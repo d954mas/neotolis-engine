@@ -125,9 +125,9 @@ typedef struct {
     uint16_t offset;
 } nt_gfx_gl_attr_t;
 
-/* One VAO with its vertex and index buffers baked in, plus a mirror of the instance tuple it
- * last received. GL attachments always equal the mirror: a layout change detaches the slots it
- * drops, and destroying the instance buffer detaches it from every VAO that names it. */
+/* One VAO with its vertex and index buffers baked in, plus a mirror of the instance
+ * (layout, buffer, offset) it last received. The layout is pinned by the first bind; destroying
+ * the instance buffer detaches it from every VAO that names it. */
 typedef struct {
     GLuint vao; /* 0 = free slot */
     GLuint instance_buffer;
