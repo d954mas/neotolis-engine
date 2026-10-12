@@ -18,6 +18,7 @@
 #include "color/nt_color.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "material/nt_material.h"
+#include "nt_vertex_locations.h"
 #include "resource/nt_resource.h"
 #include "hash/nt_hash.h"
 #include "log/nt_log.h"
@@ -59,6 +60,7 @@ static nt_mesh_t create_test_mesh(void) {
     sd->name_hash = nt_hash32_str("position").value;
     sd->type = NT_STREAM_FLOAT32;
     sd->count = 3;
+    sd->location = NT_LOC_POSITION;
 
     /* Vertex data: 3 positions */
     float *verts = (float *)(blob + sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc));
@@ -103,6 +105,7 @@ static nt_mesh_t create_test_mesh_nonindexed(void) {
     sd->name_hash = nt_hash32_str("position").value;
     sd->type = NT_STREAM_FLOAT32;
     sd->count = 3;
+    sd->location = NT_LOC_POSITION;
 
     float *verts = (float *)(blob + sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc));
     verts[3] = 1.0F;
@@ -133,9 +136,11 @@ static nt_mesh_t create_test_mesh_two_streams(void) {
     sd[0].name_hash = nt_hash32_str("position").value;
     sd[0].type = NT_STREAM_FLOAT32;
     sd[0].count = 3;
+    sd[0].location = NT_LOC_POSITION;
     sd[1].name_hash = nt_hash32_str("normal").value;
     sd[1].type = NT_STREAM_FLOAT32;
     sd[1].count = 3;
+    sd[1].location = NT_LOC_NORMAL;
 
     uint32_t handle = nt_gfx_activate_mesh(blob, blob_size);
     return (nt_mesh_t){.id = handle};

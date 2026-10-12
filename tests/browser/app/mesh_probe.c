@@ -7,6 +7,7 @@
 #include "material_comp/nt_material_comp.h"
 #include "mesh_comp/nt_mesh_comp.h"
 #include "nt_mesh_format.h"
+#include "nt_vertex_locations.h"
 #include "renderers/nt_mesh_renderer.h"
 #include "renderers/nt_skinned_mesh_renderer.h"
 #include "skin_comp/nt_skin_comp.h"
@@ -95,6 +96,7 @@ static nt_mesh_t make_quad(void) {
     sd->name_hash = nt_hash32_str("position").value;
     sd->type = NT_STREAM_FLOAT32;
     sd->count = 3;
+    sd->location = NT_LOC_POSITION;
     memcpy(blob + sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc), verts, sizeof(verts));
     memcpy(blob + sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + sizeof(verts), indices, sizeof(indices));
     return (nt_mesh_t){.id = nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob))};

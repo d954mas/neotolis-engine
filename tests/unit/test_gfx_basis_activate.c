@@ -11,6 +11,7 @@
 #include "nt_builder.h"
 #include "nt_mesh_format.h"
 #include "nt_texture_format.h"
+#include "nt_vertex_locations.h"
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/nt_gfx_test_desc.h"
 #include "unity.h"
@@ -560,6 +561,7 @@ static void fill_valid_mesh_blob(uint8_t *blob, uint32_t vertex_count) {
     sd->name_hash = 0x12345678;
     sd->type = NT_STREAM_FLOAT32;
     sd->count = 3;
+    sd->location = NT_LOC_POSITION;
 }
 
 #define MESH_BLOB_BYTES(vertex_count) (sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + ((size_t)(vertex_count) * 12U) + 6)

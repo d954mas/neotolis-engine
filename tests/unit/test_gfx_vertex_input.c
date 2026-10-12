@@ -2,6 +2,7 @@
 #include "graphics/nt_gfx.h"
 #include "graphics/nt_gfx_internal.h"
 #include "nt_mesh_format.h"
+#include "nt_vertex_locations.h"
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/nt_gfx_test_desc.h"
 #include "test_helpers/nt_gfx_test_frame.h"
@@ -307,6 +308,7 @@ void test_deactivate_mesh_cascades_to_vi(void) {
     sd->name_hash = 0x12345678;
     sd->type = NT_STREAM_FLOAT32;
     sd->count = 3;
+    sd->location = NT_LOC_POSITION;
 
     uint32_t handle = nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob));
     TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);

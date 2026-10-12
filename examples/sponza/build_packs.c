@@ -342,23 +342,23 @@ static void build_manifest_blob(NtBuilderContext *ctx, const nt_glb_scene_t *sce
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void add_meshes(NtBuilderContext *ctx, const nt_glb_scene_t *scene, bool use_base_quality) {
     NtStreamLayout layout_full[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
-        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false, 0},
-        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0},
-        {"tangent", "TANGENT", NT_STREAM_FLOAT32, 4, false, 0},
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0, false, 0},
+        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false, 0, false, 0},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0, false, 0},
+        {"tangent", "TANGENT", NT_STREAM_FLOAT32, 4, false, 0, false, 0},
     };
 
     NtStreamLayout layout_diffuse[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
-        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false, 0},
-        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0},
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0, false, 0},
+        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false, 0, false, 0},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0, false, 0},
     };
 
     NtStreamLayout layout_base[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT16, 3, false, 0},
-        {"normal", "NORMAL", NT_STREAM_INT16, 3, true, 0},
-        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT16, 2, false, 0},
-        {"tangent", "TANGENT", NT_STREAM_INT16, 4, true, 0},
+        {"position", "POSITION", NT_STREAM_FLOAT16, 3, false, 0, false, 0},
+        {"normal", "NORMAL", NT_STREAM_INT16, 3, true, 0, false, 0},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT16, 2, false, 0, false, 0},
+        {"tangent", "TANGENT", NT_STREAM_INT16, 4, true, 0, false, 0},
     };
 
     cgltf_data *gltf = (cgltf_data *)scene->_internal;

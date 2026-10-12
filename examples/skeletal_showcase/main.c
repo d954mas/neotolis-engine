@@ -41,6 +41,7 @@
 #include "meshwire/nt_meshwire.h"
 #include "nt_mesh_format.h"
 #include "nt_pack_format.h"
+#include "nt_vertex_locations.h"
 #include "render/nt_render_defs.h"
 #include "renderers/nt_mesh_renderer.h"
 #include "renderers/nt_shape_renderer.h"
@@ -1396,10 +1397,10 @@ static void make_humanoid_mesh(cpu_mesh_t *source, bool clothes, bool local_spac
                                   .vertex_data_size = vertices * source->stride,
                                   .index_data_size = indices * 2U};
     NtStreamDesc *streams = (NtStreamDesc *)(source->data + sizeof(*header));
-    streams[0] = (NtStreamDesc){.name_hash = nt_hash32_str("position").value, .type = NT_STREAM_FLOAT32, .count = 3};
-    streams[1] = (NtStreamDesc){.name_hash = nt_hash32_str("uv").value, .type = NT_STREAM_FLOAT32, .count = 2};
-    streams[2] = (NtStreamDesc){.name_hash = nt_hash32_str("joints").value, .type = NT_STREAM_UINT8, .count = 4};
-    streams[3] = (NtStreamDesc){.name_hash = nt_hash32_str("weights").value, .type = NT_STREAM_UINT8, .count = 4, .normalized = 1};
+    streams[0] = (NtStreamDesc){.name_hash = nt_hash32_str("position").value, .type = NT_STREAM_FLOAT32, .count = 3, .location = NT_LOC_POSITION};
+    streams[1] = (NtStreamDesc){.name_hash = nt_hash32_str("uv0").value, .type = NT_STREAM_FLOAT32, .count = 2, .location = NT_LOC_UV0};
+    streams[2] = (NtStreamDesc){.name_hash = nt_hash32_str("joints").value, .type = NT_STREAM_UINT8, .count = 4, .location = NT_LOC_JOINTS};
+    streams[3] = (NtStreamDesc){.name_hash = nt_hash32_str("weights").value, .type = NT_STREAM_UINT8, .count = 4, .normalized = 1, .location = NT_LOC_WEIGHTS};
     vertex_t *v = (vertex_t *)(source->data + prefix);
     uint16_t *idx = (uint16_t *)(source->data + prefix + header->vertex_data_size);
     uint32_t segment = 0;
@@ -1505,7 +1506,7 @@ static nt_material_t make_mesh_material(nt_resource_t texture, bool skinned) {
     nt_material_create_desc_t desc = {
         .textures = {{.name = "u_texture", .resource = texture}, {.name = "u_skin_matrices"}},
         .texture_count = skinned ? 2 : 1,
-        .attr_map = {{.stream_name = "position", .location = 0}, {.stream_name = "uv", .location = 1}, {.stream_name = "joints", .location = 8}, {.stream_name = "weights", .location = 9}},
+        .attr_map = {{.stream_name = "position", .location = 0}, {.stream_name = "uv0", .location = 1}, {.stream_name = "joints", .location = 8}, {.stream_name = "weights", .location = 9}},
         .attr_map_count = skinned ? 4 : 2,
         .blend = nt_blend_opaque(),
         .cull_mode = NT_CULL_NONE,

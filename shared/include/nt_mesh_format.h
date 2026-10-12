@@ -5,7 +5,7 @@
 
 /* Magic: ASCII "MESH" as uint32_t little-endian = 0x4853454D */
 #define NT_MESH_MAGIC 0x4853454D
-#define NT_MESH_VERSION 3
+#define NT_MESH_VERSION 4
 
 #define NT_MESH_MAX_STREAMS 8
 
@@ -23,11 +23,13 @@ typedef enum {
  * NtStreamDesc — describes one vertex attribute stream.
  *
  * Layout (8 bytes):
- *   name_hash(4) + type(1) + count(1) + normalized(1) + _pad(1)
+ *   name_hash(4) + type(1) + count(1) + normalized(1) + location(1)
  *
  * name_hash: hash of attribute name string (e.g. hash("position")).
  * Builder computes hashes at build time. Runtime matches by uint32 compare.
  * Hash function defined in nt_hash module.
+ * location: vertex attribute location the stream feeds, resolved by the builder
+ * (nt_vertex_locations.h defaults or the layout's explicit slot); unique per mesh.
  */
 #pragma pack(push, 1)
 typedef struct {
@@ -36,7 +38,7 @@ typedef struct {
     uint8_t count;      /* components per vertex (1-4) */
     uint8_t normalized; /* 1 = normalize integer types to [0,1] (unsigned) or [-1,1] (signed)
                          *     via GL_TRUE in glVertexAttribPointer. Must be 0 for float types. */
-    uint8_t _pad;
+    uint8_t location;   /* vertex attribute location, < NT_GFX_MAX_VERTEX_ATTRS */
 } NtStreamDesc;
 #pragma pack(pop)
 

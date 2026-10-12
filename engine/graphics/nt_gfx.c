@@ -2602,10 +2602,16 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
 }
 
 /* Per-stream half of the pack mesh safety net: type/count/normalized validity,
- * unique name hashes, and the WebGL2 offset/stride alignment rules. */
+ * unique name hashes and locations, and the WebGL2 offset/stride alignment rules. */
 static bool mesh_streams_valid(const NtStreamDesc *streams, uint8_t stream_count, uint32_t *out_stride) {
     uint32_t stride = 0;
+    uint32_t location_mask = 0;
     for (uint8_t i = 0; i < stream_count; i++) {
+        if (streams[i].location >= NT_GFX_MAX_VERTEX_ATTRS || (location_mask & (1U << streams[i].location)) != 0) {
+            NT_LOG_ERROR("activate_mesh: stream[%u] location %u out of range or duplicated", i, (uint32_t)streams[i].location);
+            return false;
+        }
+        location_mask |= 1U << streams[i].location;
         if (nt_stream_type_size(streams[i].type) == 0 || streams[i].count < 1 || streams[i].count > 4) {
             NT_LOG_ERROR("activate_mesh: stream[%u] invalid type %u / count %u", i, (uint32_t)streams[i].type, (uint32_t)streams[i].count);
             return false;

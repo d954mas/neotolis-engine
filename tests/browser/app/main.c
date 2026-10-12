@@ -24,6 +24,7 @@
 #include "memory/nt_mem_scratch.h"
 #include "nt_mesh_format.h" /* in-code mesh blob for the instanced VAO probe */
 #include "nt_pack_format.h" /* NT_ASSET_* resource-type enum */
+#include "nt_vertex_locations.h"
 #include "render/nt_render_defs.h"
 #include "renderers/nt_shape_renderer.h"
 #include "renderers/nt_sprite_renderer.h"
@@ -215,6 +216,7 @@ static bool mesh_probe_create(void) {
     sd->name_hash = nt_hash32_str("position").value;
     sd->type = NT_STREAM_FLOAT32;
     sd->count = 3;
+    sd->location = NT_LOC_POSITION;
     memcpy(blob + sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc), verts, sizeof(verts));
     memcpy(blob + sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + sizeof(verts), indices, sizeof(indices));
 

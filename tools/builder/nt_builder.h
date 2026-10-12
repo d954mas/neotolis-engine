@@ -126,6 +126,9 @@ typedef struct {
                                 * Computed (MikkTSpace) tangents have 4 source components. Narrowing
                                 * affects only the pack: builder computations always read full
                                 * source-width data. */
+    bool has_location;         /* false = the default location of a known engine_name
+                                * (nt_vertex_locations.h); an unknown name must set it */
+    uint8_t location;          /* explicit vertex attribute location, < NT_LOC_VERTEX_END */
 } NtStreamLayout;
 
 /* Shader stage hint for add_shader */

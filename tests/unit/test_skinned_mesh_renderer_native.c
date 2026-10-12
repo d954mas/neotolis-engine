@@ -19,6 +19,7 @@
 
 #include "nt_mesh_format.h"
 #include "nt_pack_format.h"
+#include "nt_vertex_locations.h"
 #include "unity.h"
 
 #include <math.h>
@@ -260,11 +261,11 @@ static nt_mesh_t make_mesh(const test_vertex_t vertices[VERTEX_COUNT]) {
     header->index_data_size = INDEX_BYTES;
 
     NtStreamDesc *streams = (NtStreamDesc *)(blob + sizeof(*header));
-    streams[0] = (NtStreamDesc){.name_hash = nt_hash32_str("position").value, .type = NT_STREAM_FLOAT32, .count = 3};
-    streams[1] = (NtStreamDesc){.name_hash = nt_hash32_str("normal").value, .type = NT_STREAM_FLOAT32, .count = 3};
-    streams[2] = (NtStreamDesc){.name_hash = nt_hash32_str("tangent").value, .type = NT_STREAM_FLOAT32, .count = 4};
-    streams[3] = (NtStreamDesc){.name_hash = nt_hash32_str("joints").value, .type = NT_STREAM_UINT8, .count = 4};
-    streams[4] = (NtStreamDesc){.name_hash = nt_hash32_str("weights").value, .type = NT_STREAM_UINT8, .count = 4, .normalized = 1};
+    streams[0] = (NtStreamDesc){.name_hash = nt_hash32_str("position").value, .type = NT_STREAM_FLOAT32, .count = 3, .location = NT_LOC_POSITION};
+    streams[1] = (NtStreamDesc){.name_hash = nt_hash32_str("normal").value, .type = NT_STREAM_FLOAT32, .count = 3, .location = NT_LOC_NORMAL};
+    streams[2] = (NtStreamDesc){.name_hash = nt_hash32_str("tangent").value, .type = NT_STREAM_FLOAT32, .count = 4, .location = NT_LOC_TANGENT};
+    streams[3] = (NtStreamDesc){.name_hash = nt_hash32_str("joints").value, .type = NT_STREAM_UINT8, .count = 4, .location = NT_LOC_JOINTS};
+    streams[4] = (NtStreamDesc){.name_hash = nt_hash32_str("weights").value, .type = NT_STREAM_UINT8, .count = 4, .normalized = 1, .location = NT_LOC_WEIGHTS};
     uint8_t *vertex_bytes = blob + sizeof(*header) + (STREAM_COUNT * sizeof(*streams));
     memcpy(vertex_bytes, vertices, VERTEX_BYTES);
     memcpy(vertex_bytes + VERTEX_BYTES, k_indices, INDEX_BYTES);

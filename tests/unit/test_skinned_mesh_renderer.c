@@ -11,6 +11,7 @@
 #include "entity/nt_entity.h"
 #include "graphics/nt_gfx.h"
 #include "graphics/nt_gfx_internal.h"
+#include "nt_vertex_locations.h"
 #include "hash/nt_hash.h"
 #include "material/nt_material.h"
 #include "material_comp/nt_material_comp.h"
@@ -40,6 +41,7 @@ static nt_mesh_t make_mesh(void) {
     stream->name_hash = nt_hash32_str("position").value;
     stream->type = NT_STREAM_FLOAT32;
     stream->count = 3;
+    stream->location = NT_LOC_POSITION;
 
     float *vertices = (float *)(blob + sizeof(*header) + sizeof(*stream));
     vertices[3] = 1.0F;
@@ -64,6 +66,7 @@ static nt_mesh_t make_indexed_mesh(void) {
     stream->name_hash = nt_hash32_str("position").value;
     stream->type = NT_STREAM_FLOAT32;
     stream->count = 3;
+    stream->location = NT_LOC_POSITION;
 
     uint16_t *indices = (uint16_t *)(blob + sizeof(*header) + sizeof(*stream) + 36);
     indices[0] = 0;
@@ -84,9 +87,9 @@ static nt_mesh_t make_skin_stream_mesh(void) {
     header->vertex_data_size = VERTEX_BYTES;
 
     NtStreamDesc *streams = (NtStreamDesc *)(blob + sizeof(*header));
-    streams[0] = (NtStreamDesc){.name_hash = nt_hash32_str("position").value, .type = NT_STREAM_FLOAT32, .count = 3};
-    streams[1] = (NtStreamDesc){.name_hash = nt_hash32_str("joints").value, .type = NT_STREAM_UINT8, .count = 4};
-    streams[2] = (NtStreamDesc){.name_hash = nt_hash32_str("weights").value, .type = NT_STREAM_UINT8, .count = 4, .normalized = 1};
+    streams[0] = (NtStreamDesc){.name_hash = nt_hash32_str("position").value, .type = NT_STREAM_FLOAT32, .count = 3, .location = NT_LOC_POSITION};
+    streams[1] = (NtStreamDesc){.name_hash = nt_hash32_str("joints").value, .type = NT_STREAM_UINT8, .count = 4, .location = NT_LOC_JOINTS};
+    streams[2] = (NtStreamDesc){.name_hash = nt_hash32_str("weights").value, .type = NT_STREAM_UINT8, .count = 4, .normalized = 1, .location = NT_LOC_WEIGHTS};
     return (nt_mesh_t){.id = nt_gfx_activate_mesh(blob, sizeof(blob))};
 }
 

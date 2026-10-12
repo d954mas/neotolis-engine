@@ -2,6 +2,7 @@
 #include "nt_builder_internal.h"
 #include "hash/nt_hash.h"
 #include "nt_mesh_format.h"
+#include "nt_vertex_locations.h"
 #include "cgltf.h"
 #include "meshwire/nt_meshwire.h"
 #include "meshwire/nt_meshwire_encode.h"
@@ -10,6 +11,51 @@
 /* --- Stream layout validation (shared by add_mesh and scene mesh paths) --- */
 
 static nt_build_result_t nt_validate_layout_alignment(const char *label, const NtStreamLayout *layout, uint32_t stream_count);
+
+/* Default location of a known stream name; -1 for a name the engine does not know. */
+static int32_t nt_default_stream_location(const char *engine_name) {
+    static const struct {
+        const char *name;
+        uint8_t location;
+    } k_defaults[] = {
+        {"position", NT_LOC_POSITION}, {"normal", NT_LOC_NORMAL}, {"color", NT_LOC_COLOR},   {"uv0", NT_LOC_UV0},
+        {"tangent", NT_LOC_TANGENT},   {"uv1", NT_LOC_UV1},       {"joints", NT_LOC_JOINTS}, {"weights", NT_LOC_WEIGHTS},
+    };
+    for (uint32_t i = 0; i < sizeof(k_defaults) / sizeof(k_defaults[0]); i++) {
+        if (strcmp(engine_name, k_defaults[i].name) == 0) {
+            return k_defaults[i].location;
+        }
+    }
+    return -1;
+}
+
+/* Location written into NtStreamDesc.location; -1 when the stream has none to resolve. */
+static int32_t nt_resolve_stream_location(const NtStreamLayout *st) { return st->has_location ? (int32_t)st->location : nt_default_stream_location(st->engine_name); }
+
+/* Checks stream s of a layout whose earlier streams already passed. */
+static nt_build_result_t nt_validate_stream_location(const char *label, const NtStreamLayout *layout, uint32_t s) {
+    const NtStreamLayout *st = &layout[s];
+    if (!st->has_location && st->location != 0) {
+        NT_LOG_ERROR("%s: stream[%u] '%s': location %u is set without has_location", label, s, st->engine_name, (uint32_t)st->location);
+        return NT_BUILD_ERR_VALIDATION;
+    }
+    const int32_t location = nt_resolve_stream_location(st);
+    if (location < 0) {
+        NT_LOG_ERROR("%s: stream[%u] '%s': unknown stream name needs an explicit location", label, s, st->engine_name);
+        return NT_BUILD_ERR_VALIDATION;
+    }
+    if (location >= NT_LOC_VERTEX_END) {
+        NT_LOG_ERROR("%s: stream[%u] '%s': location %d out of range [0, %d)", label, s, st->engine_name, location, NT_LOC_VERTEX_END);
+        return NT_BUILD_ERR_VALIDATION;
+    }
+    for (uint32_t p = 0; p < s; p++) {
+        if (nt_resolve_stream_location(&layout[p]) == location) {
+            NT_LOG_ERROR("%s: stream[%u] '%s' and stream[%u] '%s' share location %d", label, s, st->engine_name, p, layout[p].engine_name, location);
+            return NT_BUILD_ERR_VALIDATION;
+        }
+    }
+    return NT_BUILD_OK;
+}
 
 static nt_build_result_t nt_validate_stream_entry(const char *label, uint32_t s, const NtStreamLayout *st) {
     if (st->engine_name == NULL) {
@@ -52,7 +98,7 @@ nt_build_result_t nt_builder_validate_stream_layout(const char *label, const NtS
     bool has_position = false;
     uint32_t name_hashes[NT_MESH_MAX_STREAMS];
     for (uint32_t s = 0; s < stream_count; s++) {
-        if (nt_validate_stream_entry(label, s, &layout[s]) != NT_BUILD_OK) {
+        if (nt_validate_stream_entry(label, s, &layout[s]) != NT_BUILD_OK || nt_validate_stream_location(label, layout, s) != NT_BUILD_OK) {
             return NT_BUILD_ERR_VALIDATION;
         }
         /* The runtime matches shader locations by NtStreamDesc.name_hash, so two streams
@@ -539,7 +585,7 @@ nt_build_result_t nt_builder_build_mesh_buffer(const NtStreamLayout *layout, uin
         descs[s].type = (uint8_t)layout[s].type;
         descs[s].count = layout[s].count;
         descs[s].normalized = layout[s].normalized ? 1 : 0;
-        descs[s]._pad = 0;
+        descs[s].location = (uint8_t)nt_resolve_stream_location(&layout[s]);
     }
 
     uint32_t descs_size = stream_count * (uint32_t)sizeof(NtStreamDesc);

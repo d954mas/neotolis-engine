@@ -1,5 +1,6 @@
 /* clang-format off */
 #include "nt_builder_internal.h"
+#include "nt_vertex_locations.h"
 /* clang-format on */
 
 /* --- Include resolver --- */
@@ -257,6 +258,20 @@ static char *resolve_recursive(const char *source, uint32_t src_len, const char 
                         }
                         memcpy(filename, fname_start, fname_len);
                         filename[fname_len] = '\0';
+
+                        /* Engine attribute locations are generated from C, not read from disk; once per shader. */
+                        if (strcmp(filename, NT_LOCATIONS_GLSL_INCLUDE) == 0) {
+                            if (!is_in_once_set(state, filename)) {
+                                ok = add_to_once_set(state, filename) && include_buf_append(&out, NT_LOCATIONS_GLSL, (uint32_t)(sizeof(NT_LOCATIONS_GLSL) - 1));
+                            }
+                            free(filename);
+                            filename = NULL;
+                            if (!ok) {
+                                break;
+                            }
+                            p = (line_end < end) ? line_end + 1 : line_end;
+                            continue;
+                        }
 
                         /* Find the file */
                         found_path = nt_builder_find_file(filename, source_dir, state->ctx);

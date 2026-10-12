@@ -5,6 +5,7 @@
 #include "nt_pack_format.h"
 #include "nt_shader_format.h"
 #include "nt_texture_format.h"
+#include "nt_vertex_locations.h"
 #include "unity.h"
 
 #include <stddef.h>
@@ -130,6 +131,7 @@ void test_stream_desc_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(4, offsetof(NtStreamDesc, type));
     TEST_ASSERT_EQUAL_UINT(5, offsetof(NtStreamDesc, count));
     TEST_ASSERT_EQUAL_UINT(6, offsetof(NtStreamDesc, normalized));
+    TEST_ASSERT_EQUAL_UINT(7, offsetof(NtStreamDesc, location));
 }
 
 void test_stream_type_sizes(void) {
@@ -145,9 +147,9 @@ void test_stream_type_sizes(void) {
 void test_stream_stride_calculation(void) {
     /* Typical mesh: position(float32x3) + normal(float32x3) + uv(float32x2) */
     NtStreamDesc streams[3] = {
-        {0xAABBCCDD, NT_STREAM_FLOAT32, 3, 0, 0},
-        {0x11223344, NT_STREAM_FLOAT32, 3, 0, 0},
-        {0x55667788, NT_STREAM_FLOAT32, 2, 0, 0},
+        {0xAABBCCDD, NT_STREAM_FLOAT32, 3, 0, NT_LOC_POSITION},
+        {0x11223344, NT_STREAM_FLOAT32, 3, 0, NT_LOC_NORMAL},
+        {0x55667788, NT_STREAM_FLOAT32, 2, 0, NT_LOC_UV0},
     };
     uint32_t stride = 0;
     for (int i = 0; i < 3; i++) {
@@ -159,9 +161,9 @@ void test_stream_stride_calculation(void) {
 void test_stream_stride_mixed_precision(void) {
     /* Compact mesh: position(float32x3) + normal(float16x3) + uv(uint16x2) */
     NtStreamDesc streams[3] = {
-        {0xAABBCCDD, NT_STREAM_FLOAT32, 3, 0, 0},
-        {0x11223344, NT_STREAM_FLOAT16, 3, 0, 0},
-        {0x55667788, NT_STREAM_UINT16, 2, 0, 0},
+        {0xAABBCCDD, NT_STREAM_FLOAT32, 3, 0, NT_LOC_POSITION},
+        {0x11223344, NT_STREAM_FLOAT16, 3, 0, NT_LOC_NORMAL},
+        {0x55667788, NT_STREAM_UINT16, 2, 0, NT_LOC_UV0},
     };
     uint32_t stride = 0;
     for (int i = 0; i < 3; i++) {

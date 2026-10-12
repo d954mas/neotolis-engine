@@ -82,9 +82,9 @@ texture transcoding). The transform is a fixed byte permutation plus an index
 codec — no parsers, no format negotiation, no heap in the hot path (decode
 runs at load into transient memory).
 
-### Mesh wire layout (format v3)
+### Mesh wire layout (format v4)
 
-`NtMeshAssetHeader` v3 (52 bytes) carries two wire tags next to the GPU-form
+`NtMeshAssetHeader` v4 (52 bytes) carries two wire tags next to the GPU-form
 fields (`index_type` keeps its width-only meaning; `index_data_size` is the
 WIRE size of the index block):
 
@@ -100,6 +100,15 @@ WIRE size of the index block):
   `index_count * element size`; validation requires triangles
   (`index_count % 3 == 0`), a non-zero wire no larger than the decoded size,
   and a decoded size that fits `uint32_t`.
+
+**Stream locations.** Each `NtStreamDesc` carries `location`, the vertex attribute
+location its stream feeds. The builder resolves it: a stream layout entry may set
+an explicit location, otherwise a known `engine_name` takes its default from
+`shared/include/nt_vertex_locations.h` (position 0, normal 1, color 2, uv0 3,
+tangent 4, uv1 5, joints 6, weights 7). Mesh streams use locations below 8; the
+engine instance head starts at 8. Different meshes may number the same name
+differently; one mesh has one numbering. Activation checks structure only:
+every location below `NT_GFX_MAX_VERTEX_ATTRS` and unique within the mesh.
 
 **Canonicalization.** The meshopt codec preserves triangles up to rotation of
 each triple (same winding, same rasterization). The builder therefore encodes,
