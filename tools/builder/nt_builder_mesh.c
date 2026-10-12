@@ -101,9 +101,9 @@ nt_build_result_t nt_builder_validate_stream_layout(const char *label, const NtS
         if (nt_validate_stream_entry(label, s, &layout[s]) != NT_BUILD_OK || nt_validate_stream_location(label, layout, s) != NT_BUILD_OK) {
             return NT_BUILD_ERR_VALIDATION;
         }
-        /* The runtime matches shader locations by NtStreamDesc.name_hash, so two streams
-         * whose names share a hash (identical OR a 32-bit collision) bind one location,
-         * last wins. Compare the hashes the pack will actually carry. */
+        /* CPU readers find a stream by NtStreamDesc.name_hash, so two streams whose names share
+         * a hash (identical OR a 32-bit collision) would be ambiguous. Compare the hashes the
+         * pack will actually carry. */
         name_hashes[s] = nt_hash32_str(layout[s].engine_name).value;
         for (uint32_t p = 0; p < s; p++) {
             if (name_hashes[p] == name_hashes[s]) {

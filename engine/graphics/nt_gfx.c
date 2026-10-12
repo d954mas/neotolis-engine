@@ -1146,6 +1146,8 @@ static bool instance_layout_equal(const nt_gfx_instance_layout_meta_t *meta, con
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static nt_gfx_result_t make_instance_layout(const nt_vertex_layout_t *layout, nt_instance_layout_t *out) {
+    /* nt_gfx_init empties the registry, so a handle made before it would name nothing. */
+    NT_ASSERT(g_nt_gfx.initialized && "make_instance_layout: call after nt_gfx_init");
     NT_ASSERT(layout != NULL);
     NT_ASSERT(layout->attr_count >= 1 && layout->attr_count <= NT_GFX_MAX_INSTANCE_ATTRS && "instance layout needs 1..NT_GFX_MAX_INSTANCE_ATTRS attrs");
     /* GL reads stride 0 as tightly packed per attribute, which the draw range check cannot bound. */

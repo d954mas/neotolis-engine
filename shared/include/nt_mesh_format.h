@@ -25,9 +25,8 @@ typedef enum {
  * Layout (8 bytes):
  *   name_hash(4) + type(1) + count(1) + normalized(1) + location(1)
  *
- * name_hash: hash of attribute name string (e.g. hash("position")).
- * Builder computes hashes at build time. Runtime matches by uint32 compare.
- * Hash function defined in nt_hash module.
+ * name_hash: hash of attribute name string (e.g. hash("position")), computed by the builder
+ * with the nt_hash module; CPU readers find a stream by it. GL binds by location.
  * location: vertex attribute location the stream feeds, resolved by the builder
  * (nt_vertex_locations.h defaults or the layout's explicit slot); unique per mesh.
  */
