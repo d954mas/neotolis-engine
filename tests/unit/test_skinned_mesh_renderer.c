@@ -723,9 +723,11 @@ void test_skinned_and_plain_lists_share_one_pipeline(void) {
     nt_render_item_t plain = make_item(make_entity(plain_mesh, material, (nt_deformation_binding_t){0}), material, plain_mesh);
 
     nt_test_frame_next();
+    s_draw_mark = nt_gfx_fake_draw_trace_count();
     nt_mesh_renderer_draw_list_skinned(NT_GFX_FRAME_VERTEX, &skinned, 1);
     nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, &plain, 1);
     nt_test_frame_next();
+    TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
 }
 

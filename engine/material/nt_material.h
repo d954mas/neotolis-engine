@@ -34,9 +34,8 @@ typedef enum {
 
 typedef struct {
     const char *name; /* required sampler uniform name; hashed at create, not retained */
-    /* Normally resolved by the renderer. A documented renderer-supplied
-     * semantic may leave this invalid; that renderer ignores resource and
-     * sampler and supplies both at draw time. */
+    /* Resolved by the renderer at draw time; sprite slot 0 is the atlas page,
+     * substituted per emit. */
     nt_resource_t resource;
     nt_sampler_t sampler; /* override; .id==0 = use texture's asset-baked default */
 } nt_material_texture_desc_t;

@@ -225,14 +225,14 @@ entry points assert only that a program was assigned.
 Every material declares a slot for every sampler its program uses that the
 material owns. A mesh draw may add draw textures (0..`NT_MESH_MAX_DRAW_TEXTURES`):
 bindings owned by the draw, applied with the material's resolved slots as one
-complete name-keyed set; gfx validates the set, so a duplicate name or missing
+complete name-keyed set; gfx validates the set, so a duplicate active name or missing
 coverage asserts. A skinned draw supplies `u_skin_matrices` this way, so a
 skinned material does not declare it. The sprite and text renderers keep their
 documented exceptions until the material bind group (planned, #600); see
 [material](../render/material.md#materialasset-purpose). A declared name the
 program does not sample is ignored before its descriptor handle is inspected.
 
-Every other active declared slot must resolve to a texture. Register a
+Every active declared slot must resolve to a texture. Register a
 placeholder with `nt_resource_set_placeholder_texture` to survive async load
 races; a sampler override does not exempt a normally resolved slot, since the
 override only picks filtering for a texture that still has to exist. At each

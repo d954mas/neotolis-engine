@@ -139,8 +139,8 @@ layer.
 
 `engine/renderers/nt_mesh_renderer` is one source built as two link-selected
 variant targets: `nt_mesh_renderer` and `nt_skinned_mesh_renderer`. Each target
-sets the variant for its consumers; an executable links exactly one (both give
-duplicate symbols). The skinned target is not a separate module: it adds the
+sets the variant for its consumers; an executable links exactly one (linking
+both defines `NT_MESH_RENDERER_SKINNED` twice and is unsupported). The skinned target is not a separate module: it adds the
 skinned instance layout and list, consumes the existing render components plus
 `skin_comp`, and does not sample animation or select a graphics implementation.
 Its current `PUBLIC` CMake dependencies include the chain

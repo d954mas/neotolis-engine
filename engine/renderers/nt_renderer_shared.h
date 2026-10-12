@@ -5,13 +5,9 @@
 #include "graphics/nt_gfx.h"
 #include "log/nt_log.h"
 #include "material/nt_material.h"
-#include "pool/nt_pool.h"
-#include "resource/nt_resource.h"
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
 
 /* Internal to the renderers -- not a public header, not installed. */
 

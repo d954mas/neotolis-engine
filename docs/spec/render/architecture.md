@@ -614,7 +614,7 @@ asserts). The entry points:
   (`nt_skinned_mesh_instance_t`, skinned target only) or the game's own.
   `draw_textures` are 0..`NT_MESH_MAX_DRAW_TEXTURES` (8 − 4) bindings owned by
   the draw, borrowed for the call and applied together with the material's
-  textures as one complete name-keyed set; gfx validates the set (a duplicate
+  textures as one complete name-keyed set; gfx validates the set (a duplicate active
   name or missing coverage asserts; see
   [material, MaterialAsset purpose](material.md#materialasset-purpose)). A
   skinned core draw passes the skinned layout and one draw texture

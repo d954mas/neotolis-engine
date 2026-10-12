@@ -35,7 +35,7 @@ A material declares every sampler its program uses that the material owns. A
 mesh draw adds 0..`NT_MESH_MAX_DRAW_TEXTURES` (8 − 4) draw textures: bindings
 owned by the draw, not declared by the material, applied together with the
 material's textures as one complete name-keyed set. gfx validates that set: a
-duplicate name or an active sampler it does not cover asserts. The implemented
+duplicate active name or an active sampler it does not cover asserts. The implemented
 example is `u_skin_matrices`: a skinned material does not declare it, and the
 skinned list draws the run's deformation texture with its default sampler as a
 draw texture ([Mesh draws](architecture.md#mesh-draws)).

@@ -15,7 +15,8 @@
 #error "NT_MESH_RENDERER_SKINNED not defined -- link nt_mesh_renderer or nt_skinned_mesh_renderer"
 #endif
 
-/* Pipeline cache capacity; raise with -DNT_MESH_RENDERER_MAX_PIPELINES=N. */
+/* Pipeline cache capacity; raise it on the linked variant target, e.g.
+ * target_compile_definitions(nt_mesh_renderer PUBLIC NT_MESH_RENDERER_MAX_PIPELINES=N). */
 #ifndef NT_MESH_RENDERER_MAX_PIPELINES
 #define NT_MESH_RENDERER_MAX_PIPELINES 64
 #endif
@@ -67,7 +68,8 @@ nt_instance_layout_t nt_mesh_renderer_instance_layout(void);
  * stream they were allocated from, filled before nt_gfx_end_frame; one allocation may be drawn in
  * any number of passes) or a game-owned buffer. The mesh owns one vertex input per frame stream
  * and one for every other buffer (nt_gfx_mesh_vertex_input), pinned to the first layout drawn
- * through it, so two layouts of one mesh use different streams. draw_textures (NULL iff
+ * through it, so two layouts of one mesh use different streams; draws of one mesh from one game
+ * buffer at several offsets re-point between them. draw_textures (NULL only when
  * draw_texture_count is 0) are bindings owned by the draw, applied with the material's textures
  * as one set; borrowed for the call. Records nothing while the program is not ready or a pipeline
  * or vertex input cannot be created. */
