@@ -184,8 +184,8 @@ typedef struct ShaderAsset {
 
 ## Attribute locations
 
-A mesh feeds each stream at the location the builder wrote into its pack
-([runtime-formats](../assets/runtime-formats.md#mesh-wire-layout-format-v4)), and
+A mesh feeds each stream at the location its builder stream layout states and the
+pack carries ([runtime-formats](../assets/runtime-formats.md#mesh-wire-layout-format-v5)), and
 the mesh and skinned renderers feed instances at a fixed instance head, so a mesh
 shader declares its inputs at those locations. A shader may
 `#include "nt/locations.glsl"`. The builder resolves this include from C

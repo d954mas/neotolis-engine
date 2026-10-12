@@ -57,7 +57,6 @@ static nt_mesh_t create_test_mesh(void) {
     hdr->index_data_size = idata_size;
 
     NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
-    sd->name_hash = nt_hash32_str("position").value;
     sd->type = NT_STREAM_FLOAT32;
     sd->count = 3;
     sd->location = NT_LOC_POSITION;

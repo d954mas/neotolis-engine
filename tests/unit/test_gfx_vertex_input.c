@@ -412,7 +412,6 @@ void test_deactivate_mesh_cascades_to_vi(void) {
     hdr->vertex_data_size = 12;
     hdr->index_data_size = 6;
     NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
-    sd->name_hash = 0x12345678;
     sd->type = NT_STREAM_FLOAT32;
     sd->count = 3;
     sd->location = NT_LOC_POSITION;
@@ -447,12 +446,12 @@ static nt_mesh_t activate_test_mesh(const NtStreamDesc *streams, uint8_t stream_
 /* Each stream type maps to its vertex type at the pack's location, offsets packed in stream order. */
 void test_mesh_vertex_input_maps_every_stream_type(void) {
     const NtStreamDesc streams[] = {
-        {.name_hash = 1, .type = NT_STREAM_FLOAT32, .count = 3, .location = 5},
-        {.name_hash = 2, .type = NT_STREAM_FLOAT16, .count = 2, .location = 0},
-        {.name_hash = 3, .type = NT_STREAM_INT16, .count = 4, .normalized = 1, .location = 7},
-        {.name_hash = 4, .type = NT_STREAM_UINT16, .count = 2, .normalized = 1, .location = 2},
-        {.name_hash = 5, .type = NT_STREAM_UINT8, .count = 4, .location = 6},
-        {.name_hash = 6, .type = NT_STREAM_INT8, .count = 4, .normalized = 1, .location = 1},
+        {.type = NT_STREAM_FLOAT32, .count = 3, .location = 5},
+        {.type = NT_STREAM_FLOAT16, .count = 2, .location = 0},
+        {.type = NT_STREAM_INT16, .count = 4, .normalized = 1, .location = 7},
+        {.type = NT_STREAM_UINT16, .count = 2, .normalized = 1, .location = 2},
+        {.type = NT_STREAM_UINT8, .count = 4, .location = 6},
+        {.type = NT_STREAM_INT8, .count = 4, .normalized = 1, .location = 1},
     };
     const nt_mesh_t mesh = activate_test_mesh(streams, 6, 36);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, mesh.id);
@@ -482,7 +481,7 @@ void test_mesh_vertex_input_maps_every_stream_type(void) {
 void test_mesh_vertex_input_per_buffer(void) {
     init_with_streams(NT_GFX_MAX_VERTEX_STREAMS);
     const nt_buffer_t last_stream = nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + NT_GFX_MAX_VERTEX_STREAMS - 1);
-    const NtStreamDesc position = {.name_hash = 1, .type = NT_STREAM_FLOAT32, .count = 3, .location = NT_LOC_POSITION};
+    const NtStreamDesc position = {.type = NT_STREAM_FLOAT32, .count = 3, .location = NT_LOC_POSITION};
     const nt_mesh_t mesh = activate_test_mesh(&position, 1, 12);
     const nt_vertex_input_t first = nt_gfx_mesh_vertex_input(mesh, frame0());
     const nt_vertex_input_t last = nt_gfx_mesh_vertex_input(mesh, last_stream);

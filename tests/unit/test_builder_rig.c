@@ -447,9 +447,9 @@ void test_import_asserts_on_a_missing_skin(void) {
  * streams carry the reduced lanes. Offsets and stride satisfy the WebGL2
  * alignment rules for every type combination used below. */
 static void skin_layout(NtStreamLayout out[3], nt_stream_type_t joints_type, nt_stream_type_t weights_type, bool weights_normalized) {
-    out[0] = (NtStreamLayout){"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0, false, 0};
-    out[1] = (NtStreamLayout){"joints", "JOINTS", joints_type, 4, false, 0, false, 0};
-    out[2] = (NtStreamLayout){"weights", "WEIGHTS", weights_type, 4, weights_normalized, 0, false, 0};
+    out[0] = (NtStreamLayout){"POSITION", NT_STREAM_FLOAT32, 3, false, 0, NT_LOC_POSITION};
+    out[1] = (NtStreamLayout){"JOINTS", joints_type, 4, false, 0, NT_LOC_JOINTS};
+    out[2] = (NtStreamLayout){"WEIGHTS", weights_type, 4, weights_normalized, 0, NT_LOC_WEIGHTS};
 }
 
 static uint8_t *skin_decode(const rigged_glb_opts_t *opts, const NtStreamLayout *layout, float drop_tolerance, uint16_t palette_count) {
@@ -722,7 +722,7 @@ void test_skinned_mesh_rejects_a_layout_and_skin_that_disagree(void) {
     NtStreamLayout layout[3];
     skin_layout(layout, NT_STREAM_UINT8, NT_STREAM_UINT8, true);
     /* JOINTS without WEIGHTS: the third stream extracts WEIGHTS_1 verbatim. */
-    layout[2] = (NtStreamLayout){"weights_raw", "WEIGHTS_1", NT_STREAM_FLOAT32, 4, false, 0, true, NT_LOC_WEIGHTS};
+    layout[2] = (NtStreamLayout){"WEIGHTS_1", NT_STREAM_FLOAT32, 4, false, 0, NT_LOC_WEIGHTS};
     EXPECT_BUILD_ASSERT_MATCH((void)nt_builder_decode_scene_mesh_skinned(&scene, 0, 0, layout, 3, NT_TANGENT_AUTO, &skin, &data, &size), "declares both a JOINTS and a WEIGHTS stream");
 
     /* The skin streams without a skin ctx, the unskinned entry point. */
@@ -1263,12 +1263,12 @@ static void khronos_check_rest(const khronos_rig_t *asset, const nt_builder_rig_
  * count, since NORMAL is present in one asset and absent in the other. */
 static uint32_t khronos_layout(NtStreamLayout out[4], bool has_normal) {
     uint32_t n = 0;
-    out[n++] = (NtStreamLayout){"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0, false, 0};
+    out[n++] = (NtStreamLayout){"POSITION", NT_STREAM_FLOAT32, 3, false, 0, NT_LOC_POSITION};
     if (has_normal) {
-        out[n++] = (NtStreamLayout){"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false, 0, false, 0};
+        out[n++] = (NtStreamLayout){"NORMAL", NT_STREAM_FLOAT32, 3, false, 0, NT_LOC_NORMAL};
     }
-    out[n++] = (NtStreamLayout){"joints", "JOINTS", NT_STREAM_UINT8, 4, false, 0, false, 0};
-    out[n++] = (NtStreamLayout){"weights", "WEIGHTS", NT_STREAM_UINT8, 4, true, 0, false, 0};
+    out[n++] = (NtStreamLayout){"JOINTS", NT_STREAM_UINT8, 4, false, 0, NT_LOC_JOINTS};
+    out[n++] = (NtStreamLayout){"WEIGHTS", NT_STREAM_UINT8, 4, true, 0, NT_LOC_WEIGHTS};
     return n;
 }
 

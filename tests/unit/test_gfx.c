@@ -2049,7 +2049,6 @@ static void fill_valid_mesh_blob(uint8_t *blob) {
     hdr->vertex_data_size = 12;
     hdr->index_data_size = 6;
     NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
-    sd->name_hash = 0x12345678;
     sd->type = NT_STREAM_FLOAT32;
     sd->count = 3;
     sd->location = NT_LOC_POSITION;
@@ -2307,8 +2306,8 @@ static void fill_two_stream_mesh_blob(uint8_t *blob) {
     hdr->vertex_data_size = 20;
     hdr->index_data_size = 6;
     NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
-    sd[0] = (NtStreamDesc){.name_hash = 0x11111111, .type = NT_STREAM_FLOAT32, .count = 3, .location = NT_LOC_POSITION};
-    sd[1] = (NtStreamDesc){.name_hash = 0x22222222, .type = NT_STREAM_FLOAT32, .count = 2, .location = NT_LOC_UV0};
+    sd[0] = (NtStreamDesc){.type = NT_STREAM_FLOAT32, .count = 3, .location = NT_LOC_POSITION};
+    sd[1] = (NtStreamDesc){.type = NT_STREAM_FLOAT32, .count = 2, .location = NT_LOC_UV0};
 }
 
 #define MESH_BLOB2_BYTES (sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc)) + 20 + 6)
@@ -2320,16 +2319,6 @@ void test_activate_mesh_two_stream_blob_valid(void) {
     uint32_t handle = nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob));
     TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
     nt_gfx_deactivate_mesh(handle);
-}
-
-void test_activate_mesh_rejects_duplicate_name_hash(void) {
-    /* Two streams with one hash would bind one shader location twice (last wins) */
-    uint8_t blob[MESH_BLOB2_BYTES];
-    memset(blob, 0, sizeof(blob));
-    fill_two_stream_mesh_blob(blob);
-    NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
-    sd[1].name_hash = sd[0].name_hash;
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
 void test_activate_mesh_rejects_normalized_float_stream(void) {
@@ -2374,8 +2363,8 @@ void test_activate_mesh_rejects_misaligned_stream(void) {
     hdr->vertex_count = 1;
     hdr->vertex_data_size = 15;
     NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
-    sd[0] = (NtStreamDesc){.name_hash = 0x11111111, .type = NT_STREAM_FLOAT32, .count = 3, .location = 0};
-    sd[1] = (NtStreamDesc){.name_hash = 0x22222222, .type = NT_STREAM_UINT8, .count = 3, .normalized = 1, .location = 1};
+    sd[0] = (NtStreamDesc){.type = NT_STREAM_FLOAT32, .count = 3, .location = 0};
+    sd[1] = (NtStreamDesc){.type = NT_STREAM_UINT8, .count = 3, .normalized = 1, .location = 1};
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
@@ -2393,9 +2382,9 @@ void test_activate_mesh_rejects_misaligned_offset(void) {
     hdr->vertex_count = 1;
     hdr->vertex_data_size = 8;
     NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
-    sd[0] = (NtStreamDesc){.name_hash = 0x11111111, .type = NT_STREAM_UINT8, .count = 2, .normalized = 1, .location = 0};
-    sd[1] = (NtStreamDesc){.name_hash = 0x22222222, .type = NT_STREAM_FLOAT32, .count = 1, .location = 1};
-    sd[2] = (NtStreamDesc){.name_hash = 0x33333333, .type = NT_STREAM_UINT8, .count = 2, .normalized = 1, .location = 2};
+    sd[0] = (NtStreamDesc){.type = NT_STREAM_UINT8, .count = 2, .normalized = 1, .location = 0};
+    sd[1] = (NtStreamDesc){.type = NT_STREAM_FLOAT32, .count = 1, .location = 1};
+    sd[2] = (NtStreamDesc){.type = NT_STREAM_UINT8, .count = 2, .normalized = 1, .location = 2};
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
@@ -2599,11 +2588,9 @@ void test_activate_mesh_soa_wire_decodes(void) {
     hdr->vertex_count = 3;
     hdr->vertex_data_size = VD;
     NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
-    sd[0].name_hash = 1;
     sd[0].type = NT_STREAM_FLOAT32;
     sd[0].count = 3;
     sd[0].location = 0;
-    sd[1].name_hash = 2;
     sd[1].type = NT_STREAM_UINT8;
     sd[1].count = 4;
     sd[1].normalized = 1;
@@ -2648,7 +2635,6 @@ static void fill_meshopt_mesh_blob(uint8_t *blob) {
     hdr->vertex_data_size = 120;
     hdr->index_data_size = (uint32_t)sizeof(k_meshopt_wire_24);
     NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
-    sd->name_hash = 1;
     sd->type = NT_STREAM_FLOAT32;
     sd->count = 3;
     sd->location = 0;
@@ -2715,7 +2701,6 @@ void test_activate_mesh_rejects_raw_non_triangle_vertex_count(void) {
     hdr->vertex_count = 4;
     hdr->vertex_data_size = VD4;
     NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
-    sd->name_hash = 1;
     sd->type = NT_STREAM_FLOAT32;
     sd->count = 3;
     sd->location = 0;
@@ -3915,7 +3900,6 @@ int main(void) {
     RUN_TEST(test_activate_texture_bad_version);
     RUN_TEST(test_activate_mesh_rejects_misaligned_stream);
     RUN_TEST(test_activate_mesh_two_stream_blob_valid);
-    RUN_TEST(test_activate_mesh_rejects_duplicate_name_hash);
     RUN_TEST(test_activate_mesh_rejects_normalized_float_stream);
     RUN_TEST(test_activate_mesh_rejects_stream_location_out_of_range);
     RUN_TEST(test_activate_mesh_rejects_duplicate_stream_location);

@@ -1282,15 +1282,15 @@ static void copy_mesh_source(cpu_mesh_t *source, const uint8_t *wire) {
     source->position = source->joints = source->weights = UINT32_MAX;
     for (uint32_t i = 0; i < header->stream_count; ++i) {
         elements[i] = nt_stream_type_size(streams[i].type) * streams[i].count;
-        if (streams[i].name_hash == nt_hash32_str("position").value) {
+        if (streams[i].location == NT_LOC_POSITION) {
             NT_ASSERT(streams[i].type == NT_STREAM_FLOAT32 && streams[i].count == 3);
             source->position = source->stride;
         }
-        if (streams[i].name_hash == nt_hash32_str("joints").value) {
+        if (streams[i].location == NT_LOC_JOINTS) {
             NT_ASSERT(streams[i].type == NT_STREAM_UINT8 && streams[i].count == 4 && !streams[i].normalized);
             source->joints = source->stride;
         }
-        if (streams[i].name_hash == nt_hash32_str("weights").value) {
+        if (streams[i].location == NT_LOC_WEIGHTS) {
             NT_ASSERT(streams[i].type == NT_STREAM_UINT8 && streams[i].count == 4 && streams[i].normalized);
             source->weights = source->stride;
         }
@@ -1397,10 +1397,10 @@ static void make_humanoid_mesh(cpu_mesh_t *source, bool clothes, bool local_spac
                                   .vertex_data_size = vertices * source->stride,
                                   .index_data_size = indices * 2U};
     NtStreamDesc *streams = (NtStreamDesc *)(source->data + sizeof(*header));
-    streams[0] = (NtStreamDesc){.name_hash = nt_hash32_str("position").value, .type = NT_STREAM_FLOAT32, .count = 3, .location = NT_LOC_POSITION};
-    streams[1] = (NtStreamDesc){.name_hash = nt_hash32_str("uv0").value, .type = NT_STREAM_FLOAT32, .count = 2, .location = NT_LOC_UV0};
-    streams[2] = (NtStreamDesc){.name_hash = nt_hash32_str("joints").value, .type = NT_STREAM_UINT8, .count = 4, .location = NT_LOC_JOINTS};
-    streams[3] = (NtStreamDesc){.name_hash = nt_hash32_str("weights").value, .type = NT_STREAM_UINT8, .count = 4, .normalized = 1, .location = NT_LOC_WEIGHTS};
+    streams[0] = (NtStreamDesc){.type = NT_STREAM_FLOAT32, .count = 3, .location = NT_LOC_POSITION};
+    streams[1] = (NtStreamDesc){.type = NT_STREAM_FLOAT32, .count = 2, .location = NT_LOC_UV0};
+    streams[2] = (NtStreamDesc){.type = NT_STREAM_UINT8, .count = 4, .location = NT_LOC_JOINTS};
+    streams[3] = (NtStreamDesc){.type = NT_STREAM_UINT8, .count = 4, .normalized = 1, .location = NT_LOC_WEIGHTS};
     vertex_t *v = (vertex_t *)(source->data + prefix);
     uint16_t *idx = (uint16_t *)(source->data + prefix + header->vertex_data_size);
     uint32_t segment = 0;

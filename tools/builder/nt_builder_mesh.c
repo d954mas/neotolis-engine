@@ -1,6 +1,5 @@
 /* clang-format off */
 #include "nt_builder_internal.h"
-#include "hash/nt_hash.h"
 #include "nt_mesh_format.h"
 #include "nt_vertex_locations.h"
 #include "cgltf.h"
@@ -12,45 +11,17 @@
 
 static nt_build_result_t nt_validate_layout_alignment(const char *label, const NtStreamLayout *layout, uint32_t stream_count);
 
-/* Default location of a known stream name; -1 for a name the engine does not know. */
-static int32_t nt_default_stream_location(const char *engine_name) {
-    static const struct {
-        const char *name;
-        uint8_t location;
-    } k_defaults[] = {
-        {"position", NT_LOC_POSITION}, {"normal", NT_LOC_NORMAL}, {"color", NT_LOC_COLOR},   {"uv0", NT_LOC_UV0},
-        {"tangent", NT_LOC_TANGENT},   {"uv1", NT_LOC_UV1},       {"joints", NT_LOC_JOINTS}, {"weights", NT_LOC_WEIGHTS},
-    };
-    for (uint32_t i = 0; i < sizeof(k_defaults) / sizeof(k_defaults[0]); i++) {
-        if (strcmp(engine_name, k_defaults[i].name) == 0) {
-            return k_defaults[i].location;
-        }
-    }
-    return -1;
-}
-
-/* Location written into NtStreamDesc.location; -1 when the stream has none to resolve. */
-static int32_t nt_resolve_stream_location(const NtStreamLayout *st) { return st->has_location ? (int32_t)st->location : nt_default_stream_location(st->engine_name); }
-
 /* Checks stream s of a layout whose earlier streams already passed. */
 static nt_build_result_t nt_validate_stream_location(const char *label, const NtStreamLayout *layout, uint32_t s) {
     const NtStreamLayout *st = &layout[s];
-    if (!st->has_location && st->location != 0) {
-        NT_LOG_ERROR("%s: stream[%u] '%s': location %u is set without has_location", label, s, st->engine_name, (uint32_t)st->location);
-        return NT_BUILD_ERR_VALIDATION;
-    }
-    const int32_t location = nt_resolve_stream_location(st);
-    if (location < 0) {
-        NT_LOG_ERROR("%s: stream[%u] '%s': unknown stream name needs an explicit location", label, s, st->engine_name);
-        return NT_BUILD_ERR_VALIDATION;
-    }
-    if (location >= NT_LOC_VERTEX_END) {
-        NT_LOG_ERROR("%s: stream[%u] '%s': location %d out of range [0, %d)", label, s, st->engine_name, location, NT_LOC_VERTEX_END);
+    if (st->location >= NT_LOC_VERTEX_END) {
+        NT_LOG_ERROR("%s: stream[%u] '%s': location %u out of range [0, %d)", label, s, st->gltf_name, (uint32_t)st->location, NT_LOC_VERTEX_END);
         return NT_BUILD_ERR_VALIDATION;
     }
     for (uint32_t p = 0; p < s; p++) {
-        if (nt_resolve_stream_location(&layout[p]) == location) {
-            NT_LOG_ERROR("%s: stream[%u] '%s' and stream[%u] '%s' share location %d", label, s, st->engine_name, p, layout[p].engine_name, location);
+        if (layout[p].location == st->location) {
+            NT_LOG_ERROR("%s: stream[%u] '%s' and stream[%u] '%s' share location %u -- every stream sets .location (NT_LOC_*)", label, s, st->gltf_name, p, layout[p].gltf_name,
+                         (uint32_t)st->location);
             return NT_BUILD_ERR_VALIDATION;
         }
     }
@@ -58,12 +29,8 @@ static nt_build_result_t nt_validate_stream_location(const char *label, const Nt
 }
 
 static nt_build_result_t nt_validate_stream_entry(const char *label, uint32_t s, const NtStreamLayout *st) {
-    if (st->engine_name == NULL) {
-        NT_LOG_ERROR("%s: stream[%u] engine_name is NULL", label, s);
-        return NT_BUILD_ERR_VALIDATION;
-    }
     if (st->gltf_name == NULL) {
-        NT_LOG_ERROR("%s: stream[%u] '%s': gltf_name is NULL", label, s, st->engine_name);
+        NT_LOG_ERROR("%s: stream[%u] gltf_name is NULL", label, s);
         return NT_BUILD_ERR_VALIDATION;
     }
     if (st->count < 1 || st->count > 4) {
@@ -71,19 +38,19 @@ static nt_build_result_t nt_validate_stream_entry(const char *label, uint32_t s,
         return NT_BUILD_ERR_VALIDATION;
     }
     if (nt_stream_type_size((uint8_t)st->type) == 0) {
-        NT_LOG_ERROR("%s: stream[%u] '%s': invalid stream type %d", label, s, st->engine_name, (int)st->type);
+        NT_LOG_ERROR("%s: stream[%u] '%s': invalid stream type %d", label, s, st->gltf_name, (int)st->type);
         return NT_BUILD_ERR_VALIDATION;
     }
     if (st->source_components > 4) {
-        NT_LOG_ERROR("%s: stream[%u] '%s': source_components %u out of range [0, 4]", label, s, st->engine_name, (uint32_t)st->source_components);
+        NT_LOG_ERROR("%s: stream[%u] '%s': source_components %u out of range [0, 4]", label, s, st->gltf_name, (uint32_t)st->source_components);
         return NT_BUILD_ERR_VALIDATION;
     }
     if (st->source_components != 0 && st->count > st->source_components) {
-        NT_LOG_ERROR("%s: stream[%u] '%s': count %u exceeds source_components %u (widening is not supported)", label, s, st->engine_name, (uint32_t)st->count, (uint32_t)st->source_components);
+        NT_LOG_ERROR("%s: stream[%u] '%s': count %u exceeds source_components %u (widening is not supported)", label, s, st->gltf_name, (uint32_t)st->count, (uint32_t)st->source_components);
         return NT_BUILD_ERR_VALIDATION;
     }
     if (st->normalized && (st->type == NT_STREAM_FLOAT32 || st->type == NT_STREAM_FLOAT16)) {
-        NT_LOG_ERROR("%s: stream[%u] '%s': normalized=true is invalid for float types", label, s, st->engine_name);
+        NT_LOG_ERROR("%s: stream[%u] '%s': normalized=true is invalid for float types", label, s, st->gltf_name);
         return NT_BUILD_ERR_VALIDATION;
     }
     return NT_BUILD_OK;
@@ -96,20 +63,9 @@ nt_build_result_t nt_builder_validate_stream_layout(const char *label, const NtS
     }
 
     bool has_position = false;
-    uint32_t name_hashes[NT_MESH_MAX_STREAMS];
     for (uint32_t s = 0; s < stream_count; s++) {
         if (nt_validate_stream_entry(label, s, &layout[s]) != NT_BUILD_OK || nt_validate_stream_location(label, layout, s) != NT_BUILD_OK) {
             return NT_BUILD_ERR_VALIDATION;
-        }
-        /* CPU readers find a stream by NtStreamDesc.name_hash, so two streams whose names share
-         * a hash (identical OR a 32-bit collision) would be ambiguous. Compare the hashes the
-         * pack will actually carry. */
-        name_hashes[s] = nt_hash32_str(layout[s].engine_name).value;
-        for (uint32_t p = 0; p < s; p++) {
-            if (name_hashes[p] == name_hashes[s]) {
-                NT_LOG_ERROR("%s: stream[%u] '%s' and stream[%u] '%s' share name_hash 0x%08x -- rename one", label, s, layout[s].engine_name, p, layout[p].engine_name, name_hashes[s]);
-                return NT_BUILD_ERR_VALIDATION;
-            }
         }
         /* One source attribute -> one stream: duplicates make behavior order-dependent
          * (AABB follows the first POSITION; tangent compute replaces only the first TANGENT). */
@@ -137,8 +93,8 @@ static nt_build_result_t nt_validate_layout_alignment(const char *label, const N
     for (uint32_t s = 0; s < stream_count; s++) {
         uint32_t comp_size = nt_stream_type_size((uint8_t)layout[s].type);
         if (offset % comp_size != 0) {
-            NT_LOG_ERROR("%s: stream[%u] '%s' offset %u is not a multiple of its type size %u (WebGL2 rule) -- reorder streams so larger types come first", label, s,
-                         layout[s].engine_name ? layout[s].engine_name : "(null)", offset, comp_size);
+            NT_LOG_ERROR("%s: stream[%u] '%s' offset %u is not a multiple of its type size %u (WebGL2 rule) -- reorder streams so larger types come first", label, s, layout[s].gltf_name, offset,
+                         comp_size);
             return NT_BUILD_ERR_VALIDATION;
         }
         offset += comp_size * layout[s].count;
@@ -148,7 +104,7 @@ static nt_build_result_t nt_validate_layout_alignment(const char *label, const N
         uint32_t comp_size = nt_stream_type_size((uint8_t)layout[s].type);
         if (stride % comp_size != 0) {
             NT_LOG_ERROR("%s: vertex stride %u is not a multiple of stream[%u] '%s' type size %u (WebGL2 rule) -- widen a count or change a stream type so the stride divides evenly", label, stride, s,
-                         layout[s].engine_name ? layout[s].engine_name : "(null)", comp_size);
+                         layout[s].gltf_name, comp_size);
             return NT_BUILD_ERR_VALIDATION;
         }
     }
@@ -581,13 +537,10 @@ nt_build_result_t nt_builder_build_mesh_buffer(const NtStreamLayout *layout, uin
     NtStreamDesc descs[NT_MESH_MAX_STREAMS];
     memset(descs, 0, sizeof(descs));
     for (uint32_t s = 0; s < stream_count; s++) {
-        descs[s].name_hash = nt_hash32_str(layout[s].engine_name).value;
         descs[s].type = (uint8_t)layout[s].type;
         descs[s].count = layout[s].count;
         descs[s].normalized = layout[s].normalized ? 1 : 0;
-        const int32_t location = nt_resolve_stream_location(&layout[s]);
-        NT_BUILD_ASSERT(location >= 0 && location < NT_LOC_VERTEX_END && "build_mesh_buffer: layout not validated");
-        descs[s].location = (uint8_t)location;
+        descs[s].location = layout[s].location;
     }
 
     uint32_t descs_size = stream_count * (uint32_t)sizeof(NtStreamDesc);

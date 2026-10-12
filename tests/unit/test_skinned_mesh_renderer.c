@@ -38,7 +38,6 @@ static nt_mesh_t make_mesh_at(uint8_t location) {
     header->vertex_data_size = 36;
 
     NtStreamDesc *stream = (NtStreamDesc *)(blob + sizeof(*header));
-    stream->name_hash = nt_hash32_str("position").value;
     stream->type = NT_STREAM_FLOAT32;
     stream->count = 3;
     stream->location = location;
@@ -65,7 +64,6 @@ static nt_mesh_t make_indexed_mesh(void) {
     header->index_data_size = 6;
 
     NtStreamDesc *stream = (NtStreamDesc *)(blob + sizeof(*header));
-    stream->name_hash = nt_hash32_str("position").value;
     stream->type = NT_STREAM_FLOAT32;
     stream->count = 3;
     stream->location = NT_LOC_POSITION;
@@ -89,9 +87,9 @@ static nt_mesh_t make_skin_stream_mesh(void) {
     header->vertex_data_size = VERTEX_BYTES;
 
     NtStreamDesc *streams = (NtStreamDesc *)(blob + sizeof(*header));
-    streams[0] = (NtStreamDesc){.name_hash = nt_hash32_str("position").value, .type = NT_STREAM_FLOAT32, .count = 3, .location = NT_LOC_POSITION};
-    streams[1] = (NtStreamDesc){.name_hash = nt_hash32_str("joints").value, .type = NT_STREAM_UINT8, .count = 4, .location = NT_LOC_JOINTS};
-    streams[2] = (NtStreamDesc){.name_hash = nt_hash32_str("weights").value, .type = NT_STREAM_UINT8, .count = 4, .normalized = 1, .location = NT_LOC_WEIGHTS};
+    streams[0] = (NtStreamDesc){.type = NT_STREAM_FLOAT32, .count = 3, .location = NT_LOC_POSITION};
+    streams[1] = (NtStreamDesc){.type = NT_STREAM_UINT8, .count = 4, .location = NT_LOC_JOINTS};
+    streams[2] = (NtStreamDesc){.type = NT_STREAM_UINT8, .count = 4, .normalized = 1, .location = NT_LOC_WEIGHTS};
     return (nt_mesh_t){.id = nt_gfx_activate_mesh(blob, sizeof(blob))};
 }
 

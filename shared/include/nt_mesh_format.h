@@ -5,7 +5,7 @@
 
 /* Magic: ASCII "MESH" as uint32_t little-endian = 0x4853454D */
 #define NT_MESH_MAGIC 0x4853454D
-#define NT_MESH_VERSION 4
+#define NT_MESH_VERSION 5
 
 #define NT_MESH_MAX_STREAMS 8
 
@@ -22,17 +22,15 @@ typedef enum {
 /*
  * NtStreamDesc — describes one vertex attribute stream.
  *
- * Layout (8 bytes):
- *   name_hash(4) + type(1) + count(1) + normalized(1) + location(1)
+ * Layout (4 bytes):
+ *   type(1) + count(1) + normalized(1) + location(1)
  *
- * name_hash: hash of attribute name string (e.g. hash("position")), computed by the builder
- * with the nt_hash module; CPU readers find a stream by it. GL binds by location.
- * location: vertex attribute location the stream feeds, resolved by the builder
- * (nt_vertex_locations.h defaults or the layout's explicit slot); unique per mesh.
+ * location is the stream's identity: GL binds the stream to it and CPU readers find a
+ * stream by it (nt_vertex_locations.h). The builder writes the layout's location; it is
+ * unique per mesh.
  */
 #pragma pack(push, 1)
 typedef struct {
-    uint32_t name_hash; /* hash of attribute name ("position", "normal", ...) */
     uint8_t type;       /* nt_stream_type_t */
     uint8_t count;      /* components per vertex (1-4) */
     uint8_t normalized; /* 1 = normalize integer types to [0,1] (unsigned) or [-1,1] (signed)
@@ -41,7 +39,7 @@ typedef struct {
 } NtStreamDesc;
 #pragma pack(pop)
 
-_Static_assert(sizeof(NtStreamDesc) == 8, "NtStreamDesc must be 8 bytes");
+_Static_assert(sizeof(NtStreamDesc) == 4, "NtStreamDesc must be 4 bytes");
 
 /* Vertex wire layout (nt_mesh_wire_vtx_t) */
 typedef enum {

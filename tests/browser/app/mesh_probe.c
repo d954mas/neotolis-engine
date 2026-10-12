@@ -94,7 +94,6 @@ static nt_mesh_t make_quad(void) {
     hdr->vertex_data_size = sizeof(verts);
     hdr->index_data_size = sizeof(indices);
     NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
-    sd->name_hash = nt_hash32_str("position").value;
     sd->type = NT_STREAM_FLOAT32;
     sd->count = 3;
     sd->location = NT_LOC_POSITION;

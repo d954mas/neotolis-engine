@@ -82,9 +82,9 @@ texture transcoding). The transform is a fixed byte permutation plus an index
 codec — no parsers, no format negotiation, no heap in the hot path (decode
 runs at load into transient memory).
 
-### Mesh wire layout (format v4)
+### Mesh wire layout (format v5)
 
-`NtMeshAssetHeader` v4 (52 bytes) carries two wire tags next to the GPU-form
+`NtMeshAssetHeader` v5 (52 bytes) carries two wire tags next to the GPU-form
 fields (`index_type` keeps its width-only meaning; `index_data_size` is the
 WIRE size of the index block):
 
@@ -101,13 +101,15 @@ WIRE size of the index block):
   (`index_count % 3 == 0`), a non-zero wire no larger than the decoded size,
   and a decoded size that fits `uint32_t`.
 
-**Stream locations.** Each `NtStreamDesc` carries `location`, the vertex attribute
-location its stream feeds. The builder resolves it: a stream layout entry may set
-an explicit location, otherwise a known `engine_name` takes its default from
-`shared/include/nt_vertex_locations.h` (position 0, normal 1, color 2, uv0 3,
-tangent 4, uv1 5, joints 6, weights 7). Mesh streams use locations below 8; the
-engine instance head starts at 8. Different meshes may number the same name
-differently; one mesh has one numbering. Activation checks structure only:
+**Stream locations.** `NtStreamDesc` is 4 bytes: `type`, `count`, `normalized`,
+`location`. `location` is the vertex attribute location the stream feeds and the
+stream's only identity: GL binds the stream there, and CPU readers find a stream
+by its location. The builder writes the location each stream layout entry states;
+layouts use the engine convention in `shared/include/nt_vertex_locations.h`
+(`NT_LOC_POSITION` 0, `NT_LOC_NORMAL` 1, `NT_LOC_COLOR` 2, `NT_LOC_UV0` 3,
+`NT_LOC_TANGENT` 4, `NT_LOC_UV1` 5, `NT_LOC_JOINTS` 6, `NT_LOC_WEIGHTS` 7), which
+shaders declare too. Mesh streams use locations below 8; the engine instance head
+starts at 8. Activation checks structure only:
 every location below `NT_GFX_MAX_VERTEX_ATTRS` and unique within the mesh.
 gfx makes the mesh's vertex inputs with every stream at its `location`
 (`nt_gfx_mesh_vertex_input`); a stream at a location the bound instance layout

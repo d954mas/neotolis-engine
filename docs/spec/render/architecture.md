@@ -254,7 +254,7 @@ known, contained exception). Vertex-input creation asserts the WebGL2 alignment 
 locations within the WebGL2-guaranteed 16): game-declared layouts never pass
 through the builder's validator, and desktop GL accepts what the browser
 rejects. Pack data never reaches those asserts: mesh activation hard-rejects
-invalid per-stream type/count/normalized, duplicate name hashes, and
+invalid per-stream type/count/normalized,
 misaligned offsets/strides, and locations out of range or duplicated, before
 any vertex input exists. Mesh vertex inputs are created on first use and then
 reused, so creation validation is absent from the steady-state hot path;

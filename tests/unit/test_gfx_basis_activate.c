@@ -558,7 +558,6 @@ static void fill_valid_mesh_blob(uint8_t *blob, uint32_t vertex_count) {
     hdr->vertex_data_size = vertex_count * 12U;
     hdr->index_data_size = 6;
     NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
-    sd->name_hash = 0x12345678;
     sd->type = NT_STREAM_FLOAT32;
     sd->count = 3;
     sd->location = NT_LOC_POSITION;

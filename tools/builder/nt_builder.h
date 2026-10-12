@@ -13,6 +13,7 @@
 #include "nt_font_format.h"       /* NtFontAssetHeader, NtFontGlyphEntry, etc. */
 #include "nt_mesh_format.h"       /* nt_stream_type_t */
 #include "nt_texture_format.h"    /* nt_texture_pixel_format_t */
+#include "nt_vertex_locations.h"  /* NT_LOC_* for NtStreamLayout.location */
 #include "skeletal/nt_skeletal.h" /* nt_skeletal_skeleton_t, nt_skin_binding_t */
 
 /* Always-on fatal assert for builder (never compiled out by NDEBUG).
@@ -113,8 +114,7 @@ typedef struct {
 
 /* Explicit stream layout -- game declares which glTF attributes to extract */
 typedef struct {
-    const char *engine_name;   /* e.g. "position", "uv0" */
-    const char *gltf_name;     /* e.g. "POSITION", "TEXCOORD_0" */
+    const char *gltf_name;     /* glTF attribute, e.g. "POSITION", "TEXCOORD_0" */
     nt_stream_type_t type;     /* target type in output (may differ from glTF) */
     uint8_t count;             /* components per vertex in the pack (1-4) */
     bool normalized;           /* true = normalize to [0,1] or [-1,1] in runtime */
@@ -126,9 +126,7 @@ typedef struct {
                                 * Computed (MikkTSpace) tangents have 4 source components. Narrowing
                                 * affects only the pack: builder computations always read full
                                 * source-width data. */
-    bool has_location;         /* false = the default location of a known engine_name
-                                * (nt_vertex_locations.h); an unknown name must set it */
-    uint8_t location;          /* explicit vertex attribute location, < NT_LOC_VERTEX_END */
+    uint8_t location;          /* vertex attribute location the stream feeds, < NT_LOC_VERTEX_END; use NT_LOC_* */
 } NtStreamLayout;
 
 /* Shader stage hint for add_shader */
@@ -675,7 +673,7 @@ void nt_builder_set_header_dir(NtBuilderContext *ctx, const char *dir);
 void nt_builder_set_gzip_estimate(NtBuilderContext *ctx, bool enabled);
 
 /* --- Builder cache (content-addressed, skips re-encoding unchanged assets) --- */
-#define NT_BUILDER_VERSION 5 /* Bump when encode logic changes to invalidate cache */
+#define NT_BUILDER_VERSION 6 /* Bump when encode logic changes to invalidate cache */
 void nt_builder_set_cache_dir(NtBuilderContext *ctx, const char *dir);
 
 /* --- Parallel encoding (multi-threaded asset encode in finish_pack) --- */

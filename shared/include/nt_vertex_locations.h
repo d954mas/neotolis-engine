@@ -1,8 +1,8 @@
 #ifndef NT_VERTEX_LOCATIONS_H
 #define NT_VERTEX_LOCATIONS_H
 
-/* Default vertex attribute locations for known mesh stream names. The builder writes the
- * resolved location into NtStreamDesc.location; a stream layout may override any of them. */
+/* The engine's vertex attribute location convention: builder stream layouts set NtStreamLayout.location
+ * from these and shaders declare the same slots, so a mesh stream feeds the attribute that reads it. */
 #define NT_LOC_POSITION 0
 #define NT_LOC_NORMAL 1
 #define NT_LOC_COLOR 2

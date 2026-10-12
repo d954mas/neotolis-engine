@@ -263,7 +263,7 @@ validator: every material submitted here implements the documented shader ABI.
 owns the shared fetch, blend and guarded-vector functions. Skinned vertex
 shaders include it instead of the static renderer's `common/instance.glsl`;
 it reads `joints`/`weights` at `NT_LOC_JOINTS`/`NT_LOC_WEIGHTS` (6/7, the
-builder's default slots for those streams) and the instance head at
+locations skinned stream layouts give those streams) and the instance head at
 `NT_INST_LOC_*` from `nt/locations.glsl` ([shader](../render/shader.md)), and
 the mesh's vertex input feeds every stream at its pack location; no material
 maps them. The instance offsets stay the renderer's implementation. A shader

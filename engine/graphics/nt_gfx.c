@@ -2703,12 +2703,6 @@ static bool mesh_streams_valid(const NtStreamDesc *streams, uint8_t stream_count
             NT_LOG_ERROR("activate_mesh: stream[%u] normalized on a float type", i);
             return false;
         }
-        for (uint8_t p = 0; p < i; p++) {
-            if (streams[p].name_hash == streams[i].name_hash) {
-                NT_LOG_ERROR("activate_mesh: stream[%u] duplicates name_hash 0x%08x of stream[%u]", i, streams[i].name_hash, p);
-                return false;
-            }
-        }
         if (stride % nt_stream_type_size(streams[i].type) != 0) {
             NT_LOG_ERROR("activate_mesh: stream[%u] offset %u misaligned for type size %u", i, stride, nt_stream_type_size(streams[i].type));
             return false;
