@@ -680,11 +680,11 @@ static void draw_tinted_and_white_instances(nt_mesh_t mesh, nt_material_t materi
 static void test_mesh_instances_draw_their_own_colors(void) { draw_tinted_and_white_instances(make_mesh(k_bar), make_reference_material(3.0F), NULL); }
 
 /* Draws caller-owned instances in one frame; returns that frame's glVertexAttribPointer count. */
-static uint32_t render_owned(nt_mesh_t mesh, nt_material_t material, nt_vertex_input_t vi, uint32_t first, uint32_t count, uint8_t out[FRAME_BYTES]) {
+static uint32_t render_owned(nt_mesh_t mesh, nt_material_t material, nt_vertex_input_t vi, nt_buffer_t buffer, uint32_t first, uint32_t count, uint8_t out[FRAME_BYTES]) {
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     begin_target_pass();
-    nt_mesh_renderer_draw_vertex_input(mesh, material, vi, first * (uint32_t)sizeof(nt_mesh_instance_t), count);
+    nt_mesh_renderer_draw_vertex_input(mesh, material, vi, buffer, first * (uint32_t)sizeof(nt_mesh_instance_t), count);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     const uint32_t pointers = g_nt_gfx.counters.gl[NT_GFX_GL_glVertexAttribPointer];
@@ -723,15 +723,15 @@ static void test_owned_instances_draw_from_their_offset(void) {
 
     const nt_mesh_instance_t instances[4] = {owned_instance(9.0F, 0.0F, one), owned_instance(0.0F, 0.45F, tint), owned_instance(0.0F, -0.45F, one), owned_instance(0.0F, 9.0F, tint)};
     nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = instances, .size = sizeof(instances)});
-    nt_vertex_input_t vi = nt_mesh_renderer_make_vertex_input(mesh, material, buffer);
+    nt_vertex_input_t vi = nt_mesh_renderer_make_vertex_input(mesh, material);
     TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(vi));
 
-    render_owned(mesh, material, vi, 1, 2, s_actual);
+    render_owned(mesh, material, vi, buffer, 1, 2, s_actual);
     assert_instance_colors(s_expected, s_second_mask, s_actual);
-    TEST_ASSERT_EQUAL_UINT32(0, render_owned(mesh, material, vi, 1, 2, s_actual));
+    TEST_ASSERT_EQUAL_UINT32(0, render_owned(mesh, material, vi, buffer, 1, 2, s_actual));
     assert_instance_colors(s_expected, s_second_mask, s_actual);
 
-    TEST_ASSERT_GREATER_THAN_UINT32(0, render_owned(mesh, material, vi, 2, 1, s_actual));
+    TEST_ASSERT_GREATER_THAN_UINT32(0, render_owned(mesh, material, vi, buffer, 2, 1, s_actual));
     for (uint32_t byte = 0; byte < FRAME_BYTES; byte++) {
         TEST_ASSERT_UINT8_WITHIN(1, s_second_mask[byte], s_actual[byte]); /* the white bar alone */
     }

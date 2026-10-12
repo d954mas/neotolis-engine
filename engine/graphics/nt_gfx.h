@@ -70,17 +70,24 @@ typedef struct {
     uint32_t id;
 } nt_mesh_t;
 
-/* Owned vertex-input object (GL: one VAO): vertex layout + optional instance layout
- * baked against a VBO [+ IBO] [+ instance buffer]. Everything is immutable after
- * creation except the instance byte offset, which nt_gfx_bind_vertex_input_instanced sets. */
+/* Owned vertex-input object (GL: one VAO): the per-vertex layout baked against a VBO [+ IBO].
+ * Instances come at bind time (nt_gfx_bind_vertex_input_instanced); the VAO keeps the
+ * instance pointers of its last bind, so a vertex input bound with one tuple re-points nothing. */
 typedef struct {
     uint32_t id;
 } nt_vertex_input_t;
+
+/* Registered per-instance layout (divisor 1): CPU data only, no GPU object, no destroy;
+ * it survives context loss and lives until nt_gfx_shutdown. */
+typedef struct {
+    uint32_t id;
+} nt_instance_layout_t;
 
 #define NT_RENDER_TARGET_INVALID ((nt_render_target_t){0})
 #define NT_MESH_INVALID ((nt_mesh_t){0})
 #define NT_PROGRAM_INVALID ((nt_program_t){0})
 #define NT_VERTEX_INPUT_INVALID ((nt_vertex_input_t){0})
+#define NT_INSTANCE_LAYOUT_INVALID ((nt_instance_layout_t){0})
 
 /* Sampler object — texture-side filter/wrap state decoupled from the texture
  * itself. One texture can be sampled with different filters in different
@@ -329,12 +336,14 @@ typedef enum {
 /* ---- Vertex layout ---- */
 
 #define NT_GFX_MAX_VERTEX_ATTRS 16
-/* NT_GFX_MAX_INSTANCE_ATTRS comes from CMake (default 8, at most 16): the GL backend keeps
- * a packed copy of the instance layout per vertex-input slot to re-point it, and
- * max_vertex_inputs slots exist. */
+/* NT_GFX_MAX_INSTANCE_ATTRS comes from CMake (default 8, at most 16): the attr cap of one
+ * instance layout, which gfx and the GL backend store packed per registered layout. */
 #if NT_GFX_MAX_INSTANCE_ATTRS < 1 || NT_GFX_MAX_INSTANCE_ATTRS > NT_GFX_MAX_VERTEX_ATTRS
 #error "NT_GFX_MAX_INSTANCE_ATTRS must be 1-16"
 #endif
+/* Registered instance layouts: renderers register a few each at init, and an equal layout
+ * returns the existing handle, so re-init never grows the table. */
+#define NT_GFX_MAX_INSTANCE_LAYOUTS 32
 #define NT_GFX_MAX_TEXTURE_SLOTS 8
 /* WebGL2's minimum MAX_UNIFORM_BUFFER_BINDINGS, so every slot works on every device. */
 #define NT_GFX_MAX_UNIFORM_BUFFER_SLOTS 24
@@ -459,14 +468,10 @@ static inline bool nt_gfx_pipeline_key_equal(const nt_gfx_pipeline_key_t *a, con
 }
 
 typedef struct {
-    nt_vertex_layout_t layout;          /* per-vertex attrs, divisor 0; attr_count 0 = attribute-less (gl_VertexID) */
-    nt_vertex_layout_t instance_layout; /* optional per-instance attrs, divisor 1; offset set by nt_gfx_bind_vertex_input_instanced */
-    nt_buffer_t vertex_buffer;          /* NT_BUFFER_VERTEX; required iff layout.attr_count > 0 */
-    nt_buffer_t index_buffer;           /* optional ({0} = non-indexed); NT_BUFFER_INDEX with index_type != NT_INDEX_NONE */
-    nt_buffer_t instance_buffer;        /* NT_BUFFER_VERTEX; required iff instance_layout.attr_count > 0: a caller-owned buffer
-                                           (draws stay inside its size) or a frame storage buffer (nt_gfx_frame_buffer;
-                                           draws stay inside this frame's allocations) */
-    const char *label;                  /* optional debug name; borrowed for the call */
+    nt_vertex_layout_t layout; /* per-vertex attrs, divisor 0; attr_count 0 = attribute-less (gl_VertexID) */
+    nt_buffer_t vertex_buffer; /* NT_BUFFER_VERTEX; required iff layout.attr_count > 0 */
+    nt_buffer_t index_buffer;  /* optional ({0} = non-indexed); NT_BUFFER_INDEX with index_type != NT_INDEX_NONE */
+    const char *label;         /* optional debug name; borrowed for the call */
 } nt_vertex_input_desc_t;
 
 typedef struct {
@@ -615,6 +620,7 @@ typedef enum {
     X(glDepthFunc)                                                                                                                                                                                     \
     X(glDepthMask)                                                                                                                                                                                     \
     X(glDisable)                                                                                                                                                                                       \
+    X(glDisableVertexAttribArray)                                                                                                                                                                      \
     X(glDrawArrays)                                                                                                                                                                                    \
     X(glDrawArraysInstanced)                                                                                                                                                                           \
     X(glDrawBuffers)                                                                                                                                                                                   \
@@ -724,6 +730,7 @@ typedef enum {
     NT_GFX_OBJECT_TEXTURE,
     NT_GFX_OBJECT_SAMPLER,
     NT_GFX_OBJECT_RENDER_TARGET,
+    NT_GFX_OBJECT_INSTANCE_LAYOUT,
 } nt_gfx_object_kind_t;
 
 typedef enum {
@@ -913,6 +920,10 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
  * borrows its buffers; creation borrows desc/label and preserves the bound VI.
  * INVALID means context loss or backend allocation failure; caller errors assert. */
 nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc);
+/* Registers a per-instance layout (divisor 1) for nt_gfx_bind_vertex_input_instanced, or returns
+ * the handle of an equal one. Works while the context is lost; layout errors and a full table
+ * (NT_GFX_MAX_INSTANCE_LAYOUTS) assert. The handle is valid until nt_gfx_shutdown. */
+nt_instance_layout_t nt_gfx_make_instance_layout(const nt_vertex_layout_t *layout, const char *label);
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc);
 /* A nonzero handle means upload commands were issued, not that GPU storage
  * allocation or upload succeeded; creation does not poll GPU errors. */
@@ -941,7 +952,8 @@ void nt_gfx_destroy_pipeline(nt_pipeline_t pip);
 /* Invalid and stale handles are no-ops because buffer destruction also
  * destroys dependent vertex inputs (see nt_gfx_destroy_buffer). */
 void nt_gfx_destroy_vertex_input(nt_vertex_input_t vi);
-/* Destroys VIs that borrow this buffer as their vertex, index or instance buffer. */
+/* Destroys VIs that borrow this buffer as their vertex or index buffer, and detaches it
+ * from every VI whose instances it holds. */
 void nt_gfx_destroy_buffer(nt_buffer_t buf);
 /* Destroys render targets that borrow this texture. */
 void nt_gfx_destroy_texture(nt_texture_t tex);
@@ -996,17 +1008,18 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip);
 /* One backend bind selects the whole vertex-input state (layout + buffers +
  * index binding) for the following draws. Orthogonal to pipeline binding --
  * either may change without re-binding the other. Every draw requires a bound
- * vertex input (asserted); attribute-less draws bind an empty one. The vertex
- * input must declare no instance layout (asserted). */
+ * vertex input (asserted); attribute-less draws bind an empty one. A vertex input
+ * once bound with instances may not be bound here (asserted): its VAO keeps them enabled. */
 void nt_gfx_bind_vertex_input(nt_vertex_input_t vi);
-/* Binds a vertex input that declares an instance layout (asserted) with its instances at
- * byte_offset of its instance buffer. The offset must be 4-byte aligned (WebGL2 rejects
- * unaligned attrib offsets); asserted. The GL VAO keeps the pointers of its last offset, so a
- * vertex input bound at the same offset every frame re-points nothing; one bound at two
- * offsets in a frame re-points between them. The bind asserts that the first instance, and every
- * instanced draw that all its instances, lie inside the buffer, or inside this frame's
- * allocations for a frame stream. */
-void nt_gfx_bind_vertex_input_instanced(nt_vertex_input_t vi, uint32_t byte_offset);
+/* Binds vi with instances of `layout` at byte_offset of instance_buffer (NT_BUFFER_VERTEX): a
+ * caller-owned buffer (draws stay inside its size) or a frame storage buffer (nt_gfx_frame_buffer;
+ * draws stay inside this frame's allocations). The offset must be 4-byte aligned (WebGL2 rejects
+ * unaligned attrib offsets), and the instance locations must not overlap vi's vertex ones;
+ * asserted. Each VAO keeps the (layout, buffer, offset) of its last bind, so a vertex input bound
+ * with the same tuple every frame re-points nothing; one bound with two tuples in a frame
+ * re-points between them. The bind asserts that the first instance, and every instanced draw
+ * that all its instances, lie inside the buffer or this frame's allocations. */
+void nt_gfx_bind_vertex_input_instanced(nt_vertex_input_t vi, nt_instance_layout_t layout, nt_buffer_t instance_buffer, uint32_t byte_offset);
 /* Applies the complete active sampler interface of the bound pipeline's program.
  * `bindings` is borrowed only for this call and may be NULL iff count is zero.
  * Inactive names are ignored before their handles are read. Contract violations

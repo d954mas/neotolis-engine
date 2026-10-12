@@ -61,6 +61,12 @@ nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc) {
     return (nt_vertex_input_t){0};
 }
 
+nt_instance_layout_t nt_gfx_make_instance_layout(const nt_vertex_layout_t *layout, const char *label) {
+    (void)layout;
+    (void)label;
+    return (nt_instance_layout_t){0};
+}
+
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
     (void)desc;
     return (nt_buffer_t){0};
@@ -157,8 +163,10 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) { (void)pip; }
 
 void nt_gfx_bind_vertex_input(nt_vertex_input_t vi) { (void)vi; }
 
-void nt_gfx_bind_vertex_input_instanced(nt_vertex_input_t vi, uint32_t byte_offset) {
+void nt_gfx_bind_vertex_input_instanced(nt_vertex_input_t vi, nt_instance_layout_t layout, nt_buffer_t instance_buffer, uint32_t byte_offset) {
     (void)vi;
+    (void)layout;
+    (void)instance_buffer;
     (void)byte_offset;
 }
 

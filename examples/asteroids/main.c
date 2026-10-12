@@ -203,8 +203,10 @@ static float s_lod_deep[AST_SUBDIVISIONS][3], s_lod_shallow[AST_SUBDIVISIONS][3]
 /* All variants of one subdivision are contiguous in one shared rock mesh. */
 static uint32_t s_lod_first_index[AST_SUBDIVISIONS];
 static mesh_binding_t s_rocks, s_planet_mesh, s_sky_mesh;
-/* One vertex input per draw key over the shared rock buffers, as a game has one per mesh. */
+/* One vertex input per draw key over the shared rock buffers, as a game has one per mesh: each
+ * keeps its instance offset, so a steady frame re-points nothing. */
 static nt_vertex_input_t s_rock_inputs[AST_KEY_COUNT];
+static nt_instance_layout_t s_instance_layout_handle;
 /* Each key owns a fixed slot range of the instance stream; see place_runs. */
 static uint32_t s_key_slot[AST_KEY_COUNT], s_key_capacity[AST_KEY_COUNT], s_key_count[AST_KEY_COUNT];
 static uint32_t s_slot_count;
@@ -760,17 +762,11 @@ static const nt_vertex_layout_t s_instance_layout = {.attrs = {{.location = 4, .
                                                      .attr_count = 5,
                                                      .stride = sizeof(asteroid_instance_t)};
 
-static void upload_mesh(mesh_binding_t *mesh, const void *vertices, uint32_t vertex_bytes, const uint32_t *indices, uint32_t index_count, const nt_vertex_layout_t *layout, bool instanced,
-                        const char *label) {
+static void upload_mesh(mesh_binding_t *mesh, const void *vertices, uint32_t vertex_bytes, const uint32_t *indices, uint32_t index_count, const nt_vertex_layout_t *layout, const char *label) {
     mesh->vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = vertices, .size = vertex_bytes, .label = label});
     mesh->ibo = nt_gfx_make_buffer(
         &(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_IMMUTABLE, .data = indices, .size = index_count * (uint32_t)sizeof(uint32_t), .index_type = NT_INDEX_UINT32, .label = label});
-    mesh->input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = *layout,
-                                                                     .instance_layout = instanced ? s_instance_layout : (nt_vertex_layout_t){0},
-                                                                     .instance_buffer = instanced ? nt_gfx_frame_buffer(AST_STREAM_INSTANCES) : (nt_buffer_t){0},
-                                                                     .vertex_buffer = mesh->vbo,
-                                                                     .index_buffer = mesh->ibo,
-                                                                     .label = label});
+    mesh->input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = *layout, .vertex_buffer = mesh->vbo, .index_buffer = mesh->ibo, .label = label});
     mesh->index_count = index_count;
     mesh->vertex_count = vertex_bytes / layout->stride;
 }
@@ -818,14 +814,9 @@ static void generate_rocks(void) {
         .attrs = {{.location = 0, .type = NT_VERTEX_INT16, .count = 3, .normalized = true, .offset = 0}, {.location = 1, .type = NT_VERTEX_INT8, .count = 3, .normalized = true, .offset = 8}},
         .attr_count = 2,
         .stride = sizeof(rock_vertex_t)};
-    upload_mesh(&s_rocks, vertices, vertex_total * (uint32_t)sizeof(rock_vertex_t), indices, index_total, &layout, true, "asteroid_rocks");
+    upload_mesh(&s_rocks, vertices, vertex_total * (uint32_t)sizeof(rock_vertex_t), indices, index_total, &layout, "asteroid_rocks");
     for (uint32_t key = 0; key < AST_KEY_COUNT; key++) {
-        s_rock_inputs[key] = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = layout,
-                                                                                .instance_layout = s_instance_layout,
-                                                                                .instance_buffer = nt_gfx_frame_buffer(AST_STREAM_INSTANCES),
-                                                                                .vertex_buffer = s_rocks.vbo,
-                                                                                .index_buffer = s_rocks.ibo,
-                                                                                .label = "asteroid_rock_key"});
+        s_rock_inputs[key] = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = layout, .vertex_buffer = s_rocks.vbo, .index_buffer = s_rocks.ibo, .label = "asteroid_rock_key"});
     }
     free(indices);
     free(vertices);
@@ -1025,11 +1016,11 @@ static void generate_environment(void) {
                                                         {.location = 2, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 24}},
                                               .attr_count = 3,
                                               .stride = 32};
-    upload_mesh(&s_planet_mesh, planet, sizeof(planet), planet_indices, cursor, &planet_layout, true, "asteroids_planet");
+    upload_mesh(&s_planet_mesh, planet, sizeof(planet), planet_indices, cursor, &planet_layout, "asteroids_planet");
     static const float cube[8][3] = {{-1, -1, -1}, {1, -1, -1}, {1, 1, -1}, {-1, 1, -1}, {-1, -1, 1}, {1, -1, 1}, {1, 1, 1}, {-1, 1, 1}};
     static const uint32_t cube_indices[36] = {0, 1, 2, 0, 2, 3, 5, 4, 7, 5, 7, 6, 4, 0, 3, 4, 3, 7, 1, 5, 6, 1, 6, 2, 3, 2, 6, 3, 6, 7, 4, 5, 1, 4, 1, 0};
     const nt_vertex_layout_t sky_layout = {.attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0}}, .attr_count = 1, .stride = 12};
-    upload_mesh(&s_sky_mesh, cube, sizeof(cube), cube_indices, 36, &sky_layout, false, "asteroids_sky");
+    upload_mesh(&s_sky_mesh, cube, sizeof(cube), cube_indices, 36, &sky_layout, "asteroids_sky");
 }
 
 static void drop_generated(void) {
@@ -1052,6 +1043,7 @@ static bool s_noise_pending;
  * collected after its end_frame. */
 static void start_content(nt_program_t noise_program) {
     s_generate_begin = nt_time_now();
+    s_instance_layout_handle = nt_gfx_make_instance_layout(&s_instance_layout, "asteroid_instance");
     generate_environment();
     generate_rocks();
     record_noise_atlas(noise_program);
@@ -2078,6 +2070,7 @@ static uint32_t prepare_instances(void) {
 }
 
 static void draw_world(uint32_t base, const nt_frame_uniforms_t *globals) {
+    const nt_buffer_t instances = nt_gfx_frame_buffer(AST_STREAM_INSTANCES);
     const complexity_t *complexity = &s_complexities[s_level];
     nt_gfx_bind_uniform_block(0, globals, sizeof(*globals));
     nt_gfx_bind_pipeline(s_pipelines[0]);
@@ -2094,13 +2087,13 @@ static void draw_world(uint32_t base, const nt_frame_uniforms_t *globals) {
         while (end < complexity->instances && s_draw_items[end].sort_key == key) {
             end++;
         }
-        nt_gfx_bind_vertex_input_instanced(s_rock_inputs[subset], base + (s_key_slot[subset] * (uint32_t)sizeof(asteroid_instance_t)));
+        nt_gfx_bind_vertex_input_instanced(s_rock_inputs[subset], s_instance_layout_handle, instances, base + (s_key_slot[subset] * (uint32_t)sizeof(asteroid_instance_t)));
         nt_gfx_draw_indexed_instanced(s_lod_first_index[lod] + (mesh * s_lod_indices[lod]), s_lod_indices[lod], s_lod_vertices[lod], end - i);
         i = end;
     }
     nt_gfx_bind_pipeline(s_pipelines[1]);
     nt_gfx_set_uniform_vec4(s_light_name, light);
-    nt_gfx_bind_vertex_input_instanced(s_planet_mesh.input, base + (s_slot_count * (uint32_t)sizeof(asteroid_instance_t)));
+    nt_gfx_bind_vertex_input_instanced(s_planet_mesh.input, s_instance_layout_handle, instances, base + (s_slot_count * (uint32_t)sizeof(asteroid_instance_t)));
     const nt_gfx_texture_binding_t mars = {.name = s_diffuse_name, .texture = {.id = nt_resource_get(s_mars)}};
     nt_gfx_apply_texture_bindings(&mars, 1);
     nt_gfx_draw_indexed_instanced(0, s_planet_mesh.index_count, s_planet_mesh.vertex_count, 1);

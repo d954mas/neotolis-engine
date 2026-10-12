@@ -635,9 +635,9 @@ void test_skinned_mesh_stream_cannot_overlap_the_color_location(void) {
     nt_render_item_t item = make_item(entity, material, mesh);
 
     begin_storage_frame();
-    NT_TEST_EXPECT_ASSERT(nt_skinned_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, &item, 1));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "attribute location used twice"));
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    NT_TEST_EXPECT_ASSERT(nt_skinned_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, &item, 1));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "share a location"));
 }
 
 void test_static_mesh_stream_cannot_overlap_the_color_location(void) {
@@ -655,8 +655,10 @@ void test_static_mesh_stream_cannot_overlap_the_color_location(void) {
     nt_render_item_t item = make_item(entity, material, mesh);
 
     begin_storage_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, &item, 1));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "attribute location used twice"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "share a location"));
+    begin_storage_frame();
     nt_mesh_renderer_shutdown();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }

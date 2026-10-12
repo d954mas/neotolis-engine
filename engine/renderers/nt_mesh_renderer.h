@@ -63,15 +63,16 @@ void nt_mesh_renderer_restore_gpu(void);
  * the program is not ready or a pipeline or vertex input cannot be created. */
 void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, uint32_t stream, uint32_t offset, uint32_t count);
 
-/* Caller-owned vertex input for `mesh` with `material`'s layout over nt_mesh_instance_t data in
- * `instances` (live mesh, material and NT_BUFFER_VERTEX buffer asserted; INVALID on a lost context
- * or backend failure). Lifetime and recovery: render/architecture.md, Mesh draws. */
-nt_vertex_input_t nt_mesh_renderer_make_vertex_input(nt_mesh_t mesh, nt_material_t material, nt_buffer_t instances);
+/* Caller-owned vertex input for `mesh` with `material`'s layout (live mesh and material asserted;
+ * INVALID on a lost context or backend failure). Lifetime and recovery: render/architecture.md,
+ * Mesh draws. */
+nt_vertex_input_t nt_mesh_renderer_make_vertex_input(nt_mesh_t mesh, nt_material_t material);
 
 /* nt_mesh_renderer_draw over a valid `vi` (asserted) made for this mesh and a material with the
- * same layout (not checked): count > 0 instances at byte offset of its buffer. Records nothing
- * while the program is not ready; creates no cached vertex input. */
-void nt_mesh_renderer_draw_vertex_input(nt_mesh_t mesh, nt_material_t material, nt_vertex_input_t vi, uint32_t offset, uint32_t count);
+ * same layout (not checked): count > 0 nt_mesh_instance_t at byte offset of `instances`
+ * (NT_BUFFER_VERTEX). Records nothing while the program is not ready; creates no cached vertex
+ * input. A vi drawn from one buffer at one offset re-points nothing. */
+void nt_mesh_renderer_draw_vertex_input(nt_mesh_t mesh, nt_material_t material, nt_vertex_input_t vi, nt_buffer_t instances, uint32_t offset, uint32_t count);
 
 /* ECS adapter: adjacent equal batch keys form one run, packed into frame vertex stream `stream`
  * from transform and drawable and drawn as one instanced draw in the current pass. A pass with

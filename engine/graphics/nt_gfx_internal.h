@@ -177,14 +177,20 @@ uint32_t nt_gfx_backend_program_sampler_mask(uint32_t program_backend);
 uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend, uint32_t slot);
 void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle);
 
-/* Bakes the desc's layouts and the given buffer backends into an owned VAO, instance attribs
- * pointed at offset 0 of inst_backend. Restores the previously bound VAO before returning. Same
- * slot contract as create_pipeline: returns `slot`, or 0 on failure. */
-uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t inst_backend, uint32_t slot);
+/* Bakes the desc's vertex layout and the given buffer backends into an owned VAO. Restores the
+ * previously bound VAO before returning. Same slot contract as create_pipeline: returns `slot`,
+ * or 0 on failure. */
+uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot);
 void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle);
-/* Binds the vertex input's VAO and, when it has instance attribs, points them at byte_offset of
- * its instance buffer unless they already point there (0 without an instance layout). */
-void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t byte_offset);
+/* Stores a validated instance layout at slot 1..NT_GFX_MAX_INSTANCE_LAYOUTS; CPU only. */
+void nt_gfx_backend_register_instance_layout(uint32_t slot, const nt_vertex_layout_t *layout);
+/* Binds the vertex input's VAO. With layout_slot != 0 it then points that instance layout at
+ * byte_offset of buffer_backend unless the VAO already holds this exact tuple. */
+void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t layout_slot, uint32_t buffer_backend, uint32_t byte_offset);
+
+/* Frontend: tags a frame storage buffer with its stream, so an instanced bind bounds its
+ * range by the stream's `used` bytes without a search. Destroying the buffer clears it. */
+void nt_gfx_set_buffer_frame_stream(nt_buffer_t buf, uint32_t stream);
 
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc);
 void nt_gfx_backend_destroy_buffer(uint32_t backend_handle);

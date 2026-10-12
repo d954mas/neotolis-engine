@@ -132,6 +132,7 @@ static nt_program_t s_mesh_program;
 static nt_pipeline_t s_mesh_pipeline;
 static nt_vertex_input_t s_mesh_vi;
 static nt_vertex_input_t s_mesh_vi_high; /* the same mesh over vertex stream 1 */
+static nt_instance_layout_t s_mesh_instance_layout;
 static uint32_t s_mesh_handle;
 static nt_hash32_t s_mesh_color_name;
 static uint32_t s_mesh_index_count, s_mesh_vertex_count;
@@ -232,16 +233,14 @@ static bool mesh_probe_create(void) {
     s_mesh_fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_mesh_fs_src, .label = "mesh_probe_fs"});
     s_mesh_program = nt_gfx_make_program(s_mesh_vs, s_mesh_fs);
     s_mesh_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = s_mesh_program, .label = "mesh_probe_pipeline"});
-    nt_vertex_input_desc_t vi_desc = {
+    const nt_vertex_input_desc_t vi_desc = {
         .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
-        .instance_layout = {.attr_count = 1, .stride = 8, .attrs = {{.location = 4, .type = NT_VERTEX_FLOAT, .count = 2}}},
         .vertex_buffer = info->vbo,
         .index_buffer = info->ibo,
-        .instance_buffer = nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX),
         .label = "mesh_probe_vi",
     };
+    s_mesh_instance_layout = nt_gfx_make_instance_layout(&(nt_vertex_layout_t){.attr_count = 1, .stride = 8, .attrs = {{.location = 4, .type = NT_VERTEX_FLOAT, .count = 2}}}, "mesh_probe_instance");
     s_mesh_vi = nt_gfx_make_vertex_input(&vi_desc);
-    vi_desc.instance_buffer = nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1);
     s_mesh_vi_high = nt_gfx_make_vertex_input(&vi_desc);
     return s_mesh_pipeline.id != 0 && s_mesh_vi.id != 0 && s_mesh_vi_high.id != 0;
 }
@@ -282,9 +281,9 @@ static void mesh_probe_draw(void) {
     nt_gfx_bind_pipeline(s_mesh_pipeline);
     const float color[4] = {0.25F, 0.5F, 0.75F, 1.0F};
     nt_gfx_set_uniform_vec4(s_mesh_color_name, color);
-    nt_gfx_bind_vertex_input_instanced(s_mesh_vi, low_offset + 8U);
+    nt_gfx_bind_vertex_input_instanced(s_mesh_vi, s_mesh_instance_layout, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), low_offset + 8U);
     nt_gfx_draw_indexed_instanced(0, s_mesh_index_count, s_mesh_vertex_count, 2);
-    nt_gfx_bind_vertex_input_instanced(s_mesh_vi_high, high_offset + 8U);
+    nt_gfx_bind_vertex_input_instanced(s_mesh_vi_high, s_mesh_instance_layout, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1), high_offset + 8U);
     nt_gfx_draw_indexed_instanced(0, s_mesh_index_count, s_mesh_vertex_count, 2);
 }
 // #endregion
