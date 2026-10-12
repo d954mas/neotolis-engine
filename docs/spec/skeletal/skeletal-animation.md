@@ -251,8 +251,11 @@ render items in the given order; through entity it reads
 mesh/material/world/color and `skin_comp`, packs each run's instances into frame
 vertex stream `stream` and records its draw. `nt_skinned_mesh_renderer_draw(mesh, material,
 deformation, buffer, offset, count)` draws instances the caller packed into a frame stream's
-or its own buffer, with no entity component ([Mesh draws](../render/architecture.md#mesh-draws)). No sampling, FK,
-mode selection, culling or sorting.
+buffer or a caller-owned buffer, with no entity component ([Mesh draws](../render/architecture.md#mesh-draws)). No sampling, FK,
+mode selection, culling or sorting. A mesh drawn by both mesh renderers uses a
+different frame stream for each (asserted; see
+[render architecture, Vertex inputs](../render/architecture.md#vertex-inputs),
+Mesh vertex inputs).
 
 **One skinning vertex program per pass, always two frames.** The shader fetches
 both frame origins and interpolates by alpha; CPU palettes are the case
@@ -262,9 +265,10 @@ validator: every material submitted here implements the documented shader ABI.
 `assets/shaders/common/skin.glsl` declares the skin, world and color inputs and
 owns the shared fetch, blend and guarded-vector functions. Skinned vertex
 shaders include it instead of the static renderer's `common/instance.glsl`;
-it reads `joints`/`weights` at `NT_LOC_JOINTS`/`NT_LOC_WEIGHTS` (6/7, the
-locations skinned stream layouts give those streams) and the instance head at
-`NT_INST_LOC_*` from `nt/locations.glsl` ([shader](../render/shader.md)), and
+it reads `joints`/`weights` at `NT_LOC_JOINTS`/`NT_LOC_WEIGHTS`, the
+locations skinned stream layouts must give those streams (the builder does not
+check names), and the instance head at `NT_INST_LOC_*` from `nt/locations.glsl`
+([shader, Attribute locations](../render/shader.md#attribute-locations)), and
 the mesh's vertex input feeds every stream at its pack location; no material
 maps them. The instance offsets stay the renderer's implementation. A shader
 that does not read the skin streams ignores them, so a skinned MESH still draws
@@ -296,7 +300,8 @@ stream layouts the builder chapter fixes (Skin streams, under Builder
 validation). FLOAT16 lane sums deviate from 1 by at most `4·2⁻¹¹`, and no
 builder gate exists for that deviation. Stored lane order is heaviest-first,
 ties broken towards the lower joint index (§16): a contract of the export, not
-an accident of the reduction. Locations are not part of this specification.
+an accident of the reduction. Instance byte offsets are not part of this
+specification.
 
 **Normals/tangents.** LBS approximation with the linear part of the blended
 matrix and the world linear transform. One guard:

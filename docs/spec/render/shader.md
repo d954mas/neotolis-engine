@@ -1,7 +1,8 @@
 # Shader System
 
-ShaderAsset defines the interface, not values: vertex input mask, material
-vec4/texture counts, object/global usage masks, and default render state.
+ShaderAsset defines the interface, not values: the attribute locations it reads
+(see Attribute locations), material vec4/texture counts, object/global usage
+masks, and default render state.
 Shader data comes in four levels — vertex inputs, material params, object
 params, and globals.
 
@@ -185,7 +186,7 @@ typedef struct ShaderAsset {
 ## Attribute locations
 
 A mesh feeds each stream at the location its builder stream layout states and the
-pack carries ([runtime-formats](../assets/runtime-formats.md#mesh-wire-layout-format-v5)), and
+pack carries ([runtime-formats](../assets/runtime-formats.md#mesh-wire-layout)), and
 the mesh and skinned renderers feed instances at a fixed instance head, so a mesh
 shader declares its inputs at those locations. A shader may
 `#include "nt/locations.glsl"`. The builder resolves this include from C
@@ -203,13 +204,12 @@ number, or its own `#define`, matching the stream layout the mesh was built
 with. Shaders that do not include it are unaffected; the engine mesh shaders
 (`common/instance.glsl`, `common/skin.glsl` and their users) include it.
 
-## Vertex inputs a shader does not declare
+## Mesh streams and shader inputs that do not match
 
 A mesh's vertex input enables every stream of the mesh; streams the shader does
-not read add no GL call per draw, only their enable and pointer when the vertex
-input is made. An input the shader declares at a location the mesh has
-no stream for reads the GL default `(0, 0, 0, 1)`. Nothing checks mesh/shader
-compatibility: the mesh family and its shaders agree on locations by
+not read cost nothing per draw. An input that neither a mesh stream nor the
+bound instance layout supplies reads the GL generic default `(0, 0, 0, 1)`.
+Nothing checks mesh/shader compatibility: the mesh family and its shaders agree on locations by
 construction.
 
 ## Object params

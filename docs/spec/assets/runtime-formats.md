@@ -20,7 +20,7 @@ Examples:
 
 ## Runtime format validation
 
-Runtime must validate: magic, version, type, sizes/offsets. Required attributes (e.g. POSITION) are a builder guarantee — the runtime sees only name hashes and cannot identify them. Builder validation is primary. Runtime validation is safety net.
+Runtime must validate: magic, version, type, sizes/offsets. Required source attributes (POSITION) are a builder guarantee — the runtime sees stream locations, not attribute names, and cannot identify them. Builder validation is primary. Runtime validation is safety net.
 
 The skeletal activators (NSKL/NSKN/NANM) pin the boundary of that safety net as a locked rule: an activator checks only the structure a view needs to address memory, of which the one float it reads is the grid shape (`sample_count`, a finite `duration ≥ 0`), and never a value inside a sound structure; the rule, its list and its rationale live in [skeletal animation](../skeletal/skeletal-animation.md), "Builder, codec, wire formats".
 
@@ -82,11 +82,11 @@ texture transcoding). The transform is a fixed byte permutation plus an index
 codec — no parsers, no format negotiation, no heap in the hot path (decode
 runs at load into transient memory).
 
-### Mesh wire layout (format v5)
+### Mesh wire layout
 
-`NtMeshAssetHeader` v5 (52 bytes) carries two wire tags next to the GPU-form
-fields (`index_type` keeps its width-only meaning; `index_data_size` is the
-WIRE size of the index block):
+The mesh format is v5: `NtMeshAssetHeader` (52 bytes) carries two wire tags
+next to the GPU-form fields (`index_type` keeps its width-only meaning;
+`index_data_size` is the WIRE size of the index block):
 
 - `vertex_wire`: `RAW` (interleaved, upload as-is) or `SOA` — one plane per
   stream in `NtStreamDesc` order. Plane element size =
@@ -103,17 +103,13 @@ WIRE size of the index block):
 
 **Stream locations.** `NtStreamDesc` is 4 bytes: `type`, `count`, `normalized`,
 `location`. `location` is the vertex attribute location the stream feeds and the
-stream's only identity: GL binds the stream there, and CPU readers find a stream
-by its location. The builder writes the location each stream layout entry states;
-layouts use the engine convention in `shared/include/nt_vertex_locations.h`
-(`NT_LOC_POSITION` 0, `NT_LOC_NORMAL` 1, `NT_LOC_COLOR` 2, `NT_LOC_UV0` 3,
-`NT_LOC_TANGENT` 4, `NT_LOC_UV1` 5, `NT_LOC_JOINTS` 6, `NT_LOC_WEIGHTS` 7), which
-shaders declare too. Mesh streams use locations below 8; the engine instance head
-starts at 8. Activation checks structure only:
-every location below `NT_GFX_MAX_VERTEX_ATTRS` and unique within the mesh.
-gfx makes the mesh's vertex inputs with every stream at its `location`
-(`nt_gfx_mesh_vertex_input`); a stream at a location the bound instance layout
-uses asserts at the instanced bind.
+stream's only identity. The builder writes the location each stream layout entry
+states; builder layouts use `0..NT_LOC_VERTEX_END-1` (values in
+[shader, Attribute locations](../render/shader.md#attribute-locations)).
+Activation checks structure only: every location below
+`NT_GFX_MAX_VERTEX_ATTRS` and unique within the mesh. How gfx binds the streams
+is in [render architecture, Vertex inputs](../render/architecture.md#vertex-inputs)
+(Mesh vertex inputs).
 
 **Canonicalization.** The meshopt codec preserves triangles up to rotation of
 each triple (same winding, same rasterization). The builder therefore encodes,

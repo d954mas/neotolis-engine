@@ -140,9 +140,9 @@ Material-wide params (e.g. global alpha cutoff, roughness) can be mutated at run
 
 `attr_map` names custom per-vertex attributes of the sprite path (UI widgets,
 sprite custom-attr blocks). A mesh feeds every stream at the location its pack
-carries ([shader](shader.md), Attribute locations), so a mesh or skinned mesh
-material declares no `attr_map`; the mesh renderers assert it when a run
-changes material.
+carries ([shader, Attribute locations](shader.md#attribute-locations)), so a
+mesh or skinned mesh material declares no `attr_map`; the mesh renderers assert
+that the material has no `attr_map` when a run changes material.
 
 ## Attr defaults
 
@@ -195,8 +195,9 @@ and in `[0, 1]`. A zero-filled state disables blending. The complete WebGL 2
 core factor and operation sets are public. `nt_material_create` asserts the
 render-state ranges up front (blend factors and ops, enabled or not,
 `cull_mode`, every `attr_map` location below `NT_GFX_MAX_VERTEX_ATTRS`): the
-renderer cache keys pack them into fixed bit lanes, so the trap belongs at the
-API boundary, not on the first draw. Invalid WebGL combinations assert
+pipeline cache keys pack the render state, and the sprite renderer's
+vertex-input cache key packs the `attr_map` locations, into fixed bit lanes, so
+the trap belongs at the API boundary, not on the first draw. Invalid WebGL combinations assert
 during pipeline creation.
 
 The fragment shader output is the source (`src`); the color already stored in

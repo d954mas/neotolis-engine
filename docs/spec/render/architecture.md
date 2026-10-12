@@ -68,7 +68,7 @@ Draw-phase calls are deferred. At the call, the front-end validates and updates
 its logical state and geometry counters, then records the
 backend-resolved arguments of the backend call into one command stream: begin
 and end pass, clear, pipeline and vertex-input binds (an instanced one carries its
-instance offset),
+instance layout, buffer and offset),
 texture-unit and uniform-block binds, the mat4, vec4, float
 and int uniform setters, scissor rectangle and enable, viewport, the plain and
 indexed draws (both carry an instance count; the indexed draw also carries the
@@ -134,8 +134,8 @@ only skips repeated physical state (below). Every binding call except a uniform
 block compares with a front-end mirror; an equal value ends `NT_GFX_RESULT_CACHE`
 and records nothing. A mirror lives exactly as long as the contract keeps its state:
 
-- pipeline, vertex input with its instance offset, the texture set
-  (per unit: texture and sampler) and the viewport live for one pass:
+- pipeline, vertex input with its instance layout, buffer and offset, the
+  texture set (per unit: texture and sampler) and the viewport live for one pass:
   `begin_pass` discards them, so the first bind of each in a pass records;
 - the scissor rectangle carries over passes and frames; a context loss clears it;
 - scissor enable is reset to off by `begin_pass`.
@@ -187,8 +187,11 @@ The caller that creates it owns the handle and destroys it with
 buffer handles and bakes them with a per-vertex layout (GL: one VAO). Instances
 are not baked: an instance layout is a registered CPU record
 (`nt_gfx_make_instance_layout`, `nt_instance_layout_t`; no GPU object, no
-destroy, it survives context loss; an equal layout returns the existing handle;
-at most `NT_GFX_MAX_INSTANCE_LAYOUTS`), and the instance buffer is any
+destroy; an equal layout returns the existing handle; at most
+`NT_GFX_MAX_INSTANCE_LAYOUTS`). Registration asserts after `nt_gfx_init` and
+never fails, also on a lost context. A handle is valid until `nt_gfx_shutdown`
+and survives context loss; owners register again after a re-init. The instance
+buffer is any
 `NT_BUFFER_VERTEX` buffer: a frame storage buffer (`nt_gfx_frame_buffer`, see
 Frame storage) or one the caller owns. gfx does not care who fills it or when.
 One bind selects the whole geometry for the following draws:
@@ -209,9 +212,11 @@ in one shared stream a count change shifts every later run of the frame. An
 empty layout with no buffers is the attribute-less `gl_VertexID` path; every
 draw asserts a bound vertex input.
 
-The first fused bind of a vertex input asserts that the instance locations do
-not overlap its vertex ones; every fused bind asserts the buffer's type and
-liveness. A vertex input once bound with
+The first instanced bind of a vertex input asserts that the instance locations
+do not overlap its vertex ones. An instanced bind whose buffer differs from the
+last instance buffer bound in the pass asserts the buffer's type and liveness;
+a bind equal to the bound tuple returns before any check. A vertex input once
+bound with
 instances keeps divisor-1 attributes enabled, so a plain bind of it asserts; a
 vertex input never bound with instances may still draw instanced, reading only
 `gl_InstanceID`.
@@ -224,8 +229,7 @@ The instanced bind asserts the same for its first instance, which is all a
 plain draw over it reads, so plain draws carry no check. `extent` is the bytes
 one instance reads (the furthest attribute end), so attributes past the stride
 are covered. An instance layout needs a nonzero stride (asserted): GL reads
-stride 0 as tightly packed per attribute. Frame storage buffers carry their
-stream, so the bind finds the bound for a frame buffer without a search.
+stride 0 as tightly packed per attribute.
 
 **Persistent instance data.** Instance data that does not change every frame
 can live in a caller-owned buffer: write it once (or rewrite a range with
@@ -240,7 +244,7 @@ need two regions. The mesh renderer's core draw takes such a buffer and draws
 it through the mesh's base vertex input (see [Mesh draws](#mesh-draws)); a game
 that draws one mesh from several buffers or offsets every frame builds its own
 vertex inputs over the mesh's `vbo`/`ibo` (`nt_gfx_mesh_info_t`), one per offset,
-and draws with `nt_gfx_*` directly.
+and draws them with `nt_gfx_*` directly: the renderers take no vertex input.
 
 A vertex attribute is the raw GL triple `(type, count 1-4,
 normalized)` plus location and byte offset (`nt_vertex_attr_t`) — no enum of
@@ -249,7 +253,7 @@ allowed combinations; the float/half/byte/short subset of the
 to game-built layouts and mesh-pack streams alike. The pack's on-disk stream
 type enum stays separate from the gfx vertex type enum in the vertex-layout
 API (gfx maps between them totally when it makes a mesh's vertex input; the
-mesh-activation side table `nt_gfx_mesh_info_t` still stores raw pack descs — a
+mesh-activation side table `nt_gfx_mesh_info_t` stores raw pack descs — a
 known, contained exception). Vertex-input creation asserts the WebGL2 alignment rules
 (attribute offset and stride multiples of the attribute's type size,
 locations within the WebGL2-guaranteed 16): game-declared layouts never pass
@@ -419,21 +423,25 @@ and nothing can replace a material's program inside the call.
 **Mesh vertex inputs.** gfx owns a mesh's vertex inputs:
 `nt_gfx_mesh_vertex_input(mesh, buffer)` returns the one for instances in
 `buffer`, made on first use with every mesh stream at the location the builder
-wrote into its `NtStreamDesc` (see [runtime formats](../assets/runtime-formats.md)).
-A mesh owns one per frame vertex stream it is drawn from, so each stream's
-draws keep their own instance offsets, and one base vertex input for every
-other buffer. The identity is (mesh, stream): materials do not shape vertex
-inputs, so every material on a mesh shares them, and the renderers keep no
-vertex-input cache. They die with the mesh (the destroy cascade) and with a
-context loss; the next use makes them again. The mesh and skinned renderers
-bind them with their own instance layouts, which share the instance head
-(`NT_INST_LOC_*`, see [shader](shader.md)). A mesh's vertex input of a stream is
-pinned to the instance layout of the first renderer that draws it, so a mesh
-drawn by both renderers uses a different stream for each (asserted). From game
-buffers both would share the base vertex input; such a game makes its own
-vertex inputs over the mesh's `vbo`/`ibo`.
+wrote into its `NtStreamDesc` (see
+[runtime formats, Mesh wire layout](../assets/runtime-formats.md#mesh-wire-layout)).
+A mesh owns one per frame vertex stream it is drawn from, so each frame
+stream's draws keep their own instance offsets, and one base vertex input for
+every other buffer. The identity is (mesh, frame stream): materials do not
+shape vertex inputs, so every material on a mesh shares them, and the renderers
+keep no vertex-input cache. They die with the mesh (the destroy cascade) and
+with a context loss; the next use makes them again, also after the caller
+destroys one. The mesh and skinned renderers bind them with their own instance
+layouts, which share the instance head (`NT_INST_LOC_*`, see
+[shader, Attribute locations](shader.md#attribute-locations)). A mesh's vertex
+input is pinned to the instance layout of the first renderer that draws it, so
+a mesh drawn by both renderers uses a different frame stream for each
+(asserted). From game buffers both would share the base vertex input, and the
+second layout asserts; such a game builds its own vertex inputs over the mesh's
+`vbo`/`ibo` and draws them with `nt_gfx_*` directly.
 `max_vertex_inputs` budgets the vertex inputs of the meshes (frame streams they
-are drawn from, plus one if drawn from any other buffer) and the others.
+are drawn from, plus one if drawn from any other buffer) and the others, such
+as the shape renderer's four per frame stream it draws from.
 
 The sprite renderer's vertex inputs sit on the vertex and index frame buffers,
 one per layout key; `nt_sprite_renderer_shutdown` destroys them, and it runs
@@ -467,10 +475,12 @@ Every mesh and skinned mesh instance carries the entity's drawable color
 (`nt_mesh_instance_t`, `nt_skinned_mesh_instance_t`), so every render item needs
 a drawable component. A shader that ignores color does not declare the color
 input; the instance layout still provides it. Instance locations are reserved:
-8–11 for both renderers (world rows, color) and 12–13 for skinned meshes
-(frame origins, alpha). A mesh stream at a location the bound instance layout
-uses (a hand-built mesh may use any location below 16) asserts at the
-instanced bind. The engine sets no
+the `NT_INST_LOC_*` head (world rows and color for both renderers, frame
+origins and alpha for skinned meshes; values in
+[shader, Attribute locations](shader.md#attribute-locations)). A mesh stream at
+a location the bound instance layout uses (a hand-built mesh may use any
+location below `NT_GFX_MAX_VERTEX_ATTRS`) asserts at the instanced bind. The
+engine sets no
 generic (constant) vertex attribute value.
 
 ### Dynamic data lifetime
@@ -602,8 +612,10 @@ call, in the current pass. Each has two entry points:
   stream choice). Game buffers draw through the mesh's base vertex input, so
   one mesh drawn from more than one (game buffer, offset) re-points between
   them; a game that does that every frame builds its own per-offset vertex
-  inputs over the mesh buffers (see Vertex inputs, Persistent instance data).
-  After a context loss the caller recreates and refills its buffer;
+  inputs over the mesh buffers and draws them with `nt_gfx_*` directly (see
+  Vertex inputs, Persistent instance data). A mesh drawn by both renderers uses
+  a different frame stream for each (asserted; see Vertex inputs, Mesh vertex
+  inputs). After a context loss the caller recreates and refills its buffer;
 - the ECS adapter, `draw_list(stream, items, count)`, splits the items into
   runs of adjacent equal batch keys (the skinned renderer also splits on the
   deformation texture), allocates and packs each run's instances in `stream`
@@ -664,6 +676,7 @@ for (uint32_t c = 0; c < CASCADES; c++) {
 bind_surface_materials();
 nt_gfx_begin_pass(&main_pass);
 nt_gfx_bind_uniform_block(0, &views[CASCADES], sizeof(view_t));
+/* One stream serves both renderers only because no mesh is in both lists. */
 nt_skinned_mesh_renderer_draw_list(GAME_STREAM_MAIN, skinned_items, skinned_count);
 nt_mesh_renderer_draw_list(GAME_STREAM_MAIN, static_items, static_count);
 nt_gfx_end_pass();
@@ -1123,10 +1136,11 @@ cull, blend enable, RGB source/destination, alpha source/destination, RGB/alpha
 operation and polygon offset enable. Values 0–5 hold blend color, offset factor
 and units. Only the backend defines pipeline state: its `DEFINITION/PIPELINE`
 record uses the program backend slot and backend enums, and the frontend
-pipeline definition carries the program handle in `related[0]`. Backend
-`DEFINITION/PIPELINE` and `DEFINITION/ATTRIBUTE` records carry the pipeline or
-vertex-input backend slot in `detail`; initial state uses the current raw
-program name. Vertex-input creation copies each per-vertex attribute with its
+pipeline definition carries the program handle in `related[0]`. The backend
+`DEFINITION/PIPELINE` record carries the pipeline backend slot in `detail`;
+initial state uses the current raw program name. `DEFINITION/ATTRIBUTE` records
+are frontend records: `object_kind` and `object` name the vertex input or the
+instance layout. Vertex-input creation copies each per-vertex attribute with its
 layout and buffer; instance attributes belong to the instance layout. The initial SCISSOR record holds the
 carried-over rectangle; it is `UNKNOWN` before the first set and after a
 context loss. Uniform-block bindings are not recorded: each block lives one frame. A bind inside the capture that
@@ -1243,7 +1257,7 @@ Not all renderers carry the same weight. The engine ships three classes; copying
 **Building blocks** — direct GPU primitives (`nt_gfx_draw_indexed`,
 `nt_mesh_renderer`, optional `nt_skinned_mesh_renderer`). Single pipeline, fixed
 pattern, one instanced draw per compatible run (see items-sorting-batching.md),
-packed into frame storage and recorded at the call. Use for 3D
+packed into frame storage or a caller buffer and recorded at the call. Use for 3D
 meshes, custom geometry, anything where the game owns batching strategy. Stay
 minimal. The mesh renderers share one resolve-and-record body in
 `nt_renderer_shared.h`.

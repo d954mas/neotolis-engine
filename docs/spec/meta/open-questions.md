@@ -9,7 +9,7 @@ Related: [Architecture Snapshot](architecture-snapshot.md)
 
 These do not block implementation:
 
-- future WebGPU backend details (pipelines carry no vertex layout, so a WebGPU backend derives native pipelines per pipeline and vertex-input layout; a vertex input maps to setVertexBuffer/setIndexBuffer calls with its baked buffers and the fused bind's instance buffer; the mesh's stream format and the instance layout join the pipeline key, and a shader input without a stream has no generic default there)
+- future WebGPU backend details (pipelines carry no vertex layout, so a WebGPU backend derives native pipelines per pipeline and vertex-input layout; a vertex input maps to setVertexBuffer/setIndexBuffer calls with its baked buffers and the instanced bind's instance buffer; the mesh's stream format and the instance layout join the pipeline key, and a shader input without a stream has no generic default there)
 - sprite animation system
 - camera component/structure definition
 - whether some renderer-specific caches are worth adding later

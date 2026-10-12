@@ -486,18 +486,22 @@ recoverable outcomes, both retried on a later frame.
 `nt_gfx_make_vertex_input` applies the same contract to the layout checks: an
 attribute count over `NT_GFX_MAX_VERTEX_ATTRS`, a stride over the WebGL2 cap of
 255, misaligned or duplicated attributes, mismatched buffers, and an exhausted
-pool all assert. `nt_gfx_make_instance_layout` asserts the same layout rules
-(1..`NT_GFX_MAX_INSTANCE_ATTRS` attributes, stride 1..255) and a full registry;
-it has no failure result, also on a lost context, and an equal layout returns
-the registered handle. The fused instanced bind asserts the instance/vertex
-location overlap and the instance buffer's type and liveness. The returned vertex input is caller-owned and destroyed with
+pool all assert. The returned vertex input is caller-owned and destroyed with
 `nt_gfx_destroy_vertex_input`; it borrows the referenced buffers, whose
-destruction may invalidate it through the documented cascade.
-`nt_gfx_mesh_vertex_input` returns a vertex input gfx owns: it lives until the
-mesh is deactivated or the context is lost, so the caller asks again rather
-than keeping it across either; one the caller destroys is made again on the
-next request. The descriptor
-and label are borrowed only for the call. Creating a pipeline or a vertex input
+destruction may invalidate it through the documented cascade. The descriptor
+and label are borrowed only for the call.
+
+`nt_gfx_make_instance_layout` asserts the same layout rules
+(1..`NT_GFX_MAX_INSTANCE_ATTRS` attributes, stride 1..255), a call before
+`nt_gfx_init` and a full registry; it has no failure result, also on a lost
+context. The instanced bind asserts that instance and vertex locations do not
+overlap, and the instance buffer's type and liveness. `nt_gfx_mesh_vertex_input`
+returns a vertex input gfx owns, so the caller asks again rather than keeping
+it; it returns INVALID when the vertex input must be made on a lost context or
+the backend fails, and a stale mesh or buffer asserts. The registry and
+lifetime rules of both live in
+[render architecture, Vertex inputs](../render/architecture.md#vertex-inputs).
+Creating a pipeline or a vertex input
 preserves both current bindings (the bound pipeline and the bound vertex
 input); the caller does not need to rebind after creating another object.
 Detected allocation failures from public GPU-resource operations, framebuffer
