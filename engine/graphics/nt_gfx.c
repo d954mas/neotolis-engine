@@ -1701,7 +1701,7 @@ static void assert_instances_in_range(uint32_t instance_count) {
     if (s_gfx.bound_instance_layout == 0 || instance_count == 0) {
         return;
     }
-    const nt_gfx_instance_layout_meta_t *layout = &s_gfx.instance_layouts[nt_pool_slot_index(s_gfx.bound_instance_layout)];
+    const nt_gfx_instance_layout_meta_t *layout = &s_gfx.instance_layouts[s_gfx.bound_instance_layout];
     const nt_gfx_buffer_meta_t *buffer = &s_gfx.buffer_metas[nt_pool_slot_index(s_gfx.bound_instance_buffer)];
     const uint64_t limit = buffer->frame_stream != 0 ? g_nt_gfx_frame_storage[buffer->frame_stream - 1U].used : buffer->size;
     const uint64_t end = (uint64_t)s_gfx.bound_instance_offset + ((uint64_t)(instance_count - 1U) * layout->stride) + layout->extent;
