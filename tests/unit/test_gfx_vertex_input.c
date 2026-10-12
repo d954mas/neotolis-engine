@@ -215,6 +215,36 @@ void test_instanced_bind_asserts_on_caller_errors(void) {
     TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "invalid or stale instance buffer"));
     EXPECT_ASSERT(nt_gfx_bind_vertex_input_instanced(vi, NT_INSTANCE_LAYOUT_INVALID, frame0(), 0));
     TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "invalid or stale instance layout"));
+    /* A zero tuple, or one matching a previous vertex input's buffer and offset, is no cache hit. */
+    nt_vertex_input_t other = make_vi(vbo, (nt_buffer_t){0});
+    nt_gfx_bind_vertex_input(vi);
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input_instanced(vi, NT_INSTANCE_LAYOUT_INVALID, (nt_buffer_t){0}, 0));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "invalid or stale instance layout"));
+    bind_inst(other, frame0(), 16);
+    nt_gfx_bind_vertex_input(make_vi(vbo, (nt_buffer_t){0}));
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input_instanced(vi, NT_INSTANCE_LAYOUT_INVALID, frame0(), 16));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "invalid or stale instance layout"));
+    nt_gfx_end_pass();
+}
+
+/* Frame storage buffers bound by this frame's `used`; after a restore replaces them, a game
+ * buffer that may reuse an old frame buffer's slot bounds by its size. */
+void test_instance_range_follows_frame_buffer_replacement(void) {
+    nt_gfx_end_frame();
+    nt_gfx_fake_lose_and_restore_context();
+    nt_gfx_begin_frame(); /* restores: the frame buffers are new */
+    nt_vertex_input_t vi = make_vi(make_vbo(), (nt_buffer_t){0});
+    nt_buffer_t own = make_instance_buffer();
+    nt_pipeline_t pip = make_test_pipeline();
+    begin_test_pass();
+    nt_gfx_bind_pipeline(pip);
+    bind_inst(vi, frame0(), 48);
+    nt_gfx_draw_instanced(0, 3, 1); /* the new frame buffer holds 64 bytes this frame */
+    EXPECT_ASSERT(nt_gfx_draw_instanced(0, 3, 2));
+    bind_inst(vi, own, 48);
+    nt_gfx_draw_instanced(0, 3, 1);
+    EXPECT_ASSERT(nt_gfx_draw_instanced(0, 3, 2));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "instances lie outside"));
     nt_gfx_end_pass();
 }
 
@@ -801,6 +831,7 @@ int main(void) {
     RUN_TEST(test_vi_pool_exhaustion_asserts);
     RUN_TEST(test_vi_creation_asserts_on_caller_errors);
     RUN_TEST(test_instanced_bind_asserts_on_caller_errors);
+    RUN_TEST(test_instance_range_follows_frame_buffer_replacement);
     RUN_TEST(test_vi_creation_asserts_on_untyped_index_buffer);
     RUN_TEST(test_vi_creation_asserts_webgl2_rules);
     RUN_TEST(test_vi_stride_255_boundary);

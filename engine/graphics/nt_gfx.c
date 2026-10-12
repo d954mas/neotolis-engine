@@ -154,7 +154,8 @@ static struct {
     uint32_t active_render_target;
     uint32_t bound_pipeline;     /* full handle of the bound pipeline, 0 = none */
     uint32_t bound_vertex_input; /* full handle of the bound vertex input, 0 = none */
-    /* Last fused bind on the bound vertex input; layout 0 = plain bind. A vertex input change clears it. */
+    /* Last fused bind on the bound vertex input; layout 0 = plain bind. A vertex input change
+     * clears the layout; the buffer stays the pass's last validated one (the frame rule keeps it alive). */
     uint32_t bound_instance_layout;
     uint32_t bound_instance_buffer;
     uint32_t bound_instance_offset;
@@ -776,6 +777,7 @@ static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
     s_gfx.bound_pipeline = 0;
     discard_texture_set();
     s_gfx.bound_vertex_input = 0;
+    s_gfx.bound_instance_buffer = 0;
     s_gfx.bound_index_type = NT_INDEX_NONE;
     memset(s_gfx.bound_units, 0, sizeof(s_gfx.bound_units));
     s_gfx.viewport_rect[2] = -1; /* the backend sets the whole target at execution */
@@ -1742,16 +1744,20 @@ static nt_gfx_result_t bind_vertex_input_instanced(nt_vertex_input_t vi, nt_inst
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     const bool same_vi = s_gfx.bound_vertex_input != 0 && vi.id == s_gfx.bound_vertex_input;
-    if (same_vi && layout.id == s_gfx.bound_instance_layout && instance_buffer.id == s_gfx.bound_instance_buffer && byte_offset == s_gfx.bound_instance_offset) {
+    /* A nonzero bound layout passed every check below, so an equal tuple needs none of them. */
+    if (same_vi && s_gfx.bound_instance_layout != 0 && layout.id == s_gfx.bound_instance_layout && instance_buffer.id == s_gfx.bound_instance_buffer && byte_offset == s_gfx.bound_instance_offset) {
         return NT_GFX_RESULT_CACHE;
     }
     const uint32_t slot = same_vi ? nt_pool_slot_index(vi.id) : publish_vertex_input(vi);
     const uint32_t layout_slot = instance_layout_slot(layout);
     NT_ASSERT((s_gfx.instance_layouts[layout_slot].mask & s_gfx.vertex_input_metas[slot].vertex_mask) == 0 && "bind_vertex_input_instanced: instance and vertex attribs share a location");
-    NT_ASSERT(nt_pool_valid(&s_gfx.buffer_pool, instance_buffer.id) && "bind_vertex_input_instanced: invalid or stale instance buffer");
     const uint32_t buffer_slot = nt_pool_slot_index(instance_buffer.id);
-    NT_ASSERT(s_gfx.buffer_metas[buffer_slot].type == NT_BUFFER_VERTEX && "bind_vertex_input_instanced: instance buffer is not vertex type");
-    NT_ASSERT(s_gfx.buffer_backends[buffer_slot] != 0 && "bind_vertex_input_instanced: instance buffer has no live backend -- recreate it after context restore");
+    /* Runs of vertex inputs drawn from one buffer validate it once per pass. */
+    if (instance_buffer.id != s_gfx.bound_instance_buffer) {
+        NT_ASSERT(nt_pool_valid(&s_gfx.buffer_pool, instance_buffer.id) && "bind_vertex_input_instanced: invalid or stale instance buffer");
+        NT_ASSERT(s_gfx.buffer_metas[buffer_slot].type == NT_BUFFER_VERTEX && "bind_vertex_input_instanced: instance buffer is not vertex type");
+        NT_ASSERT(s_gfx.buffer_backends[buffer_slot] != 0 && "bind_vertex_input_instanced: instance buffer has no live backend -- recreate it after context restore");
+    }
     NT_ASSERT((byte_offset & 3U) == 0 && "bind_vertex_input_instanced: offset must be 4-byte aligned (WebGL2 attrib rule)");
     s_gfx.vertex_input_metas[slot].had_instances = true;
     s_gfx.bound_instance_layout = layout.id;

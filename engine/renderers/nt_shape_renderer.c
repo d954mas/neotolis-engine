@@ -819,8 +819,8 @@ static nt_buffer_t make_static_buffer(nt_buffer_type_t type, const void *data, u
 
 /* Straight line: a loss met on the way latches in gfx, every later create returns 0, and the next restore makes all again. */
 /* The instanced kinds drawn from one sized stream, made when the stream is selected: one set per
- * stream keeps each VAO's instance offsets stable, and an unused stream takes no vertex-input slots. Only missing ones are made, so a failed create is retried
- * without replacing live ones. */
+ * stream keeps each VAO's instance offsets stable, and an unused stream takes no vertex-input
+ * slots. Only missing ones are made, so a failed create is retried without replacing live ones. */
 static void make_stream_vertex_inputs(uint32_t stream) {
     const uint32_t k = stream - NT_GFX_FRAME_VERTEX;
     if (!nt_gfx_vertex_input_valid(s_shape.gpu.fill_vi[k])) {

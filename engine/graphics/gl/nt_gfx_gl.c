@@ -327,7 +327,7 @@ void nt_gfx_backend_capture_initial_state(void) {
             const nt_gfx_gl_attr_t *attr = &layout->attrs[a];
             NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_ATTRIBUTE, event->detail = i; event->result = NT_GFX_RESULT_UNKNOWN; event->data.attribute.location = attr->location;
                           event->data.attribute.type = (uint32_t)attr->type; event->data.attribute.count = attr->count; event->data.attribute.normalized = attr->normalized;
-                          event->data.attribute.offset = vi->instance_offset + attr->offset; event->data.attribute.stride = layout->stride; event->data.attribute.divisor = 1;
+                          event->data.attribute.offset = attr->offset; event->data.attribute.stride = layout->stride; event->data.attribute.divisor = 1;
                           event->data.attribute.buffer = vi->instance_buffer;);
         }
     }
@@ -1866,7 +1866,9 @@ void nt_gfx_backend_destroy_buffer(uint32_t backend_handle) {
     NT_ASSERT(backend_handle <= s_init_desc.max_buffers && "destroy_buffer: handle out of range");
     GLuint buf = s_buffer_gl[backend_handle];
     if (buf) {
-        detach_instance_buffer(buf);
+        if (s_buffer_targets[backend_handle] == GL_ARRAY_BUFFER) {
+            detach_instance_buffer(buf);
+        }
         forget_deleted_buffer(buf);
         NT_GL_DELETE(glDeleteBuffers, 1, &buf);
     }
