@@ -1065,12 +1065,10 @@ static nt_gfx_result_t make_pipeline(const nt_pipeline_desc_t *desc, nt_pipeline
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    NT_ASSERT(nt_pool_valid(&s_gfx.program_pool, desc->program.id) && program_slot_backend(nt_pool_slot_index(desc->program.id)) != 0 &&
-              "make_pipeline: invalid program, or one a context loss discarded");
-    NT_ASSERT(blend_state_valid(&desc->blend));
-
-    /* Equal descs share one pipeline. A free slot's key is all zero and never matches:
-     * the key carries the nonzero program handle asserted above. */
+    /* Equal descs share one pipeline. A hit needs no further checks: its program is live and
+     * not discarded (destroy and loss clear its keys), and its blend passed them at creation.
+     * A free slot's key is all zero, so the nonzero program handle keeps it from matching. */
+    NT_ASSERT(desc->program.id != 0 && "make_pipeline: invalid program");
     const nt_gfx_pipeline_key_t key = pipeline_key(desc);
     for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
         if (pipeline_key_equal(&s_gfx.pipeline_keys[i], &key)) {
@@ -1078,6 +1076,9 @@ static nt_gfx_result_t make_pipeline(const nt_pipeline_desc_t *desc, nt_pipeline
             return NT_GFX_RESULT_CACHE;
         }
     }
+    NT_ASSERT(nt_pool_valid(&s_gfx.program_pool, desc->program.id) && program_slot_backend(nt_pool_slot_index(desc->program.id)) != 0 &&
+              "make_pipeline: invalid program, or one a context loss discarded");
+    NT_ASSERT(blend_state_valid(&desc->blend));
 
     uint32_t id = nt_pool_alloc(&s_gfx.pipeline_pool);
     NT_ASSERT(id != 0 && "pipeline pool full -- raise nt_gfx_desc_t.max_pipelines");
