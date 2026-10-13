@@ -1247,6 +1247,33 @@ void test_gfx_make_pipeline_returns_the_live_pipeline_of_an_equal_desc(void) {
     TEST_ASSERT_EQUAL_UINT32(accepted + 1U, g_nt_gfx.counters.accepted[NT_GFX_OP_CREATE]); /* a hit is CACHE */
 }
 
+/* make_pipeline scans from slot 1, so freed pipelines must come back low slots first: after a
+ * full pool empties, the next pipeline is found on the first compare. */
+void test_gfx_freed_pipeline_slots_are_reused_low_first(void) {
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_test_gfx_link_wait(prog);
+    for (uint8_t i = 0; i < 4; i++) { /* setUp: max_pipelines = 4 */
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = (i & 1U) != 0, .cull_mode = (uint8_t)(i >> 1U)}).id);
+    }
+    nt_gfx_destroy_program(prog);
+    prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_test_gfx_link_wait(prog);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_pool_slot_index(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog}).id));
+    for (uint8_t i = 1; i < 4; i++) {
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = (i & 1U) != 0, .cull_mode = (uint8_t)(i >> 1U)}).id);
+    }
+
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame(); /* latches the loss, frees pipeline slots */
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame(); /* recovery completes */
+    nt_gfx_destroy_program(prog);
+    prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_pool_slot_index(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog}).id));
+}
+
 /* A destroyed program's keys go with its slots: the program reusing the slot makes its own pipeline. */
 void test_gfx_make_pipeline_after_program_destroy_creates_again(void) {
     nt_gfx_fake_reset();
@@ -3965,6 +3992,7 @@ int main(void) {
     RUN_TEST(test_gfx_make_pipeline_returns_the_live_pipeline_of_an_equal_desc);
     RUN_TEST(test_gfx_make_pipeline_lane_variants_on_neighbouring_programs_stay_distinct);
     RUN_TEST(test_gfx_make_pipeline_after_program_destroy_creates_again);
+    RUN_TEST(test_gfx_freed_pipeline_slots_are_reused_low_first);
     RUN_TEST(test_gfx_make_pipeline_misses_while_a_loss_is_latched);
     RUN_TEST(test_gfx_make_pipeline_on_a_restored_husk_asserts_even_after_a_hit);
     RUN_TEST(test_activate_mesh_rejects_misaligned_offset);

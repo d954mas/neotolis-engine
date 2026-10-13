@@ -345,7 +345,7 @@ range, or depth-sampling comparison state.
 
 **Cache identity.** gfx deduplicates pipelines: `nt_gfx_make_pipeline`
 returns the live pipeline whose descriptor has the same exact identity, or
-creates one. The label is not identity; the first creator's is kept. A
+creates one. The label is not identity, and gfx stores none. A
 latched context loss returns invalid before the lookup. A hit needs no other
 check: destroying a program and a context loss clear its pipelines' keys, so a
 live entry has a live program, and its state passed validation at creation.

@@ -636,8 +636,10 @@ static void wipe_backend_handles(void) {
     }
     /* Pipelines, vertex inputs and render targets are baked objects with no re-fill path:
      * loss frees their slots outright, so handles held across a loss go stale and owners
-     * make them again. Primary resources stay as husks -- owners destroy them. */
-    for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
+     * make them again. Primary resources stay as husks -- owners destroy them.
+     * Pipelines free high to low: the pool reuses the last freed slot first, and make_pipeline
+     * scans from slot 1, so the next pipelines land where the scan reaches them soonest. */
+    for (uint32_t i = s_gfx.pipeline_pool.capacity; i >= 1; i--) {
         if (nt_pool_slot_alive(&s_gfx.pipeline_pool, i)) {
             nt_pool_free(&s_gfx.pipeline_pool, s_gfx.pipeline_pool.slots[i].id);
         }
@@ -1529,9 +1531,9 @@ static nt_gfx_result_t destroy_program(nt_program_t prog) {
     /* A stale non-zero handle means the owner lost track of which programs it
      * still holds -- the one mistake this ownership model cannot absorb. */
     NT_ASSERT(nt_pool_valid(&s_gfx.program_pool, prog.id) && "destroy_program: stale handle -- clear the handle to NT_PROGRAM_INVALID when you destroy it");
-    /* Dependent pipelines cannot draw again; reclaim their slots now. Each records its own
-     * DESTROY; the program's frame-rule check already covers them. */
-    for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
+    /* Dependent pipelines cannot draw again; reclaim their slots now, high to low (see the loss
+     * wipe). Each records its own DESTROY; the program's frame-rule check already covers them. */
+    for (uint32_t i = s_gfx.pipeline_pool.capacity; i >= 1; i--) {
         if (pipeline_program(i) != prog.id) {
             continue;
         }

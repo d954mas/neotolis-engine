@@ -404,7 +404,7 @@ typedef struct {
     bool polygon_offset;         /* enable GL_POLYGON_OFFSET_FILL */
     float polygon_offset_factor; /* glPolygonOffset factor (typically 1.0) */
     float polygon_offset_units;  /* glPolygonOffset units (typically 1.0) */
-    const char *label;           /* debug name, not identity; borrowed for the call */
+    const char *label;           /* not identity, and gfx stores none */
 } nt_pipeline_desc_t;
 
 typedef struct {
@@ -853,7 +853,7 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
  * samplers assert there. Returns invalid while the context is lost, and for a live stage
  * whose GPU object a loss discarded -- recreate the stages and relink. Only a stale stage handle asserts. */
 nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs);
-/* Returns the live pipeline of an equal desc (label ignored: the first creator's is kept) or
+/* Returns the live pipeline of an equal desc (the label is not identity, and gfx keeps none) or
  * creates one; gfx owns it until its program is destroyed. Accepts a linking program; binding the
  * pipeline asserts until the program is ready. Creation preserves the currently bound pipeline. */
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
