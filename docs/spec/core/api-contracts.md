@@ -479,9 +479,9 @@ no-op even then: the handle check runs first. A returned invalid target therefor
 failed backend allocation, or an incomplete framebuffer, such as `RGBA16F`
 without float rendering. `nt_gfx_make_pipeline`
 follows the same split: a
-NULL descriptor, an unready program, and an exhausted pipeline pool assert, so a returned invalid
-pipeline handle means a lost context or a failed backend allocation — the two
-recoverable outcomes, both retried on a later frame.
+NULL descriptor, an unready program, and an exhausted pipeline pool assert, and the backend
+create only fills a CPU record, so a returned invalid pipeline handle means a lost context,
+retried on a later frame.
 `nt_gfx_make_vertex_input` applies the same contract to the layout checks: an
 attribute count over `NT_GFX_MAX_VERTEX_ATTRS`, a stride over the WebGL2 cap of
 255, misaligned or duplicated attributes, mismatched buffers, and an exhausted

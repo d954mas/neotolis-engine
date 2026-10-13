@@ -1600,11 +1600,9 @@ void nt_gfx_backend_destroy_program(uint32_t backend_handle) {
     memset(&s_programs[backend_handle], 0, sizeof(s_programs[backend_handle]));
 }
 
-uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend, uint32_t slot) {
-    if (program_backend == 0 || program_backend > s_init_desc.max_programs) {
-        return 0;
-    }
+void nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend, uint32_t slot) {
     /* The frontend pool owns slot allocation; the backend table mirrors it. */
+    NT_ASSERT(program_backend > 0 && program_backend <= s_init_desc.max_programs);
     NT_ASSERT(slot > 0 && slot <= s_init_desc.max_pipelines && s_pipelines[slot].program_slot == 0);
 
     /* Store pipeline data (fixed-function state + borrowed program only) */
@@ -1629,7 +1627,6 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
 #if NT_GFX_CAPTURE_ENABLED
     capture_pipeline_definition(slot);
 #endif
-    return slot;
 }
 
 void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle) {

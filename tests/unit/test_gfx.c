@@ -1217,22 +1217,6 @@ void test_gfx_pipeline_pool_full_asserts(void) {
     EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .cull_mode = 2}));
 }
 
-/* A backend failure is not a developer error: it stays an invalid handle so
- * callers can retry on a later frame. */
-void test_gfx_pipeline_backend_failure_returns_invalid(void) {
-    nt_gfx_fake_reset();
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
-    nt_gfx_fake_fail_next_pipeline_create();
-
-    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
-    TEST_ASSERT_EQUAL_UINT32(0, pip.id);
-
-    /* The pool slot went back, so the retry succeeds. */
-    nt_pipeline_t retry = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, retry.id);
-    nt_gfx_fake_reset();
-}
-
 /* ---- Pipeline deduplication ---- */
 
 void test_gfx_make_pipeline_returns_the_live_pipeline_of_an_equal_desc(void) {
@@ -3988,7 +3972,6 @@ int main(void) {
     RUN_TEST(test_gfx_pipeline_asserts_null_desc);
     RUN_TEST(test_gfx_pipeline_context_lost_returns_invalid);
     RUN_TEST(test_gfx_pipeline_pool_full_asserts);
-    RUN_TEST(test_gfx_pipeline_backend_failure_returns_invalid);
     RUN_TEST(test_gfx_make_pipeline_returns_the_live_pipeline_of_an_equal_desc);
     RUN_TEST(test_gfx_make_pipeline_lane_variants_on_neighbouring_programs_stay_distinct);
     RUN_TEST(test_gfx_make_pipeline_after_program_destroy_creates_again);

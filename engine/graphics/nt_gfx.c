@@ -1058,9 +1058,8 @@ static void assert_layout_webgl2_rules(const nt_vertex_layout_t *layout) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static nt_gfx_result_t make_pipeline(const nt_pipeline_desc_t *desc, nt_pipeline_t *out) {
-    /* Everything a caller controls is a developer error and traps. What is left
-     * -- a lost context, a failed backend allocation -- returns an invalid handle
-     * the caller retries on a later frame. */
+    /* Everything a caller controls is a developer error and traps. A lost context returns an
+     * invalid handle the caller retries on a later frame; the backend create only fills a record. */
     NT_ASSERT(desc != NULL);
     /* Context loss zeroes the program backend, so without this every renderer
      * would trap on the program assert below. */
@@ -1087,15 +1086,7 @@ static nt_gfx_result_t make_pipeline(const nt_pipeline_desc_t *desc, nt_pipeline
 
     uint32_t slot = nt_pool_slot_index(id);
     uint32_t program_backend = program_slot_backend(nt_pool_slot_index(desc->program.id));
-    uint32_t backend = nt_gfx_backend_create_pipeline(desc, program_backend, slot);
-    if (backend == 0) {
-        NT_LOG_ERROR("backend pipeline creation failed");
-        nt_pool_free(&s_gfx.pipeline_pool, id);
-        return NT_GFX_RESULT_BACKEND_FAILURE;
-    }
-    /* Backend records are addressed directly by pool slot. */
-    NT_ASSERT(backend == slot && "create_pipeline: backend must mirror the pool slot");
-
+    nt_gfx_backend_create_pipeline(desc, program_backend, slot);
     s_gfx.pipeline_keys[slot] = key;
 
     out->id = id;
