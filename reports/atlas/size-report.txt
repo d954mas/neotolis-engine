@@ -1,5 +1,5 @@
 # Size Report: atlas (wasm-analysis-paired)
-# Commit: fd448a7
+# Commit: 4bc0dae
 
 ## WASM Section Sizes
 
@@ -13,18 +13,18 @@ Memory                 7 B
 Global                 8 B
 Export                89 B
 Elem                  72 B
-Code               86214 B
-Data                9548 B
+Code               86005 B
+Data                9500 B
 Custom              4815 B
 ---------------- ----------
-TOTAL             101693 B
+TOTAL             101436 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-27697 B   frame
- 9467 B   main
+27638 B   frame
+ 9317 B   main
  4983 B   nt_gfx_activate_mesh
  3047 B   nt_gfx_make_texture
  3002 B   fmt_fp
@@ -55,7 +55,7 @@ TOTAL             101693 B
   436 B   vsnprintf
 
 Total functions: 132
-Total code size: 86007 B
+Total code size: 85798 B
 
 ## Built Engine Archives
 
@@ -92,7 +92,7 @@ libnt_material.a            4484 B
 libnt_material_comp.a       2104 B
 libnt_mem_scratch.a         2016 B
 libnt_mesh_comp.a           2028 B
-libnt_mesh_renderer.a       5586 B
+libnt_mesh_renderer.a       7654 B
 libnt_meshwire.a            3326 B
 libnt_meshwire_encoder.a    3540 B
 libnt_meshwire_stub.a        722 B
@@ -107,7 +107,7 @@ libnt_skeletal.a            7464 B
 libnt_skeletal_assets.a     7796 B
 libnt_skeletal_gpu.a        2622 B
 libnt_skin_comp.a           2044 B
-libnt_skinned_mesh_renderer.a    6016 B
+libnt_skinned_mesh_renderer.a    9548 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a         8926 B
 libnt_sprite_renderer.a    18616 B
@@ -122,9 +122,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2965912 B
+TOTAL (archives)         2971512 B
 
 ## Data Segments Summary
 
 Segments: 22
-Total data size: 9395 B
+Total data size: 9347 B

@@ -1,5 +1,5 @@
 # Size Report: sponza (wasm-analysis-paired)
-# Commit: fd448a7
+# Commit: 4bc0dae
 
 ## WASM Section Sizes
 
@@ -13,21 +13,21 @@ Memory                 7 B
 Global                 8 B
 Export                89 B
 Elem                  78 B
-Code              202418 B
-Data              211780 B
-Custom             10656 B
+Code              202220 B
+Data              211739 B
+Custom             10670 B
 ---------------- ----------
-TOTAL             426075 B
+TOTAL             425850 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-36544 B   frame
+36489 B   frame
 31497 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
 27330 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 17617 B   nt_gfx_activate_texture
- 7132 B   main
+ 6989 B   main
  5758 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
  4985 B   nt_gfx_activate_mesh
  4533 B   basist::transcode_uastc_to_etc1(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
@@ -55,7 +55,7 @@ TOTAL             426075 B
   738 B   emmalloc_aligned_realloc
 
 Total functions: 166
-Total code size: 202147 B
+Total code size: 201949 B
 
 ## Built Engine Archives
 
@@ -92,7 +92,7 @@ libnt_material.a            4484 B
 libnt_material_comp.a       2104 B
 libnt_mem_scratch.a         2016 B
 libnt_mesh_comp.a           2028 B
-libnt_mesh_renderer.a       5586 B
+libnt_mesh_renderer.a       7654 B
 libnt_meshwire.a            3326 B
 libnt_meshwire_encoder.a    3540 B
 libnt_meshwire_stub.a        722 B
@@ -107,7 +107,7 @@ libnt_skeletal.a            7464 B
 libnt_skeletal_assets.a     7796 B
 libnt_skeletal_gpu.a        2622 B
 libnt_skin_comp.a           2044 B
-libnt_skinned_mesh_renderer.a    6016 B
+libnt_skinned_mesh_renderer.a    9548 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a         8926 B
 libnt_sprite_renderer.a    18616 B
@@ -122,9 +122,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2965912 B
+TOTAL (archives)         2971512 B
 
 ## Data Segments Summary
 
-Segments: 156
-Total data size: 210608 B
+Segments: 157
+Total data size: 210561 B
