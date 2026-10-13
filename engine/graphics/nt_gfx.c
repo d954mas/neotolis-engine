@@ -1103,8 +1103,8 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static nt_gfx_result_t make_vertex_input(const nt_vertex_input_desc_t *desc, nt_vertex_input_t *out) {
-    /* Same contract as make_pipeline: caller errors trap, only a lost context
-     * or a failed backend allocation returns an invalid handle. */
+    /* Caller errors trap; only a lost context or a failed backend allocation
+     * returns an invalid handle. */
     NT_ASSERT(desc != NULL);
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;

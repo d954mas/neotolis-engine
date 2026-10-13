@@ -349,7 +349,7 @@ creates one. The label is not identity, and gfx stores none. A
 latched context loss returns invalid before the lookup. A hit needs no other
 check: destroying a program and a context loss clear its pipelines' keys, so a
 live entry has a live program, and its state passed validation at creation.
-The program and blend asserts run on a miss. A hit records one `CACHE`
+The live-program and blend asserts run only on a miss. A hit records one `CACHE`
 operation with no resource definition. gfx owns every
 pipeline: it dies with its program (`nt_gfx_destroy_program`), a context loss
 or `nt_gfx_shutdown`, and there is no pipeline destroy. Budget

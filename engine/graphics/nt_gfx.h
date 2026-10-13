@@ -918,9 +918,9 @@ bool nt_gfx_texture_ready(nt_texture_t tex);
 bool nt_gfx_shader_ready(nt_shader_t shd);
 /* Reports a live pool slot, independent of GPU readiness. */
 bool nt_gfx_program_valid(nt_program_t prog);
-/* Reports a live pipeline slot; false after pipeline or program destruction,
- * or a context loss (loss frees every pipeline slot -- pipelines are baked
- * objects, like vertex inputs). Renderer caches check this on lookup. */
+/* Reports a live pipeline slot; false after its program's destruction or a
+ * context loss (loss frees every pipeline slot -- pipelines are baked objects,
+ * like vertex inputs). Renderers check a held selection with it. */
 bool nt_gfx_pipeline_valid(nt_pipeline_t pip);
 /* Reports a live vertex-input slot; false after direct destruction, the
  * destroy_buffer cascade, or a context loss (loss frees every vertex-input
