@@ -326,7 +326,7 @@ retry state. `nt_mesh_renderer` (either target),
 `nt_sprite_renderer`, and `nt_text_renderer` borrow game material programs:
 the game relinks them. The
 mesh, sprite and text renderers have no restore entry point: they
-own no buffer, their pipeline caches and the sprite and text vertex-input
+own no buffer, they ask gfx for their pipelines again (the loss freed them), the sprite and text vertex-input
 caches validate on lookup and recreate what the loss freed, and meshes make
 their vertex inputs again on first use
 ([render architecture, Vertex inputs](../render/architecture.md#vertex-inputs)).

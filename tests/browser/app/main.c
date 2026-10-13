@@ -253,7 +253,6 @@ static void mesh_probe_destroy(void) {
         nt_gfx_deactivate_mesh(s_mesh_handle);
         s_mesh_handle = 0;
     }
-    nt_gfx_destroy_pipeline(s_mesh_pipeline);
     s_mesh_pipeline = (nt_pipeline_t){0};
     nt_gfx_destroy_program(s_mesh_program);
     s_mesh_program = NT_PROGRAM_INVALID;
@@ -407,7 +406,6 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     uint8_t pixel[4] = {0};
     bool read = nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_destroy_vertex_input(input);
-    nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_texture(texture);
     return read ? (int)((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U)) : -3;
 }
@@ -522,7 +520,6 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     uint8_t pixel[4] = {0};
     bool read = nt_gfx_read_pixels(target, 0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_destroy_vertex_input(input);
-    nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_texture(color);
     return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U) | ((uint32_t)pixel[3] << 24U)) : 0xFFFFFFFFU;
 }
@@ -660,8 +657,6 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
         result |= 32U;
     }
     nt_gfx_destroy_vertex_input(input);
-    nt_gfx_destroy_pipeline(pipeline);
-    nt_gfx_destroy_pipeline(overwrite);
     nt_gfx_destroy_render_target(target);
     nt_gfx_destroy_render_target(prepass);
     nt_gfx_destroy_texture(color);
@@ -739,7 +734,6 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     uint8_t pixel[4] = {0};
     bool read = nt_gfx_read_pixels(target, 0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_destroy_vertex_input(vi);
-    nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_texture(color);
     nt_gfx_destroy_texture(texture);
     nt_gfx_destroy_texture(spare);

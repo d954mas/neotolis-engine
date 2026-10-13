@@ -194,7 +194,6 @@ static void test_a_latched_loss_carries_a_whole_creation_chain(void) {
     TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR ? 1U : 0U, s_error_logs);
     nt_gfx_destroy_vertex_input(vi);
     nt_gfx_destroy_buffer(vbo);
-    nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_program(program);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);

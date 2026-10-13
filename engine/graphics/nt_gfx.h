@@ -404,61 +404,8 @@ typedef struct {
     bool polygon_offset;         /* enable GL_POLYGON_OFFSET_FILL */
     float polygon_offset_factor; /* glPolygonOffset factor (typically 1.0) */
     float polygon_offset_units;  /* glPolygonOffset units (typically 1.0) */
-    const char *label;           /* keep last: nt_gfx_pipeline_key packs everything before it */
+    const char *label;           /* debug name, not identity; borrowed for the call */
 } nt_pipeline_desc_t;
-
-/* ---- Pipeline identity ----
- * Exact identity of a desc, label excluded: equal keys <=> identical baked state.
- * `bits` packs every enum/bool lane; the float payloads ride along as bit patterns. */
-typedef struct {
-    uint64_t bits;
-    uint32_t float_bits[6]; /* blend.constant_color, polygon_offset_factor, polygon_offset_units */
-} nt_gfx_pipeline_key_t;
-
-/* Lane widths. The packer asserts each input fits: an out-of-range value must not
- * truncate onto a valid neighbour and skip make_pipeline's validation on a cache hit. */
-_Static_assert(NT_BLEND_SRC_ALPHA_SATURATE < 16, "blend factor lane is 4 bits");
-_Static_assert(NT_BLEND_OP_MAX < 8, "blend op lane is 3 bits");
-_Static_assert(NT_DEPTH_NEVER < 8, "depth func lane is 3 bits");
-/* Partial tripwire for the packer: catches a desc field that moves a later offset or the
- * size. A field that fits an existing padding hole moves nothing -- review by hand. */
-_Static_assert(offsetof(nt_pipeline_desc_t, depth_func) == 8 && offsetof(nt_pipeline_desc_t, cull_mode) == 12 && offsetof(nt_pipeline_desc_t, blend) == 16 &&
-                   offsetof(nt_pipeline_desc_t, polygon_offset) == 40 && offsetof(nt_pipeline_desc_t, polygon_offset_factor) == 44 && offsetof(nt_pipeline_desc_t, polygon_offset_units) == 48 &&
-                   offsetof(nt_pipeline_desc_t, label) == (sizeof(void *) == 8 ? 56 : 52) && sizeof(nt_pipeline_desc_t) == (sizeof(void *) == 8 ? 64 : 56),
-               "nt_pipeline_desc_t changed -- update nt_gfx_pipeline_key");
-
-/* desc / a / b are required and borrowed for the call; NULL asserts. Header-inline on
- * purpose: every gfx composition (real, stub, test fake) gets it with no link-order dependency. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
-static inline nt_gfx_pipeline_key_t nt_gfx_pipeline_key(const nt_pipeline_desc_t *desc) {
-    NT_ASSERT(desc != NULL);
-    NT_ASSERT(desc->cull_mode <= 2 && "cull_mode out of range");
-    NT_ASSERT((uint32_t)desc->depth_func <= NT_DEPTH_NEVER && "depth_func out of range");
-    NT_ASSERT(desc->blend.src_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && desc->blend.dst_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && desc->blend.src_alpha <= NT_BLEND_SRC_ALPHA_SATURATE &&
-              desc->blend.dst_alpha <= NT_BLEND_SRC_ALPHA_SATURATE && "blend factor out of range");
-    NT_ASSERT(desc->blend.op_rgb <= NT_BLEND_OP_MAX && desc->blend.op_alpha <= NT_BLEND_OP_MAX && "blend op out of range");
-    /* Identity only: a disabled blend is opaque whatever its (valid) factors say. */
-    const nt_blend_state_t blend = desc->blend.enabled ? desc->blend : nt_blend_opaque();
-    nt_gfx_pipeline_key_t key;
-    key.bits = (uint64_t)desc->program.id | (uint64_t)(desc->depth_test ? 1U : 0U) << 32 | (uint64_t)(desc->depth_write ? 1U : 0U) << 33 | (uint64_t)(desc->polygon_offset ? 1U : 0U) << 34 |
-               (uint64_t)(blend.enabled ? 1U : 0U) << 35 | (uint64_t)desc->depth_func << 36 | (uint64_t)desc->cull_mode << 39 | (uint64_t)blend.src_rgb << 41 | (uint64_t)blend.dst_rgb << 45 |
-               (uint64_t)blend.src_alpha << 49 | (uint64_t)blend.dst_alpha << 53 | (uint64_t)blend.op_rgb << 57 | (uint64_t)blend.op_alpha << 60;
-    /* Bit patterns: exact, so -0.0 vs 0.0 can only over-split, never alias. Disabled offset packs as zero. */
-    const float float_bits[6] = {blend.constant_color[0],
-                                 blend.constant_color[1],
-                                 blend.constant_color[2],
-                                 blend.constant_color[3],
-                                 desc->polygon_offset ? desc->polygon_offset_factor : 0.0F,
-                                 desc->polygon_offset ? desc->polygon_offset_units : 0.0F};
-    memcpy(key.float_bits, float_bits, sizeof(key.float_bits));
-    return key;
-}
-
-/* `bits` first: a miss costs one word, the floats are read only on a match. */
-static inline bool nt_gfx_pipeline_key_equal(const nt_gfx_pipeline_key_t *a, const nt_gfx_pipeline_key_t *b) {
-    NT_ASSERT(a != NULL && b != NULL);
-    return a->bits == b->bits && memcmp(a->float_bits, b->float_bits, sizeof(a->float_bits)) == 0;
-}
 
 typedef struct {
     nt_vertex_layout_t layout; /* per-vertex attrs, divisor 0; attr_count 0 = attribute-less (gl_VertexID) */
@@ -907,8 +854,8 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
  * whose GPU object a loss discarded -- recreate the stages and relink. Only a stale stage handle asserts. */
 nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs);
 /* Returns the live pipeline of an equal desc (label ignored: the first creator's is kept) or
- * creates one. Accepts a linking program; binding the pipeline asserts until the program is
- * ready. Creation preserves the currently bound pipeline. */
+ * creates one; gfx owns it until its program is destroyed. Accepts a linking program; binding the
+ * pipeline asserts until the program is ready. Creation preserves the currently bound pipeline. */
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
 /* Caller owns the result; destroy it with nt_gfx_destroy_vertex_input. The VI
  * borrows its buffers; creation borrows desc/label and preserves the bound VI.
@@ -937,13 +884,10 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
 
 /* Already linked programs remain usable after their stages are destroyed. */
 void nt_gfx_destroy_shader(nt_shader_t shd);
-/* Destroys the program and its pipelines; materials retain the now-unready handle.
- * Renderer caches drop dead entries on insertion/reset. INVALID is a no-op; stale nonzero handles assert.
- * Clear the caller's handle to NT_PROGRAM_INVALID after destruction. */
+/* Destroys the program and its pipelines -- the only way a pipeline dies besides a context loss
+ * and nt_gfx_shutdown; materials retain the now-unready handle. INVALID is a no-op; stale nonzero
+ * handles assert. Clear the caller's handle to NT_PROGRAM_INVALID after destruction. */
 void nt_gfx_destroy_program(nt_program_t prog);
-/* Invalid and stale handles are no-ops: program destruction also destroys
- * pipelines, and a context loss frees every pipeline slot. */
-void nt_gfx_destroy_pipeline(nt_pipeline_t pip);
 /* Invalid and stale handles are no-ops because buffer destruction also
  * destroys dependent vertex inputs (see nt_gfx_destroy_buffer). */
 void nt_gfx_destroy_vertex_input(nt_vertex_input_t vi);

@@ -80,11 +80,10 @@ two slots on one unit would fight over it at every draw.
 > or after program destruction. The material survives recovery and retains its old program
 > handle until reassignment.
 >
-> Pipeline cache keys include the program handle. Destroying the replaced
+> Pipeline identity includes the program handle. Destroying the replaced
 > program frees its pipelines; it happens before the first pass or after
 > `nt_gfx_end_frame` (the frame rule in
-> [render architecture](architecture.md#draw-phase-command-stream)). Dead cache records are removed during insertion
-> after a miss or on cache reset. For staged-work behavior, see
+> [render architecture](architecture.md#draw-phase-command-stream)). For staged-work behavior, see
 > [Program handles](../core/api-contracts.md#program-handles).
 
 ```c
@@ -195,7 +194,7 @@ and in `[0, 1]`. A zero-filled state disables blending. The complete WebGL 2
 core factor and operation sets are public. `nt_material_create` asserts the
 render-state ranges up front (blend factors and ops, enabled or not,
 `cull_mode`, every `attr_map` location below `NT_GFX_MAX_VERTEX_ATTRS`): the
-pipeline cache keys pack the render state, and the sprite renderer's
+pipeline identity packs the render state, and the sprite renderer's
 vertex-input cache key packs the `attr_map` locations, into fixed bit lanes, so
 the trap belongs at the API boundary, not on the first draw. Invalid WebGL combinations assert
 during pipeline creation.

@@ -175,7 +175,6 @@ static void render_sampled(nt_texture_t tex, nt_sampler_t sampler, uint16_t rt_w
 
     nt_gfx_destroy_texture(color);
     nt_gfx_destroy_vertex_input(vi);
-    nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_program(prog);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);

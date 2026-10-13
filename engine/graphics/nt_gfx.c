@@ -13,6 +13,55 @@
 #include "nt_shader_format.h"
 #include "nt_texture_format.h"
 
+// #region pipeline identity
+/* ---- Pipeline identity ----
+ * Exact identity of a desc, label excluded: equal keys <=> identical baked state.
+ * `bits` packs every enum/bool lane; the float payloads ride along as bit patterns. */
+typedef struct {
+    uint64_t bits;
+    uint32_t float_bits[6]; /* blend.constant_color, polygon_offset_factor, polygon_offset_units */
+} nt_gfx_pipeline_key_t;
+
+/* Lane widths. The packer asserts each input fits: an out-of-range value must not
+ * truncate onto a valid neighbour and turn into a hit on another desc's pipeline. */
+_Static_assert(NT_BLEND_SRC_ALPHA_SATURATE < 16, "blend factor lane is 4 bits");
+_Static_assert(NT_BLEND_OP_MAX < 8, "blend op lane is 3 bits");
+_Static_assert(NT_DEPTH_NEVER < 8, "depth func lane is 3 bits");
+/* Partial tripwire for the packer: catches a desc field that moves a later offset or the
+ * size. A field that fits an existing padding hole moves nothing -- review by hand. */
+_Static_assert(offsetof(nt_pipeline_desc_t, depth_func) == 8 && offsetof(nt_pipeline_desc_t, cull_mode) == 12 && offsetof(nt_pipeline_desc_t, blend) == 16 &&
+                   offsetof(nt_pipeline_desc_t, polygon_offset) == 40 && offsetof(nt_pipeline_desc_t, polygon_offset_factor) == 44 && offsetof(nt_pipeline_desc_t, polygon_offset_units) == 48 &&
+                   offsetof(nt_pipeline_desc_t, label) == (sizeof(void *) == 8 ? 56 : 52) && sizeof(nt_pipeline_desc_t) == (sizeof(void *) == 8 ? 64 : 56),
+               "nt_pipeline_desc_t changed -- update pipeline_key");
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
+static nt_gfx_pipeline_key_t pipeline_key(const nt_pipeline_desc_t *desc) {
+    NT_ASSERT(desc->cull_mode <= 2 && "cull_mode out of range");
+    NT_ASSERT((uint32_t)desc->depth_func <= NT_DEPTH_NEVER && "depth_func out of range");
+    NT_ASSERT(desc->blend.src_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && desc->blend.dst_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && desc->blend.src_alpha <= NT_BLEND_SRC_ALPHA_SATURATE &&
+              desc->blend.dst_alpha <= NT_BLEND_SRC_ALPHA_SATURATE && "blend factor out of range");
+    NT_ASSERT(desc->blend.op_rgb <= NT_BLEND_OP_MAX && desc->blend.op_alpha <= NT_BLEND_OP_MAX && "blend op out of range");
+    /* Identity only: a disabled blend is opaque whatever its (valid) factors say. */
+    const nt_blend_state_t blend = desc->blend.enabled ? desc->blend : nt_blend_opaque();
+    nt_gfx_pipeline_key_t key;
+    key.bits = (uint64_t)desc->program.id | (uint64_t)(desc->depth_test ? 1U : 0U) << 32 | (uint64_t)(desc->depth_write ? 1U : 0U) << 33 | (uint64_t)(desc->polygon_offset ? 1U : 0U) << 34 |
+               (uint64_t)(blend.enabled ? 1U : 0U) << 35 | (uint64_t)desc->depth_func << 36 | (uint64_t)desc->cull_mode << 39 | (uint64_t)blend.src_rgb << 41 | (uint64_t)blend.dst_rgb << 45 |
+               (uint64_t)blend.src_alpha << 49 | (uint64_t)blend.dst_alpha << 53 | (uint64_t)blend.op_rgb << 57 | (uint64_t)blend.op_alpha << 60;
+    /* Bit patterns: exact, so -0.0 vs 0.0 can only over-split, never alias. Disabled offset packs as zero. */
+    const float float_bits[6] = {blend.constant_color[0],
+                                 blend.constant_color[1],
+                                 blend.constant_color[2],
+                                 blend.constant_color[3],
+                                 desc->polygon_offset ? desc->polygon_offset_factor : 0.0F,
+                                 desc->polygon_offset ? desc->polygon_offset_units : 0.0F};
+    memcpy(key.float_bits, float_bits, sizeof(key.float_bits));
+    return key;
+}
+
+/* `bits` first: a miss costs one word, the floats are read only on a match. */
+static bool pipeline_key_equal(const nt_gfx_pipeline_key_t *a, const nt_gfx_pipeline_key_t *b) { return a->bits == b->bits && memcmp(a->float_bits, b->float_bits, sizeof(a->float_bits)) == 0; }
+// #endregion
+
 /* Activation staging shared by mesh decode (VBO then IBO) and the transcoded
  * Basis chain: grows on demand, freed after NT_STAGE_IDLE_FRAMES idle -- no
  * per-activation heap traffic while a pack streams in. */
@@ -586,9 +635,8 @@ static void wipe_backend_handles(void) {
         s_gfx.program_pending[i] = 0;
     }
     /* Pipelines, vertex inputs and render targets are baked objects with no re-fill path:
-     * loss frees their slots outright, so handles held across a loss go
-     * stale and the weak renderer caches self-heal on their validity
-     * checks. Primary resources stay as husks -- owners destroy them. */
+     * loss frees their slots outright, so handles held across a loss go stale and owners
+     * make them again. Primary resources stay as husks -- owners destroy them. */
     for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
         if (nt_pool_slot_alive(&s_gfx.pipeline_pool, i)) {
             nt_pool_free(&s_gfx.pipeline_pool, s_gfx.pipeline_pool.slots[i].id);
@@ -1023,9 +1071,9 @@ static nt_gfx_result_t make_pipeline(const nt_pipeline_desc_t *desc, nt_pipeline
 
     /* Equal descs share one pipeline. A free slot's key is all zero and never matches:
      * the key carries the nonzero program handle asserted above. */
-    const nt_gfx_pipeline_key_t key = nt_gfx_pipeline_key(desc);
+    const nt_gfx_pipeline_key_t key = pipeline_key(desc);
     for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
-        if (nt_gfx_pipeline_key_equal(&s_gfx.pipeline_keys[i], &key)) {
+        if (pipeline_key_equal(&s_gfx.pipeline_keys[i], &key)) {
             out->id = s_gfx.pipeline_pool.slots[i].id;
             return NT_GFX_RESULT_CACHE;
         }
@@ -1463,6 +1511,14 @@ void nt_gfx_destroy_shader(nt_shader_t shd) {
     NT_GFX_END(destroy_shader(shd));
 }
 
+/* Live slot only: the program cascade is the one caller. */
+static nt_gfx_result_t destroy_pipeline(uint32_t slot) {
+    nt_gfx_backend_destroy_pipeline(slot);
+    s_gfx.pipeline_keys[slot] = (nt_gfx_pipeline_key_t){0};
+    nt_pool_free(&s_gfx.pipeline_pool, s_gfx.pipeline_pool.slots[slot].id);
+    return NT_GFX_RESULT_ACCEPTED;
+}
+
 static nt_gfx_result_t destroy_program(nt_program_t prog) {
     /* NT_PROGRAM_INVALID is a first-class value -- games clear their handles on
      * context loss and destroy them again at shutdown. Not an error. */
@@ -1472,12 +1528,14 @@ static nt_gfx_result_t destroy_program(nt_program_t prog) {
     /* A stale non-zero handle means the owner lost track of which programs it
      * still holds -- the one mistake this ownership model cannot absorb. */
     NT_ASSERT(nt_pool_valid(&s_gfx.program_pool, prog.id) && "destroy_program: stale handle -- clear the handle to NT_PROGRAM_INVALID when you destroy it");
-    /* Dependent pipelines cannot draw again; reclaim their slots and VAOs now. */
+    /* Dependent pipelines cannot draw again; reclaim their slots now. Each records its own
+     * DESTROY; the program's frame-rule check already covers them. */
     for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
         if (pipeline_program(i) != prog.id) {
             continue;
         }
-        nt_gfx_destroy_pipeline((nt_pipeline_t){s_gfx.pipeline_pool.slots[i].id});
+        NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_PIPELINE, s_gfx.pipeline_pool.slots[i].id);
+        NT_GFX_END(destroy_pipeline(i));
     }
     uint32_t slot = nt_pool_slot_index(prog.id);
     nt_gfx_backend_destroy_program(program_slot_backend(slot));
@@ -1491,24 +1549,6 @@ void nt_gfx_destroy_program(nt_program_t prog) {
     NT_GFX_ASSERT_FRAME_RULE(&s_gfx.program_pool, prog.id);
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_PROGRAM, prog.id);
     NT_GFX_END(destroy_program(prog));
-}
-
-static nt_gfx_result_t destroy_pipeline(nt_pipeline_t pip) {
-    /* Program destruction may already have reclaimed this pipeline. */
-    if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
-        return NT_GFX_RESULT_INVALID_HANDLE;
-    }
-    uint32_t slot = nt_pool_slot_index(pip.id);
-    nt_gfx_backend_destroy_pipeline(slot);
-    s_gfx.pipeline_keys[slot] = (nt_gfx_pipeline_key_t){0};
-    nt_pool_free(&s_gfx.pipeline_pool, pip.id);
-    return NT_GFX_RESULT_ACCEPTED;
-}
-
-void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
-    NT_GFX_ASSERT_FRAME_RULE(&s_gfx.pipeline_pool, pip.id);
-    NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_PIPELINE, pip.id);
-    NT_GFX_END(destroy_pipeline(pip));
 }
 
 static nt_gfx_result_t destroy_vertex_input(nt_vertex_input_t vi) {

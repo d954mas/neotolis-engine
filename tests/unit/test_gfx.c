@@ -222,7 +222,7 @@ void test_gfx_defaults_applied(void) {
 
 /* ---- Pipeline: create with valid shaders, destroy ---- */
 
-void test_gfx_make_destroy_pipeline(void) {
+void test_gfx_make_pipeline(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
     nt_program_t prog = nt_gfx_make_program(vs, fs);
@@ -233,7 +233,6 @@ void test_gfx_make_destroy_pipeline(void) {
         .program = prog,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
-    nt_gfx_destroy_pipeline(pip);
 }
 
 /* ---- Pipeline: survives shader destroy ---- */
@@ -256,8 +255,6 @@ void test_gfx_pipeline_survives_shader_destroy(void) {
     nt_gfx_bind_pipeline(pip);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
-
-    nt_gfx_destroy_pipeline(pip);
 }
 
 /* ---- State machine: valid frame cycle ---- */
@@ -607,8 +604,6 @@ void test_gfx_two_pipelines_share_one_program(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, b.id);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_program_create_count());
 
-    nt_gfx_destroy_pipeline(a);
-    nt_gfx_destroy_pipeline(b);
     nt_gfx_destroy_program(prog);
 }
 
@@ -1129,7 +1124,10 @@ void test_gfx_destroy_program_destroys_its_pipelines(void) {
     nt_test_gfx_link_wait(keep);
     nt_pipeline_t untouched = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = keep});
 
+    /* Each cascaded pipeline is its own accepted DESTROY, next to the program's. */
+    const uint32_t destroys = g_nt_gfx.counters.accepted[NT_GFX_OP_DESTROY];
     nt_gfx_destroy_program(prog);
+    TEST_ASSERT_EQUAL_UINT32(destroys + 3U, g_nt_gfx.counters.accepted[NT_GFX_OP_DESTROY]);
 
     /* The slots come back: a fresh pipeline reuses one of them. */
     nt_pipeline_t reborn = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = keep, .depth_test = true});
@@ -1170,7 +1168,7 @@ static void expect_pipeline_blend_accept(nt_blend_state_t blend) {
         .blend = blend,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
-    nt_gfx_destroy_pipeline(pip);
+    nt_gfx_destroy_program(prog);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
 }
@@ -1232,7 +1230,6 @@ void test_gfx_pipeline_backend_failure_returns_invalid(void) {
     /* The pool slot went back, so the retry succeeds. */
     nt_pipeline_t retry = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, retry.id);
-    nt_gfx_destroy_pipeline(retry);
     nt_gfx_fake_reset();
 }
 
@@ -1292,7 +1289,7 @@ void test_gfx_make_pipeline_on_a_restored_husk_asserts_even_after_a_hit(void) {
     TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "context loss discarded"));
 }
 
-/* ---- Pipeline key: exact identity ---- */
+/* ---- Pipeline identity ---- */
 
 static nt_pipeline_desc_t key_base_desc(uint32_t program_id) {
     nt_pipeline_desc_t d;
@@ -1349,23 +1346,19 @@ static uint32_t key_variant_descs(uint32_t program_id, nt_pipeline_desc_t *out) 
 
 #define KEY_VARIANT_COUNT 26
 
-static uint32_t key_variants(uint32_t program_id, nt_gfx_pipeline_key_t *out) {
-    nt_pipeline_desc_t descs[KEY_VARIANT_COUNT];
-    const uint32_t n = key_variant_descs(program_id, descs);
-    for (uint32_t i = 0; i < n; i++) {
-        out[i] = nt_gfx_pipeline_key(&descs[i]);
-    }
-    return n;
+/* A fresh gfx whose pipeline pool fits one test's whole population. */
+static void reinit_gfx_with_pipelines(uint16_t max_pipelines) {
+    nt_gfx_shutdown();
+    nt_gfx_fake_reset();
+    nt_gfx_init(
+        &NT_GFX_TEST_DESC(.max_shaders = 4, .max_programs = 4, .max_pipelines = max_pipelines, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 4));
+    nt_gfx_begin_frame();
 }
 
 /* Programs come out of the pool in creation order: a one-lane step on the neighbouring program
  * must still make its own pipeline, and making every desc again must hit every one of them. */
 void test_gfx_make_pipeline_lane_variants_on_neighbouring_programs_stay_distinct(void) {
-    nt_gfx_shutdown();
-    nt_gfx_fake_reset();
-    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 4, .max_programs = 4, .max_pipelines = 2 * KEY_VARIANT_COUNT, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8,
-                                  .max_render_targets = 4));
-    nt_gfx_begin_frame();
+    reinit_gfx_with_pipelines(2 * KEY_VARIANT_COUNT);
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
     const nt_program_t programs[2] = {nt_gfx_make_program(vs, fs), nt_gfx_make_program(vs, fs)};
@@ -1389,98 +1382,76 @@ void test_gfx_make_pipeline_lane_variants_on_neighbouring_programs_stay_distinct
     TEST_ASSERT_EQUAL_UINT32(n, nt_gfx_fake_pipeline_create_count());
 }
 
-void test_gfx_pipeline_key_neighbouring_programs_never_alias(void) {
-    nt_gfx_pipeline_key_t keys[4 * KEY_VARIANT_COUNT];
-    uint32_t n = 0;
-    for (uint32_t p = 65550; p < 65554; p++) {
-        const uint32_t per_program = key_variants(p, &keys[n]);
-        TEST_ASSERT_EQUAL_UINT32(KEY_VARIANT_COUNT, per_program); /* keys[] is sized for exactly this many */
-        n += per_program;
-    }
-    for (uint32_t i = 0; i < n; i++) {
-        for (uint32_t j = 0; j < i; j++) {
-            TEST_ASSERT_FALSE_MESSAGE(nt_gfx_pipeline_key_equal(&keys[i], &keys[j]), "two distinct descs share a key");
-        }
-    }
-}
-
-void test_gfx_pipeline_key_preserves_depth_lane_values(void) {
+/* Depth lanes are exact even when the depth test is off. */
+void test_gfx_make_pipeline_keeps_every_depth_lane_value(void) {
+    reinit_gfx_with_pipelines(16);
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
     static const nt_depth_func_t functions[] = {NT_DEPTH_LESS, NT_DEPTH_LEQUAL, NT_DEPTH_ALWAYS, NT_DEPTH_GEQUAL, NT_DEPTH_GREATER, NT_DEPTH_EQUAL, NT_DEPTH_NOTEQUAL, NT_DEPTH_NEVER};
-    for (uint32_t enabled = 0; enabled < 2; enabled++) {
-        for (uint32_t depth = 0; depth < 8; depth++) {
-            const nt_pipeline_desc_t desc = {
-                .program.id = UINT32_C(0xABCD1234),
-                .depth_test = enabled != 0,
-                .depth_write = true,
-                .depth_func = functions[depth],
-                .cull_mode = 2,
-            };
-            const nt_gfx_pipeline_key_t key = nt_gfx_pipeline_key(&desc);
-            const uint64_t expected = UINT64_C(0xABCD1234) | (uint64_t)enabled << 32 | UINT64_C(1) << 33 | (uint64_t)depth << 36 | UINT64_C(2) << 39;
-            TEST_ASSERT_EQUAL_UINT64(expected, key.bits);
-            const uint32_t zero_payload[6] = {0};
-            TEST_ASSERT_EQUAL_UINT32_ARRAY(zero_payload, key.float_bits, 6);
+    nt_pipeline_t pips[16];
+    for (uint32_t i = 0; i < 16; i++) {
+        pips[i] = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = i >= 8, .depth_write = true, .depth_func = functions[i % 8], .cull_mode = 2});
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, pips[i].id);
+        for (uint32_t j = 0; j < i; j++) {
+            TEST_ASSERT_NOT_EQUAL_UINT32(pips[j].id, pips[i].id);
         }
     }
 }
 
-/* A disabled blend is opaque whatever its factors or constant say. */
-void test_gfx_pipeline_key_canonicalizes_disabled_blend_and_offset(void) {
-    nt_pipeline_desc_t opaque = key_base_desc(7);
+/* A disabled blend is opaque whatever its factors or constant say; a disabled offset ignores its values. */
+void test_gfx_make_pipeline_canonicalizes_disabled_blend_and_offset(void) {
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_pipeline_desc_t opaque = key_base_desc(prog.id);
     opaque.blend = nt_blend_opaque();
-    nt_pipeline_desc_t disabled = key_base_desc(7);
+    nt_pipeline_desc_t disabled = key_base_desc(prog.id);
     disabled.blend.enabled = false;
     disabled.blend.constant_color[1] = 0.5F;
     disabled.blend.op_rgb = NT_BLEND_OP_MAX;
     disabled.blend.op_alpha = NT_BLEND_OP_MIN;
-    const nt_gfx_pipeline_key_t a = nt_gfx_pipeline_key(&opaque);
-    const nt_gfx_pipeline_key_t b = nt_gfx_pipeline_key(&disabled);
-    TEST_ASSERT_TRUE(nt_gfx_pipeline_key_equal(&a, &b));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_make_pipeline(&opaque).id, nt_gfx_make_pipeline(&disabled).id);
 
-    nt_pipeline_desc_t no_offset = key_base_desc(7);
+    nt_pipeline_desc_t no_offset = key_base_desc(prog.id);
     no_offset.polygon_offset_factor = 3.0F;
     no_offset.polygon_offset_units = 3.0F;
-    const nt_gfx_pipeline_key_t c = nt_gfx_pipeline_key(&no_offset);
-    const nt_gfx_pipeline_key_t base = nt_gfx_pipeline_key(&(nt_pipeline_desc_t){.program.id = 7, .depth_test = true, .depth_write = true, .blend = nt_blend_alpha(), .cull_mode = 1});
-    TEST_ASSERT_TRUE(nt_gfx_pipeline_key_equal(&c, &base));
+    const nt_pipeline_desc_t base = key_base_desc(prog.id);
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_make_pipeline(&base).id, nt_gfx_make_pipeline(&no_offset).id);
 }
 
-void test_gfx_pipeline_key_ignores_label_and_splits_on_float_payloads(void) {
-    nt_pipeline_desc_t a = key_base_desc(9);
-    nt_pipeline_desc_t b = key_base_desc(9);
-    b.label = "other";
-    const nt_gfx_pipeline_key_t ka = nt_gfx_pipeline_key(&a);
-    const nt_gfx_pipeline_key_t kb = nt_gfx_pipeline_key(&b);
-    TEST_ASSERT_TRUE(nt_gfx_pipeline_key_equal(&ka, &kb));
-
+void test_gfx_make_pipeline_splits_on_float_payloads(void) {
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    const nt_pipeline_desc_t a = key_base_desc(prog.id);
+    const nt_pipeline_t pa = nt_gfx_make_pipeline(&a);
+    nt_pipeline_desc_t b = key_base_desc(prog.id);
     b.blend.constant_color[3] = 0.25F;
-    const nt_gfx_pipeline_key_t kc = nt_gfx_pipeline_key(&b);
-    TEST_ASSERT_EQUAL_UINT64(ka.bits, kc.bits);
-    TEST_ASSERT_FALSE(nt_gfx_pipeline_key_equal(&ka, &kc));
+    TEST_ASSERT_NOT_EQUAL_UINT32(pa.id, nt_gfx_make_pipeline(&b).id);
 
     /* Bit patterns, not values: -0.0 is a different pipeline from +0.0. */
-    b = key_base_desc(9);
+    b = key_base_desc(prog.id);
     b.blend.constant_color[0] = -0.0F;
-    const nt_gfx_pipeline_key_t kd = nt_gfx_pipeline_key(&b);
-    TEST_ASSERT_FALSE(nt_gfx_pipeline_key_equal(&ka, &kd));
+    TEST_ASSERT_NOT_EQUAL_UINT32(pa.id, nt_gfx_make_pipeline(&b).id);
 }
 
 /* An out-of-range lane value must trap before it can truncate onto a valid neighbour
- * and hand a cache hit to a desc make_pipeline would have rejected. */
-void test_gfx_pipeline_key_asserts_out_of_range_lanes(void) {
-    nt_pipeline_desc_t d = key_base_desc(3);
+ * and turn into a hit on a desc make_pipeline would have rejected. */
+void test_gfx_make_pipeline_asserts_out_of_range_lanes(void) {
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_pipeline_desc_t d = key_base_desc(prog.id);
     d.cull_mode = 3;
-    EXPECT_ASSERT((void)nt_gfx_pipeline_key(&d));
-    d = key_base_desc(3);
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&d));
+    d = key_base_desc(prog.id);
     const int bad_depth_func = NT_DEPTH_NEVER + 1; /* memcpy: an enum cast of a literal trips the analyzer */
     memcpy(&d.depth_func, &bad_depth_func, sizeof(d.depth_func));
-    EXPECT_ASSERT((void)nt_gfx_pipeline_key(&d));
-    d = key_base_desc(3);
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&d));
+    d = key_base_desc(prog.id);
     d.blend.src_rgb = 16;
-    EXPECT_ASSERT((void)nt_gfx_pipeline_key(&d));
-    d = key_base_desc(3);
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&d));
+    d = key_base_desc(prog.id);
     d.blend.op_alpha = 8;
-    EXPECT_ASSERT((void)nt_gfx_pipeline_key(&d));
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&d));
+    /* Validity has no exceptions: a disabled blend's factors are still range-checked. */
+    d = key_base_desc(prog.id);
+    d.blend.enabled = false;
+    d.blend.dst_alpha = 16;
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&d));
 }
 
 void test_gfx_pipeline_rejects_invalid_blend_factor(void) {
@@ -2216,7 +2187,6 @@ void test_frame_rule_rejects_every_live_destroy_while_drawn(void) {
 
     EXPECT_FRAME_RULE(nt_gfx_destroy_shader(o.vs));
     EXPECT_FRAME_RULE(nt_gfx_destroy_program(o.prog));
-    EXPECT_FRAME_RULE(nt_gfx_destroy_pipeline(o.pip));
     EXPECT_FRAME_RULE(nt_gfx_destroy_vertex_input(o.vi));
     EXPECT_FRAME_RULE(nt_gfx_destroy_buffer(o.vbo));
     EXPECT_FRAME_RULE(nt_gfx_destroy_texture(o.tex));
@@ -2244,12 +2214,10 @@ void test_frame_rule_rejects_every_live_destroy_while_drawn(void) {
 void test_frame_rule_ignores_stale_destroys_and_allows_the_frame_before_its_first_pass(void) {
     frame_rule_objects_t o = make_frame_rule_objects();
     nt_gfx_destroy_vertex_input(o.vi);
-    nt_gfx_destroy_pipeline(o.pip);
     nt_gfx_destroy_texture(o.tex);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_end_pass();
     nt_gfx_destroy_vertex_input(o.vi);
-    nt_gfx_destroy_pipeline(o.pip);
     nt_gfx_destroy_texture((nt_texture_t){0});
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
@@ -3154,7 +3122,6 @@ void test_gfx_pipeline_slots_freed_by_context_loss(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip); /* stale: ordinary invalid path, no trap */
     nt_gfx_end_pass();
-    nt_gfx_destroy_pipeline(pip); /* stale: tolerated no-op, also after a pass */
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
 
@@ -3165,9 +3132,6 @@ void test_gfx_pipeline_slots_freed_by_context_loss(void) {
     for (uint32_t i = 0; i < 4; i++) {
         pips[i] = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = fresh, .depth_test = (i & 1U) != 0, .cull_mode = (uint8_t)(i >> 1U)});
         TEST_ASSERT_NOT_EQUAL_UINT32(0, pips[i].id);
-    }
-    for (uint32_t i = 0; i < 4; i++) {
-        nt_gfx_destroy_pipeline(pips[i]);
     }
 }
 
@@ -3247,8 +3211,9 @@ void test_gfx_failed_bind_drops_the_previous_pipeline(void) {
         .program = prog,
     };
     nt_pipeline_t live = nt_gfx_make_pipeline(&desc);
-    nt_pipeline_t dead = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = true});
-    nt_gfx_destroy_pipeline(dead); /* handle keeps its id, generation goes stale */
+    nt_program_t doomed = nt_gfx_make_program(vs, fs);
+    nt_pipeline_t dead = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = doomed});
+    nt_gfx_destroy_program(doomed); /* takes the pipeline: its handle keeps the id, the generation goes stale */
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 
@@ -3266,7 +3231,7 @@ void test_gfx_failed_bind_drops_the_previous_pipeline(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
-    nt_gfx_destroy_pipeline(live);
+    TEST_ASSERT_TRUE(nt_gfx_pipeline_valid(live));
     nt_gfx_destroy_program(prog);
     nt_gfx_destroy_shader(vs);
     nt_gfx_destroy_shader(fs);
@@ -3314,7 +3279,6 @@ void test_gfx_frame_draw_calls(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&g_nt_gfx.counters));
     TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_draw_calls(&g_nt_gfx.last_frame));
 
-    nt_gfx_destroy_pipeline(pip);
     nt_gfx_destroy_shader(vs);
     nt_gfx_destroy_shader(fs);
 }
@@ -3404,11 +3368,14 @@ void test_gfx_begin_pass_discards_bound_state(void) {
 /* Slots are recycled, so only the full handle tells a rebound pipeline apart
  * from the destroyed one that occupied its slot. */
 void test_gfx_bound_pipeline_holds_the_generation(void) {
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
-    nt_test_gfx_link_wait(prog);
-    nt_pipeline_t old_pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
+    nt_shader_t vs = make_test_vs();
+    nt_shader_t fs = make_test_fs();
+    nt_program_t old_prog = nt_gfx_make_program(vs, fs);
+    nt_pipeline_t old_pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = old_prog});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, old_pip.id);
-    nt_gfx_destroy_pipeline(old_pip);
+    nt_gfx_destroy_program(old_prog);
+    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    nt_test_gfx_link_wait(prog);
 
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
     TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(old_pip.id), nt_pool_slot_index(pip.id));
@@ -3946,7 +3913,7 @@ int main(void) {
     RUN_TEST(test_gfx_make_destroy_shader);
     RUN_TEST(test_gfx_make_destroy_buffer);
     RUN_TEST(test_gfx_defaults_applied);
-    RUN_TEST(test_gfx_make_destroy_pipeline);
+    RUN_TEST(test_gfx_make_pipeline);
     RUN_TEST(test_gfx_pipeline_survives_shader_destroy);
     RUN_TEST(test_gfx_state_machine_valid_cycle);
     RUN_TEST(test_gfx_double_destroy_shader);
@@ -4021,11 +3988,10 @@ int main(void) {
     RUN_TEST(test_gfx_pipeline_rejects_invalid_alpha_blend_factors);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_alpha_blend_operation);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_constant_color);
-    RUN_TEST(test_gfx_pipeline_key_neighbouring_programs_never_alias);
-    RUN_TEST(test_gfx_pipeline_key_preserves_depth_lane_values);
-    RUN_TEST(test_gfx_pipeline_key_canonicalizes_disabled_blend_and_offset);
-    RUN_TEST(test_gfx_pipeline_key_ignores_label_and_splits_on_float_payloads);
-    RUN_TEST(test_gfx_pipeline_key_asserts_out_of_range_lanes);
+    RUN_TEST(test_gfx_make_pipeline_keeps_every_depth_lane_value);
+    RUN_TEST(test_gfx_make_pipeline_canonicalizes_disabled_blend_and_offset);
+    RUN_TEST(test_gfx_make_pipeline_splits_on_float_payloads);
+    RUN_TEST(test_gfx_make_pipeline_asserts_out_of_range_lanes);
     RUN_TEST(test_gfx_pipeline_rejects_src_alpha_saturate_as_destination_factor);
     RUN_TEST(test_gfx_pipeline_rejects_mixed_constant_color_and_alpha_factors);
     RUN_TEST(test_gfx_pipeline_accepts_constant_color_rgb_with_constant_alpha_source_alpha);
