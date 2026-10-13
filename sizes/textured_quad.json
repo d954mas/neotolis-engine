@@ -8608,5 +8608,55 @@
       "raw": 1183256,
       "gzip": 855769
     }
+  },
+  {
+    "commit": "c7d1d19",
+    "date": "2026-10-13T16:20:38Z",
+    "files": {
+      "index.html": {
+        "raw": 2447,
+        "gzip": 1237
+      },
+      "index_simd.wasm": {
+        "raw": 102633,
+        "gzip": 44609
+      },
+      "index.wasm": {
+        "raw": 99812,
+        "gzip": 44449
+      },
+      "index_simd.js": {
+        "raw": 21440,
+        "gzip": 8785
+      },
+      "index.js": {
+        "raw": 21440,
+        "gzip": 8780
+      },
+      "assets/base.ntpack": {
+        "raw": 3520,
+        "gzip": 879
+      },
+      "assets/lenna_hires.ntpack": {
+        "raw": 1048660,
+        "gzip": 796455
+      },
+      "assets/lenna_pixel.ntpack": {
+        "raw": 4180,
+        "gzip": 3564
+      }
+    },
+    "engine": {
+      "raw": 126520,
+      "gzip": 54631
+    },
+    "resources": {
+      "raw": 1056360,
+      "gzip": 800898
+    },
+    "total": {
+      "raw": 1182880,
+      "gzip": 855529
+    }
   }
 ]
