@@ -2110,6 +2110,23 @@ void test_sprite_renderer_emits_past_16_bit_vertex_range_use_absolute_indices(vo
 
 /* ---- Context restore and gfx re-init ---- */
 
+/* A loss the browser reports before gfx latches it: the program still reads ready, so the resolve
+ * reaches the vertex input create, which latches the loss; the material draws nothing and caches nothing. */
+void test_sprite_renderer_skips_a_vertex_input_create_that_meets_a_loss(void) {
+    s_atlas_res = register_test_atlas(0xA7ULL);
+    nt_material_t mat = create_test_material();
+    nt_entity_t e = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
+    nt_test_frame_finish_links();
+    nt_render_item_t item = {.entity = e.id, .batch_key = sprite_batch_key(e, mat)};
+
+    nt_gfx_fake_reset();
+    nt_gfx_fake_set_context_lost(true);
+    TEST_ASSERT_EQUAL_UINT32(0, draw_list_draws(&item, 1));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_vertex_input_cache_count());
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+}
+
 /* The loss frees the vertex inputs and the game relinks the program: the next frame draws
  * with no renderer restore call. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -2343,6 +2360,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_one_material_records_params_once);
     RUN_TEST(test_sprite_renderer_emit_after_odd_geometry_starts_at_multiple_of_4);
     RUN_TEST(test_sprite_renderer_emits_past_16_bit_vertex_range_use_absolute_indices);
+    RUN_TEST(test_sprite_renderer_skips_a_vertex_input_create_that_meets_a_loss);
     RUN_TEST(test_sprite_renderer_draws_after_context_restore_without_a_restore_call);
     RUN_TEST(test_sprite_renderer_new_layout_after_context_restore_reuses_a_dead_vertex_input);
     RUN_TEST(test_sprite_renderer_reselect_after_program_destroyed_in_frame_draws_nothing);

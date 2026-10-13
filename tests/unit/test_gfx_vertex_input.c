@@ -161,6 +161,7 @@ void test_vi_name_failure_on_a_live_context_asserts(void) {
     nt_buffer_t vbo = make_vbo();
     nt_gfx_fake_fail_next_vertex_input_create();
     EXPECT_ASSERT(make_vi(vbo, (nt_buffer_t){0}));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "could not name a GL object on a live context"));
 }
 
 void test_vi_pool_exhaustion_asserts(void) {

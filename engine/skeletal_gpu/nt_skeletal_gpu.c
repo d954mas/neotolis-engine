@@ -34,7 +34,6 @@ static void create_texture(void) {
         .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
         .label = "skeletal_gpu_palettes",
     });
-    NT_ASSERT((s_skeletal_gpu.texture.id != 0 || g_nt_gfx.context_lost) && "skeletal_gpu: palette texture creation failed");
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric

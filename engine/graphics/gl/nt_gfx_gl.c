@@ -1974,7 +1974,6 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
     /* Filter and wrap live on the sampler object every bind carries; the
        texture object keeps GL defaults, which no sampling path reads. */
     nt_gfx_gl_fmt_t gl = nt_gfx_gl_texture_format(desc->format);
-    NT_ASSERT(gl.internal != 0 && "create_texture: make_texture admits only mapped formats");
 
     /* Declared levels lie back to back in desc->data (NULL = storage only). */
     const uint8_t levels = desc->level_count > 1 ? desc->level_count : 1;
@@ -2081,6 +2080,9 @@ static bool nt_gfx_gl_build_render_target(const GLuint textures[NT_GFX_RT_ATTACH
     GLuint fbo = 0;
     NT_GL_GEN(glGenFramebuffers, 1, &fbo);
     if (fbo == 0) {
+        /* Like every other GL name: only a lost context fails it; incompleteness is checked below. */
+        const bool lost = nt_gfx_gl_ctx_query_lost();
+        NT_ASSERT(lost && "render target: framebuffer name failed on a live context");
         return false;
     }
     NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, fbo);

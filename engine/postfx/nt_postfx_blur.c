@@ -168,7 +168,6 @@ static void make_gpu_resources(void) {
     s_blur.sampler = nt_gfx_make_sampler(
         &(nt_sampler_desc_t){.min_filter = NT_FILTER_NEAREST, .mag_filter = NT_FILTER_NEAREST, .wrap_u = NT_WRAP_CLAMP_TO_EDGE, .wrap_v = NT_WRAP_CLAMP_TO_EDGE, .label = "postfx_blur_sampler"});
     /* A sampler-less bind falls back to the source's default filter, and the taps need NEAREST. */
-    NT_ASSERT((s_blur.sampler.id != 0 || g_nt_gfx.context_lost) && "postfx_blur: sampler creation failed");
     s_blur.vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_blur_vs_src, .label = "postfx_blur_vs"});
     s_blur.fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_blur_fs_src, .label = "postfx_blur_fs"});
     s_blur.program = nt_gfx_make_program(s_blur.vs, s_blur.fs);

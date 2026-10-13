@@ -973,6 +973,26 @@ void test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds(
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bind_sampler_count());
 }
 
+void test_gfx_make_sampler_name_failure_on_a_live_context_asserts(void) {
+    nt_gfx_fake_fail_next_sampler_create();
+    EXPECT_ASSERT(nt_gfx_make_sampler(&(nt_sampler_desc_t){.compare_func = NT_COMPARE_LESS}));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "could not name a GL object on a live context"));
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+}
+
+/* The cache hit recreates a sampler the loss zeroed; on a live context its name cannot fail. */
+void test_gfx_sampler_hit_recreate_name_failure_on_a_live_context_asserts(void) {
+    const nt_sampler_desc_t desc = {.compare_func = NT_COMPARE_LESS};
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_make_sampler(&desc).id);
+    nt_gfx_fake_lose_and_restore_context();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    nt_gfx_fake_fail_next_sampler_create();
+    EXPECT_ASSERT(nt_gfx_make_sampler(&desc));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "could not name a GL object on a live context"));
+}
+
 void test_gfx_sampler_recreate_name_failure_on_a_live_context_asserts(void) {
     nt_sampler_t compare = nt_gfx_make_sampler(&(nt_sampler_desc_t){.compare_func = NT_COMPARE_LESS});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, compare.id);
@@ -992,6 +1012,7 @@ void test_gfx_sampler_recreate_name_failure_on_a_live_context_asserts(void) {
     };
     nt_gfx_fake_fail_next_sampler_create();
     EXPECT_ASSERT(nt_gfx_apply_texture_bindings(bindings, 2));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "could not name a GL object on a live context"));
 }
 
 void test_gfx_texture_set_clears_on_pass_begin_and_failed_bind(void) {
@@ -1911,6 +1932,7 @@ void test_gfx_make_texture_name_failure_on_a_live_context_asserts(void) {
     nt_gfx_fake_reset();
     nt_gfx_fake_fail_texture_creates(1);
     EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = s_test_pixels_4x4}));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "could not name a GL object on a live context"));
 }
 
 void test_gfx_make_texture_bc7_requires_aligned_base_dimensions(void) {
@@ -3912,6 +3934,8 @@ int main(void) {
     RUN_TEST(test_gfx_draws_require_complete_texture_set_for_bound_program);
     RUN_TEST(test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost);
     RUN_TEST(test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds);
+    RUN_TEST(test_gfx_make_sampler_name_failure_on_a_live_context_asserts);
+    RUN_TEST(test_gfx_sampler_hit_recreate_name_failure_on_a_live_context_asserts);
     RUN_TEST(test_gfx_sampler_recreate_name_failure_on_a_live_context_asserts);
     RUN_TEST(test_gfx_texture_set_clears_on_pass_begin_and_failed_bind);
     RUN_TEST(test_gfx_destroy_program_accepts_invalid);

@@ -831,6 +831,24 @@ void test_a_destroyed_program_draws_nothing(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_draw_trace_count());
 }
 
+/* A loss the browser reports before gfx latches it: the selection's vertex input create latches the
+ * loss, and the selection draws nothing. */
+void test_vertex_input_create_that_meets_a_loss_draws_nothing(void) {
+    nt_test_frame_close();
+    nt_text_renderer_shutdown(); /* drops the vertex input built in setUp */
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_gfx_begin_frame();
+    nt_gfx_fake_set_context_lost(true); /* after begin_frame, so the program still reads ready */
+    const uint32_t creates = nt_gfx_fake_vertex_input_create_count();
+    nt_text_renderer_set_material(s_mat);
+    TEST_ASSERT_EQUAL_UINT32(creates + 1U, nt_gfx_fake_vertex_input_create_count());
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    nt_test_frame_begin_pass();
+    draw_and_execute();
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_draw_trace_count());
+    nt_gfx_fake_draw_trace_reset(false);
+}
+
 /* A context loss needs no restore call: the material keeps its handle, a relink rebuilds its
  * pipeline, and the vertex input comes back over the new frame buffers. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1246,6 +1264,7 @@ int main(void) {
     RUN_TEST(test_equal_draws_merge_and_a_font_change_splits);
     RUN_TEST(test_material_params_record_once_per_change);
     RUN_TEST(test_a_destroyed_program_draws_nothing);
+    RUN_TEST(test_vertex_input_create_that_meets_a_loss_draws_nothing);
     RUN_TEST(test_context_loss_recovers_without_a_restore_call);
     RUN_TEST(test_materials_sharing_a_program_share_one_pipeline);
     RUN_TEST(test_one_program_with_two_render_states_builds_two_pipelines);

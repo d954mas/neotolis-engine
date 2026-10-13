@@ -158,7 +158,7 @@ void nt_gfx_backend_clear(const nt_clear_desc_t *desc);
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc);
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle);
 
-/* Starts the link; 0 on a lost context, a GL failure or a full table. */
+/* Starts the link; 0 on a lost context or a failed glCreateProgram. */
 uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend);
 /* poll asks the driver whether the link completed (parallel compile) instead of waiting for it.
  * UNREADY while the link runs; ACCEPTED once linked, with uniform locations cached and one texture

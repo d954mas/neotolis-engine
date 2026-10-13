@@ -982,11 +982,10 @@ static nt_gfx_result_t make_program(nt_shader_t vs, nt_shader_t fs, nt_program_t
     NT_ASSERT(id != 0 && "program pool full -- raise nt_gfx_desc_t.max_programs");
 
     uint32_t backend = nt_gfx_backend_create_program(vs_backend, fs_backend);
-    if (backend == 0 && context_loss_confirmed()) {
+    if (backend == 0) {
         nt_pool_free(&s_gfx.program_pool, id);
-        return NT_GFX_RESULT_CONTEXT_LOST;
+        return name_failed();
     }
-    NT_ASSERT(backend != 0 && "program creation failed");
 
     /* Reading link status now would block until the driver finishes; begin_frame finishes it. */
     s_gfx.program_pending[nt_pool_slot_index(id)] = backend;
@@ -2892,7 +2891,7 @@ static bool mesh_make_ibo(const NtMeshAssetHeader *hdr, const uint8_t *index_dat
         .label = NULL,
     });
     if (out_ibo->id == 0) {
-        return false; /* make_buffer logged a live failure; a loss is quiet */
+        return false; /* only a loss fails make_buffer, and it latched */
     }
     return true;
 }
@@ -2942,7 +2941,7 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
         .label = NULL,
     });
     if (vbo.id == 0) {
-        return 0; /* make_buffer logged a live failure; a loss is quiet */
+        return 0; /* only a loss fails make_buffer, and it latched */
     }
 
     nt_buffer_t ibo;

@@ -310,8 +310,8 @@ measures `max(1, width >> L)` by `max(1, height >> L)` and occupies
 (`1 + floor(log2(max(width, height)))`) is legal. `N > 1` requires `data` and
 excludes `gen_mipmaps`, which is the other way to fill a chain. Creation is one
 shot: the handle is published after all declared level uploads were issued and
-the default sampler was acquired. A detected context loss, failed texture-name
-allocation or failed sampler creation leaves no texture and no pool slot.
+the default sampler was acquired. A context loss detected at the texture name or the
+default sampler leaves no texture and no pool slot.
 Driver upload and mipmap-generation errors on a live context are not polled:
 a nonzero handle does not prove successful GPU storage allocation. Filter and
 wrap state lives only on sampler objects:
@@ -356,8 +356,8 @@ program are ignored before their handles are inspected; active names are mapped
 to the immutable units recorded at link. Missing or duplicate active names,
 invalid handles, sampler/texture type mismatches, and sampling a color or depth
 attachment of the active render target are developer errors and assert. Resolution
-is atomic: context loss, a texture without live backend storage, or failed
-sampler recreation publishes no
+is atomic: context loss (also one a lazy sampler recreate meets) or a texture
+without live backend storage publishes no
 logical set and issues no backend bind. Those failures are
 recoverable, so gfx reports them and skips the following draws of that set instead
 of returning a status the caller would have to branch on. Context loss means loss
@@ -456,8 +456,8 @@ not attempt recreation. A failed recreation is a context-creation failure: it
 logs one error, and on the web it leaves no context and no loss listener, so the
 engine stays lost and no later iteration recovers it. Backend failures caused by
 a loss are reported as `CONTEXT_LOST`; only the one that latches it logs an error.
-A GL object that cannot be named on a live context (a shader, buffer, texture,
-sampler or vertex input) asserts: WebGL creates null only on a lost context, and
+A GL object that cannot be named on a live context (a shader, program, buffer,
+texture, sampler, vertex input or framebuffer) asserts: WebGL creates null only on a lost context, and
 native `glGen*` does not run out of names. A full backend table asserts too: the
 frontend pools cap every table at its size.
 A sampler cache hit whose recreate meets the loss keeps its stable id and ends
