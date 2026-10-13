@@ -390,7 +390,9 @@ typedef struct {
 } nt_shader_desc_t;
 
 /* Program + fixed render state only; vertex input is a separate owned object
- * (nt_vertex_input_desc_t) bound independently of the pipeline. */
+ * (nt_vertex_input_desc_t) bound independently of the pipeline. A transient argument, never
+ * stored densely, so its padding costs nothing. */
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 typedef struct {
     /* Borrowed; destroying the program also destroys this pipeline. */
     nt_program_t program;
@@ -904,8 +906,9 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
  * samplers assert there. Returns invalid while the context is lost, and for a live stage
  * whose GPU object a loss discarded -- recreate the stages and relink. Only a stale stage handle asserts. */
 nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs);
-/* Accepts a linking program; binding the pipeline asserts until the program is ready.
- * Creation preserves the currently bound pipeline. */
+/* Returns the live pipeline of an equal desc (label ignored: the first creator's is kept) or
+ * creates one. Accepts a linking program; binding the pipeline asserts until the program is
+ * ready. Creation preserves the currently bound pipeline. */
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
 /* Caller owns the result; destroy it with nt_gfx_destroy_vertex_input. The VI
  * borrows its buffers; creation borrows desc/label and preserves the bound VI.

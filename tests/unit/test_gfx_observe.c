@@ -665,6 +665,31 @@ static void test_restore_defines_no_render_targets(void) {
     }
 }
 
+/* Renderers make their pipeline on every material transition: a hit is one CACHE pair, no definition. */
+static void test_pipeline_cache_hit_defines_nothing(void) {
+    const nt_pipeline_desc_t desc = {.program = s_draw_program, .depth_test = true};
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&desc);
+    record_next_frame();
+    TEST_ASSERT_EQUAL_UINT32(pipeline.id, nt_gfx_make_pipeline(&desc).id);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    uint32_t start = 0;
+    while (start < capture.count && capture.events[start].kind != NT_GFX_EVENT_BEGIN) {
+        start++;
+    }
+    uint32_t begins = 0;
+    uint32_t cache = 0;
+    for (uint32_t i = start; i < capture.count; i++) {
+        const nt_gfx_event_t *e = &capture.events[i];
+        TEST_ASSERT_FALSE(e->kind == NT_GFX_EVENT_DEFINITION && e->object_kind == NT_GFX_OBJECT_PIPELINE);
+        begins += (e->kind == NT_GFX_EVENT_BEGIN && e->operation == NT_GFX_OP_CREATE && e->object_kind == NT_GFX_OBJECT_PIPELINE) ? 1U : 0U;
+        cache += (e->kind == NT_GFX_EVENT_RESULT && e->object == pipeline.id && e->result == NT_GFX_RESULT_CACHE) ? 1U : 0U;
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, begins);
+    TEST_ASSERT_EQUAL_UINT32(1, cache);
+}
+
 static void test_sampler_cache_hit_defines_nothing(void) {
     const nt_sampler_desc_t sampler_desc = {.min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR};
     nt_sampler_t sampler = nt_gfx_make_sampler(&sampler_desc);
@@ -1133,6 +1158,7 @@ int main(void) {
     RUN_TEST(test_lazy_sampler_recreate_on_a_latched_loss_ends_context_lost);
     RUN_TEST(test_link_with_a_stage_left_unready_by_a_loss_ends_unready);
     RUN_TEST(test_restore_defines_no_render_targets);
+    RUN_TEST(test_pipeline_cache_hit_defines_nothing);
     RUN_TEST(test_sampler_cache_hit_defines_nothing);
     RUN_TEST(test_frame_storage_uploads_are_recorded_operations);
     RUN_TEST(test_every_operation_records_one_begin_and_one_result);
