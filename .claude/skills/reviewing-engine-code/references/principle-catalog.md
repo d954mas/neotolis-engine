@@ -185,7 +185,7 @@ P1 for other caches. Also flag a new cache key without a neighbour test (consecu
 one-step change of each field → all keys distinct).
 **Cite:** AGENTS.md §"Code and design" (Cache identity) + docs/spec/render/architecture.md §"Cache identity".
 **Scope:** `engine/renderers/`, `engine/graphics/`, `engine/material/`, any `*_cache_find`.
-✅ `key = nt_gfx_pipeline_key(&desc)`; `key |= (1ULL | location << 1) << (si * 5)` with static asserts.
+✅ `key = pipeline_key(desc)` (exact packed lanes + float bit patterns, nt_gfx.c); `key |= (1ULL | location << 1) << (si * 5)` with static asserts.
 ❌ `key = program.id * 0x9E3779B97F4A7C15ULL + render_state_hash` compared with `==` on a hit.
 
 ## 15. No ceremony — code that serves other new code — P2

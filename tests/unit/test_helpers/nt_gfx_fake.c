@@ -130,7 +130,6 @@ static bool s_fake_fail_next_program_link;
 static bool s_fake_hold_program_links;
 static bool s_fake_lose_context_on_program_create;
 static bool s_fake_lose_context_on_program_link;
-static bool s_fake_fail_next_pipeline_create;
 static bool s_fake_fail_next_sampler_create;
 static bool s_fake_fail_next_backend_restore_lost;
 static bool s_fake_lose_context_during_next_restore;
@@ -224,7 +223,6 @@ void nt_gfx_fake_fail_next_program_link(void) { s_fake_fail_next_program_link = 
 void nt_gfx_fake_hold_program_links(bool hold) { s_fake_hold_program_links = hold; }
 void nt_gfx_fake_lose_context_on_program_create(void) { s_fake_lose_context_on_program_create = true; }
 void nt_gfx_fake_lose_context_on_program_link(void) { s_fake_lose_context_on_program_link = true; }
-void nt_gfx_fake_fail_next_pipeline_create(void) { s_fake_fail_next_pipeline_create = true; }
 void nt_gfx_fake_fail_next_sampler_create(void) { s_fake_fail_next_sampler_create = true; }
 void nt_gfx_fake_fail_next_backend_restore_lost(void) { s_fake_fail_next_backend_restore_lost = true; }
 void nt_gfx_fake_lose_context_during_next_restore(void) { s_fake_lose_context_during_next_restore = true; }
@@ -305,7 +303,6 @@ void nt_gfx_fake_reset(void) {
     s_fake_hold_program_links = false;
     s_fake_lose_context_on_program_create = false;
     s_fake_lose_context_on_program_link = false;
-    s_fake_fail_next_pipeline_create = false;
     s_fake_fail_next_sampler_create = false;
     s_fake_fail_next_backend_restore_lost = false;
 #if NT_GFX_CAPTURE_ENABLED
@@ -499,18 +496,11 @@ void nt_gfx_backend_destroy_program(uint32_t backend_handle) {
     memset(&s_fake_program_table[backend_handle], 0, sizeof(s_fake_program_table[backend_handle]));
 }
 
-uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend, uint32_t slot) {
-    if (s_fake_context_lost) {
-        return 0; /* GL creates no name on a lost context */
-    }
-    if (s_fake_fail_next_pipeline_create) {
-        s_fake_fail_next_pipeline_create = false;
-        return 0;
-    }
+void nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend, uint32_t slot) {
     s_fake_pipeline_create_count++;
     s_fake_last_pipeline_blend = desc->blend;
     (void)program_backend;
-    return slot;
+    (void)slot;
 }
 
 void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle) { (void)backend_handle; }

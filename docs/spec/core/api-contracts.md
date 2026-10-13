@@ -163,6 +163,13 @@ linking or ready program; while the loss is latched it returns invalid, and afte
 the restore a lost program asserts. Binding a pipeline whose program is not
 ready asserts.
 
+`nt_gfx_make_pipeline` is get-or-create: a descriptor equal to a live
+pipeline's (the label is not identity, and gfx stores none) returns that
+handle and records a `CACHE` result. gfx owns pipelines; there is no pipeline
+destroy. A pipeline lives until its program is destroyed, a context loss, or
+`nt_gfx_shutdown`, so `max_pipelines` budgets every distinct state made
+on live programs. Animated values belong in uniforms, not in new pipelines.
+
 `nt_gfx_destroy_program` accepts `NT_PROGRAM_INVALID` as a no-op and asserts on
 a stale non-zero handle. Clear the owner's variable to `NT_PROGRAM_INVALID`
 when destroying it.
@@ -259,14 +266,10 @@ outputs `v_texcoord`, `flat uvec2 v_glyph` (band row, band count),
 height, in em) and `v_color`, and computes coverage with `SlugRender(coord,
 glyph, band_transform)` from `common/slug_coverage.glsl`.
 
-Pipeline cache keys include the program handle, so replacement selects a
-different entry. Destroying the old program (before the first pass or after
-`nt_gfx_end_frame`, by the frame rule) frees its pipelines immediately;
-renderers remove their dead cache records on the next insertion after a miss,
-or when resetting the cache. Lookup validates a matching pipeline but does not
-remove records. An unassigned program kept alive by its owner keeps its pipelines
-alive too. `nt_gfx_destroy_pipeline` accepts stale handles as a no-op because
-program destruction can invalidate a renderer's cached handles.
+Pipeline identity includes the program handle, so replacement makes a
+different pipeline. Destroying the old program (before the first pass or after
+`nt_gfx_end_frame`, by the frame rule) frees its pipelines immediately. An
+unassigned program kept alive by its owner keeps its pipelines alive too.
 Materials retain the stale program handle until reassignment; readiness reports
 false without mutating the material.
 
@@ -476,9 +479,10 @@ no-op even then: the handle check runs first. A returned invalid target therefor
 failed backend allocation, or an incomplete framebuffer, such as `RGBA16F`
 without float rendering. `nt_gfx_make_pipeline`
 follows the same split: a
-NULL descriptor, an unready program, and an exhausted pipeline pool assert, so a returned invalid
-pipeline handle means a lost context or a failed backend allocation — the two
-recoverable outcomes, both retried on a later frame.
+NULL descriptor, an invalid program or one a context loss discarded, and an exhausted
+pipeline pool assert; a linking program is accepted. The backend create only fills a
+CPU record, so a returned invalid pipeline handle means a lost context, retried on a
+later frame.
 `nt_gfx_make_vertex_input` applies the same contract to the layout checks: an
 attribute count over `NT_GFX_MAX_VERTEX_ATTRS`, a stride over the WebGL2 cap of
 255, misaligned or duplicated attributes, mismatched buffers, and an exhausted

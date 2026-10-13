@@ -55,8 +55,8 @@ static inline uint32_t nt_sprite_renderer_batch_key(nt_material_t material, nt_r
  * override the sampler. Every declared slot must resolve to a texture (register a placeholder
  * for async loads). No textures = no page, e.g. nt_ui_radial's flat SDF. */
 
-/* Destroys the cached pipelines and vertex inputs. Required before nt_gfx_shutdown or a gfx
- * re-init: new gfx pools reuse handle ids. */
+/* Destroys the cached vertex inputs. Required before nt_gfx_shutdown or a gfx re-init: new gfx
+ * pools reuse handle ids. */
 void nt_sprite_renderer_shutdown(void);
 
 /* Contracts:
@@ -168,7 +168,6 @@ typedef struct {
     uint32_t index_count;
 } nt_sprite_test_emit_t;
 void nt_sprite_renderer_test_last_emit(nt_sprite_test_emit_t *out);
-uint32_t nt_sprite_renderer_test_pipeline_cache_count(void);
 uint32_t nt_sprite_renderer_test_vertex_input_cache_count(void);
 #endif
 // #endregion

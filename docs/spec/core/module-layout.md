@@ -152,9 +152,9 @@ planned (#488).
 
 `nt_postfx_blur` is a gaussian blur helper, not a post-processing graph. It
 borrows a ready source texture and valid temp and destination targets for each
-call; their dimensions must match. The helper owns its shader stages, program,
-pipeline, and fullscreen primitive, but it does not allocate, destroy, or retain
-caller handles.
+call; their dimensions must match. The helper owns its shader stages, program
+(gfx frees the program's pipeline with it), and fullscreen primitive, but it does
+not allocate, destroy, or retain caller handles.
 The source uses any `sampler2D` color format — the uncompressed set (`R8`,
 `RG8`, `RGB8`, `RGBA8`, `RGBA16F`, `RGBA32F`) and the block-compressed set
 (`ETC2_RGB8`, `ETC2_RGBA8`, `BC7_RGBA`, `ASTC_4x4_RGBA`); integer and depth

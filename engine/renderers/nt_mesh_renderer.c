@@ -18,18 +18,9 @@
 
 #include <string.h>
 
-/* Pipeline cache capacity; raise it on the linked variant target, e.g.
- * target_compile_definitions(nt_mesh_renderer PRIVATE NT_MESH_RENDERER_MAX_PIPELINES=N). */
-#ifndef NT_MESH_RENDERER_MAX_PIPELINES
-#define NT_MESH_RENDERER_MAX_PIPELINES 64
-#endif
-_Static_assert(NT_MESH_RENDERER_MAX_PIPELINES <= 65535, "NT_MESH_RENDERER_MAX_PIPELINES overflows the uint16 cache counter");
-
 _Static_assert(NT_GFX_MAX_INSTANCE_ATTRS >= 4 + (2 * NT_MESH_RENDERER_SKINNED), "mesh instance layouts need 4 (skinned 6) attributes: raise NT_GFX_MAX_INSTANCE_ATTRS");
 
 static struct {
-    nt_renderer_pipeline_entry_t pipelines[NT_MESH_RENDERER_MAX_PIPELINES];
-    uint16_t pipeline_count;
     nt_instance_layout_t layout;
 #if NT_MESH_RENDERER_SKINNED
     nt_instance_layout_t skinned_layout;
@@ -75,12 +66,7 @@ void nt_mesh_renderer_init(void) {
 #endif
 }
 
-void nt_mesh_renderer_shutdown(void) {
-    for (uint16_t i = 0; i < s_mesh_renderer.pipeline_count; i++) {
-        nt_gfx_destroy_pipeline(s_mesh_renderer.pipelines[i].pipeline);
-    }
-    memset(&s_mesh_renderer, 0, sizeof(s_mesh_renderer));
-}
+void nt_mesh_renderer_shutdown(void) { memset(&s_mesh_renderer, 0, sizeof(s_mesh_renderer)); }
 
 // #region run
 /* One call's state: a pass or foreign pipeline between calls invalidates it. The draw texture's
@@ -96,14 +82,6 @@ typedef struct {
     uint32_t applied_draw;
 } mesh_draw_t;
 
-/* The pipeline is program x render state; layouts live on the meshes' vertex inputs. 0 = create failed. */
-static nt_pipeline_t mesh_pipeline(const nt_material_info_t *mi) {
-    const nt_pipeline_desc_t desc = nt_renderer_material_pipeline_desc(mi, "mesh_renderer");
-    const nt_gfx_pipeline_key_t key = nt_gfx_pipeline_key(&desc);
-    const nt_pipeline_t found = nt_renderer_pipeline_cache_find(s_mesh_renderer.pipelines, s_mesh_renderer.pipeline_count, &key);
-    return found.id != 0 ? found : nt_renderer_pipeline_cache_insert(s_mesh_renderer.pipelines, &s_mesh_renderer.pipeline_count, NT_MESH_RENDERER_MAX_PIPELINES, &key, &desc);
-}
-
 /* Resolves pipeline and vertex input, reusing the previous run's on equal handles. False skips
  * the run: the program is not ready (linking or lost) or a create failed (retried by the next
  * run). The mesh's vertex input for this call's buffer does not depend on the material. */
@@ -114,7 +92,9 @@ static bool resolve(mesh_draw_t *d, nt_material_t material, const nt_material_in
     if (material.id != d->material.id) {
         /* A mesh feeds every stream at its pack location; an attr_map would name locations no mesh uses. */
         NT_ASSERT(mi->attr_map_count == 0 && "mesh material: attr_map is sprite-only");
-        d->pipeline = mesh_pipeline(mi);
+        /* Program x render state; layouts live on the meshes' vertex inputs. */
+        const nt_pipeline_desc_t desc = nt_renderer_material_pipeline_desc(mi, "mesh_renderer");
+        d->pipeline = nt_gfx_make_pipeline(&desc);
     }
     if (mesh.id != d->mesh.id) {
         d->vertex_input = nt_gfx_mesh_vertex_input(mesh, d->instances);
@@ -315,10 +295,4 @@ void nt_mesh_renderer_draw_list_skinned(uint32_t stream, const nt_render_item_t 
     }
 }
 // #endregion
-#endif
-
-#ifdef NT_TEST_ACCESS
-/* ---- Test accessors ---- */
-
-uint32_t nt_mesh_renderer_test_pipeline_cache_count(void) { return s_mesh_renderer.pipeline_count; }
 #endif

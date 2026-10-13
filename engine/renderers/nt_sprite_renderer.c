@@ -24,10 +24,11 @@
 
 /* Base 20 B sprite vertex stride — custom attrs append after this offset. */
 #define NT_SPRITE_BASE_STRIDE 20
-/* Distinct material states; also bounds the layout cache, which holds fewer. */
-#ifndef NT_SPRITE_RENDERER_MAX_PIPELINES
-#define NT_SPRITE_RENDERER_MAX_PIPELINES 16
+/* Distinct sprite vertex layouts (base + material attr_map), one vertex input each. */
+#ifndef NT_SPRITE_RENDERER_MAX_LAYOUTS
+#define NT_SPRITE_RENDERER_MAX_LAYOUTS 16
 #endif
+_Static_assert(NT_SPRITE_RENDERER_MAX_LAYOUTS <= 65535, "NT_SPRITE_RENDERER_MAX_LAYOUTS overflows the uint16 cache counter");
 
 // #region module state
 /* A resolved material: what an emit or a draw_list run records. */
@@ -52,14 +53,11 @@ typedef struct {
 } nt_sprite_alloc_t;
 
 static struct {
-    nt_renderer_pipeline_entry_t entries[NT_SPRITE_RENDERER_MAX_PIPELINES];
-    uint16_t count;
-
     /* Layout-hash cache over the frame buffers; custom layouts may share a pipeline. */
     struct {
         uint64_t key;
         nt_vertex_input_t vi;
-    } vi_entries[NT_SPRITE_RENDERER_MAX_PIPELINES];
+    } vi_entries[NT_SPRITE_RENDERER_MAX_LAYOUTS];
     uint16_t vi_count;
 
     nt_sprite_material_t current; /* set_material; the immediate emits read it */
@@ -79,9 +77,6 @@ static struct {
 
 // #region lifecycle
 void nt_sprite_renderer_shutdown(void) {
-    for (uint16_t i = 0; i < s_sprite.count; i++) {
-        nt_gfx_destroy_pipeline(s_sprite.entries[i].pipeline);
-    }
     for (uint16_t i = 0; i < s_sprite.vi_count; i++) {
         nt_gfx_destroy_vertex_input(s_sprite.vi_entries[i].vi);
     }
@@ -159,14 +154,9 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     if (!nt_gfx_program_ready(mat_info->program)) {
         return (nt_pipeline_t){0};
     }
-    /* Vertex-inputs own layouts; the pipeline is program x state, keyed by its exact desc identity. */
+    /* Vertex-inputs own layouts; the pipeline is program x state. */
     const nt_pipeline_desc_t desc = nt_renderer_material_pipeline_desc(mat_info, "sprite_pipeline");
-    const nt_gfx_pipeline_key_t key = nt_gfx_pipeline_key(&desc);
-    const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_sprite.entries, s_sprite.count, &key);
-    if (cached.id != 0) {
-        return cached;
-    }
-    return nt_renderer_pipeline_cache_insert(s_sprite.entries, &s_sprite.count, NT_SPRITE_RENDERER_MAX_PIPELINES, &key, &desc);
+    return nt_gfx_make_pipeline(&desc);
 }
 
 /* Entries are weak: a context loss frees vertex-input slots, so a hit validates and a dead
@@ -192,7 +182,7 @@ static nt_vertex_input_t find_or_create_vertex_input(const nt_material_info_t *m
             idx = i; /* a layout the loss freed; reused unless the key itself turns up */
         }
     }
-    NT_ASSERT(idx < NT_SPRITE_RENDERER_MAX_PIPELINES && "sprite vertex-input cache full; raise NT_SPRITE_RENDERER_MAX_PIPELINES");
+    NT_ASSERT(idx < NT_SPRITE_RENDERER_MAX_LAYOUTS && "sprite vertex-input cache full; raise NT_SPRITE_RENDERER_MAX_LAYOUTS");
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
         .layout = build_sprite_layout(mat_info),
         .vertex_buffer = vbo,
@@ -883,7 +873,6 @@ void nt_sprite_renderer_test_last_emit(nt_sprite_test_emit_t *out) {
     *out = s_sprite.last_emit;
 }
 
-uint32_t nt_sprite_renderer_test_pipeline_cache_count(void) { return s_sprite.count; }
 uint32_t nt_sprite_renderer_test_vertex_input_cache_count(void) { return s_sprite.vi_count; }
 #endif
 // #endregion

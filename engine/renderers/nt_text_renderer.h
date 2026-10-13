@@ -5,16 +5,6 @@
 #include "font/nt_font.h"
 #include "material/nt_material.h"
 
-/* ---- Compile-time limits ---- */
-
-/* Caches distinct (program, render state) pairs across frames; live entries persist until reset.
- * Dead entries are removed on insertion. Exhaustion asserts without evicting live entries.
- * Raise capacity with -DNT_TEXT_RENDERER_MAX_PIPELINES=N. */
-#ifndef NT_TEXT_RENDERER_MAX_PIPELINES
-#define NT_TEXT_RENDERER_MAX_PIPELINES 8
-#endif
-_Static_assert(NT_TEXT_RENDERER_MAX_PIPELINES <= 65535, "NT_TEXT_RENDERER_MAX_PIPELINES overflows the uint16 cache counter");
-
 /* Synthetic bold weight in em; labels and rich text use the same glyph variant. */
 #define NT_TEXT_SYNTH_BOLD_WEIGHT 0.04F
 
@@ -50,7 +40,7 @@ typedef struct {
     bool strikethrough; /* same at the strikeout metric */
 } nt_text_style_t;
 
-/* Destroys cached pipelines and the vertex input and clears all state. Call it before
+/* Destroys the vertex input and clears all state. Call it before
  * nt_gfx_shutdown or a gfx re-init: new pools reuse handle ids. */
 void nt_text_renderer_shutdown(void);
 
@@ -67,12 +57,5 @@ void nt_text_renderer_set_material(nt_material_t mat);
  * underline/strike, each over the whole run. */
 void nt_text_renderer_draw_n(const nt_text_style_t *style, const float model[16], const char *utf8, size_t len);
 void nt_text_renderer_draw(const nt_text_style_t *style, const float model[16], const char *utf8);
-
-// #region test_access
-#ifdef NT_TEST_ACCESS
-/* Occupied cache entries, including dead pipelines not yet removed by insertion/reset. */
-uint16_t nt_text_renderer_test_pipeline_cache_count(void);
-#endif
-// #endregion
 
 #endif /* NT_TEXT_RENDERER_H */

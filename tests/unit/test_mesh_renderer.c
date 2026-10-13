@@ -229,6 +229,7 @@ static void draw_list(const nt_render_item_t *items, uint32_t count) {
 /* ---- Unity setUp / tearDown ---- */
 
 void setUp(void) {
+    nt_gfx_fake_reset();
     memset(s_test_tex_res, 0, sizeof(s_test_tex_res));
     s_test_tex_pack_created = false;
     nt_hash_init(&(nt_hash_desc_t){0});
@@ -470,12 +471,12 @@ void test_draw_list_skips_a_linking_program_until_its_link_finishes(void) {
     TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
     draw_list(&item, 1); /* later frames, link still held */
     TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_pipeline_create_count());
 
     nt_gfx_fake_hold_program_links(false);
     draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_pipeline_create_count());
 }
 
 /* ---- Test 5: 2 items with different materials -> 2 draw calls ---- */
@@ -550,11 +551,27 @@ void test_pipeline_cache_reuse(void) {
 
     /* First draw_list call */
     draw_list(items, 1);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_pipeline_create_count());
 
     /* Second draw_list call with same material+mesh */
     draw_list(items, 1);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_pipeline_create_count());
+}
+
+/* gfx owns pipelines: a renderer restart over a live program finds the same one. */
+void test_pipeline_outlives_a_renderer_restart(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material();
+    nt_render_item_t item = {.entity = create_test_entity(mesh, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
+    draw_list(&item, 1);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_pipeline_create_count());
+
+    nt_mesh_renderer_shutdown();
+    nt_mesh_renderer_init();
+    mark_draws();
+    draw_list(&item, 1);
+    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_pipeline_create_count());
 }
 
 /* ---- Test 8: different shader programs -> different cached pipelines ---- */
@@ -577,7 +594,7 @@ void test_pipeline_cache_different_layouts(void) {
 
     draw_list(items, 2);
 
-    TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_pipeline_create_count());
 }
 
 /* Programs come out of the pool in creation order, so two shader pairs get
@@ -610,7 +627,7 @@ void test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines(void
     nt_gfx_fake_draw_trace_reset(true);
     draw_list(items, 2);
 
-    TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_pipeline_create_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(p0.id, nt_gfx_fake_draw_trace_at(0).program.id);
     TEST_ASSERT_EQUAL_UINT32(p1.id, nt_gfx_fake_draw_trace_at(1).program.id);
@@ -902,7 +919,7 @@ void test_core_draw_from_a_game_buffer(void) {
     TEST_ASSERT_EQUAL_UINT32(sizeof(nt_mesh_instance_t), nt_gfx_fake_last_instance_offset());
     TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(nt_gfx_mesh_vertex_input(mesh, instances).id), nt_gfx_fake_last_instance_vertex_input());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_pipeline_create_count());
     const nt_vertex_layout_t owned = nt_gfx_fake_last_vertex_input_layout();
     nt_render_item_t item = {.entity = create_test_entity(mesh, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
     draw_list(&item, 1);
@@ -956,28 +973,21 @@ void test_game_buffers_share_the_base_vertex_input(void) {
     nt_test_frame_open();
 }
 
-/* A failed pipeline create, a failed vertex input create and an unready program record nothing;
- * the next ready call retries and draws. */
+/* A failed vertex input create and an unready program record nothing; the next ready call
+ * retries and draws. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_core_draw_failures_record_nothing(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_material_t mat = create_test_material();
     nt_buffer_t instances = make_owned_instances(2);
-    nt_gfx_fake_fail_next_pipeline_create();
+    nt_gfx_fake_fail_next_vertex_input_create();
     nt_test_frame_next();
     mark_draws();
     nt_mesh_renderer_draw(mesh, mat, instances, 0, 1);
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_pipeline_cache_count());
-    nt_mesh_t fresh = create_test_mesh(); /* the first draw already made the other mesh's vertex input */
-    nt_gfx_fake_fail_next_vertex_input_create();
     mark_draws();
-    nt_mesh_renderer_draw(fresh, mat, instances, 0, 1);
-    nt_test_frame_next();
-    TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
-    mark_draws();
-    nt_mesh_renderer_draw(fresh, mat, instances, 0, 1);
+    nt_mesh_renderer_draw(mesh, mat, instances, 0, 1);
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls()); /* the next draw retries the create */
     nt_gfx_fake_hold_program_links(true);
@@ -1299,37 +1309,6 @@ void test_state_skip_mid_list_resolves_next_run(void) {
     nt_gfx_fake_draw_trace_reset(false);
 }
 
-/* A run whose pipeline could not be created binds nothing, so the run after it
- * still sees the state the run before it left bound. */
-void test_state_pipeline_failure_mid_list_rebinds_next_run(void) {
-    nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat_a = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_DEFAULT);
-    nt_material_t mat_b = create_test_material_textured(create_test_tex_program(), nt_blend_alpha(), NT_SAMPLER_DEFAULT);
-
-    nt_material_t mats[3] = {mat_a, mat_b, mat_a};
-    nt_mesh_t meshes[3] = {mesh, mesh, mesh};
-    nt_entity_t entities[3] = {create_test_entity(mesh, mat_a), create_test_entity(mesh, mat_b), create_test_entity(mesh, mat_a)};
-
-    nt_render_item_t items[3];
-    fill_items(items, entities, mats, meshes, 3);
-
-    /* A's pipeline is created first, so the failure lands on B. */
-    draw_list(items, 1);
-    nt_gfx_fake_reset();
-    nt_gfx_fake_draw_trace_reset(true);
-    nt_gfx_fake_fail_next_pipeline_create();
-    draw_list(items, 3);
-
-    TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_draw_trace_at(0).pipeline.id, nt_gfx_fake_draw_trace_at(1).pipeline.id);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_pipeline_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_uniform_vec4_count());
-    /* The failed run is not packed either. */
-    TEST_ASSERT_EQUAL_UINT32(2 * sizeof(nt_mesh_instance_t), nt_gfx_fake_last_update_buffer_size());
-    nt_gfx_fake_draw_trace_reset(false);
-}
-
 void test_state_same_tex_same_sampler_diff_params(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_program_t program = create_test_tex_program();
@@ -1355,24 +1334,6 @@ void test_state_same_tex_same_sampler_diff_params(void) {
 
 // #endregion
 
-/* Caching a failed pipeline would prevent a later frame from retrying creation. */
-void test_pipeline_cache_skips_failed_pipeline(void) {
-    nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat = create_test_material();
-    nt_entity_t e = create_test_entity(mesh, mat);
-    nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
-
-    nt_gfx_fake_fail_next_pipeline_create();
-    draw_list(items, 1);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_pipeline_cache_count());
-    TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
-
-    /* Next frame retries and succeeds. */
-    draw_list(items, 1);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
-    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
-}
-
 /* Manual dedup is the whole point of an explicit program: two materials on one
  * program, same layout and state, must collapse to a single pipeline. */
 void test_pipeline_cache_shared_program_collapses(void) {
@@ -1389,7 +1350,7 @@ void test_pipeline_cache_shared_program_collapses(void) {
 
     draw_list(items, 2);
 
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_pipeline_create_count());
 }
 
 /* Two runs in one list, with the transform and drawable dense indices apart (a transform-only
@@ -1488,7 +1449,7 @@ void test_vertex_input_distinct_per_mesh(void) {
     draw_list(items, 2);
 
     /* One material state: one pipeline; two meshes: two vertex inputs. */
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_pipeline_create_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_vertex_input_create_count());
 }
 
@@ -1834,6 +1795,7 @@ int main(void) {
     RUN_TEST(test_draw_list_different_materials);
     RUN_TEST(test_draw_list_alternating_materials);
     RUN_TEST(test_pipeline_cache_reuse);
+    RUN_TEST(test_pipeline_outlives_a_renderer_restart);
     RUN_TEST(test_pipeline_cache_different_layouts);
     RUN_TEST(test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines);
     RUN_TEST(test_runs_of_one_list_pack_each_entity_world_and_color);
@@ -1853,9 +1815,7 @@ int main(void) {
     RUN_TEST(test_state_override_binds_one_sampler_per_texture_change);
     RUN_TEST(test_state_distinct_textures_a_b_a);
     RUN_TEST(test_state_skip_mid_list_resolves_next_run);
-    RUN_TEST(test_state_pipeline_failure_mid_list_rebinds_next_run);
     RUN_TEST(test_state_same_tex_same_sampler_diff_params);
-    RUN_TEST(test_pipeline_cache_skips_failed_pipeline);
     RUN_TEST(test_pipeline_cache_shared_program_collapses);
     RUN_TEST(test_vertex_input_reused_across_draw_list_calls);
     RUN_TEST(test_vertex_input_distinct_per_mesh);

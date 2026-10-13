@@ -56,6 +56,7 @@ void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.max_textures = 3;
     desc.max_render_targets = 2;
+    desc.max_pipelines = 32; /* the blend-enum sweep makes 20 states on one program */
     desc.global_blocks[0] = (nt_global_block_t){"Globals", 3};
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
@@ -384,7 +385,6 @@ static void test_custom_blend_state_reaches_gl_unchanged(void) {
 
     nt_gfx_end_pass();
     nt_gfx_end_frame();
-    nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
 }
@@ -403,7 +403,6 @@ static GLint blend_value_in_pass(nt_program_t prog, nt_blend_state_t blend, GLen
     glGetIntegerv(query, &actual);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
-    nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_begin_frame();
     return actual;
 }
@@ -496,7 +495,6 @@ static void test_multiply_blend_multiplies_rgb_and_preserves_destination_alpha(v
     destroy_test_target(&target);
     nt_gfx_destroy_vertex_input(vertex_input);
     nt_gfx_destroy_buffer(vertices);
-    nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
 }
@@ -862,7 +860,6 @@ static void test_begin_pass_clears_depth_after_depth_writes_were_disabled(void) 
     nt_gfx_end_frame();
 
     destroy_test_target(&target);
-    nt_gfx_destroy_pipeline(no_depth_write_pipeline);
     nt_gfx_destroy_shader(fragment_shader);
     nt_gfx_destroy_shader(vertex_shader);
 }
@@ -901,7 +898,6 @@ static void test_global_block_from_the_desc_binds_in_the_program(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
-    nt_gfx_destroy_pipeline(pip);
     nt_gfx_destroy_program(prog);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
@@ -951,8 +947,6 @@ static void test_uniform_values_are_shared_by_pipelines_on_one_program(void) {
     assert_rgba(pixels, 16, 0, 255, 0, 255);
 
     destroy_test_target(&target);
-    nt_gfx_destroy_pipeline(pip_b);
-    nt_gfx_destroy_pipeline(pip_a);
     nt_gfx_destroy_program(prog);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
@@ -1005,8 +999,6 @@ static void test_each_pipeline_binds_its_own_program(void) {
     assert_rgba(pixels, 16, 0, 0, 255, 255);
 
     destroy_test_target(&target);
-    nt_gfx_destroy_pipeline(pip_blue);
-    nt_gfx_destroy_pipeline(pip_red);
     nt_gfx_destroy_program(blue);
     nt_gfx_destroy_program(red);
     nt_gfx_destroy_shader(blue_fs);
@@ -1014,8 +1006,8 @@ static void test_each_pipeline_binds_its_own_program(void) {
     nt_gfx_destroy_shader(vs);
 }
 
-/* Destroying one pipeline must leave its shared program usable by the other. */
-static void test_destroying_one_pipeline_leaves_the_shared_program_alive(void) {
+/* Destroying one program takes its pipelines only: another program's pipeline keeps drawing. */
+static void test_destroying_one_program_leaves_another_programs_pipeline_drawing(void) {
     static const char *vertex_source = "void main() {\n"
                                        "    float x = float((gl_VertexID << 1) & 2);\n"
                                        "    float y = float(gl_VertexID & 2);\n"
@@ -1029,17 +1021,19 @@ static void test_destroying_one_pipeline_leaves_the_shared_program_alive(void) {
 
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    nt_program_t doomed = nt_gfx_make_program(vs, fs);
     nt_program_t prog = nt_gfx_make_program(vs, fs);
     nt_test_gfx_link_wait(prog);
-    nt_pipeline_t pip_a = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = false});
+    nt_pipeline_t pip_a = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = doomed, .depth_test = true});
     nt_pipeline_t pip_b = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = true});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip_a.id);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip_b.id);
 
     test_target_t target = make_test_target(4, 4, NT_TEXTURE_FORMAT_RGBA8, NT_TEXTURE_FORMAT_DEPTH24);
 
-    nt_gfx_destroy_pipeline(pip_a);
-    TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
+    nt_gfx_destroy_program(doomed);
+    TEST_ASSERT_FALSE(nt_gfx_pipeline_valid(pip_a));
+    TEST_ASSERT_TRUE(nt_gfx_pipeline_valid(pip_b));
 
     uint8_t pixels[4 * 4 * 4] = {0};
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target, .clear_color = {0.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F});
@@ -1050,7 +1044,6 @@ static void test_destroying_one_pipeline_leaves_the_shared_program_alive(void) {
     assert_rgba(pixels, 16, 0, 255, 0, 255);
 
     destroy_test_target(&target);
-    nt_gfx_destroy_pipeline(pip_b);
     nt_gfx_destroy_program(prog);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
@@ -1907,7 +1900,7 @@ int main(void) {
     RUN_TEST(test_global_block_from_the_desc_binds_in_the_program);
     RUN_TEST(test_uniform_values_are_shared_by_pipelines_on_one_program);
     RUN_TEST(test_each_pipeline_binds_its_own_program);
-    RUN_TEST(test_destroying_one_pipeline_leaves_the_shared_program_alive);
+    RUN_TEST(test_destroying_one_program_leaves_another_programs_pipeline_drawing);
     RUN_TEST(test_uniform_cache_addresses_all_sixteen_array_elements);
     RUN_TEST(test_uniform_cache_preserves_long_names);
     RUN_TEST(test_uniform_cache_expands_only_terminal_struct_array_indices);

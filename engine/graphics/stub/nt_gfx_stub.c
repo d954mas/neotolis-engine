@@ -90,8 +90,6 @@ void nt_gfx_destroy_shader(nt_shader_t shd) { (void)shd; }
 
 void nt_gfx_destroy_program(nt_program_t prog) { (void)prog; }
 
-void nt_gfx_destroy_pipeline(nt_pipeline_t pip) { (void)pip; }
-
 void nt_gfx_destroy_vertex_input(nt_vertex_input_t vi) { (void)vi; }
 
 void nt_gfx_destroy_buffer(nt_buffer_t buf) { (void)buf; }

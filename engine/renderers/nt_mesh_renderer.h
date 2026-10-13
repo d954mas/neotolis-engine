@@ -90,10 +90,4 @@ void nt_mesh_renderer_draw_skinned(nt_mesh_t mesh, nt_material_t material, nt_te
 void nt_mesh_renderer_draw_list_skinned(uint32_t stream, const nt_render_item_t *items, uint32_t count);
 #endif
 
-// #region test_access
-#ifdef NT_TEST_ACCESS
-uint32_t nt_mesh_renderer_test_pipeline_cache_count(void);
-#endif
-// #endregion
-
 #endif /* NT_MESH_RENDERER_H */

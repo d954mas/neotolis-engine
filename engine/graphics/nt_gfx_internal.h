@@ -172,9 +172,9 @@ bool nt_gfx_backend_program_sampler_info(uint32_t program_backend, uint32_t name
 uint32_t nt_gfx_backend_program_sampler_mask(uint32_t program_backend);
 
 /* `slot` is the frontend pool slot: the pool owns allocation, the backend table
- * mirrors it 1:1 and the front-end addresses records by that slot -- returns
- * exactly `slot`, or 0 on failure. */
-uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend, uint32_t slot);
+ * mirrors it 1:1 and the front-end addresses records by that slot. Fills a CPU
+ * record only, so it cannot fail. */
+void nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend, uint32_t slot);
 void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle);
 
 /* Bakes the desc's vertex layout and the given buffer backends into an owned VAO. Restores the

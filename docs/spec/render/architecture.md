@@ -333,9 +333,7 @@ numeric uniform value that draw needs. Materials supply only their declared
 params; any required value they omit must be explicitly established by the game
 or renderer. The vec4 cache neither validates material completeness nor resets
 omitted values. Destroying a program destroys its
-pipelines, and a context loss frees every pipeline slot; renderers remove
-dead cache records during insertion after a miss or when resetting their
-caches.
+pipelines, and a context loss frees every pipeline slot.
 
 **Depth comparison.** `nt_pipeline_desc_t.depth_func` selects any of the eight
 comparisons: `NT_DEPTH_LESS` (zero/default), `LEQUAL`, `ALWAYS`, `GEQUAL`,
@@ -345,9 +343,20 @@ maps nearer surfaces to larger depth values and a pass `clear_depth` of 0.
 Selecting the comparison does not change the projection, clear value, clip
 range, or depth-sampling comparison state.
 
-**Cache identity.** Renderers key their pipeline caches on the exact
-identity of the descriptor, `nt_gfx_pipeline_key_t` from
-`nt_gfx_pipeline_key(desc)`: every enum and bool field packed bit-exact into
+**Cache identity.** gfx deduplicates pipelines: `nt_gfx_make_pipeline`
+returns the live pipeline whose descriptor has the same exact identity, or
+creates one. The label is not identity, and gfx stores none. A
+latched context loss returns invalid before the lookup. A hit needs no other
+check: destroying a program and a context loss clear its pipelines' keys, so a
+live entry has a live program, and its state passed validation at creation.
+The live-program and blend asserts run only on a miss. A hit records one `CACHE`
+operation with no resource definition. gfx owns every
+pipeline: it dies with its program (`nt_gfx_destroy_program`), a context loss
+or `nt_gfx_shutdown`, and there is no pipeline destroy. Budget
+`nt_gfx_desc_t.max_pipelines` for every distinct state made on live programs;
+state that animates goes through uniforms, not new pipelines.
+
+The identity is a private key: every enum and bool field packed bit-exact into
 one 64-bit word (program handle, depth, cull, polygon-offset enable, blend
 factors and ops) plus the float payloads (blend constant, polygon-offset
 factor/units) that cannot pack. Equal keys mean identical pipelines; a hit
@@ -364,14 +373,15 @@ Lane inputs are range-asserted: material-owned lanes at
 polygon offset) in the packer alone — unconditionally, a disabled blend included:
 canonicalisation is about identity, validity has no exceptions. So an
 out-of-range value can never truncate onto a valid neighbour and turn into a
-cache hit. gfx owns the lane widths, and pins the desc size and field offsets
+hit on another desc's pipeline. gfx owns the lane widths, and pins the desc size and field offsets
 with static asserts as a partial tripwire: a new field that moves a later offset
-trips it, one that fits a padding hole does not and must be added by hand. The
-packer is header-inline, so every gfx composition (real, stub, test fake) carries it
-with no link-order dependency. The cached pipelines borrow
-programs the game owns, so a cache entry never extends a program's lifetime.
-The population is distinct material states, tens of values in a real game, so
-a fixed array with a linear scan stays cheaper than a hash map at that scale.
+trips it, one that fits a padding hole does not and must be added by hand.
+The key is stored per pipeline slot and zeroed when the slot is freed; a free
+slot never matches because every key carries a nonzero program handle. The
+population is distinct material states, tens of values in a real game, so a
+linear scan of the slots stays cheaper than a hash map at that scale.
+Pipelines borrow programs the game owns, so a pipeline never extends a
+program's lifetime.
 
 A linear fold is not an identity: nested folds hand the handle and some state
 lane the same coefficient (`program.id*K + ... + cull*K`), so `(p, cull)` and
@@ -409,9 +419,9 @@ texture or sampler changed in the pass. The text renderer records its font's
 complete set with every draw; gfx drops it when unchanged, so consecutive draws
 of one font and material merge.
 
-The material-driven mesh, sprite, and text renderer caches build the
-`nt_pipeline_desc_t` from the material's render state and key on its
-`nt_gfx_pipeline_key_t`. Layouts live on vertex-input objects, so materials
+The material-driven mesh, sprite, and text renderers build the
+`nt_pipeline_desc_t` from the material's render state and ask gfx for it on
+each material transition; they keep no pipeline cache. Layouts live on vertex-input objects, so materials
 never split pipelines by layout. The sprite renderer resolves the pipeline once per material change
 inside a `draw_list` call, not once per run: runs also split per atlas page,
 and nothing can replace a material's program inside the call.
@@ -600,9 +610,8 @@ links `skin_comp`; an executable links exactly one, and its whole API is in
 `renderers/nt_mesh_renderer.h`. `nt_mesh_renderer_init()` runs after
 `nt_gfx_init` and registers the instance layouts; a new `nt_gfx_init`
 invalidates them, so the game calls `nt_mesh_renderer_shutdown()` before it and
-init again after. Plain and skinned draws share one pipeline cache of
-`NT_MESH_RENDERER_MAX_PIPELINES` entries (compile-time, default 64; exhaustion
-asserts). The entry points:
+init again after. Plain and skinned draws resolve their pipelines from gfx
+the same way. The entry points:
 
 - the cores, `nt_mesh_renderer_draw(mesh, material, buffer, offset, count)`
   and, in the skinned target, `nt_mesh_renderer_draw_skinned(mesh, material,
@@ -1268,7 +1277,7 @@ Not all renderers carry the same weight. The engine ships three classes; copying
 pattern, one instanced draw per compatible run (see items-sorting-batching.md),
 packed into frame storage or a caller buffer and recorded at the call. Use for 3D
 meshes, custom geometry, anything where the game owns batching strategy. Stay
-minimal. Plain and skinned mesh draws share one core and one pipeline cache.
+minimal. Plain and skinned mesh draws share one core.
 
 **Batched dynamic** — high-throughput renderers (`nt_sprite_renderer`; future particles). Many small items per frame (1k–60k): geometry is written straight into frame storage, `draw_list` records one draw per run of equal batch keys, and immediate emits rely on the front-end's bind dedup and draw merge instead of a command queue. Multi-page atlas resolution and the SIMD quad path stay. Measured on bunnymark at 60k sprites: 2 draws, 24 GL calls and 4 buffer uploads per frame, 8.5 ms whole-frame CPU in Chrome (ANGLE D3D11). The whole frame's geometry goes up in one upload (6.3 MB with `uint32_t` indices); at that size the frame storage does not stay in the CPU cache, which dominates the frame cost on native desktop GL at 60k sprites.
 

@@ -13,6 +13,55 @@
 #include "nt_shader_format.h"
 #include "nt_texture_format.h"
 
+// #region pipeline identity
+/* ---- Pipeline identity ----
+ * Exact identity of a desc, label excluded: equal keys <=> identical baked state.
+ * `bits` packs every enum/bool lane; the float payloads ride along as bit patterns. */
+typedef struct {
+    uint64_t bits;
+    uint32_t float_bits[6]; /* blend.constant_color, polygon_offset_factor, polygon_offset_units */
+} nt_gfx_pipeline_key_t;
+
+/* Lane widths. The packer asserts each input fits: an out-of-range value must not
+ * truncate onto a valid neighbour and turn into a hit on another desc's pipeline. */
+_Static_assert(NT_BLEND_SRC_ALPHA_SATURATE < 16, "blend factor lane is 4 bits");
+_Static_assert(NT_BLEND_OP_MAX < 8, "blend op lane is 3 bits");
+_Static_assert(NT_DEPTH_NEVER < 8, "depth func lane is 3 bits");
+/* Partial tripwire for the packer: catches a desc field that moves a later offset or the
+ * size. A field that fits an existing padding hole moves nothing -- review by hand. */
+_Static_assert(offsetof(nt_pipeline_desc_t, depth_func) == 8 && offsetof(nt_pipeline_desc_t, cull_mode) == 12 && offsetof(nt_pipeline_desc_t, blend) == 16 &&
+                   offsetof(nt_pipeline_desc_t, polygon_offset) == 40 && offsetof(nt_pipeline_desc_t, polygon_offset_factor) == 44 && offsetof(nt_pipeline_desc_t, polygon_offset_units) == 48 &&
+                   offsetof(nt_pipeline_desc_t, label) == (sizeof(void *) == 8 ? 56 : 52) && sizeof(nt_pipeline_desc_t) == (sizeof(void *) == 8 ? 64 : 56),
+               "nt_pipeline_desc_t changed -- update pipeline_key");
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
+static nt_gfx_pipeline_key_t pipeline_key(const nt_pipeline_desc_t *desc) {
+    NT_ASSERT(desc->cull_mode <= 2 && "cull_mode out of range");
+    NT_ASSERT((uint32_t)desc->depth_func <= NT_DEPTH_NEVER && "depth_func out of range");
+    NT_ASSERT(desc->blend.src_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && desc->blend.dst_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && desc->blend.src_alpha <= NT_BLEND_SRC_ALPHA_SATURATE &&
+              desc->blend.dst_alpha <= NT_BLEND_SRC_ALPHA_SATURATE && "blend factor out of range");
+    NT_ASSERT(desc->blend.op_rgb <= NT_BLEND_OP_MAX && desc->blend.op_alpha <= NT_BLEND_OP_MAX && "blend op out of range");
+    /* Identity only: a disabled blend is opaque whatever its (valid) factors say. */
+    const nt_blend_state_t blend = desc->blend.enabled ? desc->blend : nt_blend_opaque();
+    nt_gfx_pipeline_key_t key;
+    key.bits = (uint64_t)desc->program.id | (uint64_t)(desc->depth_test ? 1U : 0U) << 32 | (uint64_t)(desc->depth_write ? 1U : 0U) << 33 | (uint64_t)(desc->polygon_offset ? 1U : 0U) << 34 |
+               (uint64_t)(blend.enabled ? 1U : 0U) << 35 | (uint64_t)desc->depth_func << 36 | (uint64_t)desc->cull_mode << 39 | (uint64_t)blend.src_rgb << 41 | (uint64_t)blend.dst_rgb << 45 |
+               (uint64_t)blend.src_alpha << 49 | (uint64_t)blend.dst_alpha << 53 | (uint64_t)blend.op_rgb << 57 | (uint64_t)blend.op_alpha << 60;
+    /* Bit patterns: exact, so -0.0 vs 0.0 can only over-split, never alias. Disabled offset packs as zero. */
+    const float float_bits[6] = {blend.constant_color[0],
+                                 blend.constant_color[1],
+                                 blend.constant_color[2],
+                                 blend.constant_color[3],
+                                 desc->polygon_offset ? desc->polygon_offset_factor : 0.0F,
+                                 desc->polygon_offset ? desc->polygon_offset_units : 0.0F};
+    memcpy(key.float_bits, float_bits, sizeof(key.float_bits));
+    return key;
+}
+
+/* `bits` first: a miss costs one word, the floats are read only on a match. */
+static bool pipeline_key_equal(const nt_gfx_pipeline_key_t *a, const nt_gfx_pipeline_key_t *b) { return a->bits == b->bits && memcmp(a->float_bits, b->float_bits, sizeof(a->float_bits)) == 0; }
+// #endregion
+
 /* Activation staging shared by mesh decode (VBO then IBO) and the transcoded
  * Basis chain: grows on demand, freed after NT_STAGE_IDLE_FRAMES idle -- no
  * per-activation heap traffic while a pack streams in. */
@@ -128,10 +177,10 @@ static struct {
     nt_pool_t texture_pool;
     nt_pool_t render_target_pool;
 
-    uint32_t *shader_backends;   /* backend handles parallel to pool slots */
-    uint32_t *program_backends;  /* 0 while the link is pending */
-    uint32_t *program_pending;   /* backend handle while the link runs */
-    uint32_t *pipeline_programs; /* full program handle each pipeline borrows */
+    uint32_t *shader_backends;            /* backend handles parallel to pool slots */
+    uint32_t *program_backends;           /* 0 while the link is pending */
+    uint32_t *program_pending;            /* backend handle while the link runs */
+    nt_gfx_pipeline_key_t *pipeline_keys; /* exact desc identity per live slot; all-zero when free */
     uint32_t *buffer_backends;
     uint32_t *texture_backends;
 
@@ -211,6 +260,9 @@ static nt_gfx_result_t backend_failed(const char *what) {
 /* The backend slot a program holds, linked or still linking. */
 static uint32_t program_slot_backend(uint32_t slot) { return s_gfx.program_backends[slot] != 0 ? s_gfx.program_backends[slot] : s_gfx.program_pending[slot]; }
 
+/* The full program handle a pipeline slot borrows: its key packs it into the low 32 bits. */
+static uint32_t pipeline_program(uint32_t slot) { return (uint32_t)s_gfx.pipeline_keys[slot].bits; }
+
 // #region frame observation
 #if NT_GFX_CAPTURE_ENABLED
 nt_gfx_capture_state_t g_nt_gfx_capture;
@@ -252,7 +304,7 @@ static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) 
                 break;
             case NT_GFX_OBJECT_PIPELINE:
                 event->data.resource.backend = slot;
-                event->data.resource.related[0] = s_gfx.pipeline_programs[slot];
+                event->data.resource.related[0] = pipeline_program(slot);
                 break;
             case NT_GFX_OBJECT_VERTEX_INPUT:
                 event->data.resource.backend = slot;
@@ -397,7 +449,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     s_gfx.shader_backends = (uint32_t *)calloc(desc->max_shaders + 1, sizeof(uint32_t));
     s_gfx.program_backends = (uint32_t *)calloc(desc->max_programs + 1, sizeof(uint32_t));
     s_gfx.program_pending = (uint32_t *)calloc(desc->max_programs + 1, sizeof(uint32_t));
-    s_gfx.pipeline_programs = (uint32_t *)calloc(desc->max_pipelines + 1, sizeof(uint32_t));
+    s_gfx.pipeline_keys = (nt_gfx_pipeline_key_t *)calloc(desc->max_pipelines + 1, sizeof(nt_gfx_pipeline_key_t));
     s_gfx.buffer_backends = (uint32_t *)calloc(desc->max_buffers + 1, sizeof(uint32_t));
     s_gfx.texture_backends = (uint32_t *)calloc(desc->max_textures + 1, sizeof(uint32_t));
 
@@ -414,7 +466,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     s_gfx.mesh_table = (nt_gfx_mesh_info_t *)calloc((size_t)desc->max_meshes + 1, sizeof(nt_gfx_mesh_info_t));
     s_gfx.mesh_vertex_inputs = (nt_vertex_input_t *)calloc(((size_t)desc->max_meshes + 1) * NT_GFX_MESH_VERTEX_INPUTS, sizeof(nt_vertex_input_t));
     /* Init-time OOM on a few KB of tables is not a state a game can recover from. */
-    NT_ASSERT(s_gfx.shader_backends && s_gfx.program_backends && s_gfx.program_pending && s_gfx.pipeline_programs && s_gfx.buffer_backends && s_gfx.texture_backends && s_gfx.buffer_metas &&
+    NT_ASSERT(s_gfx.shader_backends && s_gfx.program_backends && s_gfx.program_pending && s_gfx.pipeline_keys && s_gfx.buffer_backends && s_gfx.texture_backends && s_gfx.buffer_metas &&
               s_gfx.vertex_input_metas && s_gfx.texture_metas && s_gfx.render_target_metas && s_gfx.mesh_table && s_gfx.mesh_vertex_inputs && "gfx init: out of memory");
 
     if (!nt_gfx_backend_init(desc)) {
@@ -497,7 +549,7 @@ void nt_gfx_shutdown(void) {
     free(s_gfx.shader_backends);
     free(s_gfx.program_backends);
     free(s_gfx.program_pending);
-    free(s_gfx.pipeline_programs);
+    free(s_gfx.pipeline_keys);
     free(s_gfx.buffer_backends);
     free(s_gfx.texture_backends);
     free(s_gfx.buffer_metas);
@@ -583,14 +635,15 @@ static void wipe_backend_handles(void) {
         s_gfx.program_pending[i] = 0;
     }
     /* Pipelines, vertex inputs and render targets are baked objects with no re-fill path:
-     * loss frees their slots outright, so handles held across a loss go
-     * stale and the weak renderer caches self-heal on their validity
-     * checks. Primary resources stay as husks -- owners destroy them. */
-    for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
+     * loss frees their slots outright, so handles held across a loss go stale and owners
+     * make them again. Primary resources stay as husks -- owners destroy them.
+     * Pipelines free high to low: the pool reuses the last freed slot first, and make_pipeline
+     * scans from slot 1, so the next pipelines land where the scan reaches them soonest. */
+    for (uint32_t i = s_gfx.pipeline_pool.capacity; i >= 1; i--) {
         if (nt_pool_slot_alive(&s_gfx.pipeline_pool, i)) {
             nt_pool_free(&s_gfx.pipeline_pool, s_gfx.pipeline_pool.slots[i].id);
         }
-        s_gfx.pipeline_programs[i] = 0;
+        s_gfx.pipeline_keys[i] = (nt_gfx_pipeline_key_t){0};
     }
     for (uint32_t i = 1; i <= s_gfx.vertex_input_pool.capacity; i++) {
         if (nt_pool_slot_alive(&s_gfx.vertex_input_pool, i)) {
@@ -1005,14 +1058,24 @@ static void assert_layout_webgl2_rules(const nt_vertex_layout_t *layout) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static nt_gfx_result_t make_pipeline(const nt_pipeline_desc_t *desc, nt_pipeline_t *out) {
-    /* Everything a caller controls is a developer error and traps. What is left
-     * -- a lost context, a failed backend allocation -- returns an invalid handle
-     * the caller retries on a later frame. */
+    /* Everything a caller controls is a developer error and traps. A lost context returns an
+     * invalid handle the caller retries on a later frame; the backend create only fills a record. */
     NT_ASSERT(desc != NULL);
     /* Context loss zeroes the program backend, so without this every renderer
      * would trap on the program assert below. */
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
+    }
+    /* Equal descs share one pipeline. A hit needs no further checks: its program is live and
+     * not discarded (destroy and loss clear its keys), and its blend passed them at creation.
+     * A free slot's key is all zero, so the nonzero program handle keeps it from matching. */
+    NT_ASSERT(desc->program.id != 0 && "make_pipeline: invalid program");
+    const nt_gfx_pipeline_key_t key = pipeline_key(desc);
+    for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
+        if (pipeline_key_equal(&s_gfx.pipeline_keys[i], &key)) {
+            out->id = s_gfx.pipeline_pool.slots[i].id;
+            return NT_GFX_RESULT_CACHE;
+        }
     }
     NT_ASSERT(nt_pool_valid(&s_gfx.program_pool, desc->program.id) && program_slot_backend(nt_pool_slot_index(desc->program.id)) != 0 &&
               "make_pipeline: invalid program, or one a context loss discarded");
@@ -1023,16 +1086,8 @@ static nt_gfx_result_t make_pipeline(const nt_pipeline_desc_t *desc, nt_pipeline
 
     uint32_t slot = nt_pool_slot_index(id);
     uint32_t program_backend = program_slot_backend(nt_pool_slot_index(desc->program.id));
-    uint32_t backend = nt_gfx_backend_create_pipeline(desc, program_backend, slot);
-    if (backend == 0) {
-        NT_LOG_ERROR("backend pipeline creation failed");
-        nt_pool_free(&s_gfx.pipeline_pool, id);
-        return NT_GFX_RESULT_BACKEND_FAILURE;
-    }
-    /* Backend records are addressed directly by pool slot. */
-    NT_ASSERT(backend == slot && "create_pipeline: backend must mirror the pool slot");
-
-    s_gfx.pipeline_programs[slot] = desc->program.id;
+    nt_gfx_backend_create_pipeline(desc, program_backend, slot);
+    s_gfx.pipeline_keys[slot] = key;
 
     out->id = id;
     NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_PIPELINE, id);
@@ -1048,8 +1103,8 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static nt_gfx_result_t make_vertex_input(const nt_vertex_input_desc_t *desc, nt_vertex_input_t *out) {
-    /* Same contract as make_pipeline: caller errors trap, only a lost context
-     * or a failed backend allocation returns an invalid handle. */
+    /* Caller errors trap; only a lost context or a failed backend allocation
+     * returns an invalid handle. */
     NT_ASSERT(desc != NULL);
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
@@ -1450,6 +1505,14 @@ void nt_gfx_destroy_shader(nt_shader_t shd) {
     NT_GFX_END(destroy_shader(shd));
 }
 
+/* Live slot only: the program cascade is the one caller. */
+static nt_gfx_result_t destroy_pipeline(uint32_t slot) {
+    nt_gfx_backend_destroy_pipeline(slot);
+    s_gfx.pipeline_keys[slot] = (nt_gfx_pipeline_key_t){0};
+    nt_pool_free(&s_gfx.pipeline_pool, s_gfx.pipeline_pool.slots[slot].id);
+    return NT_GFX_RESULT_ACCEPTED;
+}
+
 static nt_gfx_result_t destroy_program(nt_program_t prog) {
     /* NT_PROGRAM_INVALID is a first-class value -- games clear their handles on
      * context loss and destroy them again at shutdown. Not an error. */
@@ -1459,12 +1522,14 @@ static nt_gfx_result_t destroy_program(nt_program_t prog) {
     /* A stale non-zero handle means the owner lost track of which programs it
      * still holds -- the one mistake this ownership model cannot absorb. */
     NT_ASSERT(nt_pool_valid(&s_gfx.program_pool, prog.id) && "destroy_program: stale handle -- clear the handle to NT_PROGRAM_INVALID when you destroy it");
-    /* Dependent pipelines cannot draw again; reclaim their slots and VAOs now. */
-    for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
-        if (s_gfx.pipeline_programs[i] != prog.id) {
+    /* Dependent pipelines cannot draw again; reclaim their slots now, high to low (see the loss
+     * wipe). Each records its own DESTROY; the program's frame-rule check already covers them. */
+    for (uint32_t i = s_gfx.pipeline_pool.capacity; i >= 1; i--) {
+        if (pipeline_program(i) != prog.id) {
             continue;
         }
-        nt_gfx_destroy_pipeline((nt_pipeline_t){s_gfx.pipeline_pool.slots[i].id});
+        NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_PIPELINE, s_gfx.pipeline_pool.slots[i].id);
+        NT_GFX_END(destroy_pipeline(i));
     }
     uint32_t slot = nt_pool_slot_index(prog.id);
     nt_gfx_backend_destroy_program(program_slot_backend(slot));
@@ -1478,24 +1543,6 @@ void nt_gfx_destroy_program(nt_program_t prog) {
     NT_GFX_ASSERT_FRAME_RULE(&s_gfx.program_pool, prog.id);
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_PROGRAM, prog.id);
     NT_GFX_END(destroy_program(prog));
-}
-
-static nt_gfx_result_t destroy_pipeline(nt_pipeline_t pip) {
-    /* Program destruction may already have reclaimed this cached pipeline. */
-    if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
-        return NT_GFX_RESULT_INVALID_HANDLE;
-    }
-    uint32_t slot = nt_pool_slot_index(pip.id);
-    nt_gfx_backend_destroy_pipeline(slot);
-    s_gfx.pipeline_programs[slot] = 0;
-    nt_pool_free(&s_gfx.pipeline_pool, pip.id);
-    return NT_GFX_RESULT_ACCEPTED;
-}
-
-void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
-    NT_GFX_ASSERT_FRAME_RULE(&s_gfx.pipeline_pool, pip.id);
-    NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_PIPELINE, pip.id);
-    NT_GFX_END(destroy_pipeline(pip));
 }
 
 static nt_gfx_result_t destroy_vertex_input(nt_vertex_input_t vi) {
@@ -1607,7 +1654,7 @@ nt_program_t nt_gfx_pipeline_program(nt_pipeline_t pip) {
     if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
         return NT_PROGRAM_INVALID;
     }
-    nt_program_t prog = {s_gfx.pipeline_programs[nt_pool_slot_index(pip.id)]};
+    nt_program_t prog = {pipeline_program(nt_pool_slot_index(pip.id))};
     return prog;
 }
 
@@ -1657,10 +1704,10 @@ static nt_gfx_result_t bind_pipeline(nt_pipeline_t pip) {
         return NT_GFX_RESULT_INVALID_HANDLE;
     }
     uint32_t slot = nt_pool_slot_index(pip.id);
-    uint32_t program = s_gfx.pipeline_programs[slot];
+    uint32_t program = pipeline_program(slot);
     /* The set is program state: another pipeline on the same program keeps it,
      * and a program without samplers needs none. */
-    if (s_gfx.bound_pipeline == 0 || s_gfx.pipeline_programs[nt_pool_slot_index(s_gfx.bound_pipeline)] != program) {
+    if (s_gfx.bound_pipeline == 0 || pipeline_program(nt_pool_slot_index(s_gfx.bound_pipeline)) != program) {
         const uint32_t program_backend = s_gfx.program_backends[nt_pool_slot_index(program)];
         NT_ASSERT(program_backend != 0 && "bind_pipeline: program is not ready -- gate draws on nt_gfx_program_ready");
         const bool samples = nt_gfx_backend_program_sampler_mask(program_backend) != 0;
@@ -1857,7 +1904,7 @@ static nt_gfx_result_t apply_texture_bindings(const nt_gfx_texture_binding_t *bi
     }
     NT_ASSERT(s_gfx.bound_pipeline != 0 && "apply_texture_bindings: no pipeline bound");
     NT_ASSERT((bindings != NULL || count == 0) && "apply_texture_bindings: NULL bindings with nonzero count");
-    const uint32_t program = s_gfx.pipeline_programs[nt_pool_slot_index(s_gfx.bound_pipeline)];
+    const uint32_t program = pipeline_program(nt_pool_slot_index(s_gfx.bound_pipeline));
     const uint32_t program_backend = s_gfx.program_backends[nt_pool_slot_index(program)];
     const uint8_t required_mask = (uint8_t)nt_gfx_backend_program_sampler_mask(program_backend);
 
@@ -2172,7 +2219,7 @@ void nt_gfx_set_viewport(int x, int y, int w, int h) {
 /* Uniforms belong to the bound pipeline's borrowed program. */
 static uint32_t uniform_target_program(void) {
     NT_ASSERT(s_gfx.bound_pipeline != 0 && "set_uniform: no pipeline bound");
-    return s_gfx.program_backends[nt_pool_slot_index(s_gfx.pipeline_programs[nt_pool_slot_index(s_gfx.bound_pipeline)])];
+    return s_gfx.program_backends[nt_pool_slot_index(pipeline_program(nt_pool_slot_index(s_gfx.bound_pipeline)))];
 }
 
 static nt_gfx_result_t set_uniform_mat4(nt_hash32_t name, const float *matrix) {
