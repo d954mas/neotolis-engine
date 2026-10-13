@@ -189,6 +189,7 @@ static void skinned_draw_list(const nt_render_item_t *items, uint32_t count) {
 }
 
 void setUp(void) {
+    nt_gfx_fake_reset();
     s_surface_pack_created = false;
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 8, .max_pipelines = 16, .max_buffers = 32, .max_textures = 16, .max_meshes = 8,
@@ -823,7 +824,7 @@ void test_skinned_and_plain_lists_share_one_pipeline(void) {
     nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, &plain, 1);
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_pipeline_create_count());
 }
 
 /* Records one skinned instance through the core in its own frame and executes it. */

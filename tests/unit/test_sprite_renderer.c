@@ -456,6 +456,7 @@ static nt_gfx_desc_t test_gfx_desc(void) {
 }
 
 static void setup_with_gfx_desc(const nt_gfx_desc_t *gfx_desc) {
+    nt_gfx_fake_reset();
     s_pack_blob_count = 0;
     memset((void *)s_pack_blobs, 0, sizeof(s_pack_blobs));
     s_atlas_res = NT_RESOURCE_INVALID;
@@ -610,11 +611,11 @@ void test_sprite_renderer_pipeline_cache(void) {
     items[1].batch_key = sprite_batch_key(e1, mat_b);
 
     nt_sprite_renderer_draw_list(items, 2);
-    TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_pipeline_create_count());
 
     /* Re-issuing the same materials must NOT inflate the cache */
     nt_sprite_renderer_draw_list(items, 2);
-    TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_pipeline_create_count());
 }
 
 /* Programs come out of the pool in creation order, so two shader pairs get
@@ -650,7 +651,7 @@ void test_neighbouring_programs_one_depth_write_step_apart_get_their_own_pipelin
     nt_sprite_renderer_draw_list(items, 2);
     nt_test_frame_next();
 
-    TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_pipeline_create_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(p0.id, nt_gfx_fake_draw_trace_at(0).program.id);
     TEST_ASSERT_EQUAL_UINT32(p1.id, nt_gfx_fake_draw_trace_at(1).program.id);
@@ -671,7 +672,7 @@ void test_sprite_renderer_set_material_survives_a_destroyed_program(void) {
     const uint32_t draws_before = recorded_draws();
     nt_sprite_renderer_emit_region(s_atlas_res, 0, NT_MATH_MAT4_IDENTITY, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
 
-    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_pipeline_create_count());
     TEST_ASSERT_EQUAL_UINT32(draws_before, recorded_draws());
 }
 
@@ -684,7 +685,7 @@ void test_sprite_renderer_skips_a_linking_program_until_its_link_finishes(void) 
     nt_sprite_renderer_set_material(mat);
     const uint32_t draws_before = recorded_draws();
     nt_sprite_renderer_emit_region(s_atlas_res, 0, NT_MATH_MAT4_IDENTITY, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_pipeline_create_count());
     TEST_ASSERT_EQUAL_UINT32(draws_before, recorded_draws());
 
     nt_gfx_fake_hold_program_links(false);
@@ -692,7 +693,7 @@ void test_sprite_renderer_skips_a_linking_program_until_its_link_finishes(void) 
     nt_sprite_renderer_set_material(mat);
     const uint32_t linked_before = recorded_draws();
     nt_sprite_renderer_emit_region(s_atlas_res, 0, NT_MATH_MAT4_IDENTITY, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_pipeline_create_count());
     TEST_ASSERT_EQUAL_UINT32(linked_before + 1, recorded_draws());
 }
 
@@ -1185,7 +1186,7 @@ void test_sprite_renderer_layout_splits_vertex_inputs_not_pipelines(void) {
     nt_sprite_renderer_set_material(mat_radial);
 
     /* Same vs/fs/state: one pipeline; different layout: two vertex inputs. */
-    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_pipeline_create_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_vertex_input_cache_count());
 }
 
@@ -1201,7 +1202,7 @@ void test_sprite_renderer_attr_map_location_step_splits_vertex_inputs(void) {
     nt_sprite_renderer_set_material(mat_loc4);
     nt_sprite_renderer_set_material(mat_loc5);
 
-    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_pipeline_create_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_vertex_input_cache_count());
 }
 
@@ -2277,7 +2278,7 @@ void test_sprite_renderer_draws_after_gfx_reinit(void) {
     nt_test_frame_finish_links();
     nt_sprite_renderer_set_material(material);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, NT_MATH_MAT4_IDENTITY, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_pipeline_create_count());
 
     tearDown();
     setUp();
@@ -2294,7 +2295,7 @@ void test_sprite_renderer_draws_after_gfx_reinit(void) {
     TEST_ASSERT_EQUAL_UINT32(nt_material_get_info(mat)->program.id, nt_gfx_fake_draw_trace_at(0).program.id);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_pipeline_create_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_pipeline_create_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_vertex_input_cache_count());
     nt_gfx_fake_draw_trace_reset(false);
 }

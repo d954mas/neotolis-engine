@@ -3,19 +3,12 @@
 
 #include "core/nt_assert.h"
 #include "graphics/nt_gfx.h"
-#include "log/nt_log.h"
 #include "material/nt_material.h"
 
 #include <stdbool.h>
 #include <stdint.h>
 
 /* Internal to the renderers -- not a public header, not installed. */
-
-/* The key is the exact desc identity (nt_gfx_pipeline_key); a hit needs no desc compare. */
-typedef struct {
-    nt_gfx_pipeline_key_t key;
-    nt_pipeline_t pipeline;
-} nt_renderer_pipeline_entry_t;
 
 static inline nt_pipeline_desc_t nt_renderer_material_pipeline_desc(const nt_material_info_t *material, const char *fallback_label) {
     return (nt_pipeline_desc_t){
@@ -27,42 +20,6 @@ static inline nt_pipeline_desc_t nt_renderer_material_pipeline_desc(const nt_mat
         .cull_mode = (uint8_t)material->cull_mode,
         .label = material->label != NULL ? material->label : fallback_label,
     };
-}
-
-/* Validate matched pipelines because program generations can wrap; dead matches return invalid.
- * Misses also return invalid. Cleanup is deferred to insertion. */
-static inline nt_pipeline_t nt_renderer_pipeline_cache_find(const nt_renderer_pipeline_entry_t *entries, uint16_t count, const nt_gfx_pipeline_key_t *key) {
-    for (uint16_t i = 0; i < count; i++) {
-        if (nt_gfx_pipeline_key_equal(&entries[i].key, key)) {
-            return nt_gfx_pipeline_valid(entries[i].pipeline) ? entries[i].pipeline : (nt_pipeline_t){0};
-        }
-    }
-    return (nt_pipeline_t){0};
-}
-
-/* Reap dead entries before checking capacity; exhaustion asserts.
- * Leave failed pipeline creation uncached so a later miss retries. */
-static inline nt_pipeline_t nt_renderer_pipeline_cache_insert(nt_renderer_pipeline_entry_t *entries, uint16_t *count, uint16_t cap, const nt_gfx_pipeline_key_t *key, const nt_pipeline_desc_t *desc) {
-    for (uint16_t i = 0; i < *count;) {
-        if (!nt_gfx_pipeline_valid(entries[i].pipeline)) {
-            entries[i] = entries[--(*count)];
-            continue;
-        }
-        i++;
-    }
-    /* TRAP omits assert text; the log identifies the renderer that exhausted its cache. */
-    if (*count >= cap) {
-        NT_LOG_ERROR("pipeline cache exhausted building '%s' -- raise that renderer's cap", (desc->label != NULL) ? desc->label : "(unlabeled)");
-    }
-    NT_ASSERT(*count < cap && "pipeline cache exhausted -- raise this renderer's cap (NT_*_RENDERER_MAX_PIPELINES)");
-    nt_pipeline_t pip = nt_gfx_make_pipeline(desc);
-    if (pip.id == 0) {
-        return pip;
-    }
-    entries[*count].key = *key;
-    entries[*count].pipeline = pip;
-    (*count)++;
-    return pip;
 }
 
 /* Every declared vec4 param. Uniforms are program state; sampler units are fixed at link and

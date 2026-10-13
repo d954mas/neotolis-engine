@@ -646,7 +646,6 @@ void test_a_reused_program_slot_does_not_hit_the_dead_entry(void) {
     const nt_program_t dead = nt_material_get_info(mat)->program;
 
     nt_test_frame_finish_links();
-    const uint16_t base = nt_text_renderer_test_pipeline_cache_count();
     nt_gfx_fake_reset();
     select_material(mat);
     draw_and_execute();
@@ -667,9 +666,6 @@ void test_a_reused_program_slot_does_not_hit_the_dead_entry(void) {
     draw_and_execute();
 
     TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_fake_pipeline_create_count());
-    /* One new entry, not two: destroying the program destroyed the pipeline built on
-     * it, and the scan swap-removed the dead entry instead of pinning a slot. */
-    TEST_ASSERT_EQUAL_UINT16(base + 1U, nt_text_renderer_test_pipeline_cache_count());
 }
 
 /* One glyph slot: 'A' takes it, B and C find every slot in use this frame and draw as tofu. */

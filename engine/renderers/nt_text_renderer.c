@@ -29,8 +29,6 @@ _Static_assert(sizeof(nt_text_vertex_t) == 52, "text vertex stride must be 52 by
 
 // #region Module state
 static struct {
-    nt_renderer_pipeline_entry_t pipelines[NT_TEXT_RENDERER_MAX_PIPELINES];
-    uint16_t pipeline_count;
     /* Weak: a context loss frees it, and the next resolve recreates it over the current frame buffers. */
     nt_vertex_input_t vertex_input;
 
@@ -77,12 +75,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *info) {
         .cull_mode = (uint8_t)info->cull_mode,
         .label = "text_renderer",
     };
-    const nt_gfx_pipeline_key_t key = nt_gfx_pipeline_key(&desc);
-    const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_text.pipelines, s_text.pipeline_count, &key);
-    if (cached.id != 0) {
-        return cached;
-    }
-    return nt_renderer_pipeline_cache_insert(s_text.pipelines, &s_text.pipeline_count, NT_TEXT_RENDERER_MAX_PIPELINES, &key, &desc);
+    return nt_gfx_make_pipeline(&desc);
 }
 
 static nt_vertex_input_t find_or_create_vertex_input(void) {
@@ -119,9 +112,6 @@ static nt_vertex_input_t find_or_create_vertex_input(void) {
 
 // #region Lifecycle
 void nt_text_renderer_shutdown(void) {
-    for (uint16_t i = 0; i < s_text.pipeline_count; i++) {
-        nt_gfx_destroy_pipeline(s_text.pipelines[i].pipeline);
-    }
     nt_gfx_destroy_vertex_input(s_text.vertex_input);
     memset(&s_text, 0, sizeof(s_text));
 }
@@ -530,10 +520,4 @@ void nt_text_renderer_draw_n(const nt_text_style_t *style, const float model[16]
 }
 
 void nt_text_renderer_draw(const nt_text_style_t *style, const float model[16], const char *utf8) { nt_text_renderer_draw_n(style, model, utf8, utf8 ? strlen(utf8) : 0U); }
-// #endregion
-
-// #region Test accessors
-#ifdef NT_TEST_ACCESS
-uint16_t nt_text_renderer_test_pipeline_cache_count(void) { return s_text.pipeline_count; }
-#endif
 // #endregion
