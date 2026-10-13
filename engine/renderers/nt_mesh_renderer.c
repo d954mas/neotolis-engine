@@ -249,9 +249,14 @@ void nt_mesh_renderer_draw_skinned(nt_mesh_t mesh, nt_material_t material, nt_te
     draw_one(mesh, material, s_mesh_renderer.skinned_layout, instances, offset, count, &skin);
 }
 
-static uint32_t find_skinned_run_end(const nt_render_item_t *items, uint32_t leader, uint32_t end, uint32_t texture_id) {
+static uint32_t find_skinned_run_end(const nt_render_item_t *items, uint32_t leader, uint32_t end, uint32_t texture_id, nt_skin_comp_view_t skin_view) {
     uint32_t run_end = leader + 1;
-    while (run_end < end && items[run_end].batch_key == items[leader].batch_key && nt_skin_comp_handle((nt_entity_t){.id = items[run_end].entity})->texture.id == texture_id) {
+    while (run_end < end && items[run_end].batch_key == items[leader].batch_key) {
+        const uint16_t skin_index = skin_view.sparse_indices[nt_entity_index((nt_entity_t){.id = items[run_end].entity})];
+        NT_ASSERT(skin_index != NT_INVALID_COMP_INDEX && "skinned render item: entity has no skin component");
+        if (skin_view.bindings[skin_index].texture.id != texture_id) {
+            break;
+        }
         run_end++;
     }
     return run_end;
@@ -266,9 +271,10 @@ void nt_mesh_renderer_draw_list_skinned(uint32_t stream, const nt_render_item_t 
     }
     NT_ASSERT(stream >= NT_GFX_FRAME_VERTEX && stream < NT_GFX_FRAME_STREAM_COUNT && "draw_list: not a frame vertex stream");
     NT_ASSERT(count == 0 || items != NULL);
-    /* Transform and drawable by inline sparse reads; the skin binding goes through its asserting accessor. */
+    /* Inline sparse reads per instance; each run leader goes through the asserting accessors. */
     const nt_transform_comp_view_t transform_view = nt_transform_comp_view();
     const nt_drawable_comp_view_t drawable_view = nt_drawable_comp_view();
+    const nt_skin_comp_view_t skin_view = nt_skin_comp_view();
     mesh_draw_t draw = {.instance_layout = s_mesh_renderer.skinned_layout, .instances = nt_gfx_frame_buffer(stream)};
     nt_gfx_texture_binding_t skin = {.name = {.value = s_mesh_renderer.skin_name_hash}, .sampler = NT_SAMPLER_DEFAULT};
     for (uint32_t run_start = 0, run_end = 0; run_start < count; run_start = run_end) {
@@ -277,7 +283,7 @@ void nt_mesh_renderer_draw_list_skinned(uint32_t stream, const nt_render_item_t 
         const nt_material_t material = *nt_material_comp_handle(leader);
         const nt_mesh_t mesh = *nt_mesh_comp_handle(leader);
         NT_ASSERT(skin.texture.id != 0 && "skinned draw requires a deformation texture");
-        run_end = find_skinned_run_end(items, run_start, count, skin.texture.id); /* the run shares the leader's texture */
+        run_end = find_skinned_run_end(items, run_start, count, skin.texture.id, skin_view); /* the run shares the leader's texture */
         const nt_material_info_t *mat_info = nt_material_get_info(material);
         const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(mesh);
         NT_ASSERT(mat_info != NULL && mesh_info != NULL && "skinned render item references a destroyed material or mesh");
@@ -290,13 +296,13 @@ void nt_mesh_renderer_draw_list_skinned(uint32_t stream, const nt_render_item_t 
         uint32_t offset = 0;
         nt_skinned_mesh_instance_t *dst = (nt_skinned_mesh_instance_t *)nt_gfx_frame_alloc(stream, instance_count * (uint32_t)sizeof(nt_skinned_mesh_instance_t), 4, &offset);
         for (uint32_t i = run_start; i < run_end; i++, dst++) {
-            const nt_entity_t entity = {.id = items[i].entity};
-            const uint16_t entity_index = nt_entity_index(entity);
+            const uint16_t entity_index = nt_entity_index((nt_entity_t){.id = items[i].entity});
             const uint16_t transform_index = transform_view.sparse_indices[entity_index];
             const uint16_t drawable_index = drawable_view.sparse_indices[entity_index];
             NT_ASSERT(transform_index != NT_INVALID_COMP_INDEX && "skinned render item: entity has no transform component");
             NT_ASSERT(drawable_index != NT_INVALID_COMP_INDEX && "skinned render item: entity has no drawable component");
-            const nt_deformation_binding_t binding = *nt_skin_comp_handle(entity);
+            /* The leader passed its accessor and every follower the run scan's skin assert. */
+            const nt_deformation_binding_t binding = skin_view.bindings[skin_view.sparse_indices[entity_index]];
             nt_mesh_instance_world_rows(dst->world_rows, transform_view.world_matrices[transform_index]);
             dst->skin_origins[0] = binding.x0;
             dst->skin_origins[1] = binding.y0;

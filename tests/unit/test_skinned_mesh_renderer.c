@@ -442,6 +442,81 @@ void test_draw_list_asserts_on_an_item_without_transform(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
+/* Skin bindings come from the skin view, whose dense order differs from the drawable one after a
+ * skin-only removal swaps the last binding forward: each instance still takes its own binding. */
+void test_skin_view_reads_each_binding_after_a_skin_only_removal(void) {
+    nt_mesh_t mesh = make_mesh();
+    nt_texture_t textures[2] = {make_deformation_texture(), make_deformation_texture()};
+    nt_material_t material = make_material(nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1));
+    nt_entity_t entities[4];
+    for (uint16_t i = 0; i < 4; i++) {
+        const nt_texture_t texture = textures[i == 2 ? 1 : 0];
+        entities[i] = make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture, .x0 = (uint16_t)(30U + i), .alpha = 0.25F * (float)i});
+        nt_drawable_comp_set_color(entities[i], 0x50607000U + i);
+    }
+    nt_skin_comp_remove(entities[0]); /* entity 3's binding moves to skin dense index 0 */
+    const nt_render_item_t items[3] = {make_item(entities[3], material, mesh), make_item(entities[1], material, mesh), make_item(entities[2], material, mesh)};
+    const uint16_t expected[3] = {3, 1, 2};
+
+    record_skinned_list(items, 3);
+    nt_test_frame_close(); /* frame storage keeps the frame's bytes until the next begin_frame */
+    TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
+    TEST_ASSERT_EQUAL_UINT32(2U * sizeof(nt_skinned_mesh_instance_t), nt_gfx_fake_last_instance_offset());
+    for (uint32_t i = 0; i < 3; i++) {
+        const nt_skinned_mesh_instance_t *instance = (const nt_skinned_mesh_instance_t *)g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].staging + i;
+        TEST_ASSERT_EQUAL_HEX32(0x50607000U + expected[i], instance->color);
+        TEST_ASSERT_EQUAL_UINT16(30U + expected[i], instance->skin_origins[0]);
+        TEST_ASSERT_TRUE(instance->skin_alpha == 0.25F * (float)expected[i]); /* NOLINT -- exact quarter steps */
+    }
+    nt_test_frame_open();
+}
+
+/* A run leader reads its binding through the asserting accessor. */
+void test_draw_list_asserts_on_a_leader_without_skin(void) {
+    nt_mesh_t mesh = make_mesh();
+    nt_material_t material = make_material(nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1));
+    nt_entity_t entity = make_entity(mesh, material, (nt_deformation_binding_t){.texture = make_deformation_texture()});
+    nt_skin_comp_remove(entity);
+    nt_render_item_t item = make_item(entity, material, mesh);
+
+    begin_storage_frame();
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list_skinned(NT_GFX_FRAME_VERTEX, &item, 1));
+    TEST_ASSERT_EQUAL_STRING("idx != NT_INVALID_COMP_INDEX", nt_test_assert_last_expr);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+}
+
+/* Followers are read through the skin view; the run scan asserts their skin component. */
+void test_draw_list_asserts_on_a_follower_without_skin(void) {
+    nt_mesh_t mesh = make_mesh();
+    nt_texture_t texture = make_deformation_texture();
+    nt_material_t material = make_material(nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1));
+    nt_entity_t leader = make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture});
+    nt_entity_t follower = make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture});
+    nt_skin_comp_remove(follower);
+    const nt_render_item_t items[2] = {make_item(leader, material, mesh), make_item(follower, material, mesh)};
+
+    begin_storage_frame();
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list_skinned(NT_GFX_FRAME_VERTEX, items, 2));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "no skin component"));
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+}
+
+/* A destroyed follower whose slot is not reused lost its components with it: the run scan asserts. */
+void test_draw_list_asserts_on_a_destroyed_follower(void) {
+    nt_mesh_t mesh = make_mesh();
+    nt_texture_t texture = make_deformation_texture();
+    nt_material_t material = make_material(nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1));
+    nt_entity_t leader = make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture});
+    nt_entity_t follower = make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture});
+    const nt_render_item_t items[2] = {make_item(leader, material, mesh), make_item(follower, material, mesh)};
+    nt_entity_destroy(follower);
+
+    begin_storage_frame();
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list_skinned(NT_GFX_FRAME_VERTEX, items, 2));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "no skin component"));
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+}
+
 void test_material_or_mesh_change_splits_runs_in_input_order(void) {
     nt_mesh_t mesh_a = make_mesh();
     nt_mesh_t mesh_b = make_mesh();
@@ -771,6 +846,10 @@ int main(void) {
     RUN_TEST(test_runs_of_one_list_pack_each_entity_fields);
     RUN_TEST(test_draw_list_asserts_on_an_item_without_drawable);
     RUN_TEST(test_draw_list_asserts_on_an_item_without_transform);
+    RUN_TEST(test_skin_view_reads_each_binding_after_a_skin_only_removal);
+    RUN_TEST(test_draw_list_asserts_on_a_leader_without_skin);
+    RUN_TEST(test_draw_list_asserts_on_a_follower_without_skin);
+    RUN_TEST(test_draw_list_asserts_on_a_destroyed_follower);
     RUN_TEST(test_material_or_mesh_change_splits_runs_in_input_order);
     RUN_TEST(test_material_transition_reapplies_complete_surface_and_skin_set);
     RUN_TEST(test_indexed_and_nonindexed_meshes_use_matching_draw_paths);
