@@ -973,23 +973,12 @@ void test_game_buffers_share_the_base_vertex_input(void) {
     nt_test_frame_open();
 }
 
-/* A failed vertex input create and an unready program record nothing; the next ready call
- * retries and draws. */
+/* An unready program records nothing; the draw after the link finishes draws. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_core_draw_failures_record_nothing(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_material_t mat = create_test_material();
     nt_buffer_t instances = make_owned_instances(2);
-    nt_gfx_fake_fail_next_vertex_input_create();
-    nt_test_frame_next();
-    mark_draws();
-    nt_mesh_renderer_draw(mesh, mat, instances, 0, 1);
-    nt_test_frame_next();
-    TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
-    mark_draws();
-    nt_mesh_renderer_draw(mesh, mat, instances, 0, 1);
-    nt_test_frame_next();
-    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls()); /* the next draw retries the create */
     nt_gfx_fake_hold_program_links(true);
     nt_material_set_program(mat, create_test_program());
     nt_test_frame_next();

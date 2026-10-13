@@ -561,20 +561,6 @@ void test_material_params_record_once_per_change(void) {
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_uniform_vec4_count());
 }
 
-/* A vertex-input creation failure leaves the selection undrawable for its frame only. */
-void test_vertex_input_failure_is_retried_next_frame(void) {
-    nt_test_frame_close();
-    nt_text_renderer_shutdown(); /* drops the vertex input built in setUp */
-    nt_gfx_fake_fail_next_vertex_input_create();
-    nt_gfx_fake_draw_trace_reset(true);
-    open_frame(); /* selects again: the vertex input creation fails */
-    draw_and_execute();
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_draw_trace_count());
-
-    draw_and_execute(); /* the next frame's selection retries */
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
-}
-
 /* Two materials on one program and one render state are one pipeline: the key is
  * the pipeline signature, not the material's identity. */
 void test_materials_sharing_a_program_share_one_pipeline(void) {
@@ -726,16 +712,23 @@ void test_decoration_only_run_draws(void) {
 void test_unready_font_skips_glyph_and_decoration_uploads(void) {
     nt_text_style_t style = plain();
     nt_log_add_sink(capture_errors, NULL);
-    const uint8_t mask = 1U; /* fail the font's only texture */
-    nt_gfx_fake_fail_texture_creates(mask);
+    /* A font made during a loss stays unready on the restored context until its next step. */
+    nt_gfx_end_pass();
+    nt_gfx_fake_set_context_lost(true);
     nt_font_create_desc_t desc = nt_font_create_desc_defaults();
     nt_font_t font = nt_font_create(&desc);
     nt_font_add(font, register_font_resource("text_unready_font", s_blob, s_blob_size));
     nt_resource_step();
-    nt_gfx_fake_fail_texture_creates(mask);
-    nt_gfx_end_pass();
     nt_font_step();
     style.font = font;
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame(); /* takes the loss and restores */
+    /* The game relinks the material, so only the font gates the draws below. */
+    nt_program_t relinked = nt_gfx_make_program(nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"}),
+                                                nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"}));
+    nt_material_set_program(s_mat, relinked);
+    nt_test_gfx_link_wait(relinked);
 
     s_error_count = 0;
     const uint32_t uploads = nt_gfx_fake_update_texture_count();
@@ -759,7 +752,6 @@ void test_unready_font_skips_glyph_and_decoration_uploads(void) {
     TEST_ASSERT_EQUAL_UINT64(0U, g_nt_gfx.counters.indices);
     TEST_ASSERT_EQUAL_UINT32(0U, s_error_count);
 
-    nt_gfx_fake_fail_texture_creates(0U);
     nt_font_step();
     const nt_glyph_cache_entry_t *glyph = nt_font_lookup_glyph(font, 'A');
     TEST_ASSERT_NOT_NULL(glyph);
@@ -1253,7 +1245,6 @@ int main(void) {
     RUN_TEST(test_a_call_without_quads_records_nothing);
     RUN_TEST(test_equal_draws_merge_and_a_font_change_splits);
     RUN_TEST(test_material_params_record_once_per_change);
-    RUN_TEST(test_vertex_input_failure_is_retried_next_frame);
     RUN_TEST(test_a_destroyed_program_draws_nothing);
     RUN_TEST(test_context_loss_recovers_without_a_restore_call);
     RUN_TEST(test_materials_sharing_a_program_share_one_pipeline);

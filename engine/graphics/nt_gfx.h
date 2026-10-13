@@ -859,7 +859,7 @@ nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs);
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
 /* Caller owns the result; destroy it with nt_gfx_destroy_vertex_input. The VI
  * borrows its buffers; creation borrows desc/label and preserves the bound VI.
- * INVALID means context loss or backend allocation failure; caller errors assert. */
+ * INVALID means context loss; caller errors assert. */
 nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc);
 /* Registers a per-instance layout (divisor 1) for nt_gfx_bind_vertex_input_instanced, or returns
  * the handle of an equal one. Works while the context is lost; layout errors and a full table
@@ -872,9 +872,8 @@ nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc);
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc);
 nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc);
 /* Caller owns the result; destroy it with nt_gfx_destroy_render_target. The target
- * borrows its textures; INVALID means context loss, backend allocation failure
- * or an incomplete framebuffer (e.g. RGBA16F without float rendering); caller
- * errors assert. */
+ * borrows its textures; INVALID means context loss or an incomplete framebuffer
+ * (e.g. RGBA16F without float rendering); caller errors assert. */
 nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc);
 
 /* ---- Resource destruction ----
@@ -1101,8 +1100,8 @@ const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(nt_mesh_t mesh);
 /* The vertex input that draws `mesh` with instances from instance_buffer: one per frame vertex
  * stream, so each stream's draws keep their own instance offsets, and one shared by every other
  * buffer. gfx owns it: made on first use with every stream at its NtStreamDesc.location, freed
- * with the mesh or by a context loss. INVALID when it must be made while the context is lost or
- * the backend fails; a live mesh and buffer are asserted. */
+ * with the mesh or by a context loss. INVALID when it must be made while the context is lost; a
+ * live mesh and buffer are asserted. */
 nt_vertex_input_t nt_gfx_mesh_vertex_input(nt_mesh_t mesh, nt_buffer_t instance_buffer);
 
 // #region test_access

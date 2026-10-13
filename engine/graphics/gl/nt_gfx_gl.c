@@ -1524,9 +1524,7 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
             break;
         }
     }
-    if (slot == 0) {
-        return 0; /* no free slots */
-    }
+    NT_ASSERT(slot != 0 && "create_program: the frontend pool caps live programs at the table size");
     GLuint program = NT_GL_RET0(glCreateProgram);
     if (program == 0) {
         return 0; /* a zero name would leave the slot marked free */
@@ -1827,11 +1825,7 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
             break;
         }
     }
-    if (slot == 0) {
-        forget_deleted_buffer(buf);
-        NT_GL_DELETE(glDeleteBuffers, 1, &buf);
-        return 0;
-    }
+    NT_ASSERT(slot != 0 && "create_buffer: the frontend pool caps live buffers at the table size");
 
     s_buffer_gl[slot] = buf;
     s_buffer_targets[slot] = target;
@@ -1980,10 +1974,7 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
     /* Filter and wrap live on the sampler object every bind carries; the
        texture object keeps GL defaults, which no sampling path reads. */
     nt_gfx_gl_fmt_t gl = nt_gfx_gl_texture_format(desc->format);
-    if (gl.internal == 0) {
-        NT_GL_DELETE(glDeleteTextures, 1, &tex);
-        return 0;
-    }
+    NT_ASSERT(gl.internal != 0 && "create_texture: make_texture admits only mapped formats");
 
     /* Declared levels lie back to back in desc->data (NULL = storage only). */
     const uint8_t levels = desc->level_count > 1 ? desc->level_count : 1;
@@ -2040,10 +2031,7 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
             break;
         }
     }
-    if (slot == 0) {
-        NT_GL_DELETE(glDeleteTextures, 1, &tex);
-        return 0;
-    }
+    NT_ASSERT(slot != 0 && "create_texture: the frontend pool caps live textures at the table size");
 
     s_texture_gl[slot] = tex;
 

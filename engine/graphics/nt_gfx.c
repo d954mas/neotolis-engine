@@ -239,22 +239,30 @@ static const nt_gfx_texture_meta_t *render_target_size_meta(uint32_t rt_slot) {
 
 /* ---- Lifecycle ---- */
 
-/* A backend failure caused by a loss is the recoverable CONTEXT_LOST; only a failure on a
- * live context is an error. The browser is asked because the loss event may still be queued,
- * and a confirmed loss latches at once so every later call takes its lost path. */
-static nt_gfx_result_t backend_failed(const char *what) {
+/* The browser is asked because the loss event may still be queued, and a confirmed loss
+ * latches at once so every later call takes its lost path. */
+static bool context_loss_confirmed(void) {
     if (g_nt_gfx.context_lost) {
-        return NT_GFX_RESULT_CONTEXT_LOST;
+        return true;
     }
     if (nt_gfx_backend_query_context_lost()) {
         g_nt_gfx.context_lost = true;
         NT_LOG_ERROR("WebGL context lost");
-        return NT_GFX_RESULT_CONTEXT_LOST;
+        return true;
     }
-    if (what != NULL) {
-        NT_LOG_ERROR("%s", what);
-    }
-    return NT_GFX_RESULT_BACKEND_FAILURE;
+    return false;
+}
+
+/* A backend failure caused by a loss is the recoverable CONTEXT_LOST; a failure on a live
+ * context is the error result of an operation that can really fail there. */
+static nt_gfx_result_t backend_failed(void) { return context_loss_confirmed() ? NT_GFX_RESULT_CONTEXT_LOST : NT_GFX_RESULT_BACKEND_FAILURE; }
+
+/* A GL object name fails only on a lost context: WebGL creates null only then, and native
+ * glGen* does not run out. On a live context it is an engine bug, not an outcome. */
+static nt_gfx_result_t name_failed(void) {
+    const bool lost = context_loss_confirmed();
+    NT_ASSERT(lost && "backend could not name a GL object on a live context");
+    return NT_GFX_RESULT_CONTEXT_LOST;
 }
 
 /* The backend slot a program holds, linked or still linking. */
@@ -615,7 +623,7 @@ static void finish_program_links(void) {
         if (result == NT_GFX_RESULT_UNREADY) {
             continue;
         }
-        if (result != NT_GFX_RESULT_ACCEPTED && backend_failed(NULL) == NT_GFX_RESULT_CONTEXT_LOST) {
+        if (result != NT_GFX_RESULT_ACCEPTED && context_loss_confirmed()) {
             return; /* the begin_frame that takes the loss wipes every pending link */
         }
         NT_ASSERT(result == NT_GFX_RESULT_ACCEPTED && "program link failed");
@@ -792,7 +800,7 @@ static nt_gfx_result_t read_pixels(nt_render_target_t src, int x, int y, int w, 
     }
     /* WebGL reports a loss once through glGetError and the drain before the read eats it: ask the browser too. */
     if (!nt_gfx_backend_read_pixels(rt_slot, x, y, w, h, out) || nt_gfx_backend_query_context_lost()) {
-        return backend_failed(NULL); /* GL read error -> capture_failed, not an encode of uninitialized memory. */
+        return backend_failed(); /* GL read error -> capture_failed, not an encode of uninitialized memory. */
     }
 
     /* Single in-place row swap: GL bottom-left -> top-left. Row stride = w*4. */
@@ -932,7 +940,7 @@ static nt_gfx_result_t make_shader(const nt_shader_desc_t *desc, nt_shader_t *ou
     uint32_t backend = nt_gfx_backend_create_shader(desc);
     if (backend == 0) {
         nt_pool_free(&s_gfx.shader_pool, id);
-        return backend_failed("backend shader creation failed");
+        return name_failed();
     }
 
     uint32_t slot = nt_pool_slot_index(id);
@@ -974,7 +982,7 @@ static nt_gfx_result_t make_program(nt_shader_t vs, nt_shader_t fs, nt_program_t
     NT_ASSERT(id != 0 && "program pool full -- raise nt_gfx_desc_t.max_programs");
 
     uint32_t backend = nt_gfx_backend_create_program(vs_backend, fs_backend);
-    if (backend == 0 && backend_failed(NULL) == NT_GFX_RESULT_CONTEXT_LOST) {
+    if (backend == 0 && context_loss_confirmed()) {
         nt_pool_free(&s_gfx.program_pool, id);
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
@@ -1103,8 +1111,7 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static nt_gfx_result_t make_vertex_input(const nt_vertex_input_desc_t *desc, nt_vertex_input_t *out) {
-    /* Caller errors trap; only a lost context or a failed backend allocation
-     * returns an invalid handle. */
+    /* Caller errors trap; only a lost context returns an invalid handle. */
     NT_ASSERT(desc != NULL);
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
@@ -1149,7 +1156,7 @@ static nt_gfx_result_t make_vertex_input(const nt_vertex_input_desc_t *desc, nt_
     uint32_t backend = nt_gfx_backend_create_vertex_input(desc, vbo_backend, ibo_backend, slot);
     if (backend == 0) {
         nt_pool_free(&s_gfx.vertex_input_pool, id);
-        return backend_failed("backend vertex input creation failed");
+        return name_failed();
     }
     NT_ASSERT(backend == slot && "create_vertex_input: backend must mirror the pool slot");
 
@@ -1251,7 +1258,7 @@ static nt_gfx_result_t make_buffer(const nt_buffer_desc_t *desc, nt_buffer_t *ou
     uint32_t backend = nt_gfx_backend_create_buffer(desc);
     if (backend == 0) {
         nt_pool_free(&s_gfx.buffer_pool, id);
-        return backend_failed("backend buffer creation failed");
+        return name_failed();
     }
 
     uint32_t slot = nt_pool_slot_index(id);
@@ -1373,7 +1380,7 @@ static nt_gfx_result_t make_texture(const nt_texture_desc_t *desc, nt_texture_t 
     uint32_t backend = nt_gfx_backend_create_texture(&local_desc);
     if (backend == 0) {
         nt_pool_free(&s_gfx.texture_pool, id);
-        return backend_failed("backend texture creation failed");
+        return name_failed();
     }
 
     nt_sampler_desc_t sampler_desc = {
@@ -1384,11 +1391,12 @@ static nt_gfx_result_t make_texture(const nt_texture_desc_t *desc, nt_texture_t 
         .label = NULL,
     };
     nt_sampler_t default_sampler = nt_gfx_make_sampler(&sampler_desc);
-    /* A sampler recreate can latch a loss; a texture made on the dead context would be published live. */
-    if (default_sampler.id == 0 || g_nt_gfx.context_lost) {
+    /* make_sampler fails only on a loss, which it latches; a sampler hit can latch one too, and a
+     * texture made on the dead context would be published live. */
+    if (g_nt_gfx.context_lost) {
         nt_gfx_backend_destroy_texture(backend);
         nt_pool_free(&s_gfx.texture_pool, id);
-        return backend_failed(NULL);
+        return NT_GFX_RESULT_CONTEXT_LOST;
     }
 
     uint32_t slot = nt_pool_slot_index(id);
@@ -1461,7 +1469,7 @@ static nt_gfx_result_t make_render_target(const nt_render_target_desc_t *desc, n
     uint32_t backend = nt_gfx_backend_create_render_target(backends, slot);
     if (backend == 0) {
         nt_pool_free(&s_gfx.render_target_pool, id);
-        return backend_failed(NULL);
+        return backend_failed(); /* an incomplete framebuffer, such as RGBA16F without float rendering */
     }
     NT_ASSERT(backend == slot && "create_render_target: backend must mirror the pool slot");
 
@@ -1874,12 +1882,7 @@ static nt_gfx_result_t resolve_sampler_backend(uint32_t texture_slot, nt_sampler
         /* Lazy recreate after context-loss recovery — desc was preserved. */
         e->backend = nt_gfx_backend_create_sampler(&e->desc);
         if (e->backend == 0) {
-            /* A loss must not spend the one-shot log a live failure needs. */
-            if (backend_failed(NULL) == NT_GFX_RESULT_CONTEXT_LOST) {
-                return NT_GFX_RESULT_CONTEXT_LOST;
-            }
-            NT_LOG_ERROR_ONCE("apply_texture_bindings: sampler recreation failed");
-            return NT_GFX_RESULT_UNREADY;
+            return name_failed();
         }
         NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_SAMPLER, effective.id);
     }
@@ -2101,13 +2104,10 @@ static nt_gfx_result_t make_sampler(const nt_sampler_desc_t *desc, nt_sampler_t 
             out->id = i + 1;
             if (s_gfx.sampler_cache[i].backend == 0 && !g_nt_gfx.context_lost) {
                 s_gfx.sampler_cache[i].backend = nt_gfx_backend_create_sampler(&s_gfx.sampler_cache[i].desc);
-                if (s_gfx.sampler_cache[i].backend != 0) {
-                    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_SAMPLER, i + 1);
-                } else if (backend_failed(NULL) == NT_GFX_RESULT_CONTEXT_LOST) {
-                    return NT_GFX_RESULT_CONTEXT_LOST;
-                } else {
-                    NT_LOG_ERROR_ONCE("make_sampler: sampler recreation failed");
+                if (s_gfx.sampler_cache[i].backend == 0) {
+                    return name_failed();
                 }
+                NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_SAMPLER, i + 1);
             }
             return NT_GFX_RESULT_CACHE;
         }
@@ -2119,7 +2119,7 @@ static nt_gfx_result_t make_sampler(const nt_sampler_desc_t *desc, nt_sampler_t 
     NT_ASSERT(s_gfx.sampler_count < NT_GFX_MAX_SAMPLERS && "sampler cache full; raise NT_GFX_MAX_SAMPLERS");
     uint32_t backend = nt_gfx_backend_create_sampler(&normalized);
     if (backend == 0) {
-        return backend_failed("make_sampler: backend failed");
+        return name_failed();
     }
     uint32_t slot = s_gfx.sampler_count++;
     s_gfx.sampler_cache[slot].key = key;

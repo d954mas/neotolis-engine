@@ -329,9 +329,18 @@ void test_font_create_destroy_valid(void) {
     TEST_ASSERT_FALSE(nt_font_valid(font));
 }
 
-void test_font_retries_initial_texture_failure(void) {
+/* The browser gives the context back; the next begin_frame takes the loss and restores. */
+static void restore_lost_context(void) {
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+}
+
+/* A texture can fail to be made only on a lost context. */
+void test_font_retries_texture_made_during_a_loss(void) {
     nt_font_create_desc_t desc = test_font_desc();
-    nt_gfx_fake_fail_texture_creates(1U);
+    nt_gfx_fake_set_context_lost(true);
     nt_font_t font = nt_font_create(&desc);
     TEST_ASSERT_TRUE(nt_font_valid(font));
     TEST_ASSERT_EQUAL_UINT32(0U, nt_font_get_curve_texture(font).id);
@@ -340,13 +349,12 @@ void test_font_retries_initial_texture_failure(void) {
     uint8_t *blob = build_test_font_blob(&blob_size);
     nt_font_add(font, register_font_resource("font_retry", blob, blob_size));
     nt_resource_step();
-    nt_gfx_fake_fail_texture_creates(1U);
     nt_font_step();
     TEST_ASSERT_EQUAL_UINT16(1000U, nt_font_get_metrics(font).units_per_em);
 
+    restore_lost_context();
     nt_log_add_sink(capture_errors, NULL);
     s_error_count = 0;
-    nt_gfx_fake_fail_texture_creates(0U);
     nt_font_step();
     TEST_ASSERT_EQUAL_UINT32(0U, s_error_count);
     TEST_ASSERT_TRUE(nt_gfx_texture_ready(nt_font_get_curve_texture(font)));
@@ -368,7 +376,7 @@ void test_font_unready_texture_keeps_cpu_queries_gpu_free(void) {
     nt_log_add_sink(capture_errors, NULL);
     nt_font_create_desc_t desc = test_font_desc();
     s_error_count = 0;
-    nt_gfx_fake_fail_texture_creates(1U);
+    nt_gfx_fake_set_context_lost(true);
     nt_font_t font = nt_font_create(&desc);
 #if NT_LOG_MIN_LEVEL < 3
     TEST_ASSERT_GREATER_THAN_UINT32(0U, s_error_count);
@@ -381,7 +389,6 @@ void test_font_unready_texture_keeps_cpu_queries_gpu_free(void) {
     uint8_t *blob = build_test_font_blob(&blob_size);
     nt_font_add(font, register_font_resource("font_unready", blob, blob_size));
     nt_resource_step();
-    nt_gfx_fake_fail_texture_creates(1U);
     nt_font_step();
     TEST_ASSERT_FALSE(nt_gfx_texture_ready(nt_font_get_curve_texture(font)));
 
@@ -398,7 +405,7 @@ void test_font_unready_texture_keeps_cpu_queries_gpu_free(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, s_error_count);
     TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_stats(font).glyphs_cached);
 
-    nt_gfx_fake_fail_texture_creates(0U);
+    restore_lost_context();
     nt_font_step();
     TEST_ASSERT_TRUE(nt_gfx_texture_ready(nt_font_get_curve_texture(font)));
     const nt_glyph_cache_entry_t *restored = nt_font_lookup_glyph(font, 'A');
@@ -415,8 +422,8 @@ void test_font_unready_texture_keeps_cpu_queries_gpu_free(void) {
 
 void test_font_destroy_frees_unready_texture(void) {
     nt_log_add_sink(capture_errors, NULL);
+    nt_gfx_fake_set_context_lost(true);
     for (uint32_t i = 0; i < 2U; i++) {
-        nt_gfx_fake_fail_texture_creates(1U);
         nt_font_create_desc_t desc = test_font_desc();
         nt_font_t font = nt_font_create(&desc);
         const nt_texture_t curve = nt_font_get_curve_texture(font);
@@ -459,10 +466,11 @@ void test_font_cached_glyph_waits_for_rebuilt_textures(void) {
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
-    nt_gfx_fake_fail_texture_creates(1U);
+    nt_gfx_fake_set_context_lost(true); /* the rebuild meets a new loss */
     nt_font_step();
     TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_stats(font).glyphs_cached);
     TEST_ASSERT_NULL(nt_font_lookup_glyph(font, 'A'));
+    restore_lost_context();
     nt_font_step();
     const uint32_t uploads = nt_gfx_fake_update_texture_count();
     const nt_glyph_cache_entry_t *glyph = nt_font_lookup_glyph(font, 'A');
@@ -3037,7 +3045,7 @@ int main(void) {
     RUN_TEST(test_font_blob_valid);
     RUN_TEST(test_font_init_shutdown);
     RUN_TEST(test_font_create_destroy_valid);
-    RUN_TEST(test_font_retries_initial_texture_failure);
+    RUN_TEST(test_font_retries_texture_made_during_a_loss);
     RUN_TEST(test_font_unready_texture_keeps_cpu_queries_gpu_free);
     RUN_TEST(test_font_destroy_frees_unready_texture);
     RUN_TEST(test_font_cached_glyph_waits_for_rebuilt_textures);

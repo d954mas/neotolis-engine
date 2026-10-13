@@ -322,7 +322,7 @@ static void test_a_failed_frame_buffer_creation_on_a_live_context_asserts(void) 
     nt_gfx_fake_fail_buffer_creates(1);
     nt_gfx_end_frame();
     NT_TEST_EXPECT_ASSERT(nt_gfx_begin_frame());
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "frame storage buffer creation failed"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "backend could not name a GL object on a live context"));
     nt_gfx_shutdown();
     nt_gfx_fake_reset();
     nt_gfx_init(&TEST_DESC);

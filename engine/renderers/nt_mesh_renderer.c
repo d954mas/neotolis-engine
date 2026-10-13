@@ -83,7 +83,7 @@ typedef struct {
 } mesh_draw_t;
 
 /* Resolves pipeline and vertex input, reusing the previous run's on equal handles. False skips
- * the run: the program is not ready (linking or lost) or a create failed (retried by the next
+ * the run: the program is not ready (linking or lost) or a create met a loss (retried by the next
  * run). The mesh's vertex input for this call's buffer does not depend on the material. */
 static bool resolve(mesh_draw_t *d, nt_material_t material, const nt_material_info_t *mi, nt_mesh_t mesh) {
     if (!nt_gfx_program_ready(mi->program)) {
