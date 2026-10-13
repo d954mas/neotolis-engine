@@ -685,7 +685,7 @@ static uint32_t render_owned(nt_mesh_t mesh, nt_material_t material, nt_buffer_t
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     begin_target_pass();
-    nt_mesh_renderer_draw(mesh, material, nt_mesh_renderer_instance_layout(), buffer, first * (uint32_t)sizeof(nt_mesh_instance_t), count, NULL, 0);
+    nt_mesh_renderer_draw(mesh, material, buffer, first * (uint32_t)sizeof(nt_mesh_instance_t), count);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     const uint32_t pointers = g_nt_gfx.counters.gl[NT_GFX_GL_glVertexAttribPointer];

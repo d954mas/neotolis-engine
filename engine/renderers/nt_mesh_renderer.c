@@ -18,6 +18,16 @@
 
 #include <string.h>
 
+/* Pipeline cache capacity; raise it on the linked variant target, e.g.
+ * target_compile_definitions(nt_mesh_renderer PRIVATE NT_MESH_RENDERER_MAX_PIPELINES=N). */
+#ifndef NT_MESH_RENDERER_MAX_PIPELINES
+#define NT_MESH_RENDERER_MAX_PIPELINES 64
+#endif
+_Static_assert(NT_MESH_RENDERER_MAX_PIPELINES <= 65535, "NT_MESH_RENDERER_MAX_PIPELINES overflows the uint16 cache counter");
+
+/* Units a program has left after the material's slots. */
+#define MESH_MAX_DRAW_TEXTURES (NT_GFX_MAX_TEXTURE_SLOTS - NT_MATERIAL_MAX_TEXTURES)
+
 _Static_assert(NT_GFX_MAX_INSTANCE_ATTRS >= 4 + (2 * NT_MESH_RENDERER_SKINNED), "mesh instance layouts need 4 (skinned 6) attributes: raise NT_GFX_MAX_INSTANCE_ATTRS");
 
 static struct {
@@ -75,12 +85,6 @@ void nt_mesh_renderer_shutdown(void) {
     memset(&s_mesh_renderer, 0, sizeof(s_mesh_renderer));
 }
 
-nt_instance_layout_t nt_mesh_renderer_instance_layout(void) { return s_mesh_renderer.layout; }
-
-#if NT_MESH_RENDERER_SKINNED
-nt_instance_layout_t nt_mesh_renderer_skinned_instance_layout(void) { return s_mesh_renderer.skinned_layout; }
-#endif
-
 // #region run
 /* One call's state: a pass or foreign pipeline between calls invalidates it. Draw texture names
  * and samplers are fixed within a call, so texture ids identify what was applied. */
@@ -92,7 +96,7 @@ typedef struct {
     nt_instance_layout_t instance_layout;
     nt_buffer_t instances;
     uint32_t applied_material;
-    uint32_t applied_draw[NT_MESH_MAX_DRAW_TEXTURES];
+    uint32_t applied_draw[MESH_MAX_DRAW_TEXTURES];
 } mesh_draw_t;
 
 /* The pipeline is program x render state; layouts live on the meshes' vertex inputs. 0 = create failed. */
@@ -141,7 +145,7 @@ static void record(mesh_draw_t *d, const nt_material_info_t *mi, const nt_gfx_me
         textures_changed |= draw[i].texture.id != d->applied_draw[i];
     }
     if (textures_changed) {
-        nt_gfx_texture_binding_t bindings[NT_MATERIAL_MAX_TEXTURES + NT_MESH_MAX_DRAW_TEXTURES];
+        nt_gfx_texture_binding_t bindings[NT_MATERIAL_MAX_TEXTURES + MESH_MAX_DRAW_TEXTURES];
         for (uint8_t t = 0; t < mi->tex_count; t++) {
             bindings[t] = (nt_gfx_texture_binding_t){
                 .name = {.value = mi->tex_name_hashes[t]},
@@ -167,17 +171,10 @@ static void record(mesh_draw_t *d, const nt_material_info_t *mi, const nt_gfx_me
 
 /* ---- Draw ---- */
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
-void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_instance_layout_t layout, nt_buffer_t instances, uint32_t offset, uint32_t count, const nt_gfx_texture_binding_t *draw_textures,
-                           uint8_t draw_texture_count) {
-    NT_ASSERT(s_mesh_renderer.layout.id != 0);
-    /* A lost context can leave a game-activated mesh 0; nothing would draw. */
-    if (g_nt_gfx.context_lost) {
-        return;
-    }
+/* The caller has checked the lost context. */
+static void draw_one(nt_mesh_t mesh, nt_material_t material, nt_instance_layout_t layout, nt_buffer_t instances, uint32_t offset, uint32_t count, const nt_gfx_texture_binding_t *draw_textures,
+                     uint8_t draw_texture_count) {
     NT_ASSERT(count > 0);
-    NT_ASSERT(draw_texture_count <= NT_MESH_MAX_DRAW_TEXTURES && "mesh draw: too many draw textures");
-    NT_ASSERT((draw_textures != NULL || draw_texture_count == 0) && "mesh draw: NULL draw textures with nonzero count");
     const nt_material_info_t *mat_info = nt_material_get_info(material);
     const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(mesh);
     NT_ASSERT(mat_info != NULL && mesh_info != NULL && "mesh draw references a destroyed material or mesh");
@@ -185,6 +182,15 @@ void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_instance_l
     if (resolve(&draw, material, mat_info, mesh)) {
         record(&draw, mat_info, mesh_info, draw_textures, draw_texture_count, offset, count);
     }
+}
+
+void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_buffer_t instances, uint32_t offset, uint32_t count) {
+    NT_ASSERT(s_mesh_renderer.layout.id != 0);
+    /* A lost context can leave a game-activated mesh 0; nothing would draw. */
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    draw_one(mesh, material, s_mesh_renderer.layout, instances, offset, count, NULL, 0);
 }
 
 static uint32_t find_run_end(const nt_render_item_t *items, uint32_t run_start, uint32_t count) {
@@ -239,6 +245,17 @@ void nt_mesh_renderer_draw_list(uint32_t stream, const nt_render_item_t *items, 
 
 #if NT_MESH_RENDERER_SKINNED
 // #region skinned
+void nt_mesh_renderer_draw_skinned(nt_mesh_t mesh, nt_material_t material, nt_texture_t deformation, nt_buffer_t instances, uint32_t offset, uint32_t count) {
+    NT_ASSERT(s_mesh_renderer.layout.id != 0);
+    /* A lost context can leave the deformation texture or a mesh 0; nothing would draw. */
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    NT_ASSERT(deformation.id != 0 && "skinned draw requires a deformation texture");
+    const nt_gfx_texture_binding_t skin = {.name = {.value = s_mesh_renderer.skin_name_hash}, .texture = deformation, .sampler = NT_SAMPLER_DEFAULT};
+    draw_one(mesh, material, s_mesh_renderer.skinned_layout, instances, offset, count, &skin, 1);
+}
+
 static uint32_t find_skinned_run_end(const nt_render_item_t *items, uint32_t leader, uint32_t end, uint32_t texture_id) {
     uint32_t run_end = leader + 1;
     while (run_end < end && items[run_end].batch_key == items[leader].batch_key && nt_skin_comp_handle((nt_entity_t){.id = items[run_end].entity})->texture.id == texture_id) {

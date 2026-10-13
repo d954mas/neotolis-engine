@@ -32,13 +32,16 @@ param without a name is a declaration nothing can bind, so presence is decided
 by `index < count` and consumers never test the name for NULL.
 
 A material declares every sampler its program uses that the material owns. A
-mesh draw adds 0..`NT_MESH_MAX_DRAW_TEXTURES` (8 − 4) draw textures: bindings
-owned by the draw, not declared by the material, applied together with the
-material's textures as one complete name-keyed set. gfx validates that set: a
-duplicate active name or an active sampler it does not cover asserts. The implemented
-example is `u_skin_matrices`: a skinned material does not declare it, and the
-skinned list draws the run's deformation texture with its default sampler as a
-draw texture ([Mesh draws](architecture.md#mesh-draws)).
+skinned mesh draw adds a draw texture: a binding owned by the draw, not declared
+by the material, applied together with the material's textures as one complete
+name-keyed set. gfx validates that set: a duplicate active name or an active
+sampler it does not cover asserts. The only draw texture is `u_skin_matrices`:
+a skinned material does not declare it, and the skinned draws bind the
+deformation texture with its default sampler
+([Mesh draws](architecture.md#mesh-draws)). Games pass no draw textures; a
+per-draw game texture belongs to the material bind group (planned, #600), and a
+texture shared by a frame (a shadow map) is a material slot on a published
+resource.
 
 Normally each active slot must resolve to a texture, so register a placeholder
 with `nt_resource_set_placeholder_texture` for slots that load asynchronously.
@@ -47,7 +50,7 @@ inspected, so one material can over-declare for a family of shaders. The slot
 index is not the texture unit: gfx resolves the semantic name through immutable
 program reflection, and two materials may list the same samplers in any order.
 A material carries at most `NT_MATERIAL_MAX_TEXTURES` (4) slots of the 8 units
-a program can link; a mesh draw's draw textures take the other 4.
+a program can link; the other 4 are left for draw textures.
 
 Sprite and text keep two legacy renderer-specific exceptions until the material bind group (planned, #600). Sprite
 declares its atlas-page sampler in slot 0 but substitutes the page resource per

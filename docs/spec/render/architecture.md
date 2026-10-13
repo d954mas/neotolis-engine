@@ -604,17 +604,13 @@ init again after. Plain and skinned draws share one pipeline cache of
 `NT_MESH_RENDERER_MAX_PIPELINES` entries (compile-time, default 64; exhaustion
 asserts). The entry points:
 
-- the core, `nt_mesh_renderer_draw(mesh, material, layout, buffer, offset,
-  count, draw_textures, draw_texture_count)`, records one instanced draw of
-  `count` instances of `layout` at byte `offset` of `buffer`. `layout` is any
-  registered instance layout: `nt_mesh_renderer_instance_layout()`
-  (`nt_mesh_instance_t`), `nt_mesh_renderer_skinned_instance_layout()`
-  (`nt_skinned_mesh_instance_t`, skinned target only) or the game's own.
-  `draw_textures` are 0..`NT_MESH_MAX_DRAW_TEXTURES` bindings owned by the
-  draw, borrowed for the call
-  ([material, MaterialAsset purpose](material.md#materialasset-purpose)). A
-  skinned core draw passes the skinned layout and one draw texture
-  `{nt_hash32_str("u_skin_matrices"), deformation, NT_SAMPLER_DEFAULT}`.
+- the cores, `nt_mesh_renderer_draw(mesh, material, buffer, offset, count)`
+  and, in the skinned target, `nt_mesh_renderer_draw_skinned(mesh, material,
+  deformation, buffer, offset, count)`, record one instanced draw of `count`
+  instances (`nt_mesh_instance_t`, `nt_skinned_mesh_instance_t`) at byte
+  `offset` of `buffer`. The skinned core draws `deformation` as its
+  `u_skin_matrices` draw texture
+  ([material, MaterialAsset purpose](material.md#materialasset-purpose)).
   `buffer` is a frame vertex stream's buffer (`nt_gfx_frame_buffer`, the
   instances the caller wrote this frame) or a caller-owned `NT_BUFFER_VERTEX`
   buffer (persistent instance data). It reads no entity component; the
@@ -632,8 +628,8 @@ asserts). The entry points:
   count)`, split the items into runs of adjacent equal batch keys (the skinned
   list also splits on the deformation texture), allocate and pack each run's
   instances in `stream` from the transform, drawable (and skin) components, and
-  record it as the core does with the engine layout (the skinned list: the
-  run's deformation texture as its `u_skin_matrices` draw texture);
+  record it as the core does (the skinned list: the run's deformation texture
+  as its `u_skin_matrices` draw texture);
 
 The core's instances are filled before `nt_gfx_end_frame` (see Frame
 storage). One allocation may be drawn any number of times in any passes of the

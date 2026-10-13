@@ -894,7 +894,7 @@ void test_core_draw_from_a_game_buffer(void) {
     nt_gfx_fake_reset();
     nt_test_frame_next();
     mark_draws();
-    nt_mesh_renderer_draw(mesh, mat, nt_mesh_renderer_instance_layout(), instances, (uint32_t)sizeof(nt_mesh_instance_t), 3, NULL, 0);
+    nt_mesh_renderer_draw(mesh, mat, instances, (uint32_t)sizeof(nt_mesh_instance_t), 3);
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(3, drawn_instances());
@@ -924,8 +924,8 @@ void test_core_draw_asserts_past_its_game_buffer(void) {
     nt_material_t mat = create_test_material();
     nt_buffer_t instances = make_owned_instances(4);
     nt_test_frame_next();
-    nt_mesh_renderer_draw(mesh, mat, nt_mesh_renderer_instance_layout(), instances, (uint32_t)sizeof(nt_mesh_instance_t), 3, NULL, 0);
-    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(mesh, mat, nt_mesh_renderer_instance_layout(), instances, (uint32_t)sizeof(nt_mesh_instance_t), 4, NULL, 0));
+    nt_mesh_renderer_draw(mesh, mat, instances, (uint32_t)sizeof(nt_mesh_instance_t), 3);
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(mesh, mat, instances, (uint32_t)sizeof(nt_mesh_instance_t), 4));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "instances lie outside"));
     nt_test_frame_next();
 }
@@ -941,8 +941,8 @@ void test_game_buffers_share_the_base_vertex_input(void) {
     nt_gfx_fake_reset();
     nt_test_frame_next();
     mark_draws();
-    nt_mesh_renderer_draw(mesh, mat, nt_mesh_renderer_instance_layout(), first, 0, 2, NULL, 0);
-    nt_mesh_renderer_draw(mesh, mat, nt_mesh_renderer_instance_layout(), second, 0, 2, NULL, 0);
+    nt_mesh_renderer_draw(mesh, mat, first, 0, 2);
+    nt_mesh_renderer_draw(mesh, mat, second, 0, 2);
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
@@ -966,31 +966,31 @@ void test_core_draw_failures_record_nothing(void) {
     nt_gfx_fake_fail_next_pipeline_create();
     nt_test_frame_next();
     mark_draws();
-    nt_mesh_renderer_draw(mesh, mat, nt_mesh_renderer_instance_layout(), instances, 0, 1, NULL, 0);
+    nt_mesh_renderer_draw(mesh, mat, instances, 0, 1);
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_pipeline_cache_count());
     nt_mesh_t fresh = create_test_mesh(); /* the first draw already made the other mesh's vertex input */
     nt_gfx_fake_fail_next_vertex_input_create();
     mark_draws();
-    nt_mesh_renderer_draw(fresh, mat, nt_mesh_renderer_instance_layout(), instances, 0, 1, NULL, 0);
+    nt_mesh_renderer_draw(fresh, mat, instances, 0, 1);
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
     mark_draws();
-    nt_mesh_renderer_draw(fresh, mat, nt_mesh_renderer_instance_layout(), instances, 0, 1, NULL, 0);
+    nt_mesh_renderer_draw(fresh, mat, instances, 0, 1);
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls()); /* the next draw retries the create */
     nt_gfx_fake_hold_program_links(true);
     nt_material_set_program(mat, create_test_program());
     nt_test_frame_next();
     mark_draws();
-    nt_mesh_renderer_draw(mesh, mat, nt_mesh_renderer_instance_layout(), instances, 0, 1, NULL, 0);
+    nt_mesh_renderer_draw(mesh, mat, instances, 0, 1);
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
     nt_gfx_fake_hold_program_links(false);
     nt_test_frame_next(); /* the link finishes */
     mark_draws();
-    nt_mesh_renderer_draw(mesh, mat, nt_mesh_renderer_instance_layout(), instances, 0, 1, NULL, 0);
+    nt_mesh_renderer_draw(mesh, mat, instances, 0, 1);
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
 }
@@ -1054,7 +1054,7 @@ void test_real_restore_rebinds_new_stream_and_owned_buffers(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(old_stream, new_stream);
     TEST_ASSERT_EQUAL_UINT32(new_stream, nt_gfx_fake_last_instance_buffer());
     mark_draws();
-    nt_mesh_renderer_draw(mesh, mat, nt_mesh_renderer_instance_layout(), owned, 0, 2, NULL, 0);
+    nt_mesh_renderer_draw(mesh, mat, owned, 0, 2);
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_buffer_backend_id(owned), nt_gfx_fake_last_instance_buffer());
@@ -1067,13 +1067,13 @@ void test_core_draw_asserts_on_instances_outside_the_stream(void) {
     nt_test_frame_next();
     uint32_t offset = 0;
     memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX + 1, sizeof(nt_mesh_instance_t), 4, &offset), 0, sizeof(nt_mesh_instance_t));
-    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(mesh, mat, nt_mesh_renderer_instance_layout(), nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1), offset, 2, NULL, 0));
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(mesh, mat, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1), offset, 2));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "instances lie outside"));
-    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(mesh, mat, nt_mesh_renderer_instance_layout(), nt_gfx_frame_buffer(NT_GFX_FRAME_INDEX), 0, 1, NULL, 0));
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(mesh, mat, nt_gfx_frame_buffer(NT_GFX_FRAME_INDEX), 0, 1));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "not vertex type"));
     NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list(NT_GFX_FRAME_UNIFORM, NULL, 0));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "not a frame vertex stream"));
-    nt_mesh_renderer_draw(mesh, mat, nt_mesh_renderer_instance_layout(), nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1), offset, 1, NULL, 0);
+    nt_mesh_renderer_draw(mesh, mat, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1), offset, 1);
     nt_test_frame_next();
 }
 
@@ -1553,7 +1553,7 @@ void test_core_draw_reuses_one_allocation_across_passes(void) {
     TEST_ASSERT_EQUAL_UINT32(16, offset);
     for (int pass = 0; pass < 2; pass++) {
         nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-        nt_mesh_renderer_draw(mesh, mat, nt_mesh_renderer_instance_layout(), nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset, 2, NULL, 0);
+        nt_mesh_renderer_draw(mesh, mat, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset, 2);
         nt_gfx_end_pass();
     }
     TEST_ASSERT_EQUAL_UINT32(updates, nt_gfx_fake_update_buffer_count()); /* recording writes no buffer */
@@ -1566,7 +1566,7 @@ void test_core_draw_reuses_one_allocation_across_passes(void) {
 }
 
 void test_core_draw_asserts_on_zero_count(void) {
-    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(create_test_mesh(), create_test_material(), nt_mesh_renderer_instance_layout(), nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), 0, 0, NULL, 0));
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(create_test_mesh(), create_test_material(), nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), 0, 0));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "count > 0"));
 }
 
@@ -1577,7 +1577,7 @@ void test_core_draw_asserts_outside_a_pass(void) {
     begin_storage_frame();
     uint32_t offset = 0;
     memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, sizeof(nt_mesh_instance_t), 4, &offset), 0, sizeof(nt_mesh_instance_t));
-    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(mesh, mat, nt_mesh_renderer_instance_layout(), nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset, 1, NULL, 0));
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(mesh, mat, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset, 1));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "must be called inside a pass"));
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
@@ -1592,10 +1592,10 @@ void test_core_draw_applies_the_material_every_call(void) {
     nt_gfx_fake_reset();
     uint32_t offset = 0;
     memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, sizeof(nt_mesh_instance_t), 4, &offset), 0, sizeof(nt_mesh_instance_t));
-    nt_mesh_renderer_draw(mesh, mat, nt_mesh_renderer_instance_layout(), nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset, 1, NULL, 0);
+    nt_mesh_renderer_draw(mesh, mat, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset, 1);
     const float tint2[4] = {2.0F, 3.0F, 4.0F, 5.0F};
     nt_material_set_param(mat, "u_tint", tint2);
-    nt_mesh_renderer_draw(mesh, mat, nt_mesh_renderer_instance_layout(), nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset, 1, NULL, 0);
+    nt_mesh_renderer_draw(mesh, mat, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset, 1);
     nt_test_frame_next();
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_uniform_vec4_count());
@@ -1765,7 +1765,7 @@ static void test_draws_on_a_lost_context_skip_their_handle_checks(void) {
     (void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}); /* the failed create latches the loss */
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
     const nt_render_item_t item = {.entity = 0xFFFFU};
-    nt_mesh_renderer_draw((nt_mesh_t){0}, (nt_material_t){0}, nt_mesh_renderer_instance_layout(), (nt_buffer_t){0}, 0, 1, NULL, 0);
+    nt_mesh_renderer_draw((nt_mesh_t){0}, (nt_material_t){0}, (nt_buffer_t){0}, 0, 1);
     nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, &item, 1);
     nt_gfx_fake_set_context_lost(false);
 }
@@ -1793,12 +1793,32 @@ void test_mesh_with_skin_streams_draws(void) {
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
 }
 
+/* A hand-built mesh may place a stream anywhere below 16; one on the instance color slot asserts at the bind. */
+void test_mesh_stream_cannot_overlap_the_color_location(void) {
+    uint8_t blob[sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + 36];
+    memset(blob, 0, sizeof(blob));
+    NtMeshAssetHeader *header = (NtMeshAssetHeader *)blob;
+    header->magic = NT_MESH_MAGIC;
+    header->version = NT_MESH_VERSION;
+    header->stream_count = 1;
+    header->vertex_count = 3;
+    header->vertex_data_size = 36;
+    *(NtStreamDesc *)(blob + sizeof(*header)) = (NtStreamDesc){.type = NT_STREAM_FLOAT32, .count = 3, .location = NT_INST_LOC_COLOR};
+    nt_mesh_t mesh = {.id = nt_gfx_activate_mesh(blob, sizeof(blob))};
+    nt_material_t mat = create_test_material();
+    nt_render_item_t item = {.entity = create_test_entity(mesh, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
+
+    NT_TEST_EXPECT_ASSERT(record_list(&item, 1));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "share a location"));
+}
+
 int main(void) {
     UNITY_BEGIN();
 
     RUN_TEST(test_init_shutdown);
     RUN_TEST(test_draw_list_empty);
     RUN_TEST(test_mesh_with_skin_streams_draws);
+    RUN_TEST(test_mesh_stream_cannot_overlap_the_color_location);
     RUN_TEST(test_draw_list_null_items_asserts_when_nonempty);
     RUN_TEST(test_unready_program_skips_until_a_ready_program_is_assigned);
     RUN_TEST(test_batch_key_packs_material_and_mesh_slots);
