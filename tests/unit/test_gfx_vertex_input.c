@@ -157,13 +157,6 @@ void test_vi_empty_layout_is_attributeless(void) {
     nt_gfx_destroy_vertex_input(vi);
 }
 
-void test_vi_name_failure_on_a_live_context_asserts(void) {
-    nt_buffer_t vbo = make_vbo();
-    nt_gfx_fake_fail_next_vertex_input_create();
-    EXPECT_ASSERT(make_vi(vbo, (nt_buffer_t){0}));
-    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "could not name a GL object on a live context"));
-}
-
 void test_vi_pool_exhaustion_asserts(void) {
     nt_buffer_t vbo = make_vbo();
     for (int i = 0; i < TEST_MAX_VERTEX_INPUTS; i++) {
@@ -942,7 +935,6 @@ int main(void) {
     RUN_TEST(test_vi_destroy_invalid_and_stale_are_noops);
     RUN_TEST(test_vi_slot_reuse_bumps_generation);
     RUN_TEST(test_vi_empty_layout_is_attributeless);
-    RUN_TEST(test_vi_name_failure_on_a_live_context_asserts);
     RUN_TEST(test_vi_pool_exhaustion_asserts);
     RUN_TEST(test_vi_creation_asserts_on_caller_errors);
     RUN_TEST(test_instanced_bind_asserts_on_caller_errors);

@@ -493,14 +493,7 @@ void test_sampler_loss_leaves_no_texture_and_allows_a_retry(void) {
     basis_fixture_t alpha = fixture_encode(16, 8, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8);
     nt_gfx_fake_reset();
     nt_gfx_fake_lose_context_on_sampler_create();
-    nt_assert_handler = test_assert_handler;
-    if (setjmp(s_assert_jmp) != 0) {
-        nt_assert_handler = NULL;
-        fixture_free(&alpha);
-        TEST_FAIL_MESSAGE("A loss at the sampler must reject activation without asserting");
-    }
     uint32_t handle = nt_gfx_activate_texture(alpha.blob, alpha.size);
-    nt_assert_handler = NULL;
     TEST_ASSERT_EQUAL_UINT32(0, handle);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_texture_create_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_texture_destroy_count());

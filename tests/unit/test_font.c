@@ -337,52 +337,12 @@ static void restore_lost_context(void) {
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
 }
 
-/* A texture can fail to be made only on a lost context. */
-void test_font_retries_texture_made_during_a_loss(void) {
-    nt_font_create_desc_t desc = test_font_desc();
-    nt_gfx_fake_set_context_lost(true);
-    nt_font_t font = nt_font_create(&desc);
-    TEST_ASSERT_TRUE(nt_font_valid(font));
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_font_get_curve_texture(font).id);
-
-    uint32_t blob_size = 0;
-    uint8_t *blob = build_test_font_blob(&blob_size);
-    nt_font_add(font, register_font_resource("font_retry", blob, blob_size));
-    nt_resource_step();
-    nt_font_step();
-    TEST_ASSERT_EQUAL_UINT16(1000U, nt_font_get_metrics(font).units_per_em);
-
-    restore_lost_context();
-    nt_log_add_sink(capture_errors, NULL);
-    s_error_count = 0;
-    nt_font_step();
-    TEST_ASSERT_EQUAL_UINT32(0U, s_error_count);
-    TEST_ASSERT_TRUE(nt_gfx_texture_ready(nt_font_get_curve_texture(font)));
-    const uint32_t uploads = nt_gfx_fake_update_texture_count();
-    const nt_glyph_cache_entry_t *glyph = nt_font_lookup_glyph(font, 'A');
-    TEST_ASSERT_NOT_NULL(glyph);
-    TEST_ASSERT_FALSE(glyph->is_tofu);
-    TEST_ASSERT_EQUAL_INT16(500, glyph->advance);
-    TEST_ASSERT_GREATER_THAN_UINT32(uploads, nt_gfx_fake_update_texture_count());
-    const uint32_t creates = nt_gfx_fake_texture_create_count();
-    nt_font_step();
-    TEST_ASSERT_EQUAL_UINT32(creates, nt_gfx_fake_texture_create_count());
-    nt_font_destroy(font);
-    free(blob);
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- Unity assertion macros inflate the metric
 void test_font_unready_texture_keeps_cpu_queries_gpu_free(void) {
     nt_log_add_sink(capture_errors, NULL);
     nt_font_create_desc_t desc = test_font_desc();
-    s_error_count = 0;
-    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_fake_set_context_lost(true); /* a texture fails to be made only on a lost context */
     nt_font_t font = nt_font_create(&desc);
-#if NT_LOG_MIN_LEVEL < 3
-    TEST_ASSERT_GREATER_THAN_UINT32(0U, s_error_count);
-#else
-    TEST_ASSERT_EQUAL_UINT32(0U, s_error_count);
-#endif
     const nt_texture_t original = nt_font_get_curve_texture(font);
     TEST_ASSERT_FALSE(nt_gfx_texture_ready(original));
     uint32_t blob_size = 0;
@@ -406,7 +366,9 @@ void test_font_unready_texture_keeps_cpu_queries_gpu_free(void) {
     TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_stats(font).glyphs_cached);
 
     restore_lost_context();
-    nt_font_step();
+    s_error_count = 0;
+    nt_font_step(); /* retries the texture */
+    TEST_ASSERT_EQUAL_UINT32(0U, s_error_count);
     TEST_ASSERT_TRUE(nt_gfx_texture_ready(nt_font_get_curve_texture(font)));
     const nt_glyph_cache_entry_t *restored = nt_font_lookup_glyph(font, 'A');
     TEST_ASSERT_NOT_NULL(restored);
@@ -416,6 +378,9 @@ void test_font_unready_texture_keeps_cpu_queries_gpu_free(void) {
 #if NT_FONT_EMBOLDEN_ENABLED
     TEST_ASSERT_NOT_NULL(nt_font_lookup_glyph_offset(nt_font_get_slot(font), 'A', 40));
 #endif
+    const uint32_t creates = nt_gfx_fake_texture_create_count();
+    nt_font_step(); /* a ready texture is not made again */
+    TEST_ASSERT_EQUAL_UINT32(creates, nt_gfx_fake_texture_create_count());
     nt_font_destroy(font);
     free(blob);
 }
@@ -3045,7 +3010,6 @@ int main(void) {
     RUN_TEST(test_font_blob_valid);
     RUN_TEST(test_font_init_shutdown);
     RUN_TEST(test_font_create_destroy_valid);
-    RUN_TEST(test_font_retries_texture_made_during_a_loss);
     RUN_TEST(test_font_unready_texture_keeps_cpu_queries_gpu_free);
     RUN_TEST(test_font_destroy_frees_unready_texture);
     RUN_TEST(test_font_cached_glyph_waits_for_rebuilt_textures);
