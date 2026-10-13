@@ -244,7 +244,7 @@ typedef struct {
 
 A binding is valid until the context's next `begin_frame` or graphics invalidation; the game's frame order ([Resources and lifetimes](#resources-and-lifetimes): prepare before list build) is what keeps a binding current, and bindings carry no epoch; `skeletal_gpu` asserts only one `begin_frame` per gfx frame. Textures and assets stay alive through all consuming passes. Capacities are init parameters; overflow asserts. Identical pose+binding may share one prepared binding explicitly; no global dedup cache. Origins are separate x/y integers, not a linear index: the shader fetches with `texelFetch(ivec2)` and `nt_vertex_type_t` has no 32-bit integer attribute, so a linear index would cost the same four bytes plus a per-vertex div/mod.
 
-**`skin_comp`** (`engine/skin_comp`) stores one by-value `nt_deformation_binding_t` per entity in the `mesh_comp` pattern (`init/shutdown/add/has/remove`, `nt_skin_comp_handle(entity)` asserts presence). `add` starts from the zero binding; drawing it is the renderer's assert ([Renderer](#renderer)). Swap-and-pop moves the 16 B value; `remove` frees nothing — the texture is borrowed. Under `NT_INTROSPECT_ENABLED` the component describes its texture handle, origins and alpha like the other render components, so a devapi bot can spot an entity left on the zero binding.
+**`skin_comp`** (`engine/skin_comp`) stores one by-value `nt_deformation_binding_t` per entity in the `mesh_comp` pattern (`init/shutdown/add/has/remove`, `nt_skin_comp_handle(entity)` asserts presence; `nt_skin_comp_view()` returns the sparse indices and dense bindings like the transform and drawable views — pointers borrowed until shutdown; `count`, the sparse mapping and dense order change on add/remove). `add` starts from the zero binding; drawing it is the renderer's assert ([Renderer](#renderer)). Swap-and-pop moves the 16 B value; `remove` frees nothing — the texture is borrowed. Under `NT_INTROSPECT_ENABLED` the component describes its texture handle, origins and alpha like the other render components, so a devapi bot can spot an entity left on the zero binding.
 
 ## Renderer
 
@@ -296,8 +296,11 @@ per-instance. Only adjacent compatible items merge; the game's order wins.
 **Instance layout** (`nt_skinned_mesh_instance_t`, 64 B) carries three world
 rows, four UINT16 frame origin coordinates, one float alpha and the drawable
 color as normalized RGBA8 (see [color](../render/architecture.md#color)).
-`nt_mesh_renderer_draw_list_skinned` reads each item's skin binding through its asserting accessor, so a
-stale skinned item asserts. `joints` arrive through float
+`nt_mesh_renderer_draw_list_skinned` reads each item's skin binding through the
+skin view, as it reads transform and drawable; each run's leader goes through the
+asserting accessors (liveness and presence), and on a live context an item without
+`skin_comp` asserts. Followers get presence checks only, no liveness check: items are live entities of the
+entity pool, per the lifetime contract in [Components and ownership](#components-and-ownership). `joints` arrive through float
 attributes with shader integer conversion and `weights` normalized, in the
 stream layouts the builder chapter fixes (Skin streams, under Builder
 validation). FLOAT16 lane sums deviate from 1 by at most `4·2⁻¹¹`, and no

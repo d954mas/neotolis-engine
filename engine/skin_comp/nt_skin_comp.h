@@ -32,4 +32,13 @@ void nt_skin_comp_remove(nt_entity_t entity);
 /* Caller MUST call nt_skin_comp_has() first — traps if entity has no component */
 nt_deformation_binding_t *nt_skin_comp_handle(nt_entity_t entity);
 
+/* Bulk SoA view — pointers stable until shutdown; count, sparse mapping and dense order change on add/remove. */
+typedef struct {
+    uint16_t count;
+    const uint16_t *sparse_indices;           /* entity_index -> dense_idx; NT_INVALID_COMP_INDEX if absent */
+    const nt_deformation_binding_t *bindings; /* dense_idx -> binding */
+} nt_skin_comp_view_t;
+
+nt_skin_comp_view_t nt_skin_comp_view(void);
+
 #endif /* NT_SKIN_COMP_H */

@@ -84,3 +84,11 @@ nt_deformation_binding_t *nt_skin_comp_handle(nt_entity_t entity) {
     NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
     return &s_bindings[idx];
 }
+
+nt_skin_comp_view_t nt_skin_comp_view(void) {
+    return (nt_skin_comp_view_t){
+        .count = nt_comp_storage_count(&s_storage),
+        .sparse_indices = nt_comp_storage_sparse(&s_storage),
+        .bindings = s_bindings,
+    };
+}
