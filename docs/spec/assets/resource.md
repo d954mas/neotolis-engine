@@ -333,7 +333,8 @@ their vertex inputs again on first use
 Frame storage needs no game restore: the `nt_gfx_begin_frame` that restores the
 context makes new frame buffers, and that frame's allocations reach them.
 Draw entry points that check handles before gfx (`nt_mesh_renderer_draw`,
-`nt_mesh_renderer_draw_list`, `nt_mesh_renderer_draw_list_skinned`, `nt_postfx_blur_gaussian`) return at
+`nt_mesh_renderer_draw_skinned`, `nt_mesh_renderer_draw_list`,
+`nt_mesh_renderer_draw_list_skinned`, `nt_postfx_blur_gaussian`) return at
 once while `g_nt_gfx.context_lost`, so a game may keep calling them through a loss,
 including after a restore that met a second loss and left handles 0.
 `nt_sprite_renderer_set_material` accepts a material whose relink met that loss;

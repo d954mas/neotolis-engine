@@ -397,7 +397,7 @@ Texture and sampler travel together in one `nt_gfx_texture_binding_t`; a materia
 without an override selects the texture's asset default. At every material
 transition the renderer resolves the material's declared `nt_resource_t` texture
 handles, and every sprite emit and run submits the complete semantic set; a
-mesh draw adds its draw textures to it (see Mesh draws). The sprite batch key packs the material pool slot and the currently published GPU
+skinned mesh draw adds its draw texture to it (see Mesh draws). The sprite batch key packs the material pool slot and the currently published GPU
 texture pool slot, resolved from the stable page resource index; a run draws with
 its first item's page. Both bindings
 remain live and unchanged from list construction through draw completion; a new
@@ -427,7 +427,7 @@ every other buffer. The identity is (mesh, frame stream): materials do not
 shape vertex inputs, so every material on a mesh shares them, and the renderers
 keep no vertex-input cache. They die with the mesh (the destroy cascade) and
 with a context loss; the next use makes them again, also after the caller
-destroys one. The mesh renderer binds them with the draw's instance layout; the
+destroys one. The mesh renderer binds them with its plain or skinned instance layout; the
 engine layouts share the instance head (`NT_INST_LOC_*`, see
 [shader, Attribute locations](shader.md#attribute-locations)). A mesh's vertex
 input is pinned to the first instance layout drawn through it, so two instance

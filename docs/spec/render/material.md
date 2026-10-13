@@ -158,9 +158,10 @@ the mesh renderer ignores them.
 A material stores the declared `nt_resource_t` for each texture slot and never a
 resolved handle. Renderers call `nt_resource_get` where they already transition
 material state: the mesh renderer at each material or draw-texture change inside a draw call,
-the sprite renderer at `set_material` and at each `draw_list` material change. Draw
-textures are no material slots and are not resolved: the draw passes texture
-handles and samplers, applied with the resolved declarations as one set. A sprite emit
+the sprite renderer at `set_material` and at each `draw_list` material change. The draw
+texture is no material slot and is not resolved: the renderer binds the
+deformation texture with its default sampler, applied with the resolved
+declarations as one set. A sprite emit
 records the params current at the call. Slot 0 of a sprite material is the atlas
 page: the renderer substitutes the page of each emit, and of each `draw_list`
 run's first item, so the declared slot-0 resource is never resolved. A text material declares no textures, so the text renderer resolves no
