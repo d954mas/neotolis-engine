@@ -10,7 +10,6 @@
 #include "material_comp/nt_material_comp.h"
 #include "mesh_comp/nt_mesh_comp.h"
 #include "renderers/nt_mesh_renderer.h"
-#include "renderers/nt_skinned_mesh_renderer.h"
 #include "resource/nt_resource.h"
 #include "skin_comp/nt_skin_comp.h"
 #include "test_helpers/nt_gfx_test_desc.h"
@@ -293,8 +292,6 @@ static nt_mesh_t make_mesh(const test_vertex_t vertices[VERTEX_COUNT]) {
 static nt_material_t make_skinned_material(float probe_mode) {
     return nt_material_create(&(nt_material_create_desc_t){
         .program = s_skin_program,
-        .textures = {{.name = "u_skin_matrices"}},
-        .texture_count = 1,
         .params = {{.name = "u_probe_mode", .value = {probe_mode, 0.0F, 0.0F, 0.0F}}},
         .param_count = 1,
         .cull_mode = NT_CULL_NONE,
@@ -337,7 +334,7 @@ static void render_entity(nt_entity_t entity, nt_material_t material, nt_mesh_t 
     nt_gfx_begin_frame();
     begin_target_pass();
     if (skinned) {
-        nt_skinned_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, &item, 1);
+        nt_mesh_renderer_draw_list_skinned(NT_GFX_FRAME_VERTEX, &item, 1);
     } else {
         nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, &item, 1);
     }
@@ -356,7 +353,7 @@ static void render_list(const nt_render_item_t *items, uint32_t count, bool skin
     const uint32_t draws = nt_gfx_draw_calls(&g_nt_gfx.counters);
     const uint64_t instances = g_nt_gfx.counters.instances;
     if (skinned) {
-        nt_skinned_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, items, count);
+        nt_mesh_renderer_draw_list_skinned(NT_GFX_FRAME_VERTEX, items, count);
     } else {
         nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, items, count);
     }
@@ -494,8 +491,7 @@ void setUp(void) {
     nt_skin_comp_init(&(nt_skin_comp_desc_t){.capacity = 32});
     nt_material_init(&(nt_material_desc_t){.max_materials = 16});
     s_initialized = true;
-    TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 4}));
-    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 4}));
+    nt_mesh_renderer_init();
 
     bool sources_ready = compose_skin_vertex_source(&skin_source) && read_text("tests/fixtures/skinned_mesh_renderer_reference_native.vert", &reference_source) &&
                          read_text("tests/fixtures/skinned_mesh_renderer_native.frag", &fragment_source);
@@ -546,7 +542,6 @@ void tearDown(void) {
     if (!s_initialized) {
         return;
     }
-    nt_skinned_mesh_renderer_shutdown();
     nt_mesh_renderer_shutdown();
     nt_material_shutdown();
     nt_skin_comp_shutdown();

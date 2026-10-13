@@ -9,7 +9,6 @@
 #include "nt_mesh_format.h"
 #include "nt_vertex_locations.h"
 #include "renderers/nt_mesh_renderer.h"
-#include "renderers/nt_skinned_mesh_renderer.h"
 #include "skin_comp/nt_skin_comp.h"
 #include "transform_comp/nt_transform_comp.h"
 
@@ -25,7 +24,7 @@
 #define NT_TEST_KEEPALIVE
 #endif
 
-/* WebGL2 proof of the mesh renderers' instance layouts: per-instance RGBA8 color at the
+/* WebGL2 proof of the mesh renderer's instance layouts: per-instance RGBA8 color at the
  * struct offsets, stride stepping inside one run, and a shader that does not read color. */
 
 enum { RT_W = 64, RT_H = 64 };
@@ -102,17 +101,12 @@ static nt_mesh_t make_quad(void) {
     return (nt_mesh_t){.id = nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob))};
 }
 
-static nt_material_t make_material(nt_program_t program, bool skinned) {
+static nt_material_t make_material(nt_program_t program) {
     nt_material_create_desc_t desc = {
         .program = program,
         .cull_mode = NT_CULL_NONE,
         .label = "mesh_color_probe",
     };
-    if (skinned) {
-        /* The run supplies the deformation texture; this program samples nothing. */
-        desc.textures[0] = (nt_material_texture_desc_t){.name = "u_skin_matrices"};
-        desc.texture_count = 1;
-    }
     return nt_material_create(&desc);
 }
 
@@ -154,12 +148,10 @@ static void start_modules(void) {
     (void)nt_material_comp_init(&(nt_material_comp_desc_t){.capacity = 16});
     (void)nt_drawable_comp_init(&(nt_drawable_comp_desc_t){.capacity = 16});
     (void)nt_skin_comp_init(&(nt_skin_comp_desc_t){.capacity = 16});
-    (void)nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 4});
-    (void)nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 4});
+    nt_mesh_renderer_init();
 }
 
 static void stop_modules(void) {
-    nt_skinned_mesh_renderer_shutdown();
     nt_mesh_renderer_shutdown();
     nt_skin_comp_shutdown();
     nt_drawable_comp_shutdown();
@@ -177,9 +169,9 @@ static uint32_t draw_and_check(nt_render_target_t target, nt_texture_t deformati
     const uint32_t tint = nt_color_pack((const float[4]){0.1F, 0.2F, 0.3F, 0.5F}); /* alpha 128: blending is off, so it reaches the target */
     const uint32_t skinned_tint = nt_color_pack((const float[4]){0.3F, 0.2F, 0.1F, 0.5F});
     nt_mesh_t quad = make_quad();
-    nt_material_t mesh_material = make_material(s_program[PROBE_MESH], false);
-    nt_material_t colorless_material = make_material(s_program[PROBE_COLORLESS], false);
-    nt_material_t skinned_material = make_material(s_program[PROBE_SKINNED], true);
+    nt_material_t mesh_material = make_material(s_program[PROBE_MESH]);
+    nt_material_t colorless_material = make_material(s_program[PROBE_COLORLESS]);
+    nt_material_t skinned_material = make_material(s_program[PROBE_SKINNED]);
     const nt_render_item_t mesh_items[2] = {make_item(quad, mesh_material, -0.5F, 0.5F, tint, NULL), make_item(quad, mesh_material, 0.5F, 0.5F, 0xFFFFFFFFU, NULL)};
     const nt_render_item_t colorless_item = make_item(quad, colorless_material, 0.0F, 0.0F, tint, NULL);
     const nt_render_item_t skinned_items[2] = {make_item(quad, skinned_material, -0.5F, -0.5F, skinned_tint, &binding), make_item(quad, skinned_material, 0.5F, -0.5F, 0xFFFFFFFFU, &binding)};
@@ -190,7 +182,7 @@ static uint32_t draw_and_check(nt_render_target_t target, nt_texture_t deformati
     const uint64_t instances = g_nt_gfx.counters.instances;
     nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, mesh_items, 2);
     nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, &colorless_item, 1);
-    nt_skinned_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX + 1, skinned_items, 2); /* the quad's vertex input per stream pins one layout */
+    nt_mesh_renderer_draw_list_skinned(NT_GFX_FRAME_VERTEX + 1, skinned_items, 2); /* the quad's vertex input per stream pins one layout */
     /* One instanced draw per list: the two mesh and two skinned instances each share a run. */
     const bool batched = nt_gfx_draw_calls(&g_nt_gfx.counters) == draws + 3 && g_nt_gfx.counters.instances == instances + 5;
     nt_gfx_end_pass();

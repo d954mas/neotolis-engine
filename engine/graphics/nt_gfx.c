@@ -1744,7 +1744,7 @@ static nt_gfx_result_t bind_vertex_input_instanced(nt_vertex_input_t vi, nt_inst
     /* The first instanced bind pins the layout, so the overlap check runs once per vertex input. */
     if (meta->instance_layout != layout_slot) {
         NT_ASSERT(meta->instance_layout == 0 && "bind_vertex_input_instanced: the vertex input is pinned to another instance layout -- draw each layout through its own vertex input, e.g. "
-                                                "a mesh drawn by both mesh renderers from a different frame stream for each");
+                                                "a mesh drawn with two instance layouts from a different frame stream for each");
         NT_ASSERT((s_gfx.instance_layouts[layout_slot].mask & meta->vertex_mask) == 0 && "bind_vertex_input_instanced: instance and vertex attribs share a location");
     }
     const uint32_t buffer_slot = nt_pool_slot_index(instance_buffer.id);

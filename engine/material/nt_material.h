@@ -34,9 +34,8 @@ typedef enum {
 
 typedef struct {
     const char *name; /* required sampler uniform name; hashed at create, not retained */
-    /* Normally resolved by the renderer. A documented renderer-supplied
-     * semantic may leave this invalid; that renderer ignores resource and
-     * sampler and supplies both at draw time. */
+    /* Resolved by the renderer at draw time; sprite slot 0 is the atlas page,
+     * substituted per emit. */
     nt_resource_t resource;
     nt_sampler_t sampler; /* override; .id==0 = use texture's asset-baked default */
 } nt_material_texture_desc_t;
@@ -65,7 +64,7 @@ typedef struct {
     uint8_t texture_count;
     nt_material_param_desc_t params[NT_MATERIAL_MAX_PARAMS];
     uint8_t param_count;
-    /* Sprite path only: a mesh feeds every stream at its pack location, so the mesh renderers
+    /* Sprite path only: a mesh feeds every stream at its pack location, so the mesh renderer
      * assert that a mesh material has none. */
     nt_material_attr_desc_t attr_map[NT_MATERIAL_MAX_ATTR_MAP];
     uint8_t attr_map_count;

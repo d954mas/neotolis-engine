@@ -187,7 +187,7 @@ typedef struct ShaderAsset {
 
 A mesh feeds each stream at the location its builder stream layout states and the
 pack carries ([runtime-formats](../assets/runtime-formats.md#mesh-wire-layout)), and
-the mesh and skinned renderers feed instances at a fixed instance head, so a mesh
+the mesh renderer's instance layouts feed instances at a fixed instance head, so a mesh
 shader declares its inputs at those locations. A shader may
 `#include "nt/locations.glsl"`. The builder resolves this include from C
 (`shared/include/nt_vertex_locations.h`), not from a file. It expands at every
@@ -197,7 +197,7 @@ safe. It holds only `#define` constants, never attribute declarations:
 - `NT_LOC_*`, the default mesh stream locations: position 0, normal 1, color 2,
   uv0 3, tangent 4, uv1 5, joints 6, weights 7;
 - `NT_INST_LOC_*`, the instance head: world rows 8-10 and color 11 for both
-  renderers, skin frame origins 12 and skin alpha 13 for skinned meshes.
+  instance layouts, skin frame origins 12 and skin alpha 13 for skinned meshes.
 
 A shader that reads a stream at an explicitly assigned location writes that
 number, or its own `#define`, matching the stream layout the mesh was built

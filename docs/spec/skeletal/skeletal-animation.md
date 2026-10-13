@@ -32,7 +32,7 @@ Both paths will end in GPU skinning of the same mesh through **one vertex progra
 - **CPU:** clips → sampled track poses → mix/override (additive after v1) → procedural edits/IK → FK → skinning palette → `skeletal_gpu` staging → GPU (frame1 = frame0, alpha 0).
 - **Baked:** bank (matrices per frame, baked once) → clip time → two frame origins + alpha → GPU.
 
-`skinned_mesh_renderer` draws meshes with joint indices and weights from prepared deformation data. It never discovers the animation source.
+The skinned mesh renderer (the `nt_skinned_mesh_renderer` target of the mesh renderer) draws meshes with joint indices and weights from prepared deformation data. It never discovers the animation source.
 
 ## Principles and boundaries
 
@@ -248,14 +248,17 @@ A binding is valid until the context's next `begin_frame` or graphics invalidati
 
 ## Renderer
 
-`nt_skinned_mesh_renderer_draw_list(stream, items, count)` consumes existing 16-byte
+The skinned part of `nt_mesh_renderer.h` exists only in the
+`nt_skinned_mesh_renderer` target, which links instead of `nt_mesh_renderer`.
+`nt_mesh_renderer_draw_list_skinned(stream, items, count)` consumes existing 16-byte
 render items in the given order; through entity it reads
 mesh/material/world/color and `skin_comp`, packs each run's instances into frame
-vertex stream `stream` and records its draw. `nt_skinned_mesh_renderer_draw(mesh, material,
-deformation, buffer, offset, count)` draws instances the caller packed into a frame stream's
-buffer or a caller-owned buffer, with no entity component ([Mesh draws](../render/architecture.md#mesh-draws)). No sampling, FK,
-mode selection, culling or sorting. A mesh drawn by both mesh renderers uses a
-different frame stream for each (asserted; see
+vertex stream `stream` and records its draw.
+`nt_mesh_renderer_draw_skinned(mesh, material, deformation, buffer, offset,
+count)` draws instances the caller packed, with no entity component
+([Mesh draws](../render/architecture.md#mesh-draws)).
+No sampling, FK, mode selection, culling or sorting. Two instance layouts of one
+mesh use different frame streams (asserted; see
 [render architecture, Vertex inputs](../render/architecture.md#vertex-inputs),
 Mesh vertex inputs).
 
@@ -274,18 +277,16 @@ check names), and the instance head at `NT_INST_LOC_*` from `nt/locations.glsl`
 the mesh's vertex input feeds every stream at its pack location; no material
 maps them. The instance offsets stay the renderer's implementation. A shader
 that does not read the skin streams ignores them, so a skinned MESH still draws
-through `nt_mesh_renderer`. The program's non-sampler uniforms must fit the
+through the plain instance layout and `nt_mesh_renderer_draw_list`. The program's non-sampler uniforms must fit the
 backend's 16-entry cache. Always-lerp is to be measured against a
 single-fetch variant (planned, #487); a second program appears only if that number justifies it.
 
-**Sampler set.** The material explicitly declares `u_skin_matrices` as a
-`highp sampler2D` within `NT_MATERIAL_MAX_TEXTURES` = 4. The renderer replaces
-that declared slot's resource and sampler with the run's deformation texture
-and its default sampler, resolves the surface slots normally, and applies the
-complete combined set in one `nt_gfx_apply_texture_bindings` call. The declared
-placeholder resource and sampler have no effect in this renderer. Reapply when
-the material or deformation texture changes; nothing is tracked across draw
-calls.
+**Sampler set.** The program samples `u_skin_matrices` as a `highp sampler2D`;
+the material does not declare it and declares only its surface textures, within
+`NT_MATERIAL_MAX_TEXTURES` = 4. The run's deformation texture with its default
+sampler is the draw's `u_skin_matrices` draw texture
+([Mesh draws](../render/architecture.md#mesh-draws)). Reapply when the material
+or deformation texture changes; nothing is tracked across draw calls.
 
 **Batching.** `nt_mesh_renderer_batch_key(material, mesh)` stays the exact
 two-slot packing. An equal key is a candidate run, and the run also requires an
@@ -295,7 +296,7 @@ per-instance. Only adjacent compatible items merge; the game's order wins.
 **Instance layout** (`nt_skinned_mesh_instance_t`, 64 B) carries three world
 rows, four UINT16 frame origin coordinates, one float alpha and the drawable
 color as normalized RGBA8 (see [color](../render/architecture.md#color)).
-`draw_list` reads each item's skin binding through its asserting accessor, so a
+`nt_mesh_renderer_draw_list_skinned` reads each item's skin binding through its asserting accessor, so a
 stale skinned item asserts. `joints` arrive through float
 attributes with shader integer conversion and `weights` normalized, in the
 stream layouts the builder chapter fixes (Skin streams, under Builder
@@ -489,9 +490,10 @@ glTF is the normative source reference; import selects the canonical rig (skin/n
 - `skeletal_bank` (planned): bank init/bake/lookup over `skeletal` + gfx interface.
 - `skeletal_gpu` (`engine/skeletal_gpu`, one module `nt_skeletal_gpu`): frame staging/upload and `nt_deformation_binding_t` ([GPU preparation](#gpu-preparation)); depends on the gfx interface and on `skeletal` for the matrix layout only.
 - `skin_comp` (`engine/skin_comp`, one module `nt_skin_comp`): the by-value binding component ([GPU preparation](#gpu-preparation)) over `comp_storage`.
-- `skinned_mesh_renderer` (`engine/renderers`, one module
-  `nt_skinned_mesh_renderer`): instanced drawing over prepared deformation
-  bindings ([Renderer](#renderer)). Its public static-link chain is
+- skinned mesh renderer (`engine/renderers`, target `nt_skinned_mesh_renderer`
+  built from the mesh renderer source; links instead of `nt_mesh_renderer`):
+  instanced drawing over prepared deformation bindings ([Renderer](#renderer)).
+  Its public static-link chain is
   `nt_skinned_mesh_renderer → nt_skin_comp → nt_skeletal_gpu → nt_skeletal`;
   static archive linking may discard unused CPU kernel objects.
 - `skeletal_assets` (`engine/skeletal_assets`, one module `nt_skeletal_assets`): the optional NSKL/NSKN/NANM adapters ([Resources and lifetimes](#resources-and-lifetimes)) over `skeletal` + `resource`. `skeletal` itself links neither, so a headless CPU build links no pack code. `skeletal_ik`, `skeletal_retarget` as extensions. Track assign/release/crossfade are game-side field writes ([Tracks: caller-owned playback state](#tracks-caller-owned-playback-state)).

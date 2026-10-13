@@ -243,8 +243,7 @@ void setUp(void) {
     nt_drawable_comp_init(&(nt_drawable_comp_desc_t){.capacity = 64});
     nt_material_init(&(nt_material_desc_t){.max_materials = 64});
 
-    nt_mesh_renderer_desc_t desc = nt_mesh_renderer_desc_defaults();
-    nt_mesh_renderer_init(&desc);
+    nt_mesh_renderer_init();
 
     nt_gfx_fake_draw_trace_reset(true);
     s_draw_mark = 0;
@@ -272,8 +271,7 @@ void test_init_shutdown(void) {
     /* Module is initialized in setUp */
     nt_mesh_renderer_shutdown();
     /* Re-init for tearDown to work cleanly */
-    nt_mesh_renderer_desc_t desc = nt_mesh_renderer_desc_defaults();
-    nt_mesh_renderer_init(&desc);
+    nt_mesh_renderer_init();
 }
 
 /* ---- Test 2: an empty list reserves nothing and draws nothing ---- */
@@ -1772,11 +1770,55 @@ static void test_draws_on_a_lost_context_skip_their_handle_checks(void) {
     nt_gfx_fake_set_context_lost(false);
 }
 
+/* A mesh with joint and weight streams draws plainly: they sit below the instance head. */
+void test_mesh_with_skin_streams_draws(void) {
+    enum { VERTEX_BYTES = 3 * 20 };
+    uint8_t blob[sizeof(NtMeshAssetHeader) + (3 * sizeof(NtStreamDesc)) + VERTEX_BYTES];
+    memset(blob, 0, sizeof(blob));
+    NtMeshAssetHeader *header = (NtMeshAssetHeader *)blob;
+    header->magic = NT_MESH_MAGIC;
+    header->version = NT_MESH_VERSION;
+    header->stream_count = 3;
+    header->vertex_count = 3;
+    header->vertex_data_size = VERTEX_BYTES;
+    NtStreamDesc *streams = (NtStreamDesc *)(blob + sizeof(*header));
+    streams[0] = (NtStreamDesc){.type = NT_STREAM_FLOAT32, .count = 3, .location = NT_LOC_POSITION};
+    streams[1] = (NtStreamDesc){.type = NT_STREAM_UINT8, .count = 4, .location = NT_LOC_JOINTS};
+    streams[2] = (NtStreamDesc){.type = NT_STREAM_UINT8, .count = 4, .normalized = 1, .location = NT_LOC_WEIGHTS};
+    nt_mesh_t mesh = {.id = nt_gfx_activate_mesh(blob, sizeof(blob))};
+    nt_material_t mat = create_test_material();
+    nt_render_item_t item = {.entity = create_test_entity(mesh, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
+
+    draw_list(&item, 1);
+    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
+}
+
+/* A hand-built mesh may place a stream anywhere below 16; one on the instance color slot asserts at the bind. */
+void test_mesh_stream_cannot_overlap_the_color_location(void) {
+    uint8_t blob[sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + 36];
+    memset(blob, 0, sizeof(blob));
+    NtMeshAssetHeader *header = (NtMeshAssetHeader *)blob;
+    header->magic = NT_MESH_MAGIC;
+    header->version = NT_MESH_VERSION;
+    header->stream_count = 1;
+    header->vertex_count = 3;
+    header->vertex_data_size = 36;
+    *(NtStreamDesc *)(blob + sizeof(*header)) = (NtStreamDesc){.type = NT_STREAM_FLOAT32, .count = 3, .location = NT_INST_LOC_COLOR};
+    nt_mesh_t mesh = {.id = nt_gfx_activate_mesh(blob, sizeof(blob))};
+    nt_material_t mat = create_test_material();
+    nt_render_item_t item = {.entity = create_test_entity(mesh, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
+
+    NT_TEST_EXPECT_ASSERT(record_list(&item, 1));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "share a location"));
+}
+
 int main(void) {
     UNITY_BEGIN();
 
     RUN_TEST(test_init_shutdown);
     RUN_TEST(test_draw_list_empty);
+    RUN_TEST(test_mesh_with_skin_streams_draws);
+    RUN_TEST(test_mesh_stream_cannot_overlap_the_color_location);
     RUN_TEST(test_draw_list_null_items_asserts_when_nonempty);
     RUN_TEST(test_unready_program_skips_until_a_ready_program_is_assigned);
     RUN_TEST(test_batch_key_packs_material_and_mesh_slots);
