@@ -25,9 +25,6 @@
 #endif
 _Static_assert(NT_MESH_RENDERER_MAX_PIPELINES <= 65535, "NT_MESH_RENDERER_MAX_PIPELINES overflows the uint16 cache counter");
 
-/* Units a program has left after the material's slots. */
-#define MESH_MAX_DRAW_TEXTURES (NT_GFX_MAX_TEXTURE_SLOTS - NT_MATERIAL_MAX_TEXTURES)
-
 _Static_assert(NT_GFX_MAX_INSTANCE_ATTRS >= 4 + (2 * NT_MESH_RENDERER_SKINNED), "mesh instance layouts need 4 (skinned 6) attributes: raise NT_GFX_MAX_INSTANCE_ATTRS");
 
 static struct {
@@ -86,8 +83,8 @@ void nt_mesh_renderer_shutdown(void) {
 }
 
 // #region run
-/* One call's state: a pass or foreign pipeline between calls invalidates it. Draw texture names
- * and samplers are fixed within a call, so texture ids identify what was applied. */
+/* One call's state: a pass or foreign pipeline between calls invalidates it. The draw texture's
+ * name and sampler are fixed within a call, so its texture id identifies what was applied. */
 typedef struct {
     nt_material_t material;
     nt_mesh_t mesh;
@@ -96,7 +93,7 @@ typedef struct {
     nt_instance_layout_t instance_layout;
     nt_buffer_t instances;
     uint32_t applied_material;
-    uint32_t applied_draw[MESH_MAX_DRAW_TEXTURES];
+    uint32_t applied_draw;
 } mesh_draw_t;
 
 /* The pipeline is program x render state; layouts live on the meshes' vertex inputs. 0 = create failed. */
@@ -133,19 +130,15 @@ static bool resolve(mesh_draw_t *d, nt_material_t material, const nt_material_in
 }
 
 /* Pipeline first: uniforms and the texture set land on its program. The set is the material's
- * declarations followed by the draw textures; gfx resolves units by name. */
-static void record(mesh_draw_t *d, const nt_material_info_t *mi, const nt_gfx_mesh_info_t *mesh_info, const nt_gfx_texture_binding_t *draw, uint8_t draw_count, uint32_t offset, uint32_t count) {
+ * declarations followed by the optional draw texture; gfx resolves units by name. */
+static void record(mesh_draw_t *d, const nt_material_info_t *mi, const nt_gfx_mesh_info_t *mesh_info, const nt_gfx_texture_binding_t *draw, uint32_t offset, uint32_t count) {
     nt_gfx_bind_pipeline(d->pipeline);
     const bool material_changed = d->material.id != d->applied_material;
     if (material_changed) {
         nt_renderer_set_material_uniforms(mi);
     }
-    bool textures_changed = material_changed;
-    for (uint8_t i = 0; i < draw_count; i++) {
-        textures_changed |= draw[i].texture.id != d->applied_draw[i];
-    }
-    if (textures_changed) {
-        nt_gfx_texture_binding_t bindings[NT_MATERIAL_MAX_TEXTURES + MESH_MAX_DRAW_TEXTURES];
+    if (material_changed || (draw != NULL && draw->texture.id != d->applied_draw)) {
+        nt_gfx_texture_binding_t bindings[NT_MATERIAL_MAX_TEXTURES + 1];
         for (uint8_t t = 0; t < mi->tex_count; t++) {
             bindings[t] = (nt_gfx_texture_binding_t){
                 .name = {.value = mi->tex_name_hashes[t]},
@@ -153,11 +146,12 @@ static void record(mesh_draw_t *d, const nt_material_info_t *mi, const nt_gfx_me
                 .sampler = mi->tex_samplers[t],
             };
         }
-        for (uint8_t i = 0; i < draw_count; i++) {
-            bindings[mi->tex_count + i] = draw[i];
-            d->applied_draw[i] = draw[i].texture.id;
+        uint8_t binding_count = mi->tex_count;
+        if (draw != NULL) {
+            bindings[binding_count++] = *draw;
+            d->applied_draw = draw->texture.id;
         }
-        nt_gfx_apply_texture_bindings(bindings, (uint8_t)(mi->tex_count + draw_count));
+        nt_gfx_apply_texture_bindings(bindings, binding_count);
     }
     d->applied_material = d->material.id;
     nt_gfx_bind_vertex_input_instanced(d->vertex_input, d->instance_layout, d->instances, offset);
@@ -172,15 +166,14 @@ static void record(mesh_draw_t *d, const nt_material_info_t *mi, const nt_gfx_me
 /* ---- Draw ---- */
 
 /* The caller has checked the lost context. */
-static void draw_one(nt_mesh_t mesh, nt_material_t material, nt_instance_layout_t layout, nt_buffer_t instances, uint32_t offset, uint32_t count, const nt_gfx_texture_binding_t *draw_textures,
-                     uint8_t draw_texture_count) {
+static void draw_one(nt_mesh_t mesh, nt_material_t material, nt_instance_layout_t layout, nt_buffer_t instances, uint32_t offset, uint32_t count, const nt_gfx_texture_binding_t *draw_texture) {
     NT_ASSERT(count > 0);
     const nt_material_info_t *mat_info = nt_material_get_info(material);
     const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(mesh);
     NT_ASSERT(mat_info != NULL && mesh_info != NULL && "mesh draw references a destroyed material or mesh");
     mesh_draw_t draw = {.instance_layout = layout, .instances = instances};
     if (resolve(&draw, material, mat_info, mesh)) {
-        record(&draw, mat_info, mesh_info, draw_textures, draw_texture_count, offset, count);
+        record(&draw, mat_info, mesh_info, draw_texture, offset, count);
     }
 }
 
@@ -190,7 +183,7 @@ void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_buffer_t i
     if (g_nt_gfx.context_lost) {
         return;
     }
-    draw_one(mesh, material, s_mesh_renderer.layout, instances, offset, count, NULL, 0);
+    draw_one(mesh, material, s_mesh_renderer.layout, instances, offset, count, NULL);
 }
 
 static uint32_t find_run_end(const nt_render_item_t *items, uint32_t run_start, uint32_t count) {
@@ -239,7 +232,7 @@ void nt_mesh_renderer_draw_list(uint32_t stream, const nt_render_item_t *items, 
             nt_mesh_instance_world_rows(dst->world_rows, transform_view.world_matrices[transform_index]);
             dst->color = drawable_view.colors_packed[drawable_index];
         }
-        record(&draw, mat_info, mesh_info, NULL, 0, offset, instance_count);
+        record(&draw, mat_info, mesh_info, NULL, offset, instance_count);
     }
 }
 
@@ -253,7 +246,7 @@ void nt_mesh_renderer_draw_skinned(nt_mesh_t mesh, nt_material_t material, nt_te
     }
     NT_ASSERT(deformation.id != 0 && "skinned draw requires a deformation texture");
     const nt_gfx_texture_binding_t skin = {.name = {.value = s_mesh_renderer.skin_name_hash}, .texture = deformation, .sampler = NT_SAMPLER_DEFAULT};
-    draw_one(mesh, material, s_mesh_renderer.skinned_layout, instances, offset, count, &skin, 1);
+    draw_one(mesh, material, s_mesh_renderer.skinned_layout, instances, offset, count, &skin);
 }
 
 static uint32_t find_skinned_run_end(const nt_render_item_t *items, uint32_t leader, uint32_t end, uint32_t texture_id) {
@@ -312,7 +305,7 @@ void nt_mesh_renderer_draw_list_skinned(uint32_t stream, const nt_render_item_t 
             dst->skin_alpha = binding.alpha;
             dst->color = drawable_view.colors_packed[drawable_index];
         }
-        record(&draw, mat_info, mesh_info, &skin, 1, offset, instance_count);
+        record(&draw, mat_info, mesh_info, &skin, offset, instance_count);
     }
 }
 // #endregion

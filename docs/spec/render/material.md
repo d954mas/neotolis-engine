@@ -50,7 +50,7 @@ inspected, so one material can over-declare for a family of shaders. The slot
 index is not the texture unit: gfx resolves the semantic name through immutable
 program reflection, and two materials may list the same samplers in any order.
 A material carries at most `NT_MATERIAL_MAX_TEXTURES` (4) slots of the 8 units
-a program can link; the other 4 are left for draw textures.
+a program can link, which leaves room for the draw texture.
 
 Sprite and text keep two legacy renderer-specific exceptions until the material bind group (planned, #600). Sprite
 declares its atlas-page sampler in slot 0 but substitutes the page resource per
