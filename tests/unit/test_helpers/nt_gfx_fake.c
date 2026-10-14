@@ -118,16 +118,12 @@ static bool s_fake_context_lost;
 static bool s_fake_loss_pending; /* the web lost-event latch until begin_frame takes it */
 static uint32_t s_fake_texture_destroy_count;
 static uint32_t s_fake_last_destroyed_texture;
-static bool s_fake_fail_next_buffer_create;
 static uint8_t s_fake_lose_buffer_creates;
-static bool s_fake_fail_next_program_link;
 static bool s_fake_hold_program_links;
 static bool s_fake_lose_context_on_program_link;
-static bool s_fake_fail_next_sampler_create;
 static bool s_fake_lose_context_on_sampler_create;
 static bool s_fake_fail_next_backend_restore_lost;
 static bool s_fake_lose_context_during_next_restore;
-static bool s_fake_fail_next_render_target_create;
 static uint32_t s_fake_last_update_buffer_offset;
 static const void *s_fake_last_update_buffer_data;
 static uint32_t s_fake_last_update_buffer_size;
@@ -201,15 +197,11 @@ nt_texture_desc_t nt_gfx_fake_last_texture_desc(void) { return s_fake_last_textu
 nt_buffer_desc_t nt_gfx_fake_last_buffer_desc(void) { return s_fake_last_buffer_desc; }
 uint32_t nt_gfx_fake_last_color_texture_backend(void) { return s_fake_last_color_texture_backend; }
 uint32_t nt_gfx_fake_last_depth_texture_backend(void) { return s_fake_last_depth_texture_backend; }
-void nt_gfx_fake_fail_next_render_target_create(void) { s_fake_fail_next_render_target_create = true; }
 uint32_t nt_gfx_fake_texture_destroy_count(void) { return s_fake_texture_destroy_count; }
 uint32_t nt_gfx_fake_last_destroyed_texture(void) { return s_fake_last_destroyed_texture; }
-void nt_gfx_fake_fail_next_buffer_create(void) { s_fake_fail_next_buffer_create = true; }
 void nt_gfx_fake_lose_context_on_buffer_creates(uint8_t mask) { s_fake_lose_buffer_creates = mask; }
-void nt_gfx_fake_fail_next_program_link(void) { s_fake_fail_next_program_link = true; }
 void nt_gfx_fake_hold_program_links(bool hold) { s_fake_hold_program_links = hold; }
 void nt_gfx_fake_lose_context_on_program_link(void) { s_fake_lose_context_on_program_link = true; }
-void nt_gfx_fake_fail_next_sampler_create(void) { s_fake_fail_next_sampler_create = true; }
 void nt_gfx_fake_lose_context_on_sampler_create(void) { s_fake_lose_context_on_sampler_create = true; }
 void nt_gfx_fake_fail_next_backend_restore_lost(void) { s_fake_fail_next_backend_restore_lost = true; }
 void nt_gfx_fake_lose_context_during_next_restore(void) { s_fake_lose_context_during_next_restore = true; }
@@ -282,19 +274,15 @@ void nt_gfx_fake_reset(void) {
     s_fake_loss_pending = false;
     s_fake_texture_destroy_count = 0;
     s_fake_last_destroyed_texture = 0;
-    s_fake_fail_next_buffer_create = false;
     s_fake_lose_buffer_creates = 0;
-    s_fake_fail_next_program_link = false;
     s_fake_hold_program_links = false;
     s_fake_lose_context_on_program_link = false;
-    s_fake_fail_next_sampler_create = false;
     s_fake_lose_context_on_sampler_create = false;
     s_fake_fail_next_backend_restore_lost = false;
 #if NT_GFX_CAPTURE_ENABLED
     s_fake_backend_snapshot_count = 0;
 #endif
     s_fake_lose_context_during_next_restore = false;
-    s_fake_fail_next_render_target_create = false;
 }
 
 /* Deliberately outside nt_gfx_fake_reset: a test may reset the other observations mid-scenario and
@@ -465,14 +453,10 @@ nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll
         s_fake_lose_context_on_program_link = false;
         s_fake_context_lost = true;
         s_fake_loss_pending = true;
-        return NT_GFX_RESULT_BACKEND_FAILURE;
+        return NT_GFX_RESULT_CONTEXT_LOST;
     }
     if (s_fake_hold_program_links) {
         return NT_GFX_RESULT_UNREADY;
-    }
-    if (s_fake_fail_next_program_link) {
-        s_fake_fail_next_program_link = false;
-        return NT_GFX_RESULT_BACKEND_FAILURE;
     }
     return NT_GFX_RESULT_ACCEPTED;
 }
@@ -540,10 +524,6 @@ bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot) {
             s_fake_last_vertex_buffer_hash = h;
         }
     }
-    if (s_fake_fail_next_buffer_create) {
-        s_fake_fail_next_buffer_create = false;
-        return false;
-    }
     s_fake_buffer_live[slot] = true;
     return true;
 }
@@ -580,10 +560,6 @@ bool nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTAC
     }
     s_fake_last_color_texture_backend = textures[NT_GFX_RT_COLOR];
     s_fake_last_depth_texture_backend = textures[NT_GFX_RT_DEPTH];
-    if (s_fake_fail_next_render_target_create) {
-        s_fake_fail_next_render_target_create = false;
-        return false;
-    }
     return true;
 }
 
@@ -632,10 +608,6 @@ uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
     }
     if (s_fake_context_lost) {
         return 0; /* GL creates no name on a lost context */
-    }
-    if (s_fake_fail_next_sampler_create) {
-        s_fake_fail_next_sampler_create = false;
-        return 0;
     }
     static uint32_t s_counter;
     return ++s_counter; /* unique id so tests can differentiate samplers */

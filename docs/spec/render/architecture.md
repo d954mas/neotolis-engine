@@ -940,19 +940,24 @@ On a lost context pass calls keep their sequencing asserts and record nothing:
 `begin_pass` still opens the pass, pass-scoped calls end `CONTEXT_LOST` after the
 pass check, and `end_pass` closes the pass (its END is a backend no-op without a BEGIN).
 
-A backend call that reports a failure (a create, a readback, a lazy sampler recreate at bind or on a
-cache hit) asks the browser: a loss latches as above and ends the operation with
-`CONTEXT_LOST`. On a live context a GL object that cannot be named asserts (see
-[API contracts](../core/api-contracts.md)); a readback error and an incomplete
-framebuffer keep their own failure reason. A
-readback asks after every read as well: WebGL reports a loss once through
-`glGetError`, and the drain before the read consumes it. The backend asks only where the answer prevents a crash or a
-misleading log: before shader and program creation, because Emscripten throws on
-the null object some browsers return on a lost context; error logs for link,
-uniform reflection and framebuffer completeness, which a loss suppresses;
-after texture upload, because a nonzero WebGL name does not establish context
-liveness; and the vertex array made at context setup, whose name 0 asserts only
-on a live context. A GPU timer query named 0 leaves its segment unallocated and
+A backend call that reports a failure (a create, a link, a readback, a lazy sampler recreate at
+bind or on a cache hit) means a lost context: the loss latches as above and the operation ends
+`CONTEXT_LOST`. On a live context each of these failures is a bug, and the GL backend asserts
+where it happens: a GL object that cannot be named (see
+[API contracts](../core/api-contracts.md)), a failed link or uniform reflection, an incomplete
+framebuffer and a readback GL error. The engine's attachment formats are required framebuffer
+formats of GLES 3.0 ("Required Framebuffer Formats": `RGBA8`, `DEPTH16`, `DEPTH24`, `DEPTH32F`;
+`EXT_color_buffer_float` makes single-sample `RGBA16F` one too, and creation checks its bit), so a
+live driver must complete every target the engine builds. Two residual cases also assert: a
+texture whose GPU storage allocation failed (uploads are not polled) leaves its framebuffer
+incomplete, and a GPU-process death that fails a status before the browser reports the loss.
+The backend asks the browser after a failed call, never at a creator's entry, for the same reason.
+A readback asks after every read as well: WebGL reports a loss once through
+`glGetError`, and the drain before the read consumes it. Beyond failures the backend asks only
+where the answer prevents a crash: before shader and program creation, because Emscripten throws on
+the null object some browsers return on a lost context; after texture upload, because a nonzero
+WebGL name does not establish context liveness; and the vertex array made at context setup, whose
+name 0 asserts only on a live context. A GPU timer query named 0 leaves its segment unallocated and
 skipped, because `beginQuery` throws on it. A fresh context (init or restore) first
 drains GL errors: Emscripten keeps a recorded error across contexts, so a call
 that reached the dead context must not fail the fresh one's first check.

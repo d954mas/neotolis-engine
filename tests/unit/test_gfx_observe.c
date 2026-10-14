@@ -237,15 +237,6 @@ static void test_init_on_a_lost_context_latches_the_loss(void) {
     nt_gfx_fake_set_context_lost(false);
 }
 
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
-/* Only a loss the browser confirms latches: a name failure on a live context asserts instead. */
-static void test_a_name_failure_on_a_live_context_asserts_without_latching(void) {
-    nt_gfx_fake_fail_next_buffer_create();
-    NT_TEST_EXPECT_ASSERT(nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}));
-    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
-}
-#endif
-
 /* The latch keeps the tables until begin_frame takes the lost event, also when the context is back by then. */
 static void test_a_latched_loss_wipes_when_its_event_is_taken(void) {
     for (uint32_t taken = 0; taken < 2; taken++) {
@@ -1165,9 +1156,6 @@ int main(void) {
     RUN_TEST(test_loss_and_restore_between_iterations_restore_in_one_begin_frame);
     RUN_TEST(test_a_latched_loss_carries_a_whole_creation_chain);
     RUN_TEST(test_a_loss_latched_inside_a_pass_closes_the_pass);
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
-    RUN_TEST(test_a_name_failure_on_a_live_context_asserts_without_latching);
-#endif
     RUN_TEST(test_init_on_a_lost_context_latches_the_loss);
     RUN_TEST(test_a_latched_loss_wipes_when_its_event_is_taken);
     RUN_TEST(test_a_sampler_recreate_and_a_readback_latch_a_loss);

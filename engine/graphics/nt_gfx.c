@@ -626,10 +626,11 @@ static void finish_program_links(void) {
         if (result == NT_GFX_RESULT_UNREADY) {
             continue;
         }
-        if (result != NT_GFX_RESULT_ACCEPTED && context_loss_confirmed()) {
+        /* The backend asserts a live link failure, so anything but ACCEPTED is a loss. */
+        if (result == NT_GFX_RESULT_CONTEXT_LOST) {
+            (void)context_loss_confirmed();
             return; /* the begin_frame that takes the loss wipes every pending link */
         }
-        NT_ASSERT(result == NT_GFX_RESULT_ACCEPTED && "program link failed");
         s_gfx.program_states[i] = NT_GFX_PROGRAM_READY;
         NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_PROGRAM, s_gfx.program_pool.slots[i].id);
     }

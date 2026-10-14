@@ -490,8 +490,9 @@ developer errors and assert, as are exhausted configured target capacity and
 destroying a live target while the frame is being drawn (the frame rule).
 Creating a target is allowed anywhere, inside a pass too: the create is immediate,
 and a pass binds its framebuffer only when the stream executes. Destroying an invalid or stale target is a
-no-op even then: the handle check runs first. A returned invalid target therefore means a lost context
-or an incomplete framebuffer. `nt_gfx_make_pipeline`
+no-op even then: the handle check runs first. A returned invalid target therefore means a lost
+context; an incomplete framebuffer on a live context asserts (see
+[render architecture](../render/architecture.md)). `nt_gfx_make_pipeline`
 follows the same split: a
 NULL descriptor, an invalid program or one a context loss discarded, and an exhausted
 pipeline pool assert; a linking program is accepted. The backend create only fills a
@@ -518,9 +519,9 @@ lifetime rules of both live in
 Creating a pipeline or a vertex input
 preserves both current bindings (the bound pipeline and the bound vertex
 input); the caller does not need to rebind after creating another object.
-Framebuffer completeness and context restore remain runtime failures reported
-through invalid handles, `false`, or readiness
-queries. Texture upload failures
+Context loss and restore remain runtime outcomes reported through invalid
+handles, `false`, or readiness queries; on a live context an incomplete
+framebuffer, a failed link and a readback error assert. Texture upload failures
 are unchecked as specified above. Mandatory backend setup objects are internal
 invariants: failure to create the GL service EBO
 upload VAO with a live context asserts.

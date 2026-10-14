@@ -1077,6 +1077,10 @@ bool nt_gfx_backend_read_pixels(uint32_t render_target_backend, int x, int y, in
     /* A failed read (incomplete FB, invalid read buffer, no current context) leaves out_rgba8
        partly/wholly untouched — report it so the dev-only capture path yields capture_failed, not garbage. */
     const bool ok = NT_GL_RET0(glGetError) == GL_NO_ERROR;
+    if (!ok) {
+        const bool lost = nt_gfx_gl_ctx_query_lost();
+        NT_ASSERT(lost && "read_pixels: GL error on a live context");
+    }
     if (fbo != 0) {
         NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, 0);
     }
@@ -1249,6 +1253,14 @@ void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uin
 
 /* ---- Resource management (shader / buffer / pipeline) ---- */
 
+/* WebGL names null only on a lost context, and native glGen* does not run out: a null name on a
+ * live context is a bug. Asked after the failed call, never at entry -- a GPU-process death can
+ * fail the call before the browser reports the loss. */
+static void assert_name_failed_on_loss(void) {
+    const bool lost = nt_gfx_gl_ctx_query_lost();
+    NT_ASSERT(lost && "backend could not name a GL object on a live context");
+}
+
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
     /* A browser that returns a null shader on a lost context makes Emscripten's glShaderSource throw. */
     if (nt_gfx_gl_ctx_query_lost()) {
@@ -1256,6 +1268,11 @@ uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
     }
     GLenum gl_type = (desc->type == NT_SHADER_VERTEX) ? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER;
     GLuint shader = NT_GL_RET(glCreateShader, gl_type);
+    /* A loss between the entry query and the create: glShaderSource would throw on the null name. */
+    if (shader == 0) {
+        assert_name_failed_on_loss();
+        return 0;
+    }
 
 #ifdef NT_PLATFORM_WEB
     const char *prefix = "#version 300 es\n";
@@ -1520,7 +1537,8 @@ bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uin
     }
     GLuint program = NT_GL_RET0(glCreateProgram);
     if (program == 0) {
-        return false; /* a zero name would leave the record marked empty */
+        assert_name_failed_on_loss();
+        return false;
     }
     NT_GL(glAttachShader, program, (GLuint)vs_backend);
     NT_GL(glAttachShader, program, (GLuint)fs_backend);
@@ -1544,11 +1562,13 @@ nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll
     GLint linked = 0;
     NT_GL(glGetProgramiv, rec->program, GL_LINK_STATUS, &linked);
     if (!linked) {
-        /* A loss fails the link before its event arrives; the caller's query latches it. */
-        if (!nt_gfx_gl_ctx_query_lost()) {
+        /* A loss fails the link before its event arrives; the caller latches it. */
+        const bool lost = nt_gfx_gl_ctx_query_lost();
+        if (!lost) {
             nt_gfx_gl_log_link_failure(rec->program);
         }
-        return NT_GFX_RESULT_BACKEND_FAILURE;
+        NT_ASSERT(lost && "program link failed");
+        return NT_GFX_RESULT_CONTEXT_LOST;
     }
     const nt_global_block_t *blocks = s_init_desc.global_blocks;
     for (uint32_t bi = 0; bi < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; bi++) {
@@ -1561,10 +1581,9 @@ nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll
         }
     }
     if (!nt_gfx_gl_cache_uniforms(rec->program, rec)) {
-        if (!nt_gfx_gl_ctx_query_lost()) {
-            NT_LOG_ERROR("program uniform reflection failed");
-        }
-        return NT_GFX_RESULT_BACKEND_FAILURE;
+        const bool lost = nt_gfx_gl_ctx_query_lost();
+        NT_ASSERT(lost && "program uniform reflection failed");
+        return NT_GFX_RESULT_CONTEXT_LOST;
     }
     write_sampler_units(rec->program, rec);
 #if NT_GFX_CAPTURE_ENABLED
@@ -1639,6 +1658,7 @@ bool nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint
     GLuint vao = 0;
     NT_GL_GEN(glGenVertexArrays, 1, &vao);
     if (vao == 0) {
+        assert_name_failed_on_loss();
         return false;
     }
     nt_gfx_gl_vertex_input_t *vi = &s_vertex_inputs[slot];
@@ -1787,7 +1807,8 @@ bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot) {
     GLuint buf;
     NT_GL_GEN(glGenBuffers, 1, &buf);
     if (buf == 0) {
-        return false; /* storing name 0 would alias the empty-record sentinel */
+        assert_name_failed_on_loss();
+        return false;
     }
     const GLenum target = desc->type == NT_BUFFER_INDEX ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
     GLenum usage = map_buffer_usage(desc->usage);
@@ -1939,6 +1960,7 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
     GLuint tex;
     NT_GL_GEN(glGenTextures, 1, &tex);
     if (tex == 0) {
+        assert_name_failed_on_loss();
         return 0;
     }
     nt_gfx_gl_bind_texture_for_upload(tex);
@@ -2037,9 +2059,7 @@ static bool nt_gfx_gl_build_render_target(const GLuint textures[NT_GFX_RT_ATTACH
     GLuint fbo = 0;
     NT_GL_GEN(glGenFramebuffers, 1, &fbo);
     if (fbo == 0) {
-        /* Like every other GL name: only a lost context fails it; incompleteness is checked below. */
-        const bool lost = nt_gfx_gl_ctx_query_lost();
-        NT_ASSERT(lost && "render target: framebuffer name failed on a live context");
+        assert_name_failed_on_loss();
         return false;
     }
     NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, fbo);
@@ -2058,9 +2078,13 @@ static bool nt_gfx_gl_build_render_target(const GLuint textures[NT_GFX_RT_ATTACH
 
     GLenum status = NT_GL_RET(glCheckFramebufferStatus, GL_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE) {
-        if (!nt_gfx_gl_ctx_query_lost()) {
+        /* The engine's formats are required framebuffer formats (GLES 3.0 "Required Framebuffer
+         * Formats"; RGBA16F with EXT_color_buffer_float), so only a loss leaves one incomplete. */
+        const bool lost = nt_gfx_gl_ctx_query_lost();
+        if (!lost) {
             NT_LOG_ERROR("render target incomplete: GL status 0x%04X", (unsigned)status);
         }
+        NT_ASSERT(lost && "render target incomplete on a live context");
         NT_GL_DELETE(glDeleteFramebuffers, 1, &fbo);
         NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, restore_fbo);
         s_bound_framebuffer = restore_fbo;
@@ -2137,6 +2161,7 @@ uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
     GLuint s = 0;
     NT_GL_GEN(glGenSamplers, 1, &s);
     if (s == 0) {
+        assert_name_failed_on_loss();
         return 0;
     }
     NT_GL(glSamplerParameteri, s, GL_TEXTURE_MIN_FILTER, (GLint)map_texture_filter(desc->min_filter));

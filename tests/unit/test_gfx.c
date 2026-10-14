@@ -416,19 +416,6 @@ void test_gfx_make_program_asserts_invalid_shader(void) {
     EXPECT_ASSERT(nt_gfx_make_program(vs, (nt_shader_t){0}));
 }
 
-/* ---- Program: link failure asserts where the link finishes ---- */
-
-void test_gfx_link_failure_asserts_in_begin_frame(void) {
-    nt_shader_t vs = make_test_vs();
-    nt_shader_t fs = make_test_fs();
-    nt_gfx_fake_fail_next_program_link();
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
-    TEST_ASSERT_TRUE(nt_gfx_program_valid(prog));
-    nt_gfx_end_frame();
-    EXPECT_ASSERT(nt_gfx_begin_frame());
-    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "program link failed"));
-}
-
 /* ---- Program: the link runs across frames and only a begin_frame finishes it ---- */
 
 void test_gfx_program_links_at_a_begin_frame(void) {
@@ -469,17 +456,18 @@ void test_gfx_destroy_while_linking_frees_the_slot(void) {
     nt_gfx_destroy_program(pending);
     TEST_ASSERT_FALSE(nt_gfx_program_valid(pending));
 
-    /* Armed for the next finished link: the destroyed one must not consume it. */
-    nt_gfx_fake_fail_next_program_link();
+    /* The destroyed link is gone: the fake's per-slot record asserts if begin_frame finished it. */
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
 
     nt_program_t reused = nt_gfx_make_program(make_test_vs(), make_test_fs());
     TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(pending.id), nt_pool_slot_index(reused.id));
     TEST_ASSERT_NOT_EQUAL_UINT32(pending.id, reused.id);
+    TEST_ASSERT_FALSE(nt_gfx_program_ready(reused));
     nt_gfx_end_frame();
-    EXPECT_ASSERT(nt_gfx_begin_frame());
-    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "program link failed"));
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(nt_gfx_program_ready(reused));
+    TEST_ASSERT_FALSE(nt_gfx_program_valid(pending));
 }
 
 /* ---- Program: a loss met while finishing a link latches it, never asserts ---- */
@@ -1110,41 +1098,6 @@ void test_gfx_creates_that_meet_a_loss_free_their_pool_slots(void) {
     for (uint32_t i = 0; i < 4; i++) {
         nt_gfx_destroy_buffer(buffers[i]);
     }
-}
-
-/* The cache hit recreates a sampler the loss zeroed; on a live context its name cannot fail. */
-void test_gfx_sampler_hit_recreate_name_failure_on_a_live_context_asserts(void) {
-    const nt_sampler_desc_t desc = {.compare_func = NT_COMPARE_LESS};
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_make_sampler(&desc).id);
-    nt_gfx_fake_lose_and_restore_context();
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
-    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
-    nt_gfx_fake_fail_next_sampler_create();
-    EXPECT_ASSERT(nt_gfx_make_sampler(&desc));
-    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "could not name a GL object on a live context"));
-}
-
-void test_gfx_sampler_recreate_name_failure_on_a_live_context_asserts(void) {
-    nt_sampler_t compare = nt_gfx_make_sampler(&(nt_sampler_desc_t){.compare_func = NT_COMPARE_LESS});
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, compare.id);
-    nt_gfx_fake_lose_and_restore_context();
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
-
-    nt_texture_t color = make_binding_test_texture(1);
-    nt_texture_t depth = make_binding_test_texture_format(NT_TEXTURE_FORMAT_DEPTH24);
-    nt_program_t program = nt_gfx_fake_make_program_typed((const char *const[]){"u_color", "u_shadow"}, (const uint8_t[]){NT_GFX_SAMPLER_CLASS_FLOAT, NT_GFX_SAMPLER_CLASS_SHADOW}, 2);
-    nt_test_gfx_link_wait(program);
-    begin_texture_binding_test_pass(program);
-    bind_test_vertex_input();
-    const nt_gfx_texture_binding_t bindings[] = {
-        {.name = nt_hash32_str("u_color"), .texture = color, .sampler = NT_SAMPLER_DEFAULT},
-        {.name = nt_hash32_str("u_shadow"), .texture = depth, .sampler = compare},
-    };
-    nt_gfx_fake_fail_next_sampler_create();
-    EXPECT_ASSERT(nt_gfx_apply_texture_bindings(bindings, 2));
-    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "could not name a GL object on a live context"));
 }
 
 void test_gfx_texture_set_clears_on_pass_begin_and_failed_bind(void) {
@@ -4046,8 +3999,6 @@ int main(void) {
     RUN_TEST(test_gfx_husks_skip_the_backend_and_their_slots_are_reused_after_restore);
     RUN_TEST(test_gfx_husks_after_a_failed_restore_reach_no_backend_record);
     RUN_TEST(test_gfx_texture_rolled_back_by_its_sampler_frees_its_slot);
-    RUN_TEST(test_gfx_sampler_hit_recreate_name_failure_on_a_live_context_asserts);
-    RUN_TEST(test_gfx_sampler_recreate_name_failure_on_a_live_context_asserts);
     RUN_TEST(test_gfx_texture_set_clears_on_pass_begin_and_failed_bind);
     RUN_TEST(test_gfx_destroy_program_accepts_invalid);
     RUN_TEST(test_gfx_destroy_program_asserts_on_a_stale_handle);
@@ -4063,7 +4014,6 @@ int main(void) {
     RUN_TEST(test_gfx_shader_pool_full_asserts);
     RUN_TEST(test_gfx_shader_pool_full_while_lost_returns_invalid);
     RUN_TEST(test_gfx_make_program_asserts_invalid_shader);
-    RUN_TEST(test_gfx_link_failure_asserts_in_begin_frame);
     RUN_TEST(test_gfx_program_links_at_a_begin_frame);
     RUN_TEST(test_gfx_destroy_while_linking_frees_the_slot);
     RUN_TEST(test_gfx_context_loss_during_link_finish_latches_the_loss);

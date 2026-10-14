@@ -55,11 +55,9 @@ uint32_t nt_gfx_fake_uniform_vec4_count(void);
 uint32_t nt_gfx_fake_uniform_vec4_hash_at(uint32_t index);
 void nt_gfx_fake_uniform_vec4_value_at(uint32_t index, float out[4]);
 /* Program links finish in nt_gfx_begin_frame; these act there. Hold keeps every link pending. */
-void nt_gfx_fake_fail_next_program_link(void);
 void nt_gfx_fake_hold_program_links(bool hold);
 void nt_gfx_fake_lose_context_on_program_link(void);
-/* fail_* fails a create on a live context, which gfx asserts; lose_* loses the context at it. */
-void nt_gfx_fake_fail_next_sampler_create(void);
+/* Loses the context at the create. A live name failure asserts in the GL backend; native tests prove it. */
 void nt_gfx_fake_lose_context_on_sampler_create(void);
 /* Viewport size the front-end passed to the last begin_pass; 0 for the default framebuffer. */
 uint16_t nt_gfx_fake_last_pass_width(void);
@@ -105,13 +103,11 @@ uint32_t nt_gfx_fake_gpu_caps_probe_count(void);
 uint32_t nt_gfx_fake_texture_destroy_count(void);
 /* Backend handle of the last destroyed texture; handle 0 is a no-op, as on GL. */
 uint32_t nt_gfx_fake_last_destroyed_texture(void);
-void nt_gfx_fake_fail_next_buffer_create(void);
 void nt_gfx_fake_lose_context_on_buffer_creates(uint8_t mask);
 /* A failed web recreate leaves no context: the backend stays lost. */
 void nt_gfx_fake_fail_next_backend_restore_lost(void);
 /* The recreate succeeds but the context is lost again before begin_frame finishes. */
 void nt_gfx_fake_lose_context_during_next_restore(void);
-void nt_gfx_fake_fail_next_render_target_create(void);
 /* Live loss state; true also queues the lost event, which stays until begin_frame takes it, as in a
  * browser. The lose_context_on_* knobs do the same. Creates fail on a lost context, as GL's do. */
 void nt_gfx_fake_set_context_lost(bool lost);
