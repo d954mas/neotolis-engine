@@ -107,7 +107,7 @@ typedef struct {
     uint8_t usage;        /* nt_buffer_usage_t */
     uint8_t index_type;   /* 0=none, 1=uint16, 2=uint32 */
     uint8_t frame_stream; /* frame storage stream + 1 (its `used` bounds instance reads); 0 = not frame storage */
-    bool live;            /* GPU storage on the current context; false = husk a loss left */
+    bool live;            /* a backend object on the current context; false = free slot or husk */
     uint32_t size;        /* capacity */
 } nt_gfx_buffer_meta_t;
 
@@ -143,7 +143,7 @@ typedef struct {
     uint16_t height;
     uint8_t format;    /* nt_texture_format_t */
     uint8_t mip_count; /* 1 = base only, >1 = has mip chain */
-    bool live;         /* GPU storage on the current context; false = husk a loss left */
+    bool live;         /* a backend object on the current context; false = free slot or husk */
     /* Sampler NT_SAMPLER_DEFAULT resolves to. Always non-zero for a live
      * texture: make_texture rejects the texture when the sampler cannot be
      * created. Survives a context loss: sampler ids stay valid across it. */
@@ -247,7 +247,7 @@ static const nt_gfx_texture_meta_t *render_target_size_meta(uint32_t rt_slot) {
 
 /* A backend failure means a lost context: the backend asserted a live one after asking the
  * browser. The loss event may still be queued, so the first failure latches it at once and every
- * later call takes its lost path; only it logs. */
+ * later call takes its lost path; only that first failure logs. */
 static nt_gfx_result_t latch_loss(void) {
     if (!g_nt_gfx.context_lost) {
         g_nt_gfx.context_lost = true;
@@ -256,7 +256,7 @@ static nt_gfx_result_t latch_loss(void) {
     return NT_GFX_RESULT_CONTEXT_LOST;
 }
 
-/* Programs, buffers and textures use the frontend slot as the backend handle; a husk has none. */
+/* True while the program has a GPU object (linking or ready). */
 static bool program_has_gpu(uint32_t slot) { return s_gfx.program_states[slot] != NT_GFX_PROGRAM_NONE; }
 
 /* The full program handle a pipeline slot borrows: its key packs it into the low 32 bits. */
@@ -619,7 +619,7 @@ static void finish_program_links(void) {
             (void)latch_loss();
             return; /* the begin_frame that takes the loss wipes every pending link */
         }
-        NT_ASSERT(result == NT_GFX_RESULT_ACCEPTED && "program link failed");
+        NT_ASSERT(result == NT_GFX_RESULT_ACCEPTED && "finish_program: unexpected backend result");
         s_gfx.program_states[i] = NT_GFX_PROGRAM_READY;
         NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_PROGRAM, s_gfx.program_pool.slots[i].id);
     }
@@ -633,11 +633,8 @@ static void wipe_backend_handles(void) {
     for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
         s_gfx.program_states[i] = NT_GFX_PROGRAM_NONE;
     }
-    /* Pipelines, vertex inputs and render targets are baked from other handles, and their users
-     * validate and remake them: loss frees their slots outright. Primary resources stay as husks
-     * that readiness checks already skip; owners destroy them.
-     * Pipelines free high to low: the pool reuses the last freed slot first, and make_pipeline
-     * scans from slot 1, so the next pipelines land where the scan reaches them soonest. */
+    /* Owners remake baked handles, so loss frees them; primaries stay husks until owners destroy them.
+     * Pipelines free high to low: reuse starts at the low slots make_pipeline scans first. */
     for (uint32_t i = s_gfx.pipeline_pool.capacity; i >= 1; i--) {
         if (nt_pool_slot_alive(&s_gfx.pipeline_pool, i)) {
             nt_pool_free(&s_gfx.pipeline_pool, s_gfx.pipeline_pool.slots[i].id);
@@ -764,7 +761,7 @@ void nt_gfx_end_frame(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static nt_gfx_result_t read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint8_t *out, uint32_t out_cap) {
     NT_ASSERT(w > 0 && h > 0 && "read_pixels: empty rect");
-    NT_ASSERT(out != NULL); /* L1 writes the readback (and row-swaps) through out — NULL is a caller bug. */
+    NT_ASSERT(out != NULL);
     /* In uint64_t so w*h*4 cannot overflow before the comparison. */
     NT_ASSERT((uint64_t)(uint32_t)w * (uint64_t)(uint32_t)h * 4U <= (uint64_t)out_cap && "read_pixels: out_cap is smaller than w*h*4");
     /* A lost context returns uninitialized garbage as a "successful" read — every other GL wrapper
@@ -786,7 +783,7 @@ static nt_gfx_result_t read_pixels(nt_render_target_t src, int x, int y, int w, 
     }
     /* WebGL reports a loss once through glGetError and the drain before the read eats it: ask the browser too. */
     if (!nt_gfx_backend_read_pixels(rt_slot, x, y, w, h, out) || nt_gfx_backend_query_context_lost()) {
-        /* A loss leaves the buffer unwritten: false -> capture_failed, not an encode of garbage. */
+        /* The buffer is unusable: false -> capture_failed, not an encode of it. */
         return latch_loss();
     }
 

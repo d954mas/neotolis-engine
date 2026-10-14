@@ -1,6 +1,6 @@
 /* nt_gfx_read_pixels contract — cap assert / top-left orientation /
  * channel layout / bad-size assert. Links nt_gfx_fake (deterministic synthetic
- * gradient, no GL context — the only L1 readback layer CTest can prove headless). */
+ * gradient, no GL context — the only readback layer CTest can prove headless). */
 
 #include "graphics/nt_gfx.h"
 #include "test_helpers/nt_assert_trap.h"

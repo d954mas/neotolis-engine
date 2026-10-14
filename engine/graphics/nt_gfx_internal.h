@@ -137,7 +137,8 @@ typedef enum {
 
 /* ---- Backend function signatures (implemented by each backend) ---- */
 
-/* Shader and sampler destroy accepts 0 (no-op, as glDelete*); every bind requires a live handle -- the front-end owns husk handling.
+/* Program, buffer and texture destroys require a live record; the other destroys accept 0 (no-op, as
+ * glDelete*). Every bind requires a live handle -- the front-end owns husk handling.
  * The backend keeps GL-mirror state only; calls name the program or vertex input. */
 
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc);
@@ -145,8 +146,8 @@ void nt_gfx_backend_shutdown(void);
 /* Returns and clears the latch a lost event sets; C flag, no JS. begin_frame
  * alone takes it. */
 bool nt_gfx_backend_take_context_loss(void);
-/* Asks the browser directly (JS): failure paths and begin_frame while a loss
- * is known or a restore just ran. */
+/* Asks the browser directly (JS). The frontend asks at init, in begin_frame while lost, in the
+ * restore and after a backend read that reported success; the backend classifies failed calls. */
 bool nt_gfx_backend_query_context_lost(void);
 
 void nt_gfx_backend_check_timer_disjoint(void);
@@ -159,15 +160,15 @@ uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc);
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle);
 
 /* Programs, pipelines, vertex inputs, buffers, textures and render targets: `slot` is the frontend
- * pool slot and the backend handle; its record is empty on entry, and `false` means a lost context.
- * Program, buffer and texture destroys take a live record: the frontend never passes a husk. */
+ * pool slot and the backend handle, and its record is empty on entry. A bool create returns false
+ * only on a lost context. The frontend never passes a husk to a destroy. */
 
 /* Starts the link. */
 bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uint32_t slot);
 /* poll asks the driver whether the link completed (parallel compile) instead of waiting for it.
  * UNREADY while the link runs; ACCEPTED once linked, with uniform locations cached and one texture
  * unit per active sampler element (reflection order, 0..n-1, n <= NT_GFX_MAX_TEXTURE_SLOTS);
- * CONTEXT_LOST on a loss. A failed link or reflection on a live context logs and asserts. */
+ * CONTEXT_LOST on a loss. On a live context a failed link logs and asserts, a failed reflection asserts. */
 nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll);
 void nt_gfx_backend_destroy_program(uint32_t backend_handle);
 

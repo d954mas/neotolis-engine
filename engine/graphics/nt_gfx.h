@@ -864,15 +864,14 @@ nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc);
  * register again after the next nt_gfx_init. */
 nt_instance_layout_t nt_gfx_make_instance_layout(const nt_vertex_layout_t *layout);
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc);
-/* Returns invalid only on a lost context. A zero size, a size above gpu_caps.max_texture_size
- * and a compressed format the GPU lacks assert: the game checks caps first. A nonzero handle
- * means upload commands were issued, not that GPU storage allocation or upload succeeded;
- * creation does not poll GPU errors. */
+/* Invalid means a lost context; a zero size, a size above gpu_caps.max_texture_size and a missing
+ * compressed format assert. A nonzero handle means uploads were issued, not that storage
+ * allocation succeeded: creation does not poll GPU errors. */
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc);
 nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc);
-/* Caller owns the result; destroy it with nt_gfx_destroy_render_target. The target
- * borrows its textures; INVALID means context loss. Caller errors assert, RGBA16F color
- * without gpu_caps.has_float_render_target and an incomplete framebuffer too. */
+/* Caller owns the result; destroy it with nt_gfx_destroy_render_target. The target borrows its
+ * textures; INVALID means context loss. Caller errors, RGBA16F color without
+ * gpu_caps.has_float_render_target and an incomplete framebuffer on a live context assert. */
 nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc);
 
 /* ---- Resource destruction ----

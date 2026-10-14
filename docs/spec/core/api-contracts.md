@@ -466,9 +466,9 @@ texture, sampler, vertex input or framebuffer) asserts: WebGL creates null only 
 native `glGen*` does not run out of names. The backend tables of programs,
 pipelines, vertex inputs, buffers, textures and render targets are indexed by the
 frontend pool slot, so there is one allocation per object; a create into an
-occupied backend record asserts. A husk never reaches the backend: its destroy
-frees only the pool slot, because after a restore its old GL name may belong to
-a new object. Dead records stay until the restore empties every table.
+occupied backend record asserts. A program, buffer or texture husk never reaches
+the backend: its destroy frees only the pool slot, because after a restore its
+old GL name may belong to a new object (a shader husk passes name 0, a no-op). Dead records stay until the restore empties every table.
 A sampler cache hit whose recreate meets the loss keeps its stable id and ends
 `CONTEXT_LOST`; a texture whose default sampler met it is not made.
 A loss frees every render-target slot, as it frees pipelines and vertex inputs;
@@ -492,7 +492,7 @@ Creating a target is allowed anywhere, inside a pass too: the create is immediat
 and a pass binds its framebuffer only when the stream executes. Destroying an invalid or stale target is a
 no-op even then: the handle check runs first. A returned invalid target therefore means a lost
 context; an incomplete framebuffer on a live context asserts (see
-[render architecture](../render/architecture.md)). `nt_gfx_make_pipeline`
+[render architecture, Frame observation](../render/architecture.md#frame-observation)). `nt_gfx_make_pipeline`
 follows the same split: a
 NULL descriptor, an invalid program or one a context loss discarded, and an exhausted
 pipeline pool assert; a linking program is accepted. The backend create only fills a

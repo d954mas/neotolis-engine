@@ -101,7 +101,7 @@ uint32_t nt_gfx_fake_last_index_buffer_hash(void);
 uint32_t nt_gfx_fake_backend_restore_count(void);
 uint32_t nt_gfx_fake_gpu_caps_probe_count(void);
 uint32_t nt_gfx_fake_texture_destroy_count(void);
-/* Backend handle of the last destroyed texture; handle 0 is a no-op, as on GL. */
+/* Backend handle of the last destroyed texture. */
 uint32_t nt_gfx_fake_last_destroyed_texture(void);
 void nt_gfx_fake_lose_context_on_buffer_creates(uint8_t mask);
 /* A failed web recreate leaves no context: the backend stays lost. */

@@ -128,7 +128,7 @@ static void test_make_asserts_on_attachment_misuse(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_render_target_create_count());
 }
 
-/* A target create that meets the loss gives its pool slot back: a leak would cost one per loss. */
+/* A target create that meets the loss latches it; the restore leaves every target slot free. */
 static void test_a_create_that_meets_the_loss_frees_its_slot(void) {
     nt_texture_t color = make_color();
     const uint32_t creates = nt_gfx_fake_render_target_create_count();

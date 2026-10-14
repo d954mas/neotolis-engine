@@ -1254,8 +1254,8 @@ void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uin
 /* ---- Resource management (shader / buffer / pipeline) ---- */
 
 /* WebGL names null only on a lost context, and native glGen* does not run out: a null name on a
- * live context is a bug. Asked after the failed call, never at entry -- a GPU-process death can
- * fail the call before the browser reports the loss. */
+ * live context is a bug. Asked after the failed call: a GPU-process death can fail the call before
+ * the browser reports the loss. */
 static void assert_name_failed_on_loss(void) {
     const bool lost = nt_gfx_gl_ctx_query_lost();
     NT_ASSERT(lost && "backend could not name a GL object on a live context");
@@ -1567,7 +1567,7 @@ nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll
         if (!lost) {
             nt_gfx_gl_log_link_failure(rec->program);
         }
-        NT_ASSERT(lost && "program link failed");
+        NT_ASSERT(lost && "program link failed on a live context");
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     const nt_global_block_t *blocks = s_init_desc.global_blocks;
@@ -2079,7 +2079,8 @@ static bool nt_gfx_gl_build_render_target(const GLuint textures[NT_GFX_RT_ATTACH
     GLenum status = NT_GL_RET(glCheckFramebufferStatus, GL_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE) {
         /* The engine's formats are required framebuffer formats (GLES 3.0 "Required Framebuffer
-         * Formats"; RGBA16F with EXT_color_buffer_float), so only a loss leaves one incomplete. */
+         * Formats"; RGBA16F with EXT_color_buffer_float): on a live context incompleteness is a bug,
+         * or storage an unpolled allocation failure left out. */
         const bool lost = nt_gfx_gl_ctx_query_lost();
         if (!lost) {
             NT_LOG_ERROR("render target incomplete: GL status 0x%04X", (unsigned)status);

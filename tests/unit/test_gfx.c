@@ -1043,7 +1043,7 @@ void test_gfx_husks_skip_the_backend_and_their_slots_are_reused_after_restore(vo
     destroy_husks(fresh);
 }
 
-/* A failed restore keeps the dead backend records; husks destroyed and shut down never touch them. */
+/* A failed restore keeps the dead backend records; the destroy count shows texture husks never reach them. */
 void test_gfx_husks_after_a_failed_restore_reach_no_backend_record(void) {
     husks_t h = make_husks();
     nt_gfx_fake_set_context_lost(false);
