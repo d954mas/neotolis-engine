@@ -3,6 +3,7 @@
 #include "core/nt_assert.h"
 
 #include <math.h>
+#include <stddef.h>
 #include <string.h>
 
 typedef struct {
@@ -24,26 +25,20 @@ static const char *s_blur_vs_src = "precision highp float;\n"
 /* mediump sampler, not the lowp default: float sources carry values beyond lowp's +-2 range. */
 static const char *s_blur_fs_src = "precision mediump float;\n"
                                    "uniform mediump sampler2D u_source;\n"
-                                   "uniform vec4 u_direction;\n"
-                                   "uniform int u_radius;\n"
-                                   "uniform vec4 u_kernel0;\n"
-                                   "uniform vec4 u_kernel1;\n"
-                                   "uniform vec4 u_kernel2;\n"
-                                   "uniform vec4 u_kernel3;\n"
-                                   "uniform vec4 u_kernel4;\n"
+                                   "layout(std140) uniform Draw { vec4 u_direction; ivec4 u_radius; vec4 u_kernel[5]; };\n"
                                    /* NEAREST taps need exact texel centres, which mediump (fp16 on
                                       mobile) cannot address past 2048 texels. */
                                    "in highp vec2 v_uv;\n"
                                    "out vec4 frag_color;\n"
                                    /* Select then mask: i & 3 is provably 0..3, so no arm can constant-fold to
                                       a negative index. NVIDIA inlines kernel_at(0), folds every arm, and
-                                      rejects u_kernel1[0 - 4] at link time though the guard makes it dead. */
+                                      rejects u_kernel[1][0 - 4] at link time though the guard makes it dead. */
                                    "float kernel_at(int i) {\n"
-                                   "    vec4 k = (i < 4)  ? u_kernel0\n"
-                                   "           : (i < 8)  ? u_kernel1\n"
-                                   "           : (i < 12) ? u_kernel2\n"
-                                   "           : (i < 16) ? u_kernel3\n"
-                                   "                      : u_kernel4;\n"
+                                   "    vec4 k = (i < 4)  ? u_kernel[0]\n"
+                                   "           : (i < 8)  ? u_kernel[1]\n"
+                                   "           : (i < 12) ? u_kernel[2]\n"
+                                   "           : (i < 16) ? u_kernel[3]\n"
+                                   "                      : u_kernel[4];\n"
                                    "    return k[i & 3];\n"
                                    "}\n"
                                    "void main() {\n"
@@ -51,7 +46,7 @@ static const char *s_blur_fs_src = "precision mediump float;\n"
                                    "    highp vec2 step_uv = u_direction.xy * texel;\n"
                                    "    vec4 acc = texture(u_source, v_uv) * kernel_at(0);\n"
                                    "    for (int i = 1; i <= 16; i++) {\n"
-                                   "        if (i > u_radius) { break; }\n"
+                                   "        if (i > u_radius.x) { break; }\n"
                                    "        float w = kernel_at(i);\n"
                                    "        highp vec2 d = step_uv * float(i);\n"
                                    "        acc += texture(u_source, v_uv - d) * w;\n"
@@ -71,21 +66,20 @@ static struct {
     bool initialized;
 } s_blur;
 
-/* Fixed uniform names: hashed once at init, the blur path sets them every pass. */
-static nt_hash32_t s_kernel_uniforms[5];
-static nt_hash32_t s_u_radius;
-static nt_hash32_t s_u_source;
-static nt_hash32_t s_u_direction;
+/* The blur shader's Draw block (std140). */
+typedef struct {
+    float direction[4];
+    int32_t radius[4]; /* .x */
+    float kernel[20];
+} nt_blur_draw_block_t;
 
-static void hash_uniform_names(void) {
-    static const char *const kernel_names[5] = {"u_kernel0", "u_kernel1", "u_kernel2", "u_kernel3", "u_kernel4"};
-    for (uint32_t i = 0; i < 5; i++) {
-        s_kernel_uniforms[i] = nt_hash32_str(kernel_names[i]);
-    }
-    s_u_radius = nt_hash32_str("u_radius");
-    s_u_source = nt_hash32_str("u_source");
-    s_u_direction = nt_hash32_str("u_direction");
-}
+_Static_assert(offsetof(nt_blur_draw_block_t, radius) == 16 && offsetof(nt_blur_draw_block_t, kernel) == 32 && sizeof(nt_blur_draw_block_t) == 112,
+               "nt_blur_draw_block_t mirrors the std140 Draw block of the blur shader");
+
+/* Hashed once at init. */
+static nt_hash32_t s_u_source;
+
+static void hash_uniform_names(void) { s_u_source = nt_hash32_str("u_source"); }
 
 static uint32_t radius_to_int(float radius) {
     if (!isfinite(radius) || radius <= 0.0F || radius > (float)NT_POSTFX_BLUR_MAX_RADIUS) {
@@ -204,6 +198,7 @@ static void make_gpu_resources(void) {
 
 void nt_postfx_blur_init(void) {
     NT_ASSERT(!s_blur.initialized && "nt_postfx_blur_init: already initialized");
+    NT_ASSERT(g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].capacity > 0 && "postfx blur: set nt_gfx_desc_t.frame_capacity[NT_GFX_FRAME_UNIFORM]");
     memset(&s_blur, 0, sizeof(s_blur));
     hash_uniform_names();
     make_gpu_resources();
@@ -300,21 +295,16 @@ static bool validate_pass(const nt_postfx_blur_pass_t *pass, uint32_t *out_radiu
     return nt_gfx_program_ready(s_blur.program);
 }
 
-static void upload_kernel(uint32_t radius, const float packed[20]) {
-    nt_gfx_set_uniform_int(s_u_radius, (int)radius);
-    for (uint32_t i = 0; i < 5; i++) {
-        nt_gfx_set_uniform_vec4(s_kernel_uniforms[i], &packed[(size_t)i * 4U]);
-    }
-}
-
 static void draw_blur_pass(nt_texture_t source, nt_render_target_t target, const float direction[4], uint32_t radius, const float packed[20]) {
+    nt_blur_draw_block_t block = {.radius = {(int32_t)radius}};
+    memcpy(block.direction, direction, sizeof(block.direction));
+    memcpy(block.kernel, packed, sizeof(block.kernel));
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.0F, 0.0F, 0.0F, 0.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(s_blur.pipeline);
     nt_gfx_bind_vertex_input(s_blur.vertex_input);
     const nt_gfx_texture_binding_t binding = {.name = s_u_source, .texture = source, .sampler = s_blur.sampler};
     nt_gfx_apply_texture_bindings(&binding, 1);
-    nt_gfx_set_uniform_vec4(s_u_direction, direction);
-    upload_kernel(radius, packed);
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, &block, sizeof(block));
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
 }

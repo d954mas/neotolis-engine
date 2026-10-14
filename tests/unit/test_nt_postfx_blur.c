@@ -404,17 +404,17 @@ static void test_a_loss_during_restore_is_retried_by_the_next_one(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
 }
 
-/* Separate vec4 uniforms and a masked index avoid driver-dependent array bounds
+/* Constant kernel indices and a masked component index avoid driver-dependent array bounds
  * rejection; checking the source also covers drivers that accept unsafe indexing. */
 static void test_blur_fs_keeps_the_masked_kernel_index(void) {
     const char *src = nt_postfx_blur_test_fs_source();
     TEST_ASSERT_NOT_NULL(src);
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(src, "k[i & 3]"), "kernel index must stay masked to 0..3");
-    TEST_ASSERT_NULL_MESSAGE(strstr(src, "u_kernel["), "kernel taps must stay separate vec4 uniforms, not an array");
+    TEST_ASSERT_NULL_MESSAGE(strstr(src, "u_kernel[i"), "kernel taps must be read at constant indices");
     for (int i = 0; i < 5; i++) {
         char name[16];
-        (void)snprintf(name, sizeof(name), "u_kernel%d", i);
-        TEST_ASSERT_NOT_NULL_MESSAGE(strstr(src, name), "all five kernel uniforms must be declared");
+        (void)snprintf(name, sizeof(name), "u_kernel[%d]", i);
+        TEST_ASSERT_NOT_NULL_MESSAGE(strstr(src, name), "each kernel vec4 is read at its constant index");
     }
 }
 

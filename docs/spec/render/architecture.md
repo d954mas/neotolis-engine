@@ -1266,7 +1266,11 @@ the copy's offset, and triangles are a non-indexed list in the general stream,
 which their vertex input reads at offset 0. Frame storage holds every flush of
 the frame until `nt_gfx_end_frame`, and so does the command stream, so a host
 sizes the used vertex streams and `stream_capacity` for its busiest frame;
-`nt_shape_renderer_init` asserts a nonzero general-stream budget.
+`nt_shape_renderer_init` asserts a nonzero general-stream budget. The view
+projection, eye, pixel scale and line width are one std140 `Draw` block that every
+program of a flush binds through `nt_gfx_bind_uniform_block`: unchanged settings
+end `CACHE`, so the uniform stream holds one block per settings change and pass,
+and `nt_shape_renderer_init` asserts a nonzero uniform budget too.
 
 Every flush draws filled instanced shapes by type, then triangles,
 then wire templates by type, connected segments and independent lines. Within

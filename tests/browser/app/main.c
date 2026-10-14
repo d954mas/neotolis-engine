@@ -1284,7 +1284,7 @@ int main(int argc, char *argv[]) {
     _Static_assert(NT_GFX_MAX_VERTEX_STREAMS >= 2, "the mesh probe draws from a second vertex stream");
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX + 1] = 1024U; /* the mesh probe's skinned instances */
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = 128U * 1024U;
-    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 512U; /* the 256 B view block plus any offset alignment up to 256 */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 16U * 512U; /* the view block and the Draw blocks of the probe passes: 256 B or less each, plus any offset alignment up to 256 */
     nt_gfx_init(&gfx_desc);
 
     nt_http_init();

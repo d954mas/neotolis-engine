@@ -380,6 +380,7 @@ int main(void) {
     nt_input_init();
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 64U * 1024U; /* the shape overlay */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 2U * 512U;  /* the shape overlay's Draw blocks: 256 B or less each, plus any offset alignment up to 256 */
     nt_gfx_init(&gfx_desc);
     nt_shape_renderer_init();
 

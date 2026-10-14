@@ -45,6 +45,7 @@ static void wait_shape_links(void) {
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 512U * 1024U;
+    desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 16U * 1024U; /* a Draw block per settings change and pass */
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);

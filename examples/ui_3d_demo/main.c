@@ -1020,7 +1020,7 @@ int main(int argc, char *argv[]) {
     nt_input_init();
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
-    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 3U * 512U; /* 3D, HUD/inspector and highlight views: 256 B or less each, plus any offset alignment up to 256 */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 6U * 512U; /* 3D, HUD/inspector and highlight views and their shape Draw blocks: 256 B or less each, plus any offset alignment up to 256 */
     gfx_desc.depth = true;
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = UI_3D_DEMO_VERTEX_BYTES;
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = UI_3D_DEMO_INDEX_BYTES;

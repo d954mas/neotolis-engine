@@ -5,6 +5,7 @@
 #include "log/nt_log.h"
 #include "math/nt_math.h"
 
+#include <stddef.h>
 #include <string.h>
 
 _Static_assert(NT_GFX_MAX_INSTANCE_ATTRS >= 5, "shape instance layout needs 5 attributes: raise NT_GFX_MAX_INSTANCE_ATTRS");
@@ -32,11 +33,12 @@ static void mat3_mulv(const float m[3][3], const float v[3], float out[3]) { glm
 
 /* ---- Embedded shader source ---- */
 
+/* The Draw block of all four shape programs: one std140 layout, so their binds of one view dedup. */
+#define NT_SHAPE_DRAW_GLSL "layout(std140) uniform Draw { mat4 u_vp; vec4 u_eye; vec4 u_pixel_scale; vec4 u_line; };\n"
+
 static const char *s_shape_vs_src = "precision highp float;\n"
                                     "layout(location = 0) in vec3 a_position;\n"
-                                    "layout(location = 2) in vec4 a_color;\n"
-                                    "uniform mat4 u_vp;\n"
-                                    "out mediump vec4 v_color;\n"
+                                    "layout(location = 2) in vec4 a_color;\n" NT_SHAPE_DRAW_GLSL "out mediump vec4 v_color;\n"
                                     "void main() {\n"
                                     "    v_color = a_color;\n"
                                     "    gl_Position = u_vp * vec4(a_position, 1.0);\n"
@@ -52,10 +54,7 @@ static const char *s_shape_fs_src = "precision mediump float;\n"
 /* ---- Instanced line vertex shader ---- */
 
 #define NT_STROKE_GLSL                                                                                                                                                                                 \
-    "uniform mat4 u_vp;\n"                                                                                                                                                                             \
-    "uniform vec4 u_eye;\n"                                                                                                                                                                            \
-    "uniform float u_line_width;\n"                                                                                                                                                                    \
-    "uniform vec4 u_pixel_scale;\n"                                                                                                                                                                    \
+    NT_SHAPE_DRAW_GLSL                                                                                                                                                                                 \
     "vec3 side(vec3 edge, vec3 view) {\n"                                                                                                                                                              \
     "    vec3 n = cross(edge, view);\n"                                                                                                                                                                \
     "    if (dot(n,n) < 1e-12) n = cross(edge, vec3(0,1,0));\n"                                                                                                                                        \
@@ -104,14 +103,14 @@ static const char *s_shape_fs_src = "precision mediump float;\n"
     "    vec2 incoming=(pos-cb.xy/max(cb.w,1e-6))/u_pixel_scale.xy;\n"                                                                                                                                 \
     "    vec2 outgoing=(ca.xy/max(ca.w,1e-6)-pos)/u_pixel_scale.xy;\n"                                                                                                                                 \
     "    vec3 offset=join_offset(pixel_side(incoming),pixel_side(outgoing),corner.y);\n"                                                                                                               \
-    "    cp.xy+=offset.xy*(0.5*u_line_width)*u_pixel_scale.xy*cp.w;\n"                                                                                                                                 \
+    "    cp.xy+=offset.xy*(0.5*u_line.x)*u_pixel_scale.xy*cp.w;\n"                                                                                                                                     \
     "    return cp;\n"                                                                                                                                                                                 \
     "}\n"                                                                                                                                                                                              \
     "vec4 stroke_position(vec2 corner, vec3 before, vec3 p, vec3 after) {\n"                                                                                                                           \
     "    if (u_pixel_scale.x>0.0) return pixel_position(corner,before,p,after);\n"                                                                                                                     \
     "    vec3 view = to_eye(p);\n"                                                                                                                                                                     \
     "    vec3 offset = join_offset(side(p-before,view),side(after-p,view),corner.y);\n"                                                                                                                \
-    "    return u_vp*vec4(biased(p+offset*(0.5*u_line_width)),1);\n"                                                                                                                                   \
+    "    return u_vp*vec4(biased(p+offset*(0.5*u_line.x)),1);\n"                                                                                                                                       \
     "}\n"
 
 static const char *s_line_vs_src =
@@ -228,9 +227,7 @@ static const char *s_fill_vs_src = "precision highp float;\n"
                                    "layout(location = 1) in vec3 i_center;\n"
                                    "layout(location = 2) in vec3 i_scale;\n"
                                    "layout(location = 3) in vec4 i_rot;\n"
-                                   "layout(location = 4) in vec4 i_color;\n"
-                                   "uniform mat4 u_vp;\n"
-                                   "out mediump vec4 v_color;\n"
+                                   "layout(location = 4) in vec4 i_color;\n" NT_SHAPE_DRAW_GLSL "out mediump vec4 v_color;\n"
                                    "void main() {\n"
                                    "    vec3 p = a_pos_tag.xyz * mix(i_scale, i_scale.xxx, abs(a_pos_tag.w));\n"
                                    "    p.y += a_pos_tag.w * i_scale.y;\n"
@@ -241,6 +238,18 @@ static const char *s_fill_vs_src = "precision highp float;\n"
                                    "}\n";
 
 /* ---- Module state ---- */
+
+/* Mirrors NT_SHAPE_DRAW_GLSL (std140). */
+typedef struct {
+    float vp[16];
+    float eye[4];         /* derived from vp; w = 0 for an orthographic view direction */
+    float pixel_scale[4]; /* .xy = 2 / viewport for a pixel width; 0 = world-space width */
+    float line_width[4];  /* .x */
+} nt_shape_draw_block_t;
+
+_Static_assert(offsetof(nt_shape_draw_block_t, eye) == 64 && offsetof(nt_shape_draw_block_t, pixel_scale) == 80 && offsetof(nt_shape_draw_block_t, line_width) == 96 &&
+                   sizeof(nt_shape_draw_block_t) == 112,
+               "nt_shape_draw_block_t mirrors the std140 Draw block of the shape shaders");
 
 static struct {
     /* GPU objects: made by create_gpu, released and zeroed by destroy_gpu. Pipelines index by depth_enabled. */
@@ -301,11 +310,8 @@ static struct {
     } line_staging;
     uint32_t line_count;
 
-    /* Settings */
-    float vp[16];
-    float eye[4]; /* derived from vp; w = 0 for an orthographic view direction */
-    float line_width;
-    float pixel_scale[4];
+    /* Settings: the Draw block every flush binds, then the CPU-only ones. */
+    nt_shape_draw_block_t draw;
     bool depth_enabled;
     uint8_t stream; /* frame vertex stream of instanced kinds */
     bool initialized;
@@ -806,12 +812,6 @@ void nt_shape_renderer_line(const float a[3], const float b[3], uint32_t color) 
 
 /* ---- Lifecycle ---- */
 
-/* Fixed uniform names: hashed once, the draw path sets them every frame. */
-static nt_hash32_t s_u_vp;
-static nt_hash32_t s_u_eye;
-static nt_hash32_t s_u_line_width;
-static nt_hash32_t s_u_pixel_scale;
-
 static nt_buffer_t make_static_buffer(nt_buffer_type_t type, const void *data, uint32_t size, const char *label) {
     return nt_gfx_make_buffer(
         &(nt_buffer_desc_t){.type = type, .usage = NT_USAGE_IMMUTABLE, .data = data, .size = size, .index_type = type == NT_BUFFER_INDEX ? NT_INDEX_UINT16 : NT_INDEX_NONE, .label = label});
@@ -911,14 +911,11 @@ static void drop_queues(void) {
 
 void nt_shape_renderer_init(void) {
     /* Every flush draws from frame storage, and triangle batches always from the general stream. */
-    NT_ASSERT(g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].capacity > 0 && "shape renderer: set nt_gfx_desc_t.frame_capacity[NT_GFX_FRAME_VERTEX]");
+    NT_ASSERT(g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].capacity > 0 && g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].capacity > 0 &&
+              "shape renderer: set nt_gfx_desc_t.frame_capacity[NT_GFX_FRAME_VERTEX] and [NT_GFX_FRAME_UNIFORM]");
     memset(&s_shape, 0, sizeof(s_shape));
-    s_u_vp = nt_hash32_str("u_vp");
-    s_u_eye = nt_hash32_str("u_eye");
-    s_u_line_width = nt_hash32_str("u_line_width");
-    s_u_pixel_scale = nt_hash32_str("u_pixel_scale");
     build_trig_lut();
-    s_shape.line_width = 0.02F;
+    s_shape.draw.line_width[0] = 0.02F;
     s_shape.depth_enabled = true;
     s_shape.stream = NT_GFX_FRAME_VERTEX;
     s_shape.fill_layout = nt_gfx_make_instance_layout(&k_shape_instance_layout);
@@ -948,17 +945,13 @@ void nt_shape_renderer_restore_gpu(void) {
 }
 
 /* Copies one kind's staging into frame storage and draws it instanced from there. */
-static void draw_instances(nt_pipeline_t pipeline, nt_vertex_input_t vi, nt_instance_layout_t layout, const void *data, uint32_t bytes, nt_shape_range_t range, uint32_t count, bool stroke) {
+static void draw_instances(nt_pipeline_t pipeline, nt_vertex_input_t vi, nt_instance_layout_t layout, const void *data, uint32_t bytes, nt_shape_range_t range, uint32_t count) {
     uint32_t offset = 0;
     memcpy(nt_gfx_frame_alloc(s_shape.stream, bytes, 4, &offset), data, bytes);
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input_instanced(vi, layout, nt_gfx_frame_buffer(s_shape.stream), offset);
-    nt_gfx_set_uniform_mat4(s_u_vp, s_shape.vp);
-    if (stroke) {
-        nt_gfx_set_uniform_vec4(s_u_eye, s_shape.eye);
-        nt_gfx_set_uniform_float(s_u_line_width, s_shape.line_width);
-        nt_gfx_set_uniform_vec4(s_u_pixel_scale, s_shape.pixel_scale);
-    }
+    /* Rebinding unchanged settings is free: equal bytes end CACHE in gfx. */
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, &s_shape.draw, sizeof(s_shape.draw));
     nt_gfx_draw_indexed_instanced(range.first_index, range.num_indices, range.num_vertices, count);
 }
 
@@ -974,7 +967,7 @@ void nt_shape_renderer_flush(void) {
         const uint32_t count = s_shape.fill_counts[type];
         if (count > 0) {
             draw_instances(s_shape.gpu.fill_pip[d], s_shape.gpu.fill_vi[s_shape.stream - NT_GFX_FRAME_VERTEX], s_shape.fill_layout, s_shape.fills[type], count * (uint32_t)sizeof(nt_shape_instance_t),
-                           s_shape.fill_ranges[type], count, false);
+                           s_shape.fill_ranges[type], count);
             s_shape.fill_counts[type] = 0;
         }
     }
@@ -984,7 +977,7 @@ void nt_shape_renderer_flush(void) {
         memcpy(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, bytes, (uint32_t)sizeof(nt_shape_vertex_t), &offset), s_shape.vertices, bytes);
         nt_gfx_bind_pipeline(s_shape.gpu.batch_pip[d]);
         nt_gfx_bind_vertex_input(s_shape.gpu.batch_vi);
-        nt_gfx_set_uniform_mat4(s_u_vp, s_shape.vp);
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, &s_shape.draw, sizeof(s_shape.draw));
         nt_gfx_draw(offset / (uint32_t)sizeof(nt_shape_vertex_t), s_shape.vertex_count);
         s_shape.vertex_count = 0;
     }
@@ -993,19 +986,19 @@ void nt_shape_renderer_flush(void) {
         const uint32_t count = s_shape.wire_counts[type];
         if (count > 0) {
             draw_instances(s_shape.gpu.wire_pip[d], s_shape.gpu.wire_vi[s_shape.stream - NT_GFX_FRAME_VERTEX], s_shape.wire_layout, s_shape.wires[type], count * (uint32_t)sizeof(nt_shape_instance_t),
-                           s_shape.wire_ranges[type], count, true);
+                           s_shape.wire_ranges[type], count);
             s_shape.wire_counts[type] = 0;
         }
     }
     if (s_shape.stroke_count > 0) {
         draw_instances(s_shape.gpu.line_pip[d], s_shape.gpu.stroke_vi[s_shape.stream - NT_GFX_FRAME_VERTEX], s_shape.stroke_layout, s_shape.strokes,
-                       s_shape.stroke_count * (uint32_t)sizeof(nt_shape_stroke_instance_t), (nt_shape_range_t){0, 12, 7}, s_shape.stroke_count, true);
+                       s_shape.stroke_count * (uint32_t)sizeof(nt_shape_stroke_instance_t), (nt_shape_range_t){0, 12, 7}, s_shape.stroke_count);
         s_shape.stroke_count = 0;
     }
     if (s_shape.line_count > 0) {
         /* Independent lines skip the join triangles of the shared template. */
         draw_instances(s_shape.gpu.line_pip[d], s_shape.gpu.line_vi[s_shape.stream - NT_GFX_FRAME_VERTEX], s_shape.line_layout, s_shape.line_staging.lines,
-                       s_shape.line_count * (uint32_t)sizeof(nt_shape_line_instance_t), (nt_shape_range_t){0, 6, 7}, s_shape.line_count, true);
+                       s_shape.line_count * (uint32_t)sizeof(nt_shape_line_instance_t), (nt_shape_range_t){0, 6, 7}, s_shape.line_count);
         s_shape.line_count = 0;
     }
 }
@@ -1048,22 +1041,22 @@ static void eye_from_vp(const float vp[16], float eye[4]) {
 }
 
 void nt_shape_renderer_set_vp(const float vp[16]) {
-    if (memcmp(s_shape.vp, vp, sizeof(float) * 16) == 0) { // NOLINT — intentional bitwise dirty-check
+    if (memcmp(s_shape.draw.vp, vp, sizeof(float) * 16) == 0) { // NOLINT — intentional bitwise dirty-check
         return;
     }
     nt_shape_renderer_flush();
-    memcpy(s_shape.vp, vp, sizeof(float) * 16);
-    eye_from_vp(vp, s_shape.eye);
+    memcpy(s_shape.draw.vp, vp, sizeof(float) * 16);
+    eye_from_vp(vp, s_shape.draw.eye);
 }
 
 void nt_shape_renderer_set_line_width(float width) {
     NT_ASSERT(isfinite(width) && width > 0.0F);
-    if (width == s_shape.line_width && s_shape.pixel_scale[0] == 0.0F) {
+    if (width == s_shape.draw.line_width[0] && s_shape.draw.pixel_scale[0] == 0.0F) {
         return;
     }
     nt_shape_renderer_flush();
-    s_shape.line_width = width;
-    memset(s_shape.pixel_scale, 0, sizeof(s_shape.pixel_scale));
+    s_shape.draw.line_width[0] = width;
+    memset(s_shape.draw.pixel_scale, 0, sizeof(s_shape.draw.pixel_scale));
 }
 
 void nt_shape_renderer_set_line_width_pixels(float width, uint32_t viewport_width, uint32_t viewport_height) {
@@ -1071,13 +1064,13 @@ void nt_shape_renderer_set_line_width_pixels(float width, uint32_t viewport_widt
     NT_ASSERT(viewport_width > 0 && viewport_height > 0);
     float x = 2.0F / (float)viewport_width;
     float y = 2.0F / (float)viewport_height;
-    if (width == s_shape.line_width && x == s_shape.pixel_scale[0] && y == s_shape.pixel_scale[1]) {
+    if (width == s_shape.draw.line_width[0] && x == s_shape.draw.pixel_scale[0] && y == s_shape.draw.pixel_scale[1]) {
         return;
     }
     nt_shape_renderer_flush();
-    s_shape.line_width = width;
-    s_shape.pixel_scale[0] = x;
-    s_shape.pixel_scale[1] = y;
+    s_shape.draw.line_width[0] = width;
+    s_shape.draw.pixel_scale[0] = x;
+    s_shape.draw.pixel_scale[1] = y;
 }
 
 void nt_shape_renderer_set_depth(bool enabled) {
@@ -1275,9 +1268,9 @@ uint32_t nt_shape_renderer_test_stroke_count(void) {
     }
     return count;
 }
-const float *nt_shape_renderer_test_vp(void) { return s_shape.vp; }
-const float *nt_shape_renderer_test_eye(void) { return s_shape.eye; }
-float nt_shape_renderer_test_line_width(void) { return s_shape.line_width; }
+const float *nt_shape_renderer_test_vp(void) { return s_shape.draw.vp; }
+const float *nt_shape_renderer_test_eye(void) { return s_shape.draw.eye; }
+float nt_shape_renderer_test_line_width(void) { return s_shape.draw.line_width[0]; }
 bool nt_shape_renderer_test_depth_enabled(void) { return s_shape.depth_enabled; }
 bool nt_shape_renderer_test_initialized(void) { return s_shape.initialized; }
 #endif
