@@ -3837,13 +3837,13 @@ void test_full_global_block_list_inits(void) {
     nt_gfx_shutdown();
     nt_gfx_desc_t desc =
         NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16);
-    static const char *const names[NT_GFX_MAX_GAME_BLOCKS] = {"B0", "B1", "B2", "B3", "B4", "B5"};
+    static const char *const names[NT_GFX_MAX_GAME_BLOCKS] = {"B0", "B1", "B2", "B3", "B4"};
     for (uint32_t i = 0; i < NT_GFX_MAX_GAME_BLOCKS; i++) {
         desc.game_blocks[i] = names[i];
     }
     nt_gfx_init(&desc);
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_SLOT_GAME + 5U, nt_gfx_block_slot(desc.game_blocks, "B5"));
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_SLOT_GAME + 4U, nt_gfx_block_slot(desc.game_blocks, "B4"));
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_SLOT_DRAW, nt_gfx_block_slot(desc.game_blocks, "Draw"));
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_MAX_UNIFORM_BUFFER_SLOTS, nt_gfx_block_slot(desc.game_blocks, "Nope"));
     nt_gfx_begin_frame();

@@ -339,8 +339,8 @@ typedef enum {
 #define NT_GFX_SLOT_MATERIAL 1 /* "Material": the material's params, bound by nt_material_apply */
 #define NT_GFX_SLOT_DRAW 2     /* "Draw": per-draw data of a renderer or game shader */
 #define NT_GFX_SLOT_GAME 3     /* nt_gfx_desc_t.game_blocks[i] binds to NT_GFX_SLOT_GAME + i */
-/* Globals, Draw and the game blocks fit WebGPU's 8 dynamic uniform bindings. */
-#define NT_GFX_MAX_GAME_BLOCKS 6
+/* Every slot is frame data at a dynamic offset: all fit WebGPU's 8 dynamic uniform bindings. */
+#define NT_GFX_MAX_GAME_BLOCKS 5
 #define NT_GFX_MAX_UNIFORM_BUFFER_SLOTS (NT_GFX_SLOT_GAME + NT_GFX_MAX_GAME_BLOCKS)
 
 typedef struct {

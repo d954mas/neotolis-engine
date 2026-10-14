@@ -188,8 +188,8 @@ reserves three names by update frequency: `Globals` (`NT_GFX_SLOT_GLOBALS`, fram
 and view data the game fills), `Material` (`NT_GFX_SLOT_MATERIAL`) and `Draw`
 (`NT_GFX_SLOT_DRAW`, per-draw data). `nt_gfx_desc_t.game_blocks` lists the
 game's own names at `nt_gfx_init`: entry `i` binds to `NT_GFX_SLOT_GAME + i`,
-up to `NT_GFX_MAX_GAME_BLOCKS` (6, so `Globals`, `Draw` and the game blocks fit
-WebGPU's eight dynamic uniform bindings), and the list ends at the first NULL.
+up to `NT_GFX_MAX_GAME_BLOCKS` (5: every slot is frame data at a dynamic offset,
+and the eight slots fit WebGPU's eight dynamic uniform bindings), and the list ends at the first NULL.
 A reserved or duplicate name in the list asserts at init; an active block whose
 name is neither reserved nor listed asserts at link (it would read slot 0). The
 slots are logical: a WebGPU backend maps them into its bind groups. Names are

@@ -148,8 +148,8 @@ backend bakes sets instead) and records a unit bind only when that unit's
 texture or sampler changed in the pass; a set that changes no unit ends `CACHE`. Bytes equal to
 a slot's last staged block of the frame bind that staged range again without a copy
 (`CACHE` when the pass already holds it).
-Uniform-block slots are below `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS` (9: the three
-reserved names and six game blocks); a bind at that slot or above asserts.
+Uniform-block slots are below `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS` (8: the three
+reserved names and five game blocks); a bind at that slot or above asserts.
 
 The compare runs after the pass check; an equal value was validated when it was
 recorded, `begin_pass` discards the pass-scoped mirrors, and the frame rule keeps
