@@ -10,8 +10,8 @@
 
 /* Contracts: draws record into frame storage (set nt_gfx_desc_t.frame_capacity VERTEX and INDEX)
  * inside a pass; each draw call records one indexed draw, and gfx merges consecutive draws of one
- * font and material. Uniforms are program state: the renderer skips params it already wrote to a
- * program, so nothing else may write the uniforms of a program text materials use. */
+ * font and material. Each draw applies its material (nt_material_apply): the Material block, the
+ * material's own textures and the font's curve texture u_curve_texture as a draw texture. */
 
 /* Everything that shapes one draw's vertices. Zero-initialized = plain text: every decoration off.
  * Every float must be finite. */
@@ -49,7 +49,7 @@ void nt_text_renderer_shutdown(void);
  * Requires an assigned slug_text program, premultiplied-compatible blend and cull NONE.
  * slug_text.frag never discards; a depth-writing material uses slug_text_depth.frag, which discards empty
  * pixels so they do not occlude. Pair it with a glyph_depth_bias for overlapping glyphs.
- * A text material declares no textures: the font's curve texture is the renderer's own bind (asserted). */
+ * A text material does not declare u_curve_texture: the renderer supplies it. */
 void nt_text_renderer_set_material(nt_material_t mat);
 
 /* NULL or len=0 is a no-op; trailing partial UTF-8 codepoints are dropped without reading past utf8+len.

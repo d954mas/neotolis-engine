@@ -1081,6 +1081,45 @@ static void test_standalone_value_uniform_asserts_at_link(void) {
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "standalone non-sampler uniform"));
 }
 
+static void expect_link_assert(const char *fragment_source, const char *message) {
+    NT_TEST_EXPECT_ASSERT((void)bind_uniform_test_program(fragment_source));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, message));
+}
+
+/* An unknown block would sit on binding 0 and read Globals. */
+static void test_unknown_block_name_asserts_at_link(void) {
+    expect_link_assert("layout(std140) uniform Lighting { vec4 u_light; };\n"
+                       "out vec4 frag_color;\n"
+                       "void main() { frag_color = u_light; }\n",
+                       "neither reserved nor in");
+}
+
+/* A float member packs differently from a C struct of 16-byte members. */
+static void test_non_vec4_block_member_asserts_at_link(void) {
+    expect_link_assert("layout(std140) uniform Draw { float u_value; };\n"
+                       "out vec4 frag_color;\n"
+                       "void main() { frag_color = vec4(u_value); }\n",
+                       "is not vec4");
+}
+
+/* A row-major matrix would read a column-major C mat4 transposed. */
+static void test_row_major_block_matrix_asserts_at_link(void) {
+    expect_link_assert("layout(std140, row_major) uniform Draw { mat4 u_matrix; };\n"
+                       "out vec4 frag_color;\n"
+                       "void main() { frag_color = u_matrix[1]; }\n",
+                       "row_major");
+}
+
+/* A truncated block name could match a listed prefix or report the wrong cause. */
+static void test_long_block_name_asserts_at_link(void) {
+    expect_link_assert("layout(std140) uniform "
+                       "Bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                       "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx { vec4 u_value; };\n"
+                       "out vec4 frag_color;\n"
+                       "void main() { frag_color = u_value; }\n",
+                       "uniform block name longer");
+}
+
 // #region program-owned sampler units
 static nt_program_t make_sampler_program(const char *vertex_source, const char *fragment_source) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
@@ -1621,7 +1660,8 @@ static void GLAD_API_PTR count_link_status_query(GLuint program, GLenum query, G
 
 /* make_program only starts the link: reading its status or reflection there would block on the driver. */
 static void test_make_program_does_not_query_link_status(void) {
-    static const nt_gfx_gl_call_t blocking[] = {NT_GFX_GL_glGetProgramiv, NT_GFX_GL_glGetActiveUniform, NT_GFX_GL_glGetUniformLocation, NT_GFX_GL_glGetActiveUniformBlockName};
+    static const nt_gfx_gl_call_t blocking[] = {NT_GFX_GL_glGetProgramiv, NT_GFX_GL_glGetActiveUniform, NT_GFX_GL_glGetUniformLocation, NT_GFX_GL_glGetActiveUniformBlockName,
+                                                NT_GFX_GL_glGetActiveUniformBlockiv};
     enum { BLOCKING_COUNT = sizeof(blocking) / sizeof(blocking[0]) };
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "out vec4 frag_color;\nvoid main() { frag_color = vec4(1.0); }\n"});
@@ -1897,6 +1937,10 @@ int main(void) {
     RUN_TEST(test_each_pipeline_binds_its_own_program);
     RUN_TEST(test_destroying_one_program_leaves_another_programs_pipeline_drawing);
     RUN_TEST(test_standalone_value_uniform_asserts_at_link);
+    RUN_TEST(test_unknown_block_name_asserts_at_link);
+    RUN_TEST(test_non_vec4_block_member_asserts_at_link);
+    RUN_TEST(test_row_major_block_matrix_asserts_at_link);
+    RUN_TEST(test_long_block_name_asserts_at_link);
     RUN_TEST(test_supported_sampler_types_retain_their_classes);
     RUN_TEST(test_signed_sampler_type_asserts_at_link);
     RUN_TEST(test_vertex_stage_and_array_samplers_get_distinct_units);

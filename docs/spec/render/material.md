@@ -155,7 +155,7 @@ const TextureAssetRef *material_get_textures(const MaterialAssetHeader *h) { ret
 
 No duplicated material data. Material is created once (either from code via descriptor or loaded from pack asset in the future) and lives in a single pool slot. Multiple entities reference the same material handle.
 
-Per-entity variation (e.g. per-character color, dissolve progress) goes through entity param components, not material mutation — each entity carries its own values, the material stays shared.
+Per-entity variation (e.g. per-character color, dissolve progress) goes through instance data or a `Draw` block, not material mutation — the material stays shared.
 
 Material-wide params (e.g. a global alpha cutoff or a fog color) can be replaced at runtime with `nt_material_set_params`. This changes the values for every entity sharing the material, for the whole frame of the write ([Params](#params)).
 

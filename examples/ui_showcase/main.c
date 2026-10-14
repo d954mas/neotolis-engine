@@ -532,7 +532,6 @@ static nt_ui_context_t *s_ctx;
 
 static nt_hash32_t s_pack_id;
 static nt_resource_t s_atlas_handle;
-static nt_resource_t s_atlas_tex_handle;
 static nt_resource_t s_font_resource;
 /* Rich-text family resources: DejaVu R/B/I/BI faces baked into the pack (variant slots). */
 static nt_resource_t s_rich_font_resource[4];
@@ -540,7 +539,6 @@ static nt_resource_t s_rich_font_resource[4];
 /* Dedicated single-sprite atlas for the radial-image reveal: its lone region's UV spans [0,1]
  * over the quad, so the wedge stays centered. */
 static nt_resource_t s_radial_art_atlas_handle;
-static nt_resource_t s_radial_art_tex_handle;
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
 /* One base radial material (nt_ui_radial) + one radial-image material per reveal mode so each
@@ -3981,7 +3979,6 @@ int main(int argc, char *argv[]) {
     s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_ATLAS, NT_ASSET_ATLAS);
-    s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT, NT_ASSET_FONT);
     s_rich_font_resource[0] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_R, NT_ASSET_FONT);
     s_rich_font_resource[1] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_B, NT_ASSET_FONT);
@@ -3995,7 +3992,6 @@ int main(int argc, char *argv[]) {
     s_base_program.vs = s_radial_program.vs;
     s_base_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_UI_BASE_FRAG, NT_ASSET_SHADER_CODE);
     s_radial_art_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_RADIAL_ART, NT_ASSET_ATLAS);
-    s_radial_art_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_RADIAL_ART_TEX0, NT_ASSET_TEXTURE);
     s_radial_art_ref = nt_atlas_ref(s_radial_art_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_RADIAL_ART_RADIAL_ART.value);
 
     /* Rich-text inline icons (heart/gold) live in the MAIN ui_showcase atlas now. The by-name refs

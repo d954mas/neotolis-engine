@@ -67,7 +67,8 @@ Pipeline identity includes the program handle. Destroying the old program
 `set_material`; mesh draws with the pipeline resolved at their call. A program
 is destroyed only outside a drawn frame (the frame rule in
 [render architecture](architecture.md#draw-phase-command-stream)). Numeric material params
-remain mutable and are read at the draw; snapshot timing is specified in
+live in the material's own uniform buffer and stay mutable: the last write of a frame
+reaches every draw of that frame, as specified in
 [API contracts](../core/api-contracts.md#program-handles).
 
 Uniform block bindings are program state, not material state: a program is

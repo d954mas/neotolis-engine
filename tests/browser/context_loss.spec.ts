@@ -51,6 +51,9 @@ function pixelsMatch(actual: number[], expected: number[]): boolean {
   return actual.length === expected.length && actual.every((value, i) => Math.abs(value - expected[i]) <= 1);
 }
 
+// The lower mesh probe quad, relative to the canvas: the color check and its omitted-bind control share it.
+const MESH_PROBE = { x: 1194, y: 748, width: 40, height: 24 };
+
 function expectMeshProbe(pixels: number[]): void {
   let colored = 0;
   for (let i = 0; i < pixels.length; i += 4) {
@@ -111,7 +114,7 @@ test('context loss: both renderers restore their pixels after two loss cycles', 
   // corner drawn through two owned vertex inputs, one over each of two frame
   // vertex streams' buffers. One rect per quad: the lower one is instance 0 of the
   // stream 0 draw, the upper one (y 688..728) instance 1 of the stream 1 draw.
-  const meshRect = { x: Math.round(canvas!.x + 1194), y: Math.round(canvas!.y + 748), width: 40, height: 24 };
+  const meshRect = { x: Math.round(canvas!.x + MESH_PROBE.x), y: Math.round(canvas!.y + MESH_PROBE.y), width: MESH_PROBE.width, height: MESH_PROBE.height };
   const meshRect2 = { x: Math.round(canvas!.x + 1194), y: Math.round(canvas!.y + 696), width: 40, height: 24 };
   const spriteBaseline = await capturePixels(page, spriteRect);
   const textBaseline = await capturePixels(page, textRect);
@@ -302,7 +305,7 @@ test('mesh pixel probe detects an omitted Draw block bind', async ({ page }) => 
   await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready() && window.__nt.drawn_frames() > 3);
   const canvas = await page.locator('canvas').boundingBox();
   expect(canvas).not.toBeNull();
-  const pixels = await capturePixels(page, { x: Math.round(canvas!.x + 1194), y: Math.round(canvas!.y + 748), width: 40, height: 24 });
+  const pixels = await capturePixels(page, { x: Math.round(canvas!.x + MESH_PROBE.x), y: Math.round(canvas!.y + MESH_PROBE.y), width: MESH_PROBE.width, height: MESH_PROBE.height });
   let colored = 0;
   for (let i = 0; i < pixels.length; i += 4) {
     if (Math.abs(pixels[i] - 64) <= 1 && Math.abs(pixels[i + 1] - 128) <= 1 && Math.abs(pixels[i + 2] - 191) <= 1) colored++;

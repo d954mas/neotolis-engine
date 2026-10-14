@@ -89,7 +89,6 @@ static NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
 static nt_ui_context_t *s_ui_ctx;
 static nt_hash32_t s_pack_id;
 static nt_resource_t s_atlas_handle;
-static nt_resource_t s_atlas_tex_handle;
 static nt_resource_t s_font_resource;
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
@@ -588,7 +587,6 @@ int main(void) {
     s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_RTT_SHOWCASE_UI_ATLAS, NT_ASSET_ATLAS);
-    s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_RTT_SHOWCASE_UI_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_RTT_SHOWCASE_FONT, NT_ASSET_FONT);
     s_white_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_RTT_SHOWCASE_UI_ATLAS__WHITE.value);
 

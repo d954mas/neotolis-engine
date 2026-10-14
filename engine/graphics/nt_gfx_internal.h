@@ -188,8 +188,8 @@ void nt_gfx_backend_destroy_program(uint32_t backend_handle);
 /* Sampler units and classes are immutable program state, recorded at link. */
 bool nt_gfx_backend_program_sampler_info(uint32_t program_backend, uint32_t name_hash, nt_gfx_sampler_info_t *out_info);
 uint32_t nt_gfx_backend_program_sampler_mask(uint32_t program_backend);
-/* Data size of the active uniform block the program binds to slot at link; 0 = none. */
-uint32_t nt_gfx_backend_program_block_size(uint32_t program_backend, uint32_t slot);
+/* Data size per slot of the active uniform blocks the program binds at link; 0 = none. */
+const uint32_t *nt_gfx_backend_program_block_sizes(uint32_t program_backend);
 
 /* Fills a CPU record only, so it cannot fail. */
 void nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend, uint32_t slot);

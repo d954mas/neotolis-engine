@@ -41,6 +41,8 @@ void setUp(void) {
     nt_gfx_begin_frame();
     nt_gfx_fake_reset();
     nt_gfx_fake_set_samplers((const char *const[]){"u_source"}, 1);
+    /* The blur program's Draw block: every pass must bind it, or its draw asserts. */
+    nt_gfx_fake_set_block(NT_GFX_SLOT_DRAW, 112);
     nt_postfx_blur_init();
     /* The fake finishes the blur program's link at the next begin_frame. */
     nt_gfx_end_frame();
@@ -364,6 +366,13 @@ static void test_blur_lifecycle_misuse_asserts(void) {
      * module it might own without tracking which ones it turned off. */
     nt_postfx_blur_restore_gpu();
     NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(NULL));
+
+    /* Every pass binds a Draw block from the uniform stream. */
+    nt_gfx_frame_storage_t *storage = &g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM];
+    const uint32_t capacity = storage->capacity;
+    storage->capacity = 0;
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_init());
+    storage->capacity = capacity;
 }
 
 /* A second context loss can land between begin_frame's recovery and the restore

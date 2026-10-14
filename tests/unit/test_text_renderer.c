@@ -403,7 +403,7 @@ void test_quad_covers_fp16_rounded_tofu(void) {
 }
 
 /* The font's curve texture is a draw texture, so a text material may declare textures of its
- * own: one set carries both, and a name the program does not sample is ignored. */
+ * own; a name the program does not sample is ignored before its resource is resolved. */
 void test_text_material_may_declare_its_own_textures(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});

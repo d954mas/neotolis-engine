@@ -199,6 +199,14 @@ static struct {
     GLuint vao;
     /* Context state, not VAO state: only glVertexAttribPointer captures it. */
     GLuint array_buffer;
+    /* The generic binding; glBindBufferRange sets it too. */
+    GLuint uniform_buffer;
+    /* Indexed ranges persist across passes and frames; the front-end rebinds blocks every pass. */
+    struct {
+        GLuint buffer;
+        uint32_t offset;
+        uint32_t size;
+    } uniform_ranges[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS];
     GLuint program;
     bool depth_test_enabled;
     bool depth_write_enabled;
@@ -329,9 +337,9 @@ uint32_t nt_gfx_backend_program_sampler_mask(uint32_t program_backend) {
     return (1U << s_programs[program_backend].sampler_count) - 1U;
 }
 
-uint32_t nt_gfx_backend_program_block_size(uint32_t program_backend, uint32_t slot) {
-    NT_ASSERT(program_backend != 0 && program_backend <= s_init_desc.max_programs && s_programs[program_backend].program != 0 && "program_block_size: requires a live program");
-    return s_programs[program_backend].block_sizes[slot];
+const uint32_t *nt_gfx_backend_program_block_sizes(uint32_t program_backend) {
+    NT_ASSERT(program_backend != 0 && program_backend <= s_init_desc.max_programs && s_programs[program_backend].program != 0 && "program_block_sizes: requires a live program");
+    return s_programs[program_backend].block_sizes;
 }
 
 // #region test mirror reads
@@ -401,6 +409,8 @@ static void nt_gfx_gl_cache_ground_state(void) {
     s_pass_discard = 0;
     s_gl_cache.vao = 0;
     s_gl_cache.array_buffer = 0;
+    s_gl_cache.uniform_buffer = 0;
+    memset(s_gl_cache.uniform_ranges, 0, sizeof(s_gl_cache.uniform_ranges));
     s_gl_cache.program = 0;
     s_gl_cache.depth_test_enabled = false;
     s_gl_cache.depth_write_enabled = true; /* GL default: depth write enabled */
@@ -1384,6 +1394,18 @@ static bool nt_gfx_gl_reflect_samplers(GLuint program, nt_gfx_gl_program_t *rec)
         if (block_index != -1) {
             /* A C struct of float/int32_t/uint32_t arrays matches only these std140 members byte for byte. */
             NT_ASSERT((utype == GL_FLOAT_VEC4 || utype == GL_INT_VEC4 || utype == GL_UNSIGNED_INT_VEC4 || utype == GL_FLOAT_MAT4) && "uniform block member is not vec4, ivec4, uvec4 or mat4");
+            const bool mat4 = utype == GL_FLOAT_MAT4;
+            GLint offset = -1;
+            GLint array_stride = -1;
+            GLint matrix_stride = -1;
+            GLint row_major = -1;
+            NT_GL(glGetActiveUniformsiv, program, 1, &index, GL_UNIFORM_OFFSET, &offset);
+            NT_GL(glGetActiveUniformsiv, program, 1, &index, GL_UNIFORM_ARRAY_STRIDE, &array_stride);
+            NT_GL(glGetActiveUniformsiv, program, 1, &index, GL_UNIFORM_MATRIX_STRIDE, &matrix_stride);
+            NT_GL(glGetActiveUniformsiv, program, 1, &index, GL_UNIFORM_IS_ROW_MAJOR, &row_major);
+            NT_ASSERT(row_major == 0 && "uniform block member: row_major matrix -- the C side is column-major");
+            NT_ASSERT(offset >= 0 && offset % 16 == 0 && (usize == 1 || array_stride == (mat4 ? 64 : 16)) && (!mat4 || matrix_stride == 16) &&
+                      "uniform block member: not a std140 layout -- declare the block layout(std140)");
             continue;
         }
         nt_gfx_sampler_class_t sampler_class = NT_GFX_SAMPLER_CLASS_FLOAT;
@@ -1413,7 +1435,7 @@ static bool nt_gfx_gl_reflect_samplers(GLuint program, nt_gfx_gl_program_t *rec)
 }
 
 /* Every active block binds to the slot of its name; an unknown name would sit on binding 0 and read
- * Globals. The size per slot is the largest block bound there. */
+ * Globals. Names are unique per program and per slot (init asserts the list), so one block owns a slot. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static bool nt_gfx_gl_bind_blocks(GLuint program, nt_gfx_gl_program_t *rec) {
     memset(rec->block_sizes, 0, sizeof(rec->block_sizes));
@@ -1423,6 +1445,10 @@ static bool nt_gfx_gl_bind_blocks(GLuint program, nt_gfx_gl_program_t *rec) {
         return false;
     }
     char name[NT_GFX_GL_MAX_UNIFORM_NAME];
+    GLint max_name_length = 0;
+    NT_GL(glGetProgramiv, program, GL_ACTIVE_UNIFORM_BLOCK_MAX_NAME_LENGTH, &max_name_length);
+    /* A truncated name would match a listed prefix or report the wrong cause. */
+    NT_ASSERT(max_name_length <= (GLint)sizeof(name) && "uniform block name longer than NT_GFX_GL_MAX_UNIFORM_NAME");
     for (GLint bi = 0; bi < block_count; bi++) {
         GLsizei length = 0;
         NT_GL(glGetActiveUniformBlockName, program, (GLuint)bi, (GLsizei)sizeof(name), &length, name);
@@ -1434,9 +1460,7 @@ static bool nt_gfx_gl_bind_blocks(GLuint program, nt_gfx_gl_program_t *rec) {
         const uint32_t slot = nt_gfx_block_slot(s_init_desc.global_blocks, name);
         NT_ASSERT(slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS && "uniform block name is neither reserved nor in nt_gfx_desc_t.global_blocks");
         NT_GL(glUniformBlockBinding, program, (GLuint)bi, (GLuint)slot);
-        if ((uint32_t)size > rec->block_sizes[slot]) {
-            rec->block_sizes[slot] = (uint32_t)size;
-        }
+        rec->block_sizes[slot] = (uint32_t)size;
     }
     return true;
 }
@@ -1716,6 +1740,23 @@ static void forget_deleted_buffer(GLuint buf) {
     if (s_gl_cache.array_buffer == buf) {
         s_gl_cache.array_buffer = 0;
     }
+    if (s_gl_cache.uniform_buffer == buf) {
+        s_gl_cache.uniform_buffer = 0;
+    }
+    /* A recycled name must not match a range GL already dropped. */
+    for (uint32_t i = 0; i < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; i++) {
+        if (s_gl_cache.uniform_ranges[i].buffer == buf) {
+            s_gl_cache.uniform_ranges[i].buffer = 0;
+        }
+    }
+}
+
+/* The generic binding of the targets the cache tracks; NULL for the element array (VAO state). */
+static GLuint *cached_generic_binding(GLenum target) {
+    if (target == GL_ARRAY_BUFFER) {
+        return &s_gl_cache.array_buffer;
+    }
+    return target == GL_UNIFORM_BUFFER ? &s_gl_cache.uniform_buffer : NULL;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
@@ -1735,8 +1776,9 @@ bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot) {
         ebo_upload_begin();
     }
     NT_GL(glBindBuffer, target, buf);
-    if (target == GL_ARRAY_BUFFER) {
-        s_gl_cache.array_buffer = buf;
+    GLuint *generic = cached_generic_binding(target);
+    if (generic != NULL) {
+        *generic = buf;
     }
     NT_GL_BUFFER_UPLOAD(desc->data, desc->size, glBufferData, target, (GLsizeiptr)desc->size, desc->data, usage);
     if (unhook_vao) {
@@ -1771,13 +1813,14 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, cons
     if (unhook_vao) {
         ebo_upload_begin();
     }
-    if (target != GL_ARRAY_BUFFER || s_gl_cache.array_buffer != buf) {
+    GLuint *generic = cached_generic_binding(target);
+    if (generic == NULL || *generic != buf) {
         NT_GL(glBindBuffer, target, buf);
     } else {
         NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_BUFFER_UPLOAD, event->result = NT_GFX_RESULT_CACHE; event->detail = NT_GFX_GL_glBindBuffer; event->data.backend.args[0] = buf;);
     }
-    if (target == GL_ARRAY_BUFFER) {
-        s_gl_cache.array_buffer = buf;
+    if (generic != NULL) {
+        *generic = buf;
     }
     NT_GL_BUFFER_UPLOAD(data, size, glBufferSubData, target, (GLintptr)offset, (GLsizeiptr)size, data);
     if (unhook_vao) {
@@ -1789,7 +1832,16 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, cons
 
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, uint32_t offset, uint32_t size) {
     NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_buffers && s_buffer_gl[backend_handle] != 0 && "bind_uniform_buffer: requires a live buffer");
-    NT_GL(glBindBufferRange, GL_UNIFORM_BUFFER, slot, s_buffer_gl[backend_handle], (GLintptr)offset, (GLsizeiptr)size);
+    const GLuint buf = s_buffer_gl[backend_handle];
+    if (s_gl_cache.uniform_ranges[slot].buffer == buf && s_gl_cache.uniform_ranges[slot].offset == offset && s_gl_cache.uniform_ranges[slot].size == size) {
+        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UBO, event->result = NT_GFX_RESULT_CACHE; event->detail = NT_GFX_GL_glBindBufferRange; event->data.backend.args[0] = buf;);
+        return;
+    }
+    NT_GL(glBindBufferRange, GL_UNIFORM_BUFFER, slot, buf, (GLintptr)offset, (GLsizeiptr)size);
+    s_gl_cache.uniform_ranges[slot].buffer = buf;
+    s_gl_cache.uniform_ranges[slot].offset = offset;
+    s_gl_cache.uniform_ranges[slot].size = size;
+    s_gl_cache.uniform_buffer = buf;
 }
 
 /* ---- Texture management ---- */

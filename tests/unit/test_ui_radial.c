@@ -624,7 +624,10 @@ static void test_radial_image_reveal_mode_plumbed(void) {
     style.tint_strength = 0.75F;
 
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
+    const uint32_t updates = nt_gfx_fake_update_buffer_count();
     radial_image_walk(&ref, &style, 40.0F, 40.0F);
+    /* The walk bakes the tint per vertex and never rewrites the shared material's params. */
+    TEST_ASSERT_EQUAL_UINT32(updates, nt_gfx_fake_update_buffer_count());
 
     /* a_tint (floats 4..7 of the custom block) baked per-vertex: rgb 0..1 + strength. */
     TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);

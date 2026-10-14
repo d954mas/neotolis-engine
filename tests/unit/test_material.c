@@ -233,6 +233,9 @@ void test_set_params_writes_the_buffer_only_on_change(void) {
     TEST_ASSERT_EQUAL_UINT32(updates + 1U, nt_gfx_fake_update_buffer_count());
     TEST_ASSERT_EQUAL_UINT32(sizeof(changed), nt_gfx_fake_last_update_buffer_size());
     TEST_ASSERT_EQUAL_MEMORY(changed, nt_gfx_fake_last_update_buffer_data(), sizeof(changed));
+    const float last_changed[4] = {0.8F, 0.0F, 0.0F, 0.5F}; /* only the last member differs */
+    nt_material_set_params(mat, last_changed, sizeof(last_changed));
+    TEST_ASSERT_EQUAL_UINT32(updates + 2U, nt_gfx_fake_update_buffer_count());
 }
 
 void test_set_params_asserts_size_or_handle(void) {
@@ -525,8 +528,11 @@ void test_apply_asserts_too_many_draw_textures(void) {
 
 /* ---- Lifetime and restore ---- */
 
-/* The restore rebuilds every params buffer from the CPU copy, also with a full buffer pool and
- * for a material created while the context was lost. */
+/* Buffers left for materials after the frame storage streams of NT_GFX_TEST_DESC. */
+#define MATERIAL_TEST_FREE_BUFFERS (32U - 4U)
+
+/* The restore rebuilds every params buffer from the CPU copy, including bytes written while the
+ * context was lost and a material created then; a second call leaks nothing. */
 void test_restore_gpu_rebuilds_params_buffers(void) {
     nt_material_create_desc_t d = make_test_desc();
     d.texture_count = 0;
@@ -545,9 +551,17 @@ void test_restore_gpu_rebuilds_params_buffers(void) {
 
     nt_gfx_fake_reset();
     nt_material_restore_gpu();
-    nt_material_restore_gpu(); /* harmless twice */
     TEST_ASSERT_EQUAL(NT_BUFFER_UNIFORM, nt_gfx_fake_last_buffer_desc().type);
     TEST_ASSERT_EQUAL_MEMORY(s_params, nt_gfx_fake_last_buffer_desc().data, sizeof(s_params)); /* `during` comes last */
+    nt_material_destroy(during);
+    nt_material_restore_gpu(); /* `before` is now the only params material */
+    TEST_ASSERT_EQUAL_MEMORY(changed, nt_gfx_fake_last_buffer_desc().data, sizeof(changed));
+    during = nt_material_create(&d);
+    nt_material_restore_gpu();
+    /* Two materials hold buffers: the rest of the pool is still free after three restores. */
+    for (uint32_t i = 0; i < MATERIAL_TEST_FREE_BUFFERS - 2U; i++) {
+        TEST_ASSERT_TRUE(nt_material_valid(nt_material_create(&d)));
+    }
     nt_program_t program = nt_gfx_fake_make_program(NULL, 0);
     nt_test_gfx_link_wait(program);
     nt_test_frame_begin_pass();
@@ -559,20 +573,43 @@ void test_restore_gpu_rebuilds_params_buffers(void) {
     nt_gfx_begin_frame();
 }
 
-/* Destroy releases the params buffer: a full cycle never exhausts the buffer pool. */
+/* Destroy and shutdown release the params buffers: each fills the buffer pool exactly, so one
+ * leaked buffer overflows the next fill. */
 void test_destroy_and_shutdown_release_params_buffers(void) {
     nt_material_create_desc_t d = make_test_desc();
     for (uint32_t i = 0; i < 64; i++) {
         nt_material_destroy(nt_material_create(&d));
     }
-    for (uint32_t i = 0; i < 4; i++) {
-        (void)nt_material_create(&d);
+    for (uint32_t i = 0; i < MATERIAL_TEST_FREE_BUFFERS; i++) {
+        TEST_ASSERT_TRUE(nt_material_valid(nt_material_create(&d)));
     }
     nt_material_shutdown();
     init_material_defaults();
-    for (uint32_t i = 0; i < 16; i++) {
+    for (uint32_t i = 0; i < MATERIAL_TEST_FREE_BUFFERS; i++) {
         TEST_ASSERT_TRUE(nt_material_valid(nt_material_create(&d)));
     }
+}
+
+/* A params buffer follows the gfx frame rule; a material without params has nothing to destroy. */
+void test_destroying_a_params_material_in_a_drawn_frame_asserts(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    nt_material_t with_params = nt_material_create(&d);
+    d.params = NULL;
+    d.params_size = 0;
+    nt_material_t without_params = nt_material_create(&d);
+    nt_test_frame_begin_pass();
+    NT_TEST_EXPECT_ASSERT(nt_material_destroy(with_params));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "frame rule"));
+    nt_material_destroy(without_params);
+    nt_test_frame_close();
+    nt_gfx_begin_frame();
+}
+
+/* A shared restore sequence may name the module before init or after shutdown. */
+void test_restore_gpu_ignores_an_uninitialized_module(void) {
+    nt_material_shutdown();
+    nt_material_restore_gpu();
+    init_material_defaults();
 }
 
 /* ---- Test 21: get_info returns NULL for invalid handle ---- */
@@ -651,6 +688,8 @@ int main(void) {
     RUN_TEST(test_apply_asserts_too_many_draw_textures);
     RUN_TEST(test_restore_gpu_rebuilds_params_buffers);
     RUN_TEST(test_destroy_and_shutdown_release_params_buffers);
+    RUN_TEST(test_destroying_a_params_material_in_a_drawn_frame_asserts);
+    RUN_TEST(test_restore_gpu_ignores_an_uninitialized_module);
 
     /* Query edge cases */
     RUN_TEST(test_get_info_returns_null_for_invalid);

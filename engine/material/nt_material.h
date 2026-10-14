@@ -113,7 +113,8 @@ void nt_material_init(const nt_material_desc_t *desc);
 void nt_material_shutdown(void);
 /* Context restore: recreates every material's params buffer from its CPU copy. Call it in the
  * restore sequence, before the first pass and before any nt_material_set_params of that frame;
- * a second call is harmless. A material created while the context was lost gets its buffer here. */
+ * a second call is harmless, and an uninitialized module ignores it. A material created while
+ * the context was lost gets its buffer here. */
 void nt_material_restore_gpu(void);
 
 /* ---- Create / Destroy / Query ---- */

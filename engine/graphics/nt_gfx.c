@@ -423,10 +423,14 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc->max_meshes > 0 && "nt_gfx_desc_t.max_meshes is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_vertex_inputs > 0 && "nt_gfx_desc_t.max_vertex_inputs is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_render_targets > 0 && "nt_gfx_desc_t.max_render_targets is 0 -- use nt_gfx_desc_defaults() or set explicitly");
-    for (uint32_t i = 0; i < NT_GFX_MAX_GAME_BLOCKS && desc->global_blocks[i] != NULL; i++) {
+    bool listed = true;
+    for (uint32_t i = 0; i < NT_GFX_MAX_GAME_BLOCKS; i++) {
+        listed = listed && desc->global_blocks[i] != NULL;
+        NT_ASSERT((listed || desc->global_blocks[i] == NULL) && "nt_gfx_desc_t.global_blocks: a name after the first NULL");
         /* Looked up in the list before entry i, an earlier equal name or a reserved one answers first. */
-        NT_ASSERT(nt_gfx_block_slot(desc->global_blocks, desc->global_blocks[i]) == NT_GFX_SLOT_GAME + i && "nt_gfx_desc_t.global_blocks: a reserved or duplicate name");
+        NT_ASSERT((!listed || nt_gfx_block_slot(desc->global_blocks, desc->global_blocks[i]) == NT_GFX_SLOT_GAME + i) && "nt_gfx_desc_t.global_blocks: a reserved or duplicate name");
     }
+    NT_ASSERT(desc->frame_capacity[NT_GFX_FRAME_UNIFORM] % 16U == 0 && "nt_gfx_desc_t.frame_capacity[NT_GFX_FRAME_UNIFORM]: a multiple of 16");
     uint16_t max_render_targets = desc->max_render_targets;
     memset(&s_gfx, 0, sizeof(s_gfx));
     s_gfx.scissor_rect[2] = -1;
@@ -1221,8 +1225,10 @@ nt_instance_layout_t nt_gfx_make_instance_layout(const nt_vertex_layout_t *layou
     return result;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static nt_gfx_result_t make_buffer(const nt_buffer_desc_t *desc, nt_buffer_t *out) {
     NT_ASSERT(desc != NULL);
+    NT_ASSERT((uint32_t)desc->type <= NT_BUFFER_UNIFORM && "make_buffer: invalid buffer type");
     NT_ASSERT((desc->type != NT_BUFFER_UNIFORM || (desc->size > 0 && desc->size % 16U == 0)) && "make_buffer: a uniform buffer's size is a nonzero multiple of 16");
     /* Same recoverable contract as the other make_* creators -- without this
      * a lost-frame creation yields a pool-valid buffer with a dead GL name. */
@@ -1672,8 +1678,8 @@ static nt_gfx_result_t bind_pipeline(nt_pipeline_t pip) {
         return NT_GFX_RESULT_CACHE;
     }
     if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
-        /* Clearing the mirror is the whole unbind: later draws and uniform
-         * writes trap on it. The bound vertex input is orthogonal state. */
+        /* Clearing the mirror is the whole unbind: later draws trap on it. The bound
+         * vertex input is orthogonal state. */
         s_gfx.bound_pipeline = 0;
         discard_texture_set();
         NT_LOG_ERROR("bind_pipeline: invalid handle");
@@ -2189,16 +2195,15 @@ static void assert_vertex_input_bound(void) { NT_ASSERT(s_gfx.bound_vertex_input
 static void assert_texture_set_applied(void) { NT_ASSERT(s_gfx.texture_set_applied && "draw: bound program requires a texture set -- call nt_gfx_apply_texture_bindings"); }
 
 /* WebGL2 rejects a draw whose program reads a block with a smaller or no bound range (native GL
- * reads past it), so the first draw after a pipeline or block change checks every block the
+ * reads past it), so the first draw after a program or block change checks every block the
  * program uses. Runs before a merge: a merged draw must not inherit an unchecked binding. */
 static void assert_blocks_bound(void) {
     if (s_gfx.blocks_checked) {
         return;
     }
-    const uint32_t program_slot = nt_pool_slot_index(pipeline_program(nt_pool_slot_index(s_gfx.bound_pipeline)));
+    const uint32_t *needed = nt_gfx_backend_program_block_sizes(nt_pool_slot_index(pipeline_program(nt_pool_slot_index(s_gfx.bound_pipeline))));
     for (uint32_t slot = 0; slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; slot++) {
-        const uint32_t needed = nt_gfx_backend_program_block_size(program_slot, slot);
-        NT_ASSERT(s_gfx.bound_blocks[slot].size >= needed && "draw: a uniform block the program uses is unbound or smaller than the block -- bind it in this pass");
+        NT_ASSERT(s_gfx.bound_blocks[slot].size >= needed[slot] && "draw: a uniform block the program uses is unbound or smaller than the block -- bind it in this pass");
     }
     s_gfx.blocks_checked = true;
 }
@@ -2345,19 +2350,33 @@ static nt_gfx_result_t bind_uniform_buffer(uint32_t slot, nt_buffer_t buf) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    if (buf.id == s_gfx.bound_blocks[slot].buffer) {
+    /* Frame data binds subranges; a whole-buffer bind would read past what this frame uploaded. */
+    NT_ASSERT((buf.id == 0 || buf.id != g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].buffer.id) && "bind_uniform_buffer: frame data binds through nt_gfx_bind_uniform_block");
+    nt_gfx_block_binding_t *bound = &s_gfx.bound_blocks[slot];
+    if (buf.id == 0) {
+        /* The unbind is logical (GL rejects an empty range): the draw check reads size 0, and the
+         * buffer stays named so rebinding it restores the range GL still holds. */
+        if (bound->size != 0) {
+            bound->size = 0;
+            s_gfx.blocks_checked = false;
+            return NT_GFX_RESULT_ACCEPTED;
+        }
         return NT_GFX_RESULT_CACHE;
     }
-    if (buf.id == 0) {
-        /* The unbind is logical: GL rejects an empty range, and the draw check reads the mirror. */
-        s_gfx.bound_blocks[slot] = (nt_gfx_block_binding_t){0};
-        s_gfx.blocks_checked = false;
-        return NT_GFX_RESULT_ACCEPTED;
+    /* Only frame data binds at an offset, so another buffer's binding is always the whole buffer. */
+    if (buf.id == bound->buffer && bound->size != 0) {
+        return NT_GFX_RESULT_CACHE;
     }
     NT_ASSERT(nt_pool_valid(&s_gfx.buffer_pool, buf.id) && "bind_uniform_buffer: invalid buffer handle");
     const nt_gfx_buffer_meta_t *meta = &s_gfx.buffer_metas[nt_pool_slot_index(buf.id)];
     NT_ASSERT(meta->type == NT_BUFFER_UNIFORM && "bind_uniform_buffer: buffer is not uniform type");
     NT_ASSERT(meta->live && "bind_uniform_buffer: buffer has no live backend -- recreate it after context restore");
+    if (buf.id == bound->buffer) {
+        /* Unbound logically in this pass: GL still holds this buffer's whole range on the slot. */
+        bound->size = meta->size;
+        s_gfx.blocks_checked = false;
+        return NT_GFX_RESULT_CACHE;
+    }
     publish_uniform_binding(slot, buf.id, 0, meta->size);
     return NT_GFX_RESULT_ACCEPTED;
 }

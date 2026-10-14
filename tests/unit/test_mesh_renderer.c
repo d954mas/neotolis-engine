@@ -1166,7 +1166,10 @@ void test_state_set_params_between_calls_writes_the_buffer(void) {
     TEST_ASSERT_EQUAL_UINT32(updates + 1U, nt_gfx_fake_update_buffer_count());
     TEST_ASSERT_EQUAL_MEMORY(tint2, nt_gfx_fake_last_update_buffer_data(), sizeof(tint2));
     draw_list(items, 1);
-    TEST_ASSERT_TRUE(nt_gfx_fake_ubo_bind_count() >= 1U);
+    /* The write lands in the material's own buffer: both calls bind that one buffer. */
+    const uint32_t binds = nt_gfx_fake_ubo_bind_count();
+    TEST_ASSERT_TRUE(binds >= 1U);
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_ubo_bind_at(0).buffer_backend, nt_gfx_fake_ubo_bind_at(binds - 1U).buffer_backend);
 }
 
 void test_state_program_replaced_between_calls(void) {
@@ -1546,7 +1549,9 @@ void test_core_draw_asserts_outside_a_pass(void) {
  * two draws of one frame is the frame's last write, which both draws read. */
 void test_core_draw_applies_the_material_every_call(void) {
     nt_mesh_t mesh = create_test_mesh();
+    nt_gfx_fake_set_block(NT_GFX_SLOT_MATERIAL, 16); /* the program reads the Material block */
     nt_material_t mat = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_DEFAULT);
+    nt_gfx_fake_set_block(NT_GFX_SLOT_MATERIAL, 0);
     begin_storage_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_fake_reset();
@@ -1556,6 +1561,8 @@ void test_core_draw_applies_the_material_every_call(void) {
     const float tint2[4] = {2.0F, 3.0F, 4.0F, 5.0F};
     nt_material_set_params(mat, tint2, sizeof(tint2));
     TEST_ASSERT_EQUAL_MEMORY(tint2, nt_gfx_fake_last_update_buffer_data(), sizeof(tint2));
+    /* Without the second call's apply, the unbound slot would fail the draw's block check. */
+    nt_gfx_bind_uniform_buffer(NT_GFX_SLOT_MATERIAL, NT_BUFFER_INVALID);
     nt_mesh_renderer_draw(mesh, mat, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset, 1);
     nt_test_frame_next();
 

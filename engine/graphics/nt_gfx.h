@@ -376,10 +376,12 @@ typedef struct {
     uint32_t capture_capacity;   /* event records, default: 0; allocated once at init */
     uint32_t stream_capacity;    /* draw-phase command bytes of one frame, default: 32 KiB; allocated once at init */
     /* Frame storage bytes per frame by stream (NT_GFX_FRAME_*), default: 0 (disabled);
-     * each enabled stream is a CPU staging copy plus a GPU buffer, allocated once at init. */
+     * each enabled stream is a CPU staging copy plus a GPU buffer, allocated once at init.
+     * The uniform stream is a uniform buffer: a multiple of 16 (asserted). */
     uint32_t frame_capacity[NT_GFX_FRAME_STREAM_COUNT];
-    /* The game's uniform block names, slot NT_GFX_SLOT_GAME + index; the list ends at the first
-     * NULL (default: none). Borrowed unchanged until nt_gfx_shutdown. */
+    /* The game's uniform block names, slot NT_GFX_SLOT_GAME + index; the list is dense and ends at
+     * the first NULL (a name after it asserts; default: none). Borrowed unchanged until
+     * nt_gfx_shutdown. */
     const char *global_blocks[NT_GFX_MAX_GAME_BLOCKS];
     bool depth;               /* request depth buffer (default: true) */
     bool stencil;             /* request stencil buffer (default: false) */
@@ -993,9 +995,9 @@ bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint
 /* ---- Uniform blocks ---- */
 
 /* Block members are vec4, ivec4, uvec4, mat4 or arrays of them in a layout(std140) block with
- * column-major matrices (asserted at link), so a C struct of float/int32_t/uint32_t arrays
- * matches it byte for byte. A draw asserts that each block its program uses is bound in the pass
- * with at least the block's size. */
+ * column-major matrices (member types, matrix order, offsets and strides asserted at link), so a
+ * C struct of float/int32_t/uint32_t arrays matches it byte for byte. A draw asserts that each
+ * block its program uses is bound in the pass with at least the block's size. */
 
 /* Frame data: copies size bytes (a multiple of 16) into the uniform frame stream and binds that
  * range to slot. Bytes equal to the range already bound to slot in this pass end CACHE with no

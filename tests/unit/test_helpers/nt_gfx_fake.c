@@ -78,9 +78,9 @@ void nt_gfx_fake_set_block(uint32_t slot, uint32_t size) {
     s_fake_block_template[slot] = size;
 }
 
-uint32_t nt_gfx_backend_program_block_size(uint32_t program_backend, uint32_t slot) {
-    NT_ASSERT(program_backend != 0 && program_backend <= s_fake_max_programs && s_fake_program_table[program_backend].used && "program_block_size: requires a live program");
-    return s_fake_program_table[program_backend].block_sizes[slot];
+const uint32_t *nt_gfx_backend_program_block_sizes(uint32_t program_backend) {
+    NT_ASSERT(program_backend != 0 && program_backend <= s_fake_max_programs && s_fake_program_table[program_backend].used && "program_block_sizes: requires a live program");
+    return s_fake_program_table[program_backend].block_sizes;
 }
 // #endregion
 

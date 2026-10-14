@@ -105,7 +105,6 @@ static nt_ui_context_t *s_ctx;
 
 static nt_hash32_t s_pack_id;
 static nt_resource_t s_atlas_handle;
-static nt_resource_t s_atlas_tex_handle;
 static nt_resource_t s_font_resource;
 
 static nt_material_t s_sprite_material;
@@ -601,7 +600,6 @@ int main(int argc, char *argv[]) {
     s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_SLICE9_DEMO_ATLAS, NT_ASSET_ATLAS);
-    s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_SLICE9_DEMO_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_SLICE9_DEMO_FONT, NT_ASSET_FONT);
 
     /* Handle is valid immediately; fill late-bound art refs upfront. */

@@ -145,7 +145,6 @@ static bool s_debug_overlay;
 /* Resources. */
 static nt_hash32_t s_pack_id;
 static nt_resource_t s_atlas_handle;
-static nt_resource_t s_atlas_tex_handle;
 static nt_resource_t s_font_resource;
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
@@ -1069,7 +1068,6 @@ int main(int argc, char *argv[]) {
     s_text_depth_program.vs = s_text_program.vs;
     s_text_depth_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_DEPTH_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_3D_DEMO_ATLAS, NT_ASSET_ATLAS);
-    s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_3D_DEMO_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_3D_DEMO_FONT, NT_ASSET_FONT);
 
     /* Handle is valid immediately; fill late-bound button-bg refs upfront. */

@@ -23,6 +23,8 @@ void setUp(void) {
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
     nt_gfx_fake_reset();
+    /* The shape programs' Draw block: every flush must bind it, or its draws assert. */
+    nt_gfx_fake_set_block(NT_GFX_SLOT_DRAW, 112);
     nt_shape_renderer_init();
     /* The fake finishes the renderer's program links at the next begin_frame. */
     nt_gfx_end_frame();
@@ -546,6 +548,15 @@ void test_shape_init_asserts_without_a_vertex_budget(void) {
     NT_TEST_EXPECT_ASSERT(nt_shape_renderer_init());
     storage->capacity = capacity;
 }
+
+/* Every flush binds a Draw block from the uniform stream. */
+void test_shape_init_asserts_without_a_uniform_budget(void) {
+    nt_gfx_frame_storage_t *storage = &g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM];
+    const uint32_t capacity = storage->capacity;
+    storage->capacity = 0;
+    NT_TEST_EXPECT_ASSERT(nt_shape_renderer_init());
+    storage->capacity = capacity;
+}
 #endif
 
 /* A second loss can land inside the restore: it latches in gfx, the queues and settings stay sane,
@@ -802,6 +813,7 @@ int main(void) {
     RUN_TEST(test_shape_templates_draw_disjoint_ranges);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_shape_init_asserts_without_a_vertex_budget);
+    RUN_TEST(test_shape_init_asserts_without_a_uniform_budget);
 #endif
     RUN_TEST(test_shape_loss_during_restore_is_retried_by_the_next_one);
     RUN_TEST(test_shape_restore_on_inactive_renderer_does_nothing);

@@ -198,12 +198,16 @@ borrowed without copying: each string must remain valid and unchanged until
 restore bind it too.
 
 Block members are `vec4`, `ivec4`, `uvec4`, `mat4` or arrays of them in a
-`layout(std140)` block with column-major matrices; another member type asserts
-at link. A C struct of `float`, `int32_t` and `uint32_t` arrays then matches the
-block byte for byte. A draw asserts that every block its program uses is bound
-in the pass with at least the block's data size (WebGL rejects such a draw,
-native GL reads past the range); the check runs on the first draw after a
-pipeline or block change, before a merge.
+`layout(std140)` block with column-major matrices; another member type, a
+`row_major` matrix or a non-std140 offset or stride asserts at link. A C struct of
+`float`, `int32_t` and `uint32_t` arrays then matches the block byte for byte. A
+draw asserts that every block its program uses is bound in the pass with at least
+the block's data size (WebGL rejects such a draw, native GL reads past the range);
+the check runs on the first draw after a program or block change, before a merge.
+
+A slot holds the last block bound to it in the pass, whoever bound it: engine
+renderers that draw with their own `Draw` block (shape flush, blur) replace the
+game's `Draw` binding, so a game rebinds its own block after calling them.
 
 `nt_gfx_bind_uniform_block(slot, data, size)` binds frame data: it copies `size`
 bytes into the uniform frame stream at the next multiple of
@@ -219,8 +223,11 @@ ends `CONTEXT_LOST`.
 (size a nonzero multiple of 16, asserted at creation); an equal handle ends
 `CACHE`. Its data is written with `nt_gfx_update_buffer`, so every draw of a
 frame reads the frame's last write. `NT_BUFFER_INVALID` unbinds the slot without
-a backend call, and a draw whose program uses the slot asserts. Another buffer
-type or a buffer without a live backend asserts after the lost-context return.
+a backend call, and a draw whose program uses the slot asserts; rebinding the
+buffer the slot held before the unbind ends `CACHE` too, because GL still holds
+its range. Another buffer type, a buffer without a live backend, or the uniform
+frame stream's buffer (frame data binds through `nt_gfx_bind_uniform_block`)
+asserts after the lost-context return.
 
 `nt_gfx_make_program` returns `NT_PROGRAM_INVALID` for the two states a context
 loss leaves behind, and for nothing else. The first is the loss itself: a loss

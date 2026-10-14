@@ -329,7 +329,6 @@ static nt_ui_context_t *s_ui;
 NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
 static nt_frame_uniforms_t s_frame_uniforms; /* filled each frame; stage parts set its camera */
 static nt_resource_t s_atlas;
-static nt_resource_t s_atlas_texture;
 static nt_resource_t s_font_resource;
 static nt_font_t s_font;
 static nt_material_t s_sprite_material;
@@ -2797,7 +2796,6 @@ int main(int argc, char *argv[]) {
     s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas = nt_resource_request(ASSET_ATLAS_SKELETAL_SHOWCASE_UI, NT_ASSET_ATLAS);
-    s_atlas_texture = nt_resource_request(ASSET_TEXTURE_SKELETAL_SHOWCASE_UI_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_SKELETAL_SHOWCASE_FONT, NT_ASSET_FONT);
     s_rig_resource[RIG_FOX] = nt_resource_request(ASSET_SKELETON_SKELETAL_SHOWCASE_FOX_NSKL, NT_ASSET_SKELETON);
     s_rig_resource[RIG_CESIUMMAN] = nt_resource_request(ASSET_SKELETON_SKELETAL_SHOWCASE_CESIUMMAN_NSKL, NT_ASSET_SKELETON);

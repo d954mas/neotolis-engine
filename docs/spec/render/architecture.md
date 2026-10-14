@@ -162,7 +162,8 @@ the front-end. The GL backend keeps caches for
 physical GL state the front-end does not name: the program and VAO behind
 different pipelines and vertex inputs, the fixed-function difference between
 pipelines, the texture and sampler halves of a unit across passes, the
-viewport, clear values, the active unit, the `GL_ARRAY_BUFFER` binding, and the
+viewport, clear values, the active unit, the `GL_ARRAY_BUFFER` and generic
+`GL_UNIFORM_BUFFER` bindings, the range each uniform-block slot holds, and the
 instance layout, buffer and offset each vertex input's VAO last received: a
 recorded instanced bind that repeats all three issues no `glBindBuffer` or
 `glVertexAttribPointer` (only the VAO bind, when another VAO is bound), so a
@@ -297,12 +298,10 @@ targets), so a context loss frees their pool slots outright. Primary resources (
 shaders, programs) instead survive a loss as husks — pool slot alive,
 backend gone — because materials and game code hold them through the loss
 window: programs and textures already report readiness (a link is asynchronous
-anyway), so draws skip a husk with no second validity check, and the restore
-recipe has their owners destroy the old handles explicitly. Destroying a stale
-program asserts; a stale shader, buffer or texture destroy logs an error and
-changes nothing. Applying a texture set containing a husk reports once and issues no
-texture or sampler bind, and the draws of that set are skipped; binding a husk
-buffer, or writing into any husk, asserts. Destroying handle 0 is a silent no-op
+anyway), and the restore recipe has their owners destroy the old handles
+explicitly. Destroying a stale program asserts; a stale shader, buffer or texture
+destroy logs an error and changes nothing. Applying a texture set containing a
+husk, binding a husk buffer, or writing into any husk asserts. Destroying handle 0 is a silent no-op
 for every primary type, so an owner whose create met a loss destroys without a check.
 
 **Program / pipeline split.** A program is the linked (vertex, fragment) pair
@@ -760,8 +759,9 @@ instance-buffer re-pointing, uniform block binds and draws outside a pass assert
 Destroying a live object from the first pass until `nt_gfx_end_frame` asserts
 (the frame rule, see Draw-phase command stream).
 Physical texture/sampler GL bindings and uniform-block binds remain context
-state. The backend deduplicates texture/sampler binds across passes;
-every uniform-block bind records one `glBindBufferRange`. A depth clear forces the depth
+state. The backend deduplicates texture/sampler binds and uniform-block ranges across
+passes: a recorded block bind whose buffer, offset and size the slot already holds issues
+no `glBindBufferRange`. A depth clear forces the depth
 mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
 A render target is a thin framebuffer object over optional attachments, color
@@ -1146,13 +1146,12 @@ dead names of the lost context.
 Among INITIAL records, `detail` is meaningful only on INITIAL/STATE.
 Program publication and initial state include `INITIAL/SAMPLER` records with
 backend program slot, name hash, location, unit and sampler class in args 0–4.
-`INITIAL/UNIFORM_VEC4` gives program slot/name hash/location in args 0–2 and cached
-vec4 values; `UNKNOWN` means no retained value. These INITIAL records can occur
-inside CREATE when the program first becomes available. Inactive names emit
-SKIP/INACTIVE; cache skips are distinct from invalid requests.
+These INITIAL records can occur inside CREATE when the program first becomes
+available. Inactive texture-set names emit SKIP/INACTIVE; cache skips are distinct
+from invalid requests.
 
 `SKIP` records mark work that was not issued without ending an operation:
-backend cache skips (`SKIP/CACHE`) and inactive uniform or texture-set names
+backend cache skips (`SKIP/CACHE`) and inactive texture-set names
 (`SKIP/INACTIVE`).
 
 Pipeline state records use integers 0–12 for program, depth enable/write/function,

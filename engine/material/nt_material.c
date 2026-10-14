@@ -68,7 +68,10 @@ void nt_material_shutdown(void) {
 }
 
 void nt_material_restore_gpu(void) {
-    NT_ASSERT(s_mat.initialized);
+    /* A shared restore sequence may name a module the game never initialized. */
+    if (!s_mat.initialized) {
+        return;
+    }
     for (uint32_t i = 1; i <= s_mat.pool.capacity; i++) {
         nt_material_record_t *rec = &s_mat.slots[i];
         if (!nt_pool_slot_alive(&s_mat.pool, i) || rec->params_size == 0) {
