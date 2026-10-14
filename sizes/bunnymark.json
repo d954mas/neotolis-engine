@@ -5978,5 +5978,51 @@
       "raw": 3316157,
       "gzip": 1068979
     }
+  },
+  {
+    "commit": "ca9b005",
+    "date": "2026-10-14T08:34:01Z",
+    "files": {
+      "index.html": {
+        "raw": 2448,
+        "gzip": 1237
+      },
+      "index_simd.wasm": {
+        "raw": 455096,
+        "gzip": 208227
+      },
+      "index.wasm": {
+        "raw": 426803,
+        "gzip": 203042
+      },
+      "index_simd.js": {
+        "raw": 22010,
+        "gzip": 8974
+      },
+      "index.js": {
+        "raw": 22010,
+        "gzip": 8969
+      },
+      "assets/bunnymark_hd.ntpack": {
+        "raw": 2797312,
+        "gzip": 835042
+      },
+      "assets/bunnymark_sd.ntpack": {
+        "raw": 38688,
+        "gzip": 15116
+      }
+    },
+    "engine": {
+      "raw": 479554,
+      "gzip": 218438
+    },
+    "resources": {
+      "raw": 2836000,
+      "gzip": 850158
+    },
+    "total": {
+      "raw": 3315554,
+      "gzip": 1068596
+    }
   }
 ]
