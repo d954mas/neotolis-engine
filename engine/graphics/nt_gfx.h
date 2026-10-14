@@ -84,7 +84,6 @@ typedef struct {
     uint32_t id;
 } nt_instance_layout_t;
 
-#define NT_BUFFER_INVALID ((nt_buffer_t){0})
 #define NT_RENDER_TARGET_INVALID ((nt_render_target_t){0})
 #define NT_MESH_INVALID ((nt_mesh_t){0})
 #define NT_PROGRAM_INVALID ((nt_program_t){0})
@@ -375,7 +374,7 @@ typedef struct {
     uint32_t capture_capacity;   /* event records, default: 0; allocated once at init */
     uint32_t stream_capacity;    /* draw-phase command bytes of one frame, default: 32 KiB; allocated once at init */
     /* Frame storage bytes per frame by stream (NT_GFX_FRAME_*), default: 0 (disabled) except the
-     * uniform stream, which every pass's Globals block uses: 16 KiB, a multiple of 16 (asserted);
+     * uniform stream, which every pass's Globals block uses: 16 KiB;
      * each enabled stream is a CPU staging copy plus a GPU buffer, allocated once at init. */
     uint32_t frame_capacity[NT_GFX_FRAME_STREAM_COUNT];
     /* The game's uniform block names, slot NT_GFX_SLOT_GAME + index; the list ends at the first
@@ -932,8 +931,8 @@ nt_texture_format_t nt_gfx_texture_format(nt_texture_t tex);
 
 /* ---- Draw state ---- Pipeline, vertex input, texture set, instance pointers and uniform
  * blocks are pass-scoped: set them inside a pass (asserted); nt_gfx_begin_pass
- * discards them, so every pass binds every block it reads. Physical texture/sampler and
- * uniform-buffer binds are context state. An equal bind, texture set, scissor or viewport
+ * discards them, so every pass binds every block it reads. Physical texture/sampler binds are
+ * context state. An equal bind, texture set, scissor or viewport
  * ends CACHE and records nothing; a texture set records only its changed units. */
 
 void nt_gfx_bind_pipeline(nt_pipeline_t pip);

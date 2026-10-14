@@ -132,7 +132,7 @@ typedef struct {
 } nt_gfx_sampler_info_t;
 
 /* Slot a uniform block name binds to at link: the reserved names first, then the game's list
- * (NULL = none); NT_GFX_MAX_UNIFORM_BUFFER_SLOTS for an unknown name. */
+ * (ends at a NULL entry); NT_GFX_MAX_UNIFORM_BUFFER_SLOTS for an unknown name. */
 static inline uint32_t nt_gfx_block_slot(const char *const *game_blocks, const char *name) {
     static const char *const reserved[NT_GFX_SLOT_GAME] = {"Globals", "Material", "Draw"};
     for (uint32_t slot = 0; slot < NT_GFX_SLOT_GAME; slot++) {
@@ -140,7 +140,7 @@ static inline uint32_t nt_gfx_block_slot(const char *const *game_blocks, const c
             return slot;
         }
     }
-    for (uint32_t i = 0; game_blocks != NULL && i < NT_GFX_MAX_GAME_BLOCKS && game_blocks[i] != NULL; i++) {
+    for (uint32_t i = 0; i < NT_GFX_MAX_GAME_BLOCKS && game_blocks[i] != NULL; i++) {
         if (strcmp(name, game_blocks[i]) == 0) {
             return NT_GFX_SLOT_GAME + i;
         }

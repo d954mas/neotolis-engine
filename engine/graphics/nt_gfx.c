@@ -136,8 +136,8 @@ typedef struct {
     uint32_t sampler;
 } nt_gfx_unit_binding_t;
 
+/* A range of the uniform frame stream; size 0 = nothing bound. */
 typedef struct {
-    uint32_t buffer; /* full buffer handle; 0 = nothing bound in this pass */
     uint32_t offset;
     uint32_t size;
 } nt_gfx_block_binding_t;
@@ -232,14 +232,10 @@ static struct {
      * contract keeps its state. */
     nt_gfx_unit_binding_t bound_units[NT_GFX_MAX_TEXTURE_SLOTS];
     nt_gfx_block_binding_t bound_blocks[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS];
-    /* The last block each slot staged in the frame; begin_frame clears it. */
-    struct {
-        uint32_t offset;
-        uint32_t size;
-    } staged_blocks[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS];
-    bool blocks_checked;  /* the bound program's blocks were checked against bound_blocks since the last change */
-    int scissor_rect[4];  /* GL bottom-left x,y,w,h; carries over passes; w = -1: unknown */
-    int viewport_rect[4]; /* GL bottom-left x,y,w,h; w = -1: unknown */
+    nt_gfx_block_binding_t staged_blocks[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS]; /* the last block each slot staged in the frame */
+    bool blocks_checked;                                                   /* the bound program's blocks were checked against bound_blocks since the last change */
+    int scissor_rect[4];                                                   /* GL bottom-left x,y,w,h; carries over passes; w = -1: unknown */
+    int viewport_rect[4];                                                  /* GL bottom-left x,y,w,h; w = -1: unknown */
 } s_gfx;
 
 _Static_assert(NT_GFX_MAX_TEXTURE_SLOTS <= 8, "texture unit masks are uint8_t");
@@ -2312,36 +2308,30 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
 
 /* ---- Uniform blocks ---- */
 
-static void publish_uniform_binding(uint32_t slot, uint32_t buffer, uint32_t offset, uint32_t size) {
-    s_gfx.bound_blocks[slot] = (nt_gfx_block_binding_t){buffer, offset, size};
-    s_gfx.blocks_checked = false;
-    nt_gfx_frame_bind_uniform_buffer(nt_pool_slot_index(buffer), slot, offset, size);
-}
-
 void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size) {
     NT_ASSERT(slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS && data != NULL && size > 0 && size % 16U == 0 && "bind_uniform_block: slot, data or size (a nonzero multiple of 16)");
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_uniform_block: must be called inside a pass");
     const bool lost = g_nt_gfx.context_lost;
     const nt_gfx_frame_storage_t *storage = &g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM];
-    /* Staged bytes stay unchanged until the next begin_frame: equal bytes of the frame are copied once,
-     * and bound again only in a new pass (the mirror is pass-scoped). */
+    /* Staged bytes stay unchanged until the next begin_frame, so bytes equal to the slot's last
+     * staged block bind that range again without a copy. */
     uint32_t offset = s_gfx.staged_blocks[slot].offset;
     const bool staged = !lost && s_gfx.staged_blocks[slot].size == size && memcmp(storage->staging + offset, data, size) == 0;
     if (!lost && !staged) {
         /* A disabled stream (zero capacity) reaches the allocator, which stops on the overflow. */
         memcpy(nt_gfx_frame_alloc(NT_GFX_FRAME_UNIFORM, size, g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment, &offset), data, size);
-        s_gfx.staged_blocks[slot].offset = offset;
-        s_gfx.staged_blocks[slot].size = size;
+        s_gfx.staged_blocks[slot] = (nt_gfx_block_binding_t){offset, size};
     }
-    const nt_gfx_block_binding_t *bound = &s_gfx.bound_blocks[slot];
-    const bool equal = staged && bound->buffer == storage->buffer.id && bound->offset == offset && bound->size == size;
+    const bool equal = staged && s_gfx.bound_blocks[slot].offset == offset && s_gfx.bound_blocks[slot].size == size;
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, storage->buffer.id, event->data.binding.slot = slot; event->data.binding.offset = offset; event->data.binding.size = size);
     if (lost) {
         NT_GFX_END(NT_GFX_RESULT_CONTEXT_LOST);
         return;
     }
     if (!equal) {
-        publish_uniform_binding(slot, storage->buffer.id, offset, size);
+        s_gfx.bound_blocks[slot] = (nt_gfx_block_binding_t){offset, size};
+        s_gfx.blocks_checked = false;
+        nt_gfx_frame_bind_uniform_buffer(nt_pool_slot_index(storage->buffer.id), slot, offset, size);
     }
     NT_GFX_END(equal ? NT_GFX_RESULT_CACHE : NT_GFX_RESULT_ACCEPTED);
 }
@@ -2352,7 +2342,7 @@ static nt_gfx_result_t unbind_uniform_block(uint32_t slot) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    if (s_gfx.bound_blocks[slot].buffer == 0) {
+    if (s_gfx.bound_blocks[slot].size == 0) {
         return NT_GFX_RESULT_CACHE;
     }
     /* The unbind is logical: GL rejects an empty range, and the draw check reads the mirror. */

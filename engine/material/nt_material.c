@@ -133,12 +133,6 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
 
 void nt_material_destroy(nt_material_t mat) {
     NT_ASSERT(s_mat.initialized); /* destroy before init */
-    if (mat.id == 0) {
-        return;
-    }
-    if (!nt_pool_valid(&s_mat.pool, mat.id)) {
-        return; /* a stale handle: already destroyed */
-    }
     nt_pool_free(&s_mat.pool, mat.id);
 }
 

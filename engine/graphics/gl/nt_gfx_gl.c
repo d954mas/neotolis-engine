@@ -1737,12 +1737,6 @@ static void forget_deleted_buffer(GLuint buf) {
     if (s_gl_cache.array_buffer == buf) {
         s_gl_cache.array_buffer = 0;
     }
-    /* A recycled name must not match a range GL already dropped. */
-    for (uint32_t i = 0; i < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; i++) {
-        if (s_gl_cache.uniform_ranges[i].buffer == buf) {
-            s_gl_cache.uniform_ranges[i].buffer = 0;
-        }
-    }
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites

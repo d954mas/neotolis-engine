@@ -145,9 +145,9 @@ A mirror lives exactly as long as the contract keeps its state:
 
 `nt_gfx_apply_texture_bindings` validates the whole set on every call (a WebGPU
 backend bakes sets instead) and records a unit bind only when that unit's
-texture or sampler changed in the pass; a set that changes no unit ends `CACHE`. A frame block compares
-its bytes with the range bound to its slot in the pass (the staged bytes stay
-unchanged until the next `begin_frame`).
+texture or sampler changed in the pass; a set that changes no unit ends `CACHE`. Bytes equal to
+a slot's last staged block of the frame bind that staged range again without a copy
+(`CACHE` when the pass already holds it).
 Uniform-block slots are below `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS` (9: the three
 reserved names and six game blocks); a bind at that slot or above asserts.
 
@@ -156,9 +156,7 @@ recorded, `begin_pass` discards the pass-scoped mirrors, and the frame rule keep
 every recorded object alive until `nt_gfx_end_frame`. An invalid or stale
 vertex-input handle asserts: owners revalidate cached handles and recreate them
 after a loss. An invalid pipeline handle clears its mirror (the unbind); other
-invalid binds leave their mirrors unchanged. An equal uniform block (same bytes, same
-slot) is dropped by
-the front-end. The GL backend keeps caches for
+invalid binds leave their mirrors unchanged. The GL backend keeps caches for
 physical GL state the front-end does not name: the program and VAO behind
 different pipelines and vertex inputs, the fixed-function difference between
 pipelines, the texture and sampler halves of a unit across passes, the
@@ -1097,9 +1095,7 @@ the count followed by each name, a returned value (`glCreate*`, `glGetError`,
 locations, status) follows the arguments, and indexed offsets are byte offsets.
 Output pointers are presence bits; their written values are not recorded. Readback, timer-query and debug-group calls are
 issued calls too and are recorded like any other.
-Float arguments occupy `backend.values` in float argument order. Matrix and vec4
-calls use `uniform` with the location in `name`, float count in `count`, and
-copied values. `backend.bytes` is actual CPU upload payload, zero for NULL storage.
+Float arguments occupy `backend.values` in float argument order. `backend.bytes` is actual CPU upload payload, zero for NULL storage.
 No event borrows upload memory, shader source or caller labels.
 
 Resource `DEFINITION/STATE` records with `object_kind=NONE` use `detail` as the

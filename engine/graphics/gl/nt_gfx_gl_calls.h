@@ -138,8 +138,6 @@ static inline void nt_gl_put_callback(nt_gl_callback_t callback) { nt_gl_put_uns
 #define NT_GL_EACH_8(a, ...) NT_GL_PUT_(a), NT_GL_EACH_7(__VA_ARGS__)
 #define NT_GL_EACH_9(a, ...) NT_GL_PUT_(a), NT_GL_EACH_8(__VA_ARGS__)
 #define NT_GL_EACH_10(a, ...) NT_GL_PUT_(a), NT_GL_EACH_9(__VA_ARGS__)
-#define NT_GL_LAST_3(a, b, c) c
-#define NT_GL_LAST_4(a, b, c, d) d
 
 #define NT_GL_OPEN_(call) (NT_GL_COUNT_(call), nt_gfx_capture_open_call(call))
 #define NT_GL_RECORDING_() (g_nt_gfx_capture.call != NULL)
