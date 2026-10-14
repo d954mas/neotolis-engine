@@ -1386,8 +1386,11 @@ static bool nt_gfx_gl_reflect_samplers(GLuint program, nt_gfx_gl_program_t *rec)
         /* Block members are fed by their buffer, not by location writes. Emscripten
          * hands out a location for any active name, so the block index decides. */
         const GLuint index = (GLuint)ui;
-        GLint block_index = -1;
+        GLint block_index = -2; /* a lost context writes nothing */
         NT_GL(glGetActiveUniformsiv, program, 1, &index, GL_UNIFORM_BLOCK_INDEX, &block_index);
+        if (block_index == -2) {
+            return false;
+        }
         if (block_index != -1) {
             /* A C struct of float/int32_t/uint32_t arrays matches only these std140 members byte for byte. */
             NT_ASSERT((utype == GL_FLOAT_VEC4 || utype == GL_INT_VEC4 || utype == GL_UNSIGNED_INT_VEC4 || utype == GL_FLOAT_MAT4) && "uniform block member is not vec4, ivec4, uvec4 or mat4");
@@ -1400,6 +1403,9 @@ static bool nt_gfx_gl_reflect_samplers(GLuint program, nt_gfx_gl_program_t *rec)
             NT_GL(glGetActiveUniformsiv, program, 1, &index, GL_UNIFORM_ARRAY_STRIDE, &array_stride);
             NT_GL(glGetActiveUniformsiv, program, 1, &index, GL_UNIFORM_MATRIX_STRIDE, &matrix_stride);
             NT_GL(glGetActiveUniformsiv, program, 1, &index, GL_UNIFORM_IS_ROW_MAJOR, &row_major);
+            if (row_major == -1) {
+                return false; /* the context was lost after the block index */
+            }
             NT_ASSERT(row_major == 0 && "uniform block member: row_major matrix -- the C side is column-major");
             NT_ASSERT(offset >= 0 && offset % 16 == 0 && (usize == 1 || array_stride == (mat4 ? 64 : 16)) && (!mat4 || matrix_stride == 16) &&
                       "uniform block member: not a std140 layout -- declare the block layout(std140)");

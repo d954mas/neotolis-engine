@@ -13,8 +13,7 @@
 typedef struct {
     nt_material_info_t info; /* the public, read-only view */
     nt_resource_t tex_resources[NT_MATERIAL_MAX_TEXTURES];
-    uint32_t tex_name_hashes[NT_MATERIAL_MAX_TEXTURES];
-    nt_sampler_t tex_samplers[NT_MATERIAL_MAX_TEXTURES];
+    nt_gfx_texture_binding_t textures[NT_MATERIAL_MAX_TEXTURES]; /* name and sampler; apply resolves the texture */
     uint8_t tex_count;
     uint16_t params_size;
     uint8_t params[NT_MATERIAL_MAX_PARAM_BYTES];
@@ -90,11 +89,10 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
         /* A slot with no uniform name is a declaration nothing can bind. */
         NT_ASSERT(desc->textures[i].name != NULL && "material texture slot needs a sampler uniform name");
         rec->tex_resources[i] = desc->textures[i].resource;
-        rec->tex_name_hashes[i] = nt_hash32_str(desc->textures[i].name).value;
-        rec->tex_samplers[i] = desc->textures[i].sampler;
+        rec->textures[i] = (nt_gfx_texture_binding_t){.name = nt_hash32_str(desc->textures[i].name), .sampler = desc->textures[i].sampler};
         for (uint8_t j = 0; j < i; j++) {
             /* Two slots on one sampler name would fight over its unit at every draw. */
-            NT_ASSERT(rec->tex_name_hashes[j] != rec->tex_name_hashes[i] && "two material texture slots name the same sampler uniform");
+            NT_ASSERT(rec->textures[j].name.value != rec->textures[i].name.value && "two material texture slots name the same sampler uniform");
         }
     }
 
@@ -146,7 +144,7 @@ bool nt_material_valid(nt_material_t mat) {
 /* Returns the record of a valid handle, or NULL */
 static nt_material_record_t *get_record(nt_material_t mat) {
     NT_ASSERT(s_mat.initialized && "material module not initialized");
-    if (mat.id == 0 || !nt_pool_valid(&s_mat.pool, mat.id)) {
+    if (!nt_pool_valid(&s_mat.pool, mat.id)) {
         return NULL;
     }
     return &s_mat.slots[nt_pool_slot_index(mat.id)];
@@ -184,12 +182,9 @@ void nt_material_apply(nt_material_t mat, const nt_gfx_texture_binding_t *draw_t
         nt_gfx_unbind_uniform_block(NT_GFX_SLOT_MATERIAL);
     }
     nt_gfx_texture_binding_t bindings[NT_GFX_MAX_TEXTURE_SLOTS];
+    memcpy(bindings, rec->textures, rec->tex_count * sizeof(bindings[0]));
     for (uint8_t t = 0; t < rec->tex_count; t++) {
-        bindings[t] = (nt_gfx_texture_binding_t){
-            .name = {.value = rec->tex_name_hashes[t]},
-            .texture = {.id = nt_resource_get(rec->tex_resources[t])},
-            .sampler = rec->tex_samplers[t],
-        };
+        bindings[t].texture.id = nt_resource_get(rec->tex_resources[t]);
     }
     for (uint8_t t = 0; t < count; t++) {
         bindings[rec->tex_count + t] = draw_textures[t];

@@ -3625,6 +3625,39 @@ void test_uniform_block_uploads_the_frame_bytes_to_its_range(void) {
     nt_gfx_begin_frame();
 }
 
+/* begin_frame forgets the staged blocks: equal bytes in the next frame copy and upload again. */
+void test_uniform_block_copies_equal_bytes_again_in_a_new_frame(void) {
+    link_stream_test_program();
+    begin_stream_test_pass();
+    nt_gfx_bind_uniform_block(3, s_block_a, sizeof(s_block_a));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    begin_stream_test_pass();
+    EXPECT_RECORDED(nt_gfx_bind_uniform_block(3, s_block_a, sizeof(s_block_a)));
+    TEST_ASSERT_EQUAL_UINT32(sizeof(s_block_a), g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].used);
+    nt_gfx_draw(0, 3);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_MEMORY(s_block_a, nt_gfx_fake_last_update_buffer_data(), sizeof(s_block_a));
+    nt_gfx_begin_frame();
+}
+
+/* A new program is checked again before its first draw, even with the blocks unchanged. */
+void test_draw_checks_the_blocks_again_after_a_program_change(void) {
+    link_stream_test_program();
+    nt_gfx_fake_set_block(NT_GFX_SLOT_MATERIAL, 32);
+    const nt_program_t reads_material = make_sampler_program(NULL, 0);
+    nt_gfx_fake_set_block(NT_GFX_SLOT_MATERIAL, 0);
+    const nt_pipeline_t second = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = reads_material});
+    begin_stream_test_pass();
+    nt_gfx_draw(0, 3);
+    nt_gfx_bind_pipeline(second);
+    EXPECT_ASSERT(nt_gfx_draw(3, 3));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "uniform block the program uses"));
+    nt_gfx_end_pass();
+}
+
 /* A block size outside the std140 grain cannot match a C struct of 16-byte members. */
 void test_uniform_block_size_is_a_multiple_of_16(void) {
     link_stream_test_program();
@@ -4163,6 +4196,8 @@ int main(void) {
     RUN_TEST(test_uniform_block_rebinds_the_frame_copy_in_a_new_pass);
     RUN_TEST(test_uniform_block_dedup_compares_the_whole_last_binding);
     RUN_TEST(test_uniform_block_uploads_the_frame_bytes_to_its_range);
+    RUN_TEST(test_uniform_block_copies_equal_bytes_again_in_a_new_frame);
+    RUN_TEST(test_draw_checks_the_blocks_again_after_a_program_change);
     RUN_TEST(test_uniform_block_size_is_a_multiple_of_16);
     RUN_TEST(test_uniform_block_unbinds_logically);
     RUN_TEST(test_draw_asserts_an_unbound_or_short_block);

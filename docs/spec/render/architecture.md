@@ -137,8 +137,8 @@ front-end mirror; an equal value ends `NT_GFX_RESULT_CACHE` and records nothing.
 A mirror lives exactly as long as the contract keeps its state:
 
 - pipeline, vertex input with its instance layout, buffer and offset, the
-  texture set (per unit: texture and sampler), the uniform-block slots
-  (buffer, offset and size) and the viewport live for one pass: `begin_pass`
+  texture set (per unit: texture and sampler), the bound uniform-block slots
+  and the viewport live for one pass: `begin_pass`
   discards them, so the first bind of each in a pass records;
 - the scissor rectangle carries over passes and frames; a context loss clears it;
 - scissor enable is reset to off by `begin_pass`.
@@ -724,7 +724,7 @@ and what carries over is in
 and supplies `clear_color`/`clear_depth`; unselected values are ignored.
 It clears the current target under the current scissor, or the entire attachment
 when scissor is disabled. It does not use the viewport as a clear rectangle.
-It preserves the pipeline, vertex input, texture set, uniforms, viewport and
+It preserves the pipeline, vertex input, texture set, uniform blocks, viewport and
 scissor. Depth clear temporarily enables depth writes and restores the bound
 pipeline's mask before returning. Selecting neither attachment does no GPU work;
 a lost context skips the operation. Stencil has no clear API.
@@ -755,7 +755,7 @@ program and is discarded when that program changes. Pipeline and vertex-input bi
 instance-buffer re-pointing, uniform block binds and draws outside a pass assert.
 Destroying a live object from the first pass until `nt_gfx_end_frame` asserts
 (the frame rule, see Draw-phase command stream).
-Physical texture/sampler GL bindings and uniform-block binds remain context
+Physical texture/sampler GL bindings and GL uniform-block ranges remain context
 state. The backend deduplicates texture/sampler binds and uniform-block ranges across
 passes: a recorded block bind whose buffer, offset and size the slot already holds issues
 no `glBindBufferRange`. A depth clear forces the depth
@@ -1161,7 +1161,7 @@ are frontend records: `object_kind` and `object` name the vertex input or the
 instance layout. Vertex-input creation copies each per-vertex attribute with its
 layout and buffer; instance attributes belong to the instance layout. The initial SCISSOR record holds the
 carried-over rectangle; it is `UNKNOWN` before the first set and after a
-context loss. Uniform-block bindings are not recorded: each block lives one frame. A bind inside the capture that
+context loss. Uniform-block bindings are not recorded: a pass binds every block it reads. A bind inside the capture that
 ends `CACHE` matches this state or one set earlier in the frame. Inherited
 layouts unavailable in existing CPU state are explicitly unknown. Capture
 never adds a GL-state mirror of its own or queries GL to reconstruct state.
@@ -1253,8 +1253,7 @@ sizes the used vertex streams and `stream_capacity` for its busiest frame;
 `nt_shape_renderer_init` asserts a nonzero general-stream budget. The view
 projection, eye, pixel scale and line width are one std140 `Draw` block that every
 program of a flush binds through `nt_gfx_bind_uniform_block`: equal settings copy
-nothing, a change allocates a block (up to 256 B of padding), and
-`nt_shape_renderer_init` asserts a nonzero uniform budget too.
+nothing and a change allocates a block (up to 256 B of padding).
 
 Every flush draws filled instanced shapes by type, then triangles,
 then wire templates by type, connected segments and independent lines. Within

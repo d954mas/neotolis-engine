@@ -136,7 +136,7 @@ typedef struct {
     uint32_t sampler;
 } nt_gfx_unit_binding_t;
 
-/* A range of the uniform frame stream; size 0 = nothing bound. */
+/* A staged range of the uniform frame stream. */
 typedef struct {
     uint32_t offset;
     uint32_t size;
@@ -231,9 +231,9 @@ static struct {
     /* Binding mirrors: an equal bind records nothing. Each lives as long as the
      * contract keeps its state. */
     nt_gfx_unit_binding_t bound_units[NT_GFX_MAX_TEXTURE_SLOTS];
-    nt_gfx_block_binding_t bound_blocks[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS];
     nt_gfx_block_binding_t staged_blocks[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS]; /* the last block each slot staged in the frame */
-    bool blocks_checked;                                                   /* the bound program's blocks were checked against bound_blocks since the last change */
+    uint32_t bound_blocks;                                                 /* slot bits bound in this pass, each to its staged block */
+    bool blocks_checked;                                                   /* the bound program's blocks were checked since the last change */
     int scissor_rect[4];                                                   /* GL bottom-left x,y,w,h; carries over passes; w = -1: unknown */
     int viewport_rect[4];                                                  /* GL bottom-left x,y,w,h; w = -1: unknown */
 } s_gfx;
@@ -835,7 +835,7 @@ static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
     s_gfx.bound_instance_buffer = 0;
     s_gfx.bound_index_type = NT_INDEX_NONE;
     memset(s_gfx.bound_units, 0, sizeof(s_gfx.bound_units));
-    memset(s_gfx.bound_blocks, 0, sizeof(s_gfx.bound_blocks));
+    s_gfx.bound_blocks = 0;
     s_gfx.viewport_rect[2] = -1; /* the backend sets the whole target at execution */
     /* A lost frame records nothing but keeps the pass order, so its sequencing and the frame rule still assert. */
     if (g_nt_gfx.context_lost) {
@@ -2198,7 +2198,8 @@ static void assert_blocks_bound(void) {
     }
     const uint32_t *needed = nt_gfx_backend_program_block_sizes(nt_pool_slot_index(pipeline_program(nt_pool_slot_index(s_gfx.bound_pipeline))));
     for (uint32_t slot = 0; slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; slot++) {
-        NT_ASSERT(s_gfx.bound_blocks[slot].size >= needed[slot] && "draw: a uniform block the program uses is unbound or smaller than the block -- bind it in this pass");
+        const uint32_t bound_size = (s_gfx.bound_blocks >> slot) & 1U ? s_gfx.staged_blocks[slot].size : 0;
+        NT_ASSERT(bound_size >= needed[slot] && "draw: a uniform block the program uses is unbound or smaller than the block -- bind it in this pass");
     }
     s_gfx.blocks_checked = true;
 }
@@ -2322,14 +2323,14 @@ void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size) {
         memcpy(nt_gfx_frame_alloc(NT_GFX_FRAME_UNIFORM, size, g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment, &offset), data, size);
         s_gfx.staged_blocks[slot] = (nt_gfx_block_binding_t){offset, size};
     }
-    const bool equal = staged && s_gfx.bound_blocks[slot].offset == offset && s_gfx.bound_blocks[slot].size == size;
+    const bool equal = staged && ((s_gfx.bound_blocks >> slot) & 1U) != 0;
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, storage->buffer.id, event->data.binding.slot = slot; event->data.binding.offset = offset; event->data.binding.size = size);
     if (lost) {
         NT_GFX_END(NT_GFX_RESULT_CONTEXT_LOST);
         return;
     }
     if (!equal) {
-        s_gfx.bound_blocks[slot] = (nt_gfx_block_binding_t){offset, size};
+        s_gfx.bound_blocks |= 1U << slot;
         s_gfx.blocks_checked = false;
         nt_gfx_frame_bind_uniform_buffer(nt_pool_slot_index(storage->buffer.id), slot, offset, size);
     }
@@ -2342,11 +2343,11 @@ static nt_gfx_result_t unbind_uniform_block(uint32_t slot) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    if (s_gfx.bound_blocks[slot].size == 0) {
+    if (((s_gfx.bound_blocks >> slot) & 1U) == 0) {
         return NT_GFX_RESULT_CACHE;
     }
     /* The unbind is logical: GL rejects an empty range, and the draw check reads the mirror. */
-    s_gfx.bound_blocks[slot] = (nt_gfx_block_binding_t){0};
+    s_gfx.bound_blocks &= ~(1U << slot);
     s_gfx.blocks_checked = false;
     return NT_GFX_RESULT_ACCEPTED;
 }

@@ -911,8 +911,7 @@ static void drop_queues(void) {
 
 void nt_shape_renderer_init(void) {
     /* Every flush draws from frame storage, and triangle batches always from the general stream. */
-    NT_ASSERT(g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].capacity > 0 && g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].capacity > 0 &&
-              "shape renderer: set nt_gfx_desc_t.frame_capacity[NT_GFX_FRAME_VERTEX] and [NT_GFX_FRAME_UNIFORM]");
+    NT_ASSERT(g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].capacity > 0 && "shape renderer: set nt_gfx_desc_t.frame_capacity[NT_GFX_FRAME_VERTEX]");
     memset(&s_shape, 0, sizeof(s_shape));
     build_trig_lut();
     s_shape.draw.line_width[0] = 0.02F;

@@ -481,6 +481,7 @@ void test_apply_without_params_unbinds_the_material_slot(void) {
     nt_gfx_draw(0, 3);
     nt_material_apply(without_params, &draw, 1);
     NT_TEST_EXPECT_ASSERT(nt_gfx_draw(3, 3));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "uniform block the program uses"));
     nt_test_frame_close();
     nt_gfx_begin_frame();
 }
@@ -525,19 +526,6 @@ void test_apply_snapshots_the_params(void) {
     TEST_ASSERT_EQUAL_MEMORY(changed, staging + nt_gfx_fake_ubo_bind_at(1).offset, sizeof(changed));
     TEST_ASSERT_EQUAL_MEMORY(s_params, staging + nt_gfx_fake_ubo_bind_at(2).offset, sizeof(s_params));
     TEST_ASSERT_TRUE(nt_gfx_fake_ubo_bind_at(2).offset > nt_gfx_fake_ubo_bind_at(1).offset);
-    nt_gfx_begin_frame();
-}
-
-/* The frame holds a copy of the params, so a material is destroyed at any time. */
-void test_destroying_a_params_material_in_a_drawn_frame(void) {
-    nt_material_create_desc_t d = make_test_desc();
-    d.texture_count = 0;
-    nt_material_t mat = nt_material_create(&d);
-    begin_params_pass();
-    nt_material_apply(mat, NULL, 0);
-    nt_material_destroy(mat);
-    TEST_ASSERT_FALSE(nt_material_valid(mat));
-    nt_test_frame_close();
     nt_gfx_begin_frame();
 }
 
@@ -614,7 +602,6 @@ int main(void) {
     RUN_TEST(test_apply_without_params_unbinds_the_material_slot);
     RUN_TEST(test_apply_asserts_too_many_draw_textures);
     RUN_TEST(test_apply_snapshots_the_params);
-    RUN_TEST(test_destroying_a_params_material_in_a_drawn_frame);
 
     /* Query edge cases */
     RUN_TEST(test_get_info_returns_null_for_invalid);

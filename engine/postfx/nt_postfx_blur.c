@@ -196,7 +196,6 @@ static void make_gpu_resources(void) {
 
 void nt_postfx_blur_init(void) {
     NT_ASSERT(!s_blur.initialized && "nt_postfx_blur_init: already initialized");
-    NT_ASSERT(g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].capacity > 0 && "postfx blur: set nt_gfx_desc_t.frame_capacity[NT_GFX_FRAME_UNIFORM]");
     memset(&s_blur, 0, sizeof(s_blur));
     s_u_source = nt_hash32_str("u_source");
     make_gpu_resources();
