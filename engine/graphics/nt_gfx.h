@@ -998,9 +998,9 @@ bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint
  * spec). A draw asserts that each block its program uses is bound in the pass at its full size. */
 
 /* Frame data: copies size bytes (a multiple of 16) into the uniform frame stream and binds that
- * range to slot. Bytes equal to the range already bound to slot in this pass end CACHE with no
- * copy, so an owner rebinds unchanged data freely. Inside a pass; the bytes live for this frame.
- * Budget frame_capacity[NT_GFX_FRAME_UNIFORM] at size + 256 per changed bind (offset alignment <= 256). */
+ * range to slot. Bytes equal to the slot's last staged block of the frame copy nothing (CACHE in
+ * its pass, a rebind in a later one). Inside a pass; the bytes live for this frame. Budget
+ * frame_capacity[NT_GFX_FRAME_UNIFORM] at size + 256 per slot and distinct value of the frame. */
 void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size);
 /* Binds a whole NT_BUFFER_UNIFORM buffer to slot; an equal handle ends CACHE. NT_BUFFER_INVALID
  * unbinds the slot without a backend call, so a draw whose program uses the slot asserts.

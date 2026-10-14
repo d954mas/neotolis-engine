@@ -232,6 +232,11 @@ static struct {
      * contract keeps its state. */
     nt_gfx_unit_binding_t bound_units[NT_GFX_MAX_TEXTURE_SLOTS];
     nt_gfx_block_binding_t bound_blocks[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS];
+    /* The last block each slot staged in the frame; begin_frame clears it. */
+    struct {
+        uint32_t offset;
+        uint32_t size;
+    } staged_blocks[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS];
     bool blocks_checked;  /* the bound program's blocks were checked against bound_blocks since the last change */
     int scissor_rect[4];  /* GL bottom-left x,y,w,h; carries over passes; w = -1: unknown */
     int viewport_rect[4]; /* GL bottom-left x,y,w,h; w = -1: unknown */
@@ -710,6 +715,7 @@ void nt_gfx_begin_frame(void) {
     s_gfx.render_state = NT_GFX_STATE_IDLE;
     age_stage_buffer();
     nt_gfx_frame_begin();
+    memset(s_gfx.staged_blocks, 0, sizeof(s_gfx.staged_blocks));
     g_nt_gfx.last_frame = g_nt_gfx.counters;
 #if NT_GFX_CAPTURE_ENABLED
     if (g_nt_gfx_capture.recording) {
@@ -2319,14 +2325,18 @@ void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size) {
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_uniform_block: must be called inside a pass");
     const bool lost = g_nt_gfx.context_lost;
     const nt_gfx_frame_storage_t *storage = &g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM];
-    const nt_gfx_block_binding_t *bound = &s_gfx.bound_blocks[slot];
-    /* Staged bytes stay unchanged from their allocation until the next begin_frame, and the mirror is pass-scoped. */
-    const bool equal = !lost && bound->buffer == storage->buffer.id && bound->size == size && memcmp(storage->staging + bound->offset, data, size) == 0;
-    uint32_t offset = bound->offset;
-    if (!lost && !equal) {
+    /* Staged bytes stay unchanged until the next begin_frame: equal bytes of the frame are copied once,
+     * and bound again only in a new pass (the mirror is pass-scoped). */
+    uint32_t offset = s_gfx.staged_blocks[slot].offset;
+    const bool staged = !lost && s_gfx.staged_blocks[slot].size == size && memcmp(storage->staging + offset, data, size) == 0;
+    if (!lost && !staged) {
         /* A disabled stream (zero capacity) reaches the allocator, which stops on the overflow. */
         memcpy(nt_gfx_frame_alloc(NT_GFX_FRAME_UNIFORM, size, g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment, &offset), data, size);
+        s_gfx.staged_blocks[slot].offset = offset;
+        s_gfx.staged_blocks[slot].size = size;
     }
+    const nt_gfx_block_binding_t *bound = &s_gfx.bound_blocks[slot];
+    const bool equal = staged && bound->buffer == storage->buffer.id && bound->offset == offset && bound->size == size;
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, storage->buffer.id, event->data.binding.slot = slot; event->data.binding.offset = offset; event->data.binding.size = size);
     if (lost) {
         NT_GFX_END(NT_GFX_RESULT_CONTEXT_LOST);

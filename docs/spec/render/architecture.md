@@ -1258,9 +1258,9 @@ the frame until `nt_gfx_end_frame`, and so does the command stream, so a host
 sizes the used vertex streams and `stream_capacity` for its busiest frame;
 `nt_shape_renderer_init` asserts a nonzero general-stream budget. The view
 projection, eye, pixel scale and line width are one std140 `Draw` block that every
-program of a flush binds through `nt_gfx_bind_uniform_block`: a bind equal to the
-slot's binding in the pass ends `CACHE`, any other allocates a block (up to 256 B
-of padding), and `nt_shape_renderer_init` asserts a nonzero uniform budget too.
+program of a flush binds through `nt_gfx_bind_uniform_block`: equal settings copy
+nothing, a change allocates a block (up to 256 B of padding), and
+`nt_shape_renderer_init` asserts a nonzero uniform budget too.
 
 Every flush draws filled instanced shapes by type, then triangles,
 then wire templates by type, connected segments and independent lines. Within

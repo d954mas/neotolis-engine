@@ -212,9 +212,11 @@ per-draw data: a shape flush binds its own `Draw` block, so a game binds its
 `nt_gfx_bind_uniform_block(slot, data, size)` binds frame data: it copies `size`
 bytes into the uniform frame stream at the next multiple of
 `gpu_caps.uniform_buffer_offset_alignment` (re-probed at context restore) and
-binds that range to `slot`. Bytes equal to the range already bound to `slot` in
-this pass end `CACHE` with no copy, so an owner rebinds unchanged data freely.
-The bytes live for one frame. A slot at or above the limit, NULL `data`, or a
+binds that range to `slot`. Bytes equal to the last block `slot` staged in the
+frame copy nothing: in the pass that bound them the call ends `CACHE`, in a later
+pass it binds the staged range again. An owner rebinds unchanged data freely, and
+the stream holds one block per slot and distinct value of the frame. The bytes
+live for one frame. A slot at or above the limit, NULL `data`, or a
 `size` that is zero or not a multiple of 16 asserts; an exhausted stream stops
 as a frame storage overflow. On a lost context the call allocates nothing and
 ends `CONTEXT_LOST`.

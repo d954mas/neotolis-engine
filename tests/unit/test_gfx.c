@@ -3557,11 +3557,11 @@ void test_equal_binds_record_nothing(void) {
     nt_gfx_end_pass();
 }
 
-/* Bytes equal to the slot's binding in this pass end CACHE without a copy; other bytes, another
- * slot or a new pass copy again. */
+/* Bytes equal to the slot's binding in this pass end CACHE without a copy; other bytes or another
+ * slot copy again. */
 void test_uniform_block_dedups_equal_bytes_within_a_pass(void) {
     link_stream_test_program();
-    const nt_pipeline_t pipeline = begin_stream_test_pass();
+    begin_stream_test_pass();
     EXPECT_RECORDED(nt_gfx_bind_uniform_block(3, s_block_a, sizeof(s_block_a)));
     const uint32_t used = g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].used;
     EXPECT_NOT_RECORDED(nt_gfx_bind_uniform_block(3, s_block_a, sizeof(s_block_a)));
@@ -3570,9 +3570,23 @@ void test_uniform_block_dedups_equal_bytes_within_a_pass(void) {
     EXPECT_RECORDED(nt_gfx_bind_uniform_block(3, s_block_a, 32)); /* a shorter range is another binding */
     EXPECT_RECORDED(nt_gfx_bind_uniform_block(3, s_block_b, 32));
     nt_gfx_end_pass();
+}
+
+/* A new pass binds the frame's staged copy of equal bytes again without copying; a slot keeps one
+ * staged block, so other bytes copy. */
+void test_uniform_block_rebinds_the_frame_copy_in_a_new_pass(void) {
+    link_stream_test_program();
+    const nt_pipeline_t pipeline = begin_stream_test_pass();
+    EXPECT_RECORDED(nt_gfx_bind_uniform_block(3, s_block_b, 32));
+    nt_gfx_end_pass();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
+    const uint32_t staged = g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].used;
     EXPECT_RECORDED(nt_gfx_bind_uniform_block(3, s_block_b, 32)); /* every pass binds its blocks */
+    TEST_ASSERT_EQUAL_UINT32(staged, g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].used);
+    EXPECT_NOT_RECORDED(nt_gfx_bind_uniform_block(3, s_block_b, 32));
+    EXPECT_RECORDED(nt_gfx_bind_uniform_block(3, s_block_a, 32));
+    TEST_ASSERT_TRUE(g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].used > staged);
     nt_gfx_end_pass();
 }
 
@@ -4160,6 +4174,7 @@ int main(void) {
     RUN_TEST(test_context_loss_clears_carried_over_bind_mirrors);
     RUN_TEST(test_restored_uniform_blocks_bind_again);
     RUN_TEST(test_uniform_block_dedups_equal_bytes_within_a_pass);
+    RUN_TEST(test_uniform_block_rebinds_the_frame_copy_in_a_new_pass);
     RUN_TEST(test_uniform_block_dedup_compares_the_whole_last_binding);
     RUN_TEST(test_uniform_block_uploads_the_frame_bytes_to_its_range);
     RUN_TEST(test_uniform_block_and_buffer_sizes_are_multiples_of_16);
