@@ -122,15 +122,15 @@ static uint32_t s_fake_last_depth_texture_backend;
 static uint32_t s_fake_next_texture_backend;
 static bool s_fake_context_lost;
 static bool s_fake_loss_pending; /* the web lost-event latch until begin_frame takes it */
-static uint8_t s_fake_fail_texture_creates;
 static uint32_t s_fake_texture_destroy_count;
 static uint32_t s_fake_last_destroyed_texture;
-static uint8_t s_fake_fail_buffer_creates;
+static bool s_fake_fail_next_buffer_create;
+static uint8_t s_fake_lose_buffer_creates;
 static bool s_fake_fail_next_program_link;
 static bool s_fake_hold_program_links;
-static bool s_fake_lose_context_on_program_create;
 static bool s_fake_lose_context_on_program_link;
 static bool s_fake_fail_next_sampler_create;
+static bool s_fake_lose_context_on_sampler_create;
 static bool s_fake_fail_next_backend_restore_lost;
 static bool s_fake_lose_context_during_next_restore;
 static bool s_fake_fail_next_render_target_create;
@@ -144,9 +144,8 @@ static uint32_t s_fake_last_instance_layout;       /* recorder: instance layout 
 static nt_blend_state_t s_fake_last_pipeline_blend;
 static uint32_t s_fake_vertex_input_create_count;
 static uint32_t s_fake_bind_vertex_input_count;
-static uint32_t s_fake_last_bound_vertex_input; /* recorder: last handle bind_vertex_input received */
-static uint32_t s_fake_last_uniform_program;    /* recorder: last program a uniform write named */
-static bool s_fake_fail_next_vertex_input_create;
+static uint32_t s_fake_last_bound_vertex_input;            /* recorder: last handle bind_vertex_input received */
+static uint32_t s_fake_last_uniform_program;               /* recorder: last program a uniform write named */
 static nt_vertex_layout_t s_fake_last_vertex_input_layout; /* recorder: per-vertex layout of the last VI create */
 
 uint32_t nt_gfx_fake_last_sampler(uint32_t slot) {
@@ -209,21 +208,15 @@ nt_buffer_desc_t nt_gfx_fake_last_buffer_desc(void) { return s_fake_last_buffer_
 uint32_t nt_gfx_fake_last_color_texture_backend(void) { return s_fake_last_color_texture_backend; }
 uint32_t nt_gfx_fake_last_depth_texture_backend(void) { return s_fake_last_depth_texture_backend; }
 void nt_gfx_fake_fail_next_render_target_create(void) { s_fake_fail_next_render_target_create = true; }
-void nt_gfx_fake_fail_texture_creates(uint8_t mask) {
-    NT_ASSERT(mask <= 3);
-    s_fake_fail_texture_creates = mask;
-}
 uint32_t nt_gfx_fake_texture_destroy_count(void) { return s_fake_texture_destroy_count; }
 uint32_t nt_gfx_fake_last_destroyed_texture(void) { return s_fake_last_destroyed_texture; }
-void nt_gfx_fake_fail_buffer_creates(uint8_t mask) {
-    NT_ASSERT(mask <= 3);
-    s_fake_fail_buffer_creates = mask;
-}
+void nt_gfx_fake_fail_next_buffer_create(void) { s_fake_fail_next_buffer_create = true; }
+void nt_gfx_fake_lose_context_on_buffer_creates(uint8_t mask) { s_fake_lose_buffer_creates = mask; }
 void nt_gfx_fake_fail_next_program_link(void) { s_fake_fail_next_program_link = true; }
 void nt_gfx_fake_hold_program_links(bool hold) { s_fake_hold_program_links = hold; }
-void nt_gfx_fake_lose_context_on_program_create(void) { s_fake_lose_context_on_program_create = true; }
 void nt_gfx_fake_lose_context_on_program_link(void) { s_fake_lose_context_on_program_link = true; }
 void nt_gfx_fake_fail_next_sampler_create(void) { s_fake_fail_next_sampler_create = true; }
+void nt_gfx_fake_lose_context_on_sampler_create(void) { s_fake_lose_context_on_sampler_create = true; }
 void nt_gfx_fake_fail_next_backend_restore_lost(void) { s_fake_fail_next_backend_restore_lost = true; }
 void nt_gfx_fake_lose_context_during_next_restore(void) { s_fake_lose_context_during_next_restore = true; }
 void nt_gfx_fake_set_context_lost(bool lost) {
@@ -242,7 +235,6 @@ uint32_t nt_gfx_fake_vertex_input_create_count(void) { return s_fake_vertex_inpu
 uint32_t nt_gfx_fake_bind_vertex_input_count(void) { return s_fake_bind_vertex_input_count; }
 uint32_t nt_gfx_fake_last_bound_vertex_input(void) { return s_fake_last_bound_vertex_input; }
 uint32_t nt_gfx_fake_last_uniform_program(void) { return s_fake_last_uniform_program; }
-void nt_gfx_fake_fail_next_vertex_input_create(void) { s_fake_fail_next_vertex_input_create = true; }
 nt_vertex_layout_t nt_gfx_fake_last_vertex_input_layout(void) { return s_fake_last_vertex_input_layout; }
 
 void nt_gfx_fake_reset(void) {
@@ -291,19 +283,18 @@ void nt_gfx_fake_reset(void) {
     s_fake_bind_vertex_input_count = 0;
     s_fake_last_bound_vertex_input = 0;
     s_fake_last_uniform_program = 0;
-    s_fake_fail_next_vertex_input_create = false;
     s_fake_last_vertex_input_layout = (nt_vertex_layout_t){0};
     s_fake_context_lost = false;
     s_fake_loss_pending = false;
-    s_fake_fail_texture_creates = 0;
     s_fake_texture_destroy_count = 0;
     s_fake_last_destroyed_texture = 0;
-    s_fake_fail_buffer_creates = 0;
+    s_fake_fail_next_buffer_create = false;
+    s_fake_lose_buffer_creates = 0;
     s_fake_fail_next_program_link = false;
     s_fake_hold_program_links = false;
-    s_fake_lose_context_on_program_create = false;
     s_fake_lose_context_on_program_link = false;
     s_fake_fail_next_sampler_create = false;
+    s_fake_lose_context_on_sampler_create = false;
     s_fake_fail_next_backend_restore_lost = false;
 #if NT_GFX_CAPTURE_ENABLED
     s_fake_backend_snapshot_count = 0;
@@ -451,12 +442,6 @@ void nt_gfx_backend_destroy_shader(uint32_t backend_handle) { (void)backend_hand
 
 uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend) {
     s_fake_program_create_count++;
-    if (s_fake_lose_context_on_program_create) {
-        s_fake_lose_context_on_program_create = false;
-        s_fake_context_lost = true;
-        s_fake_loss_pending = true;
-        return 0;
-    }
     if (s_fake_context_lost) {
         return 0; /* GL creates no name on a lost context */
     }
@@ -513,10 +498,6 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
     if (s_fake_context_lost) {
         return 0; /* GL creates no name on a lost context */
     }
-    if (s_fake_fail_next_vertex_input_create) {
-        s_fake_fail_next_vertex_input_create = false;
-        return 0;
-    }
     return slot;
 }
 
@@ -541,6 +522,12 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t layout_s
 
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
     s_fake_last_buffer_desc = *desc;
+    const bool lose = (s_fake_lose_buffer_creates & 1U) != 0;
+    s_fake_lose_buffer_creates >>= 1U;
+    if (lose) {
+        s_fake_context_lost = true;
+        s_fake_loss_pending = true;
+    }
     if (s_fake_context_lost) {
         return 0; /* GL creates no name on a lost context */
     }
@@ -553,9 +540,8 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
             s_fake_last_vertex_buffer_hash = h;
         }
     }
-    bool fail = (s_fake_fail_buffer_creates & 1U) != 0;
-    s_fake_fail_buffer_creates >>= 1U;
-    if (fail) {
+    if (s_fake_fail_next_buffer_create) {
+        s_fake_fail_next_buffer_create = false;
         return 0;
     }
     /* Distinct names, so tests can tell which buffer a vertex input reads; never reset, as frame
@@ -571,13 +557,6 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
     s_fake_texture_create_count++;
     if (s_fake_context_lost) {
         return 0; /* glGenTextures returns no name on a lost context */
-    }
-    /* One bit per create, consumed in order: mask 1 fails the first, 2 the
-     * second, 3 both. */
-    bool fail = (s_fake_fail_texture_creates & 1U) != 0;
-    s_fake_fail_texture_creates >>= 1U;
-    if (fail) {
-        return 0;
     }
     return ++s_fake_next_texture_backend;
 }
@@ -643,6 +622,11 @@ bool nt_gfx_backend_is_gpu_timing_supported(void) { return false; }
 
 uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
     (void)desc;
+    if (s_fake_lose_context_on_sampler_create) {
+        s_fake_lose_context_on_sampler_create = false;
+        s_fake_context_lost = true;
+        s_fake_loss_pending = true;
+    }
     if (s_fake_context_lost) {
         return 0; /* GL creates no name on a lost context */
     }

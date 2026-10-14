@@ -174,6 +174,16 @@ static void set_caps(bool bc7, bool astc, bool etc2) {
     g_nt_gfx.gpu_caps.has_etc2 = etc2;
 }
 
+/* The browser gives the context back; the next begin_frame takes the loss and restores, probing
+ * the caps again, so the test sets its own back. */
+static void restore_lost_context(bool bc7, bool astc, bool etc2) {
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    set_caps(bc7, astc, etc2);
+}
+
 /* Fills the texture pool to capacity and empties it again. A slot leaked by a
  * rejected activation shows up as a pool-full assert on the last create. */
 static void expect_full_pool_available(void) {
@@ -459,44 +469,38 @@ void test_corrupted_payload_is_rejected_and_a_good_blob_still_activates(void) {
 
 // #region backend failures
 
-void test_backend_failure_leaves_no_texture_and_allows_a_retry(void) {
+void test_texture_loss_leaves_no_texture_and_allows_a_retry(void) {
     set_caps(true, false, false);
     basis_fixture_t alpha = fixture_encode(96, 64, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8);
     TEST_ASSERT_EQUAL_UINT8(7, alpha.mip_count);
 
     nt_gfx_fake_reset();
-    nt_gfx_fake_fail_texture_creates(1);
+    nt_gfx_fake_set_context_lost(true);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_texture(alpha.blob, alpha.size));
     /* A failed create never minted a name, so there is nothing to destroy. */
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_texture_create_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_texture_destroy_count());
     expect_transcoder_reusable(&alpha);
+    restore_lost_context(true, false, false);
     expect_full_pool_available();
 
-    nt_gfx_fake_fail_texture_creates(0);
     check_target(&alpha, first_admitted(ANY_CODEC, true, false, false, true));
     fixture_free(&alpha);
 }
 
-void test_sampler_failure_leaves_no_texture_and_allows_a_retry(void) {
+void test_sampler_loss_leaves_no_texture_and_allows_a_retry(void) {
     set_caps(true, false, false);
     basis_fixture_t alpha = fixture_encode(16, 8, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8);
     nt_gfx_fake_reset();
-    nt_gfx_fake_fail_next_sampler_create();
-    nt_assert_handler = test_assert_handler;
-    if (setjmp(s_assert_jmp) != 0) {
-        nt_assert_handler = NULL;
-        fixture_free(&alpha);
-        TEST_FAIL_MESSAGE("Sampler backend failure must reject activation without asserting");
-    }
+    nt_gfx_fake_lose_context_on_sampler_create();
     uint32_t handle = nt_gfx_activate_texture(alpha.blob, alpha.size);
-    nt_assert_handler = NULL;
     TEST_ASSERT_EQUAL_UINT32(0, handle);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_texture_create_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_texture_destroy_count());
     /* The attempt's own GL name, not handle 0 -- the storage really went back. */
     TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_destroyed_texture());
     expect_transcoder_reusable(&alpha);
+    restore_lost_context(true, false, false);
     expect_full_pool_available();
 
     check_target(&alpha, first_admitted(ANY_CODEC, true, false, false, true));
@@ -614,10 +618,10 @@ void test_staging_is_shared_grown_and_evicted(void) {
     TEST_ASSERT_NULL(nt_gfx_test_stage_ptr());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_stage_size());
 
-    /* A failed activation leaves staging behind, and idling still evicts it. */
-    nt_gfx_fake_fail_texture_creates(1);
+    /* An activation a loss failed leaves staging behind, and idling still evicts it. */
+    nt_gfx_fake_set_context_lost(true);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_texture(small.blob, small.size));
-    nt_gfx_fake_fail_texture_creates(0);
+    nt_gfx_fake_set_context_lost(false);
     TEST_ASSERT_NOT_NULL(nt_gfx_test_stage_ptr());
     idle_frames(61);
     TEST_ASSERT_NULL(nt_gfx_test_stage_ptr());
@@ -662,8 +666,8 @@ int main(void) {
     RUN_TEST(test_asymmetric_blob_activates_with_a_full_chain);
     RUN_TEST(test_rgba8_fallback_rejects_sub_updates);
     RUN_TEST(test_header_boundaries_reject_without_touching_the_pool);
-    RUN_TEST(test_backend_failure_leaves_no_texture_and_allows_a_retry);
-    RUN_TEST(test_sampler_failure_leaves_no_texture_and_allows_a_retry);
+    RUN_TEST(test_texture_loss_leaves_no_texture_and_allows_a_retry);
+    RUN_TEST(test_sampler_loss_leaves_no_texture_and_allows_a_retry);
     RUN_TEST(test_reactivation_after_context_restore_yields_the_same_storage);
     RUN_TEST(test_staging_is_shared_grown_and_evicted);
     RUN_TEST(test_shutdown_releases_a_live_staging_buffer);

@@ -313,22 +313,6 @@ static void test_a_retried_restore_reuses_the_frame_buffer_slots(void) {
     }
 }
 
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
-/* On a live context a frame buffer that cannot be made is a bug, not a loss. */
-static void test_a_failed_frame_buffer_creation_on_a_live_context_asserts(void) {
-    nt_gfx_fake_set_context_lost(true);
-    next_frame();
-    nt_gfx_fake_set_context_lost(false);
-    nt_gfx_fake_fail_buffer_creates(1);
-    nt_gfx_end_frame();
-    NT_TEST_EXPECT_ASSERT(nt_gfx_begin_frame());
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "frame storage buffer creation failed"));
-    nt_gfx_shutdown();
-    nt_gfx_fake_reset();
-    nt_gfx_init(&TEST_DESC);
-    nt_gfx_begin_frame();
-}
-#endif
 // #endregion
 
 int main(void) {
@@ -348,8 +332,5 @@ int main(void) {
     RUN_TEST(test_vertex_streams_allocate_and_upload_separately);
     RUN_TEST(test_restore_makes_new_buffers_and_a_lost_frame_uploads_nothing);
     RUN_TEST(test_a_retried_restore_reuses_the_frame_buffer_slots);
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
-    RUN_TEST(test_a_failed_frame_buffer_creation_on_a_live_context_asserts);
-#endif
     return UNITY_END();
 }

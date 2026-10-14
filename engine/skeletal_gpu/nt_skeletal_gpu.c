@@ -34,6 +34,7 @@ static void create_texture(void) {
         .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
         .label = "skeletal_gpu_palettes",
     });
+    /* make_texture rejects a size above max_texture_size before the backend; init skips that check on a lost context. */
     NT_ASSERT((s_skeletal_gpu.texture.id != 0 || g_nt_gfx.context_lost) && "skeletal_gpu: palette texture creation failed");
 }
 

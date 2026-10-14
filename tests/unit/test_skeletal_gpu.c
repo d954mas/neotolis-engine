@@ -408,6 +408,19 @@ static void test_second_begin_frame_in_one_gfx_frame_asserts(void) {
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "twice in one gfx frame"));
 }
 
+/* Init on a lost context cannot check the size; the restored context reports 4096, and the restore asserts. */
+static void test_restore_asserts_on_a_width_the_restored_context_rejects(void) {
+    nt_gfx_fake_set_context_lost(true);
+    (void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}); /* the failed create latches the loss */
+    gpu_init(8192, 1);
+    nt_gfx_fake_set_context_lost(false);
+    next_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    nt_test_assert_install();
+    NT_TEST_EXPECT_ASSERT(nt_skeletal_gpu_restore_gpu());
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "palette texture creation failed"));
+}
+
 static void test_reserve_asserts_when_the_texture_is_full(void) {
     gpu_init(6, 1);
     next_frame();
@@ -447,6 +460,7 @@ int main(void) {
     RUN_TEST(test_reserve_rejects_a_frame_wider_than_the_texture);
     RUN_TEST(test_second_begin_frame_in_one_gfx_frame_asserts);
     RUN_TEST(test_reserve_asserts_when_the_texture_is_full);
+    RUN_TEST(test_restore_asserts_on_a_width_the_restored_context_rejects);
 #endif
     return UNITY_END();
 }

@@ -310,8 +310,8 @@ measures `max(1, width >> L)` by `max(1, height >> L)` and occupies
 (`1 + floor(log2(max(width, height)))`) is legal. `N > 1` requires `data` and
 excludes `gen_mipmaps`, which is the other way to fill a chain. Creation is one
 shot: the handle is published after all declared level uploads were issued and
-the default sampler was acquired. A detected context loss, failed texture-name
-allocation or failed sampler creation leaves no texture and no pool slot.
+the default sampler was acquired. A context loss detected at the texture name or the
+default sampler leaves no texture and no pool slot.
 Driver upload and mipmap-generation errors on a live context are not polled:
 a nonzero handle does not prove successful GPU storage allocation. Filter and
 wrap state lives only on sampler objects:
@@ -356,8 +356,8 @@ program are ignored before their handles are inspected; active names are mapped
 to the immutable units recorded at link. Missing or duplicate active names,
 invalid handles, sampler/texture type mismatches, and sampling a color or depth
 attachment of the active render target are developer errors and assert. Resolution
-is atomic: context loss, a texture without live backend storage, or failed
-sampler recreation publishes no
+is atomic: context loss (also one a lazy sampler recreate meets) or a texture
+without live backend storage publishes no
 logical set and issues no backend bind. Those failures are
 recoverable, so gfx reports them and skips the following draws of that set instead
 of returning a status the caller would have to branch on. Context loss means loss
@@ -456,6 +456,10 @@ not attempt recreation. A failed recreation is a context-creation failure: it
 logs one error, and on the web it leaves no context and no loss listener, so the
 engine stays lost and no later iteration recovers it. Backend failures caused by
 a loss are reported as `CONTEXT_LOST`; only the one that latches it logs an error.
+A GL object that cannot be named on a live context (a shader, program, buffer,
+texture, sampler, vertex input or framebuffer) asserts: WebGL creates null only on a lost context, and
+native `glGen*` does not run out of names. A full backend table asserts too: the
+frontend pools cap every table at its size.
 A sampler cache hit whose recreate meets the loss keeps its stable id and ends
 `CONTEXT_LOST`; a texture whose default sampler met it is not made.
 A loss frees every render-target slot, as it frees pipelines and vertex inputs;
@@ -475,9 +479,8 @@ developer errors and assert, as are exhausted configured target capacity and
 destroying a live target while the frame is being drawn (the frame rule).
 Creating a target is allowed anywhere, inside a pass too: the create is immediate,
 and a pass binds its framebuffer only when the stream executes. Destroying an invalid or stale target is a
-no-op even then: the handle check runs first. A returned invalid target therefore means a lost context, a
-failed backend allocation, or an incomplete framebuffer, such as `RGBA16F`
-without float rendering. `nt_gfx_make_pipeline`
+no-op even then: the handle check runs first. A returned invalid target therefore means a lost context
+or an incomplete framebuffer, such as `RGBA16F` without float rendering. `nt_gfx_make_pipeline`
 follows the same split: a
 NULL descriptor, an invalid program or one a context loss discarded, and an exhausted
 pipeline pool assert; a linking program is accepted. The backend create only fills a
@@ -497,16 +500,16 @@ and label are borrowed only for the call.
 context. The instanced bind asserts that instance and vertex locations do not
 overlap, and the instance buffer's type and liveness. `nt_gfx_mesh_vertex_input`
 returns a vertex input gfx owns, so the caller asks again rather than keeping
-it; it returns INVALID when the vertex input must be made on a lost context or
-the backend fails, and a stale mesh or buffer asserts. The registry and
+it; it returns INVALID when the vertex input must be made on a lost context, and
+a stale mesh or buffer asserts. The registry and
 lifetime rules of both live in
 [render architecture, Vertex inputs](../render/architecture.md#vertex-inputs).
 Creating a pipeline or a vertex input
 preserves both current bindings (the bound pipeline and the bound vertex
 input); the caller does not need to rebind after creating another object.
-Detected allocation failures from public GPU-resource operations, framebuffer
-completeness, and context restore remain runtime failures reported
-through invalid handles, `false`, or readiness queries. Texture upload failures
+Framebuffer completeness and context restore remain runtime failures reported
+through invalid handles, `false`, or readiness
+queries. Texture upload failures
 are unchecked as specified above. Mandatory backend setup objects are internal
 invariants: failure to create the GL service EBO
 upload VAO with a live context asserts.

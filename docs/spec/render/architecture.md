@@ -324,7 +324,7 @@ name-keyed set for the bound program, resolves it into those units,
 then publishes the logical set and records its texture-unit binds together.
 A missing or duplicate active name, invalid handle, or sampler-type mismatch
 asserts before any bind is recorded; inactive names are ignored before their handles
-are inspected. Context loss, a texture husk, or failed sampler recreation
+are inspected. Context loss (also one a lazy sampler recreate meets) or a texture husk
 publishes no set and records no texture-unit bind: gfx reports the failure and skips
 the following draws of that set. A vec4 param a material
 does not declare still retains the value last written on that program.
@@ -455,7 +455,7 @@ before `nt_gfx_shutdown` or a gfx re-init, whose new pools reuse handle ids.
 Cache entries are weak: a hit validates the handle, and an entry whose
 vertex input died (context loss) is recreated in place over the new frame
 buffers, so repeated losses cannot grow the cache and no restore call is needed. A miss creates the vertex input and caches it only on
-success; recoverable creation failures leave the cache unchanged so the next
+success; a create that meets a loss leaves the cache unchanged so the next
 lookup retries. The text renderer has one fixed layout and keeps a single vertex
 input under the same rules; `nt_text_renderer_shutdown` destroys it.
 
@@ -942,7 +942,9 @@ pass check, and `end_pass` closes the pass (its END is a backend no-op without a
 
 A backend call that reports a failure (a create, a readback, a lazy sampler recreate at bind or on a
 cache hit) asks the browser: a loss latches as above and ends the operation with
-`CONTEXT_LOST`; a live context keeps its own failure reason and error log. A
+`CONTEXT_LOST`. On a live context a GL object that cannot be named asserts (see
+[API contracts](../core/api-contracts.md)); a readback error and an incomplete
+framebuffer keep their own failure reason. A
 readback asks after every read as well: WebGL reports a loss once through
 `glGetError`, and the drain before the read consumes it. The backend asks only where the answer prevents a crash or a
 misleading log: before shader and program creation, because Emscripten throws on

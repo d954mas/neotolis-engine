@@ -237,14 +237,14 @@ static void test_init_on_a_lost_context_latches_the_loss(void) {
     nt_gfx_fake_set_context_lost(false);
 }
 
-/* Only a loss the browser confirms latches: a failure on a live context keeps its reason and log. */
-static void test_a_failure_on_a_live_context_does_not_latch(void) {
-    s_error_logs = 0;
-    nt_gfx_fake_fail_buffer_creates(1);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}).id);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+/* Only a loss the browser confirms latches: a name failure on a live context asserts instead. */
+static void test_a_name_failure_on_a_live_context_asserts_without_latching(void) {
+    nt_gfx_fake_fail_next_buffer_create();
+    NT_TEST_EXPECT_ASSERT(nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}));
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
-    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR ? 1U : 0U, s_error_logs);
 }
+#endif
 
 /* The latch keeps the tables until begin_frame takes the lost event, also when the context is back by then. */
 static void test_a_latched_loss_wipes_when_its_event_is_taken(void) {
@@ -620,7 +620,6 @@ static void test_lazy_sampler_recreate_on_a_latched_loss_ends_context_lost(void)
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_fake_set_context_lost(true);
-    nt_gfx_fake_fail_next_sampler_create();
     const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = texture, .sampler = sampler};
     nt_gfx_apply_texture_bindings(&binding, 1);
     nt_gfx_end_pass();
@@ -1127,7 +1126,9 @@ int main(void) {
     RUN_TEST(test_loss_and_restore_between_iterations_restore_in_one_begin_frame);
     RUN_TEST(test_a_latched_loss_carries_a_whole_creation_chain);
     RUN_TEST(test_a_loss_latched_inside_a_pass_closes_the_pass);
-    RUN_TEST(test_a_failure_on_a_live_context_does_not_latch);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_a_name_failure_on_a_live_context_asserts_without_latching);
+#endif
     RUN_TEST(test_init_on_a_lost_context_latches_the_loss);
     RUN_TEST(test_a_latched_loss_wipes_when_its_event_is_taken);
     RUN_TEST(test_a_sampler_recreate_and_a_readback_latch_a_loss);

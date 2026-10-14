@@ -157,17 +157,6 @@ void test_vi_empty_layout_is_attributeless(void) {
     nt_gfx_destroy_vertex_input(vi);
 }
 
-void test_vi_backend_failure_releases_reserved_slot(void) {
-    nt_buffer_t vbo = make_vbo();
-    nt_gfx_fake_fail_next_vertex_input_create();
-    nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
-    TEST_ASSERT_EQUAL_UINT32(0, vi.id);
-    /* Filling the whole pool exposes even one leaked reservation. */
-    for (int i = 0; i < TEST_MAX_VERTEX_INPUTS; i++) {
-        TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(make_vi(vbo, (nt_buffer_t){0})));
-    }
-}
-
 void test_vi_pool_exhaustion_asserts(void) {
     nt_buffer_t vbo = make_vbo();
     for (int i = 0; i < TEST_MAX_VERTEX_INPUTS; i++) {
@@ -946,7 +935,6 @@ int main(void) {
     RUN_TEST(test_vi_destroy_invalid_and_stale_are_noops);
     RUN_TEST(test_vi_slot_reuse_bumps_generation);
     RUN_TEST(test_vi_empty_layout_is_attributeless);
-    RUN_TEST(test_vi_backend_failure_releases_reserved_slot);
     RUN_TEST(test_vi_pool_exhaustion_asserts);
     RUN_TEST(test_vi_creation_asserts_on_caller_errors);
     RUN_TEST(test_instanced_bind_asserts_on_caller_errors);

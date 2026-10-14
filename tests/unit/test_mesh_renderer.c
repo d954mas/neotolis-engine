@@ -973,23 +973,29 @@ void test_game_buffers_share_the_base_vertex_input(void) {
     nt_test_frame_open();
 }
 
-/* A failed vertex input create and an unready program record nothing; the next ready call
- * retries and draws. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_core_draw_failures_record_nothing(void) {
+/* A loss the browser reports before gfx latches it: the program still reads ready, so the run
+ * reaches the vertex input create, which latches the loss and returns invalid; nothing is recorded. */
+void test_core_draw_skips_a_vertex_input_create_that_meets_a_loss(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_material_t mat = create_test_material();
     nt_buffer_t instances = make_owned_instances(2);
-    nt_gfx_fake_fail_next_vertex_input_create();
     nt_test_frame_next();
+    const uint32_t creates = nt_gfx_fake_vertex_input_create_count();
+    nt_gfx_fake_set_context_lost(true);
     mark_draws();
     nt_mesh_renderer_draw(mesh, mat, instances, 0, 1);
+    TEST_ASSERT_EQUAL_UINT32(creates + 1U, nt_gfx_fake_vertex_input_create_count());
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
-    mark_draws();
-    nt_mesh_renderer_draw(mesh, mat, instances, 0, 1);
-    nt_test_frame_next();
-    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls()); /* the next draw retries the create */
+}
+
+/* An unready program records nothing; the draw after the link finishes draws. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_core_draw_waits_for_the_program_link(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material();
+    nt_buffer_t instances = make_owned_instances(2);
     nt_gfx_fake_hold_program_links(true);
     nt_material_set_program(mat, create_test_program());
     nt_test_frame_next();
@@ -1842,7 +1848,8 @@ int main(void) {
     RUN_TEST(test_core_draw_from_a_game_buffer);
     RUN_TEST(test_core_draw_asserts_past_its_game_buffer);
     RUN_TEST(test_game_buffers_share_the_base_vertex_input);
-    RUN_TEST(test_core_draw_failures_record_nothing);
+    RUN_TEST(test_core_draw_waits_for_the_program_link);
+    RUN_TEST(test_core_draw_skips_a_vertex_input_create_that_meets_a_loss);
     RUN_TEST(test_draw_from_an_unsized_stream_asserts);
     RUN_TEST(test_mesh_material_with_an_attr_map_asserts);
     RUN_TEST(test_real_restore_rebinds_new_stream_and_owned_buffers);

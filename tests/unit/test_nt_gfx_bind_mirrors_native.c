@@ -777,43 +777,6 @@ static void test_empty_vertex_input_draws_fullscreen(void) {
     TEST_ASSERT_UINT8_WITHIN(1, 255, end_frame_center_red());
 }
 
-static void GLAD_API_PTR fail_gen_vertex_arrays(GLsizei count, GLuint *arrays) {
-    for (GLsizei i = 0; i < count; i++) {
-        arrays[i] = 0;
-    }
-}
-
-static void test_failed_vao_creation_returns_invalid_and_preserves_binding(void) {
-    nt_pipeline_t pip = make_red_pipeline();
-    nt_buffer_t full = make_vbo(s_full);
-    nt_vertex_input_t vi_full = make_vi(full, (nt_buffer_t){0});
-
-    begin_black_pass();
-    nt_gfx_bind_pipeline(pip);
-    nt_gfx_bind_vertex_input(vi_full);
-    nt_gfx_frame_execute();
-    GLint bound_vao = 0;
-    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &bound_vao);
-
-    PFNGLGENVERTEXARRAYSPROC saved_gen = glad_glGenVertexArrays;
-    glad_glGenVertexArrays = fail_gen_vertex_arrays;
-    nt_vertex_input_t failed = make_vi(full, (nt_buffer_t){0});
-    glad_glGenVertexArrays = saved_gen;
-    TEST_ASSERT_EQUAL_UINT32(0, failed.id);
-    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
-
-    GLint current_vao = 0;
-    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &current_vao);
-    TEST_ASSERT_EQUAL_INT(bound_vao, current_vao);
-    nt_gfx_draw(0, 3);
-    TEST_ASSERT_UINT8_WITHIN(1, 255, center_red_in_pass());
-
-    /* The pool slot went back, so the retry succeeds. */
-    nt_vertex_input_t retry = make_vi(full, (nt_buffer_t){0});
-    TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(retry));
-    nt_gfx_end_pass();
-}
-
 /* Reads a sampling unit without leaving the backend's active-unit mirror stale:
  * the unit that was active is restored before returning. */
 static GLint texture_name_on_unit(uint32_t slot) {
@@ -1794,7 +1757,6 @@ int main(void) {
     RUN_TEST(test_empty_vertex_input_draws_fullscreen);
     RUN_TEST(test_rejected_pipeline_bind_preserves_vertex_input);
     RUN_TEST(test_creating_vertex_input_preserves_bound_one);
-    RUN_TEST(test_failed_vao_creation_returns_invalid_and_preserves_binding);
     RUN_TEST(test_compressed_create_keeps_texture_cache_truthful);
     RUN_TEST(test_ground_state_disables_scissor);
     RUN_TEST(test_identical_second_frame_issues_no_bind_calls);

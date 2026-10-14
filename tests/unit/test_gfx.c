@@ -548,7 +548,7 @@ void test_gfx_program_link_context_loss_releases_every_slot(void) {
         TEST_FAIL_MESSAGE("Context loss during program link must return invalid without asserting");
     }
     /* The failed link confirms the loss and latches it; later links stop before the backend. */
-    nt_gfx_fake_lose_context_on_program_create();
+    nt_gfx_fake_set_context_lost(true);
     for (uint32_t attempt = 0; attempt < 12; attempt++) {
         nt_program_t program = nt_gfx_make_program(vs, fs);
         TEST_ASSERT_EQUAL_UINT32(0, program.id);
@@ -973,7 +973,55 @@ void test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds(
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bind_sampler_count());
 }
 
-void test_gfx_failed_sampler_restore_rejects_whole_set_and_retries(void) {
+/* The browser gives the context back; the next begin_frame takes the loss and restores. */
+static void restore_lost_context(void) {
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+}
+
+/* A create that meets a loss gives its pool slot back: a leak would cost one slot per loss. */
+void test_gfx_creates_that_meet_a_loss_free_their_pool_slots(void) {
+    nt_gfx_fake_set_context_lost(true);
+    TEST_ASSERT_EQUAL_UINT32(0, make_test_vs().id);
+    restore_lost_context();
+    nt_gfx_fake_set_context_lost(true);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}).id);
+    restore_lost_context();
+    /* setUp: max_shaders = 8; max_buffers = 8, four of them the frame storage buffers. */
+    nt_shader_t shaders[8];
+    nt_buffer_t buffers[4];
+    for (uint32_t i = 0; i < 8; i++) {
+        shaders[i] = make_test_vs();
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, shaders[i].id);
+    }
+    for (uint32_t i = 0; i < 4; i++) {
+        buffers[i] = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8});
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, buffers[i].id);
+    }
+    for (uint32_t i = 0; i < 8; i++) {
+        nt_gfx_destroy_shader(shaders[i]);
+    }
+    for (uint32_t i = 0; i < 4; i++) {
+        nt_gfx_destroy_buffer(buffers[i]);
+    }
+}
+
+/* The cache hit recreates a sampler the loss zeroed; on a live context its name cannot fail. */
+void test_gfx_sampler_hit_recreate_name_failure_on_a_live_context_asserts(void) {
+    const nt_sampler_desc_t desc = {.compare_func = NT_COMPARE_LESS};
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_make_sampler(&desc).id);
+    nt_gfx_fake_lose_and_restore_context();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    nt_gfx_fake_fail_next_sampler_create();
+    EXPECT_ASSERT(nt_gfx_make_sampler(&desc));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "could not name a GL object on a live context"));
+}
+
+void test_gfx_sampler_recreate_name_failure_on_a_live_context_asserts(void) {
     nt_sampler_t compare = nt_gfx_make_sampler(&(nt_sampler_desc_t){.compare_func = NT_COMPARE_LESS});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, compare.id);
     nt_gfx_fake_lose_and_restore_context();
@@ -991,23 +1039,8 @@ void test_gfx_failed_sampler_restore_rejects_whole_set_and_retries(void) {
         {.name = nt_hash32_str("u_shadow"), .texture = depth, .sampler = compare},
     };
     nt_gfx_fake_fail_next_sampler_create();
-    nt_gfx_apply_texture_bindings(bindings, 2);
-
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_FAILED, nt_gfx_test_texture_set_state());
-    nt_gfx_draw(0, 3);
-    nt_gfx_draw_instanced(0, 3, 1);
-    nt_gfx_draw_indexed(0, 3, 3);
-    nt_gfx_draw_indexed_instanced(0, 3, 3, 1);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&g_nt_gfx.counters));
-
-    apply_texture_set(bindings, 2);
-    nt_gfx_draw_indexed(0, 3, 3);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
-    end_texture_binding_test_pass();
-    /* The failed set bound nothing; the retry bound both units. */
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bind_sampler_count());
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_sampler(1));
+    EXPECT_ASSERT(nt_gfx_apply_texture_bindings(bindings, 2));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "could not name a GL object on a live context"));
 }
 
 void test_gfx_texture_set_clears_on_pass_begin_and_failed_bind(void) {
@@ -1923,32 +1956,6 @@ void test_gfx_make_texture_hands_the_contiguous_mip_chain_to_the_backend(void) {
     }
 }
 
-void test_gfx_make_texture_create_failure_leaves_no_texture(void) {
-    nt_gfx_fake_reset();
-    nt_gfx_fake_fail_texture_creates(1);
-
-    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
-        .width = 13,
-        .height = 7,
-        .data = s_rgb8_chain_13x7,
-        .format = NT_TEXTURE_FORMAT_RGB8,
-        .level_count = 4,
-    });
-    TEST_ASSERT_EQUAL_UINT32(0, tex.id);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_texture_create_count());
-    /* A failed create never minted a name, so there is nothing to destroy. */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_texture_destroy_count());
-
-    nt_texture_t textures[8];
-    for (int i = 0; i < 8; i++) {
-        textures[i] = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = s_test_pixels_4x4});
-        TEST_ASSERT_NOT_EQUAL_UINT32(0, textures[i].id);
-    }
-    for (int i = 0; i < 8; i++) {
-        nt_gfx_destroy_texture(textures[i]);
-    }
-}
-
 void test_gfx_make_texture_bc7_requires_aligned_base_dimensions(void) {
     enable_compressed_caps();
     static const uint8_t blocks[128] = {0};
@@ -1960,37 +1967,6 @@ void test_gfx_make_texture_bc7_requires_aligned_base_dimensions(void) {
     TEST_ASSERT_EQUAL_UINT32(creates, nt_gfx_fake_texture_create_count());
 }
 
-void test_gfx_make_texture_sampler_failure_rolls_back(void) {
-    const nt_texture_desc_t desc = {.width = 13,
-                                    .height = 7,
-                                    .data = s_rgb8_chain_13x7,
-                                    .format = NT_TEXTURE_FORMAT_RGB8,
-                                    .level_count = 4,
-                                    .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
-                                    .mag_filter = NT_FILTER_LINEAR,
-                                    .wrap_u = NT_WRAP_REPEAT};
-    nt_gfx_fake_fail_next_sampler_create();
-    nt_assert_handler = test_assert_handler;
-    if (setjmp(s_assert_jmp) != 0) {
-        nt_assert_handler = NULL;
-        TEST_FAIL_MESSAGE("default sampler allocation failure must be recoverable");
-    }
-    nt_texture_t failed = nt_gfx_make_texture(&desc);
-    nt_assert_handler = NULL;
-    TEST_ASSERT_EQUAL_UINT32(0, failed.id);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_texture_destroy_count());
-    /* The attempt's own GL name, not handle 0 -- the storage really went back. */
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_destroyed_texture());
-
-    nt_texture_t textures[8];
-    for (uint32_t i = 0; i < 8; i++) {
-        textures[i] = nt_gfx_make_texture(&desc);
-        TEST_ASSERT_TRUE(nt_gfx_texture_ready(textures[i]));
-    }
-    for (uint32_t i = 0; i < 8; i++) {
-        nt_gfx_destroy_texture(textures[i]);
-    }
-}
 // #endregion
 
 /* ---- Texture: destroy and reuse slot ---- */
@@ -2279,7 +2255,7 @@ void test_begin_pass_on_a_lost_context_still_checks_its_desc(void) {
     nt_gfx_end_frame();
 }
 
-/* An activation that fails after making its vertex buffer frees it inside a drawn frame without asserting. */
+/* An activation that a loss fails after making its vertex buffer frees it inside a drawn frame without asserting. */
 void test_failed_mesh_activation_in_a_drawn_frame_frees_its_buffer(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
@@ -2287,7 +2263,7 @@ void test_failed_mesh_activation_in_a_drawn_frame_frees_its_buffer(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_end_pass();
     const uint32_t accepted = g_nt_gfx.counters.accepted[NT_GFX_OP_DESTROY];
-    nt_gfx_fake_fail_buffer_creates(2); /* the index buffer */
+    nt_gfx_fake_lose_context_on_buffer_creates(2); /* at the index buffer */
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
     TEST_ASSERT_EQUAL_UINT32(accepted + 1U, g_nt_gfx.counters.accepted[NT_GFX_OP_DESTROY]);
 }
@@ -3947,7 +3923,9 @@ int main(void) {
     RUN_TEST(test_gfx_draws_require_complete_texture_set_for_bound_program);
     RUN_TEST(test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost);
     RUN_TEST(test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds);
-    RUN_TEST(test_gfx_failed_sampler_restore_rejects_whole_set_and_retries);
+    RUN_TEST(test_gfx_creates_that_meet_a_loss_free_their_pool_slots);
+    RUN_TEST(test_gfx_sampler_hit_recreate_name_failure_on_a_live_context_asserts);
+    RUN_TEST(test_gfx_sampler_recreate_name_failure_on_a_live_context_asserts);
     RUN_TEST(test_gfx_texture_set_clears_on_pass_begin_and_failed_bind);
     RUN_TEST(test_gfx_destroy_program_accepts_invalid);
     RUN_TEST(test_gfx_destroy_program_asserts_on_a_stale_handle);
@@ -4024,9 +4002,7 @@ int main(void) {
     RUN_TEST(test_gfx_make_texture_rejects_bad_level_counts_before_allocation);
     RUN_TEST(test_gfx_make_texture_rejects_unsupported_gpu_requirements);
     RUN_TEST(test_gfx_make_texture_hands_the_contiguous_mip_chain_to_the_backend);
-    RUN_TEST(test_gfx_make_texture_create_failure_leaves_no_texture);
     RUN_TEST(test_gfx_make_texture_bc7_requires_aligned_base_dimensions);
-    RUN_TEST(test_gfx_make_texture_sampler_failure_rolls_back);
     RUN_TEST(test_gfx_destroy_texture_and_reuse);
     RUN_TEST(test_gfx_double_destroy_texture);
     RUN_TEST(test_gfx_buffer_pool_full_asserts);

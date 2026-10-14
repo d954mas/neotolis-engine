@@ -1255,49 +1255,6 @@ static void emit_test_quad(const float *custom, uint8_t custom_bytes) {
     nt_sprite_renderer_emit_geometry(s_atlas_res, nt_atlas_find_region(s_atlas_res, FIXTURE_R0_HASH), positions, 4, idx, 6, NT_MATH_MAT4_IDENTITY, 0xFFFFFFFFU, custom, custom_bytes);
 }
 
-/* A failed vertex input leaves the material not drawable until its next resolve: every
- * draw_list call, and for the immediate emits the first set_material of a frame. */
-void test_sprite_renderer_retries_vertex_input_after_backend_failure(void) {
-    s_atlas_res = register_test_atlas(0xA7ULL);
-    nt_material_t mat = create_test_material();
-    const nt_material_t custom = create_defaults_test_material(1.0F);
-    nt_entity_t e = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
-    nt_test_frame_finish_links();
-    nt_render_item_t item = {.entity = e.id, .batch_key = sprite_batch_key(e, mat)};
-
-    nt_gfx_fake_reset();
-    nt_gfx_fake_fail_next_vertex_input_create();
-    TEST_ASSERT_EQUAL_UINT32(0, draw_list_draws(&item, 1));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_vertex_input_cache_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
-
-    TEST_ASSERT_EQUAL_UINT32(1, draw_list_draws(&item, 1));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_vertex_input_cache_count());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_vertex_input_create_count());
-
-    nt_test_frame_next();
-    TEST_ASSERT_EQUAL_UINT32(1, draw_list_draws(&item, 1));
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_vertex_input_create_count());
-
-    /* A custom layout needs its own vertex input. */
-    nt_gfx_fake_fail_next_vertex_input_create();
-    nt_sprite_renderer_set_material(custom);
-    uint32_t draws_before = recorded_draws();
-    emit_test_quad(NULL, 0);
-    nt_sprite_renderer_set_material(custom);
-    emit_test_quad(NULL, 0);
-    TEST_ASSERT_EQUAL_UINT32(draws_before, recorded_draws());
-    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_vertex_input_create_count());
-
-    nt_test_frame_next();
-    nt_sprite_renderer_set_material(custom);
-    draws_before = recorded_draws();
-    emit_test_quad(NULL, 0);
-    TEST_ASSERT_EQUAL_UINT32(draws_before + 1, recorded_draws());
-    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_fake_vertex_input_create_count());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_vertex_input_cache_count());
-}
-
 static void assert_last_emit_custom(const float want[4]) {
     TEST_ASSERT_EQUAL_UINT32(4, nt_sprite_test_last_emit().vertex_count);
     for (uint32_t v = 0; v < 4; v++) {
@@ -2153,6 +2110,23 @@ void test_sprite_renderer_emits_past_16_bit_vertex_range_use_absolute_indices(vo
 
 /* ---- Context restore and gfx re-init ---- */
 
+/* A loss the browser reports before gfx latches it: the program still reads ready, so the resolve
+ * reaches the vertex input create, which latches the loss; the material draws nothing and caches nothing. */
+void test_sprite_renderer_skips_a_vertex_input_create_that_meets_a_loss(void) {
+    s_atlas_res = register_test_atlas(0xA7ULL);
+    nt_material_t mat = create_test_material();
+    nt_entity_t e = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
+    nt_test_frame_finish_links();
+    nt_render_item_t item = {.entity = e.id, .batch_key = sprite_batch_key(e, mat)};
+
+    nt_gfx_fake_reset();
+    nt_gfx_fake_set_context_lost(true);
+    TEST_ASSERT_EQUAL_UINT32(0, draw_list_draws(&item, 1));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_vertex_input_cache_count());
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+}
+
 /* The loss frees the vertex inputs and the game relinks the program: the next frame draws
  * with no renderer restore call. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -2360,7 +2334,6 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_extended_layout_from_attr_map);
     RUN_TEST(test_sprite_renderer_layout_splits_vertex_inputs_not_pipelines);
     RUN_TEST(test_sprite_renderer_attr_map_location_step_splits_vertex_inputs);
-    RUN_TEST(test_sprite_renderer_retries_vertex_input_after_backend_failure);
     RUN_TEST(test_sprite_renderer_custom_attr_emit_bakes_per_vertex);
     RUN_TEST(test_sprite_renderer_custom_attr_emit_bakes_material_defaults);
     RUN_TEST(test_sprite_renderer_custom_attr_emit_without_block_or_defaults_asserts);
@@ -2387,6 +2360,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_one_material_records_params_once);
     RUN_TEST(test_sprite_renderer_emit_after_odd_geometry_starts_at_multiple_of_4);
     RUN_TEST(test_sprite_renderer_emits_past_16_bit_vertex_range_use_absolute_indices);
+    RUN_TEST(test_sprite_renderer_skips_a_vertex_input_create_that_meets_a_loss);
     RUN_TEST(test_sprite_renderer_draws_after_context_restore_without_a_restore_call);
     RUN_TEST(test_sprite_renderer_new_layout_after_context_restore_reuses_a_dead_vertex_input);
     RUN_TEST(test_sprite_renderer_reselect_after_program_destroyed_in_frame_draws_nothing);
