@@ -60,8 +60,8 @@ void nt_sprite_renderer_shutdown(void);
  *   1. Caller pre-filters invisible, unresolved, and tombstoned sprites;
  *      renderer draws every entry.
  *   2. Equal batch keys share material and page: a run draws with its first item's page.
- *   3. Frame UBOs (e.g. view_proj) are shader-specific — register and bind
- *      them before draw_list; renderer does not touch UBOs.
+ *   3. Frame blocks (Globals, game blocks) are the caller's: bind them in the
+ *      pass before draw_list; the renderer binds only Material (nt_material_apply).
  *   4. Entities, required components, and material bindings stay live and
  *      unchanged through draw_list.
  * Does not change the material selected by set_material. */
