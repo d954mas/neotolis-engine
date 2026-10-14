@@ -128,6 +128,15 @@ static void test_make_asserts_on_attachment_misuse(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_render_target_create_count());
 }
 
+/* The game checks the capability bit and picks its format; gfx does not try and fail. */
+static void test_make_asserts_on_rgba16f_without_float_rendering(void) {
+    nt_texture_t half = make_attachment(NT_TEXTURE_FORMAT_RGBA16F, 64, 32);
+    g_nt_gfx.gpu_caps.has_float_render_target = false;
+    NT_TEST_EXPECT_ASSERT(make_target(half, NO_TEXTURE));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_render_target_create_count());
+    TEST_ASSERT_TRUE(nt_gfx_render_target_valid(make_target(make_color(), NO_TEXTURE)));
+}
+
 /* A pool-valid texture that outlived a loss has no GL name to attach. */
 static void test_make_asserts_on_texture_husk(void) {
     nt_texture_t color = make_color();
@@ -755,6 +764,7 @@ int main(void) {
     RUN_TEST(test_half_float_color_is_accepted);
     RUN_TEST(test_make_asserts_on_attachment_misuse);
     RUN_TEST(test_make_asserts_on_texture_husk);
+    RUN_TEST(test_make_asserts_on_rgba16f_without_float_rendering);
     RUN_TEST(test_backend_failure_returns_invalid_and_keeps_textures);
     RUN_TEST(test_shared_depth_texture_serves_two_targets);
     RUN_TEST(test_destroying_a_texture_destroys_only_its_targets);

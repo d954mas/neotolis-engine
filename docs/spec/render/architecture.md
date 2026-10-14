@@ -804,11 +804,9 @@ remains valid. `RGBA32F` is not supported for render targets — it additionally
 needs `OES_texture_float_linear` to be filtered and `EXT_float_blend` to be
 blended into, and both are absent on roughly half of iOS devices.
 
-Creation does not consult `gpu_caps.has_float_render_target`. A device that
-cannot render to half-float fails the backend completeness check, and creation
-returns invalid — the fallback path a caller needs regardless. The capability
-bit exists so a caller can choose its format without paying for a failed
-attempt.
+An `RGBA16F` color attachment requires `gpu_caps.has_float_render_target`
+(`EXT_color_buffer_float` on the web, core on native GL); creation asserts without
+it. A game that wants a fallback checks the bit and picks `RGBA8` itself.
 
 The supported depth formats are `DEPTH16`, `DEPTH24`, and `DEPTH32F`.
 Attachment textures, like every texture, keep GL default texture state; the

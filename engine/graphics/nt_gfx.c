@@ -1427,10 +1427,11 @@ static nt_gfx_result_t make_render_target(const nt_render_target_desc_t *desc, n
         NT_ASSERT((size == NULL || (meta->width == size->width && meta->height == size->height)) && "make_render_target: attachment sizes differ");
         size = meta;
     }
-    /* Deliberately not gated on gpu_caps.has_float_render_target: the backend
-       completeness check is the real gate, and it already returns invalid. */
     NT_ASSERT((desc->color.id == 0 || nt_gfx_texture_format(desc->color) == NT_TEXTURE_FORMAT_RGBA8 || nt_gfx_texture_format(desc->color) == NT_TEXTURE_FORMAT_RGBA16F) &&
               "make_render_target: color texture must be RGBA8 or RGBA16F");
+    /* After the context_lost check: a lost probe reports zero caps. The game checks the bit and picks its format. */
+    NT_ASSERT((desc->color.id == 0 || nt_gfx_texture_format(desc->color) != NT_TEXTURE_FORMAT_RGBA16F || g_nt_gfx.gpu_caps.has_float_render_target) &&
+              "make_render_target: an RGBA16F color attachment requires gpu_caps.has_float_render_target");
     NT_ASSERT((desc->depth.id == 0 || nt_texture_format_is_depth(nt_gfx_texture_format(desc->depth))) && "make_render_target: depth texture must be DEPTH*");
 
     uint32_t id = nt_pool_alloc(&s_gfx.render_target_pool);

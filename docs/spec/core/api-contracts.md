@@ -479,17 +479,19 @@ that loss: the engine stays lost and a later begin_frame restores again.
 A render-target descriptor names the color and depth textures; an invalid
 handle means that attachment is absent, and at least one must be present. The
 textures must be live, single-level and of one size, which becomes the target
-size. Color takes `RGBA8` or `RGBA16F`; depth takes a `DEPTH*` format. The
+size. Color takes `RGBA8` or `RGBA16F`, which requires
+`gpu_caps.has_float_render_target`; depth takes a `DEPTH*` format. The
 descriptor carries no sampler state.
 
-An unsupported color or depth format, a target with no attachment, and an
+An unsupported color or depth format, `RGBA16F` without float rendering, a
+target with no attachment, and an
 invalid, husk, multi-level or differently sized attachment texture are
 developer errors and assert, as are exhausted configured target capacity and
 destroying a live target while the frame is being drawn (the frame rule).
 Creating a target is allowed anywhere, inside a pass too: the create is immediate,
 and a pass binds its framebuffer only when the stream executes. Destroying an invalid or stale target is a
 no-op even then: the handle check runs first. A returned invalid target therefore means a lost context
-or an incomplete framebuffer, such as `RGBA16F` without float rendering. `nt_gfx_make_pipeline`
+or an incomplete framebuffer. `nt_gfx_make_pipeline`
 follows the same split: a
 NULL descriptor, an invalid program or one a context loss discarded, and an exhausted
 pipeline pool assert; a linking program is accepted. The backend create only fills a
