@@ -137,7 +137,8 @@ typedef enum {
 
 /* ---- Backend function signatures (implemented by each backend) ---- */
 
-/* destroy_* accepts 0 (no-op, as glDelete*); every bind requires a live handle -- the front-end owns husk handling.
+/* Program, buffer and texture destroys require a live record; the other destroys accept 0 (no-op, as
+ * glDelete*). Every bind requires a live handle -- the front-end owns husk handling.
  * The backend keeps GL-mirror state only; calls name the program or vertex input. */
 
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc);
@@ -145,8 +146,8 @@ void nt_gfx_backend_shutdown(void);
 /* Returns and clears the latch a lost event sets; C flag, no JS. begin_frame
  * alone takes it. */
 bool nt_gfx_backend_take_context_loss(void);
-/* Asks the browser directly (JS): failure paths and begin_frame while a loss
- * is known or a restore just ran. */
+/* Asks the browser directly (JS). The frontend asks at init, in begin_frame while lost, in the
+ * restore and after a backend read that reported success; the backend classifies failed calls. */
 bool nt_gfx_backend_query_context_lost(void);
 
 void nt_gfx_backend_check_timer_disjoint(void);
@@ -158,12 +159,16 @@ void nt_gfx_backend_clear(const nt_clear_desc_t *desc);
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc);
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle);
 
-/* Starts the link; 0 only on a lost context. */
-uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend);
+/* Programs, pipelines, vertex inputs, buffers, textures and render targets: `slot` is the frontend
+ * pool slot and the backend handle, and its record is empty on entry. A bool create returns false
+ * only on a lost context. The frontend never passes a husk to a destroy. */
+
+/* Starts the link. */
+bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uint32_t slot);
 /* poll asks the driver whether the link completed (parallel compile) instead of waiting for it.
  * UNREADY while the link runs; ACCEPTED once linked, with uniform locations cached and one texture
  * unit per active sampler element (reflection order, 0..n-1, n <= NT_GFX_MAX_TEXTURE_SLOTS);
- * BACKEND_FAILURE on a failed link, a failed reflection or a loss. */
+ * CONTEXT_LOST on a loss. On a live context a failed link logs and asserts, a failed reflection asserts. */
 nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll);
 void nt_gfx_backend_destroy_program(uint32_t backend_handle);
 
@@ -171,16 +176,13 @@ void nt_gfx_backend_destroy_program(uint32_t backend_handle);
 bool nt_gfx_backend_program_sampler_info(uint32_t program_backend, uint32_t name_hash, nt_gfx_sampler_info_t *out_info);
 uint32_t nt_gfx_backend_program_sampler_mask(uint32_t program_backend);
 
-/* `slot` is the frontend pool slot: the pool owns allocation, the backend table
- * mirrors it 1:1 and the front-end addresses records by that slot. Fills a CPU
- * record only, so it cannot fail. */
+/* Fills a CPU record only, so it cannot fail. */
 void nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend, uint32_t slot);
 void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle);
 
 /* Bakes the desc's vertex layout and the given buffer backends into an owned VAO. Restores the
- * previously bound VAO before returning. Same slot contract as create_pipeline: returns `slot`,
- * or 0 on failure. */
-uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot);
+ * previously bound VAO before returning. */
+bool nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot);
 void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle);
 /* Stores a validated instance layout at slot 1..NT_GFX_MAX_INSTANCE_LAYOUTS; CPU only. */
 void nt_gfx_backend_register_instance_layout(uint32_t slot, const nt_vertex_layout_t *layout);
@@ -192,20 +194,19 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t layout_s
  * range by the stream's `used` bytes without a search. Destroying the buffer clears it. */
 void nt_gfx_set_buffer_frame_stream(nt_buffer_t buf, uint32_t stream);
 
-uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc);
+bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot);
 void nt_gfx_backend_destroy_buffer(uint32_t backend_handle);
 void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, const void *data, uint32_t size);
 
 /* Creates the name and uploads every declared level from desc->data: levels
  * 0..N-1 back to back, N = desc->level_count > 1 ? desc->level_count : 1. */
-uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc);
+bool nt_gfx_backend_create_texture(const nt_texture_desc_t *desc, uint32_t slot);
 void nt_gfx_backend_destroy_texture(uint32_t backend_handle);
 void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_texture_format_t format, const void *data);
 
 enum { NT_GFX_RT_COLOR, NT_GFX_RT_DEPTH, NT_GFX_RT_ATTACHMENTS };
-/* Builds an FBO over live texture backends; 0 = absent attachment. Same slot
- * contract as create_pipeline: returns `slot`, or 0 on failure (no FBO name or incomplete). */
-uint32_t nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], uint32_t slot);
+/* Builds an FBO over live texture backends; 0 = absent attachment. */
+bool nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], uint32_t slot);
 void nt_gfx_backend_destroy_render_target(uint32_t backend_handle);
 
 uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc);

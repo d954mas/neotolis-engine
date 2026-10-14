@@ -1243,21 +1243,24 @@ static void test_uniform_write_targets_bound_pipelines_program(void) {
  * old lifetime left on is off, and the first bind that wants it says so again. */
 static void test_recreate_all_resources_grounds_cache(void) {
     nt_pipeline_t blend_pip = make_pipeline_ex(s_vs_src, s_fs_src, false, true, true);
-    nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
+    nt_buffer_t vbo = make_vbo(s_full);
+    nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
 
     begin_black_pass();
     nt_gfx_bind_pipeline(blend_pip);
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
-    nt_gfx_frame_execute();
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_INT(GL_TRUE, (int)glIsEnabled(GL_BLEND));
 
+    /* A real restore follows the loss wipe, which leaves no frontend object on a backend record. */
+    nt_gfx_begin_frame();
+    nt_gfx_destroy_program(nt_gfx_pipeline_program(blend_pip));
+    nt_gfx_destroy_buffer(vbo);
     TEST_ASSERT_TRUE(nt_gfx_backend_recreate_all_resources());
     TEST_ASSERT_EQUAL_INT(GL_FALSE, (int)glIsEnabled(GL_BLEND));
 
-    /* The zeroed backend tables orphan every old handle, so the frame that
-     * follows a recreate has to build its own. */
     nt_pipeline_t fresh_blend = make_pipeline_ex(s_vs_src, s_fs_src, false, true, true);
 
     /* After the recreate: it reloads glad and would drop the swapped pointers. */
@@ -1557,12 +1560,13 @@ static void test_ground_state_reissues_sampler_bind(void) {
     GLint bound_before = sampler_name_on_unit(0);
     TEST_ASSERT_NOT_EQUAL_INT(0, bound_before);
 
+    /* A real restore follows the loss wipe, which leaves no frontend object on a backend record. */
+    nt_gfx_destroy_texture(tex);
     TEST_ASSERT_TRUE(nt_gfx_backend_recreate_all_resources());
     TEST_ASSERT_EQUAL_INT(GL_TRUE, (int)glIsSampler((GLuint)bound_before));
     TEST_ASSERT_EQUAL_INT(0, sampler_name_on_unit(0));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gl_test_cached_sampler(0));
 
-    /* The zeroed backend tables orphan every old handle, so this needs its own. */
     nt_texture_t fresh = make_pixel_texture(white);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, fresh.id);
 
@@ -1671,6 +1675,79 @@ static void test_vec4_cache_follows_program_lifetime(void) {
     TEST_ASSERT_UINT8_WITHIN(1, 64, end_frame_center_red());
 }
 
+/* The backend table is indexed by the frontend slot: the pool hands out the last freed slot first,
+ * and each reused slot draws its own buffer's vertices. */
+static void test_buffer_slot_reuse_draws_each_buffers_own_data(void) {
+    nt_buffer_t a = make_vbo(s_full);
+    nt_buffer_t b = make_vbo(s_empty);
+    nt_buffer_t c = make_vbo(s_full);
+    const uint32_t slot_a = nt_pool_slot_index(a.id);
+    const uint32_t slot_c = nt_pool_slot_index(c.id);
+    nt_gfx_destroy_buffer(a);
+    nt_gfx_destroy_buffer(c);
+    nt_buffer_t d = make_vbo(s_empty);
+    nt_buffer_t e = make_vbo(s_full);
+    TEST_ASSERT_EQUAL_UINT32(slot_c, nt_pool_slot_index(d.id));
+    TEST_ASSERT_EQUAL_UINT32(slot_a, nt_pool_slot_index(e.id));
+    TEST_ASSERT_EQUAL_UINT32(slot_c, nt_gfx_test_buffer_backend_id(d));
+    TEST_ASSERT_EQUAL_UINT32(slot_a, nt_gfx_test_buffer_backend_id(e));
+
+    nt_pipeline_t pip = make_red_pipeline();
+    const nt_buffer_t buffers[3] = {b, d, e};
+    const uint8_t expected_red[3] = {0, 0, 255};
+    for (uint32_t i = 0; i < 3; i++) {
+        nt_vertex_input_t vi = make_vi(buffers[i], (nt_buffer_t){0});
+        begin_black_pass();
+        nt_gfx_bind_pipeline(pip);
+        nt_gfx_bind_vertex_input(vi);
+        nt_gfx_draw(0, 3);
+        TEST_ASSERT_EQUAL_UINT8(expected_red[i], end_frame_center_red());
+    }
+}
+
+/* A program made in a destroyed program's slot, linking or ready, starts with an empty uniform
+ * cache: its first upload of the old value is not skipped. */
+static void test_program_slot_reuse_uploads_the_first_vec4(void) {
+    const char *fs_src = "precision mediump float;\n"
+                         "uniform vec4 u_color; out vec4 frag_color;\n"
+                         "void main() { frag_color = u_color; }\n";
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_vs_src});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_src});
+    const nt_hash32_t color = nt_hash32_str("u_color");
+    const float value[4] = {0.25F, 0.5F, 0.75F, 1.0F};
+    nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
+
+    nt_program_t first = nt_gfx_make_program(vs, fs);
+    const uint32_t slot = nt_pool_slot_index(first.id);
+    nt_test_gfx_link_wait(first);
+    begin_black_pass();
+    nt_gfx_bind_pipeline(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = first}));
+    nt_gfx_bind_vertex_input(vi);
+    nt_gfx_set_uniform_vec4(color, value);
+    nt_gfx_draw(0, 3);
+    TEST_ASSERT_UINT8_WITHIN(1, 64, end_frame_center_red());
+    nt_gfx_destroy_program(first);
+
+    nt_program_t linking = nt_gfx_make_program(vs, fs);
+    TEST_ASSERT_EQUAL_UINT32(slot, nt_pool_slot_index(linking.id));
+    TEST_ASSERT_FALSE(nt_gfx_program_ready(linking));
+    nt_gfx_destroy_program(linking);
+
+    nt_program_t reused = nt_gfx_make_program(vs, fs);
+    TEST_ASSERT_EQUAL_UINT32(slot, nt_pool_slot_index(reused.id));
+    nt_test_gfx_link_wait(reused);
+    begin_black_pass();
+    nt_gfx_bind_pipeline(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = reused}));
+    nt_gfx_bind_vertex_input(vi);
+    install_state_counters();
+    nt_gfx_set_uniform_vec4(color, value);
+    nt_gfx_frame_execute();
+    TEST_ASSERT_EQUAL_UINT32(1, s_gl_calls.uniform_vec4);
+    remove_state_counters();
+    nt_gfx_draw(0, 3);
+    TEST_ASSERT_UINT8_WITHIN(1, 64, end_frame_center_red());
+}
+
 static void test_vec4_array_entries_and_other_types(void) {
     const char *fs = "precision mediump float;\n"
                      "uniform vec4 u_values[4]; uniform bvec4 u_gate; uniform int u_index;\n"
@@ -1742,6 +1819,8 @@ int main(void) {
     RUN_TEST(test_block_members_skip_the_uniform_cache);
     RUN_TEST(test_vec4_repeat_skips_physical_upload);
     RUN_TEST(test_vec4_cache_follows_program_lifetime);
+    RUN_TEST(test_buffer_slot_reuse_draws_each_buffers_own_data);
+    RUN_TEST(test_program_slot_reuse_uploads_the_first_vec4);
     RUN_TEST(test_vec4_array_entries_and_other_types);
     RUN_TEST(test_vec4_cache_compares_bytes_and_last_value);
     RUN_TEST(test_vertex_inputs_alternate_under_one_pipeline);

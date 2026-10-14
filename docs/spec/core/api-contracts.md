@@ -132,6 +132,11 @@ Virtual-resource APIs that publish a runtime handle do not automatically own or
 destroy the runtime object unless the function says it consumes ownership of the
 runtime object represented by that handle.
 
+Every gfx pool sized by `nt_gfx_desc_t` (`max_shaders`, `max_programs`,
+`max_pipelines`, `max_vertex_inputs`, `max_buffers`, `max_textures`,
+`max_render_targets`, `max_meshes`) asserts when a create finds it exhausted:
+the budget is configuration, not a runtime outcome.
+
 Frame-scoped values are plain values with no generation: a frame storage offset
 (`nt_gfx_frame_alloc`) and a deformation binding (`nt_skeletal_gpu_reserve`)
 stay valid until the owning module's next `begin_frame` (`nt_gfx_begin_frame`
@@ -291,8 +296,8 @@ and `DEPTH32F` require the same, plus `data == NULL` and no mipmaps.
 color storage: 4x4 blocks, 8 bytes per block for `ETC2_RGB8` and 16 for the other
 three. They require `data` and reject `gen_mipmaps`, because block data can only
 be uploaded, never generated. Each needs its capability bit (`has_etc2`,
-`has_bc7`, `has_astc`); a missing bit follows the `max_texture_size` precedent —
-error log, invalid handle, no storage created in every assert mode. Compressed
+`has_bc7`, `has_astc`); a missing bit follows the `max_texture_size` rule: the
+constructor asserts, so the game checks the bit before it creates. Compressed
 storage is ordinary sampled color everywhere else: `sampler2D` reads it, and
 `nt_gfx_update_texture` asserts on it, since a sub-rectangle of blocks is not a
 sub-rectangle of texels.
@@ -380,8 +385,8 @@ the public texture formats cannot satisfy them.
 Pack bytes are untrusted, so `nt_gfx_activate_texture` rejects a bad header
 instead of asserting on it: it logs and returns an invalid handle for an
 out-of-range pixel format, sampler defaults outside the filter/wrap enums,
-dimensions above `gpu_caps.max_texture_size` or above `UINT16_MAX`, a
-`data_size` longer than the blob, an unknown `compression`, and a RAW
+a zero dimension, dimensions above `gpu_caps.max_texture_size` or above
+`UINT16_MAX`, a `data_size` longer than the blob, an unknown `compression`, and a RAW
 `data_size` shorter than `width * height * bpp`. Magic, version and the minimum
 blob size are checked before the header is read. RAW assets then go through
 the public constructor unchanged.
@@ -458,8 +463,12 @@ engine stays lost and no later iteration recovers it. Backend failures caused by
 a loss are reported as `CONTEXT_LOST`; only the one that latches it logs an error.
 A GL object that cannot be named on a live context (a shader, program, buffer,
 texture, sampler, vertex input or framebuffer) asserts: WebGL creates null only on a lost context, and
-native `glGen*` does not run out of names. A full backend table asserts too: the
-frontend pools cap every table at its size.
+native `glGen*` does not run out of names. The backend tables of programs,
+pipelines, vertex inputs, buffers, textures and render targets are indexed by the
+frontend pool slot, so there is one allocation per object; a create into an
+occupied backend record asserts. A program, buffer or texture husk never reaches
+the backend: its destroy frees only the pool slot, because after a restore its
+old GL name may belong to a new object (a shader husk passes name 0, a no-op). Dead records stay until the restore empties every table.
 A sampler cache hit whose recreate meets the loss keeps its stable id and ends
 `CONTEXT_LOST`; a texture whose default sampler met it is not made.
 A loss frees every render-target slot, as it frees pipelines and vertex inputs;
@@ -470,17 +479,20 @@ that loss: the engine stays lost and a later begin_frame restores again.
 A render-target descriptor names the color and depth textures; an invalid
 handle means that attachment is absent, and at least one must be present. The
 textures must be live, single-level and of one size, which becomes the target
-size. Color takes `RGBA8` or `RGBA16F`; depth takes a `DEPTH*` format. The
+size. Color takes `RGBA8` or `RGBA16F`, which requires
+`gpu_caps.has_float_render_target`; depth takes a `DEPTH*` format. The
 descriptor carries no sampler state.
 
-An unsupported color or depth format, a target with no attachment, and an
+An unsupported color or depth format, `RGBA16F` without float rendering, a
+target with no attachment, and an
 invalid, husk, multi-level or differently sized attachment texture are
 developer errors and assert, as are exhausted configured target capacity and
 destroying a live target while the frame is being drawn (the frame rule).
 Creating a target is allowed anywhere, inside a pass too: the create is immediate,
 and a pass binds its framebuffer only when the stream executes. Destroying an invalid or stale target is a
-no-op even then: the handle check runs first. A returned invalid target therefore means a lost context
-or an incomplete framebuffer, such as `RGBA16F` without float rendering. `nt_gfx_make_pipeline`
+no-op even then: the handle check runs first. A returned invalid target therefore means a lost
+context; an incomplete framebuffer on a live context asserts (see
+[render architecture, Frame observation](../render/architecture.md#frame-observation)). `nt_gfx_make_pipeline`
 follows the same split: a
 NULL descriptor, an invalid program or one a context loss discarded, and an exhausted
 pipeline pool assert; a linking program is accepted. The backend create only fills a
@@ -507,9 +519,9 @@ lifetime rules of both live in
 Creating a pipeline or a vertex input
 preserves both current bindings (the bound pipeline and the bound vertex
 input); the caller does not need to rebind after creating another object.
-Framebuffer completeness and context restore remain runtime failures reported
-through invalid handles, `false`, or readiness
-queries. Texture upload failures
+Context loss and restore remain runtime outcomes reported through invalid
+handles, `false`, or readiness queries; on a live context an incomplete
+framebuffer, a failed link and a readback error assert. Texture upload failures
 are unchecked as specified above. Mandatory backend setup objects are internal
 invariants: failure to create the GL service EBO
 upload VAO with a live context asserts.

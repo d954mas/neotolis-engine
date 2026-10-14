@@ -24,6 +24,12 @@ typedef struct {
 static nt_gfx_fake_program_t s_fake_program_template;
 static nt_gfx_fake_program_t *s_fake_program_table;
 static uint32_t s_fake_max_programs;
+/* Buffer and texture records at the frontend slot, as the GL tables: a create into a live record
+ * or a destroy of an empty one asserts. A restore clears them like GL's memset. */
+static bool *s_fake_buffer_live;
+static uint32_t s_fake_max_buffers;
+static bool *s_fake_texture_live;
+static uint32_t s_fake_max_textures;
 
 void nt_gfx_fake_set_samplers(const char *const *names, uint8_t count) { nt_gfx_fake_set_samplers_typed(names, NULL, count); }
 
@@ -43,17 +49,6 @@ nt_program_t nt_gfx_fake_make_program_typed(const char *const *names, const uint
     const nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     const nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     return nt_gfx_make_program(vs, fs);
-}
-
-static uint32_t fake_alloc_slot(nt_gfx_fake_program_t *table, uint32_t capacity) {
-    for (uint32_t i = 1; i <= capacity; i++) {
-        if (!table[i].used) {
-            memset(&table[i], 0, sizeof(table[i]));
-            table[i].used = true;
-            return i;
-        }
-    }
-    return 0;
 }
 
 bool nt_gfx_backend_program_sampler_info(uint32_t program_backend, uint32_t name_hash, nt_gfx_sampler_info_t *out_info) {
@@ -119,21 +114,16 @@ static nt_texture_desc_t s_fake_last_texture_desc;
 static nt_buffer_desc_t s_fake_last_buffer_desc;
 static uint32_t s_fake_last_color_texture_backend;
 static uint32_t s_fake_last_depth_texture_backend;
-static uint32_t s_fake_next_texture_backend;
 static bool s_fake_context_lost;
 static bool s_fake_loss_pending; /* the web lost-event latch until begin_frame takes it */
 static uint32_t s_fake_texture_destroy_count;
 static uint32_t s_fake_last_destroyed_texture;
-static bool s_fake_fail_next_buffer_create;
 static uint8_t s_fake_lose_buffer_creates;
-static bool s_fake_fail_next_program_link;
 static bool s_fake_hold_program_links;
 static bool s_fake_lose_context_on_program_link;
-static bool s_fake_fail_next_sampler_create;
 static bool s_fake_lose_context_on_sampler_create;
 static bool s_fake_fail_next_backend_restore_lost;
 static bool s_fake_lose_context_during_next_restore;
-static bool s_fake_fail_next_render_target_create;
 static uint32_t s_fake_last_update_buffer_offset;
 static const void *s_fake_last_update_buffer_data;
 static uint32_t s_fake_last_update_buffer_size;
@@ -207,15 +197,11 @@ nt_texture_desc_t nt_gfx_fake_last_texture_desc(void) { return s_fake_last_textu
 nt_buffer_desc_t nt_gfx_fake_last_buffer_desc(void) { return s_fake_last_buffer_desc; }
 uint32_t nt_gfx_fake_last_color_texture_backend(void) { return s_fake_last_color_texture_backend; }
 uint32_t nt_gfx_fake_last_depth_texture_backend(void) { return s_fake_last_depth_texture_backend; }
-void nt_gfx_fake_fail_next_render_target_create(void) { s_fake_fail_next_render_target_create = true; }
 uint32_t nt_gfx_fake_texture_destroy_count(void) { return s_fake_texture_destroy_count; }
 uint32_t nt_gfx_fake_last_destroyed_texture(void) { return s_fake_last_destroyed_texture; }
-void nt_gfx_fake_fail_next_buffer_create(void) { s_fake_fail_next_buffer_create = true; }
 void nt_gfx_fake_lose_context_on_buffer_creates(uint8_t mask) { s_fake_lose_buffer_creates = mask; }
-void nt_gfx_fake_fail_next_program_link(void) { s_fake_fail_next_program_link = true; }
 void nt_gfx_fake_hold_program_links(bool hold) { s_fake_hold_program_links = hold; }
 void nt_gfx_fake_lose_context_on_program_link(void) { s_fake_lose_context_on_program_link = true; }
-void nt_gfx_fake_fail_next_sampler_create(void) { s_fake_fail_next_sampler_create = true; }
 void nt_gfx_fake_lose_context_on_sampler_create(void) { s_fake_lose_context_on_sampler_create = true; }
 void nt_gfx_fake_fail_next_backend_restore_lost(void) { s_fake_fail_next_backend_restore_lost = true; }
 void nt_gfx_fake_lose_context_during_next_restore(void) { s_fake_lose_context_during_next_restore = true; }
@@ -288,19 +274,15 @@ void nt_gfx_fake_reset(void) {
     s_fake_loss_pending = false;
     s_fake_texture_destroy_count = 0;
     s_fake_last_destroyed_texture = 0;
-    s_fake_fail_next_buffer_create = false;
     s_fake_lose_buffer_creates = 0;
-    s_fake_fail_next_program_link = false;
     s_fake_hold_program_links = false;
     s_fake_lose_context_on_program_link = false;
-    s_fake_fail_next_sampler_create = false;
     s_fake_lose_context_on_sampler_create = false;
     s_fake_fail_next_backend_restore_lost = false;
 #if NT_GFX_CAPTURE_ENABLED
     s_fake_backend_snapshot_count = 0;
 #endif
     s_fake_lose_context_during_next_restore = false;
-    s_fake_fail_next_render_target_create = false;
 }
 
 /* Deliberately outside nt_gfx_fake_reset: a test may reset the other observations mid-scenario and
@@ -351,19 +333,30 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     nt_gfx_fake_draw_trace_reset(false);
     s_fake_bound_pipeline = 0;
     free(s_fake_program_table);
+    free(s_fake_buffer_live);
+    free(s_fake_texture_live);
     s_fake_max_programs = desc->max_programs;
-    /* Init-only: a mid-test reset must never re-issue a texture id that is still live. */
-    s_fake_next_texture_backend = 0;
+    s_fake_max_buffers = desc->max_buffers;
+    s_fake_max_textures = desc->max_textures;
     nt_gfx_fake_set_samplers(NULL, 0);
+    /* Init-only: a mid-test reset must never forget a record that is still live. */
     s_fake_program_table = (nt_gfx_fake_program_t *)calloc((size_t)s_fake_max_programs + 1U, sizeof(nt_gfx_fake_program_t));
-    NT_ASSERT(s_fake_program_table && "gfx fake backend init: out of memory");
+    s_fake_buffer_live = (bool *)calloc((size_t)s_fake_max_buffers + 1U, sizeof(bool));
+    s_fake_texture_live = (bool *)calloc((size_t)s_fake_max_textures + 1U, sizeof(bool));
+    NT_ASSERT(s_fake_program_table && s_fake_buffer_live && s_fake_texture_live && "gfx fake backend init: out of memory");
     return true;
 }
 
 void nt_gfx_backend_shutdown(void) {
     free(s_fake_program_table);
+    free(s_fake_buffer_live);
+    free(s_fake_texture_live);
     s_fake_program_table = NULL;
+    s_fake_buffer_live = NULL;
+    s_fake_texture_live = NULL;
     s_fake_max_programs = 0;
+    s_fake_max_buffers = 0;
+    s_fake_max_textures = 0;
 }
 
 bool nt_gfx_backend_take_context_loss(void) {
@@ -440,44 +433,36 @@ uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
 
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle) { (void)backend_handle; }
 
-uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend) {
+bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uint32_t slot) {
     s_fake_program_create_count++;
+    NT_ASSERT(slot > 0 && slot <= s_fake_max_programs && !s_fake_program_table[slot].used && "create_program: the record at the frontend slot must be empty");
     if (s_fake_context_lost) {
-        return 0; /* GL creates no name on a lost context */
+        return false; /* GL creates no name on a lost context */
     }
     (void)vs_backend;
     (void)fs_backend;
-    const uint32_t slot = fake_alloc_slot(s_fake_program_table, s_fake_max_programs);
-    NT_ASSERT(slot != 0 && "fake program table full");
     s_fake_program_table[slot] = s_fake_program_template;
-    return slot;
+    return true;
 }
 
 nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll) {
     (void)poll;
-    NT_ASSERT(backend_handle != 0 && backend_handle <= s_fake_max_programs && "finish_program: handle out of range");
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_fake_max_programs && s_fake_program_table[backend_handle].used && "finish_program: requires a live record");
     if (s_fake_lose_context_on_program_link) {
         /* GL reports the link complete and failed on a lost context, before the loss event. */
         s_fake_lose_context_on_program_link = false;
         s_fake_context_lost = true;
         s_fake_loss_pending = true;
-        return NT_GFX_RESULT_BACKEND_FAILURE;
+        return NT_GFX_RESULT_CONTEXT_LOST;
     }
     if (s_fake_hold_program_links) {
         return NT_GFX_RESULT_UNREADY;
-    }
-    if (s_fake_fail_next_program_link) {
-        s_fake_fail_next_program_link = false;
-        return NT_GFX_RESULT_BACKEND_FAILURE;
     }
     return NT_GFX_RESULT_ACCEPTED;
 }
 
 void nt_gfx_backend_destroy_program(uint32_t backend_handle) {
-    if (backend_handle == 0) {
-        return;
-    }
-    NT_ASSERT(backend_handle <= s_fake_max_programs && "destroy_program: handle out of range");
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_fake_max_programs && s_fake_program_table[backend_handle].used && "destroy_program: requires a live record");
     memset(&s_fake_program_table[backend_handle], 0, sizeof(s_fake_program_table[backend_handle]));
 }
 
@@ -490,15 +475,13 @@ void nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t pro
 
 void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle) { (void)backend_handle; }
 
-uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot) {
+bool nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot) {
     (void)vbo_backend;
     (void)ibo_backend;
+    (void)slot;
     s_fake_vertex_input_create_count++;
     s_fake_last_vertex_input_layout = desc->layout;
-    if (s_fake_context_lost) {
-        return 0; /* GL creates no name on a lost context */
-    }
-    return slot;
+    return !s_fake_context_lost; /* GL creates no name on a lost context */
 }
 
 void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle) { (void)backend_handle; }
@@ -520,7 +503,8 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t layout_s
     }
 }
 
-uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
+bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot) {
+    NT_ASSERT(slot > 0 && slot <= s_fake_max_buffers && !s_fake_buffer_live[slot] && "create_buffer: the record at the frontend slot must be empty");
     s_fake_last_buffer_desc = *desc;
     const bool lose = (s_fake_lose_buffer_creates & 1U) != 0;
     s_fake_lose_buffer_creates >>= 1U;
@@ -529,7 +513,7 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
         s_fake_loss_pending = true;
     }
     if (s_fake_context_lost) {
-        return 0; /* GL creates no name on a lost context */
+        return false; /* GL creates no name on a lost context */
     }
     /* Hash at the upload boundary: the only place the GPU-form bytes exist. */
     if (desc->data != NULL && desc->size > 0) {
@@ -540,48 +524,43 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
             s_fake_last_vertex_buffer_hash = h;
         }
     }
-    if (s_fake_fail_next_buffer_create) {
-        s_fake_fail_next_buffer_create = false;
-        return 0;
-    }
-    /* Distinct names, so tests can tell which buffer a vertex input reads; never reset, as frame
-     * storage buffers made at init outlive a fake reset. */
-    static uint32_t s_next_buffer_backend;
-    return ++s_next_buffer_backend;
+    s_fake_buffer_live[slot] = true;
+    return true;
 }
 
-void nt_gfx_backend_destroy_buffer(uint32_t backend_handle) { (void)backend_handle; }
+void nt_gfx_backend_destroy_buffer(uint32_t backend_handle) {
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_fake_max_buffers && s_fake_buffer_live[backend_handle] && "destroy_buffer: requires a live record");
+    s_fake_buffer_live[backend_handle] = false;
+}
 
-uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
+bool nt_gfx_backend_create_texture(const nt_texture_desc_t *desc, uint32_t slot) {
+    NT_ASSERT(slot > 0 && slot <= s_fake_max_textures && !s_fake_texture_live[slot] && "create_texture: the record at the frontend slot must be empty");
     s_fake_last_texture_desc = *desc;
     s_fake_texture_create_count++;
     if (s_fake_context_lost) {
-        return 0; /* glGenTextures returns no name on a lost context */
+        return false; /* glGenTextures returns no name on a lost context */
     }
-    return ++s_fake_next_texture_backend;
+    s_fake_texture_live[slot] = true;
+    return true;
 }
 
 void nt_gfx_backend_destroy_texture(uint32_t backend_handle) {
-    if (backend_handle == 0) {
-        return;
-    }
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_fake_max_textures && s_fake_texture_live[backend_handle] && "destroy_texture: requires a live record");
+    s_fake_texture_live[backend_handle] = false;
     s_fake_last_destroyed_texture = backend_handle;
     s_fake_texture_destroy_count++;
 }
 
-uint32_t nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], uint32_t slot) {
+bool nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], uint32_t slot) {
     NT_ASSERT(textures[NT_GFX_RT_COLOR] != 0 || textures[NT_GFX_RT_DEPTH] != 0);
+    (void)slot;
     s_fake_render_target_create_count++;
     if (s_fake_context_lost) {
-        return 0; /* GL creates no name on a lost context */
+        return false; /* GL creates no name on a lost context */
     }
     s_fake_last_color_texture_backend = textures[NT_GFX_RT_COLOR];
     s_fake_last_depth_texture_backend = textures[NT_GFX_RT_DEPTH];
-    if (s_fake_fail_next_render_target_create) {
-        s_fake_fail_next_render_target_create = false;
-        return 0;
-    }
-    return slot;
+    return true;
 }
 
 void nt_gfx_backend_destroy_render_target(uint32_t backend_handle) {
@@ -629,10 +608,6 @@ uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
     }
     if (s_fake_context_lost) {
         return 0; /* GL creates no name on a lost context */
-    }
-    if (s_fake_fail_next_sampler_create) {
-        s_fake_fail_next_sampler_create = false;
-        return 0;
     }
     static uint32_t s_counter;
     return ++s_counter; /* unique id so tests can differentiate samplers */
@@ -722,18 +697,18 @@ void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uin
 }
 
 bool nt_gfx_backend_recreate_all_resources(void) {
-    /* The front-end drops every stage and program handle on loss without a
-     * destroy call, so the tables are released here, as in the GL backend. */
-    if (s_fake_program_table) {
-        memset(s_fake_program_table, 0, ((size_t)s_fake_max_programs + 1U) * sizeof(nt_gfx_fake_program_t));
-    }
     s_fake_backend_restore_count++;
     s_fake_loss_pending = false; /* a fresh context, like the web backend's */
+    /* As in GL: a context that cannot be created keeps the dead records. */
     if (s_fake_fail_next_backend_restore_lost) {
         s_fake_fail_next_backend_restore_lost = false;
         s_fake_context_lost = true;
         return false;
     }
+    /* The front-end drops husks without a destroy call, so the tables are released here, as in GL. */
+    memset(s_fake_program_table, 0, ((size_t)s_fake_max_programs + 1U) * sizeof(nt_gfx_fake_program_t));
+    memset(s_fake_buffer_live, 0, ((size_t)s_fake_max_buffers + 1U) * sizeof(bool));
+    memset(s_fake_texture_live, 0, ((size_t)s_fake_max_textures + 1U) * sizeof(bool));
     if (s_fake_lose_context_during_next_restore) {
         s_fake_lose_context_during_next_restore = false;
         s_fake_loss_pending = true;

@@ -1562,7 +1562,8 @@ static nt_gfx_result_t finish_backend_program(uint32_t program) {
     return result;
 }
 
-static void assert_reflection_query_failure_fails_the_finish(GLenum skipped_query) {
+/* Reflection of a linked program fails only on a lost context: on a live one it asserts. */
+static void assert_reflection_query_failure_asserts(GLenum skipped_query) {
     nt_gfx_shutdown();
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.max_programs = 2;
@@ -1579,11 +1580,12 @@ static void assert_reflection_query_failure_fails_the_finish(GLenum skipped_quer
                   "out vec4 frag_color;\n"
                   "void main() { frag_color = vec4(u_first + u_second); }\n",
     });
-    uint32_t existing = nt_gfx_backend_create_program(vs, fs);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, existing);
+    /* Backend-only programs: the fresh init made no frontend program, so both slots are free. */
+    const uint32_t existing = 1;
+    const uint32_t failing = 2;
+    TEST_ASSERT_TRUE(nt_gfx_backend_create_program(vs, fs, existing));
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, finish_backend_program(existing));
-    uint32_t failing = nt_gfx_backend_create_program(vs, fs);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, failing);
+    TEST_ASSERT_TRUE(nt_gfx_backend_create_program(vs, fs, failing));
 
     s_get_program_iv = glad_glGetProgramiv;
     s_get_active_uniform = glad_glGetActiveUniform;
@@ -1591,18 +1593,10 @@ static void assert_reflection_query_failure_fails_the_finish(GLenum skipped_quer
     s_failed_reflection_program = 0;
     glad_glGetProgramiv = skip_program_query;
     glad_glGetActiveUniform = skip_second_uniform_query;
-    nt_test_assert_install();
-    nt_test_assert_last_expr[0] = '\0';
-    nt_test_assert_armed = true;
-    volatile nt_gfx_result_t result = NT_GFX_RESULT_UNKNOWN;
-    if (setjmp(nt_test_assert_jmp) == 0) {
-        result = finish_backend_program(failing);
-    }
-    nt_test_assert_armed = false;
+    NT_TEST_EXPECT_ASSERT((void)finish_backend_program(failing));
     glad_glGetProgramiv = s_get_program_iv;
     glad_glGetActiveUniform = s_get_active_uniform;
-    TEST_ASSERT_EQUAL_STRING_MESSAGE("", nt_test_assert_last_expr, "incomplete reflection must return failure without asserting");
-    TEST_ASSERT_EQUAL(NT_GFX_RESULT_BACKEND_FAILURE, result);
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "program uniform reflection failed"));
     TEST_ASSERT_NOT_EQUAL_UINT32(0, s_failed_reflection_program);
 
     nt_gfx_backend_destroy_program(failing);
@@ -1611,11 +1605,98 @@ static void assert_reflection_query_failure_fails_the_finish(GLenum skipped_quer
     nt_gfx_backend_destroy_shader(vs);
 }
 
-static void test_missing_active_uniform_count_fails_the_finish(void) { assert_reflection_query_failure_fails_the_finish(GL_ACTIVE_UNIFORMS); }
+static void test_missing_active_uniform_count_asserts(void) { assert_reflection_query_failure_asserts(GL_ACTIVE_UNIFORMS); }
 
-static void test_missing_uniform_name_length_fails_the_finish(void) { assert_reflection_query_failure_fails_the_finish(GL_ACTIVE_UNIFORM_MAX_LENGTH); }
+static void test_missing_uniform_name_length_asserts(void) { assert_reflection_query_failure_asserts(GL_ACTIVE_UNIFORM_MAX_LENGTH); }
 
-static void test_missing_uniform_details_fail_the_finish(void) { assert_reflection_query_failure_fails_the_finish(0); }
+static void test_missing_uniform_details_assert(void) { assert_reflection_query_failure_asserts(0); }
+
+static void GLAD_API_PTR gen_no_names(GLsizei n, GLuint *names) {
+    for (GLsizei i = 0; i < n; i++) {
+        names[i] = 0;
+    }
+}
+
+/* A null name on a live context is a bug: the backend asserts and gfx latches no loss. */
+static void test_a_name_failure_on_a_live_context_asserts_without_latching(void) {
+    PFNGLGENBUFFERSPROC gen_buffers = glad_glGenBuffers;
+    glad_glGenBuffers = gen_no_names;
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}));
+    glad_glGenBuffers = gen_buffers;
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "could not name a GL object on a live context"));
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+
+    PFNGLGENSAMPLERSPROC gen_samplers = glad_glGenSamplers;
+    glad_glGenSamplers = gen_no_names;
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_sampler(&(nt_sampler_desc_t){.compare_func = NT_COMPARE_GREATER}));
+    glad_glGenSamplers = gen_samplers;
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "could not name a GL object on a live context"));
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+}
+
+static GLuint GLAD_API_PTR create_no_shader(GLenum type) {
+    (void)type;
+    return 0;
+}
+
+static PFNGLREADPIXELSPROC s_read_pixels;
+static PFNGLGETERRORPROC s_get_error;
+static bool s_fail_next_error;
+
+static void GLAD_API_PTR read_pixels_then_fail(GLint x, GLint y, GLsizei w, GLsizei h, GLenum format, GLenum type, void *pixels) {
+    s_read_pixels(x, y, w, h, format, type, pixels);
+    s_fail_next_error = true;
+}
+
+static GLenum GLAD_API_PTR error_after_read(void) {
+    if (s_fail_next_error) {
+        s_fail_next_error = false;
+        return GL_INVALID_OPERATION;
+    }
+    return s_get_error();
+}
+
+/* A null shader name and a readback GL error on a live context are bugs: they assert, no loss latches. */
+static void test_shader_name_and_readback_failures_on_a_live_context_assert(void) {
+    PFNGLCREATESHADERPROC create_shader = glad_glCreateShader;
+    glad_glCreateShader = create_no_shader;
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() {}\n"}));
+    glad_glCreateShader = create_shader;
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "could not name a GL object on a live context"));
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+
+    nt_gfx_end_frame();
+    uint8_t pixel[4] = {0};
+    s_read_pixels = glad_glReadPixels;
+    s_get_error = glad_glGetError;
+    glad_glReadPixels = read_pixels_then_fail;
+    glad_glGetError = error_after_read;
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 1, 1, pixel, sizeof(pixel)));
+    glad_glReadPixels = s_read_pixels;
+    glad_glGetError = s_get_error;
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "read_pixels: GL error on a live context"));
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    nt_gfx_begin_frame();
+}
+
+static GLenum GLAD_API_PTR framebuffer_unsupported(GLenum target) {
+    (void)target;
+    return GL_FRAMEBUFFER_UNSUPPORTED;
+}
+
+/* The engine's attachment formats are required framebuffer formats: an incomplete target on a
+ * live context is a driver or engine bug, so it asserts. */
+static void test_an_incomplete_framebuffer_on_a_live_context_asserts(void) {
+    nt_texture_t color = make_attachment(NT_TEXTURE_FORMAT_RGBA8, 4, 4);
+    PFNGLCHECKFRAMEBUFFERSTATUSPROC check_status = glad_glCheckFramebufferStatus;
+    glad_glCheckFramebufferStatus = framebuffer_unsupported;
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = color}));
+    glad_glCheckFramebufferStatus = check_status;
+    /* The assert left the half-built framebuffer bound; later tests draw to the window. */
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "render target incomplete on a live context"));
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+}
 
 static uint32_t s_link_status_queries;
 
@@ -1918,9 +1999,12 @@ int main(void) {
     RUN_TEST(test_two_draws_on_one_program_bind_at_their_queried_units);
     RUN_TEST(test_set_uniform_int_on_a_sampler_asserts);
     RUN_TEST(test_linking_a_program_keeps_the_bound_pipelines_program_current);
-    RUN_TEST(test_missing_active_uniform_count_fails_the_finish);
-    RUN_TEST(test_missing_uniform_name_length_fails_the_finish);
-    RUN_TEST(test_missing_uniform_details_fail_the_finish);
+    RUN_TEST(test_missing_active_uniform_count_asserts);
+    RUN_TEST(test_missing_uniform_name_length_asserts);
+    RUN_TEST(test_missing_uniform_details_assert);
+    RUN_TEST(test_a_name_failure_on_a_live_context_asserts_without_latching);
+    RUN_TEST(test_an_incomplete_framebuffer_on_a_live_context_asserts);
+    RUN_TEST(test_shader_name_and_readback_failures_on_a_live_context_assert);
     RUN_TEST(test_make_program_does_not_query_link_status);
     RUN_TEST(test_failed_link_logs_its_stage_and_asserts_at_begin_frame);
     int failures = UNITY_END();

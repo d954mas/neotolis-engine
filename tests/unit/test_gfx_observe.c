@@ -237,15 +237,6 @@ static void test_init_on_a_lost_context_latches_the_loss(void) {
     nt_gfx_fake_set_context_lost(false);
 }
 
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
-/* Only a loss the browser confirms latches: a name failure on a live context asserts instead. */
-static void test_a_name_failure_on_a_live_context_asserts_without_latching(void) {
-    nt_gfx_fake_fail_next_buffer_create();
-    NT_TEST_EXPECT_ASSERT(nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}));
-    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
-}
-#endif
-
 /* The latch keeps the tables until begin_frame takes the lost event, also when the context is back by then. */
 static void test_a_latched_loss_wipes_when_its_event_is_taken(void) {
     for (uint32_t taken = 0; taken < 2; taken++) {
@@ -742,7 +733,9 @@ static void test_every_operation_records_one_begin_and_one_result(void) {
     record_next_frame();
     nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8})});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_buffer(NULL).id);
+    /* A creator that ends without an object still records it as 0: a create that meets a loss. */
+    nt_gfx_fake_set_context_lost(true);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}).id);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 1.0F});
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -762,7 +755,7 @@ static void test_every_operation_records_one_begin_and_one_result(void) {
             TEST_ASSERT_GREATER_THAN_UINT32(0, depth);
             TEST_ASSERT_EQUAL(stack[--depth], e->operation);
             target_result |= e->operation == NT_GFX_OP_CREATE && e->object_kind == NT_GFX_OBJECT_RENDER_TARGET && e->object == target.id && e->result == NT_GFX_RESULT_ACCEPTED;
-            invalid_buffer |= e->operation == NT_GFX_OP_CREATE && e->object_kind == NT_GFX_OBJECT_BUFFER && e->object == 0 && e->result == NT_GFX_RESULT_INVALID_ARGUMENT;
+            invalid_buffer |= e->operation == NT_GFX_OP_CREATE && e->object_kind == NT_GFX_OBJECT_BUFFER && e->object == 0 && e->result == NT_GFX_RESULT_CONTEXT_LOST;
         }
     }
     TEST_ASSERT_EQUAL_UINT32(0, depth);
@@ -779,7 +772,8 @@ static void test_accepted_counters_match_recorded_results(void) {
     nt_gfx_set_scissor_enabled(false); /* unchanged: a cache result, not counted */
     nt_gfx_bind_pipeline((nt_pipeline_t){0});
     draw_teardown();
-    (void)nt_gfx_make_buffer(NULL);
+    nt_gfx_fake_set_context_lost(true); /* a create that meets the loss ends CONTEXT_LOST, not counted */
+    (void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8});
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
@@ -848,6 +842,43 @@ static void test_capture_initial_state_forgets_lost_bindings(void) {
     nt_gfx_begin_frame();
     capture = nt_gfx_capture_read();
     TEST_ASSERT_EQUAL_UINT32(1, initial_records(capture, NT_GFX_OP_SCISSOR, NT_GFX_RESULT_UNKNOWN));
+}
+
+/* The initial-state definition of a texture in a capture of the next frame. */
+static const nt_gfx_event_t *capture_texture_definition(nt_texture_t tex) {
+    record_next_frame();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    const nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *e = &capture.events[i];
+        if (e->kind == NT_GFX_EVENT_DEFINITION && e->object_kind == NT_GFX_OBJECT_TEXTURE && e->object == tex.id) {
+            return e;
+        }
+    }
+    return NULL;
+}
+
+/* A reused slot is a new object: the full handle differs, the backend is the slot; a husk has none. */
+static void test_capture_defines_reused_slots_and_husks_without_backend(void) {
+    static const uint8_t pixel[4] = {255, 255, 255, 255};
+    const nt_texture_desc_t desc = {.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8, .data = pixel};
+    nt_texture_t first = nt_gfx_make_texture(&desc);
+    nt_gfx_destroy_texture(first);
+    nt_texture_t reused = nt_gfx_make_texture(&desc);
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(first.id), nt_pool_slot_index(reused.id));
+    TEST_ASSERT_NOT_EQUAL_UINT32(first.id, reused.id);
+    const nt_gfx_event_t *live = capture_texture_definition(reused);
+    TEST_ASSERT_NOT_NULL(live);
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(reused.id), live->data.resource.backend);
+
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    const nt_gfx_event_t *husk = capture_texture_definition(reused);
+    TEST_ASSERT_NOT_NULL(husk);
+    TEST_ASSERT_EQUAL_UINT32(0, husk->data.resource.backend);
 }
 
 /* An equal bind and a merged indexed draw each end CACHE in the capture. */
@@ -1126,9 +1157,6 @@ int main(void) {
     RUN_TEST(test_loss_and_restore_between_iterations_restore_in_one_begin_frame);
     RUN_TEST(test_a_latched_loss_carries_a_whole_creation_chain);
     RUN_TEST(test_a_loss_latched_inside_a_pass_closes_the_pass);
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
-    RUN_TEST(test_a_name_failure_on_a_live_context_asserts_without_latching);
-#endif
     RUN_TEST(test_init_on_a_lost_context_latches_the_loss);
     RUN_TEST(test_a_latched_loss_wipes_when_its_event_is_taken);
     RUN_TEST(test_a_sampler_recreate_and_a_readback_latch_a_loss);
@@ -1166,6 +1194,7 @@ int main(void) {
     RUN_TEST(test_capture_defines_inherited_resources_and_unknown_scissor);
     RUN_TEST(test_capture_initial_state_holds_carried_over_bindings);
     RUN_TEST(test_capture_initial_state_forgets_lost_bindings);
+    RUN_TEST(test_capture_defines_reused_slots_and_husks_without_backend);
     RUN_TEST(test_capture_shows_cache_for_equal_binds_and_merged_draws);
     RUN_TEST(test_depth_only_render_target_definition_has_no_color_fields);
     RUN_TEST(test_draw_trace_preserves_arguments_and_live_prefix);

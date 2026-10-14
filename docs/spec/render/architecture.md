@@ -44,9 +44,12 @@ When enabled, the window requests a debug context and the backend installs a
 synchronous KHR_debug callback if the driver supports it. The callback logs
 messages and asserts on GL errors using the configured `NT_ASSERT_MODE`.
 
-`nt_gfx_make_texture` rejects dimensions above the GPU limit and unsupported
-compressed formats with an error log and an invalid handle before creating GPU
-storage. These are recoverable capability failures in every assert mode.
+`nt_gfx_make_texture` asserts on a zero size, dimensions above the GPU limit and
+unsupported compressed formats: the game checks `gpu_caps` before it creates, so
+its invalid handle means only a lost context (a program also rejects a stage a
+loss discarded, see [shader](shader.md#runtime-objects-shadercode-program)). Pack
+bytes are the exception: the texture activator rejects such headers before the
+constructor (see [texture activation](../core/api-contracts.md#texture-activation)).
 
 Engine-oriented, not WebGL-mirror and not full WebGPU abstraction:
 
@@ -287,12 +290,16 @@ and are not auto-restored: loss itself frees their pool slots, so a handle
 held across a loss goes stale and `nt_gfx_vertex_input_valid` reports false.
 A mesh's vertex input is made again on its first use after the restore; renderer
 caches validate on lookup and self-heal. This is the rule for baked objects — pipelines, vertex
-inputs and render targets, all assembled from other handles with no re-fill
-path: a context loss frees their pool slots outright. Primary resources (buffers, textures,
+inputs and render targets, all assembled from other handles and remade by their
+users (renderer caches self-heal on lookup; the restore recipe remakes render
+targets), so a context loss frees their pool slots outright. Primary resources (buffers, textures,
 shaders, programs) instead survive a loss as husks — pool slot alive,
-backend gone — because per-frame code keeps operating on them through the
-loss window and the restore recipe has their owners destroy the old handles
-explicitly. Applying a texture set containing a husk reports once and issues no
+backend gone — because materials and game code hold them through the loss
+window: programs and textures already report readiness (a link is asynchronous
+anyway), so draws skip a husk with no second validity check, and the restore
+recipe has their owners destroy the old handles explicitly. Destroying a stale
+program asserts; a stale shader, buffer or texture destroy logs an error and
+changes nothing. Applying a texture set containing a husk reports once and issues no
 texture or sampler bind, and the draws of that set are skipped; binding a husk
 buffer, or writing into any husk, asserts. Destroying handle 0 is a silent no-op
 for every primary type, so an owner whose create met a loss destroys without a check.
@@ -802,11 +809,9 @@ remains valid. `RGBA32F` is not supported for render targets — it additionally
 needs `OES_texture_float_linear` to be filtered and `EXT_float_blend` to be
 blended into, and both are absent on roughly half of iOS devices.
 
-Creation does not consult `gpu_caps.has_float_render_target`. A device that
-cannot render to half-float fails the backend completeness check, and creation
-returns invalid — the fallback path a caller needs regardless. The capability
-bit exists so a caller can choose its format without paying for a failed
-attempt.
+An `RGBA16F` color attachment requires `gpu_caps.has_float_render_target`
+(`EXT_color_buffer_float` on the web, core on native GL); creation asserts without
+it. A game that wants a fallback checks the bit and picks `RGBA8` itself.
 
 The supported depth formats are `DEPTH16`, `DEPTH24`, and `DEPTH32F`.
 Attachment textures, like every texture, keep GL default texture state; the
@@ -910,10 +915,10 @@ a handled loss, so shells must not) and sets one latch. Browser lost and restore
 events are separate tasks and never arrive inside a frame callback, so a restore
 never lands inside an iteration; a loss can (below). begin_frame always takes the
 latch, so a loss and restore that both happen between two callbacks (a
-background tab) still wipe the backend tables. Taking the latch wipes every backend
-handle and, unless a failed call latched the loss first, sets
+background tab) still wipe the frontend's backend state. Taking the latch turns every
+primary resource into a husk (the backend tables are emptied by the restore) and, unless a failed call latched the loss first, sets
 `g_nt_gfx.context_lost` and logs one error. While `context_lost` is
-set, begin_frame asks the browser (the only per-iteration JS query, and only in
+set, begin_frame asks the browser (the only query begin_frame issues, and only in
 the lost state; failed calls and readbacks ask on their own path); once the context is back, the same begin_frame restores it and
 sets `g_nt_gfx.context_restored` until the next begin_frame. The game therefore
 sees the restore before its resource step and before it builds anything. The
@@ -926,8 +931,11 @@ loss whose event was handled, so begin_frame has taken the latch and wiped befor
 it restores.
 
 A loss inside an iteration latches at the first backend call that fails on it:
-the call asks the browser, sets `g_nt_gfx.context_lost`, logs the one error and
-ends `CONTEXT_LOST`, and every later call takes its lost path. An owner therefore
+the backend has asked the browser (a live failure asserted there), so the
+frontend sets `g_nt_gfx.context_lost` without a query of its own, logs the one
+error and ends `CONTEXT_LOST`, and every later call takes its lost path. The
+frontend asks the browser itself only at init (after the capability probe), in
+begin_frame while lost, in the restore and after a backend read that reported success. An owner therefore
 creates in a straight line: once a shader create met the loss, the program,
 pipeline and vertex input built on it end `CONTEXT_LOST` instead of asserting on
 their 0 dependencies, and the draws take the lost path too. Operations issued
@@ -940,19 +948,26 @@ On a lost context pass calls keep their sequencing asserts and record nothing:
 `begin_pass` still opens the pass, pass-scoped calls end `CONTEXT_LOST` after the
 pass check, and `end_pass` closes the pass (its END is a backend no-op without a BEGIN).
 
-A backend call that reports a failure (a create, a readback, a lazy sampler recreate at bind or on a
-cache hit) asks the browser: a loss latches as above and ends the operation with
-`CONTEXT_LOST`. On a live context a GL object that cannot be named asserts (see
-[API contracts](../core/api-contracts.md)); a readback error and an incomplete
-framebuffer keep their own failure reason. A
-readback asks after every read as well: WebGL reports a loss once through
-`glGetError`, and the drain before the read consumes it. The backend asks only where the answer prevents a crash or a
-misleading log: before shader and program creation, because Emscripten throws on
-the null object some browsers return on a lost context; error logs for link,
-uniform reflection and framebuffer completeness, which a loss suppresses;
-after texture upload, because a nonzero WebGL name does not establish context
-liveness; and the vertex array made at context setup, whose name 0 asserts only
-on a live context. A GPU timer query named 0 leaves its segment unallocated and
+A backend call that reports a failure (a create, a link, a readback, a lazy sampler recreate at
+bind or on a cache hit) means a lost context: the loss latches as above and the operation ends
+`CONTEXT_LOST`. On a live context each of these failures is a bug, and the GL backend asserts
+where it happens: a GL object that cannot be named (see
+[API contracts, Render-target handles](../core/api-contracts.md#render-target-handles)), a failed link or uniform reflection, an incomplete
+framebuffer and a readback GL error. The engine's attachment formats are required framebuffer
+formats of GLES 3.0 ("Required Framebuffer Formats": `RGBA8`, `DEPTH16`, `DEPTH24`, `DEPTH32F`;
+`EXT_color_buffer_float` makes single-sample `RGBA16F` one too, and creation checks its bit), so a
+live driver must complete every target the engine builds. Two residual cases also assert: a
+texture whose GPU storage allocation failed (uploads are not polled) leaves its framebuffer
+incomplete, and a GPU-process death that fails a status before the browser reports the loss.
+A failure is classified by asking the browser after the failed call, for the same reason.
+A readback asks after every read as well: WebGL reports a loss once through
+`glGetError`, and the drain before the read consumes it. Beyond failures the backend asks where
+the answer prevents a crash: after shader creation and before program creation, because
+Emscripten gives WebGL's null shader a nonzero name that `glShaderSource` throws on, and throws
+inside `glCreateProgram` on a null program; after texture upload, because a nonzero WebGL name does
+not establish context liveness; for the vertex array made at context setup, whose name 0 asserts
+only on a live context; and at shutdown and when GPU timing turns off, before it deletes timer
+queries and the upload vertex array, because a GL call without a live context fails on the web. A GPU timer query named 0 leaves its segment unallocated and
 skipped, because `beginQuery` throws on it. A fresh context (init or restore) first
 drains GL errors: Emscripten keeps a recorded error across contexts, so a call
 that reached the dead context must not fail the fresh one's first check.
@@ -1103,7 +1118,9 @@ No event borrows upload memory, shader source or caller labels.
 
 Resource `DEFINITION/STATE` records with `object_kind=NONE` use `detail` as the
 resource kind and `backend.args[0..1]` as backend slot/raw GL name. Frontend resource definitions
-carry the full handle, current backend slot and available dimensions/relationships.
+carry the full handle, the backend identifier and available dimensions/relationships. Programs,
+pipelines, vertex inputs, buffers, textures and render targets carry the slot of `object`; a shader
+carries its raw GL name and a sampler its backend sampler id. A husk carries 0.
 A render-target definition carries the color and depth texture handles in
 `related[0..1]`, the color format in `format` and the depth format in `usage`,
 zero for an absent attachment, and the size of those textures.

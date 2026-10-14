@@ -680,10 +680,7 @@ typedef enum {
     NT_GFX_RESULT_INACTIVE,
     NT_GFX_RESULT_CONTEXT_LOST,
     NT_GFX_RESULT_INVALID_HANDLE,
-    NT_GFX_RESULT_INVALID_ARGUMENT,
     NT_GFX_RESULT_UNREADY,
-    NT_GFX_RESULT_BACKEND_FAILURE,
-    NT_GFX_RESULT_CAPACITY,
     NT_GFX_RESULT_UNKNOWN,
 } nt_gfx_result_t;
 
@@ -867,13 +864,14 @@ nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc);
  * register again after the next nt_gfx_init. */
 nt_instance_layout_t nt_gfx_make_instance_layout(const nt_vertex_layout_t *layout);
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc);
-/* A nonzero handle means upload commands were issued, not that GPU storage
- * allocation or upload succeeded; creation does not poll GPU errors. */
+/* Invalid means a lost context; a zero size, a size above gpu_caps.max_texture_size and a missing
+ * compressed format assert. A nonzero handle means uploads were issued, not that storage
+ * allocation succeeded: creation does not poll GPU errors. */
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc);
 nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc);
-/* Caller owns the result; destroy it with nt_gfx_destroy_render_target. The target
- * borrows its textures; INVALID means context loss or an incomplete framebuffer
- * (e.g. RGBA16F without float rendering); caller errors assert. */
+/* Caller owns the result; destroy it with nt_gfx_destroy_render_target. The target borrows its
+ * textures; INVALID means context loss. Caller errors, RGBA16F color without
+ * gpu_caps.has_float_render_target and an incomplete framebuffer on a live context assert. */
 nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc);
 
 /* ---- Resource destruction ----
@@ -923,7 +921,7 @@ bool nt_gfx_program_valid(nt_program_t prog);
 bool nt_gfx_pipeline_valid(nt_pipeline_t pip);
 /* Reports a live vertex-input slot; false after direct destruction, the
  * destroy_buffer cascade, or a context loss (loss frees every vertex-input
- * slot -- they are baked objects with no re-fill path). Renderer caches
+ * slot -- they are baked objects their users remake). Renderer caches
  * check this on lookup and self-heal. */
 bool nt_gfx_vertex_input_valid(nt_vertex_input_t vi);
 /* True once nt_gfx_begin_frame finished the link on the current context; never turns true inside a frame.
@@ -1002,8 +1000,8 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
  * nt_gfx_end_frame and the next nt_gfx_begin_frame (the window: before the swap). (x, y) is the
  * rect's bottom-left corner, as in GL; `out` is rgba8 (row pitch w*4), TOP-LEFT origin (y-flipped
  * once here), straight alpha. A render target needs an RGBA8 color attachment the rect fits in;
- * after a pass that discarded its color the content is undefined. Returns false on w<=0 || h<=0,
- * w*h*4 > out_cap (no write past the cap) or a lost context. */
+ * after a pass that discarded its color the content is undefined. w<=0 || h<=0 and
+ * w*h*4 > out_cap assert; returns false on a lost context. */
 bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint8_t *out, uint32_t out_cap);
 
 /* ---- Uniform blocks ---- */

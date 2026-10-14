@@ -386,6 +386,27 @@ void test_gfx_program_pool_full_asserts(void) {
     EXPECT_ASSERT(nt_gfx_make_program(vs, fs));
 }
 
+/* ---- Shader: exhausting the pool is a configuration error ---- */
+
+void test_gfx_shader_pool_full_asserts(void) {
+    for (int i = 0; i < 8; i++) { /* setUp: max_shaders = 8 */
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, make_test_vs().id);
+    }
+    EXPECT_ASSERT(make_test_vs());
+}
+
+/* A latched loss is checked before the pool: a lost create on a full pool returns invalid. */
+void test_gfx_shader_pool_full_while_lost_returns_invalid(void) {
+    for (int i = 0; i < 8; i++) {
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, make_test_vs().id);
+    }
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    TEST_ASSERT_EQUAL_UINT32(0, make_test_vs().id);
+}
+
 /* ---- Program: invalid stage handle asserts ---- */
 
 void test_gfx_make_program_asserts_invalid_shader(void) {
@@ -393,19 +414,6 @@ void test_gfx_make_program_asserts_invalid_shader(void) {
     nt_shader_t fs = make_test_fs();
     EXPECT_ASSERT(nt_gfx_make_program((nt_shader_t){0}, fs));
     EXPECT_ASSERT(nt_gfx_make_program(vs, (nt_shader_t){0}));
-}
-
-/* ---- Program: link failure asserts where the link finishes ---- */
-
-void test_gfx_link_failure_asserts_in_begin_frame(void) {
-    nt_shader_t vs = make_test_vs();
-    nt_shader_t fs = make_test_fs();
-    nt_gfx_fake_fail_next_program_link();
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
-    TEST_ASSERT_TRUE(nt_gfx_program_valid(prog));
-    nt_gfx_end_frame();
-    EXPECT_ASSERT(nt_gfx_begin_frame());
-    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "program link failed"));
 }
 
 /* ---- Program: the link runs across frames and only a begin_frame finishes it ---- */
@@ -448,17 +456,18 @@ void test_gfx_destroy_while_linking_frees_the_slot(void) {
     nt_gfx_destroy_program(pending);
     TEST_ASSERT_FALSE(nt_gfx_program_valid(pending));
 
-    /* Armed for the next finished link: the destroyed one must not consume it. */
-    nt_gfx_fake_fail_next_program_link();
+    /* The destroyed link is gone: the fake's per-slot record asserts if begin_frame finished it. */
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
 
     nt_program_t reused = nt_gfx_make_program(make_test_vs(), make_test_fs());
     TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(pending.id), nt_pool_slot_index(reused.id));
     TEST_ASSERT_NOT_EQUAL_UINT32(pending.id, reused.id);
+    TEST_ASSERT_FALSE(nt_gfx_program_ready(reused));
     nt_gfx_end_frame();
-    EXPECT_ASSERT(nt_gfx_begin_frame());
-    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "program link failed"));
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(nt_gfx_program_ready(reused));
+    TEST_ASSERT_FALSE(nt_gfx_program_valid(pending));
 }
 
 /* ---- Program: a loss met while finishing a link latches it, never asserts ---- */
@@ -981,6 +990,91 @@ static void restore_lost_context(void) {
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
 }
 
+/* Primary resources a loss left as husks. */
+typedef struct {
+    nt_program_t program;
+    nt_buffer_t buffer;
+    nt_texture_t texture;
+} husks_t;
+
+static husks_t make_husks(void) {
+    husks_t h = {
+        .program = nt_gfx_make_program(make_test_vs(), make_test_fs()),
+        .buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}),
+        .texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = s_test_pixels_4x4}),
+    };
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    TEST_ASSERT_TRUE(nt_gfx_program_valid(h.program));
+    TEST_ASSERT_FALSE(nt_gfx_texture_ready(h.texture));
+    return h;
+}
+
+static void destroy_husks(husks_t h) {
+    nt_gfx_destroy_program(h.program);
+    nt_gfx_destroy_buffer(h.buffer);
+    nt_gfx_destroy_texture(h.texture);
+}
+
+/* A husk never reaches the backend: after a restore its old number may name a new object, and the
+ * fake's emptied records assert if a destroy reaches them. The next create reuses the slot. */
+void test_gfx_husks_skip_the_backend_and_their_slots_are_reused_after_restore(void) {
+    husks_t h = make_husks();
+    restore_lost_context();
+    const uint32_t texture_destroys = nt_gfx_fake_texture_destroy_count();
+    destroy_husks(h);
+    TEST_ASSERT_EQUAL_UINT32(texture_destroys, nt_gfx_fake_texture_destroy_count());
+    husks_t fresh = {
+        .program = nt_gfx_make_program(make_test_vs(), make_test_fs()),
+        .buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}),
+        .texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = s_test_pixels_4x4}),
+    };
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(h.program.id), nt_pool_slot_index(fresh.program.id));
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(h.texture.id), nt_pool_slot_index(fresh.texture.id));
+    TEST_ASSERT_FALSE(nt_gfx_program_valid(h.program));
+    TEST_ASSERT_FALSE(nt_gfx_texture_ready(h.texture));
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(fresh.texture));
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(fresh.texture.id), nt_gfx_test_texture_backend_id(fresh.texture));
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(fresh.buffer.id), nt_gfx_test_buffer_backend_id(fresh.buffer));
+    nt_test_gfx_link_wait(fresh.program);
+    TEST_ASSERT_TRUE(nt_gfx_program_ready(fresh.program));
+    destroy_husks(fresh);
+}
+
+/* A failed restore keeps the dead backend records; the destroy count shows texture husks never reach them. */
+void test_gfx_husks_after_a_failed_restore_reach_no_backend_record(void) {
+    husks_t h = make_husks();
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_fake_fail_next_backend_restore_lost();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    const uint32_t texture_destroys = nt_gfx_fake_texture_destroy_count();
+    nt_gfx_destroy_buffer(h.buffer);
+    nt_gfx_shutdown(); /* program and texture husks still in their pools */
+    TEST_ASSERT_EQUAL_UINT32(texture_destroys, nt_gfx_fake_texture_destroy_count());
+    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16));
+    nt_gfx_begin_frame();
+}
+
+/* A texture whose default sampler met the loss gives its exact slot and backend record back. */
+void test_gfx_texture_rolled_back_by_its_sampler_frees_its_slot(void) {
+    nt_texture_t probe = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = s_test_pixels_4x4});
+    const uint32_t slot = nt_pool_slot_index(probe.id);
+    nt_gfx_destroy_texture(probe);
+    const uint32_t destroys = nt_gfx_fake_texture_destroy_count();
+    nt_gfx_fake_lose_context_on_sampler_create();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = s_test_pixels_4x4, .min_filter = NT_FILTER_LINEAR}).id);
+    TEST_ASSERT_EQUAL_UINT32(destroys + 1U, nt_gfx_fake_texture_destroy_count());
+    TEST_ASSERT_EQUAL_UINT32(slot, nt_gfx_fake_last_destroyed_texture());
+    restore_lost_context();
+    nt_texture_t next = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = s_test_pixels_4x4});
+    TEST_ASSERT_EQUAL_UINT32(slot, nt_pool_slot_index(next.id));
+    nt_gfx_destroy_texture(next);
+}
+
 /* A create that meets a loss gives its pool slot back: a leak would cost one slot per loss. */
 void test_gfx_creates_that_meet_a_loss_free_their_pool_slots(void) {
     nt_gfx_fake_set_context_lost(true);
@@ -1006,41 +1100,6 @@ void test_gfx_creates_that_meet_a_loss_free_their_pool_slots(void) {
     for (uint32_t i = 0; i < 4; i++) {
         nt_gfx_destroy_buffer(buffers[i]);
     }
-}
-
-/* The cache hit recreates a sampler the loss zeroed; on a live context its name cannot fail. */
-void test_gfx_sampler_hit_recreate_name_failure_on_a_live_context_asserts(void) {
-    const nt_sampler_desc_t desc = {.compare_func = NT_COMPARE_LESS};
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_make_sampler(&desc).id);
-    nt_gfx_fake_lose_and_restore_context();
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
-    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
-    nt_gfx_fake_fail_next_sampler_create();
-    EXPECT_ASSERT(nt_gfx_make_sampler(&desc));
-    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "could not name a GL object on a live context"));
-}
-
-void test_gfx_sampler_recreate_name_failure_on_a_live_context_asserts(void) {
-    nt_sampler_t compare = nt_gfx_make_sampler(&(nt_sampler_desc_t){.compare_func = NT_COMPARE_LESS});
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, compare.id);
-    nt_gfx_fake_lose_and_restore_context();
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
-
-    nt_texture_t color = make_binding_test_texture(1);
-    nt_texture_t depth = make_binding_test_texture_format(NT_TEXTURE_FORMAT_DEPTH24);
-    nt_program_t program = nt_gfx_fake_make_program_typed((const char *const[]){"u_color", "u_shadow"}, (const uint8_t[]){NT_GFX_SAMPLER_CLASS_FLOAT, NT_GFX_SAMPLER_CLASS_SHADOW}, 2);
-    nt_test_gfx_link_wait(program);
-    begin_texture_binding_test_pass(program);
-    bind_test_vertex_input();
-    const nt_gfx_texture_binding_t bindings[] = {
-        {.name = nt_hash32_str("u_color"), .texture = color, .sampler = NT_SAMPLER_DEFAULT},
-        {.name = nt_hash32_str("u_shadow"), .texture = depth, .sampler = compare},
-    };
-    nt_gfx_fake_fail_next_sampler_create();
-    EXPECT_ASSERT(nt_gfx_apply_texture_bindings(bindings, 2));
-    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "could not name a GL object on a live context"));
 }
 
 void test_gfx_texture_set_clears_on_pass_begin_and_failed_bind(void) {
@@ -1602,12 +1661,9 @@ void test_gfx_make_texture_requires_explicit_format(void) {
     }));
 }
 
-/* ---- Texture: NULL desc ---- */
+/* ---- Texture: NULL desc is a caller bug ---- */
 
-void test_gfx_make_texture_null_desc(void) {
-    nt_texture_t tex = nt_gfx_make_texture(NULL);
-    TEST_ASSERT_EQUAL_UINT32(0, tex.id);
-}
+void test_gfx_make_texture_null_desc(void) { EXPECT_ASSERT(nt_gfx_make_texture(NULL)); }
 
 /* ---- Texture: NULL data allocates storage for later update_texture ---- */
 
@@ -1625,25 +1681,23 @@ void test_gfx_make_texture_null_data(void) {
 /* ---- Texture: zero width ---- */
 
 void test_gfx_make_texture_zero_width(void) {
-    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 0,
         .height = 4,
         .format = NT_TEXTURE_FORMAT_RGBA8,
         .data = s_test_pixels_4x4,
-    });
-    TEST_ASSERT_EQUAL_UINT32(0, tex.id);
+    }));
 }
 
 /* ---- Texture: zero height ---- */
 
 void test_gfx_make_texture_zero_height(void) {
-    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 0,
         .format = NT_TEXTURE_FORMAT_RGBA8,
         .data = s_test_pixels_4x4,
-    });
-    TEST_ASSERT_EQUAL_UINT32(0, tex.id);
+    }));
 }
 
 /* ---- Texture: NPOT dimensions accepted ---- */
@@ -1896,16 +1950,17 @@ void test_gfx_make_texture_rejects_bad_level_counts_before_allocation(void) {
     }
 }
 
-void test_gfx_make_texture_rejects_unsupported_gpu_requirements(void) {
+/* Caps are the game's to check: a texture the GPU cannot hold is a caller bug. */
+void test_gfx_make_texture_asserts_on_unsupported_gpu_requirements(void) {
     /* Fake caps report no compressed support. */
     uint32_t creates = nt_gfx_fake_texture_create_count();
     for (size_t i = 0; i < sizeof(s_compressed_formats) / sizeof(s_compressed_formats[0]); i++) {
-        TEST_ASSERT_EQUAL_UINT32(0, make_compressed_texture(s_compressed_formats[i]).id);
+        EXPECT_ASSERT(make_compressed_texture(s_compressed_formats[i]));
     }
     const uint16_t too_large = (uint16_t)(nt_gfx_gpu_caps()->max_texture_size + 1U);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_texture(&(nt_texture_desc_t){.width = too_large, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8}).id);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = too_large, .format = NT_TEXTURE_FORMAT_RGBA8}).id);
-    /* Rejected before the backend: no GL name was ever asked for. */
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){.width = too_large, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8}));
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = too_large, .format = NT_TEXTURE_FORMAT_RGBA8}));
+    /* Asserted before the backend: no GL name was ever asked for, and no pool slot leaked. */
     TEST_ASSERT_EQUAL_UINT32(creates, nt_gfx_fake_texture_create_count());
 
     nt_texture_t textures[8];
@@ -2042,6 +2097,25 @@ void test_gfx_texture_pool_full_asserts(void) {
     }));
     for (int i = 0; i < 8; i++) {
         nt_gfx_destroy_texture(textures[i]);
+    }
+}
+
+/* ---- Activator: a zero dimension in pack bytes is rejected, not asserted ---- */
+
+void test_activate_texture_rejects_zero_dimensions(void) {
+    uint8_t blob[sizeof(NtTextureAssetHeaderV2)];
+    NtTextureAssetHeaderV2 *hdr = (NtTextureAssetHeaderV2 *)blob;
+    const uint32_t sizes[2][2] = {{0, 1}, {1, 0}};
+    for (int i = 0; i < 2; i++) {
+        memset(blob, 0, sizeof(blob));
+        hdr->magic = NT_TEXTURE_MAGIC;
+        hdr->version = NT_TEXTURE_VERSION_V2;
+        hdr->format = NT_TEXTURE_FORMAT_RGBA8;
+        hdr->width = sizes[i][0];
+        hdr->height = sizes[i][1];
+        hdr->mip_count = 1;
+        hdr->compression = NT_TEXTURE_COMPRESSION_RAW;
+        TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_texture(blob, (uint32_t)sizeof(blob)));
     }
 }
 
@@ -3924,8 +3998,9 @@ int main(void) {
     RUN_TEST(test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost);
     RUN_TEST(test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds);
     RUN_TEST(test_gfx_creates_that_meet_a_loss_free_their_pool_slots);
-    RUN_TEST(test_gfx_sampler_hit_recreate_name_failure_on_a_live_context_asserts);
-    RUN_TEST(test_gfx_sampler_recreate_name_failure_on_a_live_context_asserts);
+    RUN_TEST(test_gfx_husks_skip_the_backend_and_their_slots_are_reused_after_restore);
+    RUN_TEST(test_gfx_husks_after_a_failed_restore_reach_no_backend_record);
+    RUN_TEST(test_gfx_texture_rolled_back_by_its_sampler_frees_its_slot);
     RUN_TEST(test_gfx_texture_set_clears_on_pass_begin_and_failed_bind);
     RUN_TEST(test_gfx_destroy_program_accepts_invalid);
     RUN_TEST(test_gfx_destroy_program_asserts_on_a_stale_handle);
@@ -3938,8 +4013,9 @@ int main(void) {
     RUN_TEST(test_gfx_program_slot_reused_after_destroy);
     RUN_TEST(test_gfx_program_survives_shader_destroy);
     RUN_TEST(test_gfx_program_pool_full_asserts);
+    RUN_TEST(test_gfx_shader_pool_full_asserts);
+    RUN_TEST(test_gfx_shader_pool_full_while_lost_returns_invalid);
     RUN_TEST(test_gfx_make_program_asserts_invalid_shader);
-    RUN_TEST(test_gfx_link_failure_asserts_in_begin_frame);
     RUN_TEST(test_gfx_program_links_at_a_begin_frame);
     RUN_TEST(test_gfx_destroy_while_linking_frees_the_slot);
     RUN_TEST(test_gfx_context_loss_during_link_finish_latches_the_loss);
@@ -4000,7 +4076,7 @@ int main(void) {
     RUN_TEST(test_gfx_make_texture_compressed_binds_with_color_samplers);
     RUN_TEST(test_gfx_make_texture_passes_level_count_through_to_the_backend);
     RUN_TEST(test_gfx_make_texture_rejects_bad_level_counts_before_allocation);
-    RUN_TEST(test_gfx_make_texture_rejects_unsupported_gpu_requirements);
+    RUN_TEST(test_gfx_make_texture_asserts_on_unsupported_gpu_requirements);
     RUN_TEST(test_gfx_make_texture_hands_the_contiguous_mip_chain_to_the_backend);
     RUN_TEST(test_gfx_make_texture_bc7_requires_aligned_base_dimensions);
     RUN_TEST(test_gfx_destroy_texture_and_reuse);
@@ -4009,6 +4085,7 @@ int main(void) {
     RUN_TEST(test_gfx_texture_pool_full_asserts);
     /* Activator tests */
     RUN_TEST(test_activate_texture_valid_blob);
+    RUN_TEST(test_activate_texture_rejects_zero_dimensions);
     RUN_TEST(test_activate_texture_bad_magic);
     RUN_TEST(test_activate_texture_too_small);
     RUN_TEST(test_activate_mesh_valid_blob);

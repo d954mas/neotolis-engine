@@ -1,8 +1,9 @@
-/* nt_gfx_read_pixels contract — cap-reject / top-left orientation /
- * channel layout / bad-size reject. Links nt_gfx_fake (deterministic synthetic
- * gradient, no GL context — the only L1 readback layer CTest can prove headless). */
+/* nt_gfx_read_pixels contract — cap assert / top-left orientation /
+ * channel layout / bad-size assert. Links nt_gfx_fake (deterministic synthetic
+ * gradient, no GL context — the only readback layer CTest can prove headless). */
 
 #include "graphics/nt_gfx.h"
+#include "test_helpers/nt_assert_trap.h"
 #include "unity.h"
 
 #include <stdint.h>
@@ -21,16 +22,15 @@ void tearDown(void) { nt_gfx_shutdown(); }
  *   R = r & 0xFF, G = c & 0xFF, B = 0x40, A = 0xFF.
  * After the shared-layer Y-flip, out row 0 must carry GL row (h-1). */
 
-/* out_cap < w*h*4 -> false, no write past the cap. */
-void test_read_pixels_rejects_too_small_cap(void) {
+/* out_cap < w*h*4 is a caller bug: it asserts before any write. */
+void test_read_pixels_asserts_on_a_too_small_cap(void) {
     enum { W = 4, H = 4 };
     uint8_t buf[(W * H * 4) + 1];
     const uint8_t kGuard = 0xABU;
     memset(buf, kGuard, sizeof(buf));
 
     /* Cap one byte short of the required w*h*4. */
-    bool ok = nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, W, H, buf, (uint32_t)(W * H * 4) - 1U);
-    TEST_ASSERT_FALSE(ok);
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, W, H, buf, (uint32_t)(W * H * 4) - 1U));
     /* Nothing was written — every byte still the guard value. */
     for (size_t i = 0; i < sizeof(buf); i++) {
         TEST_ASSERT_EQUAL_UINT8(kGuard, buf[i]);
@@ -74,16 +74,16 @@ void test_read_pixels_channel_layout_rgba8(void) {
     }
 }
 
-/* w<=0 or h<=0 -> false; no overflow, no write. */
-void test_read_pixels_rejects_bad_size(void) {
+/* w<=0 or h<=0 is a caller bug: it asserts before any write. */
+void test_read_pixels_asserts_on_a_bad_size(void) {
     uint8_t buf[16];
     const uint8_t kGuard = 0xCDU;
     memset(buf, kGuard, sizeof(buf));
 
-    TEST_ASSERT_FALSE(nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 0, 4, buf, (uint32_t)sizeof(buf)));
-    TEST_ASSERT_FALSE(nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 4, 0, buf, (uint32_t)sizeof(buf)));
-    TEST_ASSERT_FALSE(nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, -1, 4, buf, (uint32_t)sizeof(buf)));
-    TEST_ASSERT_FALSE(nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 4, -1, buf, (uint32_t)sizeof(buf)));
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 0, 4, buf, (uint32_t)sizeof(buf)));
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 4, 0, buf, (uint32_t)sizeof(buf)));
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, -1, 4, buf, (uint32_t)sizeof(buf)));
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 4, -1, buf, (uint32_t)sizeof(buf)));
     for (size_t i = 0; i < sizeof(buf); i++) {
         TEST_ASSERT_EQUAL_UINT8(kGuard, buf[i]);
     }
@@ -91,9 +91,9 @@ void test_read_pixels_rejects_bad_size(void) {
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_read_pixels_rejects_too_small_cap);
+    RUN_TEST(test_read_pixels_asserts_on_a_too_small_cap);
     RUN_TEST(test_read_pixels_top_left_orientation);
     RUN_TEST(test_read_pixels_channel_layout_rgba8);
-    RUN_TEST(test_read_pixels_rejects_bad_size);
+    RUN_TEST(test_read_pixels_asserts_on_a_bad_size);
     return UNITY_END();
 }

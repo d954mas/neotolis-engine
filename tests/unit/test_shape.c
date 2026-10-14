@@ -110,7 +110,7 @@ void test_shape_set_stream_routes_instances(void) {
 void test_shape_restore_rebuilds_stream_vertex_inputs(void) {
     const float c[3] = {0, 0, 0};
     const float size[3] = {1, 1, 1};
-    const uint32_t old_stream = nt_gfx_test_buffer_backend_id(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1));
+    const nt_buffer_t old_stream = nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_fake_lose_and_restore_context();
@@ -120,11 +120,15 @@ void test_shape_restore_rebuilds_stream_vertex_inputs(void) {
     nt_gfx_end_frame(); /* program links finish in begin_frame */
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    const uint32_t binds = nt_gfx_fake_bind_vertex_input_count();
     nt_shape_renderer_set_stream(NT_GFX_FRAME_VERTEX + 1);
     nt_shape_renderer_cube(c, size, NULL, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     nt_test_frame_next();
-    TEST_ASSERT_NOT_EQUAL_UINT32(old_stream, nt_gfx_test_buffer_backend_id(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1)));
+    /* The new buffer may reuse the old slot, so the bound slot alone proves nothing: a bind happened
+     * after the restore, and the handle generation tells the buffers apart. */
+    TEST_ASSERT_GREATER_THAN_UINT32(binds, nt_gfx_fake_bind_vertex_input_count());
+    TEST_ASSERT_NOT_EQUAL_UINT32(old_stream.id, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1).id);
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_buffer_backend_id(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1)), nt_gfx_fake_last_instance_buffer());
 }
 

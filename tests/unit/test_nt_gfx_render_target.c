@@ -128,6 +128,30 @@ static void test_make_asserts_on_attachment_misuse(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_render_target_create_count());
 }
 
+/* A target create that meets the loss latches it; the restore leaves every target slot free. */
+static void test_a_create_that_meets_the_loss_frees_its_slot(void) {
+    nt_texture_t color = make_color();
+    const uint32_t creates = nt_gfx_fake_render_target_create_count();
+    nt_gfx_fake_set_context_lost(true);
+    TEST_ASSERT_EQUAL_UINT32(0, make_target(color, NO_TEXTURE).id);
+    TEST_ASSERT_EQUAL_UINT32(creates + 1U, nt_gfx_fake_render_target_create_count());
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    restore_context();
+    color = make_color();
+    for (int i = 0; i < 4; i++) { /* setUp: max_render_targets = 4 */
+        TEST_ASSERT_TRUE(nt_gfx_render_target_valid(make_target(color, NO_TEXTURE)));
+    }
+}
+
+/* The game checks the capability bit and picks its format; gfx does not try and fail. */
+static void test_make_asserts_on_rgba16f_without_float_rendering(void) {
+    nt_texture_t half = make_attachment(NT_TEXTURE_FORMAT_RGBA16F, 64, 32);
+    g_nt_gfx.gpu_caps.has_float_render_target = false;
+    NT_TEST_EXPECT_ASSERT(make_target(half, NO_TEXTURE));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_render_target_create_count());
+    TEST_ASSERT_TRUE(nt_gfx_render_target_valid(make_target(make_color(), NO_TEXTURE)));
+}
+
 /* A pool-valid texture that outlived a loss has no GL name to attach. */
 static void test_make_asserts_on_texture_husk(void) {
     nt_texture_t color = make_color();
@@ -139,23 +163,6 @@ static void test_make_asserts_on_texture_husk(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_render_target_create_count());
 }
 
-/* An incomplete framebuffer (RGBA16F without float rendering) is a runtime
- * failure: creation returns INVALID and the borrowed textures stay the caller's. */
-static void test_backend_failure_returns_invalid_and_keeps_textures(void) {
-    nt_texture_t color = make_color();
-    nt_texture_t depth = make_depth();
-    nt_gfx_fake_fail_next_render_target_create();
-
-    TEST_ASSERT_EQUAL_UINT32(0, make_target(color, depth).id);
-    TEST_ASSERT_TRUE(nt_gfx_texture_ready(color));
-    TEST_ASSERT_TRUE(nt_gfx_texture_ready(depth));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_texture_destroy_count());
-
-    /* setUp capacity is 4 targets: the failed make returned its slot. */
-    for (int i = 0; i < 4; i++) {
-        TEST_ASSERT_TRUE(nt_gfx_render_target_valid(make_target(color, depth)));
-    }
-}
 // #endregion
 
 // #region lifetime
@@ -755,7 +762,8 @@ int main(void) {
     RUN_TEST(test_half_float_color_is_accepted);
     RUN_TEST(test_make_asserts_on_attachment_misuse);
     RUN_TEST(test_make_asserts_on_texture_husk);
-    RUN_TEST(test_backend_failure_returns_invalid_and_keeps_textures);
+    RUN_TEST(test_make_asserts_on_rgba16f_without_float_rendering);
+    RUN_TEST(test_a_create_that_meets_the_loss_frees_its_slot);
     RUN_TEST(test_shared_depth_texture_serves_two_targets);
     RUN_TEST(test_destroying_a_texture_destroys_only_its_targets);
     RUN_TEST(test_destroy_render_target_tolerates_invalid_and_stale_handles);
