@@ -910,8 +910,8 @@ a handled loss, so shells must not) and sets one latch. Browser lost and restore
 events are separate tasks and never arrive inside a frame callback, so a restore
 never lands inside an iteration; a loss can (below). begin_frame always takes the
 latch, so a loss and restore that both happen between two callbacks (a
-background tab) still wipe the backend tables. Taking the latch wipes every backend
-handle and, unless a failed call latched the loss first, sets
+background tab) still wipe the frontend's backend state. Taking the latch turns every
+primary resource into a husk (the backend tables are emptied by the restore) and, unless a failed call latched the loss first, sets
 `g_nt_gfx.context_lost` and logs one error. While `context_lost` is
 set, begin_frame asks the browser (the only per-iteration JS query, and only in
 the lost state; failed calls and readbacks ask on their own path); once the context is back, the same begin_frame restores it and
@@ -1103,7 +1103,8 @@ No event borrows upload memory, shader source or caller labels.
 
 Resource `DEFINITION/STATE` records with `object_kind=NONE` use `detail` as the
 resource kind and `backend.args[0..1]` as backend slot/raw GL name. Frontend resource definitions
-carry the full handle, current backend slot and available dimensions/relationships.
+carry the full handle, current backend slot and available dimensions/relationships. For
+slot-indexed kinds the backend slot is the slot of `object`; a husk carries 0.
 A render-target definition carries the color and depth texture handles in
 `related[0..1]`, the color format in `format` and the depth format in `usage`,
 zero for an absent attachment, and the size of those textures.

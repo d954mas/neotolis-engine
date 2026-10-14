@@ -1579,11 +1579,12 @@ static void assert_reflection_query_failure_fails_the_finish(GLenum skipped_quer
                   "out vec4 frag_color;\n"
                   "void main() { frag_color = vec4(u_first + u_second); }\n",
     });
-    uint32_t existing = nt_gfx_backend_create_program(vs, fs);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, existing);
+    /* Backend-only programs: the fresh init made no frontend program, so both slots are free. */
+    const uint32_t existing = 1;
+    const uint32_t failing = 2;
+    TEST_ASSERT_TRUE(nt_gfx_backend_create_program(vs, fs, existing));
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, finish_backend_program(existing));
-    uint32_t failing = nt_gfx_backend_create_program(vs, fs);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, failing);
+    TEST_ASSERT_TRUE(nt_gfx_backend_create_program(vs, fs, failing));
 
     s_get_program_iv = glad_glGetProgramiv;
     s_get_active_uniform = glad_glGetActiveUniform;

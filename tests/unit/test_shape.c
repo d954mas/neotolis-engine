@@ -110,7 +110,7 @@ void test_shape_set_stream_routes_instances(void) {
 void test_shape_restore_rebuilds_stream_vertex_inputs(void) {
     const float c[3] = {0, 0, 0};
     const float size[3] = {1, 1, 1};
-    const uint32_t old_stream = nt_gfx_test_buffer_backend_id(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1));
+    const nt_buffer_t old_stream = nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_fake_lose_and_restore_context();
@@ -124,7 +124,8 @@ void test_shape_restore_rebuilds_stream_vertex_inputs(void) {
     nt_shape_renderer_cube(c, size, NULL, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     nt_test_frame_next();
-    TEST_ASSERT_NOT_EQUAL_UINT32(old_stream, nt_gfx_test_buffer_backend_id(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1)));
+    /* The new buffer may reuse the old slot; the handle generation tells them apart. */
+    TEST_ASSERT_NOT_EQUAL_UINT32(old_stream.id, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1).id);
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_buffer_backend_id(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1)), nt_gfx_fake_last_instance_buffer());
 }
 

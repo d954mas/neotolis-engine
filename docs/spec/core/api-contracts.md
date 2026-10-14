@@ -463,8 +463,12 @@ engine stays lost and no later iteration recovers it. Backend failures caused by
 a loss are reported as `CONTEXT_LOST`; only the one that latches it logs an error.
 A GL object that cannot be named on a live context (a shader, program, buffer,
 texture, sampler, vertex input or framebuffer) asserts: WebGL creates null only on a lost context, and
-native `glGen*` does not run out of names. A full backend table asserts too: the
-frontend pools cap every table at its size.
+native `glGen*` does not run out of names. The backend tables of programs,
+pipelines, vertex inputs, buffers, textures and render targets are indexed by the
+frontend pool slot, so there is one allocation per object; a create into an
+occupied backend record asserts. A husk never reaches the backend: its destroy
+frees only the pool slot, because after a restore its old GL name may belong to
+a new object. Dead records stay until the restore empties every table.
 A sampler cache hit whose recreate meets the loss keeps its stable id and ends
 `CONTEXT_LOST`; a texture whose default sampler met it is not made.
 A loss frees every render-target slot, as it frees pipelines and vertex inputs;

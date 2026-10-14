@@ -1002,6 +1002,89 @@ static void restore_lost_context(void) {
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
 }
 
+/* Primary resources a loss left as husks. */
+typedef struct {
+    nt_program_t program;
+    nt_buffer_t buffer;
+    nt_texture_t texture;
+} husks_t;
+
+static husks_t make_husks(void) {
+    husks_t h = {
+        .program = nt_gfx_make_program(make_test_vs(), make_test_fs()),
+        .buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}),
+        .texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = s_test_pixels_4x4}),
+    };
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    TEST_ASSERT_TRUE(nt_gfx_program_valid(h.program));
+    TEST_ASSERT_FALSE(nt_gfx_texture_ready(h.texture));
+    return h;
+}
+
+static void destroy_husks(husks_t h) {
+    nt_gfx_destroy_program(h.program);
+    nt_gfx_destroy_buffer(h.buffer);
+    nt_gfx_destroy_texture(h.texture);
+}
+
+/* A husk never reaches the backend: after a restore its old number may name a new object.
+ * Its slot is reused by the next create, whose backend record the restore emptied. */
+void test_gfx_husks_skip_the_backend_and_their_slots_are_reused_after_restore(void) {
+    husks_t h = make_husks();
+    const uint32_t texture_destroys = nt_gfx_fake_texture_destroy_count();
+    destroy_husks(h);
+    TEST_ASSERT_EQUAL_UINT32(texture_destroys, nt_gfx_fake_texture_destroy_count());
+    restore_lost_context();
+    husks_t fresh = {
+        .program = nt_gfx_make_program(make_test_vs(), make_test_fs()),
+        .buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}),
+        .texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = s_test_pixels_4x4}),
+    };
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(h.program.id), nt_pool_slot_index(fresh.program.id));
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(h.texture.id), nt_pool_slot_index(fresh.texture.id));
+    TEST_ASSERT_FALSE(nt_gfx_program_valid(h.program));
+    TEST_ASSERT_FALSE(nt_gfx_texture_ready(h.texture));
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(fresh.texture));
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(fresh.texture.id), nt_gfx_test_texture_backend_id(fresh.texture));
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(fresh.buffer.id), nt_gfx_test_buffer_backend_id(fresh.buffer));
+    nt_test_gfx_link_wait(fresh.program);
+    TEST_ASSERT_TRUE(nt_gfx_program_ready(fresh.program));
+    destroy_husks(fresh);
+}
+
+/* A failed restore keeps the dead backend records; husks destroyed and shut down never touch them. */
+void test_gfx_husks_after_a_failed_restore_reach_no_backend_record(void) {
+    husks_t h = make_husks();
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_fake_fail_next_backend_restore_lost();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    const uint32_t texture_destroys = nt_gfx_fake_texture_destroy_count();
+    nt_gfx_destroy_buffer(h.buffer);
+    nt_gfx_shutdown(); /* program and texture husks still in their pools */
+    TEST_ASSERT_EQUAL_UINT32(texture_destroys, nt_gfx_fake_texture_destroy_count());
+    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16));
+    nt_gfx_begin_frame();
+}
+
+/* A texture whose default sampler met the loss gives its exact slot and backend record back. */
+void test_gfx_texture_rolled_back_by_its_sampler_frees_its_slot(void) {
+    nt_texture_t probe = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = s_test_pixels_4x4});
+    const uint32_t slot = nt_pool_slot_index(probe.id);
+    nt_gfx_destroy_texture(probe);
+    nt_gfx_fake_lose_context_on_sampler_create();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = s_test_pixels_4x4, .min_filter = NT_FILTER_LINEAR}).id);
+    TEST_ASSERT_EQUAL_UINT32(slot, nt_gfx_fake_last_destroyed_texture());
+    restore_lost_context();
+    nt_texture_t next = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = s_test_pixels_4x4});
+    TEST_ASSERT_EQUAL_UINT32(slot, nt_pool_slot_index(next.id));
+    nt_gfx_destroy_texture(next);
+}
+
 /* A create that meets a loss gives its pool slot back: a leak would cost one slot per loss. */
 void test_gfx_creates_that_meet_a_loss_free_their_pool_slots(void) {
     nt_gfx_fake_set_context_lost(true);
@@ -3945,6 +4028,9 @@ int main(void) {
     RUN_TEST(test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost);
     RUN_TEST(test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds);
     RUN_TEST(test_gfx_creates_that_meet_a_loss_free_their_pool_slots);
+    RUN_TEST(test_gfx_husks_skip_the_backend_and_their_slots_are_reused_after_restore);
+    RUN_TEST(test_gfx_husks_after_a_failed_restore_reach_no_backend_record);
+    RUN_TEST(test_gfx_texture_rolled_back_by_its_sampler_frees_its_slot);
     RUN_TEST(test_gfx_sampler_hit_recreate_name_failure_on_a_live_context_asserts);
     RUN_TEST(test_gfx_sampler_recreate_name_failure_on_a_live_context_asserts);
     RUN_TEST(test_gfx_texture_set_clears_on_pass_begin_and_failed_bind);

@@ -850,6 +850,44 @@ static void test_capture_initial_state_forgets_lost_bindings(void) {
     TEST_ASSERT_EQUAL_UINT32(1, initial_records(capture, NT_GFX_OP_SCISSOR, NT_GFX_RESULT_UNKNOWN));
 }
 
+/* The initial-state definition of a texture in a capture of the next frame. */
+static const nt_gfx_event_t *capture_texture_definition(nt_texture_t tex) {
+    record_next_frame();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    const nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *e = &capture.events[i];
+        if (e->kind == NT_GFX_EVENT_DEFINITION && e->object_kind == NT_GFX_OBJECT_TEXTURE && e->object == tex.id) {
+            return e;
+        }
+    }
+    return NULL;
+}
+
+/* A reused slot is a new object: the full handle differs, the backend is the slot; a husk has none. */
+static void test_capture_defines_reused_slots_and_husks_without_backend(void) {
+    static const uint8_t pixel[4] = {255, 255, 255, 255};
+    const nt_texture_desc_t desc = {.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8, .data = pixel};
+    nt_texture_t first = nt_gfx_make_texture(&desc);
+    nt_gfx_destroy_texture(first);
+    nt_texture_t reused = nt_gfx_make_texture(&desc);
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(first.id), nt_pool_slot_index(reused.id));
+    TEST_ASSERT_NOT_EQUAL_UINT32(first.id, reused.id);
+    TEST_ASSERT_NULL(capture_texture_definition(first));
+    const nt_gfx_event_t *live = capture_texture_definition(reused);
+    TEST_ASSERT_NOT_NULL(live);
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(reused.id), live->data.resource.backend);
+
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    const nt_gfx_event_t *husk = capture_texture_definition(reused);
+    TEST_ASSERT_NOT_NULL(husk);
+    TEST_ASSERT_EQUAL_UINT32(0, husk->data.resource.backend);
+}
+
 /* An equal bind and a merged indexed draw each end CACHE in the capture. */
 static void test_capture_shows_cache_for_equal_binds_and_merged_draws(void) {
     static const float verts[9] = {0};
@@ -1166,6 +1204,7 @@ int main(void) {
     RUN_TEST(test_capture_defines_inherited_resources_and_unknown_scissor);
     RUN_TEST(test_capture_initial_state_holds_carried_over_bindings);
     RUN_TEST(test_capture_initial_state_forgets_lost_bindings);
+    RUN_TEST(test_capture_defines_reused_slots_and_husks_without_backend);
     RUN_TEST(test_capture_shows_cache_for_equal_binds_and_merged_draws);
     RUN_TEST(test_depth_only_render_target_definition_has_no_color_fields);
     RUN_TEST(test_draw_trace_preserves_arguments_and_live_prefix);

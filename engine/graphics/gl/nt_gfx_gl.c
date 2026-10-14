@@ -1512,28 +1512,21 @@ static void write_sampler_units(GLuint program, const nt_gfx_gl_program_t *rec) 
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- issued-call records expand at owning sites
-uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend) {
+bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uint32_t slot) {
+    NT_ASSERT(slot > 0 && slot <= s_init_desc.max_programs && s_programs[slot].program == 0 && "create_program: the record at the frontend slot must be empty");
     /* Emscripten's glCreateProgram throws on the null program some browsers return on a lost context. */
     if (nt_gfx_gl_ctx_query_lost()) {
-        return 0;
+        return false;
     }
-    uint32_t slot = 0;
-    for (uint32_t i = 1; i <= s_init_desc.max_programs; i++) {
-        if (s_programs[i].program == 0) {
-            slot = i;
-            break;
-        }
-    }
-    NT_ASSERT(slot != 0 && "create_program: the frontend pool caps live programs at the table size");
     GLuint program = NT_GL_RET0(glCreateProgram);
     if (program == 0) {
-        return 0; /* a zero name would leave the slot marked free */
+        return false; /* a zero name would leave the record marked empty */
     }
     NT_GL(glAttachShader, program, (GLuint)vs_backend);
     NT_GL(glAttachShader, program, (GLuint)fs_backend);
     NT_GL(glLinkProgram, program);
     s_programs[slot].program = program;
-    return slot;
+    return true;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- issued-call records expand at owning sites
@@ -1581,14 +1574,8 @@ nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll
 }
 
 void nt_gfx_backend_destroy_program(uint32_t backend_handle) {
-    if (backend_handle == 0) {
-        return;
-    }
-    NT_ASSERT(backend_handle <= s_init_desc.max_programs && "destroy_program: handle out of range");
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_programs && s_programs[backend_handle].program != 0 && "destroy_program: requires a live record");
     GLuint program = s_programs[backend_handle].program;
-    if (program == 0) {
-        return;
-    }
     /* GL defers deletion while a program remains current. */
     if (s_gl_cache.program == program) {
         NT_GL(glUseProgram, 0);
@@ -1646,14 +1633,13 @@ static void gl_attrib_pointer(const nt_gfx_gl_attr_t *attr, uint16_t stride, uin
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
-uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot) {
+bool nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot) {
     NT_ASSERT(desc != NULL);
-    /* The frontend pool owns slot allocation; the backend table mirrors it. */
     NT_ASSERT(slot > 0 && slot <= s_init_desc.max_vertex_inputs && s_vertex_inputs[slot].vao == 0);
     GLuint vao = 0;
     NT_GL_GEN(glGenVertexArrays, 1, &vao);
     if (vao == 0) {
-        return 0;
+        return false;
     }
     nt_gfx_gl_vertex_input_t *vi = &s_vertex_inputs[slot];
     *vi = (nt_gfx_gl_vertex_input_t){.vao = vao};
@@ -1676,7 +1662,7 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
     }
     NT_GL(glBindVertexArray, s_gl_cache.vao);
     NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_VERTEX_INPUT; event->data.backend.args[0] = slot; event->data.backend.args[1] = vao;);
-    return slot;
+    return true;
 }
 
 void nt_gfx_backend_register_instance_layout(uint32_t slot, const nt_vertex_layout_t *layout) {
@@ -1796,11 +1782,12 @@ static void forget_deleted_buffer(GLuint buf) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
-uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
+bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot) {
+    NT_ASSERT(slot > 0 && slot <= s_init_desc.max_buffers && s_buffer_gl[slot] == 0 && "create_buffer: the record at the frontend slot must be empty");
     GLuint buf;
     NT_GL_GEN(glGenBuffers, 1, &buf);
     if (buf == 0) {
-        return 0; /* storing name 0 would alias the free-slot sentinel */
+        return false; /* storing name 0 would alias the empty-record sentinel */
     }
     const GLenum target = desc->type == NT_BUFFER_INDEX ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
     GLenum usage = map_buffer_usage(desc->usage);
@@ -1817,35 +1804,20 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
         ebo_upload_end();
     }
 
-    /* Find free buffer slot */
-    uint32_t slot = 0;
-    for (uint32_t i = 1; i <= s_init_desc.max_buffers; i++) {
-        if (s_buffer_gl[i] == 0) {
-            slot = i;
-            break;
-        }
-    }
-    NT_ASSERT(slot != 0 && "create_buffer: the frontend pool caps live buffers at the table size");
-
     s_buffer_gl[slot] = buf;
     s_buffer_targets[slot] = target;
     NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_BUFFER; event->data.backend.args[0] = slot; event->data.backend.args[1] = buf;);
-    return slot;
+    return true;
 }
 
 void nt_gfx_backend_destroy_buffer(uint32_t backend_handle) {
-    if (backend_handle == 0) {
-        return;
-    }
-    NT_ASSERT(backend_handle <= s_init_desc.max_buffers && "destroy_buffer: handle out of range");
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_buffers && s_buffer_gl[backend_handle] != 0 && "destroy_buffer: requires a live record");
     GLuint buf = s_buffer_gl[backend_handle];
-    if (buf) {
-        if (s_buffer_targets[backend_handle] == GL_ARRAY_BUFFER) {
-            detach_instance_buffer(buf);
-        }
-        forget_deleted_buffer(buf);
-        NT_GL_DELETE(glDeleteBuffers, 1, &buf);
+    if (s_buffer_targets[backend_handle] == GL_ARRAY_BUFFER) {
+        detach_instance_buffer(buf);
     }
+    forget_deleted_buffer(buf);
+    NT_GL_DELETE(glDeleteBuffers, 1, &buf);
     s_buffer_gl[backend_handle] = 0;
     s_buffer_targets[backend_handle] = 0;
 }
@@ -2016,26 +1988,16 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
     return tex;
 }
 
-uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
+bool nt_gfx_backend_create_texture(const nt_texture_desc_t *desc, uint32_t slot) {
+    NT_ASSERT(slot > 0 && slot <= s_init_desc.max_textures && s_texture_gl[slot] == 0 && "create_texture: the record at the frontend slot must be empty");
     GLuint tex = nt_gfx_gl_create_texture_name(desc);
     if (tex == 0) {
-        return 0;
+        return false;
     }
-
-    /* Find free texture slot (1-based, 0 is reserved invalid) */
-    uint32_t slot = 0;
-    for (uint32_t i = 1; i <= s_init_desc.max_textures; i++) {
-        if (s_texture_gl[i] == 0) {
-            slot = i;
-            break;
-        }
-    }
-    NT_ASSERT(slot != 0 && "create_texture: the frontend pool caps live textures at the table size");
-
     s_texture_gl[slot] = tex;
 
     NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_TEXTURE; event->data.backend.args[0] = slot; event->data.backend.args[1] = tex;);
-    return slot;
+    return true;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
@@ -2060,15 +2022,10 @@ void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t
 }
 
 void nt_gfx_backend_destroy_texture(uint32_t backend_handle) {
-    if (backend_handle == 0) {
-        return;
-    }
-    NT_ASSERT(backend_handle <= s_init_desc.max_textures && "destroy_texture: handle out of range");
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_textures && s_texture_gl[backend_handle] != 0 && "destroy_texture: requires a live record");
     GLuint tex = s_texture_gl[backend_handle];
-    if (tex) {
-        nt_gfx_gl_forget_texture(tex);
-        NT_GL_DELETE(glDeleteTextures, 1, &tex);
-    }
+    nt_gfx_gl_forget_texture(tex);
+    NT_GL_DELETE(glDeleteTextures, 1, &tex);
     s_texture_gl[backend_handle] = 0;
 }
 
@@ -2125,16 +2082,15 @@ static void nt_gfx_gl_render_target_textures(const uint32_t textures[NT_GFX_RT_A
     }
 }
 
-uint32_t nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], uint32_t slot) {
-    /* The frontend pool owns slot allocation; the backend table mirrors it. */
+bool nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], uint32_t slot) {
     NT_ASSERT(slot > 0 && slot <= s_init_desc.max_render_targets && s_render_target_gl[slot] == 0);
     GLuint names[NT_GFX_RT_ATTACHMENTS];
     nt_gfx_gl_render_target_textures(textures, names);
     if (!nt_gfx_gl_build_render_target(names, &s_render_target_gl[slot])) {
-        return 0;
+        return false;
     }
     NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_RENDER_TARGET; event->data.backend.args[0] = slot; event->data.backend.args[1] = s_render_target_gl[slot];);
-    return slot;
+    return true;
 }
 
 void nt_gfx_backend_destroy_render_target(uint32_t backend_handle) {

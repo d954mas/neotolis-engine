@@ -1046,8 +1046,8 @@ void test_real_restore_rebinds_new_stream_and_owned_buffers(void) {
     nt_test_frame_next();
     nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX + 1, &item, 1);
     nt_test_frame_next();
-    const uint32_t old_stream = nt_gfx_test_buffer_backend_id(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1));
-    TEST_ASSERT_EQUAL_UINT32(old_stream, nt_gfx_fake_last_instance_buffer());
+    const nt_buffer_t old_stream = nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1);
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_buffer_backend_id(old_stream), nt_gfx_fake_last_instance_buffer());
 
     nt_test_frame_close();
     nt_gfx_fake_lose_and_restore_context();
@@ -1066,9 +1066,10 @@ void test_real_restore_rebinds_new_stream_and_owned_buffers(void) {
 
     nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX + 1, &item, 1);
     nt_test_frame_next();
-    const uint32_t new_stream = nt_gfx_test_buffer_backend_id(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1));
-    TEST_ASSERT_NOT_EQUAL_UINT32(old_stream, new_stream);
-    TEST_ASSERT_EQUAL_UINT32(new_stream, nt_gfx_fake_last_instance_buffer());
+    const nt_buffer_t new_stream = nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1);
+    /* The new buffer may reuse the old slot; the handle generation tells them apart. */
+    TEST_ASSERT_NOT_EQUAL_UINT32(old_stream.id, new_stream.id);
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_buffer_backend_id(new_stream), nt_gfx_fake_last_instance_buffer());
     mark_draws();
     nt_mesh_renderer_draw(mesh, mat, owned, 0, 2);
     nt_test_frame_next();

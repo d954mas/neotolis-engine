@@ -107,6 +107,7 @@ typedef struct {
     uint8_t usage;        /* nt_buffer_usage_t */
     uint8_t index_type;   /* 0=none, 1=uint16, 2=uint32 */
     uint8_t frame_stream; /* frame storage stream + 1 (its `used` bounds instance reads); 0 = not frame storage */
+    bool live;            /* GPU storage on the current context; false = husk a loss left */
     uint32_t size;        /* capacity */
 } nt_gfx_buffer_meta_t;
 
@@ -142,11 +143,19 @@ typedef struct {
     uint16_t height;
     uint8_t format;    /* nt_texture_format_t */
     uint8_t mip_count; /* 1 = base only, >1 = has mip chain */
+    bool live;         /* GPU storage on the current context; false = husk a loss left */
     /* Sampler NT_SAMPLER_DEFAULT resolves to. Always non-zero for a live
      * texture: make_texture rejects the texture when the sampler cannot be
      * created. Survives a context loss: sampler ids stay valid across it. */
     nt_sampler_t default_sampler;
 } nt_gfx_texture_meta_t;
+
+/* A program's GPU object; NONE is a free slot or a husk a loss left. */
+typedef enum {
+    NT_GFX_PROGRAM_NONE,
+    NT_GFX_PROGRAM_LINKING,
+    NT_GFX_PROGRAM_READY,
+} nt_gfx_program_state_t;
 
 typedef struct {
     /* Full borrowed texture handles: destroy_texture cascades on exact match. INVALID when absent. */
@@ -178,11 +187,8 @@ static struct {
     nt_pool_t render_target_pool;
 
     uint32_t *shader_backends;            /* backend handles parallel to pool slots */
-    uint32_t *program_backends;           /* 0 while the link is pending */
-    uint32_t *program_pending;            /* backend handle while the link runs */
+    uint8_t *program_states;              /* nt_gfx_program_state_t per slot */
     nt_gfx_pipeline_key_t *pipeline_keys; /* exact desc identity per live slot; all-zero when free */
-    uint32_t *buffer_backends;
-    uint32_t *texture_backends;
 
     nt_gfx_buffer_meta_t *buffer_metas;   /* minimal buffer metadata for runtime validation */
     nt_gfx_texture_meta_t *texture_metas; /* format + dimensions for update_texture validation */
@@ -261,8 +267,8 @@ static nt_gfx_result_t name_failed(void) {
     return NT_GFX_RESULT_CONTEXT_LOST;
 }
 
-/* The backend slot a program holds, linked or still linking. */
-static uint32_t program_slot_backend(uint32_t slot) { return s_gfx.program_backends[slot] != 0 ? s_gfx.program_backends[slot] : s_gfx.program_pending[slot]; }
+/* Programs, buffers and textures use the frontend slot as the backend handle; a husk has none. */
+static bool program_has_gpu(uint32_t slot) { return s_gfx.program_states[slot] != NT_GFX_PROGRAM_NONE; }
 
 /* The full program handle a pipeline slot borrows: its key packs it into the low 32 bits. */
 static uint32_t pipeline_program(uint32_t slot) { return (uint32_t)s_gfx.pipeline_keys[slot].bits; }
@@ -303,7 +309,7 @@ static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) 
                 event->result = NT_GFX_RESULT_UNKNOWN;
                 break;
             case NT_GFX_OBJECT_PROGRAM:
-                event->data.resource.backend = program_slot_backend(slot);
+                event->data.resource.backend = program_has_gpu(slot) ? slot : 0;
                 event->result = NT_GFX_RESULT_UNKNOWN;
                 break;
             case NT_GFX_OBJECT_PIPELINE:
@@ -318,14 +324,14 @@ static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) 
                 event->result = NT_GFX_RESULT_UNKNOWN;
                 break;
             case NT_GFX_OBJECT_BUFFER:
-                event->data.resource.backend = s_gfx.buffer_backends[slot];
+                event->data.resource.backend = s_gfx.buffer_metas[slot].live ? slot : 0;
                 event->data.resource.size = s_gfx.buffer_metas[slot].size;
                 event->data.resource.type = s_gfx.buffer_metas[slot].type;
                 event->data.resource.usage = s_gfx.buffer_metas[slot].usage;
                 event->data.resource.format = s_gfx.buffer_metas[slot].index_type;
                 break;
             case NT_GFX_OBJECT_TEXTURE:
-                event->data.resource.backend = s_gfx.texture_backends[slot];
+                event->data.resource.backend = s_gfx.texture_metas[slot].live ? slot : 0;
                 event->data.resource.width = s_gfx.texture_metas[slot].width;
                 event->data.resource.height = s_gfx.texture_metas[slot].height;
                 event->data.resource.format = s_gfx.texture_metas[slot].format;
@@ -451,11 +457,8 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     nt_pool_init(&s_gfx.render_target_pool, max_render_targets);
 
     s_gfx.shader_backends = (uint32_t *)calloc(desc->max_shaders + 1, sizeof(uint32_t));
-    s_gfx.program_backends = (uint32_t *)calloc(desc->max_programs + 1, sizeof(uint32_t));
-    s_gfx.program_pending = (uint32_t *)calloc(desc->max_programs + 1, sizeof(uint32_t));
+    s_gfx.program_states = (uint8_t *)calloc(desc->max_programs + 1, sizeof(uint8_t));
     s_gfx.pipeline_keys = (nt_gfx_pipeline_key_t *)calloc(desc->max_pipelines + 1, sizeof(nt_gfx_pipeline_key_t));
-    s_gfx.buffer_backends = (uint32_t *)calloc(desc->max_buffers + 1, sizeof(uint32_t));
-    s_gfx.texture_backends = (uint32_t *)calloc(desc->max_textures + 1, sizeof(uint32_t));
 
     s_gfx.buffer_metas = (nt_gfx_buffer_meta_t *)calloc(desc->max_buffers + 1, sizeof(nt_gfx_buffer_meta_t));
     s_gfx.vertex_input_metas = (nt_gfx_vertex_input_meta_t *)calloc(desc->max_vertex_inputs + 1, sizeof(nt_gfx_vertex_input_meta_t));
@@ -470,8 +473,8 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     s_gfx.mesh_table = (nt_gfx_mesh_info_t *)calloc((size_t)desc->max_meshes + 1, sizeof(nt_gfx_mesh_info_t));
     s_gfx.mesh_vertex_inputs = (nt_vertex_input_t *)calloc(((size_t)desc->max_meshes + 1) * NT_GFX_MESH_VERTEX_INPUTS, sizeof(nt_vertex_input_t));
     /* Init-time OOM on a few KB of tables is not a state a game can recover from. */
-    NT_ASSERT(s_gfx.shader_backends && s_gfx.program_backends && s_gfx.program_pending && s_gfx.pipeline_keys && s_gfx.buffer_backends && s_gfx.texture_backends && s_gfx.buffer_metas &&
-              s_gfx.vertex_input_metas && s_gfx.texture_metas && s_gfx.render_target_metas && s_gfx.mesh_table && s_gfx.mesh_vertex_inputs && "gfx init: out of memory");
+    NT_ASSERT(s_gfx.shader_backends && s_gfx.program_states && s_gfx.pipeline_keys && s_gfx.buffer_metas && s_gfx.vertex_input_metas && s_gfx.texture_metas && s_gfx.render_target_metas &&
+              s_gfx.mesh_table && s_gfx.mesh_vertex_inputs && "gfx init: out of memory");
 
     if (!nt_gfx_backend_init(desc)) {
         NT_LOG_ERROR("backend init failed");
@@ -527,16 +530,22 @@ void nt_gfx_shutdown(void) {
         }
     }
     for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
-        nt_gfx_backend_destroy_program(program_slot_backend(i));
+        if (program_has_gpu(i)) {
+            nt_gfx_backend_destroy_program(i);
+        }
     }
     for (uint32_t i = 1; i <= s_gfx.shader_pool.capacity; i++) {
         nt_gfx_backend_destroy_shader(s_gfx.shader_backends[i]);
     }
     for (uint32_t i = 1; i <= s_gfx.buffer_pool.capacity; i++) {
-        nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[i]);
+        if (s_gfx.buffer_metas[i].live) {
+            nt_gfx_backend_destroy_buffer(i);
+        }
     }
     for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
-        nt_gfx_backend_destroy_texture(s_gfx.texture_backends[i]);
+        if (s_gfx.texture_metas[i].live) {
+            nt_gfx_backend_destroy_texture(i);
+        }
     }
 
     nt_gfx_backend_shutdown();
@@ -551,11 +560,8 @@ void nt_gfx_shutdown(void) {
     nt_pool_shutdown(&s_gfx.mesh_pool);
 
     free(s_gfx.shader_backends);
-    free(s_gfx.program_backends);
-    free(s_gfx.program_pending);
+    free(s_gfx.program_states);
     free(s_gfx.pipeline_keys);
-    free(s_gfx.buffer_backends);
-    free(s_gfx.texture_backends);
     free(s_gfx.buffer_metas);
     free(s_gfx.vertex_input_metas);
     free(s_gfx.texture_metas);
@@ -600,8 +606,9 @@ static nt_gfx_result_t destroy_texture(nt_texture_t tex) {
         }
     }
     uint32_t slot = nt_pool_slot_index(tex.id);
-    nt_gfx_backend_destroy_texture(s_gfx.texture_backends[slot]);
-    s_gfx.texture_backends[slot] = 0;
+    if (s_gfx.texture_metas[slot].live) {
+        nt_gfx_backend_destroy_texture(slot);
+    }
     memset(&s_gfx.texture_metas[slot], 0, sizeof(nt_gfx_texture_meta_t));
     nt_pool_free(&s_gfx.texture_pool, tex.id);
     return NT_GFX_RESULT_ACCEPTED;
@@ -612,10 +619,10 @@ static nt_gfx_result_t destroy_texture(nt_texture_t tex) {
 /* A link finishes no earlier than the frame after make_program, so a program never becomes ready inside a frame. */
 static void finish_program_links(void) {
     for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
-        if (s_gfx.program_pending[i] == 0) {
+        if (s_gfx.program_states[i] != NT_GFX_PROGRAM_LINKING) {
             continue;
         }
-        nt_gfx_result_t result = nt_gfx_backend_finish_program(s_gfx.program_pending[i], g_nt_gfx.gpu_caps.has_parallel_shader_compile);
+        nt_gfx_result_t result = nt_gfx_backend_finish_program(i, g_nt_gfx.gpu_caps.has_parallel_shader_compile);
         if (result == NT_GFX_RESULT_UNREADY) {
             continue;
         }
@@ -623,8 +630,7 @@ static void finish_program_links(void) {
             return; /* the begin_frame that takes the loss wipes every pending link */
         }
         NT_ASSERT(result == NT_GFX_RESULT_ACCEPTED && "program link failed");
-        s_gfx.program_backends[i] = s_gfx.program_pending[i];
-        s_gfx.program_pending[i] = 0;
+        s_gfx.program_states[i] = NT_GFX_PROGRAM_READY;
         NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_PROGRAM, s_gfx.program_pool.slots[i].id);
     }
 }
@@ -635,8 +641,7 @@ static void wipe_backend_handles(void) {
         s_gfx.shader_backends[i] = 0;
     }
     for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
-        s_gfx.program_backends[i] = 0;
-        s_gfx.program_pending[i] = 0;
+        s_gfx.program_states[i] = NT_GFX_PROGRAM_NONE;
     }
     /* Pipelines, vertex inputs and render targets are baked objects with no re-fill path:
      * loss frees their slots outright, so handles held across a loss go stale and owners
@@ -656,10 +661,10 @@ static void wipe_backend_handles(void) {
         memset(&s_gfx.vertex_input_metas[i], 0, sizeof(nt_gfx_vertex_input_meta_t));
     }
     for (uint32_t i = 1; i <= s_gfx.buffer_pool.capacity; i++) {
-        s_gfx.buffer_backends[i] = 0;
+        s_gfx.buffer_metas[i].live = false;
     }
     for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
-        s_gfx.texture_backends[i] = 0;
+        s_gfx.texture_metas[i].live = false;
     }
     for (uint32_t i = 1; i <= s_gfx.render_target_pool.capacity; i++) {
         if (nt_pool_slot_alive(&s_gfx.render_target_pool, i)) {
@@ -669,7 +674,7 @@ static void wipe_backend_handles(void) {
     }
     /* Mesh table: keep entries active. nt_resource_invalidate() will
      * call deactivate_mesh() which returns slots to mesh pool.
-     * destroy_buffer on zeroed backend handles is safe (glDeleteBuffers(0) = no-op). */
+     * destroying a husk buffer skips the backend. */
     /* A new context starts with an unknown scissor box; pass-scoped mirrors reset at begin_pass. */
     s_gfx.scissor_rect[2] = -1;
     /* Sampler cache: zero only the backend ids so material-stored sampler.id slot references
@@ -970,19 +975,16 @@ static nt_gfx_result_t make_program(nt_shader_t vs, nt_shader_t fs, nt_program_t
         return NT_GFX_RESULT_UNREADY;
     }
 
-    /* Before the backend create: its program table has the same capacity, so this
-     * assert is where exhaustion surfaces with an actionable message. */
     uint32_t id = nt_pool_alloc(&s_gfx.program_pool);
     NT_ASSERT(id != 0 && "program pool full -- raise nt_gfx_desc_t.max_programs");
 
-    uint32_t backend = nt_gfx_backend_create_program(vs_backend, fs_backend);
-    if (backend == 0) {
+    if (!nt_gfx_backend_create_program(vs_backend, fs_backend, nt_pool_slot_index(id))) {
         nt_pool_free(&s_gfx.program_pool, id);
         return name_failed();
     }
 
     /* Reading link status now would block until the driver finishes; begin_frame finishes it. */
-    s_gfx.program_pending[nt_pool_slot_index(id)] = backend;
+    s_gfx.program_states[nt_pool_slot_index(id)] = NT_GFX_PROGRAM_LINKING;
 
     out->id = id;
     NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_PROGRAM, id);
@@ -1062,7 +1064,7 @@ static nt_gfx_result_t make_pipeline(const nt_pipeline_desc_t *desc, nt_pipeline
     /* Everything a caller controls is a developer error and traps. A lost context returns an
      * invalid handle the caller retries on a later frame; the backend create only fills a record. */
     NT_ASSERT(desc != NULL);
-    /* Context loss zeroes the program backend, so without this every renderer
+    /* Context loss leaves programs without a GPU object, so without this every renderer
      * would trap on the program assert below. */
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
@@ -1078,16 +1080,14 @@ static nt_gfx_result_t make_pipeline(const nt_pipeline_desc_t *desc, nt_pipeline
             return NT_GFX_RESULT_CACHE;
         }
     }
-    NT_ASSERT(nt_pool_valid(&s_gfx.program_pool, desc->program.id) && program_slot_backend(nt_pool_slot_index(desc->program.id)) != 0 &&
-              "make_pipeline: invalid program, or one a context loss discarded");
+    NT_ASSERT(nt_pool_valid(&s_gfx.program_pool, desc->program.id) && program_has_gpu(nt_pool_slot_index(desc->program.id)) && "make_pipeline: invalid program, or one a context loss discarded");
     NT_ASSERT(blend_state_valid(&desc->blend));
 
     uint32_t id = nt_pool_alloc(&s_gfx.pipeline_pool);
     NT_ASSERT(id != 0 && "pipeline pool full -- raise nt_gfx_desc_t.max_pipelines");
 
     uint32_t slot = nt_pool_slot_index(id);
-    uint32_t program_backend = program_slot_backend(nt_pool_slot_index(desc->program.id));
-    nt_gfx_backend_create_pipeline(desc, program_backend, slot);
+    nt_gfx_backend_create_pipeline(desc, nt_pool_slot_index(desc->program.id), slot);
     s_gfx.pipeline_keys[slot] = key;
 
     out->id = id;
@@ -1124,10 +1124,10 @@ static nt_gfx_result_t make_vertex_input(const nt_vertex_input_desc_t *desc, nt_
         NT_ASSERT(nt_pool_valid(&s_gfx.buffer_pool, desc->vertex_buffer.id) && "make_vertex_input: invalid vertex_buffer handle");
         uint32_t vbo_slot = nt_pool_slot_index(desc->vertex_buffer.id);
         NT_ASSERT(s_gfx.buffer_metas[vbo_slot].type == NT_BUFFER_VERTEX && "make_vertex_input: vertex_buffer is not vertex type");
-        vbo_backend = s_gfx.buffer_backends[vbo_slot];
+        vbo_backend = vbo_slot;
         /* A pool-valid buffer with no backend outlived a context loss; baking
          * it would produce a VAO that silently draws nothing. */
-        NT_ASSERT(vbo_backend != 0 && "make_vertex_input: vertex_buffer has no live backend -- recreate it after context restore");
+        NT_ASSERT(s_gfx.buffer_metas[vbo_slot].live && "make_vertex_input: vertex_buffer has no live backend -- recreate it after context restore");
     }
     uint32_t ibo_backend = 0;
     uint8_t index_type = NT_INDEX_NONE;
@@ -1138,20 +1138,18 @@ static nt_gfx_result_t make_vertex_input(const nt_vertex_input_desc_t *desc, nt_
         index_type = s_gfx.buffer_metas[ibo_slot].index_type;
         /* Without the declared type the backend would silently draw UINT16. */
         NT_ASSERT(index_type != NT_INDEX_NONE && "make_vertex_input: index_buffer was created without an index_type");
-        ibo_backend = s_gfx.buffer_backends[ibo_slot];
-        NT_ASSERT(ibo_backend != 0 && "make_vertex_input: index_buffer has no live backend -- recreate it after context restore");
+        ibo_backend = ibo_slot;
+        NT_ASSERT(s_gfx.buffer_metas[ibo_slot].live && "make_vertex_input: index_buffer has no live backend -- recreate it after context restore");
     }
 
     uint32_t id = nt_pool_alloc(&s_gfx.vertex_input_pool);
     NT_ASSERT(id != 0 && "vertex input pool full -- raise nt_gfx_desc_t.max_vertex_inputs");
 
     uint32_t slot = nt_pool_slot_index(id);
-    uint32_t backend = nt_gfx_backend_create_vertex_input(desc, vbo_backend, ibo_backend, slot);
-    if (backend == 0) {
+    if (!nt_gfx_backend_create_vertex_input(desc, vbo_backend, ibo_backend, slot)) {
         nt_pool_free(&s_gfx.vertex_input_pool, id);
         return name_failed();
     }
-    NT_ASSERT(backend == slot && "create_vertex_input: backend must mirror the pool slot");
 
     s_gfx.vertex_input_metas[slot] = (nt_gfx_vertex_input_meta_t){
         .vbo_id = desc->vertex_buffer.id,
@@ -1248,14 +1246,13 @@ static nt_gfx_result_t make_buffer(const nt_buffer_desc_t *desc, nt_buffer_t *ou
     uint32_t id = nt_pool_alloc(&s_gfx.buffer_pool);
     NT_ASSERT(id != 0 && "buffer pool full -- raise nt_gfx_desc_t.max_buffers");
 
-    uint32_t backend = nt_gfx_backend_create_buffer(desc);
-    if (backend == 0) {
+    uint32_t slot = nt_pool_slot_index(id);
+    if (!nt_gfx_backend_create_buffer(desc, slot)) {
         nt_pool_free(&s_gfx.buffer_pool, id);
         return name_failed();
     }
 
-    uint32_t slot = nt_pool_slot_index(id);
-    s_gfx.buffer_backends[slot] = backend;
+    s_gfx.buffer_metas[slot].live = true;
     s_gfx.buffer_metas[slot].type = (uint8_t)desc->type;
     s_gfx.buffer_metas[slot].usage = (uint8_t)desc->usage;
     s_gfx.buffer_metas[slot].index_type = desc->index_type;
@@ -1370,8 +1367,8 @@ static nt_gfx_result_t make_texture(const nt_texture_desc_t *desc, nt_texture_t 
     uint32_t id = nt_pool_alloc(&s_gfx.texture_pool);
     NT_ASSERT(id != 0 && "texture pool full -- raise nt_gfx_desc_t.max_textures");
 
-    uint32_t backend = nt_gfx_backend_create_texture(&local_desc);
-    if (backend == 0) {
+    uint32_t slot = nt_pool_slot_index(id);
+    if (!nt_gfx_backend_create_texture(&local_desc, slot)) {
         nt_pool_free(&s_gfx.texture_pool, id);
         return name_failed();
     }
@@ -1386,13 +1383,12 @@ static nt_gfx_result_t make_texture(const nt_texture_desc_t *desc, nt_texture_t 
     nt_sampler_t default_sampler = nt_gfx_make_sampler(&sampler_desc);
     /* A loss the default sampler met has latched; a texture made on the dead context would be published live. */
     if (g_nt_gfx.context_lost) {
-        nt_gfx_backend_destroy_texture(backend);
+        nt_gfx_backend_destroy_texture(slot);
         nt_pool_free(&s_gfx.texture_pool, id);
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
 
-    uint32_t slot = nt_pool_slot_index(id);
-    s_gfx.texture_backends[slot] = backend;
+    s_gfx.texture_metas[slot].live = true;
     s_gfx.texture_metas[slot].width = local_desc.width;
     s_gfx.texture_metas[slot].height = local_desc.height;
     s_gfx.texture_metas[slot].format = (uint8_t)local_desc.format;
@@ -1441,10 +1437,10 @@ static nt_gfx_result_t make_render_target(const nt_render_target_desc_t *desc, n
         NT_ASSERT(nt_pool_valid(&s_gfx.texture_pool, attachments[i].id) && "make_render_target: invalid attachment texture handle");
         uint32_t tex_slot = nt_pool_slot_index(attachments[i].id);
         const nt_gfx_texture_meta_t *meta = &s_gfx.texture_metas[tex_slot];
-        backends[i] = s_gfx.texture_backends[tex_slot];
+        backends[i] = tex_slot;
         /* A pool-valid texture with no backend outlived a context loss; the
          * framebuffer would attach a dead name. */
-        NT_ASSERT(backends[i] != 0 && "make_render_target: attachment texture has no live backend -- recreate it after context restore");
+        NT_ASSERT(meta->live && "make_render_target: attachment texture has no live backend -- recreate it after context restore");
         NT_ASSERT(meta->mip_count <= 1 && "make_render_target: attachment texture must have a single level");
         NT_ASSERT((size == NULL || (meta->width == size->width && meta->height == size->height)) && "make_render_target: attachment sizes differ");
         size = meta;
@@ -1458,13 +1454,11 @@ static nt_gfx_result_t make_render_target(const nt_render_target_desc_t *desc, n
     uint32_t id = nt_pool_alloc(&s_gfx.render_target_pool);
     NT_ASSERT(id != 0 && "render target pool full; raise nt_gfx_desc_t.max_render_targets");
     uint32_t slot = nt_pool_slot_index(id);
-    uint32_t backend = nt_gfx_backend_create_render_target(backends, slot);
-    if (backend == 0) {
+    if (!nt_gfx_backend_create_render_target(backends, slot)) {
         nt_pool_free(&s_gfx.render_target_pool, id);
         /* Live: an incomplete framebuffer, such as RGBA16F without float rendering. */
         return context_loss_confirmed() ? NT_GFX_RESULT_CONTEXT_LOST : NT_GFX_RESULT_BACKEND_FAILURE;
     }
-    NT_ASSERT(backend == slot && "create_render_target: backend must mirror the pool slot");
 
     s_gfx.render_target_metas[slot] = (nt_gfx_render_target_meta_t){.attachments = {desc->color, desc->depth}};
     out->id = id;
@@ -1533,9 +1527,10 @@ static nt_gfx_result_t destroy_program(nt_program_t prog) {
         NT_GFX_END(destroy_pipeline(i));
     }
     uint32_t slot = nt_pool_slot_index(prog.id);
-    nt_gfx_backend_destroy_program(program_slot_backend(slot));
-    s_gfx.program_backends[slot] = 0;
-    s_gfx.program_pending[slot] = 0;
+    if (program_has_gpu(slot)) {
+        nt_gfx_backend_destroy_program(slot);
+    }
+    s_gfx.program_states[slot] = NT_GFX_PROGRAM_NONE;
     nt_pool_free(&s_gfx.program_pool, prog.id);
     return NT_GFX_RESULT_ACCEPTED;
 }
@@ -1584,8 +1579,9 @@ static nt_gfx_result_t destroy_buffer(nt_buffer_t buf) {
         }
     }
     uint32_t slot = nt_pool_slot_index(buf.id);
-    nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[slot]);
-    s_gfx.buffer_backends[slot] = 0;
+    if (s_gfx.buffer_metas[slot].live) {
+        nt_gfx_backend_destroy_buffer(slot);
+    }
     memset(&s_gfx.buffer_metas[slot], 0, sizeof(nt_gfx_buffer_meta_t));
     nt_pool_free(&s_gfx.buffer_pool, buf.id);
     return NT_GFX_RESULT_ACCEPTED;
@@ -1648,7 +1644,7 @@ bool nt_gfx_program_ready(nt_program_t prog) {
     if (!nt_pool_valid(&s_gfx.program_pool, prog.id)) {
         return false;
     }
-    return s_gfx.program_backends[nt_pool_slot_index(prog.id)] != 0;
+    return s_gfx.program_states[nt_pool_slot_index(prog.id)] == NT_GFX_PROGRAM_READY;
 }
 
 nt_program_t nt_gfx_pipeline_program(nt_pipeline_t pip) {
@@ -1663,7 +1659,7 @@ bool nt_gfx_texture_ready(nt_texture_t tex) {
     if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
         return false;
     }
-    return s_gfx.texture_backends[nt_pool_slot_index(tex.id)] != 0;
+    return s_gfx.texture_metas[nt_pool_slot_index(tex.id)].live;
 }
 
 bool nt_gfx_texture_size(nt_texture_t tex, uint16_t *out_width, uint16_t *out_height) {
@@ -1709,9 +1705,9 @@ static nt_gfx_result_t bind_pipeline(nt_pipeline_t pip) {
     /* The set is program state: another pipeline on the same program keeps it,
      * and a program without samplers needs none. */
     if (s_gfx.bound_pipeline == 0 || pipeline_program(nt_pool_slot_index(s_gfx.bound_pipeline)) != program) {
-        const uint32_t program_backend = s_gfx.program_backends[nt_pool_slot_index(program)];
-        NT_ASSERT(program_backend != 0 && "bind_pipeline: program is not ready -- gate draws on nt_gfx_program_ready");
-        const bool samples = nt_gfx_backend_program_sampler_mask(program_backend) != 0;
+        const uint32_t program_slot = nt_pool_slot_index(program);
+        NT_ASSERT(s_gfx.program_states[program_slot] == NT_GFX_PROGRAM_READY && "bind_pipeline: program is not ready -- gate draws on nt_gfx_program_ready");
+        const bool samples = nt_gfx_backend_program_sampler_mask(program_slot) != 0;
         s_gfx.texture_set_state = samples ? NT_GFX_TEXTURE_SET_NONE : NT_GFX_TEXTURE_SET_APPLIED;
     }
     /* Loss frees pipeline slots, so a live slot always has a backend. */
@@ -1800,7 +1796,7 @@ static nt_gfx_result_t bind_vertex_input_instanced(nt_vertex_input_t vi, nt_inst
     if (instance_buffer.id != s_gfx.bound_instance_buffer || instance_buffer.id == 0) {
         NT_ASSERT(nt_pool_valid(&s_gfx.buffer_pool, instance_buffer.id) && "bind_vertex_input_instanced: invalid or stale instance buffer");
         NT_ASSERT(s_gfx.buffer_metas[buffer_slot].type == NT_BUFFER_VERTEX && "bind_vertex_input_instanced: instance buffer is not vertex type");
-        NT_ASSERT(s_gfx.buffer_backends[buffer_slot] != 0 && "bind_vertex_input_instanced: instance buffer has no live backend -- recreate it after context restore");
+        NT_ASSERT(s_gfx.buffer_metas[buffer_slot].live && "bind_vertex_input_instanced: instance buffer has no live backend -- recreate it after context restore");
     }
     NT_ASSERT((byte_offset & 3U) == 0 && "bind_vertex_input_instanced: offset must be 4-byte aligned (WebGL2 attrib rule)");
     meta->instance_layout = (uint8_t)layout_slot;
@@ -1809,7 +1805,7 @@ static nt_gfx_result_t bind_vertex_input_instanced(nt_vertex_input_t vi, nt_inst
     s_gfx.bound_instance_offset = byte_offset;
     /* The first instance: plain draws read only it and need no check of their own. */
     assert_instances_in_range(1);
-    nt_gfx_frame_bind_vertex_input_instanced(slot, layout_slot, s_gfx.buffer_backends[buffer_slot], byte_offset);
+    nt_gfx_frame_bind_vertex_input_instanced(slot, layout_slot, buffer_slot, byte_offset);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -1901,7 +1897,7 @@ static nt_gfx_result_t apply_texture_bindings(const nt_gfx_texture_binding_t *bi
     NT_ASSERT(s_gfx.bound_pipeline != 0 && "apply_texture_bindings: no pipeline bound");
     NT_ASSERT((bindings != NULL || count == 0) && "apply_texture_bindings: NULL bindings with nonzero count");
     const uint32_t program = pipeline_program(nt_pool_slot_index(s_gfx.bound_pipeline));
-    const uint32_t program_backend = s_gfx.program_backends[nt_pool_slot_index(program)];
+    const uint32_t program_backend = nt_pool_slot_index(program);
     const uint8_t required_mask = (uint8_t)nt_gfx_backend_program_sampler_mask(program_backend);
 
     /* Resolve everything first: a failure late in the set must leave no bind behind. */
@@ -1925,7 +1921,7 @@ static nt_gfx_result_t apply_texture_bindings(const nt_gfx_texture_binding_t *bi
         NT_ASSERT(nt_pool_valid(&s_gfx.texture_pool, bindings[i].texture.id) && "apply_texture_bindings: invalid texture handle");
         NT_ASSERT(!texture_is_active_attachment(bindings[i].texture) && "apply_texture_bindings: cannot sample the active render target's attachment");
         const uint32_t texture_slot = nt_pool_slot_index(bindings[i].texture.id);
-        if (s_gfx.texture_backends[texture_slot] == 0) {
+        if (!s_gfx.texture_metas[texture_slot].live) {
             NT_LOG_ERROR_ONCE("apply_texture_bindings: texture has no GPU resource (restore failed)");
             s_gfx.texture_set_state = NT_GFX_TEXTURE_SET_FAILED;
             return NT_GFX_RESULT_UNREADY;
@@ -1936,7 +1932,7 @@ static nt_gfx_result_t apply_texture_bindings(const nt_gfx_texture_binding_t *bi
             s_gfx.texture_set_state = NT_GFX_TEXTURE_SET_FAILED;
             return sampler_result;
         }
-        texture_backends[info.unit] = s_gfx.texture_backends[texture_slot];
+        texture_backends[info.unit] = texture_slot;
         sampler_backends[info.unit] = sampler_backend;
         applied_mask |= bit;
     }
@@ -1966,7 +1962,7 @@ void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
 bool nt_gfx_test_program_sampler_info(nt_program_t prog, nt_hash32_t name, nt_gfx_sampler_info_t *out_info) {
     NT_ASSERT(nt_gfx_program_ready(prog) && "test_program_sampler_info: program is not linked");
     NT_ASSERT(out_info != NULL && "test_program_sampler_info: out_info is required");
-    return nt_gfx_backend_program_sampler_info(s_gfx.program_backends[nt_pool_slot_index(prog.id)], name.value, out_info);
+    return nt_gfx_backend_program_sampler_info(nt_pool_slot_index(prog.id), name.value, out_info);
 }
 
 int nt_gfx_test_program_sampler_unit(nt_program_t prog, nt_hash32_t name) {
@@ -1976,7 +1972,7 @@ int nt_gfx_test_program_sampler_unit(nt_program_t prog, nt_hash32_t name) {
 
 uint32_t nt_gfx_test_program_sampler_mask(nt_program_t prog) {
     NT_ASSERT(nt_gfx_program_ready(prog) && "test_program_sampler_mask: program is not linked");
-    return nt_gfx_backend_program_sampler_mask(s_gfx.program_backends[nt_pool_slot_index(prog.id)]);
+    return nt_gfx_backend_program_sampler_mask(nt_pool_slot_index(prog.id));
 }
 #endif
 
@@ -1999,14 +1995,16 @@ uint32_t nt_gfx_test_texture_backend_id(nt_texture_t tex) {
     if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
         return 0;
     }
-    return s_gfx.texture_backends[nt_pool_slot_index(tex.id)];
+    const uint32_t slot = nt_pool_slot_index(tex.id);
+    return s_gfx.texture_metas[slot].live ? slot : 0;
 }
 
 uint32_t nt_gfx_test_buffer_backend_id(nt_buffer_t buf) {
     if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
         return 0;
     }
-    return s_gfx.buffer_backends[nt_pool_slot_index(buf.id)];
+    const uint32_t slot = nt_pool_slot_index(buf.id);
+    return s_gfx.buffer_metas[slot].live ? slot : 0;
 }
 
 uint32_t nt_gfx_test_render_target_backend_id(nt_render_target_t rt) {
@@ -2211,7 +2209,7 @@ void nt_gfx_set_viewport(int x, int y, int w, int h) {
 /* Uniforms belong to the bound pipeline's borrowed program. */
 static uint32_t uniform_target_program(void) {
     NT_ASSERT(s_gfx.bound_pipeline != 0 && "set_uniform: no pipeline bound");
-    return s_gfx.program_backends[nt_pool_slot_index(pipeline_program(nt_pool_slot_index(s_gfx.bound_pipeline)))];
+    return nt_pool_slot_index(pipeline_program(nt_pool_slot_index(s_gfx.bound_pipeline)));
 }
 
 static nt_gfx_result_t set_uniform_mat4(nt_hash32_t name, const float *matrix) {
@@ -2411,7 +2409,7 @@ void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size) {
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, buf.id, event->data.binding.slot = slot; event->data.binding.offset = offset; event->data.binding.size = size);
     /* Every block takes a fresh offset, so a bind is never equal to the slot's last one within a frame: no dedup. */
     if (!lost) {
-        nt_gfx_frame_bind_uniform_buffer(s_gfx.buffer_backends[nt_pool_slot_index(buf.id)], slot, offset, size);
+        nt_gfx_frame_bind_uniform_buffer(nt_pool_slot_index(buf.id), slot, offset, size);
     }
     NT_GFX_END(lost ? NT_GFX_RESULT_CONTEXT_LOST : NT_GFX_RESULT_ACCEPTED);
 }
@@ -2432,8 +2430,8 @@ static nt_gfx_result_t buffer_update(nt_buffer_t buf, uint32_t offset, const voi
     NT_ASSERT((data != NULL || size == 0) && "update_buffer: NULL data with nonzero size");
     NT_ASSERT(offset <= s_gfx.buffer_metas[slot].size && "update_buffer: offset exceeds buffer capacity");
     NT_ASSERT(size <= s_gfx.buffer_metas[slot].size - offset && "update_buffer: offset + size exceeds buffer capacity");
-    NT_ASSERT(s_gfx.buffer_backends[slot] != 0 && "update_buffer: buffer has no live backend -- recreate it after context restore");
-    nt_gfx_backend_update_buffer(s_gfx.buffer_backends[slot], offset, data, size);
+    NT_ASSERT(s_gfx.buffer_metas[slot].live && "update_buffer: buffer has no live backend -- recreate it after context restore");
+    nt_gfx_backend_update_buffer(slot, offset, data, size);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -2521,8 +2519,8 @@ static nt_gfx_result_t update_texture(nt_texture_t tex, uint16_t x, uint16_t y, 
     NT_ASSERT(x + w <= s_gfx.texture_metas[slot].width && "update_texture: x+w exceeds texture width");
     NT_ASSERT(y + h <= s_gfx.texture_metas[slot].height && "update_texture: y+h exceeds texture height");
     /* A husk here is a texture whose owner skipped the recreate contract -- a programmer error. */
-    NT_ASSERT(s_gfx.texture_backends[slot] != 0 && "update_texture: texture has no live backend -- recreate it after context restore");
-    nt_gfx_backend_update_texture(s_gfx.texture_backends[slot], x, y, w, h, (nt_texture_format_t)stored_format, data);
+    NT_ASSERT(s_gfx.texture_metas[slot].live && "update_texture: texture has no live backend -- recreate it after context restore");
+    nt_gfx_backend_update_texture(slot, x, y, w, h, (nt_texture_format_t)stored_format, data);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
