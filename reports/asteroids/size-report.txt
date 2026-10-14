@@ -1,5 +1,5 @@
 # Size Report: asteroids (wasm-analysis-paired)
-# Commit: c7d1d19
+# Commit: 4b42e0d
 
 ## WASM Section Sizes
 
@@ -13,20 +13,20 @@ Memory                 7 B
 Global                 9 B
 Export                95 B
 Elem                  70 B
-Code              395971 B
-Data              218969 B
+Code              395385 B
+Data              218717 B
 Custom             13269 B
 ---------------- ----------
-TOTAL             629758 B
+TOTAL             628920 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-80627 B   frame
+80638 B   frame
 31662 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
 27440 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
-20928 B   ui_panel
+20918 B   ui_panel
 19564 B   dispatch_command
 17841 B   nt_gfx_activate_texture
 12549 B   main
@@ -43,8 +43,8 @@ TOTAL             629758 B
  3365 B   Clay__CloseElement
  3319 B   void std::__2::__introsort<std::__2::_ClassicAlgPolicy, std::__2::ranges::less, unsigned int*, true>(unsigned int*, unsigned int*, std::__2::ranges::less, std::__2::iterator_traits<unsigned int*>::difference_type, bool)
  3134 B   nt_ui_label
- 3123 B   nt_gfx_make_texture
  3020 B   fmt_fp
+ 2942 B   nt_gfx_make_texture
  2629 B   nt_http_request_ex
  2610 B   scrollbar_emit_axis
  2608 B   basist::huffman_decoding_table::init(unsigned int, unsigned char const*, unsigned int)
@@ -55,7 +55,7 @@ TOTAL             629758 B
  2436 B   printf_core
 
 Total functions: 259
-Total code size: 395520 B
+Total code size: 394934 B
 
 ## Built Engine Archives
 
@@ -77,7 +77,7 @@ libnt_debug_overlay.a       2218 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               94006 B
-libnt_gfx.a               107836 B
+libnt_gfx.a               105824 B
 libnt_gfx_stub.a            6176 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
@@ -99,7 +99,7 @@ libnt_meshwire_stub.a        722 B
 libnt_metrics.a             1530 B
 libnt_platform.a             824 B
 libnt_pool.a                1376 B
-libnt_postfx_blur.a         7794 B
+libnt_postfx_blur.a         7764 B
 libnt_render.a              7668 B
 libnt_resource.a          215122 B
 libnt_shape_renderer.a   1230948 B
@@ -122,9 +122,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2961128 B
+TOTAL (archives)         2959086 B
 
 ## Data Segments Summary
 
 Segments: 180
-Total data size: 217613 B
+Total data size: 217361 B
