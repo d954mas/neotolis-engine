@@ -17,8 +17,7 @@ typedef struct {
     nt_sampler_t tex_samplers[NT_MATERIAL_MAX_TEXTURES];
     uint8_t tex_count;
     uint16_t params_size;
-    nt_buffer_t params_buffer;                   /* 0 without params, or while a lost context leaves it to the restore */
-    uint8_t params[NT_MATERIAL_MAX_PARAM_BYTES]; /* the CPU copy a restore uploads again */
+    uint8_t params[NT_MATERIAL_MAX_PARAM_BYTES];
 } nt_material_record_t;
 
 static struct {
@@ -26,16 +25,6 @@ static struct {
     nt_material_record_t *slots; /* [capacity+1], index 0 reserved */
     bool initialized;
 } s_mat;
-
-static nt_buffer_t make_params_buffer(const nt_material_record_t *rec) {
-    return nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .data = rec->params,
-        .size = rec->params_size,
-        .label = rec->info.label != NULL ? rec->info.label : "material_params",
-    });
-}
 
 /* ---- Lifecycle ---- */
 
@@ -57,32 +46,9 @@ void nt_material_shutdown(void) {
     if (!s_mat.initialized) {
         return;
     }
-    for (uint32_t i = 1; i <= s_mat.pool.capacity; i++) {
-        if (nt_pool_slot_alive(&s_mat.pool, i) && s_mat.slots[i].params_buffer.id != 0) {
-            nt_gfx_destroy_buffer(s_mat.slots[i].params_buffer);
-        }
-    }
     free(s_mat.slots);
     nt_pool_shutdown(&s_mat.pool);
     memset(&s_mat, 0, sizeof(s_mat));
-}
-
-void nt_material_restore_gpu(void) {
-    /* A shared restore sequence may name a module the game never initialized. */
-    if (!s_mat.initialized) {
-        return;
-    }
-    for (uint32_t i = 1; i <= s_mat.pool.capacity; i++) {
-        nt_material_record_t *rec = &s_mat.slots[i];
-        if (!nt_pool_slot_alive(&s_mat.pool, i) || rec->params_size == 0) {
-            continue;
-        }
-        /* Destroy first: a full buffer pool has no headroom for the new name. */
-        if (rec->params_buffer.id != 0) {
-            nt_gfx_destroy_buffer(rec->params_buffer);
-        }
-        rec->params_buffer = make_params_buffer(rec);
-    }
 }
 
 /* ---- Create / Destroy / Query ---- */
@@ -112,7 +78,6 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     }
 
     nt_material_record_t *rec = &s_mat.slots[nt_pool_slot_index(id)];
-    /* The whole record: a slot reused in the same frame must not inherit the previous buffer. */
     memset(rec, 0, sizeof(*rec));
     nt_material_info_t *info = &rec->info;
 
@@ -158,11 +123,9 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     /* Debug label (caller must ensure static storage / string literal) */
     info->label = desc->label;
 
-    /* Params: on a lost context the buffer stays 0 until nt_material_restore_gpu. */
     rec->params_size = desc->params_size;
     if (desc->params_size > 0) {
         memcpy(rec->params, desc->params, desc->params_size);
-        rec->params_buffer = make_params_buffer(rec);
     }
 
     return (nt_material_t){.id = id};
@@ -175,10 +138,6 @@ void nt_material_destroy(nt_material_t mat) {
     }
     if (!nt_pool_valid(&s_mat.pool, mat.id)) {
         return; /* a stale handle: already destroyed */
-    }
-    const nt_buffer_t buffer = s_mat.slots[nt_pool_slot_index(mat.id)].params_buffer;
-    if (buffer.id != 0) {
-        nt_gfx_destroy_buffer(buffer);
     }
     nt_pool_free(&s_mat.pool, mat.id);
 }
@@ -218,21 +177,18 @@ void nt_material_set_params(nt_material_t mat, const void *params, uint32_t size
     nt_material_record_t *rec = get_record(mat);
     NT_ASSERT(rec && "set_params on invalid material handle");
     NT_ASSERT(params != NULL && size == rec->params_size && size > 0 && "set_params: size differs from the create-time params_size");
-    if (memcmp(rec->params, params, size) == 0) {
-        return;
-    }
     memcpy(rec->params, params, size);
-    /* While lost the copy is all there is: the restore uploads it. */
-    if (rec->params_buffer.id != 0) {
-        nt_gfx_update_buffer(rec->params_buffer, 0, rec->params, size);
-    }
 }
 
 void nt_material_apply(nt_material_t mat, const nt_gfx_texture_binding_t *draw_textures, uint8_t count) {
     const nt_material_record_t *rec = get_record(mat);
     NT_ASSERT(rec && "nt_material_apply on invalid material handle");
     NT_ASSERT((draw_textures != NULL || count == 0) && rec->tex_count + count <= NT_GFX_MAX_TEXTURE_SLOTS && "nt_material_apply: draw textures");
-    nt_gfx_bind_uniform_buffer(NT_GFX_SLOT_MATERIAL, rec->params_buffer);
+    if (rec->params_size > 0) {
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_MATERIAL, rec->params, rec->params_size);
+    } else {
+        nt_gfx_unbind_uniform_block(NT_GFX_SLOT_MATERIAL);
+    }
     nt_gfx_texture_binding_t bindings[NT_GFX_MAX_TEXTURE_SLOTS];
     for (uint8_t t = 0; t < rec->tex_count; t++) {
         bindings[t] = (nt_gfx_texture_binding_t){

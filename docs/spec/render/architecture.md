@@ -147,7 +147,7 @@ A mirror lives exactly as long as the contract keeps its state:
 backend bakes sets instead) and records a unit bind only when that unit's
 texture or sampler changed in the pass; a set that changes no unit ends `CACHE`. A frame block compares
 its bytes with the range bound to its slot in the pass (the staged bytes stay
-unchanged until the next `begin_frame`); a uniform buffer compares its handle.
+unchanged until the next `begin_frame`).
 Uniform-block slots are below `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS` (9: the three
 reserved names and six game blocks); a bind at that slot or above asserts.
 
@@ -323,7 +323,7 @@ A missing or duplicate active name, invalid handle, or sampler-type mismatch
 asserts before any bind is recorded; inactive names are ignored before their handles
 are inspected. Context loss (also one a lazy sampler recreate meets) publishes no set and records
 no texture-unit bind, and a texture husk asserts. Material params are no program
-state: each material binds its own uniform buffer
+state: each material apply binds its own bytes
 ([material, Params](material.md#params)). Destroying a program destroys its
 pipelines, and a context loss frees every pipeline slot.
 
@@ -559,12 +559,10 @@ Alignment follows the reader:
 - indices align to 4 and are drawn from `first_index = offset / 4`;
 - uniform frame data is written and bound by `nt_gfx_bind_uniform_block(slot, data, size)`,
   which aligns it to `gpu_caps.uniform_buffer_offset_alignment` (at most 256 on
-  WebGL 2 and GLES 3, not necessarily a power of two): budget each changed bind
-  its size plus 256 bytes (a bind equal to the slot's binding in the pass copies
+  WebGL 2 and GLES 3, not necessarily a power of two): budget each bind its size
+  plus 256 bytes (a bind equal to the slot's last staged block of the frame copies
   nothing). The bytes live for one frame and bindings for one pass, so a draw
-  reads only blocks bound in its own pass. Data that outlives a frame (material
-  params) lives in an `NT_BUFFER_UNIFORM` buffer bound with
-  `nt_gfx_bind_uniform_buffer`.
+  reads only blocks bound in its own pass.
 
 `nt_gfx_frame_buffer(stream)` returns an ordinary buffer handle, for vertex inputs
 over a stream's vertex or instance data; `nt_gfx_bind_uniform_block` names a

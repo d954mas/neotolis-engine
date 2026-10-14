@@ -1229,7 +1229,6 @@ nt_instance_layout_t nt_gfx_make_instance_layout(const nt_vertex_layout_t *layou
 
 static nt_gfx_result_t make_buffer(const nt_buffer_desc_t *desc, nt_buffer_t *out) {
     NT_ASSERT(desc != NULL);
-    NT_ASSERT((desc->type != NT_BUFFER_UNIFORM || (desc->size > 0 && desc->size % 16U == 0)) && "make_buffer: a uniform buffer's size is a nonzero multiple of 16");
     /* Same recoverable contract as the other make_* creators -- without this
      * a lost-frame creation yields a pool-valid buffer with a dead GL name. */
     if (g_nt_gfx.context_lost) {
@@ -2203,8 +2202,7 @@ static void assert_blocks_bound(void) {
     }
     const uint32_t *needed = nt_gfx_backend_program_block_sizes(nt_pool_slot_index(pipeline_program(nt_pool_slot_index(s_gfx.bound_pipeline))));
     for (uint32_t slot = 0; slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; slot++) {
-        NT_ASSERT(s_gfx.bound_blocks[slot].size >= needed[slot] &&
-                  "draw: a uniform block the program uses is unbound or smaller than the block -- bind it in this pass (material params: nt_material_restore_gpu after a restore)");
+        NT_ASSERT(s_gfx.bound_blocks[slot].size >= needed[slot] && "draw: a uniform block the program uses is unbound or smaller than the block -- bind it in this pass");
     }
     s_gfx.blocks_checked = true;
 }
@@ -2348,36 +2346,24 @@ void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size) {
     NT_GFX_END(equal ? NT_GFX_RESULT_CACHE : NT_GFX_RESULT_ACCEPTED);
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
-static nt_gfx_result_t bind_uniform_buffer(uint32_t slot, nt_buffer_t buf) {
-    NT_ASSERT(slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS && "bind_uniform_buffer: slot");
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_uniform_buffer: must be called inside a pass");
+static nt_gfx_result_t unbind_uniform_block(uint32_t slot) {
+    NT_ASSERT(slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS && "unbind_uniform_block: slot");
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "unbind_uniform_block: must be called inside a pass");
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    /* Frame data binds subranges; a whole-buffer bind would read past what this frame uploaded. */
-    NT_ASSERT((buf.id == 0 || buf.id != g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].buffer.id) && "bind_uniform_buffer: frame data binds through nt_gfx_bind_uniform_block");
-    /* Only frame data binds at an offset, so another buffer's binding is always the whole buffer. */
-    if (buf.id == s_gfx.bound_blocks[slot].buffer) {
+    if (s_gfx.bound_blocks[slot].buffer == 0) {
         return NT_GFX_RESULT_CACHE;
     }
-    if (buf.id == 0) {
-        /* The unbind is logical: GL rejects an empty range, and the draw check reads the mirror. */
-        s_gfx.bound_blocks[slot] = (nt_gfx_block_binding_t){0};
-        s_gfx.blocks_checked = false;
-        return NT_GFX_RESULT_ACCEPTED;
-    }
-    NT_ASSERT(nt_pool_valid(&s_gfx.buffer_pool, buf.id) && "bind_uniform_buffer: invalid buffer handle");
-    const nt_gfx_buffer_meta_t *meta = &s_gfx.buffer_metas[nt_pool_slot_index(buf.id)];
-    NT_ASSERT(meta->type == NT_BUFFER_UNIFORM && "bind_uniform_buffer: buffer is not uniform type");
-    NT_ASSERT(meta->live && "bind_uniform_buffer: buffer has no live backend -- recreate it after context restore");
-    publish_uniform_binding(slot, buf.id, 0, meta->size);
+    /* The unbind is logical: GL rejects an empty range, and the draw check reads the mirror. */
+    s_gfx.bound_blocks[slot] = (nt_gfx_block_binding_t){0};
+    s_gfx.blocks_checked = false;
     return NT_GFX_RESULT_ACCEPTED;
 }
 
-void nt_gfx_bind_uniform_buffer(uint32_t slot, nt_buffer_t buf) {
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, buf.id, event->data.binding.slot = slot);
-    NT_GFX_END(bind_uniform_buffer(slot, buf));
+void nt_gfx_unbind_uniform_block(uint32_t slot) {
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, 0, event->data.binding.slot = slot);
+    NT_GFX_END(unbind_uniform_block(slot));
 }
 
 /* ---- Buffer update ---- */

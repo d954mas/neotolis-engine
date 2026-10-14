@@ -1,7 +1,7 @@
 # Material System
 
 Material = shader + render state + values. Numeric params are the bytes of the
-program's `Material` uniform block, kept in the material's own uniform buffer;
+program's `Material` uniform block, copied to the frame at each apply;
 one material lives in one pool slot and is shared by handle — per-entity
 variation goes through components, not material mutation. Sort order is
 game-controlled, not a material property. Pack-loadable material assets are
@@ -28,24 +28,19 @@ multiple of 16 up to `NT_MATERIAL_MAX_PARAM_BYTES` (256), asserted at create.
 There are no param names: the block layout is the contract between the shader
 and the struct.
 
-A material with params owns one `NT_BUFFER_UNIFORM` gfx buffer and a CPU copy of
-the bytes. `nt_material_set_params(mat, data, size)` replaces them: `size` must
-equal the create-time `params_size`, equal bytes change nothing, other bytes are
-copied and written with `nt_gfx_update_buffer`. A write follows that call's
-contract: every draw of a frame reads the frame's last write, so values that differ
-per object within one frame use separate materials, instance data or a `Draw`
-block, not a params write between draws.
+A material keeps its params as CPU bytes and owns no GPU state.
+`nt_material_set_params(mat, data, size)` replaces them (`size` must equal the
+create-time `params_size`). `nt_material_apply` copies them into the uniform
+frame stream, so a draw reads the bytes of its apply and a write reaches the
+draws applied after it. Values that differ per object still belong in instance
+data or a `Draw` block: one material per object costs a block per apply.
 
-The buffer is GPU state the material owns. `nt_material_destroy` destroys it, so a
-material with params is destroyed outside a drawn frame (the gfx frame rule);
-`nt_material_shutdown` destroys every buffer. On a context loss the buffers become
-husks: `nt_material_restore_gpu()` joins the restore sequence
-([resource restore](../assets/resource.md)), before the first pass and before any
-`nt_material_set_params` of that frame, and rebuilds every buffer from its CPU copy
-(destroying the husk first, so a full buffer pool needs no headroom; a second call
-is harmless). A material created or written while the context is lost keeps its
-bytes and gets its buffer at the restore. `nt_material_apply` asserts a material
-with params that has no buffer on a live context.
+The stream copy follows `nt_gfx_bind_uniform_block`: bytes equal to the last
+`Material` block of the frame copy nothing, other bytes cost `params_size` plus
+up to 256 bytes of alignment. Budget `frame_capacity[NT_GFX_FRAME_UNIFORM]` for
+the applies of params materials in all passes of a frame; materials sorted by
+material copy once per run, interleaved ones once per apply. A context loss
+leaves nothing to restore.
 
 ## Textures and draw textures
 
@@ -74,7 +69,7 @@ published resource.
 ## Apply
 
 `nt_material_apply(mat, draw_textures, count)` binds a material for the next draws,
-after `nt_gfx_bind_pipeline` in a pass. It binds the params buffer at
+after `nt_gfx_bind_pipeline` in a pass. It binds the params at
 `NT_GFX_SLOT_MATERIAL` (a material without params unbinds that slot, so a program
 that reads `Material` asserts at its next draw instead of reading another
 material's values) and applies the complete texture set: the material's textures,
@@ -139,8 +134,7 @@ typedef struct MaterialAssetHeader {
 ```
 
 At runtime, params and textures are accessed via computed offset from header pointer
-(the params are the std140 bytes of the `Material` block, uploaded to the material's
-buffer as they are):
+(the params are the std140 bytes of the `Material` block, bound as they are):
 
 ```c
 const uint8_t *material_get_params(const MaterialAssetHeader *h) { return (const uint8_t *)h + sizeof(MaterialAssetHeader); }
@@ -156,7 +150,7 @@ No duplicated material data. Material is created once (either from code via desc
 
 Per-entity variation (e.g. per-character color, dissolve progress) goes through instance data or a `Draw` block, not material mutation — the material stays shared.
 
-Material-wide params (e.g. a global alpha cutoff or a fog color) can be replaced at runtime with `nt_material_set_params`. This changes the values for every entity sharing the material, for the whole frame of the write ([Params](#params)).
+Material-wide params (e.g. a global alpha cutoff or a fog color) can be replaced at runtime with `nt_material_set_params`. This changes the values for every entity sharing the material, for the draws applied after the write ([Params](#params)).
 
 ## Attr map
 

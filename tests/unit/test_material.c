@@ -182,23 +182,10 @@ void test_create_basic(void) {
     TEST_ASSERT_TRUE(mat.id != 0);
 }
 
-/* ---- Params: one uniform buffer per material ---- */
+/* ---- Params: CPU bytes, copied to the frame at apply ---- */
 
-void test_create_makes_a_uniform_buffer_with_the_params(void) {
+void test_material_makes_no_gpu_buffer(void) {
     nt_material_create_desc_t d = make_test_desc();
-    nt_material_t mat = nt_material_create(&d);
-    TEST_ASSERT_TRUE(nt_material_valid(mat));
-    const nt_buffer_desc_t buffer = nt_gfx_fake_last_buffer_desc();
-    TEST_ASSERT_EQUAL(NT_BUFFER_UNIFORM, buffer.type);
-    TEST_ASSERT_EQUAL(NT_USAGE_DYNAMIC, buffer.usage);
-    TEST_ASSERT_EQUAL_UINT32(sizeof(s_params), buffer.size);
-    TEST_ASSERT_EQUAL_MEMORY(s_params, buffer.data, sizeof(s_params));
-}
-
-void test_material_without_params_makes_no_buffer(void) {
-    nt_material_create_desc_t d = make_test_desc();
-    d.params = NULL;
-    d.params_size = 0;
     nt_gfx_fake_reset();
     TEST_ASSERT_TRUE(nt_material_valid(nt_material_create(&d)));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_last_buffer_desc().size);
@@ -219,23 +206,6 @@ void test_create_asserts_bad_params(void) {
     d.params = s_params;
     d.params_size = 0;
     NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
-}
-
-/* Equal bytes write nothing; changed bytes update the buffer. */
-void test_set_params_writes_the_buffer_only_on_change(void) {
-    nt_material_create_desc_t d = make_test_desc();
-    nt_material_t mat = nt_material_create(&d);
-    const uint32_t updates = nt_gfx_fake_update_buffer_count();
-    nt_material_set_params(mat, s_params, sizeof(s_params));
-    TEST_ASSERT_EQUAL_UINT32(updates, nt_gfx_fake_update_buffer_count());
-    const float changed[4] = {0.8F, 0.0F, 0.0F, 1.0F};
-    nt_material_set_params(mat, changed, sizeof(changed));
-    TEST_ASSERT_EQUAL_UINT32(updates + 1U, nt_gfx_fake_update_buffer_count());
-    TEST_ASSERT_EQUAL_UINT32(sizeof(changed), nt_gfx_fake_last_update_buffer_size());
-    TEST_ASSERT_EQUAL_MEMORY(changed, nt_gfx_fake_last_update_buffer_data(), sizeof(changed));
-    const float last_changed[4] = {0.8F, 0.0F, 0.0F, 0.5F}; /* only the last member differs */
-    nt_material_set_params(mat, last_changed, sizeof(last_changed));
-    TEST_ASSERT_EQUAL_UINT32(updates + 2U, nt_gfx_fake_update_buffer_count());
 }
 
 void test_set_params_asserts_size_or_handle(void) {
@@ -466,9 +436,9 @@ static nt_pipeline_t begin_apply_pass(void) {
     return pipeline;
 }
 
-/* The params buffer binds at the Material slot; the set is the material's resolved textures
- * followed by the draw textures. */
-void test_apply_binds_the_params_buffer_and_the_complete_texture_set(void) {
+/* The params bind at the Material slot; the set is the material's resolved textures followed by
+ * the draw textures. */
+void test_apply_binds_the_params_and_the_complete_texture_set(void) {
     const nt_texture_t albedo = make_test_texture(1);
     const nt_texture_t page = make_test_texture(2);
     nt_resource_t albedo_res = register_test_resource("albedo", NT_ASSET_TEXTURE, albedo.id);
@@ -526,90 +496,49 @@ void test_apply_asserts_too_many_draw_textures(void) {
     nt_gfx_begin_frame();
 }
 
-/* ---- Lifetime and restore ---- */
-
-/* Buffers left for materials after the frame storage streams of NT_GFX_TEST_DESC. */
-#define MATERIAL_TEST_FREE_BUFFERS (32U - 4U)
-
-/* The restore rebuilds every params buffer from the CPU copy, including bytes written while the
- * context was lost and a material created then; a second call leaks nothing. */
-void test_restore_gpu_rebuilds_params_buffers(void) {
-    nt_material_create_desc_t d = make_test_desc();
-    d.texture_count = 0;
-    nt_material_t before = nt_material_create(&d);
-    const float changed[4] = {0.25F, 0.0F, 0.0F, 0.0F};
-    nt_gfx_fake_set_context_lost(true);
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
-    nt_material_set_params(before, changed, sizeof(changed)); /* kept in the copy while lost */
-    nt_material_t during = nt_material_create(&d);
-    TEST_ASSERT_TRUE(nt_material_valid(during));
-    nt_gfx_fake_set_context_lost(false);
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
-    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
-
-    nt_gfx_fake_reset();
-    nt_material_restore_gpu();
-    TEST_ASSERT_EQUAL(NT_BUFFER_UNIFORM, nt_gfx_fake_last_buffer_desc().type);
-    TEST_ASSERT_EQUAL_MEMORY(s_params, nt_gfx_fake_last_buffer_desc().data, sizeof(s_params)); /* `during` comes last */
-    nt_material_destroy(during);
-    nt_material_restore_gpu(); /* `before` is now the only params material */
-    TEST_ASSERT_EQUAL_MEMORY(changed, nt_gfx_fake_last_buffer_desc().data, sizeof(changed));
-    during = nt_material_create(&d);
-    nt_material_restore_gpu();
-    /* Two materials hold buffers: the rest of the pool is still free after three restores. */
-    for (uint32_t i = 0; i < MATERIAL_TEST_FREE_BUFFERS - 2U; i++) {
-        TEST_ASSERT_TRUE(nt_material_valid(nt_material_create(&d)));
-    }
+/* A pass whose program samples nothing, for materials without textures. */
+static void begin_params_pass(void) {
     nt_program_t program = nt_gfx_fake_make_program(NULL, 0);
     nt_test_gfx_link_wait(program);
     nt_test_frame_begin_pass();
     nt_gfx_bind_pipeline(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program}));
-    nt_material_apply(before, NULL, 0);
-    nt_material_apply(during, NULL, 0);
+}
+
+/* Each apply copies the params of the call: a write reaches later applies only, and A, B, A copies
+ * three blocks. */
+void test_apply_snapshots_the_params(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    d.texture_count = 0;
+    nt_material_t mat = nt_material_create(&d);
+    const float changed[4] = {0.25F, 0.0F, 0.0F, 0.0F};
+    begin_params_pass();
+    nt_gfx_fake_reset();
+    nt_material_apply(mat, NULL, 0);
+    nt_material_set_params(mat, changed, sizeof(changed));
+    nt_material_apply(mat, NULL, 0);
+    nt_material_set_params(mat, s_params, sizeof(s_params));
+    nt_material_apply(mat, NULL, 0);
+    const uint8_t *staging = g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].staging;
     nt_test_frame_close();
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_ubo_bind_count());
+    TEST_ASSERT_EQUAL_MEMORY(s_params, staging + nt_gfx_fake_ubo_bind_at(0).offset, sizeof(s_params));
+    TEST_ASSERT_EQUAL_MEMORY(changed, staging + nt_gfx_fake_ubo_bind_at(1).offset, sizeof(changed));
+    TEST_ASSERT_EQUAL_MEMORY(s_params, staging + nt_gfx_fake_ubo_bind_at(2).offset, sizeof(s_params));
+    TEST_ASSERT_TRUE(nt_gfx_fake_ubo_bind_at(2).offset > nt_gfx_fake_ubo_bind_at(1).offset);
     nt_gfx_begin_frame();
 }
 
-/* Destroy and shutdown release the params buffers: each fills the buffer pool exactly, so one
- * leaked buffer overflows the next fill. */
-void test_destroy_and_shutdown_release_params_buffers(void) {
+/* The frame holds a copy of the params, so a material is destroyed at any time. */
+void test_destroying_a_params_material_in_a_drawn_frame(void) {
     nt_material_create_desc_t d = make_test_desc();
-    for (uint32_t i = 0; i < 64; i++) {
-        nt_material_destroy(nt_material_create(&d));
-    }
-    for (uint32_t i = 0; i < MATERIAL_TEST_FREE_BUFFERS; i++) {
-        TEST_ASSERT_TRUE(nt_material_valid(nt_material_create(&d)));
-    }
-    nt_material_shutdown();
-    init_material_defaults();
-    for (uint32_t i = 0; i < MATERIAL_TEST_FREE_BUFFERS; i++) {
-        TEST_ASSERT_TRUE(nt_material_valid(nt_material_create(&d)));
-    }
-}
-
-/* A params buffer follows the gfx frame rule; a material without params has nothing to destroy. */
-void test_destroying_a_params_material_in_a_drawn_frame_asserts(void) {
-    nt_material_create_desc_t d = make_test_desc();
-    nt_material_t with_params = nt_material_create(&d);
-    d.params = NULL;
-    d.params_size = 0;
-    nt_material_t without_params = nt_material_create(&d);
-    nt_test_frame_begin_pass();
-    NT_TEST_EXPECT_ASSERT(nt_material_destroy(with_params));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "frame rule"));
-    nt_material_destroy(without_params);
+    d.texture_count = 0;
+    nt_material_t mat = nt_material_create(&d);
+    begin_params_pass();
+    nt_material_apply(mat, NULL, 0);
+    nt_material_destroy(mat);
+    TEST_ASSERT_FALSE(nt_material_valid(mat));
     nt_test_frame_close();
     nt_gfx_begin_frame();
-}
-
-/* A shared restore sequence may name the module before init or after shutdown. */
-void test_restore_gpu_ignores_an_uninitialized_module(void) {
-    nt_material_shutdown();
-    nt_material_restore_gpu();
-    init_material_defaults();
 }
 
 /* ---- Test 21: get_info returns NULL for invalid handle ---- */
@@ -648,10 +577,8 @@ int main(void) {
 
     /* Create / query */
     RUN_TEST(test_create_basic);
-    RUN_TEST(test_create_makes_a_uniform_buffer_with_the_params);
-    RUN_TEST(test_material_without_params_makes_no_buffer);
+    RUN_TEST(test_material_makes_no_gpu_buffer);
     RUN_TEST(test_create_asserts_bad_params);
-    RUN_TEST(test_set_params_writes_the_buffer_only_on_change);
     RUN_TEST(test_set_params_asserts_size_or_handle);
     RUN_TEST(test_blend_opaque_disables_blending);
     RUN_TEST(test_blend_alpha_uses_straight_source);
@@ -683,13 +610,11 @@ int main(void) {
     RUN_TEST(test_set_program_on_a_destroyed_material_asserts);
 
     /* Apply, lifetime and restore */
-    RUN_TEST(test_apply_binds_the_params_buffer_and_the_complete_texture_set);
+    RUN_TEST(test_apply_binds_the_params_and_the_complete_texture_set);
     RUN_TEST(test_apply_without_params_unbinds_the_material_slot);
     RUN_TEST(test_apply_asserts_too_many_draw_textures);
-    RUN_TEST(test_restore_gpu_rebuilds_params_buffers);
-    RUN_TEST(test_destroy_and_shutdown_release_params_buffers);
-    RUN_TEST(test_destroying_a_params_material_in_a_drawn_frame_asserts);
-    RUN_TEST(test_restore_gpu_ignores_an_uninitialized_module);
+    RUN_TEST(test_apply_snapshots_the_params);
+    RUN_TEST(test_destroying_a_params_material_in_a_drawn_frame);
 
     /* Query edge cases */
     RUN_TEST(test_get_info_returns_null_for_invalid);

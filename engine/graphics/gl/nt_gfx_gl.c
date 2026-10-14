@@ -1754,8 +1754,7 @@ bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot) {
         assert_name_failed_on_loss();
         return false;
     }
-    static const GLenum targets[] = {[NT_BUFFER_VERTEX] = GL_ARRAY_BUFFER, [NT_BUFFER_INDEX] = GL_ELEMENT_ARRAY_BUFFER, [NT_BUFFER_UNIFORM] = GL_UNIFORM_BUFFER};
-    const GLenum target = targets[desc->type];
+    const GLenum target = desc->type == NT_BUFFER_INDEX ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
     GLenum usage = map_buffer_usage(desc->usage);
     bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER;
     if (unhook_vao) {

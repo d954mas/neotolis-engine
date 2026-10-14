@@ -106,21 +106,13 @@ typedef struct {
 
 /* ---- Lifecycle ---- */
 
-/* NULL desc, zero capacity, double init and allocation failure assert. A material with params
- * owns a gfx uniform buffer: init and shut down materials inside the gfx lifetime. */
+/* NULL desc, zero capacity, double init and allocation failure assert. */
 void nt_material_init(const nt_material_desc_t *desc);
-/* Destroys every material's buffer; outside a drawn frame (the gfx frame rule). */
 void nt_material_shutdown(void);
-/* Context restore: recreates every material's params buffer from its CPU copy. Call it in the
- * restore sequence, before the first pass and before any nt_material_set_params of that frame;
- * a second call is harmless, and an uninitialized module ignores it. A material created while
- * the context was lost gets its buffer here. */
-void nt_material_restore_gpu(void);
 
 /* ---- Create / Destroy / Query ---- */
 
 nt_material_t nt_material_create(const nt_material_create_desc_t *desc);
-/* Destroys its params buffer too, so a material with params is destroyed outside a drawn frame. */
 void nt_material_destroy(nt_material_t mat);
 bool nt_material_valid(nt_material_t mat);
 /* Replaces the borrowed program; INVALID clears it and assigning the same handle changes nothing.
@@ -132,15 +124,14 @@ const nt_material_info_t *nt_material_get_info(nt_material_t mat);
 
 /* ---- Params and apply ---- */
 
-/* Replaces the params bytes; size must equal the create-time params_size. Equal bytes change
- * nothing. A write follows nt_gfx_update_buffer: every draw of a frame reads the frame's last
- * write, so per-object values in one frame use separate materials, instance data or a Draw block. */
+/* Replaces the params bytes; size must equal the create-time params_size. A draw reads the bytes
+ * of its nt_material_apply, so a write reaches the draws applied after it. */
 void nt_material_set_params(nt_material_t mat, const void *params, uint32_t size);
 
-/* Binds the material for the next draws, after nt_gfx_bind_pipeline in a pass: its params buffer
- * at NT_GFX_SLOT_MATERIAL (a material without params unbinds the slot, so a program that reads
- * `Material` asserts at draw) and the complete texture set -- the material's textures resolved
- * now, followed by draw_textures (texture default or explicit sampler each; borrowed for the
+/* Binds the material for the next draws, after nt_gfx_bind_pipeline in a pass: its params through
+ * nt_gfx_bind_uniform_block at NT_GFX_SLOT_MATERIAL (a material without params unbinds the slot,
+ * so a program that reads `Material` asserts at draw) and the complete texture set -- the
+ * material's textures resolved now, followed by draw_textures (texture default or explicit sampler each; borrowed for the
  * call; NULL iff count is 0). A renderer supplies its atlas page, font or skin texture here, and
  * so may a game for its own per-draw texture. Repeated equal applies end CACHE in gfx. */
 void nt_material_apply(nt_material_t mat, const nt_gfx_texture_binding_t *draw_textures, uint8_t count);

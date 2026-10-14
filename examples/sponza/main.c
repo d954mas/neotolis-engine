@@ -350,9 +350,7 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_MESH);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
 
-        /* Materials keep their handles and draw again once their programs relink; their params
-         * buffers are rebuilt from the CPU copies. */
-        nt_material_restore_gpu();
+        /* Materials keep their handles and draw again once their programs relink. */
         drop_programs(); /* GL objects are gone; this frees the pool slots too */
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     }

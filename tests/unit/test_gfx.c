@@ -3517,14 +3517,13 @@ void test_stream_executes_draws_in_call_order_at_end_frame(void) {
 void test_stream_records_every_draw_phase_call(void) {
     link_stream_test_program();
     const float v[4] = {0};
-    const nt_buffer_t ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .data = v, .size = sizeof(v)});
     EXPECT_RECORDED(begin_stream_test_pass());
     EXPECT_RECORDED(nt_gfx_clear(&(nt_clear_desc_t){.color = true}));
     EXPECT_RECORDED(nt_gfx_set_scissor(0, 0, 4, 4));
     EXPECT_RECORDED(nt_gfx_set_scissor_enabled(true));
     EXPECT_RECORDED(nt_gfx_set_viewport(0, 0, 4, 4));
     EXPECT_RECORDED(nt_gfx_bind_uniform_block(0, v, sizeof(v)));
-    EXPECT_RECORDED(nt_gfx_bind_uniform_buffer(NT_GFX_SLOT_MATERIAL, ubo));
+    EXPECT_RECORDED(nt_gfx_bind_uniform_block(NT_GFX_SLOT_MATERIAL, v, sizeof(v)));
     EXPECT_RECORDED(nt_gfx_draw(0, 3));
     EXPECT_RECORDED(nt_gfx_draw_instanced(0, 3, 2));
     EXPECT_RECORDED(nt_gfx_draw_indexed(0, 3, 3));
@@ -3627,39 +3626,27 @@ void test_uniform_block_uploads_the_frame_bytes_to_its_range(void) {
 }
 
 /* A block size outside the std140 grain cannot match a C struct of 16-byte members. */
-void test_uniform_block_and_buffer_sizes_are_multiples_of_16(void) {
+void test_uniform_block_size_is_a_multiple_of_16(void) {
     link_stream_test_program();
     begin_stream_test_pass();
     EXPECT_ASSERT(nt_gfx_bind_uniform_block(3, s_block_a, 20));
     nt_gfx_end_pass();
-    EXPECT_ASSERT(nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = 20}));
-    EXPECT_ASSERT(nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = 0}));
 }
 
-/* A uniform buffer binds whole; an equal handle ends CACHE, INVALID unbinds without a backend call. */
-void test_uniform_buffer_binds_whole_and_unbinds_logically(void) {
-    nt_buffer_t ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .data = s_block_a, .size = sizeof(s_block_a)});
-    nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .data = s_block_a, .size = sizeof(s_block_a)});
+/* An unbind records no backend call; an unbound slot ends CACHE. */
+void test_uniform_block_unbinds_logically(void) {
     link_stream_test_program();
     begin_stream_test_pass();
-    EXPECT_RECORDED(nt_gfx_bind_uniform_buffer(NT_GFX_SLOT_MATERIAL, ubo));
-    EXPECT_NOT_RECORDED(nt_gfx_bind_uniform_buffer(NT_GFX_SLOT_MATERIAL, ubo));
-    EXPECT_NOT_RECORDED(nt_gfx_bind_uniform_buffer(NT_GFX_SLOT_MATERIAL, NT_BUFFER_INVALID));
+    EXPECT_RECORDED(nt_gfx_bind_uniform_block(NT_GFX_SLOT_MATERIAL, s_block_a, 32));
+    EXPECT_NOT_RECORDED(nt_gfx_unbind_uniform_block(NT_GFX_SLOT_MATERIAL));
     TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.accepted[NT_GFX_OP_UBO]);
-    EXPECT_NOT_RECORDED(nt_gfx_bind_uniform_buffer(NT_GFX_SLOT_MATERIAL, NT_BUFFER_INVALID)); /* already unbound: CACHE */
+    EXPECT_NOT_RECORDED(nt_gfx_unbind_uniform_block(NT_GFX_SLOT_MATERIAL));
     TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.accepted[NT_GFX_OP_UBO]);
-    /* Frame data binds subranges; the whole stream buffer would read past this frame's upload. */
-    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer(NT_GFX_SLOT_DRAW, nt_gfx_frame_buffer(NT_GFX_FRAME_UNIFORM)));
-    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "frame data binds through nt_gfx_bind_uniform_block"));
-    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer(NT_GFX_SLOT_MATERIAL, vbo));
-    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer(NT_GFX_MAX_UNIFORM_BUFFER_SLOTS, ubo));
+    EXPECT_ASSERT(nt_gfx_unbind_uniform_block(NT_GFX_MAX_UNIFORM_BUFFER_SLOTS));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
-    nt_gfx_fake_ubo_bind_t bind = nt_gfx_fake_ubo_bind_at(0);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count());
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_SLOT_MATERIAL, bind.slot);
-    TEST_ASSERT_EQUAL_UINT32(0, bind.offset);
-    TEST_ASSERT_EQUAL_UINT32(sizeof(s_block_a), bind.size);
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_SLOT_MATERIAL, nt_gfx_fake_ubo_bind_at(0).slot);
     nt_gfx_begin_frame();
 }
 
@@ -3668,22 +3655,21 @@ void test_draw_asserts_an_unbound_or_short_block(void) {
     nt_gfx_fake_set_block(NT_GFX_SLOT_MATERIAL, 32);
     link_stream_test_program();
     nt_gfx_fake_set_block(NT_GFX_SLOT_MATERIAL, 0);
-    nt_buffer_t ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .data = s_block_a, .size = 32});
     const nt_pipeline_t pipeline = begin_stream_test_pass();
     EXPECT_ASSERT(nt_gfx_draw(0, 3));
     TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "uniform block the program uses"));
     nt_gfx_bind_uniform_block(NT_GFX_SLOT_MATERIAL, s_block_a, 16);
     EXPECT_ASSERT(nt_gfx_draw(0, 3));
     TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "uniform block the program uses"));
-    nt_gfx_bind_uniform_buffer(NT_GFX_SLOT_MATERIAL, ubo);
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_MATERIAL, s_block_a, 32);
     nt_gfx_draw(0, 3);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
     /* A material without params unbinds the slot: the next draw, which would merge, asserts first. */
-    nt_gfx_bind_uniform_buffer(NT_GFX_SLOT_MATERIAL, NT_BUFFER_INVALID);
+    nt_gfx_unbind_uniform_block(NT_GFX_SLOT_MATERIAL);
     EXPECT_ASSERT(nt_gfx_draw(3, 3));
     TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "uniform block the program uses"));
-    /* Rebinding the buffer passes the check again. */
-    nt_gfx_bind_uniform_buffer(NT_GFX_SLOT_MATERIAL, ubo);
+    /* Rebinding the staged bytes passes the check again. */
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_MATERIAL, s_block_a, 32);
     nt_gfx_draw(3, 3);
     const nt_vertex_input_t vi = {nt_gfx_test_bound_vertex_input()};
     nt_gfx_end_pass();
@@ -4177,8 +4163,8 @@ int main(void) {
     RUN_TEST(test_uniform_block_rebinds_the_frame_copy_in_a_new_pass);
     RUN_TEST(test_uniform_block_dedup_compares_the_whole_last_binding);
     RUN_TEST(test_uniform_block_uploads_the_frame_bytes_to_its_range);
-    RUN_TEST(test_uniform_block_and_buffer_sizes_are_multiples_of_16);
-    RUN_TEST(test_uniform_buffer_binds_whole_and_unbinds_logically);
+    RUN_TEST(test_uniform_block_size_is_a_multiple_of_16);
+    RUN_TEST(test_uniform_block_unbinds_logically);
     RUN_TEST(test_draw_asserts_an_unbound_or_short_block);
     RUN_TEST(test_texture_set_records_only_changed_units);
     RUN_TEST(test_contiguous_indexed_draws_merge);

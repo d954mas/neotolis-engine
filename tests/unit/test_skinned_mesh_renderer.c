@@ -768,7 +768,7 @@ void test_lists_read_the_deformation_texture_at_the_call(void) {
 }
 
 /* A/B/A deformation textures with one material: each run re-applies the texture set, but the
- * material's params buffer binds once. */
+ * material's params bind once. */
 void test_deformation_change_reapplies_textures_not_params(void) {
     nt_mesh_t mesh = make_mesh();
     nt_texture_t texture_a = make_deformation_texture();

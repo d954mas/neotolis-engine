@@ -3666,9 +3666,7 @@ static void frame(void) {
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
-        /* Materials keep their handles and draw again once their programs relink; their params
-         * buffers are rebuilt from the CPU copies. */
-        nt_material_restore_gpu();
+        /* Materials keep their handles and draw again once their programs relink. */
         nt_shape_renderer_restore_gpu();
         nt_program_ref_drop(&s_sprite_program);
         nt_program_ref_drop(&s_text_program);

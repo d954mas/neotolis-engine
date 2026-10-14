@@ -297,8 +297,7 @@ game:
 
 - destroys its own `nt_program_t` handles and sets each handle variable to
   `NT_PROGRAM_INVALID`. Destroying a stale non-zero handle asserts
-- calls `nt_material_restore_gpu()` (materials rebuild their params buffers) and the
-  restore entry point of every other active GPU-owning module, and destroys and
+- calls the restore entry point of every active GPU-owning module, and destroys and
   recreates its own GPU objects
 - calls `nt_resource_invalidate()` for the shader-code asset type and every
   other file-backed GPU asset type it uses

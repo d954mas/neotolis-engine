@@ -214,20 +214,16 @@ bytes into the uniform frame stream at the next multiple of
 `gpu_caps.uniform_buffer_offset_alignment` (re-probed at context restore) and
 binds that range to `slot`. Bytes equal to the last block `slot` staged in the
 frame copy nothing: in the pass that bound them the call ends `CACHE`, in a later
-pass it binds the staged range again. An owner rebinds unchanged data freely, and
-the stream holds one block per slot and distinct value of the frame. The bytes
-live for one frame. A slot at or above the limit, NULL `data`, or a
+pass it binds the staged range again. Other bytes copy again, so A, B, A copies
+three times; budget the stream at `size` plus 256 bytes per bind of all passes
+of a frame. The bytes live for one frame. A slot at or above the limit, NULL `data`, or a
 `size` that is zero or not a multiple of 16 asserts; an exhausted stream stops
 as a frame storage overflow. On a lost context the call allocates nothing and
 ends `CONTEXT_LOST`.
 
-`nt_gfx_bind_uniform_buffer(slot, buf)` binds a whole `NT_BUFFER_UNIFORM` buffer
-(size a nonzero multiple of 16, asserted at creation); an equal handle ends
-`CACHE`. Its data is written with `nt_gfx_update_buffer`, so every draw of a
-frame reads the frame's last write. `NT_BUFFER_INVALID` unbinds the slot without
-a backend call, and a draw whose program uses the slot asserts. Another buffer type, a buffer without a live backend, or the uniform
-frame stream's buffer (frame data binds through `nt_gfx_bind_uniform_block`)
-asserts after the lost-context return.
+`nt_gfx_unbind_uniform_block(slot)` unbinds the slot without a backend call, so a
+draw whose program uses the slot asserts; an unbound slot ends `CACHE`. Uniform
+data has no public buffer.
 
 `nt_gfx_make_program` returns `NT_PROGRAM_INVALID` for the two states a context
 loss leaves behind, and for nothing else. The first is the loss itself: a loss
@@ -249,9 +245,8 @@ are called every frame before drawing (asserted), and each emit or draw applies
 its material at the call (`nt_material_apply`). A program replaced
 behind the same material handle takes effect at the next `set_material`, which
 compares the program as well as the handle; draws already recorded keep their
-pipeline. Sprite `draw_list` resolves each run's material itself. Material params
-live in the material's own uniform buffer, so no draw depends on what another
-material wrote. A program is destroyed only outside a drawn frame (the frame rule), so a
+pipeline. Sprite `draw_list` resolves each run's material itself. Each apply binds the
+material's own params, so no draw depends on what another material wrote. A program is destroyed only outside a drawn frame (the frame rule), so a
 pipeline resolved at `set_material` stays live for the frame's draws.
 
 A material carries no readiness field. Callers derive readiness with
@@ -564,7 +559,7 @@ variant.
 
 Draw-state calls require an open pass. `nt_gfx_set_scissor`, `nt_gfx_set_scissor_enabled`,
 `nt_gfx_set_viewport`, `nt_gfx_bind_uniform_block` and
-`nt_gfx_bind_uniform_buffer` assert
+`nt_gfx_unbind_uniform_block` assert
 without an open pass, also on a lost context: every pass-scoped call checks the
 pass before it returns `NT_GFX_RESULT_CONTEXT_LOST`. `nt_gfx_begin_pass` disables scissor, sets the viewport to the whole
 target and clears the bound pipeline, vertex input, instance binding, texture

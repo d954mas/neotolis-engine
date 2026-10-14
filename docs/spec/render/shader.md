@@ -67,9 +67,8 @@ Pipeline identity includes the program handle. Destroying the old program
 `set_material`; mesh draws with the pipeline resolved at their call. A program
 is destroyed only outside a drawn frame (the frame rule in
 [render architecture](architecture.md#draw-phase-command-stream)). Numeric material params
-live in the material's own uniform buffer and stay mutable: the last write of a frame
-reaches every draw of that frame, as specified in
-[API contracts](../core/api-contracts.md#program-handles).
+stay mutable: a write reaches the draws applied after it
+([material, Params](material.md#params)).
 
 Uniform block bindings are program state, not material state: a program is
 shared by many materials, so a material-declared binding would be
@@ -77,7 +76,7 @@ last-writer-wins across them. A block binds by name instead: the engine reserves
 `Globals`, `Material` and `Draw` (slots 0-2, by update frequency) and the game
 lists its own names in `nt_gfx_desc_t.game_blocks` (slots from 3); an unknown
 active block name asserts at link. The contract (member types, std140, the draw
-check, frame data and uniform buffers) is in
+check and frame data) is in
 [API contracts](../core/api-contracts.md#program-handles).
 
 Every shader value arrives in a uniform block; there are no standalone value
@@ -163,7 +162,7 @@ typedef struct ShaderAsset {
 ## Four levels of shader data
 
 1. **vertex inputs** — from geometry/mesh, and per-instance data from the instance layouts
-2. **`Material` block** — the material's params buffer ([material, Params](material.md#params))
+2. **`Material` block** — the material's params, bound at apply ([material, Params](material.md#params))
 3. **`Draw` block** — per-draw data of a renderer or game shader, bound as frame data
 4. **`Globals` and game blocks** — frame and pass data, bound as frame data
 

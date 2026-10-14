@@ -558,14 +558,6 @@ static nt_material_t make_radial_image_material_mode(nt_ui_radial_reveal_mode_t 
 /* Default test material: DESATURATE mode baked at creation. */
 static nt_material_t make_radial_image_material(void) { return make_radial_image_material_mode(NT_UI_RADIAL_REVEAL_DESATURATE); }
 
-/* The u_reveal_mode.x the last created params buffer uploaded. */
-static float created_reveal_mode_x(void) {
-    const nt_buffer_desc_t desc = nt_gfx_fake_last_buffer_desc();
-    TEST_ASSERT_EQUAL(NT_BUFFER_UNIFORM, desc.type);
-    TEST_ASSERT_EQUAL_UINT32(sizeof(nt_ui_radial_image_params_t), desc.size);
-    return ((const nt_ui_radial_image_params_t *)desc.data)->reveal_mode[0];
-}
-
 /* Drive a textured radial_image through the walker against a real atlas region. */
 static void radial_image_walk(nt_atlas_region_ref_t *ref, nt_ui_radial_image_style_t *style, float fixed_w, float fixed_h) {
     nt_pointer_t mouse = {0};
@@ -617,17 +609,12 @@ static void test_radial_image_region_bakes_payload(void) {
 static void test_radial_image_reveal_mode_plumbed(void) {
     nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
     style.material = make_radial_image_material_mode(NT_UI_RADIAL_REVEAL_HIDE); /* == 2 */
-    /* The material carries the baked mode in its params buffer. */
-    TEST_ASSERT_TRUE_MESSAGE(approx(created_reveal_mode_x(), (float)NT_UI_RADIAL_REVEAL_HIDE), "material carries baked u_reveal_mode.x");
     ui_walker_fixture_next_frame(&s_fx);
     style.tint_color_packed = 0xFF0080FFU; /* 0xAABBGGRR: r=255, g=128, b=0 -> orange */
     style.tint_strength = 0.75F;
 
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
-    const uint32_t updates = nt_gfx_fake_update_buffer_count();
     radial_image_walk(&ref, &style, 40.0F, 40.0F);
-    /* The walk bakes the tint per vertex and never rewrites the shared material's params. */
-    TEST_ASSERT_EQUAL_UINT32(updates, nt_gfx_fake_update_buffer_count());
 
     /* a_tint (floats 4..7 of the custom block) baked per-vertex: rgb 0..1 + strength. */
     TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);

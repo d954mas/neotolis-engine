@@ -523,8 +523,8 @@ void test_equal_draws_merge_and_a_font_change_splits(void) {
     open_frame();
 }
 
-/* Each material binds its own params buffer once per change: A -> B -> A binds A again, equal
- * draws bind nothing, and every pass binds again. */
+/* Each material binds its own params once per change: A -> B -> A binds A again, equal draws bind
+ * nothing, and every pass binds again. */
 void test_material_params_bind_once_per_change(void) {
     const nt_text_style_t style = plain();
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
@@ -553,11 +553,14 @@ void test_material_params_bind_once_per_change(void) {
     next_frame();
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_ubo_bind_count());
 
-    /* A params write between frames updates the material's buffer. */
-    nt_test_frame_close();
+    /* A params write reaches the next draw. */
+    nt_gfx_fake_reset();
     nt_material_set_params(a, green, sizeof(green));
-    TEST_ASSERT_EQUAL_MEMORY(green, nt_gfx_fake_last_update_buffer_data(), sizeof(green));
-    open_frame();
+    nt_text_renderer_draw(&style, s_identity, "A");
+    const uint8_t *staging = g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].staging;
+    next_frame();
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_ubo_bind_count());
+    TEST_ASSERT_EQUAL_MEMORY(green, staging + nt_gfx_fake_ubo_bind_at(0).offset, sizeof(green));
 }
 
 /* Two materials on one program and one render state are one pipeline: the key is

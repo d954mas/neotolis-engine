@@ -137,8 +137,7 @@ typedef enum {
 typedef enum {
     NT_BUFFER_VERTEX = 0,
     NT_BUFFER_INDEX,
-    NT_BUFFER_UNIFORM, /* bound whole with nt_gfx_bind_uniform_buffer; size a nonzero multiple of 16 */
-} nt_buffer_type_t;
+} nt_buffer_type_t; /* uniform data has no public buffer: see nt_gfx_bind_uniform_block */
 
 typedef enum {
     NT_USAGE_IMMUTABLE = 0, /* GL: STATIC_DRAW */
@@ -338,7 +337,7 @@ typedef enum {
 /* Uniform block slots, logical and ordered by update frequency. A program's block binds to the slot
  * of its name at link: the engine reserves the first three names, the game lists its own. */
 #define NT_GFX_SLOT_GLOBALS 0  /* "Globals": frame and view data, filled and bound by the game */
-#define NT_GFX_SLOT_MATERIAL 1 /* "Material": the material's uniform buffer, bound by nt_material_apply */
+#define NT_GFX_SLOT_MATERIAL 1 /* "Material": the material's params, bound by nt_material_apply */
 #define NT_GFX_SLOT_DRAW 2     /* "Draw": per-draw data of a renderer or game shader */
 #define NT_GFX_SLOT_GAME 3     /* nt_gfx_desc_t.game_blocks[i] binds to NT_GFX_SLOT_GAME + i */
 /* Globals, Draw and the game blocks fit WebGPU's 8 dynamic uniform bindings. */
@@ -997,16 +996,14 @@ bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint
 /* Blocks are std140 with vec4/ivec4/uvec4/mat4 members (asserted at link; rules in the API contracts
  * spec). A draw asserts that each block its program uses is bound in the pass at its full size. */
 
-/* Frame data: copies size bytes (a multiple of 16) into the uniform frame stream and binds that
- * range to slot. Bytes equal to the slot's last staged block of the frame copy nothing (CACHE in
- * its pass, a rebind in a later one). Inside a pass; the bytes live for this frame. Budget
- * frame_capacity[NT_GFX_FRAME_UNIFORM] at size + 256 per slot and distinct value of the frame. */
+/* Copies size bytes (a multiple of 16) into the uniform frame stream and binds that range to slot.
+ * Bytes equal to the slot's last staged block of the frame copy nothing (CACHE in its pass, a
+ * rebind in a later one); other bytes copy again, so A, B, A copies three times. Inside a pass;
+ * the bytes live for this frame. Budget frame_capacity[NT_GFX_FRAME_UNIFORM] at size + 256 per
+ * bind: the bound of a frame is its binds of all passes. */
 void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size);
-/* Binds a whole NT_BUFFER_UNIFORM buffer to slot; an equal handle ends CACHE. NT_BUFFER_INVALID
- * unbinds the slot without a backend call, so a draw whose program uses the slot asserts.
- * Inside a pass. Write the buffer with nt_gfx_update_buffer: every draw of a frame reads the
- * frame's last write. */
-void nt_gfx_bind_uniform_buffer(uint32_t slot, nt_buffer_t buf);
+/* Unbinds slot without a backend call, so a draw whose program uses the slot asserts. Inside a pass. */
+void nt_gfx_unbind_uniform_block(uint32_t slot);
 
 /* update_buffer = glBufferSubData at byte offset; offset + size must fit the
  * buffer, data must point to size bytes (NULL only with size 0). Allowed at any time:

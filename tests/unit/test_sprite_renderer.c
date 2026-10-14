@@ -978,7 +978,7 @@ void test_sprite_renderer_non_page_slot_resolves_per_frame(void) {
 }
 
 /* A program replaced between an immediate emit and an ECS draw_list puts one
- * material id on two programs in one frame; its params buffer stays bound across both. */
+ * material id on two programs in one frame; its params stay bound across both. */
 void test_sprite_renderer_program_replace_between_immediate_and_draw_list(void) {
     s_atlas_res = register_test_atlas(0xE5ULL);
     nt_material_t mat = create_test_material_with_param();
@@ -1816,7 +1816,7 @@ static uint32_t emit_params(void) {
     return recorded_params() - before;
 }
 
-/* Each material binds its own params buffer: a material returning after another rebinds its own. */
+/* Each material binds its own params: a material returning after another binds its bytes again. */
 void test_sprite_renderer_params_rebind_when_material_returns(void) {
     s_atlas_res = register_test_atlas(0xD2ULL);
     const nt_program_t program = make_param_program();
@@ -1831,14 +1831,15 @@ void test_sprite_renderer_params_rebind_when_material_returns(void) {
     TEST_ASSERT_EQUAL_UINT32(1, emit_params());
     nt_sprite_renderer_set_material(mat_a);
     TEST_ASSERT_EQUAL_UINT32(1, emit_params());
+    const uint8_t *staging = g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].staging;
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_ubo_bind_count());
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_ubo_bind_at(0).buffer_backend, nt_gfx_fake_ubo_bind_at(2).buffer_backend);
-    TEST_ASSERT_NOT_EQUAL_UINT32(nt_gfx_fake_ubo_bind_at(0).buffer_backend, nt_gfx_fake_ubo_bind_at(1).buffer_backend);
+    TEST_ASSERT_EQUAL_MEMORY(staging + nt_gfx_fake_ubo_bind_at(0).offset, staging + nt_gfx_fake_ubo_bind_at(2).offset, 16);
+    TEST_ASSERT_TRUE(memcmp(staging + nt_gfx_fake_ubo_bind_at(0).offset, staging + nt_gfx_fake_ubo_bind_at(1).offset, 16) != 0);
 }
 
-/* set_params writes the material's buffer; the emit of the same material binds nothing again. */
-void test_sprite_renderer_set_params_writes_the_buffer(void) {
+/* A params write reaches the next emit of the same material. */
+void test_sprite_renderer_set_params_reaches_the_next_emit(void) {
     s_atlas_res = register_test_atlas(0xD4ULL);
     const nt_material_t mat = create_param_material(make_param_program(), 1.0F);
 
@@ -1847,13 +1848,15 @@ void test_sprite_renderer_set_params_writes_the_buffer(void) {
     TEST_ASSERT_EQUAL_UINT32(1, emit_params());
     const float tint[4] = {7.0F, 0.0F, 0.0F, 0.0F};
     nt_material_set_params(mat, tint, sizeof(tint));
-    TEST_ASSERT_EQUAL_MEMORY(tint, nt_gfx_fake_last_update_buffer_data(), sizeof(tint));
-    TEST_ASSERT_EQUAL_UINT32(0, emit_params());
+    TEST_ASSERT_EQUAL_UINT32(1, emit_params());
+    const uint8_t *staging = g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].staging;
     nt_test_frame_next();
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
+    TEST_ASSERT_EQUAL_MEMORY(tint, staging + nt_gfx_fake_ubo_bind_at(1).offset, sizeof(tint));
 }
 
 /* A program replaced after set_material takes effect at the next set_material; the material's
- * params buffer stays bound across the program change. */
+ * params stay bound across the program change. */
 void test_sprite_renderer_set_program_applies_at_next_set_material(void) {
     s_atlas_res = register_test_atlas(0xD5ULL);
     const nt_program_t program_a = make_param_program();
@@ -2047,7 +2050,6 @@ void test_sprite_renderer_draws_after_context_restore_without_a_restore_call(voi
     nt_test_frame_close();
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
-    nt_material_restore_gpu(); /* the restore sequence runs before the frame's first pass */
     nt_test_frame_begin_pass();
     const nt_program_t relinked = nt_gfx_fake_make_program(NULL, 0);
     nt_material_set_program(mat, relinked);
@@ -2055,7 +2057,7 @@ void test_sprite_renderer_draws_after_context_restore_without_a_restore_call(voi
 
     nt_gfx_fake_draw_trace_reset(true);
     nt_sprite_renderer_set_material(mat);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, emit_params(), "the rebuilt params buffer binds once");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, emit_params(), "the params bind once");
     TEST_ASSERT_EQUAL_UINT32(vi_creates + 1U, nt_gfx_fake_vertex_input_create_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_vertex_input_cache_count());
     const uint32_t params_before = recorded_params();
@@ -2242,7 +2244,7 @@ int main(void) {
     RUN_TEST(test_sprite_comp_slice9_scale_affects_emit_position);
     RUN_TEST(test_sprite_renderer_page_and_material_changes_split_compatible_calls_merge);
     RUN_TEST(test_sprite_renderer_params_rebind_when_material_returns);
-    RUN_TEST(test_sprite_renderer_set_params_writes_the_buffer);
+    RUN_TEST(test_sprite_renderer_set_params_reaches_the_next_emit);
     RUN_TEST(test_sprite_renderer_set_program_applies_at_next_set_material);
     RUN_TEST(test_sprite_renderer_one_material_records_params_once);
     RUN_TEST(test_sprite_renderer_emit_after_odd_geometry_starts_at_multiple_of_4);
