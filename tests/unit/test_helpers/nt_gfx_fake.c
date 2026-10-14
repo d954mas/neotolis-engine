@@ -447,7 +447,7 @@ bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uin
 
 nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll) {
     (void)poll;
-    NT_ASSERT(backend_handle != 0 && backend_handle <= s_fake_max_programs && "finish_program: handle out of range");
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_fake_max_programs && s_fake_program_table[backend_handle].used && "finish_program: requires a live record");
     if (s_fake_lose_context_on_program_link) {
         /* GL reports the link complete and failed on a lost context, before the loss event. */
         s_fake_lose_context_on_program_link = false;
@@ -697,20 +697,18 @@ void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uin
 }
 
 bool nt_gfx_backend_recreate_all_resources(void) {
-    /* The front-end drops every stage and program handle on loss without a
-     * destroy call, so the tables are released here, as in the GL backend. */
-    if (s_fake_program_table) {
-        memset(s_fake_program_table, 0, ((size_t)s_fake_max_programs + 1U) * sizeof(nt_gfx_fake_program_t));
-        memset(s_fake_buffer_live, 0, ((size_t)s_fake_max_buffers + 1U) * sizeof(bool));
-        memset(s_fake_texture_live, 0, ((size_t)s_fake_max_textures + 1U) * sizeof(bool));
-    }
     s_fake_backend_restore_count++;
     s_fake_loss_pending = false; /* a fresh context, like the web backend's */
+    /* As in GL: a context that cannot be created keeps the dead records. */
     if (s_fake_fail_next_backend_restore_lost) {
         s_fake_fail_next_backend_restore_lost = false;
         s_fake_context_lost = true;
         return false;
     }
+    /* The front-end drops husks without a destroy call, so the tables are released here, as in GL. */
+    memset(s_fake_program_table, 0, ((size_t)s_fake_max_programs + 1U) * sizeof(nt_gfx_fake_program_t));
+    memset(s_fake_buffer_live, 0, ((size_t)s_fake_max_buffers + 1U) * sizeof(bool));
+    memset(s_fake_texture_live, 0, ((size_t)s_fake_max_textures + 1U) * sizeof(bool));
     if (s_fake_lose_context_during_next_restore) {
         s_fake_lose_context_during_next_restore = false;
         s_fake_loss_pending = true;

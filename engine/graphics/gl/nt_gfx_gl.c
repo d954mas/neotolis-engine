@@ -1074,8 +1074,8 @@ bool nt_gfx_backend_read_pixels(uint32_t render_target_backend, int x, int y, in
     /* Drain any stale GL error so the post-read check is attributable to THIS readback. */
     nt_gfx_gl_drain_errors();
     NT_GL(glReadPixels, x, y, (GLsizei)w, (GLsizei)h, GL_RGBA, GL_UNSIGNED_BYTE, out_rgba8);
-    /* A failed read (incomplete FB, invalid read buffer, no current context) leaves out_rgba8
-       partly/wholly untouched — report it so the dev-only capture path yields capture_failed, not garbage. */
+    /* A GL error here means a lost context (asserted below); false keeps the capture from encoding
+       the untouched buffer. */
     const bool ok = NT_GL_RET0(glGetError) == GL_NO_ERROR;
     if (!ok) {
         const bool lost = nt_gfx_gl_ctx_query_lost();
@@ -1262,15 +1262,15 @@ static void assert_name_failed_on_loss(void) {
 }
 
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
-    /* A browser that returns a null shader on a lost context makes Emscripten's glShaderSource throw. */
-    if (nt_gfx_gl_ctx_query_lost()) {
-        return 0;
-    }
     GLenum gl_type = (desc->type == NT_SHADER_VERTEX) ? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER;
     GLuint shader = NT_GL_RET(glCreateShader, gl_type);
-    /* A loss between the entry query and the create: glShaderSource would throw on the null name. */
     if (shader == 0) {
         assert_name_failed_on_loss();
+        return 0;
+    }
+    /* Emscripten gives WebGL's null shader a nonzero name, and glShaderSource throws on it: only
+     * the browser flag shows the loss. */
+    if (nt_gfx_gl_ctx_query_lost()) {
         return 0;
     }
 

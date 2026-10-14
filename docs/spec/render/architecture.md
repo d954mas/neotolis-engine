@@ -954,13 +954,14 @@ formats of GLES 3.0 ("Required Framebuffer Formats": `RGBA8`, `DEPTH16`, `DEPTH2
 live driver must complete every target the engine builds. Two residual cases also assert: a
 texture whose GPU storage allocation failed (uploads are not polled) leaves its framebuffer
 incomplete, and a GPU-process death that fails a status before the browser reports the loss.
-The backend asks the browser after a failed call, never at a creator's entry, for the same reason.
+A failure is classified by asking the browser after the failed call, for the same reason.
 A readback asks after every read as well: WebGL reports a loss once through
 `glGetError`, and the drain before the read consumes it. Beyond failures the backend asks only
-where the answer prevents a crash: before shader and program creation, because Emscripten throws on
-the null object some browsers return on a lost context; after texture upload, because a nonzero
-WebGL name does not establish context liveness; and the vertex array made at context setup, whose
-name 0 asserts only on a live context. A GPU timer query named 0 leaves its segment unallocated and
+where the answer prevents a crash: after shader creation and before program creation, because
+Emscripten gives WebGL's null shader a nonzero name that `glShaderSource` throws on, and throws
+inside `glCreateProgram` on a null program; after texture upload, because a nonzero WebGL name does
+not establish context liveness; and the vertex array made at context setup, whose name 0 asserts
+only on a live context. A GPU timer query named 0 leaves its segment unallocated and
 skipped, because `beginQuery` throws on it. A fresh context (init or restore) first
 drains GL errors: Emscripten keeps a recorded error across contexts, so a call
 that reached the dead context must not fail the fresh one's first check.

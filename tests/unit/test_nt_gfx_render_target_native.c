@@ -1634,6 +1634,51 @@ static void test_a_name_failure_on_a_live_context_asserts_without_latching(void)
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
 }
 
+static GLuint GLAD_API_PTR create_no_shader(GLenum type) {
+    (void)type;
+    return 0;
+}
+
+static PFNGLREADPIXELSPROC s_read_pixels;
+static PFNGLGETERRORPROC s_get_error;
+static bool s_fail_next_error;
+
+static void GLAD_API_PTR read_pixels_then_fail(GLint x, GLint y, GLsizei w, GLsizei h, GLenum format, GLenum type, void *pixels) {
+    s_read_pixels(x, y, w, h, format, type, pixels);
+    s_fail_next_error = true;
+}
+
+static GLenum GLAD_API_PTR error_after_read(void) {
+    if (s_fail_next_error) {
+        s_fail_next_error = false;
+        return GL_INVALID_OPERATION;
+    }
+    return s_get_error();
+}
+
+/* A null shader name and a readback GL error on a live context are bugs: they assert, no loss latches. */
+static void test_shader_name_and_readback_failures_on_a_live_context_assert(void) {
+    PFNGLCREATESHADERPROC create_shader = glad_glCreateShader;
+    glad_glCreateShader = create_no_shader;
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() {}\n"}));
+    glad_glCreateShader = create_shader;
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "could not name a GL object on a live context"));
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+
+    nt_gfx_end_frame();
+    uint8_t pixel[4] = {0};
+    s_read_pixels = glad_glReadPixels;
+    s_get_error = glad_glGetError;
+    glad_glReadPixels = read_pixels_then_fail;
+    glad_glGetError = error_after_read;
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 1, 1, pixel, sizeof(pixel)));
+    glad_glReadPixels = s_read_pixels;
+    glad_glGetError = s_get_error;
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "read_pixels: GL error on a live context"));
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    nt_gfx_begin_frame();
+}
+
 static GLenum GLAD_API_PTR framebuffer_unsupported(GLenum target) {
     (void)target;
     return GL_FRAMEBUFFER_UNSUPPORTED;
@@ -1959,6 +2004,7 @@ int main(void) {
     RUN_TEST(test_missing_uniform_details_assert);
     RUN_TEST(test_a_name_failure_on_a_live_context_asserts_without_latching);
     RUN_TEST(test_an_incomplete_framebuffer_on_a_live_context_asserts);
+    RUN_TEST(test_shader_name_and_readback_failures_on_a_live_context_assert);
     RUN_TEST(test_make_program_does_not_query_link_status);
     RUN_TEST(test_failed_link_logs_its_stage_and_asserts_at_begin_frame);
     int failures = UNITY_END();

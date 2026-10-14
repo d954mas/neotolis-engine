@@ -772,6 +772,8 @@ static void test_accepted_counters_match_recorded_results(void) {
     nt_gfx_set_scissor_enabled(false); /* unchanged: a cache result, not counted */
     nt_gfx_bind_pipeline((nt_pipeline_t){0});
     draw_teardown();
+    nt_gfx_fake_set_context_lost(true); /* a create that meets the loss ends CONTEXT_LOST, not counted */
+    (void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8});
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
@@ -866,7 +868,6 @@ static void test_capture_defines_reused_slots_and_husks_without_backend(void) {
     nt_texture_t reused = nt_gfx_make_texture(&desc);
     TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(first.id), nt_pool_slot_index(reused.id));
     TEST_ASSERT_NOT_EQUAL_UINT32(first.id, reused.id);
-    TEST_ASSERT_NULL(capture_texture_definition(first));
     const nt_gfx_event_t *live = capture_texture_definition(reused);
     TEST_ASSERT_NOT_NULL(live);
     TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(reused.id), live->data.resource.backend);

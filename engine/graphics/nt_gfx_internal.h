@@ -158,14 +158,9 @@ void nt_gfx_backend_clear(const nt_clear_desc_t *desc);
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc);
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle);
 
-/* Slot contract for programs, pipelines, vertex inputs, buffers, textures and render targets:
- * `slot` is the frontend pool slot and also the backend handle -- the pool owns allocation and
- * the backend table mirrors it 1:1. The record at `slot` is empty on entry. `false` means a lost
- * context: the record stays empty and the frontend publishes nothing. `true` means the record is
- * installed (a program still links; a texture may still be rolled back by its default sampler).
- * Between the loss wipe and the restore the frontend and the backend deliberately disagree: dead
- * records stay until a successful nt_gfx_backend_recreate_all_resources clears every table, and
- * the frontend creates nothing while lost. destroy_* of these kinds takes a live record. */
+/* Programs, pipelines, vertex inputs, buffers, textures and render targets: `slot` is the frontend
+ * pool slot and the backend handle; its record is empty on entry, and `false` means a lost context.
+ * Program, buffer and texture destroys take a live record: the frontend never passes a husk. */
 
 /* Starts the link. */
 bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uint32_t slot);
@@ -209,8 +204,7 @@ void nt_gfx_backend_destroy_texture(uint32_t backend_handle);
 void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_texture_format_t format, const void *data);
 
 enum { NT_GFX_RT_COLOR, NT_GFX_RT_DEPTH, NT_GFX_RT_ATTACHMENTS };
-/* Builds an FBO over live texture backends; 0 = absent attachment. `false` also on an
- * incomplete framebuffer on a live context. */
+/* Builds an FBO over live texture backends; 0 = absent attachment. */
 bool nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], uint32_t slot);
 void nt_gfx_backend_destroy_render_target(uint32_t backend_handle);
 

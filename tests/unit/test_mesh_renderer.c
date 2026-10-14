@@ -1064,10 +1064,13 @@ void test_real_restore_rebinds_new_stream_and_owned_buffers(void) {
     nt_gfx_end_frame();
     nt_test_frame_open();
 
+    const uint32_t binds = nt_gfx_fake_bind_vertex_input_count();
     nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX + 1, &item, 1);
     nt_test_frame_next();
     const nt_buffer_t new_stream = nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1);
-    /* The new buffer may reuse the old slot; the handle generation tells them apart. */
+    /* The new buffer may reuse the old slot, so the bound slot alone proves nothing: a bind happened
+     * after the restore, and the handle generation tells the buffers apart. */
+    TEST_ASSERT_GREATER_THAN_UINT32(binds, nt_gfx_fake_bind_vertex_input_count());
     TEST_ASSERT_NOT_EQUAL_UINT32(old_stream.id, new_stream.id);
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_buffer_backend_id(new_stream), nt_gfx_fake_last_instance_buffer());
     mark_draws();

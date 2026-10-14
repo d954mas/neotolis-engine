@@ -128,6 +128,21 @@ static void test_make_asserts_on_attachment_misuse(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_render_target_create_count());
 }
 
+/* A target create that meets the loss gives its pool slot back: a leak would cost one per loss. */
+static void test_a_create_that_meets_the_loss_frees_its_slot(void) {
+    nt_texture_t color = make_color();
+    const uint32_t creates = nt_gfx_fake_render_target_create_count();
+    nt_gfx_fake_set_context_lost(true);
+    TEST_ASSERT_EQUAL_UINT32(0, make_target(color, NO_TEXTURE).id);
+    TEST_ASSERT_EQUAL_UINT32(creates + 1U, nt_gfx_fake_render_target_create_count());
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    restore_context();
+    color = make_color();
+    for (int i = 0; i < 4; i++) { /* setUp: max_render_targets = 4 */
+        TEST_ASSERT_TRUE(nt_gfx_render_target_valid(make_target(color, NO_TEXTURE)));
+    }
+}
+
 /* The game checks the capability bit and picks its format; gfx does not try and fail. */
 static void test_make_asserts_on_rgba16f_without_float_rendering(void) {
     nt_texture_t half = make_attachment(NT_TEXTURE_FORMAT_RGBA16F, 64, 32);
@@ -748,6 +763,7 @@ int main(void) {
     RUN_TEST(test_make_asserts_on_attachment_misuse);
     RUN_TEST(test_make_asserts_on_texture_husk);
     RUN_TEST(test_make_asserts_on_rgba16f_without_float_rendering);
+    RUN_TEST(test_a_create_that_meets_the_loss_frees_its_slot);
     RUN_TEST(test_shared_depth_texture_serves_two_targets);
     RUN_TEST(test_destroying_a_texture_destroys_only_its_targets);
     RUN_TEST(test_destroy_render_target_tolerates_invalid_and_stale_handles);

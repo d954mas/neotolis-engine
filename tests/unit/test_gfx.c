@@ -1018,14 +1018,14 @@ static void destroy_husks(husks_t h) {
     nt_gfx_destroy_texture(h.texture);
 }
 
-/* A husk never reaches the backend: after a restore its old number may name a new object.
- * Its slot is reused by the next create, whose backend record the restore emptied. */
+/* A husk never reaches the backend: after a restore its old number may name a new object, and the
+ * fake's emptied records assert if a destroy reaches them. The next create reuses the slot. */
 void test_gfx_husks_skip_the_backend_and_their_slots_are_reused_after_restore(void) {
     husks_t h = make_husks();
+    restore_lost_context();
     const uint32_t texture_destroys = nt_gfx_fake_texture_destroy_count();
     destroy_husks(h);
     TEST_ASSERT_EQUAL_UINT32(texture_destroys, nt_gfx_fake_texture_destroy_count());
-    restore_lost_context();
     husks_t fresh = {
         .program = nt_gfx_make_program(make_test_vs(), make_test_fs()),
         .buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}),
@@ -1064,8 +1064,10 @@ void test_gfx_texture_rolled_back_by_its_sampler_frees_its_slot(void) {
     nt_texture_t probe = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = s_test_pixels_4x4});
     const uint32_t slot = nt_pool_slot_index(probe.id);
     nt_gfx_destroy_texture(probe);
+    const uint32_t destroys = nt_gfx_fake_texture_destroy_count();
     nt_gfx_fake_lose_context_on_sampler_create();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = s_test_pixels_4x4, .min_filter = NT_FILTER_LINEAR}).id);
+    TEST_ASSERT_EQUAL_UINT32(destroys + 1U, nt_gfx_fake_texture_destroy_count());
     TEST_ASSERT_EQUAL_UINT32(slot, nt_gfx_fake_last_destroyed_texture());
     restore_lost_context();
     nt_texture_t next = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = s_test_pixels_4x4});
