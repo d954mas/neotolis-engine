@@ -217,7 +217,7 @@ static nt_program_ref_t s_programs[5];
 static nt_pipeline_t s_pipelines[3];
 static nt_material_t s_text_material;
 static nt_font_t s_font;
-static nt_hash32_t s_noise_name, s_sky_names[6], s_diffuse_name, s_light_name;
+static nt_hash32_t s_noise_name, s_sky_names[6], s_diffuse_name;
 static char s_notice[160];
 static const char s_upstream_url[] = "https://github.com/MethanePowered/MethaneAsteroids";
 
@@ -877,8 +877,6 @@ static void record_noise_atlas(nt_program_t program) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_noise_atlas});
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(s_empty_input);
-    const nt_hash32_t params_name = nt_hash32_str("u_noise_params");
-    const nt_hash32_t offset_name = nt_hash32_str("u_noise_offset");
     for (uint32_t t = 0; t < AST_MAX_TEXTURES; t++) {
         const noise_params_t params = noise_params(t);
         const uint32_t column = t % AST_NOISE_COLUMNS;
@@ -886,10 +884,10 @@ static void record_noise_atlas(nt_program_t program) {
         const float x = (float)(column * AST_NOISE_SIZE);
         const float y = (float)(row * AST_NOISE_SIZE);
         const float amplitude = 1.0F + params.gain + (params.gain * params.gain) + (params.gain * params.gain * params.gain);
-        const float uniforms[2][4] = {{params.frequency, params.lacunarity, params.gain, 1.0F / amplitude}, {params.offset_x, params.offset_y, x, y}};
+        /* noise.frag's Draw block: u_noise_params, u_noise_offset. */
+        const float block[2][4] = {{params.frequency, params.lacunarity, params.gain, 1.0F / amplitude}, {params.offset_x, params.offset_y, x, y}};
         nt_gfx_set_viewport((int)x, (int)y, (int)AST_NOISE_SIZE, (int)AST_NOISE_SIZE);
-        nt_gfx_set_uniform_vec4(params_name, uniforms[0]);
-        nt_gfx_set_uniform_vec4(offset_name, uniforms[1]);
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, block, sizeof(block));
         nt_gfx_draw(0, 3);
     }
     nt_gfx_end_pass();
@@ -2068,8 +2066,9 @@ static void draw_world(uint32_t base, const nt_frame_uniforms_t *globals) {
     const complexity_t *complexity = &s_complexities[s_level];
     nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, globals, sizeof(*globals));
     nt_gfx_bind_pipeline(s_pipelines[0]);
+    /* The rock and planet shaders' Draw block: u_light_position. */
     const float light[4] = {s_light.eye[0], s_light.eye[1], s_light.eye[2], 1};
-    nt_gfx_set_uniform_vec4(s_light_name, light);
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, light, sizeof(light));
     const nt_gfx_texture_binding_t noise = {.name = s_noise_name, .texture = s_noise};
     nt_gfx_apply_texture_bindings(&noise, 1);
     for (uint32_t i = 0; i < complexity->instances;) {
@@ -2086,7 +2085,6 @@ static void draw_world(uint32_t base, const nt_frame_uniforms_t *globals) {
         i = end;
     }
     nt_gfx_bind_pipeline(s_pipelines[1]);
-    nt_gfx_set_uniform_vec4(s_light_name, light);
     nt_gfx_bind_vertex_input_instanced(s_planet_mesh.input, s_instance_layout_handle, instances, base + (s_slot_count * (uint32_t)sizeof(asteroid_instance_t)));
     const nt_gfx_texture_binding_t mars = {.name = s_diffuse_name, .texture = {.id = nt_resource_get(s_mars)}};
     nt_gfx_apply_texture_bindings(&mars, 1);
@@ -2267,7 +2265,9 @@ int main(int argc, char **argv) {
     /* Every draw key has its own vertex input; the rest covers the text, sprite and UI renderers. */
     gfx.max_vertex_inputs = AST_KEY_COUNT + 64U;
     gfx.frame_capacity[NT_GFX_FRAME_INDEX] = 64U * 1024U;
-    gfx.frame_capacity[NT_GFX_FRAME_UNIFORM] = 2U * 512U;
+    /* The world and UI views, the light Draw block and, on a noise frame, one Draw block per noise tile:
+     * 256 B or less each, plus any offset alignment up to 256. */
+    gfx.frame_capacity[NT_GFX_FRAME_UNIFORM] = (AST_MAX_TEXTURES + 4U) * 512U;
     nt_gfx_init(&gfx);
     nt_http_init();
 #ifndef NT_PLATFORM_WEB
@@ -2306,7 +2306,6 @@ int main(int argc, char **argv) {
     }
     s_noise_name = nt_hash32_str("u_noise");
     s_diffuse_name = nt_hash32_str("u_diffuse");
-    s_light_name = nt_hash32_str("u_light_position");
     load_pack(nt_hash32_str("asteroids_ui"), "asteroids_ui.ntpack");
     load_pack(nt_hash32_str("asteroids_core"), "asteroids_core.ntpack");
     load_pack(nt_hash32_str("asteroids_space"), "asteroids_space.ntpack");

@@ -62,15 +62,13 @@ static const char *s_quad_vs_src = "precision highp float;\n"
 /* highp: the depth view reads DEPTH24 through this sampler, which fp16 cannot hold. */
 static const char *s_quad_fs_src = "precision highp float;\n"
                                    "uniform highp sampler2D u_texture;\n"
-                                   "uniform vec4 u_tint;\n"
-                                   "uniform int u_mode;\n"
-                                   "uniform float u_zoom;\n"
+                                   "layout(std140) uniform Draw { vec4 u_tint; ivec4 u_mode; vec4 u_zoom; };\n"
                                    "in vec2 v_uv;\n"
                                    "out vec4 frag_color;\n"
                                    "void main() {\n"
-                                   "    vec2 sample_uv = ((v_uv - vec2(0.5)) / max(u_zoom, 0.001)) + vec2(0.5);\n"
+                                   "    vec2 sample_uv = ((v_uv - vec2(0.5)) / max(u_zoom.x, 0.001)) + vec2(0.5);\n"
                                    "    vec4 sample_color = texture(u_texture, sample_uv);\n"
-                                   "    if (u_mode == 1) {\n"
+                                   "    if (u_mode.x == 1) {\n"
                                    "        float depth = 1.0 - sample_color.r;\n"
                                    "        frag_color = vec4(depth, depth, depth, 1.0);\n"
                                    "        return;\n"
@@ -433,9 +431,14 @@ static void draw_textured_quad(nt_texture_t texture, uint32_t quad, int mode, co
     nt_gfx_bind_vertex_input(s_demo.quad_vi);
     const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_texture"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
     nt_gfx_apply_texture_bindings(&binding, 1);
-    nt_gfx_set_uniform_int(nt_hash32_str("u_mode"), mode);
-    nt_gfx_set_uniform_float(nt_hash32_str("u_zoom"), mode == 1 ? 1.0F : s_demo.sample_zoom);
-    nt_gfx_set_uniform_vec4(nt_hash32_str("u_tint"), tint);
+    /* s_quad_fs_src's Draw block. */
+    struct {
+        float tint[4];
+        int32_t mode[4];
+        float zoom[4];
+    } block = {.mode = {mode}, .zoom = {mode == 1 ? 1.0F : s_demo.sample_zoom}};
+    memcpy(block.tint, tint, sizeof(block.tint));
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, &block, sizeof(block));
     nt_gfx_draw(quad * 6U, 6);
 }
 
@@ -546,7 +549,9 @@ int main(void) {
     nt_input_init();
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
-    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4U * 512U; /* the view block, the shape Draw block and one Draw block per blur pass: 256 B or less each, plus any offset alignment up to 256 */
+    /* The view block, the shape Draw block, a Draw block per blur pass and per presented quad (5):
+     * 256 B or less each, plus any offset alignment up to 256. */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 10U * 512U;
     gfx_desc.max_render_targets = 8;
     gfx_desc.max_textures = 32;
     gfx_desc.max_pipelines = 32;

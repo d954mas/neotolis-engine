@@ -722,8 +722,9 @@ static void test_content_is_generated_once_and_levels_reselect_instances(void) {
     const uint32_t old_level = s_level;
     nt_gfx_desc_t gfx = nt_gfx_desc_defaults();
     gfx.max_vertex_inputs = AST_KEY_COUNT + 64U;
-    /* Vertex inputs bake the instance stream's buffer, so the stream needs storage. */
+    /* Vertex inputs bake the instance stream's buffer, so the stream needs storage; the noise pass binds a Draw block per tile. */
     gfx.frame_capacity[AST_STREAM_INSTANCES] = 4096;
+    gfx.frame_capacity[NT_GFX_FRAME_UNIFORM] = AST_MAX_TEXTURES * 512U;
     nt_gfx_init(&gfx);
     nt_gfx_fake_reset();
     const nt_program_t noise_program = nt_gfx_fake_make_program(NULL, 0);
@@ -958,7 +959,7 @@ static void test_grouped_submission_draws_exact_runs_textures_offsets_and_scene_
     s_level = 0;
     nt_gfx_desc_t gfx = nt_gfx_desc_defaults();
     gfx.frame_capacity[AST_STREAM_INSTANCES] = 96U + ((AST_MAX_SLOTS + 1U) * (uint32_t)sizeof(asteroid_instance_t));
-    gfx.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096;
+    gfx.frame_capacity[NT_GFX_FRAME_UNIFORM] = (AST_MAX_TEXTURES + 4U) * 512U; /* as the host: views, light and noise-tile Draw blocks */
     gfx.max_vertex_inputs = AST_KEY_COUNT + 64U;
     nt_gfx_init(&gfx);
     const char *const samplers[] = {"u_noise"};

@@ -14,7 +14,7 @@ in vec3 v_uvw;
 in vec3 v_weights;
 flat in vec2 v_tile;
 uniform sampler2D u_noise;
-uniform vec4 u_light_position;
+layout(std140) uniform Draw { vec4 u_light_position; };
 out vec4 frag_color;
 #include "../../../assets/shaders/common/globals.glsl"
 #include "primitives.glsl"
