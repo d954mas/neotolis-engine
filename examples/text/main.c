@@ -332,7 +332,7 @@ static void frame(void) {
     double t_draw = 0.0;
 #endif
     if (can_render) {
-        nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &uniforms, sizeof(uniforms));
 
         nt_text_renderer_set_material(s_text_material);
 
@@ -433,7 +433,6 @@ int main(int argc, char *argv[]) {
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 32U * 1024U; /* the scene peaks at 12.5 KB: 60 glyphs */
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = 4U * 1024U;
     gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 512U; /* the 256 B view block plus any offset alignment up to 256 */
-    gfx_desc.global_blocks[0] = (nt_global_block_t){"Globals", 0};
     nt_gfx_init(&gfx_desc);
 
     /* 5. I/O init */

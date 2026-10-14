@@ -256,6 +256,11 @@ void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size) {
     (void)size;
 }
 
+void nt_gfx_bind_uniform_buffer(uint32_t slot, nt_buffer_t buf) {
+    (void)slot;
+    (void)buf;
+}
+
 void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size) {
     (void)buf;
     (void)offset;

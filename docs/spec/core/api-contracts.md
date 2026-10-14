@@ -183,22 +183,44 @@ A link failure is a developer error and asserts in the `nt_gfx_begin_frame`
 that finishes the link; an invalid stage handle and an exhausted program pool
 assert at `nt_gfx_make_program`.
 
-`nt_gfx_desc_t.global_blocks` declares the global name -> binding slot list at
-`nt_gfx_init` (up to `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS`; an entry with a NULL name is unused); every
-program that declares a listed block gets its slot at link. There is no
-per-program override and no later registration. Names are borrowed without
-copying: each string must remain valid and unchanged until `nt_gfx_shutdown`.
-The list survives context loss: programs linked after a restore bind it too.
+Every active uniform block binds at link to the slot of its name. The engine
+reserves three names by update frequency: `Globals` (`NT_GFX_SLOT_GLOBALS`, frame
+and view data the game fills), `Material` (`NT_GFX_SLOT_MATERIAL`) and `Draw`
+(`NT_GFX_SLOT_DRAW`, per-draw data). `nt_gfx_desc_t.global_blocks` lists the
+game's own names at `nt_gfx_init`: entry `i` binds to `NT_GFX_SLOT_GAME + i`,
+up to `NT_GFX_MAX_GAME_BLOCKS` (6, so `Globals`, `Draw` and the game blocks fit
+WebGPU's eight dynamic uniform bindings), and the list ends at the first NULL.
+A reserved or duplicate name in the list asserts at init; an active block whose
+name is neither reserved nor listed asserts at link (it would read slot 0). The
+slots are logical: a WebGPU backend maps them into its bind groups. Names are
+borrowed without copying: each string must remain valid and unchanged until
+`nt_gfx_shutdown`. The list survives context loss: programs linked after a
+restore bind it too.
 
-`nt_gfx_bind_uniform_block(slot, data, size)` copies `size` bytes into the
-uniform frame stream at the next multiple of
+Block members are `vec4`, `ivec4`, `uvec4`, `mat4` or arrays of them in a
+`layout(std140)` block with column-major matrices; another member type asserts
+at link. A C struct of `float`, `int32_t` and `uint32_t` arrays then matches the
+block byte for byte. A draw asserts that every block its program uses is bound
+in the pass with at least the block's data size (WebGL rejects such a draw,
+native GL reads past the range); the check runs on the first draw after a
+pipeline or block change, before a merge.
+
+`nt_gfx_bind_uniform_block(slot, data, size)` binds frame data: it copies `size`
+bytes into the uniform frame stream at the next multiple of
 `gpu_caps.uniform_buffer_offset_alignment` (re-probed at context restore) and
-binds that range to `slot`. The game owns no uniform buffer: a block is frame
-data, so a draw reads only blocks bound in its own frame. WebGL rejects a draw
-whose bound range is smaller than the block's data size; gfx does not know block
-sizes, so `size` covers the whole block. A slot at or above the limit, NULL
-`data` or a zero `size` asserts; an exhausted stream stops as a frame storage
-overflow. On a lost context the call allocates nothing and ends `CONTEXT_LOST`.
+binds that range to `slot`. Bytes equal to the range already bound to `slot` in
+this pass end `CACHE` with no copy, so an owner rebinds unchanged data freely.
+The bytes live for one frame. A slot at or above the limit, NULL `data`, or a
+`size` that is zero or not a multiple of 16 asserts; an exhausted stream stops
+as a frame storage overflow. On a lost context the call allocates nothing and
+ends `CONTEXT_LOST`.
+
+`nt_gfx_bind_uniform_buffer(slot, buf)` binds a whole `NT_BUFFER_UNIFORM` buffer
+(size a nonzero multiple of 16, asserted at creation); an equal handle ends
+`CACHE`. Its data is written with `nt_gfx_update_buffer`, so every draw of a
+frame reads the frame's last write. `NT_BUFFER_INVALID` unbinds the slot without
+a backend call, and a draw whose program uses the slot asserts. Another buffer
+type or a buffer without a live backend asserts after the lost-context return.
 
 `nt_gfx_make_program` returns `NT_PROGRAM_INVALID` for the two states a context
 loss leaves behind, and for nothing else. The first is the loss itself: a loss
@@ -536,15 +558,15 @@ that a loss or a cascade may have freed; there is no non-asserting pass-begin
 variant.
 
 Draw-state calls require an open pass. `nt_gfx_set_scissor`, `nt_gfx_set_scissor_enabled`,
-`nt_gfx_set_viewport` and
-`nt_gfx_bind_uniform_block` assert
+`nt_gfx_set_viewport`, `nt_gfx_bind_uniform_block` and
+`nt_gfx_bind_uniform_buffer` assert
 without an open pass, also on a lost context: every pass-scoped call checks the
 pass before it returns `NT_GFX_RESULT_CONTEXT_LOST`. `nt_gfx_begin_pass` disables scissor, sets the viewport to the whole
-target and clears the bound pipeline, vertex input, instance binding and texture
-set. The scissor rectangle and uniform-block bindings
-carry over, so a pass sets the scissor rectangle before it enables scissor. A
-bind equal to the current state records nothing; results, the texture-set
-exception, the always-recording uniform-block bind and the slot limit are in
+target and clears the bound pipeline, vertex input, instance binding, texture
+set and uniform-block bindings, so every pass binds every block it reads. The
+scissor rectangle carries over, so a pass sets the scissor rectangle before it
+enables scissor. A bind equal to the current state records nothing; results,
+the texture-set exception and the slot limit are in
 [binding dedup](../render/architecture.md#binding-dedup-and-draw-merge).
 `nt_gfx_begin_segment` and `nt_gfx_end_segment` assert outside an open frame.
 

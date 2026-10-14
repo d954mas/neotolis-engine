@@ -925,7 +925,7 @@ static void frame(void) {
 
     /* UI: needs perspective VP in frame_uniforms for sprite/text material shaders. */
     if (ui_can_render) {
-        nt_gfx_bind_uniform_block(0, &uniforms_3d, sizeof uniforms_3d);
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &uniforms_3d, sizeof uniforms_3d);
 
         nt_ui_walk(s_ctx, &target);
 
@@ -944,7 +944,7 @@ static void frame(void) {
 
     /* HUD: ortho VP. */
     if (text_info && nt_gfx_program_ready(text_info->program)) {
-        nt_gfx_bind_uniform_block(0, &uniforms_2d, sizeof uniforms_2d);
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &uniforms_2d, sizeof uniforms_2d);
         draw_hud(fb_w, fb_h);
     }
 
@@ -959,7 +959,7 @@ static void frame(void) {
 
         /* Highlight overlay emits the element's world geometry in 3D ctx → bind the perspective VP
          * so it lands on the panel; the depth-off inspector materials keep it on top. */
-        nt_gfx_bind_uniform_block(0, &uniforms_3d, sizeof uniforms_3d);
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &uniforms_3d, sizeof uniforms_3d);
         nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
     }
 
@@ -1022,7 +1022,6 @@ int main(int argc, char *argv[]) {
     gfx_desc.depth = true;
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = UI_3D_DEMO_VERTEX_BYTES;
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = UI_3D_DEMO_INDEX_BYTES;
-    gfx_desc.global_blocks[0] = (nt_global_block_t){"Globals", 0};
     nt_gfx_init(&gfx_desc);
 
     nt_http_init();

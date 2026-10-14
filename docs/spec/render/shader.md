@@ -72,12 +72,12 @@ remain mutable and are read at the draw; snapshot timing is specified in
 
 Uniform block bindings are program state, not material state: a program is
 shared by many materials, so a material-declared binding would be
-last-writer-wins across them. The game declares one global name -> slot list
-instead, in `nt_gfx_desc_t.global_blocks`, and every program that declares a
-listed block gets its slot at link. Names are borrowed without copying; each
-string must remain valid and unchanged until `nt_gfx_shutdown`. The list
-survives context loss. The data varies per draw: `nt_gfx_bind_uniform_block` copies a
-block into the uniform frame stream and binds it to a slot.
+last-writer-wins across them. A block binds by name instead: the engine reserves
+`Globals`, `Material` and `Draw` (slots 0-2, by update frequency) and the game
+lists its own names in `nt_gfx_desc_t.global_blocks` (slots from 3); an unknown
+active block name asserts at link. The contract (member types, std140, the draw
+check, frame data and uniform buffers) is in
+[API contracts](../core/api-contracts.md#program-handles).
 
 The GL backend caches at most 16 active standalone non-sampler uniform locations
 per program. Each active array element consumes one entry; uniforms in blocks do

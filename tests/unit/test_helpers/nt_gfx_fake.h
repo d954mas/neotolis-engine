@@ -13,6 +13,10 @@ void nt_gfx_fake_set_samplers_typed(const char *const *names, const uint8_t *sam
 nt_program_t nt_gfx_fake_make_program(const char *const *names, uint8_t count);
 nt_program_t nt_gfx_fake_make_program_typed(const char *const *names, const uint8_t *sampler_classes, uint8_t count);
 
+/* Subsequent links use a uniform block of `size` bytes at slot (0 = none) -- the size a draw
+ * requires bound there. Kept until changed or until gfx init clears it. */
+void nt_gfx_fake_set_block(uint32_t slot, uint32_t size);
+
 /* Draw trace: recorded by the fake backend, so the engine's draw path stays
  * free of test bookkeeping. pipeline/program are the FRONTEND handles of the
  * pipeline the fake backend last bound. */

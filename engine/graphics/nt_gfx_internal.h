@@ -5,6 +5,8 @@
 #include "hash/nt_hash.h"
 #include "pool/nt_pool.h"
 
+#include <string.h>
+
 // #region observation storage and owning-site counters
 #if NT_GFX_CAPTURE_ENABLED
 typedef struct {
@@ -129,6 +131,23 @@ typedef struct {
     uint8_t sampler_class;
 } nt_gfx_sampler_info_t;
 
+/* Slot a uniform block name binds to at link: the reserved names first, then the game's list
+ * (NULL = none); NT_GFX_MAX_UNIFORM_BUFFER_SLOTS for an unknown name. */
+static inline uint32_t nt_gfx_block_slot(const char *const *game_blocks, const char *name) {
+    static const char *const reserved[NT_GFX_SLOT_GAME] = {"Globals", "Material", "Draw"};
+    for (uint32_t slot = 0; slot < NT_GFX_SLOT_GAME; slot++) {
+        if (strcmp(name, reserved[slot]) == 0) {
+            return slot;
+        }
+    }
+    for (uint32_t i = 0; game_blocks != NULL && i < NT_GFX_MAX_GAME_BLOCKS && game_blocks[i] != NULL; i++) {
+        if (strcmp(name, game_blocks[i]) == 0) {
+            return NT_GFX_SLOT_GAME + i;
+        }
+    }
+    return NT_GFX_MAX_UNIFORM_BUFFER_SLOTS;
+}
+
 typedef enum {
     NT_GFX_TEXTURE_SET_NONE = 0,
     NT_GFX_TEXTURE_SET_APPLIED,
@@ -175,6 +194,8 @@ void nt_gfx_backend_destroy_program(uint32_t backend_handle);
 /* Sampler units and classes are immutable program state, recorded at link. */
 bool nt_gfx_backend_program_sampler_info(uint32_t program_backend, uint32_t name_hash, nt_gfx_sampler_info_t *out_info);
 uint32_t nt_gfx_backend_program_sampler_mask(uint32_t program_backend);
+/* Data size of the active uniform block the program binds to slot at link; 0 = none. */
+uint32_t nt_gfx_backend_program_block_size(uint32_t program_backend, uint32_t slot);
 
 /* Fills a CPU record only, so it cannot fail. */
 void nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend, uint32_t slot);
@@ -233,7 +254,7 @@ void nt_gfx_backend_set_viewport(int x, int y, int w, int h);
  * caller never encodes garbage. */
 bool nt_gfx_backend_read_pixels(uint32_t render_target_backend, int x, int y, int w, int h, void *out_rgba8);
 
-/* size 0 binds the whole buffer; otherwise [offset, offset + size), validated by the frontend. */
+/* Binds [offset, offset + size) of the buffer, validated by the frontend. */
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, uint32_t offset, uint32_t size);
 
 /* Uniform locations and values are program state, so the write names its

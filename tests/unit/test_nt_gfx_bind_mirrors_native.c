@@ -1581,7 +1581,7 @@ static void test_ground_state_reissues_sampler_bind(void) {
  * up a location per element, and they must not count toward the 16-entry cache. */
 static void test_block_members_skip_the_uniform_cache(void) {
     const char *vs = "precision highp float;\n"
-                     "layout(std140) uniform Big { vec4 big_data[1024]; };\n"
+                     "layout(std140) uniform Draw { vec4 big_data[1024]; };\n"
                      "uniform vec4 u_offset;\n"
                      "void main() { gl_Position = big_data[gl_VertexID] + u_offset; }\n";
     nt_pipeline_t pip = make_pipeline_ex(vs, s_fs_src, false, false, false);

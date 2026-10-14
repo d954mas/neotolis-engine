@@ -114,6 +114,7 @@ typedef struct {
      * written once, never rewritten by a material. */
     nt_gfx_gl_sampler_unit_t sampler_units[NT_GFX_MAX_TEXTURE_SLOTS];
     uint8_t sampler_count;
+    uint32_t block_sizes[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS]; /* GL_UNIFORM_BLOCK_DATA_SIZE per bound slot; 0 = none */
 } nt_gfx_gl_program_t;
 
 /* What a pointer call needs, packed: nt_vertex_attr_t pads its enum to 12 bytes. */
@@ -368,6 +369,11 @@ uint32_t nt_gfx_backend_program_sampler_mask(uint32_t program_backend) {
     NT_ASSERT(program_backend != 0 && program_backend <= s_init_desc.max_programs && s_programs[program_backend].program != 0 && "program_sampler_mask: requires a live program");
     /* Units are dense 0..n-1, so the count is the mask. */
     return (1U << s_programs[program_backend].sampler_count) - 1U;
+}
+
+uint32_t nt_gfx_backend_program_block_size(uint32_t program_backend, uint32_t slot) {
+    NT_ASSERT(program_backend != 0 && program_backend <= s_init_desc.max_programs && s_programs[program_backend].program != 0 && "program_block_size: requires a live program");
+    return s_programs[program_backend].block_sizes[slot];
 }
 
 // #region test mirror reads
@@ -1477,6 +1483,8 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
         GLint block_index = -1;
         NT_GL(glGetActiveUniformsiv, program, 1, &index, GL_UNIFORM_BLOCK_INDEX, &block_index);
         if (block_index != -1) {
+            /* A C struct of float/int32_t/uint32_t arrays matches only these std140 members byte for byte. */
+            NT_ASSERT((utype == GL_FLOAT_VEC4 || utype == GL_INT_VEC4 || utype == GL_UNSIGNED_INT_VEC4 || utype == GL_FLOAT_MAT4) && "uniform block member is not vec4, ivec4, uvec4 or mat4");
             continue;
         }
         NT_ASSERT(usize == 1 || (ulen >= 3 && strcmp(uname + ulen - 3, "[0]") == 0));
@@ -1511,6 +1519,35 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
     }
     NT_ASSERT(uniform_count <= NT_MAX_CACHED_UNIFORMS && "program exceeds standalone uniform cache capacity");
     *out_count = (uint8_t)uniform_count;
+    return true;
+}
+
+/* Every active block binds to the slot of its name; an unknown name would sit on binding 0 and read
+ * Globals. The size per slot is the largest block bound there. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
+static bool nt_gfx_gl_bind_blocks(GLuint program, nt_gfx_gl_program_t *rec) {
+    memset(rec->block_sizes, 0, sizeof(rec->block_sizes));
+    GLint block_count = -1;
+    NT_GL(glGetProgramiv, program, GL_ACTIVE_UNIFORM_BLOCKS, &block_count);
+    if (block_count < 0) {
+        return false;
+    }
+    char name[NT_GFX_GL_MAX_UNIFORM_NAME];
+    for (GLint bi = 0; bi < block_count; bi++) {
+        GLsizei length = 0;
+        NT_GL(glGetActiveUniformBlockName, program, (GLuint)bi, (GLsizei)sizeof(name), &length, name);
+        GLint size = 0;
+        NT_GL(glGetActiveUniformBlockiv, program, (GLuint)bi, GL_UNIFORM_BLOCK_DATA_SIZE, &size);
+        if (length <= 0 || size <= 0) {
+            return false;
+        }
+        const uint32_t slot = nt_gfx_block_slot(s_init_desc.global_blocks, name);
+        NT_ASSERT(slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS && "uniform block name is neither reserved nor in nt_gfx_desc_t.global_blocks");
+        NT_GL(glUniformBlockBinding, program, (GLuint)bi, (GLuint)slot);
+        if ((uint32_t)size > rec->block_sizes[slot]) {
+            rec->block_sizes[slot] = (uint32_t)size;
+        }
+    }
     return true;
 }
 
@@ -1570,17 +1607,7 @@ nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll
         NT_ASSERT(lost && "program link failed on a live context");
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    const nt_global_block_t *blocks = s_init_desc.global_blocks;
-    for (uint32_t bi = 0; bi < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; bi++) {
-        if (blocks[bi].name == NULL) {
-            continue;
-        }
-        GLuint block_index = NT_GL_RET(glGetUniformBlockIndex, rec->program, blocks[bi].name);
-        if (block_index != GL_INVALID_INDEX) {
-            NT_GL(glUniformBlockBinding, rec->program, block_index, (GLuint)blocks[bi].binding_slot);
-        }
-    }
-    if (!nt_gfx_gl_cache_uniforms(rec->program, rec)) {
+    if (!nt_gfx_gl_bind_blocks(rec->program, rec) || !nt_gfx_gl_cache_uniforms(rec->program, rec)) {
         const bool lost = nt_gfx_gl_ctx_query_lost();
         NT_ASSERT(lost && "program uniform reflection failed");
         return NT_GFX_RESULT_CONTEXT_LOST;
@@ -1810,7 +1837,8 @@ bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot) {
         assert_name_failed_on_loss();
         return false;
     }
-    const GLenum target = desc->type == NT_BUFFER_INDEX ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
+    static const GLenum targets[] = {[NT_BUFFER_VERTEX] = GL_ARRAY_BUFFER, [NT_BUFFER_INDEX] = GL_ELEMENT_ARRAY_BUFFER, [NT_BUFFER_UNIFORM] = GL_UNIFORM_BUFFER};
+    const GLenum target = targets[desc->type];
     GLenum usage = map_buffer_usage(desc->usage);
     bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER;
     if (unhook_vao) {

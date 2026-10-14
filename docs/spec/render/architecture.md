@@ -133,23 +133,24 @@ and backend asserts without a front-end equivalent fire at execution, inside
 ### Binding dedup and draw merge
 
 The front-end is the one layer that drops redundant public binds; the GL backend
-only skips repeated physical state (below). Every binding call except a uniform
-block compares with a front-end mirror; an equal value ends `NT_GFX_RESULT_CACHE`
-and records nothing. A mirror lives exactly as long as the contract keeps its state:
+only skips repeated physical state (below). Every binding call compares with a
+front-end mirror; an equal value ends `NT_GFX_RESULT_CACHE` and records nothing.
+A mirror lives exactly as long as the contract keeps its state:
 
 - pipeline, vertex input with its instance layout, buffer and offset, the
-  texture set (per unit: texture and sampler) and the viewport live for one pass:
-  `begin_pass` discards them, so the first bind of each in a pass records;
+  texture set (per unit: texture and sampler), the uniform-block slots
+  (buffer, offset and size) and the viewport live for one pass: `begin_pass`
+  discards them, so the first bind of each in a pass records;
 - the scissor rectangle carries over passes and frames; a context loss clears it;
 - scissor enable is reset to off by `begin_pass`.
 
 `nt_gfx_apply_texture_bindings` never ends `CACHE`: a successful apply validates
 and publishes the whole set and ends `ACCEPTED`, but records a unit bind only
-when that unit's texture or sampler changed in the pass. A uniform block is
-frame data at a fresh offset of the uniform frame stream, so its bind always
-records and ends `ACCEPTED`; GL keeps the slot binding across passes and frames.
-Uniform-block slots are below `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS` (24, the WebGL2 minimum); a bind at
-that slot or above asserts, and so does `nt_gfx_init` for a global block declared there.
+when that unit's texture or sampler changed in the pass. A frame block compares
+its bytes with the range bound to its slot in the pass (the staged bytes stay
+unchanged until the next `begin_frame`); a uniform buffer compares its handle.
+Uniform-block slots are below `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS` (9: the three
+reserved names and six game blocks); a bind at that slot or above asserts.
 
 The compare runs after the pass check; an equal value was validated when it was
 recorded, `begin_pass` discards the pass-scoped mirrors, and the frame rule keeps
@@ -574,11 +575,14 @@ Alignment follows the reader:
   buffer at offset 0. Consecutive allocations of one stride are contiguous;
 - instance data bound with `nt_gfx_bind_vertex_input_instanced` at its offset aligns to 4;
 - indices align to 4 and are drawn from `first_index = offset / 4`;
-- uniform data is written and bound by `nt_gfx_bind_uniform_block(slot, data, size)`,
+- uniform frame data is written and bound by `nt_gfx_bind_uniform_block(slot, data, size)`,
   which aligns it to `gpu_caps.uniform_buffer_offset_alignment` (at most 256 on
-  WebGL 2 and GLES 3, not necessarily a power of two): budget each block its size
-  plus 256 bytes. The game owns no uniform buffer; the GL binding persists, the bytes live for one frame, so a draw
-  reads only blocks bound in its own frame.
+  WebGL 2 and GLES 3, not necessarily a power of two): budget each changed bind
+  its size plus 256 bytes (a bind equal to the slot's binding in the pass copies
+  nothing). The bytes live for one frame and bindings for one pass, so a draw
+  reads only blocks bound in its own pass. Data that outlives a frame (material
+  params) lives in an `NT_BUFFER_UNIFORM` buffer bound with
+  `nt_gfx_bind_uniform_buffer`.
 
 `nt_gfx_frame_buffer(stream)` returns an ordinary buffer handle, for vertex inputs
 over a stream's vertex or instance data; `nt_gfx_bind_uniform_block` names a
@@ -694,13 +698,13 @@ nt_skeletal_gpu_flush();
 bind_shadow_materials();
 for (uint32_t c = 0; c < CASCADES; c++) {
     nt_gfx_begin_pass(&shadow_pass[c]);
-    nt_gfx_bind_uniform_block(0, &views[c], sizeof(view_t)); /* copied into frame storage */
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &views[c], sizeof(view_t)); /* copied into frame storage */
     nt_mesh_renderer_draw_list_skinned(GAME_STREAM_SHADOW + c, shadow_items, shadow_count);
     nt_gfx_end_pass();
 }
 bind_surface_materials();
 nt_gfx_begin_pass(&main_pass);
-nt_gfx_bind_uniform_block(0, &views[CASCADES], sizeof(view_t));
+nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &views[CASCADES], sizeof(view_t));
 /* One stream serves both instance layouts only because no mesh is in both lists. */
 nt_mesh_renderer_draw_list_skinned(GAME_STREAM_MAIN, skinned_items, skinned_count);
 nt_mesh_renderer_draw_list(GAME_STREAM_MAIN, static_items, static_count);

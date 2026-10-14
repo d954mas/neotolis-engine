@@ -2314,7 +2314,7 @@ static void stage_viewport(uint32_t part, uint32_t count) {
     stage_camera(part, count, rect);
     nt_gfx_set_viewport(rect[0], rect[1], rect[2], rect[3]);
     nt_gfx_set_scissor(rect[0], rect[1], rect[2], rect[3]);
-    nt_gfx_bind_uniform_block(0, &s_frame_uniforms, sizeof s_frame_uniforms);
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &s_frame_uniforms, sizeof s_frame_uniforms);
     nt_shape_renderer_set_vp(s_frame_uniforms.view_proj);
 }
 
@@ -2725,7 +2725,7 @@ static void frame(void) {
         end_stage();
 
         nt_ui_make_screen_view_proj(s_ui_scale.logical_w, s_ui_scale.logical_h, s_frame_uniforms.view_proj);
-        nt_gfx_bind_uniform_block(0, &s_frame_uniforms, sizeof s_frame_uniforms);
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &s_frame_uniforms, sizeof s_frame_uniforms);
         nt_ui_target_t target = nt_ui_scale_make_target(&s_ui_scale);
         nt_ui_walk(s_ui, &target);
     }
@@ -2763,7 +2763,6 @@ int main(int argc, char *argv[]) {
         (2U * SKELETAL_SHOWCASE_MAX_INSTANCES * (uint32_t)sizeof(nt_skinned_mesh_instance_t)) + SKELETAL_SHOWCASE_UI_VERTEX_BYTES + SKELETAL_SHOWCASE_SHAPE_VERTEX_BYTES;
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = SKELETAL_SHOWCASE_UI_INDEX_BYTES;
     gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 3U * 512U; /* two stage views and the UI view: 256 B or less each, plus any offset alignment up to 256 */
-    gfx_desc.global_blocks[0] = (nt_global_block_t){"Globals", 0};
     nt_gfx_init(&gfx_desc);
     nt_http_init();
 #ifndef NT_PLATFORM_WEB

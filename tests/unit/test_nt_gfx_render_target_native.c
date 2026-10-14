@@ -57,7 +57,7 @@ void setUp(void) {
     desc.max_textures = 3;
     desc.max_render_targets = 2;
     desc.max_pipelines = 32; /* the blend-enum sweep makes 20 states on one program */
-    desc.global_blocks[0] = (nt_global_block_t){"Globals", 3};
+    desc.global_blocks[0] = "Frame";
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
@@ -866,7 +866,7 @@ static void test_begin_pass_clears_depth_after_depth_writes_were_disabled(void) 
 
 /* Real GL must record the declared block binding when the program links. */
 static void test_global_block_from_the_desc_binds_in_the_program(void) {
-    static const char *vertex_source = "layout(std140) uniform Globals { vec4 g_offset; };\n"
+    static const char *vertex_source = "layout(std140) uniform Frame { vec4 g_offset; };\n"
                                        "void main() { gl_Position = vec4(g_offset.xy, 0.0, 1.0); }\n";
     static const char *fragment_source = "#ifdef GL_ES\n"
                                          "precision mediump float;\n"
@@ -889,11 +889,11 @@ static void test_global_block_from_the_desc_binds_in_the_program(void) {
     GLint current_program = 0;
     glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
     TEST_ASSERT_NOT_EQUAL_INT(0, current_program);
-    GLuint block_index = glGetUniformBlockIndex((GLuint)current_program, "Globals");
+    GLuint block_index = glGetUniformBlockIndex((GLuint)current_program, "Frame");
     TEST_ASSERT_NOT_EQUAL_UINT32(GL_INVALID_INDEX, block_index);
     GLint binding = -1;
     glGetActiveUniformBlockiv((GLuint)current_program, block_index, GL_UNIFORM_BLOCK_BINDING, &binding);
-    TEST_ASSERT_EQUAL_INT(3, binding);
+    TEST_ASSERT_EQUAL_INT(NT_GFX_SLOT_GAME, binding);
 
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -1707,7 +1707,7 @@ static void GLAD_API_PTR count_link_status_query(GLuint program, GLenum query, G
 
 /* make_program only starts the link: reading its status or reflection there would block on the driver. */
 static void test_make_program_does_not_query_link_status(void) {
-    static const nt_gfx_gl_call_t blocking[] = {NT_GFX_GL_glGetProgramiv, NT_GFX_GL_glGetActiveUniform, NT_GFX_GL_glGetUniformLocation, NT_GFX_GL_glGetUniformBlockIndex};
+    static const nt_gfx_gl_call_t blocking[] = {NT_GFX_GL_glGetProgramiv, NT_GFX_GL_glGetActiveUniform, NT_GFX_GL_glGetUniformLocation, NT_GFX_GL_glGetActiveUniformBlockName};
     enum { BLOCKING_COUNT = sizeof(blocking) / sizeof(blocking[0]) };
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "out vec4 frag_color;\nvoid main() { frag_color = vec4(1.0); }\n"});

@@ -38,8 +38,9 @@ void nt_gfx_frame_shutdown(void) {
 }
 
 void nt_gfx_frame_create_buffers(void) {
-    _Static_assert(NT_GFX_FRAME_INDEX == 0 && NT_GFX_FRAME_UNIFORM == 1 && NT_GFX_FRAME_VERTEX == 2, "labels below follow the stream order");
+    _Static_assert(NT_GFX_FRAME_INDEX == 0 && NT_GFX_FRAME_UNIFORM == 1 && NT_GFX_FRAME_VERTEX == 2, "labels and types below follow the stream order");
     static const char *const labels[NT_GFX_FRAME_VERTEX + 1] = {"frame_index", "frame_uniform", "frame_vertex"};
+    static const nt_buffer_type_t types[NT_GFX_FRAME_VERTEX + 1] = {NT_BUFFER_INDEX, NT_BUFFER_UNIFORM, NT_BUFFER_VERTEX};
     for (uint32_t s = 0; s < NT_GFX_FRAME_STREAM_COUNT; s++) {
         nt_gfx_frame_storage_t *storage = &g_nt_gfx_frame_storage[s];
         if (storage->capacity == 0) {
@@ -51,8 +52,7 @@ void nt_gfx_frame_create_buffers(void) {
         }
         /* A new context loss is the only expected failure; the next restore makes them again. */
         storage->buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            /* GL buffers are untyped; only index data has its own target in WebGL 2, so uniform blocks live in a vertex-type buffer. */
-            .type = s == NT_GFX_FRAME_INDEX ? NT_BUFFER_INDEX : NT_BUFFER_VERTEX,
+            .type = types[s < NT_GFX_FRAME_VERTEX ? s : NT_GFX_FRAME_VERTEX],
             .usage = NT_USAGE_STREAM,
             .size = storage->capacity,
             .index_type = s == NT_GFX_FRAME_INDEX ? NT_INDEX_UINT32 : NT_INDEX_NONE,

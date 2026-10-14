@@ -47,7 +47,7 @@ void setUp(void) {
     desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 1024U * 1024U;
     desc.frame_capacity[NT_GFX_FRAME_INDEX] = 64U * 1024U;
     desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096;
-    desc.global_blocks[0] = (nt_global_block_t){"Color", 0};
+    desc.global_blocks[0] = "Color";
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
@@ -149,7 +149,7 @@ static void test_a_block_allocated_after_the_first_pass_reaches_a_later_draw(voi
     nt_gfx_set_viewport(0, 0, half, height);
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(empty);
-    nt_gfx_bind_uniform_block(0, red, sizeof(red));
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_GAME, red, sizeof(red));
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
 
@@ -158,7 +158,7 @@ static void test_a_block_allocated_after_the_first_pass_reaches_a_later_draw(voi
     nt_gfx_set_viewport(half, 0, half, height);
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(empty);
-    nt_gfx_bind_uniform_block(0, green, sizeof(green));
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_GAME, green, sizeof(green));
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
     nt_gfx_end_frame();

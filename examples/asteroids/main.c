@@ -1563,7 +1563,7 @@ static void draw_ui(void) {
     }
     nt_frame_uniforms_t globals = {0};
     nt_ui_make_screen_view_proj(s_ui_scale.logical_w, s_ui_scale.logical_h, globals.view_proj);
-    nt_gfx_bind_uniform_block(0, &globals, sizeof(globals));
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &globals, sizeof(globals));
     const nt_ui_target_t target = nt_ui_scale_make_target(&s_ui_scale);
     nt_ui_walk(s_ui, &target);
 }
@@ -2072,7 +2072,7 @@ static uint32_t prepare_instances(void) {
 static void draw_world(uint32_t base, const nt_frame_uniforms_t *globals) {
     const nt_buffer_t instances = nt_gfx_frame_buffer(AST_STREAM_INSTANCES);
     const complexity_t *complexity = &s_complexities[s_level];
-    nt_gfx_bind_uniform_block(0, globals, sizeof(*globals));
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, globals, sizeof(*globals));
     nt_gfx_bind_pipeline(s_pipelines[0]);
     const float light[4] = {s_light.eye[0], s_light.eye[1], s_light.eye[2], 1};
     nt_gfx_set_uniform_vec4(s_light_name, light);
@@ -2274,7 +2274,6 @@ int main(int argc, char **argv) {
     gfx.max_vertex_inputs = AST_KEY_COUNT + 64U;
     gfx.frame_capacity[NT_GFX_FRAME_INDEX] = 64U * 1024U;
     gfx.frame_capacity[NT_GFX_FRAME_UNIFORM] = 2U * 512U;
-    gfx.global_blocks[0] = (nt_global_block_t){"Globals", 0};
     nt_gfx_init(&gfx);
     nt_http_init();
 #ifndef NT_PLATFORM_WEB

@@ -84,6 +84,7 @@ typedef struct {
     uint32_t id;
 } nt_instance_layout_t;
 
+#define NT_BUFFER_INVALID ((nt_buffer_t){0})
 #define NT_RENDER_TARGET_INVALID ((nt_render_target_t){0})
 #define NT_MESH_INVALID ((nt_mesh_t){0})
 #define NT_PROGRAM_INVALID ((nt_program_t){0})
@@ -113,12 +114,6 @@ typedef struct {
  * iterates sampler_count, not capacity, so capacity is free for the hot path. */
 #define NT_GFX_MAX_SAMPLERS 128
 
-/* A uniform block every program binds to binding_slot at link, when it declares one with this name. */
-typedef struct {
-    const char *name; /* borrowed unchanged until nt_gfx_shutdown; NULL = unused entry */
-    uint32_t binding_slot;
-} nt_global_block_t;
-
 /* ---- Mesh info (side table for VBO+IBO pairs from mesh activator) ---- */
 
 typedef struct {
@@ -142,7 +137,8 @@ typedef enum {
 typedef enum {
     NT_BUFFER_VERTEX = 0,
     NT_BUFFER_INDEX,
-} nt_buffer_type_t; /* uniform data has no public buffer: see nt_gfx_bind_uniform_block */
+    NT_BUFFER_UNIFORM, /* bound whole with nt_gfx_bind_uniform_buffer; size a nonzero multiple of 16 */
+} nt_buffer_type_t;
 
 typedef enum {
     NT_USAGE_IMMUTABLE = 0, /* GL: STATIC_DRAW */
@@ -339,8 +335,15 @@ typedef enum {
  * returns the existing handle, so re-init never grows the table. */
 #define NT_GFX_MAX_INSTANCE_LAYOUTS 32 /* a slot fits a byte: the GL VAO mirror and the bind command store it so */
 #define NT_GFX_MAX_TEXTURE_SLOTS 8
-/* WebGL2's minimum MAX_UNIFORM_BUFFER_BINDINGS, so every slot works on every device. */
-#define NT_GFX_MAX_UNIFORM_BUFFER_SLOTS 24
+/* Uniform block slots, logical and ordered by update frequency. A program's block binds to the slot
+ * of its name at link: the engine reserves the first three names, the game lists its own. */
+#define NT_GFX_SLOT_GLOBALS 0  /* "Globals": frame and view data, filled and bound by the game */
+#define NT_GFX_SLOT_MATERIAL 1 /* "Material": the material's uniform buffer, bound by nt_material_apply */
+#define NT_GFX_SLOT_DRAW 2     /* "Draw": per-draw data of a renderer or game shader */
+#define NT_GFX_SLOT_GAME 3     /* nt_gfx_desc_t.global_blocks[i] binds to NT_GFX_SLOT_GAME + i */
+/* Globals, Draw and the game blocks fit WebGPU's 8 dynamic uniform bindings. */
+#define NT_GFX_MAX_GAME_BLOCKS 6
+#define NT_GFX_MAX_UNIFORM_BUFFER_SLOTS (NT_GFX_SLOT_GAME + NT_GFX_MAX_GAME_BLOCKS)
 
 typedef struct {
     uint8_t location;
@@ -375,12 +378,14 @@ typedef struct {
     /* Frame storage bytes per frame by stream (NT_GFX_FRAME_*), default: 0 (disabled);
      * each enabled stream is a CPU staging copy plus a GPU buffer, allocated once at init. */
     uint32_t frame_capacity[NT_GFX_FRAME_STREAM_COUNT];
-    nt_global_block_t global_blocks[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS]; /* default: none; sized for one name per slot */
-    bool depth;                                                       /* request depth buffer (default: true) */
-    bool stencil;                                                     /* request stencil buffer (default: false) */
-    bool antialias;                                                   /* MSAA (default: false) */
-    bool alpha;                                                       /* transparent canvas/window (default: false) */
-    bool premultiplied_alpha;                                         /* web only: canvas-to-page blending (default: true, ignored when alpha=false) */
+    /* The game's uniform block names, slot NT_GFX_SLOT_GAME + index; the list ends at the first
+     * NULL (default: none). Borrowed unchanged until nt_gfx_shutdown. */
+    const char *global_blocks[NT_GFX_MAX_GAME_BLOCKS];
+    bool depth;               /* request depth buffer (default: true) */
+    bool stencil;             /* request stencil buffer (default: false) */
+    bool antialias;           /* MSAA (default: false) */
+    bool alpha;               /* transparent canvas/window (default: false) */
+    bool premultiplied_alpha; /* web only: canvas-to-page blending (default: true, ignored when alpha=false) */
 } nt_gfx_desc_t;
 
 typedef struct {
@@ -578,6 +583,8 @@ typedef enum {
     X(glGenVertexArrays)                                                                                                                                                                               \
     X(glGenerateMipmap)                                                                                                                                                                                \
     X(glGetActiveUniform)                                                                                                                                                                              \
+    X(glGetActiveUniformBlockName)                                                                                                                                                                     \
+    X(glGetActiveUniformBlockiv)                                                                                                                                                                       \
     X(glGetActiveUniformsiv)                                                                                                                                                                           \
     X(glGetAttachedShaders)                                                                                                                                                                            \
     X(glGetError)                                                                                                                                                                                      \
@@ -588,7 +595,6 @@ typedef enum {
     X(glGetQueryObjectuiv)                                                                                                                                                                             \
     X(glGetShaderInfoLog)                                                                                                                                                                              \
     X(glGetShaderiv)                                                                                                                                                                                   \
-    X(glGetUniformBlockIndex)                                                                                                                                                                          \
     X(glGetUniformLocation)                                                                                                                                                                            \
     X(glInvalidateFramebuffer)                                                                                                                                                                         \
     X(glIsShader)                                                                                                                                                                                      \
@@ -934,11 +940,11 @@ bool nt_gfx_texture_size(nt_texture_t tex, uint16_t *out_width, uint16_t *out_he
 /* Returns INVALID for invalid or stale handles. */
 nt_texture_format_t nt_gfx_texture_format(nt_texture_t tex);
 
-/* ---- Draw state ---- Pipeline, vertex input, texture set, instance pointers and
- * uniforms are pass-scoped: set them inside a pass (asserted); nt_gfx_begin_pass
- * discards them. Physical texture/sampler and uniform-buffer binds are context state.
- * An equal bind, scissor or viewport ends CACHE and records nothing; an equal texture
- * set still ends ACCEPTED and records only the changed units. */
+/* ---- Draw state ---- Pipeline, vertex input, texture set, instance pointers, uniforms and
+ * uniform blocks are pass-scoped: set them inside a pass (asserted); nt_gfx_begin_pass
+ * discards them, so every pass binds every block it reads. Physical texture/sampler and
+ * uniform-buffer binds are context state. An equal bind, scissor or viewport ends CACHE and
+ * records nothing; an equal texture set still ends ACCEPTED and records only the changed units. */
 
 void nt_gfx_bind_pipeline(nt_pipeline_t pip);
 /* One backend bind selects the whole vertex-input state (layout + buffers +
@@ -1006,11 +1012,21 @@ bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint
 
 /* ---- Uniform blocks ---- */
 
-/* Copies size bytes into the uniform frame stream and binds that range to slot; every call
- * records. Inside a pass. size covers the block's full data size (WebGL). The bytes live for
- * this frame only: bind every block a draw reads in the frame of that draw. Budget
- * frame_capacity[NT_GFX_FRAME_UNIFORM] at size + 256 per block (offset alignment <= 256). */
+/* Block members are vec4, ivec4, uvec4, mat4 or arrays of them in a layout(std140) block with
+ * column-major matrices (asserted at link), so a C struct of float/int32_t/uint32_t arrays
+ * matches it byte for byte. A draw asserts that each block its program uses is bound in the pass
+ * with at least the block's size. */
+
+/* Frame data: copies size bytes (a multiple of 16) into the uniform frame stream and binds that
+ * range to slot. Bytes equal to the range already bound to slot in this pass end CACHE with no
+ * copy, so an owner rebinds unchanged data freely. Inside a pass; the bytes live for this frame.
+ * Budget frame_capacity[NT_GFX_FRAME_UNIFORM] at size + 256 per changed bind (offset alignment <= 256). */
 void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size);
+/* Binds a whole NT_BUFFER_UNIFORM buffer to slot; an equal handle ends CACHE. NT_BUFFER_INVALID
+ * unbinds the slot without a backend call, so a draw whose program uses the slot asserts.
+ * Inside a pass. Write the buffer with nt_gfx_update_buffer: every draw of a frame reads the
+ * frame's last write. */
+void nt_gfx_bind_uniform_buffer(uint32_t slot, nt_buffer_t buf);
 
 /* update_buffer = glBufferSubData at byte offset; offset + size must fit the
  * buffer, data must point to size bytes (NULL only with size 0). Allowed at any time:

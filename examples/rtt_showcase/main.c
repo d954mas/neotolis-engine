@@ -382,7 +382,7 @@ static void draw_ui_overlay(void) {
     uniforms.resolution[3] = (fb_h > 0.0F) ? (1.0F / fb_h) : 0.0F;
     uniforms.near_far[0] = -1.0F;
     uniforms.near_far[1] = 1.0F;
-    nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &uniforms, sizeof(uniforms));
 
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, fb_w, fb_h}};
     nt_ui_walk(s_ui_ctx, &target);
@@ -552,7 +552,6 @@ int main(void) {
     gfx_desc.max_pipelines = 32;
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = RTT_SHOWCASE_VERTEX_BYTES;
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = RTT_SHOWCASE_INDEX_BYTES;
-    gfx_desc.global_blocks[0] = (nt_global_block_t){"Globals", 0};
     nt_gfx_init(&gfx_desc);
     nt_http_init();
 #ifndef NT_PLATFORM_WEB

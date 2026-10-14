@@ -19,9 +19,12 @@ typedef struct {
     uint32_t sampler_hashes[NT_GFX_MAX_TEXTURE_SLOTS];
     uint8_t sampler_classes[NT_GFX_MAX_TEXTURE_SLOTS];
     uint8_t sampler_count;
+    uint32_t block_sizes[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS];
 } nt_gfx_fake_program_t;
 
 static nt_gfx_fake_program_t s_fake_program_template;
+/* Separate from the sampler template, which every sampler setter replaces whole. */
+static uint32_t s_fake_block_template[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS];
 static nt_gfx_fake_program_t *s_fake_program_table;
 static uint32_t s_fake_max_programs;
 /* Buffer and texture records at the frontend slot, as the GL tables: a create into a live record
@@ -68,6 +71,16 @@ bool nt_gfx_backend_program_sampler_info(uint32_t program_backend, uint32_t name
 uint32_t nt_gfx_backend_program_sampler_mask(uint32_t program_backend) {
     NT_ASSERT(program_backend != 0 && program_backend <= s_fake_max_programs && s_fake_program_table[program_backend].used && "program_sampler_mask: requires a live program");
     return (1U << s_fake_program_table[program_backend].sampler_count) - 1U;
+}
+
+void nt_gfx_fake_set_block(uint32_t slot, uint32_t size) {
+    NT_ASSERT(slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS);
+    s_fake_block_template[slot] = size;
+}
+
+uint32_t nt_gfx_backend_program_block_size(uint32_t program_backend, uint32_t slot) {
+    NT_ASSERT(program_backend != 0 && program_backend <= s_fake_max_programs && s_fake_program_table[program_backend].used && "program_block_size: requires a live program");
+    return s_fake_program_table[program_backend].block_sizes[slot];
 }
 // #endregion
 
@@ -339,6 +352,7 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     s_fake_max_buffers = desc->max_buffers;
     s_fake_max_textures = desc->max_textures;
     nt_gfx_fake_set_samplers(NULL, 0);
+    memset(s_fake_block_template, 0, sizeof(s_fake_block_template));
     /* Init-only: a mid-test reset must never forget a record that is still live. */
     s_fake_program_table = (nt_gfx_fake_program_t *)calloc((size_t)s_fake_max_programs + 1U, sizeof(nt_gfx_fake_program_t));
     s_fake_buffer_live = (bool *)calloc((size_t)s_fake_max_buffers + 1U, sizeof(bool));
@@ -442,6 +456,7 @@ bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uin
     (void)vs_backend;
     (void)fs_backend;
     s_fake_program_table[slot] = s_fake_program_template;
+    memcpy(s_fake_program_table[slot].block_sizes, s_fake_block_template, sizeof(s_fake_block_template));
     return true;
 }
 

@@ -543,7 +543,7 @@ static void frame(void) {
 
     if (item_count > 0) {
         /* View block (slot 0) */
-        nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &uniforms, sizeof(uniforms));
 
         /* Lighting block (slot 1) */
         nt_lighting_t lighting = {
@@ -551,7 +551,7 @@ static void frame(void) {
             .light_color = {1.0F, 0.95F, 0.9F, 1.2F}, /* warm white, intensity 1.2 */
             .ambient = {0.6F, 0.65F, 0.8F, 0.3F},     /* cool ambient, intensity 0.3 */
         };
-        nt_gfx_bind_uniform_block(1, &lighting, sizeof(lighting));
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_GAME, &lighting, sizeof(lighting));
 
         /* Draw all render items */
         nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, items, item_count);
@@ -617,8 +617,7 @@ int main(int argc, char **argv) {
     gfx_desc.max_vertex_inputs = 256 * 4 + 48;
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = MAX_SCENE_NODES * (uint32_t)sizeof(nt_mesh_instance_t);
     gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 2U * 512U; /* view and lighting blocks: 256 B or less each, plus any offset alignment up to 256 */
-    gfx_desc.global_blocks[0] = (nt_global_block_t){"Globals", 0};
-    gfx_desc.global_blocks[1] = (nt_global_block_t){"Lighting", 1};
+    gfx_desc.global_blocks[0] = "Lighting";
     nt_gfx_init(&gfx_desc);
 
     /* 5. I/O init */

@@ -136,6 +136,12 @@ typedef struct {
     uint32_t sampler;
 } nt_gfx_unit_binding_t;
 
+typedef struct {
+    uint32_t buffer; /* full buffer handle; 0 = nothing bound in this pass */
+    uint32_t offset;
+    uint32_t size;
+} nt_gfx_block_binding_t;
+
 /* ---- Texture metadata (format + dimensions for update_texture validation) ---- */
 
 typedef struct {
@@ -225,6 +231,8 @@ static struct {
     /* Binding mirrors: an equal bind records nothing. Each lives as long as the
      * contract keeps its state. */
     nt_gfx_unit_binding_t bound_units[NT_GFX_MAX_TEXTURE_SLOTS];
+    nt_gfx_block_binding_t bound_blocks[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS];
+    bool blocks_checked;  /* the bound program's blocks were checked against bound_blocks since the last change */
     int scissor_rect[4];  /* GL bottom-left x,y,w,h; carries over passes; w = -1: unknown */
     int viewport_rect[4]; /* GL bottom-left x,y,w,h; w = -1: unknown */
 } s_gfx;
@@ -415,9 +423,9 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc->max_meshes > 0 && "nt_gfx_desc_t.max_meshes is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_vertex_inputs > 0 && "nt_gfx_desc_t.max_vertex_inputs is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_render_targets > 0 && "nt_gfx_desc_t.max_render_targets is 0 -- use nt_gfx_desc_defaults() or set explicitly");
-    for (uint32_t i = 0; i < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; i++) {
-        NT_ASSERT((desc->global_blocks[i].name == NULL || desc->global_blocks[i].binding_slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS) &&
-                  "nt_gfx_desc_t.global_blocks: slot >= NT_GFX_MAX_UNIFORM_BUFFER_SLOTS");
+    for (uint32_t i = 0; i < NT_GFX_MAX_GAME_BLOCKS && desc->global_blocks[i] != NULL; i++) {
+        /* Looked up in the list before entry i, an earlier equal name or a reserved one answers first. */
+        NT_ASSERT(nt_gfx_block_slot(desc->global_blocks, desc->global_blocks[i]) == NT_GFX_SLOT_GAME + i && "nt_gfx_desc_t.global_blocks: a reserved or duplicate name");
     }
     uint16_t max_render_targets = desc->max_render_targets;
     memset(&s_gfx, 0, sizeof(s_gfx));
@@ -825,6 +833,7 @@ static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
     s_gfx.bound_instance_buffer = 0;
     s_gfx.bound_index_type = NT_INDEX_NONE;
     memset(s_gfx.bound_units, 0, sizeof(s_gfx.bound_units));
+    memset(s_gfx.bound_blocks, 0, sizeof(s_gfx.bound_blocks));
     s_gfx.viewport_rect[2] = -1; /* the backend sets the whole target at execution */
     /* A lost frame records nothing but keeps the pass order, so its sequencing and the frame rule still assert. */
     if (g_nt_gfx.context_lost) {
@@ -1214,6 +1223,7 @@ nt_instance_layout_t nt_gfx_make_instance_layout(const nt_vertex_layout_t *layou
 
 static nt_gfx_result_t make_buffer(const nt_buffer_desc_t *desc, nt_buffer_t *out) {
     NT_ASSERT(desc != NULL);
+    NT_ASSERT((desc->type != NT_BUFFER_UNIFORM || (desc->size > 0 && desc->size % 16U == 0)) && "make_buffer: a uniform buffer's size is a nonzero multiple of 16");
     /* Same recoverable contract as the other make_* creators -- without this
      * a lost-frame creation yields a pool-valid buffer with a dead GL name. */
     if (g_nt_gfx.context_lost) {
@@ -1678,6 +1688,7 @@ static nt_gfx_result_t bind_pipeline(nt_pipeline_t pip) {
         NT_ASSERT(s_gfx.program_states[program_slot] == NT_GFX_PROGRAM_READY && "bind_pipeline: program is not ready -- gate draws on nt_gfx_program_ready");
         const bool samples = nt_gfx_backend_program_sampler_mask(program_slot) != 0;
         s_gfx.texture_set_state = samples ? NT_GFX_TEXTURE_SET_NONE : NT_GFX_TEXTURE_SET_APPLIED;
+        s_gfx.blocks_checked = false;
     }
     /* Loss frees pipeline slots, so a live slot always has a backend. */
     s_gfx.bound_pipeline = pip.id;
@@ -2256,6 +2267,21 @@ static bool texture_set_ready(void) {
     return s_gfx.texture_set_state == NT_GFX_TEXTURE_SET_APPLIED;
 }
 
+/* WebGL2 rejects a draw whose program reads a block with a smaller or no bound range (native GL
+ * reads past it), so the first draw after a pipeline or block change checks every block the
+ * program uses. Runs before a merge: a merged draw must not inherit an unchecked binding. */
+static void assert_blocks_bound(void) {
+    if (s_gfx.blocks_checked) {
+        return;
+    }
+    const uint32_t program_slot = nt_pool_slot_index(pipeline_program(nt_pool_slot_index(s_gfx.bound_pipeline)));
+    for (uint32_t slot = 0; slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; slot++) {
+        const uint32_t needed = nt_gfx_backend_program_block_size(program_slot, slot);
+        NT_ASSERT(s_gfx.bound_blocks[slot].size >= needed && "draw: a uniform block the program uses is unbound or smaller than the block -- bind it in this pass");
+    }
+    s_gfx.blocks_checked = true;
+}
+
 /* The bound vertex input carries its own index type; NT_INDEX_NONE here means
  * the caller draws indexed on a non-indexed input. */
 static void assert_indexed_draw_has_index_type(void) { NT_ASSERT(s_gfx.bound_index_type != NT_INDEX_NONE && "draw_indexed: bound vertex input is non-indexed"); }
@@ -2274,6 +2300,7 @@ static nt_gfx_result_t draw(uint32_t first_vertex, uint32_t num_vertices) {
         return NT_GFX_RESULT_UNREADY;
     }
     assert_vertex_input_bound();
+    assert_blocks_bound();
 
     g_nt_gfx.counters.vertices += num_vertices;
     /* A merged call records nothing new: CACHE keeps it out of accepted[] and draw_calls. */
@@ -2297,6 +2324,7 @@ static nt_gfx_result_t draw_instanced(uint32_t first_vertex, uint32_t num_vertic
         return NT_GFX_RESULT_UNREADY;
     }
     assert_vertex_input_bound();
+    assert_blocks_bound();
     assert_instances_in_range(instance_count);
 
     g_nt_gfx.counters.vertices += (uint64_t)num_vertices * instance_count;
@@ -2322,6 +2350,7 @@ static nt_gfx_result_t draw_indexed(uint32_t first_index, uint32_t num_indices, 
         return NT_GFX_RESULT_UNREADY;
     }
     assert_vertex_input_bound();
+    assert_blocks_bound();
     assert_indexed_draw_has_index_type();
 
     g_nt_gfx.counters.vertices += num_vertices;
@@ -2347,6 +2376,7 @@ static nt_gfx_result_t draw_indexed_instanced(uint32_t first_index, uint32_t num
         return NT_GFX_RESULT_UNREADY;
     }
     assert_vertex_input_bound();
+    assert_blocks_bound();
     assert_indexed_draw_has_index_type();
     assert_instances_in_range(instance_count);
 
@@ -2365,22 +2395,63 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
 
 /* ---- Uniform blocks ---- */
 
+static void publish_uniform_binding(uint32_t slot, uint32_t buffer, uint32_t offset, uint32_t size) {
+    s_gfx.bound_blocks[slot] = (nt_gfx_block_binding_t){buffer, offset, size};
+    s_gfx.blocks_checked = false;
+    nt_gfx_frame_bind_uniform_buffer(nt_pool_slot_index(buffer), slot, offset, size);
+}
+
 void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size) {
-    NT_ASSERT(slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS && data != NULL && size > 0 && "bind_uniform_block: slot, data or size");
+    NT_ASSERT(slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS && data != NULL && size > 0 && size % 16U == 0 && "bind_uniform_block: slot, data or size (a nonzero multiple of 16)");
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_uniform_block: must be called inside a pass");
     const bool lost = g_nt_gfx.context_lost;
-    const nt_buffer_t buf = lost ? (nt_buffer_t){0} : g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].buffer;
-    uint32_t offset = 0;
-    if (!lost) {
+    const nt_gfx_frame_storage_t *storage = &g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM];
+    const nt_gfx_block_binding_t *bound = &s_gfx.bound_blocks[slot];
+    /* Staged bytes stay unchanged from their allocation until the next begin_frame, and the mirror is pass-scoped. */
+    const bool equal = !lost && bound->buffer == storage->buffer.id && bound->size == size && memcmp(storage->staging + bound->offset, data, size) == 0;
+    uint32_t offset = bound->offset;
+    if (!lost && !equal) {
         /* A disabled stream (zero capacity) reaches the allocator, which stops on the overflow. */
         memcpy(nt_gfx_frame_alloc(NT_GFX_FRAME_UNIFORM, size, g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment, &offset), data, size);
     }
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, buf.id, event->data.binding.slot = slot; event->data.binding.offset = offset; event->data.binding.size = size);
-    /* Every block takes a fresh offset, so a bind is never equal to the slot's last one within a frame: no dedup. */
-    if (!lost) {
-        nt_gfx_frame_bind_uniform_buffer(nt_pool_slot_index(buf.id), slot, offset, size);
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, storage->buffer.id, event->data.binding.slot = slot; event->data.binding.offset = offset; event->data.binding.size = size);
+    if (lost) {
+        NT_GFX_END(NT_GFX_RESULT_CONTEXT_LOST);
+        return;
     }
-    NT_GFX_END(lost ? NT_GFX_RESULT_CONTEXT_LOST : NT_GFX_RESULT_ACCEPTED);
+    if (!equal) {
+        publish_uniform_binding(slot, storage->buffer.id, offset, size);
+    }
+    NT_GFX_END(equal ? NT_GFX_RESULT_CACHE : NT_GFX_RESULT_ACCEPTED);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
+static nt_gfx_result_t bind_uniform_buffer(uint32_t slot, nt_buffer_t buf) {
+    NT_ASSERT(slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS && "bind_uniform_buffer: slot");
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_uniform_buffer: must be called inside a pass");
+    if (g_nt_gfx.context_lost) {
+        return NT_GFX_RESULT_CONTEXT_LOST;
+    }
+    if (buf.id == s_gfx.bound_blocks[slot].buffer) {
+        return NT_GFX_RESULT_CACHE;
+    }
+    if (buf.id == 0) {
+        /* The unbind is logical: GL rejects an empty range, and the draw check reads the mirror. */
+        s_gfx.bound_blocks[slot] = (nt_gfx_block_binding_t){0};
+        s_gfx.blocks_checked = false;
+        return NT_GFX_RESULT_ACCEPTED;
+    }
+    NT_ASSERT(nt_pool_valid(&s_gfx.buffer_pool, buf.id) && "bind_uniform_buffer: invalid buffer handle");
+    const nt_gfx_buffer_meta_t *meta = &s_gfx.buffer_metas[nt_pool_slot_index(buf.id)];
+    NT_ASSERT(meta->type == NT_BUFFER_UNIFORM && "bind_uniform_buffer: buffer is not uniform type");
+    NT_ASSERT(meta->live && "bind_uniform_buffer: buffer has no live backend -- recreate it after context restore");
+    publish_uniform_binding(slot, buf.id, 0, meta->size);
+    return NT_GFX_RESULT_ACCEPTED;
+}
+
+void nt_gfx_bind_uniform_buffer(uint32_t slot, nt_buffer_t buf) {
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, buf.id, event->data.binding.slot = slot);
+    NT_GFX_END(bind_uniform_buffer(slot, buf));
 }
 
 /* ---- Buffer update ---- */
