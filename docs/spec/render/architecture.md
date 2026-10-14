@@ -926,8 +926,11 @@ loss whose event was handled, so begin_frame has taken the latch and wiped befor
 it restores.
 
 A loss inside an iteration latches at the first backend call that fails on it:
-the call asks the browser, sets `g_nt_gfx.context_lost`, logs the one error and
-ends `CONTEXT_LOST`, and every later call takes its lost path. An owner therefore
+the backend has asked the browser (a live failure asserted there), so the
+frontend sets `g_nt_gfx.context_lost` without a query of its own, logs the one
+error and ends `CONTEXT_LOST`, and every later call takes its lost path. The
+frontend asks the browser itself only at init (after the capability probe), in
+begin_frame while lost, in the restore and after every readback. An owner therefore
 creates in a straight line: once a shader create met the loss, the program,
 pipeline and vertex input built on it end `CONTEXT_LOST` instead of asserting on
 their 0 dependencies, and the draws take the lost path too. Operations issued
