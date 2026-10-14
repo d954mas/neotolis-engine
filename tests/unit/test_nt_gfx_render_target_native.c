@@ -57,7 +57,7 @@ void setUp(void) {
     desc.max_textures = 3;
     desc.max_render_targets = 2;
     desc.max_pipelines = 32; /* the blend-enum sweep makes 20 states on one program */
-    desc.global_blocks[0] = "Frame";
+    desc.game_blocks[0] = "Frame";
     desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 8U * 1024U; /* a Draw block per probe draw */
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();

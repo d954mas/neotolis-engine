@@ -162,8 +162,8 @@ the front-end. The GL backend keeps caches for
 physical GL state the front-end does not name: the program and VAO behind
 different pipelines and vertex inputs, the fixed-function difference between
 pipelines, the texture and sampler halves of a unit across passes, the
-viewport, clear values, the active unit, the `GL_ARRAY_BUFFER` and generic
-`GL_UNIFORM_BUFFER` bindings, the range each uniform-block slot holds, and the
+viewport, clear values, the active unit, the `GL_ARRAY_BUFFER` binding, the range
+each uniform-block slot holds, and the
 instance layout, buffer and offset each vertex input's VAO last received: a
 recorded instanced bind that repeats all three issues no `glBindBuffer` or
 `glVertexAttribPointer` (only the VAO bind, when another VAO is bound), so a
@@ -575,7 +575,8 @@ stream's buffer counts against `nt_gfx_desc_t.max_buffers`.
 
 `nt_gfx_desc_t.frame_capacity[stream]` is the byte budget of a stream per frame,
 allocated once at init as staging plus buffer; `nt_gfx_desc_defaults()` leaves every
-stream at 0, so the game sets the budget of each stream it uses. A zero
+stream at 0 except the uniform stream (16 KiB: every pass binds `Globals`), so the
+game sets the budget of each other stream it uses. A zero
 capacity disables the stream: no staging and no buffer, and its allocations stop the program as an
 overflow, so a game pays only for the streams it uses.
 Storage never grows: an overflow logs the stream, the needed and the free bytes
@@ -1257,9 +1258,9 @@ the frame until `nt_gfx_end_frame`, and so does the command stream, so a host
 sizes the used vertex streams and `stream_capacity` for its busiest frame;
 `nt_shape_renderer_init` asserts a nonzero general-stream budget. The view
 projection, eye, pixel scale and line width are one std140 `Draw` block that every
-program of a flush binds through `nt_gfx_bind_uniform_block`: unchanged settings
-end `CACHE`, so the uniform stream holds one block per settings change and pass,
-and `nt_shape_renderer_init` asserts a nonzero uniform budget too.
+program of a flush binds through `nt_gfx_bind_uniform_block`: a bind equal to the
+slot's binding in the pass ends `CACHE`, any other allocates a block (up to 256 B
+of padding), and `nt_shape_renderer_init` asserts a nonzero uniform budget too.
 
 Every flush draws filled instanced shapes by type, then triangles,
 then wire templates by type, connected segments and independent lines. Within

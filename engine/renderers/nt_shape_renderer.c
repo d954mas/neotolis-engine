@@ -950,7 +950,7 @@ static void draw_instances(nt_pipeline_t pipeline, nt_vertex_input_t vi, nt_inst
     memcpy(nt_gfx_frame_alloc(s_shape.stream, bytes, 4, &offset), data, bytes);
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input_instanced(vi, layout, nt_gfx_frame_buffer(s_shape.stream), offset);
-    /* Rebinding unchanged settings is free: equal bytes end CACHE in gfx. */
+    /* Unchanged settings end CACHE in gfx: no copy, and the batches around the bind still merge. */
     nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, &s_shape.draw, sizeof(s_shape.draw));
     nt_gfx_draw_indexed_instanced(range.first_index, range.num_indices, range.num_vertices, count);
 }

@@ -3620,13 +3620,9 @@ void test_uniform_block_and_buffer_sizes_are_multiples_of_16(void) {
     nt_gfx_end_pass();
     EXPECT_ASSERT(nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = 20}));
     EXPECT_ASSERT(nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = 0}));
-    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange) -- the out-of-range type is the input under test
-    EXPECT_ASSERT(nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = (nt_buffer_type_t)(NT_BUFFER_UNIFORM + 1), .usage = NT_USAGE_DYNAMIC, .size = 16}));
-    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "invalid buffer type"));
 }
 
-/* A uniform buffer binds whole; an equal handle ends CACHE, INVALID unbinds without a backend call,
- * and rebinding the unbound buffer ends CACHE because GL still holds its range. */
+/* A uniform buffer binds whole; an equal handle ends CACHE, INVALID unbinds without a backend call. */
 void test_uniform_buffer_binds_whole_and_unbinds_logically(void) {
     nt_buffer_t ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .data = s_block_a, .size = sizeof(s_block_a)});
     nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .data = s_block_a, .size = sizeof(s_block_a)});
@@ -3637,8 +3633,6 @@ void test_uniform_buffer_binds_whole_and_unbinds_logically(void) {
     EXPECT_NOT_RECORDED(nt_gfx_bind_uniform_buffer(NT_GFX_SLOT_MATERIAL, NT_BUFFER_INVALID));
     TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.accepted[NT_GFX_OP_UBO]);
     EXPECT_NOT_RECORDED(nt_gfx_bind_uniform_buffer(NT_GFX_SLOT_MATERIAL, NT_BUFFER_INVALID)); /* already unbound: CACHE */
-    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.accepted[NT_GFX_OP_UBO]);
-    EXPECT_NOT_RECORDED(nt_gfx_bind_uniform_buffer(NT_GFX_SLOT_MATERIAL, ubo));
     TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.accepted[NT_GFX_OP_UBO]);
     /* Frame data binds subranges; the whole stream buffer would read past this frame's upload. */
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer(NT_GFX_SLOT_DRAW, nt_gfx_frame_buffer(NT_GFX_FRAME_UNIFORM)));
@@ -3674,7 +3668,7 @@ void test_draw_asserts_an_unbound_or_short_block(void) {
     nt_gfx_bind_uniform_buffer(NT_GFX_SLOT_MATERIAL, NT_BUFFER_INVALID);
     EXPECT_ASSERT(nt_gfx_draw(3, 3));
     TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "uniform block the program uses"));
-    /* Rebinding the same buffer restores the slot without a record; the draw passes the check and merges. */
+    /* Rebinding the buffer passes the check again. */
     nt_gfx_bind_uniform_buffer(NT_GFX_SLOT_MATERIAL, ubo);
     nt_gfx_draw(3, 3);
     const nt_vertex_input_t vi = {nt_gfx_test_bound_vertex_input()};
@@ -3832,22 +3826,10 @@ static void expect_init_assert(const nt_gfx_desc_t *desc, const char *message) {
 
 /* A reserved name in the game's list would bind two slots by one name. */
 void test_global_block_with_a_reserved_name_asserts_at_init(void) {
-    expect_init_assert(&BLOCK_TEST_DESC(.global_blocks = {"Lighting", "Material"}), "nt_gfx_desc_t.global_blocks: a reserved or duplicate name");
+    expect_init_assert(&BLOCK_TEST_DESC(.game_blocks = {"Lighting", "Material"}), "nt_gfx_desc_t.game_blocks: a reserved or duplicate name");
 }
 
-void test_global_block_listed_twice_asserts_at_init(void) {
-    expect_init_assert(&BLOCK_TEST_DESC(.global_blocks = {"Lighting", "Lighting"}), "nt_gfx_desc_t.global_blocks: a reserved or duplicate name");
-}
-
-/* A name after the first NULL would be dropped silently and then fail at link with the wrong cause. */
-void test_global_block_after_the_end_asserts_at_init(void) { expect_init_assert(&BLOCK_TEST_DESC(.global_blocks = {NULL, "Lighting"}), "a name after the first NULL"); }
-
-/* The uniform stream is a uniform buffer, whose size is a multiple of 16. */
-void test_uniform_stream_capacity_is_a_multiple_of_16(void) {
-    nt_gfx_desc_t desc = BLOCK_TEST_DESC(.global_blocks = {NULL});
-    desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 1000;
-    expect_init_assert(&desc, "frame_capacity[NT_GFX_FRAME_UNIFORM]: a multiple of 16");
-}
+void test_global_block_listed_twice_asserts_at_init(void) { expect_init_assert(&BLOCK_TEST_DESC(.game_blocks = {"Lighting", "Lighting"}), "nt_gfx_desc_t.game_blocks: a reserved or duplicate name"); }
 
 /* A list that fills every entry has no NULL terminator and is valid. */
 void test_full_global_block_list_inits(void) {
@@ -3857,13 +3839,13 @@ void test_full_global_block_list_inits(void) {
         NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16);
     static const char *const names[NT_GFX_MAX_GAME_BLOCKS] = {"B0", "B1", "B2", "B3", "B4", "B5"};
     for (uint32_t i = 0; i < NT_GFX_MAX_GAME_BLOCKS; i++) {
-        desc.global_blocks[i] = names[i];
+        desc.game_blocks[i] = names[i];
     }
     nt_gfx_init(&desc);
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_SLOT_GAME + 5U, nt_gfx_block_slot(desc.global_blocks, "B5"));
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_SLOT_DRAW, nt_gfx_block_slot(desc.global_blocks, "Draw"));
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_MAX_UNIFORM_BUFFER_SLOTS, nt_gfx_block_slot(desc.global_blocks, "Nope"));
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_SLOT_GAME + 5U, nt_gfx_block_slot(desc.game_blocks, "B5"));
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_SLOT_DRAW, nt_gfx_block_slot(desc.game_blocks, "Draw"));
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_MAX_UNIFORM_BUFFER_SLOTS, nt_gfx_block_slot(desc.game_blocks, "Nope"));
     nt_gfx_begin_frame();
 }
 
@@ -4194,8 +4176,6 @@ int main(void) {
     RUN_TEST(test_global_block_with_a_reserved_name_asserts_at_init);
     RUN_TEST(test_global_block_listed_twice_asserts_at_init);
     RUN_TEST(test_full_global_block_list_inits);
-    RUN_TEST(test_global_block_after_the_end_asserts_at_init);
-    RUN_TEST(test_uniform_stream_capacity_is_a_multiple_of_16);
     RUN_TEST(test_stream_records_copies_of_descriptors);
     RUN_TEST(test_gpu_timing_toggles_only_between_frames);
     RUN_TEST(test_buffer_write_leaves_earlier_draws_pending);

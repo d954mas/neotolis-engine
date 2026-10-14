@@ -186,7 +186,7 @@ assert at `nt_gfx_make_program`.
 Every active uniform block binds at link to the slot of its name. The engine
 reserves three names by update frequency: `Globals` (`NT_GFX_SLOT_GLOBALS`, frame
 and view data the game fills), `Material` (`NT_GFX_SLOT_MATERIAL`) and `Draw`
-(`NT_GFX_SLOT_DRAW`, per-draw data). `nt_gfx_desc_t.global_blocks` lists the
+(`NT_GFX_SLOT_DRAW`, per-draw data). `nt_gfx_desc_t.game_blocks` lists the
 game's own names at `nt_gfx_init`: entry `i` binds to `NT_GFX_SLOT_GAME + i`,
 up to `NT_GFX_MAX_GAME_BLOCKS` (6, so `Globals`, `Draw` and the game blocks fit
 WebGPU's eight dynamic uniform bindings), and the list ends at the first NULL.
@@ -205,9 +205,9 @@ draw asserts that every block its program uses is bound in the pass with at leas
 the block's data size (WebGL rejects such a draw, native GL reads past the range);
 the check runs on the first draw after a program or block change, before a merge.
 
-A slot holds the last block bound to it in the pass, whoever bound it: engine
-renderers that draw with their own `Draw` block (shape flush, blur) replace the
-game's `Draw` binding, so a game rebinds its own block after calling them.
+A slot holds the last block bound to it in the pass, whoever bound it. `Draw` is
+per-draw data: a shape flush binds its own `Draw` block, so a game binds its
+`Draw` block before its own draws, not once per pass.
 
 `nt_gfx_bind_uniform_block(slot, data, size)` binds frame data: it copies `size`
 bytes into the uniform frame stream at the next multiple of
@@ -223,9 +223,7 @@ ends `CONTEXT_LOST`.
 (size a nonzero multiple of 16, asserted at creation); an equal handle ends
 `CACHE`. Its data is written with `nt_gfx_update_buffer`, so every draw of a
 frame reads the frame's last write. `NT_BUFFER_INVALID` unbinds the slot without
-a backend call, and a draw whose program uses the slot asserts; rebinding the
-buffer the slot held before the unbind ends `CACHE` too, because GL still holds
-its range. Another buffer type, a buffer without a live backend, or the uniform
+a backend call, and a draw whose program uses the slot asserts. Another buffer type, a buffer without a live backend, or the uniform
 frame stream's buffer (frame data binds through `nt_gfx_bind_uniform_block`)
 asserts after the lost-context return.
 

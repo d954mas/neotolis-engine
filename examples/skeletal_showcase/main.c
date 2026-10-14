@@ -2761,8 +2761,6 @@ int main(int argc, char *argv[]) {
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] =
         (2U * SKELETAL_SHOWCASE_MAX_INSTANCES * (uint32_t)sizeof(nt_skinned_mesh_instance_t)) + SKELETAL_SHOWCASE_UI_VERTEX_BYTES + SKELETAL_SHOWCASE_SHAPE_VERTEX_BYTES;
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = SKELETAL_SHOWCASE_UI_INDEX_BYTES;
-    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] =
-        8U * 512U; /* two stage views, the UI view and a shape Draw block per scaffold width and stage pass: 256 B or less each, plus any offset alignment up to 256 */
     nt_gfx_init(&gfx_desc);
     nt_http_init();
 #ifndef NT_PLATFORM_WEB

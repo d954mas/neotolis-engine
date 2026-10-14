@@ -301,8 +301,8 @@ static void test_first_frame_counts_initial_resource_creation(void) {
     (void)nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8});
     nt_gfx_begin_frame();
     TEST_ASSERT_EQUAL_UINT64(1, g_nt_gfx.last_frame.frame_sequence);
-    /* The three loads; the texture also creates its default sampler. Frame storage is off by default. */
-    TEST_ASSERT_EQUAL_UINT32(4, g_nt_gfx.last_frame.accepted[NT_GFX_OP_CREATE]);
+    /* The three loads; the texture also creates its default sampler, and init the default uniform stream's buffer. */
+    TEST_ASSERT_EQUAL_UINT32(5, g_nt_gfx.last_frame.accepted[NT_GFX_OP_CREATE]);
 }
 
 /* The pre-swap capture seam reads after end_frame: work there is legal and counts in the open frame. */

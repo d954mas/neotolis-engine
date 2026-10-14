@@ -562,7 +562,6 @@ int main(int argc, char *argv[]) {
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = SLICE9_DEMO_VERTEX_BYTES;
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = SLICE9_DEMO_INDEX_BYTES;
-    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 512U; /* the 256 B view block plus any offset alignment up to 256 */
     nt_gfx_init(&gfx_desc);
 
     nt_http_init();

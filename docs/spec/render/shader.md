@@ -31,7 +31,7 @@ asking for the status at once blocks the main thread until it finishes.
 (native) it asks each pending program once per frame whether the link is
 complete and leaves unfinished ones pending; without the extension it finishes
 every pending link there, which may block. Finishing reads the link status,
-binds the global blocks, reflects uniforms and samplers and writes the sampler
+binds the uniform blocks, reflects uniforms and samplers and writes the sampler
 units. A program is therefore ready no earlier than the frame after
 `nt_gfx_make_program`. Readiness turns true only in `nt_gfx_begin_frame` and
 turns false only by a destroy or by the loss processing in `nt_gfx_begin_frame`,
@@ -75,7 +75,7 @@ Uniform block bindings are program state, not material state: a program is
 shared by many materials, so a material-declared binding would be
 last-writer-wins across them. A block binds by name instead: the engine reserves
 `Globals`, `Material` and `Draw` (slots 0-2, by update frequency) and the game
-lists its own names in `nt_gfx_desc_t.global_blocks` (slots from 3); an unknown
+lists its own names in `nt_gfx_desc_t.game_blocks` (slots from 3); an unknown
 active block name asserts at link. The contract (member types, std140, the draw
 check, frame data and uniform buffers) is in
 [API contracts](../core/api-contracts.md#program-handles).

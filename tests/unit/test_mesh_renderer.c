@@ -1566,7 +1566,7 @@ void test_core_draw_applies_the_material_every_call(void) {
     nt_mesh_renderer_draw(mesh, mat, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset, 1);
     nt_test_frame_next();
 
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count());                        /* the second, equal bind ends CACHE */
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());                        /* the second call rebinds the unbound slot */
     TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]); /* the second, equal set ends CACHE */
 }
 

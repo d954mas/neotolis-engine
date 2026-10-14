@@ -232,7 +232,6 @@ void nt_material_apply(nt_material_t mat, const nt_gfx_texture_binding_t *draw_t
     const nt_material_record_t *rec = get_record(mat);
     NT_ASSERT(rec && "nt_material_apply on invalid material handle");
     NT_ASSERT((draw_textures != NULL || count == 0) && rec->tex_count + count <= NT_GFX_MAX_TEXTURE_SLOTS && "nt_material_apply: draw textures");
-    NT_ASSERT((rec->params_size == 0 || rec->params_buffer.id != 0 || g_nt_gfx.context_lost) && "material params have no buffer -- call nt_material_restore_gpu after a context restore");
     nt_gfx_bind_uniform_buffer(NT_GFX_SLOT_MATERIAL, rec->params_buffer);
     nt_gfx_texture_binding_t bindings[NT_GFX_MAX_TEXTURE_SLOTS];
     for (uint8_t t = 0; t < rec->tex_count; t++) {

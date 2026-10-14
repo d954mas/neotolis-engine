@@ -550,7 +550,6 @@ int main(void) {
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     /* The view block, the shape Draw block, a Draw block per blur pass and per presented quad (5):
      * 256 B or less each, plus any offset alignment up to 256. */
-    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 10U * 512U;
     gfx_desc.max_render_targets = 8;
     gfx_desc.max_textures = 32;
     gfx_desc.max_pipelines = 32;

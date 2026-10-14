@@ -79,8 +79,6 @@ _Static_assert(offsetof(nt_blur_draw_block_t, radius) == 16 && offsetof(nt_blur_
 /* Hashed once at init. */
 static nt_hash32_t s_u_source;
 
-static void hash_uniform_names(void) { s_u_source = nt_hash32_str("u_source"); }
-
 static uint32_t radius_to_int(float radius) {
     if (!isfinite(radius) || radius <= 0.0F || radius > (float)NT_POSTFX_BLUR_MAX_RADIUS) {
         return 0;
@@ -200,7 +198,7 @@ void nt_postfx_blur_init(void) {
     NT_ASSERT(!s_blur.initialized && "nt_postfx_blur_init: already initialized");
     NT_ASSERT(g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].capacity > 0 && "postfx blur: set nt_gfx_desc_t.frame_capacity[NT_GFX_FRAME_UNIFORM]");
     memset(&s_blur, 0, sizeof(s_blur));
-    hash_uniform_names();
+    s_u_source = nt_hash32_str("u_source");
     make_gpu_resources();
     s_blur.initialized = true;
 }

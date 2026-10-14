@@ -199,8 +199,6 @@ static struct {
     GLuint vao;
     /* Context state, not VAO state: only glVertexAttribPointer captures it. */
     GLuint array_buffer;
-    /* The generic binding; glBindBufferRange sets it too. */
-    GLuint uniform_buffer;
     /* Indexed ranges persist across passes and frames; the front-end rebinds blocks every pass. */
     struct {
         GLuint buffer;
@@ -409,7 +407,6 @@ static void nt_gfx_gl_cache_ground_state(void) {
     s_pass_discard = 0;
     s_gl_cache.vao = 0;
     s_gl_cache.array_buffer = 0;
-    s_gl_cache.uniform_buffer = 0;
     memset(s_gl_cache.uniform_ranges, 0, sizeof(s_gl_cache.uniform_ranges));
     s_gl_cache.program = 0;
     s_gl_cache.depth_test_enabled = false;
@@ -1457,8 +1454,8 @@ static bool nt_gfx_gl_bind_blocks(GLuint program, nt_gfx_gl_program_t *rec) {
         if (length <= 0 || size <= 0) {
             return false;
         }
-        const uint32_t slot = nt_gfx_block_slot(s_init_desc.global_blocks, name);
-        NT_ASSERT(slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS && "uniform block name is neither reserved nor in nt_gfx_desc_t.global_blocks");
+        const uint32_t slot = nt_gfx_block_slot(s_init_desc.game_blocks, name);
+        NT_ASSERT(slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS && "uniform block name is neither reserved nor in nt_gfx_desc_t.game_blocks");
         NT_GL(glUniformBlockBinding, program, (GLuint)bi, (GLuint)slot);
         rec->block_sizes[slot] = (uint32_t)size;
     }
@@ -1740,23 +1737,12 @@ static void forget_deleted_buffer(GLuint buf) {
     if (s_gl_cache.array_buffer == buf) {
         s_gl_cache.array_buffer = 0;
     }
-    if (s_gl_cache.uniform_buffer == buf) {
-        s_gl_cache.uniform_buffer = 0;
-    }
     /* A recycled name must not match a range GL already dropped. */
     for (uint32_t i = 0; i < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; i++) {
         if (s_gl_cache.uniform_ranges[i].buffer == buf) {
             s_gl_cache.uniform_ranges[i].buffer = 0;
         }
     }
-}
-
-/* The generic binding of the targets the cache tracks; NULL for the element array (VAO state). */
-static GLuint *cached_generic_binding(GLenum target) {
-    if (target == GL_ARRAY_BUFFER) {
-        return &s_gl_cache.array_buffer;
-    }
-    return target == GL_UNIFORM_BUFFER ? &s_gl_cache.uniform_buffer : NULL;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
@@ -1776,9 +1762,8 @@ bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot) {
         ebo_upload_begin();
     }
     NT_GL(glBindBuffer, target, buf);
-    GLuint *generic = cached_generic_binding(target);
-    if (generic != NULL) {
-        *generic = buf;
+    if (target == GL_ARRAY_BUFFER) {
+        s_gl_cache.array_buffer = buf;
     }
     NT_GL_BUFFER_UPLOAD(desc->data, desc->size, glBufferData, target, (GLsizeiptr)desc->size, desc->data, usage);
     if (unhook_vao) {
@@ -1813,14 +1798,13 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, cons
     if (unhook_vao) {
         ebo_upload_begin();
     }
-    GLuint *generic = cached_generic_binding(target);
-    if (generic == NULL || *generic != buf) {
+    if (target != GL_ARRAY_BUFFER || s_gl_cache.array_buffer != buf) {
         NT_GL(glBindBuffer, target, buf);
     } else {
         NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_BUFFER_UPLOAD, event->result = NT_GFX_RESULT_CACHE; event->detail = NT_GFX_GL_glBindBuffer; event->data.backend.args[0] = buf;);
     }
-    if (generic != NULL) {
-        *generic = buf;
+    if (target == GL_ARRAY_BUFFER) {
+        s_gl_cache.array_buffer = buf;
     }
     NT_GL_BUFFER_UPLOAD(data, size, glBufferSubData, target, (GLintptr)offset, (GLsizeiptr)size, data);
     if (unhook_vao) {
@@ -1841,7 +1825,6 @@ void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, 
     s_gl_cache.uniform_ranges[slot].buffer = buf;
     s_gl_cache.uniform_ranges[slot].offset = offset;
     s_gl_cache.uniform_ranges[slot].size = size;
-    s_gl_cache.uniform_buffer = buf;
 }
 
 /* ---- Texture management ---- */

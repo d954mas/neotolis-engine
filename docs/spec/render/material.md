@@ -21,9 +21,8 @@ Material = shader + render state + values.
 ## Params
 
 A material's numeric params are the bytes of the program's `Material` uniform
-block (`layout(std140)`, members `vec4`/`ivec4`/`uvec4`/`mat4` or arrays of them,
-see [API contracts](../core/api-contracts.md#program-handles)). The game mirrors
-the block with a C struct of `float`/`int32_t`/`uint32_t` arrays and passes it as
+block ([layout rules](../core/api-contracts.md#program-handles)). The game mirrors
+the block with a C struct and passes it as
 `nt_material_create_desc_t.params` / `params_size`: NULL with size 0, or a
 multiple of 16 up to `NT_MATERIAL_MAX_PARAM_BYTES` (256), asserted at create.
 There are no param names: the block layout is the contract between the shader

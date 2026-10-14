@@ -340,7 +340,7 @@ typedef enum {
 #define NT_GFX_SLOT_GLOBALS 0  /* "Globals": frame and view data, filled and bound by the game */
 #define NT_GFX_SLOT_MATERIAL 1 /* "Material": the material's uniform buffer, bound by nt_material_apply */
 #define NT_GFX_SLOT_DRAW 2     /* "Draw": per-draw data of a renderer or game shader */
-#define NT_GFX_SLOT_GAME 3     /* nt_gfx_desc_t.global_blocks[i] binds to NT_GFX_SLOT_GAME + i */
+#define NT_GFX_SLOT_GAME 3     /* nt_gfx_desc_t.game_blocks[i] binds to NT_GFX_SLOT_GAME + i */
 /* Globals, Draw and the game blocks fit WebGPU's 8 dynamic uniform bindings. */
 #define NT_GFX_MAX_GAME_BLOCKS 6
 #define NT_GFX_MAX_UNIFORM_BUFFER_SLOTS (NT_GFX_SLOT_GAME + NT_GFX_MAX_GAME_BLOCKS)
@@ -375,14 +375,13 @@ typedef struct {
     uint16_t max_render_targets; /* default: 16 */
     uint32_t capture_capacity;   /* event records, default: 0; allocated once at init */
     uint32_t stream_capacity;    /* draw-phase command bytes of one frame, default: 32 KiB; allocated once at init */
-    /* Frame storage bytes per frame by stream (NT_GFX_FRAME_*), default: 0 (disabled);
-     * each enabled stream is a CPU staging copy plus a GPU buffer, allocated once at init.
-     * The uniform stream is a uniform buffer: a multiple of 16 (asserted). */
+    /* Frame storage bytes per frame by stream (NT_GFX_FRAME_*), default: 0 (disabled) except the
+     * uniform stream, which every pass's Globals block uses: 16 KiB, a multiple of 16 (asserted);
+     * each enabled stream is a CPU staging copy plus a GPU buffer, allocated once at init. */
     uint32_t frame_capacity[NT_GFX_FRAME_STREAM_COUNT];
-    /* The game's uniform block names, slot NT_GFX_SLOT_GAME + index; the list is dense and ends at
-     * the first NULL (a name after it asserts; default: none). Borrowed unchanged until
-     * nt_gfx_shutdown. */
-    const char *global_blocks[NT_GFX_MAX_GAME_BLOCKS];
+    /* The game's uniform block names, slot NT_GFX_SLOT_GAME + index; the list ends at the first
+     * NULL (default: none). Borrowed unchanged until nt_gfx_shutdown. */
+    const char *game_blocks[NT_GFX_MAX_GAME_BLOCKS];
     bool depth;               /* request depth buffer (default: true) */
     bool stencil;             /* request stencil buffer (default: false) */
     bool antialias;           /* MSAA (default: false) */
@@ -799,6 +798,7 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
         .max_vertex_inputs = 560,
         .max_render_targets = 16,
         .stream_capacity = 32U * 1024U,
+        .frame_capacity = {[NT_GFX_FRAME_UNIFORM] = 16U * 1024U},
         .depth = true,
         .premultiplied_alpha = true,
     };
@@ -994,10 +994,8 @@ bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint
 
 /* ---- Uniform blocks ---- */
 
-/* Block members are vec4, ivec4, uvec4, mat4 or arrays of them in a layout(std140) block with
- * column-major matrices (member types, matrix order, offsets and strides asserted at link), so a
- * C struct of float/int32_t/uint32_t arrays matches it byte for byte. A draw asserts that each
- * block its program uses is bound in the pass with at least the block's size. */
+/* Blocks are std140 with vec4/ivec4/uvec4/mat4 members (asserted at link; rules in the API contracts
+ * spec). A draw asserts that each block its program uses is bound in the pass at its full size. */
 
 /* Frame data: copies size bytes (a multiple of 16) into the uniform frame stream and binds that
  * range to slot. Bytes equal to the range already bound to slot in this pass end CACHE with no

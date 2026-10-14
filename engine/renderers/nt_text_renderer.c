@@ -35,7 +35,6 @@ static struct {
     /* set_material; draws read it */
     struct {
         nt_material_t material;
-        const nt_material_info_t *info;
         nt_program_t program; /* the program `pipeline` was built on: a replace keeps the material handle */
         nt_pipeline_t pipeline;
         uint64_t frame; /* gfx frame of the selection */
@@ -118,7 +117,6 @@ static void resolve_material(nt_material_t mat, const nt_material_info_t *info) 
     NT_ASSERT(g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].capacity > 0 && g_nt_gfx_frame_storage[NT_GFX_FRAME_INDEX].capacity > 0 &&
               "text renderer: set nt_gfx_desc_t.frame_capacity[NT_GFX_FRAME_VERTEX] and [NT_GFX_FRAME_INDEX]");
     s_text.current.material = mat;
-    s_text.current.info = info;
     s_text.current.program = info->program;
     s_text.current.pipeline = find_or_create_pipeline(info);
     if (s_text.current.pipeline.id != 0 && find_or_create_vertex_input().id == 0) {

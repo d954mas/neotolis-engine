@@ -47,7 +47,7 @@ void setUp(void) {
     desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 1024U * 1024U;
     desc.frame_capacity[NT_GFX_FRAME_INDEX] = 64U * 1024U;
     desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096;
-    desc.global_blocks[0] = "Color";
+    desc.game_blocks[0] = "Color";
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);

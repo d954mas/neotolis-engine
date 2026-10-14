@@ -580,7 +580,6 @@ int main(int argc, char **argv) {
      * 208 B of vertices and 24 B of indices per glyph of its overlay buffer. */
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = (BUNNY_MAX * 4U * 20U) + (BUNNY_OVERLAY_BYTES * 208U);
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = (BUNNY_MAX * 6U * 4U) + (BUNNY_OVERLAY_BYTES * 24U);
-    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 512U; /* the 256 B view block plus any offset alignment up to 256 */
     nt_gfx_init(&gfx_desc);
 
     nt_http_init();

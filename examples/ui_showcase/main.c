@@ -3932,7 +3932,6 @@ int main(int argc, char *argv[]) {
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = UI_SHOWCASE_VERTEX_BYTES;
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = UI_SHOWCASE_INDEX_BYTES;
-    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4U * 512U; /* the view block and the shape Draw blocks of the frame: 256 B or less each, plus any offset alignment up to 256 */
     nt_gfx_init(&gfx_desc);
 
     nt_http_init();
