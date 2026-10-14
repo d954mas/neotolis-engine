@@ -1013,8 +1013,8 @@ void test_sprite_renderer_program_replace_between_immediate_and_draw_list(void) 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(program_a.id, nt_gfx_fake_draw_trace_at(0).program.id);
     TEST_ASSERT_EQUAL_UINT32(program_b.id, nt_gfx_fake_draw_trace_at(1).program.id);
-    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET] - sets_before);
-    /* Each draw applies its set; gfx drops the second, equal unit bind of the pass.
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET] - sets_before);
+    /* Each draw applies its set; the second, equal set ends CACHE.
      * Params are program state and go out twice. */
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());

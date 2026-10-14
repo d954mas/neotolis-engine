@@ -382,14 +382,14 @@ sampler interface by name, not by texture unit. Names absent from the linked
 program are ignored before their handles are inspected; active names are mapped
 to the immutable units recorded at link. Missing or duplicate active names,
 invalid handles, sampler/texture type mismatches, and sampling a color or depth
-attachment of the active render target are developer errors and assert. Resolution
-is atomic: context loss (also one a lazy sampler recreate meets) or a texture
-without live backend storage publishes no
-logical set and issues no backend bind. Those failures are
-recoverable, so gfx reports them and skips the following draws of that set instead
-of returning a status the caller would have to branch on. Context loss means loss
-already latched, by `nt_gfx_begin_frame` or by a failed backend call; material
-transitions do not poll the platform.
+attachment of the active render target are developer errors and assert, and so
+does a texture without live backend storage: like a buffer or render-target husk,
+it is a texture its owner did not recreate after a context restore. Resolution is
+atomic: context loss (also one a lazy sampler recreate meets) publishes no logical
+set and issues no backend bind, and the following draws take their lost path.
+Context loss means loss already latched, by `nt_gfx_begin_frame` or by a failed
+backend call; material transitions do not poll the platform. A set that changes
+no unit of the pass ends `CACHE` after its validation.
 
 The sampler class is part of the linked interface:
 
@@ -565,8 +565,8 @@ pass before it returns `NT_GFX_RESULT_CONTEXT_LOST`. `nt_gfx_begin_pass` disable
 target and clears the bound pipeline, vertex input, instance binding, texture
 set and uniform-block bindings, so every pass binds every block it reads. The
 scissor rectangle carries over, so a pass sets the scissor rectangle before it
-enables scissor. A bind equal to the current state records nothing; results,
-the texture-set exception and the slot limit are in
+enables scissor. A bind equal to the current state records nothing; results and
+the slot limit are in
 [binding dedup](../render/architecture.md#binding-dedup-and-draw-merge).
 `nt_gfx_begin_segment` and `nt_gfx_end_segment` assert outside an open frame.
 

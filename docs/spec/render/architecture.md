@@ -144,9 +144,9 @@ A mirror lives exactly as long as the contract keeps its state:
 - the scissor rectangle carries over passes and frames; a context loss clears it;
 - scissor enable is reset to off by `begin_pass`.
 
-`nt_gfx_apply_texture_bindings` never ends `CACHE`: a successful apply validates
-and publishes the whole set and ends `ACCEPTED`, but records a unit bind only
-when that unit's texture or sampler changed in the pass. A frame block compares
+`nt_gfx_apply_texture_bindings` validates the whole set on every call (a WebGPU
+backend bakes sets instead) and records a unit bind only when that unit's
+texture or sampler changed in the pass; a set that changes no unit ends `CACHE`. A frame block compares
 its bytes with the range bound to its slot in the pass (the staged bytes stay
 unchanged until the next `begin_frame`); a uniform buffer compares its handle.
 Uniform-block slots are below `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS` (9: the three

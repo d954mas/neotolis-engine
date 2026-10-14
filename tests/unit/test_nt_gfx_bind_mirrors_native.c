@@ -908,7 +908,7 @@ static void test_identical_second_frame_issues_no_bind_calls(void) {
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_apply_texture_bindings(&binding, 1);
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_TRUE(nt_gfx_test_texture_set_applied());
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
 
@@ -920,7 +920,7 @@ static void test_identical_second_frame_issues_no_bind_calls(void) {
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_apply_texture_bindings(&binding, 1);
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_TRUE(nt_gfx_test_texture_set_applied());
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
     remove_state_counters();

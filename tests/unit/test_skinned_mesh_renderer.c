@@ -587,8 +587,8 @@ void test_material_transition_reapplies_complete_surface_and_skin_set(void) {
     nt_gfx_fake_reset();
     skinned_draw_list(items, 2);
 
-    /* The transition applies the complete set again; its unit binds equal the pass state and are dropped. */
-    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
+    /* The transition applies the complete set again; its units equal the pass state, so it ends CACHE. */
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(1));

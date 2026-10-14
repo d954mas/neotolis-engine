@@ -699,7 +699,7 @@ static void end_texture_binding_test_pass(void) {
 
 static void apply_texture_set(const nt_gfx_texture_binding_t *bindings, uint8_t count) {
     nt_gfx_apply_texture_bindings(bindings, count);
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_TRUE(nt_gfx_test_texture_set_applied());
 }
 
 void test_gfx_apply_texture_bindings_maps_names_to_canonical_units(void) {
@@ -751,7 +751,7 @@ void test_gfx_apply_texture_bindings_rejects_partial_set_before_backend_bind(voi
 
     EXPECT_ASSERT(nt_gfx_apply_texture_bindings(bindings, 1));
     EXPECT_ASSERT((void)nt_gfx_apply_texture_bindings(NULL, 0));
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_FALSE(nt_gfx_test_texture_set_applied());
     end_texture_binding_test_pass();
 
     /* Only the complete set reached the backend. */
@@ -876,7 +876,7 @@ void test_gfx_apply_texture_bindings_requires_pass_and_pipeline(void) {
     EXPECT_ASSERT(nt_gfx_apply_texture_bindings(NULL, 1));
     EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&stale_binding, 1));
 
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_FALSE(nt_gfx_test_texture_set_applied());
     end_texture_binding_test_pass();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
 }
@@ -894,13 +894,13 @@ void test_gfx_pipeline_change_preserves_texture_set_only_for_same_program(void) 
     apply_texture_set(&binding, 1);
 
     nt_gfx_bind_pipeline(same_program_pipeline);
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_TRUE(nt_gfx_test_texture_set_applied());
     bind_test_vertex_input();
     nt_gfx_draw(0, 0);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
 
     nt_gfx_bind_pipeline(second_pipeline);
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_FALSE(nt_gfx_test_texture_set_applied());
     EXPECT_ASSERT(nt_gfx_draw(0, 0));
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
     end_texture_binding_test_pass();
@@ -942,14 +942,15 @@ void test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost(voi
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_apply_texture_bindings(NULL, 0);
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_FALSE(nt_gfx_test_texture_set_applied());
     end_texture_binding_test_pass();
     TEST_ASSERT_EQUAL_UINT32(texture_binds, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(sampler_binds, nt_gfx_fake_bind_sampler_count());
 }
 
-/* The husk is second so the first entry proves the whole set is discarded, not just the tail. */
-void test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds(void) {
+/* A husk is a texture the owner did not recreate after a restore: like a buffer or target husk it
+ * asserts. It is second so the first entry proves nothing of the set reached the backend. */
+void test_gfx_apply_texture_bindings_asserts_a_texture_husk(void) {
     nt_texture_t husk = make_binding_test_texture(1);
     nt_gfx_fake_lose_and_restore_context();
     nt_gfx_end_frame();
@@ -967,15 +968,9 @@ void test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds(
         {.name = nt_hash32_str("u_b"), .texture = live, .sampler = NT_SAMPLER_DEFAULT},
     };
     apply_texture_set(bindings, 2);
-    const uint32_t draw_calls = nt_gfx_draw_calls(&g_nt_gfx.counters);
-
     bindings[1].texture = husk;
-    nt_gfx_apply_texture_bindings(bindings, 2);
-
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_FAILED, nt_gfx_test_texture_set_state());
-    /* A reported failure skips the draw instead of drawing the previous set. */
-    nt_gfx_draw(0, 0);
-    TEST_ASSERT_EQUAL_UINT32(draw_calls, nt_gfx_draw_calls(&g_nt_gfx.counters));
+    EXPECT_ASSERT(nt_gfx_apply_texture_bindings(bindings, 2));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "recreate it after context restore"));
     end_texture_binding_test_pass();
     /* Only the first, complete set reached the backend. */
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
@@ -1112,12 +1107,12 @@ void test_gfx_texture_set_clears_on_pass_begin_and_failed_bind(void) {
     apply_texture_set(&binding, 1);
     nt_gfx_end_pass();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_FALSE(nt_gfx_test_texture_set_applied());
 
     nt_gfx_bind_pipeline(pipeline);
     apply_texture_set(&binding, 1);
     nt_gfx_bind_pipeline((nt_pipeline_t){UINT32_MAX});
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_FALSE(nt_gfx_test_texture_set_applied());
     end_texture_binding_test_pass();
 }
 
@@ -3027,7 +3022,7 @@ void test_gfx_rgba32f_sampler_overrides_require_capability(void) {
         binding.sampler = nt_gfx_make_sampler(&filtered[i]);
         g_nt_gfx.gpu_caps.has_float_texture_linear = false;
         EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
-        TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
+        TEST_ASSERT_FALSE(nt_gfx_test_texture_set_applied());
 
         g_nt_gfx.gpu_caps.has_float_texture_linear = true;
         apply_texture_set(&binding, 1);
@@ -3887,11 +3882,7 @@ void test_indexed_draw_merge_spans_texture_updates_but_not_passes(void) {
 }
 
 /* A failed texture-set apply rejects the next draw; it neither merges nor records. */
-void test_indexed_draw_after_failed_texture_set_is_rejected_not_merged(void) {
-    nt_texture_t husk = make_binding_test_texture(1);
-    nt_gfx_fake_lose_and_restore_context();
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
+void test_unchanged_texture_set_ends_cache_and_keeps_the_merge(void) {
     nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
     nt_texture_t live = make_binding_test_texture(2);
     nt_gfx_fake_draw_trace_reset(true);
@@ -3899,16 +3890,14 @@ void test_indexed_draw_after_failed_texture_set_is_rejected_not_merged(void) {
     bind_test_vertex_input();
     nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = live, .sampler = NT_SAMPLER_DEFAULT};
     apply_texture_set(&binding, 1);
+    const uint32_t accepted = g_nt_gfx.counters.accepted[NT_GFX_OP_TEXTURE_SET];
     nt_gfx_draw_indexed(0, 3, 3);
-    binding.texture = husk;
-    nt_gfx_apply_texture_bindings(&binding, 1);
+    EXPECT_NOT_RECORDED(nt_gfx_apply_texture_bindings(&binding, 1));
+    TEST_ASSERT_EQUAL_UINT32(accepted, g_nt_gfx.counters.accepted[NT_GFX_OP_TEXTURE_SET]);
+    TEST_ASSERT_TRUE(nt_gfx_test_texture_set_applied());
     nt_gfx_draw_indexed(3, 3, 3);
-    TEST_ASSERT_EQUAL_UINT64(3, g_nt_gfx.counters.indices);
-    /* The failed set recorded nothing, so the unit mirror still holds the live texture. */
-    binding.texture = live;
-    EXPECT_NOT_RECORDED(apply_texture_set(&binding, 1));
     TEST_ASSERT_EQUAL_UINT32(1, merged_draws_after_end_frame());
-    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_draw_trace_at(0).num_indices);
+    TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_fake_draw_trace_at(0).num_indices);
 }
 
 /* The backend passes the count as GLsizei: a sum past INT32_MAX records a second draw. */
@@ -4076,7 +4065,7 @@ int main(void) {
     RUN_TEST(test_gfx_pipeline_change_preserves_texture_set_only_for_same_program);
     RUN_TEST(test_gfx_draws_require_complete_texture_set_for_bound_program);
     RUN_TEST(test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost);
-    RUN_TEST(test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds);
+    RUN_TEST(test_gfx_apply_texture_bindings_asserts_a_texture_husk);
     RUN_TEST(test_gfx_creates_that_meet_a_loss_free_their_pool_slots);
     RUN_TEST(test_gfx_husks_skip_the_backend_and_their_slots_are_reused_after_restore);
     RUN_TEST(test_gfx_husks_after_a_failed_restore_reach_no_backend_record);
@@ -4209,7 +4198,7 @@ int main(void) {
     RUN_TEST(test_contiguous_indexed_draws_merge);
     RUN_TEST(test_indexed_draw_merge_boundaries);
     RUN_TEST(test_indexed_draw_merge_spans_texture_updates_but_not_passes);
-    RUN_TEST(test_indexed_draw_after_failed_texture_set_is_rejected_not_merged);
+    RUN_TEST(test_unchanged_texture_set_ends_cache_and_keeps_the_merge);
     RUN_TEST(test_indexed_draw_merge_keeps_the_count_in_glsizei);
     RUN_TEST(test_contiguous_plain_draws_merge);
     RUN_TEST(test_indexed_draws_assert_whole_triangles);

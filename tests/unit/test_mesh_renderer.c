@@ -1121,8 +1121,8 @@ void test_state_three_materials_same_mesh(void) {
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bind_vertex_input_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_uniform_vec4_count());
-    /* Every material transition applies its set; gfx drops the unchanged unit binds of the pass. */
-    TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
+    /* Every material transition applies its set; an unchanged set ends CACHE and binds nothing. */
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_sampler_count());
 }
@@ -1334,8 +1334,8 @@ void test_state_same_tex_same_sampler_diff_params(void) {
     nt_gfx_fake_reset();
     draw_list(items, 2);
 
-    /* Both materials apply their set; same texture and sampler: the second unit bind of the pass is dropped. */
-    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
+    /* Both materials apply their set; same texture and sampler: the second set ends CACHE. */
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_sampler_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
@@ -1570,7 +1570,7 @@ void test_core_draw_applies_the_material_every_call(void) {
     nt_test_frame_next();
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_uniform_vec4_count());
-    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]); /* the second, equal set ends CACHE */
     float last[4];
     nt_gfx_fake_uniform_vec4_value_at(1, last);
     TEST_ASSERT_EQUAL_INT32(5, (int32_t)last[3]);
@@ -1680,7 +1680,8 @@ void test_list_after_a_program_change_reapplies_the_texture_set(void) {
     TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(p2.id, nt_gfx_fake_draw_trace_at(s_draw_mark + 1).program.id);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bind_pipeline_count());
-    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
+    /* The new program needs its set applied again; its units equal the pass state, so it ends CACHE. */
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_uniform_vec4_count());
 }

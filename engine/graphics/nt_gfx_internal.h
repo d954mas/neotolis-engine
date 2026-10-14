@@ -148,12 +148,6 @@ static inline uint32_t nt_gfx_block_slot(const char *const *game_blocks, const c
     return NT_GFX_MAX_UNIFORM_BUFFER_SLOTS;
 }
 
-typedef enum {
-    NT_GFX_TEXTURE_SET_NONE = 0,
-    NT_GFX_TEXTURE_SET_APPLIED,
-    NT_GFX_TEXTURE_SET_FAILED,
-} nt_gfx_texture_set_state_t;
-
 /* ---- Backend function signatures (implemented by each backend) ---- */
 
 /* Program, buffer and texture destroys require a live record; the other destroys accept 0 (no-op, as
@@ -308,7 +302,7 @@ uint32_t nt_gfx_test_bound_pipeline(void);
 /* Front-end handle that owns a pipeline backend handle (a pool slot). */
 nt_pipeline_t nt_gfx_test_pipeline_of_backend(uint32_t backend_handle);
 uint32_t nt_gfx_test_bound_vertex_input(void);
-uint8_t nt_gfx_test_texture_set_state(void);
+bool nt_gfx_test_texture_set_applied(void);
 bool nt_gfx_test_program_sampler_info(nt_program_t prog, nt_hash32_t name, nt_gfx_sampler_info_t *out_info);
 int nt_gfx_test_program_sampler_unit(nt_program_t prog, nt_hash32_t name);
 uint32_t nt_gfx_test_program_sampler_mask(nt_program_t prog);

@@ -943,8 +943,8 @@ nt_texture_format_t nt_gfx_texture_format(nt_texture_t tex);
 /* ---- Draw state ---- Pipeline, vertex input, texture set, instance pointers, uniforms and
  * uniform blocks are pass-scoped: set them inside a pass (asserted); nt_gfx_begin_pass
  * discards them, so every pass binds every block it reads. Physical texture/sampler and
- * uniform-buffer binds are context state. An equal bind, scissor or viewport ends CACHE and
- * records nothing; an equal texture set still ends ACCEPTED and records only the changed units. */
+ * uniform-buffer binds are context state. An equal bind, texture set, scissor or viewport
+ * ends CACHE and records nothing; a texture set records only its changed units. */
 
 void nt_gfx_bind_pipeline(nt_pipeline_t pip);
 /* One backend bind selects the whole vertex-input state (layout + buffers +
@@ -965,10 +965,10 @@ void nt_gfx_bind_vertex_input_instanced(nt_vertex_input_t vi, nt_instance_layout
 /* Applies the complete active sampler interface of the bound pipeline's program.
  * `bindings` is borrowed only for this call and may be NULL iff count is zero.
  * Inactive names are ignored before their handles are read. Contract violations
- * assert, including sampling an attachment of the active render target. The
- * recoverable failures -- context loss (also one a lazy sampler recreate meets) or a texture husk -- publish no
- * set and no backend bind; gfx reports them and skips the following draws of that
- * set, so the caller has nothing to check. */
+ * assert, including sampling an attachment of the active render target and a texture
+ * husk the owner did not recreate after a restore. A context loss (also one a lazy
+ * sampler recreate meets) publishes no set and no backend bind. A set that changes no
+ * unit of the pass ends CACHE. */
 void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uint8_t count);
 
 /* ---- Scissor and viewport ----

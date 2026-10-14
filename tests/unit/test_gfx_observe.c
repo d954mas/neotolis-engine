@@ -332,11 +332,11 @@ static void test_clear_preserves_bound_draw_state(void) {
     nt_gfx_apply_texture_bindings(NULL, 0);
     uint32_t pipeline = nt_gfx_test_bound_pipeline();
     uint32_t input = nt_gfx_test_bound_vertex_input();
-    uint32_t textures = nt_gfx_test_texture_set_state();
+    bool textures = nt_gfx_test_texture_set_applied();
     nt_gfx_clear(&(nt_clear_desc_t){.color = true, .depth = true, .clear_depth = 0.5F});
     TEST_ASSERT_EQUAL_UINT32(pipeline, nt_gfx_test_bound_pipeline());
     TEST_ASSERT_EQUAL_UINT32(input, nt_gfx_test_bound_vertex_input());
-    TEST_ASSERT_EQUAL_UINT32(textures, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_EQUAL(textures, nt_gfx_test_texture_set_applied());
     nt_gfx_draw(0, 3);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
     draw_teardown();
