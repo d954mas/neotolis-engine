@@ -152,7 +152,7 @@ does not need to walk them. Shader stages have independent lifetimes: destroying
 a stage does not affect a program already linked from it.
 
 A program's linked executable and identity are immutable after
-`nt_gfx_make_program`; its uniform values and block bindings remain mutable.
+`nt_gfx_make_program`, and so are its sampler units and block bindings.
 Recovery requires the owner to destroy the old program and link a new handle.
 
 Handle validity and readiness are separate. `nt_gfx_program_valid` reports

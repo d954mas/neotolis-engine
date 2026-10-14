@@ -193,26 +193,6 @@ nt_sampler_t nt_gfx_get_texture_default_sampler(nt_texture_t tex) {
     return (nt_sampler_t){0};
 }
 
-void nt_gfx_set_uniform_mat4(nt_hash32_t name, const float *matrix) {
-    (void)name;
-    (void)matrix;
-}
-
-void nt_gfx_set_uniform_vec4(nt_hash32_t name, const float *vec) {
-    (void)name;
-    (void)vec;
-}
-
-void nt_gfx_set_uniform_float(nt_hash32_t name, float val) {
-    (void)name;
-    (void)val;
-}
-
-void nt_gfx_set_uniform_int(nt_hash32_t name, int val) {
-    (void)name;
-    (void)val;
-}
-
 void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
     (void)first_vertex;
     (void)num_vertices;

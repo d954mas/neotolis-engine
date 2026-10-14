@@ -71,7 +71,6 @@ static void test_stub_drops_draws_and_state_changes(void) {
     nt_gfx_bind_pipeline((nt_pipeline_t){1});
     nt_gfx_bind_vertex_input((nt_vertex_input_t){1});
     nt_gfx_apply_texture_bindings(NULL, 0);
-    nt_gfx_set_uniform_int((nt_hash32_t){1}, 7);
     nt_gfx_set_scissor_enabled(true);
     nt_gfx_draw(0, 3);
     nt_gfx_draw_instanced(0, 3, 4);

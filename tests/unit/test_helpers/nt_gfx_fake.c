@@ -99,13 +99,6 @@ static uint32_t s_fake_render_target_destroy_count;
 static uint32_t s_fake_texture_create_count;
 static uint32_t s_fake_program_create_count;
 static uint32_t s_fake_pipeline_create_count;
-#define NT_GFX_FAKE_UNIFORM_NAMES 16
-static uint32_t s_fake_uniform_int_hashes[NT_GFX_FAKE_UNIFORM_NAMES];
-static int s_fake_uniform_int_values[NT_GFX_FAKE_UNIFORM_NAMES];
-static uint32_t s_fake_uniform_int_count;
-static uint32_t s_fake_uniform_vec4_hashes[NT_GFX_FAKE_UNIFORM_NAMES];
-static float s_fake_uniform_vec4_values[NT_GFX_FAKE_UNIFORM_NAMES][4];
-static uint32_t s_fake_uniform_vec4_count;
 static uint32_t s_fake_bind_pipeline_count;
 static uint32_t s_fake_bound_pipeline;
 static uint32_t s_fake_update_texture_count;
@@ -122,7 +115,6 @@ static uint16_t s_fake_last_pass_width;
 static uint16_t s_fake_last_pass_height;
 static nt_pass_desc_t s_fake_last_pass_desc;
 static nt_clear_desc_t s_fake_last_clear_desc;
-static float s_fake_last_uniform_mat4[16];
 static nt_texture_desc_t s_fake_last_texture_desc;
 static nt_buffer_desc_t s_fake_last_buffer_desc;
 static uint32_t s_fake_last_color_texture_backend;
@@ -148,7 +140,6 @@ static nt_blend_state_t s_fake_last_pipeline_blend;
 static uint32_t s_fake_vertex_input_create_count;
 static uint32_t s_fake_bind_vertex_input_count;
 static uint32_t s_fake_last_bound_vertex_input;            /* recorder: last handle bind_vertex_input received */
-static uint32_t s_fake_last_uniform_program;               /* recorder: last program a uniform write named */
 static nt_vertex_layout_t s_fake_last_vertex_input_layout; /* recorder: per-vertex layout of the last VI create */
 
 uint32_t nt_gfx_fake_last_sampler(uint32_t slot) {
@@ -172,17 +163,6 @@ uint32_t nt_gfx_fake_texture_create_count(void) { return s_fake_texture_create_c
 uint32_t nt_gfx_fake_program_create_count(void) { return s_fake_program_create_count; }
 uint32_t nt_gfx_fake_pipeline_create_count(void) { return s_fake_pipeline_create_count; }
 uint32_t nt_gfx_fake_bind_pipeline_count(void) { return s_fake_bind_pipeline_count; }
-uint32_t nt_gfx_fake_uniform_int_count(void) { return s_fake_uniform_int_count; }
-uint32_t nt_gfx_fake_uniform_int_hash_at(uint32_t index) { return index < s_fake_uniform_int_count && index < NT_GFX_FAKE_UNIFORM_NAMES ? s_fake_uniform_int_hashes[index] : 0; }
-int nt_gfx_fake_uniform_int_value_at(uint32_t index) { return index < s_fake_uniform_int_count && index < NT_GFX_FAKE_UNIFORM_NAMES ? s_fake_uniform_int_values[index] : -1; }
-uint32_t nt_gfx_fake_uniform_vec4_count(void) { return s_fake_uniform_vec4_count; }
-uint32_t nt_gfx_fake_uniform_vec4_hash_at(uint32_t index) { return index < s_fake_uniform_vec4_count && index < NT_GFX_FAKE_UNIFORM_NAMES ? s_fake_uniform_vec4_hashes[index] : 0; }
-void nt_gfx_fake_uniform_vec4_value_at(uint32_t index, float out[4]) {
-    const bool valid = index < s_fake_uniform_vec4_count && index < NT_GFX_FAKE_UNIFORM_NAMES;
-    for (uint32_t i = 0; i < 4; i++) {
-        out[i] = valid ? s_fake_uniform_vec4_values[index][i] : 0.0F;
-    }
-}
 uint32_t nt_gfx_fake_update_texture_count(void) { return s_fake_update_texture_count; }
 nt_gfx_fake_update_texture_rect_t nt_gfx_fake_update_texture_rect_at(uint32_t index) {
     bool valid = index < s_fake_update_texture_count && index < NT_GFX_FAKE_HISTORY_CAPACITY;
@@ -205,7 +185,6 @@ uint16_t nt_gfx_fake_last_pass_width(void) { return s_fake_last_pass_width; }
 uint16_t nt_gfx_fake_last_pass_height(void) { return s_fake_last_pass_height; }
 nt_pass_desc_t nt_gfx_fake_last_pass_desc(void) { return s_fake_last_pass_desc; }
 nt_clear_desc_t nt_gfx_fake_last_clear_desc(void) { return s_fake_last_clear_desc; }
-void nt_gfx_fake_last_uniform_mat4(float out[16]) { memcpy(out, s_fake_last_uniform_mat4, sizeof(s_fake_last_uniform_mat4)); }
 nt_texture_desc_t nt_gfx_fake_last_texture_desc(void) { return s_fake_last_texture_desc; }
 nt_buffer_desc_t nt_gfx_fake_last_buffer_desc(void) { return s_fake_last_buffer_desc; }
 uint32_t nt_gfx_fake_last_color_texture_backend(void) { return s_fake_last_color_texture_backend; }
@@ -233,7 +212,6 @@ nt_blend_state_t nt_gfx_fake_last_pipeline_blend(void) { return s_fake_last_pipe
 uint32_t nt_gfx_fake_vertex_input_create_count(void) { return s_fake_vertex_input_create_count; }
 uint32_t nt_gfx_fake_bind_vertex_input_count(void) { return s_fake_bind_vertex_input_count; }
 uint32_t nt_gfx_fake_last_bound_vertex_input(void) { return s_fake_last_bound_vertex_input; }
-uint32_t nt_gfx_fake_last_uniform_program(void) { return s_fake_last_uniform_program; }
 nt_vertex_layout_t nt_gfx_fake_last_vertex_input_layout(void) { return s_fake_last_vertex_input_layout; }
 
 void nt_gfx_fake_reset(void) {
@@ -250,8 +228,6 @@ void nt_gfx_fake_reset(void) {
     s_fake_texture_create_count = 0;
     s_fake_program_create_count = 0;
     s_fake_pipeline_create_count = 0;
-    s_fake_uniform_int_count = 0;
-    s_fake_uniform_vec4_count = 0;
     s_fake_bind_pipeline_count = 0;
     s_fake_update_texture_count = 0;
     s_fake_update_buffer_count = 0;
@@ -265,7 +241,6 @@ void nt_gfx_fake_reset(void) {
     s_fake_last_pass_height = 0;
     s_fake_last_pass_desc = (nt_pass_desc_t){0};
     s_fake_last_clear_desc = (nt_clear_desc_t){0};
-    memset(s_fake_last_uniform_mat4, 0, sizeof(s_fake_last_uniform_mat4));
     s_fake_last_texture_desc = (nt_texture_desc_t){0};
     s_fake_last_buffer_desc = (nt_buffer_desc_t){0};
     s_fake_last_color_texture_backend = 0;
@@ -281,7 +256,6 @@ void nt_gfx_fake_reset(void) {
     s_fake_vertex_input_create_count = 0;
     s_fake_bind_vertex_input_count = 0;
     s_fake_last_bound_vertex_input = 0;
-    s_fake_last_uniform_program = 0;
     s_fake_last_vertex_input_layout = (nt_vertex_layout_t){0};
     s_fake_context_lost = false;
     s_fake_loss_pending = false;
@@ -664,45 +638,6 @@ void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, 
         s_fake_ubo_binds[s_fake_ubo_bind_count] = (nt_gfx_fake_ubo_bind_t){backend_handle, slot, offset, size};
     }
     s_fake_ubo_bind_count++;
-}
-
-void nt_gfx_backend_set_uniform_mat4(uint32_t program_backend, uint32_t name_hash, const float *matrix) {
-    s_fake_last_uniform_program = program_backend;
-    (void)name_hash;
-    memcpy(s_fake_last_uniform_mat4, matrix, sizeof(s_fake_last_uniform_mat4));
-}
-
-void nt_gfx_backend_set_uniform_vec4(uint32_t program_backend, uint32_t name_hash, const float *vec) {
-    s_fake_last_uniform_program = program_backend;
-    if (s_fake_uniform_vec4_count < NT_GFX_FAKE_UNIFORM_NAMES) {
-        s_fake_uniform_vec4_hashes[s_fake_uniform_vec4_count] = name_hash;
-        for (uint32_t i = 0; i < 4; i++) {
-            s_fake_uniform_vec4_values[s_fake_uniform_vec4_count][i] = vec[i];
-        }
-    }
-    s_fake_uniform_vec4_count++;
-    (void)name_hash;
-    (void)vec;
-}
-
-void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_hash, float val) {
-    s_fake_last_uniform_program = program_backend;
-    (void)name_hash;
-    (void)val;
-}
-
-void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val) {
-    nt_gfx_sampler_info_t sampler_info = {0};
-    const bool is_sampler = nt_gfx_backend_program_sampler_info(program_backend, name_hash, &sampler_info);
-    NT_ASSERT(!is_sampler && "sampler uniforms are immutable; use nt_gfx_apply_texture_bindings");
-    s_fake_last_uniform_program = program_backend;
-    if (s_fake_uniform_int_count < NT_GFX_FAKE_UNIFORM_NAMES) {
-        s_fake_uniform_int_hashes[s_fake_uniform_int_count] = name_hash;
-        s_fake_uniform_int_values[s_fake_uniform_int_count] = val;
-    }
-    s_fake_uniform_int_count++;
-    (void)name_hash;
-    (void)val;
 }
 
 void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) { fake_record_draw(0, 0, first_vertex, num_vertices, instance_count, NT_INDEX_NONE); }

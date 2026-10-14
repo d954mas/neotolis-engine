@@ -72,12 +72,11 @@ its logical state and geometry counters, then records the
 backend-resolved arguments of the backend call into one command stream: begin
 and end pass, clear, pipeline and vertex-input binds (an instanced one carries its
 instance layout, buffer and offset),
-texture-unit and uniform-block binds, the mat4, vec4, float
-and int uniform setters, scissor rectangle and enable, viewport, the plain and
+texture-unit and uniform-block binds, scissor rectangle and enable, viewport, the plain and
 indexed draws (both carry an instance count; the indexed draw also carries the
 index type of the bound vertex input), and GPU timing
-segment begin and end. Descriptors and uniform values are copied
-into the stream. A binding equal to the current one and an indexed draw that
+segment begin and end. Descriptors are copied into the stream; uniform block
+bytes are copied into frame storage at the call. A binding equal to the current one and an indexed draw that
 continues the previous one record nothing new (see Binding dedup and draw
 merge). `nt_gfx_end_frame` first uploads the frame storage (see Frame storage), then
 executes the stream in call order. Nothing is recorded outside a frame.
@@ -97,7 +96,7 @@ every draw of the frame reads the last write: writing one region twice in a
 frame gives the second content to every draw, including draws recorded before
 it. A write issued after `nt_gfx_end_frame` belongs to the next frame. Rendering
 into an attachment is recorded, so it still overwrites the attachment in pass
-order. Arguments of recorded calls (uniform values, descriptors, uniform blocks)
+order. Arguments of recorded calls (descriptors, uniform block bytes)
 are copied at the call; buffer, texture and frame storage contents are read at
 execution.
 
@@ -157,7 +156,8 @@ recorded, `begin_pass` discards the pass-scoped mirrors, and the frame rule keep
 every recorded object alive until `nt_gfx_end_frame`. An invalid or stale
 vertex-input handle asserts: owners revalidate cached handles and recreate them
 after a loss. An invalid pipeline handle clears its mirror (the unbind); other
-invalid binds leave their mirrors unchanged. Uniform values are not deduplicated by
+invalid binds leave their mirrors unchanged. An equal uniform block (same bytes, same
+slot) is dropped by
 the front-end. The GL backend keeps caches for
 physical GL state the front-end does not name: the program and VAO behind
 different pipelines and vertex inputs, the fixed-function difference between
@@ -306,24 +306,14 @@ buffer, or writing into any husk, asserts. Destroying handle 0 is a silent no-op
 for every primary type, so an owner whose create met a loss destroys without a check.
 
 **Program / pipeline split.** A program is the linked (vertex, fragment) pair
-and owns everything that follows from linking: uniform locations, uniform
-values, and global UBO block bindings. A uniform write requires a bound
-pipeline and addresses that pipeline's program at the backend boundary; a
-write with nothing bound asserts. A pipeline is fixed-function render
+and owns everything that follows from linking: sampler units and uniform block
+bindings. It holds no values: every value arrives in a uniform block bound to the
+pass, so a block outlives pipeline binds. A pipeline is fixed-function render
 state that *borrows* a program handle — it owns no vertex-input state, and
 pipeline and vertex-input binding are orthogonal: either may change without
-re-binding the other. Two pipelines on one program
-share every uniform value, and binding one does not reset what the other set.
-The mesh renderer replays declared material params on each material transition inside one draw
-call and discard that tracking at the end of the call; across calls the front-end drops equal binds and the GL backend
-drops repeated physical state (see Binding dedup and draw merge). The sprite
-renderer instead writes a material's params only when the program, the material or
-the param values differ from what it last wrote, compared at every emit and run,
-because a uniform record between two draws stops them from merging. That memo
-lasts across calls and frames, so nothing but the sprite renderer may write the
-uniforms of a program that sprite materials use. Standalone float vec4 writes are skipped when their bytes
-match the last submitted value for that program and uniform; other uniform
-writes are issued unchanged. The
+re-binding the other.
+The front-end drops equal binds and the GL backend drops repeated physical state
+(see Binding dedup and draw merge). The
 backend GL cache persists across passes and frames; ground state is issued once
 at backend init and at context restore. Sampler uniforms are not written at all:
 their units are fixed at link and belong to the program, so no material can
@@ -766,7 +756,7 @@ state; pipeline write masks affect draws, not the next pass initialization. Boun
 pipeline, vertex input, the instance binding and the logical complete texture
 set are pass-scoped: `begin_pass` discards them. The texture set is additionally tied to the bound
 program and is discarded when that program changes. Pipeline and vertex-input binds, texture-set application,
-instance-buffer re-pointing, uniform writes and draws outside a pass assert.
+instance-buffer re-pointing, uniform block binds and draws outside a pass assert.
 Destroying a live object from the first pass until `nt_gfx_end_frame` asserts
 (the frame rule, see Draw-phase command stream).
 Physical texture/sampler GL bindings and uniform-block binds remain context

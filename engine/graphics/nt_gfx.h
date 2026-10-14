@@ -499,10 +499,6 @@ typedef enum {
     NT_GFX_OP_VIEWPORT,
     NT_GFX_OP_SCISSOR,
     NT_GFX_OP_SCISSOR_ENABLE,
-    NT_GFX_OP_UNIFORM_MAT4,
-    NT_GFX_OP_UNIFORM_VEC4,
-    NT_GFX_OP_UNIFORM_FLOAT,
-    NT_GFX_OP_UNIFORM_INT,
     NT_GFX_OP_UBO,
     NT_GFX_OP_BUFFER_UPLOAD,
     NT_GFX_OP_TEXTURE_UPLOAD,
@@ -611,11 +607,8 @@ typedef enum {
     X(glTexImage2D)                                                                                                                                                                                    \
     X(glTexParameteri)                                                                                                                                                                                 \
     X(glTexSubImage2D)                                                                                                                                                                                 \
-    X(glUniform1f)                                                                                                                                                                                     \
     X(glUniform1i)                                                                                                                                                                                     \
-    X(glUniform4fv)                                                                                                                                                                                    \
     X(glUniformBlockBinding)                                                                                                                                                                           \
-    X(glUniformMatrix4fv)                                                                                                                                                                              \
     X(glUseProgram)                                                                                                                                                                                    \
     X(glVertexAttribDivisor)                                                                                                                                                                           \
     X(glVertexAttribPointer)                                                                                                                                                                           \
@@ -717,10 +710,6 @@ typedef struct {
         struct {
             uint32_t first, count, vertices, instances, vertex_input;
         } draw;
-        struct {
-            uint32_t name, count;
-            float values[16];
-        } uniform;
         struct {
             uint32_t secondary, name, slot, offset, size;
         } binding;
@@ -852,8 +841,8 @@ void nt_gfx_clear(const nt_clear_desc_t *desc);
 
 nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
 /* Starts linking valid stages; nt_gfx_begin_frame finishes the link, so the program is ready no
- * earlier than the next frame. Link errors, >16 non-sampler uniforms and >NT_GFX_MAX_TEXTURE_SLOTS
- * samplers assert there. Returns invalid while the context is lost, and for a live stage
+ * earlier than the next frame. Link errors, a standalone non-sampler uniform (values arrive in
+ * uniform blocks) and >NT_GFX_MAX_TEXTURE_SLOTS samplers assert there. Returns invalid while the context is lost, and for a live stage
  * whose GPU object a loss discarded -- recreate the stages and relink. Only a stale stage handle asserts. */
 nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs);
 /* Returns the live pipeline of an equal desc (the label is not identity, and gfx keeps none) or
@@ -940,8 +929,8 @@ bool nt_gfx_texture_size(nt_texture_t tex, uint16_t *out_width, uint16_t *out_he
 /* Returns INVALID for invalid or stale handles. */
 nt_texture_format_t nt_gfx_texture_format(nt_texture_t tex);
 
-/* ---- Draw state ---- Pipeline, vertex input, texture set, instance pointers, uniforms and
- * uniform blocks are pass-scoped: set them inside a pass (asserted); nt_gfx_begin_pass
+/* ---- Draw state ---- Pipeline, vertex input, texture set, instance pointers and uniform
+ * blocks are pass-scoped: set them inside a pass (asserted); nt_gfx_begin_pass
  * discards them, so every pass binds every block it reads. Physical texture/sampler and
  * uniform-buffer binds are context state. An equal bind, texture set, scissor or viewport
  * ends CACHE and records nothing; a texture set records only its changed units. */
@@ -983,15 +972,6 @@ void nt_gfx_set_viewport(int x, int y, int w, int h);
 /* Returns NT_SAMPLER_INVALID for an invalid handle. A husk left by a context
  * loss keeps its default sampler until its owner destroys it. */
 nt_sampler_t nt_gfx_get_texture_default_sampler(nt_texture_t tex);
-
-/* ---- Uniforms ---- The hash is the identity, as for tags and resources. Hash once
- * at init with nt_hash32_str, or inline where the cost does not matter. The
- * value lands on the bound pipeline's program (asserted). */
-
-void nt_gfx_set_uniform_mat4(nt_hash32_t name, const float *matrix);
-void nt_gfx_set_uniform_vec4(nt_hash32_t name, const float *vec);
-void nt_gfx_set_uniform_float(nt_hash32_t name, float val);
-void nt_gfx_set_uniform_int(nt_hash32_t name, int val);
 
 /* ---- Draw calls ---- Every draw is a whole triangle list (count % 3 == 0, asserted). A
  * non-instanced draw that continues the previous one of the same kind, with no command

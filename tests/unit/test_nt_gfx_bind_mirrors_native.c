@@ -130,7 +130,6 @@ static void begin_black_pass(void) { nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_
  * dedup claim is measured on real GL traffic rather than on source counters. */
 static struct {
     uint32_t use_program;
-    uint32_t uniform_vec4;
     uint32_t bind_vao;
     uint32_t depth_mask;
     uint32_t depth_mask_false;
@@ -147,7 +146,6 @@ static struct {
 } s_gl_calls;
 
 static PFNGLUSEPROGRAMPROC s_saved_use_program;
-static PFNGLUNIFORM4FVPROC s_saved_uniform_vec4;
 static PFNGLBINDVERTEXARRAYPROC s_saved_bind_vao;
 static PFNGLDEPTHMASKPROC s_saved_depth_mask;
 static PFNGLENABLEPROC s_saved_enable;
@@ -158,11 +156,6 @@ static PFNGLBINDTEXTUREPROC s_saved_state_bind_texture;
 static PFNGLVIEWPORTPROC s_saved_viewport;
 static PFNGLCLEARCOLORPROC s_saved_clear_color;
 static PFNGLCLEARDEPTHPROC s_saved_clear_depth;
-
-static void GLAD_API_PTR counting_uniform_vec4(GLint location, GLsizei count, const GLfloat *value) {
-    s_gl_calls.uniform_vec4++;
-    s_saved_uniform_vec4(location, count, value);
-}
 
 static void GLAD_API_PTR counting_use_program(GLuint program) {
     s_gl_calls.use_program++;
@@ -234,7 +227,6 @@ static void install_state_counters(void) {
     nt_gfx_frame_execute();
     memset(&s_gl_calls, 0, sizeof(s_gl_calls));
     s_saved_use_program = glad_glUseProgram;
-    s_saved_uniform_vec4 = glad_glUniform4fv;
     s_saved_bind_vao = glad_glBindVertexArray;
     s_saved_depth_mask = glad_glDepthMask;
     s_saved_enable = glad_glEnable;
@@ -246,7 +238,6 @@ static void install_state_counters(void) {
     s_saved_clear_color = glad_glClearColor;
     s_saved_clear_depth = glad_glClearDepth;
     glad_glUseProgram = counting_use_program;
-    glad_glUniform4fv = counting_uniform_vec4;
     glad_glBindVertexArray = counting_bind_vao;
     glad_glDepthMask = counting_depth_mask;
     glad_glEnable = counting_enable;
@@ -267,7 +258,6 @@ static void remove_state_counters(void) {
     }
     nt_gfx_frame_execute();
     glad_glUseProgram = s_saved_use_program;
-    glad_glUniform4fv = s_saved_uniform_vec4;
     glad_glBindVertexArray = s_saved_bind_vao;
     glad_glDepthMask = s_saved_depth_mask;
     glad_glEnable = s_saved_enable;
@@ -279,7 +269,6 @@ static void remove_state_counters(void) {
     glad_glClearColor = s_saved_clear_color;
     glad_glClearDepth = s_saved_clear_depth;
     s_saved_use_program = NULL;
-    s_saved_uniform_vec4 = NULL;
     s_saved_bind_vao = NULL;
     s_saved_depth_mask = NULL;
     s_saved_enable = NULL;
@@ -1187,58 +1176,6 @@ static void test_ground_state_viewport_reissued_after_reinit(void) {
     TEST_ASSERT_EQUAL_INT((int)g_nt_window.fb_height, viewport[3]);
 }
 
-/* Uniform values are program state: the front-end names the bound pipeline's
- * program on every write, so two programs keep their own value. */
-static void test_uniform_write_targets_bound_pipelines_program(void) {
-    static const char *vs_src = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
-    static const char *fs_src = "precision mediump float;\n"
-                                "uniform vec4 u_x;\n"
-                                "out vec4 frag_color;\n"
-                                "void main() { frag_color = u_x; }\n";
-    const float value_a[4] = {1.0F, 2.0F, 3.0F, 4.0F};
-    const float value_b[4] = {5.0F, 6.0F, 7.0F, 8.0F};
-
-    nt_pipeline_t pip_a = make_pipeline_ex(vs_src, fs_src, false, true, false);
-    /* Program and pipeline slots must differ to expose wrong-slot routing. */
-    nt_program_t spare =
-        nt_gfx_make_program(nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_src}), nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_src}));
-    nt_test_gfx_link_wait(spare);
-    TEST_ASSERT_TRUE(nt_gfx_program_ready(spare));
-    nt_pipeline_t pip_b = make_pipeline_ex(vs_src, fs_src, false, true, false);
-
-    begin_black_pass();
-    nt_gfx_bind_pipeline(pip_a);
-    nt_gfx_frame_execute();
-    GLint program_a = 0;
-    glGetIntegerv(GL_CURRENT_PROGRAM, &program_a);
-    nt_gfx_set_uniform_vec4(nt_hash32_str("u_x"), value_a);
-
-    nt_gfx_bind_pipeline(pip_b);
-    nt_gfx_frame_execute();
-    GLint program_b = 0;
-    glGetIntegerv(GL_CURRENT_PROGRAM, &program_b);
-    nt_gfx_set_uniform_vec4(nt_hash32_str("u_x"), value_b);
-    nt_gfx_end_pass();
-    nt_gfx_frame_execute();
-
-    TEST_ASSERT_NOT_EQUAL_INT(0, program_a);
-    TEST_ASSERT_NOT_EQUAL_INT(program_a, program_b);
-
-    GLint location_a = glGetUniformLocation((GLuint)program_a, "u_x");
-    GLint location_b = glGetUniformLocation((GLuint)program_b, "u_x");
-    TEST_ASSERT_GREATER_OR_EQUAL_INT(0, location_a);
-    TEST_ASSERT_GREATER_OR_EQUAL_INT(0, location_b);
-
-    GLfloat read_a[4] = {0.0F, 0.0F, 0.0F, 0.0F};
-    GLfloat read_b[4] = {0.0F, 0.0F, 0.0F, 0.0F};
-    glGetUniformfv((GLuint)program_a, location_a, read_a);
-    glGetUniformfv((GLuint)program_b, location_b, read_b);
-    for (uint32_t i = 0; i < 4; i++) {
-        TEST_ASSERT_EQUAL_INT32((int32_t)value_a[i], (int32_t)read_a[i]);
-        TEST_ASSERT_EQUAL_INT32((int32_t)value_b[i], (int32_t)read_b[i]);
-    }
-}
-
 /* A raw backend recreate grounds the cache against the fresh context: state the
  * old lifetime left on is off, and the first bind that wants it says so again. */
 static void test_recreate_all_resources_grounds_cache(void) {
@@ -1577,42 +1514,47 @@ static void test_ground_state_reissues_sampler_bind(void) {
 }
 // #endregion
 
-/* A block's array members are not standalone uniforms: linking must not look
- * up a location per element, and they must not count toward the 16-entry cache. */
-static void test_block_members_skip_the_uniform_cache(void) {
+/* A block's array members are not standalone uniforms: linking must not look up a location per element. */
+static void test_block_members_need_no_location_lookup(void) {
     const char *vs = "precision highp float;\n"
                      "layout(std140) uniform Draw { vec4 big_data[1024]; };\n"
-                     "uniform vec4 u_offset;\n"
-                     "void main() { gl_Position = big_data[gl_VertexID] + u_offset; }\n";
+                     "void main() { gl_Position = big_data[gl_VertexID]; }\n";
     nt_pipeline_t pip = make_pipeline_ex(vs, s_fs_src, false, false, false);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
     /* Reflection runs in the begin_frame that finished the link, the frame these counters cover. */
-    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.gl[NT_GFX_GL_glGetUniformLocation]);
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.gl[NT_GFX_GL_glGetUniformLocation]);
 }
 
-static void test_vec4_repeat_skips_physical_upload(void) {
+/* An equal block bind reuses the bound range; a changed value binds a new one, and the draw sees the last. */
+static void test_equal_block_bind_skips_the_range_bind(void) {
     const char *fs = "precision mediump float;\n"
-                     "uniform vec4 u_color;\n"
+                     "layout(std140) uniform Draw { vec4 u_color; };\n"
                      "out vec4 frag_color;\n"
                      "void main() { frag_color = u_color; }\n";
+    nt_gfx_end_frame();
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096;
+    nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
     nt_pipeline_t pip = make_pipeline_ex(s_vs_src, fs, false, false, false);
     nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
-    nt_hash32_t color = nt_hash32_str("u_color");
     float value[4] = {0};
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi);
-    install_state_counters();
-    nt_gfx_set_uniform_vec4(color, value);
-    nt_gfx_set_uniform_vec4(color, value);
     nt_gfx_frame_execute();
-    TEST_ASSERT_EQUAL_UINT32(1, s_gl_calls.uniform_vec4);
+    const uint32_t before = g_nt_gfx.counters.gl[NT_GFX_GL_glBindBufferRange];
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, value, sizeof(value));
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, value, sizeof(value));
+    nt_gfx_frame_execute();
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.gl[NT_GFX_GL_glBindBufferRange] - before);
     for (uint32_t i = 0; i < 4; i++) {
         value[i] = (float)(i + 1U) * 0.25F;
-        nt_gfx_set_uniform_vec4(color, value);
-        nt_gfx_set_uniform_vec4(color, value);
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, value, sizeof(value));
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, value, sizeof(value));
         nt_gfx_frame_execute();
-        TEST_ASSERT_EQUAL_UINT32(i + 2U, s_gl_calls.uniform_vec4);
+        TEST_ASSERT_EQUAL_UINT32(i + 2U, g_nt_gfx.counters.gl[NT_GFX_GL_glBindBufferRange] - before);
     }
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
@@ -1624,55 +1566,6 @@ static void test_vec4_repeat_skips_physical_upload(void) {
     for (uint32_t i = 0; i < 4; i++) {
         TEST_ASSERT_UINT8_WITHIN(1, expected[i], px[i]);
     }
-}
-
-static void test_vec4_cache_follows_program_lifetime(void) {
-    const char *fs_src = "precision mediump float;\n"
-                         "uniform vec4 u_color; out vec4 frag_color;\n"
-                         "void main() { frag_color = u_color; }\n";
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_vs_src});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_src});
-    nt_program_t p = nt_gfx_make_program(vs, fs);
-    nt_program_t q = nt_gfx_make_program(vs, fs);
-    nt_test_gfx_link_wait(p);
-    nt_test_gfx_link_wait(q);
-    nt_pipeline_t pipelines[3] = {
-        nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = p}),
-        nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = q}),
-        nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = p, .depth_write = true}),
-    };
-    nt_hash32_t color = nt_hash32_str("u_color");
-    const float values[2][4] = {{0.25F, 0.5F, 0.75F, 1}, {0.75F, 0.5F, 0.25F, 1}};
-    nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
-    install_state_counters();
-    for (uint32_t frame = 0; frame < 2; frame++) {
-        for (uint32_t pass = 0; pass < 2; pass++) {
-            begin_black_pass();
-            nt_gfx_bind_vertex_input(vi);
-            for (uint32_t i = 0; i < 3; i++) {
-                nt_gfx_bind_pipeline(pipelines[i]);
-                nt_gfx_set_uniform_vec4(color, values[i == 1 ? 1 : 0]);
-                nt_gfx_draw(0, 3);
-                TEST_ASSERT_UINT8_WITHIN(1, i == 1 ? 191 : 64, center_red_in_pass());
-            }
-            nt_gfx_end_pass();
-        }
-    }
-    TEST_ASSERT_EQUAL_UINT32(2, s_gl_calls.uniform_vec4);
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
-    nt_gfx_destroy_program(p);
-    p = nt_gfx_make_program(vs, fs);
-    nt_test_gfx_link_wait(p);
-    pipelines[0] = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = p});
-    begin_black_pass();
-    nt_gfx_bind_pipeline(pipelines[0]);
-    nt_gfx_bind_vertex_input(vi);
-    nt_gfx_set_uniform_vec4(color, values[0]);
-    nt_gfx_draw(0, 3);
-    nt_gfx_frame_execute();
-    TEST_ASSERT_EQUAL_UINT32(3, s_gl_calls.uniform_vec4);
-    TEST_ASSERT_UINT8_WITHIN(1, 64, end_frame_center_red());
 }
 
 /* The backend table is indexed by the frontend slot: the pool hands out the last freed slot first,
@@ -1705,108 +1598,6 @@ static void test_buffer_slot_reuse_draws_each_buffers_own_data(void) {
     }
 }
 
-/* A program made in a destroyed program's slot, linking or ready, starts with an empty uniform
- * cache: its first upload of the old value is not skipped. */
-static void test_program_slot_reuse_uploads_the_first_vec4(void) {
-    const char *fs_src = "precision mediump float;\n"
-                         "uniform vec4 u_color; out vec4 frag_color;\n"
-                         "void main() { frag_color = u_color; }\n";
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_vs_src});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_src});
-    const nt_hash32_t color = nt_hash32_str("u_color");
-    const float value[4] = {0.25F, 0.5F, 0.75F, 1.0F};
-    nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
-
-    nt_program_t first = nt_gfx_make_program(vs, fs);
-    const uint32_t slot = nt_pool_slot_index(first.id);
-    nt_test_gfx_link_wait(first);
-    begin_black_pass();
-    nt_gfx_bind_pipeline(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = first}));
-    nt_gfx_bind_vertex_input(vi);
-    nt_gfx_set_uniform_vec4(color, value);
-    nt_gfx_draw(0, 3);
-    TEST_ASSERT_UINT8_WITHIN(1, 64, end_frame_center_red());
-    nt_gfx_destroy_program(first);
-
-    nt_program_t linking = nt_gfx_make_program(vs, fs);
-    TEST_ASSERT_EQUAL_UINT32(slot, nt_pool_slot_index(linking.id));
-    TEST_ASSERT_FALSE(nt_gfx_program_ready(linking));
-    nt_gfx_destroy_program(linking);
-
-    nt_program_t reused = nt_gfx_make_program(vs, fs);
-    TEST_ASSERT_EQUAL_UINT32(slot, nt_pool_slot_index(reused.id));
-    nt_test_gfx_link_wait(reused);
-    begin_black_pass();
-    nt_gfx_bind_pipeline(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = reused}));
-    nt_gfx_bind_vertex_input(vi);
-    install_state_counters();
-    nt_gfx_set_uniform_vec4(color, value);
-    nt_gfx_frame_execute();
-    TEST_ASSERT_EQUAL_UINT32(1, s_gl_calls.uniform_vec4);
-    remove_state_counters();
-    nt_gfx_draw(0, 3);
-    TEST_ASSERT_UINT8_WITHIN(1, 64, end_frame_center_red());
-}
-
-static void test_vec4_array_entries_and_other_types(void) {
-    const char *fs = "precision mediump float;\n"
-                     "uniform vec4 u_values[4]; uniform bvec4 u_gate; uniform int u_index;\n"
-                     "out vec4 frag_color;\n"
-                     "void main() { frag_color = u_values[u_index] * vec4(u_gate); }\n";
-    nt_pipeline_t pip = make_pipeline_ex(s_vs_src, fs, false, false, false);
-    nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
-    const nt_hash32_t names[4] = {nt_hash32_str("u_values[0]"), nt_hash32_str("u_values[1]"), nt_hash32_str("u_values[2]"), nt_hash32_str("u_values[3]")};
-    const float values[4][4] = {{0.25F, 0, 0, 1}, {0.5F, 0, 0, 1}, {0.75F, 0, 0, 1}, {1, 0, 0, 1}};
-    begin_black_pass();
-    nt_gfx_bind_pipeline(pip);
-    nt_gfx_bind_vertex_input(vi);
-    install_state_counters();
-    for (uint32_t i = 0; i < 4; i++) {
-        nt_gfx_set_uniform_vec4(names[i], values[i]);
-    }
-    nt_gfx_set_uniform_vec4(names[2], values[2]);
-    nt_gfx_set_uniform_vec4(nt_hash32_str("inactive"), values[0]);
-    nt_gfx_frame_execute();
-    TEST_ASSERT_EQUAL_UINT32(4, s_gl_calls.uniform_vec4);
-    const float gate[4] = {1, 1, 1, 1};
-    nt_gfx_set_uniform_vec4(nt_hash32_str("u_gate"), gate);
-    nt_gfx_set_uniform_vec4(nt_hash32_str("u_gate"), gate);
-    nt_gfx_frame_execute();
-    TEST_ASSERT_EQUAL_UINT32(6, s_gl_calls.uniform_vec4);
-    nt_gfx_set_uniform_int(nt_hash32_str("u_index"), 2);
-    nt_gfx_draw(0, 3);
-    nt_gfx_frame_execute();
-    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
-    TEST_ASSERT_UINT8_WITHIN(1, 191, end_frame_center_red());
-}
-
-static void test_vec4_cache_compares_bytes_and_last_value(void) {
-    const char *fs = "precision mediump float;\n"
-                     "uniform vec4 u_color; out vec4 frag_color;\n"
-                     "void main() { frag_color = u_color; }\n";
-    nt_pipeline_t pip = make_pipeline_ex(s_vs_src, fs, false, false, false);
-    nt_hash32_t color = nt_hash32_str("u_color");
-    float value[4] = {0};
-    begin_black_pass();
-    nt_gfx_bind_pipeline(pip);
-    install_state_counters();
-    nt_gfx_set_uniform_vec4(color, value);
-    value[0] = -0.0F;
-    nt_gfx_set_uniform_vec4(color, value);
-    nt_gfx_set_uniform_vec4(color, value);
-    nt_gfx_frame_execute();
-    TEST_ASSERT_EQUAL_UINT32(2, s_gl_calls.uniform_vec4);
-    value[0] = 0.25F;
-    nt_gfx_set_uniform_vec4(color, value);
-    value[0] = 0.75F;
-    nt_gfx_set_uniform_vec4(color, value);
-    value[0] = 0.25F;
-    nt_gfx_set_uniform_vec4(color, value);
-    nt_gfx_frame_execute();
-    TEST_ASSERT_EQUAL_UINT32(5, s_gl_calls.uniform_vec4);
-    nt_gfx_end_pass();
-}
-
 int main(void) {
     /* One hidden window and GL context serve every test; setUp/tearDown reset only engine state. */
     if (!glfwInit()) {
@@ -1816,13 +1607,9 @@ int main(void) {
     g_nt_window = (nt_window_t){.max_dpr = 1.0F, .resizable = false, .width = 16, .height = 16};
     nt_window_init();
     UNITY_BEGIN();
-    RUN_TEST(test_block_members_skip_the_uniform_cache);
-    RUN_TEST(test_vec4_repeat_skips_physical_upload);
-    RUN_TEST(test_vec4_cache_follows_program_lifetime);
+    RUN_TEST(test_block_members_need_no_location_lookup);
+    RUN_TEST(test_equal_block_bind_skips_the_range_bind);
     RUN_TEST(test_buffer_slot_reuse_draws_each_buffers_own_data);
-    RUN_TEST(test_program_slot_reuse_uploads_the_first_vec4);
-    RUN_TEST(test_vec4_array_entries_and_other_types);
-    RUN_TEST(test_vec4_cache_compares_bytes_and_last_value);
     RUN_TEST(test_vertex_inputs_alternate_under_one_pipeline);
     RUN_TEST(test_second_frame_issues_no_static_attrib_pointers);
     RUN_TEST(test_repeated_instance_offset_skips_re_point);
@@ -1846,7 +1633,6 @@ int main(void) {
     RUN_TEST(test_viewport_dedup_and_resize);
     RUN_TEST(test_clear_values_dedup);
     RUN_TEST(test_ground_state_viewport_reissued_after_reinit);
-    RUN_TEST(test_uniform_write_targets_bound_pipelines_program);
     RUN_TEST(test_recreate_all_resources_grounds_cache);
     RUN_TEST(test_gl_name_reuse_after_destroying_bound_vertex_input);
     RUN_TEST(test_gl_name_reuse_after_destroying_bound_texture);

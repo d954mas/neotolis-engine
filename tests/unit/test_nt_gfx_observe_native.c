@@ -12,7 +12,6 @@ static PFNGLBUFFERDATAPROC s_buffer_data;
 static PFNGLBUFFERSUBDATAPROC s_buffer_sub_data;
 static PFNGLUSEPROGRAMPROC s_use_program;
 static PFNGLBINDVERTEXARRAYPROC s_bind_vao;
-static PFNGLUNIFORM4FVPROC s_uniform4fv;
 static PFNGLBINDBUFFERRANGEPROC s_bind_buffer_range;
 static PFNGLTEXIMAGE2DPROC s_tex_image;
 static PFNGLTEXSUBIMAGE2DPROC s_tex_sub_image;
@@ -28,7 +27,6 @@ static uint64_t s_buffer_calls;
 static uint64_t s_buffer_bytes;
 static uint32_t s_program_calls;
 static uint32_t s_vao_calls;
-static uint32_t s_uniform_calls;
 static uint32_t s_ubo_calls;
 
 static void GLAD_API_PTR count_buffer_data(GLenum target, GLsizeiptr size, const void *data, GLenum usage) {
@@ -55,11 +53,6 @@ static void GLAD_API_PTR count_use_program(GLuint program) {
 static void GLAD_API_PTR count_bind_vao(GLuint vao) {
     s_vao_calls++;
     s_bind_vao(vao);
-}
-
-static void GLAD_API_PTR count_uniform4fv(GLint location, GLsizei count, const GLfloat *value) {
-    s_uniform_calls++;
-    s_uniform4fv(location, count, value);
 }
 
 static void GLAD_API_PTR count_bind_buffer_range(GLenum target, GLuint index, GLuint buffer, GLintptr offset, GLsizeiptr size) {
@@ -119,13 +112,11 @@ void setUp(void) {
     s_buffer_sub_data = glad_glBufferSubData;
     s_use_program = glad_glUseProgram;
     s_bind_vao = glad_glBindVertexArray;
-    s_uniform4fv = glad_glUniform4fv;
     s_bind_buffer_range = glad_glBindBufferRange;
     glad_glBufferData = count_buffer_data;
     glad_glBufferSubData = count_buffer_sub_data;
     glad_glUseProgram = count_use_program;
     glad_glBindVertexArray = count_bind_vao;
-    glad_glUniform4fv = count_uniform4fv;
     glad_glBindBufferRange = count_bind_buffer_range;
     s_tex_image = glad_glTexImage2D;
     s_tex_sub_image = glad_glTexSubImage2D;
@@ -141,7 +132,7 @@ void setUp(void) {
     s_texture_calls = s_texture_bytes = 0;
     s_upload_error = s_pending_error = GL_NO_ERROR;
     s_buffer_calls = s_buffer_bytes = 0;
-    s_program_calls = s_vao_calls = s_uniform_calls = s_ubo_calls = 0;
+    s_program_calls = s_vao_calls = s_ubo_calls = 0;
 }
 
 void tearDown(void) {
@@ -149,7 +140,6 @@ void tearDown(void) {
     glad_glBufferSubData = s_buffer_sub_data;
     glad_glUseProgram = s_use_program;
     glad_glBindVertexArray = s_bind_vao;
-    glad_glUniform4fv = s_uniform4fv;
     glad_glBindBufferRange = s_bind_buffer_range;
     glad_glTexImage2D = s_tex_image;
     glad_glTexSubImage2D = s_tex_sub_image;
@@ -213,7 +203,7 @@ static void test_capture_publishes_attachment_mappings_and_skip_reasons(void) {
     nt_gfx_destroy_render_target(target);
 }
 
-static void test_new_program_defines_sampler_names_and_inactive_uniforms(void) {
+static void test_new_program_defines_sampler_names(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){gl_Position=vec4(0.0);}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){
         .type = NT_SHADER_FRAGMENT, .source = "precision mediump float; uniform sampler2D a; uniform sampler2D b; out vec4 color; void main(){color=texture(a,vec2(0.0))+texture(b,vec2(0.0));}"});
@@ -229,18 +219,12 @@ static void test_new_program_defines_sampler_names_and_inactive_uniforms(void) {
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
-    const float matrix[16] = {0};
-    nt_hash32_t inactive = nt_hash32_str("inactive");
-    nt_gfx_set_uniform_mat4(inactive, matrix);
-    nt_gfx_set_uniform_float(inactive, 1.0F);
-    nt_gfx_set_uniform_int(inactive, 1);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     uint32_t names = 0;
     uint32_t units = 0;
-    uint32_t skips = 0;
     uint32_t pipeline_states = 0;
     nt_gfx_operation_t stack[16] = {0};
     uint32_t depth = 0;
@@ -254,9 +238,6 @@ static void test_new_program_defines_sampler_names_and_inactive_uniforms(void) {
                 names |= 2;
             }
             units |= 1U << event->data.backend.args[3];
-        }
-        if (event->kind == NT_GFX_EVENT_SKIP && event->result == NT_GFX_RESULT_INACTIVE) {
-            skips++;
         }
         /* Pipeline state is defined once, by the backend, in its slots and enums. */
         if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_PIPELINE) {
@@ -274,33 +255,8 @@ static void test_new_program_defines_sampler_names_and_inactive_uniforms(void) {
     TEST_ASSERT_EQUAL_UINT32(0, depth);
     TEST_ASSERT_EQUAL_UINT32(3, names);
     TEST_ASSERT_EQUAL_UINT32(3, units);
-    TEST_ASSERT_EQUAL_UINT32(3, skips);
     TEST_ASSERT_EQUAL_UINT32(1, pipeline_states);
     TEST_ASSERT_FALSE(capture.overflow);
-}
-
-static void test_initial_uniform_records_cover_only_vec4(void) {
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "uniform mat4 m; uniform float f; void main(){gl_Position=m*vec4(f);}"});
-    nt_shader_t fs = nt_gfx_make_shader(
-        &(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "precision mediump float; uniform vec4 tint; uniform int mode; out vec4 color; void main(){color=tint*float(mode);}"});
-    nt_program_t program = nt_gfx_make_program(vs, fs);
-    TEST_ASSERT_NOT_EQUAL(0, program.id);
-    nt_test_gfx_link_wait(program);
-    nt_gfx_capture_request();
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame(); /* a recorded frame without gfx work still snapshots inherited state */
-    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
-    uint32_t records = 0;
-    for (uint32_t i = 0; i < capture.count; i++) {
-        const nt_gfx_event_t *event = &capture.events[i];
-        if (event->kind == NT_GFX_EVENT_INITIAL && event->operation == NT_GFX_OP_UNIFORM_VEC4) {
-            TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("tint").value, event->data.backend.args[1]);
-            records++;
-        }
-    }
-    TEST_ASSERT_EQUAL_UINT32(1, records);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one walk checks three argument kinds
@@ -387,8 +343,9 @@ static void test_complete_capture_matches_gl_counters(void) {
     const uint8_t pixels[16] = {0};
     const float tint[4] = {1.0F, 1.0F, 1.0F, 1.0F};
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){gl_Position=vec4(0.0);}"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){
-        .type = NT_SHADER_FRAGMENT, .source = "precision mediump float; uniform sampler2D tex; uniform vec4 tint; out vec4 color; void main(){color=texture(tex,vec2(0.5))*tint;}"});
+    nt_shader_t fs = nt_gfx_make_shader(
+        &(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT,
+                            .source = "precision mediump float; uniform sampler2D tex; layout(std140) uniform Draw { vec4 tint; }; out vec4 color; void main(){color=texture(tex,vec2(0.5))*tint;}"});
     nt_program_t program = nt_gfx_make_program(vs, fs);
     /* Record the frame whose begin_frame finishes the link; a parallel-compile driver may take several. */
     const struct timespec link_start = nt_test_link_wait_start();
@@ -408,7 +365,7 @@ static void test_complete_capture_matches_gl_counters(void) {
     nt_gfx_bind_vertex_input(vi);
     const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("tex"), .texture = texture};
     nt_gfx_apply_texture_bindings(&binding, 1);
-    nt_gfx_set_uniform_vec4(nt_hash32_str("tint"), tint);
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, tint, sizeof(tint));
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -434,7 +391,6 @@ static void test_complete_capture_matches_gl_counters(void) {
     /* The hooks count what the driver received, independently of the funnel. */
     TEST_ASSERT_EQUAL_UINT32(s_program_calls, c->gl[NT_GFX_GL_glUseProgram]);
     TEST_ASSERT_EQUAL_UINT32(s_vao_calls, c->gl[NT_GFX_GL_glBindVertexArray]);
-    TEST_ASSERT_EQUAL_UINT32(s_uniform_calls, c->gl[NT_GFX_GL_glUniform4fv]);
     TEST_ASSERT_EQUAL_UINT32(s_ubo_calls, c->gl[NT_GFX_GL_glBindBufferRange]);
     TEST_ASSERT_EQUAL_UINT32(s_attribute_calls, c->gl[NT_GFX_GL_glVertexAttribPointer]);
     TEST_ASSERT_EQUAL_UINT64(s_buffer_calls, c->buffer_upload_calls);
@@ -654,7 +610,7 @@ static void test_texture_create_reads_no_gl_error(void) {
 
 static void test_repeated_frames_separate_requests_from_issued_calls(void) {
     const char *vs_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }";
-    const char *fs_source = "precision mediump float; uniform vec4 u_color; out vec4 color; void main() { color = u_color; }";
+    const char *fs_source = "precision mediump float; layout(std140) uniform Draw { vec4 u_color; }; out vec4 color; void main() { color = u_color; }";
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_source});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source});
     nt_program_t program = nt_gfx_make_program(vs, fs);
@@ -669,15 +625,14 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     for (uint32_t frame = 0; frame < 2; frame++) {
-        s_program_calls = s_vao_calls = s_uniform_calls = s_ubo_calls = 0;
+        s_program_calls = s_vao_calls = s_ubo_calls = 0;
         nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
         for (uint32_t repeat = 0; repeat < 2; repeat++) {
             nt_gfx_bind_pipeline(pipeline);
             nt_gfx_bind_vertex_input(vi);
-            nt_gfx_set_uniform_vec4(nt_hash32_str("u_color"), color);
+            nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, color, sizeof(color));
         }
-        nt_gfx_bind_uniform_block(0, block, sizeof(block));
-        nt_gfx_set_uniform_vec4(nt_hash32_str("inactive"), color);
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, block, sizeof(block));
         nt_gfx_draw(0, 3);
         nt_gfx_end_pass();
         nt_gfx_end_frame();
@@ -685,39 +640,29 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
 #if NT_GFX_CAPTURE_ENABLED
         if (frame == 1) {
             nt_gfx_capture_view_t capture = nt_gfx_capture_read();
-            bool color_known = false;
             bool viewport_known = false;
             for (uint32_t i = 0; i < capture.count; i++) {
                 const nt_gfx_event_t *e = &capture.events[i];
-                if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_UNIFORM_VEC4 && e->data.backend.args[1] == nt_hash32_str("u_color").value) {
-                    TEST_ASSERT_EQUAL(NT_GFX_RESULT_NONE, e->result);
-                    TEST_ASSERT_EQUAL_MEMORY(color, e->data.backend.values, sizeof(color));
-                    color_known = true;
-                }
                 if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_VIEWPORT) {
                     TEST_ASSERT_EQUAL_UINT32(g_nt_window.fb_width, e->data.state.integers[2]);
                     TEST_ASSERT_EQUAL_UINT32(g_nt_window.fb_height, e->data.state.integers[3]);
                     viewport_known = true;
                 }
             }
-            TEST_ASSERT_TRUE(color_known);
             TEST_ASSERT_TRUE(viewport_known);
         }
 #endif
         nt_gfx_counters_t c = g_nt_gfx.last_frame;
-        /* Equal binds end CACHE: pipeline and vertex input once per pass. A uniform block is
-         * frame data and binds every frame. */
+        /* Equal binds end CACHE: pipeline, vertex input and the equal Draw block once per pass.
+         * A uniform block is frame data and binds every frame. */
         TEST_ASSERT_EQUAL_UINT32(1, c.accepted[NT_GFX_OP_PIPELINE]);
         TEST_ASSERT_EQUAL_UINT32(1, c.accepted[NT_GFX_OP_VERTEX_INPUT]);
-        TEST_ASSERT_EQUAL_UINT32(3, c.accepted[NT_GFX_OP_UNIFORM_VEC4]);
-        TEST_ASSERT_EQUAL_UINT32(1, c.accepted[NT_GFX_OP_UBO]);
+        TEST_ASSERT_EQUAL_UINT32(2, c.accepted[NT_GFX_OP_UBO]);
         TEST_ASSERT_EQUAL_UINT32(s_program_calls, c.gl[NT_GFX_GL_glUseProgram]);
         TEST_ASSERT_EQUAL_UINT32(s_vao_calls, c.gl[NT_GFX_GL_glBindVertexArray]);
-        TEST_ASSERT_EQUAL_UINT32(s_uniform_calls, c.gl[NT_GFX_GL_glUniform4fv]);
         TEST_ASSERT_EQUAL_UINT32(s_ubo_calls, c.gl[NT_GFX_GL_glBindBufferRange]);
         TEST_ASSERT_EQUAL_UINT32(frame == 0 ? 1 : 0, c.gl[NT_GFX_GL_glUseProgram]);
-        TEST_ASSERT_EQUAL_UINT32(frame == 0 ? 1 : 0, c.gl[NT_GFX_GL_glUniform4fv]);
-        TEST_ASSERT_EQUAL_UINT32(1, c.gl[NT_GFX_GL_glBindBufferRange]);
+        TEST_ASSERT_EQUAL_UINT32(2, c.gl[NT_GFX_GL_glBindBufferRange]);
 #if NT_GFX_CAPTURE_ENABLED
         TEST_ASSERT_EQUAL_UINT32(c.gl[NT_GFX_GL_glUseProgram], captured_calls(NT_GFX_GL_glUseProgram));
         TEST_ASSERT_EQUAL_UINT32(c.gl[NT_GFX_GL_glBindVertexArray], captured_calls(NT_GFX_GL_glBindVertexArray));
@@ -845,8 +790,7 @@ int main(void) {
     UNITY_BEGIN();
 #if NT_GFX_CAPTURE_ENABLED
     RUN_TEST(test_capture_publishes_attachment_mappings_and_skip_reasons);
-    RUN_TEST(test_new_program_defines_sampler_names_and_inactive_uniforms);
-    RUN_TEST(test_initial_uniform_records_cover_only_vec4);
+    RUN_TEST(test_new_program_defines_sampler_names);
     RUN_TEST(test_issued_calls_record_floats_names_and_payloads);
     RUN_TEST(test_frame_storage_upload_is_issued_before_the_replayed_draw);
     RUN_TEST(test_complete_capture_matches_gl_counters);

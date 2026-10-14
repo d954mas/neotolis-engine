@@ -241,12 +241,9 @@ void test_text_renderer_forwards_material_blend_state(void) {
 
     nt_blend_state_t actual = nt_gfx_fake_last_pipeline_blend();
     TEST_ASSERT_EQUAL_MEMORY(&blend, &actual, sizeof(blend));
-
-    /* Sampler units are fixed at link and curves are addressed by glyph row: a draw writes no int. */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
 }
 
-/* The font texture lands on the unit its program assigned, and nothing writes a sampler int. */
+/* The font texture lands on the unit its program assigned. */
 void test_text_renderer_font_texture_lands_on_its_program_unit(void) {
     nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
     nt_test_frame_finish_links();

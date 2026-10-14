@@ -767,7 +767,6 @@ void test_texture_lands_on_the_program_sampler_unit(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(test_texture(0))}), nt_gfx_fake_bound_texture_at(1));
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(1));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
 }
 
 // #region state transitions
@@ -797,7 +796,6 @@ void test_state_same_material_three_meshes(void) {
     TEST_ASSERT_EQUAL_UINT32(3, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_pipeline_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bind_vertex_input_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count());
     TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]); /* mesh-only changes skip material work */
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
@@ -1119,7 +1117,6 @@ void test_state_three_materials_same_mesh(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_pipeline_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bind_vertex_input_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_ubo_bind_count()); /* each material binds its own params buffer */
     /* Every material transition applies its set; an unchanged set ends CACHE and binds nothing. */
     TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
@@ -1194,7 +1191,6 @@ void test_state_program_replaced_between_calls(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(first.pipeline.id, second.pipeline.id);
     /* Bound state is call-scoped, so the new program's unit is filled again. */
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
     nt_gfx_fake_draw_trace_reset(false);
 }
 
@@ -1284,7 +1280,6 @@ void test_state_distinct_textures_a_b_a(void) {
     TEST_ASSERT_EQUAL_UINT32(tex_x, nt_gfx_fake_bound_texture_at(0));
     TEST_ASSERT_EQUAL_UINT32(tex_y, nt_gfx_fake_bound_texture_at(1));
     TEST_ASSERT_EQUAL_UINT32(tex_x, nt_gfx_fake_bound_texture_at(2));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
 }
 
 /* An unready run issues no GL call, so it neither breaks the next run nor
@@ -1333,7 +1328,6 @@ void test_state_same_tex_same_sampler_diff_params(void) {
     TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_sampler_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
 }
 

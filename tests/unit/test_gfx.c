@@ -3281,7 +3281,6 @@ void test_gfx_failed_bind_drops_the_previous_pipeline(void) {
     nt_gfx_bind_pipeline(dead); /* rejected: stale handle */
     EXPECT_ASSERT(nt_gfx_draw(0, 0));
     EXPECT_ASSERT(nt_gfx_draw_indexed(0, 0, 0));
-    EXPECT_ASSERT(nt_gfx_set_uniform_int(nt_hash32_str("u_tex"), 0));
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
 
     nt_gfx_end_pass();
@@ -3339,51 +3338,8 @@ void test_gfx_frame_draw_calls(void) {
     nt_gfx_destroy_shader(fs);
 }
 
-/* The setter must reach the backend with the caller's key and value unchanged. */
-void test_gfx_uniform_records_hash_and_value(void) {
-    const float vec[4] = {1.0F, 2.0F, 3.0F, 4.0F};
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
-    nt_test_gfx_link_wait(prog);
-    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
-
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_pipeline(pip);
-    nt_gfx_fake_reset();
-    nt_gfx_set_uniform_int(nt_hash32_str("u_slot"), 3);
-    nt_gfx_set_uniform_vec4(nt_hash32_str("u_tint"), vec);
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
-
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_uniform_int_count());
-    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_slot").value, nt_gfx_fake_uniform_int_hash_at(0));
-    TEST_ASSERT_EQUAL_INT(3, nt_gfx_fake_uniform_int_value_at(0));
-
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_uniform_vec4_count());
-    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_tint").value, nt_gfx_fake_uniform_vec4_hash_at(0));
-    /* Routed to the bound pipeline's program, not to 0. Which program it is
-     * needs distinct GL ids -- test_nt_gfx_bind_mirrors_native covers that. */
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_uniform_program());
-
-    /* UNITY_EXCLUDE_FLOAT: compare the exact small integers as ints. */
-    float recorded[4];
-    nt_gfx_fake_uniform_vec4_value_at(0, recorded);
-    for (uint32_t i = 0; i < 4; i++) {
-        TEST_ASSERT_EQUAL_INT32((int32_t)vec[i], (int32_t)recorded[i]);
-    }
-}
-
-/* A uniform value belongs to a program, so a write with no pipeline bound has
- * no program to address -- it traps instead of landing nowhere. */
-void test_gfx_uniform_without_bound_pipeline_traps(void) {
-    const float vec[4] = {1.0F, 2.0F, 3.0F, 4.0F};
-
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    EXPECT_ASSERT(nt_gfx_set_uniform_vec4(nt_hash32_str("u_tint"), vec));
-    nt_gfx_end_pass();
-}
-
-/* Bound state is pass-scoped: a bind or uniform write with no pass open has no
- * draw to reach, so it traps instead of silently landing on the next pass. */
+/* Bound state is pass-scoped: a bind with no pass open has no draw to reach, so it
+ * traps instead of silently landing on the next pass. */
 void test_gfx_binds_outside_a_pass_trap(void) {
     static const float verts[9] = {0};
     const float vec[4] = {1.0F, 2.0F, 3.0F, 4.0F};
@@ -3398,7 +3354,7 @@ void test_gfx_binds_outside_a_pass_trap(void) {
     EXPECT_ASSERT(nt_gfx_bind_pipeline(pip));
     EXPECT_ASSERT(nt_gfx_bind_vertex_input(vi));
     EXPECT_ASSERT(nt_gfx_bind_vertex_input_instanced(vi, NT_INSTANCE_LAYOUT_INVALID, vbo, 0));
-    EXPECT_ASSERT(nt_gfx_set_uniform_vec4(nt_hash32_str("u_tint"), vec));
+    EXPECT_ASSERT(nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, vec, sizeof(vec)));
 }
 
 /* The pass clear touches draw state, so begin_pass discards the bound pipeline
@@ -3560,7 +3516,6 @@ void test_stream_executes_draws_in_call_order_at_end_frame(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one stream check per recorded call
 void test_stream_records_every_draw_phase_call(void) {
     link_stream_test_program();
-    const float m[16] = {0};
     const float v[4] = {0};
     EXPECT_RECORDED(begin_stream_test_pass());
     EXPECT_RECORDED(nt_gfx_clear(&(nt_clear_desc_t){.color = true}));
@@ -3568,10 +3523,6 @@ void test_stream_records_every_draw_phase_call(void) {
     EXPECT_RECORDED(nt_gfx_set_scissor_enabled(true));
     EXPECT_RECORDED(nt_gfx_set_viewport(0, 0, 4, 4));
     EXPECT_RECORDED(nt_gfx_bind_uniform_block(0, v, sizeof(v)));
-    EXPECT_RECORDED(nt_gfx_set_uniform_mat4(nt_hash32_str("u_mvp"), m));
-    EXPECT_RECORDED(nt_gfx_set_uniform_vec4(nt_hash32_str("u_color"), v));
-    EXPECT_RECORDED(nt_gfx_set_uniform_float(nt_hash32_str("u_time"), 1.0F));
-    EXPECT_RECORDED(nt_gfx_set_uniform_int(nt_hash32_str("u_mode"), 1));
     EXPECT_RECORDED(nt_gfx_draw(0, 3));
     EXPECT_RECORDED(nt_gfx_draw_instanced(0, 3, 2));
     EXPECT_RECORDED(nt_gfx_draw_indexed(0, 3, 3));
@@ -3948,33 +3899,18 @@ void test_indexed_draws_assert_whole_triangles(void) {
     nt_gfx_fake_set_context_lost(false);
 }
 
-void test_stream_records_copies_of_descriptors_and_uniform_values(void) {
-    const nt_program_t program = make_sampler_program(NULL, 0);
+void test_stream_records_copies_of_descriptors(void) {
     nt_pass_desc_t pass = {.clear_color = {1.0F, 2.0F, 3.0F, 4.0F}, .clear_depth = 1.0F};
     nt_gfx_begin_pass(&pass);
     pass.clear_color[0] = 9.0F;
     nt_clear_desc_t clear = {.clear_color = {5.0F, 6.0F, 7.0F, 8.0F}, .color = true};
     nt_gfx_clear(&clear);
     clear.clear_color[0] = 9.0F;
-    nt_gfx_bind_pipeline(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program}));
-    float matrix[16] = {[0] = 1.0F, [15] = 16.0F};
-    nt_gfx_set_uniform_mat4(nt_hash32_str("u_mvp"), matrix);
-    matrix[15] = 9.0F;
-    float value[4] = {1.0F, 2.0F, 3.0F, 4.0F};
-    nt_gfx_set_uniform_vec4(nt_hash32_str("u_color"), value);
-    value[0] = 9.0F;
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(1, (uint32_t)nt_gfx_fake_last_pass_desc().clear_color[0]);
     TEST_ASSERT_EQUAL_UINT32(5, (uint32_t)nt_gfx_fake_last_clear_desc().clear_color[0]);
-    float seen_matrix[16];
-    nt_gfx_fake_last_uniform_mat4(seen_matrix);
-    TEST_ASSERT_EQUAL_UINT32(16, (uint32_t)seen_matrix[15]);
-    const float recorded[4] = {1.0F, 2.0F, 3.0F, 4.0F};
-    float seen[4];
-    nt_gfx_fake_uniform_vec4_value_at(nt_gfx_fake_uniform_vec4_count() - 1, seen);
-    TEST_ASSERT_EQUAL_MEMORY(recorded, seen, sizeof(seen));
     nt_gfx_begin_frame();
 }
 
@@ -4205,7 +4141,7 @@ int main(void) {
     RUN_TEST(test_global_block_with_a_reserved_name_asserts_at_init);
     RUN_TEST(test_global_block_listed_twice_asserts_at_init);
     RUN_TEST(test_full_global_block_list_inits);
-    RUN_TEST(test_stream_records_copies_of_descriptors_and_uniform_values);
+    RUN_TEST(test_stream_records_copies_of_descriptors);
     RUN_TEST(test_gpu_timing_toggles_only_between_frames);
     RUN_TEST(test_buffer_write_leaves_earlier_draws_pending);
     RUN_TEST(test_stream_overflow_asserts);
@@ -4240,8 +4176,6 @@ int main(void) {
     RUN_TEST(test_gfx_restored_iteration_draws_what_it_rebuilds);
     RUN_TEST(test_gfx_failed_bind_drops_the_previous_pipeline);
     RUN_TEST(test_gfx_frame_draw_calls);
-    RUN_TEST(test_gfx_uniform_records_hash_and_value);
-    RUN_TEST(test_gfx_uniform_without_bound_pipeline_traps);
     RUN_TEST(test_gfx_binds_outside_a_pass_trap);
     RUN_TEST(test_gfx_begin_pass_discards_bound_state);
     RUN_TEST(test_gfx_timer_requires_name_and_output);

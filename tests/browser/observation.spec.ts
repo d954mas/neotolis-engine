@@ -34,7 +34,7 @@ test('gfx observation reconciles issued WebGL calls and preserves pixels on over
       texSubImage2D: args => (!view(args[8]) ? null : pixelBytes(args, 4, 5, args[6] as number, args[7] as number)),
       compressedTexImage2D: args => (!view(args[6]) ? null : args.length >= 9 ? (args[8] as number) : view(args[6])!.byteLength),
     };
-    for (const name of ['useProgram', 'bindVertexArray', 'bindTexture', 'bindSampler', 'uniform4fv', 'uniform1i', 'drawArrays', ...Object.keys(payload)]) {
+    for (const name of ['useProgram', 'bindVertexArray', 'bindTexture', 'bindSampler', 'bindBufferRange', 'uniform1i', 'drawArrays', ...Object.keys(payload)]) {
       const original = proto[name];
       proto[name] = function (...args: unknown[]) {
         if (control.active) {
@@ -81,12 +81,12 @@ test('gfx observation reconciles issued WebGL calls and preserves pixels on over
     expect(v[1]).toBe(1); // capture compiled in
     expect(v[3]).toBe(1);
     expect(v.slice(4, 6)).toEqual([16, 32]); // Preparation before gfx begin.
-    expect(v.slice(14, 18)).toEqual([16, 32, 1, 2]);
+    expect(v.slice(14, 18)).toEqual([32, 32, 2, 2]); // The Draw block adds one 16-byte uniform stream upload.
     expect(v[6]).toBe(run.calls.useProgram || 0);
     expect(v[7]).toBe(run.calls.bindVertexArray || 0);
     expect(v[8]).toBe(run.calls.bindTexture || 0);
     expect(v[9]).toBe(run.calls.bindSampler || 0);
-    expect(v[10]).toBe((run.calls.uniform4fv || 0) + (run.calls.uniform1i || 0));
+    expect(v[10]).toBe((run.calls.bindBufferRange || 0) + (run.calls.uniform1i || 0));
     expect(run.calls.drawArrays).toBe(1);
     // Upload counters against the payloads the driver received, and gl[] against every call.
     const sum = (record: Record<string, number>, names: string[]) => names.reduce((total, name) => total + (record[name] || 0), 0);
@@ -111,7 +111,7 @@ test('gfx observation reconciles issued WebGL calls and preserves pixels on over
       expect(v[18]).toBe(v[19]); // The capture finalized the probe's own frame.
       expect(v[11]).toBe(0);
       expect(v[12]).toBeGreaterThan(0);
-      expect(v.slice(20, 26)).toEqual(['useProgram', 'bindVertexArray', 'bindTexture', 'bindSampler', 'uniform4fv', 'uniform1i'].map(name => run.calls[name] || 0));
+      expect(v.slice(20, 26)).toEqual(['useProgram', 'bindVertexArray', 'bindTexture', 'bindSampler', 'bindBufferRange', 'uniform1i'].map(name => run.calls[name] || 0));
     } else if (run.mode === 2) {
       expect(v[18]).toBe(v[19]);
       expect(v[11]).toBe(1);

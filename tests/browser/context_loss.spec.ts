@@ -22,7 +22,6 @@ declare global {
     };
     __ntLossExtension?: WEBGL_lose_context;
     __ntBlockFloatLinear?: boolean;
-    __ntProbeUploads?: number;
   }
 }
 
@@ -83,19 +82,6 @@ test('context loss: both renderers restore their pixels after two loss cycles', 
     if (message.type() === 'error' || /\b(abort(?:ed)?|(?:GL_)?INVALID_\w+|(?:GL_)?OUT_OF_MEMORY)\b/i.test(text)) errors.push(text);
   });
   await page.addInitScript(() => {
-    const locations = new WeakSet<WebGLUniformLocation>();
-    const getLocation = WebGL2RenderingContext.prototype.getUniformLocation;
-    WebGL2RenderingContext.prototype.getUniformLocation = function(program, name) {
-      const location = getLocation.call(this, program, name);
-      if (name === 'u_probe_color' && location) locations.add(location);
-      return location;
-    };
-    const upload = WebGL2RenderingContext.prototype.uniform4fv;
-    window.__ntProbeUploads = 0;
-    WebGL2RenderingContext.prototype.uniform4fv = function(location, data, offset?, length?) {
-      if (location && locations.has(location)) window.__ntProbeUploads!++;
-      upload.call(this, location, data, offset, length);
-    };
     const getExtension = WebGL2RenderingContext.prototype.getExtension;
     WebGL2RenderingContext.prototype.getExtension = function(name: string) {
       if (name === 'OES_texture_float_linear' && window.__ntBlockFloatLinear) return null;
@@ -148,8 +134,6 @@ test('context loss: both renderers restore their pixels after two loss cycles', 
     });
   }
 
-  expect(await page.evaluate(() => window.__ntProbeUploads)).toBe(1);
-
   for (let cycle = 0; cycle < 2; cycle++) {
     await test.step('context loss/restore ' + (cycle + 1), async () => {
       // Change availability across restores to catch a stale capability cache.
@@ -177,7 +161,6 @@ test('context loss: both renderers restore their pixels after two loss cycles', 
       expectVisibleProbes(sprite, text);
       expectMeshProbe(await capturePixels(page, meshRect));
       expectMeshProbe(await capturePixels(page, meshRect2));
-      expect(await page.evaluate(() => window.__ntProbeUploads), 'first upload after each restore must reach GL once').toBe(cycle + 2);
       expect(pixelsMatch(sprite, spriteBaseline), 'sprite pixels after restore').toBe(true);
       expect(pixelsMatch(text, textBaseline), 'text pixels after restore').toBe(true);
       expect(errors, 'unexpected browser/gfx errors').toEqual([]);
@@ -306,19 +289,13 @@ test('basis fixture: a single pixel skips BC7 level-zero restrictions', async ({
   expect(format, 'single-pixel Basis activation selects the next supported target').toBe(expected);
 });
 
-test('vec4 pixel probe detects an omitted initial upload', async ({ page }) => {
+test('mesh pixel probe detects an omitted Draw block bind', async ({ page }) => {
   await page.addInitScript(() => {
-    const locations = new WeakSet<WebGLUniformLocation>();
-    const getLocation = WebGL2RenderingContext.prototype.getUniformLocation;
-    WebGL2RenderingContext.prototype.getUniformLocation = function(program, name) {
-      const location = getLocation.call(this, program, name);
-      if (name === 'u_probe_color' && location) locations.add(location);
-      return location;
-    };
-    const upload = WebGL2RenderingContext.prototype.uniform4fv;
-    WebGL2RenderingContext.prototype.uniform4fv = function(location, data, offset?, length?) {
-      if (location && locations.has(location)) return;
-      upload.call(this, location, data, offset, length);
+    // Slot 2 is NT_GFX_SLOT_DRAW: with nothing ever bound there, the probe's draw cannot run.
+    const bindRange = WebGL2RenderingContext.prototype.bindBufferRange;
+    WebGL2RenderingContext.prototype.bindBufferRange = function(target, index, buffer, offset, size) {
+      if (target === WebGL2RenderingContext.UNIFORM_BUFFER && index === 2) return;
+      bindRange.call(this, target, index, buffer, offset, size);
     };
   });
   await page.goto('/index.html');
@@ -326,11 +303,11 @@ test('vec4 pixel probe detects an omitted initial upload', async ({ page }) => {
   const canvas = await page.locator('canvas').boundingBox();
   expect(canvas).not.toBeNull();
   const pixels = await capturePixels(page, { x: Math.round(canvas!.x + 1194), y: Math.round(canvas!.y + 748), width: 40, height: 24 });
-  let black = 0;
+  let colored = 0;
   for (let i = 0; i < pixels.length; i += 4) {
-    if (pixels[i] === 0 && pixels[i + 1] === 0 && pixels[i + 2] === 0) black++;
+    if (Math.abs(pixels[i] - 64) <= 1 && Math.abs(pixels[i + 1] - 128) <= 1 && Math.abs(pixels[i + 2] - 191) <= 1) colored++;
   }
-  expect(black, 'without the upload GL retains default zero, visibly different from the expected color').toBeGreaterThan(pixels.length / 4 * 0.9);
+  expect(colored, 'without the block the probe color must not appear').toBe(0);
 });
 
 test('context loss: a loss and restore between two frames still runs the restore path', async ({ page }) => {

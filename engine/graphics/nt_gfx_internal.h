@@ -251,13 +251,6 @@ bool nt_gfx_backend_read_pixels(uint32_t render_target_backend, int x, int y, in
 /* Binds [offset, offset + size) of the buffer, validated by the frontend. */
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, uint32_t offset, uint32_t size);
 
-/* Uniform locations and values are program state, so the write names its
- * program; it must be the one currently bound. */
-void nt_gfx_backend_set_uniform_mat4(uint32_t program_backend, uint32_t name_hash, const float *matrix);
-void nt_gfx_backend_set_uniform_vec4(uint32_t program_backend, uint32_t name_hash, const float *vec);
-void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_hash, float val);
-void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val);
-
 /* instance_count 1 issues the non-instanced call; index_type is NT_INDEX_UINT16 or NT_INDEX_UINT32. */
 void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count);
 void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type);

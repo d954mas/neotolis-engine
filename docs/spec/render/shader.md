@@ -19,7 +19,7 @@ host logs a skip and packs the stage unchecked, so the runtime compile stays the
 backstop.
 
 A program's linked executable and identity are immutable after
-`nt_gfx_make_program`; uniform values and block bindings remain mutable.
+`nt_gfx_make_program`, and so are its sampler units and block bindings.
 Recovery requires the owner to destroy the old program and link a new handle;
 a program whose readiness was lost never becomes ready again.
 
@@ -79,29 +79,13 @@ active block name asserts at link. The contract (member types, std140, the draw
 check, frame data and uniform buffers) is in
 [API contracts](../core/api-contracts.md#program-handles).
 
-The GL backend caches at most 16 active standalone non-sampler uniform locations
-per program. Each active array element consumes one entry; uniforms in blocks do
-not consume entries, and samplers do not either — they live in a separate table
-capped by `NT_GFX_MAX_TEXTURE_SLOTS`. Exceeding either capacity asserts when the link finishes
-time instead of silently omitting values. Reflection reads the complete reported names into
-a fixed link-time buffer (`NT_GFX_GL_MAX_UNIFORM_NAME`, 256 bytes; a longer name asserts at
-link); neither linking nor setting a uniform allocates.
-
-The cache is keyed by the `nt_hash32_str` hash of the uniform's complete name,
-including explicit array indices such as `colors[1]` or `lights[0].color`. The
-setters take that hash — `nt_gfx_set_uniform_vec4(nt_hash32_t name, …)` and its
-three siblings — and there is no string form: a caller hashes the name once at
-init, or inline where the cost does not matter.
-
-For active standalone float vec4 uniforms, the backend also remembers the last
-16 submitted bytes. Bit-identical repeats skip `glUniform4fv`; the first write,
-including zero, always reaches GL. Signed zero and distinct NaN payloads are
-compared by representation, without an epsilon. Values belong to the linked
-program and survive pipeline switches, passes and frames. Recreated programs
-start with invalid cached values. All gfx vec4 writers share this cache; other
-uniform types retain their existing setter behavior, including boolean targets
-that accept float-vector conversion. Inactive names remain no-ops. Cache lookup
-and updates allocate nothing.
+Every shader value arrives in a uniform block; there are no standalone value
+uniforms. An active standalone non-sampler uniform asserts when the link finishes,
+because no API could ever write it; GL built-ins such as `gl_DepthRange` are not
+program inputs and are ignored. Uniforms in blocks are never looked up by
+location. Reflection reads the complete reported names into a fixed link-time
+buffer (`NT_GFX_GL_MAX_UNIFORM_NAME`, 256 bytes; a longer name asserts at link);
+linking allocates nothing.
 
 Sampler uniforms are program state, not material state: their texture units are
 fixed at link and nobody writes them afterwards. Reflection classifies every
@@ -122,7 +106,7 @@ numbers. A name absent after driver optimization is inactive and ignored before
 its texture or sampler handle is inspected.
 
 A reflection query that reports nothing fails the finish rather than caching
-half a location table: on a lost context the program stays unready and its
+half a sampler unit table: on a lost context the program stays unready and its
 owner links a new one after the restore; on a live context it traps like a
 failed link. Nothing catches an exception thrown out of reflection: on the web
 the Emscripten GL layer dereferences a null result in two of its own reflection

@@ -765,11 +765,10 @@ void test_sprite_renderer_same_material_two_pages_state(void) {
     nt_gfx_fake_reset();
     TEST_ASSERT_EQUAL_UINT32(2, draw_list_draws(items, 2));
     nt_test_frame_next();
-    /* Two pages => two texture binds on the program's u_texture unit; no sampler int. */
+    /* Two pages => two texture binds on the program's u_texture unit. */
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(1));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_pipeline_count());
 }
 
