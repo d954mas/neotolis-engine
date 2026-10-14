@@ -418,7 +418,7 @@ static void test_restore_asserts_on_a_width_the_restored_context_rejects(void) {
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
     nt_test_assert_install();
     NT_TEST_EXPECT_ASSERT(nt_skeletal_gpu_restore_gpu());
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "palette texture creation failed"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "max_texture_size"));
 }
 
 static void test_reserve_asserts_when_the_texture_is_full(void) {

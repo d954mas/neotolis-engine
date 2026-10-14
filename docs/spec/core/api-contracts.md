@@ -296,8 +296,8 @@ and `DEPTH32F` require the same, plus `data == NULL` and no mipmaps.
 color storage: 4x4 blocks, 8 bytes per block for `ETC2_RGB8` and 16 for the other
 three. They require `data` and reject `gen_mipmaps`, because block data can only
 be uploaded, never generated. Each needs its capability bit (`has_etc2`,
-`has_bc7`, `has_astc`); a missing bit follows the `max_texture_size` precedent —
-error log, invalid handle, no storage created in every assert mode. Compressed
+`has_bc7`, `has_astc`); a missing bit follows the `max_texture_size` rule: the
+constructor asserts, so the game checks the bit before it creates. Compressed
 storage is ordinary sampled color everywhere else: `sampler2D` reads it, and
 `nt_gfx_update_texture` asserts on it, since a sub-rectangle of blocks is not a
 sub-rectangle of texels.
@@ -385,8 +385,8 @@ the public texture formats cannot satisfy them.
 Pack bytes are untrusted, so `nt_gfx_activate_texture` rejects a bad header
 instead of asserting on it: it logs and returns an invalid handle for an
 out-of-range pixel format, sampler defaults outside the filter/wrap enums,
-dimensions above `gpu_caps.max_texture_size` or above `UINT16_MAX`, a
-`data_size` longer than the blob, an unknown `compression`, and a RAW
+a zero dimension, dimensions above `gpu_caps.max_texture_size` or above
+`UINT16_MAX`, a `data_size` longer than the blob, an unknown `compression`, and a RAW
 `data_size` shorter than `width * height * bpp`. Magic, version and the minimum
 blob size are checked before the header is read. RAW assets then go through
 the public constructor unchanged.

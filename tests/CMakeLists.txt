@@ -355,8 +355,9 @@ if(NOT EMSCRIPTEN)
     # --- Graphics readback tests (nt_gfx_read_pixels) ---
     # nt_gfx_fake bundles the shared nt_gfx.c (nt_gfx_read_pixels orchestration)
     # with the synthetic readback backend, so it alone proves the readback contract headless.
-    add_executable(test_gfx_read_pixels unit/test_gfx_read_pixels.c)
+    add_executable(test_gfx_read_pixels unit/test_gfx_read_pixels.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_gfx_read_pixels PRIVATE nt_gfx_fake nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire_stub)
+    target_include_directories(test_gfx_read_pixels PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_set_warning_flags(test_gfx_read_pixels)
     nt_set_sanitizer_flags(test_gfx_read_pixels)
     set_target_properties(test_gfx_read_pixels PROPERTIES

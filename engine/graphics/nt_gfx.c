@@ -769,14 +769,14 @@ void nt_gfx_end_frame(void) {
     s_gfx.render_state = NT_GFX_STATE_ENDED;
 }
 
-/* Cap-checked rgba8 readback + single Y-flip to top-left. L1 contract,
- * so bad size returns false (bot-param validation is the L2 concern). */
+/* Cap-checked rgba8 readback + single Y-flip to top-left. A bad size or a short buffer is a caller
+ * bug; the devapi capture validates the request it takes from outside. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static nt_gfx_result_t read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint8_t *out, uint32_t out_cap) {
-    if (w <= 0 || h <= 0) {
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
+    NT_ASSERT(w > 0 && h > 0 && "read_pixels: empty rect");
     NT_ASSERT(out != NULL); /* L1 writes the readback (and row-swaps) through out — NULL is a caller bug. */
+    /* In uint64_t so w*h*4 cannot overflow before the comparison. */
+    NT_ASSERT((uint64_t)(uint32_t)w * (uint64_t)(uint32_t)h * 4U <= (uint64_t)out_cap && "read_pixels: out_cap is smaller than w*h*4");
     /* A lost context returns uninitialized garbage as a "successful" read — every other GL wrapper
        early-returns on this. The capture producer treats false as failure -> NULL -> capture_failed.
        It also frees every render target, so it comes before the source checks. */
@@ -793,11 +793,6 @@ static nt_gfx_result_t read_pixels(nt_render_target_t src, int x, int y, int w, 
         /* w and h are positive here; 64-bit sums cannot overflow. */
         NT_ASSERT(x >= 0 && y >= 0 && (int64_t)x + w <= render_target_size_meta(rt_slot)->width && (int64_t)y + h <= render_target_size_meta(rt_slot)->height &&
                   "read_pixels: rect outside the render target");
-    }
-    /* Compute in uint64_t so w*h*4 cannot overflow before the cap check. */
-    uint64_t need = (uint64_t)(uint32_t)w * (uint64_t)(uint32_t)h * 4U;
-    if (need > (uint64_t)out_cap) {
-        return NT_GFX_RESULT_CAPACITY;
     }
     /* WebGL reports a loss once through glGetError and the drain before the read eats it: ask the browser too. */
     if (!nt_gfx_backend_read_pixels(rt_slot, x, y, w, h, out) || nt_gfx_backend_query_context_lost()) {
@@ -926,9 +921,7 @@ void nt_gfx_clear(const nt_clear_desc_t *desc) {
 /* ---- Resource creation ---- */
 
 static nt_gfx_result_t make_shader(const nt_shader_desc_t *desc, nt_shader_t *out) {
-    if (!desc) {
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
+    NT_ASSERT(desc != NULL);
 
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
@@ -1233,9 +1226,7 @@ nt_instance_layout_t nt_gfx_make_instance_layout(const nt_vertex_layout_t *layou
 }
 
 static nt_gfx_result_t make_buffer(const nt_buffer_desc_t *desc, nt_buffer_t *out) {
-    if (!desc) {
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
+    NT_ASSERT(desc != NULL);
     /* Same recoverable contract as the other make_* creators -- without this
      * a lost-frame creation yields a pool-valid buffer with a dead GL name. */
     if (g_nt_gfx.context_lost) {
@@ -1293,23 +1284,17 @@ static bool texture_compressed_format_supported(nt_texture_format_t format) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_gfx_result_t make_texture(const nt_texture_desc_t *desc, nt_texture_t *out) {
-    if (!desc) {
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
+    NT_ASSERT(desc != NULL);
+    /* First: a lost probe reports zero caps, so the caps asserts below would fire falsely. */
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     nt_texture_desc_t local_desc = *desc;
 
     // #region descriptor contract
-    if (local_desc.width == 0 || local_desc.height == 0) {
-        NT_LOG_ERROR("make_texture: zero dimension");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
-    if (local_desc.width > g_nt_gfx.gpu_caps.max_texture_size || local_desc.height > g_nt_gfx.gpu_caps.max_texture_size) {
-        NT_LOG_ERROR("make_texture: %ux%u exceeds GPU max_texture_size %u", local_desc.width, local_desc.height, g_nt_gfx.gpu_caps.max_texture_size);
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
+    NT_ASSERT(local_desc.width > 0 && local_desc.height > 0 && "make_texture: zero dimension");
+    /* Caps are the game's to check: a texture above the GPU limit is a caller bug. */
+    NT_ASSERT(local_desc.width <= g_nt_gfx.gpu_caps.max_texture_size && local_desc.height <= g_nt_gfx.gpu_caps.max_texture_size && "make_texture: size exceeds gpu_caps.max_texture_size");
 
     NT_ASSERT(nt_texture_format_valid(local_desc.format) && "make_texture: format is required");
 
@@ -1321,10 +1306,7 @@ static nt_gfx_result_t make_texture(const nt_texture_desc_t *desc, nt_texture_t 
         NT_ASSERT(!local_desc.gen_mipmaps && "make_texture: compressed format cannot generate mipmaps");
         /* WebGL BPTC requires block-aligned base dimensions, including tiny textures. */
         NT_ASSERT((local_desc.format != NT_TEXTURE_FORMAT_BC7_RGBA || (local_desc.width % 4 == 0 && local_desc.height % 4 == 0)) && "make_texture: BC7 base dimensions must be multiples of 4");
-        if (!texture_compressed_format_supported(local_desc.format)) {
-            NT_LOG_ERROR("make_texture: compressed format %u is not supported by this GPU", (unsigned)local_desc.format);
-            return NT_GFX_RESULT_INVALID_ARGUMENT;
-        }
+        NT_ASSERT(texture_compressed_format_supported(local_desc.format) && "make_texture: compressed format is not supported by this GPU -- check gpu_caps");
     }
     /* Ahead of the generic level rule so the depth-specific message wins. */
     if (nt_texture_format_is_depth(local_desc.format)) {
@@ -2593,6 +2575,10 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
     }
     if (hdr2->width > UINT16_MAX || hdr2->height > UINT16_MAX) {
         NT_LOG_ERROR("activate_texture: %ux%u exceeds uint16 dimensions", hdr2->width, hdr2->height);
+        return 0;
+    }
+    if (hdr2->width == 0 || hdr2->height == 0) {
+        NT_LOG_ERROR("activate_texture: zero dimension %ux%u", hdr2->width, hdr2->height);
         return 0;
     }
     /* Subtraction safe -- caller verified size >= sizeof header */

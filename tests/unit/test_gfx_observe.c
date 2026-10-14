@@ -742,7 +742,9 @@ static void test_every_operation_records_one_begin_and_one_result(void) {
     record_next_frame();
     nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8})});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_buffer(NULL).id);
+    /* A creator that ends without an object still records it as 0: a create that meets a loss. */
+    nt_gfx_fake_set_context_lost(true);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}).id);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 1.0F});
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -762,7 +764,7 @@ static void test_every_operation_records_one_begin_and_one_result(void) {
             TEST_ASSERT_GREATER_THAN_UINT32(0, depth);
             TEST_ASSERT_EQUAL(stack[--depth], e->operation);
             target_result |= e->operation == NT_GFX_OP_CREATE && e->object_kind == NT_GFX_OBJECT_RENDER_TARGET && e->object == target.id && e->result == NT_GFX_RESULT_ACCEPTED;
-            invalid_buffer |= e->operation == NT_GFX_OP_CREATE && e->object_kind == NT_GFX_OBJECT_BUFFER && e->object == 0 && e->result == NT_GFX_RESULT_INVALID_ARGUMENT;
+            invalid_buffer |= e->operation == NT_GFX_OP_CREATE && e->object_kind == NT_GFX_OBJECT_BUFFER && e->object == 0 && e->result == NT_GFX_RESULT_CONTEXT_LOST;
         }
     }
     TEST_ASSERT_EQUAL_UINT32(0, depth);
@@ -779,7 +781,6 @@ static void test_accepted_counters_match_recorded_results(void) {
     nt_gfx_set_scissor_enabled(false); /* unchanged: a cache result, not counted */
     nt_gfx_bind_pipeline((nt_pipeline_t){0});
     draw_teardown();
-    (void)nt_gfx_make_buffer(NULL);
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();

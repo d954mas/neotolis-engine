@@ -44,9 +44,11 @@ When enabled, the window requests a debug context and the backend installs a
 synchronous KHR_debug callback if the driver supports it. The callback logs
 messages and asserts on GL errors using the configured `NT_ASSERT_MODE`.
 
-`nt_gfx_make_texture` rejects dimensions above the GPU limit and unsupported
-compressed formats with an error log and an invalid handle before creating GPU
-storage. These are recoverable capability failures in every assert mode.
+`nt_gfx_make_texture` asserts on a zero size, dimensions above the GPU limit and
+unsupported compressed formats: the game checks `gpu_caps` before it creates, so
+a creator's invalid handle means only a lost context. Pack bytes are the
+exception: the texture activator rejects such headers before the constructor
+(see [texture activation](../core/api-contracts.md#texture-activation)).
 
 Engine-oriented, not WebGL-mirror and not full WebGPU abstraction:
 

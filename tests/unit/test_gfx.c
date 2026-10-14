@@ -1706,12 +1706,9 @@ void test_gfx_make_texture_requires_explicit_format(void) {
     }));
 }
 
-/* ---- Texture: NULL desc ---- */
+/* ---- Texture: NULL desc is a caller bug ---- */
 
-void test_gfx_make_texture_null_desc(void) {
-    nt_texture_t tex = nt_gfx_make_texture(NULL);
-    TEST_ASSERT_EQUAL_UINT32(0, tex.id);
-}
+void test_gfx_make_texture_null_desc(void) { EXPECT_ASSERT(nt_gfx_make_texture(NULL)); }
 
 /* ---- Texture: NULL data allocates storage for later update_texture ---- */
 
@@ -1729,25 +1726,23 @@ void test_gfx_make_texture_null_data(void) {
 /* ---- Texture: zero width ---- */
 
 void test_gfx_make_texture_zero_width(void) {
-    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 0,
         .height = 4,
         .format = NT_TEXTURE_FORMAT_RGBA8,
         .data = s_test_pixels_4x4,
-    });
-    TEST_ASSERT_EQUAL_UINT32(0, tex.id);
+    }));
 }
 
 /* ---- Texture: zero height ---- */
 
 void test_gfx_make_texture_zero_height(void) {
-    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 0,
         .format = NT_TEXTURE_FORMAT_RGBA8,
         .data = s_test_pixels_4x4,
-    });
-    TEST_ASSERT_EQUAL_UINT32(0, tex.id);
+    }));
 }
 
 /* ---- Texture: NPOT dimensions accepted ---- */
@@ -2000,16 +1995,17 @@ void test_gfx_make_texture_rejects_bad_level_counts_before_allocation(void) {
     }
 }
 
-void test_gfx_make_texture_rejects_unsupported_gpu_requirements(void) {
+/* Caps are the game's to check: a texture the GPU cannot hold is a caller bug. */
+void test_gfx_make_texture_asserts_on_unsupported_gpu_requirements(void) {
     /* Fake caps report no compressed support. */
     uint32_t creates = nt_gfx_fake_texture_create_count();
     for (size_t i = 0; i < sizeof(s_compressed_formats) / sizeof(s_compressed_formats[0]); i++) {
-        TEST_ASSERT_EQUAL_UINT32(0, make_compressed_texture(s_compressed_formats[i]).id);
+        EXPECT_ASSERT(make_compressed_texture(s_compressed_formats[i]));
     }
     const uint16_t too_large = (uint16_t)(nt_gfx_gpu_caps()->max_texture_size + 1U);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_texture(&(nt_texture_desc_t){.width = too_large, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8}).id);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = too_large, .format = NT_TEXTURE_FORMAT_RGBA8}).id);
-    /* Rejected before the backend: no GL name was ever asked for. */
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){.width = too_large, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8}));
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = too_large, .format = NT_TEXTURE_FORMAT_RGBA8}));
+    /* Asserted before the backend: no GL name was ever asked for, and no pool slot leaked. */
     TEST_ASSERT_EQUAL_UINT32(creates, nt_gfx_fake_texture_create_count());
 
     nt_texture_t textures[8];
@@ -2146,6 +2142,25 @@ void test_gfx_texture_pool_full_asserts(void) {
     }));
     for (int i = 0; i < 8; i++) {
         nt_gfx_destroy_texture(textures[i]);
+    }
+}
+
+/* ---- Activator: a zero dimension in pack bytes is rejected, not asserted ---- */
+
+void test_activate_texture_rejects_zero_dimensions(void) {
+    uint8_t blob[sizeof(NtTextureAssetHeaderV2)];
+    NtTextureAssetHeaderV2 *hdr = (NtTextureAssetHeaderV2 *)blob;
+    const uint32_t sizes[2][2] = {{0, 1}, {1, 0}};
+    for (int i = 0; i < 2; i++) {
+        memset(blob, 0, sizeof(blob));
+        hdr->magic = NT_TEXTURE_MAGIC;
+        hdr->version = NT_TEXTURE_VERSION_V2;
+        hdr->format = NT_TEXTURE_FORMAT_RGBA8;
+        hdr->width = sizes[i][0];
+        hdr->height = sizes[i][1];
+        hdr->mip_count = 1;
+        hdr->compression = NT_TEXTURE_COMPRESSION_RAW;
+        TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_texture(blob, (uint32_t)sizeof(blob)));
     }
 }
 
@@ -4109,7 +4124,7 @@ int main(void) {
     RUN_TEST(test_gfx_make_texture_compressed_binds_with_color_samplers);
     RUN_TEST(test_gfx_make_texture_passes_level_count_through_to_the_backend);
     RUN_TEST(test_gfx_make_texture_rejects_bad_level_counts_before_allocation);
-    RUN_TEST(test_gfx_make_texture_rejects_unsupported_gpu_requirements);
+    RUN_TEST(test_gfx_make_texture_asserts_on_unsupported_gpu_requirements);
     RUN_TEST(test_gfx_make_texture_hands_the_contiguous_mip_chain_to_the_backend);
     RUN_TEST(test_gfx_make_texture_bc7_requires_aligned_base_dimensions);
     RUN_TEST(test_gfx_destroy_texture_and_reuse);
@@ -4118,6 +4133,7 @@ int main(void) {
     RUN_TEST(test_gfx_texture_pool_full_asserts);
     /* Activator tests */
     RUN_TEST(test_activate_texture_valid_blob);
+    RUN_TEST(test_activate_texture_rejects_zero_dimensions);
     RUN_TEST(test_activate_texture_bad_magic);
     RUN_TEST(test_activate_texture_too_small);
     RUN_TEST(test_activate_mesh_valid_blob);
