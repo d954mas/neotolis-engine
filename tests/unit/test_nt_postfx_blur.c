@@ -375,7 +375,7 @@ static void test_a_loss_during_restore_is_retried_by_the_next_one(void) {
     nt_render_target_t source_rt = make_blur_target(64, 32);
     nt_postfx_blur_pass_t pass = {.source = nt_gfx_render_target_color(source_rt), .temp = make_blur_target(64, 32), .dest = make_blur_target(64, 32), .radius = 4.0F};
 
-    nt_gfx_fake_lose_context_on_program_create();
+    nt_gfx_fake_set_context_lost(true);
     nt_postfx_blur_restore_gpu();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
 

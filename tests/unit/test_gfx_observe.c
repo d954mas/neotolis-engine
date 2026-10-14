@@ -240,7 +240,7 @@ static void test_init_on_a_lost_context_latches_the_loss(void) {
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 /* Only a loss the browser confirms latches: a name failure on a live context asserts instead. */
 static void test_a_name_failure_on_a_live_context_asserts_without_latching(void) {
-    nt_gfx_fake_fail_buffer_creates(1);
+    nt_gfx_fake_fail_next_buffer_create();
     NT_TEST_EXPECT_ASSERT(nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}));
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
 }

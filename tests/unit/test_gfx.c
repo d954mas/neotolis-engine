@@ -548,7 +548,7 @@ void test_gfx_program_link_context_loss_releases_every_slot(void) {
         TEST_FAIL_MESSAGE("Context loss during program link must return invalid without asserting");
     }
     /* The failed link confirms the loss and latches it; later links stop before the backend. */
-    nt_gfx_fake_lose_context_on_program_create();
+    nt_gfx_fake_set_context_lost(true);
     for (uint32_t attempt = 0; attempt < 12; attempt++) {
         nt_program_t program = nt_gfx_make_program(vs, fs);
         TEST_ASSERT_EQUAL_UINT32(0, program.id);

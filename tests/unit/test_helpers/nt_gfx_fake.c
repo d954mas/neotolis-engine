@@ -124,11 +124,10 @@ static bool s_fake_context_lost;
 static bool s_fake_loss_pending; /* the web lost-event latch until begin_frame takes it */
 static uint32_t s_fake_texture_destroy_count;
 static uint32_t s_fake_last_destroyed_texture;
-static uint8_t s_fake_fail_buffer_creates;
+static bool s_fake_fail_next_buffer_create;
 static uint8_t s_fake_lose_buffer_creates;
 static bool s_fake_fail_next_program_link;
 static bool s_fake_hold_program_links;
-static bool s_fake_lose_context_on_program_create;
 static bool s_fake_lose_context_on_program_link;
 static bool s_fake_fail_next_sampler_create;
 static bool s_fake_lose_context_on_sampler_create;
@@ -211,14 +210,10 @@ uint32_t nt_gfx_fake_last_depth_texture_backend(void) { return s_fake_last_depth
 void nt_gfx_fake_fail_next_render_target_create(void) { s_fake_fail_next_render_target_create = true; }
 uint32_t nt_gfx_fake_texture_destroy_count(void) { return s_fake_texture_destroy_count; }
 uint32_t nt_gfx_fake_last_destroyed_texture(void) { return s_fake_last_destroyed_texture; }
-void nt_gfx_fake_fail_buffer_creates(uint8_t mask) {
-    NT_ASSERT(mask <= 3);
-    s_fake_fail_buffer_creates = mask;
-}
+void nt_gfx_fake_fail_next_buffer_create(void) { s_fake_fail_next_buffer_create = true; }
 void nt_gfx_fake_lose_context_on_buffer_creates(uint8_t mask) { s_fake_lose_buffer_creates = mask; }
 void nt_gfx_fake_fail_next_program_link(void) { s_fake_fail_next_program_link = true; }
 void nt_gfx_fake_hold_program_links(bool hold) { s_fake_hold_program_links = hold; }
-void nt_gfx_fake_lose_context_on_program_create(void) { s_fake_lose_context_on_program_create = true; }
 void nt_gfx_fake_lose_context_on_program_link(void) { s_fake_lose_context_on_program_link = true; }
 void nt_gfx_fake_fail_next_sampler_create(void) { s_fake_fail_next_sampler_create = true; }
 void nt_gfx_fake_lose_context_on_sampler_create(void) { s_fake_lose_context_on_sampler_create = true; }
@@ -293,11 +288,10 @@ void nt_gfx_fake_reset(void) {
     s_fake_loss_pending = false;
     s_fake_texture_destroy_count = 0;
     s_fake_last_destroyed_texture = 0;
-    s_fake_fail_buffer_creates = 0;
+    s_fake_fail_next_buffer_create = false;
     s_fake_lose_buffer_creates = 0;
     s_fake_fail_next_program_link = false;
     s_fake_hold_program_links = false;
-    s_fake_lose_context_on_program_create = false;
     s_fake_lose_context_on_program_link = false;
     s_fake_fail_next_sampler_create = false;
     s_fake_lose_context_on_sampler_create = false;
@@ -448,12 +442,6 @@ void nt_gfx_backend_destroy_shader(uint32_t backend_handle) { (void)backend_hand
 
 uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend) {
     s_fake_program_create_count++;
-    if (s_fake_lose_context_on_program_create) {
-        s_fake_lose_context_on_program_create = false;
-        s_fake_context_lost = true;
-        s_fake_loss_pending = true;
-        return 0;
-    }
     if (s_fake_context_lost) {
         return 0; /* GL creates no name on a lost context */
     }
@@ -552,9 +540,8 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
             s_fake_last_vertex_buffer_hash = h;
         }
     }
-    bool fail = (s_fake_fail_buffer_creates & 1U) != 0;
-    s_fake_fail_buffer_creates >>= 1U;
-    if (fail) {
+    if (s_fake_fail_next_buffer_create) {
+        s_fake_fail_next_buffer_create = false;
         return 0;
     }
     /* Distinct names, so tests can tell which buffer a vertex input reads; never reset, as frame

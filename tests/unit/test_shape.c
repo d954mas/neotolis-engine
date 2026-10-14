@@ -556,7 +556,7 @@ void test_shape_loss_during_restore_is_retried_by_the_next_one(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    nt_gfx_fake_lose_context_on_program_create();
+    nt_gfx_fake_set_context_lost(true);
     nt_shape_renderer_restore_gpu();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
     TEST_ASSERT_TRUE(nt_shape_renderer_test_initialized());
