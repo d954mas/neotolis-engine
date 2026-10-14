@@ -5,11 +5,15 @@
 
 /* clang-format off */
 #include "core/nt_assert.h"
+#include "graphics/nt_gfx.h"
 #include "material/nt_material.h"
 #include "resource/nt_resource.h"
 #include "hash/nt_hash.h"
 #include "nt_pack_format.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/nt_gfx_fake.h"
+#include "test_helpers/nt_gfx_test_desc.h"
+#include "test_helpers/nt_gfx_test_frame.h"
 #include "unity.h"
 /* clang-format on */
 
@@ -27,12 +31,17 @@ static void init_material_defaults(void) {
 void setUp(void) {
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
+    nt_gfx_fake_reset();
+    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 32, .max_textures = 8, .max_meshes = 4, .max_vertex_inputs = 4, .max_render_targets = 4));
+    nt_gfx_begin_frame();
     init_material_defaults();
     s_vpack_counter = 0;
 }
 
 void tearDown(void) {
     nt_material_shutdown();
+    nt_gfx_end_frame();
+    nt_gfx_shutdown();
     nt_resource_shutdown();
     nt_hash_shutdown();
 }
@@ -54,6 +63,9 @@ static nt_resource_t register_test_resource(const char *name, uint8_t asset_type
 
 /* ---- Helper: build a basic material descriptor ---- */
 
+/* The `Material` block of the test shaders: one vec4. */
+static const float s_params[4] = {0.5F, 0.0F, 0.0F, 0.0F};
+
 static nt_material_create_desc_t make_test_desc(void) {
     nt_material_create_desc_t d;
     memset(&d, 0, sizeof(d));
@@ -61,12 +73,8 @@ static nt_material_create_desc_t make_test_desc(void) {
     d.textures[0].name = "u_albedo";
     d.textures[0].resource = (nt_resource_t){.id = 3};
     d.texture_count = 1;
-    d.params[0].name = "u_roughness";
-    d.params[0].value[0] = 0.5F;
-    d.params[0].value[1] = 0.0F;
-    d.params[0].value[2] = 0.0F;
-    d.params[0].value[3] = 0.0F;
-    d.param_count = 1;
+    d.params = s_params;
+    d.params_size = sizeof(s_params);
     d.attr_map[0].stream_name = "position";
     d.attr_map[0].location = 0;
     d.attr_map_count = 1;
@@ -174,51 +182,69 @@ void test_create_basic(void) {
     TEST_ASSERT_TRUE(mat.id != 0);
 }
 
-/* ---- Test 3: texture count stored correctly ---- */
+/* ---- Params: one uniform buffer per material ---- */
 
-void test_create_stores_texture_count(void) {
+void test_create_makes_a_uniform_buffer_with_the_params(void) {
     nt_material_create_desc_t d = make_test_desc();
     nt_material_t mat = nt_material_create(&d);
-    const nt_material_info_t *info = nt_material_get_info(mat);
-    TEST_ASSERT_NOT_NULL(info);
-    TEST_ASSERT_EQUAL_UINT8(1, info->tex_count);
+    TEST_ASSERT_TRUE(nt_material_valid(mat));
+    const nt_buffer_desc_t buffer = nt_gfx_fake_last_buffer_desc();
+    TEST_ASSERT_EQUAL(NT_BUFFER_UNIFORM, buffer.type);
+    TEST_ASSERT_EQUAL(NT_USAGE_DYNAMIC, buffer.usage);
+    TEST_ASSERT_EQUAL_UINT32(sizeof(s_params), buffer.size);
+    TEST_ASSERT_EQUAL_MEMORY(s_params, buffer.data, sizeof(s_params));
 }
 
-/* ---- Test 4: param count stored correctly ---- */
-
-void test_create_stores_param_count(void) {
+void test_material_without_params_makes_no_buffer(void) {
     nt_material_create_desc_t d = make_test_desc();
-    nt_material_t mat = nt_material_create(&d);
-    const nt_material_info_t *info = nt_material_get_info(mat);
-    TEST_ASSERT_NOT_NULL(info);
-    TEST_ASSERT_EQUAL_UINT8(1, info->param_count);
+    d.params = NULL;
+    d.params_size = 0;
+    nt_gfx_fake_reset();
+    TEST_ASSERT_TRUE(nt_material_valid(nt_material_create(&d)));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_last_buffer_desc().size);
 }
 
-/* ---- Test 5: param values stored correctly ---- */
+/* The bytes mirror a std140 block of 16-byte members, so the size is a multiple of 16. */
+void test_create_asserts_bad_params(void) {
+    static const float big[(NT_MATERIAL_MAX_PARAM_BYTES / 4) + 4] = {0};
+    nt_material_create_desc_t d = make_test_desc();
+    d.params_size = 20;
+    NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
+    d.params = big;
+    d.params_size = sizeof(big);
+    NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
+    d.params = NULL;
+    d.params_size = 16;
+    NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
+    d.params = s_params;
+    d.params_size = 0;
+    NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
+}
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_create_stores_param_values(void) {
+/* Equal bytes write nothing; changed bytes update the buffer. */
+void test_set_params_writes_the_buffer_only_on_change(void) {
     nt_material_create_desc_t d = make_test_desc();
     nt_material_t mat = nt_material_create(&d);
-    const nt_material_info_t *info = nt_material_get_info(mat);
-    TEST_ASSERT_NOT_NULL(info);
-    /* Compare as raw uint32 to avoid float assertion issues */
-    uint32_t expected_bits;
-    uint32_t actual_bits;
-    float expected_val = 0.5F;
-    memcpy(&expected_bits, &expected_val, sizeof(uint32_t));
-    memcpy(&actual_bits, &info->params[0][0], sizeof(uint32_t));
-    TEST_ASSERT_EQUAL_UINT32(expected_bits, actual_bits);
+    const uint32_t updates = nt_gfx_fake_update_buffer_count();
+    nt_material_set_params(mat, s_params, sizeof(s_params));
+    TEST_ASSERT_EQUAL_UINT32(updates, nt_gfx_fake_update_buffer_count());
+    const float changed[4] = {0.8F, 0.0F, 0.0F, 1.0F};
+    nt_material_set_params(mat, changed, sizeof(changed));
+    TEST_ASSERT_EQUAL_UINT32(updates + 1U, nt_gfx_fake_update_buffer_count());
+    TEST_ASSERT_EQUAL_UINT32(sizeof(changed), nt_gfx_fake_last_update_buffer_size());
+    TEST_ASSERT_EQUAL_MEMORY(changed, nt_gfx_fake_last_update_buffer_data(), sizeof(changed));
+}
 
-    float zero = 0.0F;
-    uint32_t zero_bits;
-    memcpy(&zero_bits, &zero, sizeof(uint32_t));
-    memcpy(&actual_bits, &info->params[0][1], sizeof(uint32_t));
-    TEST_ASSERT_EQUAL_UINT32(zero_bits, actual_bits);
-    memcpy(&actual_bits, &info->params[0][2], sizeof(uint32_t));
-    TEST_ASSERT_EQUAL_UINT32(zero_bits, actual_bits);
-    memcpy(&actual_bits, &info->params[0][3], sizeof(uint32_t));
-    TEST_ASSERT_EQUAL_UINT32(zero_bits, actual_bits);
+void test_set_params_asserts_size_or_handle(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    nt_material_t mat = nt_material_create(&d);
+    static const float two[8] = {0};
+    NT_TEST_EXPECT_ASSERT(nt_material_set_params(mat, two, sizeof(two)));
+    NT_TEST_EXPECT_ASSERT(nt_material_set_params(NT_MATERIAL_INVALID, s_params, sizeof(s_params)));
+    d.params = NULL;
+    d.params_size = 0;
+    nt_material_t no_params = nt_material_create(&d);
+    NT_TEST_EXPECT_ASSERT(nt_material_set_params(no_params, s_params, sizeof(s_params)));
 }
 
 /* ---- Test 6: render state stored correctly ---- */
@@ -296,37 +322,11 @@ void test_create_stores_attr_map(void) {
     TEST_ASSERT_EQUAL_UINT8(0, info->attr_map_locations[0]);
 }
 
-/* ---- Test 8: texture names hashed ---- */
-
-void test_create_hashes_texture_names(void) {
-    nt_material_create_desc_t d = make_test_desc();
-    nt_material_t mat = nt_material_create(&d);
-    const nt_material_info_t *info = nt_material_get_info(mat);
-    TEST_ASSERT_NOT_NULL(info);
-    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_albedo").value, info->tex_name_hashes[0]);
-}
-
-/* ---- Test 9: param names hashed ---- */
-
-void test_create_hashes_param_names(void) {
-    nt_material_create_desc_t d = make_test_desc();
-    nt_material_t mat = nt_material_create(&d);
-    const nt_material_info_t *info = nt_material_get_info(mat);
-    TEST_ASSERT_NOT_NULL(info);
-    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_roughness").value, info->param_name_hashes[0]);
-}
-
 /* ---- Uniform names are mandatory ---- */
 
 void test_create_asserts_null_texture_name(void) {
     nt_material_create_desc_t d = make_test_desc();
     d.textures[0].name = NULL;
-    NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
-}
-
-void test_create_asserts_null_param_name(void) {
-    nt_material_create_desc_t d = make_test_desc();
-    d.params[0].name = NULL;
     NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
 }
 
@@ -446,22 +446,133 @@ void test_set_program_clears_to_invalid(void) {
     TEST_ASSERT_EQUAL_UINT32(0, info->program.id);
 }
 
-/* ---- Test 20: create stores texture resources ---- */
+/* ---- Apply ---- */
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_create_stores_texture_resources(void) {
-    nt_resource_t tex_res = register_test_resource("test_tex", NT_ASSET_TEXTURE, 42);
+static nt_texture_t make_test_texture(uint8_t marker) {
+    uint8_t pixels[4 * 4 * 4] = {marker};
+    return nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .data = pixels, .format = NT_TEXTURE_FORMAT_RGBA8});
+}
+
+/* A program sampling u_albedo (the material's) and u_page (a draw texture). */
+static nt_pipeline_t begin_apply_pass(void) {
+    nt_program_t program = nt_gfx_fake_make_program((const char *const[]){"u_albedo", "u_page"}, 2);
+    nt_test_gfx_link_wait(program);
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    nt_test_frame_begin_pass();
+    nt_gfx_bind_pipeline(pipeline);
+    return pipeline;
+}
+
+/* The params buffer binds at the Material slot; the set is the material's resolved textures
+ * followed by the draw textures. */
+void test_apply_binds_the_params_buffer_and_the_complete_texture_set(void) {
+    const nt_texture_t albedo = make_test_texture(1);
+    const nt_texture_t page = make_test_texture(2);
+    nt_resource_t albedo_res = register_test_resource("albedo", NT_ASSET_TEXTURE, albedo.id);
     nt_resource_step();
-
     nt_material_create_desc_t d = make_test_desc();
-    d.textures[0].name = "u_albedo";
-    d.textures[0].resource = tex_res;
-    d.texture_count = 1;
+    d.textures[0].resource = albedo_res;
     nt_material_t mat = nt_material_create(&d);
+    begin_apply_pass();
+    const nt_gfx_texture_binding_t draw = {.name = nt_hash32_str("u_page"), .texture = page, .sampler = NT_SAMPLER_DEFAULT};
+    nt_gfx_fake_reset();
+    nt_material_apply(mat, &draw, 1);
+    nt_material_apply(mat, &draw, 1); /* equal: CACHE in gfx */
+    nt_test_frame_close();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count());
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_SLOT_MATERIAL, nt_gfx_fake_ubo_bind_at(0).slot);
+    TEST_ASSERT_EQUAL_UINT32(sizeof(s_params), nt_gfx_fake_ubo_bind_at(0).size);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
+    nt_gfx_begin_frame();
+}
 
-    const nt_material_info_t *info = nt_material_get_info(mat);
-    TEST_ASSERT_NOT_NULL(info);
-    TEST_ASSERT_EQUAL_UINT32(tex_res.id, info->tex_resources[0].id);
+/* A material without params unbinds the Material slot, so a program that reads it asserts
+ * instead of reading the previous material's values. */
+void test_apply_without_params_unbinds_the_material_slot(void) {
+    const nt_texture_t page = make_test_texture(2);
+    nt_material_create_desc_t d = make_test_desc();
+    d.texture_count = 0;
+    nt_material_t with_params = nt_material_create(&d);
+    d.params = NULL;
+    d.params_size = 0;
+    nt_material_t without_params = nt_material_create(&d);
+    nt_gfx_fake_set_block(NT_GFX_SLOT_MATERIAL, 16);
+    nt_program_t program = nt_gfx_fake_make_program((const char *const[]){"u_page"}, 1);
+    nt_gfx_fake_set_block(NT_GFX_SLOT_MATERIAL, 0);
+    nt_test_gfx_link_wait(program);
+    nt_test_frame_begin_pass();
+    nt_gfx_bind_pipeline(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program}));
+    nt_gfx_bind_vertex_input(nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0}));
+    const nt_gfx_texture_binding_t draw = {.name = nt_hash32_str("u_page"), .texture = page, .sampler = NT_SAMPLER_DEFAULT};
+    nt_material_apply(with_params, &draw, 1);
+    nt_gfx_draw(0, 3);
+    nt_material_apply(without_params, &draw, 1);
+    NT_TEST_EXPECT_ASSERT(nt_gfx_draw(3, 3));
+    nt_test_frame_close();
+    nt_gfx_begin_frame();
+}
+
+void test_apply_asserts_too_many_draw_textures(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    nt_material_t mat = nt_material_create(&d);
+    begin_apply_pass();
+    const nt_gfx_texture_binding_t draws[NT_GFX_MAX_TEXTURE_SLOTS] = {{0}};
+    NT_TEST_EXPECT_ASSERT(nt_material_apply(mat, draws, NT_GFX_MAX_TEXTURE_SLOTS));
+    NT_TEST_EXPECT_ASSERT(nt_material_apply(mat, NULL, 1));
+    nt_test_frame_close();
+    nt_gfx_begin_frame();
+}
+
+/* ---- Lifetime and restore ---- */
+
+/* The restore rebuilds every params buffer from the CPU copy, also with a full buffer pool and
+ * for a material created while the context was lost. */
+void test_restore_gpu_rebuilds_params_buffers(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    d.texture_count = 0;
+    nt_material_t before = nt_material_create(&d);
+    const float changed[4] = {0.25F, 0.0F, 0.0F, 0.0F};
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    nt_material_set_params(before, changed, sizeof(changed)); /* kept in the copy while lost */
+    nt_material_t during = nt_material_create(&d);
+    TEST_ASSERT_TRUE(nt_material_valid(during));
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+
+    nt_gfx_fake_reset();
+    nt_material_restore_gpu();
+    nt_material_restore_gpu(); /* harmless twice */
+    TEST_ASSERT_EQUAL(NT_BUFFER_UNIFORM, nt_gfx_fake_last_buffer_desc().type);
+    TEST_ASSERT_EQUAL_MEMORY(s_params, nt_gfx_fake_last_buffer_desc().data, sizeof(s_params)); /* `during` comes last */
+    nt_program_t program = nt_gfx_fake_make_program(NULL, 0);
+    nt_test_gfx_link_wait(program);
+    nt_test_frame_begin_pass();
+    nt_gfx_bind_pipeline(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program}));
+    nt_material_apply(before, NULL, 0);
+    nt_material_apply(during, NULL, 0);
+    nt_test_frame_close();
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
+    nt_gfx_begin_frame();
+}
+
+/* Destroy releases the params buffer: a full cycle never exhausts the buffer pool. */
+void test_destroy_and_shutdown_release_params_buffers(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    for (uint32_t i = 0; i < 64; i++) {
+        nt_material_destroy(nt_material_create(&d));
+    }
+    for (uint32_t i = 0; i < 4; i++) {
+        (void)nt_material_create(&d);
+    }
+    nt_material_shutdown();
+    init_material_defaults();
+    for (uint32_t i = 0; i < 16; i++) {
+        TEST_ASSERT_TRUE(nt_material_valid(nt_material_create(&d)));
+    }
 }
 
 /* ---- Test 21: get_info returns NULL for invalid handle ---- */
@@ -469,111 +580,6 @@ void test_create_stores_texture_resources(void) {
 void test_get_info_returns_null_for_invalid(void) {
     const nt_material_info_t *info = nt_material_get_info(NT_MATERIAL_INVALID);
     TEST_ASSERT_NULL(info);
-}
-
-/* ---- Test 22: entity_param names hashed and stored ---- */
-
-void test_create_stores_entity_params(void) {
-    nt_material_create_desc_t d = make_test_desc();
-    d.entity_params[0].name = "u_dissolve";
-    d.entity_param_count = 1;
-    nt_material_t mat = nt_material_create(&d);
-    const nt_material_info_t *info = nt_material_get_info(mat);
-    TEST_ASSERT_NOT_NULL(info);
-    TEST_ASSERT_EQUAL_UINT8(1, info->entity_param_count);
-    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_dissolve").value, info->entity_param_hashes[0]);
-}
-
-/* ---- Test: has_param returns true for existing param ---- */
-
-void test_has_param_returns_true(void) {
-    nt_material_create_desc_t d = make_test_desc();
-    nt_material_t mat = nt_material_create(&d);
-    TEST_ASSERT_TRUE(nt_material_has_param(mat, "u_roughness"));
-}
-
-/* ---- Test: has_param returns false for unknown param ---- */
-
-void test_has_param_returns_false(void) {
-    nt_material_create_desc_t d = make_test_desc();
-    nt_material_t mat = nt_material_create(&d);
-    TEST_ASSERT_FALSE(nt_material_has_param(mat, "u_nonexistent"));
-}
-
-/* ---- Test: has_param returns false for invalid handle ---- */
-
-void test_has_param_invalid_handle(void) { TEST_ASSERT_FALSE(nt_material_has_param(NT_MATERIAL_INVALID, "u_roughness")); }
-
-/* ---- Test: set_param updates all four components ---- */
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_set_param_updates_all_four(void) {
-    nt_material_create_desc_t d = make_test_desc();
-    d.params[0].name = "u_color";
-    d.params[0].value[0] = 0.0F;
-    d.params[0].value[1] = 0.0F;
-    d.params[0].value[2] = 0.0F;
-    d.params[0].value[3] = 0.0F;
-    d.param_count = 1;
-    nt_material_t mat = nt_material_create(&d);
-
-    float new_val[4] = {1.0F, 0.5F, 0.25F, 1.0F};
-    nt_material_set_param(mat, "u_color", new_val);
-
-    const nt_material_info_t *info = nt_material_get_info(mat);
-    TEST_ASSERT_NOT_NULL(info);
-    for (int c = 0; c < 4; c++) {
-        uint32_t expected_bits;
-        uint32_t actual_bits;
-        memcpy(&expected_bits, &new_val[c], sizeof(uint32_t));
-        memcpy(&actual_bits, &info->params[0][c], sizeof(uint32_t));
-        TEST_ASSERT_EQUAL_UINT32(expected_bits, actual_bits);
-    }
-}
-
-/* ---- Test: set_param_component updates only one component ---- */
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_set_param_component_updates_one(void) {
-    nt_material_create_desc_t d = make_test_desc();
-    /* d already has u_roughness = {0.5, 0, 0, 0} */
-    nt_material_t mat = nt_material_create(&d);
-
-    nt_material_set_param_component(mat, "u_roughness", 0, 0.8F);
-
-    const nt_material_info_t *info = nt_material_get_info(mat);
-    TEST_ASSERT_NOT_NULL(info);
-
-    /* Component 0 should be 0.8 */
-    float expected = 0.8F;
-    uint32_t expected_bits;
-    uint32_t actual_bits;
-    memcpy(&expected_bits, &expected, sizeof(uint32_t));
-    memcpy(&actual_bits, &info->params[0][0], sizeof(uint32_t));
-    TEST_ASSERT_EQUAL_UINT32(expected_bits, actual_bits);
-
-    /* Components 1-3 should still be 0.0 */
-    float zero = 0.0F;
-    uint32_t zero_bits;
-    memcpy(&zero_bits, &zero, sizeof(uint32_t));
-    for (int c = 1; c < 4; c++) {
-        memcpy(&actual_bits, &info->params[0][c], sizeof(uint32_t));
-        TEST_ASSERT_EQUAL_UINT32(zero_bits, actual_bits);
-    }
-}
-
-/* ---- Test: set_param with invalid handle fires NT_ASSERT ---- */
-
-void test_set_param_invalid_handle(void) {
-    float val[4] = {1.0F, 1.0F, 1.0F, 1.0F};
-    nt_assert_handler = test_assert_handler;
-    if (setjmp(s_assert_jmp) == 0) {
-        nt_material_set_param(NT_MATERIAL_INVALID, "u_roughness", val);
-        nt_assert_handler = NULL;
-        TEST_FAIL_MESSAGE("Expected NT_ASSERT to fire for invalid handle");
-    }
-    nt_assert_handler = NULL;
-    TEST_PASS();
 }
 
 /* ---- Test: set_program with a stale handle fires NT_ASSERT ---- */
@@ -605,9 +611,11 @@ int main(void) {
 
     /* Create / query */
     RUN_TEST(test_create_basic);
-    RUN_TEST(test_create_stores_texture_count);
-    RUN_TEST(test_create_stores_param_count);
-    RUN_TEST(test_create_stores_param_values);
+    RUN_TEST(test_create_makes_a_uniform_buffer_with_the_params);
+    RUN_TEST(test_material_without_params_makes_no_buffer);
+    RUN_TEST(test_create_asserts_bad_params);
+    RUN_TEST(test_set_params_writes_the_buffer_only_on_change);
+    RUN_TEST(test_set_params_asserts_size_or_handle);
     RUN_TEST(test_blend_opaque_disables_blending);
     RUN_TEST(test_blend_alpha_uses_straight_source);
     RUN_TEST(test_blend_alpha_premultiplied_uses_source_as_is);
@@ -618,12 +626,8 @@ int main(void) {
     RUN_TEST(test_create_asserts_out_of_range_key_lanes);
     RUN_TEST(test_blend_reserved_byte_is_canonicalized);
     RUN_TEST(test_create_stores_attr_map);
-    RUN_TEST(test_create_hashes_texture_names);
-    RUN_TEST(test_create_hashes_param_names);
     RUN_TEST(test_create_asserts_null_texture_name);
-    RUN_TEST(test_create_asserts_null_param_name);
     RUN_TEST(test_create_asserts_duplicate_texture_name);
-    RUN_TEST(test_create_stores_entity_params);
 
     /* Valid / destroy */
     RUN_TEST(test_valid_true_after_create);
@@ -640,18 +644,16 @@ int main(void) {
     RUN_TEST(test_set_program_replaces_a_with_b);
     RUN_TEST(test_set_program_clears_to_invalid);
     RUN_TEST(test_set_program_on_a_destroyed_material_asserts);
-    RUN_TEST(test_create_stores_texture_resources);
+
+    /* Apply, lifetime and restore */
+    RUN_TEST(test_apply_binds_the_params_buffer_and_the_complete_texture_set);
+    RUN_TEST(test_apply_without_params_unbinds_the_material_slot);
+    RUN_TEST(test_apply_asserts_too_many_draw_textures);
+    RUN_TEST(test_restore_gpu_rebuilds_params_buffers);
+    RUN_TEST(test_destroy_and_shutdown_release_params_buffers);
 
     /* Query edge cases */
     RUN_TEST(test_get_info_returns_null_for_invalid);
-
-    /* set_param API */
-    RUN_TEST(test_has_param_returns_true);
-    RUN_TEST(test_has_param_returns_false);
-    RUN_TEST(test_has_param_invalid_handle);
-    RUN_TEST(test_set_param_updates_all_four);
-    RUN_TEST(test_set_param_component_updates_one);
-    RUN_TEST(test_set_param_invalid_handle);
 
     return UNITY_END();
 }

@@ -10,9 +10,9 @@
 /* ---- Compile-time limits ---- */
 
 #define NT_MATERIAL_MAX_TEXTURES 4
-#define NT_MATERIAL_MAX_PARAMS 4
+/* Bytes of a material's `Material` uniform block (16 vec4). */
+#define NT_MATERIAL_MAX_PARAM_BYTES 256
 #define NT_MATERIAL_MAX_ATTR_MAP 8
-#define NT_MAX_PER_ENTITY_PARAMS 4
 
 /* ---- Handle type ---- */
 
@@ -33,17 +33,10 @@ typedef enum {
 /* ---- Descriptor sub-types ---- */
 
 typedef struct {
-    const char *name; /* required sampler uniform name; hashed at create, not retained */
-    /* Resolved by the renderer at draw time; sprite slot 0 is the atlas page,
-     * substituted per emit. */
-    nt_resource_t resource;
-    nt_sampler_t sampler; /* override; .id==0 = use texture's asset-baked default */
+    const char *name;       /* required sampler uniform name; hashed at create, not retained */
+    nt_resource_t resource; /* resolved by nt_material_apply at each call */
+    nt_sampler_t sampler;   /* override; .id==0 = use texture's asset-baked default */
 } nt_material_texture_desc_t;
-
-typedef struct {
-    const char *name; /* required uniform name; hashed at create, not retained */
-    float value[4];
-} nt_material_param_desc_t;
 
 typedef struct {
     const char *stream_name;
@@ -51,27 +44,26 @@ typedef struct {
     float default_value[4]; /* read only when the desc sets has_attr_defaults */
 } nt_material_attr_desc_t;
 
-typedef struct {
-    const char *name;
-} nt_material_entity_param_desc_t;
-
 /* ---- Creation descriptor ---- */
 
 typedef struct {
     /* Borrowed: the material never links, destroys or checks the program. */
     nt_program_t program;
+    /* The material's own samplers; a renderer supplies its textures (atlas page, font, skin)
+     * per draw through nt_material_apply. */
     nt_material_texture_desc_t textures[NT_MATERIAL_MAX_TEXTURES];
     uint8_t texture_count;
-    nt_material_param_desc_t params[NT_MATERIAL_MAX_PARAMS];
-    uint8_t param_count;
+    /* Bytes of the program's `Material` uniform block, copied at create: a C struct mirroring
+     * the std140 block (vec4/ivec4/uvec4/mat4 members). params_size is 0 (no params, NULL
+     * params) or a multiple of 16 up to NT_MATERIAL_MAX_PARAM_BYTES. */
+    const void *params;
+    uint16_t params_size;
     /* Sprite path only: a mesh feeds every stream at its pack location, so the mesh renderer
      * assert that a mesh material has none. */
     nt_material_attr_desc_t attr_map[NT_MATERIAL_MAX_ATTR_MAP];
     uint8_t attr_map_count;
     /* Sprite renderer: an emit without its own custom block bakes these instead of asserting. */
     bool has_attr_defaults;
-    nt_material_entity_param_desc_t entity_params[NT_MAX_PER_ENTITY_PARAMS];
-    uint8_t entity_param_count;
     bool depth_test;
     bool depth_write;
     nt_blend_state_t blend;
@@ -100,23 +92,11 @@ typedef struct {
      * program still linking, one that died with the GL context or one its owner
      * destroyed -- ask nt_gfx_program_ready(program) before drawing with it. */
     nt_program_t program;
-    /* Declared at create and never rewritten (unlike params). Renderers normally
-     * resolve these at draw; a documented supplied semantic may replace its
-     * resource and sampler without inspecting either stored value. */
-    nt_resource_t tex_resources[NT_MATERIAL_MAX_TEXTURES];
-    uint32_t tex_name_hashes[NT_MATERIAL_MAX_TEXTURES];
-    nt_sampler_t tex_samplers[NT_MATERIAL_MAX_TEXTURES]; /* per-binding sampler override; .id==0 means use texture's default */
-    uint8_t tex_count;
-    float params[NT_MATERIAL_MAX_PARAMS][4];
-    uint32_t param_name_hashes[NT_MATERIAL_MAX_PARAMS];
-    uint8_t param_count;
     uint32_t attr_map_hashes[NT_MATERIAL_MAX_ATTR_MAP];
     uint8_t attr_map_locations[NT_MATERIAL_MAX_ATTR_MAP];
     float attr_map_defaults[NT_MATERIAL_MAX_ATTR_MAP][4];
     uint8_t attr_map_count;
     bool has_attr_defaults;
-    uint32_t entity_param_hashes[NT_MAX_PER_ENTITY_PARAMS];
-    uint8_t entity_param_count;
     nt_blend_state_t blend;
     bool depth_test;
     bool depth_write;
@@ -126,13 +106,20 @@ typedef struct {
 
 /* ---- Lifecycle ---- */
 
-/* NULL desc, zero capacity, double init and allocation failure assert. */
+/* NULL desc, zero capacity, double init and allocation failure assert. A material with params
+ * owns a gfx uniform buffer: init and shut down materials inside the gfx lifetime. */
 void nt_material_init(const nt_material_desc_t *desc);
+/* Destroys every material's buffer; outside a drawn frame (the gfx frame rule). */
 void nt_material_shutdown(void);
+/* Context restore: recreates every material's params buffer from its CPU copy. Call it in the
+ * restore sequence, before the first pass and before any nt_material_set_params of that frame;
+ * a second call is harmless. A material created while the context was lost gets its buffer here. */
+void nt_material_restore_gpu(void);
 
 /* ---- Create / Destroy / Query ---- */
 
 nt_material_t nt_material_create(const nt_material_create_desc_t *desc);
+/* Destroys its params buffer too, so a material with params is destroyed outside a drawn frame. */
 void nt_material_destroy(nt_material_t mat);
 bool nt_material_valid(nt_material_t mat);
 /* Replaces the borrowed program; INVALID clears it and assigning the same handle changes nothing.
@@ -142,15 +129,19 @@ bool nt_material_valid(nt_material_t mat);
 void nt_material_set_program(nt_material_t mat, nt_program_t program);
 const nt_material_info_t *nt_material_get_info(nt_material_t mat);
 
-/* ---- Runtime param mutation ---- */
+/* ---- Params and apply ---- */
 
-bool nt_material_has_param(nt_material_t mat, const char *name);
-void nt_material_set_param(nt_material_t mat, const char *name, const float value[4]);
-void nt_material_set_param_component(nt_material_t mat, const char *name, uint8_t index, float value);
+/* Replaces the params bytes; size must equal the create-time params_size. Equal bytes change
+ * nothing. A write follows nt_gfx_update_buffer: every draw of a frame reads the frame's last
+ * write, so per-object values in one frame use separate materials, instance data or a Draw block. */
+void nt_material_set_params(nt_material_t mat, const void *params, uint32_t size);
 
-/* Hash-based overloads -- cache nt_hash32_str() result to avoid per-frame rehashing */
-bool nt_material_has_param_h(nt_material_t mat, nt_hash32_t name_hash);
-void nt_material_set_param_h(nt_material_t mat, nt_hash32_t name_hash, const float value[4]);
-void nt_material_set_param_component_h(nt_material_t mat, nt_hash32_t name_hash, uint8_t index, float value);
+/* Binds the material for the next draws, after nt_gfx_bind_pipeline in a pass: its params buffer
+ * at NT_GFX_SLOT_MATERIAL (a material without params unbinds the slot, so a program that reads
+ * `Material` asserts at draw) and the complete texture set -- the material's textures resolved
+ * now, followed by draw_textures (texture default or explicit sampler each; borrowed for the
+ * call; NULL iff count is 0). A renderer supplies its atlas page, font or skin texture here, and
+ * so may a game for its own per-draw texture. Repeated equal applies end CACHE in gfx. */
+void nt_material_apply(nt_material_t mat, const nt_gfx_texture_binding_t *draw_textures, uint8_t count);
 
 #endif /* NT_MATERIAL_H */

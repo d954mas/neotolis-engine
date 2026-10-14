@@ -1,6 +1,7 @@
 # Material System
 
-Material = shader + render state + values. Numeric params are always `vec4[]`;
+Material = shader + render state + values. Numeric params are the bytes of the
+program's `Material` uniform block, kept in the material's own uniform buffer;
 one material lives in one pool slot and is shared by handle — per-entity
 variation goes through components, not material mutation. Sort order is
 game-controlled, not a material property. Pack-loadable material assets are
@@ -17,48 +18,71 @@ initialization result.
 
 Material = shader + render state + values.
 
-## Numeric params policy
+## Params
 
-All numeric material params stored as `vec4[]`. This is intentional.
+A material's numeric params are the bytes of the program's `Material` uniform
+block (`layout(std140)`, members `vec4`/`ivec4`/`uvec4`/`mat4` or arrays of them,
+see [API contracts](../core/api-contracts.md#program-handles)). The game mirrors
+the block with a C struct of `float`/`int32_t`/`uint32_t` arrays and passes it as
+`nt_material_create_desc_t.params` / `params_size`: NULL with size 0, or a
+multiple of 16 up to `NT_MATERIAL_MAX_PARAM_BYTES` (256), asserted at create.
+There are no param names: the block layout is the contract between the shader
+and the struct.
 
-Rule: float uses `.x`, vec2 uses `.xy`, vec3 uses `.xyz`, vec4 uses `.xyzw`.
+A material with params owns one `NT_BUFFER_UNIFORM` gfx buffer and a CPU copy of
+the bytes. `nt_material_set_params(mat, data, size)` replaces them: `size` must
+equal the create-time `params_size`, equal bytes change nothing, other bytes are
+copied and written with `nt_gfx_update_buffer`. A write follows that call's
+contract: every draw of a frame reads the frame's last write, so values that differ
+per object within one frame use separate materials, instance data or a `Draw`
+block, not a params write between draws.
 
-Benefits: simple layout, simple alignment, easy future GPU block packing, no per-type runtime complexity.
+The buffer is GPU state the material owns. `nt_material_destroy` destroys it, so a
+material with params is destroyed outside a drawn frame (the gfx frame rule);
+`nt_material_shutdown` destroys every buffer. On a context loss the buffers become
+husks: `nt_material_restore_gpu()` joins the restore sequence
+([resource restore](../assets/resource.md)), before the first pass and before any
+`nt_material_set_params` of that frame, and rebuilds every buffer from its CPU copy
+(destroying the husk first, so a full buffer pool needs no headroom; a second call
+is harmless). A material created or written while the context is lost keeps its
+bytes and gets its buffer at the restore. `nt_material_apply` asserts a material
+with params that has no buffer on a live context.
 
-Every declared param and every declared texture slot names the uniform it binds
-to; `nt_material_create` asserts a non-NULL name for both and keeps its
-`nt_hash32_str` hash, which is what the backend lookup is keyed on. A slot or
-param without a name is a declaration nothing can bind, so presence is decided
-by `index < count` and consumers never test the name for NULL.
+## Textures and draw textures
 
-A material declares every sampler its program uses that the material owns. A
-skinned mesh draw adds a draw texture: a binding owned by the draw, not declared
-by the material, applied together with the material's textures as one complete
-name-keyed set. gfx validates that set: a duplicate active name or an active
-sampler it does not cover asserts. The only draw texture is `u_skin_matrices`:
-a skinned material does not declare it, and the skinned draws bind the
-deformation texture with its default sampler
-([Mesh draws](architecture.md#mesh-draws)). Games pass no draw textures; a
-per-draw game texture belongs to the material bind group (planned, #600), and a
-texture shared by a frame (a shadow map) is a material slot on a published
-resource.
+A material declares the samplers it owns by name: `textures[i] = {name, resource,
+sampler}`, at most `NT_MATERIAL_MAX_TEXTURES` (4). The name is the sampler uniform;
+`nt_material_create` asserts a non-NULL name and keeps its `nt_hash32_str` hash.
+The slot index is not the texture unit: gfx resolves the name through immutable
+program reflection, and two materials may list the same samplers in any order. Two
+slots naming one sampler assert at create. A declared name the program does not
+sample is ignored before its handle is inspected, so one material can over-declare
+for a family of shaders. Normally each active slot must resolve to a texture, so
+register a placeholder with `nt_resource_set_placeholder_texture` for slots that
+load asynchronously.
 
-Normally each active slot must resolve to a texture, so register a placeholder
-with `nt_resource_set_placeholder_texture` for slots that load asynchronously.
-A declared name the program does not sample is ignored before its handle is
-inspected, so one material can over-declare for a family of shaders. The slot
-index is not the texture unit: gfx resolves the semantic name through immutable
-program reflection, and two materials may list the same samplers in any order.
-A material carries at most `NT_MATERIAL_MAX_TEXTURES` (4) slots of the 8 units
-a program can link, which leaves room for the draw texture.
+A texture whose value is the draw's, not the material's, is a draw texture: the
+caller passes it to `nt_material_apply` next to the material's declarations, and
+the material never declares it. Each renderer owns one fixed name and always uses
+the texture's default sampler (filter is a property of the texture): the sprite
+renderer's atlas page is `u_texture`, the text renderer's font curve texture is
+`u_curve_texture`, and the skinned mesh draws bind the deformation texture as
+`u_skin_matrices` ([Mesh draws](architecture.md#mesh-draws)). A game drawing its own
+pass with a material passes its per-draw textures (a render target, for instance)
+the same way. A texture shared by a frame (a shadow map) stays a material slot on a
+published resource.
 
-Sprite and text keep two legacy renderer-specific exceptions until the material bind group (planned, #600). Sprite
-declares its atlas-page sampler in slot 0 but substitutes the page resource per
-emit and run. Text declares no material textures and supplies its font samplers
-outside the material declaration.
+## Apply
 
-`nt_material_create` asserts that no two slots name the same sampler uniform:
-two slots on one unit would fight over it at every draw.
+`nt_material_apply(mat, draw_textures, count)` binds a material for the next draws,
+after `nt_gfx_bind_pipeline` in a pass. It binds the params buffer at
+`NT_GFX_SLOT_MATERIAL` (a material without params unbinds that slot, so a program
+that reads `Material` asserts at its next draw instead of reading another
+material's values) and applies the complete texture set: the material's textures,
+resolved with `nt_resource_get` at the call, followed by the draw textures
+(borrowed for the call; NULL iff `count` is 0; the total fits the program's sampler
+units). gfx validates the set and drops what did not change, so applying an equal
+material again ends `CACHE`. Every renderer applies through this one call.
 
 ## MaterialAsset binary layout
 
@@ -97,7 +121,7 @@ typedef struct MaterialAssetHeader {
     bool depth_write;
     CullMode cull_mode;
 
-    uint16_t param_count;
+    uint16_t params_size; /* bytes of the `Material` block, a multiple of 16 */
     uint16_t texture_count;
 } MaterialAssetHeader;
 ```
@@ -108,21 +132,21 @@ typedef struct MaterialAssetHeader {
 ┌─────────────────────────┐
 │ MaterialAssetHeader      │
 ├─────────────────────────┤
-│ vec4 params[param_count] │
+│ uint8_t params[params_size] │
 ├─────────────────────────┤
 │ TextureAssetRef          │
 │   textures[texture_count]│
 └─────────────────────────┘
 ```
 
-At runtime, params and textures are accessed via computed offset from header pointer:
+At runtime, params and textures are accessed via computed offset from header pointer
+(the params are the std140 bytes of the `Material` block, uploaded to the material's
+buffer as they are):
 
 ```c
-const vec4 *material_get_params(const MaterialAssetHeader *h) {
-    return (const vec4 *)((const uint8_t *)h + sizeof(MaterialAssetHeader));
-}
+const uint8_t *material_get_params(const MaterialAssetHeader *h) { return (const uint8_t *)h + sizeof(MaterialAssetHeader); }
 
-const TextureAssetRef *material_get_textures(const MaterialAssetHeader *h) { return (const TextureAssetRef *)(material_get_params(h) + h->param_count); }
+const TextureAssetRef *material_get_textures(const MaterialAssetHeader *h) { return (const TextureAssetRef *)(material_get_params(h) + h->params_size); }
 ```
 
 **Note:** C does not allow two flexible array members in one struct. The layout above uses computed offsets instead.
@@ -133,7 +157,7 @@ No duplicated material data. Material is created once (either from code via desc
 
 Per-entity variation (e.g. per-character color, dissolve progress) goes through entity param components, not material mutation — each entity carries its own values, the material stays shared.
 
-Material-wide params (e.g. global alpha cutoff, roughness) can be mutated at runtime via `nt_material_set_param` / `nt_material_set_param_component`. This changes the value for all entities sharing that material. Renderers read params when they record a draw (the sprite renderer compares them with the values it last wrote to the program), so a write needs no bookkeeping beyond the store. Hash-based overloads (`_h` suffix) accept a pre-computed `nt_hash32_t` to avoid per-frame string hashing.
+Material-wide params (e.g. a global alpha cutoff or a fog color) can be replaced at runtime with `nt_material_set_params`. This changes the values for every entity sharing the material, for the whole frame of the write ([Params](#params)).
 
 ## Attr map
 
@@ -155,17 +179,12 @@ the mesh renderer ignores them.
 ## Texture resolve
 
 A material stores the declared `nt_resource_t` for each texture slot and never a
-resolved handle. Renderers call `nt_resource_get` where they already transition
-material state: the mesh renderer at each material or draw-texture change inside a draw call,
-the sprite renderer at `set_material` and at each `draw_list` material change. The draw
-texture is no material slot and is not resolved: the renderer binds the
-deformation texture with its default sampler, applied with the resolved
-declarations as one set. A sprite emit
-records the params current at the call. Slot 0 of a sprite material is the atlas
-page: the renderer substitutes the page of each emit, and of each `draw_list`
-run's first item, so the declared slot-0 resource is never resolved. A text material declares no textures, so the text renderer resolves no
-material textures; it binds the font's own textures. These sprite/text legacy
-exceptions end with the material bind group (planned, #600). There is no material step.
+resolved handle; `nt_material_apply` resolves them with `nt_resource_get` at each
+call. A sprite or text draw waits for its own draw texture: a sprite whose atlas
+page does not resolve skips its emit or run whatever its shader samples (the page is
+the renderer's draw texture, not a material slot), while an unresolved material slot
+the program samples asserts (the placeholder contract above). There is no material
+step.
 
 Between `nt_resource_init` and `nt_resource_shutdown`, the published view of a
 handle changes only inside `nt_resource_step`. `nt_resource_shutdown` unpublishes
@@ -234,7 +253,7 @@ it by coverage, the fragment shader outputs
 
 Blend state is immutable after `nt_material_create`. A game that switches blend
 state creates separate materials sharing the same shader and texture resource
-handles, then selects the required material. Numeric material params remain
-mutable through the existing setters.
+handles, then selects the required material. Params remain mutable through
+`nt_material_set_params`.
 
 Sort order is **not** a material property. Sorting is game-controlled: game code gets entities by tag, sorts them (by material for opaques, by depth for transparents, or any custom order), and submits draw items to the renderer in that order. The renderer draws in submission order and batches consecutive compatible items. See [Sorting Policy](items-sorting-batching.md).

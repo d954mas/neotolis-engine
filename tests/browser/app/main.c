@@ -1351,8 +1351,6 @@ int main(int argc, char *argv[]) {
     s_rich_font_resource[3] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_BI, NT_ASSET_FONT);
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
-        .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,

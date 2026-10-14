@@ -608,8 +608,6 @@ int main(int argc, char *argv[]) {
     init_atlas_refs();
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
-        .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,

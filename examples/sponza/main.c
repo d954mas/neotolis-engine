@@ -268,7 +268,8 @@ static void load_scene_from_manifest(void) {
 
         s_material_shader_types[i] = (mn->shader_type < 3) ? mn->shader_type : (uint8_t)SPONZA_SHADER_DIFFUSE;
 
-        /* Create material descriptor */
+        /* Create material descriptor; params are copied at create */
+        float alpha_cutoff[4] = {0};
         nt_material_create_desc_t mat_desc = {
             .program = s_programs[s_material_shader_types[i]].program,
             .depth_test = true,
@@ -287,8 +288,9 @@ static void load_scene_from_manifest(void) {
             /* Alpha: diffuse only, 3 streams, double-sided */
             mat_desc.textures[0] = (nt_material_texture_desc_t){.name = "u_diffuse", .resource = (mn->diffuse_rid != 0) ? s_tex_handles[tex_base + 0] : s_neutral_white_handle};
             mat_desc.texture_count = 1;
-            mat_desc.params[0] = (nt_material_param_desc_t){.name = "u_alpha_cutoff", .value = {(float)mn->alpha_cutoff_x100 / 100.0F}};
-            mat_desc.param_count = 1;
+            alpha_cutoff[0] = (float)mn->alpha_cutoff_x100 / 100.0F; /* sponza_alpha.frag: Material { vec4 u_alpha_cutoff; } */
+            mat_desc.params = alpha_cutoff;
+            mat_desc.params_size = sizeof(alpha_cutoff);
             mat_desc.blend = nt_blend_opaque();
             mat_desc.cull_mode = NT_CULL_NONE; /* double-sided for foliage */
         } else {
@@ -348,7 +350,9 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_MESH);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
 
-        /* Materials keep their handles and draw again once their programs relink. */
+        /* Materials keep their handles and draw again once their programs relink; their params
+         * buffers are rebuilt from the CPU copies. */
+        nt_material_restore_gpu();
         drop_programs(); /* GL objects are gone; this frees the pool slots too */
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     }

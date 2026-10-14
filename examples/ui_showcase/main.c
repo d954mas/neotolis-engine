@@ -3668,7 +3668,9 @@ static void frame(void) {
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
-        /* Materials keep their handles and draw again once their programs relink. */
+        /* Materials keep their handles and draw again once their programs relink; their params
+         * buffers are rebuilt from the CPU copies. */
+        nt_material_restore_gpu();
         nt_shape_renderer_restore_gpu();
         nt_program_ref_drop(&s_sprite_program);
         nt_program_ref_drop(&s_text_program);
@@ -4002,8 +4004,6 @@ int main(int argc, char *argv[]) {
     s_rich_gold_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_GOLD.value);
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
-        .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
@@ -4035,8 +4035,6 @@ int main(int argc, char *argv[]) {
     /* The radial's attr layout plus the atlas texture. Plain emits bake the defaults: a_layout = 0
      * is the shader's "plain sprite" (a radial always carries its bbox size there). */
     s_base_material = nt_material_create(&(nt_material_create_desc_t){
-        .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
-        .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
@@ -4055,8 +4053,6 @@ int main(int argc, char *argv[]) {
     static const char *const k_radial_image_labels[4] = {"ui_showcase_radial_img_desat", "ui_showcase_radial_img_dim", "ui_showcase_radial_img_hide", "ui_showcase_radial_img_tint"};
     for (int m = 0; m < 4; ++m) {
         s_radial_image_material[m] = nt_material_create(&(nt_material_create_desc_t){
-            .textures = {{.name = "u_texture", .resource = s_radial_art_tex_handle}},
-            .texture_count = 1,
             .blend = nt_blend_alpha_premultiplied(),
             .depth_test = false,
             .depth_write = false,
@@ -4066,8 +4062,8 @@ int main(int argc, char *argv[]) {
             .attr_map[2] = {.stream_name = "a_uvrect", .location = 6},
             .attr_map[3] = {.stream_name = "a_layout", .location = 7},
             .attr_map_count = 4,
-            .params[0] = {.name = NT_UI_RADIAL_IMAGE_PARAM_MODE, .value = {(float)m, 0.4F, 0.0F, 0.0F}},
-            .param_count = 1,
+            .params = &(nt_ui_radial_image_params_t){.reveal_mode = {(float)m, 0.4F, 0.0F, 0.0F}},
+            .params_size = sizeof(nt_ui_radial_image_params_t),
             .label = k_radial_image_labels[m],
         });
     }
@@ -4076,8 +4072,6 @@ int main(int argc, char *argv[]) {
      * texture (not the full-bleed radial_art). Reveals a real packed sub-region (the bunny
      * icon), exercising the region-local wedge remap (a_uvrect). DESATURATE mode. */
     s_radial_image_packed_material = nt_material_create(&(nt_material_create_desc_t){
-        .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
-        .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
@@ -4087,8 +4081,8 @@ int main(int argc, char *argv[]) {
         .attr_map[2] = {.stream_name = "a_uvrect", .location = 6},
         .attr_map[3] = {.stream_name = "a_layout", .location = 7},
         .attr_map_count = 4,
-        .params[0] = {.name = NT_UI_RADIAL_IMAGE_PARAM_MODE, .value = {(float)NT_UI_RADIAL_REVEAL_DESATURATE, 0.4F, 0.0F, 0.0F}},
-        .param_count = 1,
+        .params = &(nt_ui_radial_image_params_t){.reveal_mode = {(float)NT_UI_RADIAL_REVEAL_DESATURATE, 0.4F, 0.0F, 0.0F}},
+        .params_size = sizeof(nt_ui_radial_image_params_t),
         .label = "ui_showcase_radial_img_packed",
     });
 

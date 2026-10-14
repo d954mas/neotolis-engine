@@ -162,7 +162,7 @@ typedef struct ShaderAsset {
 
     uint32_t vertex_input_mask;
 
-    uint16_t material_vec4_count;
+    uint16_t material_block_size; /* bytes of the `Material` uniform block */
     uint16_t texture_slot_count;
 
     uint16_t object_usage_mask;
@@ -177,10 +177,10 @@ typedef struct ShaderAsset {
 
 ## Four levels of shader data
 
-1. **vertex inputs** — from geometry/mesh
-2. **material params** — from MaterialAsset
-3. **object params** — from RenderState, Transform
-4. **globals** — from renderer/pass
+1. **vertex inputs** — from geometry/mesh, and per-instance data from the instance layouts
+2. **`Material` block** — the material's params buffer ([material, Params](material.md#params))
+3. **`Draw` block** — per-draw data of a renderer or game shader, bound as frame data
+4. **`Globals` and game blocks** — frame and pass data, bound as frame data
 
 ## Attribute locations
 
@@ -211,15 +211,13 @@ bound instance layout supplies reads the GL generic default `(0, 0, 0, 1)`.
 Nothing checks mesh/shader compatibility: the mesh family and its shaders agree on locations by
 construction.
 
-## Object params
+## Object and global data
 
-Fixed object-level params for v0.1: world_matrix, object_color, object_params0.
-
-## Global params
-
-Possible globals: view, proj, view_proj, camera_pos, time, light_dir. Start minimal, expand later.
-
-WebGL 2 Uniform Buffer Objects can be used to share globals efficiently across shaders.
+Per-object values are instance data (world rows and color in the instance head) or
+a `Draw` block; frame and view values (`view_proj`, `camera_pos`, `time`) are the
+`Globals` block the game fills (`nt_frame_uniforms_t`, `common/globals.glsl`).
+Shaders read no standalone numeric uniforms: every value arrives in a uniform
+block or a vertex input.
 
 ## Draw merge
 

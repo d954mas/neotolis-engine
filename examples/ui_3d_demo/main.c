@@ -795,7 +795,9 @@ static void frame(void) {
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
-        /* Materials keep their handles and draw again once their programs relink. */
+        /* Materials keep their handles and draw again once their programs relink; their params
+         * buffers are rebuilt from the CPU copies. */
+        nt_material_restore_gpu();
         nt_shape_renderer_restore_gpu();
         nt_program_ref_drop(&s_sprite_cutoff_program);
         nt_program_ref_drop(&s_sprite_program);
@@ -1077,14 +1079,12 @@ int main(int argc, char *argv[]) {
      * across sprite+text layers). The cutoff sprite variant discards transparent button corners so
      * they don't punch depth; the per-element depth bias (element_depth_bias_ndc) keeps each panel's labels above its own bg. */
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
-        .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = true,
         .depth_write = true,
         .cull_mode = NT_CULL_NONE,
-        .params[0] = {.name = "u_alpha_cutoff", .value = {1.0F / 255.0F}},
-        .param_count = 1,
+        .params = (const float[4]){1.0F / 255.0F}, /* sprite_cutoff.frag: Material { vec4 u_alpha_cutoff; } */
+        .params_size = 4 * sizeof(float),
         .label = "ui_3d_demo_sprite",
     });
     s_text_material = nt_material_create(&(nt_material_create_desc_t){
@@ -1110,8 +1110,6 @@ int main(int argc, char *argv[]) {
     /* Inspector overlay materials: same shaders, depth_test=false so the debug sidebar stays on top
      * without testing the 3D scene depth (passive overlay, no depth-buffer side effects). */
     s_inspector_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
-        .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,

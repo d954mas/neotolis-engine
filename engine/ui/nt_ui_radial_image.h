@@ -64,10 +64,12 @@ static inline nt_ui_radial_image_style_t nt_ui_radial_image_style_defaults(void)
     };
 }
 
-/* Material param the shader reads, set once on the material by the game at creation
- * (one material per reveal mode). u_reveal_mode = {mode, dim_factor, 0, 0}. TINT is
- * per-widget (style->tint_color_packed/tint_strength -> a_tint), not a material param. */
-#define NT_UI_RADIAL_IMAGE_PARAM_MODE "u_reveal_mode"
+/* The shader's `Material` block, the params of a reveal material (one material per reveal
+ * mode): reveal_mode = {mode, dim_factor, 0, 0}. TINT is per-widget
+ * (style->tint_color_packed/tint_strength -> a_tint), not a material param. */
+typedef struct {
+    float reveal_mode[4];
+} nt_ui_radial_image_params_t;
 
 /* Two-angle form. angle_start/angle_end in radians, mathematical convention
  * (0=+X, CCW+). region is by-pointer: resolved lazily, memoized into *region; an

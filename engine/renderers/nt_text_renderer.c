@@ -41,13 +41,6 @@ static struct {
         uint64_t frame; /* gfx frame of the selection */
     } current;
 
-    /* Params last written, per program: equal params record nothing, so adjacent draws merge. */
-    struct {
-        nt_program_t program;
-        nt_material_t material;
-        float params[NT_MATERIAL_MAX_PARAMS][4];
-    } recorded;
-
     /* Quads of the draw_n in progress: contiguous from first_offset, drawn once. */
     struct {
         uint32_t first_offset;
@@ -124,7 +117,6 @@ static void resolve_material(nt_material_t mat, const nt_material_info_t *info) 
     /* A zero budget would make all text silently vanish. */
     NT_ASSERT(g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].capacity > 0 && g_nt_gfx_frame_storage[NT_GFX_FRAME_INDEX].capacity > 0 &&
               "text renderer: set nt_gfx_desc_t.frame_capacity[NT_GFX_FRAME_VERTEX] and [NT_GFX_FRAME_INDEX]");
-    NT_ASSERT(info->tex_count == 0 && "text material declares textures: every sampler unit belongs to the font");
     s_text.current.material = mat;
     s_text.current.info = info;
     s_text.current.program = info->program;
@@ -142,8 +134,7 @@ void nt_text_renderer_set_material(nt_material_t mat) {
     /* Assignment, not liveness: on the frame the context dies the program is
      * already dead here, and trapping on that would crash a recoverable event. */
     NT_ASSERT(info != NULL && info->program.id != 0 && "nt_text_renderer_set_material: invalid material or material has no program");
-    /* Params are compared when recorded, and resources are not stepped between draws of a frame.
-     * A failed resolve (pipeline 0) retries next frame; a destroyed program takes its pipeline
+    /* A failed resolve (pipeline 0) retries next frame; a destroyed program takes its pipeline
      * with it, so that selection resolves again. */
     const uint64_t frame = g_nt_gfx.counters.frame_sequence;
     if (mat.id == s_text.current.material.id && info->program.id == s_text.current.program.id && frame == s_text.current.frame &&
@@ -263,19 +254,12 @@ static void emit_decoration_quad(const float model[16], float x0, float y0, floa
 // #endregion
 
 // #region Record
-/* Pipeline first: uniforms and the texture set land on its program. */
+/* Pipeline first: the material's block and texture set land on its program; the font's curve
+ * texture is a draw texture. */
 static void record_state(nt_font_t font) {
-    const nt_material_info_t *mi = s_text.current.info;
     nt_gfx_bind_pipeline(s_text.current.pipeline);
-    const size_t param_bytes = (size_t)mi->param_count * sizeof(mi->params[0]);
-    if (s_text.recorded.program.id != s_text.current.program.id || s_text.recorded.material.id != s_text.current.material.id || memcmp(s_text.recorded.params, mi->params, param_bytes) != 0) {
-        nt_renderer_set_material_uniforms(mi);
-        s_text.recorded.program = s_text.current.program;
-        s_text.recorded.material = s_text.current.material;
-        memcpy(s_text.recorded.params, mi->params, param_bytes);
-    }
     const nt_gfx_texture_binding_t curve = {.name = s_text.curve_name, .texture = nt_font_get_curve_texture(font), .sampler = NT_SAMPLER_DEFAULT};
-    nt_gfx_apply_texture_bindings(&curve, 1);
+    nt_material_apply(s_text.current.material, &curve, 1);
     nt_gfx_bind_vertex_input(s_text.vertex_input);
 }
 

@@ -1264,16 +1264,10 @@ static void init_ui(void) {
     s_ui = nt_ui_create_context(s_ui_arena, s_ui_arena_size, &desc);
     NT_ASSERT(s_ui != NULL);
     s_ui_atlas = nt_resource_request(ASSET_ATLAS_ASTEROIDS_UI_ATLAS, NT_ASSET_ATLAS);
-    const nt_resource_t texture = nt_resource_request(ASSET_TEXTURE_ASTEROIDS_UI_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_ui_program.vs = nt_resource_request(nt_hash64_str("assets/shaders/sprite.vert"), NT_ASSET_SHADER_CODE);
     s_ui_program.fs = nt_resource_request(nt_hash64_str("assets/shaders/sprite.frag"), NT_ASSET_SHADER_CODE);
-    s_ui_material = nt_material_create(&(nt_material_create_desc_t){.textures = {{.name = "u_texture", .resource = texture}},
-                                                                    .texture_count = 1,
-                                                                    .blend = nt_blend_alpha_premultiplied(),
-                                                                    .depth_test = false,
-                                                                    .depth_write = false,
-                                                                    .cull_mode = NT_CULL_NONE,
-                                                                    .label = "asteroids_controls"});
+    s_ui_material =
+        nt_material_create(&(nt_material_create_desc_t){.blend = nt_blend_alpha_premultiplied(), .depth_test = false, .depth_write = false, .cull_mode = NT_CULL_NONE, .label = "asteroids_controls"});
     nt_ui_set_sprite_material(s_ui, s_ui_material);
     nt_ui_set_text_material(s_ui, s_text_material, 0);
     nt_ui_set_font(s_ui, 0, s_font);

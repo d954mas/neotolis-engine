@@ -94,8 +94,9 @@ color. The catalogue:
 | `HIDE` | discarded (fully hidden) |
 | `TINT` | mixed toward a tint color |
 
-`mode` and `dim_factor` are baked on the **material** at creation
-(`u_reveal_mode = {mode, dim_factor, 0, 0}`), so N widgets sharing a material
+`mode` and `dim_factor` are baked on the **material** at creation: its params are
+an `nt_ui_radial_image_params_t` (`reveal_mode = {mode, dim_factor, 0, 0}`, the
+shader's `Material { vec4 u_reveal_mode; }` block), so N widgets sharing a material
 reveal in the same mode. The **tint is per-widget** (`tint_color_packed` +
 `tint_strength` → baked into `a_tint`), so many differently-tinted radials share
 one TINT-mode material and still batch to a single draw.

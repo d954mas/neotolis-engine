@@ -337,8 +337,6 @@ static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
     desc.depth_write = false;
     desc.blend = blend;
     desc.cull_mode = NT_CULL_NONE;
-    desc.textures[0].name = "u_texture";
-    desc.texture_count = 1;
     desc.label = "test_sprite_material";
 
     nt_material_t mat = nt_material_create(&desc);
@@ -347,7 +345,9 @@ static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
 
 static nt_material_t create_test_material(void) { return create_test_material_with_blend(nt_blend_opaque()); }
 
-/* Slot 0 plus one vec4 param, so uniform counts are not vacuous. */
+/* One vec4 of params, so params binds are not vacuous. */
+static const float s_tint_one[4] = {1.0F, 0.0F, 0.0F, 0.0F};
+
 static nt_material_t create_test_material_with_param(void) {
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
@@ -355,11 +355,8 @@ static nt_material_t create_test_material_with_param(void) {
     desc.depth_test = false;
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;
-    desc.textures[0].name = "u_texture";
-    desc.texture_count = 1;
-    desc.params[0].name = "u_tint";
-    desc.params[0].value[0] = 1.0F;
-    desc.param_count = 1;
+    desc.params = s_tint_one;
+    desc.params_size = sizeof(s_tint_one);
     desc.label = "test_sprite_material_param";
 
     nt_material_t mat = nt_material_create(&desc);
@@ -496,7 +493,7 @@ void setUp(void) {
 
 static uint32_t recorded_draws(void) { return nt_gfx_draw_calls(&g_nt_gfx.counters); }
 
-static uint32_t recorded_params(void) { return g_nt_gfx.counters.accepted[NT_GFX_OP_UNIFORM_VEC4]; }
+static uint32_t recorded_params(void) { return g_nt_gfx.counters.accepted[NT_GFX_OP_UBO]; }
 
 /* Draws the list and returns the draws it recorded; a merge into the previous draw counts none. */
 static uint32_t draw_list_draws(const nt_render_item_t *items, uint32_t count) {
@@ -795,11 +792,12 @@ void test_sprite_renderer_keys_follow_unloaded_placeholder_and_replaced_pages(vo
     }
     TEST_ASSERT_EQUAL_UINT32(0, draw_list_draws(items, 2));
 
+    /* A sprite waits for its page whatever its shader samples. */
     for (uint32_t i = 0; i < 2; i++) {
         *nt_material_comp_handle(entities[i]) = textureless;
         items[i].batch_key = sprite_batch_key(entities[i], textureless);
     }
-    TEST_ASSERT_EQUAL_UINT32(1, draw_list_draws(items, 2));
+    TEST_ASSERT_EQUAL_UINT32(0, draw_list_draws(items, 2));
 
     nt_texture_t placeholder = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = s_white_pixel, .format = NT_TEXTURE_FORMAT_RGBA8});
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(page_pack, (nt_hash64_t){0xF11}, NT_ASSET_TEXTURE, placeholder.id));
@@ -843,9 +841,9 @@ void test_sprite_renderer_keys_follow_unloaded_placeholder_and_replaced_pages(vo
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(placeholder), nt_gfx_fake_bound_texture_at(0));
 }
 
-/* A material that declares no textures never takes the page, so crossing pages
- * must not split the run — contrast the two-page test above, which draws twice. */
-void test_sprite_renderer_textureless_material_ignores_page_change(void) {
+/* The page is a draw texture of every material; a program that samples nothing ignores it, binds
+ * no unit, and so its emits across pages still merge. */
+void test_sprite_renderer_textureless_material_binds_no_page(void) {
     s_atlas_res = register_test_atlas(0xE2ULL);
     nt_material_t mat = create_test_material_textureless();
     static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
@@ -861,13 +859,11 @@ void test_sprite_renderer_textureless_material_ignores_page_change(void) {
 
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
     nt_gfx_fake_draw_trace_reset(false);
 }
 
-/* An analytic-coverage material takes no page, so an unresolved page must not
- * hold its emit back. */
-void test_sprite_renderer_textureless_material_emits_without_page(void) {
+/* A sprite waits for its atlas page, also with a shader that samples nothing. */
+void test_sprite_renderer_waits_for_its_page_whatever_it_samples(void) {
     s_atlas_res = register_test_atlas(0xE3ULL);
     /* Unpublish the page texture: the atlas stays ready, its page does not resolve. */
     nt_resource_unregister(nt_hash32_str("sprite_renderer_pages"), (nt_hash64_t){FIXTURE_PAGE0_RID});
@@ -885,13 +881,12 @@ void test_sprite_renderer_textureless_material_emits_without_page(void) {
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
     nt_test_frame_next();
 
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
     nt_gfx_fake_draw_trace_reset(false);
 }
 
-/* The page is the material's slot 0, never the program's unit 0: a program that names
- * another sampler first must still read the page from the unit it gave "u_texture". */
+/* The page binds by name, never by position: a program that names another sampler first must
+ * still read the page from the unit it gave "u_texture". */
 void test_sprite_renderer_page_lands_on_its_program_unit(void) {
     s_atlas_res = register_test_atlas(0xEAULL);
 
@@ -899,12 +894,10 @@ void test_sprite_renderer_page_lands_on_its_program_unit(void) {
     memset(&mdesc, 0, sizeof(mdesc));
     mdesc.program = nt_gfx_fake_make_program((const char *const[]){"u_other", "u_texture"}, 2);
     mdesc.cull_mode = NT_CULL_NONE;
-    mdesc.textures[0].name = "u_texture";
-    mdesc.textures[0].resource = NT_RESOURCE_INVALID; /* the page substitutes into slot 0 */
     /* A distinct page makes swapped or duplicated bindings observable. */
-    mdesc.textures[1].name = "u_other";
-    mdesc.textures[1].resource = nt_atlas_get_page_resource(s_atlas_res, 1);
-    mdesc.texture_count = 2;
+    mdesc.textures[0].name = "u_other";
+    mdesc.textures[0].resource = nt_atlas_get_page_resource(s_atlas_res, 1);
+    mdesc.texture_count = 1;
     mdesc.label = "test_sprite_material_page_on_unit_1";
     nt_material_t mat = nt_material_create(&mdesc);
 
@@ -922,8 +915,8 @@ void test_sprite_renderer_page_lands_on_its_program_unit(void) {
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 0))}), nt_gfx_fake_bound_texture_at(1));
 }
 
-/* set_material resolves the non-page slots, and publication changes only between frames, so a
- * resource republished by the resource step reaches the next frame's selection. A page change
+/* The material's own textures resolve at each apply, and publication changes only between
+ * frames, so a resource republished by the resource step reaches the next frame. A page change
  * rebinds only the page unit. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_sprite_renderer_non_page_slot_resolves_per_frame(void) {
@@ -933,17 +926,15 @@ void test_sprite_renderer_non_page_slot_resolves_per_frame(void) {
     memset(&mdesc, 0, sizeof(mdesc));
     mdesc.program = nt_gfx_fake_make_program((const char *const[]){"u_other", "u_texture"}, 2);
     mdesc.cull_mode = NT_CULL_NONE;
-    mdesc.textures[0].name = "u_texture";
-    mdesc.textures[0].resource = NT_RESOURCE_INVALID; /* the page substitutes into slot 0 */
-    mdesc.textures[1].name = "u_other";
-    mdesc.textures[1].resource = nt_atlas_get_page_resource(s_atlas_res, 1);
-    mdesc.texture_count = 2;
+    mdesc.textures[0].name = "u_other";
+    mdesc.textures[0].resource = nt_atlas_get_page_resource(s_atlas_res, 1);
+    mdesc.texture_count = 1;
     mdesc.label = "test_sprite_material_republished_slot";
     nt_material_t mat = nt_material_create(&mdesc);
 
     static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
 
-    /* Frame 1: slot 1 ("u_other" -> unit 0) binds the page-1 texture from setUp. */
+    /* Frame 1: "u_other" (unit 0) binds the page-1 texture from setUp. */
     nt_gfx_fake_reset();
     nt_test_frame_finish_links();
     nt_sprite_renderer_set_material(mat);
@@ -988,7 +979,7 @@ void test_sprite_renderer_non_page_slot_resolves_per_frame(void) {
 }
 
 /* A program replaced between an immediate emit and an ECS draw_list puts one
- * material id on two programs in one frame; the uniforms must go out twice. */
+ * material id on two programs in one frame; its params buffer stays bound across both. */
 void test_sprite_renderer_program_replace_between_immediate_and_draw_list(void) {
     s_atlas_res = register_test_atlas(0xE5ULL);
     nt_material_t mat = create_test_material_with_param();
@@ -1014,16 +1005,14 @@ void test_sprite_renderer_program_replace_between_immediate_and_draw_list(void) 
     TEST_ASSERT_EQUAL_UINT32(program_a.id, nt_gfx_fake_draw_trace_at(0).program.id);
     TEST_ASSERT_EQUAL_UINT32(program_b.id, nt_gfx_fake_draw_trace_at(1).program.id);
     TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET] - sets_before);
-    /* Each draw applies its set; the second, equal set ends CACHE.
-     * Params are program state and go out twice. */
+    /* Each draw applies its set and params; the second, equal ones end CACHE. */
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_uniform_vec4_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count());
     nt_gfx_fake_draw_trace_reset(false);
 }
 
 /* A sampler override picks filtering for a texture that still has to exist, so
- * an unresolved slot 1 is a bug even with one set. */
+ * an unresolved material slot is a bug even next to a loaded page. */
 void test_sprite_renderer_emit_asserts_on_unresolved_slot_with_override(void) {
     s_atlas_res = register_test_atlas(0xE6ULL);
     nt_sampler_t override = nt_gfx_make_sampler(&(nt_sampler_desc_t){
@@ -1038,11 +1027,10 @@ void test_sprite_renderer_emit_asserts_on_unresolved_slot_with_override(void) {
     memset(&mdesc, 0, sizeof(mdesc));
     mdesc.program = nt_gfx_fake_make_program((const char *const[]){"u_texture", "u_second"}, 2);
     mdesc.cull_mode = NT_CULL_NONE;
-    mdesc.textures[0].name = "u_texture";
-    mdesc.textures[1].name = "u_second";
-    mdesc.textures[1].resource = NT_RESOURCE_INVALID;
-    mdesc.textures[1].sampler = override;
-    mdesc.texture_count = 2;
+    mdesc.textures[0].name = "u_second";
+    mdesc.textures[0].resource = NT_RESOURCE_INVALID;
+    mdesc.textures[0].sampler = override;
+    mdesc.texture_count = 1;
     mdesc.label = "test_sprite_material_two_slots";
     nt_material_t mat = nt_material_create(&mdesc);
 
@@ -1061,8 +1049,6 @@ void test_sprite_renderer_material_missing_a_program_sampler_asserts(void) {
     memset(&mdesc, 0, sizeof(mdesc));
     mdesc.program = nt_gfx_fake_make_program((const char *const[]){"u_texture", "u_second"}, 2);
     mdesc.cull_mode = NT_CULL_NONE;
-    mdesc.textures[0].name = "u_texture";
-    mdesc.texture_count = 1;
     mdesc.label = "test_sprite_material_missing_sampler";
     nt_material_t mat = nt_material_create(&mdesc);
 
@@ -1081,7 +1067,7 @@ void test_sprite_renderer_unknown_sampler_name_is_ignored(void) {
     memset(&mdesc, 0, sizeof(mdesc));
     mdesc.program = nt_gfx_fake_make_program(NULL, 0);
     mdesc.cull_mode = NT_CULL_NONE;
-    mdesc.textures[0].name = "u_texture";
+    mdesc.textures[0].name = "u_unsampled";
     mdesc.texture_count = 1;
     mdesc.label = "test_sprite_material_unknown_sampler";
     nt_material_t mat = nt_material_create(&mdesc);
@@ -1457,78 +1443,6 @@ void test_sprite_renderer_flip_mirrors_around_pivot(void) {
     assert_pos_close(2.0F, -28.0F, p, "flip-both v3");
 }
 
-/* ---- Test: material sampler override does not stick across draws ----
- *
- * Regression for the "sticky sampler" bug. Two materials, both rendering
- * the same atlas region (so the same page texture). Material A has a
- * sampler override (LINEAR). Material B has none — should fall back to
- * the texture's default sampler (NEAREST, set when page0 was created).
- * Order: [A_override, B_no_override]. After both draws, the unit must hold
- * the texture default, not A's override. Without sampler delta-tracking,
- * B's draw would skip bind_sampler entirely (texture-bind cache hit),
- * leaving A's override on the unit. */
-static nt_material_t create_test_material_with_sampler(nt_sampler_t override) {
-    nt_material_create_desc_t desc;
-    memset(&desc, 0, sizeof(desc));
-    desc.program = nt_gfx_fake_make_program((const char *const[]){"u_tex"}, 1);
-    desc.cull_mode = NT_CULL_NONE;
-    desc.texture_count = 1;
-    desc.textures[0].name = "u_tex";
-    desc.textures[0].resource = NT_RESOURCE_INVALID;
-    desc.textures[0].sampler = override;
-    desc.label = "test_mat_override";
-    nt_material_t mat = nt_material_create(&desc);
-    return mat;
-}
-
-void test_sprite_renderer_sampler_override_does_not_stick(void) {
-    s_atlas_res = register_test_atlas(0xA9ULL);
-
-    /* Override sampler differs from page0's default (NEAREST/CLAMP from zero-init
-     * desc in setUp). LINEAR + REPEAT guarantees a fresh dedup slot. */
-    nt_sampler_t override = nt_gfx_make_sampler(&(nt_sampler_desc_t){
-        .min_filter = NT_FILTER_LINEAR,
-        .mag_filter = NT_FILTER_LINEAR,
-        .wrap_u = NT_WRAP_REPEAT,
-        .wrap_v = NT_WRAP_REPEAT,
-    });
-    TEST_ASSERT_TRUE(override.id != 0);
-
-    nt_material_t mat_override = create_test_material_with_sampler(override);
-    nt_material_t mat_plain = create_test_material();
-
-    nt_entity_t e_a = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat_override);
-    nt_entity_t e_b = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat_plain);
-
-    nt_render_item_t items[2];
-    items[0].sort_key = 0;
-    items[0].entity = e_a.id;
-    nt_test_frame_finish_links();
-    items[0].batch_key = sprite_batch_key(e_a, mat_override);
-    items[1].sort_key = 1;
-    items[1].entity = e_b.id;
-    items[1].batch_key = sprite_batch_key(e_b, mat_plain);
-
-    nt_gfx_fake_reset();
-    nt_sprite_renderer_draw_list(items, 2);
-    nt_test_frame_next();
-
-    /* Resolve the page texture's default sampler (what the second draw should
-     * leave bound). page0.id was registered under FIXTURE_PAGE0_RID; FIXTURE_R0
-     * lives on page 0. */
-    nt_resource_t page0_res = nt_atlas_get_page_resource(s_atlas_res, 0);
-    nt_texture_t page0_tex = (nt_texture_t){.id = nt_resource_get(page0_res)};
-    nt_sampler_t page0_default = nt_gfx_get_texture_default_sampler(page0_tex);
-
-    /* Last sampler on slot 0 must equal page0's default, not the override
-     * carried over from draw 0. */
-    uint32_t last = nt_gfx_fake_last_sampler(0);
-    uint32_t default_backend = nt_gfx_test_sampler_backend_id(page0_default);
-    uint32_t override_backend = nt_gfx_test_sampler_backend_id(override);
-    TEST_ASSERT_TRUE(default_backend != 0 && override_backend != 0 && default_backend != override_backend);
-    TEST_ASSERT_EQUAL_UINT32(default_backend, last);
-}
-
 /* ---- emit_slice9 NULL-src (atlas-baked borders) tests ---- */
 
 /* Helper: resolve the rs9 region's runtime index in the registered atlas. */
@@ -1880,95 +1794,67 @@ void test_sprite_renderer_page_and_material_changes_split_compatible_calls_merge
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(before + 3, recorded_draws(), "a material change starts a draw");
 }
 
-/* ---- Params memo ---- */
+/* ---- Material params ---- */
 
 static nt_material_t create_param_material(nt_program_t program, float tint) {
+    const float params[4] = {tint, 0.0F, 0.0F, 0.0F};
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
     desc.program = program;
     desc.cull_mode = NT_CULL_NONE;
-    desc.textures[0].name = "u_texture";
-    desc.texture_count = 1;
-    desc.params[0].name = "u_tint";
-    desc.params[0].value[0] = tint;
-    desc.param_count = 1;
+    desc.params = params;
+    desc.params_size = sizeof(params);
     desc.label = "test_sprite_param_material";
     return nt_material_create(&desc);
 }
 
 static nt_program_t make_param_program(void) { return nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1); }
 
-/* Emits one quad and returns the params it recorded. */
+/* Emits one quad and returns the params binds it recorded. */
 static uint32_t emit_params(void) {
     const uint32_t before = recorded_params();
     nt_sprite_renderer_emit_region(s_atlas_res, 0, NT_MATH_MAT4_IDENTITY, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
     return recorded_params() - before;
 }
 
-/* Ends the frame so the fake has executed the recorded uniforms. */
-static float last_recorded_tint(void) {
-    nt_test_frame_next();
-    const uint32_t count = nt_gfx_fake_uniform_vec4_count();
-    TEST_ASSERT_TRUE(count > 0);
-    float value[4];
-    nt_gfx_fake_uniform_vec4_value_at(count - 1U, value);
-    return value[0];
-}
-
-/* Params are program state: a material returning after another one on the same program
- * writes its params again. */
-void test_sprite_renderer_params_rewritten_when_material_returns(void) {
+/* Each material binds its own params buffer: a material returning after another rebinds its own. */
+void test_sprite_renderer_params_rebind_when_material_returns(void) {
     s_atlas_res = register_test_atlas(0xD2ULL);
     const nt_program_t program = make_param_program();
     const nt_material_t mat_a = create_param_material(program, 1.0F);
     const nt_material_t mat_b = create_param_material(program, 2.0F);
 
     nt_test_frame_finish_links();
+    nt_gfx_fake_reset();
     nt_sprite_renderer_set_material(mat_a);
     TEST_ASSERT_EQUAL_UINT32(1, emit_params());
     nt_sprite_renderer_set_material(mat_b);
     TEST_ASSERT_EQUAL_UINT32(1, emit_params());
     nt_sprite_renderer_set_material(mat_a);
     TEST_ASSERT_EQUAL_UINT32(1, emit_params());
-    TEST_ASSERT_TRUE(last_recorded_tint() == 1.0F);
+    nt_test_frame_next();
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_ubo_bind_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_ubo_bind_at(0).buffer_backend, nt_gfx_fake_ubo_bind_at(2).buffer_backend);
+    TEST_ASSERT_NOT_EQUAL_UINT32(nt_gfx_fake_ubo_bind_at(0).buffer_backend, nt_gfx_fake_ubo_bind_at(1).buffer_backend);
 }
 
-void test_sprite_renderer_set_param_between_frames_reaches_next_frame(void) {
-    s_atlas_res = register_test_atlas(0xD3ULL);
-    const nt_material_t mat = create_param_material(make_param_program(), 1.0F);
-
-    nt_test_frame_finish_links();
-    nt_sprite_renderer_set_material(mat);
-    TEST_ASSERT_EQUAL_UINT32(1, emit_params());
-
-    /* Control: the uniforms persist in the program, so an unchanged material writes nothing. */
-    nt_test_frame_next();
-    nt_sprite_renderer_set_material(mat);
-    TEST_ASSERT_EQUAL_UINT32(0, emit_params());
-
-    nt_test_frame_next();
-    nt_material_set_param(mat, "u_tint", (const float[4]){5.0F, 0.0F, 0.0F, 0.0F});
-    nt_sprite_renderer_set_material(mat);
-    TEST_ASSERT_EQUAL_UINT32(1, emit_params());
-    TEST_ASSERT_TRUE(last_recorded_tint() == 5.0F);
-}
-
-void test_sprite_renderer_set_param_after_set_material_is_recorded(void) {
+/* set_params writes the material's buffer; the emit of the same material binds nothing again. */
+void test_sprite_renderer_set_params_writes_the_buffer(void) {
     s_atlas_res = register_test_atlas(0xD4ULL);
     const nt_material_t mat = create_param_material(make_param_program(), 1.0F);
 
     nt_test_frame_finish_links();
     nt_sprite_renderer_set_material(mat);
     TEST_ASSERT_EQUAL_UINT32(1, emit_params());
-    nt_material_set_param(mat, "u_tint", (const float[4]){7.0F, 0.0F, 0.0F, 0.0F});
-    const uint32_t draws_before = recorded_draws();
-    TEST_ASSERT_EQUAL_UINT32(1, emit_params());
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(draws_before + 1, recorded_draws(), "a uniform write starts a draw");
-    TEST_ASSERT_TRUE(last_recorded_tint() == 7.0F);
+    const float tint[4] = {7.0F, 0.0F, 0.0F, 0.0F};
+    nt_material_set_params(mat, tint, sizeof(tint));
+    TEST_ASSERT_EQUAL_MEMORY(tint, nt_gfx_fake_last_update_buffer_data(), sizeof(tint));
+    TEST_ASSERT_EQUAL_UINT32(0, emit_params());
+    nt_test_frame_next();
 }
 
-/* A program replaced after set_material takes effect at the next set_material, which writes
- * the params on the new program. */
+/* A program replaced after set_material takes effect at the next set_material; the material's
+ * params buffer stays bound across the program change. */
 void test_sprite_renderer_set_program_applies_at_next_set_material(void) {
     s_atlas_res = register_test_atlas(0xD5ULL);
     const nt_program_t program_a = make_param_program();
@@ -1981,13 +1867,12 @@ void test_sprite_renderer_set_program_applies_at_next_set_material(void) {
     nt_material_set_program(mat, program_b);
     TEST_ASSERT_EQUAL_UINT32(1, emit_params());
     nt_sprite_renderer_set_material(mat);
-    TEST_ASSERT_EQUAL_UINT32(1, emit_params());
+    TEST_ASSERT_EQUAL_UINT32(0, emit_params());
     nt_test_frame_next();
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(program_a.id, nt_gfx_fake_draw_trace_at(0).program.id);
     TEST_ASSERT_EQUAL_UINT32(program_b.id, nt_gfx_fake_draw_trace_at(1).program.id);
-    TEST_ASSERT_TRUE(last_recorded_tint() == 1.0F);
     nt_gfx_fake_draw_trace_reset(false);
 }
 
@@ -2136,9 +2021,8 @@ void test_sprite_renderer_draws_after_context_restore_without_a_restore_call(voi
     memset(&desc, 0, sizeof(desc));
     desc.program = nt_gfx_fake_make_program(NULL, 0);
     desc.cull_mode = NT_CULL_NONE;
-    desc.params[0].name = "u_tint";
-    desc.params[0].value[0] = 1.0F;
-    desc.param_count = 1;
+    desc.params = s_tint_one;
+    desc.params_size = sizeof(s_tint_one);
     const nt_material_t mat = nt_material_create(&desc);
     nt_entity_t entity = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
     nt_test_frame_finish_links();
@@ -2161,15 +2045,18 @@ void test_sprite_renderer_draws_after_context_restore_without_a_restore_call(voi
     TEST_ASSERT_EQUAL_UINT32(draws_before, recorded_draws());
 
     nt_gfx_fake_set_context_lost(false);
-    nt_test_frame_next();
+    nt_test_frame_close();
+    nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    nt_material_restore_gpu(); /* the restore sequence runs before the frame's first pass */
+    nt_test_frame_begin_pass();
     const nt_program_t relinked = nt_gfx_fake_make_program(NULL, 0);
     nt_material_set_program(mat, relinked);
     nt_test_frame_finish_links();
 
     nt_gfx_fake_draw_trace_reset(true);
     nt_sprite_renderer_set_material(mat);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, emit_params(), "the relinked program gets the params once");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, emit_params(), "the rebuilt params buffer binds once");
     TEST_ASSERT_EQUAL_UINT32(vi_creates + 1U, nt_gfx_fake_vertex_input_create_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_vertex_input_cache_count());
     const uint32_t params_before = recorded_params();
@@ -2225,17 +2112,20 @@ void test_sprite_renderer_reselect_after_program_destroyed_in_frame_draws_nothin
     TEST_ASSERT_EQUAL_UINT32(draws_before, recorded_draws());
 }
 
-/* The texture set is applied even with no declarations, so gfx still checks the program's samplers. */
+/* The texture set is applied with the page alone too, so gfx still checks the program's other
+ * samplers: a material that leaves one undeclared asserts after a complete one. */
 void test_sprite_renderer_undeclared_sampler_after_textured_material_asserts(void) {
     s_atlas_res = register_test_atlas(0xDEULL);
-    const nt_program_t program = make_param_program();
+    const nt_program_t program = nt_gfx_fake_make_program((const char *const[]){"u_texture", "u_extra"}, 2);
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
     desc.program = program;
     desc.cull_mode = NT_CULL_NONE;
     const nt_material_t bare = nt_material_create(&desc);
+    desc.textures[0] = (nt_material_texture_desc_t){.name = "u_extra", .resource = nt_atlas_get_page_resource(s_atlas_res, 1)};
+    desc.texture_count = 1;
+    const nt_material_t material = nt_material_create(&desc);
 
-    const nt_material_t material = create_param_material(program, 1.0F);
     nt_test_frame_finish_links();
     nt_sprite_renderer_set_material(material);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, NT_MATH_MAT4_IDENTITY, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U); /* control */
@@ -2321,8 +2211,8 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_batch_grouping);
     RUN_TEST(test_sprite_renderer_same_material_two_pages_state);
     RUN_TEST(test_sprite_renderer_keys_follow_unloaded_placeholder_and_replaced_pages);
-    RUN_TEST(test_sprite_renderer_textureless_material_ignores_page_change);
-    RUN_TEST(test_sprite_renderer_textureless_material_emits_without_page);
+    RUN_TEST(test_sprite_renderer_textureless_material_binds_no_page);
+    RUN_TEST(test_sprite_renderer_waits_for_its_page_whatever_it_samples);
     RUN_TEST(test_sprite_renderer_page_lands_on_its_program_unit);
     RUN_TEST(test_sprite_renderer_non_page_slot_resolves_per_frame);
     RUN_TEST(test_sprite_renderer_program_replace_between_immediate_and_draw_list);
@@ -2343,7 +2233,6 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_emit_geometry_asserts_partial_triangle);
     RUN_TEST(test_sprite_renderer_flip_mirrors_around_pivot);
     RUN_TEST(test_sprite_renderer_intrinsic_scale_emit_positions_and_uvs);
-    RUN_TEST(test_sprite_renderer_sampler_override_does_not_stick);
     RUN_TEST(test_draw_list_slice9_flip_mirrors_source);
     RUN_TEST(test_emit_slice9_null_src_scale_one_matches_atlas);
     RUN_TEST(test_emit_slice9_null_src_scale_two_doubles_borders);
@@ -2353,9 +2242,8 @@ int main(void) {
     RUN_TEST(test_emit_slice9_degrades_when_dst_smaller_than_borders);
     RUN_TEST(test_sprite_comp_slice9_scale_affects_emit_position);
     RUN_TEST(test_sprite_renderer_page_and_material_changes_split_compatible_calls_merge);
-    RUN_TEST(test_sprite_renderer_params_rewritten_when_material_returns);
-    RUN_TEST(test_sprite_renderer_set_param_between_frames_reaches_next_frame);
-    RUN_TEST(test_sprite_renderer_set_param_after_set_material_is_recorded);
+    RUN_TEST(test_sprite_renderer_params_rebind_when_material_returns);
+    RUN_TEST(test_sprite_renderer_set_params_writes_the_buffer);
     RUN_TEST(test_sprite_renderer_set_program_applies_at_next_set_material);
     RUN_TEST(test_sprite_renderer_one_material_records_params_once);
     RUN_TEST(test_sprite_renderer_emit_after_odd_geometry_starts_at_multiple_of_4);

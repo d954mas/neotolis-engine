@@ -632,12 +632,9 @@ int main(int argc, char **argv) {
     s_sprite_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
     s_sprite_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_BUNNIES, NT_ASSET_ATLAS);
-    nt_resource_t atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_BUNNIES_TEX0, NT_ASSET_TEXTURE);
 
     /* Material — premultiplied-alpha blend, depth off. */
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .textures = {{.name = "u_texture", .resource = atlas_tex_handle}},
-        .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,

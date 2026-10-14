@@ -238,14 +238,13 @@ per-frame gate needs no assignment latch.
 
 Sprite and text have no staged work: `nt_sprite_renderer_set_material` and
 `nt_text_renderer_set_material` resolve the material for the current gfx frame,
-are called every frame before drawing (asserted), and each emit or draw records
-its draw at the call with the params current at that call. A program replaced
+are called every frame before drawing (asserted), and each emit or draw applies
+its material at the call (`nt_material_apply`). A program replaced
 behind the same material handle takes effect at the next `set_material`, which
 compares the program as well as the handle; draws already recorded keep their
-pipeline. Sprite `draw_list` resolves each run's material itself. The text
-renderer writes material params only when `{program, material, params}` differ
-from its last write, so nothing else may write the uniforms of a program that
-text materials use. A program is destroyed only outside a drawn frame (the frame rule), so a
+pipeline. Sprite `draw_list` resolves each run's material itself. Material params
+live in the material's own uniform buffer, so no draw depends on what another
+material wrote. A program is destroyed only outside a drawn frame (the frame rule), so a
 pipeline resolved at `set_material` stays live for the frame's draws.
 
 A material carries no readiness field. Callers derive readiness with
@@ -257,11 +256,12 @@ immediate-mode `nt_sprite_renderer_set_material` / `nt_text_renderer_set_materia
 entry points assert only that a program was assigned.
 
 Every material declares a slot for every sampler its program uses that the
-material owns; a texture owned by a mesh draw is a draw texture, not a material
-slot ([material, MaterialAsset purpose](../render/material.md#materialasset-purpose)).
-The sprite and text renderers keep their documented exceptions until the material
-bind group (planned, #600). A declared name the program does not sample is ignored
-before its descriptor handle is inspected.
+material owns; a texture owned by the draw (the sprite atlas page, the font curve
+texture, the skin deformation texture, a game's per-draw texture) is a draw texture
+passed to `nt_material_apply`, not a material slot
+([material, Textures and draw textures](../render/material.md#textures-and-draw-textures)).
+A declared name the program does not sample is ignored before its descriptor
+handle is inspected.
 
 Every active declared slot must resolve to a texture. Register a
 placeholder with `nt_resource_set_placeholder_texture` to survive async load
@@ -272,14 +272,12 @@ backend units, validates coverage, and publishes only the full valid set. A
 rejected set discards the logical binding state, so a draw cannot reuse the
 previous material's textures.
 
-Sprite and text retain legacy exceptions until the material bind group (planned, #600). A sprite material that
-samples the atlas declares its page sampler at slot 0, but the renderer
-substitutes the page resource per emit and run; a material declaring no textures
-never receives the page and is for analytical coverage. A text material declares
-no textures at all — the font's curve texture is the text renderer's
-own bind. `nt_text_renderer_set_material` asserts that the material declares
-nothing, and each draw records its font set; gfx's coverage check confirms every
-sampler the program actually links.
+A sprite material never declares the atlas page: every emit and run passes the
+page as the draw texture `u_texture` with the page's default sampler, and a sprite
+whose page does not resolve skips its emit or run whatever its shader samples. A
+text material may declare textures of its own; each draw passes the font's curve
+texture as `u_curve_texture`. gfx's coverage check confirms every sampler the
+program actually links.
 
 A text material picks its fragment shader by depth writes. `slug_text.frag` has
 no `discard`: a premultiplied empty pixel changes nothing, and `discard` blocks

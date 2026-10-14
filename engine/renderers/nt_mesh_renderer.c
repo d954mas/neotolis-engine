@@ -70,7 +70,8 @@ void nt_mesh_renderer_shutdown(void) { memset(&s_mesh_renderer, 0, sizeof(s_mesh
 
 // #region run
 /* One call's state: a pass or foreign pipeline between calls invalidates it. The draw texture's
- * name and sampler are fixed within a call, so its texture id identifies what was applied. */
+ * name and sampler are fixed within a call, so its texture id identifies what was applied: a run
+ * of the same material and draw texture applies nothing again. */
 typedef struct {
     nt_material_t material;
     nt_mesh_t mesh;
@@ -109,29 +110,12 @@ static bool resolve(mesh_draw_t *d, nt_material_t material, const nt_material_in
     return true;
 }
 
-/* Pipeline first: uniforms and the texture set land on its program. The set is the material's
- * declarations followed by the optional draw texture; gfx resolves units by name. */
-static void record(mesh_draw_t *d, const nt_material_info_t *mi, const nt_gfx_mesh_info_t *mesh_info, const nt_gfx_texture_binding_t *draw, uint32_t offset, uint32_t count) {
+/* Pipeline first: the material's block and texture set land on its program. */
+static void record(mesh_draw_t *d, const nt_gfx_mesh_info_t *mesh_info, const nt_gfx_texture_binding_t *draw, uint32_t offset, uint32_t count) {
     nt_gfx_bind_pipeline(d->pipeline);
-    const bool material_changed = d->material.id != d->applied_material;
-    if (material_changed) {
-        nt_renderer_set_material_uniforms(mi);
-    }
-    if (material_changed || (draw != NULL && draw->texture.id != d->applied_draw)) {
-        nt_gfx_texture_binding_t bindings[NT_MATERIAL_MAX_TEXTURES + 1];
-        for (uint8_t t = 0; t < mi->tex_count; t++) {
-            bindings[t] = (nt_gfx_texture_binding_t){
-                .name = {.value = mi->tex_name_hashes[t]},
-                .texture = {.id = nt_resource_get(mi->tex_resources[t])},
-                .sampler = mi->tex_samplers[t],
-            };
-        }
-        uint8_t binding_count = mi->tex_count;
-        if (draw != NULL) {
-            bindings[binding_count++] = *draw;
-            d->applied_draw = draw->texture.id;
-        }
-        nt_gfx_apply_texture_bindings(bindings, binding_count);
+    if (d->material.id != d->applied_material || (draw != NULL && draw->texture.id != d->applied_draw)) {
+        nt_material_apply(d->material, draw, draw != NULL ? 1U : 0U);
+        d->applied_draw = draw != NULL ? draw->texture.id : 0U;
     }
     d->applied_material = d->material.id;
     nt_gfx_bind_vertex_input_instanced(d->vertex_input, d->instance_layout, d->instances, offset);
@@ -153,7 +137,7 @@ static void draw_one(nt_mesh_t mesh, nt_material_t material, nt_instance_layout_
     NT_ASSERT(mat_info != NULL && mesh_info != NULL && "mesh draw references a destroyed material or mesh");
     mesh_draw_t draw = {.instance_layout = layout, .instances = instances};
     if (resolve(&draw, material, mat_info, mesh)) {
-        record(&draw, mat_info, mesh_info, draw_texture, offset, count);
+        record(&draw, mesh_info, draw_texture, offset, count);
     }
 }
 
@@ -212,7 +196,7 @@ void nt_mesh_renderer_draw_list(uint32_t stream, const nt_render_item_t *items, 
             nt_mesh_instance_world_rows(dst->world_rows, transform_view.world_matrices[transform_index]);
             dst->color = drawable_view.colors_packed[drawable_index];
         }
-        record(&draw, mat_info, mesh_info, NULL, offset, instance_count);
+        record(&draw, mesh_info, NULL, offset, instance_count);
     }
 }
 
@@ -291,7 +275,7 @@ void nt_mesh_renderer_draw_list_skinned(uint32_t stream, const nt_render_item_t 
             dst->skin_alpha = binding.alpha;
             dst->color = drawable_view.colors_packed[drawable_index];
         }
-        record(&draw, mat_info, mesh_info, &skin, offset, instance_count);
+        record(&draw, mesh_info, &skin, offset, instance_count);
     }
 }
 // #endregion

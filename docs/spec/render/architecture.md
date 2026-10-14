@@ -332,15 +332,10 @@ name-keyed set for the bound program, resolves it into those units,
 then publishes the logical set and records its texture-unit binds together.
 A missing or duplicate active name, invalid handle, or sampler-type mismatch
 asserts before any bind is recorded; inactive names are ignored before their handles
-are inspected. Context loss (also one a lazy sampler recreate meets) or a texture husk
-publishes no set and records no texture-unit bind: gfx reports the failure and skips
-the following draws of that set. A vec4 param a material
-does not declare still retains the value last written on that program.
-Before each draw, the game and renderer must ensure the program holds every
-numeric uniform value that draw needs. Materials supply only their declared
-params; any required value they omit must be explicitly established by the game
-or renderer. The vec4 cache neither validates material completeness nor resets
-omitted values. Destroying a program destroys its
+are inspected. Context loss (also one a lazy sampler recreate meets) publishes no set and records
+no texture-unit bind, and a texture husk asserts. Material params are no program
+state: each material binds its own uniform buffer
+([material, Params](material.md#params)). Destroying a program destroys its
 pipelines, and a context loss frees every pipeline slot.
 
 **Depth comparison.** `nt_pipeline_desc_t.depth_func` selects any of the eight
@@ -401,15 +396,13 @@ content rather than a handful of small fields.
 **State transitions.** The sprite renderer keeps no bind tracking: every
 immediate emit and every `draw_list` run binds its pipeline, texture set and
 vertex input and records its draw, and the front-end drops the equal binds and
-merges the contiguous draws. Its one memo is the params memo above, keyed by the
-program the pipeline was built on, so a program replaced behind an unchanged
-material handle writes its params again.
+merges the contiguous draws.
 
 The mesh renderer keeps no bind tracking: every run binds its pipeline and
-vertex input, and the front-end drops the equal ones. It skips only material
-work — the vec4 param loop and the texture set — between runs of one call that
-keep the material. In the skinned list a deformation-only change applies the
-texture set, not the params. Inside one call the pipeline follows from the material, so a program change is
+vertex input, and the front-end drops the equal ones. It skips only
+`nt_material_apply` between runs of one call that keep the material and the draw
+texture; a skinned deformation-only change applies again, and the front-end drops
+the unchanged params bind. Inside one call the pipeline follows from the material, so a program change is
 a material change. A core draw call applies its material every time.
 Texture and sampler travel together in one `nt_gfx_texture_binding_t`; a material
 without an override selects the texture's asset default. At every material
