@@ -289,12 +289,14 @@ and are not auto-restored: loss itself frees their pool slots, so a handle
 held across a loss goes stale and `nt_gfx_vertex_input_valid` reports false.
 A mesh's vertex input is made again on its first use after the restore; renderer
 caches validate on lookup and self-heal. This is the rule for baked objects — pipelines, vertex
-inputs and render targets, all assembled from other handles with no re-fill
-path: a context loss frees their pool slots outright. Primary resources (buffers, textures,
+inputs and render targets, all assembled from other handles: their users
+already validate a held handle and make it again (renderer caches self-heal on
+lookup), so a context loss frees their pool slots outright. Primary resources (buffers, textures,
 shaders, programs) instead survive a loss as husks — pool slot alive,
-backend gone — because per-frame code keeps operating on them through the
-loss window and the restore recipe has their owners destroy the old handles
-explicitly. Applying a texture set containing a husk reports once and issues no
+backend gone — because materials and game code hold them through the loss
+window and already gate on readiness (a link is asynchronous anyway), so a husk
+needs no second validity check, and the restore recipe has their owners destroy
+the old handles explicitly, which keeps a stale primary handle a bug that asserts. Applying a texture set containing a husk reports once and issues no
 texture or sampler bind, and the draws of that set are skipped; binding a husk
 buffer, or writing into any husk, asserts. Destroying handle 0 is a silent no-op
 for every primary type, so an owner whose create met a loss destroys without a check.

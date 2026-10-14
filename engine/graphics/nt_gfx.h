@@ -922,7 +922,7 @@ bool nt_gfx_program_valid(nt_program_t prog);
 bool nt_gfx_pipeline_valid(nt_pipeline_t pip);
 /* Reports a live vertex-input slot; false after direct destruction, the
  * destroy_buffer cascade, or a context loss (loss frees every vertex-input
- * slot -- they are baked objects with no re-fill path). Renderer caches
+ * slot -- they are baked objects their users remake). Renderer caches
  * check this on lookup and self-heal. */
 bool nt_gfx_vertex_input_valid(nt_vertex_input_t vi);
 /* True once nt_gfx_begin_frame finished the link on the current context; never turns true inside a frame.

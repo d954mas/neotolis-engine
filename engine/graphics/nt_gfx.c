@@ -633,9 +633,9 @@ static void wipe_backend_handles(void) {
     for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
         s_gfx.program_states[i] = NT_GFX_PROGRAM_NONE;
     }
-    /* Pipelines, vertex inputs and render targets are baked objects with no re-fill path:
-     * loss frees their slots outright, so handles held across a loss go stale and owners
-     * make them again. Primary resources stay as husks -- owners destroy them.
+    /* Pipelines, vertex inputs and render targets are baked from other handles, and their users
+     * validate and remake them: loss frees their slots outright. Primary resources stay as husks
+     * that readiness checks already skip; owners destroy them.
      * Pipelines free high to low: the pool reuses the last freed slot first, and make_pipeline
      * scans from slot 1, so the next pipelines land where the scan reaches them soonest. */
     for (uint32_t i = s_gfx.pipeline_pool.capacity; i >= 1; i--) {
