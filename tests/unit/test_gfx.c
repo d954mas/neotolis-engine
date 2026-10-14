@@ -386,6 +386,27 @@ void test_gfx_program_pool_full_asserts(void) {
     EXPECT_ASSERT(nt_gfx_make_program(vs, fs));
 }
 
+/* ---- Shader: exhausting the pool is a configuration error ---- */
+
+void test_gfx_shader_pool_full_asserts(void) {
+    for (int i = 0; i < 8; i++) { /* setUp: max_shaders = 8 */
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, make_test_vs().id);
+    }
+    EXPECT_ASSERT(make_test_vs());
+}
+
+/* A latched loss is checked before the pool: a lost create on a full pool returns invalid. */
+void test_gfx_shader_pool_full_while_lost_returns_invalid(void) {
+    for (int i = 0; i < 8; i++) {
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, make_test_vs().id);
+    }
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    TEST_ASSERT_EQUAL_UINT32(0, make_test_vs().id);
+}
+
 /* ---- Program: invalid stage handle asserts ---- */
 
 void test_gfx_make_program_asserts_invalid_shader(void) {
@@ -3938,6 +3959,8 @@ int main(void) {
     RUN_TEST(test_gfx_program_slot_reused_after_destroy);
     RUN_TEST(test_gfx_program_survives_shader_destroy);
     RUN_TEST(test_gfx_program_pool_full_asserts);
+    RUN_TEST(test_gfx_shader_pool_full_asserts);
+    RUN_TEST(test_gfx_shader_pool_full_while_lost_returns_invalid);
     RUN_TEST(test_gfx_make_program_asserts_invalid_shader);
     RUN_TEST(test_gfx_link_failure_asserts_in_begin_frame);
     RUN_TEST(test_gfx_program_links_at_a_begin_frame);

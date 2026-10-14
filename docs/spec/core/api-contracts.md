@@ -132,6 +132,11 @@ Virtual-resource APIs that publish a runtime handle do not automatically own or
 destroy the runtime object unless the function says it consumes ownership of the
 runtime object represented by that handle.
 
+Every gfx pool sized by `nt_gfx_desc_t` (`max_shaders`, `max_programs`,
+`max_pipelines`, `max_vertex_inputs`, `max_buffers`, `max_textures`,
+`max_render_targets`, `max_meshes`) asserts when a create finds it exhausted:
+the budget is configuration, not a runtime outcome.
+
 Frame-scoped values are plain values with no generation: a frame storage offset
 (`nt_gfx_frame_alloc`) and a deformation binding (`nt_skeletal_gpu_reserve`)
 stay valid until the owning module's next `begin_frame` (`nt_gfx_begin_frame`

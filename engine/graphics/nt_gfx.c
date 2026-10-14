@@ -929,10 +929,7 @@ static nt_gfx_result_t make_shader(const nt_shader_desc_t *desc, nt_shader_t *ou
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     uint32_t id = nt_pool_alloc(&s_gfx.shader_pool);
-    if (id == 0) {
-        NT_LOG_ERROR("shader pool full");
-        return NT_GFX_RESULT_CAPACITY;
-    }
+    NT_ASSERT(id != 0 && "shader pool full -- raise nt_gfx_desc_t.max_shaders");
 
     uint32_t backend = nt_gfx_backend_create_shader(desc);
     if (backend == 0) {
