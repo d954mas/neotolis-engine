@@ -1,6 +1,7 @@
 #include "renderers/nt_shape_renderer.h"
 
 #include "core/nt_assert.h"
+#include "core/nt_builtins.h"
 #include "graphics/nt_gfx.h"
 #include "log/nt_log.h"
 #include "math/nt_math.h"
@@ -487,8 +488,9 @@ static void wire_segment_vertices(nt_wire_vertex_t *vertices, const float prev[4
     }
 }
 
-/* Appends a path's segments to the shared wire template; segment s owns vertices s*7.. and indices s*12... */
-static void wire_template_path(uint32_t *segments, const float (*points)[4], uint32_t count, bool closed) {
+/* Appends a path's segments to the shared wire template; segment s owns vertices s*7.. and indices s*12...
+ * Init-only and called from every template: one copy, not one per call site. */
+static NT_NOINLINE void wire_template_path(uint32_t *segments, const float (*points)[4], uint32_t count, bool closed) {
     nt_wire_vertex_t *vertices = s_shape.line_staging.build.wire_vertices;
     uint16_t *indices = s_shape.line_staging.build.wire_indices;
     uint32_t edges = closed ? count : count - 1;
@@ -512,9 +514,7 @@ static void wire_template_path(uint32_t *segments, const float (*points)[4], uin
     }
 }
 
-/* A unit ring in plane 0 (XZ, lifted by y), 1 (XY) or 2 (YZ). */
-static void wire_ring(uint32_t *segments, int plane, float y, float tag) {
-    float points[NT_SHAPE_SEGMENTS][4];
+static void wire_ring_points(float points[NT_WIRE_CAP_POINTS][4], int plane, float y, float tag) {
     for (int i = 0; i < NT_SHAPE_SEGMENTS; i++) {
         memset(points[i], 0, sizeof(points[i]));
         points[i][plane == 2 ? 1 : 0] = s_shape.cos_lut[i];
@@ -522,7 +522,6 @@ static void wire_ring(uint32_t *segments, int plane, float y, float tag) {
         points[i][1] += y;
         points[i][3] = tag;
     }
-    wire_template_path(segments, (const float(*)[4])points, NT_SHAPE_SEGMENTS, true);
 }
 
 /* The equator angle repeats once per hemisphere, joined by the straight side. */
@@ -539,11 +538,29 @@ static void wire_capsule_profile(float points[NT_WIRE_CAP_POINTS][4], int plane)
     }
 }
 
+/* Unit rings of the round wire templates: plane (0 XZ, 1 XY, 2 YZ), height and capsule tag. */
+static const struct {
+    uint8_t type;
+    uint8_t plane;
+    float y;
+    float tag;
+} k_wire_rings[] = {
+    {NT_SHAPE_CIRCLE, 0, 0.0F, 0.0F},   {NT_SHAPE_SPHERE, 0, 0.0F, 0.0F},    {NT_SHAPE_SPHERE, 1, 0.0F, 0.0F},  {NT_SHAPE_SPHERE, 2, 0.0F, 0.0F},
+    {NT_SHAPE_CYLINDER, 0, 0.5F, 0.0F}, {NT_SHAPE_CYLINDER, 0, -0.5F, 0.0F}, {NT_SHAPE_CAPSULE, 0, 0.0F, 1.0F}, {NT_SHAPE_CAPSULE, 0, 0.0F, -1.0F},
+};
+
 /* Each wire template sits on its filled template's unit shape, so both take the same instance scale. */
 static uint32_t build_wire_templates(void) {
     uint32_t segments = 0;
     for (int type = 0; type < NT_SHAPE_TYPE_COUNT; type++) {
         const uint32_t first = segments;
+        float points[NT_WIRE_CAP_POINTS][4];
+        for (size_t r = 0; r < sizeof(k_wire_rings) / sizeof(k_wire_rings[0]); r++) {
+            if (k_wire_rings[r].type == type) {
+                wire_ring_points(points, k_wire_rings[r].plane, k_wire_rings[r].y, k_wire_rings[r].tag);
+                wire_template_path(&segments, (const float(*)[4])points, NT_SHAPE_SEGMENTS, true);
+            }
+        }
         if (type == NT_SHAPE_RECT) {
             static const float corners[4][4] = {{-0.5F, -0.5F, 0, 0}, {0.5F, -0.5F, 0, 0}, {0.5F, 0.5F, 0, 0}, {-0.5F, 0.5F, 0, 0}};
             wire_template_path(&segments, corners, 4, true);
@@ -556,24 +573,13 @@ static uint32_t build_wire_templates(void) {
                 const float ends[2][4] = {{a[0], a[1], a[2], 0}, {b[0], b[1], b[2], 0}};
                 wire_template_path(&segments, ends, 2, false);
             }
-        } else if (type == NT_SHAPE_CIRCLE) {
-            wire_ring(&segments, 0, 0.0F, 0.0F);
-        } else if (type == NT_SHAPE_SPHERE) {
-            for (int plane = 0; plane < 3; plane++) {
-                wire_ring(&segments, plane, 0.0F, 0.0F);
-            }
         } else if (type == NT_SHAPE_CYLINDER) {
-            wire_ring(&segments, 0, 0.5F, 0.0F);
-            wire_ring(&segments, 0, -0.5F, 0.0F);
             for (int i = 0; i < 4; i++) {
                 int k = i * (NT_SHAPE_SEGMENTS / 4);
                 const float ends[2][4] = {{s_shape.cos_lut[k], 0.5F, s_shape.sin_lut[k], 0}, {s_shape.cos_lut[k], -0.5F, s_shape.sin_lut[k], 0}};
                 wire_template_path(&segments, ends, 2, false);
             }
-        } else {
-            wire_ring(&segments, 0, 0.0F, 1.0F);
-            wire_ring(&segments, 0, 0.0F, -1.0F);
-            float points[NT_WIRE_CAP_POINTS][4];
+        } else if (type == NT_SHAPE_CAPSULE) {
             for (int plane = 0; plane < 2; plane++) {
                 wire_capsule_profile(points, plane);
                 wire_template_path(&segments, (const float(*)[4])points, NT_WIRE_CAP_POINTS, true);
