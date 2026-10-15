@@ -1219,13 +1219,16 @@ cylindrical tubes with volumetric thickness.
 
 ### Ready-made wire shapes
 
-Rectangle and triangle outlines use connected closed paths. Circle outlines
-use one closed 16-segment XZ ring; spheres use three orthogonal rings. Cylinders
-use two closed rings and four independent struts. Capsules use two equator rings
-and two closed meridians that include the straight sides. A capsule with
+Every `_wire` shape except the triangle is a wire template on its filled
+template's unit shape, transformed by the same scale and rotation. Rectangles use
+one closed 4-edge path; cubes 12 independent edges. Circle outlines use one
+closed 16-segment XZ ring; spheres use three orthogonal rings. Cylinders use two
+closed rings and four independent struts. Capsules use two equator rings and two
+closed meridians that include the straight sides. A capsule with
 `height <= 2 * radius` uses the sphere wire template, avoiding duplicate rings
-and collapsed straight segments. Rotated variants transform the complete path
-before constructing its thickness.
+and collapsed straight segments. Triangle outlines use a connected closed path.
+Shapes are transformed before their thickness is constructed, so a non-uniform
+scale does not change the width.
 
 A branching wire graph is distinct from a path: cube edges remain independent
 segments, and cylinder strut/ring intersections do not gain
@@ -1238,14 +1241,16 @@ translucent strokes.
 
 ### Storage and draw order
 
-No heap allocation or trigonometry occurs when submitting strokes. Filled
-shapes and circle, sphere, cylinder and capsule wires use immutable templates
-built at initialization, one index buffer range per type in two shared buffers
-(fills, wires), and cost one instance per shape; one program draws every filled
-type, the capsule's hemisphere tag riding in the template's fourth component.
+No heap allocation or trigonometry occurs when submitting strokes. Filled and
+wire shapes use immutable templates built at initialization, one index buffer
+range per type in two shared buffers (fills, wires), and cost one instance per
+shape; one program draws every filled type and one every wire type, both through
+one shared transform, the capsule's hemisphere tag riding in the template's
+fourth component.
 
-Each kind is staged on the CPU between flushes. `flush` copies every non-empty
-kind into frame storage and draws it from there: instanced kinds go to the
+Each kind is staged on the CPU between flushes; filled shapes share one pool
+across their types, and so do wire shapes. `flush` copies every non-empty kind
+into frame storage, a pool grouped by type, and draws it from there: instanced kinds go to the
 vertex stream set by `nt_shape_renderer_set_stream` (default
 `NT_GFX_FRAME_VERTEX`; a change flushes, like the other settings) and bind it at
 the copy's offset, and triangles are a non-indexed list in the general stream,
@@ -1267,10 +1272,10 @@ overlay mode, calls `flush` between them.
 
 `NT_SHAPE_RENDERER_MAX_LINES` bounds independent lines (default 8192) and
 `NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS` connected segments (default 1024).
-`NT_SHAPE_RENDERER_MAX_INSTANCES` bounds each filled type (default 2048) and
-`NT_SHAPE_RENDERER_MAX_VERTICES` the triangle vertices (default 16384). Each wire
-template type holds `ceil(NT_SHAPE_RENDERER_MAX_INSTANCES / 4)` shapes (default
-512). These bound the CPU staging, not a frame: a full queue flushes all pending
+`NT_SHAPE_RENDERER_MAX_INSTANCES` bounds the filled shapes of all types together
+and, separately, the wire shapes of all types together (default 2048 each);
+`NT_SHAPE_RENDERER_MAX_VERTICES` bounds the triangle vertices (default 16384).
+These bound the CPU staging, not a frame: a full queue flushes all pending
 geometry.
 
 ## Renderer complexity classes
