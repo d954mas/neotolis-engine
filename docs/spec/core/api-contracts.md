@@ -284,13 +284,12 @@ text material may declare textures of its own; each draw passes the font's curve
 texture as `u_curve_texture`. gfx's coverage check confirms every sampler the
 program actually links.
 
-A text material picks its fragment shader by depth writes. `slug_text.frag` has
-no `discard`: a premultiplied empty pixel changes nothing, and `discard` blocks
-hidden-surface removal on some tile GPUs (PowerVR HSR). A material with
-`depth_write` uses `slug_text_depth.frag`, which discards pixels below 1/255
-coverage so empty quad pixels do not occlude; there `discard` defers the depth
-write until the shader ends. The renderer does not check the pairing; shaders are game assets,
-and a game may supply its own variant. A variant consumes the `slug_text.vert`
+`slug_text.frag` has no `discard`: a premultiplied empty pixel changes nothing,
+and `discard` blocks hidden-surface removal on some tile GPUs (PowerVR HSR). A
+depth-writing text material needs a variant that discards empty pixels so they
+do not occlude; the overlapping quads of one draw (neighbor glyphs, outline,
+shadow, underline) are coplanar there and unordered. The renderer does not check
+the material's FS; shaders are game assets, and a game may supply its own variant. A variant consumes the `slug_text.vert`
 outputs `v_texcoord`, `flat uvec2 v_glyph` (band row, band count),
 `flat vec4 v_band_transform` (bbox x0, y0, band count / width, band count /
 height, in em) and `v_color`, and computes coverage with `SlugRender(coord,

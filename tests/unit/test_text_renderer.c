@@ -58,7 +58,7 @@ static void capture_errors(nt_log_level_t level, const char *domain, const char 
 
 static const float s_identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
 static const uint32_t s_white = 0xFFFFFFFFU;
-#define TEXT_VERTEX_BYTES 52U /* nt_text_vertex_t */
+#define TEXT_VERTEX_BYTES 48U /* nt_text_vertex_t */
 
 /* The style most draws use: the setUp font, 32 px, white, nothing else set. */
 static nt_text_style_t plain(void) { return (nt_text_style_t){.font = s_font, .size = 32.0F, .color = s_white}; }
@@ -313,26 +313,18 @@ void test_measure_null_string(void) {
     TEST_ASSERT_TRUE(sz.height == 0.0F);
 }
 
-/* The vertex carries the draw's packed color at byte 44 and the per-glyph depth bias at byte 48. */
-void test_vertex_color_and_depth_bias_bytes(void) {
+/* The vertex carries the draw's packed color at byte 44. */
+void test_vertex_color_bytes(void) {
     nt_text_style_t style = plain();
-    style.glyph_depth_bias = 0.25F;
     style.color = NT_RGBA8(10, 20, 30, 40);
     nt_text_renderer_draw(&style, s_identity, "AB");
     TEST_ASSERT_EQUAL_UINT32(2, text_quad_count());
-    const uint8_t *v = text_vertices();
     uint32_t color = 0;
-    float bias0 = -1.0F;
-    float bias1 = -1.0F;
-    memcpy(&color, v + 44U, sizeof color);
-    memcpy(&bias0, v + 48U, sizeof bias0);
-    memcpy(&bias1, v + ((size_t)4U * TEXT_VERTEX_BYTES) + 48U, sizeof bias1);
+    memcpy(&color, text_vertices() + 44U, sizeof color);
     TEST_ASSERT_EQUAL_HEX32(NT_RGBA8(10, 20, 30, 40), color);
-    TEST_ASSERT_TRUE(bias0 == 0.0F);  /* NOLINT -- exact */
-    TEST_ASSERT_TRUE(bias1 == 0.25F); /* NOLINT -- exact */
 }
 
-/* The GPU reads that color as normalized RGBA8 at byte 44 of a 52-byte vertex. */
+/* The GPU reads that color as normalized RGBA8 at byte 44 of a 48-byte vertex. */
 void test_vertex_input_reads_color_as_normalized_rgba8(void) {
     const nt_vertex_layout_t layout = nt_gfx_fake_last_vertex_input_layout();
     TEST_ASSERT_EQUAL_UINT16(TEXT_VERTEX_BYTES, layout.stride);
@@ -1252,7 +1244,7 @@ int main(void) {
     RUN_TEST(test_measure_returns_nonzero);
     RUN_TEST(test_measure_empty_string);
     RUN_TEST(test_measure_null_string);
-    RUN_TEST(test_vertex_color_and_depth_bias_bytes);
+    RUN_TEST(test_vertex_color_bytes);
     RUN_TEST(test_vertex_input_reads_color_as_normalized_rgba8);
     RUN_TEST(test_quad_covers_fp16_rounded_tofu);
     RUN_TEST(test_text_material_may_declare_its_own_textures);

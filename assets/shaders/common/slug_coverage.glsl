@@ -1,6 +1,6 @@
 #pragma once
 
-// Slug GPU vector text coverage, shared by slug_text.frag and slug_text_depth.frag.
+// Slug GPU vector text coverage, shared by slug_text.frag and game text shader variants.
 // Ported from HLSL reference (github.com/EricLengyel/Slug, MIT license)
 // Uses CalcRootCode and CalcCoverage verbatim; the solvers use a cancellation-free root form (below).
 

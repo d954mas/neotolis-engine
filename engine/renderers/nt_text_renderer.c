@@ -15,16 +15,15 @@
 #include <string.h>
 
 // #region Vertex format
-/* 52 bytes per vertex, matching slug_text.vert contract */
+/* 48 bytes per vertex, matching slug_text.vert contract */
 typedef struct {
     float position[3];     /* 12B: world-space quad corner (full 3D) */
     float texcoord[2];     /* 8B: em-space coordinate */
     float glyph_data[2];   /* 8B: packed uint via memcpy (band_row, band_count) */
     float glyph_bounds[4]; /* 16B: bbox x0/y0/x1/y1 in em-space */
     uint32_t color;        /* 4B: RGBA8 0xAABBGGRR, read normalized */
-    float depth_bias;      /* 4B: per-glyph clip-space depth bias (subtracted from NDC z in the VS) */
 } nt_text_vertex_t;
-_Static_assert(sizeof(nt_text_vertex_t) == 52, "text vertex stride must be 52 bytes");
+_Static_assert(sizeof(nt_text_vertex_t) == 48, "text vertex stride must be 48 bytes");
 // #endregion
 
 // #region Module state
@@ -82,7 +81,7 @@ static nt_vertex_input_t find_or_create_vertex_input(void) {
     s_text.vertex_input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
         .layout =
             {
-                .attr_count = 6,
+                .attr_count = 5,
                 .stride = (uint16_t)sizeof(nt_text_vertex_t),
                 .attrs =
                     {
@@ -91,7 +90,6 @@ static nt_vertex_input_t find_or_create_vertex_input(void) {
                         {.location = 2, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 20},                                                    /* a_glyph_data */
                         {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 28},                                                    /* a_glyph_bounds */
                         {.location = 4, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_text_vertex_t, color)}, /* a_color */
-                        {.location = 5, .type = NT_VERTEX_FLOAT, .count = 1, .offset = offsetof(nt_text_vertex_t, depth_bias)},                /* a_depth_bias */
                     },
             },
         .vertex_buffer = vbo,
@@ -172,7 +170,7 @@ static nt_text_vertex_t *alloc_quad(void) {
     return v;
 }
 
-static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], float scale, float pen_x, float pen_y, uint32_t color, float glyph_bias) {
+static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], float scale, float pen_x, float pen_y, uint32_t color) {
 
     /* FP16 rounding can move controls past bbox by at most maxabs/2048.
      * Add 0.5 px for coverage falloff; assumes 1 world unit = 1 screen pixel. */
@@ -209,7 +207,6 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
     v[0].glyph_bounds[2] = (float)g->bbox_x1;
     v[0].glyph_bounds[3] = (float)g->bbox_y1;
     v[0].color = color;
-    v[0].depth_bias = glyph_bias;
     v[1] = v[0];
     v[2] = v[0];
     v[3] = v[0];
@@ -237,10 +234,10 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
 /* Sentinel "glyph" with band_count=0: the Slug fragment shaders return coverage=1, so it fills solid for
  * underline/strike. Pixel-space corners (already include pen/scale) flow through the same transform_point
  * path as glyphs — correct under any model matrix (world / 3D), no scissor/viewport hijack. */
-static void emit_decoration_quad(const float model[16], float x0, float y0, float x1, float y1, uint32_t color, float glyph_bias) {
+static void emit_decoration_quad(const float model[16], float x0, float y0, float x1, float y1, uint32_t color) {
     nt_text_vertex_t *v = alloc_quad();
     /* All-zero glyph data is band_count 0, the sentinel; the shader reads no bounds or texcoord for it. */
-    v[0] = (nt_text_vertex_t){.color = color, .depth_bias = glyph_bias};
+    v[0] = (nt_text_vertex_t){.color = color};
     v[1] = v[0];
     v[2] = v[0];
     v[3] = v[0];
@@ -292,7 +289,7 @@ static void draw_run(nt_font_t font) {
  * breaks premultiplied-alpha compositing when glyphs overlap. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_glyph_pass(const nt_text_style_t *style, const uint8_t *p, const uint8_t *end, const float model[16], float scale, float line_advance, nt_font_slot_t *slot, int16_t key_offset,
-                            uint32_t color, float off_x, float off_y, float *glyph_bias) {
+                            uint32_t color, float off_x, float off_y) {
     uint32_t state = NT_UTF8_ACCEPT;
     uint32_t codepoint = 0;
     uint32_t prev_cp = 0;
@@ -331,8 +328,7 @@ static void emit_glyph_pass(const nt_text_style_t *style, const uint8_t *p, cons
             continue;
         }
         if (g->bbox_x1 > g->bbox_x0) {
-            emit_quad(g, model, scale, pen_x + off_x, pen_y + off_y, color, *glyph_bias);
-            *glyph_bias += style->glyph_depth_bias;
+            emit_quad(g, model, scale, pen_x + off_x, pen_y + off_y, color);
         }
         pen_x += (float)g->advance * scale;
         prev_cp = codepoint;
@@ -343,24 +339,22 @@ static void emit_glyph_pass(const nt_text_style_t *style, const uint8_t *p, cons
 /* One underline/strike sentinel quad per LINE (continuous per same-style segment; within one
  * draw_n the whole run is one style, so the segment boundary is the newline). Y and thickness come from
  * the font metrics scaled to the run. */
-static void emit_line_deco_quads(const nt_text_style_t *style, const float model[16], float scale, float x1, float pen_y, nt_font_metrics_t metrics, float *glyph_bias) {
+static void emit_line_deco_quads(const nt_text_style_t *style, const float model[16], float scale, float x1, float pen_y, nt_font_metrics_t metrics) {
     if (style->underline) {
         float top = pen_y + ((float)metrics.underline_position * scale); /* underline_position = top edge, below baseline */
         float bot = pen_y + ((float)(metrics.underline_position - metrics.underline_thickness) * scale);
-        emit_decoration_quad(model, 0.0F, bot, x1, top, style->color, *glyph_bias);
-        *glyph_bias += style->glyph_depth_bias;
+        emit_decoration_quad(model, 0.0F, bot, x1, top, style->color);
     }
     if (style->strikethrough) {
         float bot = pen_y + ((float)metrics.strikeout_position * scale); /* strikeout_position = above baseline */
         float top = pen_y + ((float)(metrics.strikeout_position + metrics.strikeout_size) * scale);
-        emit_decoration_quad(model, 0.0F, bot, x1, top, style->color, *glyph_bias);
-        *glyph_bias += style->glyph_depth_bias;
+        emit_decoration_quad(model, 0.0F, bot, x1, top, style->color);
     }
 }
 
 /* Walk the run once (advance only) to find each line's pixel extent, then emit its decoration quads. */
 static void emit_line_decorations(const nt_text_style_t *style, const uint8_t *p, const uint8_t *end, const float model[16], float scale, float line_advance, nt_font_slot_t *slot,
-                                  nt_font_metrics_t metrics, int16_t key_offset, float *glyph_bias) {
+                                  nt_font_metrics_t metrics, int16_t key_offset) {
     uint32_t state = NT_UTF8_ACCEPT;
     uint32_t codepoint = 0;
     uint32_t prev_cp = 0;
@@ -381,7 +375,7 @@ static void emit_line_decorations(const nt_text_style_t *style, const uint8_t *p
         }
         if (codepoint == '\n') {
             if (had_glyph_on_line) {
-                emit_line_deco_quads(style, model, scale, pen_x, pen_y, metrics, glyph_bias);
+                emit_line_deco_quads(style, model, scale, pen_x, pen_y, metrics);
             }
             pen_x = 0.0F;
             pen_y -= line_advance;
@@ -407,7 +401,7 @@ static void emit_line_decorations(const nt_text_style_t *style, const uint8_t *p
         had_glyph_on_line = true;
     }
     if (had_glyph_on_line) {
-        emit_line_deco_quads(style, model, scale, pen_x, pen_y, metrics, glyph_bias);
+        emit_line_deco_quads(style, model, scale, pen_x, pen_y, metrics);
     }
 }
 
@@ -417,7 +411,7 @@ static void assert_style(const nt_text_style_t *style) {
     NT_ASSERT(style->font.id != 0 && "nt_text_renderer_draw_n: style has no font");
     NT_ASSERT(style->size > 0.0F && isfinite(style->size) && isfinite(style->letter_tracking) && isfinite(style->line_leading) && "nt_text_renderer_draw_n: size must be positive, spacing finite");
     NT_ASSERT(isfinite(style->weight_em) && isfinite(style->outline_w) && isfinite(style->shadow_dx) && isfinite(style->shadow_dy) && "nt_text_renderer_draw_n: non-finite decoration");
-    NT_ASSERT(isfinite(style->oblique) && isfinite(style->glyph_depth_bias) && "nt_text_renderer_draw_n: non-finite oblique or depth bias");
+    NT_ASSERT(isfinite(style->oblique) && "nt_text_renderer_draw_n: non-finite oblique");
 #if !NT_FONT_EMBOLDEN_ENABLED
     NT_ASSERT(style->weight_em == 0.0F && style->outline_w <= 0.0F && "weight and outline require NT_FONT_EMBOLDEN_ENABLED=ON");
 #endif
@@ -479,24 +473,22 @@ void nt_text_renderer_draw_n(const nt_text_style_t *style, const float model[16]
 #endif
     const bool shadow_active = (style->shadow_color >> 24) != 0U;
 
-    float glyph_bias = 0.0F; /* accumulates across ALL passes so they separate in depth-written world text */
-
     /* Painter order: shadow (behind) → outline → fill (top), each grouped over the whole run. One draw
      * keeps it: triangles of a draw blend in index order. */
     s_text.run.quads = 0;
     if (shadow_active) {
-        emit_glyph_pass(style, p, end, m, scale, line_advance, slot, outline_key, style->shadow_color, style->shadow_dx * size, style->shadow_dy * size, &glyph_bias);
+        emit_glyph_pass(style, p, end, m, scale, line_advance, slot, outline_key, style->shadow_color, style->shadow_dx * size, style->shadow_dy * size);
     }
 #if NT_FONT_EMBOLDEN_ENABLED
     if (outline_active) {
-        emit_glyph_pass(style, p, end, m, scale, line_advance, slot, outline_key, style->outline_color, 0.0F, 0.0F, &glyph_bias);
+        emit_glyph_pass(style, p, end, m, scale, line_advance, slot, outline_key, style->outline_color, 0.0F, 0.0F);
     }
 #endif
-    emit_glyph_pass(style, p, end, m, scale, line_advance, slot, fill_key, style->color, 0.0F, 0.0F, &glyph_bias);
+    emit_glyph_pass(style, p, end, m, scale, line_advance, slot, fill_key, style->color, 0.0F, 0.0F);
 
     /* Underline/strike sentinel quads last (on top of fill), one continuous quad per line. */
     if (style->underline || style->strikethrough) {
-        emit_line_decorations(style, p, end, m, scale, line_advance, slot, metrics, fill_key, &glyph_bias);
+        emit_line_decorations(style, p, end, m, scale, line_advance, slot, metrics, fill_key);
     }
     draw_run(style->font);
 }

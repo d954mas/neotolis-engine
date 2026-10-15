@@ -49,12 +49,6 @@ sprite or text material selected. A callback that emits sprites or text calls
 selection it finds is whatever an earlier command left. The walk's draw count (`nt_ui_get_last_walk_draw_calls`)
 counts the draws the walk added, so a walk whose first sprite or text draw merges
 into the caller's preceding draw in the same pass adds nothing for it.
-`nt_ui_set_text_material(ctx, material, glyph_depth_bias)` pairs the walker's text
-material with its glyph depth bias: text drawn with that material uses the bias, so
-a depth-writing text material gets its bias here. Text drawn with any other material
-(a rich block's own `text_material`, the inspector and hit-zone overlay materials)
-uses none: the bias accumulates per glyph in clip space and would shift text it was
-not chosen for.
 The supplied frame contains the composed world matrix, opacity, context and
 layout-space Clay command.
 
@@ -206,8 +200,9 @@ Two coord-space modes are gated by `nt_ui_create_desc_t.use_raycast_input`:
   via `inv_view_proj` → ray-plane at widget Z=0 → `mat4_inv_trs(baked.m)`
   back to widget-local → bbox check. Optional `element_depth_bias_ndc`
   is render-only: positive values move deeper hierarchy levels slightly
-  closer in projected depth to avoid z-fighting. Hit-test stays on the
-  unbiased widget plane. Debug inspector render commands are excluded
+  closer in projected depth to avoid z-fighting; panels whose backgrounds
+  write depth need it above 0, or their children are coplanar with the
+  background. Hit-test stays on the unbiased widget plane. Debug inspector render commands are excluded
   from the regular 3D walk and drawn by `nt_ui_debug_inspector_walk` as
   a separate final screen-space pass. The game binds a 2D UI projection
   first; `nt_ui_make_screen_view_proj(w, h, ...)` provides the standard

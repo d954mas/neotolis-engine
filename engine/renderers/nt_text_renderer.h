@@ -32,10 +32,6 @@ typedef struct {
     /* Faux-italic shear in text-local space (x += oblique * y about the baseline), folded into the
      * model on the CPU, so a family with no italic face can still slant. */
     float oblique;
-    /* Per-glyph clip-space depth bias toward the near plane — the VS does gl_Position.z -= bias * w,
-     * NOT a world/model-space offset. With depth_write, coplanar glyph quads z-fight at overlapping
-     * AA fringes; a small bias separates them by draw order. Signed. */
-    float glyph_depth_bias;
     bool underline;     /* one continuous solid quad per line at the font's underline metric */
     bool strikethrough; /* same at the strikeout metric */
 } nt_text_style_t;
@@ -47,8 +43,7 @@ void nt_text_renderer_shutdown(void);
 /* Selects the material for this frame's draws: call it every frame before drawing (asserted).
  * Another set_material replaces it, so a caller selects its own before drawing.
  * Requires an assigned slug_text program, premultiplied-compatible blend and cull NONE.
- * slug_text.frag never discards; a depth-writing material uses slug_text_depth.frag, which discards empty
- * pixels so they do not occlude. Pair it with a glyph_depth_bias for overlapping glyphs.
+ * slug_text.frag never discards (tile-GPU HSR); a depth-writing material needs a discarding FS.
  * A text material does not declare u_curve_texture: the renderer supplies it. */
 void nt_text_renderer_set_material(nt_material_t mat);
 
