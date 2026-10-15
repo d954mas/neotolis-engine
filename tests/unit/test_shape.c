@@ -728,30 +728,24 @@ static void test_polyline_overflow_preserves_all_segments(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_at(1).instance_count);
 }
 
-/* A full pool flushes all its types at once; each type keeps its own draw. */
-static void test_pools_overflow_at_their_totals(void) {
+/* A full type flushes everything pending; the other types keep their own draws. */
+static void test_types_overflow_at_their_limits(void) {
     const float at[3] = {1, 2, 3};
     const float size[3] = {1, 1, 1};
     const uint32_t color = NT_RGBA8(255, 255, 255, 255);
     nt_gfx_fake_draw_trace_reset(true);
+    nt_shape_renderer_cube(at, size, NULL, color);
     for (uint32_t i = 0; i <= NT_SHAPE_RENDERER_MAX_FILLS; i++) {
-        if (i % 2 == 0) {
-            nt_shape_renderer_rect(at, size, NULL, color);
-        } else {
-            nt_shape_renderer_cube(at, size, NULL, color);
-        }
+        nt_shape_renderer_rect(at, size, NULL, color);
     }
+    nt_shape_renderer_cube_wire(at, size, NULL, 0.02F, color);
     for (uint32_t i = 0; i <= NT_SHAPE_RENDERER_MAX_WIRES; i++) {
-        if (i % 2 == 0) {
-            nt_shape_renderer_capsule_wire(at, 0.5F, 3, NULL, 0.02F, color);
-        } else {
-            nt_shape_renderer_cube_wire(at, size, NULL, 0.02F, color);
-        }
+        nt_shape_renderer_capsule_wire(at, 0.5F, 3, NULL, 0.02F, color);
     }
     nt_shape_renderer_flush();
     nt_test_frame_next();
     /* rect, cube | rect left over, cube wire, capsule wire | capsule wire left over */
-    const uint32_t expected[6] = {NT_SHAPE_RENDERER_MAX_FILLS / 2, NT_SHAPE_RENDERER_MAX_FILLS / 2, 1, NT_SHAPE_RENDERER_MAX_WIRES / 2, NT_SHAPE_RENDERER_MAX_WIRES / 2, 1};
+    const uint32_t expected[6] = {NT_SHAPE_RENDERER_MAX_FILLS, 1, 1, 1, NT_SHAPE_RENDERER_MAX_WIRES, 1};
     TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_fake_draw_trace_count());
     for (uint32_t i = 0; i < 6; i++) {
         TEST_ASSERT_EQUAL_UINT32(expected[i], nt_gfx_fake_draw_trace_at(i).instance_count);
@@ -790,7 +784,7 @@ static void test_unlinked_programs_drop_queued_shapes(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_polyline_overflow_preserves_all_segments);
-    RUN_TEST(test_pools_overflow_at_their_totals);
+    RUN_TEST(test_types_overflow_at_their_limits);
     RUN_TEST(test_unlinked_programs_drop_queued_shapes);
     RUN_TEST(test_polyline_skips_repeated_points_and_closes_once);
     RUN_TEST(test_polyline_asserts_non_finite_points);

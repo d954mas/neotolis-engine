@@ -225,7 +225,7 @@ static void test_pixel_widths_share_a_flush_in_every_stroke_kind(void) {
     }
 }
 
-/* Interleaved types of one pool come out grouped by type, each instance with its own data: rect and
+/* Interleaved types draw grouped by type, each instance with its own data: rect and
  * cube wires take a non-uniform scale, the cube its depth, the capsule its half body apart from the width,
  * the cylinder its height. */
 static void test_interleaved_types_keep_their_instances(void) {

@@ -292,18 +292,13 @@ static struct {
     nt_shape_range_t fill_ranges[NT_SHAPE_TYPE_COUNT];
     nt_shape_range_t wire_ranges[NT_SHAPE_TYPE_COUNT];
 
-    /* CPU staging per kind: a flush copies each into frame storage in kind order. Fills and wires
-     * share one pool per kind across their types, which the copy groups by type. */
-    nt_shape_instance_t fills[NT_SHAPE_RENDERER_MAX_FILLS];
-    uint8_t fill_types[NT_SHAPE_RENDERER_MAX_FILLS];
+    /* CPU staging per kind and template type: a flush copies each into frame storage in kind order. */
+    nt_shape_instance_t fills[NT_SHAPE_TYPE_COUNT][NT_SHAPE_RENDERER_MAX_FILLS];
     uint32_t fill_counts[NT_SHAPE_TYPE_COUNT];
-    uint32_t fill_count;
     nt_shape_vertex_t vertices[NT_SHAPE_RENDERER_MAX_VERTICES]; /* triangles, three per triangle */
     uint32_t vertex_count;
-    nt_shape_wire_instance_t wires[NT_SHAPE_RENDERER_MAX_WIRES];
-    uint8_t wire_types[NT_SHAPE_RENDERER_MAX_WIRES];
+    nt_shape_wire_instance_t wires[NT_SHAPE_TYPE_COUNT][NT_SHAPE_RENDERER_MAX_WIRES];
     uint32_t wire_counts[NT_SHAPE_TYPE_COUNT];
-    uint32_t wire_count;
     nt_shape_stroke_instance_t strokes[NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS];
     uint32_t stroke_count;
     /* Templates are built in create_gpu, which runs with the line queue empty: the scratch stays
@@ -449,12 +444,10 @@ static nt_pipeline_t make_stroke_pipeline(nt_program_t program, bool depth, cons
 static const float k_identity_rot[4] = {0.0F, 0.0F, 0.0F, 1.0F};
 
 static void push_instance(int type, const float center[3], const float scale[3], const float *rot, uint32_t color) {
-    if (s_shape.fill_count == NT_SHAPE_RENDERER_MAX_FILLS) {
+    if (s_shape.fill_counts[type] == NT_SHAPE_RENDERER_MAX_FILLS) {
         nt_shape_renderer_flush();
     }
-    s_shape.fill_types[s_shape.fill_count] = (uint8_t)type;
-    s_shape.fill_counts[type]++;
-    nt_shape_instance_t *inst = &s_shape.fills[s_shape.fill_count++];
+    nt_shape_instance_t *inst = &s_shape.fills[type][s_shape.fill_counts[type]++];
     memcpy(inst->center, center, sizeof(inst->center));
     memcpy(inst->scale, scale, sizeof(inst->scale));
     memcpy(inst->rot, rot ? rot : k_identity_rot, sizeof(inst->rot));
@@ -465,12 +458,10 @@ static void assert_width(float width) { NT_ASSERT(isfinite(width) && width > 0.0
 
 static void push_wire_instance(int type, const float center[3], const float scale[3], const float *rot, float width, uint32_t color) {
     assert_width(width);
-    if (s_shape.wire_count == NT_SHAPE_RENDERER_MAX_WIRES) {
+    if (s_shape.wire_counts[type] == NT_SHAPE_RENDERER_MAX_WIRES) {
         nt_shape_renderer_flush();
     }
-    s_shape.wire_types[s_shape.wire_count] = (uint8_t)type;
-    s_shape.wire_counts[type]++;
-    nt_shape_wire_instance_t *inst = &s_shape.wires[s_shape.wire_count++];
+    nt_shape_wire_instance_t *inst = &s_shape.wires[type][s_shape.wire_counts[type]++];
     memcpy(inst->center, center, sizeof(inst->center));
     memcpy(inst->scale, scale, sizeof(inst->scale));
     inst->width = width;
@@ -947,8 +938,6 @@ static void destroy_gpu(void) {
 static void drop_queues(void) {
     memset(s_shape.fill_counts, 0, sizeof(s_shape.fill_counts));
     memset(s_shape.wire_counts, 0, sizeof(s_shape.wire_counts));
-    s_shape.fill_count = 0;
-    s_shape.wire_count = 0;
     s_shape.vertex_count = 0;
     s_shape.stroke_count = 0;
     s_shape.line_count = 0;
@@ -987,39 +976,15 @@ void nt_shape_renderer_restore_gpu(void) {
     create_gpu();
 }
 
-static void draw_at(nt_pipeline_t pipeline, nt_vertex_input_t vi, nt_instance_layout_t layout, uint32_t offset, nt_shape_range_t range, uint32_t count) {
+/* Copies one kind's staging into frame storage and draws it instanced from there. */
+static void draw_instances(nt_pipeline_t pipeline, nt_vertex_input_t vi, nt_instance_layout_t layout, const void *data, uint32_t bytes, nt_shape_range_t range, uint32_t count) {
+    uint32_t offset = 0;
+    memcpy(nt_gfx_frame_alloc(s_shape.stream, bytes, 4, &offset), data, bytes);
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input_instanced(vi, layout, nt_gfx_frame_buffer(s_shape.stream), offset);
     /* Unchanged settings end CACHE in gfx: no copy, and the batches around the bind still merge. */
     nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, &s_shape.draw, sizeof(s_shape.draw));
     nt_gfx_draw_indexed_instanced(range.first_index, range.num_indices, range.num_vertices, count);
-}
-
-/* Copies one kind's staging into frame storage and draws it instanced from there. */
-static void draw_instances(nt_pipeline_t pipeline, nt_vertex_input_t vi, nt_instance_layout_t layout, const void *data, uint32_t bytes, nt_shape_range_t range, uint32_t count) {
-    uint32_t offset = 0;
-    memcpy(nt_gfx_frame_alloc(s_shape.stream, bytes, 4, &offset), data, bytes);
-    draw_at(pipeline, vi, layout, offset, range, count);
-}
-
-/* at[type] = first slot of each type's group in a pool copied grouped by type. */
-static void group_starts(const uint32_t counts[NT_SHAPE_TYPE_COUNT], uint32_t at[NT_SHAPE_TYPE_COUNT]) {
-    uint32_t sum = 0;
-    for (int type = 0; type < NT_SHAPE_TYPE_COUNT; type++) {
-        at[type] = sum;
-        sum += counts[type];
-    }
-}
-
-/* One template draw per non-empty type, from the type groups starting at offset. */
-static void draw_types(nt_pipeline_t pipeline, nt_vertex_input_t vi, nt_instance_layout_t layout, uint32_t offset, uint32_t stride, const uint32_t counts[NT_SHAPE_TYPE_COUNT],
-                       const nt_shape_range_t ranges[NT_SHAPE_TYPE_COUNT]) {
-    for (int type = 0; type < NT_SHAPE_TYPE_COUNT; type++) {
-        if (counts[type] > 0) {
-            draw_at(pipeline, vi, layout, offset, ranges[type], counts[type]);
-            offset += counts[type] * stride;
-        }
-    }
 }
 
 void nt_shape_renderer_flush(void) {
@@ -1031,17 +996,12 @@ void nt_shape_renderer_flush(void) {
     }
     const int d = s_shape.depth_enabled ? 1 : 0;
     const uint32_t k = s_shape.stream - NT_GFX_FRAME_VERTEX;
-    uint32_t at[NT_SHAPE_TYPE_COUNT];
-    if (s_shape.fill_count > 0) {
-        uint32_t offset = 0;
-        nt_shape_instance_t *dst = nt_gfx_frame_alloc(s_shape.stream, s_shape.fill_count * (uint32_t)sizeof(nt_shape_instance_t), 4, &offset);
-        group_starts(s_shape.fill_counts, at);
-        for (uint32_t i = 0; i < s_shape.fill_count; i++) {
-            dst[at[s_shape.fill_types[i]]++] = s_shape.fills[i];
+    for (int type = 0; type < NT_SHAPE_TYPE_COUNT; type++) {
+        const uint32_t count = s_shape.fill_counts[type];
+        if (count > 0) {
+            draw_instances(s_shape.gpu.fill_pip[d], s_shape.gpu.fill_vi[k], s_shape.fill_layout, s_shape.fills[type], count * (uint32_t)sizeof(nt_shape_instance_t), s_shape.fill_ranges[type], count);
+            s_shape.fill_counts[type] = 0;
         }
-        draw_types(s_shape.gpu.fill_pip[d], s_shape.gpu.fill_vi[k], s_shape.fill_layout, offset, (uint32_t)sizeof(nt_shape_instance_t), s_shape.fill_counts, s_shape.fill_ranges);
-        memset(s_shape.fill_counts, 0, sizeof(s_shape.fill_counts));
-        s_shape.fill_count = 0;
     }
     if (s_shape.vertex_count > 0) {
         const uint32_t bytes = s_shape.vertex_count * (uint32_t)sizeof(nt_shape_vertex_t);
@@ -1054,16 +1014,13 @@ void nt_shape_renderer_flush(void) {
         s_shape.vertex_count = 0;
     }
     /* Strokes last: within one flush, outlines stay on top of filled shapes. */
-    if (s_shape.wire_count > 0) {
-        uint32_t offset = 0;
-        nt_shape_wire_instance_t *dst = nt_gfx_frame_alloc(s_shape.stream, s_shape.wire_count * (uint32_t)sizeof(nt_shape_wire_instance_t), 4, &offset);
-        group_starts(s_shape.wire_counts, at);
-        for (uint32_t i = 0; i < s_shape.wire_count; i++) {
-            dst[at[s_shape.wire_types[i]]++] = s_shape.wires[i];
+    for (int type = 0; type < NT_SHAPE_TYPE_COUNT; type++) {
+        const uint32_t count = s_shape.wire_counts[type];
+        if (count > 0) {
+            draw_instances(s_shape.gpu.wire_pip[d], s_shape.gpu.wire_vi[k], s_shape.wire_layout, s_shape.wires[type], count * (uint32_t)sizeof(nt_shape_wire_instance_t), s_shape.wire_ranges[type],
+                           count);
+            s_shape.wire_counts[type] = 0;
         }
-        draw_types(s_shape.gpu.wire_pip[d], s_shape.gpu.wire_vi[k], s_shape.wire_layout, offset, (uint32_t)sizeof(nt_shape_wire_instance_t), s_shape.wire_counts, s_shape.wire_ranges);
-        memset(s_shape.wire_counts, 0, sizeof(s_shape.wire_counts));
-        s_shape.wire_count = 0;
     }
     if (s_shape.stroke_count > 0) {
         draw_instances(s_shape.gpu.line_pip[d], s_shape.gpu.stroke_vi[k], s_shape.stroke_layout, s_shape.strokes, s_shape.stroke_count * (uint32_t)sizeof(nt_shape_stroke_instance_t),
@@ -1305,7 +1262,13 @@ void nt_shape_renderer_capsule_wire(const float center[3], float radius, float h
 #ifdef NT_TEST_ACCESS
 uint32_t nt_shape_renderer_test_instance_count(int type) { return s_shape.fill_counts[type]; }
 uint32_t nt_shape_renderer_test_vertex_count(void) { return s_shape.vertex_count; }
-uint32_t nt_shape_renderer_test_stroke_count(void) { return s_shape.line_count + s_shape.stroke_count + s_shape.wire_count; }
+uint32_t nt_shape_renderer_test_stroke_count(void) {
+    uint32_t count = s_shape.line_count + s_shape.stroke_count;
+    for (int type = 0; type < NT_SHAPE_TYPE_COUNT; type++) {
+        count += s_shape.wire_counts[type];
+    }
+    return count;
+}
 const float *nt_shape_renderer_test_vp(void) { return s_shape.draw.vp; }
 const float *nt_shape_renderer_test_eye(void) { return s_shape.draw.eye; }
 bool nt_shape_renderer_test_depth_enabled(void) { return s_shape.depth_enabled; }

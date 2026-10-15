@@ -1249,9 +1249,8 @@ shape; one program draws every filled type and one every wire type, both through
 one shared transform, the capsule's hemisphere tag riding in the template's
 fourth component.
 
-Each kind is staged on the CPU between flushes; filled shapes share one pool
-across their types, and so do wire shapes. `flush` copies every non-empty kind
-into frame storage (the fill and wire pools grouped by type) and draws it from
+Each kind is staged on the CPU between flushes, fill and wire templates per
+type. `flush` copies every non-empty kind into frame storage and draws it from
 there: instanced kinds go to the vertex stream set by `nt_shape_renderer_set_stream` (default
 `NT_GFX_FRAME_VERTEX`; a change flushes, like the other settings) and bind it at
 the copy's offset, and triangles are a non-indexed list in the general stream,
@@ -1274,10 +1273,9 @@ overlay mode, calls `flush` between them.
 
 `NT_SHAPE_RENDERER_MAX_LINES` bounds independent lines (default 8192) and
 `NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS` connected segments (default 1024).
-`NT_SHAPE_RENDERER_MAX_FILLS` bounds the filled shapes of all types together and
-`NT_SHAPE_RENDERER_MAX_WIRES` the template wire shapes of all types together
-(default 2048 each); `NT_SHAPE_RENDERER_MAX_VERTICES` bounds the triangle
-vertices (default 16384).
+`NT_SHAPE_RENDERER_MAX_FILLS` bounds each filled type (default 2048),
+`NT_SHAPE_RENDERER_MAX_WIRES` each wire template type (default 512) and
+`NT_SHAPE_RENDERER_MAX_VERTICES` the triangle vertices (default 16384).
 These bound the CPU staging, not a frame: a full queue flushes all pending
 geometry.
 

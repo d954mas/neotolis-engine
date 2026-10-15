@@ -10,14 +10,14 @@
 #define NT_SHAPE_RENDERER_MAX_VERTICES 16384
 #endif
 
-/* Filled shapes of all types together */
+/* Filled shapes of each type */
 #ifndef NT_SHAPE_RENDERER_MAX_FILLS
 #define NT_SHAPE_RENDERER_MAX_FILLS 2048
 #endif
 
-/* Wire shapes of all template types together (triangle wires are connected segments) */
+/* Wire shapes of each template type (triangle wires are connected segments) */
 #ifndef NT_SHAPE_RENDERER_MAX_WIRES
-#define NT_SHAPE_RENDERER_MAX_WIRES 2048
+#define NT_SHAPE_RENDERER_MAX_WIRES 512
 #endif
 
 #ifndef NT_SHAPE_RENDERER_MAX_LINES
