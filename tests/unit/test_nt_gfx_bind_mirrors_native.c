@@ -1524,6 +1524,14 @@ static void test_block_members_need_no_location_lookup(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
     /* Reflection runs in the begin_frame that finished the link, the frame these counters cover. */
     TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.gl[NT_GFX_GL_glGetUniformLocation]);
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.gl[NT_GFX_GL_glGetActiveUniformsiv]);
+
+    const char *matrix_vs = "precision highp float;\n"
+                            "layout(std140) uniform Draw { mat4 matrices[2]; };\n"
+                            "void main() { gl_Position = matrices[gl_VertexID & 1] * vec4(1.0); }\n";
+    pip = make_pipeline_ex(matrix_vs, s_fs_src, false, false, false);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
+    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.gl[NT_GFX_GL_glGetActiveUniformsiv]);
 }
 
 /* An equal block bind reuses the bound range; a changed value binds a new one, and the draw sees the last. */

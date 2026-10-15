@@ -992,8 +992,9 @@ bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint
 
 /* ---- Uniform blocks ---- */
 
-/* Blocks are std140 with vec4/ivec4/uvec4/mat4 members (asserted at link; rules in the API contracts
- * spec). A draw asserts that each block its program uses is bound in the pass at its full size. */
+/* Shaders declare std140 blocks with vec4/ivec4/uvec4/mat4 members and column-major matrices
+ * (types and matrix order asserted at link; rules in the API contracts spec).
+ * A draw asserts that each block its program uses is bound in the pass at its full size. */
 
 /* Copies size bytes (a multiple of 16) into the uniform frame stream and binds that range to slot.
  * Bytes equal to the slot's last staged block of the frame copy nothing (CACHE in its pass, a

@@ -198,9 +198,12 @@ borrowed without copying: each string must remain valid and unchanged until
 restore bind it too.
 
 Block members are `vec4`, `ivec4`, `uvec4`, `mat4` or arrays of them in a
-`layout(std140)` block with column-major matrices; another member type, a
-`row_major` matrix or a non-std140 offset or stride asserts at link. A C struct of
-`float`, `int32_t` and `uint32_t` arrays then matches the block byte for byte. A
+`layout(std140)` block with column-major matrices. Shaders must declare std140;
+WebGL enforces it, while native GL relies on the shader author to declare it.
+Link reflection asserts the member types and queries matrix order only for
+`mat4`, rejecting `row_major`. Offsets and array/matrix strides follow std140
+and are not queried. The game mirrors the block with a C struct of `float`,
+`int32_t` and `uint32_t` arrays; gfx does not verify that C struct's layout. A
 draw asserts that every block its program uses is bound in the pass with at least
 the block's data size (WebGL rejects such a draw, native GL reads past the range);
 the check runs on the first draw after a program or block change, before a merge.

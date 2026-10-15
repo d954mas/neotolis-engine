@@ -919,9 +919,10 @@ static void test_block_bound_under_one_pipeline_feeds_the_next(void) {
     static const char *fragment_source = "#ifdef GL_ES\n"
                                          "precision mediump float;\n"
                                          "#endif\n"
-                                         "layout(std140) uniform Draw { vec4 u_color; };\n"
+                                         "layout(std140) uniform Draw { vec4 u_values[2]; ivec4 u_ints[2]; uvec4 u_uints[2]; mat4 u_matrices[2]; };\n"
                                          "out vec4 frag_color;\n"
-                                         "void main() { frag_color = u_color; }\n";
+                                         "void main() { frag_color = (u_values[0] + u_values[1] + vec4(u_ints[0] + u_ints[1])\n"
+                                         "    + vec4(u_uints[0] + u_uints[1]) + u_matrices[0][1] + u_matrices[1][2]) / 16.0; }\n";
 
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
@@ -939,15 +940,26 @@ static void test_block_bound_under_one_pipeline_feeds_the_next(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target, .clear_color = {0.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F});
     /* Block bound while A is bound; the draw happens through B without binding it again. */
     nt_gfx_bind_pipeline(pip_a);
-    const float green[4] = {0.0F, 1.0F, 0.0F, 1.0F};
-    nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, green, sizeof(green));
+    /* Different array elements and asymmetric matrices expose stride and transpose errors. */
+    const struct {
+        float values[2][4];
+        int32_t ints[2][4];
+        uint32_t uints[2][4];
+        float matrices[2][16];
+    } block = {
+        .values = {{0.5F, 1.0F, 1.5F, 2.0F}, {1.5F, 2.0F, 2.5F, 3.0F}},
+        .ints = {{-1, 2, -3, 4}, {2, -1, 4, -3}},
+        .uints = {{1, 2, 3, 4}, {2, 3, 4, 5}},
+        .matrices = {{[4] = -1.0F, [5] = -2.0F, [6] = -3.0F, [7] = -4.0F}, {[8] = -1.0F, [9] = 1.0F, [10] = 3.0F, [11] = 5.0F}},
+    };
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, &block, sizeof(block));
     nt_gfx_bind_pipeline(pip_b);
     bind_empty_vertex_input();
     nt_gfx_draw(0, 3);
 
     uint8_t pixels[4 * 4 * 4] = {0};
     read_after_frame(target.target, 4, 4, pixels, sizeof(pixels));
-    assert_rgba(pixels, 16, 0, 255, 0, 255);
+    assert_rgba(pixels, 16, 64, 128, 191, 255);
 
     destroy_test_target(&target);
     nt_gfx_destroy_program(prog);
@@ -1564,6 +1576,24 @@ static void test_missing_uniform_name_length_asserts(void) { assert_reflection_q
 
 static void test_missing_uniform_details_assert(void) { assert_reflection_query_failure_asserts(0); }
 
+static PFNGLGETACTIVEUNIFORMSIVPROC s_get_active_uniforms_iv;
+
+static void GLAD_API_PTR skip_matrix_order(GLuint program, GLsizei count, const GLuint *indices, GLenum query, GLint *values) {
+    if (query != GL_UNIFORM_IS_ROW_MAJOR) {
+        s_get_active_uniforms_iv(program, count, indices, query, values);
+    }
+}
+
+static void test_missing_matrix_order_asserts(void) {
+    s_get_active_uniforms_iv = glad_glGetActiveUniformsiv;
+    glad_glGetActiveUniformsiv = skip_matrix_order;
+    NT_TEST_EXPECT_ASSERT((void)bind_uniform_test_program("layout(std140) uniform Draw { mat4 u_matrix; };\n"
+                                                          "out vec4 frag_color;\n"
+                                                          "void main() { frag_color = u_matrix[1]; }\n"));
+    glad_glGetActiveUniformsiv = s_get_active_uniforms_iv;
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "program uniform reflection failed"));
+}
+
 static void GLAD_API_PTR gen_no_names(GLsizei n, GLuint *names) {
     for (GLsizei i = 0; i < n; i++) {
         names[i] = 0;
@@ -1955,6 +1985,7 @@ int main(void) {
     RUN_TEST(test_missing_active_uniform_count_asserts);
     RUN_TEST(test_missing_uniform_name_length_asserts);
     RUN_TEST(test_missing_uniform_details_assert);
+    RUN_TEST(test_missing_matrix_order_asserts);
     RUN_TEST(test_a_name_failure_on_a_live_context_asserts_without_latching);
     RUN_TEST(test_an_incomplete_framebuffer_on_a_live_context_asserts);
     RUN_TEST(test_shader_name_and_readback_failures_on_a_live_context_assert);
