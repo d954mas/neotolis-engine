@@ -721,7 +721,11 @@ static void test_wire_instances_overflow_without_losing_shapes(void) {
     uint32_t count = NT_SHAPE_RENDERER_MAX_INSTANCES + 1;
     nt_gfx_fake_draw_trace_reset(true);
     for (uint32_t i = 0; i < count; i++) {
-        nt_shape_renderer_capsule_wire((float[3]){1, 2, 3}, 0.5F, 3, NULL, 0.02F, NT_RGBA8(255, 255, 255, 255));
+        if (i % 2 == 0) {
+            nt_shape_renderer_capsule_wire((float[3]){1, 2, 3}, 0.5F, 3, NULL, 0.02F, NT_RGBA8(255, 255, 255, 255));
+        } else {
+            nt_shape_renderer_cube_wire((float[3]){1, 2, 3}, (float[3]){1, 1, 1}, NULL, 0.02F, NT_RGBA8(255, 255, 255, 255));
+        }
     }
     nt_shape_renderer_flush();
     nt_test_frame_next();

@@ -1192,7 +1192,8 @@ hardware line-width support.
   shapes), like color: it rides in the instance, so strokes of any widths
   batch together. It must be finite and positive; violations assert.
 - `set_width_units_world()` selects world units, the default. Width is applied
-  after a shape's scale and rotation, so it is independent of radius or height;
+  after a shape's scale and rotation, so it is independent of radius, height or
+  a non-uniform scale;
   the camera projection determines its size on screen.
 - `set_width_units_pixels(viewport_width, viewport_height)` selects framebuffer
   pixels. Dimensions are the active viewport's physical pixel size, including
@@ -1227,8 +1228,6 @@ closed rings and four independent struts. Capsules use two equator rings and two
 closed meridians that include the straight sides. A capsule with
 `height <= 2 * radius` uses the sphere wire template, avoiding duplicate rings
 and collapsed straight segments. Triangle outlines use a connected closed path.
-Shapes are transformed before their thickness is constructed, so a non-uniform
-scale does not change the width.
 
 A branching wire graph is distinct from a path: cube edges remain independent
 segments, and cylinder strut/ring intersections do not gain
@@ -1250,8 +1249,8 @@ fourth component.
 
 Each kind is staged on the CPU between flushes; filled shapes share one pool
 across their types, and so do wire shapes. `flush` copies every non-empty kind
-into frame storage, a pool grouped by type, and draws it from there: instanced kinds go to the
-vertex stream set by `nt_shape_renderer_set_stream` (default
+into frame storage (the fill and wire pools grouped by type) and draws it from
+there: instanced kinds go to the vertex stream set by `nt_shape_renderer_set_stream` (default
 `NT_GFX_FRAME_VERTEX`; a change flushes, like the other settings) and bind it at
 the copy's offset, and triangles are a non-indexed list in the general stream,
 which their vertex input reads at offset 0. Frame storage holds every flush of
@@ -1265,7 +1264,8 @@ nothing and a change allocates a block (up to 256 B of padding).
 Every flush draws filled instanced shapes by type, then triangles,
 then wire templates by type, connected segments and independent lines. Within
 one flush this kind order replaces submission order: outlines stay on top of
-fills, and interleaved submissions batch into at most one draw per kind. Flushes
+fills, and interleaved submissions batch into at most one draw per kind, or per
+type for fill and wire templates. Flushes
 are the only ordering barriers — explicit `flush`, a full queue and the state
 changes above. A game that needs a later layer over an earlier one, typically in
 overlay mode, calls `flush` between them.

@@ -228,14 +228,17 @@ static void test_pixel_widths_share_a_flush_in_every_stroke_kind(void) {
 /* Interleaved types of one pool come out grouped by type, each instance with its own data: rect and
  * cube wires take a non-uniform scale, the capsule its half body apart from the width. */
 static void test_interleaved_types_keep_their_instances(void) {
+    /* A quarter turn about Y narrows a rect to 0.14 and widens a cube to 0.28: the templates differ on screen. */
+    const float turn_y[4] = {0, 0.38268343F, 0, 0.92387953F};
     nt_shape_renderer_set_width_units_pixels(RT_W, RT_H);
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
-    nt_shape_renderer_cube((float[3]){-0.75F, -0.75F, 0}, (float[3]){0.2F, 0.2F, 0.2F}, NULL, NT_RGBA8(255, 255, 0, 255));
+    nt_shape_renderer_cube((float[3]){-0.75F, -0.75F, 0}, (float[3]){0.2F, 0.2F, 0.2F}, turn_y, NT_RGBA8(255, 255, 0, 255));
     nt_shape_renderer_rect_wire((float[3]){-0.5F, 0.5F, 0}, (float[2]){0.5F, 0.25F}, NULL, 4, NT_RGBA8(255, 0, 0, 255));
     nt_shape_renderer_capsule_wire((float[3]){0, -0.5F, 0}, 0.25F, 0.75F, NULL, 4, NT_RGBA8(0, 0, 255, 255));
-    nt_shape_renderer_rect((float[3]){0.75F, -0.75F, 0}, (float[2]){0.2F, 0.2F}, NULL, NT_RGBA8(255, 0, 255, 255));
+    nt_shape_renderer_rect((float[3]){0.75F, -0.75F, 0}, (float[2]){0.2F, 0.2F}, turn_y, NT_RGBA8(255, 0, 255, 255));
+    nt_shape_renderer_cube((float[3]){-0.75F, -0.25F, 0}, (float[3]){0.2F, 0.2F, 0.2F}, turn_y, NT_RGBA8(0, 255, 255, 255));
     nt_shape_renderer_cube_wire((float[3]){0.5F, 0.5F, 0}, (float[3]){0.5F, 0.25F, 0.5F}, NULL, 4, NT_RGBA8(0, 255, 0, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
@@ -247,12 +250,16 @@ static void test_interleaved_types_keep_their_instances(void) {
     assert_pixel(frame, 48, 11, 0, 255, 0);
     assert_pixel(frame, 48, 19, 0, 255, 0);
     assert_pixel(frame, 48, 16, 0, 0, 0);
-    /* Capsule equator rings, moved by the half body 0.125 to rows 44 and 52. */
+    /* Capsule equator rings, moved by the half body 0.125 to rows 44 and 52; meridian tip at radius + half body, row 36. */
+    assert_pixel(frame, 32, 35, 0, 0, 255);
     assert_pixel(frame, 34, 43, 0, 0, 255);
     assert_pixel(frame, 34, 48, 0, 0, 0);
     assert_pixel(frame, 34, 51, 0, 0, 255);
-    assert_pixel(frame, 8, 56, 255, 255, 0);
+    /* Column 4 lies inside the turned cubes and outside a turned rect at their place. */
+    assert_pixel(frame, 4, 56, 255, 255, 0);
+    assert_pixel(frame, 4, 40, 0, 255, 255);
     assert_pixel(frame, 56, 56, 255, 0, 255);
+    assert_pixel(frame, 52, 56, 0, 0, 0);
 }
 
 static void test_pixel_join_bevel_is_bounded(void) {

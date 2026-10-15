@@ -203,7 +203,7 @@ enum {
 /* Capsule meridian: a full ring plus the equator angle repeated on each straight side. */
 #define NT_WIRE_CAP_POINTS (NT_SHAPE_SEGMENTS + 2)
 
-/* points = (before, p, after) of this corner; w tags the capsule/cylinder half. */
+/* points = (before, p, after) of this corner; w tags the capsule half. */
 typedef struct {
     float points[3][4];
     float corner[2];
@@ -1287,7 +1287,7 @@ void nt_shape_renderer_cylinder_wire(const float center[3], float radius, float 
 /* ---- Capsule ---- */
 
 void nt_shape_renderer_capsule(const float center[3], float radius, float height, const float rot[4], uint32_t color) {
-    float scale[3] = {radius, fmaxf(0.0F, (height - 2.0F * radius) * 0.5F), 0.0F};
+    float scale[3] = {radius, fmaxf(0.0F, (height - 2.0F * radius) * 0.5F), radius};
     push_instance(NT_SHAPE_CAPSULE, center, scale, rot, color);
 }
 
