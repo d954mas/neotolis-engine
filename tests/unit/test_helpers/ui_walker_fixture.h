@@ -46,9 +46,8 @@ typedef struct {
 } ui_walker_fixture_t;
 
 /* Text vertex layout in frame storage (nt_text_renderer's vertex). */
-#define UI_WALKER_FX_TEXT_VERTEX_BYTES 52U
+#define UI_WALKER_FX_TEXT_VERTEX_BYTES 48U
 #define UI_WALKER_FX_TEXT_GLYPH_BOUNDS_X1 36U /* glyph_bounds[2] */
-#define UI_WALKER_FX_TEXT_DEPTH_BIAS 48U
 
 void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_size, ui_walker_fx_bind_t bind);
 void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx);

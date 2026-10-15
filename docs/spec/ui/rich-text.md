@@ -81,7 +81,7 @@ forms; pure-intrinsic markup parses with a `NULL` tagset.
   `NT_UI_RICH_RUN_SYNTH_ITALIC`; the emit pass leans it with the run style's
   `oblique = NT_UI_RICH_SYNTH_ITALIC_SHEAR` (0.2 — text-local `x += k·y` about
   the baseline) instead of a real italic glyph. The shear is a per-call `nt_text_style_t` field
-  (sibling of `glyph_depth_bias`) folded into the model on the CPU per draw, so it mixes within one
+  folded into the model on the CPU per draw, so it mixes within one
   batch and never carries onto later text. Bold has no free analog (weight is contour *coverage*, not an affine transform);
   synthetic bold instead emits an emboldened glyph variant — see the decoration contract in [Text decoration](#text-decoration-weight--outline--shadow--underline--strike).
 
@@ -117,8 +117,7 @@ Five decoration axes travel with each draw in `nt_text_style_t`: `weight_em`, `o
 `outline_color`, `shadow_dx` / `shadow_dy` / `shadow_color`, `underline` and `strikethrough`. Both
 authoring fronts fill the SAME style at emit: `nt_ui_label` from `nt_ui_label_style_t` fields, and rich
 text from composed run state (variant bits + `push_outline/shadow/underline/strikethrough`). No new
-subsystem — decoration reuses the text pipeline and the Slug text shaders (`slug_text.frag`, or
-`slug_text_depth.frag` for depth-writing text).
+subsystem — decoration reuses the text pipeline and `slug_text.frag`.
 
 - **Units.** Text `font_size` is **px**. Everything decorative is **em** (a fraction of the text
   height, so it scales with size): `weight`, `outline` width, and `shadow` (dx,dy) offset are all em,

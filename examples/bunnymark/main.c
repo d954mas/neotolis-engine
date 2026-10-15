@@ -577,8 +577,8 @@ int main(int argc, char **argv) {
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     /* Every bunny is one rect quad: 4 vertices of 20 B and 6 uint32 indices; the HUD text adds
-     * 208 B of vertices and 24 B of indices per glyph of its overlay buffer. */
-    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = (BUNNY_MAX * 4U * 20U) + (BUNNY_OVERLAY_BYTES * 208U);
+     * 192 B of vertices and 24 B of indices per glyph of its overlay buffer. */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = (BUNNY_MAX * 4U * 20U) + (BUNNY_OVERLAY_BYTES * 192U);
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = (BUNNY_MAX * 6U * 4U) + (BUNNY_OVERLAY_BYTES * 24U);
     nt_gfx_init(&gfx_desc);
 
