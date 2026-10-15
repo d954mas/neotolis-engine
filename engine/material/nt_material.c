@@ -12,8 +12,11 @@
 
 typedef struct {
     nt_material_info_t info; /* the public, read-only view */
-    nt_resource_t tex_resources[NT_MATERIAL_MAX_TEXTURES];
-    nt_gfx_texture_binding_t textures[NT_MATERIAL_MAX_TEXTURES]; /* name and sampler; apply resolves the texture */
+    struct {
+        nt_resource_t resource;
+        nt_hash32_t name;
+        nt_sampler_t sampler;
+    } textures[NT_MATERIAL_MAX_TEXTURES];
     uint8_t tex_count;
     uint16_t params_size;
     uint8_t params[NT_MATERIAL_MAX_PARAM_BYTES];
@@ -88,8 +91,9 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     for (uint8_t i = 0; i < desc->texture_count; i++) {
         /* A slot with no uniform name is a declaration nothing can bind. */
         NT_ASSERT(desc->textures[i].name != NULL && "material texture slot needs a sampler uniform name");
-        rec->tex_resources[i] = desc->textures[i].resource;
-        rec->textures[i] = (nt_gfx_texture_binding_t){.name = nt_hash32_str(desc->textures[i].name), .sampler = desc->textures[i].sampler};
+        rec->textures[i].resource = desc->textures[i].resource;
+        rec->textures[i].name = nt_hash32_str(desc->textures[i].name);
+        rec->textures[i].sampler = desc->textures[i].sampler;
         for (uint8_t j = 0; j < i; j++) {
             /* Two slots on one sampler name would fight over its unit at every draw. */
             NT_ASSERT(rec->textures[j].name.value != rec->textures[i].name.value && "two material texture slots name the same sampler uniform");
@@ -106,14 +110,8 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     info->has_attr_defaults = desc->has_attr_defaults;
 
     /* Render state */
-    memcpy(info->blend.constant_color, desc->blend.constant_color, sizeof(info->blend.constant_color));
-    info->blend.src_rgb = desc->blend.src_rgb;
-    info->blend.dst_rgb = desc->blend.dst_rgb;
-    info->blend.src_alpha = desc->blend.src_alpha;
-    info->blend.dst_alpha = desc->blend.dst_alpha;
-    info->blend.op_rgb = desc->blend.op_rgb;
-    info->blend.op_alpha = desc->blend.op_alpha;
-    info->blend.enabled = desc->blend.enabled;
+    info->blend = desc->blend;
+    info->blend._reserved = 0;
     info->depth_test = desc->depth_test;
     info->depth_write = desc->depth_write;
     info->cull_mode = desc->cull_mode;
@@ -182,9 +180,12 @@ void nt_material_apply(nt_material_t mat, const nt_gfx_texture_binding_t *draw_t
         nt_gfx_unbind_uniform_block(NT_GFX_SLOT_MATERIAL);
     }
     nt_gfx_texture_binding_t bindings[NT_GFX_MAX_TEXTURE_SLOTS];
-    memcpy(bindings, rec->textures, rec->tex_count * sizeof(bindings[0]));
     for (uint8_t t = 0; t < rec->tex_count; t++) {
-        bindings[t].texture.id = nt_resource_get(rec->tex_resources[t]);
+        bindings[t] = (nt_gfx_texture_binding_t){
+            .name = rec->textures[t].name,
+            .texture = {.id = nt_resource_get(rec->textures[t].resource)},
+            .sampler = rec->textures[t].sampler,
+        };
     }
     for (uint8_t t = 0; t < count; t++) {
         bindings[rec->tex_count + t] = draw_textures[t];

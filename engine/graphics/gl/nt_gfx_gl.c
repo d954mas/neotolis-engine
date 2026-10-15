@@ -199,9 +199,8 @@ static struct {
     GLuint vao;
     /* Context state, not VAO state: only glVertexAttribPointer captures it. */
     GLuint array_buffer;
-    /* Indexed ranges persist across passes and frames; the front-end rebinds blocks every pass. */
+    /* Every range uses the uniform frame buffer; init and restore reset these with that buffer. */
     struct {
-        GLuint buffer;
         uint32_t offset;
         uint32_t size;
     } uniform_ranges[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS];
@@ -1437,8 +1436,8 @@ static bool nt_gfx_gl_bind_blocks(GLuint program, nt_gfx_gl_program_t *rec) {
     memset(rec->block_sizes, 0, sizeof(rec->block_sizes));
     GLint block_count = -1;
     NT_GL(glGetProgramiv, program, GL_ACTIVE_UNIFORM_BLOCKS, &block_count);
-    if (block_count < 0) {
-        return false;
+    if (block_count <= 0) {
+        return block_count == 0;
     }
     char name[NT_GFX_GL_MAX_UNIFORM_NAME];
     GLint max_name_length = 0;
@@ -1809,12 +1808,11 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, cons
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, uint32_t offset, uint32_t size) {
     NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_buffers && s_buffer_gl[backend_handle] != 0 && "bind_uniform_buffer: requires a live buffer");
     const GLuint buf = s_buffer_gl[backend_handle];
-    if (s_gl_cache.uniform_ranges[slot].buffer == buf && s_gl_cache.uniform_ranges[slot].offset == offset && s_gl_cache.uniform_ranges[slot].size == size) {
+    if (s_gl_cache.uniform_ranges[slot].offset == offset && s_gl_cache.uniform_ranges[slot].size == size) {
         NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UBO, event->result = NT_GFX_RESULT_CACHE; event->detail = NT_GFX_GL_glBindBufferRange; event->data.backend.args[0] = buf;);
         return;
     }
     NT_GL(glBindBufferRange, GL_UNIFORM_BUFFER, slot, buf, (GLintptr)offset, (GLsizeiptr)size);
-    s_gl_cache.uniform_ranges[slot].buffer = buf;
     s_gl_cache.uniform_ranges[slot].offset = offset;
     s_gl_cache.uniform_ranges[slot].size = size;
 }

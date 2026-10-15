@@ -1517,6 +1517,9 @@ static void test_ground_state_reissues_sampler_bind(void) {
 
 /* A block's array members are not standalone uniforms: linking must not look up a location per element. */
 static void test_block_members_need_no_location_lookup(void) {
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, make_red_pipeline().id);
+    /* Completion (when supported), link status, block count and uniform count suffice without blocks. */
+    TEST_ASSERT_EQUAL_UINT32(g_nt_gfx.gpu_caps.has_parallel_shader_compile ? 4U : 3U, g_nt_gfx.counters.gl[NT_GFX_GL_glGetProgramiv]);
     const char *vs = "precision highp float;\n"
                      "layout(std140) uniform Draw { vec4 big_data[1024]; };\n"
                      "void main() { gl_Position = big_data[gl_VertexID]; }\n";

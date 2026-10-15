@@ -757,8 +757,9 @@ Destroying a live object from the first pass until `nt_gfx_end_frame` asserts
 (the frame rule, see Draw-phase command stream).
 Physical texture/sampler GL bindings and GL uniform-block ranges remain context
 state. The backend deduplicates texture/sampler binds and uniform-block ranges across
-passes: a recorded block bind whose buffer, offset and size the slot already holds issues
-no `glBindBufferRange`. A depth clear forces the depth
+passes. Every uniform range uses the uniform frame buffer, and its recreation
+clears the range cache. A recorded block bind whose offset and size the slot
+already holds issues no `glBindBufferRange`. A depth clear forces the depth
 mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
 A render target is a thin framebuffer object over optional attachments, color

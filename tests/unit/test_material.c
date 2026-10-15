@@ -6,6 +6,7 @@
 /* clang-format off */
 #include "core/nt_assert.h"
 #include "graphics/nt_gfx.h"
+#include "graphics/nt_gfx_internal.h"
 #include "material/nt_material.h"
 #include "resource/nt_resource.h"
 #include "hash/nt_hash.h"
@@ -456,6 +457,10 @@ void test_apply_binds_the_params_and_the_complete_texture_set(void) {
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_SLOT_MATERIAL, nt_gfx_fake_ubo_bind_at(0).slot);
     TEST_ASSERT_EQUAL_UINT32(sizeof(s_params), nt_gfx_fake_ubo_bind_at(0).size);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(1));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(albedo), nt_gfx_fake_bound_texture_at(0));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(page), nt_gfx_fake_bound_texture_at(1));
     nt_gfx_begin_frame();
 }
 
