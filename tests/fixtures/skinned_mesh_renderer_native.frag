@@ -4,7 +4,7 @@ in vec3 v_position_probe;
 in vec3 v_normal_probe;
 in vec3 v_tangent_probe;
 in vec4 v_color_probe;
-uniform vec4 u_probe_mode;
+layout(std140) uniform Material { vec4 u_probe_mode; };
 out vec4 frag_color;
 
 void main() {

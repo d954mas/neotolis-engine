@@ -152,7 +152,7 @@ does not need to walk them. Shader stages have independent lifetimes: destroying
 a stage does not affect a program already linked from it.
 
 A program's linked executable and identity are immutable after
-`nt_gfx_make_program`; its uniform values and block bindings remain mutable.
+`nt_gfx_make_program`, and so are its sampler units and block bindings.
 Recovery requires the owner to destroy the old program and link a new handle.
 
 Handle validity and readiness are separate. `nt_gfx_program_valid` reports
@@ -183,22 +183,50 @@ A link failure is a developer error and asserts in the `nt_gfx_begin_frame`
 that finishes the link; an invalid stage handle and an exhausted program pool
 assert at `nt_gfx_make_program`.
 
-`nt_gfx_desc_t.global_blocks` declares the global name -> binding slot list at
-`nt_gfx_init` (up to `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS`; an entry with a NULL name is unused); every
-program that declares a listed block gets its slot at link. There is no
-per-program override and no later registration. Names are borrowed without
-copying: each string must remain valid and unchanged until `nt_gfx_shutdown`.
-The list survives context loss: programs linked after a restore bind it too.
+Every active uniform block binds at link to the slot of its name. The engine
+reserves three names by update frequency: `Globals` (`NT_GFX_SLOT_GLOBALS`, frame
+and view data the game fills), `Material` (`NT_GFX_SLOT_MATERIAL`) and `Draw`
+(`NT_GFX_SLOT_DRAW`, per-draw data). `nt_gfx_desc_t.game_blocks` lists the
+game's own names at `nt_gfx_init`: entry `i` binds to `NT_GFX_SLOT_GAME + i`,
+up to `NT_GFX_MAX_GAME_BLOCKS` (5: every slot is frame data at a dynamic offset,
+and the eight slots fit WebGPU's eight dynamic uniform bindings), and the list ends at the first NULL.
+A reserved or duplicate name in the list asserts at init; an active block whose
+name is neither reserved nor listed asserts at link (it would read slot 0). The
+slots are logical: a WebGPU backend maps them into its bind groups. Names are
+borrowed without copying: each string must remain valid and unchanged until
+`nt_gfx_shutdown`. The list survives context loss: programs linked after a
+restore bind it too.
 
-`nt_gfx_bind_uniform_block(slot, data, size)` copies `size` bytes into the
-uniform frame stream at the next multiple of
+Block members are `vec4`, `ivec4`, `uvec4`, `mat4` or arrays of them in a
+`layout(std140)` block with column-major matrices. Shaders must declare std140;
+WebGL enforces it, while native GL relies on the shader author to declare it.
+Link reflection asserts the member types and queries matrix order only for
+`mat4`, rejecting `row_major`. Offsets and array/matrix strides follow std140
+and are not queried. The game mirrors the block with a C struct of `float`,
+`int32_t` and `uint32_t` arrays; gfx does not verify that C struct's layout. A
+draw asserts that every block its program uses is bound in the pass with at least
+the block's data size (WebGL rejects such a draw, native GL reads past the range);
+the check runs on the first draw after a program or block change, before a merge.
+
+A slot holds the last block bound to it in the pass, whoever bound it. `Draw` is
+per-draw data: a shape flush binds its own `Draw` block, so a game binds its
+`Draw` block before its own draws, not once per pass.
+
+`nt_gfx_bind_uniform_block(slot, data, size)` binds frame data: it copies `size`
+bytes into the uniform frame stream at the next multiple of
 `gpu_caps.uniform_buffer_offset_alignment` (re-probed at context restore) and
-binds that range to `slot`. The game owns no uniform buffer: a block is frame
-data, so a draw reads only blocks bound in its own frame. WebGL rejects a draw
-whose bound range is smaller than the block's data size; gfx does not know block
-sizes, so `size` covers the whole block. A slot at or above the limit, NULL
-`data` or a zero `size` asserts; an exhausted stream stops as a frame storage
-overflow. On a lost context the call allocates nothing and ends `CONTEXT_LOST`.
+binds that range to `slot`. Bytes equal to the last block `slot` staged in the
+frame copy nothing: in the pass that bound them the call ends `CACHE`, in a later
+pass it binds the staged range again. Other bytes copy again, so A, B, A copies
+three times; budget the stream at `size` plus 256 bytes per bind of all passes
+of a frame. The bytes live for one frame. A slot at or above the limit, NULL `data`, or a
+`size` that is zero or not a multiple of 16 asserts; an exhausted stream stops
+as a frame storage overflow. On a lost context the call allocates nothing and
+ends `CONTEXT_LOST`.
+
+`nt_gfx_unbind_uniform_block(slot)` unbinds the slot without a backend call, so a
+draw whose program uses the slot asserts; an unbound slot ends `CACHE`. Uniform
+data has no public buffer.
 
 `nt_gfx_make_program` returns `NT_PROGRAM_INVALID` for the two states a context
 loss leaves behind, and for nothing else. The first is the loss itself: a loss
@@ -216,14 +244,12 @@ per-frame gate needs no assignment latch.
 
 Sprite and text have no staged work: `nt_sprite_renderer_set_material` and
 `nt_text_renderer_set_material` resolve the material for the current gfx frame,
-are called every frame before drawing (asserted), and each emit or draw records
-its draw at the call with the params current at that call. A program replaced
+are called every frame before drawing (asserted), and each emit or draw applies
+its material at the call (`nt_material_apply`). A program replaced
 behind the same material handle takes effect at the next `set_material`, which
 compares the program as well as the handle; draws already recorded keep their
-pipeline. Sprite `draw_list` resolves each run's material itself. The text
-renderer writes material params only when `{program, material, params}` differ
-from its last write, so nothing else may write the uniforms of a program that
-text materials use. A program is destroyed only outside a drawn frame (the frame rule), so a
+pipeline. Sprite `draw_list` resolves each run's material itself. Each apply binds the
+material's own params, so no draw depends on what another material wrote. A program is destroyed only outside a drawn frame (the frame rule), so a
 pipeline resolved at `set_material` stays live for the frame's draws.
 
 A material carries no readiness field. Callers derive readiness with
@@ -235,11 +261,12 @@ immediate-mode `nt_sprite_renderer_set_material` / `nt_text_renderer_set_materia
 entry points assert only that a program was assigned.
 
 Every material declares a slot for every sampler its program uses that the
-material owns; a texture owned by a mesh draw is a draw texture, not a material
-slot ([material, MaterialAsset purpose](../render/material.md#materialasset-purpose)).
-The sprite and text renderers keep their documented exceptions until the material
-bind group (planned, #600). A declared name the program does not sample is ignored
-before its descriptor handle is inspected.
+material owns; a texture owned by the draw (the sprite atlas page, the font curve
+texture, the skin deformation texture, a game's per-draw texture) is a draw texture
+passed to `nt_material_apply`, not a material slot
+([material, Textures and draw textures](../render/material.md#textures-and-draw-textures)).
+A declared name the program does not sample is ignored before its descriptor
+handle is inspected.
 
 Every active declared slot must resolve to a texture. Register a
 placeholder with `nt_resource_set_placeholder_texture` to survive async load
@@ -250,14 +277,12 @@ backend units, validates coverage, and publishes only the full valid set. A
 rejected set discards the logical binding state, so a draw cannot reuse the
 previous material's textures.
 
-Sprite and text retain legacy exceptions until the material bind group (planned, #600). A sprite material that
-samples the atlas declares its page sampler at slot 0, but the renderer
-substitutes the page resource per emit and run; a material declaring no textures
-never receives the page and is for analytical coverage. A text material declares
-no textures at all — the font's curve texture is the text renderer's
-own bind. `nt_text_renderer_set_material` asserts that the material declares
-nothing, and each draw records its font set; gfx's coverage check confirms every
-sampler the program actually links.
+A sprite material never declares the atlas page: every emit and run passes the
+page as the draw texture `u_texture` with the page's default sampler, and a sprite
+whose page does not resolve skips its emit or run whatever its shader samples. A
+text material may declare textures of its own; each draw passes the font's curve
+texture as `u_curve_texture`. gfx's coverage check confirms every sampler the
+program actually links.
 
 A text material picks its fragment shader by depth writes. `slug_text.frag` has
 no `discard`: a premultiplied empty pixel changes nothing, and `discard` blocks
@@ -360,14 +385,14 @@ sampler interface by name, not by texture unit. Names absent from the linked
 program are ignored before their handles are inspected; active names are mapped
 to the immutable units recorded at link. Missing or duplicate active names,
 invalid handles, sampler/texture type mismatches, and sampling a color or depth
-attachment of the active render target are developer errors and assert. Resolution
-is atomic: context loss (also one a lazy sampler recreate meets) or a texture
-without live backend storage publishes no
-logical set and issues no backend bind. Those failures are
-recoverable, so gfx reports them and skips the following draws of that set instead
-of returning a status the caller would have to branch on. Context loss means loss
-already latched, by `nt_gfx_begin_frame` or by a failed backend call; material
-transitions do not poll the platform.
+attachment of the active render target are developer errors and assert, and so
+does a texture without live backend storage: like a buffer or render-target husk,
+it is a texture its owner did not recreate after a context restore. Resolution is
+atomic: context loss (also one a lazy sampler recreate meets) publishes no logical
+set and issues no backend bind, and the following draws take their lost path.
+Context loss means loss already latched, by `nt_gfx_begin_frame` or by a failed
+backend call; material transitions do not poll the platform. A set that changes
+no unit of the pass ends `CACHE` after its validation.
 
 The sampler class is part of the linked interface:
 
@@ -536,15 +561,15 @@ that a loss or a cascade may have freed; there is no non-asserting pass-begin
 variant.
 
 Draw-state calls require an open pass. `nt_gfx_set_scissor`, `nt_gfx_set_scissor_enabled`,
-`nt_gfx_set_viewport` and
-`nt_gfx_bind_uniform_block` assert
+`nt_gfx_set_viewport`, `nt_gfx_bind_uniform_block` and
+`nt_gfx_unbind_uniform_block` assert
 without an open pass, also on a lost context: every pass-scoped call checks the
 pass before it returns `NT_GFX_RESULT_CONTEXT_LOST`. `nt_gfx_begin_pass` disables scissor, sets the viewport to the whole
-target and clears the bound pipeline, vertex input, instance binding and texture
-set. The scissor rectangle and uniform-block bindings
-carry over, so a pass sets the scissor rectangle before it enables scissor. A
-bind equal to the current state records nothing; results, the texture-set
-exception, the always-recording uniform-block bind and the slot limit are in
+target and clears the bound pipeline, vertex input, instance binding, texture
+set and uniform-block bindings, so every pass binds every block it reads. The
+scissor rectangle carries over, so a pass sets the scissor rectangle before it
+enables scissor. A bind equal to the current state records nothing; results and
+the slot limit are in
 [binding dedup](../render/architecture.md#binding-dedup-and-draw-merge).
 `nt_gfx_begin_segment` and `nt_gfx_end_segment` assert outside an open frame.
 

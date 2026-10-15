@@ -27,7 +27,8 @@
 void nt_shape_renderer_init(void);
 void nt_shape_renderer_shutdown(void);
 void nt_shape_renderer_restore_gpu(void);
-/* Draws pending fills, then strokes. The only draw-order barrier: render architecture, "Shape strokes". */
+/* Draws pending fills, then strokes. The only draw-order barrier: render architecture, "Shape strokes".
+ * Each flush binds its own Draw block: a game rebinds its Draw block before its next draw. */
 void nt_shape_renderer_flush(void);
 
 /* ---- State setters ---- */

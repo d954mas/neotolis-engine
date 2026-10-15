@@ -301,8 +301,8 @@ static void test_first_frame_counts_initial_resource_creation(void) {
     (void)nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8});
     nt_gfx_begin_frame();
     TEST_ASSERT_EQUAL_UINT64(1, g_nt_gfx.last_frame.frame_sequence);
-    /* The three loads; the texture also creates its default sampler. Frame storage is off by default. */
-    TEST_ASSERT_EQUAL_UINT32(4, g_nt_gfx.last_frame.accepted[NT_GFX_OP_CREATE]);
+    /* The three loads; the texture also creates its default sampler, and init the default uniform stream's buffer. */
+    TEST_ASSERT_EQUAL_UINT32(5, g_nt_gfx.last_frame.accepted[NT_GFX_OP_CREATE]);
 }
 
 /* The pre-swap capture seam reads after end_frame: work there is legal and counts in the open frame. */
@@ -332,11 +332,11 @@ static void test_clear_preserves_bound_draw_state(void) {
     nt_gfx_apply_texture_bindings(NULL, 0);
     uint32_t pipeline = nt_gfx_test_bound_pipeline();
     uint32_t input = nt_gfx_test_bound_vertex_input();
-    uint32_t textures = nt_gfx_test_texture_set_state();
+    bool textures = nt_gfx_test_texture_set_applied();
     nt_gfx_clear(&(nt_clear_desc_t){.color = true, .depth = true, .clear_depth = 0.5F});
     TEST_ASSERT_EQUAL_UINT32(pipeline, nt_gfx_test_bound_pipeline());
     TEST_ASSERT_EQUAL_UINT32(input, nt_gfx_test_bound_vertex_input());
-    TEST_ASSERT_EQUAL_UINT32(textures, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_EQUAL(textures, nt_gfx_test_texture_set_applied());
     nt_gfx_draw(0, 3);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
     draw_teardown();

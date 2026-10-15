@@ -13,6 +13,10 @@ void nt_gfx_fake_set_samplers_typed(const char *const *names, const uint8_t *sam
 nt_program_t nt_gfx_fake_make_program(const char *const *names, uint8_t count);
 nt_program_t nt_gfx_fake_make_program_typed(const char *const *names, const uint8_t *sampler_classes, uint8_t count);
 
+/* Subsequent links use a uniform block of `size` bytes at slot (0 = none) -- the size a draw
+ * requires bound there. Kept until changed or until gfx init clears it. */
+void nt_gfx_fake_set_block(uint32_t slot, uint32_t size);
+
 /* Draw trace: recorded by the fake backend, so the engine's draw path stays
  * free of test bookkeeping. pipeline/program are the FRONTEND handles of the
  * pipeline the fake backend last bound. */
@@ -48,12 +52,6 @@ uint32_t nt_gfx_fake_texture_create_count(void);
 uint32_t nt_gfx_fake_program_create_count(void);
 uint32_t nt_gfx_fake_pipeline_create_count(void);
 uint32_t nt_gfx_fake_bind_pipeline_count(void);
-uint32_t nt_gfx_fake_uniform_int_count(void);
-uint32_t nt_gfx_fake_uniform_int_hash_at(uint32_t index);
-int nt_gfx_fake_uniform_int_value_at(uint32_t index);
-uint32_t nt_gfx_fake_uniform_vec4_count(void);
-uint32_t nt_gfx_fake_uniform_vec4_hash_at(uint32_t index);
-void nt_gfx_fake_uniform_vec4_value_at(uint32_t index, float out[4]);
 /* Program links finish in nt_gfx_begin_frame; these act there. Hold keeps every link pending. */
 void nt_gfx_fake_hold_program_links(bool hold);
 void nt_gfx_fake_lose_context_on_program_link(void);
@@ -64,7 +62,6 @@ uint16_t nt_gfx_fake_last_pass_width(void);
 uint16_t nt_gfx_fake_last_pass_height(void);
 nt_pass_desc_t nt_gfx_fake_last_pass_desc(void);
 nt_clear_desc_t nt_gfx_fake_last_clear_desc(void);
-void nt_gfx_fake_last_uniform_mat4(float out[16]);
 nt_texture_desc_t nt_gfx_fake_last_texture_desc(void);
 /* Desc of the last buffer create the backend saw, failed ones included; pointers are borrowed. */
 nt_buffer_desc_t nt_gfx_fake_last_buffer_desc(void);
@@ -122,7 +119,6 @@ nt_blend_state_t nt_gfx_fake_last_pipeline_blend(void);
 uint32_t nt_gfx_fake_vertex_input_create_count(void);
 uint32_t nt_gfx_fake_bind_vertex_input_count(void);
 uint32_t nt_gfx_fake_last_bound_vertex_input(void);
-uint32_t nt_gfx_fake_last_uniform_program(void);
 nt_vertex_layout_t nt_gfx_fake_last_vertex_input_layout(void);
 #if NT_GFX_CAPTURE_ENABLED
 /* Backend snapshots taken for recorded ticks since the last reset. */

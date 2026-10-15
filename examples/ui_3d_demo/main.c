@@ -145,7 +145,6 @@ static bool s_debug_overlay;
 /* Resources. */
 static nt_hash32_t s_pack_id;
 static nt_resource_t s_atlas_handle;
-static nt_resource_t s_atlas_tex_handle;
 static nt_resource_t s_font_resource;
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
@@ -925,7 +924,7 @@ static void frame(void) {
 
     /* UI: needs perspective VP in frame_uniforms for sprite/text material shaders. */
     if (ui_can_render) {
-        nt_gfx_bind_uniform_block(0, &uniforms_3d, sizeof uniforms_3d);
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &uniforms_3d, sizeof uniforms_3d);
 
         nt_ui_walk(s_ctx, &target);
 
@@ -944,7 +943,7 @@ static void frame(void) {
 
     /* HUD: ortho VP. */
     if (text_info && nt_gfx_program_ready(text_info->program)) {
-        nt_gfx_bind_uniform_block(0, &uniforms_2d, sizeof uniforms_2d);
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &uniforms_2d, sizeof uniforms_2d);
         draw_hud(fb_w, fb_h);
     }
 
@@ -959,7 +958,7 @@ static void frame(void) {
 
         /* Highlight overlay emits the element's world geometry in 3D ctx → bind the perspective VP
          * so it lands on the panel; the depth-off inspector materials keep it on top. */
-        nt_gfx_bind_uniform_block(0, &uniforms_3d, sizeof uniforms_3d);
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &uniforms_3d, sizeof uniforms_3d);
         nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
     }
 
@@ -1018,11 +1017,9 @@ int main(int argc, char *argv[]) {
     nt_input_init();
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
-    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 3U * 512U; /* 3D, HUD/inspector and highlight views: 256 B or less each, plus any offset alignment up to 256 */
     gfx_desc.depth = true;
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = UI_3D_DEMO_VERTEX_BYTES;
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = UI_3D_DEMO_INDEX_BYTES;
-    gfx_desc.global_blocks[0] = (nt_global_block_t){"Globals", 0};
     nt_gfx_init(&gfx_desc);
 
     nt_http_init();
@@ -1068,7 +1065,6 @@ int main(int argc, char *argv[]) {
     s_text_depth_program.vs = s_text_program.vs;
     s_text_depth_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_DEPTH_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_3D_DEMO_ATLAS, NT_ASSET_ATLAS);
-    s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_3D_DEMO_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_3D_DEMO_FONT, NT_ASSET_FONT);
 
     /* Handle is valid immediately; fill late-bound button-bg refs upfront. */
@@ -1078,14 +1074,12 @@ int main(int argc, char *argv[]) {
      * across sprite+text layers). The cutoff sprite variant discards transparent button corners so
      * they don't punch depth; the per-element depth bias (element_depth_bias_ndc) keeps each panel's labels above its own bg. */
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
-        .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = true,
         .depth_write = true,
         .cull_mode = NT_CULL_NONE,
-        .params[0] = {.name = "u_alpha_cutoff", .value = {1.0F / 255.0F}},
-        .param_count = 1,
+        .params = (const float[4]){1.0F / 255.0F}, /* sprite_cutoff.frag: Material { vec4 u_alpha_cutoff; } */
+        .params_size = 4 * sizeof(float),
         .label = "ui_3d_demo_sprite",
     });
     s_text_material = nt_material_create(&(nt_material_create_desc_t){
@@ -1111,8 +1105,6 @@ int main(int argc, char *argv[]) {
     /* Inspector overlay materials: same shaders, depth_test=false so the debug sidebar stays on top
      * without testing the 3D scene depth (passive overlay, no depth-buffer side effects). */
     s_inspector_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
-        .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,

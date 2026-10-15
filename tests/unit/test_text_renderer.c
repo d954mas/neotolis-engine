@@ -241,12 +241,9 @@ void test_text_renderer_forwards_material_blend_state(void) {
 
     nt_blend_state_t actual = nt_gfx_fake_last_pipeline_blend();
     TEST_ASSERT_EQUAL_MEMORY(&blend, &actual, sizeof(blend));
-
-    /* Sampler units are fixed at link and curves are addressed by glyph row: a draw writes no int. */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
 }
 
-/* The font texture lands on the unit its program assigned, and nothing writes a sampler int. */
+/* The font texture lands on the unit its program assigned. */
 void test_text_renderer_font_texture_lands_on_its_program_unit(void) {
     nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
     nt_test_frame_finish_links();
@@ -405,9 +402,9 @@ void test_quad_covers_fp16_rounded_tofu(void) {
     }
 }
 
-/* The font's curve texture is the renderer's own bind, so a text material that
- * declares its own textures would have them silently overwritten. */
-void test_text_material_with_textures_asserts_at_set_material(void) {
+/* The font's curve texture is a draw texture, so a text material may declare textures of its
+ * own; a name the program does not sample is ignored before its resource is resolved. */
+void test_text_material_may_declare_its_own_textures(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     nt_material_t textured = nt_material_create(&(nt_material_create_desc_t){
@@ -418,7 +415,12 @@ void test_text_material_with_textures_asserts_at_set_material(void) {
     });
 
     nt_test_frame_finish_links();
-    NT_TEST_EXPECT_ASSERT(nt_text_renderer_set_material(textured));
+    select_material(textured);
+    const nt_text_style_t style = plain();
+    nt_gfx_fake_reset();
+    nt_text_renderer_draw(&style, s_identity, "A");
+    next_frame();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count()); /* the curve texture */
 }
 
 /* A zero frame storage budget would make every text draw silently vanish. */
@@ -521,16 +523,17 @@ void test_equal_draws_merge_and_a_font_change_splits(void) {
     open_frame();
 }
 
-/* Params are written once per change on a program: A -> B -> A writes A again, equal draws write nothing. */
-void test_material_params_record_once_per_change(void) {
+/* Each material binds its own params once per change: A -> B -> A binds A again, equal draws bind
+ * nothing, and every pass binds again. */
+void test_material_params_bind_once_per_change(void) {
     const nt_text_style_t style = plain();
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     nt_program_t shared = nt_gfx_make_program(vs, fs);
-    nt_material_t a = nt_material_create(
-        &(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE, .params[0] = {.name = "u_tint", .value = {1, 0, 0, 1}}, .param_count = 1});
-    nt_material_t b = nt_material_create(
-        &(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE, .params[0] = {.name = "u_tint", .value = {0, 1, 0, 1}}, .param_count = 1});
+    static const float red[4] = {1, 0, 0, 1};
+    static const float green[4] = {0, 1, 0, 1};
+    nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE, .params = red, .params_size = sizeof(red)});
+    nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE, .params = green, .params_size = sizeof(green)});
 
     nt_test_frame_finish_links();
     nt_gfx_fake_reset();
@@ -542,23 +545,22 @@ void test_material_params_record_once_per_change(void) {
     select_material(a);
     nt_text_renderer_draw(&style, s_identity, "A");
     next_frame();
-    TEST_ASSERT_EQUAL_UINT32(3U, nt_gfx_fake_uniform_vec4_count());
+    TEST_ASSERT_EQUAL_UINT32(3U, nt_gfx_fake_ubo_bind_count());
 
-    /* Unchanged params on the next frame write nothing. */
+    /* The next frame's pass binds its blocks again. */
     nt_gfx_fake_reset();
     nt_text_renderer_draw(&style, s_identity, "A");
     next_frame();
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_uniform_vec4_count());
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_ubo_bind_count());
 
-    /* A param changed between frames reaches the next frame's draw. */
-    const float green[4] = {0, 1, 0, 1};
-    nt_test_frame_close();
-    nt_material_set_param(a, "u_tint", green);
-    open_frame();
+    /* A params write reaches the next draw. */
     nt_gfx_fake_reset();
+    nt_material_set_params(a, green, sizeof(green));
     nt_text_renderer_draw(&style, s_identity, "A");
+    const uint8_t *staging = g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].staging;
     next_frame();
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_uniform_vec4_count());
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_ubo_bind_count());
+    TEST_ASSERT_EQUAL_MEMORY(green, staging + nt_gfx_fake_ubo_bind_at(0).offset, sizeof(green));
 }
 
 /* Two materials on one program and one render state are one pipeline: the key is
@@ -1253,7 +1255,7 @@ int main(void) {
     RUN_TEST(test_vertex_color_and_depth_bias_bytes);
     RUN_TEST(test_vertex_input_reads_color_as_normalized_rgba8);
     RUN_TEST(test_quad_covers_fp16_rounded_tofu);
-    RUN_TEST(test_text_material_with_textures_asserts_at_set_material);
+    RUN_TEST(test_text_material_may_declare_its_own_textures);
     RUN_TEST(test_zero_frame_capacity_asserts_at_set_material);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_draw_after_previous_frame_selection_asserts);
@@ -1262,7 +1264,7 @@ int main(void) {
     RUN_TEST(test_draw_newline_advances_to_next_line);
     RUN_TEST(test_a_call_without_quads_records_nothing);
     RUN_TEST(test_equal_draws_merge_and_a_font_change_splits);
-    RUN_TEST(test_material_params_record_once_per_change);
+    RUN_TEST(test_material_params_bind_once_per_change);
     RUN_TEST(test_a_destroyed_program_draws_nothing);
     RUN_TEST(test_vertex_input_create_that_meets_a_loss_draws_nothing);
     RUN_TEST(test_context_loss_recovers_without_a_restore_call);

@@ -134,7 +134,6 @@ static nt_vertex_input_t s_mesh_vi;
 static nt_vertex_input_t s_mesh_vi_high; /* the same mesh over vertex stream 1 */
 static nt_instance_layout_t s_mesh_instance_layout;
 static uint32_t s_mesh_handle;
-static nt_hash32_t s_mesh_color_name;
 static uint32_t s_mesh_index_count, s_mesh_vertex_count;
 
 static const char *s_mesh_vs_src = "precision highp float;\n"
@@ -143,7 +142,7 @@ static const char *s_mesh_vs_src = "precision highp float;\n"
                                    "void main() { gl_Position = vec4(a_position.xy * 0.1 + i_offset, 0.0, 1.0); }\n";
 static const char *s_mesh_fs_src = "precision mediump float;\n"
                                    "out vec4 frag_color;\n"
-                                   "uniform vec4 u_probe_color;\n"
+                                   "layout(std140) uniform Draw { vec4 u_probe_color; };\n"
                                    "void main() { frag_color = u_probe_color; }\n";
 
 /* The GL probes draw with programs linked at startup and after a restore: a link finishes
@@ -162,12 +161,14 @@ static probe_program_t s_probe_programs[PROBE_COUNT] = {
     /* Explicit LOD, not screen-space derivatives: the level under test must not depend on how the
      * driver rounds lambda for a 1x1 viewport. */
     [PROBE_BASIS] = {.vs_source = "void main() { vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)); gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }",
-                     .fs_source = "precision highp float; uniform sampler2D u_basis; uniform vec4 u_basis_uv; out vec4 color;\n"
+                     .fs_source = "precision highp float; uniform sampler2D u_basis; layout(std140) uniform Draw { vec4 u_basis_uv; }; out vec4 color;\n"
                                   "void main() { color = textureLod(u_basis, u_basis_uv.xy, u_basis_uv.z); }"},
-    [PROBE_DEPTH] = {.vs_source = "uniform vec4 u_depth; void main() { vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)); gl_Position = vec4(p * 2.0 - 1.0, u_depth.x, 1.0); }",
-                     .fs_source = "precision highp float; out vec4 color; void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }"},
+    [PROBE_DEPTH] =
+        {.vs_source =
+             "layout(std140) uniform Draw { vec4 u_depth; }; void main() { vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)); gl_Position = vec4(p * 2.0 - 1.0, u_depth.x, 1.0); }",
+         .fs_source = "precision highp float; out vec4 color; void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }"},
     [PROBE_OBSERVE] = {.vs_source = "void main(){vec2 p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2));gl_Position=vec4(p*2.0-1.0,0.0,1.0);}",
-                       .fs_source = "precision mediump float;uniform sampler2D tex;uniform vec4 tint;out vec4 color;void main(){color=texture(tex,vec2(0.5))*tint;}"},
+                       .fs_source = "precision mediump float;uniform sampler2D tex;layout(std140) uniform Draw{vec4 tint;};out vec4 color;void main(){color=texture(tex,vec2(0.5))*tint;}"},
 };
 
 /* False when a loss interrupted creation: the restore step runs again. */
@@ -198,7 +199,6 @@ static void probe_programs_destroy(void) {
 /* False when the context is (still) lost mid-restore: the caller retries on a
  * later frame; partial handles are {0}-safe for mesh_probe_destroy. */
 static bool mesh_probe_create(void) {
-    s_mesh_color_name = nt_hash32_str("u_probe_color");
     /* Unit quad, one float3 position stream, uint16 indices. */
     static const float verts[12] = {0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F};
     static const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
@@ -278,7 +278,7 @@ static void mesh_probe_draw(void) {
     memcpy(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX + 1, sizeof(high), 4, &high_offset), high, sizeof(high));
     nt_gfx_bind_pipeline(s_mesh_pipeline);
     const float color[4] = {0.25F, 0.5F, 0.75F, 1.0F};
-    nt_gfx_set_uniform_vec4(s_mesh_color_name, color);
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, color, sizeof(color));
     nt_gfx_bind_vertex_input_instanced(s_mesh_vi, s_mesh_instance_layout, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), low_offset + 8U);
     nt_gfx_draw_indexed_instanced(0, s_mesh_index_count, s_mesh_vertex_count, 2);
     nt_gfx_bind_vertex_input_instanced(s_mesh_vi_high, s_mesh_instance_layout, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1), high_offset + 8U);
@@ -513,7 +513,7 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     nt_gfx_bind_vertex_input(input);
     nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_basis"), .texture = tex, .sampler = sampler};
     nt_gfx_apply_texture_bindings(&binding, 1);
-    nt_gfx_set_uniform_vec4(nt_hash32_str("u_basis_uv"), uv);
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, uv, sizeof(uv));
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -546,13 +546,12 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program, .depth_test = true, .depth_write = true, .depth_func = NT_DEPTH_LESS});
     nt_pipeline_t overwrite = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program, .depth_test = true, .depth_func = NT_DEPTH_ALWAYS});
     nt_vertex_input_t input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
-    nt_hash32_t uniform = nt_hash32_str("u_depth");
     float z[4] = {-0.5F, 0.0F, 0.0F, 0.0F};
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = prepass, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(input);
     nt_gfx_apply_texture_bindings(NULL, 0);
-    nt_gfx_set_uniform_vec4(uniform, z);
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, z, sizeof(z));
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
 
@@ -563,7 +562,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(input);
     nt_gfx_apply_texture_bindings(NULL, 0);
-    nt_gfx_set_uniform_vec4(uniform, z);
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, z, sizeof(z));
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -576,7 +575,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(input);
     nt_gfx_apply_texture_bindings(NULL, 0);
-    nt_gfx_set_uniform_vec4(uniform, z);
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, z, sizeof(z));
     nt_gfx_draw(0, 3);
     nt_gfx_set_scissor(1, 0, 1, 1);
     nt_gfx_set_scissor_enabled(true);
@@ -613,7 +612,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     nt_gfx_bind_pipeline(overwrite);
     nt_gfx_bind_vertex_input(input);
     nt_gfx_apply_texture_bindings(NULL, 0);
-    nt_gfx_set_uniform_vec4(uniform, z);
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, z, sizeof(z));
     nt_gfx_set_scissor(0, 0, 1, 1);
     nt_gfx_set_scissor_enabled(true);
     nt_gfx_clear(&(nt_clear_desc_t){.depth = true, .clear_depth = 0.2F});
@@ -625,7 +624,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_apply_texture_bindings(NULL, 0);
     z[0] = 0.0F;
-    nt_gfx_set_uniform_vec4(uniform, z);
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, z, sizeof(z));
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -639,7 +638,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     nt_gfx_bind_pipeline(overwrite);
     nt_gfx_bind_vertex_input(input);
     nt_gfx_apply_texture_bindings(NULL, 0);
-    nt_gfx_set_uniform_vec4(uniform, z);
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, z, sizeof(z));
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -721,7 +720,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("tex"), .texture = texture};
     for (uint32_t i = 0; i < 2; i++) {
         nt_gfx_apply_texture_bindings(&binding, 1);
-        nt_gfx_set_uniform_vec4(nt_hash32_str("tint"), tint);
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, tint, sizeof(tint));
     }
     if (mode == 2) {
         for (uint32_t i = 0; i < 10000; i++) {
@@ -749,7 +748,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     s_observe_values[7] = counters.gl[NT_GFX_GL_glBindVertexArray];
     s_observe_values[8] = counters.gl[NT_GFX_GL_glBindTexture];
     s_observe_values[9] = counters.gl[NT_GFX_GL_glBindSampler];
-    s_observe_values[10] = counters.gl[NT_GFX_GL_glUniform4fv] + counters.gl[NT_GFX_GL_glUniform1i];
+    s_observe_values[10] = counters.gl[NT_GFX_GL_glBindBufferRange] + counters.gl[NT_GFX_GL_glUniform1i];
     s_observe_values[14] = (double)counters.buffer_upload_bytes;
     s_observe_values[15] = (double)counters.texture_upload_bytes;
     s_observe_values[16] = (double)counters.buffer_upload_calls;
@@ -764,7 +763,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     s_observe_values[12] = capture.count;
     s_observe_values[18] = (double)capture.counters.frame_sequence;
     s_observe_values[19] = (double)counters.frame_sequence;
-    const nt_gfx_gl_call_t calls[] = {NT_GFX_GL_glUseProgram, NT_GFX_GL_glBindVertexArray, NT_GFX_GL_glBindTexture, NT_GFX_GL_glBindSampler, NT_GFX_GL_glUniform4fv, NT_GFX_GL_glUniform1i};
+    const nt_gfx_gl_call_t calls[] = {NT_GFX_GL_glUseProgram, NT_GFX_GL_glBindVertexArray, NT_GFX_GL_glBindTexture, NT_GFX_GL_glBindSampler, NT_GFX_GL_glBindBufferRange, NT_GFX_GL_glUniform1i};
     for (uint32_t i = 0; i < capture.count; i++) {
         if (capture.events[i].kind != NT_GFX_EVENT_BACKEND) {
             continue;
@@ -1199,7 +1198,7 @@ static void frame(void) {
     });
 
     if (can_render) {
-        nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &uniforms, sizeof(uniforms));
 
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
         nt_ui_walk(s_ctx, &target);
@@ -1284,8 +1283,6 @@ int main(int argc, char *argv[]) {
     _Static_assert(NT_GFX_MAX_VERTEX_STREAMS >= 2, "the mesh probe draws from a second vertex stream");
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX + 1] = 1024U; /* the mesh probe's skinned instances */
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = 128U * 1024U;
-    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 512U; /* the 256 B view block plus any offset alignment up to 256 */
-    gfx_desc.global_blocks[0] = (nt_global_block_t){"Globals", 0};
     nt_gfx_init(&gfx_desc);
 
     nt_http_init();
@@ -1352,8 +1349,6 @@ int main(int argc, char *argv[]) {
     s_rich_font_resource[3] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_BI, NT_ASSET_FONT);
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
-        .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,

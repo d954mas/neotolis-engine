@@ -134,8 +134,10 @@ static nt_resource_t test_texture(uint32_t index) {
     return s_test_tex_res[index];
 }
 
-/* Textured + one vec4 param: the existing test materials declare neither, so
- * uniform and texture-slot counts would be vacuous without this. */
+/* Textured + one vec4 of params: the existing test materials declare neither, so
+ * params-bind and texture-slot counts would be vacuous without this. */
+static const float s_tint_one[4] = {1.0F, 0.0F, 0.0F, 0.0F};
+
 static nt_material_t create_test_material_on_texture(nt_program_t program, nt_blend_state_t blend, nt_sampler_t override_sampler, uint32_t tex_index) {
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
@@ -144,9 +146,8 @@ static nt_material_t create_test_material_on_texture(nt_program_t program, nt_bl
     desc.textures[0].resource = test_texture(tex_index);
     desc.textures[0].sampler = override_sampler;
     desc.texture_count = 1;
-    desc.params[0].name = "u_tint";
-    desc.params[0].value[0] = 1.0F;
-    desc.param_count = 1;
+    desc.params = s_tint_one;
+    desc.params_size = sizeof(s_tint_one);
     desc.depth_test = true;
     desc.depth_write = true;
     desc.blend = blend;
@@ -647,8 +648,7 @@ void test_declared_sampler_without_a_resolved_texture_asserts(void) {
     desc.label = "unresolved_tex_material";
     nt_material_t mat = nt_material_create(&desc);
 
-    const nt_material_info_t *info = nt_material_get_info(mat);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_get(info->tex_resources[0]));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_get(desc.textures[0].resource));
 
     nt_entity_t e = create_test_entity(mesh, mat);
     nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
@@ -767,7 +767,6 @@ void test_texture_lands_on_the_program_sampler_unit(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(test_texture(0))}), nt_gfx_fake_bound_texture_at(1));
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(1));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
 }
 
 // #region state transitions
@@ -797,8 +796,7 @@ void test_state_same_material_three_meshes(void) {
     TEST_ASSERT_EQUAL_UINT32(3, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_pipeline_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bind_vertex_input_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_uniform_vec4_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count());
     TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]); /* mesh-only changes skip material work */
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_sampler_count());
@@ -1119,10 +1117,9 @@ void test_state_three_materials_same_mesh(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_pipeline_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bind_vertex_input_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
-    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_uniform_vec4_count());
-    /* Every material transition applies its set; gfx drops the unchanged unit binds of the pass. */
-    TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count()); /* the materials' equal params bind once */
+    /* Every material transition applies its set; an unchanged set ends CACHE and binds nothing. */
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_sampler_count());
 }
@@ -1153,7 +1150,7 @@ void test_state_render_state_split(void) {
     nt_gfx_fake_draw_trace_reset(false);
 }
 
-void test_state_runtime_set_param_between_calls(void) {
+void test_state_set_params_between_calls_reaches_the_next_call(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_material_t mat = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_DEFAULT);
     nt_entity_t e = create_test_entity(mesh, mat);
@@ -1164,17 +1161,12 @@ void test_state_runtime_set_param_between_calls(void) {
     draw_list(items, 1);
 
     const float tint2[4] = {2.0F, 3.0F, 4.0F, 5.0F};
-    nt_material_set_param(mat, "u_tint", tint2);
-    draw_list(items, 1);
-
-    /* Bound state is call-scoped, so the second call replays the material. */
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_uniform_vec4_count());
-    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_tint").value, nt_gfx_fake_uniform_vec4_hash_at(1));
-    float last[4];
-    nt_gfx_fake_uniform_vec4_value_at(1, last);
-    for (uint32_t i = 0; i < 4; i++) {
-        TEST_ASSERT_EQUAL_INT32((int32_t)tint2[i], (int32_t)last[i]);
-    }
+    nt_material_set_params(mat, tint2, sizeof(tint2));
+    record_list(items, 1);
+    const uint8_t *staging = g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].staging;
+    nt_test_frame_next();
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
+    TEST_ASSERT_EQUAL_MEMORY(tint2, staging + nt_gfx_fake_ubo_bind_at(1).offset, sizeof(tint2));
 }
 
 void test_state_program_replaced_between_calls(void) {
@@ -1199,7 +1191,6 @@ void test_state_program_replaced_between_calls(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(first.pipeline.id, second.pipeline.id);
     /* Bound state is call-scoped, so the new program's unit is filled again. */
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
     nt_gfx_fake_draw_trace_reset(false);
 }
 
@@ -1289,7 +1280,6 @@ void test_state_distinct_textures_a_b_a(void) {
     TEST_ASSERT_EQUAL_UINT32(tex_x, nt_gfx_fake_bound_texture_at(0));
     TEST_ASSERT_EQUAL_UINT32(tex_y, nt_gfx_fake_bound_texture_at(1));
     TEST_ASSERT_EQUAL_UINT32(tex_x, nt_gfx_fake_bound_texture_at(2));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
 }
 
 /* An unready run issues no GL call, so it neither breaks the next run nor
@@ -1315,7 +1305,7 @@ void test_state_skip_mid_list_resolves_next_run(void) {
     TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_draw_trace_at(0).pipeline.id, nt_gfx_fake_draw_trace_at(1).pipeline.id);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_uniform_vec4_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count());
     nt_gfx_fake_draw_trace_reset(false);
 }
 
@@ -1330,16 +1320,17 @@ void test_state_same_tex_same_sampler_diff_params(void) {
 
     nt_render_item_t items[2];
     fill_items(items, entities, mats, meshes, 2);
+    const float tint2[4] = {2.0F, 3.0F, 4.0F, 5.0F};
+    nt_material_set_params(mat_b, tint2, sizeof(tint2));
 
     nt_gfx_fake_reset();
     draw_list(items, 2);
 
-    /* Both materials apply their set; same texture and sampler: the second unit bind of the pass is dropped. */
-    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
+    /* Both materials apply their set; same texture and sampler: the second set ends CACHE. */
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_sampler_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_uniform_vec4_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
 }
 
 // #endregion
@@ -1553,11 +1544,13 @@ void test_core_draw_asserts_outside_a_pass(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
-/* The core keeps no state between calls: each call applies its material, so a param changed
- * between two draws of one pass reaches the second. */
+/* The core keeps no state between calls: each call applies its material, so a params write between
+ * two draws reaches the second one. */
 void test_core_draw_applies_the_material_every_call(void) {
     nt_mesh_t mesh = create_test_mesh();
+    nt_gfx_fake_set_block(NT_GFX_SLOT_MATERIAL, 16); /* the program reads the Material block */
     nt_material_t mat = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_DEFAULT);
+    nt_gfx_fake_set_block(NT_GFX_SLOT_MATERIAL, 0);
     begin_storage_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_fake_reset();
@@ -1565,15 +1558,14 @@ void test_core_draw_applies_the_material_every_call(void) {
     memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, sizeof(nt_mesh_instance_t), 4, &offset), 0, sizeof(nt_mesh_instance_t));
     nt_mesh_renderer_draw(mesh, mat, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset, 1);
     const float tint2[4] = {2.0F, 3.0F, 4.0F, 5.0F};
-    nt_material_set_param(mat, "u_tint", tint2);
+    nt_material_set_params(mat, tint2, sizeof(tint2));
     nt_mesh_renderer_draw(mesh, mat, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset, 1);
+    const uint8_t *staging = g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].staging;
     nt_test_frame_next();
 
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_uniform_vec4_count());
-    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
-    float last[4];
-    nt_gfx_fake_uniform_vec4_value_at(1, last);
-    TEST_ASSERT_EQUAL_INT32(5, (int32_t)last[3]);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
+    TEST_ASSERT_EQUAL_MEMORY(tint2, staging + nt_gfx_fake_ubo_bind_at(1).offset, sizeof(tint2));
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]); /* the second, equal set ends CACHE */
 }
 
 /* The instance rows are the transpose of the affine part of a column-major mat4. */
@@ -1680,13 +1672,14 @@ void test_list_after_a_program_change_reapplies_the_texture_set(void) {
     TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(p2.id, nt_gfx_fake_draw_trace_at(s_draw_mark + 1).program.id);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bind_pipeline_count());
-    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
+    /* The new program needs its set applied again; its units equal the pass state, so it ends CACHE. */
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_uniform_vec4_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count()); /* the params stay bound across the program change */
 }
 
-/* Each list reads material params at the call, so a list drawn twice in one pass replays a param changed in between. */
-void test_list_drawn_twice_in_one_pass_reads_current_params(void) {
+/* A params write between two lists of one pass reaches the second list. */
+void test_list_drawn_twice_in_one_pass_reads_the_written_params(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_material_t mat = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_DEFAULT);
     nt_entity_t e = create_test_entity(mesh, mat);
@@ -1698,14 +1691,13 @@ void test_list_drawn_twice_in_one_pass_reads_current_params(void) {
     nt_gfx_fake_reset();
     nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, items, 1);
     const float tint2[4] = {2.0F, 3.0F, 4.0F, 5.0F};
-    nt_material_set_param(mat, "u_tint", tint2);
+    nt_material_set_params(mat, tint2, sizeof(tint2));
     nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, items, 1);
+    const uint8_t *staging = g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].staging;
     nt_test_frame_next();
 
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_uniform_vec4_count());
-    float last[4];
-    nt_gfx_fake_uniform_vec4_value_at(1, last);
-    TEST_ASSERT_EQUAL_INT32(5, (int32_t)last[3]);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
+    TEST_ASSERT_EQUAL_MEMORY(tint2, staging + nt_gfx_fake_ubo_bind_at(1).offset, sizeof(tint2));
 }
 
 /* A run whose program is not ready is skipped before its allocation: frame storage holds only
@@ -1819,7 +1811,7 @@ int main(void) {
     RUN_TEST(test_state_same_material_three_meshes);
     RUN_TEST(test_state_three_materials_same_mesh);
     RUN_TEST(test_state_render_state_split);
-    RUN_TEST(test_state_runtime_set_param_between_calls);
+    RUN_TEST(test_state_set_params_between_calls_reaches_the_next_call);
     RUN_TEST(test_state_program_replaced_between_calls);
     RUN_TEST(test_state_texture_sampler_transitions);
     RUN_TEST(test_state_override_binds_one_sampler_per_texture_change);
@@ -1840,7 +1832,7 @@ int main(void) {
     RUN_TEST(test_draw_list_of_a_mesh_in_a_reused_slot_destroys_nothing);
     RUN_TEST(test_lists_read_bindings_at_the_call);
     RUN_TEST(test_list_after_a_program_change_reapplies_the_texture_set);
-    RUN_TEST(test_list_drawn_twice_in_one_pass_reads_current_params);
+    RUN_TEST(test_list_drawn_twice_in_one_pass_reads_the_written_params);
     RUN_TEST(test_skipped_run_allocates_nothing);
     RUN_TEST(test_core_draw_asserts_outside_a_pass);
     RUN_TEST(test_core_draw_applies_the_material_every_call);

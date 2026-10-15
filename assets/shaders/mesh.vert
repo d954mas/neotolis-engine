@@ -6,7 +6,7 @@ layout(location = NT_LOC_UV0) in vec2 a_uv;
 
 out vec2 v_uv;
 
-uniform mat4 u_mvp;
+layout(std140) uniform Draw { mat4 u_mvp; };
 
 void main() {
     v_uv = a_uv;

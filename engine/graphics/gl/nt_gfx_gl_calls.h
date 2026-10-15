@@ -77,13 +77,6 @@ static inline void nt_gl_put_names(GLsizei count, const GLuint *names) {
         nt_gl_put_unsigned(names[i]);
     }
 }
-static inline void nt_gl_put_uniform(GLint location, uint32_t float_count, const GLfloat *values) {
-    nt_gfx_event_t *event = g_nt_gfx_capture.call;
-    NT_ASSERT(float_count <= 16);
-    event->data.uniform.name = (uint32_t)location;
-    event->data.uniform.count = float_count;
-    memcpy(event->data.uniform.values, values, float_count * sizeof(float));
-}
 static inline void nt_gl_close(void) { nt_gfx_capture_commit_call(); }
 static inline GLint nt_gl_close_int(GLint result) {
     if (g_nt_gfx_capture.call != NULL) {
@@ -145,22 +138,17 @@ static inline void nt_gl_put_callback(nt_gl_callback_t callback) { nt_gl_put_uns
 #define NT_GL_EACH_8(a, ...) NT_GL_PUT_(a), NT_GL_EACH_7(__VA_ARGS__)
 #define NT_GL_EACH_9(a, ...) NT_GL_PUT_(a), NT_GL_EACH_8(__VA_ARGS__)
 #define NT_GL_EACH_10(a, ...) NT_GL_PUT_(a), NT_GL_EACH_9(__VA_ARGS__)
-#define NT_GL_LAST_3(a, b, c) c
-#define NT_GL_LAST_4(a, b, c, d) d
 
 #define NT_GL_OPEN_(call) (NT_GL_COUNT_(call), nt_gfx_capture_open_call(call))
 #define NT_GL_RECORDING_() (g_nt_gfx_capture.call != NULL)
 #define NT_GL_ARGS_(...) (NT_GL_RECORDING_() ? (NT_GL_CAT(NT_GL_EACH_, NT_GL_NARGS(__VA_ARGS__))(__VA_ARGS__)) : (void)0)
 #define NT_GL_NAMES_(count, names) (NT_GL_RECORDING_() ? nt_gl_put_names((count), (names)) : (void)0)
-#define NT_GL_UNIFORM_VALUES_(float_count, location, ...)                                                                                                                                              \
-    (NT_GL_RECORDING_() ? nt_gl_put_uniform((location), (float_count), NT_GL_CAT(NT_GL_LAST_, NT_GL_NARGS(location, __VA_ARGS__))(location, __VA_ARGS__)) : (void)0)
 #define NT_GL_CLOSE_() nt_gl_close()
 #define NT_GL_CLOSE_RESULT_(result) _Generic((result), GLboolean: nt_gl_close_uint, GLint: nt_gl_close_int, GLuint: nt_gl_close_uint)(result)
 #else
 #define NT_GL_OPEN_(call) NT_GL_COUNT_(call)
 #define NT_GL_ARGS_(...) ((void)0)
 #define NT_GL_NAMES_(count, names) ((void)0)
-#define NT_GL_UNIFORM_VALUES_(float_count, location, ...) ((void)0)
 #define NT_GL_CLOSE_() ((void)0)
 #define NT_GL_CLOSE_RESULT_(result) (result)
 #endif
@@ -175,7 +163,6 @@ static inline void nt_gl_put_callback(nt_gl_callback_t callback) { nt_gl_put_uns
  *   NT_GL_BUFFER_UPLOAD / NT_GL_TEXTURE_UPLOAD(data, bytes, glFn, args...)
  *                                             count and record a CPU payload of `bytes` when data is non-NULL
  *   NT_GL_GEN / NT_GL_DELETE(glFn, n, names)  records the count followed by each object name
- *   NT_GL_UNIFORM(glFn, floats, location, ...) copies a vec4/mat4 value array into the record
  *   NT_GL_ISSUED(name, args...)               counts and records a call issued elsewhere (WebGL JS) */
 #define NT_GL(fn, ...) (NT_GL_OPEN_(NT_GFX_GL_##fn), NT_GL_ARGS_(__VA_ARGS__), NT_GL_CLOSE_(), fn(__VA_ARGS__))
 #define NT_GL0(fn) (NT_GL_OPEN_(NT_GFX_GL_##fn), NT_GL_CLOSE_(), fn())
@@ -193,7 +180,6 @@ static inline void nt_gl_put_callback(nt_gl_callback_t callback) { nt_gl_put_uns
 #define NT_GL_DELETE(fn, count, names) (NT_GL_NAMES_FIT_(count), NT_GL_OPEN_(NT_GFX_GL_##fn), NT_GL_NAMES_(count, names), NT_GL_CLOSE_(), fn((count), (names)))
 /* At most three attachment enums plus target/count fit backend.args. */
 #define NT_GL_ATTACHMENTS(fn, target, count, attachments) (NT_GL_OPEN_(NT_GFX_GL_##fn), NT_GL_ARGS_(target), NT_GL_NAMES_(count, attachments), NT_GL_CLOSE_(), fn(target, count, attachments))
-#define NT_GL_UNIFORM(fn, float_count, location, ...) (NT_GL_OPEN_(NT_GFX_GL_##fn), NT_GL_UNIFORM_VALUES_(float_count, location, __VA_ARGS__), NT_GL_CLOSE_(), fn(location, __VA_ARGS__))
 #define NT_GL_ISSUED(name, ...) (NT_GL_OPEN_(NT_GFX_GL_##name), NT_GL_ARGS_(__VA_ARGS__), NT_GL_CLOSE_())
 
 #endif

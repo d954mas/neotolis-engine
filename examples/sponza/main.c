@@ -268,7 +268,8 @@ static void load_scene_from_manifest(void) {
 
         s_material_shader_types[i] = (mn->shader_type < 3) ? mn->shader_type : (uint8_t)SPONZA_SHADER_DIFFUSE;
 
-        /* Create material descriptor */
+        /* Create material descriptor; params are copied at create */
+        float alpha_cutoff[4] = {0};
         nt_material_create_desc_t mat_desc = {
             .program = s_programs[s_material_shader_types[i]].program,
             .depth_test = true,
@@ -287,8 +288,9 @@ static void load_scene_from_manifest(void) {
             /* Alpha: diffuse only, 3 streams, double-sided */
             mat_desc.textures[0] = (nt_material_texture_desc_t){.name = "u_diffuse", .resource = (mn->diffuse_rid != 0) ? s_tex_handles[tex_base + 0] : s_neutral_white_handle};
             mat_desc.texture_count = 1;
-            mat_desc.params[0] = (nt_material_param_desc_t){.name = "u_alpha_cutoff", .value = {(float)mn->alpha_cutoff_x100 / 100.0F}};
-            mat_desc.param_count = 1;
+            alpha_cutoff[0] = (float)mn->alpha_cutoff_x100 / 100.0F; /* sponza_alpha.frag: Material { vec4 u_alpha_cutoff; } */
+            mat_desc.params = alpha_cutoff;
+            mat_desc.params_size = sizeof(alpha_cutoff);
             mat_desc.blend = nt_blend_opaque();
             mat_desc.cull_mode = NT_CULL_NONE; /* double-sided for foliage */
         } else {
@@ -543,7 +545,7 @@ static void frame(void) {
 
     if (item_count > 0) {
         /* View block (slot 0) */
-        nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &uniforms, sizeof(uniforms));
 
         /* Lighting block (slot 1) */
         nt_lighting_t lighting = {
@@ -551,7 +553,7 @@ static void frame(void) {
             .light_color = {1.0F, 0.95F, 0.9F, 1.2F}, /* warm white, intensity 1.2 */
             .ambient = {0.6F, 0.65F, 0.8F, 0.3F},     /* cool ambient, intensity 0.3 */
         };
-        nt_gfx_bind_uniform_block(1, &lighting, sizeof(lighting));
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_GAME, &lighting, sizeof(lighting));
 
         /* Draw all render items */
         nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, items, item_count);
@@ -616,9 +618,7 @@ int main(int argc, char **argv) {
     /* The vertex-input default is derived from max_meshes(128); scale it too. */
     gfx_desc.max_vertex_inputs = 256 * 4 + 48;
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = MAX_SCENE_NODES * (uint32_t)sizeof(nt_mesh_instance_t);
-    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 2U * 512U; /* view and lighting blocks: 256 B or less each, plus any offset alignment up to 256 */
-    gfx_desc.global_blocks[0] = (nt_global_block_t){"Globals", 0};
-    gfx_desc.global_blocks[1] = (nt_global_block_t){"Lighting", 1};
+    gfx_desc.game_blocks[0] = "Lighting";
     nt_gfx_init(&gfx_desc);
 
     /* 5. I/O init */

@@ -520,8 +520,6 @@ static nt_material_t make_rich_custom_material(float first_default) {
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof desc);
     desc.program = nt_material_get_info(s_fx.sprite_material)->program;
-    desc.textures[0].name = "u_texture";
-    desc.texture_count = 1;
     desc.attr_map[0] = (nt_material_attr_desc_t){.stream_name = "a_game", .location = 4, .default_value = {first_default, 0.25F, 0.5F, 1.0F}};
     desc.attr_map_count = 1;
     desc.has_attr_defaults = true;

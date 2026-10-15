@@ -11,8 +11,8 @@ uniform sampler2D u_diffuse;
 #include "common/globals.glsl"
 #include "common/lighting.glsl"
 
-/* Alpha cutoff passed as material param (.x = threshold, .yzw unused) */
-uniform vec4 u_alpha_cutoff;
+/* Alpha cutoff, the material params block (.x = threshold, .yzw unused) */
+layout(std140) uniform Material { vec4 u_alpha_cutoff; };
 
 void main() {
     vec4 albedo = texture(u_diffuse, v_uv) * v_color;

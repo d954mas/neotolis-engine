@@ -117,8 +117,8 @@ The same bounded-lifetime rule applies through
 `nt_sprite_renderer_draw_list()`: the material binding and published GPU texture
 stay live and unchanged from item construction until the call returns. Recompute
 keys for the next list after provider changes; context restore discards old lists.
-A not-yet-loaded page without a placeholder has texture slot zero: a run of a
-sampling material is skipped, while textureless materials still draw geometry.
+A not-yet-loaded page without a placeholder has texture slot zero: its run is
+skipped, whatever the material samples.
 A run draws with its first item's page: equal keys share the page by contract,
 so the renderer checks no page per item. Transform and drawable color may change
 after item construction because neither renderer's key encodes them.

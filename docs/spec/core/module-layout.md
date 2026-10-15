@@ -163,7 +163,9 @@ formats are invalid. `temp` and
 samples the source `NEAREST` with clamped edges, whatever its default sampler;
 taps land on texel centres. Its own passes start with scissor disabled, so the
 caller's scissor does not affect it. The helper does not restore prior graphics
-bindings.
+bindings. Each pass binds its direction, radius and kernel as one `Draw` uniform
+block, so a host budgets 512 bytes of `frame_capacity[NT_GFX_FRAME_UNIFORM]` per
+blur pass.
 Blur arguments, readiness of the source and validity of the targets are preconditions
 and assert when violated, as does a link failure in the helper's program. Until
 that link finishes (after init and after a restore) a call validates its pass,

@@ -19,7 +19,7 @@ host logs a skip and packs the stage unchecked, so the runtime compile stays the
 backstop.
 
 A program's linked executable and identity are immutable after
-`nt_gfx_make_program`; uniform values and block bindings remain mutable.
+`nt_gfx_make_program`, and so are its sampler units and block bindings.
 Recovery requires the owner to destroy the old program and link a new handle;
 a program whose readiness was lost never becomes ready again.
 
@@ -31,7 +31,7 @@ asking for the status at once blocks the main thread until it finishes.
 (native) it asks each pending program once per frame whether the link is
 complete and leaves unfinished ones pending; without the extension it finishes
 every pending link there, which may block. Finishing reads the link status,
-binds the global blocks, reflects uniforms and samplers and writes the sampler
+binds the uniform blocks, reflects uniforms and samplers and writes the sampler
 units. A program is therefore ready no earlier than the frame after
 `nt_gfx_make_program`. Readiness turns true only in `nt_gfx_begin_frame` and
 turns false only by a destroy or by the loss processing in `nt_gfx_begin_frame`,
@@ -67,41 +67,25 @@ Pipeline identity includes the program handle. Destroying the old program
 `set_material`; mesh draws with the pipeline resolved at their call. A program
 is destroyed only outside a drawn frame (the frame rule in
 [render architecture](architecture.md#draw-phase-command-stream)). Numeric material params
-remain mutable and are read at the draw; snapshot timing is specified in
-[API contracts](../core/api-contracts.md#program-handles).
+stay mutable: a write reaches the draws applied after it
+([material, Params](material.md#params)).
 
 Uniform block bindings are program state, not material state: a program is
 shared by many materials, so a material-declared binding would be
-last-writer-wins across them. The game declares one global name -> slot list
-instead, in `nt_gfx_desc_t.global_blocks`, and every program that declares a
-listed block gets its slot at link. Names are borrowed without copying; each
-string must remain valid and unchanged until `nt_gfx_shutdown`. The list
-survives context loss. The data varies per draw: `nt_gfx_bind_uniform_block` copies a
-block into the uniform frame stream and binds it to a slot.
+last-writer-wins across them. A block binds by name instead: the engine reserves
+`Globals`, `Material` and `Draw` (slots 0-2, by update frequency) and the game
+lists its own names in `nt_gfx_desc_t.game_blocks` (slots from 3); an unknown
+active block name asserts at link. The contract (member types, std140, the draw
+check and frame data) is in
+[API contracts](../core/api-contracts.md#program-handles).
 
-The GL backend caches at most 16 active standalone non-sampler uniform locations
-per program. Each active array element consumes one entry; uniforms in blocks do
-not consume entries, and samplers do not either — they live in a separate table
-capped by `NT_GFX_MAX_TEXTURE_SLOTS`. Exceeding either capacity asserts when the link finishes
-time instead of silently omitting values. Reflection reads the complete reported names into
-a fixed link-time buffer (`NT_GFX_GL_MAX_UNIFORM_NAME`, 256 bytes; a longer name asserts at
-link); neither linking nor setting a uniform allocates.
-
-The cache is keyed by the `nt_hash32_str` hash of the uniform's complete name,
-including explicit array indices such as `colors[1]` or `lights[0].color`. The
-setters take that hash — `nt_gfx_set_uniform_vec4(nt_hash32_t name, …)` and its
-three siblings — and there is no string form: a caller hashes the name once at
-init, or inline where the cost does not matter.
-
-For active standalone float vec4 uniforms, the backend also remembers the last
-16 submitted bytes. Bit-identical repeats skip `glUniform4fv`; the first write,
-including zero, always reaches GL. Signed zero and distinct NaN payloads are
-compared by representation, without an epsilon. Values belong to the linked
-program and survive pipeline switches, passes and frames. Recreated programs
-start with invalid cached values. All gfx vec4 writers share this cache; other
-uniform types retain their existing setter behavior, including boolean targets
-that accept float-vector conversion. Inactive names remain no-ops. Cache lookup
-and updates allocate nothing.
+Every shader value arrives in a uniform block; there are no standalone value
+uniforms. An active standalone non-sampler uniform asserts when the link finishes,
+because no API could ever write it; GL built-ins such as `gl_DepthRange` are not
+program inputs and are ignored. Uniforms in blocks are never looked up by
+location. Reflection reads the complete reported names into a fixed link-time
+buffer (`NT_GFX_GL_MAX_UNIFORM_NAME`, 256 bytes; a longer name asserts at link);
+linking allocates nothing.
 
 Sampler uniforms are program state, not material state: their texture units are
 fixed at link and nobody writes them afterwards. Reflection classifies every
@@ -122,7 +106,7 @@ numbers. A name absent after driver optimization is inactive and ignored before
 its texture or sampler handle is inspected.
 
 A reflection query that reports nothing fails the finish rather than caching
-half a location table: on a lost context the program stays unready and its
+half a sampler unit table: on a lost context the program stays unready and its
 owner links a new one after the restore; on a live context it traps like a
 failed link. Nothing catches an exception thrown out of reflection: on the web
 the Emscripten GL layer dereferences a null result in two of its own reflection
@@ -162,7 +146,7 @@ typedef struct ShaderAsset {
 
     uint32_t vertex_input_mask;
 
-    uint16_t material_vec4_count;
+    uint16_t material_block_size; /* bytes of the `Material` uniform block */
     uint16_t texture_slot_count;
 
     uint16_t object_usage_mask;
@@ -177,10 +161,10 @@ typedef struct ShaderAsset {
 
 ## Four levels of shader data
 
-1. **vertex inputs** — from geometry/mesh
-2. **material params** — from MaterialAsset
-3. **object params** — from RenderState, Transform
-4. **globals** — from renderer/pass
+1. **vertex inputs** — from geometry/mesh, and per-instance data from the instance layouts
+2. **`Material` block** — the material's params, bound at apply ([material, Params](material.md#params))
+3. **`Draw` block** — per-draw data of a renderer or game shader, bound as frame data
+4. **`Globals` and game blocks** — frame and pass data, bound as frame data
 
 ## Attribute locations
 
@@ -211,15 +195,13 @@ bound instance layout supplies reads the GL generic default `(0, 0, 0, 1)`.
 Nothing checks mesh/shader compatibility: the mesh family and its shaders agree on locations by
 construction.
 
-## Object params
+## Object and global data
 
-Fixed object-level params for v0.1: world_matrix, object_color, object_params0.
-
-## Global params
-
-Possible globals: view, proj, view_proj, camera_pos, time, light_dir. Start minimal, expand later.
-
-WebGL 2 Uniform Buffer Objects can be used to share globals efficiently across shaders.
+Per-object values are instance data (world rows and color in the instance head) or
+a `Draw` block; frame and view values (`view_proj`, `camera_pos`, `time`) are the
+`Globals` block the game fills (`nt_frame_uniforms_t`, `common/globals.glsl`).
+Shaders read no standalone numeric uniforms: every value arrives in a uniform
+block or a vertex input.
 
 ## Draw merge
 

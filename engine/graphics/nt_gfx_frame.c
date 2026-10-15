@@ -147,22 +147,6 @@ void nt_gfx_frame_execute(void) {
             nt_gfx_backend_bind_uniform_buffer(w[0], w[1], w[2], w[3]);
             w += 4;
             break;
-        case NT_GFX_CMD_SET_UNIFORM_MAT4:
-            nt_gfx_backend_set_uniform_mat4(w[0], w[1], (const float *)(w + 2));
-            w += 2 + 16;
-            break;
-        case NT_GFX_CMD_SET_UNIFORM_VEC4:
-            nt_gfx_backend_set_uniform_vec4(w[0], w[1], (const float *)(w + 2));
-            w += 2 + 4;
-            break;
-        case NT_GFX_CMD_SET_UNIFORM_FLOAT:
-            nt_gfx_backend_set_uniform_float(w[0], w[1], *(const float *)(w + 2));
-            w += 2 + 1;
-            break;
-        case NT_GFX_CMD_SET_UNIFORM_INT:
-            nt_gfx_backend_set_uniform_int(w[0], w[1], (int)w[2]);
-            w += 3;
-            break;
         case NT_GFX_CMD_SET_SCISSOR:
             nt_gfx_backend_set_scissor((int)w[0], (int)w[1], (int)w[2], (int)w[3]);
             w += 4;

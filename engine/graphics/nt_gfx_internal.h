@@ -5,6 +5,8 @@
 #include "hash/nt_hash.h"
 #include "pool/nt_pool.h"
 
+#include <string.h>
+
 // #region observation storage and owning-site counters
 #if NT_GFX_CAPTURE_ENABLED
 typedef struct {
@@ -129,11 +131,22 @@ typedef struct {
     uint8_t sampler_class;
 } nt_gfx_sampler_info_t;
 
-typedef enum {
-    NT_GFX_TEXTURE_SET_NONE = 0,
-    NT_GFX_TEXTURE_SET_APPLIED,
-    NT_GFX_TEXTURE_SET_FAILED,
-} nt_gfx_texture_set_state_t;
+/* Slot a uniform block name binds to at link: the reserved names first, then the game's list
+ * (ends at a NULL entry); NT_GFX_MAX_UNIFORM_BUFFER_SLOTS for an unknown name. */
+static inline uint32_t nt_gfx_block_slot(const char *const *game_blocks, const char *name) {
+    static const char *const reserved[NT_GFX_SLOT_GAME] = {"Globals", "Material", "Draw"};
+    for (uint32_t slot = 0; slot < NT_GFX_SLOT_GAME; slot++) {
+        if (strcmp(name, reserved[slot]) == 0) {
+            return slot;
+        }
+    }
+    for (uint32_t i = 0; i < NT_GFX_MAX_GAME_BLOCKS && game_blocks[i] != NULL; i++) {
+        if (strcmp(name, game_blocks[i]) == 0) {
+            return NT_GFX_SLOT_GAME + i;
+        }
+    }
+    return NT_GFX_MAX_UNIFORM_BUFFER_SLOTS;
+}
 
 /* ---- Backend function signatures (implemented by each backend) ---- */
 
@@ -175,6 +188,8 @@ void nt_gfx_backend_destroy_program(uint32_t backend_handle);
 /* Sampler units and classes are immutable program state, recorded at link. */
 bool nt_gfx_backend_program_sampler_info(uint32_t program_backend, uint32_t name_hash, nt_gfx_sampler_info_t *out_info);
 uint32_t nt_gfx_backend_program_sampler_mask(uint32_t program_backend);
+/* Data size per slot of the active uniform blocks the program binds at link; 0 = none. */
+const uint32_t *nt_gfx_backend_program_block_sizes(uint32_t program_backend);
 
 /* Fills a CPU record only, so it cannot fail. */
 void nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend, uint32_t slot);
@@ -233,15 +248,8 @@ void nt_gfx_backend_set_viewport(int x, int y, int w, int h);
  * caller never encodes garbage. */
 bool nt_gfx_backend_read_pixels(uint32_t render_target_backend, int x, int y, int w, int h, void *out_rgba8);
 
-/* size 0 binds the whole buffer; otherwise [offset, offset + size), validated by the frontend. */
+/* Binds [offset, offset + size) of the buffer, validated by the frontend. */
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, uint32_t offset, uint32_t size);
-
-/* Uniform locations and values are program state, so the write names its
- * program; it must be the one currently bound. */
-void nt_gfx_backend_set_uniform_mat4(uint32_t program_backend, uint32_t name_hash, const float *matrix);
-void nt_gfx_backend_set_uniform_vec4(uint32_t program_backend, uint32_t name_hash, const float *vec);
-void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_hash, float val);
-void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val);
 
 /* instance_count 1 issues the non-instanced call; index_type is NT_INDEX_UINT16 or NT_INDEX_UINT32. */
 void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count);
@@ -287,7 +295,7 @@ uint32_t nt_gfx_test_bound_pipeline(void);
 /* Front-end handle that owns a pipeline backend handle (a pool slot). */
 nt_pipeline_t nt_gfx_test_pipeline_of_backend(uint32_t backend_handle);
 uint32_t nt_gfx_test_bound_vertex_input(void);
-uint8_t nt_gfx_test_texture_set_state(void);
+bool nt_gfx_test_texture_set_applied(void);
 bool nt_gfx_test_program_sampler_info(nt_program_t prog, nt_hash32_t name, nt_gfx_sampler_info_t *out_info);
 int nt_gfx_test_program_sampler_unit(nt_program_t prog, nt_hash32_t name);
 uint32_t nt_gfx_test_program_sampler_mask(nt_program_t prog);

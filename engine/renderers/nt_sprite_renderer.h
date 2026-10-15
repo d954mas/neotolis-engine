@@ -46,14 +46,11 @@ static inline uint32_t nt_sprite_renderer_batch_key(nt_material_t material, nt_r
  * needs an open pass, and call order is draw order; gfx drops equal binds and merges
  * contiguous draws.
  *
- * Uniforms are program state: the renderer writes a material's params only when they differ
- * from what it last wrote, so nothing else may write the uniforms of a program that sprite
- * materials use.
- *
- * A material that samples the atlas declares its page sampler at slot 0, whose declared
- * resource is never sampled: the renderer substitutes the page texture and the material may
- * override the sampler. Every declared slot must resolve to a texture (register a placeholder
- * for async loads). No textures = no page, e.g. nt_ui_radial's flat SDF. */
+ * Each emit and run applies its material (nt_material_apply): the Material block and the
+ * material's own textures. The atlas page is a draw texture named u_texture with the page's
+ * default sampler (baked by the builder); a material does not declare it, and a program that
+ * does not sample it ignores it. A sprite whose page is not resolved yet is skipped. Every
+ * declared material slot must resolve to a texture (register a placeholder for async loads). */
 
 /* Destroys the cached vertex inputs. Required before nt_gfx_shutdown or a gfx re-init: new gfx
  * pools reuse handle ids. */
@@ -63,8 +60,8 @@ void nt_sprite_renderer_shutdown(void);
  *   1. Caller pre-filters invisible, unresolved, and tombstoned sprites;
  *      renderer draws every entry.
  *   2. Equal batch keys share material and page: a run draws with its first item's page.
- *   3. Frame UBOs (e.g. view_proj) are shader-specific — register and bind
- *      them before draw_list; renderer does not touch UBOs.
+ *   3. Frame blocks (Globals, game blocks) are the caller's: bind them in the
+ *      pass before draw_list; the renderer binds only Material (nt_material_apply).
  *   4. Entities, required components, and material bindings stay live and
  *      unchanged through draw_list.
  * Does not change the material selected by set_material. */

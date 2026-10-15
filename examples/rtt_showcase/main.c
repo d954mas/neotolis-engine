@@ -62,15 +62,13 @@ static const char *s_quad_vs_src = "precision highp float;\n"
 /* highp: the depth view reads DEPTH24 through this sampler, which fp16 cannot hold. */
 static const char *s_quad_fs_src = "precision highp float;\n"
                                    "uniform highp sampler2D u_texture;\n"
-                                   "uniform vec4 u_tint;\n"
-                                   "uniform int u_mode;\n"
-                                   "uniform float u_zoom;\n"
+                                   "layout(std140) uniform Draw { vec4 u_tint; ivec4 u_mode; vec4 u_zoom; };\n"
                                    "in vec2 v_uv;\n"
                                    "out vec4 frag_color;\n"
                                    "void main() {\n"
-                                   "    vec2 sample_uv = ((v_uv - vec2(0.5)) / max(u_zoom, 0.001)) + vec2(0.5);\n"
+                                   "    vec2 sample_uv = ((v_uv - vec2(0.5)) / max(u_zoom.x, 0.001)) + vec2(0.5);\n"
                                    "    vec4 sample_color = texture(u_texture, sample_uv);\n"
-                                   "    if (u_mode == 1) {\n"
+                                   "    if (u_mode.x == 1) {\n"
                                    "        float depth = 1.0 - sample_color.r;\n"
                                    "        frag_color = vec4(depth, depth, depth, 1.0);\n"
                                    "        return;\n"
@@ -91,7 +89,6 @@ static NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
 static nt_ui_context_t *s_ui_ctx;
 static nt_hash32_t s_pack_id;
 static nt_resource_t s_atlas_handle;
-static nt_resource_t s_atlas_tex_handle;
 static nt_resource_t s_font_resource;
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
@@ -382,7 +379,7 @@ static void draw_ui_overlay(void) {
     uniforms.resolution[3] = (fb_h > 0.0F) ? (1.0F / fb_h) : 0.0F;
     uniforms.near_far[0] = -1.0F;
     uniforms.near_far[1] = 1.0F;
-    nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &uniforms, sizeof(uniforms));
 
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, fb_w, fb_h}};
     nt_ui_walk(s_ui_ctx, &target);
@@ -433,9 +430,14 @@ static void draw_textured_quad(nt_texture_t texture, uint32_t quad, int mode, co
     nt_gfx_bind_vertex_input(s_demo.quad_vi);
     const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_texture"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
     nt_gfx_apply_texture_bindings(&binding, 1);
-    nt_gfx_set_uniform_int(nt_hash32_str("u_mode"), mode);
-    nt_gfx_set_uniform_float(nt_hash32_str("u_zoom"), mode == 1 ? 1.0F : s_demo.sample_zoom);
-    nt_gfx_set_uniform_vec4(nt_hash32_str("u_tint"), tint);
+    /* s_quad_fs_src's Draw block. */
+    struct {
+        float tint[4];
+        int32_t mode[4];
+        float zoom[4];
+    } block = {.mode = {mode}, .zoom = {mode == 1 ? 1.0F : s_demo.sample_zoom}};
+    memcpy(block.tint, tint, sizeof(block.tint));
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, &block, sizeof(block));
     nt_gfx_draw(quad * 6U, 6);
 }
 
@@ -546,13 +548,13 @@ int main(void) {
     nt_input_init();
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
-    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 512U; /* the 256 B view block plus any offset alignment up to 256 */
+    /* The view block, the shape Draw block, a Draw block per blur pass and per presented quad (5):
+     * 256 B or less each, plus any offset alignment up to 256. */
     gfx_desc.max_render_targets = 8;
     gfx_desc.max_textures = 32;
     gfx_desc.max_pipelines = 32;
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = RTT_SHOWCASE_VERTEX_BYTES;
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = RTT_SHOWCASE_INDEX_BYTES;
-    gfx_desc.global_blocks[0] = (nt_global_block_t){"Globals", 0};
     nt_gfx_init(&gfx_desc);
     nt_http_init();
 #ifndef NT_PLATFORM_WEB
@@ -584,13 +586,10 @@ int main(void) {
     s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_RTT_SHOWCASE_UI_ATLAS, NT_ASSET_ATLAS);
-    s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_RTT_SHOWCASE_UI_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_RTT_SHOWCASE_FONT, NT_ASSET_FONT);
     s_white_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_RTT_SHOWCASE_UI_ATLAS__WHITE.value);
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
-        .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,

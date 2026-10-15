@@ -17,10 +17,6 @@ typedef enum {
     NT_GFX_CMD_BIND_VERTEX_INPUT_INSTANCED,
     NT_GFX_CMD_BIND_TEXTURE_UNIT,
     NT_GFX_CMD_BIND_UNIFORM_BUFFER,
-    NT_GFX_CMD_SET_UNIFORM_MAT4,
-    NT_GFX_CMD_SET_UNIFORM_VEC4,
-    NT_GFX_CMD_SET_UNIFORM_FLOAT,
-    NT_GFX_CMD_SET_UNIFORM_INT,
     NT_GFX_CMD_SET_SCISSOR,
     NT_GFX_CMD_SET_SCISSOR_ENABLED,
     NT_GFX_CMD_SET_VIEWPORT,
@@ -103,24 +99,6 @@ static inline void nt_gfx_frame_bind_texture_unit(uint32_t texture_backend, uint
 }
 static inline void nt_gfx_frame_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, uint32_t offset, uint32_t size) {
     nt_gfx_frame_u32x4(NT_GFX_CMD_BIND_UNIFORM_BUFFER, 4, backend_handle, slot, offset, size);
-}
-static inline void nt_gfx_frame_set_uniform_floats(nt_gfx_cmd_t op, uint32_t program_backend, uint32_t name_hash, const float *values, uint32_t count) {
-    uint32_t *w = (uint32_t *)nt_gfx_frame_push(op, (2U + count) * 4U);
-    w[0] = program_backend;
-    w[1] = name_hash;
-    memcpy(w + 2, values, count * sizeof(float));
-}
-static inline void nt_gfx_frame_set_uniform_mat4(uint32_t program_backend, uint32_t name_hash, const float *matrix) {
-    nt_gfx_frame_set_uniform_floats(NT_GFX_CMD_SET_UNIFORM_MAT4, program_backend, name_hash, matrix, 16);
-}
-static inline void nt_gfx_frame_set_uniform_vec4(uint32_t program_backend, uint32_t name_hash, const float *vec) {
-    nt_gfx_frame_set_uniform_floats(NT_GFX_CMD_SET_UNIFORM_VEC4, program_backend, name_hash, vec, 4);
-}
-static inline void nt_gfx_frame_set_uniform_float(uint32_t program_backend, uint32_t name_hash, float val) {
-    nt_gfx_frame_set_uniform_floats(NT_GFX_CMD_SET_UNIFORM_FLOAT, program_backend, name_hash, &val, 1);
-}
-static inline void nt_gfx_frame_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val) {
-    nt_gfx_frame_u32x4(NT_GFX_CMD_SET_UNIFORM_INT, 3, program_backend, name_hash, (uint32_t)val, 0);
 }
 static inline void nt_gfx_frame_set_scissor(int x, int y, int w, int h) { nt_gfx_frame_u32x4(NT_GFX_CMD_SET_SCISSOR, 4, (uint32_t)x, (uint32_t)y, (uint32_t)w, (uint32_t)h); }
 static inline void nt_gfx_frame_set_viewport(int x, int y, int w, int h) { nt_gfx_frame_u32x4(NT_GFX_CMD_SET_VIEWPORT, 4, (uint32_t)x, (uint32_t)y, (uint32_t)w, (uint32_t)h); }

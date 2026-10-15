@@ -546,9 +546,9 @@ static nt_material_t make_radial_image_material_mode(nt_ui_radial_reveal_mode_t 
     desc.attr_map[3].stream_name = "a_layout";
     desc.attr_map[3].location = 7;
     desc.attr_map_count = 4;
-    desc.params[0].name = NT_UI_RADIAL_IMAGE_PARAM_MODE;
-    desc.params[0].value[0] = (float)mode; /* reveal look baked at creation */
-    desc.param_count = 1;
+    const nt_ui_radial_image_params_t params = {.reveal_mode = {(float)mode}}; /* reveal look baked at creation */
+    desc.params = &params;
+    desc.params_size = sizeof(params);
     desc.label = "radial_image_test_material";
 
     const nt_material_t mat = nt_material_create(&desc);
@@ -557,18 +557,6 @@ static nt_material_t make_radial_image_material_mode(nt_ui_radial_reveal_mode_t 
 
 /* Default test material: DESATURATE mode baked at creation. */
 static nt_material_t make_radial_image_material(void) { return make_radial_image_material_mode(NT_UI_RADIAL_REVEAL_DESATURATE); }
-
-/* Read back the u_reveal_mode param's .x from the material info (-1 if absent). */
-static float reveal_mode_param_x(nt_material_t mat) {
-    const nt_material_info_t *info = nt_material_get_info(mat);
-    const uint32_t want = nt_hash32_str(NT_UI_RADIAL_IMAGE_PARAM_MODE).value;
-    for (uint8_t i = 0; i < info->param_count; i++) {
-        if (info->param_name_hashes[i] == want) {
-            return info->params[i][0];
-        }
-    }
-    return -1.0F;
-}
 
 /* Drive a textured radial_image through the walker against a real atlas region. */
 static void radial_image_walk(nt_atlas_region_ref_t *ref, nt_ui_radial_image_style_t *style, float fixed_w, float fixed_h) {
@@ -625,14 +613,8 @@ static void test_radial_image_reveal_mode_plumbed(void) {
     style.tint_color_packed = 0xFF0080FFU; /* 0xAABBGGRR: r=255, g=128, b=0 -> orange */
     style.tint_strength = 0.75F;
 
-    /* The material carries the baked mode before any walk. */
-    TEST_ASSERT_TRUE_MESSAGE(approx(reveal_mode_param_x(style.material), (float)NT_UI_RADIAL_REVEAL_HIDE), "material carries baked u_reveal_mode.x");
-
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
     radial_image_walk(&ref, &style, 40.0F, 40.0F);
-
-    /* The walk must NOT overwrite the material-level reveal mode. */
-    TEST_ASSERT_TRUE_MESSAGE(approx(reveal_mode_param_x(style.material), (float)NT_UI_RADIAL_REVEAL_HIDE), "walk leaves material u_reveal_mode.x intact");
 
     /* a_tint (floats 4..7 of the custom block) baked per-vertex: rgb 0..1 + strength. */
     TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);

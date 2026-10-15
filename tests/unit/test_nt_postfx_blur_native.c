@@ -12,6 +12,7 @@
 
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096; /* the Draw block of each blur pass */
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);

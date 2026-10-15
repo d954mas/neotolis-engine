@@ -529,9 +529,9 @@ static void test_attachments_bind_with_their_default_sampler(void) {
 
     begin_single_sampler_pass(NT_GFX_SAMPLER_CLASS_FLOAT);
     apply_one_texture(color, NT_SAMPLER_DEFAULT);
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_TRUE(nt_gfx_test_texture_set_applied());
     apply_one_texture(depth, NT_SAMPLER_DEFAULT);
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_TRUE(nt_gfx_test_texture_set_applied());
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
@@ -551,7 +551,7 @@ static void test_depth_texture_rejects_linear_sampler_override(void) {
     NT_TEST_EXPECT_ASSERT(apply_one_texture(depth, linear));
 
     apply_one_texture(color, linear);
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_TRUE(nt_gfx_test_texture_set_applied());
 }
 
 static void test_integer_texture_rejects_linear_sampler_override(void) {
@@ -592,7 +592,7 @@ static void test_depth_texture_accepts_linear_comparison_sampler(void) {
 
     begin_single_sampler_pass(NT_GFX_SAMPLER_CLASS_SHADOW);
     apply_one_texture(depth, comparison);
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_TRUE(nt_gfx_test_texture_set_applied());
     nt_gfx_end_pass();
 }
 
@@ -707,9 +707,9 @@ static void test_single_level_textures_accept_mipmap_sampler_override(void) {
 
     begin_single_sampler_pass(NT_GFX_SAMPLER_CLASS_FLOAT);
     apply_one_texture(color, mipmap_sampler);
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_TRUE(nt_gfx_test_texture_set_applied());
     apply_one_texture(one_pixel, mipmap_sampler);
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_TRUE(nt_gfx_test_texture_set_applied());
     nt_gfx_end_pass();
 }
 // #endregion

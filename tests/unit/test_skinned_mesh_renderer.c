@@ -587,8 +587,8 @@ void test_material_transition_reapplies_complete_surface_and_skin_set(void) {
     nt_gfx_fake_reset();
     skinned_draw_list(items, 2);
 
-    /* The transition applies the complete set again; its unit binds equal the pass state and are dropped. */
-    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
+    /* The transition applies the complete set again; its units equal the pass state, so it ends CACHE. */
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(1));
@@ -768,15 +768,15 @@ void test_lists_read_the_deformation_texture_at_the_call(void) {
 }
 
 /* A/B/A deformation textures with one material: each run re-applies the texture set, but the
- * material's uniforms are written once. */
-void test_deformation_change_reapplies_textures_not_uniforms(void) {
+ * material's params bind once. */
+void test_deformation_change_reapplies_textures_not_params(void) {
     nt_mesh_t mesh = make_mesh();
     nt_texture_t texture_a = make_deformation_texture();
     nt_texture_t texture_b = make_deformation_texture();
     nt_material_t material = nt_material_create(&(nt_material_create_desc_t){
         .program = nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1),
-        .params = {{.name = "u_tint", .value = {1.0F, 1.0F, 1.0F, 1.0F}}},
-        .param_count = 1,
+        .params = (const float[4]){1.0F, 1.0F, 1.0F, 1.0F},
+        .params_size = 4 * sizeof(float),
         .label = "skin_test_material_with_param",
     });
     nt_render_item_t items[3] = {
@@ -789,7 +789,7 @@ void test_deformation_change_reapplies_textures_not_uniforms(void) {
     skinned_draw_list(items, 3);
     TEST_ASSERT_EQUAL_UINT32(3, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_uniform_vec4_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count());
 }
 
 void test_empty_list_reserves_nothing(void) {
@@ -888,7 +888,7 @@ int main(void) {
     RUN_TEST(test_skinned_draws_route_to_their_stream);
     RUN_TEST(test_skinned_vertex_input_versions_per_stream);
     RUN_TEST(test_lists_read_the_deformation_texture_at_the_call);
-    RUN_TEST(test_deformation_change_reapplies_textures_not_uniforms);
+    RUN_TEST(test_deformation_change_reapplies_textures_not_params);
     RUN_TEST(test_empty_list_reserves_nothing);
     RUN_TEST(test_mesh_only_change_skips_the_texture_set);
     RUN_TEST(test_list_on_a_lost_context_skips_its_handle_checks);

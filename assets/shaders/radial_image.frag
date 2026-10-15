@@ -14,7 +14,7 @@ precision highp float;
 
 uniform sampler2D u_texture;
 // .x = reveal mode (0 DESATURATE / 1 DIM / 2 HIDE / 3 TINT), .y = dim_factor.
-uniform vec4 u_reveal_mode;
+layout(std140) uniform Material { vec4 u_reveal_mode; };
 
 in vec2 v_texcoord;
 in vec4 v_color;

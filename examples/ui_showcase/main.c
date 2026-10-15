@@ -532,7 +532,6 @@ static nt_ui_context_t *s_ctx;
 
 static nt_hash32_t s_pack_id;
 static nt_resource_t s_atlas_handle;
-static nt_resource_t s_atlas_tex_handle;
 static nt_resource_t s_font_resource;
 /* Rich-text family resources: DejaVu R/B/I/BI faces baked into the pack (variant slots). */
 static nt_resource_t s_rich_font_resource[4];
@@ -540,7 +539,6 @@ static nt_resource_t s_rich_font_resource[4];
 /* Dedicated single-sprite atlas for the radial-image reveal: its lone region's UV spans [0,1]
  * over the quad, so the wedge stays centered. */
 static nt_resource_t s_radial_art_atlas_handle;
-static nt_resource_t s_radial_art_tex_handle;
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
 /* One base radial material (nt_ui_radial) + one radial-image material per reveal mode so each
@@ -3850,7 +3848,7 @@ static void frame(void) {
     });
 
     if (can_render) {
-        nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &uniforms, sizeof(uniforms));
 
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
         nt_ui_walk(s_ctx, &target);
@@ -3932,8 +3930,6 @@ int main(int argc, char *argv[]) {
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = UI_SHOWCASE_VERTEX_BYTES;
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = UI_SHOWCASE_INDEX_BYTES;
-    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 512U; /* the 256 B view block plus any offset alignment up to 256 */
-    gfx_desc.global_blocks[0] = (nt_global_block_t){"Globals", 0};
     nt_gfx_init(&gfx_desc);
 
     nt_http_init();
@@ -3980,7 +3976,6 @@ int main(int argc, char *argv[]) {
     s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_ATLAS, NT_ASSET_ATLAS);
-    s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT, NT_ASSET_FONT);
     s_rich_font_resource[0] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_R, NT_ASSET_FONT);
     s_rich_font_resource[1] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_B, NT_ASSET_FONT);
@@ -3994,7 +3989,6 @@ int main(int argc, char *argv[]) {
     s_base_program.vs = s_radial_program.vs;
     s_base_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_UI_BASE_FRAG, NT_ASSET_SHADER_CODE);
     s_radial_art_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_RADIAL_ART, NT_ASSET_ATLAS);
-    s_radial_art_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_RADIAL_ART_TEX0, NT_ASSET_TEXTURE);
     s_radial_art_ref = nt_atlas_ref(s_radial_art_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_RADIAL_ART_RADIAL_ART.value);
 
     /* Rich-text inline icons (heart/gold) live in the MAIN ui_showcase atlas now. The by-name refs
@@ -4003,8 +3997,6 @@ int main(int argc, char *argv[]) {
     s_rich_gold_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_GOLD.value);
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
-        .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
@@ -4036,8 +4028,6 @@ int main(int argc, char *argv[]) {
     /* The radial's attr layout plus the atlas texture. Plain emits bake the defaults: a_layout = 0
      * is the shader's "plain sprite" (a radial always carries its bbox size there). */
     s_base_material = nt_material_create(&(nt_material_create_desc_t){
-        .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
-        .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
@@ -4056,8 +4046,6 @@ int main(int argc, char *argv[]) {
     static const char *const k_radial_image_labels[4] = {"ui_showcase_radial_img_desat", "ui_showcase_radial_img_dim", "ui_showcase_radial_img_hide", "ui_showcase_radial_img_tint"};
     for (int m = 0; m < 4; ++m) {
         s_radial_image_material[m] = nt_material_create(&(nt_material_create_desc_t){
-            .textures = {{.name = "u_texture", .resource = s_radial_art_tex_handle}},
-            .texture_count = 1,
             .blend = nt_blend_alpha_premultiplied(),
             .depth_test = false,
             .depth_write = false,
@@ -4067,8 +4055,8 @@ int main(int argc, char *argv[]) {
             .attr_map[2] = {.stream_name = "a_uvrect", .location = 6},
             .attr_map[3] = {.stream_name = "a_layout", .location = 7},
             .attr_map_count = 4,
-            .params[0] = {.name = NT_UI_RADIAL_IMAGE_PARAM_MODE, .value = {(float)m, 0.4F, 0.0F, 0.0F}},
-            .param_count = 1,
+            .params = &(nt_ui_radial_image_params_t){.reveal_mode = {(float)m, 0.4F, 0.0F, 0.0F}},
+            .params_size = sizeof(nt_ui_radial_image_params_t),
             .label = k_radial_image_labels[m],
         });
     }
@@ -4077,8 +4065,6 @@ int main(int argc, char *argv[]) {
      * texture (not the full-bleed radial_art). Reveals a real packed sub-region (the bunny
      * icon), exercising the region-local wedge remap (a_uvrect). DESATURATE mode. */
     s_radial_image_packed_material = nt_material_create(&(nt_material_create_desc_t){
-        .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
-        .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
@@ -4088,8 +4074,8 @@ int main(int argc, char *argv[]) {
         .attr_map[2] = {.stream_name = "a_uvrect", .location = 6},
         .attr_map[3] = {.stream_name = "a_layout", .location = 7},
         .attr_map_count = 4,
-        .params[0] = {.name = NT_UI_RADIAL_IMAGE_PARAM_MODE, .value = {(float)NT_UI_RADIAL_REVEAL_DESATURATE, 0.4F, 0.0F, 0.0F}},
-        .param_count = 1,
+        .params = &(nt_ui_radial_image_params_t){.reveal_mode = {(float)NT_UI_RADIAL_REVEAL_DESATURATE, 0.4F, 0.0F, 0.0F}},
+        .params_size = sizeof(nt_ui_radial_image_params_t),
         .label = "ui_showcase_radial_img_packed",
     });
 

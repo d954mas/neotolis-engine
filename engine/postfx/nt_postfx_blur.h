@@ -18,7 +18,9 @@ typedef struct {
     float sigma; /* 0 derives from radius. */
 } nt_postfx_blur_pass_t;
 
-/* The module owns only shader, program (and so its pipeline), and fullscreen primitive state. */
+/* The module owns only shader, program (and so its pipeline), and fullscreen primitive state.
+ * Each blur pass binds a Draw uniform block: budget 512 B of frame_capacity[NT_GFX_FRAME_UNIFORM] per pass,
+ * and a game rebinds its own Draw block before its next draw. */
 void nt_postfx_blur_init(void);
 void nt_postfx_blur_shutdown(void);
 /* Rebuilds GPU resources after context restore; a loss during it is retried by the next restore. */

@@ -113,12 +113,6 @@ typedef struct {
  * iterates sampler_count, not capacity, so capacity is free for the hot path. */
 #define NT_GFX_MAX_SAMPLERS 128
 
-/* A uniform block every program binds to binding_slot at link, when it declares one with this name. */
-typedef struct {
-    const char *name; /* borrowed unchanged until nt_gfx_shutdown; NULL = unused entry */
-    uint32_t binding_slot;
-} nt_global_block_t;
-
 /* ---- Mesh info (side table for VBO+IBO pairs from mesh activator) ---- */
 
 typedef struct {
@@ -339,8 +333,15 @@ typedef enum {
  * returns the existing handle, so re-init never grows the table. */
 #define NT_GFX_MAX_INSTANCE_LAYOUTS 32 /* a slot fits a byte: the GL VAO mirror and the bind command store it so */
 #define NT_GFX_MAX_TEXTURE_SLOTS 8
-/* WebGL2's minimum MAX_UNIFORM_BUFFER_BINDINGS, so every slot works on every device. */
-#define NT_GFX_MAX_UNIFORM_BUFFER_SLOTS 24
+/* Uniform block slots, logical and ordered by update frequency. A program's block binds to the slot
+ * of its name at link: the engine reserves the first three names, the game lists its own. */
+#define NT_GFX_SLOT_GLOBALS 0  /* "Globals": frame and view data, filled and bound by the game */
+#define NT_GFX_SLOT_MATERIAL 1 /* "Material": the material's params, bound by nt_material_apply */
+#define NT_GFX_SLOT_DRAW 2     /* "Draw": per-draw data of a renderer or game shader */
+#define NT_GFX_SLOT_GAME 3     /* nt_gfx_desc_t.game_blocks[i] binds to NT_GFX_SLOT_GAME + i */
+/* Every slot is frame data at a dynamic offset: all fit WebGPU's 8 dynamic uniform bindings. */
+#define NT_GFX_MAX_GAME_BLOCKS 5
+#define NT_GFX_MAX_UNIFORM_BUFFER_SLOTS (NT_GFX_SLOT_GAME + NT_GFX_MAX_GAME_BLOCKS)
 
 typedef struct {
     uint8_t location;
@@ -372,15 +373,18 @@ typedef struct {
     uint16_t max_render_targets; /* default: 16 */
     uint32_t capture_capacity;   /* event records, default: 0; allocated once at init */
     uint32_t stream_capacity;    /* draw-phase command bytes of one frame, default: 32 KiB; allocated once at init */
-    /* Frame storage bytes per frame by stream (NT_GFX_FRAME_*), default: 0 (disabled);
+    /* Frame storage bytes per frame by stream (NT_GFX_FRAME_*), default: 0 (disabled) except the
+     * uniform stream, which every pass's Globals block uses: 16 KiB;
      * each enabled stream is a CPU staging copy plus a GPU buffer, allocated once at init. */
     uint32_t frame_capacity[NT_GFX_FRAME_STREAM_COUNT];
-    nt_global_block_t global_blocks[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS]; /* default: none; sized for one name per slot */
-    bool depth;                                                       /* request depth buffer (default: true) */
-    bool stencil;                                                     /* request stencil buffer (default: false) */
-    bool antialias;                                                   /* MSAA (default: false) */
-    bool alpha;                                                       /* transparent canvas/window (default: false) */
-    bool premultiplied_alpha;                                         /* web only: canvas-to-page blending (default: true, ignored when alpha=false) */
+    /* The game's uniform block names, slot NT_GFX_SLOT_GAME + index; the list ends at the first
+     * NULL (default: none). Borrowed unchanged until nt_gfx_shutdown. */
+    const char *game_blocks[NT_GFX_MAX_GAME_BLOCKS];
+    bool depth;               /* request depth buffer (default: true) */
+    bool stencil;             /* request stencil buffer (default: false) */
+    bool antialias;           /* MSAA (default: false) */
+    bool alpha;               /* transparent canvas/window (default: false) */
+    bool premultiplied_alpha; /* web only: canvas-to-page blending (default: true, ignored when alpha=false) */
 } nt_gfx_desc_t;
 
 typedef struct {
@@ -494,10 +498,6 @@ typedef enum {
     NT_GFX_OP_VIEWPORT,
     NT_GFX_OP_SCISSOR,
     NT_GFX_OP_SCISSOR_ENABLE,
-    NT_GFX_OP_UNIFORM_MAT4,
-    NT_GFX_OP_UNIFORM_VEC4,
-    NT_GFX_OP_UNIFORM_FLOAT,
-    NT_GFX_OP_UNIFORM_INT,
     NT_GFX_OP_UBO,
     NT_GFX_OP_BUFFER_UPLOAD,
     NT_GFX_OP_TEXTURE_UPLOAD,
@@ -578,6 +578,8 @@ typedef enum {
     X(glGenVertexArrays)                                                                                                                                                                               \
     X(glGenerateMipmap)                                                                                                                                                                                \
     X(glGetActiveUniform)                                                                                                                                                                              \
+    X(glGetActiveUniformBlockName)                                                                                                                                                                     \
+    X(glGetActiveUniformBlockiv)                                                                                                                                                                       \
     X(glGetActiveUniformsiv)                                                                                                                                                                           \
     X(glGetAttachedShaders)                                                                                                                                                                            \
     X(glGetError)                                                                                                                                                                                      \
@@ -588,7 +590,6 @@ typedef enum {
     X(glGetQueryObjectuiv)                                                                                                                                                                             \
     X(glGetShaderInfoLog)                                                                                                                                                                              \
     X(glGetShaderiv)                                                                                                                                                                                   \
-    X(glGetUniformBlockIndex)                                                                                                                                                                          \
     X(glGetUniformLocation)                                                                                                                                                                            \
     X(glInvalidateFramebuffer)                                                                                                                                                                         \
     X(glIsShader)                                                                                                                                                                                      \
@@ -605,11 +606,8 @@ typedef enum {
     X(glTexImage2D)                                                                                                                                                                                    \
     X(glTexParameteri)                                                                                                                                                                                 \
     X(glTexSubImage2D)                                                                                                                                                                                 \
-    X(glUniform1f)                                                                                                                                                                                     \
     X(glUniform1i)                                                                                                                                                                                     \
-    X(glUniform4fv)                                                                                                                                                                                    \
     X(glUniformBlockBinding)                                                                                                                                                                           \
-    X(glUniformMatrix4fv)                                                                                                                                                                              \
     X(glUseProgram)                                                                                                                                                                                    \
     X(glVertexAttribDivisor)                                                                                                                                                                           \
     X(glVertexAttribPointer)                                                                                                                                                                           \
@@ -712,10 +710,6 @@ typedef struct {
             uint32_t first, count, vertices, instances, vertex_input;
         } draw;
         struct {
-            uint32_t name, count;
-            float values[16];
-        } uniform;
-        struct {
             uint32_t secondary, name, slot, offset, size;
         } binding;
         struct {
@@ -802,6 +796,7 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
         .max_vertex_inputs = 560,
         .max_render_targets = 16,
         .stream_capacity = 32U * 1024U,
+        .frame_capacity = {[NT_GFX_FRAME_UNIFORM] = 16U * 1024U},
         .depth = true,
         .premultiplied_alpha = true,
     };
@@ -846,8 +841,8 @@ void nt_gfx_clear(const nt_clear_desc_t *desc);
 
 nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
 /* Starts linking valid stages; nt_gfx_begin_frame finishes the link, so the program is ready no
- * earlier than the next frame. Link errors, >16 non-sampler uniforms and >NT_GFX_MAX_TEXTURE_SLOTS
- * samplers assert there. Returns invalid while the context is lost, and for a live stage
+ * earlier than the next frame. Link errors, a standalone non-sampler uniform (values arrive in
+ * uniform blocks) and >NT_GFX_MAX_TEXTURE_SLOTS samplers assert there. Returns invalid while the context is lost, and for a live stage
  * whose GPU object a loss discarded -- recreate the stages and relink. Only a stale stage handle asserts. */
 nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs);
 /* Returns the live pipeline of an equal desc (the label is not identity, and gfx keeps none) or
@@ -934,11 +929,11 @@ bool nt_gfx_texture_size(nt_texture_t tex, uint16_t *out_width, uint16_t *out_he
 /* Returns INVALID for invalid or stale handles. */
 nt_texture_format_t nt_gfx_texture_format(nt_texture_t tex);
 
-/* ---- Draw state ---- Pipeline, vertex input, texture set, instance pointers and
- * uniforms are pass-scoped: set them inside a pass (asserted); nt_gfx_begin_pass
- * discards them. Physical texture/sampler and uniform-buffer binds are context state.
- * An equal bind, scissor or viewport ends CACHE and records nothing; an equal texture
- * set still ends ACCEPTED and records only the changed units. */
+/* ---- Draw state ---- Pipeline, vertex input, texture set, instance pointers and uniform
+ * blocks are pass-scoped: set them inside a pass (asserted); nt_gfx_begin_pass
+ * discards them, so every pass binds every block it reads. Physical texture/sampler binds are
+ * context state. An equal bind, texture set, scissor or viewport
+ * ends CACHE and records nothing; a texture set records only its changed units. */
 
 void nt_gfx_bind_pipeline(nt_pipeline_t pip);
 /* One backend bind selects the whole vertex-input state (layout + buffers +
@@ -959,10 +954,10 @@ void nt_gfx_bind_vertex_input_instanced(nt_vertex_input_t vi, nt_instance_layout
 /* Applies the complete active sampler interface of the bound pipeline's program.
  * `bindings` is borrowed only for this call and may be NULL iff count is zero.
  * Inactive names are ignored before their handles are read. Contract violations
- * assert, including sampling an attachment of the active render target. The
- * recoverable failures -- context loss (also one a lazy sampler recreate meets) or a texture husk -- publish no
- * set and no backend bind; gfx reports them and skips the following draws of that
- * set, so the caller has nothing to check. */
+ * assert, including sampling an attachment of the active render target and a texture
+ * husk the owner did not recreate after a restore. A context loss (also one a lazy
+ * sampler recreate meets) publishes no set and no backend bind. A set that changes no
+ * unit of the pass ends CACHE. */
 void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uint8_t count);
 
 /* ---- Scissor and viewport ----
@@ -977,15 +972,6 @@ void nt_gfx_set_viewport(int x, int y, int w, int h);
 /* Returns NT_SAMPLER_INVALID for an invalid handle. A husk left by a context
  * loss keeps its default sampler until its owner destroys it. */
 nt_sampler_t nt_gfx_get_texture_default_sampler(nt_texture_t tex);
-
-/* ---- Uniforms ---- The hash is the identity, as for tags and resources. Hash once
- * at init with nt_hash32_str, or inline where the cost does not matter. The
- * value lands on the bound pipeline's program (asserted). */
-
-void nt_gfx_set_uniform_mat4(nt_hash32_t name, const float *matrix);
-void nt_gfx_set_uniform_vec4(nt_hash32_t name, const float *vec);
-void nt_gfx_set_uniform_float(nt_hash32_t name, float val);
-void nt_gfx_set_uniform_int(nt_hash32_t name, int val);
 
 /* ---- Draw calls ---- Every draw is a whole triangle list (count % 3 == 0, asserted). A
  * non-instanced draw that continues the previous one of the same kind, with no command
@@ -1006,11 +992,18 @@ bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint
 
 /* ---- Uniform blocks ---- */
 
-/* Copies size bytes into the uniform frame stream and binds that range to slot; every call
- * records. Inside a pass. size covers the block's full data size (WebGL). The bytes live for
- * this frame only: bind every block a draw reads in the frame of that draw. Budget
- * frame_capacity[NT_GFX_FRAME_UNIFORM] at size + 256 per block (offset alignment <= 256). */
+/* Shaders declare std140 blocks with vec4/ivec4/uvec4/mat4 members and column-major matrices
+ * (types and matrix order asserted at link; rules in the API contracts spec).
+ * A draw asserts that each block its program uses is bound in the pass at its full size. */
+
+/* Copies size bytes (a multiple of 16) into the uniform frame stream and binds that range to slot.
+ * Bytes equal to the slot's last staged block of the frame copy nothing (CACHE in its pass, a
+ * rebind in a later one); other bytes copy again, so A, B, A copies three times. Inside a pass;
+ * the bytes live for this frame. Budget frame_capacity[NT_GFX_FRAME_UNIFORM] at size + 256 per
+ * bind: the bound of a frame is its binds of all passes. */
 void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size);
+/* Unbinds slot without a backend call, so a draw whose program uses the slot asserts. Inside a pass. */
+void nt_gfx_unbind_uniform_block(uint32_t slot);
 
 /* update_buffer = glBufferSubData at byte offset; offset + size must fit the
  * buffer, data must point to size bytes (NULL only with size 0). Allowed at any time:

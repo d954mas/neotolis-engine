@@ -2,8 +2,10 @@
  * with 16 bits across R and G; the CPU normalizes each texture by its own range. */
 precision highp float;
 precision highp int;
-uniform vec4 u_noise_params; /* frequency, lacunarity, gain, 1 / amplitude sum */
-uniform vec4 u_noise_offset; /* noise-space offset xy, tile origin in pixels zw */
+layout(std140) uniform Draw {
+    vec4 u_noise_params; /* frequency, lacunarity, gain, 1 / amplitude sum */
+    vec4 u_noise_offset; /* noise-space offset xy, tile origin in pixels zw */
+};
 out vec4 frag_color;
 uint lattice_hash(ivec2 cell) {
     uvec2 q = uvec2(cell);

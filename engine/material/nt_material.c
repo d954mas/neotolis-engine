@@ -10,9 +10,21 @@
 
 /* ---- Module state ---- */
 
+typedef struct {
+    nt_material_info_t info; /* the public, read-only view */
+    struct {
+        nt_resource_t resource;
+        nt_hash32_t name;
+        nt_sampler_t sampler;
+    } textures[NT_MATERIAL_MAX_TEXTURES];
+    uint8_t tex_count;
+    uint16_t params_size;
+    uint8_t params[NT_MATERIAL_MAX_PARAM_BYTES];
+} nt_material_record_t;
+
 static struct {
     nt_pool_t pool;
-    nt_material_info_t *slots; /* [capacity+1], index 0 reserved */
+    nt_material_record_t *slots; /* [capacity+1], index 0 reserved */
     bool initialized;
 } s_mat;
 
@@ -26,7 +38,7 @@ void nt_material_init(const nt_material_desc_t *desc) {
 
     nt_pool_init(&s_mat.pool, desc->max_materials);
 
-    s_mat.slots = (nt_material_info_t *)calloc((size_t)desc->max_materials + 1, sizeof(nt_material_info_t));
+    s_mat.slots = (nt_material_record_t *)calloc((size_t)desc->max_materials + 1, sizeof(nt_material_record_t));
     NT_ASSERT(s_mat.slots); /* alloc fail at init = fatal */
 
     s_mat.initialized = true;
@@ -58,6 +70,8 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     for (uint8_t i = 0; i < desc->attr_map_count; i++) {
         NT_ASSERT(desc->attr_map[i].location < NT_GFX_MAX_VERTEX_ATTRS && "attr_map location out of range");
     }
+    NT_ASSERT(desc->params_size <= NT_MATERIAL_MAX_PARAM_BYTES && desc->params_size % 16U == 0 && (desc->params != NULL) == (desc->params_size > 0) &&
+              "material params: NULL with size 0, or a multiple of 16 up to NT_MATERIAL_MAX_PARAM_BYTES");
 
     uint32_t id = nt_pool_alloc(&s_mat.pool);
     if (id == 0) {
@@ -65,36 +79,25 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
         return NT_MATERIAL_INVALID;
     }
 
-    uint32_t slot_index = nt_pool_slot_index(id);
-    nt_material_info_t *info = &s_mat.slots[slot_index];
-
-    /* Clear slot */
-    memset(info, 0, sizeof(*info));
+    nt_material_record_t *rec = &s_mat.slots[nt_pool_slot_index(id)];
+    memset(rec, 0, sizeof(*rec));
+    nt_material_info_t *info = &rec->info;
 
     info->program = desc->program;
 
     /* Textures */
     NT_ASSERT(desc->texture_count <= NT_MATERIAL_MAX_TEXTURES);
-    info->tex_count = desc->texture_count;
+    rec->tex_count = desc->texture_count;
     for (uint8_t i = 0; i < desc->texture_count; i++) {
         /* A slot with no uniform name is a declaration nothing can bind. */
         NT_ASSERT(desc->textures[i].name != NULL && "material texture slot needs a sampler uniform name");
-        info->tex_resources[i] = desc->textures[i].resource;
-        info->tex_name_hashes[i] = nt_hash32_str(desc->textures[i].name).value;
-        info->tex_samplers[i] = desc->textures[i].sampler;
+        rec->textures[i].resource = desc->textures[i].resource;
+        rec->textures[i].name = nt_hash32_str(desc->textures[i].name);
+        rec->textures[i].sampler = desc->textures[i].sampler;
         for (uint8_t j = 0; j < i; j++) {
             /* Two slots on one sampler name would fight over its unit at every draw. */
-            NT_ASSERT(info->tex_name_hashes[j] != info->tex_name_hashes[i] && "two material texture slots name the same sampler uniform");
+            NT_ASSERT(rec->textures[j].name.value != rec->textures[i].name.value && "two material texture slots name the same sampler uniform");
         }
-    }
-
-    /* Params */
-    NT_ASSERT(desc->param_count <= NT_MATERIAL_MAX_PARAMS);
-    info->param_count = desc->param_count;
-    for (uint8_t i = 0; i < desc->param_count; i++) {
-        NT_ASSERT(desc->params[i].name != NULL && "material param needs a uniform name");
-        memcpy(info->params[i], desc->params[i].value, sizeof(float) * 4);
-        info->param_name_hashes[i] = nt_hash32_str(desc->params[i].name).value;
     }
 
     /* Attr map */
@@ -106,22 +109,9 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     }
     info->has_attr_defaults = desc->has_attr_defaults;
 
-    /* Entity params */
-    NT_ASSERT(desc->entity_param_count <= NT_MAX_PER_ENTITY_PARAMS);
-    info->entity_param_count = desc->entity_param_count;
-    for (uint8_t i = 0; i < desc->entity_param_count; i++) {
-        info->entity_param_hashes[i] = desc->entity_params[i].name ? nt_hash32_str(desc->entity_params[i].name).value : 0;
-    }
-
     /* Render state */
-    memcpy(info->blend.constant_color, desc->blend.constant_color, sizeof(info->blend.constant_color));
-    info->blend.src_rgb = desc->blend.src_rgb;
-    info->blend.dst_rgb = desc->blend.dst_rgb;
-    info->blend.src_alpha = desc->blend.src_alpha;
-    info->blend.dst_alpha = desc->blend.dst_alpha;
-    info->blend.op_rgb = desc->blend.op_rgb;
-    info->blend.op_alpha = desc->blend.op_alpha;
-    info->blend.enabled = desc->blend.enabled;
+    info->blend = desc->blend;
+    info->blend._reserved = 0;
     info->depth_test = desc->depth_test;
     info->depth_write = desc->depth_write;
     info->cull_mode = desc->cull_mode;
@@ -129,14 +119,16 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     /* Debug label (caller must ensure static storage / string literal) */
     info->label = desc->label;
 
+    rec->params_size = desc->params_size;
+    if (desc->params_size > 0) {
+        memcpy(rec->params, desc->params, desc->params_size);
+    }
+
     return (nt_material_t){.id = id};
 }
 
 void nt_material_destroy(nt_material_t mat) {
     NT_ASSERT(s_mat.initialized); /* destroy before init */
-    if (mat.id == 0) {
-        return;
-    }
     nt_pool_free(&s_mat.pool, mat.id);
 }
 
@@ -147,73 +139,56 @@ bool nt_material_valid(nt_material_t mat) {
     return nt_pool_valid(&s_mat.pool, mat.id);
 }
 
-/* Returns mutable info pointer for a valid handle, or NULL */
-static nt_material_info_t *get_mutable_info(nt_material_t mat) {
+/* Returns the record of a valid handle, or NULL */
+static nt_material_record_t *get_record(nt_material_t mat) {
     NT_ASSERT(s_mat.initialized && "material module not initialized");
-    if (mat.id == 0) {
-        return NULL;
-    }
     if (!nt_pool_valid(&s_mat.pool, mat.id)) {
         return NULL;
     }
     return &s_mat.slots[nt_pool_slot_index(mat.id)];
 }
 
-const nt_material_info_t *nt_material_get_info(nt_material_t mat) { return get_mutable_info(mat); }
+const nt_material_info_t *nt_material_get_info(nt_material_t mat) {
+    const nt_material_record_t *rec = get_record(mat);
+    return rec != NULL ? &rec->info : NULL;
+}
 
 void nt_material_set_program(nt_material_t mat, nt_program_t program) {
-    nt_material_info_t *info = get_mutable_info(mat);
-    NT_ASSERT(info && "set_program on invalid material handle");
+    nt_material_record_t *rec = get_record(mat);
+    NT_ASSERT(rec && "set_program on invalid material handle");
     /* A plain store: assigning the handle the material already holds changes
      * nothing, so a per-frame gate can call this unconditionally. */
-    info->program = program;
+    rec->info.program = program;
 }
 
-/* ---- Runtime param mutation ---- */
+/* ---- Params and apply ---- */
 
-/* Returns param index for given name hash, or -1 if not found */
-static int find_param_index(const nt_material_info_t *info, uint32_t name_hash) {
-    for (uint8_t i = 0; i < info->param_count; i++) {
-        if (info->param_name_hashes[i] == name_hash) {
-            return (int)i;
-        }
+void nt_material_set_params(nt_material_t mat, const void *params, uint32_t size) {
+    nt_material_record_t *rec = get_record(mat);
+    NT_ASSERT(rec && "set_params on invalid material handle");
+    NT_ASSERT(params != NULL && size == rec->params_size && size > 0 && "set_params: size differs from the create-time params_size");
+    memcpy(rec->params, params, size);
+}
+
+void nt_material_apply(nt_material_t mat, const nt_gfx_texture_binding_t *draw_textures, uint8_t count) {
+    const nt_material_record_t *rec = get_record(mat);
+    NT_ASSERT(rec && "nt_material_apply on invalid material handle");
+    NT_ASSERT((draw_textures != NULL || count == 0) && rec->tex_count + count <= NT_GFX_MAX_TEXTURE_SLOTS && "nt_material_apply: draw textures");
+    if (rec->params_size > 0) {
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_MATERIAL, rec->params, rec->params_size);
+    } else {
+        nt_gfx_unbind_uniform_block(NT_GFX_SLOT_MATERIAL);
     }
-    return -1;
-}
-
-bool nt_material_has_param_h(nt_material_t mat, nt_hash32_t name_hash) {
-    const nt_material_info_t *info = get_mutable_info(mat);
-    if (!info) {
-        return false;
+    nt_gfx_texture_binding_t bindings[NT_GFX_MAX_TEXTURE_SLOTS];
+    for (uint8_t t = 0; t < rec->tex_count; t++) {
+        bindings[t] = (nt_gfx_texture_binding_t){
+            .name = rec->textures[t].name,
+            .texture = {.id = nt_resource_get(rec->textures[t].resource)},
+            .sampler = rec->textures[t].sampler,
+        };
     }
-    return find_param_index(info, name_hash.value) >= 0;
+    for (uint8_t t = 0; t < count; t++) {
+        bindings[rec->tex_count + t] = draw_textures[t];
+    }
+    nt_gfx_apply_texture_bindings(bindings, (uint8_t)(rec->tex_count + count));
 }
-
-bool nt_material_has_param(nt_material_t mat, const char *name) { return nt_material_has_param_h(mat, nt_hash32_str(name)); }
-
-/* Resolve info + param index; invalid handles and undeclared parameters assert. */
-static int resolve_param(nt_material_t mat, uint32_t name_hash, nt_material_info_t **out_info) {
-    nt_material_info_t *info = get_mutable_info(mat);
-    NT_ASSERT(info && "set_param on invalid material handle");
-    int idx = find_param_index(info, name_hash);
-    NT_ASSERT(idx >= 0 && "material param not found -- use nt_material_has_param to check");
-    *out_info = info;
-    return idx;
-}
-
-void nt_material_set_param_h(nt_material_t mat, nt_hash32_t name_hash, const float value[4]) {
-    nt_material_info_t *info = NULL;
-    int idx = resolve_param(mat, name_hash.value, &info);
-    memcpy(info->params[idx], value, sizeof(float) * 4);
-}
-
-void nt_material_set_param(nt_material_t mat, const char *name, const float value[4]) { nt_material_set_param_h(mat, nt_hash32_str(name), value); }
-
-void nt_material_set_param_component_h(nt_material_t mat, nt_hash32_t name_hash, uint8_t index, float value) {
-    NT_ASSERT(index <= 3 && "component index must be 0-3");
-    nt_material_info_t *info = NULL;
-    int idx = resolve_param(mat, name_hash.value, &info);
-    info->params[idx][index] = value;
-}
-
-void nt_material_set_param_component(nt_material_t mat, const char *name, uint8_t index, float value) { nt_material_set_param_component_h(mat, nt_hash32_str(name), index, value); }

@@ -33,8 +33,6 @@ static nt_material_t make_one_attr_material(void) {
     desc.program = nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1);
     nt_gfx_fake_set_samplers(NULL, 0);
     desc.cull_mode = NT_CULL_NONE;
-    desc.textures[0].name = "u_texture";
-    desc.texture_count = 1;
     desc.attr_map[0].stream_name = "a_game";
     desc.attr_map[0].location = 4;
     memcpy(desc.attr_map[0].default_value, k_defaults, sizeof k_defaults);
@@ -132,8 +130,6 @@ static nt_material_t make_radial_layout_material(void) {
     desc.program = nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1);
     nt_gfx_fake_set_samplers(NULL, 0);
     desc.cull_mode = NT_CULL_NONE;
-    desc.textures[0].name = "u_texture";
-    desc.texture_count = 1;
     desc.attr_map[0].stream_name = "a_radial";
     desc.attr_map[0].location = 4;
     memcpy(desc.attr_map[0].default_value, &k_radial_defaults[0], 4 * sizeof(float));

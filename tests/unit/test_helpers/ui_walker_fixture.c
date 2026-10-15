@@ -39,12 +39,7 @@ static nt_material_t make_material(bool with_page_sampler) {
     desc.depth_test = false;
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;
-    /* Sprite materials name the atlas page's sampler; text materials declare nothing --
-     * the font textures are the text renderer's own binds. */
-    if (with_page_sampler) {
-        desc.textures[0].name = "u_texture";
-        desc.texture_count = 1;
-    }
+    /* The atlas page and the font texture are the renderers' draw textures: neither material declares them. */
     desc.label = "walker_test_material";
 
     const nt_material_t mat = nt_material_create(&desc);

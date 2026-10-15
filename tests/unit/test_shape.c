@@ -23,6 +23,8 @@ void setUp(void) {
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
     nt_gfx_fake_reset();
+    /* The shape programs' Draw block: every flush must bind it, or its draws assert. */
+    nt_gfx_fake_set_block(NT_GFX_SLOT_DRAW, 112);
     nt_shape_renderer_init();
     /* The fake finishes the renderer's program links at the next begin_frame. */
     nt_gfx_end_frame();
@@ -479,7 +481,8 @@ static void emit_every_kind(void) {
     nt_shape_renderer_line(a, b, color);
 }
 
-/* Shapes reach the GPU through frame storage only: flushes write no buffer, end_frame uploads once. */
+/* Shapes reach the GPU through frame storage only: flushes write no buffer, end_frame uploads the
+ * vertex and the uniform stream once each. */
 void test_shape_flushes_write_no_buffer_until_end_frame(void) {
     const uint32_t uploads = nt_gfx_fake_update_buffer_count();
     for (int flush = 0; flush < 3; flush++) {
@@ -489,10 +492,11 @@ void test_shape_flushes_write_no_buffer_until_end_frame(void) {
     }
     TEST_ASSERT_EQUAL_UINT32(uploads, nt_gfx_fake_update_buffer_count());
     nt_test_frame_next();
-    TEST_ASSERT_EQUAL_UINT32(uploads + 1, nt_gfx_fake_update_buffer_count());
+    TEST_ASSERT_EQUAL_UINT32(uploads + 2, nt_gfx_fake_update_buffer_count());
 }
 
-/* Batch vertices are absolute in the frame vertex buffer, after whatever other code allocated. */
+/* Batch vertices are absolute in the frame vertex buffer, after whatever other code allocated;
+ * flushes with unchanged settings bind nothing between them, so their contiguous batches merge. */
 void test_shape_batch_draws_from_its_frame_storage_offset(void) {
     const float a[3] = {0, 0, 0};
     const float b[3] = {1, 0, 0};
@@ -507,11 +511,9 @@ void test_shape_batch_draws_from_its_frame_storage_offset(void) {
     nt_shape_renderer_triangle(a, b, c, color);
     nt_shape_renderer_flush();
     nt_test_frame_next();
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(0).first_vertex); /* 5 foreign bytes round up to one 16-byte vertex */
-    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_draw_trace_at(0).num_vertices);
-    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_fake_draw_trace_at(1).first_vertex);
-    TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_fake_draw_trace_at(1).num_vertices);
+    TEST_ASSERT_EQUAL_UINT32(9, nt_gfx_fake_draw_trace_at(0).num_vertices);
 }
 
 /* Filled and wire shapes draw their own ranges of the shared template buffers. */
@@ -591,17 +593,14 @@ void test_shape_loss_during_restore_is_retried_by_the_next_one(void) {
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_draw_trace_at(0).num_vertices);
-    bool found = false;
-    for (uint32_t i = 0; i < nt_gfx_fake_uniform_vec4_count(); i++) {
-        if (nt_gfx_fake_uniform_vec4_hash_at(i) == nt_hash32_str("u_pixel_scale").value) {
-            float value[4];
-            nt_gfx_fake_uniform_vec4_value_at(i, value);
-            TEST_ASSERT_TRUE(float_near(value[0], 2.0F / 800.0F, 1e-7F));
-            TEST_ASSERT_TRUE(float_near(value[1], 2.0F / 600.0F, 1e-7F));
-            found = true;
-        }
-    }
-    TEST_ASSERT_TRUE(found);
+    /* The Draw block the flush bound: pixel_scale sits at byte 80; the staged bytes stay until the next allocation. */
+    TEST_ASSERT_TRUE(nt_gfx_fake_ubo_bind_count() > 0);
+    const nt_gfx_fake_ubo_bind_t bind = nt_gfx_fake_ubo_bind_at(nt_gfx_fake_ubo_bind_count() - 1U);
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_SLOT_DRAW, bind.slot);
+    float pixel_scale[4];
+    memcpy(pixel_scale, g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].staging + bind.offset + 80U, sizeof(pixel_scale));
+    TEST_ASSERT_TRUE(float_near(pixel_scale[0], 2.0F / 800.0F, 1e-7F));
+    TEST_ASSERT_TRUE(float_near(pixel_scale[1], 2.0F / 600.0F, 1e-7F));
 }
 
 /* The restore contract is "every ACTIVE renderer". A game that calls all four

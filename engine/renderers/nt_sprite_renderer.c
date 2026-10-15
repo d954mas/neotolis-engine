@@ -40,8 +40,6 @@ typedef struct {
     nt_vertex_input_t vertex_input;
     uint32_t stride; /* 20 + attr_map_count * 16 */
     uint64_t frame;  /* gfx frame of the selection */
-    /* Slot 0 is the atlas page, substituted per emit or run. */
-    nt_gfx_texture_binding_t textures[NT_MATERIAL_MAX_TEXTURES];
 } nt_sprite_material_t;
 
 /* One allocation of an emit or a draw_list item. */
@@ -61,13 +59,7 @@ static struct {
     uint16_t vi_count;
 
     nt_sprite_material_t current; /* set_material; the immediate emits read it */
-
-    /* Params last written, per program: equal params record nothing, so adjacent emits merge. */
-    struct {
-        nt_program_t program;
-        nt_material_t material;
-        float params[NT_MATERIAL_MAX_PARAMS][4];
-    } recorded;
+    nt_hash32_t page_name;        /* "u_texture", hashed at the first resolve */
 
 #ifdef NT_TEST_ACCESS
     nt_sprite_test_emit_t last_emit;
@@ -216,32 +208,17 @@ static void resolve_material(nt_material_t mat, const nt_material_info_t *mi, nt
     if (out->vertex_input.id == 0) {
         out->pipeline = (nt_pipeline_t){0};
     }
-    for (uint8_t t = 0; t < mi->tex_count; t++) {
-        out->textures[t] = (nt_gfx_texture_binding_t){
-            .name = {.value = mi->tex_name_hashes[t]},
-            /* Slot 0 is the atlas page by contract: its declared resource is never sampled. */
-            .texture = {.id = (t == 0) ? 0U : nt_resource_get(mi->tex_resources[t])},
-            .sampler = mi->tex_samplers[t],
-        };
+    if (s_sprite.page_name.value == 0) {
+        s_sprite.page_name = nt_hash32_str("u_texture");
     }
 }
 
-/* Pipeline first: uniforms and the texture set land on its program. */
-static void record_state(nt_sprite_material_t *m, uint32_t page_tex) {
-    const nt_material_info_t *mi = m->info;
+/* Pipeline first: the material's block and texture set land on its program. The atlas page is a
+ * draw texture with its own default sampler; a program that does not sample it ignores it. */
+static void record_state(const nt_sprite_material_t *m, uint32_t page_tex) {
     nt_gfx_bind_pipeline(m->pipeline);
-    const size_t param_bytes = (size_t)mi->param_count * sizeof(mi->params[0]);
-    if (s_sprite.recorded.program.id != m->program.id || s_sprite.recorded.material.id != m->material.id || memcmp(s_sprite.recorded.params, mi->params, param_bytes) != 0) {
-        nt_renderer_set_material_uniforms(mi);
-        s_sprite.recorded.program = m->program;
-        s_sprite.recorded.material = m->material;
-        memcpy(s_sprite.recorded.params, mi->params, param_bytes);
-    }
-    if (mi->tex_count > 0) {
-        m->textures[0].texture.id = page_tex;
-    }
-    /* Also with no declarations: gfx checks that the program samples nothing. */
-    nt_gfx_apply_texture_bindings(m->textures, mi->tex_count);
+    const nt_gfx_texture_binding_t page = {.name = s_sprite.page_name, .texture = {.id = page_tex}, .sampler = NT_SAMPLER_DEFAULT};
+    nt_material_apply(m->material, &page, 1);
     nt_gfx_bind_vertex_input(m->vertex_input);
 }
 
@@ -252,8 +229,7 @@ void nt_sprite_renderer_set_material(nt_material_t mat) {
      * already dead here, and a relink that met a new loss left it unassigned. */
     NT_ASSERT(mi != NULL && (mi->program.id != 0 || g_nt_gfx.context_lost) && "nt_sprite_renderer_set_material: material has no program");
     nt_sprite_material_t *c = &s_sprite.current;
-    /* Params are compared when recorded, and resources are not stepped between draws of a frame.
-     * A failed resolve (pipeline 0) retries next frame; a destroyed program takes its pipeline
+    /* A failed resolve (pipeline 0) retries next frame; a destroyed program takes its pipeline
      * with it, so that selection resolves again. */
     const uint64_t frame = g_nt_gfx.counters.frame_sequence;
     if (mat.id == c->material.id && mi->program.id == c->program.id && frame == c->frame && (c->pipeline.id == 0 || nt_gfx_pipeline_valid(c->pipeline))) {
@@ -281,9 +257,10 @@ static void capture_emit(const nt_sprite_alloc_t *a, uint32_t stride, uint32_t v
 /* Records the selected material and allocates one immediate emit; false draws nothing. Every
  * emit starts at a multiple of 4 vertices for gl_VertexID & 3 corner shaders. */
 static bool emit_begin(uint32_t page_tex, uint32_t vertex_count, uint32_t index_count, nt_sprite_alloc_t *a) {
-    nt_sprite_material_t *m = &s_sprite.current;
+    const nt_sprite_material_t *m = &s_sprite.current;
     NT_ASSERT(m->frame == g_nt_gfx.counters.frame_sequence && "sprite emit: call nt_sprite_renderer_set_material in this frame");
-    if (m->pipeline.id == 0 || (m->info->tex_count > 0 && page_tex == 0)) {
+    /* A sprite waits for its atlas page, whatever its shader samples. */
+    if (m->pipeline.id == 0 || page_tex == 0) {
         return false;
     }
     record_state(m, page_tex);
@@ -836,7 +813,7 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
         NT_ASSERT((sv.flags[leader_sprite] & NT_SPRITE_FLAG_RESOLVED) != 0 && sv.resolved[leader_sprite].region != NULL && sv.resolved[leader_sprite].region->vertex_count != 0 &&
                   "sprite render item: sprite is unresolved or tombstoned");
         const uint32_t page_tex = nt_resource_get(sv.resolved[leader_sprite].page_resource);
-        if (m.pipeline.id == 0 || (mat_info->tex_count > 0 && page_tex == 0)) {
+        if (m.pipeline.id == 0 || page_tex == 0) {
             run_start = run_end;
             continue;
         }

@@ -292,8 +292,8 @@ static nt_mesh_t make_mesh(const test_vertex_t vertices[VERTEX_COUNT]) {
 static nt_material_t make_skinned_material(float probe_mode) {
     return nt_material_create(&(nt_material_create_desc_t){
         .program = s_skin_program,
-        .params = {{.name = "u_probe_mode", .value = {probe_mode, 0.0F, 0.0F, 0.0F}}},
-        .param_count = 1,
+        .params = (const float[4]){probe_mode, 0.0F, 0.0F, 0.0F}, /* Material { vec4 u_probe_mode; } */
+        .params_size = 4 * sizeof(float),
         .cull_mode = NT_CULL_NONE,
         .label = "native_skinned_probe",
     });
@@ -302,8 +302,8 @@ static nt_material_t make_skinned_material(float probe_mode) {
 static nt_material_t make_reference_material(float probe_mode) {
     return nt_material_create(&(nt_material_create_desc_t){
         .program = s_reference_program,
-        .params = {{.name = "u_probe_mode", .value = {probe_mode, 0.0F, 0.0F, 0.0F}}},
-        .param_count = 1,
+        .params = (const float[4]){probe_mode, 0.0F, 0.0F, 0.0F},
+        .params_size = 4 * sizeof(float),
         .cull_mode = NT_CULL_NONE,
         .label = "native_skin_cpu_reference",
     });

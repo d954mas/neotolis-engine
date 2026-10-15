@@ -63,19 +63,11 @@
 
 /* ---- Pipeline backend data ---- */
 
-/* Per-program standalone locations, including each array element. */
-#define NT_MAX_CACHED_UNIFORMS 16
-_Static_assert(NT_MAX_CACHED_UNIFORMS <= 16, "vec4_mask and vec4_valid are 16-bit");
 /* Longest reflected uniform name plus room for an expanded array index; asserted at link. */
 #define NT_GFX_GL_MAX_UNIFORM_NAME 256
 
-typedef struct {
-    uint32_t name_hash;
-    GLint location;
-} nt_cached_uniform_t;
-
-/* One entry per active sampler element; the unit is fixed at link. Samplers live only
- * here, never in the uniform table; the location is needed once, to write the unit. */
+/* One entry per active sampler element; the unit is fixed at link. The location is needed
+ * once, to write the unit. */
 typedef struct {
     uint32_t name_hash;
     GLint location;
@@ -101,19 +93,14 @@ typedef struct {
     uint32_t program_slot; /* index into s_programs; the pipeline borrows it. 0 = free slot */
 } nt_gfx_gl_pipeline_t;
 
-/* Uniform locations are per-program, so the cache lives here, not on the
- * pipelines that borrow the program. */
+/* Program reflection lives here, not on the pipelines that borrow the program. */
 typedef struct {
     GLuint program;
-    nt_cached_uniform_t uniforms[NT_MAX_CACHED_UNIFORMS];
-    uint8_t uniform_count;
-    uint16_t vec4_mask;
-    uint16_t vec4_valid;
-    uint8_t vec4_values[NT_MAX_CACHED_UNIFORMS][4 * sizeof(float)];
     /* Sampler units are program state: assigned in reflection order at link,
      * written once, never rewritten by a material. */
     nt_gfx_gl_sampler_unit_t sampler_units[NT_GFX_MAX_TEXTURE_SLOTS];
     uint8_t sampler_count;
+    uint32_t block_sizes[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS]; /* GL_UNIFORM_BLOCK_DATA_SIZE per bound slot; 0 = none */
 } nt_gfx_gl_program_t;
 
 /* What a pointer call needs, packed: nt_vertex_attr_t pads its enum to 12 bytes. */
@@ -212,6 +199,11 @@ static struct {
     GLuint vao;
     /* Context state, not VAO state: only glVertexAttribPointer captures it. */
     GLuint array_buffer;
+    /* Every range uses the uniform frame buffer; init and restore reset these with that buffer. */
+    struct {
+        uint32_t offset;
+        uint32_t size;
+    } uniform_ranges[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS];
     GLuint program;
     bool depth_test_enabled;
     bool depth_write_enabled;
@@ -243,16 +235,6 @@ static struct {
 static void capture_program_definition(uint32_t i) {
     const nt_gfx_gl_program_t *program = &s_programs[i];
     NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_PROGRAM; event->data.backend.args[0] = i; event->data.backend.args[1] = program->program;);
-    for (uint32_t u = 0; u < program->uniform_count; u++) {
-        if ((program->vec4_mask & (1U << u)) == 0) {
-            continue;
-        }
-        NT_GFX_RECORD(
-            NT_GFX_EVENT_INITIAL, NT_GFX_OP_UNIFORM_VEC4, event->data.backend.args[0] = i; event->data.backend.args[1] = program->uniforms[u].name_hash;
-            event->data.backend.args[2] = (uint32_t)program->uniforms[u].location; if ((program->vec4_valid & (1U << u)) != 0) {
-                memcpy(event->data.backend.values, program->vec4_values[u], sizeof(event->data.backend.values));
-            } else { event->result = NT_GFX_RESULT_UNKNOWN; });
-    }
     for (uint32_t u = 0; u < program->sampler_count; u++) {
         NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SAMPLER, event->data.backend.args[0] = i; event->data.backend.args[1] = program->sampler_units[u].name_hash;
                       event->data.backend.args[2] = (uint32_t)program->sampler_units[u].location; event->data.backend.args[3] = u;
@@ -332,24 +314,6 @@ void nt_gfx_backend_capture_initial_state(void) {
 #endif
 // #endregion
 
-/* ---- Per-program uniform location lookup ---- */
-
-static int program_uniform_index(const nt_gfx_gl_program_t *prog, uint32_t name_hash) {
-    for (uint8_t i = 0; i < prog->uniform_count; i++) {
-        if (prog->uniforms[i].name_hash == name_hash) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-static int program_get_uniform_index(uint32_t program_backend, uint32_t name_hash) {
-    NT_ASSERT(program_backend != 0 && program_backend <= s_init_desc.max_programs && s_programs[program_backend].program != 0 && "set_uniform: requires a live program");
-    /* glUniform* writes into the current program, so the named one must be it. */
-    NT_ASSERT(s_programs[program_backend].program == s_gl_cache.program && "uniform write targets a program that is not current");
-    return program_uniform_index(&s_programs[program_backend], name_hash);
-}
-
 bool nt_gfx_backend_program_sampler_info(uint32_t program_backend, uint32_t name_hash, nt_gfx_sampler_info_t *out_info) {
     NT_ASSERT(program_backend != 0 && program_backend <= s_init_desc.max_programs && s_programs[program_backend].program != 0 && "program_sampler_info: requires a live program");
     NT_ASSERT(out_info != NULL && "program_sampler_info: out_info is required");
@@ -368,6 +332,11 @@ uint32_t nt_gfx_backend_program_sampler_mask(uint32_t program_backend) {
     NT_ASSERT(program_backend != 0 && program_backend <= s_init_desc.max_programs && s_programs[program_backend].program != 0 && "program_sampler_mask: requires a live program");
     /* Units are dense 0..n-1, so the count is the mask. */
     return (1U << s_programs[program_backend].sampler_count) - 1U;
+}
+
+const uint32_t *nt_gfx_backend_program_block_sizes(uint32_t program_backend) {
+    NT_ASSERT(program_backend != 0 && program_backend <= s_init_desc.max_programs && s_programs[program_backend].program != 0 && "program_block_sizes: requires a live program");
+    return s_programs[program_backend].block_sizes;
 }
 
 // #region test mirror reads
@@ -437,6 +406,7 @@ static void nt_gfx_gl_cache_ground_state(void) {
     s_pass_discard = 0;
     s_gl_cache.vao = 0;
     s_gl_cache.array_buffer = 0;
+    memset(s_gl_cache.uniform_ranges, 0, sizeof(s_gl_cache.uniform_ranges));
     s_gl_cache.program = 0;
     s_gl_cache.depth_test_enabled = false;
     s_gl_cache.depth_write_enabled = true; /* GL default: depth write enabled */
@@ -1177,59 +1147,6 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
     }
 }
 
-/* ---- Uniforms ---- */
-
-void nt_gfx_backend_set_uniform_mat4(uint32_t program_backend, uint32_t name_hash, const float *matrix) {
-    int index = program_get_uniform_index(program_backend, name_hash);
-    if (index < 0) {
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UNIFORM_MAT4, event->result = NT_GFX_RESULT_INACTIVE; event->data.binding.name = name_hash; event->data.binding.secondary = program_backend;);
-        return;
-    }
-    NT_GL_UNIFORM(glUniformMatrix4fv, 16, s_programs[program_backend].uniforms[index].location, 1, GL_FALSE, matrix);
-}
-
-void nt_gfx_backend_set_uniform_vec4(uint32_t program_backend, uint32_t name_hash, const float *vec) {
-    int index = program_get_uniform_index(program_backend, name_hash);
-    if (index < 0) {
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UNIFORM_VEC4, event->result = NT_GFX_RESULT_INACTIVE; event->data.binding.name = name_hash; event->data.binding.secondary = program_backend;);
-        return;
-    }
-    nt_gfx_gl_program_t *prog = &s_programs[program_backend];
-    const uint16_t bit = (uint16_t)(1U << (uint32_t)index);
-    if ((prog->vec4_valid & bit) != 0 && memcmp(prog->vec4_values[index], (const void *)vec, sizeof(prog->vec4_values[index])) == 0) {
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UNIFORM_VEC4, event->result = NT_GFX_RESULT_CACHE; event->data.binding.name = name_hash; event->data.binding.secondary = program_backend;);
-        return;
-    }
-    NT_GL_UNIFORM(glUniform4fv, 4, prog->uniforms[index].location, 1, vec);
-    // Preserve uncached GL handling for other uniform types.
-    if ((prog->vec4_mask & bit) != 0) {
-        memcpy(prog->vec4_values[index], vec, sizeof(prog->vec4_values[index]));
-        prog->vec4_valid |= bit;
-    }
-}
-
-void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_hash, float val) {
-    int index = program_get_uniform_index(program_backend, name_hash);
-    if (index < 0) {
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UNIFORM_FLOAT, event->result = NT_GFX_RESULT_INACTIVE; event->data.binding.name = name_hash; event->data.binding.secondary = program_backend;);
-        return;
-    }
-    NT_GL(glUniform1f, s_programs[program_backend].uniforms[index].location, val);
-}
-
-void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val) {
-    int index = program_get_uniform_index(program_backend, name_hash);
-    if (index < 0) {
-        /* Samplers never enter the uniform table, so only a miss can name one. */
-        nt_gfx_sampler_info_t sampler_info = {0};
-        const bool is_sampler = nt_gfx_backend_program_sampler_info(program_backend, name_hash, &sampler_info);
-        NT_ASSERT(!is_sampler && "sampler uniforms are immutable; use nt_gfx_apply_texture_bindings");
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UNIFORM_INT, event->result = NT_GFX_RESULT_INACTIVE; event->data.binding.name = name_hash; event->data.binding.secondary = program_backend;);
-        return;
-    }
-    NT_GL(glUniform1i, s_programs[program_backend].uniforms[index].location, val);
-}
-
 /* ---- Draw calls ---- */
 
 void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
@@ -1437,15 +1354,10 @@ static bool uniform_sampler_class(GLenum utype, nt_gfx_sampler_class_t *out_clas
     }
 }
 
-/* Cache locations off the hot path; NT_ASSERT expansion inflates complexity. */
+/* Checks uniforms and reflects sampler units off the hot path; NT_ASSERT expansion inflates complexity. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
-    nt_cached_uniform_t *out = rec->uniforms;
-    uint8_t *out_count = &rec->uniform_count;
+static bool nt_gfx_gl_reflect_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
     rec->sampler_count = 0;
-    rec->vec4_mask = 0;
-    rec->vec4_valid = 0;
-    *out_count = 0;
     GLint active_uniforms = -1;
     NT_GL(glGetProgramiv, program, GL_ACTIVE_UNIFORMS, &active_uniforms);
     if (active_uniforms < 0) {
@@ -1462,7 +1374,6 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
     /* Expanded indices can be wider than reflection's terminal [0]. */
     NT_ASSERT((size_t)max_name_length + 10U <= NT_GFX_GL_MAX_UNIFORM_NAME && "uniform name exceeds NT_GFX_GL_MAX_UNIFORM_NAME");
     char uname[NT_GFX_GL_MAX_UNIFORM_NAME];
-    uint32_t uniform_count = 0;
     for (GLint ui = 0; ui < active_uniforms; ui++) {
         GLsizei ulen = 0;
         GLint usize = 0;
@@ -1474,9 +1385,28 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
         /* Block members are fed by their buffer, not by location writes. Emscripten
          * hands out a location for any active name, so the block index decides. */
         const GLuint index = (GLuint)ui;
-        GLint block_index = -1;
+        GLint block_index = -2; /* a lost context writes nothing */
         NT_GL(glGetActiveUniformsiv, program, 1, &index, GL_UNIFORM_BLOCK_INDEX, &block_index);
+        if (block_index == -2) {
+            return false;
+        }
         if (block_index != -1) {
+            /* These std140 members map directly to C arrays without padding between fields. */
+            NT_ASSERT((utype == GL_FLOAT_VEC4 || utype == GL_INT_VEC4 || utype == GL_UNSIGNED_INT_VEC4 || utype == GL_FLOAT_MAT4) && "uniform block member is not vec4, ivec4, uvec4 or mat4");
+            if (utype == GL_FLOAT_MAT4) {
+                GLint row_major = -1;
+                NT_GL(glGetActiveUniformsiv, program, 1, &index, GL_UNIFORM_IS_ROW_MAJOR, &row_major);
+                if (row_major == -1) {
+                    return false; /* the context was lost after the block index */
+                }
+                NT_ASSERT(row_major == 0 && "uniform block member: row_major matrix -- the C side is column-major");
+            }
+            continue;
+        }
+        nt_gfx_sampler_class_t sampler_class = NT_GFX_SAMPLER_CLASS_FLOAT;
+        if (!uniform_sampler_class(utype, &sampler_class)) {
+            /* Built-ins (gl_DepthRange) are not program inputs; anything else could never receive a value. */
+            NT_ASSERT(strncmp(uname, "gl_", 3) == 0 && "standalone non-sampler uniform: put shader values in a uniform block");
             continue;
         }
         NT_ASSERT(usize == 1 || (ulen >= 3 && strcmp(uname + ulen - 3, "[0]") == 0));
@@ -1487,30 +1417,46 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
             }
             GLint loc = NT_GL_RET(glGetUniformLocation, program, uname);
             if (loc >= 0) {
-                const uint32_t name_hash = nt_hash32_str(uname).value;
-                nt_gfx_sampler_class_t sampler_class = NT_GFX_SAMPLER_CLASS_FLOAT;
-                if (uniform_sampler_class(utype, &sampler_class)) {
-                    NT_ASSERT(rec->sampler_count < NT_GFX_MAX_TEXTURE_SLOTS && "program declares more samplers than NT_GFX_MAX_TEXTURE_SLOTS");
-                    const uint8_t unit = rec->sampler_count;
-                    rec->sampler_units[unit].name_hash = name_hash;
-                    rec->sampler_units[unit].location = loc;
-                    rec->sampler_units[unit].sampler_class = (uint8_t)sampler_class;
-                    rec->sampler_count++;
-                } else {
-                    if (uniform_count < NT_MAX_CACHED_UNIFORMS) {
-                        out[uniform_count].name_hash = name_hash;
-                        out[uniform_count].location = loc;
-                        if (utype == GL_FLOAT_VEC4) {
-                            rec->vec4_mask |= (uint16_t)(1U << uniform_count);
-                        }
-                    }
-                    uniform_count++;
-                }
+                NT_ASSERT(rec->sampler_count < NT_GFX_MAX_TEXTURE_SLOTS && "program declares more samplers than NT_GFX_MAX_TEXTURE_SLOTS");
+                const uint8_t unit = rec->sampler_count;
+                rec->sampler_units[unit].name_hash = nt_hash32_str(uname).value;
+                rec->sampler_units[unit].location = loc;
+                rec->sampler_units[unit].sampler_class = (uint8_t)sampler_class;
+                rec->sampler_count++;
             }
         }
     }
-    NT_ASSERT(uniform_count <= NT_MAX_CACHED_UNIFORMS && "program exceeds standalone uniform cache capacity");
-    *out_count = (uint8_t)uniform_count;
+    return true;
+}
+
+/* Every active block binds to the slot of its name; an unknown name would sit on binding 0 and read
+ * Globals. Names are unique per program and per slot (init asserts the list), so one block owns a slot. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
+static bool nt_gfx_gl_bind_blocks(GLuint program, nt_gfx_gl_program_t *rec) {
+    memset(rec->block_sizes, 0, sizeof(rec->block_sizes));
+    GLint block_count = -1;
+    NT_GL(glGetProgramiv, program, GL_ACTIVE_UNIFORM_BLOCKS, &block_count);
+    if (block_count <= 0) {
+        return block_count == 0;
+    }
+    char name[NT_GFX_GL_MAX_UNIFORM_NAME];
+    GLint max_name_length = 0;
+    NT_GL(glGetProgramiv, program, GL_ACTIVE_UNIFORM_BLOCK_MAX_NAME_LENGTH, &max_name_length);
+    /* A truncated name would match a listed prefix or report the wrong cause. */
+    NT_ASSERT(max_name_length <= (GLint)sizeof(name) && "uniform block name longer than NT_GFX_GL_MAX_UNIFORM_NAME");
+    for (GLint bi = 0; bi < block_count; bi++) {
+        GLsizei length = 0;
+        NT_GL(glGetActiveUniformBlockName, program, (GLuint)bi, (GLsizei)sizeof(name), &length, name);
+        GLint size = 0;
+        NT_GL(glGetActiveUniformBlockiv, program, (GLuint)bi, GL_UNIFORM_BLOCK_DATA_SIZE, &size);
+        if (length <= 0 || size <= 0) {
+            return false;
+        }
+        const uint32_t slot = nt_gfx_block_slot(s_init_desc.game_blocks, name);
+        NT_ASSERT(slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS && "uniform block name is neither reserved nor in nt_gfx_desc_t.game_blocks");
+        NT_GL(glUniformBlockBinding, program, (GLuint)bi, (GLuint)slot);
+        rec->block_sizes[slot] = (uint32_t)size;
+    }
     return true;
 }
 
@@ -1570,17 +1516,7 @@ nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll
         NT_ASSERT(lost && "program link failed on a live context");
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    const nt_global_block_t *blocks = s_init_desc.global_blocks;
-    for (uint32_t bi = 0; bi < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; bi++) {
-        if (blocks[bi].name == NULL) {
-            continue;
-        }
-        GLuint block_index = NT_GL_RET(glGetUniformBlockIndex, rec->program, blocks[bi].name);
-        if (block_index != GL_INVALID_INDEX) {
-            NT_GL(glUniformBlockBinding, rec->program, block_index, (GLuint)blocks[bi].binding_slot);
-        }
-    }
-    if (!nt_gfx_gl_cache_uniforms(rec->program, rec)) {
+    if (!nt_gfx_gl_bind_blocks(rec->program, rec) || !nt_gfx_gl_reflect_uniforms(rec->program, rec)) {
         const bool lost = nt_gfx_gl_ctx_query_lost();
         NT_ASSERT(lost && "program uniform reflection failed");
         return NT_GFX_RESULT_CONTEXT_LOST;
@@ -1871,7 +1807,14 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, cons
 
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, uint32_t offset, uint32_t size) {
     NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_buffers && s_buffer_gl[backend_handle] != 0 && "bind_uniform_buffer: requires a live buffer");
-    NT_GL(glBindBufferRange, GL_UNIFORM_BUFFER, slot, s_buffer_gl[backend_handle], (GLintptr)offset, (GLsizeiptr)size);
+    const GLuint buf = s_buffer_gl[backend_handle];
+    if (s_gl_cache.uniform_ranges[slot].offset == offset && s_gl_cache.uniform_ranges[slot].size == size) {
+        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UBO, event->result = NT_GFX_RESULT_CACHE; event->detail = NT_GFX_GL_glBindBufferRange; event->data.backend.args[0] = buf;);
+        return;
+    }
+    NT_GL(glBindBufferRange, GL_UNIFORM_BUFFER, slot, buf, (GLintptr)offset, (GLsizeiptr)size);
+    s_gl_cache.uniform_ranges[slot].offset = offset;
+    s_gl_cache.uniform_ranges[slot].size = size;
 }
 
 /* ---- Texture management ---- */

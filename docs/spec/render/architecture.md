@@ -72,12 +72,11 @@ its logical state and geometry counters, then records the
 backend-resolved arguments of the backend call into one command stream: begin
 and end pass, clear, pipeline and vertex-input binds (an instanced one carries its
 instance layout, buffer and offset),
-texture-unit and uniform-block binds, the mat4, vec4, float
-and int uniform setters, scissor rectangle and enable, viewport, the plain and
+texture-unit and uniform-block binds, scissor rectangle and enable, viewport, the plain and
 indexed draws (both carry an instance count; the indexed draw also carries the
 index type of the bound vertex input), and GPU timing
-segment begin and end. Descriptors and uniform values are copied
-into the stream. A binding equal to the current one and an indexed draw that
+segment begin and end. Descriptors are copied into the stream; uniform block
+bytes are copied into frame storage at the call. A binding equal to the current one and an indexed draw that
 continues the previous one record nothing new (see Binding dedup and draw
 merge). `nt_gfx_end_frame` first uploads the frame storage (see Frame storage), then
 executes the stream in call order. Nothing is recorded outside a frame.
@@ -97,7 +96,7 @@ every draw of the frame reads the last write: writing one region twice in a
 frame gives the second content to every draw, including draws recorded before
 it. A write issued after `nt_gfx_end_frame` belongs to the next frame. Rendering
 into an attachment is recorded, so it still overwrites the attachment in pass
-order. Arguments of recorded calls (uniform values, descriptors, uniform blocks)
+order. Arguments of recorded calls (descriptors, uniform block bytes)
 are copied at the call; buffer, texture and frame storage contents are read at
 execution.
 
@@ -133,35 +132,36 @@ and backend asserts without a front-end equivalent fire at execution, inside
 ### Binding dedup and draw merge
 
 The front-end is the one layer that drops redundant public binds; the GL backend
-only skips repeated physical state (below). Every binding call except a uniform
-block compares with a front-end mirror; an equal value ends `NT_GFX_RESULT_CACHE`
-and records nothing. A mirror lives exactly as long as the contract keeps its state:
+only skips repeated physical state (below). Every binding call compares with a
+front-end mirror; an equal value ends `NT_GFX_RESULT_CACHE` and records nothing.
+A mirror lives exactly as long as the contract keeps its state:
 
 - pipeline, vertex input with its instance layout, buffer and offset, the
-  texture set (per unit: texture and sampler) and the viewport live for one pass:
-  `begin_pass` discards them, so the first bind of each in a pass records;
+  texture set (per unit: texture and sampler), the bound uniform-block slots
+  and the viewport live for one pass: `begin_pass`
+  discards them, so the first bind of each in a pass records;
 - the scissor rectangle carries over passes and frames; a context loss clears it;
 - scissor enable is reset to off by `begin_pass`.
 
-`nt_gfx_apply_texture_bindings` never ends `CACHE`: a successful apply validates
-and publishes the whole set and ends `ACCEPTED`, but records a unit bind only
-when that unit's texture or sampler changed in the pass. A uniform block is
-frame data at a fresh offset of the uniform frame stream, so its bind always
-records and ends `ACCEPTED`; GL keeps the slot binding across passes and frames.
-Uniform-block slots are below `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS` (24, the WebGL2 minimum); a bind at
-that slot or above asserts, and so does `nt_gfx_init` for a global block declared there.
+`nt_gfx_apply_texture_bindings` validates the whole set on every call (a WebGPU
+backend bakes sets instead) and records a unit bind only when that unit's
+texture or sampler changed in the pass; a set that changes no unit ends `CACHE`. Bytes equal to
+a slot's last staged block of the frame bind that staged range again without a copy
+(`CACHE` when the pass already holds it).
+Uniform-block slots are below `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS` (8: the three
+reserved names and five game blocks); a bind at that slot or above asserts.
 
 The compare runs after the pass check; an equal value was validated when it was
 recorded, `begin_pass` discards the pass-scoped mirrors, and the frame rule keeps
 every recorded object alive until `nt_gfx_end_frame`. An invalid or stale
 vertex-input handle asserts: owners revalidate cached handles and recreate them
 after a loss. An invalid pipeline handle clears its mirror (the unbind); other
-invalid binds leave their mirrors unchanged. Uniform values are not deduplicated by
-the front-end. The GL backend keeps caches for
+invalid binds leave their mirrors unchanged. The GL backend keeps caches for
 physical GL state the front-end does not name: the program and VAO behind
 different pipelines and vertex inputs, the fixed-function difference between
 pipelines, the texture and sampler halves of a unit across passes, the
-viewport, clear values, the active unit, the `GL_ARRAY_BUFFER` binding, and the
+viewport, clear values, the active unit, the `GL_ARRAY_BUFFER` binding, the range
+each uniform-block slot holds, and the
 instance layout, buffer and offset each vertex input's VAO last received: a
 recorded instanced bind that repeats all three issues no `glBindBuffer` or
 `glVertexAttribPointer` (only the VAO bind, when another VAO is bound), so a
@@ -296,33 +296,21 @@ targets), so a context loss frees their pool slots outright. Primary resources (
 shaders, programs) instead survive a loss as husks — pool slot alive,
 backend gone — because materials and game code hold them through the loss
 window: programs and textures already report readiness (a link is asynchronous
-anyway), so draws skip a husk with no second validity check, and the restore
-recipe has their owners destroy the old handles explicitly. Destroying a stale
-program asserts; a stale shader, buffer or texture destroy logs an error and
-changes nothing. Applying a texture set containing a husk reports once and issues no
-texture or sampler bind, and the draws of that set are skipped; binding a husk
-buffer, or writing into any husk, asserts. Destroying handle 0 is a silent no-op
+anyway), and the restore recipe has their owners destroy the old handles
+explicitly. Destroying a stale program asserts; a stale shader, buffer or texture
+destroy logs an error and changes nothing. Applying a texture set containing a
+husk, binding a husk buffer, or writing into any husk asserts. Destroying handle 0 is a silent no-op
 for every primary type, so an owner whose create met a loss destroys without a check.
 
 **Program / pipeline split.** A program is the linked (vertex, fragment) pair
-and owns everything that follows from linking: uniform locations, uniform
-values, and global UBO block bindings. A uniform write requires a bound
-pipeline and addresses that pipeline's program at the backend boundary; a
-write with nothing bound asserts. A pipeline is fixed-function render
+and owns everything that follows from linking: sampler units and uniform block
+bindings. It holds no values: every value arrives in a uniform block bound to the
+pass, so a block outlives pipeline binds. A pipeline is fixed-function render
 state that *borrows* a program handle — it owns no vertex-input state, and
 pipeline and vertex-input binding are orthogonal: either may change without
-re-binding the other. Two pipelines on one program
-share every uniform value, and binding one does not reset what the other set.
-The mesh renderer replays declared material params on each material transition inside one draw
-call and discard that tracking at the end of the call; across calls the front-end drops equal binds and the GL backend
-drops repeated physical state (see Binding dedup and draw merge). The sprite
-renderer instead writes a material's params only when the program, the material or
-the param values differ from what it last wrote, compared at every emit and run,
-because a uniform record between two draws stops them from merging. That memo
-lasts across calls and frames, so nothing but the sprite renderer may write the
-uniforms of a program that sprite materials use. Standalone float vec4 writes are skipped when their bytes
-match the last submitted value for that program and uniform; other uniform
-writes are issued unchanged. The
+re-binding the other.
+The front-end drops equal binds and the GL backend drops repeated physical state
+(see Binding dedup and draw merge). The
 backend GL cache persists across passes and frames; ground state is issued once
 at backend init and at context restore. Sampler uniforms are not written at all:
 their units are fixed at link and belong to the program, so no material can
@@ -331,15 +319,10 @@ name-keyed set for the bound program, resolves it into those units,
 then publishes the logical set and records its texture-unit binds together.
 A missing or duplicate active name, invalid handle, or sampler-type mismatch
 asserts before any bind is recorded; inactive names are ignored before their handles
-are inspected. Context loss (also one a lazy sampler recreate meets) or a texture husk
-publishes no set and records no texture-unit bind: gfx reports the failure and skips
-the following draws of that set. A vec4 param a material
-does not declare still retains the value last written on that program.
-Before each draw, the game and renderer must ensure the program holds every
-numeric uniform value that draw needs. Materials supply only their declared
-params; any required value they omit must be explicitly established by the game
-or renderer. The vec4 cache neither validates material completeness nor resets
-omitted values. Destroying a program destroys its
+are inspected. Context loss (also one a lazy sampler recreate meets) publishes no set and records
+no texture-unit bind, and a texture husk asserts. Material params are no program
+state: each material apply binds its own bytes
+([material, Params](material.md#params)). Destroying a program destroys its
 pipelines, and a context loss frees every pipeline slot.
 
 **Depth comparison.** `nt_pipeline_desc_t.depth_func` selects any of the eight
@@ -400,15 +383,13 @@ content rather than a handful of small fields.
 **State transitions.** The sprite renderer keeps no bind tracking: every
 immediate emit and every `draw_list` run binds its pipeline, texture set and
 vertex input and records its draw, and the front-end drops the equal binds and
-merges the contiguous draws. Its one memo is the params memo above, keyed by the
-program the pipeline was built on, so a program replaced behind an unchanged
-material handle writes its params again.
+merges the contiguous draws.
 
 The mesh renderer keeps no bind tracking: every run binds its pipeline and
-vertex input, and the front-end drops the equal ones. It skips only material
-work — the vec4 param loop and the texture set — between runs of one call that
-keep the material. In the skinned list a deformation-only change applies the
-texture set, not the params. Inside one call the pipeline follows from the material, so a program change is
+vertex input, and the front-end drops the equal ones. It skips only
+`nt_material_apply` between runs of one call that keep the material and the draw
+texture; a skinned deformation-only change applies again, and the front-end drops
+the unchanged params bind. Inside one call the pipeline follows from the material, so a program change is
 a material change. A core draw call applies its material every time.
 Texture and sampler travel together in one `nt_gfx_texture_binding_t`; a material
 without an override selects the texture's asset default. At every material
@@ -574,11 +555,12 @@ Alignment follows the reader:
   buffer at offset 0. Consecutive allocations of one stride are contiguous;
 - instance data bound with `nt_gfx_bind_vertex_input_instanced` at its offset aligns to 4;
 - indices align to 4 and are drawn from `first_index = offset / 4`;
-- uniform data is written and bound by `nt_gfx_bind_uniform_block(slot, data, size)`,
+- uniform frame data is written and bound by `nt_gfx_bind_uniform_block(slot, data, size)`,
   which aligns it to `gpu_caps.uniform_buffer_offset_alignment` (at most 256 on
-  WebGL 2 and GLES 3, not necessarily a power of two): budget each block its size
-  plus 256 bytes. The game owns no uniform buffer; the GL binding persists, the bytes live for one frame, so a draw
-  reads only blocks bound in its own frame.
+  WebGL 2 and GLES 3, not necessarily a power of two): budget each bind its size
+  plus 256 bytes (a bind equal to the slot's last staged block of the frame copies
+  nothing). The bytes live for one frame and bindings for one pass, so a draw
+  reads only blocks bound in its own pass.
 
 `nt_gfx_frame_buffer(stream)` returns an ordinary buffer handle, for vertex inputs
 over a stream's vertex or instance data; `nt_gfx_bind_uniform_block` names a
@@ -589,7 +571,8 @@ stream's buffer counts against `nt_gfx_desc_t.max_buffers`.
 
 `nt_gfx_desc_t.frame_capacity[stream]` is the byte budget of a stream per frame,
 allocated once at init as staging plus buffer; `nt_gfx_desc_defaults()` leaves every
-stream at 0, so the game sets the budget of each stream it uses. A zero
+stream at 0 except the uniform stream (16 KiB: every pass binds `Globals`), so the
+game sets the budget of each other stream it uses. A zero
 capacity disables the stream: no staging and no buffer, and its allocations stop the program as an
 overflow, so a game pays only for the streams it uses.
 Storage never grows: an overflow logs the stream, the needed and the free bytes
@@ -694,13 +677,13 @@ nt_skeletal_gpu_flush();
 bind_shadow_materials();
 for (uint32_t c = 0; c < CASCADES; c++) {
     nt_gfx_begin_pass(&shadow_pass[c]);
-    nt_gfx_bind_uniform_block(0, &views[c], sizeof(view_t)); /* copied into frame storage */
+    nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &views[c], sizeof(view_t)); /* copied into frame storage */
     nt_mesh_renderer_draw_list_skinned(GAME_STREAM_SHADOW + c, shadow_items, shadow_count);
     nt_gfx_end_pass();
 }
 bind_surface_materials();
 nt_gfx_begin_pass(&main_pass);
-nt_gfx_bind_uniform_block(0, &views[CASCADES], sizeof(view_t));
+nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &views[CASCADES], sizeof(view_t));
 /* One stream serves both instance layouts only because no mesh is in both lists. */
 nt_mesh_renderer_draw_list_skinned(GAME_STREAM_MAIN, skinned_items, skinned_count);
 nt_mesh_renderer_draw_list(GAME_STREAM_MAIN, static_items, static_count);
@@ -741,7 +724,7 @@ and what carries over is in
 and supplies `clear_color`/`clear_depth`; unselected values are ignored.
 It clears the current target under the current scissor, or the entire attachment
 when scissor is disabled. It does not use the viewport as a clear rectangle.
-It preserves the pipeline, vertex input, texture set, uniforms, viewport and
+It preserves the pipeline, vertex input, texture set, uniform blocks, viewport and
 scissor. Depth clear temporarily enables depth writes and restores the bound
 pipeline's mask before returning. Selecting neither attachment does no GPU work;
 a lost context skips the operation. Stencil has no clear API.
@@ -769,12 +752,14 @@ state; pipeline write masks affect draws, not the next pass initialization. Boun
 pipeline, vertex input, the instance binding and the logical complete texture
 set are pass-scoped: `begin_pass` discards them. The texture set is additionally tied to the bound
 program and is discarded when that program changes. Pipeline and vertex-input binds, texture-set application,
-instance-buffer re-pointing, uniform writes and draws outside a pass assert.
+instance-buffer re-pointing, uniform block binds and draws outside a pass assert.
 Destroying a live object from the first pass until `nt_gfx_end_frame` asserts
 (the frame rule, see Draw-phase command stream).
-Physical texture/sampler GL bindings and uniform-block binds remain context
-state. The backend deduplicates texture/sampler binds across passes;
-every uniform-block bind records one `glBindBufferRange`. A depth clear forces the depth
+Physical texture/sampler GL bindings and GL uniform-block ranges remain context
+state. The backend deduplicates texture/sampler binds and uniform-block ranges across
+passes. Every uniform range uses the uniform frame buffer, and its recreation
+clears the range cache. A recorded block bind whose offset and size the slot
+already holds issues no `glBindBufferRange`. A depth clear forces the depth
 mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
 A render target is a thin framebuffer object over optional attachments, color
@@ -1111,9 +1096,7 @@ the count followed by each name, a returned value (`glCreate*`, `glGetError`,
 locations, status) follows the arguments, and indexed offsets are byte offsets.
 Output pointers are presence bits; their written values are not recorded. Readback, timer-query and debug-group calls are
 issued calls too and are recorded like any other.
-Float arguments occupy `backend.values` in float argument order. Matrix and vec4
-calls use `uniform` with the location in `name`, float count in `count`, and
-copied values. `backend.bytes` is actual CPU upload payload, zero for NULL storage.
+Float arguments occupy `backend.values` in float argument order. `backend.bytes` is actual CPU upload payload, zero for NULL storage.
 No event borrows upload memory, shader source or caller labels.
 
 Resource `DEFINITION/STATE` records with `object_kind=NONE` use `detail` as the
@@ -1159,13 +1142,12 @@ dead names of the lost context.
 Among INITIAL records, `detail` is meaningful only on INITIAL/STATE.
 Program publication and initial state include `INITIAL/SAMPLER` records with
 backend program slot, name hash, location, unit and sampler class in args 0–4.
-`INITIAL/UNIFORM_VEC4` gives program slot/name hash/location in args 0–2 and cached
-vec4 values; `UNKNOWN` means no retained value. These INITIAL records can occur
-inside CREATE when the program first becomes available. Inactive names emit
-SKIP/INACTIVE; cache skips are distinct from invalid requests.
+These INITIAL records can occur inside CREATE when the program first becomes
+available. Inactive texture-set names emit SKIP/INACTIVE; cache skips are distinct
+from invalid requests.
 
 `SKIP` records mark work that was not issued without ending an operation:
-backend cache skips (`SKIP/CACHE`) and inactive uniform or texture-set names
+backend cache skips (`SKIP/CACHE`) and inactive texture-set names
 (`SKIP/INACTIVE`).
 
 Pipeline state records use integers 0–12 for program, depth enable/write/function,
@@ -1180,7 +1162,7 @@ are frontend records: `object_kind` and `object` name the vertex input or the
 instance layout. Vertex-input creation copies each per-vertex attribute with its
 layout and buffer; instance attributes belong to the instance layout. The initial SCISSOR record holds the
 carried-over rectangle; it is `UNKNOWN` before the first set and after a
-context loss. Uniform-block bindings are not recorded: each block lives one frame. A bind inside the capture that
+context loss. Uniform-block bindings are not recorded: a pass binds every block it reads. A bind inside the capture that
 ends `CACHE` matches this state or one set earlier in the frame. Inherited
 layouts unavailable in existing CPU state are explicitly unknown. Capture
 never adds a GL-state mirror of its own or queries GL to reconstruct state.
@@ -1269,7 +1251,10 @@ the copy's offset, and triangles are a non-indexed list in the general stream,
 which their vertex input reads at offset 0. Frame storage holds every flush of
 the frame until `nt_gfx_end_frame`, and so does the command stream, so a host
 sizes the used vertex streams and `stream_capacity` for its busiest frame;
-`nt_shape_renderer_init` asserts a nonzero general-stream budget.
+`nt_shape_renderer_init` asserts a nonzero general-stream budget. The view
+projection, eye, pixel scale and line width are one std140 `Draw` block that every
+program of a flush binds through `nt_gfx_bind_uniform_block`: equal settings copy
+nothing and a change allocates a block (up to 256 B of padding).
 
 Every flush draws filled instanced shapes by type, then triangles,
 then wire templates by type, connected segments and independent lines. Within

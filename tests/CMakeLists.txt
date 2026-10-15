@@ -638,7 +638,7 @@ if(NOT EMSCRIPTEN)
 
     # --- Material module tests ---
     add_executable(test_material unit/test_material.c unit/test_helpers/nt_assert_trap.c)
-    target_link_libraries(test_material PRIVATE nt_material nt_resource nt_hash nt_http_stub nt_fs_stub nt_log_stub unity)
+    target_link_libraries(test_material PRIVATE nt_material nt_gfx_fake nt_basisu_transcoder_stub nt_meshwire_stub nt_resource nt_hash nt_http_stub nt_fs_stub nt_log_stub unity)
     target_compile_definitions(test_material PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_include_directories(test_material PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_set_warning_flags(test_material)

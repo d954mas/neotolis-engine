@@ -108,7 +108,8 @@ static void test_zero_capacity_disables_the_stream(void) {
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "frame_capacity"));
     /* A uniform block on a disabled stream is the same overflow, not a quiet context loss. */
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    NT_TEST_EXPECT_ASSERT(nt_gfx_bind_uniform_block(0, &offset, sizeof(offset)));
+    static const uint8_t block[16] = {0};
+    NT_TEST_EXPECT_ASSERT(nt_gfx_bind_uniform_block(0, block, sizeof(block)));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "frame_capacity"));
     nt_gfx_end_pass();
     next_frame();
