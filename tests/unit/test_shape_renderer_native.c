@@ -197,20 +197,6 @@ static void test_pixel_width_is_constant_across_depth_and_restore(void) {
     TEST_ASSERT_EQUAL_UINT32(6, lit_column(frame, 32, 32, 64));
 }
 
-/* Widths ride in the instances: two widths of one kind share a flush and each keeps its own. */
-static void test_world_widths_share_a_flush(void) {
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
-    nt_shape_renderer_line((float[3]){-0.5F, 0.5F, 0}, (float[3]){0.5F, 0.5F, 0}, 0.25F, NT_RGBA8(255, 255, 255, 255));
-    nt_shape_renderer_line((float[3]){-0.5F, -0.5F, 0}, (float[3]){0.5F, -0.5F, 0}, 0.5F, NT_RGBA8(255, 255, 255, 255));
-    nt_shape_renderer_flush();
-    uint8_t frame[RT_W * RT_H * 4U] = {0};
-    end_frame_and_read(frame);
-    TEST_ASSERT_EQUAL_UINT32(8, lit_column(frame, 32, 0, 32));
-    TEST_ASSERT_EQUAL_UINT32(16, lit_column(frame, 32, 32, 64));
-}
-
 /* Each stroke kind reads its width from its own instance layout: a wrong attribute would read w = 1. */
 static void test_pixel_widths_share_a_flush_in_every_stroke_kind(void) {
     const float quarter_turn_x[4] = {0.70710678F, 0, 0, 0.70710678F};
@@ -237,6 +223,36 @@ static void test_pixel_widths_share_a_flush_in_every_stroke_kind(void) {
         /* Column 49 crosses the ring's top segment mid-way, tilted 11.25 degrees: one pixel of slack. */
         TEST_ASSERT_UINT32_WITHIN(1, expected, lit_column(frame, 49, top, top + 18));
     }
+}
+
+/* Interleaved types of one pool come out grouped by type, each instance with its own data: rect and
+ * cube wires take a non-uniform scale, the capsule its half body apart from the width. */
+static void test_interleaved_types_keep_their_instances(void) {
+    nt_shape_renderer_set_width_units_pixels(RT_W, RT_H);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
+    nt_shape_renderer_cube((float[3]){-0.75F, -0.75F, 0}, (float[3]){0.2F, 0.2F, 0.2F}, NULL, NT_RGBA8(255, 255, 0, 255));
+    nt_shape_renderer_rect_wire((float[3]){-0.5F, 0.5F, 0}, (float[2]){0.5F, 0.25F}, NULL, 4, NT_RGBA8(255, 0, 0, 255));
+    nt_shape_renderer_capsule_wire((float[3]){0, -0.5F, 0}, 0.25F, 0.75F, NULL, 4, NT_RGBA8(0, 0, 255, 255));
+    nt_shape_renderer_rect((float[3]){0.75F, -0.75F, 0}, (float[2]){0.2F, 0.2F}, NULL, NT_RGBA8(255, 0, 255, 255));
+    nt_shape_renderer_cube_wire((float[3]){0.5F, 0.5F, 0}, (float[3]){0.5F, 0.25F, 0.5F}, NULL, 4, NT_RGBA8(0, 255, 0, 255));
+    nt_shape_renderer_flush();
+    uint8_t frame[RT_W * RT_H * 4U] = {0};
+    end_frame_and_read(frame);
+    /* Rect and cube outlines: horizontal edges at rows 12 and 20, 4 px each. */
+    TEST_ASSERT_EQUAL_UINT32(8, lit_column(frame, 16, 0, 32));
+    assert_pixel(frame, 16, 11, 255, 0, 0);
+    assert_pixel(frame, 16, 16, 0, 0, 0);
+    assert_pixel(frame, 48, 11, 0, 255, 0);
+    assert_pixel(frame, 48, 19, 0, 255, 0);
+    assert_pixel(frame, 48, 16, 0, 0, 0);
+    /* Capsule equator rings, moved by the half body 0.125 to rows 44 and 52. */
+    assert_pixel(frame, 34, 43, 0, 0, 255);
+    assert_pixel(frame, 34, 48, 0, 0, 0);
+    assert_pixel(frame, 34, 51, 0, 0, 255);
+    assert_pixel(frame, 8, 56, 255, 255, 0);
+    assert_pixel(frame, 56, 56, 255, 0, 255);
 }
 
 static void test_pixel_join_bevel_is_bounded(void) {
@@ -352,8 +368,8 @@ int main(void) {
     RUN_TEST(test_polyline_outer_corner_and_butt_end);
     RUN_TEST(test_pixel_width_uses_active_viewport_height);
     RUN_TEST(test_pixel_width_is_constant_across_depth_and_restore);
-    RUN_TEST(test_world_widths_share_a_flush);
     RUN_TEST(test_pixel_widths_share_a_flush_in_every_stroke_kind);
+    RUN_TEST(test_interleaved_types_keep_their_instances);
     RUN_TEST(test_pixel_join_bevel_is_bounded);
     RUN_TEST(test_pixel_line_clips_at_near_plane);
     RUN_TEST(test_wire_circle_has_closed_outer_joins);

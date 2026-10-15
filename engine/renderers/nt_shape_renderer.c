@@ -5,7 +5,6 @@
 #include "log/nt_log.h"
 #include "math/nt_math.h"
 
-#include <float.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -26,16 +25,21 @@ _Static_assert(NT_GFX_MAX_INSTANCE_ATTRS >= 5, "shape instance layout needs 5 at
 #define NT_SEG_CAP_NV ((NT_SEG_CAP_SECTIONS + 1) * (NT_SHAPE_SEGMENTS + 1))
 #define NT_SEG_CAP_NI (NT_SEG_CAP_SECTIONS * NT_SHAPE_SEGMENTS * 6)
 
-/* Thin wrappers over cglm — cast float[] to cglm typedefs (versor=float[4],
-   mat3=float[3][3], vec3=float[3]).  Casts only strip const; types are
-   layout-identical.  No SIMD path for mat3/quat in cglm. */
-static void quat_to_mat3(const float q[4], float m[3][3]) { glm_quat_mat3((float *)q, (vec3 *)m); }
-static void mat3_mulv(const float m[3][3], const float v[3], float out[3]) { glm_mat3_mulv((vec3 *)m, (float *)v, out); }
-
 /* ---- Embedded shader source ---- */
 
 /* The Draw block of all four shape programs: one std140 layout, so their binds of one view dedup. */
 #define NT_SHAPE_DRAW_GLSL "layout(std140) uniform Draw { mat4 u_vp; vec4 u_eye; vec4 u_pixel_scale; };\n"
+
+/* Fill and wire templates share one transform. xyz is the unit template; w tags a capsule hemisphere
+ * (+1 top, -1 bottom) and is 0 for every other shape: a tagged point scales by the radius on all axes
+ * and moves by half the body. */
+#define NT_SHAPE_POINT_GLSL                                                                                                                                                                            \
+    "vec3 shape_point(vec4 p, vec3 center, vec3 scale, vec4 rot) {\n"                                                                                                                                  \
+    "    vec3 v = p.xyz * mix(scale, scale.xxx, abs(p.w));\n"                                                                                                                                          \
+    "    v.y += p.w * scale.y;\n"                                                                                                                                                                      \
+    "    vec3 t = 2.0 * cross(rot.xyz, v);\n"                                                                                                                                                          \
+    "    return center + v + rot.w * t + cross(rot.xyz, t);\n"                                                                                                                                         \
+    "}\n"
 
 static const char *s_shape_vs_src = "precision highp float;\n"
                                     "layout(location = 0) in vec3 a_position;\n"
@@ -114,7 +118,6 @@ static const char *s_shape_fs_src = "precision mediump float;\n"
     "    return u_vp*vec4(biased(p+offset*(0.5*width)),1);\n"                                                                                                                                          \
     "}\n"
 
-/* i_prev.w carries the width of lines and strokes alike. */
 static const char *s_line_vs_src =
     "precision highp float;\n"
     "layout(location = 0) in vec2 a_corner;\n"
@@ -132,16 +135,11 @@ static const char *s_wire_vs_src = "precision highp float;\n"
                                    "layout(location=2) in vec4 a_p;\n"
                                    "layout(location=3) in vec4 a_after;\n"
                                    "layout(location=5) in vec3 i_center;\n"
-                                   "layout(location=6) in vec3 i_shape;\n"
+                                   "layout(location=6) in vec4 i_scale;\n"
                                    "layout(location=7) in vec4 i_rot;\n"
                                    "layout(location=8) in vec4 i_color;\n"
-                                   "out mediump vec4 v_color;\n"
-                                   "vec3 wire_point(vec4 p) {\n"
-                                   "    vec3 v=p.xyz*i_shape.x;\n"
-                                   "    v.y+=p.w*i_shape.y;\n"
-                                   "    vec3 t=2.0*cross(i_rot.xyz,v);\n"
-                                   "    return i_center+v+i_rot.w*t+cross(i_rot.xyz,t);\n"
-                                   "}\n" NT_STROKE_GLSL "void main(){gl_Position=stroke_position(a_corner,wire_point(a_before),wire_point(a_p),wire_point(a_after),i_shape.z);v_color=i_color;}\n";
+                                   "out mediump vec4 v_color;\n" NT_SHAPE_POINT_GLSL "vec3 wire_point(vec4 p) { return shape_point(p, i_center, i_scale.xyz, i_rot); }\n" NT_STROKE_GLSL
+                                   "void main(){gl_Position=stroke_position(a_corner,wire_point(a_before),wire_point(a_p),wire_point(a_after),i_scale.w);v_color=i_color;}\n";
 
 /* Stroke corners: vertices 0-4 sit at the segment start (4 = joint center), 5-6 at its end.
  * The first 6 indices are the body quad; the last 6 are the start bevel. */
@@ -179,18 +177,18 @@ typedef struct {
 
 _Static_assert(sizeof(nt_shape_instance_t) == 44, "shape instance size");
 
+/* A shape instance plus the width, which rides in the scale attribute's fourth lane. */
 typedef struct {
     float center[3];
-    float radius;
-    float half_height;
+    float scale[3];
     float width;
     float rot[4];
     uint32_t color;
 } nt_shape_wire_instance_t;
 
-_Static_assert(sizeof(nt_shape_wire_instance_t) == 44, "wire instance size");
+_Static_assert(sizeof(nt_shape_wire_instance_t) == 48, "wire instance size");
 
-/* Shape types that use instanced rendering */
+/* Template types, filled and wire alike */
 enum {
     NT_SHAPE_RECT = 0,
     NT_SHAPE_CUBE,
@@ -201,11 +199,8 @@ enum {
     NT_SHAPE_TYPE_COUNT,
 };
 
-enum { NT_WIRE_CIRCLE, NT_WIRE_SPHERE, NT_WIRE_CYLINDER, NT_WIRE_CAPSULE, NT_WIRE_COUNT };
-#define NT_WIRE_MAX_INSTANCES ((NT_SHAPE_RENDERER_MAX_INSTANCES + NT_WIRE_COUNT - 1) / NT_WIRE_COUNT)
 /* Capsule meridian: a full ring plus the equator angle repeated on each straight side. */
 #define NT_WIRE_CAP_POINTS (NT_SHAPE_SEGMENTS + 2)
-#define NT_WIRE_MAX_SEGMENTS ((2 * NT_SHAPE_SEGMENTS) + (2 * NT_WIRE_CAP_POINTS))
 
 /* points = (before, p, after) of this corner; w tags the capsule/cylinder half. */
 typedef struct {
@@ -223,8 +218,8 @@ typedef struct {
 /* Filled templates share one buffer; every vertex is vec4 so the capsule's hemisphere tag fits. */
 #define NT_FILL_TEMPLATE_VERTICES (4 + 8 + NT_SEG_CIRCLE_NV + NT_SEG_SPHERE_NV + NT_SEG_CYL_NV + NT_SEG_CAP_NV)
 #define NT_FILL_TEMPLATE_INDICES (6 + 36 + NT_SEG_CIRCLE_NI + NT_SEG_SPHERE_NI + NT_SEG_CYL_NI + NT_SEG_CAP_NI)
-/* Circle 1 ring, sphere 3, cylinder 2 rings + 4 struts, capsule 2 rings + 2 meridians. */
-#define NT_WIRE_TEMPLATE_SEGMENTS ((6 * NT_SHAPE_SEGMENTS) + 4 + NT_WIRE_MAX_SEGMENTS)
+/* Rect 4 edges, cube 12, circle 1 ring, sphere 3, cylinder 2 rings + 4 struts, capsule 2 rings + 2 meridians. */
+#define NT_WIRE_TEMPLATE_SEGMENTS (4 + 12 + (8 * NT_SHAPE_SEGMENTS) + 4 + (2 * NT_WIRE_CAP_POINTS))
 /* WebGL 2 always restarts primitives at index 65535. */
 _Static_assert(NT_SHAPE_RENDERER_MAX_VERTICES >= 3, "the triangle batch holds at least one triangle");
 _Static_assert(NT_FILL_TEMPLATE_VERTICES < 65535 && NT_WIRE_TEMPLATE_SEGMENTS * 7 < 65535, "template indices must stay below the restart index");
@@ -236,21 +231,15 @@ typedef struct {
 
 /* ---- Filled shape vertex shader ---- */
 
-/* xyz is the unit template; w tags a capsule hemisphere (+1 top, -1 bottom) and is 0 for every other shape.
- * A capsule scales by its radius on all axes and moves each hemisphere by half its body. */
 static const char *s_fill_vs_src = "precision highp float;\n"
                                    "layout(location = 0) in vec4 a_pos_tag;\n"
                                    "layout(location = 1) in vec3 i_center;\n"
                                    "layout(location = 2) in vec3 i_scale;\n"
                                    "layout(location = 3) in vec4 i_rot;\n"
-                                   "layout(location = 4) in vec4 i_color;\n" NT_SHAPE_DRAW_GLSL "out mediump vec4 v_color;\n"
+                                   "layout(location = 4) in vec4 i_color;\n" NT_SHAPE_DRAW_GLSL NT_SHAPE_POINT_GLSL "out mediump vec4 v_color;\n"
                                    "void main() {\n"
-                                   "    vec3 p = a_pos_tag.xyz * mix(i_scale, i_scale.xxx, abs(a_pos_tag.w));\n"
-                                   "    p.y += a_pos_tag.w * i_scale.y;\n"
-                                   "    vec3 t = 2.0 * cross(i_rot.xyz, p);\n"
-                                   "    vec3 r = p + i_rot.w * t + cross(i_rot.xyz, t);\n"
                                    "    v_color = i_color;\n"
-                                   "    gl_Position = u_vp * vec4(i_center + r, 1.0);\n"
+                                   "    gl_Position = u_vp * vec4(shape_point(a_pos_tag, i_center, i_scale, i_rot), 1.0);\n"
                                    "}\n";
 
 /* ---- Module state ---- */
@@ -300,15 +289,20 @@ static struct {
     nt_instance_layout_t line_layout;
     nt_instance_layout_t stroke_layout;
     nt_shape_range_t fill_ranges[NT_SHAPE_TYPE_COUNT];
-    nt_shape_range_t wire_ranges[NT_WIRE_COUNT];
+    nt_shape_range_t wire_ranges[NT_SHAPE_TYPE_COUNT];
 
-    /* CPU staging per kind: a flush copies each into frame storage in kind order. */
-    nt_shape_instance_t fills[NT_SHAPE_TYPE_COUNT][NT_SHAPE_RENDERER_MAX_INSTANCES];
+    /* CPU staging per kind: a flush copies each into frame storage in kind order. Fills and wires
+     * share one pool per kind across their types, which the copy groups by type. */
+    nt_shape_instance_t fills[NT_SHAPE_RENDERER_MAX_INSTANCES];
+    uint8_t fill_types[NT_SHAPE_RENDERER_MAX_INSTANCES];
     uint32_t fill_counts[NT_SHAPE_TYPE_COUNT];
+    uint32_t fill_count;
     nt_shape_vertex_t vertices[NT_SHAPE_RENDERER_MAX_VERTICES]; /* triangles, three per triangle */
     uint32_t vertex_count;
-    nt_shape_wire_instance_t wires[NT_WIRE_COUNT][NT_WIRE_MAX_INSTANCES];
-    uint32_t wire_counts[NT_WIRE_COUNT];
+    nt_shape_wire_instance_t wires[NT_SHAPE_RENDERER_MAX_INSTANCES];
+    uint8_t wire_types[NT_SHAPE_RENDERER_MAX_INSTANCES];
+    uint32_t wire_counts[NT_SHAPE_TYPE_COUNT];
+    uint32_t wire_count;
     nt_shape_stroke_instance_t strokes[NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS];
     uint32_t stroke_count;
     /* Templates are built in create_gpu, which runs with the line queue empty: the scratch stays
@@ -365,16 +359,16 @@ static const nt_vertex_layout_t k_shape_instance_layout = {
         },
 };
 
-/* The wire program reads its instance after its template's corner triple; i_shape = (radius, half height, width). */
+/* The wire program reads its instance after its template's corner triple. */
 static const nt_vertex_layout_t k_wire_instance_layout = {
     .attr_count = 4,
     .stride = (uint16_t)sizeof(nt_shape_wire_instance_t),
     .attrs =
         {
             {.location = 5, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
-            {.location = 6, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 12},
-            {.location = 7, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 24},
-            {.location = 8, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 40},
+            {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 12},
+            {.location = 7, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 28},
+            {.location = 8, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 44},
         },
 };
 
@@ -453,11 +447,18 @@ static nt_pipeline_t make_stroke_pipeline(nt_program_t program, bool depth, cons
 
 static const float k_identity_rot[4] = {0.0F, 0.0F, 0.0F, 1.0F};
 
+/* Unit cube ±0.5: the filled cube's vertices and the cube wire's edge ends. */
+static const float k_cube_corners[8][3] = {
+    {-0.5F, -0.5F, -0.5F}, {0.5F, -0.5F, -0.5F}, {0.5F, 0.5F, -0.5F}, {-0.5F, 0.5F, -0.5F}, {-0.5F, -0.5F, 0.5F}, {0.5F, -0.5F, 0.5F}, {0.5F, 0.5F, 0.5F}, {-0.5F, 0.5F, 0.5F},
+};
+
 static void push_instance(int type, const float center[3], const float scale[3], const float *rot, uint32_t color) {
-    if (s_shape.fill_counts[type] >= NT_SHAPE_RENDERER_MAX_INSTANCES) {
+    if (s_shape.fill_count == NT_SHAPE_RENDERER_MAX_INSTANCES) {
         nt_shape_renderer_flush();
     }
-    nt_shape_instance_t *inst = &s_shape.fills[type][s_shape.fill_counts[type]++];
+    s_shape.fill_types[s_shape.fill_count] = (uint8_t)type;
+    s_shape.fill_counts[type]++;
+    nt_shape_instance_t *inst = &s_shape.fills[s_shape.fill_count++];
     memcpy(inst->center, center, sizeof(inst->center));
     memcpy(inst->scale, scale, sizeof(inst->scale));
     memcpy(inst->rot, rot ? rot : k_identity_rot, sizeof(inst->rot));
@@ -511,13 +512,17 @@ static void wire_template_path(uint32_t *segments, const float (*points)[4], uin
     }
 }
 
-static void wire_ring_points(float points[NT_WIRE_CAP_POINTS][4], int plane, float tag) {
+/* A unit ring in plane 0 (XZ, lifted by y), 1 (XY) or 2 (YZ). */
+static void wire_ring(uint32_t *segments, int plane, float y, float tag) {
+    float points[NT_SHAPE_SEGMENTS][4];
     for (int i = 0; i < NT_SHAPE_SEGMENTS; i++) {
         memset(points[i], 0, sizeof(points[i]));
         points[i][plane == 2 ? 1 : 0] = s_shape.cos_lut[i];
         points[i][plane == 1 ? 1 : 2] = s_shape.sin_lut[i];
+        points[i][1] += y;
         points[i][3] = tag;
     }
+    wire_template_path(segments, (const float(*)[4])points, NT_SHAPE_SEGMENTS, true);
 }
 
 /* The equator angle repeats once per hemisphere, joined by the straight side. */
@@ -534,46 +539,63 @@ static void wire_capsule_profile(float points[NT_WIRE_CAP_POINTS][4], int plane)
     }
 }
 
-static void build_wire_template(int type, uint32_t *segments) {
-    const uint32_t first = *segments;
-    float points[NT_WIRE_CAP_POINTS][4];
-    static const int ring_counts[NT_WIRE_COUNT] = {1, 3, 2, 2};
-    for (int ring = 0; ring < ring_counts[type]; ring++) {
-        float tag = 0.0F;
-        if (type >= NT_WIRE_CYLINDER) {
-            tag = ring == 0 ? 1.0F : -1.0F;
+/* Each wire template sits on its filled template's unit shape, so both take the same instance scale. */
+static uint32_t build_wire_templates(void) {
+    uint32_t segments = 0;
+    for (int type = 0; type < NT_SHAPE_TYPE_COUNT; type++) {
+        const uint32_t first = segments;
+        if (type == NT_SHAPE_RECT) {
+            static const float corners[4][4] = {{-0.5F, -0.5F, 0, 0}, {0.5F, -0.5F, 0, 0}, {0.5F, 0.5F, 0, 0}, {-0.5F, 0.5F, 0, 0}};
+            wire_template_path(&segments, corners, 4, true);
+        } else if (type == NT_SHAPE_CUBE) {
+            /* 12 independent edges: bottom face, top face, verticals. */
+            static const uint8_t edges[12][2] = {{0, 1}, {1, 5}, {5, 4}, {4, 0}, {3, 2}, {2, 6}, {6, 7}, {7, 3}, {0, 3}, {1, 2}, {5, 6}, {4, 7}};
+            for (int i = 0; i < 12; i++) {
+                const float *a = k_cube_corners[edges[i][0]];
+                const float *b = k_cube_corners[edges[i][1]];
+                const float ends[2][4] = {{a[0], a[1], a[2], 0}, {b[0], b[1], b[2], 0}};
+                wire_template_path(&segments, ends, 2, false);
+            }
+        } else if (type == NT_SHAPE_CIRCLE) {
+            wire_ring(&segments, 0, 0.0F, 0.0F);
+        } else if (type == NT_SHAPE_SPHERE) {
+            for (int plane = 0; plane < 3; plane++) {
+                wire_ring(&segments, plane, 0.0F, 0.0F);
+            }
+        } else if (type == NT_SHAPE_CYLINDER) {
+            wire_ring(&segments, 0, 0.5F, 0.0F);
+            wire_ring(&segments, 0, -0.5F, 0.0F);
+            for (int i = 0; i < 4; i++) {
+                int k = i * (NT_SHAPE_SEGMENTS / 4);
+                const float ends[2][4] = {{s_shape.cos_lut[k], 0.5F, s_shape.sin_lut[k], 0}, {s_shape.cos_lut[k], -0.5F, s_shape.sin_lut[k], 0}};
+                wire_template_path(&segments, ends, 2, false);
+            }
+        } else {
+            wire_ring(&segments, 0, 0.0F, 1.0F);
+            wire_ring(&segments, 0, 0.0F, -1.0F);
+            float points[NT_WIRE_CAP_POINTS][4];
+            for (int plane = 0; plane < 2; plane++) {
+                wire_capsule_profile(points, plane);
+                wire_template_path(&segments, (const float(*)[4])points, NT_WIRE_CAP_POINTS, true);
+            }
         }
-        wire_ring_points(points, type == NT_WIRE_SPHERE ? ring : 0, tag);
-        wire_template_path(segments, (const float(*)[4])points, NT_SHAPE_SEGMENTS, true);
+        s_shape.wire_ranges[type] = (nt_shape_range_t){.first_index = first * 12, .num_indices = (segments - first) * 12, .num_vertices = (segments - first) * 7};
     }
-    if (type == NT_WIRE_CYLINDER) {
-        for (int i = 0; i < 4; i++) {
-            int k = i * (NT_SHAPE_SEGMENTS / 4);
-            float ends[2][4] = {{s_shape.cos_lut[k], 0, s_shape.sin_lut[k], 1}, {s_shape.cos_lut[k], 0, s_shape.sin_lut[k], -1}};
-            wire_template_path(segments, (const float(*)[4])ends, 2, false);
-        }
-    }
-    if (type == NT_WIRE_CAPSULE) {
-        for (int plane = 0; plane < 2; plane++) {
-            wire_capsule_profile(points, plane);
-            wire_template_path(segments, (const float(*)[4])points, NT_WIRE_CAP_POINTS, true);
-        }
-    }
-    s_shape.wire_ranges[type] = (nt_shape_range_t){.first_index = first * 12, .num_indices = (*segments - first) * 12, .num_vertices = (*segments - first) * 7};
+    return segments;
 }
 
-/* Rejects zero, negative, NaN and infinity in one comparison chain. */
-static void assert_width(float width) { NT_ASSERT(width > 0.0F && width <= FLT_MAX); }
+static void assert_width(float width) { NT_ASSERT(isfinite(width) && width > 0.0F); }
 
-static void push_wire_instance(int type, const float center[3], float radius, float half_height, const float *rot, float width, uint32_t color) {
+static void push_wire_instance(int type, const float center[3], const float scale[3], const float *rot, float width, uint32_t color) {
     assert_width(width);
-    if (s_shape.wire_counts[type] == NT_WIRE_MAX_INSTANCES) {
+    if (s_shape.wire_count == NT_SHAPE_RENDERER_MAX_INSTANCES) {
         nt_shape_renderer_flush();
     }
-    nt_shape_wire_instance_t *inst = &s_shape.wires[type][s_shape.wire_counts[type]++];
+    s_shape.wire_types[s_shape.wire_count] = (uint8_t)type;
+    s_shape.wire_counts[type]++;
+    nt_shape_wire_instance_t *inst = &s_shape.wires[s_shape.wire_count++];
     memcpy(inst->center, center, sizeof(inst->center));
-    inst->radius = radius;
-    inst->half_height = half_height;
+    memcpy(inst->scale, scale, sizeof(inst->scale));
     inst->width = width;
     memcpy(inst->rot, rot ? rot : k_identity_rot, sizeof(inst->rot));
     inst->color = color;
@@ -610,14 +632,8 @@ static void build_fill_templates(uint32_t *nv_total, uint32_t *ni_total) {
 
     /* Cube: unit cube ±0.5 */
     {
-        /* clang-format off */
-        static const float v[] = {
-            -0.5F, -0.5F, -0.5F, 0.5F, -0.5F, -0.5F, 0.5F, 0.5F, -0.5F, -0.5F, 0.5F, -0.5F,
-            -0.5F, -0.5F, 0.5F,  0.5F, -0.5F, 0.5F,  0.5F, 0.5F, 0.5F,  -0.5F, 0.5F, 0.5F,
-        };
-        /* clang-format on */
         static const uint16_t i[] = {0, 1, 2, 0, 2, 3, 5, 4, 7, 5, 7, 6, 4, 0, 3, 4, 3, 7, 1, 5, 6, 1, 6, 2, 3, 2, 6, 3, 6, 7, 4, 5, 1, 4, 1, 0};
-        append_fill(NT_SHAPE_CUBE, v, 8, 3, i, 36, nv_total, ni_total);
+        append_fill(NT_SHAPE_CUBE, &k_cube_corners[0][0], 8, 3, i, 36, nv_total, ni_total);
     }
 
     /* Circle: unit circle in XZ plane (center + 32 ring) */
@@ -886,10 +902,7 @@ static void create_gpu(void) {
     build_fill_templates(&fill_vertices, &fill_indices);
     s_shape.gpu.fill_vbo = make_static_buffer(NT_BUFFER_VERTEX, s_shape.line_staging.build.fill_vertices, fill_vertices * 4U * (uint32_t)sizeof(float), "shape_fill_templates");
     s_shape.gpu.fill_ibo = make_static_buffer(NT_BUFFER_INDEX, s_shape.line_staging.build.fill_indices, fill_indices * (uint32_t)sizeof(uint16_t), "shape_fill_templates");
-    uint32_t wire_segments = 0;
-    for (int type = 0; type < NT_WIRE_COUNT; type++) {
-        build_wire_template(type, &wire_segments);
-    }
+    const uint32_t wire_segments = build_wire_templates();
     s_shape.gpu.wire_vbo = make_static_buffer(NT_BUFFER_VERTEX, s_shape.line_staging.build.wire_vertices, wire_segments * 7U * (uint32_t)sizeof(nt_wire_vertex_t), "shape_wire_templates");
     s_shape.gpu.wire_ibo = make_static_buffer(NT_BUFFER_INDEX, s_shape.line_staging.build.wire_indices, wire_segments * 12U * (uint32_t)sizeof(uint16_t), "shape_wire_templates");
     static const float line_template_verts[] = {0, 0, 0, 1, 0, 2, 0, 3, 0, 4, 1, 0, 1, 1};
@@ -925,6 +938,8 @@ static void destroy_gpu(void) {
 static void drop_queues(void) {
     memset(s_shape.fill_counts, 0, sizeof(s_shape.fill_counts));
     memset(s_shape.wire_counts, 0, sizeof(s_shape.wire_counts));
+    s_shape.fill_count = 0;
+    s_shape.wire_count = 0;
     s_shape.vertex_count = 0;
     s_shape.stroke_count = 0;
     s_shape.line_count = 0;
@@ -963,15 +978,40 @@ void nt_shape_renderer_restore_gpu(void) {
     create_gpu();
 }
 
-/* Copies one kind's staging into frame storage and draws it instanced from there. */
-static void draw_instances(nt_pipeline_t pipeline, nt_vertex_input_t vi, nt_instance_layout_t layout, const void *data, uint32_t bytes, nt_shape_range_t range, uint32_t count) {
-    uint32_t offset = 0;
-    memcpy(nt_gfx_frame_alloc(s_shape.stream, bytes, 4, &offset), data, bytes);
+static void draw_at(nt_pipeline_t pipeline, nt_vertex_input_t vi, nt_instance_layout_t layout, uint32_t offset, nt_shape_range_t range, uint32_t count) {
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input_instanced(vi, layout, nt_gfx_frame_buffer(s_shape.stream), offset);
     /* Unchanged settings end CACHE in gfx: no copy, and the batches around the bind still merge. */
     nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, &s_shape.draw, sizeof(s_shape.draw));
     nt_gfx_draw_indexed_instanced(range.first_index, range.num_indices, range.num_vertices, count);
+}
+
+/* Copies one kind's staging into frame storage and draws it instanced from there. */
+static void draw_instances(nt_pipeline_t pipeline, nt_vertex_input_t vi, nt_instance_layout_t layout, const void *data, uint32_t bytes, nt_shape_range_t range, uint32_t count) {
+    uint32_t offset = 0;
+    memcpy(nt_gfx_frame_alloc(s_shape.stream, bytes, 4, &offset), data, bytes);
+    draw_at(pipeline, vi, layout, offset, range, count);
+}
+
+/* at[type] = first slot of each type's group in a pool copied grouped by type. */
+static void group_starts(const uint32_t counts[NT_SHAPE_TYPE_COUNT], uint32_t at[NT_SHAPE_TYPE_COUNT]) {
+    uint32_t sum = 0;
+    for (int type = 0; type < NT_SHAPE_TYPE_COUNT; type++) {
+        at[type] = sum;
+        sum += counts[type];
+    }
+}
+
+/* One template draw per non-empty type, from the type groups starting at offset; empties the counts. */
+static void draw_types(nt_pipeline_t pipeline, nt_vertex_input_t vi, nt_instance_layout_t layout, uint32_t offset, uint32_t stride, uint32_t counts[NT_SHAPE_TYPE_COUNT],
+                       const nt_shape_range_t ranges[NT_SHAPE_TYPE_COUNT]) {
+    for (int type = 0; type < NT_SHAPE_TYPE_COUNT; type++) {
+        if (counts[type] > 0) {
+            draw_at(pipeline, vi, layout, offset, ranges[type], counts[type]);
+            offset += counts[type] * stride;
+            counts[type] = 0;
+        }
+    }
 }
 
 void nt_shape_renderer_flush(void) {
@@ -982,13 +1022,17 @@ void nt_shape_renderer_flush(void) {
         return;
     }
     const int d = s_shape.depth_enabled ? 1 : 0;
-    for (int type = 0; type < NT_SHAPE_TYPE_COUNT; type++) {
-        const uint32_t count = s_shape.fill_counts[type];
-        if (count > 0) {
-            draw_instances(s_shape.gpu.fill_pip[d], s_shape.gpu.fill_vi[s_shape.stream - NT_GFX_FRAME_VERTEX], s_shape.fill_layout, s_shape.fills[type], count * (uint32_t)sizeof(nt_shape_instance_t),
-                           s_shape.fill_ranges[type], count);
-            s_shape.fill_counts[type] = 0;
+    const uint32_t k = s_shape.stream - NT_GFX_FRAME_VERTEX;
+    uint32_t at[NT_SHAPE_TYPE_COUNT];
+    if (s_shape.fill_count > 0) {
+        uint32_t offset = 0;
+        nt_shape_instance_t *dst = nt_gfx_frame_alloc(s_shape.stream, s_shape.fill_count * (uint32_t)sizeof(nt_shape_instance_t), 4, &offset);
+        group_starts(s_shape.fill_counts, at);
+        for (uint32_t i = 0; i < s_shape.fill_count; i++) {
+            dst[at[s_shape.fill_types[i]]++] = s_shape.fills[i];
         }
+        draw_types(s_shape.gpu.fill_pip[d], s_shape.gpu.fill_vi[k], s_shape.fill_layout, offset, (uint32_t)sizeof(nt_shape_instance_t), s_shape.fill_counts, s_shape.fill_ranges);
+        s_shape.fill_count = 0;
     }
     if (s_shape.vertex_count > 0) {
         const uint32_t bytes = s_shape.vertex_count * (uint32_t)sizeof(nt_shape_vertex_t);
@@ -1001,23 +1045,25 @@ void nt_shape_renderer_flush(void) {
         s_shape.vertex_count = 0;
     }
     /* Strokes last: within one flush, outlines stay on top of filled shapes. */
-    for (int type = 0; type < NT_WIRE_COUNT; type++) {
-        const uint32_t count = s_shape.wire_counts[type];
-        if (count > 0) {
-            draw_instances(s_shape.gpu.wire_pip[d], s_shape.gpu.wire_vi[s_shape.stream - NT_GFX_FRAME_VERTEX], s_shape.wire_layout, s_shape.wires[type],
-                           count * (uint32_t)sizeof(nt_shape_wire_instance_t), s_shape.wire_ranges[type], count);
-            s_shape.wire_counts[type] = 0;
+    if (s_shape.wire_count > 0) {
+        uint32_t offset = 0;
+        nt_shape_wire_instance_t *dst = nt_gfx_frame_alloc(s_shape.stream, s_shape.wire_count * (uint32_t)sizeof(nt_shape_wire_instance_t), 4, &offset);
+        group_starts(s_shape.wire_counts, at);
+        for (uint32_t i = 0; i < s_shape.wire_count; i++) {
+            dst[at[s_shape.wire_types[i]]++] = s_shape.wires[i];
         }
+        draw_types(s_shape.gpu.wire_pip[d], s_shape.gpu.wire_vi[k], s_shape.wire_layout, offset, (uint32_t)sizeof(nt_shape_wire_instance_t), s_shape.wire_counts, s_shape.wire_ranges);
+        s_shape.wire_count = 0;
     }
     if (s_shape.stroke_count > 0) {
-        draw_instances(s_shape.gpu.line_pip[d], s_shape.gpu.stroke_vi[s_shape.stream - NT_GFX_FRAME_VERTEX], s_shape.stroke_layout, s_shape.strokes,
-                       s_shape.stroke_count * (uint32_t)sizeof(nt_shape_stroke_instance_t), (nt_shape_range_t){0, 12, 7}, s_shape.stroke_count);
+        draw_instances(s_shape.gpu.line_pip[d], s_shape.gpu.stroke_vi[k], s_shape.stroke_layout, s_shape.strokes, s_shape.stroke_count * (uint32_t)sizeof(nt_shape_stroke_instance_t),
+                       (nt_shape_range_t){0, 12, 7}, s_shape.stroke_count);
         s_shape.stroke_count = 0;
     }
     if (s_shape.line_count > 0) {
         /* Independent lines skip the join triangles of the shared template. */
-        draw_instances(s_shape.gpu.line_pip[d], s_shape.gpu.line_vi[s_shape.stream - NT_GFX_FRAME_VERTEX], s_shape.line_layout, s_shape.line_staging.lines,
-                       s_shape.line_count * (uint32_t)sizeof(nt_shape_line_instance_t), (nt_shape_range_t){0, 6, 7}, s_shape.line_count);
+        draw_instances(s_shape.gpu.line_pip[d], s_shape.gpu.line_vi[k], s_shape.line_layout, s_shape.line_staging.lines, s_shape.line_count * (uint32_t)sizeof(nt_shape_line_instance_t),
+                       (nt_shape_range_t){0, 6, 7}, s_shape.line_count);
         s_shape.line_count = 0;
     }
 }
@@ -1167,30 +1213,9 @@ void nt_shape_renderer_rect(const float pos[3], const float size[2], const float
     push_instance(NT_SHAPE_RECT, pos, scale, rot, color);
 }
 
-/* Corners are center + offset, rotated when rot is given. */
-static void place_corners(const float center[3], const float (*offsets)[3], uint32_t count, const float *rot, float (*out)[3]) {
-    float rm[3][3];
-    if (rot) {
-        quat_to_mat3(rot, rm);
-    }
-    for (uint32_t i = 0; i < count; i++) {
-        float rotated[3] = {offsets[i][0], offsets[i][1], offsets[i][2]};
-        if (rot) {
-            mat3_mulv(rm, offsets[i], rotated);
-        }
-        out[i][0] = center[0] + rotated[0];
-        out[i][1] = center[1] + rotated[1];
-        out[i][2] = center[2] + rotated[2];
-    }
-}
-
 void nt_shape_renderer_rect_wire(const float pos[3], const float size[2], const float rot[4], float width, uint32_t color) {
-    float hx = size[0] * 0.5F;
-    float hy = size[1] * 0.5F;
-    const float offsets[4][3] = {{-hx, -hy, 0.0F}, {+hx, -hy, 0.0F}, {+hx, +hy, 0.0F}, {-hx, +hy, 0.0F}};
-    float corners[4][3];
-    place_corners(pos, offsets, 4, rot, corners);
-    nt_shape_renderer_polyline((const float(*)[3])corners, 4, true, width, color);
+    float scale[3] = {size[0], size[1], 1.0F};
+    push_wire_instance(NT_SHAPE_RECT, pos, scale, rot, width, color);
 }
 
 /* ---- Triangle ---- */
@@ -1219,29 +1244,15 @@ void nt_shape_renderer_circle(const float center[3], float radius, const float r
 }
 
 void nt_shape_renderer_circle_wire(const float center[3], float radius, const float rot[4], float width, uint32_t color) {
-    push_wire_instance(NT_WIRE_CIRCLE, center, radius, 0.0F, rot, width, color);
+    float scale[3] = {radius, 1.0F, radius};
+    push_wire_instance(NT_SHAPE_CIRCLE, center, scale, rot, width, color);
 }
 
 /* ---- Cube ---- */
 
 void nt_shape_renderer_cube(const float center[3], const float size[3], const float rot[4], uint32_t color) { push_instance(NT_SHAPE_CUBE, center, size, rot, color); }
 
-void nt_shape_renderer_cube_wire(const float center[3], const float size[3], const float rot[4], float width, uint32_t color) {
-    float hx = size[0] * 0.5F;
-    float hy = size[1] * 0.5F;
-    float hz = size[2] * 0.5F;
-    const float offsets[8][3] = {
-        {-hx, -hy, -hz}, {+hx, -hy, -hz}, {+hx, +hy, -hz}, {-hx, +hy, -hz}, {-hx, -hy, +hz}, {+hx, -hy, +hz}, {+hx, +hy, +hz}, {-hx, +hy, +hz},
-    };
-    float c[8][3];
-    place_corners(center, offsets, 8, rot, c);
-
-    /* 12 independent edges: bottom face, top face, verticals. */
-    static const uint8_t edges[12][2] = {{0, 1}, {1, 5}, {5, 4}, {4, 0}, {3, 2}, {2, 6}, {6, 7}, {7, 3}, {0, 3}, {1, 2}, {5, 6}, {4, 7}};
-    for (uint32_t i = 0; i < 12; i++) {
-        nt_shape_renderer_line(c[edges[i][0]], c[edges[i][1]], width, color);
-    }
-}
+void nt_shape_renderer_cube_wire(const float center[3], const float size[3], const float rot[4], float width, uint32_t color) { push_wire_instance(NT_SHAPE_CUBE, center, size, rot, width, color); }
 
 /* ---- Sphere ---- */
 
@@ -1251,7 +1262,8 @@ void nt_shape_renderer_sphere(const float center[3], float radius, const float r
 }
 
 void nt_shape_renderer_sphere_wire(const float center[3], float radius, const float rot[4], float width, uint32_t color) {
-    push_wire_instance(NT_WIRE_SPHERE, center, radius, 0.0F, rot, width, color);
+    float scale[3] = {radius, radius, radius};
+    push_wire_instance(NT_SHAPE_SPHERE, center, scale, rot, width, color);
 }
 
 /* ---- Cylinder ---- */
@@ -1262,7 +1274,8 @@ void nt_shape_renderer_cylinder(const float center[3], float radius, float heigh
 }
 
 void nt_shape_renderer_cylinder_wire(const float center[3], float radius, float height, const float rot[4], float width, uint32_t color) {
-    push_wire_instance(NT_WIRE_CYLINDER, center, radius, height * 0.5F, rot, width, color);
+    float scale[3] = {radius, height, radius};
+    push_wire_instance(NT_SHAPE_CYLINDER, center, scale, rot, width, color);
 }
 
 /* ---- Capsule ---- */
@@ -1274,20 +1287,15 @@ void nt_shape_renderer_capsule(const float center[3], float radius, float height
 
 void nt_shape_renderer_capsule_wire(const float center[3], float radius, float height, const float rot[4], float width, uint32_t color) {
     float body_half = fmaxf(0.0F, (height - 2.0F * radius) * 0.5F);
-    push_wire_instance(body_half > 0.0F ? NT_WIRE_CAPSULE : NT_WIRE_SPHERE, center, radius, body_half, rot, width, color);
+    float scale[3] = {radius, body_half > 0.0F ? body_half : radius, radius};
+    push_wire_instance(body_half > 0.0F ? NT_SHAPE_CAPSULE : NT_SHAPE_SPHERE, center, scale, rot, width, color);
 }
 
 // #region test_access
 #ifdef NT_TEST_ACCESS
 uint32_t nt_shape_renderer_test_instance_count(int type) { return s_shape.fill_counts[type]; }
 uint32_t nt_shape_renderer_test_vertex_count(void) { return s_shape.vertex_count; }
-uint32_t nt_shape_renderer_test_stroke_count(void) {
-    uint32_t count = s_shape.line_count + s_shape.stroke_count;
-    for (int type = 0; type < NT_WIRE_COUNT; type++) {
-        count += s_shape.wire_counts[type];
-    }
-    return count;
-}
+uint32_t nt_shape_renderer_test_stroke_count(void) { return s_shape.line_count + s_shape.stroke_count + s_shape.wire_count; }
 const float *nt_shape_renderer_test_vp(void) { return s_shape.draw.vp; }
 const float *nt_shape_renderer_test_eye(void) { return s_shape.draw.eye; }
 bool nt_shape_renderer_test_depth_enabled(void) { return s_shape.depth_enabled; }

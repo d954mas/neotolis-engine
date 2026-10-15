@@ -10,6 +10,7 @@
 #define NT_SHAPE_RENDERER_MAX_VERTICES 16384
 #endif
 
+/* Filled shapes of all types together; wire shapes likewise. */
 #ifndef NT_SHAPE_RENDERER_MAX_INSTANCES
 #define NT_SHAPE_RENDERER_MAX_INSTANCES 2048
 #endif

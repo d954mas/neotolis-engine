@@ -186,8 +186,8 @@ void test_shape_rect_wire_counts(void) {
     float size[2] = {2, 2};
     uint32_t col = NT_RGBA8(0, 255, 0, 255);
     nt_shape_renderer_rect_wire(pos, size, NULL, 0.02F, col);
-    /* 4 edges = 4 line instances */
-    TEST_ASSERT_EQUAL_UINT32(4, nt_shape_renderer_test_stroke_count());
+    /* One wire template instance */
+    TEST_ASSERT_EQUAL_UINT32(1, nt_shape_renderer_test_stroke_count());
 }
 
 /* ---- 11. Triangle fill counts ---- */
@@ -302,9 +302,9 @@ void test_shape_cube_wire_counts(void) {
     float center[3] = {0, 0, 0};
     float size[3] = {1, 1, 1};
     uint32_t col = NT_RGBA8(0, 255, 0, 255);
-    /* 12 edges = 12 line instances */
+    /* One wire template instance */
     nt_shape_renderer_cube_wire(center, size, NULL, 0.02F, col);
-    TEST_ASSERT_EQUAL_UINT32(12, nt_shape_renderer_test_stroke_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_shape_renderer_test_stroke_count());
 }
 
 /* ---- 21. Sphere fill counts (instanced) ---- */
@@ -466,6 +466,8 @@ static void emit_every_kind(void) {
     nt_shape_renderer_cylinder(a, 1, 2, NULL, color);
     nt_shape_renderer_capsule(a, 1, 3, NULL, color);
     nt_shape_renderer_triangle(a, b, c, color);
+    nt_shape_renderer_rect_wire(a, size, NULL, 0.02F, color);
+    nt_shape_renderer_cube_wire(a, size, NULL, 0.02F, color);
     nt_shape_renderer_circle_wire(a, 1, NULL, 0.02F, color);
     nt_shape_renderer_sphere_wire(a, 1, NULL, 0.02F, color);
     nt_shape_renderer_cylinder_wire(a, 1, 3, NULL, 0.02F, color);
@@ -515,8 +517,8 @@ void test_shape_templates_draw_disjoint_ranges(void) {
     emit_every_kind();
     nt_shape_renderer_flush();
     nt_test_frame_next();
-    /* rect, cube, circle, sphere, cylinder, capsule, batch, 4 wire templates, strokes, lines */
-    TEST_ASSERT_EQUAL_UINT32(13, nt_gfx_fake_draw_trace_count());
+    /* rect, cube, circle, sphere, cylinder, capsule, batch, 6 wire templates, strokes, lines */
+    TEST_ASSERT_EQUAL_UINT32(15, nt_gfx_fake_draw_trace_count());
     uint32_t fill_next = 0;
     for (uint32_t i = 0; i < 6; i++) {
         const nt_gfx_fake_draw_t draw = nt_gfx_fake_draw_trace_at(i);
@@ -525,12 +527,12 @@ void test_shape_templates_draw_disjoint_ranges(void) {
     }
     TEST_ASSERT_EQUAL_UINT32(NT_INDEX_NONE, nt_gfx_fake_draw_trace_at(6).index_type);
     uint32_t wire_next = 0;
-    for (uint32_t i = 7; i < 11; i++) {
+    for (uint32_t i = 7; i < 13; i++) {
         const nt_gfx_fake_draw_t draw = nt_gfx_fake_draw_trace_at(i);
         TEST_ASSERT_EQUAL_UINT32(wire_next, draw.first_index);
         wire_next += draw.num_indices;
     }
-    TEST_ASSERT_EQUAL_UINT32((16U + 48U + 36U + 68U) * 12U, wire_next);
+    TEST_ASSERT_EQUAL_UINT32((4U + 12U + 16U + 48U + 36U + 68U) * 12U, wire_next);
 }
 
 #if NT_ASSERT_MODE == NT_ASSERT_FULL

@@ -31,9 +31,9 @@
 /* Shape storage */
 #define MAX_SHAPES_PER_TYPE 32768
 #define MAX_SHAPES (MAX_SHAPES_PER_TYPE * 8)
-/* Frame storage per shape of each type at its costliest variant: a line 32 B, a rect wire 4 strokes of 56 B, a
- * triangle wire 3 strokes, a cube wire 12 lines, and a circle, sphere, cylinder or capsule one 44 B instance. */
-#define BENCH_VERTEX_BYTES_PER_SHAPE_SET (32U + (4U * 56U) + (3U * 56U) + (12U * 32U) + (4U * 44U))
+/* Frame storage per shape of each type at its costliest variant: a line 32 B, a triangle wire 3 strokes of 56 B,
+ * and a rect, cube, circle, sphere, cylinder or capsule one 48 B wire instance. */
+#define BENCH_VERTEX_BYTES_PER_SHAPE_SET (32U + (3U * 56U) + (6U * 48U))
 
 /* Shape types */
 enum { BENCH_LINE, BENCH_RECT, BENCH_TRI, BENCH_CIRCLE, BENCH_CUBE, BENCH_SPHERE, BENCH_CYL, BENCH_CAP };
