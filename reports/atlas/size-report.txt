@@ -1,47 +1,48 @@
 # Size Report: atlas (wasm-analysis-paired)
-# Commit: ca9b005
+# Commit: 6af3921
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
-Type                 203 B
-Import               598 B
-Function             135 B
+Type                 198 B
+Import               584 B
+Function             137 B
 Table                  5 B
 Memory                 7 B
 Global                 8 B
 Export                89 B
 Elem                  72 B
-Code               85047 B
-Data                8988 B
-Custom              4846 B
+Code               84584 B
+Data                8937 B
+Custom              4891 B
 ---------------- ----------
-TOTAL              99998 B
+TOTAL              99512 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-27008 B   frame
- 9282 B   main
+26255 B   frame
+ 8755 B   main
  5295 B   nt_gfx_activate_mesh
  3002 B   fmt_fp
  2751 B   nt_gfx_make_texture
  2595 B   nt_http_request
  2425 B   printf_core
- 2359 B   atlas_on_resolve
+ 2358 B   atlas_on_resolve
  1843 B   __rem_pio2f
  1274 B   nt_gfx_frame_create_buffers
  1099 B   nt_hash32_str
  1024 B   nt_input_web_on_blur
   888 B   nt_hash64_str
-  811 B   nt_gfx_gl_cache_ground_state
   809 B   nt_input_web_on_pointer_move
+  805 B   nt_gfx_gl_cache_ground_state
   769 B   nt_input_web_on_pointer_down
   734 B   nt_gfx_activate_texture
   690 B   pop_arg_long_double
   553 B   nt_gfx_activate_shader
+  537 B   nt_gfx_bind_uniform_block
   533 B   claim_more_memory
   519 B   __memcpy
   518 B   nt_gfx_backend_destroy_buffer
@@ -52,10 +53,9 @@ TOTAL              99998 B
   441 B   nt_gfx_backend_create_buffer
   436 B   nt_log_write
   436 B   vsnprintf
-  434 B   nt_resource_request
 
-Total functions: 133
-Total code size: 84838 B
+Total functions: 135
+Total code size: 84371 B
 
 ## Built Engine Archives
 
@@ -77,8 +77,8 @@ libnt_debug_overlay.a       2218 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               94006 B
-libnt_gfx.a               105288 B
-libnt_gfx_stub.a            6176 B
+libnt_gfx.a               103920 B
+libnt_gfx_stub.a            5954 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
 libnt_http_stub.a          11400 B
@@ -88,33 +88,33 @@ libnt_introspect.a           908 B
 libnt_log.a                11916 B
 libnt_log_ring.a             696 B
 libnt_log_stub.a             746 B
-libnt_material.a            4484 B
+libnt_material.a            3728 B
 libnt_material_comp.a       2104 B
 libnt_mem_scratch.a         2016 B
 libnt_mesh_comp.a           2028 B
-libnt_mesh_renderer.a       3952 B
+libnt_mesh_renderer.a       3548 B
 libnt_meshwire.a            3326 B
 libnt_meshwire_encoder.a    3540 B
 libnt_meshwire_stub.a        722 B
 libnt_metrics.a             1530 B
 libnt_platform.a             824 B
 libnt_pool.a                1376 B
-libnt_postfx_blur.a         7764 B
+libnt_postfx_blur.a         6740 B
 libnt_render.a              7668 B
 libnt_resource.a          215122 B
-libnt_shape_renderer.a   1230948 B
+libnt_shape_renderer.a   1230212 B
 libnt_skeletal.a            7464 B
 libnt_skeletal_assets.a     7796 B
 libnt_skeletal_gpu.a        2622 B
 libnt_skin_comp.a           2238 B
-libnt_skinned_mesh_renderer.a    6178 B
+libnt_skinned_mesh_renderer.a    5892 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a         8926 B
-libnt_sprite_renderer.a    16650 B
-libnt_text_renderer.a       7990 B
+libnt_sprite_renderer.a    16192 B
+libnt_text_renderer.a       7618 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                350394 B
+libnt_ui.a                350392 B
 libnt_ui_rich.a            39044 B
 libnt_ui_rich_fx.a          3050 B
 libnt_ui_stub.a             1324 B
@@ -122,9 +122,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2958550 B
+TOTAL (archives)         2952922 B
 
 ## Data Segments Summary
 
-Segments: 22
-Total data size: 8835 B
+Segments: 23
+Total data size: 8778 B

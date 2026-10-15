@@ -1,33 +1,33 @@
 # Size Report: rtt_showcase (wasm-analysis-paired)
-# Commit: ca9b005
+# Commit: 6af3921
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
-Type                 313 B
-Import               640 B
-Function             196 B
+Type                 308 B
+Import               626 B
+Function             193 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                  54 B
-Code              235833 B
-Data               20466 B
-Custom              6777 B
+Code              234873 B
+Data               20336 B
+Custom              6688 B
 ---------------- ----------
-TOTAL             264383 B
+TOTAL             263182 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-57016 B   frame
-19561 B   dispatch_command
+57375 B   frame
+19339 B   dispatch_command
 15491 B   create_gpu
-10498 B   main
 10265 B   declare_slider_control
+10064 B   main
  8796 B   Clay__ConfigureOpenElementPtr
  6038 B   Clay__SizeContainersAlongAxis
  5616 B   Clay__InitializeEphemeralMemory
@@ -37,16 +37,16 @@ TOTAL             264383 B
  3127 B   nt_ui_label
  3007 B   fmt_fp
  2605 B   nt_http_request
- 2595 B   nt_sprite_renderer_set_material
  2428 B   printf_core
+ 2405 B   nt_sprite_renderer_set_material
  2367 B   atlas_on_resolve
- 2272 B   nt_gfx_make_texture
- 2244 B   nt_gfx_apply_texture_bindings
+ 2273 B   nt_gfx_make_texture
+ 2252 B   nt_gfx_apply_texture_bindings
  1931 B   wire_template_path
  1887 B   Clay__InitializePersistentMemory
  1851 B   __rem_pio2f
  1747 B   nt_hash64
- 1718 B   nt_shape_renderer_flush
+ 1693 B   nt_shape_renderer_flush
  1678 B   nt_font_lookup_glyph_offset
  1465 B   emit_glyph_pass
  1366 B   ui_hit_test
@@ -54,8 +54,8 @@ TOTAL             264383 B
  1324 B   nt_gfx_frame_create_buffers
  1316 B   nt_ui_image
 
-Total functions: 194
-Total code size: 235498 B
+Total functions: 191
+Total code size: 234545 B
 
 ## Built Engine Archives
 
@@ -77,8 +77,8 @@ libnt_debug_overlay.a       2218 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               94006 B
-libnt_gfx.a               105288 B
-libnt_gfx_stub.a            6176 B
+libnt_gfx.a               103920 B
+libnt_gfx_stub.a            5954 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
 libnt_http_stub.a          11400 B
@@ -88,33 +88,33 @@ libnt_introspect.a           908 B
 libnt_log.a                11916 B
 libnt_log_ring.a             696 B
 libnt_log_stub.a             746 B
-libnt_material.a            4484 B
+libnt_material.a            3728 B
 libnt_material_comp.a       2104 B
 libnt_mem_scratch.a         2016 B
 libnt_mesh_comp.a           2028 B
-libnt_mesh_renderer.a       3952 B
+libnt_mesh_renderer.a       3548 B
 libnt_meshwire.a            3326 B
 libnt_meshwire_encoder.a    3540 B
 libnt_meshwire_stub.a        722 B
 libnt_metrics.a             1530 B
 libnt_platform.a             824 B
 libnt_pool.a                1376 B
-libnt_postfx_blur.a         7764 B
+libnt_postfx_blur.a         6740 B
 libnt_render.a              7668 B
 libnt_resource.a          215122 B
-libnt_shape_renderer.a   1230948 B
+libnt_shape_renderer.a   1230212 B
 libnt_skeletal.a            7464 B
 libnt_skeletal_assets.a     7796 B
 libnt_skeletal_gpu.a        2622 B
 libnt_skin_comp.a           2238 B
-libnt_skinned_mesh_renderer.a    6178 B
+libnt_skinned_mesh_renderer.a    5892 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a         8926 B
-libnt_sprite_renderer.a    16650 B
-libnt_text_renderer.a       7990 B
+libnt_sprite_renderer.a    16192 B
+libnt_text_renderer.a       7618 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                350394 B
+libnt_ui.a                350392 B
 libnt_ui_rich.a            39044 B
 libnt_ui_rich_fx.a          3050 B
 libnt_ui_stub.a             1324 B
@@ -122,9 +122,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2958550 B
+TOTAL (archives)         2952922 B
 
 ## Data Segments Summary
 
 Segments: 49
-Total data size: 20119 B
+Total data size: 19989 B
