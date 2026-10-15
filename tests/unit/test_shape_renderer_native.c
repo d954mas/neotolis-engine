@@ -226,7 +226,8 @@ static void test_pixel_widths_share_a_flush_in_every_stroke_kind(void) {
 }
 
 /* Interleaved types of one pool come out grouped by type, each instance with its own data: rect and
- * cube wires take a non-uniform scale, the capsule its half body apart from the width. */
+ * cube wires take a non-uniform scale, the cube its depth, the capsule its half body apart from the width,
+ * the cylinder its height. */
 static void test_interleaved_types_keep_their_instances(void) {
     /* A quarter turn about Y narrows a rect to 0.14 and widens a cube to 0.28: the templates differ on screen. */
     const float turn_y[4] = {0, 0.38268343F, 0, 0.92387953F};
@@ -239,17 +240,24 @@ static void test_interleaved_types_keep_their_instances(void) {
     nt_shape_renderer_capsule_wire((float[3]){0, -0.5F, 0}, 0.25F, 0.75F, NULL, 4, NT_RGBA8(0, 0, 255, 255));
     nt_shape_renderer_rect((float[3]){0.75F, -0.75F, 0}, (float[2]){0.2F, 0.2F}, turn_y, NT_RGBA8(255, 0, 255, 255));
     nt_shape_renderer_cube((float[3]){-0.75F, -0.25F, 0}, (float[3]){0.2F, 0.2F, 0.2F}, turn_y, NT_RGBA8(0, 255, 255, 255));
-    nt_shape_renderer_cube_wire((float[3]){0.5F, 0.5F, 0}, (float[3]){0.5F, 0.25F, 0.5F}, NULL, 4, NT_RGBA8(0, 255, 0, 255));
+    nt_shape_renderer_cylinder_wire((float[3]){0.5F, -0.25F, 0}, 0.125F, 0.25F, NULL, 2, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_cube_wire((float[3]){0.5F, 0.5F, 0}, (float[3]){0.5F, 0.25F, 0.5F}, turn_y, 4, NT_RGBA8(0, 255, 0, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     end_frame_and_read(frame);
-    /* Rect and cube outlines: horizontal edges at rows 12 and 20, 4 px each. */
+    /* Rect and cube outlines: horizontal edges at rows 12 and 20, 4 px each. The turned cube spans
+     * x 0.15..0.85; without its depth it would span 0.32..0.68 and miss column 39. */
     TEST_ASSERT_EQUAL_UINT32(8, lit_column(frame, 16, 0, 32));
     assert_pixel(frame, 16, 11, 255, 0, 0);
     assert_pixel(frame, 16, 16, 0, 0, 0);
-    assert_pixel(frame, 48, 11, 0, 255, 0);
-    assert_pixel(frame, 48, 19, 0, 255, 0);
-    assert_pixel(frame, 48, 16, 0, 0, 0);
+    assert_pixel(frame, 52, 11, 0, 255, 0);
+    assert_pixel(frame, 52, 19, 0, 255, 0);
+    assert_pixel(frame, 52, 16, 0, 0, 0);
+    assert_pixel(frame, 39, 11, 0, 255, 0);
+    /* Cylinder rings at its height's ends, rows 36 and 44, 2 px each. */
+    assert_pixel(frame, 46, 35, 255, 255, 255);
+    assert_pixel(frame, 46, 40, 0, 0, 0);
+    assert_pixel(frame, 46, 43, 255, 255, 255);
     /* Capsule equator rings, moved by the half body 0.125 to rows 44 and 52; meridian tip at radius + half body, row 36. */
     assert_pixel(frame, 32, 35, 0, 0, 255);
     assert_pixel(frame, 34, 43, 0, 0, 255);

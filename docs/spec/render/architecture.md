@@ -1201,8 +1201,10 @@ hardware line-width support.
   viewport/target/DPR change. The setter does not change the gfx viewport. Both
   dimensions must be positive.
 
-Width unit, viewport dimension, VP, depth and stream changes flush all pending
-geometry; a width never does. Identical values do not flush.
+Per-shape data (positions, color, width) are call arguments; per-flush state
+(VP, depth, stream, width units) is set by setters. Width unit, viewport
+dimension, VP, depth and stream changes flush all pending geometry; a width
+never does. Identical values do not flush.
 Settings survive GPU restore, including a restore that met a new loss; queued
 shapes are dropped.
 The game must flush before changing render passes or directly changing the gfx
@@ -1272,9 +1274,10 @@ overlay mode, calls `flush` between them.
 
 `NT_SHAPE_RENDERER_MAX_LINES` bounds independent lines (default 8192) and
 `NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS` connected segments (default 1024).
-`NT_SHAPE_RENDERER_MAX_INSTANCES` bounds the filled shapes of all types together
-and, separately, the wire shapes of all types together (default 2048 each);
-`NT_SHAPE_RENDERER_MAX_VERTICES` bounds the triangle vertices (default 16384).
+`NT_SHAPE_RENDERER_MAX_FILLS` bounds the filled shapes of all types together and
+`NT_SHAPE_RENDERER_MAX_WIRES` the template wire shapes of all types together
+(default 2048 each); `NT_SHAPE_RENDERER_MAX_VERTICES` bounds the triangle
+vertices (default 16384).
 These bound the CPU staging, not a frame: a full queue flushes all pending
 geometry.
 

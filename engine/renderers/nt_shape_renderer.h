@@ -10,9 +10,14 @@
 #define NT_SHAPE_RENDERER_MAX_VERTICES 16384
 #endif
 
-/* Filled shapes of all types together; wire shapes likewise. */
-#ifndef NT_SHAPE_RENDERER_MAX_INSTANCES
-#define NT_SHAPE_RENDERER_MAX_INSTANCES 2048
+/* Filled shapes of all types together */
+#ifndef NT_SHAPE_RENDERER_MAX_FILLS
+#define NT_SHAPE_RENDERER_MAX_FILLS 2048
+#endif
+
+/* Wire shapes of all template types together (triangle wires are connected segments) */
+#ifndef NT_SHAPE_RENDERER_MAX_WIRES
+#define NT_SHAPE_RENDERER_MAX_WIRES 2048
 #endif
 
 #ifndef NT_SHAPE_RENDERER_MAX_LINES
@@ -48,7 +53,7 @@ void nt_shape_renderer_set_stream(uint32_t stream);
 
 /* ---- Line ----
  * width (here and in every _wire call) is finite and positive, in the current width units.
- * A width change does not flush: strokes of any widths batch into one draw per kind. */
+ * It rides in the instance: any mix of widths batches like equal ones. */
 
 void nt_shape_renderer_line(const float a[3], const float b[3], float width, uint32_t color);
 

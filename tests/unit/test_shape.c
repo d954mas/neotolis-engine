@@ -186,8 +186,12 @@ void test_shape_rect_wire_counts(void) {
     float size[2] = {2, 2};
     uint32_t col = NT_RGBA8(0, 255, 0, 255);
     nt_shape_renderer_rect_wire(pos, size, NULL, 0.02F, col);
-    /* One wire template instance */
-    TEST_ASSERT_EQUAL_UINT32(1, nt_shape_renderer_test_stroke_count());
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_shape_renderer_flush();
+    nt_test_frame_next();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(4U * 12U, nt_gfx_fake_draw_trace_at(0).num_indices);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(0).instance_count);
 }
 
 /* ---- 11. Triangle fill counts ---- */
@@ -302,9 +306,14 @@ void test_shape_cube_wire_counts(void) {
     float center[3] = {0, 0, 0};
     float size[3] = {1, 1, 1};
     uint32_t col = NT_RGBA8(0, 255, 0, 255);
-    /* One wire template instance */
     nt_shape_renderer_cube_wire(center, size, NULL, 0.02F, col);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_shape_renderer_test_stroke_count());
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_shape_renderer_flush();
+    nt_test_frame_next();
+    /* 12 independent edges: body indices only */
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(12U * 6U, nt_gfx_fake_draw_trace_at(0).num_indices);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(0).instance_count);
 }
 
 /* ---- 21. Sphere fill counts (instanced) ---- */
@@ -397,7 +406,7 @@ void test_shape_cylinder_wire_counts(void) {
     nt_shape_renderer_flush();
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(36U * 12U, nt_gfx_fake_draw_trace_at(0).num_indices);
+    TEST_ASSERT_EQUAL_UINT32((32U * 12U) + (4U * 6U), nt_gfx_fake_draw_trace_at(0).num_indices);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(0).instance_count);
 }
 
@@ -519,20 +528,22 @@ void test_shape_templates_draw_disjoint_ranges(void) {
     nt_test_frame_next();
     /* rect, cube, circle, sphere, cylinder, capsule, batch, 6 wire templates, strokes, lines */
     TEST_ASSERT_EQUAL_UINT32(15, nt_gfx_fake_draw_trace_count());
+    /* Per type in enum order. Wires: 12 indices per segment, 6 for one with no previous neighbour (cube edges, cylinder struts). */
+    static const uint32_t fill_indices[6] = {6, 36, 16 * 3, 8 * 16 * 6, 12 * 16, 9 * 16 * 6};
+    static const uint32_t wire_indices[6] = {4 * 12, 12 * 6, 16 * 12, 48 * 12, (32 * 12) + (4 * 6), 68 * 12};
     uint32_t fill_next = 0;
+    uint32_t wire_next = 0;
     for (uint32_t i = 0; i < 6; i++) {
-        const nt_gfx_fake_draw_t draw = nt_gfx_fake_draw_trace_at(i);
-        TEST_ASSERT_EQUAL_UINT32(fill_next, draw.first_index);
-        fill_next += draw.num_indices;
+        const nt_gfx_fake_draw_t fill = nt_gfx_fake_draw_trace_at(i);
+        const nt_gfx_fake_draw_t wire = nt_gfx_fake_draw_trace_at(7 + i);
+        TEST_ASSERT_EQUAL_UINT32(fill_next, fill.first_index);
+        TEST_ASSERT_EQUAL_UINT32(fill_indices[i], fill.num_indices);
+        TEST_ASSERT_EQUAL_UINT32(wire_next, wire.first_index);
+        TEST_ASSERT_EQUAL_UINT32(wire_indices[i], wire.num_indices);
+        fill_next += fill.num_indices;
+        wire_next += wire.num_indices;
     }
     TEST_ASSERT_EQUAL_UINT32(NT_INDEX_NONE, nt_gfx_fake_draw_trace_at(6).index_type);
-    uint32_t wire_next = 0;
-    for (uint32_t i = 7; i < 13; i++) {
-        const nt_gfx_fake_draw_t draw = nt_gfx_fake_draw_trace_at(i);
-        TEST_ASSERT_EQUAL_UINT32(wire_next, draw.first_index);
-        wire_next += draw.num_indices;
-    }
-    TEST_ASSERT_EQUAL_UINT32((4U + 12U + 16U + 48U + 36U + 68U) * 12U, wire_next);
 }
 
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
@@ -717,23 +728,34 @@ static void test_polyline_overflow_preserves_all_segments(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_at(1).instance_count);
 }
 
-static void test_wire_instances_overflow_without_losing_shapes(void) {
-    uint32_t count = NT_SHAPE_RENDERER_MAX_INSTANCES + 1;
+/* A full pool flushes all its types at once; each type keeps its own draw. */
+static void test_pools_overflow_at_their_totals(void) {
+    const float at[3] = {1, 2, 3};
+    const float size[3] = {1, 1, 1};
+    const uint32_t color = NT_RGBA8(255, 255, 255, 255);
     nt_gfx_fake_draw_trace_reset(true);
-    for (uint32_t i = 0; i < count; i++) {
+    for (uint32_t i = 0; i <= NT_SHAPE_RENDERER_MAX_FILLS; i++) {
         if (i % 2 == 0) {
-            nt_shape_renderer_capsule_wire((float[3]){1, 2, 3}, 0.5F, 3, NULL, 0.02F, NT_RGBA8(255, 255, 255, 255));
+            nt_shape_renderer_rect(at, size, NULL, color);
         } else {
-            nt_shape_renderer_cube_wire((float[3]){1, 2, 3}, (float[3]){1, 1, 1}, NULL, 0.02F, NT_RGBA8(255, 255, 255, 255));
+            nt_shape_renderer_cube(at, size, NULL, color);
+        }
+    }
+    for (uint32_t i = 0; i <= NT_SHAPE_RENDERER_MAX_WIRES; i++) {
+        if (i % 2 == 0) {
+            nt_shape_renderer_capsule_wire(at, 0.5F, 3, NULL, 0.02F, color);
+        } else {
+            nt_shape_renderer_cube_wire(at, size, NULL, 0.02F, color);
         }
     }
     nt_shape_renderer_flush();
     nt_test_frame_next();
-    uint32_t actual = 0;
-    for (uint32_t i = 0; i < nt_gfx_fake_draw_trace_count(); i++) {
-        actual += nt_gfx_fake_draw_trace_at(i).instance_count;
+    /* rect, cube | rect left over, cube wire, capsule wire | capsule wire left over */
+    const uint32_t expected[6] = {NT_SHAPE_RENDERER_MAX_FILLS / 2, NT_SHAPE_RENDERER_MAX_FILLS / 2, 1, NT_SHAPE_RENDERER_MAX_WIRES / 2, NT_SHAPE_RENDERER_MAX_WIRES / 2, 1};
+    TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_fake_draw_trace_count());
+    for (uint32_t i = 0; i < 6; i++) {
+        TEST_ASSERT_EQUAL_UINT32(expected[i], nt_gfx_fake_draw_trace_at(i).instance_count);
     }
-    TEST_ASSERT_EQUAL_UINT32(count, actual);
     TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_overflowed());
 }
 
@@ -747,7 +769,7 @@ static void test_unlinked_programs_drop_queued_shapes(void) {
     nt_shape_renderer_init();
     nt_test_frame_begin_pass();
     nt_gfx_fake_draw_trace_reset(true);
-    for (uint32_t i = 0; i < NT_SHAPE_RENDERER_MAX_INSTANCES + 1; i++) {
+    for (uint32_t i = 0; i < NT_SHAPE_RENDERER_MAX_WIRES + 1; i++) {
         nt_shape_renderer_capsule_wire((float[3]){1, 2, 3}, 0.5F, 3, NULL, 0.02F, NT_RGBA8(255, 255, 255, 255));
     }
     nt_shape_renderer_triangle((const float[3]){0, 0, 0}, (const float[3]){1, 0, 0}, (const float[3]){0, 1, 0}, NT_RGBA8(255, 255, 255, 255));
@@ -768,7 +790,7 @@ static void test_unlinked_programs_drop_queued_shapes(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_polyline_overflow_preserves_all_segments);
-    RUN_TEST(test_wire_instances_overflow_without_losing_shapes);
+    RUN_TEST(test_pools_overflow_at_their_totals);
     RUN_TEST(test_unlinked_programs_drop_queued_shapes);
     RUN_TEST(test_polyline_skips_repeated_points_and_closes_once);
     RUN_TEST(test_polyline_asserts_non_finite_points);
