@@ -1273,7 +1273,7 @@ overlay mode, calls `flush` between them.
 
 `NT_SHAPE_RENDERER_MAX_LINES` bounds independent lines (default 8192) and
 `NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS` connected segments (default 1024).
-`NT_SHAPE_RENDERER_MAX_FILLS` bounds each filled type (default 2048),
+`NT_SHAPE_RENDERER_MAX_FILLS` bounds each filled type (default 512),
 `NT_SHAPE_RENDERER_MAX_WIRES` each wire template type (default 512) and
 `NT_SHAPE_RENDERER_MAX_VERTICES` the triangle vertices (default 16384).
 These bound the CPU staging, not a frame: a full queue flushes all pending

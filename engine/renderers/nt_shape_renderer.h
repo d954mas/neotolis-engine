@@ -12,7 +12,7 @@
 
 /* Filled shapes of each type */
 #ifndef NT_SHAPE_RENDERER_MAX_FILLS
-#define NT_SHAPE_RENDERER_MAX_FILLS 2048
+#define NT_SHAPE_RENDERER_MAX_FILLS 512
 #endif
 
 /* Wire shapes of each template type (triangle wires are connected segments) */
