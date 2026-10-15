@@ -2207,14 +2207,13 @@ static void declare_ui(const nt_ui_scale_t *scale) {
 // #region stage rendering
 static void draw_ground(float scale) {
     const uint32_t grid = NT_RGBA8(41, 56, 77, 255);
-    nt_shape_renderer_set_line_width(0.02F * scale); /* renderer width is retained across frames */
     const float cell = 0.6F * scale;
     const float half_x = 3.4F * scale;
     const float half_z = 3.0F * scale;
     for (int i = -5; i <= 5; ++i) {
         const float p = (float)i * cell;
-        nt_shape_renderer_line((float[3]){-half_x, 0.0F, p}, (float[3]){half_x, 0.0F, p}, grid);
-        nt_shape_renderer_line((float[3]){p, 0.0F, -half_z}, (float[3]){p, 0.0F, half_z}, grid);
+        nt_shape_renderer_line((float[3]){-half_x, 0.0F, p}, (float[3]){half_x, 0.0F, p}, 0.02F * scale, grid);
+        nt_shape_renderer_line((float[3]){p, 0.0F, -half_z}, (float[3]){p, 0.0F, half_z}, 0.02F * scale, grid);
     }
 }
 
@@ -2226,7 +2225,7 @@ static const uint32_t s_scaffold_color = NT_RGBA8(115, 128, 148, 255);
  * draw thin and grey, real bones in the subtree colours. */
 static void draw_links(const nt_skeletal_skeleton_t *skel, const nt_skeletal_mat34_t *model, const bool at_origin[SKELETAL_SHOWCASE_MAX_JOINTS], int selected_joint, bool scaffold_pass, float scale) {
     static const uint32_t bone_colors[2] = {NT_RGBA8(89, 179, 242, 255), NT_RGBA8(255, 166, 46, 255)};
-    nt_shape_renderer_set_line_width((scaffold_pass ? 0.006F : 0.02F) * scale);
+    const float width = (scaffold_pass ? 0.006F : 0.02F) * scale;
     for (uint32_t j = 0; j < skel->joint_count; ++j) {
         const uint16_t p = skel->parent[j];
         if (p == NT_SKELETAL_NO_PARENT || at_origin[p] != scaffold_pass) {
@@ -2235,7 +2234,7 @@ static void draw_links(const nt_skeletal_skeleton_t *skel, const nt_skeletal_mat
         const float a[3] = {model[p].r[0][3], model[p].r[1][3], model[p].r[2][3]};
         const float b[3] = {model[j].r[0][3], model[j].r[1][3], model[j].r[2][3]};
         const uint32_t color = scaffold_pass ? s_scaffold_color : bone_colors[in_selected_subtree(skel, selected_joint, j) ? 1 : 0];
-        nt_shape_renderer_line(a, b, color);
+        nt_shape_renderer_line(a, b, width, color);
     }
 }
 
@@ -2273,7 +2272,7 @@ static void draw_skeleton(const nt_skeletal_skeleton_t *skel, const nt_skeletal_
             const float axis_len = 0.23F * scale;
             for (int axis = 0; axis < 3; ++axis) {
                 const float end[3] = {p[0] + (model[j].r[0][axis] * axis_len), p[1] + (model[j].r[1][axis] * axis_len), p[2] + (model[j].r[2][axis] * axis_len)};
-                nt_shape_renderer_line(p, end, axis_colors[axis]);
+                nt_shape_renderer_line(p, end, 0.02F * scale, axis_colors[axis]);
             }
         }
     }

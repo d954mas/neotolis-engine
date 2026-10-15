@@ -66,9 +66,9 @@ static bool probe_multi_flush_ring(nt_render_target_t target) {
 
 static bool probe_closed_circle(nt_render_target_t target) {
     nt_shape_renderer_set_vp(s_identity_vp);
-    nt_shape_renderer_set_line_width(0.3F);
+    nt_shape_renderer_set_width_units_world();
     begin_probe_pass(target);
-    nt_shape_renderer_circle_wire((float[3]){0, 0, 0}, 0.5F, (float[4]){0.70710678F, 0, 0, 0.70710678F}, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_circle_wire((float[3]){0, 0, 0}, 0.5F, (float[4]){0.70710678F, 0, 0, 0.70710678F}, 0.3F, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     return read_probe_pass(target, frame) && pixel_is(frame, 32, 12, 255, 255, 255) && pixel_is(frame, 51, 32, 255, 255, 255) && pixel_is(frame, 32, 32, 0, 0, 0);
@@ -77,9 +77,9 @@ static bool probe_closed_circle(nt_render_target_t target) {
 static bool probe_overlay_order(nt_render_target_t target) {
     nt_shape_renderer_set_vp(s_identity_vp);
     nt_shape_renderer_set_depth(false);
-    nt_shape_renderer_set_line_width(0.3F);
+    nt_shape_renderer_set_width_units_world();
     begin_probe_pass(target);
-    nt_shape_renderer_line((float[3]){-0.5F, 0, 0}, (float[3]){0.5F, 0, 0}, NT_RGBA8(0, 255, 0, 255));
+    nt_shape_renderer_line((float[3]){-0.5F, 0, 0}, (float[3]){0.5F, 0, 0}, 0.3F, NT_RGBA8(0, 255, 0, 255));
     nt_shape_renderer_rect((float[3]){0, 0, 0}, (float[2]){1, 1}, NULL, NT_RGBA8(255, 0, 0, 255));
     nt_shape_renderer_flush();
     nt_shape_renderer_rect((float[3]){-0.25F, 0, 0}, (float[2]){0.5F, 0.5F}, NULL, NT_RGBA8(0, 0, 255, 255));
@@ -91,10 +91,10 @@ static bool probe_overlay_order(nt_render_target_t target) {
 static bool probe_pixel_width_depth(nt_render_target_t target) {
     const float perspective[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1.22222222F, -1, 0, 0, -2.22222222F, 0};
     nt_shape_renderer_set_vp(perspective);
-    nt_shape_renderer_set_line_width_pixels(6, RT_W, RT_H);
+    nt_shape_renderer_set_width_units_pixels(RT_W, RT_H);
     begin_probe_pass(target);
-    nt_shape_renderer_line((float[3]){-0.75F, -0.5F, -2}, (float[3]){0.75F, -0.5F, -2}, NT_RGBA8(255, 255, 255, 255));
-    nt_shape_renderer_line((float[3]){-1.5F, 1, -4}, (float[3]){1.5F, 1, -4}, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_line((float[3]){-0.75F, -0.5F, -2}, (float[3]){0.75F, -0.5F, -2}, 6, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_line((float[3]){-1.5F, 1, -4}, (float[3]){1.5F, 1, -4}, 6, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     return read_probe_pass(target, frame) && lit_column(frame, 32, 0, 32) == 6 && lit_column(frame, 32, 32, 64) == 6;
@@ -103,9 +103,9 @@ static bool probe_pixel_width_depth(nt_render_target_t target) {
 static bool probe_pixel_bevel(nt_render_target_t target) {
     const float points[][3] = {{-0.6F, -0.4F, 0}, {0, 0.4F, 0}, {-0.5F, -0.4F, 0}};
     nt_shape_renderer_set_vp(s_identity_vp);
-    nt_shape_renderer_set_line_width_pixels(8, RT_W, RT_H);
+    nt_shape_renderer_set_width_units_pixels(RT_W, RT_H);
     begin_probe_pass(target);
-    nt_shape_renderer_polyline(points, 3, false, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_polyline(points, 3, false, 8, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     return read_probe_pass(target, frame) && pixel_is(frame, 31, 19, 255, 255, 255) && pixel_is(frame, 32, 5, 0, 0, 0);
@@ -114,10 +114,10 @@ static bool probe_pixel_bevel(nt_render_target_t target) {
 static bool probe_near_clip(nt_render_target_t target) {
     const float perspective[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1.22222222F, -1, 0, 0, -2.22222222F, 0};
     nt_shape_renderer_set_vp(perspective);
-    nt_shape_renderer_set_line_width_pixels(6, RT_W, RT_H);
+    nt_shape_renderer_set_width_units_pixels(RT_W, RT_H);
     begin_probe_pass(target);
-    nt_shape_renderer_line((float[3]){-0.5F, 0, 0.2F}, (float[3]){0.75F, 0, -3}, NT_RGBA8(255, 255, 255, 255));
-    nt_shape_renderer_line((float[3]){-1, 0.5F, 0.2F}, (float[3]){1, 0.5F, -0.5F}, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_line((float[3]){-0.5F, 0, 0.2F}, (float[3]){0.75F, 0, -3}, 6, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_line((float[3]){-1, 0.5F, 0.2F}, (float[3]){1, 0.5F, -0.5F}, 6, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     return read_probe_pass(target, frame) && lit_column(frame, 35, 0, 64) == 6 && pixel_is(frame, 16, 16, 0, 0, 0) && pixel_is(frame, 48, 48, 0, 0, 0);
@@ -127,12 +127,12 @@ static bool probe_outer_corner(nt_render_target_t target) {
     const float points[][3] = {{-0.5F, -0.5F, 0}, {0, -0.5F, 0}, {0, 0.5F, 0}};
     const float offscreen[][3] = {{-5, -5, 0}, {-4, -5, 0}};
     nt_shape_renderer_set_vp(s_identity_vp);
-    nt_shape_renderer_set_line_width(0.3F);
+    nt_shape_renderer_set_width_units_world();
     begin_probe_pass(target);
     for (uint32_t i = 1; i < NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS; i++) {
-        nt_shape_renderer_polyline(offscreen, 2, false, NT_RGBA8(255, 255, 255, 255));
+        nt_shape_renderer_polyline(offscreen, 2, false, 0.3F, NT_RGBA8(255, 255, 255, 255));
     }
-    nt_shape_renderer_polyline(points, 3, false, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_polyline(points, 3, false, 0.3F, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     return read_probe_pass(target, frame) && pixel_is(frame, 35, 51, 255, 255, 255) && pixel_is(frame, 32, 14, 0, 0, 0);
@@ -140,13 +140,43 @@ static bool probe_outer_corner(nt_render_target_t target) {
 
 static bool probe_active_viewport(nt_render_target_t target) {
     nt_shape_renderer_set_vp(s_identity_vp);
-    nt_shape_renderer_set_line_width_pixels(6, RT_W, RT_H / 2);
+    nt_shape_renderer_set_width_units_pixels(RT_W, RT_H / 2);
     begin_probe_pass(target);
     nt_gfx_set_viewport(0, 0, RT_W, RT_H / 2);
-    nt_shape_renderer_line((float[3]){-0.5F, 0, 0}, (float[3]){0.5F, 0, 0}, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_line((float[3]){-0.5F, 0, 0}, (float[3]){0.5F, 0, 0}, 6, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     return read_probe_pass(target, frame) && lit_column(frame, 32, 0, RT_H) == 6 && pixel_is(frame, 32, 48, 255, 255, 255);
+}
+
+/* Two pixel widths per stroke kind in one flush: each kind reads its own instance width. */
+static bool probe_widths_share_a_flush(nt_render_target_t target) {
+    const float quarter_turn_x[4] = {0.70710678F, 0, 0, 0.70710678F};
+    const float widths[2] = {6, 10};
+    nt_shape_renderer_set_vp(s_identity_vp);
+    nt_shape_renderer_set_width_units_pixels(RT_W, RT_H);
+    begin_probe_pass(target);
+    for (int i = 0; i < 2; i++) {
+        const float y = i == 0 ? 0.75F : -0.25F;
+        const float path[3][3] = {{-0.3F, y, 0}, {-0.1F, y, 0}, {0.1F, y, 0}};
+        nt_shape_renderer_line((float[3]){-0.9F, y, 0}, (float[3]){-0.5F, y, 0}, widths[i], NT_RGBA8(255, 255, 255, 255));
+        nt_shape_renderer_polyline(path, 3, false, widths[i], NT_RGBA8(255, 255, 255, 255));
+        nt_shape_renderer_circle_wire((float[3]){0.6F, y - 0.3F, 0}, 0.3F, quarter_turn_x, widths[i], NT_RGBA8(255, 255, 255, 255));
+    }
+    nt_shape_renderer_flush();
+    uint8_t frame[RT_W * RT_H * 4U] = {0};
+    if (!read_probe_pass(target, frame)) {
+        return false;
+    }
+    for (int i = 0; i < 2; i++) {
+        const int top = i * 32;
+        const uint32_t expected = (uint32_t)widths[i];
+        const uint32_t ring = lit_column(frame, 49, top, top + 18);
+        if (lit_column(frame, 10, top, top + 32) != expected || lit_column(frame, 26, top, top + 32) != expected || ring + 1 < expected || ring > expected + 1) {
+            return false;
+        }
+    }
+    return true;
 }
 
 NT_TEST_KEEPALIVE uint32_t nt_test_shape_stroke_probe(void) {
@@ -170,6 +200,7 @@ NT_TEST_KEEPALIVE uint32_t nt_test_shape_stroke_probe(void) {
     mask |= probe_near_clip(target) ? 1U << 5U : 0;
     mask |= probe_outer_corner(target) ? 1U << 6U : 0;
     mask |= probe_active_viewport(target) ? 1U << 7U : 0;
+    mask |= probe_widths_share_a_flush(target) ? 1U << 8U : 0;
 
     nt_gfx_destroy_render_target(target);
     nt_gfx_destroy_texture(depth);
