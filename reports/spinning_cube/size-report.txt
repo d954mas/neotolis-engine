@@ -1,5 +1,5 @@
 # Size Report: spinning_cube (wasm-analysis-paired)
-# Commit: 6af3921
+# Commit: a345ad6
 
 ## WASM Section Sizes
 
@@ -10,52 +10,52 @@ Import               500 B
 Function             100 B
 Table                  5 B
 Memory                 7 B
-Global                 9 B
+Global                 8 B
 Export                65 B
 Elem                  34 B
-Code               81972 B
-Data               12460 B
-Custom              4046 B
+Code               74699 B
+Data               12946 B
+Custom              4154 B
 ---------------- ----------
-TOTAL              99363 B
+TOTAL              92683 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-22684 B   frame
-21487 B   main
+19396 B   frame
+18811 B   main
  3002 B   fmt_fp
- 2605 B   printf_core
- 2171 B   nt_shape_renderer_flush
+ 2604 B   printf_core
+ 2196 B   nt_shape_renderer_flush
  1845 B   __rem_pio2f
- 1809 B   wire_template_path
- 1324 B   nt_gfx_frame_create_buffers
- 1300 B   nt_gfx_make_pipeline
- 1100 B   draw_instances
+ 1287 B   nt_gfx_make_pipeline
+ 1274 B   nt_gfx_frame_create_buffers
+ 1046 B   draw_instances
+ 1025 B   wire_template_path
  1024 B   nt_input_web_on_blur
-  949 B   nt_gfx_make_instance_layout
-  924 B   nt_gfx_make_vertex_input
-  873 B   nt_gfx_gl_cache_ground_state
+  941 B   nt_gfx_make_instance_layout
+  889 B   nt_gfx_make_vertex_input
   809 B   nt_input_web_on_pointer_move
+  805 B   nt_gfx_gl_cache_ground_state
   769 B   nt_input_web_on_pointer_down
   690 B   pop_arg_long_double
-  637 B   nt_gfx_make_buffer
-  543 B   nt_gfx_backend_destroy_buffer
-  540 B   claim_more_memory
+  604 B   nt_gfx_make_buffer
+  533 B   claim_more_memory
   519 B   __memcpy
-  517 B   nt_gfx_bind_uniform_block
-  502 B   nt_gfx_backend_bind_vertex_input
-  501 B   emmalloc_memalign
-  452 B   nt_gfx_update_buffer
+  518 B   nt_gfx_backend_destroy_buffer
+  492 B   emmalloc_memalign
+  491 B   nt_gfx_bind_uniform_block
+  483 B   nt_gfx_backend_bind_vertex_input
   436 B   vsnprintf
   424 B   nt_app_web_frame
-  409 B   attempt_allocate
-  404 B   nt_log_write
+  424 B   nt_gfx_update_buffer
+  405 B   attempt_allocate
+  401 B   nt_log_write
   393 B   apply_rotation
 
 Total functions: 99
-Total code size: 81811 B
+Total code size: 74538 B
 
 ## Built Engine Archives
 
@@ -102,7 +102,7 @@ libnt_pool.a                1376 B
 libnt_postfx_blur.a         6740 B
 libnt_render.a              7668 B
 libnt_resource.a          215122 B
-libnt_shape_renderer.a   1230212 B
+libnt_shape_renderer.a    911060 B
 libnt_skeletal.a            7464 B
 libnt_skeletal_assets.a     7796 B
 libnt_skeletal_gpu.a        2622 B
@@ -122,9 +122,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2952922 B
+TOTAL (archives)         2633770 B
 
 ## Data Segments Summary
 
-Segments: 37
-Total data size: 12197 B
+Segments: 46
+Total data size: 12620 B
