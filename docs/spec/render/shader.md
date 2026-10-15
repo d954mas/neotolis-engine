@@ -130,6 +130,27 @@ A stale stage handle is a developer error and still traps. Because the builder v
 separately and never links a pair, the trap is also where mismatched varyings
 and device limits surface — offline linking arrives with `ShaderAsset`.
 
+Before a live-context link or uniform-reflection failure traps, an ERROR record
+identifies the program slot, GL name, both stage names and source hashes, and
+the failure phase (`link` or `uniform-reflection`). Reflection contract failures
+include the violated contract. The link summary is emitted before driver-log
+queries and again after the detailed logs, so an empty driver log or a bounded
+host journal does not remove the identity. Existing log-floor and runtime
+filters still apply; a context-loss outcome does not emit this fatal record.
+
+The optional shader descriptor `label` is borrowed only during creation. gfx
+copies up to 63 UTF-8 bytes per stage, sanitizing controls and quotes for a
+single diagnostic line. A program owns its copies, so stage destruction and
+pack eviction cannot remove its names before asynchronous finalization.
+Programs are named by their vertex/fragment pair; labels never affect identity
+or readiness. Unnamed sources retain their source hashes and `<unnamed>` names.
+
+The builder prefixes packed GLSL with a bounded `// nt_asset: ` comment containing
+the effective logical asset name. It remains SHDC v1 source text. gfx uses that
+marker when no descriptor label is supplied; older packs without it remain
+valid and report unnamed sources. Identical stages deduplicated within one
+pack share the first payload's name. Builder caches include the effective name.
+
 ## ShaderAsset purpose
 
 ShaderAsset defines interface, not values.

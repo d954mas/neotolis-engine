@@ -390,7 +390,7 @@ typedef struct {
 typedef struct {
     nt_shader_type_t type;
     const char *source;
-    const char *label;
+    const char *label; /* optional diagnostic name; copied during the call, bounded to 63 UTF-8 bytes */
 } nt_shader_desc_t;
 
 /* Program + fixed render state only; vertex input is a separate owned object

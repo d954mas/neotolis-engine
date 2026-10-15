@@ -9,6 +9,8 @@
 /* Magic: ASCII "SHDC" as uint32_t little-endian = 0x43444853 */
 #define NT_SHADER_CODE_MAGIC 0x43444853
 #define NT_SHADER_CODE_VERSION 1
+#define NT_SHADER_LABEL_CAP 64
+#define NT_SHADER_LABEL_PREFIX "// nt_asset: "
 
 typedef enum {
     NT_SHADER_STAGE_VERTEX = 0,

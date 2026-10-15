@@ -1499,6 +1499,15 @@ static PFNGLGETPROGRAMIVPROC s_get_program_iv;
 static PFNGLGETACTIVEUNIFORMPROC s_get_active_uniform;
 static GLenum s_skipped_program_query;
 static GLuint s_failed_reflection_program;
+static char s_program_failure_log[512];
+
+static void capture_program_failure(nt_log_level_t level, const char *domain, const char *msg, void *user) {
+    (void)domain;
+    (void)user;
+    if (level == NT_LOG_LEVEL_ERROR) {
+        (void)snprintf(s_program_failure_log, sizeof(s_program_failure_log), "%s", msg);
+    }
+}
 
 static void GLAD_API_PTR skip_program_query(GLuint program, GLenum query, GLint *value) {
     if (query == s_skipped_program_query) {
@@ -1548,9 +1557,9 @@ static void assert_reflection_query_failure_asserts(GLenum skipped_query) {
     /* Backend-only programs: the fresh init made no frontend program, so both slots are free. */
     const uint32_t existing = 1;
     const uint32_t failing = 2;
-    TEST_ASSERT_TRUE(nt_gfx_backend_create_program(vs, fs, existing));
+    TEST_ASSERT_TRUE(nt_gfx_backend_create_program(vs, fs, existing, NULL));
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, finish_backend_program(existing));
-    TEST_ASSERT_TRUE(nt_gfx_backend_create_program(vs, fs, failing));
+    TEST_ASSERT_TRUE(nt_gfx_backend_create_program(vs, fs, failing, NULL));
 
     s_get_program_iv = glad_glGetProgramiv;
     s_get_active_uniform = glad_glGetActiveUniform;
@@ -1558,7 +1567,10 @@ static void assert_reflection_query_failure_asserts(GLenum skipped_query) {
     s_failed_reflection_program = 0;
     glad_glGetProgramiv = skip_program_query;
     glad_glGetActiveUniform = skip_second_uniform_query;
+    s_program_failure_log[0] = '\0';
+    nt_log_add_sink(capture_program_failure, NULL);
     NT_TEST_EXPECT_ASSERT((void)finish_backend_program(failing));
+    nt_log_remove_sink(capture_program_failure, NULL);
     glad_glGetProgramiv = s_get_program_iv;
     glad_glGetActiveUniform = s_get_active_uniform;
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "program uniform reflection failed"));
@@ -1568,6 +1580,9 @@ static void assert_reflection_query_failure_asserts(GLenum skipped_query) {
     nt_gfx_backend_destroy_program(existing);
     nt_gfx_backend_destroy_shader(fs);
     nt_gfx_backend_destroy_shader(vs);
+    if (NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR) {
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "phase=uniform-reflection"));
+    }
 }
 
 static void test_missing_active_uniform_count_asserts(void) { assert_reflection_query_failure_asserts(GL_ACTIVE_UNIFORMS); }
@@ -1731,14 +1746,80 @@ static void test_failed_link_logs_its_stage_and_asserts_at_begin_frame(void) {
     nt_program_t prog = nt_gfx_make_program(vs, fs);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, prog.id);
     s_fragment_stage_logs = 0;
+    s_program_failure_log[0] = '\0';
     nt_log_add_sink(count_fragment_stage_logs, NULL);
+    nt_log_add_sink(capture_program_failure, NULL);
     NT_TEST_EXPECT_ASSERT(nt_test_gfx_link_wait(prog));
+    nt_log_remove_sink(capture_program_failure, NULL);
     nt_log_remove_sink(count_fragment_stage_logs, NULL);
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "program link failed"));
     TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR ? 1U : 0U, s_fragment_stage_logs);
+    if (NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR) {
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "phase=link"));
+    }
     nt_gfx_destroy_program(prog);
     if (debug_output) {
         glEnable(GL_DEBUG_OUTPUT);
+    }
+}
+
+static void GLAD_API_PTR fail_link_without_driver_log(GLuint program, GLenum query, GLint *value) {
+    if (query == GL_LINK_STATUS || query == GL_INFO_LOG_LENGTH) {
+        *value = 0;
+        return;
+    }
+    s_get_program_iv(program, query, value);
+}
+
+static void test_failed_link_with_empty_driver_logs_records_its_phase(void) {
+    char vertex_name[] = "embedded/failure.vert";
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() { gl_Position = vec4(0.0); }\n", .label = vertex_name});
+    static const char fragment[] = NT_SHADER_LABEL_PREFIX "packed/failure.frag\nout vec4 color;\nvoid main() { color = vec4(1.0); }\n";
+    const NtShaderCodeHeader header = {.magic = NT_SHADER_CODE_MAGIC, .version = NT_SHADER_CODE_VERSION, .stage = NT_SHADER_STAGE_FRAGMENT, .code_size = sizeof(fragment)};
+    uint8_t blob[sizeof(header) + sizeof(fragment)];
+    memcpy(blob, &header, sizeof(header));
+    memcpy(blob + sizeof(header), fragment, sizeof(fragment));
+    nt_shader_t fs = {nt_gfx_activate_shader(blob, sizeof(blob))};
+    memset(vertex_name, 'x', sizeof(vertex_name) - 1);
+    memset(blob, 0, sizeof(blob));
+    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_shader(vs);
+    s_get_program_iv = glad_glGetProgramiv;
+    glad_glGetProgramiv = fail_link_without_driver_log;
+    s_program_failure_log[0] = '\0';
+    nt_log_add_sink(capture_program_failure, NULL);
+    NT_TEST_EXPECT_ASSERT(nt_test_gfx_link_wait(program));
+    nt_log_remove_sink(capture_program_failure, NULL);
+    glad_glGetProgramiv = s_get_program_iv;
+    nt_gfx_destroy_program(program);
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "program link failed"));
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    if (NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR) {
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "phase=link"));
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "vs=\"embedded/failure.vert\""));
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "fs=\"packed/failure.frag\""));
+    }
+}
+
+static void test_reflection_invariant_records_its_program_and_phase(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() { gl_Position = vec4(0.0); }\n", .label = "reflection.vert"});
+    nt_shader_t fs =
+        nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "uniform float u_value;\nout vec4 color;\nvoid main() { color = vec4(u_value); }\n", .label = "reflection.frag"});
+    nt_program_t program = nt_gfx_make_program(vs, fs);
+    s_program_failure_log[0] = '\0';
+    nt_log_add_sink(capture_program_failure, NULL);
+    NT_TEST_EXPECT_ASSERT(nt_test_gfx_link_wait(program));
+    nt_log_remove_sink(capture_program_failure, NULL);
+    nt_gfx_destroy_program(program);
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_shader(vs);
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "standalone non-sampler uniform"));
+    if (NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR) {
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "phase=uniform-reflection"));
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "reflection.vert"));
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "reflection.frag"));
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "standalone non-sampler uniform"));
     }
 }
 
@@ -1991,6 +2072,8 @@ int main(void) {
     RUN_TEST(test_shader_name_and_readback_failures_on_a_live_context_assert);
     RUN_TEST(test_make_program_does_not_query_link_status);
     RUN_TEST(test_failed_link_logs_its_stage_and_asserts_at_begin_frame);
+    RUN_TEST(test_failed_link_with_empty_driver_logs_records_its_phase);
+    RUN_TEST(test_reflection_invariant_records_its_program_and_phase);
     int failures = UNITY_END();
     nt_window_shutdown();
     return failures;

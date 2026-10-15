@@ -242,9 +242,62 @@ static void collapse_whitespace(char *buf, uint32_t *len) {
 /* Takes already-resolved shader text (from add_shader), strips comments,
  * collapses whitespace, validates, and returns contiguous buffer. */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- UTF-8 scalar ranges and the output bound are checked together
+static uint32_t shader_label_copy(char out[NT_SHADER_LABEL_CAP], const char *label) {
+    const size_t len = strlen(label);
+    uint32_t wp = 0;
+    for (size_t rp = 0; rp < len && wp < NT_SHADER_LABEL_CAP - 1;) {
+        const unsigned char byte = (unsigned char)label[rp];
+        if (byte == '\\') {
+            out[wp++] = '/';
+            rp++;
+            continue;
+        }
+        if (byte < 0x20 || byte == 0x7F) {
+            out[wp++] = '?';
+            rp++;
+            continue;
+        }
+        if (byte < 0x80) {
+            out[wp++] = (char)byte;
+            rp++;
+            continue;
+        }
+        uint8_t width = 0;
+        if (byte >= 0xC2 && byte <= 0xDF) {
+            width = 2;
+        } else if (byte >= 0xE0 && byte <= 0xEF) {
+            width = 3;
+        } else if (byte >= 0xF0 && byte <= 0xF4) {
+            width = 4;
+        }
+        bool valid = width != 0 && rp + width <= len;
+        for (uint8_t i = 1; valid && i < width; i++) {
+            valid = ((unsigned char)label[rp + i] & 0xC0) == 0x80;
+        }
+        if (valid && ((byte == 0xE0 && (unsigned char)label[rp + 1] < 0xA0) || (byte == 0xED && (unsigned char)label[rp + 1] > 0x9F) || (byte == 0xF0 && (unsigned char)label[rp + 1] < 0x90) ||
+                      (byte == 0xF4 && (unsigned char)label[rp + 1] > 0x8F))) {
+            valid = false;
+        }
+        if (!valid) {
+            out[wp++] = '?';
+            rp++;
+        } else if (wp + width <= NT_SHADER_LABEL_CAP - 1) {
+            memcpy(out + wp, label + rp, width);
+            wp += width;
+            rp += width;
+        } else {
+            break;
+        }
+    }
+    out[wp] = '\0';
+    return wp;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_builder_encode_shader_to_buf(const uint8_t *resolved_text, uint32_t text_len, nt_build_shader_stage_t stage, uint8_t **out_data, uint32_t *out_size) {
+void nt_builder_encode_shader_to_buf(const uint8_t *resolved_text, uint32_t text_len, nt_build_shader_stage_t stage, const char *label, uint8_t **out_data, uint32_t *out_size) {
     NT_BUILD_ASSERT(resolved_text && text_len > 0 && "shader encode: empty source");
+    NT_BUILD_ASSERT(label && "shader encode: label is NULL");
 
     char *stripped = (char *)malloc((size_t)text_len + 1);
     NT_BUILD_ASSERT(stripped && "shader encode: malloc failed");
@@ -262,6 +315,20 @@ void nt_builder_encode_shader_to_buf(const uint8_t *resolved_text, uint32_t text
         free(stripped);
         NT_BUILD_ASSERT(0 && "shader: missing void main()");
     }
+
+    char label_text[NT_SHADER_LABEL_CAP];
+    const uint32_t label_len = shader_label_copy(label_text, label);
+    const uint32_t marker_len = (uint32_t)strlen(NT_SHADER_LABEL_PREFIX);
+    const uint32_t labeled_len = marker_len + label_len + 1 + stripped_len;
+    char *labeled = (char *)malloc((size_t)labeled_len + 1);
+    NT_BUILD_ASSERT(labeled && "shader encode: malloc failed");
+    memcpy(labeled, NT_SHADER_LABEL_PREFIX, sizeof(NT_SHADER_LABEL_PREFIX));
+    memcpy(labeled + marker_len, label_text, label_len);
+    labeled[marker_len + label_len] = '\n';
+    memcpy(labeled + marker_len + label_len + 1, stripped, stripped_len + 1);
+    free(stripped);
+    stripped = labeled;
+    stripped_len = labeled_len;
 
     /* GL compile validation at encode time */
     ensure_gl_context();

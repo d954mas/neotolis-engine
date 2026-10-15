@@ -421,7 +421,8 @@ uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
 
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle) { (void)backend_handle; }
 
-bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uint32_t slot) {
+bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uint32_t slot, const nt_gfx_shader_label_t labels[2]) {
+    (void)labels;
     s_fake_program_create_count++;
     NT_ASSERT(slot > 0 && slot <= s_fake_max_programs && !s_fake_program_table[slot].used && "create_program: the record at the frontend slot must be empty");
     if (s_fake_context_lost) {
