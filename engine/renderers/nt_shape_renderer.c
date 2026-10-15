@@ -221,8 +221,8 @@ typedef struct {
 #define NT_FILL_TEMPLATE_INDICES (6 + 36 + NT_SEG_CIRCLE_NI + NT_SEG_SPHERE_NI + NT_SEG_CYL_NI + NT_SEG_CAP_NI)
 /* Rect 4 edges, cube 12, circle 1 ring, sphere 3, cylinder 2 rings + 4 struts, capsule 2 rings + 2 meridians. */
 #define NT_WIRE_TEMPLATE_SEGMENTS (4 + 12 + (8 * NT_SHAPE_SEGMENTS) + 4 + (2 * NT_WIRE_CAP_POINTS))
-/* WebGL 2 always restarts primitives at index 65535. */
 _Static_assert(NT_SHAPE_RENDERER_MAX_VERTICES >= 3, "the triangle batch holds at least one triangle");
+/* WebGL 2 always restarts primitives at index 65535. */
 _Static_assert(NT_FILL_TEMPLATE_VERTICES < 65535 && NT_WIRE_TEMPLATE_SEGMENTS * 7 < 65535, "template indices must stay below the restart index");
 
 typedef struct {
@@ -819,32 +819,6 @@ static void build_fill_templates(uint32_t *nv_total, uint32_t *ni_total) {
 }
 // #endregion
 
-/* Neighbors let adjacent segments construct the same endpoint cross-section. */
-static void emit_stroke(const float prev[3], const float a[3], const float b[3], const float next[3], float width, uint32_t color) {
-    if (s_shape.stroke_count >= NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS) {
-        nt_shape_renderer_flush();
-    }
-    nt_shape_stroke_instance_t *inst = &s_shape.strokes[s_shape.stroke_count++];
-    memcpy(inst->prev, prev, sizeof(inst->prev));
-    inst->width = width;
-    memcpy(inst->next, next, sizeof(inst->next));
-    memcpy(inst->a, a, sizeof(inst->a));
-    memcpy(inst->b, b, sizeof(inst->b));
-    inst->color = color;
-}
-
-void nt_shape_renderer_line(const float a[3], const float b[3], float width, uint32_t color) {
-    assert_width(width);
-    if (s_shape.line_count >= NT_SHAPE_RENDERER_MAX_LINES) {
-        nt_shape_renderer_flush();
-    }
-    nt_shape_line_instance_t *inst = &s_shape.line_staging.lines[s_shape.line_count++];
-    memcpy(inst->a, a, sizeof(inst->a));
-    inst->width = width;
-    memcpy(inst->b, b, sizeof(inst->b));
-    inst->color = color;
-}
-
 /* ---- Lifecycle ---- */
 
 static nt_buffer_t make_static_buffer(nt_buffer_type_t type, const void *data, uint32_t size, const char *label) {
@@ -1120,6 +1094,32 @@ void nt_shape_renderer_set_stream(uint32_t stream) {
 }
 
 /* ---- Line ---- */
+
+/* Neighbors let adjacent segments construct the same endpoint cross-section. */
+static void emit_stroke(const float prev[3], const float a[3], const float b[3], const float next[3], float width, uint32_t color) {
+    if (s_shape.stroke_count >= NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS) {
+        nt_shape_renderer_flush();
+    }
+    nt_shape_stroke_instance_t *inst = &s_shape.strokes[s_shape.stroke_count++];
+    memcpy(inst->prev, prev, sizeof(inst->prev));
+    inst->width = width;
+    memcpy(inst->a, a, sizeof(inst->a));
+    memcpy(inst->b, b, sizeof(inst->b));
+    memcpy(inst->next, next, sizeof(inst->next));
+    inst->color = color;
+}
+
+void nt_shape_renderer_line(const float a[3], const float b[3], float width, uint32_t color) {
+    assert_width(width);
+    if (s_shape.line_count >= NT_SHAPE_RENDERER_MAX_LINES) {
+        nt_shape_renderer_flush();
+    }
+    nt_shape_line_instance_t *inst = &s_shape.line_staging.lines[s_shape.line_count++];
+    memcpy(inst->a, a, sizeof(inst->a));
+    inst->width = width;
+    memcpy(inst->b, b, sizeof(inst->b));
+    inst->color = color;
+}
 
 static bool same_point(const float a[3], const float b[3]) { return a[0] == b[0] && a[1] == b[1] && a[2] == b[2]; }
 
