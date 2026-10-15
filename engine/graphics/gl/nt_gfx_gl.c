@@ -1354,9 +1354,9 @@ static bool uniform_sampler_class(GLenum utype, nt_gfx_sampler_class_t *out_clas
     }
 }
 
-/* Reflects the sampler units off the hot path; NT_ASSERT expansion inflates complexity. */
+/* Checks uniforms and reflects sampler units off the hot path; NT_ASSERT expansion inflates complexity. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool nt_gfx_gl_reflect_samplers(GLuint program, nt_gfx_gl_program_t *rec) {
+static bool nt_gfx_gl_reflect_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
     rec->sampler_count = 0;
     GLint active_uniforms = -1;
     NT_GL(glGetProgramiv, program, GL_ACTIVE_UNIFORMS, &active_uniforms);
@@ -1516,7 +1516,7 @@ nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll
         NT_ASSERT(lost && "program link failed on a live context");
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    if (!nt_gfx_gl_bind_blocks(rec->program, rec) || !nt_gfx_gl_reflect_samplers(rec->program, rec)) {
+    if (!nt_gfx_gl_bind_blocks(rec->program, rec) || !nt_gfx_gl_reflect_uniforms(rec->program, rec)) {
         const bool lost = nt_gfx_gl_ctx_query_lost();
         NT_ASSERT(lost && "program uniform reflection failed");
         return NT_GFX_RESULT_CONTEXT_LOST;
