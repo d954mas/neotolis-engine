@@ -439,7 +439,7 @@ static nt_pipeline_t make_stroke_pipeline(nt_program_t program, bool depth, cons
     });
 }
 
-/* ---- Push instance helper ---- */
+/* ---- Push helpers ---- */
 
 static const float k_identity_rot[4] = {0.0F, 0.0F, 0.0F, 1.0F};
 
@@ -634,7 +634,7 @@ static void build_fill_templates(uint32_t *nv_total, uint32_t *ni_total) {
         append_fill(NT_SHAPE_CUBE, &k_cube_corners[0][0], 8, 3, i, 36, nv_total, ni_total);
     }
 
-    /* Circle: unit circle in XZ plane (center + 32 ring) */
+    /* Circle: unit circle in XZ plane (center + ring) */
     {
         float v[NT_SEG_CIRCLE_NV * 3];
         uint16_t idx[NT_SEG_CIRCLE_NI];
@@ -852,7 +852,6 @@ static nt_buffer_t make_static_buffer(nt_buffer_type_t type, const void *data, u
         &(nt_buffer_desc_t){.type = type, .usage = NT_USAGE_IMMUTABLE, .data = data, .size = size, .index_type = type == NT_BUFFER_INDEX ? NT_INDEX_UINT16 : NT_INDEX_NONE, .label = label});
 }
 
-/* Straight line: a loss met on the way latches in gfx, every later create returns 0, and the next restore makes all again. */
 /* The instanced kinds drawn from one sized stream, made when the stream is selected: one set per
  * stream keeps each VAO's instance offsets stable, and an unused stream takes no vertex-input
  * slots. Only missing ones are made: a reselected stream reuses its set, and after a loss all are made again. */
@@ -878,6 +877,7 @@ static void make_stream_vertex_inputs(uint32_t stream) {
     }
 }
 
+/* Straight line: a loss met on the way latches in gfx, every later create returns 0, and the next restore makes all again. */
 static void create_gpu(void) {
     s_shape.gpu.fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_shape_fs_src, .label = "shape_fs"});
     s_shape.gpu.fill_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_fill_vs_src, .label = "shape_fill_vs"});

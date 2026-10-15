@@ -229,7 +229,7 @@ static void test_pixel_widths_share_a_flush_in_every_stroke_kind(void) {
  * cube wires take a non-uniform scale, the cube its depth, the capsule its half body apart from the width,
  * the cylinder its height. */
 static void test_interleaved_types_keep_their_instances(void) {
-    /* A quarter turn about Y narrows a rect to 0.14 and widens a cube to 0.28: the templates differ on screen. */
+    /* An eighth turn (45 degrees) about Y narrows a rect to 0.14 and widens a cube to 0.28: the templates differ on screen. */
     const float turn_y[4] = {0, 0.38268343F, 0, 0.92387953F};
     nt_shape_renderer_set_width_units_pixels(RT_W, RT_H);
     nt_gfx_end_frame();
