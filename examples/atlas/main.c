@@ -97,7 +97,7 @@ static bool s_pack_dumped;
 /* Links once both stages are ready. The program is ours: the material only
  * borrows the handle, and context loss forces a relink. */
 static void link_program(void) {
-    if (nt_program_ref_update(&s_program)) {
+    if (nt_program_ref_update(&s_program, "atlas/atlas")) {
         nt_material_set_program(s_material, s_program.program);
     }
 }

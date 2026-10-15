@@ -96,7 +96,9 @@ typedef struct {
 /* Program reflection lives here, not on the pipelines that borrow the program. */
 typedef struct {
     GLuint program;
-    nt_gfx_shader_label_t labels[2];
+#if NT_LOG_MIN_LEVEL <= 2
+    char label[64];
+#endif
     /* Sampler units are program state: assigned in reflection order at link,
      * written once, never rewritten by a material. */
     nt_gfx_gl_sampler_unit_t sampler_units[NT_GFX_MAX_TEXTURE_SLOTS];
@@ -1300,8 +1302,7 @@ static void log_program_failure(uint32_t slot, const nt_gfx_gl_program_t *rec, c
     (void)rec;
     (void)phase;
     (void)reason;
-    NT_LOG_ERROR("program %u (GL %u): phase=%s vs=\"%s\"/%08x fs=\"%s\"/%08x: %s", slot, rec->program, phase, rec->labels[0].text[0] != '\0' ? rec->labels[0].text : "<unnamed>",
-                 rec->labels[0].source_hash, rec->labels[1].text[0] != '\0' ? rec->labels[1].text : "<unnamed>", rec->labels[1].source_hash, reason);
+    NT_LOG_ERROR("program %u (GL %u) \"%s\": phase=%s: %s", slot, rec->program, rec->label[0] != '\0' ? rec->label : "<unnamed>", phase, reason);
 }
 
 /* Reflection invariants need context before TRAP discards the assert expression. */
@@ -1496,7 +1497,8 @@ static void write_sampler_units(GLuint program, const nt_gfx_gl_program_t *rec) 
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- issued-call records expand at owning sites
-bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uint32_t slot, const nt_gfx_shader_label_t labels[2]) {
+bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uint32_t slot, const char *label) {
+    (void)label;
     NT_ASSERT(slot > 0 && slot <= s_init_desc.max_programs && s_programs[slot].program == 0 && "create_program: the record at the frontend slot must be empty");
     /* Emscripten's glCreateProgram throws on the null program some browsers return on a lost context. */
     if (nt_gfx_gl_ctx_query_lost()) {
@@ -1511,9 +1513,22 @@ bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uin
     NT_GL(glAttachShader, program, (GLuint)fs_backend);
     NT_GL(glLinkProgram, program);
     s_programs[slot].program = program;
-    if (labels != NULL) {
-        memcpy(s_programs[slot].labels, labels, sizeof(s_programs[slot].labels));
+#if NT_LOG_MIN_LEVEL <= 2
+    if (label != NULL) {
+        size_t n = 0;
+        while (n + 1 < sizeof(s_programs[slot].label) && label[n] != '\0') {
+            const unsigned char byte = (unsigned char)label[n];
+            s_programs[slot].label[n] = (char)(byte < 32 || byte == 127 || byte == '"' ? '?' : byte);
+            n++;
+        }
+        if (n + 1 == sizeof(s_programs[slot].label)) {
+            while (n > 0 && ((unsigned char)label[n] & 0xc0U) == 0x80U) {
+                n--;
+            }
+        }
+        s_programs[slot].label[n] = '\0';
     }
+#endif
     return true;
 }
 

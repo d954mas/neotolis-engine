@@ -1098,49 +1098,6 @@ void test_shader_stage_correct(void) {
     (void)fclose(f);
 }
 
-void test_shader_asset_label_marker(void) {
-    static const char source[] = "void main() { gl_Position = vec4(0); }\n";
-    uint8_t *data = NULL;
-    uint32_t size = 0;
-    nt_builder_encode_shader_to_buf((const uint8_t *)source, (uint32_t)strlen(source), NT_BUILD_SHADER_VERTEX, "shader\r\nname.vert", &data, &size);
-
-    TEST_ASSERT_NOT_NULL(data);
-    TEST_ASSERT_EQUAL_UINT32(sizeof(NtShaderCodeHeader) + ((NtShaderCodeHeader *)data)->code_size, size);
-    const char *packed = (const char *)(data + sizeof(NtShaderCodeHeader));
-    static const char marker[] = NT_SHADER_LABEL_PREFIX "shader??name.vert\n";
-    TEST_ASSERT_EQUAL_MEMORY(marker, packed, sizeof(marker) - 1);
-    TEST_ASSERT_NOT_NULL(strstr(packed + sizeof(marker) - 1, "void main"));
-    free(data);
-
-    data = NULL;
-    nt_builder_encode_shader_to_buf((const uint8_t *)source, (uint32_t)strlen(source), NT_BUILD_SHADER_VERTEX, "shader\\", &data, &size);
-    packed = (const char *)(data + sizeof(NtShaderCodeHeader));
-    static const char slash_marker[] = NT_SHADER_LABEL_PREFIX "shader/\n";
-    TEST_ASSERT_EQUAL_MEMORY(slash_marker, packed, sizeof(slash_marker) - 1);
-    TEST_ASSERT_NOT_NULL(strstr(packed + sizeof(slash_marker) - 1, "void main"));
-    free(data);
-
-    char boundary_label[65];
-    memset(boundary_label, 'a', 62);
-    boundary_label[62] = (char)0xC2;
-    boundary_label[63] = (char)0xA2;
-    boundary_label[64] = '\0';
-    data = NULL;
-    nt_builder_encode_shader_to_buf((const uint8_t *)source, (uint32_t)strlen(source), NT_BUILD_SHADER_VERTEX, boundary_label, &data, &size);
-    packed = (const char *)(data + sizeof(NtShaderCodeHeader));
-    TEST_ASSERT_EQUAL_CHAR('\n', packed[strlen(NT_SHADER_LABEL_PREFIX) + 62]);
-    TEST_ASSERT_NOT_NULL(strstr(packed + strlen(NT_SHADER_LABEL_PREFIX) + 63, "void main"));
-    free(data);
-
-    static const char malformed_label[] = "\xE0\x80\x80\xED\xA0\x80\xF0\x80\x80\x80\xF4\x90\x80\x80";
-    data = NULL;
-    nt_builder_encode_shader_to_buf((const uint8_t *)source, (uint32_t)strlen(source), NT_BUILD_SHADER_VERTEX, malformed_label, &data, &size);
-    packed = (const char *)(data + sizeof(NtShaderCodeHeader));
-    static const char malformed_marker[] = NT_SHADER_LABEL_PREFIX "??????????????\n";
-    TEST_ASSERT_EQUAL_MEMORY(malformed_marker, packed, sizeof(malformed_marker) - 1);
-    free(data);
-}
-
 /* --- Glob batch test using fixture shaders --- */
 
 void test_glob_shaders(void) {
@@ -3684,59 +3641,6 @@ void test_early_dedup_identical_shaders(void) {
     (void)fclose(f);
 }
 
-static void clean_cache_dir(const char *dir);
-
-void test_shader_late_dedup_ignores_asset_marker(void) {
-    const char *path_a = TMP_DIR "/marker_dedup_a.vert";
-    const char *path_b = TMP_DIR "/marker_dedup_b.vert";
-    const char *path_c = TMP_DIR "/marker_dedup_c.vert";
-    const char *cache = TMP_DIR "/marker_dedup_cache";
-    const char *packs[2] = {TMP_DIR "/marker_dedup_cold.ntpack", TMP_DIR "/marker_dedup_warm.ntpack"};
-    MKDIR(cache);
-    clean_cache_dir(cache);
-    write_test_shader(path_a, "// canonical\nvoid main() { gl_Position = vec4(0); }\n");
-    write_test_shader(path_b, "/* a different comment */\n void  main() { gl_Position = vec4(0); }\n");
-    write_test_shader(path_c, "// canonical\nvoid main() { gl_Position = vec4(0); }\n");
-
-    for (uint32_t build = 0; build < 2; build++) {
-        NtBuilderContext *ctx = nt_builder_start_pack(packs[build]);
-        nt_builder_set_cache_dir(ctx, cache);
-        nt_builder_add_shader(ctx, path_a, NT_BUILD_SHADER_VERTEX);
-        nt_builder_rename(ctx, path_a, "shader/a.vert");
-        nt_builder_add_shader(ctx, path_b, NT_BUILD_SHADER_VERTEX);
-        nt_builder_rename(ctx, path_b, "shader/a-very-long-comment-only-alias.vert");
-        nt_builder_add_shader(ctx, path_c, NT_BUILD_SHADER_VERTEX);
-        nt_builder_rename(ctx, path_c, "shader/c.vert");
-        TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
-        nt_builder_free_pack(ctx);
-    }
-
-    uint32_t cold_size = 0;
-    uint8_t *cold = (uint8_t *)nt_builder_read_file(packs[0], &cold_size);
-    uint32_t warm_size = 0;
-    uint8_t *warm = (uint8_t *)nt_builder_read_file(packs[1], &warm_size);
-    TEST_ASSERT_NOT_NULL(cold);
-    TEST_ASSERT_NOT_NULL(warm);
-    TEST_ASSERT_EQUAL_UINT32(cold_size, warm_size);
-    TEST_ASSERT_EQUAL_MEMORY(cold, warm, cold_size);
-
-    const NtPackHeader *header = (const NtPackHeader *)cold;
-    TEST_ASSERT_EQUAL_UINT16(3, header->asset_count);
-    const NtAssetEntry *entries = (const NtAssetEntry *)(cold + sizeof(NtPackHeader));
-    TEST_ASSERT_EQUAL_UINT16(0, entries[0].owner_entry);
-    TEST_ASSERT_EQUAL_UINT16(0, entries[1].owner_entry);
-    TEST_ASSERT_EQUAL_UINT16(0, entries[2].owner_entry);
-    TEST_ASSERT_EQUAL_UINT32(entries[0].offset, entries[1].offset);
-    TEST_ASSERT_EQUAL_UINT32(entries[0].offset, entries[2].offset);
-    TEST_ASSERT_EQUAL_UINT32(entries[0].size, entries[1].size);
-    TEST_ASSERT_EQUAL_UINT32(entries[0].size, entries[2].size);
-    const char *packed = (const char *)(cold + entries[0].offset + sizeof(NtShaderCodeHeader));
-    static const char marker[] = NT_SHADER_LABEL_PREFIX "shader/a.vert\n";
-    TEST_ASSERT_EQUAL_MEMORY(marker, packed, sizeof(marker) - 1);
-    free(cold);
-    free(warm);
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_early_dedup_different_kinds_not_deduped(void) {
     /* A blob and a texture_from_memory with the same raw bytes.
@@ -4271,52 +4175,6 @@ void test_cache_hit_skips_encode(void) {
 
     /* Verify cache dir has .bin files */
     TEST_ASSERT_TRUE(count_bin_files(cache) > 0);
-}
-
-void test_shader_cache_keeps_logical_label(void) {
-    const char *source_path = TMP_DIR "/cache_label.vert";
-    const char *cache = TMP_DIR "/cache_label";
-    const char *pack_a = TMP_DIR "/cache_label_a.ntpack";
-    const char *pack_b = TMP_DIR "/cache_label_b.ntpack";
-    const char *pack_c = TMP_DIR "/cache_label_c.ntpack";
-    MKDIR(cache);
-    clean_cache_dir(cache);
-    write_test_shader(source_path, "void main() { gl_Position = vec4(0); }\n");
-
-    NtBuilderContext *first = nt_builder_start_pack(pack_a);
-    nt_builder_set_cache_dir(first, cache);
-    nt_builder_add_shader(first, source_path, NT_BUILD_SHADER_VERTEX);
-    nt_builder_rename(first, source_path, "shader/cache-a.vert");
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(first));
-    nt_builder_free_pack(first);
-
-    NtBuilderContext *second = nt_builder_start_pack(pack_b);
-    nt_builder_set_cache_dir(second, cache);
-    nt_builder_add_shader(second, source_path, NT_BUILD_SHADER_VERTEX);
-    nt_builder_rename(second, source_path, "shader/cache-b.vert");
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(second));
-    TEST_ASSERT_EQUAL_UINT32(0, second->cache_hit_count);
-    TEST_ASSERT_EQUAL_UINT32(1, second->cache_miss_count);
-    nt_builder_free_pack(second);
-
-    NtBuilderContext *third = nt_builder_start_pack(pack_c);
-    nt_builder_set_cache_dir(third, cache);
-    nt_builder_add_shader(third, source_path, NT_BUILD_SHADER_VERTEX);
-    nt_builder_rename(third, source_path, "shader/cache-b.vert");
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(third));
-    TEST_ASSERT_EQUAL_UINT32(1, third->cache_hit_count);
-    TEST_ASSERT_EQUAL_UINT32(0, third->cache_miss_count);
-    nt_builder_free_pack(third);
-
-    uint32_t pack_size = 0;
-    uint8_t *pack = (uint8_t *)nt_builder_read_file(pack_c, &pack_size);
-    TEST_ASSERT_NOT_NULL(pack);
-    TEST_ASSERT_TRUE(pack_size >= sizeof(NtPackHeader) + sizeof(NtAssetEntry));
-    const NtAssetEntry *entry = (const NtAssetEntry *)(pack + sizeof(NtPackHeader));
-    const char *packed = (const char *)(pack + entry->offset + sizeof(NtShaderCodeHeader));
-    static const char marker[] = NT_SHADER_LABEL_PREFIX "shader/cache-b.vert\n";
-    TEST_ASSERT_EQUAL_MEMORY(marker, packed, sizeof(marker) - 1);
-    free(pack);
 }
 
 /* CACHE-02: Changing texture format invalidates cache */
@@ -9652,7 +9510,6 @@ int main(void) {
     /* Multi-asset and stage */
     RUN_TEST(test_multi_asset_pack);
     RUN_TEST(test_shader_stage_correct);
-    RUN_TEST(test_shader_asset_label_marker);
 
     /* Glob batch */
     RUN_TEST(test_glob_shaders);
@@ -9757,7 +9614,6 @@ int main(void) {
     RUN_TEST(test_early_dedup_identical_blobs);
     RUN_TEST(test_early_dedup_different_opts_not_deduped);
     RUN_TEST(test_early_dedup_identical_shaders);
-    RUN_TEST(test_shader_late_dedup_ignores_asset_marker);
     RUN_TEST(test_early_dedup_different_kinds_not_deduped);
     RUN_TEST(test_early_dedup_pack_data_correct);
     RUN_TEST(test_texture_identity_includes_dimensions);
@@ -9769,7 +9625,6 @@ int main(void) {
 
     /* Cache */
     RUN_TEST(test_cache_hit_skips_encode);
-    RUN_TEST(test_shader_cache_keeps_logical_label);
     RUN_TEST(test_cache_invalidation_opts);
     RUN_TEST(test_cache_version_in_opts_hash);
     RUN_TEST(test_basis_effective_cache_and_dedup_identity);

@@ -3,7 +3,6 @@
 
 #include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"
-#include "nt_shader_format.h"
 #include "pool/nt_pool.h"
 
 #include <string.h>
@@ -170,11 +169,6 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_targe
 void nt_gfx_backend_end_pass(void);
 void nt_gfx_backend_clear(const nt_clear_desc_t *desc);
 
-typedef struct {
-    char text[NT_SHADER_LABEL_CAP];
-    uint32_t source_hash;
-} nt_gfx_shader_label_t;
-
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc);
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle);
 
@@ -183,7 +177,7 @@ void nt_gfx_backend_destroy_shader(uint32_t backend_handle);
  * only on a lost context. The frontend never passes a husk to a destroy. */
 
 /* Starts the link. */
-bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uint32_t slot, const nt_gfx_shader_label_t labels[2]);
+bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uint32_t slot, const char *label);
 /* poll asks the driver whether the link completed (parallel compile) instead of waiting for it.
  * UNREADY while the link runs; ACCEPTED once linked, with uniform locations cached and one texture
  * unit per active sampler element (reflection order, 0..n-1, n <= NT_GFX_MAX_TEXTURE_SLOTS);

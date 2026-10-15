@@ -345,7 +345,7 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
  * Encoders return independent buffers; invariant failures assert. Shader encoding
  * stays on the main thread because its GL context is thread-bound. */
 void nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint32_t encode_threads, uint8_t **out_data, uint32_t *out_size);
-void nt_builder_encode_shader_to_buf(const uint8_t *resolved_text, uint32_t text_len, nt_build_shader_stage_t stage, const char *label, uint8_t **out_data, uint32_t *out_size);
+void nt_builder_encode_shader_to_buf(const uint8_t *resolved_text, uint32_t text_len, nt_build_shader_stage_t stage, uint8_t **out_data, uint32_t *out_size);
 
 /* Metadata accumulation (called from import functions) */
 void nt_builder_add_meta(NtBuilderContext *ctx, uint64_t resource_id, uint64_t kind, const void *data, uint32_t size);

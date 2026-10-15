@@ -47,7 +47,7 @@ static nt_material_t make_radial_material(void) {
 
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof desc);
-    desc.program = nt_gfx_make_program(vs, fs);
+    desc.program = nt_gfx_make_program(vs, fs, NULL);
     desc.depth_test = false;
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;
@@ -441,7 +441,7 @@ static void test_image_custom_name_bound_reorder_safe(void) {
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "perm_fs"});
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof desc);
-    desc.program = nt_gfx_make_program(vs, fs);
+    desc.program = nt_gfx_make_program(vs, fs, NULL);
     desc.cull_mode = NT_CULL_NONE;
     desc.attr_map[0].stream_name = "a_layout"; /* a_layout FIRST (offset 0..3) */
     desc.attr_map[0].location = 7;
@@ -533,7 +533,7 @@ static nt_material_t make_radial_image_material_mode(nt_ui_radial_reveal_mode_t 
 
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof desc);
-    desc.program = nt_gfx_make_program(vs, fs);
+    desc.program = nt_gfx_make_program(vs, fs, NULL);
     desc.depth_test = false;
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;

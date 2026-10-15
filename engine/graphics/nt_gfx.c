@@ -192,8 +192,7 @@ static struct {
     nt_pool_t texture_pool;
     nt_pool_t render_target_pool;
 
-    uint32_t *shader_backends; /* backend handles parallel to pool slots */
-    nt_gfx_shader_label_t *shader_labels;
+    uint32_t *shader_backends;            /* backend handles parallel to pool slots */
     uint8_t *program_states;              /* nt_gfx_program_state_t per slot */
     nt_gfx_pipeline_key_t *pipeline_keys; /* exact desc identity per live slot; all-zero when free */
 
@@ -456,8 +455,6 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     nt_pool_init(&s_gfx.render_target_pool, max_render_targets);
 
     s_gfx.shader_backends = (uint32_t *)calloc(desc->max_shaders + 1, sizeof(uint32_t));
-    s_gfx.shader_labels = (nt_gfx_shader_label_t *)calloc(desc->max_shaders + 1, sizeof(nt_gfx_shader_label_t));
-    NT_ASSERT(s_gfx.shader_labels != NULL);
     s_gfx.program_states = (uint8_t *)calloc(desc->max_programs + 1, sizeof(uint8_t));
     s_gfx.pipeline_keys = (nt_gfx_pipeline_key_t *)calloc(desc->max_pipelines + 1, sizeof(nt_gfx_pipeline_key_t));
 
@@ -560,7 +557,6 @@ void nt_gfx_shutdown(void) {
     nt_pool_shutdown(&s_gfx.mesh_pool);
 
     free(s_gfx.shader_backends);
-    free(s_gfx.shader_labels);
     free(s_gfx.program_states);
     free(s_gfx.pipeline_keys);
     free(s_gfx.buffer_metas);
@@ -922,29 +918,6 @@ void nt_gfx_clear(const nt_clear_desc_t *desc) {
 
 /* ---- Resource creation ---- */
 
-static nt_gfx_shader_label_t shader_label(const nt_shader_desc_t *desc) {
-    nt_gfx_shader_label_t label = {.source_hash = nt_hash32(desc->source, (uint32_t)strlen(desc->source)).value};
-    const char *name = desc->label;
-    if (name == NULL && strncmp(desc->source, NT_SHADER_LABEL_PREFIX, sizeof(NT_SHADER_LABEL_PREFIX) - 1) == 0) {
-        name = desc->source + sizeof(NT_SHADER_LABEL_PREFIX) - 1;
-    }
-    if (name != NULL) {
-        size_t n = 0;
-        while (n + 1 < sizeof(label.text) && name[n] != '\0' && name[n] != '\n' && name[n] != '\r') {
-            unsigned char byte = (unsigned char)name[n];
-            label.text[n] = (char)(byte < 32 || byte == 127 || byte == '"' ? '?' : byte);
-            n++;
-        }
-        if (n + 1 == sizeof(label.text)) {
-            while (n > 0 && ((unsigned char)name[n] & 0xc0U) == 0x80U) {
-                n--;
-            }
-        }
-        label.text[n] = '\0';
-    }
-    return label;
-}
-
 static nt_gfx_result_t make_shader(const nt_shader_desc_t *desc, nt_shader_t *out) {
     NT_ASSERT(desc != NULL);
 
@@ -962,7 +935,6 @@ static nt_gfx_result_t make_shader(const nt_shader_desc_t *desc, nt_shader_t *ou
 
     uint32_t slot = nt_pool_slot_index(id);
     s_gfx.shader_backends[slot] = backend;
-    s_gfx.shader_labels[slot] = shader_label(desc);
 
     out->id = id;
     NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_SHADER, id);
@@ -977,7 +949,7 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
-static nt_gfx_result_t make_program(nt_shader_t vs, nt_shader_t fs, nt_program_t *out) {
+static nt_gfx_result_t make_program(nt_shader_t vs, nt_shader_t fs, const char *label, nt_program_t *out) {
     /* First: a stage the loss failed is 0, and the loss latched when it failed. */
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
@@ -997,8 +969,7 @@ static nt_gfx_result_t make_program(nt_shader_t vs, nt_shader_t fs, nt_program_t
     uint32_t id = nt_pool_alloc(&s_gfx.program_pool);
     NT_ASSERT(id != 0 && "program pool full -- raise nt_gfx_desc_t.max_programs");
 
-    const nt_gfx_shader_label_t labels[2] = {s_gfx.shader_labels[nt_pool_slot_index(vs.id)], s_gfx.shader_labels[nt_pool_slot_index(fs.id)]};
-    if (!nt_gfx_backend_create_program(vs_backend, fs_backend, nt_pool_slot_index(id), labels)) {
+    if (!nt_gfx_backend_create_program(vs_backend, fs_backend, nt_pool_slot_index(id), label)) {
         nt_pool_free(&s_gfx.program_pool, id);
         return latch_loss();
     }
@@ -1011,10 +982,10 @@ static nt_gfx_result_t make_program(nt_shader_t vs, nt_shader_t fs, nt_program_t
     return NT_GFX_RESULT_ACCEPTED;
 }
 
-nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs) {
+nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs, const char *label) {
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_CREATE, NT_GFX_OBJECT_PROGRAM, 0, event->data.resource.related[0] = vs.id; event->data.resource.related[1] = fs.id);
     nt_program_t result = {0};
-    NT_GFX_END_OBJECT(make_program(vs, fs, &result), result.id);
+    NT_GFX_END_OBJECT(make_program(vs, fs, label, &result), result.id);
     return result;
 }
 
@@ -1499,7 +1470,6 @@ static nt_gfx_result_t destroy_shader(nt_shader_t shd) {
     uint32_t slot = nt_pool_slot_index(shd.id);
     nt_gfx_backend_destroy_shader(s_gfx.shader_backends[slot]);
     s_gfx.shader_backends[slot] = 0;
-    memset(&s_gfx.shader_labels[slot], 0, sizeof(s_gfx.shader_labels[slot]));
     nt_pool_free(&s_gfx.shader_pool, shd.id);
     return NT_GFX_RESULT_ACCEPTED;
 }

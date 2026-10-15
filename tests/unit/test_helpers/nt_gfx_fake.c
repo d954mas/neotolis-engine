@@ -51,7 +51,7 @@ nt_program_t nt_gfx_fake_make_program_typed(const char *const *names, const uint
     nt_gfx_fake_set_samplers_typed(names, sampler_classes, count);
     const nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     const nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
-    return nt_gfx_make_program(vs, fs);
+    return nt_gfx_make_program(vs, fs, NULL);
 }
 
 bool nt_gfx_backend_program_sampler_info(uint32_t program_backend, uint32_t name_hash, nt_gfx_sampler_info_t *out_info) {
@@ -421,8 +421,8 @@ uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
 
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle) { (void)backend_handle; }
 
-bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uint32_t slot, const nt_gfx_shader_label_t labels[2]) {
-    (void)labels;
+bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uint32_t slot, const char *label) {
+    (void)label;
     s_fake_program_create_count++;
     NT_ASSERT(slot > 0 && slot <= s_fake_max_programs && !s_fake_program_table[slot].used && "create_program: the record at the frontend slot must be empty");
     if (s_fake_context_lost) {

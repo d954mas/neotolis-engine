@@ -63,11 +63,12 @@ static nt_shader_t s_fs;
 static nt_program_t s_program[PROBE_PROGRAM_COUNT];
 
 static bool programs_ready(void) {
+    static const char *const program_labels[] = {"browser/mesh-color", "browser/mesh-colorless", "browser/skinned-color"};
     if (s_fs.id == 0) {
         s_fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_fs_src, .label = "mesh_color_probe_fs"});
         for (uint32_t i = 0; i < PROBE_PROGRAM_COUNT; i++) {
             s_vs[i] = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = *s_vs_src[i], .label = "mesh_color_probe_vs"});
-            s_program[i] = nt_gfx_make_program(s_vs[i], s_fs);
+            s_program[i] = nt_gfx_make_program(s_vs[i], s_fs, program_labels[i]);
         }
     }
     bool ready = true;

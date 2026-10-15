@@ -162,7 +162,7 @@ static void make_gpu_resources(void) {
     /* A sampler-less bind falls back to the source's default filter, and the taps need NEAREST. */
     s_blur.vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_blur_vs_src, .label = "postfx_blur_vs"});
     s_blur.fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_blur_fs_src, .label = "postfx_blur_fs"});
-    s_blur.program = nt_gfx_make_program(s_blur.vs, s_blur.fs);
+    s_blur.program = nt_gfx_make_program(s_blur.vs, s_blur.fs, "postfx/blur");
     s_blur.pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = s_blur.program,
         .depth_test = false,

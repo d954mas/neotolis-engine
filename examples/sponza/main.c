@@ -126,9 +126,10 @@ static nt_program_ref_t s_programs[3]; /* indexed by SponzaShaderType */
 
 /* New materials take the current program at creation; relinks update survivors. */
 static void link_programs(void) {
+    static const char *const program_labels[] = {"sponza/full", "sponza/diffuse", "sponza/alpha"};
     bool linked_any = false;
     for (uint32_t t = 0; t < 3; t++) {
-        linked_any = nt_program_ref_update(&s_programs[t]) || linked_any;
+        linked_any = nt_program_ref_update(&s_programs[t], program_labels[t]) || linked_any;
     }
     if (!linked_any) {
         return;

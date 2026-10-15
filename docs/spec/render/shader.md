@@ -11,7 +11,7 @@ Related: [Material System](material.md), [Runtime Formats](../assets/runtime-for
 ## Runtime objects: ShaderCode, Program
 
 `NT_ASSET_SHADER_CODE` is the text of ONE stage; there is no program asset.
-`nt_gfx_make_shader` compiles a stage and `nt_gfx_make_program(vs, fs)` links
+`nt_gfx_make_shader` compiles a stage and `nt_gfx_make_program(vs, fs, label)` links
 a pair, from either an embedded source string or two resolved resources. The
 shader resource exists so the builder can compile each stage offline and reject
 a broken one at build time. That validation needs a GL context: a headless build
@@ -49,7 +49,7 @@ caches all borrow the handle and never destroy it.
 A program linked from pack-loaded stages needs a per-frame gate, because the
 stages arrive asynchronously and nothing can link before both resolve.
 `nt_program_ref_t` (`material/nt_program_ref.h`) is that gate: the game gives it
-the two resource handles once, calls `nt_program_ref_update` every frame, and
+the two resource handles once, calls `nt_program_ref_update(ref, label)` every frame, and
 assigns on the frame it returns true. It stores the resource handles rather than
 the compiled stages or the source text, because only the handles survive a
 context loss -- `nt_program_ref_drop` clears the program and the same gate links
@@ -131,25 +131,18 @@ separately and never links a pair, the trap is also where mismatched varyings
 and device limits surface — offline linking arrives with `ShaderAsset`.
 
 Before a live-context link or uniform-reflection failure traps, an ERROR record
-identifies the program slot, GL name, both stage names and source hashes, and
-the failure phase (`link` or `uniform-reflection`). Reflection contract failures
-include the violated contract. The link summary is emitted before driver-log
-queries and again after the detailed logs, so an empty driver log or a bounded
-host journal does not remove the identity. Existing log-floor and runtime
-filters still apply; a context-loss outcome does not emit this fatal record.
+identifies the program slot, GL name, caller-supplied program label, and failure
+phase (`link` or `uniform-reflection`). Reflection contract failures include the
+violated contract. The link summary precedes driver-log queries and is repeated
+after detailed logs so a bounded journal retains it. Context loss keeps its
+recoverable outcome; existing log-floor and runtime filters still apply.
 
-The optional shader descriptor `label` is borrowed only during creation. gfx
-copies up to 63 UTF-8 bytes per stage, sanitizing controls and quotes for a
-single diagnostic line. A program owns its copies, so stage destruction and
-pack eviction cannot remove its names before asynchronous finalization.
-Programs are named by their vertex/fragment pair; labels never affect identity
-or readiness. Unnamed sources retain their source hashes and `<unnamed>` names.
-
-The builder prefixes packed GLSL with a bounded `// nt_asset: ` comment containing
-the effective logical asset name. It remains SHDC v1 source text. gfx uses that
-marker when no descriptor label is supplied; older packs without it remain
-valid and report unnamed sources. Identical stages deduplicated within one
-pack share the first payload's name. Builder caches include the effective name.
+The label is optional and borrowed only during the creation call. The program
+copies up to 63 UTF-8 bytes, replacing ASCII control bytes and double quotes for
+log formatting; NULL or empty labels report `<unnamed>`. Copies survive stage destruction
+and asynchronous finalization. Labels do not affect program identity or readiness.
+With `NT_LOG_MIN_LEVEL=3`, label storage and copying are compiled out. Pack-loaded
+and embedded stages use the same explicit program label; packs carry no names.
 
 ## ShaderAsset purpose
 

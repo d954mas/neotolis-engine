@@ -178,7 +178,7 @@ static void test_a_latched_loss_carries_a_whole_creation_chain(void) {
     const nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     const nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
-    const nt_program_t program = nt_gfx_make_program(vs, fs);
+    const nt_program_t program = nt_gfx_make_program(vs, fs, NULL);
     const nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     const nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 64});
     const nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
@@ -627,7 +627,7 @@ static void test_link_with_a_stage_left_unready_by_a_loss_ends_unready(void) {
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     nt_gfx_fake_lose_and_restore_context();
     record_next_frame();
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_program(vs, fs).id);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_program(vs, fs, NULL).id);
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_UNREADY, result_of(nt_gfx_capture_read(), NT_GFX_OP_CREATE, NT_GFX_OBJECT_PROGRAM));

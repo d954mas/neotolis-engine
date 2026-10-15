@@ -70,7 +70,7 @@ static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     nt_material_t material = nt_material_create(&(nt_material_create_desc_t){
-        .program = nt_gfx_make_program(vs, fs),
+        .program = nt_gfx_make_program(vs, fs, NULL),
         .blend = blend,
         .cull_mode = NT_CULL_NONE,
     });
@@ -129,12 +129,12 @@ void test_program_ref_links_once_and_relinks_after_drop(void) {
     ref.fs = publish_stage("ref_fs", make_stage(NT_SHADER_FRAGMENT).id);
     nt_resource_step();
 
-    TEST_ASSERT_TRUE(nt_program_ref_update(&ref));
+    TEST_ASSERT_TRUE(nt_program_ref_update(&ref, NULL));
     const nt_program_t first = ref.program;
     TEST_ASSERT_FALSE(nt_gfx_program_ready(first)); /* the link finishes at a begin_frame */
-    TEST_ASSERT_FALSE(nt_program_ref_update(&ref));
+    TEST_ASSERT_FALSE(nt_program_ref_update(&ref, NULL));
     nt_test_gfx_link_wait(first);
-    TEST_ASSERT_FALSE(nt_program_ref_update(&ref));
+    TEST_ASSERT_FALSE(nt_program_ref_update(&ref, NULL));
 
     /* Context dies: handles stay valid, GPU objects do not; the ref keeps its program. */
     nt_gfx_fake_set_context_lost(true);
@@ -142,7 +142,7 @@ void test_program_ref_links_once_and_relinks_after_drop(void) {
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
     TEST_ASSERT_FALSE(nt_gfx_program_ready(first));
-    TEST_ASSERT_FALSE(nt_program_ref_update(&ref));
+    TEST_ASSERT_FALSE(nt_program_ref_update(&ref, NULL));
     TEST_ASSERT_EQUAL_UINT32(first.id, ref.program.id);
 
     nt_gfx_end_frame();
@@ -152,13 +152,13 @@ void test_program_ref_links_once_and_relinks_after_drop(void) {
     TEST_ASSERT_FALSE(nt_gfx_program_valid(first));
 
     /* The stages died too: no link until the resource step brings them back. */
-    TEST_ASSERT_FALSE(nt_program_ref_update(&ref));
+    TEST_ASSERT_FALSE(nt_program_ref_update(&ref, NULL));
     TEST_ASSERT_EQUAL_UINT32(0, ref.program.id);
     republish_stage("ref_vs", make_stage(NT_SHADER_VERTEX).id);
     republish_stage("ref_fs", make_stage(NT_SHADER_FRAGMENT).id);
     nt_resource_step();
 
-    TEST_ASSERT_TRUE(nt_program_ref_update(&ref));
+    TEST_ASSERT_TRUE(nt_program_ref_update(&ref, NULL));
     TEST_ASSERT_NOT_EQUAL_UINT32(first.id, ref.program.id);
     nt_test_gfx_link_wait(ref.program);
 
@@ -408,7 +408,7 @@ void test_text_material_may_declare_its_own_textures(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     nt_material_t textured = nt_material_create(&(nt_material_create_desc_t){
-        .program = nt_gfx_make_program(vs, fs),
+        .program = nt_gfx_make_program(vs, fs, NULL),
         .cull_mode = NT_CULL_NONE,
         .textures[0] = {.name = "u_extra", .resource = NT_RESOURCE_INVALID},
         .texture_count = 1,
@@ -529,7 +529,7 @@ void test_material_params_bind_once_per_change(void) {
     const nt_text_style_t style = plain();
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
-    nt_program_t shared = nt_gfx_make_program(vs, fs);
+    nt_program_t shared = nt_gfx_make_program(vs, fs, NULL);
     static const float red[4] = {1, 0, 0, 1};
     static const float green[4] = {0, 1, 0, 1};
     nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE, .params = red, .params_size = sizeof(red)});
@@ -568,7 +568,7 @@ void test_material_params_bind_once_per_change(void) {
 void test_materials_sharing_a_program_share_one_pipeline(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
-    nt_program_t shared = nt_gfx_make_program(vs, fs);
+    nt_program_t shared = nt_gfx_make_program(vs, fs, NULL);
     nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
     nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
 
@@ -586,7 +586,7 @@ void test_materials_sharing_a_program_share_one_pipeline(void) {
 void test_one_program_with_two_render_states_builds_two_pipelines(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
-    nt_program_t shared = nt_gfx_make_program(vs, fs);
+    nt_program_t shared = nt_gfx_make_program(vs, fs, NULL);
     nt_material_t opaque_mat = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_opaque(), .cull_mode = NT_CULL_NONE});
     nt_material_t blended = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
 
@@ -605,10 +605,10 @@ void test_one_program_with_two_render_states_builds_two_pipelines(void) {
 void test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines(void) {
     nt_shader_t vs0 = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs0 = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
-    nt_program_t p0 = nt_gfx_make_program(vs0, fs0);
+    nt_program_t p0 = nt_gfx_make_program(vs0, fs0, NULL);
     nt_shader_t vs1 = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs1 = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
-    nt_program_t p1 = nt_gfx_make_program(vs1, fs1);
+    nt_program_t p1 = nt_gfx_make_program(vs1, fs1, NULL);
     TEST_ASSERT_EQUAL_UINT32(p0.id + 1, p1.id);
     nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.program = p0, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_BACK});
     nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.program = p1, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
@@ -643,7 +643,7 @@ void test_a_reused_program_slot_does_not_hit_the_dead_entry(void) {
     nt_gfx_destroy_program(dead);
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
-    nt_program_t reborn = nt_gfx_make_program(vs, fs); /* same pool slot, new generation */
+    nt_program_t reborn = nt_gfx_make_program(vs, fs, NULL); /* same pool slot, new generation */
     TEST_ASSERT_NOT_EQUAL_UINT32(dead.id, reborn.id);
 
     nt_material_set_program(mat, NT_PROGRAM_INVALID);
@@ -728,7 +728,7 @@ void test_unready_font_skips_glyph_and_decoration_uploads(void) {
     nt_gfx_begin_frame(); /* takes the loss and restores */
     /* The game relinks the material, so only the font gates the draws below. */
     nt_program_t relinked = nt_gfx_make_program(nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"}),
-                                                nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"}));
+                                                nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"}), NULL);
     nt_material_set_program(s_mat, relinked);
     nt_test_gfx_link_wait(relinked);
 
@@ -802,7 +802,7 @@ void test_a_new_program_after_shutdown_does_not_reuse_the_old_pipeline(void) {
 
     nt_test_frame_close();
     nt_text_renderer_shutdown();
-    nt_material_set_program(mat, nt_gfx_make_program(vs, fs));
+    nt_material_set_program(mat, nt_gfx_make_program(vs, fs, NULL));
     open_frame();
 
     select_material(mat);
@@ -880,7 +880,7 @@ void test_context_loss_recovers_without_a_restore_call(void) {
 
     /* The game's gate relinks and re-assigns onto the same material. */
     nt_program_t second = nt_gfx_make_program(nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"}),
-                                              nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"}));
+                                              nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"}), NULL);
     nt_material_set_program(material, second);
     nt_test_gfx_link_wait(second);
     nt_font_step();

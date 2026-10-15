@@ -140,52 +140,6 @@ nt_build_result_t nt_builder_append_data(NtBuilderContext *ctx, const void *data
     return NT_BUILD_OK;
 }
 
-static bool shader_marker_body(const uint8_t *data, uint32_t size, const uint8_t **out_body, uint32_t *out_size) {
-    if (size < sizeof(NtShaderCodeHeader)) {
-        return false;
-    }
-    NtShaderCodeHeader header;
-    memcpy(&header, data, sizeof(header));
-    if (header.magic != NT_SHADER_CODE_MAGIC || header.version != NT_SHADER_CODE_VERSION || header.stage > NT_SHADER_STAGE_FRAGMENT || header.code_size == 0 ||
-        (uint64_t)sizeof(header) + header.code_size != size) {
-        return false;
-    }
-    const uint8_t *source = data + sizeof(header);
-    if (source[header.code_size - 1] != '\0') {
-        return false;
-    }
-    const uint32_t prefix_size = (uint32_t)strlen(NT_SHADER_LABEL_PREFIX);
-    if (header.code_size <= prefix_size || memcmp(source, NT_SHADER_LABEL_PREFIX, prefix_size) != 0) {
-        return false;
-    }
-    const uint8_t *line_end = memchr(source + prefix_size, '\n', header.code_size - prefix_size);
-    if (line_end == NULL) {
-        return false;
-    }
-    *out_body = line_end + 1;
-    *out_size = (uint32_t)((source + header.code_size) - *out_body);
-    return true;
-}
-
-static bool asset_payload_equal(nt_asset_type_t type, const uint8_t *a, uint32_t a_size, const uint8_t *b, uint32_t b_size) {
-    if (a_size == b_size && memcmp(a, b, a_size) == 0) {
-        return true;
-    }
-    if (type != NT_ASSET_SHADER_CODE || a_size < sizeof(NtShaderCodeHeader) || b_size < sizeof(NtShaderCodeHeader)) {
-        return false;
-    }
-    NtShaderCodeHeader a_header;
-    NtShaderCodeHeader b_header;
-    memcpy(&a_header, a, sizeof(a_header));
-    memcpy(&b_header, b, sizeof(b_header));
-    const uint8_t *a_body = NULL;
-    const uint8_t *b_body = NULL;
-    uint32_t a_body_size = 0;
-    uint32_t b_body_size = 0;
-    return a_header.magic == b_header.magic && a_header.version == b_header.version && a_header.stage == b_header.stage && a_header._pad == b_header._pad &&
-           shader_marker_body(a, a_size, &a_body, &a_body_size) && shader_marker_body(b, b_size, &b_body, &b_body_size) && a_body_size == b_body_size && memcmp(a_body, b_body, a_body_size) == 0;
-}
-
 nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t resource_id, nt_asset_type_t type, uint32_t data_size) {
     if (!ctx) {
         return NT_BUILD_ERR_VALIDATION;
@@ -203,13 +157,11 @@ nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t reso
     uint32_t owner_entry = ctx->entry_count;
 
     for (uint32_t ei = 0; ei < ctx->entry_count; ei++) {
-        const NtAssetEntry *previous = &ctx->entries[ei];
-        if (previous->asset_type != type || previous->offset + previous->size > new_data_start) {
+        if (ctx->entries[ei].asset_type != type || ctx->entries[ei].size != data_size || ctx->entries[ei].offset + data_size > new_data_start) {
             continue;
         }
-        const uint8_t *previous_data = ctx->data_buf + previous->offset;
-        if (asset_payload_equal(type, previous_data, previous->size, new_data, data_size)) {
-            owner_entry = previous->owner_entry;
+        if (memcmp(ctx->data_buf + ctx->entries[ei].offset, new_data, data_size) == 0) {
+            owner_entry = ctx->entries[ei].owner_entry;
             break;
         }
     }
@@ -221,7 +173,7 @@ nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t reso
     NT_BUILD_ASSERT(owner_entry <= idx && ctx->entries[owner_entry].owner_entry == owner_entry);
     entry->asset_type = (uint8_t)type;
     entry->_pad = 0;
-    entry->size = owner_entry == idx ? data_size : ctx->entries[owner_entry].size;
+    entry->size = data_size;
 
     if (owner_entry != idx) {
         /* Duplicate found -- rewind data_buf, point to existing data */
@@ -457,19 +409,6 @@ static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
         return true; /* no encoding opts -- everything is in decoded_data */
     }
     return false;
-}
-
-static const char *shader_label_path(const NtBuildEntry *entry) { return entry->rename_key ? entry->rename_key : entry->path; }
-
-static uint64_t shader_cache_opts_hash(const NtBuildEntry *entry) {
-    const struct {
-        uint64_t encode_opts;
-        uint64_t label_path;
-    } identity = {
-        .encode_opts = nt_builder_compute_opts_hash(entry),
-        .label_path = nt_hash64_str(shader_label_path(entry)).value,
-    };
-    return nt_hash64(&identity, sizeof(identity)).value;
 }
 
 /* Derive asset_type from build asset kind (deterministic 1:1 mapping) */
@@ -794,7 +733,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
         /* Shader cache: check before encode */
         if (ctx->cache_dir) {
-            opts_hashes[i] = shader_cache_opts_hash(pe);
+            opts_hashes[i] = nt_builder_compute_opts_hash(pe);
             uint8_t *cached_data = NULL;
             uint32_t cached_size = 0;
             nt_cache_status_t status = nt_builder_cache_lookup(ctx->cache_dir, pe->decoded_hash, opts_hashes[i], &cached_data, &cached_size);
@@ -825,7 +764,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         double t_start = nt_time_now();
 #endif
         NtBuildShaderData *sd = (NtBuildShaderData *)pe->data;
-        nt_builder_encode_shader_to_buf(pe->decoded_data, pe->decoded_size, sd->stage, shader_label_path(pe), &results[i].data, &results[i].size);
+        nt_builder_encode_shader_to_buf(pe->decoded_data, pe->decoded_size, sd->stage, &results[i].data, &results[i].size);
 
 #if NT_LOG_MIN_LEVEL == 0
         results[i].encode_secs = nt_time_now() - t_start;
