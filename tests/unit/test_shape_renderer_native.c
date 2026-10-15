@@ -128,11 +128,10 @@ static void test_several_flushes_of_one_frame_render_in_place(void) {
 }
 
 static void test_wire_circle_has_closed_outer_joins(void) {
-    nt_shape_renderer_set_line_width(0.3F);
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1.0F});
-    nt_shape_renderer_circle_wire((float[3]){0, 0, 0}, 0.5F, (float[4]){0.70710678F, 0, 0, 0.70710678F}, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_circle_wire((float[3]){0, 0, 0}, 0.5F, (float[4]){0.70710678F, 0, 0, 0.70710678F}, 0.3F, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     end_frame_and_read(frame);
@@ -144,11 +143,10 @@ static void test_wire_circle_has_closed_outer_joins(void) {
 /* The sphere wire sits after the circle in the shared wire buffer: its draw starts at a nonzero
  * index offset. Its XY ring faces the identity camera. */
 static void test_wire_template_at_an_index_offset_renders(void) {
-    nt_shape_renderer_set_line_width(0.2F);
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1.0F});
-    nt_shape_renderer_sphere_wire((float[3]){0, 0, 0}, 0.5F, NULL, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_sphere_wire((float[3]){0, 0, 0}, 0.5F, NULL, 0.2F, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     end_frame_and_read(frame);
@@ -160,9 +158,8 @@ static void test_wire_template_at_an_index_offset_renders(void) {
 
 /* Within one flush the line stays above a later fill; the next flush draws over both. */
 static void test_overlay_strokes_draw_over_fills_until_flush(void) {
-    nt_shape_renderer_set_line_width(0.3F);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1.0F});
-    nt_shape_renderer_line((float[3]){-0.5F, 0, 0}, (float[3]){0.5F, 0, 0}, NT_RGBA8(0, 255, 0, 255));
+    nt_shape_renderer_line((float[3]){-0.5F, 0, 0}, (float[3]){0.5F, 0, 0}, 0.3F, NT_RGBA8(0, 255, 0, 255));
     nt_shape_renderer_rect((float[3]){0, 0, 0}, (float[2]){1, 1}, NULL, NT_RGBA8(255, 0, 0, 255));
     nt_shape_renderer_flush();
     nt_shape_renderer_rect((float[3]){-0.25F, 0, 0}, (float[2]){0.5F, 0.5F}, NULL, NT_RGBA8(0, 0, 255, 255));
@@ -186,13 +183,13 @@ static void test_pixel_width_is_constant_across_depth_and_restore(void) {
     const float perspective[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1.22222222F, -1, 0, 0, -2.22222222F, 0};
     const uint32_t white = NT_RGBA8(255, 255, 255, 255);
     nt_shape_renderer_set_vp(perspective);
-    nt_shape_renderer_set_line_width_pixels(6, RT_W, RT_H);
+    nt_shape_renderer_set_width_units_pixels(RT_W, RT_H);
     nt_shape_renderer_restore_gpu();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
-    nt_shape_renderer_line((float[3]){-0.75F, -0.5F, -2}, (float[3]){0.75F, -0.5F, -2}, white);
-    nt_shape_renderer_line((float[3]){-1.5F, 1, -4}, (float[3]){1.5F, 1, -4}, white);
+    nt_shape_renderer_line((float[3]){-0.75F, -0.5F, -2}, (float[3]){0.75F, -0.5F, -2}, 6, white);
+    nt_shape_renderer_line((float[3]){-1.5F, 1, -4}, (float[3]){1.5F, 1, -4}, 6, white);
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     end_frame_and_read(frame);
@@ -200,13 +197,86 @@ static void test_pixel_width_is_constant_across_depth_and_restore(void) {
     TEST_ASSERT_EQUAL_UINT32(6, lit_column(frame, 32, 32, 64));
 }
 
-static void test_pixel_join_bevel_is_bounded(void) {
-    const float points[][3] = {{-0.6F, -0.4F, 0}, {0, 0.4F, 0}, {-0.5F, -0.4F, 0}};
-    nt_shape_renderer_set_line_width_pixels(8, RT_W, RT_H);
+/* Each stroke kind reads its width from its own instance layout: a wrong attribute would read w = 1. */
+static void test_pixel_widths_share_a_flush_in_every_stroke_kind(void) {
+    const float quarter_turn_x[4] = {0.70710678F, 0, 0, 0.70710678F};
+    const float widths[2] = {6, 10};
+    nt_shape_renderer_set_width_units_pixels(RT_W, RT_H);
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
-    nt_shape_renderer_polyline(points, 3, false, NT_RGBA8(255, 255, 255, 255));
+    for (int i = 0; i < 2; i++) {
+        const float y = i == 0 ? 0.75F : -0.25F;
+        const float path[3][3] = {{-0.3F, y, 0}, {-0.1F, y, 0}, {0.1F, y, 0}};
+        nt_shape_renderer_line((float[3]){-0.9F, y, 0}, (float[3]){-0.5F, y, 0}, widths[i], NT_RGBA8(255, 255, 255, 255));
+        nt_shape_renderer_polyline(path, 3, false, widths[i], NT_RGBA8(255, 255, 255, 255));
+        nt_shape_renderer_circle_wire((float[3]){0.6F, y - 0.3F, 0}, 0.3F, quarter_turn_x, widths[i], NT_RGBA8(255, 255, 255, 255));
+    }
+    nt_shape_renderer_flush();
+    uint8_t frame[RT_W * RT_H * 4U] = {0};
+    end_frame_and_read(frame);
+    for (int i = 0; i < 2; i++) {
+        const int top = i * 32;
+        const uint32_t expected = (uint32_t)widths[i];
+        TEST_ASSERT_EQUAL_UINT32(expected, lit_column(frame, 10, top, top + 32));
+        TEST_ASSERT_EQUAL_UINT32(expected, lit_column(frame, 26, top, top + 32));
+        /* Column 49 crosses the ring's top segment mid-way, tilted 11.25 degrees: one pixel of slack. */
+        TEST_ASSERT_UINT32_WITHIN(1, expected, lit_column(frame, 49, top, top + 18));
+    }
+}
+
+/* Interleaved types draw grouped by type, each instance with its own data: rect and
+ * cube wires take a non-uniform scale, the cube its depth, the capsule its half body apart from the width,
+ * the cylinder its height. */
+static void test_interleaved_types_keep_their_instances(void) {
+    /* An eighth turn (45 degrees) about Y narrows a rect to 0.14 and widens a cube to 0.28: the templates differ on screen. */
+    const float turn_y[4] = {0, 0.38268343F, 0, 0.92387953F};
+    nt_shape_renderer_set_width_units_pixels(RT_W, RT_H);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
+    nt_shape_renderer_cube((float[3]){-0.75F, -0.75F, 0}, (float[3]){0.2F, 0.2F, 0.2F}, turn_y, NT_RGBA8(255, 255, 0, 255));
+    nt_shape_renderer_rect_wire((float[3]){-0.5F, 0.5F, 0}, (float[2]){0.5F, 0.25F}, NULL, 4, NT_RGBA8(255, 0, 0, 255));
+    nt_shape_renderer_capsule_wire((float[3]){0, -0.5F, 0}, 0.25F, 0.75F, NULL, 4, NT_RGBA8(0, 0, 255, 255));
+    nt_shape_renderer_rect((float[3]){0.75F, -0.75F, 0}, (float[2]){0.2F, 0.2F}, turn_y, NT_RGBA8(255, 0, 255, 255));
+    nt_shape_renderer_cube((float[3]){-0.75F, -0.25F, 0}, (float[3]){0.2F, 0.2F, 0.2F}, turn_y, NT_RGBA8(0, 255, 255, 255));
+    nt_shape_renderer_cylinder_wire((float[3]){0.5F, -0.25F, 0}, 0.125F, 0.25F, NULL, 2, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_cube_wire((float[3]){0.5F, 0.5F, 0}, (float[3]){0.5F, 0.25F, 0.5F}, turn_y, 4, NT_RGBA8(0, 255, 0, 255));
+    nt_shape_renderer_flush();
+    uint8_t frame[RT_W * RT_H * 4U] = {0};
+    end_frame_and_read(frame);
+    /* Rect and cube outlines: horizontal edges at rows 12 and 20, 4 px each. The turned cube spans
+     * x 0.15..0.85; without its depth it would span 0.32..0.68 and miss column 39. */
+    TEST_ASSERT_EQUAL_UINT32(8, lit_column(frame, 16, 0, 32));
+    assert_pixel(frame, 16, 11, 255, 0, 0);
+    assert_pixel(frame, 16, 16, 0, 0, 0);
+    assert_pixel(frame, 52, 11, 0, 255, 0);
+    assert_pixel(frame, 52, 19, 0, 255, 0);
+    assert_pixel(frame, 52, 16, 0, 0, 0);
+    assert_pixel(frame, 39, 11, 0, 255, 0);
+    /* Cylinder rings at its height's ends, rows 36 and 44, 2 px each. */
+    assert_pixel(frame, 46, 35, 255, 255, 255);
+    assert_pixel(frame, 46, 40, 0, 0, 0);
+    assert_pixel(frame, 46, 43, 255, 255, 255);
+    /* Capsule equator rings, moved by the half body 0.125 to rows 44 and 52; meridian tip at radius + half body, row 36. */
+    assert_pixel(frame, 32, 35, 0, 0, 255);
+    assert_pixel(frame, 34, 43, 0, 0, 255);
+    assert_pixel(frame, 34, 48, 0, 0, 0);
+    assert_pixel(frame, 34, 51, 0, 0, 255);
+    /* Column 4 lies inside the turned cubes and outside a turned rect at their place. */
+    assert_pixel(frame, 4, 56, 255, 255, 0);
+    assert_pixel(frame, 4, 40, 0, 255, 255);
+    assert_pixel(frame, 56, 56, 255, 0, 255);
+    assert_pixel(frame, 52, 56, 0, 0, 0);
+}
+
+static void test_pixel_join_bevel_is_bounded(void) {
+    const float points[][3] = {{-0.6F, -0.4F, 0}, {0, 0.4F, 0}, {-0.5F, -0.4F, 0}};
+    nt_shape_renderer_set_width_units_pixels(RT_W, RT_H);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
+    nt_shape_renderer_polyline(points, 3, false, 8, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     end_frame_and_read(frame);
@@ -217,12 +287,12 @@ static void test_pixel_join_bevel_is_bounded(void) {
 static void test_pixel_line_clips_at_near_plane(void) {
     const float perspective[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1.22222222F, -1, 0, 0, -2.22222222F, 0};
     nt_shape_renderer_set_vp(perspective);
-    nt_shape_renderer_set_line_width_pixels(6, RT_W, RT_H);
+    nt_shape_renderer_set_width_units_pixels(RT_W, RT_H);
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
-    nt_shape_renderer_line((float[3]){-0.5F, 0, 0.2F}, (float[3]){0.75F, 0, -3}, NT_RGBA8(255, 255, 255, 255));
-    nt_shape_renderer_line((float[3]){-1, 0.5F, 0.2F}, (float[3]){1, 0.5F, -0.5F}, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_line((float[3]){-0.5F, 0, 0.2F}, (float[3]){0.75F, 0, -3}, 6, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_line((float[3]){-1, 0.5F, 0.2F}, (float[3]){1, 0.5F, -0.5F}, 6, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     end_frame_and_read(frame);
@@ -235,11 +305,10 @@ static void test_pixel_line_clips_at_near_plane(void) {
 static void test_ortho_world_width_off_axis(void) {
     const float ortho[16] = {0.01F, 0, 0, 0, 0, 0.01F, 0, 0, 0, 0, -0.02F, 0, 0, 0, -0.8F, 1};
     nt_shape_renderer_set_vp(ortho);
-    nt_shape_renderer_set_line_width(25);
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
-    nt_shape_renderer_line((float[3]){-90, 80, 0}, (float[3]){90, 80, 0}, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_line((float[3]){-90, 80, 0}, (float[3]){90, 80, 0}, 25, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     end_frame_and_read(frame);
@@ -251,11 +320,11 @@ static void test_pixel_join_clips_hidden_neighbor(void) {
     const float perspective[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1.22222222F, -1, 0, 0, -2.22222222F, 0};
     const float points[][3] = {{-0.05F, 0, 1}, {0.5F, 0, -2}, {0.5F, 1, -2}};
     nt_shape_renderer_set_vp(perspective);
-    nt_shape_renderer_set_line_width_pixels(6, RT_W, RT_H);
+    nt_shape_renderer_set_width_units_pixels(RT_W, RT_H);
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
-    nt_shape_renderer_polyline(points, 3, false, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_polyline(points, 3, false, 6, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     end_frame_and_read(frame);
@@ -266,15 +335,14 @@ static void test_pixel_join_clips_hidden_neighbor(void) {
 
 static void test_polyline_outer_corner_and_butt_end(void) {
     const float points[][3] = {{-0.5F, -0.5F, 0}, {0, -0.5F, 0}, {0, 0.5F, 0}};
-    nt_shape_renderer_set_line_width(0.3F);
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
     const float offscreen[][3] = {{-5, -5, 0}, {-4, -5, 0}};
     for (uint32_t i = 1; i < NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS; i++) {
-        nt_shape_renderer_polyline(offscreen, 2, false, NT_RGBA8(255, 255, 255, 255));
+        nt_shape_renderer_polyline(offscreen, 2, false, 0.3F, NT_RGBA8(255, 255, 255, 255));
     }
-    nt_shape_renderer_polyline(points, 3, false, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_polyline(points, 3, false, 0.3F, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     end_frame_and_read(frame);
@@ -283,12 +351,12 @@ static void test_polyline_outer_corner_and_butt_end(void) {
 }
 
 static void test_pixel_width_uses_active_viewport_height(void) {
-    nt_shape_renderer_set_line_width_pixels(6, RT_W, RT_H / 2);
+    nt_shape_renderer_set_width_units_pixels(RT_W, RT_H / 2);
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
     nt_gfx_set_viewport(0, 0, RT_W, RT_H / 2);
-    nt_shape_renderer_line((float[3]){-0.5F, 0, 0}, (float[3]){0.5F, 0, 0}, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_line((float[3]){-0.5F, 0, 0}, (float[3]){0.5F, 0, 0}, 6, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     end_frame_and_read(frame);
@@ -315,6 +383,8 @@ int main(void) {
     RUN_TEST(test_polyline_outer_corner_and_butt_end);
     RUN_TEST(test_pixel_width_uses_active_viewport_height);
     RUN_TEST(test_pixel_width_is_constant_across_depth_and_restore);
+    RUN_TEST(test_pixel_widths_share_a_flush_in_every_stroke_kind);
+    RUN_TEST(test_interleaved_types_keep_their_instances);
     RUN_TEST(test_pixel_join_bevel_is_bounded);
     RUN_TEST(test_pixel_line_clips_at_near_plane);
     RUN_TEST(test_wire_circle_has_closed_outer_joins);

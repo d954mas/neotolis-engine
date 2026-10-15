@@ -31,9 +31,9 @@
 /* Shape storage */
 #define MAX_SHAPES_PER_TYPE 32768
 #define MAX_SHAPES (MAX_SHAPES_PER_TYPE * 8)
-/* Frame storage per shape of each type at its costliest variant: a line 28 B, a rect wire 4 strokes of 52 B, a
- * triangle wire 3 strokes, a cube wire 12 lines, and a circle, sphere, cylinder or capsule one 44 B instance. */
-#define BENCH_VERTEX_BYTES_PER_SHAPE_SET (28U + (4U * 52U) + (3U * 52U) + (12U * 28U) + (4U * 44U))
+/* Frame storage per shape of each type at its costliest variant: a line 32 B, a triangle wire 3 strokes of 56 B,
+ * and a rect, cube, circle, sphere, cylinder or capsule one 48 B wire instance. */
+#define BENCH_VERTEX_BYTES_PER_SHAPE_SET (32U + (3U * 56U) + (6U * 48U))
 
 /* Shape types */
 enum { BENCH_LINE, BENCH_RECT, BENCH_TRI, BENCH_CIRCLE, BENCH_CUBE, BENCH_SPHERE, BENCH_CYL, BENCH_CAP };
@@ -222,7 +222,7 @@ static void rebuild_shapes(void) {
 static void dispatch_shape(const bench_shape_t *s) {
     switch (s->type) {
     case BENCH_LINE:
-        nt_shape_renderer_line(s->a, s->b, s->col);
+        nt_shape_renderer_line(s->a, s->b, 0.02F, s->col);
         break;
     case BENCH_RECT:
         switch (s->variant) {
@@ -230,13 +230,13 @@ static void dispatch_shape(const bench_shape_t *s) {
             nt_shape_renderer_rect(s->a, s->size, NULL, s->col);
             break;
         case 1:
-            nt_shape_renderer_rect_wire(s->a, s->size, NULL, s->col);
+            nt_shape_renderer_rect_wire(s->a, s->size, NULL, 0.02F, s->col);
             break;
         case 2:
             nt_shape_renderer_rect(s->a, s->size, s->rot, s->col);
             break;
         case 3:
-            nt_shape_renderer_rect_wire(s->a, s->size, s->rot, s->col);
+            nt_shape_renderer_rect_wire(s->a, s->size, s->rot, 0.02F, s->col);
             break;
         default:
             break;
@@ -248,13 +248,13 @@ static void dispatch_shape(const bench_shape_t *s) {
             nt_shape_renderer_triangle(s->a, s->b, s->c, s->col);
             break;
         case 1:
-            nt_shape_renderer_triangle_wire(s->a, s->b, s->c, s->col);
+            nt_shape_renderer_triangle_wire(s->a, s->b, s->c, 0.02F, s->col);
             break;
         case 2:
             nt_shape_renderer_triangle(s->a, s->b, s->c, s->col);
             break;
         case 3:
-            nt_shape_renderer_triangle_wire(s->a, s->b, s->c, s->col);
+            nt_shape_renderer_triangle_wire(s->a, s->b, s->c, 0.02F, s->col);
             break;
         default:
             break;
@@ -266,13 +266,13 @@ static void dispatch_shape(const bench_shape_t *s) {
             nt_shape_renderer_circle(s->a, s->size[0], NULL, s->col);
             break;
         case 1:
-            nt_shape_renderer_circle_wire(s->a, s->size[0], NULL, s->col);
+            nt_shape_renderer_circle_wire(s->a, s->size[0], NULL, 0.02F, s->col);
             break;
         case 2:
             nt_shape_renderer_circle(s->a, s->size[0], s->rot, s->col);
             break;
         case 3:
-            nt_shape_renderer_circle_wire(s->a, s->size[0], s->rot, s->col);
+            nt_shape_renderer_circle_wire(s->a, s->size[0], s->rot, 0.02F, s->col);
             break;
         default:
             break;
@@ -284,13 +284,13 @@ static void dispatch_shape(const bench_shape_t *s) {
             nt_shape_renderer_cube(s->a, s->size, NULL, s->col);
             break;
         case 1:
-            nt_shape_renderer_cube_wire(s->a, s->size, NULL, s->col);
+            nt_shape_renderer_cube_wire(s->a, s->size, NULL, 0.02F, s->col);
             break;
         case 2:
             nt_shape_renderer_cube(s->a, s->size, s->rot, s->col);
             break;
         case 3:
-            nt_shape_renderer_cube_wire(s->a, s->size, s->rot, s->col);
+            nt_shape_renderer_cube_wire(s->a, s->size, s->rot, 0.02F, s->col);
             break;
         default:
             break;
@@ -300,7 +300,7 @@ static void dispatch_shape(const bench_shape_t *s) {
         if (s->variant == 0) {
             nt_shape_renderer_sphere(s->a, s->size[0], NULL, s->col);
         } else {
-            nt_shape_renderer_sphere_wire(s->a, s->size[0], NULL, s->col);
+            nt_shape_renderer_sphere_wire(s->a, s->size[0], NULL, 0.02F, s->col);
         }
         break;
     case BENCH_CYL:
@@ -309,13 +309,13 @@ static void dispatch_shape(const bench_shape_t *s) {
             nt_shape_renderer_cylinder(s->a, s->size[0], s->size[1], NULL, s->col);
             break;
         case 1:
-            nt_shape_renderer_cylinder_wire(s->a, s->size[0], s->size[1], NULL, s->col);
+            nt_shape_renderer_cylinder_wire(s->a, s->size[0], s->size[1], NULL, 0.02F, s->col);
             break;
         case 2:
             nt_shape_renderer_cylinder(s->a, s->size[0], s->size[1], s->rot, s->col);
             break;
         case 3:
-            nt_shape_renderer_cylinder_wire(s->a, s->size[0], s->size[1], s->rot, s->col);
+            nt_shape_renderer_cylinder_wire(s->a, s->size[0], s->size[1], s->rot, 0.02F, s->col);
             break;
         default:
             break;
@@ -327,13 +327,13 @@ static void dispatch_shape(const bench_shape_t *s) {
             nt_shape_renderer_capsule(s->a, s->size[0], s->size[1], NULL, s->col);
             break;
         case 1:
-            nt_shape_renderer_capsule_wire(s->a, s->size[0], s->size[1], NULL, s->col);
+            nt_shape_renderer_capsule_wire(s->a, s->size[0], s->size[1], NULL, 0.02F, s->col);
             break;
         case 2:
             nt_shape_renderer_capsule(s->a, s->size[0], s->size[1], s->rot, s->col);
             break;
         case 3:
-            nt_shape_renderer_capsule_wire(s->a, s->size[0], s->size[1], s->rot, s->col);
+            nt_shape_renderer_capsule_wire(s->a, s->size[0], s->size[1], s->rot, 0.02F, s->col);
             break;
         default:
             break;
@@ -350,7 +350,7 @@ static void dispatch_shape(const bench_shape_t *s) {
 
 static void draw_letter_path(const float (*points)[3], uint32_t count, uint32_t color) {
     bool closed = count > 2 && points[0][0] == points[count - 1][0] && points[0][2] == points[count - 1][2];
-    nt_shape_renderer_polyline(points, count, closed, color);
+    nt_shape_renderer_polyline(points, count, closed, 0.05F, color);
 }
 
 static void draw_letter(float ox, float oz, float scale, const float *strokes, int count, uint32_t color) {
@@ -392,7 +392,6 @@ static const float s_G[] = {1,1.4F, 0,1.4F, 0,1.4F, 0,0, 0,0, 1,0, 1,0, 1,0.7F, 
 
 static void draw_floor_text(void) {
     uint32_t color = NT_RGBA8(153, 179, 255, 255);
-    nt_shape_renderer_set_line_width(0.05F);
     float scale = 1.2F;
     float gap = 0.3F;
     float cell_w = scale + gap;
@@ -423,7 +422,6 @@ static void draw_floor_text(void) {
     for (int i = 0; i < 6; i++) {
         draw_letter(x2_start + ((float)i * cell_w), z_line2, scale, word2[i].strokes, word2[i].count, color);
     }
-    nt_shape_renderer_set_line_width(0.02F);
 }
 
 /* ---- draw room ---- */
@@ -445,13 +443,13 @@ static void draw_room(void) {
         float x = -hw + ((float)ix * GRID_STEP);
         float a[3] = {x, 0.001F, -hd};
         float b[3] = {x, 0.001F, hd};
-        nt_shape_renderer_line(a, b, grid_col);
+        nt_shape_renderer_line(a, b, 0.02F, grid_col);
     }
     for (int iz = 0; iz < grid_nz; iz++) {
         float z = -hd + ((float)iz * GRID_STEP);
         float a[3] = {-hw, 0.001F, z};
         float b[3] = {hw, 0.001F, z};
-        nt_shape_renderer_line(a, b, grid_col);
+        nt_shape_renderer_line(a, b, 0.02F, grid_col);
     }
 
     uint32_t ceil_col = NT_RGBA8(31, 31, 51, 255);

@@ -22,6 +22,6 @@ test('shape strokes render joined and pixel-width geometry in WebGL2', async ({ 
         return probe ? probe() >>> 0 : -1;
       }),
     )
-    .toBe(0xff);
+    .toBe(0x1ff);
   expect(errors).toEqual([]);
 });

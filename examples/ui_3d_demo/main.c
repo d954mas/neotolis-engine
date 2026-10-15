@@ -357,13 +357,13 @@ static void draw_room(void) {
         const float x = -hw + ((float)ix * GRID_STEP);
         const float a[3] = {x, 0.002F, -hd};
         const float b[3] = {x, 0.002F, hd};
-        nt_shape_renderer_line(a, b, grid_col);
+        nt_shape_renderer_line(a, b, 0.02F, grid_col);
     }
     for (int iz = 0; iz < nz; ++iz) {
         const float z = -hd + ((float)iz * GRID_STEP);
         const float a[3] = {-hw, 0.002F, z};
         const float b[3] = {hw, 0.002F, z};
-        nt_shape_renderer_line(a, b, grid_col);
+        nt_shape_renderer_line(a, b, 0.02F, grid_col);
     }
 
     const float wall_sz_fb[2] = {ROOM_W, ROOM_H};
@@ -412,16 +412,16 @@ static void draw_shape(void) {
     case SHAPE_CUBE: {
         const float sz[3] = {1.6F, 1.6F, 1.6F};
         nt_shape_renderer_cube(pos, sz, rot, col);
-        nt_shape_renderer_cube_wire(pos, sz, rot, wire_col);
+        nt_shape_renderer_cube_wire(pos, sz, rot, 0.02F, wire_col);
         break;
     }
     case SHAPE_SPHERE:
         nt_shape_renderer_sphere(pos, 1.0F, rot, col);
-        nt_shape_renderer_sphere_wire(pos, 1.0F, rot, wire_col);
+        nt_shape_renderer_sphere_wire(pos, 1.0F, rot, 0.02F, wire_col);
         break;
     case SHAPE_CAPSULE:
         nt_shape_renderer_capsule(pos, 0.5F, 2.0F, rot, col);
-        nt_shape_renderer_capsule_wire(pos, 0.5F, 2.0F, rot, wire_col);
+        nt_shape_renderer_capsule_wire(pos, 0.5F, 2.0F, rot, 0.02F, wire_col);
         break;
     default:
         break;

@@ -1176,8 +1176,8 @@ hardware line-width support.
 
 ### Paths and width
 
-- `line(a, b, color)` draws one independent segment with butt ends.
-- `polyline(points, count, closed, color)` draws a connected sequence of
+- `line(a, b, width, color)` draws one independent segment with butt ends.
+- `polyline(points, count, closed, width, color)` draws a connected sequence of
   world-space `float[3]` positions. It consumes points during the call and keeps
   no caller pointers. The caller samples curves into points; this renderer does
   not own Bezier/spline evaluation or an adaptive tessellation policy.
@@ -1188,19 +1188,23 @@ hardware line-width support.
   `points` may be null only when `count=0`. Positions must be finite.
 - Joins use a miter up to four half-widths, then a bevel. A flush in the middle
   of a path keeps its joins.
-- `set_line_width(width)` selects world units, including when switching back
-  from pixels. The default is `0.02`. Width is applied after a shape's scale and
-  rotation, so it is independent of radius or height; the camera projection
-  determines its size on screen.
-- `set_line_width_pixels(width, viewport_width, viewport_height)` selects
-  framebuffer pixels. Dimensions are the active viewport's physical pixel
-  size, including for an offscreen target or sub-viewport. The game resubmits
-  them after a viewport/target/DPR change. The setter does not change the gfx
-  viewport. Both dimensions must be positive; both width setters require a
-  finite positive width and assert programmer violations.
+- Width is an argument of every stroke call (`line`, `polyline` and the `_wire`
+  shapes), like color: it rides in the instance, so strokes of any widths
+  batch together. It must be finite and positive; violations assert. Width is
+  applied after a shape's scale and rotation, so it is independent of radius,
+  height or a non-uniform scale.
+- `set_width_units_world()` selects world units, the default; the camera
+  projection determines their size on screen.
+- `set_width_units_pixels(viewport_width, viewport_height)` selects framebuffer
+  pixels. Dimensions are the active viewport's physical pixel size, including
+  for an offscreen target or sub-viewport. The game resubmits them after a
+  viewport/target/DPR change. The setter does not change the gfx viewport. Both
+  dimensions must be positive.
 
-Width, width mode, viewport dimension, VP and depth changes flush all pending
-geometry. Identical values do not flush.
+Per-shape data (positions, color, width) are call arguments; per-flush state
+(VP, depth, stream, width units) is set by setters. Width unit, viewport
+dimension, VP, depth and stream changes flush all pending geometry; a width
+never does. Identical values do not flush.
 Settings survive GPU restore, including a restore that met a new loss; queued
 shapes are dropped.
 The game must flush before changing render passes or directly changing the gfx
@@ -1218,13 +1222,14 @@ cylindrical tubes with volumetric thickness.
 
 ### Ready-made wire shapes
 
-Rectangle and triangle outlines use connected closed paths. Circle outlines
-use one closed 16-segment XZ ring; spheres use three orthogonal rings. Cylinders
-use two closed rings and four independent struts. Capsules use two equator rings
-and two closed meridians that include the straight sides. A capsule with
+Every `_wire` shape except the triangle is a wire template on its filled
+template's unit shape, transformed by the same scale and rotation. Rectangles use
+one closed 4-edge path; cubes 12 independent edges. Circle outlines use one
+closed 16-segment XZ ring; spheres use three orthogonal rings. Cylinders use two
+closed rings and four independent struts. Capsules use two equator rings and two
+closed meridians that include the straight sides. A capsule with
 `height <= 2 * radius` uses the sphere wire template, avoiding duplicate rings
-and collapsed straight segments. Rotated variants transform the complete path
-before constructing its thickness.
+and collapsed straight segments. Triangle outlines use a connected closed path.
 
 A branching wire graph is distinct from a path: cube edges remain independent
 segments, and cylinder strut/ring intersections do not gain
@@ -1237,39 +1242,40 @@ translucent strokes.
 
 ### Storage and draw order
 
-No heap allocation or trigonometry occurs when submitting strokes. Filled
-shapes and circle, sphere, cylinder and capsule wires use immutable templates
-built at initialization, one index buffer range per type in two shared buffers
-(fills, wires), and cost one instance per shape; one program draws every filled
-type, the capsule's hemisphere tag riding in the template's fourth component.
+No heap allocation or trigonometry occurs when submitting strokes. Filled and
+wire shapes use immutable templates built at initialization, one index buffer
+range per type in two shared buffers (fills, wires), and cost one instance per
+shape; one program draws every filled type and one every wire type, both through
+one shared transform, the capsule's hemisphere tag riding in the template's
+fourth component.
 
-Each kind is staged on the CPU between flushes. `flush` copies every non-empty
-kind into frame storage and draws it from there: instanced kinds go to the
-vertex stream set by `nt_shape_renderer_set_stream` (default
-`NT_GFX_FRAME_VERTEX`; a change flushes, like the other settings) and bind it at
-the copy's offset, and triangles are a non-indexed list in the general stream,
+Each kind is staged on the CPU between flushes, fill and wire templates per
+type. `flush` copies every non-empty kind into frame storage and draws it from
+there: instanced kinds go to the vertex stream set by
+`nt_shape_renderer_set_stream` (default `NT_GFX_FRAME_VERTEX`; a change flushes,
+like the other settings) and bind it at the copy's offset, and triangles are a non-indexed list in the general stream,
 which their vertex input reads at offset 0. Frame storage holds every flush of
 the frame until `nt_gfx_end_frame`, and so does the command stream, so a host
 sizes the used vertex streams and `stream_capacity` for its busiest frame;
 `nt_shape_renderer_init` asserts a nonzero general-stream budget. The view
-projection, eye, pixel scale and line width are one std140 `Draw` block that every
+projection, eye and pixel scale are one std140 `Draw` block that every
 program of a flush binds through `nt_gfx_bind_uniform_block`: equal settings copy
 nothing and a change allocates a block (up to 256 B of padding).
 
 Every flush draws filled instanced shapes by type, then triangles,
 then wire templates by type, connected segments and independent lines. Within
 one flush this kind order replaces submission order: outlines stay on top of
-fills, and interleaved submissions batch into at most one draw per kind. Flushes
-are the only ordering barriers — explicit `flush`, a full queue and the state
-changes above. A game that needs a later layer over an earlier one, typically in
+fills, and interleaved submissions batch into at most one draw per kind, or per
+type for fill and wire templates. Flushes are the only ordering barriers —
+explicit `flush`, a full queue and the state changes above. A game that needs a later layer over an earlier one, typically in
 overlay mode, calls `flush` between them.
 
 `NT_SHAPE_RENDERER_MAX_LINES` bounds independent lines (default 8192) and
 `NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS` connected segments (default 1024).
-`NT_SHAPE_RENDERER_MAX_INSTANCES` bounds each filled type (default 2048) and
-`NT_SHAPE_RENDERER_MAX_VERTICES` the triangle vertices (default 16384). Each wire
-template type holds `ceil(NT_SHAPE_RENDERER_MAX_INSTANCES / 4)` shapes (default
-512). These bound the CPU staging, not a frame: a full queue flushes all pending
+`NT_SHAPE_RENDERER_MAX_FILLS` bounds each filled type (default 512),
+`NT_SHAPE_RENDERER_MAX_WIRES` each wire template type (default 512) and
+`NT_SHAPE_RENDERER_MAX_VERTICES` the triangle vertices (default 16384).
+These bound the CPU staging, not a frame: a full queue flushes all pending
 geometry.
 
 ## Renderer complexity classes

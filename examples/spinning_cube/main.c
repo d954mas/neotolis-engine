@@ -92,13 +92,13 @@ static void draw_room(void) {
         float x = -hw + ((float)ix * GRID_STEP);
         float a[3] = {x, 0.001F, -hd};
         float b[3] = {x, 0.001F, hd};
-        nt_shape_renderer_line(a, b, grid_col);
+        nt_shape_renderer_line(a, b, 0.02F, grid_col);
     }
     for (int iz = 0; iz < grid_nz; iz++) {
         float z = -hd + ((float)iz * GRID_STEP);
         float a[3] = {-hw, 0.001F, z};
         float b[3] = {hw, 0.001F, z};
-        nt_shape_renderer_line(a, b, grid_col);
+        nt_shape_renderer_line(a, b, 0.02F, grid_col);
     }
 
     /* Ceiling */
@@ -160,7 +160,7 @@ static void draw_shape(void) {
             nt_shape_renderer_cube(pos, sz, rot, col);
         }
         if (draw_wire) {
-            nt_shape_renderer_cube_wire(pos, sz, rot, wcol);
+            nt_shape_renderer_cube_wire(pos, sz, rot, 0.02F, wcol);
         }
         break;
     }
@@ -170,7 +170,7 @@ static void draw_shape(void) {
             nt_shape_renderer_sphere(pos, radius, rot, col);
         }
         if (draw_wire) {
-            nt_shape_renderer_sphere_wire(pos, radius, rot, wcol);
+            nt_shape_renderer_sphere_wire(pos, radius, rot, 0.02F, wcol);
         }
         break;
     }
@@ -181,7 +181,7 @@ static void draw_shape(void) {
             nt_shape_renderer_cylinder(pos, radius, height, rot, col);
         }
         if (draw_wire) {
-            nt_shape_renderer_cylinder_wire(pos, radius, height, rot, wcol);
+            nt_shape_renderer_cylinder_wire(pos, radius, height, rot, 0.02F, wcol);
         }
         break;
     }
@@ -192,7 +192,7 @@ static void draw_shape(void) {
             nt_shape_renderer_capsule(pos, radius, height, rot, col);
         }
         if (draw_wire) {
-            nt_shape_renderer_capsule_wire(pos, radius, height, rot, wcol);
+            nt_shape_renderer_capsule_wire(pos, radius, height, rot, 0.02F, wcol);
         }
         break;
     }

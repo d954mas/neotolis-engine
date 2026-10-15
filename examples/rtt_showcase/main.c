@@ -420,8 +420,8 @@ static void draw_scene_contents(void) {
     nt_shape_renderer_rect(floor_pos, floor_size, floor_rot, floor_color);
 
     uint32_t line_color = NT_RGBA8(255, 255, 255, 255);
-    nt_shape_renderer_line((float[3]){-2.7F, 0.04F, -1.4F}, (float[3]){2.4F, 0.04F, 1.25F}, line_color);
-    nt_shape_renderer_line((float[3]){-2.4F, 0.04F, 1.15F}, (float[3]){2.8F, 0.04F, -1.25F}, line_color);
+    nt_shape_renderer_line((float[3]){-2.7F, 0.04F, -1.4F}, (float[3]){2.4F, 0.04F, 1.25F}, 0.02F, line_color);
+    nt_shape_renderer_line((float[3]){-2.4F, 0.04F, 1.15F}, (float[3]){2.8F, 0.04F, -1.25F}, 0.02F, line_color);
     nt_shape_renderer_flush();
 }
 

@@ -10,8 +10,14 @@
 #define NT_SHAPE_RENDERER_MAX_VERTICES 16384
 #endif
 
-#ifndef NT_SHAPE_RENDERER_MAX_INSTANCES
-#define NT_SHAPE_RENDERER_MAX_INSTANCES 2048
+/* Filled shapes of each type */
+#ifndef NT_SHAPE_RENDERER_MAX_FILLS
+#define NT_SHAPE_RENDERER_MAX_FILLS 512
+#endif
+
+/* Wire shapes of each template type (triangle wires are connected segments) */
+#ifndef NT_SHAPE_RENDERER_MAX_WIRES
+#define NT_SHAPE_RENDERER_MAX_WIRES 512
 #endif
 
 #ifndef NT_SHAPE_RENDERER_MAX_LINES
@@ -35,48 +41,49 @@ void nt_shape_renderer_flush(void);
 
 /* Also defines the camera that world-width strokes face. */
 void nt_shape_renderer_set_vp(const float vp[16]);
-/* Select world-space thickness (default 0.02). Width must be finite and positive. */
-void nt_shape_renderer_set_line_width(float width);
-/* Select framebuffer-pixel thickness. Width must be finite and positive; viewport dimensions must be positive.
- * Pass the active viewport dimensions, not CSS size. */
-void nt_shape_renderer_set_line_width_pixels(float width, uint32_t viewport_width, uint32_t viewport_height);
+/* Units of every width passed to line, polyline and the _wire calls; world by default. */
+void nt_shape_renderer_set_width_units_world(void);
+/* Framebuffer pixels of the active viewport: pass its dimensions, not CSS size; both must be positive. */
+void nt_shape_renderer_set_width_units_pixels(uint32_t viewport_width, uint32_t viewport_height);
 void nt_shape_renderer_set_depth(bool enabled);
 /* Frame vertex stream for instanced shapes (default NT_GFX_FRAME_VERTEX); a pass with its own
  * stream keeps its shapes' instance pointers while counts stay. Triangle batches stay on the
  * general stream, which must be sized. */
 void nt_shape_renderer_set_stream(uint32_t stream);
 
-/* ---- Line ---- */
+/* ---- Line ----
+ * width (here and in every _wire call) is finite and positive, in the current width units.
+ * It rides in the instance: any mix of widths batches like equal ones. */
 
-void nt_shape_renderer_line(const float a[3], const float b[3], uint32_t color);
+void nt_shape_renderer_line(const float a[3], const float b[3], float width, uint32_t color);
 
 /* Connected finite world-space points, read during the call; consecutive duplicates are skipped.
  * Joins, ends and closing rules: render architecture, "Shape strokes". */
-void nt_shape_renderer_polyline(const float (*points)[3], uint32_t count, bool closed, uint32_t color);
+void nt_shape_renderer_polyline(const float (*points)[3], uint32_t count, bool closed, float width, uint32_t color);
 
 /* ---- Shapes ----
  * rot is a unit quaternion (x, y, z, w) or NULL for no rotation. */
 
 void nt_shape_renderer_rect(const float pos[3], const float size[2], const float rot[4], uint32_t color);
-void nt_shape_renderer_rect_wire(const float pos[3], const float size[2], const float rot[4], uint32_t color);
+void nt_shape_renderer_rect_wire(const float pos[3], const float size[2], const float rot[4], float width, uint32_t color);
 
 void nt_shape_renderer_triangle(const float a[3], const float b[3], const float c[3], uint32_t color);
-void nt_shape_renderer_triangle_wire(const float a[3], const float b[3], const float c[3], uint32_t color);
+void nt_shape_renderer_triangle_wire(const float a[3], const float b[3], const float c[3], float width, uint32_t color);
 
 void nt_shape_renderer_circle(const float center[3], float radius, const float rot[4], uint32_t color);
-void nt_shape_renderer_circle_wire(const float center[3], float radius, const float rot[4], uint32_t color);
+void nt_shape_renderer_circle_wire(const float center[3], float radius, const float rot[4], float width, uint32_t color);
 
 void nt_shape_renderer_cube(const float center[3], const float size[3], const float rot[4], uint32_t color);
-void nt_shape_renderer_cube_wire(const float center[3], const float size[3], const float rot[4], uint32_t color);
+void nt_shape_renderer_cube_wire(const float center[3], const float size[3], const float rot[4], float width, uint32_t color);
 
 void nt_shape_renderer_sphere(const float center[3], float radius, const float rot[4], uint32_t color);
-void nt_shape_renderer_sphere_wire(const float center[3], float radius, const float rot[4], uint32_t color);
+void nt_shape_renderer_sphere_wire(const float center[3], float radius, const float rot[4], float width, uint32_t color);
 
 void nt_shape_renderer_cylinder(const float center[3], float radius, float height, const float rot[4], uint32_t color);
-void nt_shape_renderer_cylinder_wire(const float center[3], float radius, float height, const float rot[4], uint32_t color);
+void nt_shape_renderer_cylinder_wire(const float center[3], float radius, float height, const float rot[4], float width, uint32_t color);
 
 void nt_shape_renderer_capsule(const float center[3], float radius, float height, const float rot[4], uint32_t color);
-void nt_shape_renderer_capsule_wire(const float center[3], float radius, float height, const float rot[4], uint32_t color);
+void nt_shape_renderer_capsule_wire(const float center[3], float radius, float height, const float rot[4], float width, uint32_t color);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS
@@ -96,7 +103,6 @@ uint32_t nt_shape_renderer_test_vertex_count(void);
 uint32_t nt_shape_renderer_test_stroke_count(void);
 const float *nt_shape_renderer_test_vp(void);
 const float *nt_shape_renderer_test_eye(void);
-float nt_shape_renderer_test_line_width(void);
 bool nt_shape_renderer_test_depth_enabled(void);
 bool nt_shape_renderer_test_initialized(void);
 #endif
