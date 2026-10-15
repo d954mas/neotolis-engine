@@ -1176,8 +1176,8 @@ hardware line-width support.
 
 ### Paths and width
 
-- `line(a, b, color)` draws one independent segment with butt ends.
-- `polyline(points, count, closed, color)` draws a connected sequence of
+- `line(a, b, width, color)` draws one independent segment with butt ends.
+- `polyline(points, count, closed, width, color)` draws a connected sequence of
   world-space `float[3]` positions. It consumes points during the call and keeps
   no caller pointers. The caller samples curves into points; this renderer does
   not own Bezier/spline evaluation or an adaptive tessellation policy.
@@ -1188,19 +1188,20 @@ hardware line-width support.
   `points` may be null only when `count=0`. Positions must be finite.
 - Joins use a miter up to four half-widths, then a bevel. A flush in the middle
   of a path keeps its joins.
-- `set_line_width(width)` selects world units, including when switching back
-  from pixels. The default is `0.02`. Width is applied after a shape's scale and
-  rotation, so it is independent of radius or height; the camera projection
-  determines its size on screen.
-- `set_line_width_pixels(width, viewport_width, viewport_height)` selects
-  framebuffer pixels. Dimensions are the active viewport's physical pixel
-  size, including for an offscreen target or sub-viewport. The game resubmits
-  them after a viewport/target/DPR change. The setter does not change the gfx
-  viewport. Both dimensions must be positive; both width setters require a
-  finite positive width and assert programmer violations.
+- Width is an argument of every stroke call (`line`, `polyline` and the `_wire`
+  shapes), like color: it rides in the instance, so strokes of any widths
+  batch together. It must be finite and positive; violations assert.
+- `set_width_units_world()` selects world units, the default. Width is applied
+  after a shape's scale and rotation, so it is independent of radius or height;
+  the camera projection determines its size on screen.
+- `set_width_units_pixels(viewport_width, viewport_height)` selects framebuffer
+  pixels. Dimensions are the active viewport's physical pixel size, including
+  for an offscreen target or sub-viewport. The game resubmits them after a
+  viewport/target/DPR change. The setter does not change the gfx viewport. Both
+  dimensions must be positive.
 
-Width, width mode, viewport dimension, VP and depth changes flush all pending
-geometry. Identical values do not flush.
+Width unit, viewport dimension, VP, depth and stream changes flush all pending
+geometry; a width never does. Identical values do not flush.
 Settings survive GPU restore, including a restore that met a new loss; queued
 shapes are dropped.
 The game must flush before changing render passes or directly changing the gfx
@@ -1252,7 +1253,7 @@ which their vertex input reads at offset 0. Frame storage holds every flush of
 the frame until `nt_gfx_end_frame`, and so does the command stream, so a host
 sizes the used vertex streams and `stream_capacity` for its busiest frame;
 `nt_shape_renderer_init` asserts a nonzero general-stream budget. The view
-projection, eye, pixel scale and line width are one std140 `Draw` block that every
+projection, eye and pixel scale are one std140 `Draw` block that every
 program of a flush binds through `nt_gfx_bind_uniform_block`: equal settings copy
 nothing and a change allocates a block (up to 256 B of padding).
 
