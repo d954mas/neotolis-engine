@@ -96,14 +96,12 @@ typedef struct {
 /* Program reflection lives here, not on the pipelines that borrow the program. */
 typedef struct {
     GLuint program;
-#if NT_LOG_MIN_LEVEL <= 2
-    char label[64];
-#endif
     /* Sampler units are program state: assigned in reflection order at link,
      * written once, never rewritten by a material. */
     nt_gfx_gl_sampler_unit_t sampler_units[NT_GFX_MAX_TEXTURE_SLOTS];
     uint8_t sampler_count;
     uint32_t block_sizes[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS]; /* GL_UNIFORM_BLOCK_DATA_SIZE per bound slot; 0 = none */
+    const char *label;                                     /* debug name; static storage */
 } nt_gfx_gl_program_t;
 
 /* What a pointer call needs, packed: nt_vertex_attr_t pads its enum to 12 bytes. */
@@ -1302,7 +1300,7 @@ static void log_program_failure(uint32_t slot, const nt_gfx_gl_program_t *rec, c
     (void)rec;
     (void)phase;
     (void)reason;
-    NT_LOG_ERROR("program %u (GL %u) \"%s\": phase=%s: %s", slot, rec->program, rec->label[0] != '\0' ? rec->label : "<unnamed>", phase, reason);
+    NT_LOG_ERROR("program slot %u (GL %u) \"%s\": phase=%s: %s", slot, rec->program, rec->label != NULL && rec->label[0] != '\0' ? rec->label : "<unnamed>", phase, reason);
 }
 
 /* Reflection invariants need context before TRAP discards the assert expression. */
@@ -1310,7 +1308,7 @@ static void log_program_failure(uint32_t slot, const nt_gfx_gl_program_t *rec, c
     do {                                                                                                                                                                                               \
         if (!(condition)) {                                                                                                                                                                            \
             log_program_failure((uint32_t)((rec) - s_programs), (rec), "uniform-reflection", (reason));                                                                                                \
-            NT_ASSERT(false && reason);                                                                                                                                                                \
+            NT_ASSERT((condition) && reason);                                                                                                                                                          \
         }                                                                                                                                                                                              \
     } while (0)
 
@@ -1498,7 +1496,6 @@ static void write_sampler_units(GLuint program, const nt_gfx_gl_program_t *rec) 
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- issued-call records expand at owning sites
 bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uint32_t slot, const char *label) {
-    (void)label;
     NT_ASSERT(slot > 0 && slot <= s_init_desc.max_programs && s_programs[slot].program == 0 && "create_program: the record at the frontend slot must be empty");
     /* Emscripten's glCreateProgram throws on the null program some browsers return on a lost context. */
     if (nt_gfx_gl_ctx_query_lost()) {
@@ -1513,22 +1510,7 @@ bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uin
     NT_GL(glAttachShader, program, (GLuint)fs_backend);
     NT_GL(glLinkProgram, program);
     s_programs[slot].program = program;
-#if NT_LOG_MIN_LEVEL <= 2
-    if (label != NULL) {
-        size_t n = 0;
-        while (n + 1 < sizeof(s_programs[slot].label) && label[n] != '\0') {
-            const unsigned char byte = (unsigned char)label[n];
-            s_programs[slot].label[n] = (char)(byte < 32 || byte == 127 || byte == '"' ? '?' : byte);
-            n++;
-        }
-        if (n + 1 == sizeof(s_programs[slot].label)) {
-            while (n > 0 && ((unsigned char)label[n] & 0xc0U) == 0x80U) {
-                n--;
-            }
-        }
-        s_programs[slot].label[n] = '\0';
-    }
-#endif
+    s_programs[slot].label = label;
     return true;
 }
 
@@ -1550,9 +1532,8 @@ nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll
         /* A loss fails the link before its event arrives; the caller latches it. */
         const bool lost = nt_gfx_gl_ctx_query_lost();
         if (!lost) {
-            log_program_failure(backend_handle, rec, "link", "driver rejected program");
             nt_gfx_gl_log_link_failure(rec->program);
-            /* The final identity survives a bounded sink even when the driver emits many lines. */
+            /* After the driver lines, so a journal that keeps its tail keeps the identity. */
             log_program_failure(backend_handle, rec, "link", "driver rejected program");
         }
         NT_ASSERT(lost && "program link failed on a live context");

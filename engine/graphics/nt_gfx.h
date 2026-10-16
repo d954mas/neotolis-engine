@@ -844,7 +844,7 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
  * earlier than the next frame. Link errors, a standalone non-sampler uniform (values arrive in
  * uniform blocks) and >NT_GFX_MAX_TEXTURE_SLOTS samplers assert there. Returns invalid while the context is lost, and for a live stage
  * whose GPU object a loss discarded -- recreate the stages and relink. Only a stale stage handle asserts.
- * label is an optional diagnostic name, borrowed during this call and copied up to 63 UTF-8 bytes. */
+ * label is an optional debug name; static storage. */
 nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs, const char *label);
 /* Returns the live pipeline of an equal desc (the label is not identity, and gfx keeps none) or
  * creates one; gfx owns it until its program is destroyed. Accepts a linking program; binding the

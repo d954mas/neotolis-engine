@@ -133,16 +133,12 @@ and device limits surface — offline linking arrives with `ShaderAsset`.
 Before a live-context link or uniform-reflection failure traps, an ERROR record
 identifies the program slot, GL name, caller-supplied program label, and failure
 phase (`link` or `uniform-reflection`). Reflection contract failures include the
-violated contract. The link summary precedes driver-log queries and is repeated
-after detailed logs so a bounded journal retains it. Context loss keeps its
-recoverable outcome; existing log-floor and runtime filters still apply.
+violated contract. The link record follows the driver logs, so a journal that
+keeps its tail keeps the identity. Context loss keeps its recoverable outcome.
 
-The label is optional and borrowed only during the creation call. The program
-copies up to 63 UTF-8 bytes, replacing ASCII control bytes and double quotes for
-log formatting; NULL or empty labels report `<unnamed>`. Copies survive stage destruction
-and asynchronous finalization. Labels do not affect program identity or readiness.
-With `NT_LOG_MIN_LEVEL=3`, label storage and copying are compiled out. Pack-loaded
-and embedded stages use the same explicit program label; packs carry no names.
+The label is an optional debug name in static storage, like material labels; the
+program stores the pointer. NULL or empty labels report `<unnamed>`. Labels do not
+affect program identity or readiness.
 
 ## ShaderAsset purpose
 

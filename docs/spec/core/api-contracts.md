@@ -151,9 +151,7 @@ without owning it. Destroying the program destroys its pipelines; the owner
 does not need to walk them. Shader stages have independent lifetimes: destroying
 a stage does not affect a program already linked from it.
 
-`nt_gfx_make_program(vs, fs, label)` borrows the optional diagnostic label only
-during the call. The program owns a bounded copy when error logging is compiled
-in; the label does not participate in identity. See
+The optional program label is a debug name in static storage and is not identity; see
 [shader diagnostics](../render/shader.md#runtime-objects-shadercode-program).
 
 A program's linked executable and identity are immutable after

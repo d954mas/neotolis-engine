@@ -18,8 +18,7 @@ typedef struct {
 /* ref is required, with both stage resources assigned. Returns true when a link starts; the
  * caller assigns ref->program to materials then, and renderers skip it until it is ready.
  * Linking waits for both stages to be ready. Call each frame; after a context loss, drop()
- * before the first pass so the next update links again. label is borrowed during the call,
- * copied by gfx only when linking starts, and never stored by ref. */
+ * before the first pass so the next update links again. label: debug name; static storage. */
 static inline bool nt_program_ref_update(nt_program_ref_t *ref, const char *label) {
     NT_ASSERT(ref != NULL && "nt_program_ref_update: ref is required");
     NT_ASSERT(ref->vs.id != 0 && ref->fs.id != 0 && "nt_program_ref: request both stage resources before update()");
