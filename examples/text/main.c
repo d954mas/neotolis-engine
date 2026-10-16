@@ -239,7 +239,7 @@ static void frame(void) {
 
     /* Step resource system */
     nt_resource_step();
-    if (nt_program_ref_update(&s_text_program)) {
+    if (nt_program_ref_update(&s_text_program, "text/text")) {
         nt_material_set_program(s_text_material, s_text_program.program);
     }
 

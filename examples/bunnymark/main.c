@@ -107,10 +107,10 @@ static nt_program_ref_t s_text_program;
 /* Links each pair once both its stages are ready. The programs are ours:
  * materials only borrow the handles, and context loss forces a relink. */
 static void link_programs(void) {
-    if (nt_program_ref_update(&s_sprite_program)) {
+    if (nt_program_ref_update(&s_sprite_program, "bunnymark/sprite")) {
         nt_material_set_program(s_sprite_material, s_sprite_program.program);
     }
-    if (nt_program_ref_update(&s_text_program)) {
+    if (nt_program_ref_update(&s_text_program, "bunnymark/text")) {
         nt_material_set_program(s_text_material, s_text_program.program);
     }
 }

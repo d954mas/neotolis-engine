@@ -98,10 +98,10 @@ static nt_program_ref_t s_text_program;
 /* Links each pair once both its stages are ready. The programs are ours:
  * materials only borrow the handles, and context loss forces a relink. */
 static void link_programs(void) {
-    if (nt_program_ref_update(&s_sprite_program)) {
+    if (nt_program_ref_update(&s_sprite_program, "rtt_showcase/sprite")) {
         nt_material_set_program(s_sprite_material, s_sprite_program.program);
     }
-    if (nt_program_ref_update(&s_text_program)) {
+    if (nt_program_ref_update(&s_text_program, "rtt_showcase/text")) {
         nt_material_set_program(s_text_material, s_text_program.program);
     }
 }
@@ -181,7 +181,7 @@ static void destroy_quad_resources(void) {
 static void make_quad_resources(void) {
     s_demo.quad_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_quad_vs_src, .label = "rtt_quad_vs"});
     s_demo.quad_fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_quad_fs_src, .label = "rtt_quad_fs"});
-    s_demo.quad_program = nt_gfx_make_program(s_demo.quad_vs, s_demo.quad_fs);
+    s_demo.quad_program = nt_gfx_make_program(s_demo.quad_vs, s_demo.quad_fs, "rtt_showcase/quad");
 
     s_demo.quad_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = s_demo.quad_program,

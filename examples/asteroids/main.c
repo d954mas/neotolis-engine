@@ -1090,9 +1090,10 @@ static void restore_gpu(void) {
 }
 
 static bool prepare_gpu(void) {
+    static const char *const program_labels[] = {"asteroids/rock", "asteroids/planet", "asteroids/sky", "asteroids/text", "asteroids/noise"};
     bool ready = !g_nt_gfx.context_lost && s_generated;
     for (uint32_t i = 0; i < 5; i++) {
-        if (nt_program_ref_update(&s_programs[i]) && i == 3) {
+        if (nt_program_ref_update(&s_programs[i], program_labels[i]) && i == 3) {
             nt_material_set_program(s_text_material, s_programs[i].program);
         }
         ready = nt_gfx_program_ready(s_programs[i].program) && ready;
@@ -1455,7 +1456,7 @@ static void build_ui(void) {
     s_ui_built = false;
     s_ui_escape_consumed = false;
     s_ui_keyboard_blocked = false;
-    if (nt_program_ref_update(&s_ui_program)) {
+    if (nt_program_ref_update(&s_ui_program, "asteroids/ui")) {
         nt_material_set_program(s_ui_material, s_ui_program.program);
     }
     if (!nt_resource_is_ready(s_ui_atlas) || !nt_gfx_program_ready(s_ui_program.program) || !nt_gfx_program_ready(s_programs[3].program) || nt_font_get_metrics(s_font).units_per_em == 0) {

@@ -18,8 +18,8 @@ typedef struct {
 /* ref is required, with both stage resources assigned. Returns true when a link starts; the
  * caller assigns ref->program to materials then, and renderers skip it until it is ready.
  * Linking waits for both stages to be ready. Call each frame; after a context loss, drop()
- * before the first pass so the next update links again. */
-static inline bool nt_program_ref_update(nt_program_ref_t *ref) {
+ * before the first pass so the next update links again. label: debug name; static storage. */
+static inline bool nt_program_ref_update(nt_program_ref_t *ref, const char *label) {
     NT_ASSERT(ref != NULL && "nt_program_ref_update: ref is required");
     NT_ASSERT(ref->vs.id != 0 && ref->fs.id != 0 && "nt_program_ref: request both stage resources before update()");
     if (ref->program.id != 0) {
@@ -36,7 +36,7 @@ static inline bool nt_program_ref_update(nt_program_ref_t *ref) {
         return false;
     }
     /* Invalid means a lost context; the next frame retries. */
-    ref->program = nt_gfx_make_program((nt_shader_t){vs}, (nt_shader_t){fs});
+    ref->program = nt_gfx_make_program((nt_shader_t){vs}, (nt_shader_t){fs}, label);
     return ref->program.id != 0;
 }
 

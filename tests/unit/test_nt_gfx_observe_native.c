@@ -207,7 +207,7 @@ static void test_new_program_defines_sampler_names(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){gl_Position=vec4(0.0);}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){
         .type = NT_SHADER_FRAGMENT, .source = "precision mediump float; uniform sampler2D a; uniform sampler2D b; out vec4 color; void main(){color=texture(a,vec2(0.0))+texture(b,vec2(0.0));}"});
-    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_program_t program = nt_gfx_make_program(vs, fs, NULL);
     /* Record the frame whose begin_frame finishes the link; a parallel-compile driver may take several. */
     const struct timespec link_start = nt_test_link_wait_start();
     do {
@@ -304,7 +304,7 @@ static void test_issued_calls_record_floats_names_and_payloads(void) {
 static void test_frame_storage_upload_is_issued_before_the_replayed_draw(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){gl_Position=vec4(0.0);}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "precision mediump float; out vec4 color; void main(){color=vec4(1.0);}"});
-    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_program_t program = nt_gfx_make_program(vs, fs, NULL);
     nt_test_gfx_link_wait(program);
     nt_gfx_capture_request();
     nt_gfx_end_frame();
@@ -346,7 +346,7 @@ static void test_complete_capture_matches_gl_counters(void) {
     nt_shader_t fs = nt_gfx_make_shader(
         &(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT,
                             .source = "precision mediump float; uniform sampler2D tex; layout(std140) uniform Draw { vec4 tint; }; out vec4 color; void main(){color=texture(tex,vec2(0.5))*tint;}"});
-    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_program_t program = nt_gfx_make_program(vs, fs, NULL);
     /* Record the frame whose begin_frame finishes the link; a parallel-compile driver may take several. */
     const struct timespec link_start = nt_test_link_wait_start();
     do {
@@ -613,7 +613,7 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
     const char *fs_source = "precision mediump float; layout(std140) uniform Draw { vec4 u_color; }; out vec4 color; void main() { color = u_color; }";
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_source});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source});
-    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_program_t program = nt_gfx_make_program(vs, fs, NULL);
     nt_test_gfx_link_wait(program);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});

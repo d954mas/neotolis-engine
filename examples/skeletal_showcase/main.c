@@ -1645,21 +1645,21 @@ static void shutdown_mesh_scene(void) {
 
 // #region resources
 static void link_programs(void) {
-    if (nt_program_ref_update(&s_skin_program)) {
+    if (nt_program_ref_update(&s_skin_program, "skeletal_showcase/skin")) {
         for (uint32_t i = 0; i <= RIG_COUNT; ++i) {
             nt_material_set_program(s_skin_material[i], s_skin_program.program);
         }
         nt_material_set_program(s_mix_material, s_skin_program.program);
     }
-    if (nt_program_ref_update(&s_static_program)) {
+    if (nt_program_ref_update(&s_static_program, "skeletal_showcase/static")) {
         for (uint32_t i = 0; i <= RIG_COUNT; ++i) {
             nt_material_set_program(s_static_material[i], s_static_program.program);
         }
     }
-    if (nt_program_ref_update(&s_sprite_program)) {
+    if (nt_program_ref_update(&s_sprite_program, "skeletal_showcase/sprite")) {
         nt_material_set_program(s_sprite_material, s_sprite_program.program);
     }
-    if (nt_program_ref_update(&s_text_program)) {
+    if (nt_program_ref_update(&s_text_program, "skeletal_showcase/text")) {
         nt_material_set_program(s_text_material, s_text_program.program);
     }
 }

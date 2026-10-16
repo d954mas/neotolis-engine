@@ -11,7 +11,7 @@ Related: [Material System](material.md), [Runtime Formats](../assets/runtime-for
 ## Runtime objects: ShaderCode, Program
 
 `NT_ASSET_SHADER_CODE` is the text of ONE stage; there is no program asset.
-`nt_gfx_make_shader` compiles a stage and `nt_gfx_make_program(vs, fs)` links
+`nt_gfx_make_shader` compiles a stage and `nt_gfx_make_program(vs, fs, label)` links
 a pair, from either an embedded source string or two resolved resources. The
 shader resource exists so the builder can compile each stage offline and reject
 a broken one at build time. That validation needs a GL context: a headless build
@@ -49,7 +49,7 @@ caches all borrow the handle and never destroy it.
 A program linked from pack-loaded stages needs a per-frame gate, because the
 stages arrive asynchronously and nothing can link before both resolve.
 `nt_program_ref_t` (`material/nt_program_ref.h`) is that gate: the game gives it
-the two resource handles once, calls `nt_program_ref_update` every frame, and
+the two resource handles once, calls `nt_program_ref_update(ref, label)` every frame, and
 assigns on the frame it returns true. It stores the resource handles rather than
 the compiled stages or the source text, because only the handles survive a
 context loss -- `nt_program_ref_drop` clears the program and the same gate links
@@ -129,6 +129,16 @@ that stage is permanently unready, so the owner recreates it and links again.
 A stale stage handle is a developer error and still traps. Because the builder validates each stage
 separately and never links a pair, the trap is also where mismatched varyings
 and device limits surface — offline linking arrives with `ShaderAsset`.
+
+Before a live-context link or uniform-reflection failure traps, an ERROR record
+identifies the program slot, GL name, caller-supplied program label, and failure
+phase (`link` or `uniform-reflection`). Reflection contract failures include the
+violated contract. The link record follows the driver logs, so a journal that
+keeps its tail keeps the identity. Context loss keeps its recoverable outcome.
+
+The label is an optional debug name in static storage, like material labels; the
+program stores the pointer. NULL or empty labels report `<unnamed>`. Labels do not
+affect program identity or readiness.
 
 ## ShaderAsset purpose
 

@@ -105,7 +105,7 @@ static nt_program_ref_t s_cube_program;
 /* Links once both stages are ready. The program is ours: the material only
  * borrows the handle, and context loss forces a relink. */
 static void link_programs(void) {
-    if (nt_program_ref_update(&s_cube_program)) {
+    if (nt_program_ref_update(&s_cube_program, "textured_quad/cube")) {
         nt_material_set_program(s_cube_material, s_cube_program.program);
     }
 }

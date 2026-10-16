@@ -556,22 +556,22 @@ static nt_program_ref_t s_base_program;
 /* Links each pair once both its stages are ready. The programs are ours:
  * materials only borrow the handles, and context loss forces a relink. */
 static void link_programs(void) {
-    if (nt_program_ref_update(&s_sprite_program)) {
+    if (nt_program_ref_update(&s_sprite_program, "ui_showcase/sprite")) {
         nt_material_set_program(s_sprite_material, s_sprite_program.program);
     }
-    if (nt_program_ref_update(&s_text_program)) {
+    if (nt_program_ref_update(&s_text_program, "ui_showcase/text")) {
         nt_material_set_program(s_text_material, s_text_program.program);
     }
-    if (nt_program_ref_update(&s_radial_program)) {
+    if (nt_program_ref_update(&s_radial_program, "ui_showcase/radial")) {
         nt_material_set_program(s_radial_material, s_radial_program.program);
     }
-    if (nt_program_ref_update(&s_radial_image_program)) {
+    if (nt_program_ref_update(&s_radial_image_program, "ui_showcase/radial_image")) {
         for (int m = 0; m < 4; ++m) {
             nt_material_set_program(s_radial_image_material[m], s_radial_image_program.program);
         }
         nt_material_set_program(s_radial_image_packed_material, s_radial_image_program.program);
     }
-    if (nt_program_ref_update(&s_base_program)) {
+    if (nt_program_ref_update(&s_base_program, "ui_showcase/base")) {
         nt_material_set_program(s_base_material, s_base_program.program);
     }
 }
