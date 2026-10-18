@@ -1586,8 +1586,10 @@ static void init_mesh_scene(void) {
     }
     s_mix_material = make_mesh_material(s_mix_texture_resource);
     s_skin_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SKINNED_VERT, NT_ASSET_SHADER_CODE);
+    s_skin_program.label = "skeletal_showcase/skin";
     s_skin_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_FRAG, NT_ASSET_SHADER_CODE);
     s_static_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_VERT, NT_ASSET_SHADER_CODE);
+    s_static_program.label = "skeletal_showcase/static";
     s_static_program.fs = s_skin_program.fs;
 }
 
@@ -1645,21 +1647,21 @@ static void shutdown_mesh_scene(void) {
 
 // #region resources
 static void link_programs(void) {
-    if (nt_program_ref_update(&s_skin_program, "skeletal_showcase/skin")) {
+    if (nt_program_ref_update(&s_skin_program)) {
         for (uint32_t i = 0; i <= RIG_COUNT; ++i) {
             nt_material_set_program(s_skin_material[i], s_skin_program.program);
         }
         nt_material_set_program(s_mix_material, s_skin_program.program);
     }
-    if (nt_program_ref_update(&s_static_program, "skeletal_showcase/static")) {
+    if (nt_program_ref_update(&s_static_program)) {
         for (uint32_t i = 0; i <= RIG_COUNT; ++i) {
             nt_material_set_program(s_static_material[i], s_static_program.program);
         }
     }
-    if (nt_program_ref_update(&s_sprite_program, "skeletal_showcase/sprite")) {
+    if (nt_program_ref_update(&s_sprite_program)) {
         nt_material_set_program(s_sprite_material, s_sprite_program.program);
     }
-    if (nt_program_ref_update(&s_text_program, "skeletal_showcase/text")) {
+    if (nt_program_ref_update(&s_text_program)) {
         nt_material_set_program(s_text_material, s_text_program.program);
     }
 }
@@ -2789,8 +2791,10 @@ int main(int argc, char *argv[]) {
     mount_pack("skeletal_showcase");
     mount_pack("skeletal_showcase_clips");
     s_sprite_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
+    s_sprite_program.label = "skeletal_showcase/sprite";
     s_sprite_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
     s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
+    s_text_program.label = "skeletal_showcase/text";
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas = nt_resource_request(ASSET_ATLAS_SKELETAL_SHOWCASE_UI, NT_ASSET_ATLAS);
     s_font_resource = nt_resource_request(ASSET_FONT_SKELETAL_SHOWCASE_FONT, NT_ASSET_FONT);

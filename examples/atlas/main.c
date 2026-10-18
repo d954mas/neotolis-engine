@@ -97,7 +97,7 @@ static bool s_pack_dumped;
 /* Links once both stages are ready. The program is ours: the material only
  * borrows the handle, and context loss forces a relink. */
 static void link_program(void) {
-    if (nt_program_ref_update(&s_program, "atlas/atlas")) {
+    if (nt_program_ref_update(&s_program)) {
         nt_material_set_program(s_material, s_program.program);
     }
 }
@@ -261,6 +261,7 @@ int main(int argc, char *argv[]) {
     /* Request resource handles */
     s_mesh_handle = nt_resource_request(ASSET_MESH_ASSETS_MESHES_CUBE_GLB, NT_ASSET_MESH);
     s_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_VERT, NT_ASSET_SHADER_CODE);
+    s_program.label = "atlas/atlas";
     s_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_FRAG, NT_ASSET_SHADER_CODE);
     /* Atlas page texture: "spineboy/tex0" */
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_SPINEBOY_TEX0, NT_ASSET_TEXTURE);

@@ -1557,7 +1557,7 @@ static void assert_reflection_query_failure_asserts(GLenum skipped_query) {
     /* Backend-only programs: the fresh init made no frontend program, so both slots are free. */
     const uint32_t existing = 1;
     const uint32_t failing = 2;
-    TEST_ASSERT_TRUE(nt_gfx_backend_create_program(vs, fs, existing, NULL));
+    TEST_ASSERT_TRUE(nt_gfx_backend_create_program(vs, fs, existing, "reflection/existing"));
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, finish_backend_program(existing));
     TEST_ASSERT_TRUE(nt_gfx_backend_create_program(vs, fs, failing, ""));
 
@@ -1583,6 +1583,8 @@ static void assert_reflection_query_failure_asserts(GLenum skipped_query) {
     if (NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR) {
         TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "phase=uniform-reflection"));
         TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "\"<unnamed>\""));
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "query returned no data: glGetError=0x"));
+        TEST_ASSERT_NULL(strstr(s_program_failure_log, "reflection/existing"));
     }
 }
 
@@ -1801,11 +1803,11 @@ static void test_failed_link_with_empty_driver_logs_records_its_phase(void) {
     }
 }
 
-static void test_reflection_invariant_records_its_program_and_phase(void) {
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() { gl_Position = vec4(0.0); }\n", .label = "reflection.vert"});
-    nt_shader_t fs =
-        nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "uniform float u_value;\nout vec4 color;\nvoid main() { color = vec4(u_value); }\n", .label = "reflection.frag"});
-    nt_program_t program = nt_gfx_make_program(vs, fs, "reflection/standalone");
+/* The record carries the label, the phase, and the name and value the driver reflected. */
+static void expect_program_failure_record(const char *fragment_source, const char *label, const char *phase, const char *reason, const char *driver_value) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() { gl_Position = vec4(0.0); }\n"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    nt_program_t program = nt_gfx_make_program(vs, fs, label);
     s_program_failure_log[0] = '\0';
     nt_log_add_sink(capture_program_failure, NULL);
     NT_TEST_EXPECT_ASSERT(nt_test_gfx_link_wait(program));
@@ -1813,12 +1815,23 @@ static void test_reflection_invariant_records_its_program_and_phase(void) {
     nt_gfx_destroy_program(program);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "standalone non-sampler uniform"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, reason));
     if (NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR) {
-        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "phase=uniform-reflection"));
-        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "\"reflection/standalone\""));
-        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "standalone non-sampler uniform"));
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, phase));
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, label));
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, reason));
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, driver_value));
     }
+}
+
+static void test_reflection_invariant_records_its_program_and_phase(void) {
+    expect_program_failure_record("uniform float u_value;\nout vec4 color;\nvoid main() { color = vec4(u_value); }\n", "reflection/standalone", "phase=uniform-reflection",
+                                  "standalone non-sampler uniform", "u_value=0x1406");
+}
+
+static void test_block_binding_invariant_records_its_phase(void) {
+    expect_program_failure_record("layout(std140) uniform Lighting { vec4 u_light; };\nout vec4 color;\nvoid main() { color = u_light; }\n", "reflection/block", "phase=block-binding",
+                                  "neither reserved nor in", "Lighting=0x10");
 }
 
 static void test_pass_load_preserves_color_and_depth_independently(void) {
@@ -2072,6 +2085,7 @@ int main(void) {
     RUN_TEST(test_failed_link_logs_its_stage_and_asserts_at_begin_frame);
     RUN_TEST(test_failed_link_with_empty_driver_logs_records_its_phase);
     RUN_TEST(test_reflection_invariant_records_its_program_and_phase);
+    RUN_TEST(test_block_binding_invariant_records_its_phase);
     int failures = UNITY_END();
     nt_window_shutdown();
     return failures;

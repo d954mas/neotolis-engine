@@ -127,14 +127,16 @@ void test_program_ref_links_once_and_relinks_after_drop(void) {
     nt_program_ref_t ref = {0};
     ref.vs = publish_stage("ref_vs", make_stage(NT_SHADER_VERTEX).id);
     ref.fs = publish_stage("ref_fs", make_stage(NT_SHADER_FRAGMENT).id);
+    ref.label = "ref/test";
     nt_resource_step();
 
-    TEST_ASSERT_TRUE(nt_program_ref_update(&ref, NULL));
+    TEST_ASSERT_TRUE(nt_program_ref_update(&ref));
+    TEST_ASSERT_EQUAL_STRING("ref/test", nt_gfx_fake_last_program_label());
     const nt_program_t first = ref.program;
     TEST_ASSERT_FALSE(nt_gfx_program_ready(first)); /* the link finishes at a begin_frame */
-    TEST_ASSERT_FALSE(nt_program_ref_update(&ref, NULL));
+    TEST_ASSERT_FALSE(nt_program_ref_update(&ref));
     nt_test_gfx_link_wait(first);
-    TEST_ASSERT_FALSE(nt_program_ref_update(&ref, NULL));
+    TEST_ASSERT_FALSE(nt_program_ref_update(&ref));
 
     /* Context dies: handles stay valid, GPU objects do not; the ref keeps its program. */
     nt_gfx_fake_set_context_lost(true);
@@ -142,7 +144,7 @@ void test_program_ref_links_once_and_relinks_after_drop(void) {
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
     TEST_ASSERT_FALSE(nt_gfx_program_ready(first));
-    TEST_ASSERT_FALSE(nt_program_ref_update(&ref, NULL));
+    TEST_ASSERT_FALSE(nt_program_ref_update(&ref));
     TEST_ASSERT_EQUAL_UINT32(first.id, ref.program.id);
 
     nt_gfx_end_frame();
@@ -152,13 +154,13 @@ void test_program_ref_links_once_and_relinks_after_drop(void) {
     TEST_ASSERT_FALSE(nt_gfx_program_valid(first));
 
     /* The stages died too: no link until the resource step brings them back. */
-    TEST_ASSERT_FALSE(nt_program_ref_update(&ref, NULL));
+    TEST_ASSERT_FALSE(nt_program_ref_update(&ref));
     TEST_ASSERT_EQUAL_UINT32(0, ref.program.id);
     republish_stage("ref_vs", make_stage(NT_SHADER_VERTEX).id);
     republish_stage("ref_fs", make_stage(NT_SHADER_FRAGMENT).id);
     nt_resource_step();
 
-    TEST_ASSERT_TRUE(nt_program_ref_update(&ref, NULL));
+    TEST_ASSERT_TRUE(nt_program_ref_update(&ref));
     TEST_ASSERT_NOT_EQUAL_UINT32(first.id, ref.program.id);
     nt_test_gfx_link_wait(ref.program);
 

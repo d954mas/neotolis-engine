@@ -105,7 +105,7 @@ static nt_program_ref_t s_cube_program;
 /* Links once both stages are ready. The program is ours: the material only
  * borrows the handle, and context loss forces a relink. */
 static void link_programs(void) {
-    if (nt_program_ref_update(&s_cube_program, "textured_quad/cube")) {
+    if (nt_program_ref_update(&s_cube_program)) {
         nt_material_set_program(s_cube_material, s_cube_program.program);
     }
 }
@@ -425,6 +425,7 @@ int main(int argc, char *argv[]) {
     /* Request resource handles (instanced shaders) */
     s_mesh_handle = nt_resource_request(ASSET_MESH_ASSETS_MESHES_CUBE_GLB, NT_ASSET_MESH);
     s_cube_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_VERT, NT_ASSET_SHADER_CODE);
+    s_cube_program.label = "textured_quad/cube";
     s_cube_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_FRAG, NT_ASSET_SHADER_CODE);
     s_lenna_handle = nt_resource_request(ASSET_TEXTURE_TEXTURES_LENNA, NT_ASSET_TEXTURE);
 

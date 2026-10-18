@@ -239,7 +239,7 @@ static void frame(void) {
 
     /* Step resource system */
     nt_resource_step();
-    if (nt_program_ref_update(&s_text_program, "text/text")) {
+    if (nt_program_ref_update(&s_text_program)) {
         nt_material_set_program(s_text_material, s_text_program.program);
     }
 
@@ -468,6 +468,7 @@ int main(int argc, char *argv[]) {
 
     /* 12. Request shader resources */
     s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
+    s_text_program.label = "text/text";
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
 
     /* 13. Create text material (shader pair, alpha blend for Slug) */

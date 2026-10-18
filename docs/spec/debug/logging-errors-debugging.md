@@ -104,6 +104,7 @@ Asserts are contracts, not error handling. A failed assert means the program is 
 - `nt_core` exports the selected mode to consumers. `nt_assert.h` requires it explicitly; `NDEBUG` and `NT_DEBUG` do not select or alter it.
 - Production Release presets select TRAP (1): contract violations crash immediately instead of continuing with corrupted state. No string bloat, no handler overhead — just a single branch + trap instruction per assert.
 - Assert expressions are side-effect-free. A failed assert never continues in either mode; do not duplicate its condition with recovery or a log/return path. OFF (0) is rejected by CMake and the header.
+- Device failure record: a trap whose cause depends on the device or driver, not on engine or game code, is preceded by one ERROR record naming the object, the failed phase and the values the driver returned. TRAP keeps no assert text and a field report keeps only logs, so without it a release crash names at most a function. This is the one allowed log before an assert; it never adds recovery. Programmer-invariant asserts stay bare.
 - Hard guards are required at untrusted/runtime-input boundaries and wherever a public API promises recoverable rejection; those guards implement the API contract independently of diagnostic configuration.
 - Never use asserts for conditions that can legitimately occur at runtime (missing files, user input, network errors) — those are error handling (see below).
 

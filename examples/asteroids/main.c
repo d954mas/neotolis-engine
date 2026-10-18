@@ -1090,10 +1090,9 @@ static void restore_gpu(void) {
 }
 
 static bool prepare_gpu(void) {
-    static const char *const program_labels[] = {"asteroids/rock", "asteroids/planet", "asteroids/sky", "asteroids/text", "asteroids/noise"};
     bool ready = !g_nt_gfx.context_lost && s_generated;
     for (uint32_t i = 0; i < 5; i++) {
-        if (nt_program_ref_update(&s_programs[i], program_labels[i]) && i == 3) {
+        if (nt_program_ref_update(&s_programs[i]) && i == 3) {
             nt_material_set_program(s_text_material, s_programs[i].program);
         }
         ready = nt_gfx_program_ready(s_programs[i].program) && ready;
@@ -1264,6 +1263,7 @@ static void init_ui(void) {
     NT_ASSERT(s_ui != NULL);
     s_ui_atlas = nt_resource_request(ASSET_ATLAS_ASTEROIDS_UI_ATLAS, NT_ASSET_ATLAS);
     s_ui_program.vs = nt_resource_request(nt_hash64_str("assets/shaders/sprite.vert"), NT_ASSET_SHADER_CODE);
+    s_ui_program.label = "asteroids/ui";
     s_ui_program.fs = nt_resource_request(nt_hash64_str("assets/shaders/sprite.frag"), NT_ASSET_SHADER_CODE);
     s_ui_material =
         nt_material_create(&(nt_material_create_desc_t){.blend = nt_blend_alpha_premultiplied(), .depth_test = false, .depth_write = false, .cull_mode = NT_CULL_NONE, .label = "asteroids_controls"});
@@ -1456,7 +1456,7 @@ static void build_ui(void) {
     s_ui_built = false;
     s_ui_escape_consumed = false;
     s_ui_keyboard_blocked = false;
-    if (nt_program_ref_update(&s_ui_program, "asteroids/ui")) {
+    if (nt_program_ref_update(&s_ui_program)) {
         nt_material_set_program(s_ui_material, s_ui_program.program);
     }
     if (!nt_resource_is_ready(s_ui_atlas) || !nt_gfx_program_ready(s_ui_program.program) || !nt_gfx_program_ready(s_programs[3].program) || nt_font_get_metrics(s_font).units_per_em == 0) {
@@ -2286,17 +2286,21 @@ int main(int argc, char **argv) {
     init_ui();
     const char *vertices[] = {"scene", "planet", "sky"};
     const char *fragments[] = {"rock", "planet", "sky"};
+    static const char *const labels[] = {"asteroids/rock", "asteroids/planet", "asteroids/sky"};
     for (uint32_t i = 0; i < 3; i++) {
         char path[128];
         (void)snprintf(path, sizeof(path), "examples/asteroids/shaders/%s.vert", vertices[i]);
         s_programs[i].vs = nt_resource_request(nt_hash64_str(path), NT_ASSET_SHADER_CODE);
         (void)snprintf(path, sizeof(path), "examples/asteroids/shaders/%s.frag", fragments[i]);
         s_programs[i].fs = nt_resource_request(nt_hash64_str(path), NT_ASSET_SHADER_CODE);
+        s_programs[i].label = labels[i];
     }
     s_programs[3].vs = nt_resource_request(nt_hash64_str("assets/shaders/slug_text.vert"), NT_ASSET_SHADER_CODE);
     s_programs[3].fs = nt_resource_request(nt_hash64_str("assets/shaders/slug_text.frag"), NT_ASSET_SHADER_CODE);
+    s_programs[3].label = "asteroids/text";
     s_programs[4].vs = nt_resource_request(nt_hash64_str("examples/asteroids/shaders/noise.vert"), NT_ASSET_SHADER_CODE);
     s_programs[4].fs = nt_resource_request(nt_hash64_str("examples/asteroids/shaders/noise.frag"), NT_ASSET_SHADER_CODE);
+    s_programs[4].label = "asteroids/noise";
     s_mars = nt_resource_request(nt_hash64_str("asteroids/mars"), NT_ASSET_TEXTURE);
     const char *sky_names[] = {"u_sky_px", "u_sky_nx", "u_sky_py", "u_sky_ny", "u_sky_pz", "u_sky_nz"};
     for (uint32_t i = 0; i < 6; i++) {

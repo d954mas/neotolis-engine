@@ -98,6 +98,7 @@ static uint32_t s_fake_render_target_create_count;
 static uint32_t s_fake_render_target_destroy_count;
 static uint32_t s_fake_texture_create_count;
 static uint32_t s_fake_program_create_count;
+static const char *s_fake_last_program_label;
 static uint32_t s_fake_pipeline_create_count;
 static uint32_t s_fake_bind_pipeline_count;
 static uint32_t s_fake_bound_pipeline;
@@ -161,6 +162,7 @@ uint32_t nt_gfx_fake_render_target_create_count(void) { return s_fake_render_tar
 uint32_t nt_gfx_fake_render_target_destroy_count(void) { return s_fake_render_target_destroy_count; }
 uint32_t nt_gfx_fake_texture_create_count(void) { return s_fake_texture_create_count; }
 uint32_t nt_gfx_fake_program_create_count(void) { return s_fake_program_create_count; }
+const char *nt_gfx_fake_last_program_label(void) { return s_fake_last_program_label; }
 uint32_t nt_gfx_fake_pipeline_create_count(void) { return s_fake_pipeline_create_count; }
 uint32_t nt_gfx_fake_bind_pipeline_count(void) { return s_fake_bind_pipeline_count; }
 uint32_t nt_gfx_fake_update_texture_count(void) { return s_fake_update_texture_count; }
@@ -227,6 +229,7 @@ void nt_gfx_fake_reset(void) {
     s_fake_render_target_destroy_count = 0;
     s_fake_texture_create_count = 0;
     s_fake_program_create_count = 0;
+    s_fake_last_program_label = NULL;
     s_fake_pipeline_create_count = 0;
     s_fake_bind_pipeline_count = 0;
     s_fake_update_texture_count = 0;
@@ -422,7 +425,7 @@ uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle) { (void)backend_handle; }
 
 bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uint32_t slot, const char *label) {
-    (void)label;
+    s_fake_last_program_label = label;
     s_fake_program_create_count++;
     NT_ASSERT(slot > 0 && slot <= s_fake_max_programs && !s_fake_program_table[slot].used && "create_program: the record at the frontend slot must be empty");
     if (s_fake_context_lost) {

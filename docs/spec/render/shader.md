@@ -49,7 +49,7 @@ caches all borrow the handle and never destroy it.
 A program linked from pack-loaded stages needs a per-frame gate, because the
 stages arrive asynchronously and nothing can link before both resolve.
 `nt_program_ref_t` (`material/nt_program_ref.h`) is that gate: the game gives it
-the two resource handles once, calls `nt_program_ref_update(ref, label)` every frame, and
+the two resource handles and an optional label once, calls `nt_program_ref_update` every frame, and
 assigns on the frame it returns true. It stores the resource handles rather than
 the compiled stages or the source text, because only the handles survive a
 context loss -- `nt_program_ref_drop` clears the program and the same gate links
@@ -130,10 +130,12 @@ A stale stage handle is a developer error and still traps. Because the builder v
 separately and never links a pair, the trap is also where mismatched varyings
 and device limits surface — offline linking arrives with `ShaderAsset`.
 
-Before a live-context link or uniform-reflection failure traps, an ERROR record
-identifies the program slot, GL name, caller-supplied program label, and failure
-phase (`link` or `uniform-reflection`). Reflection contract failures include the
-violated contract. The link record follows the driver logs, so a journal that
+A live-context link or reflection failure is device-dependent, so it follows the
+[device failure record](../debug/logging-errors-debugging.md#assert-policy) rule:
+the record names the program slot, GL name and label, the phase (`link`,
+`block-binding` or `uniform-reflection`), the violated contract, and the uniform
+or block name with the value the driver returned (`glGetError` when a query
+returned nothing). The link record follows the driver logs, so a journal that
 keeps its tail keeps the identity. Context loss keeps its recoverable outcome.
 
 The label is an optional debug name in static storage, like material labels; the
