@@ -69,8 +69,8 @@
 
 #include "clay.h"
 
-/* Frame storage budget of the sprite, text and shape geometry (one cube): the busiest tab peaks at about 410 KB / 64 KB, and with
- * the inspector open at about 760 KB / 225 KB. */
+/* Frame storage budget of the sprite, text and shape geometry (one cube): the busiest tabs peak at about 380 KB / 64 KB, and with
+ * the inspector open at most about 760 KB / 225 KB. */
 #define UI_SHOWCASE_VERTEX_BYTES (2048U * 1024U)
 #define UI_SHOWCASE_INDEX_BYTES (512U * 1024U)
 // #endregion
@@ -4085,7 +4085,7 @@ int main(int argc, char *argv[]) {
     });
 
     nt_ui_set_sprite_material(s_ctx, s_sprite_material);
-    nt_ui_set_text_material(s_ctx, s_text_material, 0.0F);
+    nt_ui_set_text_material(s_ctx, s_text_material);
 
     s_font = nt_font_create(&(nt_font_create_desc_t){
         .max_glyphs = 256,

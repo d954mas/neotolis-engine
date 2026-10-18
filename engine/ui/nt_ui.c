@@ -1299,7 +1299,6 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, f
         .color = nt_ui_pack_clay(t->textColor),
         .letter_tracking = (float)t->letterSpacing * text_scale,
         .line_leading = (float)t->lineHeight * text_scale,
-        .glyph_depth_bias = ctx->text_glyph_depth_bias,
     };
     if (deco != NULL) {
         nt_ui_label_deco_style(deco, opacity, &style);
@@ -1850,14 +1849,11 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
      * Restored at walk exit. After the early-outs, the path to exit has no further returns. */
     const nt_material_t saved_sprite_mat = ctx->sprite_material;
     const nt_material_t saved_text_mat = ctx->text_material;
-    const float saved_text_bias = ctx->text_glyph_depth_bias;
     if (mode == NT_UI_WALK_MODE_DEBUG_INSPECTOR) {
         if (ctx->inspector_sprite_material.id != 0) {
             ctx->sprite_material = ctx->inspector_sprite_material;
         }
         if (ctx->inspector_text_material.id != 0) {
-            /* The bias belongs to the game's text material. */
-            ctx->text_glyph_depth_bias = (ctx->inspector_text_material.id == ctx->text_material.id) ? saved_text_bias : 0.0F;
             ctx->text_material = ctx->inspector_text_material;
         }
     }
@@ -1991,7 +1987,6 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
     /* Restore the game's materials swapped in for the inspector pass. */
     ctx->sprite_material = saved_sprite_mat;
     ctx->text_material = saved_text_mat;
-    ctx->text_glyph_depth_bias = saved_text_bias;
     /* Inspector strings backed by module-level rings are now consumed; release ownership. */
     if (should_release_inspector_strings(ctx, mode)) {
         nt_ui_internal_inspector_strings_release(ctx);
@@ -2031,12 +2026,11 @@ void nt_ui_set_sprite_material(nt_ui_context_t *ctx, nt_material_t sprite_materi
     ctx->sprite_material = sprite_material;
 }
 
-void nt_ui_set_text_material(nt_ui_context_t *ctx, nt_material_t text_material, float glyph_depth_bias) {
+void nt_ui_set_text_material(nt_ui_context_t *ctx, nt_material_t text_material) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_text_material: ctx must be non-NULL");
     NT_ASSERT(!ctx->in_frame && "nt_ui_set_text_material: must be called outside begin/end");
     NT_ASSERT(text_material.id != 0 && "nt_ui_set_text_material: invalid material handle");
     ctx->text_material = text_material;
-    ctx->text_glyph_depth_bias = glyph_depth_bias;
 }
 
 void nt_ui_set_custom_handler(nt_ui_context_t *ctx, nt_ui_custom_handler_t fn, void *userdata) {
@@ -2065,13 +2059,6 @@ void nt_ui_set_view_proj(nt_ui_context_t *ctx, const float view_proj[16]) {
     glm_mat4_inv(m_in, m_inv);
     memcpy(ctx->inv_view_proj, m_inv, sizeof ctx->inv_view_proj);
     ctx->view_proj_set = true;
-}
-
-void nt_ui_set_element_depth_bias(nt_ui_context_t *ctx, float ndc_per_element) {
-    NT_ASSERT(ctx != NULL && "nt_ui_set_element_depth_bias: ctx must be non-NULL");
-    NT_ASSERT(ctx->use_raycast_input && "nt_ui_set_element_depth_bias: only valid when desc.use_raycast_input=true");
-    NT_ASSERT(isfinite(ndc_per_element) && ndc_per_element >= 0.0F && "nt_ui_set_element_depth_bias: ndc_per_element must be finite and non-negative");
-    ctx->element_depth_bias_ndc = ndc_per_element;
 }
 // #endregion
 

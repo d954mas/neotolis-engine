@@ -579,7 +579,7 @@ Storage never grows: an overflow logs the stream, the needed and the free bytes
 and stops the program because the capacity is the
 game's budget. `nt_gfx_counters_t.frame_bytes` reports each stream's use of the
 frame, final after `end_frame`, to size the capacities from a real scene.
-Text uses the general vertex stream and INDEX: 208 bytes of vertices and 24
+Text uses the general vertex stream and INDEX: 192 bytes of vertices and 24
 bytes of indices per glyph quad, decoration quads included.
 
 Each upload is one `NT_GFX_OP_BUFFER_UPLOAD` operation on its frame buffer,

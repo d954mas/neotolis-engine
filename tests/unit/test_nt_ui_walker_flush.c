@@ -13,7 +13,6 @@
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
-#include "ui/nt_ui_internal.h"
 #include "unity.h"
 
 /* Painter order of the walker: sprites and text record their draws in command order, and
@@ -167,28 +166,6 @@ static void test_compatible_texts_merge(void) {
     TEST_ASSERT_EQUAL_UINT32(2U, ui_walker_fx_quads(nt_gfx_fake_draw_trace_at(0)));
 }
 
-static const char s_text_two[] = "XY";
-
-/* The ctx text depth bias reaches the renderer per glyph: the second glyph sits one bias step nearer. */
-static void test_text_material_depth_bias_reaches_glyphs(void) {
-    bind_real_font();
-    nt_ui_set_text_material(s_fx.ctx, s_fx.text_material, 0.25F);
-    make_text(0, 0);
-    s_test_cmds[0].renderData.text.stringContents = (Clay_StringSlice){.length = 2, .chars = s_text_two, .baseChars = s_text_two};
-    inject_frozen_cmds(1);
-
-    nt_gfx_fake_draw_trace_reset(true);
-    walk();
-    ui_walker_fixture_end_frame(&s_fx);
-
-    const nt_gfx_fake_draw_t d = nt_gfx_fake_draw_trace_at(0);
-    TEST_ASSERT_EQUAL_UINT32(2U, ui_walker_fx_quads(d));
-    for (uint32_t corner = 0; corner < 4U; corner++) {
-        TEST_ASSERT_TRUE(ui_walker_fx_vertex_float(ui_walker_fx_text_vertex(d, 0, corner), UI_WALKER_FX_TEXT_DEPTH_BIAS) == 0.0F);
-        TEST_ASSERT_TRUE(ui_walker_fx_vertex_float(ui_walker_fx_text_vertex(d, 1, corner), UI_WALKER_FX_TEXT_DEPTH_BIAS) == 0.25F);
-    }
-}
-
 /* The same two rects without a clip change merge into one draw: the split above is the scissor's. */
 static void test_compatible_sprites_merge(void) {
     make_rect(0, 0);
@@ -236,7 +213,6 @@ int main(void) {
     RUN_TEST(test_scissor_change_splits_sprite_draws);
     RUN_TEST(test_scissor_change_splits_text_draws);
     RUN_TEST(test_compatible_texts_merge);
-    RUN_TEST(test_text_material_depth_bias_reaches_glyphs);
     RUN_TEST(test_compatible_sprites_merge);
     RUN_TEST(test_one_material_two_passes_rebinds);
     return UNITY_END();

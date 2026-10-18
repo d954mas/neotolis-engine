@@ -1268,7 +1268,7 @@ static void init_ui(void) {
     s_ui_material =
         nt_material_create(&(nt_material_create_desc_t){.blend = nt_blend_alpha_premultiplied(), .depth_test = false, .depth_write = false, .cull_mode = NT_CULL_NONE, .label = "asteroids_controls"});
     nt_ui_set_sprite_material(s_ui, s_ui_material);
-    nt_ui_set_text_material(s_ui, s_text_material, 0);
+    nt_ui_set_text_material(s_ui, s_text_material);
     nt_ui_set_font(s_ui, 0, s_font);
     init_ui_styles();
     nt_log_info("Asteroids UI: context=%zu bytes, scratch=131072 bytes, elements=384", s_ui_arena_size);
