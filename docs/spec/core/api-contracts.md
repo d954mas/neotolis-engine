@@ -287,8 +287,8 @@ text material may declare textures of its own; each draw passes the font's curve
 texture as `u_curve_texture`. gfx's coverage check confirms every sampler the
 program actually links.
 
-Engine text does not write depth: it is transparent, and the game draws it after
-the geometry it may cover. `slug_text.frag` has no `discard`: a premultiplied
+The engine ships no depth-writing text path: text is transparent, and the game
+draws it after the geometry it may cover. `slug_text.frag` has no `discard`: a premultiplied
 empty pixel changes nothing, and `discard` blocks hidden-surface removal on some
 tile GPUs (PowerVR HSR). A game may still give a text material depth writes; it
 then needs a variant that discards empty pixels so they do not occlude, and it

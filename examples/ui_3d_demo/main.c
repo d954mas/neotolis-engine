@@ -69,8 +69,8 @@
 #endif
 
 /* Frame storage budget of the sprite, text and shape geometry (the room, grid and shown shape take under 8 KB);
- * the first scene peaks at about 75 KB / 11 KB, and with
- * the inspector open at about 210 KB / 38 KB. */
+ * the first scene peaks at most about 75 KB / 11 KB, and with
+ * the inspector open at most about 210 KB / 38 KB. */
 #define UI_3D_DEMO_VERTEX_BYTES (512U * 1024U)
 #define UI_3D_DEMO_INDEX_BYTES (128U * 1024U)
 // #endregion
@@ -1024,7 +1024,7 @@ int main(int argc, char *argv[]) {
     nt_resource_register_type(NT_ASSET_TEXTURE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_texture, .deactivate = nt_gfx_deactivate_texture});
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
     nt_atlas_init();
-    nt_material_init(&(nt_material_desc_t){.max_materials = 6}); /* sprite, text, inspector sprite+text, + margin */
+    nt_material_init(&(nt_material_desc_t){.max_materials = 6}); /* sprite, text, overlay sprite+text, + margin */
     nt_font_init(&(nt_font_desc_t){.max_fonts = 2});
 
     nt_shape_renderer_init();

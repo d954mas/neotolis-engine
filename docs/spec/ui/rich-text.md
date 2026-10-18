@@ -174,7 +174,7 @@ swapped between two walks of one frame is the one drawn. `set_material` is bound
 `bound` guard), so a band's adjacent inline images on one atlas page **merge into
 one sprite draw**; an image on another page starts a new draw. The images of one
 block share its plane, so with a depth-writing image material an image that
-overlaps an earlier one fails the depth test there. Because the sprite renderer emits while the walk's
+overlaps an earlier one can fail the sprite pipeline's LESS depth test there. Because the sprite renderer emits while the walk's
 **scroll scissor is the current gfx scissor state**, the images are clipped to the
 panel/scroll automatically — by that scissor, **not** a Clay
 `.floating.clipTo`. Caveat: an `fx.scale > 1` image loses its per-image

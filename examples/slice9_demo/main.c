@@ -55,8 +55,8 @@
 
 #include "clay.h"
 
-/* Frame storage budget of the sprite and text geometry; the first scene peaks at about 53 KB / 8 KB, and with
- * the inspector open at about 205 KB / 35 KB. */
+/* Frame storage budget of the sprite and text geometry; the first scene peaks at about 48 KB / 8 KB, and with
+ * the inspector open at most about 205 KB / 35 KB. */
 #define SLICE9_DEMO_VERTEX_BYTES (512U * 1024U)
 #define SLICE9_DEMO_INDEX_BYTES (128U * 1024U)
 // #endregion
