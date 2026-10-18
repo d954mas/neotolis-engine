@@ -1,5 +1,5 @@
 # Size Report: asteroids (wasm-analysis-paired)
-# Commit: a345ad6
+# Commit: 87e765d
 
 ## WASM Section Sizes
 
@@ -7,29 +7,29 @@ Section                Size
 ---------------- ----------
 Type                 408 B
 Import               675 B
-Function             261 B
+Function             262 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                95 B
 Elem                  70 B
-Code              394239 B
-Data              218457 B
-Custom             13259 B
+Code              394988 B
+Data              218925 B
+Custom             13281 B
 ---------------- ----------
-TOTAL             627485 B
+TOTAL             628725 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-81271 B   frame
+81782 B   frame
 31662 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
 27440 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
-20930 B   ui_panel
+20942 B   ui_panel
 19343 B   dispatch_command
 17887 B   nt_gfx_activate_texture
-12219 B   main
+12303 B   main
  8829 B   Clay__ConfigureOpenElementPtr
  6059 B   Clay__SizeContainersAlongAxis
  5766 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
@@ -54,8 +54,8 @@ TOTAL             627485 B
  2429 B   printf_core
  2413 B   nt_ui_toggle
 
-Total functions: 259
-Total code size: 393788 B
+Total functions: 260
+Total code size: 394535 B
 
 ## Built Engine Archives
 
@@ -77,7 +77,7 @@ libnt_debug_overlay.a       2218 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               94006 B
-libnt_gfx.a               103920 B
+libnt_gfx.a               106314 B
 libnt_gfx_stub.a            5954 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
@@ -99,10 +99,10 @@ libnt_meshwire_stub.a        722 B
 libnt_metrics.a             1530 B
 libnt_platform.a             824 B
 libnt_pool.a                1376 B
-libnt_postfx_blur.a         6740 B
+libnt_postfx_blur.a         6798 B
 libnt_render.a              7668 B
 libnt_resource.a          215122 B
-libnt_shape_renderer.a    911060 B
+libnt_shape_renderer.a    911320 B
 libnt_skeletal.a            7464 B
 libnt_skeletal_assets.a     7796 B
 libnt_skeletal_gpu.a        2622 B
@@ -122,9 +122,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2633770 B
+TOTAL (archives)         2636482 B
 
 ## Data Segments Summary
 
 Segments: 180
-Total data size: 217101 B
+Total data size: 217569 B
