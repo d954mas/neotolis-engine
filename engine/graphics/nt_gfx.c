@@ -1,6 +1,7 @@
 #include "graphics/nt_gfx_frame.h"
 #include "graphics/nt_gfx_internal.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -175,6 +176,12 @@ nt_gfx_t g_nt_gfx;
 nt_gfx_device_info_t g_nt_gfx_device_info;
 
 const nt_gfx_device_info_t *nt_gfx_device_info(void) { return &g_nt_gfx_device_info; }
+
+static void record_caps(const nt_gfx_gpu_caps_t *caps) {
+    (void)snprintf(g_nt_gfx_device_info.caps, sizeof(g_nt_gfx_device_info.caps), "astc=%d bc7=%d etc2=%d float_rt=%d float_linear=%d parallel_compile=%d max_texture=%u ubo_align=%u",
+                   (int)caps->has_astc, (int)caps->has_bc7, (int)caps->has_etc2, (int)caps->has_float_render_target, (int)caps->has_float_texture_linear, (int)caps->has_parallel_shader_compile,
+                   (unsigned)caps->max_texture_size, (unsigned)caps->uniform_buffer_offset_alignment);
+}
 
 /* ---- File-scope internal state ---- */
 
@@ -485,6 +492,8 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     /* A probe on a lost context reports zero caps: latch it, and the restore probes again. */
     if (nt_gfx_backend_query_context_lost()) {
         (void)latch_loss();
+    } else {
+        record_caps(&g_nt_gfx.gpu_caps);
     }
 
     g_nt_gfx.initialized = true;
@@ -687,6 +696,7 @@ static void wipe_backend_handles(void) {
 static nt_gfx_result_t restore_context(void) {
     /* A failed recreate leaves no context, so the query keeps reporting lost for good. */
     if (!nt_gfx_backend_recreate_all_resources()) {
+        NT_LOG_ERROR("context restore failed");
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     /* getExtension enables the float color attachments the game's render targets may need. */
@@ -696,6 +706,7 @@ static nt_gfx_result_t restore_context(void) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     g_nt_gfx.gpu_caps = caps;
+    record_caps(&caps);
     g_nt_gfx.context_lost = false;
     s_gfx.scissor_enabled = false;
     g_nt_gfx.context_restored = true;

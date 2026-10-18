@@ -5,6 +5,7 @@
 #include <emscripten.h>
 #include <emscripten/html5.h>
 #include <emscripten/html5_webgl.h>
+#include <string.h>
 
 /* The cap-probe EM_JS bodies below reach the Emscripten GL registry (GL.currentContext.GLctx). GL lives
  * in library_webgl.js, force-linked by this TU's own emscripten_webgl_* C calls -- so it survives today.
@@ -41,7 +42,7 @@ bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
 
     s_gl_context = emscripten_webgl_create_context("#canvas", &attrs);
     if (s_gl_context == 0) {
-        NT_LOG_ERROR("context-create: result=0 WebGL=2.0 alpha=%d depth=%d stencil=%d antialias=%d premultiplied_alpha=%d preserve=0", (int)desc->alpha, (int)desc->depth, (int)desc->stencil,
+        NT_LOG_ERROR("context-create: failed WebGL=2.0 alpha=%d depth=%d stencil=%d antialias=%d premultiplied_alpha=%d preserve=0", (int)desc->alpha, (int)desc->depth, (int)desc->stencil,
                      (int)desc->antialias, (int)desc->premultiplied_alpha);
         return false;
     }
@@ -104,7 +105,9 @@ static void capture_device_info(void) {
     NT_GL_ISSUED(glGetString, GL_VERSION);
     nt_gfx_js_device_string(GL_VERSION, info.api_version, sizeof(info.api_version));
     if (!nt_gfx_gl_ctx_query_lost()) {
-        g_nt_gfx_device_info = info;
+        memcpy(g_nt_gfx_device_info.vendor, info.vendor, sizeof(info.vendor));
+        memcpy(g_nt_gfx_device_info.renderer, info.renderer, sizeof(info.renderer));
+        memcpy(g_nt_gfx_device_info.api_version, info.api_version, sizeof(info.api_version));
     }
 }
 

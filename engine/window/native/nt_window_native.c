@@ -187,7 +187,7 @@ void nt_window_init(void) {
         const char *description = NULL;
         const int code = glfwGetError(&description);
         (void)code;
-        NT_LOG_ERROR("GLFW-init: code=0x%08X requested=3.3-core debug=%d \"%s\"", (unsigned)code, NT_GFX_NATIVE_GL_DEBUG, description != NULL ? description : "");
+        NT_LOG_ERROR("GLFW-init: code=0x%08X \"%s\"", (unsigned)code, description != NULL ? description : "");
         __builtin_trap();
     }
 

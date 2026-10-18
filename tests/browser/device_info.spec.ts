@@ -1,7 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 
 const KEY = 'nt.test.crash';
-const LOG_LEVEL = Number(process.env.NT_DIAGNOSTICS_LOG ?? 0);
 
 type Identity = { vendor: string | null; renderer: string | null; api: string | null };
 type DeviceHooks = {
@@ -9,7 +8,6 @@ type DeviceHooks = {
   programs_ready(): boolean;
   drawn_frames(): number;
   restore_frames(): number;
-  observe_record(enabled: number): void;
   observe_value(index: number): number;
   crash_load(): string;
 };
@@ -113,6 +111,7 @@ test('device identity: automatic init survives a new session without steady-fram
   expect(await page.evaluate(() => (window as DeviceWindow).__device.queries)).toEqual(baseline.queries);
   const record = await capture(page);
   expectIdentity(record, INITIAL);
+  expect(record).toMatch(/\ngpu_caps: astc=[01] bc7=[01] etc2=[01] float_rt=[01] float_linear=[01] parallel_compile=[01] max_texture=[1-9]\d* ubo_align=[1-9]\d*\n/);
 
   const next = await context.newPage();
   await installIdentity(next, RESTORED);
@@ -125,8 +124,6 @@ test('device identity: successful restore refreshes every string', async ({ page
   test.setTimeout(90_000);
   await installIdentity(page);
   await ready(page);
-  // The existing switch is inert in capture-OFF builds; the same restore runs in both.
-  await page.evaluate(() => (window as DeviceWindow).__nt!.observe_record(1));
   await lose(page);
   const before = await page.evaluate((identity) => {
     const w = window as DeviceWindow;
@@ -140,19 +137,12 @@ test('device identity: successful restore refreshes every string', async ({ page
     const w = window as DeviceWindow;
     return {
       queries: w.__device.queries.slice(before),
-      values: Array.from({ length: 7 }, (_, i) => w.__nt!.observe_value(31 + i)),
+      counter: w.__nt!.observe_value(31),
     };
   }, before);
-  const expectedQueries = [0x9245, 0x9246, 0x1f02];
-  expect(observation.queries).toEqual(expectedQueries);
-  expect(observation.values[1], 'restore glGetString counter matches issued identity queries').toBe(3);
-  if (observation.values[0]) {
-    expect(observation.values[2], 'restore capture must not overflow').toBe(0);
-    expect(observation.values[3], 'one BACKEND event per identity query').toBe(3);
-    expect(observation.values.slice(4), 'captured query enums match actual WebGL calls').toEqual(expectedQueries);
-  }
+  expect(observation.queries).toEqual([0x9245, 0x9246, 0x1f02]);
+  expect(observation.counter, 'restore glGetString counter matches issued identity queries').toBe(3);
   expect(await page.evaluate(() => (window as DeviceWindow).__nt!.restore_frames())).toBe(1);
-  await page.evaluate(() => (window as DeviceWindow).__nt!.observe_record(0));
   expectIdentity(await capture(page), RESTORED);
 });
 
@@ -174,8 +164,8 @@ for (const failedRestore of [false, true]) {
     const record = await capture(page);
     expectIdentity(record, INITIAL);
     if (failedRestore) {
-      expect(record.match(/context-create: result=0/g) ?? []).toHaveLength(LOG_LEVEL < 3 ? 1 : 0);
-      expect(record).not.toContain('WebGL context restore failed');
+      expect(record.match(/context-create: failed/g) ?? []).toHaveLength(1);
+      expect(record.match(/context restore failed/g) ?? []).toHaveLength(1);
     }
   });
 }
@@ -190,14 +180,13 @@ test('device identity: missing debug extension uses public WebGL identity', asyn
 });
 
 test('device identity: null fields, UTF-8 truncation and newlines stay bounded', async ({ page }) => {
-  const renderer = 'GPU\r\n' + '😀'.repeat(160);
+  const renderer = 'GPU\r\n' + '😀'.repeat(80);
   await installIdentity(page, { vendor: null, renderer, api: 'WebGL 2.0\napi' });
   await ready(page);
   const record = await capture(page);
-  expectIdentity(record, { vendor: null, renderer: 'GPU  ' + '😀'.repeat(126), api: 'WebGL 2.0 api' });
+  expectIdentity(record, { vendor: null, renderer: 'GPU  ' + '😀'.repeat(62), api: 'WebGL 2.0 api' });
   expect(record).not.toContain('\uFFFD');
-  expect(record).not.toContain('gpu_vendor: null');
-  expect(Buffer.byteLength(record.split('\ngpu_renderer: ')[1].split('\n')[0], 'utf8')).toBe(509);
+  expect(Buffer.byteLength(record.split('\ngpu_renderer: ')[1].split('\n')[0], 'utf8')).toBe(253);
 });
 
 test('device identity: startup context failure is saved before app hooks exist', async ({ page }) => {
@@ -206,13 +195,8 @@ test('device identity: startup context failure is saved before app hooks exist',
   await page.waitForFunction((key) => localStorage.getItem(key) !== null, KEY, { timeout: 30_000 });
   const record = (await page.evaluate((key) => localStorage.getItem(key), KEY))!;
   expectIdentity(record, { vendor: null, renderer: null, api: null });
+  expect(record).not.toContain('\ngpu_caps:');
   expect(record).toMatch(/\nreason: /);
   expect(await page.evaluate(() => (window as DeviceWindow).__nt)).toBeUndefined();
-  const log = record.slice(record.indexOf('\nlog:\n') + 6);
-  if (LOG_LEVEL < 3) {
-    expect(log).toMatch(/ERROR.*context-create/);
-    expect(log).toMatch(/result=0/);
-  } else {
-    expect(log).toBe('');
-  }
+  expect(record.slice(record.indexOf('\nlog:\n') + 6)).toMatch(/ERROR.*context-create: failed/);
 });

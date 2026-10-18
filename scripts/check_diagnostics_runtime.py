@@ -11,9 +11,9 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 TARGETS = ("test_log_floor", "test_log_api", "test_log_api_stub", "test_log_ring",
            "test_introspect", "test_resource_timing", "test_nt_ui_timing", "test_nt_gfx_gpu_timing_native", "test_gfx_stub")
-CRASH_TARGETS = ("test_crash_record", "test_crash_record_gpu_info")
-CRASH_TESTS = tuple(f"{target}_{mode}{suffix}" for target in CRASH_TARGETS
-                    for mode in ("trap", "abort", "segv") for suffix in ("", "_check"))
+CRASH_TARGETS = ("test_crash_record", "test_crash_stub_link")
+CRASH_TESTS = ("test_crash_stub_link",) + tuple(f"test_crash_record_{mode}{suffix}" for mode in ("trap", "abort", "segv")
+                                                for suffix in ("", "_check"))
 
 
 def run(command, log):

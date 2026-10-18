@@ -3,7 +3,6 @@ import { test, expect, type Page } from '@playwright/test';
 // Crash record (engine/crash): a crashing visit stores the record and dispatches 'nt-crash';
 // the next visit reads and clears it through nt_crash_load_previous / nt_crash_clear_previous.
 const KEY = 'nt.test.crash';
-const LOG_LEVEL = Number(process.env.NT_DIAGNOSTICS_LOG ?? 0);
 
 type CrashWindow = Window & {
   __nt?: { crash_load(): string; crash_clear(): void };
@@ -59,22 +58,16 @@ for (const mode of ['trap', 'abort', 'reject', 'jserror'] as const) {
     await openRead(page);
     const record = await page.evaluate(() => (window as CrashWindow).__nt!.crash_load());
     expect(record).toBe(stored);
-    expect(record).toMatch(/^game: browser_smoke-test\nengine: ([0-9a-f]{8}(-dirty)?|unknown) \S+\ngpu_vendor: [^\n]+\ngpu_renderer: [^\n]+\ngpu_api: [^\n]+\ncontext: level=forest phase=loading checkpoint=7\ntime: \d+\nreason: /);
+    expect(record).toMatch(/^game: browser_smoke-test\nengine: ([0-9a-f]{8}(-dirty)?|unknown) \S+\ngpu_vendor: [^\n]+\ngpu_renderer: [^\n]+\ngpu_api: [^\n]+\ngpu_caps: astc=[01] [^\n]+ ubo_align=\d+\ncontext: level=forest phase=loading checkpoint=7\ntime: \d+\nreason: /);
     expect(record).toMatch(REASONS[mode]);
     expect(record).toMatch(/\nstack:\n[^]*wasm/);
 
     // The ring wrapped (300 lines > 8 KB): the oldest lines are gone, the first kept line is whole,
     // the token line written right before the crash is last.
     const log = record.slice(record.indexOf('\nlog:\n') + 6).split('\n').filter((line) => line !== '');
-    if (LOG_LEVEL < 2) {
-      expect(log[0]).toMatch(/^WARN crash probe line \d+: проверка кольца$/);
-      expect(log).not.toContain('WARN crash probe line 0: проверка кольца');
-    }
-    if (LOG_LEVEL < 3) {
-      expect(log[log.length - 1]).toBe(`ERROR crash probe token-${mode}`);
-    } else {
-      expect(log).toEqual([]);
-    }
+    expect(log[0]).toMatch(/^WARN crash probe line \d+: проверка кольца$/);
+    expect(log).not.toContain('WARN crash probe line 0: проверка кольца');
+    expect(log[log.length - 1]).toBe(`ERROR crash probe token-${mode}`);
 
     await page.evaluate(() => (window as CrashWindow).__nt!.crash_clear());
     expect(await page.evaluate(() => (window as CrashWindow).__nt!.crash_load())).toBe('');

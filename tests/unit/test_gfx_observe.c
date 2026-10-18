@@ -554,8 +554,8 @@ static void test_restore_is_one_context_operation_after_the_lost_snapshot(void) 
     TEST_ASSERT_EQUAL_UINT32(1, capture.counters.accepted[NT_GFX_OP_CONTEXT]);
 }
 
-/* The platform owns the failure record; the frontend stays lost without a duplicate log. */
-static void test_failed_restore_stays_lost_without_frontend_log(void) {
+/* A failed recreate leaves no context: the engine stays lost for good with one error log. */
+static void test_failed_restore_stays_lost_with_one_error_log(void) {
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
@@ -570,7 +570,7 @@ static void test_failed_restore_stays_lost_without_frontend_log(void) {
         nt_gfx_end_frame();
         nt_gfx_begin_frame();
     }
-    TEST_ASSERT_EQUAL_UINT32(0, s_error_logs);
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR ? 1 : 0, s_error_logs);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_backend_restore_count());
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_CONTEXT_LOST, result_of(nt_gfx_capture_read(), NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE));
 }
@@ -1181,7 +1181,7 @@ int main(void) {
     RUN_TEST(test_rejected_destroys_assert_inside_a_recorded_frame);
 #endif
     RUN_TEST(test_restore_is_one_context_operation_after_the_lost_snapshot);
-    RUN_TEST(test_failed_restore_stays_lost_without_frontend_log);
+    RUN_TEST(test_failed_restore_stays_lost_with_one_error_log);
     RUN_TEST(test_restore_meeting_a_new_loss_stays_lost_and_the_next_restore_works);
     RUN_TEST(test_lazy_sampler_recreate_on_a_latched_loss_ends_context_lost);
     RUN_TEST(test_link_with_a_stage_left_unready_by_a_loss_ends_unready);

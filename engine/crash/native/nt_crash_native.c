@@ -94,6 +94,7 @@ static void out_record(const char *reason, uint64_t code, bool has_code, uintptr
     out_field("\ngpu_vendor: ", s_device->vendor);
     out_field("\ngpu_renderer: ", s_device->renderer);
     out_field("\ngpu_api: ", s_device->api_version);
+    out_field("\ngpu_caps: ", s_device->caps);
     out_field("\ncontext: ", g_nt_crash.context);
     out_str("\ntime: ");
     out_dec(time_ms);

@@ -136,7 +136,7 @@ The engine itself prints no version. Examples log it at startup when INFO loggin
 **API.**
 
 - `nt_crash_init(name, game_version)` — once per process. `name` is the `localStorage` key on web (several games can share one origin) and the record file path on native (UTF-8; a relative path resolves against the cwd at crash time). `game_version` must name the game build, so the record maps to that build's symbols. Both are copied, non-empty and shorter than 256 bytes. Init takes one of `NT_LOG_MAX_SINKS` log sinks and, on native, installs its own unhandled-exception filter and signal handlers, replacing earlier ones without chaining; a library that later installs its own replaces them in turn, so call init after such libraries are set up. It does not touch the stored record.
-- `nt_crash_set_context(text)` copies optional game text into 1024 bytes; init and non-NULL text are required. Each call replaces the previous text; empty clears it. Truncation keeps at most 1023 bytes without splitting valid UTF-8; CR/LF become spaces. The caller may immediately free or change its source. Updates are main-thread, best effort if a crash interrupts them; the last byte always remains NUL. No callback is used to obtain game context at crash time.
+- `nt_crash_set_context(text)` copies optional game text into 1024 bytes; init and non-NULL text are required. Each call replaces the previous text; empty clears it. Truncation keeps at most 1023 bytes, possibly inside a code point (web shows the cut as U+FFFD); CR/LF become spaces, so the text cannot forge record lines. The caller may immediately free or change its source. Updates are main-thread, best effort if a crash interrupts them; the last byte always remains NUL.
 - `nt_crash_load_previous(out, cap)` copies the stored record into caller storage as a string and keeps it; it returns the string length (0: no record, or the storage is unavailable or unreadable). The stored text is untrusted and returned as it is, cut at `cap - 1` bytes and at an embedded NUL. Load and clear require init.
 - `nt_crash_clear_previous()` removes the record. The game clears only after a confirmed delivery; an unsent record waits for the next launch. A new crash overwrites the stored record.
 - Web also dispatches window event `nt-crash` with `detail.text` once the record is captured and storage was attempted. The page is still alive, so a game can send immediately (best effort; the record stays stored, so a server dedups by text — it carries `time`).
@@ -149,6 +149,7 @@ engine: <nt_version_engine()> <preset>    (e.g. 0595a717-dirty wasm-release)
 gpu_vendor: <last observed vendor>       (optional)
 gpu_renderer: <last observed renderer>   (optional)
 gpu_api: <graphics API version>          (optional)
+gpu_caps: <nt_gfx_gpu_caps_t as text>    (optional)
 context: <copied game text>              (optional)
 time: <unix ms>
 reason: RuntimeError: unreachable | signal SIGSEGV | exception 0xc000001d | abort
@@ -162,10 +163,9 @@ ERROR [resource] ...
 
 `log:` is the tail of WARN/ERROR lines from a fixed BSS byte ring of `NT_CRASH_LOG_BYTES` (default 8192). The minimum capacity reserves two maximum-size messages plus space for prefixes; domain lengths are not bounded, so this does not guarantee two complete lines. A wrapped ring drops its first line, which may be partial, and a long domain can leave no complete line. Configuration is described in [build identity and crash records](../../build.md#build-identity-and-crash-records).
 
-GPU fields are read automatically from the gfx-owned process-lifetime snapshot,
+GPU fields come from the gfx device snapshot ([Device identity](../render/architecture.md#device-identity)),
 independently of the log floor and ring wrap. Enable crash before window/gfx init
 to capture startup failures. Unknown GPU fields and empty game context are omitted.
-Loading a previous record does not replace its identity with the current session.
 The engine owns system fields; the game only supplies its context and transport.
 
 A record is at most about `NT_CRASH_LOG_BYTES` + 4 KB on native. On web the reason and stack are cut at 256 and 4096 UTF-16 code units: about `NT_CRASH_LOG_BYTES` + 8 KB for ASCII text and + 16 KB for Unicode text, which can require up to 3 UTF-8 bytes per UTF-16 code unit. Invalid UTF-8 in log or diagnostic text can expand each byte into a 3-byte replacement character, increasing the web bound to about `3 * NT_CRASH_LOG_BYTES` + 20 KB. Size the game's buffer for its platform; a longer record is cut.

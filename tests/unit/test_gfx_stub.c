@@ -23,6 +23,7 @@ static void test_device_info_is_empty_and_survives_shutdown(void) {
     TEST_ASSERT_EQUAL_STRING("", info->vendor);
     TEST_ASSERT_EQUAL_STRING("", info->renderer);
     TEST_ASSERT_EQUAL_STRING("", info->api_version);
+    TEST_ASSERT_EQUAL_STRING("", info->caps);
 }
 
 static void test_stub_has_no_graphics_resources(void) {

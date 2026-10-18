@@ -122,7 +122,6 @@ void tearDown(void) {
     nt_gfx_backend_shutdown();
 }
 
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
 static char s_setup_failure_log[NT_LOG_BUF_SIZE];
 
 static void capture_setup_failure(nt_log_level_t level, const char *domain, const char *msg, void *user) {
@@ -139,6 +138,19 @@ static void GLAD_API_PTR capture_gen_no_vao(GLsizei count, GLuint *names) {
     }
 }
 
+/* A null name on an already-lost context is retried by the next restore: no fatal record. */
+static void test_upload_vao_failure_on_a_lost_context_is_silent(void) {
+    s_setup_failure_log[0] = '\0';
+    s_fixture_lost = true;
+    glad_glGenVertexArrays = capture_gen_no_vao;
+    nt_log_add_sink(capture_setup_failure, NULL);
+    nt_gfx_gl_init_context_features();
+    nt_log_remove_sink(capture_setup_failure, NULL);
+    glad_glGenVertexArrays = capture_gen_vao;
+    TEST_ASSERT_EQUAL_STRING("", s_setup_failure_log);
+}
+
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
 static void test_upload_vao_failure_logs_before_asserting(void) {
     s_setup_failure_log[0] = '\0';
     glad_glGenVertexArrays = capture_gen_no_vao;
@@ -146,7 +158,6 @@ static void test_upload_vao_failure_logs_before_asserting(void) {
     NT_TEST_EXPECT_ASSERT(nt_gfx_gl_init_context_features());
     nt_log_remove_sink(capture_setup_failure, NULL);
     glad_glGenVertexArrays = capture_gen_vao;
-    TEST_ASSERT_FALSE(s_fixture_lost);
     if (NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR) {
         TEST_ASSERT_NOT_NULL(strstr(s_setup_failure_log, "glGenVertexArrays"));
         TEST_ASSERT_NOT_NULL(strstr(s_setup_failure_log, "name:"));
@@ -288,6 +299,7 @@ static void test_unavailable_timer_is_inert(void) {
 
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_upload_vao_failure_on_a_lost_context_is_silent);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_upload_vao_failure_logs_before_asserting);
 #endif

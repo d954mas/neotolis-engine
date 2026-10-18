@@ -67,27 +67,30 @@ renderer_draw_sprite(...);
 
 ### Device identity
 
-`nt_gfx_device_info()` returns a non-NULL, gfx-owned const view of three bounded
-strings: vendor (128 bytes), renderer (512) and API version (128), including
-NUL terminators. The address is stable for the process, before init and after
-shutdown. Callers neither modify nor free it. Empty fields mean unavailable;
-the stub always supplies empty fields without requiring init.
+`nt_gfx_device_info()` returns a non-NULL, gfx-owned const view of four bounded
+strings, NUL terminators included: vendor (128 bytes), renderer (256), API
+version (128) and caps (128). The address is stable for the process, before
+init and after shutdown. Callers neither modify nor free it. Empty fields mean
+unavailable; the stub always supplies empty fields without requiring init.
 
-The snapshot is the last observed identity, not readiness or capabilities.
-Context creation refreshes it before backend setup allocations and the service
-VAO, so their failures already have GPU context. Web publishes only an
-observation made without context loss; loss, failed recreation and shutdown
-retain the previous snapshot. No identity queries run in steady frames.
-Updates are main-thread, best effort if interrupted by a crash; each field
-always retains its terminal NUL. CR/LF become spaces. Native identity truncates
-by bytes; the web bridge preserves UTF-8 boundaries. Web prefers
-WEBGL_debug_renderer_info, with ordinary vendor/renderer parameters as fallback;
-the browser may mask the hardware. API version is not a portable driver version.
+The snapshot is the last observed device, for diagnostics and game workarounds
+of known device bugs; feature decisions read `nt_gfx_gpu_caps()`. Context
+creation refreshes the identity before backend setup, so setup failures already
+carry it. `caps` is `nt_gfx_gpu_caps_t` as text
+(`astc=1 bc7=0 etc2=1 float_rt=1 float_linear=1 parallel_compile=1 max_texture=16384 ubo_align=256`),
+written after each successful detection at init and restore; the struct itself
+is reset with `g_nt_gfx`. Web publishes only observations made without context
+loss; loss, failed recreation and shutdown keep the previous snapshot. Steady
+frames run no identity queries. Updates are main-thread, best effort if a crash
+interrupts them; each field keeps its terminal NUL. CR/LF become spaces. Native
+identity truncates by bytes; the web bridge keeps UTF-8 boundaries.
 
-The Web bridge reads current getParameter strings directly into bounded buffers:
-Emscripten 4.0.19 glGetString caches allocated strings across context recreation.
-It uses the existing GL funnel's glGetString equivalent, without a WASM heap
-string or a second persistent copy in the crash module.
+Web prefers WEBGL_debug_renderer_info, falling back to the public
+vendor/renderer parameters; the browser may mask the hardware. Firefox reports
+the extension as deprecated in the console, and its `RENDERER` already returns
+the sanitized unmasked string. API version is not a portable driver version.
+The bridge reads `getParameter` strings directly into the snapshot because
+Emscripten's `glGetString` caches strings across context recreation.
 
 ### Draw-phase command stream
 
@@ -969,23 +972,20 @@ live driver must complete every target the engine builds. Two residual cases als
 texture whose GPU storage allocation failed (uploads are not polled) leaves its framebuffer
 incomplete, and a GPU-process death that fails a status before the browser reports the loss.
 A failure is classified by asking the browser after the failed call, for the same reason.
-On live-context name failures, including the upload VAO made during setup, the
-backend logs the GL operation, available slot or shader stage, pending GL error
-and descriptor label before asserting. An incomplete framebuffer logs its slot,
-status, pending GL error, attachment size and formats, then label. These values
-come from the create arguments, with no extra resource metadata or GL size
-queries. The pending error may come from an earlier texture allocation; it is
-not proof of the cause of the framebuffer status. Numbers precede labels so a
-long label cannot truncate the failure details. Lost-context paths do not emit
-these fatal records. At log floor NONE the records and extra error queries vanish.
+Before asserting on a live-context name failure, including the setup upload VAO,
+the backend logs the GL call (and shader stage), the pending GL error and the
+descriptor label. An incomplete framebuffer logs its status, pending GL error,
+attachment size and formats, then label, all from the create arguments. The
+pending error may come from an earlier texture allocation, not the status.
+Numbers precede labels, so a long label cannot cut the details. Lost-context
+paths emit no fatal record; log floor NONE removes the records and their error
+queries.
 
-Initial context creation failure is fatal: the internal backend init returns
-void and asserts after the platform reports the failure. Web records
-context-create result 0 and the requested WebGL attributes; native records the
-GL loader result or GLFW error code/description and requested context/window
-attributes. No GL queries run after loader failure. Context recreation retains
-its recoverable bool contract; the platform records the reason once and the
-frontend stays lost on failure.
+Initial context creation failure is fatal: backend init asserts after the
+platform logs the failure. Web logs the context attributes the engine sets;
+native logs the GL loader failure or the GLFW error code and description. A
+failed recreation stays recoverable: the platform logs the cause, the frontend
+logs `context restore failed` and stays lost.
 
 A readback asks after every read as well: WebGL reports a loss once through
 `glGetError`, and the drain before the read consumes it. Beyond failures the backend asks where

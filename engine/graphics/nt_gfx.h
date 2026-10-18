@@ -519,8 +519,8 @@ typedef enum {
 } nt_gfx_operation_t;
 
 /* Every function the GL backend issues, queries included; the single source of
- * nt_gfx_gl_call_t, NT_GFX_GL_COUNT and the call names. getExtension is the WebGL
- * JS method the web context calls directly. */
+ * nt_gfx_gl_call_t, NT_GFX_GL_COUNT and the call names. The web context issues
+ * glGetString as getParameter and getExtension directly from JS. */
 #define NT_GFX_GL_CALLS(X)                                                                                                                                                                             \
     X(glGetString)                                                                                                                                                                                     \
     X(getExtension)                                                                                                                                                                                    \
@@ -773,8 +773,9 @@ typedef struct {
 
 typedef struct {
     char vendor[128];
-    char renderer[512];
+    char renderer[256];
     char api_version[128];
+    char caps[128]; /* nt_gfx_gpu_caps_t as text: the struct is reset with g_nt_gfx */
 } nt_gfx_device_info_t;
 
 /* ---- Global state ---- */

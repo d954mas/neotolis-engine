@@ -20,16 +20,13 @@ bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
     (void)desc;
     /* Window + GL context already created by nt_window_init().
        Load GL function pointers via glad. */
-    const int version = gladLoadGL(glfwGetProcAddress);
-    if (version == 0) {
-        NT_LOG_ERROR("GL-load: result=%d requested=3.3-core", version);
+    if (!gladLoadGL(glfwGetProcAddress)) {
+        NT_LOG_ERROR("GL-load: failed requested=3.3-core");
         return false;
     }
-    nt_gfx_device_info_t info = {0};
-    copy_device_string(info.vendor, sizeof(info.vendor), GL_VENDOR);
-    copy_device_string(info.renderer, sizeof(info.renderer), GL_RENDERER);
-    copy_device_string(info.api_version, sizeof(info.api_version), GL_VERSION);
-    g_nt_gfx_device_info = info;
+    copy_device_string(g_nt_gfx_device_info.vendor, sizeof(g_nt_gfx_device_info.vendor), GL_VENDOR);
+    copy_device_string(g_nt_gfx_device_info.renderer, sizeof(g_nt_gfx_device_info.renderer), GL_RENDERER);
+    copy_device_string(g_nt_gfx_device_info.api_version, sizeof(g_nt_gfx_device_info.api_version), GL_VERSION);
     return true;
 }
 

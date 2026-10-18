@@ -613,11 +613,13 @@ static void nt_gfx_gl_drain_errors(void) {
     }
 }
 
-/* Ask after the failed call: a GPU-process death can fail it before the browser reports loss. */
-static NT_NOINLINE void assert_name_failed_on_loss(const char *object, uint32_t id, const char *label) {
+/* WebGL names null only on a lost context, and native glGen* does not run out: a null name on a
+ * live context is a bug. Asked after the failed call: a GPU-process death can fail the call before
+ * the browser reports the loss. */
+static void assert_name_failed_on_loss(const char *call, const char *label) {
     const bool lost = nt_gfx_gl_ctx_query_lost();
     if (!lost) {
-        NT_LOG_ERROR("%s=%u name: gl_error=0x%04X \"%s\"", object, id, (unsigned)NT_GL_RET0(glGetError), label != NULL ? label : "");
+        NT_LOG_ERROR("%s name: gl_error=0x%04X \"%s\"", call, (unsigned)NT_GL_RET0(glGetError), label != NULL ? label : "");
     }
     NT_ASSERT(lost && "backend could not name a GL object on a live context");
 }
@@ -637,7 +639,7 @@ static void nt_gfx_gl_init_context_features(void) {
     /* 0 with a live context would silently break every index-buffer upload on
      * core GL; 0 on an already-lost context is retried by the next restore. */
     if (s_ebo_upload_vao == 0) {
-        assert_name_failed_on_loss("glGenVertexArrays upload", 0, NULL);
+        assert_name_failed_on_loss("glGenVertexArrays upload", NULL);
     }
 }
 
@@ -1184,7 +1186,7 @@ uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
     GLenum gl_type = (desc->type == NT_SHADER_VERTEX) ? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER;
     GLuint shader = NT_GL_RET(glCreateShader, gl_type);
     if (shader == 0) {
-        assert_name_failed_on_loss("glCreateShader stage", (uint32_t)desc->type, desc->label);
+        assert_name_failed_on_loss(desc->type == NT_SHADER_VERTEX ? "glCreateShader vertex" : "glCreateShader fragment", desc->label);
         return 0;
     }
     /* Emscripten gives WebGL's null shader a nonzero name, and glShaderSource throws on it: only
@@ -1513,7 +1515,7 @@ bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uin
     }
     GLuint program = NT_GL_RET0(glCreateProgram);
     if (program == 0) {
-        assert_name_failed_on_loss("glCreateProgram slot", slot, label);
+        assert_name_failed_on_loss("glCreateProgram", label);
         return false;
     }
     NT_GL(glAttachShader, program, (GLuint)vs_backend);
@@ -1636,7 +1638,7 @@ bool nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint
     GLuint vao = 0;
     NT_GL_GEN(glGenVertexArrays, 1, &vao);
     if (vao == 0) {
-        assert_name_failed_on_loss("glGenVertexArrays slot", slot, desc->label);
+        assert_name_failed_on_loss("glGenVertexArrays", desc->label);
         return false;
     }
     nt_gfx_gl_vertex_input_t *vi = &s_vertex_inputs[slot];
@@ -1785,7 +1787,7 @@ bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot) {
     GLuint buf;
     NT_GL_GEN(glGenBuffers, 1, &buf);
     if (buf == 0) {
-        assert_name_failed_on_loss("glGenBuffers slot", slot, desc->label);
+        assert_name_failed_on_loss("glGenBuffers", desc->label);
         return false;
     }
     const GLenum target = desc->type == NT_BUFFER_INDEX ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
@@ -1941,11 +1943,11 @@ static void nt_gfx_gl_bind_texture_for_upload(GLuint tex) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
-static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc, uint32_t slot) {
+static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
     GLuint tex;
     NT_GL_GEN(glGenTextures, 1, &tex);
     if (tex == 0) {
-        assert_name_failed_on_loss("glGenTextures slot", slot, desc->label);
+        assert_name_failed_on_loss("glGenTextures", desc->label);
         return 0;
     }
     nt_gfx_gl_bind_texture_for_upload(tex);
@@ -1997,7 +1999,7 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc, uint3
 
 bool nt_gfx_backend_create_texture(const nt_texture_desc_t *desc, uint32_t slot) {
     NT_ASSERT(slot > 0 && slot <= s_init_desc.max_textures && s_texture_gl[slot] == 0 && "create_texture: the record at the frontend slot must be empty");
-    GLuint tex = nt_gfx_gl_create_texture_name(desc, slot);
+    GLuint tex = nt_gfx_gl_create_texture_name(desc);
     if (tex == 0) {
         return false;
     }
@@ -2057,7 +2059,7 @@ bool nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTAC
     GLuint fbo = 0;
     NT_GL_GEN(glGenFramebuffers, 1, &fbo);
     if (fbo == 0) {
-        assert_name_failed_on_loss("glGenFramebuffers slot", slot, label);
+        assert_name_failed_on_loss("glGenFramebuffers", label);
         return false;
     }
     NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, fbo);
@@ -2081,8 +2083,8 @@ bool nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTAC
          * or storage an unpolled allocation failure left out. */
         const bool lost = nt_gfx_gl_ctx_query_lost();
         if (!lost) {
-            NT_LOG_ERROR("framebuffer slot=%u status=0x%04X gl_error=0x%04X size=%ux%u color=%u depth=%u \"%s\"", slot, (unsigned)status, (unsigned)NT_GL_RET0(glGetError), (unsigned)width,
-                         (unsigned)height, (unsigned)color, (unsigned)depth, label != NULL ? label : "");
+            NT_LOG_ERROR("framebuffer status=0x%04X gl_error=0x%04X size=%ux%u color=%u depth=%u \"%s\"", (unsigned)status, (unsigned)NT_GL_RET0(glGetError), (unsigned)width, (unsigned)height,
+                         (unsigned)color, (unsigned)depth, label != NULL ? label : "");
         }
         NT_ASSERT(lost && "render target incomplete on a live context");
         NT_GL_DELETE(glDeleteFramebuffers, 1, &fbo);
@@ -2142,7 +2144,7 @@ uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
     GLuint s = 0;
     NT_GL_GEN(glGenSamplers, 1, &s);
     if (s == 0) {
-        assert_name_failed_on_loss("glGenSamplers name", 0, desc->label);
+        assert_name_failed_on_loss("glGenSamplers", desc->label);
         return 0;
     }
     NT_GL(glSamplerParameteri, s, GL_TEXTURE_MIN_FILTER, (GLint)map_texture_filter(desc->min_filter));
