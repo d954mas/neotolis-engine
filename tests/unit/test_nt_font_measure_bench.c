@@ -36,10 +36,11 @@
 /* ---- Test blob builder (mirrors tests/unit/test_font.c) ----
  *
  * Build a minimal valid NT_ASSET_FONT binary blob in memory.
- * Contains 3 glyphs ('A'=65, 'B'=66, 'C'=67), each with 2 line segments.
+ * Contains 3 glyphs ('A'=65, 'B'=66, 'C'=67), each with a clockwise triangle.
  */
 static uint8_t *build_test_font_blob(uint32_t *out_size) {
-    uint32_t contour_size = 18;
+    const uint8_t contour[] = {1, 0, 3, 0, 7, 0, 0, 0, 0, 0, 0, NT_FONT_DELTA_SENTINEL, 0x20, 3, NT_FONT_DELTA_SENTINEL, 0x90, 1, 0};
+    const uint32_t contour_size = (uint32_t)sizeof contour;
     uint32_t header_size = (uint32_t)sizeof(NtFontAssetHeader);
     uint32_t glyphs_size = 3 * (uint32_t)sizeof(NtFontGlyphEntry);
     uint32_t total_size = header_size + glyphs_size + (3 * contour_size);
@@ -71,40 +72,13 @@ static uint8_t *build_test_font_blob(uint32_t *out_size) {
         entry.bbox_y0 = -200;
         entry.bbox_x1 = 400;
         entry.bbox_y1 = 800;
-        entry.curve_count = 2;
+        entry.curve_count = 3;
         entry.kern_count = 0;
         memcpy(blob + header_size + ((size_t)g * sizeof(NtFontGlyphEntry)), &entry, sizeof(entry));
     }
 
     for (int g = 0; g < 3; g++) {
-        uint8_t *wp = blob + data_base + ((size_t)g * contour_size);
-
-        uint16_t cc = 1;
-        memcpy(wp, &cc, 2);
-        wp += 2;
-        uint16_t sc = 2;
-        memcpy(wp, &sc, 2);
-        wp += 2;
-        int16_t sx = 0;
-        int16_t sy = 0;
-        memcpy(wp, &sx, 2);
-        wp += 2;
-        memcpy(wp, &sy, 2);
-        wp += 2;
-        wp[0] = 0;
-        wp[1] = 0;
-        wp += 2;
-        int16_t d1x = 400;
-        int16_t d1y = 0;
-        memcpy(wp, &d1x, 2);
-        wp += 2;
-        memcpy(wp, &d1y, 2);
-        wp += 2;
-        int16_t d2x = 0;
-        int16_t d2y = 800;
-        memcpy(wp, &d2x, 2);
-        wp += 2;
-        memcpy(wp, &d2y, 2);
+        memcpy(blob + data_base + ((size_t)g * contour_size), contour, sizeof contour);
     }
 
     *out_size = total_size;

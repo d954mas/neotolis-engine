@@ -582,8 +582,6 @@ void nt_atlas_get_region_handles(nt_resource_t atlas, uint32_t region_index, nt_
 // #region test access
 #ifdef NT_TEST_ACCESS
 
-const struct nt_atlas_data *nt_atlas_test_get_data(nt_resource_t atlas) { return (const nt_atlas_data_t *)nt_resource_peek_user_data(atlas); }
-
 uint32_t nt_atlas_test_find_region_raw(const struct nt_atlas_data *ad, uint64_t name_hash) {
     NT_ASSERT(ad != NULL);
     if (ad->region_count == 0) {

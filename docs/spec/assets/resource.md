@@ -545,7 +545,12 @@ only at a one-to-one local-unit-to-pixel mapping. Sample coordinates expand with
 the quad, while the undilated bbox still defines the shader's bands. Layout
 metrics stay unchanged.
 
-**v4 → v5 ADDITION (DECO-04, spec addition per AGENTS.md).** The header grew from 16 to 24 bytes with four `int16` decoration-metric fields (`underline_position`, `underline_thickness`, `strikeout_position`, `strikeout_size`) and `NT_FONT_VERSION` bumped 4 → 5. The builder reads these raw from the source font's `post` (`underlinePosition`@8, `underlineThickness`@10) and `OS/2` (`yStrikeoutSize`@26, `yStrikeoutPosition`@28) tables (big-endian, UPM-rescaled with the other metrics); when a table is absent it bakes a metric-correct heuristic (underline just below baseline, strike near mid x-height) so the runtime never sees garbage. This keeps decoration metrics in the builder — the runtime stays a parser-free safety net. A font blob large enough to contain the current header must have the expected magic and version; mismatches assert in both FULL and TRAP. Stale v4 packs must be rebuilt. A truncated header clears the provider view before glyph tables can be read.
+**v4 → v5 ADDITION (DECO-04, spec addition per AGENTS.md).** The header grew from 16 to 24 bytes with four `int16` decoration-metric fields (`underline_position`, `underline_thickness`, `strikeout_position`, `strikeout_size`) and `NT_FONT_VERSION` bumped 4 → 5. The builder reads these raw from the source font's `post` (`underlinePosition`@8, `underlineThickness`@10) and `OS/2` (`yStrikeoutSize`@26, `yStrikeoutPosition`@28) tables (big-endian, UPM-rescaled with the other metrics); when a table is absent it bakes a metric-correct heuristic (underline just below baseline, strike near mid x-height) so the runtime never sees garbage. This keeps decoration metrics in the builder — the runtime stays a parser-free safety net. A font blob large enough to contain the current header must have the expected magic and version; mismatches assert in both FULL and TRAP. Stale v4 packs must be rebuilt. A truncated header, glyph table, kern span or contour encoding clears the provider
+view before glyph data can be read. On publication the font checks only structural
+bounds: glyph data offsets, count limits, contour point headers and masks, and
+the bytes required by each one- or three-byte coordinate delta. Shared glyph
+payloads, trailing padding and zero-curve glyphs remain valid. Coordinate and
+metric values remain builder guarantees; unchanged providers are not rescanned.
 
 ### NT_ASSET_ATLAS binary format
 

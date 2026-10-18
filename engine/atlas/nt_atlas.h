@@ -157,10 +157,6 @@ void nt_atlas_get_region_handles(nt_resource_t atlas, uint32_t region_index, nt_
  * resource-system setup. */
 struct nt_atlas_data;
 
-/* Return the raw nt_atlas_data_t* stashed in a resource slot's user_data.
- * Used by tests that DO drive the resource system end-to-end. */
-const struct nt_atlas_data *nt_atlas_test_get_data(nt_resource_t atlas);
-
 /* Bypass nt_resource_peek_user_data and look up a region on a raw
  * nt_atlas_data_t* directly. Mirrors nt_atlas_find_region(). */
 uint32_t nt_atlas_test_find_region_raw(const struct nt_atlas_data *ad, uint64_t name_hash);

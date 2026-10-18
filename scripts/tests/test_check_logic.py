@@ -30,6 +30,16 @@ class CheckLogicTests(unittest.TestCase):
 
         self.assertEqual({"test_cmp"}, ctest_command_stems(lines))
 
+    def test_ctest_parser_follows_cmake_env_command_only(self):
+        lines = ['add_test([=[sanitizer_asan]=] "C:/Program Files/CMake/bin/cmake.exe" "-E" "env" "C:/r/build/tests/dbg/test_sanitizer_proof.exe" "C:/r/build/tests/dbg/test_data.exe")\n']
+
+        self.assertEqual({"cmake", "test_sanitizer_proof"}, ctest_command_stems(lines))
+
+    def test_ctest_parser_ignores_args_of_other_cmake_commands(self):
+        lines = ['add_test([=[n]=] "cmake" "-E" "compare_files" "C:/r/build/tests/dbg/test_ref.exe" "C:/r/build/tests/dbg/test_data.exe")\n']
+
+        self.assertEqual({"cmake"}, ctest_command_stems(lines))
+
     def test_every_compiled_target_must_be_registered(self):
         targets = {"test_log_real", "test_log_stub"}
 

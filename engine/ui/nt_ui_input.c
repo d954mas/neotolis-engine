@@ -1,6 +1,7 @@
 #include "ui/nt_ui_input.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "clipboard/nt_clipboard.h"
@@ -382,7 +383,7 @@ static void clipboard_copy_selection(const char *buffer, const nt_ui_input_state
 /* Decode one codepoint from src[off..len). On success writes *out_cp and returns the bytes
  * consumed (>=1). On a malformed/truncated run writes *out_cp=0 and returns the bytes to skip
  * (>=1) so the caller resyncs without reading OOB. */
-static uint32_t decode_one(const char *src, uint32_t off, uint32_t len, uint32_t *out_cp) {
+static uint32_t decode_one(const char *src, size_t off, size_t len, uint32_t *out_cp) {
     uint32_t state = NT_UTF8_ACCEPT;
     uint32_t cp = 0U;
     uint32_t consumed = 0U;
@@ -414,20 +415,11 @@ static uint32_t clipboard_paste(char *buffer, size_t buffer_size, const nt_ui_in
     if (clip == NULL || clip[0] == '\0') {
         return st->caret;
     }
-    /* Snapshot the clipboard into scratch: get_text storage is only valid until the next call, and
-     * insert below does not call clipboard again, but copying keeps the contract explicit + bounded.
-     * Cap to buffer_size: insert clamps to buffer_size-1 anyway, so a longer paste can't add more --
-     * the cap kills the size_t->uint32_t narrowing on a huge paste. A mid-codepoint cut is harmless
-     * (decode_one resyncs; a split trailing run is dropped). */
-    size_t raw_len = strlen(clip);
-    if (raw_len > buffer_size) {
-        raw_len = buffer_size;
-    }
-    const uint32_t clip_len = (uint32_t)raw_len;
-    char *src = (char *)nt_mem_scratch_alloc((size_t)clip_len + 1U, 1U);
-    NT_ASSERT(src != NULL && "nt_ui_input: scratch alloc failed (clipboard paste)");
-    memcpy(src, clip, (size_t)clip_len); /* clip_len, not +1: clip may be longer than the cap */
-    src[clip_len] = '\0';
+    const size_t clip_len = strlen(clip);
+    /* The allow predicate may call the clipboard again and invalidate clip. */
+    char *src = (char *)malloc(clip_len + 1U);
+    NT_ASSERT(src != NULL && "nt_ui_input: clipboard snapshot allocation failed");
+    memcpy(src, clip, clip_len + 1U);
 
     /* Replace any selection first. */
     if (st->anchor != st->caret) {
@@ -439,7 +431,7 @@ static uint32_t clipboard_paste(char *buffer, size_t buffer_size, const nt_ui_in
         cur_len = (uint32_t)strlen(buffer);
     }
 
-    uint32_t i = 0U;
+    size_t i = 0U;
     while (i < clip_len) {
         uint32_t cp = 0U;
         const uint32_t consumed = decode_one(src, i, clip_len, &cp);
@@ -459,6 +451,7 @@ static uint32_t clipboard_paste(char *buffer, size_t buffer_size, const nt_ui_in
         st->anchor = st->caret;
         cur_len = (uint32_t)strlen(buffer);
     }
+    free(src);
     return st->caret;
 }
 

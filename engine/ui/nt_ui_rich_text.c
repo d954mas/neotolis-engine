@@ -2434,8 +2434,6 @@ uint32_t nt_ui_rich_test_image_emit_count(nt_ui_context_t *ctx) { return rich_st
 uint32_t nt_ui_rich_test_image_region(nt_ui_context_t *ctx) { return rich_state(ctx)->image_region; }
 float nt_ui_rich_test_image_y(nt_ui_context_t *ctx) { return rich_state(ctx)->image_y; }
 
-uint32_t nt_ui_rich_test_hovered_link(nt_ui_context_t *ctx) { return rich_state(ctx)->hovered_link; }
-uint32_t nt_ui_rich_test_clicked_link(nt_ui_context_t *ctx) { return rich_state(ctx)->clicked_link; }
 uint32_t nt_ui_rich_test_link_rect_count(nt_ui_context_t *ctx) { return rich_state(ctx)->link_count; }
 
 uint8_t nt_ui_rich_test_atom_effect_id(nt_ui_context_t *ctx, uint32_t atom) {

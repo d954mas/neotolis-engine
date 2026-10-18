@@ -69,6 +69,61 @@ static void font_provider_clear(void **user_data) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool font_blob_structure_valid(const uint8_t *data, uint32_t size) {
+    const NtFontAssetHeader *header = (const NtFontAssetHeader *)data;
+    const uint32_t table_end = (uint32_t)sizeof(*header) + ((uint32_t)header->glyph_count * (uint32_t)sizeof(NtFontGlyphEntry));
+    if (table_end > size) {
+        return false;
+    }
+    const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(data + sizeof(*header));
+    for (uint32_t gi = 0; gi < header->glyph_count; gi++) {
+        const NtFontGlyphEntry *glyph = &glyphs[gi];
+        const uint32_t kern_bytes = (uint32_t)glyph->kern_count * (uint32_t)sizeof(NtFontKernEntry);
+        if (glyph->data_offset < table_end || glyph->data_offset > size || kern_bytes > size - glyph->data_offset || glyph->curve_count > NT_FONT_MAX_CURVES_PER_GLYPH) {
+            return false;
+        }
+        if (glyph->curve_count == 0) {
+            continue;
+        }
+        uint32_t offset = glyph->data_offset + kern_bytes;
+        if (size - offset < sizeof(uint16_t)) {
+            return false;
+        }
+        uint16_t contour_count;
+        memcpy(&contour_count, data + offset, sizeof contour_count);
+        offset += (uint32_t)sizeof contour_count;
+        for (uint32_t ci = 0; ci < contour_count; ci++) {
+            if (size - offset < sizeof(uint16_t)) {
+                return false;
+            }
+            uint16_t point_count;
+            memcpy(&point_count, data + offset, sizeof point_count);
+            offset += (uint32_t)sizeof point_count;
+            if (point_count == 0 || point_count > NT_FONT_MAX_POINTS_PER_CONTOUR) {
+                return false;
+            }
+            const uint32_t prefix_bytes = NT_FONT_BITMASK_BYTES(point_count) + (2U * (uint32_t)sizeof(int16_t));
+            if (prefix_bytes > size - offset) {
+                return false;
+            }
+            offset += prefix_bytes;
+            for (uint32_t coordinate = 0; coordinate < ((uint32_t)point_count - 1U) * 2U; coordinate++) {
+                if (offset == size) {
+                    return false;
+                }
+                if (data[offset++] == NT_FONT_DELTA_SENTINEL) {
+                    if (size - offset < sizeof(int16_t)) {
+                        return false;
+                    }
+                    offset += (uint32_t)sizeof(int16_t);
+                }
+            }
+        }
+    }
+    return true;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void font_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data) {
     (void)runtime_handle;
     if (data == NULL) {
@@ -83,6 +138,10 @@ static void font_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime
     const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)data;
     NT_ASSERT(hdr->magic == NT_FONT_MAGIC && "font blob: bad magic");
     NT_ASSERT(hdr->version == NT_FONT_VERSION && "font blob: version mismatch — rebuild packs");
+    if (!font_blob_structure_valid(data, size)) {
+        font_provider_clear(user_data);
+        return;
+    }
     nt_font_provider_t *p = (nt_font_provider_t *)*user_data;
     if (p == NULL) {
         p = (nt_font_provider_t *)calloc(1, sizeof(*p));

@@ -33,8 +33,8 @@ static const nt_ui_create_desc_t s_ui_desc = {.max_elements = NT_UI_DEFAULT_MAX_
 /* ---- Test font blob builder (mirrors test_font.c with 3 glyphs A/B/C) ---- */
 
 static uint8_t *build_test_font_blob(uint32_t *out_size) {
-    /* 1 contour with 2 line segments per glyph = 18 bytes per glyph. */
-    const uint32_t contour_size = 18U;
+    const uint8_t contour[] = {1, 0, 3, 0, 7, 0, 0, 0, 0, 0, 0, NT_FONT_DELTA_SENTINEL, 0x20, 3, NT_FONT_DELTA_SENTINEL, 0x90, 1, 0};
+    const uint32_t contour_size = (uint32_t)sizeof contour;
     const uint32_t header_size = (uint32_t)sizeof(NtFontAssetHeader);
     const uint32_t glyphs_size = 3U * (uint32_t)sizeof(NtFontGlyphEntry);
     const uint32_t total_size = header_size + glyphs_size + (3U * contour_size);
@@ -65,39 +65,13 @@ static uint8_t *build_test_font_blob(uint32_t *out_size) {
         e.bbox_y0 = -200;
         e.bbox_x1 = 400;
         e.bbox_y1 = 800;
-        e.curve_count = 2;
+        e.curve_count = 3;
         e.kern_count = 0;
         memcpy(blob + header_size + ((size_t)g * sizeof(NtFontGlyphEntry)), &e, sizeof e);
     }
 
-    for (int g = 0; g < 3; ++g) {
-        uint8_t *wp = blob + data_base + ((size_t)g * contour_size);
-        uint16_t cc = 1U;
-        uint16_t sc = 2U;
-        memcpy(wp, &cc, 2);
-        wp += 2;
-        memcpy(wp, &sc, 2);
-        wp += 2;
-        int16_t sx = 0;
-        int16_t sy = 0;
-        memcpy(wp, &sx, 2);
-        wp += 2;
-        memcpy(wp, &sy, 2);
-        wp += 2;
-        wp[0] = 0;
-        wp[1] = 0;
-        wp += 2;
-        int16_t d1x = 400;
-        int16_t d1y = 0;
-        memcpy(wp, &d1x, 2);
-        wp += 2;
-        memcpy(wp, &d1y, 2);
-        wp += 2;
-        int16_t d2x = 0;
-        int16_t d2y = 800;
-        memcpy(wp, &d2x, 2);
-        wp += 2;
-        memcpy(wp, &d2y, 2);
+    for (int g = 0; g < 3; g++) {
+        memcpy(blob + data_base + ((size_t)g * contour_size), contour, sizeof contour);
     }
 
     *out_size = total_size;

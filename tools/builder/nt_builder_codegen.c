@@ -455,6 +455,7 @@ void nt_builder_merge_headers(const char *const *header_paths, uint32_t count, c
         ce[i].resource_id = entries[i].hash;
         ce[i].kind = entries[i].kind;
     }
+    check_codegen_collisions(ce, entry_count);
 
     char guard[256];
     derive_include_guard(output_path, guard, sizeof(guard));

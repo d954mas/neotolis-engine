@@ -28,11 +28,11 @@
 
 /*
  * Build a minimal valid NT_ASSET_FONT binary blob in memory.
- * Contains 3 glyphs ('A'=65, 'B'=66, 'C'=67), each with 2 line segments.
+ * Contains 3 glyphs ('A'=65, 'B'=66, 'C'=67), each with a clockwise triangle.
  * No kern entries. All coordinates in font design units (units_per_em=1000).
  *
  * Binary layout per font_format.h:
- *   NtFontAssetHeader (16 bytes)
+ *   NtFontAssetHeader (24 bytes)
  *   NtFontGlyphEntry[3] (24 bytes each = 72 bytes)
  *   Per-glyph contour data blocks (variable)
  */
@@ -41,16 +41,8 @@ static uint8_t *build_test_font_blob_with_metrics(uint16_t units_per_em, int16_t
 static uint8_t *build_test_font_blob(uint32_t *out_size) { return build_test_font_blob_with_metrics(1000, 800, -200, 0, out_size); }
 
 static uint8_t *build_test_font_blob_with_metrics(uint16_t units_per_em, int16_t ascent, int16_t descent, int16_t line_gap, uint32_t *out_size) {
-    /* Pre-calculate contour data size per glyph:
-     * 1 contour with 2 line segments each
-     *   contour_count = 1 (2 bytes)
-     *   segment_count = 2 (2 bytes)
-     *   start_x, start_y (4 bytes)
-     *   type_bits: ceil(2/8) = 1 byte, padded to 2 bytes
-     *   2 line segments: 4 bytes each = 8 bytes
-     *   Total per glyph = 2 + 2 + 4 + 2 + 8 = 18 bytes
-     */
-    uint32_t contour_size = 18;
+    const uint8_t contour[] = {1, 0, 3, 0, 7, 0, 0, 0, 0, 0, 0, NT_FONT_DELTA_SENTINEL, 0x20, 3, NT_FONT_DELTA_SENTINEL, 0x90, 1, 0};
+    const uint32_t contour_size = (uint32_t)sizeof contour;
     uint32_t header_size = (uint32_t)sizeof(NtFontAssetHeader);
     uint32_t glyphs_size = 3 * (uint32_t)sizeof(NtFontGlyphEntry);
     uint32_t total_size = header_size + glyphs_size + (3 * contour_size);
@@ -84,52 +76,13 @@ static uint8_t *build_test_font_blob_with_metrics(uint16_t units_per_em, int16_t
         entry.bbox_y0 = -200;
         entry.bbox_x1 = 400;
         entry.bbox_y1 = 800;
-        entry.curve_count = 2;
+        entry.curve_count = 3;
         entry.kern_count = 0;
         memcpy(blob + header_size + ((size_t)g * sizeof(NtFontGlyphEntry)), &entry, sizeof(entry));
     }
 
-    /* Per-glyph contour data: 1 contour with 2 line segments forming a simple shape */
     for (int g = 0; g < 3; g++) {
-        uint8_t *wp = blob + data_base + ((size_t)g * contour_size);
-
-        /* contour_count = 1 */
-        uint16_t cc = 1;
-        memcpy(wp, &cc, 2);
-        wp += 2;
-
-        /* segment_count = 2 */
-        uint16_t sc = 2;
-        memcpy(wp, &sc, 2);
-        wp += 2;
-
-        /* start_x, start_y (bottom-left corner) */
-        int16_t sx = 0;
-        int16_t sy = 0;
-        memcpy(wp, &sx, 2);
-        wp += 2;
-        memcpy(wp, &sy, 2);
-        wp += 2;
-
-        /* type_bits: 2 lines (bit=0), padded to 2 bytes */
-        wp[0] = 0;
-        wp[1] = 0;
-        wp += 2;
-
-        /* Line segment 1: delta to (400, 0) -> dp2x=400, dp2y=0 */
-        int16_t d1x = 400;
-        int16_t d1y = 0;
-        memcpy(wp, &d1x, 2);
-        wp += 2;
-        memcpy(wp, &d1y, 2);
-        wp += 2;
-
-        /* Line segment 2: delta to (400, 800) from (400, 0) -> dp2x=0, dp2y=800 */
-        int16_t d2x = 0;
-        int16_t d2y = 800;
-        memcpy(wp, &d2x, 2);
-        wp += 2;
-        memcpy(wp, &d2y, 2);
+        memcpy(blob + data_base + ((size_t)g * contour_size), contour, sizeof contour);
     }
 
     *out_size = total_size;
@@ -140,7 +93,8 @@ static uint8_t *build_test_font_blob_with_metrics(uint16_t units_per_em, int16_t
  * so a resolved glyph's advance identifies WHICH resource won a shared codepoint (first-wins). */
 static uint8_t *build_font_blob_codepoints(uint16_t units_per_em, int16_t ascent, int16_t descent, int16_t line_gap, const uint32_t *codepoints, uint16_t glyph_count, int16_t advance,
                                            uint32_t *out_size) {
-    const uint32_t contour_size = 18U; /* 1 contour, 2 line segments — matches build_test_font_blob_with_metrics */
+    const uint8_t contour[] = {1, 0, 3, 0, 7, 0, 0, 0, 0, 0, 0, NT_FONT_DELTA_SENTINEL, 0x20, 3, NT_FONT_DELTA_SENTINEL, 0x90, 1, 0};
+    const uint32_t contour_size = (uint32_t)sizeof contour;
     uint32_t header_size = (uint32_t)sizeof(NtFontAssetHeader);
     uint32_t glyphs_size = (uint32_t)glyph_count * (uint32_t)sizeof(NtFontGlyphEntry);
     uint32_t total_size = header_size + glyphs_size + ((uint32_t)glyph_count * contour_size);
@@ -170,39 +124,13 @@ static uint8_t *build_font_blob_codepoints(uint16_t units_per_em, int16_t ascent
         entry.bbox_y0 = -200;
         entry.bbox_x1 = 400;
         entry.bbox_y1 = 800;
-        entry.curve_count = 2;
+        entry.curve_count = 3;
         entry.kern_count = 0;
         memcpy(blob + header_size + ((size_t)g * sizeof(NtFontGlyphEntry)), &entry, sizeof(entry));
     }
 
     for (uint16_t g = 0; g < glyph_count; g++) {
-        uint8_t *wp = blob + data_base + ((size_t)g * contour_size);
-        uint16_t cc = 1;
-        memcpy(wp, &cc, 2);
-        wp += 2;
-        uint16_t sc = 2;
-        memcpy(wp, &sc, 2);
-        wp += 2;
-        int16_t sx = 0;
-        int16_t sy = 0;
-        memcpy(wp, &sx, 2);
-        wp += 2;
-        memcpy(wp, &sy, 2);
-        wp += 2;
-        wp[0] = 0;
-        wp[1] = 0;
-        wp += 2;
-        int16_t d1x = 400;
-        int16_t d1y = 0;
-        memcpy(wp, &d1x, 2);
-        wp += 2;
-        memcpy(wp, &d1y, 2);
-        wp += 2;
-        int16_t d2x = 0;
-        int16_t d2y = 800;
-        memcpy(wp, &d2x, 2);
-        wp += 2;
-        memcpy(wp, &d2y, 2);
+        memcpy(blob + data_base + ((size_t)g * contour_size), contour, sizeof contour);
     }
 
     *out_size = total_size;
@@ -631,38 +559,12 @@ void test_font_lru_eviction(void) {
     entry_d.bbox_y0 = -200;
     entry_d.bbox_x1 = 450;
     entry_d.bbox_y1 = 800;
-    entry_d.curve_count = 2;
+    entry_d.curve_count = 3;
     entry_d.kern_count = 0;
     memcpy(blob2 + hdr_sz, &entry_d, sizeof(entry_d));
 
-    /* Contour data for 'D' (same structure as test blob) */
-    uint8_t *wp2 = blob2 + hdr_sz + glyph_sz;
-    uint16_t cc2 = 1;
-    memcpy(wp2, &cc2, 2);
-    wp2 += 2;
-    uint16_t sc2 = 2;
-    memcpy(wp2, &sc2, 2);
-    wp2 += 2;
-    int16_t sx2 = 0;
-    int16_t sy2 = 0;
-    memcpy(wp2, &sx2, 2);
-    wp2 += 2;
-    memcpy(wp2, &sy2, 2);
-    wp2 += 2;
-    wp2[0] = 0;
-    wp2[1] = 0;
-    wp2 += 2;
-    int16_t dd1x = 450;
-    int16_t dd1y = 0;
-    memcpy(wp2, &dd1x, 2);
-    wp2 += 2;
-    memcpy(wp2, &dd1y, 2);
-    wp2 += 2;
-    int16_t dd2x = 0;
-    int16_t dd2y = 800;
-    memcpy(wp2, &dd2x, 2);
-    wp2 += 2;
-    memcpy(wp2, &dd2y, 2);
+    const uint8_t contour_d[] = {1, 0, 3, 0, 7, 0, 0, 0, 0, 0, 0, NT_FONT_DELTA_SENTINEL, 0x20, 3, NT_FONT_DELTA_SENTINEL, 0xC2, 1, 0};
+    memcpy(blob2 + hdr_sz + glyph_sz, contour_d, sizeof contour_d);
 
     nt_resource_t res2 = register_font_resource("test_font_evict_d", blob2, total);
     nt_font_add(font, res2);
@@ -1334,6 +1236,125 @@ void test_font_truncated_winner_swap_clears_provider(void) {
 
     nt_font_destroy(font);
     free(blob_a);
+}
+
+static uint32_t build_font_bounds_blob(uint8_t *blob) {
+    const NtFontAssetHeader header = {.magic = NT_FONT_MAGIC, .version = NT_FONT_VERSION, .glyph_count = 1, .units_per_em = 1000, .ascent = 800, .descent = -200};
+    const NtFontGlyphEntry glyph = {.codepoint = 'A', .data_offset = sizeof(header) + sizeof(NtFontGlyphEntry), .advance = 500, .curve_count = 3};
+    const uint8_t contour[] = {1, 0, 3, 0, 7, 0, 0, 0, 0, 0, 0, NT_FONT_DELTA_SENTINEL, 0x20, 3, NT_FONT_DELTA_SENTINEL, 0x2C, 1, 0};
+    memcpy(blob, &header, sizeof header);
+    memcpy(blob + sizeof header, &glyph, sizeof glyph);
+    memcpy(blob + glyph.data_offset, contour, sizeof contour);
+    return glyph.data_offset + (uint32_t)sizeof contour;
+}
+
+static void assert_font_blob_has_no_provider(const uint8_t *blob, uint32_t size) {
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
+    uint32_t token = nt_font_test_register_data(blob, size);
+    nt_font_add(font, nt_font_test_resource(token));
+    nt_resource_step();
+    nt_font_step();
+    TEST_ASSERT_EQUAL_UINT16(0, nt_font_get_metrics(font).units_per_em);
+    TEST_ASSERT_FALSE(nt_font_lookup_metrics(font, 'A').found);
+    nt_font_destroy(font);
+    nt_font_test_deactivate(token);
+}
+
+void test_font_shared_contours_padding_and_empty_glyph_remain_valid(void) {
+    uint8_t blob[128] = {0};
+    const uint32_t original_size = build_font_bounds_blob(blob);
+    NtFontAssetHeader header;
+    NtFontGlyphEntry glyph;
+    memcpy(&header, blob, sizeof header);
+    memcpy(&glyph, blob + sizeof header, sizeof glyph);
+    const uint32_t contour_size = original_size - glyph.data_offset;
+    const uint32_t data_offset = (uint32_t)(sizeof header + (3U * sizeof glyph));
+    memmove(blob + data_offset, blob + glyph.data_offset, contour_size);
+    header.glyph_count = 3;
+    memcpy(blob, &header, sizeof header);
+    const uint32_t size = data_offset + contour_size + 4U;
+    for (uint32_t i = 0; i < 3U; i++) {
+        glyph.codepoint = 'A' + i;
+        glyph.data_offset = i == 2U ? size : data_offset;
+        glyph.curve_count = i == 2U ? 0 : 3;
+        memcpy(blob + sizeof header + (i * sizeof glyph), &glyph, sizeof glyph);
+    }
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
+    nt_font_add(font, nt_font_test_resource(nt_font_test_register_data(blob, size)));
+    nt_resource_step();
+    nt_font_step();
+    TEST_ASSERT_EQUAL_UINT16(1000, nt_font_get_metrics(font).units_per_em);
+    for (uint32_t cp = 'A'; cp <= 'C'; cp++) {
+        const nt_glyph_cache_entry_t *entry = nt_font_lookup_glyph(font, cp);
+        TEST_ASSERT_NOT_NULL(entry);
+        TEST_ASSERT_FALSE(entry->is_tofu);
+    }
+    nt_font_destroy(font);
+}
+
+void test_font_fixture_decodes_current_point_ring(void) {
+    uint32_t size = 0;
+    uint8_t *blob = build_test_font_blob(&size);
+    NtFontGlyphEntry glyph;
+    memcpy(&glyph, blob + sizeof(NtFontAssetHeader), sizeof glyph);
+    float curves[18];
+    const uint16_t count = nt_font_test_decode_contours(blob + glyph.data_offset, 0.0F, curves, 3);
+    TEST_ASSERT_EQUAL_UINT16(3, count);
+    TEST_ASSERT_EQUAL_UINT16(count, glyph.curve_count);
+    TEST_ASSERT_TRUE(curves[4] == 0.0F && curves[5] == 800.0F);
+    TEST_ASSERT_TRUE(curves[10] == 400.0F && curves[11] == 800.0F);
+    TEST_ASSERT_TRUE(curves[16] == 0.0F && curves[17] == 0.0F);
+    float twice_area = 0.0F;
+    for (uint16_t i = 0; i < count; i++) {
+        const float *curve = curves + ((size_t)i * 6U);
+        twice_area += (curve[0] * curve[5]) - (curve[4] * curve[1]);
+    }
+    TEST_ASSERT_TRUE_MESSAGE(twice_area < 0.0F, "outer contours use the builder's clockwise winding");
+    free(blob);
+}
+
+void test_font_truncated_glyph_table_clears_provider(void) {
+    uint8_t blob[80];
+    (void)build_font_bounds_blob(blob);
+    assert_font_blob_has_no_provider(blob, (uint32_t)sizeof(NtFontAssetHeader));
+    assert_font_blob_has_no_provider(blob, (uint32_t)(sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry) - 1U));
+}
+
+void test_font_invalid_glyph_data_spans_clear_provider(void) {
+    uint8_t blob[80];
+    const uint32_t size = build_font_bounds_blob(blob);
+    NtFontGlyphEntry glyph;
+    memcpy(&glyph, blob + sizeof(NtFontAssetHeader), sizeof glyph);
+    const uint32_t offsets[] = {UINT32_MAX, size + 1U, (uint32_t)sizeof(NtFontAssetHeader)};
+    for (size_t i = 0; i < sizeof offsets / sizeof offsets[0]; i++) {
+        glyph.data_offset = offsets[i];
+        memcpy(blob + sizeof(NtFontAssetHeader), &glyph, sizeof glyph);
+        assert_font_blob_has_no_provider(blob, size);
+    }
+    glyph.data_offset = size - 1U;
+    glyph.kern_count = 1;
+    memcpy(blob + sizeof(NtFontAssetHeader), &glyph, sizeof glyph);
+    assert_font_blob_has_no_provider(blob, size);
+}
+
+void test_font_truncated_contour_data_clears_provider(void) {
+    uint8_t blob[80];
+    const uint32_t size = build_font_bounds_blob(blob);
+    const uint32_t data_offset = (uint32_t)(sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry));
+    for (uint32_t truncated = data_offset; truncated < size; truncated++) {
+        assert_font_blob_has_no_provider(blob, truncated);
+    }
+}
+
+void test_font_invalid_contour_point_counts_clear_provider(void) {
+    uint8_t blob[80];
+    const uint32_t size = build_font_bounds_blob(blob);
+    const uint32_t point_offset = (uint32_t)(sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry) + 2U);
+    const uint16_t counts[] = {0, NT_FONT_MAX_POINTS_PER_CONTOUR + 1U};
+    for (size_t i = 0; i < sizeof counts / sizeof counts[0]; i++) {
+        memcpy(blob + point_offset, &counts[i], sizeof counts[i]);
+        assert_font_blob_has_no_provider(blob, size);
+    }
 }
 
 /* ---- FONT-03: unmount a font's pack WHILE it is referenced ----
@@ -3008,6 +3029,12 @@ static void test_font_worstcase_glyph_miss_budget(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_font_blob_valid);
+    RUN_TEST(test_font_fixture_decodes_current_point_ring);
+    RUN_TEST(test_font_shared_contours_padding_and_empty_glyph_remain_valid);
+    RUN_TEST(test_font_truncated_glyph_table_clears_provider);
+    RUN_TEST(test_font_invalid_glyph_data_spans_clear_provider);
+    RUN_TEST(test_font_truncated_contour_data_clears_provider);
+    RUN_TEST(test_font_invalid_contour_point_counts_clear_provider);
     RUN_TEST(test_font_init_shutdown);
     RUN_TEST(test_font_create_destroy_valid);
     RUN_TEST(test_font_unready_texture_keeps_cpu_queries_gpu_free);

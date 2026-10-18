@@ -279,9 +279,7 @@ uint32_t nt_ui_rich_test_image_emit_count(nt_ui_context_t *ctx);
 uint32_t nt_ui_rich_test_image_region(nt_ui_context_t *ctx);
 float nt_ui_rich_test_image_y(nt_ui_context_t *ctx);
 
-/* Link/effect probes. The link hover/click the last call resolved + per-link rects. */
-uint32_t nt_ui_rich_test_hovered_link(nt_ui_context_t *ctx);
-uint32_t nt_ui_rich_test_clicked_link(nt_ui_context_t *ctx);
+/* Link/effect probes. Solver link rects and per-atom effect state. */
 uint32_t nt_ui_rich_test_link_rect_count(nt_ui_context_t *ctx);
 /* The solver effect_id carried by a solved atom (0 = none) -- proves effects ride the solved stream. */
 uint8_t nt_ui_rich_test_atom_effect_id(nt_ui_context_t *ctx, uint32_t atom);

@@ -8,9 +8,7 @@
 #include <string.h>
 
 #if NT_GFX_CAPTURE_ENABLED
-static uint32_t s_fake_backend_snapshot_count;
-void nt_gfx_backend_capture_initial_state(void) { s_fake_backend_snapshot_count++; }
-uint32_t nt_gfx_fake_backend_snapshot_count(void) { return s_fake_backend_snapshot_count; }
+void nt_gfx_backend_capture_initial_state(void) {}
 #endif
 
 // #region sampler units
@@ -269,9 +267,6 @@ void nt_gfx_fake_reset(void) {
     s_fake_lose_context_on_program_link = false;
     s_fake_lose_context_on_sampler_create = false;
     s_fake_fail_next_backend_restore_lost = false;
-#if NT_GFX_CAPTURE_ENABLED
-    s_fake_backend_snapshot_count = 0;
-#endif
     s_fake_lose_context_during_next_restore = false;
 }
 

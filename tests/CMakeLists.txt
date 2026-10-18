@@ -145,7 +145,6 @@ if(NOT EMSCRIPTEN)
     # where sanitizers are disabled (clang interception_win can't patch UCRT).
     if(NOT (WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "Clang"))
         add_executable(test_sanitizer_proof unit/test_sanitizer_proof.c)
-        target_link_libraries(test_sanitizer_proof PRIVATE nt_core nt_log_stub unity)
 
         nt_set_warning_flags(test_sanitizer_proof)
         nt_set_sanitizer_flags(test_sanitizer_proof)
@@ -154,8 +153,18 @@ if(NOT EMSCRIPTEN)
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
         )
 
-        add_test(NAME sanitizer_proof COMMAND test_sanitizer_proof)
-        set_tests_properties(sanitizer_proof PROPERTIES WILL_FAIL TRUE)
+        if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+            # The wrapper converts signal termination to an ordinary exit; only
+            # the sanitizer's own diagnostic can satisfy the output oracle.
+            foreach(_sanitizer asan ubsan)
+                add_test(NAME sanitizer_proof_${_sanitizer}
+                    COMMAND ${CMAKE_COMMAND} -E env $<TARGET_FILE:test_sanitizer_proof> ${_sanitizer})
+            endforeach()
+            set_tests_properties(sanitizer_proof_asan PROPERTIES
+                PASS_REGULAR_EXPRESSION "AddressSanitizer: heap-buffer-overflow")
+            set_tests_properties(sanitizer_proof_ubsan PROPERTIES
+                PASS_REGULAR_EXPRESSION "runtime error: signed integer overflow")
+        endif()
     endif()
 
     # --- Swap demo tests ---
@@ -1545,6 +1554,7 @@ if(NOT EMSCRIPTEN)
         target_compile_definitions(${_t} PRIVATE _CRT_SECURE_NO_WARNINGS)
         nt_setup_test_target(${_t})
     endforeach()
+    target_compile_definitions(test_ui_input PRIVATE NT_CLIPBOARD_FAKE_CAP=131072)
 
     add_executable(test_nt_ui_stats
         unit/test_nt_ui_stats.c
