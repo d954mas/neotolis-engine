@@ -8,6 +8,7 @@
 /* clang-format off */
 #include "core/nt_core.h"
 #include "devapi/nt_devapi_internal.h"
+#include "version/nt_version.h"
 #include "window/nt_window.h"
 #include "unity.h"
 /* clang-format on */
@@ -61,8 +62,7 @@ static void test_engine_info(void) {
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
     TEST_ASSERT_TRUE(cJSON_IsObject(result));
 
-    /* version comes from the central nt_engine_version_string(). */
-    TEST_ASSERT_EQUAL_STRING(nt_engine_version_string(), cJSON_GetObjectItemCaseSensitive(result, "version")->valuestring);
+    TEST_ASSERT_EQUAL_STRING(nt_version_engine(), cJSON_GetObjectItemCaseSensitive(result, "version")->valuestring);
     TEST_ASSERT_TRUE(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(result, "build")));
     TEST_ASSERT_TRUE(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(result, "preset")));
     cJSON_Delete(root);

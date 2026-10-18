@@ -112,6 +112,10 @@ if(NOT EMSCRIPTEN)
     # Register with CTest
     add_test(NAME test_core COMMAND test_core)
 
+    add_executable(test_version unit/test_version.c)
+    target_link_libraries(test_version PRIVATE nt_version nt_core nt_log_stub unity)
+    nt_setup_test_target(test_version)
+
     # --- Sanitizer proof test ---
     # Triggers UB to prove ASan+UBSan are detecting. Skipped on Windows+Clang
     # where sanitizers are disabled (clang interception_win can't patch UCRT).
@@ -849,11 +853,11 @@ if(NOT EMSCRIPTEN)
         )
         nt_setup_test_target(test_devapi_net_backpressure)
 
-        # core command group via submit(). engine.info.version comes from nt_core, so the
-        # test asserts it against nt_engine_version_string() directly. Needs the core group.
+        # core command group via submit(). engine.info.version comes from nt_version, so the
+        # test asserts it against nt_version_engine() directly. Needs the core group.
         if(NT_DEVAPI_GROUP_CORE)
             add_executable(test_devapi_core unit/test_devapi_core.c)
-            target_link_libraries(test_devapi_core PRIVATE nt_devapi_core nt_devapi cjson nt_window_stub nt_app_stub nt_core nt_log_stub unity)
+            target_link_libraries(test_devapi_core PRIVATE nt_devapi_core nt_devapi cjson nt_window_stub nt_app_stub nt_version nt_core nt_log_stub unity)
             target_compile_definitions(test_devapi_core PRIVATE
                 _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1
             )

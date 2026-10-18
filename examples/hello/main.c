@@ -65,7 +65,7 @@ int main(void) {
     nt_platform_web_loading_complete();
 #endif
 
-    printf("Hello from Neotolis Engine %s!\n", nt_engine_version_string());
+    printf("Hello from Neotolis Engine " NT_VERSION_SEMVER "!\n");
     printf("Window: %ux%u fb: %ux%u dpr: %.1f\n", g_nt_window.width, g_nt_window.height, g_nt_window.fb_width, g_nt_window.fb_height, (double)g_nt_window.dpr);
 
     nt_accumulator_init(&s_acc, 1.0F / 60.0F, 4);

@@ -28,10 +28,11 @@ target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_ENABLED=1)
 #     group's deps propagate to the linking exe (a static lib's PRIVATE deps become link-only usage
 #     requirements), so the exe needs only to pick the swappable *_interface impls (nt_gfx/nt_ui/...).
 
-# Core group: ping / engine.info / view. view reads g_nt_window -> nt_window_interface.
+# Core group: ping / engine.info / view. view reads g_nt_window -> nt_window_interface;
+# engine.info reports the commit-qualified version -> nt_version.
 if(NT_DEVAPI_GROUP_CORE)
     nt_add_module(nt_devapi_core LOG_DOMAIN "devapi" nt_devapi_core.c)
-    target_link_libraries(nt_devapi_core PUBLIC nt_devapi PRIVATE nt_window_interface)
+    target_link_libraries(nt_devapi_core PUBLIC nt_devapi PRIVATE nt_window_interface nt_version)
     target_compile_definitions(nt_devapi_core PUBLIC NT_DEVAPI_GROUP_CORE=1)
 endif()
 

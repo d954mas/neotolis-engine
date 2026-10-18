@@ -123,6 +123,12 @@ Asserts are contracts, not error handling. A failed assert means the program is 
 - resource load fail → asset state failed + log
 - audio decode failure → clip state failed + log
 
+## Engine version
+
+`nt_core.h` holds the semantic version: `NT_VERSION_MAJOR/MINOR/PATCH` and the literal `NT_VERSION_SEMVER` ("0.1.0"). Every module and tool can use them without a build-time dependency on the repository state.
+
+`nt_version_engine()` (opt-in module `engine/version`) returns `"<semver>+<first 8 hex of the engine commit>"`, with `-dirty` when tracked files differ from `HEAD`. Reports, analytics and `engine.info` use it to name the exact engine source. A build step runs git against `NT_ENGINE_ROOT` on every build and rewrites the generated header only when the value changes; an unchanged tree recompiles nothing. The value is `unknown` when git is unavailable or the engine directory is not the top of its own repository (a copy without `.git` would otherwise report the host repository's commit). `nt_core`, the builder and pack builds do not link it, so a new commit relinks only its consumers.
+
 ## Debug overlay
 
 `nt_debug_overlay` is a **pure consumer** of `nt_metrics` ([Observability](#observability-devapi-log--perf--entity--resource)): it formats an on-screen HUD (`nt_debug_overlay_format_lines` / `nt_debug_overlay_draw`) from `nt_metrics_fps()`, the last frame's cpu/gpu/draw_calls via `nt_metrics_last()`, and the user counters via `nt_metrics_user_count()` / `nt_metrics_user_get()`. It owns **no** measurement and **no** counter storage — the host pushes per-frame data into `nt_metrics` and the overlay reads it back. Because of that dependency, a CMake `FATAL_ERROR` guard requires `NT_UI_DEBUG_TOOLS` to be built with `NT_METRICS_ENABLED` (with metrics OFF the overlay would format from no-op stubs — an empty HUD); both options default OFF; presets enable each explicitly.
