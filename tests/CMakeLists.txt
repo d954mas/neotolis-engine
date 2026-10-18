@@ -116,6 +116,29 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_version PRIVATE nt_version nt_core nt_log_stub unity)
     nt_setup_test_target(test_version)
 
+    # --- Crash record ---
+    # Each case crashes one run (WILL_FAIL; cmake -E env reports a signal death as a failure CTest
+    # can invert), then a second run reads the stored record. Sanitized builds install no handlers.
+    if(NOT (CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT (WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "Clang")))
+        add_executable(test_crash_record unit/test_crash_record.c)
+        target_link_libraries(test_crash_record PRIVATE nt_crash nt_log)
+        target_compile_definitions(test_crash_record PRIVATE _CRT_SECURE_NO_WARNINGS)
+        nt_set_static_crt(test_crash_record)
+        nt_set_warning_flags(test_crash_record)
+        nt_set_sanitizer_flags(test_crash_record)
+        set_target_properties(test_crash_record PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+        )
+        foreach(_mode trap abort segv)
+            set(_record "${CMAKE_CURRENT_BINARY_DIR}/crash_record_${_mode}.txt")
+            add_test(NAME test_crash_record_${_mode}
+                COMMAND ${CMAKE_COMMAND} -E env $<TARGET_FILE:test_crash_record> ${_mode} ${_record})
+            set_tests_properties(test_crash_record_${_mode} PROPERTIES WILL_FAIL TRUE TIMEOUT 30 FIXTURES_SETUP crash_${_mode})
+            add_test(NAME test_crash_record_${_mode}_check COMMAND test_crash_record check ${_mode} ${_record})
+            set_tests_properties(test_crash_record_${_mode}_check PROPERTIES TIMEOUT 30 FIXTURES_REQUIRED crash_${_mode})
+        endforeach()
+    endif()
+
     # --- Sanitizer proof test ---
     # Triggers UB to prove ASan+UBSan are detecting. Skipped on Windows+Clang
     # where sanitizers are disabled (clang interception_win can't patch UCRT).
