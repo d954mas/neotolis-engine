@@ -148,14 +148,14 @@ engine: <nt_version_engine()> <preset>    (e.g. 0595a717-dirty wasm-release)
 time: <unix ms>
 reason: RuntimeError: unreachable | signal SIGSEGV | exception 0xc000001d | abort
 pc: exe+0x1a2b3c          (native; absolute 0x... outside the executable)
-stack:                    (web: the JS error stack, at most 4 KB)
+stack:                    (web: the JS error stack, cut at 4096 characters)
 ...
 log:
 WARN [gfx] ...
 ERROR [resource] ...
 ```
 
-`log:` is the tail of WARN/ERROR lines from a fixed BSS byte ring of `NT_CRASH_LOG_BYTES` (default 8192; a game sets another size with `target_compile_definitions(nt_crash PRIVATE NT_CRASH_LOG_BYTES=...)`); the ring holds at least two log lines, and a wrapped ring drops its first line, which may be partial. A record is at most about `NT_CRASH_LOG_BYTES` + 6 KB (on web, invalid UTF-8 in a log line can grow it: each such byte becomes a 3-byte replacement character). Lines filtered by `NT_LOG_MIN_LEVEL` or `nt_log_set_level` never reach the ring; with `NT_LOG_MIN_LEVEL=3` or `nt_log_stub` the section is empty. FULL assert text goes to stderr/console, not into the record — a crash-prone check that needs its cause in field reports logs one ERROR before the assert (see [Assert policy](#assert-policy)). The dev-only `nt_log_ring` is separate: it is compiled out of release builds.
+`log:` is the tail of WARN/ERROR lines from a fixed BSS byte ring of `NT_CRASH_LOG_BYTES` (default 8192; a game sets another size with `target_compile_definitions(nt_crash PRIVATE NT_CRASH_LOG_BYTES=...)`); the ring holds at least two log lines, and a wrapped ring drops its first line, which may be partial. A record is at most about `NT_CRASH_LOG_BYTES` + 2 KB of ASCII; on web the reason (256 characters) and stack (4096 characters) are cut by characters, so non-ASCII text can take up to 3 bytes per character, about `NT_CRASH_LOG_BYTES` + 14 KB, and invalid UTF-8 in a log line grows the same way (each such byte becomes a 3-byte replacement character). Size the game's buffer for that; a longer record is cut. Lines filtered by `NT_LOG_MIN_LEVEL` or `nt_log_set_level` never reach the ring; with `NT_LOG_MIN_LEVEL=3` or `nt_log_stub` the section is empty. FULL assert text goes to stderr/console, not into the record — a crash-prone check that needs its cause in field reports logs one ERROR before the assert (see [Assert policy](#assert-policy)). The dev-only `nt_log_ring` is separate: it is compiled out of release builds.
 
 **Capture.**
 

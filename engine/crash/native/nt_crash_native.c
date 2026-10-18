@@ -239,8 +239,9 @@ static uintptr_t fault_pc(const void *uctx) {
 #endif
 }
 
-/* The signal is blocked inside the handler, so the raise stays pending and kills the process
-   under SIG_DFL (SA_RESETHAND) on return, with the original context, whatever sent it. */
+/* The handler stays installed while it writes, so a second crashing thread waits on s_writing
+   instead of dying by the default action. Then SIG_DFL and a raise: the signal is blocked here, so
+   it stays pending and kills the process on return, with the original context, whatever sent it. */
 static void on_signal(int sig, siginfo_t *info, void *uctx) {
     (void)info;
     if (atomic_flag_test_and_set(&s_writing)) {
@@ -261,6 +262,8 @@ static void on_signal(int sig, siginfo_t *info, void *uctx) {
         out_record(reason, 0, false, fault_pc(uctx), true, (uint64_t)ts.tv_sec * 1000U + (uint64_t)ts.tv_nsec / 1000000U);
         (void)close(s_fd);
     }
+    struct sigaction dfl = {.sa_handler = SIG_DFL};
+    (void)sigaction(sig, &dfl, NULL);
     (void)raise(sig);
 }
 
@@ -304,7 +307,7 @@ void nt_crash_platform_init(void) {
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_sigaction = on_signal;
-    sa.sa_flags = (int)(SA_SIGINFO | SA_ONSTACK | SA_RESETHAND); /* SA_RESETHAND is 0x80000000u */
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
     (void)sigemptyset(&sa.sa_mask);
     for (size_t i = 0; i < sizeof(k_signals) / sizeof(k_signals[0]); i++) {
         (void)sigaddset(&sa.sa_mask, k_signals[i]);

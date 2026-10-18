@@ -53,7 +53,8 @@ EM_JS(uint32_t, nt_crash_web_load, (const char *name, char *out, uint32_t cap), 
         HEAPU8[out] = 0;
         return 0;
     }
-    return stringToUTF8(text, out, cap);
+    var nul = text.indexOf(String.fromCharCode(0)); /* the C string ends there, as on native */
+    return stringToUTF8(nul < 0 ? text : text.slice(0, nul), out, cap);
 })
 
 EM_JS(void, nt_crash_web_clear, (const char *name), {

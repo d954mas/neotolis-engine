@@ -79,14 +79,20 @@ static int check(const char *mode, const char *path) {
     }
 #endif
 
-    /* The ring wrapped: the first kept line is whole, line 0 is gone, the token line is last. */
-    const char *log = strstr(s_record, "\nlog:\nWARN crash probe line ");
-    CHECK(log != NULL);
+    /* The log tail holds what the compile floor lets through. Up to WARN the ring wrapped: the
+       first kept line is whole, line 0 is gone. The token line (ERROR) is last. */
+#if NT_LOG_MIN_LEVEL <= 1
+    CHECK(strstr(s_record, "\nlog:\nWARN crash probe line ") != NULL);
     CHECK(strstr(s_record, "line 0:") == NULL);
+#endif
+#if NT_LOG_MIN_LEVEL <= 2
     char token[64];
     (void)snprintf(token, sizeof(token), "\nERROR crash probe token-%s\n", mode);
     size_t token_len = strlen(token);
     CHECK(n >= token_len && strcmp(s_record + n - token_len, token) == 0);
+#else
+    CHECK(n >= 6 && strcmp(s_record + n - 6, "\nlog:\n") == 0);
+#endif
 
     char small[16];
     CHECK(nt_crash_load_previous(small, (uint32_t)sizeof(small)) == sizeof(small) - 1U);
