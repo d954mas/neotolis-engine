@@ -1308,7 +1308,7 @@ static NT_NOINLINE void log_program_failure(const nt_gfx_gl_program_t *rec, cons
                  rec->label != NULL && rec->label[0] != '\0' ? rec->label : "<unnamed>");
 }
 
-/* Device-dependent invariants log before TRAP discards the assert expression. */
+/* Driver-result checks log before TRAP discards the assert expression. */
 #define NT_GFX_PROGRAM_ASSERT(rec, phase, condition, reason, name, value)                                                                                                                              \
     do {                                                                                                                                                                                               \
         if (!(condition)) {                                                                                                                                                                            \

@@ -12,7 +12,7 @@
 typedef struct {
     nt_resource_t vs; /* set once by the game */
     nt_resource_t fs;
-    const char *label;    /* debug name for link failures; static storage */
+    const char *label;    /* debug name in failure records; static storage */
     nt_program_t program; /* filled by update(), cleared by drop() */
 } nt_program_ref_t;
 

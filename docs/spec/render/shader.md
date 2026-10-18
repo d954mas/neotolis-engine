@@ -130,11 +130,12 @@ A stale stage handle is a developer error and still traps. Because the builder v
 separately and never links a pair, the trap is also where mismatched varyings
 and device limits surface — offline linking arrives with `ShaderAsset`.
 
-A live-context link or reflection failure is device-dependent, so it follows the
-[device failure record](../debug/logging-errors-debugging.md#assert-policy) rule:
-the record names the program slot, GL name and label, the phase (`link`,
-`blocks` or `uniforms`), the violated contract, and the uniform or block name
-with the value the driver returned (`gl_error` when a query returned nothing). The link record follows the driver logs, so a journal that
+A live-context link or reflection failure checks what the driver returned, so it
+follows the [failure record](../debug/logging-errors-debugging.md#assert-policy)
+rule: the record names the program slot, GL name and label, the phase (`link`,
+`blocks` or `uniforms`), the violated contract, and the name and value the driver
+returned: the uniform or block, `max_len`, or `gl_error` for a failed link or an
+empty query. The link record follows the driver logs, so a journal that
 keeps its tail keeps the identity. Context loss keeps its recoverable outcome.
 
 The label is an optional debug name in static storage, like material labels; the
