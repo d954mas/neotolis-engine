@@ -18,7 +18,7 @@ async function openRead(page: Page): Promise<void> {
 // Error that the filter accepts only for its wasm frames.
 const REASONS = {
   trap: /\nreason: RuntimeError: unreachable/,
-  abort: /\nreason: RuntimeError: Abort/,
+  abort: /\nreason: (?:native code called abort\(\)|abort)/,
   reject: /\nreason: RuntimeError: unreachable/,
   jserror: /\nreason: Error: crash probe js error/,
 };
@@ -73,3 +73,28 @@ for (const mode of ['trap', 'abort', 'reject', 'jserror'] as const) {
     expect(await page.evaluate(() => (window as CrashWindow).__nt!.crash_load())).toBe('');
   });
 }
+
+test('crash record: a caught Emscripten abort records before the shell overlay', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.addInitScript(() => {
+    const w = window as CrashWindow;
+    w.__crashEvents = [];
+    window.addEventListener('nt-crash', (e) => w.__crashEvents!.push((e as CustomEvent).detail.text));
+  });
+  await openRead(page);
+  await page.evaluate((key) => localStorage.removeItem(key), KEY);
+
+  await page.goto('/index.html?crash=abortcaught');
+  await page.waitForFunction(() => ((window as CrashWindow).__crashEvents ?? []).length === 1, null, {timeout: 60_000});
+  await expect(page.locator('#crash-overlay')).toHaveCSS('display', 'flex');
+
+  const stored = await page.evaluate((key) => localStorage.getItem(key), KEY);
+  expect(stored).not.toBeNull();
+  expect(await page.evaluate(() => (window as CrashWindow).__crashEvents)).toEqual([stored]);
+  expect(stored).toMatch(/\nreason: .*abort/i);
+  expect(stored).toMatch(/\nstack:\n.+/s);
+
+  await openRead(page);
+  expect(await page.evaluate(() => (window as CrashWindow).__nt!.crash_load())).toBe(stored);
+  await page.evaluate(() => (window as CrashWindow).__nt!.crash_clear());
+});

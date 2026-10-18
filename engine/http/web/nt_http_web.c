@@ -123,7 +123,7 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_
                                              received > 0x7FFFFFFF ? 0x7FFFFFFF : received,
                                              total > 0x7FFFFFFF ? 0x7FFFFFFF : total);
                     pump();
-                }).catch(function(e) {
+                }, function(e) {
                     /* Abort here = deliberate cancel/timeout after headers — not an error */
                     if (!e || e.name !== 'AbortError') {
                         console.error('ERROR [http] stream error slot=' + slot_index, e);
@@ -140,15 +140,13 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_
                 if (arr.length > 0 && !ptr) { finish(0, 0, 0); return; }
                 HEAPU8.set(arr, ptr);
                 finish(ptr, arr.length, 1);
-            }).catch(function() {
+            }, function() {
                 finish(0, 0, 0);
             });
         }
-    }).catch(function(err) {
-        /* Covers network errors, aborts (cancel/timeout) and throws after headerBlock —
-         * finish still owns hdrs, so the block is handed over, never leaked. Log
-         * non-abort failures (CORS/mixed-content are otherwise invisible) — parity
-         * with the native backend's NT_LOG_ERROR. */
+    }, function(err) {
+        /* Network errors and aborts (cancel/timeout) leave any allocated headers owned by
+         * finish. Log non-abort failures (CORS/mixed-content are otherwise invisible). */
         if (!err || err.name !== 'AbortError') {
             console.error('ERROR [http] fetch failed slot=' + slot_index, err);
         }
