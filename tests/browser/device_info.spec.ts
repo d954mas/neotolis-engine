@@ -22,7 +22,7 @@ type DeviceWindow = Window & {
 const INITIAL: Identity = { vendor: 'vendor-initial', renderer: 'renderer-initial', api: 'WebGL 2.0 initial' };
 const RESTORED: Identity = { vendor: 'vendor-restored', renderer: 'renderer-restored', api: 'WebGL 2.0 restored' };
 
-// Replace only browser identity inputs; the real engine owns capture, restore and persistence.
+// Override browser identity and context-creation responses; capture and persistence use the real engine.
 async function installIdentity(page: Page, identity = INITIAL, debug = true, denyCreate = false): Promise<void> {
   await page.addInitScript(({ identity, debug, denyCreate }) => {
     const control = (window as DeviceWindow).__device = {
