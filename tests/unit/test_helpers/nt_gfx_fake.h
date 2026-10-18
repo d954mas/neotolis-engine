@@ -50,6 +50,7 @@ uint32_t nt_gfx_fake_render_target_create_count(void);
 uint32_t nt_gfx_fake_render_target_destroy_count(void);
 uint32_t nt_gfx_fake_texture_create_count(void);
 uint32_t nt_gfx_fake_program_create_count(void);
+const char *nt_gfx_fake_last_program_label(void);
 uint32_t nt_gfx_fake_pipeline_create_count(void);
 uint32_t nt_gfx_fake_bind_pipeline_count(void);
 /* Program links finish in nt_gfx_begin_frame; these act there. Hold keeps every link pending. */

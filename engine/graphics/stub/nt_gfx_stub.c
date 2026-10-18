@@ -45,9 +45,10 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc) {
     return (nt_shader_t){0};
 }
 
-nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs) {
+nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs, const char *label) {
     (void)vs;
     (void)fs;
+    (void)label;
     return (nt_program_t){0};
 }
 

@@ -509,8 +509,8 @@ void setUp(void) {
     s_skin_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = skin_source, .label = "native_skin_vs"});
     s_reference_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = reference_source, .label = "native_skin_reference_vs"});
     s_fragment_shader = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source, .label = "native_skin_fs"});
-    s_skin_program = nt_gfx_make_program(s_skin_vs, s_fragment_shader);
-    s_reference_program = nt_gfx_make_program(s_reference_vs, s_fragment_shader);
+    s_skin_program = nt_gfx_make_program(s_skin_vs, s_fragment_shader, NULL);
+    s_reference_program = nt_gfx_make_program(s_reference_vs, s_fragment_shader, NULL);
     free(skin_source);
     free(reference_source);
     free(fragment_source);

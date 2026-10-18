@@ -225,7 +225,7 @@ void test_gfx_defaults_applied(void) {
 void test_gfx_make_pipeline(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    nt_program_t prog = nt_gfx_make_program(vs, fs, NULL);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, vs.id);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, fs.id);
 
@@ -240,7 +240,7 @@ void test_gfx_make_pipeline(void) {
 void test_gfx_pipeline_survives_shader_destroy(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    nt_program_t prog = nt_gfx_make_program(vs, fs, NULL);
     nt_test_gfx_link_wait(prog);
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = prog,
@@ -313,8 +313,8 @@ void test_gfx_make_program_does_not_dedup(void) {
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
 
-    nt_program_t a = nt_gfx_make_program(vs, fs);
-    nt_program_t b = nt_gfx_make_program(vs, fs);
+    nt_program_t a = nt_gfx_make_program(vs, fs, NULL);
+    nt_program_t b = nt_gfx_make_program(vs, fs, NULL);
 
     TEST_ASSERT_NOT_EQUAL_UINT32(0, a.id);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, b.id);
@@ -329,7 +329,7 @@ void test_gfx_make_program_does_not_dedup(void) {
 /* ---- Program: valid after create, ready once a begin_frame finished the link ---- */
 
 void test_gfx_program_valid_and_ready(void) {
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     TEST_ASSERT_TRUE(nt_gfx_program_valid(prog));
     TEST_ASSERT_FALSE(nt_gfx_program_ready(prog));
     nt_test_gfx_link_wait(prog);
@@ -340,7 +340,7 @@ void test_gfx_program_valid_and_ready(void) {
 /* ---- Program: destroy invalidates; a stale nonzero handle asserts ---- */
 
 void test_gfx_destroy_program_invalidates(void) {
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     nt_gfx_destroy_program(prog);
     TEST_ASSERT_FALSE(nt_gfx_program_valid(prog));
     TEST_ASSERT_FALSE(nt_gfx_program_ready(prog));
@@ -353,7 +353,7 @@ void test_gfx_program_slot_reused_after_destroy(void) {
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
     for (int i = 0; i < 8; i++) { /* twice the pool capacity */
-        nt_program_t prog = nt_gfx_make_program(vs, fs);
+        nt_program_t prog = nt_gfx_make_program(vs, fs, NULL);
         nt_test_gfx_link_wait(prog);
         TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
         nt_gfx_destroy_program(prog);
@@ -365,7 +365,7 @@ void test_gfx_program_slot_reused_after_destroy(void) {
 void test_gfx_program_survives_shader_destroy(void) {
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    nt_program_t prog = nt_gfx_make_program(vs, fs, NULL);
 
     nt_gfx_destroy_shader(vs);
     nt_gfx_destroy_shader(fs);
@@ -381,9 +381,9 @@ void test_gfx_program_pool_full_asserts(void) {
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
     for (int i = 0; i < 4; i++) { /* setUp: max_programs = 4 */
-        TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_make_program(vs, fs).id);
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_make_program(vs, fs, NULL).id);
     }
-    EXPECT_ASSERT(nt_gfx_make_program(vs, fs));
+    EXPECT_ASSERT(nt_gfx_make_program(vs, fs, NULL));
 }
 
 /* ---- Shader: exhausting the pool is a configuration error ---- */
@@ -412,15 +412,15 @@ void test_gfx_shader_pool_full_while_lost_returns_invalid(void) {
 void test_gfx_make_program_asserts_invalid_shader(void) {
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
-    EXPECT_ASSERT(nt_gfx_make_program((nt_shader_t){0}, fs));
-    EXPECT_ASSERT(nt_gfx_make_program(vs, (nt_shader_t){0}));
+    EXPECT_ASSERT(nt_gfx_make_program((nt_shader_t){0}, fs, NULL));
+    EXPECT_ASSERT(nt_gfx_make_program(vs, (nt_shader_t){0}, NULL));
 }
 
 /* ---- Program: the link runs across frames and only a begin_frame finishes it ---- */
 
 void test_gfx_program_links_at_a_begin_frame(void) {
     nt_gfx_fake_hold_program_links(true);
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     TEST_ASSERT_TRUE(nt_gfx_program_valid(prog));
     TEST_ASSERT_FALSE(nt_gfx_program_ready(prog));
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
@@ -452,7 +452,7 @@ void test_gfx_program_links_at_a_begin_frame(void) {
 /* ---- Program: destroying a linking program frees its slot and its pending link ---- */
 
 void test_gfx_destroy_while_linking_frees_the_slot(void) {
-    nt_program_t pending = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t pending = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     nt_gfx_destroy_program(pending);
     TEST_ASSERT_FALSE(nt_gfx_program_valid(pending));
 
@@ -460,7 +460,7 @@ void test_gfx_destroy_while_linking_frees_the_slot(void) {
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
 
-    nt_program_t reused = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t reused = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(pending.id), nt_pool_slot_index(reused.id));
     TEST_ASSERT_NOT_EQUAL_UINT32(pending.id, reused.id);
     TEST_ASSERT_FALSE(nt_gfx_program_ready(reused));
@@ -473,7 +473,7 @@ void test_gfx_destroy_while_linking_frees_the_slot(void) {
 /* ---- Program: a loss met while finishing a link latches it, never asserts ---- */
 
 void test_gfx_context_loss_during_link_finish_latches_the_loss(void) {
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     nt_gfx_fake_lose_context_on_program_link();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
@@ -501,7 +501,7 @@ void test_gfx_make_program_context_lost_returns_invalid(void) {
     /* No begin_frame in between: g_nt_gfx.context_lost is still false, so the
      * failed backend create reports the loss. */
     nt_gfx_fake_set_context_lost(true);
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    nt_program_t prog = nt_gfx_make_program(vs, fs, NULL);
     nt_gfx_fake_set_context_lost(false);
 
     TEST_ASSERT_EQUAL_UINT32(0, prog.id);
@@ -535,7 +535,7 @@ void test_gfx_make_program_rejects_a_stage_left_unready_by_a_loss(void) {
         nt_assert_handler = NULL;
         TEST_FAIL_MESSAGE("a stage left unready by a context loss must return invalid without asserting");
     }
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    nt_program_t prog = nt_gfx_make_program(vs, fs, NULL);
     nt_assert_handler = NULL;
 
     TEST_ASSERT_EQUAL_UINT32(0, prog.id);
@@ -559,7 +559,7 @@ void test_gfx_program_link_context_loss_releases_every_slot(void) {
     /* The failed link confirms the loss and latches it; later links stop before the backend. */
     nt_gfx_fake_set_context_lost(true);
     for (uint32_t attempt = 0; attempt < 12; attempt++) {
-        nt_program_t program = nt_gfx_make_program(vs, fs);
+        nt_program_t program = nt_gfx_make_program(vs, fs, NULL);
         TEST_ASSERT_EQUAL_UINT32(0, program.id);
         TEST_ASSERT_FALSE(nt_gfx_program_valid(program));
         TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
@@ -573,7 +573,7 @@ void test_gfx_program_link_context_loss_releases_every_slot(void) {
     vs = make_test_vs();
     fs = make_test_fs();
     for (uint32_t i = 0; i < 4; i++) {
-        programs[i] = nt_gfx_make_program(vs, fs);
+        programs[i] = nt_gfx_make_program(vs, fs, NULL);
         nt_test_gfx_link_wait(programs[i]);
         TEST_ASSERT_TRUE(nt_gfx_program_ready(programs[i]));
     }
@@ -589,7 +589,7 @@ void test_gfx_program_link_context_loss_releases_every_slot(void) {
 /* ---- Program: context loss clears readiness, handles stay valid ---- */
 
 void test_gfx_context_loss_keeps_handle_drops_ready(void) {
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     nt_test_gfx_link_wait(prog);
 
     nt_gfx_fake_set_context_lost(true);
@@ -605,7 +605,7 @@ void test_gfx_context_loss_keeps_handle_drops_ready(void) {
 
 void test_gfx_two_pipelines_share_one_program(void) {
     nt_gfx_fake_reset();
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
 
     nt_pipeline_t a = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = false});
     nt_pipeline_t b = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = true});
@@ -994,7 +994,7 @@ typedef struct {
 
 static husks_t make_husks(void) {
     husks_t h = {
-        .program = nt_gfx_make_program(make_test_vs(), make_test_fs()),
+        .program = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL),
         .buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}),
         .texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = s_test_pixels_4x4}),
     };
@@ -1022,7 +1022,7 @@ void test_gfx_husks_skip_the_backend_and_their_slots_are_reused_after_restore(vo
     destroy_husks(h);
     TEST_ASSERT_EQUAL_UINT32(texture_destroys, nt_gfx_fake_texture_destroy_count());
     husks_t fresh = {
-        .program = nt_gfx_make_program(make_test_vs(), make_test_fs()),
+        .program = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL),
         .buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}),
         .texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = s_test_pixels_4x4}),
     };
@@ -1128,7 +1128,7 @@ void test_gfx_destroy_program_accepts_invalid(void) {
 /* A stale non-zero handle means the owner lost track of what it still holds --
  * the one mistake single ownership cannot absorb. */
 void test_gfx_destroy_program_asserts_on_a_stale_handle(void) {
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     nt_gfx_destroy_program(prog);
 
     EXPECT_ASSERT(nt_gfx_destroy_program(prog));
@@ -1145,7 +1145,7 @@ void test_gfx_context_restore_yields_a_new_program_handle(void) {
     nt_gfx_fake_reset();
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
-    nt_program_t old = nt_gfx_make_program(vs, fs);
+    nt_program_t old = nt_gfx_make_program(vs, fs, NULL);
     nt_test_gfx_link_wait(old);
 
     nt_gfx_fake_set_context_lost(true);
@@ -1159,7 +1159,7 @@ void test_gfx_context_restore_yields_a_new_program_handle(void) {
     nt_shader_t pending_vs = make_test_vs();
     nt_shader_t pending_fs = make_test_fs();
     uint32_t links_before = nt_gfx_fake_program_create_count();
-    nt_program_t pending = nt_gfx_make_program(pending_vs, pending_fs);
+    nt_program_t pending = nt_gfx_make_program(pending_vs, pending_fs, NULL);
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
     TEST_ASSERT_EQUAL_UINT32(0, pending.id);
     TEST_ASSERT_EQUAL_UINT32(links_before, nt_gfx_fake_program_create_count());
@@ -1169,7 +1169,7 @@ void test_gfx_context_restore_yields_a_new_program_handle(void) {
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
-    nt_program_t fresh = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t fresh = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     nt_test_gfx_link_wait(fresh);
 
     TEST_ASSERT_NOT_EQUAL_UINT32(old.id, fresh.id); /* generation moved on */
@@ -1188,8 +1188,8 @@ void test_gfx_frame_boundary_syncs_loss_before_creates(void) {
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_program(vs, fs).id); /* stages died with the old context */
-    nt_program_t fresh = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_program(vs, fs, NULL).id); /* stages died with the old context */
+    nt_program_t fresh = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     nt_test_gfx_link_wait(fresh);
     TEST_ASSERT_TRUE(nt_gfx_program_ready(fresh));
 }
@@ -1202,12 +1202,12 @@ void test_gfx_frame_boundary_syncs_loss_before_creates(void) {
 void test_gfx_destroy_program_destroys_its_pipelines(void) {
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    nt_program_t prog = nt_gfx_make_program(vs, fs, NULL);
     nt_pipeline_t a = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
     nt_pipeline_t b = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = true});
     TEST_ASSERT_NOT_EQUAL_UINT32(a.id, b.id);
 
-    nt_program_t keep = nt_gfx_make_program(vs, fs);
+    nt_program_t keep = nt_gfx_make_program(vs, fs, NULL);
     nt_test_gfx_link_wait(keep);
     nt_pipeline_t untouched = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = keep});
 
@@ -1239,7 +1239,7 @@ void test_gfx_destroy_program_destroys_its_pipelines(void) {
 static void expect_pipeline_blend_assert(nt_blend_state_t blend) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    nt_program_t prog = nt_gfx_make_program(vs, fs, NULL);
     EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = prog,
         .blend = blend,
@@ -1249,7 +1249,7 @@ static void expect_pipeline_blend_assert(nt_blend_state_t blend) {
 static void expect_pipeline_blend_accept(nt_blend_state_t blend) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    nt_program_t prog = nt_gfx_make_program(vs, fs, NULL);
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = prog,
         .blend = blend,
@@ -1265,7 +1265,7 @@ void test_gfx_pipeline_asserts_null_desc(void) { EXPECT_ASSERT(nt_gfx_make_pipel
 /* Context loss is what zeroes a program's backend, so while the loss is latched it must not
  * read as the developer error of an invalid program -- the handle is still pool-valid. */
 void test_gfx_pipeline_context_lost_returns_invalid(void) {
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     nt_test_gfx_link_wait(prog);
 
     nt_gfx_fake_set_context_lost(true);
@@ -1281,7 +1281,7 @@ void test_gfx_pipeline_context_lost_returns_invalid(void) {
 
 /* After the restore the context is live again, so a program the loss discarded is a stale handle. */
 void test_gfx_pipeline_asserts_program_lost_before_restore(void) {
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     nt_test_gfx_link_wait(prog);
 
     nt_gfx_fake_lose_and_restore_context();
@@ -1295,7 +1295,7 @@ void test_gfx_pipeline_asserts_program_lost_before_restore(void) {
 }
 
 void test_gfx_pipeline_pool_full_asserts(void) {
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     for (uint8_t cull = 0; cull < 2; cull++) { /* setUp: max_pipelines = 4; equal descs share one slot */
         for (int depth = 0; depth < 2; depth++) {
             TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = depth != 0, .cull_mode = cull}).id);
@@ -1308,7 +1308,7 @@ void test_gfx_pipeline_pool_full_asserts(void) {
 
 void test_gfx_make_pipeline_returns_the_live_pipeline_of_an_equal_desc(void) {
     nt_gfx_fake_reset();
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     const uint32_t accepted = g_nt_gfx.counters.accepted[NT_GFX_OP_CREATE];
     nt_pipeline_t first = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = true, .label = "first"});
     nt_pipeline_t again = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = true, .label = "second"});
@@ -1321,13 +1321,13 @@ void test_gfx_make_pipeline_returns_the_live_pipeline_of_an_equal_desc(void) {
 /* make_pipeline scans from slot 1, so freed pipelines must come back low slots first: after a
  * full pool empties, the next pipeline is found on the first compare. */
 void test_gfx_freed_pipeline_slots_are_reused_low_first(void) {
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     nt_test_gfx_link_wait(prog);
     for (uint8_t i = 0; i < 4; i++) { /* setUp: max_pipelines = 4 */
         TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = (i & 1U) != 0, .cull_mode = (uint8_t)(i >> 1U)}).id);
     }
     nt_gfx_destroy_program(prog);
-    prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     nt_test_gfx_link_wait(prog);
     TEST_ASSERT_EQUAL_UINT32(1, nt_pool_slot_index(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog}).id));
     for (uint8_t i = 1; i < 4; i++) {
@@ -1341,7 +1341,7 @@ void test_gfx_freed_pipeline_slots_are_reused_low_first(void) {
     nt_gfx_end_frame();
     nt_gfx_begin_frame(); /* recovery completes */
     nt_gfx_destroy_program(prog);
-    prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     TEST_ASSERT_EQUAL_UINT32(1, nt_pool_slot_index(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog}).id));
 }
 
@@ -1350,12 +1350,12 @@ void test_gfx_make_pipeline_after_program_destroy_creates_again(void) {
     nt_gfx_fake_reset();
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
-    nt_program_t old_prog = nt_gfx_make_program(vs, fs);
+    nt_program_t old_prog = nt_gfx_make_program(vs, fs, NULL);
     nt_pipeline_t old_pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = old_prog});
     nt_gfx_destroy_program(old_prog);
     TEST_ASSERT_FALSE(nt_gfx_pipeline_valid(old_pip));
 
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    nt_program_t prog = nt_gfx_make_program(vs, fs, NULL);
     TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(old_prog.id), nt_pool_slot_index(prog.id));
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
     TEST_ASSERT_TRUE(nt_gfx_pipeline_valid(pip));
@@ -1366,7 +1366,7 @@ void test_gfx_make_pipeline_after_program_destroy_creates_again(void) {
 /* A loss latched mid-frame keeps the slots until the next frame wipes them; make must not hand
  * one out in between. */
 void test_gfx_make_pipeline_misses_while_a_loss_is_latched(void) {
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     const nt_pipeline_desc_t desc = {.program = prog};
     TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_make_pipeline(&desc).id);
     g_nt_gfx.context_lost = true;
@@ -1376,7 +1376,7 @@ void test_gfx_make_pipeline_misses_while_a_loss_is_latched(void) {
 
 /* The wipe empties the keys, so a desc made before the loss still reaches the husk assert. */
 void test_gfx_make_pipeline_on_a_restored_husk_asserts_even_after_a_hit(void) {
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     nt_test_gfx_link_wait(prog);
     const nt_pipeline_desc_t desc = {.program = prog};
     TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_make_pipeline(&desc).id);
@@ -1459,7 +1459,7 @@ void test_gfx_make_pipeline_lane_variants_on_neighbouring_programs_stay_distinct
     reinit_gfx_with_pipelines(2 * KEY_VARIANT_COUNT);
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
-    const nt_program_t programs[2] = {nt_gfx_make_program(vs, fs), nt_gfx_make_program(vs, fs)};
+    const nt_program_t programs[2] = {nt_gfx_make_program(vs, fs, NULL), nt_gfx_make_program(vs, fs, NULL)};
     nt_pipeline_desc_t descs[2 * KEY_VARIANT_COUNT];
     uint32_t n = 0;
     for (uint32_t p = 0; p < 2; p++) {
@@ -1483,7 +1483,7 @@ void test_gfx_make_pipeline_lane_variants_on_neighbouring_programs_stay_distinct
 /* Depth lanes are exact even when the depth test is off. */
 void test_gfx_make_pipeline_keeps_every_depth_lane_value(void) {
     reinit_gfx_with_pipelines(16);
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     static const nt_depth_func_t functions[] = {NT_DEPTH_LESS, NT_DEPTH_LEQUAL, NT_DEPTH_ALWAYS, NT_DEPTH_GEQUAL, NT_DEPTH_GREATER, NT_DEPTH_EQUAL, NT_DEPTH_NOTEQUAL, NT_DEPTH_NEVER};
     nt_pipeline_t pips[16];
     for (uint32_t i = 0; i < 16; i++) {
@@ -1497,7 +1497,7 @@ void test_gfx_make_pipeline_keeps_every_depth_lane_value(void) {
 
 /* A disabled blend is opaque whatever its factors or constant say; a disabled offset ignores its values. */
 void test_gfx_make_pipeline_canonicalizes_disabled_blend_and_offset(void) {
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     nt_pipeline_desc_t opaque = key_base_desc(prog.id);
     opaque.blend = nt_blend_opaque();
     nt_pipeline_desc_t disabled = key_base_desc(prog.id);
@@ -1515,7 +1515,7 @@ void test_gfx_make_pipeline_canonicalizes_disabled_blend_and_offset(void) {
 }
 
 void test_gfx_make_pipeline_splits_on_float_payloads(void) {
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     const nt_pipeline_desc_t a = key_base_desc(prog.id);
     const nt_pipeline_t pa = nt_gfx_make_pipeline(&a);
     nt_pipeline_desc_t b = key_base_desc(prog.id);
@@ -1531,7 +1531,7 @@ void test_gfx_make_pipeline_splits_on_float_payloads(void) {
 /* An out-of-range lane value must trap before it can truncate onto a valid neighbour
  * and turn into a hit on a desc make_pipeline would have rejected. */
 void test_gfx_make_pipeline_asserts_out_of_range_lanes(void) {
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     nt_pipeline_desc_t d = key_base_desc(prog.id);
     d.cull_mode = 3;
     EXPECT_ASSERT(nt_gfx_make_pipeline(&d));
@@ -2211,7 +2211,7 @@ static frame_rule_objects_t make_frame_rule_objects(void) {
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
     frame_rule_objects_t o = {.vs = make_test_vs(), .fs = make_test_fs()};
-    o.prog = nt_gfx_make_program(o.vs, o.fs);
+    o.prog = nt_gfx_make_program(o.vs, o.fs, NULL);
     nt_test_gfx_link_wait(o.prog);
     o.pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = o.prog});
     o.vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = verts, .size = sizeof(verts)});
@@ -3163,7 +3163,7 @@ void test_gfx_update_texture_invalid_handle(void) {
  * input rule), the handle goes stale, the bind is the ordinary invalid path,
  * and every slot is allocatable again. */
 void test_gfx_pipeline_slots_freed_by_context_loss(void) {
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     nt_test_gfx_link_wait(prog);
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
 
@@ -3183,7 +3183,7 @@ void test_gfx_pipeline_slots_freed_by_context_loss(void) {
 
     /* Programs survive as husks; relink before building new pipelines. */
     nt_gfx_destroy_program(prog);
-    nt_program_t fresh = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t fresh = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     nt_pipeline_t pips[4];
     for (uint32_t i = 0; i < 4; i++) {
         pips[i] = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = fresh, .depth_test = (i & 1U) != 0, .cull_mode = (uint8_t)(i >> 1U)});
@@ -3245,7 +3245,7 @@ void test_gfx_restored_iteration_draws_what_it_rebuilds(void) {
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
 
-    nt_program_t program = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t program = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     nt_test_gfx_link_wait(program);
     nt_pipeline_t rebuilt = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
@@ -3261,13 +3261,13 @@ void test_gfx_failed_bind_drops_the_previous_pipeline(void) {
      * on bound_pipeline, so the new pipeline's vertices would go through it. */
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    nt_program_t prog = nt_gfx_make_program(vs, fs, NULL);
     nt_test_gfx_link_wait(prog);
     nt_pipeline_desc_t desc = {
         .program = prog,
     };
     nt_pipeline_t live = nt_gfx_make_pipeline(&desc);
-    nt_program_t doomed = nt_gfx_make_program(vs, fs);
+    nt_program_t doomed = nt_gfx_make_program(vs, fs, NULL);
     nt_pipeline_t dead = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = doomed});
     nt_gfx_destroy_program(doomed); /* takes the pipeline: its handle keeps the id, the generation goes stale */
 
@@ -3299,7 +3299,7 @@ void test_gfx_frame_draw_calls(void) {
     /* Minimal pipeline so draws have something bound (test backend accepts any handle). */
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    nt_program_t prog = nt_gfx_make_program(vs, fs, NULL);
     nt_test_gfx_link_wait(prog);
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = prog,
@@ -3343,7 +3343,7 @@ void test_gfx_frame_draw_calls(void) {
 void test_gfx_binds_outside_a_pass_trap(void) {
     static const float verts[9] = {0};
     const float vec[4] = {1.0F, 2.0F, 3.0F, 4.0F};
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
     nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = verts, .size = sizeof(verts)});
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
@@ -3360,7 +3360,7 @@ void test_gfx_binds_outside_a_pass_trap(void) {
 /* The pass clear touches draw state, so begin_pass discards the bound pipeline
  * and vertex input rather than letting the next pass inherit them. */
 void test_gfx_begin_pass_discards_bound_state(void) {
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     nt_test_gfx_link_wait(prog);
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
 
@@ -3382,11 +3382,11 @@ void test_gfx_begin_pass_discards_bound_state(void) {
 void test_gfx_bound_pipeline_holds_the_generation(void) {
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
-    nt_program_t old_prog = nt_gfx_make_program(vs, fs);
+    nt_program_t old_prog = nt_gfx_make_program(vs, fs, NULL);
     nt_pipeline_t old_pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = old_prog});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, old_pip.id);
     nt_gfx_destroy_program(old_prog);
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    nt_program_t prog = nt_gfx_make_program(vs, fs, NULL);
     nt_test_gfx_link_wait(prog);
 
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});

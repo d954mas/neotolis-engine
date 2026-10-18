@@ -949,7 +949,7 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
-static nt_gfx_result_t make_program(nt_shader_t vs, nt_shader_t fs, nt_program_t *out) {
+static nt_gfx_result_t make_program(nt_shader_t vs, nt_shader_t fs, const char *label, nt_program_t *out) {
     /* First: a stage the loss failed is 0, and the loss latched when it failed. */
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
@@ -969,7 +969,7 @@ static nt_gfx_result_t make_program(nt_shader_t vs, nt_shader_t fs, nt_program_t
     uint32_t id = nt_pool_alloc(&s_gfx.program_pool);
     NT_ASSERT(id != 0 && "program pool full -- raise nt_gfx_desc_t.max_programs");
 
-    if (!nt_gfx_backend_create_program(vs_backend, fs_backend, nt_pool_slot_index(id))) {
+    if (!nt_gfx_backend_create_program(vs_backend, fs_backend, nt_pool_slot_index(id), label)) {
         nt_pool_free(&s_gfx.program_pool, id);
         return latch_loss();
     }
@@ -982,10 +982,10 @@ static nt_gfx_result_t make_program(nt_shader_t vs, nt_shader_t fs, nt_program_t
     return NT_GFX_RESULT_ACCEPTED;
 }
 
-nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs) {
+nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs, const char *label) {
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_CREATE, NT_GFX_OBJECT_PROGRAM, 0, event->data.resource.related[0] = vs.id; event->data.resource.related[1] = fs.id);
     nt_program_t result = {0};
-    NT_GFX_END_OBJECT(make_program(vs, fs, &result), result.id);
+    NT_GFX_END_OBJECT(make_program(vs, fs, label, &result), result.id);
     return result;
 }
 

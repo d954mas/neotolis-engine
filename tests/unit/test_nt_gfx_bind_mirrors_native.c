@@ -84,7 +84,7 @@ static nt_vertex_input_t make_vi(nt_buffer_t vbo, nt_buffer_t ibo) { return nt_g
 static nt_pipeline_t make_red_pipeline(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_vs_src});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_fs_src});
-    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_program_t program = nt_gfx_make_program(vs, fs, NULL);
     nt_test_gfx_link_wait(program);
     return nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
 }
@@ -115,7 +115,7 @@ static uint8_t center_red_in_pass(void) {
 static nt_pipeline_t make_pipeline_ex(const char *vs_src, const char *fs_src, bool depth_test, bool depth_write, bool blend) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_src});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_src});
-    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_program_t program = nt_gfx_make_program(vs, fs, NULL);
     nt_test_gfx_link_wait(program);
     return nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = program,
@@ -473,7 +473,7 @@ static void write_instance_offsets(uint32_t stream, uint32_t at, float x0, float
 static nt_pipeline_t make_offset_pipeline(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_vs_offset_src});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_fs_src});
-    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_program_t program = nt_gfx_make_program(vs, fs, NULL);
     nt_test_gfx_link_wait(program);
     return nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
 }
@@ -697,7 +697,7 @@ static void test_index_data_ops_do_not_rewire_bound_vertex_input(void) {
 static void test_rejected_pipeline_bind_preserves_vertex_input(void) {
     nt_pipeline_t pip = make_red_pipeline();
     nt_program_t doomed = nt_gfx_make_program(nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_vs_src}),
-                                              nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_fs_src}));
+                                              nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_fs_src}), NULL);
     nt_pipeline_t stale = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = doomed});
     nt_gfx_destroy_program(doomed);
     TEST_ASSERT_FALSE(nt_gfx_pipeline_valid(stale));
@@ -753,7 +753,7 @@ static const char *s_vertexid_vs_src = "precision mediump float;\n"
 static void test_empty_vertex_input_draws_fullscreen(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_vertexid_vs_src});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_fs_src});
-    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_program_t program = nt_gfx_make_program(vs, fs, NULL);
     nt_test_gfx_link_wait(program);
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
@@ -1357,7 +1357,7 @@ static void test_upload_burst_costs_one_active_texture_switch(void) {
 static void test_destroy_current_program_then_relink_reissues_use_program(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_vs_src});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_fs_src});
-    nt_program_t prog_p = nt_gfx_make_program(vs, fs);
+    nt_program_t prog_p = nt_gfx_make_program(vs, fs, NULL);
     nt_test_gfx_link_wait(prog_p);
     nt_pipeline_t pip_p = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog_p});
     nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
@@ -1384,7 +1384,7 @@ static void test_destroy_current_program_then_relink_reissues_use_program(void) 
     glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
     TEST_ASSERT_EQUAL_INT(0, current_program);
 
-    nt_program_t prog_q = nt_gfx_make_program(vs, fs);
+    nt_program_t prog_q = nt_gfx_make_program(vs, fs, NULL);
     nt_test_gfx_link_wait(prog_q);
     nt_pipeline_t pip_q = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog_q});
     TEST_ASSERT_TRUE(nt_gfx_pipeline_valid(pip_q));

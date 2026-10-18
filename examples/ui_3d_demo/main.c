@@ -1048,10 +1048,13 @@ int main(int argc, char *argv[]) {
 #endif
 
     s_sprite_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
+    s_sprite_program.label = "ui_3d_demo/sprite";
     s_sprite_cutoff_program.vs = s_sprite_program.vs; /* one vertex stage, two fragment variants */
+    s_sprite_cutoff_program.label = "ui_3d_demo/sprite_cutoff";
     s_sprite_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
     s_sprite_cutoff_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_CUTOFF_FRAG, NT_ASSET_SHADER_CODE);
     s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
+    s_text_program.label = "ui_3d_demo/text";
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_3D_DEMO_ATLAS, NT_ASSET_ATLAS);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_3D_DEMO_FONT, NT_ASSET_FONT);

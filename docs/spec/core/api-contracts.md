@@ -151,6 +151,9 @@ without owning it. Destroying the program destroys its pipelines; the owner
 does not need to walk them. Shader stages have independent lifetimes: destroying
 a stage does not affect a program already linked from it.
 
+The optional program label is a debug name in static storage and is not identity; see
+[shader diagnostics](../render/shader.md#runtime-objects-shadercode-program).
+
 A program's linked executable and identity are immutable after
 `nt_gfx_make_program`, and so are its sampler units and block bindings.
 Recovery requires the owner to destroy the old program and link a new handle.
