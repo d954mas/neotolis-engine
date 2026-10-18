@@ -43,7 +43,8 @@ void nt_text_renderer_shutdown(void);
 /* Selects the material for this frame's draws: call it every frame before drawing (asserted).
  * Another set_material replaces it, so a caller selects its own before drawing.
  * Requires an assigned slug_text program, premultiplied-compatible blend and cull NONE.
- * slug_text.frag never discards (tile-GPU HSR); a depth-writing material needs a discarding FS.
+ * slug_text.frag never discards (tile-GPU HSR). A depth-writing material needs a discarding FS, and
+ * the overlapping quads of one draw (outline, shadow, neighbor glyphs) may z-fight: the game's call.
  * A text material does not declare u_curve_texture: the renderer supplies it. */
 void nt_text_renderer_set_material(nt_material_t mat);
 

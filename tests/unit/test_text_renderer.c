@@ -324,10 +324,16 @@ void test_vertex_color_bytes(void) {
     TEST_ASSERT_EQUAL_HEX32(NT_RGBA8(10, 20, 30, 40), color);
 }
 
-/* The GPU reads that color as normalized RGBA8 at byte 44 of a 48-byte vertex. */
+/* Five attributes fill the 48-byte vertex; the GPU reads the color as normalized RGBA8 at byte 44. */
 void test_vertex_input_reads_color_as_normalized_rgba8(void) {
     const nt_vertex_layout_t layout = nt_gfx_fake_last_vertex_input_layout();
     TEST_ASSERT_EQUAL_UINT16(TEXT_VERTEX_BYTES, layout.stride);
+    TEST_ASSERT_EQUAL_UINT8(5U, layout.attr_count);
+    static const uint16_t offsets[4] = {0U, 12U, 20U, 28U};
+    for (uint8_t i = 0; i < 4U; i++) {
+        TEST_ASSERT_EQUAL_UINT8(i, layout.attrs[i].location);
+        TEST_ASSERT_EQUAL_UINT16(offsets[i], layout.attrs[i].offset);
+    }
     TEST_ASSERT_EQUAL_UINT8(4U, layout.attrs[4].location);
     TEST_ASSERT_EQUAL_INT(NT_VERTEX_UINT8, layout.attrs[4].type);
     TEST_ASSERT_EQUAL_UINT8(4U, layout.attrs[4].count);

@@ -13,7 +13,6 @@
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
-#include "ui/nt_ui_internal.h"
 #include "unity.h"
 
 /* Painter order of the walker: sprites and text record their draws in command order, and

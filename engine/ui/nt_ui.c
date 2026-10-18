@@ -2060,13 +2060,6 @@ void nt_ui_set_view_proj(nt_ui_context_t *ctx, const float view_proj[16]) {
     memcpy(ctx->inv_view_proj, m_inv, sizeof ctx->inv_view_proj);
     ctx->view_proj_set = true;
 }
-
-void nt_ui_set_element_depth_bias(nt_ui_context_t *ctx, float ndc_per_element) {
-    NT_ASSERT(ctx != NULL && "nt_ui_set_element_depth_bias: ctx must be non-NULL");
-    NT_ASSERT(ctx->use_raycast_input && "nt_ui_set_element_depth_bias: only valid when desc.use_raycast_input=true");
-    NT_ASSERT(isfinite(ndc_per_element) && ndc_per_element >= 0.0F && "nt_ui_set_element_depth_bias: ndc_per_element must be finite and non-negative");
-    ctx->element_depth_bias_ndc = ndc_per_element;
-}
 // #endregion
 
 // #region nt_ui_custom

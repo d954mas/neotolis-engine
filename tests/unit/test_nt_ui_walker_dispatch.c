@@ -640,11 +640,46 @@ static void test_3d_debug_inspector_walk_draws_real_tree_text(void) {
     TEST_ASSERT_GREATER_THAN_UINT32(0U, ui_walker_fx_draw_count(text_program()));
 }
 
+/* Text draws of one walk of a one-label tree, in a frame of its own. */
+static void walk_label_frame(bool inspector_walk) {
+    ui_walker_fixture_next_frame(&s_fx);
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("swap_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(120.0F), CLAY_SIZING_FIXED(40.0F)}}}) {
+        nt_ui_label(s_fx.ctx, NULL, "TreeText", &(nt_ui_label_style_t){.font_id = 0, .font_size = 14, .color = NT_RGBA8(255, 255, 255, 255)});
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_gfx_fake_draw_trace_reset(true);
+    if (inspector_walk) {
+        nt_ui_debug_inspector_walk(s_fx.ctx, &target);
+    } else {
+        nt_ui_walk(s_fx.ctx, &target);
+    }
+    ui_walker_fixture_end_frame(&s_fx);
+}
+
+/* The inspector walk draws its text with the inspector material, and the next game walk is back on the game's. */
+static void test_inspector_walk_swaps_text_material_and_restores_it(void) {
+    const nt_program_t inspector_program = nt_material_get_info(s_fx.text_material_b)->program;
+    nt_ui_set_font(s_fx.ctx, 0U, ui_walker_fixture_make_real_font(&s_fx));
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    nt_ui_inspector_set_materials(s_fx.ctx, (nt_material_t){0}, s_fx.text_material_b);
+
+    walk_label_frame(true);
+    TEST_ASSERT_GREATER_THAN_UINT32(0U, ui_walker_fx_draw_count(inspector_program));
+    TEST_ASSERT_EQUAL_UINT32(0U, ui_walker_fx_draw_count(text_program()));
+
+    walk_label_frame(false);
+    TEST_ASSERT_GREATER_THAN_UINT32(0U, ui_walker_fx_draw_count(text_program()));
+    TEST_ASSERT_EQUAL_UINT32(0U, ui_walker_fx_draw_count(inspector_program));
+}
+
 #endif
 
 static void test_dispatch_3d_element_depth_bias_uses_hierarchy_depth(void) {
     s_fx.ctx->use_raycast_input = true;
-    nt_ui_set_element_depth_bias(s_fx.ctx, 0.001F);
+    s_fx.ctx->element_depth_bias_ndc = 0.001F;
     const float identity_vp[16] = {
         1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
     };
@@ -710,6 +745,7 @@ int main(void) {
     RUN_TEST(test_dispatch_3d_debug_layer_draws_in_screen_space_debug_walk);
     RUN_TEST(test_dispatch_3d_debug_text_uses_screen_space_orientation);
     RUN_TEST(test_3d_debug_inspector_walk_draws_real_tree_text);
+    RUN_TEST(test_inspector_walk_swaps_text_material_and_restores_it);
 #endif
     RUN_TEST(test_dispatch_3d_element_depth_bias_uses_hierarchy_depth);
     RUN_TEST(test_dispatch_image_not_ready_silent);

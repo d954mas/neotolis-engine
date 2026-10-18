@@ -148,8 +148,8 @@ static nt_resource_t s_atlas_handle;
 static nt_resource_t s_font_resource;
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
-static nt_material_t s_inspector_sprite_material; /* depth-off overlay materials for the F2 inspector */
-static nt_material_t s_inspector_text_material;
+static nt_material_t s_overlay_sprite_material; /* depth-off overlay materials: the F2 inspector and the HUD */
+static nt_material_t s_overlay_text_material;
 static nt_program_ref_t s_sprite_cutoff_program;
 static nt_program_ref_t s_sprite_program;
 static nt_program_ref_t s_text_program; /* all text: no depth writes */
@@ -161,11 +161,11 @@ static void link_programs(void) {
         nt_material_set_program(s_sprite_material, s_sprite_cutoff_program.program);
     }
     if (nt_program_ref_update(&s_sprite_program)) {
-        nt_material_set_program(s_inspector_sprite_material, s_sprite_program.program);
+        nt_material_set_program(s_overlay_sprite_material, s_sprite_program.program);
     }
     if (nt_program_ref_update(&s_text_program)) {
         nt_material_set_program(s_text_material, s_text_program.program);
-        nt_material_set_program(s_inspector_text_material, s_text_program.program);
+        nt_material_set_program(s_overlay_text_material, s_text_program.program);
     }
 }
 static nt_font_t s_font;
@@ -693,7 +693,7 @@ static void draw_hud(float fb_w, float fb_h) {
     if (!s_font_bound) {
         return;
     }
-    nt_text_renderer_set_material(s_text_material);
+    nt_text_renderer_set_material(s_overlay_text_material);
 
     const uint32_t white = NT_RGBA8(242, 242, 250, 255);
     const uint32_t accent = NT_RGBA8(255, 217, 77, 255);
@@ -755,7 +755,7 @@ static void draw_hud(float fb_w, float fb_h) {
         glm_mat4_identity(stats_model);
         glm_translate(stats_model, (vec3){left_x, dbg_y_top - HUD_SIZE - 6.0F, 0.0F});
         const uint32_t stats_color = NT_RGBA8(204, 230, 204, 255);
-        nt_debug_overlay_draw(s_text_material, s_font, (const float *)stats_model, HUD_SIZE - 2.0F, stats_color);
+        nt_debug_overlay_draw(s_overlay_text_material, s_font, (const float *)stats_model, HUD_SIZE - 2.0F, stats_color);
     }
 }
 // #endregion
@@ -939,8 +939,8 @@ static void frame(void) {
     }
 
     /* The inspector sprite uses a separate program that may become ready after the UI's. */
-    const nt_material_info_t *insp_sprite = nt_material_get_info(s_inspector_sprite_material);
-    const nt_material_info_t *insp_text = nt_material_get_info(s_inspector_text_material);
+    const nt_material_info_t *insp_sprite = nt_material_get_info(s_overlay_sprite_material);
+    const nt_material_info_t *insp_text = nt_material_get_info(s_overlay_text_material);
     const bool inspector_can_render = insp_sprite && nt_gfx_program_ready(insp_sprite->program) && insp_text && nt_gfx_program_ready(insp_text->program);
 
     if (ui_can_render && inspector_can_render && nt_ui_inspector_is_active(s_ctx)) {
@@ -1083,21 +1083,21 @@ int main(int argc, char *argv[]) {
     nt_ui_set_text_material(s_ctx, s_text_material);
     /* Inspector overlay materials: same shaders, depth_test=false so the debug sidebar stays on top
      * without testing the 3D scene depth (passive overlay, no depth-buffer side effects). */
-    s_inspector_sprite_material = nt_material_create(&(nt_material_create_desc_t){
+    s_overlay_sprite_material = nt_material_create(&(nt_material_create_desc_t){
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
         .cull_mode = NT_CULL_NONE,
         .label = "ui_3d_demo_inspector_sprite",
     });
-    s_inspector_text_material = nt_material_create(&(nt_material_create_desc_t){
+    s_overlay_text_material = nt_material_create(&(nt_material_create_desc_t){
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
         .cull_mode = NT_CULL_NONE,
         .label = "ui_3d_demo_inspector_text",
     });
-    nt_ui_inspector_set_materials(s_ctx, s_inspector_sprite_material, s_inspector_text_material);
+    nt_ui_inspector_set_materials(s_ctx, s_overlay_sprite_material, s_overlay_text_material);
 
     s_font = nt_font_create(&(nt_font_create_desc_t){
         .max_glyphs = 256,
@@ -1127,8 +1127,8 @@ int main(int argc, char *argv[]) {
     nt_font_shutdown();
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);
-    nt_material_destroy(s_inspector_sprite_material);
-    nt_material_destroy(s_inspector_text_material);
+    nt_material_destroy(s_overlay_sprite_material);
+    nt_material_destroy(s_overlay_text_material);
     nt_program_ref_drop(&s_sprite_cutoff_program);
     nt_program_ref_drop(&s_sprite_program);
     nt_program_ref_drop(&s_text_program);

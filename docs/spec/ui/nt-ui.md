@@ -202,7 +202,9 @@ Two coord-space modes are gated by `nt_ui_create_desc_t.use_raycast_input`:
   is render-only: positive values move deeper hierarchy levels slightly
   closer in projected depth to avoid z-fighting; panels whose backgrounds
   write depth need it above 0, or their children are coplanar with the
-  background. Hit-test stays on the unbiased widget plane. Debug inspector render commands are excluded
+  background. Text drawn without depth writes occludes nothing: a farther
+  panel drawn later covers a label wherever the label's own background does
+  not. Hit-test stays on the unbiased widget plane. Debug inspector render commands are excluded
   from the regular 3D walk and drawn by `nt_ui_debug_inspector_walk` as
   a separate final screen-space pass. The game binds a 2D UI projection
   first; `nt_ui_make_screen_view_proj(w, h, ...)` provides the standard

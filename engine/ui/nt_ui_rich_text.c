@@ -2032,8 +2032,8 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
     }
 }
 
-/* The style of one TEXT run: its font and decoration. A non-finite
- * outline width or shadow offset turns that decoration off: the base style bypasses the push_* clamps. */
+/* The style of one TEXT run: its font and decoration. A non-finite outline width or shadow offset
+ * turns that decoration off: the base style bypasses the push_* clamps. */
 static nt_text_style_t rich_run_style(const nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, const nt_ui_rich_solved_atom_t *e) {
     const nt_ui_rich_style_t *stl = &st->styles[st->runs[e->run_idx].style_idx];
     nt_text_style_t style = {

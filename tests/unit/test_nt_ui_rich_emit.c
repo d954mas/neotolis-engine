@@ -152,6 +152,31 @@ static void test_rich_only_frame_binds_text_material(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, ui_walker_fx_draw_count(nt_material_get_info(s_fx.text_material_b)->program), "no glyph draws with the foreign material");
 }
 
+/* A block's own text_material replaces the ctx text material for its glyphs. */
+static void test_rich_block_text_material_overrides_ctx(void) {
+    s_body_font = ui_walker_fixture_make_real_font(&s_fx);
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_body_font;
+    base.text_material = s_fx.text_material_b;
+
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("rich_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_text_n(s_fx.ctx, "Hello", 5);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+    ui_walker_fixture_end_frame(&s_fx);
+
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, ui_walker_fx_draw_count(nt_material_get_info(s_fx.text_material_b)->program), "glyphs draw with the block's material");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, ui_walker_fx_draw_count(text_program()), "not with the ctx's");
+}
+
 /* (2) the FIXED block size equals the solved total size. */
 static void test_fixed_block_size_matches_solved(void) {
     frame_two_run_text(400.0F, NT_RICH_ALIGN_LEFT);
@@ -2622,6 +2647,7 @@ int main(void) {
     RUN_TEST(test_markup_effect_capacity_keeps_prior_params_and_balances_close);
     RUN_TEST(test_emit_produces_text_spans);
     RUN_TEST(test_rich_only_frame_binds_text_material);
+    RUN_TEST(test_rich_block_text_material_overrides_ctx);
     RUN_TEST(test_later_band_text_reselects_block_text_material);
     RUN_TEST(test_fixed_block_size_matches_solved);
     RUN_TEST(test_single_style_one_span_per_line);
