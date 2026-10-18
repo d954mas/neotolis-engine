@@ -173,12 +173,13 @@ static probe_program_t s_probe_programs[PROBE_COUNT] = {
 
 /* False when a loss interrupted creation: the restore step runs again. */
 static bool probe_programs_create(void) {
+    static const char *const program_labels[] = {"browser/float", "browser/basis", "browser/depth", "browser/observe"};
     bool ok = true;
     for (int i = 0; i < PROBE_COUNT; i++) {
         probe_program_t *p = &s_probe_programs[i];
         p->vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = p->vs_source});
         p->fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = p->fs_source});
-        p->program = nt_gfx_make_program(p->vs, p->fs);
+        p->program = nt_gfx_make_program(p->vs, p->fs, program_labels[i]);
         ok = ok && p->program.id != 0;
     }
     return ok;
@@ -230,7 +231,7 @@ static bool mesh_probe_create(void) {
 
     s_mesh_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_mesh_vs_src, .label = "mesh_probe_vs"});
     s_mesh_fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_mesh_fs_src, .label = "mesh_probe_fs"});
-    s_mesh_program = nt_gfx_make_program(s_mesh_vs, s_mesh_fs);
+    s_mesh_program = nt_gfx_make_program(s_mesh_vs, s_mesh_fs, "browser/mesh");
     s_mesh_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = s_mesh_program, .label = "mesh_probe_pipeline"});
     const nt_vertex_input_desc_t vi_desc = {
         .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
@@ -421,7 +422,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_loss_window(int step) {
         s_nt_window_stages[1] = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source});
         return (s_nt_window_stages[0].id != 0 && s_nt_window_stages[1].id != 0) ? 1U : 0U;
     case 1: {
-        nt_program_t program = nt_gfx_make_program(s_nt_window_stages[0], s_nt_window_stages[1]);
+        nt_program_t program = nt_gfx_make_program(s_nt_window_stages[0], s_nt_window_stages[1], "browser/loss-window");
         nt_gfx_destroy_shader(s_nt_window_stages[0]);
         nt_gfx_destroy_shader(s_nt_window_stages[1]);
         return program.id;
@@ -1329,8 +1330,10 @@ int main(int argc, char *argv[]) {
     nt_resource_load_auto(s_basis_pack_id, "assets/basis_fixture.ntpack");
 
     s_sprite_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
+    s_sprite_program.label = "browser/sprite";
     s_sprite_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
     s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
+    s_text_program.label = "browser/text";
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_ATLAS, NT_ASSET_ATLAS);
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_ATLAS_TEX0, NT_ASSET_TEXTURE);

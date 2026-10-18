@@ -12,6 +12,7 @@
 typedef struct {
     nt_resource_t vs; /* set once by the game */
     nt_resource_t fs;
+    const char *label;    /* debug name in failure records; static storage */
     nt_program_t program; /* filled by update(), cleared by drop() */
 } nt_program_ref_t;
 
@@ -36,7 +37,7 @@ static inline bool nt_program_ref_update(nt_program_ref_t *ref) {
         return false;
     }
     /* Invalid means a lost context; the next frame retries. */
-    ref->program = nt_gfx_make_program((nt_shader_t){vs}, (nt_shader_t){fs});
+    ref->program = nt_gfx_make_program((nt_shader_t){vs}, (nt_shader_t){fs}, ref->label);
     return ref->program.id != 0;
 }
 

@@ -425,6 +425,7 @@ int main(int argc, char *argv[]) {
     /* Request resource handles (instanced shaders) */
     s_mesh_handle = nt_resource_request(ASSET_MESH_ASSETS_MESHES_CUBE_GLB, NT_ASSET_MESH);
     s_cube_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_VERT, NT_ASSET_SHADER_CODE);
+    s_cube_program.label = "textured_quad/cube";
     s_cube_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_FRAG, NT_ASSET_SHADER_CODE);
     s_lenna_handle = nt_resource_request(ASSET_TEXTURE_TEXTURES_LENNA, NT_ASSET_TEXTURE);
 

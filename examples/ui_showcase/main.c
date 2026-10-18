@@ -3972,8 +3972,10 @@ int main(int argc, char *argv[]) {
 #endif
 
     s_sprite_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
+    s_sprite_program.label = "ui_showcase/sprite";
     s_sprite_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
     s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
+    s_text_program.label = "ui_showcase/text";
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_ATLAS, NT_ASSET_ATLAS);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT, NT_ASSET_FONT);
@@ -3983,10 +3985,13 @@ int main(int argc, char *argv[]) {
     s_rich_font_resource[3] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_BI, NT_ASSET_FONT);
     /* Radial shaders + the dedicated radial-art atlas + its full-bleed texture. */
     s_radial_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_RADIAL_VERT, NT_ASSET_SHADER_CODE);
+    s_radial_program.label = "ui_showcase/radial";
     s_radial_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_RADIAL_FRAG, NT_ASSET_SHADER_CODE);
     s_radial_image_program.vs = s_radial_program.vs; /* shares the radial vertex stage */
+    s_radial_image_program.label = "ui_showcase/radial_image";
     s_radial_image_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_RADIAL_IMAGE_FRAG, NT_ASSET_SHADER_CODE);
     s_base_program.vs = s_radial_program.vs;
+    s_base_program.label = "ui_showcase/base";
     s_base_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_UI_BASE_FRAG, NT_ASSET_SHADER_CODE);
     s_radial_art_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_RADIAL_ART, NT_ASSET_ATLAS);
     s_radial_art_ref = nt_atlas_ref(s_radial_art_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_RADIAL_ART_RADIAL_ART.value);

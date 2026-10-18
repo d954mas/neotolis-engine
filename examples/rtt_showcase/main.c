@@ -181,7 +181,7 @@ static void destroy_quad_resources(void) {
 static void make_quad_resources(void) {
     s_demo.quad_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_quad_vs_src, .label = "rtt_quad_vs"});
     s_demo.quad_fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_quad_fs_src, .label = "rtt_quad_fs"});
-    s_demo.quad_program = nt_gfx_make_program(s_demo.quad_vs, s_demo.quad_fs);
+    s_demo.quad_program = nt_gfx_make_program(s_demo.quad_vs, s_demo.quad_fs, "rtt_showcase/quad");
 
     s_demo.quad_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = s_demo.quad_program,
@@ -582,8 +582,10 @@ int main(void) {
 #endif
 
     s_sprite_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
+    s_sprite_program.label = "rtt_showcase/sprite";
     s_sprite_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
     s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
+    s_text_program.label = "rtt_showcase/text";
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_RTT_SHOWCASE_UI_ATLAS, NT_ASSET_ATLAS);
     s_font_resource = nt_resource_request(ASSET_FONT_RTT_SHOWCASE_FONT, NT_ASSET_FONT);

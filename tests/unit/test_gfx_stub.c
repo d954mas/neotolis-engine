@@ -14,7 +14,7 @@ void tearDown(void) { nt_gfx_shutdown(); }
 static void test_stub_has_no_graphics_resources(void) {
     nt_shader_t shader = nt_gfx_make_shader(&(nt_shader_desc_t){.source = "void main(){}"});
     TEST_ASSERT_EQUAL_UINT32(0, shader.id);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_program(shader, shader).id);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_program(shader, shader, NULL).id);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_pipeline(NULL).id);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_vertex_input(NULL).id);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_buffer(NULL).id);

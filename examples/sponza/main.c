@@ -653,10 +653,13 @@ int main(int argc, char **argv) {
     /* 11. Request shader resource handles (6 shaders, 3 permutations) */
     s_programs[SPONZA_SHADER_FULL].vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_FULL_VERT, NT_ASSET_SHADER_CODE);
     s_programs[SPONZA_SHADER_FULL].fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_FULL_FRAG, NT_ASSET_SHADER_CODE);
+    s_programs[SPONZA_SHADER_FULL].label = "sponza/full";
     s_programs[SPONZA_SHADER_DIFFUSE].vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_DIFFUSE_VERT, NT_ASSET_SHADER_CODE);
     s_programs[SPONZA_SHADER_DIFFUSE].fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_DIFFUSE_FRAG, NT_ASSET_SHADER_CODE);
+    s_programs[SPONZA_SHADER_DIFFUSE].label = "sponza/diffuse";
     s_programs[SPONZA_SHADER_ALPHA].vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_ALPHA_VERT, NT_ASSET_SHADER_CODE);
     s_programs[SPONZA_SHADER_ALPHA].fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_ALPHA_FRAG, NT_ASSET_SHADER_CODE);
+    s_programs[SPONZA_SHADER_ALPHA].label = "sponza/alpha";
 
     /* 12. Request manifest and fallback texture resource handles */
     s_manifest_handle = nt_resource_request(ASSET_BLOB_SPONZA_MANIFEST, NT_ASSET_BLOB);

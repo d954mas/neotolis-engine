@@ -115,7 +115,7 @@ static void init_with_streams(uint32_t count) {
 static nt_pipeline_t make_test_pipeline(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
-    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_program_t program = nt_gfx_make_program(vs, fs, NULL);
     nt_test_gfx_link_wait(program);
     return nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
 }

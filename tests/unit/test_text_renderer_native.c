@@ -64,7 +64,7 @@ void setUp(void) {
 
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_vs_src});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_fs_src});
-    const nt_program_t program = nt_gfx_make_program(vs, fs);
+    const nt_program_t program = nt_gfx_make_program(vs, fs, NULL);
     nt_test_gfx_link_wait(program);
     s_material = nt_material_create(&(nt_material_create_desc_t){.program = program, .cull_mode = NT_CULL_NONE, .label = "native_text_row"});
 }

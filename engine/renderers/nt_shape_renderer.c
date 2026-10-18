@@ -858,10 +858,10 @@ static void create_gpu(void) {
     s_shape.gpu.batch_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_shape_vs_src, .label = "shape_batch_vs"});
     s_shape.gpu.wire_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_wire_vs_src, .label = "shape_wire_vs"});
     s_shape.gpu.line_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_line_vs_src, .label = "shape_line_vs"});
-    s_shape.gpu.fill_prog = nt_gfx_make_program(s_shape.gpu.fill_vs, s_shape.gpu.fs);
-    s_shape.gpu.batch_prog = nt_gfx_make_program(s_shape.gpu.batch_vs, s_shape.gpu.fs);
-    s_shape.gpu.wire_prog = nt_gfx_make_program(s_shape.gpu.wire_vs, s_shape.gpu.fs);
-    s_shape.gpu.line_prog = nt_gfx_make_program(s_shape.gpu.line_vs, s_shape.gpu.fs);
+    s_shape.gpu.fill_prog = nt_gfx_make_program(s_shape.gpu.fill_vs, s_shape.gpu.fs, "shape/fill");
+    s_shape.gpu.batch_prog = nt_gfx_make_program(s_shape.gpu.batch_vs, s_shape.gpu.fs, "shape/batch");
+    s_shape.gpu.wire_prog = nt_gfx_make_program(s_shape.gpu.wire_vs, s_shape.gpu.fs, "shape/wire");
+    s_shape.gpu.line_prog = nt_gfx_make_program(s_shape.gpu.line_vs, s_shape.gpu.fs, "shape/line");
     for (int depth = 0; depth < 2; depth++) {
         s_shape.gpu.fill_pip[depth] = make_fill_pipeline(s_shape.gpu.fill_prog, depth != 0, "shape_fill_pipeline");
         s_shape.gpu.batch_pip[depth] = make_fill_pipeline(s_shape.gpu.batch_prog, depth != 0, "shape_batch_pipeline");

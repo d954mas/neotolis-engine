@@ -468,6 +468,7 @@ int main(int argc, char *argv[]) {
 
     /* 12. Request shader resources */
     s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
+    s_text_program.label = "text/text";
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
 
     /* 13. Create text material (shader pair, alpha blend for Slug) */

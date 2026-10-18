@@ -59,7 +59,7 @@ static uint8_t s_pixels[CAPTURE_BYTES];
 static nt_program_t make_program(const char *vs_src) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_src});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_fs_src});
-    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_program_t program = nt_gfx_make_program(vs, fs, NULL);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, program.id);
     nt_test_gfx_link_wait(program);
     return program;

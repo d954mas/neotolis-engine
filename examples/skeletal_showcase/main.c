@@ -1586,8 +1586,10 @@ static void init_mesh_scene(void) {
     }
     s_mix_material = make_mesh_material(s_mix_texture_resource);
     s_skin_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SKINNED_VERT, NT_ASSET_SHADER_CODE);
+    s_skin_program.label = "skeletal_showcase/skin";
     s_skin_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_FRAG, NT_ASSET_SHADER_CODE);
     s_static_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_VERT, NT_ASSET_SHADER_CODE);
+    s_static_program.label = "skeletal_showcase/static";
     s_static_program.fs = s_skin_program.fs;
 }
 
@@ -2789,8 +2791,10 @@ int main(int argc, char *argv[]) {
     mount_pack("skeletal_showcase");
     mount_pack("skeletal_showcase_clips");
     s_sprite_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
+    s_sprite_program.label = "skeletal_showcase/sprite";
     s_sprite_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
     s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
+    s_text_program.label = "skeletal_showcase/text";
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas = nt_resource_request(ASSET_ATLAS_SKELETAL_SHOWCASE_UI, NT_ASSET_ATLAS);
     s_font_resource = nt_resource_request(ASSET_FONT_SKELETAL_SHOWCASE_FONT, NT_ASSET_FONT);
