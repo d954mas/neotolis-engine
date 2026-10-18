@@ -67,13 +67,16 @@ async function ready(page: Page): Promise<void> {
 }
 
 async function capture(page: Page): Promise<string> {
+  expect(await page.evaluate((key) => localStorage.getItem(key), KEY), 'no crash before the probe').toBeNull();
   const before = await page.evaluate(() => (window as DeviceWindow).__device.queries.length);
   await page.evaluate(() => {
     setTimeout(() => { throw new WebAssembly.RuntimeError('identity probe'); });
   });
   await page.waitForFunction((key) => localStorage.getItem(key) !== null, KEY, { timeout: 10_000 });
   expect(await page.evaluate(() => (window as DeviceWindow).__device.queries.length), 'capture must not query GL').toBe(before);
-  return (await page.evaluate((key) => localStorage.getItem(key), KEY))!;
+  const record = (await page.evaluate((key) => localStorage.getItem(key), KEY))!;
+  expect(record).toContain('\nreason: RuntimeError: identity probe\n');
+  return record;
 }
 
 function expectIdentity(record: string, identity: Identity): void {
