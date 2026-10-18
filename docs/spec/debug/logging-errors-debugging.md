@@ -127,7 +127,7 @@ Asserts are contracts, not error handling. A failed assert means the program is 
 
 The engine version is its git commit. `nt_version_engine()` (opt-in module `engine/version`) returns the first 8 hex of the engine commit, with `-dirty` when tracked files differ from `HEAD`, or `unknown` when git is unavailable, fails, or the engine directory is not the top of its own repository (a copy without `.git` would otherwise report the host repository's commit). There is no semantic version.
 
-A build step runs git against `NT_ENGINE_ROOT` on every build of the target and rewrites the generated header only when the value changes, so an unchanged tree recompiles nothing and a new commit relinks only the consumers. `nt_core`, the builder and pack builds do not link it, so a commit never rebuilds packs; the engine itself prints no version. Games print it at startup (every example does: `nt_log_info("engine %s", nt_version_engine())`), crash records and `engine.info` report it.
+The engine itself prints no version. Examples log it at startup when INFO logging is enabled; `hello` prints it directly. Crash records and `engine.info` report it independently. See [build identity and crash records](../../build.md#build-identity-and-crash-records) for generation and rebuild behavior.
 
 ## Crash record
 
@@ -148,14 +148,18 @@ engine: <nt_version_engine()> <preset>    (e.g. 0595a717-dirty wasm-release)
 time: <unix ms>
 reason: RuntimeError: unreachable | signal SIGSEGV | exception 0xc000001d | abort
 pc: exe+0x1a2b3c          (native; absolute 0x... outside the executable)
-stack:                    (web: the JS error stack, cut at 4096 characters)
+stack:                    (web: the JS error stack, cut at 4096 UTF-16 code units)
 ...
 log:
 WARN [gfx] ...
 ERROR [resource] ...
 ```
 
-`log:` is the tail of WARN/ERROR lines from a fixed BSS byte ring of `NT_CRASH_LOG_BYTES` (default 8192; a game sets another size with `target_compile_definitions(nt_crash PRIVATE NT_CRASH_LOG_BYTES=...)`); the ring holds at least two log lines, and a wrapped ring drops its first line, which may be partial. A record is at most about `NT_CRASH_LOG_BYTES` + 2 KB on native. On web the reason (256 characters) and stack (4096 characters) are cut by characters: about `NT_CRASH_LOG_BYTES` + 6 KB for ASCII text and + 14 KB when non-ASCII text takes up to 3 bytes per character; invalid UTF-8 in a log line grows the same way (each such byte becomes a 3-byte replacement character). Size the game's buffer for its platform; a longer record is cut. Lines filtered by `NT_LOG_MIN_LEVEL` or `nt_log_set_level` never reach the ring; with `NT_LOG_MIN_LEVEL=3` or `nt_log_stub` the section is empty. FULL assert text goes to stderr/console, not into the record — a crash-prone check that needs its cause in field reports logs one ERROR before the assert (see [Assert policy](#assert-policy)). The dev-only `nt_log_ring` is separate: it is compiled out of release builds.
+`log:` is the tail of WARN/ERROR lines from a fixed BSS byte ring of `NT_CRASH_LOG_BYTES` (default 8192). The minimum capacity reserves two maximum-size messages plus space for prefixes; domain lengths are not bounded, so this does not guarantee two complete lines. A wrapped ring drops its first line, which may be partial, and a long domain can leave no complete line. Configuration is described in [build identity and crash records](../../build.md#build-identity-and-crash-records).
+
+A record is at most about `NT_CRASH_LOG_BYTES` + 2 KB on native. On web the reason and stack are cut at 256 and 4096 UTF-16 code units: about `NT_CRASH_LOG_BYTES` + 6 KB for ASCII text and + 14 KB for Unicode text, which can require up to 3 UTF-8 bytes per UTF-16 code unit. Invalid UTF-8 in a log line can expand each byte into a 3-byte replacement character, increasing the web bound to about `3 * NT_CRASH_LOG_BYTES` + 14 KB. Size the game's buffer for its platform; a longer record is cut.
+
+Lines filtered by `NT_LOG_MIN_LEVEL` or `nt_log_set_level` never reach the ring; with `NT_LOG_MIN_LEVEL=3` or `nt_log_stub` the section is empty. FULL assert text goes to stderr/console, not into the record — a crash-prone check that needs its cause in field reports logs one ERROR before the assert (see [Assert policy](#assert-policy)). The separate debug `nt_log_ring` is controlled by `NT_LOG_RING_ENABLED`; production Release presets disable it.
 
 **Capture.**
 
@@ -163,9 +167,9 @@ ERROR [resource] ...
 - Native: the handler writes the file and returns, so the OS default follows (WER on Windows; the original signal and core dump on Linux — the handler re-raises its signal). It uses only async-signal-safe calls (Win32 calls on Windows, where the filter and the UCRT SIGABRT handler run synchronously on the crashing thread). Windows: unhandled-exception filter (with a 32 KB stack guarantee for stack overflow) and SIGABRT; UCRT `abort()` then reports through WER; one record per process (a second faulting thread waits while the first writes, on both platforms). Linux: ILL, SEGV, BUS, FPE, ABRT, TRAP on a 64 KB alternate stack (skipped when the kernel needs more), fault PC from `ucontext` on x86_64 and aarch64. Linux older than glibc 2.34 sizes the alternate stack from `SIGSTKSZ`. Under ASan no handlers are installed; its report stays.
 - No stack walk on native: the PC names the faulting instruction, and for `NT_ASSERT` in TRAP that is the assert. Full stacks come from WER dumps, cores or a debugger.
 
-**Symbolization.** Keep each build's symbols under its `game_version`. Windows: `llvm-symbolizer --obj=game.exe --relative-address 0x<offset>` with the build's `.pdb` (native Release presets build without `-g`; a game that wants field symbols adds it). Linux: `llvm-symbolizer --obj=game 0x<offset>` (or `addr2line -e game`). Web: the build's symbol map for `wasm-function[N]`.
+**Symbolization.** The game's `game_version` identifies the matching symbols. See [build identity and crash records](../../build.md#build-identity-and-crash-records) for symbol retention and lookup commands.
 
-**Not captured:** a hard kill of the process or tab (OOM, "Aw, Snap", task manager); Windows `__fastfail` (/GS); crashes before `nt_crash_init`; Windows under a debugger; ASan/UBSan reports; errors swallowed by someone's `.catch`; cross-origin "Script error." without `crossorigin`; a JS error whose wasm frames fell past `Error.stackTraceLimit`; stack overflow off the main thread or without the alternate stack. Another wasm module on the page can trigger a false record. An external kill in the middle of a log call may garble one line. Firefox and Safari are unverified (the browser tests run Chromium).
+**Not captured:** a hard kill of the process or tab (OOM, "Aw, Snap", task manager); Windows `__fastfail` (/GS); crashes before `nt_crash_init`; Windows under a debugger; ASan/UBSan reports; errors swallowed by someone's `.catch`; cross-origin "Script error." without `crossorigin`; a JS error whose wasm frames fell past `Error.stackTraceLimit`; stack overflow off the main thread or without the alternate stack. Another wasm module on the page can trigger a false record. The log tail is best effort if a fatal signal or another thread's crash overlaps a log write. Firefox and Safari are unverified (the browser tests run Chromium).
 
 ## Debug overlay
 

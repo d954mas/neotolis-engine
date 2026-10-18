@@ -118,8 +118,8 @@ if(NOT EMSCRIPTEN)
 
     # --- Crash record ---
     # Each case crashes one run (WILL_FAIL; cmake -E env reports a signal death as a failure CTest
-    # can invert), then a second run reads the stored record. Under ASan nt_crash installs no
-    # handlers, so the exe exits 77: the check skips (the WILL_FAIL step counts 77 as passed).
+    # can invert), then a second run reads the stored record. Under ASan no handlers are installed;
+    # both steps exit 77 and are skipped.
     add_executable(test_crash_record unit/test_crash_record.c)
     target_link_libraries(test_crash_record PRIVATE nt_crash nt_log)
     target_compile_definitions(test_crash_record PRIVATE _CRT_SECURE_NO_WARNINGS)

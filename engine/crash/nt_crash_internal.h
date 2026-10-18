@@ -6,13 +6,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Tail of WARN/ERROR lines kept for the record. A game sets a larger size with
-   target_compile_definitions(nt_crash PRIVATE NT_CRASH_LOG_BYTES=...). */
+/* The crash tail is independent of the optional debug log ring. */
 #ifndef NT_CRASH_LOG_BYTES
 #define NT_CRASH_LOG_BYTES 8192
 #endif
-/* Two full lines at least, so a wrapped ring always keeps a whole line. */
-_Static_assert(NT_CRASH_LOG_BYTES >= 2 * (NT_LOG_BUF_SIZE + 64), "NT_CRASH_LOG_BYTES must hold two log lines");
+/* Reserve two maximum-size messages plus room for their prefixes. */
+_Static_assert(NT_CRASH_LOG_BYTES >= 2 * (NT_LOG_BUF_SIZE + 64), "NT_CRASH_LOG_BYTES must reserve two message buffers and prefixes");
 
 #define NT_CRASH_TEXT_MAX 256
 
@@ -28,7 +27,6 @@ typedef struct {
 
 extern nt_crash_state_t g_nt_crash;
 
-/* Platform backend (web/ or native/). */
 void nt_crash_platform_init(void);
 uint32_t nt_crash_platform_load(char *out, uint32_t cap);
 void nt_crash_platform_clear(void);

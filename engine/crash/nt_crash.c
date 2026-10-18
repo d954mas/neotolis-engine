@@ -25,8 +25,7 @@ static void ring_put(const char *s, uint32_t n) {
     }
 }
 
-/* No busy flag: nothing in the engine faults inside this memcpy; only an external kill can
-   interrupt it, which may garble one line. */
+/* The log tail is best effort if a fatal signal or another thread's crash overlaps a write. */
 static void crash_sink(nt_log_level_t level, const char *domain, const char *msg, void *user) {
     (void)user;
     if (level < NT_LOG_LEVEL_WARN) {

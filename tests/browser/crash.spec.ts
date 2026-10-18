@@ -45,7 +45,7 @@ for (const mode of ['trap', 'abort', 'reject', 'jserror'] as const) {
     await page.goto(`/index.html?crash=${mode}`);
     await page.waitForFunction(() => ((window as CrashWindow).__crashEvents ?? []).length > 0, null, { timeout: 60_000 });
 
-    // After the crash only JS runs: the instance is dead.
+    // Read the captured record from JS without calling into WASM.
     const stored = await page.evaluate((key) => localStorage.getItem(key), KEY);
     expect(stored).not.toBeNull();
     expect(await page.evaluate(() => (window as CrashWindow).__crashEvents)).toEqual([stored]);
