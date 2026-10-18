@@ -56,7 +56,7 @@ static int check(const char *mode, const char *path) {
     CHECK(n > 0 && n == strlen(s_record));
     (void)printf("%s\n", s_record);
 
-    const char *head = "game: test_crash_record\nengine: 0.1.0+";
+    const char *head = "game: test_crash_record\nengine: ";
     CHECK(strncmp(s_record, head, strlen(head)) == 0);
     CHECK(strstr(s_record, "\ntime: ") != NULL);
     bool is_trap = strcmp(mode, "trap") == 0;
@@ -97,7 +97,21 @@ static int check(const char *mode, const char *path) {
     return 0;
 }
 
+/* Under ASan nt_crash installs no handlers (ASan reports instead): skip both steps. */
+#if defined(__SANITIZE_ADDRESS__)
+#define SANITIZED 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define SANITIZED 1
+#endif
+#endif
+
 int main(int argc, char *argv[]) {
+#ifdef SANITIZED
+    (void)argc;
+    (void)argv;
+    return 77;
+#endif
     if (argc == 4 && strcmp(argv[1], "check") == 0) {
         return check(argv[2], argv[3]);
     }

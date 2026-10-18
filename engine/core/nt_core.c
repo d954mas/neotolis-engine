@@ -23,7 +23,7 @@ nt_result_t nt_engine_init(const nt_engine_config_t *config) {
         return NT_ERR_INVALID_ARG;
     }
 
-    NT_LOG_INFO("Neotolis Engine " NT_VERSION_SEMVER " initializing: app='%s'", config->app_name ? config->app_name : "(unnamed)");
+    NT_LOG_INFO("Neotolis Engine initializing: app='%s'", config->app_name ? config->app_name : "(unnamed)");
 
     s_initialized = true;
     return NT_OK;

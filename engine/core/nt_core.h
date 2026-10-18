@@ -3,14 +3,6 @@
 
 #include "core/nt_types.h"
 
-#define NT_VERSION_MAJOR 0
-#define NT_VERSION_MINOR 1
-#define NT_VERSION_PATCH 0
-#define NT_VERSION_STR_(x) #x
-#define NT_VERSION_STR(x) NT_VERSION_STR_(x)
-/* "0.1.0". The commit-qualified version is nt_version_engine() (engine/version). */
-#define NT_VERSION_SEMVER NT_VERSION_STR(NT_VERSION_MAJOR) "." NT_VERSION_STR(NT_VERSION_MINOR) "." NT_VERSION_STR(NT_VERSION_PATCH)
-
 typedef struct {
     const char *app_name;
     uint32_t version;

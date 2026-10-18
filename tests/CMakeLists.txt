@@ -113,31 +113,32 @@ if(NOT EMSCRIPTEN)
     add_test(NAME test_core COMMAND test_core)
 
     add_executable(test_version unit/test_version.c)
-    target_link_libraries(test_version PRIVATE nt_version nt_core nt_log_stub unity)
+    target_link_libraries(test_version PRIVATE nt_version unity)
     nt_setup_test_target(test_version)
 
     # --- Crash record ---
     # Each case crashes one run (WILL_FAIL; cmake -E env reports a signal death as a failure CTest
-    # can invert), then a second run reads the stored record. Sanitized builds install no handlers.
-    if(NOT (CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT (WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "Clang")))
-        add_executable(test_crash_record unit/test_crash_record.c)
-        target_link_libraries(test_crash_record PRIVATE nt_crash nt_log)
-        target_compile_definitions(test_crash_record PRIVATE _CRT_SECURE_NO_WARNINGS)
-        nt_set_static_crt(test_crash_record)
-        nt_set_warning_flags(test_crash_record)
-        nt_set_sanitizer_flags(test_crash_record)
-        set_target_properties(test_crash_record PROPERTIES
-            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-        )
-        foreach(_mode trap abort segv)
-            set(_record "${CMAKE_CURRENT_BINARY_DIR}/crash_record_${_mode}.txt")
-            add_test(NAME test_crash_record_${_mode}
-                COMMAND ${CMAKE_COMMAND} -E env $<TARGET_FILE:test_crash_record> ${_mode} ${_record})
-            set_tests_properties(test_crash_record_${_mode} PROPERTIES WILL_FAIL TRUE TIMEOUT 30 FIXTURES_SETUP crash_${_mode})
-            add_test(NAME test_crash_record_${_mode}_check COMMAND test_crash_record check ${_mode} ${_record})
-            set_tests_properties(test_crash_record_${_mode}_check PROPERTIES TIMEOUT 30 FIXTURES_REQUIRED crash_${_mode})
-        endforeach()
-    endif()
+    # can invert), then a second run reads the stored record. Under ASan nt_crash installs no
+    # handlers, so the exe exits 77: the check skips (the WILL_FAIL step counts 77 as passed).
+    add_executable(test_crash_record unit/test_crash_record.c)
+    target_link_libraries(test_crash_record PRIVATE nt_crash nt_log)
+    target_compile_definitions(test_crash_record PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_set_static_crt(test_crash_record)
+    nt_set_warning_flags(test_crash_record)
+    nt_set_sanitizer_flags(test_crash_record)
+    set_target_properties(test_crash_record PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    foreach(_mode trap abort segv)
+        set(_record "${CMAKE_CURRENT_BINARY_DIR}/crash_record_${_mode}.txt")
+        add_test(NAME test_crash_record_${_mode}
+            COMMAND ${CMAKE_COMMAND} -E env $<TARGET_FILE:test_crash_record> ${_mode} ${_record})
+        set_tests_properties(test_crash_record_${_mode} PROPERTIES
+            WILL_FAIL TRUE SKIP_RETURN_CODE 77 TIMEOUT 30 FIXTURES_SETUP crash_${_mode})
+        add_test(NAME test_crash_record_${_mode}_check COMMAND test_crash_record check ${_mode} ${_record})
+        set_tests_properties(test_crash_record_${_mode}_check PROPERTIES
+            SKIP_RETURN_CODE 77 TIMEOUT 30 FIXTURES_REQUIRED crash_${_mode})
+    endforeach()
 
     # --- Sanitizer proof test ---
     # Triggers UB to prove ASan+UBSan are detecting. Skipped on Windows+Clang
@@ -590,7 +591,7 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_sponza_program_assignment PRIVATE
         nt_mesh_renderer nt_app_stub nt_input_stub nt_window_stub nt_resource nt_material
         nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp nt_render
-        nt_hash nt_math nt_time nt_shared nt_core
+        nt_hash nt_math nt_time nt_shared nt_core nt_version
         nt_gfx_fake nt_basisu_transcoder_stub nt_meshwire_stub nt_http_stub nt_fs_stub nt_log_stub unity
     )
     nt_setup_test_target(test_sponza_program_assignment)
@@ -600,7 +601,7 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_asteroids_scene PRIVATE
         nt_text_renderer nt_font nt_app_stub nt_input_stub nt_window_stub
         nt_ui nt_atlas nt_sprite_renderer nt_mem_scratch
-        nt_resource nt_material nt_hash nt_math nt_time nt_shared nt_core nt_platform
+        nt_resource nt_material nt_hash nt_math nt_time nt_shared nt_core nt_version nt_platform
         nt_gfx_fake nt_clipboard_stub nt_basisu_transcoder_stub nt_meshwire_stub nt_http_stub nt_fs_stub nt_log_stub unity
     )
     nt_setup_test_target(test_asteroids_scene)
@@ -612,7 +613,7 @@ if(NOT EMSCRIPTEN)
         "${CMAKE_SOURCE_DIR}/examples/skeletal_showcase/generated"
     )
     target_link_libraries(test_skeletal_showcase_mixing PRIVATE
-        nt_core nt_app_stub nt_input_stub nt_window_stub nt_math nt_log_stub nt_time nt_resource
+        nt_core nt_version nt_app_stub nt_input_stub nt_window_stub nt_math nt_log_stub nt_time nt_resource
         nt_material nt_shared nt_atlas nt_skeletal nt_skeletal_assets
         nt_sprite_renderer nt_text_renderer nt_font nt_ui nt_shape_renderer
         nt_render nt_hash nt_mem_scratch nt_entity nt_transform_comp nt_drawable_comp

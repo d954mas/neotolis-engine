@@ -4,6 +4,5 @@ if(EMSCRIPTEN)
     nt_add_module(nt_crash LOG_DOMAIN "crash" nt_crash.c web/nt_crash_web.c nt_crash.h nt_crash_internal.h)
 else()
     nt_add_module(nt_crash LOG_DOMAIN "crash" nt_crash.c native/nt_crash_native.c nt_crash.h nt_crash_internal.h)
-    target_link_libraries(nt_crash PRIVATE ${CMAKE_DL_LIBS}) # dl_iterate_phdr on older glibc
 endif()
-target_link_libraries(nt_crash PUBLIC nt_core nt_log_interface nt_version)
+target_link_libraries(nt_crash PRIVATE nt_core nt_log_interface nt_version)

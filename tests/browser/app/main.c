@@ -882,8 +882,20 @@ EMSCRIPTEN_KEEPALIVE float nt_test_rich_link_css_w(void) { return s_nt_rich_link
 EMSCRIPTEN_KEEPALIVE float nt_test_rich_link_css_h(void) { return s_nt_rich_link_css_h; }
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_rich_link_clicks(void) { return s_state.link_clicks; }
 
-/* ?crash=trap|abort crashes a running frame after filling the log ring; ?crash=read only inits. */
-enum { CRASH_OFF, CRASH_TRAP, CRASH_ABORT, CRASH_READ };
+/* ?crash=trap|abort|reject|jserror crashes a running frame after filling the log ring; ?crash=read
+ * only inits. reject traps inside a Promise callback (unhandledrejection); jserror throws a plain
+ * JS Error through wasm frames (the stack-text branch of the capture filter). */
+enum { CRASH_OFF, CRASH_TRAP, CRASH_ABORT, CRASH_READ, CRASH_REJECT, CRASH_JS_ERROR };
+static const char *const k_crash_modes[] = {"", "trap", "abort", "read", "reject", "jserror"};
+EMSCRIPTEN_KEEPALIVE void nt_test_crash_trap(void) { __builtin_trap(); }
+/* clang-format off */
+EM_JS(void, nt_test_crash_reject, (void), {
+    Promise.resolve().then(function() { _nt_test_crash_trap(); });
+})
+EM_JS(void, nt_test_crash_js_error, (void), {
+    throw new Error("crash probe js error");
+})
+/* clang-format on */
 static uint32_t s_nt_crash_mode;
 static uint32_t s_nt_crash_frames;
 static char s_nt_crash_record[32768];
@@ -894,9 +906,11 @@ EMSCRIPTEN_KEEPALIVE const char *nt_test_crash_load(void) {
 EMSCRIPTEN_KEEPALIVE void nt_test_crash_clear(void) { nt_crash_clear_previous(); }
 
 static void crash_probe_step(void) {
-    if ((s_nt_crash_mode != CRASH_TRAP && s_nt_crash_mode != CRASH_ABORT) || ++s_nt_crash_frames < 3U) {
+    if (s_nt_crash_mode == CRASH_OFF || s_nt_crash_mode == CRASH_READ || ++s_nt_crash_frames < 3U) {
         return;
     }
+    uint32_t mode = s_nt_crash_mode;
+    s_nt_crash_mode = CRASH_OFF; /* reject leaves the frame loop running */
     /* Grow the heap first: the capture must read the ring through the replaced memory views. */
     volatile char *grow = (volatile char *)malloc(emscripten_get_heap_size() + (16U << 20));
     NT_ASSERT(grow);
@@ -904,9 +918,16 @@ static void crash_probe_step(void) {
     for (uint32_t i = 0; i < 300U; i++) {
         nt_log_warn("crash probe line %u: проверка кольца", i);
     }
-    nt_log_error("crash probe token-%s", s_nt_crash_mode == CRASH_TRAP ? "trap" : "abort");
-    if (s_nt_crash_mode == CRASH_TRAP) {
+    nt_log_error("crash probe token-%s", k_crash_modes[mode]);
+    if (mode == CRASH_TRAP) {
         __builtin_trap();
+    }
+    if (mode == CRASH_REJECT) {
+        nt_test_crash_reject();
+        return;
+    }
+    if (mode == CRASH_JS_ERROR) {
+        nt_test_crash_js_error();
     }
     abort();
 }
@@ -924,7 +945,7 @@ EM_JS(unsigned int, nt_test_rich_composition_mode, (void), {
 })
 
 EM_JS(uint32_t, nt_test_crash_mode, (void), {
-    return ["", "trap", "abort", "read"].indexOf(new URLSearchParams(window.location.search).get("crash") || "") >>> 0;
+    return Math.max(0, ["", "trap", "abort", "read", "reject", "jserror"].indexOf(new URLSearchParams(window.location.search).get("crash") || ""));
 })
 
 /* Quoted keys keep the Playwright-facing API stable under Closure. */

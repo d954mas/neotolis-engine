@@ -24,6 +24,7 @@
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
 #include "font/nt_font.h"
+#include "version/nt_version.h"
 #ifndef NT_PLATFORM_WEB
 #include "fs/nt_fs.h"
 #endif
@@ -563,6 +564,7 @@ int main(int argc, char **argv) {
     if (result != NT_OK) {
         return 1;
     }
+    nt_log_info("engine %s", nt_version_engine());
 
     /* Pattern 7 init order: window → input → gfx + globals UBO register →
      * I/O (http/fs/hash/resource) → activator registrations → component

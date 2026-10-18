@@ -9,6 +9,7 @@
 #include "core/nt_platform.h"
 #include "debug_overlay/nt_debug_overlay.h"
 #include "font/nt_font.h"
+#include "version/nt_version.h"
 #ifndef NT_PLATFORM_WEB
 #include "fs/nt_fs.h"
 #endif
@@ -3914,6 +3915,7 @@ int main(int argc, char *argv[]) {
     if (nt_engine_init(&config) != NT_OK) {
         return 1;
     }
+    nt_log_info("engine %s", nt_version_engine());
 
     /* Startup build provenance: confirms which build (type + preset) is actually running -- handy for
      * telling a freshly-built artifact apart from a stale/cached one. */

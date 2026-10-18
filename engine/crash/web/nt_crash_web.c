@@ -15,13 +15,6 @@ EM_JS(void, nt_crash_web_install, (const char *ring, uint32_t ring_size, const u
     var key = UTF8ToString(name);
     var head = "game: " + UTF8ToString(game) + "\nengine: " + UTF8ToString(engine) + " " + UTF8ToString(preset) + "\n";
     var captured = false;
-    function cut(text, max_bytes) {
-        var bytes = new TextEncoder().encode(text);
-        if (bytes.length <= max_bytes) return text;
-        var n = max_bytes;
-        while (n > 0 && (bytes[n] & 0xC0) === 0x80) n--; /* back off a split UTF-8 sequence */
-        return new TextDecoder().decode(bytes.subarray(0, n));
-    }
     function log_tail() {
         /* HEAPU8/HEAPU32 are read here, at crash time: memory growth replaces the views. */
         var at = HEAPU32[pos >> 2];
@@ -44,7 +37,7 @@ EM_JS(void, nt_crash_web_install, (const char *ring, uint32_t ring_size, const u
         if (!(reason instanceof WebAssembly.RuntimeError) && stack.indexOf("wasm-function[") < 0 && stack.indexOf("wasm://") < 0 &&
             stack.indexOf("[wasm code]") < 0) return;
         captured = true;
-        var text = head + "time: " + Date.now() + "\nreason: " + cut(String(reason), 256) + "\nstack:\n" + cut(stack, 4096) +
+        var text = head + "time: " + Date.now() + "\nreason: " + String(reason).slice(0, 256) + "\nstack:\n" + stack.slice(0, 4096) +
                    "\nlog:\n" + log_tail();
         try { window.localStorage.setItem(key, text); } catch (e) {}
         window.dispatchEvent(new CustomEvent("nt-crash", {"detail": {"text": text}}));

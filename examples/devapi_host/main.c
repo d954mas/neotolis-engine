@@ -5,6 +5,7 @@
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
 #include "devapi/nt_devapi.h"
+#include "version/nt_version.h"
 #ifdef __EMSCRIPTEN__
 #include "devapi/nt_devapi_web.h" /* nt_devapi_web_install_shim — the web push/pull bridge. */
 /* Capture group (NT_DEVAPI_GROUP_CAPTURE) pulls a real GL context + the pre-swap seam; a capture-OFF
@@ -290,6 +291,7 @@ int main(void) {
         printf("Failed to initialize engine: error %d\n", result);
         return 1; /* nothing inited yet */
     }
+    nt_log_info("engine %s", nt_version_engine());
 
     /* Partial-init teardown ladder: each fail jumps to the label that releases exactly what was inited,
        sharing one cleanup path with the clean exit. status stays 1 until a clean run. */

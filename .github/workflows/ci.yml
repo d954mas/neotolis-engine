@@ -525,6 +525,12 @@ jobs:
       - name: Run clang-tidy
         run: bash scripts/tidy.sh build/_cmake/native-debug
 
+      # The ASan compile DB above compiles the crash signal handlers out; lint them unsanitized.
+      - name: Run clang-tidy on the crash handlers
+        run: |
+          cmake --preset native-release-test -B build/_cmake/tidy-crash -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
+          clang-tidy -p build/_cmake/tidy-crash --quiet engine/crash/native/nt_crash_native.c tests/unit/test_crash_record.c
+
   devapi-smoke:
     name: DevAPI Smoke (live socket UAT)
     runs-on: ubuntu-latest

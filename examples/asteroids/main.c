@@ -50,6 +50,7 @@ in the source; the sky and Mars images come from packs. See CREDITS.md.
 #include "ui/nt_ui_scroll.h"
 #include "ui/nt_ui_slider.h"
 #include "ui/nt_ui_tabbar.h"
+#include "version/nt_version.h"
 #include "window/nt_window.h"
 #ifndef NT_PLATFORM_WEB
 #include "fs/nt_fs.h"
@@ -2251,6 +2252,7 @@ int main(int argc, char **argv) {
     if (nt_engine_init(&(nt_engine_config_t){.app_name = "asteroids", .version = 1}) != NT_OK) {
         return 1;
     }
+    nt_log_info("engine %s", nt_version_engine());
     g_nt_window.width = 1280;
     g_nt_window.height = 800;
     g_nt_window.title = "Methane Asteroids - Neotolis";

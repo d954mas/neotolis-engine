@@ -27,6 +27,8 @@ if(GIT)
                     RESULT_VARIABLE _rc OUTPUT_QUIET ERROR_QUIET)
                 if(_rc EQUAL 1)
                     string(APPEND _commit "-dirty")
+                elseif(NOT _rc EQUAL 0)
+                    set(_commit "unknown") # a failed diff cannot vouch for a clean tree
                 endif()
             endif()
         endif()

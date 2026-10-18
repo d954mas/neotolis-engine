@@ -1,6 +1,7 @@
 set(AST_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/build/examples/asteroids/${NT_PRESET_NAME}")
 set(AST_PACK_DIR "${CMAKE_SOURCE_DIR}/build/examples/asteroids")
 add_executable(asteroids main.c)
+target_link_libraries(asteroids PRIVATE nt_version)
 target_link_libraries(asteroids PRIVATE nt_core nt_platform nt_app nt_input nt_window nt_math nt_log nt_time nt_resource nt_material nt_shared nt_hash nt_font nt_text_renderer
     nt_ui nt_atlas nt_sprite_renderer nt_mem_scratch nt_clipboard)
 if(EMSCRIPTEN)

@@ -18,6 +18,7 @@
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
 #include "font/nt_font.h"
+#include "version/nt_version.h"
 #ifndef NT_PLATFORM_WEB
 #include "fs/nt_fs.h"
 #endif
@@ -418,6 +419,7 @@ int main(int argc, char *argv[]) {
     if (result != NT_OK) {
         return 1;
     }
+    nt_log_info("engine %s", nt_version_engine());
 
     /* 2. Window init */
     g_nt_window.width = 800;

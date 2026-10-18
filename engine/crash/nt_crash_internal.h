@@ -1,6 +1,8 @@
 #ifndef NT_CRASH_INTERNAL_H
 #define NT_CRASH_INTERNAL_H
 
+#include "log/nt_log.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -9,7 +11,8 @@
 #ifndef NT_CRASH_LOG_BYTES
 #define NT_CRASH_LOG_BYTES 8192
 #endif
-_Static_assert(NT_CRASH_LOG_BYTES > 0, "NT_CRASH_LOG_BYTES must be positive");
+/* Two full lines at least, so a wrapped ring always keeps a whole line. */
+_Static_assert(NT_CRASH_LOG_BYTES >= 2 * (NT_LOG_BUF_SIZE + 64), "NT_CRASH_LOG_BYTES must hold two log lines");
 
 #define NT_CRASH_TEXT_MAX 256
 

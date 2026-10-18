@@ -125,9 +125,9 @@ Asserts are contracts, not error handling. A failed assert means the program is 
 
 ## Engine version
 
-`nt_core.h` holds the semantic version: `NT_VERSION_MAJOR/MINOR/PATCH` and the literal `NT_VERSION_SEMVER` ("0.1.0"). Every module and tool can use them without a build-time dependency on the repository state.
+The engine version is its git commit. `nt_version_engine()` (opt-in module `engine/version`) returns the first 8 hex of the engine commit, with `-dirty` when tracked files differ from `HEAD`, or `unknown` when git is unavailable, fails, or the engine directory is not the top of its own repository (a copy without `.git` would otherwise report the host repository's commit). There is no semantic version.
 
-`nt_version_engine()` (opt-in module `engine/version`) returns `"<semver>+<first 8 hex of the engine commit>"`, with `-dirty` when tracked files differ from `HEAD`. Reports, analytics and `engine.info` use it to name the exact engine source. A build step runs git against `NT_ENGINE_ROOT` on every build and rewrites the generated header only when the value changes; an unchanged tree recompiles nothing. The value is `unknown` when git is unavailable or the engine directory is not the top of its own repository (a copy without `.git` would otherwise report the host repository's commit). `nt_core`, the builder and pack builds do not link it, so a new commit relinks only its consumers.
+A build step runs git against `NT_ENGINE_ROOT` on every build of the target and rewrites the generated header only when the value changes, so an unchanged tree recompiles nothing and a new commit relinks only the consumers. `nt_core`, the builder and pack builds do not link it, so a commit never rebuilds packs; the engine itself prints no version. Games print it at startup (every example does: `nt_log_info("engine %s", nt_version_engine())`), crash records and `engine.info` report it.
 
 ## Crash record
 
@@ -135,8 +135,8 @@ Asserts are contracts, not error handling. A failed assert means the program is 
 
 **API.**
 
-- `nt_crash_init(name, game_version)` — once per process. `name` is the `localStorage` key on web (several games can share one origin) and the record file path on native (UTF-8; a relative path resolves against the cwd at crash time). `game_version` must name the game build, so the record maps to that build's symbols. Both are copied, non-empty and shorter than 256 bytes. Init takes one of `NT_LOG_MAX_SINKS` log sinks and, on native, installs its own unhandled-exception filter and signal handlers, replacing earlier ones without chaining. It does not touch the stored record.
-- `nt_crash_load_previous(out, cap)` copies the stored record into caller storage and keeps it; it returns the bytes copied (0: no record, or the storage is unavailable or unreadable). The stored bytes are untrusted and returned as they are, cut at `cap - 1`.
+- `nt_crash_init(name, game_version)` — once per process. `name` is the `localStorage` key on web (several games can share one origin) and the record file path on native (UTF-8; a relative path resolves against the cwd at crash time). `game_version` must name the game build, so the record maps to that build's symbols. Both are copied, non-empty and shorter than 256 bytes. Init takes one of `NT_LOG_MAX_SINKS` log sinks and, on native, installs its own unhandled-exception filter and signal handlers, replacing earlier ones without chaining; a library that later installs its own replaces them in turn, so call init after such libraries are set up. It does not touch the stored record.
+- `nt_crash_load_previous(out, cap)` copies the stored record into caller storage as a string and keeps it; it returns the string length (0: no record, or the storage is unavailable or unreadable). The stored text is untrusted and returned as it is, cut at `cap - 1` bytes and at an embedded NUL. Load and clear require init.
 - `nt_crash_clear_previous()` removes the record. The game clears only after a confirmed delivery; an unsent record waits for the next launch. A new crash overwrites the stored record.
 - Web also dispatches window event `nt-crash` with `detail.text` once the record is captured and storage was attempted. The page is still alive, so a game can send immediately (best effort; the record stays stored, so a server dedups by text — it carries `time`).
 
@@ -144,7 +144,7 @@ Asserts are contracts, not error handling. A failed assert means the program is 
 
 ```
 game: <game_version>
-engine: <nt_version_engine()> <preset>
+engine: <nt_version_engine()> <preset>    (e.g. 0595a717-dirty wasm-release)
 time: <unix ms>
 reason: RuntimeError: unreachable | signal SIGSEGV | exception 0xc000001d | abort
 pc: exe+0x1a2b3c          (native; absolute 0x... outside the executable)
@@ -155,12 +155,12 @@ WARN [gfx] ...
 ERROR [resource] ...
 ```
 
-`log:` is the tail of WARN/ERROR lines from a fixed BSS byte ring of `NT_CRASH_LOG_BYTES` (default 8192; a game sets another size with `target_compile_definitions(nt_crash PRIVATE NT_CRASH_LOG_BYTES=...)`); a wrapped ring drops its partial first line. A record is at most about `NT_CRASH_LOG_BYTES` + 6 KB. Lines filtered by `NT_LOG_MIN_LEVEL` or `nt_log_set_level` never reach the ring; with `NT_LOG_MIN_LEVEL=3` the section is empty. FULL assert text goes to stderr/console, not into the record — a crash-prone check that needs its cause in field reports logs one ERROR before the assert (see [Assert policy](#assert-policy)). The dev-only `nt_log_ring` is separate: it is compiled out of release builds.
+`log:` is the tail of WARN/ERROR lines from a fixed BSS byte ring of `NT_CRASH_LOG_BYTES` (default 8192; a game sets another size with `target_compile_definitions(nt_crash PRIVATE NT_CRASH_LOG_BYTES=...)`); the ring holds at least two log lines, and a wrapped ring drops its first line, which may be partial. A record is at most about `NT_CRASH_LOG_BYTES` + 6 KB (on web, invalid UTF-8 in a log line can grow it: each such byte becomes a 3-byte replacement character). Lines filtered by `NT_LOG_MIN_LEVEL` or `nt_log_set_level` never reach the ring; with `NT_LOG_MIN_LEVEL=3` or `nt_log_stub` the section is empty. FULL assert text goes to stderr/console, not into the record — a crash-prone check that needs its cause in field reports logs one ERROR before the assert (see [Assert policy](#assert-policy)). The dev-only `nt_log_ring` is separate: it is compiled out of release builds.
 
 **Capture.**
 
 - Web: window `error` and `unhandledrejection` listeners take the first engine crash per session: a `WebAssembly.RuntimeError` (a trap; `abort()` throws one too) or an error whose stack has wasm frames (a wasm stack overflow arrives as `RangeError`). Other page errors are ignored. The listener never calls back into the trapped instance: it reads the ring from linear memory and writes `localStorage`. The shell's `Module.onAbort` overlay also fires on `abort()`; both are independent.
-- Native: the handler writes the file and returns, so the OS default follows (WER on Windows; the original signal and core dump on Linux — the handler re-raises its signal). It uses only async-signal-safe calls (Win32 calls on Windows, where the filter and the UCRT SIGABRT handler run synchronously on the crashing thread). Windows: unhandled-exception filter (with a 32 KB stack guarantee for stack overflow) and SIGABRT; UCRT `abort()` then reports through WER without a second record. Linux: ILL, SEGV, BUS, FPE, ABRT, TRAP on a 64 KB alternate stack (skipped when the kernel needs more), fault PC from `ucontext` on x86_64 and aarch64. Under ASan no handlers are installed; its report stays.
+- Native: the handler writes the file and returns, so the OS default follows (WER on Windows; the original signal and core dump on Linux — the handler re-raises its signal). It uses only async-signal-safe calls (Win32 calls on Windows, where the filter and the UCRT SIGABRT handler run synchronously on the crashing thread). Windows: unhandled-exception filter (with a 32 KB stack guarantee for stack overflow) and SIGABRT; UCRT `abort()` then reports through WER; one record per process (a second faulting thread waits while the first writes, on both platforms). Linux: ILL, SEGV, BUS, FPE, ABRT, TRAP on a 64 KB alternate stack (skipped when the kernel needs more), fault PC from `ucontext` on x86_64 and aarch64. Linux older than glibc 2.34 sizes the alternate stack from `SIGSTKSZ`. Under ASan no handlers are installed; its report stays.
 - No stack walk on native: the PC names the faulting instruction, and for `NT_ASSERT` in TRAP that is the assert. Full stacks come from WER dumps, cores or a debugger.
 
 **Symbolization.** Keep each build's symbols under its `game_version`. Windows: `llvm-symbolizer --obj=game.exe --relative-address 0x<offset>` with the build's `.pdb` (native Release presets build without `-g`; a game that wants field symbols adds it). Linux: `llvm-symbolizer --obj=game 0x<offset>` (or `addr2line -e game`). Web: the build's symbol map for `wasm-function[N]`.

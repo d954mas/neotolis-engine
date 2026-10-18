@@ -27,7 +27,7 @@
 #endif
 
 static uintptr_t s_exe_lo, s_exe_hi, s_exe_base;
-static const char *s_engine; /* cached in init: handlers call no external functions */
+static const char *s_engine; /* cached in init: no engine calls inside a handler */
 static const char *s_preset;
 
 static void out(const char *s, size_t n);
@@ -141,7 +141,7 @@ static uint64_t now_ms(void) {
 
 static void write_record(const char *reason, uint64_t code, bool has_code, uintptr_t pc, bool has_pc) {
     if (InterlockedExchange(&s_writing, 1) != 0) {
-        return;
+        Sleep(INFINITE); /* another thread is writing; the process ends when it returns */
     }
     s_file = CreateFileW(s_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (s_file == INVALID_HANDLE_VALUE) {
@@ -156,7 +156,7 @@ static LONG WINAPI on_exception(EXCEPTION_POINTERS *ep) {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
-/* Returning lets UCRT abort() continue to its fault report (WER); it removes our filter first. */
+/* Returning lets UCRT abort() continue to its fault report (WER); s_writing keeps it to one record. */
 static void on_abort(int sig) {
     (void)sig;
     write_record("abort", 0, false, 0, false);
@@ -174,12 +174,13 @@ void nt_crash_platform_init(void) {
     s_exe_base = (uintptr_t)exe;
     s_exe_lo = s_exe_base;
     s_exe_hi = s_exe_base + nt->OptionalHeader.SizeOfImage;
-#if NT_CRASH_HANDLERS
+    if (!NT_CRASH_HANDLERS) {
+        return;
+    }
     ULONG guarantee = 32U * 1024U; /* the filter still runs on an overflowed stack */
     (void)SetThreadStackGuarantee(&guarantee);
     (void)SetUnhandledExceptionFilter(on_exception);
     (void)signal(SIGABRT, on_abort);
-#endif
 }
 
 uint32_t nt_crash_platform_load(char *out_buf, uint32_t cap) {
@@ -205,11 +206,13 @@ void nt_crash_platform_clear(void) { (void)DeleteFileW(s_path); }
 #include <errno.h>
 #include <fcntl.h>
 #include <link.h>
+#include <stdatomic.h>
 #include <time.h>
 #include <ucontext.h>
 #include <unistd.h>
 
 static int s_fd = -1;
+static atomic_flag s_writing = ATOMIC_FLAG_INIT;
 
 static void out(const char *s, size_t n) {
     while (n > 0) {
@@ -244,6 +247,11 @@ static uintptr_t fault_pc(const void *uctx) {
    under SIG_DFL (SA_RESETHAND) on return, with the original context, whatever sent it. */
 static void on_signal(int sig, siginfo_t *info, void *uctx) {
     (void)info;
+    if (atomic_flag_test_and_set(&s_writing)) {
+        for (;;) {
+            (void)pause(); /* another thread is writing; the process ends when it raises */
+        }
+    }
     const char *reason = "signal";
     for (size_t i = 0; i < sizeof(k_signals) / sizeof(k_signals[0]); i++) {
         if (k_signals[i] == sig) {
@@ -283,10 +291,16 @@ void nt_crash_platform_init(void) {
     s_engine = nt_version_engine();
     s_preset = nt_engine_preset_string();
     (void)dl_iterate_phdr(find_exe, NULL);
-#if NT_CRASH_HANDLERS
+    if (!NT_CRASH_HANDLERS) {
+        return;
+    }
     /* Without room for the kernel's signal frame, skip the alternate stack: faults are still
        caught, only a main-thread stack overflow is not. */
+#ifdef _SC_SIGSTKSZ
     long need = sysconf(_SC_SIGSTKSZ);
+#else
+    long need = SIGSTKSZ; /* glibc < 2.34 */
+#endif
     if (need <= (long)sizeof(s_altstack)) {
         stack_t ss = {.ss_sp = s_altstack, .ss_size = sizeof(s_altstack)};
         (void)sigaltstack(&ss, NULL);
@@ -302,7 +316,6 @@ void nt_crash_platform_init(void) {
     for (size_t i = 0; i < sizeof(k_signals) / sizeof(k_signals[0]); i++) {
         (void)sigaction(k_signals[i], &sa, NULL);
     }
-#endif
 }
 
 uint32_t nt_crash_platform_load(char *out_buf, uint32_t cap) {

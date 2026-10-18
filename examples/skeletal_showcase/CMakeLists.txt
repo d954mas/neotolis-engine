@@ -3,6 +3,7 @@ set(SKELETAL_SHOWCASE_ASSETS_DIR "${SKELETAL_SHOWCASE_OUTPUT_DIR}/assets")
 set(SKELETAL_SHOWCASE_PACK_DIR "${CMAKE_SOURCE_DIR}/build/examples/skeletal_showcase")
 
 add_executable(skeletal_showcase main.c)
+target_link_libraries(skeletal_showcase PRIVATE nt_version)
 if(NT_DEVAPI_ENABLED)
     if(EMSCRIPTEN)
         target_link_libraries(skeletal_showcase PRIVATE nt_devapi_web nt_devapi_default)

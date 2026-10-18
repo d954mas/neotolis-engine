@@ -14,7 +14,16 @@ async function openRead(page: Page): Promise<void> {
   await page.waitForFunction(() => (window as CrashWindow).__nt !== undefined, null, { timeout: 30_000 });
 }
 
-for (const mode of ['trap', 'abort'] as const) {
+// trap and abort reach window 'error'; reject reaches 'unhandledrejection'; jserror is a plain JS
+// Error that the filter accepts only for its wasm frames.
+const REASONS = {
+  trap: /\nreason: RuntimeError: unreachable/,
+  abort: /\nreason: RuntimeError: Abort/,
+  reject: /\nreason: RuntimeError: unreachable/,
+  jserror: /\nreason: Error: crash probe js error/,
+};
+
+for (const mode of ['trap', 'abort', 'reject', 'jserror'] as const) {
   test(`crash record: ${mode} is stored, announced, read and cleared`, async ({ page }) => {
     test.setTimeout(120_000);
     await page.addInitScript(() => {
@@ -33,10 +42,8 @@ for (const mode of ['trap', 'abort'] as const) {
     await page.waitForTimeout(200);
     expect(await page.evaluate((key) => localStorage.getItem(key), KEY)).toBeNull();
 
-    const crashed = page.waitForEvent('pageerror', { timeout: 60_000 });
     await page.goto(`/index.html?crash=${mode}`);
-    expect((await crashed).message).toMatch(mode === 'trap' ? /unreachable/ : /Abort/);
-    await page.waitForFunction(() => ((window as CrashWindow).__crashEvents ?? []).length > 0, null, { timeout: 10_000 });
+    await page.waitForFunction(() => ((window as CrashWindow).__crashEvents ?? []).length > 0, null, { timeout: 60_000 });
 
     // After the crash only JS runs: the instance is dead.
     const stored = await page.evaluate((key) => localStorage.getItem(key), KEY);
@@ -51,8 +58,8 @@ for (const mode of ['trap', 'abort'] as const) {
     await openRead(page);
     const record = await page.evaluate(() => (window as CrashWindow).__nt!.crash_load());
     expect(record).toBe(stored);
-    expect(record).toMatch(/^game: browser_smoke-test\nengine: \d+\.\d+\.\d+\+([0-9a-f]{8}(-dirty)?|unknown) \S+\ntime: \d+\nreason: /);
-    expect(record).toMatch(mode === 'trap' ? /\nreason: RuntimeError: unreachable/ : /\nreason: RuntimeError: Abort/);
+    expect(record).toMatch(/^game: browser_smoke-test\nengine: ([0-9a-f]{8}(-dirty)?|unknown) \S+\ntime: \d+\nreason: /);
+    expect(record).toMatch(REASONS[mode]);
     expect(record).toMatch(/\nstack:\n[^]*wasm/);
 
     // The ring wrapped (300 lines > 8 KB): the oldest lines are gone, the first kept line is whole,

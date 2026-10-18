@@ -1,7 +1,7 @@
-#include "core/nt_core.h"
 #include "unity.h"
 #include "version/nt_version.h"
 
+#include <stdbool.h>
 #include <string.h>
 
 void setUp(void) {}
@@ -17,16 +17,13 @@ static bool is_commit(const char *s) {
     return s[8] == '\0' || strcmp(s + 8, "-dirty") == 0;
 }
 
-void test_engine_version_is_semver_plus_commit(void) {
+void test_engine_version_is_the_commit(void) {
     const char *ver = nt_version_engine();
-    const char *prefix = NT_VERSION_SEMVER "+";
-    TEST_ASSERT_EQUAL_INT(0, strncmp(ver, prefix, strlen(prefix)));
-    const char *commit = ver + strlen(prefix);
-    TEST_ASSERT_TRUE_MESSAGE(strcmp(commit, "unknown") == 0 || is_commit(commit), ver);
+    TEST_ASSERT_TRUE_MESSAGE(strcmp(ver, "unknown") == 0 || is_commit(ver), ver);
 }
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_engine_version_is_semver_plus_commit);
+    RUN_TEST(test_engine_version_is_the_commit);
     return UNITY_END();
 }

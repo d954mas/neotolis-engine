@@ -3,6 +3,7 @@ set(RTT_SHOWCASE_ASSETS_DIR "${RTT_SHOWCASE_OUTPUT_DIR}/assets")
 set(RTT_SHOWCASE_PACK_DIR "${CMAKE_SOURCE_DIR}/build/examples/rtt_showcase")
 
 add_executable(rtt_showcase main.c)
+target_link_libraries(rtt_showcase PRIVATE nt_version)
 target_link_libraries(rtt_showcase PRIVATE
     nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_shape_renderer nt_material nt_postfx_blur
     nt_resource nt_atlas nt_hash nt_mem_scratch nt_sprite_renderer nt_text_renderer nt_font nt_ui

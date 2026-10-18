@@ -16,13 +16,13 @@
    SIGABRT and fault-signal handlers, replacing earlier ones without chaining. */
 void nt_crash_init(const char *name, const char *game_version);
 
-/* Copies the previous crash record into out (NUL-terminated) without removing it. Returns the
-   bytes copied without the NUL; 0 when there is no record, the storage is unavailable or
-   unreadable (out[0] is then '\0'). The stored bytes are returned as they are; a record longer
-   than cap - 1 is cut. Requires out != NULL and cap >= 1. */
+/* Copies the previous crash record into out as a NUL-terminated string without removing it and
+   returns its length; 0 when there is no record or the storage is unavailable or unreadable
+   (out[0] is then '\0'). The stored text is returned as it is, cut at cap - 1 bytes (and at an
+   embedded NUL). Requires nt_crash_init, out != NULL and cap >= 1. */
 uint32_t nt_crash_load_previous(char *out, uint32_t cap);
 
-/* Removes the stored record. No record or unavailable storage is a no-op. */
+/* Removes the stored record. No record or unavailable storage is a no-op. Requires nt_crash_init. */
 void nt_crash_clear_previous(void);
 
 #endif // NT_CRASH_H
