@@ -4,6 +4,7 @@ set(UI_3D_DEMO_ASSETS_DIR "${UI_3D_DEMO_OUTPUT_DIR}/assets")
 set(UI_3D_DEMO_PACK_DIR "${CMAKE_SOURCE_DIR}/build/examples/ui_3d_demo")
 
 add_executable(ui_3d_demo main.c)
+target_link_libraries(ui_3d_demo PRIVATE nt_version)
 target_link_libraries(ui_3d_demo PRIVATE
     nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource
     nt_material nt_shared nt_atlas

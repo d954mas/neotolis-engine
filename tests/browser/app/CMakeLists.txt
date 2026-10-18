@@ -27,7 +27,7 @@ target_include_directories(browser_smoke PRIVATE "${CMAKE_SOURCE_DIR}/examples/u
 # so Ctrl+C/X/V work in the field. web = async cache-on-paste, native = glfw.
 # The real transcoder (not the stub): the fixture pack's Basis textures are the activation fixture.
 if(EMSCRIPTEN)
-    target_link_libraries(browser_smoke PRIVATE nt_platform_web nt_platform nt_gfx nt_http nt_clipboard nt_basisu_transcoder nt_meshwire_stub)
+    target_link_libraries(browser_smoke PRIVATE nt_platform_web nt_platform nt_gfx nt_http nt_clipboard nt_basisu_transcoder nt_meshwire_stub nt_crash)
 else()
     target_link_libraries(browser_smoke PRIVATE nt_gfx nt_http_stub nt_fs nt_clipboard nt_platform nt_basisu_transcoder nt_meshwire_stub)
 endif()

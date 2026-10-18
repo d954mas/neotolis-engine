@@ -3114,6 +3114,8 @@ void test_codegen_generates_header(void) {
     TEST_ASSERT_NOT_NULL(strstr(content, "register_labels"));
     TEST_ASSERT_NOT_NULL(strstr(content, "NT_HASH_LABELS"));
     TEST_ASSERT_NOT_NULL(strstr(content, "#endif"));
+    /* Tracked generated headers are eol=lf; a CRLF write shows them modified on Windows */
+    TEST_ASSERT_NULL(strchr(content, '\r'));
 
     free(content);
 }
@@ -3254,6 +3256,7 @@ void test_merge_combined_header(void) {
     TEST_ASSERT_NOT_NULL(strstr(content, "ASSET_SHADER_"));
     TEST_ASSERT_NOT_NULL(strstr(content, "register_labels"));
     TEST_ASSERT_NOT_NULL(strstr(content, "#ifndef"));
+    TEST_ASSERT_NULL(strchr(content, '\r'));
     free(content);
 }
 

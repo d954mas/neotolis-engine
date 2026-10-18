@@ -6,6 +6,8 @@
 #include "devapi/nt_devapi_net.h"
 #include "graphics/nt_gfx.h"
 #include "input/nt_input.h"
+#include "log/nt_log.h"
+#include "version/nt_version.h"
 #include "window/nt_window.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -85,6 +87,7 @@ int main(void) {
         printf("Failed to initialize engine: error %d\n", result);
         return 1; /* nothing inited yet */
     }
+    nt_log_info("engine %s", nt_version_engine());
 
     int status = 1; /* stays 1 until a clean run; each fail point jumps to the matching teardown label. */
 

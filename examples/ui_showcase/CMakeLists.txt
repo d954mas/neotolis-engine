@@ -4,6 +4,7 @@ set(UI_SHOWCASE_ASSETS_DIR "${UI_SHOWCASE_OUTPUT_DIR}/assets")
 set(UI_SHOWCASE_PACK_DIR "${CMAKE_SOURCE_DIR}/build/examples/ui_showcase")
 
 add_executable(ui_showcase main.c)
+target_link_libraries(ui_showcase PRIVATE nt_version)
 target_link_libraries(ui_showcase PRIVATE
     nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource
     nt_material nt_shared nt_atlas

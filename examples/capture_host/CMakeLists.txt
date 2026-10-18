@@ -1,4 +1,5 @@
 add_executable(capture_host main.c)
+target_link_libraries(capture_host PRIVATE nt_version)
 
 # Owns a REAL nt_gfx context (devapi_host inits none) for the pre-swap capture seam. Links only the
 # group libs it uses (capture + core + discovery), so it pulls nt_gfx + nt_fpng, never the ui/obs/...

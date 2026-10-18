@@ -104,7 +104,7 @@ lifetime, and naming vocabulary.
 | `engine/time` | [runtime/frame-lifecycle.md](runtime/frame-lifecycle.md) |
 | `engine/window`, `engine/platform` | [runtime/platform.md](runtime/platform.md) |
 | `engine/app` | [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) (time & render control), [runtime/frame-lifecycle.md](runtime/frame-lifecycle.md) |
-| `engine/log`, `engine/devapi`, `engine/debug_overlay`, `engine/metrics`, `engine/introspect` | [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) |
+| `engine/log`, `engine/version`, `engine/crash`, `engine/devapi`, `engine/debug_overlay`, `engine/metrics`, `engine/introspect` | [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) |
 | `engine/memory`, `engine/pool` | [runtime/memory.md](runtime/memory.md) |
 | `engine/core` | [core/principles.md](core/principles.md), [core/api-contracts.md](core/api-contracts.md); assert policy: [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) |
 | `engine/clipboard` | [core/module-layout.md](core/module-layout.md) (stub semantics example) |

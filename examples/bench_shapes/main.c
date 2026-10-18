@@ -5,8 +5,10 @@
 #include "core/nt_platform.h"
 #include "graphics/nt_gfx.h"
 #include "input/nt_input.h"
+#include "log/nt_log.h"
 #include "renderers/nt_shape_renderer.h"
 #include "time/nt_time.h"
+#include "version/nt_version.h"
 #include "window/nt_window.h"
 #include <inttypes.h>
 
@@ -634,6 +636,7 @@ int main(int argc, char **argv) {
         printf("Failed to initialize engine: error %d\n", result);
         return 1;
     }
+    nt_log_info("engine %s", nt_version_engine());
 
     g_nt_window.width = 800;
     g_nt_window.height = 600;

@@ -6,8 +6,10 @@
 #include "entity/nt_entity.h"
 #include "graphics/nt_gfx.h"
 #include "input/nt_input.h"
+#include "log/nt_log.h"
 #include "renderers/nt_shape_renderer.h"
 #include "transform_comp/nt_transform_comp.h"
+#include "version/nt_version.h"
 #include "window/nt_window.h"
 
 #include "math/nt_math.h"
@@ -373,6 +375,7 @@ int main(void) {
     if (result != NT_OK) {
         return 1;
     }
+    nt_log_info("engine %s", nt_version_engine());
 
     g_nt_window.width = 800;
     g_nt_window.height = 600;

@@ -1,4 +1,5 @@
 add_executable(devapi_host main.c)
+target_link_libraries(devapi_host PRIVATE nt_version)
 # The host wires a REAL nt_ui "hud" so ui.* resolve against a probe-able tree; nt_ui pulls its full
 # renderer chain (resource/font/material/atlas/sprite+text/nt_gfx) which must resolve at link even
 # though the host never calls nt_ui_walk. nt_gfx also supplies render.info's draw_calls (0 here, no draw).

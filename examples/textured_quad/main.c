@@ -26,6 +26,7 @@
 #include "core/nt_platform.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
+#include "version/nt_version.h"
 #include <inttypes.h>
 #ifndef NT_PLATFORM_WEB
 #include "fs/nt_fs.h"
@@ -379,6 +380,7 @@ int main(int argc, char *argv[]) {
     if (result != NT_OK) {
         return 1;
     }
+    nt_log_info("engine %s", nt_version_engine());
 
     g_nt_window.width = 800;
     g_nt_window.height = 600;

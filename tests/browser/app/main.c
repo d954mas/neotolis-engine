@@ -52,7 +52,9 @@
 #endif
 
 #ifdef __EMSCRIPTEN__
-#include <emscripten.h> /* EM_JS / EMSCRIPTEN_KEEPALIVE for the window.__nt hooks */
+#include "crash/nt_crash.h"
+#include <emscripten.h>      /* EM_JS / EMSCRIPTEN_KEEPALIVE for the window.__nt hooks */
+#include <emscripten/heap.h> /* crash probe grows the heap */
 uint32_t nt_test_shape_stroke_probe(void);
 uint32_t nt_test_mesh_color_probe(void);
 #endif
@@ -880,6 +882,56 @@ EMSCRIPTEN_KEEPALIVE float nt_test_rich_link_css_w(void) { return s_nt_rich_link
 EMSCRIPTEN_KEEPALIVE float nt_test_rich_link_css_h(void) { return s_nt_rich_link_css_h; }
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_rich_link_clicks(void) { return s_state.link_clicks; }
 
+/* ?crash=trap|abort|reject|jserror crashes a running frame after filling the log ring; ?crash=read
+ * only inits. reject traps inside a Promise callback (unhandledrejection); jserror throws a plain
+ * JS Error through wasm frames (the stack-text branch of the capture filter). */
+enum { CRASH_OFF, CRASH_TRAP, CRASH_ABORT, CRASH_READ, CRASH_REJECT, CRASH_JS_ERROR };
+static const char *const k_crash_modes[] = {"", "trap", "abort", "read", "reject", "jserror"};
+EMSCRIPTEN_KEEPALIVE void nt_test_crash_trap(void) { __builtin_trap(); }
+/* clang-format off */
+EM_JS(void, nt_test_crash_reject, (void), {
+    Promise.resolve().then(function() { _nt_test_crash_trap(); });
+})
+EM_JS(void, nt_test_crash_js_error, (void), {
+    throw new Error("crash probe js error");
+})
+/* clang-format on */
+static uint32_t s_nt_crash_mode;
+static uint32_t s_nt_crash_frames;
+static char s_nt_crash_record[32768];
+EMSCRIPTEN_KEEPALIVE const char *nt_test_crash_load(void) {
+    (void)nt_crash_load_previous(s_nt_crash_record, (uint32_t)sizeof(s_nt_crash_record));
+    return s_nt_crash_record;
+}
+EMSCRIPTEN_KEEPALIVE void nt_test_crash_clear(void) { nt_crash_clear_previous(); }
+
+static void crash_probe_step(void) {
+    if (s_nt_crash_mode == CRASH_OFF || s_nt_crash_mode == CRASH_READ || ++s_nt_crash_frames < 3U) {
+        return;
+    }
+    uint32_t mode = s_nt_crash_mode;
+    s_nt_crash_mode = CRASH_OFF; /* reject leaves the frame loop running */
+    /* Grow the heap first: the capture must read the ring through the replaced memory views. */
+    volatile char *grow = (volatile char *)malloc(emscripten_get_heap_size() + (16U << 20));
+    NT_ASSERT(grow);
+    grow[0] = 1;
+    for (uint32_t i = 0; i < 300U; i++) {
+        nt_log_warn("crash probe line %u: проверка кольца", i);
+    }
+    nt_log_error("crash probe token-%s", k_crash_modes[mode]);
+    if (mode == CRASH_TRAP) {
+        __builtin_trap();
+    }
+    if (mode == CRASH_REJECT) {
+        nt_test_crash_reject();
+        return;
+    }
+    if (mode == CRASH_JS_ERROR) {
+        nt_test_crash_js_error();
+    }
+    abort();
+}
+
 /* clang-format off */
 /* Force-include UTF8ToString for input_buffer(). The C getters are KEEPALIVE (live as bare _name in the
  * glue scope); bare access + EM_JS_DEPS is Closure-safe, no exported-methods list. */
@@ -890,6 +942,10 @@ EM_JS(unsigned int, nt_test_rich_composition_mode, (void), {
     const mode = query.get('rich_composition');
     if (mode !== 'clip' && mode !== 'open') return 0;
     return 1 | (mode === 'clip' ? 2 : 0) | (query.get('rich_effect') === 'off' ? 4 : 0);
+})
+
+EM_JS(uint32_t, nt_test_crash_mode, (void), {
+    return Math.max(0, ["", "trap", "abort", "read", "reject", "jserror"].indexOf(new URLSearchParams(window.location.search).get("crash") || ""));
 })
 
 /* Quoted keys keep the Playwright-facing API stable under Closure. */
@@ -942,7 +998,9 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'http_status': function() { return _nt_test_http_status(); },
         'http_headers': function() { return UTF8ToString(_nt_test_http_headers()); },
         'http_verify_echo': function() { return _nt_test_http_verify_echo(); },
-        'http_free': function() { _nt_test_http_free(); }
+        'http_free': function() { _nt_test_http_free(); },
+        'crash_load': function() { return UTF8ToString(_nt_test_crash_load()); },
+        'crash_clear': function() { _nt_test_crash_clear(); }
     };
 })
 /* clang-format on */
@@ -1251,6 +1309,9 @@ static void frame(void) {
     nt_gfx_end_frame();
 
     nt_window_swap_buffers();
+#if defined(__EMSCRIPTEN__)
+    crash_probe_step();
+#endif
 #if defined(__EMSCRIPTEN__) && NT_GFX_CAPTURE_ENABLED
     s_observe_request_now = !s_observe_request_now;
     if (s_observe_repeat && s_observe_request_now) {
@@ -1406,6 +1467,10 @@ int main(int argc, char *argv[]) {
 
 #if defined(__EMSCRIPTEN__)
     s_rich_composition_mode = nt_test_rich_composition_mode();
+    s_nt_crash_mode = nt_test_crash_mode();
+    if (s_nt_crash_mode != CRASH_OFF) {
+        nt_crash_init("nt.test.crash", "browser_smoke-test");
+    }
     /* Transparency removes one probe's pixels without changing layout or readiness. */
     s_nt_hidden_input_style = s_input_style;
     for (uint32_t i = 0; i < NT_UI_INPUT_STATE_COUNT; i++) {

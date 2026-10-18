@@ -4,6 +4,7 @@ set(SLICE9_DEMO_ASSETS_DIR "${SLICE9_DEMO_OUTPUT_DIR}/assets")
 set(SLICE9_DEMO_PACK_DIR "${CMAKE_SOURCE_DIR}/build/examples/slice9_demo")
 
 add_executable(slice9_demo main.c)
+target_link_libraries(slice9_demo PRIVATE nt_version)
 target_link_libraries(slice9_demo PRIVATE
     nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource
     nt_material nt_shared nt_atlas

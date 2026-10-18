@@ -260,6 +260,31 @@ Atlas benchmark scripts (`benchmark.sh`, `autoresearch-bench.sh`, `bench-vector.
 in `scripts/atlas/`) select INFO in `build/_cmake/native-release-atlas-bench`;
 `--no-build` uses that build's executable.
 
+## Build identity and crash records
+
+The `nt_version` build step runs git against `NT_ENGINE_ROOT` on every build of
+the target and replaces the generated header only when its value changes. An
+unchanged tree recompiles nothing; a changed identity relinks its consumers.
+`nt_core`, the builder and pack builds do not link `nt_version`, so changing the
+commit identity alone does not rebuild packs. The returned version and crash
+record format are defined in [Logging, Errors, Debugging](spec/debug/logging-errors-debugging.md#engine-version).
+
+To change the crash log capacity, set the definition on the engine target after
+adding the engine to the game project:
+
+```cmake
+target_compile_definitions(nt_crash PRIVATE NT_CRASH_LOG_BYTES=16384)
+```
+
+Keep each build's symbols under its `game_version`. Native Release presets do
+not enable `-g`; a game that needs field symbolization must enable debug
+information when compiling the game and engine and retain the matching symbols.
+
+- Windows: `llvm-symbolizer --obj=game.exe --relative-address 0x<offset>` with the
+  build's `.pdb`.
+- Linux: `llvm-symbolizer --obj=game 0x<offset>` or `addr2line -e game 0x<offset>`.
+- Web: use the build's symbol map for `wasm-function[N]`.
+
 ## Checks
 
 Run these from the repository root, with the SDK activated for WASM checks:
@@ -346,6 +371,17 @@ Browser diagnostics use `tests/browser/diagnostics.spec.ts`. Set
 `NT_DIAGNOSTICS_PRESET/LOG/UI/GPU/METRICS`. Debug and Release use timer values
 above 32 bits to exercise the 64-bit bridge. General browser smoke tests drive
 `tests/browser/app` (`window.__nt` hooks), not the showcase.
+
+Crash records: `tests/browser/crash.spec.ts` loads the app with `?crash=trap|abort`
+(fill the log ring, grow the heap, crash a frame), `?crash=reject` (trap in a
+Promise callback) and `?crash=jserror` (a JS error through wasm frames), then
+`?crash=read` (read and clear); CI runs it in the wasm-debug list and the
+release diagnostics row `"0 0"`. Native `test_crash_record_<mode>` crashes one run (`WILL_FAIL` through
+`cmake -E env`, which turns a signal death into a failure CTest can invert) and
+its `_check` test reads the record. Under ASan no handlers are installed;
+both test steps exit 77 and are skipped. Linux CI covers them in
+`native-release-test` and lints the handlers against that unsanitized compile DB;
+Windows only locally.
 
 That app reuses the prebuilt `ui_showcase.ntpack` (target `ui_showcase_packs`)
 and builds its own Basis fixture, `basis_fixture.ntpack` (target

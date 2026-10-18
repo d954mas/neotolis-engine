@@ -4,6 +4,7 @@ set(BUNNYMARK_ASSETS_DIR "${BUNNYMARK_OUTPUT_DIR}/assets")
 set(BUNNYMARK_PACK_DIR "${CMAKE_SOURCE_DIR}/build/examples/bunnymark")
 
 add_executable(bunnymark_demo main.c)
+target_link_libraries(bunnymark_demo PRIVATE nt_version)
 target_link_libraries(bunnymark_demo PRIVATE
     nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource
     nt_material nt_shared nt_entity nt_transform_comp nt_material_comp

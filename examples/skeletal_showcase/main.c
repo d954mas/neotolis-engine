@@ -7,6 +7,7 @@
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
+#include "version/nt_version.h"
 #ifdef NT_DEVAPI_ENABLED
 #include "devapi/nt_devapi.h"
 #include "devapi/nt_devapi_groups.h"
@@ -2744,6 +2745,7 @@ int main(int argc, char *argv[]) {
     if (nt_engine_init(&config) != NT_OK) {
         return 1;
     }
+    nt_log_info("engine %s", nt_version_engine());
     g_nt_window.width = 1280;
     g_nt_window.height = 800;
     nt_window_init();
