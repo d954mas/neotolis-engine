@@ -9,6 +9,7 @@
  */
 
 #include "core/nt_assert.h"
+#include "core/nt_builtins.h"
 #include "graphics/gl/nt_gfx_gl_ctx.h"
 #include "graphics/nt_gfx_internal.h"
 #include "hash/nt_hash.h"
@@ -1295,15 +1296,16 @@ static void nt_gfx_gl_write_array_index(char *suffix, GLint element) {
     *suffix = '\0';
 }
 
-/* A field report keeps only logs, so the record names the program and the value the driver returned. */
-static void log_program_failure(const nt_gfx_gl_program_t *rec, const char *phase, const char *reason, const char *name, uint32_t value) {
+/* A field report keeps only logs, so the record names the program and the value the driver returned.
+ * The unbounded label goes last: the log line cap truncates it, not the cause. */
+static NT_NOINLINE void log_program_failure(const nt_gfx_gl_program_t *rec, const char *phase, const char *reason, const char *name, uint32_t value) {
     (void)rec;
     (void)phase;
     (void)reason;
     (void)name;
     (void)value;
-    NT_LOG_ERROR("program slot %u (GL %u) \"%s\": phase=%s: %s: %s=0x%X", (unsigned)(rec - s_programs), rec->program, rec->label != NULL && rec->label[0] != '\0' ? rec->label : "<unnamed>", phase,
-                 reason, name, value);
+    NT_LOG_ERROR("program %u/GL %u %s: %s: %s=0x%X \"%s\"", (unsigned)(rec - s_programs), rec->program, phase, reason, name, value,
+                 rec->label != NULL && rec->label[0] != '\0' ? rec->label : "<unnamed>");
 }
 
 /* Device-dependent invariants log before TRAP discards the assert expression. */
@@ -1395,8 +1397,7 @@ static bool nt_gfx_gl_reflect_uniforms(GLuint program, nt_gfx_gl_program_t *rec)
         return false;
     }
     /* Expanded indices can be wider than reflection's terminal [0]. */
-    NT_GFX_PROGRAM_ASSERT(rec, "uniform-reflection", (size_t)max_name_length + 10U <= NT_GFX_GL_MAX_UNIFORM_NAME, "uniform name exceeds NT_GFX_GL_MAX_UNIFORM_NAME", "max_name_length",
-                          max_name_length);
+    NT_GFX_PROGRAM_ASSERT(rec, "uniforms", (size_t)max_name_length + 10U <= NT_GFX_GL_MAX_UNIFORM_NAME, "uniform name too long", "max_len", max_name_length);
     char uname[NT_GFX_GL_MAX_UNIFORM_NAME];
     for (GLint ui = 0; ui < active_uniforms; ui++) {
         GLsizei ulen = 0;
@@ -1416,15 +1417,16 @@ static bool nt_gfx_gl_reflect_uniforms(GLuint program, nt_gfx_gl_program_t *rec)
         }
         if (block_index != -1) {
             /* These std140 members map directly to C arrays without padding between fields. */
-            NT_GFX_PROGRAM_ASSERT(rec, "uniform-reflection", utype == GL_FLOAT_VEC4 || utype == GL_INT_VEC4 || utype == GL_UNSIGNED_INT_VEC4 || utype == GL_FLOAT_MAT4,
-                                  "uniform block member is not vec4, ivec4, uvec4 or mat4", uname, utype);
+            NT_GFX_PROGRAM_ASSERT(rec, "uniforms", utype == GL_FLOAT_VEC4 || utype == GL_INT_VEC4 || utype == GL_UNSIGNED_INT_VEC4 || utype == GL_FLOAT_MAT4, "block member not vec4/ivec4/uvec4/mat4",
+                                  uname, utype);
             if (utype == GL_FLOAT_MAT4) {
                 GLint row_major = -1;
                 NT_GL(glGetActiveUniformsiv, program, 1, &index, GL_UNIFORM_IS_ROW_MAJOR, &row_major);
                 if (row_major == -1) {
                     return false; /* the context was lost after the block index */
                 }
-                NT_GFX_PROGRAM_ASSERT(rec, "uniform-reflection", row_major == 0, "uniform block member: row_major matrix -- the C side is column-major", uname, row_major);
+                /* The C side is column-major. */
+                NT_GFX_PROGRAM_ASSERT(rec, "uniforms", row_major == 0, "row_major block matrix", uname, row_major);
             }
             continue;
         }
@@ -1432,12 +1434,12 @@ static bool nt_gfx_gl_reflect_uniforms(GLuint program, nt_gfx_gl_program_t *rec)
         const uniform_kind_t kind = uniform_kind(utype, &sampler_class);
         if (kind == UNIFORM_NOT_SAMPLER) {
             /* Built-ins (gl_DepthRange) are not program inputs; anything else could never receive a value. */
-            NT_GFX_PROGRAM_ASSERT(rec, "uniform-reflection", strncmp(uname, "gl_", 3) == 0, "standalone non-sampler uniform: put shader values in a uniform block", uname, utype);
+            NT_GFX_PROGRAM_ASSERT(rec, "uniforms", strncmp(uname, "gl_", 3) == 0, "standalone non-sampler uniform", uname, utype);
             continue;
         }
-        NT_GFX_PROGRAM_ASSERT(rec, "uniform-reflection", kind != UNIFORM_SIGNED_SAMPLER, "program sampler requires a signed integer texture format", uname, utype);
-        NT_GFX_PROGRAM_ASSERT(rec, "uniform-reflection", kind != UNIFORM_UNSUPPORTED_SAMPLER, "program declares an unsupported sampler type", uname, utype);
-        NT_GFX_PROGRAM_ASSERT(rec, "uniform-reflection", usize == 1 || (ulen >= 3 && strcmp(uname + ulen - 3, "[0]") == 0), "sampler array reflection lacks a terminal [0]", uname, usize);
+        NT_GFX_PROGRAM_ASSERT(rec, "uniforms", kind != UNIFORM_SIGNED_SAMPLER, "signed integer sampler", uname, utype);
+        NT_GFX_PROGRAM_ASSERT(rec, "uniforms", kind != UNIFORM_UNSUPPORTED_SAMPLER, "unsupported sampler type", uname, utype);
+        NT_GFX_PROGRAM_ASSERT(rec, "uniforms", usize == 1 || (ulen >= 3 && strcmp(uname + ulen - 3, "[0]") == 0), "sampler array without [0]", uname, usize);
         for (GLint element = 0; element < usize; element++) {
             if (element > 0) {
                 size_t suffix = (size_t)ulen - 3U;
@@ -1445,8 +1447,7 @@ static bool nt_gfx_gl_reflect_uniforms(GLuint program, nt_gfx_gl_program_t *rec)
             }
             GLint loc = NT_GL_RET(glGetUniformLocation, program, uname);
             if (loc >= 0) {
-                NT_GFX_PROGRAM_ASSERT(rec, "uniform-reflection", rec->sampler_count < NT_GFX_MAX_TEXTURE_SLOTS, "program declares more samplers than NT_GFX_MAX_TEXTURE_SLOTS", uname,
-                                      rec->sampler_count);
+                NT_GFX_PROGRAM_ASSERT(rec, "uniforms", rec->sampler_count < NT_GFX_MAX_TEXTURE_SLOTS, "more samplers than NT_GFX_MAX_TEXTURE_SLOTS", uname, rec->sampler_count);
                 const uint8_t unit = rec->sampler_count;
                 rec->sampler_units[unit].name_hash = nt_hash32_str(uname).value;
                 rec->sampler_units[unit].location = loc;
@@ -1472,7 +1473,7 @@ static bool nt_gfx_gl_bind_blocks(GLuint program, nt_gfx_gl_program_t *rec) {
     GLint max_name_length = 0;
     NT_GL(glGetProgramiv, program, GL_ACTIVE_UNIFORM_BLOCK_MAX_NAME_LENGTH, &max_name_length);
     /* A truncated name would match a listed prefix or report the wrong cause. */
-    NT_GFX_PROGRAM_ASSERT(rec, "block-binding", max_name_length <= (GLint)sizeof(name), "uniform block name longer than NT_GFX_GL_MAX_UNIFORM_NAME", "max_name_length", max_name_length);
+    NT_GFX_PROGRAM_ASSERT(rec, "blocks", max_name_length <= (GLint)sizeof(name), "block name too long", "max_len", max_name_length);
     for (GLint bi = 0; bi < block_count; bi++) {
         GLsizei length = 0;
         NT_GL(glGetActiveUniformBlockName, program, (GLuint)bi, (GLsizei)sizeof(name), &length, name);
@@ -1482,7 +1483,7 @@ static bool nt_gfx_gl_bind_blocks(GLuint program, nt_gfx_gl_program_t *rec) {
             return false;
         }
         const uint32_t slot = nt_gfx_block_slot(s_init_desc.game_blocks, name);
-        NT_GFX_PROGRAM_ASSERT(rec, "block-binding", slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS, "uniform block name is neither reserved nor in nt_gfx_desc_t.game_blocks", name, size);
+        NT_GFX_PROGRAM_ASSERT(rec, "blocks", slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS, "block neither reserved nor in game_blocks", name, size);
         NT_GL(glUniformBlockBinding, program, (GLuint)bi, (GLuint)slot);
         rec->block_sizes[slot] = (uint32_t)size;
     }
@@ -1543,21 +1544,21 @@ nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll
         if (!lost) {
             nt_gfx_gl_log_link_failure(rec->program);
             /* After the driver lines, so a journal that keeps its tail keeps the identity. */
-            log_program_failure(rec, "link", "driver rejected program", "glGetError", NT_GL_RET0(glGetError));
+            log_program_failure(rec, "link", "link failed", "gl_error", NT_GL_RET0(glGetError));
         }
         NT_ASSERT(lost && "program link failed on a live context");
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    const char *phase = "block-binding";
+    const char *phase = "blocks";
     bool reflected = nt_gfx_gl_bind_blocks(rec->program, rec);
     if (reflected) {
-        phase = "uniform-reflection";
+        phase = "uniforms";
         reflected = nt_gfx_gl_reflect_uniforms(rec->program, rec);
     }
     if (!reflected) {
         const bool lost = nt_gfx_gl_ctx_query_lost();
         if (!lost) {
-            log_program_failure(rec, phase, "query returned no data", "glGetError", NT_GL_RET0(glGetError));
+            log_program_failure(rec, phase, "no data", "gl_error", NT_GL_RET0(glGetError));
         }
         NT_ASSERT(lost && "program uniform reflection failed");
         return NT_GFX_RESULT_CONTEXT_LOST;

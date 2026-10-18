@@ -1111,7 +1111,7 @@ static void test_non_vec4_block_member_asserts_at_link(void) {
     expect_link_assert("layout(std140) uniform Draw { float u_value; };\n"
                        "out vec4 frag_color;\n"
                        "void main() { frag_color = vec4(u_value); }\n",
-                       "is not vec4");
+                       "not vec4");
 }
 
 /* A row-major matrix would read a column-major C mat4 transposed. */
@@ -1129,7 +1129,7 @@ static void test_long_block_name_asserts_at_link(void) {
                        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx { vec4 u_value; };\n"
                        "out vec4 frag_color;\n"
                        "void main() { frag_color = u_value; }\n",
-                       "uniform block name longer");
+                       "block name too long");
 }
 
 // #region program-owned sampler units
@@ -1197,7 +1197,7 @@ static void test_signed_sampler_type_asserts_at_link(void) {
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
     nt_program_t prog = nt_gfx_make_program(vs, fs, NULL);
     NT_TEST_EXPECT_ASSERT(nt_test_gfx_link_wait(prog));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "signed integer texture format"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "signed integer sampler"));
 }
 
 static void test_vertex_stage_and_array_samplers_get_distinct_units(void) {
@@ -1581,9 +1581,9 @@ static void assert_reflection_query_failure_asserts(GLenum skipped_query) {
     nt_gfx_backend_destroy_shader(fs);
     nt_gfx_backend_destroy_shader(vs);
     if (NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR) {
-        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "phase=uniform-reflection"));
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, " uniforms: "));
         TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "\"<unnamed>\""));
-        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "query returned no data: glGetError=0x"));
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "no data: gl_error=0x"));
         TEST_ASSERT_NULL(strstr(s_program_failure_log, "reflection/existing"));
     }
 }
@@ -1758,7 +1758,7 @@ static void test_failed_link_logs_its_stage_and_asserts_at_begin_frame(void) {
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "program link failed"));
     TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR ? 1U : 0U, s_fragment_stage_logs);
     if (NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR) {
-        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "phase=link"));
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, " link: "));
         TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "\"<unnamed>\""));
     }
     nt_gfx_destroy_program(prog);
@@ -1796,9 +1796,9 @@ static void test_failed_link_with_empty_driver_logs_records_its_phase(void) {
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     if (NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR) {
         char identity[64];
-        (void)snprintf(identity, sizeof(identity), "program slot %u (GL %u) ", nt_pool_slot_index(program.id), s_failed_link_program);
+        (void)snprintf(identity, sizeof(identity), "program %u/GL %u ", nt_pool_slot_index(program.id), s_failed_link_program);
         TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, identity));
-        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "phase=link"));
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, " link: "));
         TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "\"failure/link\""));
     }
 }
@@ -1825,13 +1825,32 @@ static void expect_program_failure_record(const char *fragment_source, const cha
 }
 
 static void test_reflection_invariant_records_its_program_and_phase(void) {
-    expect_program_failure_record("uniform float u_value;\nout vec4 color;\nvoid main() { color = vec4(u_value); }\n", "reflection/standalone", "phase=uniform-reflection",
-                                  "standalone non-sampler uniform", "u_value=0x1406");
+    expect_program_failure_record("uniform float u_value;\nout vec4 color;\nvoid main() { color = vec4(u_value); }\n", "reflection/standalone", " uniforms: ", "standalone non-sampler uniform",
+                                  "u_value=0x1406");
+}
+
+/* A label longer than the log line cap loses its tail, never the cause. */
+static void test_long_label_keeps_the_failure_cause(void) {
+    static char label[500];
+    memset(label, 'x', sizeof(label) - 1);
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() { gl_Position = vec4(0.0); }\n"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "uniform float u_value;\nout vec4 color;\nvoid main() { color = vec4(u_value); }\n"});
+    nt_program_t program = nt_gfx_make_program(vs, fs, label);
+    s_program_failure_log[0] = '\0';
+    nt_log_add_sink(capture_program_failure, NULL);
+    NT_TEST_EXPECT_ASSERT(nt_test_gfx_link_wait(program));
+    nt_log_remove_sink(capture_program_failure, NULL);
+    nt_gfx_destroy_program(program);
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_shader(vs);
+    if (NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR) {
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, " uniforms: standalone non-sampler uniform: u_value=0x1406 \"xxx"));
+    }
 }
 
 static void test_block_binding_invariant_records_its_phase(void) {
-    expect_program_failure_record("layout(std140) uniform Lighting { vec4 u_light; };\nout vec4 color;\nvoid main() { color = u_light; }\n", "reflection/block", "phase=block-binding",
-                                  "neither reserved nor in", "Lighting=0x10");
+    expect_program_failure_record("layout(std140) uniform Lighting { vec4 u_light; };\nout vec4 color;\nvoid main() { color = u_light; }\n", "reflection/block", " blocks: ", "neither reserved nor in",
+                                  "Lighting=0x10");
 }
 
 static void test_pass_load_preserves_color_and_depth_independently(void) {
@@ -2086,6 +2105,7 @@ int main(void) {
     RUN_TEST(test_failed_link_with_empty_driver_logs_records_its_phase);
     RUN_TEST(test_reflection_invariant_records_its_program_and_phase);
     RUN_TEST(test_block_binding_invariant_records_its_phase);
+    RUN_TEST(test_long_label_keeps_the_failure_cause);
     int failures = UNITY_END();
     nt_window_shutdown();
     return failures;
