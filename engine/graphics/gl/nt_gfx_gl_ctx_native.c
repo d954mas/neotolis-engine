@@ -6,13 +6,27 @@
 #include "core/nt_assert.h"
 #include "log/nt_log.h"
 
+static void copy_device_string(char *out, size_t cap, GLenum name) {
+    const char *text = (const char *)NT_GL(glGetString, name);
+    size_t n = 0;
+    while (text != NULL && text[n] != '\0' && n < cap - 1U) {
+        out[n] = (char)(text[n] == '\r' || text[n] == '\n' ? ' ' : text[n]);
+        n++;
+    }
+    out[n] = '\0';
+}
+
 bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
     (void)desc;
     /* Window + GL context already created by nt_window_init().
        Load GL function pointers via glad. */
     if (!gladLoadGL(glfwGetProcAddress)) {
+        NT_LOG_ERROR("GL-load: failed requested=3.3-core");
         return false;
     }
+    copy_device_string(g_nt_gfx_device_info.vendor, sizeof(g_nt_gfx_device_info.vendor), GL_VENDOR);
+    copy_device_string(g_nt_gfx_device_info.renderer, sizeof(g_nt_gfx_device_info.renderer), GL_RENDERER);
+    copy_device_string(g_nt_gfx_device_info.api_version, sizeof(g_nt_gfx_device_info.api_version), GL_VERSION);
     return true;
 }
 

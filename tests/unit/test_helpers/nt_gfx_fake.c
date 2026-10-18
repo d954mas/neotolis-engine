@@ -318,7 +318,7 @@ static void fake_record_draw(uint32_t first_index, uint32_t num_indices, uint32_
     };
 }
 
-bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
+void nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc != NULL);
     nt_gfx_fake_draw_trace_reset(false);
     s_fake_bound_pipeline = 0;
@@ -335,7 +335,6 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     s_fake_buffer_live = (bool *)calloc((size_t)s_fake_max_buffers + 1U, sizeof(bool));
     s_fake_texture_live = (bool *)calloc((size_t)s_fake_max_textures + 1U, sizeof(bool));
     NT_ASSERT(s_fake_program_table && s_fake_buffer_live && s_fake_texture_live && "gfx fake backend init: out of memory");
-    return true;
 }
 
 void nt_gfx_backend_shutdown(void) {
@@ -544,7 +543,8 @@ void nt_gfx_backend_destroy_texture(uint32_t backend_handle) {
     s_fake_texture_destroy_count++;
 }
 
-bool nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], uint32_t slot) {
+bool nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], uint32_t slot, const char *label, uint16_t width, uint16_t height, nt_texture_format_t color,
+                                         nt_texture_format_t depth) {
     NT_ASSERT(textures[NT_GFX_RT_COLOR] != 0 || textures[NT_GFX_RT_DEPTH] != 0);
     (void)slot;
     s_fake_render_target_create_count++;

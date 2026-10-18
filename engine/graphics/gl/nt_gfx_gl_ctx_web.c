@@ -1,18 +1,22 @@
 #include "graphics/gl/nt_gfx_gl_calls.h"
 #include "graphics/gl/nt_gfx_gl_ctx.h"
+#include "log/nt_log.h"
 
 #include <emscripten.h>
 #include <emscripten/html5.h>
 #include <emscripten/html5_webgl.h>
+#include <string.h>
 
 /* The cap-probe EM_JS bodies below reach the Emscripten GL registry (GL.currentContext.GLctx). GL lives
  * in library_webgl.js, force-linked by this TU's own emscripten_webgl_* C calls -- so it survives today.
  * EM_JS_DEPS makes that implicit dependency explicit + Closure-kept, so moving context creation out of
  * this file can't silently strip GL in release. */
-EM_JS_DEPS(nt_gfx_gl_ctx_web, "$GL,$UTF8ToString")
+EM_JS_DEPS(nt_gfx_gl_ctx_web, "$GL,$UTF8ToString,$stringToUTF8")
 
 static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE s_gl_context;
 static bool s_loss_pending; /* set by a lost event until begin_frame takes it */
+
+static void capture_device_info(void);
 
 static bool on_context_lost(int event_type, const void *reserved, void *user_data) {
     (void)event_type;
@@ -37,12 +41,15 @@ bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
     attrs.enableExtensionsByDefault = false;
 
     s_gl_context = emscripten_webgl_create_context("#canvas", &attrs);
-    if (s_gl_context <= 0) {
+    if (s_gl_context == 0) {
+        NT_LOG_ERROR("context-create: failed WebGL=2.0 alpha=%d depth=%d stencil=%d antialias=%d premultiplied_alpha=%d preserve=0", (int)desc->alpha, (int)desc->depth, (int)desc->stencil,
+                     (int)desc->antialias, (int)desc->premultiplied_alpha);
         return false;
     }
     emscripten_webgl_make_context_current(s_gl_context);
     s_loss_pending = false;
     emscripten_set_webglcontextlost_callback("#canvas", NULL, false, on_context_lost);
+    capture_device_info();
     return true;
 }
 
@@ -77,6 +84,31 @@ EM_JS(int, nt_gfx_js_get_extension, (const char *name), {
 static bool get_extension(const char *name) {
     NT_GL_ISSUED(getExtension, name);
     return nt_gfx_js_get_extension(name) != 0;
+}
+
+/* clang-format off */
+EM_JS(void, nt_gfx_js_device_string, (unsigned int name, char *out, unsigned int cap), {
+    var text = GL.currentContext.GLctx.getParameter(name);
+    stringToUTF8(text === null ? "" : text.replace(/[\\r\\n]/g, " "), out, cap);
+})
+/* clang-format on */
+
+static void capture_device_info(void) {
+    const bool unmasked = get_extension("WEBGL_debug_renderer_info");
+    const unsigned int vendor = unmasked ? 0x9245U : GL_VENDOR;
+    const unsigned int renderer = unmasked ? 0x9246U : GL_RENDERER;
+    nt_gfx_device_info_t info = {0};
+    NT_GL_ISSUED(glGetString, vendor);
+    nt_gfx_js_device_string(vendor, info.vendor, sizeof(info.vendor));
+    NT_GL_ISSUED(glGetString, renderer);
+    nt_gfx_js_device_string(renderer, info.renderer, sizeof(info.renderer));
+    NT_GL_ISSUED(glGetString, GL_VERSION);
+    nt_gfx_js_device_string(GL_VERSION, info.api_version, sizeof(info.api_version));
+    if (!nt_gfx_gl_ctx_query_lost()) {
+        memcpy(g_nt_gfx_device_info.vendor, info.vendor, sizeof(info.vendor));
+        memcpy(g_nt_gfx_device_info.renderer, info.renderer, sizeof(info.renderer));
+        memcpy(g_nt_gfx_device_info.api_version, info.api_version, sizeof(info.api_version));
+    }
 }
 
 nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {

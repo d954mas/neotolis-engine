@@ -269,6 +269,11 @@ unchanged tree recompiles nothing; a changed identity relinks its consumers.
 commit identity alone does not rebuild packs. The returned version and crash
 record format are defined in [Logging, Errors, Debugging](spec/debug/logging-errors-debugging.md#engine-version).
 
+Crash capture uses `nt_gfx_interface`. A graphics executable selects `nt_gfx`;
+a headless executable selects `nt_gfx_stub` without initializing graphics.
+For left-to-right static archive linkers put the provider after the consumer:
+`target_link_libraries(game PRIVATE nt_crash nt_gfx_stub nt_log)`.
+
 To change the crash log capacity, set the definition on the engine target after
 adding the engine to the game project:
 
@@ -361,6 +366,9 @@ log floor with FULL asserts, TRAP positive paths, timing producers ON/OFF,
 metrics independence, UI key checks ON with inspector OFF and OFF with inspector ON,
 and inspector ON with UI timing OFF. Gfx observation exercises capture ON and OFF,
 including fake/frontend and inert stub paths.
+The NONE rows with FULL and TRAP asserts also run the crash record cases: GPU
+fields and copied game context survive with an empty log section.
+`test_crash_stub_link` proves the headless `nt_crash` + `nt_gfx_stub` link.
 `tests/browser/observation.spec.ts` independently intercepts WebGL calls and
 upload payloads, checks uploads before render begin and compares output pixels
 with recording off/on/full.

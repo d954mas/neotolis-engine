@@ -519,9 +519,10 @@ typedef enum {
 } nt_gfx_operation_t;
 
 /* Every function the GL backend issues, queries included; the single source of
- * nt_gfx_gl_call_t, NT_GFX_GL_COUNT and the call names. getExtension is the WebGL
- * JS method the web context calls directly. */
+ * nt_gfx_gl_call_t, NT_GFX_GL_COUNT and the call names. The web context issues
+ * glGetString as getParameter and getExtension directly from JS. */
 #define NT_GFX_GL_CALLS(X)                                                                                                                                                                             \
+    X(glGetString)                                                                                                                                                                                     \
     X(getExtension)                                                                                                                                                                                    \
     X(glActiveTexture)                                                                                                                                                                                 \
     X(glAttachShader)                                                                                                                                                                                  \
@@ -770,6 +771,13 @@ typedef struct {
     uint32_t uniform_buffer_offset_alignment; /* GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT: uniform blocks start at a multiple; size frame_capacity by it */
 } nt_gfx_gpu_caps_t;
 
+typedef struct {
+    char vendor[128];
+    char renderer[256];
+    char api_version[128];
+    char caps[128]; /* nt_gfx_gpu_caps_t as text: the struct is reset with g_nt_gfx */
+} nt_gfx_device_info_t;
+
 /* ---- Global state ---- */
 
 typedef struct {
@@ -811,6 +819,11 @@ void nt_gfx_shutdown(void);
 
 /* GPU format capabilities (valid after nt_gfx_init) */
 const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void);
+
+/* Gfx-owned, never NULL; stable address for the process, including before init and after shutdown.
+ * Last observed GPU identity, refreshed on context creation; not a readiness query.
+ * Empty before observation and in the stub. Caller must not modify or free it. */
+const nt_gfx_device_info_t *nt_gfx_device_info(void);
 
 /* ---- Frame / Pass ---- */
 

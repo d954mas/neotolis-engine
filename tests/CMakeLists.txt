@@ -120,24 +120,29 @@ if(NOT EMSCRIPTEN)
     # Each case crashes one run (WILL_FAIL; cmake -E env reports a signal death as a failure CTest
     # can invert), then a second run reads the stored record. Under ASan no handlers are installed;
     # both steps exit 77 and are skipped.
-    add_executable(test_crash_record unit/test_crash_record.c)
-    target_link_libraries(test_crash_record PRIVATE nt_crash nt_log)
-    target_compile_definitions(test_crash_record PRIVATE _CRT_SECURE_NO_WARNINGS)
-    nt_set_static_crt(test_crash_record)
-    nt_set_warning_flags(test_crash_record)
-    nt_set_sanitizer_flags(test_crash_record)
-    set_target_properties(test_crash_record PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
+    # The test defines its own nt_gfx_device_info; test_crash_stub_link covers the headless link.
+    foreach(_target test_crash_record test_crash_stub_link)
+        add_executable(${_target} unit/${_target}.c)
+        target_link_libraries(${_target} PRIVATE nt_crash nt_gfx_interface nt_log)
+        target_compile_definitions(${_target} PRIVATE _CRT_SECURE_NO_WARNINGS)
+        nt_set_static_crt(${_target})
+        nt_set_warning_flags(${_target})
+        nt_set_sanitizer_flags(${_target})
+        set_target_properties(${_target} PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+        )
+    endforeach()
+    target_link_libraries(test_crash_stub_link PRIVATE nt_gfx_stub)
+    add_test(NAME test_crash_stub_link COMMAND test_crash_stub_link "${CMAKE_CURRENT_BINARY_DIR}/test_crash_stub_link.txt")
     foreach(_mode trap abort segv)
-        set(_record "${CMAKE_CURRENT_BINARY_DIR}/crash_record_${_mode}.txt")
+        set(_record "${CMAKE_CURRENT_BINARY_DIR}/test_crash_record_${_mode}.txt")
         add_test(NAME test_crash_record_${_mode}
             COMMAND ${CMAKE_COMMAND} -E env $<TARGET_FILE:test_crash_record> ${_mode} ${_record})
         set_tests_properties(test_crash_record_${_mode} PROPERTIES
-            WILL_FAIL TRUE SKIP_RETURN_CODE 77 TIMEOUT 30 FIXTURES_SETUP crash_${_mode})
+            WILL_FAIL TRUE SKIP_RETURN_CODE 77 TIMEOUT 30 FIXTURES_SETUP test_crash_record_${_mode})
         add_test(NAME test_crash_record_${_mode}_check COMMAND test_crash_record check ${_mode} ${_record})
         set_tests_properties(test_crash_record_${_mode}_check PROPERTIES
-            SKIP_RETURN_CODE 77 TIMEOUT 30 FIXTURES_REQUIRED crash_${_mode})
+            SKIP_RETURN_CODE 77 TIMEOUT 30 FIXTURES_REQUIRED test_crash_record_${_mode})
     endforeach()
 
     # --- Sanitizer proof test ---
@@ -164,8 +169,9 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_log_floor PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_log_floor)
 
-    add_executable(test_nt_gfx_gpu_timing_native unit/test_nt_gfx_gpu_timing_native.c)
-    target_link_libraries(test_nt_gfx_gpu_timing_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window_stub nt_log_stub unity glad nt_meshwire_stub)
+    add_executable(test_nt_gfx_gpu_timing_native unit/test_nt_gfx_gpu_timing_native.c unit/test_helpers/nt_assert_trap.c)
+    target_include_directories(test_nt_gfx_gpu_timing_native PRIVATE unit)
+    target_link_libraries(test_nt_gfx_gpu_timing_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window_stub nt_log unity glad nt_meshwire_stub)
     target_compile_definitions(test_nt_gfx_gpu_timing_native PRIVATE NT_LOG_DOMAIN="gfx_timer_test")
     nt_setup_test_target(test_nt_gfx_gpu_timing_native)
 

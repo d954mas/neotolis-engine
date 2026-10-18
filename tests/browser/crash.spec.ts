@@ -58,7 +58,7 @@ for (const mode of ['trap', 'abort', 'reject', 'jserror'] as const) {
     await openRead(page);
     const record = await page.evaluate(() => (window as CrashWindow).__nt!.crash_load());
     expect(record).toBe(stored);
-    expect(record).toMatch(/^game: browser_smoke-test\nengine: ([0-9a-f]{8}(-dirty)?|unknown) \S+\ntime: \d+\nreason: /);
+    expect(record).toMatch(/^game: browser_smoke-test\nengine: ([0-9a-f]{8}(-dirty)?|unknown) \S+\ngpu_vendor: [^\n]+\ngpu_renderer: [^\n]+\ngpu_api: [^\n]+\ngpu_caps: astc=[01] [^\n]+ ubo_align=\d+\ncontext: level=forest phase=loading checkpoint=7\ntime: \d+\nreason: /);
     expect(record).toMatch(REASONS[mode]);
     expect(record).toMatch(/\nstack:\n[^]*wasm/);
 
