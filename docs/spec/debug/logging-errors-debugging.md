@@ -129,6 +129,44 @@ Asserts are contracts, not error handling. A failed assert means the program is 
 
 `nt_version_engine()` (opt-in module `engine/version`) returns `"<semver>+<first 8 hex of the engine commit>"`, with `-dirty` when tracked files differ from `HEAD`. Reports, analytics and `engine.info` use it to name the exact engine source. A build step runs git against `NT_ENGINE_ROOT` on every build and rewrites the generated header only when the value changes; an unchanged tree recompiles nothing. The value is `unknown` when git is unavailable or the engine directory is not the top of its own repository (a copy without `.git` would otherwise report the host repository's commit). `nt_core`, the builder and pack builds do not link it, so a new commit relinks only its consumers.
 
+## Crash record
+
+`engine/crash` (opt-in; nothing depends on it, so a game that does not link it pays nothing) keeps one text record of the last fatal crash. The engine records; the game decides what to send, where, and when. The engine never uploads.
+
+**API.**
+
+- `nt_crash_init(name, game_version)` — once per process. `name` is the `localStorage` key on web (several games can share one origin) and the record file path on native (UTF-8; a relative path resolves against the cwd at crash time). `game_version` must name the game build, so the record maps to that build's symbols. Both are copied, non-empty and shorter than 256 bytes. Init takes one of `NT_LOG_MAX_SINKS` log sinks and, on native, installs its own unhandled-exception filter and signal handlers, replacing earlier ones without chaining. It does not touch the stored record.
+- `nt_crash_load_previous(out, cap)` copies the stored record into caller storage and keeps it; it returns the bytes copied (0: no record, or the storage is unavailable or unreadable). The stored bytes are untrusted and returned as they are, cut at `cap - 1`.
+- `nt_crash_clear_previous()` removes the record. The game clears only after a confirmed delivery; an unsent record waits for the next launch. A new crash overwrites the stored record.
+- Web also dispatches window event `nt-crash` with `detail.text` once the record is captured and storage was attempted. The page is still alive, so a game can send immediately (best effort; the record stays stored, so a server dedups by text — it carries `time`).
+
+**Record.**
+
+```
+game: <game_version>
+engine: <nt_version_engine()> <preset>
+time: <unix ms>
+reason: RuntimeError: unreachable | signal SIGSEGV | exception 0xc000001d | abort
+pc: exe+0x1a2b3c          (native; absolute 0x... outside the executable)
+stack:                    (web: the JS error stack, at most 4 KB)
+...
+log:
+WARN [gfx] ...
+ERROR [resource] ...
+```
+
+`log:` is the tail of WARN/ERROR lines from a fixed BSS byte ring of `NT_CRASH_LOG_BYTES` (default 8192; a game sets another size with `target_compile_definitions(nt_crash PRIVATE NT_CRASH_LOG_BYTES=...)`); a wrapped ring drops its partial first line. A record is at most about `NT_CRASH_LOG_BYTES` + 6 KB. Lines filtered by `NT_LOG_MIN_LEVEL` or `nt_log_set_level` never reach the ring; with `NT_LOG_MIN_LEVEL=3` the section is empty. FULL assert text goes to stderr/console, not into the record — a crash-prone check that needs its cause in field reports logs one ERROR before the assert (see [Assert policy](#assert-policy)). The dev-only `nt_log_ring` is separate: it is compiled out of release builds.
+
+**Capture.**
+
+- Web: window `error` and `unhandledrejection` listeners take the first engine crash per session: a `WebAssembly.RuntimeError` (a trap; `abort()` throws one too) or an error whose stack has wasm frames (a wasm stack overflow arrives as `RangeError`). Other page errors are ignored. The listener never calls back into the trapped instance: it reads the ring from linear memory and writes `localStorage`. The shell's `Module.onAbort` overlay also fires on `abort()`; both are independent.
+- Native: the handler writes the file and returns, so the OS default follows (WER on Windows; the original signal and core dump on Linux — the handler re-raises its signal). It uses only async-signal-safe calls (Win32 calls on Windows, where the filter and the UCRT SIGABRT handler run synchronously on the crashing thread). Windows: unhandled-exception filter (with a 32 KB stack guarantee for stack overflow) and SIGABRT; UCRT `abort()` then reports through WER without a second record. Linux: ILL, SEGV, BUS, FPE, ABRT, TRAP on a 64 KB alternate stack (skipped when the kernel needs more), fault PC from `ucontext` on x86_64 and aarch64. Under ASan no handlers are installed; its report stays.
+- No stack walk on native: the PC names the faulting instruction, and for `NT_ASSERT` in TRAP that is the assert. Full stacks come from WER dumps, cores or a debugger.
+
+**Symbolization.** Keep each build's symbols under its `game_version`. Windows: `llvm-symbolizer --obj=game.exe --relative-address 0x<offset>` with the build's `.pdb` (native Release presets build without `-g`; a game that wants field symbols adds it). Linux: `llvm-symbolizer --obj=game 0x<offset>` (or `addr2line -e game`). Web: the build's symbol map for `wasm-function[N]`.
+
+**Not captured:** a hard kill of the process or tab (OOM, "Aw, Snap", task manager); Windows `__fastfail` (/GS); crashes before `nt_crash_init`; Windows under a debugger; ASan/UBSan reports; errors swallowed by someone's `.catch`; cross-origin "Script error." without `crossorigin`; a JS error whose wasm frames fell past `Error.stackTraceLimit`; stack overflow off the main thread or without the alternate stack. Another wasm module on the page can trigger a false record. An external kill in the middle of a log call may garble one line. Firefox and Safari are unverified (the browser tests run Chromium).
+
 ## Debug overlay
 
 `nt_debug_overlay` is a **pure consumer** of `nt_metrics` ([Observability](#observability-devapi-log--perf--entity--resource)): it formats an on-screen HUD (`nt_debug_overlay_format_lines` / `nt_debug_overlay_draw`) from `nt_metrics_fps()`, the last frame's cpu/gpu/draw_calls via `nt_metrics_last()`, and the user counters via `nt_metrics_user_count()` / `nt_metrics_user_get()`. It owns **no** measurement and **no** counter storage — the host pushes per-frame data into `nt_metrics` and the overlay reads it back. Because of that dependency, a CMake `FATAL_ERROR` guard requires `NT_UI_DEBUG_TOOLS` to be built with `NT_METRICS_ENABLED` (with metrics OFF the overlay would format from no-op stubs — an empty HUD); both options default OFF; presets enable each explicitly.
