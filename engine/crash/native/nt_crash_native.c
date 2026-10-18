@@ -1,7 +1,3 @@
-#if !defined(_WIN32)
-#define _GNU_SOURCE /* REG_RIP, dl_iterate_phdr */
-#endif
-
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "crash/nt_crash_internal.h"
