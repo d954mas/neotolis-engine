@@ -279,7 +279,7 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx) {
     /* Check for identifier collisions before writing — O(N log N) */
     check_codegen_collisions(ce, total_ce);
 
-    FILE *f = fopen(header_path, "w");
+    FILE *f = fopen(header_path, "wb");
     if (!f) {
         NT_LOG_WARN("Could not write codegen header: %s", header_path);
         free(ce);
@@ -462,7 +462,7 @@ void nt_builder_merge_headers(const char *const *header_paths, uint32_t count, c
     char func_prefix[128];
     derive_func_prefix(output_path, func_prefix, sizeof(func_prefix));
 
-    FILE *f = fopen(output_path, "w");
+    FILE *f = fopen(output_path, "wb");
     if (!f) {
         NT_LOG_ERROR("Could not write merged header: %s", output_path);
         free(ce);
