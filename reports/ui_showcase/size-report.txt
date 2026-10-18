@@ -1,5 +1,5 @@
 # Size Report: ui_showcase (wasm-analysis-paired)
-# Commit: 3f90616
+# Commit: 8eb3719
 
 ## WASM Section Sizes
 
@@ -7,29 +7,29 @@ Section                Size
 ---------------- ----------
 Type                 532 B
 Import               612 B
-Function             350 B
+Function             344 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                95 B
 Elem                 144 B
-Code              375715 B
-Data               41146 B
-Custom             11365 B
+Code              375020 B
+Data               41518 B
+Custom             11193 B
 ---------------- ----------
-TOTAL             429980 B
+TOTAL             429479 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-76477 B   frame
+76530 B   frame
 17002 B   dispatch_command
-13283 B   create_gpu
-10765 B   main
+13284 B   create_gpu
  9462 B   input_field
+ 9136 B   main
  8830 B   Clay__ConfigureOpenElementPtr
- 8213 B   nt_ui_rich_text_markup
+ 8251 B   nt_ui_rich_text_markup
  6059 B   Clay__SizeContainersAlongAxis
  5872 B   nt_ui_scroll_begin
  5643 B   Clay__InitializeEphemeralMemory
@@ -45,8 +45,8 @@ TOTAL             429980 B
  3133 B   nt_ui_label
  3038 B   render_scroll
  3012 B   fmt_fp
+ 2892 B   nt_gfx_make_texture
  2877 B   nt_ui_popup_begin_internal
- 2821 B   nt_gfx_make_texture
  2687 B   nt_material_apply
  2643 B   nt_http_request
  2593 B   scrollbar_emit_axis
@@ -54,8 +54,8 @@ TOTAL             429980 B
  2429 B   printf_core
  2410 B   nt_sprite_renderer_set_material
 
-Total functions: 348
-Total code size: 375106 B
+Total functions: 342
+Total code size: 374419 B
 
 ## Built Engine Archives
 
@@ -73,13 +73,13 @@ libnt_clipboard.a           6906 B
 libnt_clipboard_stub.a       840 B
 libnt_comp_storage.a        2008 B
 libnt_core.a                1766 B
-libnt_crash.a              14956 B
+libnt_crash.a              16938 B
 libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               94006 B
-libnt_gfx.a               106314 B
-libnt_gfx_stub.a            5954 B
+libnt_gfx.a               110672 B
+libnt_gfx_stub.a            6702 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
 libnt_http_stub.a          11400 B
@@ -124,9 +124,9 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2651468 B
+TOTAL (archives)         2658556 B
 
 ## Data Segments Summary
 
 Segments: 166
-Total data size: 39976 B
+Total data size: 40348 B

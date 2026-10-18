@@ -1,32 +1,32 @@
 # Size Report: spinning_cube (wasm-analysis-paired)
-# Commit: 3f90616
+# Commit: 8eb3719
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
 Type                 165 B
-Import               500 B
-Function             101 B
+Import               472 B
+Function              98 B
 Table                  5 B
 Memory                 7 B
 Global                 8 B
 Export                65 B
-Elem                  34 B
-Code               75307 B
-Data               13380 B
-Custom              4164 B
+Elem                  33 B
+Code               73902 B
+Data               13728 B
+Custom              4026 B
 ---------------- ----------
-TOTAL              93736 B
+TOTAL              92509 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-19851 B   frame
-18825 B   main
+19901 B   frame
+16718 B   main
  3002 B   fmt_fp
- 2604 B   printf_core
+ 2602 B   printf_core
  2196 B   nt_shape_renderer_flush
  1845 B   __rem_pio2f
  1287 B   nt_gfx_make_pipeline
@@ -34,28 +34,28 @@ TOTAL              93736 B
  1046 B   draw_instances
  1025 B   wire_template_path
  1024 B   nt_input_web_on_blur
+  979 B   nt_gfx_destroy_buffer
+  965 B   nt_gfx_make_vertex_input
   941 B   nt_gfx_make_instance_layout
-  889 B   nt_gfx_make_vertex_input
   809 B   nt_input_web_on_pointer_move
   805 B   nt_gfx_gl_cache_ground_state
   769 B   nt_input_web_on_pointer_down
   690 B   pop_arg_long_double
-  604 B   nt_gfx_make_buffer
+  679 B   nt_gfx_make_buffer
   533 B   claim_more_memory
   519 B   __memcpy
-  518 B   nt_gfx_backend_destroy_buffer
+  504 B   nt_gfx_gl_ctx_create
   492 B   emmalloc_memalign
   491 B   nt_gfx_bind_uniform_block
   483 B   nt_gfx_backend_bind_vertex_input
-  436 B   vsnprintf
+  449 B   nt_gfx_make_program
+  434 B   vsnprintf
   424 B   nt_app_web_frame
   424 B   nt_gfx_update_buffer
-  405 B   attempt_allocate
-  403 B   nt_log_write
-  393 B   apply_rotation
+  407 B   nt_log_write
 
-Total functions: 100
-Total code size: 75145 B
+Total functions: 97
+Total code size: 73743 B
 
 ## Built Engine Archives
 
@@ -73,13 +73,13 @@ libnt_clipboard.a           6906 B
 libnt_clipboard_stub.a       840 B
 libnt_comp_storage.a        2008 B
 libnt_core.a                1766 B
-libnt_crash.a              14956 B
+libnt_crash.a              16938 B
 libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               94006 B
-libnt_gfx.a               106314 B
-libnt_gfx_stub.a            5954 B
+libnt_gfx.a               110672 B
+libnt_gfx_stub.a            6702 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
 libnt_http_stub.a          11400 B
@@ -124,9 +124,9 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2651468 B
+TOTAL (archives)         2658556 B
 
 ## Data Segments Summary
 
-Segments: 45
-Total data size: 13061 B
+Segments: 46
+Total data size: 13402 B

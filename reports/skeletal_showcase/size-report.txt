@@ -1,5 +1,5 @@
 # Size Report: skeletal_showcase (wasm-analysis-paired)
-# Commit: 3f90616
+# Commit: 8eb3719
 
 ## WASM Section Sizes
 
@@ -7,24 +7,24 @@ Section                Size
 ---------------- ----------
 Type                 434 B
 Import               591 B
-Function             328 B
+Function             322 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                89 B
 Elem                 157 B
-Code              335787 B
-Data               26134 B
-Custom             10001 B
+Code              335032 B
+Data               26505 B
+Custom              9817 B
 ---------------- ----------
-TOTAL             373542 B
+TOTAL             372968 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-61511 B   frame
-20864 B   main
+61564 B   frame
+19235 B   main
 19219 B   dispatch_command
 13268 B   create_gpu
  9023 B   mixing_declare_controls
@@ -44,7 +44,7 @@ TOTAL             373542 B
  3011 B   fmt_fp
  2951 B   nt_gfx_activate_mesh
  2904 B   nt_material_apply
- 2820 B   nt_gfx_make_texture
+ 2891 B   nt_gfx_make_texture
  2667 B   nt_http_request_ex
  2581 B   scrollbar_emit_axis
  2448 B   nt_ui_checkbox
@@ -54,8 +54,8 @@ TOTAL             373542 B
  2368 B   atlas_on_resolve
  2277 B   skinned_draw
 
-Total functions: 326
-Total code size: 335244 B
+Total functions: 320
+Total code size: 334497 B
 
 ## Built Engine Archives
 
@@ -73,13 +73,13 @@ libnt_clipboard.a           6906 B
 libnt_clipboard_stub.a       840 B
 libnt_comp_storage.a        2008 B
 libnt_core.a                1766 B
-libnt_crash.a              14956 B
+libnt_crash.a              16938 B
 libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               94006 B
-libnt_gfx.a               106314 B
-libnt_gfx_stub.a            5954 B
+libnt_gfx.a               110672 B
+libnt_gfx_stub.a            6702 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
 libnt_http_stub.a          11400 B
@@ -124,9 +124,9 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2651468 B
+TOTAL (archives)         2658556 B
 
 ## Data Segments Summary
 
-Segments: 89
-Total data size: 25505 B
+Segments: 88
+Total data size: 25884 B
