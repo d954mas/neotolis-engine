@@ -1,5 +1,5 @@
 # Size Report: slice9_demo (wasm-analysis-paired)
-# Commit: 0595a71
+# Commit: 3f90616
 
 ## WASM Section Sizes
 
@@ -72,7 +72,8 @@ libnt_basisu_transcoder_stub.a     778 B
 libnt_clipboard.a           6906 B
 libnt_clipboard_stub.a       840 B
 libnt_comp_storage.a        2008 B
-libnt_core.a                2180 B
+libnt_core.a                1766 B
+libnt_crash.a              14956 B
 libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
@@ -119,10 +120,11 @@ libnt_ui_rich.a            39000 B
 libnt_ui_rich_fx.a          3050 B
 libnt_ui_stub.a             1324 B
 libnt_utf8.a                1098 B
+libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2636288 B
+TOTAL (archives)         2651468 B
 
 ## Data Segments Summary
 
