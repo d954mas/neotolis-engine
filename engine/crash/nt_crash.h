@@ -16,6 +16,11 @@
    SIGABRT and fault-signal handlers, replacing earlier ones without chaining. */
 void nt_crash_init(const char *name, const char *game_version);
 
+/* Copies optional game text, replacing the previous context; empty clears it. Requires init and
+   non-NULL text. Keeps at most 1023 bytes, without splitting valid UTF-8; CR/LF become spaces.
+   The source may be freed immediately. Main-thread updates; capture during an update is best effort. */
+void nt_crash_set_context(const char *text);
+
 /* Copies the previous crash record into out as a NUL-terminated string without removing it and
    returns its length; 0 when there is no record or the storage is unavailable or unreadable
    (out[0] is then '\0'). The stored text is returned as it is, cut at cap - 1 bytes (and at an

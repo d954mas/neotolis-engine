@@ -8,4 +8,4 @@ else()
         target_compile_definitions(nt_crash PRIVATE _GNU_SOURCE) # REG_RIP, dl_iterate_phdr
     endif()
 endif()
-target_link_libraries(nt_crash PRIVATE nt_core nt_log_interface nt_version)
+target_link_libraries(nt_crash PRIVATE nt_core nt_log_interface nt_version nt_gfx_interface)

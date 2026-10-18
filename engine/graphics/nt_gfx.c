@@ -171,6 +171,10 @@ typedef struct {
 /* ---- Global state ---- */
 
 nt_gfx_t g_nt_gfx;
+/* Diagnostic history survives the runtime state's init/shutdown resets. */
+nt_gfx_device_info_t g_nt_gfx_device_info;
+
+const nt_gfx_device_info_t *nt_gfx_device_info(void) { return &g_nt_gfx_device_info; }
 
 /* ---- File-scope internal state ---- */
 

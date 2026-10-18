@@ -269,6 +269,11 @@ unchanged tree recompiles nothing; a changed identity relinks its consumers.
 commit identity alone does not rebuild packs. The returned version and crash
 record format are defined in [Logging, Errors, Debugging](spec/debug/logging-errors-debugging.md#engine-version).
 
+Crash capture uses `nt_gfx_interface`. A graphics executable selects `nt_gfx`;
+a headless executable selects `nt_gfx_stub` without initializing graphics.
+For left-to-right static archive linkers put the provider after the consumer:
+`target_link_libraries(game PRIVATE nt_crash nt_gfx_stub nt_log)`.
+
 To change the crash log capacity, set the definition on the engine target after
 adding the engine to the game project:
 

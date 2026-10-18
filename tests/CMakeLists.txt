@@ -120,24 +120,32 @@ if(NOT EMSCRIPTEN)
     # Each case crashes one run (WILL_FAIL; cmake -E env reports a signal death as a failure CTest
     # can invert), then a second run reads the stored record. Under ASan no handlers are installed;
     # both steps exit 77 and are skipped.
-    add_executable(test_crash_record unit/test_crash_record.c)
-    target_link_libraries(test_crash_record PRIVATE nt_crash nt_log)
-    target_compile_definitions(test_crash_record PRIVATE _CRT_SECURE_NO_WARNINGS)
-    nt_set_static_crt(test_crash_record)
-    nt_set_warning_flags(test_crash_record)
-    nt_set_sanitizer_flags(test_crash_record)
-    set_target_properties(test_crash_record PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    foreach(_mode trap abort segv)
-        set(_record "${CMAKE_CURRENT_BINARY_DIR}/crash_record_${_mode}.txt")
-        add_test(NAME test_crash_record_${_mode}
-            COMMAND ${CMAKE_COMMAND} -E env $<TARGET_FILE:test_crash_record> ${_mode} ${_record})
-        set_tests_properties(test_crash_record_${_mode} PROPERTIES
-            WILL_FAIL TRUE SKIP_RETURN_CODE 77 TIMEOUT 30 FIXTURES_SETUP crash_${_mode})
-        add_test(NAME test_crash_record_${_mode}_check COMMAND test_crash_record check ${_mode} ${_record})
-        set_tests_properties(test_crash_record_${_mode}_check PROPERTIES
-            SKIP_RETURN_CODE 77 TIMEOUT 30 FIXTURES_REQUIRED crash_${_mode})
+    foreach(_target test_crash_record test_crash_record_gpu_info)
+        add_executable(${_target} unit/test_crash_record.c)
+        target_link_libraries(${_target} PRIVATE nt_crash nt_gfx_interface nt_log)
+        if(_target STREQUAL "test_crash_record")
+            target_link_libraries(${_target} PRIVATE nt_gfx_stub)
+            target_compile_definitions(${_target} PRIVATE NT_TEST_CRASH_GPU_INFO=0)
+        else()
+            target_compile_definitions(${_target} PRIVATE NT_TEST_CRASH_GPU_INFO=1)
+        endif()
+        target_compile_definitions(${_target} PRIVATE _CRT_SECURE_NO_WARNINGS)
+        nt_set_static_crt(${_target})
+        nt_set_warning_flags(${_target})
+        nt_set_sanitizer_flags(${_target})
+        set_target_properties(${_target} PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+        )
+        foreach(_mode trap abort segv)
+            set(_record "${CMAKE_CURRENT_BINARY_DIR}/${_target}_${_mode}.txt")
+            add_test(NAME ${_target}_${_mode}
+                COMMAND ${CMAKE_COMMAND} -E env $<TARGET_FILE:${_target}> ${_mode} ${_record})
+            set_tests_properties(${_target}_${_mode} PROPERTIES
+                WILL_FAIL TRUE SKIP_RETURN_CODE 77 TIMEOUT 30 FIXTURES_SETUP ${_target}_${_mode})
+            add_test(NAME ${_target}_${_mode}_check COMMAND ${_target} check ${_mode} ${_record})
+            set_tests_properties(${_target}_${_mode}_check PROPERTIES
+                SKIP_RETURN_CODE 77 TIMEOUT 30 FIXTURES_REQUIRED ${_target}_${_mode})
+        endforeach()
     endforeach()
 
     # --- Sanitizer proof test ---

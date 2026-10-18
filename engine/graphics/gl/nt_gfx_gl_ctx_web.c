@@ -9,10 +9,12 @@
  * in library_webgl.js, force-linked by this TU's own emscripten_webgl_* C calls -- so it survives today.
  * EM_JS_DEPS makes that implicit dependency explicit + Closure-kept, so moving context creation out of
  * this file can't silently strip GL in release. */
-EM_JS_DEPS(nt_gfx_gl_ctx_web, "$GL,$UTF8ToString")
+EM_JS_DEPS(nt_gfx_gl_ctx_web, "$GL,$UTF8ToString,$stringToUTF8")
 
 static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE s_gl_context;
 static bool s_loss_pending; /* set by a lost event until begin_frame takes it */
+
+static void capture_device_info(void);
 
 static bool on_context_lost(int event_type, const void *reserved, void *user_data) {
     (void)event_type;
@@ -43,6 +45,7 @@ bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
     emscripten_webgl_make_context_current(s_gl_context);
     s_loss_pending = false;
     emscripten_set_webglcontextlost_callback("#canvas", NULL, false, on_context_lost);
+    capture_device_info();
     return true;
 }
 
@@ -77,6 +80,29 @@ EM_JS(int, nt_gfx_js_get_extension, (const char *name), {
 static bool get_extension(const char *name) {
     NT_GL_ISSUED(getExtension, name);
     return nt_gfx_js_get_extension(name) != 0;
+}
+
+/* clang-format off */
+EM_JS(void, nt_gfx_js_device_string, (unsigned int name, char *out, unsigned int cap), {
+    var text = GL.currentContext.GLctx.getParameter(name);
+    stringToUTF8(text === null ? "" : text.replace(/[\\r\\n]/g, " "), out, cap);
+})
+/* clang-format on */
+
+static void capture_device_info(void) {
+    const bool unmasked = get_extension("WEBGL_debug_renderer_info");
+    const unsigned int vendor = unmasked ? 0x9245U : GL_VENDOR;
+    const unsigned int renderer = unmasked ? 0x9246U : GL_RENDERER;
+    nt_gfx_device_info_t info = {0};
+    NT_GL_ISSUED(glGetString, vendor);
+    nt_gfx_js_device_string(vendor, info.vendor, sizeof(info.vendor));
+    NT_GL_ISSUED(glGetString, renderer);
+    nt_gfx_js_device_string(renderer, info.renderer, sizeof(info.renderer));
+    NT_GL_ISSUED(glGetString, GL_VERSION);
+    nt_gfx_js_device_string(GL_VERSION, info.api_version, sizeof(info.api_version));
+    if (!nt_gfx_gl_ctx_query_lost()) {
+        g_nt_gfx_device_info = info;
+    }
 }
 
 nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {

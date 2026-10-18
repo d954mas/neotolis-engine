@@ -1,5 +1,6 @@
 #include "core/nt_core.h"
 #include "crash/nt_crash_internal.h"
+#include "graphics/nt_gfx.h"
 #include "version/nt_version.h"
 
 #include <emscripten.h>
@@ -11,10 +12,16 @@
 EM_JS_DEPS(nt_crash_web, "$UTF8ToString,$stringToUTF8")
 
 EM_JS(void, nt_crash_web_install, (const char *ring, uint32_t ring_size, const uint32_t *pos, const uint32_t *full,
-                                   const char *name, const char *game, const char *engine, const char *preset), {
+                                   const char *name, const char *game, const char *engine, const char *preset,
+                                   const char *vendor, uint32_t vendor_cap, const char *renderer, uint32_t renderer_cap,
+                                   const char *api, uint32_t api_cap, const char *context, uint32_t context_cap), {
     var key = UTF8ToString(name);
     var head = "game: " + UTF8ToString(game) + "\nengine: " + UTF8ToString(engine) + " " + UTF8ToString(preset) + "\n";
     var captured = false;
+    function field(name, ptr, cap) {
+        var text = UTF8ToString(ptr, cap);
+        return text ? name + ": " + text + "\n" : "";
+    }
     function log_tail() {
         /* HEAPU8/HEAPU32 are read here, at crash time: memory growth replaces the views. */
         var at = HEAPU32[pos >> 2];
@@ -37,7 +44,9 @@ EM_JS(void, nt_crash_web_install, (const char *ring, uint32_t ring_size, const u
         if (!(reason instanceof WebAssembly.RuntimeError) && stack.indexOf("wasm-function[") < 0 && stack.indexOf("wasm://") < 0 &&
             stack.indexOf("[wasm code]") < 0) return;
         captured = true;
-        var text = head + "time: " + Date.now() + "\nreason: " + String(reason).slice(0, 256) + "\nstack:\n" + stack.slice(0, 4096) +
+        var text = head + field("gpu_vendor", vendor, vendor_cap) + field("gpu_renderer", renderer, renderer_cap) +
+                   field("gpu_api", api, api_cap) + field("context", context, context_cap) +
+                   "time: " + Date.now() + "\nreason: " + String(reason).slice(0, 256) + "\nstack:\n" + stack.slice(0, 4096) +
                    "\nlog:\n" + log_tail();
         try { window.localStorage.setItem(key, text); } catch (e) {}
         window.dispatchEvent(new CustomEvent("nt-crash", {"detail": {"text": text}}));
@@ -63,7 +72,9 @@ EM_JS(void, nt_crash_web_clear, (const char *name), {
 /* clang-format on */
 
 void nt_crash_platform_init(void) {
-    nt_crash_web_install(g_nt_crash.ring, NT_CRASH_LOG_BYTES, &g_nt_crash.pos, &g_nt_crash.full, g_nt_crash.name, g_nt_crash.game_version, nt_version_engine(), nt_engine_preset_string());
+    const nt_gfx_device_info_t *info = nt_gfx_device_info();
+    nt_crash_web_install(g_nt_crash.ring, NT_CRASH_LOG_BYTES, &g_nt_crash.pos, &g_nt_crash.full, g_nt_crash.name, g_nt_crash.game_version, nt_version_engine(), nt_engine_preset_string(), info->vendor,
+                         sizeof(info->vendor), info->renderer, sizeof(info->renderer), info->api_version, sizeof(info->api_version), g_nt_crash.context, sizeof(g_nt_crash.context));
 }
 
 uint32_t nt_crash_platform_load(char *out, uint32_t cap) { return nt_crash_web_load(g_nt_crash.name, out, cap); }

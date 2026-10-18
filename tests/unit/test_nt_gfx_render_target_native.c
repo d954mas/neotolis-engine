@@ -71,6 +71,18 @@ void tearDown(void) {
     nt_gfx_shutdown();
 }
 
+static void test_device_identity_survives_shutdown(void) {
+    const nt_gfx_device_info_t *info = nt_gfx_device_info();
+    TEST_ASSERT_NOT_NULL(info);
+    TEST_ASSERT_EQUAL_STRING((const char *)glGetString(GL_VENDOR), info->vendor);
+    TEST_ASSERT_EQUAL_STRING((const char *)glGetString(GL_RENDERER), info->renderer);
+    TEST_ASSERT_EQUAL_STRING((const char *)glGetString(GL_VERSION), info->api_version);
+    const nt_gfx_device_info_t saved = *info;
+    nt_gfx_shutdown();
+    TEST_ASSERT_EQUAL_PTR(info, nt_gfx_device_info());
+    TEST_ASSERT_EQUAL_MEMORY(&saved, info, sizeof(saved));
+}
+
 typedef struct {
     nt_texture_t color;
     nt_texture_t depth;
@@ -2055,6 +2067,7 @@ int main(void) {
     };
     nt_window_init();
     UNITY_BEGIN();
+    RUN_TEST(test_device_identity_survives_shutdown);
     RUN_TEST(test_explicit_clear_preserves_unselected_pixels_and_draw_state);
     RUN_TEST(test_pass_discard_maps_attachments_and_finishes_before_unbind);
     RUN_TEST(test_pass_load_preserves_color_and_depth_independently);

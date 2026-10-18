@@ -7,6 +7,8 @@
 
 #include <string.h>
 
+extern nt_gfx_device_info_t g_nt_gfx_device_info;
+
 // #region observation storage and owning-site counters
 #if NT_GFX_CAPTURE_ENABLED
 typedef struct {

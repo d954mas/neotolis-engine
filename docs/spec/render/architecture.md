@@ -65,6 +65,30 @@ renderer_draw_mesh(...);
 renderer_draw_sprite(...);
 ```
 
+### Device identity
+
+`nt_gfx_device_info()` returns a non-NULL, gfx-owned const view of three bounded
+strings: vendor (128 bytes), renderer (512) and API version (128), including
+NUL terminators. The address is stable for the process, before init and after
+shutdown. Callers neither modify nor free it. Empty fields mean unavailable;
+the stub always supplies empty fields without requiring init.
+
+The snapshot is the last observed identity, not readiness or capabilities.
+Context creation refreshes it before backend setup allocations and the service
+VAO, so their failures already have GPU context. Web publishes only an
+observation made without context loss; loss, failed recreation and shutdown
+retain the previous snapshot. No identity queries run in steady frames.
+Updates are main-thread, best effort if interrupted by a crash; each field
+always retains its terminal NUL. CR/LF become spaces. Native identity truncates
+by bytes; the web bridge preserves UTF-8 boundaries. Web prefers
+WEBGL_debug_renderer_info, with ordinary vendor/renderer parameters as fallback;
+the browser may mask the hardware. API version is not a portable driver version.
+
+The Web bridge reads current getParameter strings directly into bounded buffers:
+Emscripten 4.0.19 glGetString caches allocated strings across context recreation.
+It uses the existing GL funnel's glGetString equivalent, without a WASM heap
+string or a second persistent copy in the crash module.
+
 ### Draw-phase command stream
 
 Draw-phase calls are deferred. At the call, the front-end validates and updates
@@ -999,7 +1023,8 @@ expression that issues the call; a grep gate rejects any bare `gl*` call in
 always open between init and shutdown. The
 single `NT_GFX_GL_CALLS` table in `nt_gfx.h` defines the enum, `NT_GFX_GL_COUNT`
 and, with capture, `nt_gfx_gl_call_name`. WebGL JS calls the web context makes
-directly (`getExtension` and the `glGetQueryObjectui64v` timer-result bridge) are
+directly (`getExtension`, the `glGetQueryObjectui64v` timer-result bridge and
+`glGetString` identity queries through `getParameter`) are
 counted and recorded through `NT_GL_ISSUED` at their C call site, in a separate
 statement just before the JS call; the
 JS that Emscripten's GL layer runs behind a C call (lazy uniform location

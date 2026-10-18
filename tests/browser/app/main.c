@@ -911,6 +911,12 @@ static void crash_probe_step(void) {
     }
     uint32_t mode = s_nt_crash_mode;
     s_nt_crash_mode = CRASH_OFF; /* reject leaves the frame loop running */
+    char context[] = "level=forest\nphase=loading\rcheckpoint=7";
+    nt_crash_set_context(context);
+    volatile char *source = context;
+    for (size_t i = 0; i < sizeof(context) - 1U; i++) {
+        source[i] = '?';
+    }
     /* Grow the heap first: the capture must read the ring through the replaced memory views. */
     volatile char *grow = (volatile char *)malloc(emscripten_get_heap_size() + (16U << 20));
     NT_ASSERT(grow);
@@ -1334,6 +1340,13 @@ int main(int argc, char *argv[]) {
     }
     nt_log_info("browser_smoke: %s build (%s)", nt_engine_build_string(), nt_engine_preset_string());
 
+#if defined(__EMSCRIPTEN__)
+    s_nt_crash_mode = nt_test_crash_mode();
+    if (s_nt_crash_mode != CRASH_OFF) {
+        nt_crash_init("nt.test.crash", "browser_smoke-test");
+    }
+#endif
+
     g_nt_window.width = 1280;
     g_nt_window.height = 800;
     nt_window_init();
@@ -1467,10 +1480,6 @@ int main(int argc, char *argv[]) {
 
 #if defined(__EMSCRIPTEN__)
     s_rich_composition_mode = nt_test_rich_composition_mode();
-    s_nt_crash_mode = nt_test_crash_mode();
-    if (s_nt_crash_mode != CRASH_OFF) {
-        nt_crash_init("nt.test.crash", "browser_smoke-test");
-    }
     /* Transparency removes one probe's pixels without changing layout or readiness. */
     s_nt_hidden_input_style = s_input_style;
     for (uint32_t i = 0; i < NT_UI_INPUT_STATE_COUNT; i++) {

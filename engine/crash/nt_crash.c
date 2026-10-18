@@ -59,6 +59,25 @@ void nt_crash_init(const char *name, const char *game_version) {
     nt_crash_platform_init();
 }
 
+void nt_crash_set_context(const char *text) {
+    NT_ASSERT(g_nt_crash.initialized && text != NULL);
+    size_t n = 0;
+    const size_t cap = sizeof(g_nt_crash.context) - 1U;
+    while (n < cap && text[n] != '\0') {
+        n++;
+    }
+    /* If the cut falls inside a code point, discard its incomplete prefix. */
+    if (n == cap && ((unsigned char)text[n] & 0xC0U) == 0x80U) {
+        while (n > 0 && ((unsigned char)text[n] & 0xC0U) == 0x80U) {
+            n--;
+        }
+    }
+    for (size_t i = 0; i < n; i++) {
+        g_nt_crash.context[i] = (char)(text[i] == '\r' || text[i] == '\n' ? ' ' : text[i]);
+    }
+    g_nt_crash.context[n] = '\0';
+}
+
 uint32_t nt_crash_load_previous(char *out, uint32_t cap) {
     NT_ASSERT(g_nt_crash.initialized);
     NT_ASSERT(out && cap >= 1);

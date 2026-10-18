@@ -1,6 +1,7 @@
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "crash/nt_crash_internal.h"
+#include "graphics/nt_gfx.h"
 #include "version/nt_version.h"
 
 #include <signal.h>
@@ -25,10 +26,18 @@
 static uintptr_t s_exe_lo, s_exe_hi, s_exe_base;
 static const char *s_engine; /* cached in init: no engine calls inside a handler */
 static const char *s_preset;
+static const nt_gfx_device_info_t *s_device;
 
 static void out(const char *s, size_t n);
 
 static void out_str(const char *s) { out(s, strlen(s)); }
+
+static void out_field(const char *name, const char *value) {
+    if (value[0] != '\0') {
+        out_str(name);
+        out_str(value);
+    }
+}
 
 static void out_hex(uint64_t v) {
     char buf[16];
@@ -82,6 +91,10 @@ static void out_record(const char *reason, uint64_t code, bool has_code, uintptr
     out_str(s_engine);
     out_str(" ");
     out_str(s_preset);
+    out_field("\ngpu_vendor: ", s_device->vendor);
+    out_field("\ngpu_renderer: ", s_device->renderer);
+    out_field("\ngpu_api: ", s_device->api_version);
+    out_field("\ncontext: ", g_nt_crash.context);
     out_str("\ntime: ");
     out_dec(time_ms);
     out_str("\nreason: ");
@@ -162,6 +175,7 @@ static void on_abort(int sig) {
 void nt_crash_platform_init(void) {
     s_engine = nt_version_engine();
     s_preset = nt_engine_preset_string();
+    s_device = nt_gfx_device_info();
     int n = MultiByteToWideChar(CP_UTF8, 0, g_nt_crash.name, -1, s_path, NT_CRASH_TEXT_MAX);
     NT_ASSERT(n > 0);
     HMODULE exe = GetModuleHandleW(NULL);
@@ -289,6 +303,7 @@ static int find_exe(struct dl_phdr_info *info, size_t size, void *data) {
 void nt_crash_platform_init(void) {
     s_engine = nt_version_engine();
     s_preset = nt_engine_preset_string();
+    s_device = nt_gfx_device_info();
     (void)dl_iterate_phdr(find_exe, NULL);
     if (!NT_CRASH_HANDLERS) {
         return;
