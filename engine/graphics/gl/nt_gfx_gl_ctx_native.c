@@ -20,7 +20,9 @@ bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
     (void)desc;
     /* Window + GL context already created by nt_window_init().
        Load GL function pointers via glad. */
-    if (!gladLoadGL(glfwGetProcAddress)) {
+    const int version = gladLoadGL(glfwGetProcAddress);
+    if (version == 0) {
+        NT_LOG_ERROR("GL-load: result=%d requested=3.3-core", version);
         return false;
     }
     nt_gfx_device_info_t info = {0};

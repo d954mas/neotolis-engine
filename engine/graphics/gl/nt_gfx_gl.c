@@ -613,6 +613,15 @@ static void nt_gfx_gl_drain_errors(void) {
     }
 }
 
+/* Ask after the failed call: a GPU-process death can fail it before the browser reports loss. */
+static NT_NOINLINE void assert_name_failed_on_loss(const char *object, uint32_t id, const char *label) {
+    const bool lost = nt_gfx_gl_ctx_query_lost();
+    if (!lost) {
+        NT_LOG_ERROR("%s=%u name: gl_error=0x%04X \"%s\"", object, id, (unsigned)NT_GL_RET0(glGetError), label != NULL ? label : "");
+    }
+    NT_ASSERT(lost && "backend could not name a GL object on a live context");
+}
+
 static void nt_gfx_gl_init_context_features(void) {
     /* Emscripten keeps a recorded error across contexts: calls that reached the
      * dead context must not fail the fresh one's first error check. */
@@ -627,17 +636,17 @@ static void nt_gfx_gl_init_context_features(void) {
     NT_GL_GEN(glGenVertexArrays, 1, &s_ebo_upload_vao);
     /* 0 with a live context would silently break every index-buffer upload on
      * core GL; 0 on an already-lost context is retried by the next restore. */
-    const bool lost = s_ebo_upload_vao == 0 && nt_gfx_gl_ctx_query_lost();
-    NT_ASSERT(s_ebo_upload_vao != 0 || lost);
+    if (s_ebo_upload_vao == 0) {
+        assert_name_failed_on_loss("glGenVertexArrays upload", 0, NULL);
+    }
 }
 
-bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
+void nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc);
     s_init_desc = *desc;
 
-    if (!nt_gfx_gl_ctx_create(&s_init_desc)) {
-        return false;
-    }
+    const bool created = nt_gfx_gl_ctx_create(&s_init_desc);
+    NT_ASSERT(created && "gfx context creation failed");
 
     /* Allocate backend resource arrays (+1 because slots are 1-based) */
     s_programs = (nt_gfx_gl_program_t *)calloc(s_init_desc.max_programs + 1, sizeof(nt_gfx_gl_program_t));
@@ -653,7 +662,6 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     nt_gfx_gl_cache_ground_state();
 
     nt_gfx_gl_init_context_features();
-    return true;
 }
 
 void nt_gfx_backend_shutdown(void) {
@@ -1172,19 +1180,11 @@ void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uin
 
 /* ---- Resource management (shader / buffer / pipeline) ---- */
 
-/* WebGL names null only on a lost context, and native glGen* does not run out: a null name on a
- * live context is a bug. Asked after the failed call: a GPU-process death can fail the call before
- * the browser reports the loss. */
-static void assert_name_failed_on_loss(void) {
-    const bool lost = nt_gfx_gl_ctx_query_lost();
-    NT_ASSERT(lost && "backend could not name a GL object on a live context");
-}
-
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
     GLenum gl_type = (desc->type == NT_SHADER_VERTEX) ? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER;
     GLuint shader = NT_GL_RET(glCreateShader, gl_type);
     if (shader == 0) {
-        assert_name_failed_on_loss();
+        assert_name_failed_on_loss("glCreateShader stage", (uint32_t)desc->type, desc->label);
         return 0;
     }
     /* Emscripten gives WebGL's null shader a nonzero name, and glShaderSource throws on it: only
@@ -1513,7 +1513,7 @@ bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uin
     }
     GLuint program = NT_GL_RET0(glCreateProgram);
     if (program == 0) {
-        assert_name_failed_on_loss();
+        assert_name_failed_on_loss("glCreateProgram slot", slot, label);
         return false;
     }
     NT_GL(glAttachShader, program, (GLuint)vs_backend);
@@ -1636,7 +1636,7 @@ bool nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint
     GLuint vao = 0;
     NT_GL_GEN(glGenVertexArrays, 1, &vao);
     if (vao == 0) {
-        assert_name_failed_on_loss();
+        assert_name_failed_on_loss("glGenVertexArrays slot", slot, desc->label);
         return false;
     }
     nt_gfx_gl_vertex_input_t *vi = &s_vertex_inputs[slot];
@@ -1785,7 +1785,7 @@ bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot) {
     GLuint buf;
     NT_GL_GEN(glGenBuffers, 1, &buf);
     if (buf == 0) {
-        assert_name_failed_on_loss();
+        assert_name_failed_on_loss("glGenBuffers slot", slot, desc->label);
         return false;
     }
     const GLenum target = desc->type == NT_BUFFER_INDEX ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
@@ -1941,11 +1941,11 @@ static void nt_gfx_gl_bind_texture_for_upload(GLuint tex) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
-static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
+static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc, uint32_t slot) {
     GLuint tex;
     NT_GL_GEN(glGenTextures, 1, &tex);
     if (tex == 0) {
-        assert_name_failed_on_loss();
+        assert_name_failed_on_loss("glGenTextures slot", slot, desc->label);
         return 0;
     }
     nt_gfx_gl_bind_texture_for_upload(tex);
@@ -1997,7 +1997,7 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
 
 bool nt_gfx_backend_create_texture(const nt_texture_desc_t *desc, uint32_t slot) {
     NT_ASSERT(slot > 0 && slot <= s_init_desc.max_textures && s_texture_gl[slot] == 0 && "create_texture: the record at the frontend slot must be empty");
-    GLuint tex = nt_gfx_gl_create_texture_name(desc);
+    GLuint tex = nt_gfx_gl_create_texture_name(desc, slot);
     if (tex == 0) {
         return false;
     }
@@ -2039,12 +2039,13 @@ void nt_gfx_backend_destroy_texture(uint32_t backend_handle) {
 static const GLenum s_rt_attachment_points[NT_GFX_RT_ATTACHMENTS] = {GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT};
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
-static bool nt_gfx_gl_build_render_target(const GLuint textures[NT_GFX_RT_ATTACHMENTS], GLuint *out_fbo) {
+static bool nt_gfx_gl_build_render_target(const GLuint textures[NT_GFX_RT_ATTACHMENTS], GLuint *out_fbo, uint32_t slot, const char *label, uint16_t width, uint16_t height, nt_texture_format_t color,
+                                          nt_texture_format_t depth) {
     GLuint restore_fbo = s_bound_framebuffer;
     GLuint fbo = 0;
     NT_GL_GEN(glGenFramebuffers, 1, &fbo);
     if (fbo == 0) {
-        assert_name_failed_on_loss();
+        assert_name_failed_on_loss("glGenFramebuffers slot", slot, label);
         return false;
     }
     NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, fbo);
@@ -2068,7 +2069,8 @@ static bool nt_gfx_gl_build_render_target(const GLuint textures[NT_GFX_RT_ATTACH
          * or storage an unpolled allocation failure left out. */
         const bool lost = nt_gfx_gl_ctx_query_lost();
         if (!lost) {
-            NT_LOG_ERROR("render target incomplete: GL status 0x%04X", (unsigned)status);
+            NT_LOG_ERROR("framebuffer slot=%u status=0x%04X gl_error=0x%04X size=%ux%u color=%u depth=%u \"%s\"", slot, (unsigned)status, (unsigned)NT_GL_RET0(glGetError), (unsigned)width,
+                         (unsigned)height, (unsigned)color, (unsigned)depth, label != NULL ? label : "");
         }
         NT_ASSERT(lost && "render target incomplete on a live context");
         NT_GL_DELETE(glDeleteFramebuffers, 1, &fbo);
@@ -2092,11 +2094,12 @@ static void nt_gfx_gl_render_target_textures(const uint32_t textures[NT_GFX_RT_A
     }
 }
 
-bool nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], uint32_t slot) {
+bool nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], uint32_t slot, const char *label, uint16_t width, uint16_t height, nt_texture_format_t color,
+                                         nt_texture_format_t depth) {
     NT_ASSERT(slot > 0 && slot <= s_init_desc.max_render_targets && s_render_target_gl[slot] == 0);
     GLuint names[NT_GFX_RT_ATTACHMENTS];
     nt_gfx_gl_render_target_textures(textures, names);
-    if (!nt_gfx_gl_build_render_target(names, &s_render_target_gl[slot])) {
+    if (!nt_gfx_gl_build_render_target(names, &s_render_target_gl[slot], slot, label, width, height, color, depth)) {
         return false;
     }
     NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_RENDER_TARGET; event->data.backend.args[0] = slot; event->data.backend.args[1] = s_render_target_gl[slot];);
@@ -2147,7 +2150,7 @@ uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
     GLuint s = 0;
     NT_GL_GEN(glGenSamplers, 1, &s);
     if (s == 0) {
-        assert_name_failed_on_loss();
+        assert_name_failed_on_loss("glGenSamplers name", 0, desc->label);
         return 0;
     }
     NT_GL(glSamplerParameteri, s, GL_TEXTURE_MIN_FILTER, (GLint)map_texture_filter(desc->min_filter));

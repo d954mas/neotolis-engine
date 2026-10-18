@@ -1,4 +1,8 @@
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+#include "test_helpers/nt_assert_trap.h"
 
 #include "unity.h"
 
@@ -117,6 +121,42 @@ void tearDown(void) {
     nt_gfx_backend_drop_timer_segments();
     nt_gfx_backend_shutdown();
 }
+
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+static char s_setup_failure_log[NT_LOG_BUF_SIZE];
+
+static void capture_setup_failure(nt_log_level_t level, const char *domain, const char *msg, void *user) {
+    (void)domain;
+    (void)user;
+    if (level == NT_LOG_LEVEL_ERROR) {
+        (void)snprintf(s_setup_failure_log, sizeof(s_setup_failure_log), "%s", msg);
+    }
+}
+
+static void GLAD_API_PTR capture_gen_no_vao(GLsizei count, GLuint *names) {
+    for (GLsizei i = 0; i < count; i++) {
+        names[i] = 0;
+    }
+}
+
+static void test_upload_vao_failure_logs_before_asserting(void) {
+    s_setup_failure_log[0] = '\0';
+    glad_glGenVertexArrays = capture_gen_no_vao;
+    nt_log_add_sink(capture_setup_failure, NULL);
+    NT_TEST_EXPECT_ASSERT(nt_gfx_gl_init_context_features());
+    nt_log_remove_sink(capture_setup_failure, NULL);
+    glad_glGenVertexArrays = capture_gen_vao;
+    TEST_ASSERT_FALSE(s_fixture_lost);
+    if (NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR) {
+        TEST_ASSERT_NOT_NULL(strstr(s_setup_failure_log, "glGenVertexArrays"));
+        TEST_ASSERT_NOT_NULL(strstr(s_setup_failure_log, "name:"));
+        TEST_ASSERT_NOT_NULL(strstr(s_setup_failure_log, "gl_error=0x0000"));
+        TEST_ASSERT_NOT_NULL(strstr(s_setup_failure_log, "upload"));
+    } else {
+        TEST_ASSERT_EQUAL_STRING("", s_setup_failure_log);
+    }
+}
+#endif
 
 #if NT_GFX_GPU_TIMING_ENABLED
 static void test_disable_active_balances_query_and_debug_group(void) {
@@ -248,6 +288,9 @@ static void test_unavailable_timer_is_inert(void) {
 
 int main(void) {
     UNITY_BEGIN();
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_upload_vao_failure_logs_before_asserting);
+#endif
 #if NT_GFX_GPU_TIMING_ENABLED
     RUN_TEST(test_disable_active_balances_query_and_debug_group);
     RUN_TEST(test_pending_cancelled_and_reenable_returns_only_new_result);

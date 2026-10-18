@@ -172,8 +172,9 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_log_floor PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_log_floor)
 
-    add_executable(test_nt_gfx_gpu_timing_native unit/test_nt_gfx_gpu_timing_native.c)
-    target_link_libraries(test_nt_gfx_gpu_timing_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window_stub nt_log_stub unity glad nt_meshwire_stub)
+    add_executable(test_nt_gfx_gpu_timing_native unit/test_nt_gfx_gpu_timing_native.c unit/test_helpers/nt_assert_trap.c)
+    target_include_directories(test_nt_gfx_gpu_timing_native PRIVATE unit)
+    target_link_libraries(test_nt_gfx_gpu_timing_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window_stub nt_log unity glad nt_meshwire_stub)
     target_compile_definitions(test_nt_gfx_gpu_timing_native PRIVATE NT_LOG_DOMAIN="gfx_timer_test")
     nt_setup_test_target(test_nt_gfx_gpu_timing_native)
 

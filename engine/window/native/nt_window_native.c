@@ -184,7 +184,10 @@ void nt_window_init(void) {
     }
 
     if (!glfwInit()) {
-        NT_LOG_ERROR("GLFW: glfwInit() failed");
+        const char *description = NULL;
+        const int code = glfwGetError(&description);
+        (void)code;
+        NT_LOG_ERROR("GLFW-init: code=0x%08X requested=3.3-core debug=%d \"%s\"", (unsigned)code, NT_GFX_NATIVE_GL_DEBUG, description != NULL ? description : "");
         __builtin_trap();
     }
 
@@ -201,7 +204,11 @@ void nt_window_init(void) {
 
     s_glfw_window = glfwCreateWindow((int)g_nt_window.width, (int)g_nt_window.height, title, NULL, NULL);
     if (!s_glfw_window) {
-        NT_LOG_ERROR("GLFW: glfwCreateWindow() failed");
+        const char *description = NULL;
+        const int code = glfwGetError(&description);
+        (void)code;
+        NT_LOG_ERROR("context-create: GLFW code=0x%08X requested=3.3-core debug=%d size=%ux%u \"%s\"", (unsigned)code, NT_GFX_NATIVE_GL_DEBUG, g_nt_window.width, g_nt_window.height,
+                     description != NULL ? description : "");
         glfwTerminate();
         __builtin_trap();
     }

@@ -4,7 +4,8 @@
 #include <stdint.h>
 
 /* Crash record: on a fatal crash the engine stores one text record (game and engine
-   version, time, reason, fault location or stack, tail of WARN/ERROR log lines). The game
+   version, GPU identity, optional game context, time, reason, fault location or stack,
+   tail of WARN/ERROR log lines). The game
    reads it on the next launch, delivers it and clears it. The engine never sends it.
    Web also dispatches window event 'nt-crash' (detail.text) once the record is captured. */
 

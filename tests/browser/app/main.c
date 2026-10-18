@@ -886,7 +886,9 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_rich_link_clicks(void) { return s_stat
  * only inits. reject traps inside a Promise callback (unhandledrejection); jserror throws a plain
  * JS Error through wasm frames (the stack-text branch of the capture filter). */
 enum { CRASH_OFF, CRASH_TRAP, CRASH_ABORT, CRASH_READ, CRASH_REJECT, CRASH_JS_ERROR };
+#if NT_LOG_MIN_LEVEL <= 2
 static const char *const k_crash_modes[] = {"", "trap", "abort", "read", "reject", "jserror"};
+#endif
 EMSCRIPTEN_KEEPALIVE void nt_test_crash_trap(void) { __builtin_trap(); }
 /* clang-format off */
 EM_JS(void, nt_test_crash_reject, (void), {

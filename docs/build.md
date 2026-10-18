@@ -366,6 +366,11 @@ log floor with FULL asserts, TRAP positive paths, timing producers ON/OFF,
 metrics independence, UI key checks ON with inspector OFF and OFF with inspector ON,
 and inspector ON with UI timing OFF. Gfx observation exercises capture ON and OFF,
 including fake/frontend and inert stub paths.
+The NONE rows with FULL and TRAP asserts also build `test_crash_record` and
+`test_crash_record_gpu_info` and run their 12 crash/check cases: system GPU data
+and copied game context survive with an empty log section. The first executable
+uses `nt_gfx_stub`; the second supplies a test-only GPU snapshot that changes
+after crash init and differs in the next process reading the saved record.
 `tests/browser/observation.spec.ts` independently intercepts WebGL calls and
 upload payloads, checks uploads before render begin and compares output pixels
 with recording off/on/full.

@@ -478,11 +478,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(s_gfx.shader_backends && s_gfx.program_states && s_gfx.pipeline_keys && s_gfx.buffer_metas && s_gfx.vertex_input_metas && s_gfx.texture_metas && s_gfx.render_target_metas &&
               s_gfx.mesh_table && s_gfx.mesh_vertex_inputs && "gfx init: out of memory");
 
-    if (!nt_gfx_backend_init(desc)) {
-        NT_LOG_ERROR("backend init failed");
-        nt_gfx_shutdown();
-        return;
-    }
+    nt_gfx_backend_init(desc);
 
     /* Detect GPU compressed texture capabilities */
     g_nt_gfx.gpu_caps = nt_gfx_gl_ctx_detect_gpu_caps();
@@ -691,7 +687,6 @@ static void wipe_backend_handles(void) {
 static nt_gfx_result_t restore_context(void) {
     /* A failed recreate leaves no context, so the query keeps reporting lost for good. */
     if (!nt_gfx_backend_recreate_all_resources()) {
-        NT_LOG_ERROR("WebGL context restore failed");
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     /* getExtension enables the float color attachments the game's render targets may need. */
@@ -1413,6 +1408,7 @@ static nt_gfx_result_t make_render_target(const nt_render_target_desc_t *desc, n
 
     const nt_texture_t attachments[NT_GFX_RT_ATTACHMENTS] = {desc->color, desc->depth};
     uint32_t backends[NT_GFX_RT_ATTACHMENTS] = {0};
+    nt_texture_format_t formats[NT_GFX_RT_ATTACHMENTS] = {0};
     const nt_gfx_texture_meta_t *size = NULL;
     for (int i = 0; i < NT_GFX_RT_ATTACHMENTS; i++) {
         if (attachments[i].id == 0) {
@@ -1422,6 +1418,7 @@ static nt_gfx_result_t make_render_target(const nt_render_target_desc_t *desc, n
         uint32_t tex_slot = nt_pool_slot_index(attachments[i].id);
         const nt_gfx_texture_meta_t *meta = &s_gfx.texture_metas[tex_slot];
         backends[i] = tex_slot;
+        formats[i] = meta->format;
         /* A pool-valid texture with no backend outlived a context loss; the
          * framebuffer would attach a dead name. */
         NT_ASSERT(meta->live && "make_render_target: attachment texture has no live backend -- recreate it after context restore");
@@ -1439,7 +1436,7 @@ static nt_gfx_result_t make_render_target(const nt_render_target_desc_t *desc, n
     uint32_t id = nt_pool_alloc(&s_gfx.render_target_pool);
     NT_ASSERT(id != 0 && "render target pool full; raise nt_gfx_desc_t.max_render_targets");
     uint32_t slot = nt_pool_slot_index(id);
-    if (!nt_gfx_backend_create_render_target(backends, slot)) {
+    if (!nt_gfx_backend_create_render_target(backends, slot, desc->label, size->width, size->height, formats[NT_GFX_RT_COLOR], formats[NT_GFX_RT_DEPTH])) {
         nt_pool_free(&s_gfx.render_target_pool, id);
         return latch_loss();
     }

@@ -969,6 +969,24 @@ live driver must complete every target the engine builds. Two residual cases als
 texture whose GPU storage allocation failed (uploads are not polled) leaves its framebuffer
 incomplete, and a GPU-process death that fails a status before the browser reports the loss.
 A failure is classified by asking the browser after the failed call, for the same reason.
+On live-context name failures, including the upload VAO made during setup, the
+backend logs the GL operation, available slot or shader stage, pending GL error
+and descriptor label before asserting. An incomplete framebuffer logs its slot,
+status, pending GL error, attachment size and formats, then label. These values
+come from the create arguments, with no extra resource metadata or GL size
+queries. The pending error may come from an earlier texture allocation; it is
+not proof of the cause of the framebuffer status. Numbers precede labels so a
+long label cannot truncate the failure details. Lost-context paths do not emit
+these fatal records. At log floor NONE the records and extra error queries vanish.
+
+Initial context creation failure is fatal: the internal backend init returns
+void and asserts after the platform reports the failure. Web records
+context-create result 0 and the requested WebGL attributes; native records the
+GL loader result or GLFW error code/description and requested context/window
+attributes. No GL queries run after loader failure. Context recreation retains
+its recoverable bool contract; the platform records the reason once and the
+frontend stays lost on failure.
+
 A readback asks after every read as well: WebGL reports a loss once through
 `glGetError`, and the drain before the read consumes it. Beyond failures the backend asks where
 the answer prevents a crash: after shader creation and before program creation, because
@@ -981,7 +999,7 @@ skipped, because `beginQuery` throws on it. A fresh context (init or restore) fi
 drains GL errors: Emscripten keeps a recorded error across contexts, so a call
 that reached the dead context must not fail the fresh one's first check.
 
-Texture creation reads no GL error: on WebGL `glGetError` is a blocking
+Successful texture-name creation reads no GL error during upload: on WebGL `glGetError` is a blocking
 round trip to the GPU process that waits for the queued uploads. After upload,
 the backend asks whether the context is lost without waiting for GPU completion;
 a confirmed loss deletes the name and ends the create `CONTEXT_LOST`, including

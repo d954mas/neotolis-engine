@@ -71,12 +71,23 @@ void tearDown(void) {
     nt_gfx_shutdown();
 }
 
+static void assert_device_string(const char *source, const char *actual, size_t capacity) {
+    size_t length = source != NULL ? strlen(source) : 0;
+    if (length >= capacity) {
+        length = capacity - 1U;
+    }
+    TEST_ASSERT_EQUAL_UINT(length, strlen(actual));
+    for (size_t i = 0; i < length; i++) {
+        TEST_ASSERT_EQUAL_CHAR(source[i] == '\r' || source[i] == '\n' ? ' ' : source[i], actual[i]);
+    }
+}
+
 static void test_device_identity_survives_shutdown(void) {
     const nt_gfx_device_info_t *info = nt_gfx_device_info();
     TEST_ASSERT_NOT_NULL(info);
-    TEST_ASSERT_EQUAL_STRING((const char *)glGetString(GL_VENDOR), info->vendor);
-    TEST_ASSERT_EQUAL_STRING((const char *)glGetString(GL_RENDERER), info->renderer);
-    TEST_ASSERT_EQUAL_STRING((const char *)glGetString(GL_VERSION), info->api_version);
+    assert_device_string((const char *)glGetString(GL_VENDOR), info->vendor, sizeof(info->vendor));
+    assert_device_string((const char *)glGetString(GL_RENDERER), info->renderer, sizeof(info->renderer));
+    assert_device_string((const char *)glGetString(GL_VERSION), info->api_version, sizeof(info->api_version));
     const nt_gfx_device_info_t saved = *info;
     nt_gfx_shutdown();
     TEST_ASSERT_EQUAL_PTR(info, nt_gfx_device_info());
@@ -1630,21 +1641,94 @@ static void GLAD_API_PTR gen_no_names(GLsizei n, GLuint *names) {
     }
 }
 
-/* A null name on a live context is a bug: the backend asserts and gfx latches no loss. */
-static void test_a_name_failure_on_a_live_context_asserts_without_latching(void) {
-    PFNGLGENBUFFERSPROC gen_buffers = glad_glGenBuffers;
-    glad_glGenBuffers = gen_no_names;
-    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}));
-    glad_glGenBuffers = gen_buffers;
+static GLenum GLAD_API_PTR invalid_operation(void) { return GL_INVALID_OPERATION; }
+
+static GLuint GLAD_API_PTR create_no_program(void) { return 0; }
+
+static void begin_device_failure_capture(void) {
+    s_program_failure_log[0] = '\0';
+    nt_log_add_sink(capture_program_failure, NULL);
+}
+
+static void expect_name_failure_record(const char *operation, const char *label) {
+    nt_log_remove_sink(capture_program_failure, NULL);
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "could not name a GL object on a live context"));
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    if (NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR) {
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, operation));
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "name:"));
+        const char *error = strstr(s_program_failure_log, "gl_error=0x0502");
+        const char *name = strstr(s_program_failure_log, label);
+        TEST_ASSERT_NOT_NULL(error);
+        TEST_ASSERT_NOT_NULL(name);
+        TEST_ASSERT_TRUE(error < name);
+    } else {
+        TEST_ASSERT_EQUAL_STRING("", s_program_failure_log);
+    }
+}
+
+/* A null name on a live context records the cause before asserting; no loss latches. */
+static void test_a_name_failure_on_a_live_context_asserts_without_latching(void) {
+    static char long_label[800];
+    memset(long_label, 'x', sizeof(long_label) - 1);
+    memcpy(long_label, "device-label/", sizeof("device-label/") - 1);
+    PFNGLGETERRORPROC get_error = glad_glGetError;
+    PFNGLGENBUFFERSPROC gen_buffers = glad_glGenBuffers;
+    glad_glGetError = invalid_operation;
+    glad_glGenBuffers = gen_no_names;
+    begin_device_failure_capture();
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8, .label = long_label}));
+    glad_glGenBuffers = gen_buffers;
+    glad_glGetError = get_error;
+    expect_name_failure_record("glGenBuffers", "device-label/");
 
     PFNGLGENSAMPLERSPROC gen_samplers = glad_glGenSamplers;
+    glad_glGetError = invalid_operation;
     glad_glGenSamplers = gen_no_names;
-    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_sampler(&(nt_sampler_desc_t){.compare_func = NT_COMPARE_GREATER}));
+    begin_device_failure_capture();
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_sampler(&(nt_sampler_desc_t){.compare_func = NT_COMPARE_GREATER, .label = "failure/sampler"}));
     glad_glGenSamplers = gen_samplers;
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "could not name a GL object on a live context"));
-    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    glad_glGetError = get_error;
+    expect_name_failure_record("glGenSamplers", "failure/sampler");
+
+    PFNGLGENVERTEXARRAYSPROC gen_vaos = glad_glGenVertexArrays;
+    glad_glGetError = invalid_operation;
+    glad_glGenVertexArrays = gen_no_names;
+    begin_device_failure_capture();
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.label = "failure/vertex-input"}));
+    glad_glGenVertexArrays = gen_vaos;
+    glad_glGetError = get_error;
+    expect_name_failure_record("glGenVertexArrays", "failure/vertex-input");
+
+    PFNGLGENTEXTURESPROC gen_textures = glad_glGenTextures;
+    glad_glGetError = invalid_operation;
+    glad_glGenTextures = gen_no_names;
+    begin_device_failure_capture();
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 7, .format = NT_TEXTURE_FORMAT_RGBA8, .label = "failure/texture"}));
+    glad_glGenTextures = gen_textures;
+    glad_glGetError = get_error;
+    expect_name_failure_record("glGenTextures", "failure/texture");
+
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() { gl_Position = vec4(0.0); }"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "out vec4 color; void main() { color = vec4(1.0); }"});
+    PFNGLCREATEPROGRAMPROC create_program = glad_glCreateProgram;
+    glad_glGetError = invalid_operation;
+    glad_glCreateProgram = create_no_program;
+    begin_device_failure_capture();
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_program(vs, fs, "failure/program"));
+    glad_glCreateProgram = create_program;
+    glad_glGetError = get_error;
+    expect_name_failure_record("glCreateProgram", "failure/program");
+
+    nt_texture_t color = make_attachment(NT_TEXTURE_FORMAT_RGBA8, 4, 7);
+    PFNGLGENFRAMEBUFFERSPROC gen_framebuffers = glad_glGenFramebuffers;
+    glad_glGetError = invalid_operation;
+    glad_glGenFramebuffers = gen_no_names;
+    begin_device_failure_capture();
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = color, .label = "failure/framebuffer"}));
+    glad_glGenFramebuffers = gen_framebuffers;
+    glad_glGetError = get_error;
+    expect_name_failure_record("glGenFramebuffers", "failure/framebuffer");
 }
 
 static GLuint GLAD_API_PTR create_no_shader(GLenum type) {
@@ -1672,11 +1756,14 @@ static GLenum GLAD_API_PTR error_after_read(void) {
 /* A null shader name and a readback GL error on a live context are bugs: they assert, no loss latches. */
 static void test_shader_name_and_readback_failures_on_a_live_context_assert(void) {
     PFNGLCREATESHADERPROC create_shader = glad_glCreateShader;
+    PFNGLGETERRORPROC get_error = glad_glGetError;
+    glad_glGetError = invalid_operation;
     glad_glCreateShader = create_no_shader;
-    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() {}\n"}));
+    begin_device_failure_capture();
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() {}\n", .label = "failure/shader"}));
     glad_glCreateShader = create_shader;
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "could not name a GL object on a live context"));
-    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    glad_glGetError = get_error;
+    expect_name_failure_record("glCreateShader", "failure/shader");
 
     nt_gfx_end_frame();
     uint8_t pixel[4] = {0};
@@ -1699,16 +1786,41 @@ static GLenum GLAD_API_PTR framebuffer_unsupported(GLenum target) {
 
 /* The engine's attachment formats are required framebuffer formats: an incomplete target on a
  * live context is a driver or engine bug, so it asserts. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- assert traps and Unity checks expand into branches
 static void test_an_incomplete_framebuffer_on_a_live_context_asserts(void) {
-    nt_texture_t color = make_attachment(NT_TEXTURE_FORMAT_RGBA8, 4, 4);
+    static char label[800];
+    memset(label, 'x', sizeof(label) - 1);
+    memcpy(label, "failure/framebuffer/", sizeof("failure/framebuffer/") - 1);
+    nt_texture_t color = make_attachment(NT_TEXTURE_FORMAT_RGBA8, 4, 7);
+    nt_texture_t depth = make_attachment(NT_TEXTURE_FORMAT_DEPTH24, 4, 7);
     PFNGLCHECKFRAMEBUFFERSTATUSPROC check_status = glad_glCheckFramebufferStatus;
+    PFNGLGETERRORPROC get_error = glad_glGetError;
     glad_glCheckFramebufferStatus = framebuffer_unsupported;
-    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = color}));
+    glad_glGetError = invalid_operation;
+    begin_device_failure_capture();
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = color, .depth = depth, .label = label}));
     glad_glCheckFramebufferStatus = check_status;
+    glad_glGetError = get_error;
+    nt_log_remove_sink(capture_program_failure, NULL);
     /* The assert left the half-built framebuffer bound; later tests draw to the window. */
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "render target incomplete on a live context"));
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    if (NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR) {
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "status=0x8CDD"));
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "gl_error=0x0502"));
+        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "size=4x7"));
+        const char *color_field = strstr(s_program_failure_log, "color=");
+        const char *depth_field = strstr(s_program_failure_log, "depth=");
+        const char *name = strstr(s_program_failure_log, "failure/framebuffer/");
+        TEST_ASSERT_NOT_NULL(color_field);
+        TEST_ASSERT_NOT_NULL(depth_field);
+        TEST_ASSERT_NOT_NULL(name);
+        TEST_ASSERT_TRUE(color_field < name);
+        TEST_ASSERT_TRUE(depth_field < name);
+    } else {
+        TEST_ASSERT_EQUAL_STRING("", s_program_failure_log);
+    }
 }
 
 static uint32_t s_link_status_queries;

@@ -1,5 +1,6 @@
 #include "graphics/gl/nt_gfx_gl_calls.h"
 #include "graphics/gl/nt_gfx_gl_ctx.h"
+#include "log/nt_log.h"
 
 #include <emscripten.h>
 #include <emscripten/html5.h>
@@ -39,7 +40,9 @@ bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
     attrs.enableExtensionsByDefault = false;
 
     s_gl_context = emscripten_webgl_create_context("#canvas", &attrs);
-    if (s_gl_context <= 0) {
+    if (s_gl_context == 0) {
+        NT_LOG_ERROR("context-create: result=0 WebGL=2.0 alpha=%d depth=%d stencil=%d antialias=%d premultiplied_alpha=%d preserve=0", (int)desc->alpha, (int)desc->depth, (int)desc->stencil,
+                     (int)desc->antialias, (int)desc->premultiplied_alpha);
         return false;
     }
     emscripten_webgl_make_context_current(s_gl_context);
