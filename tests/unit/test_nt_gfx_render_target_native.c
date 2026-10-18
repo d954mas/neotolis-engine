@@ -85,6 +85,7 @@ static void assert_device_string(const char *source, const char *actual, size_t 
 static void test_device_identity_survives_shutdown(void) {
     const nt_gfx_device_info_t *info = nt_gfx_device_info();
     TEST_ASSERT_NOT_NULL(info);
+    TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.last_frame.gl[NT_GFX_GL_glGetString]);
     assert_device_string((const char *)glGetString(GL_VENDOR), info->vendor, sizeof(info->vendor));
     assert_device_string((const char *)glGetString(GL_RENDERER), info->renderer, sizeof(info->renderer));
     assert_device_string((const char *)glGetString(GL_VERSION), info->api_version, sizeof(info->api_version));

@@ -1152,6 +1152,12 @@ static bool gpu_restore_step(void) {
 
 static void frame(void) {
     nt_window_poll();
+#if defined(__EMSCRIPTEN__) && NT_GFX_CAPTURE_ENABLED
+    /* The next begin_frame may restore; capture every lost frame regardless of the alternating request. */
+    if (s_observe_repeat && g_nt_gfx.context_lost) {
+        nt_gfx_capture_request();
+    }
+#endif
     nt_gfx_begin_frame();
 #if defined(__EMSCRIPTEN__)
     if (g_nt_gfx.last_frame.frame_sequence == s_nt_restore_sequence) {
@@ -1315,6 +1321,29 @@ static void frame(void) {
 
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+
+#if defined(__EMSCRIPTEN__)
+    if (g_nt_gfx.context_restored) {
+        s_observe_values[31] = NT_GFX_CAPTURE_ENABLED;
+        s_observe_values[32] = g_nt_gfx.counters.gl[NT_GFX_GL_glGetString];
+#if NT_GFX_CAPTURE_ENABLED
+        /* Save the completed event prefix before the next begin_frame can replace it. */
+        const nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+        s_observe_values[33] = capture.overflow;
+        uint32_t identity_events = 0;
+        for (uint32_t i = 0; i < capture.count; i++) {
+            const nt_gfx_event_t *event = &capture.events[i];
+            if (event->kind == NT_GFX_EVENT_BACKEND && event->detail == NT_GFX_GL_glGetString) {
+                if (identity_events < 3U) {
+                    s_observe_values[35U + identity_events] = event->data.backend.args[0];
+                }
+                identity_events++;
+            }
+        }
+        s_observe_values[34] = identity_events;
+#endif
+    }
+#endif
 
     nt_window_swap_buffers();
 #if defined(__EMSCRIPTEN__)

@@ -10,6 +10,7 @@ type DeviceHooks = {
   drawn_frames(): number;
   restore_frames(): number;
   observe_record(enabled: number): void;
+  observe_value(index: number): number;
   crash_load(): string;
 };
 type DeviceWindow = Window & {
@@ -132,7 +133,21 @@ test('device identity: successful restore refreshes every string', async ({ page
     return count;
   }, RESTORED);
   await page.waitForFunction(() => (window as DeviceWindow).__nt!.programs_ready(), null, { timeout: 30_000 });
-  expect(await page.evaluate(() => (window as DeviceWindow).__device.queries.length)).toBeGreaterThan(before);
+  const observation = await page.evaluate((before) => {
+    const w = window as DeviceWindow;
+    return {
+      queries: w.__device.queries.slice(before),
+      values: Array.from({ length: 7 }, (_, i) => w.__nt!.observe_value(31 + i)),
+    };
+  }, before);
+  const expectedQueries = [0x9245, 0x9246, 0x1f02];
+  expect(observation.queries).toEqual(expectedQueries);
+  expect(observation.values[1], 'restore glGetString counter matches issued identity queries').toBe(3);
+  if (observation.values[0]) {
+    expect(observation.values[2], 'restore capture must not overflow').toBe(0);
+    expect(observation.values[3], 'one BACKEND event per identity query').toBe(3);
+    expect(observation.values.slice(4), 'captured query enums match actual WebGL calls').toEqual(expectedQueries);
+  }
   expect(await page.evaluate(() => (window as DeviceWindow).__nt!.restore_frames())).toBe(1);
   await page.evaluate(() => (window as DeviceWindow).__nt!.observe_record(0));
   expectIdentity(await capture(page), RESTORED);
