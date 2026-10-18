@@ -2038,9 +2038,21 @@ void nt_gfx_backend_destroy_texture(uint32_t backend_handle) {
 
 static const GLenum s_rt_attachment_points[NT_GFX_RT_ATTACHMENTS] = {GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT};
 
+/* Resolves texture backends to GL names; the frontend passes only live backends. */
+static void nt_gfx_gl_render_target_textures(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], GLuint out[NT_GFX_RT_ATTACHMENTS]) {
+    NT_ASSERT(s_texture_gl != NULL && (textures[NT_GFX_RT_COLOR] != 0 || textures[NT_GFX_RT_DEPTH] != 0) && "render target: no attachment");
+    for (int i = 0; i < NT_GFX_RT_ATTACHMENTS; i++) {
+        NT_ASSERT(textures[i] <= s_init_desc.max_textures && (textures[i] == 0 || s_texture_gl[textures[i]] != 0) && "render target: attachment texture has no live GL name");
+        out[i] = s_texture_gl[textures[i]];
+    }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
-static bool nt_gfx_gl_build_render_target(const GLuint textures[NT_GFX_RT_ATTACHMENTS], GLuint *out_fbo, uint32_t slot, const char *label, uint16_t width, uint16_t height, nt_texture_format_t color,
-                                          nt_texture_format_t depth) {
+bool nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], uint32_t slot, const char *label, uint16_t width, uint16_t height, nt_texture_format_t color,
+                                         nt_texture_format_t depth) {
+    NT_ASSERT(slot > 0 && slot <= s_init_desc.max_render_targets && s_render_target_gl[slot] == 0);
+    GLuint names[NT_GFX_RT_ATTACHMENTS];
+    nt_gfx_gl_render_target_textures(textures, names);
     GLuint restore_fbo = s_bound_framebuffer;
     GLuint fbo = 0;
     NT_GL_GEN(glGenFramebuffers, 1, &fbo);
@@ -2051,12 +2063,12 @@ static bool nt_gfx_gl_build_render_target(const GLuint textures[NT_GFX_RT_ATTACH
     NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, fbo);
     s_bound_framebuffer = fbo;
     for (int i = 0; i < NT_GFX_RT_ATTACHMENTS; i++) {
-        if (textures[i] != 0) {
-            NT_GL(glFramebufferTexture2D, GL_FRAMEBUFFER, s_rt_attachment_points[i], GL_TEXTURE_2D, textures[i], 0);
+        if (names[i] != 0) {
+            NT_GL(glFramebufferTexture2D, GL_FRAMEBUFFER, s_rt_attachment_points[i], GL_TEXTURE_2D, names[i], 0);
         }
     }
     /* GL 3.3 core reports a draw/read buffer without an attachment as incomplete. */
-    if (textures[NT_GFX_RT_COLOR] == 0) {
+    if (names[NT_GFX_RT_COLOR] == 0) {
         const GLenum none = GL_NONE;
         NT_GL(glDrawBuffers, 1, &none);
         NT_GL(glReadBuffer, GL_NONE);
@@ -2079,29 +2091,9 @@ static bool nt_gfx_gl_build_render_target(const GLuint textures[NT_GFX_RT_ATTACH
         return false;
     }
 
-    *out_fbo = fbo;
+    s_render_target_gl[slot] = fbo;
     NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, restore_fbo);
     s_bound_framebuffer = restore_fbo;
-    return true;
-}
-
-/* Resolves texture backends to GL names; the frontend passes only live backends. */
-static void nt_gfx_gl_render_target_textures(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], GLuint out[NT_GFX_RT_ATTACHMENTS]) {
-    NT_ASSERT(s_texture_gl != NULL && (textures[NT_GFX_RT_COLOR] != 0 || textures[NT_GFX_RT_DEPTH] != 0) && "render target: no attachment");
-    for (int i = 0; i < NT_GFX_RT_ATTACHMENTS; i++) {
-        NT_ASSERT(textures[i] <= s_init_desc.max_textures && (textures[i] == 0 || s_texture_gl[textures[i]] != 0) && "render target: attachment texture has no live GL name");
-        out[i] = s_texture_gl[textures[i]];
-    }
-}
-
-bool nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], uint32_t slot, const char *label, uint16_t width, uint16_t height, nt_texture_format_t color,
-                                         nt_texture_format_t depth) {
-    NT_ASSERT(slot > 0 && slot <= s_init_desc.max_render_targets && s_render_target_gl[slot] == 0);
-    GLuint names[NT_GFX_RT_ATTACHMENTS];
-    nt_gfx_gl_render_target_textures(textures, names);
-    if (!nt_gfx_gl_build_render_target(names, &s_render_target_gl[slot], slot, label, width, height, color, depth)) {
-        return false;
-    }
     NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_RENDER_TARGET; event->data.backend.args[0] = slot; event->data.backend.args[1] = s_render_target_gl[slot];);
     return true;
 }
