@@ -327,6 +327,20 @@ static void test_tooltip_caret_below(void) {
     TEST_ASSERT_EQUAL_UINT8(0U, flip);
 }
 
+/* The caret floats on a panel declared in the same frame, so it appears with the panel's first frame. */
+static void test_tooltip_caret_on_first_frame(void) {
+    nt_ui_tooltip_style_t st = caret_style();
+    nt_pointer_t over = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
+    bool shown = false;
+    for (int i = 0; i < 64 && !shown; ++i) {
+        shown = tooltip_frame_at(&over, &st, false);
+    }
+    TEST_ASSERT_TRUE_MESSAGE(shown, "tooltip never revealed");
+    Clay_BoundingBox caret = {0};
+    uint8_t flip = 0U;
+    TEST_ASSERT_TRUE(tooltip_caret((float)st.caret_size, &caret, &flip));
+}
+
 /* ---- ABOVE: a bottom-pinned target forces the edge-flip, so the panel attaches over it and the caret
  *      moves to the BOTTOM edge pointing down (FLIP_Y). ---- */
 static void test_tooltip_caret_above_on_flip(void) {
@@ -389,6 +403,7 @@ int main(void) {
     RUN_TEST(test_tooltip_hide_on_leave);
     RUN_TEST(test_tooltip_declares_no_catcher);
     RUN_TEST(test_tooltip_no_double_mutation);
+    RUN_TEST(test_tooltip_caret_on_first_frame);
     RUN_TEST(test_tooltip_caret_below);
     RUN_TEST(test_tooltip_caret_above_on_flip);
     RUN_TEST(test_tooltip_panel_art_no_corner_radius);

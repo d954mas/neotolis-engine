@@ -424,7 +424,7 @@ scroll/clip. From the scroll position + viewport + a fixed `item_extent` it deri
 the content still measures `count × extent` and the existing scrollbar geometry stays correct — a
 10k-row list costs ~the visible count, not the row count. Per-row ids RECYCLE over a frame-stable
 ring (`id_ring`, slot = `index % id_ring`), so the distinct ids per list are bounded by the ring,
-never the row count, and stateful row widgets never fill the non-evicting `nt_ui_state` pool; the
+never the row count, and so are the non-evicting `nt_ui_state` cells of stateful row widgets; the
 visible window must stay below the ring; exceeding it asserts before two visible rows can alias a slot.
 Because ids follow the screen SLOT, the game dispatches per-row ACTIONS by the ABSOLUTE index and
 keeps per-row PERSISTENT state game-owned (keyed by absolute index), never hung off the recycled

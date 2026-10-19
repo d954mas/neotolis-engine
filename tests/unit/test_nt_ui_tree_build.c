@@ -381,6 +381,17 @@ static void test_layout_text_overflow_asserts(void) {
     NT_TEST_EXPECT_ASSERT(overflow_declare_text());
 }
 
+/* Before the first nt_ui_end, a just-declared id has no previous-frame bbox. */
+static void test_retained_ids_first_frame_has_no_bbox(void) {
+    tree_build_setup_ctx_max_elements(32U);
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_IDI("retained_item", 0), .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {}
+    const bool found = nt_ui_get_bbox(s_fx.ctx, CLAY_IDI("retained_item", 0).id).found;
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_FALSE(found);
+}
+
 /* A new id that reuses a pruned slot must not read the old owner's hit data. */
 static void test_retained_ids_reused_slot_has_no_stale_bbox(void) {
     tree_build_setup_ctx_max_elements(32U);
@@ -800,6 +811,7 @@ int main(void) {
     RUN_TEST(test_floating_attach_to_element_with_id_inherits_xform);
     RUN_TEST(test_retained_ids_prune_ids_absent_this_frame);
     RUN_TEST(test_retained_ids_disjoint_full_frames_fit);
+    RUN_TEST(test_retained_ids_first_frame_has_no_bbox);
     RUN_TEST(test_retained_ids_reused_slot_has_no_stale_bbox);
     RUN_TEST(test_retained_ids_hit_through_clip_in_upper_slot);
     RUN_TEST(test_layout_element_overflow_asserts);

@@ -30,8 +30,8 @@ typedef struct {
     int32_t overscan;            /* extra rows rendered each side of the viewport (hides recycle pop) */
     float gap;                   /* inter-row spacing (px, finite 0..UINT16_MAX, truncated to int); scroll container's childGap */
     /* Id recycle modulus: per-row id keys on (index % id_ring), so distinct ids per list are bounded
-     * by id_ring, NOT the row count — stateful row widgets (scroll, slider, input) never fill the
-     * non-evicting nt_ui_state pool. MUST exceed the max simultaneously-visible window (begin asserts
+     * by id_ring, NOT the row count, and so are the non-evicting nt_ui_state cells of stateful row
+     * widgets (scroll, slider, input) — size state_slots for id_ring plus the rest of the UI. MUST exceed the max simultaneously-visible window (begin asserts
      * otherwise, before visible rows can alias). Default 256, far beyond any real viewport. 0/1
      * disables recycling (absolute ids; safe only for rows without per-id widget state). */
     uint32_t id_ring;

@@ -258,7 +258,8 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     ctx->hit_baked = (nt_ui_baked_xform_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes);
     ctx->hit_clip_parent_id = (uint32_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes);
     ctx->hit_generation = (uint32_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes);
-    ctx->current_generation = 0U;
+    memset(ctx->hit_generation, 0, hit_gen_bytes);
+    ctx->current_generation = 1U; /* hit_generation starts at 0, so slots this ctx never stamped read as stale */
 #if NT_UI_DEBUG_TOOLS
     const size_t hit_layer_bytes = NT_ALIGN_UP(sizeof(*ctx->hit_layer) * hit_slots, NT_UI_CACHE_LINE);
     ctx->hit_layer = (uint8_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes);

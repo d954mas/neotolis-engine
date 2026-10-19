@@ -1547,7 +1547,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
 
     // #region highlight-emit
     /* Zones and pointer-over ids can name last frame's elements; the highlight floats only on this frame's. */
-    if (highlightedElementId && Clay__GetHashMapItem(highlightedElementId)->generation > context->generation) {
+    if (highlightedElementId && Clay__GetHashMapItem(highlightedElementId)->generation == context->generation + 1U) {
         /* Relative to ntInsp_Root: -1 lands just under the panel body it would otherwise cover. */
         CLAY({.id = CLAY_ID("ntInsp_ElementHighlight"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
@@ -1704,7 +1704,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
         if (ctx->inspector_selected_id != 0U) {
             /* Only an id declared this frame has a layoutElement in this frame's array. */
             Clay_LayoutElementHashMapItem *selectedItem = Clay__GetHashMapItem(ctx->inspector_selected_id);
-            if (selectedItem->generation > context->generation) {
+            if (selectedItem->generation == context->generation + 1U) {
                 Clay_ElementId selInfoId = Clay__HashString(CLAY_STRING("ntInsp_SelectedInfoPane"), 0, 0);
                 /* Resolve offset BEFORE opening the clip element (helper reads prev-frame Clay dims). */
                 const Clay_Vector2 selInfoOffset = nt_ui_internal_scroll_pane_offset(ctx, selInfoId.id, NT_UI_STATE_TAG('i', 'n', 's', '2'), false, true);

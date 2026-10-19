@@ -3598,7 +3598,7 @@ void Clay__RenderDebugView(void) {
         }
         CLAY({ .layout = { .sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_FIXED(1)} }, .backgroundColor = CLAY__DEBUGVIEW_COLOR_3 }) {}
         Clay_LayoutElementHashMapItem *selectedItem = Clay__GetHashMapItem(context->debugSelectedElementId);
-        if (context->debugSelectedElementId != 0 && selectedItem->generation > context->generation) { // NT patch 6: declared this frame
+        if (context->debugSelectedElementId != 0 && selectedItem->generation == context->generation + 1) { // NT patch 6: declared this frame
             CLAY({
                 .layout = { .sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(300)}, .layoutDirection = CLAY_TOP_TO_BOTTOM },
                 .backgroundColor = CLAY__DEBUGVIEW_COLOR_2 ,
@@ -4353,7 +4353,7 @@ Clay_RenderCommandArray Clay_EndLayout(void) {
         int32_t *link = &context->layoutElementsHashMap.internalArray[bucket];
         while (*link != -1) {
             Clay_LayoutElementHashMapItem *item = Clay__LayoutElementHashMapItemArray_Get(&context->layoutElementsHashMapInternal, *link);
-            if (item->generation <= context->generation) {
+            if (item->generation != context->generation + 1) { // exact match survives generation wrap
                 Clay__int32_tArray_Add(&context->layoutElementsHashMapFreeList, *link);
                 *link = item->nextIndex;
             } else {
