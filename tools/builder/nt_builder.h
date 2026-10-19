@@ -690,8 +690,9 @@ void nt_builder_merge_headers(const char *const *header_paths, uint32_t count, c
 
 /* --- Dependency file ---
  * Writes a Make-style depfile listing every source file this process read (adds,
- * shader includes, glTF files and buffers) and every directory a glob walked:
- * absolute, sorted, unique. Call it last, after every pack finished successfully. */
+ * shader includes, glTF files and buffers), absolute, sorted, unique, and
+ * "<path>.globs" with every pattern nt_builder_glob_iterate walked. Call it last,
+ * after every pack finished successfully. */
 void nt_builder_write_depfile(const char *path);
 
 /* --- Utilities --- */

@@ -297,16 +297,17 @@ Generated asset headers are committed to git. This is intentional:
 
 ## Dependency file
 
-`nt_builder_write_depfile(path)` writes a Make-style depfile of everything the
+`nt_builder_write_depfile(path)` writes a Make-style depfile of every file the
 builder process read, for a build system to rerun the builder exactly when an
 input changes (CMake `add_custom_command(DEPFILE)`) and for release audits of
-pack inputs.
+pack inputs, plus `<path>.globs`: every pattern `nt_builder_glob_iterate`
+walked, absolute, one per line, including patterns whose directory did not
+exist. A build step re-lists the patterns to see added or removed files.
 
 - **Complete for builder reads:** the resolved file of every `add_*` and atlas
-  sprite, every shader `#include`, every file cgltf opens (`.gltf`/`.glb` and
-  external buffers, also through `nt_builder_parse_glb_scene`), and every
-  directory `nt_builder_glob_iterate` walked, so a new matching file invalidates
-  it. Files the game reads itself and passes as memory are not listed.
+  sprite, every shader `#include`, and every file cgltf opens (`.gltf`/`.glb`
+  and external buffers, also through `nt_builder_parse_glb_scene`). Files the
+  game reads itself and passes as memory are not listed.
 - **Cache-independent:** every `add_*` reads its source when called, so cached
   entries are listed too.
 - **Per process, not per pack:** one builder run is one build step that may
@@ -315,8 +316,10 @@ pack inputs.
 - **Format:** the depfile's own path as the target, then one path per line:
   absolute (CMake resolves relative depfile paths against the binary directory,
   not the builder's working directory), forward slashes, sorted, unique, with
-  space, `#` and `$` escaped as `\ `, `\#`, `$$`. Asset names should still avoid
-  them. Missing-file probes (asset-root lookup, existence checks) are not listed.
+  space, `#` and `$` escaped as `\ `, `\#`, `$$`. Paths are made absolute
+  without resolving symlinks. Asset names should still avoid these characters
+  and `;`, `[`, `]`. Missing-file probes (asset-root lookup, existence checks)
+  are not listed.
 
 ## Builder cache
 

@@ -516,9 +516,10 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx);
 char *nt_builder_read_file(const char *path, uint32_t *out_size);
 char *nt_builder_read_file_bounded(const char *path, uint32_t max_size, uint32_t *out_size, bool *out_too_large);
 
-/* Records a source file or globbed directory for nt_builder_write_depfile.
- * Call after a successful read, on the main thread only. */
+/* Record a source file (after a successful read) or a glob pattern for
+ * nt_builder_write_depfile. Main thread only. */
 void nt_builder_record_input(const char *path);
+void nt_builder_record_glob(const char *pattern);
 
 /* Zeroed cgltf options whose file reader records every file a glTF pulls in. */
 struct cgltf_options;

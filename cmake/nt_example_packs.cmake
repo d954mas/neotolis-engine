@@ -29,25 +29,33 @@ function(nt_example_packs)
         # The packs target must DEPENDS on it — CMake materializes a custom
         # command only when some target consumes an OUTPUT (byproducts don't count).
         set(_stamp "${PACKS_PACK_DIR}/.${PACKS_NAME}.stamp")
-        # The builder writes build_packs.d (nt_builder_write_depfile): every file
-        # it read plus every directory a glob walked.
+        # The builder writes build_packs.d (every file it read) and
+        # build_packs.d.globs (every glob pattern) via nt_builder_write_depfile.
+        # Before 3.29 ninja wants the depfile's target to name the stamp and
+        # reruns the builder on every build.
+        if(CMAKE_VERSION VERSION_LESS 3.29)
+            message(FATAL_ERROR "nt_example_packs needs CMake 3.29+ (DEPFILE in ninja's deps log)")
+        endif()
         set(_depfile "${PACKS_PACK_DIR}/build_packs.d")
-        set(_dirs "${PACKS_PACK_DIR}/.${PACKS_NAME}.dirs")
-        set(_dirs_changed "${PACKS_PACK_DIR}/.${PACKS_NAME}.dirs_changed")
-        set(_dirs_script "${NT_ENGINE_ROOT}/cmake/nt_pack_dirs.cmake")
-        add_custom_target(${PACKS_NAME}_pack_dirs
-            COMMAND ${CMAKE_COMMAND} -D "DEPFILE=${_depfile}" -D "LISTING=${_dirs}"
-                -D "CHANGED=${_dirs_changed}" -P "${_dirs_script}"
-            BYPRODUCTS "${_dirs_changed}"
+        set(_globs "${_depfile}.globs")
+        set(_listing "${PACKS_PACK_DIR}/.${PACKS_NAME}.globs_listing")
+        set(_listing_changed "${PACKS_PACK_DIR}/.${PACKS_NAME}.globs_changed")
+        set(_globs_script "${NT_ENGINE_ROOT}/cmake/nt_pack_globs.cmake")
+        add_custom_target(${PACKS_NAME}_pack_globs
+            COMMAND ${CMAKE_COMMAND} -D "GLOBS=${_globs}" -D "LISTING=${_listing}"
+                -D "CHANGED=${_listing_changed}" -P "${_globs_script}"
+            BYPRODUCTS "${_listing_changed}"
         )
         add_custom_command(
             OUTPUT "${_stamp}"
-            BYPRODUCTS ${_pack_files} "${_dirs}"
+            BYPRODUCTS ${_pack_files} "${_listing}"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKS_PACK_DIR}"
+            # A builder that stops writing them must fail, not reuse stale lists.
+            COMMAND ${CMAKE_COMMAND} -E rm -f "${_depfile}" "${_globs}"
             COMMAND "$<TARGET_FILE:${PACKS_BUILDER}>" "${PACKS_PACK_DIR}"
-            COMMAND ${CMAKE_COMMAND} -D "DEPFILE=${_depfile}" -D "LISTING=${_dirs}" -P "${_dirs_script}"
+            COMMAND ${CMAKE_COMMAND} -D "GLOBS=${_globs}" -D "LISTING=${_listing}" -P "${_globs_script}"
             COMMAND ${CMAKE_COMMAND} -E touch "${_stamp}"
-            DEPENDS ${PACKS_BUILDER} "${_dirs_changed}"
+            DEPENDS ${PACKS_BUILDER} "${_listing_changed}"
             DEPFILE "${_depfile}"
             WORKING_DIRECTORY "${NT_ENGINE_ROOT}"
             COMMENT "Building ${PACKS_NAME} pack(s)"

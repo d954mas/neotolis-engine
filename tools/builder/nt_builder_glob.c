@@ -52,6 +52,9 @@ static int glob_strcmp(const void *a, const void *b) { return strcmp(*(const cha
 /* Returns false if glob overflow (too many matches). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn callback, void *user) {
+    /* Recorded even when the directory is missing: creating it later must rebuild. */
+    nt_builder_record_glob(pattern);
+
     /* Split pattern into directory + filename pattern at last separator */
     const char *last_sep = NULL;
     for (const char *p = pattern; *p != '\0'; p++) {
@@ -90,10 +93,9 @@ bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn ca
 
         HANDLE h_find = FindFirstFileA(search_path, &find_data);
         if (h_find == INVALID_HANDLE_VALUE) {
+            free((void *)matches);
             return true;
         }
-        /* A file added to or removed from the directory must rebuild the pack. */
-        nt_builder_record_input(directory);
 
         do {
             if (find_data.cFileName[0] == '.' && (find_data.cFileName[1] == '\0' || (find_data.cFileName[1] == '.' && find_data.cFileName[2] == '\0'))) {
@@ -126,8 +128,6 @@ bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn ca
             free((void *)matches);
             return true;
         }
-        /* A file added to or removed from the directory must rebuild the pack. */
-        nt_builder_record_input(directory);
 
         struct dirent *entry;
         while ((entry = readdir(dir)) != NULL) { // NOLINT(concurrency-mt-unsafe)

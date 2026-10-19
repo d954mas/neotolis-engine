@@ -119,6 +119,11 @@ static cgltf_result gltf_read_input(const struct cgltf_memory_options *memory_op
     if (!file_data) {
         return cgltf_result_file_not_found;
     }
+    /* Like cgltf's own reader: a buffer shorter than its declared byteLength is an error. */
+    if (*size != 0 && file_size < *size) {
+        free(file_data);
+        return cgltf_result_io_error;
+    }
     nt_builder_record_input(path);
     *size = file_size;
     *data = file_data;

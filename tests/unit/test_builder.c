@@ -327,15 +327,39 @@ static void depfile_glob_noop(const char *full_path, void *user) {
     (void)user;
 }
 
+static void depfile_write_bytes(const char *path, const void *data, size_t size) {
+    FILE *file = fopen(path, "wb");
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_EQUAL(size, fwrite(data, 1, size, file));
+    TEST_ASSERT_EQUAL(0, fclose(file));
+}
+
+/* One triangle whose POSITION buffer lives in an external .bin. */
+static void depfile_write_external_gltf(const char *gltf_path, const char *bin_path, size_t bin_size) {
+    static const char gltf[] = "{\"asset\":{\"version\":\"2.0\"},\"buffers\":[{\"uri\":\"tri.bin\",\"byteLength\":36}],"
+                               "\"bufferViews\":[{\"buffer\":0,\"byteLength\":36}],"
+                               "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\","
+                               "\"min\":[0,0,0],\"max\":[1,1,0]}],"
+                               "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0}}]}],"
+                               "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}";
+    static const float positions[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+    depfile_write_bytes(gltf_path, gltf, sizeof(gltf) - 1);
+    depfile_write_bytes(bin_path, positions, bin_size);
+}
+
 /* The input log is process-wide, so earlier tests add lines too: check the
  * inputs of this test and the format, not the whole file. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_write_depfile_lists_every_input_read(void) {
-    const char *glob_dir = TMP_DIR "/depfile in#$";
-    MKDIR(glob_dir);
-    FILE *file = fopen(TMP_DIR "/depfile in#$/a.txt", "wb");
-    TEST_ASSERT_NOT_NULL(file);
-    TEST_ASSERT_EQUAL(0, fclose(file));
+    MKDIR(TMP_DIR "/depfile in#$");
+    uint32_t size = 0;
+    char *png = nt_builder_read_file("assets/textures/lenna.png", &size);
+    TEST_ASSERT_NOT_NULL(png);
+    depfile_write_bytes(TMP_DIR "/depfile in#$/copy.png", png, size);
+    free(png);
+    depfile_write_bytes(TMP_DIR "/depfile in#$/a.txt", "", 0);
+    MKDIR(TMP_DIR "/depfile gltf");
+    depfile_write_external_gltf(TMP_DIR "/depfile gltf/tri.gltf", TMP_DIR "/depfile gltf/tri.bin", 36);
 
     NtStreamLayout layout[] = {{"POSITION", NT_STREAM_FLOAT32, 3, false, 0, NT_LOC_POSITION}};
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/depfile.ntpack");
@@ -343,8 +367,18 @@ void test_write_depfile_lists_every_input_read(void) {
     nt_builder_add_shader(ctx, "assets/shaders/radial.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_mesh(ctx, "assets/meshes/cube.glb", &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
     nt_builder_add_texture(ctx, "assets/textures/lenna.png", NULL);
+    nt_builder_add_texture(ctx, TMP_DIR "/depfile in#$/copy.png", NULL);
+    nt_builder_add_font(ctx, "tests/fixtures/Roboto-Regular.ttf", &(nt_font_opts_t){.charset = NT_CHARSET_ASCII});
+    nt_atlas_opts_t atlas_opts = nt_atlas_opts_defaults();
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "depfile_atlas", &atlas_opts);
+    nt_atlas_add(atlas, "assets/sprites/spineboy/crosshair.png", NULL);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas));
     TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/depfile in#$/*.txt", depfile_glob_noop, NULL));
+    TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/depfile missing/*.png", depfile_glob_noop, NULL));
     nt_builder_free_pack(ctx);
+    nt_glb_scene_t scene = {0};
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, TMP_DIR "/depfile gltf/tri.gltf"));
+    nt_builder_free_glb_scene(&scene);
     /* A second pack of the same process reads the texture again. */
     ctx = nt_builder_start_pack(TMP_DIR "/depfile_second.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
@@ -353,16 +387,26 @@ void test_write_depfile_lists_every_input_read(void) {
 
     const char *depfile_path = TMP_DIR "/depfile.d";
     nt_builder_write_depfile(depfile_path);
-    uint32_t size = 0;
+    char *globs = nt_builder_read_file(TMP_DIR "/depfile.d.globs", &size);
+    TEST_ASSERT_NOT_NULL(globs);
+    /* Globs keep their pattern, unescaped, even for a directory that does not exist. */
+    TEST_ASSERT_NOT_NULL(strstr(globs, "/build/tests/tmp/depfile in#$/*.txt\n"));
+    TEST_ASSERT_NOT_NULL(strstr(globs, "/build/tests/tmp/depfile missing/*.png\n"));
+    free(globs);
     char *text = nt_builder_read_file(depfile_path, &size);
     TEST_ASSERT_NOT_NULL(text);
 
-    /* Read inputs, an #include and the glob directory; paths are absolute and escaped. */
+    /* Every kind of read input, absolute and escaped; globs themselves are not files. */
     TEST_ASSERT_NOT_NULL(strstr(text, "/assets/shaders/radial.frag \\\n"));
     TEST_ASSERT_NOT_NULL(strstr(text, "/assets/shaders/common/radial_sdf.glsl \\\n"));
     TEST_ASSERT_NOT_NULL(strstr(text, "/assets/meshes/cube.glb \\\n"));
-    TEST_ASSERT_NOT_NULL(strstr(text, "/build/tests/tmp/depfile\\ in\\#$$"));
-    TEST_ASSERT_NULL(strstr(text, "a.txt"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/tests/fixtures/Roboto-Regular.ttf"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/assets/sprites/spineboy/crosshair.png"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/build/tests/tmp/depfile\\ gltf/tri.gltf"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/build/tests/tmp/depfile\\ gltf/tri.bin"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/build/tests/tmp/depfile\\ in\\#$$/copy.png"));
+    TEST_ASSERT_NULL(strstr(text, "in\\#$$/a.txt"));
+    TEST_ASSERT_NULL(strstr(text, "*"));
     TEST_ASSERT_NULL(strchr(text, '\r'));
 
     /* A target line, then one absolute path per line; a file read twice is listed once. */
@@ -387,6 +431,13 @@ void test_write_depfile_lists_every_input_read(void) {
     }
     TEST_ASSERT_EQUAL_UINT32(1, lenna_count);
     free(text);
+}
+
+void test_gltf_external_buffer_shorter_than_declared_fails(void) {
+    MKDIR(TMP_DIR "/depfile gltf short");
+    depfile_write_external_gltf(TMP_DIR "/depfile gltf short/tri.gltf", TMP_DIR "/depfile gltf short/tri.bin", 12);
+    nt_glb_scene_t scene = {0};
+    EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_parse_glb_scene(&scene, TMP_DIR "/depfile gltf short/tri.gltf"), "failed to load glTF buffers");
 }
 
 /* --- Pack writer core tests --- */
@@ -9545,6 +9596,7 @@ int main(void) {
     RUN_TEST(test_hash_different_strings_differ);
     RUN_TEST(test_read_file_bounded_rejects_before_read);
     RUN_TEST(test_write_depfile_lists_every_input_read);
+    RUN_TEST(test_gltf_external_buffer_shorter_than_declared_fails);
 
     /* Pack writer core */
     RUN_TEST(test_start_pack_returns_context);

@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -15,8 +16,8 @@ FIXTURE_BUILDER = r"""import json
 from pathlib import Path
 
 source = Path(SOURCE)
-raw = source / "raw"
-reads = sorted(p for p in raw.glob("*") if p.is_file())
+patterns = [source / "raw" / "*.txt", source / "later" / "*.txt"]
+reads = [p for pattern in patterns for p in sorted(pattern.parent.glob(pattern.name)) if p.is_file()]
 reads.append(source / "shared shaders" / "shader.txt")
 out = Path(__file__).parent
 files = {p.relative_to(source).as_posix(): p.read_text() for p in reads}
@@ -29,8 +30,10 @@ def esc(path):
 
 
 depfile = out / "build_packs.d"
-inputs = sorted({esc(p) for p in [*reads, raw]})
+inputs = sorted({esc(p) for p in reads})
 depfile.write_text(esc(depfile) + ":" + "".join(" \\\n  " + i for i in inputs) + "\n", newline="\n")
+globs = "".join(p.resolve().as_posix() + "\n" for p in patterns)
+(out / "build_packs.d.globs").write_text(globs, newline="\n")
 """
 
 
@@ -45,6 +48,7 @@ class ExamplePacksTests(unittest.TestCase):
         self.packs.mkdir()
         self.raw = self.source / "raw"
         self.raw.mkdir()
+        self.later = self.source / "later"
         self.shared = self.source / "shared shaders"
         self.shared.mkdir()
         self.asset = self.raw / "font.txt"
@@ -52,8 +56,8 @@ class ExamplePacksTests(unittest.TestCase):
         (self.shared / "shader.txt").write_text("shader", encoding="utf-8")
         # Python accepts a directory containing __main__.py as its program.
         # This fixture exercises the real CMake build/copy graph without codecs:
-        # it globs raw/*, reads one shared shader and writes the depfile the way
-        # nt_builder_write_depfile does.
+        # it globs raw/*.txt and the missing later/*.txt, reads one shared shader
+        # and writes the depfile and glob list the way nt_builder_write_depfile does.
         (self.packs / "__main__.py").write_text(
             FIXTURE_BUILDER.replace("SOURCE", repr(str(self.source))), encoding="utf-8")
         self.write_project()
@@ -89,9 +93,10 @@ nt_example_packs(
 
     def build_and_check(self):
         self.run_cmake("--build", self.build)
+        globbed = [*self.raw.glob("*.txt"), *self.later.glob("*.txt")]
         expected = {
             p.relative_to(self.source).as_posix(): p.read_text(encoding="utf-8")
-            for p in [*(p for p in self.raw.glob("*") if p.is_file()), self.shared / "shader.txt"]
+            for p in [*globbed, self.shared / "shader.txt"]
         }
         for path in (self.packs / "fixture.ntpack", self.build / "assets/fixture.ntpack"):
             self.assertEqual(json.loads(path.read_text(encoding="utf-8")), expected)
@@ -130,10 +135,30 @@ nt_example_packs(
         self.assert_rebuilds(add_old_file)
         self.assert_rebuilds(added.unlink)
         self.assert_rebuilds(lambda: (self.shared / "shader.txt").write_text("edited include", encoding="utf-8"))
-        # Not read by the builder: a neighbour of a read file is not an input.
+        # Not read by the builder: a neighbour of a read file, or a file the glob does not match.
         self.assert_rebuilds(lambda: (self.shared / "unused.txt").write_text("unused", encoding="utf-8"), rebuilds=False)
+        self.assert_rebuilds(lambda: (self.raw / "notes.md").write_text("notes", encoding="utf-8"), rebuilds=False)
         self.assert_rebuilds(self.asset.unlink)
         self.assert_rebuilds(lambda: self.asset.write_text("restored into empty directory", encoding="utf-8"))
+
+        # A globbed directory that did not exist when the builder ran.
+        def create_later():
+            self.later.mkdir()
+            (self.later / "art.txt").write_text("art", encoding="utf-8")
+
+        self.assert_rebuilds(create_later)
+        self.assert_rebuilds(lambda: shutil.rmtree(self.later))
+
+    def test_builder_without_depfile_fails_the_build(self):
+        main = self.packs / "__main__.py"
+        main.write_text(main.read_text(encoding="utf-8").split("\ndepfile = ")[0] + "\n", encoding="utf-8")
+        self.configure()
+        result = subprocess.run(
+            ["cmake", "--build", str(self.build)], capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("nt_builder_write_depfile", result.stdout + result.stderr)
 
     def test_wasm_and_skipped_native_only_copy_prebuilt_packs(self):
         self.configure()

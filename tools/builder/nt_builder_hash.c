@@ -3,6 +3,10 @@
 #include "hash/nt_hash.h"
 /* clang-format on */
 
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity,clang-analyzer-core.UndefinedBinaryOperatorResult)
 char *nt_builder_normalize_path(const char *path) {
     if (!path) {
@@ -161,35 +165,73 @@ char *nt_builder_read_file(const char *path, uint32_t *out_size) {
 
 /* One builder process is one CMake build step that may write several packs,
  * so the inputs belong to the process, not to a pack context. */
-static char **s_inputs;
-static uint32_t s_input_count;
-static uint32_t s_input_capacity;
+typedef struct {
+    char **paths;
+    uint32_t count;
+    uint32_t capacity;
+} NtPathLog;
 
-void nt_builder_record_input(const char *path) {
-    /* CMake resolves relative depfile paths against the binary dir, not the
-     * builder's working directory. */
+static NtPathLog s_inputs;
+static NtPathLog s_globs;
+
+/* CMake resolves relative depfile paths against the binary dir, not the
+ * builder's working directory. Glob patterns need not exist, so no realpath. */
+static char *absolute_path(const char *path) {
 #ifdef _WIN32
     char *abs_path = _fullpath(NULL, path, 0);
 #else
-    char *abs_path = realpath(path, NULL);
+    while (path[0] == '.' && path[1] == '/') {
+        path += 2;
+    }
+    char *abs_path = NULL;
+    char cwd[4096];
+    if (path[0] == '/') {
+        abs_path = strdup(path);
+    } else if (getcwd(cwd, sizeof(cwd)) != NULL) {
+        size_t size = strlen(cwd) + strlen(path) + 2;
+        abs_path = (char *)malloc(size);
+        if (abs_path) {
+            (void)snprintf(abs_path, size, "%s/%s", cwd, path);
+        }
+    }
 #endif
-    NT_BUILD_ASSERT(abs_path && "record_input: cannot resolve path");
+    NT_BUILD_ASSERT(abs_path && "depfile: cannot make path absolute");
     for (char *c = abs_path; *c != '\0'; c++) {
         if (*c == '\\') {
             *c = '/';
         }
     }
-    if (s_input_count == s_input_capacity) {
-        uint32_t capacity = s_input_capacity ? s_input_capacity * 2U : 256U;
-        char **grown = (char **)realloc((void *)s_inputs, (size_t)capacity * sizeof(char *));
-        NT_BUILD_ASSERT(grown && "record_input: out of memory");
-        s_inputs = grown;
-        s_input_capacity = capacity;
-    }
-    s_inputs[s_input_count++] = abs_path;
+    return abs_path;
 }
 
+static void path_log_push(NtPathLog *log, const char *path) {
+    if (log->count == log->capacity) {
+        uint32_t capacity = log->capacity ? log->capacity * 2U : 256U;
+        char **grown = (char **)realloc((void *)log->paths, (size_t)capacity * sizeof(char *));
+        NT_BUILD_ASSERT(grown && "depfile: out of memory");
+        log->paths = grown;
+        log->capacity = capacity;
+    }
+    log->paths[log->count++] = absolute_path(path);
+}
+
+void nt_builder_record_input(const char *path) { path_log_push(&s_inputs, path); }
+
+void nt_builder_record_glob(const char *pattern) { path_log_push(&s_globs, pattern); }
+
 static int input_strcmp(const void *a, const void *b) { return strcmp(*(const char *const *)a, *(const char *const *)b); }
+
+static void path_log_sort(NtPathLog *log) {
+    if (log->count > 1) {
+        qsort((void *)log->paths, log->count, sizeof(char *), input_strcmp);
+    }
+}
+
+static void close_output(FILE *file) {
+    bool write_failed = ferror(file) != 0;
+    write_failed |= fclose(file) != 0;
+    NT_BUILD_ASSERT(!write_failed && "write_depfile: write failed");
+}
 
 static void write_depfile_path(FILE *file, const char *path) {
     for (const char *c = path; *c != '\0'; c++) {
@@ -202,26 +244,37 @@ static void write_depfile_path(FILE *file, const char *path) {
     }
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+/* Plain text, one pattern per line: the build step re-lists them to see added
+ * or removed files (cmake/nt_pack_globs.cmake). */
+static void write_glob_list(const char *depfile_path) {
+    path_log_sort(&s_globs);
+    char globs_path[1024];
+    (void)snprintf(globs_path, sizeof(globs_path), "%s.globs", depfile_path);
+    FILE *file = fopen(globs_path, "wb");
+    NT_BUILD_ASSERT(file && "write_depfile: cannot open glob list");
+    for (uint32_t i = 0; i < s_globs.count; i++) {
+        if (i == 0 || strcmp(s_globs.paths[i], s_globs.paths[i - 1]) != 0) {
+            (void)fprintf(file, "%s\n", s_globs.paths[i]);
+        }
+    }
+    close_output(file);
+}
+
 void nt_builder_write_depfile(const char *path) {
     NT_BUILD_ASSERT(path && "write_depfile: path is required");
-    if (s_input_count > 1) {
-        qsort((void *)s_inputs, s_input_count, sizeof(char *), input_strcmp);
-    }
+    path_log_sort(&s_inputs);
     FILE *file = fopen(path, "wb");
     NT_BUILD_ASSERT(file && "write_depfile: cannot open output");
-    /* Ninja keys the deps to the build step's own output; the target is informational. */
+    /* With a deps log (CMake 3.29+) ninja keys the deps to the step's own output. */
     write_depfile_path(file, path);
     (void)fputc(':', file);
-    for (uint32_t i = 0; i < s_input_count; i++) {
-        if (i > 0 && strcmp(s_inputs[i], s_inputs[i - 1]) == 0) {
-            continue;
+    for (uint32_t i = 0; i < s_inputs.count; i++) {
+        if (i == 0 || strcmp(s_inputs.paths[i], s_inputs.paths[i - 1]) != 0) {
+            (void)fputs(" \\\n  ", file);
+            write_depfile_path(file, s_inputs.paths[i]);
         }
-        (void)fputs(" \\\n  ", file);
-        write_depfile_path(file, s_inputs[i]);
     }
     (void)fputc('\n', file);
-    bool write_failed = ferror(file) != 0;
-    write_failed |= fclose(file) != 0;
-    NT_BUILD_ASSERT(!write_failed && "write_depfile: write failed");
+    close_output(file);
+    write_glob_list(path);
 }

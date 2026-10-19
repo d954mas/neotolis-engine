@@ -44,17 +44,19 @@ they were stale.
 Packs depend on the builder executable and on the builder's own depfile: each
 `build_packs.c` ends with `nt_builder_write_depfile("<pack dir>/build_packs.d")`,
 which lists every file the builder read, shader includes and glTF buffers
-included, plus every directory a glob walked (see the builder spec, "Dependency
-file"). Editing a read file reruns the builder; files it does not read never do.
-A small always-run step (`cmake/nt_pack_dirs.cmake`) compares the file lists of
-those glob directories with the last build, so adding or removing a file in a
-globbed directory also reruns it, even with an old timestamp. It compares
-listings rather than directory mtimes because on Windows ninja reads a
-directory's mtime from its parent's listing, which NTFS updates lazily.
+included, and writes `build_packs.d.globs` with every glob pattern it walked
+(see the builder spec, "Dependency file"). Editing a read file reruns the
+builder. A small always-run step (`cmake/nt_pack_globs.cmake`) re-lists those
+patterns, so adding or removing a matching file reruns it too, even with an old
+timestamp or in a directory that did not exist yet. Other files never rerun it.
+It compares listings rather than directory mtimes because on Windows ninja reads
+a directory's mtime from its parent's listing, which NTFS updates lazily. Native
+example packs need CMake 3.29+.
 
 A new `build_packs.c` must call `nt_builder_write_depfile` last, after every
-pack succeeded. Files the game reads itself (existence probes, data passed as
-memory) are not listed. Skipped examples do not rebuild packs. WASM still
+pack succeeded; the build fails when it does not. Files the game reads itself
+(existence probes, data passed as memory) are not listed. Skipped examples do
+not rebuild packs. WASM still
 requires a native build after asset edits; reconfigure WASM if the required pack
 set changes, such as adding Bunnymark HD art.
 
