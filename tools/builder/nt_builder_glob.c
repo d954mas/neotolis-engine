@@ -340,6 +340,28 @@ static void record_path(const char *dir, char *out, size_t out_size) {
     NT_BUILD_ASSERT(len > 0 && (size_t)len < out_size && "build record: path too long");
 }
 
+/* mtime of the running builder executable. */
+static int64_t builder_mtime(void) {
+    char exe[4096];
+#ifdef _WIN32
+    DWORD len = GetModuleFileNameA(NULL, exe, (DWORD)sizeof(exe));
+    NT_BUILD_ASSERT(len > 0 && len < sizeof(exe) && "build record: cannot find the builder executable");
+#elif defined(__APPLE__)
+    uint32_t exe_size = (uint32_t)sizeof(exe);
+    int found = _NSGetExecutablePath(exe, &exe_size);
+    NT_BUILD_ASSERT(found == 0 && "build record: cannot find the builder executable");
+#else
+    ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    NT_BUILD_ASSERT(len > 0 && (size_t)len < sizeof(exe) - 1 && "build record: cannot find the builder executable");
+    exe[len] = '\0';
+#endif
+    int64_t mtime = 0;
+    int64_t size = 0;
+    file_stat(exe, &mtime, &size);
+    NT_BUILD_ASSERT(mtime >= 0 && "build record: cannot stat the builder executable");
+    return mtime;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_write_record(const char *dir) {
     NT_BUILD_ASSERT(dir && "write_record: dir is required");
@@ -358,6 +380,7 @@ void nt_builder_write_record(const char *dir) {
     }
     FILE *file = fopen(tmp_path, "wb");
     NT_BUILD_ASSERT(file && "write_record: cannot open output");
+    (void)fprintf(file, "builder %lld\n", (long long)builder_mtime());
     for (uint32_t i = 0; i < s_record_count; i++) {
         const NtRecordLine *line = &s_record[i];
         if (i > 0 && line->kind == s_record[i - 1].kind && strcmp(line->text, s_record[i - 1].text) == 0) {
@@ -375,31 +398,6 @@ void nt_builder_write_record(const char *dir) {
     /* Replace, never rewrite in place: a torn record must not look up to date. */
     bool published = nt_builder_publish_file(tmp_path, path);
     NT_BUILD_ASSERT(published && "write_record: cannot publish");
-}
-
-/* The record cannot list the builder itself: a builder linked after the record
- * was written rebuilds. */
-static int64_t builder_mtime(void) {
-    char exe[4096];
-#ifdef _WIN32
-    DWORD len = GetModuleFileNameA(NULL, exe, (DWORD)sizeof(exe));
-    NT_BUILD_ASSERT(len > 0 && len < sizeof(exe) && "up_to_date: cannot find the builder executable");
-#elif defined(__APPLE__)
-    uint32_t exe_size = (uint32_t)sizeof(exe);
-    int found = _NSGetExecutablePath(exe, &exe_size);
-    NT_BUILD_ASSERT(found == 0 && "up_to_date: cannot find the builder executable");
-#else
-    ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
-    NT_BUILD_ASSERT(len > 0 && (size_t)len < sizeof(exe) - 1 && "up_to_date: cannot find the builder executable");
-    exe[len] = '\0';
-#endif
-    int64_t mtime = 0;
-    int64_t size = 0;
-    file_stat(exe, &mtime, &size);
-    /* An unreadable path (non-ANSI on Windows, a replaced exe on Linux) would
-     * otherwise pass as "older than any record". */
-    NT_BUILD_ASSERT(mtime >= 0 && "up_to_date: cannot stat the builder executable");
-    return mtime;
 }
 
 /* Re-lists a recorded glob and compares it with the "  <name>" lines at
@@ -434,11 +432,11 @@ bool nt_builder_up_to_date(const char *dir) {
     record_path(dir, path, sizeof(path));
     uint32_t size = 0;
     char *text = nt_builder_read_file(path, &size);
-    int64_t record_mtime = 0;
-    int64_t record_size = 0;
-    file_stat(path, &record_mtime, &record_size);
-    bool same = text != NULL && builder_mtime() < record_mtime;
-    for (char *line = text; same && *line != '\0';) {
+    /* "builder <mtime>" names the executable that wrote the packs: a newer one
+     * (relinked code) rebuilds, an older one of another preset does not. */
+    char *line = (text && strncmp(text, "builder ", 8) == 0) ? strchr(text, '\n') : NULL;
+    bool same = line != NULL && builder_mtime() <= strtoll(text + 8, NULL, 10);
+    for (line = same ? line + 1 : NULL; same && *line != '\0';) {
         char *end = strchr(line, '\n');
         if (!end) {
             same = false;

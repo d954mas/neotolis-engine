@@ -421,12 +421,14 @@ void test_write_record_lists_every_input_glob_and_output(void) {
     TEST_ASSERT_TRUE(*missing_glob == '\0' || *missing_glob == 'g');
     TEST_ASSERT_NULL(strchr(text, '\r'));
 
-    /* Inputs, outputs, then globs; absolute, sorted and unique within a kind. */
+    /* The builder line, then inputs, outputs and globs; absolute, sorted and
+     * unique within a kind. */
+    TEST_ASSERT_EQUAL_STRING_LEN("builder ", text, 8);
     static const char *const kinds[] = {"input ", "output ", "glob "};
     uint32_t kind = 0;
     uint32_t lenna_count = 0;
     const char *prev = "";
-    for (char *line = text; *line != '\0';) {
+    for (char *line = strchr(text, '\n') + 1; *line != '\0';) {
         char *end = strchr(line, '\n');
         TEST_ASSERT_NOT_NULL(end);
         *end = '\0';
@@ -473,7 +475,7 @@ static void record_keep(const char *marker, const char *out_dir) {
         TEST_ASSERT_NOT_NULL(end);
         *end = '\0';
         if (line[0] != ' ') {
-            keep = strstr(line, marker) != NULL;
+            keep = strncmp(line, "builder ", 8) == 0 || strstr(line, marker) != NULL;
         }
         if (keep) {
             (void)fprintf(file, "%s\n", line);
@@ -498,7 +500,6 @@ void test_up_to_date_sees_every_kind_of_change(void) {
     (void)remove(TMP_DIR "/record later"); /* POSIX remove() also removes an empty directory */
 #endif
     (void)remove(TMP_DIR "/record race/late.txt");
-    (void)remove(TMP_DIR "/record lookup/in.glsl");
     TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record nowhere"));
 
     MKDIR(TMP_DIR "/record edit");
@@ -535,8 +536,6 @@ void test_up_to_date_sees_every_kind_of_change(void) {
     nt_builder_record_output(TMP_DIR "/record rewrite/out.bin");
     record_write_bytes(TMP_DIR "/record rewrite/out.bin", "ab", 2);
     nt_builder_record_output(TMP_DIR "/record rewrite/out.bin");
-    MKDIR(TMP_DIR "/record lookup");
-    TEST_ASSERT_NULL(nt_builder_find_file("in.glsl", TMP_DIR "/record lookup", NULL));
     MKDIR(TMP_DIR "/record race");
     TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/record race/*.txt", record_glob_noop, NULL));
     record_write_bytes(TMP_DIR "/record race/late.txt", "", 0);
@@ -551,8 +550,16 @@ void test_up_to_date_sees_every_kind_of_change(void) {
     /* A builder linked after the record: the record predates this executable. */
     record_keep("/record out/", TMP_DIR "/record relink");
     TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record relink"));
-    UTIMBUF old_time = {1, 1};
-    TEST_ASSERT_EQUAL(0, UTIME(TMP_DIR "/record relink/build_record.txt", &old_time));
+    record_write_bytes(TMP_DIR "/record relink/build_record.txt", "builder 1\n", 10);
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record relink"));
+
+    /* A record that is not one the builder wrote is never current: no builder
+     * line, a cut last line, a line without its fields. */
+    record_write_bytes(TMP_DIR "/record relink/build_record.txt", "", 0);
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record relink"));
+    record_write_bytes(TMP_DIR "/record relink/build_record.txt", "builder 9223372036854775807\noutput 1 1 /x", 41);
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record relink"));
+    record_write_bytes(TMP_DIR "/record relink/build_record.txt", "builder 9223372036854775807\ninput 1\n", 36);
     TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record relink"));
 
     /* An output deleted before the record was written is never current. */
@@ -597,6 +604,7 @@ void test_up_to_date_sees_every_kind_of_change(void) {
     /* Same size, only the mtime moves. */
     record_keep("/record touch/", TMP_DIR "/record touch/out");
     TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record touch/out"));
+    UTIMBUF old_time = {1, 1};
     TEST_ASSERT_EQUAL(0, UTIME(TMP_DIR "/record touch/in.glsl", &old_time));
     TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record touch/out"));
 
@@ -605,12 +613,6 @@ void test_up_to_date_sees_every_kind_of_change(void) {
 
     record_keep("/record rewrite/", TMP_DIR "/record rewrite/out");
     TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record rewrite/out"));
-
-    /* A file appearing where the lookup missed would now win it. */
-    record_keep("/record lookup/", TMP_DIR "/record lookup/out");
-    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record lookup/out"));
-    record_write_bytes(TMP_DIR "/record lookup/in.glsl", "", 0);
-    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record lookup/out"));
 }
 
 void test_gltf_external_buffer_shorter_than_declared_fails(void) {

@@ -5,6 +5,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include <direct.h>
+#define MKDIR(p) _mkdir(p)
+#else
+#include <sys/stat.h>
+#define MKDIR(p) mkdir(p, 0755)
+#endif
+
 static const char *const s_sky_faces[6] = {"PositiveX", "NegativeX", "PositiveY", "NegativeY", "PositiveZ", "NegativeZ"};
 
 static NtBuilderContext *start_pack(const char *directory, const char *name) {
@@ -132,6 +140,7 @@ int main(int argc, char **argv) {
     if (nt_builder_up_to_date(argv[1])) {
         return 0;
     }
+    MKDIR(argv[1]);
     build_core(argv[1]);
     build_space(argv[1]);
     build_ui(argv[1]);

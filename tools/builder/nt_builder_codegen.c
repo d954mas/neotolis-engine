@@ -368,7 +368,6 @@ void nt_builder_merge_headers(const char *const *header_paths, uint32_t count, c
     uint32_t entry_count = 0;
 
     for (uint32_t hi = 0; hi < count; hi++) {
-        nt_builder_record_input(header_paths[hi]);
         FILE *f = fopen(header_paths[hi], "r");
         if (!f) {
             NT_LOG_ERROR("merge_headers: could not open '%s'", header_paths[hi]);
@@ -482,7 +481,10 @@ void nt_builder_merge_headers(const char *const *header_paths, uint32_t count, c
     write_register_labels(f, func_prefix, ce, entry_count);
 
     (void)fprintf(f, "#endif /* %s */\n", guard);
-    (void)fclose(f);
+    /* A torn header recorded as an output would look current forever. */
+    bool header_ok = (ferror(f) == 0);
+    header_ok = (fclose(f) == 0) && header_ok;
+    NT_BUILD_ASSERT(header_ok && "merge_headers: write failed");
     nt_builder_record_output(output_path);
 
     NT_LOG_INFO("Generated merged header: %s (%u assets from %u packs)", output_path, entry_count, count);

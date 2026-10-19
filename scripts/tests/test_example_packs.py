@@ -58,6 +58,7 @@ nt_example_packs(
             encoding="utf-8", errors="replace",
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return result.stdout
 
     def configure(self, *args):
         self.run_cmake("-S", self.source, "-B", self.build, "-G", "Ninja", *args)
@@ -71,12 +72,13 @@ nt_example_packs(
         self.assertEqual((self.build / "assets/fixture.ntpack").read_text(encoding="utf-8"), "original")
         before = self.mtimes()
         time.sleep(1.1)
-        # The builder decides: an untouched pack is neither rewritten nor copied again.
-        self.run_cmake("--build", self.build)
+        # The builder decides: an untouched pack is neither rewritten nor copied
+        # again (restat skips the copy edge, not just copy_if_different).
+        self.assertNotIn("Copying", self.run_cmake("--build", self.build))
         self.assertEqual(self.mtimes(), before)
 
         self.asset.write_text("edited", encoding="utf-8")
-        self.run_cmake("--build", self.build)
+        self.assertIn("Copying", self.run_cmake("--build", self.build))
         self.assertEqual((self.build / "assets/fixture.ntpack").read_text(encoding="utf-8"), "edited")
         self.assertTrue(all(a > b for a, b in zip(self.mtimes(), before)))
 

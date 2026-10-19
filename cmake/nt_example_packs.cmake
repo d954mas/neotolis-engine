@@ -27,7 +27,6 @@ function(nt_example_packs)
         # build_record.txt is current (nt_builder_up_to_date).
         set(_build_target ${PACKS_NAME}_pack_build)
         add_custom_target(${_build_target}
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKS_PACK_DIR}"
             COMMAND "$<TARGET_FILE:${PACKS_BUILDER}>" "${PACKS_PACK_DIR}"
             BYPRODUCTS ${_pack_files}
             WORKING_DIRECTORY "${NT_ENGINE_ROOT}"
