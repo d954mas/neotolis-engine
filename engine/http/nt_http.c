@@ -207,8 +207,8 @@ nt_result_t nt_http_init(void) {
     }
 
     /* Slots are NOT cleared here: nt_http_shutdown left them zeroed with their
-     * generations bumped and preserved, so a callback from a previous lifecycle
-     * of the module can never match a new handle (first boot: static zero). */
+     * generations bumped and preserved, so a handle from a previous lifecycle
+     * of the module can never match a new request (first boot: static zero). */
     s_http.queue_top = NT_HTTP_MAX_REQUESTS;
     for (uint16_t i = 0; i < NT_HTTP_MAX_REQUESTS; i++) {
         s_http.free_queue[i] = (uint16_t)(NT_HTTP_MAX_REQUESTS - i);
@@ -228,10 +228,9 @@ void nt_http_shutdown(void) {
         return;
     }
     nt_http_backend_shutdown();
-    /* Bump and PRESERVE every generation: completions of fetches aborted above are
-     * already scheduled on the web backend and fire later — after the bump they
-     * mismatch, across any number of shutdown/init cycles. One staleness mechanism
-     * (the generation) covers both slot reuse and module re-init. */
+    /* Bump and PRESERVE every generation: a handle kept across shutdown mismatches
+     * after any number of shutdown/init cycles. One staleness mechanism (the
+     * generation) covers both slot reuse and module re-init. */
     for (uint16_t i = 1; i <= NT_HTTP_MAX_REQUESTS; i++) {
         NtHttpSlot *slot = &s_http.slots[i];
         http_free_slot_buffers(slot);
@@ -347,12 +346,7 @@ uint8_t *nt_http_take_data(nt_http_request_t req, uint32_t *out_size) {
     uint32_t sz = slot->size;
     slot->data = NULL;
     slot->size = 0;
-    /* Canonical empty contract: web hands over malloc(0) (non-NULL under emmalloc),
-     * native hands over NULL — normalize so both backends return NULL/0 */
-    if (sz == 0) {
-        free(ptr);
-        ptr = NULL;
-    }
+    NT_ASSERT((ptr == NULL) == (sz == 0)); /* backends hand an empty body over as NULL */
 
     if (out_size) {
         *out_size = sz;
@@ -368,13 +362,13 @@ void nt_http_free(nt_http_request_t req) {
     }
 
     /* Cancel in-flight backend request (aborts fetch on web, curl transfer on native) */
-    if (slot->state == (uint8_t)NT_HTTP_STATE_PENDING || slot->state == (uint8_t)NT_HTTP_STATE_DOWNLOADING) {
+    if (nt_http_slot_in_flight(slot)) {
         nt_http_backend_cancel(index);
     }
 
-    /* No scalar clearing needed: after the generation bump below the slot is
-     * unreachable through any handle, and every field is re-initialized on the
-     * next allocation (http_copy_request + nt_http_request_ex). */
+    /* The web backend finds in-flight transfers by state; every other field is
+     * re-initialized on the next allocation (http_copy_request + nt_http_request_ex). */
+    slot->state = (uint8_t)NT_HTTP_STATE_NONE;
     http_free_slot_buffers(slot);
 
     /* Increment generation so stale handles are rejected */
@@ -390,7 +384,7 @@ void nt_http_free(nt_http_request_t req) {
     s_http.queue_top++;
 }
 
-/* ---- Backend access (for web callbacks) ---- */
+/* ---- Backend access ---- */
 
 NtHttpSlot *nt_http_get_slot(uint16_t slot_index) {
     if (slot_index == 0 || slot_index > NT_HTTP_MAX_REQUESTS) {

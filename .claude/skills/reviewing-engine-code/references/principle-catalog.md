@@ -169,7 +169,7 @@ declared dep pulls the helper today (release is broken now); P2 if it currently 
 transitively (latent).
 **Cite:** docs/build.md §"Checks" (EM_JS_DEPS gate) + `scripts/check_emjs_deps.sh` header.
 **Scope:** `engine/*/web/`, any TU with `EM_JS`/`EM_ASM`.
-✅ `EM_JS_DEPS(nt_http_web, "$UTF8ToString,malloc")` and the body uses exactly those.
+✅ `EM_JS_DEPS(nt_http_web, "$UTF8ToString")` and the body uses exactly that helper.
 ❌ body calls `lengthBytesUTF8(text)` while `EM_JS_DEPS` lists only `$stringToNewUTF8,$UTF8ToString`.
 
 ## 14. Cache identity is exact, or hashed whole — never a linear fold — P0/P1

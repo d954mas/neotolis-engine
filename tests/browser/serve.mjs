@@ -50,7 +50,10 @@ const server = createServer(async (req, res) => {
       res.setHeader('Content-Type', 'application/octet-stream');
       res.setHeader('X-Echo-Content-Type', req.headers['content-type'] || '');
       res.setHeader('X-Echo-X-Nt-Test', req.headers['x-nt-test'] || '');
-      res.end(Buffer.concat(chunks));
+      // Two writes 50 ms apart: the fetch stream yields at least two chunks to reassemble.
+      const body = Buffer.concat(chunks);
+      res.write(body.subarray(0, body.length >> 1));
+      setTimeout(() => res.end(body.subarray(body.length >> 1)), 50);
     });
     return;
   }
@@ -60,7 +63,9 @@ const server = createServer(async (req, res) => {
     return;
   }
   if (urlPath === '/slow') {
-    // Stalls 5 s: the timeout/cancel browser tests abort long before this fires.
+    // Headers go out at once, the body stalls 5 s: the timeout/cancel browser tests abort long before.
+    res.setHeader('Content-Length', '2');
+    res.flushHeaders();
     setTimeout(() => res.end('ok'), 5000);
     return;
   }

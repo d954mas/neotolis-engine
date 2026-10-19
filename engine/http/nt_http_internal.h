@@ -30,6 +30,9 @@ typedef struct {
 
 NtHttpSlot *nt_http_get_slot(uint16_t slot_index);
 
+/* The backend owns a transfer for the slot: cancel on free, poll on web */
+static inline bool nt_http_slot_in_flight(const NtHttpSlot *slot) { return slot->state == (uint8_t)NT_HTTP_STATE_PENDING || slot->state == (uint8_t)NT_HTTP_STATE_DOWNLOADING; }
+
 /* ---- Backend functions (implemented per platform) ----
  * Request parameters are read from the slot's request fields, which stay valid
  * until nt_http_free / nt_http_shutdown. */
