@@ -301,8 +301,11 @@ Generated asset headers are committed to git. This is intentional:
 builder process read, for a build system to rerun the builder exactly when an
 input changes (CMake `add_custom_command(DEPFILE)`) and for release audits of
 pack inputs, plus `<path>.globs`: every pattern `nt_builder_glob_iterate`
-walked, absolute, one per line, including patterns whose directory did not
-exist. A build step re-lists the patterns to see added or removed files.
+walked (absolute, on its own line, also when its directory did not exist),
+each followed by the names it matched as `  <name>` lines. Patterns use `*`
+and `?`, match file names case-sensitively and skip directories. A build step
+re-lists the patterns the same way and reruns the builder when the result
+differs from what the builder saw.
 
 - **Complete for builder reads:** the resolved file of every `add_*` and atlas
   sprite, every shader `#include`, and every file cgltf opens (`.gltf`/`.glb`

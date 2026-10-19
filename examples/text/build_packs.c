@@ -24,14 +24,9 @@
 
 /* ---- Font path ---- */
 
-/* LilitaOne-RussianChineseKo.ttf (SIL OFL license).
- * Fallback to system Arial for development if custom font not present. */
+/* LilitaOne-RussianChineseKo.ttf (SIL OFL license). */
 #ifndef FONT_PATH
 #define FONT_PATH "assets/fonts/LilitaOne-RussianChineseKo.ttf"
-#endif
-
-#ifndef FALLBACK_FONT_PATH
-#define FALLBACK_FONT_PATH "C:/Windows/Fonts/arial.ttf"
 #endif
 
 /* ---- Charsets ---- */
@@ -158,29 +153,6 @@ static const char *pack_path(const char *dir, const char *name) {
     return s_path_buf;
 }
 
-/* ---- Resolve font path (prefer custom, fallback to system) ---- */
-
-static bool s_has_primary_font;
-
-static const char *resolve_font_path(void) {
-    FILE *f = fopen(FONT_PATH, "rb");
-    if (f) {
-        (void)fclose(f);
-        s_has_primary_font = true;
-        return FONT_PATH;
-    }
-    (void)printf("WARNING: %s not found, falling back to %s\n", FONT_PATH, FALLBACK_FONT_PATH);
-    (void)printf("NOTE: CJK pack will be skipped (fallback font lacks CJK glyphs)\n");
-    s_has_primary_font = false;
-    f = fopen(FALLBACK_FONT_PATH, "rb");
-    if (f) {
-        (void)fclose(f);
-        return FALLBACK_FONT_PATH;
-    }
-    (void)fprintf(stderr, "ERROR: No font file available\n");
-    return NULL;
-}
-
 /* ---- Main ---- */
 
 int main(int argc, char *argv[]) {
@@ -198,13 +170,7 @@ int main(int argc, char *argv[]) {
     MKDIR(out_dir);
     MKDIR(cache_dir);
     MKDIR(header_dir);
-
-    /* Resolve font */
-    const char *font_path = resolve_font_path();
-    if (!font_path) {
-        return 1;
-    }
-    (void)printf("Using font: %s\n\n", font_path);
+    const char *font_path = FONT_PATH;
 
     // #region Pack 1: text_base.ntpack (Slug shaders + Latin/Cyrillic font)
     {
@@ -244,7 +210,7 @@ int main(int argc, char *argv[]) {
     // #endregion
 
     // #region Pack 2: text_cjk.ntpack (CJK font resource)
-    if (s_has_primary_font) {
+    {
         (void)printf("--- Building text_cjk.ntpack ---\n");
 
         /* Generate full CJK charset — only codepoints present in the font */
@@ -273,8 +239,6 @@ int main(int argc, char *argv[]) {
             return 1;
         }
         (void)printf("Built: text_cjk.ntpack\n\n");
-    } else {
-        (void)printf("--- Skipping text_cjk.ntpack (fallback font lacks CJK) ---\n\n");
     }
     // #endregion
 
@@ -282,21 +246,12 @@ int main(int argc, char *argv[]) {
     {
         char base_hdr[512];
         (void)snprintf(base_hdr, sizeof(base_hdr), "%s/text_base.h", header_dir);
-
-        if (s_has_primary_font) {
-            char cjk_hdr[512];
-            (void)snprintf(cjk_hdr, sizeof(cjk_hdr), "%s/text_cjk.h", header_dir);
-            const char *pack_headers[] = {base_hdr, cjk_hdr};
-            char combined[512];
-            (void)snprintf(combined, sizeof(combined), "%s/text_assets.h", header_dir);
-            nt_builder_merge_headers(pack_headers, 2, combined);
-        } else {
-            /* Base-only: just copy the base header as the combined one */
-            const char *pack_headers[] = {base_hdr};
-            char combined[512];
-            (void)snprintf(combined, sizeof(combined), "%s/text_assets.h", header_dir);
-            nt_builder_merge_headers(pack_headers, 1, combined);
-        }
+        char cjk_hdr[512];
+        (void)snprintf(cjk_hdr, sizeof(cjk_hdr), "%s/text_cjk.h", header_dir);
+        const char *pack_headers[] = {base_hdr, cjk_hdr};
+        char combined[512];
+        (void)snprintf(combined, sizeof(combined), "%s/text_assets.h", header_dir);
+        nt_builder_merge_headers(pack_headers, 2, combined);
         (void)printf("Generated: %s/text_assets.h\n", header_dir);
     }
 

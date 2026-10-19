@@ -42,34 +42,13 @@ if(NOT EMSCRIPTEN)
     )
 endif()
 
-# HD pack guard — HD art may not exist yet.
-# The demo ships SD-only when examples/bunnymark/raw/hd/ is absent. When the
-# user drops 5 PNGs in raw/hd/, the next native build reconfigures automatically;
-# the HD branch in build_packs.c
-# emits bunnymark_hd.ntpack and main.c sees BUNNYMARK_HD_AVAILABLE = 1.
-set(BUNNYMARK_PACK_NAMES bunnymark_sd.ntpack)
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/raw/hd")
-    set(BUNNYMARK_HD_AVAILABLE TRUE)
-    list(APPEND BUNNYMARK_PACK_NAMES bunnymark_hd.ntpack)
-    target_compile_definitions(bunnymark_demo PRIVATE BUNNYMARK_HD_AVAILABLE=1)
-    if(NOT EMSCRIPTEN)
-        target_compile_definitions(build_bunnymark_packs PRIVATE BUNNYMARK_HD_AVAILABLE=1)
-    endif()
-    message(STATUS "Bunnymark: HD art detected at examples/bunnymark/raw/hd/ — building both SD and HD packs")
-else()
-    set(BUNNYMARK_HD_AVAILABLE FALSE)
-    message(STATUS "Bunnymark: HD art not present at examples/bunnymark/raw/hd/ — SD-only build")
-endif()
-
-# BUNNYMARK_PACK_NAMES already reflects HD art presence (guard above); the
-# builder emits exactly that set, so both names are required PACKS.
 nt_example_packs(
     NAME bunnymark
     TARGET bunnymark_demo
     BUILDER build_bunnymark_packs
     PACK_DIR "${BUNNYMARK_PACK_DIR}"
     ASSETS_DIR "${BUNNYMARK_ASSETS_DIR}"
-    PACKS ${BUNNYMARK_PACK_NAMES}
+    PACKS bunnymark_sd.ntpack bunnymark_hd.ntpack
 )
 
 # Optional CDN base URL

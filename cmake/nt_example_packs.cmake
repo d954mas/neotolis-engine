@@ -2,7 +2,7 @@
 # the .expected_packs manifest the CI guard verifies. Native presets run the
 # builder at build time; wasm copies a prior native build's packs or fails loudly.
 function(nt_example_packs)
-    cmake_parse_arguments(PACKS "" "NAME;TARGET;BUILDER;PACK_DIR;ASSETS_DIR" "PACKS;OPTIONAL_PACKS" ${ARGN})
+    cmake_parse_arguments(PACKS "" "NAME;TARGET;BUILDER;PACK_DIR;ASSETS_DIR" "PACKS" ${ARGN})
     if(PACKS_UNPARSED_ARGUMENTS OR NOT PACKS_NAME OR NOT PACKS_TARGET OR NOT PACKS_BUILDER
        OR NOT PACKS_PACK_DIR OR NOT PACKS_ASSETS_DIR OR NOT PACKS_PACKS)
         message(FATAL_ERROR "nt_example_packs(${PACKS_NAME}): bad or missing arguments"
@@ -30,32 +30,30 @@ function(nt_example_packs)
         # command only when some target consumes an OUTPUT (byproducts don't count).
         set(_stamp "${PACKS_PACK_DIR}/.${PACKS_NAME}.stamp")
         # The builder writes build_packs.d (every file it read) and
-        # build_packs.d.globs (every glob pattern) via nt_builder_write_depfile.
-        # Before 3.29 ninja wants the depfile's target to name the stamp and
-        # reruns the builder on every build.
+        # build_packs.d.globs (every glob pattern with the files it matched) via
+        # nt_builder_write_depfile. Before 3.29 ninja wants the depfile's target
+        # to name the stamp and reruns the builder on every build.
         if(CMAKE_VERSION VERSION_LESS 3.29)
             message(FATAL_ERROR "nt_example_packs needs CMake 3.29+ (DEPFILE in ninja's deps log)")
         endif()
         set(_depfile "${PACKS_PACK_DIR}/build_packs.d")
         set(_globs "${_depfile}.globs")
-        set(_listing "${PACKS_PACK_DIR}/.${PACKS_NAME}.globs_listing")
-        set(_listing_changed "${PACKS_PACK_DIR}/.${PACKS_NAME}.globs_changed")
+        set(_globs_changed "${PACKS_PACK_DIR}/.${PACKS_NAME}.globs_changed")
         set(_globs_script "${NT_ENGINE_ROOT}/cmake/nt_pack_globs.cmake")
         add_custom_target(${PACKS_NAME}_pack_globs
-            COMMAND ${CMAKE_COMMAND} -D "GLOBS=${_globs}" -D "LISTING=${_listing}"
-                -D "CHANGED=${_listing_changed}" -P "${_globs_script}"
-            BYPRODUCTS "${_listing_changed}"
+            COMMAND ${CMAKE_COMMAND} -D "GLOBS=${_globs}" -D "CHANGED=${_globs_changed}" -P "${_globs_script}"
+            BYPRODUCTS "${_globs_changed}"
         )
         add_custom_command(
             OUTPUT "${_stamp}"
-            BYPRODUCTS ${_pack_files} "${_listing}"
+            BYPRODUCTS ${_pack_files}
             COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKS_PACK_DIR}"
             # A builder that stops writing them must fail, not reuse stale lists.
             COMMAND ${CMAKE_COMMAND} -E rm -f "${_depfile}" "${_globs}"
             COMMAND "$<TARGET_FILE:${PACKS_BUILDER}>" "${PACKS_PACK_DIR}"
-            COMMAND ${CMAKE_COMMAND} -D "GLOBS=${_globs}" -D "LISTING=${_listing}" -P "${_globs_script}"
+            COMMAND ${CMAKE_COMMAND} -D "GLOBS=${_globs}" -P "${_globs_script}"
             COMMAND ${CMAKE_COMMAND} -E touch "${_stamp}"
-            DEPENDS ${PACKS_BUILDER} "${_listing_changed}"
+            DEPENDS ${PACKS_BUILDER} "${_globs_changed}"
             DEPFILE "${_depfile}"
             WORKING_DIRECTORY "${NT_ENGINE_ROOT}"
             COMMENT "Building ${PACKS_NAME} pack(s)"
@@ -97,17 +95,8 @@ function(nt_example_packs)
         )
         list(APPEND _outputs "${PACKS_ASSETS_DIR}/${PACK}")
     endforeach()
-    # Optional packs (content-dependent builder output, may be absent) mirror
-    # on every build: copied when present, stale copies removed when not —
-    # correct in all modes with no configure-time EXISTS snapshot to go stale.
-    set(_optional_cmds "")
-    foreach(PACK ${PACKS_OPTIONAL_PACKS})
-        list(APPEND _optional_cmds COMMAND ${CMAKE_COMMAND}
-            -D "SRC=${PACKS_PACK_DIR}/${PACK}" -D "DST=${PACKS_ASSETS_DIR}/${PACK}"
-            -P "${NT_ENGINE_ROOT}/cmake/nt_copy_if_exists.cmake")
-    endforeach()
-    if(_outputs OR _optional_cmds)
-        add_custom_target(${PACKS_TARGET}_packs ${_optional_cmds} DEPENDS ${_stamp} ${_outputs})
+    if(_outputs)
+        add_custom_target(${PACKS_TARGET}_packs DEPENDS ${_stamp} ${_outputs})
         add_dependencies(${PACKS_TARGET} ${PACKS_TARGET}_packs)
     endif()
 endfunction()

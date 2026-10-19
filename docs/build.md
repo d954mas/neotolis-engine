@@ -44,21 +44,22 @@ they were stale.
 Packs depend on the builder executable and on the builder's own depfile: each
 `build_packs.c` ends with `nt_builder_write_depfile("<pack dir>/build_packs.d")`,
 which lists every file the builder read, shader includes and glTF buffers
-included, and writes `build_packs.d.globs` with every glob pattern it walked
-(see the builder spec, "Dependency file"). Editing a read file reruns the
-builder. A small always-run step (`cmake/nt_pack_globs.cmake`) re-lists those
-patterns, so adding or removing a matching file reruns it too, even with an old
-timestamp or in a directory that did not exist yet. Other files never rerun it.
-It compares listings rather than directory mtimes because on Windows ninja reads
-a directory's mtime from its parent's listing, which NTFS updates lazily. Native
-example packs need CMake 3.29+.
+included, and writes `build_packs.d.globs` with every glob pattern it walked and
+the files that glob saw (see the builder spec, "Dependency file"). Editing a
+read file reruns the builder. A small always-run step
+(`cmake/nt_pack_globs.cmake`) re-lists those patterns with the builder's
+matching rules and compares them with what the builder saw, so adding or
+removing a matching file reruns it too: with an old timestamp, in a directory
+that did not exist yet, or while the builder was running. Other files never
+rerun it. It compares listings rather than directory mtimes because on Windows
+ninja reads a directory's mtime from its parent's listing, which NTFS updates
+lazily. Native example packs need CMake 3.29+.
 
 A new `build_packs.c` must call `nt_builder_write_depfile` last, after every
 pack succeeded; the build fails when it does not. Files the game reads itself
 (existence probes, data passed as memory) are not listed. Skipped examples do
-not rebuild packs. WASM still
-requires a native build after asset edits; reconfigure WASM if the required pack
-set changes, such as adding Bunnymark HD art.
+not rebuild packs. WASM still requires a native build after asset edits;
+reconfigure WASM if an example's pack list changes.
 
 ## Build options
 

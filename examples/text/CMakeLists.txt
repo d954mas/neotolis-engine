@@ -38,15 +38,13 @@ if(NOT EMSCRIPTEN)
     )
 endif()
 
-# text_cjk is OPTIONAL: the builder skips it when the local font lacks CJK glyphs.
 nt_example_packs(
     NAME text
     TARGET text_demo
     BUILDER build_text_packs
     PACK_DIR "${TEXT_PACK_DIR}"
     ASSETS_DIR "${TEXT_ASSETS_DIR}"
-    PACKS text_base.ntpack
-    OPTIONAL_PACKS text_cjk.ntpack
+    PACKS text_base.ntpack text_cjk.ntpack
 )
 
 # Optional CDN base URL

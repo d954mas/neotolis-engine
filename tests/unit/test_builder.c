@@ -389,8 +389,8 @@ void test_write_depfile_lists_every_input_read(void) {
     nt_builder_write_depfile(depfile_path);
     char *globs = nt_builder_read_file(TMP_DIR "/depfile.d.globs", &size);
     TEST_ASSERT_NOT_NULL(globs);
-    /* Globs keep their pattern, unescaped, even for a directory that does not exist. */
-    TEST_ASSERT_NOT_NULL(strstr(globs, "/build/tests/tmp/depfile in#$/*.txt\n"));
+    /* Each pattern, unescaped, with the names it matched; also for a missing directory. */
+    TEST_ASSERT_NOT_NULL(strstr(globs, "/build/tests/tmp/depfile in#$/*.txt\n  a.txt\n"));
     TEST_ASSERT_NOT_NULL(strstr(globs, "/build/tests/tmp/depfile missing/*.png\n"));
     free(globs);
     char *text = nt_builder_read_file(depfile_path, &size);

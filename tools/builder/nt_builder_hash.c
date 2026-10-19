@@ -204,7 +204,7 @@ static char *absolute_path(const char *path) {
     return abs_path;
 }
 
-static void path_log_push(NtPathLog *log, const char *path) {
+static void path_log_push(NtPathLog *log, char *owned) {
     if (log->count == log->capacity) {
         uint32_t capacity = log->capacity ? log->capacity * 2U : 256U;
         char **grown = (char **)realloc((void *)log->paths, (size_t)capacity * sizeof(char *));
@@ -212,12 +212,28 @@ static void path_log_push(NtPathLog *log, const char *path) {
         log->paths = grown;
         log->capacity = capacity;
     }
-    log->paths[log->count++] = absolute_path(path);
+    log->paths[log->count++] = owned;
 }
 
-void nt_builder_record_input(const char *path) { path_log_push(&s_inputs, path); }
+void nt_builder_record_input(const char *path) { path_log_push(&s_inputs, absolute_path(path)); }
 
-void nt_builder_record_glob(const char *pattern) { path_log_push(&s_globs, pattern); }
+/* One block per glob: the absolute pattern, then "  <name>" per match. */
+void nt_builder_record_glob(const char *pattern, const char *const *matches, uint32_t match_count) {
+    char *abs_pattern = absolute_path(pattern);
+    size_t size = strlen(abs_pattern) + 2;
+    for (uint32_t i = 0; i < match_count; i++) {
+        size += strlen(matches[i]) + 3;
+    }
+    char *block = (char *)malloc(size);
+    NT_BUILD_ASSERT(block && "depfile: out of memory");
+    size_t len = (size_t)snprintf(block, size, "%s\n", abs_pattern);
+    free(abs_pattern);
+    for (uint32_t i = 0; i < match_count; i++) {
+        const char *name = strrchr(matches[i], '/');
+        len += (size_t)snprintf(block + len, size - len, "  %s\n", name ? name + 1 : matches[i]);
+    }
+    path_log_push(&s_globs, block);
+}
 
 static int input_strcmp(const void *a, const void *b) { return strcmp(*(const char *const *)a, *(const char *const *)b); }
 
@@ -244,8 +260,9 @@ static void write_depfile_path(FILE *file, const char *path) {
     }
 }
 
-/* Plain text, one pattern per line: the build step re-lists them to see added
- * or removed files (cmake/nt_pack_globs.cmake). */
+/* Plain text: each glob pattern with the file names it matched. The build step
+ * re-lists the patterns and reruns the builder when they differ
+ * (cmake/nt_pack_globs.cmake). */
 static void write_glob_list(const char *depfile_path) {
     path_log_sort(&s_globs);
     char globs_path[1024];
@@ -254,7 +271,7 @@ static void write_glob_list(const char *depfile_path) {
     NT_BUILD_ASSERT(file && "write_depfile: cannot open glob list");
     for (uint32_t i = 0; i < s_globs.count; i++) {
         if (i == 0 || strcmp(s_globs.paths[i], s_globs.paths[i - 1]) != 0) {
-            (void)fprintf(file, "%s\n", s_globs.paths[i]);
+            (void)fputs(s_globs.paths[i], file);
         }
     }
     close_output(file);

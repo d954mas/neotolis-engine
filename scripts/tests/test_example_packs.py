@@ -1,3 +1,4 @@
+import fnmatch
 import json
 import os
 from pathlib import Path
@@ -15,10 +16,25 @@ ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_BUILDER = r"""import json
 from pathlib import Path
 
+import fnmatch
+import os
+
 source = Path(SOURCE)
 patterns = [source / "raw" / "*.txt", source / "later" / "*.txt"]
-reads = [p for pattern in patterns for p in sorted(pattern.parent.glob(pattern.name)) if p.is_file()]
+globs = ""
+reads = []
+for pattern in patterns:
+    # Like nt_builder_glob_iterate: case-sensitive names, files only, sorted.
+    names = sorted(n for n in (os.listdir(pattern.parent) if pattern.parent.is_dir() else [])
+                   if fnmatch.fnmatchcase(n, pattern.name) and (pattern.parent / n).is_file())
+    globs += pattern.resolve().as_posix() + "\n" + "".join("  " + n + "\n" for n in names)
+    reads += [pattern.parent / n for n in names]
 reads.append(source / "shared shaders" / "shader.txt")
+race = source / "race"
+if race.exists():
+    # A file that lands after the glob, while the builder still works.
+    race.unlink()
+    (source / "raw" / "late.txt").write_text("late")
 out = Path(__file__).parent
 files = {p.relative_to(source).as_posix(): p.read_text() for p in reads}
 (out / "fixture.ntpack").write_text(json.dumps(files, sort_keys=True))
@@ -32,7 +48,6 @@ def esc(path):
 depfile = out / "build_packs.d"
 inputs = sorted({esc(p) for p in reads})
 depfile.write_text(esc(depfile) + ":" + "".join(" \\\n  " + i for i in inputs) + "\n", newline="\n")
-globs = "".join(p.resolve().as_posix() + "\n" for p in patterns)
 (out / "build_packs.d.globs").write_text(globs, newline="\n")
 """
 
@@ -93,7 +108,9 @@ nt_example_packs(
 
     def build_and_check(self):
         self.run_cmake("--build", self.build)
-        globbed = [*self.raw.glob("*.txt"), *self.later.glob("*.txt")]
+        # Case-sensitive like the builder; Path.glob ignores case on Windows.
+        globbed = [d / n for d in (self.raw, self.later) if d.is_dir()
+                   for n in os.listdir(d) if fnmatch.fnmatchcase(n, "*.txt")]
         expected = {
             p.relative_to(self.source).as_posix(): p.read_text(encoding="utf-8")
             for p in [*globbed, self.shared / "shader.txt"]
@@ -138,6 +155,7 @@ nt_example_packs(
         # Not read by the builder: a neighbour of a read file, or a file the glob does not match.
         self.assert_rebuilds(lambda: (self.shared / "unused.txt").write_text("unused", encoding="utf-8"), rebuilds=False)
         self.assert_rebuilds(lambda: (self.raw / "notes.md").write_text("notes", encoding="utf-8"), rebuilds=False)
+        self.assert_rebuilds(lambda: (self.raw / "EXTRA.TXT").write_text("upper", encoding="utf-8"), rebuilds=False)
         self.assert_rebuilds(self.asset.unlink)
         self.assert_rebuilds(lambda: self.asset.write_text("restored into empty directory", encoding="utf-8"))
 
@@ -148,6 +166,18 @@ nt_example_packs(
 
         self.assert_rebuilds(create_later)
         self.assert_rebuilds(lambda: shutil.rmtree(self.later))
+
+    def test_file_added_while_the_builder_runs_rebuilds_next_time(self):
+        self.configure()
+        self.build_and_check()
+        time.sleep(1.1)
+        (self.source / "race").write_text("", encoding="utf-8")
+        self.asset.write_text("edited", encoding="utf-8")
+        self.run_cmake("--build", self.build)
+        packed = json.loads((self.packs / "fixture.ntpack").read_text(encoding="utf-8"))
+        self.assertNotIn("raw/late.txt", packed)
+        # The glob list holds what the builder saw, so the next build catches up.
+        self.build_and_check()
 
     def test_builder_without_depfile_fails_the_build(self):
         main = self.packs / "__main__.py"

@@ -52,9 +52,6 @@ static int glob_strcmp(const void *a, const void *b) { return strcmp(*(const cha
 /* Returns false if glob overflow (too many matches). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn callback, void *user) {
-    /* Recorded even when the directory is missing: creating it later must rebuild. */
-    nt_builder_record_glob(pattern);
-
     /* Split pattern into directory + filename pattern at last separator */
     const char *last_sep = NULL;
     for (const char *p = pattern; *p != '\0'; p++) {
@@ -93,6 +90,8 @@ bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn ca
 
         HANDLE h_find = FindFirstFileA(search_path, &find_data);
         if (h_find == INVALID_HANDLE_VALUE) {
+            /* Creating the directory later must rebuild the pack. */
+            nt_builder_record_glob(pattern, NULL, 0);
             free((void *)matches);
             return true;
         }
@@ -125,6 +124,8 @@ bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn ca
     {
         DIR *dir = opendir(directory);
         if (!dir) {
+            /* Creating the directory later must rebuild the pack. */
+            nt_builder_record_glob(pattern, NULL, 0);
             free((void *)matches);
             return true;
         }
@@ -170,6 +171,10 @@ bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn ca
         free((void *)matches);
         return false;
     }
+
+    /* The files this glob saw, not a later re-listing: one added while the
+     * builder runs must still rebuild the pack next time. */
+    nt_builder_record_glob(pattern, (const char *const *)matches, match_count);
 
     /* Invoke callbacks in sorted order */
     for (uint32_t i = 0; i < match_count; i++) {

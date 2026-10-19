@@ -81,20 +81,13 @@ static nt_hash32_t s_hd_pack_id;
 
 static nt_resource_t s_atlas_handle;
 
-/* HD/SD toggle state — demo starts in SD.
- *
- * BUNNYMARK_HD_AVAILABLE is set by examples/bunnymark/CMakeLists.txt when the
- * raw/hd/ directory exists. When absent, s_hd_available stays false and the
- * H key + tap-zone toggle log a warning instead of crashing.
+/* HD/SD toggle state — demo starts in SD. s_hd_available drops to false when
+ * the HD pack fails to mount; the toggle then logs a warning.
  *
  * The toggle works by mounting/unmounting the HD pack at higher priority than
  * the SD pack. Atlas merge re-maps regions in place so all live
  * SpriteComponent.region_index values stay valid across the toggle. */
-#ifdef BUNNYMARK_HD_AVAILABLE
 static bool s_hd_available = true;
-#else
-static bool s_hd_available = false;
-#endif
 static bool s_hd_active = false;
 static bool s_hd_load_started = false;
 
@@ -158,7 +151,7 @@ static bool tap_zone_hit(float px, float py, float w, float h) {
  * live bunnies don't need set_region re-binding. */
 static void toggle_atlas_quality(void) {
     if (!s_hd_available) {
-        nt_log_warn("Bunnymark: HD pack not available — toggle is a no-op (drop 5 PNGs in examples/bunnymark/raw/hd/ and re-run cmake configure to enable)");
+        nt_log_warn("Bunnymark: HD pack not available — toggle is a no-op");
         return;
     }
     if (!s_hd_load_started) {

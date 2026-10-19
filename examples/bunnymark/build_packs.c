@@ -143,8 +143,7 @@ int main(int argc, char *argv[]) {
     (void)printf("Generated: %s\n", combined);
     // #endregion
 
-#ifdef BUNNYMARK_HD_AVAILABLE
-    // #region pack 2: bunnymark_hd.ntpack (guarded by CMake)
+    // #region pack 2: bunnymark_hd.ntpack
     /* ppu=17 matches HD on-screen size to SD after alpha-trim of HD margins. */
     (void)printf("\n=== Build Bunnymark HD Pack -> %s ===\n\n", out_dir);
 
@@ -204,7 +203,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     // #endregion
-#endif
 
     /* Print pack size summary */
     (void)printf("\n=== Pack Size Summary ===\n");
@@ -215,7 +213,6 @@ int main(int argc, char *argv[]) {
         (void)fclose(f);
         (void)printf("  bunnymark_sd.ntpack    %8.1f KB\n", (double)sz / 1024.0);
     }
-#ifdef BUNNYMARK_HD_AVAILABLE
     FILE *f_hd = fopen(pack_path(out_dir, "bunnymark_hd.ntpack"), "rb");
     if (f_hd) {
         (void)fseek(f_hd, 0, SEEK_END);
@@ -223,7 +220,6 @@ int main(int argc, char *argv[]) {
         (void)fclose(f_hd);
         (void)printf("  bunnymark_hd.ntpack    %8.1f KB\n", (double)sz_hd / 1024.0);
     }
-#endif
 
     nt_builder_write_depfile(pack_path(out_dir, "build_packs.d"));
     (void)printf("\n=== Done ===\n");
