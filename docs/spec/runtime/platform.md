@@ -78,8 +78,9 @@ is valid. Re-registering the same callback is a no-op, including at capacity.
 
 Allocate in C: JS reports a size, C allocates and passes the buffer for JS to
 fill, as `engine/http/web/nt_http_web.c` does. If EM_JS must allocate, only
-`wasmExports['malloc']` works (emmalloc rejects `Module['_malloc']`, Closure
-rejects bare `_malloc`); list `malloc` in `EM_JS_DEPS`.
+`wasmExports['malloc']` works (`Module['_malloc']` does not work with the
+engine's emmalloc configuration, and bare `_malloc` fails Closure compilation);
+list `malloc` in `EM_JS_DEPS`.
 
 ## Canvas, DPR, and Viewport
 

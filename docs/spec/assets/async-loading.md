@@ -150,7 +150,8 @@ Web bridge (EM_JS in `engine/http/web/nt_http_web.c`, all called from C):
 void nt_http_web_fetch(int slot, const char *url, const char *method,
                        const uint8_t *body, int body_size, const char *headers,
                        int headers_size, int timeout_ms);
-// out: received, total, status, header block size; returns the nt_http_state_t
+// out: received, total, status, header block size with its NUL (0 = none yet);
+// returns the nt_http_state_t
 int nt_http_web_poll(int slot, uint32_t *out);
 // Copies the body and header block into C buffers (NULL drops), drops the record
 void nt_http_web_take(int slot, uint8_t *data, char *hdrs);
@@ -159,13 +160,14 @@ void nt_http_web_cancel(int slot);
 
 Promise handlers only fill a JS record per slot; wasm is never entered from
 them. `nt_http_update()` polls the in-flight slots, allocates the body and
-header buffers in C and takes the record. A C fault while delivering therefore
-happens inside the game's frame: it ends the frame tick like any other crash
-and reaches the window `error` handler, where `nt_crash` records it when
-linked. A record lives exactly while its C slot is
-in flight (take, cancel and shutdown drop it), so late handlers of a cancelled
-fetch write only to the dropped record. The handle generation still rejects
-stale game handles across slot reuse and shutdown/init.
+header buffers in C and takes the JS record. A C fault while delivering
+therefore happens inside the game's frame: it escapes the requestAnimationFrame
+callback, which stops the frame loop like any other crash, and reaches the
+window `error` handler, where `nt_crash` records it once initialized. A JS
+record lives exactly while its C slot is in flight (take, cancel and shutdown
+drop it), so late handlers of a cancelled fetch write only to the dropped
+record. The handle generation rejects stale game handles across slot reuse and
+shutdown/init.
 
 ## Asset activation strategy
 

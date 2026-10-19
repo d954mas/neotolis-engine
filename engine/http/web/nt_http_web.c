@@ -10,15 +10,14 @@
  * the game's frame. No wasm code runs under a promise handler, so the fetch catch-all cannot hide a
  * C fault, and a fault while delivering ends the frame like any other crash. */
 
-_Static_assert(NT_HTTP_STATE_PENDING == 1 && NT_HTTP_STATE_DOWNLOADING == 2 && NT_HTTP_STATE_DONE == 3 && NT_HTTP_STATE_FAILED == 4, "JS record.state hard-codes these values");
+_Static_assert(NT_HTTP_STATE_PENDING == 1 && NT_HTTP_STATE_DOWNLOADING == 2 && NT_HTTP_STATE_DONE == 3 && NT_HTTP_STATE_FAILED == 4, "JS record.state stores nt_http_state_t values as literals");
 
 /* ---- EM_JS fetch with AbortController ---- */
 
 /* clang-format off */
-/* EM_JS_DEPS keeps these through Closure; HEAPU8/HEAPU32 are always-present globals (no dep). */
+/* EM_JS_DEPS keeps $UTF8ToString through Closure; HEAPU8/HEAPU32 are always-present globals (no dep). */
 EM_JS_DEPS(nt_http_web, "$UTF8ToString")
 
-/* record.state holds nt_http_state_t values: 1 PENDING, 2 DOWNLOADING, 3 DONE, 4 FAILED */
 EM_JS(void, nt_http_web_fetch, (int slot_index, const char *url_ptr, const char *method_ptr, const uint8_t *body_ptr,
                                 int body_size, const char *headers_ptr, int headers_size, int timeout_ms), {
     if (!Module['_nt_http']) {
@@ -28,8 +27,8 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, const char *url_ptr, const char 
     Module['_nt_http'][slot_index] = r;
 
     /* Quoted keys/calls survive Closure without relying on its fetch externs.
-     * Invalid caller input (bad header name, forbidden value bytes) throws from
-     * Headers/Request construction — fail the request instead of unwinding into C. */
+     * Invalid header names/values throw from Headers.append — fail the request
+     * instead of unwinding into C. */
     var init;
     try {
         init = { 'method': UTF8ToString(method_ptr), 'signal': r.controller.signal };
