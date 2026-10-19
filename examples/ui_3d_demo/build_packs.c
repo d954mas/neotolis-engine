@@ -33,7 +33,7 @@ static const char *pack_path(const char *dir, const char *name) {
 #define BUTTON_BORDER 16
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
+    if (argc != 2) {
         (void)fprintf(stderr, "Usage: build_ui_3d_demo_packs <pack_dir>\n");
         return 1;
     }

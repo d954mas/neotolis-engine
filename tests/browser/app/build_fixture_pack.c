@@ -54,7 +54,7 @@ static void add_pair(NtBuilderContext *ctx, const char *suffix, nt_basisu_encode
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
+    if (argc != 2) {
         (void)fprintf(stderr, "Usage: build_browser_fixture_pack <pack_dir>\n");
         return 1;
     }

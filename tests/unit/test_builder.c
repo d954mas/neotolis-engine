@@ -498,6 +498,7 @@ void test_up_to_date_sees_every_kind_of_change(void) {
     (void)remove(TMP_DIR "/record later"); /* POSIX remove() also removes an empty directory */
 #endif
     (void)remove(TMP_DIR "/record race/late.txt");
+    (void)remove(TMP_DIR "/record lookup/in.glsl");
     TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record nowhere"));
 
     MKDIR(TMP_DIR "/record edit");
@@ -519,6 +520,23 @@ void test_up_to_date_sees_every_kind_of_change(void) {
     TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/record remove/*.txt", record_glob_noop, NULL));
     TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/record later/*.txt", record_glob_noop, NULL));
     /* Added after the glob listed its directory, while the builder still runs. */
+    MKDIR(TMP_DIR "/record touch");
+    record_write_bytes(TMP_DIR "/record touch/in.glsl", "a", 1);
+    nt_builder_record_input(TMP_DIR "/record touch/in.glsl");
+    /* Read twice with an edit between: the first stat stays. */
+    MKDIR(TMP_DIR "/record twice");
+    record_write_bytes(TMP_DIR "/record twice/in.glsl", "a", 1);
+    nt_builder_record_input(TMP_DIR "/record twice/in.glsl");
+    record_write_bytes(TMP_DIR "/record twice/in.glsl", "ab", 2);
+    nt_builder_record_input(TMP_DIR "/record twice/in.glsl");
+    /* Written twice: the last write stays. */
+    MKDIR(TMP_DIR "/record rewrite");
+    record_write_bytes(TMP_DIR "/record rewrite/out.bin", "a", 1);
+    nt_builder_record_output(TMP_DIR "/record rewrite/out.bin");
+    record_write_bytes(TMP_DIR "/record rewrite/out.bin", "ab", 2);
+    nt_builder_record_output(TMP_DIR "/record rewrite/out.bin");
+    MKDIR(TMP_DIR "/record lookup");
+    TEST_ASSERT_NULL(nt_builder_find_file("in.glsl", TMP_DIR "/record lookup", NULL));
     MKDIR(TMP_DIR "/record race");
     TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/record race/*.txt", record_glob_noop, NULL));
     record_write_bytes(TMP_DIR "/record race/late.txt", "", 0);
@@ -575,6 +593,24 @@ void test_up_to_date_sees_every_kind_of_change(void) {
 
     record_keep("/record race/", TMP_DIR "/record race/out");
     TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record race/out"));
+
+    /* Same size, only the mtime moves. */
+    record_keep("/record touch/", TMP_DIR "/record touch/out");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record touch/out"));
+    TEST_ASSERT_EQUAL(0, UTIME(TMP_DIR "/record touch/in.glsl", &old_time));
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record touch/out"));
+
+    record_keep("/record twice/", TMP_DIR "/record twice/out");
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record twice/out"));
+
+    record_keep("/record rewrite/", TMP_DIR "/record rewrite/out");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record rewrite/out"));
+
+    /* A file appearing where the lookup missed would now win it. */
+    record_keep("/record lookup/", TMP_DIR "/record lookup/out");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record lookup/out"));
+    record_write_bytes(TMP_DIR "/record lookup/in.glsl", "", 0);
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record lookup/out"));
 }
 
 void test_gltf_external_buffer_shorter_than_declared_fails(void) {

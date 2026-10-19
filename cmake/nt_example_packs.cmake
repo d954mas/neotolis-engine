@@ -30,7 +30,6 @@ function(nt_example_packs)
             COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKS_PACK_DIR}"
             COMMAND "$<TARGET_FILE:${PACKS_BUILDER}>" "${PACKS_PACK_DIR}"
             BYPRODUCTS ${_pack_files}
-            DEPENDS ${PACKS_BUILDER}
             WORKING_DIRECTORY "${NT_ENGINE_ROOT}"
             COMMENT "Checking ${PACKS_NAME} pack(s)"
         )

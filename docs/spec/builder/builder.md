@@ -297,33 +297,57 @@ Generated asset headers are committed to git. This is intentional:
 
 ## Build record
 
-The builder decides itself whether a pack build is current. A pack-builder
-`main` starts with `if (nt_builder_up_to_date(dir)) return 0;` and ends with
-`nt_builder_write_record(dir)`, after every pack succeeded. The build system
-runs the builder on every build; a current run exits after a few stats and
+The builder decides itself whether a pack build is current; the build system
+runs it on every build, and a current run exits after a few stats and
 directory listings. `<dir>/build_record.txt` is also the release audit's list
 of pack inputs.
 
-`nt_builder_up_to_date` is true when the record exists and nothing in it
+`nt_builder_up_to_date(dir)` is true when the record exists and nothing in it
 changed: every listed input still has the same mtime and size (or is still
 missing), every output exists with the same mtime and size, every glob still
 matches the same names, and the running builder executable is older than the
-record, so a relinked builder rebuilds. Only the default invocation is
-incremental: a run with extra arguments (benchmarks, determinism checks)
-calls neither function and always builds; its new outputs make the next
-default run rebuild.
+record, so a relinked builder rebuilds.
+
+The pack-builder `main` owns when to use the record; the library does not
+parse arguments. Its contract:
+
+- The default run (`build_packs <dir>`) starts with
+  `if (nt_builder_up_to_date(dir)) return 0;` and ends with
+  `nt_builder_write_record(dir)` after every pack succeeded. A failing run
+  returns before the write, so the old record stays and no longer matches.
+- A run whose extra arguments change the output (atlas benchmarks,
+  `check_deterministic.sh`) calls neither function: it always builds, and the
+  outputs it overwrites make the next default run rebuild. A builder without
+  such modes rejects extra arguments rather than ignoring them.
+- One pack builder per directory: the record does not name the program that
+  wrote it.
+
+```c
+int main(int argc, char *argv[]) {
+    if (argc != 2) { /* usage */ return 1; }
+    const char *out_dir = argv[1];
+    if (nt_builder_up_to_date(out_dir)) {
+        return 0;
+    }
+    /* ... start, add, finish every pack; return 1 on failure ... */
+    nt_builder_write_record(out_dir);
+    return 0;
+}
+```
 
 - **Complete for builder reads:** the resolved file of every `add_*` and atlas
-  sprite, every shader `#include`, and every file cgltf opens (`.gltf`/`.glb`
-  and external buffers, also through `nt_builder_parse_glb_scene`); every
-  pattern `nt_builder_glob_iterate` walked, also when its directory did not
-  exist; every pack and header the process wrote. Files the game reads itself
-  and passes as memory, and missing-file probes (asset-root lookup, existence
-  checks), are not listed.
+  sprite, every shader `#include`, every file cgltf opens (`.gltf`/`.glb` and
+  external buffers, also through `nt_builder_parse_glb_scene`) and every header
+  `nt_builder_merge_headers` merges; every lookup candidate
+  `nt_builder_find_file` tried before the file it chose, as missing, so a file
+  appearing there rebuilds; every pattern `nt_builder_glob_iterate` walked,
+  also when its directory did not exist; every pack and header the process
+  wrote. Files the game reads itself and passes as memory are not listed.
 - **Safe against edits during a build:** an input is stat'ed before it is
-  read and a glob keeps the names it saw, so a file edited, added or removed
-  while the builder runs rebuilds the pack next time. Outputs are stat'ed when
-  the record is written.
+  read, an output right after it is published, and a glob keeps the names it
+  saw, so a file edited, added or removed while the builder runs, or a pack
+  another builder overwrote, rebuilds next time. Not caught: a same-size edit
+  within one filesystem timestamp tick of the read.
 - **Cache-independent:** every `add_*` reads its source when called, so cached
   entries are listed too.
 - **Per process, not per pack:** one builder run is one build step that may
@@ -334,9 +358,10 @@ default run rebuild.
   one `  <name>` line per match. Paths and patterns are absolute with forward
   slashes; symlinks are not resolved. Windows collapses `.`/`..` the way it
   resolves them; POSIX keeps `..`, which the kernel resolves through symlinks.
-  A file read twice is listed once, with its first stat. `-1 -1` marks a
-  missing file. mtime units are platform-specific; only equality and the
-  builder-versus-record order are meaningful.
+  A file read twice is listed once with its first stat, an output written
+  twice with its last. `-1 -1` marks a missing file. mtime units are
+  platform-specific; only equality and the builder-versus-record order are
+  meaningful.
 
 ## Builder cache
 

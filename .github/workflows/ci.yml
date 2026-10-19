@@ -74,8 +74,8 @@ jobs:
           test -f build/engine/native-release/libnt_log_stub.a
           ./build/tools/builder/native-release/builder
 
-      # Missing or partial packs already failed the build (copy edges + success stamp,
-      # cmake/nt_example_packs.cmake). Silent drifts: an example whose build_packs.c was
+      # Missing or partial packs already failed the build (copy edges + builder exit
+      # status, cmake/nt_example_packs.cmake). Silent drifts: an example whose build_packs.c was
       # never wired, one missing from NT_ALL_EXAMPLE_PACKS (test jobs would re-encode it),
       # and stale committed codegen headers (wasm/deploy compile against the committed copies).
       - name: Verify example packs wired + headers fresh

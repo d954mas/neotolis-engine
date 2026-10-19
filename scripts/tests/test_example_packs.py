@@ -9,16 +9,13 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 
 
-# Stands in for a pack builder: like nt_builder_up_to_date it exits without
-# touching the pack while its record still matches the input.
+# Stands in for a pack builder that leaves a current pack untouched.
 FIXTURE_BUILDER = r"""from pathlib import Path
 
 asset = (Path(SOURCE) / "asset.txt").read_text()
-out = Path(__file__).parent
-record = out / "build_record.txt"
-if not record.exists() or record.read_text() != asset:
-    (out / "fixture.ntpack").write_text(asset)
-    record.write_text(asset)
+pack = Path(__file__).parent / "fixture.ntpack"
+if not pack.exists() or pack.read_text() != asset:
+    pack.write_text(asset)
 """
 
 

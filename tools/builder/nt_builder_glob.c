@@ -12,6 +12,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
 
 /* --- Wildcard matching --- */
 
@@ -82,6 +85,7 @@ static bool glob_list(const char *pattern, char ***out_matches, uint32_t *out_co
 
     /* Collect matching paths into array, then sort for deterministic order */
     char **matches = (char **)malloc((size_t)GLOB_MAX_MATCHES * sizeof(char *));
+    NT_BUILD_ASSERT(matches && "glob: out of memory");
     uint32_t match_count = 0;
     bool overflow = false;
 
@@ -176,27 +180,6 @@ static bool glob_list(const char *pattern, char ***out_matches, uint32_t *out_co
     return !overflow;
 }
 
-static void record_glob(const char *pattern, char **matches, uint32_t match_count);
-
-/* Returns false if glob overflow (too many matches). */
-bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn callback, void *user) {
-    char **matches = NULL;
-    uint32_t match_count = 0;
-    bool ok = glob_list(pattern, &matches, &match_count);
-    /* The files this glob saw, not a later re-listing: one added while the
-     * builder runs must still rebuild the pack next time. An overflowed
-     * pattern is recorded empty and never matches its re-listing. */
-    record_glob(pattern, matches, match_count);
-
-    /* Invoke callbacks in sorted order */
-    for (uint32_t i = 0; i < match_count; i++) {
-        callback(matches[i], user);
-        free(matches[i]);
-    }
-    free((void *)matches);
-    return ok;
-}
-
 /* --- Build record --- */
 
 /* One builder process is one build step that may write several packs, so the
@@ -227,7 +210,11 @@ static void file_stat(const char *path, int64_t *mtime, int64_t *size) {
 #else
     struct stat st;
     if (stat(path, &st) == 0 && !S_ISDIR(st.st_mode)) {
+#ifdef __APPLE__
+        *mtime = ((int64_t)st.st_mtimespec.tv_sec * 1000000000) + st.st_mtimespec.tv_nsec;
+#else
         *mtime = ((int64_t)st.st_mtim.tv_sec * 1000000000) + st.st_mtim.tv_nsec;
+#endif
         *size = (int64_t)st.st_size;
         return;
     }
@@ -253,12 +240,14 @@ static char *absolute_path(const char *path) {
         path += 2;
     }
     char cwd[4096] = "";
-    bool cwd_ok = path[0] == '/' || getcwd(cwd, sizeof(cwd)) != NULL;
-    NT_BUILD_ASSERT(cwd_ok && "build record: cannot make path absolute");
+    if (path[0] != '/') {
+        char *got = getcwd(cwd, sizeof(cwd));
+        NT_BUILD_ASSERT(got && "build record: cannot make path absolute");
+    }
     size_t size = strlen(cwd) + strlen(path) + 2;
     char *abs_path = (char *)malloc(size);
     NT_BUILD_ASSERT(abs_path && "build record: out of memory");
-    (void)snprintf(abs_path, size, path[0] == '/' ? "%.0s%s" : "%s/%s", cwd, path);
+    (void)snprintf(abs_path, size, "%s%s%s", cwd, cwd[0] ? "/" : "", path);
 #endif
     return abs_path;
 }
@@ -274,14 +263,18 @@ static void record_push(NtRecordKind kind, const char *text, int64_t mtime, int6
     s_record_count++;
 }
 
-void nt_builder_record_input(const char *path) {
+/* Stat'ed now: before an input is read, right after an output is published, so
+ * a later edit or another builder's overwrite never looks current. */
+static void record_file(NtRecordKind kind, const char *path) {
     int64_t mtime = 0;
     int64_t size = 0;
     file_stat(path, &mtime, &size);
-    record_push(RECORD_INPUT, absolute_path(path), mtime, size);
+    record_push(kind, absolute_path(path), mtime, size);
 }
 
-void nt_builder_record_output(const char *path) { record_push(RECORD_OUTPUT, absolute_path(path), 0, 0); }
+void nt_builder_record_input(const char *path) { record_file(RECORD_INPUT, path); }
+
+void nt_builder_record_output(const char *path) { record_file(RECORD_OUTPUT, path); }
 
 static const char *match_name(const char *match) {
     const char *slash = strrchr(match, '/');
@@ -291,6 +284,8 @@ static const char *match_name(const char *match) {
 /* "glob <absolute pattern>", then "  <name>" per match. */
 static void record_glob(const char *pattern, char **matches, uint32_t match_count) {
     char *abs_pattern = absolute_path(pattern);
+    /* glob_list re-lists this absolute pattern on the next run. */
+    NT_BUILD_ASSERT(strlen(abs_pattern) < GLOB_PATH_MAX && "glob: absolute pattern too long");
     size_t size = strlen(abs_pattern) + 7;
     for (uint32_t i = 0; i < match_count; i++) {
         size += strlen(match_name(matches[i])) + 3;
@@ -305,8 +300,27 @@ static void record_glob(const char *pattern, char **matches, uint32_t match_coun
     record_push(RECORD_GLOB, block, 0, 0);
 }
 
-/* By kind, then text; the first read of a file stays first, so an edit between
- * two reads still rebuilds next time. */
+/* Returns false if glob overflow (too many matches). */
+bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn callback, void *user) {
+    char **matches = NULL;
+    uint32_t match_count = 0;
+    bool ok = glob_list(pattern, &matches, &match_count);
+    /* The files this glob saw, not a later re-listing: one added while the
+     * builder runs must still rebuild the pack next time. An overflowed
+     * pattern is recorded empty and never matches its re-listing. */
+    record_glob(pattern, matches, match_count);
+
+    /* Invoke callbacks in sorted order */
+    for (uint32_t i = 0; i < match_count; i++) {
+        callback(matches[i], user);
+        free(matches[i]);
+    }
+    free((void *)matches);
+    return ok;
+}
+
+/* By kind, then text. Of duplicates, the first read of an input sorts first (an
+ * edit between two reads still rebuilds), and the last write of an output. */
 static int record_cmp(const void *a, const void *b) {
     const NtRecordLine *la = (const NtRecordLine *)a;
     const NtRecordLine *lb = (const NtRecordLine *)b;
@@ -314,10 +328,11 @@ static int record_cmp(const void *a, const void *b) {
         return la->kind < lb->kind ? -1 : 1;
     }
     int text_cmp = strcmp(la->text, lb->text);
-    if (text_cmp != 0) {
+    if (text_cmp != 0 || la->seq == lb->seq) {
         return text_cmp;
     }
-    return la->seq < lb->seq ? -1 : 1;
+    bool earlier = la->seq < lb->seq;
+    return earlier != (la->kind == RECORD_OUTPUT) ? -1 : 1;
 }
 
 static void record_path(const char *dir, char *out, size_t out_size) {
@@ -352,12 +367,7 @@ void nt_builder_write_record(const char *dir) {
             (void)fputs(line->text, file);
             continue;
         }
-        int64_t mtime = line->mtime;
-        int64_t size = line->size;
-        if (line->kind == RECORD_OUTPUT) {
-            file_stat(line->text, &mtime, &size);
-        }
-        (void)fprintf(file, "%s %lld %lld %s\n", line->kind == RECORD_INPUT ? "input" : "output", (long long)mtime, (long long)size, line->text);
+        (void)fprintf(file, "%s %lld %lld %s\n", line->kind == RECORD_INPUT ? "input" : "output", (long long)line->mtime, (long long)line->size, line->text);
     }
     bool write_failed = ferror(file) != 0;
     write_failed |= fclose(file) != 0;
@@ -374,6 +384,10 @@ static int64_t builder_mtime(void) {
 #ifdef _WIN32
     DWORD len = GetModuleFileNameA(NULL, exe, (DWORD)sizeof(exe));
     NT_BUILD_ASSERT(len > 0 && len < sizeof(exe) && "up_to_date: cannot find the builder executable");
+#elif defined(__APPLE__)
+    uint32_t exe_size = (uint32_t)sizeof(exe);
+    int found = _NSGetExecutablePath(exe, &exe_size);
+    NT_BUILD_ASSERT(found == 0 && "up_to_date: cannot find the builder executable");
 #else
     ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
     NT_BUILD_ASSERT(len > 0 && (size_t)len < sizeof(exe) - 1 && "up_to_date: cannot find the builder executable");
@@ -382,6 +396,9 @@ static int64_t builder_mtime(void) {
     int64_t mtime = 0;
     int64_t size = 0;
     file_stat(exe, &mtime, &size);
+    /* An unreadable path (non-ANSI on Windows, a replaced exe on Linux) would
+     * otherwise pass as "older than any record". */
+    NT_BUILD_ASSERT(mtime >= 0 && "up_to_date: cannot stat the builder executable");
     return mtime;
 }
 

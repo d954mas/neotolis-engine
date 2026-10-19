@@ -223,7 +223,7 @@ static bool finish(NtBuilderContext *ctx, const char *name) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
+    if (argc != 2) {
         (void)fprintf(stderr, "Usage: build_skeletal_showcase_packs <pack_dir>\n");
         return 1;
     }

@@ -473,7 +473,7 @@ static void populate_full(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
+    if (argc != 2) {
         (void)fprintf(stderr, "Usage: build_sponza_packs <pack_dir>\n");
         return 1;
     }

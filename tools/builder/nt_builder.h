@@ -690,9 +690,10 @@ void nt_builder_merge_headers(const char *const *header_paths, uint32_t count, c
 
 /* --- Build record ---
  * <dir>/build_record.txt lists every file this process read and wrote with its
- * mtime and size, and every glob it walked with the names it saw. A pack builder
- * starts with `if (nt_builder_up_to_date(dir)) return 0;` and ends with
- * nt_builder_write_record(dir), after every pack succeeded. */
+ * mtime and size, and every glob it walked with the names it saw. A pack
+ * builder's default run starts with `if (nt_builder_up_to_date(dir)) return 0;`
+ * and ends with nt_builder_write_record(dir), after every pack succeeded
+ * (builder spec, "Build record"). */
 bool nt_builder_up_to_date(const char *dir);
 void nt_builder_write_record(const char *dir);
 

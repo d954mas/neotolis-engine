@@ -122,6 +122,10 @@ char *nt_builder_find_file(const char *filename, const char *relative_to_dir, co
             free(candidate);
             return normalized;
         }
+        /* A file appearing here later would win the lookup: record the miss. */
+        if (candidate) {
+            nt_builder_record_input(candidate);
+        }
         free(candidate);
     }
 
@@ -133,6 +137,9 @@ char *nt_builder_find_file(const char *filename, const char *relative_to_dir, co
                 char *normalized = nt_builder_normalize_path(candidate);
                 free(candidate);
                 return normalized;
+            }
+            if (candidate) {
+                nt_builder_record_input(candidate);
             }
             free(candidate);
         }

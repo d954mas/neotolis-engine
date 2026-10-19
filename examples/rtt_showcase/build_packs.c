@@ -30,7 +30,7 @@ static const char *pack_path(const char *dir, const char *name) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
+    if (argc != 2) {
         (void)fprintf(stderr, "Usage: build_rtt_showcase_packs <pack_dir>\n");
         return 1;
     }

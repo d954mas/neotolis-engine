@@ -368,6 +368,7 @@ void nt_builder_merge_headers(const char *const *header_paths, uint32_t count, c
     uint32_t entry_count = 0;
 
     for (uint32_t hi = 0; hi < count; hi++) {
+        nt_builder_record_input(header_paths[hi]);
         FILE *f = fopen(header_paths[hi], "r");
         if (!f) {
             NT_LOG_ERROR("merge_headers: could not open '%s'", header_paths[hi]);
