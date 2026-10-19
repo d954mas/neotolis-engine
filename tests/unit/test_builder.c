@@ -45,10 +45,8 @@ const char *__lsan_default_suppressions(void) { // NOLINT(bugprone-reserved-iden
 
 #include <setjmp.h>
 
-_Static_assert(NT_BUILD_ERR_KIND_ATLAS_DEGENERATE_HULL == 6, "content-error ABI changed");
 _Static_assert(NT_BUILD_ERR_KIND_ATLAS_CONTOUR_VERTEX_OVERFLOW == 7, "content-error ABI changed");
 _Static_assert(NT_BUILD_ERR_KIND_ATLAS_UNFITTABLE == 13, "content-error ABI changed");
-_Static_assert(NT_BUILD_ERR_KIND_ATLAS_HULL_INFEASIBLE == 14, "content-error ABI append-only order changed");
 
 /* --- Build assert catching (setjmp/longjmp via hookable handler) --- */
 

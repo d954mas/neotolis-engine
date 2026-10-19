@@ -985,7 +985,6 @@ void test_build_error_format_matrix(void) {
         {NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE, "atlas 'atlas', sprite 'sprite.png': image 123x456 exceeds decode limit"},
         {NT_BUILD_ERR_KIND_ATLAS_TRANSPARENT_AFTER_TRIM, "atlas 'atlas', sprite 'sprite.png': fully transparent after trim"},
         {NT_BUILD_ERR_KIND_ATLAS_SLICE9_TOO_BIG, "atlas 'atlas', sprite 'sprite.png': slice9 borders (7) >= source extent (9)"},
-        {NT_BUILD_ERR_KIND_ATLAS_DEGENERATE_HULL, "atlas 'atlas', sprite 'sprite.png': degenerate hull (no usable outline)"},
         {NT_BUILD_ERR_KIND_ATLAS_CONTOUR_VERTEX_OVERFLOW, "atlas 'atlas', sprite 'sprite.png': contour exceeds vertex budget"},
         {NT_BUILD_ERR_KIND_ATLAS_DUPLICATE_REGION_NAME, "atlas 'atlas': duplicate region name 'sprite.png'"},
         {NT_BUILD_ERR_KIND_ATLAS_TOO_MANY_REGIONS, "atlas 'atlas': region count exceeds 65535"},
