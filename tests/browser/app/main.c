@@ -882,21 +882,17 @@ EMSCRIPTEN_KEEPALIVE float nt_test_rich_link_css_w(void) { return s_nt_rich_link
 EMSCRIPTEN_KEEPALIVE float nt_test_rich_link_css_h(void) { return s_nt_rich_link_css_h; }
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_rich_link_clicks(void) { return s_state.link_clicks; }
 
-/* ?crash=trap|abort|abortcaught|reject|jserror crashes a running frame after filling the log ring; ?crash=read
+/* ?crash=trap|abort|reject|jserror crashes a running frame after filling the log ring; ?crash=read
  * only inits. reject traps inside a Promise callback (unhandledrejection); jserror throws a plain
  * JS Error through wasm frames (the stack-text branch of the capture filter). */
-enum { CRASH_OFF, CRASH_TRAP, CRASH_ABORT, CRASH_READ, CRASH_ABORT_CAUGHT, CRASH_REJECT, CRASH_JS_ERROR };
+enum { CRASH_OFF, CRASH_TRAP, CRASH_ABORT, CRASH_READ, CRASH_REJECT, CRASH_JS_ERROR };
 #if NT_LOG_MIN_LEVEL <= 2
-static const char *const k_crash_modes[] = {"", "trap", "abort", "read", "abortcaught", "reject", "jserror"};
+static const char *const k_crash_modes[] = {"", "trap", "abort", "read", "reject", "jserror"};
 #endif
 EMSCRIPTEN_KEEPALIVE void nt_test_crash_trap(void) { __builtin_trap(); }
-EMSCRIPTEN_KEEPALIVE void nt_test_crash_abort(void) { abort(); }
 /* clang-format off */
 EM_JS(void, nt_test_crash_reject, (void), {
     Promise.resolve().then(function() { _nt_test_crash_trap(); });
-})
-EM_JS(void, nt_test_crash_abort_caught, (void), {
-    try { _nt_test_crash_abort(); } catch (e) {}
 })
 EM_JS(void, nt_test_crash_js_error, (void), {
     throw new Error("crash probe js error");
@@ -934,10 +930,6 @@ static void crash_probe_step(void) {
     if (mode == CRASH_TRAP) {
         __builtin_trap();
     }
-    if (mode == CRASH_ABORT_CAUGHT) {
-        nt_test_crash_abort_caught();
-        return;
-    }
     if (mode == CRASH_REJECT) {
         nt_test_crash_reject();
         return;
@@ -961,7 +953,7 @@ EM_JS(unsigned int, nt_test_rich_composition_mode, (void), {
 })
 
 EM_JS(uint32_t, nt_test_crash_mode, (void), {
-    return Math.max(0, ["", "trap", "abort", "read", "abortcaught", "reject", "jserror"].indexOf(new URLSearchParams(window.location.search).get("crash") || ""));
+    return Math.max(0, ["", "trap", "abort", "read", "reject", "jserror"].indexOf(new URLSearchParams(window.location.search).get("crash") || ""));
 })
 
 /* Quoted keys keep the Playwright-facing API stable under Closure. */

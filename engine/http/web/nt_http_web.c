@@ -5,60 +5,32 @@
 #include <emscripten.h>
 #include <stdlib.h>
 
+/* Promise handlers only fill a JS record per slot; nt_http_backend_update copies it into C inside
+ * the game's frame. No wasm code runs under a promise handler, so the fetch catch-all cannot hide a
+ * C fault, and a fault while delivering ends the frame like any other crash. */
+
+enum { NT_HTTP_WEB_RUNNING, NT_HTTP_WEB_DONE, NT_HTTP_WEB_FAILED }; /* record.result */
+
 /* ---- EM_JS fetch with AbortController ---- */
 
 /* clang-format off */
-/* EM_JS_DEPS keeps these through Closure. malloc (linker-added, no leading _) is kept as a wasm
- * export for wasmExports['malloc']; HEAPU8 is an always-present global (no dep). */
-EM_JS_DEPS(nt_http_web, "$UTF8ToString,malloc")
+/* EM_JS_DEPS keeps these through Closure; HEAPU8/HEAPU32 are always-present globals (no dep). */
+EM_JS_DEPS(nt_http_web, "$UTF8ToString")
 
-EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_ptr, const char *method_ptr,
-                                const uint8_t *body_ptr, int body_size, const char *headers_ptr, int headers_size,
-                                int timeout_ms), {
-    var url = UTF8ToString(url_ptr);
-
-    if (!Module['_nt_http_controllers']) {
-        Module['_nt_http_controllers'] = {};
+EM_JS(void, nt_http_web_fetch, (int slot_index, const char *url_ptr, const char *method_ptr, const uint8_t *body_ptr,
+                                int body_size, const char *headers_ptr, int headers_size, int timeout_ms), {
+    if (!Module['_nt_http']) {
+        Module['_nt_http'] = {};
     }
-    var controller = new AbortController();
-    Module['_nt_http_controllers'][slot_index] = controller;
-
-    var timer = 0;
-    var status = 0;
-    var hdrs = 0; /* wasm-heap block; owned here until handed to on_complete exactly once */
-    var finished = false;
-
-    function finish(ptr, size, success) {
-        if (finished) return; /* a throw inside the first finish must not complete twice */
-        finished = true;
-        if (timer) clearTimeout(timer);
-        /* The slot may already be reused by a newer request — only drop OUR controller */
-        if (Module['_nt_http_controllers'][slot_index] === controller) {
-            delete Module['_nt_http_controllers'][slot_index];
-        }
-        _nt_http_web_on_complete(slot_index, generation, ptr, size, status, hdrs, success);
-        hdrs = 0;
-    }
-    function headerBlock(response) {
-        var s = "";
-        response.headers.forEach(function(v, k) { s += k + ': ' + v + '\n'; });
-        /* Headers values are ByteStrings (code units <= 0xFF): write the bytes
-         * directly — byte-exact parity with the native backend, no UTF-8 re-encode */
-        var p = wasmExports['malloc'](s.length + 1);
-        if (!p) return 0;
-        for (var i = 0; i < s.length; i++) {
-            HEAPU8[p + i] = s.charCodeAt(i) & 0xFF;
-        }
-        HEAPU8[p + s.length] = 0;
-        return p;
-    }
+    var r = {controller: new AbortController(), timer: 0, result: 0, status: 0, headers: null, received: 0, total: 0, chunks: []};
+    Module['_nt_http'][slot_index] = r;
 
     /* Quoted keys/calls survive Closure without relying on its fetch externs.
      * Invalid caller input (bad header name, forbidden value bytes) throws from
      * Headers/Request construction — fail the request instead of unwinding into C. */
     var init;
     try {
-        init = { 'method': UTF8ToString(method_ptr), 'signal': controller.signal };
+        init = { 'method': UTF8ToString(method_ptr), 'signal': r.controller.signal };
         if (headers_size > 0) {
             /* Alternating NUL-terminated name,value byte strings. Bytes map 1:1 to
              * code units (true Latin-1) so non-ASCII values stay ByteString-legal and
@@ -80,141 +52,151 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_
         }
     } catch (e) {
         console.error('ERROR [http] bad request options slot=' + slot_index, e);
-        finish(0, 0, 0);
+        r.result = 2;
         return;
     }
 
     if (timeout_ms > 0) {
-        timer = setTimeout(function() { controller.abort(); }, timeout_ms);
+        r.timer = setTimeout(function() { r.controller.abort(); }, timeout_ms);
     }
 
-    fetch(url, init).then(function(response) {
-        status = response.status;
-        hdrs = headerBlock(response);
-        if (!hdrs) { finish(0, 0, 0); return; } /* OOM: FAILED — native aborts on the same OOM */
+    function add(chunk) {
+        r.chunks.push(chunk);
+        r.received += chunk.length;
+    }
+    fetch(UTF8ToString(url_ptr), init).then(function(response) {
+        var block = "";
+        response.headers.forEach(function(v, k) { block += k + ': ' + v + '\n'; });
+        r.status = response.status;
+        r.headers = block;
+        r.total = parseInt(response.headers.get('Content-Length'), 10) || 0;
 
         /* Try ReadableStream for progress, fall back to arrayBuffer */
         if (response.body && typeof response.body.getReader === 'function') {
-            var contentLength = response.headers.get('Content-Length');
-            var total = contentLength ? parseInt(contentLength, 10) : 0;
-            var received = 0;
-            var chunks = [];
             var reader = response.body.getReader();
-
             function pump() {
-                reader.read().then(function(result) {
-                    if (result.done) {
-                        var totalLen = received;
-                        var ptr = wasmExports['malloc'](totalLen);
-                        if (totalLen > 0 && !ptr) { finish(0, 0, 0); return; } /* OOM: FAILED, never write at 0 */
-                        var offset = 0;
-                        for (var i = 0; i < chunks.length; i++) {
-                            HEAPU8.set(chunks[i], ptr + offset);
-                            offset += chunks[i].length;
-                        }
-                        finish(ptr, totalLen, 1);
+                return reader.read().then(function(part) {
+                    if (part.done) {
+                        r.result = 1;
                         return;
                     }
-                    var chunk = result.value;
-                    chunks.push(chunk);
-                    received += chunk.length;
-                    /* Clamp: the int params would wrap past 2^31 (huge bodies fail later at malloc anyway) */
-                    _nt_http_web_on_progress(slot_index, generation,
-                                             received > 0x7FFFFFFF ? 0x7FFFFFFF : received,
-                                             total > 0x7FFFFFFF ? 0x7FFFFFFF : total);
-                    pump();
-                }, function(e) {
-                    /* Abort here = deliberate cancel/timeout after headers — not an error */
-                    if (!e || e.name !== 'AbortError') {
-                        console.error('ERROR [http] stream error slot=' + slot_index, e);
-                    }
-                    finish(0, 0, 0);
+                    add(part.value);
+                    return pump();
                 });
             }
-            pump();
-        } else {
-            /* Fallback: no streaming progress */
-            response.arrayBuffer().then(function(buf) {
-                var arr = new Uint8Array(buf);
-                var ptr = wasmExports['malloc'](arr.length);
-                if (arr.length > 0 && !ptr) { finish(0, 0, 0); return; }
-                HEAPU8.set(arr, ptr);
-                finish(ptr, arr.length, 1);
-            }, function() {
-                finish(0, 0, 0);
-            });
+            return pump();
         }
-    }, function(err) {
-        /* Network errors and aborts (cancel/timeout) leave any allocated headers owned by
-         * finish. Log non-abort failures (CORS/mixed-content are otherwise invisible). */
+        return response.arrayBuffer().then(function(buf) {
+            add(new Uint8Array(buf));
+            r.result = 1;
+        });
+    }).catch(function(err) {
+        /* Network errors, body read errors and aborts (cancel/timeout). Log non-abort failures
+         * (CORS/mixed-content are otherwise invisible) — parity with the native NT_LOG_ERROR. */
         if (!err || err.name !== 'AbortError') {
             console.error('ERROR [http] fetch failed slot=' + slot_index, err);
         }
-        finish(0, 0, 0);
+        r.result = 2;
     });
 })
 
+/* out: received, total, status, header block size with its NUL (0 = no headers yet) */
+EM_JS(int, nt_http_web_poll, (int slot_index, uint32_t *out), {
+    var r = Module['_nt_http'][slot_index];
+    var o = out >> 2;
+    HEAPU32[o] = r.received;
+    HEAPU32[o + 1] = r.total;
+    HEAPU32[o + 2] = r.status;
+    HEAPU32[o + 3] = r.headers === null ? 0 : r.headers.length + 1;
+    return r.result;
+})
+
+/* Copies the body into data and the header block into hdrs (NULL drops either), then forgets the record. */
+EM_JS(void, nt_http_web_take, (int slot_index, uint8_t *data, char *hdrs), {
+    var r = Module['_nt_http'][slot_index];
+    if (data) {
+        for (var i = 0, at = data; i < r.chunks.length; at += r.chunks[i].length, i++) {
+            HEAPU8.set(r.chunks[i], at);
+        }
+    }
+    if (hdrs) {
+        /* Header values are ByteStrings (code units <= 0xFF): write the bytes
+         * directly — byte-exact parity with the native backend, no UTF-8 re-encode */
+        for (var j = 0; j < r.headers.length; j++) {
+            HEAPU8[hdrs + j] = r.headers.charCodeAt(j) & 0xFF;
+        }
+        HEAPU8[hdrs + r.headers.length] = 0;
+    }
+    clearTimeout(r.timer);
+    delete Module['_nt_http'][slot_index];
+})
+
+/* Late promise handlers of a cancelled fetch write only to the dropped record. */
 EM_JS(void, nt_http_web_cancel, (int slot_index), {
-    if (Module['_nt_http_controllers'] && Module['_nt_http_controllers'][slot_index]) {
-        Module['_nt_http_controllers'][slot_index].abort();
-        delete Module['_nt_http_controllers'][slot_index];
+    var r = Module['_nt_http'] && Module['_nt_http'][slot_index];
+    if (r) {
+        clearTimeout(r.timer);
+        r.controller.abort();
+        delete Module['_nt_http'][slot_index];
     }
 })
 /* clang-format on */
-
-/* ---- EMSCRIPTEN_KEEPALIVE callbacks (called from JS) ---- */
-
-/* Staleness: the (slot, generation) pair alone rejects late callbacks — slot reuse
- * bumps the generation on free, and nt_http_shutdown bumps AND preserves every
- * generation, so fetches from a previous lifecycle of the module mismatch too. */
-EMSCRIPTEN_KEEPALIVE void nt_http_web_on_progress(int slot_index, int generation, int received, int total) {
-    NtHttpSlot *slot = nt_http_get_slot((uint16_t)slot_index);
-    if (!slot || slot->generation != (uint16_t)generation) {
-        return;
-    }
-    slot->received = (uint32_t)received;
-    slot->total = (uint32_t)total;
-    slot->state = (uint8_t)NT_HTTP_STATE_DOWNLOADING;
-}
-
-EMSCRIPTEN_KEEPALIVE void nt_http_web_on_complete(int slot_index, int generation, uint8_t *data, int size, int status, char *resp_headers, int success) {
-    NtHttpSlot *slot = nt_http_get_slot((uint16_t)slot_index);
-    if (!slot || slot->generation != (uint16_t)generation) {
-        free(data);
-        free(resp_headers);
-        return;
-    }
-    slot->data = data;
-    slot->size = (uint32_t)size;
-    slot->status = (uint16_t)status;
-    slot->resp_headers = resp_headers;
-    if (success) {
-        /* Mid-transfer progress counts stream (decoded) bytes vs a possibly compressed
-         * Content-Length; settle on received==total==size for a completed request */
-        slot->received = slot->size;
-        slot->total = slot->size;
-    }
-    slot->state = success ? (uint8_t)NT_HTTP_STATE_DONE : (uint8_t)NT_HTTP_STATE_FAILED;
-}
 
 /* ---- Backend entry points ---- */
 
 bool nt_http_backend_init(void) { return true; }
 
-/* Abort everything in flight: their (already-scheduled) completions are rejected by
- * the generation bump nt_http_shutdown performs right after, freeing what they carry. */
 void nt_http_backend_shutdown(void) {
     for (uint16_t i = 1; i <= NT_HTTP_MAX_REQUESTS; i++) {
         nt_http_web_cancel((int)i);
     }
 }
 
-void nt_http_backend_update(void) {}
+void nt_http_backend_update(void) {
+    for (uint16_t i = 1; i <= NT_HTTP_MAX_REQUESTS; i++) {
+        NtHttpSlot *slot = nt_http_get_slot(i);
+        if (slot->state != (uint8_t)NT_HTTP_STATE_PENDING && slot->state != (uint8_t)NT_HTTP_STATE_DOWNLOADING) {
+            continue;
+        }
+        uint32_t info[4] = {0}; /* received, total, status, header block size */
+        int result = nt_http_web_poll((int)i, info);
+        slot->received = info[0];
+        slot->total = info[1];
+        slot->status = (uint16_t)info[2];
+        if (result == NT_HTTP_WEB_RUNNING) {
+            if (info[0] > 0) {
+                slot->state = (uint8_t)NT_HTTP_STATE_DOWNLOADING;
+            }
+            continue;
+        }
+
+        uint8_t *data = result == NT_HTTP_WEB_DONE ? malloc(info[0]) : NULL;
+        char *hdrs = info[3] > 0 ? malloc(info[3]) : NULL;
+        /* OOM fails the request; a FAILED request keeps any headers that arrived */
+        bool done = result == NT_HTTP_WEB_DONE && (data != NULL || info[0] == 0) && (hdrs != NULL || info[3] == 0);
+        if (!done) {
+            free(data);
+            data = NULL;
+        }
+        nt_http_web_take((int)i, data, hdrs);
+        slot->data = data;
+        slot->resp_headers = hdrs;
+        if (done) {
+            /* Mid-transfer progress counts stream (decoded) bytes vs a possibly compressed
+             * Content-Length; settle on received==total==size for a completed request */
+            slot->size = info[0];
+            slot->total = info[0];
+            slot->state = (uint8_t)NT_HTTP_STATE_DONE;
+        } else {
+            slot->state = (uint8_t)NT_HTTP_STATE_FAILED;
+        }
+    }
+}
 
 void nt_http_backend_request(uint16_t slot_index) {
     NtHttpSlot *slot = nt_http_get_slot(slot_index);
     NT_ASSERT(slot != NULL);
-    nt_http_web_fetch((int)slot_index, (int)slot->generation, slot->url, slot->method, slot->body, (int)slot->body_size, slot->headers, (int)slot->headers_size, (int)slot->timeout_ms);
+    nt_http_web_fetch((int)slot_index, slot->url, slot->method, slot->body, (int)slot->body_size, slot->headers, (int)slot->headers_size, (int)slot->timeout_ms);
 }
 
 void nt_http_backend_cancel(uint16_t slot_index) { nt_http_web_cancel((int)slot_index); }

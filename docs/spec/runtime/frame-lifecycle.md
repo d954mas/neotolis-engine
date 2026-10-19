@@ -33,7 +33,7 @@ input_begin_frame
 input_event_apply
 resource_step         ← async loading processing (also pumps nt_http_update)
     → a game issuing its own nt_http requests without resource_step calls
-      nt_http_update() itself once per frame (no-op on web/stub)
+      nt_http_update() itself once per frame (no-op on stub)
 game-defined resource sync helpers
     → e.g. sprite_comp_sync_resources() after resource publication changes
 audio_update          ← voice state management

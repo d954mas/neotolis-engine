@@ -6,7 +6,7 @@
 /* Crash record: on a fatal crash the engine stores one text record (game and engine
    version, GPU identity and caps, optional game context, time, reason, fault location or stack,
    tail of WARN/ERROR log lines). The game
-   reads it on the next launch, delivers it and clears it after confirmed delivery. The engine never sends it.
+   reads it on the next launch, delivers it and clears it. The engine never sends it.
    Web also dispatches window event 'nt-crash' (detail.text) once the record is captured. */
 
 /* name: web — localStorage key (several games can share one origin);

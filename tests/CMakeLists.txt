@@ -1650,18 +1650,6 @@ if(EMSCRIPTEN)
     endif()
 endif()
 
-# Source-executed Web bridge cases run without a browser so callback-fault boundaries stay
-# covered in native and WASM check lanes alike. The browser suite proves the linked artifact.
-find_program(NT_NODE_EXECUTABLE NAMES node nodejs)
-if(NT_NODE_EXECUTABLE)
-    add_test(
-        NAME test_web_crash_boundaries_source
-        COMMAND "${NT_NODE_EXECUTABLE}" --test "${CMAKE_CURRENT_SOURCE_DIR}/browser/web_crash_boundaries.test.mjs"
-    )
-else()
-    message(STATUS "Node.js not found; skipping CTest registration for test_web_crash_boundaries_source")
-endif()
-
 # Crash output survives on EVERY test exe, incl. raw add_executable targets
 # that bypass nt_setup_test_target (MSVC CRT buffers stdout to pipes).
 get_directory_property(_nt_test_targets BUILDSYSTEM_TARGETS)

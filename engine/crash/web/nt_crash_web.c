@@ -38,40 +38,22 @@ EM_JS(void, nt_crash_web_install, (const char *ring, uint32_t ring_size, const u
         var last = bytes.lastIndexOf(10) + 1;
         return last > first ? new TextDecoder().decode(bytes.subarray(first, last)) : "";
     }
-    function write(reason, stack) {
-        if (captured) return;
-        captured = true;
-        try {
-            var text = head + field("gpu_vendor", vendor, vendor_cap) + field("gpu_renderer", renderer, renderer_cap) +
-                       field("gpu_api", api, api_cap) + field("gpu_caps", caps, caps_cap) + field("context", context, context_cap) +
-                       "time: " + Date.now() + "\nreason: " + String(reason).slice(0, 256) + "\nstack:\n" +
-                       (typeof stack === "string" ? stack.slice(0, 4096) : "") + "\nlog:\n" + log_tail();
-            try { window.localStorage.setItem(key, text); } catch (e) {}
-            window.dispatchEvent(new CustomEvent("nt-crash", {"detail": {"text": text}}));
-        } catch (e) {}
-    }
     function capture(reason) {
         if (captured || !reason || typeof reason.stack !== "string") return;
-        /* Best effort: a trap or a JS error thrown through wasm frames. */
+        /* Best effort: a trap, abort() or a JS error thrown through wasm frames. */
         var stack = reason.stack;
         if (!(reason instanceof WebAssembly.RuntimeError) && stack.indexOf("wasm-function[") < 0 && stack.indexOf("wasm://") < 0 &&
             stack.indexOf("[wasm code]") < 0) return;
-    write(reason, stack);
-    }
-    function capture_abort(reason) {
-        var stack = "";
-        try { stack = new Error().stack || ""; } catch (e) {}
-        write(reason === undefined || reason === null || reason === "" ? "abort" : reason, stack);
+        captured = true;
+        var text = head + field("gpu_vendor", vendor, vendor_cap) + field("gpu_renderer", renderer, renderer_cap) +
+                   field("gpu_api", api, api_cap) + field("gpu_caps", caps, caps_cap) + field("context", context, context_cap) +
+                   "time: " + Date.now() + "\nreason: " + String(reason).slice(0, 256) + "\nstack:\n" + stack.slice(0, 4096) +
+                   "\nlog:\n" + log_tail();
+        try { window.localStorage.setItem(key, text); } catch (e) {}
+        window.dispatchEvent(new CustomEvent("nt-crash", {"detail": {"text": text}}));
     }
     window.addEventListener("error", function(e) { capture(e.error); });
     window.addEventListener("unhandledrejection", function(e) { capture(e.reason); });
-    var previous_abort = Module['onAbort'];
-    Module['onAbort'] = function() {
-        try { capture_abort(arguments[0]); } catch (e) {}
-        try {
-            if (typeof previous_abort === "function") previous_abort.apply(this, arguments);
-        } catch (e) {}
-    };
 })
 
 EM_JS(uint32_t, nt_crash_web_load, (const char *name, char *out, uint32_t cap), {
