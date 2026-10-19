@@ -1,5 +1,5 @@
 # Size Report: ui_showcase (wasm-analysis-paired)
-# Commit: 694f924
+# Commit: 43e95bc
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                 144 B
-Code              375168 B
-Data               41562 B
-Custom             11179 B
+Code              375134 B
+Data               41586 B
+Custom             11158 B
 ---------------- ----------
-TOTAL             429657 B
+TOTAL             429626 B
 
 ## Top 30 Functions by Size
 
@@ -25,9 +25,9 @@ TOTAL             429657 B
 --------  ----
 76871 B   frame
 17002 B   dispatch_command
-13284 B   create_gpu
+13289 B   create_gpu
  9467 B   input_field
- 9143 B   main
+ 9072 B   main
  8830 B   Clay__ConfigureOpenElementPtr
  8251 B   nt_ui_rich_text_markup
  6059 B   Clay__SizeContainersAlongAxis
@@ -52,10 +52,10 @@ TOTAL             429657 B
  2593 B   scrollbar_emit_axis
  2586 B   nt_ui_tooltip
  2429 B   printf_core
- 2410 B   nt_sprite_renderer_set_material
+ 2411 B   nt_sprite_renderer_set_material
 
 Total functions: 340
-Total code size: 374570 B
+Total code size: 374536 B
 
 ## Built Engine Archives
 
@@ -78,7 +78,7 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               94006 B
-libnt_gfx.a               110672 B
+libnt_gfx.a               111604 B
 libnt_gfx_stub.a            6702 B
 libnt_hash.a                4108 B
 libnt_http.a               16484 B
@@ -124,9 +124,9 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2658936 B
+TOTAL (archives)         2659868 B
 
 ## Data Segments Summary
 
-Segments: 166
-Total data size: 40392 B
+Segments: 165
+Total data size: 40423 B

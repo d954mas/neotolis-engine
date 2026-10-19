@@ -1,5 +1,5 @@
 # Size Report: sponza (wasm-analysis-paired)
-# Commit: 694f924
+# Commit: 43e95bc
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 8 B
 Export                71 B
 Elem                  78 B
-Code              200930 B
-Data              212006 B
-Custom             10472 B
+Code              200957 B
+Data              212037 B
+Custom             10465 B
 ---------------- ----------
-TOTAL             424599 B
+TOTAL             424650 B
 
 ## Top 30 Functions by Size
 
@@ -55,7 +55,7 @@ TOTAL             424599 B
   769 B   nt_input_web_on_pointer_down
 
 Total functions: 159
-Total code size: 200666 B
+Total code size: 200693 B
 
 ## Built Engine Archives
 
@@ -78,7 +78,7 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               94006 B
-libnt_gfx.a               110672 B
+libnt_gfx.a               111604 B
 libnt_gfx_stub.a            6702 B
 libnt_hash.a                4108 B
 libnt_http.a               16484 B
@@ -124,9 +124,9 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2658936 B
+TOTAL (archives)         2659868 B
 
 ## Data Segments Summary
 
 Segments: 156
-Total data size: 210832 B
+Total data size: 210863 B

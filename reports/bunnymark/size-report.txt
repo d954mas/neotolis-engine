@@ -1,5 +1,5 @@
 # Size Report: bunnymark (wasm-analysis-paired)
-# Commit: 694f924
+# Commit: 43e95bc
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                71 B
 Elem                  96 B
-Code              216619 B
-Data              208920 B
-Custom             11146 B
+Code              216648 B
+Data              208952 B
+Custom             11139 B
 ---------------- ----------
-TOTAL             437951 B
+TOTAL             438005 B
 
 ## Top 30 Functions by Size
 
@@ -28,7 +28,7 @@ TOTAL             437951 B
 27353 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 17781 B   nt_gfx_activate_texture
  6150 B   main
- 5758 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
+ 5759 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
  4533 B   basist::transcode_uastc_to_etc1(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
  4132 B   upload_glyph
  3914 B   basist::pack_eac(basist::eac_block&, unsigned char const*, unsigned int)
@@ -39,7 +39,7 @@ TOTAL             437951 B
  2624 B   nt_http_request_ex
  2588 B   basist::huffman_decoding_table::init(unsigned int, unsigned char const*, unsigned int)
  2536 B   basist::pack_eac_high_quality(basist::eac_block&, unsigned char const*, unsigned int)
- 2471 B   basist::unpack_uastc(unsigned int, unsigned int, basist::color32 const&, basist::astc_block_desc const&, basist::color32*, bool)
+ 2472 B   basist::unpack_uastc(unsigned int, unsigned int, basist::color32 const&, basist::astc_block_desc const&, basist::color32*, bool)
  2428 B   printf_core
  1678 B   basist::bitwise_decoder::read_huffman_table(basist::huffman_decoding_table&)
  1678 B   nt_font_lookup_glyph_offset
@@ -55,7 +55,7 @@ TOTAL             437951 B
  1076 B   spawn_one_defold
 
 Total functions: 187
-Total code size: 216310 B
+Total code size: 216339 B
 
 ## Built Engine Archives
 
@@ -78,7 +78,7 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               94006 B
-libnt_gfx.a               110672 B
+libnt_gfx.a               111604 B
 libnt_gfx_stub.a            6702 B
 libnt_hash.a                4108 B
 libnt_http.a               16484 B
@@ -124,9 +124,9 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2658936 B
+TOTAL (archives)         2659868 B
 
 ## Data Segments Summary
 
 Segments: 156
-Total data size: 207750 B
+Total data size: 207782 B

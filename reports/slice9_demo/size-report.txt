@@ -1,5 +1,5 @@
 # Size Report: slice9_demo (wasm-analysis-paired)
-# Commit: 694f924
+# Commit: 43e95bc
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                71 B
 Elem                  54 B
-Code              195803 B
-Data               11386 B
-Custom              5645 B
+Code              195901 B
+Data               11414 B
+Custom              5638 B
 ---------------- ----------
-TOTAL             214023 B
+TOTAL             214142 B
 
 ## Top 30 Functions by Size
 
@@ -26,7 +26,7 @@ TOTAL             214023 B
 59401 B   frame
 16998 B   dispatch_command
  8787 B   Clay__ConfigureOpenElementPtr
- 7894 B   main
+ 7965 B   main
  6038 B   Clay__SizeContainersAlongAxis
  5616 B   Clay__InitializeEphemeralMemory
  4132 B   upload_glyph
@@ -55,7 +55,7 @@ TOTAL             214023 B
  1099 B   nt_hash32_str
 
 Total functions: 158
-Total code size: 195529 B
+Total code size: 195627 B
 
 ## Built Engine Archives
 
@@ -78,7 +78,7 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               94006 B
-libnt_gfx.a               110672 B
+libnt_gfx.a               111604 B
 libnt_gfx_stub.a            6702 B
 libnt_hash.a                4108 B
 libnt_http.a               16484 B
@@ -124,9 +124,9 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2658936 B
+TOTAL (archives)         2659868 B
 
 ## Data Segments Summary
 
 Segments: 32
-Total data size: 11171 B
+Total data size: 11199 B

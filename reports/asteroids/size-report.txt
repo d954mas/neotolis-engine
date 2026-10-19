@@ -1,5 +1,5 @@
 # Size Report: asteroids (wasm-analysis-paired)
-# Commit: 694f924
+# Commit: 43e95bc
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                  70 B
-Code              394324 B
-Data              219381 B
-Custom             13134 B
+Code              394351 B
+Data              219409 B
+Custom             13127 B
 ---------------- ----------
-TOTAL             628363 B
+TOTAL             628411 B
 
 ## Top 30 Functions by Size
 
@@ -55,7 +55,7 @@ TOTAL             628363 B
  2413 B   nt_ui_toggle
 
 Total functions: 253
-Total code size: 393880 B
+Total code size: 393907 B
 
 ## Built Engine Archives
 
@@ -78,7 +78,7 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               94006 B
-libnt_gfx.a               110672 B
+libnt_gfx.a               111604 B
 libnt_gfx_stub.a            6702 B
 libnt_hash.a                4108 B
 libnt_http.a               16484 B
@@ -124,9 +124,9 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2658936 B
+TOTAL (archives)         2659868 B
 
 ## Data Segments Summary
 
 Segments: 180
-Total data size: 218025 B
+Total data size: 218053 B
