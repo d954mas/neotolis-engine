@@ -225,6 +225,7 @@ int main(int argc, char *argv[]) {
     }
 #endif
 
+    nt_builder_write_depfile(pack_path(out_dir, "build_packs.d"));
     (void)printf("\n=== Done ===\n");
     return 0;
 }

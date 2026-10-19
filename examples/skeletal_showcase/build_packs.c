@@ -329,6 +329,7 @@ int main(int argc, char *argv[]) {
     const char *headers[] = {rig_header, clips_header};
     nt_builder_merge_headers(headers, 2, merged);
     (void)printf("Generated: %s\n", merged);
+    nt_builder_write_depfile(pack_path(out_dir, "build_packs.d"));
     (void)printf("\n=== Done ===\n");
     return 0;
 }

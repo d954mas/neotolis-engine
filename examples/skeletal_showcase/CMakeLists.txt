@@ -62,9 +62,6 @@ nt_example_packs(
     PACK_DIR "${SKELETAL_SHOWCASE_PACK_DIR}"
     ASSETS_DIR "${SKELETAL_SHOWCASE_ASSETS_DIR}"
     PACKS skeletal_showcase.ntpack skeletal_showcase_clips.ntpack
-    INPUT_DIRS raw
-        "${NT_ENGINE_ROOT}/assets/shaders"
-        "${NT_ENGINE_ROOT}/examples/ui_showcase/raw"
 )
 
 if(NT_CDN_URL)

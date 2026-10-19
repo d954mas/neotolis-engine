@@ -111,6 +111,7 @@ int main(int argc, char *argv[]) {
         (void)printf("  rtt_showcase.ntpack    %8.1f KB\n", (double)sz / 1024.0);
     }
 
+    nt_builder_write_depfile(pack_path(out_dir, "build_packs.d"));
     (void)printf("\n=== Done ===\n");
     return 0;
 }

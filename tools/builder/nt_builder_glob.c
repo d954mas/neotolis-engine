@@ -92,6 +92,8 @@ bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn ca
         if (h_find == INVALID_HANDLE_VALUE) {
             return true;
         }
+        /* A file added to or removed from the directory must rebuild the pack. */
+        nt_builder_record_input(directory);
 
         do {
             if (find_data.cFileName[0] == '.' && (find_data.cFileName[1] == '\0' || (find_data.cFileName[1] == '.' && find_data.cFileName[2] == '\0'))) {
@@ -124,6 +126,8 @@ bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn ca
             free((void *)matches);
             return true;
         }
+        /* A file added to or removed from the directory must rebuild the pack. */
+        nt_builder_record_input(directory);
 
         struct dirent *entry;
         while ((entry = readdir(dir)) != NULL) { // NOLINT(concurrency-mt-unsafe)

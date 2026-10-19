@@ -1444,6 +1444,7 @@ void nt_builder_add_texture(NtBuilderContext *ctx, const char *path, const nt_te
     uint32_t file_size = 0;
     uint8_t *file_data = (uint8_t *)nt_builder_read_file(read_path, &file_size);
     NT_BUILD_ASSERT(file_data && "add_texture: failed to read file");
+    nt_builder_record_input(read_path);
 
     /* Store resolved path for re-read at encode time (before freeing resolved_path) */
     char *stored_path = strdup(read_path);
@@ -1478,6 +1479,7 @@ void nt_builder_add_shader(NtBuilderContext *ctx, const char *path, nt_build_sha
     uint32_t file_size = 0;
     char *source = nt_builder_read_file(read_path, &file_size);
     NT_BUILD_ASSERT(source && "add_shader: failed to read file");
+    nt_builder_record_input(read_path);
 
     uint32_t resolved_len = 0;
     char *resolved = nt_builder_resolve_includes(source, file_size, read_path, ctx, &resolved_len);

@@ -313,6 +313,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    nt_builder_write_depfile(pack_path(out_dir, "build_packs.d"));
     (void)printf("\n=== Done ===\n");
     return 0;
 }

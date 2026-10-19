@@ -89,6 +89,8 @@ int main(int argc, char *argv[]) {
         (void)fprintf(stderr, "basis_fixture.ntpack failed: %d\n", r);
         return 1;
     }
-    (void)printf("Generated: %s\n", path);
+    (void)snprintf(path, sizeof(path), "%s/build_packs.d", out_dir);
+    nt_builder_write_depfile(path);
+    (void)printf("Generated: %s/basis_fixture.ntpack\n", out_dir);
     return 0;
 }

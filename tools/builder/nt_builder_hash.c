@@ -156,3 +156,72 @@ char *nt_builder_read_file(const char *path, uint32_t *out_size) {
     bool too_large = false;
     return nt_builder_read_file_bounded(path, UINT32_MAX, out_size, &too_large);
 }
+
+/* --- Input log (depfile) --- */
+
+/* One builder process is one CMake build step that may write several packs,
+ * so the inputs belong to the process, not to a pack context. */
+static char **s_inputs;
+static uint32_t s_input_count;
+static uint32_t s_input_capacity;
+
+void nt_builder_record_input(const char *path) {
+    /* CMake resolves relative depfile paths against the binary dir, not the
+     * builder's working directory. */
+#ifdef _WIN32
+    char *abs_path = _fullpath(NULL, path, 0);
+#else
+    char *abs_path = realpath(path, NULL);
+#endif
+    NT_BUILD_ASSERT(abs_path && "record_input: cannot resolve path");
+    for (char *c = abs_path; *c != '\0'; c++) {
+        if (*c == '\\') {
+            *c = '/';
+        }
+    }
+    if (s_input_count == s_input_capacity) {
+        uint32_t capacity = s_input_capacity ? s_input_capacity * 2U : 256U;
+        char **grown = (char **)realloc((void *)s_inputs, (size_t)capacity * sizeof(char *));
+        NT_BUILD_ASSERT(grown && "record_input: out of memory");
+        s_inputs = grown;
+        s_input_capacity = capacity;
+    }
+    s_inputs[s_input_count++] = abs_path;
+}
+
+static int input_strcmp(const void *a, const void *b) { return strcmp(*(const char *const *)a, *(const char *const *)b); }
+
+static void write_depfile_path(FILE *file, const char *path) {
+    for (const char *c = path; *c != '\0'; c++) {
+        if (*c == ' ' || *c == '#') {
+            (void)fputc('\\', file);
+        } else if (*c == '$') {
+            (void)fputc('$', file);
+        }
+        (void)fputc(*c, file);
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_builder_write_depfile(const char *path) {
+    NT_BUILD_ASSERT(path && "write_depfile: path is required");
+    if (s_input_count > 1) {
+        qsort((void *)s_inputs, s_input_count, sizeof(char *), input_strcmp);
+    }
+    FILE *file = fopen(path, "wb");
+    NT_BUILD_ASSERT(file && "write_depfile: cannot open output");
+    /* Ninja keys the deps to the build step's own output; the target is informational. */
+    write_depfile_path(file, path);
+    (void)fputc(':', file);
+    for (uint32_t i = 0; i < s_input_count; i++) {
+        if (i > 0 && strcmp(s_inputs[i], s_inputs[i - 1]) == 0) {
+            continue;
+        }
+        (void)fputs(" \\\n  ", file);
+        write_depfile_path(file, s_inputs[i]);
+    }
+    (void)fputc('\n', file);
+    bool write_failed = ferror(file) != 0;
+    write_failed |= fclose(file) != 0;
+    NT_BUILD_ASSERT(!write_failed && "write_depfile: write failed");
+}

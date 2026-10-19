@@ -161,6 +161,9 @@ int main(int argc, char *argv[]) {
     (void)snprintf(combined, sizeof(combined), "%s/atlas_assets.h", HEADER_DIR);
     nt_builder_merge_headers(headers, 1, combined);
 
+    char depfile[512];
+    (void)snprintf(depfile, sizeof(depfile), "%s/build_packs.d", out_dir);
+    nt_builder_write_depfile(depfile);
     (void)printf("\nDone.\n");
     return 0;
 }

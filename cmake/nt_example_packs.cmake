@@ -2,7 +2,7 @@
 # the .expected_packs manifest the CI guard verifies. Native presets run the
 # builder at build time; wasm copies a prior native build's packs or fails loudly.
 function(nt_example_packs)
-    cmake_parse_arguments(PACKS "" "NAME;TARGET;BUILDER;PACK_DIR;ASSETS_DIR" "PACKS;OPTIONAL_PACKS;INPUT_DIRS" ${ARGN})
+    cmake_parse_arguments(PACKS "" "NAME;TARGET;BUILDER;PACK_DIR;ASSETS_DIR" "PACKS;OPTIONAL_PACKS" ${ARGN})
     if(PACKS_UNPARSED_ARGUMENTS OR NOT PACKS_NAME OR NOT PACKS_TARGET OR NOT PACKS_BUILDER
        OR NOT PACKS_PACK_DIR OR NOT PACKS_ASSETS_DIR OR NOT PACKS_PACKS)
         message(FATAL_ERROR "nt_example_packs(${PACKS_NAME}): bad or missing arguments"
@@ -20,21 +20,6 @@ function(nt_example_packs)
     set(_copy_list "")
     set(_stamp "")
     if(NOT EMSCRIPTEN AND NOT _skipped)
-        set(_input_deps "")
-        foreach(INPUT_DIR IN LISTS PACKS_INPUT_DIRS)
-            get_filename_component(_input_dir "${INPUT_DIR}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-            file(GLOB_RECURSE _dir_inputs CONFIGURE_DEPENDS LIST_DIRECTORIES FALSE "${_input_dir}/*")
-            list(APPEND _input_deps ${_dir_inputs})
-        endforeach()
-        if(PACKS_INPUT_DIRS)
-            list(REMOVE_DUPLICATES _input_deps)
-            list(SORT _input_deps)
-            # Membership changes must rebuild even after deletion or adding an older file.
-            set(_input_manifest "${CMAKE_CURRENT_BINARY_DIR}/${PACKS_NAME}_pack_inputs.txt")
-            string(REPLACE ";" "\n" _input_manifest_body "${_input_deps}")
-            file(GENERATE OUTPUT "${_input_manifest}" CONTENT "${_input_manifest_body}\n")
-            list(APPEND _input_deps "${_input_manifest}")
-        endif()
         foreach(PACK ${PACKS_PACKS})
             list(APPEND _pack_files "${PACKS_PACK_DIR}/${PACK}")
         endforeach()
@@ -44,13 +29,26 @@ function(nt_example_packs)
         # The packs target must DEPENDS on it — CMake materializes a custom
         # command only when some target consumes an OUTPUT (byproducts don't count).
         set(_stamp "${PACKS_PACK_DIR}/.${PACKS_NAME}.stamp")
+        # The builder writes build_packs.d (nt_builder_write_depfile): every file
+        # it read plus every directory a glob walked.
+        set(_depfile "${PACKS_PACK_DIR}/build_packs.d")
+        set(_dirs "${PACKS_PACK_DIR}/.${PACKS_NAME}.dirs")
+        set(_dirs_changed "${PACKS_PACK_DIR}/.${PACKS_NAME}.dirs_changed")
+        set(_dirs_script "${NT_ENGINE_ROOT}/cmake/nt_pack_dirs.cmake")
+        add_custom_target(${PACKS_NAME}_pack_dirs
+            COMMAND ${CMAKE_COMMAND} -D "DEPFILE=${_depfile}" -D "LISTING=${_dirs}"
+                -D "CHANGED=${_dirs_changed}" -P "${_dirs_script}"
+            BYPRODUCTS "${_dirs_changed}"
+        )
         add_custom_command(
             OUTPUT "${_stamp}"
-            BYPRODUCTS ${_pack_files}
+            BYPRODUCTS ${_pack_files} "${_dirs}"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKS_PACK_DIR}"
             COMMAND "$<TARGET_FILE:${PACKS_BUILDER}>" "${PACKS_PACK_DIR}"
+            COMMAND ${CMAKE_COMMAND} -D "DEPFILE=${_depfile}" -D "LISTING=${_dirs}" -P "${_dirs_script}"
             COMMAND ${CMAKE_COMMAND} -E touch "${_stamp}"
-            DEPENDS ${PACKS_BUILDER} ${_input_deps}
+            DEPENDS ${PACKS_BUILDER} "${_dirs_changed}"
+            DEPFILE "${_depfile}"
             WORKING_DIRECTORY "${NT_ENGINE_ROOT}"
             COMMENT "Building ${PACKS_NAME} pack(s)"
         )

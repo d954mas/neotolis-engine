@@ -132,5 +132,8 @@ int main(int argc, char **argv) {
     build_core(argv[1]);
     build_space(argv[1]);
     build_ui(argv[1]);
+    char depfile[1024];
+    (void)snprintf(depfile, sizeof(depfile), "%s/build_packs.d", argv[1]);
+    nt_builder_write_depfile(depfile);
     return 0;
 }

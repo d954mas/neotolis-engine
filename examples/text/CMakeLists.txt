@@ -38,12 +38,6 @@ if(NOT EMSCRIPTEN)
     )
 endif()
 
-set(TEXT_INPUT_DIRS "${NT_ENGINE_ROOT}/assets/fonts" "${NT_ENGINE_ROOT}/assets/shaders")
-if(WIN32)
-    # The builder can fall back to system Arial when the project font is absent.
-    list(APPEND TEXT_INPUT_DIRS "C:/Windows/Fonts")
-endif()
-
 # text_cjk is OPTIONAL: the builder skips it when the local font lacks CJK glyphs.
 nt_example_packs(
     NAME text
@@ -53,7 +47,6 @@ nt_example_packs(
     ASSETS_DIR "${TEXT_ASSETS_DIR}"
     PACKS text_base.ntpack
     OPTIONAL_PACKS text_cjk.ntpack
-    INPUT_DIRS ${TEXT_INPUT_DIRS}
 )
 
 # Optional CDN base URL

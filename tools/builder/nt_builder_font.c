@@ -780,6 +780,7 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
     uint32_t file_size = 0;
     char *file_data = nt_builder_read_file(path, &file_size);
     NT_BUILD_ASSERT(file_data && "decode_font: failed to read TTF file");
+    nt_builder_record_input(path);
 
     stbtt_fontinfo font;
     int ok = stbtt_InitFont(&font, (const unsigned char *)file_data, stbtt_GetFontOffsetForIndex((const unsigned char *)file_data, 0));

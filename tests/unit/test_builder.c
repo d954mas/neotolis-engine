@@ -322,6 +322,73 @@ void test_read_file_bounded_rejects_before_read(void) {
     free(data);
 }
 
+static void depfile_glob_noop(const char *full_path, void *user) {
+    (void)full_path;
+    (void)user;
+}
+
+/* The input log is process-wide, so earlier tests add lines too: check the
+ * inputs of this test and the format, not the whole file. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_write_depfile_lists_every_input_read(void) {
+    const char *glob_dir = TMP_DIR "/depfile in#$";
+    MKDIR(glob_dir);
+    FILE *file = fopen(TMP_DIR "/depfile in#$/a.txt", "wb");
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_EQUAL(0, fclose(file));
+
+    NtStreamLayout layout[] = {{"POSITION", NT_STREAM_FLOAT32, 3, false, 0, NT_LOC_POSITION}};
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/depfile.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_builder_add_shader(ctx, "assets/shaders/radial.frag", NT_BUILD_SHADER_FRAGMENT);
+    nt_builder_add_mesh(ctx, "assets/meshes/cube.glb", &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
+    nt_builder_add_texture(ctx, "assets/textures/lenna.png", NULL);
+    TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/depfile in#$/*.txt", depfile_glob_noop, NULL));
+    nt_builder_free_pack(ctx);
+    /* A second pack of the same process reads the texture again. */
+    ctx = nt_builder_start_pack(TMP_DIR "/depfile_second.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_builder_add_texture(ctx, "assets/textures/lenna.png", NULL);
+    nt_builder_free_pack(ctx);
+
+    const char *depfile_path = TMP_DIR "/depfile.d";
+    nt_builder_write_depfile(depfile_path);
+    uint32_t size = 0;
+    char *text = nt_builder_read_file(depfile_path, &size);
+    TEST_ASSERT_NOT_NULL(text);
+
+    /* Read inputs, an #include and the glob directory; paths are absolute and escaped. */
+    TEST_ASSERT_NOT_NULL(strstr(text, "/assets/shaders/radial.frag \\\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/assets/shaders/common/radial_sdf.glsl \\\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/assets/meshes/cube.glb \\\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/build/tests/tmp/depfile\\ in\\#$$"));
+    TEST_ASSERT_NULL(strstr(text, "a.txt"));
+    TEST_ASSERT_NULL(strchr(text, '\r'));
+
+    /* A target line, then one absolute path per line; a file read twice is listed once. */
+    char *line = strchr(text, '\n');
+    TEST_ASSERT_NOT_NULL(line);
+    TEST_ASSERT_EQUAL_STRING_LEN(": \\", line - 3, 3);
+    uint32_t lenna_count = 0;
+    for (char *start = line + 1; *start != '\0';) {
+        char *end = strchr(start, '\n');
+        TEST_ASSERT_NOT_NULL(end);
+        TEST_ASSERT_EQUAL_STRING_LEN("  ", start, 2);
+        const char *path = start + 2;
+#ifdef _WIN32
+        TEST_ASSERT_TRUE(path[1] == ':' && path[2] == '/');
+#else
+        TEST_ASSERT_EQUAL_CHAR('/', path[0]);
+#endif
+        if (strstr(path, "/lenna.png") != NULL && strstr(path, "/lenna.png") < end) {
+            lenna_count++;
+        }
+        start = end + 1;
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, lenna_count);
+    free(text);
+}
+
 /* --- Pack writer core tests --- */
 
 void test_start_pack_returns_context(void) {
@@ -9477,6 +9544,7 @@ int main(void) {
     RUN_TEST(test_hash_path_normalization);
     RUN_TEST(test_hash_different_strings_differ);
     RUN_TEST(test_read_file_bounded_rejects_before_read);
+    RUN_TEST(test_write_depfile_lists_every_input_read);
 
     /* Pack writer core */
     RUN_TEST(test_start_pack_returns_context);

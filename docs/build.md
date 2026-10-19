@@ -37,27 +37,24 @@ packs cause an explicit WASM build failure.
 The first Sponza encode can take hours. To defer it, configure native builds
 with `-DNT_SKIP_EXAMPLE_PACKS=sponza`; this cache setting persists. Reset it with
 `-DNT_SKIP_EXAMPLE_PACKS=` when Sponza is needed. Warm encodes reuse
-`build/examples/*/_cache`. Packs depend on the builder executable and files in
-the example's `INPUT_DIRS`. Native builds detect edits, additions and removals
-recursively, including shader includes and new subdirectories. An unchanged
-input tree does not rerun the builder. Generated `examples/*/generated/*.h` are
+`build/examples/*/_cache`. Generated `examples/*/generated/*.h` are
 deterministic tracked output; commit refreshed copies when a pack build reveals
 they were stale.
 
-Declare input directories once in `nt_example_packs`, for example:
+Packs depend on the builder executable and on the builder's own depfile: each
+`build_packs.c` ends with `nt_builder_write_depfile("<pack dir>/build_packs.d")`,
+which lists every file the builder read, shader includes and glTF buffers
+included, plus every directory a glob walked (see the builder spec, "Dependency
+file"). Editing a read file reruns the builder; files it does not read never do.
+A small always-run step (`cmake/nt_pack_dirs.cmake`) compares the file lists of
+those glob directories with the last build, so adding or removing a file in a
+globbed directory also reruns it, even with an old timestamp. It compares
+listings rather than directory mtimes because on Windows ninja reads a
+directory's mtime from its parent's listing, which NTFS updates lazily.
 
-```cmake
-INPUT_DIRS raw "${NT_ENGINE_ROOT}/assets/shaders"
-```
-
-Relative paths are resolved from the example's source directory. Include shared
-asset directories used by its builder; procedural-only packs need no
-`INPUT_DIRS`. Keep pack outputs, generated headers and caches outside these
-directories. Every file within a listed directory is a dependency, even if the
-builder does not consume it. The builder still decides what goes into the pack.
-File discovery runs during builds, without a background watcher; an automatically
-generated file list also invalidates packs when inputs are removed or added with
-old timestamps. Skipped examples do not scan inputs or rebuild packs. WASM still
+A new `build_packs.c` must call `nt_builder_write_depfile` last, after every
+pack succeeded. Files the game reads itself (existence probes, data passed as
+memory) are not listed. Skipped examples do not rebuild packs. WASM still
 requires a native build after asset edits; reconfigure WASM if the required pack
 set changes, such as adding Bunnymark HD art.
 

@@ -62,6 +62,7 @@ nt_builder_add_texture_from_memory / add_texture_raw   /* in-memory pixels */
 nt_builder_add_scene_mesh   /* one primitive out of a parsed GLB scene */
 nt_builder_add_blob         /* opaque bytes under a resource id */
 nt_builder_add_asset_root   /* convention-based tree import */
+nt_builder_write_depfile    /* every input this process read; see "Dependency file" */
 
 /* Skeletal assets (wire formats: Skeletal Animation,
  * "Builder, codec, wire formats"). add_skeleton encodes a
@@ -293,6 +294,29 @@ Generated asset headers are committed to git. This is intentional:
 - Git diff on the header shows exactly which assets changed between commits -- acts as an asset changelog.
 - New contributors can build and run without first running the builder.
 - Header files are small (one line per asset) and compress well in git.
+
+## Dependency file
+
+`nt_builder_write_depfile(path)` writes a Make-style depfile of everything the
+builder process read, for a build system to rerun the builder exactly when an
+input changes (CMake `add_custom_command(DEPFILE)`) and for release audits of
+pack inputs.
+
+- **Complete for builder reads:** the resolved file of every `add_*` and atlas
+  sprite, every shader `#include`, every file cgltf opens (`.gltf`/`.glb` and
+  external buffers, also through `nt_builder_parse_glb_scene`), and every
+  directory `nt_builder_glob_iterate` walked, so a new matching file invalidates
+  it. Files the game reads itself and passes as memory are not listed.
+- **Cache-independent:** every `add_*` reads its source when called, so cached
+  entries are listed too.
+- **Per process, not per pack:** one builder run is one build step that may
+  write several packs, so the log is process-wide; call it last, after every
+  `finish_pack` succeeded, from the main thread.
+- **Format:** the depfile's own path as the target, then one path per line:
+  absolute (CMake resolves relative depfile paths against the binary directory,
+  not the builder's working directory), forward slashes, sorted, unique, with
+  space, `#` and `$` escaped as `\ `, `\#`, `$$`. Asset names should still avoid
+  them. Missing-file probes (asset-root lookup, existence checks) are not listed.
 
 ## Builder cache
 

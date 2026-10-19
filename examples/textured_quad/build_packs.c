@@ -125,6 +125,7 @@ int main(int argc, char *argv[]) {
     (void)snprintf(combined, sizeof(combined), "%s/tq_assets.h", HEADER_DIR);
     nt_builder_merge_headers(headers, 3, combined);
 
+    nt_builder_write_depfile(pack_path(out_dir, "build_packs.d"));
     (void)printf("\nDone.\n");
     return 0;
 }

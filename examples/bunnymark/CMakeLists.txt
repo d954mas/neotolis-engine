@@ -70,9 +70,6 @@ nt_example_packs(
     PACK_DIR "${BUNNYMARK_PACK_DIR}"
     ASSETS_DIR "${BUNNYMARK_ASSETS_DIR}"
     PACKS ${BUNNYMARK_PACK_NAMES}
-    INPUT_DIRS raw
-        "${NT_ENGINE_ROOT}/assets/fonts"
-        "${NT_ENGINE_ROOT}/assets/shaders"
 )
 
 # Optional CDN base URL

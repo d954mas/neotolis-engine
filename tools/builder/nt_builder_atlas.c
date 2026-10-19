@@ -1008,6 +1008,9 @@ void nt_atlas_add(NtAtlasBuild *atlas, const char *path, const nt_atlas_sprite_o
     uint32_t file_size = 0;
     bool file_too_large = false;
     uint8_t *file_data = (uint8_t *)nt_builder_read_file_bounded(read_path, INT_MAX, &file_size, &file_too_large);
+    if (file_data) {
+        nt_builder_record_input(read_path);
+    }
     free(resolved_path);
     if (file_too_large) {
         push_content_error(state, add_seq, region_name, NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE, 0, 0);
