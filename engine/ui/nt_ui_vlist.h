@@ -30,11 +30,10 @@ typedef struct {
     int32_t overscan;            /* extra rows rendered each side of the viewport (hides recycle pop) */
     float gap;                   /* inter-row spacing (px, finite 0..UINT16_MAX, truncated to int); scroll container's childGap */
     /* Id recycle modulus: per-row id keys on (index % id_ring), so distinct ids per list are bounded
-     * by id_ring, NOT the row count — a 10k list never saturates Clay's PERSISTENT element hashmap
-     * (one permanent slot per distinct id ever declared). MUST exceed the max simultaneously-visible
-     * window (begin asserts otherwise, before visible rows can alias). Default 256 ~ 256
-     * hashmap slots/list, far beyond any real viewport. 0/1 disables recycling (absolute ids; can
-     * saturate). */
+     * by id_ring, NOT the row count, and so are the non-evicting nt_ui_state cells of stateful row
+     * widgets (scroll, slider, input) — size state_slots for id_ring plus the rest of the UI. MUST exceed the max simultaneously-visible window (begin asserts
+     * otherwise, before visible rows can alias). Default 256, far beyond any real viewport. 0/1
+     * disables recycling (absolute ids; safe only for rows without per-id widget state). */
     uint32_t id_ring;
 } nt_ui_vlist_style_t;
 _Static_assert(sizeof(nt_ui_vlist_style_t) == 104, "nt_ui_vlist_style_t stable ABI (88B scroll + i32 overscan + f32 gap + u32 id_ring + 4B tail pad, 8B aligned)");
