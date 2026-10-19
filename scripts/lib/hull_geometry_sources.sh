@@ -18,5 +18,6 @@ hull_geometry_source_sha256() {
     while IFS= read -r clipper; do
         sources+=("$clipper")
     done < <(printf '%s\n' deps/clipper2/CPP/Clipper2Lib/include/clipper2/*.h deps/clipper2/CPP/Clipper2Lib/src/*.cpp | LC_ALL=C sort)
-    sha256sum "${sources[@]}" | sha256sum | awk '{print $1}'
+    # Binary mode keeps checksum-list markers identical across platforms.
+    sha256sum --binary "${sources[@]}" | sha256sum | awk '{print $1}'
 }

@@ -7,6 +7,18 @@ NT_HULL_AREA_GUARD_LIB_ONLY=1 source scripts/bench_hull_tolerance.sh
 
 BASELINE="tools/research/atlas_bench/baseline"
 PLATFORM="MSYS_NT-10.0-22631"
+TEXT_DEFAULT_SHA="$(
+    sha256sum() { command sha256sum --text "$@"; }
+    hull_geometry_source_sha256
+)"
+BINARY_DEFAULT_SHA="$(
+    sha256sum() { command sha256sum --binary "$@"; }
+    hull_geometry_source_sha256
+)"
+if [[ "$TEXT_DEFAULT_SHA" != "$BINARY_DEFAULT_SHA" ]]; then
+    echo "source fingerprint depends on checksum default mode" >&2
+    exit 1
+fi
 
 if ! hull_is_canonical_publication "mixed_aa" "0,2,5,10,15,25" "native-release" "1"; then
     echo "canonical mixed-AA sweep was not recognized" >&2
