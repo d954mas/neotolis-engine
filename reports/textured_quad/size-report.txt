@@ -1,34 +1,34 @@
 # Size Report: textured_quad (wasm-analysis-paired)
-# Commit: 8eb3719
+# Commit: 694f924
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
 Type                 198 B
-Import               584 B
-Function             134 B
+Import               598 B
+Function             131 B
 Table                  5 B
 Memory                 7 B
 Global                 8 B
-Export                89 B
+Export                71 B
 Elem                  62 B
-Code               87918 B
-Data                9994 B
-Custom              4821 B
+Code               88042 B
+Data               10036 B
+Custom              4789 B
 ---------------- ----------
-TOTAL             103820 B
+TOTAL             103947 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-32169 B   frame
- 7229 B   main
+32506 B   frame
+ 7237 B   main
  5296 B   nt_gfx_activate_mesh
  3002 B   fmt_fp
  2818 B   nt_gfx_make_texture
- 2619 B   nt_http_request_ex
+ 2614 B   nt_http_request_ex
  2425 B   printf_core
  1843 B   __rem_pio2f
  1274 B   nt_gfx_frame_create_buffers
@@ -54,8 +54,8 @@ TOTAL             103820 B
   483 B   nt_gfx_backend_bind_vertex_input
   468 B   nt_gfx_destroy_texture
 
-Total functions: 132
-Total code size: 87709 B
+Total functions: 129
+Total code size: 87837 B
 
 ## Built Engine Archives
 
@@ -81,8 +81,8 @@ libnt_font.a               94006 B
 libnt_gfx.a               110672 B
 libnt_gfx_stub.a            6702 B
 libnt_hash.a                4108 B
-libnt_http.a               16110 B
-libnt_http_stub.a          11400 B
+libnt_http.a               16484 B
+libnt_http_stub.a          11406 B
 libnt_input.a              19520 B
 libnt_input_stub.a         23432 B
 libnt_introspect.a           908 B
@@ -124,9 +124,9 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2658556 B
+TOTAL (archives)         2658936 B
 
 ## Data Segments Summary
 
 Segments: 24
-Total data size: 9827 B
+Total data size: 9869 B
