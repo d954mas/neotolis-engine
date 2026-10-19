@@ -12,6 +12,7 @@ Neotolis Engine is a minimalist **C17** game engine for **Web/WASM (WebGL 2)**. 
 ## Workflow
 
 - Start with a GitHub issue and feature branch before the first commit; never stack commits on local master. Branch names: `{issue_number}-{slug}`. Continue the current task's branch/PR when requested.
+- Issues follow [issue rules](docs/issues.md): read it before filing, editing or closing one. Search for duplicates first; title `<module>[/<platform>]: <summary>`; body sections by type; labels only from its set (type, area, platform, `game`); every close without a PR gets a comment with the reason.
 - Navigate C with clangd LSP first. After adding a `.c` file, rebuild `native-debug` to refresh `compile_commands.json`; confirm new-file and platform-`#if` diagnostics against a real build.
 - Execute the requested scope. Report unrelated improvements separately.
 - Before changing a validator contract, find every constructor of that data shape, including spec examples and parameterized test helpers.
