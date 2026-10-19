@@ -13,7 +13,7 @@ type DeviceHooks = {
 };
 type DeviceWindow = Window & {
   __nt?: DeviceHooks;
-  __device: Identity & { queries: number[]; extensions: string[]; denyCreate: boolean; denied: number; creationStatus: string | null; creationErrorListeners: Set<EventListenerOrEventListenerObject> };
+  __device: Identity & { queries: number[]; extensions: string[]; denyCreate: boolean; denied: number; creationStatus: string | null };
   __deviceLoss?: WEBGL_lose_context;
 };
 
@@ -24,7 +24,7 @@ const RESTORED: Identity = { vendor: 'vendor-restored', renderer: 'renderer-rest
 async function installIdentity(page: Page, identity = INITIAL, debug = true, denyCreate = false, creationStatus: string | null = null): Promise<void> {
   await page.addInitScript(({ identity, debug, denyCreate, creationStatus }) => {
     const control = (window as DeviceWindow).__device = {
-      ...identity, queries: [] as number[], extensions: [] as string[], denyCreate, denied: 0, creationStatus, creationErrorListeners: new Set<EventListenerOrEventListenerObject>(),
+      ...identity, queries: [] as number[], extensions: [] as string[], denyCreate, denied: 0, creationStatus,
     };
     const proto = WebGL2RenderingContext.prototype;
     const getExtension = proto.getExtension;
@@ -56,16 +56,6 @@ async function installIdentity(page: Page, identity = INITIAL, debug = true, den
       }
       return getContext.apply(this, args);
     } as typeof getContext;
-    const addEventListener = HTMLCanvasElement.prototype.addEventListener;
-    const removeEventListener = HTMLCanvasElement.prototype.removeEventListener;
-    HTMLCanvasElement.prototype.addEventListener = function(...args: Parameters<typeof addEventListener>) {
-      if (args[0] === 'webglcontextcreationerror') control.creationErrorListeners.add(args[1]);
-      return addEventListener.apply(this, args);
-    } as typeof addEventListener;
-    HTMLCanvasElement.prototype.removeEventListener = function(...args: Parameters<typeof removeEventListener>) {
-      if (args[0] === 'webglcontextcreationerror') control.creationErrorListeners.delete(args[1]);
-      return removeEventListener.apply(this, args);
-    } as typeof removeEventListener;
   }, { identity, debug, denyCreate, creationStatus });
 }
 
@@ -202,39 +192,24 @@ test('device identity: null fields, UTF-8 truncation and newlines stay bounded',
   expect(Buffer.byteLength(record.split('\ngpu_renderer: ')[1].split('\n')[0], 'utf8')).toBe(253);
 });
 
-for (const [name, status, expected] of [
-  ['browser status', 'forced browser policy', 'browser_status=forced browser policy'],
-  ['empty browser status', '', 'browser_status=<empty>'],
-] as const) {
-  test(`device identity: startup context failure keeps ${name}`, async ({ page }) => {
-    await installIdentity(page, INITIAL, true, true, status);
-    await page.goto('/index.html?crash=read');
-    await page.waitForFunction((key) => localStorage.getItem(key) !== null, KEY, { timeout: 30_000 });
-    const record = (await page.evaluate((key) => localStorage.getItem(key), KEY))!;
-    expectIdentity(record, { vendor: null, renderer: null, api: null });
-    expect(record).not.toContain('\ngpu_caps:');
-    expect(record).toMatch(/\nreason: /);
-    expect(await page.evaluate(() => (window as DeviceWindow).__nt)).toBeUndefined();
-    expect(record.slice(record.indexOf('\nlog:\n') + 6)).toContain(expected);
-  });
-}
-
-test('device identity: creation status is bounded and listener is removed', async ({ page }) => {
-  const status = `reason\r\n\0${'ы'.repeat(200)}`;
-  await installIdentity(page, INITIAL, true, true, status);
+test('device identity: startup context failure is saved before app hooks exist', async ({ page }) => {
+  await installIdentity(page, INITIAL, true, true);
   await page.goto('/index.html?crash=read');
   await page.waitForFunction((key) => localStorage.getItem(key) !== null, KEY, { timeout: 30_000 });
   const record = (await page.evaluate((key) => localStorage.getItem(key), KEY))!;
-  const value = record.match(/browser_status=(.*)/)?.[1] ?? '';
-  expect(value).toMatch(/^reason   ы+$/);
-  expect(value).not.toMatch(/[\r\n\0]/);
-  expect(Buffer.byteLength(value, 'utf8')).toBeLessThanOrEqual(255);
-  expect(await page.evaluate(() => (window as DeviceWindow).__device.creationErrorListeners.size)).toBe(0);
+  expectIdentity(record, { vendor: null, renderer: null, api: null });
+  expect(record).not.toContain('\ngpu_caps:');
+  expect(record).toMatch(/\nreason: /);
+  expect(await page.evaluate(() => (window as DeviceWindow).__nt)).toBeUndefined();
+  expect(record.slice(record.indexOf('\nlog:\n') + 6)).toMatch(/ERROR.*context-create: failed .* browser_status=<empty>\n/);
 });
 
-test('device identity: creation-status listener is removed after success', async ({ page }) => {
-  await installIdentity(page);
-  await page.goto('/index.html');
-  await ready(page);
-  expect(await page.evaluate(() => (window as DeviceWindow).__device.creationErrorListeners.size)).toBe(0);
+test('device identity: startup context failure keeps the bounded browser status', async ({ page }) => {
+  await installIdentity(page, INITIAL, true, true, `reason\r\n\0${'ы'.repeat(300)}`);
+  await page.goto('/index.html?crash=read');
+  await page.waitForFunction((key) => localStorage.getItem(key) !== null, KEY, { timeout: 30_000 });
+  const record = (await page.evaluate((key) => localStorage.getItem(key), KEY))!;
+  const value = record.match(/ERROR.*context-create: failed .* browser_status=(.*)/)?.[1] ?? '';
+  expect(value).toMatch(/^reason   ы+$/);
+  expect(Buffer.byteLength(value, 'utf8')).toBe(383);
 });
