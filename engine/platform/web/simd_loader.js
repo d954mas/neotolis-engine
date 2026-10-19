@@ -6,8 +6,6 @@
 
     var api = factory();
     root.ntSupportsWasmSimd = api.ntSupportsWasmSimd;
-    root.ntResolveWasmPath = api.ntResolveWasmPath;
-    root.ntResolveWasmLoad = api.ntResolveWasmLoad;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function() {
     // Minimal WASM module: (func (drop (i8x16.splat (i32.const 0))))
     // Validation succeeds only when WebAssembly SIMD is supported.
@@ -35,33 +33,7 @@
         }
     }
 
-    function ntResolveWasmPath(path, simdWasmPath, wasmApi) {
-        if (!simdWasmPath) {
-            return path;
-        }
-
-        if (typeof path !== 'string' || !path.endsWith('.wasm')) {
-            return path;
-        }
-
-        if (!ntSupportsWasmSimd(wasmApi)) {
-            return path;
-        }
-
-        return simdWasmPath;
-    }
-
-    function ntResolveWasmLoad(path, simdWasmPath, wasmApi) {
-        var resolvedPath = ntResolveWasmPath(path, simdWasmPath, wasmApi);
-        return {
-            path: resolvedPath,
-            variant: resolvedPath === simdWasmPath ? 'simd' : 'baseline'
-        };
-    }
-
     return {
-        ntSupportsWasmSimd: ntSupportsWasmSimd,
-        ntResolveWasmPath: ntResolveWasmPath,
-        ntResolveWasmLoad: ntResolveWasmLoad
+        ntSupportsWasmSimd: ntSupportsWasmSimd
     };
 });

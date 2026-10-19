@@ -89,9 +89,8 @@ typedef struct {
     const uint8_t *blob; /* loaded pack data */
     uint32_t blob_size;  /* size of loaded blob */
     /* Metadata section (resident, survives blob eviction) */
-    uint8_t *meta_data;  /* heap-copied meta section (NULL if no metadata) */
-    uint32_t meta_size;  /* total bytes in meta section */
-    uint32_t meta_count; /* number of NtMetaEntryHeader records */
+    uint8_t *meta_data; /* heap-copied meta section (NULL if no metadata) */
+    uint32_t meta_size; /* total bytes in meta section */
     /* Loading progress */
     uint32_t bytes_received;
     uint32_t bytes_total;

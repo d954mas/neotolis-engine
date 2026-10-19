@@ -312,8 +312,8 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     Clay_SetMaxElementCount((int32_t)desc->max_elements);
 
     ctx->in_frame = false;
-    ctx->clay_arena = Clay_CreateArenaWithCapacityAndMemory(clay_size, clay_mem);
-    ctx->clay = Clay_Initialize(ctx->clay_arena, (Clay_Dimensions){.width = 1.0F, .height = 1.0F}, (Clay_ErrorHandler){.errorHandlerFunction = nt_ui_clay_error_cb, .userData = ctx});
+    const Clay_Arena clay_arena = Clay_CreateArenaWithCapacityAndMemory(clay_size, clay_mem);
+    ctx->clay = Clay_Initialize(clay_arena, (Clay_Dimensions){.width = 1.0F, .height = 1.0F}, (Clay_ErrorHandler){.errorHandlerFunction = nt_ui_clay_error_cb, .userData = ctx});
 
     Clay_SetCurrentContext(NULL);
     Clay_SetMaxElementCount(saved_default);

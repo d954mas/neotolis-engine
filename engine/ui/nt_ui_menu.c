@@ -63,7 +63,6 @@ typedef struct {
 } nt_ui_menu_runtime_t;
 _Static_assert(sizeof(nt_ui_menu_runtime_t) <= NT_UI_STATE_PAYLOAD_MAX, "menu runtime cell must fit the state pool payload");
 
-#define NT_UI_MENU_RUNTIME_SALT 0x4D52E700U /* 'MR' runtime cell */
 #define NT_UI_MENU_TAG NT_UI_STATE_TAG('m', 'e', 'n', 'u')
 
 /* Kind tags folded into the id hash so a level/panel/row/catcher at one (depth,index) never collides

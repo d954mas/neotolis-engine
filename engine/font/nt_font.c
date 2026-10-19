@@ -1197,7 +1197,7 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
 /* Upload a glyph into row cache_idx of the curve texture and fill the entry. The row starts with one header
  * texel per band, (y_start, y_count, x_start, x_count) in texels/curves, then the band-sorted curves. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void upload_glyph(nt_font_slot_t *slot, uint16_t cache_idx, const NtFontGlyphEntry *glyph, const nt_curve_t *curves, uint16_t curve_count, uint8_t resource_index, int16_t key_offset) {
+static void upload_glyph(nt_font_slot_t *slot, uint16_t cache_idx, const NtFontGlyphEntry *glyph, const nt_curve_t *curves, uint16_t curve_count, int16_t key_offset) {
     float bbox_y0 = (float)glyph->bbox_y0;
     float bbox_y1 = (float)glyph->bbox_y1;
     float bbox_x0 = (float)glyph->bbox_x0;
@@ -1415,7 +1415,6 @@ static void upload_glyph(nt_font_slot_t *slot, uint16_t cache_idx, const NtFontG
     }
     cs->key_offset = key_offset;
     cs->lru_frame = frame_now();
-    cs->resource_index = resource_index;
     // #endregion
 }
 
@@ -1435,7 +1434,7 @@ static void generate_tofu(nt_font_slot_t *slot) {
                                {fw, y1, fw * 0.5F, y1, 0, y1},
                                {0, y1, 0, ym, 0, y0}};
     const NtFontGlyphEntry glyph = {.codepoint = 0xFFFFFFFFU, .advance = w, .bbox_y0 = slot->metrics.descent, .bbox_x1 = w, .bbox_y1 = slot->metrics.ascent, .curve_count = 4};
-    upload_glyph(slot, 0, &glyph, box, 4, 0, 0);
+    upload_glyph(slot, 0, &glyph, box, 4, 0);
     slot->cache[0].entry.is_tofu = true;
 }
 
@@ -1897,7 +1896,7 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph_offset(nt_font_slot_t *slot, 
     }
     // #endregion
 
-    upload_glyph(slot, cache_idx, glyph_entry, s_decode_curves, curve_count, res_idx, key_offset);
+    upload_glyph(slot, cache_idx, glyph_entry, s_decode_curves, curve_count, key_offset);
     hash_insert(slot, codepoint, key_offset, cache_idx);
     return &slot->cache[cache_idx].entry;
 }

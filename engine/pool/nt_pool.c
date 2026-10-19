@@ -47,7 +47,7 @@ uint32_t nt_pool_alloc(nt_pool_t *pool) {
 
     /* Increment generation (starts at 1 for first allocation) */
     uint32_t prev_gen = pool->slots[slot_index].id >> NT_POOL_SLOT_SHIFT;
-    uint32_t new_gen = prev_gen + 1;
+    uint32_t new_gen = (uint16_t)(prev_gen + 1U);
     /* Guard against generation wraparound to 0 */
     if (new_gen == 0) {
         new_gen = 1;
@@ -66,7 +66,7 @@ void nt_pool_free(nt_pool_t *pool, uint32_t id) {
     if (pool->slots[slot_index].id != id) {
         return; /* stale handle */
     }
-    uint32_t gen = (id >> NT_POOL_SLOT_SHIFT) + 1;
+    uint32_t gen = (uint16_t)((id >> NT_POOL_SLOT_SHIFT) + 1U);
     if (gen == 0) {
         gen = 1;
     }

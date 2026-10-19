@@ -1068,7 +1068,6 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
         NT_ASSERT(pack->meta_data && "meta section malloc failed");
         memcpy(pack->meta_data, blob + meta_section_start, meta_section_size);
         pack->meta_size = meta_section_size;
-        pack->meta_count = h->meta_count;
     }
 
     /* Update pack metadata */

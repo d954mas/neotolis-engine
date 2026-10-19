@@ -116,6 +116,55 @@ void test_gfx_pool_free_and_realloc(void) {
     nt_pool_shutdown(&pool);
 }
 
+void test_gfx_pool_alloc_skips_zero_at_generation_wrap(void) {
+    nt_pool_t pool;
+    nt_pool_init(&pool, 1);
+    pool.slots[1].id = (uint32_t)UINT16_MAX << NT_POOL_SLOT_SHIFT;
+
+    uint32_t id = nt_pool_alloc(&pool);
+    bool valid = nt_pool_valid(&pool, id);
+    nt_pool_shutdown(&pool);
+
+    TEST_ASSERT_EQUAL_UINT32((1U << NT_POOL_SLOT_SHIFT) | 1U, id);
+    TEST_ASSERT_TRUE(valid);
+}
+
+void test_gfx_pool_free_skips_zero_before_reallocation(void) {
+    nt_pool_t pool;
+    nt_pool_init(&pool, 1);
+    uint32_t initial = nt_pool_alloc(&pool);
+    uint32_t slot = nt_pool_slot_index(initial);
+    uint32_t near_wrap = ((uint32_t)UINT16_MAX << NT_POOL_SLOT_SHIFT) | slot;
+    pool.slots[slot].id = near_wrap;
+
+    nt_pool_free(&pool, near_wrap);
+    uint32_t next = nt_pool_alloc(&pool);
+    bool stale_valid = nt_pool_valid(&pool, near_wrap);
+    nt_pool_shutdown(&pool);
+
+    TEST_ASSERT_EQUAL_UINT32((2U << NT_POOL_SLOT_SHIFT) | slot, next);
+    TEST_ASSERT_FALSE(stale_valid);
+}
+
+void test_gfx_pool_wrap_does_not_revive_first_handle_early(void) {
+    nt_pool_t pool;
+    nt_pool_init(&pool, 1);
+    uint32_t first = nt_pool_alloc(&pool);
+    uint32_t current = first;
+    bool revived = false;
+    for (uint32_t i = 0; i < 32768U; i++) {
+        nt_pool_free(&pool, current);
+        current = nt_pool_alloc(&pool);
+        if (nt_pool_valid(&pool, first)) {
+            revived = true;
+            break;
+        }
+    }
+    nt_pool_shutdown(&pool);
+
+    TEST_ASSERT_FALSE_MESSAGE(revived, "16-bit generation wrap must not halve the stale-handle reuse interval");
+}
+
 /* ---- Pool: valid accepts live handle ---- */
 
 void test_gfx_pool_valid_accepts_live(void) {
@@ -4037,6 +4086,9 @@ int main(void) {
     RUN_TEST(test_gfx_pool_alloc_returns_nonzero);
     RUN_TEST(test_gfx_pool_alloc_unique);
     RUN_TEST(test_gfx_pool_free_and_realloc);
+    RUN_TEST(test_gfx_pool_alloc_skips_zero_at_generation_wrap);
+    RUN_TEST(test_gfx_pool_free_skips_zero_before_reallocation);
+    RUN_TEST(test_gfx_pool_wrap_does_not_revive_first_handle_early);
     RUN_TEST(test_gfx_pool_valid_accepts_live);
     RUN_TEST(test_gfx_pool_valid_rejects_zero);
     RUN_TEST(test_gfx_pool_valid_rejects_stale);

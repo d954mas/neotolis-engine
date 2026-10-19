@@ -4,7 +4,6 @@
 #include <string.h>
 
 #include "core/nt_assert.h"
-#include "log/nt_log.h"
 
 /* ---- Internal state ---- */
 
@@ -97,7 +96,6 @@ void nt_entity_destroy(nt_entity_t entity) {
     /* Double destroy: slot already dead */
     if (!s_entity.alive[index]) {
         NT_ASSERT(false);
-        return;
     }
 
     /* Stale handle: slot alive but generation mismatch (old handle for recycled slot) */
@@ -154,7 +152,6 @@ void nt_entity_register_storage(const nt_comp_storage_reg_t *reg) {
     }
     if (s_entity.reg_count >= NT_MAX_COMP_STORAGES) {
         NT_ASSERT(false);
-        return;
     }
     s_entity.registrations[s_entity.reg_count] = *reg;
     s_entity.reg_count++;

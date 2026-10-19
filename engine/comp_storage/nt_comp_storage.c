@@ -54,11 +54,9 @@ uint16_t nt_comp_storage_add(nt_comp_storage_t *s, nt_entity_t entity) {
 
     if (s->entity_to_index[eidx] != NT_INVALID_COMP_INDEX) {
         NT_ASSERT(false);
-        return NT_INVALID_COMP_INDEX;
     }
     if (s->count >= s->capacity) {
         NT_ASSERT(false);
-        return NT_INVALID_COMP_INDEX;
     }
 
     uint16_t dense_idx = s->count;
