@@ -18,6 +18,27 @@ static bool s_loss_pending; /* set by a lost event until begin_frame takes it */
 
 static void capture_device_info(void);
 
+/* clang-format off */
+EM_JS(void, nt_gfx_js_watch_creation_status, (char *out, unsigned int cap), {
+    var canvas = document.getElementById("canvas");
+    if (!canvas) return;
+    var handler = function(event) {
+        stringToUTF8(String(event.statusMessage || "").replace(/[\\x00\\r\\n]/g, " "), out, cap);
+    };
+    canvas["__ntGfxCreationStatusHandler"] = handler;
+    canvas.addEventListener("webglcontextcreationerror", handler);
+})
+EM_JS(void, nt_gfx_js_unwatch_creation_status, (void), {
+    var canvas = document.getElementById("canvas");
+    if (!canvas) return;
+    var handler = canvas["__ntGfxCreationStatusHandler"];
+    if (handler) {
+        canvas.removeEventListener("webglcontextcreationerror", handler);
+        delete canvas["__ntGfxCreationStatusHandler"];
+    }
+})
+/* clang-format on */
+
 static bool on_context_lost(int event_type, const void *reserved, void *user_data) {
     (void)event_type;
     (void)reserved;
@@ -27,6 +48,7 @@ static bool on_context_lost(int event_type, const void *reserved, void *user_dat
 }
 
 bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
+    char creation_status[256] = "";
     EmscriptenWebGLContextAttributes attrs;
     emscripten_webgl_init_context_attributes(&attrs);
     attrs.alpha = desc->alpha;
@@ -40,10 +62,12 @@ bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
     /* Capability probes enable only the extensions this build uses. */
     attrs.enableExtensionsByDefault = false;
 
+    nt_gfx_js_watch_creation_status(creation_status, sizeof(creation_status));
     s_gl_context = emscripten_webgl_create_context("#canvas", &attrs);
+    nt_gfx_js_unwatch_creation_status();
     if (s_gl_context == 0) {
-        NT_LOG_ERROR("context-create: failed WebGL=2.0 alpha=%d depth=%d stencil=%d antialias=%d premultiplied_alpha=%d preserve=0", (int)desc->alpha, (int)desc->depth, (int)desc->stencil,
-                     (int)desc->antialias, (int)desc->premultiplied_alpha);
+        NT_LOG_ERROR("context-create: failed WebGL=2.0 alpha=%d depth=%d stencil=%d antialias=%d premultiplied_alpha=%d preserve=0 browser_status=%s", (int)desc->alpha, (int)desc->depth,
+                     (int)desc->stencil, (int)desc->antialias, (int)desc->premultiplied_alpha, creation_status[0] ? creation_status : "<empty>");
         return false;
     }
     emscripten_webgl_make_context_current(s_gl_context);
