@@ -1256,8 +1256,25 @@ static void assert_font_blob_has_no_provider(const uint8_t *blob, uint32_t size)
     nt_font_step();
     TEST_ASSERT_EQUAL_UINT16(0, nt_font_get_metrics(font).units_per_em);
     TEST_ASSERT_FALSE(nt_font_lookup_metrics(font, 'A').found);
-    nt_font_destroy(font);
     nt_font_test_deactivate(token);
+
+    uint8_t valid_blob[80];
+    const uint32_t valid_size = build_font_bounds_blob(valid_blob);
+    const uint32_t valid_token = nt_font_test_register_shared_rid(token, valid_blob, valid_size);
+    nt_resource_step();
+    nt_font_step();
+    TEST_ASSERT_EQUAL_UINT16(1000, nt_font_get_metrics(font).units_per_em);
+    TEST_ASSERT_TRUE(nt_font_lookup_metrics(font, 'A').found);
+
+    /* Keep the previous winner mounted so a stale provider still has readable bytes. */
+    const uint32_t replacement_token = nt_font_test_register_shared_rid(valid_token, blob, size);
+    nt_resource_step();
+    nt_font_step();
+    TEST_ASSERT_EQUAL_UINT16(0, nt_font_get_metrics(font).units_per_em);
+    TEST_ASSERT_FALSE(nt_font_lookup_metrics(font, 'A').found);
+    nt_font_destroy(font);
+    nt_font_test_deactivate(replacement_token);
+    nt_font_test_deactivate(valid_token);
 }
 
 void test_font_shared_contours_padding_and_empty_glyph_remain_valid(void) {
@@ -1346,15 +1363,29 @@ void test_font_truncated_contour_data_clears_provider(void) {
     }
 }
 
-void test_font_invalid_contour_point_counts_clear_provider(void) {
+void test_font_zero_contour_point_count_clears_provider(void) {
     uint8_t blob[80];
     const uint32_t size = build_font_bounds_blob(blob);
     const uint32_t point_offset = (uint32_t)(sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry) + 2U);
-    const uint16_t counts[] = {0, NT_FONT_MAX_POINTS_PER_CONTOUR + 1U};
-    for (size_t i = 0; i < sizeof counts / sizeof counts[0]; i++) {
-        memcpy(blob + point_offset, &counts[i], sizeof counts[i]);
-        assert_font_blob_has_no_provider(blob, size);
-    }
+    const uint16_t point_count = 0;
+    memcpy(blob + point_offset, &point_count, sizeof point_count);
+    assert_font_blob_has_no_provider(blob, size);
+}
+
+void test_font_complete_contour_above_point_limit_clears_provider(void) {
+    enum { POINT_COUNT = NT_FONT_MAX_POINTS_PER_CONTOUR + 1 };
+    uint8_t blob[sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry) + (2U * sizeof(uint16_t)) + NT_FONT_BITMASK_BYTES(POINT_COUNT) + (2U * sizeof(int16_t)) + (2U * (size_t)(POINT_COUNT - 1U))] = {
+        0};
+    const NtFontAssetHeader header = {.magic = NT_FONT_MAGIC, .version = NT_FONT_VERSION, .glyph_count = 1, .units_per_em = 1000, .ascent = 800, .descent = -200};
+    const NtFontGlyphEntry glyph = {.codepoint = 'A', .data_offset = sizeof header + sizeof glyph, .advance = 500, .curve_count = 3};
+    const uint16_t contour_count = 1;
+    const uint16_t point_count = POINT_COUNT;
+    memcpy(blob, &header, sizeof header);
+    memcpy(blob + sizeof header, &glyph, sizeof glyph);
+    memcpy(blob + glyph.data_offset, &contour_count, sizeof contour_count);
+    memcpy(blob + glyph.data_offset + sizeof contour_count, &point_count, sizeof point_count);
+    /* Complete mask, first point and zero deltas isolate the point limit from truncation. */
+    assert_font_blob_has_no_provider(blob, (uint32_t)sizeof blob);
 }
 
 /* ---- FONT-03: unmount a font's pack WHILE it is referenced ----
@@ -3034,7 +3065,8 @@ int main(void) {
     RUN_TEST(test_font_truncated_glyph_table_clears_provider);
     RUN_TEST(test_font_invalid_glyph_data_spans_clear_provider);
     RUN_TEST(test_font_truncated_contour_data_clears_provider);
-    RUN_TEST(test_font_invalid_contour_point_counts_clear_provider);
+    RUN_TEST(test_font_zero_contour_point_count_clears_provider);
+    RUN_TEST(test_font_complete_contour_above_point_limit_clears_provider);
     RUN_TEST(test_font_init_shutdown);
     RUN_TEST(test_font_create_destroy_valid);
     RUN_TEST(test_font_unready_texture_keeps_cpu_queries_gpu_free);
