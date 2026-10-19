@@ -828,7 +828,7 @@ EMSCRIPTEN_KEEPALIVE void nt_test_hide_probe(int mode) {
     s_nt_hidden_probe = mode;
 }
 /* http acceptance state (http.spec.ts): one request at a time, byte-exact echo check in C */
-static uint8_t s_nt_http_body[300];
+static uint8_t s_nt_http_body[1u << 20]; /* spans several fetch stream chunks */
 static uint32_t s_nt_http_body_size;
 static nt_http_request_t s_nt_http_req;
 

@@ -346,12 +346,6 @@ uint8_t *nt_http_take_data(nt_http_request_t req, uint32_t *out_size) {
     uint32_t sz = slot->size;
     slot->data = NULL;
     slot->size = 0;
-    /* Canonical empty contract: web hands over malloc(0) (non-NULL under emmalloc),
-     * native hands over NULL — normalize so both backends return NULL/0 */
-    if (sz == 0) {
-        free(ptr);
-        ptr = NULL;
-    }
 
     if (out_size) {
         *out_size = sz;

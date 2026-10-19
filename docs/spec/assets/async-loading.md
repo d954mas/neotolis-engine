@@ -46,10 +46,8 @@ game code: nt_resource_mount(pack_id, priority)
 
 ... N frames pass ...
 
-JS completion callback
-  → HTTP request stores the received WASM buffer and completion state
-
 Next nt_resource_step():
+  → nt_http_update() delivers the completed response into a C buffer
   → polls the HTTP request and takes its completed buffer
   → first load: parses the manifest and registers assets (BLOB owners are READY)
   → reload after eviction: restores bytes for retained records without reparsing
@@ -152,7 +150,7 @@ Web bridge (EM_JS in `engine/http/web/nt_http_web.c`, all called from C):
 void nt_http_web_fetch(int slot, const char *url, const char *method,
                        const uint8_t *body, int body_size, const char *headers,
                        int headers_size, int timeout_ms);
-// out: received, total, status, header block size; returns running/done/failed
+// out: received, total, status, header block size; returns the nt_http_state_t
 int nt_http_web_poll(int slot, uint32_t *out);
 // Copies the body and header block into C buffers (NULL drops), drops the record
 void nt_http_web_take(int slot, uint8_t *data, char *hdrs);

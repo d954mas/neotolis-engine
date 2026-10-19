@@ -62,10 +62,16 @@ test('http: timeout aborts to FAILED; free mid-download cancels and the slot is 
     .toBe(FAILED);
   await page.evaluate(() => window.__nt!.http_free());
 
-  // Cancel: free while the fetch is in flight, then reuse the slot for a real request.
-  // The aborted fetch's late callback must not touch the reused slot (generation guard).
+  // /slow sends its headers at once and stalls the body: the status stays 0 until completion.
   await page.evaluate(() => window.__nt!.http_get_slow());
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => window.__nt!.http_state())).toBeLessThan(DONE);
+  expect(await page.evaluate(() => window.__nt!.http_status())).toBe(0);
+
+  // Cancel: free while the fetch is in flight and let frames pass before reusing the slot.
+  // Neither the frame pump nor the aborted fetch's late handlers may touch the freed slot.
   await page.evaluate(() => window.__nt!.http_free());
+  await page.waitForTimeout(100);
   await page.evaluate(() => window.__nt!.http_post_echo());
   await expect
     .poll(() => page.evaluate(() => window.__nt!.http_state()), { timeout: 10_000 })

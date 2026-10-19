@@ -60,7 +60,8 @@ const server = createServer(async (req, res) => {
     return;
   }
   if (urlPath === '/slow') {
-    // Stalls 5 s: the timeout/cancel browser tests abort long before this fires.
+    // Headers go out at once, the body stalls 5 s: the timeout/cancel browser tests abort long before.
+    res.flushHeaders();
     setTimeout(() => res.end('ok'), 5000);
     return;
   }
