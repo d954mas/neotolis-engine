@@ -108,7 +108,7 @@ body is data, not a transport error) — the caller checks `nt_http_status()`;
 **FAILED = transport error, timeout or cancel** (a status may still be recorded).
 `nt_http_response_headers()` returns lowercased `"name: value\n"` lines, valid
 until `nt_http_free`/`nt_http_shutdown`. `nt_http_update()` advances
-transfers on both backends (no-op on stub) — call it once per frame while requests are in
+transfers on native and web (no-op on stub) — call it once per frame while requests are in
 flight; `nt_resource_step()` calls it too, and the pump is global, so it
 advances the game's own requests as well (see
 [frame lifecycle](../runtime/frame-lifecycle.md)).
@@ -161,7 +161,8 @@ Promise handlers only fill a JS record per slot; wasm is never entered from
 them. `nt_http_update()` polls the in-flight slots, allocates the body and
 header buffers in C and takes the record. A C fault while delivering therefore
 happens inside the game's frame: it ends the frame tick like any other crash
-and is recorded by the crash module. A record lives exactly while its C slot is
+and reaches the window `error` handler, where `nt_crash` records it when
+linked. A record lives exactly while its C slot is
 in flight (take, cancel and shutdown drop it), so late handlers of a cancelled
 fetch write only to the dropped record. The handle generation still rejects
 stale game handles across slot reuse and shutdown/init.

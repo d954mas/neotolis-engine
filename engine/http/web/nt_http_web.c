@@ -1,6 +1,7 @@
 #include "http/nt_http_internal.h"
 
 #include "core/nt_assert.h"
+#include "log/nt_log.h"
 
 #include <emscripten.h>
 #include <stdlib.h>
@@ -8,6 +9,8 @@
 /* Promise handlers only fill a JS record per slot; nt_http_backend_update copies it into C inside
  * the game's frame. No wasm code runs under a promise handler, so the fetch catch-all cannot hide a
  * C fault, and a fault while delivering ends the frame like any other crash. */
+
+_Static_assert(NT_HTTP_STATE_PENDING == 1 && NT_HTTP_STATE_DOWNLOADING == 2 && NT_HTTP_STATE_DONE == 3 && NT_HTTP_STATE_FAILED == 4, "JS record.state hard-codes these values");
 
 /* ---- EM_JS fetch with AbortController ---- */
 
@@ -65,49 +68,45 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, const char *url_ptr, const char 
         if (!err || err.name !== 'AbortError') {
             console.error('ERROR [http] fetch failed slot=' + slot_index, err);
         }
+        r.controller.abort(); /* stops the stream after a throw from add(); no-op after an abort */
         r.state = 4;
     }
     function add(chunk) {
         if (r.received + chunk.length > 0xFFFFFFFF) { /* C sizes are uint32: fail like native */
-            console.error('ERROR [http] response too large slot=' + slot_index);
-            r.controller.abort();
-            r.state = 4;
-            return false;
+            throw new RangeError('response too large');
         }
         r.chunks.push(chunk);
         r.received += chunk.length;
         r.state = 2;
-        return true;
     }
     fetch(UTF8ToString(url_ptr), init).then(function(response) {
         var block = "";
         response.headers.forEach(function(v, k) { block += k + ': ' + v + '\n'; });
         r.status = response.status;
         r.headers = block;
-        r.total = parseInt(response.headers.get('Content-Length'), 10) || 0;
+        var length = parseInt(response.headers.get('Content-Length'), 10);
+        r.total = length >= 0 && length <= 0xFFFFFFFF ? length : 0;
 
         /* Try ReadableStream for progress, fall back to arrayBuffer */
         if (response.body && typeof response.body.getReader === 'function') {
             var reader = response.body.getReader();
             /* Not returned: a promise chain over every chunk would stay alive until the end. */
-            function pump() {
+            var pump = function() {
                 reader.read().then(function(part) {
                     if (part.done) {
                         r.state = 3;
                         return;
                     }
-                    if (add(part.value)) {
-                        pump();
-                    }
+                    add(part.value);
+                    pump();
                 }).catch(fail);
-            }
+            };
             pump();
             return;
         }
         return response.arrayBuffer().then(function(buf) {
-            if (add(new Uint8Array(buf))) {
-                r.state = 3;
-            }
+            add(new Uint8Array(buf));
+            r.state = 3;
         });
     }).catch(fail);
 })
@@ -154,13 +153,12 @@ EM_JS(void, nt_http_web_cancel, (int slot_index), {
 
 /* ---- Backend entry points ---- */
 
-static bool web_in_flight(const NtHttpSlot *slot) { return slot->state == (uint8_t)NT_HTTP_STATE_PENDING || slot->state == (uint8_t)NT_HTTP_STATE_DOWNLOADING; }
-
 bool nt_http_backend_init(void) { return true; }
 
+/* A JS record exists exactly while its slot is in flight; cancel and poll rely on it. */
 void nt_http_backend_shutdown(void) {
     for (uint16_t i = 1; i <= NT_HTTP_MAX_REQUESTS; i++) {
-        if (web_in_flight(nt_http_get_slot(i))) {
+        if (nt_http_slot_in_flight(nt_http_get_slot(i))) {
             nt_http_web_cancel((int)i);
         }
     }
@@ -169,7 +167,7 @@ void nt_http_backend_shutdown(void) {
 void nt_http_backend_update(void) {
     for (uint16_t i = 1; i <= NT_HTTP_MAX_REQUESTS; i++) {
         NtHttpSlot *slot = nt_http_get_slot(i);
-        if (!web_in_flight(slot)) {
+        if (!nt_http_slot_in_flight(slot)) {
             continue;
         }
         uint32_t info[4]; /* received, total, status, header block size */
@@ -183,12 +181,10 @@ void nt_http_backend_update(void) {
 
         slot->status = (uint16_t)info[2];
         uint8_t *data = state == NT_HTTP_STATE_DONE && info[0] > 0 ? malloc(info[0]) : NULL;
-        char *hdrs = info[3] > 0 ? malloc(info[3]) : NULL;
-        /* OOM fails the request; a FAILED request keeps any headers that arrived */
-        bool done = state == NT_HTTP_STATE_DONE && (data != NULL || info[0] == 0) && (hdrs != NULL || info[3] == 0);
-        if (!done) {
-            free(data);
-            data = NULL;
+        char *hdrs = info[3] > 0 ? malloc(info[3]) : NULL; /* NULL on OOM, as on native: headers are optional */
+        bool done = state == NT_HTTP_STATE_DONE && (data != NULL || info[0] == 0);
+        if (state == NT_HTTP_STATE_DONE && !done) {
+            NT_LOG_ERROR("response body alloc failed (%u bytes): %s", (unsigned)info[0], slot->url);
         }
         nt_http_web_take((int)i, data, hdrs);
         slot->data = data;

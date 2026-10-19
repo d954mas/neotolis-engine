@@ -857,6 +857,11 @@ EMSCRIPTEN_KEEPALIVE void nt_test_http_get_slow_timeout(void) {
 EMSCRIPTEN_KEEPALIVE void nt_test_http_get_slow(void) { s_nt_http_req = nt_http_request("/slow"); }
 EMSCRIPTEN_KEEPALIVE int nt_test_http_state(void) { return (int)nt_http_state(s_nt_http_req); }
 EMSCRIPTEN_KEEPALIVE int nt_test_http_status(void) { return (int)nt_http_status(s_nt_http_req); }
+EMSCRIPTEN_KEEPALIVE int nt_test_http_total(void) {
+    uint32_t total = 0;
+    nt_http_progress(s_nt_http_req, NULL, &total);
+    return (int)total;
+}
 EMSCRIPTEN_KEEPALIVE const char *nt_test_http_headers(void) {
     const char *h = nt_http_response_headers(s_nt_http_req);
     return h != NULL ? h : "";
@@ -1004,6 +1009,7 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'http_get_slow': function() { _nt_test_http_get_slow(); },
         'http_state': function() { return _nt_test_http_state(); },
         'http_status': function() { return _nt_test_http_status(); },
+        'http_total': function() { return _nt_test_http_total(); },
         'http_headers': function() { return UTF8ToString(_nt_test_http_headers()); },
         'http_verify_echo': function() { return _nt_test_http_verify_echo(); },
         'http_free': function() { _nt_test_http_free(); },

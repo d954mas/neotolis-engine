@@ -346,6 +346,7 @@ uint8_t *nt_http_take_data(nt_http_request_t req, uint32_t *out_size) {
     uint32_t sz = slot->size;
     slot->data = NULL;
     slot->size = 0;
+    NT_ASSERT((ptr == NULL) == (sz == 0)); /* backends hand an empty body over as NULL */
 
     if (out_size) {
         *out_size = sz;
@@ -361,7 +362,7 @@ void nt_http_free(nt_http_request_t req) {
     }
 
     /* Cancel in-flight backend request (aborts fetch on web, curl transfer on native) */
-    if (slot->state == (uint8_t)NT_HTTP_STATE_PENDING || slot->state == (uint8_t)NT_HTTP_STATE_DOWNLOADING) {
+    if (nt_http_slot_in_flight(slot)) {
         nt_http_backend_cancel(index);
     }
 

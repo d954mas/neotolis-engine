@@ -61,6 +61,7 @@ const server = createServer(async (req, res) => {
   }
   if (urlPath === '/slow') {
     // Headers go out at once, the body stalls 5 s: the timeout/cancel browser tests abort long before.
+    res.setHeader('Content-Length', '2');
     res.flushHeaders();
     setTimeout(() => res.end('ok'), 5000);
     return;

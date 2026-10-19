@@ -76,12 +76,10 @@ is valid. Re-registering the same callback is a no-op, including at capacity.
 
 ## WASM bridge allocation
 
-Prefer allocating in C: JS reports a size, C allocates and passes the buffer
-for JS to fill, as `engine/http/web/nt_http_web.c` does. EM_JS code that must
-allocate into the WASM heap uses `wasmExports['malloc']`.
-`Module['_malloc']` does not work with the engine's emmalloc configuration, and
-bare `_malloc` fails Closure compilation. Declare the referenced runtime helpers
-and malloc export in `EM_JS_DEPS`.
+Allocate in C: JS reports a size, C allocates and passes the buffer for JS to
+fill, as `engine/http/web/nt_http_web.c` does. If EM_JS must allocate, only
+`wasmExports['malloc']` works (emmalloc rejects `Module['_malloc']`, Closure
+rejects bare `_malloc`); list `malloc` in `EM_JS_DEPS`.
 
 ## Canvas, DPR, and Viewport
 

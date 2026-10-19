@@ -14,6 +14,7 @@ declare global {
       http_get_slow(): void;
       http_state(): number; // nt_http_state_t: 3 = DONE, 4 = FAILED
       http_status(): number;
+      http_total(): number;
       http_headers(): string;
       http_verify_echo(): number; // 1 exact, 0 mismatch, -1 not DONE
       http_free(): void;
@@ -62,17 +63,25 @@ test('http: timeout aborts to FAILED; free mid-download cancels and the slot is 
     .toBe(FAILED);
   await page.evaluate(() => window.__nt!.http_free());
 
-  // /slow sends its headers at once and stalls the body: the status stays 0 until completion.
+  // /slow sends its headers (Content-Length: 2) at once and stalls the body: once the headers
+  // reached C as the progress total, the status still stays 0 until completion.
   await page.evaluate(() => window.__nt!.http_get_slow());
-  await page.waitForTimeout(300);
+  await expect
+    .poll(() => page.evaluate(() => window.__nt!.http_total()), { timeout: 10_000 })
+    .toBe(2);
   expect(await page.evaluate(() => window.__nt!.http_state())).toBeLessThan(DONE);
   expect(await page.evaluate(() => window.__nt!.http_status())).toBe(0);
 
-  // Cancel: free while the fetch is in flight and let frames pass before reusing the slot.
-  // Neither the frame pump nor the aborted fetch's late handlers may touch the freed slot.
+  // Free mid-flight and let frames pass: the frame pump must skip the freed slot.
   await page.evaluate(() => window.__nt!.http_free());
-  await page.waitForTimeout(100);
-  await page.evaluate(() => window.__nt!.http_post_echo());
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+
+  // Cancel and reuse the slot at once: the aborted fetch's late handlers must not touch the new request.
+  await page.evaluate(() => {
+    window.__nt!.http_get_slow();
+    window.__nt!.http_free();
+    window.__nt!.http_post_echo();
+  });
   await expect
     .poll(() => page.evaluate(() => window.__nt!.http_state()), { timeout: 10_000 })
     .toBe(DONE);
