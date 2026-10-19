@@ -309,8 +309,7 @@ int32_t nt_ui_internal_collect_tree_rows(const nt_ui_context_t *ctx, nt_ui_inspe
                 // #endregion
             }
             // #region child-push
-            /* NULL elements with length>0 = capacity-exceeded frame (see bt_dfs_subtree); treat as childless. */
-            const int32_t childCount = (el->childrenOrTextContent.children.elements == NULL) ? 0 : el->childrenOrTextContent.children.length;
+            const int32_t childCount = el->childrenOrTextContent.children.length;
             if (stack[top].child_cursor < childCount) {
                 int32_t child_idx = el->childrenOrTextContent.children.elements[stack[top].child_cursor];
                 stack[top].child_cursor++;
@@ -482,11 +481,9 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
             f->opacity = op;
         }
 
-        /* Text leaves have no .children; a capacity-exceeded frame leaves non-text parents with
-         * children.length>0 but children.elements==NULL (Clay__CloseElement's maxElementsExceeded
-         * early-return skips the elements assignment) — treat as childless to degrade, not deref. */
+        /* Text leaves have no .children. */
         const bool is_text = Clay__ElementHasConfig(elem, CLAY__ELEMENT_CONFIG_TYPE_TEXT);
-        const int32_t child_count = (is_text || elem->childrenOrTextContent.children.elements == NULL) ? 0 : elem->childrenOrTextContent.children.length;
+        const int32_t child_count = is_text ? 0 : elem->childrenOrTextContent.children.length;
 
         if (f->children_cursor < child_count) {
             const int32_t child_idx = elem->childrenOrTextContent.children.elements[f->children_cursor];
@@ -514,7 +511,7 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
     const int32_t R = cc->layoutElementTreeRoots.length;
 
     // #region init + degenerate-early-out
-    /* Covers unvisited elements (R==0, maxElementsExceeded, walker reads of stale-index errors). */
+    /* Covers unvisited elements (R==0). */
     const nt_ui_baked_xform_t identity = nt_ui_internal_identity_baked();
     for (int32_t i = 0; i < N; ++i) {
         ctx->tree_baked[i] = identity;
@@ -999,7 +996,7 @@ uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out
                 // #endregion
             }
             // #region child-push
-            const int32_t childCount = (el->childrenOrTextContent.children.elements == NULL) ? 0 : el->childrenOrTextContent.children.length;
+            const int32_t childCount = el->childrenOrTextContent.children.length;
             if (stack[top].child_cursor < childCount) {
                 int32_t child_idx = el->childrenOrTextContent.children.elements[stack[top].child_cursor];
                 stack[top].child_cursor++;
@@ -1032,7 +1029,7 @@ uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out
         bool pending = (last_root + 1) < roots;
         for (int32_t i = 0; i < sp && !pending; ++i) {
             const Clay_LayoutElement *fel = Clay_LayoutElementArray_Get(&ctx->clay->layoutElements, stack[i].elem_idx);
-            const int32_t fchildren = (fel->childrenOrTextContent.children.elements == NULL) ? 0 : fel->childrenOrTextContent.children.length;
+            const int32_t fchildren = fel->childrenOrTextContent.children.length;
             const bool not_filled = stack[i].child_cursor < 0;       /* node-fill not yet run */
             const bool has_more = stack[i].child_cursor < fchildren; /* children left to push */
             if (not_filled || has_more) {

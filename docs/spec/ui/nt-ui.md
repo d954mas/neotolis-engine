@@ -100,7 +100,7 @@ Clay's element ID hashmap retains IDs for one frame: `Clay_EndLayout` prunes
 every ID not declared in that frame, and the next frame still reads the boxes of
 the IDs it kept. The distinct IDs of two consecutive frames together, including
 anonymous and text elements, must stay below `max_elements`; a new ID beyond that
-asserts. Per-ID widget state in `nt_ui_state` is not pruned, so stateful widgets
+asserts, as does a frame with more than `max_elements - 1` layout elements. Per-ID widget state in `nt_ui_state` is not pruned, so stateful widgets
 with ever-new IDs still need recycling.
 
 ## Floating zIndex is relative

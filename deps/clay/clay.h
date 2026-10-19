@@ -31,6 +31,9 @@
 //      after the existing-id lookup and counts free slots, and pruning keeps the
 //      NT_CLAY_DEBUG_VIEW debugData pointer of a freed slot; the debug view skips a
 //      pruned selection. Search "NT patch 6".
+//   7. Layout element overflow reports CLAY_ERROR_TYPE_ELEMENTS_CAPACITY_EXCEEDED
+//      from Clay__OpenElement / Clay__OpenTextElement instead of silently dropping
+//      the rest of the frame. Search "NT patch 7" for the 2 sites.
 // NT DEPENDENCY: nt_ui_clay_impl.c wraps Clay__OpenElement /
 //   Clay__ConfigureOpenElement / Clay__CloseElement for the begin/end split
 //   pattern used by nt_ui widgets. Verify these internals still exist on update.
@@ -2052,6 +2055,12 @@ bool Clay__MemCmp(const char *s1, const char *s2, int32_t length);
 void Clay__OpenElement(void) {
     Clay_Context* context = Clay_GetCurrentContext();
     if (context->layoutElements.length == context->layoutElements.capacity - 1 || context->booleanWarnings.maxElementsExceeded) {
+        if (!context->booleanWarnings.maxElementsExceeded) { // NT patch 7
+            context->errorHandler.errorHandlerFunction(CLAY__INIT(Clay_ErrorData) {
+                .errorType = CLAY_ERROR_TYPE_ELEMENTS_CAPACITY_EXCEEDED,
+                .errorText = CLAY_STRING("Clay ran out of layout elements this frame. Try using Clay_SetMaxElementCount() with a higher value."),
+                .userData = context->errorHandler.userData });
+        }
         context->booleanWarnings.maxElementsExceeded = true;
         return;
     }
@@ -2068,6 +2077,12 @@ void Clay__OpenElement(void) {
 void Clay__OpenTextElement(Clay_String text, Clay_TextElementConfig *textConfig) {
     Clay_Context* context = Clay_GetCurrentContext();
     if (context->layoutElements.length == context->layoutElements.capacity - 1 || context->booleanWarnings.maxElementsExceeded) {
+        if (!context->booleanWarnings.maxElementsExceeded) { // NT patch 7
+            context->errorHandler.errorHandlerFunction(CLAY__INIT(Clay_ErrorData) {
+                .errorType = CLAY_ERROR_TYPE_ELEMENTS_CAPACITY_EXCEEDED,
+                .errorText = CLAY_STRING("Clay ran out of layout elements this frame. Try using Clay_SetMaxElementCount() with a higher value."),
+                .userData = context->errorHandler.userData });
+        }
         context->booleanWarnings.maxElementsExceeded = true;
         return;
     }
