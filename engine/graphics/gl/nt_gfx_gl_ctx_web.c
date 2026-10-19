@@ -41,8 +41,8 @@ static bool on_context_lost(int event_type, const void *reserved, void *user_dat
 }
 
 bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
-    /* The longest status that still fits one log line after the attribute prefix. */
-    char creation_status[NT_LOG_BUF_SIZE - 128];
+    /* nt_log_write cuts the whole line to NT_LOG_BUF_SIZE on a UTF-8 boundary. */
+    char creation_status[NT_LOG_BUF_SIZE];
     EmscriptenWebGLContextAttributes attrs;
     emscripten_webgl_init_context_attributes(&attrs);
     attrs.alpha = desc->alpha;

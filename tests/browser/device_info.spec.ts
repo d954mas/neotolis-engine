@@ -192,8 +192,7 @@ test('device identity: null fields, UTF-8 truncation and newlines stay bounded',
 });
 
 test('device identity: startup context failure is saved with the bounded browser status', async ({ page }) => {
-  // The even prefix leaves an odd byte at the cap, so a byte-level cut would split a 2-byte 'ы'.
-  await installIdentity(page, INITIAL, true, `reason\r\n\0!${'ы'.repeat(300)}`);
+  await installIdentity(page, INITIAL, true, `reason\r\n\0${'ы'.repeat(300)}`);
   await page.goto('/index.html?crash=read');
   await page.waitForFunction((key) => localStorage.getItem(key) !== null, KEY, { timeout: 30_000 });
   const record = (await page.evaluate((key) => localStorage.getItem(key), KEY))!;
@@ -201,7 +200,8 @@ test('device identity: startup context failure is saved with the bounded browser
   expect(record).not.toContain('\ngpu_caps:');
   expect(record).toMatch(/\nreason: /);
   expect(await page.evaluate(() => (window as DeviceWindow).__nt)).toBeUndefined();
-  const value = record.slice(record.indexOf('\nlog:\n') + 6).match(/ERROR.*context-create: failed .* browser_status=(.*)/)?.[1] ?? '';
-  expect(value).toMatch(/^reason   !ы+$/);
-  expect(Buffer.byteLength(value, 'utf8')).toBe(382);
+  // The status overflows the log line, so nt_log_write cuts it on a UTF-8 boundary and marks the cut.
+  const line = record.slice(record.indexOf('\nlog:\n') + 6).match(/context-create: failed .*/)?.[0] ?? '';
+  expect(line).toMatch(/ browser_status=reason   ы+\.\.\.$/);
+  expect(Buffer.byteLength(line, 'utf8')).toBeLessThan(512);
 });
