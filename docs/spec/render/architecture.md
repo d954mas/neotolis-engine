@@ -983,7 +983,8 @@ queries.
 
 Initial context creation failure is fatal: backend init asserts after the
 platform logs the failure. Web logs the context attributes the engine sets and
-the browser's bounded creation-error status when supplied; native logs the GL
+the browser's creation-error status (`<empty>` when none), cut to fit one log
+line; native logs the GL
 loader failure or the GLFW error code and description. A
 failed recreation stays recoverable: the platform logs the cause, the frontend
 logs `context restore failed` and stays lost.

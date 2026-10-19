@@ -23,7 +23,7 @@ static void capture_device_info(void);
 EM_JS(EMSCRIPTEN_WEBGL_CONTEXT_HANDLE, nt_gfx_js_create_context, (const char *target, const EmscriptenWebGLContextAttributes *attrs, char *status, unsigned int cap), {
     var canvas = findCanvasEventTarget(target);
     var message = "";
-    var on_error = function(event) { message = String(event.statusMessage || ""); };
+    var on_error = function(event) { message = event.statusMessage; };
     canvas.addEventListener("webglcontextcreationerror", on_error);
     var context = _emscripten_webgl_create_context(target, attrs);
     canvas.removeEventListener("webglcontextcreationerror", on_error);
@@ -41,8 +41,8 @@ static bool on_context_lost(int event_type, const void *reserved, void *user_dat
 }
 
 bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
-    /* Chrome's status lists GPU strings before its ErrorMessage; 384 keeps the tail inside one log line. */
-    char creation_status[384] = "";
+    /* The longest status that still fits one log line after the attribute prefix. */
+    char creation_status[NT_LOG_BUF_SIZE - 128];
     EmscriptenWebGLContextAttributes attrs;
     emscripten_webgl_init_context_attributes(&attrs);
     attrs.alpha = desc->alpha;
