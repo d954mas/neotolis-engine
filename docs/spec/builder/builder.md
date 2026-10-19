@@ -305,9 +305,13 @@ directory listings. `<dir>/build_record.txt` is also the release audit's list
 of pack inputs.
 
 `nt_builder_up_to_date` is true when the record exists and nothing in it
-changed: every listed file still has the same mtime and size (or is still
-missing), and every glob still matches the same names. The record does not see
-the builder executable; the build system deletes it when the builder relinks.
+changed: every listed input still has the same mtime and size (or is still
+missing), every output exists with the same mtime and size, every glob still
+matches the same names, and the running builder executable is older than the
+record, so a relinked builder rebuilds. Only the default invocation is
+incremental: a run with extra arguments (benchmarks, determinism checks)
+calls neither function and always builds; its new outputs make the next
+default run rebuild.
 
 - **Complete for builder reads:** the resolved file of every `add_*` and atlas
   sprite, every shader `#include`, and every file cgltf opens (`.gltf`/`.glb`
@@ -324,13 +328,15 @@ the builder executable; the build system deletes it when the builder relinks.
   entries are listed too.
 - **Per process, not per pack:** one builder run is one build step that may
   write several packs, so the record is process-wide and main-thread only.
-- **Format:** plain text, replaced atomically. Sorted lines
-  `input <mtime> <size> <path>` and `output <mtime> <size> <path>`, then per
-  glob `glob <pattern>` followed by one `  <name>` line per match. Paths and
-  patterns are absolute with forward slashes and `.`/`..` collapsed; symlinks
-  are not resolved. A file read twice is listed once, with its first stat.
-  `-1 -1` marks a missing file. mtime units are platform-specific; only
-  equality is meaningful.
+- **Format:** plain text, written to a per-process temporary file and
+  atomically replaced. Sorted lines `input <mtime> <size> <path>` and
+  `output <mtime> <size> <path>`, then per glob `glob <pattern>` followed by
+  one `  <name>` line per match. Paths and patterns are absolute with forward
+  slashes; symlinks are not resolved. Windows collapses `.`/`..` the way it
+  resolves them; POSIX keeps `..`, which the kernel resolves through symlinks.
+  A file read twice is listed once, with its first stat. `-1 -1` marks a
+  missing file. mtime units are platform-specific; only equality and the
+  builder-versus-record order are meaningful.
 
 ## Builder cache
 

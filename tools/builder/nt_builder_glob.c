@@ -48,6 +48,9 @@ static bool wildcard_match(const char *pattern, const char *str) {
 #define GLOB_MAX_MATCHES 8192
 #endif
 
+/* Recorded patterns are absolute: never truncate, a cut path re-lists differently. */
+#define GLOB_PATH_MAX 1024
+
 static int glob_strcmp(const void *a, const void *b) { return strcmp(*(const char *const *)a, *(const char *const *)b); }
 
 /* Sorted "<dir>/<name>" files matching pattern; a missing directory matches
@@ -62,14 +65,12 @@ static bool glob_list(const char *pattern, char ***out_matches, uint32_t *out_co
         }
     }
 
-    char directory[512];
+    char directory[GLOB_PATH_MAX];
     const char *file_pattern;
 
     if (last_sep != NULL) {
         size_t dir_len = (size_t)(last_sep - pattern);
-        if (dir_len >= sizeof(directory)) {
-            dir_len = sizeof(directory) - 1;
-        }
+        NT_BUILD_ASSERT(dir_len < sizeof(directory) && "glob: directory path too long");
         memcpy(directory, pattern, dir_len);
         directory[dir_len] = '\0';
         file_pattern = last_sep + 1;
@@ -87,7 +88,7 @@ static bool glob_list(const char *pattern, char ***out_matches, uint32_t *out_co
 #ifdef _WIN32
     {
         WIN32_FIND_DATAA find_data;
-        char search_path[512];
+        char search_path[GLOB_PATH_MAX + 2];
         (void)snprintf(search_path, sizeof(search_path), "%s/*", directory);
 
         HANDLE h_find = FindFirstFileA(search_path, &find_data);
@@ -110,7 +111,7 @@ static bool glob_list(const char *pattern, char ***out_matches, uint32_t *out_co
                     overflow = true;
                     break;
                 }
-                char full_path[512];
+                char full_path[GLOB_PATH_MAX + 256]; /* + NAME_MAX */
                 (void)snprintf(full_path, sizeof(full_path), "%s/%s", directory, find_data.cFileName);
                 matches[match_count] = strdup(full_path);
                 if (matches[match_count]) {
@@ -135,7 +136,7 @@ static bool glob_list(const char *pattern, char ***out_matches, uint32_t *out_co
             if (entry->d_name[0] == '.' && (entry->d_name[1] == '\0' || (entry->d_name[1] == '.' && entry->d_name[2] == '\0'))) {
                 continue;
             }
-            char full_path[512];
+            char full_path[GLOB_PATH_MAX + 256]; /* + NAME_MAX */
             (void)snprintf(full_path, sizeof(full_path), "%s/%s", directory, entry->d_name);
             struct stat st;
             if (stat(full_path, &st) != 0 || S_ISDIR(st.st_mode)) {
@@ -235,8 +236,9 @@ static void file_stat(const char *path, int64_t *mtime, int64_t *size) {
     *size = -1;
 }
 
-/* Absolute and '/'-separated with "." and ".." collapsed, so one file gets one
- * line. Glob patterns need not exist, so no realpath. */
+/* Absolute and '/'-separated; the record must work from any working directory.
+ * Windows resolves ".." lexically, so _fullpath collapses it. POSIX resolves it
+ * through symlinks, so it stays. */
 static char *absolute_path(const char *path) {
 #ifdef _WIN32
     char *abs_path = _fullpath(NULL, path, 0);
@@ -247,31 +249,16 @@ static char *absolute_path(const char *path) {
         }
     }
 #else
+    while (path[0] == '.' && path[1] == '/') {
+        path += 2;
+    }
     char cwd[4096] = "";
     bool cwd_ok = path[0] == '/' || getcwd(cwd, sizeof(cwd)) != NULL;
     NT_BUILD_ASSERT(cwd_ok && "build record: cannot make path absolute");
     size_t size = strlen(cwd) + strlen(path) + 2;
     char *abs_path = (char *)malloc(size);
     NT_BUILD_ASSERT(abs_path && "build record: out of memory");
-    (void)snprintf(abs_path, size, "%s/%s", cwd, path);
-    char *out = abs_path;
-    for (const char *in = abs_path; *in != '\0';) {
-        const char *seg = in + 1;
-        size_t len = strcspn(seg, "/");
-        if (len == 2 && seg[0] == '.' && seg[1] == '.') {
-            while (out > abs_path && *--out != '/') {
-            }
-        } else if (len > 0 && !(len == 1 && seg[0] == '.')) {
-            *out++ = '/';
-            memmove(out, seg, len);
-            out += len;
-        }
-        in = seg + len;
-    }
-    if (out == abs_path) {
-        *out++ = '/';
-    }
-    *out = '\0';
+    (void)snprintf(abs_path, size, path[0] == '/' ? "%.0s%s" : "%s/%s", cwd, path);
 #endif
     return abs_path;
 }
@@ -343,8 +330,14 @@ void nt_builder_write_record(const char *dir) {
     NT_BUILD_ASSERT(dir && "write_record: dir is required");
     char path[1024];
     record_path(dir, path, sizeof(path));
-    char tmp_path[sizeof(path) + 4];
-    (void)snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
+    /* Per process: builders of two presets can share one pack dir. */
+    char tmp_path[sizeof(path) + 24];
+#ifdef _WIN32
+    unsigned long pid = (unsigned long)GetCurrentProcessId();
+#else
+    unsigned long pid = (unsigned long)getpid();
+#endif
+    (void)snprintf(tmp_path, sizeof(tmp_path), "%s.%lu.tmp", path, pid);
     if (s_record_count > 1) {
         qsort(s_record, s_record_count, sizeof(NtRecordLine), record_cmp);
     }
@@ -370,9 +363,26 @@ void nt_builder_write_record(const char *dir) {
     write_failed |= fclose(file) != 0;
     NT_BUILD_ASSERT(!write_failed && "write_record: write failed");
     /* Replace, never rewrite in place: a torn record must not look up to date. */
-    (void)remove(path);
-    int renamed = rename(tmp_path, path);
-    NT_BUILD_ASSERT(renamed == 0 && "write_record: cannot publish");
+    bool published = nt_builder_publish_file(tmp_path, path);
+    NT_BUILD_ASSERT(published && "write_record: cannot publish");
+}
+
+/* The record cannot list the builder itself: a builder linked after the record
+ * was written rebuilds. */
+static int64_t builder_mtime(void) {
+    char exe[4096];
+#ifdef _WIN32
+    DWORD len = GetModuleFileNameA(NULL, exe, (DWORD)sizeof(exe));
+    NT_BUILD_ASSERT(len > 0 && len < sizeof(exe) && "up_to_date: cannot find the builder executable");
+#else
+    ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    NT_BUILD_ASSERT(len > 0 && (size_t)len < sizeof(exe) - 1 && "up_to_date: cannot find the builder executable");
+    exe[len] = '\0';
+#endif
+    int64_t mtime = 0;
+    int64_t size = 0;
+    file_stat(exe, &mtime, &size);
+    return mtime;
 }
 
 /* Re-lists a recorded glob and compares it with the "  <name>" lines at
@@ -407,7 +417,10 @@ bool nt_builder_up_to_date(const char *dir) {
     record_path(dir, path, sizeof(path));
     uint32_t size = 0;
     char *text = nt_builder_read_file(path, &size);
-    bool same = text != NULL;
+    int64_t record_mtime = 0;
+    int64_t record_size = 0;
+    file_stat(path, &record_mtime, &record_size);
+    bool same = text != NULL && builder_mtime() < record_mtime;
     for (char *line = text; same && *line != '\0';) {
         char *end = strchr(line, '\n');
         if (!end) {
@@ -430,7 +443,9 @@ bool nt_builder_up_to_date(const char *dir) {
         int64_t now_mtime = 0;
         int64_t now_size = 0;
         file_stat(field + 1, &now_mtime, &now_size);
-        same = *field == ' ' && now_mtime == mtime && now_size == file_size;
+        /* A missing input may stay missing; a missing output never is current. */
+        bool missing_output = file_size < 0 && strncmp(line, "output ", 7) == 0;
+        same = *field == ' ' && now_mtime == mtime && now_size == file_size && !missing_output;
         line = end + 1;
     }
     free(text);

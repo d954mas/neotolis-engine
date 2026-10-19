@@ -44,7 +44,7 @@ they were stale.
 Every native build runs each example's pack builder. The builder exits at once
 while `<pack dir>/build_record.txt` is current and rebuilds when a file it read
 or wrote changed or a glob matches different files (builder spec, "Build
-record"). Relinking the builder deletes the record. A new `build_packs.c` starts
+record"). A relinked builder rebuilds once. A new `build_packs.c` starts
 with `nt_builder_up_to_date(out_dir)` and ends with
 `nt_builder_write_record(out_dir)`; without them it rebuilds on every build.
 Skipped examples do not rebuild packs. WASM still requires a native build after

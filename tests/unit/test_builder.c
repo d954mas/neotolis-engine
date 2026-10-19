@@ -102,11 +102,17 @@ static void test_build_assert_handler(const char *expr, const char *file, int li
 
 #ifdef _WIN32
 #include <direct.h>
+#include <sys/utime.h>
 #define MKDIR(p) _mkdir(p)
+#define UTIME(p, t) _utime(p, t)
+#define UTIMBUF struct _utimbuf
 #else
 #include <dirent.h>
 #include <sys/stat.h>
+#include <utime.h>
 #define MKDIR(p) mkdir(p, 0755)
+#define UTIME(p, t) utime(p, t)
+#define UTIMBUF struct utimbuf
 #endif
 
 #define TMP_DIR "build/tests/tmp"
@@ -502,6 +508,8 @@ void test_up_to_date_sees_every_kind_of_change(void) {
     MKDIR(TMP_DIR "/record out");
     record_write_bytes(TMP_DIR "/record out/out.bin", "a", 1);
     nt_builder_record_output(TMP_DIR "/record out/out.bin");
+    MKDIR(TMP_DIR "/record gone");
+    nt_builder_record_output(TMP_DIR "/record gone/out.bin");
     MKDIR(TMP_DIR "/record add");
     record_write_bytes(TMP_DIR "/record add/a.txt", "", 0);
     TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/record add/*.txt", record_glob_noop, NULL));
@@ -521,6 +529,17 @@ void test_up_to_date_sees_every_kind_of_change(void) {
     TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record edit/out"));
     record_write_bytes(TMP_DIR "/record edit/in.glsl", "ab", 2);
     TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record edit/out"));
+
+    /* A builder linked after the record: the record predates this executable. */
+    record_keep("/record out/", TMP_DIR "/record relink");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record relink"));
+    UTIMBUF old_time = {1, 1};
+    TEST_ASSERT_EQUAL(0, UTIME(TMP_DIR "/record relink/build_record.txt", &old_time));
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record relink"));
+
+    /* An output deleted before the record was written is never current. */
+    record_keep("/record gone/", TMP_DIR "/record gone/out");
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record gone/out"));
 
     record_keep("/record appear/", TMP_DIR "/record appear/out");
     TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record appear/out"));

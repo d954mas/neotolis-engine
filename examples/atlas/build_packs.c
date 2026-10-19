@@ -69,7 +69,10 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     const char *out_dir = argv[1];
-    if (nt_builder_up_to_date(out_dir)) {
+    /* Extra arguments are a one-off build (benchmark, determinism check): it
+     * always builds, and the default build's record stays out of it. */
+    const bool incremental = argc == 2;
+    if (incremental && nt_builder_up_to_date(out_dir)) {
         return 0;
     }
 
@@ -164,7 +167,9 @@ int main(int argc, char *argv[]) {
     (void)snprintf(combined, sizeof(combined), "%s/atlas_assets.h", HEADER_DIR);
     nt_builder_merge_headers(headers, 1, combined);
 
-    nt_builder_write_record(out_dir);
+    if (incremental) {
+        nt_builder_write_record(out_dir);
+    }
     (void)printf("\nDone.\n");
     return 0;
 }

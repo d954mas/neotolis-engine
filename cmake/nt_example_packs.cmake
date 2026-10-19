@@ -24,22 +24,13 @@ function(nt_example_packs)
             list(APPEND _pack_files "${PACKS_PACK_DIR}/${PACK}")
         endforeach()
         # The builder runs on every build and exits early while its
-        # build_record.txt is current (nt_builder_up_to_date). The record cannot
-        # see the builder itself, so a relinked builder forgets it.
-        set(_record "${PACKS_PACK_DIR}/build_record.txt")
-        set(_builder_stamp "${CMAKE_CURRENT_BINARY_DIR}/${PACKS_NAME}_builder.stamp")
-        add_custom_command(
-            OUTPUT "${_builder_stamp}"
-            COMMAND ${CMAKE_COMMAND} -E rm -f "${_record}"
-            COMMAND ${CMAKE_COMMAND} -E touch "${_builder_stamp}"
-            DEPENDS ${PACKS_BUILDER}
-        )
+        # build_record.txt is current (nt_builder_up_to_date).
         set(_build_target ${PACKS_NAME}_pack_build)
         add_custom_target(${_build_target}
             COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKS_PACK_DIR}"
             COMMAND "$<TARGET_FILE:${PACKS_BUILDER}>" "${PACKS_PACK_DIR}"
             BYPRODUCTS ${_pack_files}
-            DEPENDS "${_builder_stamp}"
+            DEPENDS ${PACKS_BUILDER}
             WORKING_DIRECTORY "${NT_ENGINE_ROOT}"
             COMMENT "Checking ${PACKS_NAME} pack(s)"
         )

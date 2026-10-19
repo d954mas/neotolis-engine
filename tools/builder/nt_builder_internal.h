@@ -522,6 +522,9 @@ char *nt_builder_read_file_bounded(const char *path, uint32_t max_size, uint32_t
 void nt_builder_record_input(const char *path);
 void nt_builder_record_output(const char *path);
 
+/* Atomically replaces output_path with tmp_path; false when it cannot. */
+bool nt_builder_publish_file(const char *tmp_path, const char *output_path);
+
 /* Zeroed cgltf options whose file reader records every file a glTF pulls in. */
 struct cgltf_options;
 void nt_builder_init_gltf_options(struct cgltf_options *options);

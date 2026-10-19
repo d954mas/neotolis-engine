@@ -293,10 +293,10 @@ void nt_builder_free_pack(NtBuilderContext *ctx) { nt_builder_free_context(ctx);
 /* Forward declaration for texture re-decode (defined below make_texture_data) */
 static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *out_w, uint32_t *out_h);
 
-/* Atomic pack publish: tmp -> final. On Windows, replacing the destination
+/* Atomic publish: tmp -> final. On Windows, replacing the destination
  * fails with a sharing violation while a running example (or AV scan) holds
- * the pack open — retry briefly before giving up. */
-static bool nt_builder_publish_pack(const char *tmp_path, const char *output_path) {
+ * the file open — retry briefly before giving up. */
+bool nt_builder_publish_file(const char *tmp_path, const char *output_path) {
 #ifdef _WIN32
     for (int attempt = 0; attempt < 5; attempt++) {
         if (attempt > 0) {
@@ -1161,7 +1161,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     /* A failed write/publish must leave NO pack at the final path — a stale
      * previous pack would be silently copied by later wasm builds. */
-    if (!write_ok || !nt_builder_publish_pack(tmp_path, ctx->output_path)) {
+    if (!write_ok || !nt_builder_publish_file(tmp_path, ctx->output_path)) {
         (void)remove(tmp_path);
         (void)remove(ctx->output_path);
         NT_BUILD_ASSERT(0 && "finish_pack: failed to write or publish pack file");
