@@ -435,8 +435,13 @@ static void vlist_nested_sweep(uint32_t id_ring) {
 
 static void test_vlist_nested_scroll_reversals_no_crash(void) { vlist_nested_sweep(nt_ui_vlist_style_defaults().id_ring); }
 
-/* Disabling recycling saturates Clay's hashmap and must assert on a stale floating parent. */
-static void test_vlist_saturation_asserts(void) { NT_TEST_EXPECT_ASSERT(vlist_nested_sweep(0U)); }
+/* A long no-recycle sweep may exhaust new retained IDs without invalidating its outer container. */
+static void test_vlist_saturation_preserves_outer_container(void) {
+    vlist_nested_sweep(0U);
+    const nt_ui_bbox_t outer = nt_ui_get_bbox(s_fx.ctx, VL_OUTER_ID);
+    TEST_ASSERT_TRUE(outer.found);
+    TEST_ASSERT_TRUE(outer.width > 0.0F && outer.height > 0.0F);
+}
 
 /* Invalid gap asserts before the owned scroll opens, so the frame stays balanced. */
 static void vlist_begin_with_gap_expect_assert(uint32_t root_id, float item_extent, float gap) {
@@ -486,7 +491,7 @@ int main(void) {
     RUN_TEST(test_vlist_one_clip);
     RUN_TEST(test_vlist_window_exceeds_ring_asserts);
     RUN_TEST(test_vlist_nested_scroll_reversals_no_crash);
-    RUN_TEST(test_vlist_saturation_asserts);
+    RUN_TEST(test_vlist_saturation_preserves_outer_container);
     RUN_TEST(test_vlist_begin_negative_gap_asserts);
     RUN_TEST(test_vlist_begin_nan_gap_asserts);
     RUN_TEST(test_vlist_begin_oversized_gap_asserts);

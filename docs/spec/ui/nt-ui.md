@@ -96,8 +96,11 @@ game-side changes.
 Never assign sibling widget IDs as `base_id + index`: Clay's anonymous child IDs
 are additive (`seed + offset`), so consecutive seeds can collide with children of
 adjacent widgets. Derive sub-IDs with `nt_ui_child_id` / `nt_ui_fmix_id` instead.
-Virtualized widgets must recycle IDs, as `nt_ui_vlist` does with its ring;
-ever-growing IDs saturate Clay's element hashmap until `build_tree` asserts.
+Virtualized widgets must recycle IDs, as `nt_ui_vlist` does with its ring.
+Clay's retained table has fixed capacity: IDs already present continue to refresh
+at capacity, while new IDs are not registered. Widgets must recycle IDs before
+lookup or attachment requires them. An unregistered ID cannot resolve an own
+transform or floating parent, and those paths assert.
 
 ## Floating zIndex is relative
 

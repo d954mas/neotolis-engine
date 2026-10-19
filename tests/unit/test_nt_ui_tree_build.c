@@ -17,6 +17,7 @@
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
+#include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
@@ -61,6 +62,58 @@ static float baked_rotation(const nt_ui_baked_xform_t *bk) {
     (void)col1_len;
     (void)ortho;
     return atan2f(bk->m[1], bk->m[0]);
+}
+
+static void tree_build_setup_ctx_max_elements(uint32_t max_elements) {
+    nt_ui_destroy_context(s_fx.ctx);
+    nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
+    desc.max_elements = max_elements;
+    s_fx.ctx = nt_ui_create_context(s_arena, sizeof s_arena, &desc);
+    TEST_ASSERT_NOT_NULL(s_fx.ctx);
+    nt_ui_set_font(s_fx.ctx, 0U, s_fx.stub_font);
+    nt_ui_set_atlas_white_region(s_fx.ctx, s_fx.atlas.handle, s_fx.atlas.white_region_idx);
+    nt_ui_set_sprite_material(s_fx.ctx, s_fx.sprite_material);
+    nt_ui_set_text_material(s_fx.ctx, s_fx.text_material);
+}
+
+static void retained_ids_fill_hashmap(void) {
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    for (int32_t i = 0; i < 29; ++i) {
+        CLAY({.id = CLAY_IDI("retained_item", i), .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {}
+    }
+    CLAY({.id = CLAY_ID("retained_floating_child"), .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {}
+    nt_ui_end(s_fx.ctx);
+}
+
+static void retained_ids_declare_duplicate_at_full_capacity(void) {
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_IDI("retained_item", 28), .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {}
+    CLAY({.id = CLAY_IDI("retained_item", 28), .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {}
+    nt_ui_end(s_fx.ctx);
+}
+
+static void retained_ids_declare_unknown_at_full_capacity(void) {
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("retained_unknown"), .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {}
+    nt_ui_end(s_fx.ctx);
+}
+
+static void retained_ids_reorder_with_floating_parent(void) {
+    enum { PARENT_INDEX = 28 };
+    nt_pointer_t mouse = {0};
+    nt_ui_transform_t parent_xform = nt_ui_transform_defaults();
+    parent_xform.rotation_z = DEG2RAD(27.0F);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_IDI("retained_item", PARENT_INDEX), .layout = {.sizing = {CLAY_SIZING_FIXED(20.0F), CLAY_SIZING_FIXED(20.0F)}}, .userData = (void *)NT_UI_DATA_XFORM(0, &parent_xform, 1.0F)}) {
+        CLAY({.id = CLAY_ID("retained_floating_child"), .floating = {.attachTo = CLAY_ATTACH_TO_PARENT}, .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {}
+    }
+    for (int32_t i = 0; i < PARENT_INDEX; ++i) {
+        CLAY({.id = CLAY_IDI("retained_item", i), .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {}
+    }
+    nt_ui_end(s_fx.ctx);
 }
 
 // #endregion
@@ -289,6 +342,41 @@ static void test_floating_attach_to_element_with_id_inherits_xform(void) {
     }
     /* Both anchor (own xform) and attached (inherit) should show 15deg. */
     TEST_ASSERT_GREATER_OR_EQUAL_INT32(2, rot_count);
+}
+
+/* A full retained-ID map must still refresh existing entries. The parent was
+ * last at index 29, then moves before its floating child in the next frame. */
+static void test_retained_ids_refresh_floating_parent_at_full_capacity(void) {
+    enum { MAX_ELEMENTS = 32, PARENT_INDEX = 28 };
+    tree_build_setup_ctx_max_elements(MAX_ELEMENTS);
+    retained_ids_fill_hashmap();
+    retained_ids_reorder_with_floating_parent();
+
+    const uint32_t parent_id = CLAY_IDI("retained_item", PARENT_INDEX).id;
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(1, nt_ui_clay_priv_layout_index_for_id(s_fx.ctx->clay, parent_id), "retained parent must point at this frame's first child");
+
+    int32_t inherited_rotation_count = 0;
+    const int32_t count = nt_ui_internal_test_get_tree_baked_count(s_fx.ctx);
+    for (int32_t i = 0; i < count; ++i) {
+        const nt_ui_baked_xform_t *bk = nt_ui_internal_test_get_tree_baked(s_fx.ctx, i);
+        if (fabsf(baked_rotation(bk) - DEG2RAD(27.0F)) <= 1e-3F) {
+            inherited_rotation_count++;
+        }
+    }
+    TEST_ASSERT_GREATER_OR_EQUAL_INT32_MESSAGE(2, inherited_rotation_count, "floating child must inherit its refreshed parent's transform");
+}
+
+static void test_retained_ids_duplicate_still_asserts_at_full_capacity(void) {
+    tree_build_setup_ctx_max_elements(32U);
+    retained_ids_fill_hashmap();
+    NT_TEST_EXPECT_ASSERT(retained_ids_declare_duplicate_at_full_capacity());
+}
+
+static void test_retained_ids_unknown_is_not_registered_at_full_capacity(void) {
+    tree_build_setup_ctx_max_elements(32U);
+    retained_ids_fill_hashmap();
+    retained_ids_declare_unknown_at_full_capacity();
+    TEST_ASSERT_FALSE(nt_ui_get_bbox(s_fx.ctx, CLAY_ID("retained_unknown").id).found);
 }
 
 /* ---- 8. Floating chain — A's xform propagates to B (attached to A). ---- */
@@ -695,6 +783,9 @@ int main(void) {
     RUN_TEST(test_floating_attach_to_parent_inherits_xform);
     RUN_TEST(test_negative_zindex_float_does_not_displace_root_seed);
     RUN_TEST(test_floating_attach_to_element_with_id_inherits_xform);
+    RUN_TEST(test_retained_ids_refresh_floating_parent_at_full_capacity);
+    RUN_TEST(test_retained_ids_duplicate_still_asserts_at_full_capacity);
+    RUN_TEST(test_retained_ids_unknown_is_not_registered_at_full_capacity);
     RUN_TEST(test_floating_inside_floating_chain);
     RUN_TEST(test_floating_with_own_xform_composes_on_seed);
     RUN_TEST(test_user_data_singleton_layer_only);

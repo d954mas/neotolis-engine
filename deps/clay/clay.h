@@ -1748,9 +1748,6 @@ bool Clay__PointIsInsideRect(Clay_Vector2 point, Clay_BoundingBox rect) {
 
 Clay_LayoutElementHashMapItem* Clay__AddHashMapItem(Clay_ElementId elementId, Clay_LayoutElement* layoutElement, uint32_t idAlias) {
     Clay_Context* context = Clay_GetCurrentContext();
-    if (context->layoutElementsHashMapInternal.length == context->layoutElementsHashMapInternal.capacity - 1) {
-        return NULL;
-    }
     Clay_LayoutElementHashMapItem item = { .elementId = elementId, .layoutElement = layoutElement, .nextIndex = -1, .generation = context->generation + 1, .idAlias = idAlias };
     uint32_t hashBucket = elementId.id % context->layoutElementsHashMap.capacity;
     int32_t hashItemPrevious = -1;
@@ -1784,6 +1781,9 @@ Clay_LayoutElementHashMapItem* Clay__AddHashMapItem(Clay_ElementId elementId, Cl
         }
         hashItemPrevious = hashItemIndex;
         hashItemIndex = hashItem->nextIndex;
+    }
+    if (context->layoutElementsHashMapInternal.length == context->layoutElementsHashMapInternal.capacity - 1) {
+        return NULL;
     }
     Clay_LayoutElementHashMapItem *hashItem = Clay__LayoutElementHashMapItemArray_Add(&context->layoutElementsHashMapInternal, item);
 #if NT_CLAY_DEBUG_VIEW
