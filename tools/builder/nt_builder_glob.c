@@ -367,14 +367,8 @@ void nt_builder_write_record(const char *dir) {
     NT_BUILD_ASSERT(dir && "write_record: dir is required");
     char path[1024];
     record_path(dir, path, sizeof(path));
-    /* Per process: builders of two presets can share one pack dir. */
     char tmp_path[sizeof(path) + 24];
-#ifdef _WIN32
-    unsigned long pid = (unsigned long)GetCurrentProcessId();
-#else
-    unsigned long pid = (unsigned long)getpid();
-#endif
-    (void)snprintf(tmp_path, sizeof(tmp_path), "%s.%lu.tmp", path, pid);
+    nt_builder_tmp_path(path, tmp_path, sizeof(tmp_path));
     if (s_record_count > 1) {
         qsort(s_record, s_record_count, sizeof(NtRecordLine), record_cmp);
     }

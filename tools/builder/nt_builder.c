@@ -293,6 +293,16 @@ void nt_builder_free_pack(NtBuilderContext *ctx) { nt_builder_free_context(ctx);
 /* Forward declaration for texture re-decode (defined below make_texture_data) */
 static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *out_w, uint32_t *out_h);
 
+void nt_builder_tmp_path(const char *path, char *out, size_t out_size) {
+#ifdef _WIN32
+    unsigned long pid = (unsigned long)GetCurrentProcessId();
+#else
+    unsigned long pid = (unsigned long)getpid();
+#endif
+    int len = snprintf(out, out_size, "%s.%lu.tmp", path, pid);
+    NT_BUILD_ASSERT(len > 0 && (size_t)len < out_size && "tmp path too long");
+}
+
 /* Atomic publish: tmp -> final. On Windows, replacing the destination
  * fails with a sharing violation while a running example (or AV scan) holds
  * the file open — retry briefly before giving up. */
@@ -1128,12 +1138,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
      * path can be observed (and rewritten) by concurrent preset builds; a torn
      * pack must never be visible, and two builders must never share one tmp. */
     char tmp_path[sizeof(ctx->output_path) + 24];
-#ifdef _WIN32
-    unsigned long pid = (unsigned long)GetCurrentProcessId();
-#else
-    unsigned long pid = (unsigned long)getpid();
-#endif
-    (void)snprintf(tmp_path, sizeof(tmp_path), "%s.%lu.tmp", ctx->output_path, pid);
+    nt_builder_tmp_path(ctx->output_path, tmp_path, sizeof(tmp_path));
     FILE *file = fopen(tmp_path, "wb");
     NT_BUILD_ASSERT(file && "finish_pack: cannot open tmp output file");
 

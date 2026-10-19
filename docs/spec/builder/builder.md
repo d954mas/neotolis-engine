@@ -290,7 +290,7 @@ Rules:
 
 Generated asset headers are committed to git. This is intentional:
 
-- Output is deterministic (sorted by name, stable hashes). File only changes when assets are added, removed, or renamed.
+- Output is deterministic (sorted by name, stable hashes). File only changes when assets are added, removed, or renamed; the builder writes a per-process temporary file and replaces the header only when its bytes differ, so a pack rebuild with the same assets recompiles nothing and no reader sees a torn header.
 - Git diff on the header shows exactly which assets changed between commits -- acts as an asset changelog.
 - New contributors can build and run without first running the builder.
 - Header files are small (one line per asset) and compress well in git.

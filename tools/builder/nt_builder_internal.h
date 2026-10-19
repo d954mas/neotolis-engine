@@ -522,7 +522,9 @@ char *nt_builder_read_file_bounded(const char *path, uint32_t max_size, uint32_t
 void nt_builder_record_input(const char *path);
 void nt_builder_record_output(const char *path);
 
-/* Atomically replaces output_path with tmp_path; false when it cannot. */
+/* Staged writes: "<path>.<pid>.tmp" (builders of two presets can share one
+ * output dir), then an atomic replace of output_path; false when it cannot. */
+void nt_builder_tmp_path(const char *path, char *out, size_t out_size);
 bool nt_builder_publish_file(const char *tmp_path, const char *output_path);
 
 /* Zeroed cgltf options whose file reader records every file a glTF pulls in. */

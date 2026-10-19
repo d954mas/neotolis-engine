@@ -102,6 +102,7 @@ static void test_build_assert_handler(const char *expr, const char *file, int li
 
 #ifdef _WIN32
 #include <direct.h>
+#include <sys/stat.h>
 #include <sys/utime.h>
 #define MKDIR(p) _mkdir(p)
 #define UTIME(p, t) _utime(p, t)
@@ -613,6 +614,33 @@ void test_up_to_date_sees_every_kind_of_change(void) {
 
     record_keep("/record rewrite/", TMP_DIR "/record rewrite/out");
     TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record rewrite/out"));
+}
+
+static void header_keep_build(bool second_shader) {
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/header keep/keep.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_builder_add_shader(ctx, "assets/shaders/radial.frag", NT_BUILD_SHADER_FRAGMENT);
+    if (second_shader) {
+        nt_builder_add_shader(ctx, "assets/shaders/mesh_inst.frag", NT_BUILD_SHADER_FRAGMENT);
+    }
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+}
+
+/* A rebuild with the same assets keeps the header's mtime, so nothing that
+ * includes it recompiles; new assets replace it. */
+void test_unchanged_header_keeps_its_mtime(void) {
+    MKDIR(TMP_DIR "/header keep");
+    header_keep_build(false);
+    UTIMBUF old_time = {1, 1};
+    TEST_ASSERT_EQUAL(0, UTIME(TMP_DIR "/header keep/keep.h", &old_time));
+    header_keep_build(false);
+    struct stat st;
+    TEST_ASSERT_EQUAL(0, stat(TMP_DIR "/header keep/keep.h", &st));
+    TEST_ASSERT_EQUAL_INT64(1, (int64_t)st.st_mtime);
+    header_keep_build(true);
+    TEST_ASSERT_EQUAL(0, stat(TMP_DIR "/header keep/keep.h", &st));
+    TEST_ASSERT_TRUE(st.st_mtime > 1);
 }
 
 void test_gltf_external_buffer_shorter_than_declared_fails(void) {
@@ -9780,6 +9808,7 @@ int main(void) {
     RUN_TEST(test_write_record_lists_every_input_glob_and_output);
     RUN_TEST(test_up_to_date_sees_every_kind_of_change);
     RUN_TEST(test_gltf_external_buffer_shorter_than_declared_fails);
+    RUN_TEST(test_unchanged_header_keeps_its_mtime);
 
     /* Pack writer core */
     RUN_TEST(test_start_pack_returns_context);
