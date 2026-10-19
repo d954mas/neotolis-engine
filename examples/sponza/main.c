@@ -595,7 +595,6 @@ int main(int argc, char **argv) {
     /* 1. Engine init */
     nt_engine_config_t config = {0};
     config.app_name = "sponza";
-    config.version = 1;
 
     nt_result_t result = nt_engine_init(&config);
     if (result != NT_OK) {

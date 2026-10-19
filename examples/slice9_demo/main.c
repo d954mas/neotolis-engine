@@ -548,7 +548,6 @@ int main(int argc, char *argv[]) {
 
     nt_engine_config_t config = {0};
     config.app_name = "slice9_demo";
-    config.version = 1;
 
     if (nt_engine_init(&config) != NT_OK) {
         return 1;

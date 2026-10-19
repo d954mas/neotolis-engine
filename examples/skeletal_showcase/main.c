@@ -2741,7 +2741,7 @@ static void frame(void) {
 }
 
 int main(int argc, char *argv[]) {
-    nt_engine_config_t config = {.app_name = "skeletal_showcase", .version = 1};
+    nt_engine_config_t config = {.app_name = "skeletal_showcase"};
     if (nt_engine_init(&config) != NT_OK) {
         return 1;
     }

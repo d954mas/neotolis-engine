@@ -217,7 +217,6 @@ static void frame(void) {
 int main(int argc, char *argv[]) {
     nt_engine_config_t config = {0};
     config.app_name = "atlas_demo";
-    config.version = 1;
 
     nt_result_t result = nt_engine_init(&config);
     if (result != NT_OK) {

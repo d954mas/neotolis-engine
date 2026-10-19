@@ -5,7 +5,6 @@
 
 typedef struct {
     const char *app_name;
-    uint32_t version;
 } nt_engine_config_t;
 
 nt_result_t nt_engine_init(const nt_engine_config_t *config);

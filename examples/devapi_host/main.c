@@ -284,7 +284,6 @@ static void frame(void) {
 int main(void) {
     nt_engine_config_t config = {0};
     config.app_name = "devapi_host";
-    config.version = 1;
 
     nt_result_t result = nt_engine_init(&config);
     if (result != NT_OK) {
