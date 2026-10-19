@@ -1,11 +1,11 @@
 # Size Report: ui_showcase (wasm-analysis-paired)
-# Commit: b8c2966
+# Commit: 418c9e3
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
-Type                 532 B
+Type                 531 B
 Import               626 B
 Function             342 B
 Table                  5 B
@@ -13,21 +13,21 @@ Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                 144 B
-Code              375134 B
-Data               41586 B
-Custom             11158 B
+Code              376365 B
+Data               41806 B
+Custom             11172 B
 ---------------- ----------
-TOTAL             429626 B
+TOTAL             431090 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-76871 B   frame
+77317 B   frame
 17002 B   dispatch_command
 13289 B   create_gpu
  9467 B   input_field
- 9072 B   main
+ 9139 B   main
  8830 B   Clay__ConfigureOpenElementPtr
  8251 B   nt_ui_rich_text_markup
  6059 B   Clay__SizeContainersAlongAxis
@@ -42,7 +42,7 @@ TOTAL             429626 B
  3727 B   rich_solve
  3634 B   menu_im_row
  3365 B   Clay__CloseElement
- 3133 B   nt_ui_label
+ 3261 B   nt_ui_label
  3038 B   render_scroll
  3012 B   fmt_fp
  2894 B   nt_gfx_make_texture
@@ -50,12 +50,12 @@ TOTAL             429626 B
  2687 B   nt_material_apply
  2636 B   nt_http_request
  2593 B   scrollbar_emit_axis
- 2586 B   nt_ui_tooltip
+ 2563 B   nt_ui_tooltip
  2429 B   printf_core
  2411 B   nt_sprite_renderer_set_material
 
 Total functions: 340
-Total code size: 374536 B
+Total code size: 375767 B
 
 ## Built Engine Archives
 
@@ -115,7 +115,7 @@ libnt_sprite_renderer.a    16192 B
 libnt_text_renderer.a       7702 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                350166 B
+libnt_ui.a                351932 B
 libnt_ui_rich.a            39000 B
 libnt_ui_rich_fx.a          3050 B
 libnt_ui_stub.a             1324 B
@@ -124,9 +124,9 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2659868 B
+TOTAL (archives)         2661634 B
 
 ## Data Segments Summary
 
-Segments: 165
-Total data size: 40423 B
+Segments: 166
+Total data size: 40636 B
