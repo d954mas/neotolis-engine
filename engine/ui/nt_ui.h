@@ -40,18 +40,17 @@
 /* ---- Tunables ----
  *
  * `max_elements` (in nt_ui_create_desc_t) is the single per-ctx knob that
- * sizes all layout-bound storage. The distinct ids of two consecutive frames
- * together must also stay below it (Clay prunes ids absent for a frame):
- *   - Clay arena (sized via Clay's own formula)
- *   - tree/hit baked-xform + index arrays (production)
+ * sizes all layout-bound storage; a frame with more than max_elements - 1 elements asserts:
+ *   - Clay arena (sized via Clay's own formula; its id hashmap holds 2 * max_elements ids)
+ *   - tree/hit baked-xform + index arrays (production; hit_* mirrors hold 2 * max_elements slots)
  *   - debug_zones, widget_registry, inspector_collapsed_ids, probe_scratch (DEBUG_TOOLS only)
  *
- * Memory cost per ctx (production / production+debug; post-3D-refactor, mat4 baked storage):
- *   max_elements=1024  → ~210 KB / ~650 KB
- *   max_elements=4096  → ~820 KB / ~2.6 MB
- *   max_elements=8192  → ~1.7 MB / ~5.1 MB
- * The DEBUG_TOOLS delta is now dominated by probe_scratch (~290 B/element — owned-string POD nodes sized
- * to max_elements so the devapi reads the FULL tree). tree_baked + hit_baked grow at 160 B/element.
+ * Memory cost per ctx, nt_ui_min_arena_size on native x64 (production / production+debug):
+ *   max_elements=384   → ~510 KB / ~700 KB
+ *   max_elements=1024  → ~1.2 MB / ~1.7 MB
+ *   max_elements=7168  → ~8.0 MB / ~11.3 MB
+ * The DEBUG_TOOLS delta is dominated by probe_scratch (~290 B/element — owned-string POD nodes sized
+ * to max_elements so the devapi reads the FULL tree). tree_baked + hit_baked grow at 240 B/element.
  *
  * Override the default via game's compile defs:
  *   target_compile_definitions(my_game PRIVATE NT_UI_DEFAULT_MAX_ELEMENT_COUNT=4096)

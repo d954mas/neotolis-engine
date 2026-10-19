@@ -167,10 +167,8 @@ int32_t nt_ui_internal_get_layout_element_count(const nt_ui_context_t *ctx) {
  * A full-width in-flow row costs up to ~10 elements and the panel chrome trails the row list. */
 #define NT_UI_INSPECTOR_ELEM_RESERVE 96
 static bool cdv_layout_budget_left(const nt_ui_context_t *ctx) {
-    /* Clay fails at capacity-1 elements this frame, or ids live across last and this frame. */
-    const Clay_Context *cc = ctx->clay;
-    const int32_t live_ids = cc->layoutElementsHashMapInternal.length - cc->layoutElementsHashMapFreeList.length;
-    return (cc->layoutElements.length + NT_UI_INSPECTOR_ELEM_RESERVE) < cc->layoutElements.capacity && (live_ids + NT_UI_INSPECTOR_ELEM_RESERVE) < cc->layoutElementsHashMapInternal.capacity;
+    /* Clay raises maxElementsExceeded at length == capacity-1; keep a reserve below that. */
+    return (ctx->clay->layoutElements.length + NT_UI_INSPECTOR_ELEM_RESERVE) < ctx->clay->layoutElements.capacity;
 }
 #endif /* NT_UI_DEBUG_TOOLS */
 

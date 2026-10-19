@@ -185,16 +185,18 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     const size_t tree_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_root_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->tree_root_for_elem) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_dfs_bytes = NT_ALIGN_UP(sizeof(nt_ui_dfs_frame_t) * NT_UI_TREE_DFS_DEPTH_CAP, NT_UI_CACHE_LINE);
-    const size_t hit_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
-    const size_t hit_clip_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_clip_parent_id) * desc->max_elements, NT_UI_CACHE_LINE);
-    const size_t hit_gen_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_generation) * desc->max_elements, NT_UI_CACHE_LINE);
+    /* hit_* mirrors are indexed by Clay hashmap slot: 2 * max_elements (last frame + this frame). */
+    const size_t hit_slots = (size_t)desc->max_elements * 2U;
+    const size_t hit_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * hit_slots, NT_UI_CACHE_LINE);
+    const size_t hit_clip_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_clip_parent_id) * hit_slots, NT_UI_CACHE_LINE);
+    const size_t hit_gen_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_generation) * hit_slots, NT_UI_CACHE_LINE);
     /* Double-buffered interactive registry (always-on). */
     const size_t interactive_bytes = NT_ALIGN_UP(sizeof(nt_ui_interactive_t) * desc->max_elements, NT_UI_CACHE_LINE);
     /* Per-id retained-state pool (always-on); cap = resolved state_slots. */
     const uint32_t state_slots = desc->state_slots ? desc->state_slots : (uint32_t)NT_UI_STATE_SLOTS;
     const size_t state_pool_bytes = NT_ALIGN_UP(sizeof(nt_ui_state_cell_t) * state_slots, NT_UI_CACHE_LINE);
 #if NT_UI_DEBUG_TOOLS
-    const size_t hit_layer_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_layer) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t hit_layer_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_layer) * hit_slots, NT_UI_CACHE_LINE);
     const uint32_t widget_cap = nt_ui_next_pow2_u32(desc->max_elements * 2U);
     const size_t widget_registry_bytes = NT_ALIGN_UP(sizeof(nt_ui_widget_slot_t) * widget_cap, NT_UI_CACHE_LINE);
     const size_t debug_zones_bytes = NT_ALIGN_UP(sizeof(nt_ui_debug_zone_t) * desc->max_elements, NT_UI_CACHE_LINE);
@@ -246,9 +248,10 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     const size_t tree_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_root_bytes = NT_ALIGN_UP(sizeof(*ctx->tree_root_for_elem) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_dfs_bytes = NT_ALIGN_UP(sizeof(nt_ui_dfs_frame_t) * NT_UI_TREE_DFS_DEPTH_CAP, NT_UI_CACHE_LINE);
-    const size_t hit_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
-    const size_t hit_clip_bytes = NT_ALIGN_UP(sizeof(*ctx->hit_clip_parent_id) * desc->max_elements, NT_UI_CACHE_LINE);
-    const size_t hit_gen_bytes = NT_ALIGN_UP(sizeof(*ctx->hit_generation) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t hit_slots = (size_t)desc->max_elements * 2U;
+    const size_t hit_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * hit_slots, NT_UI_CACHE_LINE);
+    const size_t hit_clip_bytes = NT_ALIGN_UP(sizeof(*ctx->hit_clip_parent_id) * hit_slots, NT_UI_CACHE_LINE);
+    const size_t hit_gen_bytes = NT_ALIGN_UP(sizeof(*ctx->hit_generation) * hit_slots, NT_UI_CACHE_LINE);
     ctx->tree_baked = (nt_ui_baked_xform_t *)((char *)arena + ctx_size);
     ctx->tree_root_for_elem = (int32_t *)((char *)arena + ctx_size + tree_baked_bytes);
     ctx->tree_dfs_stack = (nt_ui_dfs_frame_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes);
@@ -257,7 +260,7 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     ctx->hit_generation = (uint32_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes);
     ctx->current_generation = 0U;
 #if NT_UI_DEBUG_TOOLS
-    const size_t hit_layer_bytes = NT_ALIGN_UP(sizeof(*ctx->hit_layer) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t hit_layer_bytes = NT_ALIGN_UP(sizeof(*ctx->hit_layer) * hit_slots, NT_UI_CACHE_LINE);
     ctx->hit_layer = (uint8_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes);
 #else
     const size_t hit_layer_bytes = 0U;
@@ -2102,7 +2105,7 @@ nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id) {
         return (nt_ui_bbox_t){0};
     }
     const int32_t slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
-    if (slot < 0 || slot >= (int32_t)ctx->max_elements || ctx->hit_generation[slot] != ctx->current_generation) {
+    if (slot < 0 || ctx->hit_generation[slot] != ctx->current_generation) {
         return (nt_ui_bbox_t){0};
     }
     return (nt_ui_bbox_t){.x = d.boundingBox.x, .y = d.boundingBox.y, .width = d.boundingBox.width, .height = d.boundingBox.height, .found = true};
@@ -2215,7 +2218,7 @@ static bool raycast_hit(const float inv_view_proj[16], const nt_ui_baked_xform_t
 
 /* Hit-test reads PREV-frame data via the Clay hashmap slot, which Clay keeps for one frame. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, int32_t N, float px, float py, float screen_w, float screen_h) {
+static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, float px, float py, float screen_w, float screen_h) {
     uint32_t cur_id = start_clip_id;
     /* Cap iterations to scissor stack depth so a malformed parent_id cycle can't hang. */
     uint32_t guard = NT_UI_WALKER_SCISSOR_DEPTH_CAP;
@@ -2229,7 +2232,7 @@ static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, i
         const bool found = nt_ui_clay_priv_bbox_for_id(ctx->clay, cur_id, &cx, &cy, &cw, &ch);
         NT_ASSERT(found && "hit_clip_chain: clip ancestor missing from Clay hashmap");
         const int32_t cur_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, cur_id);
-        NT_ASSERT(cur_slot >= 0 && cur_slot < N && "hit_clip_chain: clip ancestor slot OOB");
+        NT_ASSERT(cur_slot >= 0 && "hit_clip_chain: clip ancestor slot OOB");
         const nt_ui_baked_xform_t cb = ctx->hit_baked[cur_slot];
         float clx;
         float cly;
@@ -2316,7 +2319,7 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
         return false;
     }
     const int32_t slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
-    if (slot < 0 || slot >= (int32_t)ctx->max_elements) {
+    if (slot < 0) {
         return false;
     }
     /* Reject ids Clay still holds in hashmap but that weren't re-declared this frame. */
@@ -2333,7 +2336,7 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
         screen_h = nt_ui_clay_priv_layout_height(ctx->clay);
     }
 
-    if (!hit_clip_chain(ctx, ctx->hit_clip_parent_id[slot], (int32_t)ctx->max_elements, px, py, screen_w, screen_h)) {
+    if (!hit_clip_chain(ctx, ctx->hit_clip_parent_id[slot], px, py, screen_w, screen_h)) {
         return false;
     }
 
@@ -2375,7 +2378,7 @@ static bool pointer_to_local_resolved(const nt_ui_context_t *ctx, uint32_t id, f
         return false;
     }
     const int32_t slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
-    if (slot < 0 || slot >= (int32_t)ctx->max_elements) {
+    if (slot < 0) {
         return false;
     }
     if (ctx->hit_generation[slot] != ctx->current_generation) {
@@ -2388,7 +2391,7 @@ static bool pointer_to_local_resolved(const nt_ui_context_t *ctx, uint32_t id, f
         screen_w = nt_ui_clay_priv_layout_width(ctx->clay);
         screen_h = nt_ui_clay_priv_layout_height(ctx->clay);
     }
-    if (!hit_clip_chain(ctx, ctx->hit_clip_parent_id[slot], (int32_t)ctx->max_elements, px, py, screen_w, screen_h)) {
+    if (!hit_clip_chain(ctx, ctx->hit_clip_parent_id[slot], px, py, screen_w, screen_h)) {
         return false;
     }
     const nt_ui_baked_xform_t b = ctx->hit_baked[slot];
@@ -2757,7 +2760,7 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
         z->center_y = d.boundingBox.y + (d.boundingBox.height * 0.5F);
         /* Snapshot composed mat4 — same source as walker/hit-test. */
         const int32_t e_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
-        if (e_slot >= 0 && e_slot < (int32_t)ctx->max_elements && ctx->hit_generation[e_slot] == ctx->current_generation) {
+        if (e_slot >= 0 && ctx->hit_generation[e_slot] == ctx->current_generation) {
             memcpy(z->m, ctx->hit_baked[e_slot].m, sizeof z->m);
         } else {
             const nt_ui_baked_xform_t b = nt_ui_internal_identity_baked();
@@ -2999,7 +3002,7 @@ void nt_ui_debug_record_disabled_zone(nt_ui_context_t *ctx, uint32_t id, const i
     z->center_x = d.boundingBox.x + (d.boundingBox.width * 0.5F);
     z->center_y = d.boundingBox.y + (d.boundingBox.height * 0.5F);
     const int32_t e_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
-    if (e_slot >= 0 && e_slot < (int32_t)ctx->max_elements && ctx->hit_generation[e_slot] == ctx->current_generation) {
+    if (e_slot >= 0 && ctx->hit_generation[e_slot] == ctx->current_generation) {
         memcpy(z->m, ctx->hit_baked[e_slot].m, sizeof z->m);
     } else {
         const nt_ui_baked_xform_t b = nt_ui_internal_identity_baked();

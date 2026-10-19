@@ -75,32 +75,6 @@ static void tree_build_setup_ctx_max_elements(uint32_t max_elements) {
     nt_ui_set_text_material(s_fx.ctx, s_fx.text_material);
 }
 
-/* With the root, 30 ids fill all 31 usable slots of a 32-slot hashmap (Clay reserves one). */
-static void retained_ids_fill_hashmap(void) {
-    nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
-    for (int32_t i = 0; i < 29; ++i) {
-        CLAY({.id = CLAY_IDI("retained_item", i), .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {}
-    }
-    CLAY({.id = CLAY_ID("retained_floating_child"), .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {}
-    nt_ui_end(s_fx.ctx);
-}
-
-static void retained_ids_declare_duplicate_at_full_capacity(void) {
-    nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_IDI("retained_item", 28), .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {}
-    CLAY({.id = CLAY_IDI("retained_item", 28), .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {}
-    nt_ui_end(s_fx.ctx);
-}
-
-static void retained_ids_declare_unknown_at_full_capacity(void) {
-    nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("retained_unknown"), .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {}
-    nt_ui_end(s_fx.ctx);
-}
-
 static void retained_ids_declare_frame(int32_t first, int32_t count) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
@@ -110,17 +84,13 @@ static void retained_ids_declare_frame(int32_t first, int32_t count) {
     nt_ui_end(s_fx.ctx);
 }
 
-static void retained_ids_reorder_with_floating_parent(void) {
-    enum { PARENT_INDEX = 28 };
+/* After a frame of 30 other ids, the clip and its box take hashmap slots 32 and 33. */
+static void retained_ids_declare_clipped_box(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_transform_t parent_xform = nt_ui_transform_defaults();
-    parent_xform.rotation_z = DEG2RAD(27.0F);
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_IDI("retained_item", PARENT_INDEX), .layout = {.sizing = {CLAY_SIZING_FIXED(20.0F), CLAY_SIZING_FIXED(20.0F)}}, .userData = (void *)NT_UI_DATA_XFORM(0, &parent_xform, 1.0F)}) {
-        CLAY({.id = CLAY_ID("retained_floating_child"), .floating = {.attachTo = CLAY_ATTACH_TO_PARENT}, .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {}
-    }
-    for (int32_t i = 0; i < PARENT_INDEX; ++i) {
-        CLAY({.id = CLAY_IDI("retained_item", i), .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {}
+    CLAY({.id = CLAY_ID("retained_pad"), .layout = {.sizing = {CLAY_SIZING_FIXED(0.0F), CLAY_SIZING_FIXED(0.0F)}}}) {}
+    CLAY({.id = CLAY_ID("retained_clip"), .layout = {.sizing = {CLAY_SIZING_FIXED(100.0F), CLAY_SIZING_FIXED(100.0F)}}, .clip = {.horizontal = true, .vertical = true}}) {
+        CLAY({.id = CLAY_ID("retained_box"), .layout = {.sizing = {CLAY_SIZING_FIXED(50.0F), CLAY_SIZING_FIXED(50.0F)}}}) {}
     }
     nt_ui_end(s_fx.ctx);
 }
@@ -353,38 +323,6 @@ static void test_floating_attach_to_element_with_id_inherits_xform(void) {
     TEST_ASSERT_GREATER_OR_EQUAL_INT32(2, rot_count);
 }
 
-/* A full retained-ID map must still refresh existing entries. The parent was
- * declared at layout index 29, then moves before the child, which now floats on it. */
-static void test_retained_ids_refresh_floating_parent_at_full_capacity(void) {
-    enum { MAX_ELEMENTS = 32, PARENT_INDEX = 28 };
-    tree_build_setup_ctx_max_elements(MAX_ELEMENTS);
-    retained_ids_fill_hashmap();
-    retained_ids_reorder_with_floating_parent();
-
-    int32_t inherited_rotation_count = 0;
-    const int32_t count = nt_ui_internal_test_get_tree_baked_count(s_fx.ctx);
-    for (int32_t i = 0; i < count; ++i) {
-        const nt_ui_baked_xform_t *bk = nt_ui_internal_test_get_tree_baked(s_fx.ctx, i);
-        if (fabsf(baked_rotation(bk) - DEG2RAD(27.0F)) <= 1e-3F) {
-            inherited_rotation_count++;
-        }
-    }
-    TEST_ASSERT_GREATER_OR_EQUAL_INT32_MESSAGE(2, inherited_rotation_count, "floating child must inherit its refreshed parent's transform");
-}
-
-static void test_retained_ids_duplicate_still_asserts_at_full_capacity(void) {
-    tree_build_setup_ctx_max_elements(32U);
-    retained_ids_fill_hashmap();
-    NT_TEST_EXPECT_ASSERT(retained_ids_declare_duplicate_at_full_capacity());
-}
-
-/* The last frame's ids stay live during this frame, so one new id overflows the map. */
-static void test_retained_ids_new_id_asserts_at_full_capacity(void) {
-    tree_build_setup_ctx_max_elements(32U);
-    retained_ids_fill_hashmap();
-    NT_TEST_EXPECT_ASSERT(retained_ids_declare_unknown_at_full_capacity());
-}
-
 /* Ids absent for a frame are pruned, so a churning id set never fills the map. */
 static void test_retained_ids_prune_ids_absent_this_frame(void) {
     enum { MAX_ELEMENTS = 32, PER_FRAME = 10, FRAMES = 20 };
@@ -394,6 +332,28 @@ static void test_retained_ids_prune_ids_absent_this_frame(void) {
     }
     TEST_ASSERT_FALSE(nt_ui_get_bbox(s_fx.ctx, CLAY_IDI("retained_item", 0).id).found);
     TEST_ASSERT_TRUE(nt_ui_get_bbox(s_fx.ctx, CLAY_IDI("retained_item", (FRAMES - 1) * PER_FRAME).id).found);
+}
+
+/* A full frame followed by a full frame of different ids never overflows the id hashmap. */
+static void test_retained_ids_disjoint_full_frames_fit(void) {
+    enum { MAX_ELEMENTS = 32, PER_FRAME = MAX_ELEMENTS - 2 };
+    tree_build_setup_ctx_max_elements(MAX_ELEMENTS);
+    retained_ids_declare_frame(0, PER_FRAME);
+    retained_ids_declare_frame(PER_FRAME, PER_FRAME);
+    retained_ids_declare_frame(0, PER_FRAME);
+    TEST_ASSERT_TRUE(nt_ui_get_bbox(s_fx.ctx, CLAY_IDI("retained_item", 0).id).found);
+}
+
+/* Hit-testing walks hit_* mirrors by hashmap slot, which can exceed max_elements. */
+static void test_retained_ids_hit_through_clip_in_upper_slot(void) {
+    tree_build_setup_ctx_max_elements(32U);
+    retained_ids_declare_frame(0, 30);
+    retained_ids_declare_clipped_box();
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    const bool hit = nt_ui_test_hit(s_fx.ctx, CLAY_ID("retained_box").id, 25.0F, 25.0F);
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_TRUE(hit);
 }
 
 /* A new id that reuses a pruned slot must not read the old owner's hit data. */
@@ -813,11 +773,10 @@ int main(void) {
     RUN_TEST(test_floating_attach_to_parent_inherits_xform);
     RUN_TEST(test_negative_zindex_float_does_not_displace_root_seed);
     RUN_TEST(test_floating_attach_to_element_with_id_inherits_xform);
-    RUN_TEST(test_retained_ids_refresh_floating_parent_at_full_capacity);
-    RUN_TEST(test_retained_ids_duplicate_still_asserts_at_full_capacity);
-    RUN_TEST(test_retained_ids_new_id_asserts_at_full_capacity);
     RUN_TEST(test_retained_ids_prune_ids_absent_this_frame);
+    RUN_TEST(test_retained_ids_disjoint_full_frames_fit);
     RUN_TEST(test_retained_ids_reused_slot_has_no_stale_bbox);
+    RUN_TEST(test_retained_ids_hit_through_clip_in_upper_slot);
     RUN_TEST(test_floating_inside_floating_chain);
     RUN_TEST(test_floating_with_own_xform_composes_on_seed);
     RUN_TEST(test_user_data_singleton_layer_only);

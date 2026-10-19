@@ -98,9 +98,9 @@ are additive (`seed + offset`), so consecutive seeds can collide with children o
 adjacent widgets. Derive sub-IDs with `nt_ui_child_id` / `nt_ui_fmix_id` instead.
 Clay's element ID hashmap retains IDs for one frame: `Clay_EndLayout` prunes
 every ID not declared in that frame, and the next frame still reads the boxes of
-the IDs it kept. The distinct IDs of two consecutive frames together, including
-anonymous and text elements, must stay below `max_elements`; a new ID beyond that
-asserts, as does a frame with more than `max_elements - 1` layout elements. Per-ID widget state in `nt_ui_state` is not pruned, so stateful widgets
+the IDs it kept. The table holds `2 × max_elements` IDs, so the previous and
+current frame always fit; the only limit is a frame with more than
+`max_elements - 1` layout elements, which asserts. Per-ID widget state in `nt_ui_state` is not pruned, so stateful widgets
 with ever-new IDs still need recycling.
 
 ## Floating zIndex is relative

@@ -27,7 +27,8 @@
 //      EndLayout reserves sidebar width so games can enable it after nt_ui_begin.
 //   6. Retained ID hashmap pruning, ported from upstream main: EndLayout unlinks
 //      ids not declared this frame into layoutElementsHashMapFreeList, and
-//      AddHashMapItem reuses those slots. Unlike upstream, the capacity check runs
+//      AddHashMapItem reuses those slots. The item array holds 2 * maxElementCount
+//      so the previous and current frame always fit. Unlike upstream, the capacity check runs
 //      after the existing-id lookup and counts free slots, and pruning keeps the
 //      NT_CLAY_DEBUG_VIEW debugData pointer of a freed slot; the debug view skips a
 //      pruned selection. Search "NT patch 6".
@@ -2312,9 +2313,11 @@ void Clay__InitializePersistentMemory(Clay_Context* context) {
     Clay_Arena *arena = &context->internalArena;
 
     context->scrollContainerDatas = Clay__ScrollContainerDataInternalArray_Allocate_Arena(CLAY__MAX_SCROLL_CONTAINERS, arena); // NT patch: was hardcoded 10
-    context->layoutElementsHashMapInternal = Clay__LayoutElementHashMapItemArray_Allocate_Arena(maxElementCount, arena);
+    // NT patch 6: ids of the previous and current frame always fit, so only element overflow can fail.
+    int32_t hashMapItemCount = maxElementCount * 2;
+    context->layoutElementsHashMapInternal = Clay__LayoutElementHashMapItemArray_Allocate_Arena(hashMapItemCount, arena);
     context->layoutElementsHashMap = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena);
-    context->layoutElementsHashMapFreeList = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena); // NT patch 6
+    context->layoutElementsHashMapFreeList = Clay__int32_tArray_Allocate_Arena(hashMapItemCount, arena); // NT patch 6
     context->measureTextHashMapInternal = Clay__MeasureTextCacheItemArray_Allocate_Arena(maxElementCount, arena);
     context->measureTextHashMapInternalFreeList = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena);
     context->measuredWordsFreeList = Clay__int32_tArray_Allocate_Arena(maxMeasureTextCacheWordCount, arena);
@@ -2322,7 +2325,7 @@ void Clay__InitializePersistentMemory(Clay_Context* context) {
     context->measuredWords = Clay__MeasuredWordArray_Allocate_Arena(maxMeasureTextCacheWordCount, arena);
     context->pointerOverIds = Clay_ElementIdArray_Allocate_Arena(maxElementCount, arena);
 #if NT_CLAY_DEBUG_VIEW
-    context->debugElementData = Clay__DebugElementDataArray_Allocate_Arena(maxElementCount, arena);
+    context->debugElementData = Clay__DebugElementDataArray_Allocate_Arena(hashMapItemCount, arena);
 #endif
     context->arenaResetOffset = arena->nextAllocation;
 }
