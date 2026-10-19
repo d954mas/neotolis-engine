@@ -129,11 +129,12 @@ int main(int argc, char **argv) {
         (void)fprintf(stderr, "Usage: build_asteroids_packs <output_dir>\n");
         return 1;
     }
+    if (nt_builder_up_to_date(argv[1])) {
+        return 0;
+    }
     build_core(argv[1]);
     build_space(argv[1]);
     build_ui(argv[1]);
-    char depfile[1024];
-    (void)snprintf(depfile, sizeof(depfile), "%s/build_packs.d", argv[1]);
-    nt_builder_write_depfile(depfile);
+    nt_builder_write_record(argv[1]);
     return 0;
 }

@@ -41,25 +41,14 @@ with `-DNT_SKIP_EXAMPLE_PACKS=sponza`; this cache setting persists. Reset it wit
 deterministic tracked output; commit refreshed copies when a pack build reveals
 they were stale.
 
-Packs depend on the builder executable and on the builder's own depfile: each
-`build_packs.c` ends with `nt_builder_write_depfile("<pack dir>/build_packs.d")`,
-which lists every file the builder read, shader includes and glTF buffers
-included, and writes `build_packs.d.globs` with every glob pattern it walked and
-the files that glob saw (see the builder spec, "Dependency file"). Editing a
-read file reruns the builder. A small always-run step
-(`cmake/nt_pack_globs.cmake`) re-lists those patterns with the builder's
-matching rules and compares them with what the builder saw, so adding or
-removing a matching file reruns it too: with an old timestamp, in a directory
-that did not exist yet, or while the builder was running. Other files never
-rerun it. It compares listings rather than directory mtimes because on Windows
-ninja reads a directory's mtime from its parent's listing, which NTFS updates
-lazily. Native example packs need CMake 3.29+.
-
-A new `build_packs.c` must call `nt_builder_write_depfile` last, after every
-pack succeeded; the build fails when it does not. Files the game reads itself
-(existence probes, data passed as memory) are not listed. Skipped examples do
-not rebuild packs. WASM still requires a native build after asset edits;
-reconfigure WASM if an example's pack list changes.
+Every native build runs each example's pack builder. The builder exits at once
+while `<pack dir>/build_record.txt` is current and rebuilds when a file it read
+or wrote changed or a glob matches different files (builder spec, "Build
+record"). Relinking the builder deletes the record. A new `build_packs.c` starts
+with `nt_builder_up_to_date(out_dir)` and ends with
+`nt_builder_write_record(out_dir)`; without them it rebuilds on every build.
+Skipped examples do not rebuild packs. WASM still requires a native build after
+asset edits; reconfigure WASM if an example's pack list changes.
 
 ## Build options
 

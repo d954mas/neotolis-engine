@@ -308,6 +308,7 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx) {
         return NT_BUILD_ERR_IO;
     }
 
+    nt_builder_record_output(header_path);
     NT_LOG_INFO("Generated header: %s (%u assets)", header_path, ctx->pending_count);
     free(ce);
     return NT_BUILD_OK;
@@ -481,6 +482,7 @@ void nt_builder_merge_headers(const char *const *header_paths, uint32_t count, c
 
     (void)fprintf(f, "#endif /* %s */\n", guard);
     (void)fclose(f);
+    nt_builder_record_output(output_path);
 
     NT_LOG_INFO("Generated merged header: %s (%u assets from %u packs)", output_path, entry_count, count);
 

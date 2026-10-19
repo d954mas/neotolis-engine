@@ -21,7 +21,7 @@ with 1,000–50,000 objects, procedural shapes and textures in four LODs, and gr
 
 ## Prerequisites
 
-- **CMake** 3.29+ for native example packs (DEPFILE in ninja's deps log), 3.25+ otherwise
+- **CMake** 3.25+
 - **Ninja** build system
 - **Clang** (LLVM) -- recommended for both native and cross-compilation consistency
 - **Emscripten SDK** -- for WASM builds (setup automated via `scripts/setup.sh`)

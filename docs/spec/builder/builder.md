@@ -62,7 +62,7 @@ nt_builder_add_texture_from_memory / add_texture_raw   /* in-memory pixels */
 nt_builder_add_scene_mesh   /* one primitive out of a parsed GLB scene */
 nt_builder_add_blob         /* opaque bytes under a resource id */
 nt_builder_add_asset_root   /* convention-based tree import */
-nt_builder_write_depfile    /* every input this process read; see "Dependency file" */
+nt_builder_up_to_date / write_record   /* skip a current build; see "Build record" */
 
 /* Skeletal assets (wire formats: Skeletal Animation,
  * "Builder, codec, wire formats"). add_skeleton encodes a
@@ -295,34 +295,42 @@ Generated asset headers are committed to git. This is intentional:
 - New contributors can build and run without first running the builder.
 - Header files are small (one line per asset) and compress well in git.
 
-## Dependency file
+## Build record
 
-`nt_builder_write_depfile(path)` writes a Make-style depfile of every file the
-builder process read, for a build system to rerun the builder exactly when an
-input changes (CMake `add_custom_command(DEPFILE)`) and for release audits of
-pack inputs, plus `<path>.globs`: every pattern `nt_builder_glob_iterate`
-walked (absolute, on its own line, also when its directory did not exist),
-each followed by the names it matched as `  <name>` lines. Patterns use `*`
-and `?`, match file names case-sensitively and skip directories. A build step
-re-lists the patterns the same way and reruns the builder when the result
-differs from what the builder saw.
+The builder decides itself whether a pack build is current. A pack-builder
+`main` starts with `if (nt_builder_up_to_date(dir)) return 0;` and ends with
+`nt_builder_write_record(dir)`, after every pack succeeded. The build system
+runs the builder on every build; a current run exits after a few stats and
+directory listings. `<dir>/build_record.txt` is also the release audit's list
+of pack inputs.
+
+`nt_builder_up_to_date` is true when the record exists and nothing in it
+changed: every listed file still has the same mtime and size (or is still
+missing), and every glob still matches the same names. The record does not see
+the builder executable; the build system deletes it when the builder relinks.
 
 - **Complete for builder reads:** the resolved file of every `add_*` and atlas
   sprite, every shader `#include`, and every file cgltf opens (`.gltf`/`.glb`
-  and external buffers, also through `nt_builder_parse_glb_scene`). Files the
-  game reads itself and passes as memory are not listed.
+  and external buffers, also through `nt_builder_parse_glb_scene`); every
+  pattern `nt_builder_glob_iterate` walked, also when its directory did not
+  exist; every pack and header the process wrote. Files the game reads itself
+  and passes as memory, and missing-file probes (asset-root lookup, existence
+  checks), are not listed.
+- **Safe against edits during a build:** an input is stat'ed before it is
+  read and a glob keeps the names it saw, so a file edited, added or removed
+  while the builder runs rebuilds the pack next time. Outputs are stat'ed when
+  the record is written.
 - **Cache-independent:** every `add_*` reads its source when called, so cached
   entries are listed too.
 - **Per process, not per pack:** one builder run is one build step that may
-  write several packs, so the log is process-wide; call it last, after every
-  `finish_pack` succeeded, from the main thread.
-- **Format:** the depfile's own path as the target, then one path per line:
-  absolute (CMake resolves relative depfile paths against the binary directory,
-  not the builder's working directory), forward slashes, sorted, unique, with
-  space, `#` and `$` escaped as `\ `, `\#`, `$$`. Paths are made absolute
-  without resolving symlinks. Asset names should still avoid these characters
-  and `;`, `[`, `]`. Missing-file probes (asset-root lookup, existence checks)
-  are not listed.
+  write several packs, so the record is process-wide and main-thread only.
+- **Format:** plain text, replaced atomically. Sorted lines
+  `input <mtime> <size> <path>` and `output <mtime> <size> <path>`, then per
+  glob `glob <pattern>` followed by one `  <name>` line per match. Paths and
+  patterns are absolute with forward slashes and `.`/`..` collapsed; symlinks
+  are not resolved. A file read twice is listed once, with its first stat.
+  `-1 -1` marks a missing file. mtime units are platform-specific; only
+  equality is meaningful.
 
 ## Builder cache
 

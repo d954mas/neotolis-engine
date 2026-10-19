@@ -322,12 +322,12 @@ void test_read_file_bounded_rejects_before_read(void) {
     free(data);
 }
 
-static void depfile_glob_noop(const char *full_path, void *user) {
+static void record_glob_noop(const char *full_path, void *user) {
     (void)full_path;
     (void)user;
 }
 
-static void depfile_write_bytes(const char *path, const void *data, size_t size) {
+static void record_write_bytes(const char *path, const void *data, size_t size) {
     FILE *file = fopen(path, "wb");
     TEST_ASSERT_NOT_NULL(file);
     TEST_ASSERT_EQUAL(size, fwrite(data, 1, size, file));
@@ -335,7 +335,7 @@ static void depfile_write_bytes(const char *path, const void *data, size_t size)
 }
 
 /* One triangle whose POSITION buffer lives in an external .bin. */
-static void depfile_write_external_gltf(const char *gltf_path, const char *bin_path, size_t bin_size) {
+static void record_write_external_gltf(const char *gltf_path, const char *bin_path, size_t bin_size) {
     static const char gltf[] = "{\"asset\":{\"version\":\"2.0\"},\"buffers\":[{\"uri\":\"tri.bin\",\"byteLength\":36}],"
                                "\"bufferViews\":[{\"buffer\":0,\"byteLength\":36}],"
                                "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\","
@@ -343,101 +343,226 @@ static void depfile_write_external_gltf(const char *gltf_path, const char *bin_p
                                "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0}}]}],"
                                "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}";
     static const float positions[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
-    depfile_write_bytes(gltf_path, gltf, sizeof(gltf) - 1);
-    depfile_write_bytes(bin_path, positions, bin_size);
+    record_write_bytes(gltf_path, gltf, sizeof(gltf) - 1);
+    record_write_bytes(bin_path, positions, bin_size);
 }
 
-/* The input log is process-wide, so earlier tests add lines too: check the
- * inputs of this test and the format, not the whole file. */
+/* The record is process-wide, so earlier tests add lines too: check the lines
+ * of this test and the format, not the whole file. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_write_depfile_lists_every_input_read(void) {
-    MKDIR(TMP_DIR "/depfile in#$");
+void test_write_record_lists_every_input_glob_and_output(void) {
+    MKDIR(TMP_DIR "/record in#$");
     uint32_t size = 0;
     char *png = nt_builder_read_file("assets/textures/lenna.png", &size);
     TEST_ASSERT_NOT_NULL(png);
-    depfile_write_bytes(TMP_DIR "/depfile in#$/copy.png", png, size);
+    record_write_bytes(TMP_DIR "/record in#$/copy.png", png, size);
     free(png);
-    depfile_write_bytes(TMP_DIR "/depfile in#$/a.txt", "", 0);
-    MKDIR(TMP_DIR "/depfile gltf");
-    depfile_write_external_gltf(TMP_DIR "/depfile gltf/tri.gltf", TMP_DIR "/depfile gltf/tri.bin", 36);
+    record_write_bytes(TMP_DIR "/record in#$/a.txt", "", 0);
+    record_write_bytes(TMP_DIR "/record in#$/b.md", "", 0);
+    MKDIR(TMP_DIR "/record gltf");
+    record_write_external_gltf(TMP_DIR "/record gltf/tri.gltf", TMP_DIR "/record gltf/tri.bin", 36);
 
     NtStreamLayout layout[] = {{"POSITION", NT_STREAM_FLOAT32, 3, false, 0, NT_LOC_POSITION}};
-    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/depfile.ntpack");
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/record in#$/unfinished.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
-    nt_builder_add_shader(ctx, "assets/shaders/radial.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_mesh(ctx, "assets/meshes/cube.glb", &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
     nt_builder_add_texture(ctx, "assets/textures/lenna.png", NULL);
-    nt_builder_add_texture(ctx, TMP_DIR "/depfile in#$/copy.png", NULL);
+    nt_builder_add_texture(ctx, TMP_DIR "/record in#$/copy.png", NULL);
     nt_builder_add_font(ctx, "tests/fixtures/Roboto-Regular.ttf", &(nt_font_opts_t){.charset = NT_CHARSET_ASCII});
     nt_atlas_opts_t atlas_opts = nt_atlas_opts_defaults();
-    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "depfile_atlas", &atlas_opts);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "record_atlas", &atlas_opts);
     nt_atlas_add(atlas, "assets/sprites/spineboy/crosshair.png", NULL);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas));
-    TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/depfile in#$/*.txt", depfile_glob_noop, NULL));
-    TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/depfile missing/*.png", depfile_glob_noop, NULL));
+    TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/record in#$/*.txt", record_glob_noop, NULL));
+    TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/record missing/*.png", record_glob_noop, NULL));
     nt_builder_free_pack(ctx);
     nt_glb_scene_t scene = {0};
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, TMP_DIR "/depfile gltf/tri.gltf"));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, TMP_DIR "/record gltf/tri.gltf"));
     nt_builder_free_glb_scene(&scene);
-    /* A second pack of the same process reads the texture again. */
-    ctx = nt_builder_start_pack(TMP_DIR "/depfile_second.ntpack");
+    /* A second, finished pack reads the texture again and writes outputs. */
+    ctx = nt_builder_start_pack(TMP_DIR "/record in#$/finished.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
+    nt_builder_add_shader(ctx, "assets/shaders/radial.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_texture(ctx, "assets/textures/lenna.png", NULL);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
 
-    const char *depfile_path = TMP_DIR "/depfile.d";
-    nt_builder_write_depfile(depfile_path);
-    char *globs = nt_builder_read_file(TMP_DIR "/depfile.d.globs", &size);
-    TEST_ASSERT_NOT_NULL(globs);
-    /* Each pattern, unescaped, with the names it matched; also for a missing directory. */
-    TEST_ASSERT_NOT_NULL(strstr(globs, "/build/tests/tmp/depfile in#$/*.txt\n  a.txt\n"));
-    TEST_ASSERT_NOT_NULL(strstr(globs, "/build/tests/tmp/depfile missing/*.png\n"));
-    free(globs);
-    char *text = nt_builder_read_file(depfile_path, &size);
+    MKDIR(TMP_DIR "/record all");
+    nt_builder_write_record(TMP_DIR "/record all");
+    char *text = nt_builder_read_file(TMP_DIR "/record all/build_record.txt", &size);
     TEST_ASSERT_NOT_NULL(text);
 
-    /* Every kind of read input, absolute and escaped; globs themselves are not files. */
-    TEST_ASSERT_NOT_NULL(strstr(text, "/assets/shaders/radial.frag \\\n"));
-    TEST_ASSERT_NOT_NULL(strstr(text, "/assets/shaders/common/radial_sdf.glsl \\\n"));
-    TEST_ASSERT_NOT_NULL(strstr(text, "/assets/meshes/cube.glb \\\n"));
-    TEST_ASSERT_NOT_NULL(strstr(text, "/tests/fixtures/Roboto-Regular.ttf"));
-    TEST_ASSERT_NOT_NULL(strstr(text, "/assets/sprites/spineboy/crosshair.png"));
-    TEST_ASSERT_NOT_NULL(strstr(text, "/build/tests/tmp/depfile\\ gltf/tri.gltf"));
-    TEST_ASSERT_NOT_NULL(strstr(text, "/build/tests/tmp/depfile\\ gltf/tri.bin"));
-    TEST_ASSERT_NOT_NULL(strstr(text, "/build/tests/tmp/depfile\\ in\\#$$/copy.png"));
-    TEST_ASSERT_NULL(strstr(text, "in\\#$$/a.txt"));
-    TEST_ASSERT_NULL(strstr(text, "*"));
+    /* Every kind of read input, the pack written, and each glob with exactly the
+     * names it matched, also for a missing directory. */
+    TEST_ASSERT_NOT_NULL(strstr(text, "/assets/shaders/radial.frag\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/assets/shaders/common/radial_sdf.glsl\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/assets/meshes/cube.glb\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/tests/fixtures/Roboto-Regular.ttf\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/assets/sprites/spineboy/crosshair.png\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/build/tests/tmp/record gltf/tri.gltf\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/build/tests/tmp/record gltf/tri.bin\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/build/tests/tmp/record in#$/copy.png\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/build/tests/tmp/record in#$/finished.ntpack\n"));
+    TEST_ASSERT_NULL(strstr(text, "/build/tests/tmp/record in#$/unfinished.ntpack\n"));
+    TEST_ASSERT_NULL(strstr(text, "/build/tests/tmp/record in#$/a.txt\n"));
+    const char *txt_glob = strstr(text, "/build/tests/tmp/record in#$/*.txt\n  a.txt\n");
+    TEST_ASSERT_NOT_NULL(txt_glob);
+    txt_glob += strlen("/build/tests/tmp/record in#$/*.txt\n  a.txt\n");
+    TEST_ASSERT_TRUE(*txt_glob == '\0' || *txt_glob == 'g');
+    const char *missing_glob = strstr(text, "/build/tests/tmp/record missing/*.png\n");
+    TEST_ASSERT_NOT_NULL(missing_glob);
+    missing_glob += strlen("/build/tests/tmp/record missing/*.png\n");
+    TEST_ASSERT_TRUE(*missing_glob == '\0' || *missing_glob == 'g');
     TEST_ASSERT_NULL(strchr(text, '\r'));
 
-    /* A target line, then one absolute path per line; a file read twice is listed once. */
-    char *line = strchr(text, '\n');
-    TEST_ASSERT_NOT_NULL(line);
-    TEST_ASSERT_EQUAL_STRING_LEN(": \\", line - 3, 3);
+    /* Inputs, outputs, then globs; absolute, sorted and unique within a kind. */
+    static const char *const kinds[] = {"input ", "output ", "glob "};
+    uint32_t kind = 0;
     uint32_t lenna_count = 0;
-    for (char *start = line + 1; *start != '\0';) {
-        char *end = strchr(start, '\n');
+    const char *prev = "";
+    for (char *line = text; *line != '\0';) {
+        char *end = strchr(line, '\n');
         TEST_ASSERT_NOT_NULL(end);
-        TEST_ASSERT_EQUAL_STRING_LEN("  ", start, 2);
-        const char *path = start + 2;
+        *end = '\0';
+        if (line[0] != ' ') {
+            while (kind < 3 && strncmp(line, kinds[kind], strlen(kinds[kind])) != 0) {
+                kind++;
+                prev = "";
+            }
+            TEST_ASSERT_TRUE(kind < 3);
+            const char *path = line + strlen(kinds[kind]);
+            if (kind < 2) {
+                path = strchr(strchr(path, ' ') + 1, ' ') + 1;
+            }
 #ifdef _WIN32
-        TEST_ASSERT_TRUE(path[1] == ':' && path[2] == '/');
+            TEST_ASSERT_TRUE(path[1] == ':' && path[2] == '/');
 #else
-        TEST_ASSERT_EQUAL_CHAR('/', path[0]);
+            TEST_ASSERT_EQUAL_CHAR('/', path[0]);
 #endif
-        if (strstr(path, "/lenna.png") != NULL && strstr(path, "/lenna.png") < end) {
-            lenna_count++;
+            TEST_ASSERT_TRUE(strcmp(prev, path) < 0);
+            prev = path;
+            if (strstr(path, "/assets/textures/lenna.png") != NULL) {
+                lenna_count++;
+            }
         }
-        start = end + 1;
+        line = end + 1;
     }
     TEST_ASSERT_EQUAL_UINT32(1, lenna_count);
     free(text);
 }
 
+/* Keeps the lines and glob blocks of one directory as the record of out_dir. */
+static void record_keep(const char *marker, const char *out_dir) {
+    uint32_t size = 0;
+    char *text = nt_builder_read_file(TMP_DIR "/record all/build_record.txt", &size);
+    TEST_ASSERT_NOT_NULL(text);
+    MKDIR(out_dir);
+    char path[256];
+    (void)snprintf(path, sizeof(path), "%s/build_record.txt", out_dir);
+    FILE *file = fopen(path, "wb");
+    TEST_ASSERT_NOT_NULL(file);
+    bool keep = false;
+    for (char *line = text; *line != '\0';) {
+        char *end = strchr(line, '\n');
+        TEST_ASSERT_NOT_NULL(end);
+        *end = '\0';
+        if (line[0] != ' ') {
+            keep = strstr(line, marker) != NULL;
+        }
+        if (keep) {
+            (void)fprintf(file, "%s\n", line);
+        }
+        line = end + 1;
+    }
+    TEST_ASSERT_EQUAL(0, fclose(file));
+    free(text);
+}
+
+/* Each case gets its own directory and its own copy of the record, so one
+ * case's change does not leak into the next. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_up_to_date_sees_every_kind_of_change(void) {
+    /* TMP_DIR outlives a run: start every case from its initial files. */
+    (void)remove(TMP_DIR "/record appear/in.glsl");
+    (void)remove(TMP_DIR "/record add/b.txt");
+    (void)remove(TMP_DIR "/record later/a.txt");
+#ifdef _WIN32
+    (void)_rmdir(TMP_DIR "/record later");
+#else
+    (void)remove(TMP_DIR "/record later"); /* POSIX remove() also removes an empty directory */
+#endif
+    (void)remove(TMP_DIR "/record race/late.txt");
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record nowhere"));
+
+    MKDIR(TMP_DIR "/record edit");
+    record_write_bytes(TMP_DIR "/record edit/in.glsl", "a", 1);
+    nt_builder_record_input(TMP_DIR "/record edit/in.glsl");
+    MKDIR(TMP_DIR "/record appear");
+    nt_builder_record_input(TMP_DIR "/record appear/in.glsl");
+    MKDIR(TMP_DIR "/record out");
+    record_write_bytes(TMP_DIR "/record out/out.bin", "a", 1);
+    nt_builder_record_output(TMP_DIR "/record out/out.bin");
+    MKDIR(TMP_DIR "/record add");
+    record_write_bytes(TMP_DIR "/record add/a.txt", "", 0);
+    TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/record add/*.txt", record_glob_noop, NULL));
+    MKDIR(TMP_DIR "/record remove");
+    record_write_bytes(TMP_DIR "/record remove/a.txt", "", 0);
+    record_write_bytes(TMP_DIR "/record remove/b.txt", "", 0);
+    TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/record remove/*.txt", record_glob_noop, NULL));
+    TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/record later/*.txt", record_glob_noop, NULL));
+    /* Added after the glob listed its directory, while the builder still runs. */
+    MKDIR(TMP_DIR "/record race");
+    TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/record race/*.txt", record_glob_noop, NULL));
+    record_write_bytes(TMP_DIR "/record race/late.txt", "", 0);
+    MKDIR(TMP_DIR "/record all");
+    nt_builder_write_record(TMP_DIR "/record all");
+
+    record_keep("/record edit/", TMP_DIR "/record edit/out");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record edit/out"));
+    record_write_bytes(TMP_DIR "/record edit/in.glsl", "ab", 2);
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record edit/out"));
+
+    record_keep("/record appear/", TMP_DIR "/record appear/out");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record appear/out"));
+    record_write_bytes(TMP_DIR "/record appear/in.glsl", "a", 1);
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record appear/out"));
+
+    record_keep("/record out/", TMP_DIR "/record out/out");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record out/out"));
+    TEST_ASSERT_EQUAL(0, remove(TMP_DIR "/record out/out.bin"));
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record out/out"));
+
+    /* Only a matching file changes the glob: not a directory, another
+     * extension or another case. */
+    record_keep("/record add/", TMP_DIR "/record add/out");
+    MKDIR(TMP_DIR "/record add/dir.txt");
+    record_write_bytes(TMP_DIR "/record add/notes.md", "", 0);
+    record_write_bytes(TMP_DIR "/record add/UPPER.TXT", "", 0);
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record add/out"));
+    record_write_bytes(TMP_DIR "/record add/b.txt", "", 0);
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record add/out"));
+
+    record_keep("/record remove/", TMP_DIR "/record remove/out");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record remove/out"));
+    TEST_ASSERT_EQUAL(0, remove(TMP_DIR "/record remove/b.txt"));
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record remove/out"));
+
+    record_keep("/record later/", TMP_DIR "/record later out");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record later out"));
+    MKDIR(TMP_DIR "/record later");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record later out"));
+    record_write_bytes(TMP_DIR "/record later/a.txt", "", 0);
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record later out"));
+
+    record_keep("/record race/", TMP_DIR "/record race/out");
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record race/out"));
+}
+
 void test_gltf_external_buffer_shorter_than_declared_fails(void) {
-    MKDIR(TMP_DIR "/depfile gltf short");
-    depfile_write_external_gltf(TMP_DIR "/depfile gltf short/tri.gltf", TMP_DIR "/depfile gltf short/tri.bin", 12);
+    MKDIR(TMP_DIR "/record gltf short");
+    record_write_external_gltf(TMP_DIR "/record gltf short/tri.gltf", TMP_DIR "/record gltf short/tri.bin", 12);
     nt_glb_scene_t scene = {0};
-    EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_parse_glb_scene(&scene, TMP_DIR "/depfile gltf short/tri.gltf"), "failed to load glTF buffers");
+    EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_parse_glb_scene(&scene, TMP_DIR "/record gltf short/tri.gltf"), "failed to load glTF buffers");
 }
 
 /* --- Pack writer core tests --- */
@@ -9595,7 +9720,8 @@ int main(void) {
     RUN_TEST(test_hash_path_normalization);
     RUN_TEST(test_hash_different_strings_differ);
     RUN_TEST(test_read_file_bounded_rejects_before_read);
-    RUN_TEST(test_write_depfile_lists_every_input_read);
+    RUN_TEST(test_write_record_lists_every_input_glob_and_output);
+    RUN_TEST(test_up_to_date_sees_every_kind_of_change);
     RUN_TEST(test_gltf_external_buffer_shorter_than_declared_fails);
 
     /* Pack writer core */

@@ -18,45 +18,30 @@ function(nt_example_packs)
     endif()
 
     set(_copy_list "")
-    set(_stamp "")
+    set(_build_target "")
     if(NOT EMSCRIPTEN AND NOT _skipped)
         foreach(PACK ${PACKS_PACKS})
             list(APPEND _pack_files "${PACKS_PACK_DIR}/${PACK}")
         endforeach()
-        # The stamp is the only OUTPUT: it appears strictly after the builder
-        # succeeded, so a builder that published packs and then died (e.g. at
-        # header generation) cannot look up-to-date to ninja's mtime check.
-        # The packs target must DEPENDS on it — CMake materializes a custom
-        # command only when some target consumes an OUTPUT (byproducts don't count).
-        set(_stamp "${PACKS_PACK_DIR}/.${PACKS_NAME}.stamp")
-        # The builder writes build_packs.d (every file it read) and
-        # build_packs.d.globs (every glob pattern with the files it matched) via
-        # nt_builder_write_depfile. Before 3.29 ninja wants the depfile's target
-        # to name the stamp and reruns the builder on every build.
-        if(CMAKE_VERSION VERSION_LESS 3.29)
-            message(FATAL_ERROR "nt_example_packs needs CMake 3.29+ (DEPFILE in ninja's deps log)")
-        endif()
-        set(_depfile "${PACKS_PACK_DIR}/build_packs.d")
-        set(_globs "${_depfile}.globs")
-        set(_globs_changed "${PACKS_PACK_DIR}/.${PACKS_NAME}.globs_changed")
-        set(_globs_script "${NT_ENGINE_ROOT}/cmake/nt_pack_globs.cmake")
-        add_custom_target(${PACKS_NAME}_pack_globs
-            COMMAND ${CMAKE_COMMAND} -D "GLOBS=${_globs}" -D "CHANGED=${_globs_changed}" -P "${_globs_script}"
-            BYPRODUCTS "${_globs_changed}"
-        )
+        # The builder runs on every build and exits early while its
+        # build_record.txt is current (nt_builder_up_to_date). The record cannot
+        # see the builder itself, so a relinked builder forgets it.
+        set(_record "${PACKS_PACK_DIR}/build_record.txt")
+        set(_builder_stamp "${CMAKE_CURRENT_BINARY_DIR}/${PACKS_NAME}_builder.stamp")
         add_custom_command(
-            OUTPUT "${_stamp}"
-            BYPRODUCTS ${_pack_files}
+            OUTPUT "${_builder_stamp}"
+            COMMAND ${CMAKE_COMMAND} -E rm -f "${_record}"
+            COMMAND ${CMAKE_COMMAND} -E touch "${_builder_stamp}"
+            DEPENDS ${PACKS_BUILDER}
+        )
+        set(_build_target ${PACKS_NAME}_pack_build)
+        add_custom_target(${_build_target}
             COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKS_PACK_DIR}"
-            # A builder that stops writing them must fail, not reuse stale lists.
-            COMMAND ${CMAKE_COMMAND} -E rm -f "${_depfile}" "${_globs}"
             COMMAND "$<TARGET_FILE:${PACKS_BUILDER}>" "${PACKS_PACK_DIR}"
-            COMMAND ${CMAKE_COMMAND} -D "GLOBS=${_globs}" -P "${_globs_script}"
-            COMMAND ${CMAKE_COMMAND} -E touch "${_stamp}"
-            DEPENDS ${PACKS_BUILDER} "${_globs_changed}"
-            DEPFILE "${_depfile}"
+            BYPRODUCTS ${_pack_files}
+            DEPENDS "${_builder_stamp}"
             WORKING_DIRECTORY "${NT_ENGINE_ROOT}"
-            COMMENT "Building ${PACKS_NAME} pack(s)"
+            COMMENT "Checking ${PACKS_NAME} pack(s)"
         )
         set(_copy_list ${PACKS_PACKS})
         # Manifest existence tells the CI guard this example is wired; the pack
@@ -96,7 +81,10 @@ function(nt_example_packs)
         list(APPEND _outputs "${PACKS_ASSETS_DIR}/${PACK}")
     endforeach()
     if(_outputs)
-        add_custom_target(${PACKS_TARGET}_packs DEPENDS ${_stamp} ${_outputs})
+        add_custom_target(${PACKS_TARGET}_packs DEPENDS ${_outputs})
+        if(_build_target)
+            add_dependencies(${PACKS_TARGET}_packs ${_build_target})
+        endif()
         add_dependencies(${PACKS_TARGET} ${PACKS_TARGET}_packs)
     endif()
 endfunction()

@@ -291,6 +291,7 @@ static char *resolve_recursive(const char *source, uint32_t src_len, const char 
                         }
 
                         /* Read the included file */
+                        nt_builder_record_input(found_path);
                         uint32_t inc_size = 0;
                         inc_source = nt_builder_read_file(found_path, &inc_size);
                         if (!inc_source) {
@@ -298,7 +299,6 @@ static char *resolve_recursive(const char *source, uint32_t src_len, const char 
                             ok = false;
                             break;
                         }
-                        nt_builder_record_input(found_path);
 
                         /* Extract directory for nested relative includes */
                         inc_dir = extract_dir(found_path);

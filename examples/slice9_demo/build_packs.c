@@ -39,6 +39,9 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     const char *out_dir = argv[1];
+    if (nt_builder_up_to_date(out_dir)) {
+        return 0;
+    }
 
     (void)printf("=== Build Slice9 Demo Pack -> %s ===\n\n", out_dir);
 
@@ -163,7 +166,7 @@ int main(int argc, char *argv[]) {
         (void)printf("  slice9_demo.ntpack    %8.1f KB\n", (double)sz / 1024.0);
     }
 
-    nt_builder_write_depfile(pack_path(out_dir, "build_packs.d"));
+    nt_builder_write_record(out_dir);
     (void)printf("\n=== Done ===\n");
     return 0;
 }

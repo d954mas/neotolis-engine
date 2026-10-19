@@ -516,10 +516,11 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx);
 char *nt_builder_read_file(const char *path, uint32_t *out_size);
 char *nt_builder_read_file_bounded(const char *path, uint32_t max_size, uint32_t *out_size, bool *out_too_large);
 
-/* Record a source file (after a successful read), or a glob pattern with the
- * sorted "<dir>/<name>" matches it saw, for nt_builder_write_depfile. Main thread only. */
+/* Build record (nt_builder_write_record). Record an input before reading it, so
+ * an edit during the build still shows next time, and an output after writing
+ * it. Main thread only. */
 void nt_builder_record_input(const char *path);
-void nt_builder_record_glob(const char *pattern, const char *const *matches, uint32_t match_count);
+void nt_builder_record_output(const char *path);
 
 /* Zeroed cgltf options whose file reader records every file a glTF pulls in. */
 struct cgltf_options;

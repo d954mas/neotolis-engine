@@ -109,34 +109,25 @@ static nt_build_result_t nt_validate_layout_alignment(const char *label, const N
 
 /* --- glTF parsing with multi-mesh support --- */
 
-/* cgltf reads the .gltf/.glb and its external buffers through this hook. Like
- * its default reader it reads exactly *size bytes when given (a buffer's
- * byteLength) and fails on a shorter file. The default release frees with free(). */
+/* cgltf reads the .gltf/.glb and its external buffers through this hook. A
+ * buffer passes its byteLength in *size and fails on a shorter file, like the
+ * default reader. The default release frees with free(). */
 static cgltf_result gltf_read_input(const struct cgltf_memory_options *memory_options, const struct cgltf_file_options *file_options, const char *path, cgltf_size *size, void **data) {
     (void)memory_options;
     (void)file_options;
-    void *file_data = NULL;
-    if (*size == 0) {
-        uint32_t file_size = 0;
-        file_data = nt_builder_read_file(path, &file_size);
-        if (!file_data) {
-            return cgltf_result_file_not_found;
-        }
-        *size = file_size;
-    } else {
-        FILE *file = fopen(path, "rb");
-        if (!file) {
-            return cgltf_result_file_not_found;
-        }
-        file_data = malloc(*size);
-        size_t read_size = file_data ? fread(file_data, 1, *size, file) : 0;
-        (void)fclose(file);
-        if (read_size != *size) {
-            free(file_data);
-            return cgltf_result_io_error;
-        }
-    }
     nt_builder_record_input(path);
+    uint32_t file_size = 0;
+    void *file_data = nt_builder_read_file(path, &file_size);
+    if (!file_data) {
+        return cgltf_result_file_not_found;
+    }
+    if (*size > file_size) {
+        free(file_data);
+        return cgltf_result_io_error;
+    }
+    if (*size == 0) {
+        *size = file_size;
+    }
     *data = file_data;
     return cgltf_result_success;
 }

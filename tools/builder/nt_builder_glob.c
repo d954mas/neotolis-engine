@@ -10,6 +10,7 @@
 #else
 #include <dirent.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 /* --- Wildcard matching --- */
@@ -49,9 +50,10 @@ static bool wildcard_match(const char *pattern, const char *str) {
 
 static int glob_strcmp(const void *a, const void *b) { return strcmp(*(const char *const *)a, *(const char *const *)b); }
 
-/* Returns false if glob overflow (too many matches). */
+/* Sorted "<dir>/<name>" files matching pattern; a missing directory matches
+ * nothing. Past GLOB_MAX_MATCHES returns false and no matches. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn callback, void *user) {
+static bool glob_list(const char *pattern, char ***out_matches, uint32_t *out_count) {
     /* Split pattern into directory + filename pattern at last separator */
     const char *last_sep = NULL;
     for (const char *p = pattern; *p != '\0'; p++) {
@@ -90,9 +92,8 @@ bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn ca
 
         HANDLE h_find = FindFirstFileA(search_path, &find_data);
         if (h_find == INVALID_HANDLE_VALUE) {
-            /* Creating the directory later must rebuild the pack. */
-            nt_builder_record_glob(pattern, NULL, 0);
-            free((void *)matches);
+            *out_matches = matches;
+            *out_count = 0;
             return true;
         }
 
@@ -124,9 +125,8 @@ bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn ca
     {
         DIR *dir = opendir(directory);
         if (!dir) {
-            /* Creating the directory later must rebuild the pack. */
-            nt_builder_record_glob(pattern, NULL, 0);
-            free((void *)matches);
+            *out_matches = matches;
+            *out_count = 0;
             return true;
         }
 
@@ -163,18 +163,29 @@ bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn ca
         qsort((void *)matches, match_count, sizeof(char *), glob_strcmp);
     }
 
-    /* On overflow, free collected matches without invoking callbacks */
+    /* On overflow, drop collected matches: no callbacks run */
     if (overflow) {
         for (uint32_t i = 0; i < match_count; i++) {
             free(matches[i]);
         }
-        free((void *)matches);
-        return false;
+        match_count = 0;
     }
+    *out_matches = matches;
+    *out_count = match_count;
+    return !overflow;
+}
 
+static void record_glob(const char *pattern, char **matches, uint32_t match_count);
+
+/* Returns false if glob overflow (too many matches). */
+bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn callback, void *user) {
+    char **matches = NULL;
+    uint32_t match_count = 0;
+    bool ok = glob_list(pattern, &matches, &match_count);
     /* The files this glob saw, not a later re-listing: one added while the
-     * builder runs must still rebuild the pack next time. */
-    nt_builder_record_glob(pattern, (const char *const *)matches, match_count);
+     * builder runs must still rebuild the pack next time. An overflowed
+     * pattern is recorded empty and never matches its re-listing. */
+    record_glob(pattern, matches, match_count);
 
     /* Invoke callbacks in sorted order */
     for (uint32_t i = 0; i < match_count; i++) {
@@ -182,7 +193,248 @@ bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn ca
         free(matches[i]);
     }
     free((void *)matches);
-    return true;
+    return ok;
+}
+
+/* --- Build record --- */
+
+/* One builder process is one build step that may write several packs, so the
+ * record belongs to the process, not to a pack context. */
+typedef enum { RECORD_INPUT, RECORD_OUTPUT, RECORD_GLOB } NtRecordKind;
+
+typedef struct {
+    const char *text; /* absolute path, or a whole "glob" block */
+    int64_t mtime;
+    int64_t size;
+    uint32_t seq;
+    NtRecordKind kind;
+} NtRecordLine;
+
+static NtRecordLine *s_record;
+static uint32_t s_record_count;
+static uint32_t s_record_capacity;
+
+/* mtime and size, or -1 and -1 for a missing file. */
+static void file_stat(const char *path, int64_t *mtime, int64_t *size) {
+#ifdef _WIN32
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    if (GetFileAttributesExA(path, GetFileExInfoStandard, &data) && !(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+        *mtime = (int64_t)(((uint64_t)data.ftLastWriteTime.dwHighDateTime << 32U) | data.ftLastWriteTime.dwLowDateTime);
+        *size = (int64_t)(((uint64_t)data.nFileSizeHigh << 32U) | data.nFileSizeLow);
+        return;
+    }
+#else
+    struct stat st;
+    if (stat(path, &st) == 0 && !S_ISDIR(st.st_mode)) {
+        *mtime = ((int64_t)st.st_mtim.tv_sec * 1000000000) + st.st_mtim.tv_nsec;
+        *size = (int64_t)st.st_size;
+        return;
+    }
+#endif
+    *mtime = -1;
+    *size = -1;
+}
+
+/* Absolute and '/'-separated with "." and ".." collapsed, so one file gets one
+ * line. Glob patterns need not exist, so no realpath. */
+static char *absolute_path(const char *path) {
+#ifdef _WIN32
+    char *abs_path = _fullpath(NULL, path, 0);
+    NT_BUILD_ASSERT(abs_path && "build record: cannot make path absolute");
+    for (char *c = abs_path; *c != '\0'; c++) {
+        if (*c == '\\') {
+            *c = '/';
+        }
+    }
+#else
+    char cwd[4096] = "";
+    bool cwd_ok = path[0] == '/' || getcwd(cwd, sizeof(cwd)) != NULL;
+    NT_BUILD_ASSERT(cwd_ok && "build record: cannot make path absolute");
+    size_t size = strlen(cwd) + strlen(path) + 2;
+    char *abs_path = (char *)malloc(size);
+    NT_BUILD_ASSERT(abs_path && "build record: out of memory");
+    (void)snprintf(abs_path, size, "%s/%s", cwd, path);
+    char *out = abs_path;
+    for (const char *in = abs_path; *in != '\0';) {
+        const char *seg = in + 1;
+        size_t len = strcspn(seg, "/");
+        if (len == 2 && seg[0] == '.' && seg[1] == '.') {
+            while (out > abs_path && *--out != '/') {
+            }
+        } else if (len > 0 && !(len == 1 && seg[0] == '.')) {
+            *out++ = '/';
+            memmove(out, seg, len);
+            out += len;
+        }
+        in = seg + len;
+    }
+    if (out == abs_path) {
+        *out++ = '/';
+    }
+    *out = '\0';
+#endif
+    return abs_path;
+}
+
+static void record_push(NtRecordKind kind, const char *text, int64_t mtime, int64_t size) {
+    if (s_record_count == s_record_capacity) {
+        s_record_capacity = s_record_capacity ? s_record_capacity * 2U : 256U;
+        NtRecordLine *grown = (NtRecordLine *)realloc(s_record, (size_t)s_record_capacity * sizeof(NtRecordLine));
+        NT_BUILD_ASSERT(grown && "build record: out of memory");
+        s_record = grown;
+    }
+    s_record[s_record_count] = (NtRecordLine){text, mtime, size, s_record_count, kind};
+    s_record_count++;
+}
+
+void nt_builder_record_input(const char *path) {
+    int64_t mtime = 0;
+    int64_t size = 0;
+    file_stat(path, &mtime, &size);
+    record_push(RECORD_INPUT, absolute_path(path), mtime, size);
+}
+
+void nt_builder_record_output(const char *path) { record_push(RECORD_OUTPUT, absolute_path(path), 0, 0); }
+
+static const char *match_name(const char *match) {
+    const char *slash = strrchr(match, '/');
+    return slash ? slash + 1 : match;
+}
+
+/* "glob <absolute pattern>", then "  <name>" per match. */
+static void record_glob(const char *pattern, char **matches, uint32_t match_count) {
+    char *abs_pattern = absolute_path(pattern);
+    size_t size = strlen(abs_pattern) + 7;
+    for (uint32_t i = 0; i < match_count; i++) {
+        size += strlen(match_name(matches[i])) + 3;
+    }
+    char *block = (char *)malloc(size);
+    NT_BUILD_ASSERT(block && "build record: out of memory");
+    size_t len = (size_t)snprintf(block, size, "glob %s\n", abs_pattern);
+    free(abs_pattern);
+    for (uint32_t i = 0; i < match_count; i++) {
+        len += (size_t)snprintf(block + len, size - len, "  %s\n", match_name(matches[i]));
+    }
+    record_push(RECORD_GLOB, block, 0, 0);
+}
+
+/* By kind, then text; the first read of a file stays first, so an edit between
+ * two reads still rebuilds next time. */
+static int record_cmp(const void *a, const void *b) {
+    const NtRecordLine *la = (const NtRecordLine *)a;
+    const NtRecordLine *lb = (const NtRecordLine *)b;
+    if (la->kind != lb->kind) {
+        return la->kind < lb->kind ? -1 : 1;
+    }
+    int text_cmp = strcmp(la->text, lb->text);
+    if (text_cmp != 0) {
+        return text_cmp;
+    }
+    return la->seq < lb->seq ? -1 : 1;
+}
+
+static void record_path(const char *dir, char *out, size_t out_size) {
+    int len = snprintf(out, out_size, "%s/build_record.txt", dir);
+    NT_BUILD_ASSERT(len > 0 && (size_t)len < out_size && "build record: path too long");
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_builder_write_record(const char *dir) {
+    NT_BUILD_ASSERT(dir && "write_record: dir is required");
+    char path[1024];
+    record_path(dir, path, sizeof(path));
+    char tmp_path[sizeof(path) + 4];
+    (void)snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
+    if (s_record_count > 1) {
+        qsort(s_record, s_record_count, sizeof(NtRecordLine), record_cmp);
+    }
+    FILE *file = fopen(tmp_path, "wb");
+    NT_BUILD_ASSERT(file && "write_record: cannot open output");
+    for (uint32_t i = 0; i < s_record_count; i++) {
+        const NtRecordLine *line = &s_record[i];
+        if (i > 0 && line->kind == s_record[i - 1].kind && strcmp(line->text, s_record[i - 1].text) == 0) {
+            continue;
+        }
+        if (line->kind == RECORD_GLOB) {
+            (void)fputs(line->text, file);
+            continue;
+        }
+        int64_t mtime = line->mtime;
+        int64_t size = line->size;
+        if (line->kind == RECORD_OUTPUT) {
+            file_stat(line->text, &mtime, &size);
+        }
+        (void)fprintf(file, "%s %lld %lld %s\n", line->kind == RECORD_INPUT ? "input" : "output", (long long)mtime, (long long)size, line->text);
+    }
+    bool write_failed = ferror(file) != 0;
+    write_failed |= fclose(file) != 0;
+    NT_BUILD_ASSERT(!write_failed && "write_record: write failed");
+    /* Replace, never rewrite in place: a torn record must not look up to date. */
+    (void)remove(path);
+    int renamed = rename(tmp_path, path);
+    NT_BUILD_ASSERT(renamed == 0 && "write_record: cannot publish");
+}
+
+/* Re-lists a recorded glob and compares it with the "  <name>" lines at
+ * names; returns the line after them. */
+static char *glob_unchanged(const char *pattern, char *names, bool *same) {
+    char **matches = NULL;
+    uint32_t match_count = 0;
+    bool ok = glob_list(pattern, &matches, &match_count);
+    uint32_t i = 0;
+    while (names[0] == ' ' && names[1] == ' ') {
+        char *end = strchr(names, '\n');
+        if (!end) {
+            ok = false;
+            break;
+        }
+        *end = '\0';
+        ok = ok && i < match_count && strcmp(match_name(matches[i]), names + 2) == 0;
+        i++;
+        names = end + 1;
+    }
+    *same = ok && i == match_count;
+    for (uint32_t m = 0; m < match_count; m++) {
+        free(matches[m]);
+    }
+    free((void *)matches);
+    return names;
+}
+
+bool nt_builder_up_to_date(const char *dir) {
+    NT_BUILD_ASSERT(dir && "up_to_date: dir is required");
+    char path[1024];
+    record_path(dir, path, sizeof(path));
+    uint32_t size = 0;
+    char *text = nt_builder_read_file(path, &size);
+    bool same = text != NULL;
+    for (char *line = text; same && *line != '\0';) {
+        char *end = strchr(line, '\n');
+        if (!end) {
+            same = false;
+            break;
+        }
+        *end = '\0';
+        if (strncmp(line, "glob ", 5) == 0) {
+            line = glob_unchanged(line + 5, end + 1, &same);
+            continue;
+        }
+        /* "<input|output> <mtime> <size> <path>" */
+        char *field = strchr(line, ' ');
+        if (!field) {
+            same = false;
+            break;
+        }
+        long long mtime = strtoll(field + 1, &field, 10);
+        long long file_size = strtoll(field, &field, 10);
+        int64_t now_mtime = 0;
+        int64_t now_size = 0;
+        file_stat(field + 1, &now_mtime, &now_size);
+        same = *field == ' ' && now_mtime == mtime && now_size == file_size;
+        line = end + 1;
+    }
+    free(text);
+    return same;
 }
 
 /* --- Batch callback context --- */

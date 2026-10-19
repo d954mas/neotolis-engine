@@ -98,9 +98,7 @@ static uint32_t charset_add_range_filtered(char *buf, uint32_t buf_size, uint32_
 static void build_cjk_charset(const char *font_path) {
     /* Load font for cmap scanning */
     FILE *f = fopen(font_path, "rb");
-    if (!f) {
-        return;
-    }
+    NT_BUILD_ASSERT(f && "build_cjk_charset: cannot open font");
     (void)fseek(f, 0, SEEK_END);
     long sz = ftell(f);
     (void)fseek(f, 0, SEEK_SET);
@@ -161,6 +159,9 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     const char *out_dir = argv[1];
+    if (nt_builder_up_to_date(out_dir)) {
+        return 0;
+    }
     const char *header_dir = "examples/text/generated";
     char cache_dir[512];
     (void)snprintf(cache_dir, sizeof(cache_dir), "%s/_cache", out_dir);
@@ -170,7 +171,6 @@ int main(int argc, char *argv[]) {
     MKDIR(out_dir);
     MKDIR(cache_dir);
     MKDIR(header_dir);
-    const char *font_path = FONT_PATH;
 
     // #region Pack 1: text_base.ntpack (Slug shaders + Latin/Cyrillic font)
     {
@@ -192,7 +192,7 @@ int main(int argc, char *argv[]) {
         char full_charset[512];
         (void)snprintf(full_charset, sizeof(full_charset), "%s%s", NT_CHARSET_ASCII, CYRILLIC_CHARSET);
 
-        nt_builder_add_font(ctx, font_path,
+        nt_builder_add_font(ctx, FONT_PATH,
                             &(nt_font_opts_t){
                                 .charset = full_charset,
                                 .resource_name = "text/font_base",
@@ -214,7 +214,7 @@ int main(int argc, char *argv[]) {
         (void)printf("--- Building text_cjk.ntpack ---\n");
 
         /* Generate full CJK charset — only codepoints present in the font */
-        build_cjk_charset(font_path);
+        build_cjk_charset(FONT_PATH);
 
         NtBuilderContext *ctx = nt_builder_start_pack(pack_path(out_dir, "text_cjk.ntpack"));
         if (!ctx) {
@@ -225,7 +225,7 @@ int main(int argc, char *argv[]) {
         nt_builder_set_cache_dir(ctx, cache_dir);
 
         /* CJK font resource — all glyphs from CJK+Hangul+Kana ranges */
-        nt_builder_add_font(ctx, font_path,
+        nt_builder_add_font(ctx, FONT_PATH,
                             &(nt_font_opts_t){
                                 .charset = s_cjk_charset,
                                 .resource_name = "text/font_cjk",
@@ -268,7 +268,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    nt_builder_write_depfile(pack_path(out_dir, "build_packs.d"));
+    nt_builder_write_record(out_dir);
     (void)printf("\n=== Done ===\n");
     return 0;
 }

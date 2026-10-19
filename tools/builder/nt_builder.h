@@ -688,12 +688,13 @@ void nt_builder_set_threads_auto(NtBuilderContext *ctx);
 /* --- Merge per-pack .h headers into a combined header --- */
 void nt_builder_merge_headers(const char *const *header_paths, uint32_t count, const char *output_path);
 
-/* --- Dependency file ---
- * Writes a Make-style depfile listing every source file this process read (adds,
- * shader includes, glTF files and buffers), absolute, sorted, unique, and
- * "<path>.globs" with every pattern nt_builder_glob_iterate walked. Call it last,
- * after every pack finished successfully. */
-void nt_builder_write_depfile(const char *path);
+/* --- Build record ---
+ * <dir>/build_record.txt lists every file this process read and wrote with its
+ * mtime and size, and every glob it walked with the names it saw. A pack builder
+ * starts with `if (nt_builder_up_to_date(dir)) return 0;` and ends with
+ * nt_builder_write_record(dir), after every pack succeeded. */
+bool nt_builder_up_to_date(const char *dir);
+void nt_builder_write_record(const char *dir);
 
 /* --- Utilities --- */
 nt_build_result_t nt_builder_dump_pack(const char *pack_path);
