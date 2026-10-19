@@ -96,11 +96,12 @@ game-side changes.
 Never assign sibling widget IDs as `base_id + index`: Clay's anonymous child IDs
 are additive (`seed + offset`), so consecutive seeds can collide with children of
 adjacent widgets. Derive sub-IDs with `nt_ui_child_id` / `nt_ui_fmix_id` instead.
-Virtualized widgets must recycle IDs, as `nt_ui_vlist` does with its ring.
-Clay's retained table has fixed capacity: IDs already present continue to refresh
-at capacity, while new IDs are not registered. Widgets must recycle IDs before
-lookup or attachment requires them. An unregistered ID cannot resolve an own
-transform or floating parent, and those paths assert.
+Clay's element ID hashmap retains IDs for one frame: `Clay_EndLayout` prunes
+every ID not declared in that frame, and the next frame still reads the boxes of
+the IDs it kept. The distinct IDs of two consecutive frames together, including
+anonymous and text elements, must stay below `max_elements`; a new ID beyond that
+asserts. Per-ID widget state in `nt_ui_state` is not pruned, so stateful widgets
+with ever-new IDs still need recycling.
 
 ## Floating zIndex is relative
 
@@ -218,8 +219,8 @@ Two coord-space modes are gated by `nt_ui_create_desc_t.use_raycast_input`:
   orthographic.
 
 Both modes use the same `tree_baked[layout_idx]` + per-id mirror
-`hit_baked[slot]` (Clay's hashmap is persistent across frames;
-`hit_generation[slot]` rejects stale ids). Opacity is a separate
+`hit_baked[slot]` (Clay keeps the previous frame's ids;
+`hit_generation[slot]` rejects a slot reused by a new id). Opacity is a separate
 `float` accumulator on the same struct.
 
 ### Custom-attr base material
@@ -420,8 +421,8 @@ scroll/clip. From the scroll position + viewport + a fixed `item_extent` it deri
 the content still measures `count × extent` and the existing scrollbar geometry stays correct — a
 10k-row list costs ~the visible count, not the row count. Per-row ids RECYCLE over a frame-stable
 ring (`id_ring`, slot = `index % id_ring`), so the distinct ids per list are bounded by the ring,
-never the row count, and a long list never saturates Clay's persistent element hashmap; the visible
-window must stay below the ring; exceeding it asserts before two visible rows can alias a slot.
+never the row count, and stateful row widgets never fill the non-evicting `nt_ui_state` pool; the
+visible window must stay below the ring; exceeding it asserts before two visible rows can alias a slot.
 Because ids follow the screen SLOT, the game dispatches per-row ACTIONS by the ABSOLUTE index and
 keeps per-row PERSISTENT state game-owned (keyed by absolute index), never hung off the recycled
 id — transient UI state (hover/press) follows the slot, standard IM virtualization. Both axes (Y

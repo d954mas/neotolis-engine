@@ -92,10 +92,8 @@ static void tooltip_declare_caret(nt_ui_context_t *ctx, uint8_t fill_layer, uint
     if (style->caret.atlas.id == 0U || style->caret.region == NT_ATLAS_INVALID_REGION) {
         return;
     }
-    /* The caret is a floating ATTACH_TO_PARENT child: its parent (the transient popup panel) must be in
-     * Clay's persistent hashmap, which only holds once the panel existed a prior frame. Skip the first
-     * appear-frame (same 1-frame guard the shadow uses) — else the floating root's parentId is missing
-     * and build_tree trips the "parentId not in hashmap" assert. */
+    /* The caret is a floating ATTACH_TO_PARENT child of the transient popup panel. Skip the panel's
+     * first appear-frame (same 1-frame guard the shadow uses). */
     if (!nt_ui_get_bbox(ctx, panel_id).found) {
         return;
     }

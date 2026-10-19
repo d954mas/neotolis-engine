@@ -40,7 +40,8 @@
 /* ---- Tunables ----
  *
  * `max_elements` (in nt_ui_create_desc_t) is the single per-ctx knob that
- * sizes all layout-bound storage:
+ * sizes all layout-bound storage. The distinct ids of two consecutive frames
+ * together must also stay below it (Clay prunes ids absent for a frame):
  *   - Clay arena (sized via Clay's own formula)
  *   - tree/hit baked-xform + index arrays (production)
  *   - debug_zones, widget_registry, inspector_collapsed_ids, probe_scratch (DEBUG_TOOLS only)

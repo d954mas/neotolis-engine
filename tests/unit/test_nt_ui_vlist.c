@@ -390,7 +390,7 @@ static void vlist_nested_sweep_frame(float pos_y, uint32_t id_ring) {
 
     nt_ui_scroll_style_t outer = nt_ui_scroll_style_defaults(); /* ALWAYS bar => a floating tree root */
     nt_ui_vlist_style_t vst = nt_ui_vlist_style_defaults();     /* owned scroll: ALWAYS bar */
-    vst.id_ring = id_ring;                                      /* 0 = no recycle (saturates), default = bounded */
+    vst.id_ring = id_ring;                                      /* 0 = absolute row ids, default = recycled */
     const Clay_ElementDeclaration ydecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(VL_VIEW), CLAY_SIZING_FIXED(VL_VIEW)}}};
     const Clay_ElementDeclaration xdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(VL_VIEW), CLAY_SIZING_FIXED(60.0F)}}};
 
@@ -435,13 +435,8 @@ static void vlist_nested_sweep(uint32_t id_ring) {
 
 static void test_vlist_nested_scroll_reversals_no_crash(void) { vlist_nested_sweep(nt_ui_vlist_style_defaults().id_ring); }
 
-/* A long no-recycle sweep may exhaust new retained IDs without invalidating its outer container. */
-static void test_vlist_saturation_preserves_outer_container(void) {
-    vlist_nested_sweep(0U);
-    const nt_ui_bbox_t outer = nt_ui_get_bbox(s_fx.ctx, VL_OUTER_ID);
-    TEST_ASSERT_TRUE(outer.found);
-    TEST_ASSERT_TRUE(outer.width > 0.0F && outer.height > 0.0F);
-}
+/* Without recycling, 85k distinct row ids stream through Clay's id hashmap; pruning keeps it bounded. */
+static void test_vlist_no_recycle_sweep_no_crash(void) { vlist_nested_sweep(0U); }
 
 /* Invalid gap asserts before the owned scroll opens, so the frame stays balanced. */
 static void vlist_begin_with_gap_expect_assert(uint32_t root_id, float item_extent, float gap) {
@@ -491,7 +486,7 @@ int main(void) {
     RUN_TEST(test_vlist_one_clip);
     RUN_TEST(test_vlist_window_exceeds_ring_asserts);
     RUN_TEST(test_vlist_nested_scroll_reversals_no_crash);
-    RUN_TEST(test_vlist_saturation_preserves_outer_container);
+    RUN_TEST(test_vlist_no_recycle_sweep_no_crash);
     RUN_TEST(test_vlist_begin_negative_gap_asserts);
     RUN_TEST(test_vlist_begin_nan_gap_asserts);
     RUN_TEST(test_vlist_begin_oversized_gap_asserts);

@@ -17,7 +17,6 @@
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
-#include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
@@ -76,6 +75,7 @@ static void tree_build_setup_ctx_max_elements(uint32_t max_elements) {
     nt_ui_set_text_material(s_fx.ctx, s_fx.text_material);
 }
 
+/* With the root, 30 ids fill all 31 usable slots of a 32-slot hashmap (Clay reserves one). */
 static void retained_ids_fill_hashmap(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
@@ -98,6 +98,15 @@ static void retained_ids_declare_unknown_at_full_capacity(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("retained_unknown"), .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {}
+    nt_ui_end(s_fx.ctx);
+}
+
+static void retained_ids_declare_frame(int32_t first, int32_t count) {
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    for (int32_t i = first; i < first + count; ++i) {
+        CLAY({.id = CLAY_IDI("retained_item", i), .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {}
+    }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -345,15 +354,12 @@ static void test_floating_attach_to_element_with_id_inherits_xform(void) {
 }
 
 /* A full retained-ID map must still refresh existing entries. The parent was
- * last at index 29, then moves before its floating child in the next frame. */
+ * declared at layout index 29, then moves before the child, which now floats on it. */
 static void test_retained_ids_refresh_floating_parent_at_full_capacity(void) {
     enum { MAX_ELEMENTS = 32, PARENT_INDEX = 28 };
     tree_build_setup_ctx_max_elements(MAX_ELEMENTS);
     retained_ids_fill_hashmap();
     retained_ids_reorder_with_floating_parent();
-
-    const uint32_t parent_id = CLAY_IDI("retained_item", PARENT_INDEX).id;
-    TEST_ASSERT_EQUAL_INT32_MESSAGE(1, nt_ui_clay_priv_layout_index_for_id(s_fx.ctx->clay, parent_id), "retained parent must point at this frame's first child");
 
     int32_t inherited_rotation_count = 0;
     const int32_t count = nt_ui_internal_test_get_tree_baked_count(s_fx.ctx);
@@ -372,11 +378,35 @@ static void test_retained_ids_duplicate_still_asserts_at_full_capacity(void) {
     NT_TEST_EXPECT_ASSERT(retained_ids_declare_duplicate_at_full_capacity());
 }
 
-static void test_retained_ids_unknown_is_not_registered_at_full_capacity(void) {
+/* The last frame's ids stay live during this frame, so one new id overflows the map. */
+static void test_retained_ids_new_id_asserts_at_full_capacity(void) {
     tree_build_setup_ctx_max_elements(32U);
     retained_ids_fill_hashmap();
-    retained_ids_declare_unknown_at_full_capacity();
-    TEST_ASSERT_FALSE(nt_ui_get_bbox(s_fx.ctx, CLAY_ID("retained_unknown").id).found);
+    NT_TEST_EXPECT_ASSERT(retained_ids_declare_unknown_at_full_capacity());
+}
+
+/* Ids absent for a frame are pruned, so a churning id set never fills the map. */
+static void test_retained_ids_prune_ids_absent_this_frame(void) {
+    enum { MAX_ELEMENTS = 32, PER_FRAME = 10, FRAMES = 20 };
+    tree_build_setup_ctx_max_elements(MAX_ELEMENTS);
+    for (int32_t frame = 0; frame < FRAMES; ++frame) {
+        retained_ids_declare_frame(frame * PER_FRAME, PER_FRAME);
+    }
+    TEST_ASSERT_FALSE(nt_ui_get_bbox(s_fx.ctx, CLAY_IDI("retained_item", 0).id).found);
+    TEST_ASSERT_TRUE(nt_ui_get_bbox(s_fx.ctx, CLAY_IDI("retained_item", (FRAMES - 1) * PER_FRAME).id).found);
+}
+
+/* A new id that reuses a pruned slot must not read the old owner's hit data. */
+static void test_retained_ids_reused_slot_has_no_stale_bbox(void) {
+    tree_build_setup_ctx_max_elements(32U);
+    retained_ids_declare_frame(0, 1);
+    retained_ids_declare_frame(1, 1);
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_IDI("retained_item", 2), .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {}
+    const bool found = nt_ui_get_bbox(s_fx.ctx, CLAY_IDI("retained_item", 2).id).found;
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_FALSE(found);
 }
 
 /* ---- 8. Floating chain — A's xform propagates to B (attached to A). ---- */
@@ -785,7 +815,9 @@ int main(void) {
     RUN_TEST(test_floating_attach_to_element_with_id_inherits_xform);
     RUN_TEST(test_retained_ids_refresh_floating_parent_at_full_capacity);
     RUN_TEST(test_retained_ids_duplicate_still_asserts_at_full_capacity);
-    RUN_TEST(test_retained_ids_unknown_is_not_registered_at_full_capacity);
+    RUN_TEST(test_retained_ids_new_id_asserts_at_full_capacity);
+    RUN_TEST(test_retained_ids_prune_ids_absent_this_frame);
+    RUN_TEST(test_retained_ids_reused_slot_has_no_stale_bbox);
     RUN_TEST(test_floating_inside_floating_chain);
     RUN_TEST(test_floating_with_own_xform_composes_on_seed);
     RUN_TEST(test_user_data_singleton_layer_only);

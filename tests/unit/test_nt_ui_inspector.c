@@ -2218,7 +2218,8 @@ static void test_inspector_truncation_marker_visible(void) {
     inspector_emit_leaf_scene(600);
     TEST_ASSERT_TRUE_MESSAGE(inspector_frozen_has_text(s_fx.ctx, "rows hidden"), "truncated tree must emit a visible 'rows hidden' marker row");
 
-    /* Small scene fits -> no truncation -> no marker. */
+    /* Small scene fits -> no truncation -> no marker. The big frame's ids stay live one more frame. */
+    inspector_emit_leaf_scene(4);
     inspector_emit_leaf_scene(4);
     TEST_ASSERT_FALSE_MESSAGE(inspector_frozen_has_text(s_fx.ctx, "rows hidden"), "untruncated tree must NOT emit a 'rows hidden' marker row");
 }

@@ -72,7 +72,7 @@ nt_ui_vlist_style_t nt_ui_vlist_style_defaults(void) {
     s.scroll = nt_ui_scroll_style_defaults();
     s.overscan = 2; /* a couple of rows each side hides recycle pop on a fling */
     s.gap = 0.0F;
-    s.id_ring = 256U; /* recycle ids over 256 slots -> ~256 hashmap slots/list, never saturates */
+    s.id_ring = 256U; /* recycle ids over 256 slots -> bounded per-row nt_ui_state cells */
     return s;
 }
 

@@ -25,6 +25,12 @@
 //      Public toggle API reports disabled-view requests through the error handler.
 //      Debug child floats use relative zIndex=1 to match patch 4.
 //      EndLayout reserves sidebar width so games can enable it after nt_ui_begin.
+//   6. Retained ID hashmap pruning, ported from upstream main: EndLayout unlinks
+//      ids not declared this frame into layoutElementsHashMapFreeList, and
+//      AddHashMapItem reuses those slots. Unlike upstream, the capacity check runs
+//      after the existing-id lookup and counts free slots, and pruning keeps the
+//      NT_CLAY_DEBUG_VIEW debugData pointer of a freed slot; the debug view skips a
+//      pruned selection. Search "NT patch 6".
 // NT DEPENDENCY: nt_ui_clay_impl.c wraps Clay__OpenElement /
 //   Clay__ConfigureOpenElement / Clay__CloseElement for the begin/end split
 //   pattern used by nt_ui widgets. Verify these internals still exist on update.
@@ -819,6 +825,8 @@ typedef CLAY_PACKED_ENUM {
     CLAY_ERROR_TYPE_PERCENTAGE_OVER_1,
     // Clay encountered an internal error. It would be wonderful if you could report this so we can fix it!
     CLAY_ERROR_TYPE_INTERNAL_ERROR,
+    // Clay ran out of capacity in its internal hash map for storing element IDs -> elements.
+    CLAY_ERROR_TYPE_HASH_MAP_CAPACITY_EXCEEDED,
 } Clay_ErrorType;
 
 // Data to identify the error that clay has encountered.
@@ -832,6 +840,7 @@ typedef struct Clay_ErrorData {
     // CLAY_ERROR_TYPE_FLOATING_CONTAINER_PARENT_NOT_FOUND - A floating element was declared using CLAY_ATTACH_TO_ELEMENT_ID and either an invalid .parentId was provided or no element with the provided .parentId was found.
     // CLAY_ERROR_TYPE_PERCENTAGE_OVER_1 - An element was declared that using CLAY_SIZING_PERCENT but the percentage value was over 1. Percentage values are expected to be in the 0-1 range.
     // CLAY_ERROR_TYPE_INTERNAL_ERROR - Clay encountered an internal error. It would be wonderful if you could report this so we can fix it!
+    // CLAY_ERROR_TYPE_HASH_MAP_CAPACITY_EXCEEDED - Ids declared in the previous and current layout exceed the hash map. This limit can be increased with Clay_SetMaxElementCount().
     Clay_ErrorType errorType;
     // A string containing human-readable error text that explains the error in more detail.
     Clay_String errorText;
@@ -1317,6 +1326,7 @@ struct Clay_Context {
     Clay__LayoutElementTreeRootArray layoutElementTreeRoots;
     Clay__LayoutElementHashMapItemArray layoutElementsHashMapInternal;
     Clay__int32_tArray layoutElementsHashMap;
+    Clay__int32_tArray layoutElementsHashMapFreeList; // NT patch 6
     Clay__MeasureTextCacheItemArray measureTextHashMapInternal;
     Clay__int32_tArray measureTextHashMapInternalFreeList;
     Clay__int32_tArray measureTextHashMap;
@@ -1782,19 +1792,33 @@ Clay_LayoutElementHashMapItem* Clay__AddHashMapItem(Clay_ElementId elementId, Cl
         hashItemPrevious = hashItemIndex;
         hashItemIndex = hashItem->nextIndex;
     }
-    if (context->layoutElementsHashMapInternal.length == context->layoutElementsHashMapInternal.capacity - 1) {
-        return NULL;
-    }
-    Clay_LayoutElementHashMapItem *hashItem = Clay__LayoutElementHashMapItemArray_Add(&context->layoutElementsHashMapInternal, item);
+    // NT patch 6: existing ids refresh above; only a new id needs a free or unused slot.
+    Clay__int32_tArray *freeList = &context->layoutElementsHashMapFreeList;
+    int32_t indexToUse = context->layoutElementsHashMapInternal.length;
+    if (freeList->length > 0) {
+        indexToUse = freeList->internalArray[--freeList->length];
 #if NT_CLAY_DEBUG_VIEW
-    hashItem->debugData = Clay__DebugElementDataArray_Add(&context->debugElementData, CLAY__INIT(Clay__DebugElementData) CLAY__DEFAULT_STRUCT);
+        item.debugData = context->layoutElementsHashMapInternal.internalArray[indexToUse].debugData;
+        *item.debugData = CLAY__INIT(Clay__DebugElementData) CLAY__DEFAULT_STRUCT;
 #endif
-    if (hashItemPrevious != -1) {
-        Clay__LayoutElementHashMapItemArray_Get(&context->layoutElementsHashMapInternal, hashItemPrevious)->nextIndex = (int32_t)context->layoutElementsHashMapInternal.length - 1;
+    } else if (indexToUse == context->layoutElementsHashMapInternal.capacity - 1) {
+        context->errorHandler.errorHandlerFunction(CLAY__INIT(Clay_ErrorData) {
+            .errorType = CLAY_ERROR_TYPE_HASH_MAP_CAPACITY_EXCEEDED,
+            .errorText = CLAY_STRING("Clay has run out of space in its internal element ID hashmap. Try using Clay_SetMaxElementCount() with a higher value."),
+            .userData = context->errorHandler.userData });
+        return NULL;
     } else {
-        context->layoutElementsHashMap.internalArray[hashBucket] = (int32_t)context->layoutElementsHashMapInternal.length - 1;
+#if NT_CLAY_DEBUG_VIEW
+        item.debugData = Clay__DebugElementDataArray_Add(&context->debugElementData, CLAY__INIT(Clay__DebugElementData) CLAY__DEFAULT_STRUCT);
+#endif
     }
-    return hashItem;
+    Clay__LayoutElementHashMapItemArray_Set(&context->layoutElementsHashMapInternal, indexToUse, item);
+    if (hashItemPrevious != -1) {
+        Clay__LayoutElementHashMapItemArray_Get(&context->layoutElementsHashMapInternal, hashItemPrevious)->nextIndex = indexToUse;
+    } else {
+        context->layoutElementsHashMap.internalArray[hashBucket] = indexToUse;
+    }
+    return Clay__LayoutElementHashMapItemArray_Get(&context->layoutElementsHashMapInternal, indexToUse);
 }
 
 Clay_LayoutElementHashMapItem *Clay__GetHashMapItem(uint32_t id) {
@@ -2275,6 +2299,7 @@ void Clay__InitializePersistentMemory(Clay_Context* context) {
     context->scrollContainerDatas = Clay__ScrollContainerDataInternalArray_Allocate_Arena(CLAY__MAX_SCROLL_CONTAINERS, arena); // NT patch: was hardcoded 10
     context->layoutElementsHashMapInternal = Clay__LayoutElementHashMapItemArray_Allocate_Arena(maxElementCount, arena);
     context->layoutElementsHashMap = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena);
+    context->layoutElementsHashMapFreeList = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena); // NT patch 6
     context->measureTextHashMapInternal = Clay__MeasureTextCacheItemArray_Allocate_Arena(maxElementCount, arena);
     context->measureTextHashMapInternalFreeList = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena);
     context->measuredWordsFreeList = Clay__int32_tArray_Allocate_Arena(maxMeasureTextCacheWordCount, arena);
@@ -3553,8 +3578,8 @@ void Clay__RenderDebugView(void) {
             }
         }
         CLAY({ .layout = { .sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_FIXED(1)} }, .backgroundColor = CLAY__DEBUGVIEW_COLOR_3 }) {}
-        if (context->debugSelectedElementId != 0) {
-            Clay_LayoutElementHashMapItem *selectedItem = Clay__GetHashMapItem(context->debugSelectedElementId);
+        Clay_LayoutElementHashMapItem *selectedItem = Clay__GetHashMapItem(context->debugSelectedElementId);
+        if (context->debugSelectedElementId != 0 && selectedItem->layoutElement != NULL) { // NT patch 6: selection may be pruned
             CLAY({
                 .layout = { .sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(300)}, .layoutDirection = CLAY_TOP_TO_BOTTOM },
                 .backgroundColor = CLAY__DEBUGVIEW_COLOR_2 ,
@@ -4303,6 +4328,19 @@ Clay_RenderCommandArray Clay_EndLayout(void) {
         });
     } else {
         Clay__CalculateFinalLayout();
+    }
+    // NT patch 6: keep only ids declared this frame; next frame still reads their boxes.
+    for (int32_t bucket = 0; bucket < context->layoutElementsHashMap.capacity; ++bucket) {
+        int32_t *link = &context->layoutElementsHashMap.internalArray[bucket];
+        while (*link != -1) {
+            Clay_LayoutElementHashMapItem *item = Clay__LayoutElementHashMapItemArray_Get(&context->layoutElementsHashMapInternal, *link);
+            if (item->generation <= context->generation) {
+                Clay__int32_tArray_Add(&context->layoutElementsHashMapFreeList, *link);
+                *link = item->nextIndex;
+            } else {
+                link = &item->nextIndex;
+            }
+        }
     }
     return context->renderCommands;
 }

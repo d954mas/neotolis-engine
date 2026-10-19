@@ -2213,7 +2213,7 @@ static bool raycast_hit(const float inv_view_proj[16], const nt_ui_baked_xform_t
     return true;
 }
 
-/* Hit-test reads PREV-frame data via Clay's persistent hashmap slot (stable across frames). */
+/* Hit-test reads PREV-frame data via the Clay hashmap slot, which Clay keeps for one frame. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, int32_t N, float px, float py, float screen_w, float screen_h) {
     uint32_t cur_id = start_clip_id;
@@ -2757,7 +2757,7 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
         z->center_y = d.boundingBox.y + (d.boundingBox.height * 0.5F);
         /* Snapshot composed mat4 — same source as walker/hit-test. */
         const int32_t e_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
-        if (e_slot >= 0 && e_slot < (int32_t)ctx->max_elements) {
+        if (e_slot >= 0 && e_slot < (int32_t)ctx->max_elements && ctx->hit_generation[e_slot] == ctx->current_generation) {
             memcpy(z->m, ctx->hit_baked[e_slot].m, sizeof z->m);
         } else {
             const nt_ui_baked_xform_t b = nt_ui_internal_identity_baked();
@@ -2999,7 +2999,7 @@ void nt_ui_debug_record_disabled_zone(nt_ui_context_t *ctx, uint32_t id, const i
     z->center_x = d.boundingBox.x + (d.boundingBox.width * 0.5F);
     z->center_y = d.boundingBox.y + (d.boundingBox.height * 0.5F);
     const int32_t e_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
-    if (e_slot >= 0 && e_slot < (int32_t)ctx->max_elements) {
+    if (e_slot >= 0 && e_slot < (int32_t)ctx->max_elements && ctx->hit_generation[e_slot] == ctx->current_generation) {
         memcpy(z->m, ctx->hit_baked[e_slot].m, sizeof z->m);
     } else {
         const nt_ui_baked_xform_t b = nt_ui_internal_identity_baked();
