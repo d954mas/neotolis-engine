@@ -13,6 +13,7 @@
 
 #include "clay.h"
 #include "core/nt_assert.h"
+#include "graphics/nt_gfx.h"
 #include "memory/nt_mem_scratch.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_test_arena.h"
@@ -2004,45 +2005,82 @@ static void test_scrollbar_standalone_renders_inside_clip(void) {
     TEST_ASSERT_TRUE(thumb->boundingBox.y + thumb->boundingBox.height <= hclip.y + hclip.height + 0.5F);
 }
 
-/* ---- Nested: an INNER scroll's bar, with the inner scrolled so its bar would sit past the OUTER
- *      clip edge, is clipped to the outer viewport. The inner bar TRACK image is enclosed by a
- *      floating-clip SCISSOR whose bbox is bounded by the outer container (300x300) viewport. ---- */
+/* Sample the walker scissor at the original track/thumb command positions. */
+static void read_scrollbar_scissor(const nt_ui_custom_frame_t *frame, void *userdata) {
+    (void)frame;
+    TEST_ASSERT_TRUE(nt_gfx_test_scissor_enabled());
+    nt_gfx_test_scissor_rect(userdata);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_scrollbar_nested_clipped_to_outer(void) {
     nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    style.scroll_x = true;
     style.wheel_ease_speed = 0.0F;
+    style.bar_thickness = 9.0F;
+    style.bar_thumb_min_px = 24.0F;
+    nt_ui_scroll_style_t outer_style = style;
+    outer_style.track_ref = (nt_atlas_region_ref_t){0};
+    outer_style.thumb_ref = (nt_atlas_region_ref_t){0};
     const uint32_t inner_bar_id = nt_ui_scroll_test_bar_id(EXCL_INNER_ID, 1);
     nt_pointer_t p = {0};
-    p.active = true;
 
-    excl_nested_frame(&p, &style);
-    excl_nested_frame(&p, &style);
-    /* Scroll the OUTER down so the inner scroll (200 tall, pinned at the outer content top) straddles
-     * the outer's TOP clip edge: its bar's lower part stays visible while the upper part leaves the
-     * outer viewport. Without clipTo the inner bar would draw its full height past the outer clip. */
-    nt_ui_scroll_to(s_fx.ctx, EXCL_OUTER_ID, 0.0F, -150.0F);
-    excl_nested_frame(&p, &style);
-    excl_nested_frame(&p, &style);
-
-    int32_t inner_track_idx = -1;
-    const Clay_RenderCommand *inner_track = NULL;
-    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
-        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
-        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && c->id == inner_bar_id) {
-            inner_track = c;
-            inner_track_idx = i;
-            break;
+    for (int frame = 0; frame < 4; ++frame) {
+        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+        CLAY({.id = CLAY_ID("nested-clip-root"), .layout = {.sizing = {CLAY_SIZING_FIXED(800), CLAY_SIZING_FIXED(600)}, .padding = {.left = 37, .top = 53}}}) {
+            nt_ui_scroll_begin(s_fx.ctx, NULL, EXCL_OUTER_ID, &outer_style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(310), CLAY_SIZING_FIXED(190)}}});
+            {
+                CLAY({.id = CLAY_ID("nested-clip-outer-content"), .layout = {.sizing = {CLAY_SIZING_FIXED(600), CLAY_SIZING_FIXED(900)}}}) {
+                    nt_ui_scroll_begin(s_fx.ctx, NULL, EXCL_INNER_ID, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(230), CLAY_SIZING_FIXED(260)}}});
+                    {
+                        CLAY({.id = CLAY_ID("nested-clip-inner-content"), .layout = {.sizing = {CLAY_SIZING_FIXED(600), CLAY_SIZING_FIXED(900)}}}) {}
+                    }
+                    nt_ui_scroll_end(s_fx.ctx);
+                }
+            }
+            nt_ui_scroll_end(s_fx.ctx);
+        }
+        nt_ui_end(s_fx.ctx);
+        if (frame == 1) {
+            nt_ui_scroll_to(s_fx.ctx, EXCL_OUTER_ID, -80.0F, -90.0F);
+            nt_ui_scroll_to(s_fx.ctx, EXCL_INNER_ID, -30.0F, -180.0F);
         }
     }
-    if (inner_track == NULL) {
-        TEST_IGNORE_MESSAGE("inner bar culled at this scroll offset — geometry-dependent; covered by standalone + slider tests");
-        return;
+
+    const nt_ui_bbox_t inner = nt_ui_get_bbox(s_fx.ctx, EXCL_INNER_ID);
+    TEST_ASSERT_TRUE(inner.found);
+    TEST_ASSERT_TRUE(float_near(inner.x, -43.0F, 0.01F));
+    TEST_ASSERT_TRUE(float_near(inner.y, -37.0F, 0.01F));
+    Clay_RenderCommand *bars[2] = {NULL, NULL};
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && float_near(c->boundingBox.width, style.bar_thickness, 0.01F)) {
+            const int bar = c->id == inner_bar_id ? 0 : 1;
+            TEST_ASSERT_NULL(bars[bar]);
+            bars[bar] = c;
+        }
     }
-    Clay_BoundingBox clip = {0};
-    TEST_ASSERT_TRUE(floating_clip_at(inner_track_idx, &clip));
-    /* The inner bar's clip is bounded by the OUTER container viewport (300 tall at the outer origin),
-     * not the inner's own full 200 height extending past the outer clip. */
-    TEST_ASSERT_TRUE(clip.height <= 300.0F + 0.5F);
+    TEST_ASSERT_NOT_NULL(bars[0]);
+    TEST_ASSERT_NOT_NULL(bars[1]);
+
+    int scissors[2][4] = {{-1, -1, -1, -1}, {-1, -1, -1, -1}};
+    nt_ui_custom_data_t probes[2];
+    for (int bar = 0; bar < 2; ++bar) {
+        const Clay_BoundingBox b = bars[bar]->boundingBox;
+        TEST_ASSERT_TRUE(b.y < 53.0F);
+        TEST_ASSERT_TRUE(b.y + b.height > 53.0F);
+        TEST_ASSERT_TRUE(b.x >= 37.0F && b.x + b.width <= 187.0F);
+        probes[bar] = (nt_ui_custom_data_t){.type = NT_UI_CUSTOM_TYPE_CALLBACK, .data = scissors[bar], .emit = read_scrollbar_scissor};
+        bars[bar]->commandType = CLAY_RENDER_COMMAND_TYPE_CUSTOM;
+        bars[bar]->renderData.custom.customData = &probes[bar];
+    }
+    const nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    /* Intersect outer (37,53,310,190) with inner (-43,-37,230,260), then flip Y for GL. */
+    const int expected[4] = {37, 377, 150, 170};
+    TEST_ASSERT_EQUAL_INT_ARRAY(expected, scissors[0], 4);
+    TEST_ASSERT_EQUAL_INT_ARRAY(expected, scissors[1], 4);
 }
 
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
