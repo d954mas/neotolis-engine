@@ -11,12 +11,26 @@
  * in library_webgl.js, force-linked by this TU's own emscripten_webgl_* C calls -- so it survives today.
  * EM_JS_DEPS makes that implicit dependency explicit + Closure-kept, so moving context creation out of
  * this file can't silently strip GL in release. */
-EM_JS_DEPS(nt_gfx_gl_ctx_web, "$GL,$UTF8ToString,$stringToUTF8")
+EM_JS_DEPS(nt_gfx_gl_ctx_web, "$GL,$UTF8ToString,$stringToUTF8,$findCanvasEventTarget,emscripten_webgl_create_context")
 
 static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE s_gl_context;
 static bool s_loss_pending; /* set by a lost event until begin_frame takes it */
 
 static void capture_device_info(void);
+
+/* The browser explains a refusal only through a creation-error event fired synchronously inside getContext. */
+/* clang-format off */
+EM_JS(EMSCRIPTEN_WEBGL_CONTEXT_HANDLE, nt_gfx_js_create_context, (const char *target, const EmscriptenWebGLContextAttributes *attrs, char *status, unsigned int cap), {
+    var canvas = findCanvasEventTarget(target);
+    var message = "";
+    var on_error = function(event) { message = event.statusMessage; };
+    canvas.addEventListener("webglcontextcreationerror", on_error);
+    var context = _emscripten_webgl_create_context(target, attrs);
+    canvas.removeEventListener("webglcontextcreationerror", on_error);
+    if (!context) stringToUTF8(message.replace(/[\\x00\\r\\n]/g, " "), status, cap);
+    return context;
+})
+/* clang-format on */
 
 static bool on_context_lost(int event_type, const void *reserved, void *user_data) {
     (void)event_type;
@@ -27,6 +41,8 @@ static bool on_context_lost(int event_type, const void *reserved, void *user_dat
 }
 
 bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
+    /* nt_log_write cuts the whole line to NT_LOG_BUF_SIZE on a UTF-8 boundary. */
+    char creation_status[NT_LOG_BUF_SIZE];
     EmscriptenWebGLContextAttributes attrs;
     emscripten_webgl_init_context_attributes(&attrs);
     attrs.alpha = desc->alpha;
@@ -40,10 +56,10 @@ bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
     /* Capability probes enable only the extensions this build uses. */
     attrs.enableExtensionsByDefault = false;
 
-    s_gl_context = emscripten_webgl_create_context("#canvas", &attrs);
+    s_gl_context = nt_gfx_js_create_context("#canvas", &attrs, creation_status, sizeof(creation_status));
     if (s_gl_context == 0) {
-        NT_LOG_ERROR("context-create: failed WebGL=2.0 alpha=%d depth=%d stencil=%d antialias=%d premultiplied_alpha=%d preserve=0", (int)desc->alpha, (int)desc->depth, (int)desc->stencil,
-                     (int)desc->antialias, (int)desc->premultiplied_alpha);
+        NT_LOG_ERROR("context-create: failed WebGL=2.0 alpha=%d depth=%d stencil=%d antialias=%d premultiplied_alpha=%d preserve=0 browser_status=%s", (int)desc->alpha, (int)desc->depth,
+                     (int)desc->stencil, (int)desc->antialias, (int)desc->premultiplied_alpha, creation_status[0] ? creation_status : "<empty>");
         return false;
     }
     emscripten_webgl_make_context_current(s_gl_context);

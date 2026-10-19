@@ -13,7 +13,7 @@ type DeviceHooks = {
 };
 type DeviceWindow = Window & {
   __nt?: DeviceHooks;
-  __device: Identity & { queries: number[]; extensions: string[]; denyCreate: boolean; denied: number };
+  __device: Identity & { queries: number[]; extensions: string[]; deny: string | null; denied: number };
   __deviceLoss?: WEBGL_lose_context;
 };
 
@@ -21,10 +21,11 @@ const INITIAL: Identity = { vendor: 'vendor-initial', renderer: 'renderer-initia
 const RESTORED: Identity = { vendor: 'vendor-restored', renderer: 'renderer-restored', api: 'WebGL 2.0 restored' };
 
 // Override browser identity and context-creation responses; capture and persistence use the real engine.
-async function installIdentity(page: Page, identity = INITIAL, debug = true, denyCreate = false): Promise<void> {
-  await page.addInitScript(({ identity, debug, denyCreate }) => {
+// deny: null creates normally; a string refuses webgl2 and, when non-empty, reports it as the creation-error status.
+async function installIdentity(page: Page, identity = INITIAL, debug = true, deny: string | null = null): Promise<void> {
+  await page.addInitScript(({ identity, debug, deny }) => {
     const control = (window as DeviceWindow).__device = {
-      ...identity, queries: [] as number[], extensions: [] as string[], denyCreate, denied: 0,
+      ...identity, queries: [] as number[], extensions: [] as string[], deny, denied: 0,
     };
     const proto = WebGL2RenderingContext.prototype;
     const getExtension = proto.getExtension;
@@ -47,13 +48,14 @@ async function installIdentity(page: Page, identity = INITIAL, debug = true, den
     };
     const getContext = HTMLCanvasElement.prototype.getContext;
     HTMLCanvasElement.prototype.getContext = function(...args: Parameters<typeof getContext>) {
-      if (control.denyCreate && args[0] === 'webgl2') {
+      if (control.deny !== null && args[0] === 'webgl2') {
         control.denied++;
+        if (control.deny) this.dispatchEvent(new WebGLContextEvent('webglcontextcreationerror', { statusMessage: control.deny }));
         return null;
       }
       return getContext.apply(this, args);
     } as typeof getContext;
-  }, { identity, debug, denyCreate });
+  }, { identity, debug, deny });
 }
 
 async function ready(page: Page): Promise<void> {
@@ -155,7 +157,7 @@ for (const failedRestore of [false, true]) {
     if (failedRestore) {
       await page.evaluate(() => {
         const w = window as DeviceWindow;
-        w.__device.denyCreate = true;
+        w.__device.deny = '';
         w.__deviceLoss!.restoreContext();
       });
       await page.waitForFunction(() => (window as DeviceWindow).__device.denied > 0, null, { timeout: 30_000 });
@@ -164,7 +166,7 @@ for (const failedRestore of [false, true]) {
     const record = await capture(page);
     expectIdentity(record, INITIAL);
     if (failedRestore) {
-      expect(record.match(/context-create: failed/g) ?? []).toHaveLength(1);
+      expect(record.match(/context-create: failed .* browser_status=<empty>\n/g) ?? []).toHaveLength(1);
       expect(record.match(/context restore failed/g) ?? []).toHaveLength(1);
     }
   });
@@ -189,8 +191,8 @@ test('device identity: null fields, UTF-8 truncation and newlines stay bounded',
   expect(Buffer.byteLength(record.split('\ngpu_renderer: ')[1].split('\n')[0], 'utf8')).toBe(253);
 });
 
-test('device identity: startup context failure is saved before app hooks exist', async ({ page }) => {
-  await installIdentity(page, INITIAL, true, true);
+test('device identity: startup context failure is saved with the bounded browser status', async ({ page }) => {
+  await installIdentity(page, INITIAL, true, `reason\r\n\0${'ы'.repeat(300)}`);
   await page.goto('/index.html?crash=read');
   await page.waitForFunction((key) => localStorage.getItem(key) !== null, KEY, { timeout: 30_000 });
   const record = (await page.evaluate((key) => localStorage.getItem(key), KEY))!;
@@ -198,5 +200,8 @@ test('device identity: startup context failure is saved before app hooks exist',
   expect(record).not.toContain('\ngpu_caps:');
   expect(record).toMatch(/\nreason: /);
   expect(await page.evaluate(() => (window as DeviceWindow).__nt)).toBeUndefined();
-  expect(record.slice(record.indexOf('\nlog:\n') + 6)).toMatch(/ERROR.*context-create: failed/);
+  // The status overflows the log line, so nt_log_write cuts it on a UTF-8 boundary and marks the cut.
+  const line = record.slice(record.indexOf('\nlog:\n') + 6).match(/context-create: failed .*/)?.[0] ?? '';
+  expect(line).toMatch(/ browser_status=reason   ы+\.\.\.$/);
+  expect(Buffer.byteLength(line, 'utf8')).toBeLessThan(512);
 });
