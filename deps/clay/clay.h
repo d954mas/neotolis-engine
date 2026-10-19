@@ -27,11 +27,11 @@
 //      EndLayout reserves sidebar width so games can enable it after nt_ui_begin.
 //   6. Retained ID hashmap pruning, ported from upstream main: EndLayout unlinks
 //      ids not declared this frame into layoutElementsHashMapFreeList, and
-//      AddHashMapItem reuses those slots. The item array holds 2 * maxElementCount
-//      so the previous and current frame always fit. Unlike upstream, the capacity check runs
+//      AddHashMapItem reuses those slots. The item array holds 2 * maxElementCount,
+//      one id per element for the previous and current frame. Unlike upstream, the capacity check runs
 //      after the existing-id lookup and counts free slots, and pruning keeps the
 //      NT_CLAY_DEBUG_VIEW debugData pointer of a freed slot; the debug view skips a
-//      pruned selection. Search "NT patch 6".
+//      selection not declared this frame. Search "NT patch 6".
 //   7. Layout element overflow reports CLAY_ERROR_TYPE_ELEMENTS_CAPACITY_EXCEEDED
 //      from Clay__OpenElement / Clay__OpenTextElement instead of silently dropping
 //      the rest of the frame. Search "NT patch 7" for the 2 sites.
@@ -830,7 +830,7 @@ typedef CLAY_PACKED_ENUM {
     // Clay encountered an internal error. It would be wonderful if you could report this so we can fix it!
     CLAY_ERROR_TYPE_INTERNAL_ERROR,
     // Clay ran out of capacity in its internal hash map for storing element IDs -> elements.
-    CLAY_ERROR_TYPE_HASH_MAP_CAPACITY_EXCEEDED,
+    CLAY_ERROR_TYPE_HASH_MAP_CAPACITY_EXCEEDED, // NT patch 6
 } Clay_ErrorType;
 
 // Data to identify the error that clay has encountered.
@@ -2313,7 +2313,8 @@ void Clay__InitializePersistentMemory(Clay_Context* context) {
     Clay_Arena *arena = &context->internalArena;
 
     context->scrollContainerDatas = Clay__ScrollContainerDataInternalArray_Allocate_Arena(CLAY__MAX_SCROLL_CONTAINERS, arena); // NT patch: was hardcoded 10
-    // NT patch 6: ids of the previous and current frame always fit, so only element overflow can fail.
+    // NT patch 6: one id per element for the previous and current frame. An explicit .id whose
+    // declaration calls Clay_Hovered/Clay_OnHover/Clay_GetScrollOffset also keeps an anonymous alias.
     int32_t hashMapItemCount = maxElementCount * 2;
     context->layoutElementsHashMapInternal = Clay__LayoutElementHashMapItemArray_Allocate_Arena(hashMapItemCount, arena);
     context->layoutElementsHashMap = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena);
@@ -2325,7 +2326,7 @@ void Clay__InitializePersistentMemory(Clay_Context* context) {
     context->measuredWords = Clay__MeasuredWordArray_Allocate_Arena(maxMeasureTextCacheWordCount, arena);
     context->pointerOverIds = Clay_ElementIdArray_Allocate_Arena(maxElementCount, arena);
 #if NT_CLAY_DEBUG_VIEW
-    context->debugElementData = Clay__DebugElementDataArray_Allocate_Arena(hashMapItemCount, arena);
+    context->debugElementData = Clay__DebugElementDataArray_Allocate_Arena(hashMapItemCount, arena); // NT patch 6
 #endif
     context->arenaResetOffset = arena->nextAllocation;
 }
@@ -3597,7 +3598,7 @@ void Clay__RenderDebugView(void) {
         }
         CLAY({ .layout = { .sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_FIXED(1)} }, .backgroundColor = CLAY__DEBUGVIEW_COLOR_3 }) {}
         Clay_LayoutElementHashMapItem *selectedItem = Clay__GetHashMapItem(context->debugSelectedElementId);
-        if (context->debugSelectedElementId != 0 && selectedItem->layoutElement != NULL) { // NT patch 6: selection may be pruned
+        if (context->debugSelectedElementId != 0 && selectedItem->generation > context->generation) { // NT patch 6: declared this frame
             CLAY({
                 .layout = { .sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(300)}, .layoutDirection = CLAY_TOP_TO_BOTTOM },
                 .backgroundColor = CLAY__DEBUGVIEW_COLOR_2 ,

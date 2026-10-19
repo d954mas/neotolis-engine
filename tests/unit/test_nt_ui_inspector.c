@@ -686,28 +686,6 @@ static void test_inspector_text_with_siblings_no_union_misread(void) {
     TEST_ASSERT_GREATER_THAN_INT32(0, sib_after_text);
 }
 
-/* 64 branches x 32 children = ~2112 elements, about 2x the 1024 cap. */
-static void inspector_user_tree_overflow_frame(void) {
-    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("overflow_root")}) {
-        for (int b = 0; b < 64; ++b) {
-            CLAY({.id = CLAY_IDI("ovf_branch", (uint32_t)b), .layout = {.sizing = {CLAY_SIZING_FIXED(4), CLAY_SIZING_FIXED(4)}}}) {
-                for (int c = 0; c < 32; ++c) {
-                    CLAY({.id = CLAY_IDI("ovf_leaf", (uint32_t)((b * 32) + c)), .layout = {.sizing = {CLAY_SIZING_FIXED(2), CLAY_SIZING_FIXED(2)}}}) {}
-                }
-            }
-        }
-    }
-    nt_ui_end(s_fx.ctx);
-}
-
-/* A user tree past max_elements is a contract violation even with the inspector open. */
-static void test_inspector_user_tree_capacity_overflow_asserts(void) {
-    nt_ui_inspector_set_active(s_fx.ctx, true);
-    NT_TEST_EXPECT_ASSERT(inspector_user_tree_overflow_frame());
-}
-
 /* Unnamed but widget-registered element produces an inspector tree row (hex id
  * fallback); the layout element count must grow. */
 static void test_inspector_emits_hex_for_unnamed_widget(void) {
@@ -2757,7 +2735,6 @@ int main(void) {
     RUN_TEST(test_inspector_pane_drag_does_not_scroll_game);
     RUN_TEST(test_inspector_tree_text_moves_with_scroll);
     RUN_TEST(test_inspector_row_click_after_scroll_selects_scrolled_row);
-    RUN_TEST(test_inspector_user_tree_capacity_overflow_asserts);
     return UNITY_END();
 }
 

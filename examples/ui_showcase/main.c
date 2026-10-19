@@ -518,7 +518,7 @@ static bool s_ids_ready;
 
 // #region engine state
 /* Stress tab emits up to 6000 labels + ~500 row containers; size the UI arena + Clay element cap
- * for that worst case. nt_ui_min_arena_size(7168) in the DEBUG_TOOLS build is ~10.1 MB (Clay arena +
+ * for that worst case. nt_ui_min_arena_size(7168) in the DEBUG_TOOLS build is ~11.3 MB (Clay arena +
  * pow2 widget registry + probe-scratch + state pool dominate), so a 12 MB arena clears the
  * create-context assert with headroom. */
 #define UI_MAX_ELEMENTS ((uint32_t)7168U)

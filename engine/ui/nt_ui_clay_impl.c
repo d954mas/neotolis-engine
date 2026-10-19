@@ -562,6 +562,7 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
 
     // #region snapshot-per-id (hit_baked)
     /* Snapshot per-id into hashmap-slot-indexed arrays; next frame reads them while Clay keeps this frame's ids. */
+    NT_ASSERT(cc->layoutElementsHashMapInternal.capacity == (int32_t)(ctx->max_elements * 2U) && "build_tree: hit_* mirrors are sized 2 * max_elements, Clay's hashmap capacity");
     ctx->current_generation++;
     for (int32_t elem_idx = 0; elem_idx < N; ++elem_idx) {
         Clay_LayoutElement *el = Clay_LayoutElementArray_Get(&cc->layoutElements, elem_idx);
@@ -1524,10 +1525,6 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                         continue;
                     }
                     const Clay_LayoutElementHashMapItem *item = Clay__GetHashMapItem(eid->id);
-                    /* Pointer-over ids are last frame's; the highlight may float only on this frame's ids. */
-                    if (item->generation <= context->generation) {
-                        continue;
-                    }
                     /* Skip anything inside the panel footprint — the named-id set is not exhaustive. */
                     if (item->boundingBox.x >= panel_left_x) {
                         continue;
@@ -1549,7 +1546,8 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
     // #endregion
 
     // #region highlight-emit
-    if (highlightedElementId) {
+    /* Zones and pointer-over ids can name last frame's elements; the highlight floats only on this frame's. */
+    if (highlightedElementId && Clay__GetHashMapItem(highlightedElementId)->generation > context->generation) {
         /* Relative to ntInsp_Root: -1 lands just under the panel body it would otherwise cover. */
         CLAY({.id = CLAY_ID("ntInsp_ElementHighlight"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
@@ -1704,11 +1702,9 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
         // #region selected-info-pane
         CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_FIXED(1)}}, .backgroundColor = CDV_COLOR_3, .userData = debug_bg_data}) {}
         if (ctx->inspector_selected_id != 0U) {
-            /* GetHashMapItem returns the zeroed DEFAULT sentinel (non-NULL, NULL layoutElement) on a
-             * miss — a selection past the element/hashmap budget resolves here, so guard the sentinel
-             * AND the NULL layoutElement, not just `!= NULL` (a debug tool must not crash the game). */
+            /* Only an id declared this frame has a layoutElement in this frame's array. */
             Clay_LayoutElementHashMapItem *selectedItem = Clay__GetHashMapItem(ctx->inspector_selected_id);
-            if (selectedItem != NULL && selectedItem != &Clay_LayoutElementHashMapItem_DEFAULT && selectedItem->layoutElement != NULL) {
+            if (selectedItem->generation > context->generation) {
                 Clay_ElementId selInfoId = Clay__HashString(CLAY_STRING("ntInsp_SelectedInfoPane"), 0, 0);
                 /* Resolve offset BEFORE opening the clip element (helper reads prev-frame Clay dims). */
                 const Clay_Vector2 selInfoOffset = nt_ui_internal_scroll_pane_offset(ctx, selInfoId.id, NT_UI_STATE_TAG('i', 'n', 's', '2'), false, true);
