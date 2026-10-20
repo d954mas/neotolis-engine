@@ -69,7 +69,8 @@
 
 #include "../shared/nt_example_frames.h"
 #include "clay.h"
-#include "skeletal_showcase_assets.h"
+#include "skeletal_showcase.h"
+#include "skeletal_showcase_clips.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>

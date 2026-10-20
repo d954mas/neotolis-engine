@@ -57,7 +57,7 @@
 #include "window/nt_window.h"
 
 #include "nt_pack_format.h"
-#include "ui_3d_demo_assets.h"
+#include "ui_3d_demo.h"
 
 #include "clay.h"
 #include <math.h>

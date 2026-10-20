@@ -65,8 +65,8 @@ was found at. Fox Survey, Walk and CesiumMan are whole frames at 24 fps and
 report small errors; Fox Run is authored at 27.8 frames, so the builder logs a
 `not a whole number` warning, ships 28 frames, and its report shows the larger
 interpolation error the skeletal spec documents. Both are expected. The
-generated headers in `generated/` (one per pack, merged into
-`skeletal_showcase_assets.h`) are committed and deterministic.
+generated headers in `generated/` (one per pack) are committed and
+deterministic.
 
 ## Skeleton & Pose
 

@@ -20,7 +20,7 @@ target_link_libraries(browser_smoke PRIVATE
     nt_skinned_mesh_renderer
 )
 target_compile_definitions(browser_smoke PRIVATE NT_TEST_PRESET_NAME="${NT_PRESET_NAME}")
-# Reuse the showcase's generated asset header (ui_showcase_assets.h).
+# Reuse the showcase's generated asset header (ui_showcase.h).
 target_include_directories(browser_smoke PRIVATE "${CMAKE_SOURCE_DIR}/examples/ui_showcase/generated")
 if(TARGET ui_showcase_pack_build)
     add_dependencies(browser_smoke ui_showcase_pack_build)

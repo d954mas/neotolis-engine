@@ -51,7 +51,7 @@
 #include "math/nt_math.h"
 #include "nt_pack_format.h"
 
-#include "bunnymark_assets.h"
+#include "bunnymark_sd.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -181,7 +181,7 @@ static void resolve_atlas_regions(void) {
     if (s_atlas_resolved || !nt_resource_is_ready(s_atlas_handle)) {
         return;
     }
-    /* Region hashes are codegen'd by the builder into bunnymark_assets.h —
+    /* Region hashes are codegen'd by the builder into bunnymark_sd.h —
      * single source of truth. If the builder's hash function or region
      * naming changes, this rebuilds against the new constants automatically. */
     static const nt_hash64_t names[5] = {

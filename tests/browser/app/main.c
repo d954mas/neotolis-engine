@@ -40,7 +40,7 @@
 
 #include "app/nt_app.h"
 
-#include "ui_showcase_assets.h" /* reuse the showcase pack's generated asset ids */
+#include "ui_showcase.h" /* reuse the showcase pack's generated asset ids */
 
 #include <stdint.h>
 #include <stdio.h>

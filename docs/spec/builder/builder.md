@@ -2,7 +2,7 @@
 
 The builder is a standalone native C17 binary; packing rules are code, not a
 DSL. Covers the core API (typed add_* calls plus the begin/add/commit atlas transaction),
-build stages and validation, asset-ID header codegen and combined headers, the
+build stages and validation, asset-ID header codegen for multi-pack projects, the
 content-addressed encode cache, and the NFP-based atlas builder with its
 pipeline, vector packer, options, per-sprite overrides, and atlas cache.
 
@@ -265,26 +265,18 @@ Rules:
 - `register_labels()` function under `#if NT_HASH_LABELS` registers all paths for debug hash lookup.
 - Identifier collisions (two assets producing the same `#define` name) are a fatal builder error.
 
-## Combined headers (multi-pack projects)
+## Multi-pack projects
 
-Projects with multiple packs merge per-pack headers into one combined header after all packs are built:
+Each `finish_pack` writes one header per pack into the `set_header_dir` directory (convention: `examples/{project}/generated/`, visible in IDE and version control). Game code includes the header of every pack it uses:
 
 ```c
-/* Each finish_pack generates a per-pack .h (e.g. core.h, textures.h) */
-nt_builder_set_header_dir(ctx, "examples/myproject/generated");
-nt_builder_finish_pack(ctx);
-
-/* After all packs: merge into one combined header */
-const char *headers[] = {"generated/core.h", "generated/textures.h"};
-nt_builder_merge_headers(headers, 2, "generated/assets.h");
+#include "core.h"
+#include "textures.h"
 ```
 
-Rules:
-- `merge_headers` copies every per-pack define verbatim and writes them sorted by identifier. A define repeated with the same hash folds into one; the same identifier with two hashes asserts as a collision. Defines that share a hash under different identifiers (atlas regions with one name in two atlases) all stay.
-- No runtime state needed during pack building — merge operates on already-generated files.
-- Game code includes the single combined header, not per-pack headers.
-- Per-pack headers are still generated for diagnostics and per-pack diffing.
-- `set_header_dir` controls where headers are written. Convention: `examples/{project}/generated/` in source tree so headers are visible in IDE and version control.
+- An asset in two packs produces the same `#define` in both headers; C accepts an identical redefinition.
+- The same identifier with two hashes is a conflicting redefinition, so the compiler rejects it.
+- Each header has its own `{header}_register_labels()`; call the one for each included header.
 
 ## Generated headers in version control
 

@@ -683,9 +683,6 @@ void nt_builder_set_threads(NtBuilderContext *ctx, uint32_t thread_count);
  * Convenience wrapper -- equivalent to set_threads(hardware_concurrency()). */
 void nt_builder_set_threads_auto(NtBuilderContext *ctx);
 
-/* --- Merge per-pack .h headers into a combined header --- */
-void nt_builder_merge_headers(const char *const *header_paths, uint32_t count, const char *output_path);
-
 /* --- Build record: skip a current build, record this one (builder spec, "Build record") --- */
 bool nt_builder_up_to_date(const char *dir);
 void nt_builder_write_record(const char *dir);

@@ -38,7 +38,8 @@
 #include "../shared/nt_example_frames.h"
 #include "math/nt_math.h"
 #include "nt_pack_format.h"
-#include "text_assets.h"
+#include "text_base.h"
+#include "text_cjk.h"
 
 #include <math.h>
 #include <string.h>

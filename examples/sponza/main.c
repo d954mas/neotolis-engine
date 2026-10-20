@@ -59,7 +59,10 @@
 #include "../shared/nt_example_frames.h"
 #include "math/nt_math.h"
 #include "nt_pack_format.h"
-#include "sponza_assets.h"
+#include "sponza_core.h"
+#include "sponza_full.h"
+#include "sponza_geo.h"
+#include "sponza_tex.h"
 
 #include <math.h>
 #include <stdint.h>

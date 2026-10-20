@@ -35,7 +35,7 @@
 #include "window/nt_window.h"
 
 #include "../shared/nt_example_frames.h"
-#include "atlas_assets.h"
+#include "atlas_demo.h"
 #include "math/nt_math.h"
 #include "nt_pack_format.h"
 

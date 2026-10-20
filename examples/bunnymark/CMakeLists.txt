@@ -12,7 +12,7 @@ target_link_libraries(bunnymark_demo PRIVATE
     nt_debug_overlay nt_metrics nt_text_renderer nt_font
     nt_render nt_hash
 )
-# Generated asset headers from builder (bunnymark_assets.h etc.)
+# Generated per-pack asset headers from builder
 target_include_directories(bunnymark_demo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
 
 if(EMSCRIPTEN)

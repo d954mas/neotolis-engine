@@ -643,26 +643,16 @@ static void header_keep_build(bool second_shader) {
 void test_unchanged_header_keeps_its_mtime(void) {
     MKDIR(TMP_DIR "/header keep");
     header_keep_build(false);
-    const char *headers[] = {TMP_DIR "/header keep/keep.h"};
-    const char *merged = TMP_DIR "/header keep/merged.h";
-    nt_builder_merge_headers(headers, 1, merged);
     UTIMBUF old_time = {1, 1};
     TEST_ASSERT_EQUAL(0, UTIME(TMP_DIR "/header keep/keep.h", &old_time));
-    TEST_ASSERT_EQUAL(0, UTIME(merged, &old_time));
     header_keep_build(false);
-    nt_builder_merge_headers(headers, 1, merged);
     struct stat st;
     TEST_ASSERT_EQUAL(0, stat(TMP_DIR "/header keep/keep.h", &st));
-    TEST_ASSERT_EQUAL_INT64(1, (int64_t)st.st_mtime);
-    TEST_ASSERT_EQUAL(0, stat(merged, &st));
     TEST_ASSERT_EQUAL_INT64(1, (int64_t)st.st_mtime);
     nt_builder_write_record(TMP_DIR "/header keep");
     TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/header keep"));
     header_keep_build(true);
-    nt_builder_merge_headers(headers, 1, merged);
     TEST_ASSERT_EQUAL(0, stat(TMP_DIR "/header keep/keep.h", &st));
-    TEST_ASSERT_TRUE(st.st_mtime > 1);
-    TEST_ASSERT_EQUAL(0, stat(merged, &st));
     TEST_ASSERT_TRUE(st.st_mtime > 1);
     nt_builder_write_record(TMP_DIR "/header keep");
     TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/header keep"));
@@ -3568,119 +3558,6 @@ void test_codegen_renamed_assets(void) {
     nt_hash64_t expected_hash = nt_builder_normalize_and_hash("meshes/my_cube");
     TEST_ASSERT_EQUAL_HEX64(expected_hash.value, generated_hash);
 
-    free(content);
-}
-
-/* --- Merge tests --- */
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_merge_combined_header(void) {
-    const char *glb_path = TMP_DIR "/merge_tri.glb";
-    write_test_glb(glb_path);
-    const char *vert_path = TMP_DIR "/merge_test.vert";
-    write_test_shader(vert_path, "precision mediump float;\nvoid main() { gl_Position = vec4(0); }\n");
-
-    MKDIR(TMP_DIR "/merge_hdr");
-
-    /* Pack 1: mesh */
-    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/merge_pack1.ntpack");
-    nt_builder_set_header_dir(ctx, TMP_DIR "/merge_hdr");
-    NtStreamLayout layout[] = {{"POSITION", NT_STREAM_FLOAT32, 3, false, 0, NT_LOC_POSITION}};
-    nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
-    nt_builder_free_pack(ctx);
-
-    /* Pack 2: shader */
-    ctx = nt_builder_start_pack(TMP_DIR "/merge_pack2.ntpack");
-    nt_builder_set_header_dir(ctx, TMP_DIR "/merge_hdr");
-    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
-    nt_builder_free_pack(ctx);
-
-    /* Merge per-pack headers */
-    const char *headers[] = {TMP_DIR "/merge_hdr/merge_pack1.h", TMP_DIR "/merge_hdr/merge_pack2.h"};
-    const char *combined_path = TMP_DIR "/merge_assets.h";
-    nt_builder_merge_headers(headers, 2, combined_path);
-
-    /* Verify combined header */
-    char *content = read_text_file(combined_path);
-    TEST_ASSERT_NOT_NULL(content);
-    TEST_ASSERT_NOT_NULL(strstr(content, "ASSET_MESH_"));
-    TEST_ASSERT_NOT_NULL(strstr(content, "ASSET_SHADER_"));
-    TEST_ASSERT_NOT_NULL(strstr(content, "register_labels"));
-    TEST_ASSERT_NOT_NULL(strstr(content, "#ifndef"));
-    TEST_ASSERT_NULL(strchr(content, '\r'));
-    free(content);
-}
-
-void test_merge_dedup(void) {
-    const char *glb_path = TMP_DIR "/merge_dedup_tri.glb";
-    write_test_glb(glb_path);
-
-    MKDIR(TMP_DIR "/merge_dedup_hdr");
-
-    NtStreamLayout layout[] = {{"POSITION", NT_STREAM_FLOAT32, 3, false, 0, NT_LOC_POSITION}};
-
-    /* Two packs with the same mesh (same path = same hash, each in its own context) */
-    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/merge_dup1.ntpack");
-    nt_builder_set_header_dir(ctx, TMP_DIR "/merge_dedup_hdr");
-    nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
-    nt_builder_free_pack(ctx);
-
-    ctx = nt_builder_start_pack(TMP_DIR "/merge_dup2.ntpack");
-    nt_builder_set_header_dir(ctx, TMP_DIR "/merge_dedup_hdr");
-    nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
-    nt_builder_free_pack(ctx);
-
-    /* Merge — combined header should have the define only once */
-    const char *headers[] = {TMP_DIR "/merge_dedup_hdr/merge_dup1.h", TMP_DIR "/merge_dedup_hdr/merge_dup2.h"};
-    const char *combined_path = TMP_DIR "/merge_dedup.h";
-    nt_builder_merge_headers(headers, 2, combined_path);
-
-    char *content = read_text_file(combined_path);
-    TEST_ASSERT_NOT_NULL(content);
-    /* Count occurrences of ASSET_MESH_ -- should be exactly 1 */
-    uint32_t count = 0;
-    const char *p = content;
-    while ((p = strstr(p, "#define ASSET_MESH_")) != NULL) {
-        count++;
-        p++;
-    }
-    TEST_ASSERT_EQUAL_UINT32(1, count);
-    free(content);
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_merge_sorted_output(void) {
-    const char *vert_path = TMP_DIR "/merge_sort_a.vert";
-    write_test_shader(vert_path, "precision mediump float;\nvoid main() { gl_Position = vec4(0); }\n");
-    const char *frag_path = TMP_DIR "/merge_sort_b.frag";
-    write_test_shader(frag_path, "precision mediump float;\nvoid main() {}\n");
-
-    MKDIR(TMP_DIR "/merge_sort_hdr");
-
-    /* Add shaders in reverse order: b before a */
-    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/merge_sort.ntpack");
-    nt_builder_set_header_dir(ctx, TMP_DIR "/merge_sort_hdr");
-    nt_builder_add_shader(ctx, frag_path, NT_BUILD_SHADER_FRAGMENT);
-    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
-    nt_builder_free_pack(ctx);
-
-    const char *headers[] = {TMP_DIR "/merge_sort_hdr/merge_sort.h"};
-    const char *combined_path = TMP_DIR "/merge_sorted.h";
-    nt_builder_merge_headers(headers, 1, combined_path);
-
-    /* In sorted output, "a" should appear before "b" */
-    char *content = read_text_file(combined_path);
-    TEST_ASSERT_NOT_NULL(content);
-    const char *pos_a = strstr(content, "merge_sort_a");
-    const char *pos_b = strstr(content, "merge_sort_b");
-    TEST_ASSERT_NOT_NULL(pos_a);
-    TEST_ASSERT_NOT_NULL(pos_b);
-    TEST_ASSERT_TRUE_MESSAGE(pos_a < pos_b, "Assets should be sorted by name (a before b)");
     free(content);
 }
 
@@ -9989,9 +9866,6 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_codegen_renamed_assets);
 
     /* Merge */
-    RUN_TEST(test_merge_combined_header);
-    RUN_TEST(test_merge_dedup);
-    RUN_TEST(test_merge_sorted_output);
 
     /* AABB in mesh header */
     RUN_TEST(test_builder_mesh_has_aabb);

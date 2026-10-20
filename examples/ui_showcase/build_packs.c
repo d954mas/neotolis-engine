@@ -368,13 +368,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    char base_hdr[512];
-    (void)snprintf(base_hdr, sizeof(base_hdr), "%s/ui_showcase.h", HEADER_DIR);
-    const char *headers[] = {base_hdr};
-    char combined[512];
-    (void)snprintf(combined, sizeof(combined), "%s/ui_showcase_assets.h", HEADER_DIR);
-    nt_builder_merge_headers(headers, 1, combined);
-    (void)printf("Generated: %s\n", combined);
     // #endregion
 
     /* Pack size summary. */

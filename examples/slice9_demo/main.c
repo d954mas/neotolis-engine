@@ -43,7 +43,7 @@
 #include "memory/nt_mem_scratch.h"
 #include "nt_pack_format.h"
 
-#include "slice9_demo_assets.h"
+#include "slice9_demo.h"
 
 #include <math.h>
 #include <stdint.h>

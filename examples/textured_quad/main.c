@@ -49,9 +49,11 @@
 #include "window/nt_window.h"
 
 #include "../shared/nt_example_frames.h"
+#include "base.h"
+#include "lenna_hires.h"
+#include "lenna_pixel.h"
 #include "math/nt_math.h"
 #include "nt_pack_format.h"
-#include "tq_assets.h"
 
 #include <stdint.h>
 #include <string.h>

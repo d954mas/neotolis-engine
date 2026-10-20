@@ -58,7 +58,7 @@
 #include "nt_pack_format.h"
 #include "time/nt_time.h"
 
-#include "ui_showcase_assets.h"
+#include "ui_showcase.h"
 
 #include <stdint.h>
 #include <stdio.h>

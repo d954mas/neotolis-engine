@@ -98,14 +98,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    char base_hdr[512];
-    (void)snprintf(base_hdr, sizeof(base_hdr), "%s/rtt_showcase.h", HEADER_DIR);
-    const char *headers[] = {base_hdr};
-    char combined[512];
-    (void)snprintf(combined, sizeof(combined), "%s/rtt_showcase_assets.h", HEADER_DIR);
-    nt_builder_merge_headers(headers, 1, combined);
-    (void)printf("Generated: %s\n", combined);
-
     FILE *f = fopen(pack_path(out_dir, "rtt_showcase.ntpack"), "rb");
     if (f) {
         (void)fseek(f, 0, SEEK_END);

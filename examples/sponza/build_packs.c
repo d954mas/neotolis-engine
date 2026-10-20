@@ -544,20 +544,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* Generate combined header from per-pack .h files */
-    char core_hdr[512];
-    char geo_hdr[512];
-    char tex_hdr[512];
-    char full_hdr[512];
-    (void)snprintf(core_hdr, sizeof(core_hdr), "%s/sponza_core.h", header_dir);
-    (void)snprintf(geo_hdr, sizeof(geo_hdr), "%s/sponza_geo.h", header_dir);
-    (void)snprintf(tex_hdr, sizeof(tex_hdr), "%s/sponza_tex.h", header_dir);
-    (void)snprintf(full_hdr, sizeof(full_hdr), "%s/sponza_full.h", header_dir);
-    const char *pack_headers[] = {core_hdr, geo_hdr, tex_hdr, full_hdr};
-    char combined_header[512];
-    (void)snprintf(combined_header, sizeof(combined_header), "%s/sponza_assets.h", header_dir);
-    nt_builder_merge_headers(pack_headers, 4, combined_header);
-
     nt_builder_free_glb_scene(&scene);
 
     /* Print pack size summary */

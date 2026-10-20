@@ -31,7 +31,7 @@
 #include "ui/nt_ui_slider.h"
 #include "window/nt_window.h"
 
-#include "rtt_showcase_assets.h"
+#include "rtt_showcase.h"
 
 #include <stdio.h>
 #include <string.h>
