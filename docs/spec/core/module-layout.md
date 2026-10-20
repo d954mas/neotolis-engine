@@ -137,6 +137,11 @@ implementation. `engine/postfx` is optional and currently starts with
 selects the concrete gfx implementation (`nt_gfx` or `nt_gfx_stub`) at the link
 layer.
 
+`nt_crash` is opt-in and links `nt_gfx_interface` for automatic GPU identity.
+The executable chooses `nt_gfx` or `nt_gfx_stub`; headless crash capture needs
+no window or gfx initialization. Gfx does not depend on crash or install its
+handlers. The crash consumer borrows a stable view; it owns no GPU copy.
+
 `engine/renderers/nt_mesh_renderer` is one source built as two link-selected
 variant targets: `nt_mesh_renderer` and `nt_skinned_mesh_renderer`. Each target
 sets the variant for its consumers; an executable links exactly one (linking

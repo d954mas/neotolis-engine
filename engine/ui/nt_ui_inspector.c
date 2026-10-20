@@ -175,7 +175,7 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
          * in hit_baked, so fetch it by id and emit the element's Clay bbox under it. Caller binds the
          * perspective view_proj; the depth-off inspector material keeps the highlight on top. */
         const int32_t slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, ctx->inspector_highlight_id);
-        const bool slot_ok = (slot >= 0) && (slot < (int32_t)ctx->max_elements) && (ctx->hit_generation[slot] == ctx->current_generation);
+        const bool slot_ok = (slot >= 0) && (ctx->hit_generation[slot] == ctx->current_generation);
         const float *m = slot_ok ? ctx->hit_baked[slot].m : NULL;
         /* Identity affine + zero translation = no 3D placement (e.g. the GROW root): its full-canvas
          * bbox would map to a screen-filling quad, so only highlight elements that carry a transform. */

@@ -1,6 +1,7 @@
 /* Crash record, native. `<mode> <path>` fills the log ring, then crashes (trap / abort / segv);
  * ctest expects that run to fail. `check <mode> <path>` then reads the stored record. */
 #include "crash/nt_crash.h"
+#include "graphics/nt_gfx.h"
 #include "log/nt_log.h"
 
 #include <stdbool.h>
@@ -25,6 +26,25 @@
 static char s_record[65536];
 static volatile int *volatile s_null; /* opaque to the optimizer: a real SIGSEGV, not a trap */
 
+/* Stands in for the gfx snapshot; test_crash_stub_link covers the always-empty nt_gfx_stub. */
+static nt_gfx_device_info_t s_device_info;
+
+const nt_gfx_device_info_t *nt_gfx_device_info(void) { return &s_device_info; }
+
+static void set_game_context(const char *mode, char text[1100]) {
+    memset(text, 'x', 1100);
+    text[1030] = '\0';
+    nt_crash_set_context("menu");
+    nt_crash_set_context(text);
+    if (strcmp(mode, "trap") == 0) {
+        const char context[] = "level=canal\r\nlog:\nreason: custom; lives=7";
+        memcpy(text, context, sizeof(context));
+        nt_crash_set_context(text);
+    } else if (strcmp(mode, "segv") == 0) {
+        nt_crash_set_context("");
+    }
+}
+
 static int crash(const char *mode, const char *path) {
 #if defined(_WIN32)
     /* No WER dialog or report collection in the test run; the path under test stays the same. */
@@ -32,7 +52,24 @@ static int crash(const char *mode, const char *path) {
     (void)_set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
 #endif
     (void)remove(path);
+    const nt_gfx_device_info_t *device_info = nt_gfx_device_info();
+    CHECK(device_info != NULL);
+    CHECK(device_info->vendor[0] == '\0' && device_info->renderer[0] == '\0' && device_info->api_version[0] == '\0');
     nt_crash_init(path, "test_crash_record");
+    /* A later gfx initialization must be visible through the pointer cached by crash init; segv
+       keeps the snapshot empty, so its fields are omitted. */
+    if (strcmp(mode, "segv") != 0) {
+        s_device_info = (nt_gfx_device_info_t){.vendor = "Field Vendor 17", .renderer = "Field Renderer 829", .api_version = "OpenGL 3.3 field-driver-41", .caps = "astc=0 max_texture=4096"};
+    }
+    CHECK(nt_gfx_device_info() == device_info);
+    char context_source[1100];
+    set_game_context(mode, context_source);
+    /* Preserve the ownership check even when NONE removes every later log call. */
+    volatile char *context_bytes = context_source;
+    for (size_t i = 0; i < sizeof(context_source) - 1U; i++) {
+        context_bytes[i] = '?';
+    }
+    context_bytes[sizeof(context_source) - 1U] = '\0';
     for (int i = 0; i < 300; i++) {
         nt_log_warn("crash probe line %d: проверка кольца", i);
     }
@@ -61,6 +98,26 @@ static int check(const char *mode, const char *path) {
     CHECK(strstr(s_record, "\ntime: ") != NULL);
     bool is_trap = strcmp(mode, "trap") == 0;
     bool is_segv = strcmp(mode, "segv") == 0;
+    if (is_segv) {
+        CHECK(strstr(s_record, "\ngpu_") == NULL);
+    } else {
+        CHECK(strstr(s_record, "\ngpu_vendor: Field Vendor 17\ngpu_renderer: Field Renderer 829\ngpu_api: OpenGL 3.3 field-driver-41\ngpu_caps: astc=0 max_texture=4096\n") != NULL);
+    }
+    if (is_trap) {
+        CHECK(strstr(s_record, "\ncontext: level=canal  log: reason: custom; lives=7\ntime: ") != NULL);
+        CHECK(strstr(s_record, "\nreason: custom") == NULL);
+    } else if (is_segv) {
+        CHECK(strstr(s_record, "\ncontext:") == NULL);
+    } else {
+        const char *context = strstr(s_record, "\ncontext: ");
+        CHECK(context != NULL);
+        context += strlen("\ncontext: ");
+        const char *end = strchr(context, '\n');
+        CHECK(end != NULL && end - context == 1023);
+        for (size_t i = 0; i < 1023; i++) {
+            CHECK(context[i] == 'x');
+        }
+    }
 #if defined(_WIN32)
     if (is_trap) {
         CHECK(strstr(s_record, "\nreason: exception 0xc000001d\npc: exe+0x") != NULL);

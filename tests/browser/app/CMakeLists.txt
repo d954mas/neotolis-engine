@@ -22,6 +22,9 @@ target_link_libraries(browser_smoke PRIVATE
 target_compile_definitions(browser_smoke PRIVATE NT_TEST_PRESET_NAME="${NT_PRESET_NAME}")
 # Reuse the showcase's generated asset header (ui_showcase_assets.h).
 target_include_directories(browser_smoke PRIVATE "${CMAKE_SOURCE_DIR}/examples/ui_showcase/generated")
+if(TARGET ui_showcase_pack_build)
+    add_dependencies(browser_smoke ui_showcase_pack_build)
+endif()
 
 # nt_clipboard (real, per platform): nt_ui links nt_clipboard_interface; the exe picks the real impl
 # so Ctrl+C/X/V work in the field. web = async cache-on-paste, native = glfw.

@@ -39,11 +39,11 @@ float nt_ui_clay_priv_pointer_y(Clay_Context *clay);
 /* 1 if state == PRESSED or PRESSED_THIS_FRAME. */
 int nt_ui_clay_priv_pointer_pressed(Clay_Context *clay);
 
-/* Slot index is stable across frames — safe as an index into ctx->hit_baked. */
+/* Slot index into ctx->hit_baked; stable while the id is declared every frame (gate on hit_generation). */
 int32_t nt_ui_clay_priv_hashmap_slot_for_id(Clay_Context *clay, uint32_t id);
 /* May shift between frames as Clay reuses array slots — DO NOT cache. */
 int32_t nt_ui_clay_priv_layout_index_for_id(Clay_Context *clay, uint32_t id);
-/* Persistent hashmap survives BeginLayout's ephemeral reset. */
+/* Clay keeps last frame's ids across BeginLayout's ephemeral reset. */
 bool nt_ui_clay_priv_bbox_for_id(Clay_Context *clay, uint32_t id, float *x, float *y, float *w, float *h);
 /* Layout dimensions set by last nt_ui_begin. Hit-test reads these for NDC conversion. */
 float nt_ui_clay_priv_layout_width(Clay_Context *clay);

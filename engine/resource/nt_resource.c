@@ -538,7 +538,7 @@ void nt_resource_step(void) {
     double step_start = nt_time_now();
 #endif
 
-    /* Native http transfers advance only when pumped (no-op on web/stub) */
+    /* Http transfers advance only when pumped, before the pack polls below */
     nt_http_update();
 
     // #region poll loading packs and retry

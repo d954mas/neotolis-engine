@@ -83,18 +83,9 @@ static nt_resource_t s_atlas_handle;
 
 /* HD/SD toggle state — demo starts in SD.
  *
- * BUNNYMARK_HD_AVAILABLE is set by examples/bunnymark/CMakeLists.txt when the
- * raw/hd/ directory exists. When absent, s_hd_available stays false and the
- * H key + tap-zone toggle log a warning instead of crashing.
- *
  * The toggle works by mounting/unmounting the HD pack at higher priority than
  * the SD pack. Atlas merge re-maps regions in place so all live
  * SpriteComponent.region_index values stay valid across the toggle. */
-#ifdef BUNNYMARK_HD_AVAILABLE
-static bool s_hd_available = true;
-#else
-static bool s_hd_available = false;
-#endif
 static bool s_hd_active = false;
 static bool s_hd_load_started = false;
 
@@ -157,19 +148,11 @@ static bool tap_zone_hit(float px, float py, float w, float h) {
  * regions in place — region_index values stay stable across the toggle, so
  * live bunnies don't need set_region re-binding. */
 static void toggle_atlas_quality(void) {
-    if (!s_hd_available) {
-        nt_log_warn("Bunnymark: HD pack not available — toggle is a no-op (drop 5 PNGs in examples/bunnymark/raw/hd/ and re-run cmake configure to enable)");
-        return;
-    }
     if (!s_hd_load_started) {
         /* First activation: mount the HD pack at a higher priority than SD
          * (SD priority is 100; HD = 200) and kick off the auto-load. */
         nt_result_t mount_r = nt_resource_mount(s_hd_pack_id, 200);
-        if (mount_r != NT_OK) {
-            nt_log_warn("Bunnymark: HD pack mount failed (result=%d) — toggle is a no-op", (int)mount_r);
-            s_hd_available = false;
-            return;
-        }
+        NT_ASSERT(mount_r == NT_OK);
 #ifdef NT_CDN_URL
         nt_resource_load_auto(s_hd_pack_id, NT_CDN_URL "/bunnymark/bunnymark_hd.ntpack");
 #else
@@ -667,12 +650,11 @@ int main(int argc, char **argv) {
 #endif
 
     /* Log test conditions at startup. Schema:
-     *   "Bunnymark conditions: viewport=WxH sprite_size=~26x37 px blend=premultiplied atlas=SD|HD pages=N initial=I click=C hold_rate=R bunny_max=M hd_available=0|1 gpu=..."
+     *   "Bunnymark conditions: viewport=WxH sprite_size=~26x37 px blend=premultiplied atlas=SD|HD pages=N initial=I click=C hold_rate=R bunny_max=M gpu=..."
      * GPU detection is browser/driver-side and the engine doesn't yet expose a
      * caps query — gpu=unknown until that ships (documented in README). */
-    nt_log_info("Bunnymark conditions: viewport=%ux%u sprite_size=~26x37 px blend=%s atlas=%s pages=1 initial=%d click=%d hold_rate=%d bunny_max=%u hd_available=%d gpu=%s", (unsigned)s_canvas_w(),
-                (unsigned)s_canvas_h(), "premultiplied", s_hd_active ? "HD" : "SD", BUNNY_INITIAL_COUNT, BUNNY_CLICK_SPAWN_COUNT, BUNNY_HOLD_SPAWN_RATE, (unsigned)BUNNY_MAX, s_hd_available ? 1 : 0,
-                "unknown");
+    nt_log_info("Bunnymark conditions: viewport=%ux%u sprite_size=~26x37 px blend=%s atlas=%s pages=1 initial=%d click=%d hold_rate=%d bunny_max=%u gpu=%s", (unsigned)s_canvas_w(),
+                (unsigned)s_canvas_h(), "premultiplied", s_hd_active ? "HD" : "SD", BUNNY_INITIAL_COUNT, BUNNY_CLICK_SPAWN_COUNT, BUNNY_HOLD_SPAWN_RATE, (unsigned)BUNNY_MAX, "unknown");
 
     nt_app_run(frame);
 

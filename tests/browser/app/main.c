@@ -857,6 +857,11 @@ EMSCRIPTEN_KEEPALIVE void nt_test_http_get_slow_timeout(void) {
 EMSCRIPTEN_KEEPALIVE void nt_test_http_get_slow(void) { s_nt_http_req = nt_http_request("/slow"); }
 EMSCRIPTEN_KEEPALIVE int nt_test_http_state(void) { return (int)nt_http_state(s_nt_http_req); }
 EMSCRIPTEN_KEEPALIVE int nt_test_http_status(void) { return (int)nt_http_status(s_nt_http_req); }
+EMSCRIPTEN_KEEPALIVE int nt_test_http_total(void) {
+    uint32_t total = 0;
+    nt_http_progress(s_nt_http_req, NULL, &total);
+    return (int)total;
+}
 EMSCRIPTEN_KEEPALIVE const char *nt_test_http_headers(void) {
     const char *h = nt_http_response_headers(s_nt_http_req);
     return h != NULL ? h : "";
@@ -886,7 +891,9 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_rich_link_clicks(void) { return s_stat
  * only inits. reject traps inside a Promise callback (unhandledrejection); jserror throws a plain
  * JS Error through wasm frames (the stack-text branch of the capture filter). */
 enum { CRASH_OFF, CRASH_TRAP, CRASH_ABORT, CRASH_READ, CRASH_REJECT, CRASH_JS_ERROR };
+#if NT_LOG_MIN_LEVEL <= 2
 static const char *const k_crash_modes[] = {"", "trap", "abort", "read", "reject", "jserror"};
+#endif
 EMSCRIPTEN_KEEPALIVE void nt_test_crash_trap(void) { __builtin_trap(); }
 /* clang-format off */
 EM_JS(void, nt_test_crash_reject, (void), {
@@ -911,6 +918,12 @@ static void crash_probe_step(void) {
     }
     uint32_t mode = s_nt_crash_mode;
     s_nt_crash_mode = CRASH_OFF; /* reject leaves the frame loop running */
+    char context[] = "level=forest\nphase=loading\rcheckpoint=7";
+    nt_crash_set_context(context);
+    volatile char *source = context;
+    for (size_t i = 0; i < sizeof(context) - 1U; i++) {
+        source[i] = '?';
+    }
     /* Grow the heap first: the capture must read the ring through the replaced memory views. */
     volatile char *grow = (volatile char *)malloc(emscripten_get_heap_size() + (16U << 20));
     NT_ASSERT(grow);
@@ -996,6 +1009,7 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'http_get_slow': function() { _nt_test_http_get_slow(); },
         'http_state': function() { return _nt_test_http_state(); },
         'http_status': function() { return _nt_test_http_status(); },
+        'http_total': function() { return _nt_test_http_total(); },
         'http_headers': function() { return UTF8ToString(_nt_test_http_headers()); },
         'http_verify_echo': function() { return _nt_test_http_verify_echo(); },
         'http_free': function() { _nt_test_http_free(); },
@@ -1308,6 +1322,12 @@ static void frame(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
+#if defined(__EMSCRIPTEN__)
+    if (g_nt_gfx.context_restored) {
+        s_observe_values[31] = g_nt_gfx.counters.gl[NT_GFX_GL_glGetString];
+    }
+#endif
+
     nt_window_swap_buffers();
 #if defined(__EMSCRIPTEN__)
     crash_probe_step();
@@ -1332,6 +1352,13 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     nt_log_info("browser_smoke: %s build (%s)", nt_engine_build_string(), nt_engine_preset_string());
+
+#if defined(__EMSCRIPTEN__)
+    s_nt_crash_mode = nt_test_crash_mode();
+    if (s_nt_crash_mode != CRASH_OFF) {
+        nt_crash_init("nt.test.crash", "browser_smoke-test");
+    }
+#endif
 
     g_nt_window.width = 1280;
     g_nt_window.height = 800;
@@ -1466,10 +1493,6 @@ int main(int argc, char *argv[]) {
 
 #if defined(__EMSCRIPTEN__)
     s_rich_composition_mode = nt_test_rich_composition_mode();
-    s_nt_crash_mode = nt_test_crash_mode();
-    if (s_nt_crash_mode != CRASH_OFF) {
-        nt_crash_init("nt.test.crash", "browser_smoke-test");
-    }
     /* Transparency removes one probe's pixels without changing layout or readiness. */
     s_nt_hidden_input_style = s_input_style;
     for (uint32_t i = 0; i < NT_UI_INPUT_STATE_COUNT; i++) {

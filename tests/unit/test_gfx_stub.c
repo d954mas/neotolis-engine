@@ -3,6 +3,8 @@
 #include "test_helpers/nt_assert_trap.h"
 #include "unity.h"
 
+static const nt_gfx_device_info_t *s_info_before_init;
+
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     nt_gfx_init(&desc);
@@ -10,6 +12,19 @@ void setUp(void) {
 }
 
 void tearDown(void) { nt_gfx_shutdown(); }
+
+static void test_device_info_is_empty_and_survives_shutdown(void) {
+    const nt_gfx_device_info_t *info = nt_gfx_device_info();
+    TEST_ASSERT_NOT_NULL(s_info_before_init);
+    TEST_ASSERT_NOT_NULL(info);
+    TEST_ASSERT_EQUAL_PTR(s_info_before_init, info);
+    nt_gfx_shutdown();
+    TEST_ASSERT_EQUAL_PTR(info, nt_gfx_device_info());
+    TEST_ASSERT_EQUAL_STRING("", info->vendor);
+    TEST_ASSERT_EQUAL_STRING("", info->renderer);
+    TEST_ASSERT_EQUAL_STRING("", info->api_version);
+    TEST_ASSERT_EQUAL_STRING("", info->caps);
+}
 
 static void test_stub_has_no_graphics_resources(void) {
     nt_shader_t shader = nt_gfx_make_shader(&(nt_shader_desc_t){.source = "void main(){}"});
@@ -113,7 +128,9 @@ static void test_stub_frame_storage_allocation_asserts(void) {
 #endif
 
 int main(void) {
+    s_info_before_init = nt_gfx_device_info();
     UNITY_BEGIN();
+    RUN_TEST(test_device_info_is_empty_and_survives_shutdown);
     RUN_TEST(test_stub_has_no_graphics_resources);
     RUN_TEST(test_stub_returns_empty_queries_without_fabricating_pixels);
     RUN_TEST(test_stub_drops_draws_and_state_changes);

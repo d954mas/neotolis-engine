@@ -992,6 +992,7 @@ void nt_atlas_add(NtAtlasBuild *atlas, const char *path, const nt_atlas_sprite_o
     /* Missing or unreadable files are environment errors, not content errors. */
     char *resolved_path = nt_builder_find_file(path, NULL, ctx);
     const char *read_path = resolved_path ? resolved_path : path;
+    nt_builder_record_input(read_path);
     uint32_t file_size = 0;
     bool file_too_large = false;
     uint8_t *file_data = (uint8_t *)nt_builder_read_file_bounded(read_path, INT_MAX, &file_size, &file_too_large);

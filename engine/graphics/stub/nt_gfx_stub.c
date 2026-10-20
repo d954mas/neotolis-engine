@@ -3,6 +3,9 @@
 
 /* This implementation has no GPU resources or draw state. */
 nt_gfx_t g_nt_gfx;
+static nt_gfx_device_info_t s_device_info;
+
+const nt_gfx_device_info_t *nt_gfx_device_info(void) { return &s_device_info; }
 /* Zero capacity: any frame storage allocation reaches the overflow. */
 nt_gfx_frame_storage_t g_nt_gfx_frame_storage[NT_GFX_FRAME_STREAM_COUNT];
 

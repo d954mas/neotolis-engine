@@ -30,11 +30,14 @@ static const char *pack_path(const char *dir, const char *name) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
+    if (argc != 2) {
         (void)fprintf(stderr, "Usage: build_rtt_showcase_packs <pack_dir>\n");
         return 1;
     }
     const char *out_dir = argv[1];
+    if (nt_builder_up_to_date(out_dir)) {
+        return 0;
+    }
 
     (void)printf("=== Build RTT Showcase Pack -> %s ===\n\n", out_dir);
 
@@ -111,6 +114,7 @@ int main(int argc, char *argv[]) {
         (void)printf("  rtt_showcase.ntpack    %8.1f KB\n", (double)sz / 1024.0);
     }
 
+    nt_builder_write_record(out_dir);
     (void)printf("\n=== Done ===\n");
     return 0;
 }

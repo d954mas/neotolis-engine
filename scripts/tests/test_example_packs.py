@@ -1,5 +1,3 @@
-import json
-import os
 from pathlib import Path
 import subprocess
 import sys
@@ -11,6 +9,19 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 
 
+# Stands in for a pack builder that leaves a current pack and header untouched.
+FIXTURE_BUILDER = r"""from pathlib import Path
+
+asset = (Path(SOURCE) / "asset.txt").read_text()
+pack = Path(__file__).parent / "fixture.ntpack"
+if not pack.exists() or pack.read_text() != asset:
+    pack.write_text(asset)
+header = Path(SOURCE) / "generated" / "fixture.h"
+if header.read_text() != f"#define FIXTURE_{asset} 1\n":
+    header.write_text(f"#define FIXTURE_{asset} 1\n")
+"""
+
+
 class ExamplePacksTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="nt packs ")
@@ -20,42 +31,33 @@ class ExamplePacksTests(unittest.TestCase):
         self.packs = Path(self.temp.name) / "packs"
         self.source.mkdir()
         self.packs.mkdir()
-        self.raw = self.source / "raw"
-        self.raw.mkdir()
-        self.shared = self.source / "shared shaders"
-        self.shared.mkdir()
-        self.asset = self.raw / "font.txt"
+        self.asset = self.source / "asset.txt"
         self.asset.write_text("original", encoding="utf-8")
-        (self.shared / "shader.txt").write_text("shader", encoding="utf-8")
-        # Python accepts a directory containing __main__.py as its program.
-        # This fixture exercises the real CMake build/copy graph without codecs.
+        # Committed generated header, as examples/*/generated/*.h.
+        (self.source / "generated").mkdir()
+        (self.source / "generated/fixture.h").write_text("#define FIXTURE_original 1\n", encoding="utf-8")
+        (self.source / "main.c").write_text(
+            '#include "fixture.h"\n#ifndef FIXTURE_original\nint edited;\n#endif\nint main(void) { return 0; }\n',
+            encoding="utf-8")
+        # Python accepts a directory containing __main__.py as its program, so
+        # the real CMake build/copy graph runs without codecs.
         (self.packs / "__main__.py").write_text(
-            "import json\nfrom pathlib import Path\n"
-            f"source = Path({str(self.source)!r})\n"
-            "files = {p.relative_to(source).as_posix(): p.read_text()\n"
-            "         for name in ('raw', 'shared shaders')\n"
-            "         for p in (source / name).rglob('*') if p.is_file()}\n"
-            "Path(__file__).with_name('fixture.ntpack').write_text(json.dumps(files, sort_keys=True))\n",
-            encoding="utf-8",
-        )
-        self.write_project()
-
-    def write_project(self, input_dirs=True):
-        dirs = 'INPUT_DIRS raw "${CMAKE_CURRENT_SOURCE_DIR}/shared shaders"' if input_dirs else ""
+            FIXTURE_BUILDER.replace("SOURCE", repr(str(self.source))), encoding="utf-8")
         (self.source / "CMakeLists.txt").write_text(
             f'''cmake_minimum_required(VERSION 3.25)
-project(pack_inputs NONE)
+project(pack_inputs C)
 set(NT_ENGINE_ROOT "{ROOT.as_posix()}")
 include("${{NT_ENGINE_ROOT}}/cmake/nt_example_packs.cmake")
 add_executable(builder IMPORTED)
 set_target_properties(builder PROPERTIES IMPORTED_LOCATION "{Path(sys.executable).as_posix()}")
-add_custom_target(demo ALL)
+add_executable(demo main.c)
+target_include_directories(demo PRIVATE generated)
 nt_example_packs(
     NAME fixture TARGET demo BUILDER builder
     PACK_DIR "{self.packs.as_posix()}"
     ASSETS_DIR "${{CMAKE_CURRENT_BINARY_DIR}}/assets"
+    GENERATED_DIR generated
     PACKS fixture.ntpack
-    {dirs}
 )
 ''',
             encoding="utf-8",
@@ -67,66 +69,38 @@ nt_example_packs(
             encoding="utf-8", errors="replace",
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return result.stdout
 
     def configure(self, *args):
-        self.run_cmake("-S", self.source, "-B", self.build, "-G", "Ninja", *args)
+        self.run_cmake("-S", self.source, "-B", self.build, "-G", "Ninja", "-DCMAKE_C_COMPILER=clang", *args)
 
-    def build_and_check(self):
+    def mtimes(self):
+        return [p.stat().st_mtime_ns for p in (self.packs / "fixture.ntpack", self.build / "assets/fixture.ntpack")]
+
+    def test_builder_runs_every_build_and_copies_only_changed_packs(self):
+        self.configure()
         self.run_cmake("--build", self.build)
-        expected = {
-            p.relative_to(self.source).as_posix(): p.read_text(encoding="utf-8")
-            for directory in (self.raw, self.shared)
-            for p in directory.rglob("*") if p.is_file()
-        }
-        for path in (self.packs / "fixture.ntpack", self.build / "assets/fixture.ntpack"):
-            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), expected)
-
-    def test_native_tracks_edits_additions_removals_and_new_subdirectories(self):
-        self.configure()
-        self.build_and_check()
-        pack = self.packs / "fixture.ntpack"
-        original_mtime = pack.stat().st_mtime_ns
-        self.build_and_check()
-        self.configure()
-        self.build_and_check()
-        self.assertEqual(pack.stat().st_mtime_ns, original_mtime)
-
+        self.assertEqual((self.build / "assets/fixture.ntpack").read_text(encoding="utf-8"), "original")
+        before = self.mtimes()
         time.sleep(1.1)
+        # The builder decides: an untouched pack is neither rewritten nor copied
+        # again (restat skips the copy edge, not just copy_if_different).
+        noop = self.run_cmake("--build", self.build)
+        self.assertNotIn("Copying", noop)
+        self.assertNotIn("main.c", noop)
+        self.assertEqual(self.mtimes(), before)
+
+        # One build: the regenerated header recompiles its includer right away.
         self.asset.write_text("edited", encoding="utf-8")
-        self.build_and_check()
-
-        time.sleep(1.1)
-        nested = self.raw / "new subdirectory" / "mesh.txt"
-        nested.parent.mkdir()
-        nested.write_text("added", encoding="utf-8")
-        # A copied asset can predate the pack; membership alone must invalidate it.
-        os.utime(nested, (1, 1))
-        self.build_and_check()
-
-        time.sleep(1.1)
-        nested.unlink()
-        self.build_and_check()
-
-        time.sleep(1.1)
-        (self.shared / "shader.txt").write_text("edited include", encoding="utf-8")
-        self.build_and_check()
-
-        time.sleep(1.1)
-        self.asset.unlink()
-        self.build_and_check()
-
-        time.sleep(1.1)
-        self.asset.write_text("restored into empty directory", encoding="utf-8")
-        self.build_and_check()
-
-    def test_procedural_pack_needs_no_input_directories(self):
-        self.write_project(input_dirs=False)
-        self.configure()
-        self.build_and_check()
+        edited = self.run_cmake("--build", self.build)
+        self.assertIn("Copying", edited)
+        self.assertIn("main.c", edited)
+        self.assertEqual((self.build / "assets/fixture.ntpack").read_text(encoding="utf-8"), "edited")
+        self.assertTrue(all(a > b for a, b in zip(self.mtimes(), before)))
 
     def test_wasm_and_skipped_native_only_copy_prebuilt_packs(self):
         self.configure()
-        self.build_and_check()
+        self.run_cmake("--build", self.build)
         pack = self.packs / "fixture.ntpack"
         original_bytes = pack.read_bytes()
         original_mtime = pack.stat().st_mtime_ns

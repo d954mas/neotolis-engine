@@ -223,12 +223,15 @@ static bool finish(NtBuilderContext *ctx, const char *name) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
+    if (argc != 2) {
         (void)fprintf(stderr, "Usage: build_skeletal_showcase_packs <pack_dir>\n");
         return 1;
     }
 
     const char *out_dir = argv[1];
+    if (nt_builder_up_to_date(out_dir)) {
+        return 0;
+    }
     (void)printf("=== Build Skeletal showcase packs -> %s ===\n\n", out_dir);
     (void)MKDIR(out_dir);
     (void)MKDIR(HEADER_DIR);
@@ -329,6 +332,7 @@ int main(int argc, char *argv[]) {
     const char *headers[] = {rig_header, clips_header};
     nt_builder_merge_headers(headers, 2, merged);
     (void)printf("Generated: %s\n", merged);
+    nt_builder_write_record(out_dir);
     (void)printf("\n=== Done ===\n");
     return 0;
 }

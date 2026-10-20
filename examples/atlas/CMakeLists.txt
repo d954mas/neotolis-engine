@@ -40,11 +40,8 @@ nt_example_packs(
     BUILDER build_atlas_packs
     PACK_DIR "${ATLAS_PACK_DIR}"
     ASSETS_DIR "${ATLAS_ASSETS_DIR}"
+    GENERATED_DIR generated
     PACKS atlas_demo.ntpack
-    INPUT_DIRS
-        "${NT_ENGINE_ROOT}/assets/meshes"
-        "${NT_ENGINE_ROOT}/assets/shaders"
-        "${NT_ENGINE_ROOT}/assets/sprites/spineboy"
 )
 
 # Optional CDN base URL

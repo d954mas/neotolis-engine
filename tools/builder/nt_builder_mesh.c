@@ -109,10 +109,38 @@ static nt_build_result_t nt_validate_layout_alignment(const char *label, const N
 
 /* --- glTF parsing with multi-mesh support --- */
 
+/* cgltf reads the .gltf/.glb and its external buffers through this hook. A
+ * buffer passes its byteLength in *size and fails on a shorter file, like the
+ * default reader. The default release frees with free(). */
+static cgltf_result gltf_read_input(const struct cgltf_memory_options *memory_options, const struct cgltf_file_options *file_options, const char *path, cgltf_size *size, void **data) {
+    (void)memory_options;
+    (void)file_options;
+    nt_builder_record_input(path);
+    uint32_t file_size = 0;
+    void *file_data = nt_builder_read_file(path, &file_size);
+    if (!file_data) {
+        return cgltf_result_file_not_found;
+    }
+    if (*size > file_size) {
+        free(file_data);
+        return cgltf_result_io_error;
+    }
+    if (*size == 0) {
+        *size = file_size;
+    }
+    *data = file_data;
+    return cgltf_result_success;
+}
+
+void nt_builder_init_gltf_options(cgltf_options *options) {
+    memset(options, 0, sizeof(*options));
+    options->file.read = gltf_read_input;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_build_result_t nt_parse_gltf_mesh(const char *path, const char *mesh_name, uint32_t mesh_index, cgltf_data **out_data, cgltf_primitive **out_prim) {
     cgltf_options options;
-    memset(&options, 0, sizeof(options));
+    nt_builder_init_gltf_options(&options);
 
     cgltf_result result = cgltf_parse_file(&options, path, out_data);
     if (result != cgltf_result_success) {

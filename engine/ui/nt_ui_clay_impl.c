@@ -307,8 +307,7 @@ int32_t nt_ui_internal_collect_tree_rows(const nt_ui_context_t *ctx, nt_ui_inspe
                 // #endregion
             }
             // #region child-push
-            /* NULL elements with length>0 = capacity-exceeded frame (see bt_dfs_subtree); treat as childless. */
-            const int32_t childCount = (el->childrenOrTextContent.children.elements == NULL) ? 0 : el->childrenOrTextContent.children.length;
+            const int32_t childCount = el->childrenOrTextContent.children.length;
             if (stack[top].child_cursor < childCount) {
                 int32_t child_idx = el->childrenOrTextContent.children.elements[stack[top].child_cursor];
                 stack[top].child_cursor++;
@@ -480,11 +479,9 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
             f->opacity = op;
         }
 
-        /* Text leaves have no .children; a capacity-exceeded frame leaves non-text parents with
-         * children.length>0 but children.elements==NULL (Clay__CloseElement's maxElementsExceeded
-         * early-return skips the elements assignment) — treat as childless to degrade, not deref. */
+        /* Text leaves have no .children. */
         const bool is_text = Clay__ElementHasConfig(elem, CLAY__ELEMENT_CONFIG_TYPE_TEXT);
-        const int32_t child_count = (is_text || elem->childrenOrTextContent.children.elements == NULL) ? 0 : elem->childrenOrTextContent.children.length;
+        const int32_t child_count = is_text ? 0 : elem->childrenOrTextContent.children.length;
 
         if (f->children_cursor < child_count) {
             const int32_t child_idx = elem->childrenOrTextContent.children.elements[f->children_cursor];
@@ -512,7 +509,7 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
     const int32_t R = cc->layoutElementTreeRoots.length;
 
     // #region init + degenerate-early-out
-    /* Covers unvisited elements (R==0, maxElementsExceeded, walker reads of stale-index errors). */
+    /* Covers unvisited elements (R==0). */
     const nt_ui_baked_xform_t identity = nt_ui_internal_identity_baked();
     for (int32_t i = 0; i < N; ++i) {
         ctx->tree_baked[i] = identity;
@@ -551,39 +548,27 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
         if (root->parentId == 0U) {
             seed = identity;
         } else {
-            Clay_LayoutElementHashMapItem *p_item = Clay__GetHashMapItem(root->parentId);
-            if (p_item == &Clay_LayoutElementHashMapItem_DEFAULT) {
-                /* A parent added past Clay's maxElementCount is never inserted into the hashmap. */
-                NT_ASSERT(false && "build_tree: floating root's parentId missing — Clay element hashmap saturated; raise the list's id_ring");
-            } else {
-                const int32_t p_elem_idx = (int32_t)(p_item->layoutElement - cc->layoutElements.internalArray);
-                /* A baked floating parent must precede this root: 0 <= p < elem_idx. Anything else = a STALE
-                 * layoutElement (Clay element hashmap saturated by a list's distinct ids) -> developer error, ASSERT. */
-                if (p_elem_idx >= 0 && p_elem_idx < elem_idx) {
-                    seed = ctx->tree_baked[p_elem_idx];
-                    seed.hierarchy_depth = (uint16_t)(seed.hierarchy_depth + 1U);
-                } else {
-                    NT_ASSERT(false && "build_tree: floating parent index stale — Clay element hashmap saturated; raise the list's id_ring");
-                }
-            }
+            const Clay_LayoutElementHashMapItem *p_item = Clay__GetHashMapItem(root->parentId);
+            /* Clay_EndLayout prunes ids not declared this frame. */
+            NT_ASSERT(p_item != &Clay_LayoutElementHashMapItem_DEFAULT && "build_tree: floating parent was not declared this frame");
+            const int32_t p_elem_idx = (int32_t)(p_item->layoutElement - cc->layoutElements.internalArray);
+            NT_ASSERT(p_elem_idx < elem_idx && "build_tree: floating parent must be declared before its floating element");
+            seed = ctx->tree_baked[p_elem_idx];
+            seed.hierarchy_depth = (uint16_t)(seed.hierarchy_depth + 1U);
         }
         bt_dfs_subtree(ctx, cc, elem_idx, &seed, root_zindex);
     }
     // #endregion
 
     // #region snapshot-per-id (hit_baked)
-    /* Snapshot per-id into hashmap-slot-indexed arrays (Clay's hashmap is persistent across frames). */
+    /* Snapshot per-id into hashmap-slot-indexed arrays; next frame reads them while Clay keeps this frame's ids. */
+    NT_ASSERT(cc->layoutElementsHashMapInternal.capacity == (int32_t)(ctx->max_elements * 2U) && "build_tree: hit_* mirrors are sized 2 * max_elements, Clay's hashmap capacity");
     ctx->current_generation++;
     for (int32_t elem_idx = 0; elem_idx < N; ++elem_idx) {
         Clay_LayoutElement *el = Clay_LayoutElementArray_Get(&cc->layoutElements, elem_idx);
         Clay_LayoutElementHashMapItem *item = Clay__GetHashMapItem(el->id);
-        if (item == &Clay_LayoutElementHashMapItem_DEFAULT) {
-            continue;
-        }
+        NT_ASSERT(item != &Clay_LayoutElementHashMapItem_DEFAULT && "build_tree: a declared element has no Clay hashmap slot");
         const int32_t slot = (int32_t)(item - cc->layoutElementsHashMapInternal.internalArray);
-        if (slot < 0 || slot >= (int32_t)ctx->max_elements) {
-            continue;
-        }
         ctx->hit_baked[slot] = ctx->tree_baked[elem_idx];
         const int32_t clip_id = (elem_idx < cc->layoutElementClipElementIds.length) ? Clay__int32_tArray_GetValue(&cc->layoutElementClipElementIds, elem_idx) : 0;
         ctx->hit_clip_parent_id[slot] = (uint32_t)clip_id;
@@ -1010,7 +995,7 @@ uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out
                 // #endregion
             }
             // #region child-push
-            const int32_t childCount = (el->childrenOrTextContent.children.elements == NULL) ? 0 : el->childrenOrTextContent.children.length;
+            const int32_t childCount = el->childrenOrTextContent.children.length;
             if (stack[top].child_cursor < childCount) {
                 int32_t child_idx = el->childrenOrTextContent.children.elements[stack[top].child_cursor];
                 stack[top].child_cursor++;
@@ -1043,7 +1028,7 @@ uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out
         bool pending = (last_root + 1) < roots;
         for (int32_t i = 0; i < sp && !pending; ++i) {
             const Clay_LayoutElement *fel = Clay_LayoutElementArray_Get(&ctx->clay->layoutElements, stack[i].elem_idx);
-            const int32_t fchildren = (fel->childrenOrTextContent.children.elements == NULL) ? 0 : fel->childrenOrTextContent.children.length;
+            const int32_t fchildren = fel->childrenOrTextContent.children.length;
             const bool not_filled = stack[i].child_cursor < 0;       /* node-fill not yet run */
             const bool has_more = stack[i].child_cursor < fchildren; /* children left to push */
             if (not_filled || has_more) {
@@ -1540,9 +1525,6 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                         continue;
                     }
                     const Clay_LayoutElementHashMapItem *item = Clay__GetHashMapItem(eid->id);
-                    if (item == NULL) {
-                        continue;
-                    }
                     /* Skip anything inside the panel footprint — the named-id set is not exhaustive. */
                     if (item->boundingBox.x >= panel_left_x) {
                         continue;
@@ -1564,7 +1546,8 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
     // #endregion
 
     // #region highlight-emit
-    if (highlightedElementId) {
+    /* Zones and pointer-over ids can name last frame's elements; the highlight floats only on this frame's. */
+    if (highlightedElementId && Clay__GetHashMapItem(highlightedElementId)->generation == context->generation + 1U) {
         /* Relative to ntInsp_Root: -1 lands just under the panel body it would otherwise cover. */
         CLAY({.id = CLAY_ID("ntInsp_ElementHighlight"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
@@ -1719,11 +1702,9 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
         // #region selected-info-pane
         CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_FIXED(1)}}, .backgroundColor = CDV_COLOR_3, .userData = debug_bg_data}) {}
         if (ctx->inspector_selected_id != 0U) {
-            /* GetHashMapItem returns the zeroed DEFAULT sentinel (non-NULL, NULL layoutElement) on a
-             * miss — a selection past the element/hashmap budget resolves here, so guard the sentinel
-             * AND the NULL layoutElement, not just `!= NULL` (a debug tool must not crash the game). */
+            /* Only an id declared this frame has a layoutElement in this frame's array. */
             Clay_LayoutElementHashMapItem *selectedItem = Clay__GetHashMapItem(ctx->inspector_selected_id);
-            if (selectedItem != NULL && selectedItem != &Clay_LayoutElementHashMapItem_DEFAULT && selectedItem->layoutElement != NULL) {
+            if (selectedItem->generation == context->generation + 1U) {
                 Clay_ElementId selInfoId = Clay__HashString(CLAY_STRING("ntInsp_SelectedInfoPane"), 0, 0);
                 /* Resolve offset BEFORE opening the clip element (helper reads prev-frame Clay dims). */
                 const Clay_Vector2 selInfoOffset = nt_ui_internal_scroll_pane_offset(ctx, selInfoId.id, NT_UI_STATE_TAG('i', 'n', 's', '2'), false, true);

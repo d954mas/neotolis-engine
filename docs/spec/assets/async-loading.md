@@ -46,10 +46,8 @@ game code: nt_resource_mount(pack_id, priority)
 
 ... N frames pass ...
 
-JS completion callback
-  → HTTP request stores the received WASM buffer and completion state
-
 Next nt_resource_step():
+  → nt_http_update() delivers the completed response into a C buffer
   → polls the HTTP request and takes its completed buffer
   → first load: parses the manifest and registers assets (BLOB owners are READY)
   → reload after eviction: restores bytes for retained records without reparsing
@@ -109,8 +107,8 @@ State semantics: **DONE = a full response arrived with ANY HTTP status** (a 404
 body is data, not a transport error) — the caller checks `nt_http_status()`;
 **FAILED = transport error, timeout or cancel** (a status may still be recorded).
 `nt_http_response_headers()` returns lowercased `"name: value\n"` lines, valid
-until `nt_http_free`/`nt_http_shutdown`. `nt_http_update()` pumps native
-transfers (no-op on web/stub) — call it once per frame while requests are in
+until `nt_http_free`/`nt_http_shutdown`. `nt_http_update()` advances
+transfers on native and web (no-op on stub) — call it once per frame while requests are in
 flight; `nt_resource_step()` calls it too, and the pump is global, so it
 advances the game's own requests as well (see
 [frame lifecycle](../runtime/frame-lifecycle.md)).
@@ -145,28 +143,31 @@ native backend via `CURLOPT_ACCEPT_ENCODING` with curl's gzip/deflate decoders
 Progress numbers are transport-level best effort while DOWNLOADING on both
 backends; at DONE both report `received == total ==` decoded size.
 
-Web bridge (EM_JS in `engine/http/web/nt_http_web.c`):
+Web bridge (EM_JS in `engine/http/web/nt_http_web.c`, all called from C):
 
 ```c
-// Called from C → JS (request parameters read from the slot)
-void nt_http_web_fetch(int slot, int generation, const char *url,
-                       const char *method, const uint8_t *body, int body_size,
-                       const char *headers, int headers_size, int timeout_ms);
-
-// Called from JS → C (generation-checked against the slot)
-EMSCRIPTEN_KEEPALIVE
-void nt_http_web_on_progress(int slot, int generation, int received, int total);
-
-EMSCRIPTEN_KEEPALIVE
-void nt_http_web_on_complete(int slot, int generation, uint8_t *data, int size,
-                             int status, char *resp_headers, int success);
+// Starts fetch(); request parameters read from the slot
+void nt_http_web_fetch(int slot, const char *url, const char *method,
+                       const uint8_t *body, int body_size, const char *headers,
+                       int headers_size, int timeout_ms);
+// out: received, total, status, header block size with its NUL (0 = none yet);
+// returns the nt_http_state_t
+int nt_http_web_poll(int slot, uint32_t *out);
+// Copies the body and header block into C buffers (NULL drops), drops the record
+void nt_http_web_take(int slot, uint8_t *data, char *hdrs);
+void nt_http_web_cancel(int slot);
 ```
 
-The `(slot, generation)` pair is the single staleness mechanism: freeing a slot
-bumps its generation, and `nt_http_shutdown` bumps and PRESERVES every
-generation across shutdown/init, so a callback from a fetch started in a
-previous lifecycle of the module always mismatches (its payload is freed on
-rejection).
+Promise handlers only fill a JS record per slot; wasm is never entered from
+them. `nt_http_update()` polls the in-flight slots, allocates the body and
+header buffers in C and takes the JS record. A C fault while delivering
+therefore happens inside the game's frame: it escapes the requestAnimationFrame
+callback, which stops the frame loop like any other crash, and reaches the
+window `error` handler, where `nt_crash` records it once initialized. A JS
+record lives exactly while its C slot is in flight (take, cancel and shutdown
+drop it), so late handlers of a cancelled fetch write only to the dropped
+record. The handle generation rejects stale game handles across slot reuse and
+shutdown/init.
 
 ## Asset activation strategy
 

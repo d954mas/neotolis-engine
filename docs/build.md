@@ -37,29 +37,23 @@ packs cause an explicit WASM build failure.
 The first Sponza encode can take hours. To defer it, configure native builds
 with `-DNT_SKIP_EXAMPLE_PACKS=sponza`; this cache setting persists. Reset it with
 `-DNT_SKIP_EXAMPLE_PACKS=` when Sponza is needed. Warm encodes reuse
-`build/examples/*/_cache`. Packs depend on the builder executable and files in
-the example's `INPUT_DIRS`. Native builds detect edits, additions and removals
-recursively, including shader includes and new subdirectories. An unchanged
-input tree does not rerun the builder. Generated `examples/*/generated/*.h` are
+`build/examples/*/_cache`. Generated `examples/*/generated/*.h` are
 deterministic tracked output; commit refreshed copies when a pack build reveals
 they were stale.
 
-Declare input directories once in `nt_example_packs`, for example:
-
-```cmake
-INPUT_DIRS raw "${NT_ENGINE_ROOT}/assets/shaders"
-```
-
-Relative paths are resolved from the example's source directory. Include shared
-asset directories used by its builder; procedural-only packs need no
-`INPUT_DIRS`. Keep pack outputs, generated headers and caches outside these
-directories. Every file within a listed directory is a dependency, even if the
-builder does not consume it. The builder still decides what goes into the pack.
-File discovery runs during builds, without a background watcher; an automatically
-generated file list also invalidates packs when inputs are removed or added with
-old timestamps. Skipped examples do not scan inputs or rebuild packs. WASM still
-requires a native build after asset edits; reconfigure WASM if the required pack
-set changes, such as adding Bunnymark HD art.
+Every native build runs each example's pack builder; it exits at once while
+`<pack dir>/build_record.txt` is current. A new `build_packs.c` follows the
+builder spec, "Build record"; its `nt_example_packs` call names
+`GENERATED_DIR`, whose headers become build byproducts, so code that includes
+them recompiles in the same build. Another target that includes them (a test,
+`browser_smoke`) adds `add_dependencies(<target> <name>_pack_build)`, so
+building it alone also runs that pack build; `ninja -t missingdeps` lists a
+forgotten one. A header that appears or disappears reruns CMake once (globbed
+byproduct list). A byproduct is deleted by
+`cmake --build --target clean`; the next native build writes the tracked
+headers again. A file added where an asset lookup would now find it first does
+not rebuild packs (lookup misses are not recorded). Skipped examples do not
+rebuild packs. WASM still requires a native build after asset edits.
 
 ## Build options
 
@@ -201,7 +195,7 @@ cmake --preset native-debug
 cmake --build --preset native-debug --target test_basisu_golden_produce
 ctest --preset native-debug --no-tests=error -R '^test_basisu_golden_produce$'
 skip="asteroids;atlas;bunnymark;rtt_showcase;skeletal_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase"
-tests='^test_(basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder)$'
+tests='^test_(basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder(_record_.*)?)$'
 # UASTC only (the smallest transcoder)
 cmake --preset native-debug -B build/_cmake/basisu-uastc-only -DNT_BASISU_HAS_ETC1S=OFF -DNT_SKIP_EXAMPLE_PACKS="$skip"
 cmake --build build/_cmake/basisu-uastc-only --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
@@ -268,6 +262,11 @@ unchanged tree recompiles nothing; a changed identity relinks its consumers.
 `nt_core`, the builder and pack builds do not link `nt_version`, so changing the
 commit identity alone does not rebuild packs. The returned version and crash
 record format are defined in [Logging, Errors, Debugging](spec/debug/logging-errors-debugging.md#engine-version).
+
+Crash capture uses `nt_gfx_interface`. A graphics executable selects `nt_gfx`;
+a headless executable selects `nt_gfx_stub` without initializing graphics.
+For left-to-right static archive linkers put the provider after the consumer:
+`target_link_libraries(game PRIVATE nt_crash nt_gfx_stub nt_log)`.
 
 To change the crash log capacity, set the definition on the engine target after
 adding the engine to the game project:
@@ -359,6 +358,9 @@ log floor with FULL asserts, TRAP positive paths, timing producers ON/OFF,
 metrics independence, UI key checks ON with inspector OFF and OFF with inspector ON,
 and inspector ON with UI timing OFF. Gfx observation exercises capture ON and OFF,
 including fake/frontend and inert stub paths.
+The NONE rows with FULL and TRAP asserts also run the crash record cases: GPU
+fields and copied game context survive with an empty log section.
+`test_crash_stub_link` proves the headless `nt_crash` + `nt_gfx_stub` link.
 `tests/browser/observation.spec.ts` independently intercepts WebGL calls and
 upload payloads, checks uploads before render begin and compares output pixels
 with recording off/on/full.

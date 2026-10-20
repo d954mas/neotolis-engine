@@ -42,8 +42,9 @@ typedef struct {
 
 nt_result_t nt_http_init(void);
 void nt_http_shutdown(void);
-/* Pumps in-flight transfers on the native backend; no-op on web/stub. Call once per
- * frame while requests are in flight (nt_resource_step pumps for its own packs). */
+/* Advances in-flight transfers: pumps curl on native, delivers fetch progress and
+ * completion on web; no-op on stub. Call once per frame while requests are in flight
+ * (nt_resource_step pumps for its own packs). */
 void nt_http_update(void);
 /* Returns NT_HTTP_REQUEST_INVALID when the module is uninitialized, url is NULL, or
  * all NT_HTTP_MAX_REQUESTS slots are busy (logged) — free finished requests to reuse slots. */

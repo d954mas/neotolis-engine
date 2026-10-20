@@ -26,7 +26,7 @@ nt_build_result_t nt_builder_parse_glb_scene(nt_glb_scene_t *scene, const char *
     memset(scene, 0, sizeof(nt_glb_scene_t));
 
     cgltf_options options;
-    memset(&options, 0, sizeof(options));
+    nt_builder_init_gltf_options(&options);
 
     cgltf_data *data = NULL;
     cgltf_result result = cgltf_parse_file(&options, path, &data);

@@ -22,6 +22,7 @@ typedef struct {
     uint32_t full; /* the ring has wrapped at least once */
     char name[NT_CRASH_TEXT_MAX];
     char game_version[NT_CRASH_TEXT_MAX];
+    char context[1024];
     bool initialized;
 } nt_crash_state_t;
 

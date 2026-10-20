@@ -65,6 +65,33 @@ renderer_draw_mesh(...);
 renderer_draw_sprite(...);
 ```
 
+### Device identity
+
+`nt_gfx_device_info()` returns a non-NULL, gfx-owned const view of four bounded
+strings, NUL terminators included: vendor (128 bytes), renderer (256), API
+version (128) and caps (128). The address is stable for the process, before
+init and after shutdown. Callers neither modify nor free it. Empty fields mean
+unavailable; the stub always supplies empty fields without requiring init.
+
+The snapshot is the last observed device, for diagnostics and game workarounds
+of known device bugs; feature decisions read `nt_gfx_gpu_caps()`. Context
+creation refreshes the identity before backend setup, so setup failures already
+carry it. `caps` is `nt_gfx_gpu_caps_t` as text
+(`astc=1 bc7=0 etc2=1 float_rt=1 float_linear=1 parallel_compile=1 max_texture=16384 ubo_align=256`),
+written after each successful detection at init and restore; the struct itself
+is reset with `g_nt_gfx`. Web publishes only observations made without context
+loss; loss, failed recreation and shutdown keep the previous snapshot. Steady
+frames run no identity queries. Updates are main-thread, best effort if a crash
+interrupts them; each field keeps its terminal NUL. CR/LF become spaces. Native
+identity truncates by bytes; the web bridge keeps UTF-8 boundaries.
+
+Web prefers WEBGL_debug_renderer_info, falling back to the public
+vendor/renderer parameters; the browser may mask the hardware. Firefox reports
+the extension as deprecated in the console, and its `RENDERER` already returns
+the sanitized unmasked string. API version is not a portable driver version.
+The bridge reads `getParameter` strings directly into the snapshot because
+Emscripten's `glGetString` caches strings across context recreation.
+
 ### Draw-phase command stream
 
 Draw-phase calls are deferred. At the call, the front-end validates and updates
@@ -945,6 +972,23 @@ live driver must complete every target the engine builds. Two residual cases als
 texture whose GPU storage allocation failed (uploads are not polled) leaves its framebuffer
 incomplete, and a GPU-process death that fails a status before the browser reports the loss.
 A failure is classified by asking the browser after the failed call, for the same reason.
+Before asserting on a live-context name failure, including the setup upload VAO,
+the backend logs the GL call (and shader stage), the pending GL error and the
+descriptor label. An incomplete framebuffer logs its status, pending GL error,
+attachment size and formats, then label, all from the create arguments. The
+pending error may come from an earlier texture allocation, not the status.
+Numbers precede labels, so a long label cannot cut the details. Lost-context
+paths emit no fatal record; log floor NONE removes the records and their error
+queries.
+
+Initial context creation failure is fatal: backend init asserts after the
+platform logs the failure. Web logs the context attributes the engine sets and
+the browser's creation-error status (`<empty>` when none), cut to fit one log
+line; native logs the GL
+loader failure or the GLFW error code and description. A
+failed recreation stays recoverable: the platform logs the cause, the frontend
+logs `context restore failed` and stays lost.
+
 A readback asks after every read as well: WebGL reports a loss once through
 `glGetError`, and the drain before the read consumes it. Beyond failures the backend asks where
 the answer prevents a crash: after shader creation and before program creation, because
@@ -957,7 +1001,7 @@ skipped, because `beginQuery` throws on it. A fresh context (init or restore) fi
 drains GL errors: Emscripten keeps a recorded error across contexts, so a call
 that reached the dead context must not fail the fresh one's first check.
 
-Texture creation reads no GL error: on WebGL `glGetError` is a blocking
+Successful texture-name creation reads no GL error during upload: on WebGL `glGetError` is a blocking
 round trip to the GPU process that waits for the queued uploads. After upload,
 the backend asks whether the context is lost without waiting for GPU completion;
 a confirmed loss deletes the name and ends the create `CONTEXT_LOST`, including
@@ -999,7 +1043,8 @@ expression that issues the call; a grep gate rejects any bare `gl*` call in
 always open between init and shutdown. The
 single `NT_GFX_GL_CALLS` table in `nt_gfx.h` defines the enum, `NT_GFX_GL_COUNT`
 and, with capture, `nt_gfx_gl_call_name`. WebGL JS calls the web context makes
-directly (`getExtension` and the `glGetQueryObjectui64v` timer-result bridge) are
+directly (`getExtension`, the `glGetQueryObjectui64v` timer-result bridge and
+`glGetString` identity queries through `getParameter`) are
 counted and recorded through `NT_GL_ISSUED` at their C call site, in a separate
 statement just before the JS call; the
 JS that Emscripten's GL layer runs behind a C call (lazy uniform location

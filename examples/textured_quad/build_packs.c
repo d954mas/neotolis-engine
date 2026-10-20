@@ -35,11 +35,14 @@ static const char *pack_path(const char *dir, const char *name) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
+    if (argc != 2) {
         (void)fprintf(stderr, "Usage: build_tq_packs <pack_dir>\n");
         return 1;
     }
     const char *out_dir = argv[1];
+    if (nt_builder_up_to_date(out_dir)) {
+        return 0;
+    }
 
     (void)printf("=== Build Textured Cube Packs → %s ===\n\n", out_dir);
 
@@ -125,6 +128,7 @@ int main(int argc, char *argv[]) {
     (void)snprintf(combined, sizeof(combined), "%s/tq_assets.h", HEADER_DIR);
     nt_builder_merge_headers(headers, 3, combined);
 
+    nt_builder_write_record(out_dir);
     (void)printf("\nDone.\n");
     return 0;
 }

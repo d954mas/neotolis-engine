@@ -59,6 +59,16 @@ void nt_crash_init(const char *name, const char *game_version) {
     nt_crash_platform_init();
 }
 
+void nt_crash_set_context(const char *text) {
+    NT_ASSERT(g_nt_crash.initialized && text != NULL);
+    size_t n = 0;
+    const size_t cap = sizeof(g_nt_crash.context) - 1U;
+    for (; n < cap && text[n] != '\0'; n++) {
+        g_nt_crash.context[n] = (char)(text[n] == '\r' || text[n] == '\n' ? ' ' : text[n]);
+    }
+    g_nt_crash.context[n] = '\0';
+}
+
 uint32_t nt_crash_load_previous(char *out, uint32_t cap) {
     NT_ASSERT(g_nt_crash.initialized);
     NT_ASSERT(out && cap >= 1);

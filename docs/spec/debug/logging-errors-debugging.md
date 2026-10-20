@@ -136,6 +136,7 @@ The engine itself prints no version. Examples log it at startup when INFO loggin
 **API.**
 
 - `nt_crash_init(name, game_version)` — once per process. `name` is the `localStorage` key on web (several games can share one origin) and the record file path on native (UTF-8; a relative path resolves against the cwd at crash time). `game_version` must name the game build, so the record maps to that build's symbols. Both are copied, non-empty and shorter than 256 bytes. Init takes one of `NT_LOG_MAX_SINKS` log sinks and, on native, installs its own unhandled-exception filter and signal handlers, replacing earlier ones without chaining; a library that later installs its own replaces them in turn, so call init after such libraries are set up. It does not touch the stored record.
+- `nt_crash_set_context(text)` copies optional game text into 1024 bytes; init and non-NULL text are required. Each call replaces the previous text; empty clears it. Truncation keeps at most 1023 bytes, possibly inside a code point (web shows the cut as U+FFFD); CR/LF become spaces, so the text cannot forge record lines. The caller may immediately free or change its source. Updates are main-thread, best effort if a crash interrupts them; the last byte always remains NUL.
 - `nt_crash_load_previous(out, cap)` copies the stored record into caller storage as a string and keeps it; it returns the string length (0: no record, or the storage is unavailable or unreadable). The stored text is untrusted and returned as it is, cut at `cap - 1` bytes and at an embedded NUL. Load and clear require init.
 - `nt_crash_clear_previous()` removes the record. The game clears only after a confirmed delivery; an unsent record waits for the next launch. A new crash overwrites the stored record.
 - Web also dispatches window event `nt-crash` with `detail.text` once the record is captured and storage was attempted. The page is still alive, so a game can send immediately (best effort; the record stays stored, so a server dedups by text — it carries `time`).
@@ -145,6 +146,11 @@ The engine itself prints no version. Examples log it at startup when INFO loggin
 ```
 game: <game_version>
 engine: <nt_version_engine()> <preset>    (e.g. 0595a717-dirty wasm-release)
+gpu_vendor: <last observed vendor>       (optional)
+gpu_renderer: <last observed renderer>   (optional)
+gpu_api: <graphics API version>          (optional)
+gpu_caps: <nt_gfx_gpu_caps_t as text>    (optional)
+context: <copied game text>              (optional)
 time: <unix ms>
 reason: RuntimeError: unreachable | signal SIGSEGV | exception 0xc000001d | abort
 pc: exe+0x1a2b3c          (native; absolute 0x... outside the executable)
@@ -157,13 +163,18 @@ ERROR [resource] ...
 
 `log:` is the tail of WARN/ERROR lines from a fixed BSS byte ring of `NT_CRASH_LOG_BYTES` (default 8192). The minimum capacity reserves two maximum-size messages plus space for prefixes; domain lengths are not bounded, so this does not guarantee two complete lines. A wrapped ring drops its first line, which may be partial, and a long domain can leave no complete line. Configuration is described in [build identity and crash records](../../build.md#build-identity-and-crash-records).
 
-A record is at most about `NT_CRASH_LOG_BYTES` + 2 KB on native. On web the reason and stack are cut at 256 and 4096 UTF-16 code units: about `NT_CRASH_LOG_BYTES` + 6 KB for ASCII text and + 14 KB for Unicode text, which can require up to 3 UTF-8 bytes per UTF-16 code unit. Invalid UTF-8 in a log line can expand each byte into a 3-byte replacement character, increasing the web bound to about `3 * NT_CRASH_LOG_BYTES` + 14 KB. Size the game's buffer for its platform; a longer record is cut.
+GPU fields come from the gfx device snapshot ([Device identity](../render/architecture.md#device-identity)),
+independently of the log floor and ring wrap. Enable crash before window/gfx init
+to capture startup failures. Unknown GPU fields and empty game context are omitted.
+The engine owns system fields; the game only supplies its context and transport.
+
+A record is at most about `NT_CRASH_LOG_BYTES` + 4 KB on native. On web the reason and stack are cut at 256 and 4096 UTF-16 code units: about `NT_CRASH_LOG_BYTES` + 8 KB for ASCII text and + 16 KB for Unicode text, which can require up to 3 UTF-8 bytes per UTF-16 code unit. Invalid UTF-8 in log or diagnostic text can expand each byte into a 3-byte replacement character, increasing the web bound to about `3 * NT_CRASH_LOG_BYTES` + 20 KB. Size the game's buffer for its platform; a longer record is cut.
 
 Lines filtered by `NT_LOG_MIN_LEVEL` or `nt_log_set_level` never reach the ring; with `NT_LOG_MIN_LEVEL=3` or `nt_log_stub` the section is empty. FULL assert text goes to stderr/console, not into the record — a crash-prone check that needs its cause in field reports logs one ERROR before the assert (see [Assert policy](#assert-policy)). The separate debug `nt_log_ring` is controlled by `NT_LOG_RING_ENABLED`; production Release presets disable it.
 
 **Capture.**
 
-- Web: window `error` and `unhandledrejection` listeners take the first engine crash per session: a `WebAssembly.RuntimeError` (a trap; `abort()` throws one too) or an error whose stack has wasm frames (a wasm stack overflow arrives as `RangeError`). Other page errors are ignored. The listener never calls back into the trapped instance: it reads the ring from linear memory and writes `localStorage`. The shell's `Module.onAbort` overlay also fires on `abort()`; both are independent.
+- Web: window `error` and `unhandledrejection` listeners take the first engine crash per session: a `WebAssembly.RuntimeError` (a trap; `abort()` throws one too) or an error whose stack has wasm frames (a wasm stack overflow arrives as `RangeError`). Other page errors are ignored. The listener never calls back into the trapped instance: it reads the ring, current GPU fields and copied game context through current linear-memory views and writes `localStorage`. The shell's `Module.onAbort` overlay also fires on `abort()`; both are independent.
 - Native: the handler writes the file and returns, so the OS default follows (WER on Windows; the original signal and core dump on Linux — the handler re-raises its signal). It uses only async-signal-safe calls (Win32 calls on Windows, where the filter and the UCRT SIGABRT handler run synchronously on the crashing thread). Windows: unhandled-exception filter (with a 32 KB stack guarantee for stack overflow) and SIGABRT; UCRT `abort()` then reports through WER; one record per process (a second faulting thread waits while the first writes, on both platforms). Linux: ILL, SEGV, BUS, FPE, ABRT, TRAP on a 64 KB alternate stack (skipped when the kernel needs more), fault PC from `ucontext` on x86_64 and aarch64. Linux older than glibc 2.34 sizes the alternate stack from `SIGSTKSZ`. Under ASan no handlers are installed; its report stays.
 - No stack walk on native: the PC names the faulting instruction, and for `NT_ASSERT` in TRAP that is the assert. Full stacks come from WER dumps, cores or a debugger.
 
