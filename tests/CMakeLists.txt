@@ -615,6 +615,9 @@ if(NOT EMSCRIPTEN)
         nt_gfx_fake nt_clipboard_stub nt_basisu_transcoder_stub nt_meshwire_stub nt_http_stub nt_fs_stub nt_log_stub unity
     )
     nt_setup_test_target(test_asteroids_scene)
+    if(TARGET asteroids_pack_build)
+        add_dependencies(test_asteroids_scene asteroids_pack_build)
+    endif()
 
     # Exercise the skeletal showcase's real game-owned mixing controller.
     add_executable(test_skeletal_showcase_mixing unit/test_skeletal_showcase_mixing.c unit/test_helpers/nt_assert_trap.c)
