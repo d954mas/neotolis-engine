@@ -60,16 +60,10 @@ static const nt_skeletal_slot_t *skel_view_slot(nt_resource_t handle, uint8_t as
 // #endregion
 
 // #region NSKL skeleton
-static bool skl_validate(const uint8_t *data, uint32_t size, NtSklHeader *out) {
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void skl_check(const uint8_t *data, uint32_t size, NtSklHeader *out) {
     memcpy(out, data, sizeof(*out));
-    if (out->joint_count == 0) {
-        NT_LOG_WARN("activate_skeleton: joint_count 0");
-        return false;
-    }
-    if ((uint64_t)size != NT_SKL_SIZE(out->joint_count)) {
-        NT_LOG_WARN("activate_skeleton: size %u is not the %u bytes %u joints need", size, (unsigned)NT_SKL_SIZE(out->joint_count), (unsigned)out->joint_count);
-        return false;
-    }
+    NT_ASSERT(out->joint_count != 0 && (uint64_t)size == NT_SKL_SIZE(out->joint_count) && "skeleton size does not match its joint count");
 
     /* Exact preorder: the parent of joint j must be the nearest earlier joint
      * whose subtree range is still open at j. That single rule carries preorder
@@ -82,33 +76,21 @@ static bool skl_validate(const uint8_t *data, uint32_t size, NtSklHeader *out) {
     for (uint32_t j = 0; j < out->joint_count; ++j) {
         const uint16_t parent = parents[j];
         const uint16_t end = ends[j];
-        if ((uint32_t)end <= j || (uint32_t)end > out->joint_count) {
-            NT_LOG_WARN("activate_skeleton: joint %u has subtree_end %u outside (%u, %u]", j, (unsigned)end, j, (unsigned)out->joint_count);
-            return false;
-        }
+        NT_ASSERT((uint32_t)end > j && (uint32_t)end <= out->joint_count && "skeleton subtree_end out of range");
         while (top != NT_SKELETAL_NO_PARENT && (uint32_t)ends[top] <= j) {
             top = parents[top];
         }
-        if ((uint32_t)parent != top) {
-            NT_LOG_WARN("activate_skeleton: joint %u names parent %u, but the innermost open subtree is %u", j, (unsigned)parent, top);
-            return false;
-        }
-        if (parent != NT_SKELETAL_NO_PARENT && end > ends[parent]) {
-            NT_LOG_WARN("activate_skeleton: joint %u escapes the subtree of its parent %u", j, (unsigned)parent);
-            return false;
-        }
+        NT_ASSERT((uint32_t)parent == top && "skeleton parent is not the innermost open subtree");
+        NT_ASSERT((parent == NT_SKELETAL_NO_PARENT || end <= ends[parent]) && "skeleton joint escapes its parent subtree");
         top = j;
     }
-    return true;
 }
 
 uint32_t nt_skeletal_assets_activate_skeleton(const uint8_t *data, uint32_t size) {
     NT_ASSERT(s_assets.slots != NULL && "nt_skeletal_assets_init must run before the skeletal activators");
 
     NtSklHeader header = {0};
-    if (!skl_validate(data, size, &header)) {
-        return 0;
-    }
+    skl_check(data, size, &header);
 
     const uint32_t id = skel_take_slot(data, size);
     nt_skeletal_slot_t *slot = &s_assets.slots[nt_pool_slot_index(id)];
@@ -129,26 +111,16 @@ void nt_skeletal_assets_deactivate_skeleton(uint32_t runtime_handle) { skel_rele
 // #endregion
 
 // #region NSKN skin binding
-static bool skn_validate(const uint8_t *data, uint32_t size, NtSknHeader *out) {
+static void skn_check(const uint8_t *data, uint32_t size, NtSknHeader *out) {
     memcpy(out, data, sizeof(*out));
-    if (out->palette_count == 0) {
-        NT_LOG_WARN("activate_skin_binding: palette_count 0");
-        return false;
-    }
-    if ((uint64_t)size != NT_SKN_SIZE(out->palette_count)) {
-        NT_LOG_WARN("activate_skin_binding: size %u is not the %u bytes %u palette entries need", size, (unsigned)NT_SKN_SIZE(out->palette_count), (unsigned)out->palette_count);
-        return false;
-    }
-    return true;
+    NT_ASSERT(out->palette_count != 0 && (uint64_t)size == NT_SKN_SIZE(out->palette_count) && "skin binding size does not match its palette count");
 }
 
 uint32_t nt_skeletal_assets_activate_skin_binding(const uint8_t *data, uint32_t size) {
     NT_ASSERT(s_assets.slots != NULL && "nt_skeletal_assets_init must run before the skeletal activators");
 
     NtSknHeader header = {0};
-    if (!skn_validate(data, size, &header)) {
-        return 0;
-    }
+    skn_check(data, size, &header);
 
     const uint32_t id = skel_take_slot(data, size);
     nt_skeletal_slot_t *slot = &s_assets.slots[nt_pool_slot_index(id)];
@@ -168,61 +140,40 @@ void nt_skeletal_assets_deactivate_skin_binding(uint32_t runtime_handle) { skel_
 // #endregion
 
 // #region NANM clip
-static bool anm_validate_header(const uint8_t *data, uint32_t size, NtAnmHeader *out) {
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void anm_check_header(const uint8_t *data, uint32_t size, NtAnmHeader *out) {
     memcpy(out, data, sizeof(*out));
-    if (out->joint_count == 0) {
-        NT_LOG_WARN("activate_clip: joint_count 0");
-        return false;
-    }
-    if (out->sample_count == 0) {
-        NT_LOG_WARN("activate_clip: sample_count 0");
-        return false;
-    }
+    NT_ASSERT(out->joint_count != 0 && out->sample_count != 0 && "clip has no joints or samples");
     /* duration sizes the grid the sampler indexes, so it is structure. */
-    if (!nt_skeletal_finite((double)out->duration) || out->duration < 0.0F) {
-        NT_LOG_WARN("activate_clip: duration is negative or not finite");
-        return false;
-    }
-    if ((uint64_t)size != nt_anm_size(out)) {
-        NT_LOG_WARN("activate_clip: size %u is not the %u bytes these counts need", size, (unsigned)nt_anm_size(out));
-        return false;
-    }
+    NT_ASSERT(nt_skeletal_finite((double)out->duration) && out->duration >= 0.0F && "clip duration is negative or not finite");
+    NT_ASSERT((uint64_t)size == nt_anm_size(out) && "clip size does not match its counts");
     /* Interpolation reads two adjacent grid entries, so a row needs a second
      * sample and an interval to step through. */
     const bool sampled = (out->n_t | out->n_q | out->n_s) != 0U;
-    if (sampled && (out->sample_count < 2U || !(out->duration > 0.0F))) {
-        NT_LOG_WARN("activate_clip: sampled rows need at least two samples over a positive duration");
-        return false;
-    }
-    return true;
+    NT_ASSERT((!sampled || (out->sample_count >= 2U && out->duration > 0.0F)) && "clip sampled rows need two samples over a positive duration");
 }
 
 uint32_t nt_skeletal_assets_activate_clip(const uint8_t *data, uint32_t size) {
     NT_ASSERT(s_assets.slots != NULL && "nt_skeletal_assets_init must run before the skeletal activators");
 
     NtAnmHeader header = {0};
-    if (!anm_validate_header(data, size, &header)) {
-        return 0;
+    anm_check_header(data, size, &header);
+
+    /* Every table entry is a write index the sampler turns into a position in
+     * the caller's pose. */
+    nt_skeletal_clip_t check;
+    nt_skeletal_clip_view(data, &check);
+    const uint16_t *const table[3] = {check.t_joint, check.q_joint, check.s_joint};
+    const uint16_t counts[3] = {check.n_t, check.n_q, check.n_s};
+    for (uint32_t t = 0; t < 3; ++t) {
+        for (uint32_t k = 0; k < counts[t]; ++k) {
+            NT_ASSERT(table[t][k] < check.joint_count && "clip joint table names a joint out of range");
+        }
     }
 
     const uint32_t id = skel_take_slot(data, size);
     nt_skeletal_slot_t *slot = &s_assets.slots[nt_pool_slot_index(id)];
-    nt_skeletal_clip_t *view = &slot->view.clip;
-    nt_skeletal_clip_view((const uint8_t *)slot->mem, view);
-
-    /* Every table entry is a write index the sampler turns into a position in
-     * the caller's pose. */
-    const uint16_t *const table[3] = {view->t_joint, view->q_joint, view->s_joint};
-    const uint16_t counts[3] = {view->n_t, view->n_q, view->n_s};
-    for (uint32_t t = 0; t < 3; ++t) {
-        for (uint32_t k = 0; k < counts[t]; ++k) {
-            if (table[t][k] >= view->joint_count) {
-                NT_LOG_WARN("activate_clip: joint table %u entry %u names joint %u of %u", t, k, (unsigned)table[t][k], (unsigned)view->joint_count);
-                skel_release_slot(id);
-                return 0;
-            }
-        }
-    }
+    nt_skeletal_clip_view((const uint8_t *)slot->mem, &slot->view.clip);
     return id;
 }
 

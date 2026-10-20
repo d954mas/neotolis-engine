@@ -34,83 +34,12 @@ static void generate_tofu(nt_font_slot_t *slot);
 static void font_test_shutdown_packs(void);
 #endif
 
-// #region Asset callbacks — activate (structure check), on_resolve + PIN_BLOB
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool font_blob_structure_valid(const uint8_t *data, uint32_t size) {
-    const NtFontAssetHeader *header = (const NtFontAssetHeader *)data;
-    const uint32_t table_end = (uint32_t)sizeof(*header) + ((uint32_t)header->glyph_count * (uint32_t)sizeof(NtFontGlyphEntry));
-    if (table_end > size) {
-        return false;
-    }
-    const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(data + sizeof(*header));
-    for (uint32_t gi = 0; gi < header->glyph_count; gi++) {
-        const NtFontGlyphEntry *glyph = &glyphs[gi];
-        const uint32_t kern_bytes = (uint32_t)glyph->kern_count * (uint32_t)sizeof(NtFontKernEntry);
-        if (glyph->data_offset < table_end || glyph->data_offset > size || kern_bytes > size - glyph->data_offset || glyph->curve_count > NT_FONT_MAX_CURVES_PER_GLYPH) {
-            return false;
-        }
-        if (glyph->curve_count == 0) {
-            continue;
-        }
-        uint32_t offset = glyph->data_offset + kern_bytes;
-        if (size - offset < sizeof(uint16_t)) {
-            return false;
-        }
-        uint16_t contour_count;
-        memcpy(&contour_count, data + offset, sizeof contour_count);
-        offset += (uint32_t)sizeof contour_count;
-        uint32_t curves = 0;
-        for (uint32_t ci = 0; ci < contour_count; ci++) {
-            if (size - offset < sizeof(uint16_t)) {
-                return false;
-            }
-            uint16_t point_count;
-            memcpy(&point_count, data + offset, sizeof point_count);
-            offset += (uint32_t)sizeof point_count;
-            if (point_count == 0) {
-                return false;
-            }
-            const uint32_t prefix_bytes = NT_FONT_BITMASK_BYTES(point_count) + (2U * (uint32_t)sizeof(int16_t));
-            if (prefix_bytes > size - offset) {
-                return false;
-            }
-            /* convert_point_ring emits one curve per point, except an on point right after an off point
-             * joins its curve. Curves >= points/2, so the cap also bounds the decoder's point arrays. */
-            const uint8_t *on = data + offset;
-            curves += point_count;
-            for (uint32_t p = 0; p < point_count; p++) {
-                const uint32_t q = (p + 1U) % point_count;
-                if ((on[p / 8U] & (1U << (p % 8U))) == 0U && (on[q / 8U] & (1U << (q % 8U))) != 0U) {
-                    curves--;
-                }
-            }
-            if (curves > NT_FONT_MAX_CURVES_PER_GLYPH) {
-                return false;
-            }
-            offset += prefix_bytes;
-            for (uint32_t coordinate = 0; coordinate < ((uint32_t)point_count - 1U) * 2U; coordinate++) {
-                if (offset == size) {
-                    return false;
-                }
-                if (data[offset++] == NT_FONT_DELTA_SENTINEL) {
-                    if (size - offset < sizeof(int16_t)) {
-                        return false;
-                    }
-                    offset += (uint32_t)sizeof(int16_t);
-                }
-            }
-        }
-    }
-    return true;
-}
-
-/* A structurally broken blob fails its asset, so the next candidate stays published. The handle is
+// #region Asset callbacks — activate, on_resolve + PIN_BLOB
+/* Packs are trusted: the decoder asserts each glyph's structure on its first use. The handle is
  * never interpreted; nt_resource_winner_gen identifies the winner. */
 static uint32_t font_activate(const uint8_t *data, uint32_t size) {
-    if (!font_blob_structure_valid(data, size)) {
-        NT_LOG_ERROR("font blob: bad layout -- rebuild packs");
-        return 0;
-    }
+    (void)data;
+    (void)size;
     return 1;
 }
 
@@ -390,7 +319,6 @@ typedef struct {
 static nt_curve_t s_decode_curves[NT_FONT_MAX_CURVES_PER_GLYPH];
 
 /* Temporary point buffers for contour decoding (static to avoid stack overflow) */
-_Static_assert(NT_FONT_MAX_POINTS_PER_CONTOUR >= 2 * NT_FONT_MAX_CURVES_PER_GLYPH, "activation bounds points by the curve cap");
 static int32_t s_decode_pts_x[NT_FONT_MAX_POINTS_PER_CONTOUR];
 static int32_t s_decode_pts_y[NT_FONT_MAX_POINTS_PER_CONTOUR];
 static uint8_t s_decode_pts_on[NT_FONT_MAX_POINTS_PER_CONTOUR];

@@ -39,8 +39,8 @@ The skinned mesh renderer (the `nt_skinned_mesh_renderer` target of the mesh ren
 1. **Data apart from behavior.** Skeleton, clip, pose, weights and binding are data. Sample, mix, override, additive, FK, palette build, bake and upload are separate functions. No operation also advances time, loads, allocates or draws.
 2. **One authority for the final pose.** The game orders writes to local/model buffers; nothing resamples after IK or physics.
 3. **Predictable memory.** Heap only at init, character/bank creation, asset activation and explicit reconfiguration. Sampling, advance, composition, FK, IK, retargeting and frame preparation allocate nothing. Per-frame working memory (sampled track poses, capture scratch) comes from `nt_mem_scratch` or a buffer the game sized at init; kernels receive it as pointer + capacity and never allocate. Bank bake is a heavy explicit call at load time, not a frame operation.
-4. **Capacity is configured, overflow asserts.** Track capacity, workspace size, bank size, palette staging, texture budgets are set at creation. Exceeding them is `NT_ASSERT`, like component storage: no growth, no eviction policy, no fallback. Recoverable outcomes exist at the resource boundary (readiness, pack validation, activator rejection) and at the existing gfx boundary (texture creation and context restoration may fail per [API contracts](../core/api-contracts.md); the game uses the existing readiness queries and retries restoration explicitly; no new readiness mirror).
-5. **Validate at boundaries.** A loader validates its own payload before publishing views; an NSKL/NSKN/NANM activator that rejects its payload returns 0 and the asset is FAILED like a mesh or texture. An activator checks the structure a view needs to address memory and nothing about the values inside it — the locked rule of [Builder, codec, wire formats](#builder-codec-wire-formats). Cross-resource compatibility (`rig_compat_id`) is asserted at explicit binding; what the builder already guarantees (vertex indices within the palette, normalized weights) is not re-checked at runtime. Numerical functions are `void` with `NT_ASSERT` preconditions — cheap checks (pointers, aliasing, indices, counts, capacity and scalar ranges such as gains, `alpha`, joint weights ≥ 0 and masks in [0,1]) remain independent of `NT_SKELETAL_CHECKS`, including inside joint/palette loops. The flag gates expensive numerical validation (unit quaternions and finite TRS components) and is an explicit CMake option (OFF by default; Debug and release-test presets select ON, production Release presets select OFF). All enabled checks use plain `NT_ASSERT`s in both supported assert modes. Genuine alternative outcomes (degenerate IK chain) return a defined result. A game that must survive mismatched content compares the ids it already holds before binding.
+4. **Capacity is configured, overflow asserts.** Track capacity, workspace size, bank size, palette staging, texture budgets are set at creation. Exceeding them is `NT_ASSERT`, like component storage: no growth, no eviction policy, no fallback. Recoverable outcomes exist at the resource boundary (readiness, pack parse) and at the existing gfx boundary (texture creation and context restoration may fail per [API contracts](../core/api-contracts.md); the game uses the existing readiness queries and retries restoration explicitly; no new readiness mirror).
+5. **Validate at boundaries.** A loader validates its own payload before publishing views; an NSKL/NSKN/NANM activator asserts it, because packs are trusted builder output. An activator checks the structure a view needs to address memory and nothing about the values inside it — the locked rule of [Builder, codec, wire formats](#builder-codec-wire-formats). Cross-resource compatibility (`rig_compat_id`) is asserted at explicit binding; what the builder already guarantees (vertex indices within the palette, normalized weights) is not re-checked at runtime. Numerical functions are `void` with `NT_ASSERT` preconditions — cheap checks (pointers, aliasing, indices, counts, capacity and scalar ranges such as gains, `alpha`, joint weights ≥ 0 and masks in [0,1]) remain independent of `NT_SKELETAL_CHECKS`, including inside joint/palette loops. The flag gates expensive numerical validation (unit quaternions and finite TRS components) and is an explicit CMake option (OFF by default; Debug and release-test presets select ON, production Release presets select OFF). All enabled checks use plain `NT_ASSERT`s in both supported assert modes. Genuine alternative outcomes (degenerate IK chain) return a defined result. A game that must survive mismatched content compares the ids it already holds before binding.
 6. **No extension framework.** No graph, layer stack, controller, solver registry, scheduler, palette cache or per-joint callback.
 7. **Modularity at link time.** No-animation builds link no animation code. Do not rely on LTO.
 8. **Contracts are invariant, layouts are revisable.** Ownership, spaces, compatibility, lifetimes and draw compatibility are invariant. Pose ABI, shader specialization, bank texture dimensions and attribute locations are implementation details owned by one header each and changed by measurement.
@@ -358,7 +358,7 @@ Order: import → canonical hierarchy/remap → validate clips/skin → prepare 
 `shared/include/nt_skeletal_format.h` and shared by builder and runtime. The
 codec is F32 direct-access (Q16 is planned, #486). **The wire layout is the runtime
 layout:** the builder writes exactly the tables the sampler of [Sampling](#sampling) reads, and
-an activator validates the structure, copies the whole payload into one
+an activator asserts the structure, copies the whole payload into one
 allocation and points the runtime view at it — no transpose, no per-field
 decode, no section table. Every target of this engine is little-endian, so
 headers travel as packed structs and arrays are copied as bytes; the builder
@@ -430,9 +430,9 @@ The payload size is exactly `nt_anm_size(header)`, computed in 64 bits on both
 sides. `sample_count == 1` means no frame block — a clip whose every channel
 folded into the base may still have a duration.
 
-**Activation checks structure only** — LOCKED. *Structure* is
-what a view needs to address memory: the header, magic, exact version and exact
-size, the counts an array's existence depends on, the table indices the sampler
+**Activation asserts structure only** — LOCKED. *Structure* is
+what a view needs to address memory: the header, magic and exact version (the
+resource core asserts these first), the exact size, the counts an array's existence depends on, the table indices the sampler
 writes through, the NSKL preorder FK reads by, and the grid shape
 (`sample_count`, a finite `duration ≥ 0`) the sampler indexes — the one float an
 activator reads. *Values* — finite floats, unit quaternions,
@@ -445,8 +445,8 @@ repair, so no activator looks at a value: adding a value check to an activator
 is a change to this contract, not hardening, and a review that asks for one
 answers with this paragraph. The list is:
 
-- all three: at least a header, magic, `version` equal, and a size equal to the
-  exact size the counts imply (computed in 64 bits).
+- all three: a size equal to the exact size the counts imply (computed in 64
+  bits); header, magic and `version` are the resource core's assert.
 - NSKL: `joint_count ≥ 1`, `j < subtree_end[j] ≤ J`, and one exact-preorder rule
   walked in joint order — **each joint's parent is the nearest earlier joint
   whose range is still open** at that joint (`NO_PARENT` when none is) — plus
@@ -460,7 +460,7 @@ answers with this paragraph. The list is:
   because interpolation reads two adjacent grid entries — all from the header,
   before the copy; then every entry of the three `u16` joint tables below
   `joint_count` — the write indices the sampler turns into positions in the
-  caller's pose — through the view over the copy.
+  caller's pose — through a view over the payload, before the copy.
 
 The three asset types (7–9) and the bound the pack parser enforces on the enum
 are specified in [Resource](../assets/resource.md) (Asset types); activators are

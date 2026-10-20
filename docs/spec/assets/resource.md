@@ -190,13 +190,13 @@ activators it uses. Complete those module initializations before mounting packs.
 `nt_font_shutdown()` does not remove the FONT type registration: initializing
 font again requires a new resource shutdown/init lifecycle first.
 Simple virtual providers use the empty default without explicit registration.
-Before an activator runs, the resource core checks the payload's common
-`{u32 magic; u16 version}` prefix and its header size against the asset type's
-format. A mismatch logs the cause, the asset becomes FAILED, and the activator
-never sees it. An activator checks only its own structure and rejects broken
-bytes the same way, by logging the cause and returning 0. In both cases a
-lower-priority pack stays published. Activators never assert on pack bytes;
-code that runs after a successful activation may assert they are valid.
+Packs are trusted output of the engine builder. Before an activator runs, the
+resource core asserts the payload's common `{u32 magic; u16 version}` prefix and
+its header size against the asset type's format; a mismatch means a stale pack
+that needs a rebuild. An activator asserts only the structure its views address
+(sizes, counts, indices, layout). It returns 0, and the asset becomes FAILED with
+a lower-priority pack still published, only for device or build limits such as a
+texture above the GPU's maximum size or a lost context.
 
 BLOB readiness is built in and needs no activator. Other file asset types require
 a configured activator: missing one is a configuration error asserted during
@@ -533,8 +533,7 @@ row; its cache entry carries its own `band_count`, and the runtime warns once
 when a glyph drops bands. At one band a glyph needs one header texel plus at most
 four texels per curve, so `NT_FONT_MAX_CURVES_PER_GLYPH`
 (`(NT_FONT_GLYPH_TEXELS - 1) / 4` = 511) curves always fit. The builder asserts
-on a larger glyph and logs its codepoint; activation rejects a blob whose glyph
-exceeds the bound, and glyph decode asserts it.
+on a larger glyph and logs its codepoint, and glyph decode asserts the bound.
 
 Within a band the curves are sorted by descending maximum coordinate along the
 band's ray (x for horizontal bands, y for vertical bands). The fragment shader
@@ -557,7 +556,7 @@ metrics stay unchanged.
 
 **Decoration metrics.** The 24-byte header ends with four `int16` decoration-metric fields (`underline_position`, `underline_thickness`, `strikeout_position`, `strikeout_size`). The builder reads these raw from the source font's `post` (`underlinePosition`@8, `underlineThickness`@10) and `OS/2` (`yStrikeoutSize`@26, `yStrikeoutPosition`@28) tables (big-endian, UPM-rescaled with the other metrics); when a table is absent it bakes a metric-correct heuristic (underline just below baseline, strike near mid x-height) so the runtime never sees garbage. This keeps decoration metrics in the builder — the runtime stays a parser-free safety net.
 
-**Activation checks.** After the core header check, activation checks only structure: the glyph table, data and kern spans, count limits, contour point headers and masks, and the bytes each one- or three-byte coordinate delta needs. Shared glyph payloads, trailing padding and zero-curve glyphs are valid. Coordinate and metric values are builder guarantees.
+**Activation checks.** FONT activation reads nothing past the core header check: the pack is trusted, and glyph decode asserts each glyph's point and curve bounds on its first use, so a large font costs nothing at load. Shared glyph payloads, trailing padding and zero-curve glyphs are valid. Coordinate and metric values are builder guarantees.
 
 ### NT_ASSET_ATLAS binary format
 
@@ -639,7 +638,7 @@ uint16[total_index_count] (at index_offset)
   Runtime adds the region's staging-buffer base to each local index.
 ```
 
-Runtime keeps an owned atlas snapshot in slot `user_data`, not a raw mmap view. On first publication the atlas module validates the blob, copies region metadata, positions, UVs, indices, intrinsic scale, and page resource ids into owned buffers, then builds an open-addressing hash table for O(1) region lookup. Validation failures log an error and reject activation before publication (the core has already checked the header): too many pages, noncanonical section offsets, out-of-bounds per-region vertex/index spans, a region name hash equal to the tombstone, or a region whose `page_index` has no declared page. Resolve requires an activated blob and asserts if revalidation fails. Validation runs at activate and resolve on blob changes, never per frame. UVs are pre-normalized and triangles are pre-built by the builder using validated Clipper2 CDT; incomplete triangulation fails closed and the candidate is not published.
+Runtime keeps an owned atlas snapshot in slot `user_data`, not a raw mmap view. On first publication the atlas module validates the blob, copies region metadata, positions, UVs, indices, intrinsic scale, and page resource ids into owned buffers, then builds an open-addressing hash table for O(1) region lookup. Activation asserts the layout before publication (the core has already checked the header): the page cap, tightly packed sections inside the blob, per-region vertex/index spans, a region name hash other than the tombstone, and a declared page for every region. Resolve carves the same view and asserts the same layout. Validation runs at activate and resolve on blob changes, never per frame. UVs are pre-normalized and triangles are pre-built by the builder using validated Clipper2 CDT; incomplete triangulation fails closed and the candidate is not published.
 
 The builder asserts that PPU, its reciprocal, baked positions, and source dimensions in game units are finite and representable. Runtime trusts the prebuilt coordinates without a per-vertex float scan. The intrinsic atlas scale is immutable; generic `pixels_per_unit` metadata does not change it. The renderer still applies origin, flip, and the game's transform. Slice9 converts border pixels to game units using `inverse_pixels_per_unit * slice9_scale`. If opposite borders exceed the target dimension, their destination widths shrink proportionally.
 

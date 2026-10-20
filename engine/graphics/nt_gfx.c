@@ -2533,33 +2533,17 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     }
     const NtTextureAssetHeaderV2 *hdr2 = (const NtTextureAssetHeaderV2 *)data;
 
-    // #region header boundary (pack bytes are untrusted -- reject, never assert)
-    if (!nt_texture_pixel_format_valid((nt_texture_pixel_format_t)hdr2->format)) {
-        NT_LOG_ERROR("activate_texture: unsupported format %u", hdr2->format);
-        return 0;
-    }
-    if (hdr2->default_min_filter > NT_FILTER_LINEAR_MIPMAP_LINEAR || hdr2->default_mag_filter > NT_FILTER_LINEAR || hdr2->default_wrap_u > NT_WRAP_MIRRORED_REPEAT ||
-        hdr2->default_wrap_v > NT_WRAP_MIRRORED_REPEAT) {
-        NT_LOG_ERROR("activate_texture: sampler defaults out of range (min %u mag %u wrap %u/%u)", hdr2->default_min_filter, hdr2->default_mag_filter, hdr2->default_wrap_u, hdr2->default_wrap_v);
-        return 0;
-    }
+    // #region header (pack invariants assert; device limits reject)
+    NT_ASSERT(nt_texture_pixel_format_valid((nt_texture_pixel_format_t)hdr2->format) && "texture pixel format invalid");
+    NT_ASSERT(hdr2->default_min_filter <= NT_FILTER_LINEAR_MIPMAP_LINEAR && hdr2->default_mag_filter <= NT_FILTER_LINEAR && hdr2->default_wrap_u <= NT_WRAP_MIRRORED_REPEAT &&
+              hdr2->default_wrap_v <= NT_WRAP_MIRRORED_REPEAT && "texture sampler defaults out of range");
     if (hdr2->width > g_nt_gfx.gpu_caps.max_texture_size || hdr2->height > g_nt_gfx.gpu_caps.max_texture_size) {
         NT_LOG_ERROR("activate_texture: %ux%u exceeds GPU max_texture_size %u", hdr2->width, hdr2->height, g_nt_gfx.gpu_caps.max_texture_size);
         return 0;
     }
-    if (hdr2->width > UINT16_MAX || hdr2->height > UINT16_MAX) {
-        NT_LOG_ERROR("activate_texture: %ux%u exceeds uint16 dimensions", hdr2->width, hdr2->height);
-        return 0;
-    }
-    if (hdr2->width == 0 || hdr2->height == 0) {
-        NT_LOG_ERROR("activate_texture: zero dimension %ux%u", hdr2->width, hdr2->height);
-        return 0;
-    }
-    /* Subtraction safe -- caller verified size >= sizeof header */
-    if (hdr2->data_size > size - sizeof(NtTextureAssetHeaderV2)) {
-        NT_LOG_ERROR("activate_texture: v2 blob truncated");
-        return 0;
-    }
+    NT_ASSERT(hdr2->width != 0 && hdr2->height != 0 && hdr2->width <= UINT16_MAX && hdr2->height <= UINT16_MAX && "texture dimensions out of range");
+    /* Subtraction safe: the resource core checked size >= sizeof header. */
+    NT_ASSERT(hdr2->data_size <= size - sizeof(NtTextureAssetHeaderV2) && "texture blob truncated");
     const uint16_t width = (uint16_t)hdr2->width;
     const uint16_t height = (uint16_t)hdr2->height;
     // #endregion
@@ -2568,10 +2552,7 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     if (hdr2->compression == NT_TEXTURE_COMPRESSION_RAW) {
         nt_texture_format_t pixel_fmt = (nt_texture_format_t)hdr2->format;
         uint64_t expected = (uint64_t)hdr2->width * (uint64_t)hdr2->height * nt_texture_bpp(pixel_fmt);
-        if (expected > UINT32_MAX || hdr2->data_size < (uint32_t)expected) {
-            NT_LOG_ERROR("activate_texture: RAW data_size %u < expected %u", hdr2->data_size, (uint32_t)expected);
-            return 0;
-        }
+        NT_ASSERT(expected <= UINT32_MAX && hdr2->data_size >= (uint32_t)expected && "texture RAW data_size below its pixels");
         nt_texture_desc_t desc = {
             .width = width,
             .height = height,
@@ -2587,10 +2568,7 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
         return nt_gfx_make_texture(&desc).id;
     }
 
-    if (hdr2->compression != NT_TEXTURE_COMPRESSION_BASIS) {
-        NT_LOG_ERROR("activate_texture: v2 unknown compression %u", hdr2->compression);
-        return 0;
-    }
+    NT_ASSERT(hdr2->compression == NT_TEXTURE_COMPRESSION_BASIS && "texture compression unknown");
 
     /* Lazy transcoder init */
     if (!s_transcoder_initialized) {
@@ -2607,14 +2585,8 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
         NT_LOG_ERROR("activate_texture: Basis blob rejected (bad data, unsupported codec or stub transcoder linked)");
         return 0;
     }
-    if (info.width != hdr2->width || info.height != hdr2->height) {
-        NT_LOG_ERROR("activate_texture: header %ux%u but Basis blob is %ux%u", hdr2->width, hdr2->height, info.width, info.height);
-        return 0;
-    }
-    if (info.level_count != hdr2->mip_count || info.level_count != nt_texture_full_chain_levels(width, height)) {
-        NT_LOG_ERROR("activate_texture: Basis chain %u levels, header says %u, full chain is %u", info.level_count, hdr2->mip_count, nt_texture_full_chain_levels(width, height));
-        return 0;
-    }
+    NT_ASSERT(info.width == hdr2->width && info.height == hdr2->height && "texture header size differs from its Basis blob");
+    NT_ASSERT(info.level_count == hdr2->mip_count && info.level_count == nt_texture_full_chain_levels(width, height) && "texture Basis chain is not the full mip chain");
     // #endregion
 
     // #region target and staging
@@ -2659,125 +2631,54 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     return nt_gfx_make_texture(&desc).id;
 }
 
-/* Per-stream half of the pack mesh safety net: type/count/normalized validity,
- * unique name hashes and locations, and the WebGL2 offset/stride alignment rules.
- * Out of line: inlined, -O3 unrolls its loop into the caller for ~0.9 KB of wasm. */
-static NT_NOINLINE bool mesh_streams_valid(const NtStreamDesc *streams, uint8_t stream_count, uint32_t *out_stride) {
+/* Per-stream pack invariants: type/count/normalized validity, unique locations, and the
+ * WebGL2 offset/stride alignment rules. Returns the vertex stride.
+ * Out of line: inlined, -O3 unrolls its loop into the caller for ~0.7 KB of wasm. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static NT_NOINLINE uint32_t mesh_stream_stride(const NtStreamDesc *streams, uint8_t stream_count) {
     uint32_t stride = 0;
     uint32_t location_mask = 0;
     for (uint8_t i = 0; i < stream_count; i++) {
-        if (streams[i].location >= NT_GFX_MAX_VERTEX_ATTRS || (location_mask & (1U << streams[i].location)) != 0) {
-            NT_LOG_ERROR("activate_mesh: stream[%u] location %u out of range or duplicated", i, (uint32_t)streams[i].location);
-            return false;
-        }
+        NT_ASSERT(streams[i].location < NT_GFX_MAX_VERTEX_ATTRS && (location_mask & (1U << streams[i].location)) == 0 && "mesh stream location out of range or duplicated");
         location_mask |= 1U << streams[i].location;
-        if (nt_stream_type_size(streams[i].type) == 0 || streams[i].count < 1 || streams[i].count > 4) {
-            NT_LOG_ERROR("activate_mesh: stream[%u] invalid type %u / count %u", i, (uint32_t)streams[i].type, (uint32_t)streams[i].count);
-            return false;
-        }
-        if (streams[i].normalized != 0 && (streams[i].type == NT_STREAM_FLOAT32 || streams[i].type == NT_STREAM_FLOAT16)) {
-            NT_LOG_ERROR("activate_mesh: stream[%u] normalized on a float type", i);
-            return false;
-        }
-        if (stride % nt_stream_type_size(streams[i].type) != 0) {
-            NT_LOG_ERROR("activate_mesh: stream[%u] offset %u misaligned for type size %u", i, stride, nt_stream_type_size(streams[i].type));
-            return false;
-        }
+        NT_ASSERT(nt_stream_type_size(streams[i].type) != 0 && streams[i].count >= 1 && streams[i].count <= 4 && "mesh stream type/count invalid");
+        NT_ASSERT((streams[i].normalized == 0 || (streams[i].type != NT_STREAM_FLOAT32 && streams[i].type != NT_STREAM_FLOAT16)) && "mesh stream normalized on a float type");
+        NT_ASSERT(stride % nt_stream_type_size(streams[i].type) == 0 && "mesh stream offset misaligned");
         stride += nt_stream_type_size(streams[i].type) * streams[i].count;
     }
     for (uint8_t i = 0; i < stream_count; i++) {
-        if (stride % nt_stream_type_size(streams[i].type) != 0) {
-            NT_LOG_ERROR("activate_mesh: stride %u misaligned for stream[%u] type size %u", stride, i, nt_stream_type_size(streams[i].type));
-            return false;
-        }
+        NT_ASSERT(stride % nt_stream_type_size(streams[i].type) == 0 && "mesh stride misaligned for a stream type");
     }
-    *out_stride = stride;
-    return true;
+    return stride;
 }
 
-/* MESHOPT wire sizing invariants -- everything that must hold BEFORE the
- * decode allocation. 64-bit arithmetic throughout. */
-static bool mesh_meshopt_sizes_valid(const NtMeshAssetHeader *hdr, uint32_t idx_elem) {
-    if (hdr->index_type == 0 || hdr->index_count == 0 || hdr->index_count % 3 != 0) {
-        NT_LOG_ERROR("activate_mesh: MESHOPT wire with index_type %u index_count %u", (uint32_t)hdr->index_type, hdr->index_count);
-        return false;
-    }
-    uint64_t decoded_size = (uint64_t)hdr->index_count * idx_elem;
-    /* Decoded size must fit a u32: it feeds malloc, and a wasm size_t wraps at 4 GB */
-    if (decoded_size > UINT32_MAX) {
-        NT_LOG_ERROR("activate_mesh: decoded index size overflow (index_count %u)", hdr->index_count);
-        return false;
-    }
-    if (hdr->index_data_size == 0 || hdr->index_data_size > decoded_size) {
-        NT_LOG_ERROR("activate_mesh: MESHOPT index_data_size %u vs decoded %u", hdr->index_data_size, (uint32_t)decoded_size);
-        return false;
-    }
-    /* codec minimum (header + 1 code byte per triangle + 16-byte tail):
-       without this a 17-byte stream could claim hundreds of millions of
-       indices and force a huge decode allocation before the decoder rejects */
-    uint64_t min_wire = 1ULL + (hdr->index_count / 3) + 16ULL;
-    if (hdr->index_data_size < min_wire) {
-        NT_LOG_ERROR("activate_mesh: MESHOPT index_data_size %u below codec minimum for %u indices", hdr->index_data_size, hdr->index_count);
-        return false;
-    }
-    return true;
-}
-
-/* Runtime safety net for pack mesh blobs past the resource header check (types and sizes).
- * 64-bit sums so a corrupt size field cannot wrap a check into a pass. */
-static bool mesh_blob_valid(const uint8_t *data, uint32_t size) {
+/* Pack invariants for a mesh blob; the builder writes them, the resource core checked the header.
+ * 64-bit sums so a size field cannot wrap a check into a pass. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void mesh_blob_check(const uint8_t *data, uint32_t size) {
     const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
-    if (hdr->index_type > 2) {
-        NT_LOG_ERROR("activate_mesh: invalid index_type");
-        return false;
-    }
-    if (hdr->vertex_wire > NT_MESH_WIRE_VTX_SOA || hdr->index_wire > NT_MESH_WIRE_IDX_MESHOPT) {
-        NT_LOG_ERROR("activate_mesh: invalid wire tags %u/%u", (uint32_t)hdr->vertex_wire, (uint32_t)hdr->index_wire);
-        return false;
-    }
-    if (hdr->stream_count == 0 || hdr->stream_count > NT_MESH_MAX_STREAMS) {
-        NT_LOG_ERROR("activate_mesh: invalid stream_count");
-        return false;
-    }
-    uint32_t streams_size = (uint32_t)hdr->stream_count * (uint32_t)sizeof(NtStreamDesc);
-    uint64_t required = (uint64_t)sizeof(NtMeshAssetHeader) + streams_size + hdr->vertex_data_size + hdr->index_data_size;
-    if (required > size) {
-        NT_LOG_ERROR("activate_mesh: blob truncated");
-        return false;
-    }
-    /* Per-stream descs are pack input feeding glVertexAttribPointer */
-    const NtStreamDesc *streams = (const NtStreamDesc *)(data + sizeof(NtMeshAssetHeader));
-    uint32_t expected_stride = 0;
-    if (!mesh_streams_valid(streams, hdr->stream_count, &expected_stride)) {
-        return false;
-    }
-    if ((uint64_t)hdr->vertex_count * expected_stride != hdr->vertex_data_size) {
-        NT_LOG_ERROR("activate_mesh: vertex_data_size %u != vertex_count %u * stride %u", hdr->vertex_data_size, hdr->vertex_count, expected_stride);
-        return false;
-    }
+    NT_ASSERT(hdr->index_type <= 2 && hdr->vertex_wire <= NT_MESH_WIRE_VTX_SOA && hdr->index_wire <= NT_MESH_WIRE_IDX_MESHOPT && "mesh index type or wire tag invalid");
+    NT_ASSERT(hdr->stream_count != 0 && hdr->stream_count <= NT_MESH_MAX_STREAMS && "mesh stream_count invalid");
+    const uint32_t streams_size = (uint32_t)hdr->stream_count * (uint32_t)sizeof(NtStreamDesc);
+    NT_ASSERT((uint64_t)sizeof(NtMeshAssetHeader) + streams_size + hdr->vertex_data_size + hdr->index_data_size <= size && "mesh blob truncated");
+    const uint32_t stride = mesh_stream_stride((const NtStreamDesc *)(data + sizeof(NtMeshAssetHeader)), hdr->stream_count);
+    NT_ASSERT((uint64_t)hdr->vertex_count * stride == hdr->vertex_data_size && "mesh vertex_data_size != vertex_count * stride");
     static const uint32_t idx_elem_sizes[3] = {0, 2, 4};
-    uint32_t idx_elem = idx_elem_sizes[hdr->index_type];
-    if (hdr->index_type == 0 && hdr->index_count != 0) {
-        NT_LOG_ERROR("activate_mesh: index_count %u with index_type none", hdr->index_count);
-        return false;
-    }
+    const uint32_t idx_elem = idx_elem_sizes[hdr->index_type];
+    NT_ASSERT((hdr->index_type != 0 || hdr->index_count == 0) && "mesh index_count with index_type none");
     if (hdr->index_wire == NT_MESH_WIRE_IDX_MESHOPT) {
-        if (!mesh_meshopt_sizes_valid(hdr, idx_elem)) {
-            return false;
-        }
-    } else if ((uint64_t)hdr->index_count * idx_elem != hdr->index_data_size) {
-        NT_LOG_ERROR("activate_mesh: index_data_size %u != index_count %u * %u", hdr->index_data_size, hdr->index_count, idx_elem);
-        return false;
+        NT_ASSERT(hdr->index_type != 0 && hdr->index_count != 0 && hdr->index_count % 3 == 0 && "mesh MESHOPT wire without triangle indices");
+        /* Decoded size feeds malloc, and a wasm size_t wraps at 4 GB. */
+        const uint64_t decoded_size = (uint64_t)hdr->index_count * idx_elem;
+        NT_ASSERT(decoded_size <= UINT32_MAX && hdr->index_data_size != 0 && hdr->index_data_size <= decoded_size && "mesh MESHOPT index sizes inconsistent");
+        /* Codec minimum (header + 1 code byte per triangle + 16-byte tail) bounds the decode allocation. */
+        NT_ASSERT(hdr->index_data_size >= 1ULL + (hdr->index_count / 3) + 16ULL && "mesh MESHOPT index_data_size below codec minimum");
+    } else {
+        NT_ASSERT((uint64_t)hdr->index_count * idx_elem == hdr->index_data_size && "mesh index_data_size != index_count * element size");
     }
-    /* GL draws meshes only as GL_TRIANGLES: a trailing partial triangle would
-       be silently dropped at draw -- reject in the safety net too. Non-indexed
-       meshes draw vertex_count, so it carries the same constraint. */
-    uint32_t draw_count = (hdr->index_count > 0) ? hdr->index_count : hdr->vertex_count;
-    if (draw_count % 3 != 0) {
-        NT_LOG_ERROR("activate_mesh: %s count %u is not a multiple of 3", (hdr->index_count > 0) ? "index" : "vertex", draw_count);
-        return false;
-    }
-    return true;
+    /* GL draws meshes only as GL_TRIANGLES; a trailing partial triangle would be dropped. */
+    const uint32_t draw_count = (hdr->index_count > 0) ? hdr->index_count : hdr->vertex_count;
+    NT_ASSERT(draw_count % 3 == 0 && "mesh draw count is not a multiple of 3");
 }
 
 /* Uploads the IBO from the wire index block (decoding MESHOPT first).
@@ -2825,9 +2726,7 @@ static void destroy_unpublished_buffer(nt_buffer_t buf) {
 }
 
 uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
-    if (!mesh_blob_valid(data, size)) {
-        return 0;
-    }
+    mesh_blob_check(data, size);
     const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
     uint32_t streams_size = (uint32_t)hdr->stream_count * (uint32_t)sizeof(NtStreamDesc);
     const uint8_t *vertex_data = data + sizeof(NtMeshAssetHeader) + streams_size;
@@ -2902,20 +2801,11 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
 
 uint32_t nt_gfx_activate_shader(const uint8_t *data, uint32_t size) {
     const NtShaderCodeHeader *hdr = (const NtShaderCodeHeader *)data;
-    if (hdr->stage > NT_SHADER_STAGE_FRAGMENT) {
-        NT_LOG_ERROR("activate_shader: invalid stage");
-        return 0;
-    }
+    NT_ASSERT(hdr->stage <= NT_SHADER_STAGE_FRAGMENT && "shader stage invalid");
     /* 64-bit sum: a corrupt code_size must not wrap the truncation check into a pass */
-    if ((uint64_t)sizeof(NtShaderCodeHeader) + hdr->code_size > size) {
-        NT_LOG_ERROR("activate_shader: blob truncated");
-        return 0;
-    }
+    NT_ASSERT((uint64_t)sizeof(NtShaderCodeHeader) + hdr->code_size <= size && "shader blob truncated");
     /* The source is consumed as a C string -- the builder always writes the trailing NUL */
-    if (hdr->code_size == 0 || data[sizeof(NtShaderCodeHeader) + hdr->code_size - 1] != 0) {
-        NT_LOG_ERROR("activate_shader: source not NUL-terminated");
-        return 0;
-    }
+    NT_ASSERT(hdr->code_size != 0 && data[sizeof(NtShaderCodeHeader) + hdr->code_size - 1] == 0 && "shader source not NUL-terminated");
     const char *source = (const char *)(data + sizeof(NtShaderCodeHeader));
     nt_shader_type_t type = (hdr->stage == NT_SHADER_STAGE_VERTEX) ? NT_SHADER_VERTEX : NT_SHADER_FRAGMENT;
     nt_shader_t shd = nt_gfx_make_shader(&(nt_shader_desc_t){

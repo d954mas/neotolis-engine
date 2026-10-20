@@ -475,15 +475,15 @@ void test_clip_interpolates_between_samples(void) {
 }
 // #endregion
 
-// #region rejections
-/* Only structure is checked at activation (the resource core checks magic and
- * version first): a payload whose size, grid or write indices do not hold could
- * make the sampler read or write outside the allocation. Values inside a sound structure belong to the
- * builder and to NT_SKELETAL_CHECKS.
+// #region structure asserts
+/* Activation asserts the structure the builder writes: a payload whose size,
+ * grid or write indices do not hold could make the sampler read or write outside
+ * the allocation. Values inside a sound structure belong to the builder and to
+ * NT_SKELETAL_CHECKS.
  *
- * Every rejection runs against a pool of one asset: after N refusals a valid
- * payload must still activate, which proves nothing was published or held. */
-#define EXPECT_CLIP_REJECTED(buffer, bytes, why) TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_clip(buffer, bytes), why)
+ * Every assert runs against a pool of one asset: afterwards a valid payload must
+ * still activate, which proves nothing was published or held. */
+#define EXPECT_CLIP_ASSERTS(buffer, bytes) NT_TEST_EXPECT_ASSERT((void)nt_skeletal_assets_activate_clip(buffer, bytes))
 
 /* Offset of parent[j] / subtree_end[j] inside an NSKL payload. */
 #define SKL_PARENT_AT(j) (16U + (2U * (j)))
@@ -492,7 +492,7 @@ void test_clip_interpolates_between_samples(void) {
 /* The hierarchy rule is one walk, so each patch must be the single mutation that
  * reaches the rule its message names. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_skeleton_rejections(void) {
+void test_skeleton_structure_asserts(void) {
     reinit_assets(1);
 
     nt_skeletal_skeleton_t source = fixture_skeleton();
@@ -503,43 +503,43 @@ void test_skeleton_rejections(void) {
     TEST_ASSERT_NOT_NULL(buf);
 
     memcpy(buf, valid, size);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skeleton(buf, size - 1U), "one byte short");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skeleton(buf, size + 1U), "one byte long");
+    NT_TEST_EXPECT_ASSERT((void)nt_skeletal_assets_activate_skeleton(buf, size - 1U)); /* one byte short */
+    NT_TEST_EXPECT_ASSERT((void)nt_skeletal_assets_activate_skeleton(buf, size + 1U)); /* one byte long */
 
     memcpy(buf, valid, size);
     wr_u16(buf + 6, 0U);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skeleton(buf, size), "joint_count 0");
+    NT_TEST_EXPECT_ASSERT((void)nt_skeletal_assets_activate_skeleton(buf, size)); /* joint_count 0 */
 
     /* Sibling over-claim: joint 1's range is still open at joint 2, so joint 2
      * may not reach past it to joint 0. Range nesting alone accepts this. */
     memcpy(buf, valid, size);
     wr_u16(buf + SKL_PARENT_AT(2), 0U);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skeleton(buf, size), "a joint claimed by an open sibling subtree");
+    NT_TEST_EXPECT_ASSERT((void)nt_skeletal_assets_activate_skeleton(buf, size)); /* a joint claimed by an open sibling subtree */
 
     /* parent[2] = 3 points forward, so the joints are not in preorder. */
     memcpy(buf, valid, size);
     wr_u16(buf + SKL_PARENT_AT(2), 3U);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skeleton(buf, size), "non-preorder parent");
+    NT_TEST_EXPECT_ASSERT((void)nt_skeletal_assets_activate_skeleton(buf, size)); /* non-preorder parent */
 
     /* subtree_end[2] = 4 leaves the range of parent 1, which ends at 3. */
     memcpy(buf, valid, size);
     wr_u16(buf + SKL_END_AT(2), 4U);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skeleton(buf, size), "child outside its parent subtree");
+    NT_TEST_EXPECT_ASSERT((void)nt_skeletal_assets_activate_skeleton(buf, size)); /* child outside its parent subtree */
 
     /* Joint 1 closes at 2 while joint 2 still names it as its parent. */
     memcpy(buf, valid, size);
     wr_u16(buf + SKL_END_AT(1), 2U);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skeleton(buf, size), "a subtree closing before its last descendant");
+    NT_TEST_EXPECT_ASSERT((void)nt_skeletal_assets_activate_skeleton(buf, size)); /* a subtree closing before its last descendant */
 
     /* Root 0 reaching to 4 swallows root 3, which names no parent. */
     memcpy(buf, valid, size);
     wr_u16(buf + SKL_END_AT(0), 4U);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skeleton(buf, size), "a root overlapping the next root");
+    NT_TEST_EXPECT_ASSERT((void)nt_skeletal_assets_activate_skeleton(buf, size)); /* a root overlapping the next root */
 
     /* A range must end above its own joint. */
     memcpy(buf, valid, size);
     wr_u16(buf + SKL_END_AT(3), 3U);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skeleton(buf, size), "subtree_end not above its own joint");
+    NT_TEST_EXPECT_ASSERT((void)nt_skeletal_assets_activate_skeleton(buf, size)); /* subtree_end not above its own joint */
 
     memcpy(buf, valid, size);
     const uint32_t handle = nt_skeletal_assets_activate_skeleton(buf, size);
@@ -550,7 +550,7 @@ void test_skeleton_rejections(void) {
     free(valid);
 }
 
-void test_skin_binding_rejections(void) {
+void test_skin_binding_structure_asserts(void) {
     reinit_assets(1);
 
     nt_skin_binding_t source = fixture_binding();
@@ -561,12 +561,12 @@ void test_skin_binding_rejections(void) {
     TEST_ASSERT_NOT_NULL(buf);
 
     memcpy(buf, valid, size);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skin_binding(buf, size - 1U), "one byte short");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skin_binding(buf, size + 1U), "one byte long");
+    NT_TEST_EXPECT_ASSERT((void)nt_skeletal_assets_activate_skin_binding(buf, size - 1U)); /* one byte short */
+    NT_TEST_EXPECT_ASSERT((void)nt_skeletal_assets_activate_skin_binding(buf, size + 1U)); /* one byte long */
 
     memcpy(buf, valid, size);
     wr_u16(buf + 6, 0U);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skin_binding(buf, size), "palette_count 0");
+    NT_TEST_EXPECT_ASSERT((void)nt_skeletal_assets_activate_skin_binding(buf, size)); /* palette_count 0 */
 
     /* A radius is a value, not structure: a NaN one activates and is the
      * builder's bug to have caught. */
@@ -587,7 +587,7 @@ void test_skin_binding_rejections(void) {
 
 /* Header rules, including the exact size the counts imply. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_clip_header_rejections(void) {
+void test_clip_header_asserts(void) {
     reinit_assets(1);
 
     uint32_t size = 0;
@@ -596,33 +596,33 @@ void test_clip_header_rejections(void) {
     TEST_ASSERT_NOT_NULL(buf);
 
     memcpy(buf, valid, size);
-    EXPECT_CLIP_REJECTED(buf, size - 1U, "one byte short");
-    EXPECT_CLIP_REJECTED(buf, size + 1U, "one byte long");
+    EXPECT_CLIP_ASSERTS(buf, size - 1U); /* one byte short */
+    EXPECT_CLIP_ASSERTS(buf, size + 1U); /* one byte long */
 
     memcpy(buf, valid, size);
     wr_u16(buf + ANM_HDR_JOINT_COUNT, 0U);
-    EXPECT_CLIP_REJECTED(buf, size, "joint_count 0");
+    EXPECT_CLIP_ASSERTS(buf, size); /* joint_count 0 */
 
     memcpy(buf, valid, size);
     wr_u32(buf + ANM_HDR_SAMPLE_COUNT, 0U);
-    EXPECT_CLIP_REJECTED(buf, size, "sample_count 0");
+    EXPECT_CLIP_ASSERTS(buf, size); /* sample_count 0 */
 
     memcpy(buf, valid, size);
     wr_f32(buf + ANM_HDR_DURATION, -1.0F);
-    EXPECT_CLIP_REJECTED(buf, size, "negative duration");
+    EXPECT_CLIP_ASSERTS(buf, size); /* negative duration */
 
     memcpy(buf, valid, size);
     wr_u32(buf + ANM_HDR_DURATION, 0x7FC00000U);
-    EXPECT_CLIP_REJECTED(buf, size, "NaN duration");
+    EXPECT_CLIP_ASSERTS(buf, size); /* NaN duration */
 
     memcpy(buf, valid, size);
     wr_f32(buf + ANM_HDR_DURATION, 0.0F);
-    EXPECT_CLIP_REJECTED(buf, size, "a grid with no interval to step through");
+    EXPECT_CLIP_ASSERTS(buf, size); /* a grid with no interval to step through */
 
     /* A count that no longer matches the arrays changes the payload size. */
     memcpy(buf, valid, size);
     wr_u16(buf + ANM_HDR_N_T, 3U);
-    EXPECT_CLIP_REJECTED(buf, size, "one sampled t row too many");
+    EXPECT_CLIP_ASSERTS(buf, size); /* one sampled t row too many */
 
     /* Bounds are values: a broken one activates and is the builder's bug to
      * have caught, not the activator's. */
@@ -644,9 +644,9 @@ void test_clip_header_rejections(void) {
 }
 
 /* Every table entry the sampler turns into a write index into the caller's
- * pose. A table rejection happens after the slot copy, against a pool of one:
- * the slot must come back for the valid payload. */
-void test_clip_write_index_rejections(void) {
+ * pose. The table asserts before the slot copy, so a pool of one still has its
+ * slot for the valid payload. */
+void test_clip_write_index_asserts(void) {
     reinit_assets(1);
 
     uint32_t size = 0;
@@ -658,7 +658,7 @@ void test_clip_write_index_rejections(void) {
     for (uint32_t t = 0; t < 3; ++t) {
         memcpy(buf, valid, size);
         wr_u16(buf + tables[t], CLIP_JOINTS);
-        EXPECT_CLIP_REJECTED(buf, size, "a joint table entry at joint_count");
+        EXPECT_CLIP_ASSERTS(buf, size); /* a joint table entry at joint_count */
     }
 
     memcpy(buf, valid, size);
@@ -699,12 +699,12 @@ void test_clip_sampled_rows_need_a_grid(void) {
 
     uint8_t *one_sample = NULL;
     const uint32_t one_size = build_one_row_clip(&one_sample, 1U, 1.0F);
-    EXPECT_CLIP_REJECTED(one_sample, one_size, "a sampled row with a single sample");
+    EXPECT_CLIP_ASSERTS(one_sample, one_size); /* a sampled row with a single sample */
     free(one_sample);
 
     uint8_t *no_duration = NULL;
     const uint32_t no_duration_size = build_one_row_clip(&no_duration, 2U, 0.0F);
-    EXPECT_CLIP_REJECTED(no_duration, no_duration_size, "a sampled row over a zero duration");
+    EXPECT_CLIP_ASSERTS(no_duration, no_duration_size); /* a sampled row over a zero duration */
     free(no_duration);
 
     uint8_t *valid = NULL;
@@ -879,10 +879,10 @@ int main(void) {
     RUN_TEST(test_clip_view_matches_activator);
     RUN_TEST(test_clip_samples_grid_times_exactly);
     RUN_TEST(test_clip_interpolates_between_samples);
-    RUN_TEST(test_skeleton_rejections);
-    RUN_TEST(test_skin_binding_rejections);
-    RUN_TEST(test_clip_header_rejections);
-    RUN_TEST(test_clip_write_index_rejections);
+    RUN_TEST(test_skeleton_structure_asserts);
+    RUN_TEST(test_skin_binding_structure_asserts);
+    RUN_TEST(test_clip_header_asserts);
+    RUN_TEST(test_clip_write_index_asserts);
     RUN_TEST(test_clip_sampled_rows_need_a_grid);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_pool_overflow_asserts);

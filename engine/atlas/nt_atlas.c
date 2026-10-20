@@ -204,107 +204,46 @@ typedef struct {
     uint32_t index_bytes;
 } nt_atlas_blob_view_t;
 
-static bool mul_u32_checked(uint32_t lhs, uint32_t rhs, uint32_t *out) {
-    NT_ASSERT(out != NULL);
-    if (rhs == 0) {
-        *out = 0;
-        return true;
-    }
-    if (lhs > UINT32_MAX / rhs) {
-        return false;
-    }
-    *out = lhs * rhs;
-    return true;
-}
-
+/* Carves the serialized sections. Asserts the layout the builder writes; the resource core
+ * checked the header. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size, nt_atlas_blob_view_t *out) {
+static nt_atlas_blob_view_t atlas_carve_blob(const uint8_t *data, uint32_t size) {
     const NtAtlasHeader *hdr = (const NtAtlasHeader *)data;
-    if (hdr->page_count > NT_ATLAS_MAX_PAGES) {
-        return false;
-    }
-
-    uint32_t page_bytes = 0;
-    uint32_t region_bytes = 0;
-    uint32_t position_bytes = 0;
-    uint32_t uv_bytes = 0;
-    uint32_t index_bytes = 0;
-    if (!mul_u32_checked((uint32_t)hdr->page_count, (uint32_t)sizeof(uint64_t), &page_bytes) || !mul_u32_checked((uint32_t)hdr->region_count, (uint32_t)sizeof(NtAtlasRegion), &region_bytes) ||
-        !mul_u32_checked(hdr->total_vertex_count, (uint32_t)sizeof(float[2]), &position_bytes) || !mul_u32_checked(hdr->total_vertex_count, (uint32_t)sizeof(NtAtlasUv), &uv_bytes) ||
-        !mul_u32_checked(hdr->total_index_count, (uint32_t)sizeof(uint16_t), &index_bytes)) {
-        return false;
-    }
-
-    uint32_t meta_end = (uint32_t)sizeof(NtAtlasHeader);
-    if (page_bytes > size - meta_end) {
-        return false;
-    }
-    meta_end += page_bytes;
-    if (region_bytes > size - meta_end) {
-        return false;
-    }
-    meta_end += region_bytes;
-
-    if (hdr->vertex_offset != meta_end) {
-        return false;
-    }
-    if (position_bytes > size - hdr->vertex_offset) {
-        return false;
-    }
-
-    const uint32_t uv_offset = hdr->vertex_offset + position_bytes;
-    if (uv_bytes > size - uv_offset) {
-        return false;
-    }
-    const uint32_t expected_index_offset = uv_offset + uv_bytes;
-    if (hdr->index_offset != expected_index_offset) {
-        return false;
-    }
-    if (index_bytes > size - hdr->index_offset) {
-        return false;
-    }
+    NT_ASSERT(hdr->page_count <= NT_ATLAS_MAX_PAGES && "atlas page_count over the cap");
+    const uint64_t page_bytes = (uint64_t)hdr->page_count * sizeof(uint64_t);
+    const uint64_t region_bytes = (uint64_t)hdr->region_count * sizeof(NtAtlasRegion);
+    const uint64_t position_bytes = (uint64_t)hdr->total_vertex_count * sizeof(float[2]);
+    const uint64_t uv_bytes = (uint64_t)hdr->total_vertex_count * sizeof(NtAtlasUv);
+    const uint64_t index_bytes = (uint64_t)hdr->total_index_count * sizeof(uint16_t);
+    const uint64_t vertex_offset = sizeof(NtAtlasHeader) + page_bytes + region_bytes;
+    NT_ASSERT(hdr->vertex_offset == vertex_offset && hdr->index_offset == vertex_offset + position_bytes + uv_bytes && hdr->index_offset + index_bytes <= size &&
+              "atlas sections not packed inside the blob");
 
     const uint8_t *page_ids_bytes = data + sizeof(NtAtlasHeader);
     const NtAtlasRegion *regions = (const NtAtlasRegion *)(page_ids_bytes + page_bytes);
     for (uint32_t i = 0; i < hdr->region_count; i++) {
         const NtAtlasRegion *region = &regions[i];
-        if (region->name_hash == NT_ATLAS_TOMBSTONE_HASH) {
-            return false;
-        }
-        /* Strict: the builder never emits a region without a backing page, so a
-         * pageless-but-regioned blob is corruption — reject before the registry
-         * publishes a winner whose every emit would resolve NT_RESOURCE_INVALID.
-         * page_count <= NT_ATLAS_MAX_PAGES (checked above) also bounds the slot
-         * array read in nt_atlas_get_region_handles. */
-        if (region->page_index >= hdr->page_count) {
-            return false;
-        }
-        if (region->vertex_start > hdr->total_vertex_count || region->vertex_count > hdr->total_vertex_count - region->vertex_start) {
-            return false;
-        }
-        if (region->index_start > hdr->total_index_count || region->index_count > hdr->total_index_count - region->index_start) {
-            return false;
-        }
+        NT_ASSERT(region->name_hash != NT_ATLAS_TOMBSTONE_HASH && "atlas region name hash is the tombstone");
+        /* Also bounds the page slot read in nt_atlas_get_region_handles. */
+        NT_ASSERT(region->page_index < hdr->page_count && "atlas region on an undeclared page");
+        NT_ASSERT(region->vertex_start <= hdr->total_vertex_count && region->vertex_count <= hdr->total_vertex_count - region->vertex_start && region->index_start <= hdr->total_index_count &&
+                  region->index_count <= hdr->total_index_count - region->index_start && "atlas region span out of range");
     }
-
-    out->hdr = hdr;
-    out->page_ids_bytes = page_ids_bytes;
-    out->regions = regions;
-    out->positions_bytes = data + hdr->vertex_offset;
-    out->page_bytes = page_bytes;
-    out->position_bytes = position_bytes;
-    out->uv_bytes = uv_bytes;
-    out->index_bytes = index_bytes;
-    return true;
+    return (nt_atlas_blob_view_t){
+        .hdr = hdr,
+        .page_ids_bytes = page_ids_bytes,
+        .regions = regions,
+        .positions_bytes = data + hdr->vertex_offset,
+        .page_bytes = (uint32_t)page_bytes,
+        .position_bytes = (uint32_t)position_bytes,
+        .uv_bytes = (uint32_t)uv_bytes,
+        .index_bytes = (uint32_t)index_bytes,
+    };
 }
 
-/* AUX_BACKED slots become READY after activate, so validation precedes publication. */
+/* AUX_BACKED slots become READY after activate, so the layout asserts precede publication. */
 static uint32_t atlas_activate(const uint8_t *data, uint32_t size) {
-    nt_atlas_blob_view_t view;
-    if (!atlas_try_validate_and_carve_blob(data, size, &view)) {
-        NT_LOG_ERROR("atlas blob: bad layout -- rebuild packs");
-        return 0U;
-    }
+    (void)atlas_carve_blob(data, size);
     return 1U;
 }
 
@@ -330,17 +269,14 @@ static void replace_geometry(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v)
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data) {
-    (void)runtime_handle; /* always 1 — atlas_activate publishes it only for blobs that passed validation */
+    (void)runtime_handle; /* always 1 */
 
     /* Keep the published snapshot until the replacement blob is resident. */
     if (data == NULL || size == 0) {
         return;
     }
 
-    nt_atlas_blob_view_t view;
-    /* Activation already validated this blob; resolve revalidates and carves its view. */
-    const bool blob_ok = atlas_try_validate_and_carve_blob(data, size, &view);
-    NT_ASSERT(blob_ok && "atlas blob: validation failed");
+    const nt_atlas_blob_view_t view = atlas_carve_blob(data, size);
 
     nt_atlas_data_t *ad = (nt_atlas_data_t *)*user_data;
 
@@ -624,11 +560,6 @@ uint32_t nt_atlas_test_page_resource_handle(const struct nt_atlas_data *ad, uint
 }
 
 void nt_atlas_test_reset(void) { s_atlas.initialized = false; }
-
-bool nt_atlas_test_validate_header(const uint8_t *data, uint32_t size) {
-    nt_atlas_blob_view_t ignored;
-    return atlas_try_validate_and_carve_blob(data, size, &ignored);
-}
 
 const float (*nt_atlas_test_positions(const struct nt_atlas_data *ad))[2] {
     NT_ASSERT(ad != NULL);

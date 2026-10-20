@@ -1197,44 +1197,6 @@ void test_font_file_pack_unmount_cleans_state(void) {
     free(blob);
 }
 
-/* ---- A truncated replacement that would win the tiebreak fails activation; the previous winner stays published ---- */
-void test_font_truncated_replacement_keeps_lower_pack(void) {
-    nt_font_create_desc_t desc = test_font_desc();
-    nt_font_t font = nt_font_create(&desc);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
-
-    uint32_t size_a = 0;
-    uint8_t *blob_a = build_test_font_blob(&size_a);
-    uint32_t tok_a = nt_font_test_register_data(blob_a, size_a);
-    nt_resource_t res = nt_font_test_resource(tok_a);
-    nt_font_add(font, res);
-    nt_resource_step();
-    nt_font_step();
-
-    /* Warm a lookup against the valid winner. */
-    const nt_glyph_cache_entry_t *a1 = nt_font_lookup_glyph(font, 'A');
-    TEST_ASSERT_NOT_NULL(a1);
-    TEST_ASSERT_FALSE(a1->is_tofu);
-    TEST_ASSERT_NOT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
-
-    /* The later mount sharing the rid would win the tiebreak if it activated. */
-    /* Only the size is wrong: magic and version match. */
-    uint8_t truncated[sizeof(NtFontAssetHeader) - 1] = {0};
-    const NtFontAssetHeader prefix = {.magic = NT_FONT_MAGIC, .version = NT_FONT_VERSION};
-    memcpy(truncated, &prefix, sizeof truncated);
-    (void)nt_font_test_register_shared_rid(tok_a, truncated, (uint32_t)sizeof(truncated));
-    nt_resource_step();
-    nt_font_step();
-
-    TEST_ASSERT_NOT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
-    const nt_glyph_cache_entry_t *a2 = nt_font_lookup_glyph(font, 'A');
-    TEST_ASSERT_NOT_NULL(a2);
-    TEST_ASSERT_FALSE(a2->is_tofu);
-
-    nt_font_destroy(font);
-    free(blob_a);
-}
-
 static uint32_t build_font_bounds_blob(uint8_t *blob) {
     const NtFontAssetHeader header = {.magic = NT_FONT_MAGIC, .version = NT_FONT_VERSION, .glyph_count = 1, .units_per_em = 1000, .ascent = 800, .descent = -200};
     const NtFontGlyphEntry glyph = {.codepoint = 'A', .data_offset = sizeof(header) + sizeof(NtFontGlyphEntry), .advance = 500, .curve_count = 3};
@@ -1243,32 +1205,6 @@ static uint32_t build_font_bounds_blob(uint8_t *blob) {
     memcpy(blob + sizeof header, &glyph, sizeof glyph);
     memcpy(blob + glyph.data_offset, contour, sizeof contour);
     return glyph.data_offset + (uint32_t)sizeof contour;
-}
-
-static void assert_font_blob_rejected(const uint8_t *blob, uint32_t size) {
-    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
-    uint32_t token = nt_font_test_register_data(blob, size);
-    nt_font_add(font, nt_font_test_resource(token));
-    nt_resource_step();
-    nt_font_step();
-    TEST_ASSERT_FALSE(nt_resource_is_ready(nt_font_test_resource(token)));
-    TEST_ASSERT_FALSE(nt_font_lookup_metrics(font, 'A').found);
-    nt_font_destroy(font);
-    nt_font_test_deactivate(token);
-}
-
-void test_font_bad_magic_or_version_fails_activation(void) {
-    uint8_t blob[80];
-    const uint32_t size = build_font_bounds_blob(blob);
-    NtFontAssetHeader header;
-    memcpy(&header, blob, sizeof header);
-    header.version = NT_FONT_VERSION + 1U;
-    memcpy(blob, &header, sizeof header);
-    assert_font_blob_rejected(blob, size);
-    header.version = NT_FONT_VERSION;
-    header.magic = 0xDEADBEEFU;
-    memcpy(blob, &header, sizeof header);
-    assert_font_blob_rejected(blob, size);
 }
 
 void test_font_shared_contours_padding_and_empty_glyph_remain_valid(void) {
@@ -1303,48 +1239,6 @@ void test_font_shared_contours_padding_and_empty_glyph_remain_valid(void) {
     nt_font_destroy(font);
 }
 
-void test_font_truncated_glyph_table_fails_activation(void) {
-    uint8_t blob[80];
-    (void)build_font_bounds_blob(blob);
-    assert_font_blob_rejected(blob, (uint32_t)sizeof(NtFontAssetHeader));
-    assert_font_blob_rejected(blob, (uint32_t)(sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry) - 1U));
-}
-
-void test_font_invalid_glyph_data_spans_fail_activation(void) {
-    uint8_t blob[80];
-    const uint32_t size = build_font_bounds_blob(blob);
-    NtFontGlyphEntry glyph;
-    memcpy(&glyph, blob + sizeof(NtFontAssetHeader), sizeof glyph);
-    const uint32_t offsets[] = {UINT32_MAX, size + 1U, (uint32_t)sizeof(NtFontAssetHeader)};
-    for (size_t i = 0; i < sizeof offsets / sizeof offsets[0]; i++) {
-        glyph.data_offset = offsets[i];
-        memcpy(blob + sizeof(NtFontAssetHeader), &glyph, sizeof glyph);
-        assert_font_blob_rejected(blob, size);
-    }
-    glyph.data_offset = size - 1U;
-    glyph.kern_count = 1;
-    memcpy(blob + sizeof(NtFontAssetHeader), &glyph, sizeof glyph);
-    assert_font_blob_rejected(blob, size);
-}
-
-void test_font_truncated_contour_data_fails_activation(void) {
-    uint8_t blob[80];
-    const uint32_t size = build_font_bounds_blob(blob);
-    const uint32_t data_offset = (uint32_t)(sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry));
-    for (uint32_t truncated = data_offset; truncated < size; truncated++) {
-        assert_font_blob_rejected(blob, truncated);
-    }
-}
-
-void test_font_zero_contour_point_count_fails_activation(void) {
-    uint8_t blob[80];
-    const uint32_t size = build_font_bounds_blob(blob);
-    const uint32_t point_offset = (uint32_t)(sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry) + 2U);
-    const uint16_t point_count = 0;
-    memcpy(blob + point_offset, &point_count, sizeof point_count);
-    assert_font_blob_rejected(blob, size);
-}
-
 /* One glyph of `contours` identical complete rings whose on/off pattern repeats `on_every` (1 = all on, 2 = off,on). */
 static uint32_t build_ring_font_blob(uint8_t *blob, uint16_t contours, uint16_t point_count, uint32_t on_every) {
     const NtFontAssetHeader header = {.magic = NT_FONT_MAGIC, .version = NT_FONT_VERSION, .glyph_count = 1, .units_per_em = 1000, .ascent = 800, .descent = -200};
@@ -1368,19 +1262,6 @@ static uint32_t build_ring_font_blob(uint8_t *blob, uint16_t contours, uint16_t 
     return offset;
 }
 
-void test_font_contour_above_curve_cap_fails_activation(void) {
-    static uint8_t blob[2048];
-    const uint32_t size = build_ring_font_blob(blob, 1U, NT_FONT_MAX_CURVES_PER_GLYPH + 1U, 1U);
-    assert_font_blob_rejected(blob, size);
-}
-
-/* The cap holds for the glyph, not per contour. */
-void test_font_contours_above_curve_cap_together_fail_activation(void) {
-    static uint8_t blob[2048];
-    const uint32_t size = build_ring_font_blob(blob, 2U, (NT_FONT_MAX_CURVES_PER_GLYPH / 2U) + 1U, 1U);
-    assert_font_blob_rejected(blob, size);
-}
-
 static void assert_font_blob_activates(const uint8_t *blob, uint32_t size) {
     nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
     const uint32_t token = nt_font_test_register_data(blob, size);
@@ -1391,22 +1272,6 @@ static void assert_font_blob_activates(const uint8_t *blob, uint32_t size) {
     TEST_ASSERT_NOT_NULL(glyph);
     TEST_ASSERT_FALSE(glyph->is_tofu);
     nt_font_destroy(font);
-    nt_font_test_deactivate(token);
-}
-
-/* Control for every rejection built from it. */
-void test_font_bounds_blob_activates(void) {
-    uint8_t blob[80];
-    assert_font_blob_activates(blob, build_font_bounds_blob(blob));
-}
-
-/* Activation only: decoding a glyph this large would spend the band-drop warn-once. */
-void test_font_contour_at_curve_cap_activates(void) {
-    static uint8_t blob[2048];
-    const uint32_t token = nt_font_test_register_data(blob, build_ring_font_blob(blob, 1U, NT_FONT_MAX_CURVES_PER_GLYPH, 1U));
-    const nt_resource_t resource = nt_font_test_resource(token);
-    nt_resource_step();
-    TEST_ASSERT_TRUE(nt_resource_is_ready(resource));
     nt_font_test_deactivate(token);
 }
 
@@ -3089,15 +2954,6 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_font_blob_valid);
     RUN_TEST(test_font_shared_contours_padding_and_empty_glyph_remain_valid);
-    RUN_TEST(test_font_bad_magic_or_version_fails_activation);
-    RUN_TEST(test_font_truncated_glyph_table_fails_activation);
-    RUN_TEST(test_font_invalid_glyph_data_spans_fail_activation);
-    RUN_TEST(test_font_truncated_contour_data_fails_activation);
-    RUN_TEST(test_font_zero_contour_point_count_fails_activation);
-    RUN_TEST(test_font_contour_above_curve_cap_fails_activation);
-    RUN_TEST(test_font_contours_above_curve_cap_together_fail_activation);
-    RUN_TEST(test_font_bounds_blob_activates);
-    RUN_TEST(test_font_contour_at_curve_cap_activates);
     RUN_TEST(test_font_contour_points_above_curve_cap_stay_valid);
     RUN_TEST(test_font_init_shutdown);
     RUN_TEST(test_font_create_destroy_valid);
@@ -3136,7 +2992,6 @@ int main(void) {
     RUN_TEST(test_font_flushes_on_same_metrics_winner_swap);
     RUN_TEST(test_font_hotswap_replaces_metrics_in_one_step);
     RUN_TEST(test_font_file_pack_unmount_cleans_state);
-    RUN_TEST(test_font_truncated_replacement_keeps_lower_pack);
     RUN_TEST(test_font_unmount_while_referenced_renders_tofu);
     /* embolden (offset_points) */
     RUN_TEST(test_embolden_w0_identity);

@@ -449,7 +449,7 @@ static void resource_resolve_pass(void) {
 
 /* ---- Asset header check ---- */
 
-/* Every asset payload starts with {u32 magic; u16 version}; activators only see payloads that match their type. */
+/* Every asset payload starts with {u32 magic; u16 version} of its type's format. */
 static const struct {
     uint32_t magic;
     uint16_t version;
@@ -466,20 +466,15 @@ static const struct {
     [NT_ASSET_CLIP] = {NT_ANM_MAGIC, NT_SKELETAL_FORMAT_VERSION, sizeof(NtAnmHeader)},
 };
 
-static bool asset_header_valid(const NtAssetMeta *meta, const uint8_t *data) {
+/* A mismatch means a stale pack: rebuild packs after a format change. */
+static void asset_header_check(const NtAssetMeta *meta, const uint8_t *data) {
     const uint8_t atype = meta->asset_type;
-    uint32_t magic = 0;
-    uint16_t version = 0;
-    if (meta->size >= sizeof magic + sizeof version) {
-        memcpy(&magic, data, sizeof magic);
-        memcpy(&version, data + sizeof magic, sizeof version);
-    }
-    if (meta->size < s_asset_headers[atype].header_size || magic != s_asset_headers[atype].magic || version != s_asset_headers[atype].version) {
-        NT_LOG_ERROR("asset %016" PRIx64 " type %u: %u B magic 0x%08X v%u, want 0x%08X v%u -- rebuild packs", meta->resource_id, (unsigned)atype, meta->size, magic, (unsigned)version,
-                     s_asset_headers[atype].magic, (unsigned)s_asset_headers[atype].version);
-        return false;
-    }
-    return true;
+    NT_ASSERT(meta->size >= s_asset_headers[atype].header_size && "asset shorter than its header -- rebuild packs");
+    uint32_t magic;
+    uint16_t version;
+    memcpy(&magic, data, sizeof magic);
+    memcpy(&version, data + sizeof magic, sizeof version);
+    NT_ASSERT(magic == s_asset_headers[atype].magic && version == s_asset_headers[atype].version && "asset magic or version mismatch -- rebuild packs");
 }
 
 /* ---- I/O issue helper (shared by load + retry) ---- */
@@ -735,7 +730,8 @@ void nt_resource_step(void) {
                 }
 
                 const uint8_t *asset_data = pack->blob + meta->offset;
-                uint32_t handle = asset_header_valid(meta, asset_data) ? s_resource.types[atype].desc.activate(asset_data, meta->size) : 0U;
+                asset_header_check(meta, asset_data);
+                uint32_t handle = s_resource.types[atype].desc.activate(asset_data, meta->size);
                 if (handle != 0) {
                     meta->state = NT_ASSET_STATE_READY;
                     meta->runtime_handle = handle;

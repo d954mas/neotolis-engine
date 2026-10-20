@@ -1085,49 +1085,37 @@ static uint8_t *build_alias_pack_with_rid(uint64_t rid, uint8_t atype, uint32_t 
     return blob;
 }
 
-/* A payload whose header does not match its type fails before its activator runs; a lower-priority
- * copy stays published. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_asset_header_mismatch_fails_before_activation(void) {
+/* A payload whose header does not match its type is a stale pack: activation asserts before the
+ * type's activator runs. case 0 flips the magic, 1 the version, 2 cuts the payload below its header. */
+static void expect_asset_header_assert(uint32_t which) {
     nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate});
-    nt_resource_set_activate_time_budget(0);
     const nt_hash64_t rid = nt_hash64_str("header_check");
-    const nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    (void)nt_resource_request(rid, NT_ASSET_MESH);
     uint32_t size = 0;
-    uint8_t *low_blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size);
-    TEST_ASSERT_NOT_NULL(low_blob);
-    const nt_hash32_t low = nt_hash32_str("header_low");
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(low, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(low, low_blob, size));
-    nt_resource_step();
-    TEST_ASSERT_TRUE(nt_resource_is_ready(h));
-
-    const nt_hash32_t high = nt_hash32_str("header_high");
-    for (uint32_t c = 0; c < 4; c++) {
-        uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size);
-        TEST_ASSERT_NOT_NULL(blob);
-        NtAssetEntry *entry = (NtAssetEntry *)(blob + sizeof(NtPackHeader));
-        if (c == 0) {
-            blob[entry->offset] ^= 1U; /* magic */
-        } else if (c == 1) {
-            blob[entry->offset + 4U] ^= 1U; /* version */
-        } else if (c == 2) {
-            entry->size = (uint32_t)sizeof(NtMeshAssetHeader) - 1U;
-        }
-        const NtPackHeader *ph = (const NtPackHeader *)blob;
-        ((NtPackHeader *)blob)->checksum = nt_crc32(blob + ph->header_size, size - ph->header_size);
-        s_activate_call_count = 0;
-        TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(high, 1));
-        TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(high, blob, size));
-        nt_resource_step();
-        TEST_ASSERT_EQUAL_UINT32_MESSAGE(c < 3U ? 0U : 1U, s_activate_call_count, "only the matching header reaches the activator");
-        TEST_ASSERT_TRUE(nt_resource_is_ready(h));
-        nt_resource_unmount(high);
-        free(blob);
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size);
+    TEST_ASSERT_NOT_NULL(blob);
+    NtAssetEntry *entry = (NtAssetEntry *)(blob + sizeof(NtPackHeader));
+    if (which == 0) {
+        blob[entry->offset] ^= 1U;
+    } else if (which == 1) {
+        blob[entry->offset + 4U] ^= 1U;
+    } else {
+        entry->size = (uint32_t)sizeof(NtMeshAssetHeader) - 1U;
     }
-    nt_resource_unmount(low);
-    free(low_blob);
+    const NtPackHeader *ph = (const NtPackHeader *)blob;
+    ((NtPackHeader *)blob)->checksum = nt_crc32(blob + ph->header_size, size - ph->header_size);
+    const nt_hash32_t pid = nt_hash32_str("header_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
+    s_activate_call_count = 0;
+    EXPECT_ASSERT(nt_resource_step());
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, s_activate_call_count, "the activator never sees a mismatched header");
+    free(blob);
 }
+
+void test_asset_magic_mismatch_asserts(void) { expect_asset_header_assert(0); }
+void test_asset_version_mismatch_asserts(void) { expect_asset_header_assert(1); }
+void test_asset_shorter_than_header_asserts(void) { expect_asset_header_assert(2); }
 
 void test_equal_range_self_owners_keep_independent_runtime_objects(void) {
     nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate_seq, .deactivate = fake_deactivate});
@@ -3918,7 +3906,9 @@ int main(void) {
     RUN_TEST(test_asset_slot_reuse);
     RUN_TEST(test_asset_holes_shared_by_file_and_virtual_packs);
     RUN_TEST(test_parse_alias_ranges_preserve_activation_order);
-    RUN_TEST(test_asset_header_mismatch_fails_before_activation);
+    RUN_TEST(test_asset_magic_mismatch_asserts);
+    RUN_TEST(test_asset_version_mismatch_asserts);
+    RUN_TEST(test_asset_shorter_than_header_asserts);
     RUN_TEST(test_equal_range_self_owners_keep_independent_runtime_objects);
 
     /* Pack loading tests */
