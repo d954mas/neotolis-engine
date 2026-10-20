@@ -407,7 +407,7 @@ static uint32_t decode_one(const char *src, size_t off, size_t len, uint32_t *ou
 
 /* Splice clipboard text at the caret (replacing any selection). Each codepoint is decoded from the
  * untrusted clipboard bytes, run through the allow-predicate, and inserted via insert_codepoint —
- * which clamps to buffer_size-1 / max_length and drops a non-fitting multi-byte codepoint WHOLE.
+ * which clamps to buffer_size-1 / max_length-1 bytes and drops a non-fitting multi-byte codepoint WHOLE.
  * A malformed lead byte is skipped one byte at a time (never read OOB). Returns the new caret. */
 static uint32_t clipboard_paste(char *buffer, size_t buffer_size, const nt_ui_input_props_t *props, nt_ui_input_state_t *st, uint32_t cur_len, bool *changed) {
     /* Read in place: valid until the next clipboard call, and allow must not make one. */

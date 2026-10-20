@@ -24,12 +24,12 @@
 #define BUDGET_COUNT 6U
 
 static const char *const SPRITES[SPRITE_COUNT] = {
-    "assets/sprites/bigatlas/ages_.png",       "assets/sprites/bigatlas/arrow_clockwise.png", "assets/sprites/bigatlas/arrow_right_curve.png",  "assets/sprites/bigatlas/award.png",
-    "assets/sprites/bigatlas/book_open.png",   "assets/sprites/bigatlas/card_target_.png",    "assets/sprites/bigatlas/chess_king_.png",        "assets/sprites/bigatlas/d12.png",
-    "assets/sprites/bigatlas/dice_close_.png", "assets/sprites/bigatlas/emote_anger.png",     "assets/sprites/bigatlas/emote_heartBroken_.png", "assets/sprites/bigatlas/flip_empty.png",
+    "assets/sprites/bigatlas/resource_apple.png",     "assets/sprites/bigatlas/arrow_clockwise.png",   "assets/sprites/bigatlas/arrow_right_curve.png",  "assets/sprites/bigatlas/award.png",
+    "assets/sprites/bigatlas/book_open.png",          "assets/sprites/bigatlas/cards_stack_cross.png", "assets/sprites/bigatlas/hand_token_open.png",    "assets/sprites/bigatlas/d12.png",
+    "assets/sprites/bigatlas/suit_hearts_broken.png", "assets/sprites/bigatlas/emote_anger.png",       "assets/sprites/bigatlas/emote_heartBroken_.png", "assets/sprites/bigatlas/flip_empty.png",
 };
 static const float BUDGETS[BUDGET_COUNT] = {0.0F, 2.0F, 5.0F, 10.0F, 15.0F, 25.0F};
-static const uint32_t EXPECTED_TOTALS[BUDGET_COUNT] = {87, 78, 74, 63, 54, 51};
+static const uint32_t EXPECTED_TOTALS[BUDGET_COUNT] = {87, 83, 79, 67, 57, 51};
 
 void setUp(void) {}
 void tearDown(void) {}

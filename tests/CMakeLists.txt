@@ -143,28 +143,24 @@ if(NOT EMSCRIPTEN)
     # --- Sanitizer proof test ---
     # Triggers UB to prove ASan+UBSan are detecting. Skipped on Windows+Clang
     # where sanitizers are disabled (clang interception_win can't patch UCRT).
-    if(NOT (WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "Clang"))
+    # Sanitizers are Debug-only, so the proof exists only there.
+    if(NOT (WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "Clang") AND CMAKE_BUILD_TYPE STREQUAL "Debug")
         add_executable(test_sanitizer_proof unit/test_sanitizer_proof.c)
-
         nt_set_warning_flags(test_sanitizer_proof)
         nt_set_sanitizer_flags(test_sanitizer_proof)
-
         set_target_properties(test_sanitizer_proof PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
         )
-
-        if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-            # The wrapper converts signal termination to an ordinary exit; only
-            # the sanitizer's own diagnostic can satisfy the output oracle.
-            foreach(_sanitizer asan ubsan)
-                add_test(NAME sanitizer_proof_${_sanitizer}
-                    COMMAND ${CMAKE_COMMAND} -E env $<TARGET_FILE:test_sanitizer_proof> ${_sanitizer})
-            endforeach()
-            set_tests_properties(sanitizer_proof_asan PROPERTIES
-                PASS_REGULAR_EXPRESSION "AddressSanitizer: heap-buffer-overflow")
-            set_tests_properties(sanitizer_proof_ubsan PROPERTIES
-                PASS_REGULAR_EXPRESSION "runtime error: signed integer overflow")
-        endif()
+        # The wrapper converts signal termination to an ordinary exit; only
+        # the sanitizer's own diagnostic can satisfy the output oracle.
+        foreach(_sanitizer asan ubsan)
+            add_test(NAME sanitizer_proof_${_sanitizer}
+                COMMAND ${CMAKE_COMMAND} -E env $<TARGET_FILE:test_sanitizer_proof> ${_sanitizer})
+        endforeach()
+        set_tests_properties(sanitizer_proof_asan PROPERTIES
+            PASS_REGULAR_EXPRESSION "AddressSanitizer: heap-buffer-overflow")
+        set_tests_properties(sanitizer_proof_ubsan PROPERTIES
+            PASS_REGULAR_EXPRESSION "runtime error: signed integer overflow")
     endif()
 
     # --- Swap demo tests ---
@@ -698,7 +694,7 @@ if(NOT EMSCRIPTEN)
     add_test(NAME test_hash COMMAND test_hash)
 
     # --- Resource module tests ---
-    add_executable(test_resource unit/test_resource.c)
+    add_executable(test_resource unit/test_resource.c unit/test_helpers/nt_assert_trap.c)
     add_executable(test_resource_timing unit/test_resource_timing.c)
     target_link_libraries(test_resource_timing PRIVATE nt_resource nt_http_stub nt_fs nt_log_stub unity)
     target_compile_definitions(test_resource_timing PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -707,6 +703,7 @@ if(NOT EMSCRIPTEN)
     # file reads + request-fail paths). Stubs make nt_fs_read_file return INVALID,
     # so assets never activate and the activation/resolve callbacks never fire.
     target_link_libraries(test_resource PRIVATE nt_resource nt_http nt_fs nt_log_stub unity)
+    target_include_directories(test_resource PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_resource PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_resource WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     # Only test that drives REAL nt_fs/nt_http + nt_time_sleep TTL paths on real time;
@@ -735,7 +732,7 @@ if(NOT EMSCRIPTEN)
     endforeach()
 
     # --- Atlas module tests ---
-    add_executable(test_atlas unit/test_atlas.c unit/test_helpers/nt_assert_trap.c)
+    add_executable(test_atlas unit/test_atlas.c)
     target_link_libraries(test_atlas PRIVATE nt_atlas nt_resource nt_hash nt_http_stub nt_fs_stub nt_log unity)
     target_include_directories(test_atlas PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_atlas PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
@@ -1541,7 +1538,6 @@ if(NOT EMSCRIPTEN)
         target_compile_definitions(${_t} PRIVATE _CRT_SECURE_NO_WARNINGS)
         nt_setup_test_target(${_t})
     endforeach()
-    target_sources(test_nt_ui_measure_cb PRIVATE unit/test_helpers/nt_test_font_blob.c)
 
     add_executable(test_nt_ui_stats
         unit/test_nt_ui_stats.c

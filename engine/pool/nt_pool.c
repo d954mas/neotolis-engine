@@ -5,6 +5,8 @@
 
 #include "core/nt_assert.h"
 
+_Static_assert(NT_POOL_SLOT_SHIFT == 16, "generations wrap as uint16_t");
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_pool_init(nt_pool_t *pool, uint16_t capacity) {
     NT_ASSERT(pool);

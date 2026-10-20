@@ -206,15 +206,15 @@ ok
 # critical path is one single-threaded test. The wait + report happens after
 # the tidy step; a format/tidy failure kills the orphan so no exe stays locked.
 #
-# The atlas geometry tests (hull budget golden, transform sweep guard) exercise
-# builder geometry only. In default mode
+# The atlas tests (hull budget golden, transform sweep guard) cover builder
+# geometry and the sweep script. In default mode
 # they run ONLY when the change set touches those areas; --push/--full (and CI)
 # always run them, so nothing ships unchecked.
 step "ctest (native-debug, parallel with format+tidy)"
 # Everything the guards depend on: builder+bench sources, their deps libraries,
 # fixtures/goldens, the scripts they source, and the test-registration infra.
 # Matched against the UNFILTERED name union so deletions also trigger them.
-GUARD_RELEVANT='^(tools/builder/|tools/research/|engine/atlas/|engine/hash/|shared/include/|deps/(clipper2|stb|miniz|cjson)/|scripts/(bench_|atlas/|test_atlas_)|tests/unit/test_atlas_|tests/unit/test_helpers/|tests/CMakeLists|cmake/|CMakeLists\.txt$|CMakePresets\.json$)'
+GUARD_RELEVANT='^(tools/builder/|tools/research/|engine/atlas/|engine/hash/|shared/include/|deps/(clipper2|stb|miniz)/|assets/sprites/bigatlas/|scripts/(atlas/|test_atlas_)|tests/unit/test_atlas_|tests/unit/test_helpers/|tests/CMakeLists|cmake/|CMakeLists\.txt$|CMakePresets\.json$)'
 CTEST_ARGS=()
 if [ "$MODE" = "default" ] && ! printf '%s\n' "$CHANGED_NAMES_ALL" | grep -qE "$GUARD_RELEVANT"; then
     echo "(no builder/atlas paths in the change set — the atlas geometry tests defer to --push/--full)"

@@ -678,6 +678,17 @@ static void test_clipboard_paste_filters_before_capacity_clamp(void) {
     TEST_ASSERT_EQUAL_STRING("1234567", buf);
 }
 
+/* Replacing a selection must shrink the tracked length, or the paste clamps against the old text. */
+static void test_clipboard_paste_over_selection_fills_capacity(void) {
+    char buf[8] = "abcdef";
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf);
+    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_A);
+    nt_clipboard_set_text("1234567");
+    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_V);
+    TEST_ASSERT_EQUAL_STRING("1234567", buf);
+}
+
 /* ---- Test 21: paste replaces a non-empty selection. ---- */
 static void test_clipboard_paste_replaces_selection(void) {
     char buf[32];
@@ -1498,6 +1509,7 @@ int main(void) {
     RUN_TEST(test_clipboard_paste_filtered);
     RUN_TEST(test_clipboard_paste_filters_before_capacity_clamp);
     RUN_TEST(test_clipboard_paste_replaces_selection);
+    RUN_TEST(test_clipboard_paste_over_selection_fills_capacity);
     RUN_TEST(test_password_mask_render);
     RUN_TEST(test_password_buffer_and_keyboard);
     RUN_TEST(test_delete_key_right);

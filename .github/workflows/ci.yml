@@ -442,7 +442,7 @@ jobs:
           cmake -B build/_cmake/native-debug-off -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_STANDARD=17 -DCMAKE_C_STANDARD_REQUIRED=ON -DCMAKE_C_COMPILER=clang -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DNT_UI_DEBUG_TOOLS=OFF -DNT_ASSERT_MODE=2 -DNT_SKELETAL_CHECKS=ON -DNT_UI_CHECKS=ON -DNT_GFX_NATIVE_GL_DEBUG=ON -DNT_HTTP_CURL=ON -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS" -G Ninja
           cmake --build build/_cmake/native-debug-off
 
-      # The atlas bench guards check builder geometry, not optional features; native-debug
+      # The atlas geometry tests check the builder, not optional features; native-debug
       # (sanitizers) and native-release run them.
       - name: Run tests (optional features OFF)
         run: xvfb-run -a bash scripts/ci_ctest.sh --test-dir build/_cmake/native-debug-off -E '^(test_atlas_hull_budget|test_atlas_transform_sweep_guard)$'
