@@ -5,28 +5,19 @@
 
 #include "hash/nt_hash.h"
 
-/* --- TEXTURE --- */
-#define ASSET_TEXTURE_SLICE9_DEMO_ATLAS_TEX0 ((nt_hash64_t){0xCBBC0C2DDBB7ED8BULL}) /* slice9_demo_atlas/tex0 */
-
-/* --- SHADER --- */
-#define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG ((nt_hash64_t){0xC1C3907ABE639DDCULL}) /* assets/shaders/slug_text.frag */
-#define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT ((nt_hash64_t){0x8ECB088C8983CC2FULL}) /* assets/shaders/slug_text.vert */
-#define ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG ((nt_hash64_t){0x96ED6312E7B10087ULL}) /* assets/shaders/sprite.frag */
-#define ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT ((nt_hash64_t){0x75A9EEA4D1472026ULL}) /* assets/shaders/sprite.vert */
-
-/* --- FONT --- */
-#define ASSET_FONT_SLICE9_DEMO_FONT ((nt_hash64_t){0x82BA368B50767CCBULL}) /* slice9_demo/font */
-
-/* --- ATLAS --- */
-#define ASSET_ATLAS_SLICE9_DEMO_ATLAS ((nt_hash64_t){0x1E0A94A6128967FDULL}) /* slice9_demo_atlas */
-
-/* --- ATLAS_REGION --- */
-#define ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS__WHITE ((nt_hash64_t){0x27424DEE40744BBBULL}) /* slice9_demo_atlas/_white */
 #define ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_BUTTON_BLUE ((nt_hash64_t){0x04DD51E0B9359D84ULL}) /* slice9_demo_atlas/button_blue */
 #define ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_BUTTON_GREEN ((nt_hash64_t){0x7ABDDB88258FF8EEULL}) /* slice9_demo_atlas/button_green */
 #define ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_PANEL_BEIGE ((nt_hash64_t){0x0AE1CE33078EC907ULL}) /* slice9_demo_atlas/panel_beige */
 #define ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_PANEL_BLUE ((nt_hash64_t){0xD19BE6D11F48A883ULL}) /* slice9_demo_atlas/panel_blue */
 #define ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_PANEL_BROWN ((nt_hash64_t){0xAF4C0086E593897FULL}) /* slice9_demo_atlas/panel_brown */
+#define ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS__WHITE ((nt_hash64_t){0x27424DEE40744BBBULL}) /* slice9_demo_atlas/_white */
+#define ASSET_ATLAS_SLICE9_DEMO_ATLAS ((nt_hash64_t){0x1E0A94A6128967FDULL}) /* slice9_demo_atlas */
+#define ASSET_FONT_SLICE9_DEMO_FONT ((nt_hash64_t){0x82BA368B50767CCBULL}) /* slice9_demo/font */
+#define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG ((nt_hash64_t){0xC1C3907ABE639DDCULL}) /* assets/shaders/slug_text.frag */
+#define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT ((nt_hash64_t){0x8ECB088C8983CC2FULL}) /* assets/shaders/slug_text.vert */
+#define ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG ((nt_hash64_t){0x96ED6312E7B10087ULL}) /* assets/shaders/sprite.frag */
+#define ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT ((nt_hash64_t){0x75A9EEA4D1472026ULL}) /* assets/shaders/sprite.vert */
+#define ASSET_TEXTURE_SLICE9_DEMO_ATLAS_TEX0 ((nt_hash64_t){0xCBBC0C2DDBB7ED8BULL}) /* slice9_demo_atlas/tex0 */
 
 #if NT_HASH_LABELS
 static inline void slice9_demo_assets_register_labels(void) {

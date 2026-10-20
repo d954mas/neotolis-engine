@@ -279,7 +279,7 @@ nt_builder_merge_headers(headers, 2, "generated/assets.h");
 ```
 
 Rules:
-- `merge_headers` reads per-pack `.h` files, deduplicates by hash, sorts, writes one combined header.
+- `merge_headers` copies every per-pack define verbatim and writes them sorted by identifier. A define repeated with the same hash folds into one; the same identifier with two hashes asserts as a collision. Defines that share a hash under different identifiers (atlas regions with one name in two atlases) all stay.
 - No runtime state needed during pack building — merge operates on already-generated files.
 - Game code includes the single combined header, not per-pack headers.
 - Per-pack headers are still generated for diagnostics and per-pack diffing.

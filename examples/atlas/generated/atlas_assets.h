@@ -5,30 +5,16 @@
 
 #include "hash/nt_hash.h"
 
-/* --- MESH --- */
-#define ASSET_MESH_ASSETS_MESHES_CUBE_GLB ((nt_hash64_t){0xE41DD25FE1BAFFC5ULL}) /* assets/meshes/cube.glb */
-
-/* --- TEXTURE --- */
-#define ASSET_TEXTURE_SPINEBOY_TEX0 ((nt_hash64_t){0x77D96C7DFBAAA79DULL}) /* spineboy/tex0 */
-
-/* --- SHADER --- */
-#define ASSET_SHADER_ASSETS_SHADERS_MESH_INST_FRAG ((nt_hash64_t){0x407D2737917D7489ULL}) /* assets/shaders/mesh_inst.frag */
-#define ASSET_SHADER_ASSETS_SHADERS_MESH_INST_VERT ((nt_hash64_t){0xABD22A1B5B29F6E6ULL}) /* assets/shaders/mesh_inst.vert */
-
-/* --- ATLAS --- */
-#define ASSET_ATLAS_SPINEBOY ((nt_hash64_t){0x0450A34A3746ACD9ULL}) /* spineboy */
-
-/* --- ATLAS_REGION --- */
 #define ASSET_ATLAS_REGION_SPINEBOY_CROSSHAIR_PNG ((nt_hash64_t){0x9E51FBFC0FE3CBEBULL}) /* spineboy/crosshair.png */
+#define ASSET_ATLAS_REGION_SPINEBOY_EYES_PNG ((nt_hash64_t){0x7693AAD438406922ULL}) /* spineboy/eyes.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_EYE_INDIFFERENT_PNG ((nt_hash64_t){0xFFBA791E347A9830ULL}) /* spineboy/eye_indifferent.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_EYE_SURPRISED_PNG ((nt_hash64_t){0xAB58F2FB15111887ULL}) /* spineboy/eye_surprised.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_EYES_PNG ((nt_hash64_t){0x7693AAD438406922ULL}) /* spineboy/eyes.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_FRONT_BRACER_PNG ((nt_hash64_t){0x174084C7217C365FULL}) /* spineboy/front_bracer.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_FRONT_FIST_CLOSED_PNG ((nt_hash64_t){0xC0BAC2C600C36576ULL}) /* spineboy/front_fist_closed.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_FRONT_FIST_OPEN_PNG ((nt_hash64_t){0xDBE04847E0D303D6ULL}) /* spineboy/front_fist_open.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_FRONT_FOOT_PNG ((nt_hash64_t){0x0A6AA5E2BE2DDD2CULL}) /* spineboy/front_foot.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_FRONT_FOOT_BEND1_PNG ((nt_hash64_t){0x8108C1B8C9374BDCULL}) /* spineboy/front_foot_bend1.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_FRONT_FOOT_BEND2_PNG ((nt_hash64_t){0x7C515BFEC505BBAFULL}) /* spineboy/front_foot_bend2.png */
+#define ASSET_ATLAS_REGION_SPINEBOY_FRONT_FOOT_PNG ((nt_hash64_t){0x0A6AA5E2BE2DDD2CULL}) /* spineboy/front_foot.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_FRONT_SHIN_PNG ((nt_hash64_t){0xD77C1FD7F5E648D8ULL}) /* spineboy/front_shin.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_FRONT_THIGH_PNG ((nt_hash64_t){0xB0E178C075449B09ULL}) /* spineboy/front_thigh.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_FRONT_UPPER_ARM_PNG ((nt_hash64_t){0x4366FBCCA8AC3F93ULL}) /* spineboy/front_upper_arm.png */
@@ -41,14 +27,14 @@
 #define ASSET_ATLAS_REGION_SPINEBOY_MOUTH_GRIND_PNG ((nt_hash64_t){0x9722FD519DD5B7DFULL}) /* spineboy/mouth_grind.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_MOUTH_OOOO_PNG ((nt_hash64_t){0x1E709CE68E70FEF1ULL}) /* spineboy/mouth_oooo.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_MOUTH_SMILE_PNG ((nt_hash64_t){0xC7D197436C4BC938ULL}) /* spineboy/mouth_smile.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_MUZZLE_GLOW_PNG ((nt_hash64_t){0xD05C933FDEC91BCFULL}) /* spineboy/muzzle-glow.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_MUZZLE_RING_PNG ((nt_hash64_t){0x051740658BEED247ULL}) /* spineboy/muzzle-ring.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_MUZZLE_PNG ((nt_hash64_t){0xE7CBD047804EDBD4ULL}) /* spineboy/muzzle.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_MUZZLE01_PNG ((nt_hash64_t){0xDCB20D96202BF907ULL}) /* spineboy/muzzle01.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_MUZZLE02_PNG ((nt_hash64_t){0xCE23A65C8A50D1CCULL}) /* spineboy/muzzle02.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_MUZZLE03_PNG ((nt_hash64_t){0x0B117479413AE12BULL}) /* spineboy/muzzle03.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_MUZZLE04_PNG ((nt_hash64_t){0x42E7CF95F8B6A852ULL}) /* spineboy/muzzle04.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_MUZZLE05_PNG ((nt_hash64_t){0x119C85C7484CFCC8ULL}) /* spineboy/muzzle05.png */
+#define ASSET_ATLAS_REGION_SPINEBOY_MUZZLE_GLOW_PNG ((nt_hash64_t){0xD05C933FDEC91BCFULL}) /* spineboy/muzzle-glow.png */
+#define ASSET_ATLAS_REGION_SPINEBOY_MUZZLE_PNG ((nt_hash64_t){0xE7CBD047804EDBD4ULL}) /* spineboy/muzzle.png */
+#define ASSET_ATLAS_REGION_SPINEBOY_MUZZLE_RING_PNG ((nt_hash64_t){0x051740658BEED247ULL}) /* spineboy/muzzle-ring.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_NECK_PNG ((nt_hash64_t){0xFDD323F127E5E0ABULL}) /* spineboy/neck.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_PORTAL_BG_PNG ((nt_hash64_t){0x51063A6AD9FDEBE0ULL}) /* spineboy/portal-bg.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_PORTAL_FLARE1_PNG ((nt_hash64_t){0x5A3B01E8B1DE6861ULL}) /* spineboy/portal-flare1.png */
@@ -58,13 +44,18 @@
 #define ASSET_ATLAS_REGION_SPINEBOY_PORTAL_STREAKS1_PNG ((nt_hash64_t){0x0577D0468BAFF8E5ULL}) /* spineboy/portal-streaks1.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_PORTAL_STREAKS2_PNG ((nt_hash64_t){0xFC3345D69D6163FBULL}) /* spineboy/portal-streaks2.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_REAR_BRACER_PNG ((nt_hash64_t){0xE342C3C1878DE308ULL}) /* spineboy/rear_bracer.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_REAR_FOOT_PNG ((nt_hash64_t){0xCA98349AADA93686ULL}) /* spineboy/rear_foot.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_REAR_FOOT_BEND1_PNG ((nt_hash64_t){0x5CAD74AF0339816FULL}) /* spineboy/rear_foot_bend1.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_REAR_FOOT_BEND2_PNG ((nt_hash64_t){0x27644193204127CBULL}) /* spineboy/rear_foot_bend2.png */
+#define ASSET_ATLAS_REGION_SPINEBOY_REAR_FOOT_PNG ((nt_hash64_t){0xCA98349AADA93686ULL}) /* spineboy/rear_foot.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_REAR_SHIN_PNG ((nt_hash64_t){0x0FE40B9264BD9E1EULL}) /* spineboy/rear_shin.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_REAR_THIGH_PNG ((nt_hash64_t){0xA141B75107AFA5CBULL}) /* spineboy/rear_thigh.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_REAR_UPPER_ARM_PNG ((nt_hash64_t){0xA5587EF6303D0A30ULL}) /* spineboy/rear_upper_arm.png */
 #define ASSET_ATLAS_REGION_SPINEBOY_TORSO_PNG ((nt_hash64_t){0x211F72C824FA4E68ULL}) /* spineboy/torso.png */
+#define ASSET_ATLAS_SPINEBOY ((nt_hash64_t){0x0450A34A3746ACD9ULL}) /* spineboy */
+#define ASSET_MESH_ASSETS_MESHES_CUBE_GLB ((nt_hash64_t){0xE41DD25FE1BAFFC5ULL}) /* assets/meshes/cube.glb */
+#define ASSET_SHADER_ASSETS_SHADERS_MESH_INST_FRAG ((nt_hash64_t){0x407D2737917D7489ULL}) /* assets/shaders/mesh_inst.frag */
+#define ASSET_SHADER_ASSETS_SHADERS_MESH_INST_VERT ((nt_hash64_t){0xABD22A1B5B29F6E6ULL}) /* assets/shaders/mesh_inst.vert */
+#define ASSET_TEXTURE_SPINEBOY_TEX0 ((nt_hash64_t){0x77D96C7DFBAAA79DULL}) /* spineboy/tex0 */
 
 #if NT_HASH_LABELS
 static inline void atlas_assets_register_labels(void) {

@@ -121,6 +121,53 @@ static void test_merge_rejects_identifier_collision(void) {
     TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "identifier collision"));
 }
 
+/* A 116-char BLOB path makes a 127-char identifier: valid, and longer than other kinds' would be. */
+static void test_merge_keeps_longest_valid_identifier(void) {
+    char path[117];
+    memset(path, 'a', 116U);
+    path[116] = '\0';
+    char line[400];
+    (void)snprintf(line, sizeof line, "#define ASSET_BLOB_%.116s ((nt_hash64_t){0x0000000000000001ULL}) /* %s */\n",
+                   "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", path);
+    FILE *f = fopen(s_merge_paths[0], "wb");
+    TEST_ASSERT_NOT_NULL(f);
+    TEST_ASSERT_EQUAL_size_t(strlen(line), fwrite(line, 1U, strlen(line), f));
+    TEST_ASSERT_EQUAL_INT(0, fclose(f));
+    if (setjmp(s_assert_jmp) != 0) {
+        TEST_FAIL_MESSAGE(s_assert_expr);
+    }
+    nt_builder_merge_headers(s_merge_paths, 1U, s_merge_output);
+    f = fopen(s_merge_output, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    char merged[4096] = {0};
+    (void)fread(merged, 1U, sizeof(merged) - 1U, f);
+    TEST_ASSERT_EQUAL_INT(0, fclose(f));
+    TEST_ASSERT_NOT_NULL(strstr(merged, line));
+}
+
+/* Atlas regions hash only their name, so hud/icon and world/icon share a hash yet are distinct defines. */
+static void test_merge_keeps_regions_sharing_a_hash(void) {
+    const char *const headers[] = {
+        "#define ASSET_ATLAS_REGION_HUD_ICON ((nt_hash64_t){0x0000000000000007ULL}) /* hud/icon */\n",
+        "#define ASSET_ATLAS_REGION_WORLD_ICON ((nt_hash64_t){0x0000000000000007ULL}) /* world/icon */\n",
+    };
+    for (size_t i = 0; i < sizeof(s_merge_paths) / sizeof(s_merge_paths[0]); ++i) {
+        FILE *f = fopen(s_merge_paths[i], "wb");
+        TEST_ASSERT_NOT_NULL(f);
+        const size_t len = strlen(headers[i]);
+        TEST_ASSERT_EQUAL_size_t(len, fwrite(headers[i], 1U, len, f));
+        TEST_ASSERT_EQUAL_INT(0, fclose(f));
+    }
+    nt_builder_merge_headers(s_merge_paths, 2U, s_merge_output);
+    FILE *f = fopen(s_merge_output, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    char merged[4096] = {0};
+    (void)fread(merged, 1U, sizeof(merged) - 1U, f);
+    TEST_ASSERT_EQUAL_INT(0, fclose(f));
+    TEST_ASSERT_NOT_NULL(strstr(merged, headers[0]));
+    TEST_ASSERT_NOT_NULL(strstr(merged, headers[1]));
+}
+
 /* An atlas whose path starts with "region" shares the ATLAS_REGION_ prefix; the merge must keep its name. */
 static void test_merge_keeps_atlas_named_region(void) {
     const char *const headers[] = {
@@ -207,6 +254,8 @@ int main(void) {
     RUN_TEST(test_collision_check_accepts_distinct_identifiers);
     RUN_TEST(test_merge_rejects_identifier_collision);
     RUN_TEST(test_merge_keeps_atlas_named_region);
+    RUN_TEST(test_merge_keeps_regions_sharing_a_hash);
+    RUN_TEST(test_merge_keeps_longest_valid_identifier);
     RUN_TEST(test_skeletal_kinds_emit_prefixed_identifiers_in_group_order);
     return UNITY_END();
 }

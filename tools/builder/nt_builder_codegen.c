@@ -262,7 +262,7 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx) {
 
     /* Build CodegenEntry array from pending entries + atlas region codegen entries */
     uint32_t total_ce = ctx->pending_count + ctx->atlas_region_count;
-    CodegenEntry *ce = (CodegenEntry *)malloc((size_t)total_ce * sizeof(CodegenEntry));
+    CodegenEntry *ce = (CodegenEntry *)calloc(total_ce > 0 ? total_ce : 1U, sizeof(CodegenEntry)); /* calloc: analyzer tracks fields across qsort */
     NT_BUILD_ASSERT(ce && "codegen: alloc failed");
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         const NtBuildEntry *pe = &ctx->pending[i];
@@ -316,26 +316,45 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx) {
 /* --- Merge per-pack .h headers into a combined header --- */
 
 /* Parse a single #define ASSET_XXX_YYY ((nt_hash64_t){0x...ULL}) line */
+/* A merged define is copied verbatim: the per-pack writer already derived its identifier, so the merge
+ * never re-derives a kind or a name. */
 typedef struct {
     char identifier[NT_CODEGEN_MAX_IDENTIFIER];
     uint64_t hash;
-    char comment_path[256]; /* logical path from comment */
-    nt_build_asset_kind_t kind;
+    char path[256];
 } MergeEntry;
 
-/* Prefixes alone are ambiguous (an atlas at region/... reads as ATLAS_REGION_), so the kind is the one
- * whose writer derivation from the comment path reproduces the parsed identifier. */
-static nt_build_asset_kind_t kind_from_identifier(const char *id, const char *path) {
-    char derived[NT_CODEGEN_MAX_IDENTIFIER];
-    int kind = NT_BUILD_ASSET_MESH;
-    for (; kind <= NT_BUILD_ASSET_CLIP; kind++) {
-        path_to_identifier(path, type_prefix_for_kind((nt_build_asset_kind_t)kind), derived, sizeof derived);
-        if (strcmp(derived, id) == 0) {
-            break;
-        }
+static int merge_entry_cmp(const void *a, const void *b) { return strcmp(((const MergeEntry *)a)->identifier, ((const MergeEntry *)b)->identifier); }
+
+/* Parses `#define IDENTIFIER ((nt_hash64_t){0xHEXULL}) / * path * /`; false for any other line. */
+static bool parse_define_line(const char *line, MergeEntry *out) {
+    if (strncmp(line, "#define ASSET_", 14) != 0) {
+        return false;
     }
-    NT_BUILD_ASSERT(kind <= NT_BUILD_ASSET_CLIP && "merge_headers: identifier does not match its path comment");
-    return (nt_build_asset_kind_t)kind;
+    const char *p = line + 8; /* skip "#define " */
+    size_t wi = 0;
+    while (*p && *p != ' ' && *p != '\t' && wi < sizeof(out->identifier) - 1) {
+        out->identifier[wi++] = *p++;
+    }
+    out->identifier[wi] = '\0';
+
+    const char *hex_start = strstr(p, "0x");
+    if (!hex_start) {
+        return false;
+    }
+    out->hash = strtoull(hex_start, NULL, 16);
+
+    out->path[0] = '\0';
+    const char *cs = strstr(p, "/* ");
+    if (cs) {
+        cs += 3;
+        const char *ce = strstr(cs, " */");
+        const size_t len = ce ? (size_t)(ce - cs) : strlen(cs);
+        NT_BUILD_ASSERT(len < sizeof(out->path) && "merge_headers: path comment too long");
+        memcpy(out->path, cs, len);
+        out->path[len] = '\0';
+    }
+    return true;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -352,119 +371,71 @@ void nt_builder_merge_headers(const char *const *header_paths, uint32_t count, c
             NT_LOG_ERROR("merge_headers: could not open '%s'", header_paths[hi]);
             NT_BUILD_ASSERT(0 && "merge_headers: per-pack header file not found -- run pack builder first");
         }
-
         char line[1024];
         while (fgets(line, (int)sizeof(line), f) != NULL) {
-            /* Look for #define ASSET_... lines */
-            if (strncmp(line, "#define ASSET_", 14) != 0) {
+            MergeEntry entry;
+            if (!parse_define_line(line, &entry)) {
                 continue;
             }
-
-            /* Parse: #define IDENTIFIER ((nt_hash64_t){0xHEXULL}) / * comment * / */
-            char id_buf[NT_CODEGEN_MAX_IDENTIFIER];
-            char hex_buf[32];
-            memset(id_buf, 0, sizeof(id_buf));
-            memset(hex_buf, 0, sizeof(hex_buf));
-
-            const char *p = line + 8; /* skip "#define " */
-            /* Read identifier */
-            size_t wi = 0;
-            while (*p && *p != ' ' && *p != '\t' && wi < sizeof(id_buf) - 1) {
-                id_buf[wi++] = *p++;
-            }
-            id_buf[wi] = '\0';
-
-            /* Find 0x hex value */
-            const char *hex_start = strstr(p, "0x");
-            if (!hex_start) {
-                continue;
-            }
-            wi = 0;
-            const char *hp = hex_start;
-            while (*hp && *hp != 'U' && *hp != 'u' && *hp != '}' && wi < sizeof(hex_buf) - 1) {
-                hex_buf[wi++] = *hp++;
-            }
-            hex_buf[wi] = '\0';
-
-            char *end_ptr = NULL;
-            uint64_t hash = strtoull(hex_buf, &end_ptr, 16);
-
-            /* Find comment path between slash-star delimiters */
-            char comment[256] = {0};
-            const char *cs = strstr(p, "/*");
-            if (cs) {
-                cs += 3; /* skip opening delimiter + space */
-                wi = 0;
-                while (*cs && *cs != '*' && wi < sizeof(comment) - 1) {
-                    comment[wi++] = *cs++;
-                }
-                /* Trim trailing space */
-                while (wi > 0 && comment[wi - 1] == ' ') {
-                    wi--;
-                }
-                comment[wi] = '\0';
-            }
-
-            /* Dedup by hash */
-            bool found = false;
-            for (uint32_t e = 0; e < entry_count; e++) {
-                if (entries[e].hash == hash) {
-                    found = true;
-                    break;
-                }
-            }
-            if (found) {
-                continue;
-            }
-            NT_BUILD_ASSERT(entry_count < NT_BUILD_MAX_ASSETS && "merge_headers: too many unique assets -- increase NT_BUILD_MAX_ASSETS");
-
-            strncpy(entries[entry_count].identifier, id_buf, NT_CODEGEN_MAX_IDENTIFIER - 1);
-            entries[entry_count].hash = hash;
-            strncpy(entries[entry_count].comment_path, comment, sizeof(entries[entry_count].comment_path) - 1);
-            entries[entry_count].kind = kind_from_identifier(id_buf, comment);
-            entry_count++;
+            NT_BUILD_ASSERT(entry_count < NT_BUILD_MAX_ASSETS && "merge_headers: too many assets -- increase NT_BUILD_MAX_ASSETS");
+            entries[entry_count++] = entry;
         }
+        const bool read_ok = ferror(f) == 0;
         (void)fclose(f);
+        NT_BUILD_ASSERT(read_ok && "merge_headers: could not read a per-pack header");
     }
 
-    /* Build CodegenEntry array for shared write functions */
-    CodegenEntry *ce = (CodegenEntry *)calloc(entry_count > 0 ? entry_count : 1, sizeof(CodegenEntry));
-    NT_BUILD_ASSERT(ce && "merge_headers: alloc failed");
+    /* Identifier order makes duplicates adjacent: the same asset from two packs folds, while one name
+     * bound to two hashes would emit conflicting defines. */
+    qsort(entries, entry_count, sizeof(MergeEntry), merge_entry_cmp);
+    uint32_t unique = 0;
     for (uint32_t i = 0; i < entry_count; i++) {
-        ce[i].path = entries[i].comment_path;
-        ce[i].resource_id = entries[i].hash;
-        ce[i].kind = entries[i].kind;
+        if (unique > 0 && strcmp(entries[unique - 1].identifier, entries[i].identifier) == 0) {
+            if (entries[unique - 1].hash != entries[i].hash) {
+                NT_LOG_ERROR("Codegen: identifier collision '%s' between '%s' and '%s'", entries[i].identifier, entries[unique - 1].path, entries[i].path);
+                NT_BUILD_ASSERT(0 && "codegen identifier collision -- rename one of the conflicting assets");
+            }
+            continue;
+        }
+        entries[unique++] = entries[i];
     }
-    check_codegen_collisions(ce, entry_count);
 
     char guard[256];
     derive_include_guard(output_path, guard, sizeof(guard));
-
     char func_prefix[128];
     derive_func_prefix(output_path, func_prefix, sizeof(func_prefix));
 
     FILE *f = fopen(output_path, "wb");
     if (!f) {
         NT_LOG_ERROR("Could not write merged header: %s", output_path);
-        free(ce);
-        free(entries);
         NT_BUILD_ASSERT(0 && "merge_headers: could not open output file");
     }
-
     (void)fprintf(f, "/* clang-format off */\n");
     (void)fprintf(f, "/* Auto-generated by nt_builder -- do not edit */\n");
     (void)fprintf(f, "#ifndef %s\n", guard);
     (void)fprintf(f, "#define %s\n\n", guard);
     (void)fprintf(f, "#include \"hash/nt_hash.h\"\n\n");
+    for (uint32_t i = 0; i < unique; i++) {
+        (void)fprintf(f, "#define %s ((nt_hash64_t){0x%016llXULL}) /* %s */\n", entries[i].identifier, (unsigned long long)entries[i].hash, entries[i].path);
+    }
+    (void)fprintf(f, "\n");
 
-    write_sorted_defines(f, ce, entry_count);
-    write_register_labels(f, func_prefix, ce, entry_count);
+    CodegenEntry *labels = (CodegenEntry *)calloc(unique > 0 ? unique : 1, sizeof(CodegenEntry));
+    NT_BUILD_ASSERT(labels && "merge_headers: alloc failed");
+    for (uint32_t i = 0; i < unique; i++) {
+        labels[i].path = entries[i].path;
+    }
+    write_register_labels(f, func_prefix, labels, unique);
+    free(labels);
 
     (void)fprintf(f, "#endif /* %s */\n", guard);
-    (void)fclose(f);
+    bool write_ok = ferror(f) == 0;
+    write_ok = (fclose(f) == 0) && write_ok;
+    if (!write_ok) {
+        (void)remove(output_path); /* a torn header must not pass as current */
+    }
+    NT_BUILD_ASSERT(write_ok && "merge_headers: could not write the merged header");
 
-    NT_LOG_INFO("Generated merged header: %s (%u assets from %u packs)", output_path, entry_count, count);
-
-    free(ce);
+    NT_LOG_INFO("Generated merged header: %s (%u assets from %u packs)", output_path, unique, count);
     free(entries);
 }

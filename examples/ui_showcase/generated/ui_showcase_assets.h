@@ -5,33 +5,6 @@
 
 #include "hash/nt_hash.h"
 
-/* --- TEXTURE --- */
-#define ASSET_TEXTURE_UI_SHOWCASE_ATLAS_TEX0 ((nt_hash64_t){0x1CB24C1D6C3C74EFULL}) /* ui_showcase_atlas/tex0 */
-#define ASSET_TEXTURE_UI_SHOWCASE_RADIAL_ART_TEX0 ((nt_hash64_t){0x086706E397DD0EE1ULL}) /* ui_showcase_radial_art/tex0 */
-
-/* --- SHADER --- */
-#define ASSET_SHADER_ASSETS_SHADERS_RADIAL_FRAG ((nt_hash64_t){0x1CBD5703DB548D54ULL}) /* assets/shaders/radial.frag */
-#define ASSET_SHADER_ASSETS_SHADERS_RADIAL_IMAGE_FRAG ((nt_hash64_t){0x6117F8B5C957DCF7ULL}) /* assets/shaders/radial_image.frag */
-#define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG ((nt_hash64_t){0xC1C3907ABE639DDCULL}) /* assets/shaders/slug_text.frag */
-#define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT ((nt_hash64_t){0x8ECB088C8983CC2FULL}) /* assets/shaders/slug_text.vert */
-#define ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG ((nt_hash64_t){0x96ED6312E7B10087ULL}) /* assets/shaders/sprite.frag */
-#define ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT ((nt_hash64_t){0x75A9EEA4D1472026ULL}) /* assets/shaders/sprite.vert */
-#define ASSET_SHADER_ASSETS_SHADERS_SPRITE_RADIAL_VERT ((nt_hash64_t){0x54AB053A2ADAE2D0ULL}) /* assets/shaders/sprite_radial.vert */
-#define ASSET_SHADER_ASSETS_SHADERS_UI_BASE_FRAG ((nt_hash64_t){0xB494CA99DC82D5C8ULL}) /* assets/shaders/ui_base.frag */
-
-/* --- FONT --- */
-#define ASSET_FONT_UI_SHOWCASE_FONT ((nt_hash64_t){0xA3FFF9B020E5CAD5ULL}) /* ui_showcase/font */
-#define ASSET_FONT_UI_SHOWCASE_FONT_RICH_B ((nt_hash64_t){0x21CB3B011A10979CULL}) /* ui_showcase/font_rich_b */
-#define ASSET_FONT_UI_SHOWCASE_FONT_RICH_BI ((nt_hash64_t){0x2A0824949A29ABADULL}) /* ui_showcase/font_rich_bi */
-#define ASSET_FONT_UI_SHOWCASE_FONT_RICH_I ((nt_hash64_t){0x841A4565FA404981ULL}) /* ui_showcase/font_rich_i */
-#define ASSET_FONT_UI_SHOWCASE_FONT_RICH_R ((nt_hash64_t){0x272901A758BB8740ULL}) /* ui_showcase/font_rich_r */
-
-/* --- ATLAS --- */
-#define ASSET_ATLAS_UI_SHOWCASE_ATLAS ((nt_hash64_t){0xD10A933806EA38F3ULL}) /* ui_showcase_atlas */
-#define ASSET_ATLAS_UI_SHOWCASE_RADIAL_ART ((nt_hash64_t){0x82C43D6417B38E06ULL}) /* ui_showcase_radial_art */
-
-/* --- ATLAS_REGION --- */
-#define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS__WHITE ((nt_hash64_t){0x27424DEE40744BBBULL}) /* ui_showcase_atlas/_white */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_ARROW_RIGHT ((nt_hash64_t){0x338D97D05F6B41A5ULL}) /* ui_showcase_atlas/arrow_right */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_BAR_FILL_SHAPED ((nt_hash64_t){0xD90FD46D2942D266ULL}) /* ui_showcase_atlas/bar_fill_shaped */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_BAR_FILL_SMOOTH ((nt_hash64_t){0x79EB3F6E66AACCD2ULL}) /* ui_showcase_atlas/bar_fill_smooth */
@@ -57,7 +30,25 @@
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_THUMB ((nt_hash64_t){0x04116FA511D32E10ULL}) /* ui_showcase_atlas/thumb */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_TRACK_OFF ((nt_hash64_t){0x50419D86161F9647ULL}) /* ui_showcase_atlas/track_off */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_TRACK_ON ((nt_hash64_t){0x672BE88EE8BF9CFEULL}) /* ui_showcase_atlas/track_on */
+#define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS__WHITE ((nt_hash64_t){0x27424DEE40744BBBULL}) /* ui_showcase_atlas/_white */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_RADIAL_ART_RADIAL_ART ((nt_hash64_t){0xA7F6C36083803A17ULL}) /* ui_showcase_radial_art/radial_art */
+#define ASSET_ATLAS_UI_SHOWCASE_ATLAS ((nt_hash64_t){0xD10A933806EA38F3ULL}) /* ui_showcase_atlas */
+#define ASSET_ATLAS_UI_SHOWCASE_RADIAL_ART ((nt_hash64_t){0x82C43D6417B38E06ULL}) /* ui_showcase_radial_art */
+#define ASSET_FONT_UI_SHOWCASE_FONT ((nt_hash64_t){0xA3FFF9B020E5CAD5ULL}) /* ui_showcase/font */
+#define ASSET_FONT_UI_SHOWCASE_FONT_RICH_B ((nt_hash64_t){0x21CB3B011A10979CULL}) /* ui_showcase/font_rich_b */
+#define ASSET_FONT_UI_SHOWCASE_FONT_RICH_BI ((nt_hash64_t){0x2A0824949A29ABADULL}) /* ui_showcase/font_rich_bi */
+#define ASSET_FONT_UI_SHOWCASE_FONT_RICH_I ((nt_hash64_t){0x841A4565FA404981ULL}) /* ui_showcase/font_rich_i */
+#define ASSET_FONT_UI_SHOWCASE_FONT_RICH_R ((nt_hash64_t){0x272901A758BB8740ULL}) /* ui_showcase/font_rich_r */
+#define ASSET_SHADER_ASSETS_SHADERS_RADIAL_FRAG ((nt_hash64_t){0x1CBD5703DB548D54ULL}) /* assets/shaders/radial.frag */
+#define ASSET_SHADER_ASSETS_SHADERS_RADIAL_IMAGE_FRAG ((nt_hash64_t){0x6117F8B5C957DCF7ULL}) /* assets/shaders/radial_image.frag */
+#define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG ((nt_hash64_t){0xC1C3907ABE639DDCULL}) /* assets/shaders/slug_text.frag */
+#define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT ((nt_hash64_t){0x8ECB088C8983CC2FULL}) /* assets/shaders/slug_text.vert */
+#define ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG ((nt_hash64_t){0x96ED6312E7B10087ULL}) /* assets/shaders/sprite.frag */
+#define ASSET_SHADER_ASSETS_SHADERS_SPRITE_RADIAL_VERT ((nt_hash64_t){0x54AB053A2ADAE2D0ULL}) /* assets/shaders/sprite_radial.vert */
+#define ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT ((nt_hash64_t){0x75A9EEA4D1472026ULL}) /* assets/shaders/sprite.vert */
+#define ASSET_SHADER_ASSETS_SHADERS_UI_BASE_FRAG ((nt_hash64_t){0xB494CA99DC82D5C8ULL}) /* assets/shaders/ui_base.frag */
+#define ASSET_TEXTURE_UI_SHOWCASE_ATLAS_TEX0 ((nt_hash64_t){0x1CB24C1D6C3C74EFULL}) /* ui_showcase_atlas/tex0 */
+#define ASSET_TEXTURE_UI_SHOWCASE_RADIAL_ART_TEX0 ((nt_hash64_t){0x086706E397DD0EE1ULL}) /* ui_showcase_radial_art/tex0 */
 
 #if NT_HASH_LABELS
 static inline void ui_showcase_assets_register_labels(void) {

@@ -5,7 +5,7 @@
 
 #include "hash/nt_hash.h"
 
-/* --- MESH --- */
+#define ASSET_BLOB_SPONZA_MANIFEST ((nt_hash64_t){0x137B7A0BF15C9082ULL}) /* sponza/manifest */
 #define ASSET_MESH_SPONZA_MESH_0_0 ((nt_hash64_t){0x0736A2F693E609BFULL}) /* sponza/mesh/0/0 */
 #define ASSET_MESH_SPONZA_MESH_0_1 ((nt_hash64_t){0xDDBF67D849310F77ULL}) /* sponza/mesh/0/1 */
 #define ASSET_MESH_SPONZA_MESH_0_10 ((nt_hash64_t){0x8F3937737EF554B0ULL}) /* sponza/mesh/0/10 */
@@ -109,8 +109,12 @@
 #define ASSET_MESH_SPONZA_MESH_0_97 ((nt_hash64_t){0x5BD00C57A482EBEEULL}) /* sponza/mesh/0/97 */
 #define ASSET_MESH_SPONZA_MESH_0_98 ((nt_hash64_t){0x7D6C147A4407598AULL}) /* sponza/mesh/0/98 */
 #define ASSET_MESH_SPONZA_MESH_0_99 ((nt_hash64_t){0xF51BBE9F3C319516ULL}) /* sponza/mesh/0/99 */
-
-/* --- TEXTURE --- */
+#define ASSET_SHADER_ASSETS_SHADERS_SPONZA_ALPHA_FRAG ((nt_hash64_t){0x5D708E13C441B99BULL}) /* assets/shaders/sponza_alpha.frag */
+#define ASSET_SHADER_ASSETS_SHADERS_SPONZA_ALPHA_VERT ((nt_hash64_t){0x584A5C197C1A9548ULL}) /* assets/shaders/sponza_alpha.vert */
+#define ASSET_SHADER_ASSETS_SHADERS_SPONZA_DIFFUSE_FRAG ((nt_hash64_t){0x14CD2DEBE6561D46ULL}) /* assets/shaders/sponza_diffuse.frag */
+#define ASSET_SHADER_ASSETS_SHADERS_SPONZA_DIFFUSE_VERT ((nt_hash64_t){0x2CD55CDB331A27B9ULL}) /* assets/shaders/sponza_diffuse.vert */
+#define ASSET_SHADER_ASSETS_SHADERS_SPONZA_FULL_FRAG ((nt_hash64_t){0x81D54559AF776595ULL}) /* assets/shaders/sponza_full.frag */
+#define ASSET_SHADER_ASSETS_SHADERS_SPONZA_FULL_VERT ((nt_hash64_t){0x6D51978341DA11F4ULL}) /* assets/shaders/sponza_full.vert */
 #define ASSET_TEXTURE_SPONZA_FALLBACK_CHECKER ((nt_hash64_t){0x72D307FEB41957B7ULL}) /* sponza/fallback_checker */
 #define ASSET_TEXTURE_SPONZA_NEUTRAL_NORMAL ((nt_hash64_t){0xA270A1092C18B59DULL}) /* sponza/neutral_normal */
 #define ASSET_TEXTURE_SPONZA_NEUTRAL_WHITE ((nt_hash64_t){0x464A8AA330C4020CULL}) /* sponza/neutral_white */
@@ -183,17 +187,6 @@
 #define ASSET_TEXTURE_SPONZA_TEX_7 ((nt_hash64_t){0x5AAE28C6E3EF7FF3ULL}) /* sponza/tex/7 */
 #define ASSET_TEXTURE_SPONZA_TEX_8 ((nt_hash64_t){0xB2E97B5E9C00F1BBULL}) /* sponza/tex/8 */
 #define ASSET_TEXTURE_SPONZA_TEX_9 ((nt_hash64_t){0x33DD2D1052969401ULL}) /* sponza/tex/9 */
-
-/* --- SHADER --- */
-#define ASSET_SHADER_ASSETS_SHADERS_SPONZA_ALPHA_FRAG ((nt_hash64_t){0x5D708E13C441B99BULL}) /* assets/shaders/sponza_alpha.frag */
-#define ASSET_SHADER_ASSETS_SHADERS_SPONZA_ALPHA_VERT ((nt_hash64_t){0x584A5C197C1A9548ULL}) /* assets/shaders/sponza_alpha.vert */
-#define ASSET_SHADER_ASSETS_SHADERS_SPONZA_DIFFUSE_FRAG ((nt_hash64_t){0x14CD2DEBE6561D46ULL}) /* assets/shaders/sponza_diffuse.frag */
-#define ASSET_SHADER_ASSETS_SHADERS_SPONZA_DIFFUSE_VERT ((nt_hash64_t){0x2CD55CDB331A27B9ULL}) /* assets/shaders/sponza_diffuse.vert */
-#define ASSET_SHADER_ASSETS_SHADERS_SPONZA_FULL_FRAG ((nt_hash64_t){0x81D54559AF776595ULL}) /* assets/shaders/sponza_full.frag */
-#define ASSET_SHADER_ASSETS_SHADERS_SPONZA_FULL_VERT ((nt_hash64_t){0x6D51978341DA11F4ULL}) /* assets/shaders/sponza_full.vert */
-
-/* --- BLOB --- */
-#define ASSET_BLOB_SPONZA_MANIFEST ((nt_hash64_t){0x137B7A0BF15C9082ULL}) /* sponza/manifest */
 
 #if NT_HASH_LABELS
 static inline void sponza_assets_register_labels(void) {

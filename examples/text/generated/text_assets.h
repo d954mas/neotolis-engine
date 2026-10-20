@@ -5,13 +5,10 @@
 
 #include "hash/nt_hash.h"
 
-/* --- SHADER --- */
-#define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG ((nt_hash64_t){0xC1C3907ABE639DDCULL}) /* assets/shaders/slug_text.frag */
-#define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT ((nt_hash64_t){0x8ECB088C8983CC2FULL}) /* assets/shaders/slug_text.vert */
-
-/* --- FONT --- */
 #define ASSET_FONT_TEXT_FONT_BASE ((nt_hash64_t){0x0E37F3926D92844FULL}) /* text/font_base */
 #define ASSET_FONT_TEXT_FONT_CJK ((nt_hash64_t){0x4F99D765AB59FB6EULL}) /* text/font_cjk */
+#define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG ((nt_hash64_t){0xC1C3907ABE639DDCULL}) /* assets/shaders/slug_text.frag */
+#define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT ((nt_hash64_t){0x8ECB088C8983CC2FULL}) /* assets/shaders/slug_text.vert */
 
 #if NT_HASH_LABELS
 static inline void text_assets_register_labels(void) {
