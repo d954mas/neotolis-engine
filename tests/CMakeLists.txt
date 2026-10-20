@@ -652,7 +652,7 @@ if(NOT EMSCRIPTEN)
     # --- Font measure benchmark ---
     # Measures hit vs miss ns/call for the nt_font_measure_n LRU cache.
     # Uses nt_time_nanos() for the ns clock (same module used by test_time).
-    add_executable(test_nt_font_measure_bench unit/test_nt_font_measure_bench.c)
+    add_executable(test_nt_font_measure_bench unit/test_nt_font_measure_bench.c unit/test_helpers/nt_test_font_blob.c)
     target_link_libraries(test_nt_font_measure_bench PRIVATE nt_font nt_gfx_fake nt_basisu_transcoder_stub nt_resource nt_hash nt_pool nt_time nt_http_stub nt_fs_stub nt_log_stub unity nt_meshwire_stub)
     target_compile_definitions(test_nt_font_measure_bench PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_font_measure_bench)
@@ -1554,7 +1554,7 @@ if(NOT EMSCRIPTEN)
         target_compile_definitions(${_t} PRIVATE _CRT_SECURE_NO_WARNINGS)
         nt_setup_test_target(${_t})
     endforeach()
-    target_compile_definitions(test_ui_input PRIVATE NT_CLIPBOARD_FAKE_CAP=131072)
+    target_sources(test_nt_ui_measure_cb PRIVATE unit/test_helpers/nt_test_font_blob.c)
 
     add_executable(test_nt_ui_stats
         unit/test_nt_ui_stats.c

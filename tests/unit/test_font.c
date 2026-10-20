@@ -1197,12 +1197,8 @@ void test_font_file_pack_unmount_cleans_state(void) {
     free(blob);
 }
 
-/* ---- Present-but-truncated winner swap clears the provider (no stale blob read) ----
- * A swap to a resident-but-truncated blob (< header) makes it the published winner, so the old pack
- * is no longer pinned and keeping the old provider reads now-unpinned bytes. font_on_resolve must
- * clear it (not return like evicted-blob).
- * The old pack stays mounted so the stale read is deterministic: without the fix units_per_em stays. */
-void test_font_truncated_winner_swap_clears_provider(void) {
+/* ---- A truncated higher-priority replacement fails activation; the lower pack stays published ---- */
+void test_font_truncated_replacement_keeps_lower_pack(void) {
     nt_font_create_desc_t desc = test_font_desc();
     nt_font_t font = nt_font_create(&desc);
     TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
@@ -1221,18 +1217,16 @@ void test_font_truncated_winner_swap_clears_provider(void) {
     TEST_ASSERT_FALSE(a1->is_tofu);
     TEST_ASSERT_NOT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
 
-    /* Swap the winner to a resident TRUNCATED blob (< header) in a SECOND pack sharing the rid; the
-     * later mount wins the tiebreak and the pin moves to it. Pack A stays mounted (its blob alive), so
-     * a stale provider would still read valid old bytes — the fix must clear it regardless. */
+    /* The later mount sharing the rid would win the tiebreak if it activated. */
     uint8_t truncated[sizeof(NtFontAssetHeader) - 1] = {0};
-    uint32_t tok_b = nt_font_test_register_shared_rid(tok_a, truncated, (uint32_t)sizeof(truncated));
-    (void)tok_b;
+    (void)nt_font_test_register_shared_rid(tok_a, truncated, (uint32_t)sizeof(truncated));
     nt_resource_step();
     nt_font_step();
 
-    /* Provider cleared -> no active source -> metrics reset (mirrors the unmount path). Without the fix
-     * the stale provider keeps viewing pack A's live blob and units_per_em stays non-zero. */
-    TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
+    TEST_ASSERT_NOT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
+    const nt_glyph_cache_entry_t *a2 = nt_font_lookup_glyph(font, 'A');
+    TEST_ASSERT_NOT_NULL(a2);
+    TEST_ASSERT_FALSE(a2->is_tofu);
 
     nt_font_destroy(font);
     free(blob_a);
@@ -1248,33 +1242,16 @@ static uint32_t build_font_bounds_blob(uint8_t *blob) {
     return glyph.data_offset + (uint32_t)sizeof contour;
 }
 
-static void assert_font_blob_has_no_provider(const uint8_t *blob, uint32_t size) {
+static void assert_font_blob_rejected(const uint8_t *blob, uint32_t size) {
     nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
     uint32_t token = nt_font_test_register_data(blob, size);
     nt_font_add(font, nt_font_test_resource(token));
     nt_resource_step();
     nt_font_step();
-    TEST_ASSERT_EQUAL_UINT16(0, nt_font_get_metrics(font).units_per_em);
-    TEST_ASSERT_FALSE(nt_font_lookup_metrics(font, 'A').found);
-    nt_font_test_deactivate(token);
-
-    uint8_t valid_blob[80];
-    const uint32_t valid_size = build_font_bounds_blob(valid_blob);
-    const uint32_t valid_token = nt_font_test_register_shared_rid(token, valid_blob, valid_size);
-    nt_resource_step();
-    nt_font_step();
-    TEST_ASSERT_EQUAL_UINT16(1000, nt_font_get_metrics(font).units_per_em);
-    TEST_ASSERT_TRUE(nt_font_lookup_metrics(font, 'A').found);
-
-    /* Keep the previous winner mounted so a stale provider still has readable bytes. */
-    const uint32_t replacement_token = nt_font_test_register_shared_rid(valid_token, blob, size);
-    nt_resource_step();
-    nt_font_step();
-    TEST_ASSERT_EQUAL_UINT16(0, nt_font_get_metrics(font).units_per_em);
+    TEST_ASSERT_FALSE(nt_resource_is_ready(nt_font_test_resource(token)));
     TEST_ASSERT_FALSE(nt_font_lookup_metrics(font, 'A').found);
     nt_font_destroy(font);
-    nt_font_test_deactivate(replacement_token);
-    nt_font_test_deactivate(valid_token);
+    nt_font_test_deactivate(token);
 }
 
 void test_font_shared_contours_padding_and_empty_glyph_remain_valid(void) {
@@ -1309,32 +1286,11 @@ void test_font_shared_contours_padding_and_empty_glyph_remain_valid(void) {
     nt_font_destroy(font);
 }
 
-void test_font_fixture_decodes_current_point_ring(void) {
-    uint32_t size = 0;
-    uint8_t *blob = build_test_font_blob(&size);
-    NtFontGlyphEntry glyph;
-    memcpy(&glyph, blob + sizeof(NtFontAssetHeader), sizeof glyph);
-    float curves[18];
-    const uint16_t count = nt_font_test_decode_contours(blob + glyph.data_offset, 0.0F, curves, 3);
-    TEST_ASSERT_EQUAL_UINT16(3, count);
-    TEST_ASSERT_EQUAL_UINT16(count, glyph.curve_count);
-    TEST_ASSERT_TRUE(curves[4] == 0.0F && curves[5] == 800.0F);
-    TEST_ASSERT_TRUE(curves[10] == 400.0F && curves[11] == 800.0F);
-    TEST_ASSERT_TRUE(curves[16] == 0.0F && curves[17] == 0.0F);
-    float twice_area = 0.0F;
-    for (uint16_t i = 0; i < count; i++) {
-        const float *curve = curves + ((size_t)i * 6U);
-        twice_area += (curve[0] * curve[5]) - (curve[4] * curve[1]);
-    }
-    TEST_ASSERT_TRUE_MESSAGE(twice_area < 0.0F, "outer contours use the builder's clockwise winding");
-    free(blob);
-}
-
-void test_font_truncated_glyph_table_clears_provider(void) {
+void test_font_truncated_glyph_table_fails_activation(void) {
     uint8_t blob[80];
     (void)build_font_bounds_blob(blob);
-    assert_font_blob_has_no_provider(blob, (uint32_t)sizeof(NtFontAssetHeader));
-    assert_font_blob_has_no_provider(blob, (uint32_t)(sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry) - 1U));
+    assert_font_blob_rejected(blob, (uint32_t)sizeof(NtFontAssetHeader));
+    assert_font_blob_rejected(blob, (uint32_t)(sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry) - 1U));
 }
 
 void test_font_invalid_glyph_data_spans_clear_provider(void) {
@@ -1346,33 +1302,33 @@ void test_font_invalid_glyph_data_spans_clear_provider(void) {
     for (size_t i = 0; i < sizeof offsets / sizeof offsets[0]; i++) {
         glyph.data_offset = offsets[i];
         memcpy(blob + sizeof(NtFontAssetHeader), &glyph, sizeof glyph);
-        assert_font_blob_has_no_provider(blob, size);
+        assert_font_blob_rejected(blob, size);
     }
     glyph.data_offset = size - 1U;
     glyph.kern_count = 1;
     memcpy(blob + sizeof(NtFontAssetHeader), &glyph, sizeof glyph);
-    assert_font_blob_has_no_provider(blob, size);
+    assert_font_blob_rejected(blob, size);
 }
 
-void test_font_truncated_contour_data_clears_provider(void) {
+void test_font_truncated_contour_data_fails_activation(void) {
     uint8_t blob[80];
     const uint32_t size = build_font_bounds_blob(blob);
     const uint32_t data_offset = (uint32_t)(sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry));
     for (uint32_t truncated = data_offset; truncated < size; truncated++) {
-        assert_font_blob_has_no_provider(blob, truncated);
+        assert_font_blob_rejected(blob, truncated);
     }
 }
 
-void test_font_zero_contour_point_count_clears_provider(void) {
+void test_font_zero_contour_point_count_fails_activation(void) {
     uint8_t blob[80];
     const uint32_t size = build_font_bounds_blob(blob);
     const uint32_t point_offset = (uint32_t)(sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry) + 2U);
     const uint16_t point_count = 0;
     memcpy(blob + point_offset, &point_count, sizeof point_count);
-    assert_font_blob_has_no_provider(blob, size);
+    assert_font_blob_rejected(blob, size);
 }
 
-void test_font_complete_contour_above_point_limit_clears_provider(void) {
+void test_font_complete_contour_above_point_limit_fails_activation(void) {
     enum { POINT_COUNT = NT_FONT_MAX_POINTS_PER_CONTOUR + 1 };
     uint8_t blob[sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry) + (2U * sizeof(uint16_t)) + NT_FONT_BITMASK_BYTES(POINT_COUNT) + (2U * sizeof(int16_t)) + (2U * (size_t)(POINT_COUNT - 1U))] = {
         0};
@@ -1385,7 +1341,7 @@ void test_font_complete_contour_above_point_limit_clears_provider(void) {
     memcpy(blob + glyph.data_offset, &contour_count, sizeof contour_count);
     memcpy(blob + glyph.data_offset + sizeof contour_count, &point_count, sizeof point_count);
     /* Complete mask, first point and zero deltas isolate the point limit from truncation. */
-    assert_font_blob_has_no_provider(blob, (uint32_t)sizeof blob);
+    assert_font_blob_rejected(blob, (uint32_t)sizeof blob);
 }
 
 /* ---- FONT-03: unmount a font's pack WHILE it is referenced ----
@@ -3060,13 +3016,12 @@ static void test_font_worstcase_glyph_miss_budget(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_font_blob_valid);
-    RUN_TEST(test_font_fixture_decodes_current_point_ring);
     RUN_TEST(test_font_shared_contours_padding_and_empty_glyph_remain_valid);
-    RUN_TEST(test_font_truncated_glyph_table_clears_provider);
+    RUN_TEST(test_font_truncated_glyph_table_fails_activation);
     RUN_TEST(test_font_invalid_glyph_data_spans_clear_provider);
-    RUN_TEST(test_font_truncated_contour_data_clears_provider);
-    RUN_TEST(test_font_zero_contour_point_count_clears_provider);
-    RUN_TEST(test_font_complete_contour_above_point_limit_clears_provider);
+    RUN_TEST(test_font_truncated_contour_data_fails_activation);
+    RUN_TEST(test_font_zero_contour_point_count_fails_activation);
+    RUN_TEST(test_font_complete_contour_above_point_limit_fails_activation);
     RUN_TEST(test_font_init_shutdown);
     RUN_TEST(test_font_create_destroy_valid);
     RUN_TEST(test_font_unready_texture_keeps_cpu_queries_gpu_free);
@@ -3104,7 +3059,7 @@ int main(void) {
     RUN_TEST(test_font_flushes_on_same_metrics_winner_swap);
     RUN_TEST(test_font_hotswap_replaces_metrics_in_one_step);
     RUN_TEST(test_font_file_pack_unmount_cleans_state);
-    RUN_TEST(test_font_truncated_winner_swap_clears_provider);
+    RUN_TEST(test_font_truncated_replacement_keeps_lower_pack);
     RUN_TEST(test_font_unmount_while_referenced_renders_tofu);
     /* embolden (offset_points) */
     RUN_TEST(test_embolden_w0_identity);

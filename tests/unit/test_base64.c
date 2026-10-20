@@ -10,13 +10,6 @@
 void setUp(void) {}
 void tearDown(void) {}
 
-/* Encode `in` into a NUL-terminated `out`; returns the encoded byte count. */
-static uint32_t encode_str(const char *in, char *out, uint32_t out_cap) {
-    uint32_t n = nt_base64_encode((const uint8_t *)in, (uint32_t)strlen(in), out, out_cap);
-    out[n] = '\0';
-    return n;
-}
-
 /* 1 byte (%3==1) -> two '='. */
 void test_base64_padding_two_equals(void) {
     char out[4];
@@ -43,18 +36,18 @@ void test_base64_no_padding(void) {
 
 /* A longer known vector round-trips to its canonical RFC base64. */
 void test_base64_long_vector(void) {
-    char out[64];
+    char out[36];
     const char *in = "Many hands make light work.";
-    uint32_t n = encode_str(in, out, sizeof(out));
+    uint32_t n = nt_base64_encode((const uint8_t *)in, (uint32_t)strlen(in), out, sizeof(out));
     /* len 27 (%3==0) -> 36 chars, no padding. */
     TEST_ASSERT_EQUAL_UINT32(36U, n);
-    TEST_ASSERT_EQUAL_STRING("TWFueSBoYW5kcyBtYWtlIGxpZ2h0IHdvcmsu", out);
+    TEST_ASSERT_EQUAL_MEMORY("TWFueSBoYW5kcyBtYWtlIGxpZ2h0IHdvcmsu", out, sizeof(out));
 }
 
 /* out_cap one byte short of need -> returns 0, no write past cap
  * (the guard byte just past the intended output stays untouched). */
 void test_base64_cap_reject(void) {
-    const char *in = "Man"; /* need = ((3+2)/3)*4 = 4 */
+    const char *in = "Man"; /* encodes to 4 bytes */
     char buf[8];
     const char kGuard = (char)0x7F;
     memset(buf, kGuard, sizeof(buf));

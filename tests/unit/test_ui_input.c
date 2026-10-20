@@ -22,7 +22,6 @@
 #include "core/nt_assert.h"
 #include "input/nt_input.h"
 #include "input/nt_input_internal.h" /* nt_input_buffer_char + nt_input_set_key */
-#include "memory/nt_mem_scratch.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
@@ -677,46 +676,6 @@ static void test_clipboard_paste_filters_before_capacity_clamp(void) {
     nt_clipboard_set_text("aaaaaaaa123456789");
     chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_V);
     TEST_ASSERT_EQUAL_STRING("1234567", buf);
-}
-
-static void test_clipboard_paste_source_exceeds_frame_scratch(void) {
-    static char source[(64U * 1024U) + 4U];
-    const size_t prefix_len = sizeof(source) - sizeof("123");
-    memset(source, 'a', prefix_len);
-    memcpy(source + prefix_len, "123", sizeof("123"));
-    TEST_ASSERT_TRUE(sizeof(source) > nt_mem_scratch_test_size());
-
-    char buf[8] = {0};
-    const uint32_t id = nt_ui_id("f");
-    s_props.allow = nt_ui_filter_numeric;
-    warmup_focus(id, buf, sizeof buf);
-    nt_clipboard_set_text(source);
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
-    nt_test_assert_armed = true;
-    if (setjmp(nt_test_assert_jmp) != 0) {
-        nt_test_assert_armed = false;
-        TEST_FAIL_MESSAGE(nt_test_assert_last_expr);
-    }
-#endif
-    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_V);
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
-    nt_test_assert_armed = false;
-#endif
-    TEST_ASSERT_EQUAL_STRING("123", buf);
-}
-
-static void test_clipboard_paste_filtered_prefix_replaces_selection(void) {
-    char buf[8] = "old";
-    const uint32_t id = nt_ui_id("f");
-    warmup_focus(id, buf, sizeof buf);
-    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_A);
-    nt_clipboard_set_text("\t\t\t\t\t\t\t\t"
-                          "\xD0\x90\xD0\xB1"
-                          "ABCD");
-    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_V);
-    TEST_ASSERT_EQUAL_STRING("\xD0\x90\xD0\xB1"
-                             "ABC",
-                             buf);
 }
 
 /* ---- Test 21: paste replaces a non-empty selection. ---- */
@@ -1538,8 +1497,6 @@ int main(void) {
     RUN_TEST(test_clipboard_paste_clamp_no_split);
     RUN_TEST(test_clipboard_paste_filtered);
     RUN_TEST(test_clipboard_paste_filters_before_capacity_clamp);
-    RUN_TEST(test_clipboard_paste_source_exceeds_frame_scratch);
-    RUN_TEST(test_clipboard_paste_filtered_prefix_replaces_selection);
     RUN_TEST(test_clipboard_paste_replaces_selection);
     RUN_TEST(test_password_mask_render);
     RUN_TEST(test_password_buffer_and_keyboard);

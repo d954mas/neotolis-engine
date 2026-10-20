@@ -6,9 +6,7 @@
 
 #include <string.h>
 
-#ifndef NT_CLIPBOARD_FAKE_CAP
 #define NT_CLIPBOARD_FAKE_CAP 4096
-#endif
 
 static char s_buf[NT_CLIPBOARD_FAKE_CAP] = {0};
 static bool s_fake_available = true; /* test-controllable; default mirrors a real backend */

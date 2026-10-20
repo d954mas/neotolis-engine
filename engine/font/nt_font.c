@@ -35,38 +35,15 @@ static void font_test_shutdown_packs(void);
 #endif
 
 // #region Resolve-callback lifecycle — on_resolve/on_cleanup + PIN_BLOB
-/* Zero-copy provider: a {blob,size} view into the winning pack blob, held in the slot's user_data.
+/* Zero-copy provider: a view into the winning pack blob, held in the slot's user_data.
  * Fonts decode glyphs lazily from the live blob, so the winner PINs its pack (PIN_BLOB); the resolve
  * pass owns the pin, the font never ref/unrefs it. */
 typedef struct {
     const uint8_t *data;
-    uint32_t size;
 } nt_font_provider_t;
-
-/* No-op activator — real work is in font_on_resolve. Returns a UNIQUE handle per activation (font is
- * not aux-backed, so the resolve pass detects a winner-change only via a handle change); a reused
- * handle would leave user_data pointing at a freed blob. The value is never interpreted. */
-static uint32_t s_font_activate_seq;
-static uint32_t font_activate(const uint8_t *data, uint32_t size) {
-    (void)data;
-    (void)size;
-    if (s_font_activate_seq == 0) {
-        s_font_activate_seq = 1; /* 0 signals activation failure to the resource system */
-    }
-    return s_font_activate_seq++;
-}
 
 /* deactivate must NOT touch user_data — font_on_cleanup owns that lifecycle. */
 static void font_deactivate(uint32_t runtime_handle) { (void)runtime_handle; }
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void font_provider_clear(void **user_data) {
-    nt_font_provider_t *p = (nt_font_provider_t *)*user_data;
-    if (p != NULL) {
-        p->data = NULL;
-        p->size = 0;
-    }
-}
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool font_blob_structure_valid(const uint8_t *data, uint32_t size) {
@@ -123,25 +100,33 @@ static bool font_blob_structure_valid(const uint8_t *data, uint32_t size) {
     return true;
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void font_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data) {
-    (void)runtime_handle;
-    if (data == NULL) {
-        return; /* evicted/absent — keep existing view; PIN_BLOB winner is unpublishable while blob==NULL */
-    }
+/* Rejects a structurally broken blob: the asset fails and a lower-priority pack stays published.
+ * Otherwise returns a UNIQUE handle per activation (font is not aux-backed, so the resolve pass detects
+ * a winner-change only via a handle change); a reused handle would leave user_data pointing at a freed
+ * blob. The value is never interpreted. */
+static uint32_t s_font_activate_seq;
+static uint32_t font_activate(const uint8_t *data, uint32_t size) {
     if (size < sizeof(NtFontAssetHeader)) {
-        /* The previous winner is no longer pinned; a truncated replacement must
-         * clear the old view before its pack can be evicted. */
-        font_provider_clear(user_data);
-        return;
+        NT_LOG_ERROR("font blob: %u bytes is shorter than the header -- rebuild packs", size);
+        return 0;
     }
     const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)data;
     NT_ASSERT(hdr->magic == NT_FONT_MAGIC && "font blob: bad magic");
     NT_ASSERT(hdr->version == NT_FONT_VERSION && "font blob: version mismatch — rebuild packs");
     if (!font_blob_structure_valid(data, size)) {
-        font_provider_clear(user_data);
-        return;
+        NT_LOG_ERROR("font blob: glyph table or contour data out of bounds -- rebuild packs");
+        return 0;
     }
+    if (s_font_activate_seq == 0) {
+        s_font_activate_seq = 1; /* 0 signals activation failure to the resource system */
+    }
+    return s_font_activate_seq++;
+}
+
+static void font_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data) {
+    (void)size;
+    (void)runtime_handle;
+    NT_ASSERT(data != NULL && "PIN_BLOB winner is published only with a resident blob");
     nt_font_provider_t *p = (nt_font_provider_t *)*user_data;
     if (p == NULL) {
         p = (nt_font_provider_t *)calloc(1, sizeof(*p));
@@ -150,7 +135,6 @@ static void font_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime
     }
     /* Point at the CURRENT resident blob; winner-change updates the same holder. */
     p->data = data;
-    p->size = size;
 }
 
 static void font_on_cleanup(void *user_data) {
@@ -160,18 +144,9 @@ static void font_on_cleanup(void *user_data) {
 
 /* Read the winning resource's live blob through its pinned user_data holder
  * (never a raw pointer cached across frames). NULL when the provider is gone. */
-static const uint8_t *font_provider_blob(nt_resource_t resource, uint32_t *out_size) {
+static const uint8_t *font_provider_blob(nt_resource_t resource) {
     const nt_font_provider_t *p = (const nt_font_provider_t *)nt_resource_peek_user_data(resource);
-    if (p == NULL || p->data == NULL) {
-        if (out_size != NULL) {
-            *out_size = 0;
-        }
-        return NULL;
-    }
-    if (out_size != NULL) {
-        *out_size = p->size;
-    }
-    return p->data;
+    return p != NULL ? p->data : NULL;
 }
 // #endregion
 
@@ -311,14 +286,8 @@ static int compare_glyph_codepoint(const void *key, const void *elem) {
 }
 
 /* Find glyph entry in a single pack blob by codepoint via bsearch */
-static const NtFontGlyphEntry *find_glyph_in_pack(const uint8_t *blob, uint32_t blob_size, uint32_t codepoint) {
-    if (blob_size < sizeof(NtFontAssetHeader)) {
-        return NULL;
-    }
+static const NtFontGlyphEntry *find_glyph_in_pack(const uint8_t *blob, uint32_t codepoint) {
     const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)blob;
-    if (hdr->glyph_count == 0) {
-        return NULL;
-    }
     const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader));
     return (const NtFontGlyphEntry *)bsearch(&codepoint, glyphs, hdr->glyph_count, sizeof(NtFontGlyphEntry), compare_glyph_codepoint);
 }
@@ -332,9 +301,8 @@ static bool find_glyph_in_resources(nt_font_slot_t *slot, uint32_t codepoint, ui
         const uint16_t gi = slot->ascii_glyph_idx[codepoint];
         if (gi != NT_FONT_ASCII_IDX_NONE) {
             const uint8_t ri = slot->ascii_glyph_res[codepoint];
-            uint32_t blob_size = 0;
-            const uint8_t *blob = font_provider_blob(slot->resources[ri], &blob_size);
-            if (blob && blob_size >= sizeof(NtFontAssetHeader)) {
+            const uint8_t *blob = font_provider_blob(slot->resources[ri]);
+            if (blob != NULL) {
                 const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)blob;
                 /* gi is bounded by construction in rebuild_ascii_index;
                  * the bounds check guards blob corruption between load and access. */
@@ -352,12 +320,11 @@ static bool find_glyph_in_resources(nt_font_slot_t *slot, uint32_t codepoint, ui
         if (slot->resource_handles[i] == 0) {
             continue; /* not resolved yet */
         }
-        uint32_t blob_size = 0;
-        const uint8_t *blob = font_provider_blob(slot->resources[i], &blob_size);
+        const uint8_t *blob = font_provider_blob(slot->resources[i]);
         if (!blob) {
             continue;
         }
-        const NtFontGlyphEntry *entry = find_glyph_in_pack(blob, blob_size, codepoint);
+        const NtFontGlyphEntry *entry = find_glyph_in_pack(blob, codepoint);
         if (entry) {
             *out_resource_index = i;
             *out_glyph_entry = entry;
@@ -368,12 +335,9 @@ static bool find_glyph_in_resources(nt_font_slot_t *slot, uint32_t codepoint, ui
 }
 
 /* Find glyph index (position in glyph table) for a codepoint in a blob */
-static int32_t find_glyph_index(const uint8_t *blob, uint32_t blob_size, uint32_t codepoint) {
-    if (blob_size < sizeof(NtFontAssetHeader)) {
-        return -1;
-    }
+static int32_t find_glyph_index(const uint8_t *blob, uint32_t codepoint) {
     const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader));
-    const NtFontGlyphEntry *found = find_glyph_in_pack(blob, blob_size, codepoint);
+    const NtFontGlyphEntry *found = find_glyph_in_pack(blob, codepoint);
     if (!found) {
         return -1;
     }
@@ -1546,9 +1510,8 @@ void nt_font_step(void) {
         uint32_t handle_now[NT_FONT_MAX_SOURCES_PER_FONT];
         uint8_t active_count = 0;
         for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
-            uint32_t bs = 0;
-            const uint8_t *blob = font_provider_blob(slot->resources[ri], &bs);
-            res_now[ri] = (blob != NULL && bs >= sizeof(NtFontAssetHeader));
+            const uint8_t *blob = font_provider_blob(slot->resources[ri]);
+            res_now[ri] = (blob != NULL);
             /* Winner-identity token: font_activate returns a UNIQUE seq per activation, so a winner-swap
              * or hot-reload changes the handle even when presence and header metrics are unchanged. */
             handle_now[ri] = res_now[ri] ? nt_resource_get(slot->resources[ri]) : 0U;
@@ -1581,8 +1544,7 @@ void nt_font_step(void) {
             if (!res_now[ri]) {
                 continue;
             }
-            uint32_t bs = 0;
-            const uint8_t *blob = font_provider_blob(slot->resources[ri], &bs);
+            const uint8_t *blob = font_provider_blob(slot->resources[ri]);
             const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)blob;
             /* VMETRICS are the shared-metrics invariant (builder UPM-normalizes them across a fallback
              * family). Kept separate from decoration below — do NOT early-continue on a vmetric match, or a
@@ -1647,9 +1609,8 @@ static void rebuild_ascii_index(nt_font_slot_t *slot) {
         if (slot->resource_handles[k] == 0) {
             continue;
         }
-        uint32_t scan_bs = 0;
-        const uint8_t *scan_blob = font_provider_blob(slot->resources[k], &scan_bs);
-        if (!scan_blob || scan_bs < sizeof(NtFontAssetHeader)) {
+        const uint8_t *scan_blob = font_provider_blob(slot->resources[k]);
+        if (scan_blob == NULL) {
             continue;
         }
         const NtFontAssetHeader *scan_hdr = (const NtFontAssetHeader *)scan_blob;
@@ -1867,8 +1828,7 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph_offset(nt_font_slot_t *slot, 
     // #endregion
 
     // #region Decode contour data
-    uint32_t blob_size = 0;
-    const uint8_t *blob = font_provider_blob(slot->resources[res_idx], &blob_size);
+    const uint8_t *blob = font_provider_blob(slot->resources[res_idx]);
     NT_ASSERT(blob);
 
     uint16_t cache_idx = take_slot(slot);
@@ -1962,19 +1922,18 @@ int16_t nt_font_get_kern_in_slot(const nt_font_slot_t *slot, uint32_t left_codep
         if (slot->resource_handles[ri] == 0) {
             continue;
         }
-        uint32_t blob_size = 0;
-        const uint8_t *blob = font_provider_blob(slot->resources[ri], &blob_size);
+        const uint8_t *blob = font_provider_blob(slot->resources[ri]);
         if (!blob) {
             continue;
         }
 
-        const NtFontGlyphEntry *left_entry = find_glyph_in_pack(blob, blob_size, left_codepoint);
+        const NtFontGlyphEntry *left_entry = find_glyph_in_pack(blob, left_codepoint);
         if (!left_entry || left_entry->kern_count == 0) {
             continue;
         }
 
         /* Find right glyph index in this resource */
-        int32_t right_idx = find_glyph_index(blob, blob_size, right_codepoint);
+        int32_t right_idx = find_glyph_index(blob, right_codepoint);
         if (right_idx < 0) {
             continue;
         }
@@ -2060,7 +2019,6 @@ static inline uint32_t measure_size_bits(float size) {
 typedef struct {
     const NtFontGlyphEntry *entry; /* NULL on tofu fallback */
     const uint8_t *blob;
-    uint32_t blob_size;
 } nt_font_glyph_lookup_t;
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -2072,15 +2030,13 @@ static nt_font_glyph_lookup_t lookup_glyph_entry_in_slot(const nt_font_slot_t *s
         const uint16_t gi = slot->ascii_glyph_idx[codepoint];
         if (gi != NT_FONT_ASCII_IDX_NONE) {
             const uint8_t ri = slot->ascii_glyph_res[codepoint];
-            uint32_t blob_size = 0;
-            const uint8_t *blob = font_provider_blob(slot->resources[ri], &blob_size);
-            if (blob && blob_size >= sizeof(NtFontAssetHeader)) {
+            const uint8_t *blob = font_provider_blob(slot->resources[ri]);
+            if (blob != NULL) {
                 const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)blob;
                 NT_ASSERT(gi < hdr->glyph_count); /* see find_glyph_in_resources rationale */
                 const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader));
                 out.entry = glyphs + gi;
                 out.blob = blob;
-                out.blob_size = blob_size;
                 return out;
             }
         }
@@ -2090,16 +2046,14 @@ static nt_font_glyph_lookup_t lookup_glyph_entry_in_slot(const nt_font_slot_t *s
         if (slot->resource_handles[i] == 0) {
             continue;
         }
-        uint32_t blob_size = 0;
-        const uint8_t *blob = font_provider_blob(slot->resources[i], &blob_size);
+        const uint8_t *blob = font_provider_blob(slot->resources[i]);
         if (!blob) {
             continue;
         }
-        const NtFontGlyphEntry *entry = find_glyph_in_pack(blob, blob_size, codepoint);
+        const NtFontGlyphEntry *entry = find_glyph_in_pack(blob, codepoint);
         if (entry) {
             out.entry = entry;
             out.blob = blob;
-            out.blob_size = blob_size;
             return out;
         }
     }
@@ -2112,7 +2066,7 @@ static nt_font_glyph_lookup_t lookup_glyph_entry_in_slot(const nt_font_slot_t *s
  * left->entry->kern_count > 0 before calling. */
 static int16_t kern_with_left_in_slot(const nt_font_glyph_lookup_t *left, uint32_t right_codepoint) {
     /* Right glyph index within the same resource as the left entry. */
-    int32_t right_idx = find_glyph_index(left->blob, left->blob_size, right_codepoint);
+    int32_t right_idx = find_glyph_index(left->blob, right_codepoint);
     if (right_idx < 0) {
         return 0;
     }

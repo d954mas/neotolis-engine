@@ -93,10 +93,7 @@ void nt_entity_destroy(nt_entity_t entity) {
     /* Bounds check */
     NT_ASSERT(index > 0 && index <= s_entity.max_entities);
 
-    /* Double destroy: slot already dead */
-    if (!s_entity.alive[index]) {
-        NT_ASSERT(false);
-    }
+    NT_ASSERT(s_entity.alive[index] && "double destroy");
 
     /* Stale handle: slot alive but generation mismatch (old handle for recycled slot) */
     NT_ASSERT(s_entity.generations[index] == nt_entity_generation(entity));
@@ -150,9 +147,7 @@ void nt_entity_register_storage(const nt_comp_storage_reg_t *reg) {
     for (uint8_t i = 0; i < s_entity.reg_count; i++) {
         NT_ASSERT(strcmp(s_entity.registrations[i].name, reg->name) != 0 && "storage with this name already registered");
     }
-    if (s_entity.reg_count >= NT_MAX_COMP_STORAGES) {
-        NT_ASSERT(false);
-    }
+    NT_ASSERT(s_entity.reg_count < NT_MAX_COMP_STORAGES && "too many component storages");
     s_entity.registrations[s_entity.reg_count] = *reg;
     s_entity.reg_count++;
 }

@@ -410,11 +410,11 @@ static uint32_t decode_one(const char *src, size_t off, size_t len, uint32_t *ou
  * which clamps to buffer_size-1 / max_length and drops a non-fitting multi-byte codepoint WHOLE.
  * A malformed lead byte is skipped one byte at a time (never read OOB). Returns the new caret. */
 static uint32_t clipboard_paste(char *buffer, size_t buffer_size, const nt_ui_input_props_t *props, nt_ui_input_state_t *st, uint32_t cur_len, bool *changed) {
-    const char *clip = nt_clipboard_get_text(); /* engine-owned, valid until the next clipboard call */
-    if (clip == NULL || clip[0] == '\0') {
+    /* Read in place: valid until the next clipboard call, and allow must not make one. */
+    const char *clip = nt_clipboard_get_text();
+    if (clip[0] == '\0') {
         return st->caret;
     }
-    /* Read in place: nothing below calls the clipboard, and allow must not either. */
     const size_t clip_len = strlen(clip);
 
     /* Replace any selection first. */
@@ -424,7 +424,7 @@ static uint32_t clipboard_paste(char *buffer, size_t buffer_size, const nt_ui_in
         selection_span(st, &lo, &hi);
         st->caret = delete_range(buffer, lo, hi, cur_len, changed);
         st->anchor = st->caret;
-        cur_len = (uint32_t)strlen(buffer);
+        cur_len -= hi - lo;
     }
 
     size_t i = 0U;
@@ -445,7 +445,7 @@ static uint32_t clipboard_paste(char *buffer, size_t buffer_size, const nt_ui_in
             break; /* buffer full: stop (clamp), the rest of the paste is dropped */
         }
         st->anchor = st->caret;
-        cur_len = (uint32_t)strlen(buffer);
+        cur_len += st->caret - before;
     }
     return st->caret;
 }

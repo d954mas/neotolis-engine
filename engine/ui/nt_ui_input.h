@@ -20,9 +20,8 @@ typedef struct nt_ui_context nt_ui_context_t;
 
 extern const nt_ui_widget_def_t NT_UI_INPUT_DEF;
 
-/* Codepoint allow-predicate, invoked synchronously during the widget call. Returns true to keep
- * the codepoint, false to drop it. Must not call nt_clipboard_*: paste reads the clipboard text
- * in place. NULL props->allow allows any printable (non-control) codepoint. */
+/* Codepoint allow-predicate. Returns true to keep the codepoint, false to drop it. Must not call
+ * nt_clipboard_*. NULL props->allow allows any printable (non-control) codepoint. */
 typedef bool (*nt_ui_char_filter_fn)(uint32_t codepoint);
 
 /* Mobile soft-keyboard hint. Maps to web inputmode / type=password; native no-op. */

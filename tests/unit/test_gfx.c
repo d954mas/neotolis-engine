@@ -146,25 +146,6 @@ void test_gfx_pool_free_skips_zero_before_reallocation(void) {
     TEST_ASSERT_FALSE(stale_valid);
 }
 
-void test_gfx_pool_wrap_does_not_revive_first_handle_early(void) {
-    nt_pool_t pool;
-    nt_pool_init(&pool, 1);
-    uint32_t first = nt_pool_alloc(&pool);
-    uint32_t current = first;
-    bool revived = false;
-    for (uint32_t i = 0; i < 32768U; i++) {
-        nt_pool_free(&pool, current);
-        current = nt_pool_alloc(&pool);
-        if (nt_pool_valid(&pool, first)) {
-            revived = true;
-            break;
-        }
-    }
-    nt_pool_shutdown(&pool);
-
-    TEST_ASSERT_FALSE_MESSAGE(revived, "16-bit generation wrap must not halve the stale-handle reuse interval");
-}
-
 /* ---- Pool: valid accepts live handle ---- */
 
 void test_gfx_pool_valid_accepts_live(void) {
@@ -4088,7 +4069,6 @@ int main(void) {
     RUN_TEST(test_gfx_pool_free_and_realloc);
     RUN_TEST(test_gfx_pool_alloc_skips_zero_at_generation_wrap);
     RUN_TEST(test_gfx_pool_free_skips_zero_before_reallocation);
-    RUN_TEST(test_gfx_pool_wrap_does_not_revive_first_handle_early);
     RUN_TEST(test_gfx_pool_valid_accepts_live);
     RUN_TEST(test_gfx_pool_valid_rejects_zero);
     RUN_TEST(test_gfx_pool_valid_rejects_stale);

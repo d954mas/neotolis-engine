@@ -25,58 +25,11 @@
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
+#include "test_helpers/nt_test_font_blob.h"
 /* clang-format on */
 
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static const nt_ui_create_desc_t s_ui_desc = {.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT, .modal_zband_stride = NT_UI_MODAL_ZBAND_STRIDE};
-
-/* ---- Test font blob builder (mirrors test_font.c with 3 glyphs A/B/C) ---- */
-
-static uint8_t *build_test_font_blob(uint32_t *out_size) {
-    const uint8_t contour[] = {1, 0, 3, 0, 7, 0, 0, 0, 0, 0, 0, NT_FONT_DELTA_SENTINEL, 0x20, 3, NT_FONT_DELTA_SENTINEL, 0x90, 1, 0};
-    const uint32_t contour_size = (uint32_t)sizeof contour;
-    const uint32_t header_size = (uint32_t)sizeof(NtFontAssetHeader);
-    const uint32_t glyphs_size = 3U * (uint32_t)sizeof(NtFontGlyphEntry);
-    const uint32_t total_size = header_size + glyphs_size + (3U * contour_size);
-
-    uint8_t *blob = (uint8_t *)calloc(total_size, 1U);
-    NT_ASSERT(blob);
-
-    NtFontAssetHeader hdr;
-    memset(&hdr, 0, sizeof hdr);
-    hdr.magic = NT_FONT_MAGIC;
-    hdr.version = NT_FONT_VERSION;
-    hdr.glyph_count = 3;
-    hdr.units_per_em = 1000;
-    hdr.ascent = 800;
-    hdr.descent = -200;
-    hdr.line_gap = 0;
-    memcpy(blob, &hdr, sizeof hdr);
-
-    const uint32_t data_base = header_size + glyphs_size;
-    const uint32_t cp[3] = {'A', 'B', 'C'};
-    for (int g = 0; g < 3; ++g) {
-        NtFontGlyphEntry e;
-        memset(&e, 0, sizeof e);
-        e.codepoint = cp[g];
-        e.data_offset = data_base + ((uint32_t)g * contour_size);
-        e.advance = 500;
-        e.bbox_x0 = 0;
-        e.bbox_y0 = -200;
-        e.bbox_x1 = 400;
-        e.bbox_y1 = 800;
-        e.curve_count = 3;
-        e.kern_count = 0;
-        memcpy(blob + header_size + ((size_t)g * sizeof(NtFontGlyphEntry)), &e, sizeof e);
-    }
-
-    for (int g = 0; g < 3; g++) {
-        memcpy(blob + data_base + ((size_t)g * contour_size), contour, sizeof contour);
-    }
-
-    *out_size = total_size;
-    return blob;
-}
 
 static nt_resource_t register_font_resource(const char *name, const uint8_t *blob, uint32_t blob_size) {
     /* fonts resolve bytes from a resident pack blob — use a real parsed pack. */
@@ -92,7 +45,7 @@ static nt_font_t make_resolved_test_font(const char *name, uint8_t **out_blob) {
     nt_font_t font = nt_font_create(&fd);
 
     uint32_t blob_size = 0;
-    uint8_t *blob = build_test_font_blob(&blob_size);
+    uint8_t *blob = nt_test_font_blob('A', 'C', &blob_size);
     nt_resource_t res = register_font_resource(name, blob, blob_size);
     nt_font_add(font, res);
     nt_resource_step();
