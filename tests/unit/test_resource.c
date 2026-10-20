@@ -15,7 +15,6 @@
 #include "nt_pack_format.h"
 #include "core/nt_assert.h"
 #include "unity.h"
-#include "test_helpers/nt_assert_trap.h"
 /* clang-format on */
 
 #include <setjmp.h>
@@ -23,9 +22,10 @@
 /* ---- Assert-catching helper (setjmp/longjmp via hookable nt_assert_handler) ---- */
 
 static jmp_buf s_assert_jmp;
+static const char *s_assert_expr;
 
 static void test_assert_trap(const char *expr, const char *file, int line) {
-    (void)expr;
+    s_assert_expr = expr;
     (void)file;
     (void)line;
     longjmp(s_assert_jmp, 1);
@@ -118,7 +118,6 @@ static uint8_t *build_test_pack(uint32_t asset_count, uint32_t *out_size) {
 static nt_resource_desc_t s_desc;
 
 void setUp(void) {
-    nt_test_assert_install();
     nt_http_init();
     nt_fs_init();
     memset(&s_desc, 0, sizeof(s_desc));
@@ -2203,7 +2202,8 @@ void test_redownload_with_changed_bytes_asserts(void) {
     (void)fputc(last ^ 0xFF, f);
     (void)fclose(f);
     nt_resource_invalidate(NT_ASSET_MESH);
-    NT_TEST_EXPECT_ASSERT(for (int i = 0; i < 4; i++) { nt_resource_step(); });
+    EXPECT_ASSERT(for (int i = 0; i < 4; i++) { nt_resource_step(); });
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "re-downloaded pack bytes differ"));
     (void)remove(path);
 }
 

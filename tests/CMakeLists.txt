@@ -694,7 +694,7 @@ if(NOT EMSCRIPTEN)
     add_test(NAME test_hash COMMAND test_hash)
 
     # --- Resource module tests ---
-    add_executable(test_resource unit/test_resource.c unit/test_helpers/nt_assert_trap.c)
+    add_executable(test_resource unit/test_resource.c)
     add_executable(test_resource_timing unit/test_resource_timing.c)
     target_link_libraries(test_resource_timing PRIVATE nt_resource nt_http_stub nt_fs nt_log_stub unity)
     target_compile_definitions(test_resource_timing PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -703,7 +703,6 @@ if(NOT EMSCRIPTEN)
     # file reads + request-fail paths). Stubs make nt_fs_read_file return INVALID,
     # so assets never activate and the activation/resolve callbacks never fire.
     target_link_libraries(test_resource PRIVATE nt_resource nt_http nt_fs nt_log_stub unity)
-    target_include_directories(test_resource PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_resource PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_resource WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     # Only test that drives REAL nt_fs/nt_http + nt_time_sleep TTL paths on real time;

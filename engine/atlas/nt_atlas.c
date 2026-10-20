@@ -1,5 +1,6 @@
 #include "atlas/nt_atlas.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -336,6 +337,7 @@ static void replace_geometry(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v)
     ad->uvs = (nt_atlas_uv_t *)((uint8_t *)ad->positions + v->position_bytes);
     ad->indices = (uint16_t *)((uint8_t *)ad->uvs + v->uv_bytes);
     ad->ipu = v->hdr->inverse_pixels_per_unit;
+    NT_ASSERT(isfinite(ad->ipu) && ad->ipu > 0.0F && "atlas blob: builder guarantees a positive finite inverse_pixels_per_unit");
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)

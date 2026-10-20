@@ -1342,36 +1342,46 @@ void test_font_zero_contour_point_count_fails_activation(void) {
     assert_font_blob_rejected(blob, size);
 }
 
-/* One complete single-contour glyph whose on/off pattern repeats `on_every` (1 = all on, 2 = off,on). */
-static uint32_t build_ring_font_blob(uint8_t *blob, uint16_t point_count, uint32_t on_every) {
+/* One glyph of `contours` identical complete rings whose on/off pattern repeats `on_every` (1 = all on, 2 = off,on). */
+static uint32_t build_ring_font_blob(uint8_t *blob, uint16_t contours, uint16_t point_count, uint32_t on_every) {
     const NtFontAssetHeader header = {.magic = NT_FONT_MAGIC, .version = NT_FONT_VERSION, .glyph_count = 1, .units_per_em = 1000, .ascent = 800, .descent = -200};
     const NtFontGlyphEntry glyph = {.codepoint = 'A', .data_offset = sizeof header + sizeof glyph, .advance = 500, .bbox_x1 = 400, .bbox_y1 = 800, .curve_count = 3};
-    const uint16_t contour_count = 1;
     uint32_t offset = glyph.data_offset;
     memcpy(blob, &header, sizeof header);
     memcpy(blob + sizeof header, &glyph, sizeof glyph);
-    memcpy(blob + offset, &contour_count, sizeof contour_count);
-    memcpy(blob + offset + 2U, &point_count, sizeof point_count);
-    offset += 4U;
-    memset(blob + offset, 0, NT_FONT_BITMASK_BYTES(point_count));
-    for (uint32_t p = on_every - 1U; p < point_count; p += on_every) {
-        blob[offset + (p / 8U)] |= (uint8_t)(1U << (p % 8U));
+    memcpy(blob + offset, &contours, sizeof contours);
+    offset += 2U;
+    for (uint16_t c = 0; c < contours; c++) {
+        memcpy(blob + offset, &point_count, sizeof point_count);
+        offset += 2U;
+        memset(blob + offset, 0, NT_FONT_BITMASK_BYTES(point_count));
+        for (uint32_t p = on_every - 1U; p < point_count; p += on_every) {
+            blob[offset + (p / 8U)] |= (uint8_t)(1U << (p % 8U));
+        }
+        offset += NT_FONT_BITMASK_BYTES(point_count) + 4U;         /* mask + first point (0,0) */
+        memset(blob + offset, 0, (size_t)2U * (point_count - 1U)); /* zero deltas */
+        offset += 2U * (point_count - 1U);
     }
-    offset += NT_FONT_BITMASK_BYTES(point_count) + 4U;         /* mask + first point (0,0) */
-    memset(blob + offset, 0, (size_t)2U * (point_count - 1U)); /* zero deltas */
-    return offset + (2U * (point_count - 1U));
+    return offset;
 }
 
 void test_font_contour_above_curve_cap_fails_activation(void) {
     static uint8_t blob[2048];
-    const uint32_t size = build_ring_font_blob(blob, NT_FONT_MAX_CURVES_PER_GLYPH + 1U, 1U);
+    const uint32_t size = build_ring_font_blob(blob, 1U, NT_FONT_MAX_CURVES_PER_GLYPH + 1U, 1U);
+    assert_font_blob_rejected(blob, size);
+}
+
+/* The cap holds for the glyph, not per contour. */
+void test_font_contours_above_curve_cap_together_fail_activation(void) {
+    static uint8_t blob[2048];
+    const uint32_t size = build_ring_font_blob(blob, 2U, (NT_FONT_MAX_CURVES_PER_GLYPH / 2U) + 1U, 1U);
     assert_font_blob_rejected(blob, size);
 }
 
 /* 600 off,on points decode to 300 curves: more points than the curve cap, still valid. */
 void test_font_contour_points_above_curve_cap_stay_valid(void) {
     static uint8_t blob[2048];
-    const uint32_t size = build_ring_font_blob(blob, 600U, 2U);
+    const uint32_t size = build_ring_font_blob(blob, 1U, 600U, 2U);
     nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
     const uint32_t token = nt_font_test_register_data(blob, size);
     nt_font_add(font, nt_font_test_resource(token));
@@ -3063,6 +3073,7 @@ int main(void) {
     RUN_TEST(test_font_truncated_contour_data_fails_activation);
     RUN_TEST(test_font_zero_contour_point_count_fails_activation);
     RUN_TEST(test_font_contour_above_curve_cap_fails_activation);
+    RUN_TEST(test_font_contours_above_curve_cap_together_fail_activation);
     RUN_TEST(test_font_contour_points_above_curve_cap_stay_valid);
     RUN_TEST(test_font_init_shutdown);
     RUN_TEST(test_font_create_destroy_valid);
