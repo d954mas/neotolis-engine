@@ -1752,7 +1752,7 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph_offset(nt_font_slot_t *slot, 
         /* Decode weight = the SAME (already quantized+saturated) key_offset the slot is keyed
          * by, so the cached geometry and the cache key can never disagree. */
         curve_count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH, (float)key_offset);
-        if (s_decode_truncated) {
+        if (s_decode_truncated && key_offset != 0) {
             /* A cut outline leaks fill; the regular outline always fits the builder's cap. */
             NT_LOG_WARN_ONCE("font: U+%04X at weight %d outgrows %u curves -- drawn at regular weight", codepoint, key_offset, NT_FONT_MAX_CURVES_PER_GLYPH);
             curve_count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH, 0.0F);
