@@ -57,7 +57,7 @@
 #include "window/nt_window.h"
 
 #include "nt_pack_format.h"
-#include "ui_3d_demo_assets.h"
+#include "ui_3d_demo.h"
 
 #include "clay.h"
 #include <math.h>
@@ -998,7 +998,6 @@ int main(int argc, char *argv[]) {
 
     nt_engine_config_t config = {0};
     config.app_name = "ui_3d_demo";
-    config.version = 1;
     if (nt_engine_init(&config) != NT_OK) {
         return 1;
     }

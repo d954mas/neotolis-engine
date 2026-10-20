@@ -206,19 +206,18 @@ ok
 # critical path is one single-threaded test. The wait + report happens after
 # the tidy step; a format/tidy failure kills the orphan so no exe stays locked.
 #
-# The three atlas-bench guard tests (~29 s CPU, the 18 s wall critical path)
-# exercise builder geometry + research-bench provenance only. In default mode
-# they run ONLY when the change set touches those areas; --push/--full (and CI)
-# always run them, so nothing ships unchecked.
+# The atlas tests (hull budget golden, transform sweep guard) cover builder
+# geometry and the sweep script. In default mode they run ONLY when the change
+# set touches those areas; --push/--full (and CI) always run them.
 step "ctest (native-debug, parallel with format+tidy)"
-# Everything the guards depend on: builder+bench sources, their deps libraries,
-# fixtures/goldens, the scripts they source, and the test-registration infra.
+# Everything the atlas tests depend on: builder+research sources, their deps,
+# the sprite art the hull golden reads, the sweep scripts, and test registration.
 # Matched against the UNFILTERED name union so deletions also trigger them.
-GUARD_RELEVANT='^(tools/builder/|tools/research/|engine/atlas/|engine/hash/|shared/include/|deps/(clipper2|stb|miniz|cjson)/|scripts/(bench_|atlas/|test_atlas_|test_bench_|generate_hull_visual_|lib/hull_)|tests/fixtures/hull_visual_acceptance/|tests/unit/test_atlas_|tests/unit/test_helpers/|tests/CMakeLists|cmake/|CMakeLists\.txt$|CMakePresets\.json$)'
+GUARD_RELEVANT='^(tools/builder/|tools/research/|engine/atlas/|engine/hash/|shared/include/|deps/(clipper2|stb|miniz)/|assets/sprites/bigatlas/|scripts/(atlas/|test_atlas_)|tests/unit/test_atlas_|tests/unit/test_helpers/|tests/CMakeLists|cmake/|CMakeLists\.txt$|CMakePresets\.json$)'
 CTEST_ARGS=()
 if [ "$MODE" = "default" ] && ! printf '%s\n' "$CHANGED_NAMES_ALL" | grep -qE "$GUARD_RELEVANT"; then
-    echo "(no builder/atlas paths in the change set — the 3 bench-guard tests defer to --push/--full)"
-    CTEST_ARGS=(-E '^(test_atlas_hull_visual_report|test_atlas_transform_sweep_guard|test_bench_hull_tolerance_guard)$')
+    echo "(no builder/atlas paths in the change set — the atlas geometry tests defer to --push/--full)"
+    CTEST_ARGS=(-E '^(test_atlas_hull_budget|test_atlas_transform_sweep_guard)$')
 fi
 CTEST_LOG="$NATIVE_BUILD_DIR/check-ctest.log" # kept on disk; overwritten per run
 ctest --test-dir "$NATIVE_BUILD_DIR" -j "$(nproc)" --output-on-failure --no-tests=error "${CTEST_ARGS[@]}" > "$CTEST_LOG" 2>&1 &

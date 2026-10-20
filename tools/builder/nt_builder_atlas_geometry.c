@@ -1388,7 +1388,7 @@ Point2D *binary_build_convex_polygon(const uint8_t *binary, uint32_t tw, uint32_
     uint32_t hull_count = convex_hull(points, point_count, hull);
     free(points);
 
-    /* Content failure: a degenerate hull (<3 verts) has no usable outline. */
+    /* A hull under 3 vertices has no outline; callers skip the convex candidate. */
     if (hull_count < 3) {
         free(hull);
         *out_count = 0;

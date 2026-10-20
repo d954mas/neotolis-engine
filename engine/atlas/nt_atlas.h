@@ -157,10 +157,6 @@ void nt_atlas_get_region_handles(nt_resource_t atlas, uint32_t region_index, nt_
  * resource-system setup. */
 struct nt_atlas_data;
 
-/* Return the raw nt_atlas_data_t* stashed in a resource slot's user_data.
- * Used by tests that DO drive the resource system end-to-end. */
-const struct nt_atlas_data *nt_atlas_test_get_data(nt_resource_t atlas);
-
 /* Bypass nt_resource_peek_user_data and look up a region on a raw
  * nt_atlas_data_t* directly. Mirrors nt_atlas_find_region(). */
 uint32_t nt_atlas_test_find_region_raw(const struct nt_atlas_data *ad, uint64_t name_hash);
@@ -181,9 +177,6 @@ uint64_t nt_atlas_test_page_resource_id(const struct nt_atlas_data *ad, uint8_t 
 void nt_atlas_test_drive_resolve(const uint8_t *data, uint32_t size, void **user_data);
 void nt_atlas_test_drive_cleanup(void *user_data);
 
-/* Drive the production activator without a resource registry. */
-uint32_t nt_atlas_test_activate(const uint8_t *data, uint32_t size);
-
 /* Return the cached page_resources[page_index] slot handle's .id field.
  * 0 means NT_RESOURCE_INVALID (not yet post-resolve primed). */
 uint32_t nt_atlas_test_page_resource_handle(const struct nt_atlas_data *ad, uint8_t page_index);
@@ -191,9 +184,6 @@ uint32_t nt_atlas_test_page_resource_handle(const struct nt_atlas_data *ad, uint
 /* Reset module-level initialized flag so tests can re-init after
  * nt_resource_shutdown(). Production code has no nt_atlas_shutdown. */
 void nt_atlas_test_reset(void);
-
-/* Run the runtime blob validator with the same asserts and rejection rules. */
-bool nt_atlas_test_validate_header(const uint8_t *data, uint32_t size);
 
 /* Direct access to owned geometry and intrinsic scale without a resource slot. */
 const float (*nt_atlas_test_positions(const struct nt_atlas_data *ad))[2];

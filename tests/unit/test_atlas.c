@@ -7,7 +7,6 @@
 /* NT_TEST_ACCESS is provided by the CMake target. */
 
 /* clang-format off */
-#include "test_helpers/nt_assert_trap.h"
 #include "atlas/nt_atlas.h"
 #include "hash/nt_hash.h"
 #include "log/nt_log.h"
@@ -16,6 +15,8 @@
 #include "nt_pack_format.h"
 #include "resource/nt_resource.h"
 #include "unity.h"
+#include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/nt_test_pack.h"
 /* clang-format on */
 
 /* Integer staging keeps pixel fixtures readable; the helper serializes ready v8 arrays. */
@@ -119,7 +120,6 @@ static void capture_atlas_warnings(nt_log_level_t level, const char *domain, con
 }
 
 void setUp(void) {
-    nt_test_assert_install();
     s_user_data = NULL;
     s_fake_texture_next_handle = 0x7000U;
     s_atlas_warning_count = 0;
@@ -1268,10 +1268,21 @@ void test_atlas_on_cleanup_releases_all_buffers(void) {
      * report a leak-check failure at exit. */
 }
 
-/* ---- Test 14: Header/layout validation rejects corruption ----
- * Uses the test-only nt_atlas_test_validate_header helper that shares the
- * same validation logic as validate_and_carve_blob(): magic/version assert;
- * invalid section layout and size bounds return false. */
+static void expect_layout_assert(const uint8_t *buf, uint32_t size) {
+    void *user_data = NULL;
+    NT_TEST_EXPECT_ASSERT(nt_atlas_test_drive_resolve(buf, size, &user_data));
+}
+
+static void expect_layout_ok(const uint8_t *buf, uint32_t size) {
+    void *user_data = NULL;
+    nt_atlas_test_drive_resolve(buf, size, &user_data);
+    TEST_ASSERT_NOT_NULL(user_data);
+    nt_atlas_test_drive_cleanup(user_data);
+}
+
+/* ---- Layout asserts catch corruption ----
+ * Resolve asserts the section layout and size bounds the builder writes
+ * (the resource core checks the header). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_on_resolve_header_validation_rejects_corruption(void) {
     /* Build a valid blob first */
@@ -1280,57 +1291,31 @@ void test_atlas_on_resolve_header_validation_rejects_corruption(void) {
     build_fixture_blob(buf, sizeof(buf), &valid_size);
 
     /* Valid blob should pass */
-    TEST_ASSERT_TRUE(nt_atlas_test_validate_header(buf, valid_size));
-
-    /* Magic corruption: overwrite first 4 bytes */
-    uint8_t corrupt_magic[512];
-    memcpy(corrupt_magic, buf, valid_size);
-    uint32_t bad_magic = 0xDEADBEEFU;
-    memcpy(corrupt_magic, &bad_magic, sizeof(bad_magic));
-    NT_TEST_EXPECT_ASSERT(nt_atlas_test_validate_header(corrupt_magic, valid_size));
-
-    /* Version corruption: overwrite bytes 4-5 */
-    uint8_t corrupt_version[512];
-    memcpy(corrupt_version, buf, valid_size);
-    uint16_t bad_version = 0xFFFFU;
-    memcpy(corrupt_version + 4, &bad_version, sizeof(bad_version));
-    NT_TEST_EXPECT_ASSERT(nt_atlas_test_validate_header(corrupt_version, valid_size));
-
-    /* Truncated blob: size < sizeof(NtAtlasHeader) */
-    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(buf, 10), "truncated blob should fail");
+    expect_layout_ok(buf, valid_size);
 
     /* Truncated blob: header valid but size too small for pages + regions */
-    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(buf, sizeof(NtAtlasHeader)), "undersized blob should fail");
+    expect_layout_assert(buf, sizeof(NtAtlasHeader));
 
     /* Non-canonical vertex offset: sections must be tightly packed per spec. */
     uint8_t corrupt_vertex_offset[512];
     memcpy(corrupt_vertex_offset, buf, valid_size);
     NtAtlasHeader *hdr = (NtAtlasHeader *)corrupt_vertex_offset;
     hdr->vertex_offset += 4;
-    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_vertex_offset, valid_size), "vertex_offset gap should fail");
+    expect_layout_assert(corrupt_vertex_offset, valid_size);
 
     /* Non-canonical index offset: index section must start right after vertices. */
     uint8_t corrupt_index_offset[512];
     memcpy(corrupt_index_offset, buf, valid_size);
     hdr = (NtAtlasHeader *)corrupt_index_offset;
     hdr->index_offset += 2;
-    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_index_offset, valid_size), "index_offset gap should fail");
+    expect_layout_assert(corrupt_index_offset, valid_size);
 
     /* Overflow / wraparound candidate in vertex_offset must fail. */
     uint8_t corrupt_vertex_wrap[512];
     memcpy(corrupt_vertex_wrap, buf, valid_size);
     hdr = (NtAtlasHeader *)corrupt_vertex_wrap;
     hdr->vertex_offset = UINT32_MAX - 3U;
-    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_vertex_wrap, valid_size), "vertex_offset wrap should fail");
-}
-
-void test_atlas_activator_rejects_invalid_blob(void) {
-    uint8_t buf[512];
-    uint32_t size = 0;
-    build_fixture_blob(buf, sizeof(buf), &size);
-
-    TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, size), "valid atlas must activate");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, sizeof(NtAtlasHeader) - 1U), "truncated atlas must fail activation before publication");
+    expect_layout_assert(corrupt_vertex_wrap, valid_size);
 }
 
 /* ---- Test 15: Region slice validation rejects corrupt page / payload refs ---- */
@@ -1347,7 +1332,7 @@ void test_atlas_region_slice_validation_rejects_corruption(void) {
     NtAtlasRegion *regions = (NtAtlasRegion *)(corrupt_vertex_slice + sizeof(NtAtlasHeader) + page_bytes);
     regions[0].vertex_start = hdr->total_vertex_count - 1U;
     regions[0].vertex_count = 4;
-    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_vertex_slice, size), "vertex slice OOB should fail");
+    expect_layout_assert(corrupt_vertex_slice, size);
 
     uint8_t corrupt_index_slice[512];
     memcpy(corrupt_index_slice, buf, size);
@@ -1355,7 +1340,7 @@ void test_atlas_region_slice_validation_rejects_corruption(void) {
     regions = (NtAtlasRegion *)(corrupt_index_slice + sizeof(NtAtlasHeader) + page_bytes);
     regions[1].index_start = hdr->total_index_count - 1U;
     regions[1].index_count = 3;
-    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_index_slice, size), "index slice OOB should fail");
+    expect_layout_assert(corrupt_index_slice, size);
 
     uint8_t buf_with_pages[512];
     uint32_t size_with_pages = 0;
@@ -1367,7 +1352,7 @@ void test_atlas_region_slice_validation_rejects_corruption(void) {
     page_bytes = (uint32_t)hdr->page_count * (uint32_t)sizeof(uint64_t);
     regions = (NtAtlasRegion *)(corrupt_page_index + sizeof(NtAtlasHeader) + page_bytes);
     regions[0].page_index = (uint8_t)hdr->page_count;
-    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_page_index, size_with_pages), "page_index OOB should fail");
+    expect_layout_assert(corrupt_page_index, size_with_pages);
 
     /* Pinned at the boundary: page_index == page_count is the FIRST slot without
      * a backing page and must already reject; far past the cap must too. */
@@ -1377,9 +1362,9 @@ void test_atlas_region_slice_validation_rejects_corruption(void) {
     hdr = (NtAtlasHeader *)corrupt_page_slot;
     regions = (NtAtlasRegion *)(corrupt_page_slot + sizeof(NtAtlasHeader) + ((size_t)hdr->page_count * sizeof(uint64_t)));
     regions[0].page_index = (uint8_t)hdr->page_count;
-    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_page_slot, slot_size), "page_index == page_count is the first unbacked slot and must fail");
+    expect_layout_assert(corrupt_page_slot, slot_size);
     regions[0].page_index = 200;
-    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_page_slot, slot_size), "page_index far past the page cap must fail");
+    expect_layout_assert(corrupt_page_slot, slot_size);
 }
 
 /* ---- Test 16: Direct-drive on_resolve stores page ids and invalidates handles ----
@@ -1486,8 +1471,8 @@ void test_atlas_full_resource_pipeline_integration(void) {
      *   [1] page texture tex0
      *   [2] page texture tex1 */
     const uint64_t atlas_rid = 0x1234567890ABCDEFULL;
-    static const uint8_t tex0_blob[16] = {1};
-    static const uint8_t tex1_blob[16] = {2};
+    static const uint8_t tex0_blob[NT_TEST_ASSET_PAYLOAD] = {0};
+    static const uint8_t tex1_blob[NT_TEST_ASSET_PAYLOAD] = {0};
 
     const uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + (3U * sizeof(NtAssetEntry)));
     const uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_DATA_ALIGN - 1U);
@@ -1539,7 +1524,7 @@ void test_atlas_full_resource_pipeline_integration(void) {
     memcpy(pack_blob + atlas_offset, atlas_blob, atlas_blob_size);
     memcpy(pack_blob + tex0_offset, tex0_blob, sizeof(tex0_blob));
     memcpy(pack_blob + tex1_offset, tex1_blob, sizeof(tex1_blob));
-    ph->checksum = nt_crc32(pack_blob + header_size, total_size - header_size);
+    nt_test_seal_pack(pack_blob);
 
     /* --- Resource system init --- */
     nt_resource_init(NULL);
@@ -2280,18 +2265,6 @@ void test_atlas_slice9_zero_has_no_slice9(void) {
     TEST_ASSERT_FALSE((r->slice9_lrtb[0] | r->slice9_lrtb[1] | r->slice9_lrtb[2] | r->slice9_lrtb[3]) != 0);
 }
 
-/* The previous wire version (v7) must trigger the version assertion. */
-void test_atlas_previous_version_rejected(void) {
-    uint8_t buf[512];
-    uint32_t size = 0;
-    build_fixture_blob(buf, sizeof(buf), &size);
-
-    const uint16_t previous_version = 7;
-    memcpy(buf + 4, &previous_version, sizeof(previous_version));
-
-    NT_TEST_EXPECT_ASSERT(nt_atlas_test_validate_header(buf, size));
-}
-
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_atlas_parse_valid_blob);
@@ -2312,7 +2285,6 @@ int main(void) {
     RUN_TEST(test_atlas_hash_table_growth_under_1000_regions);
     RUN_TEST(test_atlas_on_cleanup_releases_all_buffers);
     RUN_TEST(test_atlas_on_resolve_header_validation_rejects_corruption);
-    RUN_TEST(test_atlas_activator_rejects_invalid_blob);
     RUN_TEST(test_atlas_region_slice_validation_rejects_corruption);
     RUN_TEST(test_atlas_page_resources_stored_at_parse);
     RUN_TEST(test_atlas_full_resource_pipeline_integration);
@@ -2330,6 +2302,5 @@ int main(void) {
     /* Slice9 */
     RUN_TEST(test_atlas_slice9_roundtrip);
     RUN_TEST(test_atlas_slice9_zero_has_no_slice9);
-    RUN_TEST(test_atlas_previous_version_rejected);
     return UNITY_END();
 }

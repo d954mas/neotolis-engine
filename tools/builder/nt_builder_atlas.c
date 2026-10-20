@@ -118,19 +118,6 @@ void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len) {
     case NT_BUILD_ERR_KIND_ATLAS_SLICE9_TOO_BIG:
         (void)snprintf(buf, len, "atlas '%s', sprite '%s': slice9 borders (%u) >= source extent (%u)", err->atlas, err->sprite, err->detail_a, err->detail_b);
         break;
-    case NT_BUILD_ERR_KIND_ATLAS_DEGENERATE_HULL:
-        (void)snprintf(buf, len, "atlas '%s', sprite '%s': degenerate hull (no usable outline)", err->atlas, err->sprite);
-        break;
-    case NT_BUILD_ERR_KIND_ATLAS_HULL_INFEASIBLE: {
-        const char *shape = "concave";
-        if (err->detail_b == NT_ATLAS_SHAPE_RECT) {
-            shape = "rect";
-        } else if (err->detail_b == NT_ATLAS_SHAPE_CONVEX_HULL) {
-            shape = "convex";
-        }
-        (void)snprintf(buf, len, "atlas '%s', sprite '%s': no covering %s hull fits the hard ceiling of %u vertices", err->atlas, err->sprite, shape, err->detail_a);
-        break;
-    }
     case NT_BUILD_ERR_KIND_ATLAS_CONTOUR_VERTEX_OVERFLOW:
         (void)snprintf(buf, len, "atlas '%s', sprite '%s': contour exceeds vertex budget", err->atlas, err->sprite);
         break;
@@ -2814,10 +2801,8 @@ static void pipeline_geometry(AtlasPipeline *p) {
         uint32_t tw = p->trim_w[idx];
         uint32_t th = p->trim_h[idx];
 
-        /* Skip a sprite that failed alpha_trim (degenerate 0-size trim). It was
-         * already reported (transparent-after-trim / slice9) so building a hull
-         * here would double-report it as a degenerate hull. Never hit on the
-         * successful path — trim is otherwise always non-zero. */
+        /* Skip a sprite that failed alpha_trim (0-size trim): it was already reported
+         * (transparent-after-trim / slice9) and has no outline to build. */
         if (tw == 0 || th == 0) {
             continue;
         }

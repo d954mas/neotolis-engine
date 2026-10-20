@@ -443,7 +443,7 @@ integer pixel gap is used for Clay child spacing, row stride and spacers.
 `char*` buffer (Model D — the engine never reallocs or owns the string; it stores
 only caret/selection/scroll/blink/focus in the state pool). Editing is UTF-8
 codepoint-aware: insert/backspace/delete/arrows never split a multi-byte sequence
-and clamp to `buffer_size-1` / `max_length`. Typed text arrives via the
+and clamp to `buffer_size-1` / `max_length-1` bytes. Typed text arrives via the
 `nt_input_pop_char` UTF-32 ring (frame-local, drained each frame while focused);
 physical keys drive navigation/edit. T2 adds selection (Shift+arrows, mouse drag,
 double-click word-select, Ctrl+A), copy/cut/paste via the swappable `nt_clipboard`
@@ -456,6 +456,11 @@ children carrying a `HAS_TRANSFORM` offset of `pad_x - scroll_x` (set as the Cla
 element `userData`, which the walker reads for layer+transform), so the line
 scrolls to keep the caret visible while clipping to the field box. Cut is a no-op
 when `nt_clipboard_available()` is false (no silent delete-without-copy).
+
+The allow-predicate must not call `nt_clipboard_*`. Paste replaces the selection,
+then inserts the clipboard text codepoint by codepoint: each passes the
+allow-predicate, and the paste stops at the first codepoint that does not fit
+the buffer or `max_length` (both count the NUL byte). A codepoint is never split.
 
 ## Consolidated interaction events
 

@@ -12,7 +12,7 @@ target_link_libraries(ui_showcase PRIVATE
     nt_shape_renderer
     nt_render nt_hash nt_mem_scratch nt_debug_overlay nt_metrics
 )
-# Generated asset headers from builder (ui_showcase_assets.h etc.)
+# Generated per-pack asset headers from builder
 target_include_directories(ui_showcase PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
 
 # nt_clipboard (real, per platform): nt_ui links nt_clipboard_interface; the exe picks the

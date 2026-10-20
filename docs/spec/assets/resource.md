@@ -104,6 +104,7 @@ texture creation does not poll GPU errors.
 Typed wrappers (MeshHandle, TextureHandle) live outside nt_resource — game code or future phases.
 
 `nt_resource_publication_epoch()` exposes a monotonic change counter for systems that want to skip work when published slot data has not changed.
+`nt_resource_winner_gen(handle)` changes each time that slot publishes a winner and never repeats within one init, so a consumer can tell a winner swap or remount apart even when runtime handles repeat.
 
 ## AssetMeta stability
 
@@ -189,14 +190,22 @@ activators it uses. Complete those module initializations before mounting packs.
 `nt_font_shutdown()` does not remove the FONT type registration: initializing
 font again requires a new resource shutdown/init lifecycle first.
 Simple virtual providers use the empty default without explicit registration.
+Packs are trusted output of the engine builder. Before an activator runs, the
+resource core asserts the payload's common `{u32 magic; u16 version}` prefix and
+its header size against the asset type's format; a mismatch means a stale pack
+that needs a rebuild. An activator asserts only the structure its views address
+(sizes, counts, indices, layout). It returns 0, and the asset becomes FAILED with
+a lower-priority pack still published, only for device or build limits such as a
+texture above the GPU's maximum size or a lost context.
+
 BLOB readiness is built in and needs no activator. Other file asset types require
 a configured activator: missing one is a configuration error asserted during
 parse, before any asset records or blob ownership change. Unknown manifest types
 are malformed input and reject the pack through the recoverable parse error.
 
 Registration requires an initialized registry, a valid type-table index, a non-NULL
-descriptor and known flag bits. `on_resolve` requires `on_cleanup`; AUX_BACKED
-requires both. Validation precedes registration, so an invalid description leaves
+descriptor and known flag bits. `on_resolve` requires `on_cleanup` unless the type
+is PIN_BLOB (its `user_data` is a borrowed view); AUX_BACKED requires both. Validation precedes registration, so an invalid description leaves
 the type available for a valid first registration. PIN_BLOB is incompatible with
 virtual assets: registering a virtual provider for a PIN type asserts before
 mutation. Callbacks and flags stay together for the registry lifetime.
@@ -243,7 +252,7 @@ without calling `on_cleanup` first. `on_cleanup` must discard the retained view.
 Explicit unmount invokes that cleanup before freeing the blob, including during
 shutdown; see [Blob pinning](#blob-pinning).
 
-**on_cleanup** fires for non-NULL `user_data` when a resolve finds no publishable real winner, synchronously when explicit unmount removes a `PIN_BLOB` slot's published provider, and during shutdown for remaining data. Copy-out data without `PIN_BLOB` survives unmount until the next resolve or shutdown. `on_resolve` requires `on_cleanup` — registering resolve without cleanup is an assert.
+**on_cleanup** fires for non-NULL `user_data` when a resolve finds no publishable real winner, synchronously when explicit unmount removes a `PIN_BLOB` slot's published provider, and during shutdown for remaining data. Copy-out data without `PIN_BLOB` survives unmount until the next resolve or shutdown. A type whose `user_data` owns nothing (a borrowed `PIN_BLOB` view) registers no `on_cleanup`; the core still clears `user_data`.
 
 **on_post_resolve** fires after the resolve iteration finishes. It may call `request` / `find` / `get` style resource accessors under the callback contract above. Typical use: materialize dependent resource slots from ids that were copied in `on_resolve`.
 
@@ -264,7 +273,7 @@ Two consumption models exist for asset types that derive state from pack bytes
 through the resolve callbacks:
 
 - **Copy-out** (`NT_RESOURCE_BEHAVIOR_AUX_BACKED`, e.g. atlas): `on_resolve` copies the bytes it needs into a self-contained `user_data`. Once built, `user_data` never touches the blob again, so the pack blob can be evicted freely and the consumer keeps working. Copy-out consumers do **not** pin.
-- **Zero-copy** (`NT_RESOURCE_BEHAVIOR_PIN_BLOB`, e.g. font): the consumer reads the *live* pack blob on demand (glyph decode at cache-miss). Its `user_data` is only a `{blob, size}` view, so the blob must stay resident for as long as it is the published winner. Zero-copy consumers **pin** the blob.
+- **Zero-copy** (`NT_RESOURCE_BEHAVIOR_PIN_BLOB`, e.g. font): the consumer reads the *live* pack blob on demand (glyph decode at cache-miss). Its `user_data` borrows the winner's asset bytes inside the pack blob, so the blob must stay resident for as long as it is the published winner. Zero-copy consumers **pin** the blob.
 
 **Pin count (`NtPackMeta.blob_pins`).** Each pack carries the aggregate count of published winners (across all slots) pinning its blob. The resolve pass resets every pack's count to zero, then increments it once per published `PIN_BLOB` winner. Rebuilding from the selected winners avoids maintaining separate pin ownership on each slot. Consumers never pin/unpin themselves. Eviction checks the previous pass's count and skips pinned blobs: pins are normal residency state, not an invariant violation.
 
@@ -524,7 +533,7 @@ row; its cache entry carries its own `band_count`, and the runtime warns once
 when a glyph drops bands. At one band a glyph needs one header texel plus at most
 four texels per curve, so `NT_FONT_MAX_CURVES_PER_GLYPH`
 (`(NT_FONT_GLYPH_TEXELS - 1) / 4` = 511) curves always fit. The builder asserts
-on a larger glyph and logs its codepoint; the runtime asserts the same bound.
+on a larger glyph and logs its codepoint, and glyph decode asserts the bound.
 
 Within a band the curves are sorted by descending maximum coordinate along the
 band's ray (x for horizontal bands, y for vertical bands). The fragment shader
@@ -545,7 +554,9 @@ only at a one-to-one local-unit-to-pixel mapping. Sample coordinates expand with
 the quad, while the undilated bbox still defines the shader's bands. Layout
 metrics stay unchanged.
 
-**v4 → v5 ADDITION (DECO-04, spec addition per AGENTS.md).** The header grew from 16 to 24 bytes with four `int16` decoration-metric fields (`underline_position`, `underline_thickness`, `strikeout_position`, `strikeout_size`) and `NT_FONT_VERSION` bumped 4 → 5. The builder reads these raw from the source font's `post` (`underlinePosition`@8, `underlineThickness`@10) and `OS/2` (`yStrikeoutSize`@26, `yStrikeoutPosition`@28) tables (big-endian, UPM-rescaled with the other metrics); when a table is absent it bakes a metric-correct heuristic (underline just below baseline, strike near mid x-height) so the runtime never sees garbage. This keeps decoration metrics in the builder — the runtime stays a parser-free safety net. A font blob large enough to contain the current header must have the expected magic and version; mismatches assert in both FULL and TRAP. Stale v4 packs must be rebuilt. A truncated header clears the provider view before glyph tables can be read.
+**Decoration metrics.** The 24-byte header ends with four `int16` decoration-metric fields (`underline_position`, `underline_thickness`, `strikeout_position`, `strikeout_size`). The builder reads these raw from the source font's `post` (`underlinePosition`@8, `underlineThickness`@10) and `OS/2` (`yStrikeoutSize`@26, `yStrikeoutPosition`@28) tables (big-endian, UPM-rescaled with the other metrics); when a table is absent it bakes a metric-correct heuristic (underline just below baseline, strike near mid x-height) so the runtime never sees garbage. This keeps decoration metrics in the builder — the runtime stays a parser-free safety net.
+
+**Activation checks.** FONT activation asserts only that the glyph table fits the blob (O(1)): the pack is trusted, and glyph decode asserts each glyph's point and curve counts on its first use, so a large font costs nothing at load. Shared glyph payloads, trailing padding and zero-curve glyphs are valid. Coordinate and metric values are builder guarantees.
 
 ### NT_ASSET_ATLAS binary format
 
@@ -627,7 +638,7 @@ uint16[total_index_count] (at index_offset)
   Runtime adds the region's staging-buffer base to each local index.
 ```
 
-Runtime keeps an owned atlas snapshot in slot `user_data`, not a raw mmap view. On first publication the atlas module validates the blob, copies region metadata, positions, UVs, indices, intrinsic scale, and page resource ids into owned buffers, then builds an open-addressing hash table for O(1) region lookup. Bad magic or version asserts in both FULL and TRAP. Other validation failures reject activation before publication: a truncated header, too many pages, invalid intrinsic scale, noncanonical section offsets, out-of-bounds per-region vertex/index spans, or a region whose `page_index` has no declared page. Resolve requires an activated blob and asserts if revalidation fails. Validation runs at activate and resolve on blob changes, never per frame. UVs are pre-normalized and triangles are pre-built by the builder using validated Clipper2 CDT; incomplete triangulation fails closed and the candidate is not published.
+Runtime keeps an owned atlas snapshot in slot `user_data`, not a raw mmap view. On first publication the atlas module validates the blob, copies region metadata, positions, UVs, indices, intrinsic scale, and page resource ids into owned buffers, then builds an open-addressing hash table for O(1) region lookup. Resolve carves the blob and asserts its layout before the slot publishes (the core has already checked the header): the page cap, tightly packed sections inside the blob, per-region vertex/index spans, a region name hash other than the tombstone, and a declared page for every region. It runs on blob changes, never per frame. UVs are pre-normalized and triangles are pre-built by the builder using validated Clipper2 CDT; incomplete triangulation fails closed and the candidate is not published.
 
 The builder asserts that PPU, its reciprocal, baked positions, and source dimensions in game units are finite and representable. Runtime trusts the prebuilt coordinates without a per-vertex float scan. The intrinsic atlas scale is immutable; generic `pixels_per_unit` metadata does not change it. The renderer still applies origin, flip, and the game's transform. Slice9 converts border pixels to game units using `inverse_pixels_per_unit * slice9_scale`. If opposite borders exceed the target dimension, their destination widths shrink proportionally.
 

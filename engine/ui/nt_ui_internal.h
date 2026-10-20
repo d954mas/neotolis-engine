@@ -472,8 +472,6 @@ struct nt_ui_context {
     nt_material_t inspector_sprite_material;
     nt_material_t inspector_text_material;
 #endif /* NT_UI_DEBUG_TOOLS */
-
-    Clay_Arena clay_arena;
 };
 
 typedef struct nt_ui_inspector_element_view {

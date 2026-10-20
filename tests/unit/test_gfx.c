@@ -116,6 +116,36 @@ void test_gfx_pool_free_and_realloc(void) {
     nt_pool_shutdown(&pool);
 }
 
+void test_gfx_pool_alloc_skips_zero_at_generation_wrap(void) {
+    nt_pool_t pool;
+    nt_pool_init(&pool, 1);
+    pool.slots[1].id = (uint32_t)UINT16_MAX << NT_POOL_SLOT_SHIFT;
+
+    uint32_t id = nt_pool_alloc(&pool);
+    bool valid = nt_pool_valid(&pool, id);
+    nt_pool_shutdown(&pool);
+
+    TEST_ASSERT_EQUAL_UINT32((1U << NT_POOL_SLOT_SHIFT) | 1U, id);
+    TEST_ASSERT_TRUE(valid);
+}
+
+void test_gfx_pool_free_skips_zero_before_reallocation(void) {
+    nt_pool_t pool;
+    nt_pool_init(&pool, 1);
+    uint32_t initial = nt_pool_alloc(&pool);
+    uint32_t slot = nt_pool_slot_index(initial);
+    uint32_t near_wrap = ((uint32_t)UINT16_MAX << NT_POOL_SLOT_SHIFT) | slot;
+    pool.slots[slot].id = near_wrap;
+
+    nt_pool_free(&pool, near_wrap);
+    uint32_t next = nt_pool_alloc(&pool);
+    bool stale_valid = nt_pool_valid(&pool, near_wrap);
+    nt_pool_shutdown(&pool);
+
+    TEST_ASSERT_EQUAL_UINT32((2U << NT_POOL_SLOT_SHIFT) | slot, next);
+    TEST_ASSERT_FALSE(stale_valid);
+}
+
 /* ---- Pool: valid accepts live handle ---- */
 
 void test_gfx_pool_valid_accepts_live(void) {
@@ -2095,9 +2125,9 @@ void test_gfx_texture_pool_full_asserts(void) {
     }
 }
 
-/* ---- Activator: a zero dimension in pack bytes is rejected, not asserted ---- */
+/* ---- Activator: a zero dimension in pack bytes asserts ---- */
 
-void test_activate_texture_rejects_zero_dimensions(void) {
+void test_activate_texture_zero_dimensions_assert(void) {
     uint8_t blob[sizeof(NtTextureAssetHeaderV2)];
     NtTextureAssetHeaderV2 *hdr = (NtTextureAssetHeaderV2 *)blob;
     const uint32_t sizes[2][2] = {{0, 1}, {1, 0}};
@@ -2110,7 +2140,7 @@ void test_activate_texture_rejects_zero_dimensions(void) {
         hdr->height = sizes[i][1];
         hdr->mip_count = 1;
         hdr->compression = NT_TEXTURE_COMPRESSION_RAW;
-        TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_texture(blob, (uint32_t)sizeof(blob)));
+        EXPECT_ASSERT((void)nt_gfx_activate_texture(blob, (uint32_t)sizeof(blob)));
     }
 }
 
@@ -2137,29 +2167,6 @@ void test_activate_texture_valid_blob(void) {
     uint32_t handle = nt_gfx_activate_texture(blob, blob_size);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
     nt_gfx_deactivate_texture(handle);
-}
-
-/* ---- Activator: texture bad magic ---- */
-
-void test_activate_texture_bad_magic(void) {
-    uint8_t blob[sizeof(NtTextureAssetHeaderV2) + 16];
-    NtTextureAssetHeaderV2 *hdr = (NtTextureAssetHeaderV2 *)blob;
-    memset(blob, 0, sizeof(blob));
-    hdr->magic = 0xDEADBEEF;
-    hdr->width = 2;
-    hdr->height = 2;
-    hdr->mip_count = 1;
-    uint32_t handle = nt_gfx_activate_texture(blob, sizeof(blob));
-    TEST_ASSERT_EQUAL_UINT32(0, handle);
-}
-
-/* ---- Activator: texture too small ---- */
-
-void test_activate_texture_too_small(void) {
-    uint8_t blob[4]; /* smaller than header */
-    memset(blob, 0, sizeof(blob));
-    uint32_t handle = nt_gfx_activate_texture(blob, sizeof(blob));
-    TEST_ASSERT_EQUAL_UINT32(0, handle);
 }
 
 /* ---- Activator: mesh valid blob (shared fixture = positive control) ---- */
@@ -2380,41 +2387,30 @@ void test_activate_mesh_asserts_when_the_mesh_pool_is_full(void) {
 }
 // #endregion
 
-/* ---- Activator: mesh bad magic ---- */
+/* ---- Activator: mesh inconsistent sizes / 32-bit wrap ---- */
 
-void test_activate_mesh_bad_magic(void) {
-    uint8_t blob[sizeof(NtMeshAssetHeader)];
-    memset(blob, 0, sizeof(blob));
-    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
-    hdr->magic = 0xDEADBEEF;
-    uint32_t handle = nt_gfx_activate_mesh(blob, sizeof(blob));
-    TEST_ASSERT_EQUAL_UINT32(0, handle);
-}
-
-/* ---- Activator: mesh bad version / inconsistent sizes / 32-bit wrap ---- */
-
-void test_activate_mesh_rejects_bad_stream_type(void) {
+void test_activate_mesh_asserts_bad_stream_type(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
     ((NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader)))->type = 99;
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_index_size_mismatch(void) {
+void test_activate_mesh_asserts_index_size_mismatch(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
     ((NtMeshAssetHeader *)blob)->index_count = 4; /* 4 * 2 != index_data_size 6 */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_index_count_with_type_none(void) {
+void test_activate_mesh_asserts_index_count_with_type_none(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
     ((NtMeshAssetHeader *)blob)->index_type = 0; /* index_count stays 3 */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
 /* Valid indexed mesh with two streams (f32x3 + f32x2); tests break one field */
@@ -2444,36 +2440,36 @@ void test_activate_mesh_two_stream_blob_valid(void) {
     nt_gfx_deactivate_mesh(handle);
 }
 
-void test_activate_mesh_rejects_normalized_float_stream(void) {
+void test_activate_mesh_asserts_normalized_float_stream(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
     ((NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader)))->normalized = 1;
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_stream_location_out_of_range(void) {
+void test_activate_mesh_asserts_stream_location_out_of_range(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
     ((NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader)))->location = NT_GFX_MAX_VERTEX_ATTRS;
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
     ((NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader)))->location = NT_GFX_MAX_VERTEX_ATTRS - 1;
     uint32_t handle = nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob));
     TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
     nt_gfx_deactivate_mesh(handle);
 }
 
-void test_activate_mesh_rejects_duplicate_stream_location(void) {
+void test_activate_mesh_asserts_duplicate_stream_location(void) {
     uint8_t blob[MESH_BLOB2_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_two_stream_mesh_blob(blob);
     NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
     sd[1].location = sd[0].location;
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_misaligned_stream(void) {
+void test_activate_mesh_asserts_misaligned_stream(void) {
     /* f32x3 + u8x3 = stride 15, not a multiple of the f32 type size (WebGL2 rule) */
     enum { BLOB_MIS = sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc)) + 15 };
     uint8_t blob[BLOB_MIS];
@@ -2488,10 +2484,10 @@ void test_activate_mesh_rejects_misaligned_stream(void) {
     NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
     sd[0] = (NtStreamDesc){.type = NT_STREAM_FLOAT32, .count = 3, .location = 0};
     sd[1] = (NtStreamDesc){.type = NT_STREAM_UINT8, .count = 3, .normalized = 1, .location = 1};
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_misaligned_offset(void) {
+void test_activate_mesh_asserts_misaligned_offset(void) {
     /* u8x2 + f32x1 + u8x2: f32 offset 2 misaligned, but stride 8 divides evenly by
      * every type size -- ONLY the offset branch can reject this blob */
     enum { BLOB_OFF = sizeof(NtMeshAssetHeader) + (3 * sizeof(NtStreamDesc)) + 8 };
@@ -2508,53 +2504,28 @@ void test_activate_mesh_rejects_misaligned_offset(void) {
     sd[0] = (NtStreamDesc){.type = NT_STREAM_UINT8, .count = 2, .normalized = 1, .location = 0};
     sd[1] = (NtStreamDesc){.type = NT_STREAM_FLOAT32, .count = 1, .location = 1};
     sd[2] = (NtStreamDesc){.type = NT_STREAM_UINT8, .count = 2, .normalized = 1, .location = 2};
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_texture_bad_version(void) {
-    uint32_t pixel_size = 2 * 2 * 4;
-    uint8_t blob[sizeof(NtTextureAssetHeaderV2) + 16];
-    memset(blob, 0, sizeof(blob));
-    NtTextureAssetHeaderV2 *hdr = (NtTextureAssetHeaderV2 *)blob;
-    hdr->magic = NT_TEXTURE_MAGIC;
-    hdr->version = NT_TEXTURE_VERSION_V2 + 1;
-    hdr->format = NT_TEXTURE_FORMAT_RGBA8;
-    hdr->width = 2;
-    hdr->height = 2;
-    hdr->mip_count = 1;
-    hdr->compression = NT_TEXTURE_COMPRESSION_RAW;
-    hdr->data_size = pixel_size;
-    /* graceful reject, not a trap: stale packs must not be misparsed */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_texture(blob, (uint32_t)sizeof(NtTextureAssetHeaderV2) + pixel_size));
-}
-
-void test_activate_mesh_bad_version(void) {
-    uint8_t blob[MESH_BLOB_BYTES];
-    memset(blob, 0, sizeof(blob));
-    fill_valid_mesh_blob(blob);
-    ((NtMeshAssetHeader *)blob)->version = NT_MESH_VERSION + 1;
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
-}
-
-void test_activate_mesh_rejects_size_mismatch(void) {
+void test_activate_mesh_asserts_size_mismatch(void) {
     /* vertex_data_size disagrees with vertex_count * stride */
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
     ((NtMeshAssetHeader *)blob)->vertex_count = 2;
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_32bit_size_wrap(void) {
+void test_activate_mesh_asserts_32bit_size_wrap(void) {
     /* A 32-bit required-sum wraps to 46 <= blob size and would OOB-read. The blob is
      * arithmetically consistent (0x15555554 * 12 == 0xFFFFFFF0), so every product
-     * cross-check passes and ONLY a 64-bit truncation check can reject it. */
+     * cross-check passes and ONLY a 64-bit truncation check can catch it. */
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
     ((NtMeshAssetHeader *)blob)->vertex_count = 0x15555554U;
     ((NtMeshAssetHeader *)blob)->vertex_data_size = 0xFFFFFFF0U;
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
 /* ---- Activator: shader valid blob ---- */
@@ -2578,34 +2549,7 @@ void test_activate_shader_valid_blob(void) {
     nt_gfx_deactivate_shader(handle);
 }
 
-/* ---- Activator: shader bad magic ---- */
-
-void test_activate_shader_bad_magic(void) {
-    uint8_t blob[sizeof(NtShaderCodeHeader)];
-    memset(blob, 0, sizeof(blob));
-    NtShaderCodeHeader *hdr = (NtShaderCodeHeader *)blob;
-    hdr->magic = 0xDEADBEEF;
-    uint32_t handle = nt_gfx_activate_shader(blob, sizeof(blob));
-    TEST_ASSERT_EQUAL_UINT32(0, handle);
-}
-
-/* ---- Activator: shader bad version ---- */
-
-void test_activate_shader_bad_version(void) {
-    const char *source = "void main() {}";
-    uint32_t code_size = (uint32_t)strlen(source) + 1;
-    uint8_t blob[sizeof(NtShaderCodeHeader) + 32];
-    memset(blob, 0, sizeof(blob));
-    NtShaderCodeHeader *hdr = (NtShaderCodeHeader *)blob;
-    hdr->magic = NT_SHADER_CODE_MAGIC;
-    hdr->version = NT_SHADER_CODE_VERSION + 1;
-    hdr->code_size = code_size;
-    memcpy(blob + sizeof(NtShaderCodeHeader), source, code_size);
-    /* graceful reject, not a trap: stale packs must not be misparsed */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_shader(blob, (uint32_t)sizeof(NtShaderCodeHeader) + code_size));
-}
-
-void test_activate_shader_rejects_32bit_size_wrap(void) {
+void test_activate_shader_asserts_32bit_size_wrap(void) {
     uint8_t blob[sizeof(NtShaderCodeHeader) + 32];
     memset(blob, 0, sizeof(blob));
     NtShaderCodeHeader *hdr = (NtShaderCodeHeader *)blob;
@@ -2613,19 +2557,19 @@ void test_activate_shader_rejects_32bit_size_wrap(void) {
     hdr->version = NT_SHADER_CODE_VERSION;
     /* 32-bit sizeof(header) + code_size would wrap below blob size and OOB-read */
     hdr->code_size = 0xFFFFFFF8U;
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_shader(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_shader(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_shader_rejects_missing_nul(void) {
+void test_activate_shader_asserts_missing_nul(void) {
     uint8_t blob[sizeof(NtShaderCodeHeader) + 8];
     memset(blob, 0, sizeof(blob));
     NtShaderCodeHeader *hdr = (NtShaderCodeHeader *)blob;
     hdr->magic = NT_SHADER_CODE_MAGIC;
     hdr->version = NT_SHADER_CODE_VERSION;
     hdr->code_size = 4;
-    /* deliberately no NUL inside code_size -- the guard under test must reject this */
+    /* deliberately no NUL inside code_size -- the assert under test must catch this */
     memcpy(blob + sizeof(NtShaderCodeHeader), "voidmain", 8); // NOLINT(bugprone-not-null-terminated-result)
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_shader(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_shader(blob, (uint32_t)sizeof(blob)));
 }
 
 /* ---- Deactivate mesh clears table ---- */
@@ -2780,28 +2724,28 @@ void test_activate_mesh_meshopt_wire_decodes(void) {
     nt_gfx_deactivate_mesh(handle);
 }
 
-void test_activate_mesh_rejects_corrupt_meshopt_stream(void) {
+void test_activate_mesh_asserts_corrupt_meshopt_stream(void) {
     uint8_t blob[MESHOPT_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_meshopt_mesh_blob(blob);
-    /* Garbage in place of the codec header byte -- decode must fail, activate must return 0 */
+    /* Garbage in place of the codec header byte: the decode fails and activation asserts. */
     blob[sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + 120] = 0x00;
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_bad_wire_tags(void) {
+void test_activate_mesh_asserts_bad_wire_tags(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
     ((NtMeshAssetHeader *)blob)->vertex_wire = 2;
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
     ((NtMeshAssetHeader *)blob)->vertex_wire = 0;
     ((NtMeshAssetHeader *)blob)->index_wire = 2;
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_raw_non_triangle_count(void) {
-    /* GL draws only GL_TRIANGLES -- the safety net must reject a partial
+void test_activate_mesh_asserts_raw_non_triangle_count(void) {
+    /* GL draws only GL_TRIANGLES -- the activator asserts against a partial
      * trailing triangle even in RAW form */
     uint8_t blob[MESH_BLOB_BYTES + 2];
     memset(blob, 0, sizeof(blob));
@@ -2809,10 +2753,10 @@ void test_activate_mesh_rejects_raw_non_triangle_count(void) {
     NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
     hdr->index_count = 4;
     hdr->index_data_size = 8;
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_raw_non_triangle_vertex_count(void) {
+void test_activate_mesh_asserts_raw_non_triangle_vertex_count(void) {
     /* non-indexed: vertex_count is the draw count -- 4 vertices would lose one */
     enum { VD4 = 48 };
     uint8_t blob[sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + VD4];
@@ -2827,10 +2771,10 @@ void test_activate_mesh_rejects_raw_non_triangle_vertex_count(void) {
     sd->type = NT_STREAM_FLOAT32;
     sd->count = 3;
     sd->location = 0;
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_meshopt_without_indices(void) {
+void test_activate_mesh_asserts_meshopt_without_indices(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
@@ -2839,10 +2783,10 @@ void test_activate_mesh_rejects_meshopt_without_indices(void) {
     hdr->index_type = 0;
     hdr->index_count = 0;
     hdr->index_data_size = 6; /* wire bytes present but no index_type */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_meshopt_non_triangle_count(void) {
+void test_activate_mesh_asserts_meshopt_non_triangle_count(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
@@ -2850,20 +2794,20 @@ void test_activate_mesh_rejects_meshopt_non_triangle_count(void) {
     hdr->index_wire = NT_MESH_WIRE_IDX_MESHOPT;
     hdr->index_count = 4;
     hdr->index_data_size = 6;
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_meshopt_wire_larger_than_decoded(void) {
+void test_activate_mesh_asserts_meshopt_wire_larger_than_decoded(void) {
     uint8_t blob[MESH_BLOB_BYTES + 2];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
     NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
     hdr->index_wire = NT_MESH_WIRE_IDX_MESHOPT;
     hdr->index_data_size = 8; /* > decoded 3 * 2 */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_meshopt_undersized_wire(void) {
+void test_activate_mesh_asserts_meshopt_undersized_wire(void) {
     /* a tiny wire block claiming thousands of indices must be rejected BEFORE
      * the decoded-buffer allocation (codec minimum is 1 byte per triangle) */
     uint8_t blob[MESH_BLOB_BYTES];
@@ -2872,10 +2816,10 @@ void test_activate_mesh_rejects_meshopt_undersized_wire(void) {
     NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
     hdr->index_wire = NT_MESH_WIRE_IDX_MESHOPT;
     hdr->index_count = 3000; /* decoded 6000 B, wire 6 B < 1 + 1000 + 16 */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_meshopt_decoded_size_overflow(void) {
+void test_activate_mesh_asserts_meshopt_decoded_size_overflow(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
@@ -2885,7 +2829,7 @@ void test_activate_mesh_rejects_meshopt_decoded_size_overflow(void) {
     /* decoded = 0xC0000000 * 4 > UINT32_MAX: a 32-bit size_t malloc would wrap */
     hdr->index_count = 0xC0000000U;
     hdr->index_data_size = 6;
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
 /* ---- Uniform buffer tests ---- */
@@ -4037,6 +3981,8 @@ int main(void) {
     RUN_TEST(test_gfx_pool_alloc_returns_nonzero);
     RUN_TEST(test_gfx_pool_alloc_unique);
     RUN_TEST(test_gfx_pool_free_and_realloc);
+    RUN_TEST(test_gfx_pool_alloc_skips_zero_at_generation_wrap);
+    RUN_TEST(test_gfx_pool_free_skips_zero_before_reallocation);
     RUN_TEST(test_gfx_pool_valid_accepts_live);
     RUN_TEST(test_gfx_pool_valid_rejects_zero);
     RUN_TEST(test_gfx_pool_valid_rejects_stale);
@@ -4104,22 +4050,19 @@ int main(void) {
     RUN_TEST(test_gfx_freed_pipeline_slots_are_reused_low_first);
     RUN_TEST(test_gfx_make_pipeline_misses_while_a_loss_is_latched);
     RUN_TEST(test_gfx_make_pipeline_on_a_restored_husk_asserts_even_after_a_hit);
-    RUN_TEST(test_activate_mesh_rejects_misaligned_offset);
-    RUN_TEST(test_activate_texture_bad_version);
-    RUN_TEST(test_activate_mesh_rejects_misaligned_stream);
+    RUN_TEST(test_activate_mesh_asserts_misaligned_offset);
+    RUN_TEST(test_activate_mesh_asserts_misaligned_stream);
     RUN_TEST(test_activate_mesh_two_stream_blob_valid);
-    RUN_TEST(test_activate_mesh_rejects_normalized_float_stream);
-    RUN_TEST(test_activate_mesh_rejects_stream_location_out_of_range);
-    RUN_TEST(test_activate_mesh_rejects_duplicate_stream_location);
-    RUN_TEST(test_activate_mesh_bad_version);
-    RUN_TEST(test_activate_mesh_rejects_size_mismatch);
-    RUN_TEST(test_activate_mesh_rejects_32bit_size_wrap);
-    RUN_TEST(test_activate_mesh_rejects_bad_stream_type);
-    RUN_TEST(test_activate_mesh_rejects_index_size_mismatch);
-    RUN_TEST(test_activate_mesh_rejects_index_count_with_type_none);
-    RUN_TEST(test_activate_shader_bad_version);
-    RUN_TEST(test_activate_shader_rejects_32bit_size_wrap);
-    RUN_TEST(test_activate_shader_rejects_missing_nul);
+    RUN_TEST(test_activate_mesh_asserts_normalized_float_stream);
+    RUN_TEST(test_activate_mesh_asserts_stream_location_out_of_range);
+    RUN_TEST(test_activate_mesh_asserts_duplicate_stream_location);
+    RUN_TEST(test_activate_mesh_asserts_size_mismatch);
+    RUN_TEST(test_activate_mesh_asserts_32bit_size_wrap);
+    RUN_TEST(test_activate_mesh_asserts_bad_stream_type);
+    RUN_TEST(test_activate_mesh_asserts_index_size_mismatch);
+    RUN_TEST(test_activate_mesh_asserts_index_count_with_type_none);
+    RUN_TEST(test_activate_shader_asserts_32bit_size_wrap);
+    RUN_TEST(test_activate_shader_asserts_missing_nul);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_factor);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_operation);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_alpha_blend_factors);
@@ -4157,9 +4100,7 @@ int main(void) {
     RUN_TEST(test_gfx_texture_pool_full_asserts);
     /* Activator tests */
     RUN_TEST(test_activate_texture_valid_blob);
-    RUN_TEST(test_activate_texture_rejects_zero_dimensions);
-    RUN_TEST(test_activate_texture_bad_magic);
-    RUN_TEST(test_activate_texture_too_small);
+    RUN_TEST(test_activate_texture_zero_dimensions_assert);
     RUN_TEST(test_activate_mesh_valid_blob);
     RUN_TEST(test_frame_rule_rejects_every_live_destroy_while_drawn);
     RUN_TEST(test_frame_rule_ignores_stale_destroys_and_allows_the_frame_before_its_first_pass);
@@ -4169,22 +4110,20 @@ int main(void) {
     RUN_TEST(test_failed_mesh_activation_in_a_drawn_frame_frees_its_buffer);
     RUN_TEST(test_destroys_before_the_first_pass_leave_the_stream_pending);
     RUN_TEST(test_activate_mesh_asserts_when_the_mesh_pool_is_full);
-    RUN_TEST(test_activate_mesh_bad_magic);
     RUN_TEST(test_activate_shader_valid_blob);
-    RUN_TEST(test_activate_shader_bad_magic);
     RUN_TEST(test_deactivate_mesh_clears_table);
     RUN_TEST(test_mesh_info_fields);
     RUN_TEST(test_activate_mesh_soa_wire_decodes);
     RUN_TEST(test_activate_mesh_meshopt_wire_decodes);
-    RUN_TEST(test_activate_mesh_rejects_corrupt_meshopt_stream);
-    RUN_TEST(test_activate_mesh_rejects_bad_wire_tags);
-    RUN_TEST(test_activate_mesh_rejects_raw_non_triangle_count);
-    RUN_TEST(test_activate_mesh_rejects_raw_non_triangle_vertex_count);
-    RUN_TEST(test_activate_mesh_rejects_meshopt_without_indices);
-    RUN_TEST(test_activate_mesh_rejects_meshopt_non_triangle_count);
-    RUN_TEST(test_activate_mesh_rejects_meshopt_wire_larger_than_decoded);
-    RUN_TEST(test_activate_mesh_rejects_meshopt_undersized_wire);
-    RUN_TEST(test_activate_mesh_rejects_meshopt_decoded_size_overflow);
+    RUN_TEST(test_activate_mesh_asserts_corrupt_meshopt_stream);
+    RUN_TEST(test_activate_mesh_asserts_bad_wire_tags);
+    RUN_TEST(test_activate_mesh_asserts_raw_non_triangle_count);
+    RUN_TEST(test_activate_mesh_asserts_raw_non_triangle_vertex_count);
+    RUN_TEST(test_activate_mesh_asserts_meshopt_without_indices);
+    RUN_TEST(test_activate_mesh_asserts_meshopt_non_triangle_count);
+    RUN_TEST(test_activate_mesh_asserts_meshopt_wire_larger_than_decoded);
+    RUN_TEST(test_activate_mesh_asserts_meshopt_undersized_wire);
+    RUN_TEST(test_activate_mesh_asserts_meshopt_decoded_size_overflow);
     /* Uniform buffer tests */
     RUN_TEST(test_stream_executes_draws_in_call_order_at_end_frame);
     RUN_TEST(test_stream_records_every_draw_phase_call);

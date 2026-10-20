@@ -198,8 +198,8 @@ static void expect_full_pool_available(void) {
     }
 }
 
-static void expect_rejected(basis_fixture_t *fixture, uint32_t size, const char *what) {
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_gfx_activate_texture(fixture->blob, size), what);
+static void expect_header_assert(basis_fixture_t *fixture, uint32_t size) {
+    EXPECT_ASSERT((void)nt_gfx_activate_texture(fixture->blob, size));
     expect_full_pool_available();
 }
 
@@ -400,49 +400,49 @@ void test_rgba8_fallback_rejects_sub_updates(void) {
 
 // #region boundary rejections
 
-void test_header_boundaries_reject_without_touching_the_pool(void) {
+void test_header_boundaries_assert_without_touching_the_pool(void) {
     set_caps(true, false, false);
     basis_fixture_t alpha = fixture_encode(13, 7, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8);
     const NtTextureAssetHeader good = *fixture_header(&alpha);
 
     fixture_header(&alpha)->mip_count = (uint16_t)(good.mip_count + 1);
-    expect_rejected(&alpha, alpha.size, "mip_count above the Basis chain");
+    expect_header_assert(&alpha, alpha.size); /* mip_count above the Basis chain */
     fixture_header(&alpha)->mip_count = (uint16_t)(good.mip_count - 1);
-    expect_rejected(&alpha, alpha.size, "mip_count below the Basis chain");
+    expect_header_assert(&alpha, alpha.size); /* mip_count below the Basis chain */
     *fixture_header(&alpha) = good;
 
     fixture_header(&alpha)->data_size = good.data_size + 1;
-    expect_rejected(&alpha, alpha.size, "data_size past the end of the blob");
+    expect_header_assert(&alpha, alpha.size); /* data_size past the end of the blob */
     *fixture_header(&alpha) = good;
-    expect_rejected(&alpha, alpha.size - 1, "buffer shorter than data_size");
+    expect_header_assert(&alpha, alpha.size - 1); /* buffer shorter than data_size */
 
     fixture_header(&alpha)->width = 12;
-    expect_rejected(&alpha, alpha.size, "header width the blob disagrees with");
+    expect_header_assert(&alpha, alpha.size); /* header width the blob disagrees with */
     *fixture_header(&alpha) = good;
     fixture_header(&alpha)->height = 8;
-    expect_rejected(&alpha, alpha.size, "header height the blob disagrees with");
+    expect_header_assert(&alpha, alpha.size); /* header height the blob disagrees with */
     *fixture_header(&alpha) = good;
 
     fixture_header(&alpha)->default_min_filter = NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR + 1;
-    expect_rejected(&alpha, alpha.size, "min_filter out of range");
+    expect_header_assert(&alpha, alpha.size); /* min_filter out of range */
     *fixture_header(&alpha) = good;
     fixture_header(&alpha)->default_mag_filter = NT_TEXTURE_DEFAULT_FILTER_LINEAR + 1;
-    expect_rejected(&alpha, alpha.size, "mag_filter out of range");
+    expect_header_assert(&alpha, alpha.size); /* mag_filter out of range */
     *fixture_header(&alpha) = good;
     fixture_header(&alpha)->default_wrap_u = NT_TEXTURE_DEFAULT_WRAP_MIRRORED_REPEAT + 1;
-    expect_rejected(&alpha, alpha.size, "wrap_u out of range");
+    expect_header_assert(&alpha, alpha.size); /* wrap_u out of range */
     *fixture_header(&alpha) = good;
 
     /* 13 is a real nt_texture_format_t (BC7) but not a packed-asset pixel format. */
     fixture_header(&alpha)->format = NT_TEXTURE_FORMAT_BC7_RGBA;
-    expect_rejected(&alpha, alpha.size, "compressed storage format in the header");
+    expect_header_assert(&alpha, alpha.size); /* compressed storage format in the header */
     *fixture_header(&alpha) = good;
 
     fixture_header(&alpha)->compression = NT_TEXTURE_COMPRESSION_BASIS + 1;
-    expect_rejected(&alpha, alpha.size, "unknown compression");
+    expect_header_assert(&alpha, alpha.size); /* unknown compression */
     *fixture_header(&alpha) = good;
 
-    /* The unmutated fixture still activates: the rejections above were the mutations. */
+    /* The unmutated fixture still activates: the asserts above came from the mutations. */
     check_target(&alpha, NT_TEXTURE_FORMAT_RGBA8);
     fixture_free(&alpha);
 }
@@ -456,7 +456,7 @@ void test_corrupted_payload_is_rejected_and_a_good_blob_still_activates(void) {
     for (uint32_t i = payload / 4U; i < (payload * 3U) / 4U; i++) {
         alpha.blob[sizeof(NtTextureAssetHeader) + i] ^= 0xA5U;
     }
-    expect_rejected(&alpha, alpha.size, "corrupted Basis payload");
+    expect_header_assert(&alpha, alpha.size); /* corrupted Basis payload */
     fixture_free(&alpha);
 
     basis_fixture_t good = fixture_encode(16, 8, NT_BASISU_CODEC_ETC1S, true, NT_TEXTURE_FORMAT_RGBA8);
@@ -665,7 +665,7 @@ int main(void) {
     RUN_TEST(test_single_pixel_blob_activates_as_one_level);
     RUN_TEST(test_asymmetric_blob_activates_with_a_full_chain);
     RUN_TEST(test_rgba8_fallback_rejects_sub_updates);
-    RUN_TEST(test_header_boundaries_reject_without_touching_the_pool);
+    RUN_TEST(test_header_boundaries_assert_without_touching_the_pool);
     RUN_TEST(test_texture_loss_leaves_no_texture_and_allows_a_retry);
     RUN_TEST(test_sampler_loss_leaves_no_texture_and_allows_a_retry);
     RUN_TEST(test_reactivation_after_context_restore_yields_the_same_storage);

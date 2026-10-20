@@ -323,15 +323,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    char rig_header[512];
-    char clips_header[512];
-    char merged[512];
-    (void)snprintf(rig_header, sizeof rig_header, "%s/skeletal_showcase.h", HEADER_DIR);
-    (void)snprintf(clips_header, sizeof clips_header, "%s/skeletal_showcase_clips.h", HEADER_DIR);
-    (void)snprintf(merged, sizeof merged, "%s/skeletal_showcase_assets.h", HEADER_DIR);
-    const char *headers[] = {rig_header, clips_header};
-    nt_builder_merge_headers(headers, 2, merged);
-    (void)printf("Generated: %s\n", merged);
     nt_builder_write_record(out_dir);
     (void)printf("\n=== Done ===\n");
     return 0;

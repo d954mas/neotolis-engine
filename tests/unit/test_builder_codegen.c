@@ -9,13 +9,38 @@ static bool s_fail_allocation;
 static jmp_buf s_assert_jmp;
 static const char *s_assert_expr;
 
-static void *test_calloc(size_t count, size_t size) { return s_fail_allocation ? NULL : calloc(count, size); }
+static void *s_allocations[8];
+static size_t s_allocation_count;
+
+static void *test_calloc(size_t count, size_t size) {
+    if (s_fail_allocation) {
+        return NULL;
+    }
+    void *ptr = calloc(count, size);
+    if (ptr != NULL) {
+        TEST_ASSERT_TRUE(s_allocation_count < sizeof(s_allocations) / sizeof(s_allocations[0]));
+        s_allocations[s_allocation_count++] = ptr;
+    }
+    return ptr;
+}
+
+static void test_free(void *ptr) {
+    for (size_t i = 0; i < s_allocation_count; ++i) {
+        if (s_allocations[i] == ptr) {
+            s_allocations[i] = s_allocations[--s_allocation_count];
+            break;
+        }
+    }
+    free(ptr);
+}
 
 /* Inject allocation failure without changing the builder's allocator. */
 #define calloc test_calloc
+#define free test_free
 // NOLINTNEXTLINE(bugprone-suspicious-include)
 #include "nt_builder_codegen.c"
 #undef calloc
+#undef free
 
 static void catch_assert(const char *expr, const char *file, int line) {
     (void)file;
@@ -30,7 +55,12 @@ void setUp(void) {
     nt_build_assert_handler = catch_assert;
 }
 
-void tearDown(void) { nt_build_assert_handler = NULL; }
+void tearDown(void) {
+    nt_build_assert_handler = NULL;
+    while (s_allocation_count > 0U) {
+        free(s_allocations[--s_allocation_count]);
+    }
+}
 
 static const CodegenEntry s_entries[] = {
     {.path = "icons/a-b", .resource_id = 1, .kind = NT_BUILD_ASSET_BLOB},

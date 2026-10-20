@@ -52,14 +52,8 @@ uint16_t nt_comp_storage_add(nt_comp_storage_t *s, nt_entity_t entity) {
 
     uint16_t eidx = nt_entity_index(entity);
 
-    if (s->entity_to_index[eidx] != NT_INVALID_COMP_INDEX) {
-        NT_ASSERT(false);
-        return NT_INVALID_COMP_INDEX;
-    }
-    if (s->count >= s->capacity) {
-        NT_ASSERT(false);
-        return NT_INVALID_COMP_INDEX;
-    }
+    NT_ASSERT(s->entity_to_index[eidx] == NT_INVALID_COMP_INDEX && "entity already has this component");
+    NT_ASSERT(s->count < s->capacity && "component storage full");
 
     uint16_t dense_idx = s->count;
     s->entity_to_index[eidx] = dense_idx;

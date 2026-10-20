@@ -242,19 +242,6 @@ int main(int argc, char *argv[]) {
     }
     // #endregion
 
-    /* Merge per-pack headers into combined text_assets.h */
-    {
-        char base_hdr[512];
-        (void)snprintf(base_hdr, sizeof(base_hdr), "%s/text_base.h", header_dir);
-        char cjk_hdr[512];
-        (void)snprintf(cjk_hdr, sizeof(cjk_hdr), "%s/text_cjk.h", header_dir);
-        const char *pack_headers[] = {base_hdr, cjk_hdr};
-        char combined[512];
-        (void)snprintf(combined, sizeof(combined), "%s/text_assets.h", header_dir);
-        nt_builder_merge_headers(pack_headers, 2, combined);
-        (void)printf("Generated: %s/text_assets.h\n", header_dir);
-    }
-
     /* Print pack size summary */
     (void)printf("\n=== Pack Size Summary ===\n");
     static const char *pack_names[] = {"text_base.ntpack", "text_cjk.ntpack"};

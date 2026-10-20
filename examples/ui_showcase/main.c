@@ -58,7 +58,7 @@
 #include "nt_pack_format.h"
 #include "time/nt_time.h"
 
-#include "ui_showcase_assets.h"
+#include "ui_showcase.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -3910,7 +3910,6 @@ int main(int argc, char *argv[]) {
 
     nt_engine_config_t config = {0};
     config.app_name = "ui_showcase";
-    config.version = 1;
 
     if (nt_engine_init(&config) != NT_OK) {
         return 1;

@@ -31,7 +31,7 @@
 #include "ui/nt_ui_slider.h"
 #include "window/nt_window.h"
 
-#include "rtt_showcase_assets.h"
+#include "rtt_showcase.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -536,7 +536,6 @@ static void frame(void) {
 int main(void) {
     nt_engine_config_t config = {0};
     config.app_name = "rtt_showcase";
-    config.version = 1;
 
     if (nt_engine_init(&config) != NT_OK) {
         return 1;

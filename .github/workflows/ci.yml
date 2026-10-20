@@ -179,12 +179,13 @@ jobs:
           for example in hello bench_shapes spinning_cube textured_quad sponza text bunnymark; do
             test -f "build/examples/$example/wasm-debug-paired/index_simd.wasm"
           done
+          # A broken probe would silently load the baseline variant in every browser.
+          node -e "const m=require('fs').readFileSync('build/examples/hello/wasm-debug-paired/index.html','utf8').match(/WebAssembly\.validate\(new Uint8Array\(\[([^\]]*)\]\)\)/); process.exit(m && WebAssembly.validate(new Uint8Array(m[1].split(',').map(Number))) ? 0 : 1)"
 
       # The ctest includes test_basisu_trimmed: the production wasm transcoder decodes the
       # native goldens under Node.
       - name: Test paired WASM debug
         run: |
-          node tests/wasm/simd_loader_test.js
           node tests/wasm/smoke_test.js wasm-debug-paired
           node tests/wasm/smoke_test.js wasm-debug-simd
           ctest --preset wasm-debug-paired
@@ -414,10 +415,8 @@ jobs:
           test -f build/engine/native-debug/libnt_log_stub.a
           ./build/tools/builder/native-debug/builder
 
-      # The hull visual report renders the research acceptance sheet: 155 s under sanitizers,
-      # 7 s in native-release (FULL asserts), which runs it.
       - name: Run tests (debug)
-        run: xvfb-run -a bash scripts/ci_ctest.sh --preset native-debug -E '^test_atlas_hull_visual_report$'
+        run: xvfb-run -a bash scripts/ci_ctest.sh --preset native-debug
 
       - name: Submodule consumption test
         run: |
@@ -445,10 +444,10 @@ jobs:
           cmake -B build/_cmake/native-debug-off -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_STANDARD=17 -DCMAKE_C_STANDARD_REQUIRED=ON -DCMAKE_C_COMPILER=clang -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DNT_UI_DEBUG_TOOLS=OFF -DNT_ASSERT_MODE=2 -DNT_SKELETAL_CHECKS=ON -DNT_UI_CHECKS=ON -DNT_GFX_NATIVE_GL_DEBUG=ON -DNT_HTTP_CURL=ON -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS" -G Ninja
           cmake --build build/_cmake/native-debug-off
 
-      # The atlas bench guards check builder geometry, not optional features; native-debug
-      # (sanitizers) and native-release run them.
+      # The atlas tests check builder geometry and the sweep script, not optional features;
+      # native-debug (sanitizers) and native-release run them.
       - name: Run tests (optional features OFF)
-        run: xvfb-run -a bash scripts/ci_ctest.sh --test-dir build/_cmake/native-debug-off -E '^(test_atlas_hull_visual_report|test_atlas_transform_sweep_guard|test_bench_hull_tolerance_guard)$'
+        run: xvfb-run -a bash scripts/ci_ctest.sh --test-dir build/_cmake/native-debug-off -E '^(test_atlas_hull_budget|test_atlas_transform_sweep_guard)$'
 
       # Each admission row (NT_BASISU_ROWS) consumes the Basis baseline through the trimmed
       # mirror and runs the Basis suites with the restricted set; the producer runs first.

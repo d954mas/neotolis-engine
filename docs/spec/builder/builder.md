@@ -2,7 +2,7 @@
 
 The builder is a standalone native C17 binary; packing rules are code, not a
 DSL. Covers the core API (typed add_* calls plus the begin/add/commit atlas transaction),
-build stages and validation, asset-ID header codegen and combined headers, the
+build stages and validation, asset-ID header codegen for multi-pack projects, the
 content-addressed encode cache, and the NFP-based atlas builder with its
 pipeline, vector packer, options, per-sprite overrides, and atlas cache.
 
@@ -150,8 +150,8 @@ before encoding.
 Basis always emits a full mip chain, independent of `gen_mipmaps` (that flag
 controls RAW runtime mip generation). The builder asserts exactly
 `1 + floor(log2(max(width, height)))` levels; 1x1 is complete with one level.
-Activation cross-checks that count against the blob and the header and rejects
-any asset that disagrees. A RAW texture whose default min filter asks for
+Activation cross-checks that count against the blob and the header and asserts
+on any asset that disagrees. A RAW texture whose default min filter asks for
 mipmaps without `gen_mipmaps` is a build-time assert (`NT_BUILD_ASSERT`); the
 runtime would accept it and sample level 0.
 
@@ -226,7 +226,7 @@ computed before canonicalization and are invariant under it.
 The builder distinguishes two failure classes:
 
 - **Programmer invariants, unexpected states, OOM, and missing/unreadable files** assert (`NT_BUILD_ASSERT`) — these are bugs or a broken environment, and crashing surfaces them instantly. The single-asset APIs (`nt_builder_add_texture`, `nt_builder_add_mesh`, `nt_builder_add_font`) also assert on a decode/parse failure of their input.
-- **Content-dependent failures of sprite images inside the ATLAS builder** are recoverable and route to a graceful error channel instead of aborting: undecodable/oversized/zero-dimension sprite images, transparent-after-trim sprites, oversized slice9 borders, contour-vertex overflow, trim-offset overflow, duplicate region names, size/page limits, and unfittable sprites. `ATLAS_DEGENERATE_HULL` and `ATLAS_HULL_INFEASIBLE` remain formatted legacy kinds no longer produced: with `max_vertices >= 4` the trim-rect candidate makes geometry selection total, so an invalid selection is a programmer invariant (assert), not content.
+- **Content-dependent failures of sprite images inside the ATLAS builder** are recoverable and route to a graceful error channel instead of aborting: undecodable/oversized/zero-dimension sprite images, transparent-after-trim sprites, oversized slice9 borders, contour-vertex overflow, trim-offset overflow, duplicate region names, size/page limits, and unfittable sprites. Geometry selection is total (see [Atlas options](#atlas-options)), so it has no content error kind.
 
 `NT_BUILD_ASSERT` is terminal: normal execution ends with `abort()`. Tests may install a non-local-jump hook to verify that an assertion fires, but the interrupted builder context is not reusable and has no rollback guarantee.
 
@@ -265,26 +265,18 @@ Rules:
 - `register_labels()` function under `#if NT_HASH_LABELS` registers all paths for debug hash lookup.
 - Identifier collisions (two assets producing the same `#define` name) are a fatal builder error.
 
-## Combined headers (multi-pack projects)
+## Multi-pack projects
 
-Projects with multiple packs merge per-pack headers into one combined header after all packs are built:
+Each `finish_pack` writes one header per pack into the `set_header_dir` directory (convention: `examples/{project}/generated/`, visible in IDE and version control). Game code includes the header of every pack it uses:
 
 ```c
-/* Each finish_pack generates a per-pack .h (e.g. core.h, textures.h) */
-nt_builder_set_header_dir(ctx, "examples/myproject/generated");
-nt_builder_finish_pack(ctx);
-
-/* After all packs: merge into one combined header */
-const char *headers[] = {"generated/core.h", "generated/textures.h"};
-nt_builder_merge_headers(headers, 2, "generated/assets.h");
+#include "core.h"
+#include "textures.h"
 ```
 
-Rules:
-- `merge_headers` reads per-pack `.h` files, deduplicates by hash, sorts, writes one combined header.
-- No runtime state needed during pack building — merge operates on already-generated files.
-- Game code includes the single combined header, not per-pack headers.
-- Per-pack headers are still generated for diagnostics and per-pack diffing.
-- `set_header_dir` controls where headers are written. Convention: `examples/{project}/generated/` in source tree so headers are visible in IDE and version control.
+- An asset in two packs produces the same `#define` in both headers; C accepts an identical redefinition.
+- The same identifier with two hashes is a conflicting redefinition: a compiler diagnostic, an error under `-Werror` (engine targets build with it). The builder checks collisions only within one pack.
+- Each header has its own `{header}_register_labels()`; call the one for each included header.
 
 ## Generated headers in version control
 
@@ -633,16 +625,7 @@ zero-initialized appended controls preserve inherit semantics. Atlas-level
 - `margin` is **raise-only**: it only feeds the packing footprint, so a per-sprite value below the atlas margin is clamped up to the atlas value. An `UNFITTABLE` record reports the *effective* (clamped-up) margin the packer actually used, not a below-atlas request.
 - `extrude`: `0` **inherits** the atlas default. A non-zero override sets **this sprite's edge bleed** (RECT only) and may be smaller OR larger than the atlas extrude — but a *zero* bleed cannot be expressed per-sprite (0 means inherit). Effective extrude, whether inherited or overridden, requires the effective sprite shape to be RECT. Compose/serialize apply the raw override. The packing footprint, however, reserves room for `max(this sprite's extrude, atlas extrude)`, so an `UNFITTABLE` record reports that effective (max) extrude — the space that actually caused the fit failure, distinct from the per-sprite bleed written into the page.
 
-**Measured area-budget guidance (`mixed_aa`, native release):**
-
-The current deterministic frontier evidence uses six public area-budget values. Each row is reconstructed from real production packs and repeat-verified through the selected-geometry proof. Tracked proofs use `portable-v1`: platform, machine CPU, and timing fields are removed before hashing. The recorded builder binary hash identifies the publisher but is not a consumer-side byte-identity gate, so the portable proof remains consumable across supported platforms. The frontier also records a deterministic hash of the production atlas-geometry sources — the single list in `scripts/lib/hull_geometry_sources.sh`, which includes the Clipper2 bridge and the vendored Clipper2 sources; visual acceptance rejects evidence after any of those sources changes, and the CI guard prints a non-fatal staleness warning. Canonical publication is explicit (`scripts/bench_hull_tolerance.sh --publish`), requires `native-release`, one builder thread, and the exact `mixed_aa` 0/2/5/10/15/25 sweep, and refuses a dirty worktree. Ordinary local sweeps only write under their output directory.
-
-Visual acceptance is black-box: every polygon displayed in its 6/7/8 selected-count evidence was chosen by the public production selector, serialized into a real pack, reconstructed, and re-proved. Internal frontier slots cannot be forced into acceptance output. `visual_input_sha256` hashes the actual decoded RGBA plus resolved row controls used by the builder.
-
-The measured numbers themselves (per-budget vertex counts, frontier fill,
-overdraw, and the sweep/pack SHA-256s) live in the published artifact
-`tools/research/atlas_bench/hull_area_frontier.json` — that file is the
-authority; never hand-copy rows out of it.
+**Area-budget guidance:** on the 12 real sprites of `test_atlas_hull_budget`, total hull vertices are 87/83/79/67/57/51 at 0/2/5/10/15/25% added area; the 10% default keeps most of the saving. The test pins these totals.
 
 **Pivot semantics:**
 - Normalized over the **source image** dimensions (not the trimmed rect). Default `(0.5, 0.5)` = image centre.

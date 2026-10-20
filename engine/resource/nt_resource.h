@@ -96,7 +96,8 @@ typedef struct {
 } nt_resource_type_desc_t;
 
 /* Copies non-NULL desc; pointer borrowed only for this call. Register once per type after resource init, before the first successful file or virtual mount.
- * Duplicate or late registration asserts. on_resolve requires on_cleanup; AUX_BACKED requires both.
+ * Duplicate or late registration asserts. on_resolve requires on_cleanup unless PIN_BLOB (a borrowed view);
+ * AUX_BACKED requires both.
  * Simple virtual providers and BLOB need no registration. Full contract: docs/spec/assets/resource.md. */
 void nt_resource_register_type(uint8_t asset_type, const nt_resource_type_desc_t *desc);
 
@@ -166,6 +167,9 @@ uint8_t nt_resource_get_asset_type(nt_resource_t handle);
  * Release invalidates source indices and unmount severs zero-copy views immediately;
  * publication and epoch changes follow in nt_resource_step(). */
 uint32_t nt_resource_publication_epoch(void);
+/* Changes each time the slot publishes a winner (pack swap, remount, aux resync) and never repeats
+ * within one init; 0 until the first publication. Identifies the winner's bytes where runtime handles repeat. */
+uint32_t nt_resource_winner_gen(nt_resource_t handle);
 
 /* Get raw blob data pointer (after NtBlobAssetHeader). Returns NULL if not ready,
  * not a blob, or the current blob is absent; out_size may be NULL. Non-NULL data

@@ -31,85 +31,8 @@
 #include "resource/nt_resource.h"
 #include "time/nt_time.h"
 #include "unity.h"
+#include "test_helpers/nt_test_font_blob.h"
 /* clang-format on */
-
-/* ---- Test blob builder (mirrors tests/unit/test_font.c) ----
- *
- * Build a minimal valid NT_ASSET_FONT binary blob in memory.
- * Contains 3 glyphs ('A'=65, 'B'=66, 'C'=67), each with 2 line segments.
- */
-static uint8_t *build_test_font_blob(uint32_t *out_size) {
-    uint32_t contour_size = 18;
-    uint32_t header_size = (uint32_t)sizeof(NtFontAssetHeader);
-    uint32_t glyphs_size = 3 * (uint32_t)sizeof(NtFontGlyphEntry);
-    uint32_t total_size = header_size + glyphs_size + (3 * contour_size);
-
-    uint8_t *blob = (uint8_t *)calloc(total_size, 1);
-    NT_ASSERT(blob);
-
-    NtFontAssetHeader hdr;
-    memset(&hdr, 0, sizeof(hdr));
-    hdr.magic = NT_FONT_MAGIC;
-    hdr.version = NT_FONT_VERSION;
-    hdr.glyph_count = 3;
-    hdr.units_per_em = 1000;
-    hdr.ascent = 800;
-    hdr.descent = -200;
-    hdr.line_gap = 0;
-    memcpy(blob, &hdr, sizeof(hdr));
-
-    uint32_t data_base = header_size + glyphs_size;
-    uint32_t codepoints[3] = {65, 66, 67};
-
-    for (int g = 0; g < 3; g++) {
-        NtFontGlyphEntry entry;
-        memset(&entry, 0, sizeof(entry));
-        entry.codepoint = codepoints[g];
-        entry.data_offset = data_base + ((uint32_t)g * contour_size);
-        entry.advance = 500;
-        entry.bbox_x0 = 0;
-        entry.bbox_y0 = -200;
-        entry.bbox_x1 = 400;
-        entry.bbox_y1 = 800;
-        entry.curve_count = 2;
-        entry.kern_count = 0;
-        memcpy(blob + header_size + ((size_t)g * sizeof(NtFontGlyphEntry)), &entry, sizeof(entry));
-    }
-
-    for (int g = 0; g < 3; g++) {
-        uint8_t *wp = blob + data_base + ((size_t)g * contour_size);
-
-        uint16_t cc = 1;
-        memcpy(wp, &cc, 2);
-        wp += 2;
-        uint16_t sc = 2;
-        memcpy(wp, &sc, 2);
-        wp += 2;
-        int16_t sx = 0;
-        int16_t sy = 0;
-        memcpy(wp, &sx, 2);
-        wp += 2;
-        memcpy(wp, &sy, 2);
-        wp += 2;
-        wp[0] = 0;
-        wp[1] = 0;
-        wp += 2;
-        int16_t d1x = 400;
-        int16_t d1y = 0;
-        memcpy(wp, &d1x, 2);
-        wp += 2;
-        memcpy(wp, &d1y, 2);
-        wp += 2;
-        int16_t d2x = 0;
-        int16_t d2y = 800;
-        memcpy(wp, &d2x, 2);
-        wp += 2;
-        memcpy(wp, &d2y, 2);
-    }
-
-    *out_size = total_size;
-    return blob;
-}
 
 /* ---- Helper: register font blob as test resource ---- */
 
@@ -131,7 +54,7 @@ static nt_font_t make_bench_font(const char *name, uint8_t **out_blob) {
     nt_font_t font = nt_font_create(&desc);
 
     uint32_t blob_size = 0;
-    uint8_t *blob = build_test_font_blob(&blob_size);
+    uint8_t *blob = nt_test_font_blob('A', 'C', &blob_size);
     nt_resource_t res = register_font_resource(name, blob, blob_size);
 
     nt_font_add(font, res);

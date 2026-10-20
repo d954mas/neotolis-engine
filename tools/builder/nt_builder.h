@@ -89,7 +89,6 @@ typedef enum {
     NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE = 3,
     NT_BUILD_ERR_KIND_ATLAS_TRANSPARENT_AFTER_TRIM = 4,
     NT_BUILD_ERR_KIND_ATLAS_SLICE9_TOO_BIG = 5,
-    NT_BUILD_ERR_KIND_ATLAS_DEGENERATE_HULL = 6, /* legacy: formatted but no longer produced */
     NT_BUILD_ERR_KIND_ATLAS_CONTOUR_VERTEX_OVERFLOW = 7,
     NT_BUILD_ERR_KIND_ATLAS_DUPLICATE_REGION_NAME = 8,
     NT_BUILD_ERR_KIND_ATLAS_TOO_MANY_REGIONS = 9,
@@ -97,7 +96,6 @@ typedef enum {
     NT_BUILD_ERR_KIND_ATLAS_TRIM_OFFSET_OVERFLOW = 11,
     NT_BUILD_ERR_KIND_ATLAS_PAGES_EXHAUSTED = 12,
     NT_BUILD_ERR_KIND_ATLAS_UNFITTABLE = 13,
-    NT_BUILD_ERR_KIND_ATLAS_HULL_INFEASIBLE = 14, /* legacy: formatted but no longer produced (selection is total at max_vertices >= 4) */
 } nt_build_error_kind;
 
 /* Pure-data error detail. Names are COPIED into fixed buffers, never
@@ -684,9 +682,6 @@ void nt_builder_set_threads(NtBuilderContext *ctx, uint32_t thread_count);
 /* Auto-detect thread count: hardware_concurrency() cores.
  * Convenience wrapper -- equivalent to set_threads(hardware_concurrency()). */
 void nt_builder_set_threads_auto(NtBuilderContext *ctx);
-
-/* --- Merge per-pack .h headers into a combined header --- */
-void nt_builder_merge_headers(const char *const *header_paths, uint32_t count, const char *output_path);
 
 /* --- Build record: skip a current build, record this one (builder spec, "Build record") --- */
 bool nt_builder_up_to_date(const char *dir);

@@ -121,10 +121,6 @@ uint32_t nt_gfx_fake_vertex_input_create_count(void);
 uint32_t nt_gfx_fake_bind_vertex_input_count(void);
 uint32_t nt_gfx_fake_last_bound_vertex_input(void);
 nt_vertex_layout_t nt_gfx_fake_last_vertex_input_layout(void);
-#if NT_GFX_CAPTURE_ENABLED
-/* Backend snapshots taken for recorded ticks since the last reset. */
-uint32_t nt_gfx_fake_backend_snapshot_count(void);
-#endif
 void nt_gfx_fake_reset(void);
 
 #endif

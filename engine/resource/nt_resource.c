@@ -4,6 +4,7 @@
 
 #include <inttypes.h>
 #include <limits.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -15,9 +16,15 @@
 #include "hash/nt_hash.h"
 #include "http/nt_http.h"
 #include "log/nt_log.h"
+#include "nt_atlas_format.h"
 #include "nt_blob_format.h"
 #include "nt_crc32.h"
+#include "nt_font_format.h"
+#include "nt_mesh_format.h"
 #include "nt_pack_format.h"
+#include "nt_shader_format.h"
+#include "nt_skeletal_format.h"
+#include "nt_texture_format.h"
 #include "time/nt_time.h"
 
 #ifndef NT_RESOURCE_TIMING_ENABLED
@@ -44,6 +51,7 @@ static struct {
     uint32_t next_mount_seq;       /* monotonic counter for mount order tiebreak */
     uint32_t asset_hwm;            /* high-water mark in assets[] */
     uint32_t publication_epoch;    /* bumps when published slot view changes */
+    uint32_t winner_gen_seq;       /* last NtResourceSlot.winner_gen handed out */
     uint64_t placeholder_texture;  /* resource_id for fallback texture, 0 = none */
     float activate_time_budget_ms; /* per-step time limit, 0 = unlimited */
     /* Retry policy (global) */
@@ -378,6 +386,7 @@ static void resource_resolve_pass(void) {
         }
 
         if (next_has_real_winner && (next_changed || needs_aux_sync)) {
+            slot->winner_gen = ++s_resource.winner_gen_seq;
             if (entry->on_resolve != NULL) {
                 const NtAssetMeta *winner = &s_resource.assets[next_asset_idx];
                 uint32_t size = 0;
@@ -437,6 +446,39 @@ static void resource_resolve_pass(void) {
         s_resource.types[atype].desc.on_post_resolve(data, size, (nt_resource_t){.id = si}, slot->runtime_handle, slot->user_data);
     }
     // #endregion
+}
+
+/* ---- Asset header check ---- */
+
+/* Every activated payload starts with {u32 magic; u16 version} of its type's format. BLOB is
+ * published at parse and never activated. */
+_Static_assert(offsetof(NtMeshAssetHeader, version) == 4 && offsetof(NtTextureAssetHeader, version) == 4 && offsetof(NtShaderCodeHeader, version) == 4 && offsetof(NtFontAssetHeader, version) == 4 &&
+                   offsetof(NtAtlasHeader, version) == 4 && offsetof(NtSklHeader, version) == 4 && offsetof(NtSknHeader, version) == 4 && offsetof(NtAnmHeader, version) == 4,
+               "asset headers share the {u32 magic; u16 version} prefix");
+static const struct {
+    uint32_t magic;
+    uint16_t version;
+    uint32_t header_size;
+} s_asset_headers[NT_ASSET_LAST + 1] = {
+    [NT_ASSET_MESH] = {NT_MESH_MAGIC, NT_MESH_VERSION, sizeof(NtMeshAssetHeader)},
+    [NT_ASSET_TEXTURE] = {NT_TEXTURE_MAGIC, NT_TEXTURE_VERSION, sizeof(NtTextureAssetHeader)},
+    [NT_ASSET_SHADER_CODE] = {NT_SHADER_CODE_MAGIC, NT_SHADER_CODE_VERSION, sizeof(NtShaderCodeHeader)},
+    [NT_ASSET_FONT] = {NT_FONT_MAGIC, NT_FONT_VERSION, sizeof(NtFontAssetHeader)},
+    [NT_ASSET_ATLAS] = {NT_ATLAS_MAGIC, NT_ATLAS_VERSION, sizeof(NtAtlasHeader)},
+    [NT_ASSET_SKELETON] = {NT_SKL_MAGIC, NT_SKELETAL_FORMAT_VERSION, sizeof(NtSklHeader)},
+    [NT_ASSET_SKIN_BINDING] = {NT_SKN_MAGIC, NT_SKELETAL_FORMAT_VERSION, sizeof(NtSknHeader)},
+    [NT_ASSET_CLIP] = {NT_ANM_MAGIC, NT_SKELETAL_FORMAT_VERSION, sizeof(NtAnmHeader)},
+};
+
+/* A mismatch means a stale pack: rebuild packs after a format change. */
+static void asset_header_check(const NtAssetMeta *meta, const uint8_t *data) {
+    const uint8_t atype = meta->asset_type;
+    NT_ASSERT(meta->size >= s_asset_headers[atype].header_size && "asset shorter than its header -- rebuild packs");
+    uint32_t magic;
+    uint16_t version;
+    memcpy(&magic, data, sizeof magic);
+    memcpy(&version, data + sizeof magic, sizeof version);
+    NT_ASSERT(magic == s_asset_headers[atype].magic && version == s_asset_headers[atype].version && "asset magic or version mismatch -- rebuild packs");
 }
 
 /* ---- I/O issue helper (shared by load + retry) ---- */
@@ -625,7 +667,9 @@ void nt_resource_step(void) {
                     /* Retained records require identical bytes; content replacement needs a remount. */
                     NT_ASSERT(loaded_size == pack->blob_size);
                     pack->blob = loaded_blob;
-                    pack->blob_size = loaded_size;
+                    const NtPackHeader *h = (const NtPackHeader *)loaded_blob;
+                    NT_ASSERT(h->checksum == pack->checksum && h->header_size <= loaded_size && nt_crc32(loaded_blob + h->header_size, loaded_size - h->header_size) == pack->checksum &&
+                              "re-downloaded pack bytes differ -- remount to replace content");
                     pack->pack_state = NT_PACK_STATE_READY;
                     pack->blob_last_access_ms = resource_get_time_ms();
                     s_resource.needs_resolve = true;
@@ -690,6 +734,7 @@ void nt_resource_step(void) {
                 }
 
                 const uint8_t *asset_data = pack->blob + meta->offset;
+                asset_header_check(meta, asset_data);
                 uint32_t handle = s_resource.types[atype].desc.activate(asset_data, meta->size);
                 if (handle != 0) {
                     meta->state = NT_ASSET_STATE_READY;
@@ -1068,12 +1113,12 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
         NT_ASSERT(pack->meta_data && "meta section malloc failed");
         memcpy(pack->meta_data, blob + meta_section_start, meta_section_size);
         pack->meta_size = meta_section_size;
-        pack->meta_count = h->meta_count;
     }
 
     /* Update pack metadata */
     pack->blob = blob;
     pack->blob_size = blob_size;
+    pack->checksum = h->checksum;
     if (pack->pack_state != NT_PACK_STATE_READY) {
         pack->pack_state = NT_PACK_STATE_READY;
     }
@@ -1130,6 +1175,14 @@ uint32_t nt_resource_get(nt_resource_t handle) {
     }
 
     return s_resource.slots[index].runtime_handle;
+}
+
+uint32_t nt_resource_winner_gen(nt_resource_t handle) {
+    uint32_t idx = handle.id;
+    if (idx == 0 || idx > s_resource.slot_count) {
+        return 0;
+    }
+    return s_resource.slots[idx].winner_gen;
 }
 
 const void *nt_resource_peek_user_data(nt_resource_t handle) {
@@ -1545,7 +1598,8 @@ void nt_resource_register_type(uint8_t asset_type, const nt_resource_type_desc_t
     NT_ASSERT(asset_type < NT_RESOURCE_MAX_ASSET_TYPES);
     NT_ASSERT(desc != NULL);
     NT_ASSERT((desc->behavior_flags & ~(NT_RESOURCE_BEHAVIOR_AUX_BACKED | NT_RESOURCE_BEHAVIOR_PIN_BLOB)) == 0);
-    NT_ASSERT(desc->on_resolve == NULL || desc->on_cleanup != NULL);
+    /* Only a PIN_BLOB view borrows its user_data; anything else on_resolve builds needs a cleanup. */
+    NT_ASSERT(desc->on_resolve == NULL || desc->on_cleanup != NULL || (desc->behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0);
     NT_ASSERT((desc->behavior_flags & NT_RESOURCE_BEHAVIOR_AUX_BACKED) == 0 || (desc->on_resolve != NULL && desc->on_cleanup != NULL));
     NtResourceTypeEntry *entry = &s_resource.types[asset_type];
     NT_ASSERT(!entry->registered);

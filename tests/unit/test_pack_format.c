@@ -371,10 +371,6 @@ void test_font_kern_entry_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(2, offsetof(NtFontKernEntry, value));
 }
 
-/* NtFontCurve removed in v2 — curves stored as contour-based variable-length data */
-void test_font_curve_size(void) { TEST_PASS(); }
-void test_font_curve_field_offsets(void) { TEST_PASS(); }
-
 void test_font_glyph_array_offset(void) {
     /* Glyph entries start immediately after header */
     TEST_ASSERT_EQUAL_UINT(24, sizeof(NtFontAssetHeader));
@@ -444,8 +440,6 @@ int main(void) {
     RUN_TEST(test_font_glyph_entry_field_offsets);
     RUN_TEST(test_font_kern_entry_size);
     RUN_TEST(test_font_kern_entry_field_offsets);
-    RUN_TEST(test_font_curve_size);
-    RUN_TEST(test_font_curve_field_offsets);
     RUN_TEST(test_font_glyph_array_offset);
 
     return UNITY_END();

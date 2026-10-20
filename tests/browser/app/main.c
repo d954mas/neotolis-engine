@@ -40,7 +40,7 @@
 
 #include "app/nt_app.h"
 
-#include "ui_showcase_assets.h" /* reuse the showcase pack's generated asset ids */
+#include "ui_showcase.h" /* reuse the showcase pack's generated asset ids */
 
 #include <stdint.h>
 #include <stdio.h>
@@ -1348,7 +1348,6 @@ int main(int argc, char *argv[]) {
 
     nt_engine_config_t config = {0};
     config.app_name = "browser_smoke";
-    config.version = 1;
     if (nt_engine_init(&config) != NT_OK) {
         return 1;
     }

@@ -12,9 +12,11 @@
 #include "time/nt_time.h"
 #include "nt_blob_format.h"
 #include "nt_crc32.h"
+#include "nt_mesh_format.h"
 #include "nt_pack_format.h"
 #include "core/nt_assert.h"
 #include "unity.h"
+#include "test_helpers/nt_test_pack.h"
 /* clang-format on */
 
 #include <setjmp.h>
@@ -22,9 +24,10 @@
 /* ---- Assert-catching helper (setjmp/longjmp via hookable nt_assert_handler) ---- */
 
 static jmp_buf s_assert_jmp;
+static const char *s_assert_expr;
 
 static void test_assert_trap(const char *expr, const char *file, int line) {
-    (void)expr;
+    s_assert_expr = expr;
     (void)file;
     (void)line;
     longjmp(s_assert_jmp, 1);
@@ -57,7 +60,7 @@ static uint32_t test_activate(const uint8_t *data, uint32_t size) {
 
 /*
  * Build a valid NTPACK blob in memory with `asset_count` fake assets.
- * Each asset has 16 bytes of zero data. Returns malloc'd blob (caller frees).
+ * Each asset is a zeroed payload behind its type's asset header. Returns malloc'd blob (caller frees).
  * Sets *out_size to total blob size.
  */
 static uint8_t *build_test_pack(uint32_t asset_count, uint32_t *out_size) {
@@ -65,7 +68,7 @@ static uint8_t *build_test_pack(uint32_t asset_count, uint32_t *out_size) {
     uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + (asset_count * sizeof(NtAssetEntry)));
     uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(NT_PACK_DATA_ALIGN - 1U);
 
-    uint32_t data_per_asset = 16; /* fake payload per asset */
+    uint32_t data_per_asset = NT_TEST_ASSET_PAYLOAD; /* fake payload per asset */
     uint32_t data_size = 0;
     for (uint32_t i = 0; i < asset_count; i++) {
         uint32_t aligned = (data_per_asset + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
@@ -105,8 +108,7 @@ static uint8_t *build_test_pack(uint32_t asset_count, uint32_t *out_size) {
         data_offset += aligned;
     }
 
-    /* Compute CRC32 over data region */
-    h->checksum = nt_crc32(blob + header_size, data_size);
+    nt_test_seal_pack(blob);
 
     *out_size = total_size;
     return blob;
@@ -328,9 +330,9 @@ void test_parse_valid_two_assets(void) {
 
     /* Verify offsets and sizes */
     TEST_ASSERT_TRUE(entries[0].offset >= h->header_size);
-    TEST_ASSERT_EQUAL_UINT32(16, entries[0].size);
+    TEST_ASSERT_EQUAL_UINT32(NT_TEST_ASSET_PAYLOAD, entries[0].size);
     TEST_ASSERT_TRUE(entries[1].offset > entries[0].offset);
-    TEST_ASSERT_EQUAL_UINT32(16, entries[1].size);
+    TEST_ASSERT_EQUAL_UINT32(NT_TEST_ASSET_PAYLOAD, entries[1].size);
 
     free(blob);
 }
@@ -357,7 +359,7 @@ void test_parse_unmounted_pack(void) {
 static uint8_t *build_pack_with_rid(uint64_t rid, uint8_t atype, uint32_t *out_size) {
     uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + sizeof(NtAssetEntry));
     uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(NT_PACK_DATA_ALIGN - 1U);
-    uint32_t data_per_asset = 16;
+    uint32_t data_per_asset = NT_TEST_ASSET_PAYLOAD;
     uint32_t aligned_data = (data_per_asset + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
     uint32_t total_size = header_size + aligned_data;
 
@@ -382,7 +384,7 @@ static uint8_t *build_pack_with_rid(uint64_t rid, uint8_t atype, uint32_t *out_s
     entry->offset = header_size;
     entry->size = data_per_asset;
 
-    h->checksum = nt_crc32(blob + header_size, aligned_data);
+    nt_test_seal_pack(blob);
 
     *out_size = total_size;
     return blob;
@@ -1079,8 +1081,82 @@ static uint8_t *build_alias_pack_with_rid(uint64_t rid, uint8_t atype, uint32_t 
     entries[1].asset_type = atype;
     entries[1].offset = entries[0].offset;
     entries[1].owner_entry = 0;
+    nt_test_seal_pack(blob);
     return blob;
 }
+
+/* A payload whose header does not match its type is a stale pack: activation asserts before the
+ * type's activator runs. case 0 flips the magic, 1 the version, 2 cuts the payload below its header. */
+static void expect_asset_header_assert(uint32_t which) {
+    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate});
+    const nt_hash64_t rid = nt_hash64_str("header_check");
+    (void)nt_resource_request(rid, NT_ASSET_MESH);
+    uint32_t size = 0;
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size);
+    TEST_ASSERT_NOT_NULL(blob);
+    NtAssetEntry *entry = (NtAssetEntry *)(blob + sizeof(NtPackHeader));
+    if (which == 0) {
+        blob[entry->offset] ^= 1U;
+    } else if (which == 1) {
+        blob[entry->offset + 4U] ^= 1U;
+    } else {
+        entry->size = (uint32_t)sizeof(NtMeshAssetHeader) - 1U;
+    }
+    const NtPackHeader *ph = (const NtPackHeader *)blob;
+    ((NtPackHeader *)blob)->checksum = nt_crc32(blob + ph->header_size, size - ph->header_size);
+    const nt_hash32_t pid = nt_hash32_str("header_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
+    s_activate_call_count = 0;
+    EXPECT_ASSERT(nt_resource_step());
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, which == 2 ? "shorter than its header" : "magic or version mismatch"));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, s_activate_call_count, "the activator never sees a mismatched header");
+    free(blob);
+}
+
+/* Runtime handles repeat (fake_activate returns one constant), so only winner_gen tells a
+ * remount or a winner swap apart; an untouched step keeps it. */
+void test_winner_gen_changes_with_each_published_winner(void) {
+    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate});
+    nt_resource_set_activate_time_budget(0);
+    const nt_hash64_t rid = nt_hash64_str("gen_res");
+    const nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_winner_gen(h));
+    uint32_t size = 0;
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size);
+    TEST_ASSERT_NOT_NULL(blob);
+    const nt_hash32_t low = nt_hash32_str("gen_low");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(low, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(low, blob, size));
+    nt_resource_step();
+    const uint32_t first = nt_resource_winner_gen(h);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, first);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(first, nt_resource_winner_gen(h), "an untouched step keeps the gen");
+
+    nt_resource_unmount(low);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(low, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(low, blob, size));
+    nt_resource_step();
+    const uint32_t remounted = nt_resource_winner_gen(h);
+    TEST_ASSERT_TRUE_MESSAGE(remounted != 0 && remounted != first, "a remount publishes a new winner");
+
+    const nt_hash32_t high = nt_hash32_str("gen_high");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(high, 1));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(high, blob, size));
+    nt_resource_step();
+    const uint32_t swapped = nt_resource_winner_gen(h);
+    TEST_ASSERT_TRUE_MESSAGE(swapped != remounted && swapped != first, "a winner swap publishes a new winner");
+    TEST_ASSERT_EQUAL_UINT32(0xBEEF, nt_resource_get(h));
+
+    nt_resource_unmount(high);
+    nt_resource_unmount(low);
+    free(blob);
+}
+
+void test_asset_magic_mismatch_asserts(void) { expect_asset_header_assert(0); }
+void test_asset_version_mismatch_asserts(void) { expect_asset_header_assert(1); }
+void test_asset_shorter_than_header_asserts(void) { expect_asset_header_assert(2); }
 
 void test_equal_range_self_owners_keep_independent_runtime_objects(void) {
     nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate_seq, .deactivate = fake_deactivate});
@@ -1090,6 +1166,7 @@ void test_equal_range_self_owners_keep_independent_runtime_objects(void) {
     NtAssetEntry *entries = (NtAssetEntry *)(blob + sizeof(NtPackHeader));
     entries[1].asset_type = entries[0].asset_type;
     entries[1].offset = entries[0].offset;
+    nt_test_seal_pack(blob);
     nt_hash32_t pid = nt_hash32_str("independent_equal_ranges");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
@@ -1125,8 +1202,8 @@ void test_parse_alias_ranges_preserve_activation_order(void) {
     uint8_t *blob = build_test_pack(8, &blob_size);
     TEST_ASSERT_NOT_NULL(blob);
     NtAssetEntry *entries = (NtAssetEntry *)(blob + sizeof(NtPackHeader));
-    const uint32_t offsets[] = {48, 0, 48, 48, 16, 0, 80, 80};
-    const uint32_t sizes[] = {16, 16, 8, 16, 16, 16, 0, 0};
+    const uint32_t offsets[] = {192, 0, 192, 192, 64, 0, 320, 320};
+    const uint32_t sizes[] = {64, 64, 32, 64, 64, 64, 32, 32};
     const uint32_t handles[] = {100, 101, 102, 100, 103, 101, 104, 104};
     const uint16_t owners[] = {0, 1, 2, 0, 4, 1, 6, 6};
     nt_resource_t resources[8];
@@ -1137,6 +1214,7 @@ void test_parse_alias_ranges_preserve_activation_order(void) {
         entries[i].asset_type = NT_ASSET_TEXTURE;
         resources[i] = nt_resource_request((nt_hash64_t){entries[i].resource_id}, NT_ASSET_TEXTURE);
     }
+    nt_test_seal_pack(blob);
     nt_hash32_t pid = nt_hash32_str("alias_ranges");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     s_activate_call_count = 0;
@@ -1487,7 +1565,7 @@ void test_activation_sets_runtime_handle(void) {
 static void write_test_pack_multi(const char *path, uint8_t atype, uint32_t count) {
     uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + (count * sizeof(NtAssetEntry)));
     uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(NT_PACK_DATA_ALIGN - 1U);
-    uint32_t data_per_asset = 16;
+    uint32_t data_per_asset = NT_TEST_ASSET_PAYLOAD;
     uint32_t data_size = 0;
     for (uint32_t i = 0; i < count; i++) {
         data_size += (data_per_asset + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
@@ -1518,7 +1596,7 @@ static void write_test_pack_multi(const char *path, uint8_t atype, uint32_t coun
         uint32_t aligned = (data_per_asset + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
         data_offset += aligned;
     }
-    h->checksum = nt_crc32(blob + header_size, data_size);
+    nt_test_seal_pack(blob);
 
     FILE *f = fopen(path, "wb");
     if (f) {
@@ -2178,6 +2256,34 @@ void test_invalidate_triggers_redownload_on_evicted_blob(void) {
     (void)remove("build/test_inv_redl.ntpack");
 }
 
+/* An evicted pack re-downloads into retained records, so different bytes of the same size must fail early. */
+void test_redownload_with_changed_bytes_asserts(void) {
+    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate, .deactivate = fake_deactivate});
+    const char *path = "build/test_redl_changed.ntpack";
+    nt_hash32_t pid = nt_hash32_str("redl_changed_pack");
+    write_test_pack_file(path, nt_hash64_str("redl_changed").value, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, TEST_BLOB_TTL_MS);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, path));
+    nt_resource_step();
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pid));
+    nt_time_sleep(TEST_PAST_BLOB_TTL_S);
+    nt_resource_step(); /* evicts the blob */
+    TEST_ASSERT_EQUAL_UINT8(0, nt_resource_test_pack_blob_resident(0));
+
+    FILE *f = fopen(path, "r+b"); /* flip the last data byte; the size stays */
+    TEST_ASSERT_NOT_NULL(f);
+    (void)fseek(f, -1, SEEK_END);
+    const int last = fgetc(f);
+    (void)fseek(f, -1, SEEK_END);
+    (void)fputc(last ^ 0xFF, f);
+    (void)fclose(f);
+    nt_resource_invalidate(NT_ASSET_MESH);
+    EXPECT_ASSERT(for (int i = 0; i < 4; i++) { nt_resource_step(); });
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "re-downloaded pack bytes differ"));
+    (void)remove(path);
+}
+
 void test_evicted_empty_pack_reloads_without_reparse(void) {
     const char *path = "build/test_empty_pack_reload.ntpack";
     uint32_t blob_size = 0;
@@ -2465,8 +2571,7 @@ static uint8_t *build_meta_pack(uint64_t rid, uint64_t kind, const void *payload
     mh->size = payload_size;
     memcpy(blob + meta_section_start + sizeof(NtMetaEntryHeader), payload, payload_size);
 
-    /* CRC32 over data region (everything after header) */
-    h->checksum = nt_crc32(blob + header_size, total_size - header_size);
+    nt_test_seal_pack(blob);
 
     *out_size = total_size;
     return blob;
@@ -3204,6 +3309,7 @@ void test_failed_owner_does_not_retry_through_alias(void) {
     entries[1].asset_type = entries[0].asset_type;
     entries[1].offset = entries[0].offset;
     entries[1].owner_entry = 0;
+    nt_test_seal_pack(blob);
     nt_hash32_t pid = nt_hash32_str("failed_owner");
     nt_resource_t h = nt_resource_request(nt_hash64_str("asset1"), NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
@@ -3253,6 +3359,7 @@ void test_alias_only_activates_owner_after_reversed_slot_reuse(void) {
     entries[1].asset_type = NT_ASSET_MESH;
     entries[1].offset = entries[0].offset;
     entries[1].owner_entry = 0;
+    nt_test_seal_pack(blob);
     nt_hash32_t pid = nt_hash32_str("alias_reversed");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
@@ -3287,6 +3394,7 @@ void test_parse_invalid_owner_relations_are_atomic(void) {
         entries[i].offset = entries[0].offset;
         entries[i].owner_entry = 0;
     }
+    nt_test_seal_pack(blob);
     NtAssetEntry valid[3];
     memcpy(valid, entries, sizeof(valid));
     nt_hash32_t pid = nt_hash32_str("invalid_owner_relations");
@@ -3361,6 +3469,7 @@ void test_failed_owner_recovers_aliases_only_after_invalidate(void) {
     entries[1].asset_type = NT_ASSET_MESH;
     entries[1].offset = entries[0].offset;
     entries[1].owner_entry = 0;
+    nt_test_seal_pack(blob);
     nt_hash32_t pid = nt_hash32_str("recover_owner");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
@@ -3691,11 +3800,11 @@ static void build_two_owner_pack(uint8_t *blob, uint8_t asset_type) {
 }
 
 static void test_parse_invalid_asset_type_rejects_before_allocation(void) {
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate});
+    nt_resource_register_type(NT_ASSET_BLOB, &(nt_resource_type_desc_t){.activate = fake_activate});
     const nt_hash32_t pack = {998};
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pack, 0));
     uint8_t blob[TEST_TWO_OWNER_PACK_SIZE];
-    build_two_owner_pack(blob, NT_ASSET_MESH);
+    build_two_owner_pack(blob, NT_ASSET_BLOB);
     NtAssetEntry *entries = (NtAssetEntry *)(blob + sizeof(NtPackHeader));
     const uint8_t invalid_types[] = {0, NT_ASSET_LAST + 1, NT_RESOURCE_MAX_ASSET_TYPES, UINT8_MAX};
     for (uint32_t i = 0; i < sizeof(invalid_types) / sizeof(invalid_types[0]); i++) {
@@ -3706,10 +3815,10 @@ static void test_parse_invalid_asset_type_rejects_before_allocation(void) {
         TEST_ASSERT_EQUAL_UINT64(0, nt_resource_get_resident_bytes().blob_bytes);
         TEST_ASSERT_EQUAL_UINT64(0, nt_resource_get_resident_bytes().metadata_bytes);
     }
-    entries[1].asset_type = NT_ASSET_MESH;
+    entries[1].asset_type = NT_ASSET_BLOB;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pack, blob, sizeof blob));
     TEST_ASSERT_EQUAL_UINT16(2, nt_resource_asset_count());
-    nt_resource_t resource = nt_resource_request((nt_hash64_t){entries[1].resource_id}, NT_ASSET_MESH);
+    nt_resource_t resource = nt_resource_request((nt_hash64_t){entries[1].resource_id}, NT_ASSET_BLOB);
     nt_resource_step();
     TEST_ASSERT_TRUE(nt_resource_is_ready(resource));
     nt_resource_unmount(pack);
@@ -3838,6 +3947,10 @@ int main(void) {
     RUN_TEST(test_asset_slot_reuse);
     RUN_TEST(test_asset_holes_shared_by_file_and_virtual_packs);
     RUN_TEST(test_parse_alias_ranges_preserve_activation_order);
+    RUN_TEST(test_asset_magic_mismatch_asserts);
+    RUN_TEST(test_asset_version_mismatch_asserts);
+    RUN_TEST(test_asset_shorter_than_header_asserts);
+    RUN_TEST(test_winner_gen_changes_with_each_published_winner);
     RUN_TEST(test_equal_range_self_owners_keep_independent_runtime_objects);
 
     /* Pack loading tests */
@@ -3882,6 +3995,7 @@ int main(void) {
     RUN_TEST(test_invalidate_calls_deactivator);
     RUN_TEST(test_invalidate_skips_virtual);
     RUN_TEST(test_invalidate_triggers_redownload_on_evicted_blob);
+    RUN_TEST(test_redownload_with_changed_bytes_asserts);
     RUN_TEST(test_evicted_empty_pack_reloads_without_reparse);
 
     /* Unmount with deactivation */

@@ -88,10 +88,10 @@ typedef struct {
     uint8_t blob_policy; /* nt_blob_policy_t */
     const uint8_t *blob; /* loaded pack data */
     uint32_t blob_size;  /* size of loaded blob */
+    uint32_t checksum;   /* pack CRC32 from the first parse; a re-download must match it */
     /* Metadata section (resident, survives blob eviction) */
-    uint8_t *meta_data;  /* heap-copied meta section (NULL if no metadata) */
-    uint32_t meta_size;  /* total bytes in meta section */
-    uint32_t meta_count; /* number of NtMetaEntryHeader records */
+    uint8_t *meta_data; /* heap-copied meta section (NULL if no metadata) */
+    uint32_t meta_size; /* total bytes in meta section */
     /* Loading progress */
     uint32_t bytes_received;
     uint32_t bytes_total;
@@ -124,6 +124,7 @@ typedef struct {
     uint16_t user_data_asset_idx; /* asset idx last used to build user_data (aux sync check) */
     uint8_t asset_type;           /* nt_asset_type_t */
     uint8_t state;                /* nt_asset_state_t visible to game code */
+    uint32_t winner_gen;          /* unique per published winner; bumps with every on_resolve */
     void *user_data;              /* per-slot auxiliary data (on_resolve/on_cleanup) */
 } NtResourceSlot;
 

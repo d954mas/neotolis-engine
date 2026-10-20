@@ -382,7 +382,7 @@ static void clipboard_copy_selection(const char *buffer, const nt_ui_input_state
 /* Decode one codepoint from src[off..len). On success writes *out_cp and returns the bytes
  * consumed (>=1). On a malformed/truncated run writes *out_cp=0 and returns the bytes to skip
  * (>=1) so the caller resyncs without reading OOB. */
-static uint32_t decode_one(const char *src, uint32_t off, uint32_t len, uint32_t *out_cp) {
+static uint32_t decode_one(const char *src, size_t off, size_t len, uint32_t *out_cp) {
     uint32_t state = NT_UTF8_ACCEPT;
     uint32_t cp = 0U;
     uint32_t consumed = 0U;
@@ -407,27 +407,15 @@ static uint32_t decode_one(const char *src, uint32_t off, uint32_t len, uint32_t
 
 /* Splice clipboard text at the caret (replacing any selection). Each codepoint is decoded from the
  * untrusted clipboard bytes, run through the allow-predicate, and inserted via insert_codepoint —
- * which clamps to buffer_size-1 / max_length and drops a non-fitting multi-byte codepoint WHOLE.
+ * which clamps to buffer_size-1 / max_length-1 bytes and drops a non-fitting multi-byte codepoint WHOLE.
  * A malformed lead byte is skipped one byte at a time (never read OOB). Returns the new caret. */
 static uint32_t clipboard_paste(char *buffer, size_t buffer_size, const nt_ui_input_props_t *props, nt_ui_input_state_t *st, uint32_t cur_len, bool *changed) {
-    const char *clip = nt_clipboard_get_text(); /* engine-owned, valid until the next clipboard call */
-    if (clip == NULL || clip[0] == '\0') {
+    /* Read in place: valid until the next clipboard call, and allow must not make one. */
+    const char *clip = nt_clipboard_get_text();
+    if (clip[0] == '\0') {
         return st->caret;
     }
-    /* Snapshot the clipboard into scratch: get_text storage is only valid until the next call, and
-     * insert below does not call clipboard again, but copying keeps the contract explicit + bounded.
-     * Cap to buffer_size: insert clamps to buffer_size-1 anyway, so a longer paste can't add more --
-     * the cap kills the size_t->uint32_t narrowing on a huge paste. A mid-codepoint cut is harmless
-     * (decode_one resyncs; a split trailing run is dropped). */
-    size_t raw_len = strlen(clip);
-    if (raw_len > buffer_size) {
-        raw_len = buffer_size;
-    }
-    const uint32_t clip_len = (uint32_t)raw_len;
-    char *src = (char *)nt_mem_scratch_alloc((size_t)clip_len + 1U, 1U);
-    NT_ASSERT(src != NULL && "nt_ui_input: scratch alloc failed (clipboard paste)");
-    memcpy(src, clip, (size_t)clip_len); /* clip_len, not +1: clip may be longer than the cap */
-    src[clip_len] = '\0';
+    const size_t clip_len = strlen(clip);
 
     /* Replace any selection first. */
     if (st->anchor != st->caret) {
@@ -436,13 +424,13 @@ static uint32_t clipboard_paste(char *buffer, size_t buffer_size, const nt_ui_in
         selection_span(st, &lo, &hi);
         st->caret = delete_range(buffer, lo, hi, cur_len, changed);
         st->anchor = st->caret;
-        cur_len = (uint32_t)strlen(buffer);
+        cur_len -= hi - lo;
     }
 
-    uint32_t i = 0U;
+    size_t i = 0U;
     while (i < clip_len) {
         uint32_t cp = 0U;
-        const uint32_t consumed = decode_one(src, i, clip_len, &cp);
+        const uint32_t consumed = decode_one(clip, i, clip_len, &cp);
         i += consumed;
         if (cp == 0U) {
             continue; /* malformed run skipped */
@@ -457,7 +445,7 @@ static uint32_t clipboard_paste(char *buffer, size_t buffer_size, const nt_ui_in
             break; /* buffer full: stop (clamp), the rest of the paste is dropped */
         }
         st->anchor = st->caret;
-        cur_len = (uint32_t)strlen(buffer);
+        cur_len += st->caret - before;
     }
     return st->caret;
 }

@@ -6,8 +6,8 @@
 static const char B64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 uint32_t nt_base64_encode(const uint8_t *in, uint32_t in_len, char *out, uint32_t out_cap) {
-    uint32_t need = ((in_len + 2U) / 3U) * 4U;
-    if (need > out_cap) {
+    const uint32_t groups = (in_len / 3U) + (in_len % 3U != 0U ? 1U : 0U);
+    if (groups > out_cap / 4U) {
         return 0U; /* fail-early: never write past out_cap. */
     }
     uint32_t o = 0U;

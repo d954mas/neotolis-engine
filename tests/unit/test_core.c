@@ -10,20 +10,20 @@ void tearDown(void) {
 }
 
 void test_engine_init_succeeds(void) {
-    nt_engine_config_t config = {.app_name = "test", .version = 1};
+    nt_engine_config_t config = {.app_name = "test"};
     TEST_ASSERT_EQUAL(NT_OK, nt_engine_init(&config));
 }
 
 void test_engine_init_null_config_fails(void) { TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, nt_engine_init(NULL)); }
 
 void test_engine_double_init_fails(void) {
-    nt_engine_config_t config = {.app_name = "test", .version = 1};
+    nt_engine_config_t config = {.app_name = "test"};
     TEST_ASSERT_EQUAL(NT_OK, nt_engine_init(&config));
     TEST_ASSERT_EQUAL(NT_ERR_INIT_FAILED, nt_engine_init(&config));
 }
 
 void test_engine_shutdown_idempotent(void) {
-    nt_engine_config_t config = {.app_name = "test", .version = 1};
+    nt_engine_config_t config = {.app_name = "test"};
     TEST_ASSERT_EQUAL(NT_OK, nt_engine_init(&config));
     nt_engine_shutdown();
     /* Second shutdown should not crash */

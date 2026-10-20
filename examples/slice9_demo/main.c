@@ -43,7 +43,7 @@
 #include "memory/nt_mem_scratch.h"
 #include "nt_pack_format.h"
 
-#include "slice9_demo_assets.h"
+#include "slice9_demo.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -548,7 +548,6 @@ int main(int argc, char *argv[]) {
 
     nt_engine_config_t config = {0};
     config.app_name = "slice9_demo";
-    config.version = 1;
 
     if (nt_engine_init(&config) != NT_OK) {
         return 1;

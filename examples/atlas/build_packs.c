@@ -81,10 +81,6 @@ int main(int argc, char *argv[]) {
     MKDIR(out_dir);
     MKDIR(HEADER_DIR);
 
-    /* Header paths for merge */
-    char pack_hdr[512];
-    (void)snprintf(pack_hdr, sizeof(pack_hdr), "%s/atlas_demo.h", HEADER_DIR);
-
     char path[512];
     (void)snprintf(path, sizeof(path), "%s/atlas_demo.ntpack", out_dir);
     NtBuilderContext *ctx = nt_builder_start_pack(path);
@@ -160,12 +156,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     nt_builder_free_pack(ctx);
-
-    /* Generate combined header */
-    const char *headers[] = {pack_hdr};
-    char combined[512];
-    (void)snprintf(combined, sizeof(combined), "%s/atlas_assets.h", HEADER_DIR);
-    nt_builder_merge_headers(headers, 1, combined);
 
     if (incremental) {
         nt_builder_write_record(out_dir);

@@ -38,7 +38,8 @@
 #include "../shared/nt_example_frames.h"
 #include "math/nt_math.h"
 #include "nt_pack_format.h"
-#include "text_assets.h"
+#include "text_base.h"
+#include "text_cjk.h"
 
 #include <math.h>
 #include <string.h>
@@ -409,7 +410,6 @@ int main(int argc, char *argv[]) {
     /* 1. Engine init */
     nt_engine_config_t config = {0};
     config.app_name = "text_demo";
-    config.version = 1;
 
     nt_result_t result = nt_engine_init(&config);
     if (result != NT_OK) {

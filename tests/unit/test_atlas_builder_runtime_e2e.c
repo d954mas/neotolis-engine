@@ -124,9 +124,8 @@ void test_builder_pack_resolves_in_runtime_atlas(void) {
     const uint8_t *blob = atlas_dedup_find_asset(pack, pack_len, (uint8_t)NT_ASSET_ATLAS, 0, &blob_size);
     TEST_ASSERT_NOT_NULL_MESSAGE(blob, "pack must contain the atlas asset");
 
-    /* The REAL builder blob must pass the REAL runtime validator on both entry
-     * points — this is the assertion no synthetic-blob suite can make. */
-    TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(blob, blob_size), "builder blob must activate in the runtime");
+    /* The REAL builder blob must pass the REAL runtime layout asserts — this is
+     * the assertion no synthetic-blob suite can make. */
     nt_atlas_test_drive_resolve(blob, blob_size, &s_user_data);
     TEST_ASSERT_NOT_NULL_MESSAGE(s_user_data, "builder blob must resolve in the runtime");
     const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
@@ -238,7 +237,6 @@ void test_builder_ready_positions_follow_ppu_on_cache_hit(void) {
         uint32_t blob_size = 0;
         const uint8_t *blob = atlas_dedup_find_asset(pack, pack_len, (uint8_t)NT_ASSET_ATLAS, 0, &blob_size);
         TEST_ASSERT_NOT_NULL(blob);
-        TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_atlas_test_activate(blob, blob_size));
         nt_atlas_test_drive_resolve(blob, blob_size, &s_user_data);
         free(pack);
 

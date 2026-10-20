@@ -184,13 +184,6 @@ nt_result_t nt_sprite_comp_init(const nt_sprite_comp_desc_t *desc) {
         nt_sprite_comp_shutdown();
         return NT_ERR_INIT_FAILED;
     }
-    /* calloc leaves slice9_scale[*] == 0.0F; sprite_default sets 1.0F per-entry
-     * at add time, but pre-add slots also need a sane value so view dumps don't
-     * trip the >0 contract. */
-    for (uint16_t i = 0; i < cap; i++) {
-        s_slice9_scale[i] = 1.0F;
-    }
-
     /* Register last. No nt_entity_unregister_storage exists, so if this ran before
      * the SoA allocations and any of them failed, shutdown could not un-publish the
      * callbacks — they would dangle with freed state. Keep register after the final

@@ -64,7 +64,6 @@
     @NT_SHELL_FULLSCREEN_BLOCK@
 
     <script>
-@NT_SHELL_SIMD_LOADER_JS@
         var Module = {
             canvas: document.getElementById('canvas')
         };

@@ -9,14 +9,12 @@
 /*
  * nt_skeletal_assets — the NSKL / NSKN / NANM adapters.
  *
- * Each activator validates the structure of the whole pack payload, copies it
- * into one allocation and points a runtime view at the copy: the wire layout is
- * the runtime layout (skeletal spec, Builder, codec, wire formats), so nothing
- * is transposed or re-indexed. The pack blob is never read again, so any blob
- * policy may drop it after activation. A structurally broken payload logs one
- * warning and returns 0, which leaves the asset FAILED: a header rejection
- * allocates nothing; the clip's joint-table rejection takes and releases a
- * slot. Structure is what a view needs to address memory, and the one float
+ * Each activator asserts the structure of the whole pack payload (packs are
+ * trusted builder output), copies it into one allocation and points a runtime
+ * view at the copy: the wire layout is the runtime layout (skeletal spec,
+ * Builder, codec, wire formats), so nothing is transposed or re-indexed. The
+ * pack blob is never read again, so any blob policy may drop it after
+ * activation. Structure is what a view needs to address memory, and the one float
  * read is the grid shape (sample_count, a finite duration >= 0); no value is
  * checked here (the locked rule of the same spec section). Payload arrays are
  * read in place from the malloc copy, whose alignment carries them.

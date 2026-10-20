@@ -2249,7 +2249,7 @@ int main(int argc, char **argv) {
     s_light = s_initial_light;
     noise_init();
     sphere_init();
-    if (nt_engine_init(&(nt_engine_config_t){.app_name = "asteroids", .version = 1}) != NT_OK) {
+    if (nt_engine_init(&(nt_engine_config_t){.app_name = "asteroids"}) != NT_OK) {
         return 1;
     }
     nt_log_info("engine %s", nt_version_engine());

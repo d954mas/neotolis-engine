@@ -668,6 +668,38 @@ static void test_clipboard_paste_filtered(void) {
     TEST_ASSERT_EQUAL_STRING("123", buf);
 }
 
+static void test_clipboard_paste_filters_before_capacity_clamp(void) {
+    char buf[8] = {0};
+    const uint32_t id = nt_ui_id("f");
+    s_props.allow = nt_ui_filter_numeric;
+    warmup_focus(id, buf, sizeof buf);
+    nt_clipboard_set_text("aaaaaaaa123456789");
+    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_V);
+    TEST_ASSERT_EQUAL_STRING("1234567", buf);
+}
+
+/* Paste stops at max_length (NUL-inclusive) inside a larger buffer. */
+static void test_clipboard_paste_stops_at_max_length(void) {
+    char buf[32] = {0};
+    const uint32_t id = nt_ui_id("f");
+    s_props.max_length = 4U;
+    warmup_focus(id, buf, sizeof buf);
+    nt_clipboard_set_text("123456");
+    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_V);
+    TEST_ASSERT_EQUAL_STRING("123", buf);
+}
+
+/* Replacing a selection must shrink the tracked length, or the paste clamps against the old text. */
+static void test_clipboard_paste_over_selection_fills_capacity(void) {
+    char buf[8] = "abcdef";
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf);
+    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_A);
+    nt_clipboard_set_text("1234567");
+    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_V);
+    TEST_ASSERT_EQUAL_STRING("1234567", buf);
+}
+
 /* ---- Test 21: paste replaces a non-empty selection. ---- */
 static void test_clipboard_paste_replaces_selection(void) {
     char buf[32];
@@ -1486,7 +1518,10 @@ int main(void) {
     RUN_TEST(test_clipboard_paste_clamp);
     RUN_TEST(test_clipboard_paste_clamp_no_split);
     RUN_TEST(test_clipboard_paste_filtered);
+    RUN_TEST(test_clipboard_paste_filters_before_capacity_clamp);
     RUN_TEST(test_clipboard_paste_replaces_selection);
+    RUN_TEST(test_clipboard_paste_over_selection_fills_capacity);
+    RUN_TEST(test_clipboard_paste_stops_at_max_length);
     RUN_TEST(test_password_mask_render);
     RUN_TEST(test_password_buffer_and_keyboard);
     RUN_TEST(test_delete_key_right);

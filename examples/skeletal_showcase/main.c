@@ -69,7 +69,8 @@
 
 #include "../shared/nt_example_frames.h"
 #include "clay.h"
-#include "skeletal_showcase_assets.h"
+#include "skeletal_showcase.h"
+#include "skeletal_showcase_clips.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -2741,7 +2742,7 @@ static void frame(void) {
 }
 
 int main(int argc, char *argv[]) {
-    nt_engine_config_t config = {.app_name = "skeletal_showcase", .version = 1};
+    nt_engine_config_t config = {.app_name = "skeletal_showcase"};
     if (nt_engine_init(&config) != NT_OK) {
         return 1;
     }

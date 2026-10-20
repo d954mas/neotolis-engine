@@ -306,7 +306,7 @@ coverage, CRT pins, the GL call funnel (`scripts/check_gl_calls.py`) and test re
 checks changed files with clang-format/clang-tidy. A changed header also lints
 every TU that includes it (native-debug's ninja deps) plus the DevAPI-only TUs;
 a header no deps mention, and `--full`, lint the whole tree. The check scripts' own tests run when `scripts/`, `cmake/` or
-`tools/devapi/` change; CI runs them on every push. The three atlas benchmark guards run when builder/atlas paths change, or
+`tools/devapi/` change; CI runs them on every push. The atlas geometry tests run when builder/atlas paths change, or
 always with `--push`/`--full`. Warm checks are much faster than the initial pack
 encode. Vendored dependencies follow upstream style and are excluded from
 format/tidy; review changes to them separately.
@@ -341,8 +341,6 @@ The wasm jobs build only the paired presets: a paired `index.wasm` is the
 baseline build, so smoke, ctest and symbol checks run there. Narrow configures
 whose tests never use HTTP (Basis, font and Clay rows, goldens, the runtime
 diagnostics matrix) pass `-DNT_HTTP_CURL=OFF`: vendored curl doubles configure time.
-`test_atlas_hull_visual_report` runs in `native-release` only; under the debug
-sanitizers it takes minutes.
 Shared job setup (LFS, toolchain, emsdk, ccache) lives in
 `.github/actions/setup`; emsdk installs into a cached `~/emsdk`, a fixed path
 that keeps wasm ccache keys stable across runs.
@@ -420,6 +418,10 @@ specified in the UI chapters linked above.
   `Testing/Temporary/LastTestsFailed.log`; a truncated terminal tail is insufficient.
 - `UNITY_EXCLUDE_FLOAT` is defined: Unity float assertions compile to nothing.
   Use meaningful comparisons, such as integer casts for small exact values.
+- Sanitizer proofs exist only in native Debug builds outside Windows Clang:
+  `ctest --preset native-debug --no-tests=error -R '^sanitizer_proof_(asan|ubsan)$'`.
+  ASan and UBSan run in separate processes and require their own diagnostic; an
+  unrelated failure does not pass. Windows Clang excludes these targets.
 - A failing `NT_BUILD_ASSERT` aborts the process. Run deliberate assert-trip tests
   directly. If a dead test still locks its executable on Windows, use
   `taskkill //F //IM <test>.exe` from Git Bash before relinking.

@@ -54,14 +54,6 @@ int main(int argc, char *argv[]) {
         {"TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0, NT_LOC_UV0},
     };
 
-    /* Per-pack header paths for merge */
-    char base_hdr[512];
-    char pixel_hdr[512];
-    char hires_hdr[512];
-    (void)snprintf(base_hdr, sizeof(base_hdr), "%s/base.h", HEADER_DIR);
-    (void)snprintf(pixel_hdr, sizeof(pixel_hdr), "%s/lenna_pixel.h", HEADER_DIR);
-    (void)snprintf(hires_hdr, sizeof(hires_hdr), "%s/lenna_hires.h", HEADER_DIR);
-
     /* ---- Pack 0: base (cube mesh + shaders) ---- */
     {
         NtBuilderContext *ctx = nt_builder_start_pack(pack_path(out_dir, "base.ntpack"));
@@ -121,12 +113,6 @@ int main(int argc, char *argv[]) {
         }
         (void)printf("Built: lenna_hires.ntpack\n");
     }
-
-    /* Generate combined header from per-pack .h files */
-    const char *headers[] = {base_hdr, pixel_hdr, hires_hdr};
-    char combined[512];
-    (void)snprintf(combined, sizeof(combined), "%s/tq_assets.h", HEADER_DIR);
-    nt_builder_merge_headers(headers, 3, combined);
 
     nt_builder_write_record(out_dir);
     (void)printf("\nDone.\n");

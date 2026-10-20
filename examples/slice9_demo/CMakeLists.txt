@@ -11,7 +11,7 @@ target_link_libraries(slice9_demo PRIVATE
     nt_sprite_renderer nt_text_renderer nt_font nt_ui
     nt_render nt_hash nt_mem_scratch nt_debug_overlay nt_metrics
 )
-# Generated asset headers from builder (slice9_demo_assets.h etc.)
+# Generated per-pack asset headers from builder
 target_include_directories(slice9_demo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
 
 # nt_ui calls nt_clipboard_* (no text field here, but the symbols must resolve); stub = no exports.

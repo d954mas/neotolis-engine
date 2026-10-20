@@ -24,7 +24,6 @@ typedef struct {
     nt_glyph_cache_entry_t entry;
     uint32_t lru_frame;
     int16_t key_offset; /* embolden weight bucket (font units); part of the cache key with entry.codepoint */
-    uint8_t resource_index;
 } nt_font_cache_slot_t;
 
 /* Opaque forward-decl in nt_font_hot.h; the typedef is duplicated there.
@@ -36,7 +35,7 @@ struct nt_font_slot_s {
     bool metrics_set;
 
     nt_resource_t resources[NT_FONT_MAX_SOURCES_PER_FONT];
-    uint32_t resource_handles[NT_FONT_MAX_SOURCES_PER_FONT];
+    uint32_t resource_gens[NT_FONT_MAX_SOURCES_PER_FONT];
     uint8_t resource_count;
 
     nt_texture_t curve_texture; /* RGBA16F, NT_FONT_GLYPH_TEXELS x max_glyphs: row i = cache slot i */

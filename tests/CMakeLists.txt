@@ -148,19 +148,22 @@ if(NOT EMSCRIPTEN)
     # --- Sanitizer proof test ---
     # Triggers UB to prove ASan+UBSan are detecting. Skipped on Windows+Clang
     # where sanitizers are disabled (clang interception_win can't patch UCRT).
-    if(NOT (WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "Clang"))
+    # Sanitizers are Debug-only, so the proof exists only there.
+    if(NOT (WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "Clang") AND CMAKE_BUILD_TYPE STREQUAL "Debug")
         add_executable(test_sanitizer_proof unit/test_sanitizer_proof.c)
-        target_link_libraries(test_sanitizer_proof PRIVATE nt_core nt_log_stub unity)
-
         nt_set_warning_flags(test_sanitizer_proof)
         nt_set_sanitizer_flags(test_sanitizer_proof)
-
         set_target_properties(test_sanitizer_proof PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
         )
-
-        add_test(NAME sanitizer_proof COMMAND test_sanitizer_proof)
-        set_tests_properties(sanitizer_proof PROPERTIES WILL_FAIL TRUE)
+        # Only the sanitizer's own diagnostic can satisfy the output oracle.
+        foreach(_sanitizer asan ubsan)
+            add_test(NAME sanitizer_proof_${_sanitizer} COMMAND test_sanitizer_proof ${_sanitizer})
+        endforeach()
+        set_tests_properties(sanitizer_proof_asan PROPERTIES
+            PASS_REGULAR_EXPRESSION "AddressSanitizer: heap-buffer-overflow")
+        set_tests_properties(sanitizer_proof_ubsan PROPERTIES
+            PASS_REGULAR_EXPRESSION "runtime error: signed integer overflow")
     endif()
 
     # --- Swap demo tests ---
@@ -651,7 +654,7 @@ if(NOT EMSCRIPTEN)
     add_test(NAME test_sort COMMAND test_sort)
 
     # --- Font module tests ---
-    add_executable(test_font unit/test_font.c)
+    add_executable(test_font unit/test_font.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_font PRIVATE nt_font nt_gfx_fake nt_basisu_transcoder_stub nt_resource nt_hash nt_pool nt_http_stub nt_fs_stub nt_log stb_truetype unity nt_meshwire_stub)
     target_compile_definitions(test_font PRIVATE _CRT_SECURE_NO_WARNINGS NT_LILITA_TTF="${CMAKE_SOURCE_DIR}/assets/fonts/LilitaOne-RussianChineseKo.ttf")
     nt_setup_test_target(test_font)
@@ -659,7 +662,7 @@ if(NOT EMSCRIPTEN)
     # --- Font measure benchmark ---
     # Measures hit vs miss ns/call for the nt_font_measure_n LRU cache.
     # Uses nt_time_nanos() for the ns clock (same module used by test_time).
-    add_executable(test_nt_font_measure_bench unit/test_nt_font_measure_bench.c)
+    add_executable(test_nt_font_measure_bench unit/test_nt_font_measure_bench.c unit/test_helpers/nt_test_font_blob.c)
     target_link_libraries(test_nt_font_measure_bench PRIVATE nt_font nt_gfx_fake nt_basisu_transcoder_stub nt_resource nt_hash nt_pool nt_time nt_http_stub nt_fs_stub nt_log_stub unity nt_meshwire_stub)
     target_compile_definitions(test_nt_font_measure_bench PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_font_measure_bench)
@@ -1113,20 +1116,16 @@ if(NOT EMSCRIPTEN)
     # Builder assert tests longjmp mid-pipeline; leaked allocations are expected.
     set_tests_properties(test_builder PROPERTIES ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0")
 
-    add_executable(test_atlas_hull_visual_report
-        unit/test_atlas_hull_visual_report.c
-        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/hull_visual_report.c
-        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c
-    )
-    target_link_libraries(test_atlas_hull_visual_report PRIVATE nt_builder nt_log unity cjson nt_meshwire)
-    target_include_directories(test_atlas_hull_visual_report PRIVATE
+    # Golden hull vertex totals per public area budget on real sprite art.
+    add_executable(test_atlas_hull_budget unit/test_atlas_hull_budget.c)
+    target_link_libraries(test_atlas_hull_budget PRIVATE nt_builder nt_log unity nt_meshwire)
+    target_include_directories(test_atlas_hull_budget PRIVATE
         ${CMAKE_SOURCE_DIR}/shared/include
         ${CMAKE_SOURCE_DIR}/tools/builder
-        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
+        ${CMAKE_CURRENT_SOURCE_DIR}/unit
     )
-    target_compile_definitions(test_atlas_hull_visual_report PRIVATE _CRT_SECURE_NO_WARNINGS)
-    # Renders the full visual-acceptance sheet; >120 s on slow CI runners.
-    nt_setup_test_target(test_atlas_hull_visual_report WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" TIMEOUT 600)
+    target_compile_definitions(test_atlas_hull_budget PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_hull_budget WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     # Proves the graceful transparent-after-trim error path is leak-free:
     # runs under live LSan, no detect_leaks=0 masking.
@@ -1245,11 +1244,6 @@ if(NOT EMSCRIPTEN)
     endif()
     if(NT_GIT_BASH_EXECUTABLE)
         add_test(
-            NAME test_bench_hull_tolerance_guard
-            COMMAND "${NT_GIT_BASH_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/test_bench_hull_tolerance_guard.sh"
-            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        )
-        add_test(
             NAME test_atlas_transform_sweep_guard
             COMMAND "${NT_GIT_BASH_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/test_atlas_transform_sweep_guard.sh"
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
@@ -1259,15 +1253,11 @@ if(NOT EMSCRIPTEN)
             COMMAND "${NT_GIT_BASH_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/test_atlas_bench_transforms_e2e.sh"
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         )
-        set_tests_properties(test_bench_hull_tolerance_guard PROPERTIES
-            ENVIRONMENT "NT_ATLAS_BENCH_EXE=${CMAKE_SOURCE_DIR}/build/tools/research/${NT_PRESET_NAME}/atlas_bench${CMAKE_EXECUTABLE_SUFFIX}"
-        )
         set_tests_properties(test_atlas_bench_transforms_e2e PROPERTIES
             ENVIRONMENT "NT_ATLAS_BENCH_EXE=${CMAKE_SOURCE_DIR}/build/tools/research/${NT_PRESET_NAME}/atlas_bench${CMAKE_EXECUTABLE_SUFFIX}"
         )
         # Bench-driven shell guards; generous ceiling still catches an infinite hang.
-        set_tests_properties(test_bench_hull_tolerance_guard test_atlas_transform_sweep_guard
-            test_atlas_bench_transforms_e2e PROPERTIES TIMEOUT 600)
+        set_tests_properties(test_atlas_transform_sweep_guard test_atlas_bench_transforms_e2e PROPERTIES TIMEOUT 600)
     else()
         message(WARNING "Git Bash not found; native shell guards are NOT registered")
     endif()
@@ -1600,15 +1590,6 @@ endif()
 # --- WASM smoke test (Node.js loading via -sMODULARIZE) ---
 if(EMSCRIPTEN)
     find_program(NT_NODE_EXECUTABLE NAMES node nodejs)
-
-    if(NT_NODE_EXECUTABLE)
-        add_test(
-            NAME test_wasm_simd_loader
-            COMMAND
-                "${NT_NODE_EXECUTABLE}"
-                "${CMAKE_CURRENT_SOURCE_DIR}/wasm/simd_loader_test.js"
-        )
-    endif()
 
     add_executable(wasm_smoke wasm/smoke_entry.c)
     # nt_core links nt_log_interface (header only); the exe picks the impl. Smoke
