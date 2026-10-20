@@ -1210,6 +1210,7 @@ uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
 }
 
 /* Log shader/program info line-by-line (query actual length, no fixed buffer) */
+#if NT_LOG_MIN_LEVEL <= 2
 static void nt_gfx_gl_log_lines(const char *log) {
     const char *line = log;
     for (const char *p = log; *p; p++) {
@@ -1257,6 +1258,8 @@ static void nt_gfx_gl_log_program(uint32_t program) {
     free(log);
 }
 
+#endif
+
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle) {
     /* Zero reaches here from nt_gfx_shutdown's sweep over free slots, and that
      * sweep also runs when nt_gfx_init failed before glad loaded an entry point. */
@@ -1267,11 +1270,19 @@ void nt_gfx_backend_destroy_shader(uint32_t backend_handle) {
 }
 
 /* Compile errors surface only here: shader creation never reads COMPILE_STATUS. */
-static void nt_gfx_gl_log_link_failure(GLuint program) {
-    nt_gfx_gl_log_program(program);
+static void nt_gfx_gl_log_link_failure(const nt_gfx_gl_program_t *rec) {
+#if NT_LOG_MIN_LEVEL <= 2
+    nt_gfx_gl_log_program(rec->program);
+    GLint vs_compile = -1;
+    GLint fs_compile = -1;
     GLsizei count = 0;
     GLuint stages[2] = {0, 0};
-    NT_GL(glGetAttachedShaders, program, 2, &count, stages);
+#ifdef NT_PLATFORM_WEB
+    NT_GL_ISSUED(glGetAttachedShaders, rec->program, 2, (const void *)&count, (const void *)stages);
+    count = nt_gfx_gl_ctx_attached_shaders(rec->program, stages);
+#else
+    NT_GL(glGetAttachedShaders, rec->program, 2, &count, stages);
+#endif
     for (GLsizei i = 0; i < count; i++) {
         /* Emscripten drops a deleted stage's name mapping, and reading its log would throw. */
         if (!NT_GL_RET(glIsShader, stages[i])) {
@@ -1279,8 +1290,28 @@ static void nt_gfx_gl_log_link_failure(GLuint program) {
         }
         GLint type = 0;
         NT_GL(glGetShaderiv, stages[i], GL_SHADER_TYPE, &type);
+        GLint *compiled = NULL;
+        if (type == GL_VERTEX_SHADER) {
+            compiled = &vs_compile;
+        } else if (type == GL_FRAGMENT_SHADER) {
+            compiled = &fs_compile;
+        }
+        if (compiled != NULL) {
+#ifdef NT_PLATFORM_WEB
+            NT_GL_ISSUED(glGetShaderiv, stages[i], GL_COMPILE_STATUS, (const void *)compiled);
+            *compiled = nt_gfx_gl_ctx_shader_compile_status(stages[i]);
+#else
+            NT_GL(glGetShaderiv, stages[i], GL_COMPILE_STATUS, compiled);
+#endif
+        }
         nt_gfx_gl_log_shader(stages[i], type == GL_VERTEX_SHADER ? "vertex" : "fragment");
     }
+    /* After driver logs, so a tail-retaining journal keeps identity and stage results together. */
+    NT_LOG_ERROR("program %u/GL %u link: link failed: gl_error=0x%X vs_compile=%d fs_compile=%d \"%s\"", (unsigned)(rec - s_programs), rec->program, NT_GL_RET0(glGetError), vs_compile, fs_compile,
+                 rec->label != NULL && rec->label[0] != '\0' ? rec->label : "<unnamed>");
+#else
+    (void)rec;
+#endif
 }
 
 static void nt_gfx_gl_write_array_index(char *suffix, GLint element) {
@@ -1544,9 +1575,7 @@ nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll
         /* A loss fails the link before its event arrives; the caller latches it. */
         const bool lost = nt_gfx_gl_ctx_query_lost();
         if (!lost) {
-            nt_gfx_gl_log_link_failure(rec->program);
-            /* After the driver lines, so a journal that keeps its tail keeps the identity. */
-            log_program_failure(rec, "link", "link failed", "gl_error", NT_GL_RET0(glGetError));
+            nt_gfx_gl_log_link_failure(rec);
         }
         NT_ASSERT(lost && "program link failed on a live context");
         return NT_GFX_RESULT_CONTEXT_LOST;

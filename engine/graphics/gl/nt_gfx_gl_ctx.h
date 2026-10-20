@@ -17,6 +17,12 @@ bool nt_gfx_gl_ctx_take_loss(void);
 /* Asks the browser directly; true without a context. Cold paths only. */
 bool nt_gfx_gl_ctx_query_lost(void);
 
+#ifdef NT_PLATFORM_WEB
+/* Emscripten's GL wrappers assert on unmapped attached stages and convert null status to false. */
+int nt_gfx_gl_ctx_attached_shaders(uint32_t program, uint32_t stages[2]);
+int nt_gfx_gl_ctx_shader_compile_status(uint32_t shader);
+#endif
+
 /* nt_gfx_gl_ctx_detect_gpu_caps is declared in graphics/nt_gfx_internal.h —
  * the test backend also implements it, so the declaration lives at the
  * shared internal layer, not the GL-only header. */

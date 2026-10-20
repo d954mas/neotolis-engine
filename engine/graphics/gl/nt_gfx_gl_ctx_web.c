@@ -18,6 +18,26 @@ static bool s_loss_pending; /* set by a lost event until begin_frame takes it */
 
 static void capture_device_info(void);
 
+#if NT_LOG_MIN_LEVEL <= 2
+/* clang-format off */
+EM_JS(int, nt_gfx_gl_ctx_attached_shaders, (uint32_t program, uint32_t *stages), {
+    var attached = GL.currentContext.GLctx.getAttachedShaders(GL.programs[program]);
+    if (!attached) return 0;
+    var count = 0;
+    for (var i = 0; i < attached.length && count < 2; ++i) {
+        var id = GL.shaders.indexOf(attached[i]);
+        if (id > 0) HEAPU32[(stages >> 2) + count++] = id;
+    }
+    return count;
+})
+EM_JS(int, nt_gfx_gl_ctx_shader_compile_status, (uint32_t shader), {
+    var ctx = GL.currentContext.GLctx;
+    var status = ctx.getShaderParameter(GL.shaders[shader], ctx.COMPILE_STATUS);
+    return status === null ? -1 : +status;
+})
+/* clang-format on */
+#endif
+
 /* The browser explains a refusal only through a creation-error event fired synchronously inside getContext. */
 /* clang-format off */
 EM_JS(EMSCRIPTEN_WEBGL_CONTEXT_HANDLE, nt_gfx_js_create_context, (const char *target, const EmscriptenWebGLContextAttributes *attrs, char *status, unsigned int cap), {
