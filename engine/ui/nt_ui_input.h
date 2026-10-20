@@ -21,8 +21,8 @@ typedef struct nt_ui_context nt_ui_context_t;
 extern const nt_ui_widget_def_t NT_UI_INPUT_DEF;
 
 /* Codepoint allow-predicate, invoked synchronously during the widget call. Returns true to keep
- * the codepoint, false to drop it. Clipboard reads/writes are allowed. NULL props->allow allows
- * any printable (non-control) codepoint. */
+ * the codepoint, false to drop it. Must not call nt_clipboard_*: paste reads the clipboard text
+ * in place. NULL props->allow allows any printable (non-control) codepoint. */
 typedef bool (*nt_ui_char_filter_fn)(uint32_t codepoint);
 
 /* Mobile soft-keyboard hint. Maps to web inputmode / type=password; native no-op. */
@@ -91,8 +91,6 @@ nt_ui_input_style_t nt_ui_input_style_defaults(void);
  *
  * Returns true the frame the buffer mutated (on_change). Pass on_submit non-NULL to receive
  * an Enter event (fires after the frame's edits). enabled=false = inert occluder, no edit.
- * A non-empty clipboard paste allocates one temporary source copy and frees it before return;
- * this discrete input action is outside steady-frame editing work. Allocation failure asserts.
  *
  * props carries per-field behaviour (allow filter, max_length, keyboard, password) and the
  * placeholder CONTENT (props->placeholder; NULL or "" = no hint). The hint's dimmed appearance

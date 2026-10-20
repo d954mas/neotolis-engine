@@ -1,7 +1,6 @@
 #include "ui/nt_ui_input.h"
 
 #include <math.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "clipboard/nt_clipboard.h"
@@ -415,11 +414,8 @@ static uint32_t clipboard_paste(char *buffer, size_t buffer_size, const nt_ui_in
     if (clip == NULL || clip[0] == '\0') {
         return st->caret;
     }
+    /* Read in place: nothing below calls the clipboard, and allow must not either. */
     const size_t clip_len = strlen(clip);
-    /* The allow predicate may call the clipboard again and invalidate clip. */
-    char *src = (char *)malloc(clip_len + 1U);
-    NT_ASSERT(src != NULL && "nt_ui_input: clipboard snapshot allocation failed");
-    memcpy(src, clip, clip_len + 1U);
 
     /* Replace any selection first. */
     if (st->anchor != st->caret) {
@@ -434,7 +430,7 @@ static uint32_t clipboard_paste(char *buffer, size_t buffer_size, const nt_ui_in
     size_t i = 0U;
     while (i < clip_len) {
         uint32_t cp = 0U;
-        const uint32_t consumed = decode_one(src, i, clip_len, &cp);
+        const uint32_t consumed = decode_one(clip, i, clip_len, &cp);
         i += consumed;
         if (cp == 0U) {
             continue; /* malformed run skipped */
@@ -451,7 +447,6 @@ static uint32_t clipboard_paste(char *buffer, size_t buffer_size, const nt_ui_in
         st->anchor = st->caret;
         cur_len = (uint32_t)strlen(buffer);
     }
-    free(src);
     return st->caret;
 }
 

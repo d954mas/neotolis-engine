@@ -719,22 +719,6 @@ static void test_clipboard_paste_filtered_prefix_replaces_selection(void) {
                              buf);
 }
 
-static bool filter_numeric_and_replace_clipboard(uint32_t cp) {
-    (void)nt_clipboard_get_text();
-    nt_clipboard_set_text("999");
-    return nt_ui_filter_numeric(cp);
-}
-
-static void test_clipboard_paste_filter_can_replace_clipboard(void) {
-    char buf[8] = {0};
-    const uint32_t id = nt_ui_id("f");
-    s_props.allow = filter_numeric_and_replace_clipboard;
-    warmup_focus(id, buf, sizeof buf);
-    nt_clipboard_set_text("123");
-    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_V);
-    TEST_ASSERT_EQUAL_STRING("123", buf);
-}
-
 /* ---- Test 21: paste replaces a non-empty selection. ---- */
 static void test_clipboard_paste_replaces_selection(void) {
     char buf[32];
@@ -1556,7 +1540,6 @@ int main(void) {
     RUN_TEST(test_clipboard_paste_filters_before_capacity_clamp);
     RUN_TEST(test_clipboard_paste_source_exceeds_frame_scratch);
     RUN_TEST(test_clipboard_paste_filtered_prefix_replaces_selection);
-    RUN_TEST(test_clipboard_paste_filter_can_replace_clipboard);
     RUN_TEST(test_clipboard_paste_replaces_selection);
     RUN_TEST(test_password_mask_render);
     RUN_TEST(test_password_buffer_and_keyboard);

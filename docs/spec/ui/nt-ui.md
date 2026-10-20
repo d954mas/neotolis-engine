@@ -450,15 +450,12 @@ element `userData`, which the walker reads for layer+transform), so the line
 scrolls to keep the caret visible while clipping to the field box. Cut is a no-op
 when `nt_clipboard_available()` is false (no silent delete-without-copy).
 
-A non-empty paste is a discrete input action. Before invoking the allow-predicate,
-it copies the full text returned by the clipboard backend into temporary heap
-storage and frees that copy before the widget call returns; allocation failure
-asserts. The predicate may read or replace the clipboard without invalidating
-the in-progress paste. This allocation occurs only on the paste key edge, outside
-steady-frame editing work, and does not consume frame scratch. The temporary
-copy uses source byte length plus one; destination capacity and `max_length`
-limit the filtered result, not the clipboard source. Both destination limits
-include the NUL byte, and clipping never splits a UTF-8 codepoint.
+Paste reads the clipboard text in place, without a copy, heap or frame scratch,
+so the allow-predicate must not call the clipboard. The predicate filters the
+whole source before the destination limits apply: destination capacity and
+`max_length` limit the filtered result, not the clipboard source. Both
+destination limits include the NUL byte, and clipping never splits a UTF-8
+codepoint.
 
 ## Consolidated interaction events
 
