@@ -1,5 +1,5 @@
 # Size Report: bunnymark (wasm-analysis-paired)
-# Commit: 418c9e3
+# Commit: 4ea9de0
 
 ## WASM Section Sizes
 
@@ -7,28 +7,28 @@ Section                Size
 ---------------- ----------
 Type                 256 B
 Import               633 B
-Function             189 B
+Function             188 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                71 B
 Elem                  96 B
-Code              216648 B
-Data              208952 B
-Custom             11139 B
+Code              216651 B
+Data              208740 B
+Custom             11116 B
 ---------------- ----------
-TOTAL             438005 B
+TOTAL             437772 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-35283 B   frame
+35489 B   frame
 31590 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
 27353 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 17781 B   nt_gfx_activate_texture
  6150 B   main
- 5759 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
+ 5758 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
  4533 B   basist::transcode_uastc_to_etc1(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
  4132 B   upload_glyph
  3914 B   basist::pack_eac(basist::eac_block&, unsigned char const*, unsigned int)
@@ -39,7 +39,7 @@ TOTAL             438005 B
  2624 B   nt_http_request_ex
  2588 B   basist::huffman_decoding_table::init(unsigned int, unsigned char const*, unsigned int)
  2536 B   basist::pack_eac_high_quality(basist::eac_block&, unsigned char const*, unsigned int)
- 2472 B   basist::unpack_uastc(unsigned int, unsigned int, basist::color32 const&, basist::astc_block_desc const&, basist::color32*, bool)
+ 2471 B   basist::unpack_uastc(unsigned int, unsigned int, basist::color32 const&, basist::astc_block_desc const&, basist::color32*, bool)
  2428 B   printf_core
  1678 B   basist::bitwise_decoder::read_huffman_table(basist::huffman_decoding_table&)
  1678 B   nt_font_lookup_glyph_offset
@@ -54,8 +54,8 @@ TOTAL             438005 B
  1100 B   nt_hash32_str
  1076 B   spawn_one_defold
 
-Total functions: 187
-Total code size: 216339 B
+Total functions: 186
+Total code size: 216344 B
 
 ## Built Engine Archives
 
@@ -129,4 +129,4 @@ TOTAL (archives)         2661634 B
 ## Data Segments Summary
 
 Segments: 156
-Total data size: 207782 B
+Total data size: 207574 B
