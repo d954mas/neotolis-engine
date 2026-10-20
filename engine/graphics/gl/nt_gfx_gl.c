@@ -1258,6 +1258,119 @@ static void nt_gfx_gl_log_program(uint32_t program) {
     free(log);
 }
 
+#ifdef NT_PLATFORM_WEB
+#define NT_GFX_GL_TRANSLATED_SOURCE_BYTES 2049U
+#define NT_GFX_GL_TRANSLATED_ENCODED_BYTES 2048U
+#define NT_GFX_GL_TRANSLATED_CHUNK_BYTES (NT_LOG_BUF_SIZE > 32U ? (NT_LOG_BUF_SIZE < 256U ? NT_LOG_BUF_SIZE - 32U : 224U) : 1U)
+
+static size_t nt_gfx_gl_utf8_char_bytes(const char *text, size_t remaining) {
+    const unsigned char first = (unsigned char)text[0];
+    size_t count = 1;
+    if (first >= 0xC2U && first <= 0xDFU) {
+        count = 2;
+    } else if (first >= 0xE0U && first <= 0xEFU) {
+        count = 3;
+    } else if (first >= 0xF0U && first <= 0xF4U) {
+        count = 4;
+    }
+    if (count > remaining) {
+        return 1;
+    }
+    for (size_t i = 1; i < count; i++) {
+        if (text[i] == '\0' || ((unsigned char)text[i] & 0xC0U) != 0x80U) {
+            return 1;
+        }
+    }
+    return count;
+}
+
+static void nt_gfx_gl_log_translated_source(const char *stage, const char *source, int length) {
+    if (length == -1) {
+        NT_LOG_ERROR("translated_%s: <unsupported>", stage);
+        return;
+    }
+    if (length < 0) {
+        NT_LOG_ERROR("translated_%s: <unavailable>", stage);
+        return;
+    }
+    if (length == 0) {
+        NT_LOG_ERROR("translated_%s: <empty>", stage);
+        return;
+    }
+    if (NT_LOG_BUF_SIZE <= 32U) {
+        NT_LOG_ERROR("translated_%s: <truncated>", stage);
+        return;
+    }
+
+    char chunk[NT_GFX_GL_TRANSLATED_CHUNK_BYTES + 1U];
+    size_t input = 0;
+    size_t source_bytes = 0;
+    size_t encoded = 0;
+    size_t chunk_size = 0;
+    uint32_t chunk_index = 0;
+    bool truncated = (unsigned int)length >= NT_GFX_GL_TRANSLATED_SOURCE_BYTES;
+    while (source_bytes < NT_GFX_GL_TRANSLATED_SOURCE_BYTES - 1U && source[source_bytes] != '\0') {
+        source_bytes++;
+    }
+    while (input < source_bytes) {
+        const char *encoded_char = &source[input];
+        char escaped[2];
+        size_t input_size = nt_gfx_gl_utf8_char_bytes(&source[input], source_bytes - input);
+        size_t encoded_size = input_size;
+        if (source[input] == '\\' || source[input] == '\n' || source[input] == '\r') {
+            escaped[0] = '\\';
+            escaped[1] = source[input] == '\n' ? 'n' : source[input] == '\r' ? 'r' : '\\';
+            encoded_char = escaped;
+            input_size = 1;
+            encoded_size = sizeof(escaped);
+        }
+        if (encoded_size > NT_GFX_GL_TRANSLATED_CHUNK_BYTES || encoded + encoded_size > NT_GFX_GL_TRANSLATED_ENCODED_BYTES) {
+            truncated = true;
+            break;
+        }
+        if (chunk_size + encoded_size > NT_GFX_GL_TRANSLATED_CHUNK_BYTES) {
+            chunk[chunk_size] = '\0';
+            NT_LOG_ERROR("translated_%s[%u]: %s", stage, chunk_index++, chunk);
+            chunk_size = 0;
+            if (chunk_index == 10U) {
+                truncated = true;
+                break;
+            }
+        }
+        memcpy(&chunk[chunk_size], encoded_char, encoded_size);
+        chunk_size += encoded_size;
+        encoded += encoded_size;
+        input += input_size;
+    }
+    if (chunk_size != 0) {
+        chunk[chunk_size] = '\0';
+        NT_LOG_ERROR("translated_%s[%u]: %s", stage, chunk_index, chunk);
+    }
+    if (truncated) {
+        NT_LOG_ERROR("translated_%s: <truncated>", stage);
+    }
+}
+
+static void nt_gfx_gl_log_translated_shaders(uint32_t vertex, uint32_t fragment) {
+    if (vertex == 0 && fragment == 0) {
+        return;
+    }
+    char vertex_source[NT_GFX_GL_TRANSLATED_SOURCE_BYTES];
+    char fragment_source[NT_GFX_GL_TRANSLATED_SOURCE_BYTES];
+    int lengths[2] = {-2, -2};
+    NT_GL_ISSUED(getExtension, "WEBGL_debug_shaders");
+    const int queried = nt_gfx_gl_ctx_translated_shader_sources(vertex, fragment, vertex_source, fragment_source, sizeof(vertex_source), lengths);
+    if ((queried & 1) != 0) {
+        NT_GL_ISSUED(getTranslatedShaderSource, vertex);
+    }
+    if ((queried & 2) != 0) {
+        NT_GL_ISSUED(getTranslatedShaderSource, fragment);
+    }
+    nt_gfx_gl_log_translated_source("vs", vertex_source, lengths[0]);
+    nt_gfx_gl_log_translated_source("fs", fragment_source, lengths[1]);
+}
+#endif
+
 #endif
 
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle) {
@@ -1272,9 +1385,14 @@ void nt_gfx_backend_destroy_shader(uint32_t backend_handle) {
 /* Compile errors surface only here: shader creation never reads COMPILE_STATUS. */
 static void nt_gfx_gl_log_link_failure(const nt_gfx_gl_program_t *rec) {
 #if NT_LOG_MIN_LEVEL <= 2
+    const GLenum link_error = NT_GL_RET0(glGetError);
     nt_gfx_gl_log_program(rec->program);
     GLint vs_compile = -1;
     GLint fs_compile = -1;
+#ifdef NT_PLATFORM_WEB
+    GLuint vertex_shader = 0;
+    GLuint fragment_shader = 0;
+#endif
     GLsizei count = 0;
     GLuint stages[2] = {0, 0};
 #ifdef NT_PLATFORM_WEB
@@ -1293,8 +1411,14 @@ static void nt_gfx_gl_log_link_failure(const nt_gfx_gl_program_t *rec) {
         GLint *compiled = NULL;
         if (type == GL_VERTEX_SHADER) {
             compiled = &vs_compile;
+#ifdef NT_PLATFORM_WEB
+            vertex_shader = stages[i];
+#endif
         } else if (type == GL_FRAGMENT_SHADER) {
             compiled = &fs_compile;
+#ifdef NT_PLATFORM_WEB
+            fragment_shader = stages[i];
+#endif
         }
         if (compiled != NULL) {
 #ifdef NT_PLATFORM_WEB
@@ -1306,8 +1430,11 @@ static void nt_gfx_gl_log_link_failure(const nt_gfx_gl_program_t *rec) {
         }
         nt_gfx_gl_log_shader(stages[i], type == GL_VERTEX_SHADER ? "vertex" : "fragment");
     }
+#ifdef NT_PLATFORM_WEB
+    nt_gfx_gl_log_translated_shaders(vertex_shader, fragment_shader);
+#endif
     /* After driver logs, so a tail-retaining journal keeps identity and stage results together. */
-    NT_LOG_ERROR("program %u/GL %u link: link failed: gl_error=0x%X vs_compile=%d fs_compile=%d \"%s\"", (unsigned)(rec - s_programs), rec->program, NT_GL_RET0(glGetError), vs_compile, fs_compile,
+    NT_LOG_ERROR("program %u/GL %u link: link failed: gl_error=0x%X vs_compile=%d fs_compile=%d \"%s\"", (unsigned)(rec - s_programs), rec->program, (unsigned)link_error, vs_compile, fs_compile,
                  rec->label != NULL && rec->label[0] != '\0' ? rec->label : "<unnamed>");
 #else
     (void)rec;

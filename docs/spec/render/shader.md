@@ -150,6 +150,17 @@ long logs or labels cannot remove the classification. These additional queries
 exist only with ERROR logging compiled in and never run for a successful link
 or an already-confirmed context loss. Stage creation remains asynchronous.
 
+On a failed live WebGL link, the backend also asks the optional
+`WEBGL_debug_shaders` extension for the translated source of each still-mapped
+vertex and fragment stage. It reports up to 2048 escaped UTF-8 bytes per stage
+in at most ten chunks that fit the configured logger, or an explicit unsupported,
+unavailable, empty, or truncated marker. Line breaks and backslashes are escaped;
+a logger buffer of 32 bytes or less reports truncation instead of source text.
+This is best-effort diagnostic output only: it retains no
+source, does not run on a successful link or confirmed loss, and does not claim
+that the browser can expose text after a GPU-process failure. Driver logs remain
+before translated text and the compact program summary remains last.
+
 The label is an optional debug name in static storage, like material labels; the
 program stores the pointer. NULL or empty labels report `<unnamed>`. Labels do not
 affect program identity or readiness.

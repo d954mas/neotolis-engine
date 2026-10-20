@@ -1135,6 +1135,10 @@ runs the timer disjoint check as its own `TIMER_DISJOINT` operation on a live
 context; the query is issued only while a timer query is pending. Each issued call is recorded
 exactly once, at the call site, by the same statement that issues it (an
 `NT_GL_ISSUED` JS bridge: by the statement before the JS call).
+The optional translated-source queries on a failed WebGL link are recorded
+after their guarded JS bridge returns: the bridge reports which calls it
+attempted, without retaining an extension object or adding a C callback.
+If that bridge cannot return, those diagnostic call events can be absent.
 `backend.args` follows the GL integer argument order; pointer payload, readback
 output and debug-label arguments are presence bits, gen/delete arguments contain
 the count followed by each name, a returned value (`glCreate*`, `glGetError`,

@@ -19,6 +19,7 @@ static bool s_loss_pending; /* set by a lost event until begin_frame takes it */
 static void capture_device_info(void);
 
 #if NT_LOG_MIN_LEVEL <= 2
+EM_JS_DEPS(nt_gfx_gl_ctx_translated_shaders, "$GL,$lengthBytesUTF8")
 /* clang-format off */
 EM_JS(int, nt_gfx_gl_ctx_attached_shaders, (uint32_t program, uint32_t *stages), {
     var attached = GL.currentContext.GLctx.getAttachedShaders(GL.programs[program]);
@@ -34,6 +35,41 @@ EM_JS(int, nt_gfx_gl_ctx_shader_compile_status, (uint32_t shader), {
     var ctx = GL.currentContext.GLctx;
     var status = ctx.getShaderParameter(GL.shaders[shader], ctx.COMPILE_STATUS);
     return status === null ? -1 : +status;
+})
+EM_JS(int, nt_gfx_gl_ctx_translated_shader_sources, (uint32_t vertex, uint32_t fragment, char *vertex_out, char *fragment_out, uint32_t cap, int *lengths), {
+    var gl = GL.currentContext.GLctx;
+    var shaders = [vertex, fragment];
+    var outputs = [vertex_out, fragment_out];
+    var extension;
+    try {
+        extension = gl.getExtension("WEBGL_debug_shaders");
+    } catch (_) {
+        extension = null;
+        for (var i = 0; i < 2; ++i) HEAP32[(lengths >> 2) + i] = -2;
+        return 0;
+    }
+    var queried = 0;
+    for (var i = 0; i < 2; ++i) {
+        if (!extension) {
+            HEAP32[(lengths >> 2) + i] = -1;
+            continue;
+        }
+        var shader = GL.shaders[shaders[i]];
+        if (!shader) {
+            HEAP32[(lengths >> 2) + i] = -2;
+            continue;
+        }
+        try {
+            queried |= 1 << i;
+            var source = extension["getTranslatedShaderSource"](shader);
+            if (typeof source !== "string") source = "";
+            HEAP32[(lengths >> 2) + i] = lengthBytesUTF8(source);
+            stringToUTF8(source, outputs[i], cap);
+        } catch (_) {
+            HEAP32[(lengths >> 2) + i] = -2;
+        }
+    }
+    return queried;
 })
 /* clang-format on */
 #endif

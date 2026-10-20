@@ -21,6 +21,7 @@ bool nt_gfx_gl_ctx_query_lost(void);
 /* Emscripten's GL wrappers assert on unmapped attached stages and convert null status to false. */
 int nt_gfx_gl_ctx_attached_shaders(uint32_t program, uint32_t stages[2]);
 int nt_gfx_gl_ctx_shader_compile_status(uint32_t shader);
+int nt_gfx_gl_ctx_translated_shader_sources(uint32_t vertex, uint32_t fragment, char *vertex_out, char *fragment_out, uint32_t cap, int lengths[2]);
 #endif
 
 /* nt_gfx_gl_ctx_detect_gpu_caps is declared in graphics/nt_gfx_internal.h —

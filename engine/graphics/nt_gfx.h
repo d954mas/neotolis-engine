@@ -612,7 +612,8 @@ typedef enum {
     X(glUseProgram)                                                                                                                                                                                    \
     X(glVertexAttribDivisor)                                                                                                                                                                           \
     X(glVertexAttribPointer)                                                                                                                                                                           \
-    X(glViewport)
+    X(glViewport)                                                                                                                                                                                      \
+    X(getTranslatedShaderSource)
 
 /* Issued-call detail (NT_GFX_GL_<name>). Integer args follow the GL signature;
  * pointer arguments become presence bits (payloads, outputs, labels) or object
