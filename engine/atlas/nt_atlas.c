@@ -227,9 +227,7 @@ static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size
     }
 
     const NtAtlasHeader *hdr = (const NtAtlasHeader *)data;
-    NT_ASSERT(hdr->magic == NT_ATLAS_MAGIC && "atlas blob: bad magic (not an atlas or corrupted)");
-    NT_ASSERT(hdr->version == NT_ATLAS_VERSION && "atlas blob: version mismatch (rebuild packs with current builder)");
-    if (hdr->page_count > NT_ATLAS_MAX_PAGES || !(hdr->inverse_pixels_per_unit > 0.0F) || !isfinite(hdr->inverse_pixels_per_unit)) {
+    if (hdr->magic != NT_ATLAS_MAGIC || hdr->version != NT_ATLAS_VERSION || hdr->page_count > NT_ATLAS_MAX_PAGES || !(hdr->inverse_pixels_per_unit > 0.0F) || !isfinite(hdr->inverse_pixels_per_unit)) {
         return false;
     }
 
@@ -310,7 +308,11 @@ static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size
 /* AUX_BACKED slots become READY after activate, so validation precedes publication. */
 static uint32_t atlas_activate(const uint8_t *data, uint32_t size) {
     nt_atlas_blob_view_t view;
-    return atlas_try_validate_and_carve_blob(data, size, &view) ? 1U : 0U;
+    if (!atlas_try_validate_and_carve_blob(data, size, &view)) {
+        NT_LOG_ERROR("atlas blob: bad magic, version or section bounds -- rebuild packs");
+        return 0U;
+    }
+    return 1U;
 }
 
 /* Keep shared spans as serialized; every live element is overwritten before publication. */

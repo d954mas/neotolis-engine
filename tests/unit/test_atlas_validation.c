@@ -100,20 +100,14 @@ void test_bad_magic_rejected(void) {
     uint8_t buf[512];
     const uint32_t size = build_blob(buf, sizeof(buf));
     ((NtAtlasHeader *)buf)->magic = 0xDEADBEEFU;
-    NT_TEST_EXPECT_ASSERT(nt_atlas_test_activate(buf, size));
-    void *user_data = NULL;
-    NT_TEST_EXPECT_ASSERT(nt_atlas_test_drive_resolve(buf, size, &user_data));
-    TEST_ASSERT_NULL(user_data);
+    assert_blob_rejected(buf, size, "bad magic must fail activation");
 }
 
 void test_bad_version_rejected(void) {
     uint8_t buf[512];
     const uint32_t size = build_blob(buf, sizeof(buf));
     ((NtAtlasHeader *)buf)->version = NT_ATLAS_VERSION + 1;
-    NT_TEST_EXPECT_ASSERT(nt_atlas_test_activate(buf, size));
-    void *user_data = NULL;
-    NT_TEST_EXPECT_ASSERT(nt_atlas_test_drive_resolve(buf, size, &user_data));
-    TEST_ASSERT_NULL(user_data);
+    assert_blob_rejected(buf, size, "a version mismatch must fail activation");
 }
 
 void test_page_count_over_cap_rejected(void) {

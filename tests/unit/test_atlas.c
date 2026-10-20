@@ -1287,14 +1287,14 @@ void test_atlas_on_resolve_header_validation_rejects_corruption(void) {
     memcpy(corrupt_magic, buf, valid_size);
     uint32_t bad_magic = 0xDEADBEEFU;
     memcpy(corrupt_magic, &bad_magic, sizeof(bad_magic));
-    NT_TEST_EXPECT_ASSERT(nt_atlas_test_validate_header(corrupt_magic, valid_size));
+    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_magic, valid_size), "bad magic should fail");
 
     /* Version corruption: overwrite bytes 4-5 */
     uint8_t corrupt_version[512];
     memcpy(corrupt_version, buf, valid_size);
     uint16_t bad_version = 0xFFFFU;
     memcpy(corrupt_version + 4, &bad_version, sizeof(bad_version));
-    NT_TEST_EXPECT_ASSERT(nt_atlas_test_validate_header(corrupt_version, valid_size));
+    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_version, valid_size), "version mismatch should fail");
 
     /* Truncated blob: size < sizeof(NtAtlasHeader) */
     TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(buf, 10), "truncated blob should fail");
@@ -2280,7 +2280,7 @@ void test_atlas_slice9_zero_has_no_slice9(void) {
     TEST_ASSERT_FALSE((r->slice9_lrtb[0] | r->slice9_lrtb[1] | r->slice9_lrtb[2] | r->slice9_lrtb[3]) != 0);
 }
 
-/* The previous wire version (v7) must trigger the version assertion. */
+/* The previous wire version (v7) must fail validation. */
 void test_atlas_previous_version_rejected(void) {
     uint8_t buf[512];
     uint32_t size = 0;
@@ -2289,7 +2289,7 @@ void test_atlas_previous_version_rejected(void) {
     const uint16_t previous_version = 7;
     memcpy(buf + 4, &previous_version, sizeof(previous_version));
 
-    NT_TEST_EXPECT_ASSERT(nt_atlas_test_validate_header(buf, size));
+    TEST_ASSERT_FALSE(nt_atlas_test_validate_header(buf, size));
 }
 
 int main(void) {

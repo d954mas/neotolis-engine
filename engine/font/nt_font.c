@@ -111,8 +111,10 @@ static uint32_t font_activate(const uint8_t *data, uint32_t size) {
         return 0;
     }
     const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)data;
-    NT_ASSERT(hdr->magic == NT_FONT_MAGIC && "font blob: bad magic");
-    NT_ASSERT(hdr->version == NT_FONT_VERSION && "font blob: version mismatch — rebuild packs");
+    if (hdr->magic != NT_FONT_MAGIC || hdr->version != NT_FONT_VERSION) {
+        NT_LOG_ERROR("font blob: magic 0x%08X version %u, expected version %u -- rebuild packs", hdr->magic, (unsigned)hdr->version, (unsigned)NT_FONT_VERSION);
+        return 0;
+    }
     if (!font_blob_structure_valid(data, size)) {
         NT_LOG_ERROR("font blob: glyph table or contour data out of bounds -- rebuild packs");
         return 0;

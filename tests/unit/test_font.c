@@ -1254,6 +1254,20 @@ static void assert_font_blob_rejected(const uint8_t *blob, uint32_t size) {
     nt_font_test_deactivate(token);
 }
 
+void test_font_bad_magic_or_version_fails_activation(void) {
+    uint8_t blob[80];
+    const uint32_t size = build_font_bounds_blob(blob);
+    NtFontAssetHeader header;
+    memcpy(&header, blob, sizeof header);
+    header.version = NT_FONT_VERSION + 1U;
+    memcpy(blob, &header, sizeof header);
+    assert_font_blob_rejected(blob, size);
+    header.version = NT_FONT_VERSION;
+    header.magic = 0xDEADBEEFU;
+    memcpy(blob, &header, sizeof header);
+    assert_font_blob_rejected(blob, size);
+}
+
 void test_font_shared_contours_padding_and_empty_glyph_remain_valid(void) {
     uint8_t blob[128] = {0};
     const uint32_t original_size = build_font_bounds_blob(blob);
@@ -3017,6 +3031,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_font_blob_valid);
     RUN_TEST(test_font_shared_contours_padding_and_empty_glyph_remain_valid);
+    RUN_TEST(test_font_bad_magic_or_version_fails_activation);
     RUN_TEST(test_font_truncated_glyph_table_fails_activation);
     RUN_TEST(test_font_invalid_glyph_data_spans_clear_provider);
     RUN_TEST(test_font_truncated_contour_data_fails_activation);
