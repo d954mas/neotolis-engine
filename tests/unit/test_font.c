@@ -1218,7 +1218,10 @@ void test_font_truncated_replacement_keeps_lower_pack(void) {
     TEST_ASSERT_NOT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
 
     /* The later mount sharing the rid would win the tiebreak if it activated. */
+    /* Only the size is wrong: magic and version match. */
     uint8_t truncated[sizeof(NtFontAssetHeader) - 1] = {0};
+    const NtFontAssetHeader prefix = {.magic = NT_FONT_MAGIC, .version = NT_FONT_VERSION};
+    memcpy(truncated, &prefix, sizeof truncated);
     (void)nt_font_test_register_shared_rid(tok_a, truncated, (uint32_t)sizeof(truncated));
     nt_resource_step();
     nt_font_step();
@@ -1378,10 +1381,7 @@ void test_font_contours_above_curve_cap_together_fail_activation(void) {
     assert_font_blob_rejected(blob, size);
 }
 
-/* 600 off,on points decode to 300 curves: more points than the curve cap, still valid. */
-void test_font_contour_points_above_curve_cap_stay_valid(void) {
-    static uint8_t blob[2048];
-    const uint32_t size = build_ring_font_blob(blob, 1U, 600U, 2U);
+static void assert_font_blob_activates(const uint8_t *blob, uint32_t size) {
     nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
     const uint32_t token = nt_font_test_register_data(blob, size);
     nt_font_add(font, nt_font_test_resource(token));
@@ -1392,6 +1392,28 @@ void test_font_contour_points_above_curve_cap_stay_valid(void) {
     TEST_ASSERT_FALSE(glyph->is_tofu);
     nt_font_destroy(font);
     nt_font_test_deactivate(token);
+}
+
+/* Control for every rejection built from it. */
+void test_font_bounds_blob_activates(void) {
+    uint8_t blob[80];
+    assert_font_blob_activates(blob, build_font_bounds_blob(blob));
+}
+
+/* Activation only: decoding a glyph this large would spend the band-drop warn-once. */
+void test_font_contour_at_curve_cap_activates(void) {
+    static uint8_t blob[2048];
+    const uint32_t token = nt_font_test_register_data(blob, build_ring_font_blob(blob, 1U, NT_FONT_MAX_CURVES_PER_GLYPH, 1U));
+    const nt_resource_t resource = nt_font_test_resource(token);
+    nt_resource_step();
+    TEST_ASSERT_TRUE(nt_resource_is_ready(resource));
+    nt_font_test_deactivate(token);
+}
+
+/* 600 off,on points decode to 300 curves: more points than the curve cap, still valid. */
+void test_font_contour_points_above_curve_cap_stay_valid(void) {
+    static uint8_t blob[2048];
+    assert_font_blob_activates(blob, build_ring_font_blob(blob, 1U, 600U, 2U));
 }
 
 /* ---- FONT-03: unmount a font's pack WHILE it is referenced ----
@@ -3074,6 +3096,8 @@ int main(void) {
     RUN_TEST(test_font_zero_contour_point_count_fails_activation);
     RUN_TEST(test_font_contour_above_curve_cap_fails_activation);
     RUN_TEST(test_font_contours_above_curve_cap_together_fail_activation);
+    RUN_TEST(test_font_bounds_blob_activates);
+    RUN_TEST(test_font_contour_at_curve_cap_activates);
     RUN_TEST(test_font_contour_points_above_curve_cap_stay_valid);
     RUN_TEST(test_font_init_shutdown);
     RUN_TEST(test_font_create_destroy_valid);

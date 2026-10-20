@@ -156,11 +156,9 @@ if(NOT EMSCRIPTEN)
         set_target_properties(test_sanitizer_proof PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
         )
-        # The wrapper converts signal termination to an ordinary exit; only
-        # the sanitizer's own diagnostic can satisfy the output oracle.
+        # Only the sanitizer's own diagnostic can satisfy the output oracle.
         foreach(_sanitizer asan ubsan)
-            add_test(NAME sanitizer_proof_${_sanitizer}
-                COMMAND ${CMAKE_COMMAND} -E env $<TARGET_FILE:test_sanitizer_proof> ${_sanitizer})
+            add_test(NAME sanitizer_proof_${_sanitizer} COMMAND test_sanitizer_proof ${_sanitizer})
         endforeach()
         set_tests_properties(sanitizer_proof_asan PROPERTIES
             PASS_REGULAR_EXPRESSION "AddressSanitizer: heap-buffer-overflow")

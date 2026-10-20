@@ -23,17 +23,13 @@ def ctest_command_stems(lines):
         if len(tokens) < 2:
             continue
         # tokens[0] is the test NAME — never registration evidence. The command
-        # (tokens[1]) always counts. Wrapper-launched executables must point
-        # into the test output dir. cmake -E env contributes only its command,
-        # never later arguments that might name an executable as data.
-        command = os.path.splitext(os.path.basename(tokens[1]))[0]
-        stems.add(command)
-        wrapped = []
-        if command.startswith("python"):
-            wrapped = tokens[2:]
-        elif command == "cmake" and tokens[2:4] == ["-E", "env"]:
-            wrapped = tokens[4:5]
-        for token in wrapped:
+        # (tokens[1]) always counts. Later args count only for python-wrapper
+        # commands AND only when they point into the test output dir (wrapper-
+        # launched exes: python run_x.py <exe>) — an exe passed as data to a
+        # non-wrapper test can never satisfy the gate.
+        stems.add(os.path.splitext(os.path.basename(tokens[1]))[0])
+        command_is_wrapper = os.path.basename(tokens[1]).startswith("python")
+        for token in tokens[2:] if command_is_wrapper else []:
             if "/build/tests/" in token.replace("\\", "/"):
                 stems.add(os.path.splitext(os.path.basename(token))[0])
     return stems

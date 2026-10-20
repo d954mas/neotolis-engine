@@ -179,6 +179,8 @@ jobs:
           for example in hello bench_shapes spinning_cube textured_quad sponza text bunnymark; do
             test -f "build/examples/$example/wasm-debug-paired/index_simd.wasm"
           done
+          # A broken probe would silently load the baseline variant in every browser.
+          node -e "const m=require('fs').readFileSync('build/examples/hello/wasm-debug-paired/index.html','utf8').match(/WebAssembly\.validate\(new Uint8Array\(\[([^\]]*)\]\)\)/); process.exit(m && WebAssembly.validate(new Uint8Array(m[1].split(',').map(Number))) ? 0 : 1)"
 
       # The ctest includes test_basisu_trimmed: the production wasm transcoder decodes the
       # native goldens under Node.

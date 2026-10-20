@@ -625,7 +625,7 @@ zero-initialized appended controls preserve inherit semantics. Atlas-level
 - `margin` is **raise-only**: it only feeds the packing footprint, so a per-sprite value below the atlas margin is clamped up to the atlas value. An `UNFITTABLE` record reports the *effective* (clamped-up) margin the packer actually used, not a below-atlas request.
 - `extrude`: `0` **inherits** the atlas default. A non-zero override sets **this sprite's edge bleed** (RECT only) and may be smaller OR larger than the atlas extrude — but a *zero* bleed cannot be expressed per-sprite (0 means inherit). Effective extrude, whether inherited or overridden, requires the effective sprite shape to be RECT. Compose/serialize apply the raw override. The packing footprint, however, reserves room for `max(this sprite's extrude, atlas extrude)`, so an `UNFITTABLE` record reports that effective (max) extrude — the space that actually caused the fit failure, distinct from the per-sprite bleed written into the page.
 
-**Area-budget guidance (`mixed_aa`, 128 sprites, native-release, one builder thread):** total hull vertices are 896/752/716/666/642/598 at 0/2/5/10/15/25% added area; the 10% default keeps most of the saving.
+**Area-budget guidance:** on the 12 real sprites of `test_atlas_hull_budget`, total hull vertices are 87/83/79/67/57/51 at 0/2/5/10/15/25% added area; the 10% default keeps most of the saving. The test pins these totals.
 
 **Pivot semantics:**
 - Normalized over the **source image** dimensions (not the trimmed rect). Default `(0.5, 0.5)` = image centre.
