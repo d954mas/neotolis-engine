@@ -601,6 +601,10 @@ if(NOT EMSCRIPTEN)
         nt_gfx_fake nt_basisu_transcoder_stub nt_meshwire_stub nt_http_stub nt_fs_stub nt_log_stub unity
     )
     nt_setup_test_target(test_sponza_program_assignment)
+    # Compile after the builder may have rewritten the header it includes.
+    if(TARGET sponza_pack_build)
+        add_dependencies(test_sponza_program_assignment sponza_pack_build)
+    endif()
 
     # Exercise the asteroid demo's real generation, LOD selection, instance packing and submission.
     add_executable(test_asteroids_scene unit/test_asteroids_scene.c)
@@ -628,6 +632,9 @@ if(NOT EMSCRIPTEN)
         nt_basisu_transcoder_stub nt_meshwire_stub unity
     )
     nt_setup_test_target(test_skeletal_showcase_mixing)
+    if(TARGET skeletal_showcase_pack_build)
+        add_dependencies(test_skeletal_showcase_mixing skeletal_showcase_pack_build)
+    endif()
 
     # --- Sort module tests ---
     add_executable(test_sort unit/test_sort.c unit/test_helpers/nt_assert_trap.c)
@@ -1050,6 +1057,7 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_builder PRIVATE nt_builder nt_log unity nt_meshwire)
     target_compile_definitions(test_builder PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_builder WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    # Same case names as the record-* table in main() of unit/test_builder.c.
     foreach(_case list input appear output gone glob directory twice race rewrite invalid publish header)
         add_test(NAME test_builder_record_${_case} COMMAND test_builder record-${_case}
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")

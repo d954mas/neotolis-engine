@@ -40,6 +40,7 @@ nt_example_packs(
     BUILDER build_atlas_packs
     PACK_DIR "${ATLAS_PACK_DIR}"
     ASSETS_DIR "${ATLAS_ASSETS_DIR}"
+    GENERATED_DIR generated
     PACKS atlas_demo.ntpack
 )
 

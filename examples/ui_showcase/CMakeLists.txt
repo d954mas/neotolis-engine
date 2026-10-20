@@ -46,6 +46,7 @@ nt_example_packs(
     BUILDER build_ui_showcase_packs
     PACK_DIR "${UI_SHOWCASE_PACK_DIR}"
     ASSETS_DIR "${UI_SHOWCASE_ASSETS_DIR}"
+    GENERATED_DIR generated
     PACKS ui_showcase.ntpack
 )
 

@@ -344,8 +344,12 @@ int main(int argc, char *argv[]) {
   read, an output from its staged file before publication (a kept header
   before its content is compared), and a glob keeps the names it
   saw, so a file edited, added or removed while the builder runs, or a pack
-  another builder overwrote, rebuilds next time. Not caught: a same-size edit
-  within one filesystem timestamp tick of the read.
+  another builder overwrote, rebuilds next time. A texture re-read for
+  encoding must still hash to its `add_*` pixels, or the build asserts rather
+  than caching new pixels under the old key. Not caught: a same-size edit
+  within one filesystem timestamp tick of the read, a replacement that keeps
+  size and mtime (`cp -p`, `rsync -a`, archive extraction), and a builder
+  relinked while the system clock stepped back.
 - **Cache-independent:** every `add_*` reads its source when called, so cached
   entries are listed too.
 - **Per process, not per pack:** one builder run is one build step that may

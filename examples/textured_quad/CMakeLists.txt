@@ -40,6 +40,7 @@ nt_example_packs(
     BUILDER build_tq_packs
     PACK_DIR "${TQ_PACK_DIR}"
     ASSETS_DIR "${TQ_ASSETS_DIR}"
+    GENERATED_DIR generated
     PACKS base.ntpack lenna_pixel.ntpack lenna_hires.ntpack
 )
 

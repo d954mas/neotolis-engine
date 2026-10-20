@@ -2,7 +2,7 @@
 # the .expected_packs manifest the CI guard verifies. Native presets run the
 # builder at build time; wasm copies a prior native build's packs or fails loudly.
 function(nt_example_packs)
-    cmake_parse_arguments(PACKS "" "NAME;TARGET;BUILDER;PACK_DIR;ASSETS_DIR" "PACKS" ${ARGN})
+    cmake_parse_arguments(PACKS "" "NAME;TARGET;BUILDER;PACK_DIR;ASSETS_DIR;GENERATED_DIR" "PACKS" ${ARGN})
     if(PACKS_UNPARSED_ARGUMENTS OR NOT PACKS_NAME OR NOT PACKS_TARGET OR NOT PACKS_BUILDER
        OR NOT PACKS_PACK_DIR OR NOT PACKS_ASSETS_DIR OR NOT PACKS_PACKS)
         message(FATAL_ERROR "nt_example_packs(${PACKS_NAME}): bad or missing arguments"
@@ -23,12 +23,18 @@ function(nt_example_packs)
         foreach(PACK ${PACKS_PACKS})
             list(APPEND _pack_files "${PACKS_PACK_DIR}/${PACK}")
         endforeach()
+        # Headers the builder rewrites: as byproducts ninja re-stats them after
+        # the run, so their includers recompile in the same build.
+        set(_headers "")
+        if(PACKS_GENERATED_DIR)
+            file(GLOB _headers CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${PACKS_GENERATED_DIR}/*.h")
+        endif()
         # The builder runs on every build and exits early while its
         # build_record.txt is current (nt_builder_up_to_date).
         set(_build_target ${PACKS_NAME}_pack_build)
         add_custom_target(${_build_target}
             COMMAND "$<TARGET_FILE:${PACKS_BUILDER}>" "${PACKS_PACK_DIR}"
-            BYPRODUCTS ${_pack_files}
+            BYPRODUCTS ${_pack_files} ${_headers}
             WORKING_DIRECTORY "${NT_ENGINE_ROOT}"
             COMMENT "Checking ${PACKS_NAME} pack(s)"
         )

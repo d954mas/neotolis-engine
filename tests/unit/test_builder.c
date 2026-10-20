@@ -597,7 +597,32 @@ void test_record_missing_old_or_malformed(void) {
     const char *path = TMP_DIR "/record invalid/build_record.txt";
     (void)remove(path);
     TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record invalid"));
-    const char *records[] = {"builder 1\n", "", "builder 9223372036854775807\noutput 1 1 /x", "builder 9223372036854775807\ninput 1\n"};
+    /* Variants of a valid record over an existing input, so each one fails
+     * only for its own defect. */
+    record_write_bytes(TMP_DIR "/record invalid/in.glsl", "a", 1);
+    nt_builder_record_input(TMP_DIR "/record invalid/in.glsl");
+    nt_builder_write_record(TMP_DIR "/record invalid");
+    uint32_t size = 0;
+    char *text = nt_builder_read_file(path, &size);
+    TEST_ASSERT_NOT_NULL(text);
+    const char *body = strchr(text, '\n') + 1;
+    TEST_ASSERT_EQUAL_STRING_LEN("input ", body, 6);
+    char newer[2048];
+    char older[2048];
+    char unterminated[2048];
+    char bad_separator[2048];
+    (void)snprintf(newer, sizeof(newer), "builder 9223372036854775807\n%s", body);
+    (void)snprintf(older, sizeof(older), "builder 1\n%s", body);
+    (void)snprintf(unterminated, sizeof(unterminated), "%.*s", (int)strlen(newer) - 1, newer);
+    memcpy(bad_separator, newer, sizeof(newer));
+    char *size_field = strchr(strchr(strchr(bad_separator, '\n') + 1, ' ') + 1, ' ') + 1;
+    *strchr(size_field, ' ') = '\t';
+    free(text);
+
+    /* A newer builder's record is current for an older builder. */
+    record_write_bytes(path, newer, strlen(newer));
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record invalid"));
+    const char *records[] = {"", older, unterminated, bad_separator};
     for (uint32_t i = 0; i < sizeof(records) / sizeof(records[0]); i++) {
         record_write_bytes(path, records[i], strlen(records[i]));
         TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record invalid"));
@@ -9821,6 +9846,7 @@ int main(int argc, char *argv[]) {
             const char *name;
             UnityTestFunction run;
         } cases[] = {
+            /* Registered as ctest cases by the foreach in tests/CMakeLists.txt. */
             {"record-list", test_write_record_lists_every_input_glob_and_output},
             {"record-input", test_record_input_changes},
             {"record-appear", test_record_missing_input_appears},

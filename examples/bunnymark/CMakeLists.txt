@@ -48,6 +48,7 @@ nt_example_packs(
     BUILDER build_bunnymark_packs
     PACK_DIR "${BUNNYMARK_PACK_DIR}"
     ASSETS_DIR "${BUNNYMARK_ASSETS_DIR}"
+    GENERATED_DIR generated
     PACKS bunnymark_sd.ntpack bunnymark_hd.ntpack
 )
 

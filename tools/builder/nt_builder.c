@@ -1380,6 +1380,8 @@ static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *ou
     if (out_h) {
         *out_h = h;
     }
+    /* Encodes are cached under this hash: a source edited since add_* must not be stored under it. */
+    NT_BUILD_ASSERT(nt_hash64(pixels, w * h * 4).value == pe->decoded_hash && "redecode_texture: source changed during the build");
     return pixels;
 }
 

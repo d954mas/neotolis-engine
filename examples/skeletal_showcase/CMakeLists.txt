@@ -61,6 +61,7 @@ nt_example_packs(
     BUILDER build_skeletal_showcase_packs
     PACK_DIR "${SKELETAL_SHOWCASE_PACK_DIR}"
     ASSETS_DIR "${SKELETAL_SHOWCASE_ASSETS_DIR}"
+    GENERATED_DIR generated
     PACKS skeletal_showcase.ntpack skeletal_showcase_clips.ntpack
 )
 

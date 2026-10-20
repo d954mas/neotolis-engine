@@ -45,6 +45,7 @@ nt_example_packs(
     BUILDER build_ui_3d_demo_packs
     PACK_DIR "${UI_3D_DEMO_PACK_DIR}"
     ASSETS_DIR "${UI_3D_DEMO_ASSETS_DIR}"
+    GENERATED_DIR generated
     PACKS ui_3d_demo.ntpack
 )
 

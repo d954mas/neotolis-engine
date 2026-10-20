@@ -9,13 +9,16 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 
 
-# Stands in for a pack builder that leaves a current pack untouched.
+# Stands in for a pack builder that leaves a current pack and header untouched.
 FIXTURE_BUILDER = r"""from pathlib import Path
 
 asset = (Path(SOURCE) / "asset.txt").read_text()
 pack = Path(__file__).parent / "fixture.ntpack"
 if not pack.exists() or pack.read_text() != asset:
     pack.write_text(asset)
+header = Path(SOURCE) / "generated" / "fixture.h"
+if header.read_text() != f"#define FIXTURE_{asset} 1\n":
+    header.write_text(f"#define FIXTURE_{asset} 1\n")
 """
 
 
@@ -30,22 +33,30 @@ class ExamplePacksTests(unittest.TestCase):
         self.packs.mkdir()
         self.asset = self.source / "asset.txt"
         self.asset.write_text("original", encoding="utf-8")
+        # Committed generated header, as examples/*/generated/*.h.
+        (self.source / "generated").mkdir()
+        (self.source / "generated/fixture.h").write_text("#define FIXTURE_original 1\n", encoding="utf-8")
+        (self.source / "main.c").write_text(
+            '#include "fixture.h"\n#ifndef FIXTURE_original\nint edited;\n#endif\nint main(void) { return 0; }\n',
+            encoding="utf-8")
         # Python accepts a directory containing __main__.py as its program, so
         # the real CMake build/copy graph runs without codecs.
         (self.packs / "__main__.py").write_text(
             FIXTURE_BUILDER.replace("SOURCE", repr(str(self.source))), encoding="utf-8")
         (self.source / "CMakeLists.txt").write_text(
             f'''cmake_minimum_required(VERSION 3.25)
-project(pack_inputs NONE)
+project(pack_inputs C)
 set(NT_ENGINE_ROOT "{ROOT.as_posix()}")
 include("${{NT_ENGINE_ROOT}}/cmake/nt_example_packs.cmake")
 add_executable(builder IMPORTED)
 set_target_properties(builder PROPERTIES IMPORTED_LOCATION "{Path(sys.executable).as_posix()}")
-add_custom_target(demo ALL)
+add_executable(demo main.c)
+target_include_directories(demo PRIVATE generated)
 nt_example_packs(
     NAME fixture TARGET demo BUILDER builder
     PACK_DIR "{self.packs.as_posix()}"
     ASSETS_DIR "${{CMAKE_CURRENT_BINARY_DIR}}/assets"
+    GENERATED_DIR generated
     PACKS fixture.ntpack
 )
 ''',
@@ -61,7 +72,7 @@ nt_example_packs(
         return result.stdout
 
     def configure(self, *args):
-        self.run_cmake("-S", self.source, "-B", self.build, "-G", "Ninja", *args)
+        self.run_cmake("-S", self.source, "-B", self.build, "-G", "Ninja", "-DCMAKE_C_COMPILER=clang", *args)
 
     def mtimes(self):
         return [p.stat().st_mtime_ns for p in (self.packs / "fixture.ntpack", self.build / "assets/fixture.ntpack")]
@@ -74,11 +85,16 @@ nt_example_packs(
         time.sleep(1.1)
         # The builder decides: an untouched pack is neither rewritten nor copied
         # again (restat skips the copy edge, not just copy_if_different).
-        self.assertNotIn("Copying", self.run_cmake("--build", self.build))
+        noop = self.run_cmake("--build", self.build)
+        self.assertNotIn("Copying", noop)
+        self.assertNotIn("main.c", noop)
         self.assertEqual(self.mtimes(), before)
 
+        # One build: the regenerated header recompiles its includer right away.
         self.asset.write_text("edited", encoding="utf-8")
-        self.assertIn("Copying", self.run_cmake("--build", self.build))
+        edited = self.run_cmake("--build", self.build)
+        self.assertIn("Copying", edited)
+        self.assertIn("main.c", edited)
         self.assertEqual((self.build / "assets/fixture.ntpack").read_text(encoding="utf-8"), "edited")
         self.assertTrue(all(a > b for a, b in zip(self.mtimes(), before)))
 

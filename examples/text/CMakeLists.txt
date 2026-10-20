@@ -44,6 +44,7 @@ nt_example_packs(
     BUILDER build_text_packs
     PACK_DIR "${TEXT_PACK_DIR}"
     ASSETS_DIR "${TEXT_ASSETS_DIR}"
+    GENERATED_DIR generated
     PACKS text_base.ntpack text_cjk.ntpack
 )
 

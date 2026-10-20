@@ -41,6 +41,7 @@ nt_example_packs(
     BUILDER build_sponza_packs
     PACK_DIR "${SP_PACK_DIR}"
     ASSETS_DIR "${SP_ASSETS_DIR}"
+    GENERATED_DIR generated
     PACKS sponza_core.ntpack sponza_geo.ntpack sponza_tex.ntpack sponza_full.ntpack
 )
 

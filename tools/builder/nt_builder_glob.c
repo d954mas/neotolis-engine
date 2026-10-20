@@ -115,8 +115,9 @@ static bool glob_list(const char *pattern, char ***out_matches, uint32_t *out_co
                     overflow = true;
                     break;
                 }
-                char full_path[GLOB_PATH_MAX + 256]; /* + NAME_MAX */
-                (void)snprintf(full_path, sizeof(full_path), "%s/%s", directory, find_data.cFileName);
+                char full_path[GLOB_PATH_MAX + 260]; /* + MAX_PATH */
+                int len = snprintf(full_path, sizeof(full_path), "%s/%s", directory, find_data.cFileName);
+                NT_BUILD_ASSERT(len > 0 && (size_t)len < sizeof(full_path) && "glob: path too long");
                 matches[match_count] = strdup(full_path);
                 if (matches[match_count]) {
                     match_count++;
@@ -141,7 +142,8 @@ static bool glob_list(const char *pattern, char ***out_matches, uint32_t *out_co
                 continue;
             }
             char full_path[GLOB_PATH_MAX + 256]; /* + NAME_MAX */
-            (void)snprintf(full_path, sizeof(full_path), "%s/%s", directory, entry->d_name);
+            int len = snprintf(full_path, sizeof(full_path), "%s/%s", directory, entry->d_name);
+            NT_BUILD_ASSERT(len > 0 && (size_t)len < sizeof(full_path) && "glob: path too long");
             struct stat st;
             if (stat(full_path, &st) != 0 || S_ISDIR(st.st_mode)) {
                 continue;

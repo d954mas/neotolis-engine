@@ -23,6 +23,7 @@ if(NOT EMSCRIPTEN)
 endif()
 nt_example_packs(NAME asteroids TARGET asteroids BUILDER build_asteroids_packs
     PACK_DIR "${AST_PACK_DIR}" ASSETS_DIR "${AST_OUTPUT_DIR}/assets"
+    GENERATED_DIR generated
     PACKS asteroids_core.ntpack asteroids_space.ntpack asteroids_ui.ntpack)
 if(EMSCRIPTEN AND NT_CDN_URL)
     target_compile_definitions(asteroids PRIVATE NT_CDN_URL="${NT_CDN_URL}")
