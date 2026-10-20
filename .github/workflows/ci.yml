@@ -650,7 +650,14 @@ jobs:
       # Only the specs that target browser_smoke; devapi.spec.ts needs devapi_host (Web Smoke job).
       - name: Run browser smoke test
         if: matrix.part == 'smoke'
-        run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts rich_composition.spec.ts context_loss.spec.ts http.spec.ts diagnostics.spec.ts observation.spec.ts pass_actions.spec.ts mesh_color.spec.ts shape_strokes.spec.ts program_link.spec.ts crash.spec.ts device_info.spec.ts
+        run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts rich_composition.spec.ts context_loss.spec.ts http.spec.ts diagnostics.spec.ts observation.spec.ts pass_actions.spec.ts mesh_color.spec.ts shape_strokes.spec.ts program_link.spec.ts shader_diagnostics.spec.ts crash.spec.ts device_info.spec.ts
+
+      - name: Shader diagnostics with WebGL validation
+        if: matrix.part == 'smoke'
+        run: |
+          emcmake cmake --preset wasm-debug -DNT_GFX_WEB_GL_DEBUG=ON
+          cmake --build --preset wasm-debug --target browser_smoke
+          (cd tests/browser && npx playwright test shader_diagnostics.spec.ts --project=chromium --workers=1)
 
       # Each admission row (NT_BASISU_ROWS) activates its own fixture pack in wasm Debug (FULL
       # asserts) and samples the transcoded texels through WebGL; a Release row would add no
@@ -683,7 +690,7 @@ jobs:
             test -f "build/tests/browser/app/$name/assets/ui_showcase.ntpack"
             test -f "build/tests/browser/app/$name/assets/basis_fixture.ntpack"
             pass_specs=""
-            if [[ "$ui $gpu" == "0 0" ]]; then pass_specs="pass_actions.spec.ts crash.spec.ts device_info.spec.ts"; fi
+            if [[ "$ui $gpu" == "0 0" ]]; then pass_specs="pass_actions.spec.ts shader_diagnostics.spec.ts crash.spec.ts device_info.spec.ts"; fi
             (cd tests/browser && NT_SHOWCASE_DIR="$GITHUB_WORKSPACE/build/tests/browser/app/$name" NT_SHOWCASE_PORT=8430 NT_DEVAPI_PORT=8431 NT_DIAGNOSTICS_PRESET="$name" NT_DIAGNOSTICS_LOG=1 NT_DIAGNOSTICS_UI="$ui" NT_DIAGNOSTICS_GPU="$gpu" NT_DIAGNOSTICS_METRICS=0 NT_DIAGNOSTICS_TIMER_BASE=4294967296 npx playwright test diagnostics.spec.ts context_loss.spec.ts $pass_specs --project=chromium --workers=1)
           done
   # #endregion
