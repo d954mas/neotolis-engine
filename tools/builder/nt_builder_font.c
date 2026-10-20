@@ -656,6 +656,11 @@ static uint32_t compute_curve_data_size(const stbtt_vertex *verts, int nv, uint1
         if (seg_count == 0) {
             continue;
         }
+        total_segs += seg_count;
+        cc++;
+        if (total_segs > NT_FONT_MAX_CURVES_PER_GLYPH) {
+            continue; /* the caller rejects the glyph; its contours may not fit s_points */
+        }
 
         /* Convert to points to get accurate size */
         uint16_t np = vertices_to_points(verts, v, contour_end);
@@ -671,8 +676,6 @@ static uint32_t compute_curve_data_size(const stbtt_vertex *verts, int nv, uint1
             prev_y = s_points[p].y;
         }
         size += contour_size;
-        total_segs += seg_count;
-        cc++;
     }
 
     *out_total_segments = total_segs;

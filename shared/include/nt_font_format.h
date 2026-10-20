@@ -107,9 +107,6 @@ typedef struct {
 #pragma pack(pop)
 _Static_assert(sizeof(NtFontKernEntry) == 4, "NtFontKernEntry must be 4 bytes");
 
-/* Maximum points per contour — shared limit between builder and runtime */
-#define NT_FONT_MAX_POINTS_PER_CONTOUR 4096
-
 /* Curve texels one runtime glyph-cache slot owns (one RGBA16F row). Shared by builder and runtime, so
  * not overridable; 2048 is the WebGL2 guaranteed MAX_TEXTURE_SIZE. */
 #define NT_FONT_GLYPH_TEXELS 2048
@@ -117,6 +114,10 @@ _Static_assert(sizeof(NtFontKernEntry) == 4, "NtFontKernEntry must be 4 bytes");
 /* At one band a glyph needs 1 header texel plus at most 4 per curve (one Y- and one X-band copy), so this
  * many curves always fit a slot. The builder rejects more; the runtime sizes its decode buffers by it. */
 #define NT_FONT_MAX_CURVES_PER_GLYPH ((NT_FONT_GLYPH_TEXELS - 1) / 4)
+
+/* A contour of N curves has at most 2N+1 points before its closing point folds, so the curve cap bounds
+ * the per-contour point buffers of builder and runtime. */
+#define NT_FONT_MAX_POINTS_PER_CONTOUR ((2 * NT_FONT_MAX_CURVES_PER_GLYPH) + 1)
 
 /* Bitmask byte size for contour type bits (ceil(n/8), 2-byte aligned) */
 #define NT_FONT_BITMASK_BYTES(n) ((((uint32_t)(n) + 15U) / 8U) & ~1U)
