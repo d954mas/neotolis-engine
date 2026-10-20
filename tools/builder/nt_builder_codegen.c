@@ -323,39 +323,19 @@ typedef struct {
     nt_build_asset_kind_t kind;
 } MergeEntry;
 
-static nt_build_asset_kind_t kind_from_identifier(const char *id) {
-    if (strstr(id, "ASSET_MESH_") == id) {
-        return NT_BUILD_ASSET_MESH;
+/* Prefixes alone are ambiguous (an atlas at region/... reads as ATLAS_REGION_), so the kind is the one
+ * whose writer derivation from the comment path reproduces the parsed identifier. */
+static nt_build_asset_kind_t kind_from_identifier(const char *id, const char *path) {
+    char derived[NT_CODEGEN_MAX_IDENTIFIER];
+    int kind = NT_BUILD_ASSET_MESH;
+    for (; kind <= NT_BUILD_ASSET_CLIP; kind++) {
+        path_to_identifier(path, type_prefix_for_kind((nt_build_asset_kind_t)kind), derived, sizeof derived);
+        if (strcmp(derived, id) == 0) {
+            break;
+        }
     }
-    if (strstr(id, "ASSET_TEXTURE_") == id) {
-        return NT_BUILD_ASSET_TEXTURE;
-    }
-    if (strstr(id, "ASSET_SHADER_") == id) {
-        return NT_BUILD_ASSET_SHADER;
-    }
-    if (strstr(id, "ASSET_BLOB_") == id) {
-        return NT_BUILD_ASSET_BLOB;
-    }
-    if (strstr(id, "ASSET_FONT_") == id) {
-        return NT_BUILD_ASSET_FONT;
-    }
-    /* Check ATLAS_REGION before ATLAS (prefix overlap) */
-    if (strstr(id, "ASSET_ATLAS_REGION_") == id) {
-        return NT_BUILD_ASSET_ATLAS_REGION;
-    }
-    if (strstr(id, "ASSET_ATLAS_") == id) {
-        return NT_BUILD_ASSET_ATLAS;
-    }
-    if (strstr(id, "ASSET_SKELETON_") == id) {
-        return NT_BUILD_ASSET_SKELETON;
-    }
-    if (strstr(id, "ASSET_SKIN_BINDING_") == id) {
-        return NT_BUILD_ASSET_SKIN_BINDING;
-    }
-    if (strstr(id, "ASSET_CLIP_") == id) {
-        return NT_BUILD_ASSET_CLIP;
-    }
-    return NT_BUILD_ASSET_BLOB; /* fallback */
+    NT_BUILD_ASSERT(kind <= NT_BUILD_ASSET_CLIP && "merge_headers: identifier does not match its path comment");
+    return (nt_build_asset_kind_t)kind;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -441,7 +421,7 @@ void nt_builder_merge_headers(const char *const *header_paths, uint32_t count, c
             strncpy(entries[entry_count].identifier, id_buf, NT_CODEGEN_MAX_IDENTIFIER - 1);
             entries[entry_count].hash = hash;
             strncpy(entries[entry_count].comment_path, comment, sizeof(entries[entry_count].comment_path) - 1);
-            entries[entry_count].kind = kind_from_identifier(id_buf);
+            entries[entry_count].kind = kind_from_identifier(id_buf, comment);
             entry_count++;
         }
         (void)fclose(f);

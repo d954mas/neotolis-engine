@@ -121,6 +121,30 @@ static void test_merge_rejects_identifier_collision(void) {
     TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "identifier collision"));
 }
 
+/* An atlas whose path starts with "region" shares the ATLAS_REGION_ prefix; the merge must keep its name. */
+static void test_merge_keeps_atlas_named_region(void) {
+    const char *const headers[] = {
+        "#define ASSET_ATLAS_REGION_MAP ((nt_hash64_t){0x0000000000000001ULL}) /* region/map */\n",
+        "#define ASSET_ATLAS_REGION_HUD_ICON ((nt_hash64_t){0x0000000000000002ULL}) /* hud/icon */\n",
+    };
+    for (size_t i = 0; i < sizeof(s_merge_paths) / sizeof(s_merge_paths[0]); ++i) {
+        FILE *f = fopen(s_merge_paths[i], "wb");
+        TEST_ASSERT_NOT_NULL(f);
+        const size_t len = strlen(headers[i]);
+        TEST_ASSERT_EQUAL_size_t(len, fwrite(headers[i], 1U, len, f));
+        TEST_ASSERT_EQUAL_INT(0, fclose(f));
+    }
+    nt_builder_merge_headers(s_merge_paths, 2U, s_merge_output);
+    FILE *f = fopen(s_merge_output, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    char merged[4096] = {0};
+    (void)fread(merged, 1U, sizeof(merged) - 1U, f);
+    TEST_ASSERT_EQUAL_INT(0, fclose(f));
+    TEST_ASSERT_NOT_NULL(strstr(merged, "#define ASSET_ATLAS_REGION_MAP "));
+    TEST_ASSERT_NOT_NULL(strstr(merged, "#define ASSET_ATLAS_REGION_HUD_ICON "));
+    TEST_ASSERT_NULL(strstr(merged, "REGION_REGION"));
+}
+
 /* Declared out of type and path order, so both the group order and the
  * within-group path sort have to do real work. */
 static const CodegenEntry s_skeletal_entries[] = {
@@ -182,6 +206,7 @@ int main(void) {
     RUN_TEST(test_collision_check_rejects_matching_identifiers);
     RUN_TEST(test_collision_check_accepts_distinct_identifiers);
     RUN_TEST(test_merge_rejects_identifier_collision);
+    RUN_TEST(test_merge_keeps_atlas_named_region);
     RUN_TEST(test_skeletal_kinds_emit_prefixed_identifiers_in_group_order);
     return UNITY_END();
 }
