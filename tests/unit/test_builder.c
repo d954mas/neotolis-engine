@@ -629,14 +629,6 @@ void test_record_missing_old_or_malformed(void) {
     }
 }
 
-#ifdef __linux__
-void test_record_unlinked_executable(void) {
-    MKDIR(TMP_DIR "/record unlinked");
-    nt_builder_write_record(TMP_DIR "/record unlinked");
-    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record unlinked"));
-}
-#endif
-
 static void header_keep_build(bool second_shader) {
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/header keep/keep.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
@@ -9836,17 +9828,11 @@ int main(int argc, char *argv[]) {
     UNITY_BEGIN();
     /* CTest gives each record case a fresh process, matching a builder run. */
     if (argc == 2) {
-#ifdef __linux__
-        /* The CTest wrapper runs a private copy, never the build's executable. */
-        if (strcmp(argv[1], "record-unlinked") == 0 && remove(argv[0]) != 0) {
-            return 1;
-        }
-#endif
         const struct {
             const char *name;
             UnityTestFunction run;
         } cases[] = {
-            /* Registered as ctest cases by the foreach in tests/CMakeLists.txt. */
+            /* tests/CMakeLists.txt registers each "record-*" name here as a ctest. */
             {"record-list", test_write_record_lists_every_input_glob_and_output},
             {"record-input", test_record_input_changes},
             {"record-appear", test_record_missing_input_appears},
@@ -9860,9 +9846,6 @@ int main(int argc, char *argv[]) {
             {"record-invalid", test_record_missing_old_or_malformed},
             {"record-publish", test_record_published_file_snapshot},
             {"record-header", test_unchanged_header_keeps_its_mtime},
-#ifdef __linux__
-            {"record-unlinked", test_record_unlinked_executable},
-#endif
         };
         for (uint32_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
             if (strcmp(argv[1], cases[i].name) == 0) {

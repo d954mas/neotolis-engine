@@ -119,9 +119,8 @@ static bool glob_list(const char *pattern, char ***out_matches, uint32_t *out_co
                 int len = snprintf(full_path, sizeof(full_path), "%s/%s", directory, find_data.cFileName);
                 NT_BUILD_ASSERT(len > 0 && (size_t)len < sizeof(full_path) && "glob: path too long");
                 matches[match_count] = strdup(full_path);
-                if (matches[match_count]) {
-                    match_count++;
-                }
+                NT_BUILD_ASSERT(matches[match_count] && "glob: out of memory");
+                match_count++;
             }
         } while (FindNextFileA(h_find, &find_data));
 
@@ -155,9 +154,8 @@ static bool glob_list(const char *pattern, char ***out_matches, uint32_t *out_co
                     break;
                 }
                 matches[match_count] = strdup(full_path);
-                if (matches[match_count]) {
-                    match_count++;
-                }
+                NT_BUILD_ASSERT(matches[match_count] && "glob: out of memory");
+                match_count++;
             }
         }
 

@@ -18,7 +18,6 @@ function(nt_example_packs)
     endif()
 
     set(_copy_list "")
-    set(_build_target "")
     if(NOT EMSCRIPTEN AND NOT _skipped)
         foreach(PACK ${PACKS_PACKS})
             list(APPEND _pack_files "${PACKS_PACK_DIR}/${PACK}")
@@ -31,8 +30,7 @@ function(nt_example_packs)
         endif()
         # The builder runs on every build and exits early while its
         # build_record.txt is current (nt_builder_up_to_date).
-        set(_build_target ${PACKS_NAME}_pack_build)
-        add_custom_target(${_build_target}
+        add_custom_target(${PACKS_NAME}_pack_build
             COMMAND "$<TARGET_FILE:${PACKS_BUILDER}>" "${PACKS_PACK_DIR}"
             BYPRODUCTS ${_pack_files} ${_headers}
             WORKING_DIRECTORY "${NT_ENGINE_ROOT}"
@@ -77,9 +75,6 @@ function(nt_example_packs)
     endforeach()
     if(_outputs)
         add_custom_target(${PACKS_TARGET}_packs DEPENDS ${_outputs})
-        if(_build_target)
-            add_dependencies(${PACKS_TARGET}_packs ${_build_target})
-        endif()
         add_dependencies(${PACKS_TARGET} ${PACKS_TARGET}_packs)
     endif()
 endfunction()

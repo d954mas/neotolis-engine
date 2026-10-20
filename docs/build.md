@@ -45,7 +45,11 @@ Every native build runs each example's pack builder; it exits at once while
 `<pack dir>/build_record.txt` is current. A new `build_packs.c` follows the
 builder spec, "Build record"; its `nt_example_packs` call names
 `GENERATED_DIR`, whose headers become build byproducts, so code that includes
-them recompiles in the same build. A byproduct is deleted by
+them recompiles in the same build. Another target that includes them (a test,
+`browser_smoke`) adds `add_dependencies(<target> <name>_pack_build)`, so
+building it alone also runs that pack build; `ninja -t missingdeps` lists a
+forgotten one. A header that appears or disappears reruns CMake once (globbed
+byproduct list). A byproduct is deleted by
 `cmake --build --target clean`; the next native build writes the tracked
 headers again. A file added where an asset lookup would now find it first does
 not rebuild packs (lookup misses are not recorded). Skipped examples do not

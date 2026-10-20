@@ -21,7 +21,7 @@ specifically `bunnymark/update_native_position_velocity`.
 The startup conditions log line follows the schema:
 
 ```
-Bunnymark conditions: viewport=WxH sprite_size=~26x37 px blend=premultiplied atlas=SD|HD pages=1 initial=I click=C hold_rate=R bunny_max=M hd_available=0|1 gpu=...
+Bunnymark conditions: viewport=WxH sprite_size=~26x37 px blend=premultiplied atlas=SD|HD pages=1 initial=I click=C hold_rate=R bunny_max=M gpu=...
 ```
 
 ## Controls
