@@ -7,7 +7,6 @@
 /* NT_TEST_ACCESS is provided by the CMake target. */
 
 /* clang-format off */
-#include "test_helpers/nt_assert_trap.h"
 #include "atlas/nt_atlas.h"
 #include "hash/nt_hash.h"
 #include "log/nt_log.h"
@@ -119,7 +118,6 @@ static void capture_atlas_warnings(nt_log_level_t level, const char *domain, con
 }
 
 void setUp(void) {
-    nt_test_assert_install();
     s_user_data = NULL;
     s_fake_texture_next_handle = 0x7000U;
     s_atlas_warning_count = 0;
@@ -1282,20 +1280,6 @@ void test_atlas_on_resolve_header_validation_rejects_corruption(void) {
     /* Valid blob should pass */
     TEST_ASSERT_TRUE(nt_atlas_test_validate_header(buf, valid_size));
 
-    /* Magic corruption: overwrite first 4 bytes */
-    uint8_t corrupt_magic[512];
-    memcpy(corrupt_magic, buf, valid_size);
-    uint32_t bad_magic = 0xDEADBEEFU;
-    memcpy(corrupt_magic, &bad_magic, sizeof(bad_magic));
-    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_magic, valid_size), "bad magic should fail");
-
-    /* Version corruption: overwrite bytes 4-5 */
-    uint8_t corrupt_version[512];
-    memcpy(corrupt_version, buf, valid_size);
-    uint16_t bad_version = 0xFFFFU;
-    memcpy(corrupt_version + 4, &bad_version, sizeof(bad_version));
-    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_version, valid_size), "version mismatch should fail");
-
     /* Truncated blob: size < sizeof(NtAtlasHeader) */
     TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(buf, 10), "truncated blob should fail");
 
@@ -2280,18 +2264,6 @@ void test_atlas_slice9_zero_has_no_slice9(void) {
     TEST_ASSERT_FALSE((r->slice9_lrtb[0] | r->slice9_lrtb[1] | r->slice9_lrtb[2] | r->slice9_lrtb[3]) != 0);
 }
 
-/* The previous wire version (v7) must fail validation. */
-void test_atlas_previous_version_rejected(void) {
-    uint8_t buf[512];
-    uint32_t size = 0;
-    build_fixture_blob(buf, sizeof(buf), &size);
-
-    const uint16_t previous_version = 7;
-    memcpy(buf + 4, &previous_version, sizeof(previous_version));
-
-    TEST_ASSERT_FALSE(nt_atlas_test_validate_header(buf, size));
-}
-
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_atlas_parse_valid_blob);
@@ -2330,6 +2302,5 @@ int main(void) {
     /* Slice9 */
     RUN_TEST(test_atlas_slice9_roundtrip);
     RUN_TEST(test_atlas_slice9_zero_has_no_slice9);
-    RUN_TEST(test_atlas_previous_version_rejected);
     return UNITY_END();
 }

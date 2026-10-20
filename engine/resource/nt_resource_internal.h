@@ -88,6 +88,7 @@ typedef struct {
     uint8_t blob_policy; /* nt_blob_policy_t */
     const uint8_t *blob; /* loaded pack data */
     uint32_t blob_size;  /* size of loaded blob */
+    uint32_t checksum;   /* pack CRC32 from the first parse; a re-download must match it */
     /* Metadata section (resident, survives blob eviction) */
     uint8_t *meta_data; /* heap-copied meta section (NULL if no metadata) */
     uint32_t meta_size; /* total bytes in meta section */

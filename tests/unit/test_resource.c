@@ -15,6 +15,7 @@
 #include "nt_pack_format.h"
 #include "core/nt_assert.h"
 #include "unity.h"
+#include "test_helpers/nt_assert_trap.h"
 /* clang-format on */
 
 #include <setjmp.h>
@@ -117,6 +118,7 @@ static uint8_t *build_test_pack(uint32_t asset_count, uint32_t *out_size) {
 static nt_resource_desc_t s_desc;
 
 void setUp(void) {
+    nt_test_assert_install();
     nt_http_init();
     nt_fs_init();
     memset(&s_desc, 0, sizeof(s_desc));
@@ -2178,6 +2180,33 @@ void test_invalidate_triggers_redownload_on_evicted_blob(void) {
     (void)remove("build/test_inv_redl.ntpack");
 }
 
+/* An evicted pack re-downloads into retained records, so different bytes of the same size must fail early. */
+void test_redownload_with_changed_bytes_asserts(void) {
+    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate, .deactivate = fake_deactivate});
+    const char *path = "build/test_redl_changed.ntpack";
+    nt_hash32_t pid = nt_hash32_str("redl_changed_pack");
+    write_test_pack_file(path, nt_hash64_str("redl_changed").value, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, TEST_BLOB_TTL_MS);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, path));
+    nt_resource_step();
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pid));
+    nt_time_sleep(TEST_PAST_BLOB_TTL_S);
+    nt_resource_step(); /* evicts the blob */
+    TEST_ASSERT_EQUAL_UINT8(0, nt_resource_test_pack_blob_resident(0));
+
+    FILE *f = fopen(path, "r+b"); /* flip the last data byte; the size stays */
+    TEST_ASSERT_NOT_NULL(f);
+    (void)fseek(f, -1, SEEK_END);
+    const int last = fgetc(f);
+    (void)fseek(f, -1, SEEK_END);
+    (void)fputc(last ^ 0xFF, f);
+    (void)fclose(f);
+    nt_resource_invalidate(NT_ASSET_MESH);
+    NT_TEST_EXPECT_ASSERT(for (int i = 0; i < 4; i++) { nt_resource_step(); });
+    (void)remove(path);
+}
+
 void test_evicted_empty_pack_reloads_without_reparse(void) {
     const char *path = "build/test_empty_pack_reload.ntpack";
     uint32_t blob_size = 0;
@@ -3882,6 +3911,7 @@ int main(void) {
     RUN_TEST(test_invalidate_calls_deactivator);
     RUN_TEST(test_invalidate_skips_virtual);
     RUN_TEST(test_invalidate_triggers_redownload_on_evicted_blob);
+    RUN_TEST(test_redownload_with_changed_bytes_asserts);
     RUN_TEST(test_evicted_empty_pack_reloads_without_reparse);
 
     /* Unmount with deactivation */

@@ -625,7 +625,9 @@ void nt_resource_step(void) {
                     /* Retained records require identical bytes; content replacement needs a remount. */
                     NT_ASSERT(loaded_size == pack->blob_size);
                     pack->blob = loaded_blob;
-                    pack->blob_size = loaded_size;
+                    const NtPackHeader *h = (const NtPackHeader *)loaded_blob;
+                    NT_ASSERT(h->checksum == pack->checksum && h->header_size <= loaded_size && nt_crc32(loaded_blob + h->header_size, loaded_size - h->header_size) == pack->checksum &&
+                              "re-downloaded pack bytes differ -- remount to replace content");
                     pack->pack_state = NT_PACK_STATE_READY;
                     pack->blob_last_access_ms = resource_get_time_ms();
                     s_resource.needs_resolve = true;
@@ -1073,6 +1075,7 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
     /* Update pack metadata */
     pack->blob = blob;
     pack->blob_size = blob_size;
+    pack->checksum = h->checksum;
     if (pack->pack_state != NT_PACK_STATE_READY) {
         pack->pack_state = NT_PACK_STATE_READY;
     }

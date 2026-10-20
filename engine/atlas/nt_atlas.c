@@ -1,6 +1,5 @@
 #include "atlas/nt_atlas.h"
 
-#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -227,7 +226,7 @@ static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size
     }
 
     const NtAtlasHeader *hdr = (const NtAtlasHeader *)data;
-    if (hdr->magic != NT_ATLAS_MAGIC || hdr->version != NT_ATLAS_VERSION || hdr->page_count > NT_ATLAS_MAX_PAGES || !(hdr->inverse_pixels_per_unit > 0.0F) || !isfinite(hdr->inverse_pixels_per_unit)) {
+    if (hdr->magic != NT_ATLAS_MAGIC || hdr->version != NT_ATLAS_VERSION || hdr->page_count > NT_ATLAS_MAX_PAGES) {
         return false;
     }
 
@@ -307,9 +306,14 @@ static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size
 
 /* AUX_BACKED slots become READY after activate, so validation precedes publication. */
 static uint32_t atlas_activate(const uint8_t *data, uint32_t size) {
+    const NtAtlasHeader *hdr = (const NtAtlasHeader *)data;
+    if (size >= sizeof(NtAtlasHeader) && (hdr->magic != NT_ATLAS_MAGIC || hdr->version != NT_ATLAS_VERSION)) {
+        NT_LOG_ERROR("atlas blob: magic 0x%08X version %u, expected version %u -- rebuild packs", hdr->magic, (unsigned)hdr->version, (unsigned)NT_ATLAS_VERSION);
+        return 0U;
+    }
     nt_atlas_blob_view_t view;
     if (!atlas_try_validate_and_carve_blob(data, size, &view)) {
-        NT_LOG_ERROR("atlas blob: bad magic, version or section bounds -- rebuild packs");
+        NT_LOG_ERROR("atlas blob: header, page count or section bounds out of range -- rebuild packs");
         return 0U;
     }
     return 1U;

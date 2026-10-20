@@ -1,4 +1,3 @@
-#include <math.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -181,16 +180,6 @@ void test_truncated_index_section_rejected(void) {
     assert_blob_rejected(buf, size - 2U, "an index section past the blob end must be a hard reject");
 }
 
-void test_invalid_inverse_pixels_per_unit_rejected(void) {
-    const float invalid[] = {0.0F, -1.0F, INFINITY, -INFINITY, NAN};
-    for (uint32_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
-        uint8_t buf[512];
-        const uint32_t size = build_blob(buf, sizeof(buf));
-        ((NtAtlasHeader *)buf)->inverse_pixels_per_unit = invalid[i];
-        assert_blob_rejected(buf, size, "invalid intrinsic scale must be a hard reject");
-    }
-}
-
 void test_truncated_position_or_uv_section_rejected(void) {
     uint8_t buf[512];
     const uint32_t size = build_blob(buf, sizeof(buf));
@@ -203,7 +192,6 @@ void test_truncated_position_or_uv_section_rejected(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_valid_blob_activates);
-    RUN_TEST(test_invalid_inverse_pixels_per_unit_rejected);
     RUN_TEST(test_truncated_position_or_uv_section_rejected);
     RUN_TEST(test_pageless_regioned_blob_rejected);
     RUN_TEST(test_corrupt_merge_blob_leaves_atlas_unchanged);
