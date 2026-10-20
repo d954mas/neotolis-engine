@@ -96,7 +96,7 @@ returns `NT_ERR_INVALID_ARG` even after blob eviction: eviction preserves the
 registered assets, metadata and original blob size. Resource-managed I/O restores
 evicted bytes without parsing the manifest again. The URL/path must return
 identical bytes for the mount's lifetime: reload asserts that the size and the
-data CRC32 match the first parse, and does not re-read the manifest. Unmount and
+`checksum` match the first parse, and does not re-read the manifest. Unmount and
 mount again to replace the pack.
 
 For direct parsing without resource-managed I/O, success retains the caller's

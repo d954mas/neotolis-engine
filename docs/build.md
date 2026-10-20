@@ -416,7 +416,7 @@ specified in the UI chapters linked above.
   `Testing/Temporary/LastTestsFailed.log`; a truncated terminal tail is insufficient.
 - `UNITY_EXCLUDE_FLOAT` is defined: Unity float assertions compile to nothing.
   Use meaningful comparisons, such as integer casts for small exact values.
-- Sanitizer proofs run only in native Debug builds with sanitizers enabled:
+- Sanitizer proofs exist only in native Debug builds outside Windows Clang:
   `ctest --preset native-debug --no-tests=error -R '^sanitizer_proof_(asan|ubsan)$'`.
   ASan and UBSan run in separate processes and require their own diagnostic; an
   unrelated failure does not pass. Windows Clang excludes these targets.

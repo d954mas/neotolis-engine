@@ -1266,10 +1266,9 @@ void test_atlas_on_cleanup_releases_all_buffers(void) {
      * report a leak-check failure at exit. */
 }
 
-/* ---- Test 14: Header/layout validation rejects corruption ----
- * Uses the test-only nt_atlas_test_validate_header helper that shares the
- * same validation logic as validate_and_carve_blob(): magic/version assert;
- * invalid section layout and size bounds return false. */
+/* ---- Header/layout validation rejects corruption ----
+ * nt_atlas_test_validate_header runs the runtime blob validator: bad magic or
+ * version, section layout and size bounds all return false. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_on_resolve_header_validation_rejects_corruption(void) {
     /* Build a valid blob first */

@@ -34,10 +34,7 @@ static void generate_tofu(nt_font_slot_t *slot);
 static void font_test_shutdown_packs(void);
 #endif
 
-// #region Resolve-callback lifecycle — on_resolve/on_cleanup + PIN_BLOB
-/* Zero-copy provider: the slot's user_data is the winning pack blob itself. Fonts decode glyphs
- * lazily from the live blob, so the winner PINs its pack (PIN_BLOB); the resolve pass owns the pin
- * and severs user_data before the blob is freed. */
+// #region Asset callbacks — activate (structure check), on_resolve/on_cleanup + PIN_BLOB
 static void font_deactivate(uint32_t runtime_handle) { (void)runtime_handle; }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -109,7 +106,7 @@ static bool font_blob_structure_valid(const uint8_t *data, uint32_t size) {
     return true;
 }
 
-/* Rejects a structurally broken blob: the asset fails and a lower-priority pack stays published.
+/* Rejects a structurally broken blob: the asset fails and the next candidate stays published.
  * Otherwise returns a UNIQUE handle per activation (font is not aux-backed, so the resolve pass detects
  * a winner-change only via a handle change); a reused handle would leave user_data pointing at a freed
  * blob. The value is never interpreted. */
@@ -134,6 +131,9 @@ static uint32_t font_activate(const uint8_t *data, uint32_t size) {
     return s_font_activate_seq++;
 }
 
+/* Zero-copy provider: the slot's user_data is the winning pack blob itself. Fonts decode glyphs
+ * lazily from the live blob, so the winner PINs its pack (PIN_BLOB); the resolve pass owns the pin
+ * and severs user_data before the blob is freed. */
 static void font_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data) {
     (void)size;
     (void)runtime_handle;

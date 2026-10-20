@@ -529,7 +529,8 @@ row; its cache entry carries its own `band_count`, and the runtime warns once
 when a glyph drops bands. At one band a glyph needs one header texel plus at most
 four texels per curve, so `NT_FONT_MAX_CURVES_PER_GLYPH`
 (`(NT_FONT_GLYPH_TEXELS - 1) / 4` = 511) curves always fit. The builder asserts
-on a larger glyph and logs its codepoint; the runtime asserts the same bound.
+on a larger glyph and logs its codepoint; activation rejects a blob whose glyph
+exceeds the bound, and glyph decode asserts it.
 
 Within a band the curves are sorted by descending maximum coordinate along the
 band's ray (x for horizontal bands, y for vertical bands). The fragment shader
@@ -552,7 +553,7 @@ metrics stay unchanged.
 
 **Decoration metrics.** The 24-byte header ends with four `int16` decoration-metric fields (`underline_position`, `underline_thickness`, `strikeout_position`, `strikeout_size`). The builder reads these raw from the source font's `post` (`underlinePosition`@8, `underlineThickness`@10) and `OS/2` (`yStrikeoutSize`@26, `yStrikeoutPosition`@28) tables (big-endian, UPM-rescaled with the other metrics); when a table is absent it bakes a metric-correct heuristic (underline just below baseline, strike near mid x-height) so the runtime never sees garbage. This keeps decoration metrics in the builder — the runtime stays a parser-free safety net.
 
-**Activation checks.** Activation checks only structure: the header size, magic and version, glyph table, data and kern spans, count limits, contour point headers and masks, and the bytes each one- or three-byte coordinate delta needs. A failed check logs an error and fails the asset, so a lower-priority pack stays published. Shared glyph payloads, trailing padding and zero-curve glyphs are valid. Coordinate and metric values are builder guarantees.
+**Activation checks.** Activation checks only structure: the header size, magic and version, glyph table, data and kern spans, count limits, contour point headers and masks, and the bytes each one- or three-byte coordinate delta needs. Shared glyph payloads, trailing padding and zero-curve glyphs are valid. Coordinate and metric values are builder guarantees.
 
 ### NT_ASSET_ATLAS binary format
 
@@ -634,7 +635,7 @@ uint16[total_index_count] (at index_offset)
   Runtime adds the region's staging-buffer base to each local index.
 ```
 
-Runtime keeps an owned atlas snapshot in slot `user_data`, not a raw mmap view. On first publication the atlas module validates the blob, copies region metadata, positions, UVs, indices, intrinsic scale, and page resource ids into owned buffers, then builds an open-addressing hash table for O(1) region lookup. Validation failures log an error and reject activation before publication: bad magic or version, a truncated header, too many pages, noncanonical section offsets, out-of-bounds per-region vertex/index spans, or a region whose `page_index` has no declared page. Resolve requires an activated blob and asserts if revalidation fails. Validation runs at activate and resolve on blob changes, never per frame. UVs are pre-normalized and triangles are pre-built by the builder using validated Clipper2 CDT; incomplete triangulation fails closed and the candidate is not published.
+Runtime keeps an owned atlas snapshot in slot `user_data`, not a raw mmap view. On first publication the atlas module validates the blob, copies region metadata, positions, UVs, indices, intrinsic scale, and page resource ids into owned buffers, then builds an open-addressing hash table for O(1) region lookup. Validation failures log an error and reject activation before publication: bad magic or version, a truncated header, too many pages, noncanonical section offsets, out-of-bounds per-region vertex/index spans, a region name hash equal to the tombstone, or a region whose `page_index` has no declared page. Resolve requires an activated blob and asserts if revalidation fails. Validation runs at activate and resolve on blob changes, never per frame. UVs are pre-normalized and triangles are pre-built by the builder using validated Clipper2 CDT; incomplete triangulation fails closed and the candidate is not published.
 
 The builder asserts that PPU, its reciprocal, baked positions, and source dimensions in game units are finite and representable. Runtime trusts the prebuilt coordinates without a per-vertex float scan. The intrinsic atlas scale is immutable; generic `pixels_per_unit` metadata does not change it. The renderer still applies origin, flip, and the game's transform. Slice9 converts border pixels to game units using `inverse_pixels_per_unit * slice9_scale`. If opposite borders exceed the target dimension, their destination widths shrink proportionally.
 

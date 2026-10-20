@@ -188,7 +188,7 @@ uint32_t nt_atlas_test_page_resource_handle(const struct nt_atlas_data *ad, uint
  * nt_resource_shutdown(). Production code has no nt_atlas_shutdown. */
 void nt_atlas_test_reset(void);
 
-/* Run the runtime blob validator with the same asserts and rejection rules. */
+/* Run the runtime blob validator; false on any structural rejection. */
 bool nt_atlas_test_validate_header(const uint8_t *data, uint32_t size);
 
 /* Direct access to owned geometry and intrinsic scale without a resource slot. */

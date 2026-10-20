@@ -207,12 +207,11 @@ ok
 # the tidy step; a format/tidy failure kills the orphan so no exe stays locked.
 #
 # The atlas tests (hull budget golden, transform sweep guard) cover builder
-# geometry and the sweep script. In default mode
-# they run ONLY when the change set touches those areas; --push/--full (and CI)
-# always run them, so nothing ships unchecked.
+# geometry and the sweep script. In default mode they run ONLY when the change
+# set touches those areas; --push/--full (and CI) always run them.
 step "ctest (native-debug, parallel with format+tidy)"
-# Everything the guards depend on: builder+bench sources, their deps libraries,
-# fixtures/goldens, the scripts they source, and the test-registration infra.
+# Everything the atlas tests depend on: builder+research sources, their deps,
+# the sprite art the hull golden reads, the sweep scripts, and test registration.
 # Matched against the UNFILTERED name union so deletions also trigger them.
 GUARD_RELEVANT='^(tools/builder/|tools/research/|engine/atlas/|engine/hash/|shared/include/|deps/(clipper2|stb|miniz)/|assets/sprites/bigatlas/|scripts/(atlas/|test_atlas_)|tests/unit/test_atlas_|tests/unit/test_helpers/|tests/CMakeLists|cmake/|CMakeLists\.txt$|CMakePresets\.json$)'
 CTEST_ARGS=()

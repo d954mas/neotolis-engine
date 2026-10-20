@@ -1197,7 +1197,7 @@ void test_font_file_pack_unmount_cleans_state(void) {
     free(blob);
 }
 
-/* ---- A truncated higher-priority replacement fails activation; the lower pack stays published ---- */
+/* ---- A truncated replacement that would win the tiebreak fails activation; the previous winner stays published ---- */
 void test_font_truncated_replacement_keeps_lower_pack(void) {
     nt_font_create_desc_t desc = test_font_desc();
     nt_font_t font = nt_font_create(&desc);

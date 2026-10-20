@@ -2800,10 +2800,8 @@ static void pipeline_geometry(AtlasPipeline *p) {
         uint32_t tw = p->trim_w[idx];
         uint32_t th = p->trim_h[idx];
 
-        /* Skip a sprite that failed alpha_trim (degenerate 0-size trim). It was
-         * already reported (transparent-after-trim / slice9) so building a hull
-         * here would double-report it as a degenerate hull. Never hit on the
-         * successful path — trim is otherwise always non-zero. */
+        /* Skip a sprite that failed alpha_trim (0-size trim): it was already reported
+         * (transparent-after-trim / slice9) and has no outline to build. */
         if (tw == 0 || th == 0) {
             continue;
         }

@@ -450,9 +450,10 @@ element `userData`, which the walker reads for layer+transform), so the line
 scrolls to keep the caret visible while clipping to the field box. Cut is a no-op
 when `nt_clipboard_available()` is false (no silent delete-without-copy).
 
-The allow-predicate must not call `nt_clipboard_*`. Paste filters the whole
-clipboard text first; destination capacity and `max_length` (both counting the
-NUL byte) limit the filtered result, and clipping never splits a UTF-8 codepoint.
+The allow-predicate must not call `nt_clipboard_*`. Paste replaces the selection,
+then inserts the clipboard text codepoint by codepoint: each passes the
+allow-predicate, and the paste stops at the first codepoint that does not fit
+the buffer or `max_length` (both count the NUL byte). A codepoint is never split.
 
 ## Consolidated interaction events
 

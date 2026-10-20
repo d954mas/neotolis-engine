@@ -12,11 +12,11 @@ int main(int argc, char *argv[]) {
         if (!buf) {
             return 1;
         }
-        buf[10] = 'x'; /* One byte past end. */
+        buf[10] = 'x'; /* ASan witness: heap-buffer-overflow */
         free((void *)buf);
     } else if (strcmp(argv[1], "ubsan") == 0) {
         volatile int x = INT_MAX;
-        x += 1; /* Signed overflow. */
+        x += 1; /* UBSan witness: signed integer overflow */
         (void)x;
     } else {
         return 1;

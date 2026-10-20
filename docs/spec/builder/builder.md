@@ -225,7 +225,7 @@ computed before canonicalization and are invariant under it.
 The builder distinguishes two failure classes:
 
 - **Programmer invariants, unexpected states, OOM, and missing/unreadable files** assert (`NT_BUILD_ASSERT`) — these are bugs or a broken environment, and crashing surfaces them instantly. The single-asset APIs (`nt_builder_add_texture`, `nt_builder_add_mesh`, `nt_builder_add_font`) also assert on a decode/parse failure of their input.
-- **Content-dependent failures of sprite images inside the ATLAS builder** are recoverable and route to a graceful error channel instead of aborting: undecodable/oversized/zero-dimension sprite images, transparent-after-trim sprites, oversized slice9 borders, contour-vertex overflow, trim-offset overflow, duplicate region names, size/page limits, and unfittable sprites. With `max_vertices >= 4` the trim-rect candidate makes geometry selection total, so an invalid selection is a programmer invariant (assert), not content.
+- **Content-dependent failures of sprite images inside the ATLAS builder** are recoverable and route to a graceful error channel instead of aborting: undecodable/oversized/zero-dimension sprite images, transparent-after-trim sprites, oversized slice9 borders, contour-vertex overflow, trim-offset overflow, duplicate region names, size/page limits, and unfittable sprites. Geometry selection is total (see [Atlas options](#atlas-options)), so it has no content error kind.
 
 `NT_BUILD_ASSERT` is terminal: normal execution ends with `abort()`. Tests may install a non-local-jump hook to verify that an assertion fires, but the interrupted builder context is not reusable and has no rollback guarantee.
 
@@ -562,7 +562,7 @@ zero-initialized appended controls preserve inherit semantics. Atlas-level
 - `margin` is **raise-only**: it only feeds the packing footprint, so a per-sprite value below the atlas margin is clamped up to the atlas value. An `UNFITTABLE` record reports the *effective* (clamped-up) margin the packer actually used, not a below-atlas request.
 - `extrude`: `0` **inherits** the atlas default. A non-zero override sets **this sprite's edge bleed** (RECT only) and may be smaller OR larger than the atlas extrude — but a *zero* bleed cannot be expressed per-sprite (0 means inherit). Effective extrude, whether inherited or overridden, requires the effective sprite shape to be RECT. Compose/serialize apply the raw override. The packing footprint, however, reserves room for `max(this sprite's extrude, atlas extrude)`, so an `UNFITTABLE` record reports that effective (max) extrude — the space that actually caused the fit failure, distinct from the per-sprite bleed written into the page.
 
-**Measured area-budget guidance (`mixed_aa`, 128 sprites):** total hull vertices were 896/752/716/666/642/598 at 0/2/5/10/15/25% added area (`atlas_bench out.json "assets/sprites/bigatlas/*.png" mixed_aa concave 4096 128 --max-added-area-percent <p>` with `NT_BUILDER_THREADS=1`); the 10% default keeps most of the saving. `test_atlas_hull_budget` pins the per-budget sum over 12 sprites, so a geometry change shows up as a test diff.
+**Area-budget guidance (`mixed_aa`, 128 sprites, native-release, one builder thread):** total hull vertices are 896/752/716/666/642/598 at 0/2/5/10/15/25% added area; the 10% default keeps most of the saving.
 
 **Pivot semantics:**
 - Normalized over the **source image** dimensions (not the trimmed rect). Default `(0.5, 0.5)` = image centre.
