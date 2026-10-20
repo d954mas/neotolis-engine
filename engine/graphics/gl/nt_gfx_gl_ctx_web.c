@@ -20,14 +20,23 @@ static void capture_device_info(void);
 
 /* The browser explains a refusal only through a creation-error event fired synchronously inside getContext. */
 /* clang-format off */
-EM_JS(EMSCRIPTEN_WEBGL_CONTEXT_HANDLE, nt_gfx_js_create_context, (const char *target, const EmscriptenWebGLContextAttributes *attrs, char *status, unsigned int cap), {
+EM_JS(EMSCRIPTEN_WEBGL_CONTEXT_HANDLE, nt_gfx_js_create_context, (const char *target, const EmscriptenWebGLContextAttributes *attrs, char *status, unsigned int cap, unsigned char *webgl2_api), {
     var canvas = findCanvasEventTarget(target);
-    var message = "";
-    var on_error = function(event) { message = event.statusMessage; };
+    var messages = [];
+    HEAPU8[webgl2_api] = typeof WebGL2RenderingContext !== "undefined" ? 1 : 0;
+    var on_error = function(event) {
+        var message = String(event.statusMessage || "").replace(/[\\x00\\r\\n]/g, " ");
+        if (message.length > 96) {
+            message = message.slice(0, 96);
+            if (message.charCodeAt(message.length - 1) >= 0xd800 && message.charCodeAt(message.length - 1) <= 0xdbff) message = message.slice(0, -1);
+            message += "…";
+        }
+        if (message && messages.length < 2) messages.push(message);
+    };
     canvas.addEventListener("webglcontextcreationerror", on_error);
     var context = _emscripten_webgl_create_context(target, attrs);
     canvas.removeEventListener("webglcontextcreationerror", on_error);
-    if (!context) stringToUTF8(message.replace(/[\\x00\\r\\n]/g, " "), status, cap);
+    if (!context) stringToUTF8(messages.join(" | "), status, cap);
     return context;
 })
 /* clang-format on */
@@ -42,7 +51,8 @@ static bool on_context_lost(int event_type, const void *reserved, void *user_dat
 
 bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
     /* nt_log_write cuts the whole line to NT_LOG_BUF_SIZE on a UTF-8 boundary. */
-    char creation_status[NT_LOG_BUF_SIZE];
+    char creation_status[NT_LOG_BUF_SIZE] = "";
+    unsigned char webgl2_api = 0;
     EmscriptenWebGLContextAttributes attrs;
     emscripten_webgl_init_context_attributes(&attrs);
     attrs.alpha = desc->alpha;
@@ -56,10 +66,10 @@ bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
     /* Capability probes enable only the extensions this build uses. */
     attrs.enableExtensionsByDefault = false;
 
-    s_gl_context = nt_gfx_js_create_context("#canvas", &attrs, creation_status, sizeof(creation_status));
+    s_gl_context = nt_gfx_js_create_context("#canvas", &attrs, creation_status, sizeof(creation_status), &webgl2_api);
     if (s_gl_context == 0) {
-        NT_LOG_ERROR("context-create: failed WebGL=2.0 alpha=%d depth=%d stencil=%d antialias=%d premultiplied_alpha=%d preserve=0 browser_status=%s", (int)desc->alpha, (int)desc->depth,
-                     (int)desc->stencil, (int)desc->antialias, (int)desc->premultiplied_alpha, creation_status[0] ? creation_status : "<empty>");
+        NT_LOG_ERROR("context-create: failed WebGL=2.0 alpha=%d depth=%d stencil=%d antialias=%d premultiplied_alpha=%d preserve=0 webgl2_api=%d browser_status=%s", (int)desc->alpha, (int)desc->depth,
+                     (int)desc->stencil, (int)desc->antialias, (int)desc->premultiplied_alpha, (int)webgl2_api, creation_status[0] ? creation_status : "<empty>");
         return false;
     }
     emscripten_webgl_make_context_current(s_gl_context);
