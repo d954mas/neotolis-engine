@@ -35,7 +35,7 @@ struct nt_font_slot_s {
     bool metrics_set;
 
     nt_resource_t resources[NT_FONT_MAX_SOURCES_PER_FONT];
-    uint32_t resource_handles[NT_FONT_MAX_SOURCES_PER_FONT];
+    uint32_t resource_gens[NT_FONT_MAX_SOURCES_PER_FONT];
     uint8_t resource_count;
 
     nt_texture_t curve_texture; /* RGBA16F, NT_FONT_GLYPH_TEXELS x max_glyphs: row i = cache slot i */

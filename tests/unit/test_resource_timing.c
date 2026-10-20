@@ -8,6 +8,7 @@
 #include "nt_pack_format.h"
 #include "resource/nt_resource.h"
 #include "resource/nt_resource_internal.h"
+#include "test_helpers/nt_test_pack.h"
 #include "time/nt_time.h"
 #include "unity.h"
 
@@ -30,15 +31,15 @@ static void make_blob(void) {
     *h = (NtPackHeader){.magic = NT_PACK_MAGIC, .version = NT_PACK_VERSION, .asset_count = 3, .header_size = 104, .total_size = sizeof s_blob, .meta_count = 1, .meta_offset = 136};
     NtAssetEntry *entries = (NtAssetEntry *)(s_blob + sizeof *h);
     for (uint32_t i = 0; i < 3; ++i) {
-        entries[i] = (NtAssetEntry){.resource_id = 101U + i, .offset = i == 2 ? 120U : 104U, .size = 16, .owner_entry = i == 2 ? 2 : 0, .asset_type = NT_ASSET_MESH};
+        entries[i] = (NtAssetEntry){.resource_id = 101U + i, .offset = i == 2 ? 120U : 104U, .size = 16, .owner_entry = i == 2 ? 2 : 0, .asset_type = NT_ASSET_SHADER_CODE};
     }
     entries[0].meta_offset = h->meta_offset;
-    s_blob[104] = 1;
-    s_blob[120] = 2;
+    s_blob[104 + sizeof(NtShaderCodeHeader)] = 1;
+    s_blob[120 + sizeof(NtShaderCodeHeader)] = 2;
     const NtMetaEntryHeader meta = {.resource_id = 101, .kind = 7, .size = 4};
     memcpy(s_blob + h->meta_offset, &meta, sizeof meta);
     s_blob[156] = 42;
-    h->checksum = nt_crc32(s_blob + h->header_size, h->total_size - h->header_size);
+    nt_test_seal_pack(s_blob);
 }
 
 static void write_pack(const char *path, const void *data, uint32_t size) {
@@ -59,9 +60,9 @@ static void make_other_blob(void) {
     }
     NtMetaEntryHeader *meta = (NtMetaEntryHeader *)(s_other_blob + header->meta_offset);
     meta->resource_id += 100;
-    s_other_blob[104] = 3;
-    s_other_blob[120] = 4;
-    header->checksum = nt_crc32(s_other_blob + header->header_size, header->total_size - header->header_size);
+    s_other_blob[104 + sizeof(NtShaderCodeHeader)] = 3;
+    s_other_blob[120 + sizeof(NtShaderCodeHeader)] = 4;
+    nt_test_seal_pack(s_other_blob);
 }
 
 static void parse_other_pack(void) {
@@ -73,10 +74,10 @@ static void parse_other_pack(void) {
 static uint32_t activate(const uint8_t *data, uint32_t size) {
     TEST_ASSERT_EQUAL_UINT32(16, size);
     TEST_ASSERT_LESS_THAN_UINT32(sizeof s_activation_order, s_activations);
-    s_activation_order[s_activations] = data[0];
+    s_activation_order[s_activations] = data[sizeof(NtShaderCodeHeader)];
     ++s_activations;
     s_seconds += s_activation_seconds;
-    return 100U + data[0];
+    return 100U + data[sizeof(NtShaderCodeHeader)];
 }
 
 static void resolve(const uint8_t *data, uint32_t size, uint32_t handle, void **user_data) {
@@ -212,11 +213,11 @@ static void test_budget_dedup_and_resolve_keep_their_phase_boundaries(void) {
     s_tick = 0.0;
     s_activation_seconds = 0.25;
     nt_resource_set_activate_time_budget(125.0F);
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = activate, .on_resolve = resolve, .on_cleanup = cleanup});
+    nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = activate, .on_resolve = resolve, .on_cleanup = cleanup});
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(s_id, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(s_id, s_blob, sizeof s_blob));
-    nt_resource_t first = nt_resource_request((nt_hash64_t){101}, NT_ASSET_MESH);
-    nt_resource_t last = nt_resource_request((nt_hash64_t){103}, NT_ASSET_MESH);
+    nt_resource_t first = nt_resource_request((nt_hash64_t){101}, NT_ASSET_SHADER_CODE);
+    nt_resource_t last = nt_resource_request((nt_hash64_t){103}, NT_ASSET_SHADER_CODE);
     s_reads = 0;
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(1, s_activations);
@@ -233,7 +234,7 @@ static void test_budget_dedup_and_resolve_keep_their_phase_boundaries(void) {
     TEST_ASSERT_EQUAL_UINT32(2, s_activations);
     TEST_ASSERT_EQUAL_UINT32(102, nt_resource_get(last));
     assert_step(250, 750);
-    nt_resource_t duplicate = nt_resource_request((nt_hash64_t){102}, NT_ASSET_MESH);
+    nt_resource_t duplicate = nt_resource_request((nt_hash64_t){102}, NT_ASSET_SHADER_CODE);
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(nt_resource_get(first), nt_resource_get(duplicate));
     TEST_ASSERT_EQUAL_UINT32(2, s_activations);
@@ -241,7 +242,7 @@ static void test_budget_dedup_and_resolve_keep_their_phase_boundaries(void) {
 }
 
 static void test_multiple_parses_keep_last_result_not_sum(void) {
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = activate});
+    nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = activate});
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(s_id, 0));
     const nt_hash32_t other = {2};
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(other, 0));
@@ -263,11 +264,11 @@ static void test_budget_resumes_in_pack_then_asset_order(void) {
     s_tick = 0.0;
     s_activation_seconds = 0.25;
     nt_resource_set_activate_time_budget(125.0F);
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = activate});
+    nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = activate});
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(s_id, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(s_id, s_blob, sizeof s_blob));
     parse_other_pack();
-    nt_resource_t last = nt_resource_request((nt_hash64_t){203}, NT_ASSET_MESH);
+    nt_resource_t last = nt_resource_request((nt_hash64_t){203}, NT_ASSET_SHADER_CODE);
     for (uint32_t step = 1; step <= 4; ++step) {
         nt_resource_step();
         TEST_ASSERT_EQUAL_UINT32(step, s_activations);
@@ -283,16 +284,16 @@ static void test_invalidate_revisits_owner_before_budget_resume(void) {
     s_tick = 0.0;
     s_activation_seconds = 0.25;
     nt_resource_set_activate_time_budget(125.0F);
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = activate});
+    nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = activate});
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(s_id, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(s_id, s_blob, sizeof s_blob));
-    nt_resource_t alias = nt_resource_request((nt_hash64_t){102}, NT_ASSET_MESH);
-    nt_resource_t last = nt_resource_request((nt_hash64_t){103}, NT_ASSET_MESH);
+    nt_resource_t alias = nt_resource_request((nt_hash64_t){102}, NT_ASSET_SHADER_CODE);
+    nt_resource_t last = nt_resource_request((nt_hash64_t){103}, NT_ASSET_SHADER_CODE);
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(1, s_activations);
     TEST_ASSERT_TRUE(nt_resource_is_ready(alias));
     TEST_ASSERT_FALSE(nt_resource_is_ready(last));
-    nt_resource_invalidate(NT_ASSET_MESH);
+    nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(2, s_activations);
     TEST_ASSERT_TRUE(nt_resource_is_ready(alias));
@@ -308,11 +309,11 @@ static void test_remount_during_budget_reuses_holes_in_registry_order(void) {
     s_tick = 0.0;
     s_activation_seconds = 0.25;
     nt_resource_set_activate_time_budget(125.0F);
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = activate});
+    nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = activate});
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(s_id, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(s_id, s_blob, sizeof s_blob));
     parse_other_pack();
-    nt_resource_t alias = nt_resource_request((nt_hash64_t){102}, NT_ASSET_MESH);
+    nt_resource_t alias = nt_resource_request((nt_hash64_t){102}, NT_ASSET_SHADER_CODE);
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(1, s_activations);
     nt_resource_unmount(s_id);
@@ -333,10 +334,10 @@ static void test_remount_during_budget_reuses_holes_in_registry_order(void) {
 static void test_alias_state_helper_reactivates_completed_owner(void) {
     s_tick = 0.0;
     nt_resource_set_activate_time_budget(0.0F);
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = activate});
+    nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = activate});
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(s_id, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(s_id, s_blob, sizeof s_blob));
-    nt_resource_t alias = nt_resource_request((nt_hash64_t){102}, NT_ASSET_MESH);
+    nt_resource_t alias = nt_resource_request((nt_hash64_t){102}, NT_ASSET_SHADER_CODE);
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(2, s_activations);
     nt_resource_test_set_asset_state((nt_hash64_t){102}, 0, NT_ASSET_STATE_REGISTERED, 0);
@@ -348,7 +349,7 @@ static void test_alias_state_helper_reactivates_completed_owner(void) {
 }
 
 static void test_resident_bytes_eviction_reload_and_unmount(void) {
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = activate});
+    nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = activate});
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(s_id, 0));
     const nt_hash32_t other = {2};
     assert_bytes(0, 0);
@@ -356,7 +357,7 @@ static void test_resident_bytes_eviction_reload_and_unmount(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(other, (const uint8_t *)&s_pack, sizeof s_pack));
     write_pack(s_path_a, s_blob, sizeof s_blob);
     nt_resource_set_activate_time_budget(0.0F);
-    nt_resource_t first = nt_resource_request((nt_hash64_t){101}, NT_ASSET_MESH);
+    nt_resource_t first = nt_resource_request((nt_hash64_t){101}, NT_ASSET_SHADER_CODE);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(s_id, s_path_a));
     nt_resource_step();
     assert_bytes(sizeof s_blob + sizeof s_pack, 24);
@@ -375,7 +376,7 @@ static void test_resident_bytes_eviction_reload_and_unmount(void) {
     TEST_ASSERT_NOT_NULL(meta);
     TEST_ASSERT_EQUAL_UINT32(4, size);
     TEST_ASSERT_EQUAL_UINT8(42, meta[0]);
-    nt_resource_invalidate(NT_ASSET_MESH);
+    nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     nt_resource_step();
     assert_bytes(sizeof s_blob + sizeof s_pack, 24);
     assert_parse(375, 125);
@@ -391,18 +392,18 @@ static void test_borrowed_auto_blob_survives_invalidation(void) {
     s_tick = 0.0;
     s_seconds = 1.0;
     nt_resource_set_activate_time_budget(0.0F);
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = activate});
+    nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = activate});
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(s_id, 0));
     nt_resource_set_blob_policy(s_id, NT_BLOB_AUTO, 5);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(s_id, s_blob, sizeof s_blob));
-    nt_resource_t alias = nt_resource_request((nt_hash64_t){102}, NT_ASSET_MESH);
+    nt_resource_t alias = nt_resource_request((nt_hash64_t){102}, NT_ASSET_SHADER_CODE);
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(2, s_activations);
 
     s_seconds += 1.0;
     nt_resource_step();
     assert_bytes(sizeof s_blob, 24);
-    nt_resource_invalidate(NT_ASSET_MESH);
+    nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(s_id));
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(4, s_activations);
@@ -412,13 +413,13 @@ static void test_borrowed_auto_blob_survives_invalidation(void) {
 
     nt_resource_unmount(s_id);
     assert_bytes(0, 0);
-    TEST_ASSERT_EQUAL_UINT8(1, s_blob[104]);
+    TEST_ASSERT_EQUAL_UINT8(1, s_blob[104 + sizeof(NtShaderCodeHeader)]);
 }
 
 static void test_borrowed_auto_blob_publishes_late_pin(void) {
     s_tick = 0.0;
     s_seconds = 1.0;
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = activate, .behavior_flags = NT_RESOURCE_BEHAVIOR_PIN_BLOB});
+    nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = activate, .behavior_flags = NT_RESOURCE_BEHAVIOR_PIN_BLOB});
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(s_id, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(s_id, s_blob, sizeof s_blob));
     nt_resource_set_blob_policy(s_id, NT_BLOB_AUTO, 5);
@@ -426,7 +427,7 @@ static void test_borrowed_auto_blob_publishes_late_pin(void) {
     s_seconds += 1.0;
     nt_resource_step();
 
-    nt_resource_t alias = nt_resource_request((nt_hash64_t){102}, NT_ASSET_MESH);
+    nt_resource_t alias = nt_resource_request((nt_hash64_t){102}, NT_ASSET_SHADER_CODE);
     nt_resource_step();
     TEST_ASSERT_TRUE(nt_resource_is_ready(alias));
     TEST_ASSERT_EQUAL_UINT32(101, nt_resource_get(alias));
@@ -459,7 +460,7 @@ static void check_activation_before_auto_eviction(uint8_t policy, uint32_t ttl, 
     make_other_blob();
     write_pack(s_path_a, s_blob, sizeof s_blob);
     write_pack(s_path_b, s_other_blob, sizeof s_other_blob);
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = activate});
+    nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = activate});
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(s_id, 0));
     nt_resource_set_activate_time_budget(budget);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount((nt_hash32_t){2}, 0));
@@ -469,7 +470,7 @@ static void check_activation_before_auto_eviction(uint8_t policy, uint32_t ttl, 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file((nt_hash32_t){2}, s_path_b));
     nt_resource_t handles[6];
     for (uint32_t i = 0; i < 6; i++) {
-        handles[i] = nt_resource_request((nt_hash64_t){101U + (i % 3U) + (100U * (i / 3U))}, NT_ASSET_MESH);
+        handles[i] = nt_resource_request((nt_hash64_t){101U + (i % 3U) + (100U * (i / 3U))}, NT_ASSET_SHADER_CODE);
     }
     uint32_t steps = budget == 0.0F ? 1U : 4U;
     for (uint32_t i = 0; i < steps; i++) {
@@ -505,11 +506,11 @@ static uint32_t activate_failed(const uint8_t *data, uint32_t size) {
 static void test_failed_owners_do_not_retain_auto_bytes(void) {
     s_tick = 0.0;
     s_seconds = 1.0;
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = activate_failed});
+    nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = activate_failed});
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(s_id, 0));
     write_pack(s_path_a, s_blob, sizeof s_blob);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(s_id, s_path_a));
-    nt_resource_t alias = nt_resource_request((nt_hash64_t){102}, NT_ASSET_MESH);
+    nt_resource_t alias = nt_resource_request((nt_hash64_t){102}, NT_ASSET_SHADER_CODE);
     nt_resource_set_blob_policy(s_id, NT_BLOB_AUTO, 5);
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(2, s_activations);

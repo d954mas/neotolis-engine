@@ -124,6 +124,7 @@ typedef struct {
     uint16_t user_data_asset_idx; /* asset idx last used to build user_data (aux sync check) */
     uint8_t asset_type;           /* nt_asset_type_t */
     uint8_t state;                /* nt_asset_state_t visible to game code */
+    uint32_t winner_gen;          /* unique per published winner; bumps with every on_resolve */
     void *user_data;              /* per-slot auxiliary data (on_resolve/on_cleanup) */
 } NtResourceSlot;
 

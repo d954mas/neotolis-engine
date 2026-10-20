@@ -87,26 +87,12 @@ void test_corrupt_merge_blob_leaves_atlas_unchanged(void) {
     void *user_data = NULL;
     nt_atlas_test_drive_resolve(buf, size, &user_data);
     TEST_ASSERT_NOT_NULL_MESSAGE(user_data, "baseline resolve must succeed");
-    ((NtAtlasHeader *)buf)->magic = 0xDEADBEEFU;
+    ((NtAtlasHeader *)buf)->page_count = NT_ATLAS_MAX_PAGES + 1;
     void *before = user_data;
     NT_TEST_EXPECT_ASSERT(nt_atlas_test_drive_resolve(buf, size, &user_data));
     TEST_ASSERT_EQUAL_PTR_MESSAGE(before, user_data, "a corrupt merge blob must not replace user_data");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, nt_atlas_test_region_count((const struct nt_atlas_data *)user_data), "a corrupt merge blob must not touch existing regions");
     nt_atlas_test_drive_cleanup(user_data);
-}
-
-void test_bad_magic_rejected(void) {
-    uint8_t buf[512];
-    const uint32_t size = build_blob(buf, sizeof(buf));
-    ((NtAtlasHeader *)buf)->magic = 0xDEADBEEFU;
-    assert_blob_rejected(buf, size, "bad magic must fail activation");
-}
-
-void test_bad_version_rejected(void) {
-    uint8_t buf[512];
-    const uint32_t size = build_blob(buf, sizeof(buf));
-    ((NtAtlasHeader *)buf)->version = NT_ATLAS_VERSION + 1;
-    assert_blob_rejected(buf, size, "a version mismatch must fail activation");
 }
 
 void test_page_count_over_cap_rejected(void) {
@@ -123,8 +109,8 @@ void test_page_count_over_cap_rejected(void) {
 
 void test_truncated_blob_rejected(void) {
     uint8_t buf[512];
-    (void)build_blob(buf, sizeof(buf));
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, (uint32_t)sizeof(NtAtlasHeader) - 1U), "a truncated blob must be a hard reject");
+    const uint32_t size = build_blob(buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, size - 1U), "a truncated blob must be a hard reject");
 }
 
 /* Regions sit after the page-id table in every blob this TU builds. */
@@ -195,8 +181,6 @@ int main(void) {
     RUN_TEST(test_truncated_position_or_uv_section_rejected);
     RUN_TEST(test_pageless_regioned_blob_rejected);
     RUN_TEST(test_corrupt_merge_blob_leaves_atlas_unchanged);
-    RUN_TEST(test_bad_magic_rejected);
-    RUN_TEST(test_bad_version_rejected);
     RUN_TEST(test_page_count_over_cap_rejected);
     RUN_TEST(test_truncated_blob_rejected);
     RUN_TEST(test_page_index_unbacked_rejected);

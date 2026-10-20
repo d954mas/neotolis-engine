@@ -2524,7 +2524,7 @@ static nt_texture_format_t basis_target_format(const nt_gfx_gpu_caps_t *caps, nt
 
 /* Activate a v2 texture (RAW or Basis Universal compressed) */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
+uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     /* make_texture would refuse the result anyway; bail before transcoding
      * the whole chain into staging. */
     if (g_nt_gfx.context_lost) {
@@ -2658,24 +2658,6 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
     return nt_gfx_make_texture(&desc).id;
 }
 
-uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
-    if (!data || size < sizeof(NtTextureAssetHeaderV2)) {
-        NT_LOG_ERROR("activate_texture: blob too small");
-        return 0;
-    }
-    const NtTextureAssetHeaderV2 *hdr = (const NtTextureAssetHeaderV2 *)data;
-    if (hdr->magic != NT_TEXTURE_MAGIC) {
-        NT_LOG_ERROR("activate_texture: bad magic");
-        return 0;
-    }
-    if (hdr->version != NT_TEXTURE_VERSION_V2) {
-        NT_LOG_ERROR("activate_texture: version %u != %u -- rebuild packs", (uint32_t)hdr->version, (uint32_t)NT_TEXTURE_VERSION_V2);
-        return 0;
-    }
-
-    return activate_texture_impl(data, size);
-}
-
 /* Per-stream half of the pack mesh safety net: type/count/normalized validity,
  * unique name hashes and locations, and the WebGL2 offset/stride alignment rules. */
 static bool mesh_streams_valid(const NtStreamDesc *streams, uint8_t stream_count, uint32_t *out_stride) {
@@ -2739,22 +2721,10 @@ static bool mesh_meshopt_sizes_valid(const NtMeshAssetHeader *hdr, uint32_t idx_
     return true;
 }
 
-/* Runtime safety net for pack mesh blobs (spec: runtime validates magic/version/type/sizes).
+/* Runtime safety net for pack mesh blobs past the resource header check (types and sizes).
  * 64-bit sums so a corrupt size field cannot wrap a check into a pass. */
 static bool mesh_blob_valid(const uint8_t *data, uint32_t size) {
-    if (!data || size < sizeof(NtMeshAssetHeader)) {
-        NT_LOG_ERROR("activate_mesh: blob too small");
-        return false;
-    }
     const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
-    if (hdr->magic != NT_MESH_MAGIC) {
-        NT_LOG_ERROR("activate_mesh: bad magic");
-        return false;
-    }
-    if (hdr->version != NT_MESH_VERSION) {
-        NT_LOG_ERROR("activate_mesh: version %u != %u -- rebuild packs", (uint32_t)hdr->version, (uint32_t)NT_MESH_VERSION);
-        return false;
-    }
     if (hdr->index_type > 2) {
         NT_LOG_ERROR("activate_mesh: invalid index_type");
         return false;
@@ -2929,19 +2899,7 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
 }
 
 uint32_t nt_gfx_activate_shader(const uint8_t *data, uint32_t size) {
-    if (!data || size < sizeof(NtShaderCodeHeader)) {
-        NT_LOG_ERROR("activate_shader: blob too small");
-        return 0;
-    }
     const NtShaderCodeHeader *hdr = (const NtShaderCodeHeader *)data;
-    if (hdr->magic != NT_SHADER_CODE_MAGIC) {
-        NT_LOG_ERROR("activate_shader: bad magic");
-        return 0;
-    }
-    if (hdr->version != NT_SHADER_CODE_VERSION) {
-        NT_LOG_ERROR("activate_shader: version %u != %u -- rebuild packs", (uint32_t)hdr->version, (uint32_t)NT_SHADER_CODE_VERSION);
-        return 0;
-    }
     if (hdr->stage > NT_SHADER_STAGE_FRAGMENT) {
         NT_LOG_ERROR("activate_shader: invalid stage");
         return 0;

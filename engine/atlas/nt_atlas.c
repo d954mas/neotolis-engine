@@ -192,9 +192,6 @@ static void replace_pages(nt_atlas_data_t *ad, const uint8_t *new_page_ids_bytes
 // #region activator callbacks
 static uint32_t atlas_activate(const uint8_t *data, uint32_t size);
 
-/* deactivate must NOT touch user_data — on_cleanup owns that lifecycle. */
-static void atlas_deactivate(uint32_t runtime_handle) { (void)runtime_handle; }
-
 /* Payload arrays can be unaligned in pack data; copy bytes into owned arrays. */
 typedef struct {
     const NtAtlasHeader *hdr;
@@ -222,12 +219,8 @@ static bool mul_u32_checked(uint32_t lhs, uint32_t rhs, uint32_t *out) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size, nt_atlas_blob_view_t *out) {
-    if (data == NULL || out == NULL || size < sizeof(NtAtlasHeader)) {
-        return false;
-    }
-
     const NtAtlasHeader *hdr = (const NtAtlasHeader *)data;
-    if (hdr->magic != NT_ATLAS_MAGIC || hdr->version != NT_ATLAS_VERSION || hdr->page_count > NT_ATLAS_MAX_PAGES) {
+    if (hdr->page_count > NT_ATLAS_MAX_PAGES) {
         return false;
     }
 
@@ -307,14 +300,9 @@ static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size
 
 /* AUX_BACKED slots become READY after activate, so validation precedes publication. */
 static uint32_t atlas_activate(const uint8_t *data, uint32_t size) {
-    const NtAtlasHeader *hdr = (const NtAtlasHeader *)data;
-    if (size >= sizeof(NtAtlasHeader) && (hdr->magic != NT_ATLAS_MAGIC || hdr->version != NT_ATLAS_VERSION)) {
-        NT_LOG_ERROR("atlas blob: magic 0x%08X version %u, expected version %u -- rebuild packs", hdr->magic, (unsigned)hdr->version, (unsigned)NT_ATLAS_VERSION);
-        return 0U;
-    }
     nt_atlas_blob_view_t view;
     if (!atlas_try_validate_and_carve_blob(data, size, &view)) {
-        NT_LOG_ERROR("atlas blob: header, page count or section bounds out of range -- rebuild packs");
+        NT_LOG_ERROR("atlas blob: page count or section bounds out of range -- rebuild packs");
         return 0U;
     }
     return 1U;
@@ -473,12 +461,10 @@ static void atlas_on_post_resolve(const uint8_t *data, uint32_t size, nt_resourc
 // #region public api
 nt_result_t nt_atlas_init(void) {
     NT_ASSERT(!s_atlas.initialized && "nt_atlas_init called twice");
-    nt_resource_register_type(NT_ASSET_ATLAS, &(nt_resource_type_desc_t){.activate = atlas_activate,
-                                                                         .deactivate = atlas_deactivate,
-                                                                         .on_resolve = atlas_on_resolve,
-                                                                         .on_cleanup = atlas_on_cleanup,
-                                                                         .on_post_resolve = atlas_on_post_resolve,
-                                                                         .behavior_flags = NT_RESOURCE_BEHAVIOR_AUX_BACKED});
+    nt_resource_register_type(
+        NT_ASSET_ATLAS,
+        &(nt_resource_type_desc_t){
+            .activate = atlas_activate, .on_resolve = atlas_on_resolve, .on_cleanup = atlas_on_cleanup, .on_post_resolve = atlas_on_post_resolve, .behavior_flags = NT_RESOURCE_BEHAVIOR_AUX_BACKED});
     s_atlas.initialized = true;
     return NT_OK;
 }

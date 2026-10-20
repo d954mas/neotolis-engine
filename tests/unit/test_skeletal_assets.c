@@ -476,9 +476,9 @@ void test_clip_interpolates_between_samples(void) {
 // #endregion
 
 // #region rejections
-/* Only structure is checked at activation: a payload whose size, magic,
- * version, grid or write indices do not hold could make the sampler read or
- * write outside the allocation. Values inside a sound structure belong to the
+/* Only structure is checked at activation (the resource core checks magic and
+ * version first): a payload whose size, grid or write indices do not hold could
+ * make the sampler read or write outside the allocation. Values inside a sound structure belong to the
  * builder and to NT_SKELETAL_CHECKS.
  *
  * Every rejection runs against a pool of one asset: after N refusals a valid
@@ -505,15 +505,6 @@ void test_skeleton_rejections(void) {
     memcpy(buf, valid, size);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skeleton(buf, size - 1U), "one byte short");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skeleton(buf, size + 1U), "one byte long");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skeleton(buf, 8U), "shorter than the header");
-
-    memcpy(buf, valid, size);
-    wr_u32(buf, 0xDEADBEEFU);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skeleton(buf, size), "bad magic");
-
-    memcpy(buf, valid, size);
-    wr_u16(buf + 4, NT_SKELETAL_FORMAT_VERSION + 1U);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skeleton(buf, size), "a later version");
 
     memcpy(buf, valid, size);
     wr_u16(buf + 6, 0U);
@@ -572,15 +563,6 @@ void test_skin_binding_rejections(void) {
     memcpy(buf, valid, size);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skin_binding(buf, size - 1U), "one byte short");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skin_binding(buf, size + 1U), "one byte long");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skin_binding(buf, 8U), "shorter than the header");
-
-    memcpy(buf, valid, size);
-    wr_u32(buf, 0xDEADBEEFU);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skin_binding(buf, size), "bad magic");
-
-    memcpy(buf, valid, size);
-    wr_u16(buf + 4, NT_SKELETAL_FORMAT_VERSION + 1U);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skin_binding(buf, size), "a later version");
 
     memcpy(buf, valid, size);
     wr_u16(buf + 6, 0U);
@@ -616,15 +598,6 @@ void test_clip_header_rejections(void) {
     memcpy(buf, valid, size);
     EXPECT_CLIP_REJECTED(buf, size - 1U, "one byte short");
     EXPECT_CLIP_REJECTED(buf, size + 1U, "one byte long");
-    EXPECT_CLIP_REJECTED(buf, 43U, "shorter than the header");
-
-    memcpy(buf, valid, size);
-    wr_u32(buf, 0xDEADBEEFU);
-    EXPECT_CLIP_REJECTED(buf, size, "bad magic");
-
-    memcpy(buf, valid, size);
-    wr_u16(buf + 4, NT_SKELETAL_FORMAT_VERSION + 1U);
-    EXPECT_CLIP_REJECTED(buf, size, "a later version");
 
     memcpy(buf, valid, size);
     wr_u16(buf + ANM_HDR_JOINT_COUNT, 0U);

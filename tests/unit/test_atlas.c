@@ -15,6 +15,7 @@
 #include "nt_pack_format.h"
 #include "resource/nt_resource.h"
 #include "unity.h"
+#include "test_helpers/nt_test_pack.h"
 /* clang-format on */
 
 /* Integer staging keeps pixel fixtures readable; the helper serializes ready v8 arrays. */
@@ -1267,8 +1268,8 @@ void test_atlas_on_cleanup_releases_all_buffers(void) {
 }
 
 /* ---- Header/layout validation rejects corruption ----
- * nt_atlas_test_validate_header runs the runtime blob validator: bad magic or
- * version, section layout and size bounds all return false. */
+ * nt_atlas_test_validate_header runs the runtime blob validator: section
+ * layout and size bounds return false (the resource core checks the header). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_on_resolve_header_validation_rejects_corruption(void) {
     /* Build a valid blob first */
@@ -1278,9 +1279,6 @@ void test_atlas_on_resolve_header_validation_rejects_corruption(void) {
 
     /* Valid blob should pass */
     TEST_ASSERT_TRUE(nt_atlas_test_validate_header(buf, valid_size));
-
-    /* Truncated blob: size < sizeof(NtAtlasHeader) */
-    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(buf, 10), "truncated blob should fail");
 
     /* Truncated blob: header valid but size too small for pages + regions */
     TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(buf, sizeof(NtAtlasHeader)), "undersized blob should fail");
@@ -1313,7 +1311,7 @@ void test_atlas_activator_rejects_invalid_blob(void) {
     build_fixture_blob(buf, sizeof(buf), &size);
 
     TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, size), "valid atlas must activate");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, sizeof(NtAtlasHeader) - 1U), "truncated atlas must fail activation before publication");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, size - 1U), "truncated atlas must fail activation before publication");
 }
 
 /* ---- Test 15: Region slice validation rejects corrupt page / payload refs ---- */
@@ -1469,8 +1467,8 @@ void test_atlas_full_resource_pipeline_integration(void) {
      *   [1] page texture tex0
      *   [2] page texture tex1 */
     const uint64_t atlas_rid = 0x1234567890ABCDEFULL;
-    static const uint8_t tex0_blob[16] = {1};
-    static const uint8_t tex1_blob[16] = {2};
+    static const uint8_t tex0_blob[NT_TEST_ASSET_PAYLOAD] = {0};
+    static const uint8_t tex1_blob[NT_TEST_ASSET_PAYLOAD] = {0};
 
     const uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + (3U * sizeof(NtAssetEntry)));
     const uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_DATA_ALIGN - 1U);
@@ -1522,7 +1520,7 @@ void test_atlas_full_resource_pipeline_integration(void) {
     memcpy(pack_blob + atlas_offset, atlas_blob, atlas_blob_size);
     memcpy(pack_blob + tex0_offset, tex0_blob, sizeof(tex0_blob));
     memcpy(pack_blob + tex1_offset, tex1_blob, sizeof(tex1_blob));
-    ph->checksum = nt_crc32(pack_blob + header_size, total_size - header_size);
+    nt_test_seal_pack(pack_blob);
 
     /* --- Resource system init --- */
     nt_resource_init(NULL);

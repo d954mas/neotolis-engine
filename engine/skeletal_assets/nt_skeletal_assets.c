@@ -61,19 +61,7 @@ static const nt_skeletal_slot_t *skel_view_slot(nt_resource_t handle, uint8_t as
 
 // #region NSKL skeleton
 static bool skl_validate(const uint8_t *data, uint32_t size, NtSklHeader *out) {
-    if (data == NULL || size < sizeof(NtSklHeader)) {
-        NT_LOG_WARN("activate_skeleton: payload shorter than the NSKL header");
-        return false;
-    }
     memcpy(out, data, sizeof(*out));
-    if (out->magic != NT_SKL_MAGIC) {
-        NT_LOG_WARN("activate_skeleton: bad magic 0x%08X", out->magic);
-        return false;
-    }
-    if (out->version != NT_SKELETAL_FORMAT_VERSION) {
-        NT_LOG_WARN("activate_skeleton: NSKL version %u is not %u -- rebuild packs", (unsigned)out->version, (unsigned)NT_SKELETAL_FORMAT_VERSION);
-        return false;
-    }
     if (out->joint_count == 0) {
         NT_LOG_WARN("activate_skeleton: joint_count 0");
         return false;
@@ -142,19 +130,7 @@ void nt_skeletal_assets_deactivate_skeleton(uint32_t runtime_handle) { skel_rele
 
 // #region NSKN skin binding
 static bool skn_validate(const uint8_t *data, uint32_t size, NtSknHeader *out) {
-    if (data == NULL || size < sizeof(NtSknHeader)) {
-        NT_LOG_WARN("activate_skin_binding: payload shorter than the NSKN header");
-        return false;
-    }
     memcpy(out, data, sizeof(*out));
-    if (out->magic != NT_SKN_MAGIC) {
-        NT_LOG_WARN("activate_skin_binding: bad magic 0x%08X", out->magic);
-        return false;
-    }
-    if (out->version != NT_SKELETAL_FORMAT_VERSION) {
-        NT_LOG_WARN("activate_skin_binding: NSKN version %u is not %u -- rebuild packs", (unsigned)out->version, (unsigned)NT_SKELETAL_FORMAT_VERSION);
-        return false;
-    }
     if (out->palette_count == 0) {
         NT_LOG_WARN("activate_skin_binding: palette_count 0");
         return false;
@@ -193,19 +169,7 @@ void nt_skeletal_assets_deactivate_skin_binding(uint32_t runtime_handle) { skel_
 
 // #region NANM clip
 static bool anm_validate_header(const uint8_t *data, uint32_t size, NtAnmHeader *out) {
-    if (data == NULL || size < sizeof(NtAnmHeader)) {
-        NT_LOG_WARN("activate_clip: payload shorter than the NANM header");
-        return false;
-    }
     memcpy(out, data, sizeof(*out));
-    if (out->magic != NT_ANM_MAGIC) {
-        NT_LOG_WARN("activate_clip: bad magic 0x%08X", out->magic);
-        return false;
-    }
-    if (out->version != NT_SKELETAL_FORMAT_VERSION) {
-        NT_LOG_WARN("activate_clip: NANM version %u is not %u -- rebuild packs", (unsigned)out->version, (unsigned)NT_SKELETAL_FORMAT_VERSION);
-        return false;
-    }
     if (out->joint_count == 0) {
         NT_LOG_WARN("activate_clip: joint_count 0");
         return false;

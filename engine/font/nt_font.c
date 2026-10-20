@@ -34,9 +34,7 @@ static void generate_tofu(nt_font_slot_t *slot);
 static void font_test_shutdown_packs(void);
 #endif
 
-// #region Asset callbacks — activate (structure check), on_resolve/on_cleanup + PIN_BLOB
-static void font_deactivate(uint32_t runtime_handle) { (void)runtime_handle; }
-
+// #region Asset callbacks — activate (structure check), on_resolve + PIN_BLOB
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool font_blob_structure_valid(const uint8_t *data, uint32_t size) {
     const NtFontAssetHeader *header = (const NtFontAssetHeader *)data;
@@ -106,34 +104,18 @@ static bool font_blob_structure_valid(const uint8_t *data, uint32_t size) {
     return true;
 }
 
-/* Rejects a structurally broken blob: the asset fails and the next candidate stays published.
- * Otherwise returns a UNIQUE handle per activation (font is not aux-backed, so the resolve pass detects
- * a winner-change only via a handle change); a reused handle would leave user_data pointing at a freed
- * blob. The value is never interpreted. */
-static uint32_t s_font_activate_seq;
+/* A structurally broken blob fails its asset, so the next candidate stays published. The handle is
+ * never interpreted; nt_resource_winner_gen identifies the winner. */
 static uint32_t font_activate(const uint8_t *data, uint32_t size) {
-    if (size < sizeof(NtFontAssetHeader)) {
-        NT_LOG_ERROR("font blob: %u bytes is shorter than the header -- rebuild packs", size);
-        return 0;
-    }
-    const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)data;
-    if (hdr->magic != NT_FONT_MAGIC || hdr->version != NT_FONT_VERSION) {
-        NT_LOG_ERROR("font blob: magic 0x%08X version %u, expected version %u -- rebuild packs", hdr->magic, (unsigned)hdr->version, (unsigned)NT_FONT_VERSION);
-        return 0;
-    }
     if (!font_blob_structure_valid(data, size)) {
         NT_LOG_ERROR("font blob: glyph table or contour data out of bounds -- rebuild packs");
         return 0;
     }
-    if (s_font_activate_seq == 0) {
-        s_font_activate_seq = 1; /* 0 signals activation failure to the resource system */
-    }
-    return s_font_activate_seq++;
+    return 1;
 }
 
-/* Zero-copy provider: the slot's user_data is the winning pack blob itself. Fonts decode glyphs
- * lazily from the live blob, so the winner PINs its pack (PIN_BLOB); the resolve pass owns the pin
- * and severs user_data before the blob is freed. */
+/* Zero-copy provider: user_data borrows the winner's asset bytes inside its pack blob. The winner
+ * PINs that blob (PIN_BLOB), and the resource system severs user_data before freeing it. */
 static void font_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data) {
     (void)size;
     (void)runtime_handle;
@@ -144,9 +126,6 @@ static void font_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime
     } borrowed = {.blob = data}; /* user_data is untyped; font_provider_blob reads it back as const */
     *user_data = borrowed.slot;
 }
-
-/* user_data borrows the pinned pack blob; the resource system clears it. */
-static void font_on_cleanup(void *user_data) { (void)user_data; }
 
 /* The winning resource's live blob (never a raw pointer cached across frames); NULL when gone. */
 static const uint8_t *font_provider_blob(nt_resource_t resource) { return (const uint8_t *)nt_resource_peek_user_data(resource); }
@@ -165,7 +144,7 @@ static void slot_refresh_after_resource_change(nt_font_slot_t *slot, bool flush_
     }
     bool any_active = false;
     for (uint8_t j = 0; j < slot->resource_count; j++) {
-        if (slot->resource_handles[j] != 0) {
+        if (slot->resource_gens[j] != 0) {
             any_active = true;
             break;
         }
@@ -318,7 +297,7 @@ static bool find_glyph_in_resources(nt_font_slot_t *slot, uint32_t codepoint, ui
     }
 
     for (uint8_t i = 0; i < slot->resource_count; i++) {
-        if (slot->resource_handles[i] == 0) {
+        if (slot->resource_gens[i] == 0) {
             continue; /* not resolved yet */
         }
         const uint8_t *blob = font_provider_blob(slot->resources[i]);
@@ -1435,9 +1414,7 @@ void nt_font_init(const nt_font_desc_t *desc) {
     /* Fonts are zero-copy consumers — a no-op activator marks the slot READY,
      * on_resolve/on_cleanup manage the {blob,size} view, and PIN_BLOB keeps the
      * winning pack blob resident so live glyph reads never dangle. */
-    nt_resource_register_type(
-        NT_ASSET_FONT, &(nt_resource_type_desc_t){
-                           .activate = font_activate, .deactivate = font_deactivate, .on_resolve = font_on_resolve, .on_cleanup = font_on_cleanup, .behavior_flags = NT_RESOURCE_BEHAVIOR_PIN_BLOB});
+    nt_resource_register_type(NT_ASSET_FONT, &(nt_resource_type_desc_t){.activate = font_activate, .on_resolve = font_on_resolve, .behavior_flags = NT_RESOURCE_BEHAVIOR_PIN_BLOB});
 
     s_font.last_resolve_epoch = 0;
     s_font.initialized = true;
@@ -1509,14 +1486,13 @@ void nt_font_step(void) {
 
         // #region Snapshot the current provider set (winner may have changed pack)
         bool res_now[NT_FONT_MAX_SOURCES_PER_FONT];
-        uint32_t handle_now[NT_FONT_MAX_SOURCES_PER_FONT];
+        uint32_t gen_now[NT_FONT_MAX_SOURCES_PER_FONT];
         uint8_t active_count = 0;
         for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
             const uint8_t *blob = font_provider_blob(slot->resources[ri]);
             res_now[ri] = (blob != NULL);
-            /* Winner-identity token: font_activate returns a UNIQUE seq per activation, so a winner-swap
-             * or hot-reload changes the handle even when presence and header metrics are unchanged. */
-            handle_now[ri] = res_now[ri] ? nt_resource_get(slot->resources[ri]) : 0U;
+            /* Winner identity: a swap or remount changes it even when presence and metrics do not. */
+            gen_now[ri] = res_now[ri] ? nt_resource_winner_gen(slot->resources[ri]) : 0U;
             if (res_now[ri]) {
                 active_count++;
             }
@@ -1528,11 +1504,11 @@ void nt_font_step(void) {
 
         // #region Detect provider gain/loss/identity-swap vs the cached winner handles
         for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
-            bool was = (slot->resource_handles[ri] != 0);
+            bool was = (slot->resource_gens[ri] != 0);
             /* Any provider gain/loss or identity-swap (override/patch pack, hot-reload) flushes glyph +
              * measure caches: the cache keys only on (codepoint, weight), so a winner change (incl. a
              * late-loading primary outranking a fallback) is invisible without a flush. */
-            if ((was != res_now[ri]) || (res_now[ri] && slot->resource_handles[ri] != handle_now[ri])) {
+            if ((was != res_now[ri]) || (res_now[ri] && slot->resource_gens[ri] != gen_now[ri])) {
                 changed = true;
                 need_flush = true;
             }
@@ -1587,7 +1563,7 @@ void nt_font_step(void) {
         /* Commit the published winner handle (0 = absent) after all detection — one token carries
          * both presence (nonzero) and identity (value), so the next step detects swaps with no ABA. */
         for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
-            slot->resource_handles[ri] = handle_now[ri];
+            slot->resource_gens[ri] = gen_now[ri];
         }
 
         if (changed) {
@@ -1608,7 +1584,7 @@ static void rebuild_ascii_index(nt_font_slot_t *slot) {
         slot->ascii_glyph_res[a] = 0U;
     }
     for (uint8_t k = 0; k < slot->resource_count; k++) {
-        if (slot->resource_handles[k] == 0) {
+        if (slot->resource_gens[k] == 0) {
             continue;
         }
         const uint8_t *scan_blob = font_provider_blob(slot->resources[k]);
@@ -1750,7 +1726,7 @@ void nt_font_add(nt_font_t font, nt_resource_t resource) {
     }
 
     slot->resources[slot->resource_count] = resource;
-    slot->resource_handles[slot->resource_count] = 0; /* resolved in step */
+    slot->resource_gens[slot->resource_count] = 0; /* resolved in step */
     slot->resource_count++;
 
     /* Adding an already-published resource won't bump the publication epoch, so
@@ -1921,7 +1897,7 @@ int16_t nt_font_get_kern_in_slot(const nt_font_slot_t *slot, uint32_t left_codep
 
     /* Find left glyph in resources to access its kern entries */
     for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
-        if (slot->resource_handles[ri] == 0) {
+        if (slot->resource_gens[ri] == 0) {
             continue;
         }
         const uint8_t *blob = font_provider_blob(slot->resources[ri]);
@@ -2045,7 +2021,7 @@ static nt_font_glyph_lookup_t lookup_glyph_entry_in_slot(const nt_font_slot_t *s
     }
 
     for (uint8_t i = 0; i < slot->resource_count; i++) {
-        if (slot->resource_handles[i] == 0) {
+        if (slot->resource_gens[i] == 0) {
             continue;
         }
         const uint8_t *blob = font_provider_blob(slot->resources[i]);
