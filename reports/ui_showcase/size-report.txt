@@ -1,5 +1,5 @@
 # Size Report: ui_showcase (wasm-analysis-paired)
-# Commit: 4ea9de0
+# Commit: f94abb9
 
 ## WASM Section Sizes
 
@@ -7,36 +7,36 @@ Section                Size
 ---------------- ----------
 Type                 531 B
 Import               626 B
-Function             342 B
+Function             341 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                83 B
-Elem                 144 B
-Code              376365 B
-Data               41806 B
-Custom             11172 B
+Elem                 138 B
+Code              374971 B
+Data               41075 B
+Custom             11201 B
 ---------------- ----------
-TOTAL             431090 B
+TOTAL             428987 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-77317 B   frame
+76944 B   frame
 17002 B   dispatch_command
-13289 B   create_gpu
- 9467 B   input_field
- 9139 B   main
+13283 B   create_gpu
+ 9447 B   input_field
+ 9103 B   main
  8830 B   Clay__ConfigureOpenElementPtr
- 8251 B   nt_ui_rich_text_markup
+ 8213 B   nt_ui_rich_text_markup
  6059 B   Clay__SizeContainersAlongAxis
  5872 B   nt_ui_scroll_begin
  5643 B   Clay__InitializeEphemeralMemory
  4907 B   render_rich
- 4582 B   render_radial
+ 4581 B   render_radial
  4298 B   slider_core
- 4134 B   upload_glyph
+ 4123 B   upload_glyph
  4005 B   Clay__MeasureTextCached
  3868 B   rich_emit_custom
  3727 B   rich_solve
@@ -44,18 +44,18 @@ TOTAL             431090 B
  3365 B   Clay__CloseElement
  3261 B   nt_ui_label
  3038 B   render_scroll
- 3012 B   fmt_fp
+ 3011 B   fmt_fp
  2894 B   nt_gfx_make_texture
  2877 B   nt_ui_popup_begin_internal
  2687 B   nt_material_apply
  2636 B   nt_http_request
  2593 B   scrollbar_emit_axis
  2563 B   nt_ui_tooltip
- 2429 B   printf_core
- 2411 B   nt_sprite_renderer_set_material
+ 2551 B   nt_font_lookup_glyph_offset
+ 2546 B   atlas_on_resolve
 
-Total functions: 340
-Total code size: 375767 B
+Total functions: 339
+Total code size: 374374 B
 
 ## Built Engine Archives
 
@@ -65,8 +65,8 @@ Module                         Size
 ------------------------ ----------
 libnt_app.a                 2770 B
 libnt_app_stub.a            2620 B
-libnt_atlas.a               5912 B
-libnt_base64.a               964 B
+libnt_atlas.a               5452 B
+libnt_base64.a               974 B
 libnt_basisu_transcoder.a  671530 B
 libnt_basisu_transcoder_stub.a     778 B
 libnt_clipboard.a           6906 B
@@ -77,8 +77,8 @@ libnt_crash.a              16938 B
 libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
-libnt_font.a               94006 B
-libnt_gfx.a               111604 B
+libnt_font.a               65220 B
+libnt_gfx.a               105054 B
 libnt_gfx_stub.a            6702 B
 libnt_hash.a                4108 B
 libnt_http.a               16484 B
@@ -99,23 +99,23 @@ libnt_meshwire_encoder.a    3540 B
 libnt_meshwire_stub.a        722 B
 libnt_metrics.a             1530 B
 libnt_platform.a             824 B
-libnt_pool.a                1376 B
+libnt_pool.a                1404 B
 libnt_postfx_blur.a         6798 B
 libnt_render.a              7668 B
-libnt_resource.a          215122 B
+libnt_resource.a          231656 B
 libnt_shape_renderer.a    911320 B
 libnt_skeletal.a            7464 B
-libnt_skeletal_assets.a     7796 B
+libnt_skeletal_assets.a     4046 B
 libnt_skeletal_gpu.a        2622 B
 libnt_skin_comp.a           2238 B
 libnt_skinned_mesh_renderer.a    5892 B
 libnt_sort.a                 470 B
-libnt_sprite_comp.a         8926 B
+libnt_sprite_comp.a         8744 B
 libnt_sprite_renderer.a    16192 B
 libnt_text_renderer.a       7702 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                351932 B
+libnt_ui.a                351870 B
 libnt_ui_rich.a            39000 B
 libnt_ui_rich_fx.a          3050 B
 libnt_ui_stub.a             1324 B
@@ -124,9 +124,9 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2661634 B
+TOTAL (archives)         2638416 B
 
 ## Data Segments Summary
 
-Segments: 166
-Total data size: 40636 B
+Segments: 169
+Total data size: 39884 B
