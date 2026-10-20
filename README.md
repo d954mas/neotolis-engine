@@ -107,8 +107,7 @@ node tests/wasm/smoke_test.js wasm-debug-paired
 node tests/wasm/smoke_test.js wasm-debug-simd
 ```
 
-`test_wasm_simd_loader` verifies the SIMD capability probe through its CommonJS
-and browser exports directly in Node.js. `test_wasm_smoke` can be run against
+`test_wasm_smoke` can be run against
 baseline-only, paired baseline, and standalone SIMD presets to confirm each
 produced module still loads.
 

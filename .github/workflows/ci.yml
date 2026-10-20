@@ -184,7 +184,6 @@ jobs:
       # native goldens under Node.
       - name: Test paired WASM debug
         run: |
-          node tests/wasm/simd_loader_test.js
           node tests/wasm/smoke_test.js wasm-debug-paired
           node tests/wasm/smoke_test.js wasm-debug-simd
           ctest --preset wasm-debug-paired

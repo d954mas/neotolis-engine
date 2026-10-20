@@ -1574,15 +1574,6 @@ endif()
 if(EMSCRIPTEN)
     find_program(NT_NODE_EXECUTABLE NAMES node nodejs)
 
-    if(NT_NODE_EXECUTABLE)
-        add_test(
-            NAME test_wasm_simd_loader
-            COMMAND
-                "${NT_NODE_EXECUTABLE}"
-                "${CMAKE_CURRENT_SOURCE_DIR}/wasm/simd_loader_test.js"
-        )
-    endif()
-
     add_executable(wasm_smoke wasm/smoke_entry.c)
     # nt_core links nt_log_interface (header only); the exe picks the impl. Smoke
     # test needs no real logging -> nt_log_stub.

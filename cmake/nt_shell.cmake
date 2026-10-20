@@ -26,7 +26,6 @@
 #   @NT_SHELL_TITLE@            - Page title
 #   @NT_SHELL_FULLSCREEN_BLOCK@ - HTML/CSS/JS for fullscreen bar (or empty)
 #   @NT_SHELL_KEYFRAMES@        - Literal "@keyframes" (CMake @ONLY workaround)
-#   @NT_SHELL_SIMD_LOADER_JS@   - Shared SIMD loader JavaScript source
 #   @NT_SHELL_SCRIPT_BLOCK@     - Script loading: direct {{{ SCRIPT }}} or dynamic loader
 #
 # Example:
@@ -57,7 +56,6 @@ function(nt_configure_shell target)
     # Set template variables for configure_file
     set(NT_SHELL_TITLE "${SHELL_TITLE}")
     if(SHELL_SIMD_WASM_PATH)
-        file(READ "${_NT_SHELL_MODULE_DIR}/../engine/platform/web/simd_loader.js" NT_SHELL_SIMD_LOADER_JS)
         # Derive SIMD JS filename from SIMD WASM path (e.g. index_simd.wasm → index_simd.js)
         set(_nt_simd_wasm "${SHELL_SIMD_WASM_PATH}")
         string(REGEX REPLACE "\\.wasm$" ".js" _nt_simd_js "${_nt_simd_wasm}")
@@ -68,7 +66,8 @@ function(nt_configure_shell target)
         set(_nt_shell_script_block_template [=[<template id="nt-emscripten">{{{ SCRIPT }}}</template>
     <script>
     (function() {
-        var useSimd = typeof ntSupportsWasmSimd === 'function' && ntSupportsWasmSimd();
+        // (func (drop (i8x16.splat (i32.const 0)))) validates only where WebAssembly SIMD is supported.
+        var useSimd = typeof WebAssembly === 'object' && WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 4, 1, 96, 0, 0, 3, 2, 1, 0, 10, 9, 1, 7, 0, 65, 0, 253, 15, 26, 11]));
         var variant = useSimd ? 'simd' : 'baseline';
         var scriptSrc = useSimd ? '@_nt_simd_js@' : 'index.js';
         console.info('[Neotolis] Loading WASM variant:', variant, scriptSrc);
@@ -87,7 +86,6 @@ function(nt_configure_shell target)
     </script>]=])
         string(CONFIGURE "${_nt_shell_script_block_template}" NT_SHELL_SCRIPT_BLOCK @ONLY)
     else()
-        set(NT_SHELL_SIMD_LOADER_JS "")
         set(NT_SHELL_SCRIPT_BLOCK "{{{ SCRIPT }}}")
     endif()
 
