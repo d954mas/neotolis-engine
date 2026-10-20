@@ -7,6 +7,7 @@
 
 #include "basisu/nt_basisu_transcoder.h"
 #include "core/nt_assert.h"
+#include "core/nt_builtins.h"
 #include "hash/nt_hash.h"
 #include "log/nt_log.h"
 #include "meshwire/nt_meshwire.h"
@@ -2659,8 +2660,9 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
 }
 
 /* Per-stream half of the pack mesh safety net: type/count/normalized validity,
- * unique name hashes and locations, and the WebGL2 offset/stride alignment rules. */
-static bool mesh_streams_valid(const NtStreamDesc *streams, uint8_t stream_count, uint32_t *out_stride) {
+ * unique name hashes and locations, and the WebGL2 offset/stride alignment rules.
+ * Out of line: inlined, -O3 unrolls its loop into the caller for ~0.9 KB of wasm. */
+static NT_NOINLINE bool mesh_streams_valid(const NtStreamDesc *streams, uint8_t stream_count, uint32_t *out_stride) {
     uint32_t stride = 0;
     uint32_t location_mask = 0;
     for (uint8_t i = 0; i < stream_count; i++) {

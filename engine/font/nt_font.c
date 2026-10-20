@@ -108,7 +108,7 @@ static bool font_blob_structure_valid(const uint8_t *data, uint32_t size) {
  * never interpreted; nt_resource_winner_gen identifies the winner. */
 static uint32_t font_activate(const uint8_t *data, uint32_t size) {
     if (!font_blob_structure_valid(data, size)) {
-        NT_LOG_ERROR("font blob: glyph table or contour data out of bounds -- rebuild packs");
+        NT_LOG_ERROR("font blob: bad layout -- rebuild packs");
         return 0;
     }
     return 1;

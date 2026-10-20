@@ -468,16 +468,14 @@ static const struct {
 
 static bool asset_header_valid(const NtAssetMeta *meta, const uint8_t *data) {
     const uint8_t atype = meta->asset_type;
-    if (meta->size < s_asset_headers[atype].header_size) {
-        NT_LOG_ERROR("asset %016" PRIx64 " type %u: %u bytes is shorter than its header -- rebuild packs", meta->resource_id, (unsigned)atype, meta->size);
-        return false;
+    uint32_t magic = 0;
+    uint16_t version = 0;
+    if (meta->size >= sizeof magic + sizeof version) {
+        memcpy(&magic, data, sizeof magic);
+        memcpy(&version, data + sizeof magic, sizeof version);
     }
-    uint32_t magic;
-    uint16_t version;
-    memcpy(&magic, data, sizeof magic);
-    memcpy(&version, data + sizeof magic, sizeof version);
-    if (magic != s_asset_headers[atype].magic || version != s_asset_headers[atype].version) {
-        NT_LOG_ERROR("asset %016" PRIx64 " type %u: magic 0x%08X version %u, expected 0x%08X version %u -- rebuild packs", meta->resource_id, (unsigned)atype, magic, (unsigned)version,
+    if (meta->size < s_asset_headers[atype].header_size || magic != s_asset_headers[atype].magic || version != s_asset_headers[atype].version) {
+        NT_LOG_ERROR("asset %016" PRIx64 " type %u: %u B magic 0x%08X v%u, want 0x%08X v%u -- rebuild packs", meta->resource_id, (unsigned)atype, meta->size, magic, (unsigned)version,
                      s_asset_headers[atype].magic, (unsigned)s_asset_headers[atype].version);
         return false;
     }

@@ -302,7 +302,7 @@ static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size
 static uint32_t atlas_activate(const uint8_t *data, uint32_t size) {
     nt_atlas_blob_view_t view;
     if (!atlas_try_validate_and_carve_blob(data, size, &view)) {
-        NT_LOG_ERROR("atlas blob: page count or section bounds out of range -- rebuild packs");
+        NT_LOG_ERROR("atlas blob: bad layout -- rebuild packs");
         return 0U;
     }
     return 1U;
