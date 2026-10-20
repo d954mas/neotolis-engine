@@ -654,7 +654,7 @@ if(NOT EMSCRIPTEN)
     add_test(NAME test_sort COMMAND test_sort)
 
     # --- Font module tests ---
-    add_executable(test_font unit/test_font.c)
+    add_executable(test_font unit/test_font.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_font PRIVATE nt_font nt_gfx_fake nt_basisu_transcoder_stub nt_resource nt_hash nt_pool nt_http_stub nt_fs_stub nt_log stb_truetype unity nt_meshwire_stub)
     target_compile_definitions(test_font PRIVATE _CRT_SECURE_NO_WARNINGS NT_LILITA_TTF="${CMAKE_SOURCE_DIR}/assets/fonts/LilitaOne-RussianChineseKo.ttf")
     nt_setup_test_target(test_font)

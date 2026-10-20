@@ -150,8 +150,8 @@ before encoding.
 Basis always emits a full mip chain, independent of `gen_mipmaps` (that flag
 controls RAW runtime mip generation). The builder asserts exactly
 `1 + floor(log2(max(width, height)))` levels; 1x1 is complete with one level.
-Activation cross-checks that count against the blob and the header and rejects
-any asset that disagrees. A RAW texture whose default min filter asks for
+Activation cross-checks that count against the blob and the header and asserts
+on any asset that disagrees. A RAW texture whose default min filter asks for
 mipmaps without `gen_mipmaps` is a build-time assert (`NT_BUILD_ASSERT`); the
 runtime would accept it and sample level 0.
 
@@ -275,7 +275,7 @@ Each `finish_pack` writes one header per pack into the `set_header_dir` director
 ```
 
 - An asset in two packs produces the same `#define` in both headers; C accepts an identical redefinition.
-- The same identifier with two hashes is a conflicting redefinition, so the compiler rejects it.
+- The same identifier with two hashes is a conflicting redefinition: a compiler diagnostic, an error under `-Werror` (engine targets build with it). The builder checks collisions only within one pack.
 - Each header has its own `{header}_register_labels()`; call the one for each included header.
 
 ## Generated headers in version control

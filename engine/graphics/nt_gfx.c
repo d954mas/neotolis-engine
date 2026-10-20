@@ -2699,10 +2699,8 @@ static bool mesh_make_ibo(const NtMeshAssetHeader *hdr, const uint8_t *index_dat
             NT_LOG_ERROR("activate_mesh: index decode alloc failed (%u bytes)", gpu_index_size);
             return false;
         }
-        if (!nt_meshwire_decode_indices(idx_tmp, hdr->index_count, idx_elem, index_data, hdr->index_data_size, hdr->vertex_count)) {
-            NT_LOG_ERROR("activate_mesh: index wire decode failed");
-            return false;
-        }
+        const bool decoded = nt_meshwire_decode_indices(idx_tmp, hdr->index_count, idx_elem, index_data, hdr->index_data_size, hdr->vertex_count);
+        NT_ASSERT(decoded && "mesh MESHOPT index stream corrupt");
         gpu_index_data = idx_tmp;
     }
     *out_ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
@@ -2725,6 +2723,7 @@ static void destroy_unpublished_buffer(nt_buffer_t buf) {
     NT_GFX_END(destroy_buffer(buf));
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
     mesh_blob_check(data, size);
     const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
@@ -2747,10 +2746,8 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
         for (uint8_t i = 0; i < hdr->stream_count; i++) {
             elem_sizes[i] = nt_stream_type_size(streams[i].type) * streams[i].count;
         }
-        if (!nt_meshwire_reinterleave(soa_tmp, vertex_data, hdr->vertex_count, elem_sizes, hdr->stream_count)) {
-            NT_LOG_ERROR("activate_mesh: SOA re-interleave failed");
-            return 0;
-        }
+        const bool interleaved = nt_meshwire_reinterleave(soa_tmp, vertex_data, hdr->vertex_count, elem_sizes, hdr->stream_count);
+        NT_ASSERT(interleaved && "mesh SOA streams inconsistent");
         gpu_vertex_data = soa_tmp;
     }
 

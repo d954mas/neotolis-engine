@@ -53,9 +53,8 @@ static uint32_t build_blob_pages(uint8_t *out, uint32_t cap, uint16_t page_count
 
 static uint32_t build_blob(uint8_t *out, uint32_t cap) { return build_blob_pages(out, cap, 1); }
 
-/* Activation and resolve both assert malformed structure; resolve leaves no state behind. */
+/* Resolve asserts malformed structure before it builds any state. */
 static void assert_blob_asserts(uint8_t *buf, uint32_t size) {
-    NT_TEST_EXPECT_ASSERT((void)nt_atlas_test_activate(buf, size));
     void *user_data = NULL;
     NT_TEST_EXPECT_ASSERT(nt_atlas_test_drive_resolve(buf, size, &user_data));
     TEST_ASSERT_NULL(user_data);
@@ -64,7 +63,6 @@ static void assert_blob_asserts(uint8_t *buf, uint32_t size) {
 void test_valid_blob_activates(void) {
     uint8_t buf[512];
     const uint32_t size = build_blob(buf, sizeof(buf));
-    TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, size), "a valid blob must activate");
     /* Control for the assert helper: the resolve path does create state. */
     void *user_data = NULL;
     nt_atlas_test_drive_resolve(buf, size, &user_data);
@@ -104,13 +102,16 @@ void test_page_count_over_cap_asserts(void) {
     assert_blob_asserts(buf, size); /* page_count past the cap */
     /* Control: the same layout at exactly the cap is accepted. */
     const uint32_t ok_size = build_blob_pages(buf, sizeof(buf), NT_ATLAS_MAX_PAGES);
-    TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, ok_size), "exactly the cap must activate");
+    void *user_data = NULL;
+    nt_atlas_test_drive_resolve(buf, ok_size, &user_data);
+    TEST_ASSERT_NOT_NULL_MESSAGE(user_data, "exactly the cap must resolve");
+    nt_atlas_test_drive_cleanup(user_data);
 }
 
 void test_truncated_blob_asserts(void) {
     uint8_t buf[512];
     const uint32_t size = build_blob(buf, sizeof(buf));
-    NT_TEST_EXPECT_ASSERT((void)nt_atlas_test_activate(buf, size - 1U)); /* a truncated blob */
+    assert_blob_asserts(buf, size - 1U); /* a truncated blob */
 }
 
 /* Regions sit after the page-id table in every blob this TU builds. */
@@ -125,6 +126,13 @@ void test_page_index_unbacked_asserts(void) {
     assert_blob_asserts(buf, size); /* a region on an unbacked page */
     region->page_index = NT_ATLAS_MAX_PAGES;
     assert_blob_asserts(buf, size); /* page_index past the slot array */
+}
+
+void test_tombstone_region_hash_asserts(void) {
+    uint8_t buf[512];
+    const uint32_t size = build_blob(buf, sizeof(buf));
+    blob_region0(buf)->name_hash = NT_ATLAS_TOMBSTONE_HASH;
+    assert_blob_asserts(buf, size);
 }
 
 void test_vertex_span_oob_asserts(void) {
@@ -172,7 +180,10 @@ void test_truncated_position_or_uv_section_asserts(void) {
     const NtAtlasHeader *hdr = (const NtAtlasHeader *)buf;
     assert_blob_asserts(buf, hdr->vertex_offset + (4U * (uint32_t)sizeof(float[2])) - 1U); /* truncated positions must be rejected */
     assert_blob_asserts(buf, hdr->index_offset - 1U);                                      /* truncated UVs must be rejected */
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_atlas_test_activate(buf, size));
+    void *user_data = NULL;
+    nt_atlas_test_drive_resolve(buf, size, &user_data);
+    TEST_ASSERT_NOT_NULL(user_data);
+    nt_atlas_test_drive_cleanup(user_data);
 }
 
 int main(void) {
@@ -184,6 +195,7 @@ int main(void) {
     RUN_TEST(test_page_count_over_cap_asserts);
     RUN_TEST(test_truncated_blob_asserts);
     RUN_TEST(test_page_index_unbacked_asserts);
+    RUN_TEST(test_tombstone_region_hash_asserts);
     RUN_TEST(test_vertex_span_oob_asserts);
     RUN_TEST(test_index_span_oob_asserts);
     RUN_TEST(test_vertex_offset_gap_asserts);

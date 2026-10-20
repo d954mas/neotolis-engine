@@ -1109,7 +1109,48 @@ static void expect_asset_header_assert(uint32_t which) {
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
     s_activate_call_count = 0;
     EXPECT_ASSERT(nt_resource_step());
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, which == 2 ? "shorter than its header" : "magic or version mismatch"));
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, s_activate_call_count, "the activator never sees a mismatched header");
+    free(blob);
+}
+
+/* Runtime handles repeat (fake_activate returns one constant), so only winner_gen tells a
+ * remount or a winner swap apart; an untouched step keeps it. */
+void test_winner_gen_changes_with_each_published_winner(void) {
+    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate});
+    nt_resource_set_activate_time_budget(0);
+    const nt_hash64_t rid = nt_hash64_str("gen_res");
+    const nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_winner_gen(h));
+    uint32_t size = 0;
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size);
+    TEST_ASSERT_NOT_NULL(blob);
+    const nt_hash32_t low = nt_hash32_str("gen_low");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(low, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(low, blob, size));
+    nt_resource_step();
+    const uint32_t first = nt_resource_winner_gen(h);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, first);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(first, nt_resource_winner_gen(h), "an untouched step keeps the gen");
+
+    nt_resource_unmount(low);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(low, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(low, blob, size));
+    nt_resource_step();
+    const uint32_t remounted = nt_resource_winner_gen(h);
+    TEST_ASSERT_TRUE_MESSAGE(remounted != 0 && remounted != first, "a remount publishes a new winner");
+
+    const nt_hash32_t high = nt_hash32_str("gen_high");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(high, 1));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(high, blob, size));
+    nt_resource_step();
+    const uint32_t swapped = nt_resource_winner_gen(h);
+    TEST_ASSERT_TRUE_MESSAGE(swapped != remounted && swapped != first, "a winner swap publishes a new winner");
+    TEST_ASSERT_EQUAL_UINT32(0xBEEF, nt_resource_get(h));
+
+    nt_resource_unmount(high);
+    nt_resource_unmount(low);
     free(blob);
 }
 
@@ -3909,6 +3950,7 @@ int main(void) {
     RUN_TEST(test_asset_magic_mismatch_asserts);
     RUN_TEST(test_asset_version_mismatch_asserts);
     RUN_TEST(test_asset_shorter_than_header_asserts);
+    RUN_TEST(test_winner_gen_changes_with_each_published_winner);
     RUN_TEST(test_equal_range_self_owners_keep_independent_runtime_objects);
 
     /* Pack loading tests */

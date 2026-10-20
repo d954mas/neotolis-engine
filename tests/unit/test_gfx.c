@@ -2389,7 +2389,7 @@ void test_activate_mesh_asserts_when_the_mesh_pool_is_full(void) {
 
 /* ---- Activator: mesh inconsistent sizes / 32-bit wrap ---- */
 
-void test_activate_mesh_rejects_bad_stream_type(void) {
+void test_activate_mesh_asserts_bad_stream_type(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
@@ -2397,7 +2397,7 @@ void test_activate_mesh_rejects_bad_stream_type(void) {
     EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_index_size_mismatch(void) {
+void test_activate_mesh_asserts_index_size_mismatch(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
@@ -2405,7 +2405,7 @@ void test_activate_mesh_rejects_index_size_mismatch(void) {
     EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_index_count_with_type_none(void) {
+void test_activate_mesh_asserts_index_count_with_type_none(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
@@ -2440,7 +2440,7 @@ void test_activate_mesh_two_stream_blob_valid(void) {
     nt_gfx_deactivate_mesh(handle);
 }
 
-void test_activate_mesh_rejects_normalized_float_stream(void) {
+void test_activate_mesh_asserts_normalized_float_stream(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
@@ -2448,7 +2448,7 @@ void test_activate_mesh_rejects_normalized_float_stream(void) {
     EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_stream_location_out_of_range(void) {
+void test_activate_mesh_asserts_stream_location_out_of_range(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
@@ -2460,7 +2460,7 @@ void test_activate_mesh_rejects_stream_location_out_of_range(void) {
     nt_gfx_deactivate_mesh(handle);
 }
 
-void test_activate_mesh_rejects_duplicate_stream_location(void) {
+void test_activate_mesh_asserts_duplicate_stream_location(void) {
     uint8_t blob[MESH_BLOB2_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_two_stream_mesh_blob(blob);
@@ -2469,7 +2469,7 @@ void test_activate_mesh_rejects_duplicate_stream_location(void) {
     EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_misaligned_stream(void) {
+void test_activate_mesh_asserts_misaligned_stream(void) {
     /* f32x3 + u8x3 = stride 15, not a multiple of the f32 type size (WebGL2 rule) */
     enum { BLOB_MIS = sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc)) + 15 };
     uint8_t blob[BLOB_MIS];
@@ -2487,7 +2487,7 @@ void test_activate_mesh_rejects_misaligned_stream(void) {
     EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_misaligned_offset(void) {
+void test_activate_mesh_asserts_misaligned_offset(void) {
     /* u8x2 + f32x1 + u8x2: f32 offset 2 misaligned, but stride 8 divides evenly by
      * every type size -- ONLY the offset branch can reject this blob */
     enum { BLOB_OFF = sizeof(NtMeshAssetHeader) + (3 * sizeof(NtStreamDesc)) + 8 };
@@ -2507,7 +2507,7 @@ void test_activate_mesh_rejects_misaligned_offset(void) {
     EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_size_mismatch(void) {
+void test_activate_mesh_asserts_size_mismatch(void) {
     /* vertex_data_size disagrees with vertex_count * stride */
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
@@ -2516,10 +2516,10 @@ void test_activate_mesh_rejects_size_mismatch(void) {
     EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_32bit_size_wrap(void) {
+void test_activate_mesh_asserts_32bit_size_wrap(void) {
     /* A 32-bit required-sum wraps to 46 <= blob size and would OOB-read. The blob is
      * arithmetically consistent (0x15555554 * 12 == 0xFFFFFFF0), so every product
-     * cross-check passes and ONLY a 64-bit truncation check can reject it. */
+     * cross-check passes and ONLY a 64-bit truncation check can catch it. */
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
@@ -2549,7 +2549,7 @@ void test_activate_shader_valid_blob(void) {
     nt_gfx_deactivate_shader(handle);
 }
 
-void test_activate_shader_rejects_32bit_size_wrap(void) {
+void test_activate_shader_asserts_32bit_size_wrap(void) {
     uint8_t blob[sizeof(NtShaderCodeHeader) + 32];
     memset(blob, 0, sizeof(blob));
     NtShaderCodeHeader *hdr = (NtShaderCodeHeader *)blob;
@@ -2560,14 +2560,14 @@ void test_activate_shader_rejects_32bit_size_wrap(void) {
     EXPECT_ASSERT((void)nt_gfx_activate_shader(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_shader_rejects_missing_nul(void) {
+void test_activate_shader_asserts_missing_nul(void) {
     uint8_t blob[sizeof(NtShaderCodeHeader) + 8];
     memset(blob, 0, sizeof(blob));
     NtShaderCodeHeader *hdr = (NtShaderCodeHeader *)blob;
     hdr->magic = NT_SHADER_CODE_MAGIC;
     hdr->version = NT_SHADER_CODE_VERSION;
     hdr->code_size = 4;
-    /* deliberately no NUL inside code_size -- the guard under test must reject this */
+    /* deliberately no NUL inside code_size -- the assert under test must catch this */
     memcpy(blob + sizeof(NtShaderCodeHeader), "voidmain", 8); // NOLINT(bugprone-not-null-terminated-result)
     EXPECT_ASSERT((void)nt_gfx_activate_shader(blob, (uint32_t)sizeof(blob)));
 }
@@ -2724,16 +2724,16 @@ void test_activate_mesh_meshopt_wire_decodes(void) {
     nt_gfx_deactivate_mesh(handle);
 }
 
-void test_activate_mesh_rejects_corrupt_meshopt_stream(void) {
+void test_activate_mesh_asserts_corrupt_meshopt_stream(void) {
     uint8_t blob[MESHOPT_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_meshopt_mesh_blob(blob);
-    /* Garbage in place of the codec header byte -- decode must fail, activate must return 0 */
+    /* Garbage in place of the codec header byte: the decode fails and activation asserts. */
     blob[sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + 120] = 0x00;
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_bad_wire_tags(void) {
+void test_activate_mesh_asserts_bad_wire_tags(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
@@ -2744,8 +2744,8 @@ void test_activate_mesh_rejects_bad_wire_tags(void) {
     EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_raw_non_triangle_count(void) {
-    /* GL draws only GL_TRIANGLES -- the safety net must reject a partial
+void test_activate_mesh_asserts_raw_non_triangle_count(void) {
+    /* GL draws only GL_TRIANGLES -- the activator asserts against a partial
      * trailing triangle even in RAW form */
     uint8_t blob[MESH_BLOB_BYTES + 2];
     memset(blob, 0, sizeof(blob));
@@ -2756,7 +2756,7 @@ void test_activate_mesh_rejects_raw_non_triangle_count(void) {
     EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_raw_non_triangle_vertex_count(void) {
+void test_activate_mesh_asserts_raw_non_triangle_vertex_count(void) {
     /* non-indexed: vertex_count is the draw count -- 4 vertices would lose one */
     enum { VD4 = 48 };
     uint8_t blob[sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + VD4];
@@ -2774,7 +2774,7 @@ void test_activate_mesh_rejects_raw_non_triangle_vertex_count(void) {
     EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_meshopt_without_indices(void) {
+void test_activate_mesh_asserts_meshopt_without_indices(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
@@ -2786,7 +2786,7 @@ void test_activate_mesh_rejects_meshopt_without_indices(void) {
     EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_meshopt_non_triangle_count(void) {
+void test_activate_mesh_asserts_meshopt_non_triangle_count(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
@@ -2797,7 +2797,7 @@ void test_activate_mesh_rejects_meshopt_non_triangle_count(void) {
     EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_meshopt_wire_larger_than_decoded(void) {
+void test_activate_mesh_asserts_meshopt_wire_larger_than_decoded(void) {
     uint8_t blob[MESH_BLOB_BYTES + 2];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
@@ -2807,7 +2807,7 @@ void test_activate_mesh_rejects_meshopt_wire_larger_than_decoded(void) {
     EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_meshopt_undersized_wire(void) {
+void test_activate_mesh_asserts_meshopt_undersized_wire(void) {
     /* a tiny wire block claiming thousands of indices must be rejected BEFORE
      * the decoded-buffer allocation (codec minimum is 1 byte per triangle) */
     uint8_t blob[MESH_BLOB_BYTES];
@@ -2819,7 +2819,7 @@ void test_activate_mesh_rejects_meshopt_undersized_wire(void) {
     EXPECT_ASSERT((void)nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_meshopt_decoded_size_overflow(void) {
+void test_activate_mesh_asserts_meshopt_decoded_size_overflow(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
@@ -4050,19 +4050,19 @@ int main(void) {
     RUN_TEST(test_gfx_freed_pipeline_slots_are_reused_low_first);
     RUN_TEST(test_gfx_make_pipeline_misses_while_a_loss_is_latched);
     RUN_TEST(test_gfx_make_pipeline_on_a_restored_husk_asserts_even_after_a_hit);
-    RUN_TEST(test_activate_mesh_rejects_misaligned_offset);
-    RUN_TEST(test_activate_mesh_rejects_misaligned_stream);
+    RUN_TEST(test_activate_mesh_asserts_misaligned_offset);
+    RUN_TEST(test_activate_mesh_asserts_misaligned_stream);
     RUN_TEST(test_activate_mesh_two_stream_blob_valid);
-    RUN_TEST(test_activate_mesh_rejects_normalized_float_stream);
-    RUN_TEST(test_activate_mesh_rejects_stream_location_out_of_range);
-    RUN_TEST(test_activate_mesh_rejects_duplicate_stream_location);
-    RUN_TEST(test_activate_mesh_rejects_size_mismatch);
-    RUN_TEST(test_activate_mesh_rejects_32bit_size_wrap);
-    RUN_TEST(test_activate_mesh_rejects_bad_stream_type);
-    RUN_TEST(test_activate_mesh_rejects_index_size_mismatch);
-    RUN_TEST(test_activate_mesh_rejects_index_count_with_type_none);
-    RUN_TEST(test_activate_shader_rejects_32bit_size_wrap);
-    RUN_TEST(test_activate_shader_rejects_missing_nul);
+    RUN_TEST(test_activate_mesh_asserts_normalized_float_stream);
+    RUN_TEST(test_activate_mesh_asserts_stream_location_out_of_range);
+    RUN_TEST(test_activate_mesh_asserts_duplicate_stream_location);
+    RUN_TEST(test_activate_mesh_asserts_size_mismatch);
+    RUN_TEST(test_activate_mesh_asserts_32bit_size_wrap);
+    RUN_TEST(test_activate_mesh_asserts_bad_stream_type);
+    RUN_TEST(test_activate_mesh_asserts_index_size_mismatch);
+    RUN_TEST(test_activate_mesh_asserts_index_count_with_type_none);
+    RUN_TEST(test_activate_shader_asserts_32bit_size_wrap);
+    RUN_TEST(test_activate_shader_asserts_missing_nul);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_factor);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_operation);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_alpha_blend_factors);
@@ -4115,15 +4115,15 @@ int main(void) {
     RUN_TEST(test_mesh_info_fields);
     RUN_TEST(test_activate_mesh_soa_wire_decodes);
     RUN_TEST(test_activate_mesh_meshopt_wire_decodes);
-    RUN_TEST(test_activate_mesh_rejects_corrupt_meshopt_stream);
-    RUN_TEST(test_activate_mesh_rejects_bad_wire_tags);
-    RUN_TEST(test_activate_mesh_rejects_raw_non_triangle_count);
-    RUN_TEST(test_activate_mesh_rejects_raw_non_triangle_vertex_count);
-    RUN_TEST(test_activate_mesh_rejects_meshopt_without_indices);
-    RUN_TEST(test_activate_mesh_rejects_meshopt_non_triangle_count);
-    RUN_TEST(test_activate_mesh_rejects_meshopt_wire_larger_than_decoded);
-    RUN_TEST(test_activate_mesh_rejects_meshopt_undersized_wire);
-    RUN_TEST(test_activate_mesh_rejects_meshopt_decoded_size_overflow);
+    RUN_TEST(test_activate_mesh_asserts_corrupt_meshopt_stream);
+    RUN_TEST(test_activate_mesh_asserts_bad_wire_tags);
+    RUN_TEST(test_activate_mesh_asserts_raw_non_triangle_count);
+    RUN_TEST(test_activate_mesh_asserts_raw_non_triangle_vertex_count);
+    RUN_TEST(test_activate_mesh_asserts_meshopt_without_indices);
+    RUN_TEST(test_activate_mesh_asserts_meshopt_non_triangle_count);
+    RUN_TEST(test_activate_mesh_asserts_meshopt_wire_larger_than_decoded);
+    RUN_TEST(test_activate_mesh_asserts_meshopt_undersized_wire);
+    RUN_TEST(test_activate_mesh_asserts_meshopt_decoded_size_overflow);
     /* Uniform buffer tests */
     RUN_TEST(test_stream_executes_draws_in_call_order_at_end_frame);
     RUN_TEST(test_stream_records_every_draw_phase_call);

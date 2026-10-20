@@ -21,6 +21,7 @@
 #include "nt_pack_format.h"
 #include "resource/nt_resource.h"
 #include "stb_truetype.h"
+#include "test_helpers/nt_assert_trap.h"
 #include "unity.h"
 /* clang-format on */
 
@@ -1279,6 +1280,26 @@ static void assert_font_blob_activates(const uint8_t *blob, uint32_t size) {
 void test_font_contour_points_above_curve_cap_stay_valid(void) {
     static uint8_t blob[2048];
     assert_font_blob_activates(blob, build_ring_font_blob(blob, 1U, 600U, 2U));
+}
+
+/* Packs are trusted, so glyph decode asserts the bounds its static buffers rely on. */
+static void expect_glyph_decode_assert(const uint8_t *blob, uint32_t size, const char *expr) {
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
+    nt_font_add(font, nt_font_test_resource(nt_font_test_register_data(blob, size)));
+    nt_resource_step();
+    nt_font_step();
+    NT_TEST_EXPECT_ASSERT((void)nt_font_lookup_glyph(font, 'A'));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, expr));
+}
+
+void test_font_contour_over_point_cap_asserts_on_decode(void) {
+    static uint8_t blob[4096];
+    expect_glyph_decode_assert(blob, build_ring_font_blob(blob, 1U, NT_FONT_MAX_POINTS_PER_CONTOUR + 1U, 2U), "NT_FONT_MAX_POINTS_PER_CONTOUR");
+}
+
+void test_font_outline_over_curve_cap_asserts_on_decode(void) {
+    static uint8_t blob[4096];
+    expect_glyph_decode_assert(blob, build_ring_font_blob(blob, 1U, NT_FONT_MAX_CURVES_PER_GLYPH + 1U, 1U), "curve cap");
 }
 
 /* ---- FONT-03: unmount a font's pack WHILE it is referenced ----
@@ -2955,6 +2976,8 @@ int main(void) {
     RUN_TEST(test_font_blob_valid);
     RUN_TEST(test_font_shared_contours_padding_and_empty_glyph_remain_valid);
     RUN_TEST(test_font_contour_points_above_curve_cap_stay_valid);
+    RUN_TEST(test_font_contour_over_point_cap_asserts_on_decode);
+    RUN_TEST(test_font_outline_over_curve_cap_asserts_on_decode);
     RUN_TEST(test_font_init_shutdown);
     RUN_TEST(test_font_create_destroy_valid);
     RUN_TEST(test_font_unready_texture_keeps_cpu_queries_gpu_free);

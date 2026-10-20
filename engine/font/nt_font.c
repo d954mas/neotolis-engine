@@ -35,11 +35,11 @@ static void font_test_shutdown_packs(void);
 #endif
 
 // #region Asset callbacks — activate, on_resolve + PIN_BLOB
-/* Packs are trusted: the decoder asserts each glyph's structure on its first use. The handle is
- * never interpreted; nt_resource_winner_gen identifies the winner. */
+/* Packs are trusted: one O(1) table bound here, and glyph decode asserts each glyph's point and
+ * curve counts on first use. The handle is never interpreted; nt_resource_winner_gen identifies the winner. */
 static uint32_t font_activate(const uint8_t *data, uint32_t size) {
-    (void)data;
-    (void)size;
+    const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)data;
+    NT_ASSERT(sizeof(NtFontAssetHeader) + ((uint64_t)hdr->glyph_count * sizeof(NtFontGlyphEntry)) <= size && "font glyph table past the blob");
     return 1;
 }
 
@@ -1339,9 +1339,8 @@ void nt_font_init(const nt_font_desc_t *desc) {
     s_font.slots = (nt_font_slot_t *)calloc((size_t)desc->max_fonts + 1, sizeof(nt_font_slot_t));
     NT_ASSERT(s_font.slots);
 
-    /* Fonts are zero-copy consumers — a no-op activator marks the slot READY,
-     * on_resolve/on_cleanup manage the {blob,size} view, and PIN_BLOB keeps the
-     * winning pack blob resident so live glyph reads never dangle. */
+    /* Fonts are zero-copy consumers: on_resolve borrows the winner's bytes as user_data (no
+     * cleanup needed), and PIN_BLOB keeps the winning pack blob resident so glyph reads never dangle. */
     nt_resource_register_type(NT_ASSET_FONT, &(nt_resource_type_desc_t){.activate = font_activate, .on_resolve = font_on_resolve, .behavior_flags = NT_RESOURCE_BEHAVIOR_PIN_BLOB});
 
     s_font.last_resolve_epoch = 0;
@@ -1430,7 +1429,7 @@ void nt_font_step(void) {
         bool changed = false; /* provider set, identity, or metrics changed -> rebuild ascii + measure cache */
         bool need_flush = false;
 
-        // #region Detect provider gain/loss/identity-swap vs the cached winner handles
+        // #region Detect provider gain/loss/identity-swap vs the cached winner gens
         for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
             bool was = (slot->resource_gens[ri] != 0);
             /* Any provider gain/loss or identity-swap (override/patch pack, hot-reload) flushes glyph +
@@ -1488,7 +1487,7 @@ void nt_font_step(void) {
         }
         // #endregion
 
-        /* Commit the published winner handle (0 = absent) after all detection — one token carries
+        /* Commit the published winner gen (0 = absent) after all detection — one token carries
          * both presence (nonzero) and identity (value), so the next step detects swaps with no ABA. */
         for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
             slot->resource_gens[ri] = gen_now[ri];
@@ -2257,21 +2256,6 @@ void nt_font_test_deactivate(uint32_t token) {
     }
     free(tp->pack_blob);
     tp->pack_blob = NULL;
-}
-
-uint32_t nt_font_test_register_shared_rid(uint32_t base_token, const uint8_t *data, uint32_t size) {
-    NT_ASSERT(base_token != 0 && base_token <= s_test_pack_count);
-    NT_ASSERT(s_test_pack_count < NT_FONT_TEST_MAX_PACKS);
-    uint32_t idx = s_test_pack_count++;
-    nt_font_test_pack_t *tp = &s_test_packs[idx];
-    memset(tp, 0, sizeof(*tp));
-    char name[32];
-    (void)snprintf(name, sizeof(name), "font_test_pack_%u", idx);
-    tp->pid = nt_hash32_str(name);              /* fresh pack id */
-    tp->rid = s_test_packs[base_token - 1].rid; /* shared resource id -> both packs publish one resource */
-    tp->used = true;
-    font_test_mount_parse(tp, data, size);
-    return idx + 1;
 }
 
 void nt_font_test_reregister(uint32_t token, const uint8_t *data, uint32_t size) {

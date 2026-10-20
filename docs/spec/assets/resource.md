@@ -104,7 +104,7 @@ texture creation does not poll GPU errors.
 Typed wrappers (MeshHandle, TextureHandle) live outside nt_resource — game code or future phases.
 
 `nt_resource_publication_epoch()` exposes a monotonic change counter for systems that want to skip work when published slot data has not changed.
-`nt_resource_winner_gen(handle)` changes each time that slot publishes a winner and never repeats, so a consumer can tell a winner swap or remount apart even when runtime handles repeat.
+`nt_resource_winner_gen(handle)` changes each time that slot publishes a winner and never repeats within one init, so a consumer can tell a winner swap or remount apart even when runtime handles repeat.
 
 ## AssetMeta stability
 
@@ -204,8 +204,8 @@ parse, before any asset records or blob ownership change. Unknown manifest types
 are malformed input and reject the pack through the recoverable parse error.
 
 Registration requires an initialized registry, a valid type-table index, a non-NULL
-descriptor and known flag bits. AUX_BACKED requires `on_resolve` and
-`on_cleanup`; other types may leave any callback NULL. Validation precedes registration, so an invalid description leaves
+descriptor and known flag bits. `on_resolve` requires `on_cleanup` unless the type
+is PIN_BLOB (its `user_data` is a borrowed view); AUX_BACKED requires both. Validation precedes registration, so an invalid description leaves
 the type available for a valid first registration. PIN_BLOB is incompatible with
 virtual assets: registering a virtual provider for a PIN type asserts before
 mutation. Callbacks and flags stay together for the registry lifetime.
@@ -556,7 +556,7 @@ metrics stay unchanged.
 
 **Decoration metrics.** The 24-byte header ends with four `int16` decoration-metric fields (`underline_position`, `underline_thickness`, `strikeout_position`, `strikeout_size`). The builder reads these raw from the source font's `post` (`underlinePosition`@8, `underlineThickness`@10) and `OS/2` (`yStrikeoutSize`@26, `yStrikeoutPosition`@28) tables (big-endian, UPM-rescaled with the other metrics); when a table is absent it bakes a metric-correct heuristic (underline just below baseline, strike near mid x-height) so the runtime never sees garbage. This keeps decoration metrics in the builder — the runtime stays a parser-free safety net.
 
-**Activation checks.** FONT activation reads nothing past the core header check: the pack is trusted, and glyph decode asserts each glyph's point and curve bounds on its first use, so a large font costs nothing at load. Shared glyph payloads, trailing padding and zero-curve glyphs are valid. Coordinate and metric values are builder guarantees.
+**Activation checks.** FONT activation asserts only that the glyph table fits the blob (O(1)): the pack is trusted, and glyph decode asserts each glyph's point and curve counts on its first use, so a large font costs nothing at load. Shared glyph payloads, trailing padding and zero-curve glyphs are valid. Coordinate and metric values are builder guarantees.
 
 ### NT_ASSET_ATLAS binary format
 
@@ -638,7 +638,7 @@ uint16[total_index_count] (at index_offset)
   Runtime adds the region's staging-buffer base to each local index.
 ```
 
-Runtime keeps an owned atlas snapshot in slot `user_data`, not a raw mmap view. On first publication the atlas module validates the blob, copies region metadata, positions, UVs, indices, intrinsic scale, and page resource ids into owned buffers, then builds an open-addressing hash table for O(1) region lookup. Activation asserts the layout before publication (the core has already checked the header): the page cap, tightly packed sections inside the blob, per-region vertex/index spans, a region name hash other than the tombstone, and a declared page for every region. Resolve carves the same view and asserts the same layout. Validation runs at activate and resolve on blob changes, never per frame. UVs are pre-normalized and triangles are pre-built by the builder using validated Clipper2 CDT; incomplete triangulation fails closed and the candidate is not published.
+Runtime keeps an owned atlas snapshot in slot `user_data`, not a raw mmap view. On first publication the atlas module validates the blob, copies region metadata, positions, UVs, indices, intrinsic scale, and page resource ids into owned buffers, then builds an open-addressing hash table for O(1) region lookup. Resolve carves the blob and asserts its layout before the slot publishes (the core has already checked the header): the page cap, tightly packed sections inside the blob, per-region vertex/index spans, a region name hash other than the tombstone, and a declared page for every region. It runs on blob changes, never per frame. UVs are pre-normalized and triangles are pre-built by the builder using validated Clipper2 CDT; incomplete triangulation fails closed and the candidate is not published.
 
 The builder asserts that PPU, its reciprocal, baked positions, and source dimensions in game units are finite and representable. Runtime trusts the prebuilt coordinates without a per-vertex float scan. The intrinsic atlas scale is immutable; generic `pixels_per_unit` metadata does not change it. The renderer still applies origin, flip, and the game's transform. Slice9 converts border pixels to game units using `inverse_pixels_per_unit * slice9_scale`. If opposite borders exceed the target dimension, their destination widths shrink proportionally.
 

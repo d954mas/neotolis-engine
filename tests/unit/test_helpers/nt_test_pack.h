@@ -70,7 +70,7 @@ static inline void nt_test_seal_pack(uint8_t *blob) {
     NtPackHeader *h = (NtPackHeader *)blob;
     const NtAssetEntry *entries = (const NtAssetEntry *)(blob + sizeof(NtPackHeader));
     for (uint32_t i = 0; i < h->asset_count; i++) {
-        if (entries[i].size >= sizeof(uint32_t) + sizeof(uint16_t) && entries[i].offset >= h->header_size && entries[i].offset <= h->total_size - entries[i].size) {
+        if (entries[i].size >= sizeof(uint32_t) + sizeof(uint16_t) && entries[i].size <= h->total_size && entries[i].offset >= h->header_size && entries[i].offset <= h->total_size - entries[i].size) {
             nt_test_write_asset_header(blob + entries[i].offset, entries[i].asset_type);
         }
     }

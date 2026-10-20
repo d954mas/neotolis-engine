@@ -4,6 +4,7 @@
 
 #include <inttypes.h>
 #include <limits.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -449,7 +450,11 @@ static void resource_resolve_pass(void) {
 
 /* ---- Asset header check ---- */
 
-/* Every asset payload starts with {u32 magic; u16 version} of its type's format. */
+/* Every activated payload starts with {u32 magic; u16 version} of its type's format. BLOB is
+ * published at parse and never activated. */
+_Static_assert(offsetof(NtMeshAssetHeader, version) == 4 && offsetof(NtTextureAssetHeader, version) == 4 && offsetof(NtShaderCodeHeader, version) == 4 && offsetof(NtFontAssetHeader, version) == 4 &&
+                   offsetof(NtAtlasHeader, version) == 4 && offsetof(NtSklHeader, version) == 4 && offsetof(NtSknHeader, version) == 4 && offsetof(NtAnmHeader, version) == 4,
+               "asset headers share the {u32 magic; u16 version} prefix");
 static const struct {
     uint32_t magic;
     uint16_t version;
@@ -458,7 +463,6 @@ static const struct {
     [NT_ASSET_MESH] = {NT_MESH_MAGIC, NT_MESH_VERSION, sizeof(NtMeshAssetHeader)},
     [NT_ASSET_TEXTURE] = {NT_TEXTURE_MAGIC, NT_TEXTURE_VERSION, sizeof(NtTextureAssetHeader)},
     [NT_ASSET_SHADER_CODE] = {NT_SHADER_CODE_MAGIC, NT_SHADER_CODE_VERSION, sizeof(NtShaderCodeHeader)},
-    [NT_ASSET_BLOB] = {NT_BLOB_MAGIC, NT_BLOB_VERSION, sizeof(NtBlobAssetHeader)},
     [NT_ASSET_FONT] = {NT_FONT_MAGIC, NT_FONT_VERSION, sizeof(NtFontAssetHeader)},
     [NT_ASSET_ATLAS] = {NT_ATLAS_MAGIC, NT_ATLAS_VERSION, sizeof(NtAtlasHeader)},
     [NT_ASSET_SKELETON] = {NT_SKL_MAGIC, NT_SKELETAL_FORMAT_VERSION, sizeof(NtSklHeader)},
@@ -1594,6 +1598,8 @@ void nt_resource_register_type(uint8_t asset_type, const nt_resource_type_desc_t
     NT_ASSERT(asset_type < NT_RESOURCE_MAX_ASSET_TYPES);
     NT_ASSERT(desc != NULL);
     NT_ASSERT((desc->behavior_flags & ~(NT_RESOURCE_BEHAVIOR_AUX_BACKED | NT_RESOURCE_BEHAVIOR_PIN_BLOB)) == 0);
+    /* Only a PIN_BLOB view borrows its user_data; anything else on_resolve builds needs a cleanup. */
+    NT_ASSERT(desc->on_resolve == NULL || desc->on_cleanup != NULL || (desc->behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0);
     NT_ASSERT((desc->behavior_flags & NT_RESOURCE_BEHAVIOR_AUX_BACKED) == 0 || (desc->on_resolve != NULL && desc->on_cleanup != NULL));
     NtResourceTypeEntry *entry = &s_resource.types[asset_type];
     NT_ASSERT(!entry->registered);

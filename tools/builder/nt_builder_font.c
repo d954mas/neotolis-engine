@@ -626,15 +626,15 @@ static uint16_t vertices_to_points(const stbtt_vertex *verts, int start, int end
     return np;
 }
 
-static uint32_t compute_curve_data_size(const stbtt_vertex *verts, int nv, uint16_t *out_total_segments, uint16_t *out_contour_count) {
+static uint32_t compute_curve_data_size(const stbtt_vertex *verts, int nv, uint32_t *out_total_segments, uint16_t *out_contour_count) {
     if (nv == 0) {
         *out_total_segments = 0;
         *out_contour_count = 0;
         return 0;
     }
 
-    uint32_t size = 2; /* contour_count uint16 */
-    uint16_t total_segs = 0;
+    uint32_t size = 2;       /* contour_count uint16 */
+    uint32_t total_segs = 0; /* 32-bit: a wrapped sum would slip past the curve cap */
     uint16_t cc = 0;
 
     /* Find contour boundaries (vmove to vmove) */
@@ -647,7 +647,7 @@ static uint32_t compute_curve_data_size(const stbtt_vertex *verts, int nv, uint1
             contour_end++;
         }
         /* Count segments in this contour */
-        uint16_t seg_count = 0;
+        uint32_t seg_count = 0;
         for (int j = v + 1; j < contour_end; j++) {
             if (verts[j].type == STBTT_vline || verts[j].type == STBTT_vcurve) {
                 seg_count++;
@@ -699,7 +699,7 @@ static void write_contour_data(const stbtt_vertex *verts, int nv, uint16_t conto
             contour_end++;
         }
         /* Skip empty contours */
-        uint16_t seg_count = 0;
+        uint32_t seg_count = 0;
         for (int j = v + 1; j < contour_end; j++) {
             if (verts[j].type == STBTT_vline || verts[j].type == STBTT_vcurve) {
                 seg_count++;
@@ -751,7 +751,7 @@ static void write_contour_data(const stbtt_vertex *verts, int nv, uint16_t conto
 
 typedef struct {
     int glyph_idx;
-    uint16_t total_segments;
+    uint32_t total_segments;
     uint16_t contour_count;
     uint16_t kern_count;
     uint32_t curve_data_size;
@@ -1014,7 +1014,7 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
         memset(ge, 0, sizeof(*ge));
         ge->codepoint = codepoints[i];
         ge->data_offset = data_offset;
-        ge->curve_count = ginfo[i].total_segments;
+        ge->curve_count = (uint16_t)ginfo[i].total_segments; /* <= NT_FONT_MAX_CURVES_PER_GLYPH, checked above */
         ge->kern_count = ginfo[i].kern_count;
 
         /* Metrics */
