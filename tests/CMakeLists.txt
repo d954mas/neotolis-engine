@@ -1098,20 +1098,16 @@ if(NOT EMSCRIPTEN)
     # Builder assert tests longjmp mid-pipeline; leaked allocations are expected.
     set_tests_properties(test_builder PROPERTIES ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0")
 
-    add_executable(test_atlas_hull_visual_report
-        unit/test_atlas_hull_visual_report.c
-        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/hull_visual_report.c
-        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c
-    )
-    target_link_libraries(test_atlas_hull_visual_report PRIVATE nt_builder nt_log unity cjson nt_meshwire)
-    target_include_directories(test_atlas_hull_visual_report PRIVATE
+    # Golden hull vertex totals per public area budget on real sprite art.
+    add_executable(test_atlas_hull_budget unit/test_atlas_hull_budget.c)
+    target_link_libraries(test_atlas_hull_budget PRIVATE nt_builder nt_log unity nt_meshwire)
+    target_include_directories(test_atlas_hull_budget PRIVATE
         ${CMAKE_SOURCE_DIR}/shared/include
         ${CMAKE_SOURCE_DIR}/tools/builder
-        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
+        ${CMAKE_CURRENT_SOURCE_DIR}/unit
     )
-    target_compile_definitions(test_atlas_hull_visual_report PRIVATE _CRT_SECURE_NO_WARNINGS)
-    # Renders the full visual-acceptance sheet; >120 s on slow CI runners.
-    nt_setup_test_target(test_atlas_hull_visual_report WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" TIMEOUT 600)
+    target_compile_definitions(test_atlas_hull_budget PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_hull_budget WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     # Proves the graceful transparent-after-trim error path is leak-free:
     # runs under live LSan, no detect_leaks=0 masking.
@@ -1230,11 +1226,6 @@ if(NOT EMSCRIPTEN)
     endif()
     if(NT_GIT_BASH_EXECUTABLE)
         add_test(
-            NAME test_bench_hull_tolerance_guard
-            COMMAND "${NT_GIT_BASH_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/test_bench_hull_tolerance_guard.sh"
-            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        )
-        add_test(
             NAME test_atlas_transform_sweep_guard
             COMMAND "${NT_GIT_BASH_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/test_atlas_transform_sweep_guard.sh"
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
@@ -1244,15 +1235,11 @@ if(NOT EMSCRIPTEN)
             COMMAND "${NT_GIT_BASH_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/test_atlas_bench_transforms_e2e.sh"
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         )
-        set_tests_properties(test_bench_hull_tolerance_guard PROPERTIES
-            ENVIRONMENT "NT_ATLAS_BENCH_EXE=${CMAKE_SOURCE_DIR}/build/tools/research/${NT_PRESET_NAME}/atlas_bench${CMAKE_EXECUTABLE_SUFFIX}"
-        )
         set_tests_properties(test_atlas_bench_transforms_e2e PROPERTIES
             ENVIRONMENT "NT_ATLAS_BENCH_EXE=${CMAKE_SOURCE_DIR}/build/tools/research/${NT_PRESET_NAME}/atlas_bench${CMAKE_EXECUTABLE_SUFFIX}"
         )
         # Bench-driven shell guards; generous ceiling still catches an infinite hang.
-        set_tests_properties(test_bench_hull_tolerance_guard test_atlas_transform_sweep_guard
-            test_atlas_bench_transforms_e2e PROPERTIES TIMEOUT 600)
+        set_tests_properties(test_atlas_transform_sweep_guard test_atlas_bench_transforms_e2e PROPERTIES TIMEOUT 600)
     else()
         message(WARNING "Git Bash not found; native shell guards are NOT registered")
     endif()

@@ -414,10 +414,8 @@ jobs:
           test -f build/engine/native-debug/libnt_log_stub.a
           ./build/tools/builder/native-debug/builder
 
-      # The hull visual report renders the research acceptance sheet: 155 s under sanitizers,
-      # 7 s in native-release (FULL asserts), which runs it.
       - name: Run tests (debug)
-        run: xvfb-run -a bash scripts/ci_ctest.sh --preset native-debug -E '^test_atlas_hull_visual_report$'
+        run: xvfb-run -a bash scripts/ci_ctest.sh --preset native-debug
 
       - name: Submodule consumption test
         run: |
@@ -448,7 +446,7 @@ jobs:
       # The atlas bench guards check builder geometry, not optional features; native-debug
       # (sanitizers) and native-release run them.
       - name: Run tests (optional features OFF)
-        run: xvfb-run -a bash scripts/ci_ctest.sh --test-dir build/_cmake/native-debug-off -E '^(test_atlas_hull_visual_report|test_atlas_transform_sweep_guard|test_bench_hull_tolerance_guard)$'
+        run: xvfb-run -a bash scripts/ci_ctest.sh --test-dir build/_cmake/native-debug-off -E '^(test_atlas_hull_budget|test_atlas_transform_sweep_guard)$'
 
       # Each admission row (NT_BASISU_ROWS) consumes the Basis baseline through the trimmed
       # mirror and runs the Basis suites with the restricted set; the producer runs first.

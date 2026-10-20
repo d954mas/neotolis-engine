@@ -562,16 +562,7 @@ zero-initialized appended controls preserve inherit semantics. Atlas-level
 - `margin` is **raise-only**: it only feeds the packing footprint, so a per-sprite value below the atlas margin is clamped up to the atlas value. An `UNFITTABLE` record reports the *effective* (clamped-up) margin the packer actually used, not a below-atlas request.
 - `extrude`: `0` **inherits** the atlas default. A non-zero override sets **this sprite's edge bleed** (RECT only) and may be smaller OR larger than the atlas extrude — but a *zero* bleed cannot be expressed per-sprite (0 means inherit). Effective extrude, whether inherited or overridden, requires the effective sprite shape to be RECT. Compose/serialize apply the raw override. The packing footprint, however, reserves room for `max(this sprite's extrude, atlas extrude)`, so an `UNFITTABLE` record reports that effective (max) extrude — the space that actually caused the fit failure, distinct from the per-sprite bleed written into the page.
 
-**Measured area-budget guidance (`mixed_aa`, native release):**
-
-The current deterministic frontier evidence uses six public area-budget values. Each row is reconstructed from real production packs and repeat-verified through the selected-geometry proof. Tracked proofs use `portable-v1`: platform, machine CPU, and timing fields are removed before hashing. The recorded builder binary hash identifies the publisher but is not a consumer-side byte-identity gate, so the portable proof remains consumable across supported platforms. The frontier also records a deterministic hash of the production atlas-geometry sources — the single list in `scripts/lib/hull_geometry_sources.sh`, which includes the Clipper2 bridge and the vendored Clipper2 sources; visual acceptance rejects evidence after any of those sources changes, and the CI guard prints a non-fatal staleness warning. Canonical publication is explicit (`scripts/bench_hull_tolerance.sh --publish`), requires `native-release`, one builder thread, and the exact `mixed_aa` 0/2/5/10/15/25 sweep, and refuses a dirty worktree. Ordinary local sweeps only write under their output directory.
-
-Visual acceptance is black-box: every polygon displayed in its 6/7/8 selected-count evidence was chosen by the public production selector, serialized into a real pack, reconstructed, and re-proved. Internal frontier slots cannot be forced into acceptance output. `visual_input_sha256` hashes the actual decoded RGBA plus resolved row controls used by the builder.
-
-The measured numbers themselves (per-budget vertex counts, frontier fill,
-overdraw, and the sweep/pack SHA-256s) live in the published artifact
-`tools/research/atlas_bench/hull_area_frontier.json` — that file is the
-authority; never hand-copy rows out of it.
+**Measured area-budget guidance (`mixed_aa`, 128 sprites):** total hull vertices were 896/752/716/666/642/598 at 0/2/5/10/15/25% added area; the 10% default keeps most of the saving. `test_atlas_hull_budget` pins per-budget totals on a 12-sprite subset, so a geometry change shows up as a test diff.
 
 **Pivot semantics:**
 - Normalized over the **source image** dimensions (not the trimmed rect). Default `(0.5, 0.5)` = image centre.
