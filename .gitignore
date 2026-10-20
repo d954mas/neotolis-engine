@@ -8,6 +8,9 @@ build/
 .claude/commands/autoresearch
 .claude/skills/autoresearch
 
+# Staged writes a killed builder leaves behind
+examples/*/generated/*.tmp
+
 # CMake
 CMakeFiles/
 CMakeCache.txt

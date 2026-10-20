@@ -74,8 +74,8 @@ jobs:
           test -f build/engine/native-release/libnt_log_stub.a
           ./build/tools/builder/native-release/builder
 
-      # Missing or partial packs already failed the build (copy edges + success stamp,
-      # cmake/nt_example_packs.cmake). Silent drifts: an example whose build_packs.c was
+      # Missing or partial packs already failed the build (copy edges + builder exit
+      # status, cmake/nt_example_packs.cmake). Silent drifts: an example whose build_packs.c was
       # never wired, one missing from NT_ALL_EXAMPLE_PACKS (test jobs would re-encode it),
       # and stale committed codegen headers (wasm/deploy compile against the committed copies).
       - name: Verify example packs wired + headers fresh
@@ -463,7 +463,7 @@ jobs:
             flags="${row#*:}"
             cmake --preset native-debug -B "build/_cmake/$name" ${flags//,/ } -DNT_HTTP_CURL=OFF -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
             cmake --build "build/_cmake/$name" --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
-            xvfb-run -a bash scripts/ci_ctest.sh --test-dir "build/_cmake/$name" --no-tests=error -R '^test_(basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder)$'
+            xvfb-run -a bash scripts/ci_ctest.sh --test-dir "build/_cmake/$name" --no-tests=error -R '^test_(basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder(_record_.*)?)$'
           done
 
       - name: Test optional font geometry (FULL asserts)

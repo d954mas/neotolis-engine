@@ -293,10 +293,20 @@ void nt_builder_free_pack(NtBuilderContext *ctx) { nt_builder_free_context(ctx);
 /* Forward declaration for texture re-decode (defined below make_texture_data) */
 static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *out_w, uint32_t *out_h);
 
-/* Atomic pack publish: tmp -> final. On Windows, replacing the destination
+void nt_builder_tmp_path(const char *path, char *out, size_t out_size) {
+#ifdef _WIN32
+    unsigned long pid = (unsigned long)GetCurrentProcessId();
+#else
+    unsigned long pid = (unsigned long)getpid();
+#endif
+    int len = snprintf(out, out_size, "%s.%lu.tmp", path, pid);
+    NT_BUILD_ASSERT(len > 0 && (size_t)len < out_size && "tmp path too long");
+}
+
+/* Atomic publish: tmp -> final. On Windows, replacing the destination
  * fails with a sharing violation while a running example (or AV scan) holds
- * the pack open — retry briefly before giving up. */
-static bool nt_builder_publish_pack(const char *tmp_path, const char *output_path) {
+ * the file open — retry briefly before giving up. */
+bool nt_builder_publish_file(const char *tmp_path, const char *output_path) {
 #ifdef _WIN32
     for (int attempt = 0; attempt < 5; attempt++) {
         if (attempt > 0) {
@@ -1128,12 +1138,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
      * path can be observed (and rewritten) by concurrent preset builds; a torn
      * pack must never be visible, and two builders must never share one tmp. */
     char tmp_path[sizeof(ctx->output_path) + 24];
-#ifdef _WIN32
-    unsigned long pid = (unsigned long)GetCurrentProcessId();
-#else
-    unsigned long pid = (unsigned long)getpid();
-#endif
-    (void)snprintf(tmp_path, sizeof(tmp_path), "%s.%lu.tmp", ctx->output_path, pid);
+    nt_builder_tmp_path(ctx->output_path, tmp_path, sizeof(tmp_path));
     FILE *file = fopen(tmp_path, "wb");
     NT_BUILD_ASSERT(file && "finish_pack: cannot open tmp output file");
 
@@ -1161,7 +1166,8 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     /* A failed write/publish must leave NO pack at the final path — a stale
      * previous pack would be silently copied by later wasm builds. */
-    if (!write_ok || !nt_builder_publish_pack(tmp_path, ctx->output_path)) {
+    nt_builder_record_output(ctx->output_path, tmp_path);
+    if (!write_ok || !nt_builder_publish_file(tmp_path, ctx->output_path)) {
         (void)remove(tmp_path);
         (void)remove(ctx->output_path);
         NT_BUILD_ASSERT(0 && "finish_pack: failed to write or publish pack file");
@@ -1374,6 +1380,8 @@ static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *ou
     if (out_h) {
         *out_h = h;
     }
+    /* Encodes are cached under this hash: a source edited since add_* must not be stored under it. */
+    NT_BUILD_ASSERT(nt_hash64(pixels, w * h * 4).value == pe->decoded_hash && "redecode_texture: source changed during the build");
     return pixels;
 }
 
@@ -1441,6 +1449,7 @@ void nt_builder_add_texture(NtBuilderContext *ctx, const char *path, const nt_te
     const char *read_path = resolved_path ? resolved_path : path;
 
     /* Read file */
+    nt_builder_record_input(read_path);
     uint32_t file_size = 0;
     uint8_t *file_data = (uint8_t *)nt_builder_read_file(read_path, &file_size);
     NT_BUILD_ASSERT(file_data && "add_texture: failed to read file");
@@ -1475,6 +1484,7 @@ void nt_builder_add_shader(NtBuilderContext *ctx, const char *path, nt_build_sha
     char *resolved_path = nt_builder_find_file(path, NULL, ctx);
     const char *read_path = resolved_path ? resolved_path : path;
 
+    nt_builder_record_input(read_path);
     uint32_t file_size = 0;
     char *source = nt_builder_read_file(read_path, &file_size);
     NT_BUILD_ASSERT(source && "add_shader: failed to read file");

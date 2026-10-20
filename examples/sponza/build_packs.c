@@ -473,11 +473,14 @@ static void populate_full(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
+    if (argc != 2) {
         (void)fprintf(stderr, "Usage: build_sponza_packs <pack_dir>\n");
         return 1;
     }
     const char *out_dir = argv[1];
+    if (nt_builder_up_to_date(out_dir)) {
+        return 0;
+    }
     const char *header_dir = "examples/sponza/generated";
     char cache_dir[512];
     (void)snprintf(cache_dir, sizeof(cache_dir), "%s/_cache", out_dir);
@@ -570,6 +573,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    nt_builder_write_record(out_dir);
     (void)printf("\n=== Done ===\n");
     return 0;
 }

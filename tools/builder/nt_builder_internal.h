@@ -516,6 +516,21 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx);
 char *nt_builder_read_file(const char *path, uint32_t *out_size);
 char *nt_builder_read_file_bounded(const char *path, uint32_t max_size, uint32_t *out_size, bool *out_too_large);
 
+/* Build record (nt_builder_write_record). Main thread only. Capture inputs
+ * before reading; outputs from the staged file before publishing, or from
+ * the existing header before comparing it for an unchanged-content skip. */
+void nt_builder_record_input(const char *path);
+void nt_builder_record_output(const char *path, const char *snapshot_path);
+
+/* Staged writes: "<path>.<pid>.tmp" (builders of two presets can share one
+ * output dir), then an atomic replace of output_path; false when it cannot. */
+void nt_builder_tmp_path(const char *path, char *out, size_t out_size);
+bool nt_builder_publish_file(const char *tmp_path, const char *output_path);
+
+/* Zeroed cgltf options whose file reader records every file a glTF pulls in. */
+struct cgltf_options;
+void nt_builder_init_gltf_options(struct cgltf_options *options);
+
 /* Glob callback type is public (nt_builder.h). The iteration function itself
  * is also declared in nt_builder.h; do not re-declare here. */
 

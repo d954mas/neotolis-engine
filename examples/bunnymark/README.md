@@ -21,7 +21,7 @@ specifically `bunnymark/update_native_position_velocity`.
 The startup conditions log line follows the schema:
 
 ```
-Bunnymark conditions: viewport=WxH sprite_size=~26x37 px blend=premultiplied atlas=SD|HD pages=1 initial=I click=C hold_rate=R bunny_max=M hd_available=0|1 gpu=...
+Bunnymark conditions: viewport=WxH sprite_size=~26x37 px blend=premultiplied atlas=SD|HD pages=1 initial=I click=C hold_rate=R bunny_max=M gpu=...
 ```
 
 ## Controls
@@ -64,33 +64,21 @@ setup. The pure-C `bunny_physics.h` header is stdint-only.
 behavior. `BUNNY_HOLD_SPAWN_RATE` (default **50**) controls the extra per-frame
 spawn count while the left mouse / tap is held.
 
-## Adding HD Art (enabling the H toggle)
+## HD Art (the H toggle)
 
 The `H` key + top-right "Quality" tap zone toggle SD <-> HD packs at runtime.
 Atlas merge re-maps regions in place so live SpriteComponent `region_index`
 values stay valid across the toggle — no `set_region` re-binding is needed.
 
-To enable HD:
+`examples/bunnymark/raw/hd/` holds 5 high-res PNGs with the same filenames as
+the SD variants (`bunny_red.png`, `bunny_green.png`, `bunny_blue.png`,
+`bunny_yellow.png`, `bunny_purple.png`); the builder always emits both
+`bunnymark_sd.ntpack` and `bunnymark_hd.ntpack`. The HD art is about 17x the SD
+originals (the HD pack uses `pixels_per_unit = 17.0`, so HD sprites render at
+the same on-screen size as SD).
 
-1. Drop 5 high-res PNGs into `examples/bunnymark/raw/hd/` with the SAME
-   filenames as the SD variants:
-   - `bunny_red.png`
-   - `bunny_green.png`
-   - `bunny_blue.png`
-   - `bunny_yellow.png`
-   - `bunny_purple.png`
-   The current HD art is about 17x the SD originals (the HD pack uses
-   `pixels_per_unit = 17.0`, so HD sprites render at the same on-screen size
-   as SD).
-2. Re-run cmake configure: `cmake --preset native-debug`. The configure step
-   detects the `raw/hd/` directory and adds `bunnymark_hd.ntpack` to the
-   build (sets `BUNNYMARK_HD_AVAILABLE = 1`).
-3. Rebuild: `cmake --build build/_cmake/native-debug --target bunnymark_demo`.
-4. The H key + tap-zone toggle will then mount/unmount the HD pack at
-   runtime via atlas merge.
-
-When `raw/hd/` is absent, the demo still builds (SD-only) and the toggle logs
-a warning ("HD pack not available — toggle is a no-op") instead of crashing.
+If the HD pack fails to mount, the toggle logs a warning ("HD pack not
+available — toggle is a no-op") instead of crashing.
 
 ## Asset License
 

@@ -777,6 +777,7 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
     // #endregion
 
     // #region Init stb_truetype
+    nt_builder_record_input(path);
     uint32_t file_size = 0;
     char *file_data = nt_builder_read_file(path, &file_size);
     NT_BUILD_ASSERT(file_data && "decode_font: failed to read TTF file");

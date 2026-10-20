@@ -102,11 +102,18 @@ static void test_build_assert_handler(const char *expr, const char *file, int li
 
 #ifdef _WIN32
 #include <direct.h>
+#include <sys/stat.h>
+#include <sys/utime.h>
 #define MKDIR(p) _mkdir(p)
+#define UTIME(p, t) _utime(p, t)
+#define UTIMBUF struct _utimbuf
 #else
 #include <dirent.h>
 #include <sys/stat.h>
+#include <utime.h>
 #define MKDIR(p) mkdir(p, 0755)
+#define UTIME(p, t) utime(p, t)
+#define UTIMBUF struct utimbuf
 #endif
 
 #define TMP_DIR "build/tests/tmp"
@@ -320,6 +327,354 @@ void test_read_file_bounded_rejects_before_read(void) {
     TEST_ASSERT_EQUAL_UINT32(sizeof(contents) - 1, size);
     TEST_ASSERT_EQUAL_MEMORY(contents, data, sizeof(contents) - 1);
     free(data);
+}
+
+static void record_glob_noop(const char *full_path, void *user) {
+    (void)full_path;
+    (void)user;
+}
+
+static void record_write_bytes(const char *path, const void *data, size_t size) {
+    FILE *file = fopen(path, "wb");
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_EQUAL(size, fwrite(data, 1, size, file));
+    TEST_ASSERT_EQUAL(0, fclose(file));
+}
+
+void test_record_published_file_snapshot(void) {
+    MKDIR(TMP_DIR "/record publish");
+    const char *path = TMP_DIR "/record publish/out.bin";
+    const char *staged = TMP_DIR "/record publish/staged.bin";
+    record_write_bytes(path, "other", 5);
+    record_write_bytes(staged, "ours", 4);
+    nt_builder_record_output(path, staged);
+    TEST_ASSERT_TRUE(nt_builder_publish_file(staged, path));
+    nt_builder_write_record(TMP_DIR "/record publish");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record publish"));
+    /* A later publisher must not become the output of this build. */
+    record_write_bytes(staged, "other", 5);
+    TEST_ASSERT_TRUE(nt_builder_publish_file(staged, path));
+    nt_builder_write_record(TMP_DIR "/record publish");
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record publish"));
+}
+
+/* One triangle whose POSITION buffer lives in an external .bin. */
+static void record_write_external_gltf(const char *gltf_path, const char *bin_path, size_t bin_size) {
+    static const char gltf[] = "{\"asset\":{\"version\":\"2.0\"},\"buffers\":[{\"uri\":\"tri.bin\",\"byteLength\":36}],"
+                               "\"bufferViews\":[{\"buffer\":0,\"byteLength\":36}],"
+                               "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\","
+                               "\"min\":[0,0,0],\"max\":[1,1,0]}],"
+                               "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0}}]}],"
+                               "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}";
+    static const float positions[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+    record_write_bytes(gltf_path, gltf, sizeof(gltf) - 1);
+    record_write_bytes(bin_path, positions, bin_size);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_write_record_lists_every_input_glob_and_output(void) {
+    MKDIR(TMP_DIR "/record in#$");
+    uint32_t size = 0;
+    char *png = nt_builder_read_file("assets/textures/lenna.png", &size);
+    TEST_ASSERT_NOT_NULL(png);
+    record_write_bytes(TMP_DIR "/record in#$/copy.png", png, size);
+    free(png);
+    record_write_bytes(TMP_DIR "/record in#$/a.txt", "", 0);
+    record_write_bytes(TMP_DIR "/record in#$/b.md", "", 0);
+    MKDIR(TMP_DIR "/record gltf");
+    record_write_external_gltf(TMP_DIR "/record gltf/tri.gltf", TMP_DIR "/record gltf/tri.bin", 36);
+
+    NtStreamLayout layout[] = {{"POSITION", NT_STREAM_FLOAT32, 3, false, 0, NT_LOC_POSITION}};
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/record in#$/unfinished.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_builder_add_mesh(ctx, "assets/meshes/cube.glb", &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
+    nt_builder_add_texture(ctx, "assets/textures/lenna.png", NULL);
+    nt_builder_add_texture(ctx, TMP_DIR "/record in#$/copy.png", NULL);
+    nt_builder_add_font(ctx, "tests/fixtures/Roboto-Regular.ttf", &(nt_font_opts_t){.charset = NT_CHARSET_ASCII});
+    nt_atlas_opts_t atlas_opts = nt_atlas_opts_defaults();
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "record_atlas", &atlas_opts);
+    nt_atlas_add(atlas, "assets/sprites/spineboy/crosshair.png", NULL);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas));
+    TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/record in#$/*.txt", record_glob_noop, NULL));
+    TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/record missing/*.png", record_glob_noop, NULL));
+    nt_builder_free_pack(ctx);
+    nt_glb_scene_t scene = {0};
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, TMP_DIR "/record gltf/tri.gltf"));
+    nt_builder_free_glb_scene(&scene);
+    /* A second, finished pack reads the texture again and writes outputs. */
+    ctx = nt_builder_start_pack(TMP_DIR "/record in#$/finished.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_builder_add_shader(ctx, "assets/shaders/radial.frag", NT_BUILD_SHADER_FRAGMENT);
+    nt_builder_add_texture(ctx, "assets/textures/lenna.png", NULL);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    MKDIR(TMP_DIR "/record all");
+    nt_builder_write_record(TMP_DIR "/record all");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record all"));
+    char *text = nt_builder_read_file(TMP_DIR "/record all/build_record.txt", &size);
+    TEST_ASSERT_NOT_NULL(text);
+
+    /* Every kind of read input, the pack written, and each glob with exactly the
+     * names it matched, also for a missing directory. */
+    TEST_ASSERT_NOT_NULL(strstr(text, "/assets/shaders/radial.frag\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/assets/shaders/common/radial_sdf.glsl\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/assets/meshes/cube.glb\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/tests/fixtures/Roboto-Regular.ttf\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/assets/sprites/spineboy/crosshair.png\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/build/tests/tmp/record gltf/tri.gltf\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/build/tests/tmp/record gltf/tri.bin\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/build/tests/tmp/record in#$/copy.png\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "/build/tests/tmp/record in#$/finished.ntpack\n"));
+    TEST_ASSERT_NULL(strstr(text, "/build/tests/tmp/record in#$/unfinished.ntpack\n"));
+    TEST_ASSERT_NULL(strstr(text, "/build/tests/tmp/record in#$/a.txt\n"));
+    const char *txt_glob = strstr(text, "/build/tests/tmp/record in#$/*.txt\n  a.txt\n");
+    TEST_ASSERT_NOT_NULL(txt_glob);
+    txt_glob += strlen("/build/tests/tmp/record in#$/*.txt\n  a.txt\n");
+    TEST_ASSERT_TRUE(*txt_glob == '\0' || *txt_glob == 'g');
+    const char *missing_glob = strstr(text, "/build/tests/tmp/record missing/*.png\n");
+    TEST_ASSERT_NOT_NULL(missing_glob);
+    missing_glob += strlen("/build/tests/tmp/record missing/*.png\n");
+    TEST_ASSERT_TRUE(*missing_glob == '\0' || *missing_glob == 'g');
+    TEST_ASSERT_NULL(strchr(text, '\r'));
+
+    /* The builder line, then inputs, outputs and globs; absolute, sorted and
+     * unique within a kind. */
+    TEST_ASSERT_EQUAL_STRING_LEN("builder ", text, 8);
+    static const char *const kinds[] = {"input ", "output ", "glob "};
+    uint32_t kind = 0;
+    uint32_t lenna_count = 0;
+    const char *prev = "";
+    for (char *line = strchr(text, '\n') + 1; *line != '\0';) {
+        char *end = strchr(line, '\n');
+        TEST_ASSERT_NOT_NULL(end);
+        *end = '\0';
+        if (line[0] != ' ') {
+            while (kind < 3 && strncmp(line, kinds[kind], strlen(kinds[kind])) != 0) {
+                kind++;
+                prev = "";
+            }
+            TEST_ASSERT_TRUE(kind < 3);
+            const char *path = line + strlen(kinds[kind]);
+            if (kind < 2) {
+                path = strchr(strchr(path, ' ') + 1, ' ') + 1;
+            }
+#ifdef _WIN32
+            TEST_ASSERT_TRUE(path[1] == ':' && path[2] == '/');
+#else
+            TEST_ASSERT_EQUAL_CHAR('/', path[0]);
+#endif
+            TEST_ASSERT_TRUE(strcmp(prev, path) < 0);
+            prev = path;
+            if (strstr(path, "/assets/textures/lenna.png") != NULL) {
+                lenna_count++;
+            }
+        }
+        line = end + 1;
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, lenna_count);
+    free(text);
+}
+
+void test_record_input_changes(void) {
+    MKDIR(TMP_DIR "/record edit");
+    const char *path = TMP_DIR "/record edit/in.glsl";
+    record_write_bytes(path, "a", 1);
+    nt_builder_record_input(path);
+    nt_builder_write_record(TMP_DIR "/record edit");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record edit"));
+    record_write_bytes(path, "ab", 2);
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record edit"));
+    record_write_bytes(path, "b", 1);
+    UTIMBUF old_time = {1, 1};
+    TEST_ASSERT_EQUAL(0, UTIME(path, &old_time));
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record edit"));
+    TEST_ASSERT_EQUAL(0, remove(path));
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record edit"));
+}
+
+void test_record_missing_input_appears(void) {
+    MKDIR(TMP_DIR "/record appear");
+    const char *path = TMP_DIR "/record appear/in.glsl";
+    (void)remove(path);
+    nt_builder_record_input(path);
+    nt_builder_write_record(TMP_DIR "/record appear");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record appear"));
+    record_write_bytes(path, "a", 1);
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record appear"));
+}
+
+void test_record_output_changes(void) {
+    MKDIR(TMP_DIR "/record out");
+    const char *path = TMP_DIR "/record out/out.bin";
+    record_write_bytes(path, "a", 1);
+    nt_builder_record_output(path, path);
+    nt_builder_write_record(TMP_DIR "/record out");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record out"));
+    record_write_bytes(path, "ab", 2);
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record out"));
+    TEST_ASSERT_EQUAL(0, remove(path));
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record out"));
+}
+
+void test_record_missing_output_is_not_current(void) {
+    MKDIR(TMP_DIR "/record gone");
+    const char *path = TMP_DIR "/record gone/out.bin";
+    (void)remove(path);
+    nt_builder_record_output(path, path);
+    nt_builder_write_record(TMP_DIR "/record gone");
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record gone"));
+}
+
+void test_record_glob_membership_changes(void) {
+    MKDIR(TMP_DIR "/record glob");
+    record_write_bytes(TMP_DIR "/record glob/a.asset", "", 0);
+    (void)remove(TMP_DIR "/record glob/b.asset");
+    TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/record glob/*.asset", record_glob_noop, NULL));
+    nt_builder_write_record(TMP_DIR "/record glob");
+    MKDIR(TMP_DIR "/record glob/dir.asset");
+    record_write_bytes(TMP_DIR "/record glob/notes.md", "", 0);
+    record_write_bytes(TMP_DIR "/record glob/UPPER.ASSET", "", 0);
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record glob"));
+    record_write_bytes(TMP_DIR "/record glob/b.asset", "", 0);
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record glob"));
+    TEST_ASSERT_EQUAL(0, remove(TMP_DIR "/record glob/b.asset"));
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record glob"));
+    TEST_ASSERT_EQUAL(0, remove(TMP_DIR "/record glob/a.asset"));
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record glob"));
+}
+
+void test_record_missing_glob_directory_appears(void) {
+    MKDIR(TMP_DIR "/record later out");
+    (void)remove(TMP_DIR "/record later/a.txt");
+#ifdef _WIN32
+    (void)_rmdir(TMP_DIR "/record later");
+#else
+    (void)remove(TMP_DIR "/record later");
+#endif
+    TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/record later/*.txt", record_glob_noop, NULL));
+    nt_builder_write_record(TMP_DIR "/record later out");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record later out"));
+    MKDIR(TMP_DIR "/record later");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record later out"));
+    record_write_bytes(TMP_DIR "/record later/a.txt", "", 0);
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record later out"));
+}
+
+void test_record_input_changed_between_reads(void) {
+    MKDIR(TMP_DIR "/record twice");
+    const char *path = TMP_DIR "/record twice/in.glsl";
+    record_write_bytes(path, "a", 1);
+    nt_builder_record_input(path);
+    record_write_bytes(path, "ab", 2);
+    nt_builder_record_input(path);
+    nt_builder_write_record(TMP_DIR "/record twice");
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record twice"));
+}
+
+void test_record_glob_changed_during_build(void) {
+    MKDIR(TMP_DIR "/record race");
+    (void)remove(TMP_DIR "/record race/late.asset");
+    TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/record race/*.asset", record_glob_noop, NULL));
+    record_write_bytes(TMP_DIR "/record race/late.asset", "", 0);
+    nt_builder_write_record(TMP_DIR "/record race");
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record race"));
+}
+
+void test_record_last_output_write_wins(void) {
+    MKDIR(TMP_DIR "/record rewrite");
+    const char *path = TMP_DIR "/record rewrite/out.bin";
+    record_write_bytes(path, "a", 1);
+    nt_builder_record_output(path, path);
+    record_write_bytes(path, "ab", 2);
+    nt_builder_record_output(path, path);
+    nt_builder_write_record(TMP_DIR "/record rewrite");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record rewrite"));
+}
+
+void test_record_missing_old_or_malformed(void) {
+    MKDIR(TMP_DIR "/record invalid");
+    const char *path = TMP_DIR "/record invalid/build_record.txt";
+    (void)remove(path);
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record invalid"));
+    /* Variants of a valid record over an existing input, so each one fails
+     * only for its own defect. */
+    record_write_bytes(TMP_DIR "/record invalid/in.glsl", "a", 1);
+    nt_builder_record_input(TMP_DIR "/record invalid/in.glsl");
+    nt_builder_write_record(TMP_DIR "/record invalid");
+    uint32_t size = 0;
+    char *text = nt_builder_read_file(path, &size);
+    TEST_ASSERT_NOT_NULL(text);
+    const char *body = strchr(text, '\n') + 1;
+    TEST_ASSERT_EQUAL_STRING_LEN("input ", body, 6);
+    char newer[2048];
+    char older[2048];
+    char unterminated[2048];
+    char bad_separator[2048];
+    (void)snprintf(newer, sizeof(newer), "builder 9223372036854775807\n%s", body);
+    (void)snprintf(older, sizeof(older), "builder 1\n%s", body);
+    (void)snprintf(unterminated, sizeof(unterminated), "%.*s", (int)strlen(newer) - 1, newer);
+    memcpy(bad_separator, newer, sizeof(newer));
+    char *size_field = strchr(strchr(strchr(bad_separator, '\n') + 1, ' ') + 1, ' ') + 1;
+    *strchr(size_field, ' ') = '\t';
+    free(text);
+
+    /* A newer builder's record is current for an older builder. */
+    record_write_bytes(path, newer, strlen(newer));
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record invalid"));
+    const char *records[] = {"", older, unterminated, bad_separator};
+    for (uint32_t i = 0; i < sizeof(records) / sizeof(records[0]); i++) {
+        record_write_bytes(path, records[i], strlen(records[i]));
+        TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record invalid"));
+    }
+}
+
+static void header_keep_build(bool second_shader) {
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/header keep/keep.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_builder_add_shader(ctx, "assets/shaders/radial.frag", NT_BUILD_SHADER_FRAGMENT);
+    if (second_shader) {
+        nt_builder_add_shader(ctx, "assets/shaders/mesh_inst.frag", NT_BUILD_SHADER_FRAGMENT);
+    }
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+}
+
+/* A rebuild with the same assets keeps the header's mtime, so nothing that
+ * includes it recompiles; new assets replace it. */
+void test_unchanged_header_keeps_its_mtime(void) {
+    MKDIR(TMP_DIR "/header keep");
+    header_keep_build(false);
+    const char *headers[] = {TMP_DIR "/header keep/keep.h"};
+    const char *merged = TMP_DIR "/header keep/merged.h";
+    nt_builder_merge_headers(headers, 1, merged);
+    UTIMBUF old_time = {1, 1};
+    TEST_ASSERT_EQUAL(0, UTIME(TMP_DIR "/header keep/keep.h", &old_time));
+    TEST_ASSERT_EQUAL(0, UTIME(merged, &old_time));
+    header_keep_build(false);
+    nt_builder_merge_headers(headers, 1, merged);
+    struct stat st;
+    TEST_ASSERT_EQUAL(0, stat(TMP_DIR "/header keep/keep.h", &st));
+    TEST_ASSERT_EQUAL_INT64(1, (int64_t)st.st_mtime);
+    TEST_ASSERT_EQUAL(0, stat(merged, &st));
+    TEST_ASSERT_EQUAL_INT64(1, (int64_t)st.st_mtime);
+    nt_builder_write_record(TMP_DIR "/header keep");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/header keep"));
+    header_keep_build(true);
+    nt_builder_merge_headers(headers, 1, merged);
+    TEST_ASSERT_EQUAL(0, stat(TMP_DIR "/header keep/keep.h", &st));
+    TEST_ASSERT_TRUE(st.st_mtime > 1);
+    TEST_ASSERT_EQUAL(0, stat(merged, &st));
+    TEST_ASSERT_TRUE(st.st_mtime > 1);
+    nt_builder_write_record(TMP_DIR "/header keep");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/header keep"));
+}
+
+void test_gltf_external_buffer_shorter_than_declared_fails(void) {
+    MKDIR(TMP_DIR "/record gltf short");
+    record_write_external_gltf(TMP_DIR "/record gltf short/tri.gltf", TMP_DIR "/record gltf short/tri.bin", 12);
+    nt_glb_scene_t scene = {0};
+    EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_parse_glb_scene(&scene, TMP_DIR "/record gltf short/tri.gltf"), "failed to load glTF buffers");
 }
 
 /* --- Pack writer core tests --- */
@@ -9469,14 +9824,47 @@ void test_atlas_per_sprite_shape_override_rect(void) {
     free(buf);
 }
 
-int main(void) {
+int main(int argc, char *argv[]) {
     UNITY_BEGIN();
+    /* CTest gives each record case a fresh process, matching a builder run. */
+    if (argc == 2) {
+        const struct {
+            const char *name;
+            UnityTestFunction run;
+        } cases[] = {
+            /* tests/CMakeLists.txt registers each "record-*" name here as a ctest. */
+            {"record-list", test_write_record_lists_every_input_glob_and_output},
+            {"record-input", test_record_input_changes},
+            {"record-appear", test_record_missing_input_appears},
+            {"record-output", test_record_output_changes},
+            {"record-gone", test_record_missing_output_is_not_current},
+            {"record-glob", test_record_glob_membership_changes},
+            {"record-directory", test_record_missing_glob_directory_appears},
+            {"record-twice", test_record_input_changed_between_reads},
+            {"record-race", test_record_glob_changed_during_build},
+            {"record-rewrite", test_record_last_output_write_wins},
+            {"record-invalid", test_record_missing_old_or_malformed},
+            {"record-publish", test_record_published_file_snapshot},
+            {"record-header", test_unchanged_header_keeps_its_mtime},
+        };
+        for (uint32_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+            if (strcmp(argv[1], cases[i].name) == 0) {
+                UnityDefaultTestRun(cases[i].run, cases[i].name, __LINE__);
+                return UNITY_END();
+            }
+        }
+        return 1;
+    }
+    if (argc != 1) {
+        return 1;
+    }
 
     /* Normalize-and-hash tests */
     RUN_TEST(test_hash_known_value);
     RUN_TEST(test_hash_path_normalization);
     RUN_TEST(test_hash_different_strings_differ);
     RUN_TEST(test_read_file_bounded_rejects_before_read);
+    RUN_TEST(test_gltf_external_buffer_shorter_than_declared_fails);
 
     /* Pack writer core */
     RUN_TEST(test_start_pack_returns_context);

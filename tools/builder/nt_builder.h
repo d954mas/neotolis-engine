@@ -688,6 +688,10 @@ void nt_builder_set_threads_auto(NtBuilderContext *ctx);
 /* --- Merge per-pack .h headers into a combined header --- */
 void nt_builder_merge_headers(const char *const *header_paths, uint32_t count, const char *output_path);
 
+/* --- Build record: skip a current build, record this one (builder spec, "Build record") --- */
+bool nt_builder_up_to_date(const char *dir);
+void nt_builder_write_record(const char *dir);
+
 /* --- Utilities --- */
 nt_build_result_t nt_builder_dump_pack(const char *pack_path);
 nt_hash64_t nt_builder_normalize_and_hash(const char *str);

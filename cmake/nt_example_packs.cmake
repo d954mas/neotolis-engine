@@ -2,7 +2,7 @@
 # the .expected_packs manifest the CI guard verifies. Native presets run the
 # builder at build time; wasm copies a prior native build's packs or fails loudly.
 function(nt_example_packs)
-    cmake_parse_arguments(PACKS "" "NAME;TARGET;BUILDER;PACK_DIR;ASSETS_DIR" "PACKS;OPTIONAL_PACKS;INPUT_DIRS" ${ARGN})
+    cmake_parse_arguments(PACKS "" "NAME;TARGET;BUILDER;PACK_DIR;ASSETS_DIR;GENERATED_DIR" "PACKS" ${ARGN})
     if(PACKS_UNPARSED_ARGUMENTS OR NOT PACKS_NAME OR NOT PACKS_TARGET OR NOT PACKS_BUILDER
        OR NOT PACKS_PACK_DIR OR NOT PACKS_ASSETS_DIR OR NOT PACKS_PACKS)
         message(FATAL_ERROR "nt_example_packs(${PACKS_NAME}): bad or missing arguments"
@@ -18,41 +18,23 @@ function(nt_example_packs)
     endif()
 
     set(_copy_list "")
-    set(_stamp "")
     if(NOT EMSCRIPTEN AND NOT _skipped)
-        set(_input_deps "")
-        foreach(INPUT_DIR IN LISTS PACKS_INPUT_DIRS)
-            get_filename_component(_input_dir "${INPUT_DIR}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-            file(GLOB_RECURSE _dir_inputs CONFIGURE_DEPENDS LIST_DIRECTORIES FALSE "${_input_dir}/*")
-            list(APPEND _input_deps ${_dir_inputs})
-        endforeach()
-        if(PACKS_INPUT_DIRS)
-            list(REMOVE_DUPLICATES _input_deps)
-            list(SORT _input_deps)
-            # Membership changes must rebuild even after deletion or adding an older file.
-            set(_input_manifest "${CMAKE_CURRENT_BINARY_DIR}/${PACKS_NAME}_pack_inputs.txt")
-            string(REPLACE ";" "\n" _input_manifest_body "${_input_deps}")
-            file(GENERATE OUTPUT "${_input_manifest}" CONTENT "${_input_manifest_body}\n")
-            list(APPEND _input_deps "${_input_manifest}")
-        endif()
         foreach(PACK ${PACKS_PACKS})
             list(APPEND _pack_files "${PACKS_PACK_DIR}/${PACK}")
         endforeach()
-        # The stamp is the only OUTPUT: it appears strictly after the builder
-        # succeeded, so a builder that published packs and then died (e.g. at
-        # header generation) cannot look up-to-date to ninja's mtime check.
-        # The packs target must DEPENDS on it — CMake materializes a custom
-        # command only when some target consumes an OUTPUT (byproducts don't count).
-        set(_stamp "${PACKS_PACK_DIR}/.${PACKS_NAME}.stamp")
-        add_custom_command(
-            OUTPUT "${_stamp}"
-            BYPRODUCTS ${_pack_files}
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKS_PACK_DIR}"
+        # Headers the builder rewrites: as byproducts ninja re-stats them after
+        # the run, so their includers recompile in the same build.
+        set(_headers "")
+        if(PACKS_GENERATED_DIR)
+            file(GLOB _headers CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${PACKS_GENERATED_DIR}/*.h")
+        endif()
+        # The builder runs on every build and exits early while its
+        # build_record.txt is current (nt_builder_up_to_date).
+        add_custom_target(${PACKS_NAME}_pack_build
             COMMAND "$<TARGET_FILE:${PACKS_BUILDER}>" "${PACKS_PACK_DIR}"
-            COMMAND ${CMAKE_COMMAND} -E touch "${_stamp}"
-            DEPENDS ${PACKS_BUILDER} ${_input_deps}
+            BYPRODUCTS ${_pack_files} ${_headers}
             WORKING_DIRECTORY "${NT_ENGINE_ROOT}"
-            COMMENT "Building ${PACKS_NAME} pack(s)"
+            COMMENT "Checking ${PACKS_NAME} pack(s)"
         )
         set(_copy_list ${PACKS_PACKS})
         # Manifest existence tells the CI guard this example is wired; the pack
@@ -91,17 +73,8 @@ function(nt_example_packs)
         )
         list(APPEND _outputs "${PACKS_ASSETS_DIR}/${PACK}")
     endforeach()
-    # Optional packs (content-dependent builder output, may be absent) mirror
-    # on every build: copied when present, stale copies removed when not —
-    # correct in all modes with no configure-time EXISTS snapshot to go stale.
-    set(_optional_cmds "")
-    foreach(PACK ${PACKS_OPTIONAL_PACKS})
-        list(APPEND _optional_cmds COMMAND ${CMAKE_COMMAND}
-            -D "SRC=${PACKS_PACK_DIR}/${PACK}" -D "DST=${PACKS_ASSETS_DIR}/${PACK}"
-            -P "${NT_ENGINE_ROOT}/cmake/nt_copy_if_exists.cmake")
-    endforeach()
-    if(_outputs OR _optional_cmds)
-        add_custom_target(${PACKS_TARGET}_packs ${_optional_cmds} DEPENDS ${_stamp} ${_outputs})
+    if(_outputs)
+        add_custom_target(${PACKS_TARGET}_packs DEPENDS ${_outputs})
         add_dependencies(${PACKS_TARGET} ${PACKS_TARGET}_packs)
     endif()
 endfunction()

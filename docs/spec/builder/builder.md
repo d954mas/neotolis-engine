@@ -62,6 +62,7 @@ nt_builder_add_texture_from_memory / add_texture_raw   /* in-memory pixels */
 nt_builder_add_scene_mesh   /* one primitive out of a parsed GLB scene */
 nt_builder_add_blob         /* opaque bytes under a resource id */
 nt_builder_add_asset_root   /* convention-based tree import */
+nt_builder_up_to_date / write_record   /* skip a current build; see "Build record" */
 
 /* Skeletal assets (wire formats: Skeletal Animation,
  * "Builder, codec, wire formats"). add_skeleton encodes a
@@ -289,10 +290,80 @@ Rules:
 
 Generated asset headers are committed to git. This is intentional:
 
-- Output is deterministic (sorted by name, stable hashes). File only changes when assets are added, removed, or renamed.
+- Output is deterministic (sorted by name, stable hashes). File only changes when assets are added, removed, or renamed; the builder writes a per-process temporary file and replaces the header only when its bytes differ, so a pack rebuild with the same assets recompiles nothing and no reader sees a torn header.
 - Git diff on the header shows exactly which assets changed between commits -- acts as an asset changelog.
 - New contributors can build and run without first running the builder.
 - Header files are small (one line per asset) and compress well in git.
+
+## Build record
+
+The builder decides itself whether a pack build is current; the build system
+runs it on every build, and a current run exits after a few stats and
+directory listings. `<dir>/build_record.txt` is also the release audit's list
+of pack inputs.
+
+`nt_builder_up_to_date(dir)` is true when the record exists and nothing in it
+changed: every listed input still has the same mtime and size (or is still
+missing), every output exists with the same mtime and size, every glob still
+matches the same names, and the running builder executable is not newer than
+the one that wrote the record, so relinked builder code rebuilds.
+
+The pack-builder `main` owns when to use the record; the library does not
+parse arguments:
+
+```c
+int main(int argc, char *argv[]) {
+    if (argc != 2) { /* usage */ return 1; }
+    const char *out_dir = argv[1];
+    if (nt_builder_up_to_date(out_dir)) {
+        return 0;
+    }
+    /* ... start, add, finish every pack; return 1 on failure ... */
+    nt_builder_write_record(out_dir);
+    return 0;
+}
+```
+
+- **Failing runs** return before the write; the old record stays and no
+  longer matches the outputs or inputs that changed.
+- **Runs with extra arguments** that change the output (atlas benchmarks,
+  `check_deterministic.sh`) call neither function: they always build, and the
+  outputs they overwrite make the next default run rebuild. A builder without
+  such modes rejects extra arguments rather than ignoring them.
+- **One pack builder per directory.** Build presets may share one pack
+  directory only if their builders produce the same packs: an older builder
+  accepts a newer one's record.
+- **Complete for builder reads:** the resolved file of every `add_*` and atlas
+  sprite, every shader `#include`, and every file cgltf opens (`.gltf`/`.glb`
+  and external buffers, also through `nt_builder_parse_glb_scene`); every
+  pattern `nt_builder_glob_iterate` walked, also when its directory did not
+  exist; every pack and header the process wrote. Not listed: files the game
+  reads itself (charset scans, data passed as memory) and lookup misses, so a
+  file added to a higher-priority asset root does not rebuild.
+- **Safe against edits during a build:** an input is stat'ed before it is
+  read, an output from its staged file before publication (a kept header
+  before its content is compared), and a glob keeps the names it
+  saw, so a file edited, added or removed while the builder runs, or a pack
+  another builder overwrote, rebuilds next time. A texture re-read for
+  encoding must still hash to its `add_*` pixels, or the build asserts rather
+  than caching new pixels under the old key. Not caught: a same-size edit
+  within one filesystem timestamp tick of the read, a replacement that keeps
+  size and mtime (`cp -p`, `rsync -a`, archive extraction), and a builder
+  relinked while the system clock stepped back.
+- **Cache-independent:** every `add_*` reads its source when called, so cached
+  entries are listed too.
+- **Per process, not per pack:** one builder run is one build step that may
+  write several packs, so the record is process-wide and main-thread only.
+- **Format:** plain text, written to a per-process temporary file and
+  atomically replaced. `builder <mtime>`, then sorted lines
+  `input <mtime> <size> <path>` and `output <mtime> <size> <path>`, then per
+  glob `glob <pattern>` followed by one `  <name>` line per match. Paths and
+  patterns are absolute with forward slashes; symlinks are not resolved.
+  Windows collapses `.`/`..` the way it resolves them; POSIX keeps `..`, which
+  the kernel resolves through symlinks. A file read twice is listed once with
+  its first stat, an output written twice with its last. `-1 -1` marks a
+  missing file. mtime units are platform-specific; only equality and the
+  builder order are meaningful.
 
 ## Builder cache
 

@@ -354,11 +354,7 @@ static void frame(void) {
 
     nt_gfx_end_pass();
     nt_gfx_end_frame();
-#ifdef ASSET_FONT_TEXT_FONT_CJK
     nt_example_frames_end(can_render && s_cjk_loading && nt_resource_pack_state(s_cjk_pack_id) == NT_PACK_STATE_READY);
-#else
-    nt_example_frames_end(can_render && s_cjk_loading); /* the fallback font build ships no CJK pack */
-#endif
 
     nt_window_swap_buffers();
 
@@ -492,11 +488,9 @@ int main(int argc, char *argv[]) {
     nt_resource_t font_base_res = nt_resource_request(ASSET_FONT_TEXT_FONT_BASE, NT_ASSET_FONT);
     nt_font_add(s_font, font_base_res);
 
-#ifdef ASSET_FONT_TEXT_FONT_CJK
     /* CJK font resource -- resolved when CJK pack loads (progressive) */
     nt_resource_t font_cjk_res = nt_resource_request(ASSET_FONT_TEXT_FONT_CJK, NT_ASSET_FONT);
     nt_font_add(s_font, font_cjk_res);
-#endif
 
     /* 15. Unlimited activation budget during loading (0 = no time limit) */
     nt_resource_set_activate_time_budget(0);

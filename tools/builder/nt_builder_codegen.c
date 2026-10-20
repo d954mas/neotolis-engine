@@ -247,6 +247,26 @@ static void write_register_labels(FILE *f, const char *func_prefix, const Codege
     free(sorted);
 }
 
+/* Replaces path with the staged tmp only when the bytes differ: an unchanged
+ * header keeps its mtime, so nothing recompiles, and no reader sees a torn one. */
+static bool header_publish(const char *tmp_path, const char *path) {
+    uint32_t fresh_size = 0;
+    uint32_t old_size = 0;
+    char *fresh = nt_builder_read_file(tmp_path, &fresh_size);
+    /* A kept header must describe the file compared, not a later replacement. */
+    nt_builder_record_output(path, path);
+    char *old = nt_builder_read_file(path, &old_size);
+    bool same = fresh && old && fresh_size == old_size && memcmp(fresh, old, fresh_size) == 0;
+    free(fresh);
+    free(old);
+    if (same) {
+        (void)remove(tmp_path);
+        return true;
+    }
+    nt_builder_record_output(path, tmp_path);
+    return nt_builder_publish_file(tmp_path, path);
+}
+
 /* --- Per-pack codegen (called from finish_pack) --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -279,7 +299,9 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx) {
     /* Check for identifier collisions before writing — O(N log N) */
     check_codegen_collisions(ce, total_ce);
 
-    FILE *f = fopen(header_path, "wb");
+    char tmp_path[NT_BUILD_HEADER_PATH_MAX + 24];
+    nt_builder_tmp_path(header_path, tmp_path, sizeof(tmp_path));
+    FILE *f = fopen(tmp_path, "wb");
     if (!f) {
         NT_LOG_WARN("Could not write codegen header: %s", header_path);
         free(ce);
@@ -301,8 +323,8 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx) {
      * pass as success (the builder would look up-to-date and never rerun). */
     bool header_ok = (ferror(f) == 0);
     header_ok = (fclose(f) == 0) && header_ok;
-    if (!header_ok) {
-        (void)remove(header_path);
+    if (!header_ok || !header_publish(tmp_path, header_path)) {
+        (void)remove(tmp_path);
         NT_LOG_WARN("Failed writing codegen header: %s", header_path);
         free(ce);
         return NT_BUILD_ERR_IO;
@@ -462,7 +484,9 @@ void nt_builder_merge_headers(const char *const *header_paths, uint32_t count, c
     char func_prefix[128];
     derive_func_prefix(output_path, func_prefix, sizeof(func_prefix));
 
-    FILE *f = fopen(output_path, "wb");
+    char tmp_path[1024];
+    nt_builder_tmp_path(output_path, tmp_path, sizeof(tmp_path));
+    FILE *f = fopen(tmp_path, "wb");
     if (!f) {
         NT_LOG_ERROR("Could not write merged header: %s", output_path);
         free(ce);
@@ -480,7 +504,11 @@ void nt_builder_merge_headers(const char *const *header_paths, uint32_t count, c
     write_register_labels(f, func_prefix, ce, entry_count);
 
     (void)fprintf(f, "#endif /* %s */\n", guard);
-    (void)fclose(f);
+    /* A torn header recorded as an output would look current forever. */
+    bool header_ok = (ferror(f) == 0);
+    header_ok = (fclose(f) == 0) && header_ok;
+    header_ok = header_ok && header_publish(tmp_path, output_path);
+    NT_BUILD_ASSERT(header_ok && "merge_headers: write failed");
 
     NT_LOG_INFO("Generated merged header: %s (%u assets from %u packs)", output_path, entry_count, count);
 
