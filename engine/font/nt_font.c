@@ -35,14 +35,9 @@ static void font_test_shutdown_packs(void);
 #endif
 
 // #region Resolve-callback lifecycle — on_resolve/on_cleanup + PIN_BLOB
-/* Zero-copy provider: a view into the winning pack blob, held in the slot's user_data.
- * Fonts decode glyphs lazily from the live blob, so the winner PINs its pack (PIN_BLOB); the resolve
- * pass owns the pin, the font never ref/unrefs it. */
-typedef struct {
-    const uint8_t *data;
-} nt_font_provider_t;
-
-/* deactivate must NOT touch user_data — font_on_cleanup owns that lifecycle. */
+/* Zero-copy provider: the slot's user_data is the winning pack blob itself. Fonts decode glyphs
+ * lazily from the live blob, so the winner PINs its pack (PIN_BLOB); the resolve pass owns the pin
+ * and severs user_data before the blob is freed. */
 static void font_deactivate(uint32_t runtime_handle) { (void)runtime_handle; }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -69,6 +64,7 @@ static bool font_blob_structure_valid(const uint8_t *data, uint32_t size) {
         uint16_t contour_count;
         memcpy(&contour_count, data + offset, sizeof contour_count);
         offset += (uint32_t)sizeof contour_count;
+        uint32_t curves = 0;
         for (uint32_t ci = 0; ci < contour_count; ci++) {
             if (size - offset < sizeof(uint16_t)) {
                 return false;
@@ -76,11 +72,24 @@ static bool font_blob_structure_valid(const uint8_t *data, uint32_t size) {
             uint16_t point_count;
             memcpy(&point_count, data + offset, sizeof point_count);
             offset += (uint32_t)sizeof point_count;
-            if (point_count == 0 || point_count > NT_FONT_MAX_POINTS_PER_CONTOUR) {
+            if (point_count == 0) {
                 return false;
             }
             const uint32_t prefix_bytes = NT_FONT_BITMASK_BYTES(point_count) + (2U * (uint32_t)sizeof(int16_t));
             if (prefix_bytes > size - offset) {
+                return false;
+            }
+            /* convert_point_ring emits one curve per point, except an on point right after an off point
+             * joins its curve. Curves >= points/2, so the cap also bounds the decoder's point arrays. */
+            const uint8_t *on = data + offset;
+            curves += point_count;
+            for (uint32_t p = 0; p < point_count; p++) {
+                const uint32_t q = (p + 1U) % point_count;
+                if ((on[p / 8U] & (1U << (p % 8U))) == 0U && (on[q / 8U] & (1U << (q % 8U))) != 0U) {
+                    curves--;
+                }
+            }
+            if (curves > NT_FONT_MAX_CURVES_PER_GLYPH) {
                 return false;
             }
             offset += prefix_bytes;
@@ -129,27 +138,18 @@ static void font_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime
     (void)size;
     (void)runtime_handle;
     NT_ASSERT(data != NULL && "PIN_BLOB winner is published only with a resident blob");
-    nt_font_provider_t *p = (nt_font_provider_t *)*user_data;
-    if (p == NULL) {
-        p = (nt_font_provider_t *)calloc(1, sizeof(*p));
-        NT_ASSERT(p);
-        *user_data = p;
-    }
-    /* Point at the CURRENT resident blob; winner-change updates the same holder. */
-    p->data = data;
+    union {
+        const uint8_t *blob;
+        void *slot;
+    } borrowed = {.blob = data}; /* user_data is untyped; font_provider_blob reads it back as const */
+    *user_data = borrowed.slot;
 }
 
-static void font_on_cleanup(void *user_data) {
-    /* Free the holder only — the blob pin is rebuilt from the winners by the resolve pass, so there is nothing to release here. */
-    free(user_data);
-}
+/* user_data borrows the pinned pack blob; the resource system clears it. */
+static void font_on_cleanup(void *user_data) { (void)user_data; }
 
-/* Read the winning resource's live blob through its pinned user_data holder
- * (never a raw pointer cached across frames). NULL when the provider is gone. */
-static const uint8_t *font_provider_blob(nt_resource_t resource) {
-    const nt_font_provider_t *p = (const nt_font_provider_t *)nt_resource_peek_user_data(resource);
-    return p != NULL ? p->data : NULL;
-}
+/* The winning resource's live blob (never a raw pointer cached across frames); NULL when gone. */
+static const uint8_t *font_provider_blob(nt_resource_t resource) { return (const uint8_t *)nt_resource_peek_user_data(resource); }
 // #endregion
 
 /* Single source of truth for the cleanup that must follow any change in a slot's
@@ -306,8 +306,7 @@ static bool find_glyph_in_resources(nt_font_slot_t *slot, uint32_t codepoint, ui
             const uint8_t *blob = font_provider_blob(slot->resources[ri]);
             if (blob != NULL) {
                 const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)blob;
-                /* gi is bounded by construction in rebuild_ascii_index;
-                 * the bounds check guards blob corruption between load and access. */
+                /* gi is bounded by construction in rebuild_ascii_index. */
                 NT_ASSERT(gi < hdr->glyph_count);
                 const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader));
                 *out_resource_index = ri;
@@ -412,6 +411,7 @@ typedef struct {
 static nt_curve_t s_decode_curves[NT_FONT_MAX_CURVES_PER_GLYPH];
 
 /* Temporary point buffers for contour decoding (static to avoid stack overflow) */
+_Static_assert(NT_FONT_MAX_POINTS_PER_CONTOUR >= 2 * NT_FONT_MAX_CURVES_PER_GLYPH, "activation bounds points by the curve cap");
 static int32_t s_decode_pts_x[NT_FONT_MAX_POINTS_PER_CONTOUR];
 static int32_t s_decode_pts_y[NT_FONT_MAX_POINTS_PER_CONTOUR];
 static uint8_t s_decode_pts_on[NT_FONT_MAX_POINTS_PER_CONTOUR];

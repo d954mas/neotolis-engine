@@ -1307,7 +1307,7 @@ void test_font_truncated_glyph_table_fails_activation(void) {
     assert_font_blob_rejected(blob, (uint32_t)(sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry) - 1U));
 }
 
-void test_font_invalid_glyph_data_spans_clear_provider(void) {
+void test_font_invalid_glyph_data_spans_fail_activation(void) {
     uint8_t blob[80];
     const uint32_t size = build_font_bounds_blob(blob);
     NtFontGlyphEntry glyph;
@@ -1342,20 +1342,46 @@ void test_font_zero_contour_point_count_fails_activation(void) {
     assert_font_blob_rejected(blob, size);
 }
 
-void test_font_complete_contour_above_point_limit_fails_activation(void) {
-    enum { POINT_COUNT = NT_FONT_MAX_POINTS_PER_CONTOUR + 1 };
-    uint8_t blob[sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry) + (2U * sizeof(uint16_t)) + NT_FONT_BITMASK_BYTES(POINT_COUNT) + (2U * sizeof(int16_t)) + (2U * (size_t)(POINT_COUNT - 1U))] = {
-        0};
+/* One complete single-contour glyph whose on/off pattern repeats `on_every` (1 = all on, 2 = off,on). */
+static uint32_t build_ring_font_blob(uint8_t *blob, uint16_t point_count, uint32_t on_every) {
     const NtFontAssetHeader header = {.magic = NT_FONT_MAGIC, .version = NT_FONT_VERSION, .glyph_count = 1, .units_per_em = 1000, .ascent = 800, .descent = -200};
-    const NtFontGlyphEntry glyph = {.codepoint = 'A', .data_offset = sizeof header + sizeof glyph, .advance = 500, .curve_count = 3};
+    const NtFontGlyphEntry glyph = {.codepoint = 'A', .data_offset = sizeof header + sizeof glyph, .advance = 500, .bbox_x1 = 400, .bbox_y1 = 800, .curve_count = 3};
     const uint16_t contour_count = 1;
-    const uint16_t point_count = POINT_COUNT;
+    uint32_t offset = glyph.data_offset;
     memcpy(blob, &header, sizeof header);
     memcpy(blob + sizeof header, &glyph, sizeof glyph);
-    memcpy(blob + glyph.data_offset, &contour_count, sizeof contour_count);
-    memcpy(blob + glyph.data_offset + sizeof contour_count, &point_count, sizeof point_count);
-    /* Complete mask, first point and zero deltas isolate the point limit from truncation. */
-    assert_font_blob_rejected(blob, (uint32_t)sizeof blob);
+    memcpy(blob + offset, &contour_count, sizeof contour_count);
+    memcpy(blob + offset + 2U, &point_count, sizeof point_count);
+    offset += 4U;
+    memset(blob + offset, 0, NT_FONT_BITMASK_BYTES(point_count));
+    for (uint32_t p = on_every - 1U; p < point_count; p += on_every) {
+        blob[offset + (p / 8U)] |= (uint8_t)(1U << (p % 8U));
+    }
+    offset += NT_FONT_BITMASK_BYTES(point_count) + 4U;         /* mask + first point (0,0) */
+    memset(blob + offset, 0, (size_t)2U * (point_count - 1U)); /* zero deltas */
+    return offset + (2U * (point_count - 1U));
+}
+
+void test_font_contour_above_curve_cap_fails_activation(void) {
+    static uint8_t blob[2048];
+    const uint32_t size = build_ring_font_blob(blob, NT_FONT_MAX_CURVES_PER_GLYPH + 1U, 1U);
+    assert_font_blob_rejected(blob, size);
+}
+
+/* 600 off,on points decode to 300 curves: more points than the curve cap, still valid. */
+void test_font_contour_points_above_curve_cap_stay_valid(void) {
+    static uint8_t blob[2048];
+    const uint32_t size = build_ring_font_blob(blob, 600U, 2U);
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
+    const uint32_t token = nt_font_test_register_data(blob, size);
+    nt_font_add(font, nt_font_test_resource(token));
+    nt_resource_step();
+    nt_font_step();
+    const nt_glyph_cache_entry_t *glyph = nt_font_lookup_glyph(font, 'A');
+    TEST_ASSERT_NOT_NULL(glyph);
+    TEST_ASSERT_FALSE(glyph->is_tofu);
+    nt_font_destroy(font);
+    nt_font_test_deactivate(token);
 }
 
 /* ---- FONT-03: unmount a font's pack WHILE it is referenced ----
@@ -3033,10 +3059,11 @@ int main(void) {
     RUN_TEST(test_font_shared_contours_padding_and_empty_glyph_remain_valid);
     RUN_TEST(test_font_bad_magic_or_version_fails_activation);
     RUN_TEST(test_font_truncated_glyph_table_fails_activation);
-    RUN_TEST(test_font_invalid_glyph_data_spans_clear_provider);
+    RUN_TEST(test_font_invalid_glyph_data_spans_fail_activation);
     RUN_TEST(test_font_truncated_contour_data_fails_activation);
     RUN_TEST(test_font_zero_contour_point_count_fails_activation);
-    RUN_TEST(test_font_complete_contour_above_point_limit_fails_activation);
+    RUN_TEST(test_font_contour_above_curve_cap_fails_activation);
+    RUN_TEST(test_font_contour_points_above_curve_cap_stay_valid);
     RUN_TEST(test_font_init_shutdown);
     RUN_TEST(test_font_create_destroy_valid);
     RUN_TEST(test_font_unready_texture_keeps_cpu_queries_gpu_free);
