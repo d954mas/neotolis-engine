@@ -186,7 +186,7 @@ cmake --preset native-debug
 cmake --build --preset native-debug --target test_basisu_golden_produce
 ctest --preset native-debug --no-tests=error -R '^test_basisu_golden_produce$'
 skip="asteroids;atlas;bunnymark;rtt_showcase;skeletal_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase"
-tests='^test_(basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder)$'
+tests='^test_(basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder(_record_.*)?)$'
 # UASTC only (the smallest transcoder)
 cmake --preset native-debug -B build/_cmake/basisu-uastc-only -DNT_BASISU_HAS_ETC1S=OFF -DNT_SKIP_EXAMPLE_PACKS="$skip"
 cmake --build build/_cmake/basisu-uastc-only --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder

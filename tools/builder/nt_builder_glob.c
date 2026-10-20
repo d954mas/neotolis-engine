@@ -263,18 +263,17 @@ static void record_push(NtRecordKind kind, const char *text, int64_t mtime, int6
     s_record_count++;
 }
 
-/* Stat'ed now: before an input is read, right after an output is published, so
- * a later edit or another builder's overwrite never looks current. */
-static void record_file(NtRecordKind kind, const char *path) {
+/* Capture the file we read or publish, before another writer can replace it. */
+static void record_file(NtRecordKind kind, const char *path, const char *snapshot_path) {
     int64_t mtime = 0;
     int64_t size = 0;
-    file_stat(path, &mtime, &size);
+    file_stat(snapshot_path, &mtime, &size);
     record_push(kind, absolute_path(path), mtime, size);
 }
 
-void nt_builder_record_input(const char *path) { record_file(RECORD_INPUT, path); }
+void nt_builder_record_input(const char *path) { record_file(RECORD_INPUT, path, path); }
 
-void nt_builder_record_output(const char *path) { record_file(RECORD_OUTPUT, path); }
+void nt_builder_record_output(const char *path, const char *snapshot_path) { record_file(RECORD_OUTPUT, path, snapshot_path); }
 
 static const char *match_name(const char *match) {
     const char *slash = strrchr(match, '/');
@@ -342,7 +341,11 @@ static void record_path(const char *dir, char *out, size_t out_size) {
 
 /* mtime of the running builder executable. */
 static int64_t builder_mtime(void) {
+#if defined(_WIN32) || defined(__APPLE__)
     char exe[4096];
+#else
+    const char *exe = "/proc/self/exe";
+#endif
 #ifdef _WIN32
     DWORD len = GetModuleFileNameA(NULL, exe, (DWORD)sizeof(exe));
     NT_BUILD_ASSERT(len > 0 && len < sizeof(exe) && "build record: cannot find the builder executable");
@@ -350,10 +353,6 @@ static int64_t builder_mtime(void) {
     uint32_t exe_size = (uint32_t)sizeof(exe);
     int found = _NSGetExecutablePath(exe, &exe_size);
     NT_BUILD_ASSERT(found == 0 && "build record: cannot find the builder executable");
-#else
-    ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
-    NT_BUILD_ASSERT(len > 0 && (size_t)len < sizeof(exe) - 1 && "build record: cannot find the builder executable");
-    exe[len] = '\0';
 #endif
     int64_t mtime = 0;
     int64_t size = 0;

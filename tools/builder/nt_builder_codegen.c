@@ -253,6 +253,8 @@ static bool header_publish(const char *tmp_path, const char *path) {
     uint32_t fresh_size = 0;
     uint32_t old_size = 0;
     char *fresh = nt_builder_read_file(tmp_path, &fresh_size);
+    /* A kept header must describe the file compared, not a later replacement. */
+    nt_builder_record_output(path, path);
     char *old = nt_builder_read_file(path, &old_size);
     bool same = fresh && old && fresh_size == old_size && memcmp(fresh, old, fresh_size) == 0;
     free(fresh);
@@ -261,6 +263,7 @@ static bool header_publish(const char *tmp_path, const char *path) {
         (void)remove(tmp_path);
         return true;
     }
+    nt_builder_record_output(path, tmp_path);
     return nt_builder_publish_file(tmp_path, path);
 }
 
@@ -327,7 +330,6 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx) {
         return NT_BUILD_ERR_IO;
     }
 
-    nt_builder_record_output(header_path);
     NT_LOG_INFO("Generated header: %s (%u assets)", header_path, ctx->pending_count);
     free(ce);
     return NT_BUILD_OK;
@@ -507,7 +509,6 @@ void nt_builder_merge_headers(const char *const *header_paths, uint32_t count, c
     header_ok = (fclose(f) == 0) && header_ok;
     header_ok = header_ok && header_publish(tmp_path, output_path);
     NT_BUILD_ASSERT(header_ok && "merge_headers: write failed");
-    nt_builder_record_output(output_path);
 
     NT_LOG_INFO("Generated merged header: %s (%u assets from %u packs)", output_path, entry_count, count);
 

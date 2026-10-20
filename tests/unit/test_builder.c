@@ -341,6 +341,23 @@ static void record_write_bytes(const char *path, const void *data, size_t size) 
     TEST_ASSERT_EQUAL(0, fclose(file));
 }
 
+void test_record_published_file_snapshot(void) {
+    MKDIR(TMP_DIR "/record publish");
+    const char *path = TMP_DIR "/record publish/out.bin";
+    const char *staged = TMP_DIR "/record publish/staged.bin";
+    record_write_bytes(path, "other", 5);
+    record_write_bytes(staged, "ours", 4);
+    nt_builder_record_output(path, staged);
+    TEST_ASSERT_TRUE(nt_builder_publish_file(staged, path));
+    nt_builder_write_record(TMP_DIR "/record publish");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record publish"));
+    /* A later publisher must not become the output of this build. */
+    record_write_bytes(staged, "other", 5);
+    TEST_ASSERT_TRUE(nt_builder_publish_file(staged, path));
+    nt_builder_write_record(TMP_DIR "/record publish");
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record publish"));
+}
+
 /* One triangle whose POSITION buffer lives in an external .bin. */
 static void record_write_external_gltf(const char *gltf_path, const char *bin_path, size_t bin_size) {
     static const char gltf[] = "{\"asset\":{\"version\":\"2.0\"},\"buffers\":[{\"uri\":\"tri.bin\",\"byteLength\":36}],"
@@ -354,8 +371,6 @@ static void record_write_external_gltf(const char *gltf_path, const char *bin_pa
     record_write_bytes(bin_path, positions, bin_size);
 }
 
-/* The record is process-wide, so earlier tests add lines too: check the lines
- * of this test and the format, not the whole file. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_write_record_lists_every_input_glob_and_output(void) {
     MKDIR(TMP_DIR "/record in#$");
@@ -396,6 +411,7 @@ void test_write_record_lists_every_input_glob_and_output(void) {
 
     MKDIR(TMP_DIR "/record all");
     nt_builder_write_record(TMP_DIR "/record all");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record all"));
     char *text = nt_builder_read_file(TMP_DIR "/record all/build_record.txt", &size);
     TEST_ASSERT_NOT_NULL(text);
 
@@ -460,161 +476,141 @@ void test_write_record_lists_every_input_glob_and_output(void) {
     free(text);
 }
 
-/* Keeps the lines and glob blocks of one directory as the record of out_dir. */
-static void record_keep(const char *marker, const char *out_dir) {
-    uint32_t size = 0;
-    char *text = nt_builder_read_file(TMP_DIR "/record all/build_record.txt", &size);
-    TEST_ASSERT_NOT_NULL(text);
-    MKDIR(out_dir);
-    char path[256];
-    (void)snprintf(path, sizeof(path), "%s/build_record.txt", out_dir);
-    FILE *file = fopen(path, "wb");
-    TEST_ASSERT_NOT_NULL(file);
-    bool keep = false;
-    for (char *line = text; *line != '\0';) {
-        char *end = strchr(line, '\n');
-        TEST_ASSERT_NOT_NULL(end);
-        *end = '\0';
-        if (line[0] != ' ') {
-            keep = strncmp(line, "builder ", 8) == 0 || strstr(line, marker) != NULL;
-        }
-        if (keep) {
-            (void)fprintf(file, "%s\n", line);
-        }
-        line = end + 1;
-    }
-    TEST_ASSERT_EQUAL(0, fclose(file));
-    free(text);
+void test_record_input_changes(void) {
+    MKDIR(TMP_DIR "/record edit");
+    const char *path = TMP_DIR "/record edit/in.glsl";
+    record_write_bytes(path, "a", 1);
+    nt_builder_record_input(path);
+    nt_builder_write_record(TMP_DIR "/record edit");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record edit"));
+    record_write_bytes(path, "ab", 2);
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record edit"));
+    record_write_bytes(path, "b", 1);
+    UTIMBUF old_time = {1, 1};
+    TEST_ASSERT_EQUAL(0, UTIME(path, &old_time));
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record edit"));
+    TEST_ASSERT_EQUAL(0, remove(path));
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record edit"));
 }
 
-/* Each case gets its own directory and its own copy of the record, so one
- * case's change does not leak into the next. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_up_to_date_sees_every_kind_of_change(void) {
-    /* TMP_DIR outlives a run: start every case from its initial files. */
-    (void)remove(TMP_DIR "/record appear/in.glsl");
-    (void)remove(TMP_DIR "/record add/b.txt");
+void test_record_missing_input_appears(void) {
+    MKDIR(TMP_DIR "/record appear");
+    const char *path = TMP_DIR "/record appear/in.glsl";
+    (void)remove(path);
+    nt_builder_record_input(path);
+    nt_builder_write_record(TMP_DIR "/record appear");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record appear"));
+    record_write_bytes(path, "a", 1);
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record appear"));
+}
+
+void test_record_output_changes(void) {
+    MKDIR(TMP_DIR "/record out");
+    const char *path = TMP_DIR "/record out/out.bin";
+    record_write_bytes(path, "a", 1);
+    nt_builder_record_output(path, path);
+    nt_builder_write_record(TMP_DIR "/record out");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record out"));
+    record_write_bytes(path, "ab", 2);
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record out"));
+    TEST_ASSERT_EQUAL(0, remove(path));
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record out"));
+}
+
+void test_record_missing_output_is_not_current(void) {
+    MKDIR(TMP_DIR "/record gone");
+    const char *path = TMP_DIR "/record gone/out.bin";
+    (void)remove(path);
+    nt_builder_record_output(path, path);
+    nt_builder_write_record(TMP_DIR "/record gone");
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record gone"));
+}
+
+void test_record_glob_membership_changes(void) {
+    MKDIR(TMP_DIR "/record glob");
+    record_write_bytes(TMP_DIR "/record glob/a.asset", "", 0);
+    (void)remove(TMP_DIR "/record glob/b.asset");
+    TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/record glob/*.asset", record_glob_noop, NULL));
+    nt_builder_write_record(TMP_DIR "/record glob");
+    MKDIR(TMP_DIR "/record glob/dir.asset");
+    record_write_bytes(TMP_DIR "/record glob/notes.md", "", 0);
+    record_write_bytes(TMP_DIR "/record glob/UPPER.ASSET", "", 0);
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record glob"));
+    record_write_bytes(TMP_DIR "/record glob/b.asset", "", 0);
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record glob"));
+    TEST_ASSERT_EQUAL(0, remove(TMP_DIR "/record glob/b.asset"));
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record glob"));
+    TEST_ASSERT_EQUAL(0, remove(TMP_DIR "/record glob/a.asset"));
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record glob"));
+}
+
+void test_record_missing_glob_directory_appears(void) {
+    MKDIR(TMP_DIR "/record later out");
     (void)remove(TMP_DIR "/record later/a.txt");
 #ifdef _WIN32
     (void)_rmdir(TMP_DIR "/record later");
 #else
-    (void)remove(TMP_DIR "/record later"); /* POSIX remove() also removes an empty directory */
+    (void)remove(TMP_DIR "/record later");
 #endif
-    (void)remove(TMP_DIR "/record race/late.txt");
-    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record nowhere"));
-
-    MKDIR(TMP_DIR "/record edit");
-    record_write_bytes(TMP_DIR "/record edit/in.glsl", "a", 1);
-    nt_builder_record_input(TMP_DIR "/record edit/in.glsl");
-    MKDIR(TMP_DIR "/record appear");
-    nt_builder_record_input(TMP_DIR "/record appear/in.glsl");
-    MKDIR(TMP_DIR "/record out");
-    record_write_bytes(TMP_DIR "/record out/out.bin", "a", 1);
-    nt_builder_record_output(TMP_DIR "/record out/out.bin");
-    MKDIR(TMP_DIR "/record gone");
-    nt_builder_record_output(TMP_DIR "/record gone/out.bin");
-    MKDIR(TMP_DIR "/record add");
-    record_write_bytes(TMP_DIR "/record add/a.txt", "", 0);
-    TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/record add/*.txt", record_glob_noop, NULL));
-    MKDIR(TMP_DIR "/record remove");
-    record_write_bytes(TMP_DIR "/record remove/a.txt", "", 0);
-    record_write_bytes(TMP_DIR "/record remove/b.txt", "", 0);
-    TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/record remove/*.txt", record_glob_noop, NULL));
     TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/record later/*.txt", record_glob_noop, NULL));
-    /* Added after the glob listed its directory, while the builder still runs. */
-    MKDIR(TMP_DIR "/record touch");
-    record_write_bytes(TMP_DIR "/record touch/in.glsl", "a", 1);
-    nt_builder_record_input(TMP_DIR "/record touch/in.glsl");
-    /* Read twice with an edit between: the first stat stays. */
-    MKDIR(TMP_DIR "/record twice");
-    record_write_bytes(TMP_DIR "/record twice/in.glsl", "a", 1);
-    nt_builder_record_input(TMP_DIR "/record twice/in.glsl");
-    record_write_bytes(TMP_DIR "/record twice/in.glsl", "ab", 2);
-    nt_builder_record_input(TMP_DIR "/record twice/in.glsl");
-    /* Written twice: the last write stays. */
-    MKDIR(TMP_DIR "/record rewrite");
-    record_write_bytes(TMP_DIR "/record rewrite/out.bin", "a", 1);
-    nt_builder_record_output(TMP_DIR "/record rewrite/out.bin");
-    record_write_bytes(TMP_DIR "/record rewrite/out.bin", "ab", 2);
-    nt_builder_record_output(TMP_DIR "/record rewrite/out.bin");
-    MKDIR(TMP_DIR "/record race");
-    TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/record race/*.txt", record_glob_noop, NULL));
-    record_write_bytes(TMP_DIR "/record race/late.txt", "", 0);
-    MKDIR(TMP_DIR "/record all");
-    nt_builder_write_record(TMP_DIR "/record all");
-
-    record_keep("/record edit/", TMP_DIR "/record edit/out");
-    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record edit/out"));
-    record_write_bytes(TMP_DIR "/record edit/in.glsl", "ab", 2);
-    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record edit/out"));
-
-    /* A builder linked after the record: the record predates this executable. */
-    record_keep("/record out/", TMP_DIR "/record relink");
-    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record relink"));
-    record_write_bytes(TMP_DIR "/record relink/build_record.txt", "builder 1\n", 10);
-    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record relink"));
-
-    /* A record that is not one the builder wrote is never current: no builder
-     * line, a cut last line, a line without its fields. */
-    record_write_bytes(TMP_DIR "/record relink/build_record.txt", "", 0);
-    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record relink"));
-    record_write_bytes(TMP_DIR "/record relink/build_record.txt", "builder 9223372036854775807\noutput 1 1 /x", 41);
-    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record relink"));
-    record_write_bytes(TMP_DIR "/record relink/build_record.txt", "builder 9223372036854775807\ninput 1\n", 36);
-    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record relink"));
-
-    /* An output deleted before the record was written is never current. */
-    record_keep("/record gone/", TMP_DIR "/record gone/out");
-    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record gone/out"));
-
-    record_keep("/record appear/", TMP_DIR "/record appear/out");
-    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record appear/out"));
-    record_write_bytes(TMP_DIR "/record appear/in.glsl", "a", 1);
-    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record appear/out"));
-
-    record_keep("/record out/", TMP_DIR "/record out/out");
-    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record out/out"));
-    TEST_ASSERT_EQUAL(0, remove(TMP_DIR "/record out/out.bin"));
-    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record out/out"));
-
-    /* Only a matching file changes the glob: not a directory, another
-     * extension or another case. */
-    record_keep("/record add/", TMP_DIR "/record add/out");
-    MKDIR(TMP_DIR "/record add/dir.txt");
-    record_write_bytes(TMP_DIR "/record add/notes.md", "", 0);
-    record_write_bytes(TMP_DIR "/record add/UPPER.TXT", "", 0);
-    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record add/out"));
-    record_write_bytes(TMP_DIR "/record add/b.txt", "", 0);
-    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record add/out"));
-
-    record_keep("/record remove/", TMP_DIR "/record remove/out");
-    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record remove/out"));
-    TEST_ASSERT_EQUAL(0, remove(TMP_DIR "/record remove/b.txt"));
-    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record remove/out"));
-
-    record_keep("/record later/", TMP_DIR "/record later out");
+    nt_builder_write_record(TMP_DIR "/record later out");
     TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record later out"));
     MKDIR(TMP_DIR "/record later");
     TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record later out"));
     record_write_bytes(TMP_DIR "/record later/a.txt", "", 0);
     TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record later out"));
-
-    record_keep("/record race/", TMP_DIR "/record race/out");
-    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record race/out"));
-
-    /* Same size, only the mtime moves. */
-    record_keep("/record touch/", TMP_DIR "/record touch/out");
-    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record touch/out"));
-    UTIMBUF old_time = {1, 1};
-    TEST_ASSERT_EQUAL(0, UTIME(TMP_DIR "/record touch/in.glsl", &old_time));
-    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record touch/out"));
-
-    record_keep("/record twice/", TMP_DIR "/record twice/out");
-    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record twice/out"));
-
-    record_keep("/record rewrite/", TMP_DIR "/record rewrite/out");
-    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record rewrite/out"));
 }
+
+void test_record_input_changed_between_reads(void) {
+    MKDIR(TMP_DIR "/record twice");
+    const char *path = TMP_DIR "/record twice/in.glsl";
+    record_write_bytes(path, "a", 1);
+    nt_builder_record_input(path);
+    record_write_bytes(path, "ab", 2);
+    nt_builder_record_input(path);
+    nt_builder_write_record(TMP_DIR "/record twice");
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record twice"));
+}
+
+void test_record_glob_changed_during_build(void) {
+    MKDIR(TMP_DIR "/record race");
+    (void)remove(TMP_DIR "/record race/late.asset");
+    TEST_ASSERT_TRUE(nt_builder_glob_iterate(TMP_DIR "/record race/*.asset", record_glob_noop, NULL));
+    record_write_bytes(TMP_DIR "/record race/late.asset", "", 0);
+    nt_builder_write_record(TMP_DIR "/record race");
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record race"));
+}
+
+void test_record_last_output_write_wins(void) {
+    MKDIR(TMP_DIR "/record rewrite");
+    const char *path = TMP_DIR "/record rewrite/out.bin";
+    record_write_bytes(path, "a", 1);
+    nt_builder_record_output(path, path);
+    record_write_bytes(path, "ab", 2);
+    nt_builder_record_output(path, path);
+    nt_builder_write_record(TMP_DIR "/record rewrite");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record rewrite"));
+}
+
+void test_record_missing_old_or_malformed(void) {
+    MKDIR(TMP_DIR "/record invalid");
+    const char *path = TMP_DIR "/record invalid/build_record.txt";
+    (void)remove(path);
+    TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record invalid"));
+    const char *records[] = {"builder 1\n", "", "builder 9223372036854775807\noutput 1 1 /x", "builder 9223372036854775807\ninput 1\n"};
+    for (uint32_t i = 0; i < sizeof(records) / sizeof(records[0]); i++) {
+        record_write_bytes(path, records[i], strlen(records[i]));
+        TEST_ASSERT_FALSE(nt_builder_up_to_date(TMP_DIR "/record invalid"));
+    }
+}
+
+#ifdef __linux__
+void test_record_unlinked_executable(void) {
+    MKDIR(TMP_DIR "/record unlinked");
+    nt_builder_write_record(TMP_DIR "/record unlinked");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/record unlinked"));
+}
+#endif
 
 static void header_keep_build(bool second_shader) {
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/header keep/keep.ntpack");
@@ -632,15 +628,29 @@ static void header_keep_build(bool second_shader) {
 void test_unchanged_header_keeps_its_mtime(void) {
     MKDIR(TMP_DIR "/header keep");
     header_keep_build(false);
+    const char *headers[] = {TMP_DIR "/header keep/keep.h"};
+    const char *merged = TMP_DIR "/header keep/merged.h";
+    nt_builder_merge_headers(headers, 1, merged);
     UTIMBUF old_time = {1, 1};
     TEST_ASSERT_EQUAL(0, UTIME(TMP_DIR "/header keep/keep.h", &old_time));
+    TEST_ASSERT_EQUAL(0, UTIME(merged, &old_time));
     header_keep_build(false);
+    nt_builder_merge_headers(headers, 1, merged);
     struct stat st;
     TEST_ASSERT_EQUAL(0, stat(TMP_DIR "/header keep/keep.h", &st));
     TEST_ASSERT_EQUAL_INT64(1, (int64_t)st.st_mtime);
+    TEST_ASSERT_EQUAL(0, stat(merged, &st));
+    TEST_ASSERT_EQUAL_INT64(1, (int64_t)st.st_mtime);
+    nt_builder_write_record(TMP_DIR "/header keep");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/header keep"));
     header_keep_build(true);
+    nt_builder_merge_headers(headers, 1, merged);
     TEST_ASSERT_EQUAL(0, stat(TMP_DIR "/header keep/keep.h", &st));
     TEST_ASSERT_TRUE(st.st_mtime > 1);
+    TEST_ASSERT_EQUAL(0, stat(merged, &st));
+    TEST_ASSERT_TRUE(st.st_mtime > 1);
+    nt_builder_write_record(TMP_DIR "/header keep");
+    TEST_ASSERT_TRUE(nt_builder_up_to_date(TMP_DIR "/header keep"));
 }
 
 void test_gltf_external_buffer_shorter_than_declared_fails(void) {
@@ -9797,18 +9807,55 @@ void test_atlas_per_sprite_shape_override_rect(void) {
     free(buf);
 }
 
-int main(void) {
+int main(int argc, char *argv[]) {
     UNITY_BEGIN();
+    /* CTest gives each record case a fresh process, matching a builder run. */
+    if (argc == 2) {
+#ifdef __linux__
+        /* The CTest wrapper runs a private copy, never the build's executable. */
+        if (strcmp(argv[1], "record-unlinked") == 0 && remove(argv[0]) != 0) {
+            return 1;
+        }
+#endif
+        const struct {
+            const char *name;
+            UnityTestFunction run;
+        } cases[] = {
+            {"record-list", test_write_record_lists_every_input_glob_and_output},
+            {"record-input", test_record_input_changes},
+            {"record-appear", test_record_missing_input_appears},
+            {"record-output", test_record_output_changes},
+            {"record-gone", test_record_missing_output_is_not_current},
+            {"record-glob", test_record_glob_membership_changes},
+            {"record-directory", test_record_missing_glob_directory_appears},
+            {"record-twice", test_record_input_changed_between_reads},
+            {"record-race", test_record_glob_changed_during_build},
+            {"record-rewrite", test_record_last_output_write_wins},
+            {"record-invalid", test_record_missing_old_or_malformed},
+            {"record-publish", test_record_published_file_snapshot},
+            {"record-header", test_unchanged_header_keeps_its_mtime},
+#ifdef __linux__
+            {"record-unlinked", test_record_unlinked_executable},
+#endif
+        };
+        for (uint32_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+            if (strcmp(argv[1], cases[i].name) == 0) {
+                UnityDefaultTestRun(cases[i].run, cases[i].name, __LINE__);
+                return UNITY_END();
+            }
+        }
+        return 1;
+    }
+    if (argc != 1) {
+        return 1;
+    }
 
     /* Normalize-and-hash tests */
     RUN_TEST(test_hash_known_value);
     RUN_TEST(test_hash_path_normalization);
     RUN_TEST(test_hash_different_strings_differ);
     RUN_TEST(test_read_file_bounded_rejects_before_read);
-    RUN_TEST(test_write_record_lists_every_input_glob_and_output);
-    RUN_TEST(test_up_to_date_sees_every_kind_of_change);
     RUN_TEST(test_gltf_external_buffer_shorter_than_declared_fails);
-    RUN_TEST(test_unchanged_header_keeps_its_mtime);
 
     /* Pack writer core */
     RUN_TEST(test_start_pack_returns_context);

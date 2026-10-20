@@ -1,0 +1,6 @@
+file(COPY_FILE "${BUILDER}" "${COPY}")
+execute_process(COMMAND "${COPY}" record-unlinked RESULT_VARIABLE result)
+file(REMOVE "${COPY}")
+if(NOT result STREQUAL "0")
+    message(FATAL_ERROR "Unlinked builder record test failed: ${result}")
+endif()

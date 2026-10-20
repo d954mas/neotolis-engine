@@ -341,7 +341,8 @@ int main(int argc, char *argv[]) {
   reads itself (charset scans, data passed as memory) and lookup misses, so a
   file added to a higher-priority asset root does not rebuild.
 - **Safe against edits during a build:** an input is stat'ed before it is
-  read, an output right after it is published, and a glob keeps the names it
+  read, an output from its staged file before publication (a kept header
+  before its content is compared), and a glob keeps the names it
   saw, so a file edited, added or removed while the builder runs, or a pack
   another builder overwrote, rebuilds next time. Not caught: a same-size edit
   within one filesystem timestamp tick of the read.

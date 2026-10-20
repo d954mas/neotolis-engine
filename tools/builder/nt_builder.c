@@ -1166,12 +1166,12 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     /* A failed write/publish must leave NO pack at the final path — a stale
      * previous pack would be silently copied by later wasm builds. */
+    nt_builder_record_output(ctx->output_path, tmp_path);
     if (!write_ok || !nt_builder_publish_file(tmp_path, ctx->output_path)) {
         (void)remove(tmp_path);
         (void)remove(ctx->output_path);
         NT_BUILD_ASSERT(0 && "finish_pack: failed to write or publish pack file");
     }
-    nt_builder_record_output(ctx->output_path);
     // #endregion
 
     /* Generate codegen header (.h with ASSET_* constants) */

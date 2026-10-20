@@ -516,11 +516,11 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx);
 char *nt_builder_read_file(const char *path, uint32_t *out_size);
 char *nt_builder_read_file_bounded(const char *path, uint32_t max_size, uint32_t *out_size, bool *out_too_large);
 
-/* Build record (nt_builder_write_record). Record an input before reading it, so
- * an edit during the build still shows next time, and an output after writing
- * it. Main thread only. */
+/* Build record (nt_builder_write_record). Main thread only. Capture inputs
+ * before reading; outputs from the staged file before publishing, or from
+ * the existing header before comparing it for an unchanged-content skip. */
 void nt_builder_record_input(const char *path);
-void nt_builder_record_output(const char *path);
+void nt_builder_record_output(const char *path, const char *snapshot_path);
 
 /* Staged writes: "<path>.<pid>.tmp" (builders of two presets can share one
  * output dir), then an atomic replace of output_path; false when it cannot. */

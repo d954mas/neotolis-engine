@@ -1050,6 +1050,20 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_builder PRIVATE nt_builder nt_log unity nt_meshwire)
     target_compile_definitions(test_builder PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_builder WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    foreach(_case list input appear output gone glob directory twice race rewrite invalid publish header)
+        add_test(NAME test_builder_record_${_case} COMMAND test_builder record-${_case}
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        set_tests_properties(test_builder_record_${_case} PROPERTIES TIMEOUT 120)
+    endforeach()
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        add_test(NAME test_builder_record_unlinked
+            COMMAND ${CMAKE_COMMAND}
+                "-DBUILDER=$<TARGET_FILE:test_builder>"
+                "-DCOPY=${CMAKE_CURRENT_BINARY_DIR}/test_builder_unlinked"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_builder_unlinked.cmake"
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        set_tests_properties(test_builder_record_unlinked PROPERTIES TIMEOUT 120)
+    endif()
 
     # Skeletal wire formats live in their own target: test_builder.c is already
     # ~10k lines and these tests need no atlas/glTF fixtures.
