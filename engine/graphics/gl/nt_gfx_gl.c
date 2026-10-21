@@ -97,6 +97,8 @@ typedef struct {
 /* Program reflection lives here, not on the pipelines that borrow the program. */
 typedef struct {
     GLuint program;
+    GLuint vs; /* attached stages, kept so a failed link can read their compile status */
+    GLuint fs;
     /* Sampler units are program state: assigned in reflection order at link,
      * written once, never rewritten by a material. */
     nt_gfx_gl_sampler_unit_t sampler_units[NT_GFX_MAX_TEXTURE_SLOTS];
@@ -1269,51 +1271,6 @@ void nt_gfx_backend_destroy_shader(uint32_t backend_handle) {
     NT_GL(glDeleteShader, (GLuint)backend_handle);
 }
 
-/* Compile errors surface only here: shader creation never reads COMPILE_STATUS. */
-static void nt_gfx_gl_log_link_failure(const nt_gfx_gl_program_t *rec) {
-#if NT_LOG_MIN_LEVEL <= 2
-    nt_gfx_gl_log_program(rec->program);
-    GLint vs_compile = -1;
-    GLint fs_compile = -1;
-    GLsizei count = 0;
-    GLuint stages[2] = {0, 0};
-#ifdef NT_PLATFORM_WEB
-    NT_GL_ISSUED(glGetAttachedShaders, rec->program, 2, (const void *)&count, (const void *)stages);
-    count = nt_gfx_gl_ctx_attached_shaders(rec->program, stages);
-#else
-    NT_GL(glGetAttachedShaders, rec->program, 2, &count, stages);
-#endif
-    for (GLsizei i = 0; i < count; i++) {
-        /* Emscripten drops a deleted stage's name mapping, and reading its log would throw. */
-        if (!NT_GL_RET(glIsShader, stages[i])) {
-            continue;
-        }
-        GLint type = 0;
-        NT_GL(glGetShaderiv, stages[i], GL_SHADER_TYPE, &type);
-        GLint *compiled = NULL;
-        if (type == GL_VERTEX_SHADER) {
-            compiled = &vs_compile;
-        } else if (type == GL_FRAGMENT_SHADER) {
-            compiled = &fs_compile;
-        }
-        if (compiled != NULL) {
-#ifdef NT_PLATFORM_WEB
-            NT_GL_ISSUED(glGetShaderiv, stages[i], GL_COMPILE_STATUS, (const void *)compiled);
-            *compiled = nt_gfx_gl_ctx_shader_compile_status(stages[i]);
-#else
-            NT_GL(glGetShaderiv, stages[i], GL_COMPILE_STATUS, compiled);
-#endif
-        }
-        nt_gfx_gl_log_shader(stages[i], type == GL_VERTEX_SHADER ? "vertex" : "fragment");
-    }
-    /* After driver logs, so a tail-retaining journal keeps identity and stage results together. */
-    NT_LOG_ERROR("program %u/GL %u link: link failed: gl_error=0x%X vs_compile=%d fs_compile=%d \"%s\"", (unsigned)(rec - s_programs), rec->program, NT_GL_RET0(glGetError), vs_compile, fs_compile,
-                 rec->label != NULL && rec->label[0] != '\0' ? rec->label : "<unnamed>");
-#else
-    (void)rec;
-#endif
-}
-
 static void nt_gfx_gl_write_array_index(char *suffix, GLint element) {
     char digits[10];
     uint8_t count = 0;
@@ -1349,6 +1306,34 @@ static NT_NOINLINE void log_program_failure(const nt_gfx_gl_program_t *rec, cons
             NT_ASSERT((condition) && (reason) != NULL);                                                                                                                                                \
         }                                                                                                                                                                                              \
     } while (0)
+
+#if NT_LOG_MIN_LEVEL <= 2
+/* -1: the owner destroyed the stage and Emscripten dropped its name; native GL keeps an attached stage queryable. */
+static GLint log_stage_failure(GLuint shader, const char *stage) {
+    if (!NT_GL_RET(glIsShader, shader)) {
+        return -1;
+    }
+    GLint compiled = 0;
+    NT_GL(glGetShaderiv, shader, GL_COMPILE_STATUS, &compiled);
+    nt_gfx_gl_log_shader(shader, stage);
+    return compiled;
+}
+#endif
+
+/* Compile errors surface only here: shader creation never reads COMPILE_STATUS. */
+static void nt_gfx_gl_log_link_failure(const nt_gfx_gl_program_t *rec) {
+#if NT_LOG_MIN_LEVEL <= 2
+    const GLenum gl_error = NT_GL_RET0(glGetError);
+    nt_gfx_gl_log_program(rec->program);
+    const GLint vs_compile = log_stage_failure(rec->vs, "vertex");
+    const GLint fs_compile = log_stage_failure(rec->fs, "fragment");
+    /* After the driver lines, so a journal that keeps its tail keeps the classification and identity. */
+    NT_LOG_ERROR("program link stages: vs_compile=%d fs_compile=%d", vs_compile, fs_compile);
+    log_program_failure(rec, "link", "link failed", "gl_error", gl_error);
+#else
+    (void)rec;
+#endif
+}
 
 typedef enum { UNIFORM_NOT_SAMPLER, UNIFORM_SAMPLER, UNIFORM_SIGNED_SAMPLER, UNIFORM_UNSUPPORTED_SAMPLER } uniform_kind_t;
 
@@ -1553,6 +1538,8 @@ bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uin
     NT_GL(glAttachShader, program, (GLuint)fs_backend);
     NT_GL(glLinkProgram, program);
     s_programs[slot].program = program;
+    s_programs[slot].vs = (GLuint)vs_backend;
+    s_programs[slot].fs = (GLuint)fs_backend;
     s_programs[slot].label = label;
     return true;
 }

@@ -769,13 +769,20 @@ typedef struct {
     bool has_parallel_shader_compile;         /* link completion polled without blocking (KHR_parallel_shader_compile / KHR|ARB) */
     uint32_t max_texture_size;                /* GL_MAX_TEXTURE_SIZE, queried at init */
     uint32_t uniform_buffer_offset_alignment; /* GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT: uniform blocks start at a multiple; size frame_capacity by it */
+    /* Shader resource limits: a driver may fail a link over them without a log. */
+    uint32_t max_varying_components;          /* GL_MAX_VARYING_COMPONENTS */
+    uint32_t max_vertex_uniform_components;   /* GL_MAX_VERTEX_UNIFORM_COMPONENTS */
+    uint32_t max_fragment_uniform_components; /* GL_MAX_FRAGMENT_UNIFORM_COMPONENTS */
+    uint32_t max_vertex_uniform_blocks;       /* GL_MAX_VERTEX_UNIFORM_BLOCKS */
+    uint32_t max_fragment_uniform_blocks;     /* GL_MAX_FRAGMENT_UNIFORM_BLOCKS */
+    uint32_t max_uniform_block_size;          /* GL_MAX_UNIFORM_BLOCK_SIZE, bytes */
 } nt_gfx_gpu_caps_t;
 
 typedef struct {
     char vendor[128];
     char renderer[256];
     char api_version[128];
-    char caps[128]; /* nt_gfx_gpu_caps_t as text: the struct is reset with g_nt_gfx */
+    char caps[256]; /* nt_gfx_gpu_caps_t as text: the struct is reset with g_nt_gfx */
 } nt_gfx_device_info_t;
 
 /* ---- Global state ---- */

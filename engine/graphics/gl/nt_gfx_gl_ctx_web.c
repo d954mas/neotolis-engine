@@ -18,26 +18,6 @@ static bool s_loss_pending; /* set by a lost event until begin_frame takes it */
 
 static void capture_device_info(void);
 
-#if NT_LOG_MIN_LEVEL <= 2
-/* clang-format off */
-EM_JS(int, nt_gfx_gl_ctx_attached_shaders, (uint32_t program, uint32_t *stages), {
-    var attached = GL.currentContext.GLctx.getAttachedShaders(GL.programs[program]);
-    if (!attached) return 0;
-    var count = 0;
-    for (var i = 0; i < attached.length && count < 2; ++i) {
-        var id = GL.shaders.indexOf(attached[i]);
-        if (id > 0) HEAPU32[(stages >> 2) + count++] = id;
-    }
-    return count;
-})
-EM_JS(int, nt_gfx_gl_ctx_shader_compile_status, (uint32_t shader), {
-    var ctx = GL.currentContext.GLctx;
-    var status = ctx.getShaderParameter(GL.shaders[shader], ctx.COMPILE_STATUS);
-    return status === null ? -1 : +status;
-})
-/* clang-format on */
-#endif
-
 /* The browser explains a refusal only through a creation-error event fired synchronously inside getContext. */
 /* clang-format off */
 EM_JS(EMSCRIPTEN_WEBGL_CONTEXT_HANDLE, nt_gfx_js_create_context, (const char *target, const EmscriptenWebGLContextAttributes *attrs, char *status, unsigned int cap), {
@@ -147,6 +127,12 @@ static void capture_device_info(void) {
     }
 }
 
+static uint32_t gl_limit(GLenum name) {
+    GLint value = 0;
+    NT_GL(glGetIntegerv, name, &value);
+    return (uint32_t)value;
+}
+
 nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     nt_gfx_gpu_caps_t caps = {0};
     caps.has_astc = get_extension("WEBGL_compressed_texture_astc");
@@ -156,12 +142,14 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     caps.has_float_texture_linear = get_extension("OES_texture_float_linear");
     /* Without getExtension the COMPLETION_STATUS query is INVALID_ENUM and reads as never complete. */
     caps.has_parallel_shader_compile = get_extension("KHR_parallel_shader_compile");
-    GLint max_texture_size = 0;
-    NT_GL(glGetIntegerv, GL_MAX_TEXTURE_SIZE, &max_texture_size);
-    caps.max_texture_size = (uint32_t)max_texture_size;
-    GLint ubo_align = 0;
-    NT_GL(glGetIntegerv, GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &ubo_align);
-    caps.uniform_buffer_offset_alignment = (uint32_t)ubo_align;
+    caps.max_texture_size = gl_limit(GL_MAX_TEXTURE_SIZE);
+    caps.uniform_buffer_offset_alignment = gl_limit(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT);
+    caps.max_varying_components = gl_limit(GL_MAX_VARYING_COMPONENTS);
+    caps.max_vertex_uniform_components = gl_limit(GL_MAX_VERTEX_UNIFORM_COMPONENTS);
+    caps.max_fragment_uniform_components = gl_limit(GL_MAX_FRAGMENT_UNIFORM_COMPONENTS);
+    caps.max_vertex_uniform_blocks = gl_limit(GL_MAX_VERTEX_UNIFORM_BLOCKS);
+    caps.max_fragment_uniform_blocks = gl_limit(GL_MAX_FRAGMENT_UNIFORM_BLOCKS);
+    caps.max_uniform_block_size = gl_limit(GL_MAX_UNIFORM_BLOCK_SIZE);
     return caps;
 }
 

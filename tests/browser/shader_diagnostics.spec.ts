@@ -1,12 +1,12 @@
 import { test, expect } from '@playwright/test';
 
-type Mode = 'vertex' | 'fragment' | 'both' | 'link' | 'long-log' | 'unavailable' | 'null-status' | 'lost' | 'success';
+type Mode = 'vertex' | 'fragment' | 'both' | 'link' | 'long-log' | 'unavailable' | 'lost' | 'success';
 type ProbeWindow = Window & {
   __nt?: { ready: boolean; programs_ready(): boolean; loss_window(step: number): number };
   __stages: { armed: boolean; queries: number; deletedQueries: number; programLogs: number; failed: boolean };
 };
 
-for (const mode of ['vertex', 'fragment', 'both', 'link', 'long-log', 'unavailable', 'null-status', 'lost', 'success'] as Mode[]) {
+for (const mode of ['vertex', 'fragment', 'both', 'link', 'long-log', 'unavailable', 'lost', 'success'] as Mode[]) {
   test(`shader diagnostics: ${mode}`, async ({ page }) => {
     await page.addInitScript((mode: Mode) => {
       const state = (window as ProbeWindow).__stages = { armed: !['unavailable', 'lost', 'success'].includes(mode), queries: 0, deletedQueries: 0, programLogs: 0, failed: false };
@@ -15,10 +15,11 @@ for (const mode of ['vertex', 'fragment', 'both', 'link', 'long-log', 'unavailab
       const parameter = proto.getShaderParameter;
       const programParameter = proto.getProgramParameter;
       const link = proto.linkProgram;
-      const attached = proto.getAttachedShaders;
       const remove = proto.deleteShader;
       const lost = proto.isContextLost;
       const deleted = new Set<WebGLShader>();
+      // Debug Emscripten builds read each parameter twice, so count stages, not calls.
+      const queried = new Set<WebGLShader>();
       let target: WebGLProgram | null = null;
       proto.shaderSource = function(shader, text) {
         const type = parameter.call(this, shader, this.SHADER_TYPE);
@@ -38,14 +39,11 @@ for (const mode of ['vertex', 'fragment', 'both', 'link', 'long-log', 'unavailab
       };
       proto.getShaderParameter = function(shader, query) {
         if (query === this.COMPILE_STATUS) {
-          state.queries++;
+          if (!queried.has(shader)) state.queries++;
+          queried.add(shader);
           if (deleted.has(shader)) state.deletedQueries++;
-          if (mode === 'null-status' && parameter.call(this, shader, this.SHADER_TYPE) === this.VERTEX_SHADER) return null;
         }
         return parameter.call(this, shader, query);
-      };
-      proto.getAttachedShaders = function(program) {
-        return attached.call(this, program)?.reverse() ?? null;
       };
       proto.deleteShader = function(shader) {
         if (shader) deleted.add(shader);
@@ -86,19 +84,18 @@ for (const mode of ['vertex', 'fragment', 'both', 'link', 'long-log', 'unavailab
     }
     await page.waitForFunction(() => localStorage.getItem('nt.test.crash') !== null);
     const record = (await page.evaluate(() => localStorage.getItem('nt.test.crash')))!;
-    expect(record.includes('shader not bound to local id')).toBe(false);
-    const summary = record.split('\n').find(line => line.includes(' link: link failed:'))!;
-    expect(summary).toMatch(/program \d+\/GL \d+ link: link failed: gl_error=0x0 /);
-    const vertex = mode === 'unavailable' || mode === 'null-status' ? -1 : mode === 'vertex' || mode === 'both' ? 0 : 1;
+    const lines = record.split('\n');
+    const at = lines.findIndex(line => line.includes(' link: link failed:'));
+    expect(lines[at]).toMatch(/program \d+\/GL \d+ link: link failed: gl_error=0x0 "[^"\n]+"$/);
+    const vertex = mode === 'unavailable' ? -1 : mode === 'vertex' || mode === 'both' ? 0 : 1;
     const fragment = mode === 'unavailable' ? -1 : mode === 'fragment' || mode === 'both' ? 0 : 1;
-    expect(summary).toContain(`vs_compile=${vertex} fs_compile=${fragment}`);
-    expect(summary).toMatch(/"[^"\n]+"$/);
+    expect(lines[at - 1]).toContain(`program link stages: vs_compile=${vertex} fs_compile=${fragment}`);
     const state = await page.evaluate(() => (window as ProbeWindow).__stages);
     expect(state.queries).toBe(mode === 'unavailable' ? 0 : 2);
     expect(state.deletedQueries).toBe(0);
     if (mode === 'long-log') {
       expect(record).toContain('driver detail');
-      expect(record.lastIndexOf(' link: link failed:')).toBeGreaterThan(record.lastIndexOf('driver detail'));
+      expect(record.lastIndexOf('program link stages:')).toBeGreaterThan(record.lastIndexOf('driver detail'));
     }
   });
 }

@@ -138,17 +138,14 @@ returned: the uniform or block, `max_len`, or `gl_error` for a failed link or an
 empty query. The link record follows the driver logs, so a journal that
 keeps its tail keeps the identity. Context loss keeps its recoverable outcome.
 
-The final link-failure record also carries `vs_compile` and `fs_compile`: `1`
-means that stage compiled, `0` means compilation failed, and `-1` means its
-status was unavailable. The backend queries each still-live attached stage by
-type after the failed link; attachment order does not define vertex/fragment
-identity. Deleted WebGL stage mappings are skipped, not reported as failed,
-including with WebGL GL assertions enabled. A null WebGL compile-status result
-is also unavailable rather than false.
-Both results precede the label in the same final line, after driver logs, so
-long logs or labels cannot remove the classification. These additional queries
-exist only with ERROR logging compiled in and never run for a successful link
-or an already-confirmed context loss. Stage creation remains asynchronous.
+Just before that line, a link failure logs
+`program link stages: vs_compile=<v> fs_compile=<f>`: `1` means the stage
+compiled, `0` that it did not, `-1` that the status is unavailable because the
+owner destroyed the stage and the web backend no longer names it (native GL
+keeps an attached stage readable). The program keeps both stage names for this.
+An empty driver log with `1 1` therefore points at linking, a `0` at that
+stage's compilation. These queries exist only with ERROR logging compiled in and
+never run for a successful link or an already-confirmed context loss.
 
 The label is an optional debug name in static storage, like material labels; the
 program stores the pointer. NULL or empty labels report `<unnamed>`. Labels do not
