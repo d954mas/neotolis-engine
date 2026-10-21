@@ -113,7 +113,7 @@ test('device identity: automatic init survives a new session without steady-fram
   expect(await page.evaluate(() => (window as DeviceWindow).__device.queries)).toEqual(baseline.queries);
   const record = await capture(page);
   expectIdentity(record, INITIAL);
-  expect(record).toMatch(/\ngpu_caps: astc=[01] bc7=[01] etc2=[01] float_rt=[01] float_linear=[01] parallel_compile=[01] max_texture=[1-9]\d* ubo_align=[1-9]\d*\n/);
+  expect(record).toMatch(/\ngpu_caps: astc=[01] bc7=[01] etc2=[01] float_rt=[01] float_linear=[01] parallel_compile=[01] max_texture=[1-9]\d* ubo_align=[1-9]\d* vary=[1-9]\d* vs_uni=[1-9]\d* fs_uni=[1-9]\d* vs_ubo=[1-9]\d* fs_ubo=[1-9]\d* ubo_size=[1-9]\d*\n/);
 
   const next = await context.newPage();
   await installIdentity(next, RESTORED);

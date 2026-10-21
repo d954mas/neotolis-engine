@@ -80,8 +80,18 @@ static void test_device_identity_survives_shutdown(void) {
     TEST_ASSERT_EQUAL_STRING((const char *)glGetString(GL_RENDERER), info->renderer);
     TEST_ASSERT_EQUAL_STRING((const char *)glGetString(GL_VERSION), info->api_version);
     char caps[sizeof(info->caps)];
-    (void)snprintf(caps, sizeof(caps), "max_texture=%u ubo_align=%u", (unsigned)g_nt_gfx.gpu_caps.max_texture_size, (unsigned)g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment);
+    const nt_gfx_gpu_caps_t *gpu = &g_nt_gfx.gpu_caps;
+    (void)snprintf(caps, sizeof(caps), "max_texture=%u ubo_align=%u vary=%u vs_uni=%u fs_uni=%u vs_ubo=%u fs_ubo=%u ubo_size=%u", (unsigned)gpu->max_texture_size,
+                   (unsigned)gpu->uniform_buffer_offset_alignment, (unsigned)gpu->max_varying_components, (unsigned)gpu->max_vertex_uniform_components, (unsigned)gpu->max_fragment_uniform_components,
+                   (unsigned)gpu->max_vertex_uniform_blocks, (unsigned)gpu->max_fragment_uniform_blocks, (unsigned)gpu->max_uniform_block_size);
     TEST_ASSERT_NOT_NULL(strstr(info->caps, caps));
+    /* GL 3.3 minimums: a wrong enum reads 0. */
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(60, gpu->max_varying_components);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1024, gpu->max_vertex_uniform_components);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1024, gpu->max_fragment_uniform_components);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(12, gpu->max_vertex_uniform_blocks);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(12, gpu->max_fragment_uniform_blocks);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(16384, gpu->max_uniform_block_size);
     const nt_gfx_device_info_t saved = *info;
     nt_gfx_shutdown();
     TEST_ASSERT_EQUAL_PTR(info, nt_gfx_device_info());
@@ -1517,11 +1527,13 @@ static PFNGLGETACTIVEUNIFORMPROC s_get_active_uniform;
 static GLenum s_skipped_program_query;
 static GLuint s_failed_reflection_program;
 static char s_program_failure_log[512];
+static char s_previous_failure_log[512]; /* the error line just before the last one */
 
 static void capture_program_failure(nt_log_level_t level, const char *domain, const char *msg, void *user) {
     (void)domain;
     (void)user;
     if (level == NT_LOG_LEVEL_ERROR) {
+        memcpy(s_previous_failure_log, s_program_failure_log, sizeof(s_previous_failure_log));
         (void)snprintf(s_program_failure_log, sizeof(s_program_failure_log), "%s", msg);
     }
 }
@@ -1811,7 +1823,9 @@ static void test_make_program_does_not_query_link_status(void) {
         TEST_ASSERT_EQUAL_UINT32(before[i], g_nt_gfx.counters.gl[blocking[i]]);
     }
     TEST_ASSERT_FALSE(nt_gfx_program_ready(prog));
+    const uint32_t shader_queries = g_nt_gfx.counters.gl[NT_GFX_GL_glGetShaderiv];
     nt_test_gfx_link_wait(prog);
+    TEST_ASSERT_EQUAL_UINT32(shader_queries, g_nt_gfx.counters.gl[NT_GFX_GL_glGetShaderiv]);
 }
 
 static uint32_t s_fragment_stage_logs;
@@ -1861,28 +1875,59 @@ static void GLAD_API_PTR fail_link_without_driver_log(GLuint program, GLenum que
     s_get_program_iv(program, query, value);
 }
 
-static void test_failed_link_with_empty_driver_logs_records_its_phase(void) {
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() { gl_Position = vec4(0.0); }\n"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "out vec4 color;\nvoid main() { color = vec4(1.0); }\n"});
-    nt_program_t program = nt_gfx_make_program(vs, fs, "failure/link");
-    nt_gfx_destroy_shader(fs);
-    nt_gfx_destroy_shader(vs);
-    s_get_program_iv = glad_glGetProgramiv;
-    glad_glGetProgramiv = fail_link_without_driver_log;
-    s_program_failure_log[0] = '\0';
-    nt_log_add_sink(capture_program_failure, NULL);
-    NT_TEST_EXPECT_ASSERT(nt_test_gfx_link_wait(program));
-    nt_log_remove_sink(capture_program_failure, NULL);
-    glad_glGetProgramiv = s_get_program_iv;
-    nt_gfx_destroy_program(program);
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "program link failed"));
-    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
-    if (NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR) {
-        char identity[64];
-        (void)snprintf(identity, sizeof(identity), "program %u/GL %u ", nt_pool_slot_index(program.id), s_failed_link_program);
-        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, identity));
-        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, " link: "));
-        TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "\"failure/link\""));
+static PFNGLGETSHADERIVPROC s_stage_parameter;
+static GLint s_vertex_compiled;
+static GLint s_fragment_compiled;
+static uint32_t s_compile_queries;
+
+static void GLAD_API_PTR stage_status_without_driver_log(GLuint shader, GLenum query, GLint *value) {
+    if (query == GL_INFO_LOG_LENGTH) {
+        *value = 0;
+    } else if (query == GL_COMPILE_STATUS) {
+        GLint type = 0;
+        s_stage_parameter(shader, GL_SHADER_TYPE, &type);
+        *value = type == GL_VERTEX_SHADER ? s_vertex_compiled : s_fragment_compiled;
+        s_compile_queries++;
+    } else {
+        s_stage_parameter(shader, query, value);
+    }
+}
+
+static void test_failed_link_records_both_compile_statuses_without_driver_logs(void) {
+    static const GLint statuses[][2] = {{0, 1}, {1, 0}, {0, 0}, {1, 1}};
+    for (uint32_t i = 0; i < sizeof(statuses) / sizeof(statuses[0]); i++) {
+        nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() { gl_Position = vec4(0.0); }"});
+        nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "out vec4 color; void main() { color = vec4(1.0); }"});
+        nt_program_t program = nt_gfx_make_program(vs, fs, "failure/stages");
+        /* GL only flags an attached stage for deletion, so its status stays readable. */
+        nt_gfx_destroy_shader(fs);
+        nt_gfx_destroy_shader(vs);
+        s_get_program_iv = glad_glGetProgramiv;
+        s_stage_parameter = glad_glGetShaderiv;
+        glad_glGetProgramiv = fail_link_without_driver_log;
+        glad_glGetShaderiv = stage_status_without_driver_log;
+        s_vertex_compiled = statuses[i][0];
+        s_fragment_compiled = statuses[i][1];
+        s_compile_queries = 0;
+        s_program_failure_log[0] = '\0';
+        nt_log_add_sink(capture_program_failure, NULL);
+        NT_TEST_EXPECT_ASSERT(nt_test_gfx_link_wait(program));
+        nt_log_remove_sink(capture_program_failure, NULL);
+        glad_glGetProgramiv = s_get_program_iv;
+        glad_glGetShaderiv = s_stage_parameter;
+        nt_gfx_destroy_program(program);
+        TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "program link failed"));
+        TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR ? 2U : 0U, s_compile_queries);
+        TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+        if (NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR) {
+            char fields[64];
+            (void)snprintf(fields, sizeof(fields), "program link stages: vs_compile=%d fs_compile=%d", s_vertex_compiled, s_fragment_compiled);
+            char identity[64];
+            (void)snprintf(identity, sizeof(identity), "program %u/GL %u link: link failed: ", nt_pool_slot_index(program.id), s_failed_link_program);
+            TEST_ASSERT_EQUAL_STRING(fields, s_previous_failure_log);
+            TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, identity));
+            TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "\"failure/stages\""));
+        }
     }
 }
 
@@ -2186,7 +2231,7 @@ int main(void) {
     RUN_TEST(test_shader_name_and_readback_failures_on_a_live_context_assert);
     RUN_TEST(test_make_program_does_not_query_link_status);
     RUN_TEST(test_failed_link_logs_its_stage_and_asserts_at_begin_frame);
-    RUN_TEST(test_failed_link_with_empty_driver_logs_records_its_phase);
+    RUN_TEST(test_failed_link_records_both_compile_statuses_without_driver_logs);
     RUN_TEST(test_reflection_invariant_records_its_program_and_phase);
     RUN_TEST(test_block_binding_invariant_records_its_phase);
     RUN_TEST(test_long_label_keeps_the_failure_cause);

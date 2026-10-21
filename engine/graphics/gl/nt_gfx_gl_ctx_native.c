@@ -61,14 +61,7 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     caps.has_float_render_target = gl_ver >= 30;
     caps.has_float_texture_linear = gl_ver >= 30;
 
-    GLint max_tex_size = 0;
-    NT_GL(glGetIntegerv, GL_MAX_TEXTURE_SIZE, &max_tex_size);
-    caps.max_texture_size = (uint32_t)max_tex_size;
-
-    GLint ubo_align = 0;
-    NT_GL(glGetIntegerv, GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &ubo_align);
-    caps.uniform_buffer_offset_alignment = (uint32_t)ubo_align;
-
+    nt_gfx_gl_read_limits(&caps);
     return caps;
 }
 

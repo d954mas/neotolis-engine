@@ -38,6 +38,14 @@ double nt_gfx_gl_ctx_query_result(uint32_t query);
 
 #endif
 
+/* GL limits; the shared backend reads them for both contexts. */
+void nt_gfx_gl_read_limits(nt_gfx_gpu_caps_t *caps);
+
+#if defined(NT_PLATFORM_WEB) && NT_LOG_MIN_LEVEL <= 2
+/* Writes the browser-translated text of a live stage, cut to cap bytes; 0 when there is none. */
+int nt_gfx_gl_ctx_translated_source(uint32_t shader, char *out, uint32_t cap);
+#endif
+
 /* Install a KHR_debug message callback that routes GL errors to NT_LOG_ERROR + assert, synchronously
  * so a breakpoint lands on the offending call. Requires NT_GFX_NATIVE_GL_DEBUG;
  * returns false when disabled, on web, or when the driver lacks KHR_debug. */

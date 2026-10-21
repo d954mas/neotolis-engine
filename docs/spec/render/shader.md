@@ -138,6 +138,23 @@ returned: the uniform or block, `max_len`, or `gl_error` for a failed link or an
 empty query. The link record follows the driver logs, so a journal that
 keeps its tail keeps the identity. Context loss keeps its recoverable outcome.
 
+Just before that line, a link failure logs
+`program link stages: vs_compile=<v> fs_compile=<f>`: `1` means the stage
+compiled, `0` that it did not, `-1` that the status is unavailable because the
+owner destroyed the stage and the web backend no longer names it (native GL
+keeps an attached stage readable). An empty driver log with `1 1` therefore
+points at linking, a `0` at that stage's compilation. A context lost during
+these queries can also read as `-1` or `0`; that record still ends in the
+assertion. These queries exist only with ERROR logging compiled in and never run
+for a successful link or an already-confirmed context loss.
+
+On the web, the browser's translation of a stage is what the driver actually
+compiled, and the browser may adapt it to the GPU. A link failure therefore logs
+`<stage> translated:` and the text from the optional `WEBGL_debug_shaders`
+extension for each live stage, cut to 2 KB, ahead of the driver logs that a
+journal keeping its tail should retain. A stage without text logs nothing.
+Native GL compiles the packed source as is and logs no translation.
+
 The label is an optional debug name in static storage, like material labels; the
 program stores the pointer. NULL or empty labels report `<unnamed>`. Labels do not
 affect program identity or readiness.

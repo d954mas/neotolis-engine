@@ -69,7 +69,7 @@ renderer_draw_sprite(...);
 
 `nt_gfx_device_info()` returns a non-NULL, gfx-owned const view of four bounded
 strings, NUL terminators included: vendor (128 bytes), renderer (256), API
-version (128) and caps (128). The address is stable for the process, before
+version (128) and caps (256). The address is stable for the process, before
 init and after shutdown. Callers neither modify nor free it. Empty fields mean
 unavailable; the stub always supplies empty fields without requiring init.
 
@@ -77,7 +77,7 @@ The snapshot is the last observed device, for diagnostics and game workarounds
 of known device bugs; feature decisions read `nt_gfx_gpu_caps()`. Context
 creation refreshes the identity before backend setup, so setup failures already
 carry it. `caps` is `nt_gfx_gpu_caps_t` as text
-(`astc=1 bc7=0 etc2=1 float_rt=1 float_linear=1 parallel_compile=1 max_texture=16384 ubo_align=256`),
+(`astc=1 bc7=0 etc2=1 float_rt=1 float_linear=1 parallel_compile=1 max_texture=16384 ubo_align=256 vary=60 vs_uni=1024 fs_uni=896 vs_ubo=12 fs_ubo=12 ubo_size=16384`),
 written after each successful detection at init and restore; the struct itself
 is reset with `g_nt_gfx`. Web publishes only observations made without context
 loss; loss, failed recreation and shutdown keep the previous snapshot. Steady
@@ -1046,7 +1046,9 @@ and, with capture, `nt_gfx_gl_call_name`. WebGL JS calls the web context makes
 directly (`getExtension`, the `glGetQueryObjectui64v` timer-result bridge and
 `glGetString` identity queries through `getParameter`) are
 counted and recorded through `NT_GL_ISSUED` at their C call site, in a separate
-statement just before the JS call; the
+statement just before the JS call. The one exception is the translated-source
+lookup of a failed link, which runs only before that link's assertion fails:
+nothing observes the frame. The
 JS that Emscripten's GL layer runs behind a C call (lazy uniform location
 lookup, state shadowing) is a documented boundary: counters and capture see the
 C API call. Payload fields count calls with non-NULL CPU data and their bytes,

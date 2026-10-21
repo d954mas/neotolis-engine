@@ -97,6 +97,8 @@ typedef struct {
 /* Program reflection lives here, not on the pipelines that borrow the program. */
 typedef struct {
     GLuint program;
+    GLuint vs; /* attached stages, kept so a failed link can query them */
+    GLuint fs;
     /* Sampler units are program state: assigned in reflection order at link,
      * written once, never rewritten by a material. */
     nt_gfx_gl_sampler_unit_t sampler_units[NT_GFX_MAX_TEXTURE_SLOTS];
@@ -1180,6 +1182,23 @@ void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uin
     }
 }
 
+static NT_NOINLINE uint32_t gl_limit(GLenum name) {
+    GLint value = 0;
+    NT_GL(glGetIntegerv, name, &value);
+    return (uint32_t)value;
+}
+
+void nt_gfx_gl_read_limits(nt_gfx_gpu_caps_t *caps) {
+    caps->max_texture_size = gl_limit(GL_MAX_TEXTURE_SIZE);
+    caps->uniform_buffer_offset_alignment = gl_limit(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT);
+    caps->max_varying_components = gl_limit(GL_MAX_VARYING_COMPONENTS);
+    caps->max_vertex_uniform_components = gl_limit(GL_MAX_VERTEX_UNIFORM_COMPONENTS);
+    caps->max_fragment_uniform_components = gl_limit(GL_MAX_FRAGMENT_UNIFORM_COMPONENTS);
+    caps->max_vertex_uniform_blocks = gl_limit(GL_MAX_VERTEX_UNIFORM_BLOCKS);
+    caps->max_fragment_uniform_blocks = gl_limit(GL_MAX_FRAGMENT_UNIFORM_BLOCKS);
+    caps->max_uniform_block_size = gl_limit(GL_MAX_UNIFORM_BLOCK_SIZE);
+}
+
 /* ---- Resource management (shader / buffer / pipeline) ---- */
 
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
@@ -1210,6 +1229,7 @@ uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
 }
 
 /* Log shader/program info line-by-line (query actual length, no fixed buffer) */
+#if NT_LOG_MIN_LEVEL <= 2
 static void nt_gfx_gl_log_lines(const char *log) {
     const char *line = log;
     for (const char *p = log; *p; p++) {
@@ -1257,6 +1277,8 @@ static void nt_gfx_gl_log_program(uint32_t program) {
     free(log);
 }
 
+#endif
+
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle) {
     /* Zero reaches here from nt_gfx_shutdown's sweep over free slots, and that
      * sweep also runs when nt_gfx_init failed before glad loaded an entry point. */
@@ -1264,23 +1286,6 @@ void nt_gfx_backend_destroy_shader(uint32_t backend_handle) {
         return;
     }
     NT_GL(glDeleteShader, (GLuint)backend_handle);
-}
-
-/* Compile errors surface only here: shader creation never reads COMPILE_STATUS. */
-static void nt_gfx_gl_log_link_failure(GLuint program) {
-    nt_gfx_gl_log_program(program);
-    GLsizei count = 0;
-    GLuint stages[2] = {0, 0};
-    NT_GL(glGetAttachedShaders, program, 2, &count, stages);
-    for (GLsizei i = 0; i < count; i++) {
-        /* Emscripten drops a deleted stage's name mapping, and reading its log would throw. */
-        if (!NT_GL_RET(glIsShader, stages[i])) {
-            continue;
-        }
-        GLint type = 0;
-        NT_GL(glGetShaderiv, stages[i], GL_SHADER_TYPE, &type);
-        nt_gfx_gl_log_shader(stages[i], type == GL_VERTEX_SHADER ? "vertex" : "fragment");
-    }
 }
 
 static void nt_gfx_gl_write_array_index(char *suffix, GLint element) {
@@ -1318,6 +1323,59 @@ static NT_NOINLINE void log_program_failure(const nt_gfx_gl_program_t *rec, cons
             NT_ASSERT((condition) && (reason) != NULL);                                                                                                                                                \
         }                                                                                                                                                                                              \
     } while (0)
+
+#if NT_LOG_MIN_LEVEL <= 2
+static GLint stage_compile_status(GLuint shader) {
+    if (!NT_GL_RET(glIsShader, shader)) {
+        return -1;
+    }
+    GLint compiled = 0;
+    NT_GL(glGetShaderiv, shader, GL_COMPILE_STATUS, &compiled);
+    return compiled;
+}
+
+#ifdef NT_PLATFORM_WEB
+/* The browser's translation is what the driver compiled; it can differ per GPU. */
+static void log_translated_source(GLuint shader, const char *stage) {
+    char text[2048];
+    if (nt_gfx_gl_ctx_translated_source(shader, text, sizeof(text))) {
+        NT_LOG_ERROR("%s translated:", stage);
+        nt_gfx_gl_log_lines(text);
+    }
+}
+#endif
+#endif
+
+/* Compile errors surface only here: shader creation never reads COMPILE_STATUS. */
+static void nt_gfx_gl_log_link_failure(const nt_gfx_gl_program_t *rec) {
+#if NT_LOG_MIN_LEVEL <= 2
+    const GLenum gl_error = NT_GL_RET0(glGetError);
+    const GLint vs_compile = stage_compile_status(rec->vs);
+    const GLint fs_compile = stage_compile_status(rec->fs);
+#ifdef NT_PLATFORM_WEB
+    /* Before the driver logs, so a journal that keeps its tail drops this text first. */
+    if (vs_compile >= 0) {
+        log_translated_source(rec->vs, "vertex");
+    }
+    if (fs_compile >= 0) {
+        log_translated_source(rec->fs, "fragment");
+    }
+#endif
+    nt_gfx_gl_log_program(rec->program);
+    /* -1: the owner destroyed the stage and Emscripten dropped its name; native GL keeps an attached stage readable. */
+    if (vs_compile >= 0) {
+        nt_gfx_gl_log_shader(rec->vs, "vertex");
+    }
+    if (fs_compile >= 0) {
+        nt_gfx_gl_log_shader(rec->fs, "fragment");
+    }
+    /* After the driver lines, so a journal that keeps its tail keeps the classification and identity. */
+    NT_LOG_ERROR("program link stages: vs_compile=%d fs_compile=%d", vs_compile, fs_compile);
+    log_program_failure(rec, "link", "link failed", "gl_error", gl_error);
+#else
+    (void)rec;
+#endif
+}
 
 typedef enum { UNIFORM_NOT_SAMPLER, UNIFORM_SAMPLER, UNIFORM_SIGNED_SAMPLER, UNIFORM_UNSUPPORTED_SAMPLER } uniform_kind_t;
 
@@ -1522,6 +1580,8 @@ bool nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend, uin
     NT_GL(glAttachShader, program, (GLuint)fs_backend);
     NT_GL(glLinkProgram, program);
     s_programs[slot].program = program;
+    s_programs[slot].vs = (GLuint)vs_backend;
+    s_programs[slot].fs = (GLuint)fs_backend;
     s_programs[slot].label = label;
     return true;
 }
@@ -1544,9 +1604,7 @@ nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll
         /* A loss fails the link before its event arrives; the caller latches it. */
         const bool lost = nt_gfx_gl_ctx_query_lost();
         if (!lost) {
-            nt_gfx_gl_log_link_failure(rec->program);
-            /* After the driver lines, so a journal that keeps its tail keeps the identity. */
-            log_program_failure(rec, "link", "link failed", "gl_error", NT_GL_RET0(glGetError));
+            nt_gfx_gl_log_link_failure(rec);
         }
         NT_ASSERT(lost && "program link failed on a live context");
         return NT_GFX_RESULT_CONTEXT_LOST;

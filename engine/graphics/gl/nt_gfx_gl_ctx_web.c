@@ -11,7 +11,7 @@
  * in library_webgl.js, force-linked by this TU's own emscripten_webgl_* C calls -- so it survives today.
  * EM_JS_DEPS makes that implicit dependency explicit + Closure-kept, so moving context creation out of
  * this file can't silently strip GL in release. */
-EM_JS_DEPS(nt_gfx_gl_ctx_web, "$GL,$UTF8ToString,$stringToUTF8,$findCanvasEventTarget,emscripten_webgl_create_context")
+EM_JS_DEPS(nt_gfx_gl_ctx_web, "$GL,$UTF8ToString,$stringToUTF8,$lengthBytesUTF8,$findCanvasEventTarget,emscripten_webgl_create_context")
 
 static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE s_gl_context;
 static bool s_loss_pending; /* set by a lost event until begin_frame takes it */
@@ -102,6 +102,19 @@ static bool get_extension(const char *name) {
     return nt_gfx_js_get_extension(name) != 0;
 }
 
+#if NT_LOG_MIN_LEVEL <= 2
+/* Not recorded: it runs only before a link-failure assertion, and nothing observes that frame. */
+/* clang-format off */
+EM_JS(int, nt_gfx_gl_ctx_translated_source, (uint32_t shader, char *out, uint32_t cap), {
+    var ext = GL.currentContext.GLctx.getExtension("WEBGL_debug_shaders");
+    var text = ext ? ext["getTranslatedShaderSource"](GL.shaders[shader]) : null;
+    if (!text) return 0;
+    stringToUTF8(text, out, cap);
+    return 1;
+})
+/* clang-format on */
+#endif
+
 /* clang-format off */
 EM_JS(void, nt_gfx_js_device_string, (unsigned int name, char *out, unsigned int cap), {
     var text = GL.currentContext.GLctx.getParameter(name);
@@ -136,12 +149,7 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     caps.has_float_texture_linear = get_extension("OES_texture_float_linear");
     /* Without getExtension the COMPLETION_STATUS query is INVALID_ENUM and reads as never complete. */
     caps.has_parallel_shader_compile = get_extension("KHR_parallel_shader_compile");
-    GLint max_texture_size = 0;
-    NT_GL(glGetIntegerv, GL_MAX_TEXTURE_SIZE, &max_texture_size);
-    caps.max_texture_size = (uint32_t)max_texture_size;
-    GLint ubo_align = 0;
-    NT_GL(glGetIntegerv, GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &ubo_align);
-    caps.uniform_buffer_offset_alignment = (uint32_t)ubo_align;
+    nt_gfx_gl_read_limits(&caps);
     return caps;
 }
 
