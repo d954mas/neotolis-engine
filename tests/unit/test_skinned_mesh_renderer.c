@@ -26,6 +26,8 @@
 #include "unity.h"
 /* clang-format on */
 
+static nt_instance_layout_t skinned_layout(void) { return nt_gfx_make_instance_layout(&nt_skinned_mesh_instance_layout); }
+
 static nt_mesh_t make_mesh_at(uint8_t location) {
     uint8_t blob[sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + 36];
     memset(blob, 0, sizeof(blob));
@@ -678,7 +680,7 @@ void test_core_draw_binds_the_deformation_draw_texture_across_passes(void) {
     nt_mesh_instance_world_rows(instance->world_rows, world);
     for (int pass = 0; pass < 2; pass++) {
         nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-        nt_mesh_renderer_draw_skinned(mesh, material, texture, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset, 1);
+        nt_mesh_renderer_draw_skinned(mesh, material, texture, skinned_layout(), nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset, 1);
         nt_gfx_end_pass();
     }
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_update_buffer_count()); /* recording writes no buffer */
@@ -704,7 +706,7 @@ void test_skinned_draws_route_to_their_stream(void) {
     nt_mesh_renderer_draw_list_skinned(NT_GFX_FRAME_VERTEX + 1, &item, 1);
     TEST_ASSERT_EQUAL_UINT32(general, g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used);
     TEST_ASSERT_EQUAL_UINT32(sizeof(nt_skinned_mesh_instance_t), g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX + 1].used);
-    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_skinned(mesh, material, texture, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1), 0, 2));
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_skinned(mesh, material, texture, skinned_layout(), nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1), 0, 2));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "instances lie outside"));
     NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list_skinned(NT_GFX_FRAME_INDEX, &item, 1));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "not a frame vertex stream"));
@@ -833,7 +835,7 @@ static void core_draw_frame(nt_mesh_t mesh, nt_material_t material, nt_texture_t
     uint32_t offset = 0;
     nt_skinned_mesh_instance_t *instance = (nt_skinned_mesh_instance_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, sizeof(nt_skinned_mesh_instance_t), 4, &offset);
     *instance = (nt_skinned_mesh_instance_t){.color = NT_RGBA8(255, 255, 255, 255)};
-    nt_mesh_renderer_draw_skinned(mesh, material, deformation, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset, 1);
+    nt_mesh_renderer_draw_skinned(mesh, material, deformation, skinned_layout(), nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset, 1);
     nt_test_frame_next();
 }
 

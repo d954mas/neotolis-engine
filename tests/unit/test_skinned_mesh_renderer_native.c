@@ -685,7 +685,7 @@ static uint32_t render_owned(nt_mesh_t mesh, nt_material_t material, nt_buffer_t
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     begin_target_pass();
-    nt_mesh_renderer_draw(mesh, material, buffer, first * (uint32_t)sizeof(nt_mesh_instance_t), count);
+    nt_mesh_renderer_draw(mesh, material, nt_gfx_make_instance_layout(&nt_mesh_instance_layout), buffer, first * (uint32_t)sizeof(nt_mesh_instance_t), count);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     const uint32_t pointers = g_nt_gfx.counters.gl[NT_GFX_GL_glVertexAttribPointer];
@@ -741,6 +741,78 @@ static void test_skinned_instances_draw_their_own_colors(void) {
     draw_tinted_and_white_instances(make_mesh(k_bar), make_skinned_material(3.0F), &binding);
 }
 
+/* Each covered pixel drawn by exactly one instance shows that instance's colour. */
+static void assert_two_instance_colors(const uint8_t first_mask[FRAME_BYTES], const uint8_t second_mask[FRAME_BYTES], const uint8_t frame[FRAME_BYTES], const uint8_t first[3],
+                                       const uint8_t second[3]) {
+    uint32_t covered[2] = {0, 0};
+    for (uint32_t pixel = 0; pixel < RT_W * RT_H; pixel++) {
+        const size_t byte_offset = (size_t)pixel * 4U;
+        const bool in_first = first_mask[byte_offset + 3] != 0;
+        if (in_first == (second_mask[byte_offset + 3] != 0)) {
+            continue;
+        }
+        const uint8_t *expected = in_first ? first : second;
+        for (size_t c = 0; c < 3; c++) {
+            TEST_ASSERT_UINT8_WITHIN(1, expected[c], frame[byte_offset + c]);
+        }
+        covered[in_first ? 0 : 1]++;
+    }
+    TEST_ASSERT_GREATER_THAN_UINT32(0, covered[0]);
+    TEST_ASSERT_GREATER_THAN_UINT32(0, covered[1]);
+}
+
+typedef struct {
+    nt_skinned_mesh_instance_t head;
+    float param[4];
+} param_instance_t;
+
+/* A game layout (engine head + one vec4 at location 14) carries a per-instance value: two skinned
+ * instances of one mesh in ONE draw blend to different colours by their own value. */
+static void test_game_layout_values_reach_the_shader_per_instance(void) {
+    const nt_deformation_binding_t binding = {.texture = s_palette, .x0 = 0, .y0 = 0, .x1 = 3, .y1 = 1, .alpha = 0.25F};
+    nt_mesh_t mesh = make_mesh(k_bar);
+    nt_material_t material = make_skinned_material(4.0F);
+    nt_entity_t top = make_entity(mesh, material, &binding);
+    nt_entity_t bottom = make_entity(mesh, material, &binding);
+    nt_transform_comp_set_position(top, 0.0F, 0.45F, 0.0F);
+    nt_transform_comp_set_position(bottom, 0.0F, -0.45F, 0.0F);
+    nt_transform_comp_update();
+    const uint32_t key = nt_mesh_renderer_batch_key(material, mesh);
+    const nt_render_item_t items[2] = {{.entity = top.id, .batch_key = key}, {.entity = bottom.id, .batch_key = key}};
+    render_list(&items[0], 1, true, s_expected);
+    render_list(&items[1], 1, true, s_second_mask);
+
+    nt_vertex_layout_t desc = nt_skinned_mesh_instance_layout;
+    desc.attrs[desc.attr_count++] = (nt_vertex_attr_t){.location = 14, .type = NT_VERTEX_FLOAT, .count = 4, .offset = offsetof(param_instance_t, param)};
+    desc.stride = sizeof(param_instance_t);
+    const nt_instance_layout_t layout = nt_gfx_make_instance_layout(&desc);
+    param_instance_t instances[2] = {0};
+    for (int i = 0; i < 2; i++) {
+        const float world[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, i == 0 ? 0.45F : -0.45F, 0, 1};
+        nt_mesh_instance_world_rows(instances[i].head.world_rows, world);
+        instances[i].head.skin_origins[0] = binding.x0;
+        instances[i].head.skin_origins[1] = binding.y0;
+        instances[i].head.skin_origins[2] = binding.x1;
+        instances[i].head.skin_origins[3] = binding.y1;
+        instances[i].head.skin_alpha = binding.alpha;
+        instances[i].head.color = 0xFFFFFFFFU;
+        instances[i].param[0] = (float)i;
+    }
+    nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = instances, .size = sizeof(instances)});
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    begin_target_pass();
+    nt_mesh_renderer_draw_skinned(mesh, material, s_palette, layout, buffer, 0, 2);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
+    const bool read = nt_gfx_read_pixels(s_target, 0, 0, RT_W, RT_H, s_actual, FRAME_BYTES);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(read);
+    assert_two_instance_colors(s_expected, s_second_mask, s_actual, (const uint8_t[3]){255, 0, 0}, (const uint8_t[3]){0, 0, 255});
+    nt_gfx_destroy_buffer(buffer);
+}
+
 int main(void) {
     /* One hidden window and GL context serve every test; setUp/tearDown reset only engine state. */
     if (!glfwInit()) {
@@ -755,6 +827,7 @@ int main(void) {
     RUN_TEST(test_mesh_instances_draw_their_own_colors);
     RUN_TEST(test_skinned_instances_draw_their_own_colors);
     RUN_TEST(test_owned_instances_draw_from_their_offset);
+    RUN_TEST(test_game_layout_values_reach_the_shader_per_instance);
     int failures = UNITY_END();
     nt_window_shutdown();
     return failures;

@@ -190,7 +190,7 @@ typedef struct ShaderAsset {
 
 ## Four levels of shader data
 
-1. **vertex inputs** — from geometry/mesh, and per-instance data from the instance layouts
+1. **vertex inputs** — from geometry/mesh, and per-instance data from the instance layouts (the engine head or a game layout)
 2. **`Material` block** — the material's params, bound at apply ([material, Params](material.md#params))
 3. **`Draw` block** — per-draw data of a renderer or game shader, bound as frame data
 4. **`Globals` and game blocks** — frame and pass data, bound as frame data
@@ -213,7 +213,15 @@ safe. It holds only `#define` constants, never attribute declarations:
 
 A shader that reads a stream at an explicitly assigned location writes that
 number, or its own `#define`, matching the stream layout the mesh was built
-with. Shaders that do not include it are unaffected; the engine mesh shaders
+with.
+
+A game instance layout places its own attributes at any location that neither
+the drawn meshes' streams nor the layout's other attributes use: above the head
+(12-15 for the plain head, 14-15 for the skinned head) or a 0-7 slot those
+meshes lack. A collision asserts at the instanced bind. The budget is 16
+locations for mesh streams and instance attributes together. Every attribute is
+bound with `glVertexAttribPointer`, so a shader declares it as `float` or
+`vecN`, never `ivec`/`uvec`. Shaders that do not include it are unaffected; the engine mesh shaders
 (`common/instance.glsl`, `common/skin.glsl` and their users) include it.
 
 ## Mesh streams and shader inputs that do not match
@@ -226,8 +234,8 @@ construction.
 
 ## Object and global data
 
-Per-object values are instance data (world rows and color in the instance head) or
-a `Draw` block; frame and view values (`view_proj`, `camera_pos`, `time`) are the
+Per-object values are instance data (world rows and color in the instance head,
+or a game layout's attributes) or a `Draw` block; frame and view values (`view_proj`, `camera_pos`, `time`) are the
 `Globals` block the game fills (`nt_frame_uniforms_t`, `common/globals.glsl`).
 Shaders read no standalone numeric uniforms: every value arrives in a uniform
 block or a vertex input.

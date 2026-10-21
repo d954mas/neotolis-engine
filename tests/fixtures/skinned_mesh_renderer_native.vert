@@ -7,11 +7,13 @@ precision highp int;
 layout(location = NT_LOC_POSITION) in vec3 a_position;
 layout(location = NT_LOC_NORMAL) in vec3 a_normal;
 layout(location = NT_LOC_TANGENT) in vec4 a_tangent;
+layout(location = 14) in vec4 a_param; /* a game layout's per-instance value */
 
 out vec3 v_position_probe;
 out vec3 v_normal_probe;
 out vec3 v_tangent_probe;
 out vec4 v_color_probe;
+out vec4 v_param_probe;
 
 mat3 world_linear() {
     return mat3(
@@ -38,5 +40,6 @@ void main() {
     v_normal_probe = normal * 0.25 + 0.5;
     v_tangent_probe = tangent * 0.25 + 0.5;
     v_color_probe = a_color;
+    v_param_probe = mix(vec4(1.0, 0.0, 0.0, 1.0), vec4(0.0, 0.0, 1.0, 1.0), a_param.x);
     gl_Position = vec4(position, 1.0);
 }
