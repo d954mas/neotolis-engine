@@ -230,20 +230,21 @@ One bind selects the whole geometry for the following draws:
 of `layout` at byte `offset` of `buffer`, one command. Per mesh switch that is a
 single `glBindVertexArray` instead of buffer re-binds plus per-attribute
 `glVertexAttribPointer` rewrites. WebGL2 has no baseInstance, so instances are
-located by pointing the instance attributes at their offset. A vertex input's
-first instanced bind pins its instance layout: it enables the layout's slots
-with divisor 1, and a bind with another layout asserts, so one vertex input
-draws one instance format. Each VAO keeps the buffer and offset of its last
-bind: an equal pair re-points nothing, a new offset or buffer re-points the
-layout's attributes. A vertex input bound with one pair every frame re-points
-nothing; one bound with two in a frame re-points between them every frame. For frame data, a pass whose instances live in their
+located by pointing the instance attributes at their offset. Each VAO keeps the
+layout, buffer and offset of its last instanced bind: an equal tuple re-points
+nothing, a new offset or buffer re-points the layout's attributes, and a new
+layout also disables and detaches the locations only the old layout used and
+enables (divisor 1) the ones only the new layout uses. A vertex input bound with
+one tuple every frame re-points nothing; one bound with two in a frame
+re-points between them every frame, so one layout per (vertex input, stream) is
+the cheap case, not a rule. For frame data, a pass whose instances live in their
 own stream keeps every run's offset, and so its pointers, while its counts stay;
 in one shared stream a count change shifts every later run of the frame. An
 empty layout with no buffers is the attribute-less `gl_VertexID` path; every
 draw asserts a bound vertex input.
 
-The first instanced bind of a vertex input asserts that the instance locations
-do not overlap its vertex ones. An instanced bind whose buffer differs from the
+An instanced bind that changes a vertex input's layout asserts that the
+instance locations do not overlap its vertex ones. An instanced bind whose buffer differs from the
 last instance buffer bound in the pass asserts the buffer's type and liveness;
 a bind equal to the bound tuple returns before any check. A vertex input once
 bound with
@@ -454,12 +455,10 @@ keep no vertex-input cache. They die with the mesh (the destroy cascade) and
 with a context loss; the next use makes them again, also after the caller
 destroys one. The mesh renderer binds them with its plain or skinned instance layout; the
 engine layouts share the instance head (`NT_INST_LOC_*`, see
-[shader, Attribute locations](shader.md#attribute-locations)). A mesh's vertex
-input is pinned to the first instance layout drawn through it, so two instance
-layouts of one mesh use different frame streams (asserted). From game buffers
-they would share the base vertex input, so at most one layout draws a mesh from
-game buffers and a second asserts; a game that needs more builds its own vertex
-inputs over the mesh's `vbo`/`ibo` and draws them with `nt_gfx_*` directly.
+[shader, Attribute locations](shader.md#attribute-locations)). Two instance
+layouts of one mesh drawn from one stream, or from game buffers (which share
+the base vertex input), switch the vertex input's layout on every change;
+drawing each layout from its own frame stream avoids that.
 `max_vertex_inputs` budgets the vertex inputs of the meshes (frame streams they
 are drawn from, plus one if drawn from any other buffer) and the others, such
 as the shape renderer's four per frame stream it draws from.
@@ -646,9 +645,7 @@ the same way. The entry points:
   one mesh drawn from more than one (game buffer, offset) re-points between
   them; a game that does that every frame builds its own per-offset vertex
   inputs over the mesh buffers and draws them with `nt_gfx_*` directly (see
-  Vertex inputs, Persistent instance data). Two instance layouts of one mesh
-  use different frame streams (asserted; see Vertex inputs, Mesh vertex
-  inputs). After a context loss the caller recreates and refills its buffer;
+  Vertex inputs, Persistent instance data). After a context loss the caller recreates and refills its buffer;
 - the ECS adapters, `nt_mesh_renderer_draw_list(stream, items, count)` and, in
   the skinned target, `nt_mesh_renderer_draw_list_skinned(stream, items,
   count)`, split the items into runs of adjacent equal batch keys (the skinned
@@ -711,7 +708,6 @@ for (uint32_t c = 0; c < CASCADES; c++) {
 bind_surface_materials();
 nt_gfx_begin_pass(&main_pass);
 nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &views[CASCADES], sizeof(view_t));
-/* One stream serves both instance layouts only because no mesh is in both lists. */
 nt_mesh_renderer_draw_list_skinned(GAME_STREAM_MAIN, skinned_items, skinned_count);
 nt_mesh_renderer_draw_list(GAME_STREAM_MAIN, static_items, static_count);
 nt_gfx_end_pass();

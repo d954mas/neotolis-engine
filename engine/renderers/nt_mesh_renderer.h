@@ -78,9 +78,8 @@ _Static_assert(sizeof(nt_skinned_mesh_instance_t) == 64 && offsetof(nt_skinned_m
                "skinned mesh instance layout");
 
 /* nt_mesh_renderer_draw for skinned instances (nt_skinned_mesh_instance_t). `deformation` is drawn
- * as u_skin_matrices, which the material (common/skin.glsl) does not declare. A mesh drawn plain
- * and skinned uses a different frame stream for each and game buffers for at most one
- * (render/architecture.md, Vertex inputs). Call after nt_skeletal_gpu_flush. */
+ * as u_skin_matrices, which the material (common/skin.glsl) does not declare. Call after
+ * nt_skeletal_gpu_flush. */
 void nt_mesh_renderer_draw_skinned(nt_mesh_t mesh, nt_material_t material, nt_texture_t deformation, nt_buffer_t instances, uint32_t offset, uint32_t count);
 
 /* nt_mesh_renderer_draw_list for skinned items: runs also split on the deformation texture,

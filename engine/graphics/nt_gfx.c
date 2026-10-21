@@ -120,7 +120,7 @@ typedef struct {
     uint32_t ibo_id;
     uint16_t vertex_mask;    /* vertex attribute locations; an instance layout may not overlap them */
     uint8_t index_type;      /* captured from the IBO; NT_INDEX_NONE for non-indexed */
-    uint8_t instance_layout; /* pinned by its first instanced bind; 0 = never bound with instances */
+    uint8_t instance_layout; /* layout of its last instanced bind; 0 = never bound with instances */
 } nt_gfx_vertex_input_meta_t;
 
 /* ---- Instance layout records (CPU only; survive context loss) ---- */
@@ -1781,10 +1781,8 @@ static nt_gfx_result_t bind_vertex_input_instanced(nt_vertex_input_t vi, nt_inst
     const uint32_t layout_slot = layout.id;
     NT_ASSERT(layout_slot >= 1 && layout_slot <= s_gfx.instance_layout_count && "invalid instance layout");
     nt_gfx_vertex_input_meta_t *meta = &s_gfx.vertex_input_metas[slot];
-    /* The first instanced bind pins the layout, so the overlap check runs once per vertex input. */
+    /* The overlap check runs only when the vertex input changes instance layout. */
     if (meta->instance_layout != layout_slot) {
-        NT_ASSERT(meta->instance_layout == 0 && "bind_vertex_input_instanced: the vertex input is pinned to another instance layout -- draw each layout through its own vertex input, e.g. "
-                                                "a mesh drawn with two instance layouts from a different frame stream for each");
         NT_ASSERT((s_gfx.instance_layouts[layout_slot].mask & meta->vertex_mask) == 0 && "bind_vertex_input_instanced: instance and vertex attribs share a location");
     }
     const uint32_t buffer_slot = nt_pool_slot_index(instance_buffer.id);

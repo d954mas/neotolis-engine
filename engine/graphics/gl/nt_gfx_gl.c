@@ -117,8 +117,8 @@ typedef struct {
 } nt_gfx_gl_attr_t;
 
 /* One VAO with its vertex and index buffers baked in, plus a mirror of the instance
- * (layout, buffer, offset) it last received. The layout is pinned by the first bind; destroying
- * the instance buffer detaches it from every VAO that names it. */
+ * (layout, buffer, offset) it last received. Destroying the instance buffer detaches it from
+ * every VAO that names it. */
 typedef struct {
     GLuint vao; /* 0 = free slot */
     GLuint instance_buffer;
@@ -1815,11 +1815,17 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t layout_s
         return;
     }
     const nt_gfx_gl_instance_layout_t *layout = &s_instance_layouts[layout_slot];
-    /* The frontend pins one layout per vertex input; 0 = first bind, or its buffer was destroyed. */
-    if (vi->instance_layout == 0) {
+    /* Old 0 = first bind, or its buffer was destroyed. Dropped slots point at no buffer, so the
+     * buffer-destroy walk, which knows only the current layout, finds every attachment. */
+    if (vi->instance_layout != layout_slot) {
+        const uint16_t old_mask = vi->instance_layout != 0 ? s_instance_layouts[vi->instance_layout].mask : 0U;
+        detach_instance_slots((uint16_t)(old_mask & ~layout->mask));
         for (uint8_t i = 0; i < layout->attr_count; i++) {
-            NT_GL(glEnableVertexAttribArray, layout->attrs[i].location);
-            NT_GL(glVertexAttribDivisor, layout->attrs[i].location, 1);
+            const uint8_t loc = layout->attrs[i].location;
+            if ((old_mask & (1U << loc)) == 0) {
+                NT_GL(glEnableVertexAttribArray, loc);
+                NT_GL(glVertexAttribDivisor, loc, 1);
+            }
         }
         vi->instance_layout = (uint8_t)layout_slot;
     }
