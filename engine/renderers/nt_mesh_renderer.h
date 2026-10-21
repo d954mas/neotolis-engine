@@ -56,8 +56,9 @@ extern const nt_vertex_layout_t nt_mesh_instance_layout;
 
 /* Records one instanced draw in the current pass: count > 0 instances of `layout` at byte offset of
  * `instances`, a frame vertex stream's buffer (filled before nt_gfx_end_frame) or a game-owned
- * NT_BUFFER_VERTEX buffer. A shader input the layout does not feed reads (0, 0, 0, 1) on GL.
- * Records nothing while the program is not ready or a pipeline or vertex input cannot be created. */
+ * NT_BUFFER_VERTEX buffer. A shader input neither the mesh nor the layout feeds is undefined on
+ * native GL and (0, 0, 0, 1) on WebGL. Records nothing while the program is not ready or a pipeline
+ * or vertex input cannot be created. */
 void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_instance_layout_t layout, nt_buffer_t instances, uint32_t offset, uint32_t count);
 
 /* ECS adapter: adjacent equal batch keys form one run, packed into frame vertex stream `stream`

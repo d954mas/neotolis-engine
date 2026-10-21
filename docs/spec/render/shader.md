@@ -229,8 +229,10 @@ bound with `glVertexAttribPointer`, so a shader declares it as `float` or
 
 A mesh's vertex input enables every stream of the mesh; streams the shader does
 not read cost nothing per draw. An input that neither a mesh stream nor the
-bound instance layout supplies reads the GL generic default `(0, 0, 0, 1)`.
-Nothing checks mesh/shader compatibility: the mesh family and its shaders agree on locations by
+bound instance layout supplies reads the current generic attribute value:
+`(0, 0, 0, 1)` on WebGL, which keeps it, but undefined on native GL after a
+draw that had an array enabled at that location (OpenGL 3.3, 2.8.3). A shader
+declares only inputs its mesh streams and instance layout feed. Nothing checks mesh/shader compatibility: the mesh family and its shaders agree on locations by
 construction.
 
 ## Object and global data
