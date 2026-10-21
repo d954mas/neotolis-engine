@@ -129,12 +129,22 @@ if(NT_DEVAPI_GROUP_CAPTURE)
     target_compile_definitions(nt_devapi_capture PUBLIC NT_DEVAPI_GROUP_CAPTURE=1)
 endif()
 
+# Record group (record.start / record.stop) over nt_recorder; the host calls nt_recorder_frame.
+if(NT_DEVAPI_GROUP_RECORDER)
+    if(NOT TARGET nt_recorder)
+        message(FATAL_ERROR "NT_DEVAPI_GROUP_RECORDER requires nt_recorder, which has no backend on this platform.")
+    endif()
+    nt_add_module(nt_devapi_recorder LOG_DOMAIN "devapi" nt_devapi_recorder.c)
+    target_link_libraries(nt_devapi_recorder PUBLIC nt_devapi nt_recorder PRIVATE nt_app_interface)
+    target_compile_definitions(nt_devapi_recorder PUBLIC NT_DEVAPI_GROUP_RECORDER=1)
+endif()
+
 # nt_devapi_default -- the "register every compiled-in group" bundle. Links every enabled group lib (so
 # a host linking it gets all groups + their deps) and provides nt_devapi_register_default(). The group
 # libs' PUBLIC NT_DEVAPI_GROUP_<X> defines reach nt_devapi_default.c here, gating its register calls.
 nt_add_module(nt_devapi_default LOG_DOMAIN "devapi" nt_devapi_default.c)
 target_link_libraries(nt_devapi_default PUBLIC nt_devapi)
-foreach(_grp core time discovery input ui obs entity_write capture)
+foreach(_grp core time discovery input ui obs entity_write capture recorder)
     if(TARGET nt_devapi_${_grp})
         target_link_libraries(nt_devapi_default PUBLIC nt_devapi_${_grp})
     endif()

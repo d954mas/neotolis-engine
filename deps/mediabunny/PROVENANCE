@@ -1,0 +1,17 @@
+Mediabunny — media toolkit for the web (MP4 muxer only)
+=======================================================
+
+Upstream:  https://github.com/Vanilagy/mediabunny (npm package `mediabunny`)
+License:   MPL-2.0 (LICENSE; the banner is kept inline in nt_mediabunny.js)
+Version:   1.62.0
+
+Files vendored:
+  nt_mediabunny.js  esbuild bundle of entry.mjs (minified IIFE, sets globalThis.NtMediabunny)
+  entry.mjs         the bundle entry: the six exports the recorder's web backend uses
+  LICENSE           upstream license text
+
+How obtained (unmodified upstream code; only tree-shaken):
+  npm install mediabunny@1.62.0 esbuild@0.24.2
+  npx esbuild entry.mjs --bundle --minify --format=iife --legal-comments=inline --outfile=nt_mediabunny.js
+
+Used by: engine/recorder (web) through --extern-pre-js, outside Closure. Size: 125 KB raw, 32 KB gzip.

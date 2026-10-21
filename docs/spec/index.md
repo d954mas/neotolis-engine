@@ -62,6 +62,7 @@ The chapters below define engine behavior.
 | [io/input.md](io/input.md) | Polling input model, pointer state, capture |
 | [io/audio.md](io/audio.md) | Platform-agnostic audio module, clips, voices, JS bridge |
 | [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) | Logging, asserts, errors, debug overlay, and the dev-only devapi |
+| [debug/recorder.md](debug/recorder.md) | Dev-only video recorder: call placement, frame selection, audio sync, backends, devapi `record.*` |
 | [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) | Skeletal animation: NSKL/NANM/NSKN assets, pose ABI, tracks, FK, GPU staging, skinned mesh renderer, bounds, `mix`/`override` composition; runtime banks planned, additive after v1 |
 | [ui/nt-ui.md](ui/nt-ui.md) | `nt_ui`: Clay dependency contract, transforms, interaction, widgets, scroll, popups, menus |
 | [ui/radial-widgets.md](ui/radial-widgets.md) | Radial widgets and the custom-attr image path rationale |
@@ -105,6 +106,7 @@ lifetime, and naming vocabulary.
 | `engine/window`, `engine/platform` | [runtime/platform.md](runtime/platform.md) |
 | `engine/app` | [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) (time & render control), [runtime/frame-lifecycle.md](runtime/frame-lifecycle.md) |
 | `engine/log`, `engine/version`, `engine/crash`, `engine/devapi`, `engine/debug_overlay`, `engine/metrics`, `engine/introspect` | [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) |
+| `engine/recorder` | [debug/recorder.md](debug/recorder.md) |
 | `engine/memory`, `engine/pool` | [runtime/memory.md](runtime/memory.md) |
 | `engine/core` | [core/principles.md](core/principles.md), [core/api-contracts.md](core/api-contracts.md); assert policy: [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) |
 | `engine/clipboard` | [core/module-layout.md](core/module-layout.md) (stub semantics example) |
