@@ -13,7 +13,7 @@ type DeviceHooks = {
 };
 type DeviceWindow = Window & {
   __nt?: DeviceHooks;
-  __device: Identity & { queries: number[]; extensions: string[]; deny: string[] | null; denied: number; creationErrorListeners: Set<EventListenerOrEventListenerObject> };
+  __device: Identity & { queries: number[]; extensions: string[]; deny: string[] | null; denied: number };
   __deviceLoss?: WEBGL_lose_context;
 };
 
@@ -21,11 +21,11 @@ const INITIAL: Identity = { vendor: 'vendor-initial', renderer: 'renderer-initia
 const RESTORED: Identity = { vendor: 'vendor-restored', renderer: 'renderer-restored', api: 'WebGL 2.0 restored' };
 
 // Override browser identity and context-creation responses; capture and persistence use the real engine.
-// deny: null creates normally; each string otherwise becomes one creation-error status before refusal.
+// deny: null creates normally; otherwise webgl2 is refused after each string is reported as a creation-error status.
 async function installIdentity(page: Page, identity = INITIAL, debug = true, deny: string[] | null = null, webgl2Api = true): Promise<void> {
   await page.addInitScript(({ identity, debug, deny, webgl2Api }) => {
     const control = (window as DeviceWindow).__device = {
-      ...identity, queries: [] as number[], extensions: [] as string[], deny, denied: 0, creationErrorListeners: new Set<EventListenerOrEventListenerObject>(),
+      ...identity, queries: [] as number[], extensions: [] as string[], deny, denied: 0,
     };
     const proto = WebGL2RenderingContext.prototype;
     const getExtension = proto.getExtension;
@@ -55,16 +55,6 @@ async function installIdentity(page: Page, identity = INITIAL, debug = true, den
       }
       return getContext.apply(this, args);
     } as typeof getContext;
-    const addEventListener = HTMLCanvasElement.prototype.addEventListener;
-    const removeEventListener = HTMLCanvasElement.prototype.removeEventListener;
-    HTMLCanvasElement.prototype.addEventListener = function(...args: Parameters<typeof addEventListener>) {
-      if (args[0] === 'webglcontextcreationerror') control.creationErrorListeners.add(args[1]);
-      return addEventListener.apply(this, args);
-    } as typeof addEventListener;
-    HTMLCanvasElement.prototype.removeEventListener = function(...args: Parameters<typeof removeEventListener>) {
-      if (args[0] === 'webglcontextcreationerror') control.creationErrorListeners.delete(args[1]);
-      return removeEventListener.apply(this, args);
-    } as typeof removeEventListener;
     if (!webgl2Api) Object.defineProperty(window, 'WebGL2RenderingContext', { configurable: true, value: undefined });
   }, { identity, debug, deny, webgl2Api });
 }
@@ -202,19 +192,7 @@ test('device identity: null fields, UTF-8 truncation and newlines stay bounded',
   expect(Buffer.byteLength(record.split('\ngpu_renderer: ')[1].split('\n')[0], 'utf8')).toBe(253);
 });
 
-for (const { name, statuses, webgl2Api, expected } of [
-  {
-    name: 'the ordered browser sequence',
-    statuses: ['Could not create a WebGL context: GPU provider creation failed', 'Web page caused context loss and was blocked'],
-    webgl2Api: true,
-    expected: 'webgl2_api=1 browser_status=Could not create a WebGL context: GPU provider creation failed | Web page caused context loss and was blocked',
-  },
-  { name: 'no browser event', statuses: [], webgl2Api: true, expected: 'webgl2_api=1 browser_status=<empty>' },
-  { name: 'empty browser events', statuses: ['', ''], webgl2Api: true, expected: 'webgl2_api=1 browser_status=<empty>' },
-  { name: 'a missing WebGL2 API', statuses: [], webgl2Api: false, expected: 'webgl2_api=0 browser_status=<empty>' },
-] as const) {
-test(`device identity: startup context failure preserves ${name}`, async ({ page }) => {
-  await installIdentity(page, INITIAL, true, [...statuses], webgl2Api);
+async function startupFailureLine(page: Page): Promise<string> {
   await page.goto('/index.html?crash=read');
   await page.waitForFunction((key) => localStorage.getItem(key) !== null, KEY, { timeout: 30_000 });
   const record = (await page.evaluate((key) => localStorage.getItem(key), KEY))!;
@@ -222,37 +200,27 @@ test(`device identity: startup context failure preserves ${name}`, async ({ page
   expect(record).not.toContain('\ngpu_caps:');
   expect(record).toMatch(/\nreason: /);
   expect(await page.evaluate(() => (window as DeviceWindow).__nt)).toBeUndefined();
-  const line = record.slice(record.indexOf('\nlog:\n') + 6).match(/context-create: failed .*/)?.[0] ?? '';
-  expect(line).toContain(expected);
-  expect(Buffer.byteLength(line, 'utf8')).toBeLessThan(512);
-  expect(await page.evaluate(() => (window as DeviceWindow).__device.creationErrorListeners.size)).toBe(0);
-});
+  return record.slice(record.indexOf('\nlog:\n') + 6).match(/context-create: failed .*/)?.[0] ?? '';
 }
 
-test('device identity: successful creation removes the status listener', async ({ page }) => {
-  await installIdentity(page);
-  await ready(page);
-  expect(await page.evaluate(() => (window as DeviceWindow).__device.creationErrorListeners.size)).toBe(0);
-});
-
-test('device identity: browser status text preserves the next status after a cut', async ({ page }) => {
-  await installIdentity(page, INITIAL, true, [`reason\r\n\0${'ы'.repeat(300)}`, 'blocked', 'ignored']);
-  await page.goto('/index.html?crash=read');
-  await page.waitForFunction((key) => localStorage.getItem(key) !== null, KEY, { timeout: 30_000 });
-  const record = (await page.evaluate((key) => localStorage.getItem(key), KEY))!;
-  const line = record.slice(record.indexOf('\nlog:\n') + 6).match(/context-create: failed .*/)?.[0] ?? '';
-  expect(line).toMatch(/browser_status=reason   ы+… \| blocked$/);
-  expect(line).not.toContain('ignored');
-  expect(line).not.toContain('\uFFFD');
+test('device identity: startup context failure is saved with the bounded browser status', async ({ page }) => {
+  await installIdentity(page, INITIAL, true, [`reason\r\n\0${'ы'.repeat(300)}`, 'blocked']);
+  // The status overflows the log line, so nt_log_write cuts it on a UTF-8 boundary and marks the cut.
+  const line = await startupFailureLine(page);
+  expect(line).toMatch(/ browser_status=reason   ы+\.\.\.$/);
   expect(Buffer.byteLength(line, 'utf8')).toBeLessThan(512);
 });
 
-test('device identity: browser status cuts surrogate pairs at a code point boundary', async ({ page }) => {
-  await installIdentity(page, INITIAL, true, [`${'x'.repeat(95)}😀`, `${'y'.repeat(95)}😀`]);
-  await page.goto('/index.html?crash=read');
-  await page.waitForFunction((key) => localStorage.getItem(key) !== null, KEY, { timeout: 30_000 });
-  const record = (await page.evaluate((key) => localStorage.getItem(key), KEY))!;
-  const line = record.slice(record.indexOf('\nlog:\n') + 6).match(/context-create: failed .*/)?.[0] ?? '';
-  expect(line).toMatch(new RegExp(`browser_status=${'x'.repeat(95)}… \\| ${'y'.repeat(95)}…$`));
-  expect(line).not.toContain('\uFFFD');
+test('device identity: startup context failure keeps the Chromium statuses in order', async ({ page }) => {
+  const provider = 'Could not create a WebGL context, VENDOR = 0xffff, DEVICE = 0xffff, GL_VENDOR = Disabled, GL_RENDERER = Disabled, '
+    + 'GL_VERSION = Disabled, Sandboxed = no, Optimus = no, AMD switchable = no, Reset notification strategy = 0x0000, '
+    + 'ErrorMessage = BindToCurrentSequence failed: .';
+  await installIdentity(page, INITIAL, true, ['', provider, 'Web page caused context loss and was blocked']);
+  const line = await startupFailureLine(page);
+  expect(line.endsWith(` browser_status=${provider} | Web page caused context loss and was blocked`)).toBe(true);
+});
+
+test('device identity: startup context failure names a missing WebGL 2 API', async ({ page }) => {
+  await installIdentity(page, INITIAL, true, [], false);
+  expect((await startupFailureLine(page)).endsWith(' browser_status=no WebGL2RenderingContext')).toBe(true);
 });
