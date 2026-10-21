@@ -355,6 +355,25 @@ static void test_late_block_within_a_block_is_kept(void) {
     TEST_ASSERT_EQUAL_UINT64(800, s_be.run_starts[0]);
 }
 
+/* At 60 fps a frame is 800 samples, under one block: the first frame writes no silence, so a block
+   that arrives late at t0 is kept whole. */
+static void test_first_late_block_at_high_fps_is_kept(void) {
+    start_at(60, 0.0);
+    frame_at(1.0 / 60.0, 1.0 / 60.0);
+    push_block(0.5F, 800, 0.0);
+    frame_at(2.0 / 60.0, 1.0 / 60.0);
+    TEST_ASSERT_EQUAL_UINT32(1, s_be.runs);
+    TEST_ASSERT_EQUAL_UINT64(0, s_be.run_starts[0]);
+}
+
+/* A clock jump of years ends the recording after a bounded count instead of counting every deadline. */
+static void test_huge_time_jump_ends_quickly(void) {
+    start_at(30, 0.0);
+    frame_at(1.5e8, 1.0 / 30.0);
+    TEST_ASSERT_FALSE(nt_recorder_active());
+    TEST_ASSERT_EQUAL_UINT32(0, s_be.closed_frames);
+}
+
 static void test_audio_failure_ends_the_recording(void) {
     start_at(30, 0.0);
     s_be.fail_audio = true;
@@ -387,6 +406,8 @@ int main(void) {
     RUN_TEST(test_overlapping_push_is_dropped);
     RUN_TEST(test_drift_within_a_block_joins);
     RUN_TEST(test_late_block_within_a_block_is_kept);
+    RUN_TEST(test_first_late_block_at_high_fps_is_kept);
+    RUN_TEST(test_huge_time_jump_ends_quickly);
     RUN_TEST(test_audio_failure_ends_the_recording);
     return UNITY_END();
 }

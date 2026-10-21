@@ -12,11 +12,12 @@ globalThis['NtRecorder'] = (function () {
         var supported = function (enc, cfg) {
             return enc.isConfigSupported(cfg).then(function (s) { return s.supported; }, function () { return false; });
         };
-        var vcfg = { width: 1920, height: 1080, framerate: 30 };
+        // A small config: a bigger canvas the encoder rejects ends that recording at its first frame.
+        var vcfg = { width: 640, height: 360, framerate: 30 };
         var acfg = { sampleRate: 48000, numberOfChannels: 2 };
         Promise.all([
-            supported(VideoEncoder, Object.assign({ codec: 'avc1.64002A' }, vcfg)).then(function (high) {
-                return high || supported(VideoEncoder, Object.assign({ codec: 'avc1.42E02A' }, vcfg))
+            supported(VideoEncoder, Object.assign({ codec: 'avc1.64001F' }, vcfg)).then(function (high) {
+                return high || supported(VideoEncoder, Object.assign({ codec: 'avc1.42E01F' }, vcfg))
                     .then(function (base) { profile = base ? '42E0' : null; return high; });
             }).then(function (high) { if (high) { profile = '6400'; } }),
             supported(AudioEncoder, Object.assign({ codec: 'mp4a.40.2' }, acfg)).then(function (aac) {
@@ -29,9 +30,14 @@ globalThis['NtRecorder'] = (function () {
     var LEVELS = [['1F', 3600, 108000], ['28', 8192, 245760], ['2A', 8704, 522240], ['33', 36864, 983040],
                   ['34', 36864, 2073600], ['3C', 139264, 4177920], ['3E', 139264, 16711680]];
 
-    function release(r) {
+    // The browser may already have closed an encoder (resource reclamation).
+    function closeEncoders(r) {
         if (r.venc && r.venc.state !== 'closed') { r.venc.close(); }
         if (r.aenc && r.aenc.state !== 'closed') { r.aenc.close(); }
+    }
+
+    function release(r) {
+        closeEncoders(r);
         if (r.out) { r.out.cancel().catch(function () {}); }
     }
 
@@ -151,10 +157,12 @@ globalThis['NtRecorder'] = (function () {
             .then(function () { return r.chain; })
             .then(function () { return r.out.finalize(); })
             .then(function () {
-                r.venc.close();
-                r.aenc.close();
-                done(new Blob([r.out.target.buffer], { type: 'video/mp4' }));
-            }, function (e) { if (!r.error) { r.error = String(e); } done(null); });
+                if (r.error) { throw r.error; }
+                closeEncoders(r);
+                return new Blob([r.out.target.buffer], { type: 'video/mp4' });
+            })
+            .catch(function (e) { r.fail(e); return null; })
+            .then(done);
     }
 
     return { 'open': open, 'video': video, 'audio': audio, 'close': close };

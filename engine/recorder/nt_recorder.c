@@ -59,8 +59,8 @@ static bool write_audio(uint64_t limit, bool pad) {
     uint64_t fill = limit;
     if (s_rec.queued > 0) {
         fill = s_rec.queue_pos < limit ? s_rec.queue_pos : limit;
-    } else if (!pad && limit > NT_RECORDER_AUDIO_SLACK) {
-        fill = limit - NT_RECORDER_AUDIO_SLACK;
+    } else if (!pad) {
+        fill = limit > NT_RECORDER_AUDIO_SLACK ? limit - NT_RECORDER_AUDIO_SLACK : 0U;
     }
     if (s_rec.audio_written < fill && !write_silence(fill - s_rec.audio_written)) {
         return false;
@@ -138,7 +138,7 @@ void nt_recorder_frame(double t, double dt) {
     double period = 1.0 / (double)s_rec.fps;
     double margin = 0.5 * (dt < period ? dt : period);
     uint32_t frames = s_rec.frames;
-    while (t + margin >= s_rec.t0 + ((double)(frames + 1U) * period)) {
+    while (frames - s_rec.frames <= 2U * s_rec.fps && t + margin >= s_rec.t0 + ((double)(frames + 1U) * period)) {
         frames++;
     }
     /* Catching up more than two seconds (render off while time ran) would flood the encoder. */
