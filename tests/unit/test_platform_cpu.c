@@ -6,14 +6,15 @@ void setUp(void) { /* no fixture: the probe is a pure read */ }
 
 void tearDown(void) { /* no teardown */ }
 
-/* Spin until user time moves: Windows counters tick every ~15.6 ms, so a fixed loop can read no change.
+/* Spin until user time grows: Windows counters tick every ~15.6 ms, so a fixed loop can read no change,
+ * and older Linux kernels may briefly shift user time into system.
  * The deadline only catches a dead probe; a loaded CI runner may get little CPU per wall second. */
 void test_cpu_usage_grows_under_busy_loop(void) {
     nt_platform_cpu_t a = nt_platform_cpu_usage();
     nt_platform_cpu_t b = a;
     uint64_t deadline = nt_time_nanos() + 10000000000ULL;
     volatile uint64_t sink = 0;
-    while (b.user_ns == a.user_ns && nt_time_nanos() < deadline) {
+    while (b.user_ns <= a.user_ns && nt_time_nanos() < deadline) {
         for (uint32_t i = 0; i < 1000000U; i++) {
             sink += i;
         }
