@@ -7,7 +7,7 @@ precision highp int;
 layout(location = NT_LOC_POSITION) in vec3 a_position;
 layout(location = NT_LOC_NORMAL) in vec3 a_normal;
 layout(location = NT_LOC_TANGENT) in vec4 a_tangent;
-layout(location = 14) in vec4 a_param; /* a game layout's per-instance value */
+layout(location = 14) in vec4 a_param; /* a game layout's per-instance value; only probe mode 4 outputs it, always drawn with that layout */
 
 out vec3 v_position_probe;
 out vec3 v_normal_probe;

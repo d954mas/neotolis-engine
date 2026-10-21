@@ -772,12 +772,13 @@ static void test_game_layout_values_reach_the_shader_per_instance(void) {
     const nt_deformation_binding_t binding = {.texture = s_palette, .x0 = 0, .y0 = 0, .x1 = 3, .y1 = 1, .alpha = 0.25F};
     nt_mesh_t mesh = make_mesh(k_bar);
     nt_material_t material = make_skinned_material(4.0F);
-    nt_entity_t top = make_entity(mesh, material, &binding);
-    nt_entity_t bottom = make_entity(mesh, material, &binding);
+    nt_material_t coverage = make_skinned_material(3.0F); /* the masks: instance colour, no game value */
+    nt_entity_t top = make_entity(mesh, coverage, &binding);
+    nt_entity_t bottom = make_entity(mesh, coverage, &binding);
     nt_transform_comp_set_position(top, 0.0F, 0.45F, 0.0F);
     nt_transform_comp_set_position(bottom, 0.0F, -0.45F, 0.0F);
     nt_transform_comp_update();
-    const uint32_t key = nt_mesh_renderer_batch_key(material, mesh);
+    const uint32_t key = nt_mesh_renderer_batch_key(coverage, mesh);
     const nt_render_item_t items[2] = {{.entity = top.id, .batch_key = key}, {.entity = bottom.id, .batch_key = key}};
     render_list(&items[0], 1, true, s_expected);
     render_list(&items[1], 1, true, s_second_mask);

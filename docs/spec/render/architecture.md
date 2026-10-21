@@ -243,8 +243,8 @@ in one shared stream a count change shifts every later run of the frame. An
 empty layout with no buffers is the attribute-less `gl_VertexID` path; every
 draw asserts a bound vertex input.
 
-An instanced bind that changes a vertex input's layout asserts that the
-instance locations do not overlap its vertex ones. An instanced bind whose buffer differs from the
+An instanced bind that changes a vertex input's layout (the first instanced
+bind included) asserts that the instance locations do not overlap its vertex ones. An instanced bind whose buffer differs from the
 last instance buffer bound in the pass asserts the buffer's type and liveness;
 a bind equal to the bound tuple returns before any check. A vertex input once
 bound with
@@ -633,8 +633,9 @@ the same way. The entry points:
   count)` and, in the skinned target, `nt_mesh_renderer_draw_skinned(mesh,
   material, deformation, layout, buffer, offset, count)`, record one instanced
   draw of `count` instances of `layout` at byte `offset` of `buffer`. The
-  caller owns the layout: the engine head (`nt_mesh_instance_layout`,
-  `nt_skinned_mesh_instance_layout`, which `init` registers), the head plus the
+  caller owns the layout: the engine head (registering
+  `nt_mesh_instance_layout` or `nt_skinned_mesh_instance_layout` returns the
+  handle `init` registered), the head plus the
   game's per-instance values, or an instance of its own that its shader reads.
   This is how per-entity shader values (hit flash, dissolve, growth, an HDR
   tint) reach one draw without splitting it:
@@ -663,7 +664,8 @@ the same way. The entry points:
   count)`, split the items into runs of adjacent equal batch keys (the skinned
   list also splits on the deformation texture), allocate and pack each run's
   instances in `stream` from the transform, drawable (and skin) components, and
-  record it as the core does (the skinned list: the run's deformation texture
+  record it as the core does with the engine head layout (the skinned list:
+  the run's deformation texture
   as its `u_skin_matrices` draw texture);
 
 The core's instances are filled before `nt_gfx_end_frame` (see Frame
