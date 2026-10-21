@@ -38,7 +38,7 @@ double nt_gfx_gl_ctx_query_result(uint32_t query);
 
 #endif
 
-/* Shader and texture limits; the shared GL backend reads them for both contexts. */
+/* GL limits; the shared backend reads them for both contexts. */
 void nt_gfx_gl_read_limits(nt_gfx_gpu_caps_t *caps);
 
 #if defined(NT_PLATFORM_WEB) && NT_LOG_MIN_LEVEL <= 2

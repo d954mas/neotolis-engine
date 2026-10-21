@@ -1047,7 +1047,7 @@ directly (`getExtension`, the `glGetQueryObjectui64v` timer-result bridge and
 `glGetString` identity queries through `getParameter`) are
 counted and recorded through `NT_GL_ISSUED` at their C call site, in a separate
 statement just before the JS call. The one exception is the translated-source
-lookup of a failed link, which runs only before that link's assertion traps:
+lookup of a failed link, which runs only before that link's assertion fails:
 nothing observes the frame. The
 JS that Emscripten's GL layer runs behind a C call (lazy uniform location
 lookup, state shadowing) is a documented boundary: counters and capture see the

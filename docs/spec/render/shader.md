@@ -143,9 +143,10 @@ Just before that line, a link failure logs
 compiled, `0` that it did not, `-1` that the status is unavailable because the
 owner destroyed the stage and the web backend no longer names it (native GL
 keeps an attached stage readable). An empty driver log with `1 1` therefore
-points at linking, a `0` at that stage's compilation. These queries exist only
-with ERROR logging compiled in and never run for a successful link or an
-already-confirmed context loss.
+points at linking, a `0` at that stage's compilation. A context lost during
+these queries can also read as `-1` or `0`; that record still ends in the
+assertion. These queries exist only with ERROR logging compiled in and never run
+for a successful link or an already-confirmed context loss.
 
 On the web, the browser's translation of a stage is what the driver actually
 compiled, and the browser may adapt it to the GPU. A link failure therefore logs

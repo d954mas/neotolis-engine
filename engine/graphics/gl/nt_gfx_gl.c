@@ -97,7 +97,7 @@ typedef struct {
 /* Program reflection lives here, not on the pipelines that borrow the program. */
 typedef struct {
     GLuint program;
-    GLuint vs; /* attached stages, kept so a failed link can read their compile status */
+    GLuint vs; /* attached stages, kept so a failed link can query them */
     GLuint fs;
     /* Sampler units are program state: assigned in reflection order at link,
      * written once, never rewritten by a material. */
@@ -1353,7 +1353,7 @@ static void nt_gfx_gl_log_link_failure(const nt_gfx_gl_program_t *rec) {
     const GLint vs_compile = stage_compile_status(rec->vs);
     const GLint fs_compile = stage_compile_status(rec->fs);
 #ifdef NT_PLATFORM_WEB
-    /* Before the driver logs, which a journal that keeps its tail should keep first. */
+    /* Before the driver logs, so a journal that keeps its tail drops this text first. */
     if (vs_compile >= 0) {
         log_translated_source(rec->vs, "vertex");
     }
