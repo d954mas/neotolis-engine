@@ -285,7 +285,7 @@ static void mesh_probe_draw(void) {
     nt_gfx_bind_pipeline(s_mesh_pipeline);
     const float color[4] = {0.25F, 0.5F, 0.75F, 1.0F};
     nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, color, sizeof(color));
-    /* The same vertex input switches layouts every frame (WebGL2 enable/detach rules). */
+    /* The same vertex input switches layouts every frame: re-points and detaches through WebGL2. */
     const float away[6] = {5.0F, 5.0F, 0.0F, 0.0F, 0.0F, 0.0F};
     uint32_t away_offset = 0;
     memcpy(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, sizeof(away), 4, &away_offset), away, sizeof(away));

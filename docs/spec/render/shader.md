@@ -213,16 +213,17 @@ safe. It holds only `#define` constants, never attribute declarations:
 
 A shader that reads a stream at an explicitly assigned location writes that
 number, or its own `#define`, matching the stream layout the mesh was built
-with.
+with. Shaders that do not include it are unaffected; the engine mesh shaders
+(`common/instance.glsl`, `common/skin.glsl` and their users) include it.
 
 A game instance layout places its own attributes at any location that neither
 the drawn meshes' streams nor the layout's other attributes use: above the head
 (12-15 for the plain head, 14-15 for the skinned head) or a 0-7 slot those
-meshes lack. A collision asserts at the instanced bind. The budget is 16
+meshes lack. A location used twice in the layout asserts at registration; one
+shared with a mesh stream asserts at the instanced bind. The budget is 16
 locations for mesh streams and instance attributes together. Every attribute is
 bound with `glVertexAttribPointer`, so a shader declares it as `float` or
-`vecN`, never `ivec`/`uvec`. Shaders that do not include it are unaffected; the engine mesh shaders
-(`common/instance.glsl`, `common/skin.glsl` and their users) include it.
+`vecN`, never `ivec`/`uvec`.
 
 ## Mesh streams and shader inputs that do not match
 

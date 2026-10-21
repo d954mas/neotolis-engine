@@ -27,7 +27,7 @@ set as packed RGBA8 ([color](architecture.md#color)): build it with
 1/510), whatever its material's blend. API lives in
 `engine/drawable_comp/nt_drawable_comp.h`.
 
-Per-entity shader params do not come from a component: the game packs them into its own instance layout and draws with the mesh core ([render architecture, Mesh draws](architecture.md#mesh-draws)). An ECS owner for them waits for a consumer.
+Per-entity shader params do not come from a component: the game packs them into its own instance layout and draws with the mesh core ([render architecture, Mesh draws](architecture.md#mesh-draws)).
 
 ## Mesh component
 

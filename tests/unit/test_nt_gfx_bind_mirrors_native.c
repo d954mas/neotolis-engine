@@ -741,10 +741,10 @@ static void test_instance_layout_switch_keeps_buffer_lifetime(void) {
     layout_frame(pip, vi, switch_layout(), second);
     layout_frame(pip, idle, pair_layout(), (nt_buffer_t){0}); /* vi's VAO is no longer bound */
     nt_gfx_destroy_buffer(first);
-    TEST_ASSERT_EQUAL_INT(1, attrib_state(vao, 2).enabled);
-    TEST_ASSERT_EQUAL_INT(1, attrib_state(vao, 3).enabled);
+    assert_attrib(attrib_state(vao, 2), GL_UNSIGNED_BYTE, 4, GL_TRUE, 64, 4);
+    assert_attrib(attrib_state(vao, 11), GL_FLOAT, 1, GL_FALSE, 64, 60);
     nt_gfx_destroy_buffer(second);
-    for (GLuint location = 1; location <= 3; location++) {
+    for (GLuint location = 1; location <= 11; location++) {
         assert_attrib_dropped(attrib_state(vao, location));
     }
     begin_black_pass();

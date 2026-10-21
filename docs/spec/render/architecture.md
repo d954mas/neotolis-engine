@@ -236,7 +236,7 @@ nothing, a new offset or buffer re-points the layout's attributes, and a new
 layout also disables and detaches the locations only the old layout used and
 enables (divisor 1) the ones only the new layout uses. A vertex input bound with
 one tuple every frame re-points nothing; one bound with two in a frame
-re-points between them every frame, so one layout per (vertex input, stream) is
+re-points between them every frame, so one layout per (mesh, stream) is
 the cheap case, not a rule. For frame data, a pass whose instances live in their
 own stream keeps every run's offset, and so its pointers, while its counts stay;
 in one shared stream a count change shifts every later run of the frame. An
@@ -642,7 +642,7 @@ the same way. The entry points:
   nt_vertex_layout_t desc = nt_skinned_mesh_instance_layout;
   desc.attrs[desc.attr_count++] = (nt_vertex_attr_t){.location = 14, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 64};
   desc.stride = 80; /* nt_skinned_mesh_instance_t + one vec4 */
-  fighter_layout = nt_gfx_make_instance_layout(&desc); /* once, after nt_mesh_renderer_init */
+  fighter_layout = nt_gfx_make_instance_layout(&desc); /* once after every nt_gfx_init; keep the handle */
   nt_mesh_renderer_draw_skinned(mesh, material, deformation, fighter_layout, buffer, offset, count);
   ```
   Equal descriptors share one registered handle. The skinned core draws `deformation` as its
