@@ -1,8 +1,9 @@
-/* Native process-RSS probe behind nt_platform_memory_usage().
+/* Native process probes behind nt_platform.h: resident memory and CPU time.
  * One branch per OS; all OS calls live here so no module touches the syscall. */
 #include "core/nt_assert.h"
 #include "core/nt_platform.h"
 
+// #region memory
 #if defined(NT_PLATFORM_WIN)
 #include <windows.h>
 /* psapi.h after windows.h: it depends on windows.h types. */
@@ -74,3 +75,45 @@ nt_platform_mem_t nt_platform_memory_usage(void) {
     return mem;
 }
 #endif
+// #endregion
+
+// #region cpu
+#if defined(NT_PLATFORM_WIN)
+/* windows.h comes from the memory region above. */
+
+static uint64_t filetime_us(FILETIME ft) { return (((uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime) / 10U; }
+
+nt_platform_cpu_t nt_platform_cpu_usage(void) {
+    FILETIME creation;
+    FILETIME exit_time;
+    FILETIME kernel;
+    FILETIME user;
+    BOOL ok = GetProcessTimes(GetCurrentProcess(), &creation, &exit_time, &kernel, &user);
+    NT_ASSERT(ok && "GetProcessTimes failed");
+    (void)ok;
+    nt_platform_cpu_t cpu = {filetime_us(user), filetime_us(kernel)};
+    return cpu;
+}
+
+#else
+#include <sys/resource.h>
+
+static uint64_t timeval_us(struct timeval tv) { return ((uint64_t)tv.tv_sec * 1000000U) + (uint64_t)tv.tv_usec; }
+
+nt_platform_cpu_t nt_platform_cpu_usage(void) {
+    struct rusage ru;
+    int rc = getrusage(RUSAGE_SELF, &ru);
+    NT_ASSERT(rc == 0 && "getrusage(RUSAGE_SELF) failed");
+    (void)rc;
+    nt_platform_cpu_t cpu = {timeval_us(ru.ru_utime), timeval_us(ru.ru_stime)};
+    return cpu;
+}
+#endif
+
+float nt_platform_cpu_percent(nt_platform_cpu_t prev, nt_platform_cpu_t cur, uint64_t wall_us) {
+    NT_ASSERT(wall_us > 0 && "zero wall interval");
+    NT_ASSERT(cur.user_us >= prev.user_us && cur.system_us >= prev.system_us && "cpu readings out of order");
+    uint64_t cpu_us = (cur.user_us - prev.user_us) + (cur.system_us - prev.system_us);
+    return (float)(100.0 * (double)cpu_us / (double)wall_us);
+}
+// #endregion

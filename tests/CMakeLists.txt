@@ -227,6 +227,16 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_platform_mem COMMAND test_platform_mem)
 
+    # --- Platform CPU time probe (native only; nt_time bounds the busy loop) ---
+    add_executable(test_platform_cpu unit/test_platform_cpu.c)
+    target_link_libraries(test_platform_cpu PRIVATE nt_platform nt_time nt_log_stub unity)
+    nt_set_warning_flags(test_platform_cpu)
+    nt_set_sanitizer_flags(test_platform_cpu)
+    set_target_properties(test_platform_cpu PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_platform_cpu COMMAND test_platform_cpu)
+
     # --- Perf collector (nt_metrics, L1 without devapi) ---
     # nt_metrics is the perf source of truth now: the host pushes nt_metrics_frame_t + sets user
     # counters, and the test drives those same public paths — so it links nt_metrics + nt_hash only,
