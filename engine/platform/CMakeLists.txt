@@ -1,4 +1,4 @@
-# nt_platform -- OS/browser wrappers (process memory probe today).
+# nt_platform -- OS/browser wrappers (process memory and CPU probes).
 # Web vs native impl selected at configure time, mirroring engine/window.
 
 if(EMSCRIPTEN)
@@ -7,7 +7,7 @@ if(EMSCRIPTEN)
     )
 else()
     nt_add_module(nt_platform LOG_DOMAIN "platform"
-        native/nt_platform_mem_native.c
+        native/nt_platform_native.c
     )
 endif()
 

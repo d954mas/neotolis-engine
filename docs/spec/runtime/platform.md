@@ -67,6 +67,32 @@ Platform does **not** handle:
 - material logic
 - resource manifests
 
+## Process probes
+
+`core/nt_platform.h` declares process probes; `engine/platform` implements them
+(`native/nt_platform_native.c`, `web/nt_platform_mem_web.c`). Modules and games
+read process figures only through these calls, never through the OS directly.
+
+- `nt_platform_memory_usage()` returns `nt_platform_mem_t`. Native: `used` is the
+  resident set and `reserved` mirrors it. Web: `used` is allocator in-use bytes
+  (not RSS) and `reserved` is the heap size.
+- `nt_platform_cpu_usage()` returns `nt_platform_cpu_t`: user and system CPU time
+  in nanoseconds, cumulative since process start and summed over all threads.
+  Web builds do not declare it, because the browser exposes no process CPU time.
+  Guard callers with `!defined(NT_PLATFORM_WEB)`; `NT_PLATFORM_NATIVE` excludes
+  Windows.
+- `nt_platform_cpu_percent(prev, cur, wall_ns)` turns two readings into load over
+  the interval with a one-core base: 100 is one core fully busy, and several busy
+  threads read above 100. It keeps no state; the caller stores the previous
+  reading and picks the window, measured with `nt_time_nanos()`. Windows counters
+  tick every ~15.6 ms, so use a window of at least ~0.5 s. Only the user+system
+  total must grow: older Linux kernels can move time between the two fields. A
+  zero `wall_ns` or a total going backwards asserts.
+
+A failing OS call inside a probe asserts. Native builds support Windows, Linux
+and macOS; any other OS fails to compile. Machine-wide counters, core count and
+per-thread CPU time are out of scope.
+
 ## Pre-swap hooks
 
 `nt_window_add_pre_swap_hook(fn)` registers a process-lifetime callback and returns
