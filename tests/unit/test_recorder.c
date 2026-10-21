@@ -25,6 +25,8 @@ static struct {
     double t0, period;
     uint64_t audio_frames;
     uint64_t audio_nonzero;
+    int64_t first_nonzero; /* track position of the first non-zero sample, -1 when none */
+    uint64_t audio_ahead;  /* most audio past the written video after any frame call */
     bool saw_pre_start;
     uint32_t closes;
     uint32_t closed_frames;
@@ -64,6 +66,9 @@ bool nt_recorder_platform_audio(const float *stereo, uint32_t frames) {
     }
     for (uint32_t i = 0; i < frames * 2; i++) {
         if (stereo[i] != 0.0F) {
+            if (s_be.first_nonzero < 0) {
+                s_be.first_nonzero = (int64_t)(s_be.audio_frames + (i / 2U));
+            }
             s_be.audio_nonzero++;
         }
         if (stereo[i] == PRE_START_SAMPLE) {
@@ -81,6 +86,7 @@ void nt_recorder_platform_close(uint32_t frames) {
 
 void setUp(void) {
     memset(&s_be, 0, sizeof(s_be));
+    s_be.first_nonzero = -1;
     g_nt_window.fb_width = 641;
     g_nt_window.fb_height = 361;
 }
@@ -95,6 +101,10 @@ static void start_at(uint32_t fps, double t) {
 static void frame_at(double t, double dt) {
     s_be.now = t;
     nt_recorder_frame(t, dt);
+    double ahead = (double)s_be.audio_frames - ((double)s_be.videos * s_be.period * 48000.0);
+    if (ahead > (double)s_be.audio_ahead) {
+        s_be.audio_ahead = (uint64_t)ahead;
+    }
 }
 
 /* Advances like nt_app: a float dt accumulated into a double time. */
@@ -195,8 +205,11 @@ static void test_video_failure_ends_the_recording(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_recorder_stop());
 }
 
+/* A lag within one mixer block is not padded until stop, where the failing write ends the recording. */
 static void test_audio_failure_at_stop_returns_zero(void) {
+    static float s_part[1000 * 2];
     start_at(30, 0.0);
+    nt_recorder_push_audio(s_part, 1000);
     frame_at(1.0 / 30.0, 1.0 / 30.0);
     s_be.fail_audio = true;
     TEST_ASSERT_EQUAL_UINT32(0, nt_recorder_stop());
@@ -285,6 +298,46 @@ static void test_surplus_beyond_a_frame_is_dropped(void) {
     TEST_ASSERT_EQUAL_UINT64(10ULL * 1600ULL * 2ULL, s_be.audio_nonzero);
 }
 
+/* Audio never runs past the video: at fps 30 three 1/60 steps reach t = 0.05 but one frame ends at
+   1/30, so only 1600 samples may be written; at fps 1, 1.9 s of play is one second of video. */
+static void test_audio_stops_at_the_video_end(void) {
+    static float s_step[800 * 2];
+    fill(s_step, 800, 0.5F);
+    start_at(30, 0.0);
+    for (int i = 1; i <= 3; i++) {
+        nt_recorder_push_audio(s_step, 800);
+        frame_at(i / 60.0, 1.0 / 60.0);
+    }
+    TEST_ASSERT_EQUAL_UINT64(1600, s_be.audio_frames);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_recorder_stop());
+    TEST_ASSERT_EQUAL_UINT64(1600, s_be.audio_frames);
+
+    memset(&s_be, 0, sizeof(s_be));
+    s_be.first_nonzero = -1;
+    start_at(1, 0.0);
+    double t = 0.0;
+    for (int i = 0; i < 114; i++) {
+        t += 1.0 / 60.0;
+        nt_recorder_push_audio(s_step, 800);
+        frame_at(t, 1.0 / 60.0);
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, nt_recorder_stop());
+    TEST_ASSERT_EQUAL_UINT64(48000, s_be.audio_frames);
+    TEST_ASSERT_EQUAL_UINT64(0, s_be.audio_ahead);
+}
+
+/* Frame calls skipped (render off, time running): the block pushed next is for its own advance, so
+   the gap before it becomes silence and the block keeps its place on the track. */
+static void test_gap_before_a_block_becomes_silence(void) {
+    static float s_step[1600 * 2];
+    fill(s_step, 1600, 0.5F);
+    start_at(30, 0.0);
+    nt_recorder_push_audio(s_step, 1600);
+    frame_at(3.0 / 30.0, 3.0 / 30.0);
+    TEST_ASSERT_EQUAL_INT64(3200, s_be.first_nonzero);
+    TEST_ASSERT_EQUAL_UINT64(4800, s_be.audio_frames);
+}
+
 static void test_audio_failure_ends_the_recording(void) {
     static float s_step[1600 * 2];
     start_at(30, 0.0);
@@ -313,6 +366,8 @@ int main(void) {
     RUN_TEST(test_lockstep_blocks_are_kept_whole);
     RUN_TEST(test_block_mixer_is_not_padded_mid_track);
     RUN_TEST(test_surplus_beyond_a_frame_is_dropped);
+    RUN_TEST(test_audio_stops_at_the_video_end);
+    RUN_TEST(test_gap_before_a_block_becomes_silence);
     RUN_TEST(test_audio_failure_ends_the_recording);
     return UNITY_END();
 }

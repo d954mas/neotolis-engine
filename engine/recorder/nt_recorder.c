@@ -8,8 +8,10 @@
 #include "recorder/nt_recorder_internal.h"
 #include "window/nt_window.h"
 
-/* Audio pushed but not yet due; one second covers any clamped frame. */
-#define NT_RECORDER_AUDIO_CAP NT_RECORDER_AUDIO_RATE
+/* Pushed audio not yet written: one period at 1 fps plus a clamped frame. */
+#define NT_RECORDER_AUDIO_CAP (2U * NT_RECORDER_AUDIO_RATE)
+/* Mixers push in blocks that rarely match a frame; drift up to one block carries over. */
+#define NT_RECORDER_AUDIO_SLACK 1024
 
 static struct {
     bool active;
@@ -26,14 +28,21 @@ static struct {
 } s_rec;
 
 static void finish(void) {
-    nt_recorder_platform_close(s_rec.frames);
+    s_rec.active = false; /* first: the backend may hand control to the host before it returns */
     NT_LOG_INFO("%u frames, audio padded %llu trimmed %llu samples", s_rec.frames, (unsigned long long)s_rec.audio_padded, (unsigned long long)s_rec.audio_trimmed);
-    s_rec.active = false;
+    nt_recorder_platform_close(s_rec.frames);
 }
 
 static void fail(const char *why) {
     NT_LOG_WARN("%s, recording ended", why);
     finish();
+}
+
+static uint64_t samples_at(double seconds) { return seconds > 0.0 ? (uint64_t)llround(seconds * NT_RECORDER_AUDIO_RATE) : 0U; }
+
+static void consume(uint32_t n) {
+    s_rec.audio_queued -= n;
+    memmove(s_rec.audio, s_rec.audio + ((size_t)n * 2U), (size_t)s_rec.audio_queued * 2U * sizeof(float));
 }
 
 static bool write_silence(uint64_t frames) {
@@ -50,23 +59,31 @@ static bool write_silence(uint64_t frames) {
     return true;
 }
 
-/* Writes queued audio up to `target` samples in total. Mixers push in blocks that rarely match a frame,
-   so a lag or surplus within `slack` carries over; beyond it the track is padded or the oldest surplus
-   dropped, which keeps the track on the caller's time. */
-static bool write_audio_to(uint64_t target, uint64_t slack) {
-    uint64_t due = target > s_rec.audio_written ? target - s_rec.audio_written : 0U;
-    uint32_t n = due < s_rec.audio_queued ? (uint32_t)due : s_rec.audio_queued;
-    if (n > 0 && !nt_recorder_platform_audio(s_rec.audio, n)) {
-        return false;
+/* The queue holds the samples pushed for the advance that ends at track position `end`. Places it on the
+   track first (a gap before it becomes silence, an overlap with written audio or with time before t0 is
+   dropped), then writes up to `limit`, the end of the recorded video; the rest waits for later frames. */
+static bool write_audio(uint64_t end, uint64_t limit) {
+    int64_t start = (int64_t)end - (int64_t)s_rec.audio_queued;
+    int64_t gap = start - (int64_t)s_rec.audio_written;
+    if (start < 0 || gap < -NT_RECORDER_AUDIO_SLACK) {
+        int64_t over = -gap; /* gap <= start: covers time before t0 as well */
+        uint32_t drop = over < (int64_t)s_rec.audio_queued ? (uint32_t)over : s_rec.audio_queued;
+        s_rec.audio_trimmed += drop;
+        consume(drop);
+    } else if (gap > NT_RECORDER_AUDIO_SLACK && s_rec.audio_written < limit) {
+        uint64_t room = limit - s_rec.audio_written;
+        if (!write_silence((uint64_t)gap < room ? (uint64_t)gap : room)) {
+            return false;
+        }
     }
-    s_rec.audio_written += n;
-    s_rec.audio_queued -= n;
-    uint32_t drop = s_rec.audio_queued > slack ? s_rec.audio_queued - (uint32_t)slack : 0U;
-    s_rec.audio_trimmed += drop;
-    s_rec.audio_queued -= drop;
-    memmove(s_rec.audio, s_rec.audio + ((size_t)(n + drop) * 2U), (size_t)s_rec.audio_queued * 2U * sizeof(float));
-    if (s_rec.audio_written + slack < target) {
-        return write_silence(target - s_rec.audio_written);
+    uint64_t room = limit > s_rec.audio_written ? limit - s_rec.audio_written : 0U;
+    uint32_t n = room < s_rec.audio_queued ? (uint32_t)room : s_rec.audio_queued;
+    if (n > 0) {
+        if (!nt_recorder_platform_audio(s_rec.audio, n)) {
+            return false;
+        }
+        s_rec.audio_written += n;
+        consume(n);
     }
     return true;
 }
@@ -107,28 +124,25 @@ void nt_recorder_frame(double t, double dt) {
         fail("framebuffer resized");
         return;
     }
-    double audio_t = t - s_rec.t0;
-    uint64_t target = audio_t > 0.0 ? (uint64_t)llround(audio_t * NT_RECORDER_AUDIO_RATE) : 0U;
-    if (target == 0) {
-        /* Pushed for an advance that ended at or before the start time. */
-        s_rec.audio_trimmed += s_rec.audio_queued;
-        s_rec.audio_queued = 0;
-    }
-    if (!write_audio_to(target, NT_RECORDER_AUDIO_RATE / s_rec.fps)) {
-        fail("audio encoder failed");
-        return;
-    }
     /* Nearest sample: a deadline belongs to this frame once it is closer to t than to the neighbouring
        frames. The half-frame margin also absorbs float step_dt that rounds below 1 / fps; capping it at
        half a period keeps a long hitch from claiming deadlines the next frame is nearer to. */
     double period = 1.0 / (double)s_rec.fps;
     double margin = 0.5 * (dt < period ? dt : period);
-    while (t + margin >= s_rec.t0 + ((double)(s_rec.frames + 1U) * period)) {
+    uint32_t frames = s_rec.frames;
+    while (t + margin >= s_rec.t0 + ((double)(frames + 1U) * period)) {
+        frames++;
+    }
+    /* Audio first, and only up to the end of the video being written. */
+    if (!write_audio(samples_at(t - s_rec.t0), samples_at((double)frames * period))) {
+        fail("audio encoder failed");
+        return;
+    }
+    for (; s_rec.frames < frames; s_rec.frames++) {
         if (!nt_recorder_platform_video(s_rec.frames)) {
             fail("video encoder failed");
             return;
         }
-        s_rec.frames++;
     }
 }
 
@@ -151,8 +165,11 @@ uint32_t nt_recorder_stop(void) {
     if (s_rec.frames == 0) {
         NT_LOG_WARN("stopped before the first frame, nothing written");
     }
-    uint64_t target = ((uint64_t)s_rec.frames * NT_RECORDER_AUDIO_RATE + (s_rec.fps / 2U)) / s_rec.fps;
-    if (!write_audio_to(target, 0)) {
+    /* Samples pushed after the last frame call are past the recorded time. */
+    s_rec.audio_trimmed += s_rec.audio_queued;
+    consume(s_rec.audio_queued);
+    uint64_t end = samples_at((double)s_rec.frames / (double)s_rec.fps);
+    if (s_rec.audio_written < end && !write_silence(end - s_rec.audio_written)) {
         fail("audio encoder failed");
         return 0;
     }

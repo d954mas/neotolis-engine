@@ -10,6 +10,7 @@ declare global {
   interface Window {
     __devapi?: { ready: boolean; submit(line: string): string; poll(): string };
     __rec?: { name: string; frames: number; error: string | null; b64?: string };
+    NtRecorder?: { ready(): boolean };
   }
 }
 
@@ -41,12 +42,19 @@ test('record.* in lockstep writes a synced MP4', async ({ page }, testInfo) => {
     }, { method, params });
 
   expect((await call('time.set_mode', { mode: 'manual' })).ok).toBe(true);
-  const f0 = (await call('frame.current')).result.frame;
+  await page.waitForFunction(() => window.NtRecorder?.ready() === true, null, { timeout: 30_000 });
+  const step = async (count: number) => {
+    const from = (await call('frame.current')).result.frame;
+    if (count > 0) await call('time.step', { count });
+    await expect.poll(async () => (await call('frame.current')).result.frame, { timeout: 60_000 }).toBeGreaterThanOrEqual(from + count);
+  };
+  // Start half a second away from a flash, so no flash or beep is cut at either end of the clip.
+  const time = (await call('frame.current')).result.time;
+  await step(Math.round(((Math.floor(time) + 1.5 - time) % 1) * 60));
   expect((await call('record.start', { name: 'probe.mp4', fps: 30 })).ok).toBe(true);
   expect((await call('record.start', { name: 'probe.mp4', fps: 30 })).error.code).toBe('busy');
   // 360 steps of the default 1/60 at 30 fps: 180 frames, a flash and a beep each game second.
-  await call('time.step', { count: 360 });
-  await expect.poll(async () => (await call('frame.current')).result.frame, { timeout: 60_000 }).toBeGreaterThanOrEqual(f0 + 360);
+  await step(360);
   expect((await call('record.stop')).result.frames).toBe(180);
   expect((await call('record.stop')).result.frames).toBe(0);
 

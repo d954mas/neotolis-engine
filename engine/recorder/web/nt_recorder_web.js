@@ -3,14 +3,18 @@
 // outside Closure, so the WebCodecs and Mediabunny property names stay intact in wasm-release.
 var NtRecorder = (function () {
     var cur = null;
-    // Probed once at load: Firefox and Linux Chrome lack AAC, a software-only Chrome lacks H.264 High.
+    // Probed once at load (Firefox and Linux Chrome lack AAC, a software-only Chrome lacks H.264 High);
+    // open refuses until the probe settles, so a start never picks a codec the browser rejects.
     var profile = '6400';
     var acodec = 'mp4a.40.2';
+    var probed = false;
     if (typeof VideoEncoder !== 'undefined' && typeof AudioEncoder !== 'undefined') {
-        VideoEncoder.isConfigSupported({ codec: 'avc1.640028', width: 1920, height: 1080, framerate: 30 })
-            .then(function (s) { if (!s.supported) { profile = '42E0'; } }, function () {});
-        AudioEncoder.isConfigSupported({ codec: acodec, sampleRate: 48000, numberOfChannels: 2 })
-            .then(function (s) { if (!s.supported) { acodec = 'opus'; } }, function () {});
+        Promise.all([
+            VideoEncoder.isConfigSupported({ codec: 'avc1.640028', width: 1920, height: 1080, framerate: 30 })
+                .then(function (s) { if (!s.supported) { profile = '42E0'; } }, function () {}),
+            AudioEncoder.isConfigSupported({ codec: acodec, sampleRate: 48000, numberOfChannels: 2 })
+                .then(function (s) { if (!s.supported) { acodec = 'opus'; } }, function () {}),
+        ]).then(function () { probed = true; });
     }
     // H.264 levels: [level_idc hex, max frame macroblocks, max macroblocks per second].
     var LEVELS = [['1F', 3600, 108000], ['28', 8192, 245760], ['2A', 8704, 522240], ['33', 36864, 983040],
@@ -23,7 +27,7 @@ var NtRecorder = (function () {
     }
 
     function open(name, canvas, w, h, fps) {
-        if (typeof VideoEncoder === 'undefined' || typeof AudioEncoder === 'undefined' || typeof NtMediabunny === 'undefined') {
+        if (!probed || typeof NtMediabunny === 'undefined') {
             return false;
         }
         var mbs = Math.ceil(w / 16) * Math.ceil(h / 16);
@@ -97,7 +101,8 @@ var NtRecorder = (function () {
         return true;
     }
 
-    // Hands the recording to its own flush chain, so a new open never waits for it.
+    // Hands the recording to its own flush chain, so a new open never waits for it. The event always
+    // fires from a later task or microtask, never inside the C call.
     function close(frames) {
         var r = cur;
         cur = null;
@@ -116,7 +121,7 @@ var NtRecorder = (function () {
             }
         };
         if (!frames || r.error) {
-            done(null);
+            Promise.resolve().then(function () { done(null); });
             return;
         }
         r.venc.flush()
@@ -130,5 +135,5 @@ var NtRecorder = (function () {
             }, function (e) { if (!r.error) { r.error = String(e); } done(null); });
     }
 
-    return { 'open': open, 'video': video, 'audio': audio, 'close': close };
+    return { 'open': open, 'video': video, 'audio': audio, 'close': close, 'ready': function () { return probed; } };
 })();

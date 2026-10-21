@@ -46,21 +46,23 @@ while time ran) re-encode the same pixels. Frozen time (pause, MANUAL idle) writ
 The owner of the mix (today a game audio module) pushes interleaved stereo float samples at 48 kHz
 from the main thread, before the `frame` call, for that frame's advance. The track starts at `t0`: a
 block mixed for the advance from `t - dt` to `t` plays from file time `t - dt - t0`, so a sound a
-game mixer starts in the step that first shows its cause plays with that frame. Samples pushed at a
-call whose time is at or before `t0` are dropped. Mixers push in blocks that rarely match a frame,
-so a lag or surplus up to one frame carries over; beyond that the track is padded with silence or
-the oldest surplus dropped, which keeps it on the caller's time. At `stop` the track is cut or
-padded to the video length. A track is always written, silent when nothing is pushed. A lockstep
-mixer renders `step_dt · 48000` samples per step without a sound device; a real-time mixer copies
-its device output to the main thread. Pushes beyond one second between two `frame` calls are
-dropped.
+game mixer starts in the step that first shows its cause plays with that frame.
+
+Each `frame` call first picks its video frames, then places the queued samples on the track (they
+end at `t`): a gap before them longer than one mixer block (1024 samples) becomes silence, an overlap
+with audio already written (or with time before `t0`) is dropped, and drift within a block carries
+over. It then writes audio only up to the end of the video written so far, so the track never runs
+ahead of the picture; later samples wait in a 2 s queue (pushes beyond it are dropped). `stop` drops
+what was pushed after the last frame call and pads the track to the video length. A track is always
+written, silent when nothing is pushed. A lockstep mixer renders `step_dt · 48000` samples per step
+without a sound device; a real-time mixer copies its device output to the main thread.
 
 ## Backends
 
 **Web.** `VideoFrame` from the canvas inside the rAF task, before the swap (the context is
 `preserveDrawingBuffer:false`, so the drawing buffer still holds the frame), into `VideoEncoder`
 and `AudioEncoder`. Codecs are probed once when the script loads: H.264 High, or Constrained
-Baseline where the browser has no High encoder, at the lowest of levels 3.1, 4.0, 4.2, 5.1, 5.2,
+Baseline where the browser has no High encoder (`start` returns false until the probe settles), at the lowest of levels 3.1, 4.0, 4.2, 5.1, 5.2,
 6.0, 6.2 that fits size × fps (bitrate `0.1 · w · h · fps`); AAC-LC 192 kbps, or Opus where the
 browser has no AAC encoder (Firefox, Chrome on Linux; editors handle Opus in MP4 poorly). The
 vendored Mediabunny muxer (`deps/mediabunny`) writes the MP4. The JS lives in
@@ -71,7 +73,7 @@ Encoded bytes stay in tab memory (~1 MB/s at 1080p30): a dev-only exception to p
 storage; long web recordings are not a goal. Nothing paces the game to the encoder, so an encoder
 queue above two seconds of frames ends the recording (`encoder backlog`). After `stop`, when the
 encoders flush, the window event `nt-recorder` (cancelable, `detail {name, blob, frames, error}`)
-is dispatched; unless a listener cancels it, the browser downloads `blob` as `name`. A browser
+is dispatched from a later task, never inside the C call; unless a listener cancels it, the browser downloads `blob` as `name`. A browser
 without WebCodecs makes `start` return false. A codec, muxer or backlog failure ends the recording
 at the next `frame` call, or, after the last one, shows only as `error` in the event; the event is
 the authority for whether a file exists.
