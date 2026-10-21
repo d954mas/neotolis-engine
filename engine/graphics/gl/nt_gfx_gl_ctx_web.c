@@ -11,7 +11,7 @@
  * in library_webgl.js, force-linked by this TU's own emscripten_webgl_* C calls -- so it survives today.
  * EM_JS_DEPS makes that implicit dependency explicit + Closure-kept, so moving context creation out of
  * this file can't silently strip GL in release. */
-EM_JS_DEPS(nt_gfx_gl_ctx_web, "$GL,$UTF8ToString,$stringToUTF8,$findCanvasEventTarget,emscripten_webgl_create_context")
+EM_JS_DEPS(nt_gfx_gl_ctx_web, "$GL,$UTF8ToString,$stringToUTF8,$lengthBytesUTF8,$findCanvasEventTarget,emscripten_webgl_create_context")
 
 static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE s_gl_context;
 static bool s_loss_pending; /* set by a lost event until begin_frame takes it */
@@ -101,6 +101,25 @@ static bool get_extension(const char *name) {
     NT_GL_ISSUED(getExtension, name);
     return nt_gfx_js_get_extension(name) != 0;
 }
+
+#if NT_LOG_MIN_LEVEL <= 2
+/* clang-format off */
+EM_JS(int, nt_gfx_js_translated_source, (uint32_t shader, char *out, uint32_t cap), {
+    var text = GL.currentContext.GLctx.getExtension("WEBGL_debug_shaders")["getTranslatedShaderSource"](GL.shaders[shader]);
+    if (!text) return 0;
+    stringToUTF8(text, out, cap);
+    return lengthBytesUTF8(text);
+})
+/* clang-format on */
+
+int nt_gfx_gl_ctx_translated_source(uint32_t shader, char *out, uint32_t cap) {
+    if (!get_extension("WEBGL_debug_shaders")) {
+        return 0;
+    }
+    NT_GL_ISSUED(getTranslatedShaderSource, shader);
+    return nt_gfx_js_translated_source(shader, out, cap);
+}
+#endif
 
 /* clang-format off */
 EM_JS(void, nt_gfx_js_device_string, (unsigned int name, char *out, unsigned int cap), {

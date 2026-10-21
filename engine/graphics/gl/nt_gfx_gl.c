@@ -1318,6 +1318,30 @@ static GLint log_stage_failure(GLuint shader, const char *stage) {
     nt_gfx_gl_log_shader(shader, stage);
     return compiled;
 }
+
+#ifdef NT_PLATFORM_WEB
+/* Shared by the logged stages so the crash journal's tail still holds the summary after them. */
+#define NT_GFX_GL_TRANSLATED_BYTES 4096U
+
+/* The browser's translation is what the driver compiled; it can differ per GPU. */
+static void log_translated_source(GLuint shader, const char *stage, uint32_t cap) {
+    char *text = (char *)malloc(cap);
+    if (!text) {
+        return;
+    }
+    const int len = nt_gfx_gl_ctx_translated_source(shader, text, cap);
+    if (len == 0) {
+        NT_LOG_ERROR("%s translated: unavailable", stage);
+    } else {
+        NT_LOG_ERROR("%s translated:", stage);
+        nt_gfx_gl_log_lines(text);
+        if ((uint32_t)len >= cap) {
+            NT_LOG_ERROR("%s translated: truncated at %u of %d bytes", stage, cap - 1U, len);
+        }
+    }
+    free(text);
+}
+#endif
 #endif
 
 /* Compile errors surface only here: shader creation never reads COMPILE_STATUS. */
@@ -1327,6 +1351,19 @@ static void nt_gfx_gl_log_link_failure(const nt_gfx_gl_program_t *rec) {
     nt_gfx_gl_log_program(rec->program);
     const GLint vs_compile = log_stage_failure(rec->vs, "vertex");
     const GLint fs_compile = log_stage_failure(rec->fs, "fragment");
+#ifdef NT_PLATFORM_WEB
+    /* A compile failure needs only the failed stage's text; a link failure needs both live stages. */
+    const bool compile_failed = vs_compile == 0 || fs_compile == 0;
+    const bool vs_text = compile_failed ? vs_compile == 0 : vs_compile == 1;
+    const bool fs_text = compile_failed ? fs_compile == 0 : fs_compile == 1;
+    const uint32_t cap = NT_GFX_GL_TRANSLATED_BYTES / (vs_text && fs_text ? 2U : 1U);
+    if (vs_text) {
+        log_translated_source(rec->vs, "vertex", cap);
+    }
+    if (fs_text) {
+        log_translated_source(rec->fs, "fragment", cap);
+    }
+#endif
     /* After the driver lines, so a journal that keeps its tail keeps the classification and identity. */
     NT_LOG_ERROR("program link stages: vs_compile=%d fs_compile=%d", vs_compile, fs_compile);
     log_program_failure(rec, "link", "link failed", "gl_error", gl_error);

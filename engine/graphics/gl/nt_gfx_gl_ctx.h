@@ -38,6 +38,11 @@ double nt_gfx_gl_ctx_query_result(uint32_t query);
 
 #endif
 
+#ifdef NT_PLATFORM_WEB
+/* Browser-translated text of a live stage, truncated to cap bytes; returns its full UTF-8 length, 0 when unavailable. */
+int nt_gfx_gl_ctx_translated_source(uint32_t shader, char *out, uint32_t cap);
+#endif
+
 /* Install a KHR_debug message callback that routes GL errors to NT_LOG_ERROR + assert, synchronously
  * so a breakpoint lands on the offending call. Requires NT_GFX_NATIVE_GL_DEBUG;
  * returns false when disabled, on web, or when the driver lacks KHR_debug. */
