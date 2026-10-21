@@ -1,19 +1,28 @@
 // nt_recorder web backend: WebCodecs H.264 + AAC (Opus where the browser has no AAC encoder) from the
 // canvas, muxed to MP4 by Mediabunny. Loaded with --extern-pre-js after deps/mediabunny/nt_mediabunny.js,
 // outside Closure, so the WebCodecs and Mediabunny property names stay intact in wasm-release.
-var NtRecorder = (function () {
+globalThis['NtRecorder'] = (function () {
     var cur = null;
     // Probed once at load (Firefox and Linux Chrome lack AAC, a software-only Chrome lacks H.264 High);
     // open refuses until the probe settles, so a start never picks a codec the browser rejects.
-    var profile = '6400';
-    var acodec = 'mp4a.40.2';
+    var profile = null;
+    var acodec = null;
     var probed = false;
     if (typeof VideoEncoder !== 'undefined' && typeof AudioEncoder !== 'undefined') {
+        var supported = function (enc, cfg) {
+            return enc.isConfigSupported(cfg).then(function (s) { return s.supported; }, function () { return false; });
+        };
+        var vcfg = { width: 1920, height: 1080, framerate: 30 };
+        var acfg = { sampleRate: 48000, numberOfChannels: 2 };
         Promise.all([
-            VideoEncoder.isConfigSupported({ codec: 'avc1.640028', width: 1920, height: 1080, framerate: 30 })
-                .then(function (s) { if (!s.supported) { profile = '42E0'; } }, function () {}),
-            AudioEncoder.isConfigSupported({ codec: acodec, sampleRate: 48000, numberOfChannels: 2 })
-                .then(function (s) { if (!s.supported) { acodec = 'opus'; } }, function () {}),
+            supported(VideoEncoder, Object.assign({ codec: 'avc1.64002A' }, vcfg)).then(function (high) {
+                return high || supported(VideoEncoder, Object.assign({ codec: 'avc1.42E02A' }, vcfg))
+                    .then(function (base) { profile = base ? '42E0' : null; return high; });
+            }).then(function (high) { if (high) { profile = '6400'; } }),
+            supported(AudioEncoder, Object.assign({ codec: 'mp4a.40.2' }, acfg)).then(function (aac) {
+                return aac || supported(AudioEncoder, Object.assign({ codec: 'opus' }, acfg))
+                    .then(function (opus) { acodec = opus ? 'opus' : null; return aac; });
+            }).then(function (aac) { if (aac) { acodec = 'mp4a.40.2'; } }),
         ]).then(function () { probed = true; });
     }
     // H.264 levels: [level_idc hex, max frame macroblocks, max macroblocks per second].
@@ -27,7 +36,8 @@ var NtRecorder = (function () {
     }
 
     function open(name, canvas, w, h, fps) {
-        if (!probed || typeof NtMediabunny === 'undefined') {
+        if (!probed || !profile || !acodec) {
+            if (!probed) { console.warn('nt_recorder: codec probe still running, start again'); }
             return false;
         }
         var mbs = Math.ceil(w / 16) * Math.ceil(h / 16);
@@ -37,7 +47,7 @@ var NtRecorder = (function () {
         }
         var MB = NtMediabunny;
         var r = { name: name, canvas: canvas, w: w, h: h, fps: fps, error: null, samples: 0 };
-        var fail = function (e) { if (!r.error) { r.error = String(e); } };
+        var fail = r.fail = function (e) { if (!r.error) { r.error = String(e); } };
         try {
             r.out = new MB.Output({ format: new MB.Mp4OutputFormat(), target: new MB.BufferTarget() });
             r.vsrc = new MB.EncodedVideoPacketSource('avc');
@@ -69,21 +79,29 @@ var NtRecorder = (function () {
         return true;
     }
 
-    // Called inside the rAF task before the swap: the drawing buffer still holds this frame.
+    // Called inside the rAF task before the swap: the drawing buffer still holds this frame. A throw
+    // (lost context) ends the recording instead of unwinding into wasm.
     function video(index) {
         var r = cur;
-        // Nothing paces the game to the encoder, so a backlog of two seconds ends the recording.
-        if (!r.error && r.venc.encodeQueueSize > r.fps * 2) {
-            r.error = 'encoder backlog';
+        // Nothing paces the game to the encoder: a backlog of two seconds when a frame call begins ends
+        // the recording (checked once per call, so its own catch-up frames do not count).
+        if (!r.error && !r.inCall) {
+            r.inCall = true;
+            Promise.resolve().then(function () { r.inCall = false; });
+            if (r.venc.encodeQueueSize > r.fps * 2) { r.fail('encoder backlog'); }
         }
         if (r.error) {
             return false;
         }
         var us = Math.round(index * 1e6 / r.fps);
-        var f = new VideoFrame(r.canvas, { timestamp: us, duration: Math.round((index + 1) * 1e6 / r.fps) - us,
-                                           visibleRect: { x: 0, y: 0, width: r.w, height: r.h } });
-        r.venc.encode(f, { keyFrame: index % (r.fps * 2) === 0 });
-        f.close();
+        try {
+            var f = new VideoFrame(r.canvas, { timestamp: us, duration: Math.round((index + 1) * 1e6 / r.fps) - us,
+                                               visibleRect: { x: 0, y: 0, width: r.w, height: r.h } });
+            try { r.venc.encode(f, { keyFrame: index % (r.fps * 2) === 0 }); } finally { f.close(); }
+        } catch (e) {
+            r.fail(e);
+            return false;
+        }
         return true;
     }
 
@@ -93,16 +111,20 @@ var NtRecorder = (function () {
         if (r.error) {
             return false;
         }
-        var a = new AudioData({ format: 'f32', sampleRate: 48000, numberOfFrames: frames, numberOfChannels: 2,
-                                timestamp: Math.round(r.samples * 1e6 / 48000), data: stereo });
+        try {
+            var a = new AudioData({ format: 'f32', sampleRate: 48000, numberOfFrames: frames, numberOfChannels: 2,
+                                    timestamp: Math.round(r.samples * 1e6 / 48000), data: stereo });
+            try { r.aenc.encode(a); } finally { a.close(); }
+        } catch (e) {
+            r.fail(e);
+            return false;
+        }
         r.samples += frames;
-        r.aenc.encode(a);
-        a.close();
         return true;
     }
 
-    // Hands the recording to its own flush chain, so a new open never waits for it. The event always
-    // fires from a later task or microtask, never inside the C call.
+    // Hands the recording to its own flush chain, so a new open never waits for it. The event fires
+    // after the C call returns, never inside it.
     function close(frames) {
         var r = cur;
         cur = null;
@@ -135,5 +157,5 @@ var NtRecorder = (function () {
             }, function (e) { if (!r.error) { r.error = String(e); } done(null); });
     }
 
-    return { 'open': open, 'video': video, 'audio': audio, 'close': close, 'ready': function () { return probed; } };
+    return { 'open': open, 'video': video, 'audio': audio, 'close': close };
 })();

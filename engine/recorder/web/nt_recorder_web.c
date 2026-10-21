@@ -9,19 +9,19 @@
 EM_JS_DEPS(nt_recorder_web, "$UTF8ToString")
 
 EM_JS(int, nt_recorder_web_open, (const char *name, uint32_t w, uint32_t h, uint32_t fps), {
-    return window['NtRecorder']['open'](UTF8ToString(name), Module['canvas'], w, h, fps) ? 1 : 0;
+    return globalThis['NtRecorder']['open'](UTF8ToString(name), Module['canvas'], w, h, fps) ? 1 : 0;
 })
 
 EM_JS(int, nt_recorder_web_video, (uint32_t index), {
-    return window['NtRecorder']['video'](index) ? 1 : 0;
+    return globalThis['NtRecorder']['video'](index) ? 1 : 0;
 })
 
 EM_JS(int, nt_recorder_web_audio, (const float *stereo, uint32_t frames), {
-    return window['NtRecorder']['audio'](HEAPF32.subarray(stereo >> 2, (stereo >> 2) + frames * 2), frames) ? 1 : 0;
+    return globalThis['NtRecorder']['audio'](HEAPF32.subarray(stereo >>> 2, (stereo >>> 2) + frames * 2), frames) ? 1 : 0;
 })
 
 EM_JS(void, nt_recorder_web_close, (uint32_t frames), {
-    window['NtRecorder']['close'](frames);
+    globalThis['NtRecorder']['close'](frames);
 })
 /* clang-format on */
 

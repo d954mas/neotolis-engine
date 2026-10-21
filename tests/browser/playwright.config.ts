@@ -2,9 +2,10 @@ import { defineConfig, devices } from '@playwright/test';
 import { join } from 'node:path';
 
 // Two static servers, one per wasm target: the browser_smoke app (input/rich/context_loss specs)
-// and the devapi_host capture build (devapi.spec.ts). Each spec file runs in the project whose
-// server serves the app it drives — a plain `npx playwright test` covers both, provided both
-// targets are built (browser_smoke via the wasm-debug preset; devapi_host via
+// and the devapi_host build with the capture and record groups (devapi.spec.ts, record.spec.ts; the
+// latter also needs python and ffmpeg). Each spec file runs in the project whose server serves the
+// app it drives — a plain `npx playwright test` covers both, provided both targets are built
+// (browser_smoke via the wasm-debug preset; devapi_host via
 // `cmake --build build/_cmake/wasm-debug --target devapi_host`).
 const PORT = Number(process.env.NT_SHOWCASE_PORT || 8123);
 const DEVAPI_PORT = Number(process.env.NT_DEVAPI_PORT || 8124);

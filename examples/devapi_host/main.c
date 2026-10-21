@@ -208,35 +208,39 @@ static void render_pattern(bool flash) {
 #endif /* NT_DEVAPI_HOST_WEB_GFX */
 
 #ifdef NT_DEVAPI_GROUP_RECORDER
-/* A/V probe for record.*: the frame that starts each second's flash also starts a 50 ms 1 kHz beep at
-   the beginning of its mixed block, as a game mixer starts a triggered sound. */
+/* A/V probe for record.*, mixed like a game: each frame pushes the block for its advance, and the step
+   that crosses a whole game second starts a 50 ms 1 kHz beep at the block start while its frame starts
+   a 100 ms white flash. */
 #define HOST_TONE_RATE 48000
-static uint64_t s_tone_pushed;
+#define HOST_BEEP_FRAMES (HOST_TONE_RATE / 20)
 static uint32_t s_beep_left;
+
+static bool second_crossed(void) { return floor(g_nt_app.time) != floor(g_nt_app.time - (double)g_nt_app.dt); }
 
 static void push_tone(void) {
     static float s_buf[4800 * 2];
-    uint64_t target = (uint64_t)llround(g_nt_app.time * HOST_TONE_RATE);
     if (!nt_recorder_active()) {
-        s_tone_pushed = target;
+        s_beep_left = 0;
         return;
     }
-    if (floor(g_nt_app.time) != floor(g_nt_app.time - (double)g_nt_app.dt)) {
-        s_beep_left = HOST_TONE_RATE / 20;
+    double start = g_nt_app.time - (double)g_nt_app.dt;
+    int64_t n = llround(g_nt_app.time * HOST_TONE_RATE) - llround(start * HOST_TONE_RATE);
+    if (second_crossed()) {
+        s_beep_left = HOST_BEEP_FRAMES;
     }
-    while (s_tone_pushed < target) {
-        uint32_t n = (target - s_tone_pushed) < 4800U ? (uint32_t)(target - s_tone_pushed) : 4800U;
-        for (uint32_t i = 0; i < n; i++) {
+    for (int64_t done = 0; done < n;) {
+        uint32_t chunk = (n - done) < 4800 ? (uint32_t)(n - done) : 4800U;
+        for (uint32_t i = 0; i < chunk; i++) {
             float v = 0.0F;
             if (s_beep_left > 0) {
-                v = 0.5F * sinf(6.2831853F * 1000.0F * (float)(HOST_TONE_RATE / 20 - s_beep_left) / (float)HOST_TONE_RATE);
+                v = 0.5F * sinf(6.2831853F * 1000.0F * (float)(HOST_BEEP_FRAMES - s_beep_left) / (float)HOST_TONE_RATE);
                 s_beep_left--;
             }
             s_buf[2 * i] = v;
             s_buf[(2 * i) + 1] = v;
         }
-        nt_recorder_push_audio(s_buf, n);
-        s_tone_pushed += n;
+        nt_recorder_push_audio(s_buf, chunk, start + ((double)done / HOST_TONE_RATE));
+        done += chunk;
     }
 }
 #endif
@@ -275,14 +279,17 @@ static void frame(void) {
     const bool render = nt_app_render_enabled();
 #ifdef NT_DEVAPI_HOST_WEB_GFX
     if (render) {
-        /* 100 ms white flash from each whole game second (visible at record fps >= 10). */
+#ifdef NT_DEVAPI_GROUP_RECORDER
         render_pattern(g_nt_app.time - floor(g_nt_app.time) < 0.1);
+#else
+        render_pattern(false);
+#endif
     }
     nt_gfx_end_frame();
 #endif
 #ifdef NT_DEVAPI_GROUP_RECORDER
+    push_tone(); /* the mixer runs with the update, rendered or not */
     if (render) {
-        push_tone();
         nt_recorder_frame(g_nt_app.time, (double)g_nt_app.dt);
     }
 #endif
