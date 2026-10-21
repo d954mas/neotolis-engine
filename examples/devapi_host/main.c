@@ -12,14 +12,14 @@
    still serves submit/poll/poke. */
 #if defined(NT_DEVAPI_GROUP_CAPTURE) || defined(NT_DEVAPI_GROUP_RECORDER)
 #define NT_DEVAPI_HOST_WEB_GFX 1
+#include <math.h>
+
 #include "graphics/nt_gfx.h"
 #endif
 #ifdef NT_DEVAPI_GROUP_CAPTURE
 #include "devapi/nt_devapi_capture.h" /* nt_devapi_capture_install_seam — pre-swap capture seam. */
 #endif
 #ifdef NT_DEVAPI_GROUP_RECORDER
-#include <math.h>
-
 #include "recorder/nt_recorder.h"
 #endif
 #else
@@ -208,21 +208,30 @@ static void render_pattern(bool flash) {
 #endif /* NT_DEVAPI_HOST_WEB_GFX */
 
 #ifdef NT_DEVAPI_GROUP_RECORDER
-/* A/V sync probe for record.*: every game second starts a 100 ms white flash and a 50 ms 1 kHz beep. */
+/* A/V probe for record.*: the frame that starts each second's flash also starts a 50 ms 1 kHz beep at
+   the beginning of its mixed block, as a game mixer starts a triggered sound. */
 #define HOST_TONE_RATE 48000
 static uint64_t s_tone_pushed;
+static uint32_t s_beep_left;
 
 static void push_tone(void) {
     static float s_buf[4800 * 2];
     uint64_t target = (uint64_t)llround(g_nt_app.time * HOST_TONE_RATE);
-    if (target < s_tone_pushed) {
+    if (!nt_recorder_active()) {
         s_tone_pushed = target;
+        return;
+    }
+    if (floor(g_nt_app.time) != floor(g_nt_app.time - (double)g_nt_app.dt)) {
+        s_beep_left = HOST_TONE_RATE / 20;
     }
     while (s_tone_pushed < target) {
         uint32_t n = (target - s_tone_pushed) < 4800U ? (uint32_t)(target - s_tone_pushed) : 4800U;
         for (uint32_t i = 0; i < n; i++) {
-            uint64_t g = s_tone_pushed + i;
-            float v = (g % HOST_TONE_RATE) < (HOST_TONE_RATE / 20) ? 0.5F * sinf(6.2831853F * 1000.0F * (float)(g % HOST_TONE_RATE) / (float)HOST_TONE_RATE) : 0.0F;
+            float v = 0.0F;
+            if (s_beep_left > 0) {
+                v = 0.5F * sinf(6.2831853F * 1000.0F * (float)(HOST_TONE_RATE / 20 - s_beep_left) / (float)HOST_TONE_RATE);
+                s_beep_left--;
+            }
             s_buf[2 * i] = v;
             s_buf[(2 * i) + 1] = v;
         }
@@ -266,7 +275,7 @@ static void frame(void) {
     const bool render = nt_app_render_enabled();
 #ifdef NT_DEVAPI_HOST_WEB_GFX
     if (render) {
-        /* 100 ms white flash from each whole game second, long enough for any record fps to catch. */
+        /* 100 ms white flash from each whole game second (visible at record fps >= 10). */
         render_pattern(g_nt_app.time - floor(g_nt_app.time) < 0.1);
     }
     nt_gfx_end_frame();

@@ -1,16 +1,12 @@
-#include <string.h>
-
 #include "app/nt_app.h"
 #include "core/nt_assert.h"
 #include "devapi/nt_devapi_internal.h"
 #include "recorder/nt_recorder.h"
 
 /* record.* group: a bot starts and stops nt_recorder on game time. The host calls nt_recorder_frame
-   every frame; the file (native) or the 'nt-recorder' event (web) is the output. */
+   every frame; the web output is the 'nt-recorder' event. */
 
 #ifdef NT_DEVAPI_GROUP_RECORDER
-
-#define NT_DEVAPI_RECORD_NAME_MAX 255U
 
 static void set_bad_params(nt_devapi_error *err, const char *message) {
     err->code = NT_DEVAPI_ERR_BAD_PARAMS;
@@ -20,8 +16,8 @@ static void set_bad_params(nt_devapi_error *err, const char *message) {
 static bool cmd_record_start(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     const cJSON *name = cJSON_GetObjectItemCaseSensitive(params, "name");
-    if (!cJSON_IsString(name) || name->valuestring[0] == '\0' || strlen(name->valuestring) > NT_DEVAPI_RECORD_NAME_MAX) {
-        set_bad_params(err, "record.start: name must be a non-empty string of at most 255 bytes");
+    if (!cJSON_IsString(name) || name->valuestring[0] == '\0') {
+        set_bad_params(err, "record.start: name must be a non-empty string");
         return false;
     }
     const char *bad_fps = "record.start: fps must be an integer 1..120";
@@ -63,7 +59,7 @@ static const nt_devapi_command_desc k_record_cmds[] = {
         .params_shape = "{name:string, fps:int}",
         .result_shape = "{}",
         .frame_behavior = "any",
-        .side_effects = "starts nt_recorder; native writes the name path, web dispatches 'nt-recorder' after stop",
+        .side_effects = "starts nt_recorder; web dispatches 'nt-recorder' after stop",
     },
     {
         .method = "record.stop",

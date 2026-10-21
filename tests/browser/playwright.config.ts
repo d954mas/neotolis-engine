@@ -48,7 +48,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      testIgnore: '**/devapi.spec.ts',
+      testIgnore: ['**/devapi.spec.ts', '**/record.spec.ts'],
       use: {
         ...devices['Desktop Chrome'],
         launchOptions: chromiumGl,
@@ -56,7 +56,7 @@ export default defineConfig({
     },
     {
       name: 'devapi-chromium',
-      testMatch: '**/devapi.spec.ts',
+      testMatch: ['**/devapi.spec.ts', '**/record.spec.ts'],
       use: {
         ...devices['Desktop Chrome'],
         baseURL: `http://localhost:${DEVAPI_PORT}`,

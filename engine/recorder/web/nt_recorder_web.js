@@ -1,11 +1,34 @@
-// nt_recorder web backend: WebCodecs H.264 + AAC from the canvas, muxed to MP4 by Mediabunny.
-// Loaded with --extern-pre-js after deps/mediabunny/nt_mediabunny.js, outside Closure, so the
-// WebCodecs and Mediabunny property names stay intact in wasm-release.
+// nt_recorder web backend: WebCodecs H.264 + AAC (Opus where the browser has no AAC encoder) from the
+// canvas, muxed to MP4 by Mediabunny. Loaded with --extern-pre-js after deps/mediabunny/nt_mediabunny.js,
+// outside Closure, so the WebCodecs and Mediabunny property names stay intact in wasm-release.
 var NtRecorder = (function () {
     var cur = null;
+    // Probed once at load: Firefox and Linux Chrome lack AAC, a software-only Chrome lacks H.264 High.
+    var profile = '6400';
+    var acodec = 'mp4a.40.2';
+    if (typeof VideoEncoder !== 'undefined' && typeof AudioEncoder !== 'undefined') {
+        VideoEncoder.isConfigSupported({ codec: 'avc1.640028', width: 1920, height: 1080, framerate: 30 })
+            .then(function (s) { if (!s.supported) { profile = '42E0'; } }, function () {});
+        AudioEncoder.isConfigSupported({ codec: acodec, sampleRate: 48000, numberOfChannels: 2 })
+            .then(function (s) { if (!s.supported) { acodec = 'opus'; } }, function () {});
+    }
+    // H.264 levels: [level_idc hex, max frame macroblocks, max macroblocks per second].
+    var LEVELS = [['1F', 3600, 108000], ['28', 8192, 245760], ['2A', 8704, 522240], ['33', 36864, 983040],
+                  ['34', 36864, 2073600], ['3C', 139264, 4177920], ['3E', 139264, 16711680]];
+
+    function release(r) {
+        if (r.venc && r.venc.state !== 'closed') { r.venc.close(); }
+        if (r.aenc && r.aenc.state !== 'closed') { r.aenc.close(); }
+        if (r.out) { r.out.cancel().catch(function () {}); }
+    }
 
     function open(name, canvas, w, h, fps) {
         if (typeof VideoEncoder === 'undefined' || typeof AudioEncoder === 'undefined' || typeof NtMediabunny === 'undefined') {
+            return false;
+        }
+        var mbs = Math.ceil(w / 16) * Math.ceil(h / 16);
+        var level = LEVELS.find(function (l) { return mbs <= l[1] && mbs * fps <= l[2]; });
+        if (!level) {
             return false;
         }
         var MB = NtMediabunny;
@@ -14,7 +37,7 @@ var NtRecorder = (function () {
         try {
             r.out = new MB.Output({ format: new MB.Mp4OutputFormat(), target: new MB.BufferTarget() });
             r.vsrc = new MB.EncodedVideoPacketSource('avc');
-            r.asrc = new MB.EncodedAudioPacketSource('aac');
+            r.asrc = new MB.EncodedAudioPacketSource(acodec === 'opus' ? 'opus' : 'aac');
             r.out.addVideoTrack(r.vsrc, { frameRate: fps });
             r.out.addAudioTrack(r.asrc);
             // Packets join the muxer strictly in output order through one promise chain.
@@ -26,17 +49,16 @@ var NtRecorder = (function () {
                     var m = first ? meta : undefined;
                     first = false;
                     r.chain = r.chain.then(function () { return src.add(p, m); });
+                    r.chain.catch(fail);
                 };
             };
-            // Lowest H.264 High level that fits the macroblock size and rate.
-            var mbs = Math.ceil(w / 16) * Math.ceil(h / 16);
-            var level = (mbs <= 8192 && mbs * fps <= 245760) ? '28' : (mbs <= 8704 && mbs * fps <= 522240) ? '2A' : (mbs * fps <= 983040) ? '33' : '34';
             r.venc = new VideoEncoder({ output: add(r.vsrc), error: fail });
-            r.venc.configure({ codec: 'avc1.6400' + level, width: w, height: h, framerate: fps,
+            r.venc.configure({ codec: 'avc1.' + profile + level[0], width: w, height: h, framerate: fps,
                                bitrate: Math.round(w * h * fps * 0.1), alpha: 'discard', avc: { format: 'avc' } });
             r.aenc = new AudioEncoder({ output: add(r.asrc), error: fail });
-            r.aenc.configure({ codec: 'mp4a.40.2', sampleRate: 48000, numberOfChannels: 2, bitrate: 192000 });
+            r.aenc.configure({ codec: acodec, sampleRate: 48000, numberOfChannels: 2, bitrate: 192000 });
         } catch (e) {
+            release(r);
             return false;
         }
         cur = r;
@@ -46,6 +68,10 @@ var NtRecorder = (function () {
     // Called inside the rAF task before the swap: the drawing buffer still holds this frame.
     function video(index) {
         var r = cur;
+        // Nothing paces the game to the encoder, so a backlog of two seconds ends the recording.
+        if (!r.error && r.venc.encodeQueueSize > r.fps * 2) {
+            r.error = 'encoder backlog';
+        }
         if (r.error) {
             return false;
         }
@@ -76,8 +102,9 @@ var NtRecorder = (function () {
         var r = cur;
         cur = null;
         var done = function (blob) {
-            if (r.venc && r.venc.state !== 'closed') { r.venc.close(); }
-            if (r.aenc && r.aenc.state !== 'closed') { r.aenc.close(); }
+            if (!blob) {
+                release(r);
+            }
             var detail = { name: r.name, blob: blob, frames: frames, error: r.error || (frames ? null : 'no frames') };
             // Default action: download. A host that wants the blob (automation) cancels the event.
             if (window.dispatchEvent(new CustomEvent('nt-recorder', { detail: detail, cancelable: true })) && blob) {
@@ -89,15 +116,18 @@ var NtRecorder = (function () {
             }
         };
         if (!frames || r.error) {
-            r.out.cancel().then(function () { done(null); }, function () { done(null); });
+            done(null);
             return;
         }
         r.venc.flush()
             .then(function () { return r.aenc.flush(); })
             .then(function () { return r.chain; })
             .then(function () { return r.out.finalize(); })
-            .then(function () { done(new Blob([r.out.target.buffer], { type: 'video/mp4' })); },
-                  function (e) { if (!r.error) { r.error = String(e); } done(null); });
+            .then(function () {
+                r.venc.close();
+                r.aenc.close();
+                done(new Blob([r.out.target.buffer], { type: 'video/mp4' }));
+            }, function (e) { if (!r.error) { r.error = String(e); } done(null); });
     }
 
     return { 'open': open, 'video': video, 'audio': audio, 'close': close };
