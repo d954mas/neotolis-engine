@@ -51,16 +51,18 @@ block with its start time `t_start` on the same clock; sample `s` of a block pla
 `t_start - t0 + s / 48000`. A game mixer that starts a sound at the beginning of the block for the
 step that first shows its cause (`t_start = t - dt`) plays it with that frame. A lockstep mixer
 renders `step_dt · 48000` samples per step without a sound device; a real-time mixer copies its
-device output to the main thread.
+device output to the main thread. Sounds played through `nt_audio` are not captured.
 
-Blocks are placed by their time. Next to queued audio, a block within one mixer block (1024 samples)
-of where the previous one ended joins it, so drift never splits a mixer's stream; an overlap beyond
-that, and anything before `t0`, is dropped, and a gap beyond it becomes silence. After audio that is
-already written, a block keeps its exact time. Audio is written only up to the end of the written
-video, so the track never runs ahead of the picture; the rest waits in a 2 s queue, and a block
-that does not fit is lost to silence. With nothing queued, silence is written up to one block short
-of the video, which leaves room for a mixer that delivers late. A track is always written, silent
-when nothing is pushed; at the end it is padded to the video length.
+Blocks are placed by their time. A block within one mixer block (1024 samples) of where the
+previous push ended continues it, queued or already written, so rounding and drift never split a
+mixer's stream. Once silence has been written past the previous push (the mixer paused), a block
+keeps its exact time. An overlap with placed audio, and anything before `t0`, is dropped, and a
+gap becomes silence. Audio is written only up to the end of the written video, so the track never
+runs ahead of the picture; the rest waits in a queue of 3 s plus two blocks (the catch-up bound
+plus a period at 1 fps), and a push that does not fit ends the recording (WARN), as the next
+`frame` call would. With nothing queued, silence is written up to 250 ms short of the video, which
+leaves room for a real-time mixer whose blocks reach the main thread late. A track is always
+written, silent when nothing is pushed; at the end it is padded to the video length.
 
 ## Backends
 
@@ -69,14 +71,14 @@ when nothing is pushed; at the end it is padded to the video length.
 and `AudioEncoder`. Codecs are probed once when the script loads: H.264 High, else Constrained
 Baseline, at the lowest level that fits size × fps (bitrate `0.1 · w · h · fps`); AAC-LC 192 kbps,
 else Opus (Firefox, Chrome on Linux; editors handle Opus in MP4 poorly). `start` returns false
-while the probe runs (a console warning says so; start again), and in a browser without WebCodecs
-or without an H.264 encoder. The vendored Mediabunny muxer (`deps/mediabunny`) writes the MP4. The
+while the probe runs (a console warning says so; start again), and in a browser without WebCodecs,
+an H.264 encoder or an AAC/Opus encoder. The vendored Mediabunny muxer (`deps/mediabunny`) writes the MP4. The
 JS lives in `web/nt_recorder_web.js` and loads with `--extern-pre-js`, outside Closure; a page that
 links the recorder evaluates the 125 KB muxer at load. One module per page, main thread.
 
 Encoded bytes stay in tab memory (~1 MB/s at 1080p30): a dev-only exception to preallocated
 storage; long web recordings are not a goal. Nothing paces the game to the encoder, so an encoder
-queue above two seconds of frames when a `frame` call begins ends the recording
+queue above four seconds of frames (two of backlog plus one call's catch-up) ends the recording
 (`encoder backlog`); lockstep must not step much faster than the encoder runs. After `stop`, when
 the encoders flush, the window event `nt-recorder` (cancelable, `detail {name, blob, frames,
 error}`) is dispatched after the C call returns; unless a listener cancels it, the browser

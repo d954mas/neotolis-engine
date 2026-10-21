@@ -183,6 +183,8 @@ static void test_hitch_resubmits_the_frame(void) {
     start_at(30, 0.0);
     frame_at(0.1, 0.1);
     TEST_ASSERT_EQUAL_UINT32(3, s_be.videos);
+    TEST_ASSERT_EQUAL_UINT32(3, s_be.next_index);
+    TEST_ASSERT_FALSE(s_be.index_gap);
 }
 
 static void test_frozen_time_writes_nothing(void) {
@@ -374,6 +376,110 @@ static void test_huge_time_jump_ends_quickly(void) {
     TEST_ASSERT_EQUAL_UINT32(0, s_be.closed_frames);
 }
 
+/* Rounding puts a block one sample off the end of the previous one; with the queue already written it
+   still continues the run instead of losing or inserting a sample. */
+static void test_block_after_written_audio_joins(void) {
+    start_at(30, 0.0);
+    push_block(0.5F, 1600, 0.0);
+    frame_at(1.0 / 30.0, 1.0 / 30.0);
+    push_block(0.5F, 1600, 1599.0 / 48000.0);
+    frame_at(2.0 / 30.0, 1.0 / 30.0);
+    push_block(0.5F, 1600, 3201.0 / 48000.0);
+    frame_at(3.0 / 30.0, 1.0 / 30.0);
+    TEST_ASSERT_EQUAL_UINT32(1, s_be.runs);
+    TEST_ASSERT_EQUAL_UINT64(4800, s_be.audio_nonzero);
+}
+
+/* A mixer like devapi_host's at a 144 Hz step with t0 off the sample grid: one run, no lost samples. */
+static void test_lockstep_mixer_off_the_sample_grid_is_one_run(void) {
+    double t = 10.0 + (0.4 / 48000.0);
+    start_at(60, t);
+    const float step = 1.0F / 144.0F;
+    uint64_t pushed = 0;
+    for (int i = 0; i < 1440; i++) {
+        double start = t;
+        t += (double)step;
+        uint32_t n = (uint32_t)(llround(t * 48000.0) - llround(start * 48000.0));
+        push_block(0.5F, n, start);
+        pushed += n;
+        frame_at(t, (double)step);
+    }
+    (void)nt_recorder_stop();
+    TEST_ASSERT_EQUAL_UINT32(1, s_be.runs);
+    TEST_ASSERT_UINT64_WITHIN(800, pushed, s_be.audio_nonzero);
+}
+
+/* A real-time mixer delivers each block two frames late (~33 ms, audio thread to the main thread):
+   every sample is kept in one run. */
+static void test_late_real_time_mixer_keeps_every_sample(void) {
+    start_at(30, 0.0);
+    uint64_t pushed = 0;
+    for (int i = 1; i <= 600; i++) {
+        if (i > 2) {
+            push_block(0.5F, 800, (double)(i - 3) / 60.0);
+            pushed += 800;
+        }
+        frame_at(i / 60.0, 1.0 / 60.0);
+    }
+    (void)nt_recorder_stop();
+    TEST_ASSERT_EQUAL_UINT32(1, s_be.runs);
+    TEST_ASSERT_EQUAL_UINT64(pushed, s_be.audio_nonzero);
+}
+
+/* Render off for 2.4 s at fps 1 is within the catch-up bound, so the mixer's audio meanwhile is kept. */
+static void test_render_off_gap_keeps_its_audio(void) {
+    start_at(1, 0.0);
+    uint64_t pushed = 0;
+    for (int i = 1; i <= 300; i++) {
+        push_block(0.5F, 800, (double)(i - 1) / 60.0);
+        pushed += 800;
+        if (i <= 60 || i > 204) {
+            frame_at(i / 60.0, 1.0 / 60.0);
+        }
+    }
+    TEST_ASSERT_TRUE(nt_recorder_active());
+    TEST_ASSERT_EQUAL_UINT32(5, nt_recorder_stop());
+    TEST_ASSERT_EQUAL_UINT32(1, s_be.runs);
+    TEST_ASSERT_EQUAL_UINT64(pushed, s_be.audio_nonzero);
+}
+
+/* Render off past the catch-up bound fills the queue: the recording ends there, not with lost audio. */
+static void test_full_audio_queue_ends_the_recording(void) {
+    start_at(30, 0.0);
+    push_block(0.5F, 1600, 0.0);
+    frame_at(1.0 / 30.0, 1.0 / 30.0);
+    for (int i = 2; i <= 150 && nt_recorder_active(); i++) {
+        push_block(0.5F, 1600, (double)(i - 1) / 30.0);
+    }
+    TEST_ASSERT_FALSE(nt_recorder_active());
+    TEST_ASSERT_EQUAL_UINT32(1, s_be.closed_frames);
+    TEST_ASSERT_EQUAL_UINT64(1600, s_be.audio_frames);
+}
+
+/* Exactly two seconds of due frames are caught up; one more ends the recording. */
+static void test_catch_up_bound_is_two_seconds_of_frames(void) {
+    start_at(30, 0.0);
+    frame_at(1.0 / 30.0, 1.0 / 30.0);
+    frame_at(61.0 / 30.0, 1.0 / 30.0);
+    TEST_ASSERT_TRUE(nt_recorder_active());
+    TEST_ASSERT_EQUAL_UINT32(61, nt_recorder_stop());
+
+    memset(&s_be, 0, sizeof(s_be));
+    start_at(30, 0.0);
+    frame_at(1.0 / 30.0, 1.0 / 30.0);
+    frame_at(62.0 / 30.0, 1.0 / 30.0);
+    TEST_ASSERT_FALSE(nt_recorder_active());
+    TEST_ASSERT_EQUAL_UINT32(1, s_be.closed_frames);
+}
+
+static void test_final_audio_failure_returns_zero(void) {
+    start_at(30, 0.0);
+    frame_at(1.0 / 30.0, 1.0 / 30.0);
+    s_be.fail_audio = true;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_recorder_stop());
+    TEST_ASSERT_EQUAL_UINT32(1, s_be.closes);
+}
+
 static void test_audio_failure_ends_the_recording(void) {
     start_at(30, 0.0);
     s_be.fail_audio = true;
@@ -408,6 +514,13 @@ int main(void) {
     RUN_TEST(test_late_block_within_a_block_is_kept);
     RUN_TEST(test_first_late_block_at_high_fps_is_kept);
     RUN_TEST(test_huge_time_jump_ends_quickly);
+    RUN_TEST(test_block_after_written_audio_joins);
+    RUN_TEST(test_lockstep_mixer_off_the_sample_grid_is_one_run);
+    RUN_TEST(test_late_real_time_mixer_keeps_every_sample);
+    RUN_TEST(test_render_off_gap_keeps_its_audio);
+    RUN_TEST(test_full_audio_queue_ends_the_recording);
+    RUN_TEST(test_catch_up_bound_is_two_seconds_of_frames);
+    RUN_TEST(test_final_audio_failure_returns_zero);
     RUN_TEST(test_audio_failure_ends_the_recording);
     return UNITY_END();
 }

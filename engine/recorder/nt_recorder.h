@@ -12,11 +12,12 @@
 bool nt_recorder_start(const char *name, uint32_t fps, double t);
 
 /* After nt_gfx_end_frame and before nt_window_swap_buffers, once per presented frame; dt is this
-   frame's advance. A resize or an encoder failure ends the recording (WARN). No-op while idle. */
+   frame's advance. A resize, over two seconds of due frames or an encoder failure ends the recording
+   (WARN). No-op while idle. */
 void nt_recorder_frame(double t, double dt);
 
 /* Interleaved stereo 48 kHz samples that start at t_start on the clock passed to nt_recorder_frame;
-   a block within 1024 samples of the queued audio's end joins it. Main thread. No-op while idle. */
+   a block within 1024 samples of the previous push's end continues it. Main thread. No-op while idle. */
 void nt_recorder_push_audio(const float *stereo48k, uint32_t frames, double t_start);
 
 /* Returns the frames written; 0 while idle or when the final audio write failed. */

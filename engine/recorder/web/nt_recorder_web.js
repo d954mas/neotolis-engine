@@ -7,8 +7,8 @@ globalThis['NtRecorder'] = (function () {
     // open refuses until the probe settles, so a start never picks a codec the browser rejects.
     var profile = null;
     var acodec = null;
-    var probed = false;
-    if (typeof VideoEncoder !== 'undefined' && typeof AudioEncoder !== 'undefined') {
+    var probed = typeof VideoEncoder === 'undefined' || typeof AudioEncoder === 'undefined';
+    if (!probed) {
         var supported = function (enc, cfg) {
             return enc.isConfigSupported(cfg).then(function (s) { return s.supported; }, function () { return false; });
         };
@@ -89,13 +89,9 @@ globalThis['NtRecorder'] = (function () {
     // (lost context) ends the recording instead of unwinding into wasm.
     function video(index) {
         var r = cur;
-        // Nothing paces the game to the encoder: a backlog of two seconds when a frame call begins ends
-        // the recording (checked once per call, so its own catch-up frames do not count).
-        if (!r.error && !r.inCall) {
-            r.inCall = true;
-            Promise.resolve().then(function () { r.inCall = false; });
-            if (r.venc.encodeQueueSize > r.fps * 2) { r.fail('encoder backlog'); }
-        }
+        // Nothing paces the game to the encoder: two seconds of backlog beyond one call's catch-up
+        // (at most two seconds of frames) end the recording.
+        if (!r.error && r.venc.encodeQueueSize > r.fps * 4 + 1) { r.fail('encoder backlog'); }
         if (r.error) {
             return false;
         }

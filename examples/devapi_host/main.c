@@ -333,8 +333,6 @@ static void frame(void) {
     if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
         nt_app_quit();
     }
-#ifdef NT_DEVAPI_HOST_WEB_GFX
-#endif
 }
 
 int main(void) {
