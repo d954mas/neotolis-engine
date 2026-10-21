@@ -1182,6 +1182,23 @@ void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uin
     }
 }
 
+static NT_NOINLINE uint32_t gl_limit(GLenum name) {
+    GLint value = 0;
+    NT_GL(glGetIntegerv, name, &value);
+    return (uint32_t)value;
+}
+
+void nt_gfx_gl_read_limits(nt_gfx_gpu_caps_t *caps) {
+    caps->max_texture_size = gl_limit(GL_MAX_TEXTURE_SIZE);
+    caps->uniform_buffer_offset_alignment = gl_limit(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT);
+    caps->max_varying_components = gl_limit(GL_MAX_VARYING_COMPONENTS);
+    caps->max_vertex_uniform_components = gl_limit(GL_MAX_VERTEX_UNIFORM_COMPONENTS);
+    caps->max_fragment_uniform_components = gl_limit(GL_MAX_FRAGMENT_UNIFORM_COMPONENTS);
+    caps->max_vertex_uniform_blocks = gl_limit(GL_MAX_VERTEX_UNIFORM_BLOCKS);
+    caps->max_fragment_uniform_blocks = gl_limit(GL_MAX_FRAGMENT_UNIFORM_BLOCKS);
+    caps->max_uniform_block_size = gl_limit(GL_MAX_UNIFORM_BLOCK_SIZE);
+}
+
 /* ---- Resource management (shader / buffer / pipeline) ---- */
 
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
@@ -1308,38 +1325,32 @@ static NT_NOINLINE void log_program_failure(const nt_gfx_gl_program_t *rec, cons
     } while (0)
 
 #if NT_LOG_MIN_LEVEL <= 2
-/* -1: the owner destroyed the stage and Emscripten dropped its name; native GL keeps an attached stage queryable. */
-static GLint log_stage_failure(GLuint shader, const char *stage) {
+static GLint stage_compile_status(GLuint shader) {
     if (!NT_GL_RET(glIsShader, shader)) {
         return -1;
     }
     GLint compiled = 0;
     NT_GL(glGetShaderiv, shader, GL_COMPILE_STATUS, &compiled);
-    nt_gfx_gl_log_shader(shader, stage);
     return compiled;
 }
 
 #ifdef NT_PLATFORM_WEB
-/* Shared by the logged stages so the crash journal's tail still holds the summary after them. */
-#define NT_GFX_GL_TRANSLATED_BYTES 4096U
-
 /* The browser's translation is what the driver compiled; it can differ per GPU. */
-static void log_translated_source(GLuint shader, const char *stage, uint32_t cap) {
-    char *text = (char *)malloc(cap);
-    if (!text) {
+static void log_translated_source(GLuint shader, const char *stage, char *text, uint32_t cap) {
+    const int len = nt_gfx_gl_ctx_translated_source(shader, text, cap);
+    if (len < 0) {
+        NT_LOG_ERROR("%s translated: unavailable", stage);
         return;
     }
-    const int len = nt_gfx_gl_ctx_translated_source(shader, text, cap);
     if (len == 0) {
-        NT_LOG_ERROR("%s translated: unavailable", stage);
-    } else {
-        NT_LOG_ERROR("%s translated:", stage);
-        nt_gfx_gl_log_lines(text);
-        if ((uint32_t)len >= cap) {
-            NT_LOG_ERROR("%s translated: truncated at %u of %d bytes", stage, cap - 1U, len);
-        }
+        NT_LOG_ERROR("%s translated: empty", stage);
+        return;
     }
-    free(text);
+    NT_LOG_ERROR("%s translated:", stage);
+    nt_gfx_gl_log_lines(text);
+    if ((uint32_t)len >= cap) {
+        NT_LOG_ERROR("%s translated: truncated, %d bytes", stage, len);
+    }
 }
 #endif
 #endif
@@ -1348,22 +1359,31 @@ static void log_translated_source(GLuint shader, const char *stage, uint32_t cap
 static void nt_gfx_gl_log_link_failure(const nt_gfx_gl_program_t *rec) {
 #if NT_LOG_MIN_LEVEL <= 2
     const GLenum gl_error = NT_GL_RET0(glGetError);
-    nt_gfx_gl_log_program(rec->program);
-    const GLint vs_compile = log_stage_failure(rec->vs, "vertex");
-    const GLint fs_compile = log_stage_failure(rec->fs, "fragment");
+    const GLint vs_compile = stage_compile_status(rec->vs);
+    const GLint fs_compile = stage_compile_status(rec->fs);
 #ifdef NT_PLATFORM_WEB
-    /* A compile failure needs only the failed stage's text; a link failure needs both live stages. */
+    /* Before the driver logs, which a journal that keeps its tail should keep first. A compile failure
+     * needs only the failed stage's text; a link failure needs both live stages. One budget serves both. */
     const bool compile_failed = vs_compile == 0 || fs_compile == 0;
     const bool vs_text = compile_failed ? vs_compile == 0 : vs_compile == 1;
     const bool fs_text = compile_failed ? fs_compile == 0 : fs_compile == 1;
-    const uint32_t cap = NT_GFX_GL_TRANSLATED_BYTES / (vs_text && fs_text ? 2U : 1U);
+    char text[4096];
+    const uint32_t cap = sizeof(text) / (vs_text && fs_text ? 2U : 1U);
     if (vs_text) {
-        log_translated_source(rec->vs, "vertex", cap);
+        log_translated_source(rec->vs, "vertex", text, cap);
     }
     if (fs_text) {
-        log_translated_source(rec->fs, "fragment", cap);
+        log_translated_source(rec->fs, "fragment", text, cap);
     }
 #endif
+    nt_gfx_gl_log_program(rec->program);
+    /* -1: the owner destroyed the stage and Emscripten dropped its name; native GL keeps an attached stage readable. */
+    if (vs_compile >= 0) {
+        nt_gfx_gl_log_shader(rec->vs, "vertex");
+    }
+    if (fs_compile >= 0) {
+        nt_gfx_gl_log_shader(rec->fs, "fragment");
+    }
     /* After the driver lines, so a journal that keeps its tail keeps the classification and identity. */
     NT_LOG_ERROR("program link stages: vs_compile=%d fs_compile=%d", vs_compile, fs_compile);
     log_program_failure(rec, "link", "link failed", "gl_error", gl_error);

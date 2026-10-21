@@ -524,7 +524,6 @@ typedef enum {
 #define NT_GFX_GL_CALLS(X)                                                                                                                                                                             \
     X(glGetString)                                                                                                                                                                                     \
     X(getExtension)                                                                                                                                                                                    \
-    X(getTranslatedShaderSource)                                                                                                                                                                       \
     X(glActiveTexture)                                                                                                                                                                                 \
     X(glAttachShader)                                                                                                                                                                                  \
     X(glBeginQuery)                                                                                                                                                                                    \
@@ -583,7 +582,6 @@ typedef enum {
     X(glGetActiveUniformBlockName)                                                                                                                                                                     \
     X(glGetActiveUniformBlockiv)                                                                                                                                                                       \
     X(glGetActiveUniformsiv)                                                                                                                                                                           \
-    X(glGetAttachedShaders)                                                                                                                                                                            \
     X(glGetError)                                                                                                                                                                                      \
     X(glGetIntegerv)                                                                                                                                                                                   \
     X(glGetProgramInfoLog)                                                                                                                                                                             \

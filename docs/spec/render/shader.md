@@ -142,17 +142,19 @@ Just before that line, a link failure logs
 `program link stages: vs_compile=<v> fs_compile=<f>`: `1` means the stage
 compiled, `0` that it did not, `-1` that the status is unavailable because the
 owner destroyed the stage and the web backend no longer names it (native GL
-keeps an attached stage readable). The program keeps both stage names for this.
-An empty driver log with `1 1` therefore points at linking, a `0` at that
-stage's compilation. These queries exist only with ERROR logging compiled in and
-never run for a successful link or an already-confirmed context loss.
+keeps an attached stage readable). An empty driver log with `1 1` therefore
+points at linking, a `0` at that stage's compilation. These queries exist only
+with ERROR logging compiled in and never run for a successful link or an
+already-confirmed context loss.
 
 On the web, the browser's translation of a stage is what the driver actually
-compiled, and the browser may adapt it to the GPU. Before the stage line, a link
-failure therefore logs `<stage> translated:` and the text from the optional
-`WEBGL_debug_shaders` extension: only the stages that failed to compile, or both
-live stages when both compiled. The logged stages share 4 KB, and longer text
-ends with a `truncated` line; a browser without the extension logs
+compiled, and the browser may adapt it to the GPU. A link failure therefore logs
+`<stage> translated:` and the text from the optional `WEBGL_debug_shaders`
+extension first, ahead of the driver logs that a journal keeping its tail should
+retain: only the stages that failed to compile, or both live stages when both
+compiled. The logged stages share 4 KB; longer text ends with a
+`truncated, <bytes> bytes` line, an empty translation (a stage the browser
+itself rejected) logs `empty`, and a browser without the extension logs
 `unavailable`. Native GL compiles the packed source as is and logs no
 translation.
 

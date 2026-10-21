@@ -37,12 +37,6 @@ bool nt_gfx_gl_ctx_take_loss(void) { return false; }
 
 bool nt_gfx_gl_ctx_query_lost(void) { return false; }
 
-static uint32_t gl_limit(GLenum name) {
-    GLint value = 0;
-    NT_GL(glGetIntegerv, name, &value);
-    return (uint32_t)value;
-}
-
 nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     nt_gfx_gpu_caps_t caps = {0};
     caps.has_bc7 = GLAD_GL_ARB_texture_compression_bptc != 0;
@@ -67,15 +61,7 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     caps.has_float_render_target = gl_ver >= 30;
     caps.has_float_texture_linear = gl_ver >= 30;
 
-    caps.max_texture_size = gl_limit(GL_MAX_TEXTURE_SIZE);
-    caps.uniform_buffer_offset_alignment = gl_limit(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT);
-    caps.max_varying_components = gl_limit(GL_MAX_VARYING_COMPONENTS);
-    caps.max_vertex_uniform_components = gl_limit(GL_MAX_VERTEX_UNIFORM_COMPONENTS);
-    caps.max_fragment_uniform_components = gl_limit(GL_MAX_FRAGMENT_UNIFORM_COMPONENTS);
-    caps.max_vertex_uniform_blocks = gl_limit(GL_MAX_VERTEX_UNIFORM_BLOCKS);
-    caps.max_fragment_uniform_blocks = gl_limit(GL_MAX_FRAGMENT_UNIFORM_BLOCKS);
-    caps.max_uniform_block_size = gl_limit(GL_MAX_UNIFORM_BLOCK_SIZE);
-
+    nt_gfx_gl_read_limits(&caps);
     return caps;
 }
 

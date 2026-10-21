@@ -103,22 +103,17 @@ static bool get_extension(const char *name) {
 }
 
 #if NT_LOG_MIN_LEVEL <= 2
+EM_JS_DEPS(nt_gfx_gl_ctx_translated_source, "$lengthBytesUTF8")
+/* Not recorded: it runs only before a link-failure assertion, and nothing observes that frame. */
 /* clang-format off */
-EM_JS(int, nt_gfx_js_translated_source, (uint32_t shader, char *out, uint32_t cap), {
-    var text = GL.currentContext.GLctx.getExtension("WEBGL_debug_shaders")["getTranslatedShaderSource"](GL.shaders[shader]);
-    if (!text) return 0;
+EM_JS(int, nt_gfx_gl_ctx_translated_source, (uint32_t shader, char *out, uint32_t cap), {
+    var ext = GL.currentContext.GLctx.getExtension("WEBGL_debug_shaders");
+    var text = ext ? ext["getTranslatedShaderSource"](GL.shaders[shader]) : null;
+    if (text === null) return -1;
     stringToUTF8(text, out, cap);
     return lengthBytesUTF8(text);
 })
 /* clang-format on */
-
-int nt_gfx_gl_ctx_translated_source(uint32_t shader, char *out, uint32_t cap) {
-    if (!get_extension("WEBGL_debug_shaders")) {
-        return 0;
-    }
-    NT_GL_ISSUED(getTranslatedShaderSource, shader);
-    return nt_gfx_js_translated_source(shader, out, cap);
-}
 #endif
 
 /* clang-format off */
@@ -146,12 +141,6 @@ static void capture_device_info(void) {
     }
 }
 
-static uint32_t gl_limit(GLenum name) {
-    GLint value = 0;
-    NT_GL(glGetIntegerv, name, &value);
-    return (uint32_t)value;
-}
-
 nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     nt_gfx_gpu_caps_t caps = {0};
     caps.has_astc = get_extension("WEBGL_compressed_texture_astc");
@@ -161,14 +150,7 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     caps.has_float_texture_linear = get_extension("OES_texture_float_linear");
     /* Without getExtension the COMPLETION_STATUS query is INVALID_ENUM and reads as never complete. */
     caps.has_parallel_shader_compile = get_extension("KHR_parallel_shader_compile");
-    caps.max_texture_size = gl_limit(GL_MAX_TEXTURE_SIZE);
-    caps.uniform_buffer_offset_alignment = gl_limit(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT);
-    caps.max_varying_components = gl_limit(GL_MAX_VARYING_COMPONENTS);
-    caps.max_vertex_uniform_components = gl_limit(GL_MAX_VERTEX_UNIFORM_COMPONENTS);
-    caps.max_fragment_uniform_components = gl_limit(GL_MAX_FRAGMENT_UNIFORM_COMPONENTS);
-    caps.max_vertex_uniform_blocks = gl_limit(GL_MAX_VERTEX_UNIFORM_BLOCKS);
-    caps.max_fragment_uniform_blocks = gl_limit(GL_MAX_FRAGMENT_UNIFORM_BLOCKS);
-    caps.max_uniform_block_size = gl_limit(GL_MAX_UNIFORM_BLOCK_SIZE);
+    nt_gfx_gl_read_limits(&caps);
     return caps;
 }
 
