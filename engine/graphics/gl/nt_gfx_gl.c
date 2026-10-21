@@ -1336,20 +1336,11 @@ static GLint stage_compile_status(GLuint shader) {
 
 #ifdef NT_PLATFORM_WEB
 /* The browser's translation is what the driver compiled; it can differ per GPU. */
-static void log_translated_source(GLuint shader, const char *stage, char *text, uint32_t cap) {
-    const int len = nt_gfx_gl_ctx_translated_source(shader, text, cap);
-    if (len < 0) {
-        NT_LOG_ERROR("%s translated: unavailable", stage);
-        return;
-    }
-    if (len == 0) {
-        NT_LOG_ERROR("%s translated: empty", stage);
-        return;
-    }
-    NT_LOG_ERROR("%s translated:", stage);
-    nt_gfx_gl_log_lines(text);
-    if ((uint32_t)len >= cap) {
-        NT_LOG_ERROR("%s translated: truncated, %d bytes", stage, len);
+static void log_translated_source(GLuint shader, const char *stage) {
+    char text[2048];
+    if (nt_gfx_gl_ctx_translated_source(shader, text, sizeof(text))) {
+        NT_LOG_ERROR("%s translated:", stage);
+        nt_gfx_gl_log_lines(text);
     }
 }
 #endif
@@ -1362,18 +1353,12 @@ static void nt_gfx_gl_log_link_failure(const nt_gfx_gl_program_t *rec) {
     const GLint vs_compile = stage_compile_status(rec->vs);
     const GLint fs_compile = stage_compile_status(rec->fs);
 #ifdef NT_PLATFORM_WEB
-    /* Before the driver logs, which a journal that keeps its tail should keep first. A compile failure
-     * needs only the failed stage's text; a link failure needs both live stages. One budget serves both. */
-    const bool compile_failed = vs_compile == 0 || fs_compile == 0;
-    const bool vs_text = compile_failed ? vs_compile == 0 : vs_compile == 1;
-    const bool fs_text = compile_failed ? fs_compile == 0 : fs_compile == 1;
-    char text[4096];
-    const uint32_t cap = sizeof(text) / (vs_text && fs_text ? 2U : 1U);
-    if (vs_text) {
-        log_translated_source(rec->vs, "vertex", text, cap);
+    /* Before the driver logs, which a journal that keeps its tail should keep first. */
+    if (vs_compile >= 0) {
+        log_translated_source(rec->vs, "vertex");
     }
-    if (fs_text) {
-        log_translated_source(rec->fs, "fragment", text, cap);
+    if (fs_compile >= 0) {
+        log_translated_source(rec->fs, "fragment");
     }
 #endif
     nt_gfx_gl_log_program(rec->program);

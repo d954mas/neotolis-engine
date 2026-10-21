@@ -150,13 +150,9 @@ already-confirmed context loss.
 On the web, the browser's translation of a stage is what the driver actually
 compiled, and the browser may adapt it to the GPU. A link failure therefore logs
 `<stage> translated:` and the text from the optional `WEBGL_debug_shaders`
-extension first, ahead of the driver logs that a journal keeping its tail should
-retain: only the stages that failed to compile, or both live stages when both
-compiled. The logged stages share 4 KB; longer text ends with a
-`truncated, <bytes> bytes` line, an empty translation (a stage the browser
-itself rejected) logs `empty`, and a browser without the extension logs
-`unavailable`. Native GL compiles the packed source as is and logs no
-translation.
+extension for each live stage, cut to 2 KB, ahead of the driver logs that a
+journal keeping its tail should retain. A stage without text logs nothing.
+Native GL compiles the packed source as is and logs no translation.
 
 The label is an optional debug name in static storage, like material labels; the
 program stores the pointer. NULL or empty labels report `<unnamed>`. Labels do not

@@ -103,15 +103,14 @@ static bool get_extension(const char *name) {
 }
 
 #if NT_LOG_MIN_LEVEL <= 2
-EM_JS_DEPS(nt_gfx_gl_ctx_translated_source, "$lengthBytesUTF8")
 /* Not recorded: it runs only before a link-failure assertion, and nothing observes that frame. */
 /* clang-format off */
 EM_JS(int, nt_gfx_gl_ctx_translated_source, (uint32_t shader, char *out, uint32_t cap), {
     var ext = GL.currentContext.GLctx.getExtension("WEBGL_debug_shaders");
     var text = ext ? ext["getTranslatedShaderSource"](GL.shaders[shader]) : null;
-    if (text === null) return -1;
+    if (!text) return 0;
     stringToUTF8(text, out, cap);
-    return lengthBytesUTF8(text);
+    return 1;
 })
 /* clang-format on */
 #endif

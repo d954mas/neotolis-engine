@@ -100,23 +100,26 @@ for (const mode of ['vertex', 'fragment', 'link', 'no-translation', 'long-transl
     const fragment = mode === 'destroyed' ? -1 : mode === 'fragment' ? 0 : 1;
     expect(lines[at - 1]).toContain(`program link stages: vs_compile=${vertex} fs_compile=${fragment}`);
 
-    // A compile failure translates only the failed stage; a link failure both live stages.
-    const stages = mode === 'destroyed' ? [] : mode === 'vertex' ? ['vertex'] : mode === 'fragment' ? ['fragment'] : ['vertex', 'fragment'];
+    // Every live stage is translated; one the browser itself rejected has no text and logs nothing.
+    const translated = mode === 'destroyed' || mode === 'no-translation' ? [] : mode === 'vertex' ? ['fragment'] : mode === 'fragment' ? ['vertex'] : ['vertex', 'fragment'];
     const driver = lines.findIndex(line => line.includes('driver detail'));
     for (const stage of ['vertex', 'fragment']) {
-      const header = lines.findIndex(line => line.includes(`${stage} translated:`));
-      expect(header >= 0).toBe(stages.includes(stage));
+      const header = lines.findIndex(line => line.endsWith(`${stage} translated:`));
+      expect(header >= 0).toBe(translated.includes(stage));
       if (header < 0) continue;
       expect(header).toBeLessThan(at - 1);
       if (driver >= 0) expect(header).toBeLessThan(driver);
-      if (mode === 'vertex' || mode === 'fragment') expect(lines[header]).toMatch(new RegExp(`${stage} translated: empty$`));
-      if (mode === 'no-translation') expect(lines[header]).toMatch(new RegExp(`${stage} translated: unavailable$`));
-      if (mode === 'link') expect(lines[header + 1]).toMatch(new RegExp(`// ${stage} stage$`));
-      if (mode === 'long-translation') expect(record).toContain(`${stage} translated: truncated, 11400 bytes`);
+      if (mode !== 'long-translation') expect(lines[header + 1]).toMatch(new RegExp(`// ${stage} stage$`));
+    }
+    if (mode === 'long-translation') {
+      // 11400 bytes per stage, cut to 2 KB each.
+      const kept = lines.filter(line => line.includes('translated line')).length;
+      expect(kept).toBeGreaterThan(60);
+      expect(kept).toBeLessThanOrEqual(72);
     }
     const state = await probe();
     expect(state.queries).toBe(mode === 'destroyed' ? 0 : 2);
-    expect(state.translations).toBe(mode === 'no-translation' ? 0 : stages.length);
+    expect(state.translations).toBe(mode === 'destroyed' || mode === 'no-translation' ? 0 : 2);
     if (mode === 'link') expect(lines.findLastIndex(line => line.includes('driver detail'))).toBeLessThan(at - 1);
   });
 }

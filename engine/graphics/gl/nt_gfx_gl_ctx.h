@@ -42,8 +42,7 @@ double nt_gfx_gl_ctx_query_result(uint32_t query);
 void nt_gfx_gl_read_limits(nt_gfx_gpu_caps_t *caps);
 
 #if defined(NT_PLATFORM_WEB) && NT_LOG_MIN_LEVEL <= 2
-/* Browser-translated text of a live stage, truncated to cap bytes. Returns its full UTF-8 length,
- * 0 when empty, -1 when the browser exposes none. */
+/* Writes the browser-translated text of a live stage, cut to cap bytes; 0 when there is none. */
 int nt_gfx_gl_ctx_translated_source(uint32_t shader, char *out, uint32_t cap);
 #endif
 
