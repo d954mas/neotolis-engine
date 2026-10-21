@@ -22,8 +22,9 @@ static void capture_device_info(void);
 /* clang-format off */
 EM_JS(EMSCRIPTEN_WEBGL_CONTEXT_HANDLE, nt_gfx_js_create_context, (const char *target, const EmscriptenWebGLContextAttributes *attrs, char *status, unsigned int cap), {
     var canvas = findCanvasEventTarget(target);
-    var message = "";
-    var on_error = function(event) { message = event.statusMessage; };
+    /* Chromium sends the detailed provider failure first, then "blocked"; keep both in order. */
+    var message = typeof WebGL2RenderingContext == "undefined" ? "no WebGL2RenderingContext" : "";
+    var on_error = function(event) { if (event.statusMessage) message += (message ? " | " : "") + event.statusMessage; };
     canvas.addEventListener("webglcontextcreationerror", on_error);
     var context = _emscripten_webgl_create_context(target, attrs);
     canvas.removeEventListener("webglcontextcreationerror", on_error);
