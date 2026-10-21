@@ -77,7 +77,7 @@ The snapshot is the last observed device, for diagnostics and game workarounds
 of known device bugs; feature decisions read `nt_gfx_gpu_caps()`. Context
 creation refreshes the identity before backend setup, so setup failures already
 carry it. `caps` is `nt_gfx_gpu_caps_t` as text
-(`astc=1 bc7=0 etc2=1 float_rt=1 float_linear=1 parallel_compile=1 max_texture=16384 ubo_align=256 varyings=60 vs_uniforms=1024 fs_uniforms=896 vs_blocks=12 fs_blocks=12 ubo_size=16384`),
+(`astc=1 bc7=0 etc2=1 float_rt=1 float_linear=1 parallel_compile=1 max_texture=16384 ubo_align=256 vary=60 vs_uni=1024 fs_uni=896 vs_ubo=12 fs_ubo=12 ubo_size=16384`),
 written after each successful detection at init and restore; the struct itself
 is reset with `g_nt_gfx`. Web publishes only observations made without context
 loss; loss, failed recreation and shutdown keep the previous snapshot. Steady

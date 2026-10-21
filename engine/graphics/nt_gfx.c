@@ -180,7 +180,7 @@ const nt_gfx_device_info_t *nt_gfx_device_info(void) { return &g_nt_gfx_device_i
 
 static void record_caps(const nt_gfx_gpu_caps_t *caps) {
     (void)snprintf(g_nt_gfx_device_info.caps, sizeof(g_nt_gfx_device_info.caps),
-                   "astc=%d bc7=%d etc2=%d float_rt=%d float_linear=%d parallel_compile=%d max_texture=%u ubo_align=%u varyings=%u vs_uniforms=%u fs_uniforms=%u vs_blocks=%u fs_blocks=%u ubo_size=%u",
+                   "astc=%d bc7=%d etc2=%d float_rt=%d float_linear=%d parallel_compile=%d max_texture=%u ubo_align=%u vary=%u vs_uni=%u fs_uni=%u vs_ubo=%u fs_ubo=%u ubo_size=%u",
                    (int)caps->has_astc, (int)caps->has_bc7, (int)caps->has_etc2, (int)caps->has_float_render_target, (int)caps->has_float_texture_linear, (int)caps->has_parallel_shader_compile,
                    (unsigned)caps->max_texture_size, (unsigned)caps->uniform_buffer_offset_alignment, (unsigned)caps->max_varying_components, (unsigned)caps->max_vertex_uniform_components,
                    (unsigned)caps->max_fragment_uniform_components, (unsigned)caps->max_vertex_uniform_blocks, (unsigned)caps->max_fragment_uniform_blocks, (unsigned)caps->max_uniform_block_size);

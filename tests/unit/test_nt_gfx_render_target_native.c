@@ -81,7 +81,7 @@ static void test_device_identity_survives_shutdown(void) {
     TEST_ASSERT_EQUAL_STRING((const char *)glGetString(GL_VERSION), info->api_version);
     char caps[sizeof(info->caps)];
     const nt_gfx_gpu_caps_t *gpu = &g_nt_gfx.gpu_caps;
-    (void)snprintf(caps, sizeof(caps), "max_texture=%u ubo_align=%u varyings=%u vs_uniforms=%u fs_uniforms=%u vs_blocks=%u fs_blocks=%u ubo_size=%u", (unsigned)gpu->max_texture_size,
+    (void)snprintf(caps, sizeof(caps), "max_texture=%u ubo_align=%u vary=%u vs_uni=%u fs_uni=%u vs_ubo=%u fs_ubo=%u ubo_size=%u", (unsigned)gpu->max_texture_size,
                    (unsigned)gpu->uniform_buffer_offset_alignment, (unsigned)gpu->max_varying_components, (unsigned)gpu->max_vertex_uniform_components, (unsigned)gpu->max_fragment_uniform_components,
                    (unsigned)gpu->max_vertex_uniform_blocks, (unsigned)gpu->max_fragment_uniform_blocks, (unsigned)gpu->max_uniform_block_size);
     TEST_ASSERT_NOT_NULL(strstr(info->caps, caps));
