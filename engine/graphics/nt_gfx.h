@@ -16,10 +16,6 @@
 #error "NT_GFX_MAX_VERTEX_STREAMS must be 1-32"
 #endif
 
-#ifndef NT_GFX_MAX_INSTANCE_ATTRS
-#error "NT_GFX_MAX_INSTANCE_ATTRS must be defined by the nt_gfx_interface target"
-#endif
-
 #include "core/nt_assert.h"
 #include "core/nt_types.h"
 #include "hash/nt_hash.h"
@@ -323,11 +319,6 @@ typedef enum {
 /* ---- Vertex layout ---- */
 
 #define NT_GFX_MAX_VERTEX_ATTRS 16
-/* NT_GFX_MAX_INSTANCE_ATTRS comes from CMake (default 8, at most 16): the attr cap of one
- * instance layout, which gfx and the GL backend store packed per registered layout. */
-#if NT_GFX_MAX_INSTANCE_ATTRS < 1 || NT_GFX_MAX_INSTANCE_ATTRS > NT_GFX_MAX_VERTEX_ATTRS
-#error "NT_GFX_MAX_INSTANCE_ATTRS must be 1-16"
-#endif
 /* Registered instance layouts: renderers register a few each at init, and an equal layout
  * returns the existing handle, so re-init never grows the table. */
 #define NT_GFX_MAX_INSTANCE_LAYOUTS 32 /* a slot fits a byte: the GL VAO mirror and the bind command store it so */

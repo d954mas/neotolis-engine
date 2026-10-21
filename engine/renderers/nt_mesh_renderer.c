@@ -18,8 +18,6 @@
 
 #include <string.h>
 
-_Static_assert(NT_GFX_MAX_INSTANCE_ATTRS >= 4 + (2 * NT_MESH_RENDERER_SKINNED), "mesh instance layouts need 4 (skinned 6) attributes: raise NT_GFX_MAX_INSTANCE_ATTRS");
-
 static struct {
     nt_instance_layout_t layout;
 #if NT_MESH_RENDERER_SKINNED

@@ -126,7 +126,7 @@ typedef struct {
 /* ---- Instance layout records (CPU only; survive context loss) ---- */
 
 typedef struct {
-    nt_vertex_attr_t attrs[NT_GFX_MAX_INSTANCE_ATTRS];
+    nt_vertex_attr_t attrs[NT_GFX_MAX_VERTEX_ATTRS];
     uint32_t extent; /* bytes one instance reads: max attr offset + attr size (may exceed the stride) */
     uint16_t stride;
     uint16_t mask; /* attribute locations */
@@ -1200,7 +1200,7 @@ static nt_gfx_result_t make_instance_layout(const nt_vertex_layout_t *layout, nt
     /* nt_gfx_init empties the registry, so a handle made before it would name nothing. */
     NT_ASSERT(g_nt_gfx.initialized && "make_instance_layout: call after nt_gfx_init");
     NT_ASSERT(layout != NULL);
-    NT_ASSERT(layout->attr_count >= 1 && layout->attr_count <= NT_GFX_MAX_INSTANCE_ATTRS && "instance layout needs 1..NT_GFX_MAX_INSTANCE_ATTRS attrs");
+    NT_ASSERT(layout->attr_count >= 1 && layout->attr_count <= NT_GFX_MAX_VERTEX_ATTRS && "instance layout needs 1..NT_GFX_MAX_VERTEX_ATTRS attrs");
     /* GL reads stride 0 as tightly packed per attribute, which the draw range check cannot bound. */
     NT_ASSERT(layout->stride > 0 && layout->stride <= 255 && "instance layout stride must be 1..255 (WebGL2 cap)");
     assert_layout_webgl2_rules(layout);

@@ -128,7 +128,7 @@ typedef struct {
 } nt_gfx_gl_vertex_input_t;
 
 typedef struct {
-    nt_gfx_gl_attr_t attrs[NT_GFX_MAX_INSTANCE_ATTRS];
+    nt_gfx_gl_attr_t attrs[NT_GFX_MAX_VERTEX_ATTRS];
     uint16_t stride;
     uint16_t mask;
     uint8_t attr_count;

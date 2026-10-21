@@ -633,13 +633,16 @@ static void test_destroying_an_instance_buffer_detaches_it(void) {
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
 }
 
-/* Location 2 as RGBA8 at offset 4, location 3 as float4 at 16, stride 32: shares location 2 with
- * pair_layout in another format. */
+/* Location 2 as RGBA8 at offset 4, location 3 as float4 at 16, locations 4-11 as floats from 32,
+ * stride 64: shares location 2 with pair_layout in another format and has more than 8 attrs. */
 static nt_instance_layout_t switch_layout(void) {
-    return nt_gfx_make_instance_layout(
-        &(nt_vertex_layout_t){.attr_count = 2,
-                              .stride = 32,
-                              .attrs = {{.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 4}, {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 16}}});
+    nt_vertex_layout_t layout = {.attr_count = 2,
+                                 .stride = 64,
+                                 .attrs = {{.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 4}, {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 16}}};
+    for (uint8_t loc = 4; loc <= 11; loc++) {
+        layout.attrs[layout.attr_count++] = (nt_vertex_attr_t){.location = loc, .type = NT_VERTEX_FLOAT, .count = 1, .offset = (uint16_t)(32 + ((loc - 4) * 4))};
+    }
+    return nt_gfx_make_instance_layout(&layout);
 }
 
 /* One frame drawing vi with `layout` from `buffer` ({0} = the general stream, 64 bytes); returns
@@ -709,15 +712,17 @@ static void test_vertex_input_switches_instance_layouts(void) {
     const nt_instance_layout_t other = switch_layout();
     TEST_ASSERT_EQUAL_UINT32(2 + (2 + 2 + 2), layout_frame(pip, vi, pair, (nt_buffer_t){0})); /* + the VAO's position stream */
     const GLuint vao = (GLuint)nt_gfx_gl_test_cached_vao();
-    /* Location 3 enabled; location 1 dropped (its re-point to no buffer counts); both of the new layout pointed. */
-    TEST_ASSERT_EQUAL_UINT32(1 + 1 + 1 + 2, layout_frame(pip, vi, other, (nt_buffer_t){0}));
+    /* Location 1 dropped (its re-point to no buffer counts); 3-11 enabled with divisors; all 10 pointed. */
+    TEST_ASSERT_EQUAL_UINT32(1 + 9 + 9 + 10, layout_frame(pip, vi, other, (nt_buffer_t){0}));
     assert_attrib_dropped(attrib_state(vao, 1));
-    assert_attrib(attrib_state(vao, 2), GL_UNSIGNED_BYTE, 4, GL_TRUE, 32, 4);
-    assert_attrib(attrib_state(vao, 3), GL_FLOAT, 4, GL_FALSE, 32, 16);
-    TEST_ASSERT_EQUAL_UINT32(1 + 1 + 1 + 2, layout_frame(pip, vi, pair, (nt_buffer_t){0}));
+    assert_attrib(attrib_state(vao, 2), GL_UNSIGNED_BYTE, 4, GL_TRUE, 64, 4);
+    assert_attrib(attrib_state(vao, 3), GL_FLOAT, 4, GL_FALSE, 64, 16);
+    assert_attrib(attrib_state(vao, 11), GL_FLOAT, 1, GL_FALSE, 64, 60);
+    TEST_ASSERT_EQUAL_UINT32(9 + 1 + 1 + 2, layout_frame(pip, vi, pair, (nt_buffer_t){0}));
     assert_attrib(attrib_state(vao, 1), GL_FLOAT, 2, GL_FALSE, 16, 0);
     assert_attrib(attrib_state(vao, 2), GL_FLOAT, 2, GL_FALSE, 16, 8);
     assert_attrib_dropped(attrib_state(vao, 3));
+    assert_attrib_dropped(attrib_state(vao, 11));
     TEST_ASSERT_EQUAL_UINT32(0, layout_frame(pip, vi, pair, (nt_buffer_t){0}));
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
 }

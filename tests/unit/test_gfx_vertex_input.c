@@ -294,13 +294,13 @@ void test_vi_creation_asserts_webgl2_rules(void) {
      * a removed cap would still trap downstream on the zeroed attrs. */
     EXPECT_ASSERT(nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = {.attr_count = NT_GFX_MAX_VERTEX_ATTRS + 1, .stride = 4}, .vertex_buffer = vbo}));
     TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "NT_GFX_MAX_VERTEX_ATTRS"));
-    EXPECT_ASSERT(nt_gfx_make_instance_layout(&(nt_vertex_layout_t){.attr_count = NT_GFX_MAX_INSTANCE_ATTRS + 1, .stride = 4}));
-    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "NT_GFX_MAX_INSTANCE_ATTRS"));
+    EXPECT_ASSERT(nt_gfx_make_instance_layout(&(nt_vertex_layout_t){.attr_count = NT_GFX_MAX_VERTEX_ATTRS + 1, .stride = 4}));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "NT_GFX_MAX_VERTEX_ATTRS"));
     EXPECT_ASSERT(nt_gfx_make_instance_layout(&(nt_vertex_layout_t){0}));
-    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "NT_GFX_MAX_INSTANCE_ATTRS"));
-    /* Exactly NT_GFX_MAX_INSTANCE_ATTRS is accepted and survives the backend's compact copy. */
-    nt_vertex_layout_t inst_full = {.attr_count = NT_GFX_MAX_INSTANCE_ATTRS, .stride = (uint16_t)(4 * NT_GFX_MAX_INSTANCE_ATTRS)};
-    for (uint8_t i = 0; i < NT_GFX_MAX_INSTANCE_ATTRS; i++) {
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "NT_GFX_MAX_VERTEX_ATTRS"));
+    /* Exactly NT_GFX_MAX_VERTEX_ATTRS is accepted and survives the backend's compact copy. */
+    nt_vertex_layout_t inst_full = {.attr_count = NT_GFX_MAX_VERTEX_ATTRS, .stride = (uint16_t)(4 * NT_GFX_MAX_VERTEX_ATTRS)};
+    for (uint8_t i = 0; i < NT_GFX_MAX_VERTEX_ATTRS; i++) {
         inst_full.attrs[i] = (nt_vertex_attr_t){.location = i, .type = NT_VERTEX_FLOAT, .count = 1, .offset = (uint16_t)(i * 4)};
     }
     TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_make_instance_layout(&inst_full).id);
