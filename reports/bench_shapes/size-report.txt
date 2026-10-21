@@ -1,5 +1,5 @@
 # Size Report: bench_shapes (wasm-analysis-paired)
-# Commit: f94abb9
+# Commit: f229888
 
 ## WASM Section Sizes
 
@@ -7,24 +7,24 @@ Section                Size
 ---------------- ----------
 Type                 213 B
 Import               486 B
-Function             100 B
+Function             103 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                71 B
 Elem                  24 B
-Code               76620 B
-Data               13889 B
-Custom              4260 B
+Code               77094 B
+Data               14013 B
+Custom              4329 B
 ---------------- ----------
-TOTAL              95684 B
+TOTAL              96354 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-16740 B   frame
-16224 B   main
+16621 B   frame
+16304 B   main
  3002 B   fmt_fp
  2834 B   rebuild_shapes
  2611 B   printf_core
@@ -50,12 +50,12 @@ TOTAL              95684 B
   517 B   nt_gfx_bind_uniform_block
   502 B   nt_gfx_backend_bind_vertex_input
   501 B   emmalloc_memalign
-  473 B   nt_gfx_make_program
+  487 B   nt_gfx_make_program
   452 B   nt_gfx_update_buffer
   431 B   nt_app_web_frame
 
-Total functions: 99
-Total code size: 76449 B
+Total functions: 102
+Total code size: 76918 B
 
 ## Built Engine Archives
 
@@ -78,8 +78,8 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               65220 B
-libnt_gfx.a               105054 B
-libnt_gfx_stub.a            6702 B
+libnt_gfx.a               107110 B
+libnt_gfx_stub.a            6854 B
 libnt_hash.a                4108 B
 libnt_http.a               16484 B
 libnt_http_stub.a          11406 B
@@ -124,9 +124,9 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2638416 B
+TOTAL (archives)         2640624 B
 
 ## Data Segments Summary
 
 Segments: 59
-Total data size: 13473 B
+Total data size: 13597 B

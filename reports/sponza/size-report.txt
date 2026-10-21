@@ -1,5 +1,5 @@
 # Size Report: sponza (wasm-analysis-paired)
-# Commit: f94abb9
+# Commit: f229888
 
 ## WASM Section Sizes
 
@@ -7,28 +7,28 @@ Section                Size
 ---------------- ----------
 Type                 235 B
 Import               626 B
-Function             162 B
+Function             165 B
 Table                  5 B
 Memory                 7 B
 Global                 8 B
 Export                71 B
 Elem                  78 B
-Code              199344 B
-Data              210247 B
-Custom             10518 B
+Code              199851 B
+Data              210372 B
+Custom             10587 B
 ---------------- ----------
-TOTAL             421301 B
+TOTAL             422005 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-35859 B   frame
+35763 B   frame
 31497 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
 27329 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 17141 B   nt_gfx_activate_texture
  5754 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
- 5271 B   main
+ 5345 B   main
  4533 B   basist::transcode_uastc_to_etc1(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
  4466 B   nt_gfx_activate_mesh
  3914 B   basist::pack_eac(basist::eac_block&, unsigned char const*, unsigned int)
@@ -54,8 +54,8 @@ TOTAL             421301 B
   770 B   __cxx_global_array_dtor
   769 B   nt_input_web_on_pointer_down
 
-Total functions: 160
-Total code size: 199078 B
+Total functions: 163
+Total code size: 199580 B
 
 ## Built Engine Archives
 
@@ -78,8 +78,8 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               65220 B
-libnt_gfx.a               105054 B
-libnt_gfx_stub.a            6702 B
+libnt_gfx.a               107110 B
+libnt_gfx_stub.a            6854 B
 libnt_hash.a                4108 B
 libnt_http.a               16484 B
 libnt_http_stub.a          11406 B
@@ -124,9 +124,9 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2638416 B
+TOTAL (archives)         2640624 B
 
 ## Data Segments Summary
 
 Segments: 159
-Total data size: 209080 B
+Total data size: 209204 B

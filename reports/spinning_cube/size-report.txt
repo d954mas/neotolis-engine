@@ -1,5 +1,5 @@
 # Size Report: spinning_cube (wasm-analysis-paired)
-# Commit: f94abb9
+# Commit: f229888
 
 ## WASM Section Sizes
 
@@ -7,24 +7,24 @@ Section                Size
 ---------------- ----------
 Type                 165 B
 Import               472 B
-Function              98 B
+Function             101 B
 Table                  5 B
 Memory                 7 B
 Global                 8 B
 Export                65 B
 Elem                  33 B
-Code               73950 B
-Data               13748 B
-Custom              4007 B
+Code               74443 B
+Data               13876 B
+Custom              4076 B
 ---------------- ----------
-TOTAL              92558 B
+TOTAL              93251 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-19901 B   frame
-16711 B   main
+19810 B   frame
+16786 B   main
  3002 B   fmt_fp
  2602 B   printf_core
  2196 B   nt_shape_renderer_flush
@@ -48,14 +48,14 @@ TOTAL              92558 B
   492 B   emmalloc_memalign
   491 B   nt_gfx_bind_uniform_block
   483 B   nt_gfx_backend_bind_vertex_input
-  449 B   nt_gfx_make_program
+  463 B   nt_gfx_make_program
   434 B   vsnprintf
   424 B   nt_app_web_frame
   424 B   nt_gfx_update_buffer
   407 B   nt_log_write
 
-Total functions: 97
-Total code size: 73791 B
+Total functions: 100
+Total code size: 74279 B
 
 ## Built Engine Archives
 
@@ -78,8 +78,8 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               65220 B
-libnt_gfx.a               105054 B
-libnt_gfx_stub.a            6702 B
+libnt_gfx.a               107110 B
+libnt_gfx_stub.a            6854 B
 libnt_hash.a                4108 B
 libnt_http.a               16484 B
 libnt_http_stub.a          11406 B
@@ -124,9 +124,9 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2638416 B
+TOTAL (archives)         2640624 B
 
 ## Data Segments Summary
 
 Segments: 45
-Total data size: 13429 B
+Total data size: 13557 B
