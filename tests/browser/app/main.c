@@ -135,6 +135,7 @@ static nt_pipeline_t s_mesh_pipeline;
 static nt_vertex_input_t s_mesh_vi;
 static nt_vertex_input_t s_mesh_vi_high; /* the same mesh over vertex stream 1 */
 static nt_instance_layout_t s_mesh_instance_layout;
+static nt_instance_layout_t s_mesh_switch_layout; /* drawn off screen through s_mesh_vi before its own layout */
 static uint32_t s_mesh_handle;
 static uint32_t s_mesh_index_count, s_mesh_vertex_count;
 
@@ -242,6 +243,8 @@ static bool mesh_probe_create(void) {
         .label = "mesh_probe_vi",
     };
     s_mesh_instance_layout = nt_gfx_make_instance_layout(&(nt_vertex_layout_t){.attr_count = 1, .stride = 8, .attrs = {{.location = 4, .type = NT_VERTEX_FLOAT, .count = 2}}});
+    s_mesh_switch_layout = nt_gfx_make_instance_layout(
+        &(nt_vertex_layout_t){.attr_count = 2, .stride = 24, .attrs = {{.location = 4, .type = NT_VERTEX_FLOAT, .count = 2}, {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 8}}});
     s_mesh_vi = nt_gfx_make_vertex_input(&vi_desc);
     s_mesh_vi_high = nt_gfx_make_vertex_input(&vi_desc);
     return s_mesh_pipeline.id != 0 && s_mesh_vi.id != 0 && s_mesh_vi_high.id != 0;
@@ -282,6 +285,12 @@ static void mesh_probe_draw(void) {
     nt_gfx_bind_pipeline(s_mesh_pipeline);
     const float color[4] = {0.25F, 0.5F, 0.75F, 1.0F};
     nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, color, sizeof(color));
+    /* The same vertex input switches layouts every frame: re-points and detaches through WebGL2. */
+    const float away[6] = {5.0F, 5.0F, 0.0F, 0.0F, 0.0F, 0.0F};
+    uint32_t away_offset = 0;
+    memcpy(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, sizeof(away), 4, &away_offset), away, sizeof(away));
+    nt_gfx_bind_vertex_input_instanced(s_mesh_vi, s_mesh_switch_layout, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), away_offset);
+    nt_gfx_draw_indexed_instanced(0, s_mesh_index_count, s_mesh_vertex_count, 1);
     nt_gfx_bind_vertex_input_instanced(s_mesh_vi, s_mesh_instance_layout, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), low_offset + 8U);
     nt_gfx_draw_indexed_instanced(0, s_mesh_index_count, s_mesh_vertex_count, 2);
     nt_gfx_bind_vertex_input_instanced(s_mesh_vi_high, s_mesh_instance_layout, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1), high_offset + 8U);

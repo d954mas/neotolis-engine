@@ -18,8 +18,6 @@
 
 #include <string.h>
 
-_Static_assert(NT_GFX_MAX_INSTANCE_ATTRS >= 4 + (2 * NT_MESH_RENDERER_SKINNED), "mesh instance layouts need 4 (skinned 6) attributes: raise NT_GFX_MAX_INSTANCE_ATTRS");
-
 static struct {
     nt_instance_layout_t layout;
 #if NT_MESH_RENDERER_SKINNED
@@ -29,7 +27,7 @@ static struct {
 } s_mesh_renderer; /* layout.id != 0 between init and shutdown */
 
 /* clang-format off */
-static const nt_vertex_layout_t s_instance_layout = {
+const nt_vertex_layout_t nt_mesh_instance_layout = {
     .attr_count = 4,
     .stride = sizeof(nt_mesh_instance_t),
     .attrs = {
@@ -40,7 +38,7 @@ static const nt_vertex_layout_t s_instance_layout = {
     },
 };
 #if NT_MESH_RENDERER_SKINNED
-static const nt_vertex_layout_t s_skinned_instance_layout = {
+const nt_vertex_layout_t nt_skinned_mesh_instance_layout = {
     .attr_count = 6,
     .stride = sizeof(nt_skinned_mesh_instance_t),
     .attrs = {
@@ -59,9 +57,9 @@ static const nt_vertex_layout_t s_skinned_instance_layout = {
 
 void nt_mesh_renderer_init(void) {
     NT_ASSERT(s_mesh_renderer.layout.id == 0);
-    s_mesh_renderer.layout = nt_gfx_make_instance_layout(&s_instance_layout);
+    s_mesh_renderer.layout = nt_gfx_make_instance_layout(&nt_mesh_instance_layout);
 #if NT_MESH_RENDERER_SKINNED
-    s_mesh_renderer.skinned_layout = nt_gfx_make_instance_layout(&s_skinned_instance_layout);
+    s_mesh_renderer.skinned_layout = nt_gfx_make_instance_layout(&nt_skinned_mesh_instance_layout);
     s_mesh_renderer.skin_name_hash = nt_hash32_str("u_skin_matrices").value;
 #endif
 }
@@ -141,13 +139,12 @@ static void draw_one(nt_mesh_t mesh, nt_material_t material, nt_instance_layout_
     }
 }
 
-void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_buffer_t instances, uint32_t offset, uint32_t count) {
-    NT_ASSERT(s_mesh_renderer.layout.id != 0);
+void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_instance_layout_t layout, nt_buffer_t instances, uint32_t offset, uint32_t count) {
     /* A lost context can leave a game-activated mesh 0; nothing would draw. */
     if (g_nt_gfx.context_lost) {
         return;
     }
-    draw_one(mesh, material, s_mesh_renderer.layout, instances, offset, count, NULL);
+    draw_one(mesh, material, layout, instances, offset, count, NULL);
 }
 
 static uint32_t find_run_end(const nt_render_item_t *items, uint32_t run_start, uint32_t count) {
@@ -202,7 +199,7 @@ void nt_mesh_renderer_draw_list(uint32_t stream, const nt_render_item_t *items, 
 
 #if NT_MESH_RENDERER_SKINNED
 // #region skinned
-void nt_mesh_renderer_draw_skinned(nt_mesh_t mesh, nt_material_t material, nt_texture_t deformation, nt_buffer_t instances, uint32_t offset, uint32_t count) {
+void nt_mesh_renderer_draw_skinned(nt_mesh_t mesh, nt_material_t material, nt_texture_t deformation, nt_instance_layout_t layout, nt_buffer_t instances, uint32_t offset, uint32_t count) {
     NT_ASSERT(s_mesh_renderer.layout.id != 0);
     /* A lost context can leave the deformation texture or a mesh 0; nothing would draw. */
     if (g_nt_gfx.context_lost) {
@@ -210,7 +207,7 @@ void nt_mesh_renderer_draw_skinned(nt_mesh_t mesh, nt_material_t material, nt_te
     }
     NT_ASSERT(deformation.id != 0 && "skinned draw requires a deformation texture");
     const nt_gfx_texture_binding_t skin = {.name = {.value = s_mesh_renderer.skin_name_hash}, .texture = deformation, .sampler = NT_SAMPLER_DEFAULT};
-    draw_one(mesh, material, s_mesh_renderer.skinned_layout, instances, offset, count, &skin);
+    draw_one(mesh, material, layout, instances, offset, count, &skin);
 }
 
 static uint32_t find_skinned_run_end(const nt_render_item_t *items, uint32_t leader, uint32_t end, uint32_t texture_id, nt_skin_comp_view_t skin_view) {

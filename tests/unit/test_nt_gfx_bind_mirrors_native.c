@@ -633,6 +633,130 @@ static void test_destroying_an_instance_buffer_detaches_it(void) {
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
 }
 
+/* Location 2 as RGBA8 at offset 4, location 3 as float4 at 16, locations 4-11 as floats from 32,
+ * stride 64: shares location 2 with pair_layout in another format and has more than 8 attrs. */
+static nt_instance_layout_t switch_layout(void) {
+    nt_vertex_layout_t layout = {.attr_count = 2,
+                                 .stride = 64,
+                                 .attrs = {{.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 4}, {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 16}}};
+    for (uint8_t loc = 4; loc <= 11; loc++) {
+        layout.attrs[layout.attr_count++] = (nt_vertex_attr_t){.location = loc, .type = NT_VERTEX_FLOAT, .count = 1, .offset = (uint16_t)(32 + ((loc - 4) * 4))};
+    }
+    return nt_gfx_make_instance_layout(&layout);
+}
+
+/* One frame drawing vi with `layout` from `buffer` ({0} = the general stream, 64 bytes); returns
+ * that frame's enable + divisor + pointer calls. */
+static uint32_t layout_frame(nt_pipeline_t pip, nt_vertex_input_t vi, nt_instance_layout_t layout, nt_buffer_t buffer) {
+    uint32_t offset = 0;
+    memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 64, 4, &offset), 0, 64);
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pip);
+    nt_gfx_bind_vertex_input_instanced(vi, layout, buffer.id != 0 ? buffer : nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), 0);
+    nt_gfx_draw_instanced(0, 3, 1);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    const uint32_t *gl = g_nt_gfx.counters.gl;
+    const uint32_t calls = gl[NT_GFX_GL_glEnableVertexAttribArray] + gl[NT_GFX_GL_glVertexAttribDivisor] + gl[NT_GFX_GL_glVertexAttribPointer];
+    nt_gfx_begin_frame();
+    return calls;
+}
+
+typedef struct {
+    GLint enabled, buffer, divisor, size, type, normalized, stride;
+    GLintptr offset;
+} attrib_state_t;
+
+static attrib_state_t attrib_state(GLuint vao, GLuint location) {
+    attrib_state_t s = {0};
+    void *pointer = NULL;
+    glBindVertexArray(vao);
+    glGetVertexAttribiv(location, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &s.enabled);
+    glGetVertexAttribiv(location, GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING, &s.buffer);
+    glGetVertexAttribiv(location, GL_VERTEX_ATTRIB_ARRAY_DIVISOR, &s.divisor);
+    glGetVertexAttribiv(location, GL_VERTEX_ATTRIB_ARRAY_SIZE, &s.size);
+    glGetVertexAttribiv(location, GL_VERTEX_ATTRIB_ARRAY_TYPE, &s.type);
+    glGetVertexAttribiv(location, GL_VERTEX_ATTRIB_ARRAY_NORMALIZED, &s.normalized);
+    glGetVertexAttribiv(location, GL_VERTEX_ATTRIB_ARRAY_STRIDE, &s.stride);
+    glGetVertexAttribPointerv(location, GL_VERTEX_ATTRIB_ARRAY_POINTER, &pointer);
+    s.offset = (GLintptr)pointer;
+    glBindVertexArray((GLuint)nt_gfx_gl_test_cached_vao());
+    return s;
+}
+
+static void assert_attrib(attrib_state_t s, GLint type, GLint size, GLint normalized, GLint stride, GLintptr offset) {
+    TEST_ASSERT_EQUAL_INT(1, s.enabled);
+    TEST_ASSERT_NOT_EQUAL_INT(0, s.buffer);
+    TEST_ASSERT_EQUAL_INT(1, s.divisor);
+    TEST_ASSERT_EQUAL_INT(type, s.type);
+    TEST_ASSERT_EQUAL_INT(size, s.size);
+    TEST_ASSERT_EQUAL_INT(normalized, s.normalized);
+    TEST_ASSERT_EQUAL_INT(stride, s.stride);
+    TEST_ASSERT_EQUAL_INT64(offset, s.offset);
+}
+
+static void assert_attrib_dropped(attrib_state_t s) {
+    TEST_ASSERT_EQUAL_INT(0, s.enabled);
+    TEST_ASSERT_EQUAL_INT(0, s.buffer);
+}
+
+/* One vertex input follows the layout of each bind: a switch enables only the new locations,
+ * disables and detaches the dropped ones, and re-points every attribute of the new layout, also a
+ * shared location in another format; the same tuple again issues no call. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_vertex_input_switches_instance_layouts(void) {
+    init_with_vertex_streams(1);
+    nt_pipeline_t pip = make_red_pipeline();
+    nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
+    const nt_instance_layout_t pair = pair_layout();
+    const nt_instance_layout_t other = switch_layout();
+    TEST_ASSERT_EQUAL_UINT32(2 + (2 + 2 + 2), layout_frame(pip, vi, pair, (nt_buffer_t){0})); /* + the VAO's position stream */
+    const GLuint vao = (GLuint)nt_gfx_gl_test_cached_vao();
+    /* Location 1 dropped (its re-point to no buffer counts); 3-11 enabled with divisors; all 10 pointed. */
+    TEST_ASSERT_EQUAL_UINT32(1 + 9 + 9 + 10, layout_frame(pip, vi, other, (nt_buffer_t){0}));
+    assert_attrib_dropped(attrib_state(vao, 1));
+    assert_attrib(attrib_state(vao, 2), GL_UNSIGNED_BYTE, 4, GL_TRUE, 64, 4);
+    assert_attrib(attrib_state(vao, 3), GL_FLOAT, 4, GL_FALSE, 64, 16);
+    assert_attrib(attrib_state(vao, 11), GL_FLOAT, 1, GL_FALSE, 64, 60);
+    TEST_ASSERT_EQUAL_UINT32(9 + 1 + 1 + 2, layout_frame(pip, vi, pair, (nt_buffer_t){0}));
+    assert_attrib(attrib_state(vao, 1), GL_FLOAT, 2, GL_FALSE, 16, 0);
+    assert_attrib(attrib_state(vao, 2), GL_FLOAT, 2, GL_FALSE, 16, 8);
+    assert_attrib_dropped(attrib_state(vao, 3));
+    assert_attrib_dropped(attrib_state(vao, 11));
+    TEST_ASSERT_EQUAL_UINT32(0, layout_frame(pip, vi, pair, (nt_buffer_t){0}));
+    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
+}
+
+/* After a switch only the current buffer holds attributes: destroying the previous one touches
+ * nothing, destroying the current one detaches it, and the vertex input draws again. */
+static void test_instance_layout_switch_keeps_buffer_lifetime(void) {
+    init_with_vertex_streams(1);
+    nt_pipeline_t pip = make_red_pipeline();
+    nt_buffer_t first = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 64});
+    nt_buffer_t second = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 64});
+    nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
+    nt_vertex_input_t idle = make_vi(make_vbo(s_full), (nt_buffer_t){0});
+    layout_frame(pip, vi, pair_layout(), first);
+    const GLuint vao = (GLuint)nt_gfx_gl_test_cached_vao();
+    layout_frame(pip, vi, switch_layout(), second);
+    layout_frame(pip, idle, pair_layout(), (nt_buffer_t){0}); /* vi's VAO is no longer bound */
+    nt_gfx_destroy_buffer(first);
+    assert_attrib(attrib_state(vao, 2), GL_UNSIGNED_BYTE, 4, GL_TRUE, 64, 4);
+    assert_attrib(attrib_state(vao, 11), GL_FLOAT, 1, GL_FALSE, 64, 60);
+    nt_gfx_destroy_buffer(second);
+    for (GLuint location = 1; location <= 11; location++) {
+        assert_attrib_dropped(attrib_state(vao, location));
+    }
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pip);
+    uint32_t offset = 0;
+    memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 16, 4, &offset), 0, 16);
+    nt_gfx_bind_vertex_input_instanced(vi, pair_layout(), nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset);
+    nt_gfx_draw_instanced(0, 3, 1);
+    TEST_ASSERT_UINT8_WITHIN(1, 255, end_frame_center_red());
+    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
+}
+
 /* Index uploads go through the service VAO and rebind the cached one: the bound VAO keeps its
  * own index binding. */
 static void test_index_upload_keeps_the_bound_vao(void) {
@@ -1630,6 +1754,8 @@ int main(void) {
     RUN_TEST(test_caller_buffer_draws_without_re_point);
     RUN_TEST(test_destroying_a_bound_vertex_input_grounds_the_vao_cache);
     RUN_TEST(test_destroying_an_instance_buffer_detaches_it);
+    RUN_TEST(test_vertex_input_switches_instance_layouts);
+    RUN_TEST(test_instance_layout_switch_keeps_buffer_lifetime);
     RUN_TEST(test_index_upload_keeps_the_bound_vao);
     RUN_TEST(test_index_data_ops_do_not_rewire_bound_vertex_input);
     RUN_TEST(test_empty_vertex_input_draws_fullscreen);

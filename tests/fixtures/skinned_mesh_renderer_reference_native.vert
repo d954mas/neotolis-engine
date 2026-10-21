@@ -13,6 +13,7 @@ out vec3 v_position_probe;
 out vec3 v_normal_probe;
 out vec3 v_tangent_probe;
 out vec4 v_color_probe;
+out vec4 v_param_probe;
 
 vec3 world_position(vec3 position) {
     vec4 p = vec4(position, 1.0);
@@ -25,5 +26,6 @@ void main() {
     v_normal_probe = a_normal * 0.25 + 0.5;
     v_tangent_probe = a_tangent.xyz * 0.25 + 0.5;
     v_color_probe = a_color;
+    v_param_probe = vec4(0.0);
     gl_Position = vec4(position, 1.0);
 }

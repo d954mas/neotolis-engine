@@ -254,13 +254,10 @@ The skinned part of `nt_mesh_renderer.h` exists only in the
 render items in the given order; through entity it reads
 mesh/material/world/color and `skin_comp`, packs each run's instances into frame
 vertex stream `stream` and records its draw.
-`nt_mesh_renderer_draw_skinned(mesh, material, deformation, buffer, offset,
-count)` draws instances the caller packed, with no entity component
+`nt_mesh_renderer_draw_skinned(mesh, material, deformation, layout, buffer,
+offset, count)` draws instances the caller packed, with no entity component
 ([Mesh draws](../render/architecture.md#mesh-draws)).
-No sampling, FK, mode selection, culling or sorting. Two instance layouts of one
-mesh use different frame streams (asserted; see
-[render architecture, Vertex inputs](../render/architecture.md#vertex-inputs),
-Mesh vertex inputs).
+No sampling, FK, mode selection, culling or sorting.
 
 **One skinning vertex program per pass, always two frames.** The shader fetches
 both frame origins and interpolates by alpha; CPU palettes are the case

@@ -230,20 +230,21 @@ One bind selects the whole geometry for the following draws:
 of `layout` at byte `offset` of `buffer`, one command. Per mesh switch that is a
 single `glBindVertexArray` instead of buffer re-binds plus per-attribute
 `glVertexAttribPointer` rewrites. WebGL2 has no baseInstance, so instances are
-located by pointing the instance attributes at their offset. A vertex input's
-first instanced bind pins its instance layout: it enables the layout's slots
-with divisor 1, and a bind with another layout asserts, so one vertex input
-draws one instance format. Each VAO keeps the buffer and offset of its last
-bind: an equal pair re-points nothing, a new offset or buffer re-points the
-layout's attributes. A vertex input bound with one pair every frame re-points
-nothing; one bound with two in a frame re-points between them every frame. For frame data, a pass whose instances live in their
+located by pointing the instance attributes at their offset. Each VAO keeps the
+layout, buffer and offset of its last instanced bind: an equal tuple re-points
+nothing, a new offset or buffer re-points the layout's attributes, and a new
+layout also disables and detaches the locations only the old layout used and
+enables (divisor 1) the ones only the new layout uses. A vertex input bound with
+one tuple every frame re-points nothing; one bound with two in a frame
+re-points between them every frame, so one layout per (mesh, stream) is
+the cheap case, not a rule. For frame data, a pass whose instances live in their
 own stream keeps every run's offset, and so its pointers, while its counts stay;
 in one shared stream a count change shifts every later run of the frame. An
 empty layout with no buffers is the attribute-less `gl_VertexID` path; every
 draw asserts a bound vertex input.
 
-The first instanced bind of a vertex input asserts that the instance locations
-do not overlap its vertex ones. An instanced bind whose buffer differs from the
+An instanced bind that changes a vertex input's layout (the first instanced
+bind included) asserts that the instance locations do not overlap its vertex ones. An instanced bind whose buffer differs from the
 last instance buffer bound in the pass asserts the buffer's type and liveness;
 a bind equal to the bound tuple returns before any check. A vertex input once
 bound with
@@ -452,14 +453,12 @@ every other buffer. The identity is (mesh, frame stream): materials do not
 shape vertex inputs, so every material on a mesh shares them, and the renderers
 keep no vertex-input cache. They die with the mesh (the destroy cascade) and
 with a context loss; the next use makes them again, also after the caller
-destroys one. The mesh renderer binds them with its plain or skinned instance layout; the
+destroys one. The mesh renderer binds them with the instance layout of each draw; the
 engine layouts share the instance head (`NT_INST_LOC_*`, see
-[shader, Attribute locations](shader.md#attribute-locations)). A mesh's vertex
-input is pinned to the first instance layout drawn through it, so two instance
-layouts of one mesh use different frame streams (asserted). From game buffers
-they would share the base vertex input, so at most one layout draws a mesh from
-game buffers and a second asserts; a game that needs more builds its own vertex
-inputs over the mesh's `vbo`/`ibo` and draws them with `nt_gfx_*` directly.
+[shader, Attribute locations](shader.md#attribute-locations)). Two instance
+layouts of one mesh drawn from one stream, or from game buffers (which share
+the base vertex input), switch the vertex input's layout on every change;
+drawing each layout from its own frame stream avoids that.
 `max_vertex_inputs` budgets the vertex inputs of the meshes (frame streams they
 are drawn from, plus one if drawn from any other buffer) and the others, such
 as the shape renderer's four per frame stream it draws from.
@@ -492,12 +491,12 @@ float-to-byte conversion saturates and rounds half up (NaN gives 0), so an
 opacity fold gives the same alpha on a packed color and on a Clay color with the
 same byte values.
 
-Every mesh and skinned mesh instance carries the entity's drawable color
+Every instance the ECS adapters pack carries the entity's drawable color
 (`nt_mesh_instance_t`, `nt_skinned_mesh_instance_t`), so every render item needs
 a drawable component. A shader that ignores color does not declare the color
-input; the instance layout still provides it. Instance locations are reserved:
-the `NT_INST_LOC_*` head (world rows and color for both instance layouts, frame
-origins and alpha for skinned meshes; values in
+input; the instance layout still provides it. The engine layouts use the
+`NT_INST_LOC_*` head (world rows and color for both, frame origins and alpha for
+skinned meshes; values in
 [shader, Attribute locations](shader.md#attribute-locations)). A mesh stream at
 a location the bound instance layout uses (a hand-built mesh may use any
 location below `NT_GFX_MAX_VERTEX_ATTRS`) asserts at the instanced bind. The
@@ -630,11 +629,24 @@ invalidates them, so the game calls `nt_mesh_renderer_shutdown()` before it and
 init again after. Plain and skinned draws resolve their pipelines from gfx
 the same way. The entry points:
 
-- the cores, `nt_mesh_renderer_draw(mesh, material, buffer, offset, count)`
-  and, in the skinned target, `nt_mesh_renderer_draw_skinned(mesh, material,
-  deformation, buffer, offset, count)`, record one instanced draw of `count`
-  instances (`nt_mesh_instance_t`, `nt_skinned_mesh_instance_t`) at byte
-  `offset` of `buffer`. The skinned core draws `deformation` as its
+- the cores, `nt_mesh_renderer_draw(mesh, material, layout, buffer, offset,
+  count)` and, in the skinned target, `nt_mesh_renderer_draw_skinned(mesh,
+  material, deformation, layout, buffer, offset, count)`, record one instanced
+  draw of `count` instances of `layout` at byte `offset` of `buffer`. The
+  caller owns the layout: the engine head (registering
+  `nt_mesh_instance_layout` or `nt_skinned_mesh_instance_layout` returns the
+  handle `init` registered), the head plus the
+  game's per-instance values, or an instance of its own that its shader reads.
+  This is how per-entity shader values (hit flash, dissolve, growth, an HDR
+  tint) reach one draw without splitting it:
+  ```c
+  nt_vertex_layout_t desc = nt_skinned_mesh_instance_layout;
+  desc.attrs[desc.attr_count++] = (nt_vertex_attr_t){.location = 14, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 64};
+  desc.stride = 80; /* nt_skinned_mesh_instance_t + one vec4 */
+  fighter_layout = nt_gfx_make_instance_layout(&desc); /* once after every nt_gfx_init; keep the handle */
+  nt_mesh_renderer_draw_skinned(mesh, material, deformation, fighter_layout, buffer, offset, count);
+  ```
+  Equal descriptors share one registered handle. The skinned core draws `deformation` as its
   `u_skin_matrices` draw texture
   ([material, MaterialAsset purpose](material.md#materialasset-purpose)).
   `buffer` is a frame vertex stream's buffer (`nt_gfx_frame_buffer`, the
@@ -646,15 +658,14 @@ the same way. The entry points:
   one mesh drawn from more than one (game buffer, offset) re-points between
   them; a game that does that every frame builds its own per-offset vertex
   inputs over the mesh buffers and draws them with `nt_gfx_*` directly (see
-  Vertex inputs, Persistent instance data). Two instance layouts of one mesh
-  use different frame streams (asserted; see Vertex inputs, Mesh vertex
-  inputs). After a context loss the caller recreates and refills its buffer;
+  Vertex inputs, Persistent instance data). After a context loss the caller recreates and refills its buffer;
 - the ECS adapters, `nt_mesh_renderer_draw_list(stream, items, count)` and, in
   the skinned target, `nt_mesh_renderer_draw_list_skinned(stream, items,
   count)`, split the items into runs of adjacent equal batch keys (the skinned
   list also splits on the deformation texture), allocate and pack each run's
   instances in `stream` from the transform, drawable (and skin) components, and
-  record it as the core does (the skinned list: the run's deformation texture
+  record it as the core does with the engine head layout (the skinned list:
+  the run's deformation texture
   as its `u_skin_matrices` draw texture);
 
 The core's instances are filled before `nt_gfx_end_frame` (see Frame
@@ -711,7 +722,6 @@ for (uint32_t c = 0; c < CASCADES; c++) {
 bind_surface_materials();
 nt_gfx_begin_pass(&main_pass);
 nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &views[CASCADES], sizeof(view_t));
-/* One stream serves both instance layouts only because no mesh is in both lists. */
 nt_mesh_renderer_draw_list_skinned(GAME_STREAM_MAIN, skinned_items, skinned_count);
 nt_mesh_renderer_draw_list(GAME_STREAM_MAIN, static_items, static_count);
 nt_gfx_end_pass();

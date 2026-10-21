@@ -294,13 +294,13 @@ void test_vi_creation_asserts_webgl2_rules(void) {
      * a removed cap would still trap downstream on the zeroed attrs. */
     EXPECT_ASSERT(nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = {.attr_count = NT_GFX_MAX_VERTEX_ATTRS + 1, .stride = 4}, .vertex_buffer = vbo}));
     TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "NT_GFX_MAX_VERTEX_ATTRS"));
-    EXPECT_ASSERT(nt_gfx_make_instance_layout(&(nt_vertex_layout_t){.attr_count = NT_GFX_MAX_INSTANCE_ATTRS + 1, .stride = 4}));
-    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "NT_GFX_MAX_INSTANCE_ATTRS"));
+    EXPECT_ASSERT(nt_gfx_make_instance_layout(&(nt_vertex_layout_t){.attr_count = NT_GFX_MAX_VERTEX_ATTRS + 1, .stride = 4}));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "NT_GFX_MAX_VERTEX_ATTRS"));
     EXPECT_ASSERT(nt_gfx_make_instance_layout(&(nt_vertex_layout_t){0}));
-    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "NT_GFX_MAX_INSTANCE_ATTRS"));
-    /* Exactly NT_GFX_MAX_INSTANCE_ATTRS is accepted and survives the backend's compact copy. */
-    nt_vertex_layout_t inst_full = {.attr_count = NT_GFX_MAX_INSTANCE_ATTRS, .stride = (uint16_t)(4 * NT_GFX_MAX_INSTANCE_ATTRS)};
-    for (uint8_t i = 0; i < NT_GFX_MAX_INSTANCE_ATTRS; i++) {
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "NT_GFX_MAX_VERTEX_ATTRS"));
+    /* Exactly NT_GFX_MAX_VERTEX_ATTRS is accepted and survives the backend's compact copy. */
+    nt_vertex_layout_t inst_full = {.attr_count = NT_GFX_MAX_VERTEX_ATTRS, .stride = (uint16_t)(4 * NT_GFX_MAX_VERTEX_ATTRS)};
+    for (uint8_t i = 0; i < NT_GFX_MAX_VERTEX_ATTRS; i++) {
         inst_full.attrs[i] = (nt_vertex_attr_t){.location = i, .type = NT_VERTEX_FLOAT, .count = 1, .offset = (uint16_t)(i * 4)};
     }
     TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_make_instance_layout(&inst_full).id);
@@ -619,28 +619,28 @@ void test_instanced_bind_names_its_buffer(void) {
     TEST_ASSERT_EQUAL_UINT32(32, nt_gfx_fake_last_instance_offset());
 }
 
+/* One vertex input takes any instance layout: each switch binds again, and a layout overlapping
+ * its vertex locations asserts on the switch. */
+void test_vertex_input_follows_the_bound_instance_layout(void) {
+    const nt_instance_layout_t other = nt_gfx_make_instance_layout(&(nt_vertex_layout_t){.attr_count = 1, .stride = 16, .attrs = {{.location = 5, .type = NT_VERTEX_FLOAT, .count = 4}}});
+    const nt_instance_layout_t overlap = nt_gfx_make_instance_layout(&(nt_vertex_layout_t){.attr_count = 1, .stride = 16, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 4}}});
+    nt_buffer_t vbo = make_vbo();
+    nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
+    begin_test_pass();
+    bind_inst(vi, frame0(), 0);
+    nt_gfx_bind_vertex_input_instanced(vi, other, frame0(), 0);
+    bind_inst(vi, frame0(), 0);
+    TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.counters.accepted[NT_GFX_OP_VERTEX_INPUT]);
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input_instanced(vi, overlap, frame0(), 0));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "share a location"));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(s_inst.id, nt_gfx_fake_last_instance_layout());
+}
+
 /* Once bound with instances, a vertex input keeps them enabled in its VAO: a plain bind asserts,
  * also right after the instanced bind cached it and in a later frame. A vertex input never bound
  * with instances still draws instanced reading only gl_InstanceID. */
-/* The first instanced bind pins the layout: the same vertex input with another layout asserts,
- * while another vertex input takes that layout. */
-void test_instance_layout_is_pinned_by_the_first_bind(void) {
-    const nt_vertex_layout_t other_layout = {.attr_count = 1, .stride = 16, .attrs = {{.location = 5, .type = NT_VERTEX_FLOAT, .count = 4}}};
-    const nt_instance_layout_t other = nt_gfx_make_instance_layout(&other_layout);
-    nt_buffer_t vbo = make_vbo();
-    nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
-    nt_vertex_input_t second = make_vi(vbo, (nt_buffer_t){0});
-    begin_test_pass();
-    bind_inst(vi, frame0(), 0);
-    bind_inst(vi, frame0(), 16);
-    EXPECT_ASSERT(nt_gfx_bind_vertex_input_instanced(vi, other, frame0(), 0));
-    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "pinned to another instance layout"));
-    nt_gfx_bind_vertex_input_instanced(second, other, frame0(), 0);
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
-    TEST_ASSERT_EQUAL_UINT32(other.id, nt_gfx_fake_last_instance_layout());
-}
-
 void test_plain_bind_of_an_instanced_vi_asserts(void) {
     nt_buffer_t vbo = make_vbo();
     nt_vertex_input_t plain = make_vi(vbo, (nt_buffer_t){0});
@@ -742,7 +742,7 @@ void test_every_draw_form_checks_its_own_stream(void) {
 }
 
 /* An equal (vertex input, buffer, offset) in the same pass ends CACHE; a change of any one of them
- * binds. The layout is pinned per vertex input, so it never changes here. */
+ * binds. */
 void test_equal_instance_binding_is_dropped(void) {
     init_with_streams(2);
     nt_buffer_t vbo = make_vbo();
@@ -957,7 +957,7 @@ int main(void) {
     RUN_TEST(test_begin_pass_clears_bound_vi);
     RUN_TEST(test_bind_vertex_input_instanced_reaches_backend);
     RUN_TEST(test_instanced_bind_names_its_buffer);
-    RUN_TEST(test_instance_layout_is_pinned_by_the_first_bind);
+    RUN_TEST(test_vertex_input_follows_the_bound_instance_layout);
     RUN_TEST(test_plain_bind_of_an_instanced_vi_asserts);
     RUN_TEST(test_instanced_draw_asserts_its_instance_range);
     RUN_TEST(test_instance_range_uses_the_attribute_extent);

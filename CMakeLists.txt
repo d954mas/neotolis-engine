@@ -99,10 +99,6 @@ set(NT_GFX_MAX_VERTEX_STREAMS "8" CACHE STRING "Frame vertex streams the game ca
 if(NOT NT_GFX_MAX_VERTEX_STREAMS MATCHES "^[1-9][0-9]?$" OR NT_GFX_MAX_VERTEX_STREAMS GREATER 32)
     message(FATAL_ERROR "NT_GFX_MAX_VERTEX_STREAMS must be 1-32.")
 endif()
-set(NT_GFX_MAX_INSTANCE_ATTRS "8" CACHE STRING "Instance attributes per vertex input, 1-16 (WebGL2 guarantees 16 attribute locations in all).")
-if(NOT NT_GFX_MAX_INSTANCE_ATTRS MATCHES "^[1-9][0-9]?$" OR NT_GFX_MAX_INSTANCE_ATTRS GREATER 16)
-    message(FATAL_ERROR "NT_GFX_MAX_INSTANCE_ATTRS must be 1-16.")
-endif()
 option(NT_LOG_RING_ENABLED "Build the dev-only nt_log_ring log-tail store." OFF)
 option(NT_METRICS_ENABLED "Build the dev-only nt_metrics perf collector." OFF)
 # Published by nt_core so component describe()/registration agree without linking introspect.

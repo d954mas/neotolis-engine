@@ -50,11 +50,16 @@ static inline void nt_mesh_instance_world_rows(float rows[3][4], const float wor
 void nt_mesh_renderer_init(void);
 void nt_mesh_renderer_shutdown(void);
 
-/* Records one instanced draw in the current pass: count > 0 instances (nt_mesh_instance_t) at byte
- * offset of `instances`, a frame vertex stream's buffer (filled before nt_gfx_end_frame) or a
- * game-owned NT_BUFFER_VERTEX buffer. Records nothing while the program is not ready or a pipeline
+/* The engine instance layout (nt_mesh_instance_t), registered by init. A game layout copies it and
+ * appends attributes, or describes an instance of its own; equal descriptors share one handle. */
+extern const nt_vertex_layout_t nt_mesh_instance_layout;
+
+/* Records one instanced draw in the current pass: count > 0 instances of `layout` at byte offset of
+ * `instances`, a frame vertex stream's buffer (filled before nt_gfx_end_frame) or a game-owned
+ * NT_BUFFER_VERTEX buffer. A shader input neither the mesh nor the layout feeds may be undefined on
+ * native GL and (0, 0, 0, 1) on WebGL. Records nothing while the program is not ready or a pipeline
  * or vertex input cannot be created. */
-void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_buffer_t instances, uint32_t offset, uint32_t count);
+void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_instance_layout_t layout, nt_buffer_t instances, uint32_t offset, uint32_t count);
 
 /* ECS adapter: adjacent equal batch keys form one run, packed into frame vertex stream `stream`
  * from transform and drawable and drawn as one instanced draw in the current pass. A pass with
@@ -77,11 +82,12 @@ _Static_assert(sizeof(nt_skinned_mesh_instance_t) == 64 && offsetof(nt_skinned_m
                    offsetof(nt_skinned_mesh_instance_t, color) == 60,
                "skinned mesh instance layout");
 
-/* nt_mesh_renderer_draw for skinned instances (nt_skinned_mesh_instance_t). `deformation` is drawn
- * as u_skin_matrices, which the material (common/skin.glsl) does not declare. A mesh drawn plain
- * and skinned uses a different frame stream for each and game buffers for at most one
- * (render/architecture.md, Vertex inputs). Call after nt_skeletal_gpu_flush. */
-void nt_mesh_renderer_draw_skinned(nt_mesh_t mesh, nt_material_t material, nt_texture_t deformation, nt_buffer_t instances, uint32_t offset, uint32_t count);
+/* The engine skinned instance layout (nt_skinned_mesh_instance_t), registered by init. */
+extern const nt_vertex_layout_t nt_skinned_mesh_instance_layout;
+
+/* nt_mesh_renderer_draw with a deformation texture, drawn as u_skin_matrices, which the material
+ * (common/skin.glsl) does not declare. Call after nt_skeletal_gpu_flush. */
+void nt_mesh_renderer_draw_skinned(nt_mesh_t mesh, nt_material_t material, nt_texture_t deformation, nt_instance_layout_t layout, nt_buffer_t instances, uint32_t offset, uint32_t count);
 
 /* nt_mesh_renderer_draw_list for skinned items: runs also split on the deformation texture,
  * drawn as each run's u_skin_matrices draw texture, and every item also needs a skin component

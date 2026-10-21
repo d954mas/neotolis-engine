@@ -538,7 +538,7 @@ destruction may invalidate it through the documented cascade. The descriptor
 and label are borrowed only for the call.
 
 `nt_gfx_make_instance_layout` asserts the same layout rules
-(1..`NT_GFX_MAX_INSTANCE_ATTRS` attributes, stride 1..255), a call before
+(1..`NT_GFX_MAX_VERTEX_ATTRS` (16) attributes, stride 1..255), a call before
 `nt_gfx_init` and a full registry; it has no failure result, also on a lost
 context. The instanced bind asserts that instance and vertex locations do not
 overlap, and the instance buffer's type and liveness. `nt_gfx_mesh_vertex_input`

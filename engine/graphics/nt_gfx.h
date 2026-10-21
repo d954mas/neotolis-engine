@@ -16,10 +16,6 @@
 #error "NT_GFX_MAX_VERTEX_STREAMS must be 1-32"
 #endif
 
-#ifndef NT_GFX_MAX_INSTANCE_ATTRS
-#error "NT_GFX_MAX_INSTANCE_ATTRS must be defined by the nt_gfx_interface target"
-#endif
-
 #include "core/nt_assert.h"
 #include "core/nt_types.h"
 #include "hash/nt_hash.h"
@@ -72,8 +68,7 @@ typedef struct {
 
 /* Owned vertex-input object (GL: one VAO): the per-vertex layout baked against a VBO [+ IBO].
  * Instances come at bind time (nt_gfx_bind_vertex_input_instanced); the VAO keeps the
- * instance pointers of its last bind, so a vertex input bound with one tuple re-points nothing.
- * Its first instanced bind pins the instance layout. */
+ * instance pointers of its last bind, so a vertex input bound with one tuple re-points nothing. */
 typedef struct {
     uint32_t id;
 } nt_vertex_input_t;
@@ -324,11 +319,6 @@ typedef enum {
 /* ---- Vertex layout ---- */
 
 #define NT_GFX_MAX_VERTEX_ATTRS 16
-/* NT_GFX_MAX_INSTANCE_ATTRS comes from CMake (default 8, at most 16): the attr cap of one
- * instance layout, which gfx and the GL backend store packed per registered layout. */
-#if NT_GFX_MAX_INSTANCE_ATTRS < 1 || NT_GFX_MAX_INSTANCE_ATTRS > NT_GFX_MAX_VERTEX_ATTRS
-#error "NT_GFX_MAX_INSTANCE_ATTRS must be 1-16"
-#endif
 /* Registered instance layouts: renderers register a few each at init, and an equal layout
  * returns the existing handle, so re-init never grows the table. */
 #define NT_GFX_MAX_INSTANCE_LAYOUTS 32 /* a slot fits a byte: the GL VAO mirror and the bind command store it so */
@@ -966,9 +956,8 @@ void nt_gfx_bind_vertex_input(nt_vertex_input_t vi);
  * caller-owned buffer (draws stay inside its size) or a frame storage buffer (nt_gfx_frame_buffer;
  * draws stay inside this frame's allocations). The offset must be 4-byte aligned (WebGL2 rejects
  * unaligned attrib offsets), and the instance locations must not overlap vi's vertex ones;
- * asserted. The first instanced bind pins `layout` to vi; another layout asserts. The VAO keeps
- * the buffer and offset of its last bind, so a vertex input bound with the same pair every frame
- * re-points nothing; one bound with two pairs in a frame re-points between them. The bind asserts that the first instance, and every instanced draw
+ * asserted. The VAO keeps the layout, buffer and offset of its last bind, so a vertex input bound
+ * with the same tuple every frame re-points nothing; a new layout also switches the enabled slots. The bind asserts that the first instance, and every instanced draw
  * that all its instances, lie inside the buffer or this frame's allocations. */
 void nt_gfx_bind_vertex_input_instanced(nt_vertex_input_t vi, nt_instance_layout_t layout, nt_buffer_t instance_buffer, uint32_t byte_offset);
 /* Applies the complete active sampler interface of the bound pipeline's program.

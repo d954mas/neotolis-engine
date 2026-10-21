@@ -190,7 +190,7 @@ typedef struct ShaderAsset {
 
 ## Four levels of shader data
 
-1. **vertex inputs** — from geometry/mesh, and per-instance data from the instance layouts
+1. **vertex inputs** — from geometry/mesh, and per-instance data from the instance layouts (the engine head or a game layout)
 2. **`Material` block** — the material's params, bound at apply ([material, Params](material.md#params))
 3. **`Draw` block** — per-draw data of a renderer or game shader, bound as frame data
 4. **`Globals` and game blocks** — frame and pass data, bound as frame data
@@ -216,18 +216,29 @@ number, or its own `#define`, matching the stream layout the mesh was built
 with. Shaders that do not include it are unaffected; the engine mesh shaders
 (`common/instance.glsl`, `common/skin.glsl` and their users) include it.
 
+A game instance layout places its own attributes at any location that neither
+the drawn meshes' streams nor the layout's other attributes use: above the head
+(12-15 for the plain head, 14-15 for the skinned head) or a 0-7 slot those
+meshes lack. A location used twice in the layout asserts at registration; one
+shared with a mesh stream asserts at the instanced bind. The budget is 16
+locations for mesh streams and instance attributes together. Every attribute is
+bound with `glVertexAttribPointer`, so a shader declares it as `float` or
+`vecN`, never `ivec`/`uvec`.
+
 ## Mesh streams and shader inputs that do not match
 
 A mesh's vertex input enables every stream of the mesh; streams the shader does
 not read cost nothing per draw. An input that neither a mesh stream nor the
-bound instance layout supplies reads the GL generic default `(0, 0, 0, 1)`.
-Nothing checks mesh/shader compatibility: the mesh family and its shaders agree on locations by
+bound instance layout supplies reads the current generic attribute value:
+`(0, 0, 0, 1)` on WebGL, which keeps it, but undefined on native GL after a
+draw whose shader read an enabled array at that location (OpenGL 3.3, 2.8.3). A shader
+declares only inputs its mesh streams and instance layout feed. Nothing checks mesh/shader compatibility: the mesh family and its shaders agree on locations by
 construction.
 
 ## Object and global data
 
-Per-object values are instance data (world rows and color in the instance head) or
-a `Draw` block; frame and view values (`view_proj`, `camera_pos`, `time`) are the
+Per-object values are instance data (world rows and color in the instance head,
+or a game layout's attributes) or a `Draw` block; frame and view values (`view_proj`, `camera_pos`, `time`) are the
 `Globals` block the game fills (`nt_frame_uniforms_t`, `common/globals.glsl`).
 Shaders read no standalone numeric uniforms: every value arrives in a uniform
 block or a vertex input.

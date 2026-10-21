@@ -120,13 +120,13 @@ typedef struct {
     uint32_t ibo_id;
     uint16_t vertex_mask;    /* vertex attribute locations; an instance layout may not overlap them */
     uint8_t index_type;      /* captured from the IBO; NT_INDEX_NONE for non-indexed */
-    uint8_t instance_layout; /* pinned by its first instanced bind; 0 = never bound with instances */
+    uint8_t instance_layout; /* layout of its last instanced bind; 0 = never bound with instances */
 } nt_gfx_vertex_input_meta_t;
 
 /* ---- Instance layout records (CPU only; survive context loss) ---- */
 
 typedef struct {
-    nt_vertex_attr_t attrs[NT_GFX_MAX_INSTANCE_ATTRS];
+    nt_vertex_attr_t attrs[NT_GFX_MAX_VERTEX_ATTRS];
     uint32_t extent; /* bytes one instance reads: max attr offset + attr size (may exceed the stride) */
     uint16_t stride;
     uint16_t mask; /* attribute locations */
@@ -1200,7 +1200,7 @@ static nt_gfx_result_t make_instance_layout(const nt_vertex_layout_t *layout, nt
     /* nt_gfx_init empties the registry, so a handle made before it would name nothing. */
     NT_ASSERT(g_nt_gfx.initialized && "make_instance_layout: call after nt_gfx_init");
     NT_ASSERT(layout != NULL);
-    NT_ASSERT(layout->attr_count >= 1 && layout->attr_count <= NT_GFX_MAX_INSTANCE_ATTRS && "instance layout needs 1..NT_GFX_MAX_INSTANCE_ATTRS attrs");
+    NT_ASSERT(layout->attr_count >= 1 && layout->attr_count <= NT_GFX_MAX_VERTEX_ATTRS && "instance layout needs 1..NT_GFX_MAX_VERTEX_ATTRS attrs");
     /* GL reads stride 0 as tightly packed per attribute, which the draw range check cannot bound. */
     NT_ASSERT(layout->stride > 0 && layout->stride <= 255 && "instance layout stride must be 1..255 (WebGL2 cap)");
     assert_layout_webgl2_rules(layout);
@@ -1781,10 +1781,8 @@ static nt_gfx_result_t bind_vertex_input_instanced(nt_vertex_input_t vi, nt_inst
     const uint32_t layout_slot = layout.id;
     NT_ASSERT(layout_slot >= 1 && layout_slot <= s_gfx.instance_layout_count && "invalid instance layout");
     nt_gfx_vertex_input_meta_t *meta = &s_gfx.vertex_input_metas[slot];
-    /* The first instanced bind pins the layout, so the overlap check runs once per vertex input. */
+    /* The overlap check runs only when the vertex input changes instance layout. */
     if (meta->instance_layout != layout_slot) {
-        NT_ASSERT(meta->instance_layout == 0 && "bind_vertex_input_instanced: the vertex input is pinned to another instance layout -- draw each layout through its own vertex input, e.g. "
-                                                "a mesh drawn with two instance layouts from a different frame stream for each");
         NT_ASSERT((s_gfx.instance_layouts[layout_slot].mask & meta->vertex_mask) == 0 && "bind_vertex_input_instanced: instance and vertex attribs share a location");
     }
     const uint32_t buffer_slot = nt_pool_slot_index(instance_buffer.id);
