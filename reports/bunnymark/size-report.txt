@@ -1,5 +1,5 @@
 # Size Report: bunnymark (wasm-analysis-paired)
-# Commit: c36dec0
+# Commit: 16738d1
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                71 B
 Elem                  90 B
-Code              215439 B
+Code              215646 B
 Data              208126 B
 Custom             11147 B
 ---------------- ----------
-TOTAL             435971 B
+TOTAL             436178 B
 
 ## Top 30 Functions by Size
 
@@ -27,7 +27,7 @@ TOTAL             435971 B
 31590 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
 27353 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 17250 B   nt_gfx_activate_texture
- 6032 B   main
+ 6033 B   main
  5755 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
  4533 B   basist::transcode_uastc_to_etc1(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
  4121 B   upload_glyph
@@ -55,7 +55,7 @@ TOTAL             435971 B
  1076 B   spawn_one_defold
 
 Total functions: 186
-Total code size: 215131 B
+Total code size: 215338 B
 
 ## Built Engine Archives
 
@@ -78,7 +78,7 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               65220 B
-libnt_gfx.a               107238 B
+libnt_gfx.a               112258 B
 libnt_gfx_stub.a            6854 B
 libnt_hash.a                4108 B
 libnt_http.a               16484 B
@@ -93,7 +93,7 @@ libnt_material.a            3728 B
 libnt_material_comp.a       2104 B
 libnt_mem_scratch.a         2016 B
 libnt_mesh_comp.a           2028 B
-libnt_mesh_renderer.a       3548 B
+libnt_mesh_renderer.a       3572 B
 libnt_meshwire.a            3326 B
 libnt_meshwire_encoder.a    3540 B
 libnt_meshwire_stub.a        722 B
@@ -108,7 +108,7 @@ libnt_skeletal.a            7464 B
 libnt_skeletal_assets.a     4046 B
 libnt_skeletal_gpu.a        2622 B
 libnt_skin_comp.a           2238 B
-libnt_skinned_mesh_renderer.a    5892 B
+libnt_skinned_mesh_renderer.a    5944 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a         8744 B
 libnt_sprite_renderer.a    16192 B
@@ -124,7 +124,7 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2640752 B
+TOTAL (archives)         2645848 B
 
 ## Data Segments Summary
 
