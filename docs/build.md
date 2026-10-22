@@ -364,6 +364,25 @@ fields and copied game context survive with an empty log section.
 upload payloads, checks uploads before render begin and compares output pixels
 with recording off/on/full.
 
+The `devapi-chromium` Playwright project (`devapi.spec.ts`, `record.spec.ts`) serves
+`build/examples/devapi_host/wasm-debug`, built as on the CI web-smoke line (this reconfigures the
+shared wasm-debug cache):
+
+```bash
+emcmake cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
+cmake --build --preset wasm-debug --target devapi_host
+```
+
+`record.spec.ts` records offline (MANUAL, 360 steps at fps 30) and checks the downloaded MP4 with
+`tools/devapi/check_recording.py`: streams, frame rate and count, 48 kHz stereo audio as long as the
+video, flash/beep offset within a frame. That needs python (`$PYTHON`, else `python`/`python3`) and
+ffmpeg/ffprobe on `PATH` or in `FFMPEG_DIR`. A second test records in RUN at time scale 7, so a step
+exceeds the 100 ms drift bound, and fails on a drift WARN; it also checks `bad_params` and a cancelled
+`nt-recorder` event. Its step guard assumes a 60 Hz rAF (CI headless); a faster display fails it.
+`nt_recorder` is OFF in the push gate: only the CI wasm-release job links it under Closure (a
+`devapi_host` with the RECORDER group, then a check that the four `NtRecorder.*(` calls keep their
+names). Native `test_recorder` covers frame selection and the audio stream.
+
 Browser diagnostics use `tests/browser/diagnostics.spec.ts`. Set
 `NT_SHOWCASE_DIR` to the exact build, distinct `NT_SHOWCASE_PORT`/`NT_DEVAPI_PORT`,
 `CI=1` to forbid server reuse, and matching

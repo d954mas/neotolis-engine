@@ -372,6 +372,7 @@ commands live in [Building and checks](../../build.md#build-options).
 | `NT_DEVAPI_GROUP_OBS` | OFF | Build the `log.*` / `perf.*` / `entity.*` / `resource.*` reads. Requires `NT_LOG_RING_ENABLED` + `NT_METRICS_ENABLED` + `NT_INTROSPECT_ENABLED`. |
 | `NT_DEVAPI_GROUP_ENTITY_WRITE` | OFF | Build the `entity.set` component-write group. Requires `NT_INTROSPECT_WRITE_ENABLED`. |
 | `NT_DEVAPI_GROUP_CAPTURE` | OFF | Build the `capture.frame` / `capture.region` PNG framebuffer-capture group (links `nt_gfx` + `nt_fpng`). |
+| `NT_DEVAPI_GROUP_RECORDER` | OFF | Build the `record.start` / `record.stop` group over [`nt_recorder`](recorder.md); configure error where `nt_recorder` has no backend. |
 
 **devapi caps & tunables** (`-D` overridable preprocessor defines, with their defaults):
 

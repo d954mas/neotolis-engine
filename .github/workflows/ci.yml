@@ -224,6 +224,13 @@ jobs:
           emcmake cmake --preset wasm-release -B build/_cmake/wasm-release-ui-on -DNT_FONT_EMBOLDEN_ENABLED=ON -DNT_UI_CLAY_DEBUG_VIEW=ON
           cmake --build build/_cmake/wasm-release-ui-on --target ui_showcase
 
+      # Only a release link runs Closure over the EM_JS calls into the recorder's extern-pre-js NtRecorder.
+      - name: Build the recorder in WASM release
+        run: |
+          emcmake cmake --preset wasm-release -B build/_cmake/wasm-release-recorder -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_RECORDER=ON
+          cmake --build build/_cmake/wasm-release-recorder --target devapi_host
+          test "$(grep -Eo 'NtRecorder\.(open|video|audio|close)\(' build/examples/devapi_host/wasm-release-recorder/index.js | sort -u | wc -l)" = 4
+
       # The paired index.wasm is the wasm-release baseline (only the shell differs).
       - name: Build paired WASM release (baseline + SIMD)
         run: |
@@ -576,12 +583,13 @@ jobs:
         with:
           emsdk: "true"
           ccache-key: web-smoke
+          extra-packages: ffmpeg
 
-      # Capture group ON arms the web host's pre-swap seam (NT_DEVAPI_HOST_WEB_CAPTURE): the deferred
+      # Capture group ON arms the web host's pre-swap seam (NT_DEVAPI_GROUP_CAPTURE): the deferred
       # capture.frame resolves to a REAL PNG, the behavior the live spec asserts.
-      - name: Build devapi_host wasm (debug, capture ON)
+      - name: Build devapi_host wasm (debug, capture and record ON)
         run: |
-          emcmake cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON
+          emcmake cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
           cmake --build --preset wasm-debug --target devapi_host
 
       - name: Cache Playwright browsers
@@ -598,7 +606,7 @@ jobs:
 
       # The devapi-chromium project's server defaults to build/examples/devapi_host/wasm-debug.
       - name: Run devapi web smoke test
-        run: cd tests/browser && npx playwright test devapi.spec.ts
+        run: cd tests/browser && npx playwright test devapi.spec.ts record.spec.ts
 
   # Three parts in parallel: the default smoke specs, the Basis admission rows and the
   # release diagnostics rows.

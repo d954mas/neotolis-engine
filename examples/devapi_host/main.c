@@ -8,12 +8,19 @@
 #include "version/nt_version.h"
 #ifdef __EMSCRIPTEN__
 #include "devapi/nt_devapi_web.h" /* nt_devapi_web_install_shim — the web push/pull bridge. */
-/* Capture group (NT_DEVAPI_GROUP_CAPTURE) pulls a real GL context + the pre-swap seam; a capture-OFF
-   web build still serves submit/poll/poke. */
+/* Capture and record groups pull a real GL context and a non-blank frame; without them the web build
+   still serves submit/poll/poke. */
+#if defined(NT_DEVAPI_GROUP_CAPTURE) || defined(NT_DEVAPI_GROUP_RECORDER)
+#define NT_DEVAPI_HOST_WEB_GFX 1
+#include <math.h>
+
+#include "graphics/nt_gfx.h"
+#endif
 #ifdef NT_DEVAPI_GROUP_CAPTURE
-#define NT_DEVAPI_HOST_WEB_CAPTURE 1
 #include "devapi/nt_devapi_capture.h" /* nt_devapi_capture_install_seam — pre-swap capture seam. */
-#include "graphics/nt_gfx.h"          /* real GL context + a non-blank frame so capture has a target. */
+#endif
+#ifdef NT_DEVAPI_GROUP_RECORDER
+#include "recorder/nt_recorder.h"
 #endif
 #else
 #include "devapi/nt_devapi_net.h"
@@ -183,21 +190,62 @@ static void recover_on_disconnect(void) {
 }
 #endif /* !__EMSCRIPTEN__ */
 
-#ifdef NT_DEVAPI_HOST_WEB_CAPTURE
-/* Two tones make a uniform/blank pre-swap capture observable. */
+#ifdef NT_DEVAPI_HOST_WEB_GFX
+/* Two tones make a uniform/blank pre-swap capture observable; record builds add a white flash. */
 static const float k_bg_color[4] = {0.10F, 0.20F, 0.45F, 1.0F};
 static const float k_fg_color[4] = {0.90F, 0.55F, 0.10F, 1.0F};
 
-static void render_pattern(void) {
+static void render_pattern(bool flash) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {k_bg_color[0], k_bg_color[1], k_bg_color[2], k_bg_color[3]}, .clear_depth = 1.0F});
     const int fb_w = (int)g_nt_window.fb_width;
     const int fb_h = (int)g_nt_window.fb_height;
     nt_gfx_set_scissor(fb_w / 4, fb_h / 4, fb_w / 2, fb_h / 2);
     nt_gfx_set_scissor_enabled(true);
-    nt_gfx_clear(&(nt_clear_desc_t){.color = true, .clear_color = {k_fg_color[0], k_fg_color[1], k_fg_color[2], k_fg_color[3]}});
+    const float *fg = flash ? (const float[4]){1.0F, 1.0F, 1.0F, 1.0F} : k_fg_color;
+    nt_gfx_clear(&(nt_clear_desc_t){.color = true, .clear_color = {fg[0], fg[1], fg[2], fg[3]}});
     nt_gfx_end_pass();
 }
-#endif /* NT_DEVAPI_HOST_WEB_CAPTURE */
+#endif /* NT_DEVAPI_HOST_WEB_GFX */
+
+#ifdef NT_DEVAPI_GROUP_RECORDER
+/* A/V probe for record.*, mixed like a game: each frame pushes the samples for its advance, and the
+   step that crosses a whole game second starts a 50 ms 1 kHz beep at the block start while its frame
+   starts a 100 ms white flash. */
+#define HOST_TONE_RATE 48000
+#define HOST_BEEP_FRAMES (HOST_TONE_RATE / 20)
+static uint32_t s_beep_left;
+
+static bool second_crossed(void) { return floor(g_nt_app.time) != floor(g_nt_app.time - (double)g_nt_app.dt); }
+
+static void push_tone(void) {
+    static float s_buf[4800 * 2];
+    if (!nt_recorder_active()) {
+        s_beep_left = 0;
+        return;
+    }
+    double start = g_nt_app.time - (double)g_nt_app.dt;
+    int64_t n = llround(g_nt_app.time * HOST_TONE_RATE) - llround(start * HOST_TONE_RATE);
+    /* Cap a huge step: past the recorder's two-second catch-up the next frame call ends the recording. */
+    n = n < 3 * HOST_TONE_RATE ? n : 3 * HOST_TONE_RATE;
+    if (second_crossed()) {
+        s_beep_left = HOST_BEEP_FRAMES;
+    }
+    for (int64_t done = 0; done < n && nt_recorder_active();) {
+        uint32_t chunk = (n - done) < 4800 ? (uint32_t)(n - done) : 4800U;
+        for (uint32_t i = 0; i < chunk; i++) {
+            float v = 0.0F;
+            if (s_beep_left > 0) {
+                v = 0.5F * sinf(6.2831853F * 1000.0F * (float)(HOST_BEEP_FRAMES - s_beep_left) / (float)HOST_TONE_RATE);
+                s_beep_left--;
+            }
+            s_buf[2 * i] = v;
+            s_buf[(2 * i) + 1] = v;
+        }
+        nt_recorder_push_audio(s_buf, chunk);
+        done += chunk;
+    }
+}
+#endif
 
 static void frame(void) {
     /* Host owns measurement; nt_metrics only stores. */
@@ -210,7 +258,7 @@ static void frame(void) {
 #endif
 
     nt_window_poll();
-#ifdef NT_DEVAPI_HOST_WEB_CAPTURE
+#ifdef NT_DEVAPI_HOST_WEB_GFX
     nt_gfx_begin_frame();
 #endif
     /* nt_devapi_update must run before nt_input_poll so injected rising edges survive the edge-clear. */
@@ -231,11 +279,21 @@ static void frame(void) {
        nt_window_swap_buffers (post-render, pre-swap GL-valid point); web draws the two-tone pattern first
        so that seam reads a non-blank frame. */
     const bool render = nt_app_render_enabled();
-#ifdef NT_DEVAPI_HOST_WEB_CAPTURE
+#ifdef NT_DEVAPI_HOST_WEB_GFX
     if (render) {
-        render_pattern();
+#ifdef NT_DEVAPI_GROUP_RECORDER
+        render_pattern(second_crossed() || g_nt_app.time - floor(g_nt_app.time) < 0.1);
+#else
+        render_pattern(false);
+#endif
     }
     nt_gfx_end_frame();
+#endif
+#ifdef NT_DEVAPI_GROUP_RECORDER
+    push_tone(); /* the mixer runs with the update, rendered or not */
+    if (render) {
+        nt_recorder_frame(g_nt_app.time, (double)g_nt_app.dt);
+    }
 #endif
     if (render) {
         nt_window_swap_buffers();
@@ -277,8 +335,6 @@ static void frame(void) {
     if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
         nt_app_quit();
     }
-#ifdef NT_DEVAPI_HOST_WEB_CAPTURE
-#endif
 }
 
 int main(void) {
@@ -302,8 +358,8 @@ int main(void) {
     /* vsync OFF so time.set_fps{fps:0} truly uncaps the managed loop. */
     nt_window_set_vsync(NT_VSYNC_OFF);
     nt_input_init();
-#ifdef NT_DEVAPI_HOST_WEB_CAPTURE
-    /* Web capture build: a real GL context so the pre-swap capture seam reads a non-blank frame.
+#ifdef NT_DEVAPI_HOST_WEB_GFX
+    /* Web capture or record build: a real GL context so capture and the recorder read a non-blank frame.
        The capture group inits its own fpng encoder in nt_devapi_register_capture (no nt_fpng_init here). */
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     nt_gfx_init(&gfx_desc);
@@ -388,7 +444,7 @@ int main(void) {
     /* Web: install the push/pull bridge (window.__devapi). NO listener — the page's own JS is
        the only caller, under the OFF-by-default NT_DEVAPI_ENABLED gate. */
     nt_devapi_web_install_shim();
-#ifdef NT_DEVAPI_HOST_WEB_CAPTURE
+#ifdef NT_DEVAPI_GROUP_CAPTURE
     /* Capture build only: install the pre-swap seam; it needs the real GL context inited above so the
        deferred capture reads a non-blank PNG. */
     nt_devapi_capture_install_seam();
@@ -427,8 +483,8 @@ shutdown_devapi:
 #endif
     nt_devapi_shutdown();
 shutdown_base:
-#ifdef NT_DEVAPI_HOST_WEB_CAPTURE
-    nt_gfx_shutdown(); /* paired with the nt_gfx_init on the web capture path above. */
+#ifdef NT_DEVAPI_HOST_WEB_GFX
+    nt_gfx_shutdown(); /* paired with the nt_gfx_init on the web capture/record path above. */
 #endif
     nt_input_shutdown();
     nt_window_shutdown();
