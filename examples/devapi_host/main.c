@@ -225,10 +225,12 @@ static void push_tone(void) {
     }
     double start = g_nt_app.time - (double)g_nt_app.dt;
     int64_t n = llround(g_nt_app.time * HOST_TONE_RATE) - llround(start * HOST_TONE_RATE);
+    /* A step past the recorder's two-second catch-up ends the recording at this frame's call anyway. */
+    n = n < 3 * HOST_TONE_RATE ? n : 3 * HOST_TONE_RATE;
     if (second_crossed()) {
         s_beep_left = HOST_BEEP_FRAMES;
     }
-    for (int64_t done = 0; done < n;) {
+    for (int64_t done = 0; done < n && nt_recorder_active();) {
         uint32_t chunk = (n - done) < 4800 ? (uint32_t)(n - done) : 4800U;
         for (uint32_t i = 0; i < chunk; i++) {
             float v = 0.0F;

@@ -50,13 +50,13 @@ test('record.* in lockstep downloads a synced MP4', async ({ page }, testInfo) =
   expect(errors).toEqual([]);
 });
 
-// RUN mode: record.start lands inside a frame whose step already advanced time, and that step's samples
-// are pushed after it. A step of ~117 ms (scale 7) would show any one-step offset as a drift WARN.
+// RUN mode: a step of ~117 ms (scale 7) would show a one-step offset between record.start and the
+// pushed stream as a drift WARN. fps 5 keeps a software encoder (CI) far from its backlog bound.
 test('record.* in real time keeps audio on the clock', async ({ page }) => {
   const warnings: string[] = [];
-  let started = false;
+  const log: string[] = [];
   page.on('console', (msg) => {
-    started ||= /recording \d+x\d+ at 30 fps/.test(msg.text());
+    if (msg.text().includes('[recorder]')) log.push(msg.text());
     if (/audio .* the clock/.test(msg.text())) warnings.push(msg.text());
   });
   await page.goto('/index.html');
@@ -67,9 +67,11 @@ test('record.* in real time keeps audio on the clock', async ({ page }) => {
       return resp ? JSON.parse(resp) : null;
     }, { method, params });
   expect((await call('time.set_scale', { scale: 7 })).ok).toBe(true);
-  await expect.poll(async () => (await call('record.start', { name: 'run.mp4', fps: 30 })).ok, { timeout: 30_000 }).toBe(true);
+  await expect.poll(async () => (await call('record.start', { name: 'run.mp4', fps: 5 })).ok, { timeout: 30_000 }).toBe(true);
   await page.waitForTimeout(1500);
-  expect((await call('record.stop')).result.frames).toBeGreaterThan(30);
-  expect(started).toBe(true); // the recorder's log reaches the console, so no WARN means no drift
+  const frames = (await call('record.stop')).result.frames;
+  console.log(log.join('\n'));
+  expect(frames).toBeGreaterThan(5);
+  expect(log.some((line) => / at 5 fps/.test(line))).toBe(true); // the log reaches the console, so no WARN means no drift
   expect(warnings).toEqual([]);
 });

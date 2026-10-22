@@ -27,7 +27,7 @@ globalThis['NtRecorder'] = (function () {
         ]).then(function () { probed = true; });
     }
     // H.264 levels: [level_idc hex, max frame macroblocks, max macroblocks per second].
-    var LEVELS = [['1F', 3600, 108000], ['28', 8192, 245760], ['2A', 8704, 522240], ['33', 36864, 983040],
+    var LEVELS = [['1F', 3600, 108000], ['28', 8192, 245760], ['2A', 8704, 522240], ['32', 22080, 589824], ['33', 36864, 983040],
                   ['34', 36864, 2073600], ['3C', 139264, 4177920], ['3E', 139264, 16711680]];
 
     // The browser may already have closed an encoder (resource reclamation).
