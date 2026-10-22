@@ -53,13 +53,12 @@ static uint32_t end_recording(void) {
         NT_LOG_WARN("ended before the first frame, nothing written");
     }
     /* Before padding: audio short of the video shows here even after the one-shot drift WARN. */
-    double video_s = (double)s_rec.frames / (double)s_rec.fps;
-    double audio_s = (double)s_rec.audio / NT_RECORDER_AUDIO_RATE;
+    NT_LOG_INFO("%u frames, %.2f s; audio %.2f s before padding (%+.0f ms against the video)", s_rec.frames, (double)s_rec.frames / (double)s_rec.fps, (double)s_rec.audio / NT_RECORDER_AUDIO_RATE,
+                (((double)s_rec.audio / NT_RECORDER_AUDIO_RATE) - ((double)s_rec.frames / (double)s_rec.fps)) * 1000.0);
     if (!pad_to_video()) {
         fail();
         return 0;
     }
-    NT_LOG_INFO("%u frames, %.2f s; audio %.2f s before padding (%+.0f ms against the video)", s_rec.frames, video_s, audio_s, (audio_s - video_s) * 1000.0);
     uint32_t frames = s_rec.frames;
     finish();
     return frames;
