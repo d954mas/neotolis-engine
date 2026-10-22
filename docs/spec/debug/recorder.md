@@ -13,7 +13,7 @@ Related: [Logging, Errors, Debugging](logging-errors-debugging.md) (devapi, fram
 ```c
 bool nt_recorder_start(const char *name, uint32_t fps, double t);
 void nt_recorder_frame(double t, double dt);
-void nt_recorder_push_audio(const float *stereo48k, uint32_t frames, double t_start);
+void nt_recorder_push_audio(const float *stereo48k, uint32_t frames);
 uint32_t nt_recorder_stop(void);
 bool nt_recorder_active(void);
 ```
@@ -30,7 +30,7 @@ asserts while a recording is active. `frame`, `push_audio` and `stop` are no-ops
 returns the frame count, 0 when the final audio write failed. A recording also ends on the spot,
 with a WARN, on a framebuffer size change or a `frame` call more than two seconds of frames after
 the previous one (render off while time ran), both with the audio padded to the video, and on an
-encoder failure; a later `stop` returns 0.
+encoder failure, which writes no file; a later `stop` returns 0.
 
 ## Frame selection
 
@@ -46,23 +46,21 @@ every k-th step.
 
 ## Audio
 
-The owner of the mix pushes interleaved stereo float samples at 48 kHz from the main thread, each
-block with its start time `t_start` on the same clock; sample `s` of a block plays at file time
-`t_start - t0 + s / 48000`. A game mixer that starts a sound at the beginning of the block for the
-step that first shows its cause (`t_start = t - dt`) plays it with that frame. A lockstep mixer
-renders `step_dt · 48000` samples per step without a sound device; a real-time mixer copies its
-device output to the main thread. Sounds played through `nt_audio` are not captured.
+The game's mixer pushes its output as one stream of interleaved stereo float samples at 48 kHz from
+the main thread: sample `n` plays at file time `n / 48000`, so the stream carries no timestamps and
+the recorder corrects nothing. The mixer pushes every step's samples from the first step after
+`start`, silence included: a lockstep mixer renders `llround(t · 48000) − llround((t − dt) · 48000)`
+samples per step, which never drifts from the clock, and a sound it starts at the beginning of the
+step that first shows its cause plays with that frame. A game without sound pushes nothing and gets
+a silent track. A gap, a late start or a mixer on another clock shifts the rest of the track; when
+the pushed stream differs from the time passed to `frame` by more than 100 ms (one mixer block and a
+frame fit well inside), a WARN says so once per recording. A real-time mixer that renders on an
+audio thread is the game's to align: it pushes the samples rendered from `start` on, on the game
+clock. Sounds played through `nt_audio` are not captured.
 
-Blocks are placed by their time. A block within one mixer block (1024 samples) of where the
-previous push ended continues it, queued or already written, so rounding and drift never split a
-mixer's stream; such a block moves to that end, by up to 21 ms. Once silence has been written past the previous push (the mixer paused), a block
-keeps its exact time. An overlap with placed audio, and anything before `t0`, is dropped, and a
-gap becomes silence. Audio is written only up to the end of the written video, so the track never
-runs ahead of the picture; the rest waits in a queue. A push that would end more than 3.25 s plus
-two blocks past the written track (the catch-up bound, a period at 1 fps and the silence lag) ends
-the recording (WARN): render off for longer, or a block stamped far ahead of the clock. With nothing queued, silence is written up to 250 ms short of the video, which
-leaves room for a real-time mixer whose blocks reach the main thread late. A track is always
-written, silent when nothing is pushed; at the end it is padded to the video length.
+Samples go to the encoder as they are pushed, so the track may run ahead of the video while
+recording (render off, or a push before the frame call). At the end it is padded with silence to
+the video length; audio pushed past the last frame stays.
 
 ## Backends
 

@@ -1,35 +1,25 @@
 #include "recorder/nt_recorder.h"
 
 #include <math.h>
-#include <stdlib.h>
-#include <string.h>
 
 #include "core/nt_assert.h"
 #include "log/nt_log.h"
 #include "recorder/nt_recorder_internal.h"
 #include "window/nt_window.h"
 
-/* A push that starts within one mixer block of where the previous one ended continues it. */
-#define NT_RECORDER_AUDIO_SLACK 1024
-/* With nothing queued, silence stays this far behind the video: a real-time mixer's blocks reach the
-   main thread a few frames late. */
-#define NT_RECORDER_AUDIO_LATE (NT_RECORDER_AUDIO_RATE / 4U)
-/* Track span from the written audio to a push's end: the silence lag, the two-second catch-up plus a
-   period at 1 fps, and a block each of join drift and mixer lookahead. */
-#define NT_RECORDER_AUDIO_CAP ((3ULL * NT_RECORDER_AUDIO_RATE) + NT_RECORDER_AUDIO_LATE + (2ULL * NT_RECORDER_AUDIO_SLACK))
+/* Seconds the pushed stream may differ from the caller's clock: one mixer block and a frame fit; past
+   this it has a gap or a late start. */
+#define NT_RECORDER_AUDIO_DRIFT 0.1
 
 static struct {
     bool active;
+    bool drift_warned;
     uint32_t fps;
     double t0;
     uint32_t width;
     uint32_t height;
     uint32_t frames;
-    uint64_t audio_written; /* track position written so far */
-    uint64_t queue_pos;     /* track position of audio[0] */
-    uint64_t run_end;       /* track position after the last pushed sample; 0 before the first */
-    uint32_t queued;
-    float audio[(size_t)NT_RECORDER_AUDIO_CAP * 2U];
+    uint64_t audio; /* samples written: the track position */
 } s_rec;
 
 static void finish(void) {
@@ -43,58 +33,20 @@ static void fail(void) {
     finish();
 }
 
-static uint64_t frames_end(uint32_t frames) { return (uint64_t)llround((double)frames * NT_RECORDER_AUDIO_RATE / (double)s_rec.fps); }
-
-static bool write_silence(uint64_t frames) {
-    static const float k_zero[1024 * 2];
-    while (frames > 0) {
-        uint32_t n = frames < 1024U ? (uint32_t)frames : 1024U;
-        if (!nt_recorder_platform_audio(k_zero, n)) {
-            return false;
-        }
-        s_rec.audio_written += n;
-        frames -= n;
-    }
-    return true;
-}
-
-/* Writes the track up to `limit`, the end of the written video: silence up to the queue, then the queue.
-   With nothing queued, silence stops NT_RECORDER_AUDIO_LATE short of the limit unless `pad`. */
-static bool write_audio(uint64_t limit, bool pad) {
-    uint64_t fill = limit;
-    if (s_rec.queued > 0) {
-        fill = s_rec.queue_pos < limit ? s_rec.queue_pos : limit;
-    } else if (!pad) {
-        fill = limit > NT_RECORDER_AUDIO_LATE ? limit - NT_RECORDER_AUDIO_LATE : 0U;
-    }
-    if (s_rec.audio_written < fill && !write_silence(fill - s_rec.audio_written)) {
-        return false;
-    }
-    if (s_rec.queued > 0 && s_rec.queue_pos == s_rec.audio_written && s_rec.audio_written < limit) {
-        uint64_t room = limit - s_rec.audio_written;
-        uint32_t n = room < s_rec.queued ? (uint32_t)room : s_rec.queued;
-        if (!nt_recorder_platform_audio(s_rec.audio, n)) {
-            return false;
-        }
-        s_rec.audio_written += n;
-        s_rec.queued -= n;
-        s_rec.queue_pos += n;
-        memmove(s_rec.audio, s_rec.audio + ((size_t)n * 2U), (size_t)s_rec.queued * 2U * sizeof(float));
-    }
-    if (pad && s_rec.audio_written < limit) {
-        return write_silence(limit - s_rec.audio_written);
-    }
-    return true;
-}
-
-/* Ends with the audio track padded to the video; audio past it is dropped. */
+/* Ends with the audio track padded with silence to the video; audio pushed past it stays. */
 static uint32_t end_recording(void) {
+    static const float k_zero[1024 * 2];
     if (s_rec.frames == 0) {
-        NT_LOG_WARN("stopped before the first frame, nothing written");
+        NT_LOG_WARN("ended before the first frame, nothing written");
     }
-    if (!write_audio(frames_end(s_rec.frames), true)) {
-        fail();
-        return 0;
+    uint64_t end = (uint64_t)llround((double)s_rec.frames * NT_RECORDER_AUDIO_RATE / (double)s_rec.fps);
+    while (s_rec.audio < end) {
+        uint32_t n = end - s_rec.audio < 1024U ? (uint32_t)(end - s_rec.audio) : 1024U;
+        if (!nt_recorder_platform_audio(k_zero, n)) {
+            fail();
+            return 0;
+        }
+        s_rec.audio += n;
     }
     uint32_t frames = s_rec.frames;
     finish();
@@ -116,15 +68,13 @@ bool nt_recorder_start(const char *name, uint32_t fps, double t) {
         return false;
     }
     s_rec.active = true;
+    s_rec.drift_warned = false;
     s_rec.fps = fps;
     s_rec.t0 = t;
     s_rec.width = w;
     s_rec.height = h;
     s_rec.frames = 0;
-    s_rec.audio_written = 0;
-    s_rec.queue_pos = 0;
-    s_rec.run_end = 0;
-    s_rec.queued = 0;
+    s_rec.audio = 0;
     NT_LOG_INFO("%s: recording %ux%u at %u fps", name, w, h, fps);
     return true;
 }
@@ -133,7 +83,7 @@ void nt_recorder_frame(double t, double dt) {
     if (!s_rec.active) {
         return;
     }
-    NT_ASSERT(isfinite(t - s_rec.t0) && isfinite(dt));
+    NT_ASSERT(isfinite(t - s_rec.t0) && isfinite(dt) && dt >= 0.0);
     if ((g_nt_window.fb_width & ~1U) != s_rec.width || (g_nt_window.fb_height & ~1U) != s_rec.height) {
         NT_LOG_WARN("framebuffer resized, recording ended");
         (void)end_recording();
@@ -154,58 +104,31 @@ void nt_recorder_frame(double t, double dt) {
         (void)end_recording();
         return;
     }
-    /* Audio first, and only up to the end of the video being written. */
-    if (!write_audio(frames_end(frames), false)) {
-        fail();
-        return;
-    }
     for (; s_rec.frames < frames; s_rec.frames++) {
         if (!nt_recorder_platform_video(s_rec.frames)) {
             fail();
             return;
         }
     }
+    /* Audio is a stream without timestamps: a mixer that skips or starts late shifts the rest of the
+       track, so say so once. A game without sound pushes nothing and is not checked. */
+    double drift = ((double)s_rec.audio / NT_RECORDER_AUDIO_RATE) - (t - s_rec.t0);
+    if (s_rec.audio > 0 && !s_rec.drift_warned && fabs(drift) > NT_RECORDER_AUDIO_DRIFT) {
+        s_rec.drift_warned = true;
+        NT_LOG_WARN("audio %.0f ms %s the clock; push every step's samples from the start, silence included", fabs(drift) * 1000.0, drift < 0.0 ? "behind" : "ahead of");
+    }
 }
 
-void nt_recorder_push_audio(const float *stereo48k, uint32_t frames, double t_start) {
+void nt_recorder_push_audio(const float *stereo48k, uint32_t frames) {
     if (!s_rec.active || frames == 0) {
         return;
     }
     NT_ASSERT(stereo48k != NULL);
-    NT_ASSERT(fabs(t_start - s_rec.t0) < 1e9); /* finite and within llround's range */
-    int64_t pos = (int64_t)llround((t_start - s_rec.t0) * NT_RECORDER_AUDIO_RATE);
-    int64_t placed = (int64_t)(s_rec.queued > 0 ? s_rec.queue_pos + s_rec.queued : s_rec.audio_written);
-    /* Drift within a block continues the previous push, queued or written, unless silence was written
-       past it (the mixer paused); otherwise the block keeps its exact time. */
-    bool run = s_rec.run_end > 0 && s_rec.run_end >= s_rec.audio_written;
-    if (run && llabs(pos - (int64_t)s_rec.run_end) <= NT_RECORDER_AUDIO_SLACK) {
-        pos = (int64_t)s_rec.run_end;
-    } else if (pos < placed) {
-        /* Overlaps placed audio or precedes t0: keep only the part after it. */
-        int64_t skip = placed - pos;
-        if (skip >= (int64_t)frames) {
-            return;
-        }
-        stereo48k += (size_t)skip * 2U;
-        frames -= (uint32_t)skip;
-        pos = placed;
-    }
-    /* Render off past the catch-up bound, or a block far ahead of the clock, would wait longer than the
-       queue holds: end rather than lose audio. */
-    if ((uint64_t)pos + frames - s_rec.audio_written > NT_RECORDER_AUDIO_CAP) {
-        NT_LOG_WARN("audio %.1f s ahead of the written track, recording ended", (double)((uint64_t)pos - s_rec.audio_written) / NT_RECORDER_AUDIO_RATE);
-        (void)end_recording();
+    if (!nt_recorder_platform_audio(stereo48k, frames)) {
+        fail();
         return;
     }
-    if (s_rec.queued == 0) {
-        s_rec.queue_pos = (uint64_t)pos; /* a gap before it is written as silence */
-    }
-    uint64_t gap = (uint64_t)pos - (s_rec.queue_pos + s_rec.queued);
-    float *dst = s_rec.audio + ((size_t)s_rec.queued * 2U);
-    memset(dst, 0, (size_t)gap * 2U * sizeof(float));
-    memcpy(dst + ((size_t)gap * 2U), stereo48k, (size_t)frames * 2U * sizeof(float));
-    s_rec.queued += (uint32_t)gap + frames;
-    s_rec.run_end = (uint64_t)pos + frames;
+    s_rec.audio += frames;
 }
 
 uint32_t nt_recorder_stop(void) { return s_rec.active ? end_recording() : 0; }

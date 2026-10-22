@@ -208,9 +208,9 @@ static void render_pattern(bool flash) {
 #endif /* NT_DEVAPI_HOST_WEB_GFX */
 
 #ifdef NT_DEVAPI_GROUP_RECORDER
-/* A/V probe for record.*, mixed like a game: each frame pushes the block for its advance, and the step
-   that crosses a whole game second starts a 50 ms 1 kHz beep at the block start while its frame starts
-   a 100 ms white flash. */
+/* A/V probe for record.*, mixed like a game: each frame pushes the samples for its advance, and the
+   step that crosses a whole game second starts a 50 ms 1 kHz beep at the block start while its frame
+   starts a 100 ms white flash. */
 #define HOST_TONE_RATE 48000
 #define HOST_BEEP_FRAMES (HOST_TONE_RATE / 20)
 static uint32_t s_beep_left;
@@ -239,7 +239,7 @@ static void push_tone(void) {
             s_buf[2 * i] = v;
             s_buf[(2 * i) + 1] = v;
         }
-        nt_recorder_push_audio(s_buf, chunk, start + ((double)done / HOST_TONE_RATE));
+        nt_recorder_push_audio(s_buf, chunk);
         done += chunk;
     }
 }
