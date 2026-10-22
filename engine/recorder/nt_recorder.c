@@ -7,13 +7,13 @@
 #include "recorder/nt_recorder_internal.h"
 #include "window/nt_window.h"
 
-/* Seconds the pushed stream may differ from the caller's clock: one mixer block and a frame fit; past
-   this it has a gap or a late start. */
+/* Seconds the pushed stream may differ from the caller's clock: a 1024-sample mixer block and a 60 Hz
+   step fit; past this it has a gap, a late start or extra samples. */
 #define NT_RECORDER_AUDIO_DRIFT 0.1
 
 static struct {
     bool active;
-    bool pushed; /* the game's mixer has pushed; until then the track is silence beside the video */
+    bool pushed; /* the game's mixer has pushed; until then the track is silence up to each frame's t */
     bool drift_warned;
     uint32_t fps;
     double t0;
@@ -33,7 +33,6 @@ static void fail(void) {
     finish();
 }
 
-/* Pads the track with silence up to track position `end`. */
 static bool pad_to(uint64_t end) {
     static const float k_zero[1024 * 2];
     while (s_rec.audio < end) {
@@ -64,7 +63,7 @@ bool nt_recorder_start(const char *name, uint32_t fps, double t) {
     NT_ASSERT(!s_rec.active && "nt_recorder_start: already recording");
     NT_ASSERT(name != NULL && name[0] != '\0');
     NT_ASSERT(fps >= 1 && fps <= 120 && isfinite(t));
-    uint32_t w = g_nt_window.fb_width & ~1U;
+    uint32_t w = g_nt_window.fb_width & ~1U; /* H.264 4:2:0 needs even sizes */
     uint32_t h = g_nt_window.fb_height & ~1U;
     if (w == 0 || h == 0) {
         NT_LOG_WARN("%s: framebuffer is %ux%u, not recording", name, g_nt_window.fb_width, g_nt_window.fb_height);
@@ -97,8 +96,8 @@ void nt_recorder_frame(double t, double dt) {
         (void)end_recording();
         return;
     }
-    /* Nearest sample: a deadline belongs to this frame once it is closer to t than to the neighbouring
-       frames. The half-frame margin also absorbs float step_dt that rounds below 1 / fps; capping it at
+    /* Nearest sample: a deadline belongs to this frame once it is closer to t than to the next frame,
+       expected at t + dt. The margin also absorbs float step_dt that rounds below 1 / fps; capping it at
        half a period keeps a long hitch from claiming deadlines the next frame is nearer to. */
     double period = 1.0 / (double)s_rec.fps;
     double margin = 0.5 * (dt < period ? dt : period);
@@ -126,8 +125,8 @@ void nt_recorder_frame(double t, double dt) {
         }
         return;
     }
-    /* Audio is a stream without timestamps: a mixer that skips shifts the rest of the track, so say so
-       once. */
+    /* Pushed audio carries no timestamps: a mixer that skips or overfills shifts the rest of the track,
+       so say so once. */
     double drift = ((double)s_rec.audio / NT_RECORDER_AUDIO_RATE) - (t - s_rec.t0);
     if (!s_rec.drift_warned && fabs(drift) > NT_RECORDER_AUDIO_DRIFT) {
         s_rec.drift_warned = true;

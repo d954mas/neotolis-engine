@@ -2,9 +2,8 @@ import { test, expect } from '@playwright/test';
 import { execFileSync } from 'child_process';
 import { join } from 'path';
 
-// Needs devapi_host built with NT_DEVAPI_GROUP_RECORDER, plus python and ffmpeg: a lockstep record.*
-// run, then the downloaded MP4 is checked for streams, frame count and flash/beep sync
-// (tools/devapi/check_recording.py).
+// Needs devapi_host built with NT_DEVAPI_GROUP_RECORDER (docs/build.md). The lockstep test also needs
+// python and ffmpeg: tools/devapi/check_recording.py checks the downloaded MP4.
 declare global {
   interface Window {
     __devapi?: { ready: boolean; submit(line: string): string };
@@ -51,8 +50,8 @@ test('record.* in lockstep downloads a synced MP4', async ({ page }, testInfo) =
 });
 
 // RUN mode: a step of ~117 ms (scale 7) would show a one-step offset between record.start and the
-// pushed stream as a drift WARN. Frames reach the encoder at fps x scale per second whatever the fps,
-// so a small canvas keeps a software encoder (CI) well inside its backlog bound.
+// pushed stream as a drift WARN. Frames reach the encoder at recording fps x scale per second, so a
+// small canvas keeps a software encoder (CI) well inside its backlog bound.
 test('record.* in real time keeps audio on the clock', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 180 });
   const warnings: string[] = [];

@@ -3,9 +3,9 @@
 // outside Closure, so the WebCodecs and Mediabunny property names stay intact in wasm-release.
 globalThis['NtRecorder'] = (function () {
     var cur = null;
-    var url = null; // the last download's blob URL, revoked on the next (Chrome may ask before it)
+    var url = null; // the last download's blob URL, revoked on the next: Chrome may still be asking where to save it
     // Probed once at load (Firefox and Linux Chrome lack AAC, a software-only Chrome lacks H.264 High);
-    // open refuses until the probe settles, so a start never picks a codec the browser rejects.
+    // open refuses until the probe settles, so a start picks a profile and audio codec the browser reported.
     var profile = null;
     var acodec = null;
     var probed = typeof VideoEncoder === 'undefined' || typeof AudioEncoder === 'undefined';
@@ -31,7 +31,7 @@ globalThis['NtRecorder'] = (function () {
     var LEVELS = [['1F', 3600, 108000], ['28', 8192, 245760], ['2A', 8704, 522240], ['32', 22080, 589824], ['33', 36864, 983040],
                   ['34', 36864, 2073600], ['3C', 139264, 4177920], ['3E', 139264, 16711680]];
 
-    // The browser may already have closed an encoder (resource reclamation).
+    // An encoder error or the browser's resource reclamation may already have closed an encoder.
     function closeEncoders(r) {
         if (r.venc && r.venc.state !== 'closed') { r.venc.close(); }
         if (r.aenc && r.aenc.state !== 'closed') { r.aenc.close(); }
@@ -99,7 +99,7 @@ globalThis['NtRecorder'] = (function () {
         var us = Math.round(index * 1e6 / r.fps);
         try {
             var f = new VideoFrame(r.canvas, { timestamp: us, duration: Math.round((index + 1) * 1e6 / r.fps) - us,
-                                               visibleRect: { x: 0, y: 0, width: r.w, height: r.h } });
+                                               visibleRect: { x: 0, y: 0, width: r.w, height: r.h } }); // even crop
             try { r.venc.encode(f, { keyFrame: index % (r.fps * 2) === 0 }); } finally { f.close(); }
         } catch (e) {
             r.fail(e);

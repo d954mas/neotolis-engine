@@ -159,14 +159,15 @@ static void test_one_frame_per_step(void) {
     TEST_ASSERT_EQUAL_UINT32(90, s_be.closed_frames);
 }
 
-/* Every second step lands exactly on a deadline; the odd steps lie half a period away. */
+/* Every second step lands on a deadline (within float step error); the others lie half a period away. */
 static void test_two_ticks_per_frame(void) {
     TEST_ASSERT_EQUAL_UINT32(10000, run_lockstep(1.0F / 60.0F, 30, 20000));
     TEST_ASSERT_FALSE(s_be.index_gap);
     TEST_ASSERT_TRUE(s_be.worst_video_error < 1e-4);
 }
 
-/* 1/50 and 1/25 round down as floats; a fixed tolerance drifts one step late after ~4500 frames. */
+/* 1/50 and 1/25 round down as floats, so time falls ever further behind the deadlines; the dt margin
+   absorbs it over 20000 frames. */
 static void test_float_step_below_period_does_not_drift(void) {
     TEST_ASSERT_EQUAL_UINT32(20000, run_lockstep(1.0F / 50.0F, 50, 20000));
     TEST_ASSERT_FALSE(s_be.index_gap);
@@ -176,7 +177,7 @@ static void test_float_step_below_period_does_not_drift(void) {
 }
 
 /* The margin comes from the frame's own dt, so with uneven dt a deadline can land up to
-   dt - previous_dt / 2 away (0.8 / 60 here); a take-once-reached rule would reach a full dt (1.15 / 60). */
+   dt - previous_dt / 2 away (0.8 / 60 here). */
 static void test_jittered_real_time_picks_nearest_frames(void) {
     start_at(30, 0.0);
     double t = 0.0;
@@ -319,7 +320,7 @@ static void test_silent_track_matches_video_length(void) {
 }
 
 /* A mixer like devapi_host's (samples per step from absolute times) at a 144 Hz step with t0 off the
-   sample grid: the stream reaches the encoder whole and in order, and never drifts from the clock. */
+   sample grid: the stream reaches the encoder whole and in order, and stays within the drift bound. */
 static void test_lockstep_mixer_stream_is_written_whole(void) {
     double t = 10.0 + (0.4 / 48000.0);
     start_at(60, t);

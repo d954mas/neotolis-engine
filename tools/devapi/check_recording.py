@@ -53,7 +53,8 @@ def main():
         errors.append(f"frames {video[0]['nb_read_frames']} != {a.frames}")
     if audio[0].get("sample_rate") != "48000" or audio[0].get("channels") != 2:
         errors.append(f"audio is {audio[0].get('sample_rate')} Hz, {audio[0].get('channels')} channels; expected 48000 Hz stereo")
-    # Padded to the video; the codec rounds the end up to its frame (AAC 1024 samples, Opus 960).
+    # Padded to the video; the encoder rounds the end up to whole codec frames (AAC 1024 samples,
+    # Opus 960); one more frame is margin.
     if abs(float(audio[0]["duration"]) - a.frames / a.fps) > 2048 / 48000:
         errors.append(f"audio lasts {audio[0]['duration']} s, video {a.frames / a.fps:.3f} s")
 

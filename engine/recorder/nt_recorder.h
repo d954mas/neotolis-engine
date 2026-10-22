@@ -5,15 +5,16 @@
 #include <stdint.h>
 
 /* Dev-only MP4 recorder (H.264 + AAC or Opus, 48 kHz stereo) of the presented frames on the caller's
-   clock; frame selection, audio sync and the web 'nt-recorder' event: docs/spec/debug/recorder.md. */
+   clock; frame selection, the audio stream and the web 'nt-recorder' event: docs/spec/debug/recorder.md. */
 
-/* name: web — download name, copied; fps 1..120; t: where the audio stream begins, so call between
-   steps. Returns false (logged) when the framebuffer is under 2x2, there is no encoder, or the output
-   cannot be opened. Asserts while recording. */
+/* name: web — download name, copied; fps 1..120; t: the recording's origin (video deadlines, audio
+   sample 0), so call between steps. Returns false (logged) when a framebuffer side is under 2 px or the
+   backend refuses (no encoder, output not opened; web: codec probe running, past H.264 level 6.2).
+   Asserts while recording. */
 bool nt_recorder_start(const char *name, uint32_t fps, double t);
 
-/* After nt_gfx_end_frame and before nt_window_swap_buffers, once per presented frame; dt is this
-   frame's advance. A resize, over two seconds of due frames or an encoder failure ends the recording
+/* After nt_gfx_end_frame and before nt_window_swap_buffers, once per presented frame; dt is the advance
+   that produced this frame. A resize, over two seconds of due frames or an encoder failure ends the recording
    (WARN). No-op while idle. */
 void nt_recorder_frame(double t, double dt);
 
@@ -23,7 +24,8 @@ void nt_recorder_frame(double t, double dt);
    from the clock by over 100 ms is reported once (WARN). Main thread. No-op while idle. */
 void nt_recorder_push_audio(const float *stereo48k, uint32_t frames);
 
-/* Returns the frames written; 0 while idle or when the final audio write failed. */
+/* Returns the frames sent to the encoder; 0 while idle or when the final audio write failed (web: the
+   'nt-recorder' event says whether a file exists). */
 uint32_t nt_recorder_stop(void);
 
 bool nt_recorder_active(void);

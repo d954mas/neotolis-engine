@@ -5,8 +5,7 @@ import { join } from 'node:path';
 // and the devapi_host build with the capture and record groups (devapi.spec.ts, record.spec.ts; the
 // latter also needs python and ffmpeg). Each spec file runs in the project whose server serves the
 // app it drives — a plain `npx playwright test` covers both, provided both targets are built
-// (browser_smoke via the wasm-debug preset; devapi_host via
-// `cmake --build build/_cmake/wasm-debug --target devapi_host`).
+// (browser_smoke via the wasm-debug preset; devapi_host with its groups as in docs/build.md).
 const PORT = Number(process.env.NT_SHOWCASE_PORT || 8123);
 const DEVAPI_PORT = Number(process.env.NT_DEVAPI_PORT || 8124);
 const DEVAPI_DIR = process.env.NT_DEVAPI_DIR || join(__dirname, '..', '..', 'build', 'examples', 'devapi_host', 'wasm-debug');

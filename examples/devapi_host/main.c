@@ -191,7 +191,7 @@ static void recover_on_disconnect(void) {
 #endif /* !__EMSCRIPTEN__ */
 
 #ifdef NT_DEVAPI_HOST_WEB_GFX
-/* Two tones make a uniform/blank pre-swap capture observable. */
+/* Two tones make a uniform/blank pre-swap capture observable; record builds add a white flash. */
 static const float k_bg_color[4] = {0.10F, 0.20F, 0.45F, 1.0F};
 static const float k_fg_color[4] = {0.90F, 0.55F, 0.10F, 1.0F};
 
@@ -225,7 +225,7 @@ static void push_tone(void) {
     }
     double start = g_nt_app.time - (double)g_nt_app.dt;
     int64_t n = llround(g_nt_app.time * HOST_TONE_RATE) - llround(start * HOST_TONE_RATE);
-    /* A step past the recorder's two-second catch-up ends the recording at this frame's call anyway. */
+    /* Cap a huge step: past the recorder's two-second catch-up the next frame call ends the recording. */
     n = n < 3 * HOST_TONE_RATE ? n : 3 * HOST_TONE_RATE;
     if (second_crossed()) {
         s_beep_left = HOST_BEEP_FRAMES;
@@ -359,7 +359,7 @@ int main(void) {
     nt_window_set_vsync(NT_VSYNC_OFF);
     nt_input_init();
 #ifdef NT_DEVAPI_HOST_WEB_GFX
-    /* Web capture build: a real GL context so the pre-swap capture seam reads a non-blank frame.
+    /* Web capture or record build: a real GL context so capture and the recorder read a non-blank frame.
        The capture group inits its own fpng encoder in nt_devapi_register_capture (no nt_fpng_init here). */
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     nt_gfx_init(&gfx_desc);
@@ -484,7 +484,7 @@ shutdown_devapi:
     nt_devapi_shutdown();
 shutdown_base:
 #ifdef NT_DEVAPI_HOST_WEB_GFX
-    nt_gfx_shutdown(); /* paired with the nt_gfx_init on the web capture path above. */
+    nt_gfx_shutdown(); /* paired with the nt_gfx_init on the web capture/record path above. */
 #endif
     nt_input_shutdown();
     nt_window_shutdown();

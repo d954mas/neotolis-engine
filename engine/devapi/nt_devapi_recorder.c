@@ -36,7 +36,7 @@ static bool cmd_record_start(const cJSON *params, cJSON *result, nt_devapi_error
     }
     if (!nt_recorder_start(name->valuestring, fps, g_nt_app.time)) {
         err->code = "failed";
-        err->message = "record.start: no encoder or the output cannot be opened (see log)";
+        err->message = "record.start: the recorder refused to start (see log and console)";
         return false;
     }
     (void)result;
@@ -59,7 +59,7 @@ static const nt_devapi_command_desc k_record_cmds[] = {
         .params_shape = "{name:string, fps:int}",
         .result_shape = "{}",
         .frame_behavior = "any",
-        .side_effects = "starts nt_recorder; web dispatches 'nt-recorder' after stop",
+        .side_effects = "starts nt_recorder; web dispatches 'nt-recorder' when the recording ends",
     },
     {
         .method = "record.stop",
