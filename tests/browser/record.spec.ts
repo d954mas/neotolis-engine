@@ -66,12 +66,27 @@ test('record.* in real time keeps audio on the clock', async ({ page }) => {
       const resp = window.__devapi!.submit(JSON.stringify({ method, params: params ?? {} }));
       return resp ? JSON.parse(resp) : null;
     }, { method, params });
+  for (const params of [{ name: 'run.mp4', fps: 0 }, { name: 'run.mp4', fps: 121 }, { name: '', fps: 5 }]) {
+    expect((await call('record.start', params)).error.code).toBe('bad_params');
+  }
+  // A host that takes the blob cancels the event, so nothing downloads.
+  let downloads = 0;
+  page.on('download', () => downloads++);
+  await page.evaluate(() => window.addEventListener('nt-recorder', (e) => {
+    e.preventDefault();
+    const d = (e as CustomEvent).detail;
+    (window as any).__rec = { size: d.blob ? d.blob.size : 0, error: d.error };
+  }));
   expect((await call('time.set_scale', { scale: 7 })).ok).toBe(true);
   await expect.poll(async () => (await call('record.start', { name: 'run.mp4', fps: 5 })).ok, { timeout: 30_000 }).toBe(true);
   await page.waitForTimeout(1500);
   const frames = (await call('record.stop')).result.frames;
   console.log(log.join('\n'));
   expect(frames).toBeGreaterThan(5);
+  const rec = await page.waitForFunction(() => (window as any).__rec, null, { timeout: 30_000 }).then((h) => h.jsonValue());
+  expect(rec.error).toBeNull();
+  expect(rec.size).toBeGreaterThan(0);
+  expect(downloads).toBe(0);
   expect(log.some((line) => / at 5 fps/.test(line))).toBe(true); // the log reaches the console, so no WARN means no drift
   expect(warnings).toEqual([]);
 });

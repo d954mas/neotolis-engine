@@ -36,7 +36,7 @@ def main():
     a = ap.parse_args()
 
     probe = json.loads(run([tool("ffprobe"), "-v", "error", "-count_frames", "-show_entries",
-                            "stream=codec_type,codec_name,avg_frame_rate,nb_read_frames", "-of", "json", a.mp4]).stdout)
+                            "stream=codec_type,codec_name,avg_frame_rate,nb_read_frames,sample_rate,channels,duration", "-of", "json", a.mp4]).stdout)
     streams = probe["streams"]
     video = [s for s in streams if s["codec_type"] == "video"]
     audio = [s for s in streams if s["codec_type"] == "audio"]
@@ -51,6 +51,11 @@ def main():
         errors.append(f"avg_frame_rate {video[0]['avg_frame_rate']} != {a.fps}/1")
     if int(video[0]["nb_read_frames"]) != a.frames:
         errors.append(f"frames {video[0]['nb_read_frames']} != {a.frames}")
+    if audio[0].get("sample_rate") != "48000" or audio[0].get("channels") != 2:
+        errors.append(f"audio is {audio[0].get('sample_rate')} Hz, {audio[0].get('channels')} channels; expected 48000 Hz stereo")
+    # Padded to the video; the codec rounds the end up to its frame (AAC 1024 samples, Opus 960).
+    if abs(float(audio[0]["duration"]) - a.frames / a.fps) > 2048 / 48000:
+        errors.append(f"audio lasts {audio[0]['duration']} s, video {a.frames / a.fps:.3f} s")
 
     # Flash onsets: centre luma rising above 200.
     luma = run([tool("ffmpeg"), "-v", "error", "-i", a.mp4, "-vf", "crop=2:2:iw/2:ih/2,scale=1:1",

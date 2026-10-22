@@ -365,6 +365,11 @@ fields and copied game context survive with an empty log section.
 upload payloads, checks uploads before render begin and compares output pixels
 with recording off/on/full.
 
+The `devapi-chromium` Playwright project (`devapi.spec.ts`, `record.spec.ts`) serves a wasm-debug
+`devapi_host` built with `-DNT_DEVAPI_ENABLED=ON` and the CORE, DISCOVERY, TIME, CAPTURE, OBS and
+RECORDER groups ON (the CI web-smoke line); `record.spec.ts` also needs python and ffmpeg/ffprobe on
+`PATH` or in `FFMPEG_DIR`.
+
 Browser diagnostics use `tests/browser/diagnostics.spec.ts`. Set
 `NT_SHOWCASE_DIR` to the exact build, distinct `NT_SHOWCASE_PORT`/`NT_DEVAPI_PORT`,
 `CI=1` to forbid server reuse, and matching

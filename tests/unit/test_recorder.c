@@ -2,7 +2,9 @@
    platform backend and log. */
 
 #include <math.h>
+#include <stdarg.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "log/nt_log.h"
@@ -32,6 +34,7 @@ static struct {
     uint32_t fail_index;
     bool fail_audio;
     uint32_t warns;
+    char info[160];    /* the last INFO line */
     float next_sample; /* push_stream's counter */
 } s_be;
 
@@ -83,8 +86,13 @@ void nt_recorder_platform_close(uint32_t frames) {
 
 void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...) {
     (void)domain;
-    (void)fmt;
     s_be.warns += level == NT_LOG_LEVEL_WARN ? 1U : 0U;
+    if (level == NT_LOG_LEVEL_INFO) {
+        va_list args;
+        va_start(args, fmt);
+        (void)vsnprintf(s_be.info, sizeof(s_be.info), fmt, args);
+        va_end(args);
+    }
 }
 
 void setUp(void) {
@@ -224,6 +232,7 @@ static void test_video_failure_ends_the_recording(void) {
     }
     TEST_ASSERT_FALSE(nt_recorder_active());
     TEST_ASSERT_EQUAL_UINT32(2, s_be.closed_frames);
+    TEST_ASSERT_EQUAL_UINT64(2ULL * 1600ULL, s_be.audio_frames); /* silence beside the frames, no end padding */
     TEST_ASSERT_EQUAL_UINT32(0, nt_recorder_stop());
 }
 
@@ -347,6 +356,56 @@ static void test_mixer_gap_warns_once(void) {
     TEST_ASSERT_TRUE(nt_recorder_active());
 }
 
+/* Pushes `per_step` samples for each of `steps` 1/60 steps at fps 30, from `first` on. */
+static void run_mixer(int first, int steps, uint32_t per_step) {
+    for (int i = first; i < first + steps; i++) {
+        push_stream(per_step);
+        frame_at(i / 60.0, 1.0 / 60.0);
+    }
+}
+
+/* The bound is 100 ms either way: a gap of 83 ms passes, 133 ms warns, and a stream running ahead
+   warns too. A new recording warns again. */
+static void test_drift_bound_both_ways_and_per_recording(void) {
+    start_at(30, 0.0);
+    run_mixer(1, 60, 800);
+    run_mixer(66, 60, 800); /* 5 steps (83 ms) missing: within the bound */
+    TEST_ASSERT_EQUAL_UINT32(0, s_be.warns);
+    run_mixer(129, 60, 800); /* 3 more (133 ms total) */
+    TEST_ASSERT_EQUAL_UINT32(1, s_be.warns);
+    (void)nt_recorder_stop();
+
+    s_be.warns = 0;
+    start_at(30, 0.0);
+    run_mixer(1, 60, 1600); /* twice the clock */
+    TEST_ASSERT_EQUAL_UINT32(1, s_be.warns);
+}
+
+/* End padding rounds to the nearest sample at a rate that does not divide 48000. */
+static void test_padding_rounds_at_fps_7(void) {
+    start_at(7, 0.0);
+    push_stream(1);
+    frame_at(2.0 / 7.0, 1.0 / 7.0);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_recorder_stop());
+    TEST_ASSERT_EQUAL_UINT64(13714, s_be.audio_frames); /* 13714.29 */
+
+    memset(&s_be, 0, sizeof(s_be));
+    start_at(7, 0.0);
+    push_stream(1);
+    frame_at(4.0 / 7.0, 1.0 / 7.0);
+    TEST_ASSERT_EQUAL_UINT32(4, nt_recorder_stop());
+    TEST_ASSERT_EQUAL_UINT64(27429, s_be.audio_frames); /* 27428.57 */
+}
+
+/* The end line reports the audio pushed against the video, before padding hides the difference. */
+static void test_end_line_reports_audio_against_video(void) {
+    start_at(30, 0.0);
+    push_stream(800);
+    frame_at(3.0 / 30.0, 1.0 / 30.0);
+    TEST_ASSERT_EQUAL_UINT32(3, nt_recorder_stop());
+    TEST_ASSERT_EQUAL_STRING("3 frames, 0.10 s; audio 0.02 s before padding (-83 ms against the video)", s_be.info);
+}
+
 /* Short audio is padded with silence to the video at stop; audio pushed past the video stays. */
 static void test_stop_pads_short_audio_and_keeps_long(void) {
     start_at(30, 0.0);
@@ -403,6 +462,9 @@ int main(void) {
     RUN_TEST(test_block_mixer_does_not_warn);
     RUN_TEST(test_silence_until_the_first_push);
     RUN_TEST(test_mixer_gap_warns_once);
+    RUN_TEST(test_drift_bound_both_ways_and_per_recording);
+    RUN_TEST(test_padding_rounds_at_fps_7);
+    RUN_TEST(test_end_line_reports_audio_against_video);
     RUN_TEST(test_stop_pads_short_audio_and_keeps_long);
     RUN_TEST(test_final_audio_failure_returns_zero);
     RUN_TEST(test_audio_failure_ends_the_recording);

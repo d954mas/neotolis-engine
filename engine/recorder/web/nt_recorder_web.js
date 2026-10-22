@@ -3,6 +3,7 @@
 // outside Closure, so the WebCodecs and Mediabunny property names stay intact in wasm-release.
 globalThis['NtRecorder'] = (function () {
     var cur = null;
+    var url = null; // the last download's blob URL, revoked on the next (Chrome may ask before it)
     // Probed once at load (Firefox and Linux Chrome lack AAC, a software-only Chrome lacks H.264 High);
     // open refuses until the probe settles, so a start never picks a codec the browser rejects.
     var profile = null;
@@ -49,6 +50,7 @@ globalThis['NtRecorder'] = (function () {
         var mbs = Math.ceil(w / 16) * Math.ceil(h / 16);
         var level = LEVELS.find(function (l) { return mbs <= l[1] && mbs * fps <= l[2]; });
         if (!level) {
+            console.warn('nt_recorder: ' + w + 'x' + h + ' at ' + fps + ' fps exceeds H.264 level 6.2');
             return false;
         }
         var MB = NtMediabunny;
@@ -137,11 +139,11 @@ globalThis['NtRecorder'] = (function () {
             var detail = { name: r.name, blob: blob, frames: frames, error: r.error || (frames ? null : 'no frames') };
             // Default action: download. A host that wants the blob (automation) cancels the event.
             if (window.dispatchEvent(new CustomEvent('nt-recorder', { detail: detail, cancelable: true })) && blob) {
+                if (url) { URL.revokeObjectURL(url); }
                 var a = document.createElement('a');
-                a.href = URL.createObjectURL(blob);
+                a.href = url = URL.createObjectURL(blob);
                 a.download = r.name;
                 a.click();
-                setTimeout(function () { URL.revokeObjectURL(a.href); }, 60000);
             }
         };
         if (!frames || r.error) {
