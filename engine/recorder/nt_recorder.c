@@ -33,10 +33,9 @@ static void fail(void) {
     finish();
 }
 
-/* Pads the track with silence to the end of the written video. */
-static bool pad_to_video(void) {
+/* Pads the track with silence up to track position `end`. */
+static bool pad_to(uint64_t end) {
     static const float k_zero[1024 * 2];
-    uint64_t end = (uint64_t)llround((double)s_rec.frames * NT_RECORDER_AUDIO_RATE / (double)s_rec.fps);
     while (s_rec.audio < end) {
         uint32_t n = end - s_rec.audio < 1024U ? (uint32_t)(end - s_rec.audio) : 1024U;
         if (!nt_recorder_platform_audio(k_zero, n)) {
@@ -49,13 +48,10 @@ static bool pad_to_video(void) {
 
 /* Ends with the audio track padded to the video; audio pushed past it stays. */
 static uint32_t end_recording(void) {
-    if (s_rec.frames == 0) {
-        NT_LOG_WARN("ended before the first frame, nothing written");
-    }
     /* Before padding: audio short of the video shows here even after the one-shot drift WARN. */
     NT_LOG_INFO("%u frames, %.2f s; audio %.2f s before padding (%+.0f ms against the video)", s_rec.frames, (double)s_rec.frames / (double)s_rec.fps, (double)s_rec.audio / NT_RECORDER_AUDIO_RATE,
                 (((double)s_rec.audio / NT_RECORDER_AUDIO_RATE) - ((double)s_rec.frames / (double)s_rec.fps)) * 1000.0);
-    if (!pad_to_video()) {
+    if (!pad_to((uint64_t)llround((double)s_rec.frames * NT_RECORDER_AUDIO_RATE / (double)s_rec.fps))) {
         fail();
         return 0;
     }
@@ -122,10 +118,10 @@ void nt_recorder_frame(double t, double dt) {
             return;
         }
     }
-    /* Silence keeps pace with the video until the first push, so a long silent clip never pads at once
-       and a mixer that starts later continues from the video end. */
+    /* Silence keeps pace with the clock until the first push, so a long silent clip never pads at once
+       and a mixer whose first push is the step after this call starts on time. */
     if (!s_rec.pushed) {
-        if (!pad_to_video()) {
+        if (!pad_to((uint64_t)llround(fmax(t - s_rec.t0, 0.0) * NT_RECORDER_AUDIO_RATE))) {
             fail();
         }
         return;

@@ -282,7 +282,7 @@ static void frame(void) {
 #ifdef NT_DEVAPI_HOST_WEB_GFX
     if (render) {
 #ifdef NT_DEVAPI_GROUP_RECORDER
-        render_pattern(g_nt_app.time - floor(g_nt_app.time) < 0.1);
+        render_pattern(second_crossed() || g_nt_app.time - floor(g_nt_app.time) < 0.1);
 #else
         render_pattern(false);
 #endif

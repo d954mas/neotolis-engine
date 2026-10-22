@@ -64,13 +64,11 @@ globalThis['NtRecorder'] = (function () {
             r.out.addAudioTrack(r.asrc);
             // Packets join the muxer strictly in output order through one promise chain.
             r.chain = r.out.start();
+            // The muxer reads the decoder config from the first packet's metadata and ignores the rest.
             var add = function (src) {
-                var first = true;
                 return function (chunk, meta) {
                     var p = MB.EncodedPacket.fromEncodedChunk(chunk);
-                    var m = first ? meta : undefined;
-                    first = false;
-                    r.chain = r.chain.then(function () { return src.add(p, m); });
+                    r.chain = r.chain.then(function () { return src.add(p, meta); });
                     r.chain.catch(fail);
                 };
             };

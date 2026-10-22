@@ -22,7 +22,9 @@ The game calls `nt_recorder_frame` once per presented frame, after `nt_gfx_end_f
 `nt_window_swap_buffers`, and passes its clock: `t` is the time of this frame, `dt` its advance.
 There is no hook and no hidden clock. With `g_nt_app.time` and MANUAL lockstep the recording is
 offline and frame-exact as long as the encoder keeps up with the stepping (see Backends); with RUN it
-records hand play in real time.
+records hand play in real time. `start`'s `t` is where the audio stream begins: call it between
+steps, so the first pushed samples are those of the next step (devapi does), or pass that step's
+start time.
 
 `start` fixes the size to the window framebuffer, rounded down to even. It returns false (logged)
 when that leaves less than 2x2, the platform has no encoder, or the output cannot be opened; it
@@ -48,12 +50,13 @@ every k-th step.
 
 The game's mixer pushes its output as one stream of interleaved stereo float samples at 48 kHz from
 the main thread, each step's samples before the `frame` call for that step. The stream carries no
-timestamps and the recorder corrects nothing: until the first push the track is silence written
-beside the video, and from then on sample `n` of the stream follows sample `n − 1`. So the mixer
-pushes every step's samples once it starts, silence included: a lockstep mixer renders
+timestamps and the recorder corrects nothing: until the first push each `frame` call writes silence
+up to its `t`, and from then on sample `n` of the stream follows sample `n − 1`. So the mixer pushes
+every step's samples once it starts, silence included: a lockstep mixer renders
 `llround(t · 48000) − llround((t − dt) · 48000)` samples per step, which never drifts from the clock.
-A mixer that starts after `start` continues from the end of the video written so far, within one
-frame period. A game without sound pushes nothing and gets a silent track.
+A mixer whose first push is the step after a `frame` call starts on time; one that starts while
+render is off (no `frame` calls) starts early by that gap, which the drift WARN reports. A game
+without sound pushes nothing and gets a silent track.
 
 A sound the mixer starts at the beginning of a step plays at that step's time. With `step_dt =
 1 / fps` it plays with the frame that first shows its cause; with more steps per frame it can come up
@@ -64,23 +67,27 @@ recording. A real-time mixer that renders on an audio thread is the game's to al
 samples rendered for each step on the game clock. Sounds played through `nt_audio` are not captured.
 
 Pushed samples go to the encoder at once, so the track may run ahead of the video while recording
-(render off). At the end it is padded with silence to the video length; audio pushed past the last
-frame stays.
+(render off). At the end an INFO line gives the frames, the video length and the audio pushed
+against it (positive up to a frame period is normal: the clock runs past the last deadline); then the
+track is padded with silence to the video length, and audio pushed past the last frame stays.
 
 ## Backends
 
 **Web.** `VideoFrame` from the canvas inside the rAF task, before the swap (the context is
 `preserveDrawingBuffer:false`, so the drawing buffer still holds the frame), into `VideoEncoder`
 and `AudioEncoder`. Codecs are probed once when the script loads: H.264 High, else Constrained
-Baseline, at the lowest level that fits size × fps (bitrate `0.1 · w · h · fps`); AAC-LC 192 kbps,
-else Opus (Firefox, Chrome on Linux; editors handle Opus in MP4 poorly). `start` returns false
-while the probe runs (a console warning says so; start again), and in a browser without WebCodecs,
-an H.264 encoder or an AAC/Opus encoder. The vendored Mediabunny muxer (`deps/mediabunny`) writes the MP4. The
+Baseline, at the lowest listed level (3.1 to 6.2) whose frame size and macroblock rate fit
+(bitrate `0.1 · w · h · fps`); AAC-LC, else Opus (Firefox, Chrome on Linux; editors handle Opus in
+MP4 poorly), both 192 kbps. `start` returns false while the probe runs (a console warning says so;
+start again), past level 6.2 (a console warning), and in a browser without WebCodecs, an H.264
+encoder or an AAC/Opus encoder. WebCodecs needs a secure context: a page over plain `http` to a LAN
+address (a phone) has none, so recording there needs `https` or `localhost`. The vendored Mediabunny muxer (`deps/mediabunny`) writes the MP4. The
 JS lives in `web/nt_recorder_web.js` and loads with `--extern-pre-js`, outside Closure; a page that
 links the recorder evaluates the 125 KB muxer at load. One module per page, main thread.
 
-Encoded bytes stay in tab memory (~1 MB/s at 1080p30): a dev-only exception to preallocated
-storage; long web recordings are not a goal. Nothing paces the game to the encoder, so an encoder
+Encoded bytes stay in tab memory (~0.8 MB/s at 1080p30; finishing copies the file, so the peak is
+two to three times its size): a dev-only exception to preallocated storage; long web recordings
+are not a goal. Nothing paces the game to the encoder, so an encoder
 queue above four seconds of frames (two of backlog plus one call's catch-up) ends the recording
 (`encoder backlog`); lockstep must not step much faster than the encoder runs. After `stop`, when
 the encoders flush, the window event `nt-recorder` (cancelable, `detail {name, blob, frames,
@@ -106,4 +113,6 @@ authority for whether a file exists.
 `record.start`, `time.step{count}`, `record.stop`; the default `step_dt` of `1/60` at `fps` 30 records
 every second step. `tests/browser/record.spec.ts` runs exactly that on `devapi_host` (built with the
 group) and checks the downloaded file with `tools/devapi/check_recording.py` (needs python and
-ffmpeg: streams, frame count, flash/beep offset within a frame).
+ffmpeg: streams, frame count, 48 kHz stereo audio as long as the video, flash/beep offset within a
+frame). A second test records in RUN at time scale 7 (steps over the 100 ms drift bound), fails on a
+drift WARN, and checks `bad_params` and a cancelled `nt-recorder` event.

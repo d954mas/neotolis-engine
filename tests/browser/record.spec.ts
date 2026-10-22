@@ -51,8 +51,10 @@ test('record.* in lockstep downloads a synced MP4', async ({ page }, testInfo) =
 });
 
 // RUN mode: a step of ~117 ms (scale 7) would show a one-step offset between record.start and the
-// pushed stream as a drift WARN. fps 5 keeps a software encoder (CI) far from its backlog bound.
+// pushed stream as a drift WARN. Frames reach the encoder at fps x scale per second whatever the fps,
+// so a small canvas keeps a software encoder (CI) well inside its backlog bound.
 test('record.* in real time keeps audio on the clock', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 180 });
   const warnings: string[] = [];
   const log: string[] = [];
   page.on('console', (msg) => {
@@ -79,8 +81,12 @@ test('record.* in real time keeps audio on the clock', async ({ page }) => {
   }));
   expect((await call('time.set_scale', { scale: 7 })).ok).toBe(true);
   await expect.poll(async () => (await call('record.start', { name: 'run.mp4', fps: 5 })).ok, { timeout: 30_000 }).toBe(true);
+  const from = (await call('frame.current')).result;
   await page.waitForTimeout(1500);
+  const to = (await call('frame.current')).result;
   const frames = (await call('record.stop')).result.frames;
+  // The steps must exceed the drift bound, or a one-step offset would pass unseen.
+  expect((to.time - from.time) / (to.frame - from.frame)).toBeGreaterThan(0.1);
   console.log(log.join('\n'));
   expect(frames).toBeGreaterThan(5);
   const rec = await page.waitForFunction(() => (window as any).__rec, null, { timeout: 30_000 }).then((h) => h.jsonValue());
