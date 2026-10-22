@@ -55,12 +55,12 @@ device output to the main thread. Sounds played through `nt_audio` are not captu
 
 Blocks are placed by their time. A block within one mixer block (1024 samples) of where the
 previous push ended continues it, queued or already written, so rounding and drift never split a
-mixer's stream. Once silence has been written past the previous push (the mixer paused), a block
+mixer's stream; such a block moves to that end, by up to 21 ms. Once silence has been written past the previous push (the mixer paused), a block
 keeps its exact time. An overlap with placed audio, and anything before `t0`, is dropped, and a
 gap becomes silence. Audio is written only up to the end of the written video, so the track never
-runs ahead of the picture; the rest waits in a queue of 3 s plus two blocks (the catch-up bound
-plus a period at 1 fps), and a push that does not fit ends the recording (WARN), as the next
-`frame` call would. With nothing queued, silence is written up to 250 ms short of the video, which
+runs ahead of the picture; the rest waits in a queue. A push that would end more than 3.25 s plus
+two blocks past the written track (the catch-up bound, a period at 1 fps and the silence lag) ends
+the recording (WARN): render off for longer, or a block stamped far ahead of the clock. With nothing queued, silence is written up to 250 ms short of the video, which
 leaves room for a real-time mixer whose blocks reach the main thread late. A track is always
 written, silent when nothing is pushed; at the end it is padded to the video length.
 

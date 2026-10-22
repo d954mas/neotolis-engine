@@ -36,6 +36,12 @@ static struct {
     bool fail_video;
     uint32_t fail_index;
     bool fail_audio;
+    /* Tagged mode: a pushed sample holds 1 + its true track position. */
+    bool tagged;
+    float last_tag;
+    bool tag_order_broken;
+    uint64_t tags;
+    double worst_tag_error;
 } s_be;
 
 bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height, uint32_t fps) {
@@ -76,8 +82,15 @@ bool nt_recorder_platform_audio(const float *stereo, uint32_t frames) {
                 s_be.run_starts[s_be.runs++] = s_be.audio_frames + i;
             }
         }
-        if (v == PRE_START_SAMPLE) {
+        if (v == PRE_START_SAMPLE && !s_be.tagged) {
             s_be.saw_pre_start = true;
+        }
+        if (s_be.tagged && nonzero) {
+            s_be.tag_order_broken |= v <= s_be.last_tag;
+            s_be.last_tag = v;
+            s_be.tags++;
+            double err = fabs((double)(s_be.audio_frames + i) - (double)(v - 1.0F));
+            s_be.worst_tag_error = err > s_be.worst_tag_error ? err : s_be.worst_tag_error;
         }
         s_be.last_nonzero = nonzero;
     }
@@ -472,6 +485,111 @@ static void test_catch_up_bound_is_two_seconds_of_frames(void) {
     TEST_ASSERT_EQUAL_UINT32(1, s_be.closed_frames);
 }
 
+/* One block far ahead of the clock cannot wait in the queue: the recording ends instead of every later
+   block being dropped as an overlap. */
+static void test_block_far_ahead_ends_the_recording(void) {
+    start_at(30, 0.0);
+    push_block(0.5F, 800, 5.0);
+    TEST_ASSERT_FALSE(nt_recorder_active());
+    TEST_ASSERT_EQUAL_UINT32(1, s_be.closes);
+}
+
+/* fps 1: silence written 250 ms behind the first frame, a real-time mixer resuming 200 ms behind it,
+   then render off for 2.9 s (within the catch-up bound): the queue holds all of it. */
+static void test_queue_holds_catch_up_after_late_silence(void) {
+    start_at(1, 0.0);
+    for (int i = 1; i <= 60; i++) {
+        frame_at(i / 60.0, 1.0 / 60.0);
+    }
+    for (int k = 48; k < 234; k++) {
+        push_block(0.5F, 800, k / 60.0);
+    }
+    frame_at(234.0 / 60.0, 1.0 / 60.0);
+    TEST_ASSERT_TRUE(nt_recorder_active());
+    TEST_ASSERT_EQUAL_UINT32(3, nt_recorder_stop());
+    TEST_ASSERT_EQUAL_UINT64((3ULL * 48000ULL) - (48ULL * 800ULL), s_be.audio_nonzero);
+}
+
+static uint32_t next_rand(uint32_t *state) {
+    *state = (*state * 1664525U) + 1013904223U;
+    return *state >> 8;
+}
+
+/* A real-time mixer with 128-sample blocks: start times off by up to 300 samples, delivery up to three
+   frames late, pauses of half a second. Each sample holds 1 + its true track position. */
+#define MIX_BLOCK 128U
+#define MIX_OFF 300
+#define MIX_MAX_BLOCKS 40000U
+
+static struct {
+    uint32_t rng;
+    uint64_t made;      /* true position after the last block rendered */
+    uint64_t delivered; /* true position of the next block to reach the main thread */
+    uint32_t blocks;
+    uint64_t starts[MIX_MAX_BLOCKS];
+} s_mix;
+
+static void mixer_advance(double t) {
+    static float s_tag[MIX_BLOCK * 2U];
+    if (next_rand(&s_mix.rng) % 400U == 0) {
+        s_mix.made += 24000; /* the mixer pauses for half a second */
+        s_mix.delivered = s_mix.made;
+    }
+    while (s_mix.made + MIX_BLOCK <= (uint64_t)(t * 48000.0)) {
+        s_mix.made += MIX_BLOCK;
+    }
+    double reach = (t - ((double)(next_rand(&s_mix.rng) % 4U) / 60.0)) * 48000.0;
+    for (; s_mix.delivered + MIX_BLOCK <= s_mix.made && (double)(s_mix.delivered + MIX_BLOCK) <= reach; s_mix.delivered += MIX_BLOCK) {
+        for (uint32_t k = 0; k < MIX_BLOCK; k++) {
+            s_tag[(size_t)k * 2U] = (float)(s_mix.delivered + k + 1U);
+            s_tag[((size_t)k * 2U) + 1U] = s_tag[(size_t)k * 2U];
+        }
+        double off = (double)((int32_t)(next_rand(&s_mix.rng) % ((2U * MIX_OFF) + 1U)) - MIX_OFF);
+        nt_recorder_push_audio(s_tag, MIX_BLOCK, ((double)s_mix.delivered + off) / 48000.0);
+        TEST_ASSERT_TRUE(s_mix.blocks < MIX_MAX_BLOCKS);
+        s_mix.starts[s_mix.blocks++] = s_mix.delivered;
+    }
+}
+
+/* Under jittered frame times and render-off stretches of up to a second, no sample of that mixer is
+   lost, reordered or placed more than a join away, and the track never leads the video. */
+static void test_real_time_mixer_invariants(void) {
+    memset(&s_mix, 0, sizeof(s_mix));
+    s_mix.rng = 12345U;
+    s_be.tagged = true;
+    start_at(30, 0.0);
+    double t = 0.0;
+    uint32_t render_off = 0;
+    for (int i = 0; i < 6000; i++) {
+        double dt = (1.0 / 60.0) * (0.7 + ((double)(next_rand(&s_mix.rng) % 600U) / 1000.0));
+        t += dt;
+        mixer_advance(t);
+        if (render_off == 0 && next_rand(&s_mix.rng) % 300U == 0) {
+            render_off = 1 + (next_rand(&s_mix.rng) % 60U);
+        }
+        if (render_off > 0) {
+            render_off--;
+        } else {
+            frame_at(t, dt);
+        }
+    }
+    TEST_ASSERT_TRUE(nt_recorder_active());
+    uint64_t video_end = (uint64_t)nt_recorder_stop() * 1600U;
+    /* Blocks clear of the video end by more than the placement bound are written whole; none past it. */
+    const uint64_t bound = 1024U + MIX_OFF;
+    uint64_t must = 0;
+    uint64_t may = 0;
+    for (uint32_t b = 0; b < s_mix.blocks; b++) {
+        must += s_mix.starts[b] + MIX_BLOCK + bound <= video_end ? MIX_BLOCK : 0U;
+        may += s_mix.starts[b] < video_end + bound ? MIX_BLOCK : 0U;
+    }
+    TEST_ASSERT_FALSE(s_be.tag_order_broken);
+    TEST_ASSERT_TRUE(s_be.worst_tag_error <= (double)bound);
+    TEST_ASSERT_EQUAL_UINT64(0, s_be.audio_ahead);
+    TEST_ASSERT_TRUE(s_be.tags >= must && s_be.tags <= may);
+    TEST_ASSERT_TRUE(must > 30ULL * 48000ULL);
+}
+
 static void test_final_audio_failure_returns_zero(void) {
     start_at(30, 0.0);
     frame_at(1.0 / 30.0, 1.0 / 30.0);
@@ -520,6 +638,9 @@ int main(void) {
     RUN_TEST(test_render_off_gap_keeps_its_audio);
     RUN_TEST(test_full_audio_queue_ends_the_recording);
     RUN_TEST(test_catch_up_bound_is_two_seconds_of_frames);
+    RUN_TEST(test_block_far_ahead_ends_the_recording);
+    RUN_TEST(test_queue_holds_catch_up_after_late_silence);
+    RUN_TEST(test_real_time_mixer_invariants);
     RUN_TEST(test_final_audio_failure_returns_zero);
     RUN_TEST(test_audio_failure_ends_the_recording);
     return UNITY_END();

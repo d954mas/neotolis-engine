@@ -14,9 +14,9 @@
 /* With nothing queued, silence stays this far behind the video: a real-time mixer's blocks reach the
    main thread a few frames late. */
 #define NT_RECORDER_AUDIO_LATE (NT_RECORDER_AUDIO_RATE / 4U)
-/* Audio pushed past the written video: the two-second catch-up plus a period at 1 fps, and a block
-   each of join drift and mixer lookahead. */
-#define NT_RECORDER_AUDIO_CAP ((3ULL * NT_RECORDER_AUDIO_RATE) + (2ULL * NT_RECORDER_AUDIO_SLACK))
+/* Track span from the written audio to a push's end: the silence lag, the two-second catch-up plus a
+   period at 1 fps, and a block each of join drift and mixer lookahead. */
+#define NT_RECORDER_AUDIO_CAP ((3ULL * NT_RECORDER_AUDIO_RATE) + NT_RECORDER_AUDIO_LATE + (2ULL * NT_RECORDER_AUDIO_SLACK))
 
 static struct {
     bool active;
@@ -172,7 +172,7 @@ void nt_recorder_push_audio(const float *stereo48k, uint32_t frames, double t_st
         return;
     }
     NT_ASSERT(stereo48k != NULL);
-    NT_ASSERT(isfinite(t_start - s_rec.t0));
+    NT_ASSERT(fabs(t_start - s_rec.t0) < 1e9); /* finite and within llround's range */
     int64_t pos = (int64_t)llround((t_start - s_rec.t0) * NT_RECORDER_AUDIO_RATE);
     int64_t placed = (int64_t)(s_rec.queued > 0 ? s_rec.queue_pos + s_rec.queued : s_rec.audio_written);
     /* Drift within a block continues the previous push, queued or written, unless silence was written
@@ -190,16 +190,17 @@ void nt_recorder_push_audio(const float *stereo48k, uint32_t frames, double t_st
         frames -= (uint32_t)skip;
         pos = placed;
     }
+    /* Render off past the catch-up bound, or a block far ahead of the clock, would wait longer than the
+       queue holds: end rather than lose audio. */
+    if ((uint64_t)pos + frames - s_rec.audio_written > NT_RECORDER_AUDIO_CAP) {
+        NT_LOG_WARN("audio %.1f s ahead of the written track, recording ended", (double)((uint64_t)pos - s_rec.audio_written) / NT_RECORDER_AUDIO_RATE);
+        (void)end_recording();
+        return;
+    }
     if (s_rec.queued == 0) {
         s_rec.queue_pos = (uint64_t)pos; /* a gap before it is written as silence */
     }
     uint64_t gap = (uint64_t)pos - (s_rec.queue_pos + s_rec.queued);
-    /* Only render off past the catch-up bound fills the queue; the next frame call would end it too. */
-    if (s_rec.queued + gap + frames > NT_RECORDER_AUDIO_CAP) {
-        NT_LOG_WARN("audio queue full without frames, recording ended");
-        (void)end_recording();
-        return;
-    }
     float *dst = s_rec.audio + ((size_t)s_rec.queued * 2U);
     memset(dst, 0, (size_t)gap * 2U * sizeof(float));
     memcpy(dst + ((size_t)gap * 2U), stereo48k, (size_t)frames * 2U * sizeof(float));
