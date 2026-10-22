@@ -13,6 +13,7 @@
 
 static struct {
     bool active;
+    bool pushed; /* the game's mixer has pushed; until then the track is silence beside the video */
     bool drift_warned;
     uint32_t fps;
     double t0;
@@ -33,20 +34,28 @@ static void fail(void) {
     finish();
 }
 
-/* Ends with the audio track padded with silence to the video; audio pushed past it stays. */
-static uint32_t end_recording(void) {
+/* Pads the track with silence to the end of the written video. */
+static bool pad_to_video(void) {
     static const float k_zero[1024 * 2];
-    if (s_rec.frames == 0) {
-        NT_LOG_WARN("ended before the first frame, nothing written");
-    }
     uint64_t end = (uint64_t)llround((double)s_rec.frames * NT_RECORDER_AUDIO_RATE / (double)s_rec.fps);
     while (s_rec.audio < end) {
         uint32_t n = end - s_rec.audio < 1024U ? (uint32_t)(end - s_rec.audio) : 1024U;
         if (!nt_recorder_platform_audio(k_zero, n)) {
-            fail();
-            return 0;
+            return false;
         }
         s_rec.audio += n;
+    }
+    return true;
+}
+
+/* Ends with the audio track padded to the video; audio pushed past it stays. */
+static uint32_t end_recording(void) {
+    if (s_rec.frames == 0) {
+        NT_LOG_WARN("ended before the first frame, nothing written");
+    }
+    if (!pad_to_video()) {
+        fail();
+        return 0;
     }
     uint32_t frames = s_rec.frames;
     finish();
@@ -68,6 +77,7 @@ bool nt_recorder_start(const char *name, uint32_t fps, double t) {
         return false;
     }
     s_rec.active = true;
+    s_rec.pushed = false;
     s_rec.drift_warned = false;
     s_rec.fps = fps;
     s_rec.t0 = t;
@@ -110,10 +120,18 @@ void nt_recorder_frame(double t, double dt) {
             return;
         }
     }
-    /* Audio is a stream without timestamps: a mixer that skips or starts late shifts the rest of the
-       track, so say so once. A game without sound pushes nothing and is not checked. */
+    /* Silence keeps pace with the video until the first push, so a long silent clip never pads at once
+       and a mixer that starts later continues from the video end. */
+    if (!s_rec.pushed) {
+        if (!pad_to_video()) {
+            fail();
+        }
+        return;
+    }
+    /* Audio is a stream without timestamps: a mixer that skips shifts the rest of the track, so say so
+       once. */
     double drift = ((double)s_rec.audio / NT_RECORDER_AUDIO_RATE) - (t - s_rec.t0);
-    if (s_rec.audio > 0 && !s_rec.drift_warned && fabs(drift) > NT_RECORDER_AUDIO_DRIFT) {
+    if (!s_rec.drift_warned && fabs(drift) > NT_RECORDER_AUDIO_DRIFT) {
         s_rec.drift_warned = true;
         NT_LOG_WARN("audio %.0f ms %s the clock; push every step's samples from the start, silence included", fabs(drift) * 1000.0, drift < 0.0 ? "behind" : "ahead of");
     }
@@ -124,6 +142,7 @@ void nt_recorder_push_audio(const float *stereo48k, uint32_t frames) {
         return;
     }
     NT_ASSERT(stereo48k != NULL);
+    s_rec.pushed = true;
     if (!nt_recorder_platform_audio(stereo48k, frames)) {
         fail();
         return;

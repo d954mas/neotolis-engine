@@ -116,7 +116,7 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_version PRIVATE nt_version unity)
     nt_setup_test_target(test_version)
 
-    # --- Video recorder core (frame selection, audio pad/trim); the test defines the platform backend ---
+    # --- Video recorder core (frame selection, audio stream); the test defines the platform backend and log ---
     add_executable(test_recorder unit/test_recorder.c ${CMAKE_SOURCE_DIR}/engine/recorder/nt_recorder.c)
     target_link_libraries(test_recorder PRIVATE nt_core nt_window_stub nt_log_interface unity)
     target_compile_definitions(test_recorder PRIVATE NT_LOG_DOMAIN="recorder")

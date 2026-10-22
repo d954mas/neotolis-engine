@@ -16,10 +16,10 @@ bool nt_recorder_start(const char *name, uint32_t fps, double t);
    (WARN). No-op while idle. */
 void nt_recorder_frame(double t, double dt);
 
-/* The next interleaved stereo 48 kHz samples of the game's mix: sample n of the stream plays at t0 +
-   n / 48000. Push every step's samples from the first step after start, silence included, or none at
-   all; a stream that drifts from the clock by over 100 ms is reported once (WARN). Main thread. No-op
-   while idle. */
+/* The next interleaved stereo 48 kHz samples of the game's mix, pushed before nt_recorder_frame for
+   the same step. Until the first push the track is silence beside the video; from then on the stream
+   continues sample by sample, so push every step's samples, silence included. A stream that drifts
+   from the clock by over 100 ms is reported once (WARN). Main thread. No-op while idle. */
 void nt_recorder_push_audio(const float *stereo48k, uint32_t frames);
 
 /* Returns the frames written; 0 while idle or when the final audio write failed. */

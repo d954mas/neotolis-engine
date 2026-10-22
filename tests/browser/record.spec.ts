@@ -49,3 +49,27 @@ test('record.* in lockstep downloads a synced MP4', async ({ page }, testInfo) =
   console.log(out.toString().trim());
   expect(errors).toEqual([]);
 });
+
+// RUN mode: record.start lands inside a frame whose step already advanced time, and that step's samples
+// are pushed after it. A step of ~117 ms (scale 7) would show any one-step offset as a drift WARN.
+test('record.* in real time keeps audio on the clock', async ({ page }) => {
+  const warnings: string[] = [];
+  let started = false;
+  page.on('console', (msg) => {
+    started ||= /recording \d+x\d+ at 30 fps/.test(msg.text());
+    if (/audio .* the clock/.test(msg.text())) warnings.push(msg.text());
+  });
+  await page.goto('/index.html');
+  await page.waitForFunction(() => window.__devapi?.ready === true, null, { timeout: 30_000 });
+  const call = (method: string, params?: Record<string, unknown>) =>
+    page.evaluate(({ method, params }) => {
+      const resp = window.__devapi!.submit(JSON.stringify({ method, params: params ?? {} }));
+      return resp ? JSON.parse(resp) : null;
+    }, { method, params });
+  expect((await call('time.set_scale', { scale: 7 })).ok).toBe(true);
+  await expect.poll(async () => (await call('record.start', { name: 'run.mp4', fps: 30 })).ok, { timeout: 30_000 }).toBe(true);
+  await page.waitForTimeout(1500);
+  expect((await call('record.stop')).result.frames).toBeGreaterThan(30);
+  expect(started).toBe(true); // the recorder's log reaches the console, so no WARN means no drift
+  expect(warnings).toEqual([]);
+});

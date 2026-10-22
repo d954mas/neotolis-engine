@@ -313,11 +313,32 @@ static void test_block_mixer_does_not_warn(void) {
     TEST_ASSERT_EQUAL_UINT32(0, s_be.warns);
 }
 
-/* A mixer that starts half a second late shifts the track: one WARN, however long it runs. */
-static void test_late_mixer_warns_once(void) {
+/* Silence keeps pace with the video until the mixer starts half a second in; its stream then follows
+   whole, with no WARN. */
+static void test_silence_until_the_first_push(void) {
     start_at(30, 0.0);
+    uint64_t pushed = 0;
     for (int i = 1; i <= 600; i++) {
         if (i > 30) {
+            push_stream(800);
+            pushed += 800;
+        }
+        frame_at(i / 60.0, 1.0 / 60.0);
+        if (i == 30) {
+            TEST_ASSERT_EQUAL_UINT64(15ULL * 1600ULL, s_be.audio_frames);
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(300, nt_recorder_stop());
+    TEST_ASSERT_EQUAL_UINT64(pushed, s_be.audio_nonzero);
+    TEST_ASSERT_FALSE(s_be.stream_broken);
+    TEST_ASSERT_EQUAL_UINT32(0, s_be.warns);
+}
+
+/* A mixer that stops for half a second shifts the rest of the track: one WARN, however long it runs. */
+static void test_mixer_gap_warns_once(void) {
+    start_at(30, 0.0);
+    for (int i = 1; i <= 600; i++) {
+        if (i <= 60 || i > 90) {
             push_stream(800);
         }
         frame_at(i / 60.0, 1.0 / 60.0);
@@ -345,6 +366,7 @@ static void test_stop_pads_short_audio_and_keeps_long(void) {
 
 static void test_final_audio_failure_returns_zero(void) {
     start_at(30, 0.0);
+    push_stream(800);
     frame_at(1.0 / 30.0, 1.0 / 30.0);
     s_be.fail_audio = true;
     TEST_ASSERT_EQUAL_UINT32(0, nt_recorder_stop());
@@ -379,7 +401,8 @@ int main(void) {
     RUN_TEST(test_silent_track_matches_video_length);
     RUN_TEST(test_lockstep_mixer_stream_is_written_whole);
     RUN_TEST(test_block_mixer_does_not_warn);
-    RUN_TEST(test_late_mixer_warns_once);
+    RUN_TEST(test_silence_until_the_first_push);
+    RUN_TEST(test_mixer_gap_warns_once);
     RUN_TEST(test_stop_pads_short_audio_and_keeps_long);
     RUN_TEST(test_final_audio_failure_returns_zero);
     RUN_TEST(test_audio_failure_ends_the_recording);

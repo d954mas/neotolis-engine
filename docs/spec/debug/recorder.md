@@ -47,20 +47,25 @@ every k-th step.
 ## Audio
 
 The game's mixer pushes its output as one stream of interleaved stereo float samples at 48 kHz from
-the main thread: sample `n` plays at file time `n / 48000`, so the stream carries no timestamps and
-the recorder corrects nothing. The mixer pushes every step's samples from the first step after
-`start`, silence included: a lockstep mixer renders `llround(t · 48000) − llround((t − dt) · 48000)`
-samples per step, which never drifts from the clock, and a sound it starts at the beginning of the
-step that first shows its cause plays with that frame. A game without sound pushes nothing and gets
-a silent track. A gap, a late start or a mixer on another clock shifts the rest of the track; when
-the pushed stream differs from the time passed to `frame` by more than 100 ms (one mixer block and a
-frame fit well inside), a WARN says so once per recording. A real-time mixer that renders on an
-audio thread is the game's to align: it pushes the samples rendered from `start` on, on the game
-clock. Sounds played through `nt_audio` are not captured.
+the main thread, each step's samples before the `frame` call for that step. The stream carries no
+timestamps and the recorder corrects nothing: until the first push the track is silence written
+beside the video, and from then on sample `n` of the stream follows sample `n − 1`. So the mixer
+pushes every step's samples once it starts, silence included: a lockstep mixer renders
+`llround(t · 48000) − llround((t − dt) · 48000)` samples per step, which never drifts from the clock.
+A mixer that starts after `start` continues from the end of the video written so far, within one
+frame period. A game without sound pushes nothing and gets a silent track.
 
-Samples go to the encoder as they are pushed, so the track may run ahead of the video while
-recording (render off, or a push before the frame call). At the end it is padded with silence to
-the video length; audio pushed past the last frame stays.
+A sound the mixer starts at the beginning of a step plays at that step's time. With `step_dt =
+1 / fps` it plays with the frame that first shows its cause; with more steps per frame it can come up
+to one frame period after that frame's pts, as the frame shows the nearest step. A gap or a mixer on
+another clock shifts the rest of the track; when the pushed stream differs from the time passed to
+`frame` by more than 100 ms (one mixer block and a step fit well inside), a WARN says so once per
+recording. A real-time mixer that renders on an audio thread is the game's to align: it pushes the
+samples rendered for each step on the game clock. Sounds played through `nt_audio` are not captured.
+
+Pushed samples go to the encoder at once, so the track may run ahead of the video while recording
+(render off). At the end it is padded with silence to the video length; audio pushed past the last
+frame stays.
 
 ## Backends
 
