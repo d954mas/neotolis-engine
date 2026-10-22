@@ -63,7 +63,7 @@ static uint32_t end_recording(void) {
 bool nt_recorder_start(const char *name, uint32_t fps, double t) {
     NT_ASSERT(!s_rec.active && "nt_recorder_start: already recording");
     NT_ASSERT(name != NULL && name[0] != '\0');
-    NT_ASSERT(fps >= 1 && fps <= 120);
+    NT_ASSERT(fps >= 1 && fps <= 120 && isfinite(t));
     uint32_t w = g_nt_window.fb_width & ~1U;
     uint32_t h = g_nt_window.fb_height & ~1U;
     if (w == 0 || h == 0) {

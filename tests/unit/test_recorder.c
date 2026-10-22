@@ -17,7 +17,7 @@
 
 static struct {
     uint32_t opens;
-    uint32_t width, height;
+    uint32_t width, height, fps;
     uint32_t videos;
     uint32_t next_index;
     bool index_gap;
@@ -35,6 +35,7 @@ static struct {
     bool fail_audio;
     bool fail_open;
     uint32_t warns;
+    char warn[160];    /* the last WARN line */
     char info[160];    /* the last INFO line */
     float next_sample; /* push_stream's counter */
 } s_be;
@@ -47,6 +48,7 @@ bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height
     }
     s_be.width = width;
     s_be.height = height;
+    s_be.fps = fps;
     s_be.period = 1.0 / (double)fps;
     return true;
 }
@@ -91,10 +93,10 @@ void nt_recorder_platform_close(uint32_t frames) {
 void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...) {
     (void)domain;
     s_be.warns += level == NT_LOG_LEVEL_WARN ? 1U : 0U;
-    if (level == NT_LOG_LEVEL_INFO) {
+    if (level == NT_LOG_LEVEL_INFO || level == NT_LOG_LEVEL_WARN) {
         va_list args;
         va_start(args, fmt);
-        (void)vsnprintf(s_be.info, sizeof(s_be.info), fmt, args);
+        (void)vsnprintf(level == NT_LOG_LEVEL_INFO ? s_be.info : s_be.warn, sizeof(s_be.info), fmt, args);
         va_end(args);
     }
 }
@@ -110,6 +112,7 @@ void tearDown(void) { (void)nt_recorder_stop(); }
 static void start_at(uint32_t fps, double t) {
     s_be.t0 = t;
     TEST_ASSERT_TRUE(nt_recorder_start("clip.mp4", fps, t));
+    TEST_ASSERT_EQUAL_UINT32(fps, s_be.fps);
 }
 
 static void frame_at(double t, double dt) {
@@ -228,6 +231,11 @@ static void test_resize_ends_with_audio_padded_to_the_video(void) {
     TEST_ASSERT_EQUAL_UINT64(1600, s_be.audio_frames);
     TEST_ASSERT_EQUAL_UINT32(1, s_be.warns);
     TEST_ASSERT_EQUAL_UINT32(0, nt_recorder_stop());
+
+    start_at(30, 0.0);
+    g_nt_window.fb_height = 500;
+    frame_at(1.0 / 30.0, 1.0 / 30.0);
+    TEST_ASSERT_FALSE(nt_recorder_active());
 }
 
 static void test_video_failure_ends_the_recording(void) {
@@ -240,6 +248,7 @@ static void test_video_failure_ends_the_recording(void) {
     TEST_ASSERT_FALSE(nt_recorder_active());
     TEST_ASSERT_EQUAL_UINT32(2, s_be.closed_frames);
     TEST_ASSERT_EQUAL_UINT64(2ULL * 1600ULL, s_be.audio_frames); /* silence beside the frames, no end padding */
+    TEST_ASSERT_EQUAL_UINT32(1, s_be.warns);
     TEST_ASSERT_EQUAL_UINT32(0, nt_recorder_stop());
 }
 
@@ -253,17 +262,27 @@ static void test_open_failure_refuses_to_start(void) {
 static void test_tiny_framebuffer_refuses_to_start(void) {
     g_nt_window.fb_width = 1;
     TEST_ASSERT_FALSE(nt_recorder_start("clip.mp4", 30, 0.0));
+    g_nt_window.fb_width = 641;
+    g_nt_window.fb_height = 1;
+    TEST_ASSERT_FALSE(nt_recorder_start("clip.mp4", 30, 0.0));
     TEST_ASSERT_FALSE(nt_recorder_active());
     TEST_ASSERT_EQUAL_UINT32(0, s_be.opens);
+    TEST_ASSERT_EQUAL_UINT32(2, s_be.warns);
 }
 
+/* After a recording, so the core holds a stale clock and size that a missing idle check would use. */
 static void test_idle_calls_are_inert(void) {
+    start_at(30, 0.0);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_recorder_stop());
+    memset(&s_be, 0, sizeof(s_be));
     float samples[4] = {1, 1, 1, 1};
     nt_recorder_frame(1.0, 1.0);
     nt_recorder_push_audio(samples, 2);
     nt_recorder_push_audio(NULL, 0);
     TEST_ASSERT_EQUAL_UINT32(0, nt_recorder_stop());
     TEST_ASSERT_EQUAL_UINT32(0, s_be.closes);
+    TEST_ASSERT_EQUAL_UINT32(0, s_be.videos);
+    TEST_ASSERT_EQUAL_UINT64(0, s_be.audio_frames);
 }
 
 /* A clock jump of years ends the recording after a bounded count instead of counting every deadline. */
@@ -365,12 +384,41 @@ static void test_silence_until_the_first_push(void) {
     TEST_ASSERT_EQUAL_UINT64(before + 24000U, s_be.audio_frames);
 }
 
+/* Silence rounds to the nearest sample (1.3 -> 1, 2.7 -> 3) and writes nothing for a t before the start. */
+static void test_silence_rounds_and_ignores_earlier_time(void) {
+    start_at(30, 1.0);
+    frame_at(0.5, 0.0);
+    TEST_ASSERT_EQUAL_UINT64(0, s_be.audio_frames);
+    (void)nt_recorder_stop();
+
+    memset(&s_be, 0, sizeof(s_be));
+    start_at(30, 0.0);
+    frame_at(1.3 / 48000.0, 1.3 / 48000.0);
+    TEST_ASSERT_EQUAL_UINT64(1, s_be.audio_frames);
+    frame_at(2.7 / 48000.0, 1.4 / 48000.0);
+    TEST_ASSERT_EQUAL_UINT64(3, s_be.audio_frames);
+}
+
+/* A mixer that starts while render is off continues the track from the last frame call, so it runs
+   behind the clock by the gap; the WARN says so. */
+static void test_mixer_starting_during_render_off_warns(void) {
+    start_at(30, 0.0);
+    frame_at(1.0 / 60.0, 1.0 / 60.0);
+    for (int i = 21; i <= 31; i++) { /* steps 2..20 had no frame call and no mixer */
+        push_stream(800);
+    }
+    frame_at(31.0 / 60.0, 1.0 / 60.0);
+    TEST_ASSERT_EQUAL_UINT32(1, s_be.warns);
+    TEST_ASSERT_NOT_NULL(strstr(s_be.warn, "behind"));
+}
+
 static void test_silence_failure_ends_the_recording(void) {
     start_at(30, 0.0);
     s_be.fail_audio = true;
     frame_at(1.0 / 30.0, 1.0 / 30.0);
     TEST_ASSERT_FALSE(nt_recorder_active());
     TEST_ASSERT_EQUAL_UINT32(1, s_be.closes);
+    TEST_ASSERT_EQUAL_UINT32(1, s_be.warns);
 }
 
 /* A mixer that stops for half a second shifts the rest of the track: one WARN, however long it runs. */
@@ -395,7 +443,7 @@ static void run_mixer(int first, int steps, uint32_t per_step) {
 }
 
 /* The bound is 100 ms either way: a gap of 83 ms passes, 133 ms warns, and a stream running ahead
-   warns too. A new recording warns again. */
+   warns from just over 100 ms. A new recording warns again. */
 static void test_drift_bound_both_ways_and_per_recording(void) {
     start_at(30, 0.0);
     run_mixer(1, 60, 800);
@@ -403,12 +451,20 @@ static void test_drift_bound_both_ways_and_per_recording(void) {
     TEST_ASSERT_EQUAL_UINT32(0, s_be.warns);
     run_mixer(129, 60, 800); /* 3 more (133 ms total) */
     TEST_ASSERT_EQUAL_UINT32(1, s_be.warns);
+    TEST_ASSERT_NOT_NULL(strstr(s_be.warn, "behind"));
     (void)nt_recorder_stop();
 
     s_be.warns = 0;
     start_at(30, 0.0);
-    run_mixer(1, 60, 1600); /* twice the clock */
+    run_mixer(1, 60, 800);
+    push_stream(4096);
+    push_stream(656); /* 99 ms ahead */
+    run_mixer(61, 1, 800);
+    TEST_ASSERT_EQUAL_UINT32(0, s_be.warns);
+    push_stream(96); /* 101 ms ahead */
+    run_mixer(62, 1, 800);
     TEST_ASSERT_EQUAL_UINT32(1, s_be.warns);
+    TEST_ASSERT_NOT_NULL(strstr(s_be.warn, "ahead of"));
 }
 
 /* End padding rounds to the nearest sample at a rate that does not divide 48000. */
@@ -460,6 +516,7 @@ static void test_final_audio_failure_returns_zero(void) {
     s_be.fail_audio = true;
     TEST_ASSERT_EQUAL_UINT32(0, nt_recorder_stop());
     TEST_ASSERT_EQUAL_UINT32(1, s_be.closes);
+    TEST_ASSERT_EQUAL_UINT32(1, s_be.warns);
 }
 
 static void test_audio_failure_ends_the_recording(void) {
@@ -468,6 +525,7 @@ static void test_audio_failure_ends_the_recording(void) {
     push_stream(1600);
     TEST_ASSERT_FALSE(nt_recorder_active());
     TEST_ASSERT_EQUAL_UINT32(1, s_be.closes);
+    TEST_ASSERT_EQUAL_UINT32(1, s_be.warns);
     TEST_ASSERT_EQUAL_UINT32(0, nt_recorder_stop());
 }
 
@@ -492,6 +550,8 @@ int main(void) {
     RUN_TEST(test_lockstep_mixer_stream_is_written_whole);
     RUN_TEST(test_block_mixer_does_not_warn);
     RUN_TEST(test_silence_until_the_first_push);
+    RUN_TEST(test_silence_rounds_and_ignores_earlier_time);
+    RUN_TEST(test_mixer_starting_during_render_off_warns);
     RUN_TEST(test_silence_failure_ends_the_recording);
     RUN_TEST(test_mixer_gap_warns_once);
     RUN_TEST(test_drift_bound_both_ways_and_per_recording);

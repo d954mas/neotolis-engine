@@ -224,7 +224,7 @@ jobs:
           emcmake cmake --preset wasm-release -B build/_cmake/wasm-release-ui-on -DNT_FONT_EMBOLDEN_ENABLED=ON -DNT_UI_CLAY_DEBUG_VIEW=ON
           cmake --build build/_cmake/wasm-release-ui-on --target ui_showcase
 
-      # Only a release link puts the recorder's EM_JS calls into its pre-js script through Closure.
+      # Only a release link runs Closure over the EM_JS calls into the recorder's extern-pre-js NtRecorder.
       - name: Build the recorder in WASM release
         run: |
           emcmake cmake --preset wasm-release -B build/_cmake/wasm-release-recorder -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_RECORDER=ON

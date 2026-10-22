@@ -92,6 +92,7 @@ test('record.* in real time keeps audio on the clock', async ({ page }) => {
   const rec = await page.waitForFunction(() => (window as any).__rec, null, { timeout: 30_000 }).then((h) => h.jsonValue());
   expect(rec.error).toBeNull();
   expect(rec.size).toBeGreaterThan(0);
+  await page.waitForTimeout(2000); // a download reaches Playwright some time after the click
   expect(downloads).toBe(0);
   expect(log.some((line) => / at 5 fps/.test(line))).toBe(true); // the log reaches the console, so no WARN means no drift
   expect(warnings).toEqual([]);

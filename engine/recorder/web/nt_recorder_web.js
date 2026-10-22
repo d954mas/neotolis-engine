@@ -64,6 +64,7 @@ globalThis['NtRecorder'] = (function () {
             r.out.addAudioTrack(r.asrc);
             // Packets join the muxer strictly in output order through one promise chain.
             r.chain = r.out.start();
+            r.chain.catch(fail);
             // The muxer reads the decoder config from the first packet's metadata and ignores the rest.
             var add = function (src) {
                 return function (chunk, meta) {
@@ -91,7 +92,7 @@ globalThis['NtRecorder'] = (function () {
         var r = cur;
         // Nothing paces the game to the encoder: two seconds of backlog beyond one call's catch-up
         // (at most two seconds of frames) end the recording.
-        if (!r.error && r.venc.encodeQueueSize > r.fps * 4 + 1) { r.fail('encoder backlog'); }
+        if (!r.error && r.venc.encodeQueueSize > r.fps * 4) { r.fail('encoder backlog'); }
         if (r.error) {
             return false;
         }

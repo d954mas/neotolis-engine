@@ -30,9 +30,9 @@ start time.
 when that leaves less than 2x2, the platform has no encoder, or the output cannot be opened; it
 asserts while a recording is active. `frame`, `push_audio` and `stop` are no-ops while idle. `stop`
 returns the frame count, 0 when the final audio write failed. A recording also ends on the spot,
-with a WARN, on a framebuffer size change or a `frame` call more than two seconds of frames after
-the previous one (render off while time ran), both with the audio padded to the video, and on an
-encoder failure, which writes no file; a later `stop` returns 0.
+with a WARN, on a change of the even-rounded framebuffer size or a `frame` call more than two
+seconds of frames after the previous one (render off while time ran), both with the audio padded to
+the video, and on an encoder failure, which writes no file; a later `stop` returns 0.
 
 ## Frame selection
 
@@ -54,9 +54,10 @@ timestamps and the recorder corrects nothing: until the first push each `frame` 
 up to its `t`, and from then on sample `n` of the stream follows sample `n − 1`. So the mixer pushes
 every step's samples once it starts, silence included: a lockstep mixer renders
 `llround(t · 48000) − llround((t − dt) · 48000)` samples per step, which never drifts from the clock.
-A mixer whose first push is the step after a `frame` call starts on time; one that starts while
-render is off (no `frame` calls) starts early by that gap, which the drift WARN reports. A game
-without sound pushes nothing and gets a silent track.
+A mixer whose first push is the step right after a `frame` call starts on time; one whose first push
+comes later (a second step of the same frame, or render off) starts early by the steps since that
+call, which the drift WARN reports past 100 ms. A game without sound pushes nothing and gets a
+silent track.
 
 A sound the mixer starts at the beginning of a step plays at that step's time. With `step_dt =
 1 / fps` it plays with the frame that first shows its cause; with more steps per frame it can come up
@@ -80,10 +81,12 @@ Baseline, at the lowest listed level (3.1 to 6.2) whose frame size and macrobloc
 (bitrate `0.1 · w · h · fps`); AAC-LC, else Opus (Firefox, Chrome on Linux; editors handle Opus in
 MP4 poorly), both 192 kbps. `start` returns false while the probe runs (a console warning says so;
 start again), past level 6.2 (a console warning), and in a browser without WebCodecs, an H.264
-encoder or an AAC/Opus encoder. WebCodecs needs a secure context: a page over plain `http` to a LAN
-address (a phone) has none, so recording there needs `https` or `localhost`. The vendored Mediabunny muxer (`deps/mediabunny`) writes the MP4. The
-JS lives in `web/nt_recorder_web.js` and loads with `--extern-pre-js`, outside Closure; a page that
-links the recorder evaluates the 125 KB muxer at load. One module per page, main thread.
+encoder or an AAC/Opus encoder. The probe uses 640x360 at 30 fps: an encoder that rejects the level
+picked for the real size ends the recording at its first frame (`error` in the event). WebCodecs
+needs a secure context: a page over plain `http` to a LAN address (a phone) has none, so recording
+there needs `https` or `localhost`. The vendored Mediabunny muxer (`deps/mediabunny`) writes the
+MP4. The JS lives in `web/nt_recorder_web.js` and loads with `--extern-pre-js`, outside Closure; a
+page that links the recorder evaluates the 125 KB muxer at load. One module per page, main thread.
 
 Encoded bytes stay in tab memory (~0.8 MB/s at 1080p30; finishing copies the file, so the peak is
 two to three times its size): a dev-only exception to preallocated storage; long web recordings
