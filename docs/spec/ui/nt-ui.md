@@ -106,6 +106,10 @@ capacity (`max_elements - 1` layout elements, or its configs and render commands
 sized by `max_elements`) asserts. Per-ID widget state in `nt_ui_state` is not
 pruned, so stateful widgets with ever-new IDs still need recycling.
 
+A floating `parentId` must name an element declared earlier in the same frame
+(NT patch 8). A kept ID or a later declaration does not qualify; the declaration
+asserts through Clay's error callback.
+
 ## Floating zIndex is relative
 
 Upstream Clay sorts every floating element globally by its own

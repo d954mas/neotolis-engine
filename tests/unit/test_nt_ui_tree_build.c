@@ -311,17 +311,20 @@ static void test_negative_zindex_float_does_not_displace_root_seed(void) {
 /* ---- 7. Floating ATTACH_TO_ELEMENT_WITH_ID → inherits target element's xform. ---- */
 static void test_floating_attach_to_element_with_id_inherits_xform(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
     nt_ui_transform_t rot = nt_ui_transform_defaults();
     rot.rotation_z = DEG2RAD(15.0F);
-    CLAY({.id = CLAY_ID("anchor"),
-          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT},
-          .layout = {.sizing = {CLAY_SIZING_FIXED(50.0F), CLAY_SIZING_FIXED(50.0F)}},
-          .userData = (void *)NT_UI_DATA_XFORM(0, &rot, 1.0F)}) {}
-    CLAY({.id = CLAY_ID("attached"),
-          .floating = {.attachTo = CLAY_ATTACH_TO_ELEMENT_WITH_ID, .parentId = CLAY_ID("anchor").id},
-          .layout = {.sizing = {CLAY_SIZING_FIXED(20.0F), CLAY_SIZING_FIXED(20.0F)}}}) {}
-    nt_ui_end(s_fx.ctx);
+    /* The second frame re-declares a retained anchor before attaching to it. */
+    for (int frame = 0; frame < 2; ++frame) {
+        nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+        CLAY({.id = CLAY_ID("anchor"),
+              .floating = {.attachTo = CLAY_ATTACH_TO_ROOT},
+              .layout = {.sizing = {CLAY_SIZING_FIXED(50.0F), CLAY_SIZING_FIXED(50.0F)}},
+              .userData = (void *)NT_UI_DATA_XFORM(0, &rot, 1.0F)}) {}
+        CLAY({.id = CLAY_ID("attached"),
+              .floating = {.attachTo = CLAY_ATTACH_TO_ELEMENT_WITH_ID, .parentId = CLAY_ID("anchor").id},
+              .layout = {.sizing = {CLAY_SIZING_FIXED(20.0F), CLAY_SIZING_FIXED(20.0F)}}}) {}
+        nt_ui_end(s_fx.ctx);
+    }
 
     /* attached has no own xform; should inherit anchor's 15deg. */
     const int32_t N = nt_ui_internal_test_get_tree_baked_count(s_fx.ctx);
@@ -334,6 +337,25 @@ static void test_floating_attach_to_element_with_id_inherits_xform(void) {
     }
     /* Both anchor (own xform) and attached (inherit) should show 15deg. */
     TEST_ASSERT_GREATER_OR_EQUAL_INT32(2, rot_count);
+}
+
+static void declare_attached_to_anchor(void) {
+    CLAY({.id = CLAY_ID("attached"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ELEMENT_WITH_ID, .parentId = CLAY_ID("anchor").id},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(20.0F), CLAY_SIZING_FIXED(20.0F)}}}) {}
+}
+
+/* Attaching to a parent retained from the previous frame but not yet declared in this one asserts at declaration. */
+static void test_floating_retained_parent_asserts_at_declaration(void) {
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("anchor"), .layout = {.sizing = {CLAY_SIZING_FIXED(50.0F), CLAY_SIZING_FIXED(50.0F)}}}) {}
+    nt_ui_end(s_fx.ctx);
+
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    TEST_ASSERT_TRUE(Clay_GetElementData(CLAY_ID("anchor")).found);
+    NT_TEST_EXPECT_ASSERT(declare_attached_to_anchor());
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "Clay reported a contract violation"));
 }
 
 /* Ids absent for a frame are pruned, so a churning id set never fills the map. */
@@ -809,6 +831,7 @@ int main(void) {
     RUN_TEST(test_floating_attach_to_parent_inherits_xform);
     RUN_TEST(test_negative_zindex_float_does_not_displace_root_seed);
     RUN_TEST(test_floating_attach_to_element_with_id_inherits_xform);
+    RUN_TEST(test_floating_retained_parent_asserts_at_declaration);
     RUN_TEST(test_retained_ids_prune_ids_absent_this_frame);
     RUN_TEST(test_retained_ids_disjoint_full_frames_fit);
     RUN_TEST(test_retained_ids_first_frame_has_no_bbox);

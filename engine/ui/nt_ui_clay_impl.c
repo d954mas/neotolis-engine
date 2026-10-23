@@ -549,7 +549,7 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
             seed = identity;
         } else {
             const Clay_LayoutElementHashMapItem *p_item = Clay__GetHashMapItem(root->parentId);
-            /* Clay_EndLayout prunes ids not declared this frame. */
+            /* ATTACH_TO_PARENT/ROOT parents are declared earlier by structure; by-id parents by NT patch 8. */
             NT_ASSERT(p_item != &Clay_LayoutElementHashMapItem_DEFAULT && "build_tree: floating parent was not declared this frame");
             const int32_t p_elem_idx = (int32_t)(p_item->layoutElement - cc->layoutElements.internalArray);
             NT_ASSERT(p_elem_idx < elem_idx && "build_tree: floating parent must be declared before its floating element");
