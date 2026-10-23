@@ -147,7 +147,7 @@ static nt_gfx_gl_vertex_input_t *s_vertex_inputs; /* vertex-input VAOs, indexed 
 /* CPU data: no GL object, so a context loss keeps it. */
 static nt_gfx_gl_instance_layout_t s_instance_layouts[NT_GFX_MAX_INSTANCE_LAYOUTS + 1];
 static GLuint *s_buffer_gl;        /* GL buffer names, indexed by slot */
-static GLenum *s_buffer_targets;   /* GL_ARRAY_BUFFER or GL_ELEMENT_ARRAY_BUFFER */
+static GLenum *s_buffer_targets;   /* GL_ARRAY_BUFFER, GL_ELEMENT_ARRAY_BUFFER or GL_PIXEL_PACK_BUFFER */
 static GLuint *s_texture_gl;       /* GL texture names, indexed by slot */
 static GLuint *s_render_target_gl; /* GL framebuffer names, indexed by slot */
 static GLuint s_bound_framebuffer;
@@ -646,6 +646,7 @@ static void nt_gfx_gl_init_context_features(void) {
     }
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 void nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc);
     s_init_desc = *desc;
@@ -1071,6 +1072,40 @@ bool nt_gfx_backend_read_pixels(uint32_t render_target_backend, int x, int y, in
     }
     return ok;
 }
+
+#if !defined(NT_PLATFORM_WEB)
+// #region buffer readback
+/* BGRA is the desktop drivers' window format: RGBA would make the CPU swizzle every pixel. */
+void nt_gfx_backend_read_pixels_to_buffer(uint32_t render_target_backend, int x, int y, int w, int h, uint32_t buffer_backend) {
+    const GLuint fbo = render_target_backend != 0 ? s_render_target_gl[render_target_backend] : 0;
+    if (fbo != 0) {
+        NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, fbo);
+    }
+    NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, s_buffer_gl[buffer_backend]);
+    NT_GL(glPixelStorei, GL_PACK_ALIGNMENT, 4);
+    NT_GL(glReadPixels, x, y, (GLsizei)w, (GLsizei)h, GL_BGRA, GL_UNSIGNED_BYTE, NULL); /* NULL: offset 0 into the bound pack buffer */
+    NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, 0);
+    if (fbo != 0) {
+        NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, 0);
+    }
+}
+
+const void *nt_gfx_backend_map_buffer(uint32_t buffer_backend, uint32_t size) {
+    NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, s_buffer_gl[buffer_backend]);
+    const void *bytes = NT_GL_RET(glMapBufferRange, GL_PIXEL_PACK_BUFFER, (GLintptr)0, (GLsizeiptr)size, (GLbitfield)GL_MAP_READ_BIT);
+    NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, 0);
+    NT_ASSERT(bytes != NULL && "map_readback: map failed");
+    return bytes;
+}
+
+void nt_gfx_backend_unmap_buffer(uint32_t buffer_backend) {
+    NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, s_buffer_gl[buffer_backend]);
+    const GLuint intact = NT_GL_RET(glUnmapBuffer, GL_PIXEL_PACK_BUFFER); /* GLboolean, widened by the capture funnel */
+    NT_ASSERT(intact == GL_TRUE && "unmap_readback: the driver lost the mapped bytes");
+    NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, 0);
+}
+// #endregion
+#endif
 
 /* ---- Pipeline bind ---- */
 
@@ -1877,8 +1912,14 @@ bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot) {
         assert_name_failed_on_loss("glGenBuffers", desc->label);
         return false;
     }
-    const GLenum target = desc->type == NT_BUFFER_INDEX ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
+    GLenum target = desc->type == NT_BUFFER_INDEX ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
     GLenum usage = map_buffer_usage(desc->usage);
+#if !defined(NT_PLATFORM_WEB)
+    if (desc->type == NT_BUFFER_READBACK) {
+        target = GL_PIXEL_PACK_BUFFER;
+        usage = GL_STREAM_READ;
+    }
+#endif
     bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER;
     if (unhook_vao) {
         ebo_upload_begin();
@@ -1891,6 +1932,11 @@ bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot) {
     if (unhook_vao) {
         ebo_upload_end();
     }
+#if !defined(NT_PLATFORM_WEB)
+    if (target == GL_PIXEL_PACK_BUFFER) {
+        NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, 0); /* a bound pack buffer turns every glReadPixels pointer into an offset */
+    }
+#endif
 
     s_buffer_gl[slot] = buf;
     s_buffer_targets[slot] = target;

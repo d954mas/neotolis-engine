@@ -17,6 +17,7 @@
 #endif
 
 #include "core/nt_assert.h"
+#include "core/nt_platform.h"
 #include "core/nt_types.h"
 #include "hash/nt_hash.h"
 #include "nt_mesh_format.h"
@@ -131,6 +132,9 @@ typedef enum {
 typedef enum {
     NT_BUFFER_VERTEX = 0,
     NT_BUFFER_INDEX,
+#if !defined(NT_PLATFORM_WEB)
+    NT_BUFFER_READBACK, /* native: pixels the GPU copies for the CPU (nt_gfx_read_pixels_to_buffer); no data, usage ignored */
+#endif
 } nt_buffer_type_t; /* uniform data has no public buffer: see nt_gfx_bind_uniform_block */
 
 typedef enum {
@@ -505,6 +509,11 @@ typedef enum {
     NT_GFX_OP_GPU_TIMING,
     NT_GFX_OP_TIMER_DISJOINT,
     NT_GFX_OP_CLEAR,
+#if !defined(NT_PLATFORM_WEB)
+    NT_GFX_OP_BUFFER_READ,
+    NT_GFX_OP_BUFFER_MAP,
+    NT_GFX_OP_BUFFER_UNMAP,
+#endif
     NT_GFX_OP_COUNT
 } nt_gfx_operation_t;
 
@@ -600,7 +609,15 @@ typedef enum {
     X(glUseProgram)                                                                                                                                                                                    \
     X(glVertexAttribDivisor)                                                                                                                                                                           \
     X(glVertexAttribPointer)                                                                                                                                                                           \
-    X(glViewport)
+    X(glViewport)                                                                                                                                                                                      \
+    NT_GFX_GL_READBACK_CALLS(X)
+
+/* Buffer readback is native only: WebGL has no buffer mapping. */
+#if defined(NT_PLATFORM_WEB)
+#define NT_GFX_GL_READBACK_CALLS(X)
+#else
+#define NT_GFX_GL_READBACK_CALLS(X) X(glMapBufferRange) X(glUnmapBuffer)
+#endif
 
 /* Issued-call detail (NT_GFX_GL_<name>). Integer args follow the GL signature;
  * pointer arguments become presence bits (payloads, outputs, labels) or object
@@ -998,6 +1015,22 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
  * after a pass that discarded its color the content is undefined. w<=0 || h<=0 and
  * w*h*4 > out_cap assert; returns false on a lost context. */
 bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint8_t *out, uint32_t out_cap);
+
+#if !defined(NT_PLATFORM_WEB)
+/* Native only (WebGL has no buffer mapping). Starts a read of an (x,y,w,h) sub-rect of `src` into
+ * `buf` (NT_BUFFER_READBACK, w*h*4 <= size) and returns without waiting for the GPU. The bytes are
+ * BGRA8 rows of w*4, BOTTOM-UP as GL stores them, read with nt_gfx_map_readback. Frame point and source
+ * rules as nt_gfx_read_pixels; a mapped `buf` asserts. A readback buffer may be destroyed while a
+ * frame is being drawn: no recorded command names it. */
+void nt_gfx_read_pixels_to_buffer(nt_render_target_t src, int x, int y, int w, int h, nt_buffer_t buf);
+/* The bytes of `buf`'s last read, valid until nt_gfx_unmap_readback or nt_gfx_destroy_buffer,
+ * whichever comes first; never NULL (a failed map asserts; the gfx stub returns NULL). Waits for the
+ * GPU only while it still copies that read: map a read issued frames earlier. A `buf` with no read
+ * since its last map asserts. Any frame state: the read was already issued. */
+const uint8_t *nt_gfx_map_readback(nt_buffer_t buf);
+/* Ends the access from nt_gfx_map_readback; the mapped bytes become invalid. An unmapped `buf` asserts. */
+void nt_gfx_unmap_readback(nt_buffer_t buf);
+#endif
 
 /* ---- Uniform blocks ---- */
 

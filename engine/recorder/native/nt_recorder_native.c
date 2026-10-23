@@ -31,6 +31,9 @@ static const GUID k_max_bitrate = {0x9651eae4, 0x39b9, 0x4ebf, {0x85, 0xef, 0xd7
 /* Frames in flight. MF keeps the last input sample until the next, so fewer than 2 deadlock; more than 4
    measured no faster. */
 #define NT_RECORDER_POOL 4U
+/* Window reads in flight: a read is mapped when the ring is full, three reads after it was issued,
+   so the GPU has normally written it and the map does not wait. */
+#define NT_RECORDER_READS 3U
 
 static struct {
     IMFSinkWriter *writer;
@@ -40,6 +43,12 @@ static struct {
     uint32_t width;
     uint32_t height;
     uint32_t fps;
+    nt_buffer_t reads[NT_RECORDER_READS]; /* a FIFO ring: oldest at head - pending */
+    uint32_t read_first[NT_RECORDER_READS];
+    uint32_t read_count[NT_RECORDER_READS]; /* the output frames that show this read */
+    uint32_t head;
+    uint32_t pending;
+    bool wrote;      /* a video sample reached the encoder: the file has something to keep */
     bool com;        /* this recording holds a COM reference */
     bool broken;     /* a write failed: the encoder may never drain */
     HANDLE released; /* set when the pool gets a sample back; lives with the process, as does s_notify */
@@ -113,6 +122,12 @@ static IMFMediaType *audio_type(const GUID *subtype, uint32_t bits, uint32_t byt
 /* Releases in dependency order; the file goes only when this recording's writer made it, and after
    MFShutdown, since the sink may close it on an MF thread. */
 static void release(bool remove_file) {
+    for (uint32_t i = 0; i < NT_RECORDER_READS; i++) {
+        if (s_mf.reads[i].id != 0) {
+            nt_gfx_destroy_buffer(s_mf.reads[i]);
+            s_mf.reads[i] = (nt_buffer_t){0};
+        }
+    }
     bool made = s_mf.writer != NULL;
     if (made) {
         IMFSinkWriter_Release(s_mf.writer);
@@ -199,6 +214,9 @@ bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height
     s_mf.height = height;
     s_mf.fps = fps;
     s_mf.broken = false;
+    s_mf.head = 0;
+    s_mf.pending = 0;
+    s_mf.wrote = false;
     if (s_mf.released == NULL) {
         s_mf.released = CreateEventW(NULL, FALSE, FALSE, NULL);
         NT_ASSERT(s_mf.released != NULL);
@@ -211,26 +229,22 @@ bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height
         release(true);
         return false;
     }
+    for (uint32_t i = 0; i < NT_RECORDER_READS; i++) {
+        s_mf.reads[i] = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_READBACK, .size = width * height * 4U, .label = "recorder read"});
+    }
     return true;
 }
 
-/* read_pixels leaves tight (w * 4) top-down RGBA rows; where MF pads the pitch each row moves to its
-   slot, bottom up so no row lands on one not yet moved, and turns into BGRA on the way. */
-static void place_rows(uint8_t *scan0, size_t pitch) {
+/* The read holds BGRA rows bottom-up; MF wants them top-down at its pitch. */
+static void copy_rows(uint8_t *scan0, size_t pitch, const uint8_t *bytes) {
     size_t row = (size_t)s_mf.width * 4U;
-    for (uint32_t y = s_mf.height; y-- > 0;) {
-        uint8_t *dst = scan0 + (y * pitch);
-        if (pitch != row) {
-            memmove(dst, scan0 + (y * row), row);
-        }
-        uint32_t *px = (uint32_t *)dst;
-        for (uint32_t x = 0; x < s_mf.width; x++) {
-            px[x] = (px[x] & 0xFF00FF00U) | ((px[x] >> 16) & 0xFFU) | ((px[x] & 0xFFU) << 16);
-        }
+    for (uint32_t y = 0; y < s_mf.height; y++) {
+        memcpy(scan0 + (y * pitch), bytes + ((size_t)(s_mf.height - 1U - y) * row), row);
     }
 }
 
-bool nt_recorder_platform_video(uint32_t index) {
+/* One pooled sample per output frame, filled from the mapped read. */
+static void write_frame(uint32_t index, const uint8_t *bytes) {
     /* EMPTY means the encoder still holds every sample; it returns them on its own threads and
        s_notify wakes this wait. Ten seconds of that is an encoder that died. */
     IMFSample *sample = NULL;
@@ -243,7 +257,7 @@ bool nt_recorder_platform_video(uint32_t index) {
     }
     if (!ok(hr, "AllocateSample")) {
         s_mf.broken = true;
-        return false;
+        return;
     }
     IMFMediaBuffer *buffer = NULL;
     IMF2DBuffer *buffer2d = NULL;
@@ -253,25 +267,42 @@ bool nt_recorder_platform_video(uint32_t index) {
     must(IMFMediaBuffer_QueryInterface(buffer, &IID_IMF2DBuffer, (void **)&buffer2d));
     must(IMF2DBuffer_Lock2D(buffer2d, &scan0, &pitch));
     NT_ASSERT(pitch >= (LONG)s_mf.width * 4 && "nt_recorder: the RGB32 pool buffer is not top-down");
-    /* The top rows: an odd framebuffer loses its bottom row, as on web. */
-    bool good = nt_gfx_read_pixels((nt_render_target_t){0}, 0, (int)(g_nt_window.fb_height - s_mf.height), (int)s_mf.width, (int)s_mf.height, scan0, (uint32_t)pitch * s_mf.height);
-    if (good) {
-        place_rows(scan0, (size_t)pitch);
-    } else {
-        NT_LOG_WARN("the window read failed");
-    }
+    copy_rows(scan0, (size_t)pitch, bytes);
     must(IMF2DBuffer_Unlock2D(buffer2d));
-    if (good) {
-        must(IMFMediaBuffer_SetCurrentLength(buffer, (DWORD)pitch * s_mf.height));
-        must(IMFSample_SetSampleTime(sample, hns(index, s_mf.fps)));
-        must(IMFSample_SetSampleDuration(sample, hns(index + 1ULL, s_mf.fps) - hns(index, s_mf.fps)));
-        good = ok(IMFSinkWriter_WriteSample(s_mf.writer, s_mf.video, sample), "WriteSample video");
-        s_mf.broken = !good;
-    }
+    must(IMFMediaBuffer_SetCurrentLength(buffer, (DWORD)pitch * s_mf.height));
+    must(IMFSample_SetSampleTime(sample, hns(index, s_mf.fps)));
+    must(IMFSample_SetSampleDuration(sample, hns(index + 1ULL, s_mf.fps) - hns(index, s_mf.fps)));
+    s_mf.broken = !ok(IMFSinkWriter_WriteSample(s_mf.writer, s_mf.video, sample), "WriteSample video");
+    s_mf.wrote |= !s_mf.broken;
     IMF2DBuffer_Release(buffer2d);
     IMFMediaBuffer_Release(buffer);
     IMFSample_Release(sample); /* back to the pool once the encoder is done with it */
-    return good;
+}
+
+/* Encodes the oldest read; false once a write failed (broken). Reads leave the ring in issue order, so
+   the encoder gets pts in order. */
+static bool encode_oldest(void) {
+    uint32_t slot = (s_mf.head + NT_RECORDER_READS - s_mf.pending) % NT_RECORDER_READS;
+    const uint8_t *bytes = nt_gfx_map_readback(s_mf.reads[slot]);
+    s_mf.pending--;
+    for (uint32_t i = 0; !s_mf.broken && i < s_mf.read_count[slot]; i++) {
+        write_frame(s_mf.read_first[slot] + i, bytes);
+    }
+    nt_gfx_unmap_readback(s_mf.reads[slot]);
+    return !s_mf.broken;
+}
+
+bool nt_recorder_platform_video(uint32_t first, uint32_t count) {
+    if (s_mf.pending == NT_RECORDER_READS && !encode_oldest()) {
+        return false;
+    }
+    /* The top rows: an odd framebuffer loses its bottom row and right column, as on web. */
+    nt_gfx_read_pixels_to_buffer((nt_render_target_t){0}, 0, (int)(g_nt_window.fb_height - s_mf.height), (int)s_mf.width, (int)s_mf.height, s_mf.reads[s_mf.head]);
+    s_mf.read_first[s_mf.head] = first;
+    s_mf.read_count[s_mf.head] = count;
+    s_mf.head = (s_mf.head + 1U) % NT_RECORDER_READS;
+    s_mf.pending++;
+    return true;
 }
 
 /* One MF buffer per push, beside the per-sample allocations inside the MF pipeline itself. */
@@ -296,11 +327,15 @@ bool nt_recorder_platform_audio(uint64_t at, const float *stereo, uint32_t frame
     return good;
 }
 
-/* Without a frame there is nothing to keep: Finalize refuses an empty video track. After a failed write
-   Finalize could wait forever on the encoder, so it is skipped; either way the fragments on disk stay. */
-void nt_recorder_platform_close(uint32_t frames) {
-    if (frames > 0 && !s_mf.broken) {
+/* The reads still in the ring go to the encoder first. Without a frame there is nothing to keep:
+   Finalize refuses an empty video track. After a failed write Finalize could wait forever on the
+   encoder, so it is skipped; either way the fragments on disk stay. */
+bool nt_recorder_platform_close(void) {
+    while (!s_mf.broken && s_mf.pending > 0 && encode_oldest()) {
+    }
+    if (s_mf.wrote && !s_mf.broken) {
         (void)ok(IMFSinkWriter_Finalize(s_mf.writer), "Finalize");
     }
-    release(frames == 0);
+    release(!s_mf.wrote);
+    return !s_mf.broken;
 }

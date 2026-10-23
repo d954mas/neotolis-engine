@@ -19,6 +19,7 @@ static struct {
     uint32_t opens;
     uint32_t width, height, fps;
     uint32_t videos;
+    uint32_t video_calls;
     uint32_t next_index;
     bool index_gap;
     double now;               /* caller time of the current frame call */
@@ -36,6 +37,7 @@ static struct {
     uint32_t fail_index;
     bool fail_audio;
     bool fail_open;
+    bool fail_close;
     uint32_t warns;
     char warn[160];    /* the last WARN line */
     char info[160];    /* the last INFO line */
@@ -56,19 +58,23 @@ bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height
     return true;
 }
 
-bool nt_recorder_platform_video(uint32_t index) {
-    if (s_be.fail_video && index == s_be.fail_index) {
-        return false;
+bool nt_recorder_platform_video(uint32_t first, uint32_t count) {
+    TEST_ASSERT_TRUE(count > 0);
+    s_be.video_calls++;
+    for (uint32_t index = first; index < first + count; index++) {
+        if (s_be.fail_video && index == s_be.fail_index) {
+            return false;
+        }
+        if (index != s_be.next_index) {
+            s_be.index_gap = true;
+        }
+        double err = fabs(s_be.now - (s_be.t0 + ((double)(index + 1U) * s_be.period)));
+        if (err > s_be.worst_video_error) {
+            s_be.worst_video_error = err;
+        }
+        s_be.next_index = index + 1;
+        s_be.videos++;
     }
-    if (index != s_be.next_index) {
-        s_be.index_gap = true;
-    }
-    double err = fabs(s_be.now - (s_be.t0 + ((double)(index + 1U) * s_be.period)));
-    if (err > s_be.worst_video_error) {
-        s_be.worst_video_error = err;
-    }
-    s_be.next_index = index + 1;
-    s_be.videos++;
     return true;
 }
 
@@ -90,9 +96,10 @@ bool nt_recorder_platform_audio(uint64_t at, const float *stereo, uint32_t frame
     return true;
 }
 
-void nt_recorder_platform_close(uint32_t frames) {
+bool nt_recorder_platform_close(void) {
     s_be.closes++;
-    s_be.closed_frames = frames;
+    s_be.closed_frames = s_be.videos;
+    return !s_be.fail_close;
 }
 
 void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...) {
@@ -204,6 +211,7 @@ static void test_jittered_real_time_picks_nearest_frames(void) {
 static void test_hitch_resubmits_the_frame(void) {
     start_at(30, 0.0);
     frame_at(0.1, 0.1);
+    TEST_ASSERT_EQUAL_UINT32(1, s_be.video_calls); /* one read serves every deadline of a call */
     TEST_ASSERT_EQUAL_UINT32(3, s_be.videos);
     TEST_ASSERT_EQUAL_UINT32(3, s_be.next_index);
     TEST_ASSERT_FALSE(s_be.index_gap);
@@ -261,6 +269,24 @@ static void test_video_failure_ends_the_recording(void) {
     TEST_ASSERT_EQUAL_UINT64(2ULL * 1600ULL, s_be.audio_frames); /* silence beside the frames, no end padding */
     TEST_ASSERT_EQUAL_UINT32(1, s_be.warns);
     TEST_ASSERT_EQUAL_UINT32(0, nt_recorder_stop());
+}
+
+static void test_batch_failure_keeps_the_frames_before_it(void) {
+    s_be.fail_video = true;
+    s_be.fail_index = 1;
+    start_at(30, 0.0);
+    frame_at(0.1, 0.1); /* three deadlines in one call; the second fails */
+    TEST_ASSERT_FALSE(nt_recorder_active());
+    TEST_ASSERT_EQUAL_UINT32(1, s_be.closed_frames);
+}
+
+/* Windows encodes its last reads in close: a write failing there leaves no frames to report. */
+static void test_close_failure_returns_zero(void) {
+    s_be.fail_close = true;
+    start_at(30, 0.0);
+    frame_at(1.0 / 30.0, 1.0 / 30.0);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_recorder_stop());
+    TEST_ASSERT_EQUAL_UINT32(1, s_be.closed_frames);
 }
 
 static void test_open_failure_refuses_to_start(void) {
@@ -634,6 +660,8 @@ int main(void) {
     RUN_TEST(test_catch_up_bound_is_two_seconds_of_frames);
     RUN_TEST(test_resize_ends_with_audio_padded_to_the_video);
     RUN_TEST(test_video_failure_ends_the_recording);
+    RUN_TEST(test_batch_failure_keeps_the_frames_before_it);
+    RUN_TEST(test_close_failure_returns_zero);
     RUN_TEST(test_open_failure_refuses_to_start);
     RUN_TEST(test_tiny_framebuffer_refuses_to_start);
     RUN_TEST(test_idle_calls_are_inert);

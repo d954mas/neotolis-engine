@@ -43,11 +43,14 @@ game_update           ← CLAY layout, NT_UI_DATA_* allocations
 transform_update
 game_render           ← nt_ui_walk reads scratch pointers; any number of
                         gfx passes; from the first pass no live GPU object is
-                        destroyed (the frame rule)
+                        destroyed (the frame rule; readback buffers are exempt)
 nt_gfx_end_frame      ← after the last pass, also when nothing renders; uploads
                         frame storage and executes the recorded draw-phase calls
-nt_gfx_read_pixels    ← optional: reads the finished frame, before the swap
-nt_recorder_frame     ← optional, dev-only: encodes the finished frame (debug/recorder.md)
+nt_gfx_read_pixels    ← optional: reads the finished frame, before the swap; native
+                        nt_gfx_read_pixels_to_buffer queues the read instead
+nt_recorder_frame     ← optional, dev-only: records the finished frame; Windows queues
+                        a read and encodes it three reads later, or at the end of the
+                        recording (debug/recorder.md)
 nt_window_swap_buffers
 ```
 

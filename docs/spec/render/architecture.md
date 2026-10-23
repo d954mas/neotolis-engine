@@ -131,7 +131,8 @@ execution.
 until `nt_gfx_end_frame`. While it is being drawn, destroying a live object
 asserts: every `nt_gfx_destroy_*` and `nt_gfx_deactivate_*`, and so every
 module shutdown, unmount or restore that destroys GPU objects, because a recorded
-command may still name it. Before the first pass and after `nt_gfx_end_frame`
+command may still name it. A readback buffer is exempt: no recorded command
+names it (see Readback). Before the first pass and after `nt_gfx_end_frame`
 destroys are allowed; a destroy of a stale or invalid handle keeps its own
 contract. A lost frame follows the same order: `nt_gfx_begin_pass` on a lost
 context records nothing but still opens the pass, and every pass-scoped call
@@ -733,9 +734,40 @@ the game writes the instances itself and draws them through the core in each
 cascade. The sprite and text renderers record into frame storage at each emit
 or draw, inside a pass; the shape renderer copies each kind into frame storage at
 `flush`. Lifetime work (resource unmounts, `nt_program_ref_drop`,
-renderer restores, any destroy) runs before the first pass or after
-`nt_gfx_end_frame` (the frame rule); `nt_gfx_read_pixels` runs after
+renderer restores, any destroy but of a readback buffer) runs before the first
+pass or after `nt_gfx_end_frame` (the frame rule); `nt_gfx_read_pixels` runs after
 `nt_gfx_end_frame`, before the swap.
+
+### Readback
+
+`nt_gfx_read_pixels` copies a rect of the window or of an RGBA8 render target
+into caller memory after `nt_gfx_end_frame`, before the swap. It waits until the
+GPU has finished the frame.
+
+Native builds can also read without waiting. WebGL has no buffer mapping, so the
+web build has neither these calls nor `NT_BUFFER_READBACK`. A readback buffer is
+made with no data (its usage is ignored), and `nt_gfx_update_buffer` on it asserts.
+No recorded command names a readback buffer, so destroying one is exempt from the
+frame rule.
+`nt_gfx_read_pixels_to_buffer` follows the frame point and source rules of
+`nt_gfx_read_pixels`, queues the copy, and returns. The buffer then holds BGRA8
+rows of `w * 4` bytes, bottom-up as GL stores them; BGRA is the format desktop
+drivers read without a conversion. `nt_gfx_map_readback(buf)` returns the bytes;
+GL makes the map wait only while the GPU still copies that read, so a caller maps
+reads it issued frames earlier. `nt_gfx_unmap_readback` ends the access. Map and
+unmap run in any frame state, because the copy was queued earlier.
+
+The bytes stay valid until the unmap or the destroy of the buffer, whichever
+comes first; a buffer may be destroyed in any readback state. A read into a
+buffer whose last read was not mapped replaces it. A read into a mapped buffer,
+a map without a read since the last map and an unmap of an unmapped buffer
+assert. A native GL context is never lost, so readback has no lost-context path.
+
+The caller owns the buffers and their order. With three buffers in a ring
+mapped only when the ring is full, a read is mapped three reads after it was
+issued, so the GPU has normally finished it and the map does not wait. An NVIDIA debug context reports "Pixel transfer is
+synchronized with 3D rendering" for every read, synchronous or not, even on an
+idle GPU; the message does not mean that the CPU waited.
 
 ### Render targets
 
@@ -791,7 +823,7 @@ set are pass-scoped: `begin_pass` discards them. The texture set is additionally
 program and is discarded when that program changes. Pipeline and vertex-input binds, texture-set application,
 instance-buffer re-pointing, uniform block binds and draws outside a pass assert.
 Destroying a live object from the first pass until `nt_gfx_end_frame` asserts
-(the frame rule, see Draw-phase command stream).
+(the frame rule, see Draw-phase command stream; readback buffers excepted).
 Physical texture/sampler GL bindings and GL uniform-block ranges remain context
 state. The backend deduplicates texture/sampler binds and uniform-block ranges across
 passes. Every uniform range uses the uniform frame buffer, and its recreation
@@ -1154,7 +1186,8 @@ exactly once, at the call site, by the same statement that issues it (an
 `backend.args` follows the GL integer argument order; pointer payload, readback
 output and debug-label arguments are presence bits, gen/delete arguments contain
 the count followed by each name, a returned value (`glCreate*`, `glGetError`,
-locations, status) follows the arguments, and indexed offsets are byte offsets.
+locations, status) follows the arguments, a returned mapping (`glMapBufferRange`)
+is a presence bit, and indexed offsets are byte offsets.
 Output pointers are presence bits; their written values are not recorded. Readback, timer-query and debug-group calls are
 issued calls too and are recorded like any other.
 Float arguments occupy `backend.values` in float argument order. `backend.bytes` is actual CPU upload payload, zero for NULL storage.

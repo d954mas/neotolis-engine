@@ -109,9 +109,16 @@ typedef struct {
     uint8_t usage;        /* nt_buffer_usage_t */
     uint8_t index_type;   /* 0=none, 1=uint16, 2=uint32 */
     uint8_t frame_stream; /* frame storage stream + 1 (its `used` bounds instance reads); 0 = not frame storage */
+    uint8_t readback;     /* NT_BUFFER_READBACK: nt_gfx_readback_state_t */
     bool live;            /* a backend object on the current context; false = free slot or husk */
     uint32_t size;        /* capacity */
 } nt_gfx_buffer_meta_t;
+
+typedef enum {
+    NT_GFX_READBACK_IDLE = 0,
+    NT_GFX_READBACK_PENDING, /* a read was issued and not mapped yet */
+    NT_GFX_READBACK_MAPPED,
+} nt_gfx_readback_state_t;
 
 /* ---- Vertex input metadata (destroy cascade + draw-invariant checks) ---- */
 
@@ -779,6 +786,24 @@ void nt_gfx_end_frame(void) {
     s_gfx.render_state = NT_GFX_STATE_ENDED;
 }
 
+/* The backend slot of a read source (0 = the window). A context loss frees every render target, so
+ * read_pixels checks the loss first; native readback never sees one. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
+static uint32_t read_source_slot(nt_render_target_t src, int x, int y, int w, int h) {
+    if (src.id == 0) {
+        return 0;
+    }
+    NT_ASSERT(nt_pool_valid(&s_gfx.render_target_pool, src.id) && "read_pixels: invalid render target");
+    uint32_t rt_slot = nt_pool_slot_index(src.id);
+    /* WebGL reads RGBA/UNSIGNED_BYTE only from a normalized fixed-point color buffer. */
+    NT_ASSERT(s_gfx.render_target_metas[rt_slot].attachments[NT_GFX_RT_COLOR].id != 0 && render_target_attachment_meta(rt_slot, NT_GFX_RT_COLOR)->format == NT_TEXTURE_FORMAT_RGBA8 &&
+              "read_pixels: the source needs an RGBA8 color attachment");
+    /* w and h are positive here; 64-bit sums cannot overflow. */
+    NT_ASSERT(x >= 0 && y >= 0 && (int64_t)x + w <= render_target_size_meta(rt_slot)->width && (int64_t)y + h <= render_target_size_meta(rt_slot)->height &&
+              "read_pixels: rect outside the render target");
+    return rt_slot;
+}
+
 /* Cap-checked rgba8 readback + single Y-flip to top-left. A bad size or a short buffer is a caller
  * bug; the devapi capture validates the request it takes from outside. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
@@ -788,22 +813,11 @@ static nt_gfx_result_t read_pixels(nt_render_target_t src, int x, int y, int w, 
     /* In uint64_t so w*h*4 cannot overflow before the comparison. */
     NT_ASSERT((uint64_t)(uint32_t)w * (uint64_t)(uint32_t)h * 4U <= (uint64_t)out_cap && "read_pixels: out_cap is smaller than w*h*4");
     /* A lost context returns uninitialized garbage as a "successful" read — every other GL wrapper
-       early-returns on this. The capture producer treats false as failure -> NULL -> capture_failed.
-       It also frees every render target, so it comes before the source checks. */
+       early-returns on this. The capture producer treats false as failure -> NULL -> capture_failed. */
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    uint32_t rt_slot = 0;
-    if (src.id != 0) {
-        NT_ASSERT(nt_pool_valid(&s_gfx.render_target_pool, src.id) && "read_pixels: invalid render target");
-        rt_slot = nt_pool_slot_index(src.id);
-        /* WebGL reads RGBA/UNSIGNED_BYTE only from a normalized fixed-point color buffer. */
-        NT_ASSERT(s_gfx.render_target_metas[rt_slot].attachments[NT_GFX_RT_COLOR].id != 0 && render_target_attachment_meta(rt_slot, NT_GFX_RT_COLOR)->format == NT_TEXTURE_FORMAT_RGBA8 &&
-                  "read_pixels: the source needs an RGBA8 color attachment");
-        /* w and h are positive here; 64-bit sums cannot overflow. */
-        NT_ASSERT(x >= 0 && y >= 0 && (int64_t)x + w <= render_target_size_meta(rt_slot)->width && (int64_t)y + h <= render_target_size_meta(rt_slot)->height &&
-                  "read_pixels: rect outside the render target");
-    }
+    uint32_t rt_slot = read_source_slot(src, x, y, w, h);
     /* WebGL reports a loss once through glGetError and the drain before the read eats it: ask the browser too. */
     if (!nt_gfx_backend_read_pixels(rt_slot, x, y, w, h, out) || nt_gfx_backend_query_context_lost()) {
         /* The buffer is unusable: false -> capture_failed, not an encode of it. */
@@ -835,6 +849,64 @@ bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint
     NT_GFX_END(result);
     return result == NT_GFX_RESULT_ACCEPTED;
 }
+
+#if !defined(NT_PLATFORM_WEB)
+// #region buffer readback
+/* A native GL context is never lost (nt_gfx_gl_ctx_native.c), so readback has no lost path. */
+static nt_gfx_buffer_meta_t *readback_meta(nt_buffer_t buf) {
+    NT_ASSERT(nt_pool_valid(&s_gfx.buffer_pool, buf.id) && "readback: invalid buffer");
+    nt_gfx_buffer_meta_t *meta = &s_gfx.buffer_metas[nt_pool_slot_index(buf.id)];
+    NT_ASSERT(meta->type == NT_BUFFER_READBACK && "readback: not an NT_BUFFER_READBACK buffer");
+    return meta;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
+static nt_gfx_result_t read_pixels_to_buffer(nt_render_target_t src, int x, int y, int w, int h, nt_buffer_t buf) {
+    NT_ASSERT(w > 0 && h > 0 && "read_pixels_to_buffer: empty rect");
+    nt_gfx_buffer_meta_t *meta = readback_meta(buf);
+    NT_ASSERT((uint64_t)(uint32_t)w * (uint64_t)(uint32_t)h * 4U <= meta->size && "read_pixels_to_buffer: the buffer is smaller than w*h*4");
+    NT_ASSERT(meta->readback != NT_GFX_READBACK_MAPPED && "read_pixels_to_buffer: unmap the buffer first");
+    nt_gfx_backend_read_pixels_to_buffer(read_source_slot(src, x, y, w, h), x, y, w, h, nt_pool_slot_index(buf.id));
+    meta->readback = NT_GFX_READBACK_PENDING;
+    return NT_GFX_RESULT_ACCEPTED;
+}
+
+void nt_gfx_read_pixels_to_buffer(nt_render_target_t src, int x, int y, int w, int h, nt_buffer_t buf) {
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_ENDED && "read_pixels_to_buffer: read between nt_gfx_end_frame and nt_gfx_begin_frame");
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_BUFFER_READ, NT_GFX_OBJECT_BUFFER, buf.id, event->data.state.integers[0] = (uint32_t)x; event->data.state.integers[1] = (uint32_t)y;
+                         event->data.state.integers[2] = (uint32_t)w; event->data.state.integers[3] = (uint32_t)h; event->data.state.integers[4] = src.id);
+    NT_GFX_END(read_pixels_to_buffer(src, x, y, w, h, buf));
+}
+
+static nt_gfx_result_t map_readback(nt_buffer_t buf, const uint8_t **out) {
+    nt_gfx_buffer_meta_t *meta = readback_meta(buf);
+    NT_ASSERT(meta->readback == NT_GFX_READBACK_PENDING && "map_readback: needs a read since the last map");
+    *out = (const uint8_t *)nt_gfx_backend_map_buffer(nt_pool_slot_index(buf.id), meta->size);
+    meta->readback = NT_GFX_READBACK_MAPPED;
+    return NT_GFX_RESULT_ACCEPTED;
+}
+
+const uint8_t *nt_gfx_map_readback(nt_buffer_t buf) {
+    NT_GFX_BEGIN(NT_GFX_OP_BUFFER_MAP, NT_GFX_OBJECT_BUFFER, buf.id);
+    const uint8_t *bytes = NULL;
+    NT_GFX_END(map_readback(buf, &bytes));
+    return bytes;
+}
+
+static nt_gfx_result_t unmap_readback(nt_buffer_t buf) {
+    nt_gfx_buffer_meta_t *meta = readback_meta(buf);
+    NT_ASSERT(meta->readback == NT_GFX_READBACK_MAPPED && "unmap_readback: the buffer is not mapped");
+    meta->readback = NT_GFX_READBACK_IDLE;
+    nt_gfx_backend_unmap_buffer(nt_pool_slot_index(buf.id));
+    return NT_GFX_RESULT_ACCEPTED;
+}
+
+void nt_gfx_unmap_readback(nt_buffer_t buf) {
+    NT_GFX_BEGIN(NT_GFX_OP_BUFFER_UNMAP, NT_GFX_OBJECT_BUFFER, buf.id);
+    NT_GFX_END(unmap_readback(buf));
+}
+// #endregion
+#endif
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
@@ -1238,6 +1310,9 @@ nt_instance_layout_t nt_gfx_make_instance_layout(const nt_vertex_layout_t *layou
 
 static nt_gfx_result_t make_buffer(const nt_buffer_desc_t *desc, nt_buffer_t *out) {
     NT_ASSERT(desc != NULL);
+#if !defined(NT_PLATFORM_WEB)
+    NT_ASSERT((desc->type != NT_BUFFER_READBACK || desc->data == NULL) && "make_buffer: the GPU writes a readback buffer");
+#endif
     /* Same recoverable contract as the other make_* creators -- without this
      * a lost-frame creation yields a pool-valid buffer with a dead GL name. */
     if (g_nt_gfx.context_lost) {
@@ -1583,7 +1658,13 @@ static nt_gfx_result_t destroy_buffer(nt_buffer_t buf) {
 }
 
 void nt_gfx_destroy_buffer(nt_buffer_t buf) {
+#if !defined(NT_PLATFORM_WEB)
+    /* No recorded command names a readback buffer, so the frame rule has nothing to protect. */
+    const bool readback = nt_pool_valid(&s_gfx.buffer_pool, buf.id) && s_gfx.buffer_metas[nt_pool_slot_index(buf.id)].type == NT_BUFFER_READBACK;
+    NT_GFX_ASSERT_FRAME_RULE(&s_gfx.buffer_pool, readback ? 0U : buf.id);
+#else
     NT_GFX_ASSERT_FRAME_RULE(&s_gfx.buffer_pool, buf.id);
+#endif
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_BUFFER, buf.id);
     NT_GFX_END(destroy_buffer(buf));
 }
@@ -2382,6 +2463,9 @@ static nt_gfx_result_t buffer_update(nt_buffer_t buf, uint32_t offset, const voi
         return NT_GFX_RESULT_INVALID_HANDLE;
     }
     uint32_t slot = nt_pool_slot_index(buf.id);
+#if !defined(NT_PLATFORM_WEB)
+    NT_ASSERT(s_gfx.buffer_metas[slot].type != NT_BUFFER_READBACK && "update_buffer: the GPU writes a readback buffer");
+#endif
     NT_ASSERT(s_gfx.buffer_metas[slot].usage != NT_USAGE_IMMUTABLE && "update_buffer: cannot update immutable buffer");
     NT_ASSERT((data != NULL || size == 0) && "update_buffer: NULL data with nonzero size");
     NT_ASSERT(offset <= s_gfx.buffer_metas[slot].size && "update_buffer: offset exceeds buffer capacity");

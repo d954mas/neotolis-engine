@@ -54,7 +54,7 @@ globalThis['NtRecorder'] = (function () {
             return false;
         }
         var MB = NtMediabunny;
-        var r = { name: name, canvas: canvas, w: w, h: h, fps: fps, error: null };
+        var r = { name: name, canvas: canvas, w: w, h: h, fps: fps, error: null, frames: 0 };
         var fail = r.fail = function (e) { if (!r.error) { r.error = String(e); } };
         try {
             r.out = new MB.Output({ format: new MB.Mp4OutputFormat(), target: new MB.BufferTarget() });
@@ -105,6 +105,7 @@ globalThis['NtRecorder'] = (function () {
             r.fail(e);
             return false;
         }
+        r.frames++;
         return true;
     }
 
@@ -127,8 +128,9 @@ globalThis['NtRecorder'] = (function () {
 
     // Hands the recording to its own flush chain, so a new open never waits for it. The event fires
     // after the C call returns, never inside it.
-    function close(frames) {
+    function close() {
         var r = cur;
+        var frames = r.frames;
         cur = null;
         var done = function (blob) {
             if (!blob) {

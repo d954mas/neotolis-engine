@@ -24,14 +24,14 @@ static struct {
     uint64_t audio; /* samples written: the track position */
 } s_rec;
 
-static void finish(void) {
+static bool finish(void) {
     s_rec.active = false;
-    nt_recorder_platform_close(s_rec.frames);
+    return nt_recorder_platform_close();
 }
 
 static void fail(void) {
     NT_LOG_WARN("encoder failed, recording ended");
-    finish();
+    (void)finish();
 }
 
 static bool pad_to(uint64_t end) {
@@ -55,9 +55,7 @@ static uint32_t end_recording(void) {
         fail();
         return 0;
     }
-    uint32_t frames = s_rec.frames;
-    finish();
-    return frames;
+    return finish() ? s_rec.frames : 0;
 }
 
 /* Pushed audio carries no timestamps: a mixer that skips or overfills shifts the rest of the track,
@@ -129,11 +127,12 @@ void nt_recorder_frame(double t, double dt) {
         (void)end_recording();
         return;
     }
-    for (; s_rec.frames < frames; s_rec.frames++) {
-        if (!nt_recorder_platform_video(s_rec.frames)) {
+    if (frames > s_rec.frames) {
+        if (!nt_recorder_platform_video(s_rec.frames, frames - s_rec.frames)) {
             fail();
             return;
         }
+        s_rec.frames = frames;
     }
     /* Silence keeps pace with the clock until the first push, so a long silent clip never pads at once
        and a mixer whose first push is the step after this call starts on time. */
