@@ -751,14 +751,17 @@ frame rule.
 `nt_gfx_read_pixels_to_buffer` follows the frame point and source rules of
 `nt_gfx_read_pixels`, queues the copy and a fence, and returns. The buffer then
 holds BGRA8 rows of `w * 4` bytes, bottom-up as GL stores them; BGRA is the
-format desktop drivers read without a conversion. `nt_gfx_map_buffer(buf, wait)`
+format desktop drivers read without a conversion. `nt_gfx_map_readback(buf, wait)`
 returns the bytes once the fence has signalled. With `wait` false it returns
-NULL (`UNREADY`) while the GPU is still copying. `nt_gfx_unmap_buffer` ends the
+NULL (`UNREADY`) while the GPU is still copying. `nt_gfx_unmap_readback` ends the
 access. Map and unmap run in any frame state, because the copy was queued
 earlier.
 
-Each read is mapped once. A read into a mapped buffer, a map without a read
-since the last map and an unmap of an unmapped buffer assert. A native GL context
+The bytes stay valid until the unmap or the destroy of the buffer, whichever
+comes first; a buffer may be destroyed in any readback state. A read into a
+buffer whose last read was not mapped replaces it. A read into a mapped buffer,
+a map without a read since the last map and an unmap of an unmapped buffer
+assert. A native GL context
 is never lost, so readback has no lost-context path: with `wait` the map always
 returns the bytes.
 

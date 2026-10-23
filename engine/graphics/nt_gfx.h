@@ -1019,15 +1019,16 @@ bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint
 #if !defined(NT_PLATFORM_WEB)
 /* Native only (WebGL has no buffer mapping). Starts a read of an (x,y,w,h) sub-rect of `src` into
  * `buf` (NT_BUFFER_READBACK, w*h*4 <= size) and returns without waiting for the GPU. The bytes are
- * BGRA8 rows of w*4, BOTTOM-UP as GL stores them, read with nt_gfx_map_buffer. Frame point and source
+ * BGRA8 rows of w*4, BOTTOM-UP as GL stores them, read with nt_gfx_map_readback. Frame point and source
  * rules as nt_gfx_read_pixels; a mapped `buf` asserts. A readback buffer may be destroyed while a
  * frame is being drawn: no recorded command names it. */
 void nt_gfx_read_pixels_to_buffer(nt_render_target_t src, int x, int y, int w, int h, nt_buffer_t buf);
-/* The bytes of `buf`'s last read, valid until nt_gfx_unmap_buffer. With !wait it returns NULL while
+/* The bytes of `buf`'s last read, valid until nt_gfx_unmap_readback or nt_gfx_destroy_buffer,
+ * whichever comes first. With !wait it returns NULL while
  * the GPU is still copying; with wait it never returns NULL. Asserts a read since the last map. Any
  * frame state: the read was already issued. */
-const uint8_t *nt_gfx_map_buffer(nt_buffer_t buf, bool wait);
-void nt_gfx_unmap_buffer(nt_buffer_t buf);
+const uint8_t *nt_gfx_map_readback(nt_buffer_t buf, bool wait);
+void nt_gfx_unmap_readback(nt_buffer_t buf);
 #endif
 
 /* ---- Uniform blocks ---- */

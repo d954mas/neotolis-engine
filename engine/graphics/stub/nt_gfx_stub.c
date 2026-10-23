@@ -244,13 +244,13 @@ void nt_gfx_read_pixels_to_buffer(nt_render_target_t src, int x, int y, int w, i
     (void)buf;
 }
 
-const uint8_t *nt_gfx_map_buffer(nt_buffer_t buf, bool wait) {
+const uint8_t *nt_gfx_map_readback(nt_buffer_t buf, bool wait) {
     (void)buf;
     (void)wait;
     return NULL;
 }
 
-void nt_gfx_unmap_buffer(nt_buffer_t buf) { (void)buf; }
+void nt_gfx_unmap_readback(nt_buffer_t buf) { (void)buf; }
 #endif
 
 void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size) {

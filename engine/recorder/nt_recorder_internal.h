@@ -16,8 +16,8 @@ bool nt_recorder_platform_video(uint32_t first, uint32_t count);
 /* Interleaved stereo samples at track sample at (pts at / 48000), continuing the track; it may run
    ahead of the video. */
 bool nt_recorder_platform_audio(uint64_t at, const float *stereo, uint32_t frames);
-/* Finishes the file. frames is the video frame count sent to platform_video; returns the frames the
-   encoder took, 0 after an encoder failure (Windows encodes its last reads here). */
-uint32_t nt_recorder_platform_close(uint32_t frames);
+/* Finishes the file. frames is the video frame count sent to platform_video; false when a write failed
+   (Windows encodes its last reads here). */
+bool nt_recorder_platform_close(uint32_t frames);
 
 #endif // NT_RECORDER_INTERNAL_H

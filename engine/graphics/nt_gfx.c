@@ -878,9 +878,9 @@ void nt_gfx_read_pixels_to_buffer(nt_render_target_t src, int x, int y, int w, i
     NT_GFX_END(read_pixels_to_buffer(src, x, y, w, h, buf));
 }
 
-static nt_gfx_result_t map_buffer(nt_buffer_t buf, bool wait, const uint8_t **out) {
+static nt_gfx_result_t map_readback(nt_buffer_t buf, bool wait, const uint8_t **out) {
     nt_gfx_buffer_meta_t *meta = readback_meta(buf);
-    NT_ASSERT(meta->readback == NT_GFX_READBACK_PENDING && "map_buffer: needs a read since the last map");
+    NT_ASSERT(meta->readback == NT_GFX_READBACK_PENDING && "map_readback: needs a read since the last map");
     const uint32_t slot = nt_pool_slot_index(buf.id);
     if (!nt_gfx_backend_readback_ready(slot, wait)) {
         return NT_GFX_RESULT_UNREADY;
@@ -890,24 +890,24 @@ static nt_gfx_result_t map_buffer(nt_buffer_t buf, bool wait, const uint8_t **ou
     return NT_GFX_RESULT_ACCEPTED;
 }
 
-const uint8_t *nt_gfx_map_buffer(nt_buffer_t buf, bool wait) {
+const uint8_t *nt_gfx_map_readback(nt_buffer_t buf, bool wait) {
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_BUFFER_MAP, NT_GFX_OBJECT_BUFFER, buf.id, event->data.state.integers[0] = wait);
     const uint8_t *bytes = NULL;
-    NT_GFX_END(map_buffer(buf, wait, &bytes));
+    NT_GFX_END(map_readback(buf, wait, &bytes));
     return bytes;
 }
 
-static nt_gfx_result_t unmap_buffer(nt_buffer_t buf) {
+static nt_gfx_result_t unmap_readback(nt_buffer_t buf) {
     nt_gfx_buffer_meta_t *meta = readback_meta(buf);
-    NT_ASSERT(meta->readback == NT_GFX_READBACK_MAPPED && "unmap_buffer: the buffer is not mapped");
+    NT_ASSERT(meta->readback == NT_GFX_READBACK_MAPPED && "unmap_readback: the buffer is not mapped");
     meta->readback = NT_GFX_READBACK_IDLE;
     nt_gfx_backend_unmap_buffer(nt_pool_slot_index(buf.id));
     return NT_GFX_RESULT_ACCEPTED;
 }
 
-void nt_gfx_unmap_buffer(nt_buffer_t buf) {
+void nt_gfx_unmap_readback(nt_buffer_t buf) {
     NT_GFX_BEGIN(NT_GFX_OP_BUFFER_UNMAP, NT_GFX_OBJECT_BUFFER, buf.id);
-    NT_GFX_END(unmap_buffer(buf));
+    NT_GFX_END(unmap_readback(buf));
 }
 // #endregion
 #endif

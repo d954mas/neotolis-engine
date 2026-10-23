@@ -47,10 +47,9 @@ static struct {
     uint32_t read_count[NT_RECORDER_READS]; /* the output frames that show this read */
     uint32_t head;
     uint32_t pending;
-    uint32_t written; /* video samples sent to the encoder */
-    bool com;         /* this recording holds a COM reference */
-    bool broken;      /* a write failed: the encoder may never drain */
-    HANDLE released;  /* set when the pool gets a sample back; lives with the process, as does s_notify */
+    bool com;        /* this recording holds a COM reference */
+    bool broken;     /* a write failed: the encoder may never drain */
+    HANDLE released; /* set when the pool gets a sample back; lives with the process, as does s_notify */
     wchar_t path[MAX_PATH];
 } s_mf;
 
@@ -215,7 +214,6 @@ bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height
     s_mf.broken = false;
     s_mf.head = 0;
     s_mf.pending = 0;
-    s_mf.written = 0;
     if (s_mf.released == NULL) {
         s_mf.released = CreateEventW(NULL, FALSE, FALSE, NULL);
         NT_ASSERT(s_mf.released != NULL);
@@ -273,7 +271,6 @@ static bool write_frame(uint32_t index, const uint8_t *bytes) {
     must(IMFSample_SetSampleDuration(sample, hns(index + 1ULL, s_mf.fps) - hns(index, s_mf.fps)));
     bool good = ok(IMFSinkWriter_WriteSample(s_mf.writer, s_mf.video, sample), "WriteSample video");
     s_mf.broken = !good;
-    s_mf.written += good ? 1U : 0U;
     IMF2DBuffer_Release(buffer2d);
     IMFMediaBuffer_Release(buffer);
     IMFSample_Release(sample); /* back to the pool once the encoder is done with it */
@@ -284,7 +281,7 @@ static bool write_frame(uint32_t index, const uint8_t *bytes) {
    failed (broken). Reads leave the ring in issue order, so the encoder gets pts in order. */
 static bool encode_oldest(bool wait) {
     uint32_t slot = (s_mf.head + NT_RECORDER_READS - s_mf.pending) % NT_RECORDER_READS;
-    const uint8_t *bytes = nt_gfx_map_buffer(s_mf.reads[slot], wait);
+    const uint8_t *bytes = nt_gfx_map_readback(s_mf.reads[slot], wait);
     if (bytes == NULL) {
         return false;
     }
@@ -292,7 +289,7 @@ static bool encode_oldest(bool wait) {
     for (uint32_t i = 0; !s_mf.broken && i < s_mf.read_count[slot]; i++) {
         (void)write_frame(s_mf.read_first[slot] + i, bytes);
     }
-    nt_gfx_unmap_buffer(s_mf.reads[slot]);
+    nt_gfx_unmap_readback(s_mf.reads[slot]);
     return !s_mf.broken;
 }
 
@@ -337,16 +334,15 @@ bool nt_recorder_platform_audio(uint64_t at, const float *stereo, uint32_t frame
     return good;
 }
 
-/* The reads still in the ring go to the encoder first. Without a written frame there is nothing to
-   keep: Finalize refuses an empty video track. After a failed write Finalize could wait forever on the
+/* The reads still in the ring go to the encoder first. Without a frame there is nothing to keep:
+   Finalize refuses an empty video track. After a failed write Finalize could wait forever on the
    encoder, so it is skipped; either way the fragments on disk stay. */
-uint32_t nt_recorder_platform_close(uint32_t frames) {
-    (void)frames; /* the reads in the ring are counted but not written yet */
-    while (s_mf.pending > 0 && encode_oldest(true)) {
+bool nt_recorder_platform_close(uint32_t frames) {
+    while (!s_mf.broken && s_mf.pending > 0 && encode_oldest(true)) {
     }
-    if (s_mf.written > 0 && !s_mf.broken) {
+    if (frames > 0 && !s_mf.broken) {
         (void)ok(IMFSinkWriter_Finalize(s_mf.writer), "Finalize");
     }
-    release(s_mf.written == 0);
-    return s_mf.broken ? 0U : s_mf.written;
+    release(frames == 0);
+    return !s_mf.broken;
 }

@@ -24,7 +24,7 @@ static struct {
     uint64_t audio; /* samples written: the track position */
 } s_rec;
 
-static uint32_t finish(void) {
+static bool finish(void) {
     s_rec.active = false;
     return nt_recorder_platform_close(s_rec.frames);
 }
@@ -55,7 +55,7 @@ static uint32_t end_recording(void) {
         fail();
         return 0;
     }
-    return finish();
+    return finish() ? s_rec.frames : 0;
 }
 
 /* Pushed audio carries no timestamps: a mixer that skips or overfills shifts the rest of the track,

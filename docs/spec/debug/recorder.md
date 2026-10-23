@@ -32,7 +32,8 @@ before or after its push.
 non-empty `name`, `fps` within 1..120 and no active recording. It returns false (logged) when either
 side of that size is under 2 px or the backend refuses: no encoder, a size the encoder rejects, or
 an output that cannot be opened (see Backends). `frame`, `push_audio` and `stop` are no-ops while idle.
-`stop` returns the frames sent to the encoder, 0 when the final audio write failed.
+`stop` returns the frames sent to the encoder, 0 when a final write failed (audio, or on Windows the
+last frames, see Backends).
 
 A recording also ends on its own, with a WARN, in three cases. A change of the even-rounded
 framebuffer size, and a `frame` call with more than two seconds (`2 · fps`) of due frames (render
@@ -126,7 +127,8 @@ encoder, so in RUN the step after `start` advances by that wait and its `frame` 
 for each deadline it covers.
 Media Foundation must be installed: a game that links the recorder does not start on a Windows N
 edition without the Media Feature Pack. The executable links `nt_gfx`, not its stub: the recorder
-reads the window through it, and a failed read ends the recording (WARN).
+reads the window through it. A recording takes three `nt_gfx` buffers of `w · h · 4` bytes (about
+25 MB at 1080p), so `nt_gfx_desc_t.max_buffers` needs three spare slots.
 
 A `frame` call with due frames queues one read of the window into one of three readback buffers
 (`nt_gfx_read_pixels_to_buffer`, see [Rendering Architecture](../render/architecture.md#readback)) and
@@ -157,7 +159,7 @@ the dead encoder, and keeps the fragments on disk; so does a failed `Finalize` (
 | Command | Params | Result | Errors |
 |---|---|---|---|
 | `record.start` | `{name, fps}` | `{}` | `bad_params` (name not a non-empty string, fps not an integer 1..120), `busy` (active), `failed` (`start` returned false) |
-| `record.stop` | `{}` | `{frames}` | none; `frames` is 0 when nothing was active, the recording ended on its own, or the final audio write failed |
+| `record.stop` | `{}` | `{frames}` | none; `frames` is 0 when nothing was active, the recording ended on its own, or a final write failed |
 
 On Windows `name` is the file path. The host's first `frame` call after `record.start` sets the
 origin. An offline recording is `time.set_mode{mode:"manual"}`,

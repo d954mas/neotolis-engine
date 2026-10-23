@@ -37,6 +37,7 @@ static struct {
     uint32_t fail_index;
     bool fail_audio;
     bool fail_open;
+    bool fail_close;
     uint32_t warns;
     char warn[160];    /* the last WARN line */
     char info[160];    /* the last INFO line */
@@ -95,10 +96,10 @@ bool nt_recorder_platform_audio(uint64_t at, const float *stereo, uint32_t frame
     return true;
 }
 
-uint32_t nt_recorder_platform_close(uint32_t frames) {
+bool nt_recorder_platform_close(uint32_t frames) {
     s_be.closes++;
     s_be.closed_frames = frames;
-    return frames;
+    return !s_be.fail_close;
 }
 
 void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...) {
@@ -268,6 +269,15 @@ static void test_video_failure_ends_the_recording(void) {
     TEST_ASSERT_EQUAL_UINT64(2ULL * 1600ULL, s_be.audio_frames); /* silence beside the frames, no end padding */
     TEST_ASSERT_EQUAL_UINT32(1, s_be.warns);
     TEST_ASSERT_EQUAL_UINT32(0, nt_recorder_stop());
+}
+
+/* Windows encodes its last reads in close: a write failing there leaves no frames to report. */
+static void test_close_failure_returns_zero(void) {
+    s_be.fail_close = true;
+    start_at(30, 0.0);
+    frame_at(1.0 / 30.0, 1.0 / 30.0);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_recorder_stop());
+    TEST_ASSERT_EQUAL_UINT32(1, s_be.closed_frames);
 }
 
 static void test_open_failure_refuses_to_start(void) {
@@ -641,6 +651,7 @@ int main(void) {
     RUN_TEST(test_catch_up_bound_is_two_seconds_of_frames);
     RUN_TEST(test_resize_ends_with_audio_padded_to_the_video);
     RUN_TEST(test_video_failure_ends_the_recording);
+    RUN_TEST(test_close_failure_returns_zero);
     RUN_TEST(test_open_failure_refuses_to_start);
     RUN_TEST(test_tiny_framebuffer_refuses_to_start);
     RUN_TEST(test_idle_calls_are_inert);
