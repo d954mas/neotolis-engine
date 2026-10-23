@@ -120,12 +120,12 @@ A link failure is a developer error and traps (`NT_ASSERT`) in the
 `nt_gfx_begin_frame` that finishes the link, after logging the program log
 and the logs of its stages; stage creation never reads
 its compile status, so compile errors surface there too. A pending link holds
-the GPU objects of both stages until it resolves (linked, its program destroyed, or the context lost):
-destroying a stage handle meanwhile frees the handle at once and defers
-`glDeleteShader` to the last pending link that holds the stage. The diagnostics
-therefore never depend on how long the owner keeps its stage handles; on the web
-this matters because Emscripten drops a deleted shader's name immediately and
-Chromium refuses to translate a shader marked for deletion. A link the browser fails because the context
+the GPU objects of both stages until it resolves: destroying a stage handle
+meanwhile frees the handle at once, and the last pending link that holds the
+stage deletes its GPU object when that link finishes or its program is
+destroyed (a context loss discards it instead). The diagnostics therefore never
+depend on how long the owner keeps its stage handles; on the web this matters
+because Emscripten forgets a deleted stage's name at once. A link the browser fails because the context
 was lost latches the loss instead and leaves the program unready.
 `nt_gfx_make_program` returns an invalid handle on
 a lost context, including a loss the browser reports before its lost event
@@ -147,7 +147,9 @@ Just before that line, a link failure logs
 `program link stages: vs_compile=<v> fs_compile=<f>`: `1` means the stage
 compiled and `0` that it did not. An empty driver log with `1 1` therefore
 points at linking, a `0` at that stage's compilation. A context lost during
-these queries can also read as `0`; that record still ends in the assertion. These queries exist only with ERROR logging compiled in and never run
+these queries can also read as `0`, and on the web a stage log may then read
+`(unknown error)`; that record still ends in the assertion. These queries exist
+only with ERROR logging compiled in and never run
 for a successful link or an already-confirmed context loss.
 
 On the web, the browser's translation of a stage is what the driver actually

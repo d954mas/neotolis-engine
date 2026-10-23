@@ -1286,8 +1286,8 @@ void nt_gfx_backend_destroy_shader(uint32_t backend_handle) {
     if (backend_handle == 0) {
         return;
     }
-    /* A pending link keeps the stage alive for its failure diagnostics: Emscripten drops a deleted
-     * name at once, and Chromium refuses translation of a stage marked for deletion. */
+    /* A pending link keeps the stage alive for its failure diagnostics; Emscripten forgets a deleted
+     * name at once. */
     bool held = false;
     for (uint32_t i = 1; i <= s_init_desc.max_programs; i++) {
         if (s_programs[i].vs == backend_handle) {

@@ -103,7 +103,7 @@ for (const mode of ['vertex', 'fragment', 'link', 'no-translation', 'long-transl
     const fragment = mode === 'fragment' ? 0 : 1;
     expect(lines[at - 1]).toContain(`program link stages: vs_compile=${vertex} fs_compile=${fragment}`);
 
-    // Every compiled stage is translated; one the browser itself rejected has no text and logs nothing.
+    // With the extension, every compiled stage is translated; one the browser rejected has no text and logs nothing.
     const translated = mode === 'no-translation' ? [] : vertex === 0 ? ['fragment'] : fragment === 0 ? ['vertex'] : ['vertex', 'fragment'];
     const driver = lines.findIndex(line => line.includes('driver detail'));
     for (const stage of ['vertex', 'fragment']) {

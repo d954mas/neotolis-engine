@@ -23,6 +23,7 @@ static uint32_t s_invalidate_count;
 static GLenum s_invalidated[3];
 static GLsizei s_invalidated_count;
 static GLint s_invalidated_fbo;
+static PFNGLDELETESHADERPROC s_delete_shader; /* tearDown restores it even when a test fails mid-hook */
 
 static void GLAD_API_PTR record_invalidate(GLenum target, GLsizei count, const GLenum *attachments) {
     s_invalidate_count++;
@@ -64,10 +65,12 @@ void setUp(void) {
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
     s_invalidate = glad_glInvalidateFramebuffer;
     s_invalidate_count = 0;
+    s_delete_shader = glad_glDeleteShader;
 }
 
 void tearDown(void) {
     glad_glInvalidateFramebuffer = s_invalidate;
+    glad_glDeleteShader = s_delete_shader;
     nt_gfx_shutdown();
 }
 
@@ -1931,7 +1934,6 @@ static void test_failed_link_records_both_compile_statuses_without_driver_logs(v
     }
 }
 
-static PFNGLDELETESHADERPROC s_delete_shader;
 static uint32_t s_deleted_shaders;
 
 static void GLAD_API_PTR count_shader_delete(GLuint shader) {
@@ -1944,7 +1946,6 @@ static void test_destroyed_stages_live_until_the_last_pending_link_resolves(void
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "out vec4 color; void main() { color = vec4(1.0); }"});
     nt_program_t kept = nt_gfx_make_program(vs, fs, "hold/kept");
     nt_program_t dropped = nt_gfx_make_program(vs, fs, "hold/dropped");
-    s_delete_shader = glad_glDeleteShader;
     glad_glDeleteShader = count_shader_delete;
     s_deleted_shaders = 0;
 
@@ -1976,7 +1977,6 @@ static void test_destroyed_stages_live_until_the_last_pending_link_resolves(void
     TEST_ASSERT_EQUAL_UINT32(4, s_deleted_shaders);
     nt_gfx_destroy_shader(live_vs);
     TEST_ASSERT_EQUAL_UINT32(5, s_deleted_shaders);
-    glad_glDeleteShader = s_delete_shader;
 }
 
 /* The record carries the label, the phase, and the name and value the driver reflected. */
