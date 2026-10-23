@@ -38,4 +38,7 @@ bool nt_recorder_platform_video(uint32_t first, uint32_t count) {
 
 bool nt_recorder_platform_audio(uint64_t at, const float *stereo, uint32_t frames) { return nt_recorder_web_audio((double)at, stereo, frames) != 0; }
 
-void nt_recorder_platform_close(uint32_t frames) { nt_recorder_web_close(frames); }
+uint32_t nt_recorder_platform_close(uint32_t frames) {
+    nt_recorder_web_close(frames);
+    return frames;
+}

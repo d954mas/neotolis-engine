@@ -140,9 +140,8 @@ loses its bottom row and right column, as on web.
 Nothing is dropped. With all three reads in flight a call waits for the oldest. When the encoder
 holds all four buffers, it waits for one. So lockstep runs at the GPU's and the encoder's pace, RUN
 shows a hitch instead of a missing frame, and an encoder that keeps all four for ten seconds counts
-as an encoder failure. The end of a recording destroys the readback buffers, so `stop` (and a
-`push_audio` whose write fails) follows the gfx frame rule: not between the first
-`nt_gfx_begin_pass` of a frame and `nt_gfx_end_frame`. Each audio write, pushed samples or silence, allocates one Media Foundation buffer
+as an encoder failure. `stop` returns the frames the encoder took, so a write that fails while it
+encodes the last reads makes it return 0. Each audio write, pushed samples or silence, allocates one Media Foundation buffer
 beside the per-sample allocations of the Media Foundation pipeline itself: a dev-only exception to
 preallocated storage. An encoder failure ends the recording without `Finalize`, which could wait on
 the dead encoder, and keeps the fragments on disk; so does a failed `Finalize` (WARN), after which

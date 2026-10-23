@@ -152,7 +152,11 @@ static inline void nt_gl_put_callback(nt_gl_callback_t callback) { nt_gl_put_uns
 #define NT_GL_ARGS_(...) (NT_GL_RECORDING_() ? (NT_GL_CAT(NT_GL_EACH_, NT_GL_NARGS(__VA_ARGS__))(__VA_ARGS__)) : (void)0)
 #define NT_GL_NAMES_(count, names) (NT_GL_RECORDING_() ? nt_gl_put_names((count), (names)) : (void)0)
 #define NT_GL_CLOSE_() nt_gl_close()
-#define NT_GL_CLOSE_RESULT_(result) _Generic((result), GLboolean: nt_gl_close_uint, GLint: nt_gl_close_int, GLuint: nt_gl_close_uint, default: nt_gl_close_pointer)(result)
+#if defined(NT_PLATFORM_WEB)
+#define NT_GL_CLOSE_RESULT_(result) _Generic((result), GLboolean: nt_gl_close_uint, GLint: nt_gl_close_int, GLuint: nt_gl_close_uint)(result)
+#else
+#define NT_GL_CLOSE_RESULT_(result) _Generic((result), GLboolean: nt_gl_close_uint, GLint: nt_gl_close_int, GLuint: nt_gl_close_uint, GLsync: nt_gl_close_pointer, void *: nt_gl_close_pointer)(result)
+#endif
 #else
 #define NT_GL_OPEN_(call) NT_GL_COUNT_(call)
 #define NT_GL_ARGS_(...) ((void)0)

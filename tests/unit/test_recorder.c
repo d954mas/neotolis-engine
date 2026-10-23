@@ -19,6 +19,7 @@ static struct {
     uint32_t opens;
     uint32_t width, height, fps;
     uint32_t videos;
+    uint32_t video_calls;
     uint32_t next_index;
     bool index_gap;
     double now;               /* caller time of the current frame call */
@@ -58,6 +59,7 @@ bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height
 
 bool nt_recorder_platform_video(uint32_t first, uint32_t count) {
     TEST_ASSERT_TRUE(count > 0);
+    s_be.video_calls++;
     if (s_be.fail_video && s_be.fail_index - first < count) {
         return false;
     }
@@ -93,9 +95,10 @@ bool nt_recorder_platform_audio(uint64_t at, const float *stereo, uint32_t frame
     return true;
 }
 
-void nt_recorder_platform_close(uint32_t frames) {
+uint32_t nt_recorder_platform_close(uint32_t frames) {
     s_be.closes++;
     s_be.closed_frames = frames;
+    return frames;
 }
 
 void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...) {
@@ -207,6 +210,7 @@ static void test_jittered_real_time_picks_nearest_frames(void) {
 static void test_hitch_resubmits_the_frame(void) {
     start_at(30, 0.0);
     frame_at(0.1, 0.1);
+    TEST_ASSERT_EQUAL_UINT32(1, s_be.video_calls); /* one read serves every deadline of a call */
     TEST_ASSERT_EQUAL_UINT32(3, s_be.videos);
     TEST_ASSERT_EQUAL_UINT32(3, s_be.next_index);
     TEST_ASSERT_FALSE(s_be.index_gap);

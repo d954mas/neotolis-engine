@@ -24,14 +24,14 @@ static struct {
     uint64_t audio; /* samples written: the track position */
 } s_rec;
 
-static void finish(void) {
+static uint32_t finish(void) {
     s_rec.active = false;
-    nt_recorder_platform_close(s_rec.frames);
+    return nt_recorder_platform_close(s_rec.frames);
 }
 
 static void fail(void) {
     NT_LOG_WARN("encoder failed, recording ended");
-    finish();
+    (void)finish();
 }
 
 static bool pad_to(uint64_t end) {
@@ -55,9 +55,7 @@ static uint32_t end_recording(void) {
         fail();
         return 0;
     }
-    uint32_t frames = s_rec.frames;
-    finish();
-    return frames;
+    return finish();
 }
 
 /* Pushed audio carries no timestamps: a mixer that skips or overfills shifts the rest of the track,

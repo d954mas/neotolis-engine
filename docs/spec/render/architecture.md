@@ -745,7 +745,9 @@ GPU has finished the frame.
 
 Native builds can also read without waiting. WebGL has no buffer mapping, so the
 web build has neither these calls nor `NT_BUFFER_READBACK`. A readback buffer is
-made with `NT_USAGE_STREAM` and no data, and `nt_gfx_update_buffer` on it asserts.
+made with no data (its usage is ignored), and `nt_gfx_update_buffer` on it asserts.
+No recorded command names a readback buffer, so destroying one is exempt from the
+frame rule.
 `nt_gfx_read_pixels_to_buffer` follows the frame point and source rules of
 `nt_gfx_read_pixels`, queues the copy and a fence, and returns. The buffer then
 holds BGRA8 rows of `w * 4` bytes, bottom-up as GL stores them; BGRA is the
@@ -756,8 +758,9 @@ access. Map and unmap run in any frame state, because the copy was queued
 earlier.
 
 Each read is mapped once. A read into a mapped buffer, a map without a read
-since the last map and an unmap of an unmapped buffer assert. A lost context
-drops the read: the map returns NULL (`CONTEXT_LOST`).
+since the last map and an unmap of an unmapped buffer assert. A native GL context
+is never lost, so readback has no lost-context path: with `wait` the map always
+returns the bytes.
 
 The caller owns the buffers and their order. With two or three buffers in a
 ring, a read is mapped a frame or two after it was issued and the CPU does not
@@ -1104,7 +1107,7 @@ cascaded destroys). Only frontend cache hits
 one, whose indices still count), rejections and losses are left out; an operation whose
 backend skipped a call as a cache hit (SKIP/CACHE) or found an inactive uniform
 (SKIP/INACTIVE) still ends ACCEPTED and counts. A GPU timer poll with no result
-yet ends `UNREADY`. Texture
+yet and a readback map without `wait` on an unfinished copy end `UNREADY`. Texture
 sets count per operation, while per-unit binds show in `gl[]`. Accepted
 operations minus GL calls is not a cache-skip count.
 Each initialization restarts the frame sequence: the first frame after init is 1,

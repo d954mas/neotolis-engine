@@ -852,6 +852,7 @@ bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint
 
 #if !defined(NT_PLATFORM_WEB)
 // #region buffer readback
+/* A native GL context is never lost (nt_gfx_gl_ctx_native.c), so readback has no lost path. */
 static nt_gfx_buffer_meta_t *readback_meta(nt_buffer_t buf) {
     NT_ASSERT(nt_pool_valid(&s_gfx.buffer_pool, buf.id) && "readback: invalid buffer");
     nt_gfx_buffer_meta_t *meta = &s_gfx.buffer_metas[nt_pool_slot_index(buf.id)];
@@ -865,10 +866,6 @@ static nt_gfx_result_t read_pixels_to_buffer(nt_render_target_t src, int x, int 
     nt_gfx_buffer_meta_t *meta = readback_meta(buf);
     NT_ASSERT((uint64_t)(uint32_t)w * (uint64_t)(uint32_t)h * 4U <= meta->size && "read_pixels_to_buffer: the buffer is smaller than w*h*4");
     NT_ASSERT(meta->readback != NT_GFX_READBACK_MAPPED && "read_pixels_to_buffer: unmap the buffer first");
-    if (g_nt_gfx.context_lost) {
-        return NT_GFX_RESULT_CONTEXT_LOST;
-    }
-    NT_ASSERT(meta->live && "read_pixels_to_buffer: buffer has no live backend -- recreate it after context restore");
     nt_gfx_backend_read_pixels_to_buffer(read_source_slot(src, x, y, w, h), x, y, w, h, nt_pool_slot_index(buf.id));
     meta->readback = NT_GFX_READBACK_PENDING;
     return NT_GFX_RESULT_ACCEPTED;
@@ -881,24 +878,14 @@ void nt_gfx_read_pixels_to_buffer(nt_render_target_t src, int x, int y, int w, i
     NT_GFX_END(read_pixels_to_buffer(src, x, y, w, h, buf));
 }
 
-/* A lost context drops the read: no bytes, and the pending state goes with the husk. */
 static nt_gfx_result_t map_buffer(nt_buffer_t buf, bool wait, const uint8_t **out) {
     nt_gfx_buffer_meta_t *meta = readback_meta(buf);
     NT_ASSERT(meta->readback == NT_GFX_READBACK_PENDING && "map_buffer: needs a read since the last map");
-    if (g_nt_gfx.context_lost || !meta->live) {
-        return NT_GFX_RESULT_CONTEXT_LOST;
-    }
     const uint32_t slot = nt_pool_slot_index(buf.id);
     if (!nt_gfx_backend_readback_ready(slot, wait)) {
-        if (!wait) {
-            return NT_GFX_RESULT_UNREADY;
-        }
-        return latch_loss();
+        return NT_GFX_RESULT_UNREADY;
     }
     *out = (const uint8_t *)nt_gfx_backend_map_buffer(slot, meta->size);
-    if (*out == NULL) {
-        return latch_loss();
-    }
     meta->readback = NT_GFX_READBACK_MAPPED;
     return NT_GFX_RESULT_ACCEPTED;
 }
@@ -914,9 +901,6 @@ static nt_gfx_result_t unmap_buffer(nt_buffer_t buf) {
     nt_gfx_buffer_meta_t *meta = readback_meta(buf);
     NT_ASSERT(meta->readback == NT_GFX_READBACK_MAPPED && "unmap_buffer: the buffer is not mapped");
     meta->readback = NT_GFX_READBACK_IDLE;
-    if (g_nt_gfx.context_lost || !meta->live) {
-        return NT_GFX_RESULT_CONTEXT_LOST;
-    }
     nt_gfx_backend_unmap_buffer(nt_pool_slot_index(buf.id));
     return NT_GFX_RESULT_ACCEPTED;
 }
@@ -1331,7 +1315,7 @@ nt_instance_layout_t nt_gfx_make_instance_layout(const nt_vertex_layout_t *layou
 static nt_gfx_result_t make_buffer(const nt_buffer_desc_t *desc, nt_buffer_t *out) {
     NT_ASSERT(desc != NULL);
 #if !defined(NT_PLATFORM_WEB)
-    NT_ASSERT((desc->type != NT_BUFFER_READBACK || (desc->data == NULL && desc->usage == NT_USAGE_STREAM)) && "make_buffer: a readback buffer takes no data and NT_USAGE_STREAM");
+    NT_ASSERT((desc->type != NT_BUFFER_READBACK || desc->data == NULL) && "make_buffer: the GPU writes a readback buffer");
 #endif
     /* Same recoverable contract as the other make_* creators -- without this
      * a lost-frame creation yields a pool-valid buffer with a dead GL name. */
@@ -1678,7 +1662,13 @@ static nt_gfx_result_t destroy_buffer(nt_buffer_t buf) {
 }
 
 void nt_gfx_destroy_buffer(nt_buffer_t buf) {
+#if !defined(NT_PLATFORM_WEB)
+    /* No recorded command names a readback buffer, so the frame rule has nothing to protect. */
+    const bool readback = nt_pool_valid(&s_gfx.buffer_pool, buf.id) && s_gfx.buffer_metas[nt_pool_slot_index(buf.id)].type == NT_BUFFER_READBACK;
+    NT_GFX_ASSERT_FRAME_RULE(&s_gfx.buffer_pool, readback ? 0U : buf.id);
+#else
     NT_GFX_ASSERT_FRAME_RULE(&s_gfx.buffer_pool, buf.id);
+#endif
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_BUFFER, buf.id);
     NT_GFX_END(destroy_buffer(buf));
 }
@@ -2477,10 +2467,10 @@ static nt_gfx_result_t buffer_update(nt_buffer_t buf, uint32_t offset, const voi
         return NT_GFX_RESULT_INVALID_HANDLE;
     }
     uint32_t slot = nt_pool_slot_index(buf.id);
-    NT_ASSERT(s_gfx.buffer_metas[slot].usage != NT_USAGE_IMMUTABLE && "update_buffer: cannot update immutable buffer");
 #if !defined(NT_PLATFORM_WEB)
     NT_ASSERT(s_gfx.buffer_metas[slot].type != NT_BUFFER_READBACK && "update_buffer: the GPU writes a readback buffer");
 #endif
+    NT_ASSERT(s_gfx.buffer_metas[slot].usage != NT_USAGE_IMMUTABLE && "update_buffer: cannot update immutable buffer");
     NT_ASSERT((data != NULL || size == 0) && "update_buffer: NULL data with nonzero size");
     NT_ASSERT(offset <= s_gfx.buffer_metas[slot].size && "update_buffer: offset exceeds buffer capacity");
     NT_ASSERT(size <= s_gfx.buffer_metas[slot].size - offset && "update_buffer: offset + size exceeds buffer capacity");

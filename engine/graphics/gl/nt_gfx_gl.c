@@ -1114,17 +1114,17 @@ bool nt_gfx_backend_readback_ready(uint32_t buffer_backend, bool wait) {
     if (status == GL_TIMEOUT_EXPIRED) {
         return false;
     }
-    NT_ASSERT((status != GL_WAIT_FAILED || nt_gfx_gl_ctx_query_lost()) && "readback: fence wait failed on a live context");
+    NT_ASSERT(status != GL_WAIT_FAILED && "readback: fence wait failed");
     NT_GL(glDeleteSync, fence);
     s_buffer_fence[buffer_backend] = NULL;
-    return status != GL_WAIT_FAILED;
+    return true;
 }
 
 const void *nt_gfx_backend_map_buffer(uint32_t buffer_backend, uint32_t size) {
     NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, s_buffer_gl[buffer_backend]);
     const void *bytes = NT_GL_RET(glMapBufferRange, GL_PIXEL_PACK_BUFFER, (GLintptr)0, (GLsizeiptr)size, (GLbitfield)GL_MAP_READ_BIT);
     NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, 0);
-    NT_ASSERT((bytes != NULL || nt_gfx_gl_ctx_query_lost()) && "map_buffer: map failed on a live context");
+    NT_ASSERT(bytes != NULL && "map_buffer: map failed");
     return bytes;
 }
 
@@ -1939,9 +1939,11 @@ bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot) {
     if (unhook_vao) {
         ebo_upload_end();
     }
+#if !defined(NT_PLATFORM_WEB)
     if (target == GL_PIXEL_PACK_BUFFER) {
         NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, 0); /* a bound pack buffer turns every glReadPixels pointer into an offset */
     }
+#endif
 
     s_buffer_gl[slot] = buf;
     s_buffer_targets[slot] = target;

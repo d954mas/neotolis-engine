@@ -229,12 +229,7 @@ bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height
         return false;
     }
     for (uint32_t i = 0; i < NT_RECORDER_READS; i++) {
-        s_mf.reads[i] = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_READBACK, .usage = NT_USAGE_STREAM, .size = width * height * 4U, .label = "recorder read"});
-        if (s_mf.reads[i].id == 0) {
-            NT_LOG_WARN("no readback buffer (lost context)");
-            release(true);
-            return false;
-        }
+        s_mf.reads[i] = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_READBACK, .size = width * height * 4U, .label = "recorder read"});
     }
     return true;
 }
@@ -285,42 +280,30 @@ static bool write_frame(uint32_t index, const uint8_t *bytes) {
     return good;
 }
 
-typedef enum {
-    NT_RECORDER_READ_ENCODED,
-    NT_RECORDER_READ_UNREADY, /* the GPU is still copying it */
-    NT_RECORDER_READ_FAILED,
-} nt_recorder_read_t;
-
-/* Encodes the oldest read; reads leave the ring in issue order, so the encoder gets pts in order. */
-static nt_recorder_read_t encode_oldest(bool wait) {
+/* Encodes the oldest read; false while the GPU is still copying it (never with wait) or once a write
+   failed (broken). Reads leave the ring in issue order, so the encoder gets pts in order. */
+static bool encode_oldest(bool wait) {
     uint32_t slot = (s_mf.head + NT_RECORDER_READS - s_mf.pending) % NT_RECORDER_READS;
     const uint8_t *bytes = nt_gfx_map_buffer(s_mf.reads[slot], wait);
     if (bytes == NULL) {
-        /* Without wait a lost context also looks unready; the full ring's wait then fails. */
-        if (!wait) {
-            return NT_RECORDER_READ_UNREADY;
-        }
-        NT_LOG_WARN("the window read failed");
-        return NT_RECORDER_READ_FAILED;
+        return false;
     }
     s_mf.pending--;
-    bool good = true;
-    for (uint32_t i = 0; good && i < s_mf.read_count[slot]; i++) {
-        good = write_frame(s_mf.read_first[slot] + i, bytes);
+    for (uint32_t i = 0; !s_mf.broken && i < s_mf.read_count[slot]; i++) {
+        (void)write_frame(s_mf.read_first[slot] + i, bytes);
     }
     nt_gfx_unmap_buffer(s_mf.reads[slot]);
-    return good ? NT_RECORDER_READ_ENCODED : NT_RECORDER_READ_FAILED;
+    return !s_mf.broken;
 }
 
 bool nt_recorder_platform_video(uint32_t first, uint32_t count) {
-    nt_recorder_read_t r = NT_RECORDER_READ_ENCODED;
-    while (s_mf.pending > 0 && (r = encode_oldest(false)) == NT_RECORDER_READ_ENCODED) {
+    while (s_mf.pending > 0 && encode_oldest(false)) {
     }
     /* A full ring waits for its oldest read: lockstep runs at the GPU's pace. */
-    if (r != NT_RECORDER_READ_FAILED && s_mf.pending == NT_RECORDER_READS) {
-        r = encode_oldest(true);
+    if (!s_mf.broken && s_mf.pending == NT_RECORDER_READS) {
+        (void)encode_oldest(true);
     }
-    if (r == NT_RECORDER_READ_FAILED) {
+    if (s_mf.broken) {
         return false;
     }
     /* The top rows: an odd framebuffer loses its bottom row, as on web. */
@@ -357,12 +340,13 @@ bool nt_recorder_platform_audio(uint64_t at, const float *stereo, uint32_t frame
 /* The reads still in the ring go to the encoder first. Without a written frame there is nothing to
    keep: Finalize refuses an empty video track. After a failed write Finalize could wait forever on the
    encoder, so it is skipped; either way the fragments on disk stay. */
-void nt_recorder_platform_close(uint32_t frames) {
+uint32_t nt_recorder_platform_close(uint32_t frames) {
     (void)frames; /* the reads in the ring are counted but not written yet */
-    while (!s_mf.broken && s_mf.pending > 0 && encode_oldest(true) == NT_RECORDER_READ_ENCODED) {
+    while (s_mf.pending > 0 && encode_oldest(true)) {
     }
     if (s_mf.written > 0 && !s_mf.broken) {
         (void)ok(IMFSinkWriter_Finalize(s_mf.writer), "Finalize");
     }
     release(s_mf.written == 0);
+    return s_mf.broken ? 0U : s_mf.written;
 }
