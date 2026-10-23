@@ -20,7 +20,7 @@ bool nt_recorder_active(void);
 
 The game calls `nt_recorder_frame` once per presented frame, after `nt_gfx_end_frame` and before
 `nt_window_swap_buffers`, and passes its clock: `t` is the time of this frame, `dt` the advance that
-produced it; `t` never goes back within a recording (asserted). There is no hook and no hidden clock. With `g_nt_app.time` and MANUAL lockstep the
+produced it; `t` never goes back within a recording (a `t` before the origin asserts). There is no hook and no hidden clock. With `g_nt_app.time` and MANUAL lockstep the
 recording is offline and frame-exact; stepping that outruns the encoder ends it on web and waits for
 it on Windows (see Backends). With RUN it records hand play in real time. The first `frame` call of a
 recording sets its origin `t0`: the start of the step that produced that frame (`t - dt`), or, when

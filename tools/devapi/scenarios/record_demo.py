@@ -41,7 +41,8 @@ def lockstep(client, out):
     if steps:
         client.step(steps)
     client.result("record.start", {"name": path, "fps": 30})
-    client.step(360)
+    for _ in range(12):  # one request per 30 steps keeps a slow encoder inside the read timeout
+        client.step(30)
     frames = client.result("record.stop")["frames"]
     assert frames == 180, f"lockstep: {frames} frames, expected 180"
     check(path, 30, frames, False)

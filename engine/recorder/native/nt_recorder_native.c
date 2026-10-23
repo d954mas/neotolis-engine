@@ -16,6 +16,7 @@
 #include "graphics/nt_gfx.h"
 #include "log/nt_log.h"
 #include "recorder/nt_recorder_internal.h"
+#include "time/nt_time.h"
 #include "window/nt_window.h"
 
 /* From codecapi.h, which compiles as C only after ks.h: CODECAPI_AVEncMPVDefaultBPictureCount,
@@ -190,11 +191,12 @@ static void place_rows(uint8_t *scan0, size_t pitch) {
 }
 
 bool nt_recorder_platform_video(uint32_t index) {
-    /* AllocateSample waits about a second for a free sample; EMPTY means the encoder still holds them
-       all, and it returns them on its own threads. Ten seconds of that is an encoder that died. */
+    /* EMPTY means the encoder still holds every sample and returns them on its own threads (here
+       AllocateSample waits about a second per call; MF does not promise it). Ten seconds of that is an
+       encoder that died. */
     IMFSample *sample = NULL;
     HRESULT hr = MF_E_SAMPLEALLOCATOR_EMPTY;
-    for (int tries = 0; hr == MF_E_SAMPLEALLOCATOR_EMPTY && tries < 10; tries++) {
+    for (double until = nt_time_now() + 10.0; hr == MF_E_SAMPLEALLOCATOR_EMPTY && nt_time_now() < until;) {
         hr = IMFVideoSampleAllocatorEx_AllocateSample(s_mf.pool, &sample);
     }
     if (!ok(hr, "AllocateSample")) {
