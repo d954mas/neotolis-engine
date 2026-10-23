@@ -1,5 +1,5 @@
 # Size Report: ui_3d_demo (wasm-analysis-paired)
-# Commit: 8da7294
+# Commit: b2033de
 
 ## WASM Section Sizes
 
@@ -101,7 +101,7 @@ libnt_metrics.a             1530 B
 libnt_platform.a             824 B
 libnt_pool.a                1404 B
 libnt_postfx_blur.a         6798 B
-libnt_recorder.a           15800 B
+libnt_recorder.a           15516 B
 libnt_render.a              7668 B
 libnt_resource.a          231656 B
 libnt_shape_renderer.a    911320 B
@@ -125,7 +125,7 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2662156 B
+TOTAL (archives)         2661872 B
 
 ## Data Segments Summary
 
