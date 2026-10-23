@@ -244,9 +244,8 @@ void nt_gfx_read_pixels_to_buffer(nt_render_target_t src, int x, int y, int w, i
     (void)buf;
 }
 
-const uint8_t *nt_gfx_map_readback(nt_buffer_t buf, bool wait) {
+const uint8_t *nt_gfx_map_readback(nt_buffer_t buf) {
     (void)buf;
-    (void)wait;
     return NULL;
 }
 

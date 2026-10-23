@@ -145,11 +145,8 @@ static nt_gfx_gl_pipeline_t *s_pipelines;         /* pipeline data, indexed by s
 static nt_gfx_gl_vertex_input_t *s_vertex_inputs; /* vertex-input VAOs, indexed by slot */
 /* CPU data: no GL object, so a context loss keeps it. */
 static nt_gfx_gl_instance_layout_t s_instance_layouts[NT_GFX_MAX_INSTANCE_LAYOUTS + 1];
-static GLuint *s_buffer_gl;      /* GL buffer names, indexed by slot */
-static GLenum *s_buffer_targets; /* GL_ARRAY_BUFFER, GL_ELEMENT_ARRAY_BUFFER or GL_PIXEL_PACK_BUFFER */
-#if !defined(NT_PLATFORM_WEB)
-static GLsync *s_buffer_fence; /* readback buffers: the fence after the last read, until mapped */
-#endif
+static GLuint *s_buffer_gl;        /* GL buffer names, indexed by slot */
+static GLenum *s_buffer_targets;   /* GL_ARRAY_BUFFER, GL_ELEMENT_ARRAY_BUFFER or GL_PIXEL_PACK_BUFFER */
 static GLuint *s_texture_gl;       /* GL texture names, indexed by slot */
 static GLuint *s_render_target_gl; /* GL framebuffer names, indexed by slot */
 static GLuint s_bound_framebuffer;
@@ -666,10 +663,6 @@ void nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     s_render_target_gl = (GLuint *)calloc(s_init_desc.max_render_targets + 1, sizeof(GLuint));
     /* Init-time OOM on a few KB of tables is not a state a game can recover from. */
     NT_ASSERT(s_programs && s_pipelines && s_vertex_inputs && s_buffer_gl && s_buffer_targets && s_texture_gl && s_render_target_gl && "gfx backend init: out of memory");
-#if !defined(NT_PLATFORM_WEB)
-    s_buffer_fence = (GLsync *)calloc(s_init_desc.max_buffers + 1, sizeof(GLsync));
-    NT_ASSERT(s_buffer_fence != NULL && "gfx backend init: out of memory");
-#endif
 
     nt_gfx_gl_cache_ground_state();
 
@@ -695,10 +688,6 @@ void nt_gfx_backend_shutdown(void) {
     free(s_buffer_targets);
     free(s_texture_gl);
     free(s_render_target_gl);
-#if !defined(NT_PLATFORM_WEB)
-    free((void *)s_buffer_fence);
-    s_buffer_fence = NULL;
-#endif
 
     s_programs = NULL;
     s_pipelines = NULL;
@@ -1098,26 +1087,6 @@ void nt_gfx_backend_read_pixels_to_buffer(uint32_t render_target_backend, int x,
     if (fbo != 0) {
         NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, 0);
     }
-    if (s_buffer_fence[buffer_backend] != NULL) {
-        NT_GL(glDeleteSync, s_buffer_fence[buffer_backend]);
-    }
-    s_buffer_fence[buffer_backend] = NT_GL_RET(glFenceSync, GL_SYNC_GPU_COMMANDS_COMPLETE, 0U);
-}
-
-bool nt_gfx_backend_readback_ready(uint32_t buffer_backend, bool wait) {
-    GLsync fence = s_buffer_fence[buffer_backend];
-    /* The flush makes a fence the driver still holds reach the GPU, so a later wait can end. */
-    GLenum status = NT_GL_RET(glClientWaitSync, fence, GL_SYNC_FLUSH_COMMANDS_BIT, (GLuint64)0);
-    while (wait && status == GL_TIMEOUT_EXPIRED) {
-        status = NT_GL_RET(glClientWaitSync, fence, 0U, (GLuint64)1000000000);
-    }
-    if (status == GL_TIMEOUT_EXPIRED) {
-        return false;
-    }
-    NT_ASSERT(status != GL_WAIT_FAILED && "readback: fence wait failed");
-    NT_GL(glDeleteSync, fence);
-    s_buffer_fence[buffer_backend] = NULL;
-    return true;
 }
 
 const void *nt_gfx_backend_map_buffer(uint32_t buffer_backend, uint32_t size) {
@@ -1958,12 +1927,6 @@ void nt_gfx_backend_destroy_buffer(uint32_t backend_handle) {
         detach_instance_buffer(buf);
     }
     forget_deleted_buffer(buf);
-#if !defined(NT_PLATFORM_WEB)
-    if (s_buffer_fence[backend_handle] != NULL) {
-        NT_GL(glDeleteSync, s_buffer_fence[backend_handle]);
-        s_buffer_fence[backend_handle] = NULL;
-    }
-#endif
     NT_GL_DELETE(glDeleteBuffers, 1, &buf);
     s_buffer_gl[backend_handle] = 0;
     s_buffer_targets[backend_handle] = 0;
@@ -2362,11 +2325,6 @@ bool nt_gfx_backend_recreate_all_resources(void) {
     if (s_buffer_targets) {
         memset(s_buffer_targets, 0, (s_init_desc.max_buffers + 1) * sizeof(GLenum));
     }
-#if !defined(NT_PLATFORM_WEB)
-    if (s_buffer_fence) {
-        memset((void *)s_buffer_fence, 0, (s_init_desc.max_buffers + 1) * sizeof(GLsync));
-    }
-#endif
     if (s_texture_gl) {
         memset(s_texture_gl, 0, (s_init_desc.max_textures + 1) * sizeof(GLuint));
     }

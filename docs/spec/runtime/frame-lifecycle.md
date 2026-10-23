@@ -49,7 +49,7 @@ nt_gfx_end_frame      ← after the last pass, also when nothing renders; upload
 nt_gfx_read_pixels    ← optional: reads the finished frame, before the swap; native
                         nt_gfx_read_pixels_to_buffer queues the read instead
 nt_recorder_frame     ← optional, dev-only: records the finished frame; Windows queues
-                        a read and encodes it a frame or two later (debug/recorder.md)
+                        a read and encodes it three recorded frames later (debug/recorder.md)
 nt_window_swap_buffers
 ```
 

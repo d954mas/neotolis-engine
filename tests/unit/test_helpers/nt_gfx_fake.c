@@ -421,12 +421,6 @@ void nt_gfx_backend_read_pixels_to_buffer(uint32_t render_target_backend, int x,
     (void)buffer_backend;
 }
 
-bool nt_gfx_backend_readback_ready(uint32_t buffer_backend, bool wait) {
-    (void)buffer_backend;
-    (void)wait;
-    return true;
-}
-
 const void *nt_gfx_backend_map_buffer(uint32_t buffer_backend, uint32_t size) {
     (void)buffer_backend;
     NT_ASSERT(size <= sizeof(s_fake_readback) && "fake map_buffer: buffer larger than the fake storage");

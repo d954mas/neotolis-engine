@@ -617,7 +617,7 @@ typedef enum {
 #if defined(NT_PLATFORM_WEB)
 #define NT_GFX_GL_READBACK_CALLS(X)
 #else
-#define NT_GFX_GL_READBACK_CALLS(X) X(glClientWaitSync) X(glDeleteSync) X(glFenceSync) X(glMapBufferRange) X(glUnmapBuffer)
+#define NT_GFX_GL_READBACK_CALLS(X) X(glMapBufferRange) X(glUnmapBuffer)
 #endif
 
 /* Issued-call detail (NT_GFX_GL_<name>). Integer args follow the GL signature;
@@ -1024,10 +1024,9 @@ bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint
  * frame is being drawn: no recorded command names it. */
 void nt_gfx_read_pixels_to_buffer(nt_render_target_t src, int x, int y, int w, int h, nt_buffer_t buf);
 /* The bytes of `buf`'s last read, valid until nt_gfx_unmap_readback or nt_gfx_destroy_buffer,
- * whichever comes first. With !wait it returns NULL while
- * the GPU is still copying; with wait it never returns NULL. Asserts a read since the last map. Any
- * frame state: the read was already issued. */
-const uint8_t *nt_gfx_map_readback(nt_buffer_t buf, bool wait);
+ * whichever comes first. Waits for the GPU only while it still copies that read: map a read issued
+ * frames earlier. Asserts a read since the last map. Any frame state: the read was already issued. */
+const uint8_t *nt_gfx_map_readback(nt_buffer_t buf);
 void nt_gfx_unmap_readback(nt_buffer_t buf);
 #endif
 

@@ -2034,7 +2034,7 @@ static void test_read_pixels_to_buffer_gives_bottom_up_bgra(void) {
     TEST_ASSERT_UINT8_WITHIN(1, 255, top_down[(5 * 4) + 2]);
     /* The rect at (1, 1) pins the offset: the recorder reads from y = fb_height - height. */
     nt_gfx_read_pixels_to_buffer(target.target, 1, 1, 4, 2, buf);
-    const uint8_t *bytes = nt_gfx_map_readback(buf, true);
+    const uint8_t *bytes = nt_gfx_map_readback(buf);
     TEST_ASSERT_NOT_NULL(bytes);
     for (size_t row = 0; row < 2; row++) {
         for (size_t col = 0; col < 4; col++) {
@@ -2067,7 +2067,7 @@ static void test_readback_buffer_contract_asserts(void) {
     nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_READBACK, .size = sizeof(data)});
     NT_TEST_EXPECT_ASSERT(nt_gfx_update_buffer(buf, 0, data, 4));
     expect_readback_assert("update_buffer: the GPU writes a readback buffer");
-    NT_TEST_EXPECT_ASSERT((void)nt_gfx_map_readback(buf, true));
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_map_readback(buf));
     expect_readback_assert("map_readback: needs a read since the last map");
     NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels_to_buffer((nt_render_target_t){0}, 0, 0, 2, 2, buf));
     expect_readback_assert("read_pixels_to_buffer: read between nt_gfx_end_frame and nt_gfx_begin_frame");
@@ -2075,7 +2075,7 @@ static void test_readback_buffer_contract_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels_to_buffer((nt_render_target_t){0}, 0, 0, 4, 2, buf));
     expect_readback_assert("read_pixels_to_buffer: the buffer is smaller than w*h*4");
     nt_gfx_read_pixels_to_buffer((nt_render_target_t){0}, 0, 0, 2, 2, buf);
-    TEST_ASSERT_NOT_NULL(nt_gfx_map_readback(buf, true));
+    TEST_ASSERT_NOT_NULL(nt_gfx_map_readback(buf));
     NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels_to_buffer((nt_render_target_t){0}, 0, 0, 2, 2, buf));
     expect_readback_assert("read_pixels_to_buffer: unmap the buffer first");
     nt_gfx_unmap_readback(buf);

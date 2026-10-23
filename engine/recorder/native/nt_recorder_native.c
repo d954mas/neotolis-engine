@@ -31,7 +31,8 @@ static const GUID k_max_bitrate = {0x9651eae4, 0x39b9, 0x4ebf, {0x85, 0xef, 0xd7
 /* Frames in flight. MF keeps the last input sample until the next, so fewer than 2 deadlock; more than 4
    measured no faster. */
 #define NT_RECORDER_POOL 4U
-/* Window reads in flight: a read is mapped a frame or two after it was issued, once the GPU wrote it. */
+/* Window reads in flight: a read is mapped when the ring is full, three recorded frames after it was
+   issued, so the GPU has long written it and the map does not wait. */
 #define NT_RECORDER_READS 3U
 
 static struct {
@@ -277,14 +278,11 @@ static bool write_frame(uint32_t index, const uint8_t *bytes) {
     return good;
 }
 
-/* Encodes the oldest read; false while the GPU is still copying it (never with wait) or once a write
-   failed (broken). Reads leave the ring in issue order, so the encoder gets pts in order. */
-static bool encode_oldest(bool wait) {
+/* Encodes the oldest read; false once a write failed (broken). Reads leave the ring in issue order, so
+   the encoder gets pts in order. */
+static bool encode_oldest(void) {
     uint32_t slot = (s_mf.head + NT_RECORDER_READS - s_mf.pending) % NT_RECORDER_READS;
-    const uint8_t *bytes = nt_gfx_map_readback(s_mf.reads[slot], wait);
-    if (bytes == NULL) {
-        return false;
-    }
+    const uint8_t *bytes = nt_gfx_map_readback(s_mf.reads[slot]);
     s_mf.pending--;
     for (uint32_t i = 0; !s_mf.broken && i < s_mf.read_count[slot]; i++) {
         (void)write_frame(s_mf.read_first[slot] + i, bytes);
@@ -294,13 +292,7 @@ static bool encode_oldest(bool wait) {
 }
 
 bool nt_recorder_platform_video(uint32_t first, uint32_t count) {
-    while (s_mf.pending > 0 && encode_oldest(false)) {
-    }
-    /* A full ring waits for its oldest read: lockstep runs at the GPU's pace. */
-    if (!s_mf.broken && s_mf.pending == NT_RECORDER_READS) {
-        (void)encode_oldest(true);
-    }
-    if (s_mf.broken) {
+    if (s_mf.pending == NT_RECORDER_READS && !encode_oldest()) {
         return false;
     }
     /* The top rows: an odd framebuffer loses its bottom row, as on web. */
@@ -338,7 +330,7 @@ bool nt_recorder_platform_audio(uint64_t at, const float *stereo, uint32_t frame
    Finalize refuses an empty video track. After a failed write Finalize could wait forever on the
    encoder, so it is skipped; either way the fragments on disk stay. */
 bool nt_recorder_platform_close(uint32_t frames) {
-    while (!s_mf.broken && s_mf.pending > 0 && encode_oldest(true)) {
+    while (!s_mf.broken && s_mf.pending > 0 && encode_oldest()) {
     }
     if (frames > 0 && !s_mf.broken) {
         (void)ok(IMFSinkWriter_Finalize(s_mf.writer), "Finalize");

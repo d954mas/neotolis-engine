@@ -92,7 +92,7 @@ static inline GLuint nt_gl_close_uint(GLuint result) {
     nt_gl_close();
     return result;
 }
-/* A returned pointer (a sync object, a mapping) records as a presence bit. */
+/* A returned mapping records as a presence bit. */
 static inline void *nt_gl_close_pointer(void *result) {
     if (g_nt_gfx_capture.call != NULL) {
         nt_gl_put_pointer(result);
@@ -155,7 +155,7 @@ static inline void nt_gl_put_callback(nt_gl_callback_t callback) { nt_gl_put_uns
 #if defined(NT_PLATFORM_WEB)
 #define NT_GL_CLOSE_RESULT_(result) _Generic((result), GLboolean: nt_gl_close_uint, GLint: nt_gl_close_int, GLuint: nt_gl_close_uint)(result)
 #else
-#define NT_GL_CLOSE_RESULT_(result) _Generic((result), GLboolean: nt_gl_close_uint, GLint: nt_gl_close_int, GLuint: nt_gl_close_uint, GLsync: nt_gl_close_pointer, void *: nt_gl_close_pointer)(result)
+#define NT_GL_CLOSE_RESULT_(result) _Generic((result), GLboolean: nt_gl_close_uint, GLint: nt_gl_close_int, GLuint: nt_gl_close_uint, void *: nt_gl_close_pointer)(result)
 #endif
 #else
 #define NT_GL_OPEN_(call) NT_GL_COUNT_(call)

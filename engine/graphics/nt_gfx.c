@@ -878,22 +878,18 @@ void nt_gfx_read_pixels_to_buffer(nt_render_target_t src, int x, int y, int w, i
     NT_GFX_END(read_pixels_to_buffer(src, x, y, w, h, buf));
 }
 
-static nt_gfx_result_t map_readback(nt_buffer_t buf, bool wait, const uint8_t **out) {
+static nt_gfx_result_t map_readback(nt_buffer_t buf, const uint8_t **out) {
     nt_gfx_buffer_meta_t *meta = readback_meta(buf);
     NT_ASSERT(meta->readback == NT_GFX_READBACK_PENDING && "map_readback: needs a read since the last map");
-    const uint32_t slot = nt_pool_slot_index(buf.id);
-    if (!nt_gfx_backend_readback_ready(slot, wait)) {
-        return NT_GFX_RESULT_UNREADY;
-    }
-    *out = (const uint8_t *)nt_gfx_backend_map_buffer(slot, meta->size);
+    *out = (const uint8_t *)nt_gfx_backend_map_buffer(nt_pool_slot_index(buf.id), meta->size);
     meta->readback = NT_GFX_READBACK_MAPPED;
     return NT_GFX_RESULT_ACCEPTED;
 }
 
-const uint8_t *nt_gfx_map_readback(nt_buffer_t buf, bool wait) {
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_BUFFER_MAP, NT_GFX_OBJECT_BUFFER, buf.id, event->data.state.integers[0] = wait);
+const uint8_t *nt_gfx_map_readback(nt_buffer_t buf) {
+    NT_GFX_BEGIN(NT_GFX_OP_BUFFER_MAP, NT_GFX_OBJECT_BUFFER, buf.id);
     const uint8_t *bytes = NULL;
-    NT_GFX_END(map_readback(buf, wait, &bytes));
+    NT_GFX_END(map_readback(buf, &bytes));
     return bytes;
 }
 

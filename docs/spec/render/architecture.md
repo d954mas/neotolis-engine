@@ -749,25 +749,22 @@ made with no data (its usage is ignored), and `nt_gfx_update_buffer` on it asser
 No recorded command names a readback buffer, so destroying one is exempt from the
 frame rule.
 `nt_gfx_read_pixels_to_buffer` follows the frame point and source rules of
-`nt_gfx_read_pixels`, queues the copy and a fence, and returns. The buffer then
-holds BGRA8 rows of `w * 4` bytes, bottom-up as GL stores them; BGRA is the
-format desktop drivers read without a conversion. `nt_gfx_map_readback(buf, wait)`
-returns the bytes once the fence has signalled. With `wait` false it returns
-NULL (`UNREADY`) while the GPU is still copying. `nt_gfx_unmap_readback` ends the
-access. Map and unmap run in any frame state, because the copy was queued
-earlier.
+`nt_gfx_read_pixels`, queues the copy, and returns. The buffer then holds BGRA8
+rows of `w * 4` bytes, bottom-up as GL stores them; BGRA is the format desktop
+drivers read without a conversion. `nt_gfx_map_readback(buf)` returns the bytes;
+GL makes the map wait only while the GPU still copies that read, so a caller maps
+reads it issued frames earlier. `nt_gfx_unmap_readback` ends the access. Map and
+unmap run in any frame state, because the copy was queued earlier.
 
 The bytes stay valid until the unmap or the destroy of the buffer, whichever
 comes first; a buffer may be destroyed in any readback state. A read into a
 buffer whose last read was not mapped replaces it. A read into a mapped buffer,
 a map without a read since the last map and an unmap of an unmapped buffer
-assert. A native GL context
-is never lost, so readback has no lost-context path: with `wait` the map always
-returns the bytes.
+assert. A native GL context is never lost, so readback has no lost-context path.
 
-The caller owns the buffers and their order. With two or three buffers in a
-ring, a read is mapped a frame or two after it was issued and the CPU does not
-wait for the GPU. An NVIDIA debug context reports "Pixel transfer is
+The caller owns the buffers and their order. With three buffers in a ring
+mapped only when the ring is full, a read is mapped three reads after it was
+issued and the CPU does not wait for the GPU. An NVIDIA debug context reports "Pixel transfer is
 synchronized with 3D rendering" for every read, synchronous or not, even on an
 idle GPU; the message does not mean that the CPU waited.
 
@@ -1110,7 +1107,7 @@ cascaded destroys). Only frontend cache hits
 one, whose indices still count), rejections and losses are left out; an operation whose
 backend skipped a call as a cache hit (SKIP/CACHE) or found an inactive uniform
 (SKIP/INACTIVE) still ends ACCEPTED and counts. A GPU timer poll with no result
-yet and a readback map without `wait` on an unfinished copy end `UNREADY`. Texture
+yet ends `UNREADY`. Texture
 sets count per operation, while per-unit binds show in `gl[]`. Accepted
 operations minus GL calls is not a cache-skip count.
 Each initialization restarts the frame sequence: the first frame after init is 1,

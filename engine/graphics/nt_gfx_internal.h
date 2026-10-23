@@ -252,11 +252,9 @@ void nt_gfx_backend_set_viewport(int x, int y, int w, int h);
 bool nt_gfx_backend_read_pixels(uint32_t render_target_backend, int x, int y, int w, int h, void *out_rgba8);
 
 #if !defined(NT_PLATFORM_WEB)
-/* Starts a BGRA8 read into readback buffer slot buffer_backend and fences it. */
+/* Starts a BGRA8 read into readback buffer slot buffer_backend. */
 void nt_gfx_backend_read_pixels_to_buffer(uint32_t render_target_backend, int x, int y, int w, int h, uint32_t buffer_backend);
-/* Whether the fenced read finished; with wait it blocks until it has and returns true. */
-bool nt_gfx_backend_readback_ready(uint32_t buffer_backend, bool wait);
-/* Maps [0, size) for reading. */
+/* Maps [0, size) for reading; GL waits for the read that wrote it. */
 const void *nt_gfx_backend_map_buffer(uint32_t buffer_backend, uint32_t size);
 void nt_gfx_backend_unmap_buffer(uint32_t buffer_backend);
 #endif

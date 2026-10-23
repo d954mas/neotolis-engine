@@ -132,15 +132,16 @@ reads the window through it. A recording takes three `nt_gfx` buffers of `w · h
 
 A `frame` call with due frames queues one read of the window into one of three readback buffers
 (`nt_gfx_read_pixels_to_buffer`, see [Rendering Architecture](../render/architecture.md#readback)) and
-returns without waiting for the GPU. A later call encodes the read once the GPU has finished it,
-usually a frame or two later: each output frame the read covers (several when one call takes several
-deadlines) copies its rows into one of four pooled encoder buffers, top-down. The frames keep their
+returns without waiting for the GPU. When all three buffers hold reads, the call first encodes the
+oldest one, three recorded frames old, which the GPU has long written: each output frame the read
+covers (several when one call takes several deadlines) copies its rows into one of four pooled
+encoder buffers, top-down. The frames keep their
 pts, so the delay does not move the video against the audio, and the end of a recording encodes the
 reads still in flight before it finishes the file. The read takes the top rows, so an odd framebuffer
 loses its bottom row and right column, as on web.
 
-Nothing is dropped. With all three reads in flight a call waits for the oldest. When the encoder
-holds all four buffers, it waits for one. So lockstep runs at the GPU's and the encoder's pace, RUN
+Nothing is dropped. When the GPU has not written the oldest read yet, mapping it waits. When the
+encoder holds all four buffers, the call waits for one. So lockstep runs at the GPU's and the encoder's pace, RUN
 shows a hitch instead of a missing frame, and an encoder that keeps all four for ten seconds counts
 as an encoder failure. `stop` returns the frames the encoder took, so a write that fails while it
 encodes the last reads makes it return 0. Each audio write, pushed samples or silence, allocates one Media Foundation buffer
