@@ -26,7 +26,7 @@ static struct {
 
 static bool finish(void) {
     s_rec.active = false;
-    return nt_recorder_platform_close(s_rec.frames);
+    return nt_recorder_platform_close();
 }
 
 static void fail(void) {

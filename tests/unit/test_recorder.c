@@ -61,10 +61,10 @@ bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height
 bool nt_recorder_platform_video(uint32_t first, uint32_t count) {
     TEST_ASSERT_TRUE(count > 0);
     s_be.video_calls++;
-    if (s_be.fail_video && s_be.fail_index - first < count) {
-        return false;
-    }
     for (uint32_t index = first; index < first + count; index++) {
+        if (s_be.fail_video && index == s_be.fail_index) {
+            return false;
+        }
         if (index != s_be.next_index) {
             s_be.index_gap = true;
         }
@@ -96,9 +96,9 @@ bool nt_recorder_platform_audio(uint64_t at, const float *stereo, uint32_t frame
     return true;
 }
 
-bool nt_recorder_platform_close(uint32_t frames) {
+bool nt_recorder_platform_close(void) {
     s_be.closes++;
-    s_be.closed_frames = frames;
+    s_be.closed_frames = s_be.videos;
     return !s_be.fail_close;
 }
 
@@ -269,6 +269,15 @@ static void test_video_failure_ends_the_recording(void) {
     TEST_ASSERT_EQUAL_UINT64(2ULL * 1600ULL, s_be.audio_frames); /* silence beside the frames, no end padding */
     TEST_ASSERT_EQUAL_UINT32(1, s_be.warns);
     TEST_ASSERT_EQUAL_UINT32(0, nt_recorder_stop());
+}
+
+static void test_batch_failure_keeps_the_frames_before_it(void) {
+    s_be.fail_video = true;
+    s_be.fail_index = 1;
+    start_at(30, 0.0);
+    frame_at(0.1, 0.1); /* three deadlines in one call; the second fails */
+    TEST_ASSERT_FALSE(nt_recorder_active());
+    TEST_ASSERT_EQUAL_UINT32(1, s_be.closed_frames);
 }
 
 /* Windows encodes its last reads in close: a write failing there leaves no frames to report. */
@@ -651,6 +660,7 @@ int main(void) {
     RUN_TEST(test_catch_up_bound_is_two_seconds_of_frames);
     RUN_TEST(test_resize_ends_with_audio_padded_to_the_video);
     RUN_TEST(test_video_failure_ends_the_recording);
+    RUN_TEST(test_batch_failure_keeps_the_frames_before_it);
     RUN_TEST(test_close_failure_returns_zero);
     RUN_TEST(test_open_failure_refuses_to_start);
     RUN_TEST(test_tiny_framebuffer_refuses_to_start);

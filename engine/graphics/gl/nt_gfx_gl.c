@@ -1099,7 +1099,8 @@ const void *nt_gfx_backend_map_buffer(uint32_t buffer_backend, uint32_t size) {
 
 void nt_gfx_backend_unmap_buffer(uint32_t buffer_backend) {
     NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, s_buffer_gl[buffer_backend]);
-    (void)NT_GL_RET(glUnmapBuffer, GL_PIXEL_PACK_BUFFER);
+    const GLuint intact = NT_GL_RET(glUnmapBuffer, GL_PIXEL_PACK_BUFFER); /* GLboolean, widened by the capture funnel */
+    NT_ASSERT(intact == GL_TRUE && "unmap_readback: the driver lost the mapped bytes");
     NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, 0);
 }
 // #endregion
