@@ -1127,7 +1127,8 @@ names are in the DEFINITION record. BEGIN and RESULT are recorded at the call.
 The BACKEND and backend SKIP records of recorded commands appear when the
 stream executes in `nt_gfx_end_frame`, outside any BEGIN/RESULT pair, and so do the BACKEND
 records of program links that `nt_gfx_begin_frame` finishes, followed by each finished program's
-DEFINITION. A program's DEFINITION does not imply readiness: one recorded while it links carries
+DEFINITION. A stage destroyed while a pending link holds it records its `glDeleteShader` where that
+link resolves: among these link records, or inside the program's DESTROY pair. A program's DEFINITION does not imply readiness: one recorded while it links carries
 no reflection. Immediate backend work inside a
 draw-phase call, such as a lazy sampler recreation, stays inside its pair.
 Operations issued inside another operation

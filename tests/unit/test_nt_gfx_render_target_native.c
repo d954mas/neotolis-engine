@@ -1899,7 +1899,7 @@ static void test_failed_link_records_both_compile_statuses_without_driver_logs(v
         nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() { gl_Position = vec4(0.0); }"});
         nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "out vec4 color; void main() { color = vec4(1.0); }"});
         nt_program_t program = nt_gfx_make_program(vs, fs, "failure/stages");
-        /* GL only flags an attached stage for deletion, so its status stays readable. */
+        /* The pending link holds both stages, so their status stays readable. */
         nt_gfx_destroy_shader(fs);
         nt_gfx_destroy_shader(vs);
         s_get_program_iv = glad_glGetProgramiv;
@@ -1929,6 +1929,54 @@ static void test_failed_link_records_both_compile_statuses_without_driver_logs(v
             TEST_ASSERT_NOT_NULL(strstr(s_program_failure_log, "\"failure/stages\""));
         }
     }
+}
+
+static PFNGLDELETESHADERPROC s_delete_shader;
+static uint32_t s_deleted_shaders;
+
+static void GLAD_API_PTR count_shader_delete(GLuint shader) {
+    s_deleted_shaders++;
+    s_delete_shader(shader);
+}
+
+static void test_destroyed_stages_live_until_the_last_pending_link_resolves(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() { gl_Position = vec4(0.0); }"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "out vec4 color; void main() { color = vec4(1.0); }"});
+    nt_program_t kept = nt_gfx_make_program(vs, fs, "hold/kept");
+    nt_program_t dropped = nt_gfx_make_program(vs, fs, "hold/dropped");
+    s_delete_shader = glad_glDeleteShader;
+    glad_glDeleteShader = count_shader_delete;
+    s_deleted_shaders = 0;
+
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_shader(fs);
+    TEST_ASSERT_EQUAL_UINT32(0, s_deleted_shaders);
+    nt_gfx_destroy_program(dropped);
+    TEST_ASSERT_EQUAL_UINT32(0, s_deleted_shaders);
+    nt_test_gfx_link_wait(kept);
+    TEST_ASSERT_EQUAL_UINT32(2, s_deleted_shaders);
+    nt_gfx_destroy_program(kept);
+    TEST_ASSERT_EQUAL_UINT32(2, s_deleted_shaders);
+
+    /* A resolved link holds nothing, so destroying a stage afterwards deletes it at once. */
+    nt_shader_t late = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() { gl_Position = vec4(0.0); }"});
+    nt_shader_t late_fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "out vec4 color; void main() { color = vec4(1.0); }"});
+    nt_program_t linked = nt_gfx_make_program(late, late_fs, "hold/linked");
+    nt_test_gfx_link_wait(linked);
+    nt_gfx_destroy_shader(late);
+    TEST_ASSERT_EQUAL_UINT32(3, s_deleted_shaders);
+    nt_gfx_destroy_program(linked);
+
+    /* Destroying the last pending link deletes the orphaned stage it held; a live stage stays. */
+    nt_shader_t live_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() { gl_Position = vec4(0.0); }"});
+    nt_program_t pending = nt_gfx_make_program(live_vs, late_fs, "hold/pending");
+    nt_gfx_destroy_shader(late_fs);
+    TEST_ASSERT_EQUAL_UINT32(3, s_deleted_shaders);
+    nt_gfx_destroy_program(pending);
+    TEST_ASSERT_EQUAL_UINT32(4, s_deleted_shaders);
+    nt_gfx_destroy_shader(live_vs);
+    TEST_ASSERT_EQUAL_UINT32(5, s_deleted_shaders);
+    glad_glDeleteShader = s_delete_shader;
 }
 
 /* The record carries the label, the phase, and the name and value the driver reflected. */
@@ -2232,6 +2280,7 @@ int main(void) {
     RUN_TEST(test_make_program_does_not_query_link_status);
     RUN_TEST(test_failed_link_logs_its_stage_and_asserts_at_begin_frame);
     RUN_TEST(test_failed_link_records_both_compile_statuses_without_driver_logs);
+    RUN_TEST(test_destroyed_stages_live_until_the_last_pending_link_resolves);
     RUN_TEST(test_reflection_invariant_records_its_program_and_phase);
     RUN_TEST(test_block_binding_invariant_records_its_phase);
     RUN_TEST(test_long_label_keeps_the_failure_cause);

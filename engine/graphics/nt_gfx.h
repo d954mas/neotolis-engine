@@ -582,7 +582,6 @@ typedef enum {
     X(glGetShaderiv)                                                                                                                                                                                   \
     X(glGetUniformLocation)                                                                                                                                                                            \
     X(glInvalidateFramebuffer)                                                                                                                                                                         \
-    X(glIsShader)                                                                                                                                                                                      \
     X(glLinkProgram)                                                                                                                                                                                   \
     X(glPixelStorei)                                                                                                                                                                                   \
     X(glPolygonOffset)                                                                                                                                                                                 \
@@ -884,7 +883,8 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
  * Frame rule: destroying a live object asserts from the first nt_gfx_begin_pass until
  * nt_gfx_end_frame, also through nt_gfx_deactivate_*. */
 
-/* Already linked programs remain usable after their stages are destroyed. */
+/* Legal whether or not a program linking from it has resolved: a pending link keeps the stage's GPU
+ * object until it resolves, so a failed link still reports the stage. The frame rule still applies. */
 void nt_gfx_destroy_shader(nt_shader_t shd);
 /* Destroys the program and its pipelines -- the only way a pipeline dies besides a context loss
  * and nt_gfx_shutdown; materials retain the now-unready handle. INVALID is a no-op; stale nonzero
