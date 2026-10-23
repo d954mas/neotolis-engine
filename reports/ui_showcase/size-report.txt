@@ -1,33 +1,33 @@
 # Size Report: ui_showcase (wasm-analysis-paired)
-# Commit: f905a72
+# Commit: 8da7294
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
 Type                 531 B
-Import               626 B
-Function             344 B
+Import               619 B
+Function             345 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                 138 B
-Code              375479 B
+Code              375868 B
 Data               41219 B
-Custom             11270 B
+Custom             11274 B
 ---------------- ----------
-TOTAL             429711 B
+TOTAL             430098 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-76849 B   frame
+76726 B   frame
 17002 B   dispatch_command
 13283 B   create_gpu
  9447 B   input_field
- 9184 B   main
+ 9176 B   main
  8846 B   Clay__ConfigureOpenElementPtr
  8213 B   nt_ui_rich_text_markup
  6059 B   Clay__SizeContainersAlongAxis
@@ -54,8 +54,8 @@ TOTAL             429711 B
  2551 B   nt_font_lookup_glyph_offset
  2546 B   atlas_on_resolve
 
-Total functions: 342
-Total code size: 374877 B
+Total functions: 343
+Total code size: 375264 B
 
 ## Built Engine Archives
 
@@ -78,8 +78,8 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               65220 B
-libnt_gfx.a               112258 B
-libnt_gfx_stub.a            6854 B
+libnt_gfx.a               112744 B
+libnt_gfx_stub.a            6838 B
 libnt_hash.a                4108 B
 libnt_http.a               16484 B
 libnt_http_stub.a          11406 B
@@ -125,7 +125,7 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2661686 B
+TOTAL (archives)         2662156 B
 
 ## Data Segments Summary
 
