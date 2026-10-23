@@ -103,7 +103,7 @@ typedef struct {
      * written once, never rewritten by a material. */
     nt_gfx_gl_sampler_unit_t sampler_units[NT_GFX_MAX_TEXTURE_SLOTS];
     uint8_t sampler_count;
-    uint8_t orphaned;                                      /* bit 0 vs, bit 1 fs: the stage handle is gone, the last holding link deletes it */
+    uint8_t deferred_delete;                               /* bit 0 vs, bit 1 fs: the stage handle is gone, the last holding link deletes it */
     uint32_t block_sizes[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS]; /* GL_UNIFORM_BLOCK_DATA_SIZE per bound slot; 0 = none */
     const char *label;                                     /* debug name; static storage */
 } nt_gfx_gl_program_t;
@@ -1291,10 +1291,10 @@ void nt_gfx_backend_destroy_shader(uint32_t backend_handle) {
     bool held = false;
     for (uint32_t i = 1; i <= s_init_desc.max_programs; i++) {
         if (s_programs[i].vs == backend_handle) {
-            s_programs[i].orphaned |= 1U;
+            s_programs[i].deferred_delete |= 1U;
             held = true;
         } else if (s_programs[i].fs == backend_handle) {
-            s_programs[i].orphaned |= 2U;
+            s_programs[i].deferred_delete |= 2U;
             held = true;
         }
     }
@@ -1312,15 +1312,15 @@ static bool stage_held(GLuint shader) {
     return false;
 }
 
-/* The link resolved: drop its hold and delete an orphaned stage that no other pending link holds. */
+/* The link resolved: drop its hold and run a deferred delete that no other pending link still holds. */
 static void release_stages(nt_gfx_gl_program_t *rec) {
     const GLuint stages[2] = {rec->vs, rec->fs};
-    const uint8_t orphaned = rec->orphaned;
+    const uint8_t deferred_delete = rec->deferred_delete;
     rec->vs = 0;
     rec->fs = 0;
-    rec->orphaned = 0;
+    rec->deferred_delete = 0;
     for (uint8_t i = 0; i < 2; i++) {
-        if ((orphaned & (1U << i)) != 0 && !stage_held(stages[i])) {
+        if ((deferred_delete & (1U << i)) != 0 && !stage_held(stages[i])) {
             NT_GL(glDeleteShader, stages[i]);
         }
     }

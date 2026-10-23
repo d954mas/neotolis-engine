@@ -1968,7 +1968,7 @@ static void test_destroyed_stages_live_until_the_last_pending_link_resolves(void
     TEST_ASSERT_EQUAL_UINT32(3, s_deleted_shaders);
     nt_gfx_destroy_program(linked);
 
-    /* Destroying the last pending link deletes the orphaned stage it held; a live stage stays. */
+    /* Destroying the last pending link runs the deferred delete of the stage it held; a live stage stays. */
     nt_shader_t live_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() { gl_Position = vec4(0.0); }"});
     nt_program_t pending = nt_gfx_make_program(live_vs, late_fs, "hold/pending");
     nt_gfx_destroy_shader(late_fs);
