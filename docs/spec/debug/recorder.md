@@ -125,16 +125,18 @@ the size (very small, or past 4K) and blocks for encoder setup, up to about a se
 encoder, so in RUN the step after `start` advances by that wait and its `frame` call repeats a frame
 for each deadline it covers.
 Media Foundation must be installed: a game that links the recorder does not start on a Windows N
-edition without the Media Feature Pack.
+edition without the Media Feature Pack. The executable links `nt_gfx`, not its stub: the recorder
+reads the window through it, and a failed read ends the recording (WARN).
 
 Each due frame reads the window with `nt_gfx_read_pixels` straight into one of four pooled encoder
 buffers. The read takes the top rows, so an odd framebuffer loses its bottom row and right column, as
 on web. When the encoder holds all four buffers, the `frame` call waits for one: lockstep runs at the
 encoder's pace, RUN shows hitches, and an encoder that keeps all four for ten seconds counts as an
-encoder failure. Each audio write, pushed samples or silence, allocates one Media Foundation buffer: a
-dev-only exception to preallocated storage. An encoder failure ends the recording and keeps the
-fragments on disk; so does a failed `Finalize` (WARN), after which `stop` still returns the frames. A
-recording without a frame deletes its file.
+encoder failure. Each audio write, pushed samples or silence, allocates one Media Foundation buffer
+beside the per-sample allocations of the Media Foundation pipeline itself: a dev-only exception to
+preallocated storage. An encoder failure ends the recording without `Finalize`, which could wait on
+the dead encoder, and keeps the fragments on disk; so does a failed `Finalize` (WARN), after which
+`stop` still returns the frames. A recording without a frame deletes its file (WARN when it cannot).
 
 **Other platforms** define no `nt_recorder` target.
 

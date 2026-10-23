@@ -16,14 +16,15 @@
 #include "graphics/nt_gfx.h"
 #include "log/nt_log.h"
 #include "recorder/nt_recorder_internal.h"
-#include "time/nt_time.h"
 #include "window/nt_window.h"
 
 /* From codecapi.h, which compiles as C only after ks.h: CODECAPI_AVEncMPVDefaultBPictureCount,
-   CODECAPI_AVEncMPVGOPSize, CODECAPI_AVEncCommonRateControlMode and two of their values. */
+   CODECAPI_AVEncMPVGOPSize, CODECAPI_AVEncCommonRateControlMode, CODECAPI_AVEncCommonMaxBitRate and
+   two values. */
 static const GUID k_bframes = {0x8d390aac, 0xdc5c, 0x4200, {0xb5, 0x7f, 0x81, 0x4d, 0x04, 0xba, 0xba, 0xb2}};
 static const GUID k_gop = {0x95f31b26, 0x95a4, 0x41aa, {0x93, 0x03, 0x24, 0x6a, 0x7f, 0xc6, 0xee, 0xf1}};
 static const GUID k_rate_control = {0x1c0608e9, 0x370c, 0x4710, {0x8a, 0x58, 0xcb, 0x61, 0x81, 0xc4, 0x24, 0x23}};
+static const GUID k_max_bitrate = {0x9651eae4, 0x39b9, 0x4ebf, {0x85, 0xef, 0xd7, 0xf4, 0x44, 0xec, 0x74, 0x65}};
 #define NT_RECORDER_H264_HIGH 100U          /* eAVEncH264VProfile_High */
 #define NT_RECORDER_PEAK_CONSTRAINED_VBR 1U /* eAVEncCommonRateControlMode_PeakConstrainedVBR */
 
@@ -39,7 +40,9 @@ static struct {
     uint32_t width;
     uint32_t height;
     uint32_t fps;
-    bool com; /* this recording holds a COM reference */
+    bool com;        /* this recording holds a COM reference */
+    bool broken;     /* a write failed: the encoder may never drain */
+    HANDLE released; /* set when the pool gets a sample back; lives with the process, as does s_notify */
     wchar_t path[MAX_PATH];
 } s_mf;
 
@@ -57,6 +60,28 @@ static bool ok(HRESULT hr, const char *call) {
 
 /* 100 ns time of sample n at rate; durations are differences of these, so rounding never accumulates. */
 static LONGLONG hns(uint64_t n, uint32_t rate) { return (LONGLONG)(n * 10000000ULL / rate); }
+
+/* The pool calls NotifyRelease on an MF thread when the encoder returns a sample; static, so it counts
+   no references. */
+static HRESULT STDMETHODCALLTYPE notify_query(IMFVideoSampleAllocatorNotify *self, REFIID riid, void **out) {
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IMFVideoSampleAllocatorNotify)) {
+        *out = self;
+        return S_OK;
+    }
+    *out = NULL;
+    return E_NOINTERFACE;
+}
+static ULONG STDMETHODCALLTYPE notify_ref(IMFVideoSampleAllocatorNotify *self) {
+    (void)self;
+    return 1;
+}
+static HRESULT STDMETHODCALLTYPE notify_release(IMFVideoSampleAllocatorNotify *self) {
+    (void)self;
+    (void)SetEvent(s_mf.released);
+    return S_OK;
+}
+static IMFVideoSampleAllocatorNotifyVtbl s_notify_vtbl = {notify_query, notify_ref, notify_ref, notify_release};
+static IMFVideoSampleAllocatorNotify s_notify = {&s_notify_vtbl};
 
 /* MFSetAttributeSize / MFSetAttributeRatio are C++-only. */
 static void set_pair(IMFMediaType *type, const GUID *key, uint32_t hi, uint32_t lo) { must(IMFMediaType_SetUINT64(type, key, ((UINT64)hi << 32) | lo)); }
@@ -85,14 +110,13 @@ static IMFMediaType *audio_type(const GUID *subtype, uint32_t bits, uint32_t byt
     return type;
 }
 
-/* Releases in dependency order; the file goes only when this recording's writer made it. */
+/* Releases in dependency order; the file goes only when this recording's writer made it, and after
+   MFShutdown, since the sink may close it on an MF thread. */
 static void release(bool remove_file) {
-    if (s_mf.writer != NULL) {
+    bool made = s_mf.writer != NULL;
+    if (made) {
         IMFSinkWriter_Release(s_mf.writer);
         s_mf.writer = NULL;
-        if (remove_file) {
-            (void)DeleteFileW(s_mf.path);
-        }
     }
     if (s_mf.pool != NULL) {
         IMFVideoSampleAllocatorEx_Release(s_mf.pool);
@@ -102,6 +126,9 @@ static void release(bool remove_file) {
     if (s_mf.com) {
         CoUninitialize();
         s_mf.com = false;
+    }
+    if (made && remove_file && !DeleteFileW(s_mf.path)) {
+        NT_LOG_WARN("the empty recording was not deleted (error %lu)", GetLastError());
     }
 }
 
@@ -122,7 +149,8 @@ static bool create_writer(void) {
     // #region stream types
     IMFMediaType *vout = video_type(&MFVideoFormat_H264);
     must(IMFMediaType_SetUINT32(vout, &MF_MT_MPEG2_PROFILE, NT_RECORDER_H264_HIGH));
-    must(IMFMediaType_SetUINT32(vout, &MF_MT_AVG_BITRATE, (UINT32)(0.1 * s_mf.width * s_mf.height * s_mf.fps)));
+    UINT32 bitrate = (UINT32)(0.1 * s_mf.width * s_mf.height * s_mf.fps);
+    must(IMFMediaType_SetUINT32(vout, &MF_MT_AVG_BITRATE, bitrate));
     /* Untagged output decodes with the wrong matrix in ffmpeg and players. */
     must(IMFMediaType_SetUINT32(vout, &MF_MT_YUV_MATRIX, MFVideoTransferMatrix_BT709));
     must(IMFMediaType_SetUINT32(vout, &MF_MT_VIDEO_PRIMARIES, MFVideoPrimaries_BT709));
@@ -133,10 +161,11 @@ static bool create_writer(void) {
     /* B-frames would delay the video start by a frame (the MP4 sink writes no edit list); the default
        hardware CBR pads a still screen to the full bitrate. */
     IMFAttributes *encoder = NULL;
-    must(MFCreateAttributes(&encoder, 3));
+    must(MFCreateAttributes(&encoder, 4));
     must(IMFAttributes_SetUINT32(encoder, &k_bframes, 0));
     must(IMFAttributes_SetUINT32(encoder, &k_gop, 2U * s_mf.fps));
     must(IMFAttributes_SetUINT32(encoder, &k_rate_control, NT_RECORDER_PEAK_CONSTRAINED_VBR));
+    must(IMFAttributes_SetUINT32(encoder, &k_max_bitrate, 2U * bitrate));
     IMFMediaType *aout = audio_type(&MFAudioFormat_AAC, 16, 24000); /* 192 kbps */
     IMFMediaType *ain = audio_type(&MFAudioFormat_Float, 32, NT_RECORDER_AUDIO_RATE * 8U);
     must(IMFMediaType_SetUINT32(ain, &MF_MT_AUDIO_BLOCK_ALIGNMENT, 8));
@@ -147,6 +176,12 @@ static bool create_writer(void) {
            ok(MFCreateVideoSampleAllocatorEx(&IID_IMFVideoSampleAllocatorEx, (void **)&s_mf.pool), "MFCreateVideoSampleAllocatorEx") &&
            ok(IMFVideoSampleAllocatorEx_InitializeSampleAllocatorEx(s_mf.pool, NT_RECORDER_POOL, NT_RECORDER_POOL, NULL, vin), "InitializeSampleAllocatorEx") &&
            ok(IMFSinkWriter_BeginWriting(s_mf.writer), "BeginWriting");
+    if (good) {
+        IMFVideoSampleAllocatorCallback *callback = NULL;
+        must(IMFVideoSampleAllocatorEx_QueryInterface(s_mf.pool, &IID_IMFVideoSampleAllocatorCallback, (void **)&callback));
+        must(IMFVideoSampleAllocatorCallback_SetCallback(callback, &s_notify));
+        IMFVideoSampleAllocatorCallback_Release(callback);
+    }
     IMFMediaType_Release(vout);
     IMFMediaType_Release(vin);
     IMFAttributes_Release(encoder);
@@ -163,6 +198,11 @@ bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height
     s_mf.width = width;
     s_mf.height = height;
     s_mf.fps = fps;
+    s_mf.broken = false;
+    if (s_mf.released == NULL) {
+        s_mf.released = CreateEventW(NULL, FALSE, FALSE, NULL);
+        NT_ASSERT(s_mf.released != NULL);
+    }
     /* S_OK and S_FALSE add a reference this recording releases; RPC_E_CHANGED_MODE means the thread
        already has COM, which the free-threaded sink writer can use. */
     s_mf.com = SUCCEEDED(CoInitializeEx(NULL, COINIT_MULTITHREADED));
@@ -191,15 +231,18 @@ static void place_rows(uint8_t *scan0, size_t pitch) {
 }
 
 bool nt_recorder_platform_video(uint32_t index) {
-    /* EMPTY means the encoder still holds every sample and returns them on its own threads (here
-       AllocateSample waits about a second per call; MF does not promise it). Ten seconds of that is an
-       encoder that died. */
+    /* EMPTY means the encoder still holds every sample; it returns them on its own threads and
+       s_notify wakes this wait. Ten seconds of that is an encoder that died. */
     IMFSample *sample = NULL;
     HRESULT hr = MF_E_SAMPLEALLOCATOR_EMPTY;
-    for (double until = nt_time_now() + 10.0; hr == MF_E_SAMPLEALLOCATOR_EMPTY && nt_time_now() < until;) {
-        hr = IMFVideoSampleAllocatorEx_AllocateSample(s_mf.pool, &sample);
+    for (ULONGLONG until = GetTickCount64() + 10000U; (hr = IMFVideoSampleAllocatorEx_AllocateSample(s_mf.pool, &sample)) == MF_E_SAMPLEALLOCATOR_EMPTY;) {
+        ULONGLONG now = GetTickCount64();
+        if (now >= until || WaitForSingleObject(s_mf.released, (DWORD)(until - now)) != WAIT_OBJECT_0) {
+            break;
+        }
     }
     if (!ok(hr, "AllocateSample")) {
+        s_mf.broken = true;
         return false;
     }
     IMFMediaBuffer *buffer = NULL;
@@ -214,6 +257,8 @@ bool nt_recorder_platform_video(uint32_t index) {
     bool good = nt_gfx_read_pixels((nt_render_target_t){0}, 0, (int)(g_nt_window.fb_height - s_mf.height), (int)s_mf.width, (int)s_mf.height, scan0, (uint32_t)pitch * s_mf.height);
     if (good) {
         place_rows(scan0, (size_t)pitch);
+    } else {
+        NT_LOG_WARN("the window read failed");
     }
     must(IMF2DBuffer_Unlock2D(buffer2d));
     if (good) {
@@ -221,6 +266,7 @@ bool nt_recorder_platform_video(uint32_t index) {
         must(IMFSample_SetSampleTime(sample, hns(index, s_mf.fps)));
         must(IMFSample_SetSampleDuration(sample, hns(index + 1ULL, s_mf.fps) - hns(index, s_mf.fps)));
         good = ok(IMFSinkWriter_WriteSample(s_mf.writer, s_mf.video, sample), "WriteSample video");
+        s_mf.broken = !good;
     }
     IMF2DBuffer_Release(buffer2d);
     IMFMediaBuffer_Release(buffer);
@@ -228,9 +274,8 @@ bool nt_recorder_platform_video(uint32_t index) {
     return good;
 }
 
-/* One small MF buffer per push: a dev-only allocation on the step path. */
+/* One MF buffer per push, beside the per-sample allocations inside the MF pipeline itself. */
 bool nt_recorder_platform_audio(uint64_t at, const float *stereo, uint32_t frames) {
-    NT_ASSERT(frames <= UINT32_MAX / 8U);
     DWORD bytes = frames * 8U;
     IMFMediaBuffer *buffer = NULL;
     IMFSample *sample = NULL;
@@ -245,15 +290,16 @@ bool nt_recorder_platform_audio(uint64_t at, const float *stereo, uint32_t frame
     must(IMFSample_SetSampleTime(sample, hns(at, NT_RECORDER_AUDIO_RATE)));
     must(IMFSample_SetSampleDuration(sample, hns(at + frames, NT_RECORDER_AUDIO_RATE) - hns(at, NT_RECORDER_AUDIO_RATE)));
     bool good = ok(IMFSinkWriter_WriteSample(s_mf.writer, s_mf.audio, sample), "WriteSample audio");
+    s_mf.broken = !good;
     IMFSample_Release(sample);
     IMFMediaBuffer_Release(buffer);
     return good;
 }
 
-/* Without a frame there is nothing to keep: Finalize refuses an empty video track. A failed Finalize
-   leaves the fragments written before. */
+/* Without a frame there is nothing to keep: Finalize refuses an empty video track. After a failed write
+   Finalize could wait forever on the encoder, so it is skipped; either way the fragments on disk stay. */
 void nt_recorder_platform_close(uint32_t frames) {
-    if (frames > 0) {
+    if (frames > 0 && !s_mf.broken) {
         (void)ok(IMFSinkWriter_Finalize(s_mf.writer), "Finalize");
     }
     release(frames == 0);

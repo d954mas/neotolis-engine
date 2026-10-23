@@ -144,7 +144,8 @@ no window or gfx initialization. Gfx does not depend on crash or install its
 handlers. The crash consumer borrows a stable view; it owns no GPU copy.
 
 `nt_recorder` follows the same opt-in shape: no interface, no stub, one target
-whose platform backend CMake picks; a platform without a backend defines no target.
+whose platform backend CMake picks; a platform without a backend defines no target. The Windows
+backend reads the window through `nt_gfx`, so its executable links `nt_gfx`, not the stub.
 
 `engine/renderers/nt_mesh_renderer` is one source built as two link-selected
 variant targets: `nt_mesh_renderer` and `nt_skinned_mesh_renderer`. Each target

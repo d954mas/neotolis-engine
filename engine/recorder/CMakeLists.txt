@@ -12,7 +12,7 @@ if(EMSCRIPTEN)
 elseif(WIN32)
     # Media Foundation; it reads the window through nt_gfx, so the executable also links nt_gfx.
     nt_add_module(nt_recorder LOG_DOMAIN "recorder" nt_recorder.c native/nt_recorder_native.c nt_recorder.h nt_recorder_internal.h)
-    target_link_libraries(nt_recorder PRIVATE mfplat mfreadwrite mfuuid ole32 nt_gfx_interface nt_time)
+    target_link_libraries(nt_recorder PRIVATE mfplat mfreadwrite mfuuid ole32 nt_gfx_interface)
 else()
     return()
 endif()
