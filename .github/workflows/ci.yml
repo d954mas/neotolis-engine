@@ -433,6 +433,20 @@ jobs:
           cmake --build build/submodule-test
           ./build/submodule-test/submodule_test
 
+  # Compile and link only: no other job builds the Windows recorder backend (Media Foundation).
+  windows-recorder:
+    name: Windows Recorder Build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ninja
+        run: choco install ninja -y --no-progress
+      - name: Build devapi_host with the recorder group
+        shell: bash
+        run: |
+          cmake --preset native-debug -B build/_cmake/windows-recorder -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS" -DNT_HTTP_CURL=OFF -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
+          cmake --build build/_cmake/windows-recorder --target devapi_host
+
   # Debug configurations that differ from native-debug in one feature set.
   native-variants:
     name: Native Feature Variants
@@ -699,7 +713,7 @@ jobs:
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
-    needs: [packs, wasm-debug, wasm-release, wasm-analysis, native-release, native-debug, native-variants, lint, devapi-smoke, web-smoke, browser-test]
+    needs: [packs, wasm-debug, wasm-release, wasm-analysis, native-release, native-debug, windows-recorder, native-variants, lint, devapi-smoke, web-smoke, browser-test]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     permissions:
       contents: write
