@@ -54,7 +54,7 @@ globalThis['NtRecorder'] = (function () {
             return false;
         }
         var MB = NtMediabunny;
-        var r = { name: name, canvas: canvas, w: w, h: h, fps: fps, error: null, samples: 0 };
+        var r = { name: name, canvas: canvas, w: w, h: h, fps: fps, error: null };
         var fail = r.fail = function (e) { if (!r.error) { r.error = String(e); } };
         try {
             r.out = new MB.Output({ format: new MB.Mp4OutputFormat(), target: new MB.BufferTarget() });
@@ -108,21 +108,20 @@ globalThis['NtRecorder'] = (function () {
         return true;
     }
 
-    // stereo: a Float32Array view of wasm memory; AudioData copies it.
-    function audio(stereo, frames) {
+    // at: the track position in samples; stereo: a Float32Array view of wasm memory; AudioData copies it.
+    function audio(at, stereo, frames) {
         var r = cur;
         if (r.error) {
             return false;
         }
         try {
             var a = new AudioData({ format: 'f32', sampleRate: 48000, numberOfFrames: frames, numberOfChannels: 2,
-                                    timestamp: Math.round(r.samples * 1e6 / 48000), data: stereo });
+                                    timestamp: Math.round(at * 1e6 / 48000), data: stereo });
             try { r.aenc.encode(a); } finally { a.close(); }
         } catch (e) {
             r.fail(e);
             return false;
         }
-        r.samples += frames;
         return true;
     }
 

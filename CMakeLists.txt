@@ -130,7 +130,7 @@ option(NT_DEVAPI_GROUP_OBS "Build the devapi obs group (log.*/perf.*/entity.*/re
 option(NT_DEVAPI_GROUP_ENTITY_WRITE "Build the devapi entity.set component-write group." OFF)
 # Default OFF (opt-in); the first DEFERRED data-returning group — links nt_gfx (readback) + nt_fpng (PNG encode).
 option(NT_DEVAPI_GROUP_CAPTURE "Build the devapi capture.frame/capture.region group (PNG framebuffer capture)." OFF)
-# Default OFF (opt-in); links nt_recorder, so it needs a platform with a recorder backend (web).
+# Default OFF (opt-in); links nt_recorder, so it needs a platform with a recorder backend (web, Windows).
 option(NT_DEVAPI_GROUP_RECORDER "Build the devapi record.start/record.stop group (nt_recorder video)." OFF)
 
 set(NT_ASSERT_MODE "1" CACHE STRING "Assert mode: 1=trap, 2=full.")

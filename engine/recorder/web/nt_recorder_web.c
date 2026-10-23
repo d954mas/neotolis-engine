@@ -16,8 +16,8 @@ EM_JS(int, nt_recorder_web_video, (uint32_t index), {
     return globalThis['NtRecorder']['video'](index) ? 1 : 0;
 })
 
-EM_JS(int, nt_recorder_web_audio, (const float *stereo, uint32_t frames), {
-    return globalThis['NtRecorder']['audio'](HEAPF32.subarray(stereo >>> 2, (stereo >>> 2) + frames * 2), frames) ? 1 : 0;
+EM_JS(int, nt_recorder_web_audio, (double at, const float *stereo, uint32_t frames), {
+    return globalThis['NtRecorder']['audio'](at, HEAPF32.subarray(stereo >>> 2, (stereo >>> 2) + frames * 2), frames) ? 1 : 0;
 })
 
 EM_JS(void, nt_recorder_web_close, (uint32_t frames), {
@@ -29,6 +29,6 @@ bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height
 
 bool nt_recorder_platform_video(uint32_t index) { return nt_recorder_web_video(index) != 0; }
 
-bool nt_recorder_platform_audio(const float *stereo, uint32_t frames) { return nt_recorder_web_audio(stereo, frames) != 0; }
+bool nt_recorder_platform_audio(uint64_t at, const float *stereo, uint32_t frames) { return nt_recorder_web_audio((double)at, stereo, frames) != 0; }
 
 void nt_recorder_platform_close(uint32_t frames) { nt_recorder_web_close(frames); }
