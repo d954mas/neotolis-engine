@@ -97,12 +97,13 @@ typedef struct {
 /* Program reflection lives here, not on the pipelines that borrow the program. */
 typedef struct {
     GLuint program;
-    GLuint vs; /* attached stages, kept so a failed link can query them */
+    GLuint vs; /* stages held while the link is pending, so a failed link can query them; 0 after */
     GLuint fs;
     /* Sampler units are program state: assigned in reflection order at link,
      * written once, never rewritten by a material. */
     nt_gfx_gl_sampler_unit_t sampler_units[NT_GFX_MAX_TEXTURE_SLOTS];
     uint8_t sampler_count;
+    uint8_t deferred_delete;                               /* bit 0 vs, bit 1 fs: the stage handle is gone, the last holding link deletes it */
     uint32_t block_sizes[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS]; /* GL_UNIFORM_BLOCK_DATA_SIZE per bound slot; 0 = none */
     const char *label;                                     /* debug name; static storage */
 } nt_gfx_gl_program_t;
@@ -1285,7 +1286,44 @@ void nt_gfx_backend_destroy_shader(uint32_t backend_handle) {
     if (backend_handle == 0) {
         return;
     }
-    NT_GL(glDeleteShader, (GLuint)backend_handle);
+    /* A pending link keeps the stage alive for its failure diagnostics; Emscripten forgets a deleted
+     * name at once. */
+    bool held = false;
+    for (uint32_t i = 1; i <= s_init_desc.max_programs; i++) {
+        if (s_programs[i].vs == backend_handle) {
+            s_programs[i].deferred_delete |= 1U;
+            held = true;
+        } else if (s_programs[i].fs == backend_handle) {
+            s_programs[i].deferred_delete |= 2U;
+            held = true;
+        }
+    }
+    if (!held) {
+        NT_GL(glDeleteShader, (GLuint)backend_handle);
+    }
+}
+
+static bool stage_held(GLuint shader) {
+    for (uint32_t i = 1; i <= s_init_desc.max_programs; i++) {
+        if (s_programs[i].vs == shader || s_programs[i].fs == shader) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* The link resolved: drop its hold and run a deferred delete that no other pending link still holds. */
+static void release_stages(nt_gfx_gl_program_t *rec) {
+    const GLuint stages[2] = {rec->vs, rec->fs};
+    const uint8_t deferred_delete = rec->deferred_delete;
+    rec->vs = 0;
+    rec->fs = 0;
+    rec->deferred_delete = 0;
+    for (uint8_t i = 0; i < 2; i++) {
+        if ((deferred_delete & (1U << i)) != 0 && !stage_held(stages[i])) {
+            NT_GL(glDeleteShader, stages[i]);
+        }
+    }
 }
 
 static void nt_gfx_gl_write_array_index(char *suffix, GLint element) {
@@ -1324,17 +1362,7 @@ static NT_NOINLINE void log_program_failure(const nt_gfx_gl_program_t *rec, cons
         }                                                                                                                                                                                              \
     } while (0)
 
-#if NT_LOG_MIN_LEVEL <= 2
-static GLint stage_compile_status(GLuint shader) {
-    if (!NT_GL_RET(glIsShader, shader)) {
-        return -1;
-    }
-    GLint compiled = 0;
-    NT_GL(glGetShaderiv, shader, GL_COMPILE_STATUS, &compiled);
-    return compiled;
-}
-
-#ifdef NT_PLATFORM_WEB
+#if NT_LOG_MIN_LEVEL <= 2 && defined(NT_PLATFORM_WEB)
 /* The browser's translation is what the driver compiled; it can differ per GPU. */
 static void log_translated_source(GLuint shader, const char *stage) {
     char text[2048];
@@ -1344,31 +1372,24 @@ static void log_translated_source(GLuint shader, const char *stage) {
     }
 }
 #endif
-#endif
 
 /* Compile errors surface only here: shader creation never reads COMPILE_STATUS. */
 static void nt_gfx_gl_log_link_failure(const nt_gfx_gl_program_t *rec) {
 #if NT_LOG_MIN_LEVEL <= 2
     const GLenum gl_error = NT_GL_RET0(glGetError);
-    const GLint vs_compile = stage_compile_status(rec->vs);
-    const GLint fs_compile = stage_compile_status(rec->fs);
+    /* The pending link holds both stages, so their names stay valid until it resolves. */
+    GLint vs_compile = 0;
+    GLint fs_compile = 0;
+    NT_GL(glGetShaderiv, rec->vs, GL_COMPILE_STATUS, &vs_compile);
+    NT_GL(glGetShaderiv, rec->fs, GL_COMPILE_STATUS, &fs_compile);
 #ifdef NT_PLATFORM_WEB
     /* Before the driver logs, so a journal that keeps its tail drops this text first. */
-    if (vs_compile >= 0) {
-        log_translated_source(rec->vs, "vertex");
-    }
-    if (fs_compile >= 0) {
-        log_translated_source(rec->fs, "fragment");
-    }
+    log_translated_source(rec->vs, "vertex");
+    log_translated_source(rec->fs, "fragment");
 #endif
     nt_gfx_gl_log_program(rec->program);
-    /* -1: the owner destroyed the stage and Emscripten dropped its name; native GL keeps an attached stage readable. */
-    if (vs_compile >= 0) {
-        nt_gfx_gl_log_shader(rec->vs, "vertex");
-    }
-    if (fs_compile >= 0) {
-        nt_gfx_gl_log_shader(rec->fs, "fragment");
-    }
+    nt_gfx_gl_log_shader(rec->vs, "vertex");
+    nt_gfx_gl_log_shader(rec->fs, "fragment");
     /* After the driver lines, so a journal that keeps its tail keeps the classification and identity. */
     NT_LOG_ERROR("program link stages: vs_compile=%d fs_compile=%d", vs_compile, fs_compile);
     log_program_failure(rec, "link", "link failed", "gl_error", gl_error);
@@ -1624,6 +1645,7 @@ nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     write_sampler_units(rec->program, rec);
+    release_stages(rec);
 #if NT_GFX_CAPTURE_ENABLED
     capture_program_definition(backend_handle);
 #endif
@@ -1639,6 +1661,7 @@ void nt_gfx_backend_destroy_program(uint32_t backend_handle) {
         s_gl_cache.program = 0;
     }
     NT_GL(glDeleteProgram, program);
+    release_stages(&s_programs[backend_handle]);
     memset(&s_programs[backend_handle], 0, sizeof(s_programs[backend_handle]));
 }
 

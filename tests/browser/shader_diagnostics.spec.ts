@@ -18,12 +18,13 @@ for (const mode of ['vertex', 'fragment', 'link', 'no-translation', 'long-transl
       const link = proto.linkProgram;
       const lost = proto.isContextLost;
       const extension = proto.getExtension;
+      const infoLog = proto.getShaderInfoLog;
       // Debug Emscripten builds read each parameter twice, so count stages, not calls.
       const queried = new Set<WebGLShader>();
       let target: WebGLProgram | null = null;
       proto.shaderSource = function(shader, text) {
         const type = parameter.call(this, shader, this.SHADER_TYPE);
-        const broken = state.armed && (mode === 'vertex' && type === this.VERTEX_SHADER || mode === 'fragment' && type === this.FRAGMENT_SHADER);
+        const broken = state.armed && ((mode === 'vertex' || mode === 'destroyed') && type === this.VERTEX_SHADER || mode === 'fragment' && type === this.FRAGMENT_SHADER);
         return source.call(this, shader, broken ? '#version 300 es\ninvalid shader source' : text);
       };
       proto.linkProgram = function(program) {
@@ -49,7 +50,8 @@ for (const mode of ['vertex', 'fragment', 'link', 'no-translation', 'long-transl
         if (state.failed) state.programLogs++;
         return program === target && mode === 'link' ? ('driver detail ' + 'x'.repeat(80) + '\n').repeat(20) : '';
       };
-      proto.getShaderInfoLog = function() { return ''; };
+      // 'destroyed' passes the driver's log through to prove the held stage stays queryable; other modes keep stage logs out.
+      proto.getShaderInfoLog = function(shader) { return mode === 'destroyed' ? infoLog.call(this, shader) : ''; };
       proto.getExtension = function(this: WebGL2RenderingContext, name: string) {
         const result = extension.call(this, name);
         if (name !== 'WEBGL_debug_shaders') return result;
@@ -96,12 +98,13 @@ for (const mode of ['vertex', 'fragment', 'link', 'no-translation', 'long-transl
     const lines = record.split('\n');
     const at = lines.findIndex(line => line.includes(' link: link failed:'));
     expect(lines[at]).toMatch(/program \d+\/GL \d+ link: link failed: gl_error=0x0 "[^"\n]+"$/);
-    const vertex = mode === 'destroyed' ? -1 : mode === 'vertex' ? 0 : 1;
-    const fragment = mode === 'destroyed' ? -1 : mode === 'fragment' ? 0 : 1;
+    // A pending link holds stages whose handles were destroyed, so they report like live ones.
+    const vertex = mode === 'vertex' || mode === 'destroyed' ? 0 : 1;
+    const fragment = mode === 'fragment' ? 0 : 1;
     expect(lines[at - 1]).toContain(`program link stages: vs_compile=${vertex} fs_compile=${fragment}`);
 
-    // Every live stage is translated; one the browser itself rejected has no text and logs nothing.
-    const translated = mode === 'destroyed' || mode === 'no-translation' ? [] : mode === 'vertex' ? ['fragment'] : mode === 'fragment' ? ['vertex'] : ['vertex', 'fragment'];
+    // With the extension, every compiled stage is translated; one the browser rejected has no text and logs nothing.
+    const translated = mode === 'no-translation' ? [] : vertex === 0 ? ['fragment'] : fragment === 0 ? ['vertex'] : ['vertex', 'fragment'];
     const driver = lines.findIndex(line => line.includes('driver detail'));
     for (const stage of ['vertex', 'fragment']) {
       const header = lines.findIndex(line => line.endsWith(`${stage} translated:`));
@@ -117,9 +120,15 @@ for (const mode of ['vertex', 'fragment', 'link', 'no-translation', 'long-transl
       expect(kept).toBeGreaterThan(60);
       expect(kept).toBeLessThanOrEqual(72);
     }
+    if (mode === 'destroyed') {
+      const header = lines.findIndex(line => line.endsWith('vertex shader:'));
+      expect(header).toBeGreaterThan(0);
+      // Record lines carry an `ERROR [gfx] ` prefix; the driver text after it names the broken token.
+      expect(lines[header + 1].replace(/^ERROR \[[^\]]*\] /, '')).toMatch(/invalid/);
+    }
     const state = await probe();
-    expect(state.queries).toBe(mode === 'destroyed' ? 0 : 2);
-    expect(state.translations).toBe(mode === 'destroyed' || mode === 'no-translation' ? 0 : 2);
+    expect(state.queries).toBe(2);
+    expect(state.translations).toBe(mode === 'no-translation' ? 0 : 2);
     if (mode === 'link') expect(lines.findLastIndex(line => line.includes('driver detail'))).toBeLessThan(at - 1);
   });
 }

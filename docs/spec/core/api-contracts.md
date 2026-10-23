@@ -149,7 +149,9 @@ each module asserts only its frame order (one `begin_frame` per gfx frame).
 whoever called `nt_gfx_make_program`. Pipelines and materials store the handle
 without owning it. Destroying the program destroys its pipelines; the owner
 does not need to walk them. Shader stages have independent lifetimes: destroying
-a stage does not affect a program already linked from it.
+a stage handle does not affect a program linked or linking from it; a pending
+link keeps the stage's GPU object for its
+[failure diagnostics](../render/shader.md#runtime-objects-shadercode-program).
 
 The optional program label is a debug name in static storage and is not identity; see
 [shader diagnostics](../render/shader.md#runtime-objects-shadercode-program).
