@@ -1093,7 +1093,7 @@ const void *nt_gfx_backend_map_buffer(uint32_t buffer_backend, uint32_t size) {
     NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, s_buffer_gl[buffer_backend]);
     const void *bytes = NT_GL_RET(glMapBufferRange, GL_PIXEL_PACK_BUFFER, (GLintptr)0, (GLsizeiptr)size, (GLbitfield)GL_MAP_READ_BIT);
     NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, 0);
-    NT_ASSERT(bytes != NULL && "map_buffer: map failed");
+    NT_ASSERT(bytes != NULL && "map_readback: map failed");
     return bytes;
 }
 

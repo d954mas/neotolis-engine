@@ -1024,9 +1024,11 @@ bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint
  * frame is being drawn: no recorded command names it. */
 void nt_gfx_read_pixels_to_buffer(nt_render_target_t src, int x, int y, int w, int h, nt_buffer_t buf);
 /* The bytes of `buf`'s last read, valid until nt_gfx_unmap_readback or nt_gfx_destroy_buffer,
- * whichever comes first. Waits for the GPU only while it still copies that read: map a read issued
- * frames earlier. Asserts a read since the last map. Any frame state: the read was already issued. */
+ * whichever comes first; never NULL (a failed map asserts; the gfx stub returns NULL). Waits for the
+ * GPU only while it still copies that read: map a read issued frames earlier. A `buf` with no read
+ * since its last map asserts. Any frame state: the read was already issued. */
 const uint8_t *nt_gfx_map_readback(nt_buffer_t buf);
+/* Ends the access from nt_gfx_map_readback; the mapped bytes become invalid. An unmapped `buf` asserts. */
 void nt_gfx_unmap_readback(nt_buffer_t buf);
 #endif
 

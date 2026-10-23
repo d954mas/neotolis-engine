@@ -787,7 +787,7 @@ void nt_gfx_end_frame(void) {
 }
 
 /* The backend slot of a read source (0 = the window). A context loss frees every render target, so
- * callers check it first. */
+ * read_pixels checks the loss first; native readback never sees one. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static uint32_t read_source_slot(nt_render_target_t src, int x, int y, int w, int h) {
     if (src.id == 0) {

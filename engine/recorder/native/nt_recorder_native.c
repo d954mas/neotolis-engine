@@ -31,8 +31,8 @@ static const GUID k_max_bitrate = {0x9651eae4, 0x39b9, 0x4ebf, {0x85, 0xef, 0xd7
 /* Frames in flight. MF keeps the last input sample until the next, so fewer than 2 deadlock; more than 4
    measured no faster. */
 #define NT_RECORDER_POOL 4U
-/* Window reads in flight: a read is mapped when the ring is full, three recorded frames after it was
-   issued, so the GPU has long written it and the map does not wait. */
+/* Window reads in flight: a read is mapped when the ring is full, three reads after it was issued,
+   so the GPU has normally written it and the map does not wait. */
 #define NT_RECORDER_READS 3U
 
 static struct {
@@ -296,7 +296,7 @@ bool nt_recorder_platform_video(uint32_t first, uint32_t count) {
     if (s_mf.pending == NT_RECORDER_READS && !encode_oldest()) {
         return false;
     }
-    /* The top rows: an odd framebuffer loses its bottom row, as on web. */
+    /* The top rows: an odd framebuffer loses its bottom row and right column, as on web. */
     nt_gfx_read_pixels_to_buffer((nt_render_target_t){0}, 0, (int)(g_nt_window.fb_height - s_mf.height), (int)s_mf.width, (int)s_mf.height, s_mf.reads[s_mf.head]);
     s_mf.read_first[s_mf.head] = first;
     s_mf.read_count[s_mf.head] = count;
