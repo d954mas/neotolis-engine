@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Check an nt_recorder MP4: one H.264 and one AAC/Opus stream, the expected frame rate and count, and
-A/V sync of a flash+beep probe (each white flash onset has a beep onset within one frame).
+"""Check an nt_recorder MP4: one H.264 and one AAC/Opus stream, the expected frame rate and count, both
+streams starting at 0, and A/V sync of a flash+beep probe (each white flash onset, at its decoded
+timestamp, has a beep onset within one frame).
 
 Needs ffprobe and ffmpeg on PATH (or in FFMPEG_DIR). Stdlib only.
 
-    python tools/devapi/check_recording.py clip.mp4 --fps 30 --frames 90
+    python tools/devapi/check_recording.py clip.mp4 --fps 30 --frames 90 [--real-time]
+
+--real-time: audio may run up to a frame period past the video (pushed after the last deadline).
 """
 
 import argparse
@@ -33,10 +36,11 @@ def main():
     ap.add_argument("mp4")
     ap.add_argument("--fps", type=int, required=True)
     ap.add_argument("--frames", type=int, required=True)
+    ap.add_argument("--real-time", action="store_true")
     a = ap.parse_args()
 
     probe = json.loads(run([tool("ffprobe"), "-v", "error", "-count_frames", "-show_entries",
-                            "stream=codec_type,codec_name,avg_frame_rate,nb_read_frames,sample_rate,channels,duration", "-of", "json", a.mp4]).stdout)
+                            "stream=codec_type,codec_name,avg_frame_rate,nb_read_frames,sample_rate,channels,duration,start_time", "-of", "json", a.mp4]).stdout)
     streams = probe["streams"]
     video = [s for s in streams if s["codec_type"] == "video"]
     audio = [s for s in streams if s["codec_type"] == "audio"]
@@ -53,15 +57,25 @@ def main():
         errors.append(f"frames {video[0]['nb_read_frames']} != {a.frames}")
     if audio[0].get("sample_rate") != "48000" or audio[0].get("channels") != 2:
         errors.append(f"audio is {audio[0].get('sample_rate')} Hz, {audio[0].get('channels')} channels; expected 48000 Hz stereo")
+    # A late start (B-frames without an edit list) shifts the whole stream against the other.
+    for s in (video[0], audio[0]):
+        if abs(float(s.get("start_time", 0))) > 0.5 / a.fps:
+            errors.append(f"{s['codec_type']} starts at {s['start_time']} s, expected 0")
     # Padded to the video; the encoder rounds the end up to whole codec frames (AAC 1024 samples,
-    # Opus 960); one more frame is margin.
-    if abs(float(audio[0]["duration"]) - a.frames / a.fps) > 2048 / 48000:
+    # Opus 960); one more frame is margin. In real time audio pushed after the last deadline stays.
+    over = float(audio[0]["duration"]) - a.frames / a.fps
+    if over < -2048 / 48000 or over > 2048 / 48000 + (1.0 / a.fps if a.real_time else 0.0):
         errors.append(f"audio lasts {audio[0]['duration']} s, video {a.frames / a.fps:.3f} s")
 
     # Flash onsets: centre luma rising above 200.
     luma = run([tool("ffmpeg"), "-v", "error", "-i", a.mp4, "-vf", "crop=2:2:iw/2:ih/2,scale=1:1",
                 "-f", "rawvideo", "-pix_fmt", "gray", "-"]).stdout
-    flashes = [i / a.fps for i, v in enumerate(luma) if v > 200 and (i == 0 or luma[i - 1] <= 200)]
+    pts = json.loads(run([tool("ffprobe"), "-v", "error", "-select_streams", "v", "-show_entries", "frame=pts_time",
+                          "-of", "json", a.mp4]).stdout)["frames"]
+    times = [float(f["pts_time"]) for f in pts]
+    if len(times) != len(luma):
+        sys.exit(f"{len(times)} frame timestamps for {len(luma)} decoded frames")
+    flashes = [times[i] for i, v in enumerate(luma) if v > 200 and (i == 0 or luma[i - 1] <= 200)]
     # Beep onsets: ends of silence, except the one at the end of the track.
     log = run([tool("ffmpeg"), "-hide_banner", "-i", a.mp4, "-af", "silencedetect=n=-40dB:d=0.2",
                "-f", "null", "-"]).stderr.decode(errors="replace")

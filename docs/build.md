@@ -383,6 +383,18 @@ exceeds the 100 ms drift bound, and fails on a drift WARN; it also checks `bad_p
 `devapi_host` with the RECORDER group, then a check that the four `NtRecorder.*(` calls keep their
 names). Native `test_recorder` covers frame selection and the audio stream.
 
+The Windows backend has no CI. Check it locally with a native `devapi_host` that links the RECORDER
+group (it then inits `nt_gfx` and draws the flash pattern) and
+`tools/devapi/scenarios/record_demo.py`, which records a lockstep and a real-time clip and runs
+`check_recording.py` on each:
+
+```bash
+cmake --preset native-debug -B build/_cmake/native-record -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
+cmake --build build/_cmake/native-record --target devapi_host
+build/examples/devapi_host/native-record/devapi_host.exe &
+python tools/devapi/scenarios/record_demo.py --out build
+```
+
 Browser diagnostics use `tests/browser/diagnostics.spec.ts`. Set
 `NT_SHOWCASE_DIR` to the exact build, distinct `NT_SHOWCASE_PORT`/`NT_DEVAPI_PORT`,
 `CI=1` to forbid server reuse, and matching

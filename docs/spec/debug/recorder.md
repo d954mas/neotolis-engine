@@ -11,7 +11,7 @@ Related: [Logging, Errors, Debugging](logging-errors-debugging.md) (devapi, fram
 ## API and call placement
 
 ```c
-bool nt_recorder_start(const char *name, uint32_t fps, double t);
+bool nt_recorder_start(const char *name, uint32_t fps);
 void nt_recorder_frame(double t, double dt);
 void nt_recorder_push_audio(const float *stereo48k, uint32_t frames);
 uint32_t nt_recorder_stop(void);
@@ -21,25 +21,27 @@ bool nt_recorder_active(void);
 The game calls `nt_recorder_frame` once per presented frame, after `nt_gfx_end_frame` and before
 `nt_window_swap_buffers`, and passes its clock: `t` is the time of this frame, `dt` the advance that
 produced it. There is no hook and no hidden clock. With `g_nt_app.time` and MANUAL lockstep the
-recording is offline and frame-exact; stepping that outruns the encoder ends it (see Backends). With
-RUN it records hand play in real time. `start`'s `t` is the recording's origin: the video deadlines
-count from it and the audio stream begins there. Call `start` between steps, so the first pushed
-samples are those of the next step (devapi on web does), or pass that step's start time.
+recording is offline and frame-exact; stepping that outruns the encoder ends it on web and waits for
+it on Windows (see Backends). With RUN it records hand play in real time. The first `frame` call of a
+recording sets its origin `t0`: the start of the step that produced that frame (`t - dt`), or, when
+the mixer pushed samples before it, where those samples begin. The video deadlines count from `t0`
+and audio sample 0 sits there, so `start` can come anywhere in a step: between steps, or inside one
+before or after its push.
 
 `start` fixes the size to the window framebuffer, rounded down to even (H.264 4:2:0). It asserts a
-non-empty `name`, `fps` within 1..120, a finite `t` and no active recording. It returns false
-(logged) when either side of that size is under 2 px or the backend refuses: no encoder, or the
-output cannot be opened (web: see Backends). `frame`, `push_audio` and `stop` are no-ops while idle.
+non-empty `name`, `fps` within 1..120 and no active recording. It returns false (logged) when either
+side of that size is under 2 px or the backend refuses: no encoder, a size the encoder rejects, or
+an output that cannot be opened (see Backends). `frame`, `push_audio` and `stop` are no-ops while idle.
 `stop` returns the frames sent to the encoder, 0 when the final audio write failed.
 
 A recording also ends on its own, with a WARN, in three cases. A change of the even-rounded
 framebuffer size, and a `frame` call with more than two seconds (`2 · fps`) of due frames (render
-off while time ran), end it with the audio padded to the video. An encoder failure ends it without
-a file. After any of them `stop` returns 0.
+off while time ran), end it with the audio padded to the video. An encoder failure ends it; web
+writes no file, Windows keeps the fragments already on disk. After any of them `stop` returns 0.
 
 ## Frame selection
 
-Output frame `i` has pts `i / fps` and is due at `t0 + (i + 1) / fps`, where `t0` is the start time:
+Output frame `i` has pts `i / fps` and is due at `t0 + (i + 1) / fps`, where `t0` is the origin:
 the first frame shows the result of the first advance, and `N` lockstep steps of `1 / fps` give `N`
 frames. A `frame` call takes every due deadline within a margin of `t`: half of `dt`, at most half
 a period. With a steady game frame rate that picks the presented frame nearest each deadline and
@@ -53,8 +55,9 @@ render-off gap) re-encode the same pixels. Frozen time (pause, MANUAL idle) writ
 
 The game's mixer pushes its output as one stream of interleaved stereo float samples at 48 kHz from
 the main thread, each step's samples before the `frame` call for that step. The stream carries no
-timestamps and the recorder corrects nothing: until the first push each `frame` call writes silence
-up to its `t`, and from then on sample `n` of the stream follows sample `n − 1`. So the mixer pushes
+timestamps and the recorder corrects nothing: samples pushed before the first `frame` call set the
+origin (render off after `start`, several steps per frame); until the first push each `frame` call
+writes silence up to its `t`; from then on sample `n` of the stream follows sample `n − 1`. So the mixer pushes
 every step's samples once it starts, silence included. A lockstep mixer renders
 `llround(t · 48000) − llround((t − dt) · 48000)` samples per step: from absolute times, so rounding
 does not accumulate. A mixer whose first push is the step right after a `frame` call starts on
@@ -110,7 +113,28 @@ recording in that call. An asynchronous codec, muxer or backlog failure ends it 
 into the backend, or, after the last one, shows only as `error` in the event: the event is the
 authority for whether a file exists.
 
-**Other platforms** define no `nt_recorder` target; a Windows Media Foundation backend is planned.
+**Windows.** A Media Foundation sink writer writes a fragmented MP4 to the `name` path while
+recording (UTF-8, relative to the working directory, overwritten; a name that does not convert to a
+path under `MAX_PATH` makes `start` return false). A killed process leaves a file readable up to the
+last fragment, which loses about one fragment plus the frames still in the encoder. Video is H.264
+High without B-frames (the MP4 sink writes no edit list, so B-frames would start the video a frame
+late), peak-constrained VBR at the web bitrate, BT.709 tags; audio is AAC-LC 192 kbps from the float
+samples. Both backends put a keyframe every two seconds. Media Foundation takes a hardware encoder
+when one accepts the stream, else its software one. `start` returns false where no encoder accepts
+the size (very small, or past 4K) and blocks for encoder setup, up to about a second with a hardware
+encoder, so in RUN the first `frame` call takes several deadlines and repeats the opening frame.
+Media Foundation must be installed: a game that links the recorder does not start on a Windows N
+edition without the Media Feature Pack.
+
+Each due frame reads the window with `nt_gfx_read_pixels` straight into one of four pooled encoder
+buffers. The read takes the top rows, so an odd framebuffer loses its bottom row and right column, as
+on web. When the encoder holds all four buffers, the `frame` call waits for one: lockstep runs at the
+encoder's pace, RUN shows hitches, and a stalled encoder blocks the game. Each audio push allocates
+one Media Foundation buffer: a dev-only exception to preallocated storage. An encoder failure ends
+the recording and keeps the fragments on disk (the WARN gives the path); a recording without a frame
+deletes its file.
+
+**Other platforms** define no `nt_recorder` target.
 
 ## devapi `record.*`
 
@@ -122,6 +146,8 @@ authority for whether a file exists.
 | `record.start` | `{name, fps}` | `{}` | `bad_params` (name not a non-empty string, fps not an integer 1..120), `busy` (active), `failed` (`start` returned false) |
 | `record.stop` | `{}` | `{frames}` | none; `frames` is 0 when nothing was active, the recording ended on its own, or the final audio write failed |
 
-`record.start` uses `g_nt_app.time`. An offline recording is `time.set_mode{mode:"manual"}`,
+On Windows `name` is the file path. The host's first `frame` call after `record.start` sets the
+origin. An offline recording is `time.set_mode{mode:"manual"}`,
 `record.start`, `time.step{count}`, `record.stop`; the default `step_dt` of `1/60` at `fps` 30 records
-every second step. The browser tests of this sequence are in [build instructions](../../build.md).
+every second step. The browser tests and the native check of this sequence are in
+[build instructions](../../build.md).

@@ -56,7 +56,7 @@ engine/
     formats/
     audio/
     devapi/    (dev-only, NT_DEVAPI_ENABLED — see debug/logging-errors-debugging.md)
-    recorder/  (dev-only, opt-in by linking; web/ backend only — see debug/recorder.md)
+    recorder/  (dev-only, opt-in by linking; web/ and Windows native/ backends — see debug/recorder.md)
 
 deps/
     cjson/     (vendored standalone lib, EXCLUDE_FROM_ALL; linked only by consumers)

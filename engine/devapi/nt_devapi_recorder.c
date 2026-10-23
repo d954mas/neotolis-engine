@@ -1,10 +1,9 @@
-#include "app/nt_app.h"
 #include "core/nt_assert.h"
 #include "devapi/nt_devapi_internal.h"
 #include "recorder/nt_recorder.h"
 
-/* record.* group: a bot starts and stops nt_recorder on game time. The host calls nt_recorder_frame
-   every frame; the web output is the 'nt-recorder' event. */
+/* record.* group: a bot starts and stops nt_recorder. The host calls nt_recorder_frame every frame
+   with game time; the web output is the 'nt-recorder' event, the Windows output the file at name. */
 
 #ifdef NT_DEVAPI_GROUP_RECORDER
 
@@ -34,7 +33,7 @@ static bool cmd_record_start(const cJSON *params, cJSON *result, nt_devapi_error
         err->message = "record.start: a recording is active";
         return false;
     }
-    if (!nt_recorder_start(name->valuestring, fps, g_nt_app.time)) {
+    if (!nt_recorder_start(name->valuestring, fps)) {
         err->code = "failed";
         err->message = "record.start: the recorder refused to start (see log and console)";
         return false;
@@ -59,7 +58,7 @@ static const nt_devapi_command_desc k_record_cmds[] = {
         .params_shape = "{name:string, fps:int}",
         .result_shape = "{}",
         .frame_behavior = "any",
-        .side_effects = "starts nt_recorder; web dispatches 'nt-recorder' when the recording ends",
+        .side_effects = "starts nt_recorder; web dispatches 'nt-recorder' when the recording ends; Windows writes the file at name (a path)",
     },
     {
         .method = "record.stop",

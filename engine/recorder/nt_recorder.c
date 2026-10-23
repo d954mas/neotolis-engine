@@ -13,6 +13,7 @@
 
 static struct {
     bool active;
+    bool origin; /* t0 set, by the first frame call */
     bool pushed; /* the game's mixer has pushed; until then the track is silence up to each frame's t */
     bool drift_warned;
     uint32_t fps;
@@ -37,7 +38,7 @@ static bool pad_to(uint64_t end) {
     static const float k_zero[1024 * 2];
     while (s_rec.audio < end) {
         uint32_t n = end - s_rec.audio < 1024U ? (uint32_t)(end - s_rec.audio) : 1024U;
-        if (!nt_recorder_platform_audio(k_zero, n)) {
+        if (!nt_recorder_platform_audio(s_rec.audio, k_zero, n)) {
             return false;
         }
         s_rec.audio += n;
@@ -59,10 +60,20 @@ static uint32_t end_recording(void) {
     return frames;
 }
 
-bool nt_recorder_start(const char *name, uint32_t fps, double t) {
+/* Pushed audio carries no timestamps: a mixer that skips or overfills shifts the rest of the track,
+   so say so once. */
+static void warn_drift(double t) {
+    double drift = ((double)s_rec.audio / NT_RECORDER_AUDIO_RATE) - (t - s_rec.t0);
+    if (!s_rec.drift_warned && fabs(drift) > NT_RECORDER_AUDIO_DRIFT) {
+        s_rec.drift_warned = true;
+        NT_LOG_WARN("audio %.0f ms %s the clock; push every step's samples from the start, silence included", fabs(drift) * 1000.0, drift < 0.0 ? "behind" : "ahead of");
+    }
+}
+
+bool nt_recorder_start(const char *name, uint32_t fps) {
     NT_ASSERT(!s_rec.active && "nt_recorder_start: already recording");
     NT_ASSERT(name != NULL && name[0] != '\0');
-    NT_ASSERT(fps >= 1 && fps <= 120 && isfinite(t));
+    NT_ASSERT(fps >= 1 && fps <= 120);
     uint32_t w = g_nt_window.fb_width & ~1U; /* H.264 4:2:0 needs even sizes */
     uint32_t h = g_nt_window.fb_height & ~1U;
     if (w == 0 || h == 0) {
@@ -74,10 +85,10 @@ bool nt_recorder_start(const char *name, uint32_t fps, double t) {
         return false;
     }
     s_rec.active = true;
+    s_rec.origin = false;
     s_rec.pushed = false;
     s_rec.drift_warned = false;
     s_rec.fps = fps;
-    s_rec.t0 = t;
     s_rec.width = w;
     s_rec.height = h;
     s_rec.frames = 0;
@@ -90,7 +101,13 @@ void nt_recorder_frame(double t, double dt) {
     if (!s_rec.active) {
         return;
     }
-    NT_ASSERT(isfinite(t - s_rec.t0) && isfinite(dt) && dt >= 0.0);
+    NT_ASSERT(isfinite(t) && isfinite(dt) && dt >= 0.0);
+    /* The origin is the start of the step that produced the first frame, or where the stream pushed
+       before it begins (render off after start, several steps per frame), so audio sample 0 sits at t0. */
+    if (!s_rec.origin) {
+        s_rec.origin = true;
+        s_rec.t0 = t - (s_rec.pushed ? (double)s_rec.audio / NT_RECORDER_AUDIO_RATE : dt);
+    }
     if ((g_nt_window.fb_width & ~1U) != s_rec.width || (g_nt_window.fb_height & ~1U) != s_rec.height) {
         NT_LOG_WARN("framebuffer resized, recording ended");
         (void)end_recording();
@@ -120,18 +137,12 @@ void nt_recorder_frame(double t, double dt) {
     /* Silence keeps pace with the clock until the first push, so a long silent clip never pads at once
        and a mixer whose first push is the step after this call starts on time. */
     if (!s_rec.pushed) {
-        if (!pad_to((uint64_t)llround(fmax(t - s_rec.t0, 0.0) * NT_RECORDER_AUDIO_RATE))) {
+        if (!pad_to((uint64_t)llround((t - s_rec.t0) * NT_RECORDER_AUDIO_RATE))) {
             fail();
         }
         return;
     }
-    /* Pushed audio carries no timestamps: a mixer that skips or overfills shifts the rest of the track,
-       so say so once. */
-    double drift = ((double)s_rec.audio / NT_RECORDER_AUDIO_RATE) - (t - s_rec.t0);
-    if (!s_rec.drift_warned && fabs(drift) > NT_RECORDER_AUDIO_DRIFT) {
-        s_rec.drift_warned = true;
-        NT_LOG_WARN("audio %.0f ms %s the clock; push every step's samples from the start, silence included", fabs(drift) * 1000.0, drift < 0.0 ? "behind" : "ahead of");
-    }
+    warn_drift(t);
 }
 
 void nt_recorder_push_audio(const float *stereo48k, uint32_t frames) {
@@ -140,7 +151,7 @@ void nt_recorder_push_audio(const float *stereo48k, uint32_t frames) {
     }
     NT_ASSERT(stereo48k != NULL);
     s_rec.pushed = true;
-    if (!nt_recorder_platform_audio(stereo48k, frames)) {
+    if (!nt_recorder_platform_audio(s_rec.audio, stereo48k, frames)) {
         fail();
         return;
     }

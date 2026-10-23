@@ -135,7 +135,7 @@ if(NT_DEVAPI_GROUP_RECORDER)
         message(FATAL_ERROR "NT_DEVAPI_GROUP_RECORDER requires nt_recorder, which has no backend on this platform.")
     endif()
     nt_add_module(nt_devapi_recorder LOG_DOMAIN "devapi" nt_devapi_recorder.c)
-    target_link_libraries(nt_devapi_recorder PUBLIC nt_devapi nt_recorder PRIVATE nt_app_interface)
+    target_link_libraries(nt_devapi_recorder PUBLIC nt_devapi nt_recorder)
     target_compile_definitions(nt_devapi_recorder PUBLIC NT_DEVAPI_GROUP_RECORDER=1)
 endif()
 
