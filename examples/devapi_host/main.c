@@ -199,7 +199,8 @@ static void render_pattern(bool flash) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {k_bg_color[0], k_bg_color[1], k_bg_color[2], k_bg_color[3]}, .clear_depth = 1.0F});
     const int fb_w = (int)g_nt_window.fb_width;
     const int fb_h = (int)g_nt_window.fb_height;
-    nt_gfx_set_scissor(fb_w / 4, fb_h / 4, fb_w / 2, fb_h / 2);
+    /* Upper left of centre (GL y is up), so a recording that swaps red/blue or rows shows it. */
+    nt_gfx_set_scissor(fb_w / 8, fb_h * 3 / 8, fb_w / 2, fb_h / 2);
     nt_gfx_set_scissor_enabled(true);
     const float *fg = flash ? (const float[4]){1.0F, 1.0F, 1.0F, 1.0F} : k_fg_color;
     nt_gfx_clear(&(nt_clear_desc_t){.color = true, .clear_color = {fg[0], fg[1], fg[2], fg[3]}});

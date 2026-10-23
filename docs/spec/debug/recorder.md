@@ -20,7 +20,7 @@ bool nt_recorder_active(void);
 
 The game calls `nt_recorder_frame` once per presented frame, after `nt_gfx_end_frame` and before
 `nt_window_swap_buffers`, and passes its clock: `t` is the time of this frame, `dt` the advance that
-produced it. There is no hook and no hidden clock. With `g_nt_app.time` and MANUAL lockstep the
+produced it; `t` never goes back within a recording (asserted). There is no hook and no hidden clock. With `g_nt_app.time` and MANUAL lockstep the
 recording is offline and frame-exact; stepping that outruns the encoder ends it on web and waits for
 it on Windows (see Backends). With RUN it records hand play in real time. The first `frame` call of a
 recording sets its origin `t0`: the start of the step that produced that frame (`t - dt`), or, when
@@ -122,17 +122,19 @@ late), peak-constrained VBR at the web bitrate, BT.709 tags; audio is AAC-LC 192
 samples. Both backends put a keyframe every two seconds. Media Foundation takes a hardware encoder
 when one accepts the stream, else its software one. `start` returns false where no encoder accepts
 the size (very small, or past 4K) and blocks for encoder setup, up to about a second with a hardware
-encoder, so in RUN the first `frame` call takes several deadlines and repeats the opening frame.
+encoder, so in RUN the step after `start` advances by that wait and its `frame` call repeats a frame
+for each deadline it covers.
 Media Foundation must be installed: a game that links the recorder does not start on a Windows N
 edition without the Media Feature Pack.
 
 Each due frame reads the window with `nt_gfx_read_pixels` straight into one of four pooled encoder
 buffers. The read takes the top rows, so an odd framebuffer loses its bottom row and right column, as
 on web. When the encoder holds all four buffers, the `frame` call waits for one: lockstep runs at the
-encoder's pace, RUN shows hitches, and a stalled encoder blocks the game. Each audio push allocates
-one Media Foundation buffer: a dev-only exception to preallocated storage. An encoder failure ends
-the recording and keeps the fragments on disk (the WARN gives the path); a recording without a frame
-deletes its file.
+encoder's pace, RUN shows hitches, and an encoder that keeps all four for ten seconds counts as an
+encoder failure. Each audio write, pushed samples or silence, allocates one Media Foundation buffer: a
+dev-only exception to preallocated storage. An encoder failure ends the recording and keeps the
+fragments on disk; so does a failed `Finalize` (WARN), after which `stop` still returns the frames. A
+recording without a frame deletes its file.
 
 **Other platforms** define no `nt_recorder` target.
 

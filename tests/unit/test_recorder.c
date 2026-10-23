@@ -25,7 +25,8 @@ static struct {
     double worst_video_error; /* largest |now - deadline| of an encoded frame */
     double t0, period;        /* t0: the origin the test expects */
     uint64_t audio_frames;
-    bool position_wrong; /* an audio call whose position is not the samples written so far */
+    uint64_t at;         /* samples written in this recording */
+    bool position_wrong; /* an audio call whose position is not at */
     uint64_t audio_nonzero;
     float last_sample;
     bool stream_broken; /* a non-zero sample that is not the previous one + 1 */
@@ -51,6 +52,7 @@ bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height
     s_be.height = height;
     s_be.fps = fps;
     s_be.period = 1.0 / (double)fps;
+    s_be.at = 0;
     return true;
 }
 
@@ -74,7 +76,8 @@ bool nt_recorder_platform_audio(uint64_t at, const float *stereo, uint32_t frame
     if (s_be.fail_audio) {
         return false;
     }
-    s_be.position_wrong |= at != s_be.audio_frames;
+    s_be.position_wrong |= at != s_be.at;
+    s_be.at += frames;
     for (uint32_t i = 0; i < frames; i++) {
         float v = stereo[(size_t)i * 2U];
         if (v != 0.0F) {
@@ -109,7 +112,10 @@ void setUp(void) {
     g_nt_window.fb_height = 361;
 }
 
-void tearDown(void) { (void)nt_recorder_stop(); }
+void tearDown(void) {
+    (void)nt_recorder_stop();
+    TEST_ASSERT_FALSE(s_be.position_wrong);
+}
 
 /* t: the origin the first frame call should set, for the video deadline check. */
 static void start_at(uint32_t fps, double t) {
@@ -226,8 +232,9 @@ static void test_time_jump_over_two_seconds_ends_the_recording(void) {
 
 static void test_resize_ends_with_audio_padded_to_the_video(void) {
     start_at(30, 0.0);
-    push_stream(1600);
-    frame_at(1.0 / 30.0, 1.0 / 30.0);
+    push_stream(800);
+    frame_at(1.0 / 60.0, 1.0 / 60.0);
+    frame_at(1.0 / 30.0, 1.0 / 60.0);
     g_nt_window.fb_width = 800;
     frame_at(2.0 / 30.0, 1.0 / 30.0);
     TEST_ASSERT_FALSE(nt_recorder_active());
@@ -419,7 +426,6 @@ static void test_lockstep_mixer_stream_is_written_whole(void) {
     (void)nt_recorder_stop();
     TEST_ASSERT_EQUAL_UINT64(pushed, s_be.audio_nonzero);
     TEST_ASSERT_FALSE(s_be.stream_broken);
-    TEST_ASSERT_FALSE(s_be.position_wrong);
     TEST_ASSERT_EQUAL_UINT32(0, s_be.warns);
 }
 

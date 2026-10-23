@@ -39,7 +39,6 @@ static struct {
     uint32_t height;
     uint32_t fps;
     bool com; /* this recording holds a COM reference */
-    bool mf;  /* MFStartup succeeded */
     wchar_t path[MAX_PATH];
 } s_mf;
 
@@ -98,10 +97,7 @@ static void release(bool remove_file) {
         IMFVideoSampleAllocatorEx_Release(s_mf.pool);
         s_mf.pool = NULL;
     }
-    if (s_mf.mf) {
-        (void)MFShutdown();
-        s_mf.mf = false;
-    }
+    (void)MFShutdown();
     if (s_mf.com) {
         CoUninitialize();
         s_mf.com = false;
@@ -169,35 +165,36 @@ bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height
     /* S_OK and S_FALSE add a reference this recording releases; RPC_E_CHANGED_MODE means the thread
        already has COM, which the free-threaded sink writer can use. */
     s_mf.com = SUCCEEDED(CoInitializeEx(NULL, COINIT_MULTITHREADED));
-    s_mf.mf = ok(MFStartup(MF_VERSION, MFSTARTUP_FULL), "MFStartup");
-    if (!s_mf.mf || !create_writer()) {
+    must(MFStartup(MF_VERSION, MFSTARTUP_FULL)); /* the process could not start without Media Foundation */
+    if (!create_writer()) {
         release(true);
         return false;
     }
     return true;
 }
 
-/* read_pixels leaves tight (w * 4) top-down RGBA rows; MF pads the pitch, so each row moves to its slot,
-   bottom up so no row lands on one not yet moved, and turns into BGRA on the way. */
+/* read_pixels leaves tight (w * 4) top-down RGBA rows; where MF pads the pitch each row moves to its
+   slot, bottom up so no row lands on one not yet moved, and turns into BGRA on the way. */
 static void place_rows(uint8_t *scan0, size_t pitch) {
     size_t row = (size_t)s_mf.width * 4U;
     for (uint32_t y = s_mf.height; y-- > 0;) {
         uint8_t *dst = scan0 + (y * pitch);
-        memmove(dst, scan0 + (y * row), row);
-        for (size_t i = 0; i < row; i += 4) {
-            uint8_t r = dst[i];
-            dst[i] = dst[i + 2];
-            dst[i + 2] = r;
+        if (pitch != row) {
+            memmove(dst, scan0 + (y * row), row);
+        }
+        uint32_t *px = (uint32_t *)dst;
+        for (uint32_t x = 0; x < s_mf.width; x++) {
+            px[x] = (px[x] & 0xFF00FF00U) | ((px[x] >> 16) & 0xFFU) | ((px[x] & 0xFFU) << 16);
         }
     }
 }
 
 bool nt_recorder_platform_video(uint32_t index) {
     /* AllocateSample waits about a second for a free sample; EMPTY means the encoder still holds them
-       all, and it returns them on its own threads. */
+       all, and it returns them on its own threads. Ten seconds of that is an encoder that died. */
     IMFSample *sample = NULL;
     HRESULT hr = MF_E_SAMPLEALLOCATOR_EMPTY;
-    while (hr == MF_E_SAMPLEALLOCATOR_EMPTY) {
+    for (int tries = 0; hr == MF_E_SAMPLEALLOCATOR_EMPTY && tries < 10; tries++) {
         hr = IMFVideoSampleAllocatorEx_AllocateSample(s_mf.pool, &sample);
     }
     if (!ok(hr, "AllocateSample")) {
@@ -251,10 +248,11 @@ bool nt_recorder_platform_audio(uint64_t at, const float *stereo, uint32_t frame
     return good;
 }
 
-/* Without a frame there is nothing to keep: Finalize refuses an empty video track. */
+/* Without a frame there is nothing to keep: Finalize refuses an empty video track. A failed Finalize
+   leaves the fragments written before. */
 void nt_recorder_platform_close(uint32_t frames) {
-    if (frames > 0 && !ok(IMFSinkWriter_Finalize(s_mf.writer), "Finalize")) {
-        NT_LOG_WARN("%ls keeps the fragments written before the failure", s_mf.path);
+    if (frames > 0) {
+        (void)ok(IMFSinkWriter_Finalize(s_mf.writer), "Finalize");
     }
     release(frames == 0);
 }

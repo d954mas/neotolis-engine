@@ -6,9 +6,9 @@
 
 #define NT_RECORDER_AUDIO_RATE 48000U
 
-/* Platform backend. open returns false when it cannot record. video and audio return false on an
-   encoder failure; the core then ends the recording and still calls close: web writes no file, native
-   keeps the fragments already on disk. */
+/* Platform backend. open returns false, after logging why, when it cannot record. video and audio
+   return false when the frame or samples cannot be encoded; the core then ends the recording and still
+   calls close: web writes no file, native keeps the fragments already on disk (none without a frame). */
 bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height, uint32_t fps);
 /* Encodes the current framebuffer as output frame index (pts index / fps). */
 bool nt_recorder_platform_video(uint32_t index);

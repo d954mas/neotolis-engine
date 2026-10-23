@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Check an nt_recorder MP4: one H.264 and one AAC/Opus stream, the expected frame rate and count, both
-streams starting at 0, and A/V sync of a flash+beep probe (each white flash onset, at its decoded
-timestamp, has a beep onset within one frame).
+streams starting at 0, colour and row order (the probe's orange box sits upper left on blue), and
+A/V sync of a flash+beep probe (each white flash onset, at its decoded timestamp, has a beep onset
+within one frame).
 
 Needs ffprobe and ffmpeg on PATH (or in FFMPEG_DIR). Stdlib only.
 
@@ -76,6 +77,13 @@ def main():
     if len(times) != len(luma):
         sys.exit(f"{len(times)} frame timestamps for {len(luma)} decoded frames")
     flashes = [times[i] for i, v in enumerate(luma) if v > 200 and (i == 0 or luma[i - 1] <= 200)]
+    # One frame between flashes as 8x8 cells: (2,2) lies in the box, (6,6) in the field.
+    still = next(i for i, v in enumerate(luma) if v <= 200)
+    cells = run([tool("ffmpeg"), "-v", "error", "-i", a.mp4, "-vf", f"select=eq(n\\,{still}),scale=8:8:flags=area",
+                 "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]).stdout
+    box, field = cells[54:57], cells[162:165]
+    if not (box[0] > box[2] and field[2] > field[0]):
+        errors.append(f"box {tuple(box)}, field {tuple(field)}: expected an orange box upper left on blue")
     # Beep onsets: ends of silence, except the one at the end of the track.
     log = run([tool("ffmpeg"), "-hide_banner", "-i", a.mp4, "-af", "silencedetect=n=-40dB:d=0.2",
                "-f", "null", "-"]).stderr.decode(errors="replace")

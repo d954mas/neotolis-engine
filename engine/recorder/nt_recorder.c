@@ -81,7 +81,7 @@ bool nt_recorder_start(const char *name, uint32_t fps) {
         return false;
     }
     if (!nt_recorder_platform_open(name, w, h, fps)) {
-        NT_LOG_WARN("%s: no encoder, or the output cannot be opened", name);
+        NT_LOG_WARN("%s: not recording", name); /* the backend logged why */
         return false;
     }
     s_rec.active = true;
@@ -101,13 +101,14 @@ void nt_recorder_frame(double t, double dt) {
     if (!s_rec.active) {
         return;
     }
-    NT_ASSERT(isfinite(t) && isfinite(dt) && dt >= 0.0);
     /* The origin is the start of the step that produced the first frame, or where the stream pushed
        before it begins (render off after start, several steps per frame), so audio sample 0 sits at t0. */
     if (!s_rec.origin) {
         s_rec.origin = true;
         s_rec.t0 = t - (s_rec.pushed ? (double)s_rec.audio / NT_RECORDER_AUDIO_RATE : dt);
     }
+    /* A clock that went back would pad silence up to a negative time. */
+    NT_ASSERT(isfinite(t) && isfinite(dt) && dt >= 0.0 && t >= s_rec.t0);
     if ((g_nt_window.fb_width & ~1U) != s_rec.width || (g_nt_window.fb_height & ~1U) != s_rec.height) {
         NT_LOG_WARN("framebuffer resized, recording ended");
         (void)end_recording();
