@@ -345,7 +345,7 @@ static void declare_attached_to_anchor(void) {
           .layout = {.sizing = {CLAY_SIZING_FIXED(20.0F), CLAY_SIZING_FIXED(20.0F)}}}) {}
 }
 
-/* A parent retained from the previous frame but not yet declared in this one asserts at declaration. */
+/* Attaching to a parent retained from the previous frame but not yet declared in this one asserts at declaration. */
 static void test_floating_retained_parent_asserts_at_declaration(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);

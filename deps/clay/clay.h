@@ -37,7 +37,8 @@
 //      the rest of the frame. Search "NT patch 7" for the 2 sites.
 //   8. A floating parentId must name an element declared earlier this frame.
 //      Upstream accepts an id retained from the previous frame and lays the
-//      float out against that frame's element, clip and bbox. One site in
+//      float out through a stale element index (another element's clip, or an
+//      out-of-bounds internal error) and the previous frame's bbox. One site in
 //      ConfigureOpenElementPtr reports FLOATING_CONTAINER_PARENT_NOT_FOUND;
 //      search "NT patch 8".
 // NT DEPENDENCY: nt_ui_clay_impl.c wraps Clay__OpenElement /
@@ -828,7 +829,7 @@ typedef CLAY_PACKED_ENUM {
     CLAY_ERROR_TYPE_TEXT_MEASUREMENT_CAPACITY_EXCEEDED,
     // Two elements were declared with exactly the same ID within one layout.
     CLAY_ERROR_TYPE_DUPLICATE_ID,
-    // A floating element was declared using CLAY_ATTACH_TO_ELEMENT_ID and either an invalid .parentId was provided or no element with the provided .parentId was found.
+    // A floating element was declared using CLAY_ATTACH_TO_ELEMENT_ID and either an invalid .parentId was provided or no element with the provided .parentId was declared earlier this frame (NT patch 8).
     CLAY_ERROR_TYPE_FLOATING_CONTAINER_PARENT_NOT_FOUND,
     // An element was declared that using CLAY_SIZING_PERCENT but the percentage value was over 1. Percentage values are expected to be in the 0-1 range.
     CLAY_ERROR_TYPE_PERCENTAGE_OVER_1,
@@ -846,7 +847,7 @@ typedef struct Clay_ErrorData {
     // CLAY_ERROR_TYPE_ELEMENTS_CAPACITY_EXCEEDED - Clay ran out of capacity in its internal array for storing elements. This limit can be increased with Clay_SetMaxElementCount().
     // CLAY_ERROR_TYPE_TEXT_MEASUREMENT_CAPACITY_EXCEEDED - Clay ran out of capacity in its internal array for storing elements. This limit can be increased with Clay_SetMaxMeasureTextCacheWordCount().
     // CLAY_ERROR_TYPE_DUPLICATE_ID - Two elements were declared with exactly the same ID within one layout.
-    // CLAY_ERROR_TYPE_FLOATING_CONTAINER_PARENT_NOT_FOUND - A floating element was declared using CLAY_ATTACH_TO_ELEMENT_ID and either an invalid .parentId was provided or no element with the provided .parentId was found.
+    // CLAY_ERROR_TYPE_FLOATING_CONTAINER_PARENT_NOT_FOUND - A floating element was declared using CLAY_ATTACH_TO_ELEMENT_ID and either an invalid .parentId was provided or no element with the provided .parentId was declared earlier this frame (NT patch 8).
     // CLAY_ERROR_TYPE_PERCENTAGE_OVER_1 - An element was declared that using CLAY_SIZING_PERCENT but the percentage value was over 1. Percentage values are expected to be in the 0-1 range.
     // CLAY_ERROR_TYPE_INTERNAL_ERROR - Clay encountered an internal error. It would be wonderful if you could report this so we can fix it!
     // CLAY_ERROR_TYPE_HASH_MAP_CAPACITY_EXCEEDED - Ids declared in the previous and current layout exceed the hash map. This limit can be increased with Clay_SetMaxElementCount().
