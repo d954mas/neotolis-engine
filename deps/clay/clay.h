@@ -35,6 +35,11 @@
 //   7. Layout element overflow reports CLAY_ERROR_TYPE_ELEMENTS_CAPACITY_EXCEEDED
 //      from Clay__OpenElement / Clay__OpenTextElement instead of silently dropping
 //      the rest of the frame. Search "NT patch 7" for the 2 sites.
+//   8. A floating parentId must name an element declared earlier this frame.
+//      Upstream accepts an id retained from the previous frame and lays the
+//      float out against that frame's element, clip and bbox. One site in
+//      ConfigureOpenElementPtr reports FLOATING_CONTAINER_PARENT_NOT_FOUND;
+//      search "NT patch 8".
 // NT DEPENDENCY: nt_ui_clay_impl.c wraps Clay__OpenElement /
 //   Clay__ConfigureOpenElement / Clay__CloseElement for the begin/end split
 //   pattern used by nt_ui widgets. Verify these internals still exist on update.
@@ -2184,10 +2189,11 @@ void Clay__ConfigureOpenElementPtr(const Clay_ElementDeclaration *declaration) {
                 }
             } else if (declaration->floating.attachTo == CLAY_ATTACH_TO_ELEMENT_WITH_ID) {
                 Clay_LayoutElementHashMapItem *parentItem = Clay__GetHashMapItem(floatingConfig.parentId);
-                if (parentItem == &Clay_LayoutElementHashMapItem_DEFAULT) {
+                // NT patch 8: a parent retained from the previous frame has stale layout data; only one declared earlier this frame counts.
+                if (parentItem == &Clay_LayoutElementHashMapItem_DEFAULT || parentItem->generation != context->generation + 1) {
                     context->errorHandler.errorHandlerFunction(CLAY__INIT(Clay_ErrorData) {
                             .errorType = CLAY_ERROR_TYPE_FLOATING_CONTAINER_PARENT_NOT_FOUND,
-                            .errorText = CLAY_STRING("A floating element was declared with a parentId, but no element with that ID was found."),
+                            .errorText = CLAY_STRING("A floating element was declared with a parentId, but no element with that ID was declared earlier this frame."),
                             .userData = context->errorHandler.userData });
                 } else {
                     clipElementId = Clay__int32_tArray_GetValue(&context->layoutElementClipElementIds, (int32_t)(parentItem->layoutElement - context->layoutElements.internalArray));
