@@ -56,19 +56,22 @@ bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height
     return true;
 }
 
-bool nt_recorder_platform_video(uint32_t index) {
-    if (s_be.fail_video && index == s_be.fail_index) {
+bool nt_recorder_platform_video(uint32_t first, uint32_t count) {
+    TEST_ASSERT_TRUE(count > 0);
+    if (s_be.fail_video && s_be.fail_index - first < count) {
         return false;
     }
-    if (index != s_be.next_index) {
-        s_be.index_gap = true;
+    for (uint32_t index = first; index < first + count; index++) {
+        if (index != s_be.next_index) {
+            s_be.index_gap = true;
+        }
+        double err = fabs(s_be.now - (s_be.t0 + ((double)(index + 1U) * s_be.period)));
+        if (err > s_be.worst_video_error) {
+            s_be.worst_video_error = err;
+        }
+        s_be.next_index = index + 1;
+        s_be.videos++;
     }
-    double err = fabs(s_be.now - (s_be.t0 + ((double)(index + 1U) * s_be.period)));
-    if (err > s_be.worst_video_error) {
-        s_be.worst_video_error = err;
-    }
-    s_be.next_index = index + 1;
-    s_be.videos++;
     return true;
 }
 

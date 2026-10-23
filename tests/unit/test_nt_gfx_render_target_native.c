@@ -2017,6 +2017,58 @@ static void test_pass_load_preserves_color_and_depth_independently(void) {
     destroy_test_target(&target);
 }
 
+/* An odd size with a box in the top-left corner: a row flip, a column flip or a channel swap shows. */
+static void test_read_pixels_to_buffer_gives_bottom_up_bgra(void) {
+    test_target_t target = make_test_target(5, 3, NT_TEXTURE_FORMAT_RGBA8, NT_TEXTURE_FORMAT_DEPTH24);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target, .clear_color = {0.0F, 0.0F, 1.0F, 1.0F}, .clear_depth = 1.0F});
+    nt_gfx_set_scissor(0, 2, 2, 1); /* GL rows count from the bottom: y = 2 is the top row */
+    nt_gfx_set_scissor_enabled(true);
+    nt_gfx_clear(&(nt_clear_desc_t){.color = true, .clear_color = {1.0F, 0.5F, 0.0F, 1.0F}});
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    uint8_t top_down[5 * 3 * 4] = {0};
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(target.target, 0, 0, 5, 3, top_down, sizeof(top_down)));
+    TEST_ASSERT_UINT8_WITHIN(1, 255, top_down[0]);
+    TEST_ASSERT_UINT8_WITHIN(1, 255, top_down[(5 * 4) + 2]);
+    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_READBACK, .usage = NT_USAGE_STREAM, .size = sizeof(top_down)});
+    nt_gfx_read_pixels_to_buffer(target.target, 0, 0, 5, 3, buf);
+    const uint8_t *bytes = nt_gfx_map_buffer(buf, true);
+    TEST_ASSERT_NOT_NULL(bytes);
+    for (size_t row = 0; row < 3; row++) {
+        for (size_t col = 0; col < 5; col++) {
+            const uint8_t *rgba = &top_down[((row * 5U) + col) * 4U];
+            const uint8_t *bgra = &bytes[(((2U - row) * 5U) + col) * 4U];
+            TEST_ASSERT_EQUAL_UINT8(rgba[0], bgra[2]);
+            TEST_ASSERT_EQUAL_UINT8(rgba[1], bgra[1]);
+            TEST_ASSERT_EQUAL_UINT8(rgba[2], bgra[0]);
+            TEST_ASSERT_EQUAL_UINT8(rgba[3], bgra[3]);
+        }
+    }
+    nt_gfx_unmap_buffer(buf);
+    TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
+    nt_gfx_begin_frame();
+    nt_gfx_destroy_buffer(buf);
+    destroy_test_target(&target);
+}
+
+static void test_readback_buffer_contract_asserts(void) {
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_READBACK, .usage = NT_USAGE_DYNAMIC, .size = 16}));
+    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_READBACK, .usage = NT_USAGE_STREAM, .size = 16});
+    const uint8_t data[4] = {0};
+    NT_TEST_EXPECT_ASSERT(nt_gfx_update_buffer(buf, 0, data, sizeof(data)));
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_map_buffer(buf, true));                                     /* no read yet */
+    NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels_to_buffer((nt_render_target_t){0}, 0, 0, 2, 2, buf)); /* frame still open */
+    nt_gfx_end_frame();
+    NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels_to_buffer((nt_render_target_t){0}, 0, 0, 4, 2, buf)); /* larger than the buffer */
+    nt_gfx_read_pixels_to_buffer((nt_render_target_t){0}, 0, 0, 2, 2, buf);
+    TEST_ASSERT_NOT_NULL(nt_gfx_map_buffer(buf, true));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels_to_buffer((nt_render_target_t){0}, 0, 0, 2, 2, buf)); /* still mapped */
+    nt_gfx_unmap_buffer(buf);
+    NT_TEST_EXPECT_ASSERT(nt_gfx_unmap_buffer(buf));
+    nt_gfx_begin_frame();
+    nt_gfx_destroy_buffer(buf);
+}
+
 static void test_pass_clear_covers_attachment_and_starts_with_scissor_off(void) {
     test_target_t target = make_test_target(4, 3, NT_TEXTURE_FORMAT_RGBA8, NT_TEXTURE_FORMAT_DEPTH24);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target, .clear_depth = 0.25F});
@@ -2188,6 +2240,8 @@ int main(void) {
     RUN_TEST(test_pass_discard_maps_attachments_and_finishes_before_unbind);
     RUN_TEST(test_pass_load_preserves_color_and_depth_independently);
     RUN_TEST(test_pass_clear_covers_attachment_and_starts_with_scissor_off);
+    RUN_TEST(test_read_pixels_to_buffer_gives_bottom_up_bgra);
+    RUN_TEST(test_readback_buffer_contract_asserts);
     RUN_TEST(test_render_target_recreate_at_new_size_without_spare_slots);
     RUN_TEST(test_depth_texture_uses_explicit_format);
     RUN_TEST(test_all_public_depth_functions_reach_gl);

@@ -145,8 +145,11 @@ static nt_gfx_gl_pipeline_t *s_pipelines;         /* pipeline data, indexed by s
 static nt_gfx_gl_vertex_input_t *s_vertex_inputs; /* vertex-input VAOs, indexed by slot */
 /* CPU data: no GL object, so a context loss keeps it. */
 static nt_gfx_gl_instance_layout_t s_instance_layouts[NT_GFX_MAX_INSTANCE_LAYOUTS + 1];
-static GLuint *s_buffer_gl;        /* GL buffer names, indexed by slot */
-static GLenum *s_buffer_targets;   /* GL_ARRAY_BUFFER or GL_ELEMENT_ARRAY_BUFFER */
+static GLuint *s_buffer_gl;      /* GL buffer names, indexed by slot */
+static GLenum *s_buffer_targets; /* GL_ARRAY_BUFFER, GL_ELEMENT_ARRAY_BUFFER or GL_PIXEL_PACK_BUFFER */
+#if !defined(NT_PLATFORM_WEB)
+static GLsync *s_buffer_fence; /* readback buffers: the fence after the last read, until mapped */
+#endif
 static GLuint *s_texture_gl;       /* GL texture names, indexed by slot */
 static GLuint *s_render_target_gl; /* GL framebuffer names, indexed by slot */
 static GLuint s_bound_framebuffer;
@@ -645,6 +648,7 @@ static void nt_gfx_gl_init_context_features(void) {
     }
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 void nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc);
     s_init_desc = *desc;
@@ -662,6 +666,10 @@ void nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     s_render_target_gl = (GLuint *)calloc(s_init_desc.max_render_targets + 1, sizeof(GLuint));
     /* Init-time OOM on a few KB of tables is not a state a game can recover from. */
     NT_ASSERT(s_programs && s_pipelines && s_vertex_inputs && s_buffer_gl && s_buffer_targets && s_texture_gl && s_render_target_gl && "gfx backend init: out of memory");
+#if !defined(NT_PLATFORM_WEB)
+    s_buffer_fence = (GLsync *)calloc(s_init_desc.max_buffers + 1, sizeof(GLsync));
+    NT_ASSERT(s_buffer_fence != NULL && "gfx backend init: out of memory");
+#endif
 
     nt_gfx_gl_cache_ground_state();
 
@@ -687,6 +695,10 @@ void nt_gfx_backend_shutdown(void) {
     free(s_buffer_targets);
     free(s_texture_gl);
     free(s_render_target_gl);
+#if !defined(NT_PLATFORM_WEB)
+    free((void *)s_buffer_fence);
+    s_buffer_fence = NULL;
+#endif
 
     s_programs = NULL;
     s_pipelines = NULL;
@@ -1070,6 +1082,59 @@ bool nt_gfx_backend_read_pixels(uint32_t render_target_backend, int x, int y, in
     }
     return ok;
 }
+
+#if !defined(NT_PLATFORM_WEB)
+// #region buffer readback
+/* BGRA is the desktop drivers' window format: RGBA would make the CPU swizzle every pixel. */
+void nt_gfx_backend_read_pixels_to_buffer(uint32_t render_target_backend, int x, int y, int w, int h, uint32_t buffer_backend) {
+    const GLuint fbo = render_target_backend != 0 ? s_render_target_gl[render_target_backend] : 0;
+    if (fbo != 0) {
+        NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, fbo);
+    }
+    NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, s_buffer_gl[buffer_backend]);
+    NT_GL(glPixelStorei, GL_PACK_ALIGNMENT, 4);
+    NT_GL(glReadPixels, x, y, (GLsizei)w, (GLsizei)h, GL_BGRA, GL_UNSIGNED_BYTE, NULL); /* NULL: offset 0 into the bound pack buffer */
+    NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, 0);
+    if (fbo != 0) {
+        NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, 0);
+    }
+    if (s_buffer_fence[buffer_backend] != NULL) {
+        NT_GL(glDeleteSync, s_buffer_fence[buffer_backend]);
+    }
+    s_buffer_fence[buffer_backend] = NT_GL_RET(glFenceSync, GL_SYNC_GPU_COMMANDS_COMPLETE, 0U);
+}
+
+bool nt_gfx_backend_readback_ready(uint32_t buffer_backend, bool wait) {
+    GLsync fence = s_buffer_fence[buffer_backend];
+    /* The flush makes a fence the driver still holds reach the GPU, so a later wait can end. */
+    GLenum status = NT_GL_RET(glClientWaitSync, fence, GL_SYNC_FLUSH_COMMANDS_BIT, (GLuint64)0);
+    while (wait && status == GL_TIMEOUT_EXPIRED) {
+        status = NT_GL_RET(glClientWaitSync, fence, 0U, (GLuint64)1000000000);
+    }
+    if (status == GL_TIMEOUT_EXPIRED) {
+        return false;
+    }
+    NT_ASSERT((status != GL_WAIT_FAILED || nt_gfx_gl_ctx_query_lost()) && "readback: fence wait failed on a live context");
+    NT_GL(glDeleteSync, fence);
+    s_buffer_fence[buffer_backend] = NULL;
+    return status != GL_WAIT_FAILED;
+}
+
+const void *nt_gfx_backend_map_buffer(uint32_t buffer_backend, uint32_t size) {
+    NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, s_buffer_gl[buffer_backend]);
+    const void *bytes = NT_GL_RET(glMapBufferRange, GL_PIXEL_PACK_BUFFER, (GLintptr)0, (GLsizeiptr)size, (GLbitfield)GL_MAP_READ_BIT);
+    NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, 0);
+    NT_ASSERT((bytes != NULL || nt_gfx_gl_ctx_query_lost()) && "map_buffer: map failed on a live context");
+    return bytes;
+}
+
+void nt_gfx_backend_unmap_buffer(uint32_t buffer_backend) {
+    NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, s_buffer_gl[buffer_backend]);
+    (void)NT_GL_RET(glUnmapBuffer, GL_PIXEL_PACK_BUFFER);
+    NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, 0);
+}
+// #endregion
+#endif
 
 /* ---- Pipeline bind ---- */
 
@@ -1854,8 +1919,14 @@ bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot) {
         assert_name_failed_on_loss("glGenBuffers", desc->label);
         return false;
     }
-    const GLenum target = desc->type == NT_BUFFER_INDEX ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
+    GLenum target = desc->type == NT_BUFFER_INDEX ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
     GLenum usage = map_buffer_usage(desc->usage);
+#if !defined(NT_PLATFORM_WEB)
+    if (desc->type == NT_BUFFER_READBACK) {
+        target = GL_PIXEL_PACK_BUFFER;
+        usage = GL_STREAM_READ;
+    }
+#endif
     bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER;
     if (unhook_vao) {
         ebo_upload_begin();
@@ -1867,6 +1938,9 @@ bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot) {
     NT_GL_BUFFER_UPLOAD(desc->data, desc->size, glBufferData, target, (GLsizeiptr)desc->size, desc->data, usage);
     if (unhook_vao) {
         ebo_upload_end();
+    }
+    if (target == GL_PIXEL_PACK_BUFFER) {
+        NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, 0); /* a bound pack buffer turns every glReadPixels pointer into an offset */
     }
 
     s_buffer_gl[slot] = buf;
@@ -1882,6 +1956,12 @@ void nt_gfx_backend_destroy_buffer(uint32_t backend_handle) {
         detach_instance_buffer(buf);
     }
     forget_deleted_buffer(buf);
+#if !defined(NT_PLATFORM_WEB)
+    if (s_buffer_fence[backend_handle] != NULL) {
+        NT_GL(glDeleteSync, s_buffer_fence[backend_handle]);
+        s_buffer_fence[backend_handle] = NULL;
+    }
+#endif
     NT_GL_DELETE(glDeleteBuffers, 1, &buf);
     s_buffer_gl[backend_handle] = 0;
     s_buffer_targets[backend_handle] = 0;
@@ -2280,6 +2360,11 @@ bool nt_gfx_backend_recreate_all_resources(void) {
     if (s_buffer_targets) {
         memset(s_buffer_targets, 0, (s_init_desc.max_buffers + 1) * sizeof(GLenum));
     }
+#if !defined(NT_PLATFORM_WEB)
+    if (s_buffer_fence) {
+        memset((void *)s_buffer_fence, 0, (s_init_desc.max_buffers + 1) * sizeof(GLsync));
+    }
+#endif
     if (s_texture_gl) {
         memset(s_texture_gl, 0, (s_init_desc.max_textures + 1) * sizeof(GLuint));
     }

@@ -408,6 +408,34 @@ bool nt_gfx_backend_read_pixels(uint32_t render_target_backend, int x, int y, in
     return true; /* synthetic fill always writes the full buffer. */
 }
 
+#if !defined(NT_PLATFORM_WEB)
+/* Readback without a GPU: every read is done at once and maps to zeroed bytes. */
+static uint8_t s_fake_readback[64U * 64U * 4U];
+
+void nt_gfx_backend_read_pixels_to_buffer(uint32_t render_target_backend, int x, int y, int w, int h, uint32_t buffer_backend) {
+    (void)render_target_backend;
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+    (void)buffer_backend;
+}
+
+bool nt_gfx_backend_readback_ready(uint32_t buffer_backend, bool wait) {
+    (void)buffer_backend;
+    (void)wait;
+    return true;
+}
+
+const void *nt_gfx_backend_map_buffer(uint32_t buffer_backend, uint32_t size) {
+    (void)buffer_backend;
+    NT_ASSERT(size <= sizeof(s_fake_readback) && "fake map_buffer: buffer larger than the fake storage");
+    return s_fake_readback;
+}
+
+void nt_gfx_backend_unmap_buffer(uint32_t buffer_backend) { (void)buffer_backend; }
+#endif
+
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
     (void)desc;
     if (s_fake_context_lost) {

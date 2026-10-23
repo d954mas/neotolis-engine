@@ -25,7 +25,8 @@ void nt_recorder_frame(double t, double dt);
 void nt_recorder_push_audio(const float *stereo48k, uint32_t frames);
 
 /* Returns the frames sent to the encoder; 0 while idle, after a self-end or when the final audio write
-   failed (web: the 'nt-recorder' event says whether a file exists). */
+   failed (web: the 'nt-recorder' event says whether a file exists). Windows destroys gfx buffers here:
+   not while a frame is being drawn (the gfx frame rule). */
 uint32_t nt_recorder_stop(void);
 
 bool nt_recorder_active(void);

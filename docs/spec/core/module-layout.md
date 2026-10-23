@@ -213,7 +213,7 @@ pools, parse shaders, or record draw state. Creation and activation return
 invalid handles, validity/readiness queries return false, and draw/state calls
 do nothing. Capabilities, capacities and statistics remain zero. Data views are
 empty; texture-size and timer outputs are zeroed. Readback returns false without
-writing pixels. Applying a texture set is a no-op; no program is ever ready, so
+writing pixels, and a readback buffer map returns NULL. Applying a texture set is a no-op; no program is ever ready, so
 no draw is ever issued.
 
 A headless executable owns the decision to omit graphics initialization and

@@ -737,6 +737,34 @@ renderer restores, any destroy) runs before the first pass or after
 `nt_gfx_end_frame` (the frame rule); `nt_gfx_read_pixels` runs after
 `nt_gfx_end_frame`, before the swap.
 
+### Readback
+
+`nt_gfx_read_pixels` copies a rect of the window or of an RGBA8 render target
+into caller memory after `nt_gfx_end_frame`, before the swap. It waits until the
+GPU has finished the frame.
+
+Native builds can also read without waiting. WebGL has no buffer mapping, so the
+web build has neither these calls nor `NT_BUFFER_READBACK`. A readback buffer is
+made with `NT_USAGE_STREAM` and no data, and `nt_gfx_update_buffer` on it asserts.
+`nt_gfx_read_pixels_to_buffer` follows the frame point and source rules of
+`nt_gfx_read_pixels`, queues the copy and a fence, and returns. The buffer then
+holds BGRA8 rows of `w * 4` bytes, bottom-up as GL stores them; BGRA is the
+format desktop drivers read without a conversion. `nt_gfx_map_buffer(buf, wait)`
+returns the bytes once the fence has signalled. With `wait` false it returns
+NULL (`UNREADY`) while the GPU is still copying. `nt_gfx_unmap_buffer` ends the
+access. Map and unmap run in any frame state, because the copy was queued
+earlier.
+
+Each read is mapped once. A read into a mapped buffer, a map without a read
+since the last map and an unmap of an unmapped buffer assert. A lost context
+drops the read: the map returns NULL (`CONTEXT_LOST`).
+
+The caller owns the buffers and their order. With two or three buffers in a
+ring, a read is mapped a frame or two after it was issued and the CPU does not
+wait for the GPU. An NVIDIA debug context reports "Pixel transfer is
+synchronized with 3D rendering" for every read, synchronous or not, even on an
+idle GPU; the message does not mean that the CPU waited.
+
 ### Render targets
 
 Render targets are a general backend capability for offscreen passes, not a

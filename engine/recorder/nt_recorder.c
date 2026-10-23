@@ -129,11 +129,12 @@ void nt_recorder_frame(double t, double dt) {
         (void)end_recording();
         return;
     }
-    for (; s_rec.frames < frames; s_rec.frames++) {
-        if (!nt_recorder_platform_video(s_rec.frames)) {
+    if (frames > s_rec.frames) {
+        if (!nt_recorder_platform_video(s_rec.frames, frames - s_rec.frames)) {
             fail();
             return;
         }
+        s_rec.frames = frames;
     }
     /* Silence keeps pace with the clock until the first push, so a long silent clip never pads at once
        and a mixer whose first push is the step after this call starts on time. */

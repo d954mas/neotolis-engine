@@ -92,6 +92,14 @@ static inline GLuint nt_gl_close_uint(GLuint result) {
     nt_gl_close();
     return result;
 }
+/* A returned pointer (a sync object, a mapping) records as a presence bit. */
+static inline void *nt_gl_close_pointer(void *result) {
+    if (g_nt_gfx_capture.call != NULL) {
+        nt_gl_put_pointer(result);
+    }
+    nt_gl_close();
+    return result;
+}
 
 #ifdef NT_PLATFORM_WEB
 /* WebGL has no debug callback; a private type keeps the _Generic association unconditional. */
@@ -144,7 +152,7 @@ static inline void nt_gl_put_callback(nt_gl_callback_t callback) { nt_gl_put_uns
 #define NT_GL_ARGS_(...) (NT_GL_RECORDING_() ? (NT_GL_CAT(NT_GL_EACH_, NT_GL_NARGS(__VA_ARGS__))(__VA_ARGS__)) : (void)0)
 #define NT_GL_NAMES_(count, names) (NT_GL_RECORDING_() ? nt_gl_put_names((count), (names)) : (void)0)
 #define NT_GL_CLOSE_() nt_gl_close()
-#define NT_GL_CLOSE_RESULT_(result) _Generic((result), GLboolean: nt_gl_close_uint, GLint: nt_gl_close_int, GLuint: nt_gl_close_uint)(result)
+#define NT_GL_CLOSE_RESULT_(result) _Generic((result), GLboolean: nt_gl_close_uint, GLint: nt_gl_close_int, GLuint: nt_gl_close_uint, default: nt_gl_close_pointer)(result)
 #else
 #define NT_GL_OPEN_(call) NT_GL_COUNT_(call)
 #define NT_GL_ARGS_(...) ((void)0)
