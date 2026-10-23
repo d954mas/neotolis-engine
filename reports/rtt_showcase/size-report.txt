@@ -1,5 +1,5 @@
 # Size Report: rtt_showcase (wasm-analysis-paired)
-# Commit: 8452a70
+# Commit: f905a72
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                65 B
 Elem                  48 B
-Code              232309 B
-Data               21415 B
-Custom              6675 B
+Code              232325 B
+Data               21439 B
+Custom              6687 B
 ---------------- ----------
-TOTAL             261666 B
+TOTAL             261718 B
 
 ## Top 30 Functions by Size
 
@@ -27,7 +27,7 @@ TOTAL             261666 B
 19214 B   dispatch_command
 13262 B   create_gpu
 10220 B   declare_slider_control
- 8796 B   Clay__ConfigureOpenElementPtr
+ 8812 B   Clay__ConfigureOpenElementPtr
  8544 B   main
  6038 B   Clay__SizeContainersAlongAxis
  5616 B   Clay__InitializeEphemeralMemory
@@ -55,7 +55,7 @@ TOTAL             261666 B
  1317 B   nt_ui_image
 
 Total functions: 185
-Total code size: 231986 B
+Total code size: 232002 B
 
 ## Built Engine Archives
 
@@ -116,7 +116,7 @@ libnt_sprite_renderer.a    16192 B
 libnt_text_renderer.a       7702 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                351870 B
+libnt_ui.a                351908 B
 libnt_ui_rich.a            39000 B
 libnt_ui_rich_fx.a          3050 B
 libnt_ui_stub.a             1324 B
@@ -125,9 +125,9 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2661648 B
+TOTAL (archives)         2661686 B
 
 ## Data Segments Summary
 
-Segments: 59
-Total data size: 20997 B
+Segments: 60
+Total data size: 21015 B

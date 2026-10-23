@@ -1,5 +1,5 @@
 # Size Report: skeletal_showcase (wasm-analysis-paired)
-# Commit: 8452a70
+# Commit: f905a72
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                71 B
 Elem                 151 B
-Code              333648 B
-Data               23872 B
-Custom              9882 B
+Code              333664 B
+Data               23900 B
+Custom              9894 B
 ---------------- ----------
-TOTAL             369006 B
+TOTAL             369062 B
 
 ## Top 30 Functions by Size
 
@@ -28,7 +28,7 @@ TOTAL             369006 B
 19219 B   dispatch_command
 13268 B   create_gpu
  9020 B   mixing_declare_controls
- 8798 B   Clay__ConfigureOpenElementPtr
+ 8814 B   Clay__ConfigureOpenElementPtr
  6433 B   nt_ui_combo_begin
  6038 B   Clay__SizeContainersAlongAxis
  5874 B   nt_ui_scroll_begin
@@ -55,7 +55,7 @@ TOTAL             369006 B
  2277 B   skinned_draw
 
 Total functions: 320
-Total code size: 333111 B
+Total code size: 333127 B
 
 ## Built Engine Archives
 
@@ -116,7 +116,7 @@ libnt_sprite_renderer.a    16192 B
 libnt_text_renderer.a       7702 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                351870 B
+libnt_ui.a                351908 B
 libnt_ui_rich.a            39000 B
 libnt_ui_rich_fx.a          3050 B
 libnt_ui_stub.a             1324 B
@@ -125,9 +125,9 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2661648 B
+TOTAL (archives)         2661686 B
 
 ## Data Segments Summary
 
-Segments: 90
-Total data size: 23238 B
+Segments: 91
+Total data size: 23258 B

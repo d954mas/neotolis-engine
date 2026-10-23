@@ -1,5 +1,5 @@
 # Size Report: asteroids (wasm-analysis-paired)
-# Commit: 8452a70
+# Commit: f905a72
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                  64 B
-Code              394441 B
-Data              219017 B
-Custom             13177 B
+Code              394457 B
+Data              219040 B
+Custom             13163 B
 ---------------- ----------
-TOTAL             628154 B
+TOTAL             628179 B
 
 ## Top 30 Functions by Size
 
@@ -30,7 +30,7 @@ TOTAL             628154 B
 19217 B   dispatch_command
 17355 B   nt_gfx_activate_texture
 10756 B   main
- 8829 B   Clay__ConfigureOpenElementPtr
+ 8845 B   Clay__ConfigureOpenElementPtr
  6059 B   Clay__SizeContainersAlongAxis
  5766 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
  5643 B   Clay__InitializeEphemeralMemory
@@ -55,7 +55,7 @@ TOTAL             628154 B
  2436 B   printf_core
 
 Total functions: 254
-Total code size: 393995 B
+Total code size: 394011 B
 
 ## Built Engine Archives
 
@@ -116,7 +116,7 @@ libnt_sprite_renderer.a    16192 B
 libnt_text_renderer.a       7702 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                351870 B
+libnt_ui.a                351908 B
 libnt_ui_rich.a            39000 B
 libnt_ui_rich_fx.a          3050 B
 libnt_ui_stub.a             1324 B
@@ -125,9 +125,9 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2661648 B
+TOTAL (archives)         2661686 B
 
 ## Data Segments Summary
 
-Segments: 183
-Total data size: 217639 B
+Segments: 182
+Total data size: 217669 B
