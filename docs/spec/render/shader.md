@@ -148,7 +148,9 @@ Just before that line, a link failure logs
 compiled and `0` that it did not. An empty driver log with `1 1` therefore
 points at linking, a `0` at that stage's compilation. A context lost during
 these queries can also read as `0`, and on the web a stage log may then read
-`(unknown error)`; that record still ends in the assertion. These queries exist
+`(unknown error)`. Finishing asks for the loss again after these queries, and
+after a failed reflection's record, so a loss they cause keeps the recoverable
+context-loss outcome; only a live failure ends in the assertion. These queries exist
 only with ERROR logging compiled in and never run
 for a successful link or an already-confirmed context loss.
 

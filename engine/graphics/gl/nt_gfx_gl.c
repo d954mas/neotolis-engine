@@ -1658,9 +1658,11 @@ nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll
     NT_GL(glGetProgramiv, rec->program, GL_LINK_STATUS, &linked);
     if (!linked) {
         /* A loss fails the link before its event arrives; the caller latches it. */
-        const bool lost = nt_gfx_gl_ctx_query_lost();
+        bool lost = nt_gfx_gl_ctx_query_lost();
         if (!lost) {
             nt_gfx_gl_log_link_failure(rec);
+            /* The diagnostic queries can lose the context too. */
+            lost = nt_gfx_gl_ctx_query_lost();
         }
         NT_ASSERT(lost && "program link failed on a live context");
         return NT_GFX_RESULT_CONTEXT_LOST;
@@ -1672,9 +1674,10 @@ nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll
         reflected = nt_gfx_gl_reflect_uniforms(rec->program, rec);
     }
     if (!reflected) {
-        const bool lost = nt_gfx_gl_ctx_query_lost();
+        bool lost = nt_gfx_gl_ctx_query_lost();
         if (!lost) {
             log_program_failure(rec, phase, "no data", "gl_error", NT_GL_RET0(glGetError));
+            lost = nt_gfx_gl_ctx_query_lost();
         }
         NT_ASSERT(lost && "program uniform reflection failed");
         return NT_GFX_RESULT_CONTEXT_LOST;
