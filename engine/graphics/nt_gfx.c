@@ -109,16 +109,10 @@ typedef struct {
     uint8_t usage;        /* nt_buffer_usage_t */
     uint8_t index_type;   /* 0=none, 1=uint16, 2=uint32 */
     uint8_t frame_stream; /* frame storage stream + 1 (its `used` bounds instance reads); 0 = not frame storage */
-    uint8_t readback;     /* NT_BUFFER_READBACK: nt_gfx_readback_state_t */
+    bool read;            /* NT_BUFFER_READBACK: a read was issued */
     bool live;            /* a backend object on the current context; false = free slot or husk */
     uint32_t size;        /* capacity */
 } nt_gfx_buffer_meta_t;
-
-typedef enum {
-    NT_GFX_READBACK_IDLE = 0,
-    NT_GFX_READBACK_PENDING, /* a read was issued and not mapped yet */
-    NT_GFX_READBACK_MAPPED,
-} nt_gfx_readback_state_t;
 
 /* ---- Vertex input metadata (destroy cascade + draw-invariant checks) ---- */
 
@@ -865,9 +859,8 @@ static nt_gfx_result_t read_pixels_to_buffer(nt_render_target_t src, int x, int 
     NT_ASSERT(w > 0 && h > 0 && "read_pixels_to_buffer: empty rect");
     nt_gfx_buffer_meta_t *meta = readback_meta(buf);
     NT_ASSERT((uint64_t)(uint32_t)w * (uint64_t)(uint32_t)h * 4U <= meta->size && "read_pixels_to_buffer: the buffer is smaller than w*h*4");
-    NT_ASSERT(meta->readback != NT_GFX_READBACK_MAPPED && "read_pixels_to_buffer: unmap the buffer first");
     nt_gfx_backend_read_pixels_to_buffer(read_source_slot(src, x, y, w, h), x, y, w, h, nt_pool_slot_index(buf.id));
-    meta->readback = NT_GFX_READBACK_PENDING;
+    meta->read = true;
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -878,32 +871,17 @@ void nt_gfx_read_pixels_to_buffer(nt_render_target_t src, int x, int y, int w, i
     NT_GFX_END(read_pixels_to_buffer(src, x, y, w, h, buf));
 }
 
-static nt_gfx_result_t map_readback(nt_buffer_t buf, const uint8_t **out) {
-    nt_gfx_buffer_meta_t *meta = readback_meta(buf);
-    NT_ASSERT(meta->readback == NT_GFX_READBACK_PENDING && "map_readback: needs a read since the last map");
-    *out = (const uint8_t *)nt_gfx_backend_map_buffer(nt_pool_slot_index(buf.id), meta->size);
-    meta->readback = NT_GFX_READBACK_MAPPED;
+static nt_gfx_result_t wait_readback(nt_buffer_t buf, const uint8_t **out) {
+    NT_ASSERT(readback_meta(buf)->read && "wait_readback: the buffer was never read");
+    *out = (const uint8_t *)nt_gfx_backend_wait_buffer(nt_pool_slot_index(buf.id));
     return NT_GFX_RESULT_ACCEPTED;
 }
 
-const uint8_t *nt_gfx_map_readback(nt_buffer_t buf) {
-    NT_GFX_BEGIN(NT_GFX_OP_BUFFER_MAP, NT_GFX_OBJECT_BUFFER, buf.id);
+const uint8_t *nt_gfx_wait_readback(nt_buffer_t buf) {
+    NT_GFX_BEGIN(NT_GFX_OP_BUFFER_WAIT, NT_GFX_OBJECT_BUFFER, buf.id);
     const uint8_t *bytes = NULL;
-    NT_GFX_END(map_readback(buf, &bytes));
+    NT_GFX_END(wait_readback(buf, &bytes));
     return bytes;
-}
-
-static nt_gfx_result_t unmap_readback(nt_buffer_t buf) {
-    nt_gfx_buffer_meta_t *meta = readback_meta(buf);
-    NT_ASSERT(meta->readback == NT_GFX_READBACK_MAPPED && "unmap_readback: the buffer is not mapped");
-    meta->readback = NT_GFX_READBACK_IDLE;
-    nt_gfx_backend_unmap_buffer(nt_pool_slot_index(buf.id));
-    return NT_GFX_RESULT_ACCEPTED;
-}
-
-void nt_gfx_unmap_readback(nt_buffer_t buf) {
-    NT_GFX_BEGIN(NT_GFX_OP_BUFFER_UNMAP, NT_GFX_OBJECT_BUFFER, buf.id);
-    NT_GFX_END(unmap_readback(buf));
 }
 // #endregion
 #endif

@@ -101,6 +101,17 @@ static inline void *nt_gl_close_pointer(void *result) {
     return result;
 }
 
+#ifndef NT_PLATFORM_WEB
+/* A returned fence records as a presence bit. */
+static inline GLsync nt_gl_close_sync(GLsync result) {
+    if (g_nt_gfx_capture.call != NULL) {
+        nt_gl_put_pointer(result);
+    }
+    nt_gl_close();
+    return result;
+}
+#endif
+
 #ifdef NT_PLATFORM_WEB
 /* WebGL has no debug callback; a private type keeps the _Generic association unconditional. */
 typedef const struct nt_gl_no_callback_tag *nt_gl_callback_t;
@@ -155,7 +166,7 @@ static inline void nt_gl_put_callback(nt_gl_callback_t callback) { nt_gl_put_uns
 #if defined(NT_PLATFORM_WEB)
 #define NT_GL_CLOSE_RESULT_(result) _Generic((result), GLboolean: nt_gl_close_uint, GLint: nt_gl_close_int, GLuint: nt_gl_close_uint)(result)
 #else
-#define NT_GL_CLOSE_RESULT_(result) _Generic((result), GLboolean: nt_gl_close_uint, GLint: nt_gl_close_int, GLuint: nt_gl_close_uint, void *: nt_gl_close_pointer)(result)
+#define NT_GL_CLOSE_RESULT_(result) _Generic((result), GLboolean: nt_gl_close_uint, GLint: nt_gl_close_int, GLuint: nt_gl_close_uint, void *: nt_gl_close_pointer, GLsync: nt_gl_close_sync)(result)
 #endif
 #else
 #define NT_GL_OPEN_(call) NT_GL_COUNT_(call)

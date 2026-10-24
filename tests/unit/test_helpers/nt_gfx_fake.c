@@ -409,7 +409,7 @@ bool nt_gfx_backend_read_pixels(uint32_t render_target_backend, int x, int y, in
 }
 
 #if !defined(NT_PLATFORM_WEB)
-/* Readback without a GPU: every read is done at once and maps to zeroed bytes. */
+/* Readback without a GPU: every read is done at once and returns zeroed bytes. */
 static uint8_t s_fake_readback[64U * 64U * 4U];
 
 void nt_gfx_backend_read_pixels_to_buffer(uint32_t render_target_backend, int x, int y, int w, int h, uint32_t buffer_backend) {
@@ -421,13 +421,10 @@ void nt_gfx_backend_read_pixels_to_buffer(uint32_t render_target_backend, int x,
     (void)buffer_backend;
 }
 
-const void *nt_gfx_backend_map_buffer(uint32_t buffer_backend, uint32_t size) {
+const void *nt_gfx_backend_wait_buffer(uint32_t buffer_backend) {
     (void)buffer_backend;
-    NT_ASSERT(size <= sizeof(s_fake_readback) && "fake map_buffer: buffer larger than the fake storage");
     return s_fake_readback;
 }
-
-void nt_gfx_backend_unmap_buffer(uint32_t buffer_backend) { (void)buffer_backend; }
 #endif
 
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
@@ -515,6 +512,9 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t layout_s
 bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot) {
     NT_ASSERT(slot > 0 && slot <= s_fake_max_buffers && !s_fake_buffer_live[slot] && "create_buffer: the record at the frontend slot must be empty");
     s_fake_last_buffer_desc = *desc;
+#if !defined(NT_PLATFORM_WEB)
+    NT_ASSERT((desc->type != NT_BUFFER_READBACK || desc->size <= sizeof(s_fake_readback)) && "fake create_buffer: readback larger than the fake storage");
+#endif
     const bool lose = (s_fake_lose_buffer_creates & 1U) != 0;
     s_fake_lose_buffer_creates >>= 1U;
     if (lose) {

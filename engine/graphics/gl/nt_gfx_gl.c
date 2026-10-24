@@ -150,6 +150,14 @@ static GLuint *s_buffer_gl;        /* GL buffer names, indexed by slot */
 static GLenum *s_buffer_targets;   /* GL_ARRAY_BUFFER, GL_ELEMENT_ARRAY_BUFFER or GL_PIXEL_PACK_BUFFER */
 static GLuint *s_texture_gl;       /* GL texture names, indexed by slot */
 static GLuint *s_render_target_gl; /* GL framebuffer names, indexed by slot */
+#if !defined(NT_PLATFORM_WEB)
+/* NT_BUFFER_READBACK: the mapping kept for the buffer's life and the fence of its last read. */
+typedef struct {
+    const void *bytes;
+    GLsync fence;
+} nt_gfx_gl_readback_t;
+static nt_gfx_gl_readback_t *s_readbacks; /* indexed by buffer slot */
+#endif
 static GLuint s_bound_framebuffer;
 static GLbitfield s_pass_discard;
 
@@ -663,6 +671,10 @@ void nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     s_buffer_targets = (GLenum *)calloc(s_init_desc.max_buffers + 1, sizeof(GLenum));
     s_texture_gl = (GLuint *)calloc(s_init_desc.max_textures + 1, sizeof(GLuint));
     s_render_target_gl = (GLuint *)calloc(s_init_desc.max_render_targets + 1, sizeof(GLuint));
+#if !defined(NT_PLATFORM_WEB)
+    s_readbacks = (nt_gfx_gl_readback_t *)calloc(s_init_desc.max_buffers + 1, sizeof(nt_gfx_gl_readback_t));
+    NT_ASSERT(s_readbacks && "gfx backend init: out of memory");
+#endif
     /* Init-time OOM on a few KB of tables is not a state a game can recover from. */
     NT_ASSERT(s_programs && s_pipelines && s_vertex_inputs && s_buffer_gl && s_buffer_targets && s_texture_gl && s_render_target_gl && "gfx backend init: out of memory");
 
@@ -690,6 +702,10 @@ void nt_gfx_backend_shutdown(void) {
     free(s_buffer_targets);
     free(s_texture_gl);
     free(s_render_target_gl);
+#if !defined(NT_PLATFORM_WEB)
+    free(s_readbacks);
+    s_readbacks = NULL;
+#endif
 
     s_programs = NULL;
     s_pipelines = NULL;
@@ -1089,21 +1105,22 @@ void nt_gfx_backend_read_pixels_to_buffer(uint32_t render_target_backend, int x,
     if (fbo != 0) {
         NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, 0);
     }
+    nt_gfx_gl_readback_t *rb = &s_readbacks[buffer_backend];
+    if (rb->fence != NULL) {
+        NT_GL(glDeleteSync, rb->fence);
+    }
+    rb->fence = NT_GL_RET(glFenceSync, GL_SYNC_GPU_COMMANDS_COMPLETE, (GLbitfield)0);
 }
 
-const void *nt_gfx_backend_map_buffer(uint32_t buffer_backend, uint32_t size) {
-    NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, s_buffer_gl[buffer_backend]);
-    const void *bytes = NT_GL_RET(glMapBufferRange, GL_PIXEL_PACK_BUFFER, (GLintptr)0, (GLsizeiptr)size, (GLbitfield)GL_MAP_READ_BIT);
-    NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, 0);
-    NT_ASSERT(bytes != NULL && "map_readback: map failed");
-    return bytes;
-}
-
-void nt_gfx_backend_unmap_buffer(uint32_t buffer_backend) {
-    NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, s_buffer_gl[buffer_backend]);
-    const GLuint intact = NT_GL_RET(glUnmapBuffer, GL_PIXEL_PACK_BUFFER); /* GLboolean, widened by the capture funnel */
-    NT_ASSERT(intact == GL_TRUE && "unmap_readback: the driver lost the mapped bytes");
-    NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, 0);
+/* The flush bit: a fence the driver has not submitted yet would never signal. */
+const void *nt_gfx_backend_wait_buffer(uint32_t buffer_backend) {
+    const nt_gfx_gl_readback_t *rb = &s_readbacks[buffer_backend];
+    GLenum status = GL_TIMEOUT_EXPIRED;
+    while (status == GL_TIMEOUT_EXPIRED) {
+        status = NT_GL_RET(glClientWaitSync, rb->fence, (GLbitfield)GL_SYNC_FLUSH_COMMANDS_BIT, (GLuint64)1000000000U);
+    }
+    NT_ASSERT(status != GL_WAIT_FAILED && "wait_readback: glClientWaitSync failed");
+    return rb->bytes;
 }
 // #endregion
 #endif
@@ -1921,7 +1938,6 @@ bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot) {
 #if !defined(NT_PLATFORM_WEB)
     if (desc->type == NT_BUFFER_READBACK) {
         target = GL_PIXEL_PACK_BUFFER;
-        usage = GL_STREAM_READ;
     }
 #endif
     bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER;
@@ -1932,15 +1948,25 @@ bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot) {
     if (target == GL_ARRAY_BUFFER) {
         s_gl_cache.array_buffer = buf;
     }
+#if !defined(NT_PLATFORM_WEB)
+    /* Mapped once for the buffer's life: a map per read costs about 0.6 ms on NVIDIA, waiting for the
+       driver thread. */
+    if (target == GL_PIXEL_PACK_BUFFER) {
+        NT_ASSERT(GLAD_GL_ARB_buffer_storage && "make_buffer: a readback buffer needs GL_ARB_buffer_storage");
+        const GLbitfield access = GL_MAP_READ_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
+        NT_GL(glBufferStorage, GL_PIXEL_PACK_BUFFER, (GLsizeiptr)desc->size, NULL, access | GL_CLIENT_STORAGE_BIT);
+        s_readbacks[slot].bytes = NT_GL_RET(glMapBufferRange, GL_PIXEL_PACK_BUFFER, (GLintptr)0, (GLsizeiptr)desc->size, access);
+        NT_ASSERT(s_readbacks[slot].bytes != NULL && "make_buffer: mapping the readback buffer failed");
+        NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, 0); /* a bound pack buffer turns every glReadPixels pointer into an offset */
+    } else {
+        NT_GL_BUFFER_UPLOAD(desc->data, desc->size, glBufferData, target, (GLsizeiptr)desc->size, desc->data, usage);
+    }
+#else
     NT_GL_BUFFER_UPLOAD(desc->data, desc->size, glBufferData, target, (GLsizeiptr)desc->size, desc->data, usage);
+#endif
     if (unhook_vao) {
         ebo_upload_end();
     }
-#if !defined(NT_PLATFORM_WEB)
-    if (target == GL_PIXEL_PACK_BUFFER) {
-        NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, 0); /* a bound pack buffer turns every glReadPixels pointer into an offset */
-    }
-#endif
 
     s_buffer_gl[slot] = buf;
     s_buffer_targets[slot] = target;
@@ -1955,7 +1981,14 @@ void nt_gfx_backend_destroy_buffer(uint32_t backend_handle) {
         detach_instance_buffer(buf);
     }
     forget_deleted_buffer(buf);
-    NT_GL_DELETE(glDeleteBuffers, 1, &buf);
+#if !defined(NT_PLATFORM_WEB)
+    nt_gfx_gl_readback_t *rb = &s_readbacks[backend_handle];
+    if (rb->fence != NULL) {
+        NT_GL(glDeleteSync, rb->fence);
+    }
+    *rb = (nt_gfx_gl_readback_t){0};
+#endif
+    NT_GL_DELETE(glDeleteBuffers, 1, &buf); /* unmaps a readback buffer */
     s_buffer_gl[backend_handle] = 0;
     s_buffer_targets[backend_handle] = 0;
 }

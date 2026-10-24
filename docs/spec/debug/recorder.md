@@ -127,27 +127,32 @@ encoder, so in RUN the step after `start` advances by that wait and its `frame` 
 for each deadline it covers.
 Media Foundation must be installed: a game that links the recorder does not start on a Windows N
 edition without the Media Feature Pack. The executable links `nt_gfx`, not its stub: the recorder
-reads the window through it. A recording takes three `nt_gfx` buffers of `w · h · 4` bytes (about
-25 MB at 1080p), so `nt_gfx_desc_t.max_buffers` needs three spare slots.
+reads the window through it. A recording takes five `nt_gfx` readback buffers of `w · h · 4` bytes
+(about 41 MB at 1080p), so `nt_gfx_desc_t.max_buffers` needs five spare slots. Media Foundation
+converts the frames to NV12 on a D3D11 device; where none has video support (remote desktop, a
+virtual machine) it converts on the CPU, about a third of a core at 1080p30 (WARN at `start`).
 
-A `frame` call with due frames queues one read of the window into one of three readback buffers
+A `frame` call with due frames queues one read of the window into a readback buffer
 (`nt_gfx_read_pixels_to_buffer`, see [Rendering Architecture](../render/architecture.md#readback)) and
-returns without waiting for the GPU. When all three buffers hold reads, the call first encodes the
-oldest one, issued three `frame` calls earlier, which the GPU has normally written: each output frame the read
-covers (several when one call takes several deadlines) copies its rows into one of four pooled
-encoder buffers, top-down. The frames keep their
-pts, so the delay does not move the video against the audio, and the end of a recording, unless a
-write failed, encodes the reads still in flight before it finishes the file. The read takes the top rows, so an odd framebuffer
-loses its bottom row and right column, as on web.
+returns without waiting for the GPU. When three reads are in flight, the call first encodes the
+oldest one, issued three `frame` calls earlier, which the GPU has normally written. Media Foundation
+reads its pixels in place, bottom-up, with no copy: each output frame the read covers (several when
+one call takes several deadlines) is one sample over the same buffer. The frames keep their pts, so
+the delay does not move the video against the audio, and the end of a recording, unless a write
+failed, encodes the reads still in flight before it finishes the file. The read takes the top rows,
+so an odd framebuffer loses its bottom row and right column, as on web.
 
-Pacing waits instead of dropping frames. When the GPU has not written the oldest read yet, mapping
-it waits. When the
-encoder holds all four buffers, the call waits for one. So lockstep runs at the GPU's and the encoder's pace, RUN
-shows a hitch instead of a missing frame, and an encoder that keeps all four for ten seconds counts
-as an encoder failure. `stop` also returns 0 when a write fails while it encodes the last reads,
-as after any encoder failure. Each audio write, pushed samples or silence, allocates one Media Foundation buffer
-beside the per-sample allocations of the Media Foundation pipeline itself: a dev-only exception to
-preallocated storage. An encoder failure ends the recording without `Finalize`, which could wait on
+Pacing waits instead of dropping frames. When the GPU has not written the oldest read yet, the
+encode waits for it. A buffer takes a new read only after Media Foundation has released every sample
+over it; the two buffers beyond the reads in flight cover the samples the encoder still holds. So
+lockstep runs at the GPU's and the encoder's pace, RUN shows a hitch instead of a missing frame, and
+an encoder that keeps a buffer for ten seconds counts as an encoder failure. A catch-up call queues
+all its repeated frames at once; they share one buffer, so the buffers still bound the backlog.
+`stop` also returns 0 when a write fails while it encodes the last reads, as after any encoder
+failure. Each audio write, pushed samples or silence, allocates one Media Foundation buffer, and each
+video frame one sample, beside the per-sample allocations of the Media Foundation pipeline itself: a
+dev-only exception to preallocated storage. The readback buffers are destroyed after
+`MFShutdown`, once no sample points into them. An encoder failure ends the recording without `Finalize`, which could wait on
 the dead encoder, and keeps the fragments on disk; so does a failed `Finalize` (WARN), after which
 `stop` still returns the frames. A recording without a frame deletes its file (WARN when it cannot).
 
