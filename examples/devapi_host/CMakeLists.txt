@@ -5,7 +5,7 @@ target_link_libraries(devapi_host PRIVATE nt_version)
 # though the host never calls nt_ui_walk. nt_gfx also supplies render.info's draw_calls (0 here, no draw).
 # GNU ld is single-pass — list each CONSUMER before its PROVIDER: nt_devapi before nt_ui+nt_gfx, nt_ui
 # before its renderer chain. nt_devapi is transitive via nt_devapi_net; pin it explicitly.
-# Transport split (mirrors engine/devapi/CMakeLists.txt): web links nt_devapi_web (push/pull ccall
+# Transport split (mirrors engine/devapi/CMakeLists.txt): web links nt_devapi_web (push/pull JS
 # bridge, NO socket) + nt_platform_web; native links nt_devapi_net (TCP). Both consume nt_devapi_default;
 # web also pulls nt_gfx for the deferred-capture seam.
 if(EMSCRIPTEN)
@@ -40,13 +40,6 @@ if(EMSCRIPTEN)
     # fpng auto-detects non-x86 (EMSCRIPTEN) and takes its scalar path, but pin FPNG_NO_SSE=1 explicitly
     # so the WASM build never reaches the SSE intrinsics.
     target_compile_definitions(nt_fpng PRIVATE FPNG_NO_SSE=1)
-
-    # The KEEPALIVE transport wrappers + main, and the ccall/UTF8ToString runtime methods the
-    # window.__devapi bridge needs.
-    target_link_options(devapi_host PRIVATE
-        "SHELL:-sEXPORTED_FUNCTIONS=['_main','_nt_devapi_web_submit','_nt_devapi_web_poll','_nt_devapi_web_reset']"
-        "SHELL:-sEXPORTED_RUNTIME_METHODS=['ccall','UTF8ToString']"
-    )
 endif()
 
 # Strict warning and sanitizer policy

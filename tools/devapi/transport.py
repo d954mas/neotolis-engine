@@ -105,6 +105,8 @@ class SocketTransport(Transport):
 # A deterministic rAF barrier: a Promise that resolves after two nested requestAnimationFrame
 # callbacks. One nested rAF lets the deferred capture's pre-swap seam run (the producer fills its
 # payload INSIDE the swap that the second rAF schedules).
+# The MANUAL pump's own step. time.step defers; its reply is dropped by the negative id.
+_PUMP_STEP_LINE = '{"method":"time.step","request_id":-1,"params":{"count":1}}'
 _RAF_BARRIER_JS = "() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r())))"
 
 
@@ -173,15 +175,15 @@ class PlaywrightTransport(Transport):
             # caller's own command is time.step, which is itself a deferred sim-advance (an extra step
             # would over-advance the sim). Under RUN the rAF below advances the frame.
             if self._manual and self._last_method != "time.step":
-                self._page.evaluate("() => window.__devapi.tick(1)")
+                self._page.evaluate("(l) => window.__devapi.submit(l)", _PUMP_STEP_LINE)
             self._page.evaluate(_RAF_BARRIER_JS)
             line = self._page.evaluate("() => window.__devapi.poll()")
             if not line:
                 continue
             if len(line.encode("utf-8")) >= MAX_LINE_BYTES:
                 raise ConnectionError("oversized line from window.__devapi.poll — framing/cap desync")
-            # Drop the pump's own step replies (the bridge tick uses NEGATIVE request_ids; a caller only
-            # ever allocates positive ones) so they never pollute the client's correlation map.
+            # Drop the pump's own step replies (NEGATIVE request_id; a caller only ever allocates
+            # positive ones) so they never pollute the client's correlation map.
             try:
                 rid = json.loads(line).get("request_id")
             except ValueError:

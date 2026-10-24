@@ -14,7 +14,7 @@
 # so a match is a reliable signal the body marshals strings / reaches wasm exports.
 set -euo pipefail
 
-HELPERS='UTF8ToString|stringToNewUTF8|stringToUTF8|lengthBytesUTF8|allocateUTF8|intArrayFromString'
+HELPERS='UTF8ToString|stringToNewUTF8|stringToUTF8|stringToUTF8OnStack|lengthBytesUTF8|allocateUTF8|intArrayFromString|ccall|cwrap'
 
 fail=0
 # One recursive grep pre-filters the EM_JS/EM_ASM TUs; a per-file spawn loop over

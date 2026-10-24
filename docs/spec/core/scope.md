@@ -47,7 +47,7 @@ Related: [Core Principles](principles.md), [Module Layout](module-layout.md), [n
 - WebGL 1 support
 - a command/RPC API in the shipped runtime (NOTE: the `nt_devapi` milestone has shipped a
   dev-only, self-describing JSON command surface for engine introspection and
-  automation, over both a native loopback-TCP transport and a web `ccall` bridge. It is gated
+  automation, over both a native loopback-TCP transport and a web JS bridge. It is gated
   by `NT_DEVAPI_ENABLED` (OFF by default) and the `engine/devapi` subdir is compile-excluded
   from release, so it remains **not** part of the shipped runtime or the asset/format
   pipeline. See [Logging, Errors, Debugging — devapi](../debug/logging-errors-debugging.md).)

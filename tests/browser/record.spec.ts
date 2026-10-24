@@ -6,7 +6,7 @@ import { join } from 'path';
 // python and ffmpeg: tools/devapi/check_recording.py checks the downloaded MP4.
 declare global {
   interface Window {
-    __devapi?: { ready: boolean; submit(line: string): string };
+    __devapi?: { submit(line: string): string };
   }
 }
 
@@ -14,7 +14,7 @@ test('record.* in lockstep downloads a synced MP4', async ({ page }, testInfo) =
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/index.html');
-  await page.waitForFunction(() => window.__devapi?.ready === true, null, { timeout: 30_000 });
+  await page.waitForFunction(() => window.__devapi !== undefined, null, { timeout: 30_000 });
   const call = (method: string, params?: Record<string, unknown>) =>
     page.evaluate(({ method, params }) => {
       const resp = window.__devapi!.submit(JSON.stringify({ method, params: params ?? {} }));
@@ -61,7 +61,7 @@ test('record.* in real time keeps audio on the clock', async ({ page }) => {
     if (/audio .* the clock/.test(msg.text())) warnings.push(msg.text());
   });
   await page.goto('/index.html');
-  await page.waitForFunction(() => window.__devapi?.ready === true, null, { timeout: 30_000 });
+  await page.waitForFunction(() => window.__devapi !== undefined, null, { timeout: 30_000 });
   const call = (method: string, params?: Record<string, unknown>) =>
     page.evaluate(({ method, params }) => {
       const resp = window.__devapi!.submit(JSON.stringify({ method, params: params ?? {} }));

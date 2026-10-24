@@ -2,16 +2,14 @@ import { test, expect } from '@playwright/test';
 
 // The web devapi bridge the capture-build devapi_host installs (engine/devapi/nt_devapi_web.c,
 // EM_JS): submit(line) returns the synchronous response line ("" when the command deferred — C
-// returned NULL), poll() returns a queued deferred response line ("" when none ready), tick(n)
-// submits a time.step{count:n}, ready flips true after install. No listener on web.
+// returned NULL), poll() returns a queued deferred response line ("" when none ready). No listener
+// on web.
 declare global {
   interface Window {
     __devapi?: {
-      ready: boolean;
       submit(line: string): string;
       poll(): string;
       reset(): void;
-      tick(n?: number): string;
     };
   }
 }
@@ -33,8 +31,8 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
   const frame = () =>
     page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 
-  // Boot gate: the web shim sets window.__devapi.ready once installed (engine/devapi/nt_devapi_web.c).
-  await page.waitForFunction(() => window.__devapi?.ready === true, null, { timeout: 30_000 });
+  // Boot gate: the host installs window.__devapi after devapi init (engine/devapi/nt_devapi_web.c).
+  await page.waitForFunction(() => window.__devapi !== undefined, null, { timeout: 30_000 });
 
   // Capture must remain usable after WebGL restoration.
   for (let cycle = 0; cycle < 2; cycle++) {
@@ -84,7 +82,7 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
   expect(Boolean(poke2?.result?.poked)).toBe(!Boolean(poke1?.result?.poked));
 
   // 3. Deterministic pump + the riskiest web path: a deferred capture.frame -> real PNG.
-  //    MANUAL mode makes progress deterministic; tick(n) + frame() advances RENDERED frames so the
+  //    MANUAL mode makes progress deterministic; time.step + frame() advances RENDERED frames so the
   //    pre-swap seam fills the payload before we poll.
   await submit('time.set_mode', { mode: 'manual' });
 
@@ -97,7 +95,7 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
   }, captureId);
 
   // The deferred data line arrives only after a rendered frame fills the pre-swap seam. Drive frames
-  // (tick advances MANUAL sim time; frame() forces a real rAF render+swap) and poll until the matching
+  // (time.step advances MANUAL sim time; frame() forces a real rAF render+swap) and poll until the matching
   // id appears, bounded by expect.poll's timeout so a deferred-forever capture never hangs CI.
   let captureResp: { ok?: boolean; result?: { format?: string; data?: string; deferred?: boolean } } | null = null;
   if (submitted) {
@@ -111,7 +109,8 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
     await expect
       .poll(
         async () => {
-          await page.evaluate(() => window.__devapi!.tick(1)); // advance one MANUAL sim step
+          // Advance one MANUAL sim step; its deferred reply carries request_id -1 and is skipped below.
+          await page.evaluate(() => window.__devapi!.submit('{"method":"time.step","request_id":-1,"params":{"count":1}}'));
           await frame(); // force a real rendered frame -> pre-swap seam fills the payload
           const s = await page.evaluate((rid) => {
             // Drain queued deferred lines; return the one whose request_id matches the capture.

@@ -379,7 +379,7 @@ the `window.__devapi` bridge and the `NtRecorder` calls. `NT_DEVAPI_DIR` points 
 `NT_LOG_MIN_LEVEL=0` keeps the recorder INFO line that `record.spec.ts` reads:
 
 ```bash
-emcmake cmake --preset wasm-release -B build/_cmake/wasm-release-devapi -DNT_PRESET_NAME=wasm-release-devapi -DNT_LOG_MIN_LEVEL=0 -DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
+emcmake cmake --preset wasm-release -B build/_cmake/wasm-release-devapi -DNT_LOG_MIN_LEVEL=0 -DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
 cmake --build build/_cmake/wasm-release-devapi --target devapi_host
 cd tests/browser && NT_DEVAPI_DIR=../../build/examples/devapi_host/wasm-release-devapi npx playwright test devapi.spec.ts record.spec.ts
 ```

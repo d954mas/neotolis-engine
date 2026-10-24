@@ -603,7 +603,7 @@ jobs:
       # calls. INFO logs stay on: record.spec.ts reads a recorder INFO line.
       - name: Build devapi_host wasm (release, capture and record ON)
         run: |
-          emcmake cmake --preset wasm-release -B build/_cmake/wasm-release-devapi -DNT_PRESET_NAME=wasm-release-devapi -DNT_LOG_MIN_LEVEL=0 -DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
+          emcmake cmake --preset wasm-release -B build/_cmake/wasm-release-devapi -DNT_LOG_MIN_LEVEL=0 -DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
           cmake --build build/_cmake/wasm-release-devapi --target devapi_host
 
       - name: Cache Playwright browsers
