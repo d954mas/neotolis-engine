@@ -1012,7 +1012,8 @@ formats of GLES 3.0 ("Required Framebuffer Formats": `RGBA8`, `DEPTH16`, `DEPTH2
 `EXT_color_buffer_float` makes single-sample `RGBA16F` one too, and creation checks its bit), so a
 live driver must complete every target the engine builds. Two residual cases also assert: a
 texture whose GPU storage allocation failed (uploads are not polled) leaves its framebuffer
-incomplete, and a GPU-process death that fails a status before the browser reports the loss.
+incomplete, and a GPU-process death that fails a status while the browser reports no loss, even
+after the failure record's queries.
 A failure is classified by asking the browser after the failed call, for the same reason,
 and again after its failure record, whose queries can surface the loss.
 Before asserting on a live-context name failure, including the setup upload VAO,

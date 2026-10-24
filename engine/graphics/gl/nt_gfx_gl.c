@@ -618,7 +618,7 @@ static void nt_gfx_gl_drain_errors(void) {
 
 /* WebGL names null only on a lost context, and native glGen* does not run out: a null name on a
  * live context is a bug. Asked after the failed call and again after its record: a GPU-process death
- * can fail the call, or the record's queries, before the browser reports the loss. */
+ * can fail the call before the browser reports the loss, and the record's error query can report it. */
 static void assert_name_failed_on_loss(const char *call, const char *label) {
     bool lost = nt_gfx_gl_ctx_query_lost();
     if (!lost) {
