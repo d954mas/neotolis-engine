@@ -1,5 +1,5 @@
 # Size Report: textured_quad (wasm-analysis-paired)
-# Commit: 233f4f4
+# Commit: 841fbee
 
 ## WASM Section Sizes
 
@@ -13,22 +13,22 @@ Memory                 7 B
 Global                 8 B
 Export                71 B
 Elem                  62 B
-Code               87543 B
-Data                8422 B
+Code               90046 B
+Data                8464 B
 Custom              4890 B
 ---------------- ----------
-TOTAL             101933 B
+TOTAL             104478 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-32053 B   frame
+33522 B   frame
  7078 B   main
  4466 B   nt_gfx_activate_mesh
+ 3585 B   nt_http_request_ex
  3002 B   fmt_fp
  2823 B   nt_gfx_make_texture
- 2614 B   nt_http_request_ex
  2425 B   printf_core
  1843 B   __rem_pio2f
  1274 B   nt_gfx_frame_create_buffers
@@ -55,7 +55,7 @@ TOTAL             101933 B
   440 B   nt_log_write
 
 Total functions: 134
-Total code size: 87329 B
+Total code size: 89832 B
 
 ## Built Engine Archives
 
@@ -81,8 +81,8 @@ libnt_font.a               65220 B
 libnt_gfx.a               112784 B
 libnt_gfx_stub.a            6838 B
 libnt_hash.a                4108 B
-libnt_http.a               16484 B
-libnt_http_stub.a          11406 B
+libnt_http.a               18238 B
+libnt_http_stub.a          13148 B
 libnt_input.a              19520 B
 libnt_input_stub.a         23432 B
 libnt_introspect.a           908 B
@@ -103,7 +103,7 @@ libnt_pool.a                1404 B
 libnt_postfx_blur.a         6798 B
 libnt_recorder.a           15516 B
 libnt_render.a              7668 B
-libnt_resource.a          231656 B
+libnt_resource.a          232018 B
 libnt_shape_renderer.a    911320 B
 libnt_skeletal.a            7464 B
 libnt_skeletal_assets.a     4046 B
@@ -125,9 +125,9 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2661912 B
+TOTAL (archives)         2665770 B
 
 ## Data Segments Summary
 
 Segments: 26
-Total data size: 8243 B
+Total data size: 8285 B
