@@ -252,6 +252,9 @@ static void test_vertex_streams_allocate_and_upload_separately(void) {
     TEST_ASSERT_EQUAL_UINT32(0, alloc_filled(NT_GFX_FRAME_VERTEX + 1, 8, 4, 0)); /* starts at 0 again */
     NT_TEST_EXPECT_ASSERT(alloc_filled(NT_GFX_FRAME_VERTEX + 2, 260, 4, 0));     /* its own budget */
     NT_TEST_EXPECT_ASSERT(nt_gfx_frame_buffer(NT_GFX_FRAME_STREAM_COUNT));
+    /* end_frame writes frame storage into the frame's copy; an immediate write would miss it. */
+    const uint32_t word = 0;
+    NT_TEST_EXPECT_ASSERT(nt_gfx_update_buffer(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1), 0, &word, sizeof(word)));
 }
 
 // #region restore

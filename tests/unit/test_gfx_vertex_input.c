@@ -248,8 +248,7 @@ void test_instance_range_follows_frame_buffer_replacement(void) {
 /* Destroying a buffer drops its frame stream tag: a game buffer that takes the slot bounds by
  * its own size, not by the stream's allocations this frame. */
 void test_reused_buffer_slot_drops_the_frame_stream_tag(void) {
-    nt_buffer_t tagged = make_instance_buffer();
-    nt_gfx_set_buffer_frame_stream(tagged, NT_GFX_FRAME_VERTEX);
+    nt_buffer_t tagged = nt_gfx_make_frame_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 64}, NT_GFX_FRAME_VERTEX);
     nt_gfx_destroy_buffer(tagged);
     nt_buffer_t own = make_instance_buffer();
     TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(tagged.id), nt_pool_slot_index(own.id));

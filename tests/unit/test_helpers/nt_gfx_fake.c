@@ -512,7 +512,8 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t layout_s
     }
 }
 
-bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot) {
+bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot, bool rotate) {
+    (void)rotate;
     NT_ASSERT(slot > 0 && slot <= s_fake_max_buffers && !s_fake_buffer_live[slot] && "create_buffer: the record at the frontend slot must be empty");
     s_fake_last_buffer_desc = *desc;
     const bool lose = (s_fake_lose_buffer_creates & 1U) != 0;
@@ -585,6 +586,8 @@ static void fake_bind_texture(uint32_t backend_handle, uint32_t slot) {
         s_fake_bound_textures[s_fake_bound_texture_count++] = backend_handle;
     }
 }
+
+void nt_gfx_backend_next_frame(void) {}
 
 void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, const void *data, uint32_t size) {
     (void)backend_handle;

@@ -361,6 +361,85 @@ static void test_a_buffer_write_after_end_frame_shows_in_the_next_frame(void) {
     nt_gfx_begin_frame();
 }
 
+/* Draws one indexed green triangle from frame storage and ends the frame. */
+static void draw_frame_triangle(nt_pipeline_t pipeline, nt_vertex_input_t input, uint32_t count, const float triangle[6]) {
+    const uint32_t first = alloc_indices(alloc_triangle(12, count, triangle));
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_bind_vertex_input(input);
+    nt_gfx_draw_indexed(first, 3, count);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
+/* The index and vertex copies flip together, whatever a frame writes: after a frame with vertices
+ * and no indices, an indexed frame reads its own indices. Stale indices from two frames back would
+ * draw the left triangle that frame left at vertices 3-5 of the same copy. */
+static void test_a_frame_without_indices_keeps_vertex_and_index_copies_paired(void) {
+    const nt_pipeline_t green = make_pipeline(s_vs_src, s_fs_green_src);
+    const nt_vertex_input_t input = make_frame_input(12);
+    draw_frame_triangle(green, input, 6, s_left);
+    nt_gfx_begin_frame();
+    alloc_triangle(12, 3, s_right); /* vertex bytes only */
+    begin_black_pass();
+    nt_gfx_bind_pipeline(green);
+    nt_gfx_bind_vertex_input(input);
+    nt_gfx_draw(0, 3);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    draw_frame_triangle(green, input, 3, s_right);
+    uint8_t left[4] = {0};
+    uint8_t right[4] = {0};
+    read_pixel((int)(g_nt_window.fb_width * 3U / 16U), (int)(g_nt_window.fb_height / 2U), left);
+    read_pixel((int)(g_nt_window.fb_width * 12U / 16U), (int)(g_nt_window.fb_height / 2U), right);
+    TEST_ASSERT_EQUAL_UINT8(0, left[1]);
+    TEST_ASSERT_EQUAL_UINT8(255, right[1]);
+    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
+    nt_gfx_begin_frame();
+}
+
+/* A vertex input made on either frame parity reads this frame's copies on both parities. */
+static void test_a_frame_input_made_on_either_parity_draws_on_both(void) {
+    const nt_pipeline_t green = make_pipeline(s_vs_src, s_fs_green_src);
+    for (uint32_t made = 0; made < 2; made++) {
+        const nt_vertex_input_t input = make_frame_input(12);
+        for (uint32_t frame = 0; frame < 2; frame++) {
+            draw_frame_triangle(green, input, 3, frame == 0 ? s_left : s_right);
+            uint8_t px[4] = {0};
+            read_pixel((int)(g_nt_window.fb_width * (frame == 0 ? 3U : 12U) / 16U), (int)(g_nt_window.fb_height / 2U), px);
+            TEST_ASSERT_EQUAL_UINT8(255, px[1]);
+            nt_gfx_begin_frame();
+        }
+        nt_gfx_destroy_vertex_input(input);
+        draw_frame_triangle(green, make_frame_input(12), 3, s_left); /* shifts the next input to the other parity */
+        nt_gfx_begin_frame();
+    }
+    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
+}
+
+/* The uniform stream has one buffer: equal block offsets on consecutive frames read each frame's bytes. */
+static void test_a_block_at_the_same_offset_on_consecutive_frames_reads_fresh_bytes(void) {
+    const nt_pipeline_t pipeline = make_pipeline(s_vertexid_vs_src, s_fs_block_src);
+    const nt_vertex_input_t empty = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
+    for (uint32_t frame = 0; frame < 3; frame++) {
+        const float color[4] = {frame == 1 ? 0.0F : 1.0F, frame == 1 ? 1.0F : 0.0F, 0.0F, 1.0F};
+        begin_black_pass();
+        nt_gfx_bind_pipeline(pipeline);
+        nt_gfx_bind_uniform_block(NT_GFX_SLOT_GAME, color, sizeof(color));
+        nt_gfx_bind_vertex_input(empty);
+        nt_gfx_draw(0, 3);
+        nt_gfx_end_pass();
+        nt_gfx_end_frame();
+        uint8_t px[4] = {0};
+        read_pixel(8, 8, px);
+        TEST_ASSERT_EQUAL_UINT8(frame == 1 ? 0 : 255, px[0]);
+        TEST_ASSERT_EQUAL_UINT8(frame == 1 ? 255 : 0, px[1]);
+        nt_gfx_begin_frame();
+    }
+    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
+}
+
 int main(void) {
     /* One hidden window and GL context serve every test; setUp/tearDown reset only engine state. */
     if (!glfwInit()) {
@@ -377,6 +456,9 @@ int main(void) {
     RUN_TEST(test_a_buffer_write_between_two_draws_reaches_both);
     RUN_TEST(test_a_texture_write_between_two_draws_reaches_both);
     RUN_TEST(test_a_buffer_write_after_end_frame_shows_in_the_next_frame);
+    RUN_TEST(test_a_frame_without_indices_keeps_vertex_and_index_copies_paired);
+    RUN_TEST(test_a_frame_input_made_on_either_parity_draws_on_both);
+    RUN_TEST(test_a_block_at_the_same_offset_on_consecutive_frames_reads_fresh_bytes);
     int failures = UNITY_END();
     nt_window_shutdown();
     return failures;

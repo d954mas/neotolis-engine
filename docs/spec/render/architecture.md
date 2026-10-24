@@ -215,7 +215,8 @@ what is adjacent.
 Vertex-input state is a public gfx object referenced by `nt_vertex_input_t`.
 The caller that creates it owns the handle and destroys it with
 `nt_gfx_destroy_vertex_input`; the object borrows its vertex and optional index
-buffer handles and bakes them with a per-vertex layout (GL: one VAO). Instances
+buffer handles and bakes them with a per-vertex layout (GL: two VAOs, one per
+frame parity, see Frame storage). Instances
 are not baked: an instance layout is a registered CPU record
 (`nt_gfx_make_instance_layout`, `nt_instance_layout_t`; no GPU object, no
 destroy; an equal layout returns the existing handle; at most
@@ -235,10 +236,16 @@ located by pointing the instance attributes at their offset. Each VAO keeps the
 layout, buffer and offset of its last instanced bind: an equal tuple re-points
 nothing, a new offset or buffer re-points the layout's attributes, and a new
 layout also disables and detaches the locations only the old layout used and
-enables (divisor 1) the ones only the new layout uses. A vertex input bound with
-one tuple every frame re-points nothing; one bound with two in a frame
-re-points between them every frame, so one layout per (mesh, stream) is
-the cheap case, not a rule. For frame data, a pass whose instances live in their
+enables (divisor 1) the ones only the new layout uses. A bind that reads a
+rotating frame storage buffer (baked, or as instances) uses the VAO of the
+frame's parity; every other bind uses the first VAO and costs what one VAO
+did. For frame data a tuple change is paid once per VAO, over two frames. A
+vertex input bound with one tuple every frame re-points nothing once the VAOs
+it uses hold it; one bound with two in a frame re-points between them every
+frame, so one layout per (mesh, stream) is the cheap case, not a rule. Across
+frames the parity flip costs frame data at most one `glBindVertexArray` (a
+frame that starts with the previous frame's last vertex input) and one
+`glBindBuffer` (the upload after an instanced bind of the other copy). For frame data, a pass whose instances live in their
 own stream keeps every run's offset, and so its pointers, while its counts stay;
 in one shared stream a count change shifts every later run of the frame. An
 empty layout with no buffers is the attribute-less `gl_VertexID` path; every
@@ -509,19 +516,36 @@ generic (constant) vertex attribute value.
 A write into a buffer that an earlier draw of the same frame read is correct
 but not free: Mali drivers under ANGLE track the whole buffer, not the written
 range, so the write waits for those draws or copies around them. Measured on
-the reference phone:
+the reference phone (Mali-G76, ANGLE over GLES):
 
 - appending per-draw data between draws of one frame costs 2-15x frame time when the frame is
   not GPU-bound;
 - a partial rewrite from offset 0 stalls the same way;
 - a full-size rewrite does not stall: Chrome gives the buffer new storage;
-- rewriting a buffer one frame after its last read does not stall;
+- rewriting a buffer one frame after its last read does not stall on Mali;
 - orphaning (`glBufferData` per write) removes the wait but allocates storage on
   every call.
 
+Desktop Chrome on Windows runs WebGL on ANGLE over D3D11, where a one-frame-late
+rewrite does wait. A `STREAM_DRAW` or `DYNAMIC_DRAW` buffer starts in ANGLE's
+dynamic class (writes go to system memory; every draw copies the range it reads);
+once draws read more than three times its size between two writes, ANGLE treats
+it as static for good. A static buffer's `bufferSubData` maps ANGLE's staging
+copy of the whole buffer and waits until the GPU has finished the previous
+frame's copy out of it. A game build with 10 000 instanced people (Intel UHD,
+Chrome 156) spent 27 % of the GPU-process main thread there; later builds of
+the same game read less per frame, stay dynamic and do not wait. In a WebGL 2
+model of frame storage, orphaning and `bufferData` with data also waited, and
+a buffer created `STATIC_DRAW` waits from the start; a ring of offsets inside
+one buffer cannot help, since the staging copy is one resource (ANGLE source).
+Uniform reads never promote a buffer, so a `STREAM_DRAW` uniform buffer never
+waits.
+
 Policy: the stream executes once per frame, in `nt_gfx_end_frame`, so no write
 ever lands between draws of one frame: every write of a frame precedes all its
-draws and lands one frame after the previous frame read the buffer. Per-frame
+draws and lands one frame after the previous frame read the buffer. Frame
+storage index and vertex streams alternate two GPU copies per frame, so a frame
+writes the copy the previous frame did not draw from (see Frame storage). Per-frame
 data lives in frame storage (below): it is written to CPU staging at any point
 of the frame and reaches its buffer in one upload per stream, before the replay.
 The sprite, text and shape renderers write their geometry to frame storage, so a
@@ -536,7 +560,7 @@ waiting build a higher clock. Compare builds as described in
 
 Frame storage holds one frame's per-draw data for engine renderers and the
 game alike, in streams named `NT_GFX_FRAME_*` (`uint32_t` in the API), each a CPU staging copy
-plus one `STREAM` buffer:
+plus a `STREAM` buffer:
 
 - `NT_GFX_FRAME_INDEX`: `uint32_t` indices (`NT_INDEX_UINT32`); WebGL never
   binds an element buffer as anything else, so indices have their own buffer;
@@ -557,9 +581,19 @@ stream its instances were allocated from, and one allocation may serve several
 passes. Instance data that persists across frames belongs in a caller-owned
 buffer instead (see Vertex inputs, Persistent instance data).
 
-One `STREAM` buffer per stream, rewritten from offset 0 every frame, is the
-policy the phone measurements selected: rotating several buffers showed no
-consistent benefit. The API does not guarantee a stall-free upload.
+The index and vertex streams keep two GPU copies behind one buffer handle and
+alternate them per frame: every write and bind of a frame names the copy of its
+parity, and each vertex input owns a VAO per parity (see Vertex inputs). On
+ANGLE over D3D11 this removes the upload wait of Dynamic data lifetime: in the
+WebGL 2 model with static buffers the share of the GPU-process main thread
+waiting in `bufferSubData` fell from 64 % to 0. Games whose buffers stay
+dynamic do not wait and measured the same with one buffer or two (Intel UHD;
+reference phone, vsync off). The uniform stream keeps one buffer: a stream
+uniform buffer never waits, and its binds stay cached across frames. Offsets, staging and the handle do not change between frames; the cost
+is a second GPU copy of each index and vertex stream's capacity and a second
+VAO per vertex input. `nt_gfx_update_buffer` asserts on a frame storage buffer:
+`nt_gfx_end_frame` writes the stream's allocations over it, and the next frame
+draws from the other copy.
 
 `nt_gfx_frame_alloc(stream, size, align, &offset)` returns `size` bytes of
 staging at an offset that is a multiple of `align`; both are nonzero. It is
@@ -1213,11 +1247,13 @@ definition relates its vertex and index buffer handles in `related[0..1]`. An
 instance layout (`NT_GFX_OBJECT_INSTANCE_LAYOUT`) is defined at registration
 and in the initial state: `backend` is its handle, `size` its stride and
 `flags` its location mask, followed by its attribute records (divisor 1, buffer
-0). The backend defines the vertex input's VAO with its GL name in
+0). The backend defines the vertex input's two VAOs: the parity 0 VAO's GL name in
 `backend.args[1]` and the instance binding its pointers hold: the instance
 buffer's GL name in `args[2]` (0 without one), the offset in `args[3]` and the
-layout slot in `args[4]` (all 0 from creation); the layout's own definition
-names its attributes. An upload that
+layout slot in `args[4]` (all 0 from creation); the parity 1 VAO the same way in
+`args[5..8]`. The layout's own definition names its attributes. A buffer
+definition carries its parity 0 and parity 1 GL names in `backend.args[1..2]`,
+equal unless the buffer is a rotating frame storage buffer. An upload that
 finds its buffer already bound to `GL_ARRAY_BUFFER` records a `SKIP` of
 `glBindBuffer`. Both bind forms are `NT_GFX_OP_VERTEX_INPUT`; the instanced
 one carries the instance buffer in `binding.secondary`, the layout in

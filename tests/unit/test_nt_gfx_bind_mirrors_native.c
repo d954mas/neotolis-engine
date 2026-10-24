@@ -328,8 +328,9 @@ static nt_instance_layout_t pair_layout(void) {
 }
 
 /* Steady state: vertex and index buffers are baked at creation and each instanced vertex input
- * keeps its (layout, buffer, offset), so a whole frame of draws issues no glVertexAttribPointer at
- * all, and VAO binds stay one per vertex-input switch (delta-checked). */
+ * keeps its (layout, buffer, offset) in the VAO of each frame parity, so once both VAOs hold it a
+ * whole frame of draws issues no glVertexAttribPointer at all, and VAO binds stay one per
+ * vertex-input switch (delta-checked). */
 static void test_second_frame_issues_no_static_attrib_pointers(void) {
     init_with_vertex_streams(1);
     nt_pipeline_t pip = make_red_pipeline();
@@ -337,18 +338,21 @@ static void test_second_frame_issues_no_static_attrib_pointers(void) {
     nt_vertex_input_t vi_empty = make_vi(make_vbo(s_empty), (nt_buffer_t){0});
     nt_vertex_input_t vi_inst = make_vi(make_vbo(s_full), (nt_buffer_t){0});
 
-    /* The warm-up frame points the instance side; it ends on vi_full, which the next frame starts with. */
+    /* One warm-up frame per parity points the instance side of both VAOs; each ends on vi_full,
+     * which the measured frame starts with. */
     uint32_t inst_offset = 0;
-    memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 8, 4, &inst_offset), 0, 8);
-    begin_black_pass();
-    nt_gfx_bind_pipeline(pip);
-    nt_gfx_bind_vertex_input_instanced(vi_inst, offset_layout(), nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), inst_offset);
-    nt_gfx_draw_instanced(0, 3, 1);
-    nt_gfx_bind_vertex_input(vi_full);
-    nt_gfx_draw(0, 3);
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
+    for (uint32_t warm = 0; warm < 2; warm++) {
+        memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 8, 4, &inst_offset), 0, 8);
+        begin_black_pass();
+        nt_gfx_bind_pipeline(pip);
+        nt_gfx_bind_vertex_input_instanced(vi_inst, offset_layout(), nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), inst_offset);
+        nt_gfx_draw_instanced(0, 3, 1);
+        nt_gfx_bind_vertex_input(vi_full);
+        nt_gfx_draw(0, 3);
+        nt_gfx_end_pass();
+        nt_gfx_end_frame();
+        nt_gfx_begin_frame();
+    }
 
     const uint32_t attrib_pointers = g_nt_gfx.counters.gl[NT_GFX_GL_glVertexAttribPointer];
     const uint32_t vao_binds = g_nt_gfx.counters.gl[NT_GFX_GL_glBindVertexArray];
@@ -419,23 +423,28 @@ static uint32_t instanced_frame(nt_pipeline_t pip, const instanced_run_t *runs, 
 
 /* A VAO keeps its instance pointers across passes and frames: the same tuple re-points nothing;
  * a new offset re-points every attribute and binds the instance buffer only when the
- * ARRAY_BUFFER binding differs. */
+ * ARRAY_BUFFER binding differs. Frame stream instances use the VAO of the frame's parity, so a
+ * change is paid once by each of the two VAOs. */
 static void test_repeated_instance_offset_skips_re_point(void) {
     init_with_vertex_streams(1);
     nt_pipeline_t pip = make_red_pipeline();
     nt_vertex_input_t vi_a = make_vi(make_vbo(s_full), (nt_buffer_t){0});
     nt_vertex_input_t vi_b = make_vi(make_vbo(s_full), (nt_buffer_t){0});
-    instanced_frame(pip, &(instanced_run_t){vi_a, 0, {0}}, 1); /* also counts the first bind's pointers */
+    TEST_ASSERT_EQUAL_UINT32((2 * 2) + 2, instanced_frame(pip, &(instanced_run_t){vi_a, 0, {0}}, 1)); /* + both inputs' creation, a pointer per VAO */
+    TEST_ASSERT_EQUAL_UINT32(2, instanced_frame(pip, &(instanced_run_t){vi_a, 0, {0}}, 1));           /* the other parity's VAO */
     TEST_ASSERT_EQUAL_UINT32(0, instanced_frame(pip, &(instanced_run_t){vi_a, 0, {0}}, 1));
     TEST_ASSERT_EQUAL_UINT32(2, instanced_frame(pip, &(instanced_run_t){vi_a, 32, {0}}, 1));
-    TEST_ASSERT_EQUAL_UINT32(0, s_frame_buffer_binds);                                       /* the stream's buffer is still bound */
+    /* The upload binds this frame's copy of the stream, which the instanced bind then finds bound. */
+    TEST_ASSERT_EQUAL_UINT32(1, s_frame_buffer_binds);
+    TEST_ASSERT_EQUAL_UINT32(2, instanced_frame(pip, &(instanced_run_t){vi_a, 32, {0}}, 1));
+    TEST_ASSERT_EQUAL_UINT32(0, instanced_frame(pip, &(instanced_run_t){vi_a, 32, {0}}, 1));
     TEST_ASSERT_EQUAL_UINT32(2, instanced_frame(pip, &(instanced_run_t){vi_b, 32, {0}}, 1)); /* another VAO has its own pointers */
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
 }
 
 /* Two vertex inputs over one buffer each keep their own offset: a steady frame re-points
- * nothing, a run that moves re-points only its own VAO, and one vertex input drawn at two
- * offsets in a frame re-points between them every frame. */
+ * nothing, a run that moves re-points only its own VAOs (one per parity, so two frames), and one
+ * vertex input drawn at two offsets in a frame re-points between them every frame. */
 static void test_vertex_inputs_over_one_buffer_keep_their_offsets(void) {
     init_with_vertex_streams(1);
     nt_pipeline_t pip = make_red_pipeline();
@@ -443,11 +452,14 @@ static void test_vertex_inputs_over_one_buffer_keep_their_offsets(void) {
     nt_vertex_input_t vi_b = make_vi(make_vbo(s_full), (nt_buffer_t){0});
     const instanced_run_t steady[2] = {{vi_a, 0, {0}}, {vi_b, 16, {0}}};
     instanced_frame(pip, steady, 2);
+    instanced_frame(pip, steady, 2);
     TEST_ASSERT_EQUAL_UINT32(0, instanced_frame(pip, steady, 2));
     const instanced_run_t moved[2] = {{vi_a, 32, {0}}, {vi_b, 16, {0}}};
     TEST_ASSERT_EQUAL_UINT32(2, instanced_frame(pip, moved, 2));
+    TEST_ASSERT_EQUAL_UINT32(2, instanced_frame(pip, moved, 2));
     TEST_ASSERT_EQUAL_UINT32(0, instanced_frame(pip, moved, 2));
     const instanced_run_t shared[2] = {{vi_a, 0, {0}}, {vi_a, 16, {0}}};
+    instanced_frame(pip, shared, 2);
     instanced_frame(pip, shared, 2);
     TEST_ASSERT_EQUAL_UINT32(4, instanced_frame(pip, shared, 2));
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
@@ -581,10 +593,10 @@ static void test_destroying_a_bound_vertex_input_grounds_the_vao_cache(void) {
     nt_gfx_draw(0, 3);
     TEST_ASSERT_UINT8_WITHIN(1, 255, end_frame_center_red());
     /* A vertex input reusing the freed slot starts with no instance tuple: creation points the
-     * static attribute, its first bind both instance attributes. */
+     * static attribute of both VAOs, its first bind both instance attributes. */
     nt_gfx_destroy_vertex_input(vi_b);
     nt_vertex_input_t vi_c = make_vi(make_vbo(s_full), (nt_buffer_t){0});
-    TEST_ASSERT_EQUAL_UINT32(1 + 2, instanced_frame(pip, &(instanced_run_t){vi_c, 0, {0}}, 1));
+    TEST_ASSERT_EQUAL_UINT32(2 + 2, instanced_frame(pip, &(instanced_run_t){vi_c, 0, {0}}, 1));
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
 }
 
@@ -630,6 +642,46 @@ static void test_destroying_an_instance_buffer_detaches_it(void) {
     nt_gfx_bind_vertex_input_instanced(vi, pair_layout(), nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset);
     nt_gfx_draw_instanced(0, 3, 1);
     TEST_ASSERT_UINT8_WITHIN(1, 255, end_frame_center_red());
+    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
+}
+
+/* A rotating frame buffer has a name per frame parity, each held by that parity's VAO: destroying
+ * the buffer detaches both VAOs. */
+static void test_destroying_a_rotating_buffer_detaches_both_vaos(void) {
+    init_with_vertex_streams(2);
+    nt_pipeline_t pip = make_red_pipeline();
+    nt_buffer_t rotating = nt_gfx_make_frame_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64}, NT_GFX_FRAME_VERTEX + 1);
+    nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
+    GLuint vaos[2] = {0, 0};
+    for (uint32_t frame = 0; frame < 2; frame++) {
+        uint32_t offset = 0;
+        memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX + 1, 64, 4, &offset), 0, 64);
+        begin_black_pass();
+        nt_gfx_bind_pipeline(pip);
+        nt_gfx_bind_vertex_input_instanced(vi, pair_layout(), rotating, offset);
+        nt_gfx_draw_instanced(0, 3, 1);
+        nt_gfx_end_pass();
+        nt_gfx_end_frame();
+        vaos[frame] = (GLuint)nt_gfx_gl_test_cached_vao();
+        nt_gfx_begin_frame();
+    }
+    TEST_ASSERT_NOT_EQUAL_UINT32(vaos[0], vaos[1]);
+    GLint enabled = 0;
+    GLint attached[2] = {0, 0};
+    for (uint32_t k = 0; k < 2; k++) {
+        read_attrib(vaos[k], 1, &enabled, &attached[k]);
+        TEST_ASSERT_EQUAL_INT(1, enabled);
+        TEST_ASSERT_NOT_EQUAL_INT(0, attached[k]);
+    }
+    TEST_ASSERT_NOT_EQUAL_INT(attached[0], attached[1]);
+    nt_gfx_destroy_buffer(rotating);
+    for (uint32_t k = 0; k < 2; k++) {
+        for (GLuint location = 1; location <= 2; location++) {
+            read_attrib(vaos[k], location, &enabled, &attached[0]);
+            TEST_ASSERT_EQUAL_INT(0, enabled);
+            TEST_ASSERT_EQUAL_INT(0, attached[0]);
+        }
+    }
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
 }
 
@@ -702,28 +754,30 @@ static void assert_attrib_dropped(attrib_state_t s) {
 
 /* One vertex input follows the layout of each bind: a switch enables only the new locations,
  * disables and detaches the dropped ones, and re-points every attribute of the new layout, also a
- * shared location in another format; the same tuple again issues no call. */
+ * shared location in another format; the same tuple again issues no call. A caller buffer does not
+ * rotate, so every bind meets the same VAO. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_vertex_input_switches_instance_layouts(void) {
     init_with_vertex_streams(1);
     nt_pipeline_t pip = make_red_pipeline();
     nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
+    nt_buffer_t instances = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 64});
     const nt_instance_layout_t pair = pair_layout();
     const nt_instance_layout_t other = switch_layout();
-    TEST_ASSERT_EQUAL_UINT32(2 + (2 + 2 + 2), layout_frame(pip, vi, pair, (nt_buffer_t){0})); /* + the VAO's position stream */
+    TEST_ASSERT_EQUAL_UINT32((2 * 2) + (2 + 2 + 2), layout_frame(pip, vi, pair, instances)); /* + both VAOs' position stream */
     const GLuint vao = (GLuint)nt_gfx_gl_test_cached_vao();
     /* Location 1 dropped (its re-point to no buffer counts); 3-11 enabled with divisors; all 10 pointed. */
-    TEST_ASSERT_EQUAL_UINT32(1 + 9 + 9 + 10, layout_frame(pip, vi, other, (nt_buffer_t){0}));
+    TEST_ASSERT_EQUAL_UINT32(1 + 9 + 9 + 10, layout_frame(pip, vi, other, instances));
     assert_attrib_dropped(attrib_state(vao, 1));
     assert_attrib(attrib_state(vao, 2), GL_UNSIGNED_BYTE, 4, GL_TRUE, 64, 4);
     assert_attrib(attrib_state(vao, 3), GL_FLOAT, 4, GL_FALSE, 64, 16);
     assert_attrib(attrib_state(vao, 11), GL_FLOAT, 1, GL_FALSE, 64, 60);
-    TEST_ASSERT_EQUAL_UINT32(9 + 1 + 1 + 2, layout_frame(pip, vi, pair, (nt_buffer_t){0}));
+    TEST_ASSERT_EQUAL_UINT32(9 + 1 + 1 + 2, layout_frame(pip, vi, pair, instances));
     assert_attrib(attrib_state(vao, 1), GL_FLOAT, 2, GL_FALSE, 16, 0);
     assert_attrib(attrib_state(vao, 2), GL_FLOAT, 2, GL_FALSE, 16, 8);
     assert_attrib_dropped(attrib_state(vao, 3));
     assert_attrib_dropped(attrib_state(vao, 11));
-    TEST_ASSERT_EQUAL_UINT32(0, layout_frame(pip, vi, pair, (nt_buffer_t){0}));
+    TEST_ASSERT_EQUAL_UINT32(0, layout_frame(pip, vi, pair, instances));
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
 }
 
@@ -1756,6 +1810,7 @@ int main(void) {
     RUN_TEST(test_destroying_an_instance_buffer_detaches_it);
     RUN_TEST(test_vertex_input_switches_instance_layouts);
     RUN_TEST(test_instance_layout_switch_keeps_buffer_lifetime);
+    RUN_TEST(test_destroying_a_rotating_buffer_detaches_both_vaos);
     RUN_TEST(test_index_upload_keeps_the_bound_vao);
     RUN_TEST(test_index_data_ops_do_not_rewire_bound_vertex_input);
     RUN_TEST(test_empty_vertex_input_draws_fullscreen);

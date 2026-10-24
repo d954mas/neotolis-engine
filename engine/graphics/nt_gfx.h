@@ -1050,7 +1050,8 @@ void nt_gfx_unbind_uniform_block(uint32_t slot);
 /* update_buffer = glBufferSubData at byte offset; offset + size must fit the
  * buffer, data must point to size bytes (NULL only with size 0). Allowed at any time:
  * a write before nt_gfx_end_frame lands before every draw of the frame, so every draw
- * reads the frame's last write; a write after it belongs to the next frame. */
+ * reads the frame's last write; a write after it belongs to the next frame. Frame storage
+ * buffers (nt_gfx_frame_buffer) assert: allocate their data with nt_gfx_frame_alloc. */
 void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size);
 
 /* ---- Frame storage ----
