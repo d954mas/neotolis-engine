@@ -252,7 +252,7 @@ void nt_http_update(void) {
     /* Idle is judged only here, after the backend has drained everything that
      * arrived: bytes delayed by a long frame count as progress, not as a stall. */
     double now = 0.0;
-    bool have_now = false;
+    bool have_now = false; /* no clock read unless an idle-limited request is in flight */
     for (uint16_t i = 1; i <= NT_HTTP_MAX_REQUESTS; i++) {
         NtHttpSlot *slot = &s_http.slots[i];
         if (!nt_http_slot_in_flight(slot) || slot->idle_timeout_ms == 0) {

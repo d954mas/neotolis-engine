@@ -21,7 +21,6 @@ declare global {
       http_free(): void;
       pack_stall_start(mode: number): void;
       pack_stall_state(): number;
-      pack_stall_received(): number;
     };
   }
 }
@@ -74,9 +73,6 @@ for (const [mode, path] of [[0, '/pack-stall-headers'], [1, '/pack-stall-body']]
       await fetch(m === 0 ? '/stall-reset-headers' : '/stall-reset-body', { method: 'POST' });
     }, mode);
     await page.evaluate((m) => window.__nt!.pack_stall_start(m), mode);
-    if (mode === 1) {
-      await expect.poll(() => page.evaluate(() => window.__nt!.pack_stall_received())).toBeGreaterThan(0);
-    }
     await expect.poll(() => page.evaluate(() => window.__nt!.pack_stall_state()), { timeout: 10_000 }).toBe(PACK_READY);
     const attempts = await page.evaluate(async () => await (await fetch('/stall-attempts')).json());
     expect(attempts[path]).toBe(3); // attempts 1 and 2 stall

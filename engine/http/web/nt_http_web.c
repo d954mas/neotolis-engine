@@ -24,7 +24,6 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, const char *url_ptr, const char 
         Module['_nt_http'] = {};
     }
     var r = {controller: new AbortController(), timer: 0, state: 1, status: 0, headers: null, received: 0, total: 0, chunks: []};
-    var requestUrl = UTF8ToString(url_ptr);
     Module['_nt_http'][slot_index] = r;
 
     /* Quoted keys/calls survive Closure without relying on its fetch externs.
@@ -53,7 +52,7 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, const char *url_ptr, const char 
             init['body'] = HEAPU8.slice(body_ptr, body_ptr + body_size);
         }
     } catch (e) {
-        console.error('ERROR [http] bad request options slot=' + slot_index + ' url=' + requestUrl + ' reason=' + String(e), e);
+        console.error('ERROR [http] bad request options slot=' + slot_index, e);
         r.state = 4;
         return;
     }
@@ -66,7 +65,7 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, const char *url_ptr, const char 
         /* Network errors, body read errors and aborts (cancel/timeout). Log non-abort failures
          * (CORS/mixed-content are otherwise invisible) — parity with the native NT_LOG_ERROR. */
         if (!err || err.name !== 'AbortError') {
-            console.error('ERROR [http] fetch failed slot=' + slot_index + ' url=' + requestUrl + ' status=' + r.status + ' bytes=' + r.received + '/' + r.total + ' reason=' + String(err), err);
+            console.error('ERROR [http] fetch failed slot=' + slot_index, err);
         }
         r.controller.abort(); /* stops the stream after a throw from add(); no-op after an abort */
         r.state = 4;
@@ -79,7 +78,7 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, const char *url_ptr, const char 
         r.received += chunk.length;
         r.state = 2;
     }
-    fetch(requestUrl, init).then(function(response) {
+    fetch(UTF8ToString(url_ptr), init).then(function(response) {
         var block = "";
         response.headers.forEach(function(v, k) { block += k + ': ' + v + '\n'; });
         r.status = response.status;

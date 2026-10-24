@@ -851,11 +851,6 @@ EMSCRIPTEN_KEEPALIVE void nt_test_pack_stall_start(int mode) {
     nt_resource_load_url(s_nt_stall_pack_id, mode == 0 ? "/pack-stall-headers" : "/pack-stall-body");
 }
 EMSCRIPTEN_KEEPALIVE int nt_test_pack_stall_state(void) { return (int)nt_resource_pack_state(s_nt_stall_pack_id); }
-EMSCRIPTEN_KEEPALIVE int nt_test_pack_stall_received(void) {
-    uint32_t received = 0;
-    nt_resource_pack_progress(s_nt_stall_pack_id, &received, NULL);
-    return (int)received;
-}
 
 EMSCRIPTEN_KEEPALIVE void nt_test_http_post_echo(void) {
     s_nt_http_body_size = (uint32_t)sizeof(s_nt_http_body);
@@ -1039,7 +1034,6 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'http_get_drip': function() { _nt_test_http_get_drip(); },
         'pack_stall_start': function(mode) { _nt_test_pack_stall_start(mode); },
         'pack_stall_state': function() { return _nt_test_pack_stall_state(); },
-        'pack_stall_received': function() { return _nt_test_pack_stall_received(); },
         'http_state': function() { return _nt_test_http_state(); },
         'http_status': function() { return _nt_test_http_status(); },
         'http_total': function() { return _nt_test_http_total(); },
