@@ -81,10 +81,10 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
   const poke2 = await submit('game.poke');
   expect(Boolean(poke2?.result?.poked)).toBe(!Boolean(poke1?.result?.poked));
 
-  // 3. Deterministic pump + the riskiest web path: a deferred capture.frame -> real PNG.
-  //    MANUAL mode makes progress deterministic; time.step + frame() advances RENDERED frames so the
-  //    pre-swap seam fills the payload before we poll.
+  // 3. The riskiest web path: a deferred capture.frame -> real PNG, with the sim frozen in MANUAL.
+  //    No time.step: frame() renders, the pre-swap seam fills the payload, and the frame counter stays put.
   await submit('time.set_mode', { mode: 'manual' });
+  const frameBefore = (await submit('frame.current'))?.result?.frame;
 
   // Submit capture.frame with a known request_id; the web host DEFERS it (submit returns ""), so the
   // PNG arrives on a later poll() AFTER a rendered frame — match it by request_id.
@@ -95,8 +95,8 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
   }, captureId);
 
   // The deferred data line arrives only after a rendered frame fills the pre-swap seam. Drive frames
-  // (time.step advances MANUAL sim time; frame() forces a real rAF render+swap) and poll until the matching
-  // id appears, bounded by expect.poll's timeout so a deferred-forever capture never hangs CI.
+  // (frame() forces a real rAF render+swap) and poll until the matching id appears, bounded by
+  // expect.poll's timeout so a deferred-forever capture never hangs CI.
   let captureResp: { ok?: boolean; result?: { format?: string; data?: string; deferred?: boolean } } | null = null;
   if (submitted) {
     // Non-deferred (a capture-OFF host would answer synchronously) — accept the immediate envelope.
@@ -109,8 +109,6 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
     await expect
       .poll(
         async () => {
-          // Advance one MANUAL sim step; its deferred reply carries request_id -1 and is skipped below.
-          await page.evaluate(() => window.__devapi!.submit('{"method":"time.step","request_id":-1,"params":{"count":1}}'));
           await frame(); // force a real rendered frame -> pre-swap seam fills the payload
           const s = await page.evaluate((rid) => {
             // Drain queued deferred lines; return the one whose request_id matches the capture.
@@ -137,6 +135,8 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
   expect(captureResp?.result?.format).toBe('png');
   const b64 = captureResp?.result?.data ?? '';
   expect(b64.length).toBeGreaterThan(0);
+  expect(typeof frameBefore).toBe('number');
+  expect((await submit('frame.current'))?.result?.frame).toBe(frameBefore);
 
   // Decode the PNG in-page and assert it is genuinely NON-BLANK: the host renders a two-tone frame, so
   // a uniform/blank capture (a real seam failure) yields a single colour and fails here, not just "has bytes".

@@ -93,9 +93,9 @@ bool nt_devapi_can_defer_current(void);
    precomputed). Must be called from inside a handler dispatch. */
 bool nt_devapi_defer_current_time(double seconds);
 
-/* Like nt_devapi_defer_current but ASSOCIATES a result producer with the slot: at the pre-swap seam the
-   producer fills the slot's owned payload, which poll_response then yields as the ok-entry result (instead
-   of the legacy {deferred:true}). `ctx`/`ctx_free` are the producer's owned param block + its destructor
+/* Like nt_devapi_defer_current but ASSOCIATES a result producer with the slot: at the next pre-swap seam
+   after submit, sim frozen or not, the producer fills the slot's owned payload, which poll_response then
+   yields as the ok-entry result (instead of the legacy {deferred:true}). `ctx`/`ctx_free` are the producer's owned param block + its destructor
    (NULL if unowned). `fail_code`/`fail_msg` are the wire error the core yields if the producer returns NULL
    — static literals supplied by the handler, so the core names no group (zero release delta when absent).
    Must be called from inside a handler dispatch.
@@ -104,7 +104,7 @@ bool nt_devapi_defer_current_time(double seconds);
    yields {deferred:true} for it (that would re-introduce the drain race). So the HOST MUST drive the
    pre-swap seam on every rendered frame; while rendering is suppressed the slot legitimately stalls until
    render resumes (bounded per-session by close_client -> nt_devapi_deferred_reset). */
-bool nt_devapi_defer_current_with_result(int frames, nt_devapi_payload_producer_fn producer, void *ctx, nt_devapi_ctx_free_fn ctx_free, const char *fail_code, const char *fail_msg);
+bool nt_devapi_defer_current_with_result(nt_devapi_payload_producer_fn producer, void *ctx, nt_devapi_ctx_free_fn ctx_free, const char *fail_code, const char *fail_msg);
 
 /* Run every ready producer-slot's producer at the pre-swap seam (fills the slot's payload). The generic
    core entry; a producer-bearing group wraps it with its own host-facing seam. */

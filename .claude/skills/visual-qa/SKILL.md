@@ -64,9 +64,9 @@ cmake --build build/_cmake/native-debug-capture --target <example>
 
 - `pixel_health.py` liveness thresholds false-positive on visually quiet valid
   states — use it opt-in, not as a default gate.
-- Under MANUAL time mode use `capture_frame_and_step()` — a bare
-  `capture_frame()` deadlocks (capture defers to presentation, which never
-  comes without a `time.step`).
+- `capture_frame()` works in any time mode and never advances the sim: in
+  MANUAL it shows the current state, so `step()` first when you need a new one.
+  It stalls while rendering is off (no swap, no capture seam).
 - The app renders every frame regardless of focus — a black capture means the
   GDI path was used, not that rendering stalled.
 - Non-ASCII test strings must be hardcoded UTF-8 in C — Git Bash→Windows env

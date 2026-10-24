@@ -84,11 +84,9 @@ bool nt_devapi_defer_current_time(double seconds) {
     return true;
 }
 
-bool nt_devapi_defer_current_with_result(int frames, nt_devapi_payload_producer_fn producer, void *ctx, nt_devapi_ctx_free_fn ctx_free, const char *fail_code, const char *fail_msg) {
+bool nt_devapi_defer_current_with_result(nt_devapi_payload_producer_fn producer, void *ctx, nt_devapi_ctx_free_fn ctx_free, const char *fail_code, const char *fail_msg) {
     NT_ASSERT(s_out_deferred != NULL && producer != NULL); /* only valid inside a handler dispatch. */
     *s_out_deferred = true;
-    s_defer_frames = frames;
-    s_defer_by_time = false; /* producer slots are frame-deferred — read at the next pre-swap seam. */
     s_defer_producer = producer;
     s_defer_producer_ctx = ctx;
     s_defer_producer_ctx_free = ctx_free;
@@ -513,6 +511,9 @@ const char *nt_devapi_submit(const char *line) {
 /* A slot is ready once the game frame counter has reached its target. Wrap-safe: the subtraction
    wraps together with g_nt_app.frame, so the slot stays pending until its frame deadline. */
 static bool slot_ready(const nt_devapi_deferred_slot *slot) {
+    if (slot->is_data) {
+        return true; /* only the pre-swap seam gates a data slot, sim frozen or not. */
+    }
     if (slot->by_time) {
         return g_nt_app.time >= slot->target_time; /* game-time deadline (monotonic double, no wrap). */
     }
@@ -578,9 +579,9 @@ const char *nt_devapi_poll_response(void) {
         if (!slot_ready(&s_deferred[i])) {
             continue;
         }
-        /* Drain-race guard: drain runs at frame start, the pre-swap seam at frame end, so a slot can
-           be frame-ready before its payload is filled. Yielding then would emit the legacy
-           {deferred:true} and lose the data — withhold until the seam fills it next frame. */
+        /* Drain-race guard: a data slot is ready at submit, before the pre-swap seam fills its payload.
+           Yielding then would emit the legacy {deferred:true} and lose the data — withhold until the
+           seam fills it. */
         if (s_deferred[i].producer != NULL && s_deferred[i].payload == NULL) {
             continue;
         }
