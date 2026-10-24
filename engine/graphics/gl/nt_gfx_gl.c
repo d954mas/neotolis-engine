@@ -617,12 +617,13 @@ static void nt_gfx_gl_drain_errors(void) {
 }
 
 /* WebGL names null only on a lost context, and native glGen* does not run out: a null name on a
- * live context is a bug. Asked after the failed call: a GPU-process death can fail the call before
- * the browser reports the loss. */
+ * live context is a bug. Asked after the failed call and again after its record: a GPU-process death
+ * can fail the call, or the record's queries, before the browser reports the loss. */
 static void assert_name_failed_on_loss(const char *call, const char *label) {
-    const bool lost = nt_gfx_gl_ctx_query_lost();
+    bool lost = nt_gfx_gl_ctx_query_lost();
     if (!lost) {
         NT_LOG_ERROR("%s name: gl_error=0x%04X \"%s\"", call, (unsigned)NT_GL_RET0(glGetError), label != NULL ? label : "");
+        lost = nt_gfx_gl_ctx_query_lost();
     }
     NT_ASSERT(lost && "backend could not name a GL object on a live context");
 }
@@ -1661,7 +1662,7 @@ nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll
         bool lost = nt_gfx_gl_ctx_query_lost();
         if (!lost) {
             nt_gfx_gl_log_link_failure(rec);
-            /* The diagnostic queries can lose the context too. */
+            /* The diagnostic queries can surface the loss too. */
             lost = nt_gfx_gl_ctx_query_lost();
         }
         NT_ASSERT(lost && "program link failed on a live context");
@@ -2217,10 +2218,11 @@ bool nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTAC
         /* The engine's formats are required framebuffer formats (GLES 3.0 "Required Framebuffer
          * Formats"; RGBA16F with EXT_color_buffer_float): on a live context incompleteness is a bug,
          * or storage an unpolled allocation failure left out. */
-        const bool lost = nt_gfx_gl_ctx_query_lost();
+        bool lost = nt_gfx_gl_ctx_query_lost();
         if (!lost) {
             NT_LOG_ERROR("framebuffer status=0x%04X gl_error=0x%04X size=%ux%u color=%u depth=%u \"%s\"", (unsigned)status, (unsigned)NT_GL_RET0(glGetError), (unsigned)width, (unsigned)height,
                          (unsigned)color, (unsigned)depth, label != NULL ? label : "");
+            lost = nt_gfx_gl_ctx_query_lost();
         }
         NT_ASSERT(lost && "render target incomplete on a live context");
         NT_GL_DELETE(glDeleteFramebuffers, 1, &fbo);

@@ -1,13 +1,13 @@
 import { test, expect } from '@playwright/test';
 
-type Mode = 'vertex' | 'fragment' | 'link' | 'no-translation' | 'long-translation' | 'destroyed' | 'lost' | 'loss-in-log' | 'loss-in-reflection-log';
+type Mode = 'vertex' | 'fragment' | 'link' | 'no-translation' | 'long-translation' | 'destroyed' | 'lost' | 'reflection' | 'loss-in-log' | 'loss-in-reflection-log';
 type Probe = { armed: boolean; queries: number; programLogs: number; translations: number; enables: number; failed: boolean; checkedLive: boolean; losses: number; restores: number };
 type ProbeWindow = Window & {
   __nt?: { ready: boolean; programs_ready(): boolean; loss_window(step: number): number };
   __stages: Probe;
 };
 
-for (const mode of ['vertex', 'fragment', 'link', 'no-translation', 'long-translation', 'destroyed', 'lost', 'loss-in-log', 'loss-in-reflection-log'] as Mode[]) {
+for (const mode of ['vertex', 'fragment', 'link', 'no-translation', 'long-translation', 'destroyed', 'lost', 'reflection', 'loss-in-log', 'loss-in-reflection-log'] as Mode[]) {
   test(`shader diagnostics: ${mode}`, async ({ page }) => {
     await page.addInitScript((mode: Mode) => {
       const state = (window as ProbeWindow).__stages = { armed: mode !== 'destroyed', queries: 0, programLogs: 0, translations: 0, enables: 0, failed: false, checkedLive: false, losses: 0, restores: 0 };
@@ -41,7 +41,7 @@ for (const mode of ['vertex', 'fragment', 'link', 'no-translation', 'long-transl
         return link.call(this, program);
       };
       proto.getProgramParameter = function(program, query) {
-        if (program === target && mode === 'loss-in-reflection-log') {
+        if (program === target && (mode === 'reflection' || mode === 'loss-in-reflection-log')) {
           if (query !== this.ACTIVE_UNIFORMS) return programParameter.call(this, program, query);
           state.failed = true;
           return -1;
@@ -103,6 +103,13 @@ for (const mode of ['vertex', 'fragment', 'link', 'no-translation', 'long-transl
       });
       expect(await probe()).toMatchObject({ failed: true, checkedLive: true, losses: 1, restores: 1 });
       expect(await crash()).toBeNull();
+      return;
+    }
+    if (mode === 'reflection') {
+      // A live reflection failure still traps with its record.
+      await page.waitForFunction(() => localStorage.getItem('nt.test.crash') !== null);
+      expect(await crash()).toMatch(/program \d+\/GL \d+ uniforms: no data: gl_error=0x0 "[^"\n]+"/);
+      expect(await probe()).toMatchObject({ failed: true, checkedLive: true, losses: 0 });
       return;
     }
     if (mode === 'destroyed') {
