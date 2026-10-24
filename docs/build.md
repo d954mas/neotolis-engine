@@ -374,15 +374,24 @@ emcmake cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=
 cmake --build --preset wasm-debug --target devapi_host
 ```
 
+CI also runs both specs against a release `devapi_host`, because only a release link runs Closure over
+the `window.__devapi` bridge and the `NtRecorder` calls. `NT_DEVAPI_DIR` points the server at it;
+`NT_LOG_MIN_LEVEL=0` keeps the recorder INFO line that `record.spec.ts` reads:
+
+```bash
+emcmake cmake --preset wasm-release -B build/_cmake/wasm-release-devapi -DNT_PRESET_NAME=wasm-release-devapi -DNT_LOG_MIN_LEVEL=0 -DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
+cmake --build build/_cmake/wasm-release-devapi --target devapi_host
+cd tests/browser && NT_DEVAPI_DIR=../../build/examples/devapi_host/wasm-release-devapi npx playwright test devapi.spec.ts record.spec.ts
+```
+
 `record.spec.ts` records offline (MANUAL, 360 steps at fps 30) and checks the downloaded MP4 with
 `tools/devapi/check_recording.py`: streams, frame rate and count, 48 kHz stereo audio as long as the
 video, flash/beep offset within a frame. That needs python (`$PYTHON`, else `python`/`python3`) and
 ffmpeg/ffprobe on `PATH` or in `FFMPEG_DIR`. A second test records in RUN at time scale 7, so a step
 exceeds the 100 ms drift bound, and fails on a drift WARN; it also checks `bad_params` and a cancelled
 `nt-recorder` event. Its step guard assumes a 60 Hz rAF (CI headless); a faster display fails it.
-`nt_recorder` is OFF in the push gate: only the CI wasm-release job links it under Closure (a
-`devapi_host` with the RECORDER group, then a check that the four `NtRecorder.*(` calls keep their
-names). Native `test_recorder` covers frame selection and the audio stream.
+`nt_recorder` is OFF in the push gate: only the CI web-smoke release run links it under Closure.
+Native `test_recorder` covers frame selection and the audio stream.
 
 CI only compiles and links the Windows backend (`windows-recorder`). Check its behavior locally with a
 native `devapi_host` that links the RECORDER group (it then inits `nt_gfx` and draws the flash
