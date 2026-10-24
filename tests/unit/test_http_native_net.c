@@ -243,6 +243,19 @@ static void test_idle_timeout_fails_after_partial_body(void) {
     nt_http_free(req);
 }
 
+static void test_idle_timeout_failure_cancels_transfer(void) {
+    /* /latebody resumes 0.3 s after its first bytes: an uncancelled transfer would finish DONE */
+    nt_http_options_t opts = {.idle_timeout_ms = 100};
+    nt_http_request_t req = nt_http_request_ex(make_url("/latebody"), &opts);
+    TEST_ASSERT_EQUAL(NT_HTTP_STATE_FAILED, pump_to_completion(req));
+    for (int i = 0; i < 50; i++) {
+        nt_http_update();
+        net_sleep_ms(10);
+    }
+    TEST_ASSERT_EQUAL(NT_HTTP_STATE_FAILED, nt_http_state(req));
+    nt_http_free(req);
+}
+
 static void test_idle_timeout_tracks_body_progress(void) {
     nt_http_options_t opts = {.idle_timeout_ms = 500};
     nt_http_request_t req = nt_http_request_ex(make_url("/drip"), &opts);
@@ -281,8 +294,8 @@ static void test_idle_timeout_keeps_body_that_arrived_during_pump_pause(void) {
     TEST_ASSERT_EQUAL(NT_HTTP_STATE_DONE, pump_to_completion(req));
     uint32_t size = 0;
     uint8_t *data = nt_http_take_data(req, &size);
-    TEST_ASSERT_EQUAL_MEMORY("abcdef", data, 6);
     TEST_ASSERT_EQUAL(6, size);
+    TEST_ASSERT_EQUAL_MEMORY("abcdef", data, size);
     free(data);
     nt_http_free(req);
 }
@@ -425,6 +438,7 @@ int main(void) {
     RUN_TEST(test_timeout_fails);
     RUN_TEST(test_idle_timeout_fails_before_headers);
     RUN_TEST(test_idle_timeout_fails_after_partial_body);
+    RUN_TEST(test_idle_timeout_failure_cancels_transfer);
     RUN_TEST(test_idle_timeout_tracks_body_progress);
     RUN_TEST(test_idle_timeout_tracks_compressed_wire_progress);
     RUN_TEST(test_idle_timeout_keeps_body_that_arrived_during_pump_pause);

@@ -38,7 +38,7 @@ typedef struct {
                                  * divergence table */
     uint32_t header_count;      /* number of name/value PAIRS in headers */
     uint32_t timeout_ms;        /* 0 -> no timeout; clamped to INT_MAX ms (~24 days) */
-    uint32_t idle_timeout_ms;   /* 0 -> disabled; max time nt_http_update sees no new body bytes; clamped like timeout_ms */
+    uint32_t idle_timeout_ms;   /* 0 -> disabled; max time nt_http_update sees no new body bytes */
 } nt_http_options_t;
 
 nt_result_t nt_http_init(void);

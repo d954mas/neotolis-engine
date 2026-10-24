@@ -199,9 +199,6 @@ static void http_copy_request(NtHttpSlot *slot, const char *url, const nt_http_o
         slot->timeout_ms = 0x7FFFFFFFU;
     }
     slot->idle_timeout_ms = opts != NULL ? opts->idle_timeout_ms : 0;
-    if (slot->idle_timeout_ms > 0x7FFFFFFFU) {
-        slot->idle_timeout_ms = 0x7FFFFFFFU;
-    }
 }
 
 /* ---- Lifecycle ---- */

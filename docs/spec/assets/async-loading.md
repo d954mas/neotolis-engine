@@ -93,13 +93,17 @@ fetch()-forbidden methods CONNECT/TRACE/TRACK — backends would diverge
 otherwise.
 
 `timeout_ms` limits the whole request. `idle_timeout_ms` instead limits how long
-`nt_http_update()` sees no new response-body bytes. Both default to 0 (disabled),
-are clamped to `INT_MAX` milliseconds, and can be used together. Only
+`nt_http_update()` sees no new response-body bytes. Both default to 0 (disabled)
+and can be used together. Only
 `nt_http_update()` judges idleness, after the backend has taken everything that
 arrived: the clock starts on the first update after the request is issued and
 restarts whenever the received byte count changes. Headers alone do not restart
-it. Bytes or a completion that arrived during a long frame count as progress, so
-a slow frame never discards a transfer that delivered data. A request with no new
+it; upload and server think time count as idle. Whatever the backend has taken
+by that update counts as progress, including bytes or a completion that arrived
+during a long frame. Native reads the socket inside the update, so a slow frame
+never discards bytes the server sent. Web sees only what the fetch() handlers
+have already recorded, and after a long frame the browser may run the frame
+before those handlers. A request with no new
 bytes for the limit becomes FAILED in that update; the log includes the full URL,
 received bytes and threshold. A frame gap longer than the limit still fails a
 request that had nothing new by then, including after a suspended page resumes;
@@ -119,7 +123,7 @@ parity is cheap.
 
 State semantics: **DONE = a full response arrived with ANY HTTP status** (a 404
 body is data, not a transport error) — the caller checks `nt_http_status()`;
-**FAILED = transport error, timeout or cancel** (a status may still be recorded).
+**FAILED = transport error, timeout, idle stall or cancel** (a status may still be recorded).
 `nt_http_response_headers()` returns lowercased `"name: value\n"` lines, valid
 until `nt_http_free`/`nt_http_shutdown`. `nt_http_update()` advances
 transfers on native and web (no-op on stub) — call it once per frame while requests are in

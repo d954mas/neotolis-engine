@@ -20,30 +20,15 @@ declare global {
       http_verify_echo(): number; // 1 exact, 0 mismatch, -1 not DONE
       http_free(): void;
       pack_stall_start(mode: number): void;
-      pack_stall_pause(paused: number): void;
       pack_stall_state(): number;
       pack_stall_received(): number;
     };
   }
 }
 
-test('resource: a body that arrived while frames were paused is kept, not retried', async ({ page }) => {
-  await page.goto('/index.html');
-  await page.waitForFunction(() => window.__nt?.ready === true, null, { timeout: 30_000 });
-  await page.evaluate(async () => {
-    await fetch('/stall-reset-late', { method: 'POST' });
-    window.__nt!.pack_stall_start(2);
-    window.__nt!.pack_stall_pause(1);
-  });
-  await page.waitForTimeout(900);
-  await page.evaluate(() => window.__nt!.pack_stall_pause(0));
-  await expect.poll(() => page.evaluate(() => window.__nt!.pack_stall_state()), { timeout: 10_000 }).toBe(4);
-  const attempts = await page.evaluate(async () => await (await fetch('/stall-attempts')).json());
-  expect(attempts['/pack-late-body']).toBe(1);
-});
-
 const DONE = 3;
 const FAILED = 4;
+const PACK_READY = 4; // nt_pack_state_t
 
 test('http: POST body arrives verbatim, headers/status surface, 404 is DONE', async ({ page }) => {
   await page.goto('/index.html');
@@ -92,7 +77,7 @@ for (const [mode, path] of [[0, '/pack-stall-headers'], [1, '/pack-stall-body']]
     if (mode === 1) {
       await expect.poll(() => page.evaluate(() => window.__nt!.pack_stall_received())).toBeGreaterThan(0);
     }
-    await expect.poll(() => page.evaluate(() => window.__nt!.pack_stall_state()), { timeout: 10_000 }).toBe(4);
+    await expect.poll(() => page.evaluate(() => window.__nt!.pack_stall_state()), { timeout: 10_000 }).toBe(PACK_READY);
     const attempts = await page.evaluate(async () => await (await fetch('/stall-attempts')).json());
     expect(attempts[path]).toBe(3); // attempts 1 and 2 stall
   });

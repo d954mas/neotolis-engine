@@ -82,23 +82,22 @@ const server = createServer(async (req, res) => {
     send();
     return;
   }
-  if (urlPath === '/pack-stall-headers' || urlPath === '/pack-stall-body' || urlPath === '/pack-late-body') {
+  if (urlPath === '/pack-stall-headers' || urlPath === '/pack-stall-body') {
     const attempt = (stallAttempts.get(urlPath) || 0) + 1;
     stallAttempts.set(urlPath, attempt);
     const data = await readFile(join(ROOT, 'assets', 'basis_fixture.ntpack'));
     res.setHeader('Content-Length', String(data.length));
     res.setHeader('Content-Type', 'application/octet-stream');
-    if (attempt === 1 || (attempt === 2 && urlPath !== '/pack-late-body')) {
+    if (attempt <= 2) {
       res.flushHeaders();
       if (urlPath !== '/pack-stall-headers') res.write(data.subarray(0, 3));
-      if (urlPath === '/pack-late-body') setTimeout(() => res.end(data.subarray(3)), 600);
     } else {
       res.end(data);
     }
     return;
   }
-  if (req.method === 'POST' && (urlPath === '/stall-reset-headers' || urlPath === '/stall-reset-body' || urlPath === '/stall-reset-late')) {
-    const path = urlPath === '/stall-reset-headers' ? '/pack-stall-headers' : urlPath === '/stall-reset-body' ? '/pack-stall-body' : '/pack-late-body';
+  if (req.method === 'POST' && (urlPath === '/stall-reset-headers' || urlPath === '/stall-reset-body')) {
+    const path = urlPath === '/stall-reset-headers' ? '/pack-stall-headers' : '/pack-stall-body';
     stallAttempts.set(path, 0);
     res.statusCode = 204;
     res.end();
