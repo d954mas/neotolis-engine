@@ -1,11 +1,15 @@
 /* Windows backend: a Media Foundation sink writer streams H.264 + AAC into a fragmented MP4 at the
-   name path, so a killed process keeps every fragment written before. Main thread; MF converts and
-   encodes on its own threads. */
+   name path, so a killed process keeps every fragment written before. Main thread; MF reads the
+   window's pixels in place from the readback buffers, converts them (on a D3D11 device when one can
+   be made) and encodes on its own threads. */
 
 #define COBJMACROS
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
+#include <d3d10_1.h> /* ID3D10Multithread */
+#include <d3d11.h>
+#include <limits.h>
 #include <mfapi.h>
 #include <mferror.h>
 #include <mfidl.h>
@@ -28,30 +32,40 @@ static const GUID k_max_bitrate = {0x9651eae4, 0x39b9, 0x4ebf, {0x85, 0xef, 0xd7
 #define NT_RECORDER_H264_HIGH 100U          /* eAVEncH264VProfile_High */
 #define NT_RECORDER_PEAK_CONSTRAINED_VBR 1U /* eAVEncCommonRateControlMode_PeakConstrainedVBR */
 
-/* Frames in flight. MF keeps the last input sample until the next, so fewer than 2 deadlock; more than 4
-   measured no faster. */
-#define NT_RECORDER_POOL 4U
-/* Window reads in flight: a read is mapped when the ring is full, three reads after it was issued,
-   so the GPU has normally written it and the map does not wait. */
+/* Window reads in flight: a read is encoded three reads after it was issued, so the GPU has normally
+   written it and the fence wait returns at once. */
 #define NT_RECORDER_READS 3U
+/* Readback buffers: the reads in flight plus the encoded ones MF still holds. MF keeps the last input
+   sample until the next, so a ring of only the reads would wait on the frame just sent. */
+#define NT_RECORDER_SLOTS 5U
+
+/* One readback buffer and the MF buffer over its bytes: MF reads the pixels in place and holds a
+   reference per sample, so the slot takes no new read until MF has released them all. */
+typedef struct {
+    IMFMediaBuffer mf; /* first: MF calls back with this pointer */
+    volatile LONG refs;
+    nt_buffer_t read;
+    BYTE *bytes; /* read-only mapping: only MF's Lock signature drops the const */
+    uint32_t first;
+    uint32_t count; /* the output frames that show this read */
+} nt_recorder_slot_t;
 
 static struct {
     IMFSinkWriter *writer;
-    IMFVideoSampleAllocatorEx *pool;
+    ID3D11Device *device;
+    IMFDXGIDeviceManager *devices;
     DWORD video;
     DWORD audio;
     uint32_t width;
     uint32_t height;
     uint32_t fps;
-    nt_buffer_t reads[NT_RECORDER_READS]; /* a FIFO ring: oldest at head - pending */
-    uint32_t read_first[NT_RECORDER_READS];
-    uint32_t read_count[NT_RECORDER_READS]; /* the output frames that show this read */
+    nt_recorder_slot_t slots[NT_RECORDER_SLOTS]; /* a FIFO ring: oldest read at head - pending */
     uint32_t head;
     uint32_t pending;
     bool wrote;      /* a video sample reached the encoder: the file has something to keep */
     bool com;        /* this recording holds a COM reference */
     bool broken;     /* a write failed: the encoder may never drain */
-    HANDLE released; /* set when the pool gets a sample back; lives with the process, as does s_notify */
+    HANDLE released; /* set when MF drops a slot reference; lives with the process */
     wchar_t path[MAX_PATH];
 } s_mf;
 
@@ -70,27 +84,67 @@ static bool ok(HRESULT hr, const char *call) {
 /* 100 ns time of sample n at rate; durations are differences of these, so rounding never accumulates. */
 static LONGLONG hns(uint64_t n, uint32_t rate) { return (LONGLONG)(n * 10000000ULL / rate); }
 
-/* The pool calls NotifyRelease on an MF thread when the encoder returns a sample; static, so it counts
-   no references. */
-static HRESULT STDMETHODCALLTYPE notify_query(IMFVideoSampleAllocatorNotify *self, REFIID riid, void **out) {
-    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IMFVideoSampleAllocatorNotify)) {
+// #region slot buffer
+/* MF calls these on its own threads. The slots are static: the count only tells when MF is done. */
+static ULONG STDMETHODCALLTYPE slot_add_ref(IMFMediaBuffer *self) { return (ULONG)InterlockedIncrement(&((nt_recorder_slot_t *)self)->refs); }
+static ULONG STDMETHODCALLTYPE slot_release(IMFMediaBuffer *self) {
+    LONG refs = InterlockedDecrement(&((nt_recorder_slot_t *)self)->refs);
+    (void)SetEvent(s_mf.released);
+    return (ULONG)refs;
+}
+static HRESULT STDMETHODCALLTYPE slot_query(IMFMediaBuffer *self, REFIID riid, void **out) {
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IMFMediaBuffer)) {
+        (void)slot_add_ref(self);
         *out = self;
         return S_OK;
     }
     *out = NULL;
     return E_NOINTERFACE;
 }
-static ULONG STDMETHODCALLTYPE notify_ref(IMFVideoSampleAllocatorNotify *self) {
-    (void)self;
-    return 1;
-}
-static HRESULT STDMETHODCALLTYPE notify_release(IMFVideoSampleAllocatorNotify *self) {
-    (void)self;
-    (void)SetEvent(s_mf.released);
+static DWORD slot_size(void) { return s_mf.width * s_mf.height * 4U; }
+static HRESULT STDMETHODCALLTYPE slot_lock(IMFMediaBuffer *self, BYTE **bytes, DWORD *max, DWORD *current) {
+    *bytes = ((nt_recorder_slot_t *)self)->bytes;
+    if (max != NULL) {
+        *max = slot_size();
+    }
+    if (current != NULL) {
+        *current = slot_size();
+    }
     return S_OK;
 }
-static IMFVideoSampleAllocatorNotifyVtbl s_notify_vtbl = {notify_query, notify_ref, notify_ref, notify_release};
-static IMFVideoSampleAllocatorNotify s_notify = {&s_notify_vtbl};
+static HRESULT STDMETHODCALLTYPE slot_unlock(IMFMediaBuffer *self) {
+    (void)self;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE slot_length(IMFMediaBuffer *self, DWORD *length) {
+    (void)self;
+    *length = slot_size();
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE slot_set_length(IMFMediaBuffer *self, DWORD length) {
+    (void)self;
+    return length == slot_size() ? S_OK : E_INVALIDARG;
+}
+static IMFMediaBufferVtbl s_slot_vtbl = {slot_query, slot_add_ref, slot_release, slot_lock, slot_unlock, slot_length, slot_set_length, slot_length};
+
+/* MF drops a slot's references on its own threads as its pipeline consumes each frame. A catch-up
+   slot carries up to 2 * fps frames, so the limit is ten seconds without one released, not for all. */
+static bool wait_released(nt_recorder_slot_t *slot) {
+    LONG last = LONG_MAX;
+    ULONGLONG until = 0;
+    for (LONG refs; (refs = InterlockedCompareExchange(&slot->refs, 0, 0)) > 0;) {
+        ULONGLONG now = GetTickCount64();
+        if (refs < last) {
+            last = refs;
+            until = now + 10000U;
+        } else if (now >= until) {
+            return false;
+        }
+        (void)WaitForSingleObject(s_mf.released, (DWORD)(until - now));
+    }
+    return true;
+}
+// #endregion
 
 /* MFSetAttributeSize / MFSetAttributeRatio are C++-only. */
 static void set_pair(IMFMediaType *type, const GUID *key, uint32_t hi, uint32_t lo) { must(IMFMediaType_SetUINT64(type, key, ((UINT64)hi << 32) | lo)); }
@@ -120,40 +174,68 @@ static IMFMediaType *audio_type(const GUID *subtype, uint32_t bits, uint32_t byt
 }
 
 /* Releases in dependency order; the file goes only when this recording's writer made it, and after
-   MFShutdown, since the sink may close it on an MF thread. */
+   MFShutdown, since the sink may close it on an MF thread. The readback buffers go last: MF samples
+   point into them until the pipeline is gone. */
 static void release(bool remove_file) {
-    for (uint32_t i = 0; i < NT_RECORDER_READS; i++) {
-        if (s_mf.reads[i].id != 0) {
-            nt_gfx_destroy_buffer(s_mf.reads[i]);
-            s_mf.reads[i] = (nt_buffer_t){0};
-        }
-    }
     bool made = s_mf.writer != NULL;
     if (made) {
         IMFSinkWriter_Release(s_mf.writer);
         s_mf.writer = NULL;
     }
-    if (s_mf.pool != NULL) {
-        IMFVideoSampleAllocatorEx_Release(s_mf.pool);
-        s_mf.pool = NULL;
+    if (s_mf.devices != NULL) {
+        IMFDXGIDeviceManager_Release(s_mf.devices);
+        s_mf.devices = NULL;
+    }
+    if (s_mf.device != NULL) {
+        ID3D11Device_Release(s_mf.device);
+        s_mf.device = NULL;
     }
     (void)MFShutdown();
     if (s_mf.com) {
         CoUninitialize();
         s_mf.com = false;
     }
+    for (uint32_t i = 0; i < NT_RECORDER_SLOTS; i++) {
+        nt_recorder_slot_t *slot = &s_mf.slots[i];
+        if (slot->read.id != 0) {
+            bool idle = wait_released(slot);
+            NT_ASSERT(idle && "nt_recorder: Media Foundation still holds a frame after MFShutdown");
+            nt_gfx_destroy_buffer(slot->read);
+            slot->read = (nt_buffer_t){0};
+        }
+    }
     if (made && remove_file && !DeleteFileW(s_mf.path)) {
         NT_LOG_WARN("the empty recording was not deleted (error %lu)", GetLastError());
     }
 }
 
+/* With this device MF can convert RGB32 to NV12 on the GPU; its CPU converter took about a third of
+   a core at 1080p30. Without a hardware device with video support it converts on the CPU. */
+static void attach_device(IMFAttributes *attrs) {
+    HRESULT hr = D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, D3D11_CREATE_DEVICE_VIDEO_SUPPORT, NULL, 0, D3D11_SDK_VERSION, &s_mf.device, NULL, NULL);
+    if (FAILED(hr)) {
+        NT_LOG_WARN("no D3D11 video device (0x%08lx): colour conversion on the CPU", (unsigned long)hr);
+        return;
+    }
+    /* MF uses the device from its own threads. */
+    ID3D10Multithread *multithread = NULL;
+    must(ID3D11Device_QueryInterface(s_mf.device, &IID_ID3D10Multithread, (void **)&multithread));
+    (void)ID3D10Multithread_SetMultithreadProtected(multithread, TRUE);
+    ID3D10Multithread_Release(multithread);
+    UINT token = 0;
+    must(MFCreateDXGIDeviceManager(&token, &s_mf.devices));
+    must(IMFDXGIDeviceManager_ResetDevice(s_mf.devices, (IUnknown *)s_mf.device, token));
+    must(IMFAttributes_SetUnknown(attrs, &MF_SINK_WRITER_D3D_MANAGER, (IUnknown *)s_mf.devices));
+}
+
 static bool create_writer(void) {
     IMFAttributes *attrs = NULL;
-    must(MFCreateAttributes(&attrs, 3));
+    must(MFCreateAttributes(&attrs, 4));
+    attach_device(attrs);
     must(IMFAttributes_SetGUID(attrs, &MF_TRANSCODE_CONTAINERTYPE, &MFTranscodeContainerType_FMPEG4));
     must(IMFAttributes_SetUINT32(attrs, &MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE));
-    /* The sample pool bounds the frames in flight; throttling alone let a hardware encoder queue seconds
-       of frames. */
+    /* The readback slots bound the pixels in flight; throttling alone let a hardware encoder queue
+       seconds of frames. */
     must(IMFAttributes_SetUINT32(attrs, &MF_SINK_WRITER_DISABLE_THROTTLING, TRUE));
     bool good = ok(MFCreateSinkWriterFromURL(s_mf.path, NULL, attrs, &s_mf.writer), "MFCreateSinkWriterFromURL");
     IMFAttributes_Release(attrs);
@@ -172,7 +254,8 @@ static bool create_writer(void) {
     must(IMFMediaType_SetUINT32(vout, &MF_MT_TRANSFER_FUNCTION, MFVideoTransFunc_709));
     must(IMFMediaType_SetUINT32(vout, &MF_MT_VIDEO_NOMINAL_RANGE, MFNominalRange_16_235));
     IMFMediaType *vin = video_type(&MFVideoFormat_RGB32);
-    must(IMFMediaType_SetUINT32(vin, &MF_MT_DEFAULT_STRIDE, s_mf.width * 4U)); /* positive: top-down rows */
+    /* Negative: bottom-up rows, as GL reads them, so nothing flips the frame. */
+    must(IMFMediaType_SetUINT32(vin, &MF_MT_DEFAULT_STRIDE, (UINT32) - (INT32)(s_mf.width * 4U)));
     /* B-frames would delay the video start by a frame (the MP4 sink writes no edit list); the default
        hardware CBR pads a still screen to the full bitrate. */
     IMFAttributes *encoder = NULL;
@@ -188,15 +271,7 @@ static bool create_writer(void) {
 
     good = ok(IMFSinkWriter_AddStream(s_mf.writer, vout, &s_mf.video), "AddStream video") && ok(IMFSinkWriter_SetInputMediaType(s_mf.writer, s_mf.video, vin, encoder), "SetInputMediaType video") &&
            ok(IMFSinkWriter_AddStream(s_mf.writer, aout, &s_mf.audio), "AddStream audio") && ok(IMFSinkWriter_SetInputMediaType(s_mf.writer, s_mf.audio, ain, NULL), "SetInputMediaType audio") &&
-           ok(MFCreateVideoSampleAllocatorEx(&IID_IMFVideoSampleAllocatorEx, (void **)&s_mf.pool), "MFCreateVideoSampleAllocatorEx") &&
-           ok(IMFVideoSampleAllocatorEx_InitializeSampleAllocatorEx(s_mf.pool, NT_RECORDER_POOL, NT_RECORDER_POOL, NULL, vin), "InitializeSampleAllocatorEx") &&
            ok(IMFSinkWriter_BeginWriting(s_mf.writer), "BeginWriting");
-    if (good) {
-        IMFVideoSampleAllocatorCallback *callback = NULL;
-        must(IMFVideoSampleAllocatorEx_QueryInterface(s_mf.pool, &IID_IMFVideoSampleAllocatorCallback, (void **)&callback));
-        must(IMFVideoSampleAllocatorCallback_SetCallback(callback, &s_notify));
-        IMFVideoSampleAllocatorCallback_Release(callback);
-    }
     IMFMediaType_Release(vout);
     IMFMediaType_Release(vin);
     IMFAttributes_Release(encoder);
@@ -229,66 +304,34 @@ bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height
         release(true);
         return false;
     }
-    for (uint32_t i = 0; i < NT_RECORDER_READS; i++) {
-        s_mf.reads[i] = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_READBACK, .size = width * height * 4U, .label = "recorder read"});
+    for (uint32_t i = 0; i < NT_RECORDER_SLOTS; i++) {
+        s_mf.slots[i].mf.lpVtbl = &s_slot_vtbl;
+        s_mf.slots[i].read = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_READBACK, .size = width * height * 4U, .label = "recorder read"});
     }
     return true;
 }
 
-/* The read holds BGRA rows bottom-up; MF wants them top-down at its pitch. */
-static void copy_rows(uint8_t *scan0, size_t pitch, const uint8_t *bytes) {
-    size_t row = (size_t)s_mf.width * 4U;
-    for (uint32_t y = 0; y < s_mf.height; y++) {
-        memcpy(scan0 + (y * pitch), bytes + ((size_t)(s_mf.height - 1U - y) * row), row);
-    }
-}
-
-/* One pooled sample per output frame, filled from the mapped read. */
-static void write_frame(uint32_t index, const uint8_t *bytes) {
-    /* EMPTY means the encoder still holds every sample; it returns them on its own threads and
-       s_notify wakes this wait. Ten seconds of that is an encoder that died. */
+/* One sample per output frame over the slot's pixels; repeated frames share the slot with their own pts. */
+static void write_frame(nt_recorder_slot_t *slot, uint32_t index) {
     IMFSample *sample = NULL;
-    HRESULT hr = MF_E_SAMPLEALLOCATOR_EMPTY;
-    for (ULONGLONG until = GetTickCount64() + 10000U; (hr = IMFVideoSampleAllocatorEx_AllocateSample(s_mf.pool, &sample)) == MF_E_SAMPLEALLOCATOR_EMPTY;) {
-        ULONGLONG now = GetTickCount64();
-        if (now >= until || WaitForSingleObject(s_mf.released, (DWORD)(until - now)) != WAIT_OBJECT_0) {
-            break;
-        }
-    }
-    if (!ok(hr, "AllocateSample")) {
-        s_mf.broken = true;
-        return;
-    }
-    IMFMediaBuffer *buffer = NULL;
-    IMF2DBuffer *buffer2d = NULL;
-    BYTE *scan0 = NULL;
-    LONG pitch = 0;
-    must(IMFSample_GetBufferByIndex(sample, 0, &buffer));
-    must(IMFMediaBuffer_QueryInterface(buffer, &IID_IMF2DBuffer, (void **)&buffer2d));
-    must(IMF2DBuffer_Lock2D(buffer2d, &scan0, &pitch));
-    NT_ASSERT(pitch >= (LONG)s_mf.width * 4 && "nt_recorder: the RGB32 pool buffer is not top-down");
-    copy_rows(scan0, (size_t)pitch, bytes);
-    must(IMF2DBuffer_Unlock2D(buffer2d));
-    must(IMFMediaBuffer_SetCurrentLength(buffer, (DWORD)pitch * s_mf.height));
+    must(MFCreateSample(&sample));
+    must(IMFSample_AddBuffer(sample, &slot->mf));
     must(IMFSample_SetSampleTime(sample, hns(index, s_mf.fps)));
     must(IMFSample_SetSampleDuration(sample, hns(index + 1ULL, s_mf.fps) - hns(index, s_mf.fps)));
     s_mf.broken = !ok(IMFSinkWriter_WriteSample(s_mf.writer, s_mf.video, sample), "WriteSample video");
     s_mf.wrote |= !s_mf.broken;
-    IMF2DBuffer_Release(buffer2d);
-    IMFMediaBuffer_Release(buffer);
-    IMFSample_Release(sample); /* back to the pool once the encoder is done with it */
+    IMFSample_Release(sample);
 }
 
 /* Encodes the oldest read; false once a write failed (broken). Reads leave the ring in issue order, so
    the encoder gets pts in order. */
 static bool encode_oldest(void) {
-    uint32_t slot = (s_mf.head + NT_RECORDER_READS - s_mf.pending) % NT_RECORDER_READS;
-    const uint8_t *bytes = nt_gfx_map_readback(s_mf.reads[slot]);
+    nt_recorder_slot_t *slot = &s_mf.slots[(s_mf.head + NT_RECORDER_SLOTS - s_mf.pending) % NT_RECORDER_SLOTS];
+    slot->bytes = (BYTE *)nt_gfx_wait_readback(slot->read);
     s_mf.pending--;
-    for (uint32_t i = 0; !s_mf.broken && i < s_mf.read_count[slot]; i++) {
-        write_frame(s_mf.read_first[slot] + i, bytes);
+    for (uint32_t i = 0; !s_mf.broken && i < slot->count; i++) {
+        write_frame(slot, slot->first + i);
     }
-    nt_gfx_unmap_readback(s_mf.reads[slot]);
     return !s_mf.broken;
 }
 
@@ -296,11 +339,17 @@ bool nt_recorder_platform_video(uint32_t first, uint32_t count) {
     if (s_mf.pending == NT_RECORDER_READS && !encode_oldest()) {
         return false;
     }
+    nt_recorder_slot_t *slot = &s_mf.slots[s_mf.head];
+    if (!wait_released(slot)) {
+        NT_LOG_WARN("the encoder kept a frame for 10 s");
+        s_mf.broken = true;
+        return false;
+    }
     /* The top rows: an odd framebuffer loses its bottom row and right column, as on web. */
-    nt_gfx_read_pixels_to_buffer((nt_render_target_t){0}, 0, (int)(g_nt_window.fb_height - s_mf.height), (int)s_mf.width, (int)s_mf.height, s_mf.reads[s_mf.head]);
-    s_mf.read_first[s_mf.head] = first;
-    s_mf.read_count[s_mf.head] = count;
-    s_mf.head = (s_mf.head + 1U) % NT_RECORDER_READS;
+    nt_gfx_read_pixels_to_buffer((nt_render_target_t){0}, 0, (int)(g_nt_window.fb_height - s_mf.height), (int)s_mf.width, (int)s_mf.height, slot->read);
+    slot->first = first;
+    slot->count = count;
+    s_mf.head = (s_mf.head + 1U) % NT_RECORDER_SLOTS;
     s_mf.pending++;
     return true;
 }

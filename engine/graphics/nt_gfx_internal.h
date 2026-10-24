@@ -254,9 +254,9 @@ bool nt_gfx_backend_read_pixels(uint32_t render_target_backend, int x, int y, in
 #if !defined(NT_PLATFORM_WEB)
 /* Starts a BGRA8 read into readback buffer slot buffer_backend. */
 void nt_gfx_backend_read_pixels_to_buffer(uint32_t render_target_backend, int x, int y, int w, int h, uint32_t buffer_backend);
-/* Maps [0, size) for reading; GL waits for the read that wrote it. */
-const void *nt_gfx_backend_map_buffer(uint32_t buffer_backend, uint32_t size);
-void nt_gfx_backend_unmap_buffer(uint32_t buffer_backend);
+/* Waits for the last read into the buffer and returns its persistently mapped bytes; a buffer never
+ * read asserts. */
+const void *nt_gfx_backend_wait_buffer(uint32_t buffer_backend);
 #endif
 
 /* Binds [offset, offset + size) of the buffer, validated by the frontend. */

@@ -10,9 +10,10 @@ if(EMSCRIPTEN)
     endforeach()
     set_property(TARGET nt_recorder APPEND PROPERTY INTERFACE_LINK_DEPENDS ${_nt_recorder_js})
 elseif(WIN32)
-    # Media Foundation; it reads the window through nt_gfx, so the executable also links nt_gfx.
+    # Media Foundation, with a D3D11 device for its colour conversion; it reads the window through
+    # nt_gfx, so the executable also links nt_gfx.
     nt_add_module(nt_recorder LOG_DOMAIN "recorder" nt_recorder.c native/nt_recorder_native.c nt_recorder.h nt_recorder_internal.h)
-    target_link_libraries(nt_recorder PRIVATE mfplat mfreadwrite mfuuid ole32 nt_gfx_interface)
+    target_link_libraries(nt_recorder PRIVATE mfplat mfreadwrite mfuuid ole32 d3d11 dxguid nt_gfx_interface)
 else()
     return()
 endif()

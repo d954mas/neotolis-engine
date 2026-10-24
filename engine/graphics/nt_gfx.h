@@ -511,8 +511,7 @@ typedef enum {
     NT_GFX_OP_CLEAR,
 #if !defined(NT_PLATFORM_WEB)
     NT_GFX_OP_BUFFER_READ,
-    NT_GFX_OP_BUFFER_MAP,
-    NT_GFX_OP_BUFFER_UNMAP,
+    NT_GFX_OP_BUFFER_WAIT,
 #endif
     NT_GFX_OP_COUNT
 } nt_gfx_operation_t;
@@ -616,7 +615,7 @@ typedef enum {
 #if defined(NT_PLATFORM_WEB)
 #define NT_GFX_GL_READBACK_CALLS(X)
 #else
-#define NT_GFX_GL_READBACK_CALLS(X) X(glMapBufferRange) X(glUnmapBuffer)
+#define NT_GFX_GL_READBACK_CALLS(X) X(glBufferStorage) X(glClientWaitSync) X(glDeleteSync) X(glFenceSync) X(glMapBufferRange)
 #endif
 
 /* Issued-call detail (NT_GFX_GL_<name>). Integer args follow the GL signature;
@@ -1018,18 +1017,17 @@ bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint
 
 #if !defined(NT_PLATFORM_WEB)
 /* Native only (WebGL has no buffer mapping). Starts a read of an (x,y,w,h) sub-rect of `src` into
- * `buf` (NT_BUFFER_READBACK, w*h*4 <= size) and returns without waiting for the GPU. The bytes are
- * BGRA8 rows of w*4, BOTTOM-UP as GL stores them, read with nt_gfx_map_readback. Frame point and source
- * rules as nt_gfx_read_pixels; a mapped `buf` asserts. A readback buffer may be destroyed while a
- * frame is being drawn: no recorded command names it. */
+ * `buf` (NT_BUFFER_READBACK, w*h*4 <= size) and returns without waiting for the GPU (the driver may
+ * still make the call wait for its own thread). The bytes are
+ * BGRA8 rows of w*4, BOTTOM-UP as GL stores them, read with nt_gfx_wait_readback. Frame point and
+ * source rules as nt_gfx_read_pixels. The caller must not read into or destroy `buf` while anything
+ * still uses its bytes: nt_gfx cannot see a consumer on another thread. A readback buffer may be
+ * destroyed while a frame is being drawn: no recorded command names it. */
 void nt_gfx_read_pixels_to_buffer(nt_render_target_t src, int x, int y, int w, int h, nt_buffer_t buf);
-/* The bytes of `buf`'s last read, valid until nt_gfx_unmap_readback or nt_gfx_destroy_buffer,
- * whichever comes first; never NULL (a failed map asserts; the gfx stub returns NULL). Waits for the
- * GPU only while it still copies that read: map a read issued frames earlier. A `buf` with no read
- * since its last map asserts. Any frame state: the read was already issued. */
-const uint8_t *nt_gfx_map_readback(nt_buffer_t buf);
-/* Ends the access from nt_gfx_map_readback; the mapped bytes become invalid. An unmapped `buf` asserts. */
-void nt_gfx_unmap_readback(nt_buffer_t buf);
+/* The bytes of `buf`'s last read, after waiting while the GPU still copies it: wait for a read issued
+ * frames earlier, which normally returns at once. Valid, from any thread, until the next read into `buf` or its destroy; never NULL
+ * (the gfx stub returns NULL). A `buf` never read asserts. Any frame state: the read was issued. */
+const uint8_t *nt_gfx_wait_readback(nt_buffer_t buf);
 #endif
 
 /* ---- Uniform blocks ---- */
