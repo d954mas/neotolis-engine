@@ -13,7 +13,6 @@ declare global {
       http_get_slow_timeout(): void;
       http_get_slow(): void;
       http_get_drip(): void;
-      http_get_late_empty(): void;
       http_state(): number; // nt_http_state_t: 3 = DONE, 4 = FAILED
       http_status(): number;
       http_total(): number;
@@ -28,7 +27,7 @@ declare global {
   }
 }
 
-test('resource: a body arriving after the idle deadline still retries when frames resume', async ({ page }) => {
+test('resource: a body that arrived while frames were paused is kept, not retried', async ({ page }) => {
   await page.goto('/index.html');
   await page.waitForFunction(() => window.__nt?.ready === true, null, { timeout: 30_000 });
   await page.evaluate(async () => {
@@ -40,20 +39,7 @@ test('resource: a body arriving after the idle deadline still retries when frame
   await page.evaluate(() => window.__nt!.pack_stall_pause(0));
   await expect.poll(() => page.evaluate(() => window.__nt!.pack_stall_state()), { timeout: 10_000 }).toBe(4);
   const attempts = await page.evaluate(async () => await (await fetch('/stall-attempts')).json());
-  expect(attempts['/pack-late-body']).toBe(2);
-});
-
-test('http: a delayed bodyless response fails after a paused pump', async ({ page }) => {
-  await page.goto('/index.html');
-  await page.waitForFunction(() => window.__nt?.ready === true, null, { timeout: 30_000 });
-  await page.evaluate(() => {
-    window.__nt!.http_get_late_empty();
-    window.__nt!.pack_stall_pause(1);
-  });
-  await page.waitForTimeout(900);
-  await page.evaluate(() => window.__nt!.pack_stall_pause(0));
-  await expect.poll(() => page.evaluate(() => window.__nt!.http_state()), { timeout: 10_000 }).toBe(FAILED);
-  await page.evaluate(() => window.__nt!.http_free());
+  expect(attempts['/pack-late-body']).toBe(1);
 });
 
 const DONE = 3;
@@ -96,7 +82,7 @@ test('http: idle timeout resets on body bytes', async ({ page }) => {
 });
 
 for (const [mode, path] of [[0, '/pack-stall-headers'], [1, '/pack-stall-body']] as const) {
-  test(`resource: idle HTTP ${path} fails and retries`, async ({ page }) => {
+  test(`resource: idle HTTP ${path} fails and every retry keeps the limit`, async ({ page }) => {
     await page.goto('/index.html');
     await page.waitForFunction(() => window.__nt?.ready === true, null, { timeout: 30_000 });
     await page.evaluate(async (m) => {
@@ -108,7 +94,7 @@ for (const [mode, path] of [[0, '/pack-stall-headers'], [1, '/pack-stall-body']]
     }
     await expect.poll(() => page.evaluate(() => window.__nt!.pack_stall_state()), { timeout: 10_000 }).toBe(4);
     const attempts = await page.evaluate(async () => await (await fetch('/stall-attempts')).json());
-    expect(attempts[path]).toBe(2);
+    expect(attempts[path]).toBe(3); // attempts 1 and 2 stall
   });
 }
 

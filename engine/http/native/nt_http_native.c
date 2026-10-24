@@ -2,7 +2,6 @@
 
 #include "core/nt_assert.h"
 #include "log/nt_log.h"
-#include "time/nt_time.h"
 
 /* curl's setopt/getinfo typecheck macros explode clang-tidy (sizeof tricks, huge
  * expansions); plain function calls keep the same runtime behavior. */
@@ -36,8 +35,6 @@ typedef struct {
     struct curl_slist *req_headers;
     NtHttpBuf body;
     NtHttpBuf hdr;
-    uint8_t idle_expired;
-    curl_off_t idle_last_wire_received;
 } NtHttpNativeXfer;
 
 static struct {
@@ -140,20 +137,7 @@ static uint16_t native_xfer_index(const NtHttpNativeXfer *xfer) { return (uint16
 static int native_on_progress(void *userdata, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow) {
     (void)ultotal;
     (void)ulnow;
-    NtHttpNativeXfer *xfer = userdata;
-    NtHttpSlot *slot = nt_http_get_slot(native_xfer_index(xfer));
-    if (dlnow < xfer->idle_last_wire_received) {
-        xfer->idle_last_wire_received = 0;
-    }
-    if (slot != NULL && slot->idle_timeout_ms > 0 && dlnow > xfer->idle_last_wire_received) {
-        double now = nt_time_now();
-        if ((now - slot->idle_last_progress_at) * 1000.0 >= (double)slot->idle_timeout_ms) {
-            xfer->idle_expired = 1;
-            return 1;
-        }
-        slot->idle_last_progress_at = now;
-    }
-    xfer->idle_last_wire_received = dlnow;
+    NtHttpSlot *slot = nt_http_get_slot(native_xfer_index(userdata));
     if (slot != NULL && dlnow > 0) {
         slot->received = (uint32_t)dlnow;
         slot->total = (uint32_t)dltotal;
@@ -167,10 +151,6 @@ static int native_on_progress(void *userdata, curl_off_t dltotal, curl_off_t dln
 static void native_finish(NtHttpNativeXfer *xfer, CURLcode result) {
     NtHttpSlot *slot = nt_http_get_slot(native_xfer_index(xfer));
     NT_ASSERT(slot != NULL);
-    if (xfer->idle_expired || (result == CURLE_OK && slot->idle_timeout_ms > 0 && (nt_time_now() - slot->idle_last_progress_at) * 1000.0 >= (double)slot->idle_timeout_ms)) {
-        result = CURLE_OPERATION_TIMEDOUT;
-        xfer->idle_expired = 1;
-    }
 
     long code = 0;
     curl_easy_getinfo(xfer->easy, CURLINFO_RESPONSE_CODE, &code);
@@ -196,11 +176,7 @@ static void native_finish(NtHttpNativeXfer *xfer, CURLcode result) {
         slot->total = slot->size;
         slot->state = (uint8_t)NT_HTTP_STATE_DONE;
     } else {
-        if (xfer->idle_expired) {
-            NT_LOG_ERROR("request idle for %u ms after %u bytes: %s", slot->idle_timeout_ms, slot->received, slot->url);
-        } else {
-            NT_LOG_ERROR("request failed: %s (%s)", curl_easy_strerror(result), slot->url);
-        }
+        NT_LOG_ERROR("request failed: %s (%s)", curl_easy_strerror(result), slot->url);
         slot->state = (uint8_t)NT_HTTP_STATE_FAILED;
     }
 

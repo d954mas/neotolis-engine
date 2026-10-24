@@ -92,19 +92,19 @@ given), and `timeout_ms`. A body on GET/HEAD is asserted out, as are the
 fetch()-forbidden methods CONNECT/TRACE/TRACK — backends would diverge
 otherwise.
 
-`timeout_ms` limits the whole request. `idle_timeout_ms` instead limits time
-without new response-body bytes, starting when the request is issued and resetting
-only when the received byte count rises. Both default to 0 (disabled), are
-clamped to `INT_MAX` milliseconds, and can be used together. Headers alone do
-not reset the idle clock. A stalled request becomes FAILED on the next
-`nt_http_update()`; the log includes the full URL, received bytes and threshold.
-Time spent with the page suspended still counts, so the next frame may fail and
-retry the request. On web, an enabled idle limit requires a readable response
-stream; a non-streaming fallback fails rather than treating a slow valid body as
-idle. Native measures received wire bytes and web measures decoded body bytes.
-The pack loader uses `nt_resource_set_http_idle_timeout(pack_id, ms)` on a mounted
-pack before load; retries keep that limit and use the existing retry policy.
-The default remains disabled for games that do not opt in.
+`timeout_ms` limits the whole request. `idle_timeout_ms` instead limits how long
+`nt_http_update()` sees no new response-body bytes. Both default to 0 (disabled),
+are clamped to `INT_MAX` milliseconds, and can be used together. Only
+`nt_http_update()` judges idleness, after the backend has taken everything that
+arrived: the clock starts on the first update after the request is issued and
+restarts whenever the received byte count changes. Headers alone do not restart
+it. Bytes or a completion that arrived during a long frame count as progress, so
+a slow frame never discards a transfer that delivered data. A request with no new
+bytes for the limit becomes FAILED in that update; the log includes the full URL,
+received bytes and threshold. A frame gap longer than the limit still fails a
+request that had nothing new by then, including after a suspended page resumes;
+the caller's retry handles that. Progress counts the same bytes as
+`nt_http_progress()`: wire bytes on native, decoded bytes on web.
 
 **Reference semantics: the web backend.** `nt_http` behaves like `fetch()`; the
 native backend approximates that with libcurl and is NOT byte-identical. The
@@ -163,10 +163,10 @@ Web bridge (EM_JS in `engine/http/web/nt_http_web.c`, all called from C):
 // Starts fetch(); request parameters read from the slot
 void nt_http_web_fetch(int slot, const char *url, const char *method,
                        const uint8_t *body, int body_size, const char *headers,
-                       int headers_size, int timeout_ms, int idle_timeout_ms);
+                       int headers_size, int timeout_ms);
 // out: received, total, status, header block size with its NUL (0 = none yet);
 // returns the nt_http_state_t
-int nt_http_web_poll(int slot, uint32_t *out, double *last_progress_at);
+int nt_http_web_poll(int slot, uint32_t *out);
 // Copies the body and header block into C buffers (NULL drops), drops the record
 void nt_http_web_take(int slot, uint8_t *data, char *hdrs);
 void nt_http_web_cancel(int slot);
@@ -227,6 +227,11 @@ currently sets `retry_max_attempts = 0`, which means unlimited attempts.
 `nt_resource_set_retry_policy` can set a finite total attempt limit, including the
 initial attempt; `1` disables retries. The default policy still needs a separate
 decision; callers needing bounded retries must configure that limit explicitly.
+
+`nt_resource_set_http_idle_timeout(ms)` sets the `idle_timeout_ms` of every HTTP
+pack request issued afterwards, retries included (default 0, disabled). A stalled
+pack request then fails like any other load failure and follows this policy, so a
+stalled pack retries without limit unless the game also bounds `max_attempts`.
 
 Aux-miss reloads (target winner requires aux data but its blob was evicted) reuse the same I/O path, but schedule an immediate retry on the next `resource_step()` instead of waiting for backoff.
 

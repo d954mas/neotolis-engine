@@ -252,6 +252,8 @@ void nt_http_update(void) {
         return;
     }
     nt_http_backend_update();
+    /* Idle is judged only here, after the backend has drained everything that
+     * arrived: bytes delayed by a long frame count as progress, not as a stall. */
     double now = 0.0;
     bool have_now = false;
     for (uint16_t i = 1; i <= NT_HTTP_MAX_REQUESTS; i++) {
@@ -263,7 +265,10 @@ void nt_http_update(void) {
             now = nt_time_now();
             have_now = true;
         }
-        if ((now - slot->idle_last_progress_at) * 1000.0 >= (double)slot->idle_timeout_ms) {
+        if (slot->received != slot->idle_received) {
+            slot->idle_received = slot->received;
+            slot->idle_since = now;
+        } else if ((now - slot->idle_since) * 1000.0 >= (double)slot->idle_timeout_ms) {
             NT_LOG_ERROR("request idle for %u ms after %u bytes: %s", slot->idle_timeout_ms, slot->received, slot->url);
             nt_http_backend_cancel(i);
             slot->state = (uint8_t)NT_HTTP_STATE_FAILED;
@@ -306,7 +311,7 @@ nt_http_request_t nt_http_request_ex(const char *url, const nt_http_options_t *o
     slot->resp_headers = NULL;
     slot->status = 0;
     slot->state = (uint8_t)NT_HTTP_STATE_PENDING;
-    slot->idle_last_progress_at = nt_time_now();
+    slot->idle_received = UINT32_MAX; /* the first update starts the idle clock */
 
     nt_http_backend_request(index);
 

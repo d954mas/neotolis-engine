@@ -25,6 +25,7 @@ static void net_sleep_ms(unsigned ms) {
 
 /* clang-format off */
 #include "http/nt_http.h"
+#include "time/nt_time.h"
 #include "unity.h"
 /* clang-format on */
 
@@ -223,15 +224,19 @@ static void test_timeout_fails(void) {
 
 static void test_idle_timeout_fails_before_headers(void) {
     nt_http_options_t opts = {.idle_timeout_ms = 500};
+    double start = nt_time_now();
     nt_http_request_t req = nt_http_request_ex(make_url("/slow"), &opts);
     TEST_ASSERT_EQUAL(NT_HTTP_STATE_FAILED, pump_to_completion(req));
+    TEST_ASSERT_TRUE(nt_time_now() - start < 2.0); /* /slow answers after 5 s */
     nt_http_free(req);
 }
 
 static void test_idle_timeout_fails_after_partial_body(void) {
     nt_http_options_t opts = {.idle_timeout_ms = 500};
+    double start = nt_time_now();
     nt_http_request_t req = nt_http_request_ex(make_url("/slowbody"), &opts);
     TEST_ASSERT_EQUAL(NT_HTTP_STATE_FAILED, pump_to_completion(req));
+    TEST_ASSERT_TRUE(nt_time_now() - start < 2.0);
     uint32_t received = 0;
     nt_http_progress(req, &received, NULL);
     TEST_ASSERT_GREATER_THAN(0, received);
@@ -262,7 +267,7 @@ static void test_idle_timeout_tracks_compressed_wire_progress(void) {
     nt_http_free(req);
 }
 
-static void test_idle_timeout_rejects_late_body_after_pump_pause(void) {
+static void test_idle_timeout_keeps_body_that_arrived_during_pump_pause(void) {
     nt_http_options_t opts = {.idle_timeout_ms = 250};
     nt_http_request_t req = nt_http_request_ex(make_url("/latebody"), &opts);
     uint32_t received = 0;
@@ -273,8 +278,12 @@ static void test_idle_timeout_rejects_late_body_after_pump_pause(void) {
     }
     TEST_ASSERT_GREATER_THAN(0, received);
     net_sleep_ms(800);
-    nt_http_update();
-    TEST_ASSERT_EQUAL(NT_HTTP_STATE_FAILED, nt_http_state(req));
+    TEST_ASSERT_EQUAL(NT_HTTP_STATE_DONE, pump_to_completion(req));
+    uint32_t size = 0;
+    uint8_t *data = nt_http_take_data(req, &size);
+    TEST_ASSERT_EQUAL_MEMORY("abcdef", data, 6);
+    TEST_ASSERT_EQUAL(6, size);
+    free(data);
     nt_http_free(req);
 }
 
@@ -418,7 +427,7 @@ int main(void) {
     RUN_TEST(test_idle_timeout_fails_after_partial_body);
     RUN_TEST(test_idle_timeout_tracks_body_progress);
     RUN_TEST(test_idle_timeout_tracks_compressed_wire_progress);
-    RUN_TEST(test_idle_timeout_rejects_late_body_after_pump_pause);
+    RUN_TEST(test_idle_timeout_keeps_body_that_arrived_during_pump_pause);
     RUN_TEST(test_timeout_mid_body_keeps_status);
     RUN_TEST(test_connection_refused_fails);
     RUN_TEST(test_cancel_in_flight);

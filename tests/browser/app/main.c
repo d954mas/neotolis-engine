@@ -848,7 +848,7 @@ EMSCRIPTEN_KEEPALIVE void nt_test_pack_stall_start(int mode) {
     s_nt_stall_pack_id = nt_hash32_str(mode == 0 ? "stall_headers" : mode == 1 ? "stall_body" : "late_body");
     nt_resource_mount(s_nt_stall_pack_id, 1);
     nt_resource_set_retry_policy(3, 20, 20);
-    nt_resource_set_http_idle_timeout(s_nt_stall_pack_id, 250);
+    nt_resource_set_http_idle_timeout(250);
     nt_resource_load_url(s_nt_stall_pack_id, mode == 0 ? "/pack-stall-headers" : mode == 1 ? "/pack-stall-body" : "/pack-late-body");
 }
 EMSCRIPTEN_KEEPALIVE void nt_test_pack_stall_pause(int paused) { s_nt_pause_resources = paused; }
@@ -885,10 +885,6 @@ EMSCRIPTEN_KEEPALIVE void nt_test_http_get_slow(void) { s_nt_http_req = nt_http_
 EMSCRIPTEN_KEEPALIVE void nt_test_http_get_drip(void) {
     nt_http_options_t opts = {.idle_timeout_ms = 500};
     s_nt_http_req = nt_http_request_ex("/drip", &opts);
-}
-EMSCRIPTEN_KEEPALIVE void nt_test_http_get_late_empty(void) {
-    nt_http_options_t opts = {.idle_timeout_ms = 250};
-    s_nt_http_req = nt_http_request_ex("/late-empty?probe=idle%20timeout", &opts);
 }
 EMSCRIPTEN_KEEPALIVE int nt_test_http_state(void) { return (int)nt_http_state(s_nt_http_req); }
 EMSCRIPTEN_KEEPALIVE int nt_test_http_status(void) { return (int)nt_http_status(s_nt_http_req); }
@@ -1043,7 +1039,6 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'http_get_slow_timeout': function() { _nt_test_http_get_slow_timeout(); },
         'http_get_slow': function() { _nt_test_http_get_slow(); },
         'http_get_drip': function() { _nt_test_http_get_drip(); },
-        'http_get_late_empty': function() { _nt_test_http_get_late_empty(); },
         'pack_stall_start': function(mode) { _nt_test_pack_stall_start(mode); },
         'pack_stall_pause': function(paused) { _nt_test_pack_stall_pause(paused); },
         'pack_stall_state': function() { return _nt_test_pack_stall_state(); },
