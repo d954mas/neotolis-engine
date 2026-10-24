@@ -7,10 +7,6 @@ target_link_libraries(skeletal_showcase PRIVATE nt_version)
 if(NT_DEVAPI_ENABLED)
     if(EMSCRIPTEN)
         target_link_libraries(skeletal_showcase PRIVATE nt_devapi_web nt_devapi_default)
-        target_link_options(skeletal_showcase PRIVATE
-            "SHELL:-sEXPORTED_FUNCTIONS=['_main','_nt_devapi_web_submit','_nt_devapi_web_poll','_nt_devapi_web_reset']"
-            "SHELL:-sEXPORTED_RUNTIME_METHODS=['ccall','UTF8ToString']"
-        )
     else()
         target_link_libraries(skeletal_showcase PRIVATE nt_devapi_net nt_devapi_default)
     endif()
