@@ -1,5 +1,5 @@
 # Size Report: skeletal_showcase (wasm-analysis-paired)
-# Commit: b2033de
+# Commit: 233f4f4
 
 ## WASM Section Sizes
 
@@ -13,17 +13,17 @@ Memory                 7 B
 Global                 9 B
 Export                71 B
 Elem                 151 B
-Code              334054 B
+Code              334082 B
 Data               23900 B
 Custom              9898 B
 ---------------- ----------
-TOTAL             369450 B
+TOTAL             369478 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-61681 B   frame
+61698 B   frame
 19344 B   main
 19219 B   dispatch_command
 13268 B   create_gpu
@@ -43,7 +43,7 @@ TOTAL             369450 B
  3252 B   nt_ui_label
  3009 B   fmt_fp
  2904 B   nt_material_apply
- 2891 B   nt_gfx_make_texture
+ 2896 B   nt_gfx_make_texture
  2624 B   nt_http_request_ex
  2582 B   scrollbar_emit_axis
  2551 B   nt_font_lookup_glyph_offset
@@ -55,7 +55,7 @@ TOTAL             369450 B
  2277 B   skinned_draw
 
 Total functions: 321
-Total code size: 333515 B
+Total code size: 333543 B
 
 ## Built Engine Archives
 
@@ -78,7 +78,7 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               65220 B
-libnt_gfx.a               112744 B
+libnt_gfx.a               112784 B
 libnt_gfx_stub.a            6838 B
 libnt_hash.a                4108 B
 libnt_http.a               16484 B
@@ -125,7 +125,7 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2661872 B
+TOTAL (archives)         2661912 B
 
 ## Data Segments Summary
 

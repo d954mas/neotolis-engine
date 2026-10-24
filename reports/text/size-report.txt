@@ -1,5 +1,5 @@
 # Size Report: text (wasm-analysis-paired)
-# Commit: b2033de
+# Commit: 233f4f4
 
 ## WASM Section Sizes
 
@@ -13,22 +13,22 @@ Memory                 7 B
 Global                 8 B
 Export                71 B
 Elem                  30 B
-Code               84551 B
+Code               84582 B
 Data                8622 B
 Custom              4206 B
 ---------------- ----------
-TOTAL              98419 B
+TOTAL              98450 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-25741 B   frame
+25759 B   frame
  5861 B   nt_text_renderer_draw
  4610 B   main
  4026 B   upload_glyph
  3002 B   fmt_fp
- 2816 B   nt_gfx_make_texture
+ 2821 B   nt_gfx_make_texture
  2614 B   nt_http_request_ex
  2502 B   nt_font_lookup_glyph_offset
  2425 B   printf_core
@@ -43,19 +43,19 @@ TOTAL              98419 B
   769 B   nt_input_web_on_pointer_down
   726 B   emit_decoration_quad
   690 B   pop_arg_long_double
-  682 B   nt_gfx_make_buffer
+  678 B   nt_gfx_make_buffer
   677 B   nt_gfx_backend_bind_vertex_input
   536 B   nt_gfx_bind_uniform_block
   533 B   claim_more_memory
   533 B   nt_gfx_gl_ctx_create
   519 B   __memcpy
   495 B   emmalloc_memalign
-  484 B   nt_gfx_backend_create_sampler
+  494 B   nt_gfx_backend_create_sampler
   483 B   find_pack
-  453 B   nt_gfx_activate_shader
+  451 B   nt_gfx_activate_shader
 
 Total functions: 106
-Total code size: 84372 B
+Total code size: 84403 B
 
 ## Built Engine Archives
 
@@ -78,7 +78,7 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               65220 B
-libnt_gfx.a               112744 B
+libnt_gfx.a               112784 B
 libnt_gfx_stub.a            6838 B
 libnt_hash.a                4108 B
 libnt_http.a               16484 B
@@ -125,7 +125,7 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2661872 B
+TOTAL (archives)         2661912 B
 
 ## Data Segments Summary
 

@@ -1,5 +1,5 @@
 # Size Report: asteroids (wasm-analysis-paired)
-# Commit: b2033de
+# Commit: 233f4f4
 
 ## WASM Section Sizes
 
@@ -13,17 +13,17 @@ Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                  64 B
-Code              394871 B
+Code              394904 B
 Data              219040 B
 Custom             13167 B
 ---------------- ----------
-TOTAL             628591 B
+TOTAL             628624 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-82008 B   frame
+82033 B   frame
 31662 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
 27440 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 20946 B   ui_panel
@@ -44,7 +44,7 @@ TOTAL             628591 B
  3319 B   void std::__2::__introsort<std::__2::_ClassicAlgPolicy, std::__2::ranges::less, unsigned int*, true>(unsigned int*, unsigned int*, std::__2::ranges::less, std::__2::iterator_traits<unsigned int*>::difference_type, bool)
  3262 B   nt_ui_label
  3020 B   fmt_fp
- 2892 B   nt_gfx_make_texture
+ 2897 B   nt_gfx_make_texture
  2624 B   nt_http_request_ex
  2610 B   scrollbar_emit_axis
  2608 B   basist::huffman_decoding_table::init(unsigned int, unsigned char const*, unsigned int)
@@ -55,7 +55,7 @@ TOTAL             628591 B
  2436 B   printf_core
 
 Total functions: 255
-Total code size: 394423 B
+Total code size: 394456 B
 
 ## Built Engine Archives
 
@@ -78,7 +78,7 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               65220 B
-libnt_gfx.a               112744 B
+libnt_gfx.a               112784 B
 libnt_gfx_stub.a            6838 B
 libnt_hash.a                4108 B
 libnt_http.a               16484 B
@@ -125,7 +125,7 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2661872 B
+TOTAL (archives)         2661912 B
 
 ## Data Segments Summary
 

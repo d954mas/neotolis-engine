@@ -1,5 +1,5 @@
 # Size Report: ui_3d_demo (wasm-analysis-paired)
-# Commit: b2033de
+# Commit: 233f4f4
 
 ## WASM Section Sizes
 
@@ -13,17 +13,17 @@ Memory                 7 B
 Global                 9 B
 Export                71 B
 Elem                  48 B
-Code              234703 B
+Code              234724 B
 Data               19950 B
 Custom              6432 B
 ---------------- ----------
-TOTAL             262308 B
+TOTAL             262329 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-69205 B   frame
+69222 B   frame
 17002 B   dispatch_command
 13251 B   create_gpu
  9132 B   main
@@ -36,7 +36,7 @@ TOTAL             262308 B
  3353 B   Clay__CloseElement
  3254 B   nt_ui_label
  3007 B   fmt_fp
- 2891 B   nt_gfx_make_texture
+ 2896 B   nt_gfx_make_texture
  2686 B   nt_material_apply
  2600 B   nt_http_request
  2551 B   nt_font_lookup_glyph_offset
@@ -55,7 +55,7 @@ TOTAL             262308 B
  1308 B   nt_gfx_make_pipeline
 
 Total functions: 179
-Total code size: 234389 B
+Total code size: 234410 B
 
 ## Built Engine Archives
 
@@ -78,7 +78,7 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               65220 B
-libnt_gfx.a               112744 B
+libnt_gfx.a               112784 B
 libnt_gfx_stub.a            6838 B
 libnt_hash.a                4108 B
 libnt_http.a               16484 B
@@ -125,7 +125,7 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2661872 B
+TOTAL (archives)         2661912 B
 
 ## Data Segments Summary
 

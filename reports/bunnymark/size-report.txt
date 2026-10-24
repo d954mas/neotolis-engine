@@ -1,5 +1,5 @@
 # Size Report: bunnymark (wasm-analysis-paired)
-# Commit: b2033de
+# Commit: 233f4f4
 
 ## WASM Section Sizes
 
@@ -13,17 +13,17 @@ Memory                 7 B
 Global                 9 B
 Export                71 B
 Elem                  90 B
-Code              216042 B
+Code              216067 B
 Data              208126 B
 Custom             11151 B
 ---------------- ----------
-TOTAL             436572 B
+TOTAL             436597 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-34914 B   frame
+34931 B   frame
 31590 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
 27353 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 17250 B   nt_gfx_activate_texture
@@ -34,7 +34,7 @@ TOTAL             436572 B
  3914 B   basist::pack_eac(basist::eac_block&, unsigned char const*, unsigned int)
  3319 B   void std::__2::__introsort<std::__2::_ClassicAlgPolicy, std::__2::ranges::less, unsigned int*, true>(unsigned int*, unsigned int*, std::__2::ranges::less, std::__2::iterator_traits<unsigned int*>::difference_type, bool)
  3007 B   fmt_fp
- 2889 B   nt_gfx_make_texture
+ 2894 B   nt_gfx_make_texture
  2686 B   nt_material_apply
  2624 B   nt_http_request_ex
  2588 B   basist::huffman_decoding_table::init(unsigned int, unsigned char const*, unsigned int)
@@ -49,13 +49,13 @@ TOTAL             436572 B
  1300 B   nt_gfx_make_pipeline
  1241 B   basist::bc7_mode_5_encoder::eval_weights(basist::color32 const*, unsigned char*, int, int, int, int, int, int)
  1218 B   basist::transcode_uastc_to_etc2_eac_a8(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
- 1218 B   nt_gfx_make_vertex_input
+ 1214 B   nt_gfx_make_vertex_input
  1119 B   nt_input_web_on_blur
  1100 B   nt_hash32_str
  1076 B   spawn_one_defold
 
 Total functions: 187
-Total code size: 215732 B
+Total code size: 215757 B
 
 ## Built Engine Archives
 
@@ -78,7 +78,7 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               65220 B
-libnt_gfx.a               112744 B
+libnt_gfx.a               112784 B
 libnt_gfx_stub.a            6838 B
 libnt_hash.a                4108 B
 libnt_http.a               16484 B
@@ -125,7 +125,7 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2661872 B
+TOTAL (archives)         2661912 B
 
 ## Data Segments Summary
 
