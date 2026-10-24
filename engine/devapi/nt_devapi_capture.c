@@ -193,7 +193,7 @@ static bool parse_scale(const cJSON *params, uint32_t *factor, nt_devapi_error *
 
 /* Defer with a producer carrying the captured rect + factor. `gl_y` is the GL bottom-left y of the
    rect (top-left y converted by the caller); the row-flip in nt_gfx_read_pixels then yields a
-   top-left sub-rect matching the documented contract. Capture resolves after ~1 render. */
+   top-left sub-rect matching the documented contract. Capture resolves at the next render, sim frozen or not. */
 static bool defer_capture(uint32_t x, uint32_t gl_y, uint32_t w, uint32_t h, uint32_t factor, nt_devapi_error *err) {
     if (!s_seam_armed) {
         /* The host advertises capture but never drives the pre-swap seam (e.g. devapi_host, which inits
@@ -210,7 +210,7 @@ static bool defer_capture(uint32_t x, uint32_t gl_y, uint32_t w, uint32_t h, uin
     ctx->w = w;
     ctx->h = h;
     ctx->factor = factor;
-    return nt_devapi_defer_current_with_result(1, capture_produce, ctx, free, NT_DEVAPI_ERR_CAPTURE_FAILED, "deferred capture producer failed (framebuffer readback or PNG encode error)");
+    return nt_devapi_defer_current_with_result(capture_produce, ctx, free, NT_DEVAPI_ERR_CAPTURE_FAILED, "deferred capture producer failed (framebuffer readback or PNG encode error)");
 }
 
 /* capture.frame {scale?}: defers a full-framebuffer capture (x=0,y=0,w=fb_width,h=fb_height). */

@@ -173,7 +173,7 @@ def run(client: DevApiClient) -> None:
     assert bool(poked2["poked"]) != before, "game.poke did not flip the observable host bool"
     print("PASS discovery + game.echo/game.poke: endpoints list both, echo round-trips, poke flips host state.")
 
-    # 3. Deterministic pump + the riskiest web path: a deferred capture -> real PNG.
+    # 3. The riskiest web path: a deferred capture -> real PNG, with the sim frozen in MANUAL.
     client.set_mode("manual")
     _drive_deferred_capture(client)
 

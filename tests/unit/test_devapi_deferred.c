@@ -62,7 +62,7 @@ static cJSON *synthetic_producer(void *ctx) {
     return result; /* owned by the slot; transferred into the yield envelope by poll_response. */
 }
 
-/* Defers 1 frame WITH a synthetic result producer + an owned ctx (a heap int sentinel). */
+/* Defers to the next pre-swap seam WITH a synthetic result producer + an owned ctx (a heap int sentinel). */
 static bool defer_result_handler(const cJSON *params, cJSON *result_obj, nt_devapi_error *err, void *user_data) {
     (void)params;
     (void)result_obj;
@@ -71,7 +71,7 @@ static bool defer_result_handler(const cJSON *params, cJSON *result_obj, nt_deva
     int *ctx = (int *)malloc(sizeof(int));
     TEST_ASSERT_NOT_NULL(ctx);
     *ctx = 0xA5;
-    return nt_devapi_defer_current_with_result(1, synthetic_producer, ctx, synthetic_ctx_free, "producer_failed", "synthetic producer failed");
+    return nt_devapi_defer_current_with_result(synthetic_producer, ctx, synthetic_ctx_free, "producer_failed", "synthetic producer failed");
 }
 
 static void register_defer_result(void) {
@@ -237,14 +237,13 @@ static void test_overflow_rejected_structured(void) {
     TEST_ASSERT_NULL(advance_frame()); /* frame=1; the live slot targets frame 1000, nothing pops yet */
 }
 
-/* Payload yield: defer-with-result, advance the frame, drive the pre-swap seam (fills the slot's
+/* Payload yield: defer-with-result with the frame frozen, drive the pre-swap seam (fills the slot's
    payload via the synthetic producer), then poll -> the entry carries the synthetic {probe:"ok"}
    payload AND the correlated request_id, NOT the legacy {deferred:true}. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_payload_yield_via_producer(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer_result\",\"request_id\":42}"));
 
-    g_nt_app.frame++;                   /* reach the slot's 1-frame target. */
     nt_devapi_run_pre_swap_producers(); /* GL-valid seam fills the payload (synthetic — no GL). */
     /* The producer's input ctx is consumed + freed once at the seam (one-shot); the produced
        payload now lives on the slot, to be yielded next. */
@@ -296,7 +295,6 @@ static void test_legacy_yield_unaffected(void) {
    (the leak the reset-no-leak case guards is the filled-but-never-yielded payload). */
 static void test_reset_frees_filled_payload(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer_result\",\"request_id\":1}"));
-    g_nt_app.frame++;
     nt_devapi_run_pre_swap_producers();             /* payload now owned by the slot, unyielded. */
     TEST_ASSERT_EQUAL_INT(1, s_producer_ctx_freed); /* ctx already consumed/freed at the seam. */
 

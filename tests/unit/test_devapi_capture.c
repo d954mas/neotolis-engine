@@ -25,7 +25,7 @@
 void setUp(void) {
     /* No nt_fpng_init() here: registering the capture group (register_default -> register_capture) inits
        the encoder. This test proves a host needs no explicit fpng init. */
-    g_nt_app.frame = 0; /* deferred targets are g_nt_app.frame + 1 — start at a known frame. */
+    g_nt_app.frame = 0; /* frame never advances here: capture must resolve with the sim frozen. */
     g_nt_window.fb_width = CAP_FB_W;
     g_nt_window.fb_height = CAP_FB_H;
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
@@ -55,10 +55,9 @@ static void assert_bad_params(const char *resp) {
     cJSON_Delete(root);
 }
 
-/* Drive one render seam + frame advance, then poll the yielded envelope (caller frees the root). */
+/* Drive one render seam (no frame advance), then poll the yielded envelope (caller frees the root). */
 static cJSON *capture_yield(const char *request) {
     TEST_ASSERT_NULL(nt_devapi_submit(request)); /* a well-formed capture defers (no sync response). */
-    g_nt_app.frame++;                            /* reach the slot's 1-frame target. */
     nt_devapi_capture_on_pre_swap();             /* GL-valid seam: fills the payload via the producer. */
     const char *resp = nt_devapi_poll_response();
     TEST_ASSERT_NOT_NULL(resp);
@@ -189,7 +188,6 @@ static void test_capture_nondividing_scale_bad_params(void) {
 static void test_capture_producer_failure_yields_error(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"capture.frame\",\"request_id\":42}"));
     g_nt_gfx.context_lost = true; /* force the readback to fail -> producer returns NULL. */
-    g_nt_app.frame++;
     nt_devapi_capture_on_pre_swap();
     g_nt_gfx.context_lost = false; /* restore for any following test. */
 
@@ -242,12 +240,11 @@ static void test_capture_unarmed_host_unavailable(void) {
     /* tearDown shuts down; the next setUp re-inits + re-arms. */
 }
 
-/* drain-race guard: a frame-READY slot whose pre-swap producer has NOT run yet is WITHHELD (poll NULL),
-   not emitted as capture_failed (which would lose the image). Drives a poll landing between the
-   frame-advance and the seam; no GL — the seam-vs-poll ordering is the SUT. */
+/* drain-race guard: a READY slot whose pre-swap producer has NOT run yet is WITHHELD (poll NULL),
+   not emitted as capture_failed (which would lose the image). Drives a poll landing between
+   submit and the seam; no GL — the seam-vs-poll ordering is the SUT. */
 static void test_capture_ready_before_seam_is_withheld(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"capture.frame\",\"request_id\":9}")); /* defers. */
-    g_nt_app.frame++;                                                                      /* reach the slot's 1-frame target: the slot is now READY, but the seam has NOT run. */
     /* Poll WITHOUT driving the seam: ready + producer-bearing + payload==NULL -> withheld, NOT capture_failed. */
     TEST_ASSERT_NULL(nt_devapi_poll_response());
     /* Now drive the seam: the producer fills the payload, and the next poll yields the real PNG. */

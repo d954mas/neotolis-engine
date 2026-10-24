@@ -579,7 +579,7 @@ jobs:
         run: xvfb-run -a python3 tools/devapi/scenarios/devapi_demo.py
 
   # The deferred-capture-over-web drain race is invisible to unit tests — only a real headless Chromium
-  # proves it; devapi.spec.ts pumps frames deterministically via time.step, not rAF cadence.
+  # proves it; devapi.spec.ts captures in MANUAL with the sim frozen, polling after each rendered frame.
   web-smoke:
     name: Web Smoke (devapi, blocking)
     runs-on: ubuntu-latest

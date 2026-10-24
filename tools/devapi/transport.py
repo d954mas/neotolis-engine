@@ -7,7 +7,6 @@ crashed / deferred-forever engine can never hang the bot or CI.
 
 Stdlib only (socket) — no pip deps. Python 3.8+.
 """
-import json
 import socket
 import time
 from abc import ABC, abstractmethod
@@ -102,23 +101,27 @@ class SocketTransport(Transport):
                 self._sock.close()
 
 
-# A deterministic rAF barrier: a Promise that resolves after two nested requestAnimationFrame
-# callbacks. One nested rAF lets the deferred capture's pre-swap seam run (the producer fills its
-# payload INSIDE the swap that the second rAF schedules).
-# The MANUAL pump's own step. time.step defers; its reply is dropped by the negative id.
-_PUMP_STEP_LINE = '{"method":"time.step","request_id":-1,"params":{"count":1}}'
-_RAF_BARRIER_JS = "() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r())))"
+# One wait per evaluate: a queued line returns at once; otherwise a double rAF (one rendered frame, so
+# the pre-swap seam can fill a deferred capture) races a timer for the time left, then one poll. rAF
+# stops in a background tab; the timer keeps the wait bounded.
+_POLL_AFTER_FRAME_JS = (
+    "async (ms) => { const q = window.__devapi.poll(); if (q) return q; let t; "
+    "await Promise.race(["
+    "new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))), "
+    "new Promise(r => { t = setTimeout(r, ms); })]); "
+    "clearTimeout(t); return window.__devapi.poll(); }"
+)
 
 
 class PlaywrightTransport(Transport):
-    """JSON-lines over window.__devapi.submit/poll, pumped once per rAF until a line arrives.
+    """JSON-lines over window.__devapi.submit/poll, polled once per rendered frame until a line arrives.
 
     No socket — drives the web devapi bridge over a Playwright page. send() calls
     window.__devapi.submit and stashes the SYNCHRONOUS response (a non-deferred command returns its
     response line immediately; a deferred command — C returned NULL — returns "" and its data line
-    arrives later via poll()). recv_line() returns a stashed line, else loops a rAF barrier +
-    window.__devapi.poll() until a line appears or the MANDATORY read_timeout fires — mirroring
-    SocketTransport's bounded read so a deferred-forever capture can never hang CI.
+    arrives later via poll()). recv_line() returns a stashed line, else polls after each frame until a
+    line appears or the MANDATORY read_timeout fires. Like SocketTransport it only moves lines: time
+    advance belongs to the client.
 
     Playwright Python is NOT a CI dep (the CI web gate is the TS spec); this class is the local/dev
     web wire and touches only the page handle the caller constructed, so the module stays stdlib-only
@@ -131,33 +134,10 @@ class PlaywrightTransport(Transport):
         self._closed = False
         # Lines received synchronously from submit() but not yet handed to recv_line().
         self._inbox = []
-        # Outbound bookkeeping for the MANUAL frame pump: the last method sent and whether the host is in
-        # MANUAL (where the frame counter advances only on time.step, so a frame-keyed deferred like
-        # capture never drains on rAF alone).
-        self._manual = False
-        self._last_method = None
-
-    def _note_outbound(self, line: str) -> None:
-        """Track the outbound method + MANUAL mode so recv_line pumps frames correctly."""
-        self._last_method = None
-        try:
-            msg = json.loads(line)
-        except ValueError:
-            return
-        if not isinstance(msg, dict):
-            return  # a batch array — no single method
-        self._last_method = msg.get("method")
-        if self._last_method == "time.set_mode":
-            mode = (msg.get("params") or {}).get("mode")
-            if mode in ("manual", "run"):
-                self._manual = mode == "manual"
 
     def send(self, line: str) -> None:
         if self._closed:
             raise ConnectionError("transport is closed")
-        if len(line.encode("utf-8")) > MAX_LINE_BYTES:
-            raise ValueError("outbound line exceeds MAX_LINE_BYTES")
-        self._note_outbound(line)
         # submit returns "" on defer (C returned NULL), else the synchronous response line.
         resp = self._page.evaluate("(l) => window.__devapi.submit(l)", line)
         if resp:
@@ -168,30 +148,14 @@ class PlaywrightTransport(Transport):
             raise ConnectionError("transport is closed")
         if self._inbox:
             return self._inbox.pop(0)
-        # Bounded poll: never an unbounded loop — a deferred-forever capture must fail fast.
-        deadline = time.time() + self._timeout
-        while time.time() < deadline:
-            # Advance one MANUAL frame so a frame-keyed deferred (capture) drains — but NOT when the
-            # caller's own command is time.step, which is itself a deferred sim-advance (an extra step
-            # would over-advance the sim). Under RUN the rAF below advances the frame.
-            if self._manual and self._last_method != "time.step":
-                self._page.evaluate("(l) => window.__devapi.submit(l)", _PUMP_STEP_LINE)
-            self._page.evaluate(_RAF_BARRIER_JS)
-            line = self._page.evaluate("() => window.__devapi.poll()")
-            if not line:
-                continue
-            if len(line.encode("utf-8")) >= MAX_LINE_BYTES:
-                raise ConnectionError("oversized line from window.__devapi.poll — framing/cap desync")
-            # Drop the pump's own step replies (NEGATIVE request_id; a caller only ever allocates
-            # positive ones) so they never pollute the client's correlation map.
-            try:
-                rid = json.loads(line).get("request_id")
-            except ValueError:
-                rid = None
-            if isinstance(rid, int) and rid < 0:
-                continue
-            return line
-        raise TimeoutError("no web devapi line within read_timeout")
+        deadline = time.monotonic() + self._timeout
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise TimeoutError("no web devapi line within read_timeout")
+            line = self._page.evaluate(_POLL_AFTER_FRAME_JS, max(1, int(left * 1000)))
+            if line:
+                return line
 
     def close(self) -> None:
         if self._closed:
