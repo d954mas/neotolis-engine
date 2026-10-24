@@ -89,8 +89,8 @@ const server = createServer(async (req, res) => {
     res.setHeader('Content-Length', String(data.length));
     res.setHeader('Content-Type', 'application/octet-stream');
     if (attempt <= 2) {
-      res.flushHeaders();
-      if (urlPath !== '/pack-stall-headers') res.write(data.subarray(0, 3));
+      // stall-headers never answers; stall-body sends headers and 3 bytes, then stops
+      if (urlPath === '/pack-stall-body') res.write(data.subarray(0, 3));
     } else {
       res.end(data);
     }
