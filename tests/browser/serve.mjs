@@ -16,6 +16,7 @@ const ROOT =
   process.env.NT_SHOWCASE_DIR ||
   join(__dirname, '..', '..', 'build', 'tests', 'browser', 'app', 'wasm-debug');
 const PORT = Number(process.env.NT_SHOWCASE_PORT || 8123);
+const stallAttempts = new Map();
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -67,6 +68,43 @@ const server = createServer(async (req, res) => {
     res.setHeader('Content-Length', '2');
     res.flushHeaders();
     setTimeout(() => res.end('ok'), 5000);
+    return;
+  }
+  if (urlPath === '/drip') {
+    res.setHeader('Content-Length', '6');
+    let at = 0;
+    const send = () => {
+      if (res.destroyed) return;
+      res.write('abcdef'[at++]);
+      if (at === 6) res.end();
+      else setTimeout(send, 180);
+    };
+    send();
+    return;
+  }
+  if (urlPath === '/pack-stall-headers' || urlPath === '/pack-stall-body') {
+    const attempt = (stallAttempts.get(urlPath) || 0) + 1;
+    stallAttempts.set(urlPath, attempt);
+    const data = await readFile(join(ROOT, 'assets', 'basis_fixture.ntpack'));
+    res.setHeader('Content-Length', String(data.length));
+    res.setHeader('Content-Type', 'application/octet-stream');
+    if (attempt <= 2) {
+      // stall-headers never answers; stall-body sends headers and 3 bytes, then stops
+      if (urlPath === '/pack-stall-body') res.write(data.subarray(0, 3));
+    } else {
+      res.end(data);
+    }
+    return;
+  }
+  if (req.method === 'POST' && urlPath.startsWith('/stall-reset/')) {
+    stallAttempts.set(urlPath.slice('/stall-reset'.length), 0);
+    res.statusCode = 204;
+    res.end();
+    return;
+  }
+  if (urlPath === '/stall-attempts') {
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify(Object.fromEntries(stallAttempts)));
     return;
   }
 

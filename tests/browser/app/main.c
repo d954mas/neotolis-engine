@@ -840,6 +840,17 @@ EMSCRIPTEN_KEEPALIVE void nt_test_hide_probe(int mode) {
 static uint8_t s_nt_http_body[300];
 static uint32_t s_nt_http_body_size;
 static nt_http_request_t s_nt_http_req;
+static nt_hash32_t s_nt_stall_pack_id;
+
+EMSCRIPTEN_KEEPALIVE void nt_test_pack_stall_start(int mode) {
+    NT_ASSERT(mode == 0 || mode == 1);
+    s_nt_stall_pack_id = nt_hash32_str(mode == 0 ? "stall_headers" : "stall_body");
+    nt_resource_mount(s_nt_stall_pack_id, 1);
+    nt_resource_set_retry_policy(3, 20, 20);
+    nt_resource_set_http_idle_timeout(1000);
+    nt_resource_load_url(s_nt_stall_pack_id, mode == 0 ? "/pack-stall-headers" : "/pack-stall-body");
+}
+EMSCRIPTEN_KEEPALIVE int nt_test_pack_stall_state(void) { return (int)nt_resource_pack_state(s_nt_stall_pack_id); }
 
 EMSCRIPTEN_KEEPALIVE void nt_test_http_post_echo(void) {
     s_nt_http_body_size = (uint32_t)sizeof(s_nt_http_body);
@@ -864,6 +875,10 @@ EMSCRIPTEN_KEEPALIVE void nt_test_http_get_slow_timeout(void) {
     s_nt_http_req = nt_http_request_ex("/slow", &opts);
 }
 EMSCRIPTEN_KEEPALIVE void nt_test_http_get_slow(void) { s_nt_http_req = nt_http_request("/slow"); }
+EMSCRIPTEN_KEEPALIVE void nt_test_http_get_drip(void) {
+    nt_http_options_t opts = {.idle_timeout_ms = 500};
+    s_nt_http_req = nt_http_request_ex("/drip", &opts);
+}
 EMSCRIPTEN_KEEPALIVE int nt_test_http_state(void) { return (int)nt_http_state(s_nt_http_req); }
 EMSCRIPTEN_KEEPALIVE int nt_test_http_status(void) { return (int)nt_http_status(s_nt_http_req); }
 EMSCRIPTEN_KEEPALIVE int nt_test_http_total(void) {
@@ -1016,6 +1031,9 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'http_get_404': function() { _nt_test_http_get_404(); },
         'http_get_slow_timeout': function() { _nt_test_http_get_slow_timeout(); },
         'http_get_slow': function() { _nt_test_http_get_slow(); },
+        'http_get_drip': function() { _nt_test_http_get_drip(); },
+        'pack_stall_start': function(mode) { _nt_test_pack_stall_start(mode); },
+        'pack_stall_state': function() { return _nt_test_pack_stall_state(); },
         'http_state': function() { return _nt_test_http_state(); },
         'http_status': function() { return _nt_test_http_status(); },
         'http_total': function() { return _nt_test_http_total(); },

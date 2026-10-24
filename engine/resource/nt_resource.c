@@ -58,6 +58,7 @@ static struct {
     uint32_t retry_max_attempts; /* 0 = infinite */
     uint32_t retry_base_delay_ms;
     uint32_t retry_max_delay_ms;
+    uint32_t http_idle_timeout_ms; /* 0 = disabled */
     bool needs_resolve;
     bool initialized;
 #if NT_RESOURCE_TIMING_ENABLED
@@ -485,7 +486,8 @@ static void asset_header_check(const NtAssetMeta *meta, const uint8_t *data) {
 
 static uint32_t resource_io_issue(const char *path, uint8_t io_type) {
     if (io_type == NT_IO_HTTP) {
-        return nt_http_request(path).id;
+        nt_http_options_t opts = {.idle_timeout_ms = s_resource.http_idle_timeout_ms};
+        return nt_http_request_ex(path, &opts).id;
     }
 #ifndef NT_PLATFORM_WEB
     if (io_type == NT_IO_FS) {
@@ -1618,6 +1620,8 @@ void nt_resource_set_retry_policy(uint32_t max_attempts, uint32_t base_delay_ms,
     s_resource.retry_base_delay_ms = base_delay_ms;
     s_resource.retry_max_delay_ms = max_delay_ms;
 }
+
+void nt_resource_set_http_idle_timeout(uint32_t idle_timeout_ms) { s_resource.http_idle_timeout_ms = idle_timeout_ms; }
 
 /* ---- Blob policy ---- */
 

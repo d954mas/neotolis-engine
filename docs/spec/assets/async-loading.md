@@ -88,9 +88,24 @@ multi / stub). `nt_http_request(url)` is the GET shorthand;
 `nt_http_request_ex(url, opts)` adds method, body (copied at call time),
 request-header pairs, an optional `content_type` (defaulted to
 `application/octet-stream` when a body is present and no Content-Type pair was
-given), and `timeout_ms`. A body on GET/HEAD is asserted out, as are the
+given), `timeout_ms` and `idle_timeout_ms`. A body on GET/HEAD is asserted out, as are the
 fetch()-forbidden methods CONNECT/TRACE/TRACK — backends would diverge
 otherwise.
+
+`timeout_ms` limits the whole request. `idle_timeout_ms` instead limits how long
+`nt_http_update()` sees no new response-body bytes. Both are per request, default to 0
+(disabled) and can be used together. Connection setup counts as idle, so the
+engine has no separate connect timeout. Only `nt_http_update()` judges idleness,
+right after the backend update: the clock starts on the first update after the request is issued and
+restarts whenever the received byte count changes. Headers alone do not restart
+it; upload and server think time count as idle. Whatever the backend has taken
+by that update counts as progress, including bytes or a completion that arrived
+during a long frame (see the divergence table for web). A request with no new
+bytes for the limit becomes FAILED in that update, without a status or response
+headers; the log includes the full URL, received bytes and threshold. A frame gap longer than the limit still fails a
+request that had nothing new by then, including after a suspended page resumes;
+the caller's retry handles that. Progress counts the same bytes as
+`nt_http_progress()`: wire bytes on native, decoded bytes on web.
 
 **Reference semantics: the web backend.** `nt_http` behaves like `fetch()`; the
 native backend approximates that with libcurl and is NOT byte-identical. The
@@ -105,7 +120,7 @@ parity is cheap.
 
 State semantics: **DONE = a full response arrived with ANY HTTP status** (a 404
 body is data, not a transport error) — the caller checks `nt_http_status()`;
-**FAILED = transport error, timeout or cancel** (a status may still be recorded).
+**FAILED = transport error, timeout, idle stall or cancel** (a status may still be recorded).
 `nt_http_response_headers()` returns lowercased `"name: value\n"` lines, valid
 until `nt_http_free`/`nt_http_shutdown`. `nt_http_update()` advances
 transfers on native and web (no-op on stub) — call it once per frame while requests are in
@@ -137,6 +152,7 @@ native backend via `CURLOPT_ACCEPT_ENCODING` with curl's gzip/deflate decoders
 | Request header validation | forbidden names (Host, Cookie, Origin, ...) silently dropped, CORS applies, CR/LF in a value throws → FAILED | sent verbatim, no validation |
 | obs-fold continuation lines (legacy servers) | browser unfolds them | folded line is dropped or emitted as a garbage header line |
 | Mid-transfer progress numbers | decoded stream bytes vs raw Content-Length | wire (possibly compressed) bytes |
+| Idle judgement after a long frame | the browser may run the frame before queued fetch() handlers, so bytes that already arrived can still count as idle | the update reads the socket, so bytes that already arrived always count as progress |
 | Relative URL (`"/path"`) | resolved against the page origin | no base URL — the request FAILs |
 | Connection pool | browser-managed (about 6 per host on HTTP/1.1, one on HTTP/2) | The vendored build uses HTTP/1.1. The connection cache retains up to `NT_HTTP_MAX_REQUESTS` connections across hosts after transfers complete, so a burst to one host can reuse the previous burst's connections. This is not a hard limit on all open connections: transfers to other hosts may temporarily exceed it. An idle connection is not reused past libcurl's idle limit (`CURLOPT_MAXAGE_CONN`) and closes on a later request or at shutdown. |
 
@@ -213,6 +229,11 @@ currently sets `retry_max_attempts = 0`, which means unlimited attempts.
 `nt_resource_set_retry_policy` can set a finite total attempt limit, including the
 initial attempt; `1` disables retries. The default policy still needs a separate
 decision; callers needing bounded retries must configure that limit explicitly.
+
+`nt_resource_set_http_idle_timeout(ms)` sets the `idle_timeout_ms` of every HTTP
+pack request issued afterwards, retries included (default 0, disabled). A stalled
+pack request then fails like any other load failure and follows this policy, so a
+stalled pack retries without limit unless the game also bounds `max_attempts`.
 
 Aux-miss reloads (target winner requires aux data but its blob was evicted) reuse the same I/O path, but schedule an immediate retry on the next `resource_step()` instead of waiting for backoff.
 

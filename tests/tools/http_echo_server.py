@@ -7,10 +7,12 @@ Then: build/tests/<preset>/test_http_native_net
 Endpoints: POST /echo (byte-exact echo + request headers reflected into
 X-Echo-* response headers), GET /hello, /status404, /slow (5 s stall),
 /slowbody (headers then stall), /gzip, /truncated, /empty, /loop,
-/r301hello + /hello301 (redirect probes), and /peer (a short hold, then the
-number of the TCP connection it arrived on, so a test can tell a reused
-connection from a new one). tests/browser/serve.mjs serves the same /status404
-and /slow and a narrower POST /echo (Content-Type and X-NT-Test reflected); the
+/r301hello + /hello301 (redirect probes), /drip (one byte every 180 ms),
+/latebody (half the body, a 1 s gap, the rest), /gzipdrip (gzip header
+dripped before any decoded byte), and /peer (a short hold, then the number of
+the TCP connection it arrived on, so a test can tell a reused connection from
+a new one). tests/browser/serve.mjs serves the same /status404, /slow and
+/drip and a narrower POST /echo (Content-Type and X-NT-Test reflected); the
 rest are native-only.
 """
 import gzip
@@ -117,6 +119,35 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(b"partial")
             self.wfile.flush()
             time.sleep(5)
+        elif self.path == "/drip":
+            self.send_response(200)
+            self.send_header("Content-Length", "6")
+            self.end_headers()
+            for byte in b"abcdef":
+                self.wfile.write(bytes([byte]))
+                self.wfile.flush()
+                time.sleep(0.18)
+        elif self.path == "/latebody":
+            self.send_response(200)
+            self.send_header("Content-Length", "6")
+            self.end_headers()
+            self.wfile.write(b"abc")
+            self.wfile.flush()
+            time.sleep(1.0)
+            self.wfile.write(b"def")
+            self.wfile.flush()
+        elif self.path == "/gzipdrip":
+            body = gzip.compress(b"gzip-payload-neotolis" * 8)
+            self.send_response(200)
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            for at in range(0, 10, 2):
+                self.wfile.write(body[at : at + 2])
+                self.wfile.flush()
+                time.sleep(0.18)
+            self.wfile.write(body[10:])
+            self.wfile.flush()
         else:
             self._reply(404, b"")
 

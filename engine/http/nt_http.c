@@ -2,6 +2,7 @@
 
 #include "core/nt_assert.h"
 #include "log/nt_log.h"
+#include "time/nt_time.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -197,6 +198,7 @@ static void http_copy_request(NtHttpSlot *slot, const char *url, const nt_http_o
     if (slot->timeout_ms > 0x7FFFFFFFU) {
         slot->timeout_ms = 0x7FFFFFFFU;
     }
+    slot->idle_timeout_ms = opts != NULL ? opts->idle_timeout_ms : 0;
 }
 
 /* ---- Lifecycle ---- */
@@ -247,6 +249,22 @@ void nt_http_update(void) {
         return;
     }
     nt_http_backend_update();
+    /* Judged after the backend update, so whatever it took this frame counts as progress */
+    for (uint16_t i = 1; i <= NT_HTTP_MAX_REQUESTS; i++) {
+        NtHttpSlot *slot = &s_http.slots[i];
+        if (!nt_http_slot_in_flight(slot) || slot->idle_timeout_ms == 0) {
+            continue;
+        }
+        double now = nt_time_now();
+        if (slot->received != slot->idle_received) {
+            slot->idle_received = slot->received;
+            slot->idle_since = now;
+        } else if ((now - slot->idle_since) * 1000.0 >= (double)slot->idle_timeout_ms) {
+            NT_LOG_ERROR("request idle for %u ms after %u bytes: %s", slot->idle_timeout_ms, slot->received, slot->url);
+            nt_http_backend_cancel(i);
+            slot->state = (uint8_t)NT_HTTP_STATE_FAILED;
+        }
+    }
 }
 
 /* ---- Request management ---- */
@@ -284,6 +302,7 @@ nt_http_request_t nt_http_request_ex(const char *url, const nt_http_options_t *o
     slot->resp_headers = NULL;
     slot->status = 0;
     slot->state = (uint8_t)NT_HTTP_STATE_PENDING;
+    slot->idle_received = UINT32_MAX; /* the first update starts the idle clock */
 
     nt_http_backend_request(index);
 

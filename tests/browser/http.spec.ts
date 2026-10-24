@@ -12,18 +12,22 @@ declare global {
       http_get_404(): void;
       http_get_slow_timeout(): void;
       http_get_slow(): void;
+      http_get_drip(): void;
       http_state(): number; // nt_http_state_t: 3 = DONE, 4 = FAILED
       http_status(): number;
       http_total(): number;
       http_headers(): string;
       http_verify_echo(): number; // 1 exact, 0 mismatch, -1 not DONE
       http_free(): void;
+      pack_stall_start(mode: number): void;
+      pack_stall_state(): number;
     };
   }
 }
 
 const DONE = 3;
 const FAILED = 4;
+const PACK_READY = 4; // nt_pack_state_t
 
 test('http: POST body arrives verbatim, headers/status surface, 404 is DONE', async ({ page }) => {
   await page.goto('/index.html');
@@ -51,6 +55,29 @@ test('http: POST body arrives verbatim, headers/status surface, 404 is DONE', as
   expect(await page.evaluate(() => window.__nt!.http_status())).toBe(404);
   await page.evaluate(() => window.__nt!.http_free());
 });
+
+test('http: idle timeout resets on body bytes', async ({ page }) => {
+  await page.goto('/index.html');
+  await page.waitForFunction(() => window.__nt?.ready === true, null, { timeout: 30_000 });
+  await page.evaluate(() => window.__nt!.http_get_drip());
+  await expect.poll(() => page.evaluate(() => window.__nt!.http_state()), { timeout: 10_000 }).toBe(DONE);
+  expect(await page.evaluate(() => window.__nt!.http_total())).toBe(6);
+  await page.evaluate(() => window.__nt!.http_free());
+});
+
+for (const [mode, path] of [[0, '/pack-stall-headers'], [1, '/pack-stall-body']] as const) {
+  test(`resource: idle HTTP ${path} fails and every retry keeps the limit`, async ({ page }) => {
+    await page.goto('/index.html');
+    await page.waitForFunction(() => window.__nt?.ready === true, null, { timeout: 30_000 });
+    await page.evaluate(async (p) => {
+      await fetch('/stall-reset' + p, { method: 'POST' });
+    }, path);
+    await page.evaluate((m) => window.__nt!.pack_stall_start(m), mode);
+    await expect.poll(() => page.evaluate(() => window.__nt!.pack_stall_state()), { timeout: 10_000 }).toBe(PACK_READY);
+    const attempts = await page.evaluate(async () => await (await fetch('/stall-attempts')).json());
+    expect(attempts[path]).toBe(3); // attempts 1 and 2 stall
+  });
+}
 
 test('http: timeout aborts to FAILED; free mid-download cancels and the slot is reusable', async ({ page }) => {
   await page.goto('/index.html');
