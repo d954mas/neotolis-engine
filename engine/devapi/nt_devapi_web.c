@@ -10,15 +10,14 @@
 #include "devapi/nt_devapi_web.h"
 
 /* JS-only entries (reached through window.__devapi, never named by the host). submit takes ownership
-   of a stringToNewUTF8 line and frees it; both return the core's own buffer, NULL when deferred /
-   nothing ready. */
+   of a stringToNewUTF8 line and frees it; submit and poll return NULL when deferred / nothing ready. */
 EMSCRIPTEN_KEEPALIVE const char *nt_devapi_web_submit(char *line);
 EMSCRIPTEN_KEEPALIVE const char *nt_devapi_web_poll(void);
 EMSCRIPTEN_KEEPALIVE void nt_devapi_web_reset(void);
 
 /* clang-format off */
-/* The line goes through the heap, not ccall's wasm-stack copy: a request may exceed the 64 KiB stack.
-   Names are quoted so release --closure 1 keeps them. */
+/* The line goes through the heap: a request may exceed the 64 KiB wasm stack. Names are quoted so
+   release --closure 1 keeps them. */
 EM_JS_DEPS(nt_devapi_web, "$stringToNewUTF8,$UTF8ToString")
 
 EM_JS(void, nt_devapi_web_install_js, (void), {
