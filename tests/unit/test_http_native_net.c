@@ -231,24 +231,15 @@ static void test_idle_timeout_fails_before_headers(void) {
     nt_http_free(req);
 }
 
-static void test_idle_timeout_fails_after_partial_body(void) {
-    nt_http_options_t opts = {.idle_timeout_ms = 500};
-    double start = nt_time_now();
-    nt_http_request_t req = nt_http_request_ex(make_url("/slowbody"), &opts);
-    TEST_ASSERT_EQUAL(NT_HTTP_STATE_FAILED, pump_to_completion(req));
-    TEST_ASSERT_TRUE(nt_time_now() - start < 2.0);
-    uint32_t received = 0;
-    nt_http_progress(req, &received, NULL);
-    TEST_ASSERT_GREATER_THAN(0, received);
-    nt_http_free(req);
-}
-
 static void test_idle_timeout_failure_cancels_transfer(void) {
-    /* /latebody resumes 0.3 s after its first bytes: an uncancelled transfer would finish DONE */
+    /* /latebody resumes 1 s after its first bytes: an uncancelled transfer would finish DONE */
     nt_http_options_t opts = {.idle_timeout_ms = 100};
     nt_http_request_t req = nt_http_request_ex(make_url("/latebody"), &opts);
     TEST_ASSERT_EQUAL(NT_HTTP_STATE_FAILED, pump_to_completion(req));
-    for (int i = 0; i < 50; i++) {
+    uint32_t received = 0;
+    nt_http_progress(req, &received, NULL);
+    TEST_ASSERT_GREATER_THAN(0, received); /* failed after body bytes, not before headers */
+    for (int i = 0; i < 150; i++) {
         nt_http_update();
         net_sleep_ms(10);
     }
@@ -260,6 +251,9 @@ static void test_idle_timeout_tracks_body_progress(void) {
     nt_http_options_t opts = {.idle_timeout_ms = 500};
     nt_http_request_t req = nt_http_request_ex(make_url("/drip"), &opts);
     TEST_ASSERT_EQUAL(NT_HTTP_STATE_DONE, pump_to_completion(req));
+    net_sleep_ms(600); /* a finished request is never judged idle */
+    nt_http_update();
+    TEST_ASSERT_EQUAL(NT_HTTP_STATE_DONE, nt_http_state(req));
     uint32_t size = 0;
     uint8_t *data = nt_http_take_data(req, &size);
     TEST_ASSERT_EQUAL(6, size);
@@ -290,7 +284,7 @@ static void test_idle_timeout_keeps_body_that_arrived_during_pump_pause(void) {
         net_sleep_ms(10);
     }
     TEST_ASSERT_GREATER_THAN(0, received);
-    net_sleep_ms(800);
+    net_sleep_ms(1500);
     TEST_ASSERT_EQUAL(NT_HTTP_STATE_DONE, pump_to_completion(req));
     uint32_t size = 0;
     uint8_t *data = nt_http_take_data(req, &size);
@@ -437,7 +431,6 @@ int main(void) {
     RUN_TEST(test_redirect_loop_fails);
     RUN_TEST(test_timeout_fails);
     RUN_TEST(test_idle_timeout_fails_before_headers);
-    RUN_TEST(test_idle_timeout_fails_after_partial_body);
     RUN_TEST(test_idle_timeout_failure_cancels_transfer);
     RUN_TEST(test_idle_timeout_tracks_body_progress);
     RUN_TEST(test_idle_timeout_tracks_compressed_wire_progress);

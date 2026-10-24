@@ -88,7 +88,7 @@ multi / stub). `nt_http_request(url)` is the GET shorthand;
 `nt_http_request_ex(url, opts)` adds method, body (copied at call time),
 request-header pairs, an optional `content_type` (defaulted to
 `application/octet-stream` when a body is present and no Content-Type pair was
-given), and `timeout_ms`. A body on GET/HEAD is asserted out, as are the
+given), `timeout_ms` and `idle_timeout_ms`. A body on GET/HEAD is asserted out, as are the
 fetch()-forbidden methods CONNECT/TRACE/TRACK — backends would diverge
 otherwise.
 
@@ -101,12 +101,9 @@ arrived: the clock starts on the first update after the request is issued and
 restarts whenever the received byte count changes. Headers alone do not restart
 it; upload and server think time count as idle. Whatever the backend has taken
 by that update counts as progress, including bytes or a completion that arrived
-during a long frame. Native reads the socket inside the update, so a slow frame
-never discards bytes the server sent. Web sees only what the fetch() handlers
-have already recorded, and after a long frame the browser may run the frame
-before those handlers. A request with no new
-bytes for the limit becomes FAILED in that update; the log includes the full URL,
-received bytes and threshold. A frame gap longer than the limit still fails a
+during a long frame (see the divergence table for web). A request with no new
+bytes for the limit becomes FAILED in that update, without a status or response
+headers; the log includes the full URL, received bytes and threshold. A frame gap longer than the limit still fails a
 request that had nothing new by then, including after a suspended page resumes;
 the caller's retry handles that. Progress counts the same bytes as
 `nt_http_progress()`: wire bytes on native, decoded bytes on web.
@@ -156,6 +153,7 @@ native backend via `CURLOPT_ACCEPT_ENCODING` with curl's gzip/deflate decoders
 | Request header validation | forbidden names (Host, Cookie, Origin, ...) silently dropped, CORS applies, CR/LF in a value throws → FAILED | sent verbatim, no validation |
 | obs-fold continuation lines (legacy servers) | browser unfolds them | folded line is dropped or emitted as a garbage header line |
 | Mid-transfer progress numbers | decoded stream bytes vs raw Content-Length | wire (possibly compressed) bytes |
+| Idle judgement after a long frame | the browser may run the frame before queued fetch() handlers, so bytes that already arrived can still count as idle | the update reads the socket, so bytes that already arrived always count as progress |
 | Relative URL (`"/path"`) | resolved against the page origin | no base URL — the request FAILs |
 | Connection pool | browser-managed (about 6 per host on HTTP/1.1, one on HTTP/2) | The vendored build uses HTTP/1.1. The connection cache retains up to `NT_HTTP_MAX_REQUESTS` connections across hosts after transfers complete, so a burst to one host can reuse the previous burst's connections. This is not a hard limit on all open connections: transfers to other hosts may temporarily exceed it. An idle connection is not reused past libcurl's idle limit (`CURLOPT_MAXAGE_CONN`) and closes on a later request or at shutdown. |
 

@@ -21,7 +21,7 @@ typedef enum {
     NT_HTTP_STATE_PENDING,
     NT_HTTP_STATE_DOWNLOADING,
     NT_HTTP_STATE_DONE,   /* full response received, any HTTP status — check nt_http_status */
-    NT_HTTP_STATE_FAILED, /* transport error, timeout or cancel — no usable body */
+    NT_HTTP_STATE_FAILED, /* transport error, timeout, idle stall or cancel — no usable body */
 } nt_http_state_t;
 
 typedef struct {

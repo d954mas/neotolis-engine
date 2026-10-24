@@ -8,7 +8,7 @@ Endpoints: POST /echo (byte-exact echo + request headers reflected into
 X-Echo-* response headers), GET /hello, /status404, /slow (5 s stall),
 /slowbody (headers then stall), /gzip, /truncated, /empty, /loop,
 /r301hello + /hello301 (redirect probes), /drip (one byte every 180 ms),
-/latebody (half the body, a 0.3 s gap, the rest), /gzipdrip (gzip header
+/latebody (half the body, a 1 s gap, the rest), /gzipdrip (gzip header
 dripped before any decoded byte), and /peer (a short hold, then the number of
 the TCP connection it arrived on, so a test can tell a reused connection from
 a new one). tests/browser/serve.mjs serves the same /status404, /slow and
@@ -133,7 +133,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"abc")
             self.wfile.flush()
-            time.sleep(0.3)
+            time.sleep(1.0)
             self.wfile.write(b"def")
             self.wfile.flush()
         elif self.path == "/gzipdrip":

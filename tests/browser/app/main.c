@@ -847,7 +847,7 @@ EMSCRIPTEN_KEEPALIVE void nt_test_pack_stall_start(int mode) {
     s_nt_stall_pack_id = nt_hash32_str(mode == 0 ? "stall_headers" : "stall_body");
     nt_resource_mount(s_nt_stall_pack_id, 1);
     nt_resource_set_retry_policy(3, 20, 20);
-    nt_resource_set_http_idle_timeout(250);
+    nt_resource_set_http_idle_timeout(1000);
     nt_resource_load_url(s_nt_stall_pack_id, mode == 0 ? "/pack-stall-headers" : "/pack-stall-body");
 }
 EMSCRIPTEN_KEEPALIVE int nt_test_pack_stall_state(void) { return (int)nt_resource_pack_state(s_nt_stall_pack_id); }

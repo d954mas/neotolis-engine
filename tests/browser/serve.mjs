@@ -96,9 +96,8 @@ const server = createServer(async (req, res) => {
     }
     return;
   }
-  if (req.method === 'POST' && (urlPath === '/stall-reset-headers' || urlPath === '/stall-reset-body')) {
-    const path = urlPath === '/stall-reset-headers' ? '/pack-stall-headers' : '/pack-stall-body';
-    stallAttempts.set(path, 0);
+  if (req.method === 'POST' && urlPath.startsWith('/stall-reset/')) {
+    stallAttempts.set(urlPath.slice('/stall-reset'.length), 0);
     res.statusCode = 204;
     res.end();
     return;
