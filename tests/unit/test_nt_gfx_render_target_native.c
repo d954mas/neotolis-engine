@@ -2095,10 +2095,14 @@ static void test_read_pixels_to_buffer_gives_bottom_up_bgra(void) {
             TEST_ASSERT_EQUAL_UINT8(rgba[3], bgra[3]);
         }
     }
-    /* A second read replaces the first one's bytes and fence. */
-    nt_gfx_read_pixels_to_buffer(target.target, 0, 0, 1, 1, buf);
+    /* A second read replaces the first one's bytes and fence: the orange top-left pixel, where the
+       first read started on blue. */
+    nt_gfx_read_pixels_to_buffer(target.target, 0, 2, 1, 1, buf);
     bytes = nt_gfx_wait_readback(buf);
-    TEST_ASSERT_EQUAL_UINT8(top_down[(2U * 5U * 4U) + 2U], bytes[0]);
+    TEST_ASSERT_EQUAL_UINT8(top_down[0], bytes[2]);
+    TEST_ASSERT_EQUAL_UINT8(top_down[1], bytes[1]);
+    TEST_ASSERT_EQUAL_UINT8(top_down[2], bytes[0]);
+    TEST_ASSERT_EQUAL_UINT8(top_down[3], bytes[3]);
     uint8_t again[sizeof(top_down)] = {0};
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(target.target, 0, 0, 5, 3, again, sizeof(again)));
     TEST_ASSERT_EQUAL_UINT8_ARRAY(top_down, again, sizeof(again));

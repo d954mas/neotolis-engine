@@ -109,7 +109,6 @@ typedef struct {
     uint8_t usage;        /* nt_buffer_usage_t */
     uint8_t index_type;   /* 0=none, 1=uint16, 2=uint32 */
     uint8_t frame_stream; /* frame storage stream + 1 (its `used` bounds instance reads); 0 = not frame storage */
-    bool read;            /* NT_BUFFER_READBACK: a read was issued */
     bool live;            /* a backend object on the current context; false = free slot or husk */
     uint32_t size;        /* capacity */
 } nt_gfx_buffer_meta_t;
@@ -860,7 +859,6 @@ static nt_gfx_result_t read_pixels_to_buffer(nt_render_target_t src, int x, int 
     nt_gfx_buffer_meta_t *meta = readback_meta(buf);
     NT_ASSERT((uint64_t)(uint32_t)w * (uint64_t)(uint32_t)h * 4U <= meta->size && "read_pixels_to_buffer: the buffer is smaller than w*h*4");
     nt_gfx_backend_read_pixels_to_buffer(read_source_slot(src, x, y, w, h), x, y, w, h, nt_pool_slot_index(buf.id));
-    meta->read = true;
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -872,7 +870,7 @@ void nt_gfx_read_pixels_to_buffer(nt_render_target_t src, int x, int y, int w, i
 }
 
 static nt_gfx_result_t wait_readback(nt_buffer_t buf, const uint8_t **out) {
-    NT_ASSERT(readback_meta(buf)->read && "wait_readback: the buffer was never read");
+    (void)readback_meta(buf); /* handle and type; the backend asserts a read was issued */
     *out = (const uint8_t *)nt_gfx_backend_wait_buffer(nt_pool_slot_index(buf.id));
     return NT_GFX_RESULT_ACCEPTED;
 }

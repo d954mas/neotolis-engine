@@ -9,6 +9,7 @@
 
 #include <d3d10_1.h> /* ID3D10Multithread */
 #include <d3d11.h>
+#include <limits.h>
 #include <mfapi.h>
 #include <mferror.h>
 #include <mfidl.h>
@@ -64,7 +65,7 @@ static struct {
     bool wrote;      /* a video sample reached the encoder: the file has something to keep */
     bool com;        /* this recording holds a COM reference */
     bool broken;     /* a write failed: the encoder may never drain */
-    HANDLE released; /* set when MF drops a slot's last reference; lives with the process */
+    HANDLE released; /* set when MF drops a slot reference; lives with the process */
     wchar_t path[MAX_PATH];
 } s_mf;
 
@@ -88,9 +89,7 @@ static LONGLONG hns(uint64_t n, uint32_t rate) { return (LONGLONG)(n * 10000000U
 static ULONG STDMETHODCALLTYPE slot_add_ref(IMFMediaBuffer *self) { return (ULONG)InterlockedIncrement(&((nt_recorder_slot_t *)self)->refs); }
 static ULONG STDMETHODCALLTYPE slot_release(IMFMediaBuffer *self) {
     LONG refs = InterlockedDecrement(&((nt_recorder_slot_t *)self)->refs);
-    if (refs == 0) {
-        (void)SetEvent(s_mf.released);
-    }
+    (void)SetEvent(s_mf.released);
     return (ULONG)refs;
 }
 static HRESULT STDMETHODCALLTYPE slot_query(IMFMediaBuffer *self, REFIID riid, void **out) {
@@ -128,11 +127,17 @@ static HRESULT STDMETHODCALLTYPE slot_set_length(IMFMediaBuffer *self, DWORD len
 }
 static IMFMediaBufferVtbl s_slot_vtbl = {slot_query, slot_add_ref, slot_release, slot_lock, slot_unlock, slot_length, slot_set_length, slot_length};
 
-/* MF drops a slot's references on its own threads once the encoder no longer needs the pixels. */
+/* MF drops a slot's references on its own threads as the encoder takes each frame. A catch-up slot
+   carries up to 2 * fps frames, so the limit is ten seconds without one released, not for all. */
 static bool wait_released(nt_recorder_slot_t *slot) {
-    for (ULONGLONG until = GetTickCount64() + 10000U; InterlockedCompareExchange(&slot->refs, 0, 0) > 0;) {
+    LONG last = LONG_MAX;
+    ULONGLONG until = 0;
+    for (LONG refs; (refs = InterlockedCompareExchange(&slot->refs, 0, 0)) > 0;) {
         ULONGLONG now = GetTickCount64();
-        if (now >= until) {
+        if (refs < last) {
+            last = refs;
+            until = now + 10000U;
+        } else if (now >= until) {
             return false;
         }
         (void)WaitForSingleObject(s_mf.released, (DWORD)(until - now));

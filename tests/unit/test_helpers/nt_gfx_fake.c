@@ -409,7 +409,8 @@ bool nt_gfx_backend_read_pixels(uint32_t render_target_backend, int x, int y, in
 }
 
 #if !defined(NT_PLATFORM_WEB)
-/* Readback without a GPU: every read is done at once and returns zeroed bytes. */
+/* Readback without a GPU: every read is done at once and returns zeroed bytes; the never-read
+   assert lives in the GL backend. */
 static uint8_t s_fake_readback[64U * 64U * 4U];
 
 void nt_gfx_backend_read_pixels_to_buffer(uint32_t render_target_backend, int x, int y, int w, int h, uint32_t buffer_backend) {

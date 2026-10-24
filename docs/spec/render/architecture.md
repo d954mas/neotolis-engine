@@ -759,8 +759,8 @@ wait flushes the fence, so it also returns for a read issued in the same frame.
 It runs in any frame state, because the copy was queued earlier.
 
 A readback buffer is mapped once, persistently and coherently, when it is made
-(`GL_ARB_buffer_storage`, which every desktop driver and Mesa provide; making one
-without it asserts). A map per read costs about 0.6 ms on NVIDIA, where it waits
+(`GL_ARB_buffer_storage`, core since GL 4.4: current NVIDIA, AMD and Intel
+drivers and Mesa have it, macOS GL does not; making one without it asserts). A map per read costs about 0.6 ms on NVIDIA, where it waits
 for the driver thread. So the bytes are readable from any thread until the next
 read into the buffer or its destroy; a wait on a buffer never read asserts. The
 caller owns the buffers and their order, and must not read into or destroy a

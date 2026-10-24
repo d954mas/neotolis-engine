@@ -146,7 +146,7 @@ Pacing waits instead of dropping frames. When the GPU has not written the oldest
 encode waits for it. A buffer takes a new read only after Media Foundation has released every sample
 over it; the two buffers beyond the reads in flight cover the samples the encoder still holds. So
 lockstep runs at the GPU's and the encoder's pace, RUN shows a hitch instead of a missing frame, and
-an encoder that keeps a buffer for ten seconds counts as an encoder failure. A catch-up call queues
+ten seconds without the encoder releasing a frame counts as an encoder failure. A catch-up call queues
 all its repeated frames at once; they share one buffer, so the buffers still bound the backlog.
 `stop` also returns 0 when a write fails while it encodes the last reads, as after any encoder
 failure. Each audio write, pushed samples or silence, allocates one Media Foundation buffer, and each

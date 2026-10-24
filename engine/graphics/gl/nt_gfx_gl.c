@@ -1115,6 +1115,7 @@ void nt_gfx_backend_read_pixels_to_buffer(uint32_t render_target_backend, int x,
 /* The flush bit: a fence the driver has not submitted yet would never signal. */
 const void *nt_gfx_backend_wait_buffer(uint32_t buffer_backend) {
     const nt_gfx_gl_readback_t *rb = &s_readbacks[buffer_backend];
+    NT_ASSERT(rb->fence != NULL && "wait_readback: the buffer was never read");
     GLenum status = GL_TIMEOUT_EXPIRED;
     while (status == GL_TIMEOUT_EXPIRED) {
         status = NT_GL_RET(glClientWaitSync, rb->fence, (GLbitfield)GL_SYNC_FLUSH_COMMANDS_BIT, (GLuint64)1000000000U);
