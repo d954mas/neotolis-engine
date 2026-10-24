@@ -149,7 +149,7 @@ static nt_gfx_gl_vertex_input_t (*s_vertex_inputs)[2]; /* vertex-input VAO pairs
 /* CPU data: no GL object, so a context loss keeps it. */
 static nt_gfx_gl_instance_layout_t s_instance_layouts[NT_GFX_MAX_INSTANCE_LAYOUTS + 1];
 static GLuint (*s_buffer_gl)[2];   /* GL buffer names per parity, indexed by slot; equal unless the buffer rotates */
-static uint32_t s_parity;          /* which copy of a rotating buffer, and which VAO of an input, this frame uses */
+static uint32_t s_parity;          /* which copy of a rotating buffer, and which VAO of an input reading one, this frame uses */
 static GLenum *s_buffer_targets;   /* GL_ARRAY_BUFFER, GL_ELEMENT_ARRAY_BUFFER or GL_PIXEL_PACK_BUFFER */
 static GLuint *s_texture_gl;       /* GL texture names, indexed by slot */
 static GLuint *s_render_target_gl; /* GL framebuffer names, indexed by slot */

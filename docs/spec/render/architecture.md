@@ -532,10 +532,14 @@ dynamic class (writes go to system memory; every draw copies the range it reads)
 once draws read more than three times its size between two writes, ANGLE treats
 it as static for good. A static buffer's `bufferSubData` maps ANGLE's staging
 copy of the whole buffer and waits until the GPU has finished the previous
-frame's copy out of it. Measured on Intel UHD (Chrome 156) in a game with 10 000
-instanced people, 27 % of the GPU-process main thread waited there; a ring of
-offsets inside one buffer, usage hints, orphaning and `bufferData` with data
-all still wait. Uniform data is never promoted, so it never waits.
+frame's copy out of it. A game build with 10 000 instanced people (Intel UHD,
+Chrome 156) spent 27 % of the GPU-process main thread there; later builds of
+the same game read less per frame, stay dynamic and do not wait. In a WebGL 2
+model of frame storage, orphaning and `bufferData` with data also waited, and
+a buffer created `STATIC_DRAW` waits from the start; a ring of offsets inside
+one buffer cannot help, since the staging copy is one resource (ANGLE source).
+Uniform reads never promote a buffer, so a `STREAM_DRAW` uniform buffer never
+waits.
 
 Policy: the stream executes once per frame, in `nt_gfx_end_frame`, so no write
 ever lands between draws of one frame: every write of a frame precedes all its
@@ -580,14 +584,16 @@ buffer instead (see Vertex inputs, Persistent instance data).
 The index and vertex streams keep two GPU copies behind one buffer handle and
 alternate them per frame: every write and bind of a frame names the copy of its
 parity, and each vertex input owns a VAO per parity (see Vertex inputs). On
-ANGLE over D3D11 this removes the upload wait of Dynamic data lifetime (game on
-Intel UHD: GPU-process main thread 10.0 to 7.0 ms per frame); on the reference
-phone it measured neutral, where one buffer also never waited. The uniform
-stream keeps one buffer: its data never waits, and its binds stay cached across
-frames. Offsets, staging and the handle do not change between frames; the cost
+ANGLE over D3D11 this removes the upload wait of Dynamic data lifetime: in the
+WebGL 2 model with static buffers the share of the GPU-process main thread
+waiting in `bufferSubData` fell from 64 % to 0. Games whose buffers stay
+dynamic do not wait and measured the same with one buffer or two (Intel UHD;
+reference phone, vsync off). The uniform stream keeps one buffer: a stream
+uniform buffer never waits, and its binds stay cached across frames. Offsets, staging and the handle do not change between frames; the cost
 is a second GPU copy of each index and vertex stream's capacity and a second
 VAO per vertex input. `nt_gfx_update_buffer` asserts on a frame storage buffer:
-an immediate write would land in a copy the frame does not draw.
+`nt_gfx_end_frame` writes the stream's allocations over it, and the next frame
+draws from the other copy.
 
 `nt_gfx_frame_alloc(stream, size, align, &offset)` returns `size` bytes of
 staging at an offset that is a multiple of `align`; both are nonzero. It is

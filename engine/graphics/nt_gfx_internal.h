@@ -218,7 +218,7 @@ bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot, b
 void nt_gfx_backend_destroy_buffer(uint32_t backend_handle);
 void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, const void *data, uint32_t size);
 /* Once per frame: every write and bind of the frame uses the other name of each rotating buffer,
- * and the other VAO of each vertex input, than the previous frame did. */
+ * and a bind that reads one the other VAO of its vertex input, than the previous frame did. */
 void nt_gfx_backend_next_frame(void);
 
 /* Creates the name and uploads every declared level from desc->data: levels

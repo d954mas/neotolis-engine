@@ -1326,8 +1326,8 @@ static nt_gfx_result_t make_buffer(const nt_buffer_desc_t *desc, uint8_t frame_s
     NT_ASSERT(id != 0 && "buffer pool full -- raise nt_gfx_desc_t.max_buffers");
 
     uint32_t slot = nt_pool_slot_index(id);
-    /* The uniform stream does not rotate: ANGLE never waits on uniform data, and the backend's
-     * range cache relies on one uniform buffer. */
+    /* The uniform stream does not rotate: uniform reads never promote an ANGLE buffer to the static
+     * class that waits, and the backend's range cache relies on one uniform buffer. */
     const bool rotate = frame_stream != 0 && frame_stream - 1U != NT_GFX_FRAME_UNIFORM;
     if (!nt_gfx_backend_create_buffer(desc, slot, rotate)) {
         nt_pool_free(&s_gfx.buffer_pool, id);
@@ -2475,7 +2475,7 @@ static nt_gfx_result_t buffer_update(nt_buffer_t buf, uint32_t offset, const voi
     NT_ASSERT(s_gfx.buffer_metas[slot].type != NT_BUFFER_READBACK && "update_buffer: the GPU writes a readback buffer");
 #endif
     NT_ASSERT(s_gfx.buffer_metas[slot].usage != NT_USAGE_IMMUTABLE && "update_buffer: cannot update immutable buffer");
-    /* A frame buffer rotates per frame: an immediate write would land in a copy this frame does not draw. */
+    /* end_frame writes the stream's allocations over a frame buffer, and the next frame draws the other copy. */
     NT_ASSERT((s_gfx.buffer_metas[slot].frame_stream != 0) == frame_storage && "update_buffer: nt_gfx_end_frame writes frame storage -- allocate per-frame data with nt_gfx_frame_alloc");
     NT_ASSERT((data != NULL || size == 0) && "update_buffer: NULL data with nonzero size");
     NT_ASSERT(offset <= s_gfx.buffer_metas[slot].size && "update_buffer: offset exceeds buffer capacity");
