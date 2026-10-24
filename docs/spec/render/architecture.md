@@ -750,23 +750,27 @@ made with no data (its usage is ignored), and `nt_gfx_update_buffer` on it asser
 No recorded command names a readback buffer, so destroying one is exempt from the
 frame rule.
 `nt_gfx_read_pixels_to_buffer` follows the frame point and source rules of
-`nt_gfx_read_pixels`, queues the copy and a fence, and returns. The buffer then
-holds BGRA8 rows of `w * 4` bytes, bottom-up as GL stores them; BGRA is the
-format desktop drivers read without a conversion. `nt_gfx_wait_readback(buf)`
-returns the bytes after waiting on that fence, which blocks only while the GPU
-still copies the read, so a caller waits for reads it issued frames earlier. The
-wait flushes the fence, so it also returns for a read issued in the same frame.
-It runs in any frame state, because the copy was queued earlier.
+`nt_gfx_read_pixels`, queues the copy and a fence, and returns without waiting
+for the GPU. On NVIDIA the call itself can wait for the driver thread to catch
+up with the frame's commands: about 0.6 ms in a trivial scene, occasionally
+several ms in a game. The buffer then holds BGRA8 rows of `w * 4` bytes,
+bottom-up as GL stores them; BGRA is the format desktop drivers read without a
+conversion. `nt_gfx_wait_readback(buf)` returns the bytes after waiting on that
+fence: it blocks while the GPU still copies the read, so a caller waits for reads
+it issued frames earlier, which normally returns at once. The wait flushes the
+fence, so it also returns for a read issued in the same frame. It runs in any
+frame state, because the copy was queued earlier.
 
 A readback buffer is mapped once, persistently and coherently, when it is made
 (`GL_ARB_buffer_storage`, core since GL 4.4: current NVIDIA, AMD and Intel
-drivers and Mesa have it, macOS GL does not; making one without it asserts). A map per read costs about 0.6 ms on NVIDIA, where it waits
-for the driver thread. So the bytes are readable from any thread until the next
-read into the buffer or its destroy; a wait on a buffer never read asserts. The
-caller owns the buffers and their order, and must not read into or destroy a
-buffer while anything, on any thread, still uses its bytes: nt_gfx cannot see
-such a consumer, so this is not asserted. A native GL context is never lost, so
-readback has no lost-context path. An NVIDIA debug context reports "Pixel transfer is
+drivers and Mesa have it, macOS GL does not; making one without it asserts). A
+map per read cost about 0.6 ms on NVIDIA, waiting for the driver thread. The
+bytes are readable from any thread until the next read into the buffer or its
+destroy; a wait on a buffer never read asserts. The caller owns the buffers and
+their order, and must not read into or destroy a buffer while anything, on any
+thread, still uses its bytes: nt_gfx cannot see such a consumer, so this is not
+asserted. A native GL context is never lost, so readback has no lost-context
+path. An NVIDIA debug context reports "Pixel transfer is
 synchronized with 3D rendering" for every read, synchronous or not, even on an
 idle GPU; the message does not mean that the CPU waited.
 
@@ -1190,8 +1194,8 @@ exactly once, at the call site, by the same statement that issues it (an
 `backend.args` follows the GL integer argument order; pointer payload, readback
 output and debug-label arguments are presence bits, gen/delete arguments contain
 the count followed by each name, a returned value (`glCreate*`, `glGetError`,
-locations, status) follows the arguments, a returned mapping (`glMapBufferRange`) or fence (`glFenceSync`)
-is a presence bit, and indexed offsets are byte offsets.
+locations, status) follows the arguments, a returned mapping (`glMapBufferRange`)
+or fence (`glFenceSync`) is a presence bit, and indexed offsets are byte offsets.
 Output pointers are presence bits; their written values are not recorded. Readback, timer-query and debug-group calls are
 issued calls too and are recorded like any other.
 Float arguments occupy `backend.values` in float argument order. `backend.bytes` is actual CPU upload payload, zero for NULL storage.

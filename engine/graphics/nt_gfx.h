@@ -1017,14 +1017,15 @@ bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint
 
 #if !defined(NT_PLATFORM_WEB)
 /* Native only (WebGL has no buffer mapping). Starts a read of an (x,y,w,h) sub-rect of `src` into
- * `buf` (NT_BUFFER_READBACK, w*h*4 <= size) and returns without waiting for the GPU. The bytes are
+ * `buf` (NT_BUFFER_READBACK, w*h*4 <= size) and returns without waiting for the GPU (the driver may
+ * still make the call wait for its own thread). The bytes are
  * BGRA8 rows of w*4, BOTTOM-UP as GL stores them, read with nt_gfx_wait_readback. Frame point and
  * source rules as nt_gfx_read_pixels. The caller must not read into or destroy `buf` while anything
  * still uses its bytes: nt_gfx cannot see a consumer on another thread. A readback buffer may be
  * destroyed while a frame is being drawn: no recorded command names it. */
 void nt_gfx_read_pixels_to_buffer(nt_render_target_t src, int x, int y, int w, int h, nt_buffer_t buf);
 /* The bytes of `buf`'s last read, after waiting while the GPU still copies it: wait for a read issued
- * frames earlier. Valid, from any thread, until the next read into `buf` or its destroy; never NULL
+ * frames earlier, which normally returns at once. Valid, from any thread, until the next read into `buf` or its destroy; never NULL
  * (the gfx stub returns NULL). A `buf` never read asserts. Any frame state: the read was issued. */
 const uint8_t *nt_gfx_wait_readback(nt_buffer_t buf);
 #endif

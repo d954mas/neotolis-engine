@@ -1,7 +1,7 @@
 /* Windows backend: a Media Foundation sink writer streams H.264 + AAC into a fragmented MP4 at the
    name path, so a killed process keeps every fragment written before. Main thread; MF reads the
-   window's pixels in place from the readback buffers, converts them on a D3D11 device and encodes on
-   its own threads. */
+   window's pixels in place from the readback buffers, converts them (on a D3D11 device when one can
+   be made) and encodes on its own threads. */
 
 #define COBJMACROS
 #define WIN32_LEAN_AND_MEAN
@@ -33,7 +33,7 @@ static const GUID k_max_bitrate = {0x9651eae4, 0x39b9, 0x4ebf, {0x85, 0xef, 0xd7
 #define NT_RECORDER_PEAK_CONSTRAINED_VBR 1U /* eAVEncCommonRateControlMode_PeakConstrainedVBR */
 
 /* Window reads in flight: a read is encoded three reads after it was issued, so the GPU has normally
-   written it and the wait does not block. */
+   written it and the fence wait returns at once. */
 #define NT_RECORDER_READS 3U
 /* Readback buffers: the reads in flight plus the encoded ones MF still holds. MF keeps the last input
    sample until the next, so a ring of only the reads would wait on the frame just sent. */
@@ -127,8 +127,8 @@ static HRESULT STDMETHODCALLTYPE slot_set_length(IMFMediaBuffer *self, DWORD len
 }
 static IMFMediaBufferVtbl s_slot_vtbl = {slot_query, slot_add_ref, slot_release, slot_lock, slot_unlock, slot_length, slot_set_length, slot_length};
 
-/* MF drops a slot's references on its own threads as the encoder takes each frame. A catch-up slot
-   carries up to 2 * fps frames, so the limit is ten seconds without one released, not for all. */
+/* MF drops a slot's references on its own threads as its pipeline consumes each frame. A catch-up
+   slot carries up to 2 * fps frames, so the limit is ten seconds without one released, not for all. */
 static bool wait_released(nt_recorder_slot_t *slot) {
     LONG last = LONG_MAX;
     ULONGLONG until = 0;
@@ -209,8 +209,8 @@ static void release(bool remove_file) {
     }
 }
 
-/* MF converts RGB32 to NV12 on this device instead of the CPU, about a third of a core at 1080p30.
-   Without a D3D11 video device (remote desktop, a VM) it converts on the CPU. */
+/* With this device MF can convert RGB32 to NV12 on the GPU; its CPU converter took about a third of
+   a core at 1080p30. Without a hardware device with video support it converts on the CPU. */
 static void attach_device(IMFAttributes *attrs) {
     HRESULT hr = D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, D3D11_CREATE_DEVICE_VIDEO_SUPPORT, NULL, 0, D3D11_SDK_VERSION, &s_mf.device, NULL, NULL);
     if (FAILED(hr)) {
@@ -234,7 +234,7 @@ static bool create_writer(void) {
     attach_device(attrs);
     must(IMFAttributes_SetGUID(attrs, &MF_TRANSCODE_CONTAINERTYPE, &MFTranscodeContainerType_FMPEG4));
     must(IMFAttributes_SetUINT32(attrs, &MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE));
-    /* The readback slots bound the frames in flight; throttling alone let a hardware encoder queue
+    /* The readback slots bound the pixels in flight; throttling alone let a hardware encoder queue
        seconds of frames. */
     must(IMFAttributes_SetUINT32(attrs, &MF_SINK_WRITER_DISABLE_THROTTLING, TRUE));
     bool good = ok(MFCreateSinkWriterFromURL(s_mf.path, NULL, attrs, &s_mf.writer), "MFCreateSinkWriterFromURL");
