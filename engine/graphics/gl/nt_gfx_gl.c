@@ -126,6 +126,7 @@ typedef struct {
     uint32_t instance_offset;
     uint8_t instance_layout; /* registered layout slot; 0 = none */
     _Static_assert(NT_GFX_MAX_INSTANCE_LAYOUTS <= UINT8_MAX, "instance layout slot is a byte");
+    bool bakes_rotating; /* its vertex or index buffer rotates; set on VAO 0 */
 } nt_gfx_gl_vertex_input_t;
 
 typedef struct {
@@ -141,12 +142,14 @@ typedef struct {
  * state, and core profile rejects it with VAO 0 bound (INVALID_OPERATION). */
 static GLuint s_ebo_upload_vao;
 
-static nt_gfx_gl_program_t *s_programs;           /* programs, linked or linking, indexed by slot */
-static nt_gfx_gl_pipeline_t *s_pipelines;         /* pipeline data, indexed by slot */
-static nt_gfx_gl_vertex_input_t *s_vertex_inputs; /* vertex-input VAOs, indexed by slot */
+static nt_gfx_gl_program_t *s_programs;   /* programs, linked or linking, indexed by slot */
+static nt_gfx_gl_pipeline_t *s_pipelines; /* pipeline data, indexed by slot */
+/* VAO k of an input reads copy k of every rotating buffer it bakes or binds (see nt_gfx_backend_next_frame). */
+static nt_gfx_gl_vertex_input_t (*s_vertex_inputs)[2]; /* vertex-input VAO pairs, indexed by slot */
 /* CPU data: no GL object, so a context loss keeps it. */
 static nt_gfx_gl_instance_layout_t s_instance_layouts[NT_GFX_MAX_INSTANCE_LAYOUTS + 1];
-static GLuint *s_buffer_gl;        /* GL buffer names, indexed by slot */
+static GLuint (*s_buffer_gl)[2];   /* GL buffer names per parity, indexed by slot; equal unless the buffer rotates */
+static uint32_t s_parity;          /* which copy of a rotating buffer, and which VAO of an input, this frame uses */
 static GLenum *s_buffer_targets;   /* GL_ARRAY_BUFFER, GL_ELEMENT_ARRAY_BUFFER or GL_PIXEL_PACK_BUFFER */
 static GLuint *s_texture_gl;       /* GL texture names, indexed by slot */
 static GLuint *s_render_target_gl; /* GL framebuffer names, indexed by slot */
@@ -290,10 +293,11 @@ void nt_gfx_backend_capture_initial_state(void) {
         capture_program_definition(i);
     }
     for (uint32_t i = 1; i <= s_init_desc.max_buffers; i++) {
-        if (s_buffer_gl[i] == 0) {
+        if (s_buffer_gl[i][0] == 0) {
             continue;
         }
-        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_BUFFER; event->data.backend.args[0] = i; event->data.backend.args[1] = s_buffer_gl[i];);
+        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_BUFFER; event->data.backend.args[0] = i; event->data.backend.args[1] = s_buffer_gl[i][0];
+                      event->data.backend.args[2] = s_buffer_gl[i][1];);
     }
     for (uint32_t i = 1; i <= s_init_desc.max_textures; i++) {
         if (s_texture_gl[i] == 0) {
@@ -302,12 +306,14 @@ void nt_gfx_backend_capture_initial_state(void) {
         NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_TEXTURE; event->data.backend.args[0] = i; event->data.backend.args[1] = s_texture_gl[i];);
     }
     for (uint32_t i = 1; i <= s_init_desc.max_vertex_inputs; i++) {
-        if (s_vertex_inputs[i].vao == 0) {
+        if (s_vertex_inputs[i][0].vao == 0) {
             continue;
         }
-        const nt_gfx_gl_vertex_input_t *vi = &s_vertex_inputs[i];
-        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_VERTEX_INPUT; event->data.backend.args[0] = i; event->data.backend.args[1] = vi->vao;
-                      event->data.backend.args[2] = vi->instance_buffer; event->data.backend.args[3] = vi->instance_offset; event->data.backend.args[4] = vi->instance_layout;);
+        const nt_gfx_gl_vertex_input_t *vi = s_vertex_inputs[i];
+        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_VERTEX_INPUT; event->data.backend.args[0] = i; event->data.backend.args[1] = vi[0].vao;
+                      event->data.backend.args[2] = vi[0].instance_buffer; event->data.backend.args[3] = vi[0].instance_offset; event->data.backend.args[4] = vi[0].instance_layout;
+                      event->data.backend.args[5] = vi[1].vao; event->data.backend.args[6] = vi[1].instance_buffer; event->data.backend.args[7] = vi[1].instance_offset;
+                      event->data.backend.args[8] = vi[1].instance_layout;);
     }
     for (uint32_t i = 1; i <= s_init_desc.max_render_targets; i++) {
         if (s_render_target_gl[i] == 0) {
@@ -658,8 +664,8 @@ void nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     /* Allocate backend resource arrays (+1 because slots are 1-based) */
     s_programs = (nt_gfx_gl_program_t *)calloc(s_init_desc.max_programs + 1, sizeof(nt_gfx_gl_program_t));
     s_pipelines = (nt_gfx_gl_pipeline_t *)calloc(s_init_desc.max_pipelines + 1, sizeof(nt_gfx_gl_pipeline_t));
-    s_vertex_inputs = (nt_gfx_gl_vertex_input_t *)calloc(s_init_desc.max_vertex_inputs + 1, sizeof(nt_gfx_gl_vertex_input_t));
-    s_buffer_gl = (GLuint *)calloc(s_init_desc.max_buffers + 1, sizeof(GLuint));
+    s_vertex_inputs = calloc(s_init_desc.max_vertex_inputs + 1, sizeof(*s_vertex_inputs));
+    s_buffer_gl = calloc(s_init_desc.max_buffers + 1, sizeof(*s_buffer_gl));
     s_buffer_targets = (GLenum *)calloc(s_init_desc.max_buffers + 1, sizeof(GLenum));
     s_texture_gl = (GLuint *)calloc(s_init_desc.max_textures + 1, sizeof(GLuint));
     s_render_target_gl = (GLuint *)calloc(s_init_desc.max_render_targets + 1, sizeof(GLuint));
@@ -1082,7 +1088,7 @@ void nt_gfx_backend_read_pixels_to_buffer(uint32_t render_target_backend, int x,
     if (fbo != 0) {
         NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, fbo);
     }
-    NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, s_buffer_gl[buffer_backend]);
+    NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, s_buffer_gl[buffer_backend][0]);
     NT_GL(glPixelStorei, GL_PACK_ALIGNMENT, 4);
     NT_GL(glReadPixels, x, y, (GLsizei)w, (GLsizei)h, GL_BGRA, GL_UNSIGNED_BYTE, NULL); /* NULL: offset 0 into the bound pack buffer */
     NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, 0);
@@ -1092,7 +1098,7 @@ void nt_gfx_backend_read_pixels_to_buffer(uint32_t render_target_backend, int x,
 }
 
 const void *nt_gfx_backend_map_buffer(uint32_t buffer_backend, uint32_t size) {
-    NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, s_buffer_gl[buffer_backend]);
+    NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, s_buffer_gl[buffer_backend][0]);
     const void *bytes = NT_GL_RET(glMapBufferRange, GL_PIXEL_PACK_BUFFER, (GLintptr)0, (GLsizeiptr)size, (GLbitfield)GL_MAP_READ_BIT);
     NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, 0);
     NT_ASSERT(bytes != NULL && "map_readback: map failed");
@@ -1100,7 +1106,7 @@ const void *nt_gfx_backend_map_buffer(uint32_t buffer_backend, uint32_t size) {
 }
 
 void nt_gfx_backend_unmap_buffer(uint32_t buffer_backend) {
-    NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, s_buffer_gl[buffer_backend]);
+    NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, s_buffer_gl[buffer_backend][0]);
     const GLuint intact = NT_GL_RET(glUnmapBuffer, GL_PIXEL_PACK_BUFFER); /* GLboolean, widened by the capture funnel */
     NT_ASSERT(intact == GL_TRUE && "unmap_readback: the driver lost the mapped bytes");
     NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, 0);
@@ -1754,34 +1760,41 @@ static void gl_attrib_pointer(const nt_gfx_gl_attr_t *attr, uint16_t stride, uin
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 bool nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot) {
     NT_ASSERT(desc != NULL);
-    NT_ASSERT(slot > 0 && slot <= s_init_desc.max_vertex_inputs && s_vertex_inputs[slot].vao == 0);
-    GLuint vao = 0;
-    NT_GL_GEN(glGenVertexArrays, 1, &vao);
-    if (vao == 0) {
-        assert_name_failed_on_loss("glGenVertexArrays", desc->label);
-        return false;
-    }
-    nt_gfx_gl_vertex_input_t *vi = &s_vertex_inputs[slot];
-    *vi = (nt_gfx_gl_vertex_input_t){.vao = vao};
-    NT_GL(glBindVertexArray, vao);
-    const GLuint vbo = vbo_backend != 0 && vbo_backend <= s_init_desc.max_buffers ? s_buffer_gl[vbo_backend] : 0;
-    if (vbo != 0) {
-        /* Buffer bound before the pointer calls -- satisfies the WebGL "no
-         * pointer without a bound ARRAY_BUFFER" rule at creation time. */
-        NT_GL(glBindBuffer, GL_ARRAY_BUFFER, vbo);
-        s_gl_cache.array_buffer = vbo;
-        for (uint8_t i = 0; i < desc->layout.attr_count; i++) {
-            const nt_gfx_gl_attr_t attr = pack_attr(&desc->layout.attrs[i]);
-            NT_GL(glEnableVertexAttribArray, attr.location);
-            gl_attrib_pointer(&attr, desc->layout.stride, 0);
+    NT_ASSERT(slot > 0 && slot <= s_init_desc.max_vertex_inputs && s_vertex_inputs[slot][0].vao == 0);
+    for (uint32_t k = 0; k < 2; k++) {
+        GLuint vao = 0;
+        NT_GL_GEN(glGenVertexArrays, 1, &vao);
+        if (vao == 0) {
+            assert_name_failed_on_loss("glGenVertexArrays", desc->label);
+            NT_GL(glBindVertexArray, s_gl_cache.vao);
+            nt_gfx_backend_destroy_vertex_input(slot);
+            return false;
+        }
+        nt_gfx_gl_vertex_input_t *vi = &s_vertex_inputs[slot][k];
+        *vi = (nt_gfx_gl_vertex_input_t){.vao = vao};
+        NT_GL(glBindVertexArray, vao);
+        const GLuint vbo = vbo_backend != 0 && vbo_backend <= s_init_desc.max_buffers ? s_buffer_gl[vbo_backend][k] : 0;
+        if (vbo != 0) {
+            /* Buffer bound before the pointer calls -- satisfies the WebGL "no
+             * pointer without a bound ARRAY_BUFFER" rule at creation time. */
+            NT_GL(glBindBuffer, GL_ARRAY_BUFFER, vbo);
+            s_gl_cache.array_buffer = vbo;
+            for (uint8_t i = 0; i < desc->layout.attr_count; i++) {
+                const nt_gfx_gl_attr_t attr = pack_attr(&desc->layout.attrs[i]);
+                NT_GL(glEnableVertexAttribArray, attr.location);
+                gl_attrib_pointer(&attr, desc->layout.stride, 0);
+            }
+        }
+        const GLuint ibo = ibo_backend != 0 && ibo_backend <= s_init_desc.max_buffers ? s_buffer_gl[ibo_backend][k] : 0;
+        if (ibo != 0) {
+            NT_GL(glBindBuffer, GL_ELEMENT_ARRAY_BUFFER, ibo); /* captured by the VAO */
         }
     }
-    const GLuint ibo = ibo_backend != 0 && ibo_backend <= s_init_desc.max_buffers ? s_buffer_gl[ibo_backend] : 0;
-    if (ibo != 0) {
-        NT_GL(glBindBuffer, GL_ELEMENT_ARRAY_BUFFER, ibo); /* captured by the VAO */
-    }
     NT_GL(glBindVertexArray, s_gl_cache.vao);
-    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_VERTEX_INPUT; event->data.backend.args[0] = slot; event->data.backend.args[1] = vao;);
+    s_vertex_inputs[slot][0].bakes_rotating =
+        (vbo_backend != 0 && s_buffer_gl[vbo_backend][0] != s_buffer_gl[vbo_backend][1]) || (ibo_backend != 0 && s_buffer_gl[ibo_backend][0] != s_buffer_gl[ibo_backend][1]);
+    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_VERTEX_INPUT; event->data.backend.args[0] = slot; event->data.backend.args[1] = s_vertex_inputs[slot][0].vao;
+                  event->data.backend.args[5] = s_vertex_inputs[slot][1].vao;);
     return true;
 }
 
@@ -1821,16 +1834,18 @@ static void detach_instance_slots(uint16_t mask) {
 static void detach_instance_buffer(GLuint buf) {
     bool rebound = false;
     for (uint32_t i = 1; i <= s_init_desc.max_vertex_inputs; i++) {
-        nt_gfx_gl_vertex_input_t *vi = &s_vertex_inputs[i];
-        if (vi->vao == 0 || vi->instance_buffer != buf) {
-            continue;
+        for (uint32_t k = 0; k < 2; k++) {
+            nt_gfx_gl_vertex_input_t *vi = &s_vertex_inputs[i][k];
+            if (vi->vao == 0 || vi->instance_buffer != buf) {
+                continue;
+            }
+            NT_GL(glBindVertexArray, vi->vao);
+            rebound = true;
+            detach_instance_slots(s_instance_layouts[vi->instance_layout].mask);
+            vi->instance_buffer = 0;
+            vi->instance_offset = 0;
+            vi->instance_layout = 0;
         }
-        NT_GL(glBindVertexArray, vi->vao);
-        rebound = true;
-        detach_instance_slots(s_instance_layouts[vi->instance_layout].mask);
-        vi->instance_buffer = 0;
-        vi->instance_offset = 0;
-        vi->instance_layout = 0;
     }
     if (rebound) {
         NT_GL(glBindVertexArray, s_gl_cache.vao);
@@ -1842,23 +1857,30 @@ void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle) {
         return;
     }
     NT_ASSERT(backend_handle <= s_init_desc.max_vertex_inputs && "destroy_vertex_input: handle out of range");
-    nt_gfx_gl_vertex_input_t *vi = &s_vertex_inputs[backend_handle];
-    if (vi->vao != 0) {
-        /* Deleting the bound VAO reverts the GL binding to 0 -- mirror it. */
-        if (s_gl_cache.vao == vi->vao) {
-            s_gl_cache.vao = 0;
+    for (uint32_t k = 0; k < 2; k++) {
+        nt_gfx_gl_vertex_input_t *vi = &s_vertex_inputs[backend_handle][k];
+        if (vi->vao != 0) {
+            /* Deleting the bound VAO reverts the GL binding to 0 -- mirror it. */
+            if (s_gl_cache.vao == vi->vao) {
+                s_gl_cache.vao = 0;
+            }
+            NT_GL_DELETE(glDeleteVertexArrays, 1, &vi->vao);
         }
-        NT_GL_DELETE(glDeleteVertexArrays, 1, &vi->vao);
+        memset(vi, 0, sizeof(*vi));
     }
-    memset(vi, 0, sizeof(*vi));
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
 void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t layout_slot, uint32_t buffer_backend, uint32_t byte_offset) {
     /* A zeroed record (context loss, destroyed vertex input) would leave the
      * previous VAO bound and draw the wrong geometry. */
-    NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_vertex_inputs && s_vertex_inputs[backend_handle].vao != 0 && "bind_vertex_input: requires a live vertex input");
-    nt_gfx_gl_vertex_input_t *vi = &s_vertex_inputs[backend_handle];
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_vertex_inputs && s_vertex_inputs[backend_handle][0].vao != 0 && "bind_vertex_input: requires a live vertex input");
+    NT_ASSERT((layout_slot == 0 || (buffer_backend != 0 && buffer_backend <= s_init_desc.max_buffers && s_buffer_gl[buffer_backend][0] != 0)) && "bind_vertex_input: requires a live instance buffer");
+    /* Only a bind that reads a rotating buffer needs this frame's VAO; any other stays on VAO 0, so
+     * its bind and pointers carry across frames as with one VAO. */
+    const bool rotates = s_vertex_inputs[backend_handle][0].bakes_rotating || (layout_slot != 0 && s_buffer_gl[buffer_backend][0] != s_buffer_gl[buffer_backend][1]);
+    const uint32_t k = rotates ? s_parity : 0U;
+    nt_gfx_gl_vertex_input_t *vi = &s_vertex_inputs[backend_handle][k];
     if (s_gl_cache.vao != vi->vao) {
         NT_GL(glBindVertexArray, vi->vao);
         s_gl_cache.vao = vi->vao;
@@ -1868,8 +1890,7 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t layout_s
     if (layout_slot == 0) {
         return;
     }
-    NT_ASSERT(buffer_backend != 0 && buffer_backend <= s_init_desc.max_buffers && s_buffer_gl[buffer_backend] != 0 && "bind_vertex_input: requires a live instance buffer");
-    const GLuint buf = s_buffer_gl[buffer_backend];
+    const GLuint buf = s_buffer_gl[buffer_backend][k];
     /* The tuple this VAO last received: a vertex input bound with one tuple never re-points. */
     if (vi->instance_layout == layout_slot && vi->instance_buffer == buf && vi->instance_offset == byte_offset) {
         NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_VERTEX_INPUT, event->result = NT_GFX_RESULT_CACHE; event->detail = NT_GFX_GL_glVertexAttribPointer; event->data.backend.args[0] = vi->vao;
@@ -1908,14 +1929,8 @@ static void forget_deleted_buffer(GLuint buf) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
-bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot) {
-    NT_ASSERT(slot > 0 && slot <= s_init_desc.max_buffers && s_buffer_gl[slot] == 0 && "create_buffer: the record at the frontend slot must be empty");
-    GLuint buf;
-    NT_GL_GEN(glGenBuffers, 1, &buf);
-    if (buf == 0) {
-        assert_name_failed_on_loss("glGenBuffers", desc->label);
-        return false;
-    }
+bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot, bool rotate) {
+    NT_ASSERT(slot > 0 && slot <= s_init_desc.max_buffers && s_buffer_gl[slot][0] == 0 && "create_buffer: the record at the frontend slot must be empty");
     GLenum target = desc->type == NT_BUFFER_INDEX ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
     GLenum usage = map_buffer_usage(desc->usage);
 #if !defined(NT_PLATFORM_WEB)
@@ -1924,39 +1939,57 @@ bool nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc, uint32_t slot) {
         usage = GL_STREAM_READ;
     }
 #endif
-    bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER;
-    if (unhook_vao) {
-        ebo_upload_begin();
-    }
-    NT_GL(glBindBuffer, target, buf);
-    if (target == GL_ARRAY_BUFFER) {
-        s_gl_cache.array_buffer = buf;
-    }
-    NT_GL_BUFFER_UPLOAD(desc->data, desc->size, glBufferData, target, (GLsizeiptr)desc->size, desc->data, usage);
-    if (unhook_vao) {
-        ebo_upload_end();
-    }
+    /* A rotating buffer keeps a copy per frame parity, so a frame never writes the copy the
+     * previous frame's draws may still read (ANGLE D3D11 waits on it). */
+    for (uint32_t k = 0; k < (rotate ? 2U : 1U); k++) {
+        GLuint buf;
+        NT_GL_GEN(glGenBuffers, 1, &buf);
+        if (buf == 0) {
+            assert_name_failed_on_loss("glGenBuffers", desc->label);
+            s_buffer_gl[slot][0] = 0; /* a loss took the first name with the context */
+            return false;
+        }
+        bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER;
+        if (unhook_vao) {
+            ebo_upload_begin();
+        }
+        NT_GL(glBindBuffer, target, buf);
+        if (target == GL_ARRAY_BUFFER) {
+            s_gl_cache.array_buffer = buf;
+        }
+        NT_GL_BUFFER_UPLOAD(desc->data, desc->size, glBufferData, target, (GLsizeiptr)desc->size, desc->data, usage);
+        if (unhook_vao) {
+            ebo_upload_end();
+        }
 #if !defined(NT_PLATFORM_WEB)
-    if (target == GL_PIXEL_PACK_BUFFER) {
-        NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, 0); /* a bound pack buffer turns every glReadPixels pointer into an offset */
-    }
+        if (target == GL_PIXEL_PACK_BUFFER) {
+            NT_GL(glBindBuffer, GL_PIXEL_PACK_BUFFER, 0); /* a bound pack buffer turns every glReadPixels pointer into an offset */
+        }
 #endif
-
-    s_buffer_gl[slot] = buf;
+        s_buffer_gl[slot][k] = buf;
+    }
+    if (!rotate) {
+        s_buffer_gl[slot][1] = s_buffer_gl[slot][0];
+    }
     s_buffer_targets[slot] = target;
-    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_BUFFER; event->data.backend.args[0] = slot; event->data.backend.args[1] = buf;);
+    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_BUFFER; event->data.backend.args[0] = slot; event->data.backend.args[1] = s_buffer_gl[slot][0];
+                  event->data.backend.args[2] = s_buffer_gl[slot][1];);
     return true;
 }
 
 void nt_gfx_backend_destroy_buffer(uint32_t backend_handle) {
-    NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_buffers && s_buffer_gl[backend_handle] != 0 && "destroy_buffer: requires a live record");
-    GLuint buf = s_buffer_gl[backend_handle];
-    if (s_buffer_targets[backend_handle] == GL_ARRAY_BUFFER) {
-        detach_instance_buffer(buf);
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_buffers && s_buffer_gl[backend_handle][0] != 0 && "destroy_buffer: requires a live record");
+    const uint32_t copies = s_buffer_gl[backend_handle][1] != s_buffer_gl[backend_handle][0] ? 2U : 1U;
+    for (uint32_t k = 0; k < copies; k++) {
+        GLuint buf = s_buffer_gl[backend_handle][k];
+        if (s_buffer_targets[backend_handle] == GL_ARRAY_BUFFER) {
+            detach_instance_buffer(buf);
+        }
+        forget_deleted_buffer(buf);
+        NT_GL_DELETE(glDeleteBuffers, 1, &buf);
     }
-    forget_deleted_buffer(buf);
-    NT_GL_DELETE(glDeleteBuffers, 1, &buf);
-    s_buffer_gl[backend_handle] = 0;
+    s_buffer_gl[backend_handle][0] = 0;
+    s_buffer_gl[backend_handle][1] = 0;
     s_buffer_targets[backend_handle] = 0;
 }
 
@@ -1964,7 +1997,7 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, cons
     if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
         return;
     }
-    GLuint buf = s_buffer_gl[backend_handle];
+    GLuint buf = s_buffer_gl[backend_handle][s_parity];
     GLenum target = s_buffer_targets[backend_handle];
     bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER;
     if (unhook_vao) {
@@ -1984,11 +2017,13 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, cons
     }
 }
 
+void nt_gfx_backend_next_frame(void) { s_parity ^= 1U; }
+
 /* ---- Uniform buffer ---- */
 
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, uint32_t offset, uint32_t size) {
-    NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_buffers && s_buffer_gl[backend_handle] != 0 && "bind_uniform_buffer: requires a live buffer");
-    const GLuint buf = s_buffer_gl[backend_handle];
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_buffers && s_buffer_gl[backend_handle][0] != 0 && "bind_uniform_buffer: requires a live buffer");
+    const GLuint buf = s_buffer_gl[backend_handle][s_parity];
     if (s_gl_cache.uniform_ranges[slot].offset == offset && s_gl_cache.uniform_ranges[slot].size == size) {
         NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UBO, event->result = NT_GFX_RESULT_CACHE; event->detail = NT_GFX_GL_glBindBufferRange; event->data.backend.args[0] = buf;);
         return;
@@ -2346,10 +2381,10 @@ bool nt_gfx_backend_recreate_all_resources(void) {
         memset(s_pipelines, 0, (s_init_desc.max_pipelines + 1) * sizeof(nt_gfx_gl_pipeline_t));
     }
     if (s_vertex_inputs) {
-        memset(s_vertex_inputs, 0, (s_init_desc.max_vertex_inputs + 1) * sizeof(nt_gfx_gl_vertex_input_t));
+        memset(s_vertex_inputs, 0, (s_init_desc.max_vertex_inputs + 1) * sizeof(*s_vertex_inputs));
     }
     if (s_buffer_gl) {
-        memset(s_buffer_gl, 0, (s_init_desc.max_buffers + 1) * sizeof(GLuint));
+        memset(s_buffer_gl, 0, (s_init_desc.max_buffers + 1) * sizeof(*s_buffer_gl));
     }
     if (s_buffer_targets) {
         memset(s_buffer_targets, 0, (s_init_desc.max_buffers + 1) * sizeof(GLenum));

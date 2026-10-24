@@ -50,17 +50,16 @@ void nt_gfx_frame_create_buffers(void) {
             nt_gfx_destroy_buffer(storage->buffer);
         }
         /* A new context loss is the only expected failure; the next restore makes them again. */
-        storage->buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            /* GL buffers are untyped; only index data has its own target in WebGL 2, so uniform blocks live in a vertex-type buffer. */
-            .type = s == NT_GFX_FRAME_INDEX ? NT_BUFFER_INDEX : NT_BUFFER_VERTEX,
-            .usage = NT_USAGE_STREAM,
-            .size = storage->capacity,
-            .index_type = s == NT_GFX_FRAME_INDEX ? NT_INDEX_UINT32 : NT_INDEX_NONE,
-            .label = labels[s < NT_GFX_FRAME_VERTEX ? s : NT_GFX_FRAME_VERTEX],
-        });
-        if (storage->buffer.id != 0) {
-            nt_gfx_set_buffer_frame_stream(storage->buffer, s);
-        }
+        storage->buffer = nt_gfx_make_frame_buffer(
+            &(nt_buffer_desc_t){
+                /* GL buffers are untyped; only index data has its own target in WebGL 2, so uniform blocks live in a vertex-type buffer. */
+                .type = s == NT_GFX_FRAME_INDEX ? NT_BUFFER_INDEX : NT_BUFFER_VERTEX,
+                .usage = NT_USAGE_STREAM,
+                .size = storage->capacity,
+                .index_type = s == NT_GFX_FRAME_INDEX ? NT_INDEX_UINT32 : NT_INDEX_NONE,
+                .label = labels[s < NT_GFX_FRAME_VERTEX ? s : NT_GFX_FRAME_VERTEX],
+            },
+            s);
     }
 }
 // #endregion
@@ -89,7 +88,7 @@ static void upload_storage(void) {
             continue;
         }
         g_nt_gfx.counters.frame_bytes[s] = storage->used;
-        nt_gfx_update_buffer(storage->buffer, 0, storage->staging, storage->used);
+        nt_gfx_update_frame_buffer(storage->buffer, storage->staging, storage->used);
     }
 }
 // #endregion

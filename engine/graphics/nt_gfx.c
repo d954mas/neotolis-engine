@@ -731,6 +731,8 @@ void nt_gfx_begin_frame(void) {
     s_gfx.render_state = NT_GFX_STATE_IDLE;
     age_stage_buffer();
     nt_gfx_frame_begin();
+    /* One flip per frame for every rotating buffer: all writes and binds of a frame use one copy. */
+    nt_gfx_backend_next_frame();
     memset(s_gfx.staged_blocks, 0, sizeof(s_gfx.staged_blocks));
     g_nt_gfx.last_frame = g_nt_gfx.counters;
 #if NT_GFX_CAPTURE_ENABLED
@@ -1308,7 +1310,7 @@ nt_instance_layout_t nt_gfx_make_instance_layout(const nt_vertex_layout_t *layou
     return result;
 }
 
-static nt_gfx_result_t make_buffer(const nt_buffer_desc_t *desc, nt_buffer_t *out) {
+static nt_gfx_result_t make_buffer(const nt_buffer_desc_t *desc, uint8_t frame_stream, nt_buffer_t *out) {
     NT_ASSERT(desc != NULL);
 #if !defined(NT_PLATFORM_WEB)
     NT_ASSERT((desc->type != NT_BUFFER_READBACK || desc->data == NULL) && "make_buffer: the GPU writes a readback buffer");
@@ -1324,12 +1326,16 @@ static nt_gfx_result_t make_buffer(const nt_buffer_desc_t *desc, nt_buffer_t *ou
     NT_ASSERT(id != 0 && "buffer pool full -- raise nt_gfx_desc_t.max_buffers");
 
     uint32_t slot = nt_pool_slot_index(id);
-    if (!nt_gfx_backend_create_buffer(desc, slot)) {
+    /* The uniform stream does not rotate: ANGLE never waits on uniform data, and the backend's
+     * range cache relies on one uniform buffer. */
+    const bool rotate = frame_stream != 0 && frame_stream - 1U != NT_GFX_FRAME_UNIFORM;
+    if (!nt_gfx_backend_create_buffer(desc, slot, rotate)) {
         nt_pool_free(&s_gfx.buffer_pool, id);
         return latch_loss();
     }
 
     s_gfx.buffer_metas[slot].live = true;
+    s_gfx.buffer_metas[slot].frame_stream = frame_stream;
     s_gfx.buffer_metas[slot].type = (uint8_t)desc->type;
     s_gfx.buffer_metas[slot].usage = (uint8_t)desc->usage;
     s_gfx.buffer_metas[slot].index_type = desc->index_type;
@@ -1340,7 +1346,7 @@ static nt_gfx_result_t make_buffer(const nt_buffer_desc_t *desc, nt_buffer_t *ou
     return NT_GFX_RESULT_ACCEPTED;
 }
 
-nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
+static nt_buffer_t make_buffer_request(const nt_buffer_desc_t *desc, uint8_t frame_stream) {
     NT_GFX_BEGIN_REQUEST(
         NT_GFX_OP_CREATE, NT_GFX_OBJECT_BUFFER, 0, if (desc != NULL) {
             event->data.resource.size = desc->size;
@@ -1350,9 +1356,13 @@ nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
             event->data.resource.flags = desc->data != NULL;
         });
     nt_buffer_t result = {0};
-    NT_GFX_END_OBJECT(make_buffer(desc, &result), result.id);
+    NT_GFX_END_OBJECT(make_buffer(desc, frame_stream, &result), result.id);
     return result;
 }
+
+nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) { return make_buffer_request(desc, 0); }
+
+nt_buffer_t nt_gfx_make_frame_buffer(const nt_buffer_desc_t *desc, uint32_t stream) { return make_buffer_request(desc, (uint8_t)(stream + 1U)); }
 
 static bool texture_compressed_format_supported(nt_texture_format_t format) {
     switch (format) {
@@ -1889,8 +1899,6 @@ void nt_gfx_bind_vertex_input_instanced(nt_vertex_input_t vi, nt_instance_layout
                          event->data.binding.offset = byte_offset);
     NT_GFX_END(bind_vertex_input_instanced(vi, layout, instance_buffer, byte_offset));
 }
-
-void nt_gfx_set_buffer_frame_stream(nt_buffer_t buf, uint32_t stream) { s_gfx.buffer_metas[nt_pool_slot_index(buf.id)].frame_stream = (uint8_t)(stream + 1U); }
 
 static bool texture_sampler_compatible(uint32_t texture_slot, const nt_sampler_desc_t *desc) {
     const nt_gfx_texture_meta_t *meta = &s_gfx.texture_metas[texture_slot];
@@ -2454,7 +2462,7 @@ void nt_gfx_unbind_uniform_block(uint32_t slot) {
 /* ---- Buffer update ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — NT_ASSERT expansion, not real branching
-static nt_gfx_result_t buffer_update(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size) {
+static nt_gfx_result_t buffer_update(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size, bool frame_storage) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
@@ -2467,6 +2475,8 @@ static nt_gfx_result_t buffer_update(nt_buffer_t buf, uint32_t offset, const voi
     NT_ASSERT(s_gfx.buffer_metas[slot].type != NT_BUFFER_READBACK && "update_buffer: the GPU writes a readback buffer");
 #endif
     NT_ASSERT(s_gfx.buffer_metas[slot].usage != NT_USAGE_IMMUTABLE && "update_buffer: cannot update immutable buffer");
+    /* A frame buffer rotates per frame: an immediate write would land in a copy this frame does not draw. */
+    NT_ASSERT((s_gfx.buffer_metas[slot].frame_stream != 0) == frame_storage && "update_buffer: nt_gfx_end_frame writes frame storage -- allocate per-frame data with nt_gfx_frame_alloc");
     NT_ASSERT((data != NULL || size == 0) && "update_buffer: NULL data with nonzero size");
     NT_ASSERT(offset <= s_gfx.buffer_metas[slot].size && "update_buffer: offset exceeds buffer capacity");
     NT_ASSERT(size <= s_gfx.buffer_metas[slot].size - offset && "update_buffer: offset + size exceeds buffer capacity");
@@ -2477,7 +2487,12 @@ static nt_gfx_result_t buffer_update(nt_buffer_t buf, uint32_t offset, const voi
 
 void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size) {
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_BUFFER_UPLOAD, NT_GFX_OBJECT_BUFFER, buf.id, event->data.resource.size = size; event->data.resource.related[0] = offset; event->data.resource.flags = data != NULL);
-    NT_GFX_END(buffer_update(buf, offset, data, size));
+    NT_GFX_END(buffer_update(buf, offset, data, size, false));
+}
+
+void nt_gfx_update_frame_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_BUFFER_UPLOAD, NT_GFX_OBJECT_BUFFER, buf.id, event->data.resource.size = size; event->data.resource.flags = data != NULL);
+    NT_GFX_END(buffer_update(buf, 0, data, size, true));
 }
 
 static nt_gfx_result_t begin_segment(const char *name) {

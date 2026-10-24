@@ -729,17 +729,37 @@ static void test_a_captured_vertex_input_names_its_instance_tuple(void) {
     bool layout_defined = false;
     bool vao_defined = false;
     bool requested = false;
+    uint32_t buffers_defined = 0;
     for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *event = &capture.events[i];
         if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_CREATE && event->object_kind == NT_GFX_OBJECT_INSTANCE_LAYOUT && event->object == layout.id) {
             TEST_ASSERT_EQUAL_UINT64(16, event->data.resource.size);
             layout_defined = true;
         }
+        /* A frame vertex stream has a name per frame parity; any other buffer one name twice. */
+        if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_STATE && event->detail == NT_GFX_OBJECT_BUFFER) {
+            const uint32_t slot = event->data.backend.args[0];
+            TEST_ASSERT_NOT_EQUAL_UINT32(0, event->data.backend.args[1]);
+            if (slot == nt_pool_slot_index(instances.id)) {
+                TEST_ASSERT_NOT_EQUAL_UINT32(event->data.backend.args[1], event->data.backend.args[2]);
+                buffers_defined++;
+            } else if (slot == nt_pool_slot_index(vertices.id)) {
+                TEST_ASSERT_EQUAL_UINT32(event->data.backend.args[1], event->data.backend.args[2]);
+                buffers_defined++;
+            }
+        }
+        /* Two VAOs, one per parity; only the one the previous frame bound holds the tuple. */
         if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_STATE && event->detail == NT_GFX_OBJECT_VERTEX_INPUT && event->data.backend.args[0] == nt_pool_slot_index(vi.id)) {
             TEST_ASSERT_NOT_EQUAL_UINT32(0, event->data.backend.args[1]);
-            TEST_ASSERT_NOT_EQUAL_UINT32(0, event->data.backend.args[2]);
-            TEST_ASSERT_EQUAL_UINT32(0, event->data.backend.args[3]);
-            TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(layout.id), event->data.backend.args[4]);
+            TEST_ASSERT_NOT_EQUAL_UINT32(0, event->data.backend.args[5]);
+            TEST_ASSERT_NOT_EQUAL_UINT32(event->data.backend.args[1], event->data.backend.args[5]);
+            const uint32_t *bound = event->data.backend.args[2] != 0 ? &event->data.backend.args[1] : &event->data.backend.args[5];
+            const uint32_t *unbound = bound == &event->data.backend.args[1] ? &event->data.backend.args[5] : &event->data.backend.args[1];
+            TEST_ASSERT_NOT_EQUAL_UINT32(0, bound[1]);
+            TEST_ASSERT_EQUAL_UINT32(0, bound[2]);
+            TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(layout.id), bound[3]);
+            TEST_ASSERT_EQUAL_UINT32(0, unbound[1]);
+            TEST_ASSERT_EQUAL_UINT32(0, unbound[3]);
             vao_defined = true;
         }
         if (event->kind == NT_GFX_EVENT_BEGIN && event->operation == NT_GFX_OP_VERTEX_INPUT && event->object == vi.id) {
@@ -752,6 +772,7 @@ static void test_a_captured_vertex_input_names_its_instance_tuple(void) {
     TEST_ASSERT_TRUE(layout_defined);
     TEST_ASSERT_TRUE(vao_defined);
     TEST_ASSERT_TRUE(requested);
+    TEST_ASSERT_EQUAL_UINT32(2, buffers_defined);
 }
 #endif
 
@@ -762,9 +783,9 @@ static void test_attribute_pointer_calls_are_counted_per_issue(void) {
         .layout = {.attr_count = 1, .stride = 8, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 2}}},
     });
     const nt_instance_layout_t layout = nt_gfx_make_instance_layout(&(nt_vertex_layout_t){.attr_count = 1, .stride = 16, .attrs = {{.location = 1, .type = NT_VERTEX_FLOAT, .count = 4}}});
-    /* Creation points the static attribute; the instance side waits for the first bind. */
-    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.gl[NT_GFX_GL_glVertexAttribPointer]);
-    TEST_ASSERT_EQUAL_UINT32(1, s_attribute_calls);
+    /* Creation points the static attribute of both VAOs; the instance side waits for the first bind. */
+    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.gl[NT_GFX_GL_glVertexAttribPointer]);
+    TEST_ASSERT_EQUAL_UINT32(2, s_attribute_calls);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     uint32_t offset = 0;
     memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 32, 4, &offset), 0, 32);
@@ -774,9 +795,9 @@ static void test_attribute_pointer_calls_are_counted_per_issue(void) {
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_counters_t counters = g_nt_gfx.last_frame;
-    /* One pointer at creation, one for the first instanced bind, one for the move to 16. */
+    /* One pointer per VAO at creation, one for the first instanced bind, one for the move to 16. */
     TEST_ASSERT_EQUAL_UINT32(0, offset);
-    TEST_ASSERT_EQUAL_UINT32(3, counters.gl[NT_GFX_GL_glVertexAttribPointer]);
+    TEST_ASSERT_EQUAL_UINT32(4, counters.gl[NT_GFX_GL_glVertexAttribPointer]);
     TEST_ASSERT_EQUAL_UINT32(s_attribute_calls, counters.gl[NT_GFX_GL_glVertexAttribPointer]);
 }
 
