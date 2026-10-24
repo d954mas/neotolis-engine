@@ -141,16 +141,19 @@ rule: the record names the program slot, GL name and label, the phase (`link`,
 `blocks` or `uniforms`), the violated contract, and the name and value the driver
 returned: the uniform or block, `max_len`, or `gl_error` for a failed link or an
 empty query. The link record follows the driver logs, so a journal that
-keeps its tail keeps the identity. Context loss keeps its recoverable outcome.
+keeps its tail keeps the identity. Context loss keeps its recoverable outcome:
+finishing asks for the loss again after the record, so a loss its queries
+surface returns the context-loss outcome, and only a live failure ends in the
+assertion. A shader whose diagnostics kill the GPU process every time therefore
+loses the context again on each relink its owner makes after a restore; it never traps.
 
 Just before that line, a link failure logs
 `program link stages: vs_compile=<v> fs_compile=<f>`: `1` means the stage
 compiled and `0` that it did not. An empty driver log with `1 1` therefore
 points at linking, a `0` at that stage's compilation. A context lost during
 these queries can also read as `0`, and on the web a stage log may then read
-`(unknown error)`; that record still ends in the assertion. These queries exist
-only with ERROR logging compiled in and never run
-for a successful link or an already-confirmed context loss.
+`(unknown error)`. These stage queries exist only with ERROR logging compiled
+in and never run for a successful link or an already-confirmed context loss.
 
 On the web, the browser's translation of a stage is what the driver actually
 compiled, and the browser may adapt it to the GPU. A link failure therefore logs

@@ -1,16 +1,16 @@
 import { test, expect } from '@playwright/test';
 
-type Mode = 'vertex' | 'fragment' | 'link' | 'no-translation' | 'long-translation' | 'destroyed' | 'lost';
-type Probe = { armed: boolean; queries: number; programLogs: number; translations: number; enables: number; failed: boolean };
+type Mode = 'vertex' | 'fragment' | 'link' | 'no-translation' | 'long-translation' | 'destroyed' | 'lost' | 'reflection' | 'loss-in-log' | 'loss-in-reflection-log';
+type Probe = { armed: boolean; queries: number; programLogs: number; translations: number; enables: number; failed: boolean; checkedLive: boolean; losses: number; restores: number };
 type ProbeWindow = Window & {
   __nt?: { ready: boolean; programs_ready(): boolean; loss_window(step: number): number };
   __stages: Probe;
 };
 
-for (const mode of ['vertex', 'fragment', 'link', 'no-translation', 'long-translation', 'destroyed', 'lost'] as Mode[]) {
+for (const mode of ['vertex', 'fragment', 'link', 'no-translation', 'long-translation', 'destroyed', 'lost', 'reflection', 'loss-in-log', 'loss-in-reflection-log'] as Mode[]) {
   test(`shader diagnostics: ${mode}`, async ({ page }) => {
     await page.addInitScript((mode: Mode) => {
-      const state = (window as ProbeWindow).__stages = { armed: mode !== 'destroyed', queries: 0, programLogs: 0, translations: 0, enables: 0, failed: false };
+      const state = (window as ProbeWindow).__stages = { armed: mode !== 'destroyed', queries: 0, programLogs: 0, translations: 0, enables: 0, failed: false, checkedLive: false, losses: 0, restores: 0 };
       const proto = WebGL2RenderingContext.prototype;
       const source = proto.shaderSource;
       const parameter = proto.getShaderParameter;
@@ -19,6 +19,15 @@ for (const mode of ['vertex', 'fragment', 'link', 'no-translation', 'long-transl
       const lost = proto.isContextLost;
       const extension = proto.getExtension;
       const infoLog = proto.getShaderInfoLog;
+      const error = proto.getError;
+      // A real loss inside a diagnostic query, after the engine saw the context live.
+      function loseDuringLog(gl: WebGL2RenderingContext) {
+        const recovery = extension.call(gl, 'WEBGL_lose_context')!;
+        gl.canvas.addEventListener('webglcontextlost', () => setTimeout(() => recovery.restoreContext(), 100), { once: true });
+        gl.canvas.addEventListener('webglcontextrestored', () => state.restores++, { once: true });
+        state.losses++;
+        recovery.loseContext();
+      }
       // Debug Emscripten builds read each parameter twice, so count stages, not calls.
       const queried = new Set<WebGLShader>();
       let target: WebGLProgram | null = null;
@@ -32,6 +41,11 @@ for (const mode of ['vertex', 'fragment', 'link', 'no-translation', 'long-transl
         return link.call(this, program);
       };
       proto.getProgramParameter = function(program, query) {
+        if (program === target && (mode === 'reflection' || mode === 'loss-in-reflection-log')) {
+          if (query !== this.ACTIVE_UNIFORMS) return programParameter.call(this, program, query);
+          state.failed = true;
+          return -1;
+        }
         if (program === target && query === this.LINK_STATUS) {
           state.failed = true;
           return false;
@@ -45,9 +59,18 @@ for (const mode of ['vertex', 'fragment', 'link', 'no-translation', 'long-transl
         }
         return parameter.call(this, shader, query);
       };
-      proto.isContextLost = function() { return mode === 'lost' && state.failed || lost.call(this); };
+      proto.isContextLost = function() {
+        const result = mode === 'lost' && state.failed || lost.call(this);
+        if (state.failed && !result) state.checkedLive = true;
+        return result;
+      };
+      proto.getError = function() {
+        if (mode === 'loss-in-reflection-log' && state.checkedLive && !state.losses) loseDuringLog(this);
+        return error.call(this);
+      };
       proto.getProgramInfoLog = function(program) {
         if (state.failed) state.programLogs++;
+        if (program === target && mode === 'loss-in-log' && state.checkedLive && !state.losses) loseDuringLog(this);
         return program === target && mode === 'link' ? ('driver detail ' + 'x'.repeat(80) + '\n').repeat(20) : '';
       };
       // 'destroyed' passes the driver's log through to prove the held stage stays queryable; other modes keep stage logs out.
@@ -72,6 +95,23 @@ for (const mode of ['vertex', 'fragment', 'link', 'no-translation', 'long-transl
     await page.goto('/index.html?crash=read');
     const probe = () => page.evaluate(() => (window as ProbeWindow).__stages);
     const crash = () => page.evaluate(() => localStorage.getItem('nt.test.crash'));
+    if (mode === 'loss-in-log' || mode === 'loss-in-reflection-log') {
+      // The loss keeps the recoverable outcome: restore, relink, no trap.
+      await page.waitForFunction(() => {
+        const w = window as ProbeWindow;
+        return w.__stages.restores === 1 && w.__nt?.ready && w.__nt.programs_ready();
+      });
+      expect(await probe()).toMatchObject({ failed: true, checkedLive: true, losses: 1, restores: 1 });
+      expect(await crash()).toBeNull();
+      return;
+    }
+    if (mode === 'reflection') {
+      // A live reflection failure still traps with its record.
+      await page.waitForFunction(() => localStorage.getItem('nt.test.crash') !== null);
+      expect(await crash()).toMatch(/program \d+\/GL \d+ uniforms: no data: gl_error=0x0 "[^"\n]+"/);
+      expect(await probe()).toMatchObject({ failed: true, checkedLive: true, losses: 0 });
+      return;
+    }
     if (mode === 'destroyed') {
       await page.waitForFunction(() => {
         const hooks = (window as ProbeWindow).__nt;

@@ -1012,15 +1012,18 @@ formats of GLES 3.0 ("Required Framebuffer Formats": `RGBA8`, `DEPTH16`, `DEPTH2
 `EXT_color_buffer_float` makes single-sample `RGBA16F` one too, and creation checks its bit), so a
 live driver must complete every target the engine builds. Two residual cases also assert: a
 texture whose GPU storage allocation failed (uploads are not polled) leaves its framebuffer
-incomplete, and a GPU-process death that fails a status before the browser reports the loss.
-A failure is classified by asking the browser after the failed call, for the same reason.
+incomplete, and a GPU-process death that fails a status while the browser reports no loss, even
+after the failure record's queries.
+A failure is classified by asking the browser after the failed call, for the same reason,
+and again after its failure record, whose queries can surface the loss.
 Before asserting on a live-context name failure, including the setup upload VAO,
 the backend logs the GL call (and shader stage), the pending GL error and the
 descriptor label. An incomplete framebuffer logs its status, pending GL error,
 attachment size and formats, then label, all from the create arguments. The
 pending error may come from an earlier texture allocation, not the status.
-Numbers precede labels, so a long label cannot cut the details. Lost-context
-paths emit no fatal record; log floor NONE removes the records and their error
+Numbers precede labels, so a long label cannot cut the details. A loss known
+before the record emits none; a record whose queries surface the loss is followed
+by `WebGL context lost`, not a trap; log floor NONE removes the records and their error
 queries.
 
 Initial context creation failure is fatal: backend init asserts after the

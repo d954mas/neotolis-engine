@@ -19,6 +19,7 @@ declare global {
       basis_build_codecs(): number;
       basis_sample(level: number): number;
       basis_single_pixel_format(): number;
+      float_probe(useTexture: number): number;
     };
     __ntLossExtension?: WEBGL_lose_context;
     __ntBlockFloatLinear?: boolean;
@@ -511,3 +512,54 @@ test('context loss: texture creation rejects loss during upload', async ({ page 
   await restoreAndDraw(page, errors);
   expect(errors, 'unexpected browser/gfx errors').toEqual([]);
 });
+
+// A failed framebuffer on a live context logs a record; a loss its getError surfaces must still recover.
+for (const fault of ['name', 'status'] as const) {
+  test(`context loss: a loss surfaced by a failed framebuffer ${fault} record recovers`, async ({ page }) => {
+    test.setTimeout(60_000);
+    const errors = trackErrors(page);
+    await page.goto('/index.html');
+    await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready() && window.__nt.basis_ready(), null, { timeout: 30_000 });
+    const result = await page.evaluate((fault) => {
+      const gl = document.querySelector('canvas')!.getContext('webgl2')!;
+      const loss = gl.getExtension('WEBGL_lose_context');
+      if (!loss) throw new Error('WEBGL_lose_context unavailable');
+      window.__ntLossExtension = loss;
+      const { createFramebuffer, checkFramebufferStatus, isContextLost, getError } = gl;
+      const state = { failed: false, checkedLive: false, lost: false };
+      if (fault === 'name') {
+        gl.createFramebuffer = function() {
+          state.failed = true;
+          return null;
+        };
+      } else {
+        gl.checkFramebufferStatus = function() {
+          state.failed = true;
+          return gl.FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
+        };
+      }
+      gl.isContextLost = function() {
+        const lost = isContextLost.call(this);
+        if (state.failed && !lost) state.checkedLive = true;
+        return lost;
+      };
+      gl.getError = function() {
+        if (state.checkedLive && !state.lost) {
+          state.lost = true;
+          loss.loseContext();
+        }
+        return getError.call(this);
+      };
+      try {
+        return { probe: window.__nt!.float_probe(0), ...state };
+      } finally {
+        Object.assign(gl, { createFramebuffer, checkFramebufferStatus, isContextLost, getError });
+      }
+    }, fault);
+    test.skip(result.probe === -1, 'float render targets unavailable');
+    expect(result).toEqual({ probe: -2, failed: true, checkedLive: true, lost: true });
+    await restoreAndDraw(page, errors);
+    const record = fault === 'name' ? 'ERROR [gfx] glGenFramebuffers name:' : 'ERROR [gfx] framebuffer status=';
+    expect(errors.filter((error) => !error.startsWith(record)), 'unexpected browser/gfx errors').toEqual([]);
+  });
+}
