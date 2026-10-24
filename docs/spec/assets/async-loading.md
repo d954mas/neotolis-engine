@@ -92,6 +92,20 @@ given), and `timeout_ms`. A body on GET/HEAD is asserted out, as are the
 fetch()-forbidden methods CONNECT/TRACE/TRACK — backends would diverge
 otherwise.
 
+`timeout_ms` limits the whole request. `idle_timeout_ms` instead limits time
+without new response-body bytes, starting when the request is issued and resetting
+only when the received byte count rises. Both default to 0 (disabled), are
+clamped to `INT_MAX` milliseconds, and can be used together. Headers alone do
+not reset the idle clock. A stalled request becomes FAILED on the next
+`nt_http_update()`; the log includes the full URL, received bytes and threshold.
+Time spent with the page suspended still counts, so the next frame may fail and
+retry the request. On web, an enabled idle limit requires a readable response
+stream; a non-streaming fallback fails rather than treating a slow valid body as
+idle. Native measures received wire bytes and web measures decoded body bytes.
+The pack loader uses `nt_resource_set_http_idle_timeout(pack_id, ms)` on a mounted
+pack before load; retries keep that limit and use the existing retry policy.
+The default remains disabled for games that do not opt in.
+
 **Reference semantics: the web backend.** `nt_http` behaves like `fetch()`; the
 native backend approximates that with libcurl and is NOT byte-identical. The
 guarantees both backends share are the ones in this chapter (state semantics,
@@ -149,10 +163,10 @@ Web bridge (EM_JS in `engine/http/web/nt_http_web.c`, all called from C):
 // Starts fetch(); request parameters read from the slot
 void nt_http_web_fetch(int slot, const char *url, const char *method,
                        const uint8_t *body, int body_size, const char *headers,
-                       int headers_size, int timeout_ms);
+                       int headers_size, int timeout_ms, int idle_timeout_ms);
 // out: received, total, status, header block size with its NUL (0 = none yet);
 // returns the nt_http_state_t
-int nt_http_web_poll(int slot, uint32_t *out);
+int nt_http_web_poll(int slot, uint32_t *out, double *last_progress_at);
 // Copies the body and header block into C buffers (NULL drops), drops the record
 void nt_http_web_take(int slot, uint8_t *data, char *hdrs);
 void nt_http_web_cancel(int slot);

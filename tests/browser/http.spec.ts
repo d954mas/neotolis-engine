@@ -12,15 +12,49 @@ declare global {
       http_get_404(): void;
       http_get_slow_timeout(): void;
       http_get_slow(): void;
+      http_get_drip(): void;
+      http_get_late_empty(): void;
       http_state(): number; // nt_http_state_t: 3 = DONE, 4 = FAILED
       http_status(): number;
       http_total(): number;
       http_headers(): string;
       http_verify_echo(): number; // 1 exact, 0 mismatch, -1 not DONE
       http_free(): void;
+      pack_stall_start(mode: number): void;
+      pack_stall_pause(paused: number): void;
+      pack_stall_state(): number;
+      pack_stall_received(): number;
     };
   }
 }
+
+test('resource: a body arriving after the idle deadline still retries when frames resume', async ({ page }) => {
+  await page.goto('/index.html');
+  await page.waitForFunction(() => window.__nt?.ready === true, null, { timeout: 30_000 });
+  await page.evaluate(async () => {
+    await fetch('/stall-reset-late', { method: 'POST' });
+    window.__nt!.pack_stall_start(2);
+    window.__nt!.pack_stall_pause(1);
+  });
+  await page.waitForTimeout(900);
+  await page.evaluate(() => window.__nt!.pack_stall_pause(0));
+  await expect.poll(() => page.evaluate(() => window.__nt!.pack_stall_state()), { timeout: 10_000 }).toBe(4);
+  const attempts = await page.evaluate(async () => await (await fetch('/stall-attempts')).json());
+  expect(attempts['/pack-late-body']).toBe(2);
+});
+
+test('http: a delayed bodyless response fails after a paused pump', async ({ page }) => {
+  await page.goto('/index.html');
+  await page.waitForFunction(() => window.__nt?.ready === true, null, { timeout: 30_000 });
+  await page.evaluate(() => {
+    window.__nt!.http_get_late_empty();
+    window.__nt!.pack_stall_pause(1);
+  });
+  await page.waitForTimeout(900);
+  await page.evaluate(() => window.__nt!.pack_stall_pause(0));
+  await expect.poll(() => page.evaluate(() => window.__nt!.http_state()), { timeout: 10_000 }).toBe(FAILED);
+  await page.evaluate(() => window.__nt!.http_free());
+});
 
 const DONE = 3;
 const FAILED = 4;
@@ -51,6 +85,32 @@ test('http: POST body arrives verbatim, headers/status surface, 404 is DONE', as
   expect(await page.evaluate(() => window.__nt!.http_status())).toBe(404);
   await page.evaluate(() => window.__nt!.http_free());
 });
+
+test('http: idle timeout resets on body bytes', async ({ page }) => {
+  await page.goto('/index.html');
+  await page.waitForFunction(() => window.__nt?.ready === true, null, { timeout: 30_000 });
+  await page.evaluate(() => window.__nt!.http_get_drip());
+  await expect.poll(() => page.evaluate(() => window.__nt!.http_state()), { timeout: 10_000 }).toBe(DONE);
+  expect(await page.evaluate(() => window.__nt!.http_total())).toBe(6);
+  await page.evaluate(() => window.__nt!.http_free());
+});
+
+for (const [mode, path] of [[0, '/pack-stall-headers'], [1, '/pack-stall-body']] as const) {
+  test(`resource: idle HTTP ${path} fails and retries`, async ({ page }) => {
+    await page.goto('/index.html');
+    await page.waitForFunction(() => window.__nt?.ready === true, null, { timeout: 30_000 });
+    await page.evaluate(async (m) => {
+      await fetch(m === 0 ? '/stall-reset-headers' : '/stall-reset-body', { method: 'POST' });
+    }, mode);
+    await page.evaluate((m) => window.__nt!.pack_stall_start(m), mode);
+    if (mode === 1) {
+      await expect.poll(() => page.evaluate(() => window.__nt!.pack_stall_received())).toBeGreaterThan(0);
+    }
+    await expect.poll(() => page.evaluate(() => window.__nt!.pack_stall_state()), { timeout: 10_000 }).toBe(4);
+    const attempts = await page.evaluate(async () => await (await fetch('/stall-attempts')).json());
+    expect(attempts[path]).toBe(2);
+  });
+}
 
 test('http: timeout aborts to FAILED; free mid-download cancels and the slot is reusable', async ({ page }) => {
   await page.goto('/index.html');

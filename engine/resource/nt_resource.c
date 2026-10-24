@@ -483,9 +483,10 @@ static void asset_header_check(const NtAssetMeta *meta, const uint8_t *data) {
 
 /* ---- I/O issue helper (shared by load + retry) ---- */
 
-static uint32_t resource_io_issue(const char *path, uint8_t io_type) {
+static uint32_t resource_io_issue(const NtPackMeta *pack, const char *path, uint8_t io_type) {
     if (io_type == NT_IO_HTTP) {
-        return nt_http_request(path).id;
+        nt_http_options_t opts = {.idle_timeout_ms = pack->http_idle_timeout_ms};
+        return nt_http_request_ex(path, &opts).id;
     }
 #ifndef NT_PLATFORM_WEB
     if (io_type == NT_IO_FS) {
@@ -596,7 +597,7 @@ void nt_resource_step(void) {
             if (now >= pack->retry_time_ms) {
                 pack->retry_time_ms = 0;
                 pack->attempt_count++;
-                pack->io_request_id = resource_io_issue(pack->load_path, pack->io_type);
+                pack->io_request_id = resource_io_issue(pack, pack->load_path, pack->io_type);
                 pack->pack_state = (pack->io_request_id != 0) ? NT_PACK_STATE_REQUESTED : NT_PACK_STATE_FAILED;
             }
         }
@@ -1425,7 +1426,7 @@ static nt_result_t resource_load(uint32_t pack_id, const char *path, uint8_t io_
     strncpy(pack->load_path, path, 255);
     pack->load_path[255] = '\0';
 
-    uint32_t req_id = resource_io_issue(path, io_type);
+    uint32_t req_id = resource_io_issue(pack, path, io_type);
     if (req_id == 0) {
         pack->pack_state = NT_PACK_STATE_FAILED;
         NT_LOG_ERROR("load failed to issue I/O request");
@@ -1617,6 +1618,15 @@ void nt_resource_set_retry_policy(uint32_t max_attempts, uint32_t base_delay_ms,
     s_resource.retry_max_attempts = max_attempts;
     s_resource.retry_base_delay_ms = base_delay_ms;
     s_resource.retry_max_delay_ms = max_delay_ms;
+}
+
+void nt_resource_set_http_idle_timeout(nt_hash32_t pack_id, uint32_t idle_timeout_ms) {
+    int16_t idx = find_pack(pack_id.value);
+    if (idx < 0) {
+        return;
+    }
+    NT_ASSERT(s_resource.packs[idx].pack_state == NT_PACK_STATE_NONE);
+    s_resource.packs[idx].http_idle_timeout_ms = idle_timeout_ms;
 }
 
 /* ---- Blob policy ---- */

@@ -223,6 +223,9 @@ void nt_resource_set_activate_time_budget(float max_ms);
 /* ---- Retry policy ---- */
 
 void nt_resource_set_retry_policy(uint32_t max_attempts, uint32_t base_delay_ms, uint32_t max_delay_ms);
+/* Set on a mounted pack before load. 0 disables the idle limit; the HTTP request
+ * fails after this many milliseconds without body bytes and follows the retry policy. */
+void nt_resource_set_http_idle_timeout(nt_hash32_t pack_id, uint32_t idle_timeout_ms);
 
 /* ---- Blob policy ---- */
 

@@ -103,6 +103,7 @@ typedef struct {
     uint16_t attempt_count;
     uint32_t retry_delay_ms;
     uint32_t retry_time_ms; /* wall clock ms of next retry */
+    uint32_t http_idle_timeout_ms;
     /* Blob eviction */
     uint32_t blob_last_access_ms;
     uint32_t blob_ttl_ms;

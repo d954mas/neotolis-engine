@@ -19,11 +19,12 @@ _Static_assert(NT_HTTP_STATE_PENDING == 1 && NT_HTTP_STATE_DOWNLOADING == 2 && N
 EM_JS_DEPS(nt_http_web, "$UTF8ToString")
 
 EM_JS(void, nt_http_web_fetch, (int slot_index, const char *url_ptr, const char *method_ptr, const uint8_t *body_ptr,
-                                int body_size, const char *headers_ptr, int headers_size, int timeout_ms), {
+                                int body_size, const char *headers_ptr, int headers_size, int timeout_ms, int idle_timeout_ms), {
     if (!Module['_nt_http']) {
         Module['_nt_http'] = {};
     }
-    var r = {controller: new AbortController(), timer: 0, state: 1, status: 0, headers: null, received: 0, total: 0, chunks: []};
+    var r = {controller: new AbortController(), timer: 0, state: 1, status: 0, headers: null, received: 0, total: 0, chunks: [], lastProgressAt: performance.now() / 1000};
+    var requestUrl = UTF8ToString(url_ptr);
     Module['_nt_http'][slot_index] = r;
 
     /* Quoted keys/calls survive Closure without relying on its fetch externs.
@@ -52,7 +53,7 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, const char *url_ptr, const char 
             init['body'] = HEAPU8.slice(body_ptr, body_ptr + body_size);
         }
     } catch (e) {
-        console.error('ERROR [http] bad request options slot=' + slot_index, e);
+        console.error('ERROR [http] bad request options slot=' + slot_index + ' url=' + requestUrl + ' reason=' + String(e), e);
         r.state = 4;
         return;
     }
@@ -65,12 +66,19 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, const char *url_ptr, const char 
         /* Network errors, body read errors and aborts (cancel/timeout). Log non-abort failures
          * (CORS/mixed-content are otherwise invisible) — parity with the native NT_LOG_ERROR. */
         if (!err || err.name !== 'AbortError') {
-            console.error('ERROR [http] fetch failed slot=' + slot_index, err);
+            console.error('ERROR [http] fetch failed slot=' + slot_index + ' url=' + requestUrl + ' status=' + r.status + ' bytes=' + r.received + '/' + r.total + ' reason=' + String(err), err);
         }
         r.controller.abort(); /* stops the stream after a throw from add(); no-op after an abort */
         r.state = 4;
     }
     function add(chunk) {
+        if (idle_timeout_ms > 0 && chunk.length > 0) {
+            var now = performance.now() / 1000;
+            if ((now - r.lastProgressAt) * 1000 >= idle_timeout_ms) {
+                throw new Error('idle for ' + idle_timeout_ms + ' ms after ' + r.received + ' bytes');
+            }
+            r.lastProgressAt = now;
+        }
         if (r.received + chunk.length > 0xFFFFFFFF) { /* C sizes are uint32: fail like native */
             throw new RangeError('response too large');
         }
@@ -78,7 +86,7 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, const char *url_ptr, const char 
         r.received += chunk.length;
         r.state = 2;
     }
-    fetch(UTF8ToString(url_ptr), init).then(function(response) {
+    fetch(requestUrl, init).then(function(response) {
         var block = "";
         response.headers.forEach(function(v, k) { block += k + ': ' + v + '\n'; });
         r.status = response.status;
@@ -93,6 +101,9 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, const char *url_ptr, const char 
             var pump = function() {
                 reader.read().then(function(part) {
                     if (part.done) {
+                        if (idle_timeout_ms > 0 && (performance.now() / 1000 - r.lastProgressAt) * 1000 >= idle_timeout_ms) {
+                            throw new Error('idle for ' + idle_timeout_ms + ' ms after ' + r.received + ' bytes');
+                        }
                         r.state = 3;
                         return;
                     }
@@ -103,6 +114,16 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, const char *url_ptr, const char 
             pump();
             return;
         }
+        if (idle_timeout_ms > 0) {
+            if (response.body === null && (init['method'] === 'HEAD' || response.status === 204 || response.status === 205 || response.status === 304)) {
+                if ((performance.now() / 1000 - r.lastProgressAt) * 1000 >= idle_timeout_ms) {
+                    throw new Error('idle for ' + idle_timeout_ms + ' ms after ' + r.received + ' bytes');
+                }
+                r.state = 3;
+                return;
+            }
+            throw new Error('idle timeout requires a readable response stream');
+        }
         return response.arrayBuffer().then(function(buf) {
             add(new Uint8Array(buf));
             r.state = 3;
@@ -111,13 +132,14 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, const char *url_ptr, const char 
 })
 
 /* out: received, total, status, header block size with its NUL (0 = no headers yet) */
-EM_JS(int, nt_http_web_poll, (int slot_index, uint32_t *out), {
+EM_JS(int, nt_http_web_poll, (int slot_index, uint32_t *out, double *last_progress_at), {
     var r = Module['_nt_http'][slot_index];
     var o = out >> 2;
     HEAPU32[o] = r.received;
     HEAPU32[o + 1] = r.total;
     HEAPU32[o + 2] = r.status;
     HEAPU32[o + 3] = r.headers === null ? 0 : r.headers.length + 1;
+    HEAPF64[last_progress_at >> 3] = r.lastProgressAt;
     return r.state;
 })
 
@@ -170,7 +192,9 @@ void nt_http_backend_update(void) {
             continue;
         }
         uint32_t info[4]; /* received, total, status, header block size */
-        int state = nt_http_web_poll((int)i, info);
+        double last_progress_at;
+        int state = nt_http_web_poll((int)i, info, &last_progress_at);
+        slot->idle_last_progress_at = last_progress_at;
         slot->received = info[0];
         slot->total = info[1];
         if (state == NT_HTTP_STATE_PENDING || state == NT_HTTP_STATE_DOWNLOADING) {
@@ -203,7 +227,7 @@ void nt_http_backend_update(void) {
 void nt_http_backend_request(uint16_t slot_index) {
     NtHttpSlot *slot = nt_http_get_slot(slot_index);
     NT_ASSERT(slot != NULL);
-    nt_http_web_fetch((int)slot_index, slot->url, slot->method, slot->body, (int)slot->body_size, slot->headers, (int)slot->headers_size, (int)slot->timeout_ms);
+    nt_http_web_fetch((int)slot_index, slot->url, slot->method, slot->body, (int)slot->body_size, slot->headers, (int)slot->headers_size, (int)slot->timeout_ms, (int)slot->idle_timeout_ms);
 }
 
 void nt_http_backend_cancel(uint16_t slot_index) { nt_http_web_cancel((int)slot_index); }

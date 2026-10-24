@@ -15,6 +15,8 @@ typedef struct {
     uint32_t headers_size;
     uint32_t header_pairs;
     uint32_t timeout_ms;
+    uint32_t idle_timeout_ms;
+    double idle_last_progress_at;
     /* Response */
     uint8_t *data;
     uint32_t size;

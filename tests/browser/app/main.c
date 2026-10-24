@@ -840,6 +840,24 @@ EMSCRIPTEN_KEEPALIVE void nt_test_hide_probe(int mode) {
 static uint8_t s_nt_http_body[300];
 static uint32_t s_nt_http_body_size;
 static nt_http_request_t s_nt_http_req;
+static nt_hash32_t s_nt_stall_pack_id;
+static int s_nt_pause_resources;
+
+EMSCRIPTEN_KEEPALIVE void nt_test_pack_stall_start(int mode) {
+    NT_ASSERT(mode >= 0 && mode <= 2);
+    s_nt_stall_pack_id = nt_hash32_str(mode == 0 ? "stall_headers" : mode == 1 ? "stall_body" : "late_body");
+    nt_resource_mount(s_nt_stall_pack_id, 1);
+    nt_resource_set_retry_policy(3, 20, 20);
+    nt_resource_set_http_idle_timeout(s_nt_stall_pack_id, 250);
+    nt_resource_load_url(s_nt_stall_pack_id, mode == 0 ? "/pack-stall-headers" : mode == 1 ? "/pack-stall-body" : "/pack-late-body");
+}
+EMSCRIPTEN_KEEPALIVE void nt_test_pack_stall_pause(int paused) { s_nt_pause_resources = paused; }
+EMSCRIPTEN_KEEPALIVE int nt_test_pack_stall_state(void) { return (int)nt_resource_pack_state(s_nt_stall_pack_id); }
+EMSCRIPTEN_KEEPALIVE int nt_test_pack_stall_received(void) {
+    uint32_t received = 0;
+    nt_resource_pack_progress(s_nt_stall_pack_id, &received, NULL);
+    return (int)received;
+}
 
 EMSCRIPTEN_KEEPALIVE void nt_test_http_post_echo(void) {
     s_nt_http_body_size = (uint32_t)sizeof(s_nt_http_body);
@@ -864,6 +882,14 @@ EMSCRIPTEN_KEEPALIVE void nt_test_http_get_slow_timeout(void) {
     s_nt_http_req = nt_http_request_ex("/slow", &opts);
 }
 EMSCRIPTEN_KEEPALIVE void nt_test_http_get_slow(void) { s_nt_http_req = nt_http_request("/slow"); }
+EMSCRIPTEN_KEEPALIVE void nt_test_http_get_drip(void) {
+    nt_http_options_t opts = {.idle_timeout_ms = 500};
+    s_nt_http_req = nt_http_request_ex("/drip", &opts);
+}
+EMSCRIPTEN_KEEPALIVE void nt_test_http_get_late_empty(void) {
+    nt_http_options_t opts = {.idle_timeout_ms = 250};
+    s_nt_http_req = nt_http_request_ex("/late-empty?probe=idle%20timeout", &opts);
+}
 EMSCRIPTEN_KEEPALIVE int nt_test_http_state(void) { return (int)nt_http_state(s_nt_http_req); }
 EMSCRIPTEN_KEEPALIVE int nt_test_http_status(void) { return (int)nt_http_status(s_nt_http_req); }
 EMSCRIPTEN_KEEPALIVE int nt_test_http_total(void) {
@@ -1016,6 +1042,12 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'http_get_404': function() { _nt_test_http_get_404(); },
         'http_get_slow_timeout': function() { _nt_test_http_get_slow_timeout(); },
         'http_get_slow': function() { _nt_test_http_get_slow(); },
+        'http_get_drip': function() { _nt_test_http_get_drip(); },
+        'http_get_late_empty': function() { _nt_test_http_get_late_empty(); },
+        'pack_stall_start': function(mode) { _nt_test_pack_stall_start(mode); },
+        'pack_stall_pause': function(paused) { _nt_test_pack_stall_pause(paused); },
+        'pack_stall_state': function() { return _nt_test_pack_stall_state(); },
+        'pack_stall_received': function() { return _nt_test_pack_stall_received(); },
         'http_state': function() { return _nt_test_http_state(); },
         'http_status': function() { return _nt_test_http_status(); },
         'http_total': function() { return _nt_test_http_total(); },
@@ -1195,7 +1227,13 @@ static void frame(void) {
     nt_input_poll();
     nt_mem_scratch_reset();
 
+#ifdef __EMSCRIPTEN__
+    if (!s_nt_pause_resources) {
+        nt_resource_step();
+    }
+#else
     nt_resource_step();
+#endif
     link_programs();
 
     s_state.time += g_nt_app.dt;
