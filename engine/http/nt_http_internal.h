@@ -17,7 +17,7 @@ typedef struct {
     uint32_t timeout_ms;
     uint32_t idle_timeout_ms;
     uint32_t idle_received; /* received at the last progress seen by nt_http_update */
-    double idle_since;      /* nt_time_now() of that progress */
+    double idle_since;      /* nt_time_now() of that update */
     /* Response */
     uint8_t *data;
     uint32_t size;

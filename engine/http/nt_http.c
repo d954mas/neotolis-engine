@@ -249,7 +249,7 @@ void nt_http_update(void) {
         return;
     }
     nt_http_backend_update();
-    /* Judged after the backend drained what arrived: bytes delayed by a long frame are progress */
+    /* Judged after the backend update, so whatever it took this frame counts as progress */
     for (uint16_t i = 1; i <= NT_HTTP_MAX_REQUESTS; i++) {
         NtHttpSlot *slot = &s_http.slots[i];
         if (!nt_http_slot_in_flight(slot) || slot->idle_timeout_ms == 0) {

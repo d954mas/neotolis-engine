@@ -94,10 +94,9 @@ otherwise.
 
 `timeout_ms` limits the whole request. `idle_timeout_ms` instead limits how long
 `nt_http_update()` sees no new response-body bytes. Both are per request, default to 0
-(disabled) and can be used together. Connection setup counts as idle, so no
-separate connect timeout exists. Only
-`nt_http_update()` judges idleness, after the backend has taken everything that
-arrived: the clock starts on the first update after the request is issued and
+(disabled) and can be used together. Connection setup counts as idle, so the
+engine has no separate connect timeout. Only `nt_http_update()` judges idleness,
+right after the backend update: the clock starts on the first update after the request is issued and
 restarts whenever the received byte count changes. Headers alone do not restart
 it; upload and server think time count as idle. Whatever the backend has taken
 by that update counts as progress, including bytes or a completion that arrived
