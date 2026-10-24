@@ -1,5 +1,5 @@
 # Size Report: asteroids (wasm-analysis-paired)
-# Commit: e60d61d
+# Commit: 53b6734
 
 ## WASM Section Sizes
 
