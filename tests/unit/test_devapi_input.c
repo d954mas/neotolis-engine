@@ -345,11 +345,10 @@ static void test_sched_offset0_applies_on_advance(void) {
 }
 
 /* A frozen tick releases NOTHING: an enqueued down@0 stays unscheduled while the frame is unchanged
-   (pause / manual-idle), then lands on the next real advance. Order-independent: nt_devapi_input_reset
-   re-seeds the advance clock against the current g_nt_app.frame, so the first tick_no_advance below
+   (pause / manual-idle), then lands on the next real advance. Order-independent: setUp's register
+   seeds the advance clock against the current g_nt_app.frame, so the first tick_no_advance below
    never sees a spurious forced-advance regardless of which test ran first. */
 static void test_sched_pause_freeze(void) {
-    nt_devapi_input_reset(); /* seed the clock to the current frame so a frozen tick stays frozen. */
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}")));
     tick_no_advance(); /* frame frozen -> schedule releases nothing */
     TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
@@ -608,12 +607,25 @@ static cJSON *state_result(const char *request) {
     return result;
 }
 
+static void assert_bool_field(const cJSON *obj, const char *name, bool expected) {
+    const cJSON *f = cJSON_GetObjectItemCaseSensitive(obj, name);
+    TEST_ASSERT_TRUE(cJSON_IsBool(f));
+    TEST_ASSERT_EQUAL(expected, cJSON_IsTrue(f));
+}
+
 static void assert_key_state(bool down, bool pressed, bool released) {
     cJSON *r = state_result("{\"method\":\"input.state\",\"params\":{\"key\":\"A\"}}");
-    TEST_ASSERT_EQUAL(down, cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(r, "down")));
-    TEST_ASSERT_EQUAL(pressed, cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(r, "pressed")));
-    TEST_ASSERT_EQUAL(released, cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(r, "released")));
+    assert_bool_field(r, "down", down);
+    assert_bool_field(r, "pressed", pressed);
+    assert_bool_field(r, "released", released);
     cJSON_Delete(r);
+}
+
+static int popped_text_count(void) {
+    cJSON *r = state_result("{\"method\":\"input.state\",\"params\":{\"pop_text\":true}}");
+    int n = cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(r, "codepoints"));
+    cJSON_Delete(r);
+    return n;
 }
 
 /* MANUAL: frozen ticks between the step and the read clear nt_input's edges and text, yet input.state
@@ -633,13 +645,32 @@ static void test_input_state_survives_frozen_ticks(void) {
     TEST_ASSERT_EQUAL_INT(104, cJSON_GetArrayItem(cps, 0)->valueint);
     TEST_ASSERT_EQUAL_INT(105, cJSON_GetArrayItem(cps, 1)->valueint);
     cJSON_Delete(r);
-    r = state_result("{\"method\":\"input.state\",\"params\":{\"pop_text\":true}}"); /* consumed */
-    TEST_ASSERT_EQUAL_INT(0, cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(r, "codepoints")));
-    cJSON_Delete(r);
+    TEST_ASSERT_EQUAL_INT(0, popped_text_count()); /* consumed */
 
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\",\"down\":false}}")));
     advance();
     assert_key_state(false, false, true);
+    tick_no_advance();
+    assert_key_state(false, false, true);
+    TEST_ASSERT_EQUAL_INT(0, popped_text_count()); /* the new copy replaced the old text */
+}
+
+/* The copy observes game input, so a client reset keeps it; a mid-tick native reset (after frame++,
+   before the input update) does not hide that tick's advance. */
+static void test_input_state_copy_survives_client_reset(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}")));
+    advance();
+    tick_no_advance();
+    nt_devapi_run_reset_hooks();
+    tick_no_advance();
+    assert_key_state(true, true, false);
+
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\",\"down\":false}}")));
+    g_nt_app.frame++;
+    nt_devapi_run_reset_hooks(); /* drops the up: the schedule is the gone client's */
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\",\"down\":false}}")));
+    nt_devapi_update();
+    nt_input_poll();
     tick_no_advance();
     assert_key_state(false, false, true);
 }
@@ -725,7 +756,7 @@ static void test_input_gesture_single_point_applied_once(void) {
    by construction. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_sched_full_drains_in_one_tick(void) {
-    nt_devapi_input_reset();                                                                                 /* clean schedule + seeded advance clock. */
+    nt_devapi_input_reset();                                                                                 /* clean schedule. */
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"pop_text\":true}}"))); /* clear any stale ring */
     /* Fill the WHOLE schedule with NT_DEVAPI_INPUT_SCHED_MAX frame-0-due key-down entries. */
     fill_schedule_leaving(0U);
@@ -843,6 +874,7 @@ int main(void) {
     RUN_TEST(test_input_state_bad_pop_text_bad_params);
     RUN_TEST(test_input_state_observes_injected_key);
     RUN_TEST(test_input_state_survives_frozen_ticks);
+    RUN_TEST(test_input_state_copy_survives_client_reset);
     RUN_TEST(test_input_describe);
     return UNITY_END();
 }

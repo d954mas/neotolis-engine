@@ -26,6 +26,7 @@ assertion / protocol). Stdlib only (socket + json) — no pip deps.
 """
 import os
 import sys
+import time
 
 # Allow running as a plain script by making the repo root importable, so the
 # absolute `tools.devapi.*` imports resolve (mirrors time_render_demo.py).
@@ -67,6 +68,13 @@ def resolve_port(argv) -> int:
     return DEFAULT_PORT
 
 
+def _frozen_state(client: DevApiClient, **params) -> dict:
+    # Let MANUAL-idle ticks run first: their polls clear key edges and text, so the read proves that
+    # input.state still reports the last sim-advancing poll.
+    time.sleep(0.1)
+    return client.state(**params)
+
+
 def run(client: DevApiClient) -> None:
     """Drive the three workflows; raise AssertionError on any contract violation."""
     # 1. Drain-race — a tap's release pins to the sim-advance count, not wall-clock.
@@ -81,7 +89,7 @@ def run(client: DevApiClient) -> None:
     hold = 8
     client.key("C", hold=hold)  # down@0 + up@offset=hold
     client.step(count=1)
-    first = client.state(key="C")
+    first = _frozen_state(client, key="C")
     assert first.get("down") is True and first.get("pressed") is True, f"drain-race: C is {first!r} after the first step, expected down and pressed (inject observed, not lost)"
     client.step(count=hold // 2)  # still inside the hold window
     mid = client.state(key="C").get("down")
@@ -96,11 +104,11 @@ def run(client: DevApiClient) -> None:
     assert off.get("enabled") is False, f"set_player_enabled(False) echoed {off!r}, expected enabled=False"
     client.key("B", down=True)  # inject while gated — must still flow
     client.step(count=1)
-    gated_observed = client.state(key="B")
+    gated_observed = _frozen_state(client, key="B")
     assert gated_observed.get("down") is True and gated_observed.get("pressed") is True, f"gated input.state(B) is {gated_observed!r}, expected down and pressed (inject orthogonal to the gate)"
     client.key("B", down=False)
     client.step(count=1)
-    released = client.state(key="B")
+    released = _frozen_state(client, key="B")
     assert released.get("down") is False and released.get("released") is True, f"gated input.state(B) is {released!r} after the up, expected released"
     on = client.set_player_enabled(True)
     assert on.get("enabled") is True, f"set_player_enabled(True) echoed {on!r}, expected enabled=True"
@@ -114,7 +122,7 @@ def run(client: DevApiClient) -> None:
     queued = client.text("hi")
     assert queued.get("queued") == 2, f"input.text echoed {queued!r}, expected {{queued:2}}"
     client.step(count=1)
-    cps = client.state(pop_text=True).get("codepoints")
+    cps = _frozen_state(client, pop_text=True).get("codepoints")
     assert cps == [104, 105], f"input.state(pop_text).codepoints is {cps!r}, expected [104, 105] ('h','i') after an advancing step"
     print("PASS[3/3] input.text: codepoints == [104, 105] drained from the char ring after a sim-advance.")
 
@@ -148,6 +156,8 @@ def main(port: int) -> int:
         if transport is not None:
             try:
                 client = DevApiClient(transport)
+                for k in ("B", "C"):  # keys this run may have left down
+                    client.key(k, down=False)
                 client.set_player_enabled(True)
                 client.set_mode("run")
                 client.resume()
