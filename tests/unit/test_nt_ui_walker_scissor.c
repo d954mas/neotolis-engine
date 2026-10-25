@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -256,6 +257,49 @@ static void test_scissor_neither_axis_clips_to_bbox(void) {
     TEST_ASSERT_EQUAL_INT(50, rect[3]);
 }
 
+static void test_scissor_empty_floating_clip_culls(void) {
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 50.5F, .y = 100.25F, .width = 0.0F, .height = 50.0F};
+    s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
+    inject_frozen_cmds(2);
+
+    const nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_walk(s_fx.ctx, &target);
+    int rect[4];
+    nt_gfx_test_scissor_rect(rect);
+    TEST_ASSERT_EQUAL_INT(0, rect[2]);
+    TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
+
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 50.5F, .y = 100.25F, .width = 200.0F, .height = 0.0F};
+    nt_ui_walk(s_fx.ctx, &target);
+    nt_gfx_test_scissor_rect(rect);
+    TEST_ASSERT_EQUAL_INT(0, rect[3]);
+    TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
+
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 50.5F, .y = 100.25F, .width = 0.0F, .height = 50.0F};
+    s_test_cmds[0].renderData.clip.horizontal = true;
+    s_test_cmds[0].renderData.clip.vertical = true;
+    s_test_cmds[2].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
+    s_test_cmds[2].boundingBox = s_test_cmds[0].boundingBox;
+    s_test_cmds[3].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
+    inject_frozen_cmds(4);
+    nt_ui_walk(s_fx.ctx, &target);
+    nt_gfx_test_scissor_rect(rect);
+    TEST_ASSERT_EQUAL_INT(0, rect[2]);
+    TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
+
+    s_test_cmds[0].renderData.clip.horizontal = false;
+    s_test_cmds[0].renderData.clip.vertical = false;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = NAN, .y = NAN, .width = NAN, .height = -1.0F};
+    inject_frozen_cmds(2);
+    nt_ui_walk(s_fx.ctx, &target);
+    nt_gfx_test_scissor_rect(rect);
+    TEST_ASSERT_EQUAL_INT(0, rect[0]);
+    TEST_ASSERT_EQUAL_INT(0, rect[2]);
+    TEST_ASSERT_EQUAL_INT(0, rect[3]);
+    TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
+}
+
 /* Scaled mode: viewport is LOGICAL (Y top-down). fb_size + fb_offset describe
  * physical placement. Scissor coordinates scale logical->physical and Y-flip
  * against fb height for GL bottom-left. */
@@ -358,6 +402,7 @@ int main(void) {
     RUN_TEST(test_scissor_horizontal_only);
     RUN_TEST(test_scissor_vertical_only);
     RUN_TEST(test_scissor_neither_axis_clips_to_bbox);
+    RUN_TEST(test_scissor_empty_floating_clip_culls);
     RUN_TEST(test_scissor_scaled_letterbox);
     RUN_TEST(test_scissor_scaled_expand);
     return UNITY_END();

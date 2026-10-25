@@ -1361,12 +1361,15 @@ void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *targ
 static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, clip_cache_entry_t *clip_cache, int *clip_cache_len) {
     NT_ASSERT((uint32_t)*depth < NT_UI_WALKER_SCISSOR_DEPTH_CAP && "scissor stack overflow; restructure nested clip");
 
-    /* Both-axes-false is reserved for Clay's floating clipTo=ATTACHED_PARENT marker;
-     * user code must always set at least one axis true (asserted below). */
+    /* Clay's floating clipTo=ATTACHED_PARENT marker has both axes false and clips to its box. */
     const Clay_ClipRenderData *clip = &c->renderData.clip;
     const bool both_false = !clip->horizontal && !clip->vertical;
-    NT_ASSERT((!both_false || (c->boundingBox.width > 0.0F && c->boundingBox.height > 0.0F)) &&
-              "nt_ui SCISSOR_START with both axes false requires non-empty bbox (reserved for Clay floating clipTo marker)");
+    if (both_false && !(c->boundingBox.width > 0.0F && c->boundingBox.height > 0.0F)) {
+        stack[(*depth)++] = (scissor_rect_t){0};
+        nt_ui_internal_apply_scissor_logical_to_physical(target, 0, 0, 0, 0);
+        nt_gfx_set_scissor_enabled(true);
+        return;
+    }
     const int vw = (int)target->viewport[2];
     const int vh = (int)target->viewport[3];
     const bool clip_h = clip->horizontal || both_false;
@@ -1408,7 +1411,6 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
             }
         }
     }
-
     /* Intersect with parent so inner widgets cannot escape outer clip. */
     if (*depth > 0) {
         scissor_rect_t t = stack[*depth - 1];
