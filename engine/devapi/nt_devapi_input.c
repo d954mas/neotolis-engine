@@ -240,7 +240,7 @@ static void seen_snapshot(void) {
     s_seen.char_count = 0;
     s_seen.char_next = 0;
     uint32_t cp;
-    while (s_seen.char_count < NT_INPUT_CHAR_RING && nt_input_pop_char(&cp)) {
+    while (nt_input_pop_char(&cp)) { /* the ring holds at most NT_INPUT_CHAR_RING */
         s_seen.chars[s_seen.char_count++] = cp;
     }
 }
@@ -773,6 +773,10 @@ static bool cmd_input_set_player_enabled(const cJSON *params, cJSON *result, nt_
         return false;
     }
     bool enabled = cJSON_IsTrue(e);
+    if (!enabled && s_read_live) {
+        seen_snapshot(); /* the gate's release edges are not the advancing poll's */
+        s_read_live = false;
+    }
     nt_input_set_player_enabled(enabled);
     devapi_add_bool(result, "enabled", enabled);
     return true;

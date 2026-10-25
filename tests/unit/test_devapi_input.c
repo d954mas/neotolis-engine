@@ -656,6 +656,17 @@ static void test_input_state_survives_frozen_ticks(void) {
     TEST_ASSERT_EQUAL_INT(0, popped_text_count()); /* the new copy replaced the old text */
 }
 
+/* A gate cutover right after an advance releases A at once; input.state keeps the advancing poll's
+   edges (pressed, not released) and the live down. */
+static void test_input_state_gate_cutover_keeps_advance_edges(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}")));
+    advance();
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":false}}")));
+    assert_key_state(false, true, false);
+    tick_no_advance();
+    assert_key_state(false, true, false);
+}
+
 /* The copy observes game input, so a client reset keeps it; a mid-tick native reset (after frame++,
    before the input update) does not hide that tick's advance. */
 static void test_input_state_copy_survives_client_reset(void) {
@@ -874,6 +885,7 @@ int main(void) {
     RUN_TEST(test_input_state_observes_injected_key);
     RUN_TEST(test_input_state_survives_frozen_ticks);
     RUN_TEST(test_input_state_copy_survives_client_reset);
+    RUN_TEST(test_input_state_gate_cutover_keeps_advance_edges);
     RUN_TEST(test_input_describe);
     return UNITY_END();
 }
