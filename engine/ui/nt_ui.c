@@ -1361,9 +1361,6 @@ void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *targ
 static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, clip_cache_entry_t *clip_cache, int *clip_cache_len) {
     NT_ASSERT((uint32_t)*depth < NT_UI_WALKER_SCISSOR_DEPTH_CAP && "scissor stack overflow; restructure nested clip");
 
-    /* Empty is valid (a collapsed clip element); a non-finite box is a layout/transform bug and the int casts need finite input. */
-    NT_ASSERT(isfinite(c->boundingBox.x + c->boundingBox.width) && isfinite(c->boundingBox.y + c->boundingBox.height) && "nt_ui scissor bbox must be finite");
-
     /* Both axes false is Clay's floating clipTo=ATTACHED_PARENT marker; Clay sets a clip config only with an axis. */
     const Clay_ClipRenderData *clip = &c->renderData.clip;
     const bool both_false = !clip->horizontal && !clip->vertical;
@@ -1692,6 +1689,8 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START: {
+        /* Check the layout box before the corner AABB: fminf/fmaxf would drop a NaN width. Empty is valid. */
+        NT_ASSERT(isfinite(c->boundingBox.x + c->boundingBox.width) && isfinite(c->boundingBox.y + c->boundingBox.height) && "nt_ui scissor bbox must be finite");
         counters->scissor_command_count++;
         Clay_RenderCommand local = *c;
         if (force_screen_space) {

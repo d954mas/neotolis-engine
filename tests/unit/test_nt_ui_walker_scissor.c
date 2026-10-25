@@ -296,10 +296,10 @@ static void test_scissor_empty_clip_has_zero_extent(void) {
     TEST_ASSERT_EQUAL_INT(50, rect[0]);
 }
 
-/* A NaN box (broken game transform) crashes instead of reaching the int casts. */
+/* A NaN size (e.g. CLAY_SIZING_FIXED(NAN)) crashes; the corner AABB alone would turn it into a 0-width clip. */
 static void test_scissor_nan_bbox_asserts(void) {
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
-    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = NAN, .y = 0.0F, .width = 10.0F, .height = 10.0F};
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 50.0F, .y = 100.0F, .width = NAN, .height = 50.0F};
     s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
     inject_frozen_cmds(2);
     const nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
