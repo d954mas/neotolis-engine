@@ -248,7 +248,7 @@ static void seen_refresh(void) {
     }
 }
 
-void nt_devapi_input_update(void) {
+static void nt_devapi_input_update(void) {
     bool advanced = (g_nt_app.frame != s_last_frame);
     s_last_frame = g_nt_app.frame;
     /* A frozen tick (pause / manual-idle) releases nothing: synthetic input holds until the sim

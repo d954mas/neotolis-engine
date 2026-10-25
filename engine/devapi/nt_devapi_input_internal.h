@@ -23,10 +23,6 @@ bool nt_devapi_input_sched_can_reserve(uint32_t n);
 bool nt_devapi_input_sched_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask, uint16_t at_frame);
 bool nt_devapi_input_sched_wheel(float dx, float dy, uint16_t at_frame);
 
-/* Per-tick schedule driver (the tick hook): on a real sim-advance releases due entries into the inject
-   buffer. Exposed for tests that drive the per-tick path directly. */
-void nt_devapi_input_update(void);
-
 /* Reset hook: drop pending schedule entries only (applied input, its copy and the advance clock stay). */
 void nt_devapi_input_reset(void);
 
