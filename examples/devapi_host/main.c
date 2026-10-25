@@ -173,22 +173,14 @@ static void declare_hud_scaled(void) {
     nt_ui_end(s_hud_scaled_ctx);
 }
 
-#ifndef __EMSCRIPTEN__
-/* Host-owned disconnect recovery: the engine resets only devapi-owned state on a client drop, so a
-   bot that drops mid-MANUAL leaves the host frozen. On the connected->disconnected edge, force RUN so
-   the bare host stays usable. A graceful bot restores mode itself; this only catches an ungraceful drop.
-   Native-only: web has no listener / no client to drop. */
-static void recover_on_disconnect(void) {
-    static bool was_connected = false;
-    bool now = nt_devapi_net_has_client();
-    if (was_connected && !now) {
-        g_nt_app.mode = NT_APP_MODE_RUN;
-        g_nt_app.paused = false;
-        g_nt_app.pending_steps = 0;
-    }
-    was_connected = now;
+/* Host-owned client-reset recovery: the engine resets only devapi-owned state when a client leaves, so
+   a bot that drops mid-MANUAL would leave the host frozen. Force RUN so the bare host stays usable for
+   the next client. A graceful bot restores mode itself; this catches a drop, a takeover and a web reset. */
+static void recover_on_client_reset(void) {
+    g_nt_app.mode = NT_APP_MODE_RUN;
+    g_nt_app.paused = false;
+    g_nt_app.pending_steps = 0;
 }
-#endif /* !__EMSCRIPTEN__ */
 
 #ifdef NT_DEVAPI_HOST_GFX
 /* Two tones make a uniform/blank pre-swap capture observable; record builds add a white flash. */
@@ -264,9 +256,6 @@ static void frame(void) {
 #endif
     /* nt_devapi_update must run before nt_input_poll so injected rising edges survive the edge-clear. */
     nt_devapi_update();
-#ifndef __EMSCRIPTEN__
-    recover_on_disconnect(); /* host policy: unfreeze after an (ungraceful) bot drop (native only). */
-#endif
     nt_input_poll();
 
     /* Build the hud tree AFTER input_poll so this frame's (possibly injected) pointer drives the
@@ -331,8 +320,8 @@ static void frame(void) {
     nt_metrics_sample(&mf);
 #endif
 
-    /* No auto-exit: the driver owns quit (ESC for interactive, else subprocess kill; the bot's socket
-       timeouts catch a hung host). A frame-count cap would also kill long stability sims. */
+    /* No auto-exit: the driver owns quit (ESC for interactive, else a kill by the caller's outer
+       deadline). A frame-count cap would also kill long stability sims. */
     if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
         nt_app_quit();
     }
@@ -391,6 +380,7 @@ int main(void) {
     }
 #endif                            /* !__EMSCRIPTEN__ */
     nt_devapi_register_default(); /* full host: register every compiled-in group (incl. capture). */
+    nt_devapi_register_reset(recover_on_client_reset);
     result = nt_devapi_register(&k_game_echo, cmd_game_echo, NULL);
     if (result != NT_OK) {
         printf("[devapi_host] failed to register game.echo: error %d\n", result);

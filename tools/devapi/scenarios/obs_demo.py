@@ -13,7 +13,7 @@ already-running host with --port N (or env NT_DEVAPI_PORT) + --no-launch.
 
 Usage: python tools/devapi/scenarios/obs_demo.py [--port N] [--no-launch] [--host-bin PATH]
   Port resolution: --port N  >  env NT_DEVAPI_PORT  >  default 17890.
-Returns exit 0 if every assertion passes, exit 1 on any failure (connect / timeout / assertion /
+Returns exit 0 if every assertion passes, exit 1 on any failure (connect / assertion /
 protocol), exit 2 on a usage / launch error. Stdlib only (socket + json + subprocess) — no pip deps.
 """
 import os
@@ -26,15 +26,14 @@ import time
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
     from tools.devapi.client import DevApiClient, DevApiResultError
-    from tools.devapi.transport import DEFAULT_PORT, DEFAULT_READ_TIMEOUT, SocketTransport
+    from tools.devapi.transport import DEFAULT_PORT, SocketTransport
 else:
     from ..client import DevApiClient, DevApiResultError
-    from ..transport import DEFAULT_PORT, DEFAULT_READ_TIMEOUT, SocketTransport
+    from ..transport import DEFAULT_PORT, SocketTransport
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
-# Manual-mode frame budget: large enough to fill the metrics rings so the aggregates are non-trivial,
-# small enough to stay well under the host's per-step safety cap.
+# Manual-mode frame budget: large enough to fill the metrics rings so the aggregates are non-trivial.
 SAMPLE_FRAMES = 200
 
 # The aggregate fields every populated channel/window must expose.
@@ -87,7 +86,7 @@ def _connect_with_retry(port: int, deadline_s: float = 10.0) -> SocketTransport:
     last_exc = None
     while time.time() < end:
         try:
-            return SocketTransport("127.0.0.1", port, read_timeout=DEFAULT_READ_TIMEOUT)
+            return SocketTransport("127.0.0.1", port)
         except (ConnectionError, TimeoutError, OSError) as exc:
             last_exc = exc
             time.sleep(0.1)
@@ -263,7 +262,7 @@ def main(argv) -> int:
             proc = subprocess.Popen([host_bin], cwd=REPO_ROOT, env=env)
             transport = _connect_with_retry(port)
         else:
-            transport = SocketTransport("127.0.0.1", port, read_timeout=DEFAULT_READ_TIMEOUT)
+            transport = SocketTransport("127.0.0.1", port)
         client = DevApiClient(transport)
         run(client)
         return 0

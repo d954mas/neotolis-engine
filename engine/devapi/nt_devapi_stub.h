@@ -33,6 +33,7 @@ static inline bool nt_devapi_net_start(uint16_t port) {
     return false;
 }
 static inline void nt_devapi_update(void) {}
+static inline void nt_devapi_register_reset(nt_devapi_hook_fn fn) { (void)fn; }
 static inline void nt_devapi_net_stop(void) {}
 static inline bool nt_devapi_net_wait_for_client(uint32_t timeout_ms) {
     (void)timeout_ms;

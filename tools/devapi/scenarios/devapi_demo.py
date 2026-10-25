@@ -15,7 +15,9 @@ Exit 0 if every assertion passes, 1 on assertion / protocol / transport failure,
 
 Stdlib only; the web driver is the TS spec + PlaywrightTransport for local runs.
 """
+import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -24,10 +26,10 @@ import time
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
     from tools.devapi.client import DevApiClient, DevApiResultError
-    from tools.devapi.transport import DEFAULT_PORT, DEFAULT_READ_TIMEOUT, SocketTransport
+    from tools.devapi.transport import DEFAULT_PORT, SocketTransport
 else:
     from ..client import DevApiClient, DevApiResultError
-    from ..transport import DEFAULT_PORT, DEFAULT_READ_TIMEOUT, SocketTransport
+    from ..transport import DEFAULT_PORT, SocketTransport
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
@@ -83,7 +85,7 @@ def _connect_with_retry(port: int, deadline_s: float = 10.0) -> SocketTransport:
     last_exc = None
     while time.time() < end:
         try:
-            return SocketTransport("127.0.0.1", port, read_timeout=DEFAULT_READ_TIMEOUT)
+            return SocketTransport("127.0.0.1", port)
         except (ConnectionError, TimeoutError, OSError) as exc:
             last_exc = exc
             time.sleep(0.1)
@@ -137,6 +139,29 @@ def _drive_deferred_items(client: DevApiClient, advertised: set) -> None:
         client.step(1)
         exercised.append("time.step")
     print(f"PASS deferred-items: {', '.join(exercised) or '(none advertised)'} exercised (advertised commands asserted).")
+
+
+def _raw_ping(port: int) -> None:
+    # A bounded raw socket, so a host that parks or rejects the newcomer fails here instead of hanging.
+    with socket.create_connection(("127.0.0.1", port), timeout=10) as s:
+        s.sendall(b'{"method":"ping","request_id":1}\n')
+        reply = json.loads(s.makefile("rb").readline())
+        assert reply.get("ok") is True, f"the newest client was not served: {reply}"
+
+
+def _check_newest_client_wins(port: int, client: DevApiClient) -> None:
+    """The native host serves the newest connection: a second client is served and the first is dropped;
+    a client that reconnects at once is served even before its old close is read."""
+    _raw_ping(port)
+    try:
+        client.result("ping")
+    except ConnectionError:
+        pass
+    else:
+        raise AssertionError("the replaced client was still served")
+    for _ in range(30):
+        _raw_ping(port)
+    print("PASS newest client wins: a second client takes over and 30 immediate reconnects are served.")
 
 
 def run(client: DevApiClient) -> None:
@@ -195,9 +220,11 @@ def main(argv) -> int:
             proc = subprocess.Popen([host_bin], cwd=REPO_ROOT, env=env)
             transport = _connect_with_retry(port)
         else:
-            transport = SocketTransport("127.0.0.1", port, read_timeout=DEFAULT_READ_TIMEOUT)
+            transport = SocketTransport("127.0.0.1", port)
         client = DevApiClient(transport)
         run(client)
+        _check_newest_client_wins(port, client)
+        assert proc is None or proc.poll() is None, "the host exited during the client checks"
         return 0
     except AssertionError as exc:
         print(f"FAIL: assertion: {exc}")

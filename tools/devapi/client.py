@@ -2,8 +2,8 @@
 
 request / result / batch / wait_frames / step over a pluggable Transport.
 Replies are correlated by request_id. The engine keeps one deferred reply in flight: a
-command sent while one is pending answers busy, and a client timeout closes the
-transport, which drops it.
+command sent while one is pending answers busy, and closing the transport drops it.
+A request waits as long as the engine needs; the caller's outer deadline bounds the session.
 
 Stdlib only (json + socket) — no pip deps. Python 3.8+.
 """
@@ -54,11 +54,7 @@ class DevApiClient:
         if rid in self._pending:
             return self._pending.pop(rid)
         while True:
-            try:
-                line = self._transport.recv_line()
-            except TimeoutError as exc:
-                # Name the pending request_id so a hang is diagnosable, not silent.
-                raise TimeoutError(f"no response for request_id={rid}") from exc
+            line = self._transport.recv_line()
             try:
                 obj = json.loads(line)
             except ValueError as exc:
@@ -104,10 +100,7 @@ class DevApiClient:
             arr.append(entry)
         self._transport.send(json.dumps(arr))
         while True:
-            try:
-                line = self._transport.recv_line()
-            except TimeoutError as exc:
-                raise TimeoutError(f"no response for batch request_ids={ids}") from exc
+            line = self._transport.recv_line()
             try:
                 obj = json.loads(line)
             except ValueError as exc:
@@ -189,28 +182,6 @@ class DevApiClient:
     def frame_current(self) -> Dict[str, Any]:
         """Read the current {frame, time, dt} from the managed loop's g_nt_app state."""
         return self.result("frame.current")
-
-    def wait_game_seconds(self, total: float, chunk: float = 4.0) -> None:
-        """Wait `total` seconds of GAME time by looping time.wait in <=chunk segments.
-
-        For LIVE-RUN observation only. The engine caps a single time.wait at
-        NT_DEVAPI_TIME_WAIT_MAX_SECONDS (4.0s, sized to the 5s socket read timeout); this
-        helper chains shorter waits to exceed that without raising the client read timeout.
-        For DETERMINISTIC cooldown/duration tests prefer MANUAL mode + step_seconds() — real-time
-        waiting is non-deterministic and slow. RUN + unpaused + scale>0 required (time.wait rejects
-        frozen time).
-        """
-        if total < 0:
-            raise ValueError("total must be >= 0")
-        # chunk <= 0 would never decrement remaining (infinite loop); chunk > 4.0 exceeds the engine
-        # cap (NT_DEVAPI_TIME_WAIT_MAX_SECONDS) so every segment raises. Bound it to (0, 4.0].
-        if not 0 < chunk <= 4.0:
-            raise ValueError("chunk must be in (0, 4.0]")
-        remaining = total
-        while remaining > 0:
-            seg = chunk if remaining > chunk else remaining
-            self.time_wait(seg)  # result() raises on bad_params (manual/paused/scale==0)
-            remaining -= seg
 
     # #region input.* wrappers — fire-and-forget inject. result() just confirms ok / raises.
     def key(self, name: str, down: Optional[bool] = None, hold: Optional[float] = None) -> Dict[str, Any]:

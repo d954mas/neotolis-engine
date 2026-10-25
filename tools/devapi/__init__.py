@@ -9,7 +9,6 @@ Stdlib only (socket + json), no pip deps, Python 3.8+.
 from .client import DevApiClient, DevApiResultError
 from .transport import (
     DEFAULT_PORT,
-    DEFAULT_READ_TIMEOUT,
     SocketTransport,
     Transport,
 )
@@ -20,5 +19,4 @@ __all__ = [
     "SocketTransport",
     "Transport",
     "DEFAULT_PORT",
-    "DEFAULT_READ_TIMEOUT",
 ]

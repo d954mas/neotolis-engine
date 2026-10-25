@@ -527,6 +527,7 @@ jobs:
 
       # The registration gate reads this job's compile DB / CTestTestfiles (devapi-gated tests visible).
       - name: Run CRT-pin, GL-funnel, test-registration and check-script gates
+        timeout-minutes: 20
         run: |
           bash scripts/check_crt_pins.sh
           python3 scripts/check_gl_calls.py
@@ -576,6 +577,7 @@ jobs:
       # Self-launches devapi_host over the native socket and drives the canonical run(client);
       # xvfb-run supplies the headless X for nt_window_init().
       - name: Run devapi live-socket UAT
+        timeout-minutes: 5
         run: xvfb-run -a python3 tools/devapi/scenarios/devapi_demo.py
 
   # The deferred-capture-over-web drain race is invisible to unit tests — only a real headless Chromium

@@ -35,7 +35,8 @@ cmake --build build/_cmake/native-debug-capture --target <example>
 3. **Run the example in the background**, drive the Python client
    (`tools/devapi/client.py` — API, not a CLI): `capture_frame()` /
    `capture_region()`. Patterns: `tools/devapi/scenarios/`, liveness gate:
-   `tools/devapi/pixel_health.py`.
+   `tools/devapi/pixel_health.py`. A request waits as long as the engine needs,
+   so run the client under a shell timeout.
 
 4. **Interaction rhythm (hard rule):** observe → act → `frame.wait` → observe;
    capture only after the state is stable. Lazy font glyphs / UI resources need

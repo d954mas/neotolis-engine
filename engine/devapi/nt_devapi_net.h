@@ -19,18 +19,14 @@
 #define NT_DEVAPI_DEFAULT_PORT 17890
 #endif
 
-/* Start the loopback (127.0.0.1 ONLY) TCP server: single client, JSON-lines, non-blocking.
+/* Start the loopback (127.0.0.1 ONLY) TCP server: single client (the newest connection replaces it),
+   JSON-lines, non-blocking.
    Returns false on socket/bind/listen failure — the port may legitimately be taken, so this
    is an API-contract return, NOT an assert. Call nt_devapi_init first; pair with _stop. */
 bool nt_devapi_net_start(uint16_t port);
 
 /* Close the client + listen sockets and tear down platform networking (WSACleanup on Windows). */
 void nt_devapi_net_stop(void);
-
-/* True while a devapi client is connected. The host watches the connected->disconnected edge to run
-   its OWN explicit recovery (e.g. unfreeze g_nt_app): the engine resets only devapi-owned state on
-   disconnect, so game-owned time/mode recovery is application policy, not the library's. */
-bool nt_devapi_net_has_client(void);
 
 /* Opt-in pre-loop gate: blocks in select() on the listen socket until a client connects or timeout_ms
    elapses (bounded, not busy-spun). Returns true if a client is connected. The game wires this BEFORE

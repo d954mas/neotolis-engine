@@ -269,8 +269,6 @@ bool nt_devapi_net_start(uint16_t port) {
     return true;
 }
 
-bool nt_devapi_net_has_client(void) { return s_client != NT_INVALID_SOCK; }
-
 void nt_devapi_net_stop(void) {
     close_client();
     if (s_listen != NT_INVALID_SOCK) {
@@ -291,13 +289,16 @@ void nt_devapi_net_stop(void) {
 // #endregion
 
 // #region accept / poll
-/* Non-blocking accept; sets the new client non-blocking + TCP_NODELAY. */
+/* Non-blocking accept; sets the new client non-blocking + TCP_NODELAY. The newest connection wins: it
+   replaces a served client, so a reconnect whose old close is not read yet, or a client behind a hung
+   one, is served at once. */
 static void try_accept(void) {
-    NT_ASSERT(s_client == NT_INVALID_SOCK); /* callers must not overwrite a live client. */
     nt_sock_t c = accept(s_listen, NULL, NULL);
     if (c != NT_INVALID_SOCK) {
+        if (s_client != NT_INVALID_SOCK) {
+            close_client();
+        }
         s_client = c;
-        s_recv_len = 0;
         set_client_opts(c);
         return;
     }
@@ -328,9 +329,7 @@ static void net_poll(void) {
     if (s_listen == NT_INVALID_SOCK) {
         return; /* not started / stopped. */
     }
-    if (s_client == NT_INVALID_SOCK) {
-        try_accept();
-    }
+    try_accept();
     if (s_client == NT_INVALID_SOCK) {
         return;
     }
