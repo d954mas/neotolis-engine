@@ -280,18 +280,9 @@ if [ "$MODE" = "push" ]; then
         echo "       -DNT_SKIP_EXAMPLE_PACKS carries over:  cmake --preset native-release"
         exit 1
     fi
-    # A hand-passed -DNT_ASSERT_MODE=2 here makes this step green and empty: NT_ASSERT_FULL-only code
-    # compiles again and the -Wunused class the step exists for disappears.
-    if ! grep -q '^NT_ASSERT_MODE:STRING=1$' "$NR_CACHE"; then
-        echo "ERROR: native-release cache must set NT_ASSERT_MODE=1 (TRAP) — reconfigure it: cmake --preset native-release"
-        exit 1
-    fi
-    # The preset pins NT_BUILD_TESTS=OFF, but a directory configured before that pin keeps the
-    # option default (ON) across an implicit reconfigure -- probes back in, measurements instrumented.
-    if ! grep -q '^NT_BUILD_TESTS:BOOL=OFF$' "$NR_CACHE"; then
-        echo "ERROR: native-release cache has NT_BUILD_TESTS != OFF — reconfigure it: cmake --preset native-release"
-        exit 1
-    fi
+    # Re-applying the preset restores every preset-owned value a stale or hand-edited cache drifted
+    # from (TRAP asserts, tests OFF); options the preset does not set, such as NT_SKIP_EXAMPLE_PACKS, stay.
+    cmake --preset native-release > /dev/null
     cmake --build build/_cmake/native-release
     ok
 
@@ -308,6 +299,7 @@ if [ "$MODE" = "push" ]; then
         echo "  emcmake cmake --preset wasm-debug"
         exit 1
     fi
+    cmake --preset wasm-debug > /dev/null
     cmake --build build/_cmake/wasm-debug
     ok
 
@@ -319,10 +311,7 @@ if [ "$MODE" = "push" ]; then
         echo "  emcmake cmake --preset wasm-release"
         exit 1
     fi
-    if ! grep -q '^NT_WASM_CLOSURE:BOOL=ON$' build/_cmake/wasm-release/CMakeCache.txt; then
-        echo "ERROR: wasm-release cache must set NT_WASM_CLOSURE=ON — reconfigure it: emcmake cmake --preset wasm-release"
-        exit 1
-    fi
+    cmake --preset wasm-release > /dev/null
     cmake --build build/_cmake/wasm-release
     ok
 

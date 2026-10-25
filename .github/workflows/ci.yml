@@ -514,7 +514,7 @@ jobs:
             xargs clang-format --dry-run --Werror
 
       # Module composition (no engine module links a real swappable impl; omitting an impl is a
-      # loud unresolved-symbol error) and EM_JS_DEPS (Closure strips undeclared helpers in release).
+      # loud unresolved-symbol error) and EM_JS_DEPS (Closure, ON in wasm-release, strips undeclared helpers).
       - name: Run module-composition and EM_JS_DEPS gates
         run: |
           bash scripts/check_no_real_impl_links.sh

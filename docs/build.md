@@ -87,7 +87,7 @@ is no longer a valid configuration.
 | `NT_INTROSPECT_WRITE_ENABLED` | OFF | Debug/release-test presets select ON; production Release selects OFF. |
 | `NT_GFX_NATIVE_GL_DEBUG` | OFF | Requests a native GL debug context and installs the KHR_debug callback when available. `native-debug` selects ON; native Release presets select OFF. Can be enabled explicitly in Release. |
 | `NT_GFX_WEB_GL_DEBUG` | OFF | Opt-in Emscripten GL parameter checks and per-call logging. |
-| `NT_WASM_CLOSURE` | OFF | `wasm-release` selects ON; `wasm-debug` selects OFF. Paired, SIMD and analysis presets inherit these values. Set explicitly to test either value with any build type. |
+| `NT_WASM_CLOSURE` | OFF | `wasm-release` selects ON; `wasm-debug` selects OFF. Set explicitly to test either value with any build type. |
 | `NT_HTTP_CURL` | OFF | Native presets select ON. Plain CMake and subproject builds require explicit ON for the libcurl backend; OFF uses the HTTP stub. CA sources follow the curl configuration; the engine does not override them. See [Linux OpenSSL CA cache](#linux-openssl-ca-cache). |
 | `NT_HTTP_WEBSOCKETS` | OFF | Effective only when `NT_HTTP_CURL=ON` and Neotolis configures the vendored `CURL::libcurl`; otherwise configuration reports that it is ignored. ON keeps only HTTP(S) and WS(S), then publishes the global `NT_HTTP_WEBSOCKETS` property for consumers after `add_subdirectory(<engine>)`. A pre-provided curl target remains consumer-owned. |
 | `NT_HYBRID_HPG` | ON | Windows hybrid-GPU preference hint; per-app Windows graphics preferences override it. |
@@ -321,9 +321,9 @@ The push gate additionally builds native-release, wasm-debug and wasm-release,
 then runs submodule consumption and the diagnostics matrices (their independent
 builds run in parallel). These catch
 NDEBUG-only warnings, Emscripten-specific warnings and Closure failures that the
-native Debug build cannot catch. The push gate requires `NT_WASM_CLOSURE=ON`
-in the `wasm-release` cache; reconfigure with `emcmake cmake --preset wasm-release`
-if the option is missing or OFF. The full mode checks whole-tree format/tidy.
+native Debug build cannot catch. Before each of those builds the gate re-applies
+its preset, so a stale or hand-edited cache cannot drop the preset's values;
+options the preset does not set are kept. The full mode checks whole-tree format/tidy.
 
 ### CI jobs
 
