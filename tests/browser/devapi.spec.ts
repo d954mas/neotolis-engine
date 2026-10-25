@@ -161,9 +161,13 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
   expect(distinctColors).toBeGreaterThan(1);
   expect(errors).toEqual([]);
 
+  // A pending reply makes every command busy; reset() drops it, so the next client starts free.
   const afterReset = await page.evaluate((rid) => {
+    const ping = () => JSON.parse(window.__devapi!.submit(JSON.stringify({ method: 'ping', request_id: rid })));
+    window.__devapi!.submit(JSON.stringify({ method: 'capture.frame', request_id: rid }));
+    const busy = ping().error?.code;
     window.__devapi!.reset();
-    return JSON.parse(window.__devapi!.submit(JSON.stringify({ method: 'ping', request_id: rid })));
+    return { busy, ok: ping().ok };
   }, nextId++);
-  expect(afterReset.ok).toBe(true);
+  expect(afterReset).toEqual({ busy: 'busy', ok: true });
 });

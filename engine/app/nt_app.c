@@ -33,7 +33,8 @@ void nt_app_set_step_dt(float step_dt) {
 }
 
 void nt_app_step(int count) {
-    NT_ASSERT(count >= 0); /* engine invariant: callers (L2 range-checks bot input) pass count >= 0 */
+    NT_ASSERT(count >= 0);                          /* engine invariant: callers (L2 range-checks bot input) pass count >= 0 */
+    NT_ASSERT(g_nt_app.mode == NT_APP_MODE_MANUAL); /* RUN never drains a step and a mode switch drops it. */
     /* Saturate instead of overflowing: pending_steps is drained one per advance, so an absurd
        backlog only delays — it must never invoke signed-overflow UB. pending_steps >= 0 and
        count >= 0, so INT_MAX - pending_steps is a safe non-negative bound to test against. */

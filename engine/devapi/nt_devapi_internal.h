@@ -54,14 +54,12 @@ typedef enum nt_devapi_gate {
     NT_DEVAPI_GATE_PRESENT, /* the next pre-swap seam (a frame is presented) */
 } nt_devapi_gate;
 
-#define NT_DEVAPI_DEFER_CTX_SIZE 24
-
-/* Defer the in-flight command's reply. When the gate opens, `reply` runs with the handler ABI (params NULL,
-   user_data = the slot's copy of ctx) and its result or error is the response; a gate that can no longer open
-   (sim frozen, time mode changed, rendering off) answers stalled instead. ctx (ctx_size bytes, at most
-   NT_DEVAPI_DEFER_CTX_SIZE; NULL when 0) is copied as bytes, so the reply reads it with memcpy. Returns false with err set inside a batch; the handler
-   returns that. Call only from a handler, before any side effect that a failed defer must not leave. */
-bool nt_devapi_defer(nt_devapi_gate gate, double amount, nt_devapi_handler_fn reply, const void *ctx, size_t ctx_size, nt_devapi_error *err);
+/* Defer the in-flight command's reply. nt_devapi_update checks the gate each tick: once it opens, `reply`
+   runs with the handler ABI (params and user_data NULL) and its result or error is the response; a gate that
+   can no longer open (sim frozen, time mode changed, rendering off) answers stalled instead. A reply that
+   needs input keeps it in its group: only one reply is ever pending. Returns false with err set inside a
+   batch; call it before any side effect a failed defer must not leave. */
+bool nt_devapi_defer(nt_devapi_gate gate, double amount, nt_devapi_handler_fn reply, nt_devapi_error *err);
 
 /* Build a pending PRESENT reply at the pre-swap seam (GL-valid, before swap). A group that defers on
    PRESENT wraps it with its own host-facing seam. */
@@ -104,7 +102,4 @@ const nt_devapi_slot *nt_devapi_registry_find(const char *method);
    each distinct group once, derived from the registered commands. */
 bool nt_devapi_group_is_first(int index);
 
-/* The single inject scheduler lives in the input group, but the ui group reuses it (one scheduler,
-   one cap <= the immediate buffer — so two sibling groups can never over-subscribe the buffer). Its
-   cap + the cross-group reuse wrappers are therefore visible when EITHER group is built. */
 #endif /* NT_DEVAPI_INTERNAL_H */

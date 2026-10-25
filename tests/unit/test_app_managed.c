@@ -165,17 +165,14 @@ void test_manual_idle_freezes_frame(void) {
     TEST_ASSERT_TRUE_MESSAGE(s_frame_log_count >= 5, "frame fn must keep running in manual-idle");
 }
 
-/* A real mode switch drops queued steps, so they never advance a later manual session; setting the
-   current mode again keeps them. */
+/* A real mode switch drops queued steps, so they never advance a later session; setting the current
+   mode again keeps them. */
 void test_set_mode_switch_drops_queued_steps(void) {
     g_nt_app.mode = NT_APP_MODE_MANUAL;
     nt_app_step(4);
     nt_app_set_mode(NT_APP_MODE_MANUAL);
     TEST_ASSERT_EQUAL_INT(4, g_nt_app.pending_steps);
     nt_app_set_mode(NT_APP_MODE_RUN);
-    TEST_ASSERT_EQUAL_INT(0, g_nt_app.pending_steps);
-    nt_app_step(2); /* queued in RUN, before the switch */
-    nt_app_set_mode(NT_APP_MODE_MANUAL);
     TEST_ASSERT_EQUAL_INT(0, g_nt_app.pending_steps);
 }
 
@@ -199,7 +196,11 @@ void test_set_mode_invalid_asserts(void) {
     /* deliberately out-of-range enum to trip the L1 whitelist assert. */
     NT_TEST_EXPECT_ASSERT(nt_app_set_mode((nt_app_mode_t)99)); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
 }
-void test_step_negative_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_app_step(-1)); }
+void test_step_negative_asserts(void) {
+    g_nt_app.mode = NT_APP_MODE_MANUAL;
+    NT_TEST_EXPECT_ASSERT(nt_app_step(-1));
+}
+void test_step_in_run_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_app_step(1)); }
 #endif
 
 int main(void) {
@@ -218,6 +219,7 @@ int main(void) {
     RUN_TEST(test_set_step_dt_zero_asserts);
     RUN_TEST(test_set_mode_invalid_asserts);
     RUN_TEST(test_step_negative_asserts);
+    RUN_TEST(test_step_in_run_asserts);
 #endif
     return UNITY_END();
 }

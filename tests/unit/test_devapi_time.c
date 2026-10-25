@@ -28,6 +28,12 @@ void tearDown(void) { nt_devapi_shutdown(); }
 
 /* ---- helpers (clone of test_devapi_deferred.c cadence) ---- */
 
+/* One host tick of the devapi: nt_devapi_update resolves the pending gate, then the drain yields it. */
+static const char *drain(void) {
+    nt_devapi_update();
+    return nt_devapi_poll_response();
+}
+
 /* One loop iteration as nt_app_run does it (RUN: wall dt unless paused; MANUAL: one queued step), then the drain. */
 static const char *advance_sim(void) {
     float dt = 0.0F;
@@ -47,14 +53,14 @@ static const char *advance_sim(void) {
     if (advanced) {
         g_nt_app.frame++;
     }
-    return nt_devapi_poll_response();
+    return drain();
 }
 
 /* Advance game time by `dt` seconds (what the RUN loop does each frame), then drain any slot whose
    game-time deadline was reached. For time.wait (time-based slots), not frame-based ones. */
 static const char *advance_time(double dt) {
     g_nt_app.time += dt;
-    return nt_devapi_poll_response();
+    return drain();
 }
 
 /* Parse `resp`, assert ok:false + error.code == "bad_params", free the tree. */
@@ -204,7 +210,7 @@ static void test_step_deferred_resolves_after_count(void) {
         TEST_ASSERT_NULL(advance_sim()); /* advances 1 and 2: still pending */
     }
     assert_clock_reply(advance_sim(), 21, 4);
-    TEST_ASSERT_NULL(nt_devapi_poll_response()); /* drained */
+    TEST_ASSERT_NULL(drain()); /* drained */
 }
 
 /* Steps the game already queued run first: the reply waits for them too. */
@@ -283,8 +289,18 @@ static void test_frame_wait_over_cap_bad_params(void) {
    sim-advance (the immediate-ack form), distinct from the over-cap rejection above. */
 static void test_frame_wait_zero_resolves_immediately(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"frame.wait\",\"request_id\":5,\"params\":{\"frames\":0}}"));
-    assert_clock_reply(nt_devapi_poll_response(), 5, 0); /* ready immediately, no g_nt_app.frame advance */
-    TEST_ASSERT_NULL(nt_devapi_poll_response());         /* drained */
+    assert_clock_reply(drain(), 5, 0); /* ready immediately, no g_nt_app.frame advance */
+    TEST_ASSERT_NULL(drain());         /* drained */
+}
+
+/* The reply is read the tick its gate opens: later frames before the drain (web polls between rAFs) do not
+   change it, so native and web report the same frame. */
+static void test_clock_reply_is_read_when_the_gate_opens(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"frame.wait\",\"request_id\":6,\"params\":{\"frames\":1}}"));
+    g_nt_app.frame++;
+    nt_devapi_update();
+    g_nt_app.frame += 2;
+    assert_clock_reply(nt_devapi_poll_response(), 6, 1);
 }
 
 /* frames is a frame count: a fractional value is rejected, not truncated. */
@@ -340,7 +356,7 @@ static void test_frame_wait_yields_after_n_sim_advances(void) {
 
     /* The N-th sim-advance yields {frame,time,dt} with the request_id. */
     assert_clock_reply(advance_sim(), 7, WAIT_FRAMES);
-    TEST_ASSERT_NULL(nt_devapi_poll_response()); /* drained */
+    TEST_ASSERT_NULL(drain()); /* drained */
 }
 
 /* A freeze after submit, from game code or the host, fails the wait as stalled instead of hanging it. */
@@ -424,7 +440,7 @@ static void e2e_frame_fn(void) {
         TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.step\",\"request_id\":31,\"params\":{\"count\":5}}"));
     }
     s_e2e_iters++;
-    const char *r = nt_devapi_poll_response(); /* the host drains the deferred queue each tick */
+    const char *r = drain(); /* the host drains the deferred queue each tick */
     if (r != NULL) {
         s_e2e_resp = r;
         nt_app_quit();
@@ -451,7 +467,7 @@ static void test_step_drains_through_real_loop(void) {
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
     TEST_ASSERT_EQUAL_INT(31, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
     cJSON_Delete(root);
-    TEST_ASSERT_NULL(nt_devapi_poll_response()); /* nothing left queued */
+    TEST_ASSERT_NULL(drain()); /* nothing left queued */
 }
 
 /* ---- time.wait (game-time deadline; the RUN-only sibling of frame.wait) ---- */
@@ -464,21 +480,21 @@ static void test_time_wait_yields_after_seconds(void) {
     TEST_ASSERT_NULL(advance_time(0.2));          /* time 0.2 < 0.5 */
     TEST_ASSERT_NULL(advance_time(0.2));          /* time 0.4 < 0.5 */
     assert_clock_reply(advance_time(0.2), 11, 0); /* time 0.6 >= 0.5 -> resolves */
-    TEST_ASSERT_NULL(nt_devapi_poll_response());
+    TEST_ASSERT_NULL(drain());
 }
 
 /* time.wait{seconds:0}: deadline == current time, so it resolves on the next drain with no time
    advance (immediate-ack), mirroring frame.wait{frames:0}. */
 static void test_time_wait_zero_resolves_immediately(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.wait\",\"request_id\":13,\"params\":{\"seconds\":0}}"));
-    const char *resp = nt_devapi_poll_response(); /* ready immediately, no g_nt_app.time advance */
+    const char *resp = drain(); /* ready immediately, no g_nt_app.time advance */
     TEST_ASSERT_NOT_NULL(resp);
     cJSON *root = cJSON_Parse(resp);
     TEST_ASSERT_NOT_NULL(root);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
     TEST_ASSERT_EQUAL_INT(13, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
     cJSON_Delete(root);
-    TEST_ASSERT_NULL(nt_devapi_poll_response()); /* drained */
+    TEST_ASSERT_NULL(drain()); /* drained */
 }
 
 /* time.wait is RUN + scale>0 only: in MANUAL / paused / scale==0 game time is frozen, so a passive
@@ -519,7 +535,7 @@ static void test_time_step_seconds_converts_to_frames(void) {
         TEST_ASSERT_NULL(advance_sim());
     }
     assert_clock_reply(advance_sim(), 12, 60);
-    TEST_ASSERT_NULL(nt_devapi_poll_response());
+    TEST_ASSERT_NULL(drain());
 }
 
 /* count and seconds are mutually exclusive; a sub-step duration still queues >= 1 frame (ceil). */
@@ -575,6 +591,7 @@ int main(void) {
     RUN_TEST(test_step_waits_for_already_queued_steps);
     RUN_TEST(test_step_backlog_overflow_bad_params);
     RUN_TEST(test_frame_wait_fractional_bad_params);
+    RUN_TEST(test_clock_reply_is_read_when_the_gate_opens);
     RUN_TEST(test_frame_wait_stalls_when_game_pauses);
     RUN_TEST(test_frame_wait_stalls_when_game_switches_to_manual);
     RUN_TEST(test_step_stalls_when_mode_switches_to_run);

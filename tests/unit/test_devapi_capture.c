@@ -46,6 +46,12 @@ void tearDown(void) {
 
 /* ---- helpers ---- */
 
+/* One host tick of the devapi: nt_devapi_update resolves the pending gate, then the drain yields it. */
+static const char *drain(void) {
+    nt_devapi_update();
+    return nt_devapi_poll_response();
+}
+
 static void assert_bad_params(const char *resp) {
     TEST_ASSERT_NOT_NULL(resp); /* a sync error returns an envelope, never NULL (NULL == deferred). */
     cJSON *root = cJSON_Parse(resp);
@@ -60,7 +66,7 @@ static void assert_bad_params(const char *resp) {
 static cJSON *capture_yield(const char *request) {
     TEST_ASSERT_NULL(nt_devapi_submit(request)); /* a well-formed capture defers (no sync response). */
     nt_devapi_capture_on_pre_swap();             /* GL-valid seam: builds the reply. */
-    const char *resp = nt_devapi_poll_response();
+    const char *resp = drain();
     TEST_ASSERT_NOT_NULL(resp);
     cJSON *root = cJSON_Parse(resp);
     TEST_ASSERT_NOT_NULL(root);
@@ -97,7 +103,7 @@ static void test_capture_frame_defers(void) {
     const char *resp = nt_devapi_submit("{\"method\":\"capture.frame\",\"request_id\":1}");
     TEST_ASSERT_NULL(resp); /* deferred sentinel: no synchronous response. */
     /* before the seam runs, polling yields nothing (the slot has no payload yet). */
-    TEST_ASSERT_NULL(nt_devapi_poll_response());
+    TEST_ASSERT_NULL(drain());
 }
 
 /* seam-driven encode (no socket) -> format:"png" + non-empty data */
@@ -124,7 +130,7 @@ static void test_capture_frame_seam_encode(void) {
     TEST_ASSERT_TRUE(cJSON_IsNumber(id));
     TEST_ASSERT_EQUAL_INT(7, id->valueint); /* request_id correlation preserved. */
     cJSON_Delete(root);
-    TEST_ASSERT_NULL(nt_devapi_poll_response()); /* drained. */
+    TEST_ASSERT_NULL(drain()); /* drained. */
 }
 
 /* scale + region produce POST-scale dims */
@@ -189,7 +195,7 @@ static void test_capture_producer_failure_yields_error(void) {
     nt_devapi_capture_on_pre_swap();
     g_nt_gfx.context_lost = false; /* restore for any following test. */
 
-    const char *resp = nt_devapi_poll_response();
+    const char *resp = drain();
     TEST_ASSERT_NOT_NULL(resp);
     cJSON *root = cJSON_Parse(resp);
     TEST_ASSERT_NOT_NULL(root);
@@ -204,7 +210,7 @@ static void test_capture_producer_failure_yields_error(void) {
     TEST_ASSERT_TRUE(cJSON_IsNumber(id));
     TEST_ASSERT_EQUAL_INT(42, id->valueint); /* request_id correlation preserved on the failure path. */
     cJSON_Delete(root);
-    TEST_ASSERT_NULL(nt_devapi_poll_response());
+    TEST_ASSERT_NULL(drain());
 }
 
 /* pixel cap (DoS backstop) rejects an oversized framebuffer/rect synchronously.
@@ -243,9 +249,9 @@ static void test_capture_unarmed_host_unavailable(void) {
 static void test_capture_waits_for_the_seam_with_sim_frozen(void) {
     g_nt_app.mode = NT_APP_MODE_MANUAL; /* no step queued */
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"capture.frame\",\"request_id\":9}"));
-    TEST_ASSERT_NULL(nt_devapi_poll_response());
+    TEST_ASSERT_NULL(drain());
     nt_devapi_capture_on_pre_swap();
-    const char *resp = nt_devapi_poll_response();
+    const char *resp = drain();
     TEST_ASSERT_NOT_NULL(resp);
     cJSON *root = cJSON_Parse(resp);
     TEST_ASSERT_NOT_NULL(root);
@@ -254,14 +260,14 @@ static void test_capture_waits_for_the_seam_with_sim_frozen(void) {
     TEST_ASSERT_EQUAL_STRING("png", cJSON_GetObjectItemCaseSensitive(result, "format")->valuestring);
     TEST_ASSERT_EQUAL_INT(9, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
     cJSON_Delete(root);
-    TEST_ASSERT_NULL(nt_devapi_poll_response());
+    TEST_ASSERT_NULL(drain());
 }
 
 /* rendering off -> no frame is presented, so the capture fails as stalled on the drain instead of hanging. */
 static void test_capture_with_render_off_stalls(void) {
     nt_app_set_render_enabled(false);
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"capture.frame\",\"request_id\":3}"));
-    const char *resp = nt_devapi_poll_response();
+    const char *resp = drain();
     TEST_ASSERT_NOT_NULL(resp);
     cJSON *root = cJSON_Parse(resp);
     TEST_ASSERT_NOT_NULL(root);

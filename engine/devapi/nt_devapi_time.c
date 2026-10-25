@@ -22,8 +22,17 @@ static void set_bad_params(nt_devapi_error *err, const char *message) {
 
 _Static_assert(NT_DEVAPI_FRAME_WAIT_MAX <= INT32_MAX, "NT_DEVAPI_FRAME_WAIT_MAX must fit the wrap-safe frame compare");
 
-/* {frame,time,dt}: frame.current, and the reply of every clock deferral. */
-static bool cmd_frame_current(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud);
+/* frame.current → {frame, time, dt}, also the reply of every clock deferral; g_nt_app.time = sum of applied
+   dts = game-elapsed time. */
+static bool cmd_frame_current(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
+    (void)params;
+    (void)err;
+    (void)ud;
+    devapi_add_number(result, "frame", (double)g_nt_app.frame);
+    devapi_add_number(result, "time", g_nt_app.time);
+    devapi_add_number(result, "dt", (double)g_nt_app.dt);
+    return true;
+}
 
 // #region time.*
 static bool cmd_time_pause(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
@@ -95,7 +104,7 @@ static bool cmd_time_step(const cJSON *params, cJSON *result, nt_devapi_error *e
         set_bad_params(err, "time.step: too many steps already queued");
         return false;
     }
-    if (!nt_devapi_defer(NT_DEVAPI_GATE_FRAMES, (double)(g_nt_app.pending_steps + count), cmd_frame_current, NULL, 0U, err)) {
+    if (!nt_devapi_defer(NT_DEVAPI_GATE_FRAMES, (double)(g_nt_app.pending_steps + count), cmd_frame_current, err)) {
         return false;
     }
     nt_app_step(count);
@@ -199,7 +208,7 @@ static bool cmd_time_wait(const cJSON *params, cJSON *result, nt_devapi_error *e
         set_bad_params(err, "time.wait: seconds out of range [0, NT_DEVAPI_TIME_WAIT_MAX_SECONDS]");
         return false;
     }
-    return nt_devapi_defer(NT_DEVAPI_GATE_SECONDS, seconds, cmd_frame_current, NULL, 0U, err);
+    return nt_devapi_defer(NT_DEVAPI_GATE_SECONDS, seconds, cmd_frame_current, err);
 }
 // #endregion
 
@@ -229,17 +238,6 @@ static bool cmd_render_info(const cJSON *params, cJSON *result, nt_devapi_error 
 // #endregion
 
 // #region frame.*
-/* frame.current → {frame, time, dt}; g_nt_app.time = sum of applied dts = game-elapsed time. */
-static bool cmd_frame_current(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)params;
-    (void)err;
-    (void)ud;
-    devapi_add_number(result, "frame", (double)g_nt_app.frame);
-    devapi_add_number(result, "time", g_nt_app.time);
-    devapi_add_number(result, "dt", (double)g_nt_app.dt);
-    return true;
-}
-
 /* frame.wait passively waits for autonomous RUN frames: in MANUAL the bot steps, and a paused sim has
    nothing to wait for. A pause or mode switch after submit fails the reply as stalled. */
 static bool cmd_frame_wait(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
@@ -254,7 +252,7 @@ static bool cmd_frame_wait(const cJSON *params, cJSON *result, nt_devapi_error *
     if (f != NULL && !nt_devapi_parse_u32_param_exact(f, NT_DEVAPI_FRAME_WAIT_MAX, err, set_bad_params, "frame.wait: frames must be an integer in [0, NT_DEVAPI_FRAME_WAIT_MAX]", &frames)) {
         return false;
     }
-    return nt_devapi_defer(NT_DEVAPI_GATE_FRAMES, (double)frames, cmd_frame_current, NULL, 0U, err);
+    return nt_devapi_defer(NT_DEVAPI_GATE_FRAMES, (double)frames, cmd_frame_current, err);
 }
 // #endregion
 
@@ -353,7 +351,7 @@ static const nt_devapi_command_desc k_time_cmds[] = {
         .method = "frame.wait",
         .group = "frame",
         .summary = "RUN-only: reply once frames sim-advances elapse (frames=0 resolves on the next drain); rejected in manual/paused, stalled if the sim freezes later",
-        .params_shape = "{frames?:number}",
+        .params_shape = "{frames?:integer}",
         .result_shape = "{frame:number,time:number,dt:number}",
         .frame_behavior = "deferred",
         .side_effects = "none",

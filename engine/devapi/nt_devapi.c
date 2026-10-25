@@ -35,24 +35,22 @@ static void resp_reserve(size_t need) {
 }
 
 // #region deferred reply
-/* The one pending deferred reply. It owns the request_id dup and a copy of the reply's ctx, never a
-   pointer into s_resp_buf; the envelope is serialized at yield time. */
+/* The one pending deferred reply. It owns the request_id dup, never a pointer into s_resp_buf; the
+   envelope is serialized at yield time. */
 typedef struct deferred_slot {
     cJSON *id;                  /* owned request_id dup; NULL if absent. */
-    cJSON *entry;               /* PRESENT: envelope built at the pre-swap seam; NULL until then. */
+    cJSON *entry;               /* the reply or stalled envelope once resolved; NULL until then. */
     nt_devapi_handler_fn reply; /* NULL: nothing pending. */
     double target_time;         /* SECONDS: g_nt_app.time deadline. */
     uint32_t target_frame;      /* FRAMES: g_nt_app.frame deadline (wrap-safe compare). */
     nt_devapi_gate gate;
-    nt_app_mode_t mode;                          /* the time mode at submit; a switch strands a clock gate. */
-    unsigned char ctx[NT_DEVAPI_DEFER_CTX_SIZE]; /* bytes: a reply reads it with memcpy, so no alignment */
+    nt_app_mode_t mode; /* the time mode at submit; a switch strands a clock gate. */
 } deferred_slot;
 
 static deferred_slot s_pending;
 
 /* The command being dispatched; nt_devapi_defer reads it. One at a time: a handler never re-enters submit. */
 typedef struct dispatch_state {
-    const cJSON *req;
     bool batch;
 } dispatch_state;
 
@@ -70,7 +68,7 @@ void nt_devapi_resp_reset(void) {
     free(s_resp_buf);
     s_resp_buf = NULL;
     s_resp_cap = 0U;
-    nt_devapi_deferred_reset(); /* shutdown path: drop the pending deferred reply. */
+    nt_devapi_deferred_reset();
 }
 
 /* Serialize `tree` into the growing buffer and return it (valid until the next submit). */
@@ -209,11 +207,9 @@ static const char *request_reject_reason(const cJSON *req) {
     return NULL;
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-bool nt_devapi_defer(nt_devapi_gate gate, double amount, nt_devapi_handler_fn reply, const void *ctx, size_t ctx_size, nt_devapi_error *err) {
-    NT_ASSERT(s_current != NULL && reply != NULL); /* only from a handler; a reply never defers. */
-    NT_ASSERT(s_pending.reply == NULL);            /* dispatch answers busy first; one defer per command. */
-    NT_ASSERT(ctx_size <= NT_DEVAPI_DEFER_CTX_SIZE && (ctx == NULL) == (ctx_size == 0));
+bool nt_devapi_defer(nt_devapi_gate gate, double amount, nt_devapi_handler_fn reply, nt_devapi_error *err) {
+    NT_ASSERT(s_current != NULL && reply != NULL);                                              /* only from a handler; a reply never defers. */
+    NT_ASSERT(s_pending.reply == NULL);                                                         /* dispatch answers busy first; one defer per command. */
     NT_ASSERT(gate != NT_DEVAPI_GATE_FRAMES || (amount >= 0.0 && amount <= (double)INT32_MAX)); /* wrap-safe compare range */
     if (s_current->batch) {
         /* A batch is one ordered response array; a deferred reply cannot go in it. */
@@ -227,24 +223,20 @@ bool nt_devapi_defer(nt_devapi_gate gate, double amount, nt_devapi_handler_fn re
     } else if (gate == NT_DEVAPI_GATE_SECONDS) {
         s_pending.target_time = g_nt_app.time + amount;
     }
-    if (ctx_size > 0U) {
-        memcpy(s_pending.ctx, ctx, ctx_size);
-    }
-    s_pending.id = dup_request_id(s_current->req);
     return true;
 }
 
-/* Run a handler into an owned {ok,result} or {ok:false,error} entry without request_id, or NULL when it
-   deferred (only a dispatched command can). The handler gets a fresh result object it can neither leak nor free. */
-static cJSON *handler_entry(nt_devapi_handler_fn fn, const cJSON *params, void *user_data, bool dispatched) {
+/* Run a handler into an owned {ok,result} or {ok:false,error} entry without request_id, or NULL when a
+   dispatched command deferred. The handler gets a fresh result object it can neither leak nor free. */
+static cJSON *handler_entry(nt_devapi_handler_fn fn, const cJSON *params, void *user_data) {
     cJSON *result_obj = cJSON_CreateObject();
     NT_ASSERT(result_obj != NULL);
     nt_devapi_error err = {0};
     bool ok = fn(params, result_obj, &err, user_data);
-    bool deferred = dispatched && s_pending.reply != NULL;
-    NT_ASSERT(ok || !deferred); /* a handler that deferred returns true. */
+    bool deferred = s_current != NULL && s_pending.reply != NULL; /* a reply runs with no dispatch in flight. */
+    NT_ASSERT(ok || !deferred);                                   /* a handler that deferred returns true. */
     if (ok && !deferred) {
-        return make_ok_entry(result_obj); /* detaches result_obj into the envelope */
+        return make_ok_entry(result_obj);
     }
     cJSON_Delete(result_obj);
     if (ok) {
@@ -289,11 +281,13 @@ static cJSON *dispatch_one(const cJSON *req, bool batch) {
 
     const cJSON *params = cJSON_GetObjectItemCaseSensitive(req, "params"); /* validated above */
     NT_ASSERT(s_current == NULL);                                          /* a handler never re-enters submit. */
-    dispatch_state state = {.req = req, .batch = batch};
+    dispatch_state state = {.batch = batch};
     s_current = &state;
-    cJSON *entry = handler_entry(slot->handler, params, slot->user_data, true);
+    cJSON *entry = handler_entry(slot->handler, params, slot->user_data);
     s_current = NULL;
-    if (entry != NULL) {
+    if (entry == NULL) {
+        s_pending.id = dup_request_id(req);
+    } else {
         echo_request_id(entry, req);
     }
     return entry;
@@ -372,8 +366,23 @@ static bool clock_ready(void) {
     return (int32_t)(g_nt_app.frame - s_pending.target_frame) >= 0; /* wraps together with g_nt_app.frame. */
 }
 
-/* The reply runs with no dispatch in flight, so it cannot defer again. */
-static cJSON *reply_entry(void) { return handler_entry(s_pending.reply, NULL, s_pending.ctx, false); }
+/* Resolve the pending clock or PRESENT gate once per tick, before the transports drain, so native and
+   web see the same state and a clock reply is read the tick its gate opens. Ready wins over a frozen sim
+   (the last step of a crunch both reaches the target and empties the queue), not over a mode switch: RUN
+   frames past a manual target are not the steps asked for. */
+static void resolve_pending(void) {
+    if (s_pending.reply == NULL || s_pending.entry != NULL) {
+        return;
+    }
+    if (s_pending.gate != NT_DEVAPI_GATE_PRESENT && g_nt_app.mode == s_pending.mode && clock_ready()) {
+        s_pending.entry = handler_entry(s_pending.reply, NULL, NULL);
+        return;
+    }
+    const char *why = stall_reason();
+    if (why != NULL) {
+        s_pending.entry = make_error_entry(NT_DEVAPI_ERR_STALLED, why);
+    }
+}
 
 void nt_devapi_run_pre_swap_reply(void) {
     /* May fire after nt_devapi_shutdown (a host that swaps once more during teardown) — no-op then. */
@@ -381,30 +390,18 @@ void nt_devapi_run_pre_swap_reply(void) {
         return;
     }
     /* The read must happen here, before swap: poll_response runs where the back buffer is undefined. */
-    s_pending.entry = reply_entry();
+    s_pending.entry = handler_entry(s_pending.reply, NULL, NULL);
 }
 
 const char *nt_devapi_poll_response(void) {
     NT_ASSERT(nt_devapi_initialized());
-    if (s_pending.reply == NULL) {
+    cJSON *entry = s_pending.entry;
+    if (entry == NULL) {
         return NULL;
     }
-    /* Ready wins over a frozen sim (the last step of a crunch both reaches the target and empties the
-       queue), not over a mode switch: RUN frames past a manual target are not the steps asked for. */
-    cJSON *entry = s_pending.entry;
     s_pending.entry = NULL;
-    if (entry == NULL && s_pending.gate != NT_DEVAPI_GATE_PRESENT && g_nt_app.mode == s_pending.mode && clock_ready()) {
-        entry = reply_entry();
-    }
-    if (entry == NULL) {
-        const char *why = stall_reason();
-        if (why == NULL) {
-            return NULL;
-        }
-        entry = make_error_entry(NT_DEVAPI_ERR_STALLED, why);
-    }
     if (s_pending.id != NULL) {
-        attach_request_id(entry, s_pending.id); /* ownership moves into the tree. */
+        attach_request_id(entry, s_pending.id);
         s_pending.id = NULL;
     }
     const char *out = resp_serialize(entry);
@@ -413,10 +410,11 @@ const char *nt_devapi_poll_response(void) {
     return out;
 }
 
-/* Core per-tick entry: runs the transport-poll phase (each transport's recv + drain) then the tick
-   phase (e.g. the input schedule release), naming neither transport. The phase order is what guarantees
+/* Core per-tick entry: resolves the pending gate, runs the transport-poll phase (each transport's recv +
+   drain), then the tick phase (e.g. the input schedule release), naming neither transport. The phase order is what guarantees
    a received line is scheduled before the tick reads it, so a host may register the two in any order. */
 void nt_devapi_update(void) {
+    resolve_pending();
     nt_devapi_run_transport_hooks();
     nt_devapi_run_tick_hooks();
 }

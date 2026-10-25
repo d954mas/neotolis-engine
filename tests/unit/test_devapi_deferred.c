@@ -14,13 +14,14 @@
 /* clang-format on */
 
 /* Test-only commands, registered locally in this binary: test.defer {gate, amount?, tag?} defers a reply that
-   echoes its copied ctx; test.defer_fail defers a reply that fails; test.echo answers at once. */
+   echoes the tag it keeps; test.defer_fail defers a reply that fails; test.echo answers at once. */
+static int s_tag;
+
 static bool reply_probe(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)err;
-    TEST_ASSERT_NULL(params); /* a deferred reply runs with no params */
-    int tag = 0;
-    memcpy(&tag, ud, sizeof(tag));
-    devapi_add_number(result, "tag", tag);
+    TEST_ASSERT_NULL(params); /* a deferred reply runs with no params or user_data */
+    TEST_ASSERT_NULL(ud);
+    devapi_add_number(result, "tag", s_tag);
     return true;
 }
 
@@ -48,9 +49,9 @@ static bool cmd_defer(const cJSON *params, cJSON *result, nt_devapi_error *err, 
     (void)result;
     const cJSON *a = cJSON_GetObjectItemCaseSensitive(params, "amount");
     const cJSON *t = cJSON_GetObjectItemCaseSensitive(params, "tag");
-    int tag = cJSON_IsNumber(t) ? t->valueint : 7;
+    s_tag = cJSON_IsNumber(t) ? t->valueint : 7;
     nt_devapi_handler_fn reply = ud != NULL ? reply_fail : reply_probe;
-    return nt_devapi_defer(parse_gate(params), cJSON_IsNumber(a) ? a->valuedouble : 3.0, reply, &tag, sizeof(tag), err);
+    return nt_devapi_defer(parse_gate(params), cJSON_IsNumber(a) ? a->valuedouble : 3.0, reply, err);
 }
 
 static bool cmd_echo(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
@@ -86,6 +87,12 @@ void setUp(void) {
 
 void tearDown(void) { nt_devapi_shutdown(); }
 
+/* One host tick of the devapi: nt_devapi_update resolves the pending gate, then the drain yields it. */
+static const char *drain(void) {
+    nt_devapi_update();
+    return nt_devapi_poll_response();
+}
+
 /* One loop iteration as nt_app_run does it (RUN: wall dt unless paused; MANUAL: one queued step), then the drain. */
 static const char *tick(void) {
     float dt = 0.0F;
@@ -105,7 +112,7 @@ static const char *tick(void) {
     if (advanced) {
         g_nt_app.frame++;
     }
-    return nt_devapi_poll_response();
+    return drain();
 }
 
 /* Parse a reply line; the caller deletes the tree. */
@@ -138,13 +145,13 @@ static void test_frames_gate_yields_after_k_frames(void) {
     TEST_ASSERT_NULL(tick());
     TEST_ASSERT_NULL(tick());
     assert_probe(tick(), 5, 7);
-    TEST_ASSERT_NULL(nt_devapi_poll_response());
+    TEST_ASSERT_NULL(drain());
 }
 
 static void test_zero_frames_resolves_on_next_drain(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":1,\"params\":{\"amount\":0}}"));
     nt_app_pause(); /* frozen, but the target is already reached: ready wins */
-    assert_probe(nt_devapi_poll_response(), 7, 1);
+    assert_probe(drain(), 7, 1);
 }
 
 static void test_seconds_gate_yields_on_game_time(void) {
@@ -182,11 +189,20 @@ static void test_busy_while_pending(void) {
     cJSON_Delete(parse(nt_devapi_submit("{\"method\":\"test.echo\"}")));
 }
 
-/* A reply that is ready but not yet drained still holds the slot. */
+/* A reply that is resolved but not yet drained still holds the slot. */
 static void test_busy_until_drained(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":1,\"params\":{\"amount\":0}}"));
+    nt_devapi_update();
     assert_error(nt_devapi_submit("{\"method\":\"test.echo\",\"request_id\":2}"), "busy", 2);
     assert_probe(nt_devapi_poll_response(), 7, 1);
+}
+
+/* The drain only hands out what nt_devapi_update resolved: a freeze between ticks is not seen at poll time. */
+static void test_poll_alone_does_not_resolve(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":1,\"params\":{\"amount\":0}}"));
+    TEST_ASSERT_NULL(nt_devapi_poll_response());
+    nt_app_pause();
+    assert_probe(drain(), 7, 1); /* ready wins over the frozen sim */
 }
 
 static void test_batch_rejects_deferral_and_runs_the_rest(void) {
@@ -217,19 +233,19 @@ static void test_batch_while_pending_is_busy_per_entry(void) {
 static void test_present_yields_after_the_seam(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":9,\"params\":{\"gate\":\"present\",\"tag\":11}}"));
     nt_app_pause();
-    TEST_ASSERT_NULL(nt_devapi_poll_response()); /* a frozen sim does not stall a present gate */
+    TEST_ASSERT_NULL(drain()); /* a frozen sim does not stall a present gate */
     nt_devapi_run_pre_swap_reply();
     nt_devapi_run_pre_swap_reply(); /* a second swap this frame keeps the first reply */
-    assert_probe(nt_devapi_poll_response(), 11, 9);
+    assert_probe(drain(), 11, 9);
     nt_devapi_run_pre_swap_reply(); /* nothing pending: no-op */
-    TEST_ASSERT_NULL(nt_devapi_poll_response());
+    TEST_ASSERT_NULL(drain());
 }
 
 static void test_present_reply_built_before_render_off_still_yields(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":9,\"params\":{\"gate\":\"present\"}}"));
     nt_devapi_run_pre_swap_reply();
     nt_app_set_render_enabled(false);
-    assert_probe(nt_devapi_poll_response(), 7, 9);
+    assert_probe(drain(), 7, 9);
 }
 // #endregion
 
@@ -280,7 +296,7 @@ static void test_seconds_stall_on_scale_zero_frames_do_not(void) {
 static void test_present_stalls_with_render_off(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":3,\"params\":{\"gate\":\"present\"}}"));
     nt_app_set_render_enabled(false);
-    assert_error(nt_devapi_poll_response(), "stalled", 3);
+    assert_error(drain(), "stalled", 3);
 }
 // #endregion
 
@@ -288,12 +304,12 @@ static void test_present_stalls_with_render_off(void) {
 static void test_reset_frees_pending_and_built(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":1,\"params\":{\"amount\":5}}"));
     nt_devapi_deferred_reset(); /* owned id freed (LSan) */
-    TEST_ASSERT_NULL(nt_devapi_poll_response());
+    TEST_ASSERT_NULL(drain());
 
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":2,\"params\":{\"gate\":\"present\"}}"));
     nt_devapi_run_pre_swap_reply();
     nt_devapi_deferred_reset(); /* built entry freed (LSan) */
-    TEST_ASSERT_NULL(nt_devapi_poll_response());
+    TEST_ASSERT_NULL(drain());
     cJSON_Delete(parse(nt_devapi_submit("{\"method\":\"test.echo\"}")));
 }
 // #endregion
@@ -307,6 +323,7 @@ int main(void) {
     RUN_TEST(test_reply_failure_is_its_error);
     RUN_TEST(test_busy_while_pending);
     RUN_TEST(test_busy_until_drained);
+    RUN_TEST(test_poll_alone_does_not_resolve);
     RUN_TEST(test_batch_rejects_deferral_and_runs_the_rest);
     RUN_TEST(test_batch_while_pending_is_busy_per_entry);
     RUN_TEST(test_present_yields_after_the_seam);

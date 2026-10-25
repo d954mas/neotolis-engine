@@ -1,7 +1,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <string.h>
 
 #include "base64/nt_base64.h"
 #include "core/nt_assert.h"
@@ -45,7 +44,7 @@ static bool s_seam_armed;
 
 void nt_devapi_capture_arm(void) { s_seam_armed = true; }
 
-/* Reply params: the captured rect + scale divisor, copied into the deferred slot. */
+/* The pending capture's rect + scale divisor: only one deferred reply is ever pending. */
 typedef struct capture_ctx {
     uint32_t x;
     uint32_t y;
@@ -53,7 +52,8 @@ typedef struct capture_ctx {
     uint32_t h;
     uint32_t factor; /* scale divisor: 1 (full) / 2 (½) / 4 (¼). */
 } capture_ctx;
-_Static_assert(sizeof(capture_ctx) <= NT_DEVAPI_DEFER_CTX_SIZE, "capture_ctx must fit the deferred slot ctx");
+
+static capture_ctx s_capture;
 
 // #region seam producer
 /* Fused alpha-strip + box-average: rgba8 src -> RGB dst, dst dims = w/factor x h/factor.
@@ -158,9 +158,8 @@ static bool capture_produce(const capture_ctx *c, cJSON *result) {
 /* The deferred reply, run once at the GL-valid pre-swap seam. */
 static bool capture_reply(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
-    capture_ctx c;
-    memcpy(&c, ud, sizeof(c)); /* the slot keeps ctx as bytes */
-    if (!capture_produce(&c, result)) {
+    (void)ud;
+    if (!capture_produce(&s_capture, result)) {
         err->code = NT_DEVAPI_ERR_CAPTURE_FAILED;
         err->message = "capture failed (framebuffer readback or PNG encode error)";
         return false;
@@ -208,8 +207,8 @@ static bool defer_capture(uint32_t x, uint32_t gl_y, uint32_t w, uint32_t h, uin
         err->message = "capture not available on this host (it does not drive the pre-swap capture seam)";
         return false;
     }
-    capture_ctx ctx = {.x = x, .y = gl_y, .w = w, .h = h, .factor = factor};
-    return nt_devapi_defer(NT_DEVAPI_GATE_PRESENT, 0.0, capture_reply, &ctx, sizeof(ctx), err);
+    s_capture = (capture_ctx){.x = x, .y = gl_y, .w = w, .h = h, .factor = factor};
+    return nt_devapi_defer(NT_DEVAPI_GATE_PRESENT, 0.0, capture_reply, err);
 }
 
 /* capture.frame {scale?}: defers a full-framebuffer capture (x=0,y=0,w=fb_width,h=fb_height). */

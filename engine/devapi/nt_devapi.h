@@ -42,8 +42,8 @@ const char *nt_devapi_submit(const char *line);
    call (it shares the same growing buffer as submit). Drain in a loop until it returns NULL. */
 const char *nt_devapi_poll_response(void);
 
-/* Per-tick devapi update — the game calls this once per frame. Core owns the entry; it runs only
-   the registered tick hooks (each transport registers its own poll + deferred drain via
+/* Per-tick devapi update — the game calls this once per frame. It checks the pending deferred reply's
+   gate, then runs the registered hooks (each transport registers its own poll + deferred drain via
    the hook registry, so native net and web share this one seam). */
 void nt_devapi_update(void);
 

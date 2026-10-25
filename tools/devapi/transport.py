@@ -154,7 +154,10 @@ class PlaywrightTransport(Transport):
             left = deadline - time.monotonic()
             if left <= 0:
                 # Like SocketTransport: a timeout closes, and the reset drops the engine's pending reply.
-                self.close()
+                try:
+                    self.close()
+                except Exception:  # a dead page cannot reset; the timeout is still the error to report
+                    pass
                 raise TimeoutError("no web devapi line within read_timeout")
             line = self._page.evaluate(_POLL_AFTER_FRAME_JS, max(1, int(left * 1000)))
             if line:
