@@ -26,7 +26,6 @@ assertion / protocol). Stdlib only (socket + json) — no pip deps.
 """
 import os
 import sys
-import time
 
 # Allow running as a plain script by making the repo root importable, so the
 # absolute `tools.devapi.*` imports resolve (mirrors time_render_demo.py).
@@ -69,9 +68,9 @@ def resolve_port(argv) -> int:
 
 
 def _frozen_state(client: DevApiClient, **params) -> dict:
-    # Let MANUAL-idle ticks run first: their polls clear key edges and text, so the read proves that
-    # input.state still reports the last sim-advancing poll.
-    time.sleep(0.1)
+    # One round trip first: the second read lands after a MANUAL-idle tick whose poll cleared key edges
+    # and text, so it proves input.state still reports the last sim-advancing poll.
+    client.state()
     return client.state(**params)
 
 

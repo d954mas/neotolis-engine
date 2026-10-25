@@ -345,9 +345,7 @@ static void test_sched_offset0_applies_on_advance(void) {
 }
 
 /* A frozen tick releases NOTHING: an enqueued down@0 stays unscheduled while the frame is unchanged
-   (pause / manual-idle), then lands on the next real advance. Order-independent: setUp's register
-   seeds the advance clock against the current g_nt_app.frame, so the first tick_no_advance below
-   never sees a spurious forced-advance regardless of which test ran first. */
+   (pause / manual-idle), then lands on the next real advance. */
 static void test_sched_pause_freeze(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}")));
     tick_no_advance(); /* frame frozen -> schedule releases nothing */
@@ -647,6 +645,9 @@ static void test_input_state_survives_frozen_ticks(void) {
     cJSON_Delete(r);
     TEST_ASSERT_EQUAL_INT(0, popped_text_count()); /* consumed */
 
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"hi\"}}")));
+    advance();
+    tick_no_advance(); /* a copy with unread text */
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\",\"down\":false}}")));
     advance();
     assert_key_state(false, false, true);
@@ -756,8 +757,6 @@ static void test_input_gesture_single_point_applied_once(void) {
    by construction. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_sched_full_drains_in_one_tick(void) {
-    nt_devapi_input_reset();                                                                                 /* clean schedule. */
-    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"pop_text\":true}}"))); /* clear any stale ring */
     /* Fill the WHOLE schedule with NT_DEVAPI_INPUT_SCHED_MAX frame-0-due key-down entries. */
     fill_schedule_leaving(0U);
     /* One more 1-entry command must now overflow (schedule full) -> whole-or-nothing reject. */

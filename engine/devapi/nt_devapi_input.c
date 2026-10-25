@@ -271,9 +271,7 @@ void nt_devapi_input_update(void) {
 }
 
 void nt_devapi_input_reset(void) {
-    /* Clears ONLY devapi-owned transient state. Applied input and its s_seen copy are game-owned (a bot
-       is indistinguishable from a human at the inject layer), so neither is released here. The advance
-       clock is not re-seeded: a native reset runs mid-tick, after this tick's frame++. */
+    /* Applied input and s_seen are game-owned. No clock re-seed: a native reset runs mid-tick, after frame++. */
     s_sched_count = 0;
 }
 // #endregion
