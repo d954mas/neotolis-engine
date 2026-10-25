@@ -527,6 +527,7 @@ jobs:
 
       # The registration gate reads this job's compile DB / CTestTestfiles (devapi-gated tests visible).
       - name: Run CRT-pin, GL-funnel, test-registration and check-script gates
+        timeout-minutes: 20
         run: |
           bash scripts/check_crt_pins.sh
           python3 scripts/check_gl_calls.py

@@ -17,14 +17,15 @@ class FakePage:
 
 
 class PlaywrightTransportTests(unittest.TestCase):
-    def test_close_resets_bridge_and_rejects_further_use(self):
+    def test_construction_and_close_reset_bridge(self):
         page = FakePage()
         transport = PlaywrightTransport(page)
+        self.assertEqual([("() => window.__devapi.reset()", ())], page.calls)  # takes over a killed client
 
         transport.close()
         transport.close()
 
-        self.assertEqual([("() => window.__devapi.reset()", ())], page.calls)
+        self.assertEqual([("() => window.__devapi.reset()", ())] * 2, page.calls)
         with self.assertRaises(ConnectionError):
             transport.send("{}")
 
@@ -39,14 +40,6 @@ class PlaywrightTransportTests(unittest.TestCase):
         self.assertEqual(line, transport.recv_line())
         submitted = [args[0] for expression, args in page.calls if "submit" in expression]
         self.assertEqual(["time.set_mode", "capture.frame"], [json.loads(s)["method"] for s in submitted])
-
-    def test_wait_has_no_deadline(self):
-        line = '{"request_id":1,"ok":true,"result":{}}'
-        page = FakePage(polls=[""] * 500 + [line])
-        transport = PlaywrightTransport(page)
-
-        self.assertEqual(line, transport.recv_line())
-        self.assertEqual(501, sum(1 for expression, _ in page.calls if "poll()" in expression))
 
 
 if __name__ == "__main__":

@@ -15,7 +15,9 @@ Exit 0 if every assertion passes, 1 on assertion / protocol / transport failure,
 
 Stdlib only; the web driver is the TS spec + PlaywrightTransport for local runs.
 """
+import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -139,18 +141,20 @@ def _drive_deferred_items(client: DevApiClient, advertised: set) -> None:
     print(f"PASS deferred-items: {', '.join(exercised) or '(none advertised)'} exercised (advertised commands asserted).")
 
 
-def _check_extra_client_closed(port: int, client: DevApiClient) -> None:
-    """The native host serves one client: a second connection is closed at once, the first stays served."""
-    with SocketTransport("127.0.0.1", port) as extra:
-        try:
-            extra.send('{"method":"ping"}')
-            extra.recv_line()
-        except ConnectionError:
-            pass
-        else:
-            raise AssertionError("a second client was served while the first was connected")
-    client.result("ping")
-    print("PASS extra client: closed at once, the first client is still served.")
+def _check_newest_client_wins(port: int, client: DevApiClient) -> None:
+    """The native host serves the newest connection: a second client is served and the first is dropped."""
+    # A bounded raw socket, so a host that parks the newcomer fails here instead of hanging.
+    with socket.create_connection(("127.0.0.1", port), timeout=10) as s:
+        s.sendall(b'{"method":"ping","request_id":1}\n')
+        reply = json.loads(s.makefile("rb").readline())
+        assert reply.get("ok") is True, f"the newest client was not served: {reply}"
+    try:
+        client.result("ping")
+    except ConnectionError:
+        pass
+    else:
+        raise AssertionError("the replaced client was still served")
+    print("PASS newest client wins: the second client is served, the first is dropped.")
 
 
 def run(client: DevApiClient) -> None:
@@ -212,7 +216,7 @@ def main(argv) -> int:
             transport = SocketTransport("127.0.0.1", port)
         client = DevApiClient(transport)
         run(client)
-        _check_extra_client_closed(port, client)
+        _check_newest_client_wins(port, client)
         return 0
     except AssertionError as exc:
         print(f"FAIL: assertion: {exc}")

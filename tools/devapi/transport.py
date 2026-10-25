@@ -2,9 +2,10 @@
 
 A pluggable Transport interface (send a line, read a line, close) plus the
 native SocketTransport: a loopback TCP connection to the engine's devapi
-server, JSON-lines framed on '\\n'. A read waits as long as the engine needs: every
-logically blocked reply fails with stalled, so only a platform stall can hang, and the
-caller's outer deadline (CI step, test runner, shell) bounds the session.
+server, JSON-lines framed on '\\n'. A read waits as long as the engine needs: a
+logically blocked reply fails with stalled, so a read stays pending only on a platform
+stall or a long requested wait, and the caller's outer deadline (CI step, test runner,
+shell) bounds the session. A new client takes over from the previous one.
 
 Stdlib only (socket) — no pip deps. Python 3.8+.
 """
@@ -106,8 +107,9 @@ class PlaywrightTransport(Transport):
     window.__devapi.submit and stashes the SYNCHRONOUS response (a non-deferred command returns its
     response line immediately; a deferred command — C returned NULL — returns "" and its data line
     arrives later via poll()). recv_line() returns a stashed line, else polls after each frame until a
-    line appears; close() resets the bridge, dropping the engine's pending reply (a native close does
-    the same). Like SocketTransport it only moves lines: time advance belongs to the client.
+    line appears. Construction and close() reset the bridge, dropping a pending reply, so a client
+    takes over from one that was killed (a new native connection replaces the old one the same way).
+    Like SocketTransport it only moves lines: time advance belongs to the client.
 
     Playwright Python is NOT a CI dep (the CI web gate is the TS spec); this class is the local/dev
     web wire and touches only the page handle the caller constructed, so the module stays stdlib-only
@@ -119,6 +121,7 @@ class PlaywrightTransport(Transport):
         self._closed = False
         # Lines received synchronously from submit() but not yet handed to recv_line().
         self._inbox = []
+        page.evaluate("() => window.__devapi.reset()")
 
     def send(self, line: str) -> None:
         if self._closed:

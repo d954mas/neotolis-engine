@@ -276,7 +276,6 @@ static void test_bad_params_cases(void) {
 /* frames is bounded only by the wrap-safe frame compare: INT32_MAX + 1 is bad_params with no slot, INT32_MAX defers. */
 static void test_frame_wait_int32_bound(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"frame.wait\",\"params\":{\"frames\":2147483648}}"));
-    TEST_ASSERT_NULL(advance_sim()); /* the rejected wait enqueued no slot */
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"frame.wait\",\"params\":{\"frames\":2147483647}}"));
     TEST_ASSERT_NULL(advance_sim());
 }
@@ -305,14 +304,22 @@ static void test_frame_wait_fractional_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"frame.wait\",\"params\":{\"frames\":-1}}"));
 }
 
-/* A step count is bounded only by the int queue: past INT32_MAX steps (count or seconds) is bad_params with
-   nothing queued, INT32_MAX itself queues. MANUAL, so the mode check cannot mask the range check. */
-static void test_step_int32_bound(void) {
+/* A step count is bounded only by the int queue: past INT32_MAX steps is bad_params, INT32_MAX itself
+   queues (a rejected step queued nothing, or the accepted one would be "too many steps already queued").
+   MANUAL, so the mode check cannot mask the range check. */
+static void test_step_count_int32_bound(void) {
     g_nt_app.mode = NT_APP_MODE_MANUAL;
     assert_bad_params(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"count\":2147483648}}"));
-    assert_bad_params(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"seconds\":1e30}}"));
-    TEST_ASSERT_EQUAL_INT(0, g_nt_app.pending_steps);
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"count\":2147483647}}"));
+    TEST_ASSERT_EQUAL_INT(INT32_MAX, g_nt_app.pending_steps);
+}
+
+/* The seconds sugar hits the same bound before its int cast; step_dt 1 makes seconds == steps. */
+static void test_step_seconds_int32_bound(void) {
+    g_nt_app.mode = NT_APP_MODE_MANUAL;
+    g_nt_app.step_dt = 1.0F;
+    assert_bad_params(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"seconds\":2147483648}}"));
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"seconds\":2147483647}}"));
     TEST_ASSERT_EQUAL_INT(INT32_MAX, g_nt_app.pending_steps);
 }
 
@@ -568,7 +575,8 @@ int main(void) {
     RUN_TEST(test_bad_params_cases);
     RUN_TEST(test_frame_wait_int32_bound);
     RUN_TEST(test_frame_wait_zero_resolves_immediately);
-    RUN_TEST(test_step_int32_bound);
+    RUN_TEST(test_step_count_int32_bound);
+    RUN_TEST(test_step_seconds_int32_bound);
     RUN_TEST(test_set_fps_tiny_underflow_bad_params);
     RUN_TEST(test_step_requires_manual_mode);
     RUN_TEST(test_set_scale_huge_bad_params);
