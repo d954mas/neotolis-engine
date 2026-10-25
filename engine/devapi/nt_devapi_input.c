@@ -217,61 +217,53 @@ static void sched_tick(void) {
 static uint32_t s_last_frame;
 
 /* input.state reports the edges and text of the last sim-advancing poll. A frozen tick's poll still
-   clears them, so the first frozen tick copies them here before its poll runs. */
+   clears them, so they are copied here before the first frozen poll runs. */
 static struct {
     bool pressed[NT_KEY_COUNT];
     bool released[NT_KEY_COUNT];
     uint32_t chars[NT_INPUT_CHAR_RING];
     uint32_t char_count;
-    uint32_t char_next;
 } s_seen;
 
-/* true: the last completed nt_input_poll advanced, so input.state reads nt_input; false: it reads
-   s_seen. Commands run after one tick's poll and before the next tick's input update (native in
-   the next update's transport phase, web between frames), so this flag names that poll. */
-static bool s_read_live;
+/* true: the last completed nt_input_poll advanced and s_seen does not hold it yet. Commands run after
+   one tick's poll and before the next tick's input update (native in the next update's transport
+   phase, web between frames), so a refresh there copies that poll. */
+static bool s_seen_stale;
 
-static void seen_snapshot(void) {
+static void seen_refresh(void) {
+    if (!s_seen_stale) {
+        return;
+    }
+    s_seen_stale = false;
     for (int k = 0; k < NT_KEY_COUNT; k++) {
         s_seen.pressed[k] = nt_input_key_is_pressed((nt_key_t)k);
         s_seen.released[k] = nt_input_key_is_released((nt_key_t)k);
     }
     /* Popping is safe: the coming poll drops the unread chars anyway. */
     s_seen.char_count = 0;
-    s_seen.char_next = 0;
     uint32_t cp;
-    while (nt_input_pop_char(&cp)) { /* the ring holds at most NT_INPUT_CHAR_RING */
+    while (nt_input_pop_char(&cp)) {
+        NT_ASSERT(s_seen.char_count < NT_INPUT_CHAR_RING); /* nt_input's ring drops chars past this cap */
         s_seen.chars[s_seen.char_count++] = cp;
     }
-}
-
-static bool seen_pop_char(uint32_t *cp) {
-    if (s_read_live) {
-        return nt_input_pop_char(cp);
-    }
-    if (s_seen.char_next == s_seen.char_count) {
-        return false;
-    }
-    *cp = s_seen.chars[s_seen.char_next++];
-    return true;
 }
 
 void nt_devapi_input_update(void) {
     bool advanced = (g_nt_app.frame != s_last_frame);
     s_last_frame = g_nt_app.frame;
-    if (s_read_live && !advanced) {
-        seen_snapshot();
-    }
-    s_read_live = advanced;
     /* A frozen tick (pause / manual-idle) releases nothing: synthetic input holds until the sim
        advances, so an injected edge can't be missed by a stalled update. */
     if (advanced) {
+        s_seen_stale = true;
         sched_tick();
+    } else {
+        seen_refresh();
     }
 }
 
 void nt_devapi_input_reset(void) {
-    /* Applied input and s_seen are game-owned. No clock re-seed: a native reset runs mid-tick, after frame++. */
+    /* Applied input stays, and so does s_seen, which observes it. No clock re-seed: a native reset
+       runs mid-tick, after frame++. */
     s_sched_count = 0;
 }
 // #endregion
@@ -773,9 +765,8 @@ static bool cmd_input_set_player_enabled(const cJSON *params, cJSON *result, nt_
         return false;
     }
     bool enabled = cJSON_IsTrue(e);
-    if (!enabled && s_read_live) {
-        seen_snapshot(); /* the gate's release edges are not the advancing poll's */
-        s_read_live = false;
+    if (!enabled) {
+        seen_refresh(); /* the gate's release edges are not the advancing poll's */
     }
     nt_input_set_player_enabled(enabled);
     devapi_add_bool(result, "enabled", enabled);
@@ -853,8 +844,6 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
     return true;
 }
 
-/* IMMEDIATE read: `down` is live (no poll clears it); edges and text come from the last sim-advancing
-   poll, so an enqueued inject is not visible until a sim-advance. pop_text:true DRAINS that text. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_input_state(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
@@ -870,8 +859,9 @@ static bool cmd_input_state(const cJSON *params, cJSON *result, nt_devapi_error 
             return false;
         }
         devapi_add_bool(result, "down", nt_input_key_is_down(key));
-        devapi_add_bool(result, "pressed", s_read_live ? nt_input_key_is_pressed(key) : s_seen.pressed[key]);
-        devapi_add_bool(result, "released", s_read_live ? nt_input_key_is_released(key) : s_seen.released[key]);
+        seen_refresh();
+        devapi_add_bool(result, "pressed", s_seen.pressed[key]);
+        devapi_add_bool(result, "released", s_seen.released[key]);
     }
     const cJSON *pt = cJSON_GetObjectItemCaseSensitive(params, "pop_text");
     if (pt != NULL) {
@@ -882,14 +872,15 @@ static bool cmd_input_state(const cJSON *params, cJSON *result, nt_devapi_error 
         if (cJSON_IsTrue(pt)) {
             cJSON *cps = cJSON_AddArrayToObject(result, "codepoints");
             NT_ASSERT(cps != NULL); /* OOM traps fail-early (matches devapi_add_*). */
-            uint32_t cp;
-            while (seen_pop_char(&cp)) { /* both sources hold at most NT_INPUT_CHAR_RING chars */
-                cJSON *num = cJSON_CreateNumber((double)cp);
+            seen_refresh();
+            for (uint32_t i = 0; i < s_seen.char_count; i++) {
+                cJSON *num = cJSON_CreateNumber((double)s_seen.chars[i]);
                 NT_ASSERT(num != NULL);
                 cJSON_bool added = cJSON_AddItemToArray(cps, num);
                 NT_ASSERT(added);
                 (void)added;
             }
+            s_seen.char_count = 0;
         }
     }
     return true;
@@ -996,9 +987,9 @@ static const nt_devapi_handler_fn k_input_handlers[] = {
 _Static_assert(sizeof(k_input_cmds) / sizeof(k_input_cmds[0]) == sizeof(k_input_handlers) / sizeof(k_input_handlers[0]), "input: descriptor/handler arrays must have equal length");
 
 void nt_devapi_register_input(void) {
-    nt_devapi_input_reset();       /* fresh schedule each init->register. */
-    s_last_frame = g_nt_app.frame; /* seed so the first update doesn't see a spurious advance. */
-    s_read_live = true;
+    nt_devapi_input_reset(); /* fresh schedule each init->register. */
+    s_last_frame = g_nt_app.frame;
+    s_seen_stale = true;
     /* The only core coupling point: core/net call these generic hooks, never the group symbols. */
     nt_devapi_register_tick(nt_devapi_input_update);
     nt_devapi_register_reset(nt_devapi_input_reset);

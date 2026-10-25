@@ -582,22 +582,6 @@ static void test_input_state_unknown_key_bad_params(void) { assert_bad_params(nt
 
 static void test_input_state_bad_pop_text_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"pop_text\":1}}")); }
 
-/* The drain-race, machine-observable: inject A -> input.state reads down==false (stale, no
-   advance yet) -> advance -> input.state reads down==true. */
-static void test_input_state_observes_injected_key(void) {
-    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"key\":\"A\"}}")); /* pre: not yet polled */
-    cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
-    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(result, "down")));
-    cJSON_Delete(root);
-
-    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}"))); /* enqueue down@0 */
-    advance();                                                                                         /* advance -> release applies the inject */
-    root = parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"key\":\"A\"}}"));
-    result = cJSON_GetObjectItemCaseSensitive(root, "result");
-    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(result, "down")));
-    cJSON_Delete(root);
-}
-
 static cJSON *state_result(const char *request) {
     cJSON *root = parse_ok(nt_devapi_submit(request));
     cJSON *result = cJSON_DetachItemFromObjectCaseSensitive(root, "result");
@@ -624,6 +608,15 @@ static int popped_text_count(void) {
     int n = cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(r, "codepoints"));
     cJSON_Delete(r);
     return n;
+}
+
+/* The drain-race, machine-observable: inject A -> input.state reads down==false (stale, no
+   advance yet) -> advance -> input.state reads down==true. */
+static void test_input_state_observes_injected_key(void) {
+    assert_key_state(false, false, false); /* pre: not yet polled */
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}")));
+    advance(); /* advance -> release applies the inject */
+    assert_key_state(true, true, false);
 }
 
 /* MANUAL: frozen ticks between the step and the read clear nt_input's edges and text, yet input.state
@@ -664,6 +657,15 @@ static void test_input_state_gate_cutover_keeps_advance_edges(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":false}}")));
     assert_key_state(false, true, false);
     tick_no_advance();
+    assert_key_state(false, true, false);
+}
+
+/* A cutover later in the freeze keeps the copy the first frozen tick took. */
+static void test_input_state_gate_cutover_in_freeze_keeps_copy(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}")));
+    advance();
+    tick_no_advance();
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":false}}")));
     assert_key_state(false, true, false);
 }
 
@@ -886,6 +888,7 @@ int main(void) {
     RUN_TEST(test_input_state_survives_frozen_ticks);
     RUN_TEST(test_input_state_copy_survives_client_reset);
     RUN_TEST(test_input_state_gate_cutover_keeps_advance_edges);
+    RUN_TEST(test_input_state_gate_cutover_in_freeze_keeps_copy);
     RUN_TEST(test_input_describe);
     return UNITY_END();
 }
