@@ -1,5 +1,5 @@
 # Size Report: bunnymark (wasm-analysis-paired)
-# Commit: d6effa6
+# Commit: 547fa18
 
 ## WASM Section Sizes
 
@@ -63,8 +63,8 @@ Total code size: 218345 B
 
 Module                         Size
 ------------------------ ----------
-libnt_app.a                 2770 B
-libnt_app_stub.a            2620 B
+libnt_app.a                 2828 B
+libnt_app_stub.a            2678 B
 libnt_atlas.a               5452 B
 libnt_base64.a               974 B
 libnt_basisu_transcoder.a  671530 B
@@ -116,7 +116,7 @@ libnt_sprite_renderer.a    16192 B
 libnt_text_renderer.a       7702 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                351908 B
+libnt_ui.a                351936 B
 libnt_ui_rich.a            39000 B
 libnt_ui_rich_fx.a          3050 B
 libnt_ui_stub.a             1324 B
@@ -125,7 +125,7 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2665770 B
+TOTAL (archives)         2665914 B
 
 ## Data Segments Summary
 
