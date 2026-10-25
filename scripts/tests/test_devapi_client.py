@@ -31,7 +31,7 @@ class PlaywrightTransportTests(unittest.TestCase):
 
     def test_manual_mode_submits_nothing_of_its_own(self):
         line = '{"request_id":2,"ok":true,"result":{}}'
-        page = FakePage(polls=["", line])
+        page = FakePage(polls=[""] * 50 + [line])
         transport = PlaywrightTransport(page)
 
         transport.send(json.dumps({"method": "time.set_mode", "request_id": 1, "params": {"mode": "manual"}}))

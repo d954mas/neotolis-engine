@@ -75,16 +75,13 @@ bool nt_devapi_initialized(void);
 // #region lifecycle hooks
 /* Lifecycle hooks let an optional group plug into the core/transport without either naming the
    group: a compiled-out group registers nothing, so the core/net TUs carry zero of its symbols. */
-typedef void (*nt_devapi_hook_fn)(void);
-
-/* Register a per-tick / client-reset hook. Cleared on shutdown, re-registered each init;
-   overflow asserts (build-time bug). */
+/* Register a per-tick hook. Cleared on shutdown, re-registered each init; overflow asserts (build-time
+   bug). Reset hooks are registered through the public nt_devapi_register_reset. */
 /* Two ordered phases: transport-poll hooks (recv + enqueue) run before tick hooks (schedule release).
    transport_is_registered lets a transport register its poll at most once per init (the table is
    append-only, so a stop->start restart must not duplicate it). */
 void nt_devapi_register_transport_poll(nt_devapi_hook_fn fn);
 void nt_devapi_register_tick(nt_devapi_hook_fn fn);
-void nt_devapi_register_reset(nt_devapi_hook_fn fn);
 bool nt_devapi_transport_is_registered(nt_devapi_hook_fn fn);
 
 /* Run the transport-poll phase, then the tick phase; reset hooks fire on a client drop. */

@@ -34,4 +34,6 @@ typedef struct nt_devapi_command_desc {
    calls nt_devapi_submit (dispatch asserts no re-entry). */
 typedef bool (*nt_devapi_handler_fn)(const cJSON *params, cJSON *result_obj, nt_devapi_error *err, void *user_data);
 
+typedef void (*nt_devapi_hook_fn)(void);
+
 #endif /* NT_DEVAPI_TYPES_H */

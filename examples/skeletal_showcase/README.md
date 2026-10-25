@@ -352,14 +352,9 @@ once without `CPU reference` through the existing browser bridge. Capture replie
 ```js
 const command = {method: "capture.frame", request_id: 1, params: {scale: 1}};
 let reply = window.__devapi.submit(JSON.stringify(command));
-const deadline = performance.now() + 5000;
-while (!reply && performance.now() < deadline) {
+while (!reply) {
     await new Promise(requestAnimationFrame);
     reply = window.__devapi.poll();
-}
-if (!reply) {
-    window.__devapi.reset(); // drop the pending reply, or every next command answers busy
-    throw new Error("Capture timed out");
 }
 const response = JSON.parse(reply);
 if (!response.ok) throw new Error(JSON.stringify(response.error));

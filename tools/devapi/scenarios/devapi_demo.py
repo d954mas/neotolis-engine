@@ -141,20 +141,27 @@ def _drive_deferred_items(client: DevApiClient, advertised: set) -> None:
     print(f"PASS deferred-items: {', '.join(exercised) or '(none advertised)'} exercised (advertised commands asserted).")
 
 
-def _check_newest_client_wins(port: int, client: DevApiClient) -> None:
-    """The native host serves the newest connection: a second client is served and the first is dropped."""
-    # A bounded raw socket, so a host that parks the newcomer fails here instead of hanging.
+def _raw_ping(port: int) -> None:
+    # A bounded raw socket, so a host that parks or rejects the newcomer fails here instead of hanging.
     with socket.create_connection(("127.0.0.1", port), timeout=10) as s:
         s.sendall(b'{"method":"ping","request_id":1}\n')
         reply = json.loads(s.makefile("rb").readline())
         assert reply.get("ok") is True, f"the newest client was not served: {reply}"
+
+
+def _check_newest_client_wins(port: int, client: DevApiClient) -> None:
+    """The native host serves the newest connection: a second client is served and the first is dropped;
+    a client that reconnects at once is served even before its old close is read."""
+    _raw_ping(port)
     try:
         client.result("ping")
     except ConnectionError:
         pass
     else:
         raise AssertionError("the replaced client was still served")
-    print("PASS newest client wins: the second client is served, the first is dropped.")
+    for _ in range(30):
+        _raw_ping(port)
+    print("PASS newest client wins: a second client takes over and 30 immediate reconnects are served.")
 
 
 def run(client: DevApiClient) -> None:
@@ -217,6 +224,7 @@ def main(argv) -> int:
         client = DevApiClient(transport)
         run(client)
         _check_newest_client_wins(port, client)
+        assert proc is None or proc.poll() is None, "the host exited during the client checks"
         return 0
     except AssertionError as exc:
         print(f"FAIL: assertion: {exc}")

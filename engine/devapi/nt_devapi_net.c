@@ -269,8 +269,6 @@ bool nt_devapi_net_start(uint16_t port) {
     return true;
 }
 
-bool nt_devapi_net_has_client(void) { return s_client != NT_INVALID_SOCK; }
-
 void nt_devapi_net_stop(void) {
     close_client();
     if (s_listen != NT_INVALID_SOCK) {
@@ -301,7 +299,6 @@ static void try_accept(void) {
             close_client();
         }
         s_client = c;
-        s_recv_len = 0;
         set_client_opts(c);
         return;
     }

@@ -47,6 +47,11 @@ const char *nt_devapi_poll_response(void);
    the hook registry, so native net and web share this one seam). */
 void nt_devapi_update(void);
 
+/* Run fn whenever a client leaves: a native disconnect, a newer connection taking over, or a web
+   reset(). The engine resets only devapi-owned state there; recovering game state (time mode, pause,
+   queued steps) is the host's policy. Call after nt_devapi_init (shutdown clears the table); overflow asserts. */
+void nt_devapi_register_reset(nt_devapi_hook_fn fn);
+
 #ifdef NT_DEVAPI_GROUP_UI
 /* Host-facing: register a UI context under a name so the `ui` group can resolve it.
    Call AFTER nt_devapi_init(): init clears the host ctx table, so a pre-init registration is

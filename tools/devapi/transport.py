@@ -110,7 +110,9 @@ class PlaywrightTransport(Transport):
     arrives later via poll()). recv_line() returns a stashed line, else polls after each frame until a
     line appears. Construction and close() reset the bridge, dropping a pending reply, so a client
     takes over from one that was killed (a new native connection replaces the old one the same way).
-    Like SocketTransport it only moves lines: time advance belongs to the client.
+    Construct it after window.__devapi exists. Unlike a native takeover, a replaced live web client
+    gets no error, so drive one page with one client. Like SocketTransport it only moves lines: time
+    advance belongs to the client.
 
     Playwright Python is NOT a CI dep (the CI web gate is the TS spec); this class is the local/dev
     web wire and touches only the page handle the caller constructed, so the module stays stdlib-only
