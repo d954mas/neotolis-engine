@@ -311,8 +311,8 @@ if [ "$MODE" = "push" ]; then
     cmake --build build/_cmake/wasm-debug
     ok
 
-    # Release catches the Closure-only class (EM_JS helpers stripped by minification)
-    # that wasm-debug can never see. Measured warm cost: ~25 s.
+    # The wasm-release preset catches Closure-stripped EM_JS helpers; wasm-debug
+    # leaves Closure OFF. Measured warm cost: ~25 s.
     step "build (wasm-release)"
     if [ ! -d "build/_cmake/wasm-release" ]; then
         echo "ERROR: build/_cmake/wasm-release missing — configure the preset first:"

@@ -48,6 +48,7 @@
             "binaryDir": "${sourceDir}/build/_cmake/wasm-debug",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
+                "NT_WASM_CLOSURE": "OFF",
                 "NT_UI_DEBUG_TOOLS": "ON",
                 "NT_LOG_RING_ENABLED": "ON",
                 "NT_METRICS_ENABLED": "ON",
@@ -70,6 +71,7 @@
             "binaryDir": "${sourceDir}/build/_cmake/wasm-release",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
+                "NT_WASM_CLOSURE": "ON",
                 "NT_UI_DEBUG_TOOLS": "OFF",
                 "NT_LOG_RING_ENABLED": "OFF",
                 "NT_METRICS_ENABLED": "OFF",

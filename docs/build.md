@@ -87,6 +87,7 @@ is no longer a valid configuration.
 | `NT_INTROSPECT_WRITE_ENABLED` | OFF | Debug/release-test presets select ON; production Release selects OFF. |
 | `NT_GFX_NATIVE_GL_DEBUG` | OFF | Requests a native GL debug context and installs the KHR_debug callback when available. `native-debug` selects ON; native Release presets select OFF. Can be enabled explicitly in Release. |
 | `NT_GFX_WEB_GL_DEBUG` | OFF | Opt-in Emscripten GL parameter checks and per-call logging. |
+| `NT_WASM_CLOSURE` | OFF | `wasm-release` selects ON; `wasm-debug` selects OFF. Paired, SIMD and analysis presets inherit these values. Set explicitly to test either value with any build type. |
 | `NT_HTTP_CURL` | OFF | Native presets select ON. Plain CMake and subproject builds require explicit ON for the libcurl backend; OFF uses the HTTP stub. CA sources follow the curl configuration; the engine does not override them. See [Linux OpenSSL CA cache](#linux-openssl-ca-cache). |
 | `NT_HTTP_WEBSOCKETS` | OFF | Effective only when `NT_HTTP_CURL=ON` and Neotolis configures the vendored `CURL::libcurl`; otherwise configuration reports that it is ignored. ON keeps only HTTP(S) and WS(S), then publishes the global `NT_HTTP_WEBSOCKETS` property for consumers after `add_subdirectory(<engine>)`. A pre-provided curl target remains consumer-owned. |
 | `NT_HYBRID_HPG` | ON | Windows hybrid-GPU preference hint; per-app Windows graphics preferences override it. |
@@ -374,7 +375,7 @@ emcmake cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=
 cmake --build --preset wasm-debug --target devapi_host
 ```
 
-CI also runs both specs against a release `devapi_host`, because only a release link runs Closure over
+CI also runs both specs against a `wasm-release` `devapi_host`, because that preset enables Closure over
 the `window.__devapi` bridge and the `NtRecorder` calls. `NT_DEVAPI_DIR` points the server at it;
 `NT_LOG_MIN_LEVEL=0` keeps the recorder INFO line that `record.spec.ts` reads:
 
@@ -390,7 +391,7 @@ video, flash/beep offset within a frame. That needs python (`$PYTHON`, else `pyt
 ffmpeg/ffprobe on `PATH` or in `FFMPEG_DIR`. A second test records in RUN at time scale 7, so a step
 exceeds the 100 ms drift bound, and fails on a drift WARN; it also checks `bad_params` and a cancelled
 `nt-recorder` event. Its step guard assumes a 60 Hz rAF (CI headless); a faster display fails it.
-`nt_recorder` is OFF in the push gate: only the CI web-smoke release run links it under Closure.
+`nt_recorder` is OFF in the push gate: the CI web-smoke `wasm-release` run links it under Closure.
 Native `test_recorder` covers frame selection and the audio stream.
 
 CI only compiles and links the Windows backend (`windows-recorder`). Check its behavior locally with a
