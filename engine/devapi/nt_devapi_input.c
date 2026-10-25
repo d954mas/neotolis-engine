@@ -216,9 +216,55 @@ static void sched_tick(void) {
    first post-reset tick doesn't fire spuriously. */
 static uint32_t s_last_frame;
 
+/* input.state reports the last sim-advancing poll. A frozen tick's poll still clears key edges and
+   text, so the first frozen tick copies them here before its poll runs. */
+static struct {
+    bool down[NT_KEY_COUNT];
+    bool pressed[NT_KEY_COUNT];
+    bool released[NT_KEY_COUNT];
+    uint32_t chars[NT_INPUT_CHAR_RING];
+    uint32_t char_count;
+    uint32_t char_next;
+} s_seen;
+
+/* true: the last completed nt_input_poll advanced, so input.state reads nt_input; false: it reads
+   s_seen. Commands run after one tick's poll and before the next tick's devapi update (native
+   between transport recv and the tick hooks, web between frames), so this flag names that poll. */
+static bool s_read_live;
+
+static void seen_snapshot(void) {
+    for (int k = 0; k < NT_KEY_COUNT; k++) {
+        s_seen.down[k] = nt_input_key_is_down((nt_key_t)k);
+        s_seen.pressed[k] = nt_input_key_is_pressed((nt_key_t)k);
+        s_seen.released[k] = nt_input_key_is_released((nt_key_t)k);
+    }
+    /* Popping is safe: the coming poll drops the unread chars anyway. */
+    s_seen.char_count = 0;
+    s_seen.char_next = 0;
+    uint32_t cp;
+    while (s_seen.char_count < NT_INPUT_CHAR_RING && nt_input_pop_char(&cp)) {
+        s_seen.chars[s_seen.char_count++] = cp;
+    }
+}
+
+static bool seen_pop_char(uint32_t *cp) {
+    if (s_read_live) {
+        return nt_input_pop_char(cp);
+    }
+    if (s_seen.char_next == s_seen.char_count) {
+        return false;
+    }
+    *cp = s_seen.chars[s_seen.char_next++];
+    return true;
+}
+
 void nt_devapi_input_update(void) {
     bool advanced = (g_nt_app.frame != s_last_frame);
     s_last_frame = g_nt_app.frame;
+    if (s_read_live && !advanced) {
+        seen_snapshot();
+    }
+    s_read_live = advanced;
     /* A frozen tick (pause / manual-idle) releases nothing: synthetic input holds until the sim
        advances, so an injected edge can't be missed by a stalled update. */
     if (advanced) {
@@ -231,6 +277,7 @@ void nt_devapi_input_reset(void) {
        game-owned (a bot is indistinguishable from a human at the inject layer), so it is NOT released here. */
     s_sched_count = 0;
     s_last_frame = g_nt_app.frame; /* re-seed so the next update compares against the real frame. */
+    s_read_live = true;            /* a new client reads current input until the next frozen tick copies it. */
 }
 // #endregion
 
@@ -807,8 +854,8 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
     return true;
 }
 
-/* IMMEDIATE read of the last polled state: an enqueued inject is not visible until a sim-advance.
-   pop_text:true DRAINS the char ring (consuming side effect). */
+/* IMMEDIATE read of the last sim-advancing poll: an enqueued inject is not visible until a sim-advance.
+   pop_text:true DRAINS that poll's text (consuming side effect). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_input_state(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
@@ -823,9 +870,9 @@ static bool cmd_input_state(const cJSON *params, cJSON *result, nt_devapi_error 
             set_bad_params(err, "input.state: unknown key name");
             return false;
         }
-        devapi_add_bool(result, "down", nt_input_key_is_down(key));
-        devapi_add_bool(result, "pressed", nt_input_key_is_pressed(key));
-        devapi_add_bool(result, "released", nt_input_key_is_released(key));
+        devapi_add_bool(result, "down", s_read_live ? nt_input_key_is_down(key) : s_seen.down[key]);
+        devapi_add_bool(result, "pressed", s_read_live ? nt_input_key_is_pressed(key) : s_seen.pressed[key]);
+        devapi_add_bool(result, "released", s_read_live ? nt_input_key_is_released(key) : s_seen.released[key]);
     }
     const cJSON *pt = cJSON_GetObjectItemCaseSensitive(params, "pop_text");
     if (pt != NULL) {
@@ -838,7 +885,7 @@ static bool cmd_input_state(const cJSON *params, cJSON *result, nt_devapi_error 
             NT_ASSERT(cps != NULL); /* OOM traps fail-early (matches devapi_add_*). */
             /* Cap the drain to the inject queue size so a flood can't spin the read forever. */
             uint32_t cp;
-            for (uint32_t i = 0; i < (uint32_t)NT_INPUT_INJECT_QUEUE_MAX && nt_input_pop_char(&cp); i++) {
+            for (uint32_t i = 0; i < (uint32_t)NT_INPUT_INJECT_QUEUE_MAX && seen_pop_char(&cp); i++) {
                 cJSON *num = cJSON_CreateNumber((double)cp);
                 NT_ASSERT(num != NULL);
                 cJSON_bool added = cJSON_AddItemToArray(cps, num);
@@ -937,7 +984,7 @@ static const nt_devapi_command_desc k_input_cmds[] = {
     {
         .method = "input.state",
         .group = "input",
-        .summary = "IMMEDIATE read of polled input state (stale until a sim-advance polls the inject queue)",
+        .summary = "IMMEDIATE read of the input state the last sim-advancing poll produced (an inject shows after the next sim-advance)",
         .params_shape = "{key?:string, pop_text?:bool}",
         .result_shape = "{down?:bool, pressed?:bool, released?:bool, codepoints?:[number]}",
         .frame_behavior = "any",

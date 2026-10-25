@@ -601,6 +601,49 @@ static void test_input_state_observes_injected_key(void) {
     cJSON_Delete(root);
 }
 
+static cJSON *state_result(const char *request) {
+    cJSON *root = parse_ok(nt_devapi_submit(request));
+    cJSON *result = cJSON_DetachItemFromObjectCaseSensitive(root, "result");
+    cJSON_Delete(root);
+    return result;
+}
+
+static void assert_key_state(bool down, bool pressed, bool released) {
+    cJSON *r = state_result("{\"method\":\"input.state\",\"params\":{\"key\":\"A\"}}");
+    TEST_ASSERT_EQUAL(down, cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(r, "down")));
+    TEST_ASSERT_EQUAL(pressed, cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(r, "pressed")));
+    TEST_ASSERT_EQUAL(released, cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(r, "released")));
+    cJSON_Delete(r);
+}
+
+/* MANUAL: frozen ticks between the step and the read clear nt_input's edges and text, yet input.state
+   still reports the last advancing poll; the next advance reports live state again. */
+static void test_input_state_survives_frozen_ticks(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}")));
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"hi\"}}")));
+    advance();
+    tick_no_advance();
+    tick_no_advance();
+    TEST_ASSERT_FALSE(nt_input_key_is_pressed(NT_KEY_A)); /* the game-facing edge is gone */
+    assert_key_state(true, true, false);
+
+    cJSON *r = state_result("{\"method\":\"input.state\",\"params\":{\"pop_text\":true}}");
+    cJSON *cps = cJSON_GetObjectItemCaseSensitive(r, "codepoints");
+    TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(cps));
+    TEST_ASSERT_EQUAL_INT(104, cJSON_GetArrayItem(cps, 0)->valueint);
+    TEST_ASSERT_EQUAL_INT(105, cJSON_GetArrayItem(cps, 1)->valueint);
+    cJSON_Delete(r);
+    r = state_result("{\"method\":\"input.state\",\"params\":{\"pop_text\":true}}"); /* consumed */
+    TEST_ASSERT_EQUAL_INT(0, cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(r, "codepoints")));
+    cJSON_Delete(r);
+
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\",\"down\":false}}")));
+    advance();
+    assert_key_state(false, false, true);
+    tick_no_advance();
+    assert_key_state(false, false, true);
+}
+
 /* ---- input.button happy path — mask actually presses the mapped mouse button ---- */
 
 /* input.button {buttons:2} on the reserved mouse slot -> after an advance the RIGHT button is down. */
@@ -799,6 +842,7 @@ int main(void) {
     RUN_TEST(test_input_state_unknown_key_bad_params);
     RUN_TEST(test_input_state_bad_pop_text_bad_params);
     RUN_TEST(test_input_state_observes_injected_key);
+    RUN_TEST(test_input_state_survives_frozen_ticks);
     RUN_TEST(test_input_describe);
     return UNITY_END();
 }

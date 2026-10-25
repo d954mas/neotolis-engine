@@ -81,7 +81,8 @@ def run(client: DevApiClient) -> None:
     hold = 8
     client.key("C", hold=hold)  # down@0 + up@offset=hold
     client.step(count=1)
-    assert client.state(key="C").get("down") is True, "drain-race: C.down expected True after first step (inject observed, not lost)"
+    first = client.state(key="C")
+    assert first.get("down") is True and first.get("pressed") is True, f"drain-race: C is {first!r} after the first step, expected down and pressed (inject observed, not lost)"
     client.step(count=hold // 2)  # still inside the hold window
     mid = client.state(key="C").get("down")
     assert mid is True, f"drain-race: C.down is {mid!r} mid-hold, expected True (release pinned to the hold, not applied early)"
@@ -95,28 +96,25 @@ def run(client: DevApiClient) -> None:
     assert off.get("enabled") is False, f"set_player_enabled(False) echoed {off!r}, expected enabled=False"
     client.key("B", down=True)  # inject while gated — must still flow
     client.step(count=1)
-    gated_observed = client.state(key="B").get("down")
-    assert gated_observed is True, f"gated input.state(B).down is {gated_observed!r}, expected True (inject orthogonal to the gate)"
+    gated_observed = client.state(key="B")
+    assert gated_observed.get("down") is True and gated_observed.get("pressed") is True, f"gated input.state(B) is {gated_observed!r}, expected down and pressed (inject orthogonal to the gate)"
+    client.key("B", down=False)
+    client.step(count=1)
+    released = client.state(key="B")
+    assert released.get("down") is False and released.get("released") is True, f"gated input.state(B) is {released!r} after the up, expected released"
     on = client.set_player_enabled(True)
     assert on.get("enabled") is True, f"set_player_enabled(True) echoed {on!r}, expected enabled=True"
     print(
-        "PASS[2/3] gate cutover: inject observed (B.down==true) while player disabled. "
+        "PASS[2/3] gate cutover: inject observed (B pressed, then released) while player disabled. "
         "NOTE: 'real physical device dropped while gated' needs a live device — manual."
     )
 
     # 3. input.text — codepoints reach the char ring; the pop_text drain reads them back.
-    # A text() inject is invisible until a step() advances: that advance releases the chars AND drains
-    # them into the (frame-local) ring in the same poll, so pop_text must read in that same window.
+    # A text() inject is invisible until a step() advances; input.state then reads that advance's text.
     queued = client.text("hi")
-    assert isinstance(queued.get("queued"), int), f"input.text echoed {queued!r}, expected {{queued:int}}"
-    cps = []
-    for _ in range(50):  # generous budget against the 1-frame ring window; each iter is one advancing inject+drain
-        client.state(pop_text=True)  # clear any partial / stale ring contents
-        client.text("hi")            # enqueue char@0 into the devapi schedule
-        client.step(count=1)         # advance once: release the chars into the buffer + drain into the ring this poll
-        cps = client.state(pop_text=True).get("codepoints")
-        if cps == [104, 105]:
-            break
+    assert queued.get("queued") == 2, f"input.text echoed {queued!r}, expected {{queued:2}}"
+    client.step(count=1)
+    cps = client.state(pop_text=True).get("codepoints")
     assert cps == [104, 105], f"input.state(pop_text).codepoints is {cps!r}, expected [104, 105] ('h','i') after an advancing step"
     print("PASS[3/3] input.text: codepoints == [104, 105] drained from the char ring after a sim-advance.")
 
