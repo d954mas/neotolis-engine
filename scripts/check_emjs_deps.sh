@@ -3,7 +3,7 @@
 # THAT helper in an EM_JS_DEPS of the SAME translation unit. Presence of some EM_JS_DEPS is not
 # enough: a helper kept only via another dep's transitive __deps (an emscripten implementation
 # detail) breaks silently in --closure wasm-release on an emsdk upgrade or a deps refactor.
-# The risk is release/Closure-only -> invisible to wasm-debug and native builds.
+# The risk is Closure-only (NT_WASM_CLOSURE=ON) -> invisible to wasm-debug and native builds.
 #
 # Method: strip C/JS comments (heuristic; also trims '//' inside string literals, which only ever
 # hides text after it on that line), collect helper references, and require each one, by name, in

@@ -27,6 +27,7 @@ if(EMSCRIPTEN AND PROJECT_IS_TOP_LEVEL)
 endif()
 
 option(NT_WASM_ENABLE_SIMD "Build WASM targets with -msimd128 enabled." OFF)
+option(NT_WASM_CLOSURE "Run Closure Compiler on Emscripten JS glue." OFF)
 set(NT_WASM_SIMD_WASM_PATH "" CACHE STRING "Alternate SIMD wasm path injected into the HTML shell.")
 
 # Escape hatch for expensive pack builds (e.g. a future PR-CI lane without sponza);
@@ -162,7 +163,7 @@ if(EMSCRIPTEN)
     # emmalloc: compact allocator, ~4 KB smaller than default dlmalloc
     add_link_options(-sMALLOC=emmalloc)
     # Closure Compiler minifies JS glue code (~60% reduction)
-    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    if(NT_WASM_CLOSURE)
         add_link_options(--closure 1)
     endif()
 

@@ -514,7 +514,7 @@ jobs:
             xargs clang-format --dry-run --Werror
 
       # Module composition (no engine module links a real swappable impl; omitting an impl is a
-      # loud unresolved-symbol error) and EM_JS_DEPS (Closure strips undeclared helpers in release).
+      # loud unresolved-symbol error) and EM_JS_DEPS (Closure, ON in wasm-release, strips undeclared helpers).
       - name: Run module-composition and EM_JS_DEPS gates
         run: |
           bash scripts/check_no_real_impl_links.sh
@@ -599,8 +599,8 @@ jobs:
           emcmake cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
           cmake --build --preset wasm-debug --target devapi_host
 
-      # Only a release link runs Closure over the window.__devapi bridge and the recorder's NtRecorder
-      # calls. INFO logs stay on: record.spec.ts reads a recorder INFO line.
+      # The wasm-release preset enables Closure over the window.__devapi bridge and the recorder's
+      # NtRecorder calls. INFO logs stay on: record.spec.ts reads a recorder INFO line.
       - name: Build devapi_host wasm (release, capture and record ON)
         run: |
           emcmake cmake --preset wasm-release -B build/_cmake/wasm-release-devapi -DNT_LOG_MIN_LEVEL=0 -DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
