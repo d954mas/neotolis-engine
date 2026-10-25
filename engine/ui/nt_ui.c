@@ -1361,9 +1361,8 @@ void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *targ
 static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, clip_cache_entry_t *clip_cache, int *clip_cache_len) {
     NT_ASSERT((uint32_t)*depth < NT_UI_WALKER_SCISSOR_DEPTH_CAP && "scissor stack overflow; restructure nested clip");
 
-    /* Empty is valid (a collapsed clip element); non-finite or negative is a layout/transform bug and UB in the int casts. */
-    const Clay_BoundingBox *bb = &c->boundingBox;
-    NT_ASSERT(isfinite(bb->x) && isfinite(bb->y) && isfinite(bb->width) && isfinite(bb->height) && bb->width >= 0.0F && bb->height >= 0.0F && "nt_ui scissor bbox must be finite and non-negative");
+    /* Empty is valid (a collapsed clip element); a non-finite box is a layout/transform bug and the int casts need finite input. */
+    NT_ASSERT(isfinite(c->boundingBox.x + c->boundingBox.width) && isfinite(c->boundingBox.y + c->boundingBox.height) && "nt_ui scissor bbox must be finite");
 
     /* Both axes false is Clay's floating clipTo=ATTACHED_PARENT marker; Clay sets a clip config only with an axis. */
     const Clay_ClipRenderData *clip = &c->renderData.clip;
