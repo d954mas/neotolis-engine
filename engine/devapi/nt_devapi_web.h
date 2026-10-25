@@ -3,7 +3,7 @@
 
 /* Web (Emscripten) transport for the devapi core: a push/pull bridge instead of a socket.
    JS pushes a request line via an EMSCRIPTEN_KEEPALIVE export and pulls queued responses; the core
-   stays transport-agnostic (it owns nt_devapi_update + the frame-keyed deferred drain). Web-only
+   stays transport-agnostic (it owns nt_devapi_update + the deferred drain). Web-only
    (compiled out of the native build); dev-only, gated by NT_DEVAPI_ENABLED with the rest of the
    layer. The host calls only nt_devapi_web_install_shim once at startup; the KEEPALIVE wrappers
    are reached from JS through window.__devapi (no socket / no listener). */

@@ -2,11 +2,10 @@
 """DevAPI capture demo — the live-socket UAT for the frame-capture group.
 
 Exercises capture.frame / capture.region end-to-end against a real running examples/capture_host over
-loopback TCP. Capture is a deferred DATA command, so the drain-race (the reply must arrive only after a
-render fills the payload) only surfaces with a live socket + real GL context, never in a unit binary.
+loopback TCP. Capture is deferred to the pre-swap seam, which only a live socket + real GL context drives.
 The host renders a known two-tone pattern; this UAT confirms the command resolves after a render with a
-decodable, non-blank PNG (not {deferred:true}), region/scale dims are correct, bad params return
-bad_params over the wire, and the pixel-health check passes.
+decodable, non-blank PNG, region/scale dims are correct, bad params return bad_params over the wire, and
+the pixel-health check passes.
 
 devapi_host inits no gfx, so this scenario launches capture_host (a dedicated gfx-backed host). By
 default it launches its own subprocess on a free port and tears it down; attach to an already-running
@@ -118,10 +117,8 @@ def run(client: DevApiClient, save_dir=None) -> None:
     fb_h = int(view["fb_height"])
     assert fb_w > 0 and fb_h > 0, f"view returned a zero-size framebuffer ({fb_w}x{fb_h})"
 
-    # 1. Drain-race: capture.frame is deferred, so the reply must arrive only after a render fills the
-    #    payload — not the legacy {deferred:true}. Receiving width/height/format/data proves it ran.
+    # 1. capture.frame resolves after a render; a decodable width/height/format/data proves the seam ran.
     full = client.capture_frame()
-    assert full.get("deferred") is not True, "capture.frame returned {deferred:true} — the producer never ran (drain-race)"
     img = pixel_health.check_payload(full, fb_w, fb_h)
     # Channel order (RGB vs BGR): the centered fg box is R-dominant orange; a red/blue swap would invert
     # it and slip past every channel-symmetric check (not-blank, split-means).
@@ -133,7 +130,7 @@ def run(client: DevApiClient, save_dir=None) -> None:
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)
         img.save(os.path.join(save_dir, "capture_frame.png"))
-    print(f"PASS[1/5] capture.frame: deferred-yield carried a decodable {img.width}x{img.height} PNG, not {{deferred:true}}.")
+    print(f"PASS[1/5] capture.frame: the deferred reply carried a decodable {img.width}x{img.height} PNG.")
 
     # 2. capture.region: a sub-rect returns dims matching the rect. The dims + not-blank check is
     #    position-blind, so the region origin is verified separately below (a flip passes dims+not-blank).
@@ -186,7 +183,7 @@ def run(client: DevApiClient, save_dir=None) -> None:
     # 5. Pixel-health summary: the full-frame image already passed decode + dims + not-blank above.
     print("PASS[5/5] pixel-health: decode + dims + not-blank held on every captured frame.")
 
-    print("PASS: capture.* end-to-end over the socket — drain-race + region + scale + bad_params + pixel-health all machine-asserted.")
+    print("PASS: capture.* end-to-end over the socket — deferred capture + region + scale + bad_params + pixel-health all machine-asserted.")
 
 
 def main(argv) -> int:

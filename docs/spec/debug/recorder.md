@@ -167,7 +167,7 @@ which could wait on the dead encoder, and keeps the fragments on disk; so does a
 
 | Command | Params | Result | Errors |
 |---|---|---|---|
-| `record.start` | `{name, fps}` | `{}` | `bad_params` (name not a non-empty string, fps not an integer 1..120), `busy` (active), `failed` (`start` returned false) |
+| `record.start` | `{name, fps}` | `{}` | `bad_params` (name not a non-empty string, fps not an integer 1..120), `recording` (active), `failed` (`start` returned false) |
 | `record.stop` | `{}` | `{frames}` | none; `frames` is 0 when nothing was active, the recording ended on its own, or a final write failed |
 
 On Windows `name` is the file path. The host's first `frame` call after `record.start` sets the

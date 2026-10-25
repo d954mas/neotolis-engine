@@ -184,7 +184,7 @@ typedef enum {
     NT_INJECT_CHAR,            /* codepoint into the char ring */
 } nt_inject_kind_t;
 
-/* Bounded BSS immediate inject buffer cap (-D overridable, like NT_DEVAPI_MAX_DEFERRED). */
+/* Bounded BSS immediate inject buffer cap (-D overridable). */
 #ifndef NT_INPUT_INJECT_QUEUE_MAX
 #define NT_INPUT_INJECT_QUEUE_MAX 256
 #endif

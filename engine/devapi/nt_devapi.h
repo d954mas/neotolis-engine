@@ -33,7 +33,8 @@ nt_result_t nt_devapi_register(const nt_devapi_command_desc *desc, nt_devapi_han
 
 /* Submit one JSON request line → the JSON response line. The returned pointer is valid
    only until the next submit/poll_response — copy it before the next core call. Returns
-   NULL when the command deferred its response (drain it later via nt_devapi_poll_response). */
+   NULL when the command deferred its response (drain it later via nt_devapi_poll_response).
+   While a deferred response is pending, every well-formed command for a registered method answers busy. */
 const char *nt_devapi_submit(const char *line);
 
 /* Yield the next ready deferred response, or NULL if none is ready this call. The returned
@@ -42,7 +43,7 @@ const char *nt_devapi_submit(const char *line);
 const char *nt_devapi_poll_response(void);
 
 /* Per-tick devapi update — the game calls this once per frame. Core owns the entry; it runs only
-   the registered tick hooks (each transport registers its own poll + frame-keyed deferred drain via
+   the registered tick hooks (each transport registers its own poll + deferred drain via
    the hook registry, so native net and web share this one seam). */
 void nt_devapi_update(void);
 

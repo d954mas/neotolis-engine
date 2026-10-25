@@ -155,7 +155,7 @@ endforeach()
 # Transport target -- selected by platform: two PARALLEL transports over the one core, not a
 # single swappable interface. Web (Emscripten) is a push/pull JS bridge with NO socket;
 # native is the loopback TCP transport. A core-only consumer pulls neither's deps. The core
-# (nt_devapi) owns nt_devapi_update + the frame-keyed deferred drain; each transport registers its own
+# (nt_devapi) owns nt_devapi_update + the deferred drain; each transport registers its own
 # poll (native) or nothing (web, push-driven) as a tick hook.
 if(EMSCRIPTEN)
     nt_add_module(nt_devapi_web LOG_DOMAIN "devapi_web"

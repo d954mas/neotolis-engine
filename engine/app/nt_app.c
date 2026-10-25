@@ -22,6 +22,9 @@ void nt_app_set_scale(float scale) {
 }
 void nt_app_set_mode(nt_app_mode_t mode) {
     NT_ASSERT(mode == NT_APP_MODE_RUN || mode == NT_APP_MODE_MANUAL);
+    if (mode != g_nt_app.mode) {
+        g_nt_app.pending_steps = 0; /* queued steps belong to the manual session that queued them. */
+    }
     g_nt_app.mode = mode;
 }
 void nt_app_set_step_dt(float step_dt) {

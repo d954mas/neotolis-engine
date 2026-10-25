@@ -18,16 +18,15 @@ declare global {
 // arrival order (an unrelated line must not be mistaken for the capture result).
 let nextId = 1;
 
-// Web-smoke gate: only a real headless Chromium exposes the deferred-capture drain race — the PNG
-// resolves to real pixels (not {deferred:true}) only after a rendered frame fills the pre-swap seam.
+// Web-smoke gate: only a real headless Chromium drives the pre-swap seam — the deferred capture
+// resolves to real pixels only after a rendered frame.
 test('devapi web transport: discovery + game.* + deferred capture yields a non-blank PNG after context restore', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/index.html');
 
   // Frame barrier: resolve after two nested requestAnimationFrame calls — one real rendered frame.
-  // The deferred capture's pre-swap producer only fills its payload INSIDE the swap this schedules
-  // (a render-disabled frame won't fill it).
+  // The deferred capture's reply is built only INSIDE the swap this schedules.
   const frame = () =>
     page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 
@@ -82,7 +81,7 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
   expect(Boolean(poke2?.result?.poked)).toBe(!Boolean(poke1?.result?.poked));
 
   // 3. The riskiest web path: a deferred capture.frame -> real PNG, with the sim frozen in MANUAL.
-  //    No time.step: frame() renders, the pre-swap seam fills the payload, and the frame counter stays put.
+  //    No time.step: frame() renders, the pre-swap seam builds the reply, and the frame counter stays put.
   await submit('time.set_mode', { mode: 'manual' });
   const frameBefore = (await submit('frame.current'))?.result?.frame;
 
@@ -97,7 +96,7 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
   // The deferred data line arrives only after a rendered frame fills the pre-swap seam. Drive frames
   // (frame() forces a real rAF render+swap) and poll until the matching id appears, bounded by
   // expect.poll's timeout so a deferred-forever capture never hangs CI.
-  let captureResp: { ok?: boolean; result?: { format?: string; data?: string; deferred?: boolean } } | null = null;
+  let captureResp: { ok?: boolean; result?: { format?: string; data?: string } } | null = null;
   if (submitted) {
     // Non-deferred (a capture-OFF host would answer synchronously) — accept the immediate envelope.
     captureResp = JSON.parse(submitted);
@@ -109,7 +108,7 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
     await expect
       .poll(
         async () => {
-          await frame(); // force a real rendered frame -> pre-swap seam fills the payload
+          await frame(); // force a real rendered frame -> pre-swap seam builds the reply
           const s = await page.evaluate((rid) => {
             // Drain queued deferred lines; return the one whose request_id matches the capture.
             for (let i = 0; i < 8; i++) {
@@ -129,9 +128,8 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
     captureResp = captureLine ? JSON.parse(captureLine) : null;
   }
 
-  // The deferred capture must be a real PNG, not {deferred:true}, with a non-empty base64 payload.
+  // The deferred capture must be a real PNG with a non-empty base64 payload.
   expect(captureResp?.ok).toBe(true);
-  expect(captureResp?.result?.deferred).not.toBe(true);
   expect(captureResp?.result?.format).toBe('png');
   const b64 = captureResp?.result?.data ?? '';
   expect(b64.length).toBeGreaterThan(0);

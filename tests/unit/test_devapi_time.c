@@ -1,9 +1,10 @@
 /* L2 devapi time/render/frame group via submit() (no socket): discovery lists the commands with
    shapes, thin handlers forward to the nt_app L1 API, every bot-input range violation returns
    bad_params, render.info reports {enabled,draw_calls}, frame.current reports {frame,time,dt}, and
-   the highest-value test: frame.wait{frames:N} yields after exactly N sim-advances and NEVER during PAUSE. */
+   the highest-value test: frame.wait{frames:N} yields after exactly N sim-advances and fails as stalled on a pause. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,10 +28,25 @@ void tearDown(void) { nt_devapi_shutdown(); }
 
 /* ---- helpers (clone of test_devapi_deferred.c cadence) ---- */
 
-/* One game-frame advance: bump g_nt_app.frame (what the loop does on a sim-advance), then
-   read any deferred slot whose game-frame deadline was reached. */
+/* One loop iteration as nt_app_run does it (RUN: wall dt unless paused; MANUAL: one queued step), then the drain. */
 static const char *advance_sim(void) {
-    g_nt_app.frame++;
+    float dt = 0.0F;
+    bool advanced = false;
+    if (g_nt_app.mode == NT_APP_MODE_RUN) {
+        if (!g_nt_app.paused) {
+            dt = (1.0F / 60.0F) * g_nt_app.scale;
+            advanced = true;
+        }
+    } else if (g_nt_app.pending_steps > 0) {
+        g_nt_app.pending_steps--;
+        dt = g_nt_app.step_dt;
+        advanced = true;
+    }
+    g_nt_app.dt = dt;
+    g_nt_app.time += (double)dt;
+    if (advanced) {
+        g_nt_app.frame++;
+    }
     return nt_devapi_poll_response();
 }
 
@@ -49,6 +65,30 @@ static void assert_bad_params(const char *resp) {
     TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(root, "ok")));
     cJSON *err = cJSON_GetObjectItemCaseSensitive(root, "error");
     TEST_ASSERT_EQUAL_STRING("bad_params", cJSON_GetObjectItemCaseSensitive(err, "code")->valuestring);
+    cJSON_Delete(root);
+}
+
+/* Parse `resp`, assert ok:false + error.code == code, free the tree. */
+static void assert_error_code(const char *resp, const char *code) {
+    TEST_ASSERT_NOT_NULL(resp);
+    cJSON *root = cJSON_Parse(resp);
+    TEST_ASSERT_NOT_NULL(root);
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(root, "ok")));
+    TEST_ASSERT_EQUAL_STRING(code, cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(root, "error"), "code")->valuestring);
+    cJSON_Delete(root);
+}
+
+/* Assert a clock reply: ok, the request_id, and result.frame == frame. */
+static void assert_clock_reply(const char *resp, int request_id, uint32_t frame) {
+    TEST_ASSERT_NOT_NULL(resp);
+    cJSON *root = cJSON_Parse(resp);
+    TEST_ASSERT_NOT_NULL(root);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
+    cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
+    TEST_ASSERT_EQUAL_UINT32(frame, (uint32_t)cJSON_GetObjectItemCaseSensitive(result, "frame")->valuedouble);
+    TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(result, "time")));
+    TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(result, "dt")));
+    TEST_ASSERT_EQUAL_INT(request_id, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
     cJSON_Delete(root);
 }
 
@@ -148,33 +188,42 @@ static void test_forwarding_to_nt_app(void) {
 }
 
 /* time.step is DEFERRED (lockstep contract): it queues advances on pending_steps immediately, but
-   holds the response until exactly `count` sim-advances have completed — so a follow-up read sees
-   frame advanced by count, not by however many drained before the read. (Unit harness ticks the
-   deferred queue directly via advance_sim(); the real loop also drains pending_steps.) */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+   holds the reply until exactly `count` sim-advances have completed — so the reply's frame is the
+   submit frame plus count. */
 static void test_step_deferred_resolves_after_count(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"time.set_mode\",\"params\":{\"mode\":\"manual\"}}")));
 
     /* default count = 1 when omitted: queues 1, defers, resolves on the 1st sim-advance. */
-    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.step\"}"));
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.step\",\"request_id\":20}"));
     TEST_ASSERT_EQUAL_INT(1, g_nt_app.pending_steps); /* queued immediately */
-    TEST_ASSERT_NOT_NULL(advance_sim());              /* 1 advance resolves the default step's slot */
+    assert_clock_reply(advance_sim(), 20, 1);
 
-    /* explicit count = 3: deferred response withheld until the 3rd sim-advance. */
-    g_nt_app.pending_steps = 0; /* isolate from the default-count check above */
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.step\",\"request_id\":21,\"params\":{\"count\":3}}"));
     TEST_ASSERT_EQUAL_INT(3, g_nt_app.pending_steps);
     for (int i = 0; i < 2; i++) {
         TEST_ASSERT_NULL(advance_sim()); /* advances 1 and 2: still pending */
     }
-    const char *resp = advance_sim(); /* 3rd advance yields {ok:true,result:{deferred:true},request_id:21} */
-    TEST_ASSERT_NOT_NULL(resp);
-    cJSON *root = cJSON_Parse(resp);
-    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
-    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(root, "result"), "deferred")));
-    TEST_ASSERT_EQUAL_INT(21, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
-    cJSON_Delete(root);
+    assert_clock_reply(advance_sim(), 21, 4);
     TEST_ASSERT_NULL(nt_devapi_poll_response()); /* drained */
+}
+
+/* Steps the game already queued run first: the reply waits for them too. */
+static void test_step_waits_for_already_queued_steps(void) {
+    g_nt_app.mode = NT_APP_MODE_MANUAL;
+    nt_app_step(2);
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.step\",\"request_id\":22,\"params\":{\"count\":1}}"));
+    TEST_ASSERT_NULL(advance_sim());
+    TEST_ASSERT_NULL(advance_sim());
+    assert_clock_reply(advance_sim(), 22, 3);
+}
+
+/* A backlog that would push the deadline past the wrap-safe range is rejected before any side effect. */
+static void test_step_backlog_overflow_bad_params(void) {
+    g_nt_app.mode = NT_APP_MODE_MANUAL;
+    g_nt_app.pending_steps = INT32_MAX - 2;
+    assert_bad_params(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"count\":5}}"));
+    TEST_ASSERT_EQUAL_INT(INT32_MAX - 2, g_nt_app.pending_steps);
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"frame.current\"}"))); /* nothing pending */
 }
 
 /* ---- render.* ---- */
@@ -234,13 +283,14 @@ static void test_frame_wait_over_cap_bad_params(void) {
    sim-advance (the immediate-ack form), distinct from the over-cap rejection above. */
 static void test_frame_wait_zero_resolves_immediately(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"frame.wait\",\"request_id\":5,\"params\":{\"frames\":0}}"));
-    const char *resp = nt_devapi_poll_response(); /* ready immediately, no g_nt_app.frame advance */
-    TEST_ASSERT_NOT_NULL(resp);
-    cJSON *root = cJSON_Parse(resp);
-    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
-    TEST_ASSERT_EQUAL_INT(5, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
-    cJSON_Delete(root);
-    TEST_ASSERT_NULL(nt_devapi_poll_response()); /* drained */
+    assert_clock_reply(nt_devapi_poll_response(), 5, 0); /* ready immediately, no g_nt_app.frame advance */
+    TEST_ASSERT_NULL(nt_devapi_poll_response());         /* drained */
+}
+
+/* frames is a frame count: a fractional value is rejected, not truncated. */
+static void test_frame_wait_fractional_bad_params(void) {
+    assert_bad_params(nt_devapi_submit("{\"method\":\"frame.wait\",\"params\":{\"frames\":1.7}}"));
+    assert_bad_params(nt_devapi_submit("{\"method\":\"frame.wait\",\"params\":{\"frames\":-1}}"));
 }
 
 /* time.step{count} over the cap → bad_params, no backlog queued. cJSON clamps huge JSON
@@ -288,17 +338,57 @@ static void test_frame_wait_yields_after_n_sim_advances(void) {
         TEST_ASSERT_NULL(advance_sim());
     }
 
-    /* The N-th sim-advance yields {ok:true,result:{deferred:true},request_id:7}. */
-    const char *resp = advance_sim();
-    TEST_ASSERT_NOT_NULL(resp);
-    cJSON *root = cJSON_Parse(resp);
-    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
-    cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
-    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(result, "deferred")));
-    TEST_ASSERT_EQUAL_INT(7, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
-    cJSON_Delete(root);
-
+    /* The N-th sim-advance yields {frame,time,dt} with the request_id. */
+    assert_clock_reply(advance_sim(), 7, WAIT_FRAMES);
     TEST_ASSERT_NULL(nt_devapi_poll_response()); /* drained */
+}
+
+/* A freeze after submit, from game code or the host, fails the wait as stalled instead of hanging it. */
+static void test_frame_wait_stalls_when_game_pauses(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"frame.wait\",\"params\":{\"frames\":3}}"));
+    TEST_ASSERT_NULL(advance_sim());
+    nt_app_pause();
+    assert_error_code(advance_sim(), "stalled");
+}
+
+static void test_frame_wait_stalls_when_game_switches_to_manual(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"frame.wait\",\"params\":{\"frames\":3}}"));
+    nt_app_set_mode(NT_APP_MODE_MANUAL);
+    nt_app_step(10);
+    assert_error_code(advance_sim(), "stalled");
+}
+
+/* A step whose queue a mode switch dropped fails as stalled, even when RUN frames pass its target. */
+static void test_step_last_step_switched_to_run_stalls(void) {
+    g_nt_app.mode = NT_APP_MODE_MANUAL;
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"count\":1}}"));
+    nt_app_set_mode(NT_APP_MODE_RUN); /* game code, before the step runs */
+    assert_error_code(advance_sim(), "stalled");
+}
+
+/* A step whose queue a mode switch dropped fails as stalled. */
+static void test_step_stalls_when_mode_switches_to_run(void) {
+    g_nt_app.mode = NT_APP_MODE_MANUAL;
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"count\":100}}"));
+    TEST_ASSERT_NULL(advance_sim());
+    nt_app_set_mode(NT_APP_MODE_RUN);
+    TEST_ASSERT_EQUAL_INT(0, g_nt_app.pending_steps); /* the switch dropped the queued steps */
+    assert_error_code(advance_sim(), "stalled");
+}
+
+static void test_time_wait_stalls_when_game_freezes_time(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.wait\",\"params\":{\"seconds\":1.0}}"));
+    nt_app_set_scale(0.0F);
+    assert_error_code(advance_sim(), "stalled");
+}
+
+/* One reply in flight: the bot cannot pause or switch mode under a pending wait; it gets busy, nothing changes. */
+static void test_mutators_busy_while_reply_pending(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"frame.wait\",\"params\":{\"frames\":3}}"));
+    assert_error_code(nt_devapi_submit("{\"method\":\"time.pause\"}"), "busy");
+    assert_error_code(nt_devapi_submit("{\"method\":\"time.set_mode\",\"params\":{\"mode\":\"manual\"}}"), "busy");
+    TEST_ASSERT_FALSE(g_nt_app.paused);
+    TEST_ASSERT_EQUAL_INT(NT_APP_MODE_RUN, g_nt_app.mode);
 }
 
 /* frame.wait is RUN-only: under PAUSE (frame frozen) and in MANUAL (frame advances only on
@@ -371,16 +461,9 @@ static void test_step_drains_through_real_loop(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_time_wait_yields_after_seconds(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.wait\",\"request_id\":11,\"params\":{\"seconds\":0.5}}"));
-    TEST_ASSERT_NULL(advance_time(0.2));  /* time 0.2 < 0.5 */
-    TEST_ASSERT_NULL(advance_time(0.2));  /* time 0.4 < 0.5 */
-    const char *resp = advance_time(0.2); /* time 0.6 >= 0.5 -> resolves */
-    TEST_ASSERT_NOT_NULL(resp);
-    cJSON *root = cJSON_Parse(resp);
-    TEST_ASSERT_NOT_NULL(root);
-    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
-    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(root, "result"), "deferred")));
-    TEST_ASSERT_EQUAL_INT(11, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
-    cJSON_Delete(root);
+    TEST_ASSERT_NULL(advance_time(0.2));          /* time 0.2 < 0.5 */
+    TEST_ASSERT_NULL(advance_time(0.2));          /* time 0.4 < 0.5 */
+    assert_clock_reply(advance_time(0.2), 11, 0); /* time 0.6 >= 0.5 -> resolves */
     TEST_ASSERT_NULL(nt_devapi_poll_response());
 }
 
@@ -435,14 +518,7 @@ static void test_time_step_seconds_converts_to_frames(void) {
     for (int i = 0; i < 59; i++) {
         TEST_ASSERT_NULL(advance_sim());
     }
-    const char *resp = advance_sim();
-    TEST_ASSERT_NOT_NULL(resp);
-    cJSON *root = cJSON_Parse(resp);
-    TEST_ASSERT_NOT_NULL(root);
-    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
-    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(root, "result"), "deferred")));
-    TEST_ASSERT_EQUAL_INT(12, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
-    cJSON_Delete(root);
+    assert_clock_reply(advance_sim(), 12, 60);
     TEST_ASSERT_NULL(nt_devapi_poll_response());
 }
 
@@ -462,15 +538,12 @@ static void test_time_step_fractional_count_has_no_side_effect(void) {
     TEST_ASSERT_EQUAL_INT(0, g_nt_app.pending_steps);
 }
 
-static void test_step_queue_full_has_no_side_effect(void) {
+/* A second step while the first reply is pending is busy and queues nothing. */
+static void test_step_busy_has_no_side_effect(void) {
     g_nt_app.mode = NT_APP_MODE_MANUAL;
-    for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
-        TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"count\":1}}"));
-    }
-    TEST_ASSERT_EQUAL_INT(NT_DEVAPI_MAX_DEFERRED, g_nt_app.pending_steps);
-
-    assert_bad_params(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"count\":1}}"));
-    TEST_ASSERT_EQUAL_INT(NT_DEVAPI_MAX_DEFERRED, g_nt_app.pending_steps);
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"count\":1}}"));
+    assert_error_code(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"count\":1}}"), "busy");
+    TEST_ASSERT_EQUAL_INT(1, g_nt_app.pending_steps);
 }
 
 int main(void) {
@@ -498,6 +571,15 @@ int main(void) {
     RUN_TEST(test_time_step_seconds_converts_to_frames);
     RUN_TEST(test_time_step_count_seconds_exclusive_and_ceil);
     RUN_TEST(test_time_step_fractional_count_has_no_side_effect);
-    RUN_TEST(test_step_queue_full_has_no_side_effect);
+    RUN_TEST(test_step_busy_has_no_side_effect);
+    RUN_TEST(test_step_waits_for_already_queued_steps);
+    RUN_TEST(test_step_backlog_overflow_bad_params);
+    RUN_TEST(test_frame_wait_fractional_bad_params);
+    RUN_TEST(test_frame_wait_stalls_when_game_pauses);
+    RUN_TEST(test_frame_wait_stalls_when_game_switches_to_manual);
+    RUN_TEST(test_step_stalls_when_mode_switches_to_run);
+    RUN_TEST(test_step_last_step_switched_to_run_stalls);
+    RUN_TEST(test_time_wait_stalls_when_game_freezes_time);
+    RUN_TEST(test_mutators_busy_while_reply_pending);
     return UNITY_END();
 }

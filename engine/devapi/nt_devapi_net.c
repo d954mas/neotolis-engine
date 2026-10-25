@@ -104,12 +104,12 @@ static void close_client(void) {
         s_client = NT_INVALID_SOCK;
     }
     s_recv_len = 0; /* drop any partial line — the next client starts clean. */
-    /* Drop the gone client's in-flight deferred results so a reconnecting client
-       can't receive them tagged with the old client's request_id. */
+    /* Drop the gone client's pending deferred reply so a reconnecting client is not busy and
+       can't receive it tagged with the old client's request_id. */
     nt_devapi_deferred_reset();
     /* Generic client-reset hooks: a compiled-out group registers none, so net.c names no group. */
     nt_devapi_run_reset_hooks();
-    /* Resets ONLY devapi-owned transient state (deferred queue + reset-hook schedules). Game-owned
+    /* Resets ONLY devapi-owned transient state (pending deferred reply + reset-hook schedules). Game-owned
        state (time mode, gate, applied input) is the changer's job — L1 can't tell game from bot. */
 }
 
@@ -409,7 +409,7 @@ void nt_devapi_net_poll(void) {
     }
     // #endregion
 
-    // #region deferred drain — emit every result whose game-frame deadline (g_nt_app.frame) has passed
+    // #region deferred drain — emit the pending reply once its gate opened or stalled
     const char *dr;
     while ((dr = nt_devapi_poll_response()) != NULL) {
         if (!send_line(dr)) {

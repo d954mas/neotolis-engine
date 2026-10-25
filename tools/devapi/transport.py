@@ -120,7 +120,8 @@ class PlaywrightTransport(Transport):
     window.__devapi.submit and stashes the SYNCHRONOUS response (a non-deferred command returns its
     response line immediately; a deferred command — C returned NULL — returns "" and its data line
     arrives later via poll()). recv_line() returns a stashed line, else polls after each frame until a
-    line appears or the MANDATORY read_timeout fires. Like SocketTransport it only moves lines: time
+    line appears or the MANDATORY read_timeout fires, which closes the transport and resets the bridge
+    (a native timeout closes the socket the same way). Like SocketTransport it only moves lines: time
     advance belongs to the client.
 
     Playwright Python is NOT a CI dep (the CI web gate is the TS spec); this class is the local/dev
@@ -152,6 +153,8 @@ class PlaywrightTransport(Transport):
         while True:
             left = deadline - time.monotonic()
             if left <= 0:
+                # Like SocketTransport: a timeout closes, and the reset drops the engine's pending reply.
+                self.close()
                 raise TimeoutError("no web devapi line within read_timeout")
             line = self._page.evaluate(_POLL_AFTER_FRAME_JS, max(1, int(left * 1000)))
             if line:
