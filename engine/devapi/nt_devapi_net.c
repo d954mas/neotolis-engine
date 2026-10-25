@@ -70,6 +70,8 @@ static char *s_recv_buf;
 static size_t s_recv_cap;
 static size_t s_recv_len;
 
+static void net_poll(void);
+
 // #region recv buffer (geometric grow, mirrors resp_reserve in nt_devapi.c)
 static void recv_reserve(size_t need) {
     if (need <= s_recv_cap) {
@@ -261,8 +263,8 @@ bool nt_devapi_net_start(uint16_t port) {
     /* Register recv+deferred-drain in the transport-poll phase, which the core runs before the tick
        phase — so a line received this tick is scheduled before the input tick reads it, regardless of
        registration order. Register at most once: the table is append-only, so a restart must not dup. */
-    if (!nt_devapi_transport_is_registered(nt_devapi_net_poll)) {
-        nt_devapi_register_transport_poll(nt_devapi_net_poll);
+    if (!nt_devapi_transport_is_registered(net_poll)) {
+        nt_devapi_register_transport_poll(net_poll);
     }
     return true;
 }
@@ -318,8 +320,11 @@ static void try_accept(void) {
     NT_ASSERT(0 && "devapi_net accept() failed with an unexpected error (fd exhaustion?)");
 }
 
+/* The transport-poll hook nt_devapi_update runs once per tick: non-blocking accept + recv + framed
+   dispatch + send + deferred drain. A wedged send buffer gets a bounded best-effort retry, then the
+   client is dropped (never an unbounded spin). Safe before a client connects. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_devapi_net_poll(void) {
+static void net_poll(void) {
     if (s_listen == NT_INVALID_SOCK) {
         return; /* not started / stopped. */
     }

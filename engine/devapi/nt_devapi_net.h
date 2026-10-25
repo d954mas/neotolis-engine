@@ -24,12 +24,6 @@
    is an API-contract return, NOT an assert. Call nt_devapi_init first; pair with _stop. */
 bool nt_devapi_net_start(uint16_t port);
 
-/* Poll the transport once per frame: non-blocking accept + recv + framed dispatch + send +
-   deferred drain. Non-blocking accept/recv/dispatch; a wedged send buffer gets a bounded
-   best-effort retry, then the client is dropped (never an unbounded spin). Safe to call
-   before a client connects. */
-void nt_devapi_net_poll(void);
-
 /* Close the client + listen sockets and tear down platform networking (WSACleanup on Windows). */
 void nt_devapi_net_stop(void);
 

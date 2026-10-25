@@ -350,7 +350,7 @@ static const nt_devapi_command_desc k_time_cmds[] = {
     {
         .method = "frame.wait",
         .group = "frame",
-        .summary = "RUN-only: reply once frames sim-advances elapse (frames=0 resolves on the next drain); rejected in manual/paused, stalled if the sim freezes later",
+        .summary = "RUN-only: reply once frames sim-advances elapse (frames=0 resolves on the next nt_devapi_update); rejected in manual/paused, stalled if the sim freezes later",
         .params_shape = "{frames?:integer}",
         .result_shape = "{frame:number,time:number,dt:number}",
         .frame_behavior = "deferred",

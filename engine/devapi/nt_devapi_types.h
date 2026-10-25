@@ -30,7 +30,8 @@ typedef struct nt_devapi_command_desc {
 } nt_devapi_command_desc;
 
 /* Command handler. Fills result_obj (a pre-created cJSON object) on success and
-   returns true; on failure fills err and returns false. params may be NULL. */
+   returns true; on failure fills err and returns false. params may be NULL. A handler never
+   calls nt_devapi_submit (dispatch asserts no re-entry). */
 typedef bool (*nt_devapi_handler_fn)(const cJSON *params, cJSON *result_obj, nt_devapi_error *err, void *user_data);
 
 #endif /* NT_DEVAPI_TYPES_H */
