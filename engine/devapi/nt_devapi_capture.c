@@ -53,7 +53,7 @@ typedef struct capture_ctx {
     uint32_t h;
     uint32_t factor; /* scale divisor: 1 (full) / 2 (½) / 4 (¼). */
 } capture_ctx;
-_Static_assert(sizeof(capture_ctx) <= NT_DEVAPI_DEFER_CTX_SIZE && _Alignof(capture_ctx) <= 8, "capture_ctx must fit the deferred slot ctx");
+_Static_assert(sizeof(capture_ctx) <= NT_DEVAPI_DEFER_CTX_SIZE, "capture_ctx must fit the deferred slot ctx");
 
 // #region seam producer
 /* Fused alpha-strip + box-average: rgba8 src -> RGB dst, dst dims = w/factor x h/factor.

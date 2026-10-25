@@ -44,8 +44,8 @@ typedef struct deferred_slot {
     double target_time;         /* SECONDS: g_nt_app.time deadline. */
     uint32_t target_frame;      /* FRAMES: g_nt_app.frame deadline (wrap-safe compare). */
     nt_devapi_gate gate;
-    nt_app_mode_t mode; /* the time mode at submit; a switch strands a clock gate. */
-    _Alignas(8) unsigned char ctx[NT_DEVAPI_DEFER_CTX_SIZE];
+    nt_app_mode_t mode;                          /* the time mode at submit; a switch strands a clock gate. */
+    unsigned char ctx[NT_DEVAPI_DEFER_CTX_SIZE]; /* bytes: a reply reads it with memcpy, so no alignment */
 } deferred_slot;
 
 static deferred_slot s_pending;

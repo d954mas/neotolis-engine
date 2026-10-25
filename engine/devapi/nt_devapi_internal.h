@@ -59,7 +59,7 @@ typedef enum nt_devapi_gate {
 /* Defer the in-flight command's reply. When the gate opens, `reply` runs with the handler ABI (params NULL,
    user_data = the slot's copy of ctx) and its result or error is the response; a gate that can no longer open
    (sim frozen, time mode changed, rendering off) answers stalled instead. ctx (ctx_size bytes, at most
-   NT_DEVAPI_DEFER_CTX_SIZE; NULL when 0) is copied. Returns false with err set inside a batch; the handler
+   NT_DEVAPI_DEFER_CTX_SIZE; NULL when 0) is copied as bytes, so the reply reads it with memcpy. Returns false with err set inside a batch; the handler
    returns that. Call only from a handler, before any side effect that a failed defer must not leave. */
 bool nt_devapi_defer(nt_devapi_gate gate, double amount, nt_devapi_handler_fn reply, const void *ctx, size_t ctx_size, nt_devapi_error *err);
 
