@@ -73,7 +73,8 @@ static bool cmd_time_step(const cJSON *params, cJSON *result, nt_devapi_error *e
             set_bad_params(err, "time.step: seconds must be finite and > 0");
             return false;
         }
-        double steps = ceil(seconds / (double)g_nt_app.step_dt); /* step_dt > 0 (L1 invariant). */
+        /* step_dt > 0 (L1 invariant); fmax: a positive quotient can underflow to 0 when step_dt > 1. */
+        double steps = fmax(1.0, ceil(seconds / (double)g_nt_app.step_dt));
         if (steps > (double)INT32_MAX) {
             set_bad_params(err, "time.step: seconds too large (more than INT32_MAX steps)");
             return false;

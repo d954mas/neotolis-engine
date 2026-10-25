@@ -315,6 +315,14 @@ static void test_step_count_int32_bound(void) {
 }
 
 /* The seconds sugar hits the same bound before its int cast; step_dt 1 makes seconds == steps. */
+/* Any positive seconds steps at least once: a quotient that underflows to 0 still queues one step. */
+static void test_step_seconds_tiny_steps_once(void) {
+    g_nt_app.mode = NT_APP_MODE_MANUAL;
+    g_nt_app.step_dt = 2.0F;
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"seconds\":5e-324}}"));
+    TEST_ASSERT_EQUAL_INT(1, g_nt_app.pending_steps);
+}
+
 static void test_step_seconds_int32_bound(void) {
     g_nt_app.mode = NT_APP_MODE_MANUAL;
     g_nt_app.step_dt = 1.0F;
@@ -577,6 +585,7 @@ int main(void) {
     RUN_TEST(test_frame_wait_zero_resolves_immediately);
     RUN_TEST(test_step_count_int32_bound);
     RUN_TEST(test_step_seconds_int32_bound);
+    RUN_TEST(test_step_seconds_tiny_steps_once);
     RUN_TEST(test_set_fps_tiny_underflow_bad_params);
     RUN_TEST(test_step_requires_manual_mode);
     RUN_TEST(test_set_scale_huge_bad_params);

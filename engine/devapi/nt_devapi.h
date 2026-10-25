@@ -49,7 +49,9 @@ void nt_devapi_update(void);
 
 /* Run fn whenever a client leaves: a native disconnect, a newer connection taking over, or a web
    reset(). The engine resets only devapi-owned state there; recovering game state (time mode, pause,
-   queued steps) is the host's policy. Call after nt_devapi_init (shutdown clears the table); overflow asserts. */
+   queued steps) is the host's policy. Call after nt_devapi_init (shutdown clears the table); overflow asserts.
+   fn runs inside a transport's close or reset: it must not call back into devapi (submit, update,
+   net start/stop, web reset). */
 void nt_devapi_register_reset(nt_devapi_hook_fn fn);
 
 #ifdef NT_DEVAPI_GROUP_UI

@@ -347,7 +347,8 @@ python -m http.server 8125 --bind 127.0.0.1 --directory build/examples/skeletal_
 ```
 
 Open `http://127.0.0.1:8125`, select the same pose, then capture once with and
-once without `CPU reference` through the existing browser bridge. Capture replies are deferred; wait for the actual PNG:
+once without `CPU reference` through the existing browser bridge. Capture replies are deferred; wait for the actual PNG. Keep one waiting loop per page: a loop left
+running keeps polling and takes the next command's reply.
 
 ```js
 const command = {method: "capture.frame", request_id: 1, params: {scale: 1}};
