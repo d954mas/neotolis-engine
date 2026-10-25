@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -256,6 +257,55 @@ static void test_scissor_neither_axis_clips_to_bbox(void) {
     TEST_ASSERT_EQUAL_INT(50, rect[3]);
 }
 
+static void read_scissor(const nt_ui_custom_frame_t *frame, void *userdata) {
+    (void)frame;
+    TEST_ASSERT_TRUE(nt_gfx_test_scissor_enabled());
+    nt_gfx_test_scissor_rect(userdata);
+}
+
+/* Sample the scissor a draw inside START(bbox)..END would see. */
+static void walk_probe_inside_clip(Clay_BoundingBox bbox, bool axes, int rect[4]) {
+    rect[0] = rect[1] = rect[2] = rect[3] = -1;
+    nt_ui_custom_data_t probe = {.type = NT_UI_CUSTOM_TYPE_CALLBACK, .data = rect, .emit = read_scissor};
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
+    s_test_cmds[0].boundingBox = bbox;
+    s_test_cmds[0].renderData.clip.horizontal = axes;
+    s_test_cmds[0].renderData.clip.vertical = axes;
+    s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_CUSTOM;
+    s_test_cmds[1].renderData.custom.customData = &probe;
+    s_test_cmds[2].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
+    inject_frozen_cmds(3);
+    const nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_walk(s_fx.ctx, &target);
+}
+
+/* A float attached to a collapsed clip element gets an empty marker; its subtree draws under a 0-area scissor. */
+static void test_scissor_empty_floating_marker_culls(void) {
+    int rect[4];
+    walk_probe_inside_clip((Clay_BoundingBox){.x = 50.5F, .y = 100.25F, .width = 0.0F, .height = 50.0F}, false, rect);
+    TEST_ASSERT_EQUAL_INT(0, rect[2]);
+    walk_probe_inside_clip((Clay_BoundingBox){.x = 50.5F, .y = 100.25F, .width = 200.0F, .height = 0.0F}, false, rect);
+    TEST_ASSERT_EQUAL_INT(0, rect[3]);
+}
+
+/* Zero extent at a fractional edge must not round out to a 1 px column. */
+static void test_scissor_empty_clip_has_zero_extent(void) {
+    int rect[4];
+    walk_probe_inside_clip((Clay_BoundingBox){.x = 50.5F, .y = 100.25F, .width = 0.0F, .height = 50.0F}, true, rect);
+    TEST_ASSERT_EQUAL_INT(0, rect[2]);
+    TEST_ASSERT_EQUAL_INT(50, rect[0]);
+}
+
+/* A NaN size (e.g. CLAY_SIZING_FIXED(NAN)) crashes; the corner AABB alone would turn it into a 0-width clip. */
+static void test_scissor_nan_bbox_asserts(void) {
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 50.0F, .y = 100.0F, .width = NAN, .height = 50.0F};
+    s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
+    inject_frozen_cmds(2);
+    const nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
+}
+
 /* Scaled mode: viewport is LOGICAL (Y top-down). fb_size + fb_offset describe
  * physical placement. Scissor coordinates scale logical->physical and Y-flip
  * against fb height for GL bottom-left. */
@@ -358,6 +408,9 @@ int main(void) {
     RUN_TEST(test_scissor_horizontal_only);
     RUN_TEST(test_scissor_vertical_only);
     RUN_TEST(test_scissor_neither_axis_clips_to_bbox);
+    RUN_TEST(test_scissor_empty_floating_marker_culls);
+    RUN_TEST(test_scissor_empty_clip_has_zero_extent);
+    RUN_TEST(test_scissor_nan_bbox_asserts);
     RUN_TEST(test_scissor_scaled_letterbox);
     RUN_TEST(test_scissor_scaled_expand);
     return UNITY_END();

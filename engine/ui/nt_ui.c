@@ -1361,12 +1361,9 @@ void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *targ
 static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, clip_cache_entry_t *clip_cache, int *clip_cache_len) {
     NT_ASSERT((uint32_t)*depth < NT_UI_WALKER_SCISSOR_DEPTH_CAP && "scissor stack overflow; restructure nested clip");
 
-    /* Both-axes-false is reserved for Clay's floating clipTo=ATTACHED_PARENT marker;
-     * user code must always set at least one axis true (asserted below). */
+    /* Both axes false is Clay's floating clipTo=ATTACHED_PARENT marker; Clay sets a clip config only with an axis. */
     const Clay_ClipRenderData *clip = &c->renderData.clip;
     const bool both_false = !clip->horizontal && !clip->vertical;
-    NT_ASSERT((!both_false || (c->boundingBox.width > 0.0F && c->boundingBox.height > 0.0F)) &&
-              "nt_ui SCISSOR_START with both axes false requires non-empty bbox (reserved for Clay floating clipTo marker)");
     const int vw = (int)target->viewport[2];
     const int vh = (int)target->viewport[3];
     const bool clip_h = clip->horizontal || both_false;
@@ -1378,7 +1375,8 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
     if (clip_h) {
         const float bx = c->boundingBox.x;
         x = (int)floorf(bx);
-        wp = (int)ceilf(bx + c->boundingBox.width) - x;
+        /* Zero extent stays empty: floor/ceil of a fractional edge would open a 1 px column. */
+        wp = (c->boundingBox.width > 0.0F) ? (int)ceilf(bx + c->boundingBox.width) - x : 0;
     } else {
         x = 0;
         wp = vw;
@@ -1386,7 +1384,7 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
     if (clip_v) {
         const float by = c->boundingBox.y;
         y = (int)floorf(by);
-        hp = (int)ceilf(by + c->boundingBox.height) - y;
+        hp = (c->boundingBox.height > 0.0F) ? (int)ceilf(by + c->boundingBox.height) - y : 0;
     } else {
         y = 0;
         hp = vh;
@@ -1691,6 +1689,8 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START: {
+        /* Check the layout box before the corner AABB: fminf/fmaxf would drop a NaN width. Empty is valid. */
+        NT_ASSERT(isfinite(c->boundingBox.x + c->boundingBox.width) && isfinite(c->boundingBox.y + c->boundingBox.height) && "nt_ui scissor bbox must be finite");
         counters->scissor_command_count++;
         Clay_RenderCommand local = *c;
         if (force_screen_space) {

@@ -574,6 +574,14 @@ space. A rotated scroll container is clipped by the AABB of its
 rotated corners, so content can poke past the visual corners.
 Stencil-mask fix is out of scope for v1.
 
+A clip with zero extent along an axis it clips (for example a collapsed
+scroll container) yields a zero-area scissor, so its subtree and any float
+clipped to it with `clipTo = ATTACHED_PARENT` draw nothing. Under rotation the
+AABB rule above still applies. A float finds its clip by comparing boxes, so
+under a transformed clip, or nested clips with the same box, it can get another
+clip's scissor and stay visible. A non-finite clip box is a layout bug and
+asserts.
+
 ## Text under non-uniform scale
 
 Font atlas em-size is picked from
