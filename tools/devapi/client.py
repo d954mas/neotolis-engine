@@ -1,8 +1,9 @@
 """DevApiClient — the reusable harness surface.
 
 request / result / batch / wait_frames / step over a pluggable Transport.
-Replies are correlated by request_id via a pending-map, never by arrival order
-(deferred / pipelined results interleave on one connection).
+Replies are correlated by request_id. The engine keeps one deferred reply in flight: a
+command sent while one is pending answers busy, and a client timeout closes the
+transport, which drops it.
 
 Stdlib only (json + socket) — no pip deps. Python 3.8+.
 """
@@ -123,9 +124,9 @@ class DevApiClient:
     def wait_frames(self, n: int) -> Dict[str, Any]:
         """Block until `n` simulation frames have ADVANCED (not loop iterations).
 
-        Deferred — the correlation loop handles the yield. Uses result() so a server
-        rejection (frame.wait is RUN-only: manual/paused return bad_params) raises
-        DevApiResultError instead of silently returning an {ok:false} envelope.
+        Deferred; returns {frame,time,dt} at the reply. RUN-only: manual/paused raise
+        DevApiResultError (bad_params), and a pause or mode switch while waiting raises it
+        with stalled.
         """
         return self.result("frame.wait", {"frames": n})
 
@@ -134,7 +135,8 @@ class DevApiClient:
 
         Deferred, RUN-only: game time advances on the variable RUN dt, so a fixed frame
         count can't express it (that's the point). Rejected in manual/paused/scale==0 where
-        time is frozen (raises DevApiResultError). Wall duration is ~seconds/scale.
+        time is frozen, and stalled if time freezes while waiting (both raise
+        DevApiResultError). Wall duration is ~seconds/scale. Returns {frame,time,dt}.
         """
         return self.result("time.wait", {"seconds": seconds})
 
@@ -142,8 +144,8 @@ class DevApiClient:
         """Advance exactly `count` fixed-dt sim frames (lockstep); requires manual mode.
 
         Maps to time.step{count}; deterministic — no wall clock, no max_dt clamp.
-        Deferred: blocks until all `count` sim-advances have completed, so a follow-up
-        frame.current reads frame already advanced by exactly count (not the queue mid-drain).
+        Deferred: blocks until every queued step is done and returns {frame,time,dt} then.
+        A mode switch while stepping drops the queue and raises DevApiResultError (stalled).
         """
         return self.result("time.step", {"count": count})
 
@@ -437,15 +439,14 @@ class DevApiClient:
 
     # #endregion
 
-    # #region capture.* wrappers — deferred DATA commands; result() blocks until a render fills the payload.
+    # #region capture.* wrappers — deferred commands; result() blocks until a render builds the PNG.
     def capture_frame(self, scale: Optional[int] = None) -> Dict[str, Any]:
         """Capture the full framebuffer as a PNG. Result: {width,height,format:"png",data:<base64>}.
 
-        Deferred: result() blocks until the next pre-swap render fills the payload, so it returns the
-        real PNG (NOT {deferred:true}). Works in any time mode and never advances the sim: in MANUAL
-        it shows the current state; step first for a new one. Stalls while rendering is off (no swap,
-        no seam). `scale` is the integer divisor {1,2,4} (1=full, 2=half,
-        4=quarter); omitted -> full resolution.
+        Deferred: result() blocks until the next pre-swap render builds the PNG. Works in any time
+        mode and never advances the sim: in MANUAL it shows the current state; step first for a new
+        one. Raises DevApiResultError (stalled) while rendering is off. `scale` is the integer
+        divisor {1,2,4} (1=full, 2=half, 4=quarter); omitted -> full resolution.
         """
         params: Dict[str, Any] = {}
         if scale is not None:

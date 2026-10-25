@@ -29,7 +29,7 @@ static bool cmd_record_start(const cJSON *params, cJSON *result, nt_devapi_error
         return false;
     }
     if (nt_recorder_active()) {
-        err->code = "busy";
+        err->code = "recording";
         err->message = "record.start: a recording is active";
         return false;
     }

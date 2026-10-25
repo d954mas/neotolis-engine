@@ -44,10 +44,10 @@ void nt_app_quit(void);
 
 void nt_app_pause(void); /* RUN: dt -> 0, frame frozen, fn still runs */
 void nt_app_resume(void);
-void nt_app_set_scale(float scale); /* RUN dt multiplier (NOT a determinism primitive) */
-void nt_app_set_mode(nt_app_mode_t mode);
+void nt_app_set_scale(float scale);       /* RUN dt multiplier (NOT a determinism primitive) */
+void nt_app_set_mode(nt_app_mode_t mode); /* a real switch drops queued manual steps */
 void nt_app_set_step_dt(float step_dt);
-void nt_app_step(int count); /* MANUAL: queue `count` fixed-dt advances */
+void nt_app_step(int count); /* MANUAL only: queue `count` fixed-dt advances */
 
 void nt_app_set_render_enabled(bool enabled);
 bool nt_app_render_enabled(void);

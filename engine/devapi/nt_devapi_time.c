@@ -1,4 +1,5 @@
 #include <math.h>
+#include <stdint.h>
 #include <string.h>
 
 #include "app/nt_app.h"
@@ -17,6 +18,20 @@
 static void set_bad_params(nt_devapi_error *err, const char *message) {
     err->code = NT_DEVAPI_ERR_BAD_PARAMS;
     err->message = message;
+}
+
+_Static_assert(NT_DEVAPI_FRAME_WAIT_MAX <= INT32_MAX, "NT_DEVAPI_FRAME_WAIT_MAX must fit the wrap-safe frame compare");
+
+/* frame.current → {frame, time, dt}, also the reply of every clock deferral; g_nt_app.time = sum of applied
+   dts = game-elapsed time. */
+static bool cmd_frame_current(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
+    (void)params;
+    (void)err;
+    (void)ud;
+    devapi_add_number(result, "frame", (double)g_nt_app.frame);
+    devapi_add_number(result, "time", g_nt_app.time);
+    devapi_add_number(result, "dt", (double)g_nt_app.dt);
+    return true;
 }
 
 // #region time.*
@@ -39,8 +54,8 @@ static bool cmd_time_resume(const cJSON *params, cJSON *result, nt_devapi_error 
 }
 
 /* Lockstep-crunch step. Count in frames (default 1) OR seconds (sugar: ceil(seconds/step_dt) frames
-   — game-time and frames are linear in MANUAL since step_dt is fixed). Deferred: the response is
-   held until all sim-advances complete, so the caller observes frame advanced by exactly count. */
+   — game-time and frames are linear in MANUAL since step_dt is fixed). Deferred: the reply waits for
+   the steps already queued plus `count`, so the caller observes every queued step done. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_time_step(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)result;
@@ -80,18 +95,20 @@ static bool cmd_time_step(const cJSON *params, cJSON *result, nt_devapi_error *e
         }
         count = (int)parsed;
     }
-    /* Only MANUAL drains pending_steps; queued into RUN they never drain, and under RUN+pause the
-       deferred reply could never resolve → the caller would block until its socket timeout. */
+    /* Only MANUAL drains pending_steps: a RUN step would resolve on RUN frames and leave its steps queued. */
     if (g_nt_app.mode != NT_APP_MODE_MANUAL) {
         set_bad_params(err, "time.step: only valid in 'manual' mode");
         return false;
     }
-    if (!nt_devapi_can_defer_current()) {
-        set_bad_params(err, "time.step: deferred response unavailable");
+    if (count > INT32_MAX - g_nt_app.pending_steps) {
+        set_bad_params(err, "time.step: too many steps already queued");
+        return false;
+    }
+    if (!nt_devapi_defer(NT_DEVAPI_GATE_FRAMES, (double)(g_nt_app.pending_steps + count), cmd_frame_current, err)) {
         return false;
     }
     nt_app_step(count);
-    return nt_devapi_defer_current(count);
+    return true;
 }
 
 static bool cmd_time_set_scale(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
@@ -169,8 +186,8 @@ static bool cmd_time_set_fps(const cJSON *params, cJSON *result, nt_devapi_error
     return true;
 }
 
-/* RUN + scale>0 only: in MANUAL/pause/scale==0 game time is frozen, so a passive wait could never
-   resolve. Deadline is GAME time, not a frame count — RUN's variable dt can't be precomputed as frames. */
+/* RUN + scale>0 only: in MANUAL/pause/scale==0 game time is frozen. Deadline is GAME time, not a frame
+   count — RUN's variable dt can't be precomputed as frames. A later freeze fails the reply as stalled. */
 static bool cmd_time_wait(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)result;
     (void)ud;
@@ -191,7 +208,7 @@ static bool cmd_time_wait(const cJSON *params, cJSON *result, nt_devapi_error *e
         set_bad_params(err, "time.wait: seconds out of range [0, NT_DEVAPI_TIME_WAIT_MAX_SECONDS]");
         return false;
     }
-    return nt_devapi_defer_current_time(seconds);
+    return nt_devapi_defer(NT_DEVAPI_GATE_SECONDS, seconds, cmd_frame_current, err);
 }
 // #endregion
 
@@ -221,20 +238,8 @@ static bool cmd_render_info(const cJSON *params, cJSON *result, nt_devapi_error 
 // #endregion
 
 // #region frame.*
-/* frame.current → {frame, time, dt}; g_nt_app.time = sum of applied dts = game-elapsed time. */
-static bool cmd_frame_current(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)params;
-    (void)err;
-    (void)ud;
-    devapi_add_number(result, "frame", (double)g_nt_app.frame);
-    devapi_add_number(result, "time", g_nt_app.time);
-    devapi_add_number(result, "dt", (double)g_nt_app.dt);
-    return true;
-}
-
-/* frame.wait passively waits for autonomous RUN frames. In MANUAL the bot must time.step; in
-   PAUSE there is nothing to wait for — reject fail-fast instead of registering a slot that can
-   never resolve and would block the caller. Over-cap also fails fast (never spins). */
+/* frame.wait passively waits for autonomous RUN frames: in MANUAL the bot steps, and a paused sim has
+   nothing to wait for. A pause or mode switch after submit fails the reply as stalled. */
 static bool cmd_frame_wait(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)result;
     (void)ud;
@@ -242,20 +247,12 @@ static bool cmd_frame_wait(const cJSON *params, cJSON *result, nt_devapi_error *
         set_bad_params(err, "frame.wait: only valid in running mode (use time.step in manual; resume if paused)");
         return false;
     }
-    int frames = 1;
+    uint32_t frames = 1U;
     const cJSON *f = cJSON_GetObjectItemCaseSensitive(params, "frames");
-    if (f != NULL) {
-        if (!cJSON_IsNumber(f)) {
-            set_bad_params(err, "frame.wait: frames must be a number");
-            return false;
-        }
-        frames = f->valueint;
-    }
-    if (frames < 0 || frames > NT_DEVAPI_FRAME_WAIT_MAX) {
-        set_bad_params(err, "frame.wait: frames out of range [0, NT_DEVAPI_FRAME_WAIT_MAX]");
+    if (f != NULL && !nt_devapi_parse_u32_param_exact(f, NT_DEVAPI_FRAME_WAIT_MAX, err, set_bad_params, "frame.wait: frames must be an integer in [0, NT_DEVAPI_FRAME_WAIT_MAX]", &frames)) {
         return false;
     }
-    return nt_devapi_defer_current(frames);
+    return nt_devapi_defer(NT_DEVAPI_GATE_FRAMES, (double)frames, cmd_frame_current, err);
 }
 // #endregion
 
@@ -281,9 +278,9 @@ static const nt_devapi_command_desc k_time_cmds[] = {
     {
         .method = "time.step",
         .group = "time",
-        .summary = "MANUAL: advance count fixed-dt frames OR seconds (= seconds/step_dt frames); lockstep, blocks until done",
+        .summary = "MANUAL: advance count fixed-dt frames OR seconds (= seconds/step_dt frames); replies once every queued step is done",
         .params_shape = "{count?:number, seconds?:number}",
-        .result_shape = "{deferred:bool}",
+        .result_shape = "{frame:number,time:number,dt:number}",
         .frame_behavior = "deferred",
         .side_effects = "queues sim advances",
     },
@@ -317,9 +314,9 @@ static const nt_devapi_command_desc k_time_cmds[] = {
     {
         .method = "time.wait",
         .group = "time",
-        .summary = "RUN-only: defer until seconds of GAME time elapse; rejected in manual/paused/scale=0 (use time.step in manual)",
+        .summary = "RUN-only: reply once seconds of GAME time elapse; rejected in manual/paused/scale=0, stalled if time freezes later",
         .params_shape = "{seconds?:number}",
-        .result_shape = "{deferred:bool}",
+        .result_shape = "{frame:number,time:number,dt:number}",
         .frame_behavior = "deferred",
         .side_effects = "none",
     },
@@ -353,9 +350,9 @@ static const nt_devapi_command_desc k_time_cmds[] = {
     {
         .method = "frame.wait",
         .group = "frame",
-        .summary = "RUN-only: defer until frames sim-advances elapse (frames=0 resolves on the next drain); rejected in manual/paused (use time.step in manual)",
-        .params_shape = "{frames?:number}",
-        .result_shape = "{deferred:bool}",
+        .summary = "RUN-only: reply once frames sim-advances elapse (frames=0 resolves on the next nt_devapi_update); rejected in manual/paused, stalled if the sim freezes later",
+        .params_shape = "{frames?:integer}",
+        .result_shape = "{frame:number,time:number,dt:number}",
         .frame_behavior = "deferred",
         .side_effects = "none",
     },

@@ -153,9 +153,8 @@ void test_scale_multiplies_wall_dt(void) {
     }
 }
 
-/* MANUAL with no pending steps never advances the frame, so a deferred wait keyed on the frame
-   never resolves during manual-idle. The full L1+L2 "yield after N sim-advances, never during
-   pause/idle" coverage lives in test_devapi_time.c, where the deferred queue + submit() link. */
+/* MANUAL with no pending steps never advances the frame. The devapi side (a wait over a frozen sim
+   answers stalled) lives in test_devapi_deferred.c / test_devapi_time.c. */
 void test_manual_idle_freezes_frame(void) {
     g_nt_app.mode = NT_APP_MODE_MANUAL; /* no nt_app_step() -> pending_steps == 0 */
     s_iter_target = 5;
@@ -164,6 +163,17 @@ void test_manual_idle_freezes_frame(void) {
 
     TEST_ASSERT_EQUAL_UINT32(0, g_nt_app.frame); /* frozen: no sim-advance, no tick */
     TEST_ASSERT_TRUE_MESSAGE(s_frame_log_count >= 5, "frame fn must keep running in manual-idle");
+}
+
+/* A real mode switch drops queued steps, so they never advance a later session; setting the current
+   mode again keeps them. */
+void test_set_mode_switch_drops_queued_steps(void) {
+    g_nt_app.mode = NT_APP_MODE_MANUAL;
+    nt_app_step(4);
+    nt_app_set_mode(NT_APP_MODE_MANUAL);
+    TEST_ASSERT_EQUAL_INT(4, g_nt_app.pending_steps);
+    nt_app_set_mode(NT_APP_MODE_RUN);
+    TEST_ASSERT_EQUAL_INT(0, g_nt_app.pending_steps);
 }
 
 /* Render flag defaults true and toggles; loop-agnostic engine state. */
@@ -186,7 +196,11 @@ void test_set_mode_invalid_asserts(void) {
     /* deliberately out-of-range enum to trip the L1 whitelist assert. */
     NT_TEST_EXPECT_ASSERT(nt_app_set_mode((nt_app_mode_t)99)); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
 }
-void test_step_negative_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_app_step(-1)); }
+void test_step_negative_asserts(void) {
+    g_nt_app.mode = NT_APP_MODE_MANUAL;
+    NT_TEST_EXPECT_ASSERT(nt_app_step(-1));
+}
+void test_step_in_run_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_app_step(1)); }
 #endif
 
 int main(void) {
@@ -197,6 +211,7 @@ int main(void) {
     RUN_TEST(test_manual_reproducible_across_two_runs);
     RUN_TEST(test_scale_multiplies_wall_dt);
     RUN_TEST(test_manual_idle_freezes_frame);
+    RUN_TEST(test_set_mode_switch_drops_queued_steps);
     RUN_TEST(test_render_flag_default_true_and_toggles);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_set_scale_negative_asserts);
@@ -204,6 +219,7 @@ int main(void) {
     RUN_TEST(test_set_step_dt_zero_asserts);
     RUN_TEST(test_set_mode_invalid_asserts);
     RUN_TEST(test_step_negative_asserts);
+    RUN_TEST(test_step_in_run_asserts);
 #endif
     return UNITY_END();
 }

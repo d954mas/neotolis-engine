@@ -50,6 +50,10 @@ class PlaywrightTransportTests(unittest.TestCase):
         waits = [args[0] for expression, args in page.calls if "poll()" in expression]
         self.assertTrue(waits)
         self.assertTrue(all(1 <= ms <= 50 for ms in waits))
+        # The timeout resets the bridge, so the engine's pending reply cannot leave the session busy.
+        self.assertEqual("() => window.__devapi.reset()", page.calls[-1][0])
+        with self.assertRaises(ConnectionError):
+            transport.send("{}")
 
 
 if __name__ == "__main__":

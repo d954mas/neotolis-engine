@@ -66,7 +66,7 @@ cmake --build build/_cmake/native-debug-capture --target <example>
   states — use it opt-in, not as a default gate.
 - `capture_frame()` works in any time mode and never advances the sim: in
   MANUAL it shows the current state, so `step()` first when you need a new one.
-  It stalls while rendering is off (no swap, no capture seam).
+  It fails as `stalled` while rendering is off; resend once rendering is back.
 - The app renders every frame regardless of focus — a black capture means the
   GDI path was used, not that rendering stalled.
 - Non-ASCII test strings must be hardcoded UTF-8 in C — Git Bash→Windows env

@@ -6,7 +6,7 @@ import { join } from 'path';
 // python and ffmpeg: tools/devapi/check_recording.py checks the downloaded MP4.
 declare global {
   interface Window {
-    __devapi?: { submit(line: string): string };
+    __devapi?: { submit(line: string): string; poll(): string };
   }
 }
 
@@ -20,10 +20,13 @@ test('record.* in lockstep downloads a synced MP4', async ({ page }, testInfo) =
       const resp = window.__devapi!.submit(JSON.stringify({ method, params: params ?? {} }));
       return resp ? JSON.parse(resp) : null;
     }, { method, params });
+  // time.step replies once its steps are done; until that reply is drained every other command is busy.
   const step = async (count: number) => {
-    const from = (await call('frame.current')).result.frame;
-    if (count > 0) await call('time.step', { count });
-    await expect.poll(async () => (await call('frame.current')).result.frame, { timeout: 60_000 }).toBeGreaterThanOrEqual(from + count);
+    if (count <= 0) return;
+    expect(await call('time.step', { count })).toBeNull();
+    let line = '';
+    await expect.poll(async () => (line = await page.evaluate(() => window.__devapi!.poll())), { timeout: 60_000 }).not.toBe('');
+    expect(JSON.parse(line).ok).toBe(true);
   };
 
   expect((await call('time.set_mode', { mode: 'manual' })).ok).toBe(true);
@@ -32,7 +35,7 @@ test('record.* in lockstep downloads a synced MP4', async ({ page }, testInfo) =
   await step(Math.round(((Math.floor(time) + 1.5 - time) % 1) * 60));
   // start fails until the codec probe settles, a moment after load.
   await expect.poll(async () => (await call('record.start', { name: 'probe.mp4', fps: 30 })).ok, { timeout: 30_000 }).toBe(true);
-  expect((await call('record.start', { name: 'probe.mp4', fps: 30 })).error.code).toBe('busy');
+  expect((await call('record.start', { name: 'probe.mp4', fps: 30 })).error.code).toBe('recording');
   // 360 steps of the default 1/60 at 30 fps: 180 frames, a flash and a beep each game second.
   await step(360);
   const download = page.waitForEvent('download');

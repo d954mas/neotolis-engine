@@ -357,7 +357,10 @@ while (!reply && performance.now() < deadline) {
     await new Promise(requestAnimationFrame);
     reply = window.__devapi.poll();
 }
-if (!reply) throw new Error("Capture timed out");
+if (!reply) {
+    window.__devapi.reset(); // drop the pending reply, or every next command answers busy
+    throw new Error("Capture timed out");
+}
 const response = JSON.parse(reply);
 if (!response.ok) throw new Error(JSON.stringify(response.error));
 const image = new Image();

@@ -1,7 +1,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <string.h>
 
 #include "base64/nt_base64.h"
 #include "core/nt_assert.h"
@@ -29,8 +28,7 @@
    end-to-end. */
 _Static_assert((uint64_t)NT_DEVAPI_CAPTURE_MAX_PIXELS * 8U <= UINT32_MAX, "NT_DEVAPI_CAPTURE_MAX_PIXELS too large: the base64 size expansion (~w*h*8) would overflow the uint32 producer size math");
 
-/* Capture wire error codes (group-owned; the generic core never names them — it yields whatever the
-   handler supplies as the slot's fail_code / err->code). */
+/* Capture wire error codes (group-owned; the generic core never names them). */
 #define NT_DEVAPI_ERR_CAPTURE_FAILED "capture_failed"
 #define NT_DEVAPI_ERR_CAPTURE_UNAVAILABLE "capture_unavailable"
 
@@ -46,7 +44,7 @@ static bool s_seam_armed;
 
 void nt_devapi_capture_arm(void) { s_seam_armed = true; }
 
-/* Producer params: the captured rect + scale divisor, owned by the slot (freed at the seam). */
+/* The pending capture's rect + scale divisor: only one deferred reply is ever pending. */
 typedef struct capture_ctx {
     uint32_t x;
     uint32_t y;
@@ -54,6 +52,8 @@ typedef struct capture_ctx {
     uint32_t h;
     uint32_t factor; /* scale divisor: 1 (full) / 2 (½) / 4 (¼). */
 } capture_ctx;
+
+static capture_ctx s_capture;
 
 // #region seam producer
 /* Fused alpha-strip + box-average: rgba8 src -> RGB dst, dst dims = w/factor x h/factor.
@@ -85,60 +85,52 @@ void nt_devapi_capture_strip_and_box(const uint8_t *src, uint32_t w, uint32_t h,
     }
 }
 
-/* Build the {width,height,format:"png",data:<base64>} payload from the encoded PNG. Owns nothing
-   on failure (returns NULL -> the DATA slot yields the distinguishable capture_failed error). */
-static cJSON *build_payload(const uint8_t *png, uint32_t png_len, uint32_t out_w, uint32_t out_h) {
+/* Fill {width,height,format:"png",data:<base64>} from the encoded PNG. */
+static bool build_payload(cJSON *result, const uint8_t *png, uint32_t png_len, uint32_t out_w, uint32_t out_h) {
     uint32_t b64_need = ((png_len + 2U) / 3U) * 4U;
     char *b64 = (char *)malloc((size_t)b64_need + 1U); /* +1 for the NUL the JSON string needs. */
     if (b64 == NULL) {
-        return NULL;
+        return false;
     }
     uint32_t b64_len = nt_base64_encode(png, png_len, b64, b64_need);
     if (b64_len == 0U) {
         free(b64);
-        return NULL;
+        return false;
     }
     b64[b64_len] = '\0';
 
-    cJSON *payload = cJSON_CreateObject();
-    if (payload == NULL) {
-        free(b64);
-        return NULL;
-    }
-    devapi_add_number(payload, "width", (double)out_w);
-    devapi_add_number(payload, "height", (double)out_h);
-    devapi_add_string(payload, "format", "png");
-    devapi_add_string(payload, "data", b64);
+    devapi_add_number(result, "width", (double)out_w);
+    devapi_add_number(result, "height", (double)out_h);
+    devapi_add_string(result, "format", "png");
+    devapi_add_string(result, "data", b64);
     free(b64);
-    return payload;
+    return true;
 }
 
-/* The pre-swap seam producer: readback -> strip+box -> fpng -> base64 -> payload. Runs once
-   per slot at the GL-valid seam; failure at any bounded stage returns NULL (no assert on the path
-   that bot params can reach). */
-static cJSON *capture_produce(void *vctx) {
-    const capture_ctx *c = (const capture_ctx *)vctx;
+/* readback -> strip+box -> fpng -> base64 -> result. Failure at any bounded stage returns false (no
+   assert on the path that bot params can reach). */
+static bool capture_produce(const capture_ctx *c, cJSON *result) {
     uint32_t out_w = c->w / c->factor;
     uint32_t out_h = c->h / c->factor;
     if (out_w == 0U || out_h == 0U) {
-        return NULL; /* defensive only: the handlers reject non-dividing scale synchronously (bad_params). */
+        return false; /* defensive only: the handlers reject non-dividing scale synchronously (bad_params). */
     }
 
     uint32_t rgba_len = c->w * c->h * 4U;
     uint8_t *rgba = (uint8_t *)malloc((size_t)rgba_len);
     if (rgba == NULL) {
-        return NULL;
+        return false;
     }
     if (!nt_gfx_read_pixels((nt_render_target_t){0}, (int)c->x, (int)c->y, (int)c->w, (int)c->h, rgba, rgba_len)) {
         free(rgba);
-        return NULL;
+        return false;
     }
 
     uint32_t rgb_len = out_w * out_h * 3U;
     uint8_t *rgb = (uint8_t *)malloc((size_t)rgb_len);
     if (rgb == NULL) {
         free(rgba);
-        return NULL;
+        return false;
     }
     nt_devapi_capture_strip_and_box(rgba, c->w, c->h, c->factor, rgb);
     free(rgba);
@@ -149,18 +141,30 @@ static cJSON *capture_produce(void *vctx) {
     uint8_t *png = (uint8_t *)malloc((size_t)png_cap);
     if (png == NULL) {
         free(rgb);
-        return NULL;
+        return false;
     }
     uint32_t png_len = nt_fpng_encode_rgb(rgb, out_w, out_h, png, png_cap);
     free(rgb);
     if (png_len == 0U) {
         free(png);
-        return NULL;
+        return false;
     }
 
-    cJSON *payload = build_payload(png, png_len, out_w, out_h);
+    bool built = build_payload(result, png, png_len, out_w, out_h);
     free(png);
-    return payload;
+    return built;
+}
+
+/* The deferred reply, run once at the GL-valid pre-swap seam. */
+static bool capture_reply(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
+    (void)params;
+    (void)ud;
+    if (!capture_produce(&s_capture, result)) {
+        err->code = NT_DEVAPI_ERR_CAPTURE_FAILED;
+        err->message = "capture failed (framebuffer readback or PNG encode error)";
+        return false;
+    }
+    return true;
 }
 // #endregion
 
@@ -191,7 +195,7 @@ static bool parse_scale(const cJSON *params, uint32_t *factor, nt_devapi_error *
     return true;
 }
 
-/* Defer with a producer carrying the captured rect + factor. `gl_y` is the GL bottom-left y of the
+/* Defer a reply carrying the captured rect + factor. `gl_y` is the GL bottom-left y of the
    rect (top-left y converted by the caller); the row-flip in nt_gfx_read_pixels then yields a
    top-left sub-rect matching the documented contract. Capture resolves at the next render, sim frozen or not. */
 static bool defer_capture(uint32_t x, uint32_t gl_y, uint32_t w, uint32_t h, uint32_t factor, nt_devapi_error *err) {
@@ -203,14 +207,8 @@ static bool defer_capture(uint32_t x, uint32_t gl_y, uint32_t w, uint32_t h, uin
         err->message = "capture not available on this host (it does not drive the pre-swap capture seam)";
         return false;
     }
-    capture_ctx *ctx = (capture_ctx *)malloc(sizeof(capture_ctx));
-    NT_ASSERT(ctx != NULL); /* OOM is a host-side fault, not bot input. */
-    ctx->x = x;
-    ctx->y = gl_y;
-    ctx->w = w;
-    ctx->h = h;
-    ctx->factor = factor;
-    return nt_devapi_defer_current_with_result(capture_produce, ctx, free, NT_DEVAPI_ERR_CAPTURE_FAILED, "deferred capture producer failed (framebuffer readback or PNG encode error)");
+    s_capture = (capture_ctx){.x = x, .y = gl_y, .w = w, .h = h, .factor = factor};
+    return nt_devapi_defer(NT_DEVAPI_GATE_PRESENT, 0.0, capture_reply, err);
 }
 
 /* capture.frame {scale?}: defers a full-framebuffer capture (x=0,y=0,w=fb_width,h=fb_height). */
@@ -313,9 +311,9 @@ static const nt_devapi_handler_fn k_capture_handlers[] = {
 };
 _Static_assert(sizeof(k_capture_cmds) / sizeof(k_capture_cmds[0]) == sizeof(k_capture_handlers) / sizeof(k_capture_handlers[0]), "capture: descriptor/handler arrays must have equal length");
 
-/* Public host-facing seam (the window pre-swap hook target) — delegates to the generic core producer
-   runner, which fills any ready producer-slot's payload at the GL-valid point. */
-void nt_devapi_capture_on_pre_swap(void) { nt_devapi_run_pre_swap_producers(); }
+/* Public host-facing seam (the window pre-swap hook target): builds a pending capture reply at the
+   GL-valid point. */
+void nt_devapi_capture_on_pre_swap(void) { nt_devapi_run_pre_swap_reply(); }
 
 void nt_devapi_register_capture(void) {
     s_seam_armed = false; /* fresh init starts unarmed; the host (re-)arms via install_seam. */

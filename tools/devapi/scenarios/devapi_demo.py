@@ -5,8 +5,8 @@ self-launched here; web PlaywrightTransport / the devapi.spec.ts gate), proving 
 It exercises:
   * discovery        — ping + endpoints/command.describe/features (game.echo + game.poke, zero engine edits),
   * game.* round-trip — game.echo {msg} read-back + game.poke write flipping an observable host bool,
-  * deferred capture — capture.frame/region must resolve to a REAL PNG (not {deferred:true}) on a
-                       capture-capable host; the native host has no GL, so it returns capture_unavailable,
+  * deferred capture — capture.frame/region must resolve to a REAL PNG on a capture-capable host;
+                       the native host has no GL, so it returns capture_unavailable,
   * deferred items   — perf.stats mem_used + render.set_enabled + time.step (advertised commands MUST pass).
 
 Usage: python tools/devapi/scenarios/devapi_demo.py [--port N] [--no-launch] [--host-bin PATH]
@@ -91,10 +91,10 @@ def _connect_with_retry(port: int, deadline_s: float = 10.0) -> SocketTransport:
 
 
 def _drive_deferred_capture(client: DevApiClient) -> None:
-    """Deferred capture.frame/region — the drain race only a live transport exposes.
+    """Deferred capture.frame/region over a live transport.
 
-    A capture-capable host (web: pre-swap seam armed) MUST reply with a real PNG, never {deferred:true};
-    the native host (no GL/seam) rejects synchronously with capture_unavailable (the documented outcome).
+    A capture-capable host (web: pre-swap seam armed) MUST reply with a real PNG; the native host
+    (no GL/seam) rejects synchronously with capture_unavailable (the documented outcome).
     """
     try:
         full = client.capture_frame()
@@ -103,19 +103,14 @@ def _drive_deferred_capture(client: DevApiClient) -> None:
             print("PASS capture: host drives no pre-swap seam -> capture_unavailable (native devapi_host, expected).")
             return
         raise
-    # Capture-capable host (web): the deferred producer must have run.
-    assert full.get("deferred") is not True, (
-        "capture.frame returned {deferred:true} — the pre-swap producer never ran (web drain-race)"
-    )
     assert full.get("format") == "png", f"capture.frame format is {full.get('format')!r}, expected 'png'"
     assert full.get("data"), "capture.frame returned an empty data payload"
     # web half: a sub-rect crop returns the same png contract.
     view = client.result("view")
     fb_w, fb_h = int(view["fb_width"]), int(view["fb_height"])
     region = client.capture_region(0, 0, fb_w * 3 // 4, fb_h * 3 // 4)
-    assert region.get("deferred") is not True, "capture.region returned {deferred:true} (drain-race)"
     assert region.get("format") == "png" and region.get("data"), "capture.region payload is not a non-empty PNG"
-    print(f"PASS capture: deferred capture.frame + capture.region yielded real PNGs ({full.get('width')}x{full.get('height')}), not {{deferred:true}}.")
+    print(f"PASS capture: deferred capture.frame + capture.region yielded real PNGs ({full.get('width')}x{full.get('height')}).")
 
 
 def _drive_deferred_items(client: DevApiClient, advertised: set) -> None:

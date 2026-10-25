@@ -25,7 +25,8 @@
 void setUp(void) {
     /* No nt_fpng_init() here: registering the capture group (register_default -> register_capture) inits
        the encoder. This test proves a host needs no explicit fpng init. */
-    g_nt_app.frame = 0; /* frame never advances here: capture must resolve with the sim frozen. */
+    /* frame never advances here: capture must resolve with the sim frozen. */
+    g_nt_app = (nt_app_t){.max_dt = 0.1F, .scale = 1.0F, .step_dt = 1.0F / 60.0F, .render_enabled = true};
     g_nt_window.fb_width = CAP_FB_W;
     g_nt_window.fb_height = CAP_FB_H;
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
@@ -45,6 +46,12 @@ void tearDown(void) {
 
 /* ---- helpers ---- */
 
+/* One host tick of the devapi: nt_devapi_update resolves the pending gate, then the drain yields it. */
+static const char *drain(void) {
+    nt_devapi_update();
+    return nt_devapi_poll_response();
+}
+
 static void assert_bad_params(const char *resp) {
     TEST_ASSERT_NOT_NULL(resp); /* a sync error returns an envelope, never NULL (NULL == deferred). */
     cJSON *root = cJSON_Parse(resp);
@@ -58,8 +65,8 @@ static void assert_bad_params(const char *resp) {
 /* Drive one render seam (no frame advance), then poll the yielded envelope (caller frees the root). */
 static cJSON *capture_yield(const char *request) {
     TEST_ASSERT_NULL(nt_devapi_submit(request)); /* a well-formed capture defers (no sync response). */
-    nt_devapi_capture_on_pre_swap();             /* GL-valid seam: fills the payload via the producer. */
-    const char *resp = nt_devapi_poll_response();
+    nt_devapi_capture_on_pre_swap();             /* GL-valid seam: builds the reply. */
+    const char *resp = drain();
     TEST_ASSERT_NOT_NULL(resp);
     cJSON *root = cJSON_Parse(resp);
     TEST_ASSERT_NOT_NULL(root);
@@ -96,7 +103,7 @@ static void test_capture_frame_defers(void) {
     const char *resp = nt_devapi_submit("{\"method\":\"capture.frame\",\"request_id\":1}");
     TEST_ASSERT_NULL(resp); /* deferred sentinel: no synchronous response. */
     /* before the seam runs, polling yields nothing (the slot has no payload yet). */
-    TEST_ASSERT_NULL(nt_devapi_poll_response());
+    TEST_ASSERT_NULL(drain());
 }
 
 /* seam-driven encode (no socket) -> format:"png" + non-empty data */
@@ -106,8 +113,6 @@ static void test_capture_frame_seam_encode(void) {
     cJSON *root = capture_yield("{\"method\":\"capture.frame\",\"request_id\":7}");
     cJSON *result = result_of(root);
     TEST_ASSERT_TRUE(cJSON_IsObject(result));
-    /* the stored payload was yielded, NOT the legacy {deferred:true}. */
-    TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(result, "deferred"));
 
     cJSON *format = cJSON_GetObjectItemCaseSensitive(result, "format");
     TEST_ASSERT_TRUE(cJSON_IsString(format));
@@ -125,7 +130,7 @@ static void test_capture_frame_seam_encode(void) {
     TEST_ASSERT_TRUE(cJSON_IsNumber(id));
     TEST_ASSERT_EQUAL_INT(7, id->valueint); /* request_id correlation preserved. */
     cJSON_Delete(root);
-    TEST_ASSERT_NULL(nt_devapi_poll_response()); /* queue drained. */
+    TEST_ASSERT_NULL(drain()); /* drained. */
 }
 
 /* scale + region produce POST-scale dims */
@@ -163,7 +168,7 @@ static void test_capture_region_scale_halves_dims(void) {
     cJSON_Delete(root);
 }
 
-/* degenerate scale>rect -> SYNCHRONOUS bad_params (never {deferred:true}) */
+/* degenerate scale>rect -> SYNCHRONOUS bad_params */
 
 static void test_capture_region_degenerate_scale_bad_params(void) {
     /* w/scale==0 (3/4==0): the handler rejects synchronously, no defer, no image. */
@@ -180,18 +185,17 @@ static void test_capture_nondividing_scale_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"capture.frame\",\"params\":{\"scale\":4}}"));
 }
 
-/* producer RAN but returned NULL -> a distinguishable {ok:false,error:capture_failed} with the correlated
-   id, never the content-free {deferred:true} nor a crash. A lost context makes nt_gfx_read_pixels fail so
-   the producer yields NULL. */
+/* the reply ran but the readback failed -> {ok:false,error:capture_failed} with the correlated id. A lost
+   context makes nt_gfx_read_pixels fail. */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_capture_producer_failure_yields_error(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"capture.frame\",\"request_id\":42}"));
-    g_nt_gfx.context_lost = true; /* force the readback to fail -> producer returns NULL. */
+    g_nt_gfx.context_lost = true; /* force the readback to fail. */
     nt_devapi_capture_on_pre_swap();
     g_nt_gfx.context_lost = false; /* restore for any following test. */
 
-    const char *resp = nt_devapi_poll_response();
+    const char *resp = drain();
     TEST_ASSERT_NOT_NULL(resp);
     cJSON *root = cJSON_Parse(resp);
     TEST_ASSERT_NOT_NULL(root);
@@ -201,12 +205,12 @@ static void test_capture_producer_failure_yields_error(void) {
     cJSON *code = cJSON_GetObjectItemCaseSensitive(error, "code");
     TEST_ASSERT_TRUE(cJSON_IsString(code));
     TEST_ASSERT_EQUAL_STRING("capture_failed", code->valuestring);
-    TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(root, "data")); /* no image, no legacy deferred flag. */
+    TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(root, "data")); /* no image. */
     cJSON *id = cJSON_GetObjectItemCaseSensitive(root, "request_id");
     TEST_ASSERT_TRUE(cJSON_IsNumber(id));
     TEST_ASSERT_EQUAL_INT(42, id->valueint); /* request_id correlation preserved on the failure path. */
     cJSON_Delete(root);
-    TEST_ASSERT_NULL(nt_devapi_poll_response());
+    TEST_ASSERT_NULL(drain());
 }
 
 /* pixel cap (DoS backstop) rejects an oversized framebuffer/rect synchronously.
@@ -240,16 +244,14 @@ static void test_capture_unarmed_host_unavailable(void) {
     /* tearDown shuts down; the next setUp re-inits + re-arms. */
 }
 
-/* drain-race guard: a READY slot whose pre-swap producer has NOT run yet is WITHHELD (poll NULL),
-   not emitted as capture_failed (which would lose the image). Drives a poll landing between
-   submit and the seam; no GL — the seam-vs-poll ordering is the SUT. */
-static void test_capture_ready_before_seam_is_withheld(void) {
-    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"capture.frame\",\"request_id\":9}")); /* defers. */
-    /* Poll WITHOUT driving the seam: ready + producer-bearing + payload==NULL -> withheld, NOT capture_failed. */
-    TEST_ASSERT_NULL(nt_devapi_poll_response());
-    /* Now drive the seam: the producer fills the payload, and the next poll yields the real PNG. */
+/* a poll before the seam waits (the image does not exist yet), even with the sim frozen in idle MANUAL;
+   the seam then builds the real PNG. */
+static void test_capture_waits_for_the_seam_with_sim_frozen(void) {
+    g_nt_app.mode = NT_APP_MODE_MANUAL; /* no step queued */
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"capture.frame\",\"request_id\":9}"));
+    TEST_ASSERT_NULL(drain());
     nt_devapi_capture_on_pre_swap();
-    const char *resp = nt_devapi_poll_response();
+    const char *resp = drain();
     TEST_ASSERT_NOT_NULL(resp);
     cJSON *root = cJSON_Parse(resp);
     TEST_ASSERT_NOT_NULL(root);
@@ -258,7 +260,20 @@ static void test_capture_ready_before_seam_is_withheld(void) {
     TEST_ASSERT_EQUAL_STRING("png", cJSON_GetObjectItemCaseSensitive(result, "format")->valuestring);
     TEST_ASSERT_EQUAL_INT(9, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
     cJSON_Delete(root);
-    TEST_ASSERT_NULL(nt_devapi_poll_response());
+    TEST_ASSERT_NULL(drain());
+}
+
+/* rendering off -> no frame is presented, so the capture fails as stalled on the drain instead of hanging. */
+static void test_capture_with_render_off_stalls(void) {
+    nt_app_set_render_enabled(false);
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"capture.frame\",\"request_id\":3}"));
+    const char *resp = drain();
+    TEST_ASSERT_NOT_NULL(resp);
+    cJSON *root = cJSON_Parse(resp);
+    TEST_ASSERT_NOT_NULL(root);
+    TEST_ASSERT_EQUAL_STRING("stalled", cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(root, "error"), "code")->valuestring);
+    TEST_ASSERT_EQUAL_INT(3, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
+    cJSON_Delete(root);
 }
 
 /* box-average downscale produces the EXACT integer mean.
@@ -300,7 +315,8 @@ int main(void) {
     RUN_TEST(test_capture_producer_failure_yields_error);
     RUN_TEST(test_capture_pixel_cap_bad_params);
     RUN_TEST(test_capture_unarmed_host_unavailable);
-    RUN_TEST(test_capture_ready_before_seam_is_withheld);
+    RUN_TEST(test_capture_waits_for_the_seam_with_sim_frozen);
+    RUN_TEST(test_capture_with_render_off_stalls);
     RUN_TEST(test_capture_box_average_exact_mean);
     return UNITY_END();
 }

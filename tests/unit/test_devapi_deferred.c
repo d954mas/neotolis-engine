@@ -1,6 +1,6 @@
-/* Proof of the deferred yield path: submit()->NULL on defer, advancing the game frame
-   (g_nt_app.frame) then polling; the K-th frame yields {ok,result,request_id} with the original
-   id. Covers number/string/absent ids, multi-slot ordering, and overflow rejection. */
+/* The deferred reply core: submit()->NULL on defer, the reply yields once its gate opens (frames, game
+   seconds, the pre-swap seam) with the original request_id; one reply in flight (busy); a gate that can no
+   longer open answers stalled; reset frees what the slot owns. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <stdio.h>
@@ -13,317 +13,327 @@
 #include "unity.h"
 /* clang-format on */
 
-/* Test-only deferred command — registered LOCALLY in this binary, NEVER in the engine
-   `core` group. Defers K frames (params {frames?:number}, default DEFER_FRAMES). */
-#define DEFER_FRAMES 3
+/* Test-only commands, registered locally in this binary: test.defer {gate, amount?, tag?} defers a reply that
+   echoes the tag it keeps; test.defer_fail defers a reply that fails; test.echo answers at once. */
+static int s_tag;
 
-static bool defer_handler(const cJSON *params, cJSON *result_obj, nt_devapi_error *err, void *user_data) {
-    (void)result_obj; /* the continuation fills the result at yield time. */
+static bool reply_probe(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)err;
-    (void)user_data;
-    int frames = DEFER_FRAMES;
-    const cJSON *f = cJSON_GetObjectItemCaseSensitive(params, "frames");
-    if (cJSON_IsNumber(f)) {
-        frames = f->valueint;
-    }
-    return nt_devapi_defer_current(frames);
+    TEST_ASSERT_NULL(params); /* a deferred reply runs with no params or user_data */
+    TEST_ASSERT_NULL(ud);
+    devapi_add_number(result, "tag", s_tag);
+    return true;
 }
 
-static void register_defer(void) {
-    nt_devapi_command_desc desc = {
-        .method = "test.defer",
-        .group = "test",
-        .summary = "test-only deferred command",
-        .params_shape = "{frames?:number}",
-        .result_shape = "{deferred:bool}",
-        .frame_behavior = "deferred",
-        .side_effects = "none",
-    };
-    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register(&desc, defer_handler, NULL));
-}
-
-/* Synthetic payload producer — no GL, no capture group — so the payload-yield path is provable in a
-   pure unit binary. Exercises the owned-ctx lifecycle (set on defer, freed once on yield/reset);
-   freed-once is asserted via s_producer_ctx_freed under ASan/LSan. */
-static int s_producer_ctx_freed; /* incremented once per ctx free — proves no double / no leak. */
-
-static void synthetic_ctx_free(void *ctx) {
-    TEST_ASSERT_NOT_NULL(ctx);
-    s_producer_ctx_freed++;
-    free(ctx);
-}
-
-static cJSON *synthetic_producer(void *ctx) {
-    TEST_ASSERT_NOT_NULL(ctx);                /* the owned ctx must reach the producer. */
-    TEST_ASSERT_EQUAL_INT(0xA5, *(int *)ctx); /* and carry the handler-set sentinel. */
-    cJSON *result = cJSON_CreateObject();
-    TEST_ASSERT_NOT_NULL(result);
-    devapi_add_string(result, "probe", "ok");
-    return result; /* owned by the slot; transferred into the yield envelope by poll_response. */
-}
-
-/* Defers to the next pre-swap seam WITH a synthetic result producer + an owned ctx (a heap int sentinel). */
-static bool defer_result_handler(const cJSON *params, cJSON *result_obj, nt_devapi_error *err, void *user_data) {
+static bool reply_fail(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
-    (void)result_obj;
-    (void)err;
-    (void)user_data;
-    int *ctx = (int *)malloc(sizeof(int));
-    TEST_ASSERT_NOT_NULL(ctx);
-    *ctx = 0xA5;
-    return nt_devapi_defer_current_with_result(synthetic_producer, ctx, synthetic_ctx_free, "producer_failed", "synthetic producer failed");
+    (void)result;
+    (void)ud;
+    err->code = "probe_failed";
+    err->message = "synthetic reply failed";
+    return false;
 }
 
-static void register_defer_result(void) {
+static nt_devapi_gate parse_gate(const cJSON *params) {
+    const cJSON *g = cJSON_GetObjectItemCaseSensitive(params, "gate");
+    if (cJSON_IsString(g) && strcmp(g->valuestring, "seconds") == 0) {
+        return NT_DEVAPI_GATE_SECONDS;
+    }
+    if (cJSON_IsString(g) && strcmp(g->valuestring, "present") == 0) {
+        return NT_DEVAPI_GATE_PRESENT;
+    }
+    return NT_DEVAPI_GATE_FRAMES;
+}
+
+static bool cmd_defer(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
+    (void)result;
+    const cJSON *a = cJSON_GetObjectItemCaseSensitive(params, "amount");
+    const cJSON *t = cJSON_GetObjectItemCaseSensitive(params, "tag");
+    s_tag = cJSON_IsNumber(t) ? t->valueint : 7;
+    nt_devapi_handler_fn reply = ud != NULL ? reply_fail : reply_probe;
+    return nt_devapi_defer(parse_gate(params), cJSON_IsNumber(a) ? a->valuedouble : 3.0, reply, err);
+}
+
+static bool cmd_echo(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
+    (void)params;
+    (void)err;
+    (void)ud;
+    devapi_add_bool(result, "echo", true);
+    return true;
+}
+
+static void register_cmd(const char *method, nt_devapi_handler_fn fn, void *ud) {
     nt_devapi_command_desc desc = {
-        .method = "test.defer_result",
+        .method = method,
         .group = "test",
-        .summary = "test-only deferred command with a synthetic result payload",
+        .summary = "test-only command",
         .params_shape = "{}",
-        .result_shape = "{probe:string}",
+        .result_shape = "{}",
         .frame_behavior = "deferred",
         .side_effects = "none",
     };
-    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register(&desc, defer_result_handler, NULL));
+    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register(&desc, fn, ud));
 }
+
+static int s_fail_marker;
 
 void setUp(void) {
-    g_nt_app.frame = 0; /* deferred targets are g_nt_app.frame + N — start each test at a known frame. */
-    s_producer_ctx_freed = 0;
+    g_nt_app = (nt_app_t){.max_dt = 0.1F, .scale = 1.0F, .step_dt = 1.0F / 60.0F, .render_enabled = true};
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
-    register_defer();
-    register_defer_result();
+    register_cmd("test.defer", cmd_defer, NULL);
+    register_cmd("test.defer_fail", cmd_defer, &s_fail_marker);
+    register_cmd("test.echo", cmd_echo, NULL);
 }
 
 void tearDown(void) { nt_devapi_shutdown(); }
 
-/* One game frame: advance the frame counter, then read any slot whose deadline was reached. */
-static const char *advance_frame(void) {
-    g_nt_app.frame++;
+/* One host tick of the devapi: nt_devapi_update resolves the pending gate, then the drain yields it. */
+static const char *drain(void) {
+    nt_devapi_update();
     return nt_devapi_poll_response();
 }
 
-/* submit() of a deferring command returns NULL (no sync response). */
-static void test_submit_defers_returns_null(void) {
-    const char *resp = nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":7}");
-    TEST_ASSERT_NULL(resp);
+/* One loop iteration as nt_app_run does it (RUN: wall dt unless paused; MANUAL: one queued step), then the drain. */
+static const char *tick(void) {
+    float dt = 0.0F;
+    bool advanced = false;
+    if (g_nt_app.mode == NT_APP_MODE_RUN) {
+        if (!g_nt_app.paused) {
+            dt = (1.0F / 60.0F) * g_nt_app.scale;
+            advanced = true;
+        }
+    } else if (g_nt_app.pending_steps > 0) {
+        g_nt_app.pending_steps--;
+        dt = g_nt_app.step_dt;
+        advanced = true;
+    }
+    g_nt_app.dt = dt;
+    g_nt_app.time += (double)dt;
+    if (advanced) {
+        g_nt_app.frame++;
+    }
+    return drain();
 }
 
-/* K-1 frames return NULL, the K-th yields {ok:true,result:{...},request_id:7}, then drained. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_yield_after_k_frames_number_id(void) {
-    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":7}"));
-
-    for (int i = 0; i < DEFER_FRAMES - 1; i++) {
-        TEST_ASSERT_NULL(advance_frame()); /* still pending */
-    }
-
-    const char *resp = advance_frame();
-    TEST_ASSERT_NOT_NULL(resp); /* yields on the K-th frame */
-    cJSON *root = cJSON_Parse(resp);
+/* Parse a reply line; the caller deletes the tree. */
+static cJSON *parse(const char *line) {
+    TEST_ASSERT_NOT_NULL(line);
+    cJSON *root = cJSON_Parse(line);
     TEST_ASSERT_NOT_NULL(root);
-    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
-    cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
-    TEST_ASSERT_TRUE(cJSON_IsObject(result));
-    cJSON *id = cJSON_GetObjectItemCaseSensitive(root, "request_id");
-    TEST_ASSERT_TRUE(cJSON_IsNumber(id)); /* number stays number */
-    TEST_ASSERT_EQUAL_INT(7, id->valueint);
-    cJSON_Delete(root);
-
-    TEST_ASSERT_NULL(nt_devapi_poll_response()); /* queue drained */
+    return root;
 }
 
-/* A string request_id survives the deferred path as a string. */
-static void test_yield_string_id(void) {
-    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":\"abc\",\"params\":{\"frames\":2}}"));
-    TEST_ASSERT_NULL(advance_frame()); /* frames=2 -> 1 pending frame */
-
-    const char *resp = advance_frame();
-    TEST_ASSERT_NOT_NULL(resp);
-    cJSON *root = cJSON_Parse(resp);
-    cJSON *id = cJSON_GetObjectItemCaseSensitive(root, "request_id");
-    TEST_ASSERT_TRUE(cJSON_IsString(id)); /* string stays string */
-    TEST_ASSERT_EQUAL_STRING("abc", id->valuestring);
-    cJSON_Delete(root);
-}
-
-/* No request_id: the command still defers and still pops (exercises the id==NULL branch). */
-static void test_yield_absent_id(void) {
-    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"params\":{\"frames\":1}}"));
-
-    const char *resp = advance_frame(); /* frames=1 -> ready on the first frame */
-    TEST_ASSERT_NOT_NULL(resp);
-    cJSON *root = cJSON_Parse(resp);
-    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
-    cJSON *id = cJSON_GetObjectItemCaseSensitive(root, "request_id");
-    TEST_ASSERT_NULL(id); /* no id echoed when the request carried none */
-    cJSON_Delete(root);
-
-    TEST_ASSERT_NULL(nt_devapi_poll_response()); /* drained */
-}
-
-/* Regression for the over-decrement bug: two slots with DIFFERENT K must each pop on their own
-   frame, and neither may pop early. id=1 defers 1 frame, id=2 defers 3 frames. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_multi_slot_distinct_frames(void) {
-    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":1,\"params\":{\"frames\":1}}"));
-    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":2,\"params\":{\"frames\":3}}"));
-
-    /* Frame 1: only id=1 (frames=1) is ready; id=2 (frames=3) must NOT pop. */
-    g_nt_app.frame++;
-    const char *r1 = nt_devapi_poll_response();
-    TEST_ASSERT_NOT_NULL(r1);
-    cJSON *root1 = cJSON_Parse(r1);
-    TEST_ASSERT_EQUAL_INT(1, cJSON_GetObjectItemCaseSensitive(root1, "request_id")->valueint);
-    cJSON_Delete(root1);
-    TEST_ASSERT_NULL(nt_devapi_poll_response()); /* id=2 still pending, not popped early */
-
-    /* Frame 2: id=2's target (frame 3) not yet reached. */
-    TEST_ASSERT_NULL(advance_frame());
-
-    /* Frame 3: id=2 reaches its target and pops. */
-    g_nt_app.frame++;
-    const char *r2 = nt_devapi_poll_response();
-    TEST_ASSERT_NOT_NULL(r2);
-    cJSON *root2 = cJSON_Parse(r2);
-    TEST_ASSERT_EQUAL_INT(2, cJSON_GetObjectItemCaseSensitive(root2, "request_id")->valueint);
-    cJSON_Delete(root2);
-
-    TEST_ASSERT_NULL(nt_devapi_poll_response()); /* both drained */
-}
-
-/* A deferred command inside a batch is rejected with an error entry — never dropped from the
-   array or leaked as the DEFERRED_SENTINEL pointer. The response stays 1:1 (length 2 here),
-   each entry is ok:false bad_params, and no slot is enqueued. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_deferred_in_batch_rejected(void) {
-    const char *resp = nt_devapi_submit("[{\"method\":\"test.defer\",\"request_id\":1},{\"method\":\"test.defer\",\"request_id\":2}]");
-    TEST_ASSERT_NOT_NULL(resp); /* a batch always returns synchronously, never NULL */
-    cJSON *root = cJSON_Parse(resp);
-    TEST_ASSERT_TRUE(cJSON_IsArray(root));
-    TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(root)); /* ordered, 1:1 — nothing dropped */
-    cJSON *e0 = cJSON_GetArrayItem(root, 0);
-    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(e0, "ok")));
-    cJSON *err0 = cJSON_GetObjectItemCaseSensitive(e0, "error");
-    TEST_ASSERT_EQUAL_STRING("bad_params", cJSON_GetObjectItemCaseSensitive(err0, "code")->valuestring);
-    cJSON_Delete(root);
-
-    /* The rejected entries enqueued no deferred slot — the queue is empty. */
-    TEST_ASSERT_NULL(advance_frame());
-}
-
-/* Overflow: more than NT_DEVAPI_MAX_DEFERRED concurrent defers rejects the overflowing
-   call with a structured bad_params error (not NULL), leaving the earlier slots intact. */
-static void test_overflow_rejected_structured(void) {
-    /* Fill the queue with long-lived defers (frames high enough to outlast this test). */
-    for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
-        char line[96];
-        (void)snprintf(line, sizeof(line), "{\"method\":\"test.defer\",\"request_id\":%d,\"params\":{\"frames\":1000}}", i);
-        TEST_ASSERT_NULL(nt_devapi_submit(line)); /* each defers, no free-slot exhaustion yet */
-    }
-
-    /* The next defer has no free slot -> rejected whole with a structured error, NOT NULL. */
-    const char *resp = nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":999}");
-    TEST_ASSERT_NOT_NULL(resp);
-    cJSON *root = cJSON_Parse(resp);
+static void assert_error(const char *line, const char *code, int request_id) {
+    cJSON *root = parse(line);
     TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(root, "ok")));
-    cJSON *error = cJSON_GetObjectItemCaseSensitive(root, "error");
-    TEST_ASSERT_EQUAL_STRING("bad_params", cJSON_GetObjectItemCaseSensitive(error, "code")->valuestring);
-    TEST_ASSERT_EQUAL_INT(999, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
+    TEST_ASSERT_EQUAL_STRING(code, cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(root, "error"), "code")->valuestring);
+    TEST_ASSERT_EQUAL_INT(request_id, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
     cJSON_Delete(root);
-
-    /* An earlier in-flight slot is intact: advance one frame and assert nothing pops yet. */
-    /* The first enqueued (request_id 0) has frames=1000; the overflow rejection touched no slot. */
-    TEST_ASSERT_NULL(advance_frame()); /* frame=1; the live slot targets frame 1000, nothing pops yet */
 }
 
-/* Payload yield: defer-with-result with the frame frozen, drive the pre-swap seam (fills the slot's
-   payload via the synthetic producer), then poll -> the entry carries the synthetic {probe:"ok"}
-   payload AND the correlated request_id, NOT the legacy {deferred:true}. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_payload_yield_via_producer(void) {
-    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer_result\",\"request_id\":42}"));
-
-    nt_devapi_run_pre_swap_producers(); /* GL-valid seam fills the payload (synthetic — no GL). */
-    /* The producer's input ctx is consumed + freed once at the seam (one-shot); the produced
-       payload now lives on the slot, to be yielded next. */
-    TEST_ASSERT_EQUAL_INT(1, s_producer_ctx_freed);
-
-    const char *resp = nt_devapi_poll_response();
-    TEST_ASSERT_NOT_NULL(resp);
-    cJSON *root = cJSON_Parse(resp);
-    TEST_ASSERT_NOT_NULL(root);
+static void assert_probe(const char *line, int tag, int request_id) {
+    cJSON *root = parse(line);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
-    cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
-    TEST_ASSERT_TRUE(cJSON_IsObject(result));
-    /* The stored payload was yielded, NOT the legacy {deferred:true}. */
-    TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(result, "deferred"));
-    cJSON *probe = cJSON_GetObjectItemCaseSensitive(result, "probe");
-    TEST_ASSERT_TRUE(cJSON_IsString(probe));
-    TEST_ASSERT_EQUAL_STRING("ok", probe->valuestring);
-    cJSON *id = cJSON_GetObjectItemCaseSensitive(root, "request_id");
-    TEST_ASSERT_TRUE(cJSON_IsNumber(id));
-    TEST_ASSERT_EQUAL_INT(42, id->valueint); /* request_id correlation preserved. */
+    TEST_ASSERT_EQUAL_INT(tag, cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(root, "result"), "tag")->valueint);
+    TEST_ASSERT_EQUAL_INT(request_id, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
     cJSON_Delete(root);
-
-    TEST_ASSERT_EQUAL_INT(1, s_producer_ctx_freed); /* still exactly once — yield does not re-free. */
-    TEST_ASSERT_NULL(nt_devapi_poll_response());    /* queue drained. */
 }
 
-/* Legacy regression: a plain nt_devapi_defer_current(1) slot (no producer) still yields the
-   content-free {deferred:true}; driving the pre-swap seam does not touch it (no producer). */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_legacy_yield_unaffected(void) {
-    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":5,\"params\":{\"frames\":1}}"));
+// #region frames / seconds / ids
+static void test_frames_gate_yields_after_k_frames(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":7,\"params\":{\"amount\":3,\"tag\":5}}"));
+    TEST_ASSERT_NULL(tick());
+    TEST_ASSERT_NULL(tick());
+    assert_probe(tick(), 5, 7);
+    TEST_ASSERT_NULL(drain());
+}
 
+static void test_zero_frames_resolves_on_next_drain(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":1,\"params\":{\"amount\":0}}"));
+    nt_app_pause(); /* frozen, but the target is already reached: ready wins */
+    assert_probe(drain(), 7, 1);
+}
+
+static void test_seconds_gate_yields_on_game_time(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":2,\"params\":{\"gate\":\"seconds\",\"amount\":0.05}}"));
+    TEST_ASSERT_NULL(tick());   /* 1/60 */
+    TEST_ASSERT_NULL(tick());   /* 2/60 */
+    assert_probe(tick(), 7, 2); /* 3/60 >= 0.05 */
+}
+
+static void test_string_and_absent_ids(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":\"abc\",\"params\":{\"amount\":1}}"));
+    cJSON *root = parse(tick());
+    TEST_ASSERT_EQUAL_STRING("abc", cJSON_GetObjectItemCaseSensitive(root, "request_id")->valuestring);
+    cJSON_Delete(root);
+
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"params\":{\"amount\":1}}"));
+    root = parse(tick());
+    TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(root, "request_id"));
+    cJSON_Delete(root);
+}
+
+static void test_reply_failure_is_its_error(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer_fail\",\"request_id\":4,\"params\":{\"amount\":1}}"));
+    assert_error(tick(), "probe_failed", 4);
+}
+// #endregion
+
+// #region one reply in flight
+static void test_busy_while_pending(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":1,\"params\":{\"amount\":2}}"));
+    assert_error(nt_devapi_submit("{\"method\":\"test.echo\",\"request_id\":2}"), "busy", 2);
+    assert_error(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":3}"), "busy", 3);
+    TEST_ASSERT_NULL(tick());
+    assert_probe(tick(), 7, 1); /* the first reply is untouched by the rejected ones */
+    cJSON_Delete(parse(nt_devapi_submit("{\"method\":\"test.echo\"}")));
+}
+
+/* A reply that is resolved but not yet drained still holds the slot. */
+static void test_busy_until_drained(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":1,\"params\":{\"amount\":0}}"));
+    nt_devapi_update();
+    assert_error(nt_devapi_submit("{\"method\":\"test.echo\",\"request_id\":2}"), "busy", 2);
+    assert_probe(nt_devapi_poll_response(), 7, 1);
+}
+
+/* The drain only hands out what nt_devapi_update resolved: a freeze between ticks is not seen at poll time. */
+static void test_poll_alone_does_not_resolve(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":1,\"params\":{\"amount\":0}}"));
+    TEST_ASSERT_NULL(nt_devapi_poll_response());
+    nt_app_pause();
+    assert_probe(drain(), 7, 1); /* ready wins over the frozen sim */
+}
+
+static void test_batch_rejects_deferral_and_runs_the_rest(void) {
+    cJSON *root = parse(nt_devapi_submit("[{\"method\":\"test.defer\",\"request_id\":1},{\"method\":\"test.echo\",\"request_id\":2}]"));
+    TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(root));
+    cJSON *e0 = cJSON_GetArrayItem(root, 0);
+    TEST_ASSERT_EQUAL_STRING("bad_params", cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(e0, "error"), "code")->valuestring);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(root, 1), "ok")));
+    cJSON_Delete(root);
+    TEST_ASSERT_NULL(tick()); /* nothing pending */
+    cJSON_Delete(parse(nt_devapi_submit("{\"method\":\"test.echo\"}")));
+}
+
+static void test_batch_while_pending_is_busy_per_entry(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":1,\"params\":{\"amount\":5}}"));
+    cJSON *root = parse(nt_devapi_submit("[{\"method\":\"test.echo\",\"request_id\":2},{\"method\":\"test.echo\",\"request_id\":3}]"));
+    TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(root));
+    for (int i = 0; i < 2; i++) {
+        cJSON *e = cJSON_GetArrayItem(root, i);
+        TEST_ASSERT_EQUAL_STRING("busy", cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(e, "error"), "code")->valuestring);
+        TEST_ASSERT_EQUAL_INT(2 + i, cJSON_GetObjectItemCaseSensitive(e, "request_id")->valueint);
+    }
+    cJSON_Delete(root);
+}
+// #endregion
+
+// #region present gate
+static void test_present_yields_after_the_seam(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":9,\"params\":{\"gate\":\"present\",\"tag\":11}}"));
+    nt_app_pause();
+    TEST_ASSERT_NULL(drain()); /* a frozen sim does not stall a present gate */
+    nt_devapi_run_pre_swap_reply();
+    nt_devapi_run_pre_swap_reply(); /* a second swap this frame keeps the first reply */
+    assert_probe(drain(), 11, 9);
+    nt_devapi_run_pre_swap_reply(); /* nothing pending: no-op */
+    TEST_ASSERT_NULL(drain());
+}
+
+static void test_present_reply_built_before_render_off_still_yields(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":9,\"params\":{\"gate\":\"present\"}}"));
+    nt_devapi_run_pre_swap_reply();
+    nt_app_set_render_enabled(false);
+    assert_probe(drain(), 7, 9);
+}
+// #endregion
+
+// #region stalled
+static void test_frames_stall_on_pause(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":1,\"params\":{\"amount\":3}}"));
+    TEST_ASSERT_NULL(tick());
+    nt_app_pause(); /* game code pauses between drains */
+    assert_error(tick(), "stalled", 1);
+    cJSON_Delete(parse(nt_devapi_submit("{\"method\":\"test.echo\"}"))); /* slot freed */
+}
+
+static void test_frames_stall_on_mode_switch(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":1,\"params\":{\"amount\":3}}"));
+    nt_app_set_mode(NT_APP_MODE_MANUAL);
+    nt_app_step(10); /* the new mode advances, but not the one the reply waits in */
+    assert_error(tick(), "stalled", 1);
+}
+
+static void test_frames_stall_in_idle_manual(void) {
+    g_nt_app.mode = NT_APP_MODE_MANUAL;
+    nt_app_step(1);
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":1,\"params\":{\"amount\":2}}"));
+    assert_error(tick(), "stalled", 1); /* the one queued step ran: frame 1 of 2, nothing left to advance */
+}
+
+/* The last queued step reaches the target and empties the queue: ready wins. */
+static void test_last_manual_step_resolves(void) {
+    g_nt_app.mode = NT_APP_MODE_MANUAL;
+    nt_app_step(2);
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":1,\"params\":{\"amount\":2}}"));
+    TEST_ASSERT_NULL(tick());
+    g_nt_app.pending_steps--; /* crunch: the loop runs the last step, the drain comes after an idle iteration */
     g_nt_app.frame++;
-    nt_devapi_run_pre_swap_producers(); /* a producer-less slot is untouched by the seam. */
-
-    const char *resp = nt_devapi_poll_response();
-    TEST_ASSERT_NOT_NULL(resp);
-    cJSON *root = cJSON_Parse(resp);
-    cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
-    TEST_ASSERT_TRUE(cJSON_IsObject(result));
-    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(result, "deferred"))); /* legacy shape intact */
-    TEST_ASSERT_EQUAL_INT(5, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
-    cJSON_Delete(root);
-    TEST_ASSERT_NULL(nt_devapi_poll_response());
+    assert_probe(tick(), 7, 1);
 }
 
-/* Reset-no-leak: defer-with-result, fill the payload via the seam, then reset WITHOUT polling.
-   The seam already consumed the ctx; reset must free the unyielded owned PAYLOAD — LSan-clean
-   (the leak the reset-no-leak case guards is the filled-but-never-yielded payload). */
-static void test_reset_frees_filled_payload(void) {
-    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer_result\",\"request_id\":1}"));
-    nt_devapi_run_pre_swap_producers();             /* payload now owned by the slot, unyielded. */
-    TEST_ASSERT_EQUAL_INT(1, s_producer_ctx_freed); /* ctx already consumed/freed at the seam. */
+static void test_seconds_stall_on_scale_zero_frames_do_not(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":1,\"params\":{\"gate\":\"seconds\",\"amount\":1}}"));
+    nt_app_set_scale(0.0F);
+    assert_error(tick(), "stalled", 1);
 
-    nt_devapi_deferred_reset();                  /* must free the filled-but-unyielded payload (LSan). */
-    TEST_ASSERT_NULL(nt_devapi_poll_response()); /* slot cleared — nothing pending. */
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":2,\"params\":{\"amount\":2}}"));
+    TEST_ASSERT_NULL(tick()); /* RUN at scale 0 still advances the frame */
+    assert_probe(tick(), 7, 2);
 }
 
-/* Reset-no-leak before fill: defer-with-result then reset WITHOUT driving the seam. The unfilled
-   slot still owns its ctx (payload is NULL) — reset frees the ctx, no leak. */
-static void test_reset_frees_unfilled_ctx(void) {
-    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer_result\",\"request_id\":2}"));
-    /* no frame advance, no pre-swap fill: producer never ran, payload stays NULL. */
-    nt_devapi_deferred_reset();
-    TEST_ASSERT_EQUAL_INT(1, s_producer_ctx_freed); /* the unrun producer's ctx is still freed. */
-    TEST_ASSERT_NULL(nt_devapi_poll_response());
+static void test_present_stalls_with_render_off(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":3,\"params\":{\"gate\":\"present\"}}"));
+    nt_app_set_render_enabled(false);
+    assert_error(drain(), "stalled", 3);
 }
+// #endregion
+
+// #region reset
+static void test_reset_frees_pending_and_built(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":1,\"params\":{\"amount\":5}}"));
+    nt_devapi_deferred_reset(); /* owned id freed (LSan) */
+    TEST_ASSERT_NULL(drain());
+
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":2,\"params\":{\"gate\":\"present\"}}"));
+    nt_devapi_run_pre_swap_reply();
+    nt_devapi_deferred_reset(); /* built entry freed (LSan) */
+    TEST_ASSERT_NULL(drain());
+    cJSON_Delete(parse(nt_devapi_submit("{\"method\":\"test.echo\"}")));
+}
+// #endregion
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_submit_defers_returns_null);
-    RUN_TEST(test_yield_after_k_frames_number_id);
-    RUN_TEST(test_yield_string_id);
-    RUN_TEST(test_yield_absent_id);
-    RUN_TEST(test_multi_slot_distinct_frames);
-    RUN_TEST(test_deferred_in_batch_rejected);
-    RUN_TEST(test_overflow_rejected_structured);
-    RUN_TEST(test_payload_yield_via_producer);
-    RUN_TEST(test_legacy_yield_unaffected);
-    RUN_TEST(test_reset_frees_filled_payload);
-    RUN_TEST(test_reset_frees_unfilled_ctx);
+    RUN_TEST(test_frames_gate_yields_after_k_frames);
+    RUN_TEST(test_zero_frames_resolves_on_next_drain);
+    RUN_TEST(test_seconds_gate_yields_on_game_time);
+    RUN_TEST(test_string_and_absent_ids);
+    RUN_TEST(test_reply_failure_is_its_error);
+    RUN_TEST(test_busy_while_pending);
+    RUN_TEST(test_busy_until_drained);
+    RUN_TEST(test_poll_alone_does_not_resolve);
+    RUN_TEST(test_batch_rejects_deferral_and_runs_the_rest);
+    RUN_TEST(test_batch_while_pending_is_busy_per_entry);
+    RUN_TEST(test_present_yields_after_the_seam);
+    RUN_TEST(test_present_reply_built_before_render_off_still_yields);
+    RUN_TEST(test_frames_stall_on_pause);
+    RUN_TEST(test_frames_stall_on_mode_switch);
+    RUN_TEST(test_frames_stall_in_idle_manual);
+    RUN_TEST(test_last_manual_step_resolves);
+    RUN_TEST(test_seconds_stall_on_scale_zero_frames_do_not);
+    RUN_TEST(test_present_stalls_with_render_off);
+    RUN_TEST(test_reset_frees_pending_and_built);
     return UNITY_END();
 }
