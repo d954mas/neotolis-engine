@@ -1361,15 +1361,13 @@ void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *targ
 static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, clip_cache_entry_t *clip_cache, int *clip_cache_len) {
     NT_ASSERT((uint32_t)*depth < NT_UI_WALKER_SCISSOR_DEPTH_CAP && "scissor stack overflow; restructure nested clip");
 
-    /* Clay's floating clipTo=ATTACHED_PARENT marker has both axes false and clips to its box. */
+    /* Empty is valid (a collapsed clip element); non-finite or negative is a layout/transform bug and UB in the int casts. */
+    const Clay_BoundingBox *bb = &c->boundingBox;
+    NT_ASSERT(isfinite(bb->x) && isfinite(bb->y) && isfinite(bb->width) && isfinite(bb->height) && bb->width >= 0.0F && bb->height >= 0.0F && "nt_ui scissor bbox must be finite and non-negative");
+
+    /* Both axes false is Clay's floating clipTo=ATTACHED_PARENT marker; Clay sets a clip config only with an axis. */
     const Clay_ClipRenderData *clip = &c->renderData.clip;
     const bool both_false = !clip->horizontal && !clip->vertical;
-    if (both_false && !(c->boundingBox.width > 0.0F && c->boundingBox.height > 0.0F)) {
-        stack[(*depth)++] = (scissor_rect_t){0};
-        nt_ui_internal_apply_scissor_logical_to_physical(target, 0, 0, 0, 0);
-        nt_gfx_set_scissor_enabled(true);
-        return;
-    }
     const int vw = (int)target->viewport[2];
     const int vh = (int)target->viewport[3];
     const bool clip_h = clip->horizontal || both_false;
@@ -1381,7 +1379,8 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
     if (clip_h) {
         const float bx = c->boundingBox.x;
         x = (int)floorf(bx);
-        wp = (int)ceilf(bx + c->boundingBox.width) - x;
+        /* Zero extent stays empty: floor/ceil of a fractional edge would open a 1 px column. */
+        wp = (c->boundingBox.width > 0.0F) ? (int)ceilf(bx + c->boundingBox.width) - x : 0;
     } else {
         x = 0;
         wp = vw;
@@ -1389,7 +1388,7 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
     if (clip_v) {
         const float by = c->boundingBox.y;
         y = (int)floorf(by);
-        hp = (int)ceilf(by + c->boundingBox.height) - y;
+        hp = (c->boundingBox.height > 0.0F) ? (int)ceilf(by + c->boundingBox.height) - y : 0;
     } else {
         y = 0;
         hp = vh;
@@ -1411,6 +1410,7 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
             }
         }
     }
+
     /* Intersect with parent so inner widgets cannot escape outer clip. */
     if (*depth > 0) {
         scissor_rect_t t = stack[*depth - 1];
