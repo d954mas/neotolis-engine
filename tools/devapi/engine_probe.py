@@ -9,7 +9,7 @@ correlation. This proves the WHOLE native transport chain over a real socket.
 Usage: python tools/devapi/engine_probe.py [--port N]
   Port resolution: --port N  >  env NT_DEVAPI_PORT  >  default 17890.
 Returns exit 0 if every assertion passes, exit 1 on any failure (connect /
-timeout / assertion). Stdlib only (socket + json) — no pip deps.
+assertion). Stdlib only (socket + json) — no pip deps.
 """
 import os
 import sys
@@ -19,10 +19,10 @@ import sys
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
     from tools.devapi.client import DevApiClient, DevApiResultError
-    from tools.devapi.transport import DEFAULT_PORT, DEFAULT_READ_TIMEOUT, SocketTransport
+    from tools.devapi.transport import DEFAULT_PORT, SocketTransport
 else:
     from .client import DevApiClient, DevApiResultError
-    from .transport import DEFAULT_PORT, DEFAULT_READ_TIMEOUT, SocketTransport
+    from .transport import DEFAULT_PORT, SocketTransport
 
 
 def _parse_port(raw: str) -> int:
@@ -92,7 +92,7 @@ def run(client: DevApiClient) -> None:
 def main(port: int) -> int:
     transport = None
     try:
-        transport = SocketTransport("127.0.0.1", port, read_timeout=DEFAULT_READ_TIMEOUT)
+        transport = SocketTransport("127.0.0.1", port)
         client = DevApiClient(transport)
         run(client)
         return 0

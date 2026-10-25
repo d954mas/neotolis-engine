@@ -476,6 +476,8 @@ specified in the UI chapters linked above.
   dependencies. Ad-hoc linking `nt_builder.lib` misses glad/cgltf dependencies.
 - For pixel-exact GL checks use DevAPI `capture.frame` (`glReadPixels`, also
   works headless), with `NT_DEVAPI_ENABLED` and the CAPTURE group enabled.
+  A DevAPI client has no read timeout: run it under an outer deadline (a CI step
+  `timeout-minutes`, a test runner or shell timeout).
   GDI/PrintWindow capture may not capture a GL framebuffer. For aesthetics/layout
   that cannot be verified locally, ask the developer to inspect specific results.
 

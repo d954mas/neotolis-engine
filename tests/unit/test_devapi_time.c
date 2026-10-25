@@ -5,14 +5,12 @@
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 /* clang-format off */
 #include "app/nt_app.h"
 #include "devapi/nt_devapi_internal.h"
-#include "devapi/nt_devapi_time_internal.h"
 #include "unity.h"
 /* clang-format on */
 
@@ -275,18 +273,16 @@ static void test_bad_params_cases(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"time.set_mode\",\"params\":{\"mode\":\"bogus\"}}"));
 }
 
-/* frame.wait over the cap → structured bad_params (never spins, never enqueues a slot). */
-static void test_frame_wait_over_cap_bad_params(void) {
-    char line[96];
-    (void)snprintf(line, sizeof(line), "{\"method\":\"frame.wait\",\"params\":{\"frames\":%d}}", NT_DEVAPI_FRAME_WAIT_MAX + 1);
-    assert_bad_params(nt_devapi_submit(line));
-
-    /* The rejected wait enqueued no slot: a sim-advance pops nothing. */
+/* frames is bounded only by the wrap-safe frame compare: INT32_MAX + 1 is bad_params with no slot, INT32_MAX defers. */
+static void test_frame_wait_int32_bound(void) {
+    assert_bad_params(nt_devapi_submit("{\"method\":\"frame.wait\",\"params\":{\"frames\":2147483648}}"));
+    TEST_ASSERT_NULL(advance_sim()); /* the rejected wait enqueued no slot */
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"frame.wait\",\"params\":{\"frames\":2147483647}}"));
     TEST_ASSERT_NULL(advance_sim());
 }
 
 /* frame.wait{frames:0}: target == current frame, so it resolves on the very next drain with no
-   sim-advance (the immediate-ack form), distinct from the over-cap rejection above. */
+   sim-advance (the immediate-ack form). */
 static void test_frame_wait_zero_resolves_immediately(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"frame.wait\",\"request_id\":5,\"params\":{\"frames\":0}}"));
     assert_clock_reply(drain(), 5, 0); /* ready immediately, no g_nt_app.frame advance */
@@ -309,13 +305,15 @@ static void test_frame_wait_fractional_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"frame.wait\",\"params\":{\"frames\":-1}}"));
 }
 
-/* time.step{count} over the cap → bad_params, no backlog queued. cJSON clamps huge JSON
-   numbers to INT_MAX, so an uncapped count would wedge the host for billions of frames. */
-static void test_step_over_cap_bad_params(void) {
-    char line[96];
-    (void)snprintf(line, sizeof(line), "{\"method\":\"time.step\",\"params\":{\"count\":%lld}}", (long long)NT_DEVAPI_STEP_MAX + 1);
-    assert_bad_params(nt_devapi_submit(line));
-    TEST_ASSERT_EQUAL_INT(0, g_nt_app.pending_steps); /* rejected → nothing queued */
+/* A step count is bounded only by the int queue: past INT32_MAX steps (count or seconds) is bad_params with
+   nothing queued, INT32_MAX itself queues. MANUAL, so the mode check cannot mask the range check. */
+static void test_step_int32_bound(void) {
+    g_nt_app.mode = NT_APP_MODE_MANUAL;
+    assert_bad_params(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"count\":2147483648}}"));
+    assert_bad_params(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"seconds\":1e30}}"));
+    TEST_ASSERT_EQUAL_INT(0, g_nt_app.pending_steps);
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"count\":2147483647}}"));
+    TEST_ASSERT_EQUAL_INT(INT32_MAX, g_nt_app.pending_steps);
 }
 
 /* a finite-but-tiny fps must fail fast, never store a +inf frame cap (which would spin-wait the
@@ -515,13 +513,10 @@ static void test_time_wait_rejected_when_time_frozen(void) {
     TEST_ASSERT_NULL(advance_time(2.0)); /* time 2.0 >> any 1.0s deadline -> proves none of the 3 registered a slot */
 }
 
-/* Over the seconds cap -> bad_params, no slot (a wait longer than the read-timeout could never be
-   received by the client). */
-static void test_time_wait_over_cap_bad_params(void) {
-    char line[96];
-    (void)snprintf(line, sizeof(line), "{\"method\":\"time.wait\",\"params\":{\"seconds\":%f}}", NT_DEVAPI_TIME_WAIT_MAX_SECONDS + 1.0);
-    assert_bad_params(nt_devapi_submit(line));
-    TEST_ASSERT_NULL(advance_time(NT_DEVAPI_TIME_WAIT_MAX_SECONDS + 2.0));
+/* Any finite wait defers: the client, not the engine, decides how long it is willing to wait. */
+static void test_time_wait_long_defers(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.wait\",\"params\":{\"seconds\":1e9}}"));
+    TEST_ASSERT_NULL(advance_time(10.0));
 }
 
 /* time.step{seconds} sugar: ceil(seconds/step_dt) frames. step_dt = 1/60 (setUp), so 1.0s = 60
@@ -571,9 +566,9 @@ int main(void) {
     RUN_TEST(test_render_info_reflects_flag);
     RUN_TEST(test_frame_current_matches_app);
     RUN_TEST(test_bad_params_cases);
-    RUN_TEST(test_frame_wait_over_cap_bad_params);
+    RUN_TEST(test_frame_wait_int32_bound);
     RUN_TEST(test_frame_wait_zero_resolves_immediately);
-    RUN_TEST(test_step_over_cap_bad_params);
+    RUN_TEST(test_step_int32_bound);
     RUN_TEST(test_set_fps_tiny_underflow_bad_params);
     RUN_TEST(test_step_requires_manual_mode);
     RUN_TEST(test_set_scale_huge_bad_params);
@@ -583,7 +578,7 @@ int main(void) {
     RUN_TEST(test_time_wait_yields_after_seconds);
     RUN_TEST(test_time_wait_zero_resolves_immediately);
     RUN_TEST(test_time_wait_rejected_when_time_frozen);
-    RUN_TEST(test_time_wait_over_cap_bad_params);
+    RUN_TEST(test_time_wait_long_defers);
     RUN_TEST(test_time_step_seconds_converts_to_frames);
     RUN_TEST(test_time_step_count_seconds_exclusive_and_ceil);
     RUN_TEST(test_time_step_fractional_count_has_no_side_effect);

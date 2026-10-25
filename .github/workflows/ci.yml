@@ -576,6 +576,7 @@ jobs:
       # Self-launches devapi_host over the native socket and drives the canonical run(client);
       # xvfb-run supplies the headless X for nt_window_init().
       - name: Run devapi live-socket UAT
+        timeout-minutes: 5
         run: xvfb-run -a python3 tools/devapi/scenarios/devapi_demo.py
 
   # The deferred-capture-over-web drain race is invisible to unit tests — only a real headless Chromium

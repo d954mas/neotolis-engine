@@ -6,7 +6,6 @@
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "devapi/nt_devapi_internal.h"
-#include "devapi/nt_devapi_time_internal.h"
 #include "graphics/nt_gfx.h"
 
 /* time/render/frame command group. Bot input is range/type-checked → bad_params; never assert
@@ -19,8 +18,6 @@ static void set_bad_params(nt_devapi_error *err, const char *message) {
     err->code = NT_DEVAPI_ERR_BAD_PARAMS;
     err->message = message;
 }
-
-_Static_assert(NT_DEVAPI_FRAME_WAIT_MAX <= INT32_MAX, "NT_DEVAPI_FRAME_WAIT_MAX must fit the wrap-safe frame compare");
 
 /* frame.current → {frame, time, dt}, also the reply of every clock deferral; g_nt_app.time = sum of applied
    dts = game-elapsed time. */
@@ -56,7 +53,6 @@ static bool cmd_time_resume(const cJSON *params, cJSON *result, nt_devapi_error 
 /* Lockstep-crunch step. Count in frames (default 1) OR seconds (sugar: ceil(seconds/step_dt) frames
    — game-time and frames are linear in MANUAL since step_dt is fixed). Deferred: the reply waits for
    the steps already queued plus `count`, so the caller observes every queued step done. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_time_step(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)result;
     (void)ud;
@@ -78,15 +74,15 @@ static bool cmd_time_step(const cJSON *params, cJSON *result, nt_devapi_error *e
             return false;
         }
         double steps = ceil(seconds / (double)g_nt_app.step_dt); /* step_dt > 0 (L1 invariant). */
-        if (steps > (double)NT_DEVAPI_STEP_MAX) {
-            set_bad_params(err, "time.step: seconds too large (exceeds NT_DEVAPI_STEP_MAX frames)");
+        if (steps > (double)INT32_MAX) {
+            set_bad_params(err, "time.step: seconds too large (more than INT32_MAX steps)");
             return false;
         }
-        count = (int)steps; /* >= 1 (ceil of a positive) and <= STEP_MAX, so the cast is safe. */
+        count = (int)steps; /* >= 1 (ceil of a positive) and <= INT32_MAX, so the cast is safe. */
     } else if (c != NULL) {
         uint32_t parsed = 0;
-        const char *bad_count = "time.step: count must be an integer in [1, NT_DEVAPI_STEP_MAX]";
-        if (!nt_devapi_parse_u32_param_exact(c, NT_DEVAPI_STEP_MAX, err, set_bad_params, bad_count, &parsed)) {
+        const char *bad_count = "time.step: count must be an integer in [1, INT32_MAX]";
+        if (!nt_devapi_parse_u32_param_exact(c, INT32_MAX, err, set_bad_params, bad_count, &parsed)) {
             return false;
         }
         if (parsed == 0U) {
@@ -204,8 +200,8 @@ static bool cmd_time_wait(const cJSON *params, cJSON *result, nt_devapi_error *e
         }
         seconds = s->valuedouble;
     }
-    if (!isfinite(seconds) || seconds < 0.0 || seconds > NT_DEVAPI_TIME_WAIT_MAX_SECONDS) {
-        set_bad_params(err, "time.wait: seconds out of range [0, NT_DEVAPI_TIME_WAIT_MAX_SECONDS]");
+    if (!isfinite(seconds) || seconds < 0.0) {
+        set_bad_params(err, "time.wait: seconds must be finite and >= 0");
         return false;
     }
     return nt_devapi_defer(NT_DEVAPI_GATE_SECONDS, seconds, cmd_frame_current, err);
@@ -249,7 +245,7 @@ static bool cmd_frame_wait(const cJSON *params, cJSON *result, nt_devapi_error *
     }
     uint32_t frames = 1U;
     const cJSON *f = cJSON_GetObjectItemCaseSensitive(params, "frames");
-    if (f != NULL && !nt_devapi_parse_u32_param_exact(f, NT_DEVAPI_FRAME_WAIT_MAX, err, set_bad_params, "frame.wait: frames must be an integer in [0, NT_DEVAPI_FRAME_WAIT_MAX]", &frames)) {
+    if (f != NULL && !nt_devapi_parse_u32_param_exact(f, INT32_MAX, err, set_bad_params, "frame.wait: frames must be an integer in [0, INT32_MAX]", &frames)) {
         return false;
     }
     return nt_devapi_defer(NT_DEVAPI_GATE_FRAMES, (double)frames, cmd_frame_current, err);

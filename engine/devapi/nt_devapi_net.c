@@ -291,11 +291,15 @@ void nt_devapi_net_stop(void) {
 // #endregion
 
 // #region accept / poll
-/* Non-blocking accept; sets the new client non-blocking + TCP_NODELAY. */
+/* Non-blocking accept; sets the new client non-blocking + TCP_NODELAY. A connection that arrives while
+   a client is served is closed at once, so the extra client fails fast instead of waiting in the backlog. */
 static void try_accept(void) {
-    NT_ASSERT(s_client == NT_INVALID_SOCK); /* callers must not overwrite a live client. */
     nt_sock_t c = accept(s_listen, NULL, NULL);
     if (c != NT_INVALID_SOCK) {
+        if (s_client != NT_INVALID_SOCK) {
+            nt_close_sock(c);
+            return;
+        }
         s_client = c;
         s_recv_len = 0;
         set_client_opts(c);
@@ -328,9 +332,7 @@ static void net_poll(void) {
     if (s_listen == NT_INVALID_SOCK) {
         return; /* not started / stopped. */
     }
-    if (s_client == NT_INVALID_SOCK) {
-        try_accept();
-    }
+    try_accept();
     if (s_client == NT_INVALID_SOCK) {
         return;
     }

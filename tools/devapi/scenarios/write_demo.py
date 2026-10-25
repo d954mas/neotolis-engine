@@ -23,10 +23,10 @@ import time
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
     from tools.devapi.client import DevApiClient, DevApiResultError
-    from tools.devapi.transport import DEFAULT_PORT, DEFAULT_READ_TIMEOUT, SocketTransport
+    from tools.devapi.transport import DEFAULT_PORT, SocketTransport
 else:
     from ..client import DevApiClient, DevApiResultError
-    from ..transport import DEFAULT_PORT, DEFAULT_READ_TIMEOUT, SocketTransport
+    from ..transport import DEFAULT_PORT, SocketTransport
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
@@ -73,7 +73,7 @@ def _connect_with_retry(port: int, deadline_s: float = 10.0) -> SocketTransport:
     last_exc = None
     while time.time() < end:
         try:
-            return SocketTransport("127.0.0.1", port, read_timeout=DEFAULT_READ_TIMEOUT)
+            return SocketTransport("127.0.0.1", port)
         except (ConnectionError, TimeoutError, OSError) as exc:
             last_exc = exc
             time.sleep(0.1)
@@ -212,7 +212,7 @@ def main(argv) -> int:
             proc = subprocess.Popen([host_bin], cwd=REPO_ROOT, env=env)
             transport = _connect_with_retry(port)
         else:
-            transport = SocketTransport("127.0.0.1", port, read_timeout=DEFAULT_READ_TIMEOUT)
+            transport = SocketTransport("127.0.0.1", port)
         client = DevApiClient(transport)
         run(client)
         return 0

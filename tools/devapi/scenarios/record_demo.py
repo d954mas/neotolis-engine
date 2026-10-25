@@ -19,10 +19,10 @@ import sys
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
     from tools.devapi.client import DevApiClient
-    from tools.devapi.transport import DEFAULT_PORT, DEFAULT_READ_TIMEOUT, SocketTransport
+    from tools.devapi.transport import DEFAULT_PORT, SocketTransport
 else:
     from ..client import DevApiClient
-    from ..transport import DEFAULT_PORT, DEFAULT_READ_TIMEOUT, SocketTransport
+    from ..transport import DEFAULT_PORT, SocketTransport
 
 CHECK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "check_recording.py")
 
@@ -41,8 +41,7 @@ def lockstep(client, out):
     if steps:
         client.step(steps)
     client.result("record.start", {"name": path, "fps": 30})
-    for _ in range(12):  # one request per 30 steps keeps a slow encoder inside the read timeout
-        client.step(30)
+    client.step(360)
     frames = client.result("record.stop")["frames"]
     assert frames == 180, f"lockstep: {frames} frames, expected 180"
     check(path, 30, frames, False)
@@ -53,7 +52,7 @@ def real_time(client, out):
     client.set_mode("run")
     client.resume()
     client.result("record.start", {"name": path, "fps": 30})
-    client.wait_game_seconds(10.0)
+    client.time_wait(10.0)
     frames = client.result("record.stop")["frames"]
     assert frames > 0, "real time: no frames"
     check(path, 30, frames, True)
@@ -64,7 +63,7 @@ def main():
     ap.add_argument("--port", type=int, default=int(os.environ.get("NT_DEVAPI_PORT", DEFAULT_PORT)))
     ap.add_argument("--out", default=os.getcwd())
     a = ap.parse_args()
-    transport = SocketTransport("127.0.0.1", a.port, read_timeout=DEFAULT_READ_TIMEOUT)
+    transport = SocketTransport("127.0.0.1", a.port)
     try:
         client = DevApiClient(transport)
         out = os.path.abspath(a.out)

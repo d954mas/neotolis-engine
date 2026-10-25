@@ -40,20 +40,13 @@ class PlaywrightTransportTests(unittest.TestCase):
         submitted = [args[0] for expression, args in page.calls if "submit" in expression]
         self.assertEqual(["time.set_mode", "capture.frame"], [json.loads(s)["method"] for s in submitted])
 
-    def test_wait_is_bounded_by_read_timeout(self):
-        page = FakePage()
-        transport = PlaywrightTransport(page, read_timeout=0.05)
+    def test_wait_has_no_deadline(self):
+        line = '{"request_id":1,"ok":true,"result":{}}'
+        page = FakePage(polls=[""] * 500 + [line])
+        transport = PlaywrightTransport(page)
 
-        with self.assertRaises(TimeoutError):
-            transport.recv_line()
-
-        waits = [args[0] for expression, args in page.calls if "poll()" in expression]
-        self.assertTrue(waits)
-        self.assertTrue(all(1 <= ms <= 50 for ms in waits))
-        # The timeout resets the bridge, so the engine's pending reply cannot leave the session busy.
-        self.assertEqual("() => window.__devapi.reset()", page.calls[-1][0])
-        with self.assertRaises(ConnectionError):
-            transport.send("{}")
+        self.assertEqual(line, transport.recv_line())
+        self.assertEqual(501, sum(1 for expression, _ in page.calls if "poll()" in expression))
 
 
 if __name__ == "__main__":

@@ -2,18 +2,15 @@
 
 A pluggable Transport interface (send a line, read a line, close) plus the
 native SocketTransport: a loopback TCP connection to the engine's devapi
-server, JSON-lines framed on '\\n', with a MANDATORY read timeout so a
-crashed / deferred-forever engine can never hang the bot or CI.
+server, JSON-lines framed on '\\n'. A read waits as long as the engine needs: every
+logically blocked reply fails with stalled, so only a platform stall can hang, and the
+caller's outer deadline (CI step, test runner, shell) bounds the session.
 
 Stdlib only (socket) — no pip deps. Python 3.8+.
 """
 import socket
-import time
 from abc import ABC, abstractmethod
 
-# Default loopback read timeout (seconds). Bounded so a dead/deferred-forever
-# server is fatal-fast instead of an infinite hang.
-DEFAULT_READ_TIMEOUT = 5.0
 DEFAULT_CONNECT_TIMEOUT = 5.0
 # Matches the host's NT_DEVAPI_DEFAULT_PORT.
 DEFAULT_PORT = 17890
@@ -40,7 +37,7 @@ class Transport(ABC):
 
 
 class SocketTransport(Transport):
-    """Loopback TCP, JSON-lines on '\\n', mandatory read timeout.
+    """Loopback TCP, JSON-lines on '\\n'.
 
     Numeric 127.0.0.1 keeps create_connection on IPv4, matching the server's
     INADDR_LOOPBACK bind (an IPv6 ::1 resolution would never reach it).
@@ -51,14 +48,12 @@ class SocketTransport(Transport):
         host: str = "127.0.0.1",
         port: int = DEFAULT_PORT,
         connect_timeout: float = DEFAULT_CONNECT_TIMEOUT,
-        read_timeout: float = DEFAULT_READ_TIMEOUT,
     ) -> None:
         # Set first so a failure mid-construction still leaves close() safe.
         self._sock = None
         self._f = None
         self._sock = socket.create_connection((host, port), timeout=connect_timeout)
-        # The read timeout is mandatory, not optional — never block forever.
-        self._sock.settimeout(read_timeout)
+        self._sock.settimeout(None)
         # Binary makefile handles partial-recv reassembly; readline frames on b'\n' and caps the read in
         # BYTES (a text-mode makefile would cap MAX_LINE_BYTES in CHARACTERS, diverging from the contract).
         # 256 KB buffer: multi-MB base64 capture lines through the default 8 KB reader recv so slowly
@@ -77,14 +72,7 @@ class SocketTransport(Transport):
 
     def recv_line(self) -> str:
         # Bound the read (in BYTES) so a desynced stream can never grow memory without limit.
-        try:
-            raw = self._f.readline(MAX_LINE_BYTES)
-        except (socket.timeout, TimeoutError) as exc:
-            # On py3.8 socket.timeout is NOT a TimeoutError subclass; normalize so callers catch
-            # one type. A mid-read timeout also leaves the buffered reader in an undefined state,
-            # so invalidate the transport — a retry must fail fast, not read corrupted framing.
-            self.close()
-            raise TimeoutError(str(exc) or "read timed out") from exc
+        raw = self._f.readline(MAX_LINE_BYTES)
         if raw == b"":
             # Orderly disconnect: recv returned b"" (mirrors the server-side close path). Fail fast, never hang.
             raise ConnectionError("server closed the connection")
@@ -102,14 +90,12 @@ class SocketTransport(Transport):
 
 
 # One wait per evaluate: a queued line returns at once; otherwise a double rAF (one rendered frame, so
-# the pre-swap seam can fill a deferred capture) races a timer for the time left, then one poll. rAF
-# stops in a background tab; the timer keeps the wait bounded.
+# the pre-swap seam can fill a deferred capture), then one poll. A background tab stops rAF and so the
+# wait, the same as a host that stops ticking.
 _POLL_AFTER_FRAME_JS = (
-    "async (ms) => { const q = window.__devapi.poll(); if (q) return q; let t; "
-    "await Promise.race(["
-    "new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))), "
-    "new Promise(r => { t = setTimeout(r, ms); })]); "
-    "clearTimeout(t); return window.__devapi.poll(); }"
+    "async () => { const q = window.__devapi.poll(); if (q) return q; "
+    "await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); "
+    "return window.__devapi.poll(); }"
 )
 
 
@@ -120,18 +106,16 @@ class PlaywrightTransport(Transport):
     window.__devapi.submit and stashes the SYNCHRONOUS response (a non-deferred command returns its
     response line immediately; a deferred command — C returned NULL — returns "" and its data line
     arrives later via poll()). recv_line() returns a stashed line, else polls after each frame until a
-    line appears or the MANDATORY read_timeout fires, which closes the transport and resets the bridge
-    (a native timeout closes the socket the same way). Like SocketTransport it only moves lines: time
-    advance belongs to the client.
+    line appears; close() resets the bridge, dropping the engine's pending reply (a native close does
+    the same). Like SocketTransport it only moves lines: time advance belongs to the client.
 
     Playwright Python is NOT a CI dep (the CI web gate is the TS spec); this class is the local/dev
     web wire and touches only the page handle the caller constructed, so the module stays stdlib-only
     importable for the native SocketTransport path.
     """
 
-    def __init__(self, page, read_timeout: float = DEFAULT_READ_TIMEOUT) -> None:
+    def __init__(self, page) -> None:
         self._page = page
-        self._timeout = read_timeout
         self._closed = False
         # Lines received synchronously from submit() but not yet handed to recv_line().
         self._inbox = []
@@ -149,17 +133,8 @@ class PlaywrightTransport(Transport):
             raise ConnectionError("transport is closed")
         if self._inbox:
             return self._inbox.pop(0)
-        deadline = time.monotonic() + self._timeout
         while True:
-            left = deadline - time.monotonic()
-            if left <= 0:
-                # Like SocketTransport: a timeout closes, and the reset drops the engine's pending reply.
-                try:
-                    self.close()
-                except Exception:  # a dead page cannot reset; the timeout is still the error to report
-                    pass
-                raise TimeoutError("no web devapi line within read_timeout")
-            line = self._page.evaluate(_POLL_AFTER_FRAME_JS, max(1, int(left * 1000)))
+            line = self._page.evaluate(_POLL_AFTER_FRAME_JS)
             if line:
                 return line
 

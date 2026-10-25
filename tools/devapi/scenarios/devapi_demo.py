@@ -24,10 +24,10 @@ import time
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
     from tools.devapi.client import DevApiClient, DevApiResultError
-    from tools.devapi.transport import DEFAULT_PORT, DEFAULT_READ_TIMEOUT, SocketTransport
+    from tools.devapi.transport import DEFAULT_PORT, SocketTransport
 else:
     from ..client import DevApiClient, DevApiResultError
-    from ..transport import DEFAULT_PORT, DEFAULT_READ_TIMEOUT, SocketTransport
+    from ..transport import DEFAULT_PORT, SocketTransport
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
@@ -83,7 +83,7 @@ def _connect_with_retry(port: int, deadline_s: float = 10.0) -> SocketTransport:
     last_exc = None
     while time.time() < end:
         try:
-            return SocketTransport("127.0.0.1", port, read_timeout=DEFAULT_READ_TIMEOUT)
+            return SocketTransport("127.0.0.1", port)
         except (ConnectionError, TimeoutError, OSError) as exc:
             last_exc = exc
             time.sleep(0.1)
@@ -137,6 +137,20 @@ def _drive_deferred_items(client: DevApiClient, advertised: set) -> None:
         client.step(1)
         exercised.append("time.step")
     print(f"PASS deferred-items: {', '.join(exercised) or '(none advertised)'} exercised (advertised commands asserted).")
+
+
+def _check_extra_client_closed(port: int, client: DevApiClient) -> None:
+    """The native host serves one client: a second connection is closed at once, the first stays served."""
+    with SocketTransport("127.0.0.1", port) as extra:
+        try:
+            extra.send('{"method":"ping"}')
+            extra.recv_line()
+        except ConnectionError:
+            pass
+        else:
+            raise AssertionError("a second client was served while the first was connected")
+    client.result("ping")
+    print("PASS extra client: closed at once, the first client is still served.")
 
 
 def run(client: DevApiClient) -> None:
@@ -195,9 +209,10 @@ def main(argv) -> int:
             proc = subprocess.Popen([host_bin], cwd=REPO_ROOT, env=env)
             transport = _connect_with_retry(port)
         else:
-            transport = SocketTransport("127.0.0.1", port, read_timeout=DEFAULT_READ_TIMEOUT)
+            transport = SocketTransport("127.0.0.1", port)
         client = DevApiClient(transport)
         run(client)
+        _check_extra_client_closed(port, client)
         return 0
     except AssertionError as exc:
         print(f"FAIL: assertion: {exc}")
