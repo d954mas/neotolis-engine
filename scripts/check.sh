@@ -319,6 +319,10 @@ if [ "$MODE" = "push" ]; then
         echo "  emcmake cmake --preset wasm-release"
         exit 1
     fi
+    if ! grep -q '^NT_WASM_CLOSURE:BOOL=ON$' build/_cmake/wasm-release/CMakeCache.txt; then
+        echo "ERROR: wasm-release cache must set NT_WASM_CLOSURE=ON — reconfigure it: emcmake cmake --preset wasm-release"
+        exit 1
+    fi
     cmake --build build/_cmake/wasm-release
     ok
 

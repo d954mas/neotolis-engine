@@ -321,7 +321,9 @@ The push gate additionally builds native-release, wasm-debug and wasm-release,
 then runs submodule consumption and the diagnostics matrices (their independent
 builds run in parallel). These catch
 NDEBUG-only warnings, Emscripten-specific warnings and Closure failures that the
-native Debug build cannot catch. The full mode checks whole-tree format/tidy.
+native Debug build cannot catch. The push gate requires `NT_WASM_CLOSURE=ON`
+in the `wasm-release` cache; reconfigure with `emcmake cmake --preset wasm-release`
+if the option is missing or OFF. The full mode checks whole-tree format/tidy.
 
 ### CI jobs
 
