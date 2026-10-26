@@ -12,8 +12,8 @@ extern nt_gfx_device_info_t g_nt_gfx_device_info;
 // #region observation storage and owning-site counters
 #if NT_GFX_CAPTURE_ENABLED
 typedef struct {
-    bool request_pending; /* the next frame records */
-    bool recording;
+    bool request_pending;  /* the next frame records */
+    uint32_t marker_depth; /* tracked in every frame, recorded or not */
     nt_gfx_event_t *events;
     uint32_t capacity;
     nt_gfx_capture_view_t view;
@@ -28,10 +28,10 @@ extern nt_gfx_capture_state_t g_nt_gfx_capture;
 #if NT_GFX_CAPTURE_ENABLED
 void nt_gfx_backend_capture_initial_state(void);
 /* Zeroes the next record in place; the caller publishes it by advancing count.
- * NULL when not recording or full; a full array marks overflow. */
+ * NULL when not recording or full; a full array marks overflow, and nothing appends after it. */
 static inline nt_gfx_event_t *nt_gfx_capture_reserve(void) {
     nt_gfx_capture_state_t *capture = &g_nt_gfx_capture;
-    if (!capture->recording) {
+    if (!g_nt_gfx.capture_recording || capture->view.overflow) {
         return NULL;
     }
     if (capture->view.count == capture->capacity) {

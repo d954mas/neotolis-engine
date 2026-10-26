@@ -660,8 +660,20 @@ typedef enum {
     NT_GFX_EVENT_SKIP,
     NT_GFX_EVENT_INITIAL,
     NT_GFX_EVENT_DEFINITION,
-    NT_GFX_EVENT_ARGUMENT, /* request argument belonging to the enclosing BEGIN */
+    NT_GFX_EVENT_ARGUMENT,   /* request argument belonging to the enclosing BEGIN */
+    NT_GFX_EVENT_NOTE,       /* caller context; its NOTE_FIELD records follow */
+    NT_GFX_EVENT_NOTE_FIELD, /* one field of the preceding NOTE */
+    NT_GFX_EVENT_MARKER_PUSH,
+    NT_GFX_EVENT_MARKER_POP,
 } nt_gfx_event_kind_t;
+
+typedef enum {
+    NT_GFX_NOTE_U32,
+    NT_GFX_NOTE_I32,
+    NT_GFX_NOTE_U64,
+    NT_GFX_NOTE_F32,
+    NT_GFX_NOTE_STR,
+} nt_gfx_note_type_t;
 
 typedef enum {
     NT_GFX_OBJECT_NONE,
@@ -694,44 +706,62 @@ typedef enum {
  * object is a full typed frontend handle and the cross-context identity; raw names
  * live only in backend data and are valid within their context segment, which a
  * CONTEXT operation ends. Unknown inherited values are explicit. */
-typedef struct {
-    nt_gfx_event_kind_t kind;
-    nt_gfx_operation_t operation;
-    nt_gfx_object_kind_t object_kind;
-    uint32_t object;
-    uint32_t detail;
-    nt_gfx_result_t result;
-    union {
-        struct {
-            uint64_t bytes;
-            uint32_t args[12];
-            float values[4];
-        } backend;
-        struct {
-            uint64_t size;
-            uint32_t backend, related[3], type, usage, width, height, format, levels, flags;
-        } resource;
-        struct {
-            uint32_t first, count, vertices, instances, vertex_input;
-        } draw;
-        struct {
-            uint32_t secondary, name, slot, offset, size;
-        } binding;
-        struct {
-            uint32_t target;
-            float color[4], depth;
-            /* Flags are meaningful only in BEGIN records; INITIAL holds cached clear values. */
-            bool load_color, load_depth, discard_color, discard_depth;
-        } pass;
-        nt_clear_desc_t clear;
-        struct {
-            uint32_t buffer, offset, stride, location, type, count, normalized, divisor;
-        } attribute;
-        struct {
-            uint32_t integers[14];
-            float values[6];
-        } state;
-    } data;
+typedef union {
+    struct {
+        nt_gfx_event_kind_t kind;
+        nt_gfx_operation_t operation;
+        nt_gfx_object_kind_t object_kind;
+        uint32_t object;
+        uint32_t detail;
+        nt_gfx_result_t result;
+        union {
+            struct {
+                uint64_t bytes;
+                uint32_t args[12];
+                float values[4];
+            } backend;
+            struct {
+                uint64_t size;
+                uint32_t backend, related[3], type, usage, width, height, format, levels, flags;
+            } resource;
+            struct {
+                uint32_t first, count, vertices, instances, vertex_input;
+            } draw;
+            struct {
+                uint32_t secondary, name, slot, offset, size;
+            } binding;
+            struct {
+                uint32_t target;
+                float color[4], depth;
+                /* Flags are meaningful only in BEGIN records; INITIAL holds cached clear values. */
+                bool load_color, load_depth, discard_color, discard_depth;
+            } pass;
+            nt_clear_desc_t clear;
+            struct {
+                uint32_t buffer, offset, stride, location, type, count, normalized, divisor;
+            } attribute;
+            struct {
+                uint32_t integers[14];
+                float values[6];
+            } state;
+        } data;
+    };
+    struct {
+        nt_gfx_event_kind_t kind;
+        char label[100]; /* NOTE label or MARKER_PUSH name */
+    } note;
+    struct {
+        nt_gfx_event_kind_t kind;
+        nt_gfx_note_type_t type;
+        char key[24];
+        union {
+            uint32_t u32;
+            int32_t i32;
+            uint64_t u64;
+            float f32;
+            char str[72];
+        } value;
+    } field;
 } nt_gfx_event_t;
 
 _Static_assert(sizeof(nt_gfx_event_t) == 104, "capture record layout must remain explicit");
@@ -759,6 +789,47 @@ void nt_gfx_capture_request(void);
  * next requested recording, or shutdown, so read right after begin_frame. Copy count records and
  * metadata to keep. Empty views have events=NULL. */
 nt_gfx_capture_view_t nt_gfx_capture_read(void);
+#endif
+
+/* Context from any code for the capture: a label plus typed fields. Called through NT_GFX_NOTE. */
+typedef struct {
+    const char *key;
+    nt_gfx_note_type_t type;
+    union {
+        uint32_t u32;
+        int32_t i32;
+        uint64_t u64;
+        float f32;
+        const char *str;
+    } value;
+} nt_gfx_note_field_t;
+
+#define NT_NOTE_U32(k, v) ((nt_gfx_note_field_t){.key = (k), .type = NT_GFX_NOTE_U32, .value.u32 = (v)})
+#define NT_NOTE_I32(k, v) ((nt_gfx_note_field_t){.key = (k), .type = NT_GFX_NOTE_I32, .value.i32 = (v)})
+#define NT_NOTE_U64(k, v) ((nt_gfx_note_field_t){.key = (k), .type = NT_GFX_NOTE_U64, .value.u64 = (v)})
+#define NT_NOTE_F32(k, v) ((nt_gfx_note_field_t){.key = (k), .type = NT_GFX_NOTE_F32, .value.f32 = (v)})
+#define NT_NOTE_STR(k, v) ((nt_gfx_note_field_t){.key = (k), .type = NT_GFX_NOTE_STR, .value.str = (v)})
+
+#if NT_GFX_CAPTURE_ENABLED
+void nt_gfx_note_record(const char *label, const nt_gfx_note_field_t *fields, uint32_t count);
+/* Nested groups in call order; every push pops before the next nt_gfx_begin_frame. */
+void nt_gfx_marker_push(const char *name);
+void nt_gfx_marker_pop(void);
+/* The trailing placeholder lets a note have no fields under C17; it is not recorded. */
+#define NT_GFX_NOTE(...) NT_GFX_NOTE_(__VA_ARGS__, NT_NOTE_U32(NULL, 0))
+/* An expression, not a do/if block: each note adds one branch to its caller. sizeof does not
+ * evaluate its operand, so the fields are built once. */
+#define NT_GFX_NOTE_(label, ...)                                                                                                                                                                       \
+    (g_nt_gfx.capture_recording                                                                                                                                                                        \
+         ? nt_gfx_note_record((label), (const nt_gfx_note_field_t[]){__VA_ARGS__}, (uint32_t)(sizeof((const nt_gfx_note_field_t[]){__VA_ARGS__}) / sizeof(nt_gfx_note_field_t)) - 1U)                  \
+         : (void)0)
+#define NT_GFX_MARKER_PUSH(name) nt_gfx_marker_push(name)
+#define NT_GFX_MARKER_POP() nt_gfx_marker_pop()
+#else
+/* Arguments are not evaluated: they must be side-effect-free. */
+#define NT_GFX_NOTE(...) ((void)0)
+#define NT_GFX_MARKER_PUSH(name) ((void)0)
+#define NT_GFX_MARKER_POP() ((void)0)
 #endif
 // #endregion
 
@@ -798,6 +869,9 @@ typedef struct {
     bool context_lost;
     bool context_restored;
     bool initialized;
+#if NT_GFX_CAPTURE_ENABLED
+    bool capture_recording; /* this frame records; read by NT_GFX_NOTE */
+#endif
 } nt_gfx_t;
 
 extern nt_gfx_t g_nt_gfx;

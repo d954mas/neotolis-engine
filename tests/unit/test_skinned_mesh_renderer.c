@@ -1,6 +1,7 @@
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/nt_gfx_test_desc.h"
 #include "test_helpers/nt_gfx_test_frame.h"
+#include "test_helpers/nt_gfx_test_notes.h"
 
 #include <string.h>
 
@@ -194,7 +195,7 @@ void setUp(void) {
     nt_gfx_fake_reset();
     s_surface_pack_created = false;
     nt_hash_init(&(nt_hash_desc_t){0});
-    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 8, .max_pipelines = 16, .max_buffers = 32, .max_textures = 16, .max_meshes = 8,
+    nt_gfx_init(&NT_GFX_TEST_DESC(.capture_capacity = 4096U, .max_shaders = 8, .max_programs = 8, .max_pipelines = 16, .max_buffers = 32, .max_textures = 16, .max_meshes = 8,
                                   /* 48 non-mesh inputs + the per-(mesh, stream) vertex inputs of 8 meshes. */
                                   .max_vertex_inputs = 96, .max_render_targets = 4));
     nt_gfx_begin_frame();
@@ -864,11 +865,41 @@ void test_core_draw_appends_the_deformation_to_the_material_set(void) {
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "appears more than once"));
 }
 
+#if NT_GFX_CAPTURE_ENABLED
+/* A deformation-only split notes the same material and mesh for both runs. */
+void test_deformation_split_notes_the_same_material_and_mesh(void) {
+    nt_mesh_t mesh = make_mesh();
+    nt_texture_t texture_a = make_deformation_texture();
+    nt_texture_t texture_b = make_deformation_texture();
+    nt_material_t material = make_material(nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1));
+    nt_entity_t entity_a = make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture_a});
+    nt_entity_t entity_b = make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture_b});
+    nt_render_item_t items[2] = {make_item(entity_a, material, mesh), make_item(entity_b, material, mesh)};
+
+    nt_gfx_capture_request();
+    record_skinned_list(items, 2);
+
+    const uint32_t notes[2] = {nt_test_note(0, "mesh"), nt_test_note(nt_test_note(0, "mesh") + 1U, "mesh")};
+    const uint32_t count = nt_gfx_capture_read().count;
+    TEST_ASSERT_LESS_THAN_UINT32(count, notes[1]);
+    TEST_ASSERT_EQUAL_UINT32(count, nt_test_note(notes[1] + 1U, "mesh"));
+    for (uint32_t i = 0; i < 2; i++) {
+        TEST_ASSERT_EQUAL_UINT32(material.id, nt_test_note_u32(notes[i], "material"));
+        TEST_ASSERT_EQUAL_UINT32(mesh.id, nt_test_note_u32(notes[i], "mesh"));
+        TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, nt_test_next_draw_result(notes[i]));
+    }
+    nt_test_frame_next();
+}
+#endif
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_one_compatible_item_draws_with_its_deformation_texture);
     RUN_TEST(test_compatible_items_share_one_instanced_draw);
     RUN_TEST(test_deformation_texture_splits_runs_but_origins_do_not);
+#if NT_GFX_CAPTURE_ENABLED
+    RUN_TEST(test_deformation_split_notes_the_same_material_and_mesh);
+#endif
     RUN_TEST(test_a_b_a_textures_reapply_complete_set);
     RUN_TEST(test_separate_draw_lists_replay_supplied_texture_set);
     RUN_TEST(test_packed_instances_keep_each_entity_world_and_binding);

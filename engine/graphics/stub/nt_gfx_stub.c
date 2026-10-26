@@ -35,6 +35,13 @@ const char *nt_gfx_gl_call_name(uint32_t call) {
 }
 void nt_gfx_capture_request(void) {}
 nt_gfx_capture_view_t nt_gfx_capture_read(void) { return (nt_gfx_capture_view_t){0}; }
+void nt_gfx_note_record(const char *label, const nt_gfx_note_field_t *fields, uint32_t count) {
+    (void)label;
+    (void)fields;
+    (void)count;
+}
+void nt_gfx_marker_push(const char *name) { (void)name; }
+void nt_gfx_marker_pop(void) {}
 #endif
 
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc) { (void)desc; }

@@ -86,8 +86,10 @@ typedef struct {
  * run). The mesh's vertex input for this call's buffer does not depend on the material. */
 static bool resolve(mesh_draw_t *d, nt_material_t material, const nt_material_info_t *mi, nt_mesh_t mesh) {
     if (!nt_gfx_program_ready(mi->program)) {
+        NT_GFX_NOTE("mesh", NT_NOTE_U32("material", material.id), NT_NOTE_U32("mesh", mesh.id), NT_NOTE_STR("drop", "program not ready"));
         return false;
     }
+    NT_GFX_NOTE("mesh", NT_NOTE_U32("material", material.id), NT_NOTE_U32("mesh", mesh.id));
     if (material.id != d->material.id) {
         /* A mesh feeds every stream at its pack location; an attr_map would name locations no mesh uses. */
         NT_ASSERT(mi->attr_map_count == 0 && "mesh material: attr_map is sprite-only");
@@ -99,6 +101,7 @@ static bool resolve(mesh_draw_t *d, nt_material_t material, const nt_material_in
         d->vertex_input = nt_gfx_mesh_vertex_input(mesh, d->instances);
     }
     if (d->pipeline.id == 0 || d->vertex_input.id == 0) {
+        NT_GFX_NOTE("mesh", NT_NOTE_U32("material", material.id), NT_NOTE_U32("mesh", mesh.id), NT_NOTE_STR("drop", "context lost"));
         d->material = (nt_material_t){0};
         d->mesh = (nt_mesh_t){0};
         return false;

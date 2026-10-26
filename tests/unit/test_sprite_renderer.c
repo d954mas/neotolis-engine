@@ -1,6 +1,7 @@
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/nt_gfx_test_desc.h"
 #include "test_helpers/nt_gfx_test_frame.h"
+#include "test_helpers/nt_gfx_test_notes.h"
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <math.h>
 #include <stdint.h>
@@ -449,7 +450,8 @@ static uint32_t sprite_batch_key(nt_entity_t entity, nt_material_t material) {
 /* ---- setUp / tearDown ---- */
 
 static nt_gfx_desc_t test_gfx_desc(void) {
-    return NT_GFX_TEST_DESC(.max_shaders = 32, .max_programs = 16, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16, .max_vertex_inputs = 16, .max_render_targets = 16);
+    return NT_GFX_TEST_DESC(.capture_capacity = 4096U, .max_shaders = 32, .max_programs = 16, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16, .max_vertex_inputs = 16,
+                            .max_render_targets = 16);
 }
 
 static void setup_with_gfx_desc(const nt_gfx_desc_t *gfx_desc) {
@@ -2196,6 +2198,67 @@ void test_sprite_renderer_zero_index_frame_capacity_asserts(void) { assert_set_m
 
 /* ---- main ---- */
 
+#if NT_GFX_CAPTURE_ENABLED
+/* Each emit notes its material and page; a merged emit keeps its note before a CACHE draw. */
+void test_sprite_renderer_merged_emits_keep_their_notes(void) {
+    s_atlas_res = register_test_atlas(0xD4ULL);
+    nt_material_t mat = create_test_material();
+    nt_test_frame_finish_links();
+    nt_gfx_capture_request();
+    nt_test_frame_next();
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, NT_MATH_MAT4_IDENTITY, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, NT_MATH_MAT4_IDENTITY, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
+
+    const uint32_t notes[2] = {nt_test_note(0, "sprite"), nt_test_note(nt_test_note(0, "sprite") + 1U, "sprite")};
+    TEST_ASSERT_LESS_THAN_UINT32(nt_gfx_capture_read().count, notes[1]);
+    const uint32_t page = nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 0));
+    for (uint32_t i = 0; i < 2; i++) {
+        TEST_ASSERT_EQUAL_UINT32(mat.id, nt_test_note_u32(notes[i], "material"));
+        TEST_ASSERT_EQUAL_UINT32(page, nt_test_note_u32(notes[i], "page"));
+        TEST_ASSERT_EQUAL_STRING("", nt_test_note_str(notes[i], "drop"));
+    }
+    TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, nt_test_next_draw_result(notes[0]));
+    TEST_ASSERT_EQUAL(NT_GFX_RESULT_CACHE, nt_test_next_draw_result(notes[1]));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_capture_read().count, nt_test_note(notes[1] + 1U, "sprite"));
+}
+
+void test_sprite_renderer_linking_program_notes_its_skip(void) {
+    s_atlas_res = register_test_atlas(0xC8ULL);
+    nt_gfx_fake_hold_program_links(true);
+    nt_material_t mat = create_test_material();
+    nt_gfx_capture_request();
+    nt_test_frame_next();
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, NT_MATH_MAT4_IDENTITY, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
+    nt_gfx_fake_hold_program_links(false);
+
+    const uint32_t note = nt_test_note(0, "sprite");
+    TEST_ASSERT_EQUAL_UINT32(mat.id, nt_test_note_u32(note, "material"));
+    TEST_ASSERT_EQUAL_STRING("program not ready", nt_test_note_str(note, "drop"));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_capture_read().count, nt_test_note(note + 1U, "sprite"));
+    TEST_ASSERT_EQUAL(NT_GFX_RESULT_NONE, nt_test_next_draw_result(note)); /* the last note: scans to the end */
+}
+
+void test_sprite_renderer_unready_page_notes_its_skip(void) {
+    s_atlas_res = register_test_atlas(0xE4ULL);
+    nt_resource_unregister(nt_hash32_str("sprite_renderer_pages"), (nt_hash64_t){FIXTURE_PAGE0_RID});
+    nt_resource_step();
+    nt_material_t mat = create_test_material_textureless();
+    nt_test_frame_finish_links();
+    nt_gfx_capture_request();
+    nt_test_frame_next();
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, NT_MATH_MAT4_IDENTITY, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
+
+    const uint32_t note = nt_test_note(0, "sprite");
+    TEST_ASSERT_EQUAL_UINT32(0, nt_test_note_u32(note, "page"));
+    TEST_ASSERT_EQUAL_STRING("page not ready", nt_test_note_str(note, "drop"));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_capture_read().count, nt_test_note(note + 1U, "sprite"));
+    TEST_ASSERT_EQUAL(NT_GFX_RESULT_NONE, nt_test_next_draw_result(note)); /* the last note: scans to the end */
+}
+#endif
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_sprite_renderer_vertex_size_assert);
@@ -2243,6 +2306,11 @@ int main(void) {
     RUN_TEST(test_emit_slice9_degrades_when_dst_smaller_than_borders);
     RUN_TEST(test_sprite_comp_slice9_scale_affects_emit_position);
     RUN_TEST(test_sprite_renderer_page_and_material_changes_split_compatible_calls_merge);
+#if NT_GFX_CAPTURE_ENABLED
+    RUN_TEST(test_sprite_renderer_merged_emits_keep_their_notes);
+    RUN_TEST(test_sprite_renderer_unready_page_notes_its_skip);
+    RUN_TEST(test_sprite_renderer_linking_program_notes_its_skip);
+#endif
     RUN_TEST(test_sprite_renderer_params_rebind_when_material_returns);
     RUN_TEST(test_sprite_renderer_set_params_reaches_the_next_emit);
     RUN_TEST(test_sprite_renderer_set_program_applies_at_next_set_material);

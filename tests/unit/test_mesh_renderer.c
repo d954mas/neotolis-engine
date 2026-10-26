@@ -2,6 +2,7 @@
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/nt_gfx_test_desc.h"
 #include "test_helpers/nt_gfx_test_frame.h"
+#include "test_helpers/nt_gfx_test_notes.h"
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <stdio.h>
 #include <string.h>
@@ -237,8 +238,8 @@ void setUp(void) {
     memset(s_test_tex_res, 0, sizeof(s_test_tex_res));
     s_test_tex_pack_created = false;
     nt_hash_init(&(nt_hash_desc_t){0});
-    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 32, .max_programs = 64, .max_pipelines = 64, .max_buffers = 256, .max_textures = 32, .max_meshes = 32, .max_vertex_inputs = TEST_MAX_VERTEX_INPUTS,
-                                  .max_render_targets = 16));
+    nt_gfx_init(&NT_GFX_TEST_DESC(.capture_capacity = 4096U, .max_shaders = 32, .max_programs = 64, .max_pipelines = 64, .max_buffers = 256, .max_textures = 32, .max_meshes = 32,
+                                  .max_vertex_inputs = TEST_MAX_VERTEX_INPUTS, .max_render_targets = 16));
     nt_gfx_begin_frame();
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_entity_init(&(nt_entity_desc_t){.max_entities = 64});
@@ -1799,6 +1800,40 @@ void test_mesh_stream_cannot_overlap_the_color_location(void) {
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "share a location"));
 }
 
+#if NT_GFX_CAPTURE_ENABLED
+/* Each run notes its material and mesh before its work; a run whose program is not ready notes the skip. */
+void test_draw_list_notes_each_run_and_its_skip(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t not_ready = create_test_material();
+    nt_material_t ready = create_test_material();
+    nt_material_set_program(not_ready, NT_PROGRAM_INVALID);
+    nt_entity_t e0 = create_test_entity(mesh, not_ready);
+    nt_entity_t e1 = create_test_entity(mesh, ready);
+    nt_render_item_t items[2] = {
+        {.sort_key = 0, .entity = e0.id, .batch_key = nt_mesh_renderer_batch_key(not_ready, mesh)},
+        {.sort_key = 1, .entity = e1.id, .batch_key = nt_mesh_renderer_batch_key(ready, mesh)},
+    };
+
+    nt_gfx_capture_request();
+    record_list(items, 2);
+
+    const uint32_t first = nt_test_note(0, "mesh");
+    const uint32_t second = nt_test_note(first + 1U, "mesh");
+    TEST_ASSERT_LESS_THAN_UINT32(nt_gfx_capture_read().count, second);
+    TEST_ASSERT_EQUAL_UINT32(not_ready.id, nt_test_note_u32(first, "material"));
+    TEST_ASSERT_EQUAL_UINT32(mesh.id, nt_test_note_u32(first, "mesh"));
+    TEST_ASSERT_EQUAL_STRING("program not ready", nt_test_note_str(first, "drop"));
+    TEST_ASSERT_EQUAL(NT_GFX_RESULT_NONE, nt_test_next_draw_result(first));
+    TEST_ASSERT_EQUAL_STRING("", nt_test_note_str(second, "drop"));
+    TEST_ASSERT_EQUAL_UINT32(ready.id, nt_test_note_u32(second, "material"));
+    TEST_ASSERT_EQUAL_UINT32(mesh.id, nt_test_note_u32(second, "mesh"));
+    TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, nt_test_next_draw_result(second));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_capture_read().count, nt_test_note(second + 1U, "mesh"));
+    nt_test_frame_next();
+    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
+}
+#endif
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -1816,6 +1851,9 @@ int main(void) {
     RUN_TEST(test_mesh_renderer_forwards_material_blend_state);
     RUN_TEST(test_draw_list_same_material_mesh_batching);
     RUN_TEST(test_draw_list_skips_a_not_ready_run_without_packing_it);
+#if NT_GFX_CAPTURE_ENABLED
+    RUN_TEST(test_draw_list_notes_each_run_and_its_skip);
+#endif
     RUN_TEST(test_draw_list_skips_a_run_whose_program_was_destroyed);
     RUN_TEST(test_draw_list_skips_a_linking_program_until_its_link_finishes);
     RUN_TEST(test_draw_list_different_materials);

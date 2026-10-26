@@ -907,6 +907,16 @@ static void destroy_gpu(void) {
     memset(&s_shape.gpu, 0, sizeof(s_shape.gpu));
 }
 
+/* Must test every queue drop_queues clears. */
+static bool queues_empty(void) {
+    for (int type = 0; type < NT_SHAPE_TYPE_COUNT; type++) {
+        if (s_shape.fill_counts[type] != 0 || s_shape.wire_counts[type] != 0) {
+            return false;
+        }
+    }
+    return s_shape.vertex_count == 0 && s_shape.stroke_count == 0 && s_shape.line_count == 0;
+}
+
 static void drop_queues(void) {
     memset(s_shape.fill_counts, 0, sizeof(s_shape.fill_counts));
     memset(s_shape.wire_counts, 0, sizeof(s_shape.wire_counts));
@@ -952,6 +962,7 @@ void nt_shape_renderer_restore_gpu(void) {
 static void draw_instances(nt_pipeline_t pipeline, nt_vertex_input_t vi, nt_instance_layout_t layout, const void *data, uint32_t bytes, nt_shape_range_t range, uint32_t count) {
     uint32_t offset = 0;
     memcpy(nt_gfx_frame_alloc(s_shape.stream, bytes, 4, &offset), data, bytes);
+    NT_GFX_NOTE("shape");
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input_instanced(vi, layout, nt_gfx_frame_buffer(s_shape.stream), offset);
     /* Unchanged settings end CACHE in gfx: no copy, and the batches around the bind still merge. */
@@ -961,8 +972,13 @@ static void draw_instances(nt_pipeline_t pipeline, nt_vertex_input_t vi, nt_inst
 
 void nt_shape_renderer_flush(void) {
     NT_ASSERT(s_shape.initialized && "nt_shape_renderer_flush: module is not initialized");
+    /* Every setter flushes; an empty flush has nothing to draw or to note. */
+    if (queues_empty()) {
+        return;
+    }
     /* Each program finishes linking on its own frame; until all do, queued shapes are dropped. */
     if (!nt_gfx_program_ready(s_shape.gpu.fill_prog) || !nt_gfx_program_ready(s_shape.gpu.batch_prog) || !nt_gfx_program_ready(s_shape.gpu.wire_prog) || !nt_gfx_program_ready(s_shape.gpu.line_prog)) {
+        NT_GFX_NOTE("shape", NT_NOTE_STR("drop", "program not ready"));
         drop_queues();
         return;
     }
@@ -979,6 +995,7 @@ void nt_shape_renderer_flush(void) {
         const uint32_t bytes = s_shape.vertex_count * (uint32_t)sizeof(nt_shape_vertex_t);
         uint32_t offset = 0;
         memcpy(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, bytes, (uint32_t)sizeof(nt_shape_vertex_t), &offset), s_shape.vertices, bytes);
+        NT_GFX_NOTE("shape");
         nt_gfx_bind_pipeline(s_shape.gpu.batch_pip[d]);
         nt_gfx_bind_vertex_input(s_shape.gpu.batch_vi);
         nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, &s_shape.draw, sizeof(s_shape.draw));

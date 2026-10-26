@@ -1,6 +1,7 @@
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/nt_gfx_test_desc.h"
 #include "test_helpers/nt_gfx_test_frame.h"
+#include "test_helpers/nt_gfx_test_notes.h"
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <math.h>
 #include <setjmp.h>
@@ -178,7 +179,8 @@ static void test_assert_handler(const char *expr, const char *file, int line) {
 void setUp(void) {
     nt_assert_handler = test_assert_handler;
     nt_gfx_fake_reset();
-    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 16, .max_programs = 8, .max_pipelines = 8, .max_buffers = 16, .max_textures = 32, .max_meshes = 8, .max_vertex_inputs = 16, .max_render_targets = 16));
+    nt_gfx_init(&NT_GFX_TEST_DESC(.capture_capacity = 4096U, .max_shaders = 16, .max_programs = 8, .max_pipelines = 8, .max_buffers = 16, .max_textures = 32, .max_meshes = 8, .max_vertex_inputs = 16,
+                                  .max_render_targets = 16));
     nt_gfx_begin_frame();
     nt_gfx_fake_set_samplers((const char *const[]){"u_curve_texture"}, 1);
     nt_hash_init(&(nt_hash_desc_t){0});
@@ -1238,6 +1240,39 @@ void test_embolden_off_rejects_nonzero_before_drawing(void) {
 }
 #endif
 
+#if NT_GFX_CAPTURE_ENABLED
+/* A merged draw keeps its note before a CACHE draw; a font without a loaded resource notes its skip. */
+void test_notes_survive_merges_and_an_unloaded_font_notes_its_skip(void) {
+    nt_text_style_t style = plain();
+    nt_font_t empty = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
+    nt_gfx_capture_request();
+    next_frame();
+    nt_text_renderer_draw(&style, s_identity, ""); /* empty: no note */
+    nt_text_renderer_draw(&style, s_identity, "AB");
+    nt_text_renderer_draw(&style, s_identity, "C");
+    style.font = empty;
+    nt_text_renderer_draw(&style, s_identity, "A");
+
+    const uint32_t first = nt_test_note(0, "text");
+    const uint32_t second = nt_test_note(first + 1U, "text");
+    const uint32_t third = nt_test_note(second + 1U, "text");
+    TEST_ASSERT_LESS_THAN_UINT32(nt_gfx_capture_read().count, third);
+    TEST_ASSERT_EQUAL_UINT32(s_mat.id, nt_test_note_u32(first, "material"));
+    TEST_ASSERT_EQUAL_UINT32(s_font.id, nt_test_note_u32(first, "font"));
+    TEST_ASSERT_EQUAL_UINT32(s_font.id, nt_test_note_u32(second, "font"));
+    TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, nt_test_next_draw_result(first));
+    TEST_ASSERT_EQUAL(NT_GFX_RESULT_CACHE, nt_test_next_draw_result(second));
+    TEST_ASSERT_EQUAL_UINT32(empty.id, nt_test_note_u32(third, "font"));
+    TEST_ASSERT_EQUAL_STRING("", nt_test_note_str(first, "drop"));
+    TEST_ASSERT_EQUAL_STRING("font not loaded", nt_test_note_str(third, "drop"));
+    TEST_ASSERT_EQUAL(NT_GFX_RESULT_NONE, nt_test_next_draw_result(third)); /* the last note: scans to the end */
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_capture_read().count, nt_test_note(third + 1U, "text"));
+    nt_test_frame_close();
+    nt_font_destroy(empty);
+    open_frame();
+}
+#endif
+
 int main(void) {
     UNITY_BEGIN();
 #if !NT_FONT_EMBOLDEN_ENABLED && NT_ASSERT_MODE == NT_ASSERT_FULL
@@ -1264,6 +1299,9 @@ int main(void) {
     RUN_TEST(test_draw_newline_advances_to_next_line);
     RUN_TEST(test_a_call_without_quads_records_nothing);
     RUN_TEST(test_equal_draws_merge_and_a_font_change_splits);
+#if NT_GFX_CAPTURE_ENABLED
+    RUN_TEST(test_notes_survive_merges_and_an_unloaded_font_notes_its_skip);
+#endif
     RUN_TEST(test_material_params_bind_once_per_change);
     RUN_TEST(test_a_destroyed_program_draws_nothing);
     RUN_TEST(test_vertex_input_create_that_meets_a_loss_draws_nothing);

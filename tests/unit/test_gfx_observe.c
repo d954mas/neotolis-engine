@@ -7,6 +7,7 @@
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/nt_gfx_test_frame.h"
+#include "test_helpers/nt_gfx_test_notes.h"
 #include "unity.h"
 
 static uint32_t s_error_logs;
@@ -21,7 +22,7 @@ static void count_error_logs(nt_log_level_t level, const char *domain, const cha
 
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
-    desc.capture_capacity = 64;
+    desc.capture_capacity = 256;
     desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 4096;
     desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096;
     nt_gfx_init(&desc);
@@ -1120,6 +1121,117 @@ static void test_capture_read_after_shutdown_is_empty(void) {
     nt_gfx_begin_frame();
 }
 
+static void test_notes_copy_label_and_typed_fields(void) {
+    NT_GFX_NOTE("unrecorded");
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_capture_read().count);
+    record_next_frame();
+    const uint32_t first = nt_gfx_capture_read().count;
+    char name[8] = "boss";
+    NT_GFX_NOTE("wave", NT_NOTE_U32("u", 7U), NT_NOTE_I32("i", -3), NT_NOTE_U64("big", UINT64_MAX), NT_NOTE_F32("f", 0.5F), NT_NOTE_STR("name", name));
+    NT_GFX_NOTE("bare");
+    memcpy(name, "gone", 5);
+
+    const nt_gfx_capture_view_t v = nt_gfx_capture_read();
+    TEST_ASSERT_EQUAL_UINT32(first + 7U, v.count);
+    const nt_gfx_event_t *e = &v.events[first];
+    TEST_ASSERT_EQUAL(NT_GFX_EVENT_NOTE, e[0].kind);
+    TEST_ASSERT_EQUAL_STRING("wave", e[0].note.label);
+    for (uint32_t i = 1; i <= 5; i++) {
+        TEST_ASSERT_EQUAL(NT_GFX_EVENT_NOTE_FIELD, e[i].kind);
+    }
+    TEST_ASSERT_EQUAL(NT_GFX_NOTE_U32, e[1].field.type);
+    TEST_ASSERT_EQUAL_STRING("u", e[1].field.key);
+    TEST_ASSERT_EQUAL_UINT32(7, e[1].field.value.u32);
+    TEST_ASSERT_EQUAL(NT_GFX_NOTE_I32, e[2].field.type);
+    TEST_ASSERT_EQUAL_INT32(-3, e[2].field.value.i32);
+    TEST_ASSERT_EQUAL(NT_GFX_NOTE_U64, e[3].field.type);
+    TEST_ASSERT_EQUAL_UINT64(UINT64_MAX, e[3].field.value.u64);
+    TEST_ASSERT_EQUAL(NT_GFX_NOTE_F32, e[4].field.type);
+    const float half = 0.5F;
+    TEST_ASSERT_EQUAL_MEMORY(&half, &e[4].field.value.f32, sizeof(half));
+    TEST_ASSERT_EQUAL(NT_GFX_NOTE_STR, e[5].field.type);
+    TEST_ASSERT_EQUAL_STRING("name", e[5].field.key);
+    TEST_ASSERT_EQUAL_STRING("boss", e[5].field.value.str); /* copied at the call */
+    TEST_ASSERT_EQUAL(NT_GFX_EVENT_NOTE, e[6].kind);
+    TEST_ASSERT_EQUAL_STRING("bare", e[6].note.label);
+}
+
+static void test_notes_do_not_end_a_draw_merge(void) {
+    record_next_frame();
+    draw_setup();
+    nt_gfx_draw(0, 3);
+    NT_GFX_NOTE("between");
+    nt_gfx_draw(3, 3);
+    draw_teardown();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
+    const uint32_t note = nt_test_note(0, "between");
+    TEST_ASSERT_LESS_THAN_UINT32(nt_gfx_capture_read().count, note);
+    TEST_ASSERT_EQUAL(NT_GFX_RESULT_CACHE, nt_test_next_draw_result(note));
+}
+
+static void test_markers_nest_in_call_order_and_may_wrap_post_render_work(void) {
+    record_next_frame();
+    NT_GFX_MARKER_PUSH("world");
+    NT_GFX_MARKER_PUSH("shadows");
+    NT_GFX_MARKER_POP();
+    NT_GFX_MARKER_POP();
+    nt_gfx_end_frame();
+    NT_GFX_MARKER_PUSH("after end_frame");
+    NT_GFX_MARKER_POP();
+
+    static const char *const expected[] = {"world", "shadows", NULL, NULL, "after end_frame", NULL};
+    const nt_gfx_capture_view_t v = nt_gfx_capture_read();
+    uint32_t seen = 0;
+    for (uint32_t i = 0; i < v.count; i++) {
+        const nt_gfx_event_t *e = &v.events[i];
+        if (e->kind != NT_GFX_EVENT_MARKER_PUSH && e->kind != NT_GFX_EVENT_MARKER_POP) {
+            continue;
+        }
+        TEST_ASSERT_LESS_THAN_UINT32(6, seen);
+        TEST_ASSERT_EQUAL(expected[seen] != NULL ? NT_GFX_EVENT_MARKER_PUSH : NT_GFX_EVENT_MARKER_POP, e->kind);
+        if (expected[seen] != NULL) {
+            TEST_ASSERT_EQUAL_STRING(expected[seen], e->note.label);
+        }
+        seen++;
+    }
+    TEST_ASSERT_EQUAL_UINT32(6, seen);
+    nt_gfx_begin_frame();
+}
+
+/* Reopens gfx with room for spare records after a recorded frame's snapshot, inside that frame. */
+static uint32_t record_with_spare(uint32_t snapshot, uint32_t spare) {
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    desc.capture_capacity = snapshot + spare;
+    desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 4096; /* as in setUp */
+    desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096;
+    nt_gfx_init(&desc);
+    s_draw_program = nt_gfx_fake_make_program(NULL, 0);
+    nt_gfx_begin_frame();
+    record_next_frame();
+    return nt_gfx_capture_read().count;
+}
+
+/* A note lands with all its fields or not at all, and nothing appends after an overflow. */
+static void test_a_note_that_does_not_fit_overflows_whole(void) {
+    record_next_frame();
+    const uint32_t snapshot = nt_gfx_capture_read().count;
+
+    TEST_ASSERT_EQUAL_UINT32(snapshot, record_with_spare(snapshot, 3));
+    NT_GFX_NOTE("fits", NT_NOTE_U32("a", 1U), NT_NOTE_U32("b", 2U));
+    nt_gfx_capture_view_t v = nt_gfx_capture_read();
+    TEST_ASSERT_EQUAL_UINT32(snapshot + 3U, v.count);
+    TEST_ASSERT_FALSE(v.overflow);
+
+    TEST_ASSERT_EQUAL_UINT32(snapshot, record_with_spare(snapshot, 2));
+    NT_GFX_NOTE("too big", NT_NOTE_U32("a", 1U), NT_NOTE_U32("b", 2U));
+    NT_GFX_MARKER_PUSH("after");
+    NT_GFX_MARKER_POP();
+    v = nt_gfx_capture_read();
+    TEST_ASSERT_EQUAL_UINT32(snapshot, v.count);
+    TEST_ASSERT_TRUE(v.overflow);
+}
+
 static void test_exact_capacity_and_one_record_short(void) {
     record_next_frame();
     nt_gfx_end_frame();
@@ -1142,6 +1254,27 @@ static void test_exact_capacity_and_one_record_short(void) {
         TEST_ASSERT_EQUAL_UINT32(needed - missing, view.count);
         TEST_ASSERT_EQUAL(missing != 0, view.overflow);
     }
+}
+#endif
+
+#if NT_GFX_CAPTURE_ENABLED && NT_ASSERT_MODE == NT_ASSERT_FULL
+static void test_marker_pop_without_push_asserts(void) { NT_TEST_EXPECT_ASSERT(NT_GFX_MARKER_POP()); }
+
+/* The capture runs begin_frame to begin_frame, so a group must not cross one. */
+static void test_a_marker_open_at_begin_frame_asserts(void) {
+    NT_GFX_MARKER_PUSH("open");
+    nt_gfx_end_frame();
+    NT_TEST_EXPECT_ASSERT(nt_gfx_begin_frame());
+    NT_GFX_MARKER_POP();
+    nt_gfx_begin_frame();
+}
+
+static void test_a_note_string_longer_than_its_record_asserts(void) {
+    record_next_frame();
+    char key[32];
+    memset(key, 'k', 24);
+    key[24] = '\0';
+    NT_TEST_EXPECT_ASSERT(NT_GFX_NOTE("n", NT_NOTE_U32(key, 1U)));
 }
 #endif
 
@@ -1204,6 +1337,15 @@ int main(void) {
     RUN_TEST(test_request_during_recorded_frame_replaces_the_capture);
     RUN_TEST(test_capture_read_after_shutdown_is_empty);
     RUN_TEST(test_exact_capacity_and_one_record_short);
+    RUN_TEST(test_notes_copy_label_and_typed_fields);
+    RUN_TEST(test_notes_do_not_end_a_draw_merge);
+    RUN_TEST(test_markers_nest_in_call_order_and_may_wrap_post_render_work);
+    RUN_TEST(test_a_note_that_does_not_fit_overflows_whole);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_marker_pop_without_push_asserts);
+    RUN_TEST(test_a_marker_open_at_begin_frame_asserts);
+    RUN_TEST(test_a_note_string_longer_than_its_record_asserts);
+#endif
 #endif
     return UNITY_END();
 }
