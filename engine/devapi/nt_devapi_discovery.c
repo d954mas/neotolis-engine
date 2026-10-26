@@ -33,9 +33,7 @@ static bool cmd_endpoints(const cJSON *params, cJSON *result, nt_devapi_error *e
     const cJSON *detail_item = cJSON_GetObjectItemCaseSensitive(params, "detail");
     if (detail_item != NULL) {
         if (!cJSON_IsBool(detail_item)) {
-            err->code = NT_DEVAPI_ERR_BAD_PARAMS;
-            err->message = "params.detail must be a bool";
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "params.detail must be a bool");
         }
         detail = cJSON_IsTrue(detail_item);
     }
@@ -54,16 +52,12 @@ static bool cmd_command_describe(const cJSON *params, cJSON *result, nt_devapi_e
     (void)ud;
     const cJSON *method_item = cJSON_GetObjectItemCaseSensitive(params, "method");
     if (!cJSON_IsString(method_item) || method_item->valuestring == NULL) {
-        err->code = NT_DEVAPI_ERR_BAD_PARAMS;
-        err->message = (method_item == NULL) ? "missing params.method" : "non-string params.method";
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, (method_item == NULL) ? "missing params.method" : "non-string params.method");
     }
 
     const nt_devapi_slot *slot = nt_devapi_registry_find(method_item->valuestring);
     if (slot == NULL) {
-        err->code = NT_DEVAPI_ERR_UNKNOWN_METHOD;
-        err->message = "no command registered for this method";
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_UNKNOWN_METHOD, "no command registered for this method");
     }
 
     devapi_add_string(result, "method", slot->method);

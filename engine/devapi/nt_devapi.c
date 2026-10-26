@@ -110,32 +110,30 @@ void devapi_add_null(cJSON *obj, const char *key) {
 
 /* Require a finite, integer-valued number in [0, max_d], writing it to *out_d. Casting an
    out-of-range/NaN/Inf double to unsigned is UB, so all checks run on the double before any cast. */
-static bool parse_number_exact(const cJSON *node, double max_d, nt_devapi_error *err, nt_devapi_bad_params_fn set_bad, const char *message, double *out_d) {
+static bool parse_number_exact(const cJSON *node, double max_d, nt_devapi_error *err, const char *message, double *out_d) {
     if (!cJSON_IsNumber(node)) {
-        set_bad(err, message);
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, message);
     }
     double d = node->valuedouble;
     if (!isfinite(d) || d != floor(d) || d < 0.0 || d > max_d) {
-        set_bad(err, message);
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, message);
     }
     *out_d = d;
     return true;
 }
 
-bool nt_devapi_parse_u32_param_exact(const cJSON *node, uint32_t max, nt_devapi_error *err, nt_devapi_bad_params_fn set_bad, const char *message, uint32_t *out) {
+bool nt_devapi_parse_u32_param_exact(const cJSON *node, uint32_t max, nt_devapi_error *err, const char *message, uint32_t *out) {
     double d = 0.0;
-    if (!parse_number_exact(node, (double)max, err, set_bad, message, &d)) {
+    if (!parse_number_exact(node, (double)max, err, message, &d)) {
         return false;
     }
     *out = (uint32_t)d; /* d is integer-valued in [0, max] — the cast is exact and in range. */
     return true;
 }
 
-bool nt_devapi_parse_u16_param_exact(const cJSON *node, uint16_t max, nt_devapi_error *err, nt_devapi_bad_params_fn set_bad, const char *message, uint16_t *out) {
+bool nt_devapi_parse_u16_param_exact(const cJSON *node, uint16_t max, nt_devapi_error *err, const char *message, uint16_t *out) {
     double d = 0.0;
-    if (!parse_number_exact(node, (double)max, err, set_bad, message, &d)) {
+    if (!parse_number_exact(node, (double)max, err, message, &d)) {
         return false;
     }
     *out = (uint16_t)d; /* d is integer-valued in [0, max] — the cast is exact and in range. */
@@ -213,9 +211,7 @@ bool nt_devapi_defer(nt_devapi_gate gate, double amount, nt_devapi_handler_fn re
     NT_ASSERT(gate != NT_DEVAPI_GATE_FRAMES || (amount >= 0.0 && amount <= (double)INT32_MAX)); /* wrap-safe compare range */
     if (s_current->batch) {
         /* A batch is one ordered response array; a deferred reply cannot go in it. */
-        err->code = NT_DEVAPI_ERR_BAD_PARAMS;
-        err->message = "deferred commands are not supported inside a batch";
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "deferred commands are not supported inside a batch");
     }
     s_pending = (deferred_slot){.reply = reply, .gate = gate, .mode = g_nt_app.mode};
     if (gate == NT_DEVAPI_GATE_FRAMES) {

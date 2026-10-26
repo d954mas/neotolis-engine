@@ -25,13 +25,11 @@ static bool cmd_game_poke(const cJSON *params, cJSON *result, nt_devapi_error *e
     return true;
 }
 
+/* The short game form: group, params_shape and frame_behavior come from the registry defaults. */
 static const nt_devapi_command_desc k_game_poke = {
     .method = "game.poke",
-    .group = "game",
     .summary = "test game-layer command (flips a flag)",
-    .params_shape = "{}",
     .result_shape = "{poked:bool}",
-    .frame_behavior = "any",
     .side_effects = "flips a test flag",
 };
 
@@ -287,6 +285,9 @@ static void test_game_command_describe(void) {
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
     TEST_ASSERT_EQUAL_STRING("game", cJSON_GetObjectItemCaseSensitive(result, "group")->valuestring);
     TEST_ASSERT_EQUAL_STRING("{poked:bool}", cJSON_GetObjectItemCaseSensitive(result, "result_shape")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("none", cJSON_GetObjectItemCaseSensitive(result, "params_shape")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("immediate", cJSON_GetObjectItemCaseSensitive(result, "frame_behavior")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("flips a test flag", cJSON_GetObjectItemCaseSensitive(result, "side_effects")->valuestring);
     cJSON_Delete(root);
 }
 

@@ -71,6 +71,36 @@ static void test_register_seven_fields_round_trip(void) {
     TEST_ASSERT_EQUAL_PTR(dummy_handler, slot->handler);
 }
 
+/* Only method, summary and result_shape are required; NULL fields take the documented defaults. */
+static void test_register_defaults_fill_omitted_fields(void) {
+    nt_devapi_command_desc desc = {
+        .method = "game.skills.learn",
+        .summary = "learn a node",
+        .result_shape = "{ok:bool}",
+    };
+    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register(&desc, dummy_handler, NULL));
+
+    const nt_devapi_slot *slot = nt_devapi_registry_find("game.skills.learn");
+    TEST_ASSERT_NOT_NULL(slot);
+    TEST_ASSERT_EQUAL_STRING("game", slot->group);
+    TEST_ASSERT_EQUAL_STRING("learn a node", slot->summary);
+    TEST_ASSERT_EQUAL_STRING("none", slot->params_shape);
+    TEST_ASSERT_EQUAL_STRING("{ok:bool}", slot->result_shape);
+    TEST_ASSERT_EQUAL_STRING("immediate", slot->frame_behavior);
+    TEST_ASSERT_EQUAL_STRING("none", slot->side_effects);
+}
+
+/* A dotless method with no group is its own group. */
+static void test_default_group_of_dotless_method_is_the_method(void) {
+    nt_devapi_command_desc desc = {
+        .method = "solo",
+        .summary = "s",
+        .result_shape = "{}",
+    };
+    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register(&desc, dummy_handler, NULL));
+    TEST_ASSERT_EQUAL_STRING("solo", nt_devapi_registry_find("solo")->group);
+}
+
 /* Descriptors are strdup-copied — mutating/freeing the source after
    register must not corrupt the stored copy. */
 static void test_owned_copy_survives_source_free(void) {
@@ -162,6 +192,8 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_init_double_init);
     RUN_TEST(test_register_seven_fields_round_trip);
+    RUN_TEST(test_register_defaults_fill_omitted_fields);
+    RUN_TEST(test_default_group_of_dotless_method_is_the_method);
     RUN_TEST(test_owned_copy_survives_source_free);
     RUN_TEST(test_dup_method_rejected_first_preserved);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL

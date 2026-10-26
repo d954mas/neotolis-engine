@@ -22,11 +22,6 @@ _Static_assert(NT_DEVAPI_ENTITY_WRITE_MAX_FIELDS > 0, "NT_DEVAPI_ENTITY_WRITE_MA
 #define NT_DEVAPI_STR2(x) #x
 #define NT_DEVAPI_STR(x) NT_DEVAPI_STR2(x)
 
-static void set_bad_params(nt_devapi_error *err, const char *message) {
-    err->code = NT_DEVAPI_ERR_BAD_PARAMS;
-    err->message = message;
-}
-
 /* Finite as a double AND after float-narrowing (mirrors the read side rejecting NaN/Inf). */
 static bool finite_f(double d, float *out) {
     if (!isfinite(d)) {
@@ -44,8 +39,7 @@ static bool finite_f(double d, float *out) {
    array[3]->VEC3, array[4]->VEC4). Range/semantic (color [0,1], unit quaternion) is the apply() hook's job. */
 static bool parse_write_value(const cJSON *node, nt_write_value *out, nt_devapi_error *err) {
     if (node == NULL) {
-        set_bad_params(err, "entity.set: missing value");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.set: missing value");
     }
     if (cJSON_IsBool(node)) {
         out->kind = NT_WV_BOOL;
@@ -55,8 +49,7 @@ static bool parse_write_value(const cJSON *node, nt_write_value *out, nt_devapi_
     if (cJSON_IsNumber(node)) {
         float f = 0.0F;
         if (!finite_f(node->valuedouble, &f)) {
-            set_bad_params(err, "entity.set: value must be finite");
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.set: value must be finite");
         }
         out->kind = NT_WV_F32;
         out->as.f32 = f;
@@ -65,55 +58,47 @@ static bool parse_write_value(const cJSON *node, nt_write_value *out, nt_devapi_
     if (cJSON_IsArray(node)) {
         int n = cJSON_GetArraySize(node);
         if (n != 3 && n != 4) {
-            set_bad_params(err, "entity.set: array value must have 3 or 4 numbers");
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.set: array value must have 3 or 4 numbers");
         }
         for (int i = 0; i < n; i++) {
             const cJSON *el = cJSON_GetArrayItem(node, i);
             float f = 0.0F;
             if (!cJSON_IsNumber(el) || !finite_f(el->valuedouble, &f)) {
-                set_bad_params(err, "entity.set: array value must be finite numbers");
-                return false;
+                return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.set: array value must be finite numbers");
             }
             out->as.v[i] = f;
         }
         out->kind = (n == 3) ? NT_WV_VEC3 : NT_WV_VEC4;
         return true;
     }
-    set_bad_params(err, "entity.set: value must be a number, bool, or array of 3 or 4 numbers");
-    return false;
+    return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.set: value must be a number, bool, or array of 3 or 4 numbers");
 }
 
 /* Resolve {id, component} to a live entity carrying a writable component (mirrors entity.list
    resolution: total/query API only, never an asserting accessor on bot input). */
 static bool resolve_target(const cJSON *params, nt_entity_t *out_e, nt_comp_apply_fn *out_apply, const char **out_component, nt_devapi_error *err) {
     uint32_t id = 0;
-    if (!nt_devapi_parse_u32_param_exact(cJSON_GetObjectItemCaseSensitive(params, "id"), UINT32_MAX, err, set_bad_params, "entity.set: id must be an integer in [0, UINT32_MAX]", &id)) {
+    if (!nt_devapi_parse_u32_param_exact(cJSON_GetObjectItemCaseSensitive(params, "id"), UINT32_MAX, err, "entity.set: id must be an integer in [0, UINT32_MAX]", &id)) {
         return false;
     }
     nt_entity_t e = {.id = id};
     if (!nt_entity_is_alive(e)) {
-        set_bad_params(err, "entity.set: entity dead or stale");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.set: entity dead or stale");
     }
     const cJSON *jcomp = cJSON_GetObjectItemCaseSensitive(params, "component");
     if (!cJSON_IsString(jcomp) || jcomp->valuestring == NULL) {
-        set_bad_params(err, "entity.set: component must be a string");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.set: component must be a string");
     }
     nt_comp_id_t cid = nt_entity_storage_find(jcomp->valuestring);
     if (cid == NT_COMP_ID_INVALID) {
-        set_bad_params(err, "entity.set: unknown component");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.set: unknown component");
     }
     if (!nt_entity_has_comp(e, cid)) {
-        set_bad_params(err, "entity.set: entity has no such component");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.set: entity has no such component");
     }
     const nt_comp_storage_reg_t *reg = nt_entity_storage_at(cid);
     if (reg->apply == NULL) {
-        set_bad_params(err, "entity.set: component is read-only");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.set: component is read-only");
     }
     *out_e = e;
     *out_apply = reg->apply;
@@ -124,8 +109,7 @@ static bool resolve_target(const cJSON *params, nt_entity_t *out_e, nt_comp_appl
 static bool apply_single(nt_entity_t e, nt_comp_apply_fn apply, const cJSON *params, cJSON *applied, nt_devapi_error *err) {
     const cJSON *jfield = cJSON_GetObjectItemCaseSensitive(params, "field");
     if (!cJSON_IsString(jfield) || jfield->valuestring == NULL) {
-        set_bad_params(err, "entity.set: field must be a string (or use fields:{...})");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.set: field must be a string (or use fields:{...})");
     }
     nt_write_value wv;
     if (!parse_write_value(cJSON_GetObjectItemCaseSensitive(params, "value"), &wv, err)) {
@@ -135,8 +119,7 @@ static bool apply_single(nt_entity_t e, nt_comp_apply_fn apply, const cJSON *par
        partial state — the same whole-or-nothing contract the batch path uses, applied uniformly. */
     const char *msg = NULL;
     if (!apply(e, jfield->valuestring, &wv, true, &msg)) {
-        set_bad_params(err, msg != NULL ? msg : "entity.set: invalid field");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, msg != NULL ? msg : "entity.set: invalid field");
     }
     msg = NULL;
     bool ok = apply(e, jfield->valuestring, &wv, false, &msg);
@@ -157,7 +140,7 @@ static int batch_validate(nt_entity_t e, nt_comp_apply_fn apply, const cJSON *jf
         const char *msg = NULL;
         if (!parse_write_value(fld, &vals[count], err) || !apply(e, fld->string, &vals[count], true, &msg)) {
             if (msg != NULL) {
-                set_bad_params(err, msg);
+                nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, msg);
             }
             return -1;
         }
@@ -171,13 +154,11 @@ static int batch_validate(nt_entity_t e, nt_comp_apply_fn apply, const cJSON *jf
    second pass is infallible). Avoids a half-applied TRS (new position, old rotation). */
 static bool apply_batch(nt_entity_t e, nt_comp_apply_fn apply, const cJSON *jfields, cJSON *applied, nt_devapi_error *err) {
     if (!cJSON_IsObject(jfields)) {
-        set_bad_params(err, "entity.set: fields must be an object");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.set: fields must be an object");
     }
     int n = cJSON_GetArraySize(jfields);
     if (n == 0 || n > NT_DEVAPI_ENTITY_WRITE_MAX_FIELDS) {
-        set_bad_params(err, "entity.set: fields must hold 1.." NT_DEVAPI_STR(NT_DEVAPI_ENTITY_WRITE_MAX_FIELDS) " entries");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.set: fields must hold 1.." NT_DEVAPI_STR(NT_DEVAPI_ENTITY_WRITE_MAX_FIELDS) " entries");
     }
     const char *keys[NT_DEVAPI_ENTITY_WRITE_MAX_FIELDS];
     nt_write_value vals[NT_DEVAPI_ENTITY_WRITE_MAX_FIELDS];
@@ -210,8 +191,7 @@ static bool cmd_entity_set(const cJSON *params, cJSON *result, nt_devapi_error *
     const cJSON *jfields = cJSON_GetObjectItemCaseSensitive(params, "fields");
     const cJSON *jfield = cJSON_GetObjectItemCaseSensitive(params, "field");
     if (jfields != NULL && jfield != NULL) {
-        set_bad_params(err, "entity.set: use field+value OR fields, not both");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.set: use field+value OR fields, not both");
     }
 
     cJSON *applied = cJSON_AddArrayToObject(result, "fields");

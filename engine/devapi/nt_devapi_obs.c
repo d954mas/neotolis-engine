@@ -25,11 +25,6 @@
 #define NT_DEVAPI_OBS_LIMIT_MAX 512
 #endif
 
-static void set_bad_params(nt_devapi_error *err, const char *message) {
-    err->code = NT_DEVAPI_ERR_BAD_PARAMS;
-    err->message = message;
-}
-
 // #region log.*
 /* nt_log_level_t token mapping (stable JSON, not the numeric enum). */
 static const char *log_level_token(nt_log_level_t level) {
@@ -53,8 +48,7 @@ static bool parse_level(const cJSON *jlevel, nt_log_level_t *out, nt_devapi_erro
         return true;
     }
     if (!cJSON_IsString(jlevel) || jlevel->valuestring == NULL) {
-        set_bad_params(err, "log.tail: level must be a string");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "log.tail: level must be a string");
     }
     const char *s = jlevel->valuestring;
     if (strcmp(s, "info") == 0) {
@@ -64,8 +58,7 @@ static bool parse_level(const cJSON *jlevel, nt_log_level_t *out, nt_devapi_erro
     } else if (strcmp(s, "error") == 0) {
         *out = NT_LOG_LEVEL_ERROR;
     } else {
-        set_bad_params(err, "log.tail: level must be one of info/warn/error");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "log.tail: level must be one of info/warn/error");
     }
     return true;
 }
@@ -77,7 +70,7 @@ static bool parse_tail_n(const cJSON *jn, uint16_t *out, nt_devapi_error *err) {
         *out = NT_LOG_RING_DEPTH;
         return true;
     }
-    return nt_devapi_parse_u16_param_exact(jn, NT_LOG_RING_DEPTH, err, set_bad_params, "log.tail: n must be an integer in [0, NT_LOG_RING_DEPTH]", out);
+    return nt_devapi_parse_u16_param_exact(jn, NT_LOG_RING_DEPTH, err, "log.tail: n must be an integer in [0, NT_LOG_RING_DEPTH]", out);
 }
 
 static void add_log_entries(cJSON *result, const nt_log_ring_entry_t *tail, uint16_t got) {
@@ -206,8 +199,7 @@ static bool cmd_perf_stats(const cJSON *params, cJSON *result, nt_devapi_error *
         }
     } else {
         if (!cJSON_IsArray(jchannels)) {
-            set_bad_params(err, "perf.stats: channels must be an array of channel-name strings");
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "perf.stats: channels must be an array of channel-name strings");
         }
         for (int i = 0; i < NT_METRICS_CHANNEL_COUNT; i++) {
             want[i] = false;
@@ -215,8 +207,7 @@ static bool cmd_perf_stats(const cJSON *params, cJSON *result, nt_devapi_error *
         const cJSON *jc = NULL;
         cJSON_ArrayForEach(jc, jchannels) {
             if (!cJSON_IsString(jc) || jc->valuestring == NULL) {
-                set_bad_params(err, "perf.stats: channels must be strings");
-                return false;
+                return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "perf.stats: channels must be strings");
             }
             int found = -1;
             for (int i = 0; i < NT_METRICS_CHANNEL_COUNT; i++) {
@@ -226,8 +217,7 @@ static bool cmd_perf_stats(const cJSON *params, cJSON *result, nt_devapi_error *
                 }
             }
             if (found < 0) {
-                set_bad_params(err, "perf.stats: unknown channel (valid: frame_ms, cpu_ms, gpu_ms, draw_calls, mem_used, scratch_hwm, scratch_used, pool_occupancy)");
-                return false;
+                return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "perf.stats: unknown channel (valid: frame_ms, cpu_ms, gpu_ms, draw_calls, mem_used, scratch_hwm, scratch_used, pool_occupancy)");
             }
             want[found] = true;
         }
@@ -238,13 +228,11 @@ static bool cmd_perf_stats(const cJSON *params, cJSON *result, nt_devapi_error *
     const cJSON *jbudget = cJSON_GetObjectItemCaseSensitive(params, "budget_ms");
     if (jbudget != NULL) {
         if (!cJSON_IsNumber(jbudget)) {
-            set_bad_params(err, "perf.stats: budget_ms must be a number");
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "perf.stats: budget_ms must be a number");
         }
         budget_ms = jbudget->valuedouble;
         if (!isfinite(budget_ms) || budget_ms <= 0.0) {
-            set_bad_params(err, "perf.stats: budget_ms must be finite and > 0");
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "perf.stats: budget_ms must be finite and > 0");
         }
     }
 
@@ -298,13 +286,13 @@ static bool cmd_perf_reset(const cJSON *params, cJSON *result, nt_devapi_error *
 static bool resolve_page(const cJSON *params, uint32_t total, const char *who, uint32_t *out_begin, uint32_t *out_end, nt_devapi_error *err) {
     uint32_t offset = 0;
     const cJSON *jo = cJSON_GetObjectItemCaseSensitive(params, "offset");
-    if (jo != NULL && !nt_devapi_parse_u32_param_exact(jo, UINT32_MAX, err, set_bad_params, who, &offset)) {
+    if (jo != NULL && !nt_devapi_parse_u32_param_exact(jo, UINT32_MAX, err, who, &offset)) {
         return false;
     }
     uint32_t limit = NT_DEVAPI_OBS_LIMIT_MAX;
     const cJSON *jl = cJSON_GetObjectItemCaseSensitive(params, "limit");
     if (jl != NULL) {
-        if (!nt_devapi_parse_u32_param_exact(jl, UINT32_MAX, err, set_bad_params, who, &limit)) {
+        if (!nt_devapi_parse_u32_param_exact(jl, UINT32_MAX, err, who, &limit)) {
             return false;
         }
         if (limit > NT_DEVAPI_OBS_LIMIT_MAX) {
@@ -470,23 +458,19 @@ static bool append_filter_terms(const cJSON *arr, nt_comp_id_t *ids, uint8_t *n,
         return true;
     }
     if (!cJSON_IsArray(arr)) {
-        set_bad_params(err, "entity.list: all/any/none must be arrays of component names");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.list: all/any/none must be arrays of component names");
     }
     const cJSON *el = NULL;
     cJSON_ArrayForEach(el, arr) {
         if (*n >= NT_DEVAPI_QUERY_MAX_TERMS) {
-            set_bad_params(err, "entity.list: too many filter terms");
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.list: too many filter terms");
         }
         if (!cJSON_IsString(el) || el->valuestring == NULL) {
-            set_bad_params(err, "entity.list: filter terms must be component-name strings");
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.list: filter terms must be component-name strings");
         }
         nt_comp_id_t id = nt_entity_storage_find(el->valuestring);
         if (id == NT_COMP_ID_INVALID) {
-            set_bad_params(err, "entity.list: unknown component in filter");
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.list: unknown component in filter");
         }
         ids[(*n)++] = id;
     }
@@ -501,13 +485,11 @@ static bool parse_entity_filter(const cJSON *params, entity_filter *f, nt_devapi
     const cJSON *jcomp = cJSON_GetObjectItemCaseSensitive(params, "component");
     if (jcomp != NULL) {
         if (!cJSON_IsString(jcomp) || jcomp->valuestring == NULL) {
-            set_bad_params(err, "entity.list: component must be a string");
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.list: component must be a string");
         }
         nt_comp_id_t id = nt_entity_storage_find(jcomp->valuestring);
         if (id == NT_COMP_ID_INVALID) {
-            set_bad_params(err, "entity.list: unknown component");
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.list: unknown component");
         }
         f->all[f->n_all++] = id;
     }
@@ -652,7 +634,7 @@ static bool resolve_pack_filter(const cJSON *params, bool *out_filter, uint16_t 
         return true;
     }
     uint32_t pack_id = 0;
-    if (!nt_devapi_parse_u32_param_exact(jpid, UINT32_MAX, err, set_bad_params, "resource.list: pack_id must be a non-negative integer", &pack_id)) {
+    if (!nt_devapi_parse_u32_param_exact(jpid, UINT32_MAX, err, "resource.list: pack_id must be a non-negative integer", &pack_id)) {
         return false;
     }
     *out_filter = true;
@@ -727,8 +709,7 @@ static bool cmd_resource_list(const cJSON *params, cJSON *result, nt_devapi_erro
     const cJSON *jia = cJSON_GetObjectItemCaseSensitive(params, "include_assets");
     if (jia != NULL) {
         if (!cJSON_IsBool(jia)) {
-            set_bad_params(err, "resource.list: include_assets must be a bool");
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "resource.list: include_assets must be a bool");
         }
         include_assets = cJSON_IsTrue(jia);
     }

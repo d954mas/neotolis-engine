@@ -14,11 +14,6 @@
 
 #ifdef NT_DEVAPI_GROUP_TIME
 
-static void set_bad_params(nt_devapi_error *err, const char *message) {
-    err->code = NT_DEVAPI_ERR_BAD_PARAMS;
-    err->message = message;
-}
-
 /* frame.current → {frame, time, dt}, also the reply of every clock deferral; g_nt_app.time = sum of applied
    dts = game-elapsed time. */
 static bool cmd_frame_current(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
@@ -59,47 +54,40 @@ static bool cmd_time_step(const cJSON *params, cJSON *result, nt_devapi_error *e
     const cJSON *c = cJSON_GetObjectItemCaseSensitive(params, "count");
     const cJSON *s = cJSON_GetObjectItemCaseSensitive(params, "seconds");
     if (c != NULL && s != NULL) {
-        set_bad_params(err, "time.step: count and seconds are mutually exclusive");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "time.step: count and seconds are mutually exclusive");
     }
     int count = 1;
     if (s != NULL) {
         if (!cJSON_IsNumber(s)) {
-            set_bad_params(err, "time.step: seconds must be a number");
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "time.step: seconds must be a number");
         }
         double seconds = s->valuedouble;
         if (!isfinite(seconds) || seconds <= 0.0) {
-            set_bad_params(err, "time.step: seconds must be finite and > 0");
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "time.step: seconds must be finite and > 0");
         }
         /* step_dt > 0 (L1 invariant); fmax: a positive quotient can underflow to 0 when step_dt > 1. */
         double steps = fmax(1.0, ceil(seconds / (double)g_nt_app.step_dt));
         if (steps > (double)INT32_MAX) {
-            set_bad_params(err, "time.step: seconds too large (more than INT32_MAX steps)");
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "time.step: seconds too large (more than INT32_MAX steps)");
         }
         count = (int)steps; /* >= 1 (ceil of a positive) and <= INT32_MAX, so the cast is safe. */
     } else if (c != NULL) {
         uint32_t parsed = 0;
         const char *bad_count = "time.step: count must be an integer in [1, INT32_MAX]";
-        if (!nt_devapi_parse_u32_param_exact(c, INT32_MAX, err, set_bad_params, bad_count, &parsed)) {
+        if (!nt_devapi_parse_u32_param_exact(c, INT32_MAX, err, bad_count, &parsed)) {
             return false;
         }
         if (parsed == 0U) {
-            set_bad_params(err, bad_count);
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, bad_count);
         }
         count = (int)parsed;
     }
     /* Only MANUAL drains pending_steps: a RUN step would resolve on RUN frames and leave its steps queued. */
     if (g_nt_app.mode != NT_APP_MODE_MANUAL) {
-        set_bad_params(err, "time.step: only valid in 'manual' mode");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "time.step: only valid in 'manual' mode");
     }
     if (count > INT32_MAX - g_nt_app.pending_steps) {
-        set_bad_params(err, "time.step: too many steps already queued");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "time.step: too many steps already queued");
     }
     if (!nt_devapi_defer(NT_DEVAPI_GATE_FRAMES, (double)(g_nt_app.pending_steps + count), cmd_frame_current, err)) {
         return false;
@@ -112,20 +100,17 @@ static bool cmd_time_set_scale(const cJSON *params, cJSON *result, nt_devapi_err
     (void)ud;
     const cJSON *s = cJSON_GetObjectItemCaseSensitive(params, "scale");
     if (!cJSON_IsNumber(s)) {
-        set_bad_params(err, "time.set_scale: scale must be a number");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "time.set_scale: scale must be a number");
     }
     double scale = s->valuedouble;
     if (!isfinite(scale) || scale < 0.0) {
-        set_bad_params(err, "time.set_scale: scale must be finite and >= 0");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "time.set_scale: scale must be finite and >= 0");
     }
     /* A huge finite double narrows to +inf in float; +inf scale → dt = wall_dt*inf poisons
        g_nt_app.time/dt. Reject any scale whose float form is not finite. */
     float fscale = (float)scale;
     if (!isfinite(fscale)) {
-        set_bad_params(err, "time.set_scale: scale out of representable range");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "time.set_scale: scale out of representable range");
     }
     nt_app_set_scale(fscale);
     devapi_add_number(result, "scale", scale);
@@ -136,8 +121,7 @@ static bool cmd_time_set_mode(const cJSON *params, cJSON *result, nt_devapi_erro
     (void)ud;
     const cJSON *m = cJSON_GetObjectItemCaseSensitive(params, "mode");
     if (!cJSON_IsString(m) || m->valuestring == NULL) {
-        set_bad_params(err, "time.set_mode: mode must be a string");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "time.set_mode: mode must be a string");
     }
     nt_app_mode_t mode;
     if (strcmp(m->valuestring, "run") == 0) {
@@ -145,8 +129,7 @@ static bool cmd_time_set_mode(const cJSON *params, cJSON *result, nt_devapi_erro
     } else if (strcmp(m->valuestring, "manual") == 0) {
         mode = NT_APP_MODE_MANUAL;
     } else {
-        set_bad_params(err, "time.set_mode: mode must be 'run' or 'manual'");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "time.set_mode: mode must be 'run' or 'manual'");
     }
     nt_app_set_mode(mode);
     devapi_add_string(result, "mode", m->valuestring);
@@ -159,13 +142,11 @@ static bool cmd_time_set_fps(const cJSON *params, cJSON *result, nt_devapi_error
     (void)ud;
     const cJSON *f = cJSON_GetObjectItemCaseSensitive(params, "fps");
     if (!cJSON_IsNumber(f)) {
-        set_bad_params(err, "time.set_fps: fps must be a number");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "time.set_fps: fps must be a number");
     }
     double fps = f->valuedouble;
     if (!isfinite(fps) || fps < 0.0) {
-        set_bad_params(err, "time.set_fps: fps must be finite and >= 0");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "time.set_fps: fps must be finite and >= 0");
     }
     /* Compute the reciprocal in double, then validate the float-narrowed result: a finite-but-tiny
        fps (e.g. 1e-50) overflows 1/fps to +inf in float, which would spin-wait the managed loop
@@ -174,8 +155,7 @@ static bool cmd_time_set_fps(const cJSON *params, cJSON *result, nt_devapi_error
     if (fps > 0.0) {
         target_dt = (float)(1.0 / fps);
         if (!isfinite(target_dt) || target_dt <= 0.0F) {
-            set_bad_params(err, "time.set_fps: fps out of representable frame-cap range");
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "time.set_fps: fps out of representable frame-cap range");
         }
     }
     g_nt_app.target_dt = target_dt;
@@ -189,21 +169,18 @@ static bool cmd_time_wait(const cJSON *params, cJSON *result, nt_devapi_error *e
     (void)result;
     (void)ud;
     if (g_nt_app.mode != NT_APP_MODE_RUN || g_nt_app.paused || g_nt_app.scale <= 0.0F) {
-        set_bad_params(err, "time.wait: only valid while game time advances (RUN, unpaused, scale > 0)");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "time.wait: only valid while game time advances (RUN, unpaused, scale > 0)");
     }
     double seconds = 0.0;
     const cJSON *s = cJSON_GetObjectItemCaseSensitive(params, "seconds");
     if (s != NULL) {
         if (!cJSON_IsNumber(s)) {
-            set_bad_params(err, "time.wait: seconds must be a number");
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "time.wait: seconds must be a number");
         }
         seconds = s->valuedouble;
     }
     if (!isfinite(seconds) || seconds < 0.0) {
-        set_bad_params(err, "time.wait: seconds must be finite and >= 0");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "time.wait: seconds must be finite and >= 0");
     }
     return nt_devapi_defer(NT_DEVAPI_GATE_SECONDS, seconds, cmd_frame_current, err);
 }
@@ -214,8 +191,7 @@ static bool cmd_render_set_enabled(const cJSON *params, cJSON *result, nt_devapi
     (void)ud;
     const cJSON *e = cJSON_GetObjectItemCaseSensitive(params, "enabled");
     if (!cJSON_IsBool(e)) {
-        set_bad_params(err, "render.set_enabled: enabled must be a bool");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "render.set_enabled: enabled must be a bool");
     }
     bool enabled = cJSON_IsTrue(e);
     nt_app_set_render_enabled(enabled);
@@ -241,12 +217,11 @@ static bool cmd_frame_wait(const cJSON *params, cJSON *result, nt_devapi_error *
     (void)result;
     (void)ud;
     if (g_nt_app.mode == NT_APP_MODE_MANUAL || g_nt_app.paused) {
-        set_bad_params(err, "frame.wait: only valid in running mode (use time.step in manual; resume if paused)");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "frame.wait: only valid in running mode (use time.step in manual; resume if paused)");
     }
     uint32_t frames = 1U;
     const cJSON *f = cJSON_GetObjectItemCaseSensitive(params, "frames");
-    if (f != NULL && !nt_devapi_parse_u32_param_exact(f, INT32_MAX, err, set_bad_params, "frame.wait: frames must be an integer in [0, INT32_MAX]", &frames)) {
+    if (f != NULL && !nt_devapi_parse_u32_param_exact(f, INT32_MAX, err, "frame.wait: frames must be an integer in [0, INT32_MAX]", &frames)) {
         return false;
     }
     return nt_devapi_defer(NT_DEVAPI_GATE_FRAMES, (double)frames, cmd_frame_current, err);

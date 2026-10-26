@@ -7,36 +7,25 @@
 
 #ifdef NT_DEVAPI_GROUP_RECORDER
 
-static void set_bad_params(nt_devapi_error *err, const char *message) {
-    err->code = NT_DEVAPI_ERR_BAD_PARAMS;
-    err->message = message;
-}
-
 static bool cmd_record_start(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     const cJSON *name = cJSON_GetObjectItemCaseSensitive(params, "name");
     if (!cJSON_IsString(name) || name->valuestring[0] == '\0') {
-        set_bad_params(err, "record.start: name must be a non-empty string");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "record.start: name must be a non-empty string");
     }
     const char *bad_fps = "record.start: fps must be an integer 1..120";
     uint32_t fps = 0;
-    if (!nt_devapi_parse_u32_param_exact(cJSON_GetObjectItemCaseSensitive(params, "fps"), 120, err, set_bad_params, bad_fps, &fps)) {
+    if (!nt_devapi_parse_u32_param_exact(cJSON_GetObjectItemCaseSensitive(params, "fps"), 120, err, bad_fps, &fps)) {
         return false;
     }
     if (fps == 0) {
-        set_bad_params(err, bad_fps);
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, bad_fps);
     }
     if (nt_recorder_active()) {
-        err->code = "recording";
-        err->message = "record.start: a recording is active";
-        return false;
+        return nt_devapi_fail(err, "recording", "record.start: a recording is active");
     }
     if (!nt_recorder_start(name->valuestring, fps)) {
-        err->code = "failed";
-        err->message = "record.start: the recorder refused to start (see log and console)";
-        return false;
+        return nt_devapi_fail(err, "failed", "record.start: the recorder refused to start (see log and console)");
     }
     (void)result;
     return true;

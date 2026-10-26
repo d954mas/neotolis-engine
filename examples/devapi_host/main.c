@@ -48,9 +48,7 @@ static bool cmd_game_echo(const cJSON *params, cJSON *result, nt_devapi_error *e
     (void)ud;
     const cJSON *msg = cJSON_GetObjectItemCaseSensitive(params, "msg");
     if (!cJSON_IsString(msg)) {
-        err->code = "bad_params";
-        err->message = "game.echo requires a string \"msg\"";
-        return false;
+        return nt_devapi_fail(err, "bad_params", "game.echo requires a string \"msg\"");
     }
     cJSON *added = cJSON_AddStringToObject(result, "msg", msg->valuestring);
     NT_ASSERT(added != NULL);
@@ -58,14 +56,12 @@ static bool cmd_game_echo(const cJSON *params, cJSON *result, nt_devapi_error *e
     return true;
 }
 
+/* Omitted fields take the registry defaults: group "game" from the method, immediate, no side effects. */
 static const nt_devapi_command_desc k_game_echo = {
     .method = "game.echo",
-    .group = "game",
     .summary = "echo {msg} back",
     .params_shape = "{msg:string}",
     .result_shape = "{msg:string}",
-    .frame_behavior = "any",
-    .side_effects = "none",
 };
 
 /* game-layer WRITE command via the public register path — zero engine edits: flips an observable host
@@ -85,11 +81,8 @@ static bool cmd_game_poke(const cJSON *params, cJSON *result, nt_devapi_error *e
 
 static const nt_devapi_command_desc k_game_poke = {
     .method = "game.poke",
-    .group = "game",
     .summary = "flip an observable host bool, return {poked}",
-    .params_shape = "{}",
     .result_shape = "{poked:bool}",
-    .frame_behavior = "any",
     .side_effects = "flips game state",
 };
 

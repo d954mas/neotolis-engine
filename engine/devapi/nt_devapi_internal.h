@@ -21,11 +21,10 @@ void devapi_add_bool(cJSON *obj, const char *key, bool value);
 void devapi_add_null(cJSON *obj, const char *key);
 
 /* Strict unsigned-integer param parsers: require a finite, integer-valued number in [0, max]
-   (a blind cast of an out-of-range/NaN/Inf double to unsigned is UB). On violation they call
-   set_bad(err, message) and return false, else write the parsed value to *out. */
-typedef void (*nt_devapi_bad_params_fn)(nt_devapi_error *err, const char *message);
-bool nt_devapi_parse_u32_param_exact(const cJSON *node, uint32_t max, nt_devapi_error *err, nt_devapi_bad_params_fn set_bad, const char *message, uint32_t *out);
-bool nt_devapi_parse_u16_param_exact(const cJSON *node, uint16_t max, nt_devapi_error *err, nt_devapi_bad_params_fn set_bad, const char *message, uint16_t *out);
+   (a blind cast of an out-of-range/NaN/Inf double to unsigned is UB). On violation they fail
+   with bad_params and the given message, else write the parsed value to *out. */
+bool nt_devapi_parse_u32_param_exact(const cJSON *node, uint32_t max, nt_devapi_error *err, const char *message, uint32_t *out);
+bool nt_devapi_parse_u16_param_exact(const cJSON *node, uint16_t max, nt_devapi_error *err, const char *message, uint16_t *out);
 
 /* One registered command. The 7 descriptor strings are strdup-owned copies
    freed at shutdown; handler + user_data are stored verbatim. */

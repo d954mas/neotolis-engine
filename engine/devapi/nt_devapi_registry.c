@@ -70,17 +70,16 @@ bool nt_devapi_transport_is_registered(nt_devapi_hook_fn fn) {
 }
 // #endregion
 
-/* Local strdup: portable under strict C17 (POSIX strdup not guaranteed declared). */
-static char *devapi_strdup(const char *src) {
-    if (src == NULL) {
-        return NULL;
-    }
-    size_t len = strlen(src) + 1U;
-    char *dst = (char *)malloc(len);
+/* Local strndup: portable under strict C17 (POSIX strdup/strndup not guaranteed declared). */
+static char *devapi_strndup(const char *src, size_t len) {
+    char *dst = (char *)malloc(len + 1U);
     NT_ASSERT(dst != NULL);
     memcpy(dst, src, len);
+    dst[len] = '\0';
     return dst;
 }
+
+static char *devapi_strdup(const char *src) { return devapi_strndup(src, strlen(src)); }
 
 static void slot_free(nt_devapi_slot *slot) {
     free(slot->method);
@@ -122,10 +121,8 @@ void nt_devapi_shutdown(void) {
 }
 
 nt_result_t nt_devapi_register(const nt_devapi_command_desc *desc, nt_devapi_handler_fn handler, void *user_data) {
-    /* Preconditions (caller bugs): initialized + desc/handler/all-7-fields non-NULL — a NULL
-       field would strdup to NULL and silently vanish from the self-describing surface. */
-    NT_ASSERT(s_initialized && desc != NULL && handler != NULL && desc->method != NULL && desc->group != NULL && desc->summary != NULL && desc->params_shape != NULL && desc->result_shape != NULL &&
-              desc->frame_behavior != NULL && desc->side_effects != NULL);
+    /* Preconditions (caller bugs): initialized + desc/handler and the fields with no default non-NULL. */
+    NT_ASSERT(s_initialized && desc != NULL && handler != NULL && desc->method != NULL && desc->summary != NULL && desc->result_shape != NULL);
 
     /* dup_method is a legitimate game-author error, not a bug: reject, don't overwrite. INVALID_ARG (not
        INIT_FAILED) so a caller can tell "bad method arg" apart from "devapi double-init". */
@@ -138,12 +135,12 @@ nt_result_t nt_devapi_register(const nt_devapi_command_desc *desc, nt_devapi_han
 
     nt_devapi_slot *slot = &s_slots[s_count];
     slot->method = devapi_strdup(desc->method);
-    slot->group = devapi_strdup(desc->group);
+    slot->group = desc->group != NULL ? devapi_strdup(desc->group) : devapi_strndup(desc->method, strcspn(desc->method, "."));
     slot->summary = devapi_strdup(desc->summary);
-    slot->params_shape = devapi_strdup(desc->params_shape);
+    slot->params_shape = devapi_strdup(desc->params_shape != NULL ? desc->params_shape : "none");
     slot->result_shape = devapi_strdup(desc->result_shape);
-    slot->frame_behavior = devapi_strdup(desc->frame_behavior);
-    slot->side_effects = devapi_strdup(desc->side_effects);
+    slot->frame_behavior = devapi_strdup(desc->frame_behavior != NULL ? desc->frame_behavior : "immediate");
+    slot->side_effects = devapi_strdup(desc->side_effects != NULL ? desc->side_effects : "none");
     slot->handler = handler;
     slot->user_data = user_data;
     s_count++;
@@ -175,7 +172,7 @@ const nt_devapi_slot *nt_devapi_registry_find(const char *method) {
    engine.info emit each distinct group once, derived from the commands (no separate list). */
 bool nt_devapi_group_is_first(int index) {
     NT_ASSERT(index >= 0 && index < s_count);
-    /* Every slot's group is non-NULL (nt_devapi_register asserts all fields), so no NULL guards. */
+    /* Every slot's group is non-NULL (nt_devapi_register fills defaults), so no NULL guards. */
     const char *group = s_slots[index].group;
     for (int i = 0; i < index; i++) {
         if (strcmp(s_slots[i].group, group) == 0) {

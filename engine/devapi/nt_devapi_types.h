@@ -16,9 +16,19 @@ typedef struct nt_devapi_error {
     const char *message;
 } nt_devapi_error;
 
-/* Self-describing command metadata. All 7 fields are documentation strings the registry
-   copies (strdup) at registration. `group` names the command's capability bundle; the
-   `features` command lists the distinct groups across all registered commands. */
+/* Fill err and return false, so a failing handler is one statement: return nt_devapi_fail(err, "bad_params", "...");
+   Both strings must outlive the response (static literals). */
+static inline bool nt_devapi_fail(nt_devapi_error *err, const char *code, const char *message) {
+    err->code = code;
+    err->message = message;
+    return false;
+}
+
+/* Self-describing command metadata: documentation strings the registry copies (strdup) at
+   registration. `method`, `summary` and `result_shape` are required. A NULL field takes its
+   default: `group` = the method's first dot segment (the whole method when it has no dot),
+   `params_shape` = "none", `frame_behavior` = "immediate", `side_effects` = "none". `group`
+   names the command's capability bundle; the `features` command lists the distinct groups. */
 typedef struct nt_devapi_command_desc {
     const char *method;
     const char *group;

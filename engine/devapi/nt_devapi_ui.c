@@ -47,11 +47,6 @@ void nt_devapi_ui_register_context(const char *name, nt_ui_context_t *ctx) {
 
 // #endregion
 
-static void set_bad_params(nt_devapi_error *err, const char *message) {
-    err->code = NT_DEVAPI_ERR_BAD_PARAMS;
-    err->message = message;
-}
-
 /* Clear the host-registered name->ctx* table. The HOST owns these registrations (registered ONCE at
    startup, like game.* commands) — so this is called only at init/register (before the host registers),
    NOT on a client disconnect, or every session after the first would see an empty table. */
@@ -68,14 +63,12 @@ static void clear_ui_ctx_table(void) {
    deltas. Mirrors the input group's parse_finite_coord; never asserts on bot input. */
 static bool parse_finite_coord(const cJSON *nj, const char *cmd, float *out, nt_devapi_error *err) {
     if (nj == NULL || !cJSON_IsNumber(nj)) {
-        set_bad_params(err, cmd);
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, cmd);
     }
     double v = nj->valuedouble;
     float fv = (float)v;
     if (!isfinite(v) || !isfinite(fv)) {
-        set_bad_params(err, cmd);
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, cmd);
     }
     *out = fv;
     return true;
@@ -86,13 +79,11 @@ static bool parse_finite_coord(const cJSON *nj, const char *cmd, float *out, nt_
    ui.drag frames, mirrors the input group / time.step). */
 static bool parse_frame_count(const cJSON *nj, const char *cmd, uint16_t *out, nt_devapi_error *err) {
     if (nj == NULL || !cJSON_IsNumber(nj)) {
-        set_bad_params(err, cmd);
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, cmd);
     }
     double v = nj->valuedouble;
     if (v < 0.0 || v > (double)UINT16_MAX || v != (double)(uint16_t)v) {
-        set_bad_params(err, cmd);
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, cmd);
     }
     *out = (uint16_t)v;
     return true;
@@ -102,7 +93,7 @@ static bool parse_frame_count(const cJSON *nj, const char *cmd, uint16_t *out, n
    bot input; absent -> the sole/first context. Returns NULL on failure (err is set). */
 static nt_ui_context_t *resolve_ctx(const cJSON *params, nt_devapi_error *err) {
     if (s_ui_ctx_count == 0) {
-        set_bad_params(err, "ui: no UI context registered");
+        nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "ui: no UI context registered");
         return NULL;
     }
     nt_ui_context_t *ctx = NULL;
@@ -111,7 +102,7 @@ static nt_ui_context_t *resolve_ctx(const cJSON *params, nt_devapi_error *err) {
         ctx = s_ui_ctx[0].ctx; /* default = sole/first */
     } else {
         if (!cJSON_IsString(jc) || jc->valuestring == NULL) {
-            set_bad_params(err, "ui: ctx must be a string");
+            nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "ui: ctx must be a string");
             return NULL;
         }
         for (uint32_t i = 0; i < s_ui_ctx_count; i++) {
@@ -121,14 +112,14 @@ static nt_ui_context_t *resolve_ctx(const cJSON *params, nt_devapi_error *err) {
             }
         }
         if (ctx == NULL) {
-            set_bad_params(err, "ui: unknown context");
+            nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "ui: unknown context");
             return NULL;
         }
     }
     /* A ctx that has not completed a frame has degenerate (0) layout dims; the coord converters
        (add_meta, resolve_target) trap on them. Reject pre-frame so NO bot input reaches the converter. */
     if (!nt_ui_context_has_frame(ctx)) {
-        set_bad_params(err, "ui: context has not rendered a frame yet");
+        nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "ui: context has not rendered a frame yet");
         return NULL;
     }
     return ctx;
@@ -227,8 +218,7 @@ static bool cmd_ui_element(const cJSON *params, cJSON *result, nt_devapi_error *
     (void)ud;
     const cJSON *jid = cJSON_GetObjectItemCaseSensitive(params, "id");
     if (!cJSON_IsString(jid) || jid->valuestring == NULL) {
-        set_bad_params(err, "ui.element: id must be a string");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "ui.element: id must be a string");
     }
     nt_ui_context_t *ctx = resolve_ctx(params, err);
     if (ctx == NULL) {
@@ -249,8 +239,7 @@ static bool cmd_ui_element(const cJSON *params, cJSON *result, nt_devapi_error *
         }
     }
     /* A miss under a DFS-depth-truncated snapshot may be a real widget below the depth limit, not a stale id. */
-    set_bad_params(err, truncated ? "ui.element: id not found in the probe snapshot (truncated at DFS depth)" : "ui.element: unknown or stale id");
-    return false;
+    return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, truncated ? "ui.element: id not found in the probe snapshot (truncated at DFS depth)" : "ui.element: unknown or stale id");
 }
 
 static bool cmd_ui_contexts(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
@@ -288,8 +277,7 @@ static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t
     const cJSON *jt = cJSON_GetObjectItemCaseSensitive(params, key);
     if (cJSON_IsString(jt)) {
         if (jt->valuestring == NULL || jt->valuestring[0] == '\0') {
-            set_bad_params(err, "ui: target id must be a non-empty string");
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "ui: target id must be a non-empty string");
         }
         uint32_t uid = nt_ui_id(jt->valuestring); /* non-empty pre-checked above; nt_ui_id asserts s!=NULL, not the hash. */
         uint32_t count = 0;
@@ -304,14 +292,12 @@ static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t
         }
         if (hit == NULL) {
             /* Below the DFS-depth limit the id may be a real widget the snapshot dropped — don't call it stale. */
-            set_bad_params(err, truncated ? "ui: target id not found in the probe snapshot (truncated at DFS depth)" : "ui: unknown or stale target id");
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, truncated ? "ui: target id not found in the probe snapshot (truncated at DFS depth)" : "ui: unknown or stale target id");
         }
         /* A behind-camera 3D node / collapsed element has a zero rect (visible=false); its center would
            resolve to a screen corner, so fail loudly instead of clicking the wrong point. */
         if (hit->bounds[2] <= 0.0F || hit->bounds[3] <= 0.0F) {
-            set_bad_params(err, "ui: target id is offscreen or behind camera");
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "ui: target id is offscreen or behind camera");
         }
         /* bounds are {x,y,w,h} Y-up layout px -> center, then the SAME Y-up->Y-down flip the {x,y}
            path uses (layout_y = layout_h - y_up) so id and {x,y} resolve identically. */
@@ -346,8 +332,7 @@ static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t
         *out_y = device[1];
         return true;
     }
-    set_bad_params(err, "ui: target must be a string id or an {x,y} object");
-    return false;
+    return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "ui: target must be a string id or an {x,y} object");
 }
 
 /* ui.click: resolve id|{x,y} -> center -> DOWN@0 + UP@hold via the SAME inject path as input.click.
@@ -367,16 +352,14 @@ static bool cmd_ui_click(const cJSON *params, cJSON *result, nt_devapi_error *er
     const cJSON *hj = cJSON_GetObjectItemCaseSensitive(params, "hold");
     if (hj != NULL) {
         if (!cJSON_IsNumber(hj)) {
-            set_bad_params(err, "ui.click: hold must be a number");
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "ui.click: hold must be a number");
         }
         if (!parse_frame_count(hj, "ui.click: hold must be an integer in [0, 65535]", &hold, err)) {
             return false;
         }
     }
     if (!nt_devapi_input_sched_can_reserve(2U)) {
-        set_bad_params(err, "ui.click: inject schedule overflow");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "ui.click: inject schedule overflow");
     }
     nt_devapi_input_sched_pointer(NT_INJECT_POINTER_DOWN, NT_INPUT_INJECT_POINTER_ID_BASE, cx, cy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, 0);
     nt_devapi_input_sched_pointer(NT_INJECT_POINTER_UP, NT_INPUT_INJECT_POINTER_ID_BASE, cx, cy, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, hold);
@@ -408,8 +391,7 @@ static bool cmd_ui_scroll(const cJSON *params, cJSON *result, nt_devapi_error *e
         return false;
     }
     if (!nt_devapi_input_sched_can_reserve(2U)) {
-        set_bad_params(err, "ui.scroll: inject schedule overflow");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "ui.scroll: inject schedule overflow");
     }
     nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, NT_INPUT_INJECT_POINTER_ID_BASE, cx, cy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 0, 0);
     nt_devapi_input_sched_wheel(dx, dy, 0);
@@ -437,8 +419,7 @@ static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err
     const cJSON *frj = cJSON_GetObjectItemCaseSensitive(params, "frames");
     if (frj != NULL) {
         if (!cJSON_IsNumber(frj)) {
-            set_bad_params(err, "ui.drag: frames must be a number");
-            return false;
+            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "ui.drag: frames must be a number");
         }
         if (!parse_frame_count(frj, "ui.drag: frames must be an integer in [1, 65535]", &frames, err)) {
             return false;
@@ -448,18 +429,15 @@ static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err
        not at `to`) would land back at `from` — `to` silently ignored. frames>=1 gives the instant
        from->to->up drag, so nothing is lost by requiring it. */
     if (frames == 0U) {
-        set_bad_params(err, "ui.drag: frames must be >= 1 (a 0-frame drag cannot reach `to`)");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "ui.drag: frames must be >= 1 (a 0-frame drag cannot reach `to`)");
     }
     if (frames > NT_DEVAPI_UI_DRAG_FRAMES_MAX) {
-        set_bad_params(err, "ui.drag: frames exceeds the per-command cap");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "ui.drag: frames exceeds the per-command cap");
     }
     /* DOWN@0 + `frames` interpolated MOVEs (one per frame, t=1..frames) + UP@frames. */
     uint32_t total = (uint32_t)frames + 2U;
     if (!nt_devapi_input_sched_can_reserve(total)) {
-        set_bad_params(err, "ui.drag: inject schedule overflow");
-        return false;
+        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "ui.drag: inject schedule overflow");
     }
     const uint32_t id = NT_INPUT_INJECT_POINTER_ID_BASE;
     nt_devapi_input_sched_pointer(NT_INJECT_POINTER_DOWN, id, fx, fy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, 0);
