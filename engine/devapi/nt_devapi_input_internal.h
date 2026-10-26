@@ -27,7 +27,7 @@ void nt_devapi_input_sched_wheel(float dx, float dy, uint16_t at_frame);
    buffer. Exposed for tests that drive the per-tick path directly. */
 void nt_devapi_input_update(void);
 
-/* Reset hook: drop pending entries, release applied held synthetic input, re-seed the advance clock.
+/* Reset hook: drop pending entries and re-seed the advance clock; applied input stays (game-owned).
    Also called from tests for order-independence. */
 void nt_devapi_input_reset(void);
 

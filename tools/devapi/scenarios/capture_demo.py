@@ -198,7 +198,7 @@ def main(argv) -> int:
             if not os.path.isfile(host_bin):
                 print(f"error: capture_host not found at {host_bin}\n"
                       f"  build it: cmake -B build/_cmake/cap-host -DNT_DEVAPI_ENABLED=ON "
-                      f"-DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON "
+                      f"-DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON "
                       f"-DNT_DEVAPI_GROUP_CAPTURE=ON -G Ninja -DCMAKE_C_COMPILER=clang\n"
                       f"  then: cmake --build build/_cmake/cap-host --target capture_host\n"
                       f"  or attach to a running host with --no-launch --port N", file=sys.stderr)

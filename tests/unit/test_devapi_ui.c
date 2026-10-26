@@ -563,6 +563,20 @@ static void test_drag_lands_exactly_on_to(void) {
     TEST_ASSERT_TRUE(near_eq(slot->x, 1.0F));
     nt_devapi_input_reset();
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"ui.drag\",\"params\":{\"from\":{\"x\":-3e38,\"y\":0},\"to\":{\"x\":3e38,\"y\":0},\"frames\":2}}")));
+    advance(); /* DOWN@0 */
+    advance(); /* MOVE@1, the midpoint: float math made it inf */
+    slot = inject_slot();
+    TEST_ASSERT_NOT_NULL(slot);
+    TEST_ASSERT_TRUE(isfinite(slot->x) && near_eq(slot->x, 0.0F));
+}
+
+/* ui.scroll needs MOVE + wheel; with one slot free it answers overflow and queues nothing. */
+static void test_scroll_preflights_both_entries(void) {
+    for (uint32_t i = 0; i < NT_DEVAPI_INPUT_SCHED_MAX - 1U; i++) {
+        cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}")));
+    }
+    TEST_ASSERT_NOT_NULL(strstr(nt_devapi_submit("{\"method\":\"ui.scroll\",\"params\":{\"id\":\"widget\",\"dy\":1}}"), "inject schedule overflow"));
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"B\"}}")));
 }
 
 /* ---- ui.drag whole-or-nothing on the shared scheduler ---- */
@@ -627,6 +641,7 @@ int main(void) {
     RUN_TEST(test_drag_frames_negative_bad_params);
     RUN_TEST(test_drag_frames_zero_bad_params);
     RUN_TEST(test_drag_lands_exactly_on_to);
+    RUN_TEST(test_scroll_preflights_both_entries);
     RUN_TEST(test_drag_frames_over_cap_bad_params);
     RUN_TEST(test_drag_at_cap_reserves_whole);
     RUN_TEST(test_drag_over_reserve_no_partial_inject);

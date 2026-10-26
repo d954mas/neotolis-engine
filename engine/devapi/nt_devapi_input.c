@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 
 #include "app/nt_app.h" /* g_nt_app.frame — the advance clock the schedule ticks on. */
@@ -52,12 +53,12 @@ typedef struct {
 static sched_entry_t s_sched[NT_DEVAPI_INPUT_SCHED_MAX];
 static uint32_t s_sched_count;
 
-static bool sched_can_reserve(uint32_t n) { return n <= NT_DEVAPI_INPUT_SCHED_MAX - s_sched_count; }
+bool nt_devapi_input_sched_can_reserve(uint32_t n) { return n <= NT_DEVAPI_INPUT_SCHED_MAX - s_sched_count; }
 
-/* Whole-or-nothing: every handler preflights sched_can_reserve(N) for its whole command before the
+/* Whole-or-nothing: every handler preflights nt_devapi_input_sched_can_reserve(N) for its whole command before the
    first sched_* call, so a near-full schedule never accepts a DOWN and rejects its UP. */
 static sched_entry_t *sched_reserve(uint32_t n) {
-    NT_ASSERT(sched_can_reserve(n));
+    NT_ASSERT(nt_devapi_input_sched_can_reserve(n));
     sched_entry_t *first = &s_sched[s_sched_count];
     s_sched_count += n;
     return first;
@@ -71,7 +72,7 @@ static void sched_key(nt_key_t key, bool down, uint16_t at_frame) {
     e->u.key.down = down;
 }
 
-static void sched_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask, uint16_t at_frame) {
+void nt_devapi_input_sched_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask, uint16_t at_frame) {
     sched_entry_t *e = sched_reserve(1);
     e->frames_remaining = at_frame;
     e->kind = (uint8_t)kind;
@@ -96,24 +97,13 @@ static void sched_buttons(uint32_t id, uint8_t buttons_mask, uint16_t at_frame) 
     e->u.buttons.buttons_mask = buttons_mask;
 }
 
-static void sched_wheel(float dx, float dy, uint16_t at_frame) {
+void nt_devapi_input_sched_wheel(float dx, float dy, uint16_t at_frame) {
     sched_entry_t *e = sched_reserve(1);
     e->frames_remaining = at_frame;
     e->kind = NT_INJECT_WHEEL;
     e->u.wheel.dx = dx;
     e->u.wheel.dy = dy;
 }
-
-/* Cross-group reuse wrappers (the ui group delegates here so there is ONE scheduler on the immediate
-   buffer — see nt_devapi_input_internal.h). Thin pass-throughs to the static scheduler; whole-or-nothing
-   semantics are the caller's (preflight can_reserve(N) then issue N sched_* calls, single-threaded). */
-bool nt_devapi_input_sched_can_reserve(uint32_t n) { return sched_can_reserve(n); }
-
-void nt_devapi_input_sched_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask, uint16_t at_frame) {
-    sched_pointer(kind, id, x, y, pressure, type, buttons_mask, at_frame);
-}
-
-void nt_devapi_input_sched_wheel(float dx, float dy, uint16_t at_frame) { sched_wheel(dx, dy, at_frame); }
 
 /* down@0 + up@hold (2 entries): the tap/click hold primitive. */
 static void sched_tap(nt_key_t key, uint16_t hold_frames) {
@@ -271,7 +261,7 @@ static bool cmd_input_key(const cJSON *params, cJSON *result, nt_devapi_error *e
         if (!nt_devapi_parse_u16_param_exact(hold, UINT16_MAX, err, "input.key: hold must be an integer in [0, 65535]", &h)) {
             return false;
         }
-        if (!sched_can_reserve(2U)) {
+        if (!nt_devapi_input_sched_can_reserve(2U)) {
             return nt_devapi_fail(err, "input.key: inject schedule overflow");
         }
         sched_tap(key, h);
@@ -284,7 +274,7 @@ static bool cmd_input_key(const cJSON *params, cJSON *result, nt_devapi_error *e
             }
             down = cJSON_IsTrue(d);
         }
-        if (!sched_can_reserve(1U)) {
+        if (!nt_devapi_input_sched_can_reserve(1U)) {
             return nt_devapi_fail(err, "input.key: inject schedule overflow");
         }
         sched_key(key, down, 0);
@@ -336,10 +326,10 @@ static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_erro
             return false;
         }
     }
-    if (!sched_can_reserve(1U)) {
+    if (!nt_devapi_input_sched_can_reserve(1U)) {
         return nt_devapi_fail(err, "input.pointer: inject schedule overflow");
     }
-    sched_pointer(kind, id, x, y, 1.0F, type, buttons, 0);
+    nt_devapi_input_sched_pointer(kind, id, x, y, 1.0F, type, buttons, 0);
     devapi_add_number(result, "queued", 1.0);
     return true;
 }
@@ -365,10 +355,10 @@ static bool cmd_input_move(const cJSON *params, cJSON *result, nt_devapi_error *
     if (!pointer_type_from_name(cJSON_GetObjectItemCaseSensitive(params, "type"), &type)) {
         return nt_devapi_fail(err, "input.move: type must be 'mouse', 'touch' or 'pen'");
     }
-    if (!sched_can_reserve(1U)) {
+    if (!nt_devapi_input_sched_can_reserve(1U)) {
         return nt_devapi_fail(err, "input.move: inject schedule overflow");
     }
-    sched_pointer(NT_INJECT_POINTER_MOVE, id, x, y, 1.0F, type, 0, 0);
+    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, id, x, y, 1.0F, type, 0, 0);
     devapi_add_number(result, "queued", 1.0);
     return true;
 }
@@ -404,11 +394,11 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
             return false;
         }
     }
-    if (!sched_can_reserve(2U)) {
+    if (!nt_devapi_input_sched_can_reserve(2U)) {
         return nt_devapi_fail(err, "input.click: inject schedule overflow");
     }
-    sched_pointer(NT_INJECT_POINTER_DOWN, id, x, y, 1.0F, (uint8_t)NT_POINTER_MOUSE, buttons, 0);
-    sched_pointer(NT_INJECT_POINTER_UP, id, x, y, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, hold);
+    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_DOWN, id, x, y, 1.0F, (uint8_t)NT_POINTER_MOUSE, buttons, 0);
+    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_UP, id, x, y, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, hold);
     devapi_add_number(result, "queued", 2.0);
     return true;
 }
@@ -437,14 +427,14 @@ static bool cmd_input_wheel(const cJSON *params, cJSON *result, nt_devapi_error 
             return false;
         }
         y = flip_y_up_to_device(y); /* positioned scroll: Y-up in -> device Y-down for the MOVE entry. */
-        if (!sched_can_reserve(2U)) {
+        if (!nt_devapi_input_sched_can_reserve(2U)) {
             return nt_devapi_fail(err, "input.wheel: inject schedule overflow");
         }
-        sched_pointer(NT_INJECT_POINTER_MOVE, NT_INPUT_INJECT_POINTER_ID_BASE, x, y, 1.0F, (uint8_t)NT_POINTER_MOUSE, 0, 0);
-    } else if (!sched_can_reserve(1U)) {
+        nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, NT_INPUT_INJECT_POINTER_ID_BASE, x, y, 1.0F, (uint8_t)NT_POINTER_MOUSE, 0, 0);
+    } else if (!nt_devapi_input_sched_can_reserve(1U)) {
         return nt_devapi_fail(err, "input.wheel: inject schedule overflow");
     }
-    sched_wheel(dx, dy, 0);
+    nt_devapi_input_sched_wheel(dx, dy, 0);
     devapi_add_bool(result, "ok", true);
     return true;
 }
@@ -497,14 +487,14 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
         return nt_devapi_fail(err, "input.gesture: span (points*frame_stride) exceeds the frame-offset range");
     }
     /* DOWN + (npoints-1) moves + UP: DOWN@0 carries point[0], so moves cover points[1..n-1] only. */
-    if (!sched_can_reserve((uint32_t)npoints + 1U)) {
+    if (!nt_devapi_input_sched_can_reserve((uint32_t)npoints + 1U)) {
         return nt_devapi_fail(err, "input.gesture: inject schedule overflow");
     }
     /* down@0 carrying first point, a move per SUBSEQUENT point at its frame offset, up after the last. */
     const cJSON *first = cJSON_GetArrayItem(points, 0);
     float fx = (float)cJSON_GetArrayItem(first, 0)->valuedouble;
     float fy = flip_y_up_to_device((float)cJSON_GetArrayItem(first, 1)->valuedouble); /* each point's Y is Y-up. */
-    sched_pointer(NT_INJECT_POINTER_DOWN, id, fx, fy, 1.0F, type, 1U, 0);
+    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_DOWN, id, fx, fy, 1.0F, type, 1U, 0);
     int idx = 0;
     cJSON_ArrayForEach(p, points) {
         if (idx == 0) {
@@ -516,10 +506,10 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
         /* Compute the offset in int64 so the narrowing source is self-evidently within the
            already-validated [0, UINT16_MAX] span (idx <= npoints-1 => at <= last_offset). */
         uint16_t at = (uint16_t)((int64_t)idx * (int64_t)stride);
-        sched_pointer(NT_INJECT_POINTER_MOVE, id, mx, my, 1.0F, type, 1U, at);
+        nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, id, mx, my, 1.0F, type, 1U, at);
         idx++;
     }
-    sched_pointer(NT_INJECT_POINTER_UP, id, 0.0F, 0.0F, 0.0F, type, 0, (uint16_t)last_offset);
+    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_UP, id, 0.0F, 0.0F, 0.0F, type, 0, (uint16_t)last_offset);
     devapi_add_number(result, "queued", (double)npoints + 1.0);
     return true;
 }
@@ -539,7 +529,7 @@ static bool cmd_input_button(const cJSON *params, cJSON *result, nt_devapi_error
         }
     }
     /* Mask applies at the slot's apply-time position (schedule order), so a queued move is honored. */
-    if (!sched_can_reserve(1U)) {
+    if (!nt_devapi_input_sched_can_reserve(1U)) {
         return nt_devapi_fail(err, "input.button: inject schedule overflow");
     }
     sched_buttons(id, buttons, 0);
@@ -566,8 +556,11 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
         return nt_devapi_fail(err, "input.text: text must be a string");
     }
     const unsigned char *s = (const unsigned char *)t->valuestring;
-    /* Bounded by the schedule cap: more codepoints than that can never enqueue whole. */
-    uint32_t cps[NT_DEVAPI_INPUT_SCHED_MAX];
+    /* Bounded by the char ring: beyond it the reply's queued would overstate what the game can read.
+       The dispatcher copies the message on return, so a static buffer is enough. */
+    static char too_long[64];
+    (void)snprintf(too_long, sizeof too_long, "input.text: more than %u codepoints (the char ring)", (unsigned)NT_INPUT_CHAR_RING);
+    uint32_t cps[NT_INPUT_CHAR_RING];
     uint32_t n = 0;
     while (*s != 0) {
         uint32_t cp;
@@ -603,8 +596,8 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
         if (cp < k_min_cp[extra] || cp > 0x10FFFFU || (cp >= 0xD800U && cp <= 0xDFFFU)) {
             return nt_devapi_fail(err, "input.text: invalid UTF-8");
         }
-        if (n >= NT_DEVAPI_INPUT_SCHED_MAX) {
-            return nt_devapi_fail(err, "input.text: too many codepoints (exceeds inject schedule)");
+        if (n >= NT_INPUT_CHAR_RING) {
+            return nt_devapi_fail(err, too_long);
         }
         cps[n] = cp;
         n++;
@@ -615,11 +608,7 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
         devapi_add_number(result, "queued", 0.0);
         return true;
     }
-    /* Beyond the char ring the reply's queued would overstate what the game can read. */
-    if (n > NT_INPUT_CHAR_RING) {
-        return nt_devapi_fail(err, "input.text: exceeds char-ring capacity (32)");
-    }
-    if (!sched_can_reserve(n)) {
+    if (!nt_devapi_input_sched_can_reserve(n)) {
         return nt_devapi_fail(err, "input.text: inject schedule overflow");
     }
     sched_text(cps, n);

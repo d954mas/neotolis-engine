@@ -4,13 +4,11 @@
 # full host links nt_devapi_default (every compiled-in group + nt_devapi_register_default()). Each
 # NT_DEVAPI_GROUP_<X> option gates building that group's library.
 
-# nt_devapi -- the framework: dispatch + self-describing registry + its discovery commands (endpoints /
-# command.describe, registered by nt_devapi_register_discovery) + lifecycle hooks + the host-facing
-# registration API (nt_devapi_groups.h). It references NO group, so any set of group libs can link it.
+# nt_devapi -- the framework: dispatch + self-describing registry with its discovery commands (endpoints /
+# command.describe, registered by init) + lifecycle hooks + the host-facing registration API
+# (nt_devapi_groups.h). It references NO group, so any set of group libs can link it.
 nt_add_module(nt_devapi LOG_DOMAIN "devapi"
     nt_devapi.c
-    nt_devapi_discovery.c
-    nt_devapi_registry.c
     nt_devapi.h
     nt_devapi_groups.h
     nt_devapi_internal.h
@@ -137,7 +135,7 @@ endif()
 # libs' PUBLIC NT_DEVAPI_GROUP_<X> defines reach nt_devapi_default.c here, gating its register calls.
 nt_add_module(nt_devapi_default LOG_DOMAIN "devapi" nt_devapi_default.c)
 target_link_libraries(nt_devapi_default PUBLIC nt_devapi)
-foreach(_grp core time discovery input ui obs entity_write capture recorder)
+foreach(_grp core time input ui obs entity_write capture recorder)
     if(TARGET nt_devapi_${_grp})
         target_link_libraries(nt_devapi_default PUBLIC nt_devapi_${_grp})
     endif()

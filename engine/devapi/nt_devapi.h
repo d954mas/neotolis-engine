@@ -72,13 +72,13 @@ void nt_devapi_register(const nt_devapi_command *cmds, size_t count, void *user_
 const char *nt_devapi_submit(const char *line);
 
 /* Yield the next ready deferred response, or NULL if none is ready this call. The returned
-   pointer is valid only until the next submit/poll_response — copy it before the next core
-   call (it shares the same growing buffer as submit). Drain in a loop until it returns NULL. */
+   pointer is valid only until the next submit/poll_response, which frees it — copy it before the
+   next core call. Drain in a loop until it returns NULL. */
 const char *nt_devapi_poll_response(void);
 
 /* Per-tick devapi update — the game calls this once per frame. It checks the pending deferred reply's
-   gate, then runs the registered hooks (each transport registers its own poll + deferred drain via
-   the hook registry, so native net and web share this one seam). */
+   gate, then runs the transport poll (native net's recv + deferred drain), then the tick hook (the
+   input schedule release). */
 void nt_devapi_update(void);
 
 /* Run fn whenever a client leaves: a native disconnect, a newer connection taking over, or a web

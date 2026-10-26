@@ -384,7 +384,7 @@ static void net_poll(void) {
 
             const char *resp = nt_devapi_submit(line);
             if (resp != NULL) {
-                /* Write BEFORE the next core call — s_resp_buf is reused each submit. */
+                /* Write BEFORE the next core call, which frees this line. */
                 if (!send_line(resp)) {
                     close_client();
                     return;

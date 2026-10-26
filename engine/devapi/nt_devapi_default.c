@@ -23,7 +23,6 @@ void nt_devapi_register_default(void) {
 #ifdef NT_DEVAPI_GROUP_ENTITY_WRITE
     nt_devapi_register_entity_write();
 #endif
-    nt_devapi_register_discovery();
 #ifdef NT_DEVAPI_GROUP_CAPTURE
     nt_devapi_register_capture();
 #endif

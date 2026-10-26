@@ -8,14 +8,87 @@
 #include "core/nt_assert.h"
 #include "devapi/nt_devapi_internal.h"
 
-/* Transport-agnostic dispatch core: no platform/socket code, so it runs from
-   CTest with literal JSON lines. */
+/* Transport-agnostic core: registry, dispatch, deferred reply, lifecycle hooks and the discovery
+   commands. No platform/socket code, so it runs from CTest with literal JSON lines. */
+
+// #region registry
+/* Dev-only registry: fixed table of borrowed descriptors, linear scan. Not a frame-hot path. */
+typedef struct registry_slot {
+    const nt_devapi_command *cmd;
+    void *user_data;
+} registry_slot;
+
+static registry_slot s_slots[NT_DEVAPI_MAX_COMMANDS];
+static int s_count;
+static bool s_initialized;
+
+static const registry_slot *registry_find(const char *method) {
+    for (int i = 0; i < s_count; i++) {
+        if (strcmp(s_slots[i].cmd->method, method) == 0) {
+            return &s_slots[i];
+        }
+    }
+    return NULL;
+}
+
+static void register_one(const nt_devapi_command *cmd, void *user_data) {
+    NT_ASSERT(cmd->method != NULL && cmd->summary != NULL && cmd->params_shape != NULL && cmd->result_shape != NULL && cmd->fn != NULL);
+    NT_ASSERT(registry_find(cmd->method) == NULL); /* a duplicate method is a registration bug */
+    s_slots[s_count++] = (registry_slot){.cmd = cmd, .user_data = user_data};
+}
+
+void nt_devapi_register(const nt_devapi_command *cmds, size_t count, void *user_data) {
+    NT_ASSERT(s_initialized && cmds != NULL && count <= (size_t)(NT_DEVAPI_MAX_COMMANDS - s_count));
+    for (size_t i = 0; i < count; i++) {
+        register_one(&cmds[i], user_data);
+    }
+}
+
+bool nt_devapi_initialized(void) { return s_initialized; }
+// #endregion
+
+// #region lifecycle hooks
+/* Two ordered phases run every update: the transport poll (recv + enqueue) before the tick (the input
+   schedule release), so a line received this tick is scheduled before the tick reads it, whatever the
+   registration order. One slot each: native net is the only polling transport, input the only ticker.
+   Reset hooks fire on a client drop. */
+#ifndef NT_DEVAPI_MAX_RESET_HOOKS
+#define NT_DEVAPI_MAX_RESET_HOOKS 8
+#endif
+
+static nt_devapi_hook_fn s_transport_hook;
+static nt_devapi_hook_fn s_tick_hook;
+static nt_devapi_hook_fn s_reset_hooks[NT_DEVAPI_MAX_RESET_HOOKS];
+static int s_reset_count;
+
+/* Idempotent, so a transport stop->start re-sets the same poll. */
+void nt_devapi_set_transport_poll(nt_devapi_hook_fn fn) {
+    NT_ASSERT(fn != NULL && (s_transport_hook == NULL || s_transport_hook == fn));
+    s_transport_hook = fn;
+}
+
+void nt_devapi_set_tick(nt_devapi_hook_fn fn) {
+    NT_ASSERT(fn != NULL && s_tick_hook == NULL);
+    s_tick_hook = fn;
+}
+
+void nt_devapi_register_reset(nt_devapi_hook_fn fn) {
+    NT_ASSERT(fn != NULL && s_reset_count < NT_DEVAPI_MAX_RESET_HOOKS);
+    s_reset_hooks[s_reset_count++] = fn;
+}
+
+void nt_devapi_run_reset_hooks(void) {
+    for (int i = 0; i < s_reset_count; i++) {
+        s_reset_hooks[i]();
+    }
+}
+// #endregion
 
 /* The last response line handed out; valid until the next submit/poll_response frees it. */
 static char *s_resp;
 
 // #region deferred reply
-/* The one pending deferred reply. It owns the request_id dup, never a pointer into s_resp_buf; the
+/* The one pending deferred reply. It owns the request_id dup, never a pointer into s_resp; the
    envelope is serialized at yield time. */
 typedef struct deferred_slot {
     cJSON *id;                  /* owned request_id dup; NULL if absent. */
@@ -29,12 +102,10 @@ typedef struct deferred_slot {
 
 static deferred_slot s_pending;
 
-/* The command being dispatched; nt_devapi_defer reads it. One at a time: a handler never re-enters submit. */
-typedef struct dispatch_state {
-    bool batch;
-} dispatch_state;
-
-static dispatch_state *s_current;
+/* A command is being dispatched (nt_devapi_defer requires it), and whether it sits in a batch. One at a
+   time: a handler never re-enters submit. */
+static bool s_in_dispatch;
+static bool s_in_batch;
 
 void nt_devapi_deferred_reset(void) {
     cJSON_Delete(s_pending.id);
@@ -42,13 +113,6 @@ void nt_devapi_deferred_reset(void) {
     s_pending = (deferred_slot){0};
 }
 // #endregion
-
-/* Release the response buffer on shutdown so init->shutdown->init stays leak-free. */
-void nt_devapi_resp_reset(void) {
-    cJSON_free(s_resp);
-    s_resp = NULL;
-    nt_devapi_deferred_reset();
-}
 
 static const char *resp_serialize(cJSON *tree) {
     cJSON_free(s_resp);
@@ -124,6 +188,87 @@ bool nt_devapi_parse_f32_param(const cJSON *node, nt_devapi_error *err, const ch
     return true;
 }
 
+// #region discovery
+static void emit_command(cJSON *obj, const nt_devapi_command *cmd) {
+    devapi_add_string(obj, "method", cmd->method);
+    devapi_add_string(obj, "summary", cmd->summary);
+    devapi_add_string(obj, "params_shape", cmd->params_shape);
+    devapi_add_string(obj, "result_shape", cmd->result_shape);
+}
+
+/* result wraps a `commands` array — never a bare top-level array. */
+static bool cmd_endpoints(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
+    cJSON *commands = cJSON_AddArrayToObject(result, "commands");
+    NT_ASSERT(commands != NULL);
+    for (int i = 0; i < s_count; i++) {
+        cJSON *obj = cJSON_CreateObject();
+        NT_ASSERT(obj != NULL);
+        cJSON_bool added = cJSON_AddItemToArray(commands, obj);
+        NT_ASSERT(added);
+        (void)added;
+        emit_command(obj, s_slots[i].cmd);
+    }
+    return true;
+}
+
+/* Full contract for params.method. Missing/non-string -> bad_params; unknown -> unknown_method. */
+static bool cmd_command_describe(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
+    const cJSON *method_item = cJSON_GetObjectItemCaseSensitive(params, "method");
+    if (!cJSON_IsString(method_item) || method_item->valuestring == NULL) {
+        return nt_devapi_fail(err, (method_item == NULL) ? "missing params.method" : "non-string params.method");
+    }
+    const registry_slot *slot = registry_find(method_item->valuestring);
+    if (slot == NULL) {
+        return nt_devapi_fail_code(err, NT_DEVAPI_ERR_UNKNOWN_METHOD, "no command registered for this method");
+    }
+    emit_command(result, slot->cmd);
+    return true;
+}
+
+static const nt_devapi_command k_discovery_cmds[] = {
+    {
+        .method = "endpoints",
+        .summary = "list all registered commands",
+        .params_shape = "{}",
+        .result_shape = "{commands:[{method,summary,params_shape,result_shape}]}",
+        .fn = cmd_endpoints,
+    },
+    {
+        .method = "command.describe",
+        .summary = "full self-describing contract for one command",
+        .params_shape = "{method:string}",
+        .result_shape = "{method,summary,params_shape,result_shape}",
+        .fn = cmd_command_describe,
+    },
+};
+// #endregion
+
+nt_result_t nt_devapi_init(void) {
+    if (s_initialized) {
+        return NT_ERR_INIT_FAILED;
+    }
+    s_count = 0;
+    s_transport_hook = NULL; /* groups re-register their lifecycle hooks when a host registers them. */
+    s_tick_hook = NULL;
+    s_reset_count = 0;
+    s_initialized = true;
+    /* Discovery is the registry's own surface. Groups are the host's choice, registered after init:
+       nt_devapi_register_default() or specific nt_devapi_register_<group>() calls (nt_devapi_groups.h). */
+    nt_devapi_register(k_discovery_cmds, NT_COUNTOF(k_discovery_cmds), NULL);
+    return NT_OK;
+}
+
+void nt_devapi_shutdown(void) {
+    s_count = 0;
+    s_transport_hook = NULL; /* drop group hooks so init->shutdown->init re-registers cleanly. */
+    s_tick_hook = NULL;
+    s_reset_count = 0;
+    cJSON_free(s_resp);
+    s_resp = NULL;
+    nt_devapi_deferred_reset();
+    s_initialized = false;
+}
+
 /* Build an owned {ok:false,error} entry. code/message are copied by cJSON, not owned. */
 static cJSON *make_error_entry(const char *code, const char *message) {
     cJSON *entry = cJSON_CreateObject();
@@ -190,10 +335,10 @@ static const char *request_reject_reason(const cJSON *req) {
 }
 
 bool nt_devapi_defer(nt_devapi_gate gate, double amount, nt_devapi_handler_fn reply, nt_devapi_error *err) {
-    NT_ASSERT(s_current != NULL && reply != NULL);                                              /* only from a handler; a reply never defers. */
+    NT_ASSERT(s_in_dispatch && reply != NULL);                                                  /* only from a handler; a reply never defers. */
     NT_ASSERT(s_pending.reply == NULL);                                                         /* dispatch answers busy first; one defer per command. */
     NT_ASSERT(gate != NT_DEVAPI_GATE_FRAMES || (amount >= 0.0 && amount <= (double)INT32_MAX)); /* wrap-safe compare range */
-    if (s_current->batch) {
+    if (s_in_batch) {
         /* A batch is one ordered response array; a deferred reply cannot go in it. */
         return nt_devapi_fail(err, "deferred commands are not supported inside a batch");
     }
@@ -213,8 +358,8 @@ static cJSON *handler_entry(nt_devapi_handler_fn fn, const cJSON *params, void *
     NT_ASSERT(result_obj != NULL);
     nt_devapi_error err = {0};
     bool ok = fn(params, result_obj, &err, user_data);
-    bool deferred = s_current != NULL && s_pending.reply != NULL; /* a reply runs with no dispatch in flight. */
-    NT_ASSERT(ok || !deferred);                                   /* a handler that deferred returns true. */
+    bool deferred = s_in_dispatch && s_pending.reply != NULL; /* a reply runs with no dispatch in flight. */
+    NT_ASSERT(ok || !deferred);                               /* a handler that deferred returns true. */
     if (ok && !deferred) {
         return make_ok_entry(result_obj);
     }
@@ -247,7 +392,7 @@ static cJSON *dispatch_one(const cJSON *req, bool batch) {
         return entry;
     }
 
-    const nt_devapi_slot *slot = nt_devapi_registry_find(method_item->valuestring);
+    const registry_slot *slot = registry_find(method_item->valuestring);
     if (slot == NULL) {
         cJSON *entry = make_error_entry(NT_DEVAPI_ERR_UNKNOWN_METHOD, "no command registered for this method");
         echo_request_id(entry, req);
@@ -261,11 +406,11 @@ static cJSON *dispatch_one(const cJSON *req, bool batch) {
     }
 
     const cJSON *params = cJSON_GetObjectItemCaseSensitive(req, "params"); /* validated above */
-    NT_ASSERT(s_current == NULL);                                          /* a handler never re-enters submit. */
-    dispatch_state state = {.batch = batch};
-    s_current = &state;
+    NT_ASSERT(!s_in_dispatch);                                             /* a handler never re-enters submit. */
+    s_in_dispatch = true;
+    s_in_batch = batch;
     cJSON *entry = handler_entry(slot->cmd->fn, params, slot->user_data);
-    s_current = NULL;
+    s_in_dispatch = false;
     if (entry == NULL) {
         s_pending.id = dup_request_id(req);
     } else {
@@ -291,7 +436,7 @@ static cJSON *dispatch_batch(const cJSON *root) {
 }
 
 const char *nt_devapi_submit(const char *line) {
-    NT_ASSERT(nt_devapi_initialized()); /* dispatch before init is a caller bug (empty registry). */
+    NT_ASSERT(s_initialized); /* dispatch before init is a caller bug (empty registry). */
     /* Strict: a line protocol rejects trailing garbage ('{...} junk'). */
     cJSON *root = cJSON_ParseWithOpts(line, NULL, true);
     if (root == NULL) {
@@ -367,7 +512,7 @@ static void resolve_pending(void) {
 
 void nt_devapi_run_pre_swap_reply(void) {
     /* May fire after nt_devapi_shutdown (a host that swaps once more during teardown) — no-op then. */
-    if (!nt_devapi_initialized() || s_pending.reply == NULL || s_pending.gate != NT_DEVAPI_GATE_PRESENT || s_pending.entry != NULL) {
+    if (!s_initialized || s_pending.reply == NULL || s_pending.gate != NT_DEVAPI_GATE_PRESENT || s_pending.entry != NULL) {
         return;
     }
     /* The read must happen here, before swap: poll_response runs where the back buffer is undefined. */
@@ -375,7 +520,7 @@ void nt_devapi_run_pre_swap_reply(void) {
 }
 
 const char *nt_devapi_poll_response(void) {
-    NT_ASSERT(nt_devapi_initialized());
+    NT_ASSERT(s_initialized);
     cJSON *entry = s_pending.entry;
     if (entry == NULL) {
         return NULL;
@@ -391,10 +536,14 @@ const char *nt_devapi_poll_response(void) {
     return out;
 }
 
-/* Core per-tick entry: resolves the pending gate, runs the transport-poll phase (each transport's recv +
-   drain), then the tick phase (e.g. the input schedule release), naming neither transport. The phase order is what guarantees
-   a received line is scheduled before the tick reads it, so a host may register the two in any order. */
+/* Core per-tick entry: resolves the pending gate, then the transport poll (recv + drain), then the tick
+   (e.g. the input schedule release), naming neither transport nor group. */
 void nt_devapi_update(void) {
     resolve_pending();
-    nt_devapi_run_transport_and_tick();
+    if (s_transport_hook != NULL) {
+        s_transport_hook();
+    }
+    if (s_tick_hook != NULL) {
+        s_tick_hook();
+    }
 }

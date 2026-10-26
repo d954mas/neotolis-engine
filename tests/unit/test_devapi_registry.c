@@ -1,4 +1,4 @@
-/* Registry: table registration by reference and its registration-bug asserts. */
+/* Registry: table registration, its registration-bug asserts, and the lifecycle hook slots. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <stdio.h>
@@ -14,13 +14,16 @@
 
 static bool dummy_handler(const cJSON *params, cJSON *result_obj, nt_devapi_error *err, void *user_data) { return true; }
 
-/* init auto-registers the compiled-in commands, so the registry is non-empty after
-   setUp. Tests assert DELTAS from this baseline count. */
-static int s_base_cmds;
+static void *s_seen_user_data;
+
+static bool record_user_data(const cJSON *params, cJSON *result_obj, nt_devapi_error *err, void *user_data) {
+    s_seen_user_data = user_data;
+    return true;
+}
 
 void setUp(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
-    s_base_cmds = nt_devapi_registry_count();
+    s_seen_user_data = NULL;
 }
 
 void tearDown(void) { nt_devapi_shutdown(); }
@@ -33,20 +36,53 @@ static void test_init_double_init(void) {
 static int s_user_data;
 
 static const nt_devapi_command k_test_cmds[] = {
-    {.method = "test.liveness", .summary = "liveness check", .params_shape = "{}", .result_shape = "{pong:bool}", .fn = dummy_handler},
-    {.method = "test.other", .summary = "other", .params_shape = "{n:number}", .result_shape = "{}", .fn = dummy_handler},
+    {.method = "test.liveness", .summary = "liveness check", .params_shape = "{}", .result_shape = "{pong:bool}", .fn = record_user_data},
+    {.method = "test.other", .summary = "other", .params_shape = "{n:number}", .result_shape = "{}", .fn = record_user_data},
 };
 
-/* The table is stored by reference: each slot points at its descriptor and carries the table's user_data. */
-static void test_register_table_by_reference(void) {
+/* Every handler of a table receives that table's user_data. */
+static void test_table_user_data_reaches_each_handler(void) {
     nt_devapi_register(k_test_cmds, NT_COUNTOF(k_test_cmds), &s_user_data);
-    TEST_ASSERT_EQUAL_INT(s_base_cmds + 2, nt_devapi_registry_count());
-    for (int i = 0; i < 2; i++) {
-        const nt_devapi_slot *slot = nt_devapi_registry_find(k_test_cmds[i].method);
-        TEST_ASSERT_NOT_NULL(slot);
-        TEST_ASSERT_EQUAL_PTR(&k_test_cmds[i], slot->cmd);
-        TEST_ASSERT_EQUAL_PTR(&s_user_data, slot->user_data);
+    for (size_t i = 0; i < NT_COUNTOF(k_test_cmds); i++) {
+        char req[64];
+        (void)snprintf(req, sizeof req, "{\"method\":\"%s\"}", k_test_cmds[i].method);
+        s_seen_user_data = NULL;
+        TEST_ASSERT_NOT_NULL(strstr(nt_devapi_submit(req), "\"ok\":true"));
+        TEST_ASSERT_EQUAL_PTR(&s_user_data, s_seen_user_data);
     }
+}
+
+/* The registry fills to exactly NT_DEVAPI_MAX_COMMANDS (init registered the 2 discovery commands). */
+static char s_fill_names[NT_DEVAPI_MAX_COMMANDS][16];
+static nt_devapi_command s_fill_cmds[NT_DEVAPI_MAX_COMMANDS];
+
+static void test_registry_fills_to_the_cap(void) {
+    const size_t free_slots = NT_DEVAPI_MAX_COMMANDS - 2U;
+    for (size_t i = 0; i < free_slots; i++) {
+        (void)snprintf(s_fill_names[i], sizeof s_fill_names[i], "fill.%u", (unsigned)i);
+        s_fill_cmds[i] = (nt_devapi_command){.method = s_fill_names[i], .summary = "s", .params_shape = "{}", .result_shape = "{}", .fn = dummy_handler};
+    }
+    nt_devapi_register(s_fill_cmds, free_slots, NULL);
+    TEST_ASSERT_NOT_NULL(strstr(nt_devapi_submit("{\"method\":\"fill.0\"}"), "\"ok\":true"));
+}
+
+static int s_hook_order[4];
+static int s_hook_calls;
+static void poll_a(void) { s_hook_order[s_hook_calls++] = 1; }
+static void poll_b(void) {}
+static void tick_a(void) { s_hook_order[s_hook_calls++] = 2; }
+
+/* nt_devapi_update runs the transport poll before the tick, whatever the set order; re-setting the
+   same poll (a transport stop->start) is allowed. */
+static void test_update_runs_poll_before_tick(void) {
+    nt_devapi_set_tick(tick_a);
+    nt_devapi_set_transport_poll(poll_a);
+    nt_devapi_set_transport_poll(poll_a);
+    s_hook_calls = 0;
+    nt_devapi_update();
+    TEST_ASSERT_EQUAL_INT(2, s_hook_calls);
+    TEST_ASSERT_EQUAL_INT(1, s_hook_order[0]);
+    TEST_ASSERT_EQUAL_INT(2, s_hook_order[1]);
 }
 
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
@@ -81,6 +117,8 @@ static void test_dup_in_one_table_asserts(void) {
 static const nt_devapi_command k_incomplete_cmds[] = {
     {.method = NULL, .summary = "s", .params_shape = "{}", .result_shape = "{}", .fn = dummy_handler},
     {.method = "test.no_summary", .summary = NULL, .params_shape = "{}", .result_shape = "{}", .fn = dummy_handler},
+    {.method = "test.no_params", .summary = "s", .params_shape = NULL, .result_shape = "{}", .fn = dummy_handler},
+    {.method = "test.no_result", .summary = "s", .params_shape = "{}", .result_shape = NULL, .fn = dummy_handler},
     {.method = "test.no_fn", .summary = "s", .params_shape = "{}", .result_shape = "{}", .fn = NULL},
 };
 
@@ -89,6 +127,21 @@ static void test_missing_field_asserts(void) {
         NT_TEST_EXPECT_ASSERT(nt_devapi_register(&k_incomplete_cmds[i], 1, NULL));
         TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "cmd->fn != NULL"));
     }
+}
+
+/* A second transport poll or tick is a host bug: each slot has one owner. */
+static void test_second_hook_owner_asserts(void) {
+    nt_devapi_set_transport_poll(poll_a);
+    NT_TEST_EXPECT_ASSERT(nt_devapi_set_transport_poll(poll_b));
+    nt_devapi_set_tick(tick_a);
+    NT_TEST_EXPECT_ASSERT(nt_devapi_set_tick(tick_a));
+}
+
+/* One row past a full registry asserts before the row is read. */
+static void test_one_past_the_cap_asserts(void) {
+    test_registry_fills_to_the_cap();
+    NT_TEST_EXPECT_ASSERT(nt_devapi_register(k_test_cmds, 1, NULL));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "NT_DEVAPI_MAX_COMMANDS"));
 }
 
 /* The count is checked against the free slots before any row is read. */
@@ -125,13 +178,17 @@ static void test_submit_before_init_asserts(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_init_double_init);
-    RUN_TEST(test_register_table_by_reference);
+    RUN_TEST(test_table_user_data_reaches_each_handler);
+    RUN_TEST(test_registry_fills_to_the_cap);
+    RUN_TEST(test_update_runs_poll_before_tick);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_register_before_init_asserts);
     RUN_TEST(test_dup_method_asserts);
     RUN_TEST(test_dup_in_one_table_asserts);
     RUN_TEST(test_missing_field_asserts);
     RUN_TEST(test_overflow_asserts);
+    RUN_TEST(test_one_past_the_cap_asserts);
+    RUN_TEST(test_second_hook_owner_asserts);
     RUN_TEST(test_fail_without_err_asserts);
     RUN_TEST(test_submit_before_init_asserts);
 #endif

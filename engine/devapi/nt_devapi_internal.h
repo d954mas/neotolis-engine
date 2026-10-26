@@ -1,8 +1,7 @@
 #ifndef NT_DEVAPI_INTERNAL_H
 #define NT_DEVAPI_INTERNAL_H
 
-/* Internal registry layout, shared by the registry store and the
-   dispatch/discovery code. Not part of the public API. */
+/* Core surface shared with the group and transport TUs. Not part of the public API. */
 
 #include "devapi/nt_devapi.h"
 
@@ -24,19 +23,9 @@ void devapi_add_null(cJSON *obj, const char *key);
    with bad_params and the given message, else write the parsed value to *out. */
 bool nt_devapi_parse_u32_param_exact(const cJSON *node, uint32_t max, nt_devapi_error *err, const char *message, uint32_t *out);
 bool nt_devapi_parse_u16_param_exact(const cJSON *node, uint16_t max, nt_devapi_error *err, const char *message, uint16_t *out);
-/* A bot float: a number finite as a double AND after float-narrowing (a finite double past FLT_MAX
-   narrows to inf and would poison hit-tests / deltas). Fails with bad_params and message. */
+/* A bot float: a number whose float form is finite (a finite double past FLT_MAX would narrow to inf
+   and poison hit-tests / deltas). Fails with bad_params and message. */
 bool nt_devapi_parse_f32_param(const cJSON *node, nt_devapi_error *err, const char *message, float *out);
-
-/* One registered command: the caller's static descriptor and its table's user_data, both by reference. */
-typedef struct nt_devapi_slot {
-    const nt_devapi_command *cmd;
-    void *user_data;
-} nt_devapi_slot;
-
-/* Release the response buffer (statics are file-local to nt_devapi.c). Called from
-   shutdown so init->shutdown->init is leak-free. */
-void nt_devapi_resp_reset(void);
 
 // #region deferred reply
 /* One command can defer its reply: submit returns NULL and poll_response yields the reply once its gate
@@ -62,7 +51,7 @@ void nt_devapi_run_pre_swap_reply(void);
 void nt_devapi_deferred_reset(void);
 // #endregion
 
-/* True between init and shutdown — lets submit enforce init-before-use. */
+/* True between init and shutdown. */
 bool nt_devapi_initialized(void);
 
 // #region lifecycle hooks
@@ -72,13 +61,7 @@ bool nt_devapi_initialized(void);
    before the tick. Reset hooks are registered through the public nt_devapi_register_reset. */
 void nt_devapi_set_transport_poll(nt_devapi_hook_fn fn);
 void nt_devapi_set_tick(nt_devapi_hook_fn fn);
-void nt_devapi_run_transport_and_tick(void);
 void nt_devapi_run_reset_hooks(void);
 // #endregion
-
-/* Registry-table accessors (used by the dispatch core + discovery handlers). */
-int nt_devapi_registry_count(void);
-const nt_devapi_slot *nt_devapi_registry_slot(int index);
-const nt_devapi_slot *nt_devapi_registry_find(const char *method);
 
 #endif /* NT_DEVAPI_INTERNAL_H */

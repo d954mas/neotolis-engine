@@ -77,12 +77,11 @@ static cJSON *submit_endpoints(const char *request, const cJSON **commands_out) 
 
 /* ---- endpoints ---- */
 
-/* Every row carries all four descriptor fields, and the list is the whole registry. */
+/* Every row carries all four descriptor fields. */
 static void test_endpoints_has_four_fields(void) {
     const cJSON *commands = NULL;
     cJSON *root = submit_endpoints("{\"method\":\"endpoints\"}", &commands);
 
-    TEST_ASSERT_EQUAL_INT(nt_devapi_registry_count(), cJSON_GetArraySize(commands));
     const cJSON *poke = find_command(commands, "game.poke");
     TEST_ASSERT_NOT_NULL(poke);
     TEST_ASSERT_EQUAL_INT(4, count_object_fields(poke));

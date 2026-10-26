@@ -1,5 +1,6 @@
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "core/nt_assert.h"
@@ -374,21 +375,18 @@ static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err
     if (!resolve_target(params, "from", ctx, &fx, &fy, err) || !resolve_target(params, "to", ctx, &tx, &ty, err)) {
         return false;
     }
+    /* A 0-frame drag emits no MOVE, so the inject UP (which releases at the pointer's CURRENT position,
+       not at `to`) would land back at `from`; frames >= 1 gives the instant from->to->up drag. The
+       message names the real cap: the dispatcher copies it on return, so a static buffer is enough. */
+    static char bad_frames[64];
+    (void)snprintf(bad_frames, sizeof bad_frames, "ui.drag: frames must be an integer in [1, %u]", (unsigned)NT_DEVAPI_UI_DRAG_FRAMES_MAX);
     uint16_t frames = 8U; /* default: a short multi-frame drag. */
     const cJSON *frj = cJSON_GetObjectItemCaseSensitive(params, "frames");
-    if (frj != NULL) {
-        if (!nt_devapi_parse_u16_param_exact(frj, UINT16_MAX, err, "ui.drag: frames must be an integer in [1, 65535]", &frames)) {
-            return false;
-        }
+    if (frj != NULL && !nt_devapi_parse_u16_param_exact(frj, NT_DEVAPI_UI_DRAG_FRAMES_MAX, err, bad_frames, &frames)) {
+        return false;
     }
-    /* A 0-frame drag emits no MOVE, so the inject UP (which releases at the pointer's CURRENT position,
-       not at `to`) would land back at `from` — `to` silently ignored. frames>=1 gives the instant
-       from->to->up drag, so nothing is lost by requiring it. */
     if (frames == 0U) {
-        return nt_devapi_fail(err, "ui.drag: frames must be >= 1 (a 0-frame drag cannot reach `to`)");
-    }
-    if (frames > NT_DEVAPI_UI_DRAG_FRAMES_MAX) {
-        return nt_devapi_fail(err, "ui.drag: frames exceeds the per-command cap");
+        return nt_devapi_fail(err, bad_frames);
     }
     /* DOWN@0 + `frames` interpolated MOVEs (one per frame, t=1..frames) + UP@frames. */
     uint32_t total = (uint32_t)frames + 2U;
