@@ -119,7 +119,6 @@ option(NT_DEVAPI_ENABLED "Build the devapi command layer (engine/devapi)." OFF)
 option(NT_DEVAPI_GROUP_INPUT "Build the devapi input.* group (synthetic input injection)." ON)
 option(NT_DEVAPI_GROUP_CORE "Build the devapi core group (ping / engine.info / view)." ON)
 option(NT_DEVAPI_GROUP_TIME "Build the devapi time.*/render.*/frame.* group." ON)
-option(NT_DEVAPI_GROUP_DISCOVERY "Build the devapi discovery group (endpoints / command.describe)." ON)
 # The ui group reads nt_ui_probe_collect (gated by NT_UI_DEBUG_TOOLS) and delegates writes to the input
 # scheduler (NT_DEVAPI_GROUP_INPUT). Default OFF (opt-in, "use only what you need") so a plain
 # -DNT_DEVAPI_ENABLED build stays lean and does not pull in UI debug tools; enable it explicitly,
@@ -375,11 +374,10 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     if(NT_DEVAPI_ENABLED)
         add_subdirectory(examples/devapi_host)
         # capture_host needs the deferred-data capture group + a real GL context (the live capture UAT).
-        # It links only the devapi group libs it uses (capture + core + discovery), never the
-        # nt_ui/obs/entity chains. Native-only: it wires the TCP transport unconditionally. Gate on all
-        # three groups so a config that disables any of them skips the host cleanly instead of
-        # link-failing on a missing group lib.
-        if(NOT EMSCRIPTEN AND NT_DEVAPI_GROUP_CAPTURE AND NT_DEVAPI_GROUP_CORE AND NT_DEVAPI_GROUP_DISCOVERY)
+        # It links only the devapi group libs it uses (capture + core), never the nt_ui/obs/entity
+        # chains. Native-only: it wires the TCP transport unconditionally. Gate on both groups so a
+        # config that disables either skips the host cleanly instead of link-failing on a missing lib.
+        if(NOT EMSCRIPTEN AND NT_DEVAPI_GROUP_CAPTURE AND NT_DEVAPI_GROUP_CORE)
             add_subdirectory(examples/capture_host)
         endif()
     endif()

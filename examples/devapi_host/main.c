@@ -45,7 +45,6 @@
 /* game-layer command via the public nt_devapi_register path — zero engine edits. Result uses the
    public cJSON API (devapi_add_* is devapi-internal). */
 static bool cmd_game_echo(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     const cJSON *msg = cJSON_GetObjectItemCaseSensitive(params, "msg");
     if (!cJSON_IsString(msg)) {
         return nt_devapi_fail(err, "game.echo requires a string \"msg\"");
@@ -61,9 +60,6 @@ static bool cmd_game_echo(const cJSON *params, cJSON *result, nt_devapi_error *e
 static bool s_game_poked = false; /* the observable: each game.poke toggles it. */
 
 static bool cmd_game_poke(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)params;
-    (void)err;
-    (void)ud;
     s_game_poked = !s_game_poked;
     cJSON *added = cJSON_AddBoolToObject(result, "poked", s_game_poked);
     NT_ASSERT(added != NULL);
@@ -72,8 +68,8 @@ static bool cmd_game_poke(const cJSON *params, cJSON *result, nt_devapi_error *e
 }
 
 static const nt_devapi_command k_game_cmds[] = {
-    {"game.echo", "echo {msg} back", "{msg:string}", "{msg:string}", cmd_game_echo},
-    {"game.poke", "flip an observable host bool (game state), return {poked}", "{}", "{poked:bool}", cmd_game_poke},
+    {.method = "game.echo", .summary = "echo {msg} back", .params_shape = "{msg:string}", .result_shape = "{msg:string}", .fn = cmd_game_echo},
+    {.method = "game.poke", .summary = "flip an observable host bool (game state), return {poked}", .params_shape = "{}", .result_shape = "{poked:bool}", .fn = cmd_game_poke},
 };
 
 #ifndef __EMSCRIPTEN__
@@ -442,8 +438,8 @@ int main(void) {
     nt_transform_comp_shutdown();
     nt_entity_shutdown();
 #endif
-shutdown_devapi:
 #ifndef __EMSCRIPTEN__
+shutdown_devapi:
     nt_devapi_net_stop(); /* a no-op if the socket was never started. */
 #endif
     nt_devapi_shutdown();

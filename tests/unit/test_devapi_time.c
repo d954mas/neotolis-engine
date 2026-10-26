@@ -106,7 +106,7 @@ static cJSON *parse_ok(const char *resp) {
 }
 
 static bool endpoints_has_method_with_shapes(const char *method) {
-    const char *resp = nt_devapi_submit("{\"method\":\"endpoints\",\"params\":{\"detail\":true}}");
+    const char *resp = nt_devapi_submit("{\"method\":\"endpoints\"}");
     cJSON *root = parse_ok(resp);
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
     cJSON *commands = cJSON_GetObjectItemCaseSensitive(result, "commands");

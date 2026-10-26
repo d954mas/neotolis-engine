@@ -6,7 +6,7 @@
    Native-only (compiled out of the Emscripten/web build); dev-only, gated by
    NT_DEVAPI_ENABLED with the rest of the layer. */
 
-/* Must come from the nt_devapi target compile-defines; consumers without the link see stubs that mismatch ABI. */
+/* Must come from the nt_devapi target compile-defines: the header is meaningless without the link. */
 #ifndef NT_DEVAPI_ENABLED
 #error "NT_DEVAPI_ENABLED not defined — link against nt_devapi via target_link_libraries(<target> PUBLIC|PRIVATE nt_devapi)"
 #endif

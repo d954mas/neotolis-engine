@@ -542,6 +542,9 @@ static void test_drag_frames_negative_bad_params(void) { assert_bad_params(nt_de
 
 /* frames==0 -> bad_params: a 0-frame drag emits no MOVE, so the inject up would release at `from`
    (its current position) and silently drop `to`. frames>=1 is required to reach `to`. */
+/* Both ends are finite floats, but to - from overflows: every interpolated MOVE would be inf. */
+static void test_drag_infinite_distance_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"ui.drag\",\"params\":{\"from\":{\"x\":-3e38,\"y\":0},\"to\":{\"x\":3e38,\"y\":0}}}")); }
+
 static void test_drag_frames_zero_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"ui.drag\",\"params\":{\"from\":\"widget\",\"to\":\"widget\",\"frames\":0}}")); }
 
 /* frames over the per-command DoS cap -> bad_params, no partial inject. */
@@ -612,6 +615,7 @@ int main(void) {
     RUN_TEST(test_drag_frames_fractional_bad_params);
     RUN_TEST(test_drag_frames_negative_bad_params);
     RUN_TEST(test_drag_frames_zero_bad_params);
+    RUN_TEST(test_drag_infinite_distance_bad_params);
     RUN_TEST(test_drag_frames_over_cap_bad_params);
     RUN_TEST(test_drag_at_cap_reserves_whole);
     RUN_TEST(test_drag_over_reserve_no_partial_inject);

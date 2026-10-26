@@ -4,11 +4,12 @@
 # full host links nt_devapi_default (every compiled-in group + nt_devapi_register_default()). Each
 # NT_DEVAPI_GROUP_<X> option gates building that group's library.
 
-# nt_devapi -- the framework ONLY: dispatch + self-describing registry + lifecycle-hook registry + the
-# host-facing registration API (nt_devapi_groups.h). It references NO group, so any set of group libs
-# can link it without conflict.
+# nt_devapi -- the framework: dispatch + self-describing registry + its discovery commands (endpoints /
+# command.describe, registered by nt_devapi_register_discovery) + lifecycle hooks + the host-facing
+# registration API (nt_devapi_groups.h). It references NO group, so any set of group libs can link it.
 nt_add_module(nt_devapi LOG_DOMAIN "devapi"
     nt_devapi.c
+    nt_devapi_discovery.c
     nt_devapi_registry.c
     nt_devapi.h
     nt_devapi_groups.h
@@ -40,13 +41,6 @@ if(NT_DEVAPI_GROUP_TIME)
     nt_add_module(nt_devapi_time LOG_DOMAIN "devapi" nt_devapi_time.c)
     target_link_libraries(nt_devapi_time PUBLIC nt_devapi PRIVATE nt_gfx_interface)
     target_compile_definitions(nt_devapi_time PUBLIC NT_DEVAPI_GROUP_TIME=1)
-endif()
-
-# Discovery group: endpoints / command.describe. Reads only the registry (no engine dep).
-if(NT_DEVAPI_GROUP_DISCOVERY)
-    nt_add_module(nt_devapi_discovery LOG_DOMAIN "devapi" nt_devapi_discovery.c)
-    target_link_libraries(nt_devapi_discovery PUBLIC nt_devapi)
-    target_compile_definitions(nt_devapi_discovery PUBLIC NT_DEVAPI_GROUP_DISCOVERY=1)
 endif()
 
 # The ui group delegates inject scheduling to the input group's single scheduler (one scheduler, one

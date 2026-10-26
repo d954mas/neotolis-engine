@@ -260,12 +260,9 @@ bool nt_devapi_net_start(uint16_t port) {
 #endif
         return false; /* port taken / refused — API-contract return, not an assert. */
     }
-    /* Register recv+deferred-drain in the transport-poll phase, which the core runs before the tick
-       phase — so a line received this tick is scheduled before the input tick reads it, regardless of
-       registration order. Register at most once: the table is append-only, so a restart must not dup. */
-    if (!nt_devapi_transport_is_registered(net_poll)) {
-        nt_devapi_register_transport_poll(net_poll);
-    }
+    /* recv + deferred drain run in the transport-poll phase, before the input tick, so a line received
+       this tick is scheduled before the tick reads it. */
+    nt_devapi_set_transport_poll(net_poll);
     return true;
 }
 

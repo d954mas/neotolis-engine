@@ -95,7 +95,7 @@ static bool cmd_time_set_scale(const cJSON *params, cJSON *result, nt_devapi_err
         return nt_devapi_fail(err, bad_scale);
     }
     nt_app_set_scale(fscale);
-    devapi_add_number(result, "scale", s->valuedouble);
+    devapi_add_number(result, "scale", (double)fscale);
     return true;
 }
 

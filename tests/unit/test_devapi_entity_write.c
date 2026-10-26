@@ -137,6 +137,8 @@ static void test_non_finite_bad_params(void) {
     nt_entity_t e = make_transform_entity();
     /* 1e400 overflows to inf on parse -> rejected. */
     assert_bad_params(set_submit(e.id, "\"component\":\"transform\",\"field\":\"position\",\"value\":[1e400,0,0]"));
+    /* 1e300 parses finite but has no float form. */
+    assert_bad_params(set_submit(e.id, "\"component\":\"transform\",\"field\":\"position\",\"value\":[1e300,0,0]"));
 }
 
 static void test_degenerate_quaternion_bad_params(void) {

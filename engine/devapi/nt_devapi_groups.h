@@ -11,7 +11,8 @@
      links only that group's providers (e.g. a capture-only host pulls nt_gfx + nt_fpng, not nt_ui).
 
    Each registrar's symbol exists only when its group is compiled in; calling one for an absent group
-   is an undefined-reference link error (the intended fail-early guard). */
+   is an undefined-reference link error (the intended fail-early guard). Discovery is part of the
+   framework, so nt_devapi_register_discovery() always links. */
 
 void nt_devapi_register_default(void);
 

@@ -17,8 +17,6 @@
 static bool s_game_poked;
 
 static bool cmd_game_poke(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)params;
-    (void)err;
     bool *flag = (bool *)ud;
     *flag = true;
     cJSON_AddBoolToObject(result, "poked", true);
@@ -26,7 +24,7 @@ static bool cmd_game_poke(const cJSON *params, cJSON *result, nt_devapi_error *e
 }
 
 static const nt_devapi_command k_game_cmds[] = {
-    {"game.poke", "test game-layer command (flips a flag)", "{}", "{poked:bool}", cmd_game_poke},
+    {.method = "game.poke", .summary = "test game-layer command (flips a flag)", .params_shape = "{}", .result_shape = "{poked:bool}", .fn = cmd_game_poke},
 };
 
 void setUp(void) {
@@ -36,7 +34,7 @@ void setUp(void) {
     nt_devapi_register_default();
     /* Register the game command through the public API only — the test touches
        no engine devapi source to add it (zero engine edits). */
-    nt_devapi_register(k_game_cmds, 1, &s_game_poked);
+    nt_devapi_register(k_game_cmds, NT_COUNTOF(k_game_cmds), &s_game_poked);
 }
 
 void tearDown(void) { nt_devapi_shutdown(); }
@@ -79,38 +77,19 @@ static cJSON *submit_endpoints(const char *request, const cJSON **commands_out) 
 
 /* ---- endpoints ---- */
 
-static void test_endpoints_cheap_has_two_fields(void) {
+/* Every row carries all four descriptor fields, and the list is the whole registry. */
+static void test_endpoints_has_four_fields(void) {
     const cJSON *commands = NULL;
     cJSON *root = submit_endpoints("{\"method\":\"endpoints\"}", &commands);
 
-    /* cheap form: exactly method+summary. */
-    const cJSON *ping = find_command(commands, "ping");
-    TEST_ASSERT_NOT_NULL(ping);
-    TEST_ASSERT_EQUAL_INT(2, count_object_fields(ping));
-    TEST_ASSERT_TRUE(field_is_string(ping, "method"));
-    TEST_ASSERT_TRUE(field_is_string(ping, "summary"));
-    cJSON_Delete(root);
-}
-
-static void test_endpoints_detail_has_four_fields(void) {
-    const cJSON *commands = NULL;
-    cJSON *root = submit_endpoints("{\"method\":\"endpoints\",\"params\":{\"detail\":true}}", &commands);
-
+    TEST_ASSERT_EQUAL_INT(nt_devapi_registry_count(), cJSON_GetArraySize(commands));
     const cJSON *ping = find_command(commands, "ping");
     TEST_ASSERT_NOT_NULL(ping);
     TEST_ASSERT_EQUAL_INT(4, count_object_fields(ping));
+    TEST_ASSERT_TRUE(field_is_string(ping, "method"));
+    TEST_ASSERT_TRUE(field_is_string(ping, "summary"));
     TEST_ASSERT_TRUE(field_is_string(ping, "params_shape"));
     TEST_ASSERT_TRUE(field_is_string(ping, "result_shape"));
-    cJSON_Delete(root);
-}
-
-/* detail is optional, but a present non-bool detail is rejected (not silently ignored). */
-static void test_endpoints_non_bool_detail_bad_params(void) {
-    const char *resp = nt_devapi_submit("{\"method\":\"endpoints\",\"params\":{\"detail\":\"yes\"}}");
-    cJSON *root = cJSON_Parse(resp);
-    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(root, "ok")));
-    cJSON *error = cJSON_GetObjectItemCaseSensitive(root, "error");
-    TEST_ASSERT_EQUAL_STRING("bad_params", cJSON_GetObjectItemCaseSensitive(error, "code")->valuestring);
     cJSON_Delete(root);
 }
 
@@ -253,9 +232,7 @@ static void test_absent_command_not_in_endpoints(void) {
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_endpoints_cheap_has_two_fields);
-    RUN_TEST(test_endpoints_detail_has_four_fields);
-    RUN_TEST(test_endpoints_non_bool_detail_bad_params);
+    RUN_TEST(test_endpoints_has_four_fields);
     RUN_TEST(test_command_describe_ping);
     RUN_TEST(test_command_describe_missing_method_bad_params);
     RUN_TEST(test_command_describe_unknown_method);

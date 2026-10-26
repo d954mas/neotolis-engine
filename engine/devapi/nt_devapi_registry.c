@@ -11,29 +11,28 @@ static int s_count;
 static bool s_initialized;
 
 // #region lifecycle hooks
-/* Two ordered phases run every update: transport-poll hooks (recv + enqueue) before tick hooks (the
-   input schedule release), so a line received this tick is scheduled before the tick phase reads it.
-   The ordering is the PHASE, not registration order — registrars may run in any order. Reset hooks
-   fire on a client drop. Fixed tables; each hook registers once per init under its group's gate. */
+/* Two ordered phases run every update: the transport poll (recv + enqueue) before the tick (the input
+   schedule release), so a line received this tick is scheduled before the tick reads it, whatever the
+   registration order. One slot each: native net is the only polling transport, input the only ticker.
+   Reset hooks fire on a client drop. */
 #ifndef NT_DEVAPI_MAX_HOOKS
 #define NT_DEVAPI_MAX_HOOKS 8
 #endif
 
-static nt_devapi_hook_fn s_transport_hooks[NT_DEVAPI_MAX_HOOKS];
-static int s_transport_count;
-static nt_devapi_hook_fn s_tick_hooks[NT_DEVAPI_MAX_HOOKS];
-static int s_tick_count;
+static nt_devapi_hook_fn s_transport_hook;
+static nt_devapi_hook_fn s_tick_hook;
 static nt_devapi_hook_fn s_reset_hooks[NT_DEVAPI_MAX_HOOKS];
 static int s_reset_count;
 
-void nt_devapi_register_transport_poll(nt_devapi_hook_fn fn) {
-    NT_ASSERT(fn != NULL && s_transport_count < NT_DEVAPI_MAX_HOOKS);
-    s_transport_hooks[s_transport_count++] = fn;
+/* Idempotent, so a transport stop->start re-sets the same poll. */
+void nt_devapi_set_transport_poll(nt_devapi_hook_fn fn) {
+    NT_ASSERT(fn != NULL && (s_transport_hook == NULL || s_transport_hook == fn));
+    s_transport_hook = fn;
 }
 
-void nt_devapi_register_tick(nt_devapi_hook_fn fn) {
-    NT_ASSERT(fn != NULL && s_tick_count < NT_DEVAPI_MAX_HOOKS);
-    s_tick_hooks[s_tick_count++] = fn;
+void nt_devapi_set_tick(nt_devapi_hook_fn fn) {
+    NT_ASSERT(fn != NULL && s_tick_hook == NULL);
+    s_tick_hook = fn;
 }
 
 void nt_devapi_register_reset(nt_devapi_hook_fn fn) {
@@ -41,15 +40,12 @@ void nt_devapi_register_reset(nt_devapi_hook_fn fn) {
     s_reset_hooks[s_reset_count++] = fn;
 }
 
-void nt_devapi_run_transport_hooks(void) {
-    for (int i = 0; i < s_transport_count; i++) {
-        s_transport_hooks[i]();
+void nt_devapi_run_transport_and_tick(void) {
+    if (s_transport_hook != NULL) {
+        s_transport_hook();
     }
-}
-
-void nt_devapi_run_tick_hooks(void) {
-    for (int i = 0; i < s_tick_count; i++) {
-        s_tick_hooks[i]();
+    if (s_tick_hook != NULL) {
+        s_tick_hook();
     }
 }
 
@@ -59,14 +55,6 @@ void nt_devapi_run_reset_hooks(void) {
     }
 }
 
-bool nt_devapi_transport_is_registered(nt_devapi_hook_fn fn) {
-    for (int i = 0; i < s_transport_count; i++) {
-        if (s_transport_hooks[i] == fn) {
-            return true;
-        }
-    }
-    return false;
-}
 // #endregion
 
 nt_result_t nt_devapi_init(void) {
@@ -74,8 +62,8 @@ nt_result_t nt_devapi_init(void) {
         return NT_ERR_INIT_FAILED;
     }
     s_count = 0;
-    s_transport_count = 0; /* groups re-register their lifecycle hooks when a host registers them. */
-    s_tick_count = 0;
+    s_transport_hook = NULL; /* groups re-register their lifecycle hooks when a host registers them. */
+    s_tick_hook = NULL;
     s_reset_count = 0;
     s_initialized = true;
 
@@ -87,21 +75,23 @@ nt_result_t nt_devapi_init(void) {
 
 void nt_devapi_shutdown(void) {
     s_count = 0;
-    s_transport_count = 0; /* drop group hooks so init->shutdown->init re-registers cleanly. */
-    s_tick_count = 0;
+    s_transport_hook = NULL; /* drop group hooks so init->shutdown->init re-registers cleanly. */
+    s_tick_hook = NULL;
     s_reset_count = 0;
     nt_devapi_resp_reset(); /* symmetric teardown of the dispatch-core response buffer. */
     s_initialized = false;
 }
 
-static bool command_is_complete(const nt_devapi_command *cmd) { return cmd->method != NULL && cmd->summary != NULL && cmd->params_shape != NULL && cmd->result_shape != NULL && cmd->fn != NULL; }
+static void register_one(const nt_devapi_command *cmd, void *user_data) {
+    NT_ASSERT(cmd->method != NULL && cmd->summary != NULL && cmd->params_shape != NULL && cmd->result_shape != NULL && cmd->fn != NULL);
+    NT_ASSERT(nt_devapi_registry_find(cmd->method) == NULL); /* a duplicate method is a registration bug */
+    s_slots[s_count++] = (nt_devapi_slot){.cmd = cmd, .user_data = user_data};
+}
 
 void nt_devapi_register(const nt_devapi_command *cmds, size_t count, void *user_data) {
     NT_ASSERT(s_initialized && cmds != NULL && count <= (size_t)(NT_DEVAPI_MAX_COMMANDS - s_count));
     for (size_t i = 0; i < count; i++) {
-        const nt_devapi_command *cmd = &cmds[i];
-        NT_ASSERT(command_is_complete(cmd) && nt_devapi_registry_find(cmd->method) == NULL); /* a duplicate method is a registration bug */
-        s_slots[s_count++] = (nt_devapi_slot){.cmd = cmd, .user_data = user_data};
+        register_one(&cmds[i], user_data);
     }
 }
 

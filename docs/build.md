@@ -373,7 +373,7 @@ The `devapi-chromium` Playwright project (`devapi.spec.ts`, `record.spec.ts`) se
 shared wasm-debug cache):
 
 ```bash
-emcmake cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
+emcmake cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
 cmake --build --preset wasm-debug --target devapi_host
 ```
 
@@ -382,7 +382,7 @@ the `window.__devapi` bridge and the `NtRecorder` calls. `NT_DEVAPI_DIR` points 
 `NT_LOG_MIN_LEVEL=0` keeps the recorder INFO line that `record.spec.ts` reads:
 
 ```bash
-emcmake cmake --preset wasm-release -B build/_cmake/wasm-release-devapi -DNT_LOG_MIN_LEVEL=0 -DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
+emcmake cmake --preset wasm-release -B build/_cmake/wasm-release-devapi -DNT_LOG_MIN_LEVEL=0 -DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
 cmake --build build/_cmake/wasm-release-devapi --target devapi_host
 cd tests/browser && NT_DEVAPI_DIR=../../build/examples/devapi_host/wasm-release-devapi npx playwright test devapi.spec.ts record.spec.ts
 ```
@@ -403,7 +403,7 @@ pattern) and
 `check_recording.py` on each:
 
 ```bash
-cmake --preset native-debug -B build/_cmake/native-record -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
+cmake --preset native-debug -B build/_cmake/native-record -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
 cmake --build build/_cmake/native-record --target devapi_host
 build/examples/devapi_host/native-record/devapi_host.exe &
 python tools/devapi/scenarios/record_demo.py --out build

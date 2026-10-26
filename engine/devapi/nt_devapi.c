@@ -1,3 +1,4 @@
+#include <float.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -10,29 +11,8 @@
 /* Transport-agnostic dispatch core: no platform/socket code, so it runs from
    CTest with literal JSON lines. */
 
-/* Reusable response buffer. The pointer nt_devapi_submit returns is valid only
-   until the next submit (a grow may move it). Dev-only: unbounded growth accepted. */
-static char *s_resp_buf;
-static size_t s_resp_cap;
-
-/* Grow to hold >= need bytes (geometric, min 256). */
-static void resp_reserve(size_t need) {
-    if (need <= s_resp_cap) {
-        return;
-    }
-    size_t cap = s_resp_cap ? s_resp_cap : 256U;
-    while (cap < need) {
-        if (cap > SIZE_MAX / 2U) {
-            cap = need; /* geometric growth would wrap size_t — allocate exactly. */
-            break;
-        }
-        cap *= 2U;
-    }
-    char *grown = (char *)realloc(s_resp_buf, cap);
-    NT_ASSERT(grown != NULL);
-    s_resp_buf = grown;
-    s_resp_cap = cap;
-}
+/* The last response line handed out; valid until the next submit/poll_response frees it. */
+static char *s_resp;
 
 // #region deferred reply
 /* The one pending deferred reply. It owns the request_id dup, never a pointer into s_resp_buf; the
@@ -65,21 +45,16 @@ void nt_devapi_deferred_reset(void) {
 
 /* Release the response buffer on shutdown so init->shutdown->init stays leak-free. */
 void nt_devapi_resp_reset(void) {
-    free(s_resp_buf);
-    s_resp_buf = NULL;
-    s_resp_cap = 0U;
+    cJSON_free(s_resp);
+    s_resp = NULL;
     nt_devapi_deferred_reset();
 }
 
-/* Serialize `tree` into the growing buffer and return it (valid until the next submit). */
 static const char *resp_serialize(cJSON *tree) {
-    char *unformatted = cJSON_PrintUnformatted(tree);
-    NT_ASSERT(unformatted != NULL);
-    size_t len = strlen(unformatted) + 1U;
-    resp_reserve(len);
-    memcpy(s_resp_buf, unformatted, len);
-    cJSON_free(unformatted);
-    return s_resp_buf;
+    cJSON_free(s_resp);
+    s_resp = cJSON_PrintUnformatted(tree);
+    NT_ASSERT(s_resp != NULL);
+    return s_resp;
 }
 
 /* cJSON_Add{String,Number,Bool,Null}ToObject wrappers that assert success (OOM traps rather
@@ -141,7 +116,8 @@ bool nt_devapi_parse_u16_param_exact(const cJSON *node, uint16_t max, nt_devapi_
 }
 
 bool nt_devapi_parse_f32_param(const cJSON *node, nt_devapi_error *err, const char *message, float *out) {
-    if (!cJSON_IsNumber(node) || !isfinite(node->valuedouble) || !isfinite((float)node->valuedouble)) {
+    /* On the double: an out-of-range narrowing is undefined in C17. !(<=) also rejects NaN. */
+    if (!cJSON_IsNumber(node) || !(fabs(node->valuedouble) <= (double)FLT_MAX)) {
         return nt_devapi_fail(err, message);
     }
     *out = (float)node->valuedouble;
@@ -420,6 +396,5 @@ const char *nt_devapi_poll_response(void) {
    a received line is scheduled before the tick reads it, so a host may register the two in any order. */
 void nt_devapi_update(void) {
     resolve_pending();
-    nt_devapi_run_transport_hooks();
-    nt_devapi_run_tick_hooks();
+    nt_devapi_run_transport_and_tick();
 }

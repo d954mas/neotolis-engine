@@ -15,16 +15,15 @@
 
 #define NT_DEVAPI_ERR_BAD_PARAMS "bad_params"
 
-/* Error returned by a handler: a stable machine code token + a human message.
-   Both point at static string literals owned by the handler/engine. */
+/* Error returned by a handler: a stable machine code token + a human message. */
 typedef struct nt_devapi_error {
     const char *code;
     const char *message;
 } nt_devapi_error;
 
 /* Fill err and return false, so a failing handler is one statement: return nt_devapi_fail(err, "...");
-   nt_devapi_fail answers bad_params; nt_devapi_fail_code names another code. Both strings must outlive
-   the response (static literals or a static buffer). */
+   nt_devapi_fail answers bad_params; nt_devapi_fail_code names another code. The dispatcher copies both
+   strings into the response as soon as the handler returns. */
 static inline bool nt_devapi_fail_code(nt_devapi_error *err, const char *code, const char *message) {
     err->code = code;
     err->message = message;
@@ -62,7 +61,8 @@ void nt_devapi_shutdown(void);
 
 /* Register a table of commands; every handler gets user_data (may be NULL). The table, its strings and
    user_data are stored by reference until nt_devapi_shutdown(): keep them static (a table on the stack
-   dangles once its function returns). Every field is required; a method already registered asserts. */
+   dangles once its function returns); the engine never frees them. Every field is required; a method
+   already registered asserts. */
 void nt_devapi_register(const nt_devapi_command *cmds, size_t count, void *user_data);
 
 /* Submit one JSON request line → the JSON response line. The returned pointer is valid

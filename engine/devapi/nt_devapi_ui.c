@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -289,6 +290,9 @@ static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t
         const float layout[2] = {in_x, lh - in_y};
         float device[2];
         nt_ui_layout_to_screen(ctx, layout, device);
+        if (!isfinite(device[0]) || !isfinite(device[1])) {
+            return nt_devapi_fail(err, "ui: target maps outside the finite screen range");
+        }
         *out_x = device[0];
         *out_y = device[1];
         return true;
@@ -386,6 +390,9 @@ static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err
     if (frames > NT_DEVAPI_UI_DRAG_FRAMES_MAX) {
         return nt_devapi_fail(err, "ui.drag: frames exceeds the per-command cap");
     }
+    if (!isfinite(tx - fx) || !isfinite(ty - fy)) {
+        return nt_devapi_fail(err, "ui.drag: from -> to distance is not a finite float");
+    }
     /* DOWN@0 + `frames` interpolated MOVEs (one per frame, t=1..frames) + UP@frames. */
     uint32_t total = (uint32_t)frames + 2U;
     if (!nt_devapi_input_sched_can_reserve(total)) {
@@ -393,11 +400,11 @@ static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err
     }
     const uint32_t id = NT_INPUT_INJECT_POINTER_ID_BASE;
     nt_devapi_input_sched_pointer(NT_INJECT_POINTER_DOWN, id, fx, fy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, 0);
-    for (uint16_t i = 1; i <= frames; i++) {
-        float t = (float)i / (float)frames; /* frames >= 1 enforced above, so the divisor is never 0. */
+    for (uint32_t i = 1; i <= frames; i++) { /* uint32: a uint16 counter never exceeds frames=65535 */
+        float t = (float)i / (float)frames;  /* frames >= 1 enforced above, so the divisor is never 0. */
         float mx = fx + ((tx - fx) * t);
         float my = fy + ((ty - fy) * t);
-        nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, id, mx, my, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, i);
+        nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, id, mx, my, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, (uint16_t)i);
     }
     nt_devapi_input_sched_pointer(NT_INJECT_POINTER_UP, id, tx, ty, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, frames);
     devapi_add_number(result, "queued", (double)total);

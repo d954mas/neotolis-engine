@@ -4,14 +4,11 @@
 /* Discovery group: endpoints / command.describe — the self-describing
    surface a client reads without source. */
 
-/* Emit one command: detail=false -> {method,summary}; true -> all 4 fields. */
-static void emit_command(cJSON *obj, const nt_devapi_command *cmd, bool detail) {
+static void emit_command(cJSON *obj, const nt_devapi_command *cmd) {
     devapi_add_string(obj, "method", cmd->method);
     devapi_add_string(obj, "summary", cmd->summary);
-    if (detail) {
-        devapi_add_string(obj, "params_shape", cmd->params_shape);
-        devapi_add_string(obj, "result_shape", cmd->result_shape);
-    }
+    devapi_add_string(obj, "params_shape", cmd->params_shape);
+    devapi_add_string(obj, "result_shape", cmd->result_shape);
 }
 
 /* Append an empty object to arr and return it (OOM traps, never silently dropped). */
@@ -26,21 +23,11 @@ static cJSON *add_object(cJSON *arr) {
 
 /* result wraps a `commands` array — never a bare top-level array. */
 static bool cmd_endpoints(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    /* detail is optional; if present it must be a bool (explicit over implicit). */
-    bool detail = false;
-    const cJSON *detail_item = cJSON_GetObjectItemCaseSensitive(params, "detail");
-    if (detail_item != NULL) {
-        if (!cJSON_IsBool(detail_item)) {
-            return nt_devapi_fail(err, "params.detail must be a bool");
-        }
-        detail = cJSON_IsTrue(detail_item);
-    }
-
     cJSON *commands = cJSON_AddArrayToObject(result, "commands");
     NT_ASSERT(commands != NULL);
     int n = nt_devapi_registry_count();
     for (int i = 0; i < n; i++) {
-        emit_command(add_object(commands), nt_devapi_registry_slot(i)->cmd, detail);
+        emit_command(add_object(commands), nt_devapi_registry_slot(i)->cmd);
     }
     return true;
 }
@@ -56,16 +43,16 @@ static bool cmd_command_describe(const cJSON *params, cJSON *result, nt_devapi_e
     if (slot == NULL) {
         return nt_devapi_fail_code(err, NT_DEVAPI_ERR_UNKNOWN_METHOD, "no command registered for this method");
     }
-    emit_command(result, slot->cmd, true);
+    emit_command(result, slot->cmd);
     return true;
 }
 
 static const nt_devapi_command k_discovery_cmds[] = {
     {
         .method = "endpoints",
-        .summary = "list all registered commands (cheap; detail=true for full descriptors)",
-        .params_shape = "{detail?:bool}",
-        .result_shape = "{commands:[{method,summary}]|[{method,summary,params_shape,result_shape}]}",
+        .summary = "list all registered commands",
+        .params_shape = "{}",
+        .result_shape = "{commands:[{method,summary,params_shape,result_shape}]}",
         .fn = cmd_endpoints,
     },
     {
