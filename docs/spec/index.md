@@ -50,7 +50,7 @@ The chapters below define engine behavior.
 | [data/component-storage.md](data/component-storage.md) | Sparse/dense component storage and typed component APIs |
 | [data/transform.md](data/transform.md) | Transform component, hierarchy inheritance, dirty propagation |
 | [render/render-components.md](render/render-components.md) | Drawable, mesh, material, sprite, text, and shadow components |
-| [render/architecture.md](render/architecture.md) | Engine/game render split, backend API shape, shape strokes, renderer classes |
+| [render/architecture.md](render/architecture.md) | Engine/game render split, backend API shape, frame observation (counters, capture, notes and markers), shape strokes, renderer classes |
 | [render/items-sorting-batching.md](render/items-sorting-batching.md) | Render tags, 16-byte render items, sorting policy, batching/instancing |
 | [render/shader.md](render/shader.md) | ShaderAsset interface and the four levels of shader data |
 | [render/material.md](render/material.md) | Material model, vec4 params, render state ownership, draw-time texture resolve |
@@ -99,6 +99,7 @@ lifetime, and naming vocabulary.
 | `engine/skeletal` | [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) (`nt_skeletal.h` pose ABI/FK/rig identity, skin binding + palette, clip sampling, `nt_skeletal_clip_view`) |
 | `engine/skeletal_assets` | [skeletal/skeletal-animation.md, Resources and lifetimes](skeletal/skeletal-animation.md#resources-and-lifetimes) (NSKL/NSKN/NANM activators and views), [assets/resource.md](assets/resource.md) (activator contract) |
 | Frame storage (`nt_gfx_frame_alloc`, `engine/graphics`) | [render/architecture.md](render/architecture.md#frame-storage) (streams, alignment, capacity, upload, restore) |
+| Capture notes and markers (`NT_GFX_NOTE`, `NT_GFX_MARKER_PUSH`) | [render/architecture.md](render/architecture.md#notes-and-markers) |
 | `engine/skeletal_gpu`, `engine/skin_comp` | [skeletal/skeletal-animation.md, GPU preparation](skeletal/skeletal-animation.md#gpu-preparation) (frame staging/upload, `nt_deformation_binding_t`, skin component) |
 | *(`engine/skeletal_bank` — planned, epic #472)* | [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) |
 | `engine/fs`, `engine/http` | [assets/async-loading.md](assets/async-loading.md) (pack I/O), [core/module-layout.md](core/module-layout.md) (swappable) |

@@ -1263,8 +1263,8 @@ void test_notes_survive_merges_and_an_unloaded_font_notes_its_skip(void) {
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, nt_test_next_draw_result(first));
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_CACHE, nt_test_next_draw_result(second));
     TEST_ASSERT_EQUAL_UINT32(empty.id, nt_test_note_u32(third, "font"));
-    TEST_ASSERT_EQUAL_STRING("", nt_test_note_str(first, "skip"));
-    TEST_ASSERT_EQUAL_STRING("font not loaded", nt_test_note_str(third, "skip"));
+    TEST_ASSERT_EQUAL_STRING("", nt_test_note_str(first, "drop"));
+    TEST_ASSERT_EQUAL_STRING("font not loaded", nt_test_note_str(third, "drop"));
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_NONE, nt_test_next_draw_result(third)); /* the last note: scans to the end */
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_capture_read().count, nt_test_note(third + 1U, "text"));
     nt_test_frame_close();

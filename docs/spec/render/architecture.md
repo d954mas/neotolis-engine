@@ -1295,47 +1295,56 @@ Notes, fields and markers are records of the same event array, in call order
 with the gfx records, so they share the capture's lifetime, copy rule and
 overflow. Only `kind` is common with gfx records: a note or marker keeps its
 label in `note.label`, a field its `type`, `key` and `value` in `field`. Label,
-key and string value are copied at the call (shorter than 100, 24 and 72 bytes,
-asserted while the frame records; a marker name in every frame), so callers may pass temporary buffers. A
-note lands with all its fields or, when they do not fit, sets `overflow`; no
-record appends after an overflow. Each note costs one record plus one per
-field, so per-call notes (one per sprite emit) need capacity sized for them.
+key and string value are copied at the call, so callers may pass temporary
+buffers. They are shorter than 100, 24 and 72 bytes: a recorded frame asserts
+the lengths, and a marker name is checked in every frame. A note lands with all
+its fields or, when they do not fit, sets `overflow`; no record appends after an
+overflow. Each note costs one record plus one per field, so per-call notes (one
+per sprite emit) need capacity sized for them.
 
-A note describes the front-end records after it until the next note or
-marker. Immediate operations (creates, uploads) record their backend calls at
-the call, under the current note. Draw-phase calls record theirs when the stream
-executes in `nt_gfx_end_frame`, after the notes made before it; notes made after
-`end_frame` follow that execution. Notes and markers are not
-draw-stream commands, so draw merging, counters and pixels do not depend on
-them. Markers do not reach external debuggers (a stream command between two
-draws would end their merge).
+A note describes the frontend records after it until the next note or marker.
+Immediate operations (creates, uploads) record their backend calls at the call,
+under the current note. Draw-phase calls record theirs when the stream executes
+in `nt_gfx_end_frame`, after the notes made before it; notes made after
+`end_frame` follow that execution. Notes and markers are not draw-stream
+commands, so draw merging, counters and pixels do not depend on them. Markers do
+not reach external debuggers (a stream command between two draws would end
+their merge).
 
 `g_nt_gfx.capture_recording` is set while a frame records; `NT_GFX_NOTE` checks
 it before building its fields, so a note in an unrecorded frame costs one
 branch. In capture-OFF builds the macros expand to nothing and their arguments
 are not evaluated. Marker balance is tracked in every frame of a capture build:
 a pop without a push asserts, and so does a marker still open at
-`nt_gfx_begin_frame`, the capture boundary. A group may wrap work after
+`nt_gfx_begin_frame`, where a recorded frame ends. A group may wrap work after
 `nt_gfx_end_frame`. The stub accepts and discards notes and markers.
 
-Engine renderers note their work. A note with a `skip` string field reports
-work the renderer dropped and the reason. Mesh runs and sprite `draw_list` runs
-note before they resolve, so their pipeline and vertex-input creates fall under
-the note; a run dropped after that adds a second note with `skip`. A shape flush
-with nothing queued returns early, so it neither draws nor notes.
+Engine renderers note their work. A `drop` string field reports work the
+renderer dropped and why; it is unrelated to backend `SKIP` records. A mesh run
+notes once its program is ready and a sprite `draw_list` run notes before its
+material resolves, so their pipeline and vertex-input creates fall under the
+note; a run dropped after that note adds a second note with `drop`. A mesh run
+whose program is not ready writes only the `drop` note. A shape flush with
+nothing queued returns early, so it neither draws nor notes. `program not ready`
+means the selection has no pipeline, a lost context included.
 
 | Label | Fields | Written |
 |---|---|---|
-| `mesh` | `material`, `mesh`; `skip`: `program not ready`, `context lost` | before each run of `draw_list`, `draw_list_skinned` and each direct mesh draw; a deformation-only split notes the same pair again |
-| `sprite` | `material`, `page`; `skip`: `program not ready`, `page not ready` | before each immediate emit and each `draw_list` run; a merged emit keeps its note before a `CACHE` draw |
-| `text` | `material`, `font`; `skip`: `program not ready`, `font not loaded`, `font texture not ready` | once per non-empty `draw_n` call |
-| `shape` | none; `skip`: `program not ready` | before each shape draw of a flush, or once for a non-empty flush whose programs are not ready |
+| `mesh` | `material`, `mesh`; `drop`: `program not ready`, `context lost` | before each run of `draw_list`, `draw_list_skinned` and each direct mesh draw; a deformation-only split notes the same pair again |
+| `sprite` | `material`, `page`; `drop`: `program not ready`, `page not ready` | before each immediate emit of a live region and each `draw_list` run; a merged emit keeps its note before a `CACHE` draw |
+| `text` | `material`, `font`; `drop`: `program not ready`, `font not loaded`, `font texture not ready` | once per non-empty `draw_n` call |
+| `shape` | none; `drop`: `program not ready` | before each shape draw of a flush, or once for a non-empty flush whose programs are not ready |
 
 On a loss taken at `nt_gfx_begin_frame`, mesh draws return before noting, and
-sprite, text and shape note `skip: program not ready`: the wipe leaves no ready
-program. A loss latched during the frame keeps programs and cached pipelines
-until the next `begin_frame`, so renderers note as usual and their gfx records
-end `CONTEXT_LOST`; a mesh create that meets it notes `skip: context lost`.
+sprite, text and shape note `drop: program not ready`: the wipe leaves no ready
+program. When the same `begin_frame` restores the context, mesh runs note
+`drop: program not ready` too. A loss latched during the frame leaves programs
+ready and pipelines allocated until the next `begin_frame`, but
+`nt_gfx_make_pipeline` returns no handle, cache hits included. Shape, and sprite
+or text selections resolved before the latch, note as usual and their gfx
+records end `CONTEXT_LOST`; a sprite or text material resolved after it notes
+`drop: program not ready`. A mesh create that meets the loss notes
+`drop: context lost`, and later mesh calls of that frame return before noting.
 
 ## Shape strokes
 

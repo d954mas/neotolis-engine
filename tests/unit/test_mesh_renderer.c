@@ -1822,9 +1822,9 @@ void test_draw_list_notes_each_run_and_its_skip(void) {
     TEST_ASSERT_LESS_THAN_UINT32(nt_gfx_capture_read().count, second);
     TEST_ASSERT_EQUAL_UINT32(not_ready.id, nt_test_note_u32(first, "material"));
     TEST_ASSERT_EQUAL_UINT32(mesh.id, nt_test_note_u32(first, "mesh"));
-    TEST_ASSERT_EQUAL_STRING("program not ready", nt_test_note_str(first, "skip"));
+    TEST_ASSERT_EQUAL_STRING("program not ready", nt_test_note_str(first, "drop"));
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_NONE, nt_test_next_draw_result(first));
-    TEST_ASSERT_EQUAL_STRING("", nt_test_note_str(second, "skip"));
+    TEST_ASSERT_EQUAL_STRING("", nt_test_note_str(second, "drop"));
     TEST_ASSERT_EQUAL_UINT32(ready.id, nt_test_note_u32(second, "material"));
     TEST_ASSERT_EQUAL_UINT32(mesh.id, nt_test_note_u32(second, "mesh"));
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, nt_test_next_draw_result(second));

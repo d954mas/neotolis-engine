@@ -705,8 +705,7 @@ typedef enum {
  * calls; ARGUMENT carries per-element request arguments of the enclosing BEGIN.
  * object is a full typed frontend handle and the cross-context identity; raw names
  * live only in backend data and are valid within their context segment, which a
- * CONTEXT operation ends. Unknown inherited values are explicit. Notes, their fields
- * and markers share only kind with gfx records; their strings are copies. */
+ * CONTEXT operation ends. Unknown inherited values are explicit. */
 typedef union {
     struct {
         nt_gfx_event_kind_t kind;
@@ -816,9 +815,7 @@ void nt_gfx_note_record(const char *label, const nt_gfx_note_field_t *fields, ui
 /* Nested groups in call order; every push pops before the next nt_gfx_begin_frame. */
 void nt_gfx_marker_push(const char *name);
 void nt_gfx_marker_pop(void);
-/* NT_GFX_NOTE(label, fields...): a note and its fields land together or not at all. Label, keys
- * and strings are copied and must fit their record arrays. The trailing placeholder lets a note
- * have no fields under C17; it is not recorded. */
+/* The trailing placeholder lets a note have no fields under C17; it is not recorded. */
 #define NT_GFX_NOTE(...) NT_GFX_NOTE_(__VA_ARGS__, NT_NOTE_U32(NULL, 0))
 /* An expression, not a do/if block: each note adds one branch to its caller. sizeof does not
  * evaluate its operand, so the fields are built once. */

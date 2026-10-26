@@ -907,7 +907,7 @@ static void destroy_gpu(void) {
     memset(&s_shape.gpu, 0, sizeof(s_shape.gpu));
 }
 
-/* The queues drop_queues clears; flush returns early without them. */
+/* Must test every queue drop_queues clears. */
 static bool queues_empty(void) {
     for (int type = 0; type < NT_SHAPE_TYPE_COUNT; type++) {
         if (s_shape.fill_counts[type] != 0 || s_shape.wire_counts[type] != 0) {
@@ -978,7 +978,7 @@ void nt_shape_renderer_flush(void) {
     }
     /* Each program finishes linking on its own frame; until all do, queued shapes are dropped. */
     if (!nt_gfx_program_ready(s_shape.gpu.fill_prog) || !nt_gfx_program_ready(s_shape.gpu.batch_prog) || !nt_gfx_program_ready(s_shape.gpu.wire_prog) || !nt_gfx_program_ready(s_shape.gpu.line_prog)) {
-        NT_GFX_NOTE("shape", NT_NOTE_STR("skip", "program not ready"));
+        NT_GFX_NOTE("shape", NT_NOTE_STR("drop", "program not ready"));
         drop_queues();
         return;
     }
