@@ -259,10 +259,8 @@ static void nt_devapi_input_update(void) {
     }
 }
 
-void nt_devapi_input_reset(void) {
-    /* No clock re-seed: a native reset runs mid-tick, after frame++. */
-    s_sched_count = 0;
-}
+/* Client reset: drop pending schedule entries only. No clock re-seed: a native reset runs mid-tick, after frame++. */
+static void nt_devapi_input_reset(void) { s_sched_count = 0; }
 // #endregion
 
 /* string -> nt_key_t, indexed by enum value; each name = the enum minus NT_KEY_. */

@@ -367,7 +367,7 @@ static void test_reset_drops_schedule_keeps_applied_input(void) {
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
 
-    nt_devapi_input_reset(); /* simulate client disconnect: drop the schedule, KEEP applied input */
+    nt_devapi_run_reset_hooks(); /* simulate client disconnect: drop the schedule, KEEP applied input */
     nt_input_poll();
     /* Applied input is game-owned -> still held after the reset (NOT released by the engine). */
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
