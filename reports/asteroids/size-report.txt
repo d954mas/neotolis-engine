@@ -1,5 +1,5 @@
 # Size Report: asteroids (wasm-analysis-paired)
-# Commit: b52c3c1
+# Commit: aac2bdc
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                  64 B
-Code              397516 B
-Data              219081 B
-Custom             13181 B
+Code              397983 B
+Data              219164 B
+Custom             13209 B
 ---------------- ----------
-TOTAL             631291 B
+TOTAL             631869 B
 
 ## Top 30 Functions by Size
 
@@ -28,14 +28,14 @@ TOTAL             631291 B
 27440 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 20947 B   ui_panel
 19237 B   dispatch_command
-17355 B   nt_gfx_activate_texture
+17486 B   nt_gfx_activate_texture
 10756 B   main
  8845 B   Clay__ConfigureOpenElementPtr
  6059 B   Clay__SizeContainersAlongAxis
  5766 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
  5643 B   Clay__InitializeEphemeralMemory
  4538 B   basist::transcode_uastc_to_etc1(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
- 4138 B   upload_glyph
+ 4343 B   upload_glyph
  4046 B   nt_gfx_end_frame
  4005 B   Clay__MeasureTextCached
  3920 B   basist::pack_eac(basist::eac_block&, unsigned char const*, unsigned int)
@@ -44,8 +44,8 @@ TOTAL             631291 B
  3365 B   Clay__CloseElement
  3319 B   void std::__2::__introsort<std::__2::_ClassicAlgPolicy, std::__2::ranges::less, unsigned int*, true>(unsigned int*, unsigned int*, std::__2::ranges::less, std::__2::iterator_traits<unsigned int*>::difference_type, bool)
  3262 B   nt_ui_label
+ 3028 B   nt_gfx_make_texture
  3020 B   fmt_fp
- 2897 B   nt_gfx_make_texture
  2610 B   scrollbar_emit_axis
  2608 B   basist::huffman_decoding_table::init(unsigned int, unsigned char const*, unsigned int)
  2551 B   nt_font_lookup_glyph_offset
@@ -55,7 +55,7 @@ TOTAL             631291 B
  2436 B   printf_core
 
 Total functions: 255
-Total code size: 397068 B
+Total code size: 397535 B
 
 ## Built Engine Archives
 
@@ -67,7 +67,7 @@ libnt_app.a                 2828 B
 libnt_app_stub.a            2678 B
 libnt_atlas.a               5452 B
 libnt_base64.a               974 B
-libnt_basisu_transcoder.a  671530 B
+libnt_basisu_transcoder.a  671882 B
 libnt_basisu_transcoder_stub.a     778 B
 libnt_clipboard.a           6906 B
 libnt_clipboard_stub.a       840 B
@@ -78,7 +78,7 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               65220 B
-libnt_gfx.a               112784 B
+libnt_gfx.a               113400 B
 libnt_gfx_stub.a            6838 B
 libnt_hash.a                4108 B
 libnt_http.a               18238 B
@@ -125,9 +125,9 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2665914 B
+TOTAL (archives)         2666882 B
 
 ## Data Segments Summary
 
-Segments: 183
-Total data size: 217703 B
+Segments: 185
+Total data size: 217772 B

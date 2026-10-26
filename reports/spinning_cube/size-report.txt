@@ -1,5 +1,5 @@
 # Size Report: spinning_cube (wasm-analysis-paired)
-# Commit: b52c3c1
+# Commit: aac2bdc
 
 ## WASM Section Sizes
 
@@ -67,7 +67,7 @@ libnt_app.a                 2828 B
 libnt_app_stub.a            2678 B
 libnt_atlas.a               5452 B
 libnt_base64.a               974 B
-libnt_basisu_transcoder.a  671530 B
+libnt_basisu_transcoder.a  671882 B
 libnt_basisu_transcoder_stub.a     778 B
 libnt_clipboard.a           6906 B
 libnt_clipboard_stub.a       840 B
@@ -78,7 +78,7 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               65220 B
-libnt_gfx.a               112784 B
+libnt_gfx.a               113400 B
 libnt_gfx_stub.a            6838 B
 libnt_hash.a                4108 B
 libnt_http.a               18238 B
@@ -125,7 +125,7 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2665914 B
+TOTAL (archives)         2666882 B
 
 ## Data Segments Summary
 

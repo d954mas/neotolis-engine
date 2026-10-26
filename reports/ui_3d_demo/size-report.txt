@@ -1,5 +1,5 @@
 # Size Report: ui_3d_demo (wasm-analysis-paired)
-# Commit: b52c3c1
+# Commit: aac2bdc
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                71 B
 Elem                  48 B
-Code              237358 B
+Code              237759 B
 Data               19992 B
 Custom              6435 B
 ---------------- ----------
-TOTAL             265008 B
+TOTAL             265409 B
 
 ## Top 30 Functions by Size
 
@@ -31,13 +31,13 @@ TOTAL             265008 B
  6038 B   Clay__SizeContainersAlongAxis
  5616 B   Clay__InitializeEphemeralMemory
  5250 B   nt_ui_button_begin
- 4121 B   upload_glyph
+ 4326 B   upload_glyph
  3992 B   Clay__MeasureTextCached
  3593 B   nt_http_request_ex
  3353 B   Clay__CloseElement
  3253 B   nt_ui_label
+ 3027 B   nt_gfx_make_texture
  3007 B   fmt_fp
- 2896 B   nt_gfx_make_texture
  2686 B   nt_material_apply
  2551 B   nt_font_lookup_glyph_offset
  2545 B   atlas_on_resolve
@@ -55,7 +55,7 @@ TOTAL             265008 B
  1308 B   nt_gfx_make_pipeline
 
 Total functions: 179
-Total code size: 237044 B
+Total code size: 237445 B
 
 ## Built Engine Archives
 
@@ -67,7 +67,7 @@ libnt_app.a                 2828 B
 libnt_app_stub.a            2678 B
 libnt_atlas.a               5452 B
 libnt_base64.a               974 B
-libnt_basisu_transcoder.a  671530 B
+libnt_basisu_transcoder.a  671882 B
 libnt_basisu_transcoder_stub.a     778 B
 libnt_clipboard.a           6906 B
 libnt_clipboard_stub.a       840 B
@@ -78,7 +78,7 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               65220 B
-libnt_gfx.a               112784 B
+libnt_gfx.a               113400 B
 libnt_gfx_stub.a            6838 B
 libnt_hash.a                4108 B
 libnt_http.a               18238 B
@@ -125,7 +125,7 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2665914 B
+TOTAL (archives)         2666882 B
 
 ## Data Segments Summary
 

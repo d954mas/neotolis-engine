@@ -1,5 +1,5 @@
 # Size Report: ui_showcase (wasm-analysis-paired)
-# Commit: b52c3c1
+# Commit: aac2bdc
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                 138 B
-Code              378589 B
+Code              378990 B
 Data               41259 B
 Custom             11263 B
 ---------------- ----------
-TOTAL             432848 B
+TOTAL             433249 B
 
 ## Top 30 Functions by Size
 
@@ -35,8 +35,8 @@ TOTAL             432848 B
  5643 B   Clay__InitializeEphemeralMemory
  4907 B   render_rich
  4582 B   render_radial
+ 4328 B   upload_glyph
  4298 B   slider_core
- 4123 B   upload_glyph
  4005 B   Clay__MeasureTextCached
  3868 B   rich_emit_custom
  3727 B   rich_solve
@@ -45,8 +45,8 @@ TOTAL             432848 B
  3365 B   Clay__CloseElement
  3261 B   nt_ui_label
  3038 B   render_scroll
+ 3028 B   nt_gfx_make_texture
  3011 B   fmt_fp
- 2897 B   nt_gfx_make_texture
  2877 B   nt_ui_popup_begin_internal
  2687 B   nt_material_apply
  2593 B   scrollbar_emit_axis
@@ -55,7 +55,7 @@ TOTAL             432848 B
  2546 B   atlas_on_resolve
 
 Total functions: 343
-Total code size: 377985 B
+Total code size: 378386 B
 
 ## Built Engine Archives
 
@@ -67,7 +67,7 @@ libnt_app.a                 2828 B
 libnt_app_stub.a            2678 B
 libnt_atlas.a               5452 B
 libnt_base64.a               974 B
-libnt_basisu_transcoder.a  671530 B
+libnt_basisu_transcoder.a  671882 B
 libnt_basisu_transcoder_stub.a     778 B
 libnt_clipboard.a           6906 B
 libnt_clipboard_stub.a       840 B
@@ -78,7 +78,7 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               65220 B
-libnt_gfx.a               112784 B
+libnt_gfx.a               113400 B
 libnt_gfx_stub.a            6838 B
 libnt_hash.a                4108 B
 libnt_http.a               18238 B
@@ -125,7 +125,7 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2665914 B
+TOTAL (archives)         2666882 B
 
 ## Data Segments Summary
 
