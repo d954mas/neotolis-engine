@@ -83,26 +83,26 @@ static void test_endpoints_has_four_fields(void) {
     cJSON *root = submit_endpoints("{\"method\":\"endpoints\"}", &commands);
 
     TEST_ASSERT_EQUAL_INT(nt_devapi_registry_count(), cJSON_GetArraySize(commands));
-    const cJSON *ping = find_command(commands, "ping");
-    TEST_ASSERT_NOT_NULL(ping);
-    TEST_ASSERT_EQUAL_INT(4, count_object_fields(ping));
-    TEST_ASSERT_TRUE(field_is_string(ping, "method"));
-    TEST_ASSERT_TRUE(field_is_string(ping, "summary"));
-    TEST_ASSERT_TRUE(field_is_string(ping, "params_shape"));
-    TEST_ASSERT_TRUE(field_is_string(ping, "result_shape"));
+    const cJSON *poke = find_command(commands, "game.poke");
+    TEST_ASSERT_NOT_NULL(poke);
+    TEST_ASSERT_EQUAL_INT(4, count_object_fields(poke));
+    TEST_ASSERT_TRUE(field_is_string(poke, "method"));
+    TEST_ASSERT_TRUE(field_is_string(poke, "summary"));
+    TEST_ASSERT_TRUE(field_is_string(poke, "params_shape"));
+    TEST_ASSERT_TRUE(field_is_string(poke, "result_shape"));
     cJSON_Delete(root);
 }
 
 /* ---- command.describe ---- */
 
-static void test_command_describe_ping(void) {
-    const char *resp = nt_devapi_submit("{\"method\":\"command.describe\",\"params\":{\"method\":\"ping\"}}");
+static void test_command_describe_game_command(void) {
+    const char *resp = nt_devapi_submit("{\"method\":\"command.describe\",\"params\":{\"method\":\"game.poke\"}}");
     cJSON *root = cJSON_Parse(resp);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
     TEST_ASSERT_EQUAL_INT(4, count_object_fields(result));
-    TEST_ASSERT_EQUAL_STRING("ping", cJSON_GetObjectItemCaseSensitive(result, "method")->valuestring);
-    TEST_ASSERT_EQUAL_STRING("liveness check", cJSON_GetObjectItemCaseSensitive(result, "summary")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("game.poke", cJSON_GetObjectItemCaseSensitive(result, "method")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("test game-layer command (flips a flag)", cJSON_GetObjectItemCaseSensitive(result, "summary")->valuestring);
     cJSON_Delete(root);
 }
 
@@ -233,7 +233,7 @@ static void test_absent_command_not_in_endpoints(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_endpoints_has_four_fields);
-    RUN_TEST(test_command_describe_ping);
+    RUN_TEST(test_command_describe_game_command);
     RUN_TEST(test_command_describe_missing_method_bad_params);
     RUN_TEST(test_command_describe_unknown_method);
     RUN_TEST(test_command_describe_message_distinguishes_absent_vs_nonstring);

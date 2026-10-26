@@ -390,9 +390,6 @@ static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err
     if (frames > NT_DEVAPI_UI_DRAG_FRAMES_MAX) {
         return nt_devapi_fail(err, "ui.drag: frames exceeds the per-command cap");
     }
-    if (!isfinite(tx - fx) || !isfinite(ty - fy)) {
-        return nt_devapi_fail(err, "ui.drag: from -> to distance is not a finite float");
-    }
     /* DOWN@0 + `frames` interpolated MOVEs (one per frame, t=1..frames) + UP@frames. */
     uint32_t total = (uint32_t)frames + 2U;
     if (!nt_devapi_input_sched_can_reserve(total)) {
@@ -401,9 +398,10 @@ static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err
     const uint32_t id = NT_INPUT_INJECT_POINTER_ID_BASE;
     nt_devapi_input_sched_pointer(NT_INJECT_POINTER_DOWN, id, fx, fy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, 0);
     for (uint32_t i = 1; i <= frames; i++) { /* uint32: a uint16 counter never exceeds frames=65535 */
-        float t = (float)i / (float)frames;  /* frames >= 1 enforced above, so the divisor is never 0. */
-        float mx = fx + ((tx - fx) * t);
-        float my = fy + ((ty - fy) * t);
+        /* In double: to - from cannot overflow and keeps its precision; the last MOVE lands exactly on to. */
+        double t = (double)i / (double)frames; /* frames >= 1 enforced above, so the divisor is never 0. */
+        float mx = i == frames ? tx : (float)((double)fx + (((double)tx - (double)fx) * t));
+        float my = i == frames ? ty : (float)((double)fy + (((double)ty - (double)fy) * t));
         nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, id, mx, my, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, (uint16_t)i);
     }
     nt_devapi_input_sched_pointer(NT_INJECT_POINTER_UP, id, tx, ty, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, frames);

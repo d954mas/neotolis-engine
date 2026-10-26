@@ -542,9 +542,6 @@ static void test_drag_frames_negative_bad_params(void) { assert_bad_params(nt_de
 
 /* frames==0 -> bad_params: a 0-frame drag emits no MOVE, so the inject up would release at `from`
    (its current position) and silently drop `to`. frames>=1 is required to reach `to`. */
-/* Both ends are finite floats, but to - from overflows: every interpolated MOVE would be inf. */
-static void test_drag_infinite_distance_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"ui.drag\",\"params\":{\"from\":{\"x\":-3e38,\"y\":0},\"to\":{\"x\":3e38,\"y\":0}}}")); }
-
 static void test_drag_frames_zero_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"ui.drag\",\"params\":{\"from\":\"widget\",\"to\":\"widget\",\"frames\":0}}")); }
 
 /* frames over the per-command DoS cap -> bad_params, no partial inject. */
@@ -552,6 +549,20 @@ static void test_drag_frames_over_cap_bad_params(void) {
     char req[192];
     (void)snprintf(req, sizeof req, "{\"method\":\"ui.drag\",\"params\":{\"from\":\"widget\",\"to\":\"widget\",\"frames\":%u}}", UI_DRAG_FRAMES_MAX + 1U);
     assert_bad_params(nt_devapi_submit(req));
+}
+
+/* The last MOVE lands exactly on `to`: float interpolation turned 1e8 -> 1 into 0. A span whose float
+   difference overflows (-3e38 -> 3e38) still queues finite moves. UP defers deactivation one frame, so
+   the slot still holds the final MOVE position. */
+static void test_drag_lands_exactly_on_to(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"ui.drag\",\"params\":{\"from\":{\"x\":1e8,\"y\":0},\"to\":{\"x\":1,\"y\":0},\"frames\":1}}")));
+    advance(); /* DOWN@0 */
+    advance(); /* MOVE@1 + UP@1 */
+    nt_pointer_t *slot = inject_slot();
+    TEST_ASSERT_NOT_NULL(slot);
+    TEST_ASSERT_TRUE(near_eq(slot->x, 1.0F));
+    nt_devapi_input_reset();
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"ui.drag\",\"params\":{\"from\":{\"x\":-3e38,\"y\":0},\"to\":{\"x\":3e38,\"y\":0},\"frames\":2}}")));
 }
 
 /* ---- ui.drag whole-or-nothing on the shared scheduler ---- */
@@ -615,7 +626,7 @@ int main(void) {
     RUN_TEST(test_drag_frames_fractional_bad_params);
     RUN_TEST(test_drag_frames_negative_bad_params);
     RUN_TEST(test_drag_frames_zero_bad_params);
-    RUN_TEST(test_drag_infinite_distance_bad_params);
+    RUN_TEST(test_drag_lands_exactly_on_to);
     RUN_TEST(test_drag_frames_over_cap_bad_params);
     RUN_TEST(test_drag_at_cap_reserves_whole);
     RUN_TEST(test_drag_over_reserve_no_partial_inject);
