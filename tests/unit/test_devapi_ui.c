@@ -561,7 +561,8 @@ static void test_drag_lands_exactly_on_to(void) {
     nt_pointer_t *slot = inject_slot();
     TEST_ASSERT_NOT_NULL(slot);
     TEST_ASSERT_TRUE(near_eq(slot->x, 1.0F));
-    nt_devapi_input_reset();
+    tearDown(); /* fresh schedule and pointer state for the second drag */
+    setUp();
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"ui.drag\",\"params\":{\"from\":{\"x\":-3e38,\"y\":0},\"to\":{\"x\":3e38,\"y\":0},\"frames\":2}}")));
     advance(); /* DOWN@0 */
     advance(); /* MOVE@1, the midpoint: float math made it inf */

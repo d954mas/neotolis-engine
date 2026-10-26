@@ -28,7 +28,6 @@
  */
 
 #include "app/nt_app.h"
-#include "color/nt_color.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
 #include "drawable_comp/nt_drawable_comp.h"
@@ -84,8 +83,8 @@
 
 typedef struct {
     float light_dir[4];   /* xyz = direction towards light, w = unused */
-    float light_color[4]; /* rgb = color, a = intensity */
-    float ambient[4];     /* rgb = color, a = intensity */
+    float light_color[4]; /* rgb = linear color, a = intensity */
+    float ambient[4];     /* rgb = linear color, a = intensity */
 } nt_lighting_t;
 
 _Static_assert(sizeof(nt_lighting_t) == 48, "lighting UBO 48 bytes");
@@ -272,10 +271,12 @@ static void load_scene_from_manifest(void) {
 
         s_material_shader_types[i] = (mn->shader_type < 3) ? mn->shader_type : (uint8_t)SPONZA_SHADER_DIFFUSE;
 
-        /* Create material descriptor; params are copied at create */
-        float alpha_cutoff[4] = {0};
+        /* Material { vec4 u_base_color; vec4 u_alpha_cutoff; }, the cutoff only in the alpha shader; params are copied at create */
+        float params[8] = {mn->base_color[0], mn->base_color[1], mn->base_color[2], mn->base_color[3]};
         nt_material_create_desc_t mat_desc = {
             .program = s_programs[s_material_shader_types[i]].program,
+            .params = params,
+            .params_size = 4 * sizeof(float),
             .depth_test = true,
             .depth_write = true,
             .cull_mode = NT_CULL_BACK,
@@ -292,9 +293,8 @@ static void load_scene_from_manifest(void) {
             /* Alpha: diffuse only, 3 streams, double-sided */
             mat_desc.textures[0] = (nt_material_texture_desc_t){.name = "u_diffuse", .resource = (mn->diffuse_rid != 0) ? s_tex_handles[tex_base + 0] : s_neutral_white_handle};
             mat_desc.texture_count = 1;
-            alpha_cutoff[0] = (float)mn->alpha_cutoff_x100 / 100.0F; /* sponza_alpha.frag: Material { vec4 u_alpha_cutoff; } */
-            mat_desc.params = alpha_cutoff;
-            mat_desc.params_size = sizeof(alpha_cutoff);
+            params[4] = (float)mn->alpha_cutoff_x100 / 100.0F;
+            mat_desc.params_size = sizeof(params);
             mat_desc.blend = nt_blend_opaque();
             mat_desc.cull_mode = NT_CULL_NONE; /* double-sided for foliage */
         } else {
@@ -332,9 +332,6 @@ static void load_scene_from_manifest(void) {
 
         /* Set material component */
         *nt_material_comp_handle(s_entities[i]) = s_materials[i];
-
-        /* Set drawable color from manifest base_color */
-        nt_drawable_comp_set_color(s_entities[i], nt_color_pack(mn->base_color));
     }
 
     s_entity_count = node_count;
@@ -555,7 +552,7 @@ static void frame(void) {
         nt_lighting_t lighting = {
             .light_dir = {0.5F, 0.7F, 0.5F, 0.0F},    /* angled sunlight */
             .light_color = {1.0F, 0.95F, 0.9F, 1.2F}, /* warm white, intensity 1.2 */
-            .ambient = {0.6F, 0.65F, 0.8F, 0.3F},     /* cool ambient, intensity 0.3 */
+            .ambient = {0.6F, 0.65F, 0.8F, 0.08F},    /* cool ambient, intensity 0.08 */
         };
         nt_gfx_bind_uniform_block(NT_GFX_SLOT_GAME, &lighting, sizeof(lighting));
 

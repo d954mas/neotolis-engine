@@ -8,7 +8,8 @@
 #define NT_TEXTURE_MAGIC 0x58455454
 #define NT_TEXTURE_VERSION 3
 
-/* GPU texture/storage formats. Values 1..4 are also valid packed-asset pixel formats. */
+/* GPU texture/storage formats. Values 1..4, 19 and 20 are also valid packed-asset pixel formats.
+ * An sRGB format stores encoded RGB; sampling returns linear RGB, alpha stays linear. */
 typedef enum {
     NT_TEXTURE_FORMAT_INVALID = 0,
     NT_TEXTURE_FORMAT_RGBA8 = 1, /* 4 bytes per pixel, 8 bits per channel */
@@ -25,30 +26,43 @@ typedef enum {
     NT_TEXTURE_FORMAT_ETC2_RGBA8 = 12,    /* GL_COMPRESSED_RGBA8_ETC2_EAC, 16 bytes per 4x4 block */
     NT_TEXTURE_FORMAT_BC7_RGBA = 13,      /* GL_COMPRESSED_RGBA_BPTC_UNORM, 16 bytes per 4x4 block */
     NT_TEXTURE_FORMAT_ASTC_4x4_RGBA = 14, /* GL_COMPRESSED_RGBA_ASTC_4x4_KHR, 16 bytes per 4x4 block */
+    /* Compressed sRGB twins follow ASTC so the compressed range stays contiguous. */
+    NT_TEXTURE_FORMAT_ETC2_SRGB8 = 15,            /* GL_COMPRESSED_SRGB8_ETC2 */
+    NT_TEXTURE_FORMAT_ETC2_SRGB8_ALPHA8 = 16,     /* GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC */
+    NT_TEXTURE_FORMAT_BC7_SRGB_ALPHA = 17,        /* GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM */
+    NT_TEXTURE_FORMAT_ASTC_4x4_SRGB8_ALPHA8 = 18, /* GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR */
+    NT_TEXTURE_FORMAT_SRGB8_ALPHA8 = 19,          /* 4 bytes per pixel */
+    NT_TEXTURE_FORMAT_SRGB8 = 20,                 /* 3 bytes per pixel; not color-renderable, so no runtime mips */
 } nt_texture_format_t;
 
-static inline bool nt_texture_format_valid(nt_texture_format_t fmt) { return fmt >= NT_TEXTURE_FORMAT_RGBA8 && fmt <= NT_TEXTURE_FORMAT_ASTC_4x4_RGBA; }
+static inline bool nt_texture_format_valid(nt_texture_format_t fmt) { return fmt >= NT_TEXTURE_FORMAT_RGBA8 && fmt <= NT_TEXTURE_FORMAT_SRGB8; }
 
 static inline bool nt_texture_format_is_depth(nt_texture_format_t fmt) { return fmt >= NT_TEXTURE_FORMAT_DEPTH16 && fmt <= NT_TEXTURE_FORMAT_DEPTH32F; }
 
-static inline bool nt_texture_format_is_compressed(nt_texture_format_t fmt) { return fmt >= NT_TEXTURE_FORMAT_ETC2_RGB8 && fmt <= NT_TEXTURE_FORMAT_ASTC_4x4_RGBA; }
+static inline bool nt_texture_format_is_compressed(nt_texture_format_t fmt) { return fmt >= NT_TEXTURE_FORMAT_ETC2_RGB8 && fmt <= NT_TEXTURE_FORMAT_ASTC_4x4_SRGB8_ALPHA8; }
+
+static inline bool nt_texture_format_is_srgb(nt_texture_format_t fmt) { return fmt >= NT_TEXTURE_FORMAT_ETC2_SRGB8 && fmt <= NT_TEXTURE_FORMAT_SRGB8; }
 
 static inline bool nt_texture_format_is_integer(nt_texture_format_t fmt) { return fmt == NT_TEXTURE_FORMAT_RG16UI; }
 
 /* What a sampler2D reads: colour storage, normalized or float. */
 static inline bool nt_texture_format_is_sampled_color(nt_texture_format_t fmt) { return nt_texture_format_valid(fmt) && !nt_texture_format_is_depth(fmt) && !nt_texture_format_is_integer(fmt); }
 
-/* Builder source formats are the packed-asset subset RGBA8..R8. */
+/* Builder source formats are the packed-asset subset RGBA8..R8, SRGB8_ALPHA8 and SRGB8. */
 typedef nt_texture_format_t nt_texture_pixel_format_t;
 
-static inline bool nt_texture_pixel_format_valid(nt_texture_pixel_format_t fmt) { return fmt >= NT_TEXTURE_FORMAT_RGBA8 && fmt <= NT_TEXTURE_FORMAT_R8; }
+static inline bool nt_texture_pixel_format_valid(nt_texture_pixel_format_t fmt) {
+    return (fmt >= NT_TEXTURE_FORMAT_RGBA8 && fmt <= NT_TEXTURE_FORMAT_R8) || fmt == NT_TEXTURE_FORMAT_SRGB8_ALPHA8 || fmt == NT_TEXTURE_FORMAT_SRGB8;
+}
 
 /* Bytes per pixel for each format */
 static inline uint32_t nt_texture_bpp(nt_texture_pixel_format_t fmt) {
     switch (fmt) {
     case NT_TEXTURE_FORMAT_RGBA8:
+    case NT_TEXTURE_FORMAT_SRGB8_ALPHA8:
         return 4;
     case NT_TEXTURE_FORMAT_RGB8:
+    case NT_TEXTURE_FORMAT_SRGB8:
         return 3;
     case NT_TEXTURE_FORMAT_RG8:
         return 2;
@@ -84,9 +98,11 @@ static inline uint64_t nt_texture_level_bytes(nt_texture_format_t fmt, uint32_t 
     uint64_t bytes_per_pixel = 0;
     switch (fmt) {
     case NT_TEXTURE_FORMAT_RGBA8:
+    case NT_TEXTURE_FORMAT_SRGB8_ALPHA8:
         bytes_per_pixel = 4;
         break;
     case NT_TEXTURE_FORMAT_RGB8:
+    case NT_TEXTURE_FORMAT_SRGB8:
         bytes_per_pixel = 3;
         break;
     case NT_TEXTURE_FORMAT_RG8:
@@ -105,11 +121,15 @@ static inline uint64_t nt_texture_level_bytes(nt_texture_format_t fmt, uint32_t 
         bytes_per_pixel = 16;
         break;
     case NT_TEXTURE_FORMAT_ETC2_RGB8:
+    case NT_TEXTURE_FORMAT_ETC2_SRGB8:
         bytes_per_block = 8;
         break;
     case NT_TEXTURE_FORMAT_ETC2_RGBA8:
     case NT_TEXTURE_FORMAT_BC7_RGBA:
     case NT_TEXTURE_FORMAT_ASTC_4x4_RGBA:
+    case NT_TEXTURE_FORMAT_ETC2_SRGB8_ALPHA8:
+    case NT_TEXTURE_FORMAT_BC7_SRGB_ALPHA:
+    case NT_TEXTURE_FORMAT_ASTC_4x4_SRGB8_ALPHA8:
         bytes_per_block = 16;
         break;
     case NT_TEXTURE_FORMAT_INVALID:
@@ -130,7 +150,7 @@ typedef enum {
     NT_TEXTURE_COMPRESSION_BASIS = 1, /* Basis Universal encoded data */
 } nt_texture_compression_t;
 
-/* Texture header flags (single byte, room for future bits: sRGB, linear, ...) */
+/* Texture header flags (single byte) */
 #define NT_TEXTURE_FLAG_PREMULTIPLIED (1U << 0) /* RGB already multiplied by alpha */
 #define NT_TEXTURE_FLAG_GEN_MIPMAPS (1U << 1)   /* runtime should glGenerateMipmap on RAW upload (no effect on BASIS) */
 /* bits 2..7 reserved */
@@ -167,9 +187,11 @@ typedef enum {
  *   BASIS(1): Basis Universal encoded blob follows
  *
  * format field serves double duty:
- *   RAW: pixel layout (RGBA8, RGB8, RG8, R8)
- *   BASIS: range-checked like every header field, but it does not pick the
- *          target -- alpha and codec come from the Basis blob itself
+ *   RAW: pixel layout and transfer (RGBA8, RGB8, RG8, R8, SRGB8_ALPHA8, SRGB8)
+ *   BASIS: source channels and transfer (RGBA8/RGB8 linear, SRGB8_ALPHA8/SRGB8
+ *          sRGB). sRGB picks the sRGB twin of the transcode target; alpha and
+ *          codec come from the Basis blob. The blob's own sRGB flag is not
+ *          read: UASTC never sets it.
  *
  * flags field:
  *   bit 0 = NT_TEXTURE_FLAG_PREMULTIPLIED — RGB values are already multiplied
@@ -193,7 +215,7 @@ typedef enum {
 typedef struct {
     uint32_t magic;             /* NT_TEXTURE_MAGIC */
     uint16_t version;           /* NT_TEXTURE_VERSION (= 3) */
-    uint16_t format;            /* nt_texture_pixel_format_t (source channel config for BASIS) */
+    uint16_t format;            /* nt_texture_pixel_format_t (source channels + transfer for BASIS) */
     uint32_t width;             /* base level width in pixels */
     uint32_t height;            /* base level height in pixels */
     uint16_t mip_count;         /* number of mip levels in chain */

@@ -21,28 +21,35 @@ typedef struct {
     bool integer;
     bool sampled_color;
     bool pixel_valid;
+    bool srgb;
     uint32_t bpp; /* nt_texture_bpp: 0 for everything outside the packed-asset subset */
 } format_row_t;
 
 /* clang-format off */
 static const format_row_t k_format_rows[] = {
-    /* format                          valid  depth  compressed  integer  sampled_color  pixel_valid  bpp */
-    {NT_TEXTURE_FORMAT_INVALID,        false, false, false,      false,   false,         false,       0},
-    {NT_TEXTURE_FORMAT_RGBA8,          true,  false, false,      false,   true,          true,        4},
-    {NT_TEXTURE_FORMAT_RGB8,           true,  false, false,      false,   true,          true,        3},
-    {NT_TEXTURE_FORMAT_RG8,            true,  false, false,      false,   true,          true,        2},
-    {NT_TEXTURE_FORMAT_R8,             true,  false, false,      false,   true,          true,        1},
-    {NT_TEXTURE_FORMAT_RGBA16F,        true,  false, false,      false,   true,          false,       0},
-    {NT_TEXTURE_FORMAT_RG16UI,         true,  false, false,      true,    false,         false,       0},
-    {NT_TEXTURE_FORMAT_RGBA32F,        true,  false, false,      false,   true,          false,       0},
-    {NT_TEXTURE_FORMAT_DEPTH16,        true,  true,  false,      false,   false,         false,       0},
-    {NT_TEXTURE_FORMAT_DEPTH24,        true,  true,  false,      false,   false,         false,       0},
-    {NT_TEXTURE_FORMAT_DEPTH32F,       true,  true,  false,      false,   false,         false,       0},
-    {NT_TEXTURE_FORMAT_ETC2_RGB8,      true,  false, true,       false,   true,          false,       0},
-    {NT_TEXTURE_FORMAT_ETC2_RGBA8,     true,  false, true,       false,   true,          false,       0},
-    {NT_TEXTURE_FORMAT_BC7_RGBA,       true,  false, true,       false,   true,          false,       0},
-    {NT_TEXTURE_FORMAT_ASTC_4x4_RGBA,  true,  false, true,       false,   true,          false,       0},
-    {15,                               false, false, false,      false,   false,         false,       0},
+    /* format                                  valid  depth  compressed  integer  sampled_color  pixel_valid  srgb   bpp */
+    {NT_TEXTURE_FORMAT_INVALID,                false, false, false,      false,   false,         false,       false, 0},
+    {NT_TEXTURE_FORMAT_RGBA8,                  true,  false, false,      false,   true,          true,        false, 4},
+    {NT_TEXTURE_FORMAT_RGB8,                   true,  false, false,      false,   true,          true,        false, 3},
+    {NT_TEXTURE_FORMAT_RG8,                    true,  false, false,      false,   true,          true,        false, 2},
+    {NT_TEXTURE_FORMAT_R8,                     true,  false, false,      false,   true,          true,        false, 1},
+    {NT_TEXTURE_FORMAT_RGBA16F,                true,  false, false,      false,   true,          false,       false, 0},
+    {NT_TEXTURE_FORMAT_RG16UI,                 true,  false, false,      true,    false,         false,       false, 0},
+    {NT_TEXTURE_FORMAT_RGBA32F,                true,  false, false,      false,   true,          false,       false, 0},
+    {NT_TEXTURE_FORMAT_DEPTH16,                true,  true,  false,      false,   false,         false,       false, 0},
+    {NT_TEXTURE_FORMAT_DEPTH24,                true,  true,  false,      false,   false,         false,       false, 0},
+    {NT_TEXTURE_FORMAT_DEPTH32F,               true,  true,  false,      false,   false,         false,       false, 0},
+    {NT_TEXTURE_FORMAT_ETC2_RGB8,              true,  false, true,       false,   true,          false,       false, 0},
+    {NT_TEXTURE_FORMAT_ETC2_RGBA8,             true,  false, true,       false,   true,          false,       false, 0},
+    {NT_TEXTURE_FORMAT_BC7_RGBA,               true,  false, true,       false,   true,          false,       false, 0},
+    {NT_TEXTURE_FORMAT_ASTC_4x4_RGBA,          true,  false, true,       false,   true,          false,       false, 0},
+    {NT_TEXTURE_FORMAT_ETC2_SRGB8,             true,  false, true,       false,   true,          false,       true,  0},
+    {NT_TEXTURE_FORMAT_ETC2_SRGB8_ALPHA8,      true,  false, true,       false,   true,          false,       true,  0},
+    {NT_TEXTURE_FORMAT_BC7_SRGB_ALPHA,         true,  false, true,       false,   true,          false,       true,  0},
+    {NT_TEXTURE_FORMAT_ASTC_4x4_SRGB8_ALPHA8,  true,  false, true,       false,   true,          false,       true,  0},
+    {NT_TEXTURE_FORMAT_SRGB8_ALPHA8,           true,  false, false,      false,   true,          true,        true,  4},
+    {NT_TEXTURE_FORMAT_SRGB8,                  true,  false, false,      false,   true,          true,        true,  3},
+    {21,                                       false, false, false,      false,   false,         false,       false, 0},
 };
 /* clang-format on */
 
@@ -57,6 +64,7 @@ void test_format_predicates_cover_every_value(void) {
         TEST_ASSERT_EQUAL_INT(row->integer, nt_texture_format_is_integer(fmt));
         TEST_ASSERT_EQUAL_INT(row->sampled_color, nt_texture_format_is_sampled_color(fmt));
         TEST_ASSERT_EQUAL_INT(row->pixel_valid, nt_texture_pixel_format_valid(fmt));
+        TEST_ASSERT_EQUAL_INT(row->srgb, nt_texture_format_is_srgb(fmt));
         TEST_ASSERT_EQUAL_UINT32(row->bpp, nt_texture_bpp(fmt));
     }
 }
@@ -71,12 +79,19 @@ void test_level_bytes_compressed_blocks(void) {
     TEST_ASSERT_EQUAL_UINT64(8, nt_texture_level_bytes(NT_TEXTURE_FORMAT_ETC2_RGB8, 3, 1));
     TEST_ASSERT_EQUAL_UINT64(32, nt_texture_level_bytes(NT_TEXTURE_FORMAT_ETC2_RGBA8, 6, 3));
     TEST_ASSERT_EQUAL_UINT64(32, nt_texture_level_bytes(NT_TEXTURE_FORMAT_ASTC_4x4_RGBA, 6, 3));
+    /* sRGB twins keep their linear twin's block size. */
+    TEST_ASSERT_EQUAL_UINT64(64, nt_texture_level_bytes(NT_TEXTURE_FORMAT_ETC2_SRGB8, 13, 7));
+    TEST_ASSERT_EQUAL_UINT64(32, nt_texture_level_bytes(NT_TEXTURE_FORMAT_ETC2_SRGB8_ALPHA8, 6, 3));
+    TEST_ASSERT_EQUAL_UINT64(128, nt_texture_level_bytes(NT_TEXTURE_FORMAT_BC7_SRGB_ALPHA, 13, 7));
+    TEST_ASSERT_EQUAL_UINT64(32, nt_texture_level_bytes(NT_TEXTURE_FORMAT_ASTC_4x4_SRGB8_ALPHA8, 6, 3));
 }
 
 void test_level_bytes_uncompressed(void) {
     TEST_ASSERT_EQUAL_UINT64(273, nt_texture_level_bytes(NT_TEXTURE_FORMAT_RGB8, 13, 7));
     TEST_ASSERT_EQUAL_UINT64(6, nt_texture_level_bytes(NT_TEXTURE_FORMAT_RGB8, 2, 1));
     TEST_ASSERT_EQUAL_UINT64(364, nt_texture_level_bytes(NT_TEXTURE_FORMAT_RGBA8, 13, 7));
+    TEST_ASSERT_EQUAL_UINT64(364, nt_texture_level_bytes(NT_TEXTURE_FORMAT_SRGB8_ALPHA8, 13, 7));
+    TEST_ASSERT_EQUAL_UINT64(273, nt_texture_level_bytes(NT_TEXTURE_FORMAT_SRGB8, 13, 7));
     TEST_ASSERT_EQUAL_UINT64(182, nt_texture_level_bytes(NT_TEXTURE_FORMAT_RG8, 13, 7));
     TEST_ASSERT_EQUAL_UINT64(91, nt_texture_level_bytes(NT_TEXTURE_FORMAT_R8, 13, 7));
     TEST_ASSERT_EQUAL_UINT64(32, nt_texture_level_bytes(NT_TEXTURE_FORMAT_RGBA16F, 2, 2));

@@ -166,26 +166,57 @@ static void sched_tick(void) {
     s_sched_count = out;
 }
 
-/* Real sim-advance = g_nt_app.frame changed since last update. Seeded in reset so the
-   first post-reset tick doesn't fire spuriously. */
+/* Real sim-advance = g_nt_app.frame changed since last update. Seeded at register so the
+   first post-register tick doesn't fire spuriously. */
 static uint32_t s_last_frame;
 
-void nt_devapi_input_update(void) {
+/* The keys and text of the last sim-advancing poll, which input.state reports: frozen polls clear nt_input's edges and text. */
+static struct {
+    bool down[NT_KEY_COUNT];
+    bool pressed[NT_KEY_COUNT];
+    bool released[NT_KEY_COUNT];
+    uint32_t chars[NT_INPUT_CHAR_RING];
+    uint32_t char_count;
+} s_seen;
+
+/* true: s_seen lacks the last advancing poll. Commands run after one tick's poll and before the next
+   tick's input update (native transport phase, web between frames), so a refresh there copies it. */
+static bool s_seen_stale;
+
+static void seen_refresh(void) {
+    if (!s_seen_stale) {
+        return;
+    }
+    s_seen_stale = false;
+    for (int k = 0; k < NT_KEY_COUNT; k++) {
+        s_seen.down[k] = nt_input_key_is_down((nt_key_t)k);
+        s_seen.pressed[k] = nt_input_key_is_pressed((nt_key_t)k);
+        s_seen.released[k] = nt_input_key_is_released((nt_key_t)k);
+    }
+    /* Popping is safe: the coming poll drops the unread chars anyway. */
+    s_seen.char_count = 0;
+    uint32_t cp;
+    while (nt_input_pop_char(&cp)) {
+        NT_ASSERT(s_seen.char_count < NT_INPUT_CHAR_RING); /* nt_input's ring drops chars past this cap */
+        s_seen.chars[s_seen.char_count++] = cp;
+    }
+}
+
+static void nt_devapi_input_update(void) {
     bool advanced = (g_nt_app.frame != s_last_frame);
     s_last_frame = g_nt_app.frame;
     /* A frozen tick (pause / manual-idle) releases nothing: synthetic input holds until the sim
        advances, so an injected edge can't be missed by a stalled update. */
     if (advanced) {
+        s_seen_stale = true;
         sched_tick();
+    } else {
+        seen_refresh();
     }
 }
 
-void nt_devapi_input_reset(void) {
-    /* Clears ONLY devapi-owned transient state (schedule + advance clock). Applied input is
-       game-owned (a bot is indistinguishable from a human at the inject layer), so it is NOT released here. */
-    s_sched_count = 0;
-    s_last_frame = g_nt_app.frame; /* re-seed so the next update compares against the real frame. */
-}
+/* Client reset: drop pending schedule entries only. No clock re-seed: a native reset runs mid-tick, after frame++. */
+static void nt_devapi_input_reset(void) { s_sched_count = 0; }
 // #endregion
 
 /* string -> nt_key_t, indexed by enum value; each name = the enum minus NT_KEY_. */
@@ -543,6 +574,9 @@ static bool cmd_input_set_player_enabled(const cJSON *params, cJSON *result, nt_
         return nt_devapi_fail(err, "input.set_player_enabled: enabled must be a bool");
     }
     bool enabled = cJSON_IsTrue(e);
+    if (!enabled) {
+        seen_refresh(); /* the gate's releases are not the advancing poll's */
+    }
     nt_input_set_player_enabled(enabled);
     devapi_add_bool(result, "enabled", enabled);
     return true;
@@ -616,8 +650,6 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
     return true;
 }
 
-/* IMMEDIATE read of the last polled state: an enqueued inject is not visible until a sim-advance.
-   pop_text:true DRAINS the char ring (consuming side effect). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_input_state(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     const cJSON *k = cJSON_GetObjectItemCaseSensitive(params, "key");
@@ -629,22 +661,22 @@ static bool cmd_input_state(const cJSON *params, cJSON *result, nt_devapi_error 
         if (!nt_input_key_from_name(k->valuestring, &key)) {
             return nt_devapi_fail(err, "input.state: unknown key name");
         }
-        devapi_add_bool(result, "down", nt_input_key_is_down(key));
-        devapi_add_bool(result, "pressed", nt_input_key_is_pressed(key));
-        devapi_add_bool(result, "released", nt_input_key_is_released(key));
+        seen_refresh();
+        devapi_add_bool(result, "down", s_seen.down[key]);
+        devapi_add_bool(result, "pressed", s_seen.pressed[key]);
+        devapi_add_bool(result, "released", s_seen.released[key]);
     }
-    const cJSON *pt = cJSON_GetObjectItemCaseSensitive(params, "pop_text");
+    const cJSON *pt = cJSON_GetObjectItemCaseSensitive(params, "text");
     if (pt != NULL) {
         if (!cJSON_IsBool(pt)) {
-            return nt_devapi_fail(err, "input.state: pop_text must be a bool");
+            return nt_devapi_fail(err, "input.state: text must be a bool");
         }
         if (cJSON_IsTrue(pt)) {
             cJSON *cps = cJSON_AddArrayToObject(result, "codepoints");
             NT_ASSERT(cps != NULL); /* OOM traps fail-early (matches devapi_add_*). */
-            /* Cap the drain to the inject queue size so a flood can't spin the read forever. */
-            uint32_t cp;
-            for (uint32_t i = 0; i < (uint32_t)NT_INPUT_INJECT_QUEUE_MAX && nt_input_pop_char(&cp); i++) {
-                cJSON *num = cJSON_CreateNumber((double)cp);
+            seen_refresh();
+            for (uint32_t i = 0; i < s_seen.char_count; i++) {
+                cJSON *num = cJSON_CreateNumber((double)s_seen.chars[i]);
                 NT_ASSERT(num != NULL);
                 cJSON_bool added = cJSON_AddItemToArray(cps, num);
                 NT_ASSERT(added);
@@ -723,15 +755,17 @@ static const nt_devapi_command k_input_cmds[] = {
     },
     {
         .method = "input.state",
-        .summary = "IMMEDIATE read of polled input state (stale until a sim-advance polls the inject queue); pop_text:true drains (consumes) the char ring",
-        .params_shape = "{key?:string, pop_text?:bool}",
+        .summary = "IMMEDIATE read of the last sim-advancing poll: key down/edges and the text the game left unread (an inject shows after the next sim-advance)",
+        .params_shape = "{key?:string, text?:bool}",
         .result_shape = "{down?:bool, pressed?:bool, released?:bool, codepoints?:[number]}",
         .fn = cmd_input_state,
     },
 };
 
 void nt_devapi_register_input(void) {
-    nt_devapi_input_reset(); /* fresh schedule + seeded advance clock each init->register. */
+    nt_devapi_input_reset();
+    s_last_frame = g_nt_app.frame;
+    s_seen_stale = true;
     /* The only core coupling point: core/net call these generic hooks, never the group symbols. */
     nt_devapi_set_tick(nt_devapi_input_update);
     nt_devapi_register_reset(nt_devapi_input_reset);

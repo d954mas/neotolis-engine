@@ -14,6 +14,7 @@ declare global {
       basis_ready(): boolean;
       basis_format(): number;
       basis_rgb_format(): number;
+      srgb(): [number, number, number, number, number]; // sRGB fixture format, opaque format, corner and 1x1 samples, RAW texel sample
       basis_caps(): number;
       basis_build_targets(): number;
       basis_build_codecs(): number;
@@ -181,6 +182,8 @@ const FORMAT_ETC2_RGB8 = 11;
 const FORMAT_ETC2_RGBA8 = 12;
 const FORMAT_BC7_RGBA = 13;
 const FORMAT_ASTC_4x4_RGBA = 14;
+// An sRGB fixture takes the sRGB twin of the linear target.
+const SRGB_TWIN: Record<number, number> = { [FORMAT_RGBA8]: 19, [FORMAT_ETC2_RGB8]: 15, [FORMAT_ETC2_RGBA8]: 16, [FORMAT_BC7_RGBA]: 17, [FORMAT_ASTC_4x4_RGBA]: 18 };
 
 // The activator's per-codec order (ETC1S: ETC2 -> BC7 -> ASTC; UASTC: ASTC -> BC7 -> ETC2) over the
 // formats both the GPU reports and the build admits (NT_BASISU_HAS_ETC2/BC7/ASTC); an opaque texture
@@ -215,8 +218,26 @@ function expectTexel(sample: number, expected: number[], tolerance: number, labe
 const FIXTURE_LEFT = [200, 40, 40, 255];
 const FIXTURE_AVERAGE = [120, 40, 120, 191];
 const FIXTURE_TOLERANCE = 16;
+// sRGB storage samples linear: the left half decodes to (147,5,5,255); undecoded, red would read 200.
+// Decoding steepens codec error near 200 by about 1.8x, hence the wider tolerance; red discriminates.
+// The 1x1 level averages light, (0.30,0.02,0.30) linear, and alpha 128/255 linearly: an encoded-value
+// mip would read red 48, a lost alpha 255. The RAW texel's 128s decode to 55 with alpha untouched.
+const FIXTURE_LEFT_LINEAR = [147, 5, 5, 255];
+const FIXTURE_AVERAGE_LINEAR = [76, 5, 76, 191];
+const SRGB_TEXEL_LINEAR = [55, 55, 55, 128];
 
-async function checkBasisFixture(page: Page, label: string): Promise<{ corner: number; middle: number; last: number }> {
+async function checkSrgbFixture(page: Page, label: string, caps: number, buildTargets: number, codec: number): Promise<{ srgb: number; srgbLast: number; texel: number }> {
+  const [format, rgbFormat, srgb, srgbLast, texel] = await page.evaluate(() => window.__nt!.srgb());
+  console.log(`[basis ${label}] srgb_format=${format} srgb_rgb_format=${rgbFormat} srgb=0x${srgb.toString(16)} srgb_last=0x${srgbLast.toString(16)} texel=0x${texel.toString(16)}`);
+  expect(format, `${label}: sRGB transcode target`).toBe(SRGB_TWIN[expectedBasisFormat(caps, buildTargets, true, codec)]);
+  expect(rgbFormat, `${label}: opaque sRGB transcode target`).toBe(SRGB_TWIN[expectedBasisFormat(caps, buildTargets, false, codec)]);
+  expectTexel(srgb, FIXTURE_LEFT_LINEAR, 30, `${label}: sRGB level-0 corner texel`);
+  expectTexel(srgbLast, FIXTURE_AVERAGE_LINEAR, 20, `${label}: sRGB 1x1 last level`);
+  expectTexel(texel, SRGB_TEXEL_LINEAR, 1, `${label}: RAW sRGB texel`);
+  return { srgb, srgbLast, texel };
+}
+
+async function checkBasisFixture(page: Page, label: string): Promise<{ corner: number; middle: number; last: number; srgb: number; srgbLast: number; texel: number }> {
   await page.waitForFunction(() => window.__nt!.basis_ready(), null, { timeout: 30_000 });
   const caps = await page.evaluate(() => window.__nt!.basis_caps());
   const buildTargets = await page.evaluate(() => window.__nt!.basis_build_targets());
@@ -233,7 +254,7 @@ async function checkBasisFixture(page: Page, label: string): Promise<{ corner: n
   expectTexel(corner, FIXTURE_LEFT, FIXTURE_TOLERANCE, `${label}: level-0 corner texel`);
   expectTexel(middle, FIXTURE_LEFT, FIXTURE_TOLERANCE, `${label}: level-3 corner texel`);
   expectTexel(last, FIXTURE_AVERAGE, 20, `${label}: 1x1 last level`);
-  return { corner, middle, last };
+  return { corner, middle, last, ...(await checkSrgbFixture(page, label, caps, buildTargets, codec)) };
 }
 
 test('basis fixture: the transcoded textures keep their format and texels across a context loss', async ({ page }) => {
