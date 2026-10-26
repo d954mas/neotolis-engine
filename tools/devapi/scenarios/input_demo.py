@@ -8,8 +8,8 @@ full enqueue -> net_poll -> input_poll -> drain timing:
   1. Drain-race — MANUAL mode: a tap (key down@0 + up@offset) stays down across the hold
      window and releases only after stepping past it, proving the up countdown ticks only
      on a real sim-advance (frozen across idle polls).
-  2. Gate cutover — set_player_enabled(false) then inject a key: input.state still observes
-     it down, proving inject is orthogonal to the gate. (The "real physical device dropped
+  2. Gate cutover — set_player_enabled(false) then inject a key: input.state observes
+     it pressed, then released, proving inject is orthogonal to the gate. (The "real physical device dropped
      while gated" half needs a live device and stays a manual note.)
   3. input.text — text("hi") + one sim-advance drains into the char ring; input.state{text:true}
      reads codepoints == [104,105] ('h','i').

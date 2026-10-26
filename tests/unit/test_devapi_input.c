@@ -8,7 +8,7 @@
 
 /* clang-format off */
 #include "app/nt_app.h"
-#include "devapi/nt_devapi_input_internal.h" /* sched cap + input_update/reset, driven directly here */
+#include "devapi/nt_devapi_input_internal.h" /* the schedule-fill tests derive from the real sched cap */
 #include "devapi/nt_devapi_internal.h" /* nt_devapi_update (via nt_devapi.h) — ticks the schedule on a sim-advance */
 #include "input/nt_input.h"
 #include "input/nt_input_internal.h" /* inject API: fill the buffer to probe whole-or-nothing */
@@ -621,7 +621,7 @@ static void test_input_state_observes_injected_key(void) {
 }
 
 /* MANUAL: frozen ticks between the step and the read clear nt_input's edges and text, yet input.state
-   still reports the last advancing poll; the next advance reports live state again. */
+   still reports the last advancing poll; the next advance's poll replaces the copy. */
 static void test_input_state_survives_frozen_ticks(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}")));
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"hi\"}}")));

@@ -216,7 +216,7 @@ static void sched_tick(void) {
    first post-register tick doesn't fire spuriously. */
 static uint32_t s_last_frame;
 
-/* The keys and text of the last sim-advancing poll, which input.state reports; frozen polls clear them. */
+/* The keys and text of the last sim-advancing poll, which input.state reports: frozen polls clear nt_input's edges and text. */
 static struct {
     bool down[NT_KEY_COUNT];
     bool pressed[NT_KEY_COUNT];
