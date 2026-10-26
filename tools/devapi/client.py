@@ -315,20 +315,19 @@ class DevApiClient:
         """Decode a UTF-8 string -> codepoints and enqueue them into the char ring."""
         return self.result("input.text", {"text": s})
 
-    def state(self, key: Optional[str] = None, pop_text: bool = False) -> Dict[str, Any]:
+    def state(self, key: Optional[str] = None, text: bool = False) -> Dict[str, Any]:
         """IMMEDIATE read of input state — the observation hook.
 
         Returns the result dict (a READ, unlike the fire-and-forget wrappers above). With `key`,
-        result carries {down,pressed,released} for that key: `down` is live, the edges come from the
-        last sim-advancing poll, so an inject shows only after a sim-advance (the drain-race). With
-        `pop_text=True`, result carries `codepoints` (a raw-codepoint number array) and DRAINS that
-        poll's text the game left unread.
+        result carries {down,pressed,released} for that key, all from the last sim-advancing poll,
+        so an inject shows only after a sim-advance (the drain-race). With `text=True`, result
+        carries `codepoints` (a raw-codepoint number array): that poll's text the game left unread.
         """
         params: Dict[str, Any] = {}
         if key is not None:
             params["key"] = key
-        if pop_text:
-            params["pop_text"] = True
+        if text:
+            params["text"] = True
         return self.result("input.state", params)
 
     # #endregion

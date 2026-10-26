@@ -216,8 +216,9 @@ static void sched_tick(void) {
    first post-register tick doesn't fire spuriously. */
 static uint32_t s_last_frame;
 
-/* The edges and text of the last sim-advancing poll, which input.state reports; frozen polls clear them. */
+/* The keys and text of the last sim-advancing poll, which input.state reports; frozen polls clear them. */
 static struct {
+    bool down[NT_KEY_COUNT];
     bool pressed[NT_KEY_COUNT];
     bool released[NT_KEY_COUNT];
     uint32_t chars[NT_INPUT_CHAR_RING];
@@ -234,6 +235,7 @@ static void seen_refresh(void) {
     }
     s_seen_stale = false;
     for (int k = 0; k < NT_KEY_COUNT; k++) {
+        s_seen.down[k] = nt_input_key_is_down((nt_key_t)k);
         s_seen.pressed[k] = nt_input_key_is_pressed((nt_key_t)k);
         s_seen.released[k] = nt_input_key_is_released((nt_key_t)k);
     }
@@ -761,7 +763,7 @@ static bool cmd_input_set_player_enabled(const cJSON *params, cJSON *result, nt_
     }
     bool enabled = cJSON_IsTrue(e);
     if (!enabled) {
-        seen_refresh(); /* the gate's release edges are not the advancing poll's */
+        seen_refresh(); /* the gate's releases are not the advancing poll's */
     }
     nt_input_set_player_enabled(enabled);
     devapi_add_bool(result, "enabled", enabled);
@@ -853,15 +855,15 @@ static bool cmd_input_state(const cJSON *params, cJSON *result, nt_devapi_error 
             set_bad_params(err, "input.state: unknown key name");
             return false;
         }
-        devapi_add_bool(result, "down", nt_input_key_is_down(key));
         seen_refresh();
+        devapi_add_bool(result, "down", s_seen.down[key]);
         devapi_add_bool(result, "pressed", s_seen.pressed[key]);
         devapi_add_bool(result, "released", s_seen.released[key]);
     }
-    const cJSON *pt = cJSON_GetObjectItemCaseSensitive(params, "pop_text");
+    const cJSON *pt = cJSON_GetObjectItemCaseSensitive(params, "text");
     if (pt != NULL) {
         if (!cJSON_IsBool(pt)) {
-            set_bad_params(err, "input.state: pop_text must be a bool");
+            set_bad_params(err, "input.state: text must be a bool");
             return false;
         }
         if (cJSON_IsTrue(pt)) {
@@ -875,7 +877,6 @@ static bool cmd_input_state(const cJSON *params, cJSON *result, nt_devapi_error 
                 NT_ASSERT(added);
                 (void)added;
             }
-            s_seen.char_count = 0;
         }
     }
     return true;
@@ -968,11 +969,11 @@ static const nt_devapi_command_desc k_input_cmds[] = {
     {
         .method = "input.state",
         .group = "input",
-        .summary = "IMMEDIATE read: live key down; key edges and text of the last sim-advancing poll (an inject shows after the next sim-advance)",
-        .params_shape = "{key?:string, pop_text?:bool}",
+        .summary = "IMMEDIATE read of the last sim-advancing poll: key down/edges and the text the game left unread (an inject shows after the next sim-advance)",
+        .params_shape = "{key?:string, text?:bool}",
         .result_shape = "{down?:bool, pressed?:bool, released?:bool, codepoints?:[number]}",
         .frame_behavior = "any",
-        .side_effects = "pop_text:true DRAINS (consumes) the last sim-advancing poll's unread text",
+        .side_effects = "none",
     },
 };
 

@@ -11,7 +11,7 @@ full enqueue -> net_poll -> input_poll -> drain timing:
   2. Gate cutover — set_player_enabled(false) then inject a key: input.state still observes
      it down, proving inject is orthogonal to the gate. (The "real physical device dropped
      while gated" half needs a live device and stays a manual note.)
-  3. input.text — text("hi") + one sim-advance drains into the char ring; input.state{pop_text:true}
+  3. input.text — text("hi") + one sim-advance drains into the char ring; input.state{text:true}
      reads codepoints == [104,105] ('h','i').
 
 Scheduling lives in the devapi layer (nt_input is a pure apply layer): an enqueued inject releases
@@ -116,13 +116,13 @@ def run(client: DevApiClient) -> None:
         "NOTE: 'real physical device dropped while gated' needs a live device — manual."
     )
 
-    # 3. input.text — codepoints reach the char ring; the pop_text drain reads them back.
+    # 3. input.text — codepoints reach the char ring; input.state{text} reads them back.
     # A text() inject is invisible until a step() advances; input.state then reads that advance's text.
     queued = client.text("hi")
     assert queued.get("queued") == 2, f"input.text echoed {queued!r}, expected {{queued:2}}"
     client.step(count=1)
-    cps = _frozen_state(client, pop_text=True).get("codepoints")
-    assert cps == [104, 105], f"input.state(pop_text).codepoints is {cps!r}, expected [104, 105] ('h','i') after an advancing step"
+    cps = _frozen_state(client, text=True).get("codepoints")
+    assert cps == [104, 105], f"input.state(text).codepoints is {cps!r}, expected [104, 105] ('h','i') after an advancing step"
     print("PASS[3/3] input.text: codepoints == [104, 105] drained from the char ring after a sim-advance.")
 
     # Restore a normal live state for the next session: back to RUN, unpaused.

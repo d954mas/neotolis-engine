@@ -542,12 +542,12 @@ static void test_sched_click_hold_zero_same_frame(void) {
     TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
 }
 
-/* ---- offline input.state{pop_text} drain coverage (no socket) ---- */
+/* ---- offline input.state{text} coverage (no socket) ---- */
 
-static void test_input_state_pop_text_drains_codepoints(void) {
+static void test_input_state_text_reads_codepoints(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"hi\"}}"))); /* enqueue char@0 'h','i' */
     advance();                                                                                            /* advance -> release + drain into the ring */
-    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"pop_text\":true}}"));
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"text\":true}}"));
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
     cJSON *cps = cJSON_GetObjectItemCaseSensitive(result, "codepoints");
     TEST_ASSERT_TRUE(cJSON_IsArray(cps));
@@ -579,7 +579,7 @@ static void test_input_state_empty_ok(void) {
 
 static void test_input_state_unknown_key_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"key\":\"NOPE\"}}")); }
 
-static void test_input_state_bad_pop_text_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"pop_text\":1}}")); }
+static void test_input_state_bad_text_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"text\":1}}")); }
 
 static cJSON *state_result(const char *request) {
     cJSON *root = parse_ok(nt_devapi_submit(request));
@@ -602,8 +602,8 @@ static void assert_key_state(bool down, bool pressed, bool released) {
     cJSON_Delete(r);
 }
 
-static int popped_text_count(void) {
-    cJSON *r = state_result("{\"method\":\"input.state\",\"params\":{\"pop_text\":true}}");
+static int text_count(void) {
+    cJSON *r = state_result("{\"method\":\"input.state\",\"params\":{\"text\":true}}");
     const cJSON *cps = cJSON_GetObjectItemCaseSensitive(r, "codepoints");
     TEST_ASSERT_TRUE(cJSON_IsArray(cps));
     int n = cJSON_GetArraySize(cps);
@@ -631,13 +631,13 @@ static void test_input_state_survives_frozen_ticks(void) {
     TEST_ASSERT_FALSE(nt_input_key_is_pressed(NT_KEY_A)); /* the game-facing edge is gone */
     assert_key_state(true, true, false);
 
-    cJSON *r = state_result("{\"method\":\"input.state\",\"params\":{\"pop_text\":true}}");
+    cJSON *r = state_result("{\"method\":\"input.state\",\"params\":{\"text\":true}}");
     cJSON *cps = cJSON_GetObjectItemCaseSensitive(r, "codepoints");
     TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(cps));
     TEST_ASSERT_EQUAL_INT(104, cJSON_GetArrayItem(cps, 0)->valueint);
     TEST_ASSERT_EQUAL_INT(105, cJSON_GetArrayItem(cps, 1)->valueint);
     cJSON_Delete(r);
-    TEST_ASSERT_EQUAL_INT(0, popped_text_count()); /* consumed */
+    TEST_ASSERT_EQUAL_INT(2, text_count()); /* a read consumes nothing */
 
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"hi\"}}")));
     advance();
@@ -647,8 +647,8 @@ static void test_input_state_survives_frozen_ticks(void) {
     assert_key_state(false, false, true);
     tick_no_advance();
     assert_key_state(false, false, true);
-    TEST_ASSERT_EQUAL_INT(0, popped_text_count()); /* the new copy replaced the old text */
-    g_nt_app.frame++;                              /* a native read in an advancing tick's transport phase, before the hook */
+    TEST_ASSERT_EQUAL_INT(0, text_count()); /* the new copy replaced the old text */
+    g_nt_app.frame++;                       /* a native read in an advancing tick's transport phase, before the hook */
     assert_key_state(false, false, true);
 }
 
@@ -668,14 +668,15 @@ static void test_input_state_reregister_drops_old_copy(void) {
 }
 
 /* A gate cutover right after an advance releases A at once; input.state keeps the advancing poll's
-   edges (pressed, not released) and the live down. */
+   A (down and pressed, not released). */
 static void test_input_state_gate_cutover_keeps_advance_edges(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}")));
     advance();
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":false}}")));
-    assert_key_state(false, true, false);
+    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
+    assert_key_state(true, true, false);
     tick_no_advance();
-    assert_key_state(false, true, false);
+    assert_key_state(true, true, false);
 }
 
 /* A cutover later in the freeze keeps the copy the first frozen tick took. */
@@ -684,7 +685,7 @@ static void test_input_state_gate_cutover_in_freeze_keeps_copy(void) {
     advance();
     tick_no_advance();
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":false}}")));
-    assert_key_state(false, true, false);
+    assert_key_state(true, true, false);
 }
 
 /* The copy observes game input, so a client reset keeps it; a mid-tick native reset (after frame++,
@@ -895,12 +896,12 @@ int main(void) {
     RUN_TEST(test_input_gesture_single_point_applied_once);
     RUN_TEST(test_sched_full_drains_in_one_tick);
     RUN_TEST(test_sched_over_reserve_whole_or_nothing);
-    RUN_TEST(test_input_state_pop_text_drains_codepoints);
+    RUN_TEST(test_input_state_text_reads_codepoints);
     RUN_TEST(test_input_state_registers);
     RUN_TEST(test_input_state_describe);
     RUN_TEST(test_input_state_empty_ok);
     RUN_TEST(test_input_state_unknown_key_bad_params);
-    RUN_TEST(test_input_state_bad_pop_text_bad_params);
+    RUN_TEST(test_input_state_bad_text_bad_params);
     RUN_TEST(test_input_state_observes_injected_key);
     RUN_TEST(test_input_state_survives_frozen_ticks);
     RUN_TEST(test_input_state_copy_survives_client_reset);
