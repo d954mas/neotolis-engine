@@ -12,10 +12,10 @@
 #include "cJSON.h"
 #include "core/nt_types.h"
 #include "devapi/nt_devapi_groups.h" /* host-facing register_<group>() / register_default surface. */
-#include "devapi/nt_devapi_types.h"  /* nt_devapi_error / _command_desc / _handler_fn (shared with the stub) */
+#include "devapi/nt_devapi_types.h"  /* nt_devapi_error / _command / _handler_fn (shared with the stub) */
 
 /* Registry table cap. Dev-only static slots; lookup scans s_count, not the cap.
-   512 leaves wide headroom for engine + game groups (~18KB BSS wasm32, dev-only). */
+   512 leaves wide headroom for engine + game groups (~4KB BSS wasm32, dev-only). */
 #ifndef NT_DEVAPI_MAX_COMMANDS
 #define NT_DEVAPI_MAX_COMMANDS 512
 #endif
@@ -24,13 +24,10 @@
 nt_result_t nt_devapi_init(void);
 void nt_devapi_shutdown(void);
 
-/* Register a command. desc, handler, desc->method, desc->summary and desc->result_shape must be
-   non-NULL; other NULL descriptor fields take the defaults in nt_devapi_types.h. Copies the
-   strings; user_data may be NULL. Non-NULL user_data is stored by
-   reference and passed to the handler until nt_devapi_shutdown(); caller owns it
-   and the engine never frees it. NT_ERR_INVALID_ARG if `method` is already registered —
-   the dup is rejected, not overwritten. */
-nt_result_t nt_devapi_register(const nt_devapi_command_desc *desc, nt_devapi_handler_fn handler, void *user_data);
+/* Register a table of commands; every handler gets user_data (may be NULL). The table, its strings and
+   user_data are stored by reference until nt_devapi_shutdown(): keep them static. Every field is
+   required; a method already registered asserts. */
+void nt_devapi_register(const nt_devapi_command *cmds, size_t count, void *user_data);
 
 /* Submit one JSON request line → the JSON response line. The returned pointer is valid
    only until the next submit/poll_response — copy it before the next core call. Returns

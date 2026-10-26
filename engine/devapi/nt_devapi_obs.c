@@ -48,7 +48,7 @@ static bool parse_level(const cJSON *jlevel, nt_log_level_t *out, nt_devapi_erro
         return true;
     }
     if (!cJSON_IsString(jlevel) || jlevel->valuestring == NULL) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "log.tail: level must be a string");
+        return nt_devapi_fail(err, "log.tail: level must be a string");
     }
     const char *s = jlevel->valuestring;
     if (strcmp(s, "info") == 0) {
@@ -58,7 +58,7 @@ static bool parse_level(const cJSON *jlevel, nt_log_level_t *out, nt_devapi_erro
     } else if (strcmp(s, "error") == 0) {
         *out = NT_LOG_LEVEL_ERROR;
     } else {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "log.tail: level must be one of info/warn/error");
+        return nt_devapi_fail(err, "log.tail: level must be one of info/warn/error");
     }
     return true;
 }
@@ -199,7 +199,7 @@ static bool cmd_perf_stats(const cJSON *params, cJSON *result, nt_devapi_error *
         }
     } else {
         if (!cJSON_IsArray(jchannels)) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "perf.stats: channels must be an array of channel-name strings");
+            return nt_devapi_fail(err, "perf.stats: channels must be an array of channel-name strings");
         }
         for (int i = 0; i < NT_METRICS_CHANNEL_COUNT; i++) {
             want[i] = false;
@@ -207,7 +207,7 @@ static bool cmd_perf_stats(const cJSON *params, cJSON *result, nt_devapi_error *
         const cJSON *jc = NULL;
         cJSON_ArrayForEach(jc, jchannels) {
             if (!cJSON_IsString(jc) || jc->valuestring == NULL) {
-                return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "perf.stats: channels must be strings");
+                return nt_devapi_fail(err, "perf.stats: channels must be strings");
             }
             int found = -1;
             for (int i = 0; i < NT_METRICS_CHANNEL_COUNT; i++) {
@@ -217,7 +217,7 @@ static bool cmd_perf_stats(const cJSON *params, cJSON *result, nt_devapi_error *
                 }
             }
             if (found < 0) {
-                return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "perf.stats: unknown channel (valid: frame_ms, cpu_ms, gpu_ms, draw_calls, mem_used, scratch_hwm, scratch_used, pool_occupancy)");
+                return nt_devapi_fail(err, "perf.stats: unknown channel (valid: frame_ms, cpu_ms, gpu_ms, draw_calls, mem_used, scratch_hwm, scratch_used, pool_occupancy)");
             }
             want[found] = true;
         }
@@ -228,11 +228,11 @@ static bool cmd_perf_stats(const cJSON *params, cJSON *result, nt_devapi_error *
     const cJSON *jbudget = cJSON_GetObjectItemCaseSensitive(params, "budget_ms");
     if (jbudget != NULL) {
         if (!cJSON_IsNumber(jbudget)) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "perf.stats: budget_ms must be a number");
+            return nt_devapi_fail(err, "perf.stats: budget_ms must be a number");
         }
         budget_ms = jbudget->valuedouble;
         if (!isfinite(budget_ms) || budget_ms <= 0.0) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "perf.stats: budget_ms must be finite and > 0");
+            return nt_devapi_fail(err, "perf.stats: budget_ms must be finite and > 0");
         }
     }
 
@@ -458,19 +458,19 @@ static bool append_filter_terms(const cJSON *arr, nt_comp_id_t *ids, uint8_t *n,
         return true;
     }
     if (!cJSON_IsArray(arr)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.list: all/any/none must be arrays of component names");
+        return nt_devapi_fail(err, "entity.list: all/any/none must be arrays of component names");
     }
     const cJSON *el = NULL;
     cJSON_ArrayForEach(el, arr) {
         if (*n >= NT_DEVAPI_QUERY_MAX_TERMS) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.list: too many filter terms");
+            return nt_devapi_fail(err, "entity.list: too many filter terms");
         }
         if (!cJSON_IsString(el) || el->valuestring == NULL) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.list: filter terms must be component-name strings");
+            return nt_devapi_fail(err, "entity.list: filter terms must be component-name strings");
         }
         nt_comp_id_t id = nt_entity_storage_find(el->valuestring);
         if (id == NT_COMP_ID_INVALID) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.list: unknown component in filter");
+            return nt_devapi_fail(err, "entity.list: unknown component in filter");
         }
         ids[(*n)++] = id;
     }
@@ -485,11 +485,11 @@ static bool parse_entity_filter(const cJSON *params, entity_filter *f, nt_devapi
     const cJSON *jcomp = cJSON_GetObjectItemCaseSensitive(params, "component");
     if (jcomp != NULL) {
         if (!cJSON_IsString(jcomp) || jcomp->valuestring == NULL) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.list: component must be a string");
+            return nt_devapi_fail(err, "entity.list: component must be a string");
         }
         nt_comp_id_t id = nt_entity_storage_find(jcomp->valuestring);
         if (id == NT_COMP_ID_INVALID) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "entity.list: unknown component");
+            return nt_devapi_fail(err, "entity.list: unknown component");
         }
         f->all[f->n_all++] = id;
     }
@@ -709,7 +709,7 @@ static bool cmd_resource_list(const cJSON *params, cJSON *result, nt_devapi_erro
     const cJSON *jia = cJSON_GetObjectItemCaseSensitive(params, "include_assets");
     if (jia != NULL) {
         if (!cJSON_IsBool(jia)) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "resource.list: include_assets must be a bool");
+            return nt_devapi_fail(err, "resource.list: include_assets must be a bool");
         }
         include_assets = cJSON_IsTrue(jia);
     }
@@ -772,77 +772,52 @@ static bool cmd_resource_list(const cJSON *params, cJSON *result, nt_devapi_erro
 }
 // #endregion
 
-static const nt_devapi_command_desc k_obs_cmds[] = {
+static const nt_devapi_command k_obs_cmds[] = {
     {
         .method = "log.tail",
-        .group = "log",
         .summary = "newest-first log entries from the dev ring, optionally filtered by min level",
         .params_shape = "{n?:number, level?:string}",
         .result_shape = "{entries:[{level:string,domain:string,msg:string}]}",
-        .frame_behavior = "any",
-        .side_effects = "none",
+        .fn = cmd_log_tail,
     },
     {
         .method = "perf.snapshot",
-        .group = "perf",
         .summary = "immediate current-frame perf view from nt_metrics' last frame (frame_ms/gpu_ms null until valid)",
         .params_shape = "{}",
         .result_shape = "{fps:number,frame_ms:number|null,cpu_ms:number,gpu_ms:number|null,draw_calls:number,user_counters:object}",
-        .frame_behavior = "any",
-        .side_effects = "none",
+        .fn = cmd_perf_snapshot,
     },
     {
         .method = "perf.stats",
-        .group = "perf",
         .summary = "windowed perf aggregates per channel (avg/median/p95/p99/p99_9) + fps-lows + over_budget_pct",
         .params_shape = "{channels?:[string], budget_ms?:number}",
         .result_shape = "{channels:object,user_channels:object,fps_low_1pct:number,fps_low_01pct:number,over_budget_pct:number,budget_ms:number}",
-        .frame_behavior = "any",
-        .side_effects = "none",
+        .fn = cmd_perf_stats,
     },
     {
         .method = "perf.reset",
-        .group = "perf",
         .summary = "clear the metrics window (counts -> 0) without tearing down state",
         .params_shape = "{}",
         .result_shape = "{reset:bool}",
-        .frame_behavior = "any",
-        .side_effects = "clears perf window",
+        .fn = cmd_perf_reset,
     },
     {
         .method = "entity.list",
-        .group = "entity",
         .summary = "live entities: core fields (id/index/generation/enabled) + each present component as a named group (empty {} when it has no describe); fully paginated with honest total; "
                    "component-set filter: has every `all` + at least one `any` + none of `none` (`component` is sugar for all:[x])",
         .params_shape = "{offset?:number, limit?:number, component?:string, all?:[string], any?:[string], none?:[string]}",
         .result_shape = "{total:number,entities:[{id,index,generation,enabled,<component>:{...}}]}",
-        .frame_behavior = "any",
-        .side_effects = "none",
+        .fn = cmd_entity_list,
     },
     {
         .method = "resource.list",
-        .group = "resource",
         .summary = "mounted packs (id/state/priority/asset_count); flat assets[] (capped, pack_id-filtered) when include_assets; paginated with total",
         .params_shape = "{offset?:number, limit?:number, pack_id?:number, include_assets?:bool}",
         .result_shape = "{total:number,packs:[{id,state,priority,asset_count}],assets?:[{resource_id:string,type,state,pack_index,blob_pins}],asset_total?:number,assets_truncated?:bool}",
-        .frame_behavior = "any",
-        .side_effects = "none",
+        .fn = cmd_resource_list,
     },
 };
 
-static const nt_devapi_handler_fn k_obs_handlers[] = {
-    cmd_log_tail, cmd_perf_snapshot, cmd_perf_stats, cmd_perf_reset, cmd_entity_list, cmd_resource_list,
-};
-_Static_assert(sizeof(k_obs_cmds) / sizeof(k_obs_cmds[0]) == sizeof(k_obs_handlers) / sizeof(k_obs_handlers[0]), "obs: descriptor/handler arrays must have equal length");
-
-void nt_devapi_register_obs(void) {
-    /* Engine-internal dup is a build-time bug -> assert NT_OK. Capture first: assert expressions must stay side-effect-free. */
-    int n = (int)(sizeof(k_obs_cmds) / sizeof(k_obs_cmds[0]));
-    for (int i = 0; i < n; i++) {
-        nt_result_t rr = nt_devapi_register(&k_obs_cmds[i], k_obs_handlers[i], NULL);
-        NT_ASSERT(rr == NT_OK);
-        (void)rr;
-    }
-}
+void nt_devapi_register_obs(void) { nt_devapi_register(k_obs_cmds, sizeof(k_obs_cmds) / sizeof(k_obs_cmds[0]), NULL); }
 
 #endif /* NT_DEVAPI_GROUP_OBS */

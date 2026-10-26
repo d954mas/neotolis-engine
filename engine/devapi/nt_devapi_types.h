@@ -16,33 +16,31 @@ typedef struct nt_devapi_error {
     const char *message;
 } nt_devapi_error;
 
-/* Fill err and return false, so a failing handler is one statement: return nt_devapi_fail(err, "bad_params", "...");
-   Both strings must outlive the response (static literals). */
-static inline bool nt_devapi_fail(nt_devapi_error *err, const char *code, const char *message) {
+/* Fill err and return false, so a failing handler is one statement: return nt_devapi_fail(err, "...");
+   nt_devapi_fail answers bad_params; nt_devapi_fail_code names another code. Both strings must outlive
+   the response (static literals or a static buffer). */
+static inline bool nt_devapi_fail_code(nt_devapi_error *err, const char *code, const char *message) {
     err->code = code;
     err->message = message;
     return false;
 }
 
-/* Self-describing command metadata: documentation strings the registry copies (strdup) at
-   registration. `method`, `summary` and `result_shape` are required. A NULL field takes its
-   default: `group` = the method's first dot segment (the whole method when it has no dot),
-   `params_shape` = "none", `frame_behavior` = "immediate", `side_effects` = "none". `group`
-   names the command's capability bundle; the `features` command lists the distinct groups. */
-typedef struct nt_devapi_command_desc {
+static inline bool nt_devapi_fail(nt_devapi_error *err, const char *message) { return nt_devapi_fail_code(err, "bad_params", message); }
+
+/* Command handler. Fills result_obj (a pre-created cJSON object) on success and returns true; on
+   failure fills err and returns false. params may be NULL. A handler never calls nt_devapi_submit
+   (dispatch asserts no re-entry). */
+typedef bool (*nt_devapi_handler_fn)(const cJSON *params, cJSON *result_obj, nt_devapi_error *err, void *user_data);
+
+/* One command: its handler plus the self-description `endpoints` / `command.describe` report.
+   summary says what the command does, including any side effect and whether it replies later. */
+typedef struct nt_devapi_command {
     const char *method;
-    const char *group;
     const char *summary;
     const char *params_shape;
     const char *result_shape;
-    const char *frame_behavior;
-    const char *side_effects;
-} nt_devapi_command_desc;
-
-/* Command handler. Fills result_obj (a pre-created cJSON object) on success and
-   returns true; on failure fills err and returns false. params may be NULL. A handler never
-   calls nt_devapi_submit (dispatch asserts no re-entry). */
-typedef bool (*nt_devapi_handler_fn)(const cJSON *params, cJSON *result_obj, nt_devapi_error *err, void *user_data);
+    nt_devapi_handler_fn fn;
+} nt_devapi_command;
 
 typedef void (*nt_devapi_hook_fn)(void);
 

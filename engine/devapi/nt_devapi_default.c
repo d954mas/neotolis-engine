@@ -1,8 +1,7 @@
 #include "devapi/nt_devapi_groups.h"
 
 /* The "register everything compiled in" bundle. A full host calls this once after nt_devapi_init();
-   the order is stable (core..recorder) so the self-describing `features` surface lists groups
-   predictably. A minimal host skips this and registers only the groups it needs (see
+   the order is stable (core..recorder) so `endpoints` lists commands predictably. A minimal host skips this and registers only the groups it needs (see
    nt_devapi_groups.h). Each call is gated by its group's compile flag, so a group-OFF build links
    no reference to that group's registrar (and pulls none of its providers). */
 void nt_devapi_register_default(void) {

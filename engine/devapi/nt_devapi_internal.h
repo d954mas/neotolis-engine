@@ -25,18 +25,13 @@ void devapi_add_null(cJSON *obj, const char *key);
    with bad_params and the given message, else write the parsed value to *out. */
 bool nt_devapi_parse_u32_param_exact(const cJSON *node, uint32_t max, nt_devapi_error *err, const char *message, uint32_t *out);
 bool nt_devapi_parse_u16_param_exact(const cJSON *node, uint16_t max, nt_devapi_error *err, const char *message, uint16_t *out);
+/* A bot float: a number finite as a double AND after float-narrowing (a finite double past FLT_MAX
+   narrows to inf and would poison hit-tests / deltas). Fails with bad_params and message. */
+bool nt_devapi_parse_f32_param(const cJSON *node, nt_devapi_error *err, const char *message, float *out);
 
-/* One registered command. The 7 descriptor strings are strdup-owned copies
-   freed at shutdown; handler + user_data are stored verbatim. */
+/* One registered command: the caller's static descriptor and its table's user_data, both by reference. */
 typedef struct nt_devapi_slot {
-    char *method;
-    char *group;
-    char *summary;
-    char *params_shape;
-    char *result_shape;
-    char *frame_behavior;
-    char *side_effects;
-    nt_devapi_handler_fn handler;
+    const nt_devapi_command *cmd;
     void *user_data;
 } nt_devapi_slot;
 
@@ -93,9 +88,5 @@ void nt_devapi_run_reset_hooks(void);
 int nt_devapi_registry_count(void);
 const nt_devapi_slot *nt_devapi_registry_slot(int index);
 const nt_devapi_slot *nt_devapi_registry_find(const char *method);
-
-/* True if slot[index]'s group first appears at index — lets `features` / engine.info emit
-   each distinct group once, derived from the registered commands. */
-bool nt_devapi_group_is_first(int index);
 
 #endif /* NT_DEVAPI_INTERNAL_H */

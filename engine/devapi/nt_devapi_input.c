@@ -1,4 +1,3 @@
-#include <math.h>
 #include <string.h>
 
 #include "app/nt_app.h" /* g_nt_app.frame — the advance clock the schedule ticks on. */
@@ -277,56 +276,15 @@ static bool pointer_type_from_name(const cJSON *t, uint8_t *out) {
     return true;
 }
 
-/* Range-check a bot-supplied pointer id before narrowing: a negative or out-of-range double cast
-   to uint32_t is UB. Rejects non-integral too. `cmd` names the command for the error message. */
-static bool parse_pointer_id(const cJSON *idj, const char *cmd, uint32_t *out, nt_devapi_error *err) {
-    double v = idj->valuedouble;
-    if (v < 0.0 || v > (double)UINT32_MAX || v != (double)(uint32_t)v) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, cmd);
-    }
-    *out = (uint32_t)v;
-    return true;
-}
-
 /* Validate a mouse-button mask against the advertised domain (bits {1,2,4} -> value in [0,7])
    before narrowing; a negative/oversized value would silently set phantom bits. Reads valuedouble
-   + an integrality test so a fractional mask (e.g. 2.5) is REJECTED, not truncated -- symmetric
-   with parse_pointer_id / parse_frame_count. */
+   + an integrality test so a fractional mask (e.g. 2.5) is REJECTED, not truncated. */
 static bool parse_button_mask(const cJSON *bj, const char *cmd, uint8_t *out, nt_devapi_error *err) {
     double v = bj->valuedouble;
     if (v < 0.0 || v > 7.0 || v != (double)(uint8_t)v) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, cmd);
+        return nt_devapi_fail(err, cmd);
     }
     *out = (uint8_t)v;
-    return true;
-}
-
-/* Range-check a non-negative integral frame count (hold / frame_stride) against [0, UINT16_MAX].
-   Reads valuedouble (not valueint) so a fractional or negative-fractional value (e.g. 2.9, -0.5)
-   is REJECTED, not silently truncated toward zero -- mirrors parse_pointer_id's integrality test. */
-static bool parse_frame_count(const cJSON *nj, const char *cmd, uint16_t *out, nt_devapi_error *err) {
-    double v = nj->valuedouble;
-    if (v < 0.0 || v > (double)UINT16_MAX || v != (double)(uint16_t)v) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, cmd);
-    }
-    *out = (uint16_t)v;
-    return true;
-}
-
-/* A bot float coordinate/delta (pointer x/y, wheel dx/dy, pressure): require a number whose double
-   AND float-narrowed form are finite. cJSON stores raw strtod doubles, so a huge finite double (e.g.
-   1e309 -> inf, or a finite value past FLT_MAX) would narrow to inf and poison hit-tests / deltas.
-   Mirrors time.set_scale's double + float-narrow isfinite check; never asserts on bot input. */
-static bool parse_finite_coord(const cJSON *nj, const char *cmd, float *out, nt_devapi_error *err) {
-    if (nj == NULL || !cJSON_IsNumber(nj)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, cmd);
-    }
-    double v = nj->valuedouble;
-    float fv = (float)v;
-    if (!isfinite(v) || !isfinite(fv)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, cmd);
-    }
-    *out = fv;
     return true;
 }
 
@@ -339,35 +297,35 @@ static bool cmd_input_key(const cJSON *params, cJSON *result, nt_devapi_error *e
     (void)ud;
     const cJSON *k = cJSON_GetObjectItemCaseSensitive(params, "key");
     if (!cJSON_IsString(k) || k->valuestring == NULL) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.key: key must be a string");
+        return nt_devapi_fail(err, "input.key: key must be a string");
     }
     nt_key_t key;
     if (!nt_input_key_from_name(k->valuestring, &key)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.key: unknown key name");
+        return nt_devapi_fail(err, "input.key: unknown key name");
     }
     const cJSON *hold = cJSON_GetObjectItemCaseSensitive(params, "hold");
     if (hold != NULL) {
         if (!cJSON_IsNumber(hold)) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.key: hold must be a number");
+            return nt_devapi_fail(err, "input.key: hold must be a number");
         }
         uint16_t h;
-        if (!parse_frame_count(hold, "input.key: hold must be an integer in [0, 65535]", &h, err)) {
+        if (!nt_devapi_parse_u16_param_exact(hold, UINT16_MAX, err, "input.key: hold must be an integer in [0, 65535]", &h)) {
             return false;
         }
         if (!sched_tap(key, h)) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.key: inject schedule overflow");
+            return nt_devapi_fail(err, "input.key: inject schedule overflow");
         }
     } else {
         bool down = true;
         const cJSON *d = cJSON_GetObjectItemCaseSensitive(params, "down");
         if (d != NULL) {
             if (!cJSON_IsBool(d)) {
-                return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.key: down must be a bool");
+                return nt_devapi_fail(err, "input.key: down must be a bool");
             }
             down = cJSON_IsTrue(d);
         }
         if (!sched_key(key, down, 0)) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.key: inject schedule overflow");
+            return nt_devapi_fail(err, "input.key: inject schedule overflow");
         }
     }
     devapi_add_bool(result, "ok", true);
@@ -379,7 +337,7 @@ static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_erro
     (void)ud;
     const cJSON *a = cJSON_GetObjectItemCaseSensitive(params, "action");
     if (!cJSON_IsString(a) || a->valuestring == NULL) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.pointer: action must be a string");
+        return nt_devapi_fail(err, "input.pointer: action must be a string");
     }
     nt_inject_kind_t kind;
     if (strcmp(a->valuestring, "down") == 0) {
@@ -389,14 +347,14 @@ static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_erro
     } else if (strcmp(a->valuestring, "up") == 0) {
         kind = NT_INJECT_POINTER_UP;
     } else {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.pointer: action must be 'down', 'move' or 'up'");
+        return nt_devapi_fail(err, "input.pointer: action must be 'down', 'move' or 'up'");
     }
     const cJSON *idj = cJSON_GetObjectItemCaseSensitive(params, "id");
     if (!cJSON_IsNumber(idj)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.pointer: id must be a number");
+        return nt_devapi_fail(err, "input.pointer: id must be a number");
     }
     uint32_t id;
-    if (!parse_pointer_id(idj, "input.pointer: id out of range", &id, err)) {
+    if (!nt_devapi_parse_u32_param_exact(idj, UINT32_MAX, err, "input.pointer: id out of range", &id)) {
         return false;
     }
     float x = 0.0F;
@@ -404,27 +362,28 @@ static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_erro
     if (kind != NT_INJECT_POINTER_UP) {
         const cJSON *xj = cJSON_GetObjectItemCaseSensitive(params, "x");
         const cJSON *yj = cJSON_GetObjectItemCaseSensitive(params, "y");
-        if (!parse_finite_coord(xj, "input.pointer: x must be a finite number for down/move", &x, err) || !parse_finite_coord(yj, "input.pointer: y must be a finite number for down/move", &y, err)) {
+        if (!nt_devapi_parse_f32_param(xj, err, "input.pointer: x must be a finite number for down/move", &x) ||
+            !nt_devapi_parse_f32_param(yj, err, "input.pointer: y must be a finite number for down/move", &y)) {
             return false;
         }
         y = flip_y_up_to_device(y);
     }
     uint8_t type;
     if (!pointer_type_from_name(cJSON_GetObjectItemCaseSensitive(params, "type"), &type)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.pointer: type must be 'mouse', 'touch' or 'pen'");
+        return nt_devapi_fail(err, "input.pointer: type must be 'mouse', 'touch' or 'pen'");
     }
     uint8_t buttons = 0;
     const cJSON *bj = cJSON_GetObjectItemCaseSensitive(params, "buttons");
     if (bj != NULL) {
         if (!cJSON_IsNumber(bj)) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.pointer: buttons must be a number");
+            return nt_devapi_fail(err, "input.pointer: buttons must be a number");
         }
         if (!parse_button_mask(bj, "input.pointer: buttons out of range [0,7]", &buttons, err)) {
             return false;
         }
     }
     if (!sched_pointer(kind, id, x, y, 1.0F, type, buttons, 0)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.pointer: inject schedule overflow");
+        return nt_devapi_fail(err, "input.pointer: inject schedule overflow");
     }
     devapi_add_number(result, "queued", 1.0);
     return true;
@@ -437,7 +396,7 @@ static bool cmd_input_move(const cJSON *params, cJSON *result, nt_devapi_error *
     const cJSON *yj = cJSON_GetObjectItemCaseSensitive(params, "y");
     float x;
     float y;
-    if (!parse_finite_coord(xj, "input.move: x must be a finite number", &x, err) || !parse_finite_coord(yj, "input.move: y must be a finite number", &y, err)) {
+    if (!nt_devapi_parse_f32_param(xj, err, "input.move: x must be a finite number", &x) || !nt_devapi_parse_f32_param(yj, err, "input.move: y must be a finite number", &y)) {
         return false;
     }
     y = flip_y_up_to_device(y);
@@ -445,18 +404,18 @@ static bool cmd_input_move(const cJSON *params, cJSON *result, nt_devapi_error *
     const cJSON *idj = cJSON_GetObjectItemCaseSensitive(params, "id");
     if (idj != NULL) {
         if (!cJSON_IsNumber(idj)) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.move: id must be a number");
+            return nt_devapi_fail(err, "input.move: id must be a number");
         }
-        if (!parse_pointer_id(idj, "input.move: id out of range", &id, err)) {
+        if (!nt_devapi_parse_u32_param_exact(idj, UINT32_MAX, err, "input.move: id out of range", &id)) {
             return false;
         }
     }
     uint8_t type;
     if (!pointer_type_from_name(cJSON_GetObjectItemCaseSensitive(params, "type"), &type)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.move: type must be 'mouse', 'touch' or 'pen'");
+        return nt_devapi_fail(err, "input.move: type must be 'mouse', 'touch' or 'pen'");
     }
     if (!sched_pointer(NT_INJECT_POINTER_MOVE, id, x, y, 1.0F, type, 0, 0)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.move: inject schedule overflow");
+        return nt_devapi_fail(err, "input.move: inject schedule overflow");
     }
     devapi_add_number(result, "queued", 1.0);
     return true;
@@ -469,7 +428,7 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
     const cJSON *yj = cJSON_GetObjectItemCaseSensitive(params, "y");
     float x;
     float y;
-    if (!parse_finite_coord(xj, "input.click: x must be a finite number", &x, err) || !parse_finite_coord(yj, "input.click: y must be a finite number", &y, err)) {
+    if (!nt_devapi_parse_f32_param(xj, err, "input.click: x must be a finite number", &x) || !nt_devapi_parse_f32_param(yj, err, "input.click: y must be a finite number", &y)) {
         return false;
     }
     y = flip_y_up_to_device(y);
@@ -477,9 +436,9 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
     const cJSON *idj = cJSON_GetObjectItemCaseSensitive(params, "id");
     if (idj != NULL) {
         if (!cJSON_IsNumber(idj)) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.click: id must be a number");
+            return nt_devapi_fail(err, "input.click: id must be a number");
         }
-        if (!parse_pointer_id(idj, "input.click: id out of range", &id, err)) {
+        if (!nt_devapi_parse_u32_param_exact(idj, UINT32_MAX, err, "input.click: id out of range", &id)) {
             return false;
         }
     }
@@ -487,7 +446,7 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
     const cJSON *bj = cJSON_GetObjectItemCaseSensitive(params, "button");
     if (bj != NULL) {
         if (!cJSON_IsNumber(bj)) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.click: button must be a number mask");
+            return nt_devapi_fail(err, "input.click: button must be a number mask");
         }
         if (!parse_button_mask(bj, "input.click: button out of range [0,7]", &buttons, err)) {
             return false;
@@ -497,21 +456,21 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
     const cJSON *hj = cJSON_GetObjectItemCaseSensitive(params, "hold");
     if (hj != NULL) {
         if (!cJSON_IsNumber(hj)) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.click: hold must be a number");
+            return nt_devapi_fail(err, "input.click: hold must be a number");
         }
-        if (!parse_frame_count(hj, "input.click: hold must be an integer in [0, 65535]", &hold, err)) {
+        if (!nt_devapi_parse_u16_param_exact(hj, UINT16_MAX, err, "input.click: hold must be an integer in [0, 65535]", &hold)) {
             return false;
         }
     }
     /* whole-or-nothing: preflight both entries (see sched_reserve). */
     if (!sched_can_reserve(2U)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.click: inject schedule overflow");
+        return nt_devapi_fail(err, "input.click: inject schedule overflow");
     }
     if (!sched_pointer(NT_INJECT_POINTER_DOWN, id, x, y, 1.0F, (uint8_t)NT_POINTER_MOUSE, buttons, 0)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.click: inject schedule overflow");
+        return nt_devapi_fail(err, "input.click: inject schedule overflow");
     }
     if (!sched_pointer(NT_INJECT_POINTER_UP, id, x, y, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, hold)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.click: inject schedule overflow");
+        return nt_devapi_fail(err, "input.click: inject schedule overflow");
     }
     devapi_add_number(result, "queued", 2.0);
     return true;
@@ -526,10 +485,10 @@ static bool cmd_input_wheel(const cJSON *params, cJSON *result, nt_devapi_error 
     float dy = 0.0F;
     const cJSON *dxj = cJSON_GetObjectItemCaseSensitive(params, "dx");
     const cJSON *dyj = cJSON_GetObjectItemCaseSensitive(params, "dy");
-    if (dxj != NULL && !parse_finite_coord(dxj, "input.wheel: dx must be a finite number", &dx, err)) {
+    if (dxj != NULL && !nt_devapi_parse_f32_param(dxj, err, "input.wheel: dx must be a finite number", &dx)) {
         return false;
     }
-    if (dyj != NULL && !parse_finite_coord(dyj, "input.wheel: dy must be a finite number", &dy, err)) {
+    if (dyj != NULL && !nt_devapi_parse_f32_param(dyj, err, "input.wheel: dy must be a finite number", &dy)) {
         return false;
     }
     const cJSON *xj = cJSON_GetObjectItemCaseSensitive(params, "x");
@@ -538,18 +497,18 @@ static bool cmd_input_wheel(const cJSON *params, cJSON *result, nt_devapi_error 
         /* Positioned scroll: x AND y both required, both finite. */
         float x;
         float y;
-        if (!parse_finite_coord(xj, "input.wheel: x must be a finite number", &x, err) || !parse_finite_coord(yj, "input.wheel: y must be a finite number", &y, err)) {
+        if (!nt_devapi_parse_f32_param(xj, err, "input.wheel: x must be a finite number", &x) || !nt_devapi_parse_f32_param(yj, err, "input.wheel: y must be a finite number", &y)) {
             return false;
         }
         y = flip_y_up_to_device(y); /* positioned scroll: Y-up in -> device Y-down for the MOVE entry. */
         /* whole-or-nothing: reserve MOVE + wheel together (see sched_reserve). */
         if (!sched_can_reserve(2U)) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.wheel: inject schedule overflow");
+            return nt_devapi_fail(err, "input.wheel: inject schedule overflow");
         }
         sched_pointer(NT_INJECT_POINTER_MOVE, NT_INPUT_INJECT_POINTER_ID_BASE, x, y, 1.0F, (uint8_t)NT_POINTER_MOUSE, 0, 0);
         sched_wheel(dx, dy, 0);
     } else if (!sched_wheel(dx, dy, 0)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.wheel: inject schedule overflow");
+        return nt_devapi_fail(err, "input.wheel: inject schedule overflow");
     }
     devapi_add_bool(result, "ok", true);
     return true;
@@ -562,31 +521,31 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
     (void)ud;
     const cJSON *idj = cJSON_GetObjectItemCaseSensitive(params, "id");
     if (!cJSON_IsNumber(idj)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.gesture: id must be a number");
+        return nt_devapi_fail(err, "input.gesture: id must be a number");
     }
     uint32_t id;
-    if (!parse_pointer_id(idj, "input.gesture: id out of range", &id, err)) {
+    if (!nt_devapi_parse_u32_param_exact(idj, UINT32_MAX, err, "input.gesture: id out of range", &id)) {
         return false;
     }
     uint8_t type;
     if (!pointer_type_from_name(cJSON_GetObjectItemCaseSensitive(params, "type"), &type)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.gesture: type must be 'mouse', 'touch' or 'pen'");
+        return nt_devapi_fail(err, "input.gesture: type must be 'mouse', 'touch' or 'pen'");
     }
     const cJSON *points = cJSON_GetObjectItemCaseSensitive(params, "points");
     if (!cJSON_IsArray(points)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.gesture: points must be an array of [x,y]");
+        return nt_devapi_fail(err, "input.gesture: points must be an array of [x,y]");
     }
     int npoints = cJSON_GetArraySize(points);
     if (npoints < 1) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.gesture: points must have at least one [x,y]");
+        return nt_devapi_fail(err, "input.gesture: points must have at least one [x,y]");
     }
     uint16_t stride = 1;
     const cJSON *sj = cJSON_GetObjectItemCaseSensitive(params, "frame_stride");
     if (sj != NULL) {
         if (!cJSON_IsNumber(sj)) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.gesture: frame_stride must be a number");
+            return nt_devapi_fail(err, "input.gesture: frame_stride must be a number");
         }
-        if (!parse_frame_count(sj, "input.gesture: frame_stride must be an integer in [0, 65535]", &stride, err)) {
+        if (!nt_devapi_parse_u16_param_exact(sj, UINT16_MAX, err, "input.gesture: frame_stride must be an integer in [0, 65535]", &stride)) {
             return false;
         }
     }
@@ -595,11 +554,11 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
     const cJSON *p = NULL;
     cJSON_ArrayForEach(p, points) {
         if (!cJSON_IsArray(p) || cJSON_GetArraySize(p) != 2) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.gesture: each point must be [x,y]");
+            return nt_devapi_fail(err, "input.gesture: each point must be [x,y]");
         }
         float tmp;
-        if (!parse_finite_coord(cJSON_GetArrayItem(p, 0), "input.gesture: point x must be a finite number", &tmp, err) ||
-            !parse_finite_coord(cJSON_GetArrayItem(p, 1), "input.gesture: point y must be a finite number", &tmp, err)) {
+        if (!nt_devapi_parse_f32_param(cJSON_GetArrayItem(p, 0), err, "input.gesture: point x must be a finite number", &tmp) ||
+            !nt_devapi_parse_f32_param(cJSON_GetArrayItem(p, 1), err, "input.gesture: point y must be a finite number", &tmp)) {
             return false;
         }
     }
@@ -607,19 +566,19 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
        Compute in a wider type so the multiplication itself can't overflow int (untrusted npoints). */
     int64_t last_offset = (int64_t)(npoints - 1) * (int64_t)stride;
     if (last_offset > UINT16_MAX) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.gesture: span (points*frame_stride) exceeds the frame-offset range");
+        return nt_devapi_fail(err, "input.gesture: span (points*frame_stride) exceeds the frame-offset range");
     }
     /* whole-or-nothing: reserve DOWN + (npoints-1) moves + UP up front (see sched_reserve).
        DOWN@0 carries point[0], so moves cover points[1..n-1] only. */
     if (!sched_can_reserve((uint32_t)npoints + 1U)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.gesture: inject schedule overflow");
+        return nt_devapi_fail(err, "input.gesture: inject schedule overflow");
     }
     /* down@0 carrying first point, a move per SUBSEQUENT point at its frame offset, up after the last. */
     const cJSON *first = cJSON_GetArrayItem(points, 0);
     float fx = (float)cJSON_GetArrayItem(first, 0)->valuedouble;
     float fy = flip_y_up_to_device((float)cJSON_GetArrayItem(first, 1)->valuedouble); /* each point's Y is Y-up. */
     if (!sched_pointer(NT_INJECT_POINTER_DOWN, id, fx, fy, 1.0F, type, 1U, 0)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.gesture: inject schedule overflow");
+        return nt_devapi_fail(err, "input.gesture: inject schedule overflow");
     }
     int queued = 1;
     int idx = 0;
@@ -634,13 +593,13 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
            already-validated [0, UINT16_MAX] span (idx <= npoints-1 => at <= last_offset). */
         uint16_t at = (uint16_t)((int64_t)idx * (int64_t)stride);
         if (!sched_pointer(NT_INJECT_POINTER_MOVE, id, mx, my, 1.0F, type, 1U, at)) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.gesture: inject schedule overflow");
+            return nt_devapi_fail(err, "input.gesture: inject schedule overflow");
         }
         queued++;
         idx++;
     }
     if (!sched_pointer(NT_INJECT_POINTER_UP, id, 0.0F, 0.0F, 0.0F, type, 0, (uint16_t)last_offset)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.gesture: inject schedule overflow");
+        return nt_devapi_fail(err, "input.gesture: inject schedule overflow");
     }
     queued++;
     devapi_add_number(result, "queued", (double)queued);
@@ -652,7 +611,7 @@ static bool cmd_input_button(const cJSON *params, cJSON *result, nt_devapi_error
     (void)ud;
     const cJSON *bj = cJSON_GetObjectItemCaseSensitive(params, "buttons");
     if (!cJSON_IsNumber(bj)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.button: buttons must be a number mask");
+        return nt_devapi_fail(err, "input.button: buttons must be a number mask");
     }
     uint8_t buttons;
     if (!parse_button_mask(bj, "input.button: buttons out of range [0,7]", &buttons, err)) {
@@ -662,15 +621,15 @@ static bool cmd_input_button(const cJSON *params, cJSON *result, nt_devapi_error
     const cJSON *idj = cJSON_GetObjectItemCaseSensitive(params, "id");
     if (idj != NULL) {
         if (!cJSON_IsNumber(idj)) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.button: id must be a number");
+            return nt_devapi_fail(err, "input.button: id must be a number");
         }
-        if (!parse_pointer_id(idj, "input.button: id out of range", &id, err)) {
+        if (!nt_devapi_parse_u32_param_exact(idj, UINT32_MAX, err, "input.button: id out of range", &id)) {
             return false;
         }
     }
     /* Mask applies at the slot's apply-time position (schedule order), so a queued move is honored. */
     if (!sched_buttons(id, buttons, 0)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.button: inject schedule overflow");
+        return nt_devapi_fail(err, "input.button: inject schedule overflow");
     }
     devapi_add_bool(result, "ok", true);
     return true;
@@ -680,7 +639,7 @@ static bool cmd_input_set_player_enabled(const cJSON *params, cJSON *result, nt_
     (void)ud;
     const cJSON *e = cJSON_GetObjectItemCaseSensitive(params, "enabled");
     if (!cJSON_IsBool(e)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.set_player_enabled: enabled must be a bool");
+        return nt_devapi_fail(err, "input.set_player_enabled: enabled must be a bool");
     }
     bool enabled = cJSON_IsTrue(e);
     nt_input_set_player_enabled(enabled);
@@ -694,7 +653,7 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
     (void)ud;
     const cJSON *t = cJSON_GetObjectItemCaseSensitive(params, "text");
     if (!cJSON_IsString(t) || t->valuestring == NULL) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.text: text must be a string");
+        return nt_devapi_fail(err, "input.text: text must be a string");
     }
     const unsigned char *s = (const unsigned char *)t->valuestring;
     /* Bounded by the schedule cap: more codepoints than that can never enqueue whole. */
@@ -717,12 +676,12 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
             cp = c & 0x07U;
             extra = 3;
         } else {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.text: malformed UTF-8 lead byte");
+            return nt_devapi_fail(err, "input.text: malformed UTF-8 lead byte");
         }
         s++;
         for (uint32_t i = 0; i < extra; i++) {
             if ((*s & 0xC0U) != 0x80U) {
-                return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.text: malformed UTF-8 continuation byte");
+                return nt_devapi_fail(err, "input.text: malformed UTF-8 continuation byte");
             }
             cp = (cp << 6U) | (*s & 0x3FU);
             s++;
@@ -732,10 +691,10 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
            never produces these; reject untrusted input -> bad_params (never assert). */
         static const uint32_t k_min_cp[4] = {0x0U, 0x80U, 0x800U, 0x10000U};
         if (cp < k_min_cp[extra] || cp > 0x10FFFFU || (cp >= 0xD800U && cp <= 0xDFFFU)) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.text: invalid UTF-8");
+            return nt_devapi_fail(err, "input.text: invalid UTF-8");
         }
         if (n >= NT_DEVAPI_INPUT_SCHED_MAX) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.text: too many codepoints (exceeds inject schedule)");
+            return nt_devapi_fail(err, "input.text: too many codepoints (exceeds inject schedule)");
         }
         cps[n] = cp;
         n++;
@@ -747,7 +706,7 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
         return true;
     }
     if (!sched_text(cps, n)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.text: exceeds char-ring capacity (32)");
+        return nt_devapi_fail(err, "input.text: exceeds char-ring capacity (32)");
     }
     devapi_add_number(result, "queued", (double)n);
     return true;
@@ -761,11 +720,11 @@ static bool cmd_input_state(const cJSON *params, cJSON *result, nt_devapi_error 
     const cJSON *k = cJSON_GetObjectItemCaseSensitive(params, "key");
     if (k != NULL) {
         if (!cJSON_IsString(k) || k->valuestring == NULL) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.state: key must be a string");
+            return nt_devapi_fail(err, "input.state: key must be a string");
         }
         nt_key_t key;
         if (!nt_input_key_from_name(k->valuestring, &key)) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.state: unknown key name");
+            return nt_devapi_fail(err, "input.state: unknown key name");
         }
         devapi_add_bool(result, "down", nt_input_key_is_down(key));
         devapi_add_bool(result, "pressed", nt_input_key_is_pressed(key));
@@ -774,7 +733,7 @@ static bool cmd_input_state(const cJSON *params, cJSON *result, nt_devapi_error 
     const cJSON *pt = cJSON_GetObjectItemCaseSensitive(params, "pop_text");
     if (pt != NULL) {
         if (!cJSON_IsBool(pt)) {
-            return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "input.state: pop_text must be a bool");
+            return nt_devapi_fail(err, "input.state: pop_text must be a bool");
         }
         if (cJSON_IsTrue(pt)) {
             cJSON *cps = cJSON_AddArrayToObject(result, "codepoints");
@@ -794,117 +753,86 @@ static bool cmd_input_state(const cJSON *params, cJSON *result, nt_devapi_error 
 }
 // #endregion
 
-static const nt_devapi_command_desc k_input_cmds[] = {
+static const nt_devapi_command k_input_cmds[] = {
     {
         .method = "input.key",
-        .group = "input",
         .summary = "inject a key edge (down default true) OR a tap (hold frames -> down@0 + up@hold)",
         .params_shape = "{key:string, down?:bool, hold?:number}",
         .result_shape = "{ok:bool}",
-        .frame_behavior = "any",
-        .side_effects = "enqueues a synthetic key event",
+        .fn = cmd_input_key,
     },
     {
         .method = "input.pointer",
-        .group = "input",
         .summary = "the pointer primitive: action down/move/up on a given id (default mouse type); x/y are Y-up (origin bottom-left), framebuffer px — same convention as ui.*",
         .params_shape = "{action:string, id:number, x?:number, y?:number, type?:string, buttons?:number}, origin:bottom-left, y_axis:up, space:framebuffer-px",
         .result_shape = "{queued:number}",
-        .frame_behavior = "any",
-        .side_effects = "enqueues a synthetic pointer event",
+        .fn = cmd_input_pointer,
     },
     {
         .method = "input.move",
-        .group = "input",
         .summary = "sugar: pointer move on the default mouse slot (reserved id); x/y are Y-up (origin bottom-left), framebuffer px",
         .params_shape = "{x:number, y:number, id?:number, type?:string}, origin:bottom-left, y_axis:up, space:framebuffer-px",
         .result_shape = "{queued:number}",
-        .frame_behavior = "any",
-        .side_effects = "enqueues a synthetic pointer move",
+        .fn = cmd_input_move,
     },
     {
         .method = "input.click",
-        .group = "input",
         .summary = "sugar: pointer down@0 + up@hold (2 entries) on the mouse slot; hold default 1 frame, 0 = same-frame; x/y are Y-up (origin bottom-left), framebuffer px",
         .params_shape = "{x:number, y:number, button?:number, id?:number, hold?:number}, origin:bottom-left, y_axis:up, space:framebuffer-px",
         .result_shape = "{queued:number}",
-        .frame_behavior = "any",
-        .side_effects = "enqueues a synthetic pointer down+up",
+        .fn = cmd_input_click,
     },
     {
         .method = "input.wheel",
-        .group = "input",
         .summary = "scroll the mouse slot (notches); with x/y scrolls AT (x,y), else at the slot's apply-time position (no slot -> no-op); x/y are Y-up (origin bottom-left), framebuffer px; "
                    "dx/dy are notch deltas (not coords)",
         .params_shape = "{dx?:number, dy?:number, x?:number, y?:number}, origin:bottom-left, y_axis:up, space:framebuffer-px",
         .result_shape = "{ok:bool}",
-        .frame_behavior = "any",
-        .side_effects = "enqueues a synthetic wheel event (with x/y, a preceding move)",
+        .fn = cmd_input_wheel,
     },
     {
         .method = "input.gesture",
-        .group = "input",
         .summary = "sugar: down@0 + a move per point (frame_stride apart) + up; NO interpolation; each point's x/y is Y-up (origin bottom-left), framebuffer px",
         .params_shape = "{id:number, type?:string, points:[[x,y]], frame_stride?:number}, origin:bottom-left, y_axis:up, space:framebuffer-px",
         .result_shape = "{queued:number}",
-        .frame_behavior = "any",
-        .side_effects = "enqueues an ordered multi-frame pointer gesture",
+        .fn = cmd_input_gesture,
     },
     {
         .method = "input.button",
-        .group = "input",
         .summary = "set the mouse-button mask {1,2,4} on the given id (default reserved mouse slot)",
         .params_shape = "{buttons:number, id?:number}",
         .result_shape = "{ok:bool}",
-        .frame_behavior = "any",
-        .side_effects = "enqueues a synthetic button-mask pointer event",
+        .fn = cmd_input_button,
     },
     {
         .method = "input.set_player_enabled",
-        .group = "input",
         .summary = "toggle the player-input gate (false suppresses the real device; inject still flows)",
         .params_shape = "{enabled:bool}",
         .result_shape = "{enabled:bool}",
-        .frame_behavior = "any",
-        .side_effects = "toggles the player input gate",
+        .fn = cmd_input_set_player_enabled,
     },
     {
         .method = "input.text",
-        .group = "input",
         .summary = "decode a UTF-8 string -> codepoints and enqueue them into the char ring",
         .params_shape = "{text:string}",
         .result_shape = "{queued:number}",
-        .frame_behavior = "any",
-        .side_effects = "enqueues synthetic typed codepoints",
+        .fn = cmd_input_text,
     },
     {
         .method = "input.state",
-        .group = "input",
-        .summary = "IMMEDIATE read of polled input state (stale until a sim-advance polls the inject queue)",
+        .summary = "IMMEDIATE read of polled input state (stale until a sim-advance polls the inject queue); pop_text:true drains (consumes) the char ring",
         .params_shape = "{key?:string, pop_text?:bool}",
         .result_shape = "{down?:bool, pressed?:bool, released?:bool, codepoints?:[number]}",
-        .frame_behavior = "any",
-        .side_effects = "pop_text:true DRAINS (consumes) the char ring",
+        .fn = cmd_input_state,
     },
 };
-
-static const nt_devapi_handler_fn k_input_handlers[] = {
-    cmd_input_key, cmd_input_pointer, cmd_input_move, cmd_input_click, cmd_input_wheel, cmd_input_gesture, cmd_input_button, cmd_input_set_player_enabled, cmd_input_text, cmd_input_state,
-};
-_Static_assert(sizeof(k_input_cmds) / sizeof(k_input_cmds[0]) == sizeof(k_input_handlers) / sizeof(k_input_handlers[0]), "input: descriptor/handler arrays must have equal length");
 
 void nt_devapi_register_input(void) {
     nt_devapi_input_reset(); /* fresh schedule + seeded advance clock each init->register. */
     /* The only core coupling point: core/net call these generic hooks, never the group symbols. */
     nt_devapi_register_tick(nt_devapi_input_update);
     nt_devapi_register_reset(nt_devapi_input_reset);
-    /* Engine-internal dup is a build-time bug → assert NT_OK. Capture first: assert expressions must stay side-effect-free. */
-    int n = (int)(sizeof(k_input_cmds) / sizeof(k_input_cmds[0]));
-    for (int i = 0; i < n; i++) {
-        nt_result_t rr = nt_devapi_register(&k_input_cmds[i], k_input_handlers[i], NULL);
-        NT_ASSERT(rr == NT_OK);
-        (void)rr;
-    }
+    nt_devapi_register(k_input_cmds, sizeof(k_input_cmds) / sizeof(k_input_cmds[0]), NULL);
 }
 
 #endif /* NT_DEVAPI_GROUP_INPUT */

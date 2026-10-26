@@ -99,7 +99,7 @@ static cJSON *parse_ok(const char *resp) {
 
 static cJSON *result_of(cJSON *root) { return cJSON_GetObjectItemCaseSensitive(root, "result"); }
 
-/* ---- discovery: the four obs group names are listed ---- */
+/* ---- discovery: the obs commands are listed ---- */
 
 static bool endpoints_has_method(const char *method) {
     const char *resp = nt_devapi_submit("{\"method\":\"endpoints\",\"params\":{\"detail\":true}}");

@@ -30,8 +30,7 @@ static bool cmd_view(const cJSON *params, cJSON *result, nt_devapi_error *err, v
     return true;
 }
 
-/* Engine-identity facts: the commit-qualified version (nt_version) and build/preset (nt_core).
-   The active command-group list lives in `features`, so engine.info doesn't duplicate it. */
+/* Engine-identity facts: the commit-qualified version (nt_version) and build/preset (nt_core). */
 static bool cmd_engine_info(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
     (void)err;
@@ -42,47 +41,30 @@ static bool cmd_engine_info(const cJSON *params, cJSON *result, nt_devapi_error 
     return true;
 }
 
-static const nt_devapi_command_desc k_core_cmds[] = {
+static const nt_devapi_command k_core_cmds[] = {
     {
         .method = "ping",
-        .group = "core",
         .summary = "liveness check",
         .params_shape = "{}",
         .result_shape = "{pong:bool}",
-        .frame_behavior = "any",
-        .side_effects = "none",
+        .fn = cmd_ping,
     },
     {
         .method = "engine.info",
-        .group = "core",
         .summary = "engine version / build / preset",
         .params_shape = "{}",
         .result_shape = "{version:string,build:string,preset:string}",
-        .frame_behavior = "any",
-        .side_effects = "none",
+        .fn = cmd_engine_info,
     },
     {
         .method = "view",
-        .group = "core",
         .summary = "framebuffer + logical size + device pixel ratio",
         .params_shape = "{}",
         .result_shape = "{fb_width:number,fb_height:number,width:number,height:number,dpr:number}",
-        .frame_behavior = "any",
-        .side_effects = "none",
+        .fn = cmd_view,
     },
 };
 
-static const nt_devapi_handler_fn k_core_handlers[] = {cmd_ping, cmd_engine_info, cmd_view};
-_Static_assert(sizeof(k_core_cmds) / sizeof(k_core_cmds[0]) == sizeof(k_core_handlers) / sizeof(k_core_handlers[0]), "core: descriptor/handler arrays must have equal length");
-
-void nt_devapi_register_core(void) {
-    /* Engine-internal dup is a build-time bug → assert NT_OK. Capture first: assert expressions must stay side-effect-free. */
-    int n = (int)(sizeof(k_core_cmds) / sizeof(k_core_cmds[0]));
-    for (int i = 0; i < n; i++) {
-        nt_result_t rr = nt_devapi_register(&k_core_cmds[i], k_core_handlers[i], NULL);
-        NT_ASSERT(rr == NT_OK);
-        (void)rr;
-    }
-}
+void nt_devapi_register_core(void) { nt_devapi_register(k_core_cmds, sizeof(k_core_cmds) / sizeof(k_core_cmds[0]), NULL); }
 
 #endif /* NT_DEVAPI_GROUP_CORE */

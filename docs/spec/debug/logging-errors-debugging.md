@@ -209,9 +209,9 @@ Recommended stats: frame time, fps, cpu/gpu time, draw call count, plus any game
 
 **Security model — native vs web.** This is the headline: **there is no open devapi port in the browser.** On native, the listener is a **loopback `127.0.0.1`-only** socket — never reachable off the machine. On web, there is **no listener at all**: `window.__devapi` is callable only by **same-page JS** in the same origin, and only when the build defines `NT_DEVAPI_ENABLED` (OFF by default — with it OFF the whole `engine/devapi` subdir is compile-excluded, so a shipped web build carries zero devapi code or symbols). A devapi-enabled web build opens no network surface; an attacker would already need to be running same-origin script in the page.
 
-**Self-describing registry.** Commands are registered once into a fixed-size table, each with a 7-field descriptor (`method`, `group`, `summary`, `params_shape`, `result_shape`, `frame_behavior`, `side_effects`). `method`, `summary` and `result_shape` are required; a NULL field takes its default at registration, so a descriptor lists only what is specific to the command: `group` is the method's first dot segment (the whole method when it has no dot; `game.skills.learn` → `game`), `params_shape` is `none`, `frame_behavior` is `immediate`, `side_effects` is `none`. An omitted field therefore claims the trivial value, and discovery reports it as given. The discovery commands (`endpoints`, `command.describe`, `features`) expose the whole surface so a client reads it without source. A game registers `game.*` commands (group `game` by default) through the public API with zero engine edits. `features` lists the distinct `group` values across all registered commands — which groups exist depends on which commands are compiled in (engine) or registered at runtime (game).
+**Self-describing registry.** A group or game registers a static table of commands in one call: `nt_devapi_register(cmds, count, user_data)`. Each `nt_devapi_command` is `{method, summary, params_shape, result_shape, fn}`; every field is required, and the table, its strings and `user_data` are stored by reference until shutdown (no copies, no heap). Every handler in the table receives the table's `user_data`. A duplicate method asserts. `summary` carries what a client needs beyond the shapes: any side effect, and whether the command replies later (a deferred command says "replies once ..." or "at the next pre-swap"). The discovery commands (`endpoints`, `command.describe`) expose the whole surface so a client reads it without source; which commands exist depends on which groups are compiled in (engine) and what the game registers. A game registers its `game.*` commands through the public API with zero engine edits.
 
-**Envelope.** Each request returns `{ok:true,result}` or `{ok:false,error:{code,message}}`, echoes `request_id` unchanged, and a JSON-array line runs as an ordered batch with continue-on-error. A **deferred** command emits no synchronous envelope — its envelope (the result, its own error, or `stalled`) arrives later from the drain; a deferred command is **not** allowed inside a batch (it is rejected with a `bad_params` entry, since a batch is one ordered response array). Core error codes: `bad_params`, `unknown_method`, `busy`, `stalled`; a group lists its own codes in its section. A failing handler fills its `nt_devapi_error` and returns false in one statement: `return nt_devapi_fail(err, "bad_params", "...");` (both strings static).
+**Envelope.** Each request returns `{ok:true,result}` or `{ok:false,error:{code,message}}`, echoes `request_id` unchanged, and a JSON-array line runs as an ordered batch with continue-on-error. A **deferred** command emits no synchronous envelope — its envelope (the result, its own error, or `stalled`) arrives later from the drain; a deferred command is **not** allowed inside a batch (it is rejected with a `bad_params` entry, since a batch is one ordered response array). Core error codes: `bad_params`, `unknown_method`, `busy`, `stalled`; a group lists its own codes in its section. A failing handler fills its `nt_devapi_error` and returns false in one statement: `return nt_devapi_fail(err, "...");` answers `bad_params`, `nt_devapi_fail_code(err, code, "...")` another code (strings outlive the response). A handler that returns false without filling `err` asserts.
 
 **cJSON dependency.** devapi parses/serializes with vendored cJSON, exposed as a standalone reusable `cjson` static-lib target (not an engine module, `EXCLUDE_FROM_ALL`). cJSON is usable by games independently of devapi; only targets that link it pull it in.
 
@@ -238,7 +238,7 @@ A bot drives input through the devapi `input.*` command group, which is a thin L
 
 **Range-checked, never asserts.** Every `input.*` command validates its params and returns `bad_params` on any out-of-domain value (unknown key name, out-of-range pointer id, a button mask outside `[0,7]` or non-integral, malformed/invalid UTF-8, a frame count outside `[0,65535]`). The L1 inject API itself never asserts — it is driven by untrusted L2 — so bad bot input is always a structured error, never a crash.
 
-**The command group** (all `frame_behavior: any`, all fire-and-forget unless noted):
+**The command group** (all reply immediately, all fire-and-forget unless noted):
 
 | Command | Params | Result | Kind |
 |---|---|---|---|
@@ -281,7 +281,7 @@ A bot reads and drives UI through the devapi `ui.*` command group — a thin L2 
 
 **Range-checked, never asserts.** Like `input.*`, every `ui.*` command validates its params and returns `bad_params` on any out-of-domain value (non-finite or float-overflowing coords, a fractional/negative/over-`UINT16_MAX` frame count, unknown ctx, unknown / stale id, a never-begun ctx). `ui.drag` additionally floors `frames` at **1**: the inject up releases at the pointer's current position, so a 0-frame drag (no move) would land the up back at `from` and silently drop `to`; `frames` ≥ 1 always emits at least one move that ends at `to`. The writes reuse the input scheduler's **whole-or-nothing** reservation — a multi-event command (`ui.click` = down@0 + up@hold; `ui.drag` = down + `frames` interpolated moves + up; `ui.scroll` = move + wheel) reserves **all** its slots or rejects, so a near-full schedule can never leave a stuck pointer-down or an unmatched edge. The bot supplies the drag path implicitly via `frames` (the handler expands the linear interpolation; `frames` is DoS-capped to fit the input scheduler). All writes are fire-and-forget — advance a frame to apply.
 
-**The command group** (all `frame_behavior: any`; reads have no side effect, writes are fire-and-forget):
+**The command group** (all reply immediately; reads have no side effect, writes are fire-and-forget):
 
 | Command | Params | Result | Kind |
 |---|---|---|---|
@@ -298,7 +298,7 @@ A bot reads and drives UI through the devapi `ui.*` command group — a thin L2 
 
 > This supersedes the earlier "overlay measures the frame, `nt_metrics` pulls from the overlay getters" model: the dependency is now inverted — the host pushes raw data into `nt_metrics`, and the overlay + `perf.*` read it. There is one perf store, fed once per frame by the host.
 
-A bot inspects engine state through the devapi **obs** command group — a thin L2 veneer that serializes the dev-only log ring, the `nt_metrics` perf collector, and the entity/resource enumeration accessors. Every obs command is a **pure immediate read**: it serializes the live L1 state on the same `submit` call and returns synchronously — **nothing in this group ever defers** (no `frame.wait`-style continuation), so all are `frame_behavior: any` with no side effect except `perf.reset`. Untrusted bot input is range/type-checked and returns `bad_params`; only host-call invariants assert.
+A bot inspects engine state through the devapi **obs** command group — a thin L2 veneer that serializes the dev-only log ring, the `nt_metrics` perf collector, and the entity/resource enumeration accessors. Every obs command is a **pure immediate read**: it serializes the live L1 state on the same `submit` call and returns synchronously — **nothing in this group ever defers** (no `frame.wait`-style continuation), so all reply immediately with no side effect except `perf.reset`. Untrusted bot input is range/type-checked and returns `bad_params`; only host-call invariants assert.
 
 **The command group:**
 
@@ -373,7 +373,7 @@ commands live in [Building and checks](../../build.md#build-options).
 |---|---|---|
 | `NT_DEVAPI_ENABLED` | OFF | Master gate. ON compiles the `engine/devapi` subdir and defines `NT_DEVAPI_ENABLED=1`; OFF compile-excludes the whole layer (zero devapi code/symbols in release). Every group flag below is a no-op while this is OFF. |
 | `NT_DEVAPI_GROUP_CORE` | ON | Build the core group: `ping` / `engine.info` / `view`. |
-| `NT_DEVAPI_GROUP_DISCOVERY` | ON | Build the discovery group: `endpoints` / `command.describe` / `features` (the live, self-describing catalog). |
+| `NT_DEVAPI_GROUP_DISCOVERY` | ON | Build the discovery group: `endpoints` / `command.describe` (the live, self-describing catalog). |
 | `NT_DEVAPI_GROUP_TIME` | ON | Build the `time.*` / `render.*` / `frame.*` group. |
 | `NT_DEVAPI_GROUP_INPUT` | ON | Build the `input.*` synthetic-input group (player gate + inject scheduler). |
 | `NT_DEVAPI_GROUP_UI` | OFF | Build the `ui.*` group (UI tree extraction + widget input). Requires `NT_UI_DEBUG_TOOLS` + `NT_DEVAPI_GROUP_INPUT` (hard CMake guards). |

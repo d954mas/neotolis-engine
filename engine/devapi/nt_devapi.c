@@ -112,11 +112,11 @@ void devapi_add_null(cJSON *obj, const char *key) {
    out-of-range/NaN/Inf double to unsigned is UB, so all checks run on the double before any cast. */
 static bool parse_number_exact(const cJSON *node, double max_d, nt_devapi_error *err, const char *message, double *out_d) {
     if (!cJSON_IsNumber(node)) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, message);
+        return nt_devapi_fail(err, message);
     }
     double d = node->valuedouble;
     if (!isfinite(d) || d != floor(d) || d < 0.0 || d > max_d) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, message);
+        return nt_devapi_fail(err, message);
     }
     *out_d = d;
     return true;
@@ -137,6 +137,14 @@ bool nt_devapi_parse_u16_param_exact(const cJSON *node, uint16_t max, nt_devapi_
         return false;
     }
     *out = (uint16_t)d; /* d is integer-valued in [0, max] — the cast is exact and in range. */
+    return true;
+}
+
+bool nt_devapi_parse_f32_param(const cJSON *node, nt_devapi_error *err, const char *message, float *out) {
+    if (!cJSON_IsNumber(node) || !isfinite(node->valuedouble) || !isfinite((float)node->valuedouble)) {
+        return nt_devapi_fail(err, message);
+    }
+    *out = (float)node->valuedouble;
     return true;
 }
 
@@ -211,7 +219,7 @@ bool nt_devapi_defer(nt_devapi_gate gate, double amount, nt_devapi_handler_fn re
     NT_ASSERT(gate != NT_DEVAPI_GATE_FRAMES || (amount >= 0.0 && amount <= (double)INT32_MAX)); /* wrap-safe compare range */
     if (s_current->batch) {
         /* A batch is one ordered response array; a deferred reply cannot go in it. */
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "deferred commands are not supported inside a batch");
+        return nt_devapi_fail(err, "deferred commands are not supported inside a batch");
     }
     s_pending = (deferred_slot){.reply = reply, .gate = gate, .mode = g_nt_app.mode};
     if (gate == NT_DEVAPI_GATE_FRAMES) {
@@ -238,7 +246,8 @@ static cJSON *handler_entry(nt_devapi_handler_fn fn, const cJSON *params, void *
     if (ok) {
         return NULL;
     }
-    return make_error_entry(err.code ? err.code : NT_DEVAPI_ERR_BAD_PARAMS, err.message ? err.message : "handler reported failure");
+    NT_ASSERT(err.code != NULL && err.message != NULL); /* a failing handler fills err (nt_devapi_fail) */
+    return make_error_entry(err.code, err.message);
 }
 
 /* Dispatch one request object → an owned response entry, or NULL if the command deferred. */
@@ -279,7 +288,7 @@ static cJSON *dispatch_one(const cJSON *req, bool batch) {
     NT_ASSERT(s_current == NULL);                                          /* a handler never re-enters submit. */
     dispatch_state state = {.batch = batch};
     s_current = &state;
-    cJSON *entry = handler_entry(slot->handler, params, slot->user_data);
+    cJSON *entry = handler_entry(slot->cmd->fn, params, slot->user_data);
     s_current = NULL;
     if (entry == NULL) {
         s_pending.id = dup_request_id(req);

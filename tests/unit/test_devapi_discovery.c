@@ -1,4 +1,4 @@
-/* Discovery group — endpoints / command.describe / features over the registry,
+/* Discovery group — endpoints / command.describe over the registry,
    plus the zero-engine-edits game-layer path. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
@@ -25,12 +25,8 @@ static bool cmd_game_poke(const cJSON *params, cJSON *result, nt_devapi_error *e
     return true;
 }
 
-/* The short game form: group, params_shape and frame_behavior come from the registry defaults. */
-static const nt_devapi_command_desc k_game_poke = {
-    .method = "game.poke",
-    .summary = "test game-layer command (flips a flag)",
-    .result_shape = "{poked:bool}",
-    .side_effects = "flips a test flag",
+static const nt_devapi_command k_game_cmds[] = {
+    {"game.poke", "test game-layer command (flips a flag)", "{}", "{poked:bool}", cmd_game_poke},
 };
 
 void setUp(void) {
@@ -40,7 +36,7 @@ void setUp(void) {
     nt_devapi_register_default();
     /* Register the game command through the public API only — the test touches
        no engine devapi source to add it (zero engine edits). */
-    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register(&k_game_poke, cmd_game_poke, &s_game_poked));
+    nt_devapi_register(k_game_cmds, 1, &s_game_poked);
 }
 
 void tearDown(void) { nt_devapi_shutdown(); }
@@ -56,16 +52,6 @@ static const cJSON *find_command(const cJSON *commands, const char *method) {
         }
     }
     return NULL;
-}
-
-static bool array_has_string(const cJSON *arr, const char *want) {
-    const cJSON *m = NULL;
-    cJSON_ArrayForEach(m, arr) {
-        if (cJSON_IsString(m) && strcmp(m->valuestring, want) == 0) {
-            return true;
-        }
-    }
-    return false;
 }
 
 static int count_object_fields(const cJSON *obj) {
@@ -93,31 +79,28 @@ static cJSON *submit_endpoints(const char *request, const cJSON **commands_out) 
 
 /* ---- endpoints ---- */
 
-static void test_endpoints_cheap_has_three_fields(void) {
+static void test_endpoints_cheap_has_two_fields(void) {
     const cJSON *commands = NULL;
     cJSON *root = submit_endpoints("{\"method\":\"endpoints\"}", &commands);
 
-    /* cheap form: exactly method+group+summary. */
+    /* cheap form: exactly method+summary. */
     const cJSON *ping = find_command(commands, "ping");
     TEST_ASSERT_NOT_NULL(ping);
-    TEST_ASSERT_EQUAL_INT(3, count_object_fields(ping));
+    TEST_ASSERT_EQUAL_INT(2, count_object_fields(ping));
     TEST_ASSERT_TRUE(field_is_string(ping, "method"));
-    TEST_ASSERT_TRUE(field_is_string(ping, "group"));
     TEST_ASSERT_TRUE(field_is_string(ping, "summary"));
     cJSON_Delete(root);
 }
 
-static void test_endpoints_detail_has_seven_fields(void) {
+static void test_endpoints_detail_has_four_fields(void) {
     const cJSON *commands = NULL;
     cJSON *root = submit_endpoints("{\"method\":\"endpoints\",\"params\":{\"detail\":true}}", &commands);
 
     const cJSON *ping = find_command(commands, "ping");
     TEST_ASSERT_NOT_NULL(ping);
-    TEST_ASSERT_EQUAL_INT(7, count_object_fields(ping));
+    TEST_ASSERT_EQUAL_INT(4, count_object_fields(ping));
     TEST_ASSERT_TRUE(field_is_string(ping, "params_shape"));
     TEST_ASSERT_TRUE(field_is_string(ping, "result_shape"));
-    TEST_ASSERT_TRUE(field_is_string(ping, "frame_behavior"));
-    TEST_ASSERT_TRUE(field_is_string(ping, "side_effects"));
     cJSON_Delete(root);
 }
 
@@ -138,9 +121,9 @@ static void test_command_describe_ping(void) {
     cJSON *root = cJSON_Parse(resp);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
-    TEST_ASSERT_EQUAL_INT(7, count_object_fields(result));
+    TEST_ASSERT_EQUAL_INT(4, count_object_fields(result));
     TEST_ASSERT_EQUAL_STRING("ping", cJSON_GetObjectItemCaseSensitive(result, "method")->valuestring);
-    TEST_ASSERT_EQUAL_STRING("core", cJSON_GetObjectItemCaseSensitive(result, "group")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("liveness check", cJSON_GetObjectItemCaseSensitive(result, "summary")->valuestring);
     cJSON_Delete(root);
 }
 
@@ -177,93 +160,53 @@ static void test_command_describe_message_distinguishes_absent_vs_nonstring(void
     cJSON_Delete(r2);
 }
 
-/* ---- features ---- */
+/* ---- compiled-in groups ---- */
 
-/* The active command groups depend on which NT_DEVAPI_GROUP_<X> options were ON at configure time.
-   The test target is fed the SAME active-group defines that gate the nt_devapi lib (the per-group
-   NT_DEVAPI_GROUP_<X> defines are PRIVATE to the lib, so they're re-supplied to this TU), so each
-   group's presence + the expected distinct-group count are derived from the defines, not hardcoded.
-   The `discovery` group is always present (this binary requires it) and `game` is registered in
-   setUp via the public API — both are unconditional. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_features_lists_active_groups(void) {
-    const char *resp = nt_devapi_submit("{\"method\":\"features\"}");
-    cJSON *root = cJSON_Parse(resp);
-    cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
-    cJSON *groups = cJSON_GetObjectItemCaseSensitive(result, "groups");
-    TEST_ASSERT_TRUE(cJSON_IsArray(groups));
+/* The listed commands depend on which NT_DEVAPI_GROUP_<X> options were ON at configure time. The test
+   target is fed the SAME group defines that gate the nt_devapi lib, so each group's presence is derived
+   from the defines, not hardcoded. discovery (this binary requires it) and game (setUp) are unconditional. */
+static void expect_listed(const cJSON *commands, const char *method, bool listed) { TEST_ASSERT_EQUAL_MESSAGE(listed, find_command(commands, method) != NULL, method); }
 
-    /* Always present: discovery (required by this binary) + game (registered in setUp). */
-    TEST_ASSERT_TRUE(array_has_string(groups, "discovery"));
-    TEST_ASSERT_TRUE(array_has_string(groups, "game"));
-    int expected = 2;
-
+static void test_endpoints_lists_compiled_groups(void) {
+    const cJSON *commands = NULL;
+    cJSON *root = submit_endpoints("{\"method\":\"endpoints\"}", &commands);
+    expect_listed(commands, "endpoints", true);
+    expect_listed(commands, "game.poke", true);
 #ifdef NT_DEVAPI_GROUP_CORE
-    TEST_ASSERT_TRUE(array_has_string(groups, "core"));
-    expected += 1; /* core */
+    expect_listed(commands, "ping", true);
 #else
-    TEST_ASSERT_FALSE(array_has_string(groups, "core"));
+    expect_listed(commands, "ping", false);
 #endif
-
 #ifdef NT_DEVAPI_GROUP_TIME
-    /* The time TU bundles three distinct group names: time / render / frame. */
-    TEST_ASSERT_TRUE(array_has_string(groups, "time"));
-    TEST_ASSERT_TRUE(array_has_string(groups, "render"));
-    TEST_ASSERT_TRUE(array_has_string(groups, "frame"));
-    expected += 3;
+    expect_listed(commands, "time.pause", true);
 #else
-    TEST_ASSERT_FALSE(array_has_string(groups, "time"));
-    TEST_ASSERT_FALSE(array_has_string(groups, "render"));
-    TEST_ASSERT_FALSE(array_has_string(groups, "frame"));
+    expect_listed(commands, "time.pause", false);
 #endif
-
 #ifdef NT_DEVAPI_GROUP_INPUT
-    TEST_ASSERT_TRUE(array_has_string(groups, "input"));
-    expected += 1; /* input */
+    expect_listed(commands, "input.key", true);
 #else
-    TEST_ASSERT_FALSE(array_has_string(groups, "input"));
+    expect_listed(commands, "input.key", false);
 #endif
-
 #ifdef NT_DEVAPI_GROUP_UI
-    TEST_ASSERT_TRUE(array_has_string(groups, "ui"));
-    expected += 1; /* ui */
+    expect_listed(commands, "ui.tree", true);
 #else
-    TEST_ASSERT_FALSE(array_has_string(groups, "ui"));
+    expect_listed(commands, "ui.tree", false);
 #endif
-
 #ifdef NT_DEVAPI_GROUP_OBS
-    /* The obs TU bundles four distinct group names: log / perf / entity / resource. */
-    TEST_ASSERT_TRUE(array_has_string(groups, "log"));
-    TEST_ASSERT_TRUE(array_has_string(groups, "perf"));
-    TEST_ASSERT_TRUE(array_has_string(groups, "entity"));
-    TEST_ASSERT_TRUE(array_has_string(groups, "resource"));
-    expected += 4;
+    expect_listed(commands, "log.tail", true);
 #else
-    TEST_ASSERT_FALSE(array_has_string(groups, "log"));
-    TEST_ASSERT_FALSE(array_has_string(groups, "perf"));
-    TEST_ASSERT_FALSE(array_has_string(groups, "entity"));
-    TEST_ASSERT_FALSE(array_has_string(groups, "resource"));
+    expect_listed(commands, "log.tail", false);
 #endif
-
 #ifdef NT_DEVAPI_GROUP_ENTITY_WRITE
-    TEST_ASSERT_TRUE(array_has_string(groups, "entity_write"));
-    expected += 1; /* entity.set */
+    expect_listed(commands, "entity.set", true);
 #else
-    TEST_ASSERT_FALSE(array_has_string(groups, "entity_write"));
+    expect_listed(commands, "entity.set", false);
 #endif
-
 #ifdef NT_DEVAPI_GROUP_CAPTURE
-    /* capture.frame + capture.region collapse to one distinct group: capture. */
-    TEST_ASSERT_TRUE(array_has_string(groups, "capture"));
-    expected += 1; /* capture */
+    expect_listed(commands, "capture.frame", true);
 #else
-    TEST_ASSERT_FALSE(array_has_string(groups, "capture"));
+    expect_listed(commands, "capture.frame", false);
 #endif
-
-    /* an absent group is not listed. */
-    TEST_ASSERT_FALSE(array_has_string(groups, "phantom"));
-    /* groups are distinct: each group's commands collapse to one entry. */
-    TEST_ASSERT_EQUAL_INT(expected, cJSON_GetArraySize(groups));
     cJSON_Delete(root);
 }
 
@@ -272,9 +215,7 @@ static void test_features_lists_active_groups(void) {
 static void test_game_command_discoverable(void) {
     const cJSON *commands = NULL;
     cJSON *root = submit_endpoints("{\"method\":\"endpoints\"}", &commands);
-    const cJSON *poke = find_command(commands, "game.poke");
-    TEST_ASSERT_NOT_NULL(poke);
-    TEST_ASSERT_EQUAL_STRING("game", cJSON_GetObjectItemCaseSensitive(poke, "group")->valuestring);
+    TEST_ASSERT_NOT_NULL(find_command(commands, "game.poke"));
     cJSON_Delete(root);
 }
 
@@ -283,11 +224,9 @@ static void test_game_command_describe(void) {
     cJSON *root = cJSON_Parse(resp);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
-    TEST_ASSERT_EQUAL_STRING("game", cJSON_GetObjectItemCaseSensitive(result, "group")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("test game-layer command (flips a flag)", cJSON_GetObjectItemCaseSensitive(result, "summary")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("{}", cJSON_GetObjectItemCaseSensitive(result, "params_shape")->valuestring);
     TEST_ASSERT_EQUAL_STRING("{poked:bool}", cJSON_GetObjectItemCaseSensitive(result, "result_shape")->valuestring);
-    TEST_ASSERT_EQUAL_STRING("none", cJSON_GetObjectItemCaseSensitive(result, "params_shape")->valuestring);
-    TEST_ASSERT_EQUAL_STRING("immediate", cJSON_GetObjectItemCaseSensitive(result, "frame_behavior")->valuestring);
-    TEST_ASSERT_EQUAL_STRING("flips a test flag", cJSON_GetObjectItemCaseSensitive(result, "side_effects")->valuestring);
     cJSON_Delete(root);
 }
 
@@ -314,14 +253,14 @@ static void test_absent_command_not_in_endpoints(void) {
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_endpoints_cheap_has_three_fields);
-    RUN_TEST(test_endpoints_detail_has_seven_fields);
+    RUN_TEST(test_endpoints_cheap_has_two_fields);
+    RUN_TEST(test_endpoints_detail_has_four_fields);
     RUN_TEST(test_endpoints_non_bool_detail_bad_params);
     RUN_TEST(test_command_describe_ping);
     RUN_TEST(test_command_describe_missing_method_bad_params);
     RUN_TEST(test_command_describe_unknown_method);
     RUN_TEST(test_command_describe_message_distinguishes_absent_vs_nonstring);
-    RUN_TEST(test_features_lists_active_groups);
+    RUN_TEST(test_endpoints_lists_compiled_groups);
     RUN_TEST(test_game_command_discoverable);
     RUN_TEST(test_game_command_describe);
     RUN_TEST(test_game_command_callable);

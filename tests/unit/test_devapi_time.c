@@ -146,7 +146,7 @@ static void test_command_describe_time_step(void) {
     const char *resp = nt_devapi_submit("{\"method\":\"command.describe\",\"params\":{\"method\":\"time.step\"}}");
     cJSON *root = parse_ok(resp);
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
-    TEST_ASSERT_EQUAL_STRING("time", cJSON_GetObjectItemCaseSensitive(result, "group")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("time.step", cJSON_GetObjectItemCaseSensitive(result, "method")->valuestring);
     const cJSON *ps = cJSON_GetObjectItemCaseSensitive(result, "params_shape");
     TEST_ASSERT_TRUE(cJSON_IsString(ps) && strlen(ps->valuestring) > 0);
     cJSON_Delete(root);

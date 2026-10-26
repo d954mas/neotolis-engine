@@ -14,11 +14,10 @@ static inline nt_result_t nt_devapi_init(void) { return NT_OK; }
 static inline void nt_devapi_shutdown(void) {}
 static inline void nt_devapi_register_default(void) {}
 
-static inline nt_result_t nt_devapi_register(const nt_devapi_command_desc *desc, nt_devapi_handler_fn handler, void *user_data) {
-    (void)desc;
-    (void)handler;
+static inline void nt_devapi_register(const nt_devapi_command *cmds, size_t count, void *user_data) {
+    (void)cmds;
+    (void)count;
     (void)user_data;
-    return NT_OK;
 }
 
 static inline const char *nt_devapi_submit(const char *line) {

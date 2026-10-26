@@ -11,7 +11,7 @@ static bool cmd_record_start(const cJSON *params, cJSON *result, nt_devapi_error
     (void)ud;
     const cJSON *name = cJSON_GetObjectItemCaseSensitive(params, "name");
     if (!cJSON_IsString(name) || name->valuestring[0] == '\0') {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, "record.start: name must be a non-empty string");
+        return nt_devapi_fail(err, "record.start: name must be a non-empty string");
     }
     const char *bad_fps = "record.start: fps must be an integer 1..120";
     uint32_t fps = 0;
@@ -19,13 +19,13 @@ static bool cmd_record_start(const cJSON *params, cJSON *result, nt_devapi_error
         return false;
     }
     if (fps == 0) {
-        return nt_devapi_fail(err, NT_DEVAPI_ERR_BAD_PARAMS, bad_fps);
+        return nt_devapi_fail(err, bad_fps);
     }
     if (nt_recorder_active()) {
-        return nt_devapi_fail(err, "recording", "record.start: a recording is active");
+        return nt_devapi_fail_code(err, "recording", "record.start: a recording is active");
     }
     if (!nt_recorder_start(name->valuestring, fps)) {
-        return nt_devapi_fail(err, "failed", "record.start: the recorder refused to start (see log and console)");
+        return nt_devapi_fail_code(err, "failed", "record.start: the recorder refused to start (see log and console)");
     }
     (void)result;
     return true;
@@ -39,37 +39,23 @@ static bool cmd_record_stop(const cJSON *params, cJSON *result, nt_devapi_error 
     return true;
 }
 
-static const nt_devapi_command_desc k_record_cmds[] = {
+static const nt_devapi_command k_record_cmds[] = {
     {
         .method = "record.start",
-        .group = "record",
-        .summary = "start recording an MP4 of the presented frames on game time",
+        .summary = "start recording an MP4 of the presented frames on game time; web dispatches 'nt-recorder' when the recording ends, Windows writes the file at name (a path)",
         .params_shape = "{name:string, fps:int}",
         .result_shape = "{}",
-        .frame_behavior = "any",
-        .side_effects = "starts nt_recorder; web dispatches 'nt-recorder' when the recording ends; Windows writes the file at name (a path)",
+        .fn = cmd_record_start,
     },
     {
         .method = "record.stop",
-        .group = "record",
         .summary = "stop the recording; frames is 0 when none was active (or it ended itself)",
         .params_shape = "{}",
         .result_shape = "{frames:int}",
-        .frame_behavior = "any",
-        .side_effects = "finishes the file",
+        .fn = cmd_record_stop,
     },
 };
 
-static const nt_devapi_handler_fn k_record_handlers[] = {cmd_record_start, cmd_record_stop};
-_Static_assert(sizeof(k_record_cmds) / sizeof(k_record_cmds[0]) == sizeof(k_record_handlers) / sizeof(k_record_handlers[0]), "record: descriptor/handler arrays must have equal length");
-
-void nt_devapi_register_recorder(void) {
-    int n = (int)(sizeof(k_record_cmds) / sizeof(k_record_cmds[0]));
-    for (int i = 0; i < n; i++) {
-        nt_result_t rr = nt_devapi_register(&k_record_cmds[i], k_record_handlers[i], NULL);
-        NT_ASSERT(rr == NT_OK);
-        (void)rr;
-    }
-}
+void nt_devapi_register_recorder(void) { nt_devapi_register(k_record_cmds, sizeof(k_record_cmds) / sizeof(k_record_cmds[0]), NULL); }
 
 #endif /* NT_DEVAPI_GROUP_RECORDER */

@@ -3,7 +3,7 @@
 self-launched here; web PlaywrightTransport / the devapi.spec.ts gate), proving native<->web parity.
 
 It exercises:
-  * discovery        — ping + endpoints/command.describe/features (game.echo + game.poke, zero engine edits),
+  * discovery        — ping + endpoints/command.describe (game.echo + game.poke, zero engine edits),
   * game.* round-trip — game.echo {msg} read-back + game.poke write flipping an observable host bool,
   * deferred capture — capture.frame/region must resolve to a REAL PNG on a capture-capable host;
                        the native host has no GL, so it returns capture_unavailable,
@@ -178,8 +178,6 @@ def run(client: DevApiClient) -> None:
     assert "game.poke" in methods, "endpoints did not list game.poke"
     desc = client.result("command.describe", {"method": "game.echo"})
     assert desc.get("params_shape") and desc.get("result_shape"), "command.describe missing shapes for game.echo"
-    features = client.result("features")
-    assert "game" in features.get("groups", []), "'game' group not active in features"
 
     # 2. game.* round-trip — echo read-back (request_id correlated) + poke write flips host state.
     echoed = client.request("game.echo", {"msg": "hi"})

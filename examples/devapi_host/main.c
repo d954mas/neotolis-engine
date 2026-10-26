@@ -48,21 +48,13 @@ static bool cmd_game_echo(const cJSON *params, cJSON *result, nt_devapi_error *e
     (void)ud;
     const cJSON *msg = cJSON_GetObjectItemCaseSensitive(params, "msg");
     if (!cJSON_IsString(msg)) {
-        return nt_devapi_fail(err, "bad_params", "game.echo requires a string \"msg\"");
+        return nt_devapi_fail(err, "game.echo requires a string \"msg\"");
     }
     cJSON *added = cJSON_AddStringToObject(result, "msg", msg->valuestring);
     NT_ASSERT(added != NULL);
     (void)added;
     return true;
 }
-
-/* Omitted fields take the registry defaults: group "game" from the method, immediate, no side effects. */
-static const nt_devapi_command_desc k_game_echo = {
-    .method = "game.echo",
-    .summary = "echo {msg} back",
-    .params_shape = "{msg:string}",
-    .result_shape = "{msg:string}",
-};
 
 /* game-layer WRITE command via the public register path — zero engine edits: flips an observable host
    bool and returns it as {poked}, proving a write mutates host state over either transport. */
@@ -79,11 +71,9 @@ static bool cmd_game_poke(const cJSON *params, cJSON *result, nt_devapi_error *e
     return true;
 }
 
-static const nt_devapi_command_desc k_game_poke = {
-    .method = "game.poke",
-    .summary = "flip an observable host bool, return {poked}",
-    .result_shape = "{poked:bool}",
-    .side_effects = "flips game state",
+static const nt_devapi_command k_game_cmds[] = {
+    {"game.echo", "echo {msg} back", "{msg:string}", "{msg:string}", cmd_game_echo},
+    {"game.poke", "flip an observable host bool (game state), return {poked}", "{}", "{poked:bool}", cmd_game_poke},
 };
 
 #ifndef __EMSCRIPTEN__
@@ -374,16 +364,7 @@ int main(void) {
 #endif                            /* !__EMSCRIPTEN__ */
     nt_devapi_register_default(); /* full host: register every compiled-in group (incl. capture). */
     nt_devapi_register_reset(recover_on_client_reset);
-    result = nt_devapi_register(&k_game_echo, cmd_game_echo, NULL);
-    if (result != NT_OK) {
-        printf("[devapi_host] failed to register game.echo: error %d\n", result);
-        goto shutdown_devapi;
-    }
-    result = nt_devapi_register(&k_game_poke, cmd_game_poke, NULL);
-    if (result != NT_OK) {
-        printf("[devapi_host] failed to register game.poke: error %d\n", result);
-        goto shutdown_devapi;
-    }
+    nt_devapi_register(k_game_cmds, sizeof(k_game_cmds) / sizeof(k_game_cmds[0]), NULL);
 
     /* Probe-able "hud" UI context. nt_mem_scratch backs CLAY's per-element data; nt_ui_module_init is
        self-contained (no gfx/font). The host registers the CTX here; the ui group's commands are

@@ -24,22 +24,13 @@ static bool ok_handler(const cJSON *params, cJSON *result_obj, nt_devapi_error *
     return true;
 }
 
-static void register_ok(void) {
-    nt_devapi_command_desc desc = {
-        .method = "ok",
-        .group = "test",
-        .summary = "test handler",
-        .params_shape = "{n?:number}",
-        .result_shape = "{ran:bool}",
-        .frame_behavior = "any",
-        .side_effects = "none",
-    };
-    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register(&desc, ok_handler, NULL));
-}
+static const nt_devapi_command k_ok_cmd[] = {
+    {"ok", "test handler", "{n?:number}", "{ran:bool}", ok_handler},
+};
 
 void setUp(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
-    register_ok();
+    nt_devapi_register(k_ok_cmd, 1, NULL);
 }
 
 void tearDown(void) { nt_devapi_shutdown(); }

@@ -1,4 +1,3 @@
-#include <stdlib.h>
 #include <string.h>
 
 #include "core/nt_assert.h"
@@ -70,28 +69,6 @@ bool nt_devapi_transport_is_registered(nt_devapi_hook_fn fn) {
 }
 // #endregion
 
-/* Local strndup: portable under strict C17 (POSIX strdup/strndup not guaranteed declared). */
-static char *devapi_strndup(const char *src, size_t len) {
-    char *dst = (char *)malloc(len + 1U);
-    NT_ASSERT(dst != NULL);
-    memcpy(dst, src, len);
-    dst[len] = '\0';
-    return dst;
-}
-
-static char *devapi_strdup(const char *src) { return devapi_strndup(src, strlen(src)); }
-
-static void slot_free(nt_devapi_slot *slot) {
-    free(slot->method);
-    free(slot->group);
-    free(slot->summary);
-    free(slot->params_shape);
-    free(slot->result_shape);
-    free(slot->frame_behavior);
-    free(slot->side_effects);
-    *slot = (nt_devapi_slot){0};
-}
-
 nt_result_t nt_devapi_init(void) {
     if (s_initialized) {
         return NT_ERR_INIT_FAILED;
@@ -109,9 +86,6 @@ nt_result_t nt_devapi_init(void) {
 }
 
 void nt_devapi_shutdown(void) {
-    for (int i = 0; i < s_count; i++) {
-        slot_free(&s_slots[i]);
-    }
     s_count = 0;
     s_transport_count = 0; /* drop group hooks so init->shutdown->init re-registers cleanly. */
     s_tick_count = 0;
@@ -120,31 +94,15 @@ void nt_devapi_shutdown(void) {
     s_initialized = false;
 }
 
-nt_result_t nt_devapi_register(const nt_devapi_command_desc *desc, nt_devapi_handler_fn handler, void *user_data) {
-    /* Preconditions (caller bugs): initialized + desc/handler and the fields with no default non-NULL. */
-    NT_ASSERT(s_initialized && desc != NULL && handler != NULL && desc->method != NULL && desc->summary != NULL && desc->result_shape != NULL);
-
-    /* dup_method is a legitimate game-author error, not a bug: reject, don't overwrite. INVALID_ARG (not
-       INIT_FAILED) so a caller can tell "bad method arg" apart from "devapi double-init". */
-    if (nt_devapi_registry_find(desc->method) != NULL) {
-        return NT_ERR_INVALID_ARG;
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_devapi_register(const nt_devapi_command *cmds, size_t count, void *user_data) {
+    NT_ASSERT(s_initialized && cmds != NULL && count <= (size_t)(NT_DEVAPI_MAX_COMMANDS - s_count));
+    for (size_t i = 0; i < count; i++) {
+        const nt_devapi_command *cmd = &cmds[i];
+        NT_ASSERT(cmd->method != NULL && cmd->summary != NULL && cmd->params_shape != NULL && cmd->result_shape != NULL && cmd->fn != NULL);
+        NT_ASSERT(nt_devapi_registry_find(cmd->method) == NULL); /* a duplicate method is a registration bug */
+        s_slots[s_count++] = (nt_devapi_slot){.cmd = cmd, .user_data = user_data};
     }
-
-    /* Table overflow is an invariant bug at this scale — assert. */
-    NT_ASSERT(s_count < NT_DEVAPI_MAX_COMMANDS);
-
-    nt_devapi_slot *slot = &s_slots[s_count];
-    slot->method = devapi_strdup(desc->method);
-    slot->group = desc->group != NULL ? devapi_strdup(desc->group) : devapi_strndup(desc->method, strcspn(desc->method, "."));
-    slot->summary = devapi_strdup(desc->summary);
-    slot->params_shape = devapi_strdup(desc->params_shape != NULL ? desc->params_shape : "none");
-    slot->result_shape = devapi_strdup(desc->result_shape);
-    slot->frame_behavior = devapi_strdup(desc->frame_behavior != NULL ? desc->frame_behavior : "immediate");
-    slot->side_effects = devapi_strdup(desc->side_effects != NULL ? desc->side_effects : "none");
-    slot->handler = handler;
-    slot->user_data = user_data;
-    s_count++;
-    return NT_OK;
 }
 
 bool nt_devapi_initialized(void) { return s_initialized; }
@@ -157,27 +115,10 @@ const nt_devapi_slot *nt_devapi_registry_slot(int index) {
 }
 
 const nt_devapi_slot *nt_devapi_registry_find(const char *method) {
-    if (method == NULL) {
-        return NULL;
-    }
     for (int i = 0; i < s_count; i++) {
-        if (s_slots[i].method != NULL && strcmp(s_slots[i].method, method) == 0) {
+        if (strcmp(s_slots[i].cmd->method, method) == 0) {
             return &s_slots[i];
         }
     }
     return NULL;
-}
-
-/* True if slot[index]'s group has not appeared in any earlier slot — lets `features` and
-   engine.info emit each distinct group once, derived from the commands (no separate list). */
-bool nt_devapi_group_is_first(int index) {
-    NT_ASSERT(index >= 0 && index < s_count);
-    /* Every slot's group is non-NULL (nt_devapi_register fills defaults), so no NULL guards. */
-    const char *group = s_slots[index].group;
-    for (int i = 0; i < index; i++) {
-        if (strcmp(s_slots[i].group, group) == 0) {
-            return false;
-        }
-    }
-    return true;
 }

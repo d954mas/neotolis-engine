@@ -43,7 +43,7 @@ if(NT_DEVAPI_GROUP_TIME)
     target_compile_definitions(nt_devapi_time PUBLIC NT_DEVAPI_GROUP_TIME=1)
 endif()
 
-# Discovery group: endpoints / command.describe / features. Reads only the registry (no engine dep).
+# Discovery group: endpoints / command.describe. Reads only the registry (no engine dep).
 if(NT_DEVAPI_GROUP_DISCOVERY)
     nt_add_module(nt_devapi_discovery LOG_DOMAIN "devapi" nt_devapi_discovery.c)
     target_link_libraries(nt_devapi_discovery PUBLIC nt_devapi)

@@ -569,7 +569,7 @@ static void test_input_state_describe(void) {
     const char *resp = nt_devapi_submit("{\"method\":\"command.describe\",\"params\":{\"method\":\"input.state\"}}");
     cJSON *root = parse_ok(resp);
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
-    TEST_ASSERT_EQUAL_STRING("input", cJSON_GetObjectItemCaseSensitive(result, "group")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("input.state", cJSON_GetObjectItemCaseSensitive(result, "method")->valuestring);
     cJSON_Delete(root);
 }
 
@@ -715,7 +715,7 @@ static void test_input_describe(void) {
     const char *resp = nt_devapi_submit("{\"method\":\"command.describe\",\"params\":{\"method\":\"input.key\"}}");
     cJSON *root = parse_ok(resp);
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
-    TEST_ASSERT_EQUAL_STRING("input", cJSON_GetObjectItemCaseSensitive(result, "group")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("input.key", cJSON_GetObjectItemCaseSensitive(result, "method")->valuestring);
     const cJSON *ps = cJSON_GetObjectItemCaseSensitive(result, "params_shape");
     TEST_ASSERT_TRUE(cJSON_IsString(ps) && strlen(ps->valuestring) > 0);
     cJSON_Delete(root);
@@ -723,7 +723,7 @@ static void test_input_describe(void) {
     resp = nt_devapi_submit("{\"method\":\"command.describe\",\"params\":{\"method\":\"input.text\"}}");
     root = parse_ok(resp);
     result = cJSON_GetObjectItemCaseSensitive(root, "result");
-    TEST_ASSERT_EQUAL_STRING("input", cJSON_GetObjectItemCaseSensitive(result, "group")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("input.text", cJSON_GetObjectItemCaseSensitive(result, "method")->valuestring);
     cJSON_Delete(root);
 }
 
