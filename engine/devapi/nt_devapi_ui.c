@@ -1,6 +1,5 @@
 #include <math.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <string.h>
 
 #include "core/nt_assert.h"
@@ -11,51 +10,33 @@
 #include "window/nt_window.h" /* g_nt_window: the one coordinate-space metadata source (like core view). */
 
 /* Veneer over the probe: range-check bot input -> bad_params, never assert. The host
-   registers UI contexts by name; the engine keeps NO global ctx registry. */
+   names its UI contexts in one table; the engine keeps NO global ctx registry. */
 
-// #region ui context name table
-/* Host-registered name -> ctx* table. Trusted in-process host calls may assert; bot input
-   that misses the table is always bad_params. */
-#ifndef NT_DEVAPI_UI_CONTEXT_MAX
-#define NT_DEVAPI_UI_CONTEXT_MAX 4 /* cap = discretion */
-#endif
+// #region ui contexts
+/* The host's table, by reference. Read only when a ui.* command runs, so the host may set it at any
+   point; it survives client reconnects. */
+static const nt_devapi_ui_context *s_ui_ctx;
+static size_t s_ui_ctx_count;
 
-static struct {
-    const char *name;
-    nt_ui_context_t *ctx;
-} s_ui_ctx[NT_DEVAPI_UI_CONTEXT_MAX];
-static uint32_t s_ui_ctx_count;
-
-/* The NT_ASSERT(x && "msg") guards inflate measured complexity past the 25 threshold; the body
-   is a flat append + dup scan. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_devapi_ui_register_context(const char *name, nt_ui_context_t *ctx) {
-    /* Must register AFTER nt_devapi_init(): init clears the host ctx table, so a pre-init
-       registration would be silently wiped. Fail loud (explicit-over-implicit). */
-    NT_ASSERT(nt_devapi_initialized() && "ui: nt_devapi_ui_register_context must be called AFTER nt_devapi_init() (init clears the host ctx table)");
-    NT_ASSERT(name != NULL && "ui: context name must be non-NULL");
-    NT_ASSERT(ctx != NULL && "ui: context must be non-NULL");
-    NT_ASSERT(s_ui_ctx_count < NT_DEVAPI_UI_CONTEXT_MAX && "ui: context table full (raise NT_DEVAPI_UI_CONTEXT_MAX)");
-    for (uint32_t i = 0; i < s_ui_ctx_count; i++) {
-        NT_ASSERT(strcmp(s_ui_ctx[i].name, name) != 0 && "ui: duplicate context name");
+static bool name_taken(const nt_devapi_ui_context *list, size_t count, const char *name) {
+    for (size_t i = 0; i < count; i++) {
+        if (strcmp(list[i].name, name) == 0) {
+            return true;
+        }
     }
-    s_ui_ctx[s_ui_ctx_count].name = name;
-    s_ui_ctx[s_ui_ctx_count].ctx = ctx;
-    s_ui_ctx_count++;
+    return false;
 }
 
+void nt_devapi_ui_set_contexts(const nt_devapi_ui_context *list, size_t count) {
+    NT_ASSERT(list != NULL || count == 0);
+    for (size_t i = 0; i < count; i++) {
+        /* a NULL row or a duplicate name is a host bug */
+        NT_ASSERT(list[i].name != NULL && list[i].ctx != NULL && !name_taken(list, i, list[i].name));
+    }
+    s_ui_ctx = list;
+    s_ui_ctx_count = count;
+}
 // #endregion
-
-/* Clear the host-registered name->ctx* table. The HOST owns these registrations (registered ONCE at
-   startup, like game.* commands) — so this is called only at init/register (before the host registers),
-   NOT on a client disconnect, or every session after the first would see an empty table. */
-static void clear_ui_ctx_table(void) {
-    for (uint32_t i = 0; i < NT_DEVAPI_UI_CONTEXT_MAX; i++) {
-        s_ui_ctx[i].name = NULL;
-        s_ui_ctx[i].ctx = NULL;
-    }
-    s_ui_ctx_count = 0;
-}
 
 /* Resolve the target ctx from an optional `ctx` string. Miss/empty -> bad_params, NEVER assert on
    bot input; absent -> the sole/first context. Returns NULL on failure (err is set). */
@@ -73,7 +54,7 @@ static nt_ui_context_t *resolve_ctx(const cJSON *params, nt_devapi_error *err) {
             nt_devapi_fail(err, "ui: ctx must be a string");
             return NULL;
         }
-        for (uint32_t i = 0; i < s_ui_ctx_count; i++) {
+        for (size_t i = 0; i < s_ui_ctx_count; i++) {
             if (strcmp(s_ui_ctx[i].name, jc->valuestring) == 0) {
                 ctx = s_ui_ctx[i].ctx;
                 break;
@@ -211,7 +192,7 @@ static bool cmd_ui_element(const cJSON *params, cJSON *result, nt_devapi_error *
 static bool cmd_ui_contexts(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     cJSON *arr = cJSON_AddArrayToObject(result, "contexts");
     NT_ASSERT(arr != NULL);
-    for (uint32_t i = 0; i < s_ui_ctx_count; i++) {
+    for (size_t i = 0; i < s_ui_ctx_count; i++) {
         cJSON *s = cJSON_CreateString(s_ui_ctx[i].name);
         NT_ASSERT(s != NULL);
         cJSON_bool added = cJSON_AddItemToArray(arr, s);
@@ -230,6 +211,8 @@ static bool cmd_ui_contexts(const cJSON *params, cJSON *result, nt_devapi_error 
 #define NT_DEVAPI_UI_DRAG_FRAMES_MAX (NT_DEVAPI_INPUT_SCHED_MAX - 2)
 #endif
 _Static_assert(NT_DEVAPI_UI_DRAG_FRAMES_MAX + 2 <= NT_DEVAPI_INPUT_SCHED_MAX, "ui.drag frames+2 must fit the input scheduler");
+_Static_assert(NT_DEVAPI_UI_DRAG_FRAMES_MAX <= UINT16_MAX, "ui.drag frames are a uint16 frame offset");
+#define UI_DRAG_FRAMES_RANGE "[1, " NT_DEVAPI_STR(NT_DEVAPI_UI_DRAG_FRAMES_MAX) "]"
 
 /* Resolve a target field (string id | {x,y}) to a DEVICE-space pixel center for the inject path. The
    ONE Y-up->device flip lives HERE: flip to layout, then layout->device through the ctx viewport. An id
@@ -376,10 +359,8 @@ static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err
         return false;
     }
     /* A 0-frame drag emits no MOVE, so the inject UP (which releases at the pointer's CURRENT position,
-       not at `to`) would land back at `from`; frames >= 1 gives the instant from->to->up drag. The
-       message names the real cap: the dispatcher copies it on return, so a static buffer is enough. */
-    static char bad_frames[64];
-    (void)snprintf(bad_frames, sizeof bad_frames, "ui.drag: frames must be an integer in [1, %u]", (unsigned)NT_DEVAPI_UI_DRAG_FRAMES_MAX);
+       not at `to`) would land back at `from`; frames >= 1 gives the instant from->to->up drag. */
+    const char *bad_frames = "ui.drag: frames must be an integer in " UI_DRAG_FRAMES_RANGE;
     uint16_t frames = 8U; /* default: a short multi-frame drag. */
     const cJSON *frj = cJSON_GetObjectItemCaseSensitive(params, "frames");
     if (frj != NULL && !nt_devapi_parse_u16_param_exact(frj, NT_DEVAPI_UI_DRAG_FRAMES_MAX, err, bad_frames, &frames)) {
@@ -395,7 +376,7 @@ static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err
     }
     const uint32_t id = NT_INPUT_INJECT_POINTER_ID_BASE;
     nt_devapi_input_sched_pointer(NT_INJECT_POINTER_DOWN, id, fx, fy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, 0);
-    for (uint32_t i = 1; i <= frames; i++) { /* uint32: a uint16 counter never exceeds frames=65535 */
+    for (uint32_t i = 1; i <= frames; i++) { /* uint32: the cap may be -D'd up to UINT16_MAX */
         /* In double: to - from cannot overflow and keeps its precision; the last MOVE lands exactly on to. */
         double t = (double)i / (double)frames; /* frames >= 1 enforced above, so the divisor is never 0. */
         float mx = i == frames ? tx : (float)((double)fx + (((double)tx - (double)fx) * t));
@@ -453,8 +434,8 @@ static const nt_devapi_command k_ui_cmds[] = {
     },
     {
         .method = "ui.drag",
-        .summary = "resolve from/to (id|Y-up {x,y}, origin bottom-left) -> down@from + frames interpolated moves + up@to (explicit points, NO interpolation owner; frames in [1, "
-                   "NT_DEVAPI_UI_DRAG_FRAMES_MAX], a 0-frame drag cannot reach `to`; fire-and-forget)",
+        .summary = "resolve from/to (id|Y-up {x,y}, origin bottom-left) -> down@from + frames interpolated moves + up@to (explicit points, NO interpolation owner; frames in " UI_DRAG_FRAMES_RANGE
+                   ", a 0-frame drag cannot reach `to`; fire-and-forget)",
         .params_shape = "{from:string|{x,y}, to:string|{x,y}, frames?:number (>=1), ctx?:string}",
         .result_shape = "{queued:number}",
         .fn = cmd_ui_drag,
@@ -462,9 +443,8 @@ static const nt_devapi_command k_ui_cmds[] = {
 };
 
 void nt_devapi_register_ui(void) {
-    clear_ui_ctx_table(); /* fresh host table at init (the host re-registers its ctx right after). */
     /* No tick/reset hook: ui.click/drag/scroll delegate scheduling to the input group's single
-       scheduler, drained by nt_devapi_input_update. The host-owned ctx table survives client
+       scheduler, drained by nt_devapi_input_update. The host's ctx table survives client
        disconnects, so there is no ui-owned transient state to reset. */
     nt_devapi_register(k_ui_cmds, NT_COUNTOF(k_ui_cmds), NULL);
 }

@@ -44,7 +44,6 @@ void nt_devapi_register(const nt_devapi_command *cmds, size_t count, void *user_
     }
 }
 
-bool nt_devapi_initialized(void) { return s_initialized; }
 // #endregion
 
 // #region lifecycle hooks
@@ -320,9 +319,8 @@ static cJSON *make_ok_entry(cJSON *result_obj) {
     return entry;
 }
 
-/* Request-level preconditions: request_id (if present) must be a scalar; params (if present)
-   must be an object. Returns the rejection reason, or NULL if the request is well-formed. */
-static const char *request_reject_reason(const cJSON *req) {
+/* Why the request object cannot run now (sets *code; bad_params unless named), or NULL with *slot set. */
+static const char *request_reject(const cJSON *req, const char **code, const registry_slot **slot) {
     const cJSON *id = cJSON_GetObjectItemCaseSensitive(req, "request_id");
     if (id != NULL && !cJSON_IsNumber(id) && !cJSON_IsString(id)) {
         return "request_id must be a number or string";
@@ -330,6 +328,19 @@ static const char *request_reject_reason(const cJSON *req) {
     const cJSON *params = cJSON_GetObjectItemCaseSensitive(req, "params");
     if (params != NULL && !cJSON_IsObject(params)) {
         return "params must be a JSON object";
+    }
+    const cJSON *method = cJSON_GetObjectItemCaseSensitive(req, "method");
+    if (!cJSON_IsString(method) || method->valuestring == NULL) {
+        return "missing or non-string method";
+    }
+    *slot = registry_find(method->valuestring);
+    if (*slot == NULL) {
+        *code = NT_DEVAPI_ERR_UNKNOWN_METHOD;
+        return "no command registered for this method";
+    }
+    if (s_pending.reply != NULL) {
+        *code = NT_DEVAPI_ERR_BUSY;
+        return "a deferred reply is pending: wait for it (a reconnect or reset drops it)";
     }
     return NULL;
 }
@@ -377,30 +388,12 @@ static cJSON *dispatch_one(const cJSON *req, bool batch) {
         return make_error_entry(NT_DEVAPI_ERR_BAD_PARAMS, "request must be a JSON object");
     }
 
-    const char *reject = request_reject_reason(req);
+    const char *code = NT_DEVAPI_ERR_BAD_PARAMS;
+    const registry_slot *slot = NULL;
+    const char *reject = request_reject(req, &code, &slot);
     if (reject != NULL) {
         /* echo_request_id is type-safe: it skips an invalid (non-scalar) id automatically. */
-        cJSON *entry = make_error_entry(NT_DEVAPI_ERR_BAD_PARAMS, reject);
-        echo_request_id(entry, req);
-        return entry;
-    }
-
-    const cJSON *method_item = cJSON_GetObjectItemCaseSensitive(req, "method");
-    if (method_item == NULL || !cJSON_IsString(method_item) || method_item->valuestring == NULL) {
-        cJSON *entry = make_error_entry(NT_DEVAPI_ERR_BAD_PARAMS, "missing or non-string method");
-        echo_request_id(entry, req);
-        return entry;
-    }
-
-    const registry_slot *slot = registry_find(method_item->valuestring);
-    if (slot == NULL) {
-        cJSON *entry = make_error_entry(NT_DEVAPI_ERR_UNKNOWN_METHOD, "no command registered for this method");
-        echo_request_id(entry, req);
-        return entry;
-    }
-
-    if (s_pending.reply != NULL) {
-        cJSON *entry = make_error_entry(NT_DEVAPI_ERR_BUSY, "a deferred reply is pending: wait for it (a reconnect or reset drops it)");
+        cJSON *entry = make_error_entry(code, reject);
         echo_request_id(entry, req);
         return entry;
     }

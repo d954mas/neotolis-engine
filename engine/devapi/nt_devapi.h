@@ -89,13 +89,15 @@ void nt_devapi_update(void);
 void nt_devapi_register_reset(nt_devapi_hook_fn fn);
 
 #ifdef NT_DEVAPI_GROUP_UI
-/* Host-facing: register a UI context under a name so the `ui` group can resolve it.
-   Call AFTER nt_devapi_init(): init clears the host ctx table, so a pre-init registration is
-   silently wiped (asserts when NT_ASSERT is on). `name` and `ctx` are stored BY REFERENCE (no copy):
-   both must stay valid and pointer-stable for the devapi's lifetime. Trusted in-process call:
-   pre-init / overflow / duplicate name asserts (not bot input). */
+/* Host-facing: name the UI contexts the `ui` group resolves (`ctx` param; absent = the first one).
+   The table is stored BY REFERENCE and read only when a ui.* command runs, so call it at any point;
+   a later call replaces it. Keep the table static. A NULL name/ctx or a duplicate name asserts. */
 typedef struct nt_ui_context nt_ui_context_t;
-void nt_devapi_ui_register_context(const char *name, nt_ui_context_t *ctx);
+typedef struct nt_devapi_ui_context {
+    const char *name;
+    nt_ui_context_t *ctx;
+} nt_devapi_ui_context;
+void nt_devapi_ui_set_contexts(const nt_devapi_ui_context *list, size_t count);
 #endif
 
 #endif /* NT_DEVAPI_H */

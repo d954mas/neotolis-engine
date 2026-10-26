@@ -11,6 +11,10 @@
 #define NT_DEVAPI_ERR_BUSY "busy"       /* a deferred reply is pending */
 #define NT_DEVAPI_ERR_STALLED "stalled" /* a deferred reply's gate can no longer open */
 
+/* Stringize a -D cap so a message tracks it (no macro expansion inside a string literal). */
+#define NT_DEVAPI_STR2(x) #x
+#define NT_DEVAPI_STR(x) NT_DEVAPI_STR2(x)
+
 /* cJSON_Add{String,Number,Bool,Null}ToObject wrappers that assert success — OOM traps
    (fail-early) instead of silently producing an incomplete response. */
 void devapi_add_string(cJSON *obj, const char *key, const char *value);
@@ -50,9 +54,6 @@ void nt_devapi_run_pre_swap_reply(void);
 /* Drop the pending deferred reply (client drop, web reset, shutdown). */
 void nt_devapi_deferred_reset(void);
 // #endregion
-
-/* True between init and shutdown. */
-bool nt_devapi_initialized(void);
 
 // #region lifecycle hooks
 /* Lifecycle hooks let an optional group plug into the core/transport without either naming the

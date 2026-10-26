@@ -1,4 +1,3 @@
-#include <stdio.h>
 #include <string.h>
 
 #include "app/nt_app.h" /* g_nt_app.frame — the advance clock the schedule ticks on. */
@@ -590,10 +589,7 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
         return nt_devapi_fail(err, "input.text: text must be a string");
     }
     const unsigned char *s = (const unsigned char *)t->valuestring;
-    /* Bounded by the char ring: beyond it the reply's queued would overstate what the game can read.
-       The dispatcher copies the message on return, so a static buffer is enough. */
-    static char too_long[64];
-    (void)snprintf(too_long, sizeof too_long, "input.text: more than %u codepoints (the char ring)", (unsigned)NT_INPUT_CHAR_RING);
+    /* Bounded by the char ring: beyond it the reply's queued would overstate what the game can read. */
     uint32_t cps[NT_INPUT_CHAR_RING];
     uint32_t n = 0;
     while (*s != 0) {
@@ -631,7 +627,7 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
             return nt_devapi_fail(err, "input.text: invalid UTF-8");
         }
         if (n >= NT_INPUT_CHAR_RING) {
-            return nt_devapi_fail(err, too_long);
+            return nt_devapi_fail(err, "input.text: more than " NT_DEVAPI_STR(NT_INPUT_CHAR_RING) " codepoints (the char ring)");
         }
         cps[n] = cp;
         n++;

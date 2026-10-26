@@ -232,8 +232,7 @@ static void test_input_gesture_near_full_atomic(void) {
 /* Each command checks the free slots for its whole command before its first entry; with one slot too
    few it answers the overflow error instead of reaching the scheduler's assert. */
 static void expect_overflow(uint32_t free, const char *request) {
-    tearDown(); /* a fresh devapi + input registration empties the schedule */
-    setUp();
+    advance(); /* releases every queued entry (all at offset 0), emptying the schedule */
     fill_schedule_leaving(free);
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(nt_devapi_submit(request), "inject schedule overflow"), request);
 }

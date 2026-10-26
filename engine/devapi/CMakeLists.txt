@@ -65,7 +65,7 @@ endif()
 # UI group: read veneer over nt_ui_probe_collect + write veneer delegating to the input scheduler.
 # PUBLIC nt_devapi_input (the reuse wrappers live there); nt_ui_interface header-only (exe picks the
 # impl); nt_window_interface for the coordinate-space metadata. NT_DEVAPI_GROUP_UI is PUBLIC because the
-# host-facing nt_devapi_ui_register_context is gated by it in the public nt_devapi.h.
+# host-facing nt_devapi_ui_set_contexts is gated by it in the public nt_devapi.h.
 if(NT_DEVAPI_GROUP_UI)
     nt_add_module(nt_devapi_ui LOG_DOMAIN "devapi" nt_devapi_ui.c)
     target_link_libraries(nt_devapi_ui PUBLIC nt_devapi nt_devapi_input nt_ui_interface PRIVATE nt_window_interface)

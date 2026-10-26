@@ -14,9 +14,6 @@
 #endif
 /* Sizes the keys/vals stack arrays; a non-positive override would form a zero/negative-length array. */
 _Static_assert(NT_DEVAPI_ENTITY_WRITE_MAX_FIELDS > 0, "NT_DEVAPI_ENTITY_WRITE_MAX_FIELDS must be > 0");
-/* Stringize the cap so the bad_params message tracks it (no macro expansion inside a string literal). */
-#define NT_DEVAPI_STR2(x) #x
-#define NT_DEVAPI_STR(x) NT_DEVAPI_STR2(x)
 
 /* Parse a cJSON value into a typed nt_write_value by WIRE SHAPE only (number->F32, bool->BOOL,
    array[3]->VEC3, array[4]->VEC4). Range/semantic (color [0,1], unit quaternion) is the apply() hook's job. */

@@ -377,8 +377,10 @@ int main(void) {
 #ifdef NT_DEVAPI_GROUP_UI
         /* The ui group's host-facing registrar exists only when GROUP_UI is built; without it the host
            still renders the hud, it is just not probe-able over devapi ui.*. */
-        nt_devapi_ui_register_context("hud", s_hud_ctx);
-        nt_devapi_ui_register_context("hud_scaled", s_hud_scaled_ctx);
+        static nt_devapi_ui_context s_ui_ctxs[2];
+        s_ui_ctxs[0] = (nt_devapi_ui_context){.name = "hud", .ctx = s_hud_ctx};
+        s_ui_ctxs[1] = (nt_devapi_ui_context){.name = "hud_scaled", .ctx = s_hud_scaled_ctx};
+        nt_devapi_ui_set_contexts(s_ui_ctxs, NT_COUNTOF(s_ui_ctxs));
 #endif
     }
 

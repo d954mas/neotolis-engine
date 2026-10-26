@@ -69,7 +69,6 @@ static void test_registry_fills_to_the_cap(void) {
 static int s_hook_order[4];
 static int s_hook_calls;
 static void poll_a(void) { s_hook_order[s_hook_calls++] = 1; }
-static void poll_b(void) {}
 static void tick_a(void) { s_hook_order[s_hook_calls++] = 2; }
 
 /* nt_devapi_update runs the transport poll before the tick, whatever the set order; re-setting the
@@ -128,6 +127,8 @@ static void test_missing_field_asserts(void) {
         TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "cmd->fn != NULL"));
     }
 }
+
+static void poll_b(void) {}
 
 /* A second transport poll or tick is a host bug: each slot has one owner. */
 static void test_second_hook_owner_asserts(void) {
