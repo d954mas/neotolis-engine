@@ -216,8 +216,7 @@ static void sched_tick(void) {
    first post-register tick doesn't fire spuriously. */
 static uint32_t s_last_frame;
 
-/* input.state reports the edges and text of the last sim-advancing poll. A frozen tick's poll still
-   clears them, so they are copied here before the first frozen poll runs. */
+/* The edges and text of the last sim-advancing poll, which input.state reports; frozen polls clear them. */
 static struct {
     bool pressed[NT_KEY_COUNT];
     bool released[NT_KEY_COUNT];
@@ -225,9 +224,8 @@ static struct {
     uint32_t char_count;
 } s_seen;
 
-/* true: the last completed nt_input_poll advanced and s_seen does not hold it yet. Commands run after
-   one tick's poll and before the next tick's input update (native in the next update's transport
-   phase, web between frames), so a refresh there copies that poll. */
+/* true: s_seen lacks the last advancing poll. Commands run after one tick's poll and before the next
+   tick's input update (native transport phase, web between frames), so a refresh there copies it. */
 static bool s_seen_stale;
 
 static void seen_refresh(void) {
@@ -262,8 +260,7 @@ static void nt_devapi_input_update(void) {
 }
 
 void nt_devapi_input_reset(void) {
-    /* Applied input stays, and so does s_seen, which observes it. No clock re-seed: a native reset
-       runs mid-tick, after frame++. */
+    /* No clock re-seed: a native reset runs mid-tick, after frame++. */
     s_sched_count = 0;
 }
 // #endregion
@@ -987,7 +984,7 @@ static const nt_devapi_handler_fn k_input_handlers[] = {
 _Static_assert(sizeof(k_input_cmds) / sizeof(k_input_cmds[0]) == sizeof(k_input_handlers) / sizeof(k_input_handlers[0]), "input: descriptor/handler arrays must have equal length");
 
 void nt_devapi_register_input(void) {
-    nt_devapi_input_reset(); /* fresh schedule each init->register. */
+    nt_devapi_input_reset();
     s_last_frame = g_nt_app.frame;
     s_seen_stale = true;
     /* The only core coupling point: core/net call these generic hooks, never the group symbols. */

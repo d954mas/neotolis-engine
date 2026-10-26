@@ -160,6 +160,7 @@ def main(port: int) -> int:
                 client.set_player_enabled(True)
                 client.set_mode("run")
                 client.resume()
+                client.wait_frames(1)  # apply the key-ups before the close drops the schedule
             except (DevApiResultError, ValueError, ConnectionError, TimeoutError, OSError):
                 pass
             transport.close()

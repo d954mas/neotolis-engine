@@ -545,9 +545,8 @@ static void test_sched_click_hold_zero_same_frame(void) {
 /* ---- offline input.state{pop_text} drain coverage (no socket) ---- */
 
 static void test_input_state_pop_text_drains_codepoints(void) {
-    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"pop_text\":true}}"))); /* clear any stale ring */
-    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"hi\"}}")));    /* enqueue char@0 'h','i' */
-    advance();                                                                                               /* advance -> release + drain into the ring */
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"hi\"}}"))); /* enqueue char@0 'h','i' */
+    advance();                                                                                            /* advance -> release + drain into the ring */
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"pop_text\":true}}"));
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
     cJSON *cps = cJSON_GetObjectItemCaseSensitive(result, "codepoints");
@@ -605,7 +604,9 @@ static void assert_key_state(bool down, bool pressed, bool released) {
 
 static int popped_text_count(void) {
     cJSON *r = state_result("{\"method\":\"input.state\",\"params\":{\"pop_text\":true}}");
-    int n = cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(r, "codepoints"));
+    const cJSON *cps = cJSON_GetObjectItemCaseSensitive(r, "codepoints");
+    TEST_ASSERT_TRUE(cJSON_IsArray(cps));
+    int n = cJSON_GetArraySize(cps);
     cJSON_Delete(r);
     return n;
 }
@@ -647,6 +648,23 @@ static void test_input_state_survives_frozen_ticks(void) {
     tick_no_advance();
     assert_key_state(false, false, true);
     TEST_ASSERT_EQUAL_INT(0, popped_text_count()); /* the new copy replaced the old text */
+    g_nt_app.frame++;                              /* a native read in an advancing tick's transport phase, before the hook */
+    assert_key_state(false, false, true);
+}
+
+/* Re-init drops the old copy and re-seeds the advance clock. */
+static void test_input_state_reregister_drops_old_copy(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}")));
+    advance();
+    tick_no_advance();
+    nt_devapi_shutdown();
+    g_nt_app.frame++;
+    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
+    nt_devapi_register_input();
+    assert_key_state(true, false, false);
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"B\"}}")));
+    tick_no_advance();
+    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_B));
 }
 
 /* A gate cutover right after an advance releases A at once; input.state keeps the advancing poll's
@@ -787,7 +805,6 @@ static void test_sched_full_drains_in_one_tick(void) {
    can ever fit is rejected as bad_params with NO partial inject (no orphan DOWN without its UP).
    A full schedule + a 2-entry click proves the preflight rejects before writing anything. */
 static void test_sched_over_reserve_whole_or_nothing(void) {
-    nt_devapi_input_reset();
     fill_schedule_leaving(1U); /* exactly 1 free slot */
     /* A click needs 2 entries -> rejects whole; the 1 free slot must survive intact. */
     assert_bad_params(nt_devapi_submit("{\"method\":\"input.click\",\"params\":{\"x\":1,\"y\":2}}"));
@@ -889,6 +906,7 @@ int main(void) {
     RUN_TEST(test_input_state_copy_survives_client_reset);
     RUN_TEST(test_input_state_gate_cutover_keeps_advance_edges);
     RUN_TEST(test_input_state_gate_cutover_in_freeze_keeps_copy);
+    RUN_TEST(test_input_state_reregister_drops_old_copy);
     RUN_TEST(test_input_describe);
     return UNITY_END();
 }
