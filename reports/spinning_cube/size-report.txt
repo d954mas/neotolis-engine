@@ -1,5 +1,5 @@
 # Size Report: spinning_cube (wasm-analysis-paired)
-# Commit: aac2bdc
+# Commit: 035db86
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 8 B
 Export                65 B
 Elem                  33 B
-Code               74542 B
+Code               74707 B
 Data               13876 B
 Custom              4080 B
 ---------------- ----------
-TOTAL              93354 B
+TOTAL              93519 B
 
 ## Top 30 Functions by Size
 
@@ -27,7 +27,7 @@ TOTAL              93354 B
 16787 B   main
  3002 B   fmt_fp
  2602 B   printf_core
- 2196 B   nt_shape_renderer_flush
+ 2361 B   nt_shape_renderer_flush
  1845 B   __rem_pio2f
  1287 B   nt_gfx_make_pipeline
  1274 B   nt_gfx_frame_create_buffers
@@ -55,7 +55,7 @@ TOTAL              93354 B
   407 B   nt_log_write
 
 Total functions: 100
-Total code size: 74378 B
+Total code size: 74543 B
 
 ## Built Engine Archives
 
@@ -104,7 +104,7 @@ libnt_postfx_blur.a         6798 B
 libnt_recorder.a           15516 B
 libnt_render.a              7668 B
 libnt_resource.a          232018 B
-libnt_shape_renderer.a    911320 B
+libnt_shape_renderer.a    911688 B
 libnt_skeletal.a            7464 B
 libnt_skeletal_assets.a     4046 B
 libnt_skeletal_gpu.a        2622 B
@@ -112,7 +112,7 @@ libnt_skin_comp.a           2238 B
 libnt_skinned_mesh_renderer.a    5944 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a         8744 B
-libnt_sprite_renderer.a    16192 B
+libnt_sprite_renderer.a    16198 B
 libnt_text_renderer.a       7702 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
@@ -125,7 +125,7 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2666882 B
+TOTAL (archives)         2667256 B
 
 ## Data Segments Summary
 

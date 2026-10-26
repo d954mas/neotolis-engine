@@ -1,5 +1,5 @@
 # Size Report: ui_3d_demo (wasm-analysis-paired)
-# Commit: aac2bdc
+# Commit: 035db86
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                71 B
 Elem                  48 B
-Code              237759 B
+Code              237939 B
 Data               19992 B
 Custom              6435 B
 ---------------- ----------
-TOTAL             265409 B
+TOTAL             265589 B
 
 ## Top 30 Functions by Size
 
@@ -43,7 +43,7 @@ TOTAL             265409 B
  2545 B   atlas_on_resolve
  2428 B   printf_core
  2406 B   nt_sprite_renderer_set_material
- 2110 B   nt_shape_renderer_flush
+ 2290 B   nt_shape_renderer_flush
  2100 B   Clay__InitializePersistentMemory
  1851 B   __rem_pio2f
  1747 B   nt_hash64
@@ -55,7 +55,7 @@ TOTAL             265409 B
  1308 B   nt_gfx_make_pipeline
 
 Total functions: 179
-Total code size: 237445 B
+Total code size: 237625 B
 
 ## Built Engine Archives
 
@@ -104,7 +104,7 @@ libnt_postfx_blur.a         6798 B
 libnt_recorder.a           15516 B
 libnt_render.a              7668 B
 libnt_resource.a          232018 B
-libnt_shape_renderer.a    911320 B
+libnt_shape_renderer.a    911688 B
 libnt_skeletal.a            7464 B
 libnt_skeletal_assets.a     4046 B
 libnt_skeletal_gpu.a        2622 B
@@ -112,7 +112,7 @@ libnt_skin_comp.a           2238 B
 libnt_skinned_mesh_renderer.a    5944 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a         8744 B
-libnt_sprite_renderer.a    16192 B
+libnt_sprite_renderer.a    16198 B
 libnt_text_renderer.a       7702 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
@@ -125,7 +125,7 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2666882 B
+TOTAL (archives)         2667256 B
 
 ## Data Segments Summary
 
