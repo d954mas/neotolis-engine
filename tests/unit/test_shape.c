@@ -17,8 +17,8 @@
 static bool float_near(float a, float b, float epsilon) { return fabsf(a - b) <= epsilon; }
 
 void setUp(void) {
-    nt_gfx_desc_t desc =
-        NT_GFX_TEST_DESC(.max_shaders = 32, .max_programs = 32, .max_pipelines = 32, .max_buffers = 128, .max_textures = 32, .max_meshes = 32, .max_vertex_inputs = 32, .max_render_targets = 16);
+    nt_gfx_desc_t desc = NT_GFX_TEST_DESC(.capture_capacity = 4096U, .max_shaders = 32, .max_programs = 32, .max_pipelines = 32, .max_buffers = 128, .max_textures = 32, .max_meshes = 32,
+                                          .max_vertex_inputs = 32, .max_render_targets = 16);
     /* A test is one frame, and every flush of it adds to frame storage. */
     desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 4U * 1024U * 1024U;
     nt_gfx_init(&desc);

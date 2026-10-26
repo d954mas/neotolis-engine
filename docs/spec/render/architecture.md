@@ -1092,8 +1092,9 @@ upload before the replayed draws that read it.
 Backends without GL (the test fake) issue no GL calls, so `gl[]` and the
 upload fields stay zero there. `NT_GFX_CAPTURE_ENABLED` is a numeric interface
 definition published by the interface target, so every consumer sees the same
-configuration; `nt_gfx_capture_request`, `nt_gfx_capture_read` and
-`nt_gfx_gl_call_name` exist only when it is 1.
+configuration; `nt_gfx_capture_request`, `nt_gfx_capture_read`,
+`nt_gfx_gl_call_name`, `nt_gfx_note_record`, `nt_gfx_marker_push` and
+`nt_gfx_marker_pop` exist only when it is 1.
 
 `gl[]` counts, by `nt_gfx_gl_call_t`, every GL call the GL backend issues
 through its `NT_GL*` funnel, queries included. Platform context management
@@ -1315,19 +1316,22 @@ a pop without a push asserts, and so does a marker still open at
 `nt_gfx_begin_frame`, the capture boundary. A group may wrap work after
 `nt_gfx_end_frame`. The stub accepts and discards notes and markers.
 
-Engine renderers note their work and skips. A skip is a `skip` note with a
-`reason` string after the renderer's note.
+Engine renderers note their work. A note with a `skip` string field reports
+work the renderer dropped and the reason. Mesh runs and sprite `draw_list` runs
+note before they resolve, so their pipeline and vertex-input creates fall under
+the note; a run dropped after that adds a second note with `skip`. A shape flush
+with nothing queued returns early, so it neither draws nor notes.
 
 | Label | Fields | Written |
 |---|---|---|
-| `mesh` | `material`, `mesh` | before each run of `draw_list`, `draw_list_skinned` and each direct mesh draw; a deformation-only split notes the same pair again |
-| `sprite` | `material`, `page` | before each immediate emit and each `draw_list` run; a merged emit keeps its note before a `CACHE` draw |
-| `text` | `material`, `font` | once per non-empty `draw_n` call |
-| `shape` | none | before each shape draw of a flush, and before the skip of a non-empty flush whose programs are not ready; an empty flush writes nothing |
-| `skip` | `reason`: `program not ready`, `page not ready`, `font not loaded`, `font texture not ready` | where the renderer drops the work |
+| `mesh` | `material`, `mesh`; `skip`: `program not ready`, `context lost` | before each run of `draw_list`, `draw_list_skinned` and each direct mesh draw; a deformation-only split notes the same pair again |
+| `sprite` | `material`, `page`; `skip`: `program not ready`, `page not ready` | before each immediate emit and each `draw_list` run; a merged emit keeps its note before a `CACHE` draw |
+| `text` | `material`, `font`; `skip`: `program not ready`, `font not loaded`, `font texture not ready` | once per non-empty `draw_n` call |
+| `shape` | none; `skip`: `program not ready` | before each shape draw of a flush, or once for a non-empty flush whose programs are not ready |
 
-Mesh draws return before noting on a lost context. Sprite, text and shape note
-it as `program not ready`: a lost context leaves no ready program.
+Mesh draws return before noting on a context already lost; a loss latched during
+a run notes `context lost`. Sprite, text and shape note a lost context as
+`program not ready`: it leaves no ready program.
 
 ## Shape strokes
 

@@ -195,7 +195,7 @@ void setUp(void) {
     nt_gfx_fake_reset();
     s_surface_pack_created = false;
     nt_hash_init(&(nt_hash_desc_t){0});
-    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 8, .max_pipelines = 16, .max_buffers = 32, .max_textures = 16, .max_meshes = 8,
+    nt_gfx_init(&NT_GFX_TEST_DESC(.capture_capacity = 4096U, .max_shaders = 8, .max_programs = 8, .max_pipelines = 16, .max_buffers = 32, .max_textures = 16, .max_meshes = 8,
                                   /* 48 non-mesh inputs + the per-(mesh, stream) vertex inputs of 8 meshes. */
                                   .max_vertex_inputs = 96, .max_render_targets = 4));
     nt_gfx_begin_frame();

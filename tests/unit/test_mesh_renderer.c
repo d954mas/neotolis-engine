@@ -238,8 +238,8 @@ void setUp(void) {
     memset(s_test_tex_res, 0, sizeof(s_test_tex_res));
     s_test_tex_pack_created = false;
     nt_hash_init(&(nt_hash_desc_t){0});
-    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 32, .max_programs = 64, .max_pipelines = 64, .max_buffers = 256, .max_textures = 32, .max_meshes = 32, .max_vertex_inputs = TEST_MAX_VERTEX_INPUTS,
-                                  .max_render_targets = 16));
+    nt_gfx_init(&NT_GFX_TEST_DESC(.capture_capacity = 4096U, .max_shaders = 32, .max_programs = 64, .max_pipelines = 64, .max_buffers = 256, .max_textures = 32, .max_meshes = 32,
+                                  .max_vertex_inputs = TEST_MAX_VERTEX_INPUTS, .max_render_targets = 16));
     nt_gfx_begin_frame();
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_entity_init(&(nt_entity_desc_t){.max_entities = 64});
@@ -1818,13 +1818,13 @@ void test_draw_list_notes_each_run_and_its_skip(void) {
     record_list(items, 2);
 
     const uint32_t first = nt_test_note(0, "mesh");
-    const uint32_t skip = nt_test_note(first, "skip");
     const uint32_t second = nt_test_note(first + 1U, "mesh");
     TEST_ASSERT_LESS_THAN_UINT32(nt_gfx_capture_read().count, second);
-    TEST_ASSERT_LESS_THAN_UINT32(second, skip);
     TEST_ASSERT_EQUAL_UINT32(not_ready.id, nt_test_note_u32(first, "material"));
     TEST_ASSERT_EQUAL_UINT32(mesh.id, nt_test_note_u32(first, "mesh"));
-    TEST_ASSERT_EQUAL_STRING("program not ready", nt_test_note_str(skip, "reason"));
+    TEST_ASSERT_EQUAL_STRING("program not ready", nt_test_note_str(first, "skip"));
+    TEST_ASSERT_EQUAL(NT_GFX_RESULT_NONE, nt_test_next_draw_result(first));
+    TEST_ASSERT_EQUAL_STRING("", nt_test_note_str(second, "skip"));
     TEST_ASSERT_EQUAL_UINT32(ready.id, nt_test_note_u32(second, "material"));
     TEST_ASSERT_EQUAL_UINT32(mesh.id, nt_test_note_u32(second, "mesh"));
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, nt_test_next_draw_result(second));

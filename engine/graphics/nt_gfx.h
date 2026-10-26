@@ -817,16 +817,15 @@ void nt_gfx_note_record(const char *label, const nt_gfx_note_field_t *fields, ui
 void nt_gfx_marker_push(const char *name);
 void nt_gfx_marker_pop(void);
 /* NT_GFX_NOTE(label, fields...): a note and its fields land together or not at all. Label, keys
- * and strings are copied (label < 100, key < 24, string < 72 bytes). The trailing placeholder lets a
- * note have no fields under C17; it is not recorded. */
+ * and strings are copied and must fit their record arrays. The trailing placeholder lets a note
+ * have no fields under C17; it is not recorded. */
 #define NT_GFX_NOTE(...) NT_GFX_NOTE_(__VA_ARGS__, NT_NOTE_U32(NULL, 0))
+/* An expression, not a do/if block: each note adds one branch to its caller. sizeof does not
+ * evaluate its operand, so the fields are built once. */
 #define NT_GFX_NOTE_(label, ...)                                                                                                                                                                       \
-    do {                                                                                                                                                                                               \
-        if (g_nt_gfx.capture_recording) {                                                                                                                                                              \
-            const nt_gfx_note_field_t nt_note_fields_[] = {__VA_ARGS__};                                                                                                                               \
-            nt_gfx_note_record((label), nt_note_fields_, (uint32_t)(sizeof(nt_note_fields_) / sizeof(nt_note_fields_[0])) - 1U);                                                                       \
-        }                                                                                                                                                                                              \
-    } while (0)
+    (g_nt_gfx.capture_recording                                                                                                                                                                        \
+         ? nt_gfx_note_record((label), (const nt_gfx_note_field_t[]){__VA_ARGS__}, (uint32_t)(sizeof((const nt_gfx_note_field_t[]){__VA_ARGS__}) / sizeof(nt_gfx_note_field_t)) - 1U)                  \
+         : (void)0)
 #define NT_GFX_MARKER_PUSH(name) nt_gfx_marker_push(name)
 #define NT_GFX_MARKER_POP() nt_gfx_marker_pop()
 #else

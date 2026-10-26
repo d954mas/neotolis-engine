@@ -259,12 +259,12 @@ static void capture_emit(const nt_sprite_alloc_t *a, uint32_t stride, uint32_t v
 static bool emit_begin(uint32_t page_tex, uint32_t vertex_count, uint32_t index_count, nt_sprite_alloc_t *a) {
     const nt_sprite_material_t *m = &s_sprite.current;
     NT_ASSERT(m->frame == g_nt_gfx.counters.frame_sequence && "sprite emit: call nt_sprite_renderer_set_material in this frame");
-    NT_GFX_NOTE("sprite", NT_NOTE_U32("material", m->material.id), NT_NOTE_U32("page", page_tex));
     /* A sprite waits for its atlas page, whatever its shader samples. */
     if (m->pipeline.id == 0 || page_tex == 0) {
-        NT_GFX_NOTE("skip", NT_NOTE_STR("reason", m->pipeline.id == 0 ? "program not ready" : "page not ready"));
+        NT_GFX_NOTE("sprite", NT_NOTE_U32("material", m->material.id), NT_NOTE_U32("page", page_tex), NT_NOTE_STR("skip", m->pipeline.id == 0 ? "program not ready" : "page not ready"));
         return false;
     }
+    NT_GFX_NOTE("sprite", NT_NOTE_U32("material", m->material.id), NT_NOTE_U32("page", page_tex));
     record_state(m, page_tex);
     uint32_t voff = 0;
     uint32_t ioff = 0;
@@ -804,9 +804,6 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
         const nt_material_t *mat = nt_material_comp_handle(leader);
         const nt_material_info_t *mat_info = nt_material_get_info(*mat);
         NT_ASSERT(mat_info != NULL && "sprite draw_list: material destroyed while its items are drawn");
-        if (mat->id != m.material.id) {
-            resolve_material(*mat, mat_info, &m);
-        }
 
         /* Equal batch keys share the page: the run draws with its leader's. */
         const uint16_t leader_sprite = sv.sparse_indices[nt_entity_index(leader)];
@@ -815,9 +812,13 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
         NT_ASSERT((sv.flags[leader_sprite] & NT_SPRITE_FLAG_RESOLVED) != 0 && sv.resolved[leader_sprite].region != NULL && sv.resolved[leader_sprite].region->vertex_count != 0 &&
                   "sprite render item: sprite is unresolved or tombstoned");
         const uint32_t page_tex = nt_resource_get(sv.resolved[leader_sprite].page_resource);
-        NT_GFX_NOTE("sprite", NT_NOTE_U32("material", m.material.id), NT_NOTE_U32("page", page_tex));
+        /* Before the resolve, so the run's pipeline and vertex-input creates fall under its note. */
+        NT_GFX_NOTE("sprite", NT_NOTE_U32("material", mat->id), NT_NOTE_U32("page", page_tex));
+        if (mat->id != m.material.id) {
+            resolve_material(*mat, mat_info, &m);
+        }
         if (m.pipeline.id == 0 || page_tex == 0) {
-            NT_GFX_NOTE("skip", NT_NOTE_STR("reason", m.pipeline.id == 0 ? "program not ready" : "page not ready"));
+            NT_GFX_NOTE("sprite", NT_NOTE_U32("material", mat->id), NT_NOTE_U32("page", page_tex), NT_NOTE_STR("skip", m.pipeline.id == 0 ? "program not ready" : "page not ready"));
             run_start = run_end;
             continue;
         }

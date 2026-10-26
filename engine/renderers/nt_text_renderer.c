@@ -425,21 +425,21 @@ void nt_text_renderer_draw_n(const nt_text_style_t *style, const float model[16]
     if (len == 0U || utf8 == NULL) {
         return;
     }
-    NT_GFX_NOTE("text", NT_NOTE_U32("material", s_text.current.material.id), NT_NOTE_U32("font", style->font.id));
     if (s_text.current.pipeline.id == 0) {
-        NT_GFX_NOTE("skip", NT_NOTE_STR("reason", "program not ready"));
+        NT_GFX_NOTE("text", NT_NOTE_U32("material", s_text.current.material.id), NT_NOTE_U32("font", style->font.id), NT_NOTE_STR("skip", "program not ready"));
         return;
     }
 
     nt_font_metrics_t metrics = nt_font_get_metrics(style->font);
     if (metrics.units_per_em == 0) {
-        NT_GFX_NOTE("skip", NT_NOTE_STR("reason", "font not loaded"));
+        NT_GFX_NOTE("text", NT_NOTE_U32("material", s_text.current.material.id), NT_NOTE_U32("font", style->font.id), NT_NOTE_STR("skip", "font not loaded"));
         return; /* no resource loaded yet (or all unmounted) */
     }
     if (!nt_gfx_texture_ready(nt_font_get_curve_texture(style->font))) {
-        NT_GFX_NOTE("skip", NT_NOTE_STR("reason", "font texture not ready"));
+        NT_GFX_NOTE("text", NT_NOTE_U32("material", s_text.current.material.id), NT_NOTE_U32("font", style->font.id), NT_NOTE_STR("skip", "font texture not ready"));
         return;
     }
+    NT_GFX_NOTE("text", NT_NOTE_U32("material", s_text.current.material.id), NT_NOTE_U32("font", style->font.id));
     const float size = style->size;
     float scale = size / (float)metrics.units_per_em;
 
