@@ -2,6 +2,7 @@
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <stdio.h>
+#include <string.h>
 
 /* clang-format off */
 #include "devapi/nt_devapi_internal.h"
@@ -79,19 +80,26 @@ static const nt_devapi_command k_incomplete_cmds[] = {
 static void test_missing_field_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_devapi_register(k_incomplete_cmds, 1, NULL)); }
 
 /* The count is checked against the free slots before any row is read. */
-static void test_overflow_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_devapi_register(k_test_cmds, NT_DEVAPI_MAX_COMMANDS, NULL)); }
+static void test_overflow_asserts(void) {
+    NT_TEST_EXPECT_ASSERT(nt_devapi_register(k_test_cmds, NT_DEVAPI_MAX_COMMANDS + 1U, NULL));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "NT_DEVAPI_MAX_COMMANDS"));
+}
 
 static bool fail_without_err(const cJSON *params, cJSON *result_obj, nt_devapi_error *err, void *user_data) { return false; }
 
+static bool defer_to_silent_fail(const cJSON *params, cJSON *result_obj, nt_devapi_error *err, void *user_data) { return nt_devapi_defer(NT_DEVAPI_GATE_PRESENT, 0.0, fail_without_err, err); }
+
 static const nt_devapi_command k_silent_fail_cmds[] = {
-    {"test.silent_fail", "returns false without filling err", "{}", "{}", fail_without_err},
+    {"test.silent_fail", "defers a reply that returns false without filling err", "{}", "{}", defer_to_silent_fail},
 };
 
-/* A failing handler must fill err; the dispatcher asserts instead of inventing an error. Runs last:
-   the trap unwinds out of dispatch and leaves its in-flight state behind. */
+/* A failing handler must fill err; the dispatcher asserts instead of inventing an error. The reply runs
+   at the pre-swap seam, outside submit, so the trap unwinds past no live request tree. */
 static void test_fail_without_err_asserts(void) {
     nt_devapi_register(k_silent_fail_cmds, 1, NULL);
-    NT_TEST_EXPECT_ASSERT((void)nt_devapi_submit("{\"method\":\"test.silent_fail\"}"));
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.silent_fail\"}"));
+    NT_TEST_EXPECT_ASSERT(nt_devapi_run_pre_swap_reply());
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "err.code"));
 }
 
 /* submit before init is a caller bug: nt_devapi_submit asserts initialized (the registry is empty). */
@@ -112,8 +120,8 @@ int main(void) {
     RUN_TEST(test_dup_in_one_table_asserts);
     RUN_TEST(test_missing_field_asserts);
     RUN_TEST(test_overflow_asserts);
-    RUN_TEST(test_submit_before_init_asserts);
     RUN_TEST(test_fail_without_err_asserts);
+    RUN_TEST(test_submit_before_init_asserts);
 #endif
     return UNITY_END();
 }

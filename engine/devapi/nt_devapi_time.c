@@ -91,7 +91,7 @@ static bool cmd_time_set_scale(const cJSON *params, cJSON *result, nt_devapi_err
     if (!nt_devapi_parse_f32_param(s, err, bad_scale, &fscale)) {
         return false;
     }
-    if (fscale < 0.0F) {
+    if (s->valuedouble < 0.0) { /* on the double: -1e-50 narrows to -0.0f and would pass */
         return nt_devapi_fail(err, bad_scale);
     }
     nt_app_set_scale(fscale);

@@ -270,6 +270,7 @@ static void test_bad_params_cases(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"count\":\"x\"}}"));
     assert_bad_params(nt_devapi_submit("{\"method\":\"time.set_fps\",\"params\":{\"fps\":-1}}"));
     assert_bad_params(nt_devapi_submit("{\"method\":\"time.set_scale\",\"params\":{\"scale\":-1}}"));
+    assert_bad_params(nt_devapi_submit("{\"method\":\"time.set_scale\",\"params\":{\"scale\":-1e-50}}")); /* narrows to -0.0f */
     assert_bad_params(nt_devapi_submit("{\"method\":\"time.set_mode\",\"params\":{\"mode\":\"bogus\"}}"));
 }
 
