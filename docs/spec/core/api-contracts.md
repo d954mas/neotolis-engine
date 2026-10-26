@@ -327,8 +327,9 @@ and `DEPTH32F` require the same, plus `data == NULL` and no mipmaps.
 `ETC2_RGB8`, `ETC2_RGBA8`, `BC7_RGBA` and `ASTC_4x4_RGBA` are block-compressed
 color storage: 4x4 blocks, 8 bytes per block for `ETC2_RGB8` and 16 for the other
 three. Their sRGB twins (`ETC2_SRGB8`, `ETC2_SRGB8_ALPHA8`, `BC7_SRGB_ALPHA`,
-`ASTC_4x4_SRGB8_ALPHA8`) share the block layout, rules and capability bit. They require `data` and reject `gen_mipmaps`, because block data can only
-be uploaded, never generated. Each needs its capability bit (`has_etc2`,
+`ASTC_4x4_SRGB8_ALPHA8`) share the block layout, rules and capability bit. They
+require `data` and reject `gen_mipmaps`, because block data can only be uploaded,
+never generated. Each needs its capability bit (`has_etc2`,
 `has_bc7`, `has_astc`); a missing bit follows the `max_texture_size` rule: the
 constructor asserts, so the game checks the bit before it creates. Compressed
 storage is ordinary sampled color everywhere else: `sampler2D` reads it, and
@@ -339,8 +340,8 @@ sub-rectangle of texels.
 samples linear RGB and leaves alpha linear. `SRGB8` is not color-renderable in
 WebGL 2, so it rejects `gen_mipmaps`.
 
-`BC7_RGBA` and `BC7_SRGB_ALPHA` additionally require both base dimensions to be multiples of 4,
-including textures smaller than one block. This is the portable WebGL BPTC
+`BC7_RGBA` and `BC7_SRGB_ALPHA` additionally require both base dimensions to be
+multiples of 4, including textures smaller than one block. This is the portable WebGL BPTC
 upload contract and asserts before storage creation on every backend. Other
 compressed formats allow partial edge blocks.
 

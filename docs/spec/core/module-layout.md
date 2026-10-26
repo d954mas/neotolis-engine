@@ -168,7 +168,8 @@ not allocate, destroy, or retain caller handles.
 The source uses any `sampler2D` color format — the uncompressed set (`R8`,
 `RG8`, `RGB8`, `RGBA8`, `RGBA16F`, `RGBA32F`), the block-compressed set
 (`ETC2_RGB8`, `ETC2_RGBA8`, `BC7_RGBA`, `ASTC_4x4_RGBA`) and the sRGB formats
-(`SRGB8_ALPHA8`, `SRGB8` and the compressed twins), which it reads as linear values; integer and depth formats are invalid. `temp` and
+(`SRGB8_ALPHA8`, `SRGB8` and the compressed twins), which it reads as linear
+values; integer and depth formats are invalid. `temp` and
 `dest` are distinct valid `RGBA8` targets matching the source size. The helper
 samples the source `NEAREST` with clamped edges, whatever its default sampler;
 taps land on texel centres. Its own passes start with scissor disabled, so the

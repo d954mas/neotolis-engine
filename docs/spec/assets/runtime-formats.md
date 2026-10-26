@@ -79,7 +79,7 @@ and re-activation after a context loss reads the same header, so the
 interpretation survives. An sRGB ASTC format expands block endpoints
 differently, so a UASTC texture sampled through it differs by about one step
 before the transfer curve. `SRGB8` is not color-renderable in WebGL 2 and cannot
-generate runtime mips: `nt_gfx_make_texture` asserts on it, and the builder
+generate runtime mips: `nt_gfx_make_texture` asserts on it with `gen_mipmaps`, and the builder
 rejects a RAW `SRGB8` texture with `gen_mipmaps`.
 
 The runtime accepts a single-level texture under any min filter, because

@@ -149,11 +149,13 @@ before encoding.
 
 `format` also selects the color encoding. `SRGB8_ALPHA8` and `SRGB8` mark
 sRGB-encoded color for a shader that lights in linear space and encodes its
-output (base color); every other format is linear data (normals, roughness,
-masks). The engine's UI, sprite and text shaders write display values, so their
-textures keep the linear formats. The game chooses per texture; nothing is inferred
-from file names or material slots. Source bytes are stored as they are and the
-GPU decodes them on sampling ([runtime formats](../assets/runtime-formats.md#texture-activation-ttex)).
+output (base color). Every other format is sampled as stored: linear data
+(normals, roughness, masks), or color that a shader writes to the display
+unchanged. The engine's UI, sprite and text shaders write display values, so
+their textures keep `RGBA8` even though the art is sRGB. The game chooses per
+texture; nothing is inferred from file names or material slots. Source bytes
+are stored as they are and the GPU decodes them on sampling
+([runtime formats](../assets/runtime-formats.md#texture-activation-ttex)).
 Basis accepts `RGBA8`, `RGB8`, `SRGB8_ALPHA8` and `SRGB8`. `premultiplied = true`
 requires `RGBA8`: premultiplying encoded sRGB bytes is not premultiplication in
 linear light. A RAW `SRGB8` texture cannot generate runtime mips (WebGL 2 cannot
