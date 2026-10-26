@@ -58,8 +58,9 @@ static void build_space(const char *directory) {
     tex.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
     tex.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
     tex.compress = nt_tex_compress_etc1s_default();
-    /* Basis has no sRGB targets yet, so planet.frag decodes Mars to linear after sampling. */
-    nt_builder_add_texture(ctx, "examples/asteroids/raw/Mars.jpg", &tex);
+    nt_tex_opts_t mars = tex;
+    mars.format = NT_TEXTURE_FORMAT_SRGB8; /* planet.frag lights in linear */
+    nt_builder_add_texture(ctx, "examples/asteroids/raw/Mars.jpg", &mars);
     nt_builder_rename(ctx, "examples/asteroids/raw/Mars.jpg", "asteroids/mars");
     for (uint32_t face = 0; face < 6; face++) {
         char name[64];
