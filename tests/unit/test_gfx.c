@@ -1793,10 +1793,9 @@ void test_gfx_make_texture_mipmap_filter_no_mipmaps(void) {
 static const uint8_t s_test_block_16[16] = {0};
 
 static const nt_texture_format_t s_compressed_formats[] = {
-    NT_TEXTURE_FORMAT_ETC2_RGB8,
-    NT_TEXTURE_FORMAT_ETC2_RGBA8,
-    NT_TEXTURE_FORMAT_BC7_RGBA,
-    NT_TEXTURE_FORMAT_ASTC_4x4_RGBA,
+    NT_TEXTURE_FORMAT_ETC2_RGB8,         NT_TEXTURE_FORMAT_ETC2_RGBA8,     NT_TEXTURE_FORMAT_ETC2_SRGB8,
+    NT_TEXTURE_FORMAT_ETC2_SRGB8_ALPHA8, NT_TEXTURE_FORMAT_BC7_SRGB_ALPHA, NT_TEXTURE_FORMAT_ASTC_4x4_SRGB8_ALPHA8,
+    NT_TEXTURE_FORMAT_BC7_RGBA,          NT_TEXTURE_FORMAT_ASTC_4x4_RGBA,
 };
 
 static void enable_compressed_caps(void) {
@@ -2041,8 +2040,11 @@ void test_gfx_make_texture_bc7_requires_aligned_base_dimensions(void) {
     static const uint8_t blocks[128] = {0};
     const uint16_t sizes[][2] = {{13, 7}, {1, 1}, {8, 2}, {2, 8}};
     uint32_t creates = nt_gfx_fake_texture_create_count();
-    for (uint32_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
-        EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){.width = sizes[i][0], .height = sizes[i][1], .format = NT_TEXTURE_FORMAT_BC7_RGBA, .data = blocks}));
+    const nt_texture_format_t formats[] = {NT_TEXTURE_FORMAT_BC7_RGBA, NT_TEXTURE_FORMAT_BC7_SRGB_ALPHA};
+    for (uint32_t f = 0; f < sizeof(formats) / sizeof(formats[0]); f++) {
+        for (uint32_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+            EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){.width = sizes[i][0], .height = sizes[i][1], .format = formats[f], .data = blocks}));
+        }
     }
     TEST_ASSERT_EQUAL_UINT32(creates, nt_gfx_fake_texture_create_count());
 }
@@ -3017,6 +3019,13 @@ void test_gfx_make_texture_rg16ui_rejects_mipmaps(void) {
         .gen_mipmaps = true,
         .data = s_test_rg16ui_4x4,
     }));
+}
+
+/* WebGL2 cannot render to SRGB8, so glGenerateMipmap would fail; SRGB8_ALPHA8 can. */
+void test_gfx_make_texture_srgb8_rejects_mipmaps(void) {
+    uint32_t creates = nt_gfx_fake_texture_create_count();
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_SRGB8, .gen_mipmaps = true, .data = s_test_pixels_4x4}));
+    TEST_ASSERT_EQUAL_UINT32(creates, nt_gfx_fake_texture_create_count());
 }
 
 void test_gfx_make_depth_texture_uses_explicit_format(void) {
@@ -4170,6 +4179,7 @@ int main(void) {
     RUN_TEST(test_gfx_make_texture_rg16ui);
     RUN_TEST(test_gfx_make_texture_rg16ui_rejects_linear);
     RUN_TEST(test_gfx_make_texture_rg16ui_rejects_mipmaps);
+    RUN_TEST(test_gfx_make_texture_srgb8_rejects_mipmaps);
     RUN_TEST(test_gfx_make_depth_texture_uses_explicit_format);
     RUN_TEST(test_gfx_make_depth_texture_rejects_linear_without_compare_mode);
     RUN_TEST(test_gfx_update_depth_texture_rejected);

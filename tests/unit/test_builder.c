@@ -885,6 +885,71 @@ void test_atlas_texture_option_aliases_are_canonicalized(void) {
     nt_builder_free_pack(ctx);
 }
 
+/* The transfer is part of the asset: the same pixels as RGBA8 and SRGB8_ALPHA8
+ * get distinct cache keys, are never deduplicated, and differ only in the header format. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_texture_srgb_twin_of_the_same_pixels_is_a_separate_asset(void) {
+    const uint8_t pixels[2 * 2 * 4] = {10, 128, 200, 255, 60, 70, 80, 90, 255, 0, 128, 40, 1, 2, 3, 4};
+    const char *pack_path = TMP_DIR "/srgb_twin.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    nt_builder_add_texture_raw(ctx, pixels, 2, 2, "linear", &opts);
+    opts.format = NT_TEXTURE_FORMAT_SRGB8_ALPHA8;
+    nt_builder_add_texture_raw(ctx, pixels, 2, 2, "srgb", &opts);
+    TEST_ASSERT_TRUE(nt_builder_compute_opts_hash(&ctx->pending[0]) != nt_builder_compute_opts_hash(&ctx->pending[1]));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    TEST_ASSERT_EQUAL_UINT32(0, ctx->early_dedup_count);
+    TEST_ASSERT_EQUAL_UINT32(0, ctx->dedup_count);
+    nt_builder_free_pack(ctx);
+
+    FILE *f = fopen(pack_path, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    NtPackHeader hdr;
+    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, f));
+    TEST_ASSERT_EQUAL_UINT16(2, hdr.asset_count);
+    NtAssetEntry entries[2];
+    TEST_ASSERT_EQUAL(1, fread(entries, sizeof(entries), 1, f));
+    TEST_ASSERT_TRUE(entries[0].offset != entries[1].offset);
+    uint8_t blobs[2][sizeof(NtTextureAssetHeader) + sizeof(pixels)];
+    for (uint32_t i = 0; i < 2; i++) {
+        TEST_ASSERT_EQUAL_UINT32(sizeof(blobs[i]), entries[i].size);
+        TEST_ASSERT_EQUAL(0, fseek(f, (long)entries[i].offset, SEEK_SET));
+        TEST_ASSERT_EQUAL(1, fread(blobs[i], sizeof(blobs[i]), 1, f));
+    }
+    (void)fclose(f);
+    NtTextureAssetHeader headers[2];
+    memcpy(&headers[0], blobs[0], sizeof(headers[0]));
+    memcpy(&headers[1], blobs[1], sizeof(headers[1]));
+    /* Entry order follows resource ids, not add order. */
+    const bool srgb_first = headers[0].format == NT_TEXTURE_FORMAT_SRGB8_ALPHA8;
+    TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_FORMAT_SRGB8_ALPHA8, headers[srgb_first ? 0 : 1].format);
+    TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_FORMAT_RGBA8, headers[srgb_first ? 1 : 0].format);
+    /* The encoded bytes go to the GPU as they are; no pre-decode. */
+    TEST_ASSERT_EQUAL_MEMORY(pixels, blobs[0] + sizeof(NtTextureAssetHeader), sizeof(pixels));
+    TEST_ASSERT_EQUAL_MEMORY(pixels, blobs[1] + sizeof(NtTextureAssetHeader), sizeof(pixels));
+}
+
+void test_texture_srgb_opts_contract(void) {
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.format = NT_TEXTURE_FORMAT_SRGB8;
+    /* Defaults ask for runtime mips, which SRGB8 storage cannot generate. */
+    EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_assert_texture_opts(&opts), "RAW SRGB8 cannot generate runtime mips");
+    opts.gen_mipmaps = false;
+    opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_SRGB8, nt_builder_assert_texture_opts(&opts));
+    /* Basis bakes its own mips, so SRGB8 is fine there. */
+    opts = nt_tex_opts_defaults();
+    opts.format = NT_TEXTURE_FORMAT_SRGB8;
+    opts.compress = NT_BASISU_HAS_UASTC ? nt_tex_compress_uastc_default() : nt_tex_compress_etc1s_default();
+    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_SRGB8, nt_builder_assert_texture_opts(&opts));
+    opts.format = NT_TEXTURE_FORMAT_SRGB8_ALPHA8;
+    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_SRGB8_ALPHA8, nt_builder_assert_texture_opts(&opts));
+    /* Premultiplying encoded bytes is not linear-light premultiplication. */
+    opts.premultiplied = true;
+    EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_assert_texture_opts(&opts), "premultiplied=true requires RGBA8");
+}
+
 /* --- Premultiplied alpha: formula + flag propagation --- */
 
 /* Known input → known output through the real encoder, exercising
@@ -9961,6 +10026,8 @@ int main(int argc, char *argv[]) {
 
     /* Premultiplied alpha */
     RUN_TEST(test_texture_premultiplied_encoding);
+    RUN_TEST(test_texture_srgb_twin_of_the_same_pixels_is_a_separate_asset);
+    RUN_TEST(test_texture_srgb_opts_contract);
 
     /* AABB edge extrude */
     RUN_TEST(test_extrude_edges_aabb_l_shape);

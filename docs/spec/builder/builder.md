@@ -147,6 +147,21 @@ of the encoded bytes. Raw-pixel inputs retain copied, resized pixels. Atlas
 pages use the same texture encoder. Premultiplication runs after resize and
 before encoding.
 
+`format` also selects the color encoding. `SRGB8_ALPHA8` and `SRGB8` mark
+sRGB-encoded color for a shader that lights in linear space and encodes its
+output (base color); every other format is linear data (normals, roughness,
+masks). The engine's UI, sprite and text shaders write display values, so their
+textures keep the linear formats. The game chooses per texture; nothing is inferred
+from file names or material slots. Source bytes are stored as they are and the
+GPU decodes them on sampling ([runtime formats](../assets/runtime-formats.md#texture-activation-ttex)).
+Basis accepts `RGBA8`, `RGB8`, `SRGB8_ALPHA8` and `SRGB8`. `premultiplied = true`
+requires `RGBA8`: premultiplying encoded sRGB bytes is not premultiplication in
+linear light. A RAW `SRGB8` texture cannot generate runtime mips (WebGL 2 cannot
+render to it); use `SRGB8_ALPHA8`, or `gen_mipmaps = false` with a non-mip
+`filter_min`. The format is part of the cache key and of dedup identity, so the
+same pixels as `RGBA8` and as `SRGB8_ALPHA8` are two assets. Resize still
+filters encoded values.
+
 Basis always emits a full mip chain, independent of `gen_mipmaps` (that flag
 controls RAW runtime mip generation). The builder asserts exactly
 `1 + floor(log2(max(width, height)))` levels; 1x1 is complete with one level.
@@ -586,13 +601,18 @@ Every frontier adopts the trim-rect candidate, so with `max_vertices >= 4` geome
 - Candidate geometry and the integer geometry prepared for serialization both pass the same selected-geometry proof: inputs valid, opaque area valid, base/selected bounds, topology, full retained-cell coverage, triangulation, metric order, allowance, and ceiling. Corrupt area, allowance, ceiling, polygon, or triangle data fails the proof. Float positions are baked afterward and checked for finiteness.
 - These controls affect builder geometry, composed page pixels, and atlas cache identity. They do not change the runtime API or the on-disk atlas blob format.
 
-**Premultiplied alpha (default):** atlas pages are encoded through the regular texture pipeline with `premultiplied = true`, which writes `RGB' = (RGB * A + 127) / 255` into the page before `strip_channels` (RAW path) or `nt_basisu_encode` (BASIS path). The resulting texture sets `NT_TEXTURE_FLAG_PREMULTIPLIED` in `NtTextureAssetHeader.flags`, and the runtime must draw with `(ONE, ONE_MINUS_SRC_ALPHA)` blending. This is what keeps NFP-packed sprites free of dark fringes at sub-pixel clearance: `(0,0,0,0)` gap pixels are the identity for premultiplied blending, so bilinear filtering at sprite edges stays correct. Setting `premultiplied = false` logs a warning and is only valid for NEAREST-filtered or fully-opaque atlases; setting `premultiplied = true` with a non-RGBA8 `format` is a hard assert.
+**Premultiplied alpha (default):** atlas pages are encoded through the regular texture pipeline with `premultiplied = true`, which writes `RGB' = (RGB * A + 127) / 255` into the page before `strip_channels` (RAW path) or `nt_basisu_encode` (BASIS path). The resulting texture sets `NT_TEXTURE_FLAG_PREMULTIPLIED` in `NtTextureAssetHeader.flags`, and the runtime must draw with `(ONE, ONE_MINUS_SRC_ALPHA)` blending. This is what keeps NFP-packed sprites free of dark fringes at sub-pixel clearance: `(0,0,0,0)` gap pixels are the identity for premultiplied blending, so bilinear filtering at sprite edges stays correct. Setting `premultiplied = false` logs a warning and is only valid for NEAREST-filtered or fully-opaque atlases; setting `premultiplied = true` with a non-RGBA8 `format`, including an sRGB one, is a hard assert.
 
-**LDR mip filtering:** the Basis encoder filters stored RGB and alpha values linearly,
-without an sRGB transfer during downsampling (`m_mip_srgb = false`, set explicitly
-by the wrapper). This preserves the premultiplied relationship through the mip
-chain. A half-coverage opaque-white/transparent-black texture reduces to roughly
-RGBA `(128,128,128,128)`, subject to block-compression error.
+**LDR mip filtering:** for a linear `format` the Basis encoder filters stored RGB
+and alpha values linearly, without an sRGB transfer during downsampling
+(`m_mip_srgb = false`, set by the wrapper). This preserves the premultiplied
+relationship through the mip chain. A half-coverage opaque-white/transparent-black
+texture reduces to roughly RGBA `(128,128,128,128)`, subject to block-compression
+error. For an sRGB `format` the wrapper sets `m_mip_srgb = true`: RGB averages
+linear light and alpha stays on stored values, so an opaque black/white checker
+reduces to about 188, not 128. sRGB is never premultiplied, so the two rules never
+meet. RAW `SRGB8_ALPHA8` mips come from runtime `glGenerateMipmap`, whose filter
+for sRGB storage the GL ES specification leaves to the driver.
 
 **Hard limits:**
 - `0 <= extrude <= max_size`; non-zero atlas extrude requires `NT_ATLAS_SHAPE_RECT`.

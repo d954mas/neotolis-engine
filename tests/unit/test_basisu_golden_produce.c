@@ -88,7 +88,7 @@ static void produce_fixture(const fixture_t *fx) {
         opts.uastc.pack_level = 2;
         opts.uastc.rdo_lambda = 1.0F;
     }
-    nt_basisu_encode_result_t enc = nt_basisu_encode(1, pixels, fx->w, fx->h, fx->alpha, &opts);
+    nt_basisu_encode_result_t enc = nt_basisu_encode(1, pixels, fx->w, fx->h, fx->alpha ? NT_TEXTURE_FORMAT_RGBA8 : NT_TEXTURE_FORMAT_RGB8, &opts);
     free(pixels);
     TEST_ASSERT_NOT_NULL_MESSAGE(enc.data, fx->name);
 

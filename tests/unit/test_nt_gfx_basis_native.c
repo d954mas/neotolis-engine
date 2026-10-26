@@ -64,10 +64,10 @@ static void fill_source(void) {
 
 /* A TTEX V3 asset with the builder's own field values, so the activator sees
  * production bytes. */
-static void build_fixture(nt_basisu_codec_t codec) {
+static void build_fixture(nt_basisu_codec_t codec, nt_texture_pixel_format_t format) {
     fill_source();
     nt_basisu_encode_opts_t opts = codec == NT_BASISU_CODEC_ETC1S ? nt_tex_compress_etc1s_high() : nt_tex_compress_uastc_default();
-    nt_basisu_encode_result_t enc = nt_basisu_encode(1, s_src, SRC_W, SRC_H, true, &opts);
+    nt_basisu_encode_result_t enc = nt_basisu_encode(1, s_src, SRC_W, SRC_H, format, &opts);
     TEST_ASSERT_NOT_NULL(enc.data);
     TEST_ASSERT_EQUAL_UINT32(SRC_LEVELS, enc.mip_count);
     TEST_ASSERT_LESS_OR_EQUAL_UINT32(sizeof(s_blob) - sizeof(NtTextureAssetHeader), enc.size);
@@ -76,7 +76,7 @@ static void build_fixture(nt_basisu_codec_t codec) {
     memset(hdr, 0, sizeof(*hdr));
     hdr->magic = NT_TEXTURE_MAGIC;
     hdr->version = NT_TEXTURE_VERSION;
-    hdr->format = NT_TEXTURE_FORMAT_RGBA8;
+    hdr->format = (uint16_t)format;
     hdr->width = SRC_W;
     hdr->height = SRC_H;
     hdr->mip_count = (uint16_t)enc.mip_count;
@@ -146,16 +146,32 @@ static const char *s_sample_fs = "precision highp float;\n"
                                  "in vec2 v_uv;\n"
                                  "out vec4 frag_color;\n"
                                  "void main() { frag_color = texture(u_tex, v_uv); }\n";
+/* Samples an sRGB texture (linear values) and encodes once with the shipped
+ * common/color.glsl: the readback then compares with the stored bytes. */
+static char s_encode_fs[2048];
+
+static void load_encode_fs(void) {
+    char color_glsl[1024] = {0};
+    FILE *file = fopen(NT_COLOR_GLSL_PATH, "rb");
+    TEST_ASSERT_NOT_NULL(file);
+    const size_t read = fread(color_glsl, 1, sizeof(color_glsl) - 1, file);
+    (void)fclose(file);
+    TEST_ASSERT_TRUE(read > 0 && read < sizeof(color_glsl) - 1);
+    (void)snprintf(s_encode_fs, sizeof(s_encode_fs),
+                   "precision highp float;\n%s\nuniform sampler2D u_tex;\nin vec2 v_uv;\nout vec4 frag_color;\n"
+                   "void main() { vec4 c = texture(u_tex, v_uv); frag_color = vec4(nt_linear_to_srgb(c.rgb), c.a); }\n",
+                   color_glsl);
+}
 
 /* Draws the texture over `vp_w x vp_h` of a `rt_w x rt_h` colour target and
  * reads the viewport back. Straight alpha survives: no blending is enabled. */
-static void render_sampled(nt_texture_t tex, nt_sampler_t sampler, uint16_t rt_w, uint16_t rt_h, int vp_w, int vp_h) {
+static void render_sampled(nt_texture_t tex, nt_sampler_t sampler, uint16_t rt_w, uint16_t rt_h, int vp_w, int vp_h, const char *fs_source) {
     nt_texture_t color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = rt_w, .height = rt_h, .format = NT_TEXTURE_FORMAT_RGBA8});
     nt_render_target_t rt = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = color});
     TEST_ASSERT_TRUE(nt_gfx_render_target_valid(rt));
 
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_fullscreen_vs});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_sample_fs});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source});
     nt_program_t prog = nt_gfx_make_program(vs, fs, NULL);
     nt_test_gfx_link_wait(prog);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
@@ -233,35 +249,44 @@ static GLint texture_max_level(nt_texture_t tex) {
 
 // #region (a) activation on the detected caps
 
-static void check_activation(nt_basisu_codec_t codec, uint8_t tolerance) {
-    build_fixture(codec);
+/* The caps matrix pins the exact sRGB twin; here the real GPU must decode it. */
+static void check_activation(nt_basisu_codec_t codec, uint8_t tolerance, bool srgb) {
+    build_fixture(codec, srgb ? NT_TEXTURE_FORMAT_SRGB8_ALPHA8 : NT_TEXTURE_FORMAT_RGBA8);
+    const char *fs = srgb ? s_encode_fs : s_sample_fs;
     uint32_t handle = nt_gfx_activate_texture(s_blob, s_blob_size);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
     nt_texture_t tex = {.id = handle};
     TEST_ASSERT_TRUE(nt_gfx_texture_ready(tex));
-    TEST_ASSERT_EQUAL_INT(expected_target(codec), nt_gfx_texture_format(tex));
+    const nt_texture_format_t format = nt_gfx_texture_format(tex);
+    if (srgb) {
+        TEST_ASSERT_TRUE(nt_texture_format_is_srgb(format) && nt_texture_format_is_compressed(format) == nt_texture_format_is_compressed(expected_target(codec)));
+    } else {
+        TEST_ASSERT_EQUAL_INT(expected_target(codec), format);
+    }
     TEST_ASSERT_EQUAL_INT((int)s_info.level_count - 1, texture_max_level(tex));
 
     /* Level 0 through the asset's own LINEAR_MIPMAP_LINEAR default sampler. */
     decode_reference(0);
-    render_sampled(tex, NT_SAMPLER_DEFAULT, SRC_W, SRC_H, SRC_W, SRC_H);
+    render_sampled(tex, NT_SAMPLER_DEFAULT, SRC_W, SRC_H, SRC_W, SRC_H, fs);
     check_against_reference(0, tolerance, false);
 
     /* One pixel of viewport forces the LOD past the end of the chain, so
      * NEAREST_MIPMAP_NEAREST clamps to MAX_LEVEL: the 1x1 tail. */
     nt_sampler_t tail = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_NEAREST_MIPMAP_NEAREST, .mag_filter = NT_FILTER_NEAREST});
     decode_reference(s_info.level_count - 1U);
-    render_sampled(tex, tail, SRC_W, SRC_H, 1, 1);
+    render_sampled(tex, tail, SRC_W, SRC_H, 1, 1, fs);
     check_against_reference(s_info.level_count - 1U, tolerance, false);
 
     nt_gfx_deactivate_texture(handle);
 }
 
 #if NT_BASISU_HAS_ETC1S
-void test_activate_etc1s_blob_uploads_and_samples(void) { check_activation(NT_BASISU_CODEC_ETC1S, TOL_ETC1S); }
+void test_activate_etc1s_blob_uploads_and_samples(void) { check_activation(NT_BASISU_CODEC_ETC1S, TOL_ETC1S, false); }
+void test_activate_etc1s_srgb_blob_takes_the_srgb_target(void) { check_activation(NT_BASISU_CODEC_ETC1S, TOL_ETC1S, true); }
 #endif
 #if NT_BASISU_HAS_UASTC
-void test_activate_uastc_blob_uploads_and_samples(void) { check_activation(NT_BASISU_CODEC_UASTC_LDR, TOL_UASTC); }
+void test_activate_uastc_blob_uploads_and_samples(void) { check_activation(NT_BASISU_CODEC_UASTC_LDR, TOL_UASTC, false); }
+void test_activate_uastc_srgb_blob_takes_the_srgb_target(void) { check_activation(NT_BASISU_CODEC_UASTC_LDR, TOL_UASTC, true); }
 #endif
 
 // #endregion
@@ -269,7 +294,9 @@ void test_activate_uastc_blob_uploads_and_samples(void) { check_activation(NT_BA
 // #region (b) prepared upload of a contiguous chain
 
 static void check_prepared_upload(nt_texture_format_t format, uint8_t tolerance) {
-    build_fixture(ANY_CODEC);
+    build_fixture(ANY_CODEC, NT_TEXTURE_FORMAT_RGBA8);
+    const char *fs = nt_texture_format_is_srgb(format) ? s_encode_fs : s_sample_fs;
+    const bool opaque_storage = format == NT_TEXTURE_FORMAT_ETC2_RGB8 || format == NT_TEXTURE_FORMAT_ETC2_SRGB8;
     uint32_t total = transcode_chain(format);
     TEST_ASSERT_GREATER_THAN_UINT32(0, total);
 
@@ -289,13 +316,13 @@ static void check_prepared_upload(nt_texture_format_t format, uint8_t tolerance)
     TEST_ASSERT_EQUAL_INT((int)s_info.level_count - 1, texture_max_level(tex));
 
     decode_reference(0);
-    render_sampled(tex, NT_SAMPLER_DEFAULT, SRC_W, SRC_H, SRC_W, SRC_H);
-    check_against_reference(0, tolerance, format == NT_TEXTURE_FORMAT_ETC2_RGB8);
+    render_sampled(tex, NT_SAMPLER_DEFAULT, SRC_W, SRC_H, SRC_W, SRC_H, fs);
+    check_against_reference(0, tolerance, opaque_storage);
 
     /* The declared chain really reaches GL: the tail level is sampled too. */
     decode_reference(s_info.level_count - 1U);
-    render_sampled(tex, NT_SAMPLER_DEFAULT, SRC_W, SRC_H, 1, 1);
-    check_against_reference(s_info.level_count - 1U, tolerance, format == NT_TEXTURE_FORMAT_ETC2_RGB8);
+    render_sampled(tex, NT_SAMPLER_DEFAULT, SRC_W, SRC_H, 1, 1, fs);
+    check_against_reference(s_info.level_count - 1U, tolerance, opaque_storage);
 
     nt_gfx_destroy_texture(tex);
 }
@@ -330,6 +357,31 @@ void test_prepared_upload_etc2_rgb8(void) {
     check_prepared_upload(NT_TEXTURE_FORMAT_ETC2_RGB8, TOL_ETC1S);
 }
 
+/* The sRGB twins upload the same blocks: decode on sampling, encode on output, back at the reference. */
+void test_prepared_upload_srgb8_alpha8(void) { check_prepared_upload(NT_TEXTURE_FORMAT_SRGB8_ALPHA8, TOL_EXACT); }
+
+void test_prepared_upload_bc7_srgb(void) {
+    if (!nt_gfx_gpu_caps()->has_bc7) {
+        TEST_IGNORE_MESSAGE("BC7_SRGB_ALPHA unverified on this host -- needs a GPU with has_bc7");
+    }
+    check_prepared_upload(NT_TEXTURE_FORMAT_BC7_SRGB_ALPHA, TOL_UASTC);
+}
+
+void test_prepared_upload_astc_srgb(void) {
+    if (!nt_gfx_gpu_caps()->has_astc) {
+        TEST_IGNORE_MESSAGE("ASTC_4x4_SRGB8_ALPHA8 unverified on this host -- needs a GPU with has_astc");
+    }
+    check_prepared_upload(NT_TEXTURE_FORMAT_ASTC_4x4_SRGB8_ALPHA8, TOL_UASTC);
+}
+
+void test_prepared_upload_etc2_srgb(void) {
+    if (!nt_gfx_gpu_caps()->has_etc2) {
+        TEST_IGNORE_MESSAGE("ETC2 sRGB unverified on this host -- needs a GPU with has_etc2");
+    }
+    check_prepared_upload(NT_TEXTURE_FORMAT_ETC2_SRGB8_ALPHA8, TOL_ETC1S);
+    check_prepared_upload(NT_TEXTURE_FORMAT_ETC2_SRGB8, TOL_ETC1S);
+}
+
 // #endregion
 
 // #region (c) GL_TEXTURE_MAX_LEVEL
@@ -350,7 +402,7 @@ void test_single_level_texture_caps_max_level_and_still_samples(void) {
     TEST_ASSERT_EQUAL_INT(0, texture_max_level(tex));
 
     /* A mip filter over a one-level texture is complete GL, not a black draw. */
-    render_sampled(tex, NT_SAMPLER_DEFAULT, 4, 4, 4, 4);
+    render_sampled(tex, NT_SAMPLER_DEFAULT, 4, 4, 4, 4, s_sample_fs);
     for (uint32_t i = 0; i < 16; i++) {
         const uint8_t *got = &s_readback[(size_t)i * 4U];
         TEST_ASSERT_UINT8_WITHIN(TOL_EXACT, texel[0], got[0]);
@@ -386,7 +438,7 @@ void test_partial_chain_caps_max_level_and_samples_its_last_level(void) {
     TEST_ASSERT_TRUE(nt_gfx_texture_ready(tex));
     TEST_ASSERT_EQUAL_INT(2, texture_max_level(tex));
 
-    render_sampled(tex, NT_SAMPLER_DEFAULT, 16, 16, 1, 1);
+    render_sampled(tex, NT_SAMPLER_DEFAULT, 16, 16, 1, 1, s_sample_fs);
     TEST_ASSERT_UINT8_WITHIN(TOL_EXACT, level_color[2][0], s_readback[0]);
     TEST_ASSERT_UINT8_WITHIN(TOL_EXACT, level_color[2][1], s_readback[1]);
     TEST_ASSERT_UINT8_WITHIN(TOL_EXACT, level_color[2][2], s_readback[2]);
@@ -400,6 +452,107 @@ void test_render_target_color_caps_max_level(void) {
     TEST_ASSERT_TRUE(nt_gfx_render_target_valid(rt));
     TEST_ASSERT_EQUAL_INT(0, texture_max_level(color));
     nt_gfx_destroy_texture(color);
+}
+
+// #endregion
+
+// #region (d) RAW sRGB decode, round trip and updates
+
+#define RAMP_W 64U
+#define RAMP_H 4U
+
+static nt_texture_t make_nearest(nt_texture_format_t format, uint16_t w, uint16_t h, const void *data) {
+    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = w,
+        .height = h,
+        .data = data,
+        .format = format,
+        .min_filter = NT_FILTER_NEAREST,
+        .mag_filter = NT_FILTER_NEAREST,
+        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+    });
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(tex));
+    TEST_ASSERT_EQUAL_INT(format, nt_gfx_texture_format(tex));
+    return tex;
+}
+
+/* Readback rows are top-left first; GL row 0 is the source's row 0. */
+static void check_readback_rgba(const uint8_t *want_rgba, uint32_t w, uint32_t h, uint8_t tolerance) {
+    for (uint32_t ry = 0; ry < h; ry++) {
+        for (uint32_t rx = 0; rx < w; rx++) {
+            const uint8_t *got = &s_readback[(((size_t)ry * w) + rx) * 4];
+            const uint8_t *want = &want_rgba[((((size_t)h - 1U - ry) * w) + rx) * 4];
+            for (uint32_t c = 0; c < 4; c++) {
+                TEST_ASSERT_UINT8_WITHIN(tolerance, want[c], got[c]);
+            }
+        }
+    }
+}
+
+void test_srgb_texel_128_samples_as_linear_with_linear_alpha(void) {
+    static const uint8_t texel[4] = {128, 128, 128, 128};
+    nt_texture_t srgb = make_nearest(NT_TEXTURE_FORMAT_SRGB8_ALPHA8, 1, 1, texel);
+    render_sampled(srgb, NT_SAMPLER_DEFAULT, 1, 1, 1, 1, s_sample_fs);
+    /* 128 decodes to 0.21586 linear (55.04 / 255); alpha stays 128 / 255. */
+    static const uint8_t decoded[4] = {55, 55, 55, 128};
+    check_readback_rgba(decoded, 1, 1, 1);
+    nt_gfx_destroy_texture(srgb);
+
+    nt_texture_t plain = make_nearest(NT_TEXTURE_FORMAT_RGBA8, 1, 1, texel);
+    render_sampled(plain, NT_SAMPLER_DEFAULT, 1, 1, 1, 1, s_sample_fs);
+    check_readback_rgba(texel, 1, 1, 0);
+    nt_gfx_destroy_texture(plain);
+}
+
+/* Every byte value in each channel, channels out of phase: decode then a single
+ * encode gives the source back within one quantization step. */
+void test_srgb_ramp_decodes_and_encodes_back_to_the_source(void) {
+    static uint8_t ramp[RAMP_W * RAMP_H * 4];
+    static uint8_t ramp_rgb[RAMP_W * RAMP_H * 3];
+    for (uint32_t i = 0; i < RAMP_W * RAMP_H; i++) {
+        ramp[(i * 4U) + 0] = (uint8_t)i;
+        ramp[(i * 4U) + 1] = (uint8_t)(255U - i);
+        ramp[(i * 4U) + 2] = (uint8_t)(i * 7U);
+        ramp[(i * 4U) + 3] = (uint8_t)(i ^ 0x5AU);
+        memcpy(&ramp_rgb[(size_t)i * 3U], &ramp[(size_t)i * 4U], 3);
+    }
+    nt_texture_t srgb = make_nearest(NT_TEXTURE_FORMAT_SRGB8_ALPHA8, RAMP_W, RAMP_H, ramp);
+    render_sampled(srgb, NT_SAMPLER_DEFAULT, RAMP_W, RAMP_H, RAMP_W, RAMP_H, s_encode_fs);
+    check_readback_rgba(ramp, RAMP_W, RAMP_H, 1);
+    nt_gfx_destroy_texture(srgb);
+
+    /* SRGB8 has no alpha: it samples as 1.0. */
+    nt_texture_t srgb_rgb = make_nearest(NT_TEXTURE_FORMAT_SRGB8, RAMP_W, RAMP_H, ramp_rgb);
+    render_sampled(srgb_rgb, NT_SAMPLER_DEFAULT, RAMP_W, RAMP_H, RAMP_W, RAMP_H, s_encode_fs);
+    for (uint32_t i = 0; i < RAMP_W * RAMP_H; i++) {
+        ramp[(i * 4U) + 3] = 255;
+    }
+    check_readback_rgba(ramp, RAMP_W, RAMP_H, 1);
+    nt_gfx_destroy_texture(srgb_rgb);
+}
+
+/* A sub-update keeps the stored sRGB format; 3-texel SRGB8 rows (9 bytes) also exercise the unpack alignment. */
+void test_srgb_updates_keep_the_interpretation(void) {
+    static uint8_t zeros[5 * 3 * 3];
+    static const uint8_t patch_rgb[3 * 3 * 3] = {10, 60, 128, 200, 30, 90, 255, 0, 17, 128, 128, 128, 1, 2, 3, 250, 240, 230, 77, 88, 99, 33, 44, 55, 128, 64, 32};
+    uint8_t want[5 * 3 * 4];
+    for (uint32_t i = 0; i < 5 * 3; i++) {
+        want[(i * 4U) + 0] = 0;
+        want[(i * 4U) + 1] = 0;
+        want[(i * 4U) + 2] = 0;
+        want[(i * 4U) + 3] = 255;
+    }
+    for (uint32_t y = 0; y < 3; y++) {
+        for (uint32_t x = 0; x < 3; x++) {
+            memcpy(&want[(((size_t)y * 5U) + 1U + x) * 4U], &patch_rgb[(((size_t)y * 3U) + x) * 3U], 3);
+        }
+    }
+    nt_texture_t rgb = make_nearest(NT_TEXTURE_FORMAT_SRGB8, 5, 3, zeros);
+    nt_gfx_update_texture(rgb, 1, 0, 3, 3, patch_rgb);
+    render_sampled(rgb, NT_SAMPLER_DEFAULT, 5, 3, 5, 3, s_encode_fs);
+    check_readback_rgba(want, 5, 3, 1);
+    nt_gfx_destroy_texture(rgb);
 }
 
 // #endregion
@@ -420,11 +573,14 @@ int main(void) {
     UNITY_BEGIN();
     nt_basisu_transcoder_global_init();
     nt_basisu_encoder_init();
+    load_encode_fs();
 #if NT_BASISU_HAS_ETC1S
     RUN_TEST(test_activate_etc1s_blob_uploads_and_samples);
+    RUN_TEST(test_activate_etc1s_srgb_blob_takes_the_srgb_target);
 #endif
 #if NT_BASISU_HAS_UASTC
     RUN_TEST(test_activate_uastc_blob_uploads_and_samples);
+    RUN_TEST(test_activate_uastc_srgb_blob_takes_the_srgb_target);
 #endif
     RUN_TEST(test_prepared_upload_rgba8);
     /* A target whose option is OFF has no transcoded chain to upload. */
@@ -441,6 +597,19 @@ int main(void) {
     RUN_TEST(test_single_level_texture_caps_max_level_and_still_samples);
     RUN_TEST(test_partial_chain_caps_max_level_and_samples_its_last_level);
     RUN_TEST(test_render_target_color_caps_max_level);
+    RUN_TEST(test_prepared_upload_srgb8_alpha8);
+#if NT_BASISU_HAS_BC7
+    RUN_TEST(test_prepared_upload_bc7_srgb);
+#endif
+#if NT_BASISU_HAS_ASTC
+    RUN_TEST(test_prepared_upload_astc_srgb);
+#endif
+#if NT_BASISU_HAS_ETC2
+    RUN_TEST(test_prepared_upload_etc2_srgb);
+#endif
+    RUN_TEST(test_srgb_texel_128_samples_as_linear_with_linear_alpha);
+    RUN_TEST(test_srgb_ramp_decodes_and_encodes_back_to_the_source);
+    RUN_TEST(test_srgb_updates_keep_the_interpretation);
     int failures = UNITY_END();
     nt_window_shutdown();
     return failures;

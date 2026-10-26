@@ -62,6 +62,26 @@ texture at RGBA8 cost. A blob whose codec is OFF (`NT_BASISU_HAS_ETC1S/UASTC`)
 is a pack from another configure, a developer error: `nt_basisu_info` asserts
 at the cross-check; there is no FAILED fallback for it.
 
+The header `format` also carries the transfer. `RGBA8`, `RGB8`, `RG8` and `R8`
+are linear storage; `SRGB8_ALPHA8` and `SRGB8` mark sRGB-encoded color. A RAW
+sRGB texture uploads its encoded bytes to `GL_SRGB8_ALPHA8`/`GL_SRGB8` as they
+lie. A BASIS sRGB texture takes the sRGB twin of the selected target
+(`ETC2_SRGB8`, `ETC2_SRGB8_ALPHA8`, `BC7_SRGB_ALPHA`, `ASTC_4x4_SRGB8_ALPHA8`;
+the uncompressed fallback becomes `SRGB8_ALPHA8`). The block bits are the same;
+only the GL internal format changes, and the extension that exposes a linear
+target exposes its twin, so the same caps gate both. Sampling sRGB storage
+returns linear RGB; alpha is never converted. The Basis blob's own sRGB flag is
+not read, because UASTC never sets it: the header is the only source. The values
+are new, not a new layout, so `NT_TEXTURE_VERSION` stays; an older runtime asserts
+on them at activation.
+`nt_gfx_texture_format` reports the real storage (for example `BC7_SRGB_ALPHA`),
+and re-activation after a context loss reads the same header, so the
+interpretation survives. An sRGB ASTC format expands block endpoints
+differently, so a UASTC texture sampled through it differs by about one step
+before the transfer curve. `SRGB8` is not color-renderable in WebGL 2 and cannot
+generate runtime mips: `nt_gfx_make_texture` asserts on it, and the builder
+rejects a RAW `SRGB8` texture with `gen_mipmaps`.
+
 The runtime accepts a single-level texture under any min filter, because
 `GL_TEXTURE_MAX_LEVEL` is then 0 and the storage is mip-complete; the builder
 asserts on that combination for RAW assets ([builder](../builder/builder.md)).

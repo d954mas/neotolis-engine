@@ -455,6 +455,7 @@ if(NOT EMSCRIPTEN)
     # Real GL + real transcoder + builder encoder. No nt_gfx_fake here: it bundles nt_gfx.c.
     add_executable(test_nt_gfx_basis_native unit/test_nt_gfx_basis_native.c)
     target_link_libraries(test_nt_gfx_basis_native PRIVATE nt_gfx nt_builder nt_basisu_transcoder_full nt_window nt_input_stub nt_log unity glad nt_meshwire)
+    target_compile_definitions(test_nt_gfx_basis_native PRIVATE _CRT_SECURE_NO_WARNINGS NT_COLOR_GLSL_PATH="${CMAKE_SOURCE_DIR}/assets/shaders/common/color.glsl")
     nt_setup_test_target(test_nt_gfx_basis_native TIMEOUT 300)
     set_property(TEST test_nt_gfx_basis_native APPEND PROPERTY LABELS native)
 
