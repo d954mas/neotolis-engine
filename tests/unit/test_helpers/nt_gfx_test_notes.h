@@ -38,10 +38,10 @@ static inline const char *nt_test_note_str(uint32_t note, const char *key) {
     return field != NULL && field->field.type == NT_GFX_NOTE_STR ? field->field.value.str : "";
 }
 
-/* Result of the first draw RESULT at or after from; NT_GFX_RESULT_NONE when none. */
-static inline nt_gfx_result_t nt_test_next_draw_result(uint32_t from) {
+/* Result of the first draw after the NOTE at index note and before the next NOTE; NT_GFX_RESULT_NONE when none. */
+static inline nt_gfx_result_t nt_test_next_draw_result(uint32_t note) {
     const nt_gfx_capture_view_t v = nt_gfx_capture_read();
-    for (uint32_t i = from; i < v.count; i++) {
+    for (uint32_t i = note + 1U; i < v.count && v.events[i].kind != NT_GFX_EVENT_NOTE; i++) {
         const nt_gfx_event_t *e = &v.events[i];
         if (e->kind == NT_GFX_EVENT_RESULT && e->operation >= NT_GFX_OP_DRAW && e->operation <= NT_GFX_OP_DRAW_INDEXED_INSTANCED) {
             return e->result;

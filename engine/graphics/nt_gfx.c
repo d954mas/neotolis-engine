@@ -341,10 +341,11 @@ static void copy_note_field(nt_gfx_event_t *dst, const nt_gfx_note_field_t *src)
 
 void nt_gfx_note_record(const char *label, const nt_gfx_note_field_t *fields, uint32_t count) {
     nt_gfx_capture_state_t *capture = &g_nt_gfx_capture;
-    if (!g_nt_gfx.capture_recording || capture->view.overflow) {
+    NT_ASSERT(g_nt_gfx.capture_recording && "nt_gfx_note_record: call it through NT_GFX_NOTE");
+    NT_ASSERT(fields != NULL || count == 0);
+    if (capture->view.overflow) {
         return;
     }
-    NT_ASSERT(fields != NULL || count == 0);
     /* All or nothing: a reader takes every NOTE_FIELD after a NOTE as its fields. */
     if (capture->capacity - capture->view.count <= count) {
         capture->view.overflow = true;
@@ -361,7 +362,8 @@ void nt_gfx_note_record(const char *label, const nt_gfx_note_field_t *fields, ui
 }
 
 void nt_gfx_marker_push(const char *name) {
-    NT_ASSERT(name != NULL && "nt_gfx_marker_push: name is required");
+    /* Checked in every frame, not only recorded ones: markers are rare and a long name must not wait for a capture. */
+    NT_ASSERT(name != NULL && strlen(name) < sizeof(g_nt_gfx_capture.events[0].note.label) && "nt_gfx_marker_push: name is required and shorter than 100 bytes");
     g_nt_gfx_capture.marker_depth++;
     nt_gfx_event_t *event = nt_gfx_capture_reserve();
     if (event != NULL) {

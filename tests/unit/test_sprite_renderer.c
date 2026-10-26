@@ -2218,6 +2218,23 @@ void test_sprite_renderer_merged_emits_keep_their_notes(void) {
     }
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, nt_test_next_draw_result(notes[0]));
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_CACHE, nt_test_next_draw_result(notes[1]));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_capture_read().count, nt_test_note(notes[1] + 1U, "sprite"));
+}
+
+void test_sprite_renderer_linking_program_notes_its_skip(void) {
+    s_atlas_res = register_test_atlas(0xC8ULL);
+    nt_gfx_fake_hold_program_links(true);
+    nt_material_t mat = create_test_material();
+    nt_gfx_capture_request();
+    nt_test_frame_next();
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, NT_MATH_MAT4_IDENTITY, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
+    nt_gfx_fake_hold_program_links(false);
+
+    const uint32_t note = nt_test_note(0, "sprite");
+    TEST_ASSERT_EQUAL_UINT32(mat.id, nt_test_note_u32(note, "material"));
+    TEST_ASSERT_EQUAL_STRING("program not ready", nt_test_note_str(nt_test_note(note, "skip"), "reason"));
+    TEST_ASSERT_EQUAL(NT_GFX_RESULT_NONE, nt_test_next_draw_result(note));
 }
 
 void test_sprite_renderer_unready_page_notes_its_skip(void) {
@@ -2288,6 +2305,7 @@ int main(void) {
 #if NT_GFX_CAPTURE_ENABLED
     RUN_TEST(test_sprite_renderer_merged_emits_keep_their_notes);
     RUN_TEST(test_sprite_renderer_unready_page_notes_its_skip);
+    RUN_TEST(test_sprite_renderer_linking_program_notes_its_skip);
 #endif
     RUN_TEST(test_sprite_renderer_params_rebind_when_material_returns);
     RUN_TEST(test_sprite_renderer_set_params_reaches_the_next_emit);

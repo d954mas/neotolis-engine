@@ -907,6 +907,15 @@ static void destroy_gpu(void) {
     memset(&s_shape.gpu, 0, sizeof(s_shape.gpu));
 }
 
+static bool queues_empty(void) {
+    for (int type = 0; type < NT_SHAPE_TYPE_COUNT; type++) {
+        if (s_shape.fill_counts[type] != 0 || s_shape.wire_counts[type] != 0) {
+            return false;
+        }
+    }
+    return s_shape.vertex_count == 0 && s_shape.stroke_count == 0 && s_shape.line_count == 0;
+}
+
 static void drop_queues(void) {
     memset(s_shape.fill_counts, 0, sizeof(s_shape.fill_counts));
     memset(s_shape.wire_counts, 0, sizeof(s_shape.wire_counts));
@@ -963,6 +972,10 @@ static void draw_instances(nt_pipeline_t pipeline, nt_vertex_input_t vi, nt_inst
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- capture note macros expand at their owning sites
 void nt_shape_renderer_flush(void) {
     NT_ASSERT(s_shape.initialized && "nt_shape_renderer_flush: module is not initialized");
+    /* Every setter flushes; an empty flush has nothing to draw or to note. */
+    if (queues_empty()) {
+        return;
+    }
     /* Each program finishes linking on its own frame; until all do, queued shapes are dropped. */
     if (!nt_gfx_program_ready(s_shape.gpu.fill_prog) || !nt_gfx_program_ready(s_shape.gpu.batch_prog) || !nt_gfx_program_ready(s_shape.gpu.wire_prog) || !nt_gfx_program_ready(s_shape.gpu.line_prog)) {
         NT_GFX_NOTE("shape");

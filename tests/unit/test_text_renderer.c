@@ -1246,6 +1246,7 @@ void test_notes_survive_merges_and_an_unloaded_font_notes_its_skip(void) {
     nt_font_t empty = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
     nt_gfx_capture_request();
     next_frame();
+    nt_text_renderer_draw(&style, s_identity, ""); /* empty: no note */
     nt_text_renderer_draw(&style, s_identity, "AB");
     nt_text_renderer_draw(&style, s_identity, "C");
     style.font = empty;
@@ -1263,6 +1264,7 @@ void test_notes_survive_merges_and_an_unloaded_font_notes_its_skip(void) {
     TEST_ASSERT_EQUAL_UINT32(empty.id, nt_test_note_u32(third, "font"));
     TEST_ASSERT_EQUAL_STRING("font not loaded", nt_test_note_str(nt_test_note(third, "skip"), "reason"));
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_NONE, nt_test_next_draw_result(third));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_capture_read().count, nt_test_note(third + 1U, "text"));
     nt_test_frame_close();
     nt_font_destroy(empty);
     open_frame();

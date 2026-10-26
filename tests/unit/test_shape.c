@@ -3,6 +3,7 @@
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/nt_gfx_test_desc.h"
 #include "test_helpers/nt_gfx_test_frame.h"
+#include "test_helpers/nt_gfx_test_notes.h"
 /* NT_TEST_ACCESS defined via CMake target_compile_definitions */
 #include "graphics/nt_gfx.h"
 #include "graphics/nt_gfx_internal.h"
@@ -781,6 +782,27 @@ static void test_unlinked_programs_drop_queued_shapes(void) {
     nt_gfx_fake_draw_trace_reset(false);
 }
 
+#if NT_GFX_CAPTURE_ENABLED
+/* Each shape draw is noted without a material; an empty flush notes nothing. */
+void test_shape_flush_notes_each_draw_and_nothing_when_empty(void) {
+    nt_gfx_capture_request();
+    nt_test_frame_next();
+    const uint32_t before = nt_gfx_capture_read().count;
+    nt_shape_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(before, nt_gfx_capture_read().count);
+
+    const float c[3] = {0, 0, 0};
+    const float size[3] = {1, 1, 1};
+    nt_shape_renderer_cube(c, size, NULL, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_flush();
+    const uint32_t note = nt_test_note(before, "shape");
+    TEST_ASSERT_LESS_THAN_UINT32(nt_gfx_capture_read().count, note);
+    TEST_ASSERT_NULL(nt_test_note_field(note, "material"));
+    TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, nt_test_next_draw_result(note));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_capture_read().count, nt_test_note(note + 1U, "shape"));
+}
+#endif
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_polyline_overflow_preserves_all_segments);
@@ -793,6 +815,9 @@ int main(void) {
     RUN_TEST(test_width_must_be_finite_and_positive);
     RUN_TEST(test_shape_init_shutdown);
     RUN_TEST(test_shape_flush_empty);
+#if NT_GFX_CAPTURE_ENABLED
+    RUN_TEST(test_shape_flush_notes_each_draw_and_nothing_when_empty);
+#endif
     RUN_TEST(test_shape_set_vp_derives_eye);
     RUN_TEST(test_shape_set_depth_auto_flush);
     RUN_TEST(test_shape_line_vertex_count);

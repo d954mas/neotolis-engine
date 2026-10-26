@@ -1295,9 +1295,10 @@ with the gfx records, so they share the capture's lifetime, copy rule and
 overflow. Only `kind` is common with gfx records: a note or marker keeps its
 label in `note.label`, a field its `type`, `key` and `value` in `field`. Label,
 key and string value are copied at the call (shorter than 100, 24 and 72 bytes,
-asserted while the frame records), so callers may pass temporary buffers. A
+asserted while the frame records; a marker name in every frame), so callers may pass temporary buffers. A
 note lands with all its fields or, when they do not fit, sets `overflow`; no
-record appends after an overflow.
+record appends after an overflow. Each note costs one record plus one per
+field, so per-call notes (one per sprite emit) need capacity sized for them.
 
 A note describes the front-end records after it until the next note or
 marker. Backend records are written when the stream executes in
@@ -1322,10 +1323,11 @@ Engine renderers note their work and skips. A skip is a `skip` note with a
 | `mesh` | `material`, `mesh` | before each run of `draw_list`, `draw_list_skinned` and each direct mesh draw; a deformation-only split notes the same pair again |
 | `sprite` | `material`, `page` | before each immediate emit and each `draw_list` run; a merged emit keeps its note before a `CACHE` draw |
 | `text` | `material`, `font` | once per non-empty `draw_n` call |
-| `shape` | none | before each shape draw of a flush, and before the skip of a flush whose programs are not ready |
+| `shape` | none | before each shape draw of a flush, and before the skip of a non-empty flush whose programs are not ready; an empty flush writes nothing |
 | `skip` | `reason`: `program not ready`, `page not ready`, `font not loaded`, `font texture not ready` | where the renderer drops the work |
 
-A context loss writes no renderer note: the capture already records it.
+Mesh draws return before noting on a lost context. Sprite, text and shape note
+it as `program not ready`: a lost context leaves no ready program.
 
 ## Shape strokes
 
