@@ -1302,8 +1302,10 @@ record appends after an overflow. Each note costs one record plus one per
 field, so per-call notes (one per sprite emit) need capacity sized for them.
 
 A note describes the front-end records after it until the next note or
-marker. Backend records are written when the stream executes in
-`nt_gfx_end_frame`, after every note of the frame. Notes and markers are not
+marker. Immediate operations (creates, uploads) record their backend calls at
+the call, under the current note. Draw-phase calls record theirs when the stream
+executes in `nt_gfx_end_frame`, after the notes made before it; notes made after
+`end_frame` follow that execution. Notes and markers are not
 draw-stream commands, so draw merging, counters and pixels do not depend on
 them. Markers do not reach external debuggers (a stream command between two
 draws would end their merge).
@@ -1329,9 +1331,11 @@ with nothing queued returns early, so it neither draws nor notes.
 | `text` | `material`, `font`; `skip`: `program not ready`, `font not loaded`, `font texture not ready` | once per non-empty `draw_n` call |
 | `shape` | none; `skip`: `program not ready` | before each shape draw of a flush, or once for a non-empty flush whose programs are not ready |
 
-Mesh draws return before noting on a context already lost; a loss latched during
-a run notes `context lost`. Sprite, text and shape note a lost context as
-`program not ready`: it leaves no ready program.
+On a loss taken at `nt_gfx_begin_frame`, mesh draws return before noting, and
+sprite, text and shape note `skip: program not ready`: the wipe leaves no ready
+program. A loss latched during the frame keeps programs and cached pipelines
+until the next `begin_frame`, so renderers note as usual and their gfx records
+end `CONTEXT_LOST`; a mesh create that meets it notes `skip: context lost`.
 
 ## Shape strokes
 
