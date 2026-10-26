@@ -1,5 +1,5 @@
 /* devapi ui.* group over a REAL headless nt_ui ctx: a real probe-able tree registered via
-   nt_devapi_ui_register_context, driven through nt_devapi_submit + JSON asserts. The whole body is
+   nt_devapi_ui_set_contexts, driven through nt_devapi_submit + JSON asserts. The whole body is
    NT_UI_DEBUG_TOOLS-gated (ui.tree/ui.element need the real nt_ui_probe_collect, else a 0-node stub);
    OFF builds compile to a passing stub main so compile_commands.json / tidy stay complete. */
 
@@ -74,6 +74,7 @@ static nt_ui_context_t *s_scaled_ctx;
    must reject it with bad_params BEFORE any coord conversion (the wire-input-crash regression). */
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_neverbegun_arena[NT_UI_TEST_ARENA_SIZE];
 static nt_ui_context_t *s_neverbegun_ctx;
+static nt_devapi_ui_context s_ctxs[3];
 
 /* Declare the same known widget in the scaled ctx, overriding the per-frame identity viewport with a
    non-identity (offset + scale) one BEFORE the first hit-test (the lazy resolve window). */
@@ -136,25 +137,24 @@ void setUp(void) {
     /* Real headless ctx + renderer chain (no window/GLFW); also nt_mem_scratch_init for CLAY data. */
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
 
-    /* nt_devapi_init re-registers the ui group, which CLEARS the host ctx table — so register the
-       ctx AFTER init, every test, or ui.* would see an empty table. */
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
     nt_devapi_register_input(); /* ui.* delegates scheduling to the input group + the test drives input.* */
     nt_devapi_register_ui();
     nt_input_init();
-    nt_devapi_ui_register_context("hud", s_fx.ctx);
 
     /* Bare second ctx (no atlas/material — probe + bbox + viewport need no walk) registered scaled. */
     const nt_ui_create_desc_t scaled_desc = nt_ui_create_desc_defaults();
     s_scaled_ctx = nt_ui_create_context(s_scaled_arena, sizeof s_scaled_arena, &scaled_desc);
     TEST_ASSERT_NOT_NULL(s_scaled_ctx);
-    nt_devapi_ui_register_context("hud_scaled", s_scaled_ctx);
 
     /* Third ctx registered but DELIBERATELY never nt_ui_begin'd (begin_w == 0): the wire-input-crash
        regression target. resolve_ctx must reject it before any converter runs. */
     s_neverbegun_ctx = nt_ui_create_context(s_neverbegun_arena, sizeof s_neverbegun_arena, &scaled_desc);
     TEST_ASSERT_NOT_NULL(s_neverbegun_ctx);
-    nt_devapi_ui_register_context("hud_neverbegun", s_neverbegun_ctx);
+    s_ctxs[0] = (nt_devapi_ui_context){.name = "hud", .ctx = s_fx.ctx};
+    s_ctxs[1] = (nt_devapi_ui_context){.name = "hud_scaled", .ctx = s_scaled_ctx};
+    s_ctxs[2] = (nt_devapi_ui_context){.name = "hud_neverbegun", .ctx = s_neverbegun_ctx};
+    nt_devapi_ui_set_contexts(s_ctxs, NT_COUNTOF(s_ctxs));
 
     /* Pin the window so the dpr metadata + any fb-derived basis is deterministic (the headless ctx
        layout size is LAYOUT_W/H from nt_ui_begin, independent of fb_*; dpr still reads g_nt_window). */
@@ -233,14 +233,13 @@ static void test_contexts_lists_registered(void) {
     cJSON_Delete(root);
 }
 
-/* ---- registration order: register BEFORE init traps (init clears the host ctx table) ---- */
+/* ---- context table: a duplicate name is a host bug ---- */
 
-/* The fixture inits in setUp; drop back to the pre-init state, assert a register traps (it would
-   otherwise be silently wiped at the next init), then re-init so tearDown's shutdown stays balanced. */
-static void test_register_context_before_init_traps(void) {
-    nt_devapi_shutdown(); /* -> nt_devapi_initialized() false */
-    NT_TEST_EXPECT_ASSERT(nt_devapi_ui_register_context("premature", s_fx.ctx));
-    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init()); /* re-arm for the balanced tearDown shutdown */
+static void test_duplicate_context_name_traps(void) {
+    static nt_devapi_ui_context dup[2];
+    dup[0] = (nt_devapi_ui_context){.name = "hud", .ctx = s_fx.ctx};
+    dup[1] = (nt_devapi_ui_context){.name = "hud", .ctx = s_scaled_ctx};
+    NT_TEST_EXPECT_ASSERT(nt_devapi_ui_set_contexts(dup, NT_COUNTOF(dup)));
 }
 
 /* ---- ui.tree: metadata + Y-up bounds ---- */
@@ -551,6 +550,38 @@ static void test_drag_frames_over_cap_bad_params(void) {
     assert_bad_params(nt_devapi_submit(req));
 }
 
+/* The last MOVE lands exactly on `to`: float interpolation turned 1e8 -> 1 into 0. UP defers
+   deactivation one frame, so the slot still holds the final MOVE position. */
+static void test_drag_lands_exactly_on_to(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"ui.drag\",\"params\":{\"from\":{\"x\":1e8,\"y\":0},\"to\":{\"x\":1,\"y\":0},\"frames\":1}}")));
+    advance(); /* DOWN@0 */
+    advance(); /* MOVE@1 + UP@1 */
+    nt_pointer_t *slot = inject_slot();
+    TEST_ASSERT_NOT_NULL(slot);
+    TEST_ASSERT_TRUE(near_eq(slot->x, 1.0F));
+}
+
+/* A span whose float difference overflows (-3e38 -> 3e38) queues finite moves: float math made the
+   midpoint inf. */
+static void test_drag_huge_span_moves_stay_finite(void) {
+    nt_pointer_t *slot = NULL;
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"ui.drag\",\"params\":{\"from\":{\"x\":-3e38,\"y\":0},\"to\":{\"x\":3e38,\"y\":0},\"frames\":2}}")));
+    advance(); /* DOWN@0 */
+    advance(); /* MOVE@1, the midpoint: float math made it inf */
+    slot = inject_slot();
+    TEST_ASSERT_NOT_NULL(slot);
+    TEST_ASSERT_TRUE(isfinite(slot->x) && near_eq(slot->x, 0.0F));
+}
+
+/* ui.scroll needs MOVE + wheel; with one slot free it answers overflow and queues nothing. */
+static void test_scroll_preflights_both_entries(void) {
+    for (uint32_t i = 0; i < NT_DEVAPI_INPUT_SCHED_MAX - 1U; i++) {
+        cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}")));
+    }
+    TEST_ASSERT_NOT_NULL(strstr(nt_devapi_submit("{\"method\":\"ui.scroll\",\"params\":{\"id\":\"widget\",\"dy\":1}}"), "inject schedule overflow"));
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"B\"}}")));
+}
+
 /* ---- ui.drag whole-or-nothing on the shared scheduler ---- */
 
 /* A ui.drag at the per-command cap reserves DOWN + frames MOVEs + UP all-or-nothing on the shared
@@ -583,7 +614,7 @@ static void test_drag_over_reserve_no_partial_inject(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_contexts_lists_registered);
-    RUN_TEST(test_register_context_before_init_traps);
+    RUN_TEST(test_duplicate_context_name_traps);
     RUN_TEST(test_tree_meta_and_yup_bounds);
     RUN_TEST(test_element_by_id_ok);
     RUN_TEST(test_element_unknown_id_bad_params);
@@ -612,6 +643,9 @@ int main(void) {
     RUN_TEST(test_drag_frames_fractional_bad_params);
     RUN_TEST(test_drag_frames_negative_bad_params);
     RUN_TEST(test_drag_frames_zero_bad_params);
+    RUN_TEST(test_drag_lands_exactly_on_to);
+    RUN_TEST(test_drag_huge_span_moves_stay_finite);
+    RUN_TEST(test_scroll_preflights_both_entries);
     RUN_TEST(test_drag_frames_over_cap_bad_params);
     RUN_TEST(test_drag_at_cap_reserves_whole);
     RUN_TEST(test_drag_over_reserve_no_partial_inject);

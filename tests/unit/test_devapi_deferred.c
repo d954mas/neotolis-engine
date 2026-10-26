@@ -18,21 +18,13 @@
 static int s_tag;
 
 static bool reply_probe(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)err;
     TEST_ASSERT_NULL(params); /* a deferred reply runs with no params or user_data */
     TEST_ASSERT_NULL(ud);
     devapi_add_number(result, "tag", s_tag);
     return true;
 }
 
-static bool reply_fail(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)params;
-    (void)result;
-    (void)ud;
-    err->code = "probe_failed";
-    err->message = "synthetic reply failed";
-    return false;
-}
+static bool reply_fail(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) { return nt_devapi_fail_code(err, "probe_failed", "synthetic reply failed"); }
 
 static nt_devapi_gate parse_gate(const cJSON *params) {
     const cJSON *g = cJSON_GetObjectItemCaseSensitive(params, "gate");
@@ -46,7 +38,6 @@ static nt_devapi_gate parse_gate(const cJSON *params) {
 }
 
 static bool cmd_defer(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)result;
     const cJSON *a = cJSON_GetObjectItemCaseSensitive(params, "amount");
     const cJSON *t = cJSON_GetObjectItemCaseSensitive(params, "tag");
     s_tag = cJSON_IsNumber(t) ? t->valueint : 7;
@@ -55,34 +46,25 @@ static bool cmd_defer(const cJSON *params, cJSON *result, nt_devapi_error *err, 
 }
 
 static bool cmd_echo(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)params;
-    (void)err;
-    (void)ud;
     devapi_add_bool(result, "echo", true);
     return true;
 }
 
-static void register_cmd(const char *method, nt_devapi_handler_fn fn, void *ud) {
-    nt_devapi_command_desc desc = {
-        .method = method,
-        .group = "test",
-        .summary = "test-only command",
-        .params_shape = "{}",
-        .result_shape = "{}",
-        .frame_behavior = "deferred",
-        .side_effects = "none",
-    };
-    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register(&desc, fn, ud));
-}
+static const nt_devapi_command k_cmds[] = {
+    {.method = "test.defer", .summary = "test-only command", .params_shape = "{}", .result_shape = "{}", .fn = cmd_defer},
+    {.method = "test.echo", .summary = "test-only command", .params_shape = "{}", .result_shape = "{}", .fn = cmd_echo},
+};
+static const nt_devapi_command k_fail_cmds[] = {
+    {.method = "test.defer_fail", .summary = "test-only command", .params_shape = "{}", .result_shape = "{}", .fn = cmd_defer},
+};
 
 static int s_fail_marker;
 
 void setUp(void) {
     g_nt_app = (nt_app_t){.max_dt = 0.1F, .scale = 1.0F, .step_dt = 1.0F / 60.0F, .render_enabled = true};
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
-    register_cmd("test.defer", cmd_defer, NULL);
-    register_cmd("test.defer_fail", cmd_defer, &s_fail_marker);
-    register_cmd("test.echo", cmd_echo, NULL);
+    nt_devapi_register(k_cmds, NT_COUNTOF(k_cmds), NULL);
+    nt_devapi_register(k_fail_cmds, NT_COUNTOF(k_fail_cmds), &s_fail_marker);
 }
 
 void tearDown(void) { nt_devapi_shutdown(); }

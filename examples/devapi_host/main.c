@@ -45,12 +45,9 @@
 /* game-layer command via the public nt_devapi_register path — zero engine edits. Result uses the
    public cJSON API (devapi_add_* is devapi-internal). */
 static bool cmd_game_echo(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     const cJSON *msg = cJSON_GetObjectItemCaseSensitive(params, "msg");
     if (!cJSON_IsString(msg)) {
-        err->code = "bad_params";
-        err->message = "game.echo requires a string \"msg\"";
-        return false;
+        return nt_devapi_fail(err, "game.echo requires a string \"msg\"");
     }
     cJSON *added = cJSON_AddStringToObject(result, "msg", msg->valuestring);
     NT_ASSERT(added != NULL);
@@ -58,24 +55,11 @@ static bool cmd_game_echo(const cJSON *params, cJSON *result, nt_devapi_error *e
     return true;
 }
 
-static const nt_devapi_command_desc k_game_echo = {
-    .method = "game.echo",
-    .group = "game",
-    .summary = "echo {msg} back",
-    .params_shape = "{msg:string}",
-    .result_shape = "{msg:string}",
-    .frame_behavior = "any",
-    .side_effects = "none",
-};
-
 /* game-layer WRITE command via the public register path — zero engine edits: flips an observable host
    bool and returns it as {poked}, proving a write mutates host state over either transport. */
 static bool s_game_poked = false; /* the observable: each game.poke toggles it. */
 
 static bool cmd_game_poke(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)params;
-    (void)err;
-    (void)ud;
     s_game_poked = !s_game_poked;
     cJSON *added = cJSON_AddBoolToObject(result, "poked", s_game_poked);
     NT_ASSERT(added != NULL);
@@ -83,14 +67,9 @@ static bool cmd_game_poke(const cJSON *params, cJSON *result, nt_devapi_error *e
     return true;
 }
 
-static const nt_devapi_command_desc k_game_poke = {
-    .method = "game.poke",
-    .group = "game",
-    .summary = "flip an observable host bool, return {poked}",
-    .params_shape = "{}",
-    .result_shape = "{poked:bool}",
-    .frame_behavior = "any",
-    .side_effects = "flips game state",
+static const nt_devapi_command k_game_cmds[] = {
+    {.method = "game.echo", .summary = "echo {msg} back", .params_shape = "{msg:string}", .result_shape = "{msg:string}", .fn = cmd_game_echo},
+    {.method = "game.poke", .summary = "flip an observable host bool (game state), return {poked}", .params_shape = "{}", .result_shape = "{poked:bool}", .fn = cmd_game_poke},
 };
 
 #ifndef __EMSCRIPTEN__
@@ -381,16 +360,7 @@ int main(void) {
 #endif                            /* !__EMSCRIPTEN__ */
     nt_devapi_register_default(); /* full host: register every compiled-in group (incl. capture). */
     nt_devapi_register_reset(recover_on_client_reset);
-    result = nt_devapi_register(&k_game_echo, cmd_game_echo, NULL);
-    if (result != NT_OK) {
-        printf("[devapi_host] failed to register game.echo: error %d\n", result);
-        goto shutdown_devapi;
-    }
-    result = nt_devapi_register(&k_game_poke, cmd_game_poke, NULL);
-    if (result != NT_OK) {
-        printf("[devapi_host] failed to register game.poke: error %d\n", result);
-        goto shutdown_devapi;
-    }
+    nt_devapi_register(k_game_cmds, NT_COUNTOF(k_game_cmds), NULL);
 
     /* Probe-able "hud" UI context. nt_mem_scratch backs CLAY's per-element data; nt_ui_module_init is
        self-contained (no gfx/font). The host registers the CTX here; the ui group's commands are
@@ -407,8 +377,10 @@ int main(void) {
 #ifdef NT_DEVAPI_GROUP_UI
         /* The ui group's host-facing registrar exists only when GROUP_UI is built; without it the host
            still renders the hud, it is just not probe-able over devapi ui.*. */
-        nt_devapi_ui_register_context("hud", s_hud_ctx);
-        nt_devapi_ui_register_context("hud_scaled", s_hud_scaled_ctx);
+        static nt_devapi_ui_context s_ui_ctxs[2];
+        s_ui_ctxs[0] = (nt_devapi_ui_context){.name = "hud", .ctx = s_hud_ctx};
+        s_ui_ctxs[1] = (nt_devapi_ui_context){.name = "hud_scaled", .ctx = s_hud_scaled_ctx};
+        nt_devapi_ui_set_contexts(s_ui_ctxs, NT_COUNTOF(s_ui_ctxs));
 #endif
     }
 
@@ -468,9 +440,9 @@ int main(void) {
     nt_transform_comp_shutdown();
     nt_entity_shutdown();
 #endif
-shutdown_devapi:
 #ifndef __EMSCRIPTEN__
-    nt_devapi_net_stop(); /* clean + register-fail paths; a no-op if the socket was never started. */
+shutdown_devapi:
+    nt_devapi_net_stop(); /* a no-op if the socket was never started. */
 #endif
     nt_devapi_shutdown();
 shutdown_base:

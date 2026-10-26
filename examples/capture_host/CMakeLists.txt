@@ -2,12 +2,12 @@ add_executable(capture_host main.c)
 target_link_libraries(capture_host PRIVATE nt_version)
 
 # Owns a REAL nt_gfx context (devapi_host inits none) for the pre-swap capture seam. Links only the
-# group libs it uses (capture + core + discovery), so it pulls nt_gfx + nt_fpng, never the ui/obs/...
+# group libs it uses (capture + core), so it pulls nt_gfx + nt_fpng, never the ui/obs/...
 # group libs. (nt_input here is the engine input MODULE for ESC handling, not the devapi input group.)
 # GNU ld is single-pass: each group lib (consumer) precedes its providers; nt_gfx's IO chain trails last.
 target_link_libraries(capture_host PRIVATE
     nt_core nt_app nt_input nt_window nt_log nt_devapi_net
-    nt_devapi_capture nt_devapi_core nt_devapi_discovery
+    nt_devapi_capture nt_devapi_core
     nt_gfx nt_fpng
     nt_resource nt_http nt_fs
     nt_platform nt_basisu_transcoder_stub nt_meshwire_stub)

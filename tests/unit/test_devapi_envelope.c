@@ -14,8 +14,6 @@
 /* Trivial handler so the envelope tests don't depend on the core group.
    Echoes back a marker + (if present) the params "n" so we can assert routing. */
 static bool ok_handler(const cJSON *params, cJSON *result_obj, nt_devapi_error *err, void *user_data) {
-    (void)err;
-    (void)user_data;
     cJSON_AddBoolToObject(result_obj, "ran", true);
     const cJSON *n = cJSON_GetObjectItemCaseSensitive(params, "n");
     if (cJSON_IsNumber(n)) {
@@ -24,22 +22,13 @@ static bool ok_handler(const cJSON *params, cJSON *result_obj, nt_devapi_error *
     return true;
 }
 
-static void register_ok(void) {
-    nt_devapi_command_desc desc = {
-        .method = "ok",
-        .group = "test",
-        .summary = "test handler",
-        .params_shape = "{n?:number}",
-        .result_shape = "{ran:bool}",
-        .frame_behavior = "any",
-        .side_effects = "none",
-    };
-    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register(&desc, ok_handler, NULL));
-}
+static const nt_devapi_command k_ok_cmd[] = {
+    {.method = "ok", .summary = "test handler", .params_shape = "{n?:number}", .result_shape = "{ran:bool}", .fn = ok_handler},
+};
 
 void setUp(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
-    register_ok();
+    nt_devapi_register(k_ok_cmd, NT_COUNTOF(k_ok_cmd), NULL);
 }
 
 void tearDown(void) { nt_devapi_shutdown(); }

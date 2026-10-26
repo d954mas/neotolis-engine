@@ -15,20 +15,12 @@
 #include "resource/nt_resource.h"
 
 /* Observability command group (log / perf / entity / resource): every command is an IMMEDIATE read,
-   never deferred. Bot input is range/type-checked -> bad_params; only host-call invariants assert.
-   Compiles out entirely when NT_DEVAPI_GROUP_OBS is absent. */
-
-#ifdef NT_DEVAPI_GROUP_OBS
+   never deferred. Bot input is range/type-checked -> bad_params; only host-call invariants assert. */
 
 /* Pagination cap shared by entity.list / resource.list: oversized `limit` -> huge payload DoS. */
 #ifndef NT_DEVAPI_OBS_LIMIT_MAX
 #define NT_DEVAPI_OBS_LIMIT_MAX 512
 #endif
-
-static void set_bad_params(nt_devapi_error *err, const char *message) {
-    err->code = NT_DEVAPI_ERR_BAD_PARAMS;
-    err->message = message;
-}
 
 // #region log.*
 /* nt_log_level_t token mapping (stable JSON, not the numeric enum). */
@@ -53,8 +45,7 @@ static bool parse_level(const cJSON *jlevel, nt_log_level_t *out, nt_devapi_erro
         return true;
     }
     if (!cJSON_IsString(jlevel) || jlevel->valuestring == NULL) {
-        set_bad_params(err, "log.tail: level must be a string");
-        return false;
+        return nt_devapi_fail(err, "log.tail: level must be a string");
     }
     const char *s = jlevel->valuestring;
     if (strcmp(s, "info") == 0) {
@@ -64,8 +55,7 @@ static bool parse_level(const cJSON *jlevel, nt_log_level_t *out, nt_devapi_erro
     } else if (strcmp(s, "error") == 0) {
         *out = NT_LOG_LEVEL_ERROR;
     } else {
-        set_bad_params(err, "log.tail: level must be one of info/warn/error");
-        return false;
+        return nt_devapi_fail(err, "log.tail: level must be one of info/warn/error");
     }
     return true;
 }
@@ -77,7 +67,7 @@ static bool parse_tail_n(const cJSON *jn, uint16_t *out, nt_devapi_error *err) {
         *out = NT_LOG_RING_DEPTH;
         return true;
     }
-    return nt_devapi_parse_u16_param_exact(jn, NT_LOG_RING_DEPTH, err, set_bad_params, "log.tail: n must be an integer in [0, NT_LOG_RING_DEPTH]", out);
+    return nt_devapi_parse_u16_param_exact(jn, NT_LOG_RING_DEPTH, err, "log.tail: n must be an integer in [0, NT_LOG_RING_DEPTH]", out);
 }
 
 static void add_log_entries(cJSON *result, const nt_log_ring_entry_t *tail, uint16_t got) {
@@ -98,7 +88,6 @@ static void add_log_entries(cJSON *result, const nt_log_ring_entry_t *tail, uint
 /* log.tail{n?, level?}: newest-first {level,domain,msg} entries, up to n, optionally filtered by
    min level. Reads the dev-only nt_log_ring. n out of range / level unknown -> bad_params. */
 static bool cmd_log_tail(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     uint16_t n = NT_LOG_RING_DEPTH;
     if (!parse_tail_n(cJSON_GetObjectItemCaseSensitive(params, "n"), &n, err)) {
         return false;
@@ -120,9 +109,6 @@ static bool cmd_log_tail(const cJSON *params, cJSON *result, nt_devapi_error *er
 // #region perf.*
 /* perf.snapshot: immediate last-frame view (not the window). */
 static bool cmd_perf_snapshot(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)params;
-    (void)err;
-    (void)ud;
     nt_metrics_frame_t last;
     nt_metrics_last(&last);
     devapi_add_number(result, "fps", (double)nt_metrics_fps());
@@ -195,7 +181,6 @@ static void add_channel_stats(cJSON *parent, const char *name, const nt_metrics_
    channel / bad budget_ms -> bad_params (never assert). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_perf_stats(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
 
     /* Optional explicit channel filter; absent -> all fixed channels. */
     const cJSON *jchannels = cJSON_GetObjectItemCaseSensitive(params, "channels");
@@ -206,8 +191,7 @@ static bool cmd_perf_stats(const cJSON *params, cJSON *result, nt_devapi_error *
         }
     } else {
         if (!cJSON_IsArray(jchannels)) {
-            set_bad_params(err, "perf.stats: channels must be an array of channel-name strings");
-            return false;
+            return nt_devapi_fail(err, "perf.stats: channels must be an array of channel-name strings");
         }
         for (int i = 0; i < NT_METRICS_CHANNEL_COUNT; i++) {
             want[i] = false;
@@ -215,8 +199,7 @@ static bool cmd_perf_stats(const cJSON *params, cJSON *result, nt_devapi_error *
         const cJSON *jc = NULL;
         cJSON_ArrayForEach(jc, jchannels) {
             if (!cJSON_IsString(jc) || jc->valuestring == NULL) {
-                set_bad_params(err, "perf.stats: channels must be strings");
-                return false;
+                return nt_devapi_fail(err, "perf.stats: channels must be strings");
             }
             int found = -1;
             for (int i = 0; i < NT_METRICS_CHANNEL_COUNT; i++) {
@@ -226,8 +209,7 @@ static bool cmd_perf_stats(const cJSON *params, cJSON *result, nt_devapi_error *
                 }
             }
             if (found < 0) {
-                set_bad_params(err, "perf.stats: unknown channel (valid: frame_ms, cpu_ms, gpu_ms, draw_calls, mem_used, scratch_hwm, scratch_used, pool_occupancy)");
-                return false;
+                return nt_devapi_fail(err, "perf.stats: unknown channel (valid: frame_ms, cpu_ms, gpu_ms, draw_calls, mem_used, scratch_hwm, scratch_used, pool_occupancy)");
             }
             want[found] = true;
         }
@@ -238,13 +220,11 @@ static bool cmd_perf_stats(const cJSON *params, cJSON *result, nt_devapi_error *
     const cJSON *jbudget = cJSON_GetObjectItemCaseSensitive(params, "budget_ms");
     if (jbudget != NULL) {
         if (!cJSON_IsNumber(jbudget)) {
-            set_bad_params(err, "perf.stats: budget_ms must be a number");
-            return false;
+            return nt_devapi_fail(err, "perf.stats: budget_ms must be a number");
         }
         budget_ms = jbudget->valuedouble;
         if (!isfinite(budget_ms) || budget_ms <= 0.0) {
-            set_bad_params(err, "perf.stats: budget_ms must be finite and > 0");
-            return false;
+            return nt_devapi_fail(err, "perf.stats: budget_ms must be finite and > 0");
         }
     }
 
@@ -282,9 +262,6 @@ static bool cmd_perf_stats(const cJSON *params, cJSON *result, nt_devapi_error *
 
 /* perf.reset: clear the metrics window without tearing down state. */
 static bool cmd_perf_reset(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)params;
-    (void)err;
-    (void)ud;
     nt_metrics_reset();
     devapi_add_bool(result, "reset", true);
     return true;
@@ -298,13 +275,13 @@ static bool cmd_perf_reset(const cJSON *params, cJSON *result, nt_devapi_error *
 static bool resolve_page(const cJSON *params, uint32_t total, const char *who, uint32_t *out_begin, uint32_t *out_end, nt_devapi_error *err) {
     uint32_t offset = 0;
     const cJSON *jo = cJSON_GetObjectItemCaseSensitive(params, "offset");
-    if (jo != NULL && !nt_devapi_parse_u32_param_exact(jo, UINT32_MAX, err, set_bad_params, who, &offset)) {
+    if (jo != NULL && !nt_devapi_parse_u32_param_exact(jo, UINT32_MAX, err, who, &offset)) {
         return false;
     }
     uint32_t limit = NT_DEVAPI_OBS_LIMIT_MAX;
     const cJSON *jl = cJSON_GetObjectItemCaseSensitive(params, "limit");
     if (jl != NULL) {
-        if (!nt_devapi_parse_u32_param_exact(jl, UINT32_MAX, err, set_bad_params, who, &limit)) {
+        if (!nt_devapi_parse_u32_param_exact(jl, UINT32_MAX, err, who, &limit)) {
             return false;
         }
         if (limit > NT_DEVAPI_OBS_LIMIT_MAX) {
@@ -470,23 +447,19 @@ static bool append_filter_terms(const cJSON *arr, nt_comp_id_t *ids, uint8_t *n,
         return true;
     }
     if (!cJSON_IsArray(arr)) {
-        set_bad_params(err, "entity.list: all/any/none must be arrays of component names");
-        return false;
+        return nt_devapi_fail(err, "entity.list: all/any/none must be arrays of component names");
     }
     const cJSON *el = NULL;
     cJSON_ArrayForEach(el, arr) {
         if (*n >= NT_DEVAPI_QUERY_MAX_TERMS) {
-            set_bad_params(err, "entity.list: too many filter terms");
-            return false;
+            return nt_devapi_fail(err, "entity.list: too many filter terms");
         }
         if (!cJSON_IsString(el) || el->valuestring == NULL) {
-            set_bad_params(err, "entity.list: filter terms must be component-name strings");
-            return false;
+            return nt_devapi_fail(err, "entity.list: filter terms must be component-name strings");
         }
         nt_comp_id_t id = nt_entity_storage_find(el->valuestring);
         if (id == NT_COMP_ID_INVALID) {
-            set_bad_params(err, "entity.list: unknown component in filter");
-            return false;
+            return nt_devapi_fail(err, "entity.list: unknown component in filter");
         }
         ids[(*n)++] = id;
     }
@@ -501,13 +474,11 @@ static bool parse_entity_filter(const cJSON *params, entity_filter *f, nt_devapi
     const cJSON *jcomp = cJSON_GetObjectItemCaseSensitive(params, "component");
     if (jcomp != NULL) {
         if (!cJSON_IsString(jcomp) || jcomp->valuestring == NULL) {
-            set_bad_params(err, "entity.list: component must be a string");
-            return false;
+            return nt_devapi_fail(err, "entity.list: component must be a string");
         }
         nt_comp_id_t id = nt_entity_storage_find(jcomp->valuestring);
         if (id == NT_COMP_ID_INVALID) {
-            set_bad_params(err, "entity.list: unknown component");
-            return false;
+            return nt_devapi_fail(err, "entity.list: unknown component");
         }
         f->all[f->n_all++] = id;
     }
@@ -558,7 +529,6 @@ static bool entity_slot_matches(uint16_t idx, const entity_filter *f, nt_entity_
    + none of `none`; `component:"x"` is sugar for all:["x"]. Unknown component / bad offset/limit ->
    bad_params. */
 static bool cmd_entity_list(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     entity_filter f;
     if (!parse_entity_filter(params, &f, err)) {
         return false;
@@ -652,7 +622,7 @@ static bool resolve_pack_filter(const cJSON *params, bool *out_filter, uint16_t 
         return true;
     }
     uint32_t pack_id = 0;
-    if (!nt_devapi_parse_u32_param_exact(jpid, UINT32_MAX, err, set_bad_params, "resource.list: pack_id must be a non-negative integer", &pack_id)) {
+    if (!nt_devapi_parse_u32_param_exact(jpid, UINT32_MAX, err, "resource.list: pack_id must be a non-negative integer", &pack_id)) {
         return false;
     }
     *out_filter = true;
@@ -722,13 +692,11 @@ static void add_assets_section(cJSON *result, bool filter_pack, uint16_t filter_
    tokens. Bad pack_id/offset/limit -> bad_params. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_resource_list(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     bool include_assets = false;
     const cJSON *jia = cJSON_GetObjectItemCaseSensitive(params, "include_assets");
     if (jia != NULL) {
         if (!cJSON_IsBool(jia)) {
-            set_bad_params(err, "resource.list: include_assets must be a bool");
-            return false;
+            return nt_devapi_fail(err, "resource.list: include_assets must be a bool");
         }
         include_assets = cJSON_IsTrue(jia);
     }
@@ -791,77 +759,50 @@ static bool cmd_resource_list(const cJSON *params, cJSON *result, nt_devapi_erro
 }
 // #endregion
 
-static const nt_devapi_command_desc k_obs_cmds[] = {
+static const nt_devapi_command k_obs_cmds[] = {
     {
         .method = "log.tail",
-        .group = "log",
         .summary = "newest-first log entries from the dev ring, optionally filtered by min level",
         .params_shape = "{n?:number, level?:string}",
         .result_shape = "{entries:[{level:string,domain:string,msg:string}]}",
-        .frame_behavior = "any",
-        .side_effects = "none",
+        .fn = cmd_log_tail,
     },
     {
         .method = "perf.snapshot",
-        .group = "perf",
         .summary = "immediate current-frame perf view from nt_metrics' last frame (frame_ms/gpu_ms null until valid)",
         .params_shape = "{}",
         .result_shape = "{fps:number,frame_ms:number|null,cpu_ms:number,gpu_ms:number|null,draw_calls:number,user_counters:object}",
-        .frame_behavior = "any",
-        .side_effects = "none",
+        .fn = cmd_perf_snapshot,
     },
     {
         .method = "perf.stats",
-        .group = "perf",
         .summary = "windowed perf aggregates per channel (avg/median/p95/p99/p99_9) + fps-lows + over_budget_pct",
         .params_shape = "{channels?:[string], budget_ms?:number}",
         .result_shape = "{channels:object,user_channels:object,fps_low_1pct:number,fps_low_01pct:number,over_budget_pct:number,budget_ms:number}",
-        .frame_behavior = "any",
-        .side_effects = "none",
+        .fn = cmd_perf_stats,
     },
     {
         .method = "perf.reset",
-        .group = "perf",
         .summary = "clear the metrics window (counts -> 0) without tearing down state",
         .params_shape = "{}",
         .result_shape = "{reset:bool}",
-        .frame_behavior = "any",
-        .side_effects = "clears perf window",
+        .fn = cmd_perf_reset,
     },
     {
         .method = "entity.list",
-        .group = "entity",
         .summary = "live entities: core fields (id/index/generation/enabled) + each present component as a named group (empty {} when it has no describe); fully paginated with honest total; "
                    "component-set filter: has every `all` + at least one `any` + none of `none` (`component` is sugar for all:[x])",
         .params_shape = "{offset?:number, limit?:number, component?:string, all?:[string], any?:[string], none?:[string]}",
         .result_shape = "{total:number,entities:[{id,index,generation,enabled,<component>:{...}}]}",
-        .frame_behavior = "any",
-        .side_effects = "none",
+        .fn = cmd_entity_list,
     },
     {
         .method = "resource.list",
-        .group = "resource",
         .summary = "mounted packs (id/state/priority/asset_count); flat assets[] (capped, pack_id-filtered) when include_assets; paginated with total",
         .params_shape = "{offset?:number, limit?:number, pack_id?:number, include_assets?:bool}",
         .result_shape = "{total:number,packs:[{id,state,priority,asset_count}],assets?:[{resource_id:string,type,state,pack_index,blob_pins}],asset_total?:number,assets_truncated?:bool}",
-        .frame_behavior = "any",
-        .side_effects = "none",
+        .fn = cmd_resource_list,
     },
 };
 
-static const nt_devapi_handler_fn k_obs_handlers[] = {
-    cmd_log_tail, cmd_perf_snapshot, cmd_perf_stats, cmd_perf_reset, cmd_entity_list, cmd_resource_list,
-};
-_Static_assert(sizeof(k_obs_cmds) / sizeof(k_obs_cmds[0]) == sizeof(k_obs_handlers) / sizeof(k_obs_handlers[0]), "obs: descriptor/handler arrays must have equal length");
-
-void nt_devapi_register_obs(void) {
-    /* Engine-internal dup is a build-time bug -> assert NT_OK. Capture first: assert expressions must stay side-effect-free. */
-    int n = (int)(sizeof(k_obs_cmds) / sizeof(k_obs_cmds[0]));
-    for (int i = 0; i < n; i++) {
-        nt_result_t rr = nt_devapi_register(&k_obs_cmds[i], k_obs_handlers[i], NULL);
-        NT_ASSERT(rr == NT_OK);
-        (void)rr;
-    }
-}
-
-#endif /* NT_DEVAPI_GROUP_OBS */
+void nt_devapi_register_obs(void) { nt_devapi_register(k_obs_cmds, NT_COUNTOF(k_obs_cmds), NULL); }

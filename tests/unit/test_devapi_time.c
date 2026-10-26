@@ -19,7 +19,6 @@ void setUp(void) {
     g_nt_app = (nt_app_t){.max_dt = 0.1F, .scale = 1.0F, .step_dt = 1.0F / 60.0F, .render_enabled = true};
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
     nt_devapi_register_time();
-    nt_devapi_register_discovery(); /* the test verifies time.* via endpoints / command.describe */
 }
 
 void tearDown(void) { nt_devapi_shutdown(); }
@@ -106,7 +105,7 @@ static cJSON *parse_ok(const char *resp) {
 }
 
 static bool endpoints_has_method_with_shapes(const char *method) {
-    const char *resp = nt_devapi_submit("{\"method\":\"endpoints\",\"params\":{\"detail\":true}}");
+    const char *resp = nt_devapi_submit("{\"method\":\"endpoints\"}");
     cJSON *root = parse_ok(resp);
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
     cJSON *commands = cJSON_GetObjectItemCaseSensitive(result, "commands");
@@ -146,7 +145,7 @@ static void test_command_describe_time_step(void) {
     const char *resp = nt_devapi_submit("{\"method\":\"command.describe\",\"params\":{\"method\":\"time.step\"}}");
     cJSON *root = parse_ok(resp);
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
-    TEST_ASSERT_EQUAL_STRING("time", cJSON_GetObjectItemCaseSensitive(result, "group")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("time.step", cJSON_GetObjectItemCaseSensitive(result, "method")->valuestring);
     const cJSON *ps = cJSON_GetObjectItemCaseSensitive(result, "params_shape");
     TEST_ASSERT_TRUE(cJSON_IsString(ps) && strlen(ps->valuestring) > 0);
     cJSON_Delete(root);
@@ -270,6 +269,7 @@ static void test_bad_params_cases(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"count\":\"x\"}}"));
     assert_bad_params(nt_devapi_submit("{\"method\":\"time.set_fps\",\"params\":{\"fps\":-1}}"));
     assert_bad_params(nt_devapi_submit("{\"method\":\"time.set_scale\",\"params\":{\"scale\":-1}}"));
+    assert_bad_params(nt_devapi_submit("{\"method\":\"time.set_scale\",\"params\":{\"scale\":-1e-50}}")); /* narrows to -0.0f */
     assert_bad_params(nt_devapi_submit("{\"method\":\"time.set_mode\",\"params\":{\"mode\":\"bogus\"}}"));
 }
 

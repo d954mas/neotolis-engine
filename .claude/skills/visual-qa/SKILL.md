@@ -26,7 +26,7 @@ distilled lessons.
 ```bash
 cmake --preset native-debug -B build/_cmake/native-debug-capture \
   -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON \
-  -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_CAPTURE=ON
+  -DNT_DEVAPI_GROUP_CAPTURE=ON
 cmake --build build/_cmake/native-debug-capture --target <example>
 ```
 

@@ -315,7 +315,7 @@ and scene byte counts stay constant.
 Enable the existing DevAPI groups when configuring a capture build:
 
 ```bash
-cmake --preset native-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_UI=ON
+cmake --preset native-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_UI=ON
 cmake --build --preset native-debug --target skeletal_showcase
 ```
 
@@ -341,7 +341,7 @@ on the GPU.
 After activating the pinned SDK, build the WebGL2 capture variant:
 
 ```bash
-cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_UI=ON
+cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_UI=ON
 cmake --build --preset wasm-debug --target skeletal_showcase
 python -m http.server 8125 --bind 127.0.0.1 --directory build/examples/skeletal_showcase/wasm-debug
 ```

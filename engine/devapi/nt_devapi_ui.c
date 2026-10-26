@@ -10,99 +10,39 @@
 #include "window/nt_window.h" /* g_nt_window: the one coordinate-space metadata source (like core view). */
 
 /* Veneer over the probe: range-check bot input -> bad_params, never assert. The host
-   registers UI contexts by name; the engine keeps NO global ctx registry. */
+   names its UI contexts in one table; the engine keeps NO global ctx registry. */
 
-#ifdef NT_DEVAPI_GROUP_UI
+// #region ui contexts
+/* The host's table, by reference. Read only when a ui.* command runs, so the host may set it at any
+   point; it survives client reconnects. */
+static const nt_devapi_ui_context *s_ui_ctx;
+static size_t s_ui_ctx_count;
 
-// #region ui context name table
-/* Host-registered name -> ctx* table. Trusted in-process host calls may assert; bot input
-   that misses the table is always bad_params. */
-#ifndef NT_DEVAPI_UI_CONTEXT_MAX
-#define NT_DEVAPI_UI_CONTEXT_MAX 4 /* cap = discretion */
-#endif
-
-static struct {
-    const char *name;
-    nt_ui_context_t *ctx;
-} s_ui_ctx[NT_DEVAPI_UI_CONTEXT_MAX];
-static uint32_t s_ui_ctx_count;
-
-/* The NT_ASSERT(x && "msg") guards inflate measured complexity past the 25 threshold; the body
-   is a flat append + dup scan. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_devapi_ui_register_context(const char *name, nt_ui_context_t *ctx) {
-    /* Must register AFTER nt_devapi_init(): init clears the host ctx table, so a pre-init
-       registration would be silently wiped. Fail loud (explicit-over-implicit). */
-    NT_ASSERT(nt_devapi_initialized() && "ui: nt_devapi_ui_register_context must be called AFTER nt_devapi_init() (init clears the host ctx table)");
-    NT_ASSERT(name != NULL && "ui: context name must be non-NULL");
-    NT_ASSERT(ctx != NULL && "ui: context must be non-NULL");
-    NT_ASSERT(s_ui_ctx_count < NT_DEVAPI_UI_CONTEXT_MAX && "ui: context table full (raise NT_DEVAPI_UI_CONTEXT_MAX)");
-    for (uint32_t i = 0; i < s_ui_ctx_count; i++) {
-        NT_ASSERT(strcmp(s_ui_ctx[i].name, name) != 0 && "ui: duplicate context name");
+static bool name_taken(const nt_devapi_ui_context *list, size_t count, const char *name) {
+    for (size_t i = 0; i < count; i++) {
+        if (strcmp(list[i].name, name) == 0) {
+            return true;
+        }
     }
-    s_ui_ctx[s_ui_ctx_count].name = name;
-    s_ui_ctx[s_ui_ctx_count].ctx = ctx;
-    s_ui_ctx_count++;
+    return false;
 }
 
+void nt_devapi_ui_set_contexts(const nt_devapi_ui_context *list, size_t count) {
+    NT_ASSERT(list != NULL || count == 0);
+    for (size_t i = 0; i < count; i++) {
+        /* a NULL row or a duplicate name is a host bug */
+        NT_ASSERT(list[i].name != NULL && list[i].ctx != NULL && !name_taken(list, i, list[i].name));
+    }
+    s_ui_ctx = list;
+    s_ui_ctx_count = count;
+}
 // #endregion
-
-static void set_bad_params(nt_devapi_error *err, const char *message) {
-    err->code = NT_DEVAPI_ERR_BAD_PARAMS;
-    err->message = message;
-}
-
-/* Clear the host-registered name->ctx* table. The HOST owns these registrations (registered ONCE at
-   startup, like game.* commands) — so this is called only at init/register (before the host registers),
-   NOT on a client disconnect, or every session after the first would see an empty table. */
-static void clear_ui_ctx_table(void) {
-    for (uint32_t i = 0; i < NT_DEVAPI_UI_CONTEXT_MAX; i++) {
-        s_ui_ctx[i].name = NULL;
-        s_ui_ctx[i].ctx = NULL;
-    }
-    s_ui_ctx_count = 0;
-}
-
-/* A bot float coordinate/delta: require a number whose double AND float-narrowed form are finite.
-   A huge finite double (1e309 -> inf, or past FLT_MAX) would narrow to inf and poison hit-tests /
-   deltas. Mirrors the input group's parse_finite_coord; never asserts on bot input. */
-static bool parse_finite_coord(const cJSON *nj, const char *cmd, float *out, nt_devapi_error *err) {
-    if (nj == NULL || !cJSON_IsNumber(nj)) {
-        set_bad_params(err, cmd);
-        return false;
-    }
-    double v = nj->valuedouble;
-    float fv = (float)v;
-    if (!isfinite(v) || !isfinite(fv)) {
-        set_bad_params(err, cmd);
-        return false;
-    }
-    *out = fv;
-    return true;
-}
-
-/* Range-check a non-negative integral frame count against [0, UINT16_MAX]. Reads valuedouble so a
-   fractional/negative value (2.9, -0.5) is REJECTED, not silently truncated (the DoS cap for
-   ui.drag frames, mirrors the input group / time.step). */
-static bool parse_frame_count(const cJSON *nj, const char *cmd, uint16_t *out, nt_devapi_error *err) {
-    if (nj == NULL || !cJSON_IsNumber(nj)) {
-        set_bad_params(err, cmd);
-        return false;
-    }
-    double v = nj->valuedouble;
-    if (v < 0.0 || v > (double)UINT16_MAX || v != (double)(uint16_t)v) {
-        set_bad_params(err, cmd);
-        return false;
-    }
-    *out = (uint16_t)v;
-    return true;
-}
 
 /* Resolve the target ctx from an optional `ctx` string. Miss/empty -> bad_params, NEVER assert on
    bot input; absent -> the sole/first context. Returns NULL on failure (err is set). */
 static nt_ui_context_t *resolve_ctx(const cJSON *params, nt_devapi_error *err) {
     if (s_ui_ctx_count == 0) {
-        set_bad_params(err, "ui: no UI context registered");
+        nt_devapi_fail(err, "ui: no UI context registered");
         return NULL;
     }
     nt_ui_context_t *ctx = NULL;
@@ -111,24 +51,24 @@ static nt_ui_context_t *resolve_ctx(const cJSON *params, nt_devapi_error *err) {
         ctx = s_ui_ctx[0].ctx; /* default = sole/first */
     } else {
         if (!cJSON_IsString(jc) || jc->valuestring == NULL) {
-            set_bad_params(err, "ui: ctx must be a string");
+            nt_devapi_fail(err, "ui: ctx must be a string");
             return NULL;
         }
-        for (uint32_t i = 0; i < s_ui_ctx_count; i++) {
+        for (size_t i = 0; i < s_ui_ctx_count; i++) {
             if (strcmp(s_ui_ctx[i].name, jc->valuestring) == 0) {
                 ctx = s_ui_ctx[i].ctx;
                 break;
             }
         }
         if (ctx == NULL) {
-            set_bad_params(err, "ui: unknown context");
+            nt_devapi_fail(err, "ui: unknown context");
             return NULL;
         }
     }
     /* A ctx that has not completed a frame has degenerate (0) layout dims; the coord converters
        (add_meta, resolve_target) trap on them. Reject pre-frame so NO bot input reaches the converter. */
     if (!nt_ui_context_has_frame(ctx)) {
-        set_bad_params(err, "ui: context has not rendered a frame yet");
+        nt_devapi_fail(err, "ui: context has not rendered a frame yet");
         return NULL;
     }
     return ctx;
@@ -201,7 +141,6 @@ static cJSON *node_to_json(const nt_ui_probe_node_t *n) {
    ctx's max_elements — no count-truncation) incl. invisible/offscreen/disabled carrying their flags (the
    bot filters, not the engine); `truncated` now signals ONLY the internal DFS-depth limit, not a count cap. */
 static bool cmd_ui_tree(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     nt_ui_context_t *ctx = resolve_ctx(params, err);
     if (ctx == NULL) {
         return false;
@@ -224,11 +163,9 @@ static bool cmd_ui_tree(const cJSON *params, cJSON *result, nt_devapi_error *err
 /* ui.element: one node resolved by developer string id. collect-then-select so the returned
    node keeps its parent/label/children consistent. Unknown/stale id -> bad_params, never assert. */
 static bool cmd_ui_element(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     const cJSON *jid = cJSON_GetObjectItemCaseSensitive(params, "id");
     if (!cJSON_IsString(jid) || jid->valuestring == NULL) {
-        set_bad_params(err, "ui.element: id must be a string");
-        return false;
+        return nt_devapi_fail(err, "ui.element: id must be a string");
     }
     nt_ui_context_t *ctx = resolve_ctx(params, err);
     if (ctx == NULL) {
@@ -249,17 +186,13 @@ static bool cmd_ui_element(const cJSON *params, cJSON *result, nt_devapi_error *
         }
     }
     /* A miss under a DFS-depth-truncated snapshot may be a real widget below the depth limit, not a stale id. */
-    set_bad_params(err, truncated ? "ui.element: id not found in the probe snapshot (truncated at DFS depth)" : "ui.element: unknown or stale id");
-    return false;
+    return nt_devapi_fail(err, truncated ? "ui.element: id not found in the probe snapshot (truncated at DFS depth)" : "ui.element: unknown or stale id");
 }
 
 static bool cmd_ui_contexts(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)params;
-    (void)err;
-    (void)ud;
     cJSON *arr = cJSON_AddArrayToObject(result, "contexts");
     NT_ASSERT(arr != NULL);
-    for (uint32_t i = 0; i < s_ui_ctx_count; i++) {
+    for (size_t i = 0; i < s_ui_ctx_count; i++) {
         cJSON *s = cJSON_CreateString(s_ui_ctx[i].name);
         NT_ASSERT(s != NULL);
         cJSON_bool added = cJSON_AddItemToArray(arr, s);
@@ -278,6 +211,8 @@ static bool cmd_ui_contexts(const cJSON *params, cJSON *result, nt_devapi_error 
 #define NT_DEVAPI_UI_DRAG_FRAMES_MAX (NT_DEVAPI_INPUT_SCHED_MAX - 2)
 #endif
 _Static_assert(NT_DEVAPI_UI_DRAG_FRAMES_MAX + 2 <= NT_DEVAPI_INPUT_SCHED_MAX, "ui.drag frames+2 must fit the input scheduler");
+_Static_assert(NT_DEVAPI_UI_DRAG_FRAMES_MAX <= UINT16_MAX, "ui.drag frames are a uint16 frame offset");
+#define UI_DRAG_FRAMES_RANGE "[1, " NT_DEVAPI_STR(NT_DEVAPI_UI_DRAG_FRAMES_MAX) "]"
 
 /* Resolve a target field (string id | {x,y}) to a DEVICE-space pixel center for the inject path. The
    ONE Y-up->device flip lives HERE: flip to layout, then layout->device through the ctx viewport. An id
@@ -288,8 +223,7 @@ static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t
     const cJSON *jt = cJSON_GetObjectItemCaseSensitive(params, key);
     if (cJSON_IsString(jt)) {
         if (jt->valuestring == NULL || jt->valuestring[0] == '\0') {
-            set_bad_params(err, "ui: target id must be a non-empty string");
-            return false;
+            return nt_devapi_fail(err, "ui: target id must be a non-empty string");
         }
         uint32_t uid = nt_ui_id(jt->valuestring); /* non-empty pre-checked above; nt_ui_id asserts s!=NULL, not the hash. */
         uint32_t count = 0;
@@ -304,14 +238,12 @@ static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t
         }
         if (hit == NULL) {
             /* Below the DFS-depth limit the id may be a real widget the snapshot dropped — don't call it stale. */
-            set_bad_params(err, truncated ? "ui: target id not found in the probe snapshot (truncated at DFS depth)" : "ui: unknown or stale target id");
-            return false;
+            return nt_devapi_fail(err, truncated ? "ui: target id not found in the probe snapshot (truncated at DFS depth)" : "ui: unknown or stale target id");
         }
         /* A behind-camera 3D node / collapsed element has a zero rect (visible=false); its center would
            resolve to a screen corner, so fail loudly instead of clicking the wrong point. */
         if (hit->bounds[2] <= 0.0F || hit->bounds[3] <= 0.0F) {
-            set_bad_params(err, "ui: target id is offscreen or behind camera");
-            return false;
+            return nt_devapi_fail(err, "ui: target id is offscreen or behind camera");
         }
         /* bounds are {x,y,w,h} Y-up layout px -> center, then the SAME Y-up->Y-down flip the {x,y}
            path uses (layout_y = layout_h - y_up) so id and {x,y} resolve identically. */
@@ -332,7 +264,7 @@ static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t
         const cJSON *jy = cJSON_GetObjectItemCaseSensitive(jt, "y");
         float in_x = 0.0F;
         float in_y = 0.0F;
-        if (!parse_finite_coord(jx, "ui: target x must be a finite number", &in_x, err) || !parse_finite_coord(jy, "ui: target y must be a finite number", &in_y, err)) {
+        if (!nt_devapi_parse_f32_param(jx, err, "ui: target x must be a finite number", &in_x) || !nt_devapi_parse_f32_param(jy, err, "ui: target y must be a finite number", &in_y)) {
             return false;
         }
         /* The sole documented Y-up -> layout Y-down flip; same layout height as the probe bounds. */
@@ -342,18 +274,19 @@ static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t
         const float layout[2] = {in_x, lh - in_y};
         float device[2];
         nt_ui_layout_to_screen(ctx, layout, device);
+        if (!isfinite(device[0]) || !isfinite(device[1])) {
+            return nt_devapi_fail(err, "ui: target maps outside the finite screen range");
+        }
         *out_x = device[0];
         *out_y = device[1];
         return true;
     }
-    set_bad_params(err, "ui: target must be a string id or an {x,y} object");
-    return false;
+    return nt_devapi_fail(err, "ui: target must be a string id or an {x,y} object");
 }
 
 /* ui.click: resolve id|{x,y} -> center -> DOWN@0 + UP@hold via the SAME inject path as input.click.
    Fire-and-forget. Whole-or-nothing preflight: reserve both entries or reject (no DOWN without its UP). */
 static bool cmd_ui_click(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     nt_ui_context_t *ctx = resolve_ctx(params, err);
     if (ctx == NULL) {
         return false;
@@ -366,17 +299,12 @@ static bool cmd_ui_click(const cJSON *params, cJSON *result, nt_devapi_error *er
     uint16_t hold = 1U; /* default: 1-frame-held click (down@0 + up@1), matches input.click. */
     const cJSON *hj = cJSON_GetObjectItemCaseSensitive(params, "hold");
     if (hj != NULL) {
-        if (!cJSON_IsNumber(hj)) {
-            set_bad_params(err, "ui.click: hold must be a number");
-            return false;
-        }
-        if (!parse_frame_count(hj, "ui.click: hold must be an integer in [0, 65535]", &hold, err)) {
+        if (!nt_devapi_parse_u16_param_exact(hj, UINT16_MAX, err, "ui.click: hold must be an integer in [0, 65535]", &hold)) {
             return false;
         }
     }
     if (!nt_devapi_input_sched_can_reserve(2U)) {
-        set_bad_params(err, "ui.click: inject schedule overflow");
-        return false;
+        return nt_devapi_fail(err, "ui.click: inject schedule overflow");
     }
     nt_devapi_input_sched_pointer(NT_INJECT_POINTER_DOWN, NT_INPUT_INJECT_POINTER_ID_BASE, cx, cy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, 0);
     nt_devapi_input_sched_pointer(NT_INJECT_POINTER_UP, NT_INPUT_INJECT_POINTER_ID_BASE, cx, cy, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, hold);
@@ -387,7 +315,6 @@ static bool cmd_ui_click(const cJSON *params, cJSON *result, nt_devapi_error *er
 /* ui.scroll: resolve id|{x,y} center -> MOVE there + wheel(dx,dy) notches via the inject path
    (reuse the positioned input.wheel form). Whole-or-nothing: MOVE + wheel reserved together. */
 static bool cmd_ui_scroll(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     nt_ui_context_t *ctx = resolve_ctx(params, err);
     if (ctx == NULL) {
         return false;
@@ -401,15 +328,14 @@ static bool cmd_ui_scroll(const cJSON *params, cJSON *result, nt_devapi_error *e
     float dy = 0.0F;
     const cJSON *dxj = cJSON_GetObjectItemCaseSensitive(params, "dx");
     const cJSON *dyj = cJSON_GetObjectItemCaseSensitive(params, "dy");
-    if (dxj != NULL && !parse_finite_coord(dxj, "ui.scroll: dx must be a finite number", &dx, err)) {
+    if (dxj != NULL && !nt_devapi_parse_f32_param(dxj, err, "ui.scroll: dx must be a finite number", &dx)) {
         return false;
     }
-    if (dyj != NULL && !parse_finite_coord(dyj, "ui.scroll: dy must be a finite number", &dy, err)) {
+    if (dyj != NULL && !nt_devapi_parse_f32_param(dyj, err, "ui.scroll: dy must be a finite number", &dy)) {
         return false;
     }
     if (!nt_devapi_input_sched_can_reserve(2U)) {
-        set_bad_params(err, "ui.scroll: inject schedule overflow");
-        return false;
+        return nt_devapi_fail(err, "ui.scroll: inject schedule overflow");
     }
     nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, NT_INPUT_INJECT_POINTER_ID_BASE, cx, cy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 0, 0);
     nt_devapi_input_sched_wheel(dx, dy, 0);
@@ -421,7 +347,6 @@ static bool cmd_ui_scroll(const cJSON *params, cJSON *result, nt_devapi_error *e
    points (the handler expands them — NO engine-side interpolation owner) + UP@to. frames CAPPED
    (DoS guard); whole-or-nothing preflight reserves DOWN + frames moves + UP up front. */
 static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     nt_ui_context_t *ctx = resolve_ctx(params, err);
     if (ctx == NULL) {
         return false;
@@ -433,41 +358,30 @@ static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err
     if (!resolve_target(params, "from", ctx, &fx, &fy, err) || !resolve_target(params, "to", ctx, &tx, &ty, err)) {
         return false;
     }
+    /* A 0-frame drag emits no MOVE, so the inject UP (which releases at the pointer's CURRENT position,
+       not at `to`) would land back at `from`; frames >= 1 gives the instant from->to->up drag. */
+    const char *bad_frames = "ui.drag: frames must be an integer in " UI_DRAG_FRAMES_RANGE;
     uint16_t frames = 8U; /* default: a short multi-frame drag. */
     const cJSON *frj = cJSON_GetObjectItemCaseSensitive(params, "frames");
-    if (frj != NULL) {
-        if (!cJSON_IsNumber(frj)) {
-            set_bad_params(err, "ui.drag: frames must be a number");
-            return false;
-        }
-        if (!parse_frame_count(frj, "ui.drag: frames must be an integer in [1, 65535]", &frames, err)) {
-            return false;
-        }
+    if (frj != NULL && !nt_devapi_parse_u16_param_exact(frj, NT_DEVAPI_UI_DRAG_FRAMES_MAX, err, bad_frames, &frames)) {
+        return false;
     }
-    /* A 0-frame drag emits no MOVE, so the inject UP (which releases at the pointer's CURRENT position,
-       not at `to`) would land back at `from` — `to` silently ignored. frames>=1 gives the instant
-       from->to->up drag, so nothing is lost by requiring it. */
     if (frames == 0U) {
-        set_bad_params(err, "ui.drag: frames must be >= 1 (a 0-frame drag cannot reach `to`)");
-        return false;
-    }
-    if (frames > NT_DEVAPI_UI_DRAG_FRAMES_MAX) {
-        set_bad_params(err, "ui.drag: frames exceeds the per-command cap");
-        return false;
+        return nt_devapi_fail(err, bad_frames);
     }
     /* DOWN@0 + `frames` interpolated MOVEs (one per frame, t=1..frames) + UP@frames. */
     uint32_t total = (uint32_t)frames + 2U;
     if (!nt_devapi_input_sched_can_reserve(total)) {
-        set_bad_params(err, "ui.drag: inject schedule overflow");
-        return false;
+        return nt_devapi_fail(err, "ui.drag: inject schedule overflow");
     }
     const uint32_t id = NT_INPUT_INJECT_POINTER_ID_BASE;
     nt_devapi_input_sched_pointer(NT_INJECT_POINTER_DOWN, id, fx, fy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, 0);
-    for (uint16_t i = 1; i <= frames; i++) {
-        float t = (float)i / (float)frames; /* frames >= 1 enforced above, so the divisor is never 0. */
-        float mx = fx + ((tx - fx) * t);
-        float my = fy + ((ty - fy) * t);
-        nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, id, mx, my, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, i);
+    for (uint32_t i = 1; i <= frames; i++) { /* uint32: the cap may be -D'd up to UINT16_MAX */
+        /* In double: to - from cannot overflow and keeps its precision; the last MOVE lands exactly on to. */
+        double t = (double)i / (double)frames; /* frames >= 1 enforced above, so the divisor is never 0. */
+        float mx = i == frames ? tx : (float)((double)fx + (((double)tx - (double)fx) * t));
+        float my = i == frames ? ty : (float)((double)fy + (((double)ty - (double)fy) * t));
+        nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, id, mx, my, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, (uint16_t)i);
     }
     nt_devapi_input_sched_pointer(NT_INJECT_POINTER_UP, id, tx, ty, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, frames);
     devapi_add_number(result, "queued", (double)total);
@@ -475,10 +389,9 @@ static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err
 }
 // #endregion
 
-static const nt_devapi_command_desc k_ui_cmds[] = {
+static const nt_devapi_command k_ui_cmds[] = {
     {
         .method = "ui.tree",
-        .group = "ui",
         .summary = "IMMEDIATE read of the last completed frame's UI tree (FULL tree of the ctx incl. invisible/disabled; `truncated` true only when the internal DFS-depth limit cut it, never "
                    "an element-count cap) + a {space,origin,y_axis,width,height,dpr,projection,viewport?} block (viewport omitted when projection==3d); bounds are Y-up (origin bottom-left), same "
                    "space ui.click({x,y}) takes",
@@ -486,77 +399,52 @@ static const nt_devapi_command_desc k_ui_cmds[] = {
         .result_shape =
             "{space:string,origin:string,y_axis:string,width:number,height:number,dpr:number,projection:string,viewport?:{x,y,w,h},truncated:bool,nodes:[{id,parent,role,id_string,text,label,"
             "child_count,visible,enabled,bounds}]}",
-        .frame_behavior = "any",
-        .side_effects = "none",
+        .fn = cmd_ui_tree,
     },
     {
         .method = "ui.element",
-        .group = "ui",
         .summary = "one UI node resolved by developer string id (unknown/stale id -> bad_params; a miss under a truncated snapshot says so); bounds Y-up (origin bottom-left)",
         .params_shape = "{id:string, ctx?:string}",
         .result_shape =
             "{space:string,origin:string,y_axis:string,width:number,height:number,dpr:number,projection:string,viewport?:{x,y,w,h},truncated:bool,node:{id,parent,role,id_string,text,label,"
             "child_count,visible,enabled,bounds}}",
-        .frame_behavior = "any",
-        .side_effects = "none",
+        .fn = cmd_ui_element,
     },
     {
         .method = "ui.contexts",
-        .group = "ui",
         .summary = "list the host-registered UI context names",
         .params_shape = "{}",
         .result_shape = "{contexts:[string]}",
-        .frame_behavior = "any",
-        .side_effects = "none",
+        .fn = cmd_ui_contexts,
     },
     {
         .method = "ui.click",
-        .group = "ui",
         .summary = "resolve a developer string id (or Y-up {x,y}, origin bottom-left — same space as ui.tree bounds) -> center -> synthetic pointer down@0 + up@hold (fire-and-forget; advance a frame "
                    "to apply)",
         .params_shape = "{id:string|{x,y}, hold?:number, ctx?:string}",
         .result_shape = "{queued:number}",
-        .frame_behavior = "any",
-        .side_effects = "enqueues synthetic pointer down+up events",
+        .fn = cmd_ui_click,
     },
     {
         .method = "ui.scroll",
-        .group = "ui",
         .summary = "resolve id (or Y-up {x,y}, origin bottom-left) -> element center -> synthetic move + wheel(dx,dy) notches (fire-and-forget)",
         .params_shape = "{id:string|{x,y}, dx?:number, dy?:number, ctx?:string}",
         .result_shape = "{queued:number}",
-        .frame_behavior = "any",
-        .side_effects = "enqueues a synthetic move + wheel event",
+        .fn = cmd_ui_scroll,
     },
     {
         .method = "ui.drag",
-        .group = "ui",
-        .summary = "resolve from/to (id|Y-up {x,y}, origin bottom-left) -> down@from + frames interpolated moves + up@to (explicit points, NO interpolation owner; frames in [1, "
-                   "NT_DEVAPI_UI_DRAG_FRAMES_MAX], a 0-frame drag cannot reach `to`; fire-and-forget)",
+        .summary = "resolve from/to (id|Y-up {x,y}, origin bottom-left) -> down@from + frames interpolated moves + up@to (explicit points, NO interpolation owner; frames in " UI_DRAG_FRAMES_RANGE
+                   ", a 0-frame drag cannot reach `to`; fire-and-forget)",
         .params_shape = "{from:string|{x,y}, to:string|{x,y}, frames?:number (>=1), ctx?:string}",
         .result_shape = "{queued:number}",
-        .frame_behavior = "any",
-        .side_effects = "enqueues an ordered multi-frame synthetic drag",
+        .fn = cmd_ui_drag,
     },
 };
 
-static const nt_devapi_handler_fn k_ui_handlers[] = {
-    cmd_ui_tree, cmd_ui_element, cmd_ui_contexts, cmd_ui_click, cmd_ui_scroll, cmd_ui_drag,
-};
-_Static_assert(sizeof(k_ui_cmds) / sizeof(k_ui_cmds[0]) == sizeof(k_ui_handlers) / sizeof(k_ui_handlers[0]), "ui: descriptor/handler arrays must have equal length");
-
 void nt_devapi_register_ui(void) {
-    clear_ui_ctx_table(); /* fresh host table at init (the host re-registers its ctx right after). */
     /* No tick/reset hook: ui.click/drag/scroll delegate scheduling to the input group's single
-       scheduler, drained by nt_devapi_input_update. The host-owned ctx table survives client
+       scheduler, drained by nt_devapi_input_update. The host's ctx table survives client
        disconnects, so there is no ui-owned transient state to reset. */
-    /* Engine-internal dup is a build-time bug -> assert NT_OK. Capture first: assert expressions must stay side-effect-free. */
-    int n = (int)(sizeof(k_ui_cmds) / sizeof(k_ui_cmds[0]));
-    for (int i = 0; i < n; i++) {
-        nt_result_t rr = nt_devapi_register(&k_ui_cmds[i], k_ui_handlers[i], NULL);
-        NT_ASSERT(rr == NT_OK);
-        (void)rr;
-    }
+    nt_devapi_register(k_ui_cmds, NT_COUNTOF(k_ui_cmds), NULL);
 }
-
-#endif /* NT_DEVAPI_GROUP_UI */

@@ -107,7 +107,6 @@ int main(void) {
         goto shutdown_gfx;
     }
     nt_devapi_register_core();
-    nt_devapi_register_discovery();
     nt_devapi_register_capture();
 
     {

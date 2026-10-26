@@ -8,7 +8,7 @@
    layer. The host calls only nt_devapi_web_install_shim once at startup; the KEEPALIVE wrappers
    are reached from JS through window.__devapi (no socket / no listener). */
 
-/* Must come from the nt_devapi target compile-defines; consumers without the link see stubs that mismatch ABI. */
+/* Must come from the nt_devapi target compile-defines: the header is meaningless without the link. */
 #ifndef NT_DEVAPI_ENABLED
 #error "NT_DEVAPI_ENABLED not defined — link against nt_devapi via target_link_libraries(<target> PUBLIC|PRIVATE nt_devapi)"
 #endif

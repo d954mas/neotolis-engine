@@ -2,7 +2,7 @@
 """DevAPI engine-probe — native transport proof.
 
 Connects to a running examples/devapi_host over loopback TCP, discovers the
-self-describing surface (endpoints / command.describe / features), drives the
+self-describing surface (endpoints / command.describe), drives the
 game-registered game.echo command end-to-end, and asserts correct request_id
 correlation. This proves the WHOLE native transport chain over a real socket.
 
@@ -60,31 +60,25 @@ def run(client: DevApiClient) -> None:
     # 1. Sanity ping (engine.info/ping exist in the core group).
     client.result("ping")
 
-    # 2. endpoints lists game.echo in group "game".
+    # 2. endpoints lists game.echo.
     endpoints = client.result("endpoints")
     commands = endpoints.get("commands", [])
     echo = next((c for c in commands if c.get("method") == "game.echo"), None)
     assert echo is not None, "endpoints did not list game.echo"
-    assert echo.get("group") == "game", f"game.echo group is {echo.get('group')!r}, expected 'game'"
 
     # 3. command.describe game.echo returns a non-empty params_shape + result_shape.
     desc = client.result("command.describe", {"method": "game.echo"})
     assert desc.get("params_shape"), "command.describe missing params_shape"
     assert desc.get("result_shape"), "command.describe missing result_shape"
 
-    # 4. features lists the "game" group as active.
-    features = client.result("features")
-    groups = features.get("groups", [])
-    assert "game" in groups, f"'game' group not active in features: {groups}"
-
-    # 5. game.echo round-trip — the transport-proof: result echoed AND request_id correlated.
+    # 4. game.echo round-trip — the transport-proof: result echoed AND request_id correlated.
     resp = client.request("game.echo", {"msg": "hello"})
     assert resp.get("ok") is True, f"game.echo not ok: {resp}"
     assert resp.get("result", {}).get("msg") == "hello", f"game.echo result mismatch: {resp}"
     assert "request_id" in resp, "game.echo response missing request_id (correlation broken)"
 
     print(
-        "PASS: ping ok, endpoints+command.describe+features discovered, "
+        "PASS: ping ok, endpoints+command.describe discovered, "
         "game.echo round-trip msg='hello' with request_id={} correlated".format(resp["request_id"])
     )
 

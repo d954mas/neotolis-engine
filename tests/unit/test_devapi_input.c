@@ -26,7 +26,6 @@
 void setUp(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
     nt_devapi_register_input();             /* re-registers input -> resets the schedule */
-    nt_devapi_register_discovery();         /* the test verifies input.* via endpoints / command.describe */
     nt_input_init();                        /* clean immediate buffer + key/pointer state */
     g_nt_window.fb_height = TEST_FB_HEIGHT; /* deterministic basis for the Y-up flip */
 }
@@ -73,7 +72,7 @@ static cJSON *parse_ok(const char *resp) {
 }
 
 static bool endpoints_has_method_with_shapes(const char *method) {
-    const char *resp = nt_devapi_submit("{\"method\":\"endpoints\",\"params\":{\"detail\":true}}");
+    const char *resp = nt_devapi_submit("{\"method\":\"endpoints\"}");
     cJSON *root = parse_ok(resp);
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
     cJSON *commands = cJSON_GetObjectItemCaseSensitive(result, "commands");
@@ -228,6 +227,27 @@ static void test_input_gesture_near_full_atomic(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"B\"}}")));
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"C\"}}")));
     assert_bad_params(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"D\"}}"));
+}
+
+/* Each command checks the free slots for its whole command before its first entry; with one slot too
+   few it answers the overflow error instead of reaching the scheduler's assert. */
+static void expect_overflow(uint32_t free, const char *request) {
+    advance(); /* releases every queued entry (all at offset 0), emptying the schedule */
+    fill_schedule_leaving(free);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(nt_devapi_submit(request), "inject schedule overflow"), request);
+}
+
+static void test_every_command_preflights_its_entries(void) {
+    expect_overflow(0U, "{\"method\":\"input.key\",\"params\":{\"key\":\"B\"}}");
+    expect_overflow(1U, "{\"method\":\"input.key\",\"params\":{\"key\":\"B\",\"hold\":2}}");
+    expect_overflow(0U, "{\"method\":\"input.pointer\",\"params\":{\"action\":\"down\",\"id\":1,\"x\":1,\"y\":1}}");
+    expect_overflow(0U, "{\"method\":\"input.move\",\"params\":{\"x\":1,\"y\":1}}");
+    expect_overflow(1U, "{\"method\":\"input.click\",\"params\":{\"x\":1,\"y\":1}}");
+    expect_overflow(0U, "{\"method\":\"input.wheel\",\"params\":{\"dy\":1}}");
+    expect_overflow(1U, "{\"method\":\"input.wheel\",\"params\":{\"dy\":1,\"x\":1,\"y\":1}}");
+    expect_overflow(2U, "{\"method\":\"input.gesture\",\"params\":{\"id\":1,\"points\":[[0,0],[5,5]]}}");
+    expect_overflow(0U, "{\"method\":\"input.button\",\"params\":{\"buttons\":1}}");
+    expect_overflow(1U, "{\"method\":\"input.text\",\"params\":{\"text\":\"ab\"}}");
 }
 
 /* ---- input.text malformed-UTF-8 reject paths ---- */
@@ -565,7 +585,7 @@ static void test_input_state_describe(void) {
     const char *resp = nt_devapi_submit("{\"method\":\"command.describe\",\"params\":{\"method\":\"input.state\"}}");
     cJSON *root = parse_ok(resp);
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
-    TEST_ASSERT_EQUAL_STRING("input", cJSON_GetObjectItemCaseSensitive(result, "group")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("input.state", cJSON_GetObjectItemCaseSensitive(result, "method")->valuestring);
     cJSON_Delete(root);
 }
 
@@ -819,7 +839,7 @@ static void test_input_describe(void) {
     const char *resp = nt_devapi_submit("{\"method\":\"command.describe\",\"params\":{\"method\":\"input.key\"}}");
     cJSON *root = parse_ok(resp);
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
-    TEST_ASSERT_EQUAL_STRING("input", cJSON_GetObjectItemCaseSensitive(result, "group")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("input.key", cJSON_GetObjectItemCaseSensitive(result, "method")->valuestring);
     const cJSON *ps = cJSON_GetObjectItemCaseSensitive(result, "params_shape");
     TEST_ASSERT_TRUE(cJSON_IsString(ps) && strlen(ps->valuestring) > 0);
     cJSON_Delete(root);
@@ -827,7 +847,7 @@ static void test_input_describe(void) {
     resp = nt_devapi_submit("{\"method\":\"command.describe\",\"params\":{\"method\":\"input.text\"}}");
     root = parse_ok(resp);
     result = cJSON_GetObjectItemCaseSensitive(root, "result");
-    TEST_ASSERT_EQUAL_STRING("input", cJSON_GetObjectItemCaseSensitive(result, "group")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("input.text", cJSON_GetObjectItemCaseSensitive(result, "method")->valuestring);
     cJSON_Delete(root);
 }
 
@@ -855,6 +875,7 @@ int main(void) {
     RUN_TEST(test_input_button_out_of_range_bad_params);
     RUN_TEST(test_input_click_near_full_atomic);
     RUN_TEST(test_input_gesture_near_full_atomic);
+    RUN_TEST(test_every_command_preflights_its_entries);
     RUN_TEST(test_input_text_bad_lead_byte_bad_params);
     RUN_TEST(test_input_text_truncated_continuation_bad_params);
     RUN_TEST(test_input_text_overlong_bad_params);

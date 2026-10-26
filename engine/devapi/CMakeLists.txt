@@ -4,16 +4,14 @@
 # full host links nt_devapi_default (every compiled-in group + nt_devapi_register_default()). Each
 # NT_DEVAPI_GROUP_<X> option gates building that group's library.
 
-# nt_devapi -- the framework ONLY: dispatch + self-describing registry + lifecycle-hook registry + the
-# host-facing registration API (nt_devapi_groups.h). It references NO group, so any set of group libs
-# can link it without conflict.
+# nt_devapi -- the framework: dispatch + self-describing registry with its discovery commands (endpoints /
+# command.describe, registered by init) + lifecycle hooks + the host-facing registration API
+# (nt_devapi_groups.h). It references NO group, so any set of group libs can link it.
 nt_add_module(nt_devapi LOG_DOMAIN "devapi"
     nt_devapi.c
-    nt_devapi_registry.c
     nt_devapi.h
     nt_devapi_groups.h
     nt_devapi_internal.h
-    nt_devapi_stub.h
 )
 
 # cjson PUBLIC: the public handler typedef takes cJSON* params. nt_app_interface is a base dep --
@@ -43,13 +41,6 @@ if(NT_DEVAPI_GROUP_TIME)
     target_compile_definitions(nt_devapi_time PUBLIC NT_DEVAPI_GROUP_TIME=1)
 endif()
 
-# Discovery group: endpoints / command.describe / features. Reads only the registry (no engine dep).
-if(NT_DEVAPI_GROUP_DISCOVERY)
-    nt_add_module(nt_devapi_discovery LOG_DOMAIN "devapi" nt_devapi_discovery.c)
-    target_link_libraries(nt_devapi_discovery PUBLIC nt_devapi)
-    target_compile_definitions(nt_devapi_discovery PUBLIC NT_DEVAPI_GROUP_DISCOVERY=1)
-endif()
-
 # The ui group delegates inject scheduling to the input group's single scheduler (one scheduler, one
 # cap <= the immediate buffer), so nt_devapi_ui hard-links nt_devapi_input. Fail early if UI lacks INPUT.
 if(NT_DEVAPI_GROUP_UI AND NOT NT_DEVAPI_GROUP_INPUT)
@@ -74,7 +65,7 @@ endif()
 # UI group: read veneer over nt_ui_probe_collect + write veneer delegating to the input scheduler.
 # PUBLIC nt_devapi_input (the reuse wrappers live there); nt_ui_interface header-only (exe picks the
 # impl); nt_window_interface for the coordinate-space metadata. NT_DEVAPI_GROUP_UI is PUBLIC because the
-# host-facing nt_devapi_ui_register_context is gated by it in the public nt_devapi.h.
+# host-facing nt_devapi_ui_set_contexts is gated by it in the public nt_devapi.h.
 if(NT_DEVAPI_GROUP_UI)
     nt_add_module(nt_devapi_ui LOG_DOMAIN "devapi" nt_devapi_ui.c)
     target_link_libraries(nt_devapi_ui PUBLIC nt_devapi nt_devapi_input nt_ui_interface PRIVATE nt_window_interface)
@@ -144,7 +135,7 @@ endif()
 # libs' PUBLIC NT_DEVAPI_GROUP_<X> defines reach nt_devapi_default.c here, gating its register calls.
 nt_add_module(nt_devapi_default LOG_DOMAIN "devapi" nt_devapi_default.c)
 target_link_libraries(nt_devapi_default PUBLIC nt_devapi)
-foreach(_grp core time discovery input ui obs entity_write capture recorder)
+foreach(_grp core time input ui obs entity_write capture recorder)
     if(TARGET nt_devapi_${_grp})
         target_link_libraries(nt_devapi_default PUBLIC nt_devapi_${_grp})
     endif()

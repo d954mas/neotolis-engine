@@ -19,8 +19,6 @@
 #else
 #include "devapi/nt_devapi_net.h"
 #endif
-#else
-#include "devapi/nt_devapi_stub.h"
 #endif
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
@@ -2830,7 +2828,9 @@ int main(int argc, char *argv[]) {
     }
     nt_devapi_register_default();
 #ifdef NT_DEVAPI_GROUP_UI
-    nt_devapi_ui_register_context("showcase", s_ui);
+    static nt_devapi_ui_context s_ui_ctxs[1];
+    s_ui_ctxs[0] = (nt_devapi_ui_context){.name = "showcase", .ctx = s_ui};
+    nt_devapi_ui_set_contexts(s_ui_ctxs, NT_COUNTOF(s_ui_ctxs));
 #endif
 #ifndef NT_PLATFORM_WEB
     if (!nt_devapi_net_start((uint16_t)NT_DEVAPI_DEFAULT_PORT)) {
