@@ -5,10 +5,7 @@
 /* record.* group: a bot starts and stops nt_recorder. The host calls nt_recorder_frame every frame
    with game time; the web output is the 'nt-recorder' event, the Windows output the file at name. */
 
-#ifdef NT_DEVAPI_GROUP_RECORDER
-
 static bool cmd_record_start(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     const cJSON *name = cJSON_GetObjectItemCaseSensitive(params, "name");
     if (!cJSON_IsString(name) || name->valuestring[0] == '\0') {
         return nt_devapi_fail(err, "record.start: name must be a non-empty string");
@@ -27,14 +24,10 @@ static bool cmd_record_start(const cJSON *params, cJSON *result, nt_devapi_error
     if (!nt_recorder_start(name->valuestring, fps)) {
         return nt_devapi_fail_code(err, "failed", "record.start: the recorder refused to start (see log and console)");
     }
-    (void)result;
     return true;
 }
 
 static bool cmd_record_stop(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)params;
-    (void)err;
-    (void)ud;
     devapi_add_number(result, "frames", (double)nt_recorder_stop());
     return true;
 }
@@ -56,6 +49,4 @@ static const nt_devapi_command k_record_cmds[] = {
     },
 };
 
-void nt_devapi_register_recorder(void) { nt_devapi_register(k_record_cmds, sizeof(k_record_cmds) / sizeof(k_record_cmds[0]), NULL); }
-
-#endif /* NT_DEVAPI_GROUP_RECORDER */
+void nt_devapi_register_recorder(void) { nt_devapi_register(k_record_cmds, NT_COUNTOF(k_record_cmds), NULL); }

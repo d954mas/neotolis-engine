@@ -9,17 +9,11 @@
 #include "graphics/nt_gfx.h"
 
 /* time/render/frame command group. Bot input is range/type-checked → bad_params; never assert
-   on untrusted input (invariants assert, untrusted input returns a structured error).
-   Compiles out entirely when NT_DEVAPI_GROUP_TIME is absent. */
-
-#ifdef NT_DEVAPI_GROUP_TIME
+   on untrusted input (invariants assert, untrusted input returns a structured error). */
 
 /* frame.current → {frame, time, dt}, also the reply of every clock deferral; g_nt_app.time = sum of applied
    dts = game-elapsed time. */
 static bool cmd_frame_current(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)params;
-    (void)err;
-    (void)ud;
     devapi_add_number(result, "frame", (double)g_nt_app.frame);
     devapi_add_number(result, "time", g_nt_app.time);
     devapi_add_number(result, "dt", (double)g_nt_app.dt);
@@ -28,18 +22,12 @@ static bool cmd_frame_current(const cJSON *params, cJSON *result, nt_devapi_erro
 
 // #region time.*
 static bool cmd_time_pause(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)params;
-    (void)err;
-    (void)ud;
     nt_app_pause();
     devapi_add_bool(result, "paused", true);
     return true;
 }
 
 static bool cmd_time_resume(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)params;
-    (void)err;
-    (void)ud;
     nt_app_resume();
     devapi_add_bool(result, "paused", false);
     return true;
@@ -49,8 +37,6 @@ static bool cmd_time_resume(const cJSON *params, cJSON *result, nt_devapi_error 
    — game-time and frames are linear in MANUAL since step_dt is fixed). Deferred: the reply waits for
    the steps already queued plus `count`, so the caller observes every queued step done. */
 static bool cmd_time_step(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)result;
-    (void)ud;
     const cJSON *c = cJSON_GetObjectItemCaseSensitive(params, "count");
     const cJSON *s = cJSON_GetObjectItemCaseSensitive(params, "seconds");
     if (c != NULL && s != NULL) {
@@ -97,28 +83,23 @@ static bool cmd_time_step(const cJSON *params, cJSON *result, nt_devapi_error *e
 }
 
 static bool cmd_time_set_scale(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
+    /* The f32 parser also rejects a finite double that narrows to +inf: dt = wall_dt*inf would poison
+       g_nt_app.time/dt. */
+    const char *bad_scale = "time.set_scale: scale must be a finite float >= 0";
     const cJSON *s = cJSON_GetObjectItemCaseSensitive(params, "scale");
-    if (!cJSON_IsNumber(s)) {
-        return nt_devapi_fail(err, "time.set_scale: scale must be a number");
+    float fscale = 0.0F;
+    if (!nt_devapi_parse_f32_param(s, err, bad_scale, &fscale)) {
+        return false;
     }
-    double scale = s->valuedouble;
-    if (!isfinite(scale) || scale < 0.0) {
-        return nt_devapi_fail(err, "time.set_scale: scale must be finite and >= 0");
-    }
-    /* A huge finite double narrows to +inf in float; +inf scale → dt = wall_dt*inf poisons
-       g_nt_app.time/dt. Reject any scale whose float form is not finite. */
-    float fscale = (float)scale;
-    if (!isfinite(fscale)) {
-        return nt_devapi_fail(err, "time.set_scale: scale out of representable range");
+    if (fscale < 0.0F) {
+        return nt_devapi_fail(err, bad_scale);
     }
     nt_app_set_scale(fscale);
-    devapi_add_number(result, "scale", scale);
+    devapi_add_number(result, "scale", s->valuedouble);
     return true;
 }
 
 static bool cmd_time_set_mode(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     const cJSON *m = cJSON_GetObjectItemCaseSensitive(params, "mode");
     if (!cJSON_IsString(m) || m->valuestring == NULL) {
         return nt_devapi_fail(err, "time.set_mode: mode must be a string");
@@ -139,7 +120,6 @@ static bool cmd_time_set_mode(const cJSON *params, cJSON *result, nt_devapi_erro
 /* Writes g_nt_app.target_dt directly (existing field semantics): fps>0 → 1/fps, fps==0 → uncapped.
    No new engine setter needed — target_dt is the canonical frame-cap field. */
 static bool cmd_time_set_fps(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     const cJSON *f = cJSON_GetObjectItemCaseSensitive(params, "fps");
     if (!cJSON_IsNumber(f)) {
         return nt_devapi_fail(err, "time.set_fps: fps must be a number");
@@ -166,8 +146,6 @@ static bool cmd_time_set_fps(const cJSON *params, cJSON *result, nt_devapi_error
 /* RUN + scale>0 only: in MANUAL/pause/scale==0 game time is frozen. Deadline is GAME time, not a frame
    count — RUN's variable dt can't be precomputed as frames. A later freeze fails the reply as stalled. */
 static bool cmd_time_wait(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)result;
-    (void)ud;
     if (g_nt_app.mode != NT_APP_MODE_RUN || g_nt_app.paused || g_nt_app.scale <= 0.0F) {
         return nt_devapi_fail(err, "time.wait: only valid while game time advances (RUN, unpaused, scale > 0)");
     }
@@ -188,7 +166,6 @@ static bool cmd_time_wait(const cJSON *params, cJSON *result, nt_devapi_error *e
 
 // #region render.*
 static bool cmd_render_set_enabled(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     const cJSON *e = cJSON_GetObjectItemCaseSensitive(params, "enabled");
     if (!cJSON_IsBool(e)) {
         return nt_devapi_fail(err, "render.set_enabled: enabled must be a bool");
@@ -200,9 +177,6 @@ static bool cmd_render_set_enabled(const cJSON *params, cJSON *result, nt_devapi
 }
 
 static bool cmd_render_info(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)params;
-    (void)err;
-    (void)ud;
     devapi_add_bool(result, "enabled", nt_app_render_enabled());
     /* Last closed frame: this command runs early in the next frame, before its draws. */
     devapi_add_number(result, "draw_calls", (double)nt_gfx_draw_calls(&g_nt_gfx.last_frame));
@@ -214,8 +188,6 @@ static bool cmd_render_info(const cJSON *params, cJSON *result, nt_devapi_error 
 /* frame.wait passively waits for autonomous RUN frames: in MANUAL the bot steps, and a paused sim has
    nothing to wait for. A pause or mode switch after submit fails the reply as stalled. */
 static bool cmd_frame_wait(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)result;
-    (void)ud;
     if (g_nt_app.mode == NT_APP_MODE_MANUAL || g_nt_app.paused) {
         return nt_devapi_fail(err, "frame.wait: only valid in running mode (use time.step in manual; resume if paused)");
     }
@@ -308,6 +280,4 @@ static const nt_devapi_command k_time_cmds[] = {
     },
 };
 
-void nt_devapi_register_time(void) { nt_devapi_register(k_time_cmds, sizeof(k_time_cmds) / sizeof(k_time_cmds[0]), NULL); }
-
-#endif /* NT_DEVAPI_GROUP_TIME */
+void nt_devapi_register_time(void) { nt_devapi_register(k_time_cmds, NT_COUNTOF(k_time_cmds), NULL); }

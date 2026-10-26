@@ -364,7 +364,7 @@ int main(void) {
 #endif                            /* !__EMSCRIPTEN__ */
     nt_devapi_register_default(); /* full host: register every compiled-in group (incl. capture). */
     nt_devapi_register_reset(recover_on_client_reset);
-    nt_devapi_register(k_game_cmds, sizeof(k_game_cmds) / sizeof(k_game_cmds[0]), NULL);
+    nt_devapi_register(k_game_cmds, NT_COUNTOF(k_game_cmds), NULL);
 
     /* Probe-able "hud" UI context. nt_mem_scratch backs CLAY's per-element data; nt_ui_module_init is
        self-contained (no gfx/font). The host registers the CTX here; the ui group's commands are
@@ -444,7 +444,7 @@ int main(void) {
 #endif
 shutdown_devapi:
 #ifndef __EMSCRIPTEN__
-    nt_devapi_net_stop(); /* clean + register-fail paths; a no-op if the socket was never started. */
+    nt_devapi_net_stop(); /* a no-op if the socket was never started. */
 #endif
     nt_devapi_shutdown();
 shutdown_base:

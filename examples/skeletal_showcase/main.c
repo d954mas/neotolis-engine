@@ -19,8 +19,6 @@
 #else
 #include "devapi/nt_devapi_net.h"
 #endif
-#else
-#include "devapi/nt_devapi_stub.h"
 #endif
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"

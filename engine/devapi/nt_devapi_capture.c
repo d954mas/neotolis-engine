@@ -13,9 +13,7 @@
 
 /* Capture command group (capture.frame / capture.region). Handlers validate bot params (never assert),
    then DEFER a producer that runs at the GL-valid pre-swap seam — that timing is why capture returns its
-   data asynchronously. Compiles out entirely without NT_DEVAPI_GROUP_CAPTURE. */
-
-#ifdef NT_DEVAPI_GROUP_CAPTURE
+   data asynchronously. */
 
 /* Bounded readback buffer: a region capped at the framebuffer keeps w*h*4 small, but the static cap
    is the DoS backstop. 4096x4096 rgba8 = 64 MiB — generous for any real demo FB; -D overridable. */
@@ -152,8 +150,6 @@ static bool capture_produce(const capture_ctx *c, cJSON *result) {
 
 /* The deferred reply, run once at the GL-valid pre-swap seam. */
 static bool capture_reply(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)params;
-    (void)ud;
     if (!capture_produce(&s_capture, result)) {
         return nt_devapi_fail_code(err, NT_DEVAPI_ERR_CAPTURE_FAILED, "capture failed (framebuffer readback or PNG encode error)");
     }
@@ -202,8 +198,6 @@ static bool defer_capture(uint32_t x, uint32_t gl_y, uint32_t w, uint32_t h, uin
 
 /* capture.frame {scale?}: defers a full-framebuffer capture (x=0,y=0,w=fb_width,h=fb_height). */
 static bool cmd_capture_frame(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)result;
-    (void)ud;
     uint32_t factor = 1U;
     if (!parse_scale(params, &factor, err, "capture.frame: scale must be one of {1, 2, 4}")) {
         return false;
@@ -226,8 +220,6 @@ static bool cmd_capture_frame(const cJSON *params, cJSON *result, nt_devapi_erro
    defers a sub-rect capture; scale applies after readback (orthogonal to region). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_capture_region(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)result;
-    (void)ud;
     uint32_t x = 0;
     uint32_t y = 0;
     uint32_t w = 0;
@@ -292,7 +284,5 @@ void nt_devapi_register_capture(void) {
     /* fpng needs a one-time CPU-feature detect before any encode; do it here so the encoder dependency
        is the capture group's own concern, not something the game host must know to call. Idempotent. */
     nt_fpng_init();
-    nt_devapi_register(k_capture_cmds, sizeof(k_capture_cmds) / sizeof(k_capture_cmds[0]), NULL);
+    nt_devapi_register(k_capture_cmds, NT_COUNTOF(k_capture_cmds), NULL);
 }
-
-#endif /* NT_DEVAPI_GROUP_CAPTURE */

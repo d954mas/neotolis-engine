@@ -926,9 +926,8 @@ if(NOT EMSCRIPTEN)
             nt_setup_test_target(test_devapi_core)
         endif()
 
-        # discovery group (endpoints / command.describe / features) + the zero-engine-edits
-        # game-layer registration path. Needs the discovery group; the active-group defines let it
-        # #ifdef-gate its per-group `features` assertions + expected group count.
+        # discovery group (endpoints / command.describe) + the game-layer registration path. Needs the
+        # discovery group; the active-group defines let it #ifdef-gate the per-group endpoint asserts.
         if(NT_DEVAPI_GROUP_DISCOVERY)
             add_executable(test_devapi_discovery unit/test_devapi_discovery.c)
             # Discovery links the nt_devapi_default bundle (register_default registers every compiled-in

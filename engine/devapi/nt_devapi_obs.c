@@ -15,10 +15,7 @@
 #include "resource/nt_resource.h"
 
 /* Observability command group (log / perf / entity / resource): every command is an IMMEDIATE read,
-   never deferred. Bot input is range/type-checked -> bad_params; only host-call invariants assert.
-   Compiles out entirely when NT_DEVAPI_GROUP_OBS is absent. */
-
-#ifdef NT_DEVAPI_GROUP_OBS
+   never deferred. Bot input is range/type-checked -> bad_params; only host-call invariants assert. */
 
 /* Pagination cap shared by entity.list / resource.list: oversized `limit` -> huge payload DoS. */
 #ifndef NT_DEVAPI_OBS_LIMIT_MAX
@@ -91,7 +88,6 @@ static void add_log_entries(cJSON *result, const nt_log_ring_entry_t *tail, uint
 /* log.tail{n?, level?}: newest-first {level,domain,msg} entries, up to n, optionally filtered by
    min level. Reads the dev-only nt_log_ring. n out of range / level unknown -> bad_params. */
 static bool cmd_log_tail(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     uint16_t n = NT_LOG_RING_DEPTH;
     if (!parse_tail_n(cJSON_GetObjectItemCaseSensitive(params, "n"), &n, err)) {
         return false;
@@ -113,9 +109,6 @@ static bool cmd_log_tail(const cJSON *params, cJSON *result, nt_devapi_error *er
 // #region perf.*
 /* perf.snapshot: immediate last-frame view (not the window). */
 static bool cmd_perf_snapshot(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)params;
-    (void)err;
-    (void)ud;
     nt_metrics_frame_t last;
     nt_metrics_last(&last);
     devapi_add_number(result, "fps", (double)nt_metrics_fps());
@@ -188,7 +181,6 @@ static void add_channel_stats(cJSON *parent, const char *name, const nt_metrics_
    channel / bad budget_ms -> bad_params (never assert). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_perf_stats(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
 
     /* Optional explicit channel filter; absent -> all fixed channels. */
     const cJSON *jchannels = cJSON_GetObjectItemCaseSensitive(params, "channels");
@@ -270,9 +262,6 @@ static bool cmd_perf_stats(const cJSON *params, cJSON *result, nt_devapi_error *
 
 /* perf.reset: clear the metrics window without tearing down state. */
 static bool cmd_perf_reset(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)params;
-    (void)err;
-    (void)ud;
     nt_metrics_reset();
     devapi_add_bool(result, "reset", true);
     return true;
@@ -540,7 +529,6 @@ static bool entity_slot_matches(uint16_t idx, const entity_filter *f, nt_entity_
    + none of `none`; `component:"x"` is sugar for all:["x"]. Unknown component / bad offset/limit ->
    bad_params. */
 static bool cmd_entity_list(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     entity_filter f;
     if (!parse_entity_filter(params, &f, err)) {
         return false;
@@ -704,7 +692,6 @@ static void add_assets_section(cJSON *result, bool filter_pack, uint16_t filter_
    tokens. Bad pack_id/offset/limit -> bad_params. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_resource_list(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     bool include_assets = false;
     const cJSON *jia = cJSON_GetObjectItemCaseSensitive(params, "include_assets");
     if (jia != NULL) {
@@ -818,6 +805,4 @@ static const nt_devapi_command k_obs_cmds[] = {
     },
 };
 
-void nt_devapi_register_obs(void) { nt_devapi_register(k_obs_cmds, sizeof(k_obs_cmds) / sizeof(k_obs_cmds[0]), NULL); }
-
-#endif /* NT_DEVAPI_GROUP_OBS */
+void nt_devapi_register_obs(void) { nt_devapi_register(k_obs_cmds, NT_COUNTOF(k_obs_cmds), NULL); }

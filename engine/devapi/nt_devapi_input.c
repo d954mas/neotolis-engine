@@ -10,8 +10,6 @@
 
 /* Veneer over the core inject API: range-check bot input -> bad_params, never assert. */
 
-#ifdef NT_DEVAPI_GROUP_INPUT
-
 // #region devapi input schedule
 /* Schedule lives in devapi, not nt_input: only the devtool legitimately knows g_nt_app.frame. */
 
@@ -240,7 +238,7 @@ static const char *const k_key_names[NT_KEY_COUNT] = {
     "ARROW_UP", "ARROW_DOWN", "ARROW_LEFT", "ARROW_RIGHT", "SPACE", "ENTER", "ESCAPE", "TAB", "BACKSPACE", "LSHIFT", "RSHIFT", "LCTRL", "RCTRL", "LALT",    "RALT",      "F1", "F2", "F3",
     "F4",       "F5",         "F6",         "F7",          "F8",    "F9",    "F10",    "F11", "F12",       "DELETE", "INSERT", "HOME",  "END",   "PAGE_UP", "PAGE_DOWN",
 };
-_Static_assert(sizeof(k_key_names) / sizeof(k_key_names[0]) == NT_KEY_COUNT, "key-name table must match nt_key_t");
+_Static_assert(NT_COUNTOF(k_key_names) == NT_KEY_COUNT, "key-name table must match nt_key_t");
 
 static bool nt_input_key_from_name(const char *name, nt_key_t *out) {
     if (name == NULL || out == NULL) {
@@ -276,13 +274,11 @@ static bool pointer_type_from_name(const cJSON *t, uint8_t *out) {
     return true;
 }
 
-/* Validate a mouse-button mask against the advertised domain (bits {1,2,4} -> value in [0,7])
-   before narrowing; a negative/oversized value would silently set phantom bits. Reads valuedouble
-   + an integrality test so a fractional mask (e.g. 2.5) is REJECTED, not truncated. */
-static bool parse_button_mask(const cJSON *bj, const char *cmd, uint8_t *out, nt_devapi_error *err) {
-    double v = bj->valuedouble;
-    if (v < 0.0 || v > 7.0 || v != (double)(uint8_t)v) {
-        return nt_devapi_fail(err, cmd);
+/* Mouse-button mask: bits {1,2,4}, so [0,7]; a wider value would set phantom bits. */
+static bool parse_button_mask(const cJSON *bj, const char *message, uint8_t *out, nt_devapi_error *err) {
+    uint16_t v = 0;
+    if (!nt_devapi_parse_u16_param_exact(bj, 7, err, message, &v)) {
+        return false;
     }
     *out = (uint8_t)v;
     return true;
@@ -294,7 +290,6 @@ static float flip_y_up_to_device(float y_up) { return (float)g_nt_window.fb_heig
 
 // #region input.*
 static bool cmd_input_key(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     const cJSON *k = cJSON_GetObjectItemCaseSensitive(params, "key");
     if (!cJSON_IsString(k) || k->valuestring == NULL) {
         return nt_devapi_fail(err, "input.key: key must be a string");
@@ -305,9 +300,6 @@ static bool cmd_input_key(const cJSON *params, cJSON *result, nt_devapi_error *e
     }
     const cJSON *hold = cJSON_GetObjectItemCaseSensitive(params, "hold");
     if (hold != NULL) {
-        if (!cJSON_IsNumber(hold)) {
-            return nt_devapi_fail(err, "input.key: hold must be a number");
-        }
         uint16_t h;
         if (!nt_devapi_parse_u16_param_exact(hold, UINT16_MAX, err, "input.key: hold must be an integer in [0, 65535]", &h)) {
             return false;
@@ -334,7 +326,6 @@ static bool cmd_input_key(const cJSON *params, cJSON *result, nt_devapi_error *e
 
 /* The pointer primitive: action -> nt_inject_kind_t, type string -> nt_pointer_type_t. */
 static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     const cJSON *a = cJSON_GetObjectItemCaseSensitive(params, "action");
     if (!cJSON_IsString(a) || a->valuestring == NULL) {
         return nt_devapi_fail(err, "input.pointer: action must be a string");
@@ -350,11 +341,8 @@ static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_erro
         return nt_devapi_fail(err, "input.pointer: action must be 'down', 'move' or 'up'");
     }
     const cJSON *idj = cJSON_GetObjectItemCaseSensitive(params, "id");
-    if (!cJSON_IsNumber(idj)) {
-        return nt_devapi_fail(err, "input.pointer: id must be a number");
-    }
     uint32_t id;
-    if (!nt_devapi_parse_u32_param_exact(idj, UINT32_MAX, err, "input.pointer: id out of range", &id)) {
+    if (!nt_devapi_parse_u32_param_exact(idj, UINT32_MAX, err, "input.pointer: id must be an integer in [0, 4294967295]", &id)) {
         return false;
     }
     float x = 0.0F;
@@ -375,10 +363,7 @@ static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_erro
     uint8_t buttons = 0;
     const cJSON *bj = cJSON_GetObjectItemCaseSensitive(params, "buttons");
     if (bj != NULL) {
-        if (!cJSON_IsNumber(bj)) {
-            return nt_devapi_fail(err, "input.pointer: buttons must be a number");
-        }
-        if (!parse_button_mask(bj, "input.pointer: buttons out of range [0,7]", &buttons, err)) {
+        if (!parse_button_mask(bj, "input.pointer: buttons must be an integer mask in [0, 7]", &buttons, err)) {
             return false;
         }
     }
@@ -391,7 +376,6 @@ static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_erro
 
 /* sugar = pointer move on the default mouse slot (reserved id). */
 static bool cmd_input_move(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     const cJSON *xj = cJSON_GetObjectItemCaseSensitive(params, "x");
     const cJSON *yj = cJSON_GetObjectItemCaseSensitive(params, "y");
     float x;
@@ -403,10 +387,7 @@ static bool cmd_input_move(const cJSON *params, cJSON *result, nt_devapi_error *
     uint32_t id = NT_INPUT_INJECT_POINTER_ID_BASE;
     const cJSON *idj = cJSON_GetObjectItemCaseSensitive(params, "id");
     if (idj != NULL) {
-        if (!cJSON_IsNumber(idj)) {
-            return nt_devapi_fail(err, "input.move: id must be a number");
-        }
-        if (!nt_devapi_parse_u32_param_exact(idj, UINT32_MAX, err, "input.move: id out of range", &id)) {
+        if (!nt_devapi_parse_u32_param_exact(idj, UINT32_MAX, err, "input.move: id must be an integer in [0, 4294967295]", &id)) {
             return false;
         }
     }
@@ -423,7 +404,6 @@ static bool cmd_input_move(const cJSON *params, cJSON *result, nt_devapi_error *
 
 /* down@0 + up@hold on the mouse slot; hold default 1 (1-frame click), 0 = same-frame. */
 static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     const cJSON *xj = cJSON_GetObjectItemCaseSensitive(params, "x");
     const cJSON *yj = cJSON_GetObjectItemCaseSensitive(params, "y");
     float x;
@@ -435,29 +415,20 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
     uint32_t id = NT_INPUT_INJECT_POINTER_ID_BASE;
     const cJSON *idj = cJSON_GetObjectItemCaseSensitive(params, "id");
     if (idj != NULL) {
-        if (!cJSON_IsNumber(idj)) {
-            return nt_devapi_fail(err, "input.click: id must be a number");
-        }
-        if (!nt_devapi_parse_u32_param_exact(idj, UINT32_MAX, err, "input.click: id out of range", &id)) {
+        if (!nt_devapi_parse_u32_param_exact(idj, UINT32_MAX, err, "input.click: id must be an integer in [0, 4294967295]", &id)) {
             return false;
         }
     }
     uint8_t buttons = 1U; /* default left */
     const cJSON *bj = cJSON_GetObjectItemCaseSensitive(params, "button");
     if (bj != NULL) {
-        if (!cJSON_IsNumber(bj)) {
-            return nt_devapi_fail(err, "input.click: button must be a number mask");
-        }
-        if (!parse_button_mask(bj, "input.click: button out of range [0,7]", &buttons, err)) {
+        if (!parse_button_mask(bj, "input.click: button must be an integer mask in [0, 7]", &buttons, err)) {
             return false;
         }
     }
     uint16_t hold = 1U; /* default: 1-frame-held click (down@0 + up@1) */
     const cJSON *hj = cJSON_GetObjectItemCaseSensitive(params, "hold");
     if (hj != NULL) {
-        if (!cJSON_IsNumber(hj)) {
-            return nt_devapi_fail(err, "input.click: hold must be a number");
-        }
         if (!nt_devapi_parse_u16_param_exact(hj, UINT16_MAX, err, "input.click: hold must be an integer in [0, 65535]", &hold)) {
             return false;
         }
@@ -478,7 +449,6 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
 
 /* Without x/y the wheel applies at the slot's apply-time position (no submit-time g_nt_input read). */
 static bool cmd_input_wheel(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     /* dx/dy are notch deltas (content-scroll sign, see nt_pointer_t.wheel_dy), NOT spatial coords —
        the Y-up flip applies only to the positioned (x,y) below, never to the wheel delta. */
     float dx = 0.0F;
@@ -518,13 +488,9 @@ static bool cmd_input_wheel(const cJSON *params, cJSON *result, nt_devapi_error 
    NO C interpolation — the bot supplies the path samples. Per-entry overflow -> bad_params. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     const cJSON *idj = cJSON_GetObjectItemCaseSensitive(params, "id");
-    if (!cJSON_IsNumber(idj)) {
-        return nt_devapi_fail(err, "input.gesture: id must be a number");
-    }
     uint32_t id;
-    if (!nt_devapi_parse_u32_param_exact(idj, UINT32_MAX, err, "input.gesture: id out of range", &id)) {
+    if (!nt_devapi_parse_u32_param_exact(idj, UINT32_MAX, err, "input.gesture: id must be an integer in [0, 4294967295]", &id)) {
         return false;
     }
     uint8_t type;
@@ -542,9 +508,6 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
     uint16_t stride = 1;
     const cJSON *sj = cJSON_GetObjectItemCaseSensitive(params, "frame_stride");
     if (sj != NULL) {
-        if (!cJSON_IsNumber(sj)) {
-            return nt_devapi_fail(err, "input.gesture: frame_stride must be a number");
-        }
         if (!nt_devapi_parse_u16_param_exact(sj, UINT16_MAX, err, "input.gesture: frame_stride must be an integer in [0, 65535]", &stride)) {
             return false;
         }
@@ -608,22 +571,15 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
 
 /* mouse-button mask {1,2,4}: inject a pointer event carrying the button mask on the given id. */
 static bool cmd_input_button(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     const cJSON *bj = cJSON_GetObjectItemCaseSensitive(params, "buttons");
-    if (!cJSON_IsNumber(bj)) {
-        return nt_devapi_fail(err, "input.button: buttons must be a number mask");
-    }
     uint8_t buttons;
-    if (!parse_button_mask(bj, "input.button: buttons out of range [0,7]", &buttons, err)) {
+    if (!parse_button_mask(bj, "input.button: buttons must be an integer mask in [0, 7]", &buttons, err)) {
         return false;
     }
     uint32_t id = NT_INPUT_INJECT_POINTER_ID_BASE;
     const cJSON *idj = cJSON_GetObjectItemCaseSensitive(params, "id");
     if (idj != NULL) {
-        if (!cJSON_IsNumber(idj)) {
-            return nt_devapi_fail(err, "input.button: id must be a number");
-        }
-        if (!nt_devapi_parse_u32_param_exact(idj, UINT32_MAX, err, "input.button: id out of range", &id)) {
+        if (!nt_devapi_parse_u32_param_exact(idj, UINT32_MAX, err, "input.button: id must be an integer in [0, 4294967295]", &id)) {
             return false;
         }
     }
@@ -636,7 +592,6 @@ static bool cmd_input_button(const cJSON *params, cJSON *result, nt_devapi_error
 }
 
 static bool cmd_input_set_player_enabled(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     const cJSON *e = cJSON_GetObjectItemCaseSensitive(params, "enabled");
     if (!cJSON_IsBool(e)) {
         return nt_devapi_fail(err, "input.set_player_enabled: enabled must be a bool");
@@ -650,7 +605,6 @@ static bool cmd_input_set_player_enabled(const cJSON *params, cJSON *result, nt_
 /* Decode UTF-8 -> codepoints (malformed/invalid scalar -> bad_params, never assert). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     const cJSON *t = cJSON_GetObjectItemCaseSensitive(params, "text");
     if (!cJSON_IsString(t) || t->valuestring == NULL) {
         return nt_devapi_fail(err, "input.text: text must be a string");
@@ -716,7 +670,6 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
    pop_text:true DRAINS the char ring (consuming side effect). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_input_state(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     const cJSON *k = cJSON_GetObjectItemCaseSensitive(params, "key");
     if (k != NULL) {
         if (!cJSON_IsString(k) || k->valuestring == NULL) {
@@ -832,7 +785,5 @@ void nt_devapi_register_input(void) {
     /* The only core coupling point: core/net call these generic hooks, never the group symbols. */
     nt_devapi_register_tick(nt_devapi_input_update);
     nt_devapi_register_reset(nt_devapi_input_reset);
-    nt_devapi_register(k_input_cmds, sizeof(k_input_cmds) / sizeof(k_input_cmds[0]), NULL);
+    nt_devapi_register(k_input_cmds, NT_COUNTOF(k_input_cmds), NULL);
 }
-
-#endif /* NT_DEVAPI_GROUP_INPUT */

@@ -4,24 +4,15 @@
 #include "version/nt_version.h"
 #include "window/nt_window.h"
 
-/* Engine `core` command group: ping / engine.info / view. Compiles out entirely
-   when NT_DEVAPI_GROUP_CORE is absent. */
-
-#ifdef NT_DEVAPI_GROUP_CORE
+/* Engine `core` command group: ping / engine.info / view. */
 
 static bool cmd_ping(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)params;
-    (void)err;
-    (void)ud;
     devapi_add_bool(result, "pong", true);
     return true; /* success result is always an object */
 }
 
 /* Read-only veneer over g_nt_window — never mutates it. */
 static bool cmd_view(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)params;
-    (void)err;
-    (void)ud;
     devapi_add_number(result, "fb_width", g_nt_window.fb_width);
     devapi_add_number(result, "fb_height", g_nt_window.fb_height);
     devapi_add_number(result, "width", g_nt_window.width); /* logical */
@@ -32,9 +23,6 @@ static bool cmd_view(const cJSON *params, cJSON *result, nt_devapi_error *err, v
 
 /* Engine-identity facts: the commit-qualified version (nt_version) and build/preset (nt_core). */
 static bool cmd_engine_info(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)params;
-    (void)err;
-    (void)ud;
     devapi_add_string(result, "version", nt_version_engine());
     devapi_add_string(result, "build", nt_engine_build_string());
     devapi_add_string(result, "preset", nt_engine_preset_string());
@@ -65,6 +53,4 @@ static const nt_devapi_command k_core_cmds[] = {
     },
 };
 
-void nt_devapi_register_core(void) { nt_devapi_register(k_core_cmds, sizeof(k_core_cmds) / sizeof(k_core_cmds[0]), NULL); }
-
-#endif /* NT_DEVAPI_GROUP_CORE */
+void nt_devapi_register_core(void) { nt_devapi_register(k_core_cmds, NT_COUNTOF(k_core_cmds), NULL); }

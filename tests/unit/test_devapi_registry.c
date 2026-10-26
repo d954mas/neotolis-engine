@@ -1,4 +1,4 @@
-/* Registry: table registration by reference, duplicate and pre-init asserts. */
+/* Registry: table registration by reference and its registration-bug asserts. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <stdio.h>
@@ -11,13 +11,7 @@
 #include "core/nt_assert.h" /* NT_ASSERT_MODE for the death-test guard */
 #include "test_helpers/nt_assert_trap.h"
 
-static bool dummy_handler(const cJSON *params, cJSON *result_obj, nt_devapi_error *err, void *user_data) {
-    (void)params;
-    (void)result_obj;
-    (void)err;
-    (void)user_data;
-    return true;
-}
+static bool dummy_handler(const cJSON *params, cJSON *result_obj, nt_devapi_error *err, void *user_data) { return true; }
 
 /* init auto-registers the compiled-in commands, so the registry is non-empty after
    setUp. Tests assert DELTAS from this baseline count. */
@@ -69,6 +63,37 @@ static void test_dup_method_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_devapi_register(k_test_cmds, 1, NULL));
 }
 
+/* Duplicates inside one table assert too. */
+static const nt_devapi_command k_dup_cmds[] = {
+    {"test.same", "first", "{}", "{}", dummy_handler},
+    {"test.same", "second", "{}", "{}", dummy_handler},
+};
+
+static void test_dup_in_one_table_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_devapi_register(k_dup_cmds, NT_COUNTOF(k_dup_cmds), NULL)); }
+
+/* Every descriptor field is required: discovery prints them all. */
+static const nt_devapi_command k_incomplete_cmds[] = {
+    {"test.incomplete", NULL, "{}", "{}", dummy_handler},
+};
+
+static void test_missing_field_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_devapi_register(k_incomplete_cmds, 1, NULL)); }
+
+/* The count is checked against the free slots before any row is read. */
+static void test_overflow_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_devapi_register(k_test_cmds, NT_DEVAPI_MAX_COMMANDS, NULL)); }
+
+static bool fail_without_err(const cJSON *params, cJSON *result_obj, nt_devapi_error *err, void *user_data) { return false; }
+
+static const nt_devapi_command k_silent_fail_cmds[] = {
+    {"test.silent_fail", "returns false without filling err", "{}", "{}", fail_without_err},
+};
+
+/* A failing handler must fill err; the dispatcher asserts instead of inventing an error. Runs last:
+   the trap unwinds out of dispatch and leaves its in-flight state behind. */
+static void test_fail_without_err_asserts(void) {
+    nt_devapi_register(k_silent_fail_cmds, 1, NULL);
+    NT_TEST_EXPECT_ASSERT((void)nt_devapi_submit("{\"method\":\"test.silent_fail\"}"));
+}
+
 /* submit before init is a caller bug: nt_devapi_submit asserts initialized (the registry is empty). */
 static void test_submit_before_init_asserts(void) {
     nt_devapi_shutdown();
@@ -84,7 +109,11 @@ int main(void) {
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_register_before_init_asserts);
     RUN_TEST(test_dup_method_asserts);
+    RUN_TEST(test_dup_in_one_table_asserts);
+    RUN_TEST(test_missing_field_asserts);
+    RUN_TEST(test_overflow_asserts);
     RUN_TEST(test_submit_before_init_asserts);
+    RUN_TEST(test_fail_without_err_asserts);
 #endif
     return UNITY_END();
 }

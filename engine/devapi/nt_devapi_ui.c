@@ -11,8 +11,6 @@
 /* Veneer over the probe: range-check bot input -> bad_params, never assert. The host
    registers UI contexts by name; the engine keeps NO global ctx registry. */
 
-#ifdef NT_DEVAPI_GROUP_UI
-
 // #region ui context name table
 /* Host-registered name -> ctx* table. Trusted in-process host calls may assert; bot input
    that misses the table is always bad_params. */
@@ -160,7 +158,6 @@ static cJSON *node_to_json(const nt_ui_probe_node_t *n) {
    ctx's max_elements — no count-truncation) incl. invisible/offscreen/disabled carrying their flags (the
    bot filters, not the engine); `truncated` now signals ONLY the internal DFS-depth limit, not a count cap. */
 static bool cmd_ui_tree(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     nt_ui_context_t *ctx = resolve_ctx(params, err);
     if (ctx == NULL) {
         return false;
@@ -183,7 +180,6 @@ static bool cmd_ui_tree(const cJSON *params, cJSON *result, nt_devapi_error *err
 /* ui.element: one node resolved by developer string id. collect-then-select so the returned
    node keeps its parent/label/children consistent. Unknown/stale id -> bad_params, never assert. */
 static bool cmd_ui_element(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     const cJSON *jid = cJSON_GetObjectItemCaseSensitive(params, "id");
     if (!cJSON_IsString(jid) || jid->valuestring == NULL) {
         return nt_devapi_fail(err, "ui.element: id must be a string");
@@ -211,9 +207,6 @@ static bool cmd_ui_element(const cJSON *params, cJSON *result, nt_devapi_error *
 }
 
 static bool cmd_ui_contexts(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)params;
-    (void)err;
-    (void)ud;
     cJSON *arr = cJSON_AddArrayToObject(result, "contexts");
     NT_ASSERT(arr != NULL);
     for (uint32_t i = 0; i < s_ui_ctx_count; i++) {
@@ -306,7 +299,6 @@ static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t
 /* ui.click: resolve id|{x,y} -> center -> DOWN@0 + UP@hold via the SAME inject path as input.click.
    Fire-and-forget. Whole-or-nothing preflight: reserve both entries or reject (no DOWN without its UP). */
 static bool cmd_ui_click(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     nt_ui_context_t *ctx = resolve_ctx(params, err);
     if (ctx == NULL) {
         return false;
@@ -319,9 +311,6 @@ static bool cmd_ui_click(const cJSON *params, cJSON *result, nt_devapi_error *er
     uint16_t hold = 1U; /* default: 1-frame-held click (down@0 + up@1), matches input.click. */
     const cJSON *hj = cJSON_GetObjectItemCaseSensitive(params, "hold");
     if (hj != NULL) {
-        if (!cJSON_IsNumber(hj)) {
-            return nt_devapi_fail(err, "ui.click: hold must be a number");
-        }
         if (!nt_devapi_parse_u16_param_exact(hj, UINT16_MAX, err, "ui.click: hold must be an integer in [0, 65535]", &hold)) {
             return false;
         }
@@ -338,7 +327,6 @@ static bool cmd_ui_click(const cJSON *params, cJSON *result, nt_devapi_error *er
 /* ui.scroll: resolve id|{x,y} center -> MOVE there + wheel(dx,dy) notches via the inject path
    (reuse the positioned input.wheel form). Whole-or-nothing: MOVE + wheel reserved together. */
 static bool cmd_ui_scroll(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     nt_ui_context_t *ctx = resolve_ctx(params, err);
     if (ctx == NULL) {
         return false;
@@ -371,7 +359,6 @@ static bool cmd_ui_scroll(const cJSON *params, cJSON *result, nt_devapi_error *e
    points (the handler expands them — NO engine-side interpolation owner) + UP@to. frames CAPPED
    (DoS guard); whole-or-nothing preflight reserves DOWN + frames moves + UP up front. */
 static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     nt_ui_context_t *ctx = resolve_ctx(params, err);
     if (ctx == NULL) {
         return false;
@@ -386,9 +373,6 @@ static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err
     uint16_t frames = 8U; /* default: a short multi-frame drag. */
     const cJSON *frj = cJSON_GetObjectItemCaseSensitive(params, "frames");
     if (frj != NULL) {
-        if (!cJSON_IsNumber(frj)) {
-            return nt_devapi_fail(err, "ui.drag: frames must be a number");
-        }
         if (!nt_devapi_parse_u16_param_exact(frj, UINT16_MAX, err, "ui.drag: frames must be an integer in [1, 65535]", &frames)) {
             return false;
         }
@@ -479,7 +463,5 @@ void nt_devapi_register_ui(void) {
     /* No tick/reset hook: ui.click/drag/scroll delegate scheduling to the input group's single
        scheduler, drained by nt_devapi_input_update. The host-owned ctx table survives client
        disconnects, so there is no ui-owned transient state to reset. */
-    nt_devapi_register(k_ui_cmds, sizeof(k_ui_cmds) / sizeof(k_ui_cmds[0]), NULL);
+    nt_devapi_register(k_ui_cmds, NT_COUNTOF(k_ui_cmds), NULL);
 }
-
-#endif /* NT_DEVAPI_GROUP_UI */

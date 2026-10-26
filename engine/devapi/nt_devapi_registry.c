@@ -94,13 +94,13 @@ void nt_devapi_shutdown(void) {
     s_initialized = false;
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool command_is_complete(const nt_devapi_command *cmd) { return cmd->method != NULL && cmd->summary != NULL && cmd->params_shape != NULL && cmd->result_shape != NULL && cmd->fn != NULL; }
+
 void nt_devapi_register(const nt_devapi_command *cmds, size_t count, void *user_data) {
     NT_ASSERT(s_initialized && cmds != NULL && count <= (size_t)(NT_DEVAPI_MAX_COMMANDS - s_count));
     for (size_t i = 0; i < count; i++) {
         const nt_devapi_command *cmd = &cmds[i];
-        NT_ASSERT(cmd->method != NULL && cmd->summary != NULL && cmd->params_shape != NULL && cmd->result_shape != NULL && cmd->fn != NULL);
-        NT_ASSERT(nt_devapi_registry_find(cmd->method) == NULL); /* a duplicate method is a registration bug */
+        NT_ASSERT(command_is_complete(cmd) && nt_devapi_registry_find(cmd->method) == NULL); /* a duplicate method is a registration bug */
         s_slots[s_count++] = (nt_devapi_slot){.cmd = cmd, .user_data = user_data};
     }
 }

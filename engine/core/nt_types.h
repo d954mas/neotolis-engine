@@ -11,4 +11,6 @@ typedef enum {
     NT_ERR_INVALID_ARG,
 } nt_result_t;
 
+#define NT_COUNTOF(array) (sizeof(array) / sizeof((array)[0]))
+
 #endif // NT_TYPES_H

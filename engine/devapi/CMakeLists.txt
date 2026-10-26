@@ -13,7 +13,6 @@ nt_add_module(nt_devapi LOG_DOMAIN "devapi"
     nt_devapi.h
     nt_devapi_groups.h
     nt_devapi_internal.h
-    nt_devapi_stub.h
 )
 
 # cjson PUBLIC: the public handler typedef takes cJSON* params. nt_app_interface is a base dep --

@@ -2,10 +2,7 @@
 #include "devapi/nt_devapi_internal.h"
 
 /* Discovery group: endpoints / command.describe — the self-describing
-   surface a client reads without source. Compiles out entirely when
-   NT_DEVAPI_GROUP_DISCOVERY is absent. */
-
-#ifdef NT_DEVAPI_GROUP_DISCOVERY
+   surface a client reads without source. */
 
 /* Emit one command: detail=false -> {method,summary}; true -> all 4 fields. */
 static void emit_command(cJSON *obj, const nt_devapi_command *cmd, bool detail) {
@@ -29,7 +26,6 @@ static cJSON *add_object(cJSON *arr) {
 
 /* result wraps a `commands` array — never a bare top-level array. */
 static bool cmd_endpoints(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     /* detail is optional; if present it must be a bool (explicit over implicit). */
     bool detail = false;
     const cJSON *detail_item = cJSON_GetObjectItemCaseSensitive(params, "detail");
@@ -51,7 +47,6 @@ static bool cmd_endpoints(const cJSON *params, cJSON *result, nt_devapi_error *e
 
 /* Full contract for params.method. Missing/non-string -> bad_params; unknown -> unknown_method. */
 static bool cmd_command_describe(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     const cJSON *method_item = cJSON_GetObjectItemCaseSensitive(params, "method");
     if (!cJSON_IsString(method_item) || method_item->valuestring == NULL) {
         return nt_devapi_fail(err, (method_item == NULL) ? "missing params.method" : "non-string params.method");
@@ -82,6 +77,4 @@ static const nt_devapi_command k_discovery_cmds[] = {
     },
 };
 
-void nt_devapi_register_discovery(void) { nt_devapi_register(k_discovery_cmds, sizeof(k_discovery_cmds) / sizeof(k_discovery_cmds[0]), NULL); }
-
-#endif /* NT_DEVAPI_GROUP_DISCOVERY */
+void nt_devapi_register_discovery(void) { nt_devapi_register(k_discovery_cmds, NT_COUNTOF(k_discovery_cmds), NULL); }

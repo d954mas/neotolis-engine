@@ -1,4 +1,3 @@
-
 #include "core/nt_assert.h"
 #include "core/nt_types.h"
 #include "devapi/nt_devapi_internal.h"
@@ -8,8 +7,6 @@
 /* entity.set: a dev-only DEBUG write. Sets writable component fields through the component's apply()
    hook (the real setter — dirty flag / color packing / quaternion normalize), so it keeps
    engine invariants but bypasses game logic: a debug/tuning tool, not a control path. */
-
-#ifdef NT_DEVAPI_GROUP_ENTITY_WRITE
 
 /* Batch field cap: a bot must not force an unbounded validate/apply loop. */
 #ifndef NT_DEVAPI_ENTITY_WRITE_MAX_FIELDS
@@ -166,7 +163,6 @@ static bool apply_batch(nt_entity_t e, nt_comp_apply_fn apply, const cJSON *jfie
 
 /* entity.set{id, component, field, value} OR {id, component, fields:{...}} -> write via apply(). */
 static bool cmd_entity_set(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
     nt_entity_t e;
     nt_comp_apply_fn apply = NULL;
     const char *component = NULL;
@@ -205,6 +201,4 @@ static const nt_devapi_command k_entity_write_cmds[] = {
     },
 };
 
-void nt_devapi_register_entity_write(void) { nt_devapi_register(k_entity_write_cmds, sizeof(k_entity_write_cmds) / sizeof(k_entity_write_cmds[0]), NULL); }
-
-#endif /* NT_DEVAPI_GROUP_ENTITY_WRITE */
+void nt_devapi_register_entity_write(void) { nt_devapi_register(k_entity_write_cmds, NT_COUNTOF(k_entity_write_cmds), NULL); }

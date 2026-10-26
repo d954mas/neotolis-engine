@@ -8,7 +8,6 @@
 
 /* Stable machine error tokens emitted by the generic dispatch core. Group-specific codes live in the
    group itself (passed in as err->code) — the core never names a group. */
-#define NT_DEVAPI_ERR_BAD_PARAMS "bad_params"
 #define NT_DEVAPI_ERR_UNKNOWN_METHOD "unknown_method"
 #define NT_DEVAPI_ERR_BUSY "busy"       /* a deferred reply is pending */
 #define NT_DEVAPI_ERR_STALLED "stalled" /* a deferred reply's gate can no longer open */

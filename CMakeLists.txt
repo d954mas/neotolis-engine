@@ -119,7 +119,7 @@ option(NT_DEVAPI_ENABLED "Build the devapi command layer (engine/devapi)." OFF)
 option(NT_DEVAPI_GROUP_INPUT "Build the devapi input.* group (synthetic input injection)." ON)
 option(NT_DEVAPI_GROUP_CORE "Build the devapi core group (ping / engine.info / view)." ON)
 option(NT_DEVAPI_GROUP_TIME "Build the devapi time.*/render.*/frame.* group." ON)
-option(NT_DEVAPI_GROUP_DISCOVERY "Build the devapi discovery group (endpoints / command.describe / features)." ON)
+option(NT_DEVAPI_GROUP_DISCOVERY "Build the devapi discovery group (endpoints / command.describe)." ON)
 # The ui group reads nt_ui_probe_collect (gated by NT_UI_DEBUG_TOOLS) and delegates writes to the input
 # scheduler (NT_DEVAPI_GROUP_INPUT). Default OFF (opt-in, "use only what you need") so a plain
 # -DNT_DEVAPI_ENABLED build stays lean and does not pull in UI debug tools; enable it explicitly,
