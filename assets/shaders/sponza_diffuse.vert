@@ -10,7 +10,6 @@ layout(location = NT_LOC_UV0) in vec2 a_uv;
 
 out vec2 v_uv;
 out mediump vec3 v_world_normal;
-out mediump vec4 v_color;
 
 void main() {
     mat4 world = mat4(
@@ -21,6 +20,5 @@ void main() {
     );
     v_world_normal = normalize(mat3(world) * a_normal);
     v_uv = a_uv;
-    v_color = a_color;
     gl_Position = view_proj * world * vec4(a_position, 1.0);
 }

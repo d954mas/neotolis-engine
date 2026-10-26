@@ -67,24 +67,30 @@ bool nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, cons
     basist::transcoder_texture_format target;
     uint32_t unit_bytes; /* bytes per 4x4 block, or per pixel for RGBA8 */
     switch (format) {
+    /* sRGB twins share the block bits; only the GL internal format differs. */
     case NT_TEXTURE_FORMAT_ETC2_RGB8:
+    case NT_TEXTURE_FORMAT_ETC2_SRGB8:
         /* Upstream has no ETC2_RGB target; an ETC1 payload is a legal GL_COMPRESSED_RGB8_ETC2 block. */
         target = basist::transcoder_texture_format::cTFETC1_RGB;
         unit_bytes = 8;
         break;
     case NT_TEXTURE_FORMAT_ETC2_RGBA8:
+    case NT_TEXTURE_FORMAT_ETC2_SRGB8_ALPHA8:
         target = basist::transcoder_texture_format::cTFETC2_RGBA;
         unit_bytes = 16;
         break;
     case NT_TEXTURE_FORMAT_BC7_RGBA:
+    case NT_TEXTURE_FORMAT_BC7_SRGB_ALPHA:
         target = basist::transcoder_texture_format::cTFBC7_RGBA;
         unit_bytes = 16;
         break;
     case NT_TEXTURE_FORMAT_ASTC_4x4_RGBA:
+    case NT_TEXTURE_FORMAT_ASTC_4x4_SRGB8_ALPHA8:
         target = basist::transcoder_texture_format::cTFASTC_4x4_RGBA;
         unit_bytes = 16;
         break;
     case NT_TEXTURE_FORMAT_RGBA8:
+    case NT_TEXTURE_FORMAT_SRGB8_ALPHA8:
         target = basist::transcoder_texture_format::cTFRGBA32;
         unit_bytes = 4;
         break;

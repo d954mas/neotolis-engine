@@ -86,7 +86,7 @@ static void fill_source(uint8_t *pixels, uint32_t w, uint32_t h, bool alpha) {
     }
 }
 
-/* hdr_format doubles as the encoder's has_alpha argument, as the builder does:
+/* hdr_format doubles as the encoder's format argument, as the builder does:
  * an RGBA8 header over opaque pixels still lets m_check_for_alpha drop the
  * alpha slices. */
 static basis_fixture_t fixture_encode(uint16_t w, uint16_t h, nt_basisu_codec_t codec, bool source_alpha, uint16_t hdr_format) {
@@ -94,7 +94,7 @@ static basis_fixture_t fixture_encode(uint16_t w, uint16_t h, nt_basisu_codec_t 
     TEST_ASSERT_NOT_NULL(src);
     fill_source(src, w, h, source_alpha);
     nt_basisu_encode_opts_t opts = codec == NT_BASISU_CODEC_ETC1S ? nt_tex_compress_etc1s_high() : nt_tex_compress_uastc_default();
-    nt_basisu_encode_result_t enc = nt_basisu_encode(1, src, w, h, hdr_format == NT_TEXTURE_FORMAT_RGBA8, &opts);
+    nt_basisu_encode_result_t enc = nt_basisu_encode(1, src, w, h, (nt_texture_pixel_format_t)hdr_format, &opts);
     free(src);
     TEST_ASSERT_NOT_NULL(enc.data);
     TEST_ASSERT_EQUAL_UINT32(full_chain_levels(w, h), enc.mip_count);
@@ -268,9 +268,30 @@ static void check_target(basis_fixture_t *fixture, nt_texture_format_t expect) {
 
 // #region caps matrix
 
+/* The sRGB storage an sRGB header must get in place of each linear target. */
+static nt_texture_format_t srgb_twin(nt_texture_format_t linear) {
+    switch (linear) {
+    case NT_TEXTURE_FORMAT_ETC2_RGB8:
+        return NT_TEXTURE_FORMAT_ETC2_SRGB8;
+    case NT_TEXTURE_FORMAT_ETC2_RGBA8:
+        return NT_TEXTURE_FORMAT_ETC2_SRGB8_ALPHA8;
+    case NT_TEXTURE_FORMAT_BC7_RGBA:
+        return NT_TEXTURE_FORMAT_BC7_SRGB_ALPHA;
+    case NT_TEXTURE_FORMAT_ASTC_4x4_RGBA:
+        return NT_TEXTURE_FORMAT_ASTC_4x4_SRGB8_ALPHA8;
+    case NT_TEXTURE_FORMAT_RGBA8:
+        return NT_TEXTURE_FORMAT_SRGB8_ALPHA8;
+    default:
+        TEST_FAIL_MESSAGE("no sRGB twin");
+        return NT_TEXTURE_FORMAT_INVALID;
+    }
+}
+
 static void caps_matrix_for_codec(nt_basisu_codec_t codec) {
     basis_fixture_t alpha = fixture_encode(16, 8, codec, true, NT_TEXTURE_FORMAT_RGBA8);
     basis_fixture_t rgb = fixture_encode(16, 8, codec, false, NT_TEXTURE_FORMAT_RGB8);
+    basis_fixture_t srgb_alpha = fixture_encode(16, 8, codec, true, NT_TEXTURE_FORMAT_SRGB8_ALPHA8);
+    basis_fixture_t srgb_rgb = fixture_encode(16, 8, codec, false, NT_TEXTURE_FORMAT_SRGB8);
     /* An RGBA8 header over opaque pixels: the encoder drops the alpha slices,
      * so an ETC2-only device gets the 8-byte-per-block ETC2_RGB8 storage. */
     basis_fixture_t opaque_rgba = fixture_encode(16, 8, codec, false, NT_TEXTURE_FORMAT_RGBA8);
@@ -283,9 +304,14 @@ static void caps_matrix_for_codec(nt_basisu_codec_t codec) {
         check_target(&alpha, first_admitted(codec, bc7, astc, etc2, true));
         check_target(&rgb, first_admitted(codec, bc7, astc, etc2, false));
         check_target(&opaque_rgba, first_admitted(codec, bc7, astc, etc2, false));
+        check_target(&srgb_alpha, srgb_twin(first_admitted(codec, bc7, astc, etc2, true)));
+        check_target(&srgb_rgb, srgb_twin(first_admitted(codec, bc7, astc, etc2, false)));
     }
+    /* No compressed cap: the uncompressed fallback keeps the sRGB interpretation. */
     set_caps(false, false, false);
     check_target(&alpha, NT_TEXTURE_FORMAT_RGBA8);
+    check_target(&srgb_alpha, NT_TEXTURE_FORMAT_SRGB8_ALPHA8);
+    check_target(&srgb_rgb, NT_TEXTURE_FORMAT_SRGB8_ALPHA8);
 #if NT_BASISU_HAS_ETC2 && NT_BASISU_HAS_BC7 && NT_BASISU_HAS_ASTC
     /* Literal anchors of the spec order on the cap combinations where the two
      * codecs diverge, independent of the first_admitted mirror. */
@@ -299,11 +325,14 @@ static void caps_matrix_for_codec(nt_basisu_codec_t codec) {
     check_target(&alpha, etc1s ? NT_TEXTURE_FORMAT_ETC2_RGBA8 : NT_TEXTURE_FORMAT_BC7_RGBA);
     set_caps(false, true, true);
     check_target(&alpha, etc1s ? NT_TEXTURE_FORMAT_ETC2_RGBA8 : NT_TEXTURE_FORMAT_ASTC_4x4_RGBA);
+    check_target(&srgb_rgb, etc1s ? NT_TEXTURE_FORMAT_ETC2_SRGB8 : NT_TEXTURE_FORMAT_ASTC_4x4_SRGB8_ALPHA8);
 #endif
 
     fixture_free(&alpha);
     fixture_free(&rgb);
     fixture_free(&opaque_rgba);
+    fixture_free(&srgb_alpha);
+    fixture_free(&srgb_rgb);
 }
 
 #if NT_BASISU_HAS_ETC1S

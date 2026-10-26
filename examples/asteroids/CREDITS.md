@@ -31,7 +31,7 @@ and Vulkan backends are not used.
   The full legal code is included in [licenses/CC-BY-4.0.txt](licenses/CC-BY-4.0.txt).
 - Downloaded from the reference revision's [Resources/Textures/Planet/Mars.jpg](https://github.com/MethanePowered/MethaneAsteroids/blob/16a5751e835dd0776d976e51438604dc8de27d16/Resources/Textures/Planet/Mars.jpg).
 - Source changes: none. The checked-in JPG is byte-for-byte identical to that
-  upstream file. The offline builder encodes it at its original resolution as Basis ETC1S with a full mip chain; the planet shader decodes sRGB after sampling.
+  upstream file. The offline builder encodes it at its original resolution as Basis ETC1S sRGB with a full mip chain, so the GPU decodes it before filtering.
 - Git blob SHA-1: `b3654a9b2d21c2910c38a0287423862650d54e1f`.
 - SHA-256: `2d187f3e77a98eaa8cea5f4cc722f633c122ef170b9e94ace6b5fb6cbc3f8e01`.
 

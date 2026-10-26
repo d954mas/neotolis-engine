@@ -1,6 +1,7 @@
 /* Browser smoke app's Basis fixture pack: a 128x128 RGBA and a 96x64 opaque RGB
  * texture of two solid halves (ETC1S when its option is ON, else UASTC), so every
- * transcode target lands on the same texels. main.c requests the same pair. */
+ * transcode target lands on the same texels, the same pair stored as sRGB, and a
+ * RAW sRGB texel. main.c requests them all. */
 
 #include "nt_builder.h"
 
@@ -50,7 +51,25 @@ static void add_pair(NtBuilderContext *ctx, const char *suffix, nt_basisu_encode
     opts.format = NT_TEXTURE_FORMAT_RGB8;
     (void)snprintf(name, sizeof(name), "basis_%s_rgb", suffix);
     nt_builder_add_texture_raw(ctx, rgb, FIXTURE_RGB_WIDTH, FIXTURE_RGB_HEIGHT, name, &opts);
-    (void)printf("  Textures added: basis_%s_rgba, basis_%s_rgb\n", suffix, suffix);
+
+    opts.format = NT_TEXTURE_FORMAT_SRGB8_ALPHA8;
+    (void)snprintf(name, sizeof(name), "basis_%s_srgb_rgba", suffix);
+    nt_builder_add_texture_raw(ctx, rgba, FIXTURE_RGBA_SIZE, FIXTURE_RGBA_SIZE, name, &opts);
+    opts.format = NT_TEXTURE_FORMAT_SRGB8;
+    (void)snprintf(name, sizeof(name), "basis_%s_srgb_rgb", suffix);
+    nt_builder_add_texture_raw(ctx, rgb, FIXTURE_RGB_WIDTH, FIXTURE_RGB_HEIGHT, name, &opts);
+    (void)printf("  Textures added: basis_%s_rgba, basis_%s_rgb and their sRGB twins\n", suffix, suffix);
+}
+
+/* One RAW sRGB texel whose 128 bytes sample as 0.21586 linear RGB and 0.50196 alpha. */
+static void add_srgb_texel(NtBuilderContext *ctx) {
+    static const uint8_t texel[4] = {128, 128, 128, 128};
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.format = NT_TEXTURE_FORMAT_SRGB8_ALPHA8;
+    opts.gen_mipmaps = false;
+    opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_NEAREST;
+    opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_NEAREST;
+    nt_builder_add_texture_raw(ctx, texel, 1, 1, "srgb_texel", &opts);
 }
 
 int main(int argc, char *argv[]) {
@@ -85,6 +104,7 @@ int main(int argc, char *argv[]) {
 #else
     add_pair(ctx, "uastc", nt_tex_compress_uastc_default());
 #endif
+    add_srgb_texel(ctx);
 
     nt_build_result_t r = nt_builder_finish_pack(ctx);
     nt_builder_free_pack(ctx);

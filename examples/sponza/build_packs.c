@@ -78,22 +78,23 @@ static const char *tex_rid(uint32_t tex_index) {
 typedef enum { TEX_ROLE_DIFFUSE, TEX_ROLE_NORMAL, TEX_ROLE_SPECULAR, TEX_ROLE_UNKNOWN } tex_role_t;
 
 /* Build a lookup: texture_index -> role (based on how materials reference it) */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- assert expansions inflate the count
 static tex_role_t *build_texture_roles(const nt_glb_scene_t *scene) {
     tex_role_t *roles = (tex_role_t *)calloc(scene->texture_count > 0 ? scene->texture_count : 1, sizeof(tex_role_t));
     NT_BUILD_ASSERT(roles && "build_texture_roles: alloc failed");
     for (uint32_t i = 0; i < scene->texture_count; i++) {
         roles[i] = TEX_ROLE_UNKNOWN;
     }
+    /* A role picks the format, sRGB or linear: an image in two roles has no right one. */
     for (uint32_t mi = 0; mi < scene->material_count; mi++) {
         const nt_glb_material_t *mat = &scene->materials[mi];
-        if (mat->diffuse_index < scene->texture_count) {
-            roles[mat->diffuse_index] = TEX_ROLE_DIFFUSE;
-        }
-        if (mat->normal_index < scene->texture_count) {
-            roles[mat->normal_index] = TEX_ROLE_NORMAL;
-        }
-        if (mat->specular_index < scene->texture_count) {
-            roles[mat->specular_index] = TEX_ROLE_SPECULAR;
+        const uint32_t slots[3] = {mat->diffuse_index, mat->normal_index, mat->specular_index};
+        const tex_role_t slot_roles[3] = {TEX_ROLE_DIFFUSE, TEX_ROLE_NORMAL, TEX_ROLE_SPECULAR};
+        for (uint32_t s = 0; s < 3; s++) {
+            if (slots[s] < scene->texture_count) {
+                NT_BUILD_ASSERT((roles[slots[s]] == TEX_ROLE_UNKNOWN || roles[slots[s]] == slot_roles[s]) && "sponza: an image serves two texture roles");
+                roles[slots[s]] = slot_roles[s];
+            }
         }
     }
     return roles;
@@ -136,7 +137,8 @@ static void add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uin
         nt_basisu_encode_opts_t tex_compress = color_compress;
         switch (roles[i]) {
         case TEX_ROLE_DIFFUSE:
-            opts.format = texture_needs_alpha(scene, i, gltf) ? NT_TEXTURE_FORMAT_RGBA8 : NT_TEXTURE_FORMAT_RGB8;
+            /* Base color is sRGB-encoded (glTF); the shaders light in linear space. RAW SRGB8 cannot runtime-mip. */
+            opts.format = texture_needs_alpha(scene, i, gltf) || color_compress.codec == NT_BASISU_CODEC_NONE ? NT_TEXTURE_FORMAT_SRGB8_ALPHA8 : NT_TEXTURE_FORMAT_SRGB8;
             break;
         case TEX_ROLE_NORMAL:
             /* RG8 for RAW (placeholders), RGB8 for Basis (Basis has no 2-channel mode) */
@@ -215,6 +217,7 @@ static void add_placeholder_textures(NtBuilderContext *ctx, const nt_glb_scene_t
 
 static void add_fallback_checker(NtBuilderContext *ctx) {
     nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.format = NT_TEXTURE_FORMAT_SRGB8_ALPHA8; /* stands in for base color */
     nt_builder_add_texture_raw(ctx, s_checker, CHECKER_SIZE, CHECKER_SIZE, "sponza/fallback_checker", &opts);
     (void)printf("  Fallback checkerboard added\n");
 }

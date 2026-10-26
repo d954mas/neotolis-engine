@@ -2044,7 +2044,7 @@ typedef struct {
     bool compressed; /* upload through glCompressedTexImage2D, sized in bytes */
 } nt_gfx_gl_fmt_t;
 
-/* Not every GL header defines all four tokens; the values are spec-fixed. */
+/* Not every GL header defines the compressed tokens; the values are spec-fixed. */
 #ifndef GL_COMPRESSED_RGB8_ETC2
 #define GL_COMPRESSED_RGB8_ETC2 0x9274
 #endif
@@ -2056,6 +2056,18 @@ typedef struct {
 #endif
 #ifndef GL_COMPRESSED_RGBA_ASTC_4x4_KHR
 #define GL_COMPRESSED_RGBA_ASTC_4x4_KHR 0x93B0
+#endif
+#ifndef GL_COMPRESSED_SRGB8_ETC2
+#define GL_COMPRESSED_SRGB8_ETC2 0x9275
+#endif
+#ifndef GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC
+#define GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC 0x9279
+#endif
+#ifndef GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM
+#define GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM 0x8E8D
+#endif
+#ifndef GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR
+#define GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR 0x93D0
 #endif
 
 static nt_gfx_gl_fmt_t nt_gfx_gl_texture_format(nt_texture_format_t fmt) {
@@ -2088,6 +2100,18 @@ static nt_gfx_gl_fmt_t nt_gfx_gl_texture_format(nt_texture_format_t fmt) {
         return (nt_gfx_gl_fmt_t){GL_COMPRESSED_RGBA_BPTC_UNORM, GL_RGBA, GL_UNSIGNED_BYTE, true, true};
     case NT_TEXTURE_FORMAT_ASTC_4x4_RGBA:
         return (nt_gfx_gl_fmt_t){GL_COMPRESSED_RGBA_ASTC_4x4_KHR, GL_RGBA, GL_UNSIGNED_BYTE, true, true};
+    case NT_TEXTURE_FORMAT_ETC2_SRGB8:
+        return (nt_gfx_gl_fmt_t){GL_COMPRESSED_SRGB8_ETC2, GL_RGB, GL_UNSIGNED_BYTE, true, true};
+    case NT_TEXTURE_FORMAT_ETC2_SRGB8_ALPHA8:
+        return (nt_gfx_gl_fmt_t){GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC, GL_RGBA, GL_UNSIGNED_BYTE, true, true};
+    case NT_TEXTURE_FORMAT_BC7_SRGB_ALPHA:
+        return (nt_gfx_gl_fmt_t){GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM, GL_RGBA, GL_UNSIGNED_BYTE, true, true};
+    case NT_TEXTURE_FORMAT_ASTC_4x4_SRGB8_ALPHA8:
+        return (nt_gfx_gl_fmt_t){GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR, GL_RGBA, GL_UNSIGNED_BYTE, true, true};
+    case NT_TEXTURE_FORMAT_SRGB8_ALPHA8:
+        return (nt_gfx_gl_fmt_t){GL_SRGB8_ALPHA8, GL_RGBA, GL_UNSIGNED_BYTE, true, false};
+    case NT_TEXTURE_FORMAT_SRGB8:
+        return (nt_gfx_gl_fmt_t){GL_SRGB8, GL_RGB, GL_UNSIGNED_BYTE, false, false};
     case NT_TEXTURE_FORMAT_INVALID:
     default:
         NT_ASSERT(0 && "unsupported texture format");

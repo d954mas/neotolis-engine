@@ -90,6 +90,10 @@ static nt_resource_t s_atlas_handle, s_atlas_tex_handle;
  * Basis transcode path. RGBA carries alpha, RGB is opaque (ETC2 picks RGB8 for it). */
 static nt_resource_t s_basis_tex_handle;
 static nt_resource_t s_basis_rgb_handle;
+/* The same pair stored as sRGB, and a RAW sRGB texel of 128s. */
+static nt_resource_t s_basis_srgb_handle;
+static nt_resource_t s_basis_srgb_rgb_handle;
+static nt_resource_t s_srgb_texel_handle;
 static nt_resource_t s_font_resource;
 static nt_resource_t s_rich_font_resource[4];
 
@@ -458,9 +462,16 @@ static bool basis_handle_ready(nt_resource_t handle) {
     return nt_resource_is_ready(handle) && tex.id != 0 && nt_gfx_texture_ready(tex);
 }
 
-EMSCRIPTEN_KEEPALIVE int nt_test_basis_ready(void) { return (basis_handle_ready(s_basis_tex_handle) && basis_handle_ready(s_basis_rgb_handle)) ? 1 : 0; }
+EMSCRIPTEN_KEEPALIVE int nt_test_basis_ready(void) {
+    return (basis_handle_ready(s_basis_tex_handle) && basis_handle_ready(s_basis_rgb_handle) && basis_handle_ready(s_basis_srgb_handle) && basis_handle_ready(s_basis_srgb_rgb_handle) &&
+            basis_handle_ready(s_srgb_texel_handle))
+               ? 1
+               : 0;
+}
 EMSCRIPTEN_KEEPALIVE int nt_test_basis_format(void) { return (int)nt_gfx_texture_format(basis_fixture_texture()); }
 EMSCRIPTEN_KEEPALIVE int nt_test_basis_rgb_format(void) { return (int)nt_gfx_texture_format((nt_texture_t){nt_resource_get(s_basis_rgb_handle)}); }
+EMSCRIPTEN_KEEPALIVE int nt_test_basis_srgb_format(void) { return (int)nt_gfx_texture_format((nt_texture_t){nt_resource_get(s_basis_srgb_handle)}); }
+EMSCRIPTEN_KEEPALIVE int nt_test_basis_srgb_rgb_format(void) { return (int)nt_gfx_texture_format((nt_texture_t){nt_resource_get(s_basis_srgb_rgb_handle)}); }
 /* Bitmasks context_loss.spec.ts combines into the expected target: what the GPU reports and what
  * the NT_BASISU_HAS_* targets admit. */
 EMSCRIPTEN_KEEPALIVE int nt_test_basis_caps(void) {
@@ -494,10 +505,8 @@ EMSCRIPTEN_KEEPALIVE int nt_test_basis_single_pixel_format(void) {
 /* Packed RGBA (r | g<<8 | b<<16 | a<<24) of texel (0,0) of one fixture level (0, 3 or 7), drawn
  * through a 1x1 render target with an explicit-LOD sampler override. 0xFFFFFFFF = fixture not ready
  * or readback failed. */
-EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
-    NT_ASSERT(level == 0 || level == 3 || level == 7);
+static unsigned int probe_texel(nt_texture_t tex, int level, float size) {
     nt_gfx_begin_frame();
-    const nt_texture_t tex = basis_fixture_texture();
     if (tex.id == 0 || !nt_gfx_texture_ready(tex)) {
         nt_gfx_end_frame();
         return 0xFFFFFFFFU;
@@ -517,8 +526,8 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
         nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = (level == 0) ? NT_FILTER_NEAREST : NT_FILTER_NEAREST_MIPMAP_NEAREST, .mag_filter = NT_FILTER_NEAREST, .label = "basis_probe_sampler"});
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = s_probe_programs[PROBE_BASIS].program});
     nt_vertex_input_t input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
-    /* Centre of texel (0,0) at the requested level (the single texel at level 7). */
-    const float texel = 0.5F / (BASIS_FIXTURE_SIZE / (float)(1 << level));
+    /* Centre of texel (0,0) at the requested level (the single texel at the last level). */
+    const float texel = 0.5F / (size / (float)(1 << level));
     const float uv[4] = {texel, texel, (float)level, 0.0F};
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {1.0F, 0.0F, 1.0F, 1.0F}});
     nt_gfx_bind_pipeline(pipeline);
@@ -535,6 +544,16 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     nt_gfx_destroy_texture(color);
     return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U) | ((uint32_t)pixel[3] << 24U)) : 0xFFFFFFFFU;
 }
+EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
+    NT_ASSERT(level == 0 || level == 3 || level == 7);
+    return probe_texel(basis_fixture_texture(), level, BASIS_FIXTURE_SIZE);
+}
+/* sRGB storage samples linear values, so these read back decoded. */
+EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_srgb_sample(int level) {
+    NT_ASSERT(level == 0 || level == 7);
+    return probe_texel((nt_texture_t){nt_resource_get(s_basis_srgb_handle)}, level, BASIS_FIXTURE_SIZE);
+}
+EMSCRIPTEN_KEEPALIVE unsigned int nt_test_srgb_texel_sample(void) { return probe_texel((nt_texture_t){nt_resource_get(s_srgb_texel_handle)}, 0, 1.0F); }
 /* In capture mode every probe frame is captured, so capture covers every pass of the probe. */
 static void probe_begin_frame(int capture) {
 #if NT_GFX_CAPTURE_ENABLED
@@ -1010,6 +1029,7 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'basis_ready': function() { return _nt_test_basis_ready() !== 0; },
         'basis_format': function() { return _nt_test_basis_format(); },
         'basis_rgb_format': function() { return _nt_test_basis_rgb_format(); },
+        'srgb': function() { return [_nt_test_basis_srgb_format(), _nt_test_basis_srgb_rgb_format(), _nt_test_basis_srgb_sample(0) >>> 0, _nt_test_basis_srgb_sample(7) >>> 0, _nt_test_srgb_texel_sample() >>> 0]; },
         'basis_caps': function() { return _nt_test_basis_caps(); },
         'basis_build_targets': function() { return _nt_test_basis_build_targets(); },
         'basis_build_codecs': function() { return _nt_test_basis_build_codecs(); },
@@ -1455,10 +1475,15 @@ int main(int argc, char *argv[]) {
 #if NT_BASISU_HAS_ETC1S
     s_basis_tex_handle = nt_resource_request(nt_hash64_str("basis_etc1s_rgba"), NT_ASSET_TEXTURE);
     s_basis_rgb_handle = nt_resource_request(nt_hash64_str("basis_etc1s_rgb"), NT_ASSET_TEXTURE);
+    s_basis_srgb_handle = nt_resource_request(nt_hash64_str("basis_etc1s_srgb_rgba"), NT_ASSET_TEXTURE);
+    s_basis_srgb_rgb_handle = nt_resource_request(nt_hash64_str("basis_etc1s_srgb_rgb"), NT_ASSET_TEXTURE);
 #else
     s_basis_tex_handle = nt_resource_request(nt_hash64_str("basis_uastc_rgba"), NT_ASSET_TEXTURE);
     s_basis_rgb_handle = nt_resource_request(nt_hash64_str("basis_uastc_rgb"), NT_ASSET_TEXTURE);
+    s_basis_srgb_handle = nt_resource_request(nt_hash64_str("basis_uastc_srgb_rgba"), NT_ASSET_TEXTURE);
+    s_basis_srgb_rgb_handle = nt_resource_request(nt_hash64_str("basis_uastc_srgb_rgb"), NT_ASSET_TEXTURE);
 #endif
+    s_srgb_texel_handle = nt_resource_request(nt_hash64_str("srgb_texel"), NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT, NT_ASSET_FONT);
     s_rich_font_resource[0] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_R, NT_ASSET_FONT);
     s_rich_font_resource[1] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_B, NT_ASSET_FONT);

@@ -1332,12 +1332,17 @@ nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
 
 static bool texture_compressed_format_supported(nt_texture_format_t format) {
     switch (format) {
+    /* Each extension exposes the sRGB twins with the linear formats. */
     case NT_TEXTURE_FORMAT_ETC2_RGB8:
     case NT_TEXTURE_FORMAT_ETC2_RGBA8:
+    case NT_TEXTURE_FORMAT_ETC2_SRGB8:
+    case NT_TEXTURE_FORMAT_ETC2_SRGB8_ALPHA8:
         return g_nt_gfx.gpu_caps.has_etc2;
     case NT_TEXTURE_FORMAT_BC7_RGBA:
+    case NT_TEXTURE_FORMAT_BC7_SRGB_ALPHA:
         return g_nt_gfx.gpu_caps.has_bc7;
     case NT_TEXTURE_FORMAT_ASTC_4x4_RGBA:
+    case NT_TEXTURE_FORMAT_ASTC_4x4_SRGB8_ALPHA8:
         return g_nt_gfx.gpu_caps.has_astc;
     default:
         return true;
@@ -1367,7 +1372,8 @@ static nt_gfx_result_t make_texture(const nt_texture_desc_t *desc, nt_texture_t 
         NT_ASSERT(local_desc.data != NULL && "make_texture: compressed format requires data");
         NT_ASSERT(!local_desc.gen_mipmaps && "make_texture: compressed format cannot generate mipmaps");
         /* WebGL BPTC requires block-aligned base dimensions, including tiny textures. */
-        NT_ASSERT((local_desc.format != NT_TEXTURE_FORMAT_BC7_RGBA || (local_desc.width % 4 == 0 && local_desc.height % 4 == 0)) && "make_texture: BC7 base dimensions must be multiples of 4");
+        NT_ASSERT(((local_desc.format != NT_TEXTURE_FORMAT_BC7_RGBA && local_desc.format != NT_TEXTURE_FORMAT_BC7_SRGB_ALPHA) || (local_desc.width % 4 == 0 && local_desc.height % 4 == 0)) &&
+                  "make_texture: BC7 base dimensions must be multiples of 4");
         NT_ASSERT(texture_compressed_format_supported(local_desc.format) && "make_texture: compressed format is not supported by this GPU -- check gpu_caps");
     }
     /* Ahead of the generic level rule so the depth-specific message wins. */
@@ -1392,6 +1398,8 @@ static nt_gfx_result_t make_texture(const nt_texture_desc_t *desc, nt_texture_t 
         /* Integer storage samples NEAREST only, so extra levels are dead VRAM. */
         NT_ASSERT(local_desc.level_count <= 1 && "integer texture mip levels are not sampleable");
     }
+    /* glGenerateMipmap needs color-renderable storage; WebGL2 does not render to SRGB8. */
+    NT_ASSERT((local_desc.format != NT_TEXTURE_FORMAT_SRGB8 || !local_desc.gen_mipmaps) && "make_texture: SRGB8 cannot generate mipmaps -- use SRGB8_ALPHA8");
     if (local_desc.format == NT_TEXTURE_FORMAT_RGBA16F) {
         NT_ASSERT((!local_desc.gen_mipmaps || g_nt_gfx.gpu_caps.has_float_render_target) && "RGBA16F mipmaps require float rendering support");
     }
@@ -2552,7 +2560,7 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
 
 /* Per-codec order: ETC1S unpacks into ETC2 exactly (opaque at half the bytes of BC7/ASTC);
  * UASTC is a subset of ASTC, BC7 approximates it and an ETC2 target re-encodes it. */
-static nt_texture_format_t basis_target_format(const nt_gfx_gpu_caps_t *caps, nt_basisu_codec_t codec, bool has_alpha, uint32_t width, uint32_t height) {
+static nt_texture_format_t basis_linear_target_format(const nt_gfx_gpu_caps_t *caps, nt_basisu_codec_t codec, bool has_alpha, uint32_t width, uint32_t height) {
     /* WebGL BPTC requires block-aligned level-0 dimensions; the smaller levels of a halved chain are accepted as they come. */
     const bool bc7 = NT_BASISU_HAS_BC7 && caps->has_bc7 && width % 4 == 0 && height % 4 == 0;
     const bool astc = NT_BASISU_HAS_ASTC && caps->has_astc;
@@ -2581,6 +2589,29 @@ static nt_texture_format_t basis_target_format(const nt_gfx_gpu_caps_t *caps, nt
         return etc2_format;
     }
     return NT_TEXTURE_FORMAT_RGBA8;
+}
+
+/* An sRGB asset takes the sRGB twin of the same target: the block bits do not change. */
+static nt_texture_format_t basis_target_format(const nt_gfx_gpu_caps_t *caps, nt_basisu_codec_t codec, bool has_alpha, bool srgb, uint32_t width, uint32_t height) {
+    const nt_texture_format_t linear = basis_linear_target_format(caps, codec, has_alpha, width, height);
+    if (!srgb) {
+        return linear;
+    }
+    switch (linear) {
+    case NT_TEXTURE_FORMAT_ETC2_RGB8:
+        return NT_TEXTURE_FORMAT_ETC2_SRGB8;
+    case NT_TEXTURE_FORMAT_ETC2_RGBA8:
+        return NT_TEXTURE_FORMAT_ETC2_SRGB8_ALPHA8;
+    case NT_TEXTURE_FORMAT_BC7_RGBA:
+        return NT_TEXTURE_FORMAT_BC7_SRGB_ALPHA;
+    case NT_TEXTURE_FORMAT_ASTC_4x4_RGBA:
+        return NT_TEXTURE_FORMAT_ASTC_4x4_SRGB8_ALPHA8;
+    case NT_TEXTURE_FORMAT_RGBA8:
+        return NT_TEXTURE_FORMAT_SRGB8_ALPHA8;
+    default:
+        NT_ASSERT(0 && "basis target has no sRGB twin");
+        return NT_TEXTURE_FORMAT_INVALID;
+    }
 }
 
 /* Activate a v2 texture (RAW or Basis Universal compressed) */
@@ -2650,13 +2681,14 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     // #endregion
 
     // #region target and staging
-    const nt_texture_format_t target = basis_target_format(nt_gfx_gpu_caps(), info.codec, info.has_alpha, width, height);
+    const bool srgb = nt_texture_format_is_srgb((nt_texture_format_t)hdr2->format);
+    const nt_texture_format_t target = basis_target_format(nt_gfx_gpu_caps(), info.codec, info.has_alpha, srgb, width, height);
 
     uint64_t chain_bytes = 0;
     for (uint32_t level = 0; level < info.level_count; level++) {
         chain_bytes += nt_texture_level_bytes(target, nt_texture_level_extent(width, level), nt_texture_level_extent(height, level));
     }
-    /* Only the RGBA8 fallback can reach 2^32, at 32768x32768. */
+    /* Only the uncompressed fallback can reach 2^32, at 32768x32768. */
     if (chain_bytes > UINT32_MAX) {
         NT_LOG_ERROR("activate_texture: the chain needs %llu bytes, more than a uint32 holds", (unsigned long long)chain_bytes);
         return 0;

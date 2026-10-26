@@ -481,7 +481,7 @@ A tint — a color that multiplies or replaces what a draw shows — is a packed
 reaches the GPU as normalized RGBA8 (vertices and instances alike). Literals use
 `NT_RGBA8(r, g, b, a)` with integer bytes 0..255; float color math lives in
 `engine/color/nt_color.h` and packs once at the end. Values are display
-(sRGB-encoded) colors; shaders use them without conversion. Values that are not
+(sRGB-encoded) colors; engine shaders use them without conversion. Values that are not
 a tint stay float: render-target clear colors, the blend constant color, material
 uniform params (where an unclamped or HDR tint belongs) and lighting. Clay's own
 declarations (`backgroundColor`, `border.color`, a raw `CLAY_TEXT` color) keep
@@ -491,6 +491,16 @@ stages can differ from a single float product by one step per stage. Every
 float-to-byte conversion saturates and rounds half up (NaN gives 0), so an
 opacity fold gives the same alpha on a packed color and on a Clay color with the
 same byte values.
+
+Textures may store sRGB-encoded color (`SRGB8_ALPHA8` and the sRGB compressed
+formats, [runtime formats](../assets/runtime-formats.md#texture-activation-ttex));
+sampling one returns linear RGB. Engine shaders and tints stay display-encoded,
+so sampling an sRGB texture in a shader that writes display values (UI, sprites,
+postfx blur) darkens it. A game that lights in linear space keeps its light and
+material colors linear and encodes once on output with `common/color.glsl`.
+The canvas is never an sRGB framebuffer and render-target colors are RGBA8 or
+RGBA16F, so blending acts on whatever the shader writes. The Sponza example
+works this way.
 
 Every instance the ECS adapters pack carries the entity's drawable color
 (`nt_mesh_instance_t`, `nt_skinned_mesh_instance_t`), so every render item needs
@@ -911,7 +921,8 @@ for a single-level texture, where it samples level 0. Driver upload failures
 are not polled, so a published handle does not guarantee complete GPU storage.
 
 Block-compressed storage (`ETC2_RGB8`, `ETC2_RGBA8`, `BC7_RGBA`,
-`ASTC_4x4_RGBA`) is normalized color for the sampler classes: it satisfies
+`ASTC_4x4_RGBA` and their sRGB twins) and the uncompressed sRGB formats are
+normalized color for the sampler classes: it satisfies
 `sampler2D`, and the comparison and integer classes reject it — comparison needs
 depth storage, `usampler2D` needs integer storage.
 

@@ -29,10 +29,13 @@ nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *op
     const nt_basisu_encode_opts_t *compress_opts = &resolved.compress;
     bool compressed = compress_opts->codec != NT_BASISU_CODEC_NONE;
     bool filter_min_uses_mips = resolved.filter_min >= NT_TEXTURE_DEFAULT_FILTER_NEAREST_MIPMAP_NEAREST;
+    NT_BUILD_ASSERT((compressed || format != NT_TEXTURE_FORMAT_SRGB8 || (!resolved.gen_mipmaps && !filter_min_uses_mips)) &&
+                    "texture opts: RAW SRGB8 cannot generate runtime mips -- use SRGB8_ALPHA8, or gen_mipmaps=false with a non-mip filter_min");
     NT_BUILD_ASSERT((compressed || !filter_min_uses_mips || resolved.gen_mipmaps) && "texture opts: RAW mipmap filter requires gen_mipmaps=true");
 
     if (compressed) {
-        NT_BUILD_ASSERT((format == NT_TEXTURE_FORMAT_RGBA8 || format == NT_TEXTURE_FORMAT_RGB8) && "texture opts: Basis compression requires RGBA8 or RGB8");
+        NT_BUILD_ASSERT((format == NT_TEXTURE_FORMAT_RGBA8 || format == NT_TEXTURE_FORMAT_RGB8 || format == NT_TEXTURE_FORMAT_SRGB8_ALPHA8 || format == NT_TEXTURE_FORMAT_SRGB8) &&
+                        "texture opts: Basis compression requires RGBA8, RGB8, SRGB8_ALPHA8 or SRGB8");
         NT_BUILD_ASSERT((compress_opts->codec == NT_BASISU_CODEC_ETC1S || compress_opts->codec == NT_BASISU_CODEC_UASTC_LDR) && "texture opts: compression mode out of range");
         /* The runtime of the same configure refuses a codec whose NT_BASISU_HAS_* is OFF. */
         NT_BUILD_ASSERT(((compress_opts->codec == NT_BASISU_CODEC_ETC1S && NT_BASISU_HAS_ETC1S) || (compress_opts->codec == NT_BASISU_CODEC_UASTC_LDR && NT_BASISU_HAS_UASTC)) &&
@@ -226,7 +229,7 @@ void nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width
     uint8_t *stripped = NULL;
     nt_basisu_encode_result_t enc = {0};
     if (compressed) {
-        enc = nt_basisu_encode(encode_threads, source, width, height, opts->format == NT_TEXTURE_FORMAT_RGBA8, &opts->compress);
+        enc = nt_basisu_encode(encode_threads, source, width, height, opts->format, &opts->compress);
         NT_BUILD_ASSERT(enc.data && "texture encode: Basis encode failed");
         uint32_t full_mip_count = 1;
         for (uint32_t size = width > height ? width : height; size > 1; size >>= 1U) {

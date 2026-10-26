@@ -32,8 +32,8 @@ bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_
 /* Transcode levels 0..N-1 of image 0 into `output` back to back, no padding
  * (level L is max(1, w >> L) x max(1, h >> L)), N and dims from `info` (from
  * a successful nt_basisu_info call on the same blob in this build). `format` is
- * RGBA8 or a compressed target whose NT_BASISU_HAS_* option is ON (the
- * activator's selector never picks another). False only for a capacity short
+ * RGBA8, SRGB8_ALPHA8 or a compressed target or its sRGB twin whose
+ * NT_BASISU_HAS_* option is ON (the activator's selector never picks another). False only for a capacity short
  * of the whole chain, before anything is written. */
 bool nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, const nt_basisu_info_t *info, nt_texture_format_t format, void *output, uint32_t capacity_bytes);
 
