@@ -86,6 +86,7 @@ typedef struct {
  * run). The mesh's vertex input for this call's buffer does not depend on the material. */
 static bool resolve(mesh_draw_t *d, nt_material_t material, const nt_material_info_t *mi, nt_mesh_t mesh) {
     if (!nt_gfx_program_ready(mi->program)) {
+        NT_GFX_NOTE("skip", NT_NOTE_STR("reason", "program not ready"));
         return false;
     }
     if (material.id != d->material.id) {
@@ -133,6 +134,7 @@ static void draw_one(nt_mesh_t mesh, nt_material_t material, nt_instance_layout_
     const nt_material_info_t *mat_info = nt_material_get_info(material);
     const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(mesh);
     NT_ASSERT(mat_info != NULL && mesh_info != NULL && "mesh draw references a destroyed material or mesh");
+    NT_GFX_NOTE("mesh", NT_NOTE_U32("material", material.id), NT_NOTE_U32("mesh", mesh.id));
     mesh_draw_t draw = {.instance_layout = layout, .instances = instances};
     if (resolve(&draw, material, mat_info, mesh)) {
         record(&draw, mesh_info, draw_texture, offset, count);
@@ -176,6 +178,7 @@ void nt_mesh_renderer_draw_list(uint32_t stream, const nt_render_item_t *items, 
         const nt_material_info_t *mat_info = nt_material_get_info(material);
         const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(mesh);
         NT_ASSERT(mat_info != NULL && mesh_info != NULL && "mesh render item references a destroyed material or mesh");
+        NT_GFX_NOTE("mesh", NT_NOTE_U32("material", material.id), NT_NOTE_U32("mesh", mesh.id));
         if (!resolve(&draw, material, mat_info, mesh)) {
             continue;
         }
@@ -248,6 +251,7 @@ void nt_mesh_renderer_draw_list_skinned(uint32_t stream, const nt_render_item_t 
         const nt_material_info_t *mat_info = nt_material_get_info(material);
         const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(mesh);
         NT_ASSERT(mat_info != NULL && mesh_info != NULL && "skinned render item references a destroyed material or mesh");
+        NT_GFX_NOTE("mesh", NT_NOTE_U32("material", material.id), NT_NOTE_U32("mesh", mesh.id));
         if (!resolve(&draw, material, mat_info, mesh)) {
             continue;
         }

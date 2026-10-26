@@ -1280,6 +1280,53 @@ ends `CACHE` matches this state or one set earlier in the frame. Inherited
 layouts unavailable in existing CPU state are explicitly unknown. Capture
 never adds a GL-state mirror of its own or queries GL to reconstruct state.
 
+### Notes and markers
+
+Any code (renderers, UI, the game) adds its own context to a capture; gfx stores
+it and never interprets it. `NT_GFX_NOTE(label, fields...)` records a `NOTE`
+followed by one `NOTE_FIELD` record per field, built with `NT_NOTE_U32`,
+`NT_NOTE_I32`, `NT_NOTE_U64`, `NT_NOTE_F32` or `NT_NOTE_STR`; a note may have no
+fields. A reader takes every consecutive `NOTE_FIELD` as the fields of the
+`NOTE` before it. `NT_GFX_MARKER_PUSH(name)` / `NT_GFX_MARKER_POP()` record
+nested groups; nesting follows from record order.
+
+Notes, fields and markers are records of the same event array, in call order
+with the gfx records, so they share the capture's lifetime, copy rule and
+overflow. Only `kind` is common with gfx records: a note or marker keeps its
+label in `note.label`, a field its `type`, `key` and `value` in `field`. Label,
+key and string value are copied at the call (shorter than 100, 24 and 72 bytes,
+asserted while the frame records), so callers may pass temporary buffers. A
+note lands with all its fields or, when they do not fit, sets `overflow`; no
+record appends after an overflow.
+
+A note describes the front-end records after it until the next note or
+marker. Backend records are written when the stream executes in
+`nt_gfx_end_frame`, after every note of the frame. Notes and markers are not
+draw-stream commands, so draw merging, counters and pixels do not depend on
+them. Markers do not reach external debuggers (a stream command between two
+draws would end their merge).
+
+`g_nt_gfx.capture_recording` is set while a frame records; `NT_GFX_NOTE` checks
+it before building its fields, so a note in an unrecorded frame costs one
+branch. In capture-OFF builds the macros expand to nothing and their arguments
+are not evaluated. Marker balance is tracked in every frame of a capture build:
+a pop without a push asserts, and so does a marker still open at
+`nt_gfx_begin_frame`, the capture boundary. A group may wrap work after
+`nt_gfx_end_frame`. The stub accepts and discards notes and markers.
+
+Engine renderers note their work and skips. A skip is a `skip` note with a
+`reason` string after the renderer's note.
+
+| Label | Fields | Written |
+|---|---|---|
+| `mesh` | `material`, `mesh` | before each run of `draw_list`, `draw_list_skinned` and each direct mesh draw; a deformation-only split notes the same pair again |
+| `sprite` | `material`, `page` | before each immediate emit and each `draw_list` run; a merged emit keeps its note before a `CACHE` draw |
+| `text` | `material`, `font` | once per non-empty `draw_n` call |
+| `shape` | none | before each shape draw of a flush, and before the skip of a flush whose programs are not ready |
+| `skip` | `reason`: `program not ready`, `page not ready`, `font not loaded`, `font texture not ready` | where the renderer drops the work |
+
+A context loss writes no renderer note: the capture already records it.
+
 ## Shape strokes
 
 `nt_shape_renderer` owns immediate-mode shape geometry and batches it until

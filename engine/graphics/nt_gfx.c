@@ -307,6 +307,80 @@ nt_gfx_capture_view_t nt_gfx_capture_read(void) {
     return result;
 }
 
+static void copy_note_text(char *dst, size_t size, const char *src) {
+    NT_ASSERT(src != NULL && "capture note: NULL string");
+    const size_t len = strlen(src);
+    NT_ASSERT(len < size && "capture note: string too long for its record");
+    memcpy(dst, src, len + 1);
+}
+
+static void copy_note_field(nt_gfx_event_t *dst, const nt_gfx_note_field_t *src) {
+    dst->field.kind = NT_GFX_EVENT_NOTE_FIELD;
+    dst->field.type = src->type;
+    copy_note_text(dst->field.key, sizeof(dst->field.key), src->key);
+    switch (src->type) {
+    case NT_GFX_NOTE_U32:
+        dst->field.value.u32 = src->value.u32;
+        break;
+    case NT_GFX_NOTE_I32:
+        dst->field.value.i32 = src->value.i32;
+        break;
+    case NT_GFX_NOTE_U64:
+        dst->field.value.u64 = src->value.u64;
+        break;
+    case NT_GFX_NOTE_F32:
+        dst->field.value.f32 = src->value.f32;
+        break;
+    case NT_GFX_NOTE_STR:
+        copy_note_text(dst->field.value.str, sizeof(dst->field.value.str), src->value.str);
+        break;
+    default:
+        NT_ASSERT(0 && "capture note: unknown field type");
+    }
+}
+
+void nt_gfx_note_record(const char *label, const nt_gfx_note_field_t *fields, uint32_t count) {
+    nt_gfx_capture_state_t *capture = &g_nt_gfx_capture;
+    if (!g_nt_gfx.capture_recording || capture->view.overflow) {
+        return;
+    }
+    NT_ASSERT(fields != NULL || count == 0);
+    /* All or nothing: a reader takes every NOTE_FIELD after a NOTE as its fields. */
+    if (capture->capacity - capture->view.count <= count) {
+        capture->view.overflow = true;
+        return;
+    }
+    nt_gfx_event_t *note = &capture->events[capture->view.count];
+    memset(note, 0, (size_t)(count + 1U) * sizeof(*note));
+    note->note.kind = NT_GFX_EVENT_NOTE;
+    copy_note_text(note->note.label, sizeof(note->note.label), label);
+    for (uint32_t i = 0; i < count; i++) {
+        copy_note_field(&note[i + 1U], &fields[i]);
+    }
+    capture->view.count += count + 1U;
+}
+
+void nt_gfx_marker_push(const char *name) {
+    NT_ASSERT(name != NULL && "nt_gfx_marker_push: name is required");
+    g_nt_gfx_capture.marker_depth++;
+    nt_gfx_event_t *event = nt_gfx_capture_reserve();
+    if (event != NULL) {
+        event->note.kind = NT_GFX_EVENT_MARKER_PUSH;
+        copy_note_text(event->note.label, sizeof(event->note.label), name);
+        g_nt_gfx_capture.view.count++;
+    }
+}
+
+void nt_gfx_marker_pop(void) {
+    NT_ASSERT(g_nt_gfx_capture.marker_depth > 0 && "nt_gfx_marker_pop: no open marker");
+    g_nt_gfx_capture.marker_depth--;
+    nt_gfx_event_t *event = nt_gfx_capture_reserve();
+    if (event != NULL) {
+        event->kind = NT_GFX_EVENT_MARKER_POP;
+        g_nt_gfx_capture.view.count++;
+    }
+}
+
 static uint32_t render_target_attachment_format(uint32_t rt_slot, int attachment) {
     return s_gfx.render_target_metas[rt_slot].attachments[attachment].id != 0 ? render_target_attachment_meta(rt_slot, attachment)->format : 0;
 }
@@ -507,7 +581,7 @@ void nt_gfx_shutdown(void) {
     nt_gfx_frame_shutdown();
     /* The open frame is discarded unpublished; teardown calls must not record into the freed array. */
 #if NT_GFX_CAPTURE_ENABLED
-    g_nt_gfx_capture.recording = false;
+    g_nt_gfx.capture_recording = false;
     free(g_nt_gfx_capture.events);
 #endif
     /* Delete GL objects before backend teardown, which destroys the WebGL context. */
@@ -721,15 +795,19 @@ static nt_gfx_result_t restore_context(void) {
 void nt_gfx_begin_frame(void) {
     NT_ASSERT(g_nt_gfx.initialized);
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_ENDED && "begin_frame: the open frame has no nt_gfx_end_frame");
+#if NT_GFX_CAPTURE_ENABLED
+    /* The capture runs begin_frame to begin_frame: a group may wrap post-render work, never a frame boundary. */
+    NT_ASSERT(g_nt_gfx_capture.marker_depth == 0 && "begin_frame: a capture marker is still open");
+#endif
     s_gfx.render_state = NT_GFX_STATE_IDLE;
     age_stage_buffer();
     nt_gfx_frame_begin();
     memset(s_gfx.staged_blocks, 0, sizeof(s_gfx.staged_blocks));
     g_nt_gfx.last_frame = g_nt_gfx.counters;
 #if NT_GFX_CAPTURE_ENABLED
-    if (g_nt_gfx_capture.recording) {
+    if (g_nt_gfx.capture_recording) {
         g_nt_gfx_capture.view.counters = g_nt_gfx.last_frame;
-        g_nt_gfx_capture.recording = false;
+        g_nt_gfx.capture_recording = false;
     }
 #endif
     g_nt_gfx.context_restored = false;
@@ -747,7 +825,7 @@ void nt_gfx_begin_frame(void) {
     /* Opened after the wipe and before the restore: the snapshot shows the tables the frame starts from. */
     if (g_nt_gfx_capture.request_pending) {
         g_nt_gfx_capture.request_pending = false;
-        g_nt_gfx_capture.recording = true;
+        g_nt_gfx.capture_recording = true;
         g_nt_gfx_capture.view = (nt_gfx_capture_view_t){0};
         capture_initial_state();
     }
