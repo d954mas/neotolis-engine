@@ -13,7 +13,7 @@ extern "C" {
 
 /* Image 0 of a Basis file, as the blob itself describes it. */
 typedef struct {
-    nt_basisu_codec_t codec; /* ETC1S or UASTC_LDR; any other upstream format makes nt_basisu_info fail */
+    nt_basisu_codec_t codec; /* ETC1S or UASTC_LDR */
     uint32_t width;          /* level 0, unpadded */
     uint32_t height;
     uint32_t level_count;
@@ -23,19 +23,19 @@ typedef struct {
 /* One-time transcoder init (call at startup before any transcode) */
 void nt_basisu_transcoder_global_init(void);
 
-/* Describe image 0 without allocating. Returns false for a bad header or a mip
- * chain whose level L is not exactly max(1, width >> L) x max(1, height >> L).
- * A codec this build does not decode (NT_BASISU_HAS_ETC1S/UASTC OFF, or a
- * non-LDR Basis format) is a pack from another configure: asserted. */
-bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_t *out_info);
+/* Describe image 0 without allocating. Blobs come from trusted packs: a bad
+ * header, a mip chain whose level L is not exactly max(1, width >> L) x
+ * max(1, height >> L), or a codec this build does not decode (a pack from
+ * another configure) is asserted. */
+void nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_t *out_info);
 
 /* Transcode levels 0..N-1 of image 0 into `output` back to back, no padding
- * (level L is max(1, w >> L) x max(1, h >> L)), N and dims from `info` (from
- * a successful nt_basisu_info call on the same blob in this build). `format` is
- * RGBA8, SRGB8_ALPHA8 or a compressed target or its sRGB twin whose
- * NT_BASISU_HAS_* option is ON (the activator's selector never picks another). False only for a capacity short
- * of the whole chain, before anything is written. */
-bool nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, const nt_basisu_info_t *info, nt_texture_format_t format, void *output, uint32_t capacity_bytes);
+ * (level L is max(1, w >> L) x max(1, h >> L)), N and dims from `info` of the
+ * same blob. `output` holds at least the sum of nt_texture_level_bytes over
+ * the chain. `format` is RGBA8, SRGB8_ALPHA8 or a compressed target or its
+ * sRGB twin whose NT_BASISU_HAS_* option is ON (the activator's selector never
+ * picks another). An upstream failure, its allocations included, is asserted. */
+void nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, const nt_basisu_info_t *info, nt_texture_format_t format, void *output);
 
 #ifdef __cplusplus
 }

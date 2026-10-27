@@ -38,6 +38,12 @@ and never picks a format; the transcoder is a codec with no GPU knowledge. That
 staging buffer is the same one mesh activation re-interleaves SoA vertices
 through — one grow-on-demand allocation, freed once it goes idle.
 
+Pack bytes are trusted. The header's `data_size` is exactly the payload that
+follows it, and a RAW payload is exactly its pixels. `nt_basisu_info` and
+`nt_basisu_transcode_chain` assert a bad Basis header, a chain that is not the
+halved chain, and a failed transcode. Only device limits return 0: texture size,
+staging allocation and a lost context.
+
 The target selector walks a fixed per-codec order and takes the first
 candidate that the GPU (`nt_gfx_gpu_caps()`) reports and the build admits
 (`NT_BASISU_HAS_ETC2/BC7/ASTC`,

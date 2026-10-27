@@ -9,19 +9,18 @@
 
 void nt_basisu_transcoder_global_init(void) { NT_BASISU_STUB_TRAP(); }
 
-bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_t *out_info) {
+void nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_t *out_info) {
     (void)basis_data;
     (void)basis_size;
     (void)out_info;
     NT_BASISU_STUB_TRAP();
 }
 
-bool nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, const nt_basisu_info_t *info, nt_texture_format_t format, void *output, uint32_t capacity_bytes) {
+void nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, const nt_basisu_info_t *info, nt_texture_format_t format, void *output) {
     (void)basis_data;
     (void)basis_size;
     (void)info;
     (void)format;
     (void)output;
-    (void)capacity_bytes;
     NT_BASISU_STUB_TRAP();
 }

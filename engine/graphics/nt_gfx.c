@@ -2713,7 +2713,7 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     }
     NT_ASSERT(hdr2->width != 0 && hdr2->height != 0 && hdr2->width <= UINT16_MAX && hdr2->height <= UINT16_MAX && "texture dimensions out of range");
     /* Subtraction safe: the resource core checked size >= sizeof header. */
-    NT_ASSERT(hdr2->data_size <= size - sizeof(NtTextureAssetHeaderV2) && "texture blob truncated");
+    NT_ASSERT(hdr2->data_size == size - sizeof(NtTextureAssetHeaderV2) && "texture data_size differs from its blob");
     const uint16_t width = (uint16_t)hdr2->width;
     const uint16_t height = (uint16_t)hdr2->height;
     // #endregion
@@ -2722,7 +2722,7 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     if (hdr2->compression == NT_TEXTURE_COMPRESSION_RAW) {
         nt_texture_format_t pixel_fmt = (nt_texture_format_t)hdr2->format;
         uint64_t expected = (uint64_t)hdr2->width * (uint64_t)hdr2->height * nt_texture_bpp(pixel_fmt);
-        NT_ASSERT(expected <= UINT32_MAX && hdr2->data_size >= (uint32_t)expected && "texture RAW data_size below its pixels");
+        NT_ASSERT(expected == hdr2->data_size && "texture RAW data_size differs from its pixels");
         nt_texture_desc_t desc = {
             .width = width,
             .height = height,
@@ -2751,10 +2751,7 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
 
     // #region blob cross-check
     nt_basisu_info_t info;
-    if (!nt_basisu_info(basis_data, basis_size, &info)) {
-        NT_LOG_ERROR("activate_texture: Basis blob rejected (bad data, unsupported codec or stub transcoder linked)");
-        return 0;
-    }
+    nt_basisu_info(basis_data, basis_size, &info);
     NT_ASSERT(info.width == hdr2->width && info.height == hdr2->height && "texture header size differs from its Basis blob");
     NT_ASSERT(info.level_count == hdr2->mip_count && info.level_count == nt_texture_full_chain_levels(width, height) && "texture Basis chain is not the full mip chain");
     // #endregion
@@ -2780,10 +2777,7 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     // #endregion
 
     // #region transcode the whole chain into staging
-    if (!nt_basisu_transcode_chain(basis_data, basis_size, &info, target, stage, (uint32_t)chain_bytes)) {
-        NT_LOG_ERROR("activate_texture: Basis transcode of the %u-level chain failed", (unsigned)info.level_count);
-        return 0;
-    }
+    nt_basisu_transcode_chain(basis_data, basis_size, &info, target, stage);
     // #endregion
 
     nt_texture_desc_t desc = {

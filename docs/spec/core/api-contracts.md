@@ -452,9 +452,10 @@ otherwise selection continues with the next candidate of that order.
 The activator transcodes the whole chain into the shared staging buffer with one
 codec call and then creates the texture through `nt_gfx_make_texture`, which is
 the single path to storage — there is no internal create/upload pair. The codec
-call opens and closes its own transcoder session. Any reported failure (transcode,
-staging, texture-name allocation, context loss or sampler creation) publishes
-nothing: no handle, no pool slot, no open transcoder session. Live-context upload
+call opens and closes its own transcoder session. Pack bytes are trusted: a
+malformed Basis blob or a failed transcode asserts. Any reported failure (staging,
+texture-name allocation, context loss or sampler creation) publishes nothing: no
+handle, no pool slot, no open transcoder session. Live-context upload
 errors remain unchecked, as in the public constructor. Texture pool exhaustion
 during activation is an asserted precondition, exactly as in
 `nt_gfx_make_texture`, not a

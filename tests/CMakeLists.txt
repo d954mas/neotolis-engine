@@ -1281,8 +1281,9 @@ if(NOT EMSCRIPTEN)
     # --- Basis encode + runtime transcode in one exe ---
     # Transcoder listed first on purpose: the runtime-first consumer link line that
     # must resolve against a single shared basisu TU. Do not reorder.
-    add_executable(test_basisu_roundtrip unit/test_basisu_roundtrip.c)
-    target_link_libraries(test_basisu_roundtrip PRIVATE nt_basisu_transcoder_full nt_builder nt_log unity nt_meshwire)
+    add_executable(test_basisu_roundtrip unit/test_basisu_roundtrip.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_basisu_roundtrip PRIVATE nt_basisu_transcoder_full nt_builder nt_core nt_log unity nt_meshwire)
+    target_include_directories(test_basisu_roundtrip PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_basisu_roundtrip PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_basisu_roundtrip)
 
