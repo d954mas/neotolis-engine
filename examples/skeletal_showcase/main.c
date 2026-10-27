@@ -2732,6 +2732,9 @@ static void frame(void) {
     nt_gfx_end_frame();
     nt_example_frames_end(ready && ordering_ready());
     if (render_enabled) {
+#ifdef NT_DEVAPI_ENABLED
+        nt_devapi_frame_rendered();
+#endif
         nt_window_swap_buffers();
     }
 }

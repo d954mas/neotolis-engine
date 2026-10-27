@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-// The web devapi bridge the capture-build devapi_host installs (engine/devapi/nt_devapi_web.c,
+// The web devapi bridge devapi_host installs (engine/devapi/nt_devapi_web.c,
 // EM_JS): submit(line) returns the synchronous response line ("" when the command deferred — C
 // returned NULL), poll() returns a queued deferred response line ("" when none ready). No listener
 // on web.
@@ -26,7 +26,7 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
   await page.goto('/index.html');
 
   // Frame barrier: resolve after two nested requestAnimationFrame calls — one real rendered frame.
-  // The deferred capture's reply is built only INSIDE the swap this schedules.
+  // The deferred capture's reply is built only in the rendered frame this schedules.
   const frame = () =>
     page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 

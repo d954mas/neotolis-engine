@@ -51,6 +51,8 @@ nt_gfx_read_pixels    ← optional: reads the finished frame, before the swap; n
 nt_recorder_frame     ← optional, dev-only: records the finished frame; Windows queues
                         a read and encodes it three reads later, or at the end of the
                         recording (debug/recorder.md)
+nt_devapi_frame_rendered ← optional, dev-only: builds a pending devapi capture reply
+                        (debug/logging-errors-debugging.md)
 nt_window_swap_buffers
 ```
 

@@ -600,7 +600,7 @@ jobs:
           ccache-key: web-smoke
           extra-packages: ffmpeg
 
-      # Capture group ON arms the web host's pre-swap seam (NT_DEVAPI_GROUP_CAPTURE): the deferred
+      # Capture group ON (NT_DEVAPI_GROUP_CAPTURE): the deferred
       # capture.frame resolves to a REAL PNG, the behavior the live spec asserts.
       - name: Build devapi_host wasm (debug, capture and record ON)
         run: |

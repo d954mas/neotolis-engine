@@ -31,8 +31,8 @@ static nt_devapi_gate parse_gate(const cJSON *params) {
     if (cJSON_IsString(g) && strcmp(g->valuestring, "seconds") == 0) {
         return NT_DEVAPI_GATE_SECONDS;
     }
-    if (cJSON_IsString(g) && strcmp(g->valuestring, "present") == 0) {
-        return NT_DEVAPI_GATE_PRESENT;
+    if (cJSON_IsString(g) && strcmp(g->valuestring, "rendered") == 0) {
+        return NT_DEVAPI_GATE_RENDERED;
     }
     return NT_DEVAPI_GATE_FRAMES;
 }
@@ -211,21 +211,21 @@ static void test_batch_while_pending_is_busy_per_entry(void) {
 }
 // #endregion
 
-// #region present gate
-static void test_present_yields_after_the_seam(void) {
-    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":9,\"params\":{\"gate\":\"present\",\"tag\":11}}"));
+// #region rendered gate
+static void test_rendered_yields_after_the_frame(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":9,\"params\":{\"gate\":\"rendered\",\"tag\":11}}"));
     nt_app_pause();
-    TEST_ASSERT_NULL(drain()); /* a frozen sim does not stall a present gate */
-    nt_devapi_run_pre_swap_reply();
-    nt_devapi_run_pre_swap_reply(); /* a second swap this frame keeps the first reply */
+    TEST_ASSERT_NULL(drain()); /* a frozen sim does not stall a rendered gate */
+    nt_devapi_frame_rendered();
+    nt_devapi_frame_rendered(); /* a second call this frame keeps the first reply */
     assert_probe(drain(), 11, 9);
-    nt_devapi_run_pre_swap_reply(); /* nothing pending: no-op */
+    nt_devapi_frame_rendered(); /* nothing pending: no-op */
     TEST_ASSERT_NULL(drain());
 }
 
-static void test_present_reply_built_before_render_off_still_yields(void) {
-    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":9,\"params\":{\"gate\":\"present\"}}"));
-    nt_devapi_run_pre_swap_reply();
+static void test_rendered_reply_built_before_render_off_still_yields(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":9,\"params\":{\"gate\":\"rendered\"}}"));
+    nt_devapi_frame_rendered();
     nt_app_set_render_enabled(false);
     assert_probe(drain(), 7, 9);
 }
@@ -275,9 +275,10 @@ static void test_seconds_stall_on_scale_zero_frames_do_not(void) {
     assert_probe(tick(), 7, 2);
 }
 
-static void test_present_stalls_with_render_off(void) {
-    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":3,\"params\":{\"gate\":\"present\"}}"));
-    nt_app_set_render_enabled(false);
+/* The update of the request's frame waits; a second update means a whole frame rendered nothing. */
+static void test_rendered_stalls_after_an_unrendered_frame(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":3,\"params\":{\"gate\":\"rendered\"}}"));
+    TEST_ASSERT_NULL(drain());
     assert_error(drain(), "stalled", 3);
 }
 // #endregion
@@ -288,8 +289,8 @@ static void test_reset_frees_pending_and_built(void) {
     nt_devapi_deferred_reset(); /* owned id freed (LSan) */
     TEST_ASSERT_NULL(drain());
 
-    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":2,\"params\":{\"gate\":\"present\"}}"));
-    nt_devapi_run_pre_swap_reply();
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":2,\"params\":{\"gate\":\"rendered\"}}"));
+    nt_devapi_frame_rendered();
     nt_devapi_deferred_reset(); /* built entry freed (LSan) */
     TEST_ASSERT_NULL(drain());
     cJSON_Delete(parse(nt_devapi_submit("{\"method\":\"test.echo\"}")));
@@ -308,14 +309,14 @@ int main(void) {
     RUN_TEST(test_poll_alone_does_not_resolve);
     RUN_TEST(test_batch_rejects_deferral_and_runs_the_rest);
     RUN_TEST(test_batch_while_pending_is_busy_per_entry);
-    RUN_TEST(test_present_yields_after_the_seam);
-    RUN_TEST(test_present_reply_built_before_render_off_still_yields);
+    RUN_TEST(test_rendered_yields_after_the_frame);
+    RUN_TEST(test_rendered_reply_built_before_render_off_still_yields);
     RUN_TEST(test_frames_stall_on_pause);
     RUN_TEST(test_frames_stall_on_mode_switch);
     RUN_TEST(test_frames_stall_in_idle_manual);
     RUN_TEST(test_last_manual_step_resolves);
     RUN_TEST(test_seconds_stall_on_scale_zero_frames_do_not);
-    RUN_TEST(test_present_stalls_with_render_off);
+    RUN_TEST(test_rendered_stalls_after_an_unrendered_frame);
     RUN_TEST(test_reset_frees_pending_and_built);
     return UNITY_END();
 }

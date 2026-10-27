@@ -232,9 +232,8 @@ static void frame(void) {
     declare_hud();
     declare_hud_scaled();
 
-    /* Swap only under the render flag so draw_calls / render.* stay honest. The capture seam runs INSIDE
-       nt_window_swap_buffers (post-render, pre-swap GL-valid point); the two-tone pattern drawn first gives
-       that seam a non-blank frame. */
+    /* Swap only under the render flag so draw_calls / render.* stay honest. The two-tone pattern gives
+       capture, read at nt_devapi_frame_rendered before the swap, a non-blank frame. */
     const bool render = nt_app_render_enabled();
     if (render) {
 #ifdef NT_DEVAPI_GROUP_RECORDER
@@ -252,6 +251,7 @@ static void frame(void) {
     }
 #endif
     if (render) {
+        nt_devapi_frame_rendered();
         nt_window_swap_buffers();
     }
 
@@ -342,7 +342,7 @@ int main(void) {
         printf("[devapi_host] listening on 127.0.0.1:%u\n", port);
     }
 #endif                            /* !__EMSCRIPTEN__ */
-    nt_devapi_register_default(); /* full host: every compiled-in group; capture installs its pre-swap seam. */
+    nt_devapi_register_default(); /* full host: register every compiled-in group (incl. capture). */
     nt_devapi_register_reset(recover_on_client_reset);
     nt_devapi_register(k_game_cmds, NT_COUNTOF(k_game_cmds), NULL);
 

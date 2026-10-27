@@ -111,7 +111,7 @@ if(NT_DEVAPI_GROUP_ENTITY_WRITE)
     target_compile_definitions(nt_devapi_entity_write PUBLIC NT_DEVAPI_GROUP_ENTITY_WRITE=1)
 endif()
 
-# Capture group (capture.frame / capture.region). Registering it installs the window pre-swap hook; the
+# Capture group (capture.frame / capture.region). The reply is built at nt_devapi_frame_rendered; the
 # producer chains nt_gfx_read_pixels (readback) -> RGB strip + box-average -> nt_fpng (PNG encode) ->
 # nt_base64.
 if(NT_DEVAPI_GROUP_CAPTURE)

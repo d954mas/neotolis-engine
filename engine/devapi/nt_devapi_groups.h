@@ -2,10 +2,9 @@
 #define NT_DEVAPI_GROUPS_H
 
 /* Host-facing group registration. The engine is code-first: nt_devapi_init() builds only the
-   framework, then a host composes its command surface by explicitly registering the groups it wants.
-   Registering a group also installs the hooks it needs, so every listed command can resolve (capture: a
-   window pre-swap hook; the host inits nt_gfx and swaps after nt_gfx_end_frame). Call these AFTER
-   nt_devapi_init().
+   framework, then a host composes its command surface by registering the groups it wants (explicit
+   over implicit — no hidden auto-wiring). Call these AFTER nt_devapi_init(). A host that registers
+   capture inits nt_gfx and calls nt_devapi_frame_rendered() before each swap.
 
    - nt_devapi_register_default() registers every group compiled into the build, in a stable order.
      A full host (devapi_host) uses it and links every group's providers.

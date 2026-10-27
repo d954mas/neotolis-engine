@@ -97,6 +97,7 @@ typedef struct deferred_slot {
     uint32_t target_frame;      /* FRAMES: g_nt_app.frame deadline (wrap-safe compare). */
     nt_devapi_gate gate;
     nt_app_mode_t mode; /* the time mode at submit; a switch strands a clock gate. */
+    bool checked;       /* RENDERED: an update has seen it, so the next one means a frame went unrendered. */
 } deferred_slot;
 
 static deferred_slot s_pending;
@@ -461,11 +462,8 @@ const char *nt_devapi_submit(const char *line) {
 }
 
 /* Why the pending gate can no longer open, or NULL while it still can. It reads state, not progress,
-   so a pause, mode switch or render-off from game code or a host is seen like a bot's. */
+   so a pause or mode switch from game code or a host is seen like a bot's. */
 static const char *stall_reason(void) {
-    if (s_pending.gate == NT_DEVAPI_GATE_PRESENT) {
-        return g_nt_app.render_enabled ? NULL : "rendering is off, so no frame is presented";
-    }
     if (g_nt_app.mode != s_pending.mode) {
         return "the time mode changed";
     }
@@ -485,7 +483,7 @@ static bool clock_ready(void) {
     return (int32_t)(g_nt_app.frame - s_pending.target_frame) >= 0; /* wraps together with g_nt_app.frame. */
 }
 
-/* Resolve the pending clock or PRESENT gate once per tick, before the transports drain, so native and
+/* Resolve the pending clock or RENDERED gate once per tick, before the transports drain, so native and
    web see the same state and a clock reply is read the tick its gate opens. Ready wins over a frozen sim
    (the last step of a crunch both reaches the target and empties the queue), not over a mode switch: RUN
    frames past a manual target are not the steps asked for. */
@@ -493,7 +491,15 @@ static void resolve_pending(void) {
     if (s_pending.reply == NULL || s_pending.entry != NULL) {
         return;
     }
-    if (s_pending.gate != NT_DEVAPI_GATE_PRESENT && g_nt_app.mode == s_pending.mode && clock_ready()) {
+    if (s_pending.gate == NT_DEVAPI_GATE_RENDERED) {
+        /* A whole frame between two checks rendered nothing: rendering is off or the host skips the call. */
+        if (s_pending.checked) {
+            s_pending.entry = make_error_entry(NT_DEVAPI_ERR_STALLED, "no frame was rendered since the request");
+        }
+        s_pending.checked = true;
+        return;
+    }
+    if (g_nt_app.mode == s_pending.mode && clock_ready()) {
         s_pending.entry = handler_entry(s_pending.reply, NULL, NULL);
         return;
     }
@@ -503,9 +509,9 @@ static void resolve_pending(void) {
     }
 }
 
-void nt_devapi_run_pre_swap_reply(void) {
-    /* May fire after nt_devapi_shutdown (a host that swaps once more during teardown) — no-op then. */
-    if (!s_initialized || s_pending.reply == NULL || s_pending.gate != NT_DEVAPI_GATE_PRESENT || s_pending.entry != NULL) {
+void nt_devapi_frame_rendered(void) {
+    NT_ASSERT(s_initialized);
+    if (s_pending.reply == NULL || s_pending.gate != NT_DEVAPI_GATE_RENDERED || s_pending.entry != NULL) {
         return;
     }
     /* The read must happen here, before swap: poll_response runs where the back buffer is undefined. */

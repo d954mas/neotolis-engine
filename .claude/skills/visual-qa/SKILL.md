@@ -74,4 +74,4 @@ cmake --build build/_cmake/native-debug-capture --target <example>
   re-encodes env-var text.
 - Stdout redirect can break GL init in some hosts; printf-debug to a file via
   fopen instead.
-- Reference host wiring: `examples/devapi_host` (registering the capture group installs the seam).
+- Reference host wiring: `examples/devapi_host` (`nt_devapi_frame_rendered()` before each swap).

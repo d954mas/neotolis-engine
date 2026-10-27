@@ -93,13 +93,6 @@ A failing OS call inside a probe asserts. Native builds support Windows, Linux
 and macOS; any other OS fails to compile. Machine-wide counters, core count and
 per-thread CPU time are out of scope.
 
-## Pre-swap hooks
-
-`nt_window_add_pre_swap_hook(fn)` registers a process-lifetime callback and returns
-`void`. Each swap invokes it before presenting, while the rendered back buffer
-is valid. Re-registering the same callback is a no-op, including at capacity.
-`NULL` and registering a new callback beyond the fixed table capacity assert.
-
 ## WASM bridge allocation
 
 Allocate in C: JS reports a size, C allocates and passes the buffer for JS to

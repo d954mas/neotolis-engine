@@ -408,6 +408,12 @@ build/examples/devapi_host/native-record/devapi_host.exe &
 python tools/devapi/scenarios/record_demo.py --out build
 ```
 
+Native capture runs live in CI `devapi-smoke`: `tools/devapi/scenarios/devapi_demo.py` and
+`capture_demo.py` self-launch `build/examples/devapi_host/native-debug`, built with the configure line of
+that job. Use a separate `-B` directory with `-DNT_PRESET_NAME` other than `native-debug` locally: the
+same preset name writes the engine libraries into the gate's `build/engine/native-debug`. Then pass
+`--host-bin` with an absolute path.
+
 Browser diagnostics use `tests/browser/diagnostics.spec.ts`. Set
 `NT_SHOWCASE_DIR` to the exact build, distinct `NT_SHOWCASE_PORT`/`NT_DEVAPI_PORT`,
 `CI=1` to forbid server reuse, and matching

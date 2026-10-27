@@ -81,6 +81,11 @@ const char *nt_devapi_poll_response(void);
    input schedule release). */
 void nt_devapi_update(void);
 
+/* The rendered frame is readable: call it each rendered frame after nt_gfx_end_frame and before
+   nt_window_swap_buffers (the back buffer is undefined after the swap). It builds a pending capture reply;
+   with nothing pending it returns at once. A frame without it fails a pending capture as stalled. */
+void nt_devapi_frame_rendered(void);
+
 /* Run fn whenever a client leaves: a native disconnect, a newer connection taking over, or a web
    reset(). The engine resets only devapi-owned state there; recovering game state (time mode, pause,
    queued steps) is the host's policy. Call after nt_devapi_init (shutdown clears the table); overflow asserts.

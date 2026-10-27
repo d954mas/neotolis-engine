@@ -2,12 +2,13 @@
 """DevAPI capture demo — the live-socket UAT for the frame-capture group.
 
 Exercises capture.frame / capture.region end-to-end against a real running examples/devapi_host over
-loopback TCP. Capture is deferred to the pre-swap seam, which only a live socket + real GL context drives.
-The host clears a known two-tone pattern; with the sim frozen in MANUAL this UAT checks the PNG decodes,
-the pattern's orientation and channel order, region == the same crop of the full frame, scale dims,
-bad_params over the wire, and that capturing never advances the frame.
+loopback TCP. Capture is deferred to the rendered frame, which only a live socket + real GL context drives.
+The host clears a known two-tone pattern; this UAT checks a capture in RUN, then with the sim frozen in
+MANUAL the PNG decodes, the pattern's orientation and channel order, region == the same crop of the full
+frame, scale dims, bad_params over the wire, and that capturing never advances the frame.
 
-By default it launches its own host subprocess and tears it down; attach to a running host with --no-launch.
+By default it launches its own host subprocess and tears it down. --no-launch attaches to a running
+examples/devapi_host (its pattern is probed) and leaves it in RUN.
 
 Usage: python tools/devapi/scenarios/capture_demo.py [--port N] [--no-launch] [--host-bin PATH] [--save DIR]
   Port resolution: --port N  >  env NT_DEVAPI_PORT  >  default 17890.
@@ -20,50 +21,20 @@ harness core stays stdlib-only.
 import os
 import subprocess
 import sys
-import time
 
 # Allow running as a plain script by making the repo root importable, so the
 # absolute `tools.devapi.*` imports resolve (mirrors obs_demo.py).
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
     from tools.devapi.client import DevApiClient, DevApiResultError
-    from tools.devapi.scenarios.devapi_demo import _find_host_bin
-    from tools.devapi.transport import DEFAULT_PORT, SocketTransport
+    from tools.devapi.scenarios.devapi_demo import _connect_with_retry, _find_host_bin, resolve_port
+    from tools.devapi.transport import SocketTransport
 else:
     from ..client import DevApiClient, DevApiResultError
-    from ..transport import DEFAULT_PORT, SocketTransport
-    from .devapi_demo import _find_host_bin
+    from ..transport import SocketTransport
+    from .devapi_demo import _connect_with_retry, _find_host_bin, resolve_port
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-
-
-def _parse_port(raw: str) -> int:
-    """int() + range-check; clean exit(2) on garbage instead of a raw traceback."""
-    try:
-        port = int(raw)
-    except ValueError:
-        print("error: --port must be an integer 1..65535", file=sys.stderr)
-        sys.exit(2)
-    if not (1 <= port <= 65535):
-        print("error: --port must be an integer 1..65535", file=sys.stderr)
-        sys.exit(2)
-    return port
-
-
-def resolve_port(argv) -> int:
-    """--port N (or positional) > env NT_DEVAPI_PORT > DEFAULT_PORT."""
-    for i, a in enumerate(argv):
-        if a == "--port" and i + 1 < len(argv):
-            return _parse_port(argv[i + 1])
-        if a.startswith("--port="):
-            return _parse_port(a.split("=", 1)[1])
-    env = os.environ.get("NT_DEVAPI_PORT")
-    if env:
-        return _parse_port(env)
-    for a in argv:
-        if a.isdigit():
-            return _parse_port(a)
-    return DEFAULT_PORT
 
 
 def _save_dir(argv):
@@ -74,19 +45,6 @@ def _save_dir(argv):
         if a.startswith("--save="):
             return a.split("=", 1)[1]
     return None
-
-
-def _connect_with_retry(port: int, deadline_s: float = 10.0) -> SocketTransport:
-    """Poll connect() until the freshly-launched host's listen socket is up (or time out)."""
-    end = time.time() + deadline_s
-    last_exc = None
-    while time.time() < end:
-        try:
-            return SocketTransport("127.0.0.1", port)
-        except (ConnectionError, TimeoutError, OSError) as exc:
-            last_exc = exc
-            time.sleep(0.1)
-    raise ConnectionError(f"could not connect to 127.0.0.1:{port} within {deadline_s}s: {last_exc}")
 
 
 def run(client: DevApiClient, save_dir=None) -> None:
@@ -101,6 +59,9 @@ def run(client: DevApiClient, save_dir=None) -> None:
     fb_w = int(view["fb_width"])
     fb_h = int(view["fb_height"])
     assert fb_w > 0 and fb_h > 0, f"view returned a zero-size framebuffer ({fb_w}x{fb_h})"
+
+    # RUN first: a capture resolves while the sim runs too.
+    pixel_health.check_payload(client.capture_frame(), fb_w, fb_h)
 
     # MANUAL with no step queued: the sim stays frozen, so every capture reads the same frame.
     client.set_mode("manual")
@@ -154,6 +115,7 @@ def run(client: DevApiClient, save_dir=None) -> None:
     # 5. MANUAL: capturing never advanced the frozen sim.
     frame_after = client.frame_current()["frame"]
     assert frame_after == frame_before, f"capture advanced the MANUAL sim: frame {frame_before} -> {frame_after}"
+    client.set_mode("run")  # an attached host keeps running after the UAT
     print(f"PASS[5/5] MANUAL: frame.current stayed {frame_before} across every capture.")
 
     print("PASS: capture.* end-to-end over the socket — deferred capture + region + scale + bad_params + pixel-health all machine-asserted.")
@@ -170,7 +132,7 @@ def main(argv) -> int:
             host_bin = _find_host_bin(argv)
             if not os.path.isfile(host_bin):
                 print(f"error: devapi_host not found at {host_bin}\n"
-                      f"  build it with the devapi-smoke configure line in .github/workflows/ci.yml,\n"
+                      f"  build it as docs/build.md describes for capture_demo.py,\n"
                       f"  or attach to a running host with --no-launch --port N", file=sys.stderr)
                 return 2
             env = dict(os.environ, NT_DEVAPI_PORT=str(port))

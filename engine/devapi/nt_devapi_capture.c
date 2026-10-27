@@ -10,7 +10,7 @@
 #include "window/nt_window.h"
 
 /* Capture command group (capture.frame / capture.region). Handlers validate bot params (never assert),
-   then DEFER a producer that runs at the GL-valid pre-swap seam — that timing is why capture returns its
+   then DEFER a producer that runs at nt_devapi_frame_rendered (GL-valid, before the swap) — that timing is why capture returns its
    data asynchronously. */
 
 /* Bounded readback buffer: a region capped at the framebuffer keeps w*h*4 small, but the static cap
@@ -133,7 +133,7 @@ static bool capture_produce(const capture_ctx *c, cJSON *result) {
     return built;
 }
 
-/* The deferred reply, run once at the GL-valid pre-swap seam. */
+/* The deferred reply, run once at nt_devapi_frame_rendered. */
 static bool capture_reply(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     if (!capture_produce(&s_capture, result)) {
         return nt_devapi_fail_code(err, NT_DEVAPI_ERR_CAPTURE_FAILED, "capture failed (framebuffer readback or PNG encode error)");
@@ -167,7 +167,7 @@ static bool parse_scale(const cJSON *params, uint32_t *factor, nt_devapi_error *
     return true;
 }
 
-/* capture.frame {scale?}: defers a full-framebuffer capture to the next present, sim frozen or not. */
+/* capture.frame {scale?}: defers a full-framebuffer capture to the next rendered frame, sim frozen or not. */
 static bool cmd_capture_frame(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     uint32_t factor = 1U;
     if (!parse_scale(params, &factor, err, "capture.frame: scale must be one of {1, 2, 4}")) {
@@ -185,7 +185,7 @@ static bool cmd_capture_frame(const cJSON *params, cJSON *result, nt_devapi_erro
         return nt_devapi_fail(err, "capture.frame: scale must evenly divide the framebuffer dimensions");
     }
     s_capture = (capture_ctx){.w = fb_w, .h = fb_h, .factor = factor};
-    return nt_devapi_defer(NT_DEVAPI_GATE_PRESENT, 0.0, capture_reply, err);
+    return nt_devapi_defer(NT_DEVAPI_GATE_RENDERED, 0.0, capture_reply, err);
 }
 
 /* capture.region {x,y,w,h,scale?}: validates the rect against the framebuffer (overflow-safe) then
@@ -226,21 +226,21 @@ static bool cmd_capture_region(const cJSON *params, cJSON *result, nt_devapi_err
        top-left y to a GL bottom-left y (h<=fb_h-y already proven) so the row-flip yields a top-left
        sub-rect. */
     s_capture = (capture_ctx){.x = x, .y = fb_h - (y + h), .w = w, .h = h, .factor = factor};
-    return nt_devapi_defer(NT_DEVAPI_GATE_PRESENT, 0.0, capture_reply, err);
+    return nt_devapi_defer(NT_DEVAPI_GATE_RENDERED, 0.0, capture_reply, err);
 }
 // #endregion
 
 static const nt_devapi_command k_capture_cmds[] = {
     {
         .method = "capture.frame",
-        .summary = "capture the full framebuffer at the next pre-swap as a PNG (base64); optional scale {1,2,4} box-average downscale",
+        .summary = "capture the full framebuffer at the next rendered frame as a PNG (base64); optional scale {1,2,4} box-average downscale",
         .params_shape = "{scale?:number}",
         .result_shape = "{width:number,height:number,format:string,data:string}",
         .fn = cmd_capture_frame,
     },
     {
         .method = "capture.region",
-        .summary = "capture a framebuffer sub-rect {x,y,w,h} at the next pre-swap as a PNG (base64); optional scale {1,2,4} downscale (no rect resampling)",
+        .summary = "capture a framebuffer sub-rect {x,y,w,h} at the next rendered frame as a PNG (base64); optional scale {1,2,4} downscale (no rect resampling)",
         .params_shape = "{x:number,y:number,w:number,h:number,scale?:number}",
         .result_shape = "{width:number,height:number,format:string,data:string}",
         .fn = cmd_capture_region,
@@ -248,9 +248,7 @@ static const nt_devapi_command k_capture_cmds[] = {
 };
 
 void nt_devapi_register_capture(void) {
-    /* The group owns its dependencies: fpng's one-time CPU-feature detect and the pre-swap seam that
-       resolves PRESENT replies, so a listed capture command always has a way to resolve. Both idempotent. */
+    /* fpng needs a one-time CPU-feature detect before any encode; the group owns it. Idempotent. */
     nt_fpng_init();
-    nt_window_add_pre_swap_hook(nt_devapi_run_pre_swap_reply);
     nt_devapi_register(k_capture_cmds, NT_COUNTOF(k_capture_cmds), NULL);
 }
