@@ -60,7 +60,7 @@ def _click_toggles(client: DevApiClient, do_click, before, btn_id="hud_btn", ctx
     return _btn_enabled(client, btn_id, ctx) != before
 
 
-def run(client: DevApiClient) -> None:
+def run(client: DevApiClient, out_dir: str) -> None:
     """Drive the ui read + write workflows; raise AssertionError on any contract violation."""
     # Manual mode so the fire-and-forget inject's down/up apply on explicit, deterministic step()s.
     client.set_mode("manual")

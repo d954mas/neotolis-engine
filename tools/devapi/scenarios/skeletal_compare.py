@@ -41,11 +41,11 @@ def _capture_stage(client, np, Image):
     return frame[y:y + h, x:x + w], frame[0, 0]
 
 
-def run(client):
+def run(client, out_dir):
     import numpy as np
     from PIL import Image
 
-    output = Path(launch.out_dir())
+    output = Path(out_dir)
     output.mkdir(parents=True, exist_ok=True)
     client.set_mode("manual")
     try:

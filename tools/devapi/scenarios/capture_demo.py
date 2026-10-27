@@ -22,7 +22,7 @@ import sys
 from .. import launch
 from ..client import DevApiClient, DevApiResultError
 
-def run(client: DevApiClient) -> None:
+def run(client: DevApiClient, out_dir: str) -> None:
     """Drive every capture surface; raise AssertionError on any contract violation.
 
     pixel_health (Pillow + numpy) is imported HERE, lazily — the harness core never pulls it.
@@ -51,7 +51,7 @@ def run(client: DevApiClient) -> None:
     assert fg[0] > fg[2], f"capture.frame: box pixel {fg} is not red-dominant orange (R/B swap or Y flip?)"
     assert below[2] > below[0], f"capture.frame: pixel below the box {below} is not the blue background (Y flip?)"
     assert right[2] > right[0], f"capture.frame: pixel right of the box {right} is not the blue background (X mirror?)"
-    img.save(os.path.join(launch.out_dir(), "capture_frame.png"))
+    img.save(os.path.join(out_dir, "capture_frame.png"))
     print(f"PASS[1/5] capture.frame: {fb_w}x{fb_h} PNG, pattern orientation and channel order hold.")
 
     # 2. capture.region equals the same crop of the full frame. A non-zero y catches a wrong gl_y conversion.
@@ -60,7 +60,7 @@ def run(client: DevApiClient) -> None:
     assert region.tobytes() == img.crop((rx, ry, rx + rw, ry + rh)).tobytes(), (
         f"capture.region {{x:{rx},y:{ry},w:{rw},h:{rh}}} differs from the same crop of capture.frame"
     )
-    region.save(os.path.join(launch.out_dir(), "capture_region.png"))
+    region.save(os.path.join(out_dir, "capture_region.png"))
     print(f"PASS[2/5] capture.region {{x:{rx},y:{ry},w:{rw},h:{rh}}} equals the full-frame crop.")
 
     # 3. scale 2 and 4 on a rect both divide (any framebuffer size): post-scale dims.

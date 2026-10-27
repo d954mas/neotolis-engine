@@ -61,8 +61,8 @@ def _start(client: DevApiClient, name: str, fps: int) -> None:
         time.sleep(0.1)
 
 
-def _real_time(client: DevApiClient, page) -> None:
-    name = "record_run.mp4" if page else os.path.join(launch.out_dir(), "record_run.mp4")
+def _real_time(client: DevApiClient, page, out_dir: str) -> None:
+    name = "record_run.mp4" if page else os.path.join(out_dir, "record_run.mp4")
     if page:
         page.set_viewport_size({"width": 320, "height": 180})  # a software encoder (CI) keeps up
         _frame(page)
@@ -91,8 +91,8 @@ def _real_time(client: DevApiClient, page) -> None:
     print(f"PASS real time: {stats['frames']} frames, {step * 1000:.0f} ms steps, max drift {stats['max_drift_ms']:+.0f} ms")
 
 
-def _lockstep(client: DevApiClient, page, downloads: list) -> None:
-    path = os.path.join(launch.out_dir(), "record_lockstep.mp4")
+def _lockstep(client: DevApiClient, page, downloads: list, out_dir: str) -> None:
+    path = os.path.join(out_dir, "record_lockstep.mp4")
     client.set_mode("manual")
     # Half a second off a flash, so the first and last flash/beep pairs are whole.
     t = client.frame_current()["time"]
@@ -118,9 +118,9 @@ def _lockstep(client: DevApiClient, page, downloads: list) -> None:
     print("PASS lockstep: 180 frames, check_recording passed")
 
 
-def _real_time_file(client: DevApiClient) -> None:
+def _real_time_file(client: DevApiClient, out_dir: str) -> None:
     """Native: a RUN clip at fps 30 decoded and checked like the lockstep one (web takes its blob)."""
-    path = os.path.join(launch.out_dir(), "record_run30.mp4")
+    path = os.path.join(out_dir, "record_run30.mp4")
     client.set_mode("run")
     client.resume()
     _start(client, path, 30)
@@ -131,17 +131,17 @@ def _real_time_file(client: DevApiClient) -> None:
     print(f"PASS real time fps 30: {frames} frames, check_recording passed")
 
 
-def run(client: DevApiClient) -> None:
+def run(client: DevApiClient, out_dir: str) -> None:
     for params in ({"name": "x.mp4", "fps": 0}, {"name": "x.mp4", "fps": 121}, {"name": "", "fps": 5}):
         assert _error_code(client, "record.start", params) == "bad_params", params
     page = getattr(client.transport, "page", None)
     downloads = []
     if page:
         page.on("download", lambda d: downloads.append(d))
-    _real_time(client, page)
+    _real_time(client, page, out_dir)
     if not page:
-        _real_time_file(client)
-    _lockstep(client, page, downloads)
+        _real_time_file(client, out_dir)
+    _lockstep(client, page, downloads, out_dir)
 
 
 if __name__ == "__main__":

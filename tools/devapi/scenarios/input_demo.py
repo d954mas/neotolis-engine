@@ -34,7 +34,7 @@ def _frozen_state(client: DevApiClient, **params) -> dict:
     return client.state(**params)
 
 
-def run(client: DevApiClient) -> None:
+def run(client: DevApiClient, out_dir: str) -> None:
     """Drive the three workflows; raise AssertionError on any contract violation.
 
     The host keeps game-owned input state across clients (a disconnect resets only devapi state), so

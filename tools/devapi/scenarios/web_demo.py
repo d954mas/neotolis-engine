@@ -91,7 +91,7 @@ def _check_takeover(page) -> None:
     print("PASS takeover: a parked wait of a killed client leaves the next client's reply alone")
 
 
-def run(client: DevApiClient) -> None:
+def run(client: DevApiClient, out_dir: str) -> None:
     page = getattr(client.transport, "page", None)
     if page is None:
         raise launch.LaunchError("web_demo needs --target web")

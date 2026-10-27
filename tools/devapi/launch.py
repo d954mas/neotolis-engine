@@ -1,6 +1,6 @@
-"""Shared scenario launcher: one run(client) on a native or a web devapi host.
+"""Shared scenario launcher: one run(client, out_dir) on a native or a web devapi host.
 
-A scenario module defines run(client) and ends with
+A scenario module defines run(client, out_dir) and ends with
     if __name__ == "__main__":
         sys.exit(launch.main(run))
 and runs from the repo root as `python -m tools.devapi.scenarios.<name> [options]`:
@@ -11,8 +11,8 @@ and runs from the repo root as `python -m tools.devapi.scenarios.<name> [options
   --target web     serve the wasm build (--web-dir, default the wasm-debug build) on a free loopback
                    port and drive it in headless Chromium (playwright-python, the web CI job's pinned
                    dependency: tools/devapi/requirements-web.txt).
-  --out DIR        where scenarios write artifacts (default: the working directory); read it with
-                   out_dir().
+  --out DIR        where scenarios write artifacts (default: the working directory); created, made
+                   absolute and passed to run as out_dir.
 
 A scenario finds its platform in the client: client.transport is a SocketTransport (.port) or a
 PlaywrightTransport (.page). Exit 0 pass, 1 assertion / protocol / transport failure, 2 usage / launch.
@@ -39,16 +39,8 @@ _DEFAULT_WEB_DIR = os.path.join(REPO_ROOT, "build", "examples", "devapi_host", "
 # SwiftShader WebGL2, as tests/browser/playwright.config.ts: headless CI has no GPU.
 _CHROMIUM_ARGS = ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]
 
-_out_dir = os.getcwd()
-
-
 class LaunchError(Exception):
     """The host could not be started or reached; exit code 2."""
-
-
-def out_dir() -> str:
-    """Absolute artifact directory (--out), created before run."""
-    return _out_dir
 
 
 def _free_port() -> int:
@@ -168,8 +160,7 @@ def _port(text: str) -> int:
 
 
 def main(run) -> int:
-    """Parse the launcher options, run `run(client)` on the chosen target, return the exit code."""
-    global _out_dir
+    """Parse the launcher options, run `run(client, out_dir)` on the chosen target, return the exit code."""
     ap = argparse.ArgumentParser(description=(sys.modules["__main__"].__doc__ or "").split("\n")[0])
     ap.add_argument("--target", choices=("native", "web"), default="native")
     ap.add_argument("--port", type=_port, help="native: attach to a running host on this port")
@@ -177,16 +168,17 @@ def main(run) -> int:
     ap.add_argument("--web-dir", help="web: directory with the wasm build's index.html")
     ap.add_argument("--out", default=os.getcwd(), help="artifact directory")
     args = ap.parse_args()
-    _out_dir = os.path.abspath(args.out)
+    out_dir = os.path.abspath(args.out)
+    scenario = functools.partial(run, out_dir=out_dir)
     try:
         try:
-            os.makedirs(_out_dir, exist_ok=True)
+            os.makedirs(out_dir, exist_ok=True)
         except OSError as exc:
-            raise LaunchError(f"cannot create --out {_out_dir}: {exc}") from exc
+            raise LaunchError(f"cannot create --out {out_dir}: {exc}") from exc
         if args.target == "native":
-            _run_native(args, run)
+            _run_native(args, scenario)
         else:
-            _run_web(args, run)
+            _run_web(args, scenario)
     except LaunchError as exc:
         print(f"FAIL: launch: {exc}", file=sys.stderr)
         return 2

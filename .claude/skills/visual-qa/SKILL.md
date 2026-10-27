@@ -34,7 +34,7 @@ cmake --build build/_cmake/native-debug-capture --target <example>
 2. **Refresh packs** (delete stale `.ntpack` after editing shader/asset sources).
 
 3. **Drive the Python client** (`tools/devapi/client.py`): `capture_frame()` /
-   `capture_region()`. A scenario is a `run(client)` module run with
+   `capture_region()`. A scenario is a `run(client, out_dir)` module run with
    `python -m tools.devapi.scenarios.<name>`; `tools/devapi/launch.py` launches the
    example (`--host-bin`, free port via `NT_DEVAPI_PORT`), attaches to a running one
    (`--port N`) or serves a wasm build in headless Chromium (`--target web

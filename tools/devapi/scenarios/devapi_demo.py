@@ -70,7 +70,7 @@ def _check_newest_client_wins(client: DevApiClient) -> None:
     print("PASS newest client wins: a second client takes over and 30 immediate reconnects are served.")
 
 
-def run(client: DevApiClient) -> None:
+def run(client: DevApiClient, out_dir: str) -> None:
     """The ONE transport-agnostic scenario; raise AssertionError on any contract violation.
 
     Driven IDENTICALLY by SocketTransport (native) and PlaywrightTransport (web); the takeover check, last,

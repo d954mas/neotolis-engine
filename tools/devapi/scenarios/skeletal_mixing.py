@@ -76,16 +76,16 @@ def _advance(client, seconds):
     client.result("time.step", {"seconds": seconds})
 
 
-def run(client):
+def run(client, out_dir):
     client.set_mode("manual")
     try:
-        print(json.dumps(_run(client), indent=2))
+        print(json.dumps(_run(client, out_dir), indent=2))
     finally:
         client.set_mode("run")
 
 
-def _run(client):
-    output = Path(launch.out_dir())
+def _run(client, out_dir):
+    output = Path(out_dir)
     output.mkdir(parents=True, exist_ok=True)
     _select_scene(client)
     client.step(5)

@@ -25,7 +25,7 @@ from ..client import DevApiClient
 CRUNCH_FRAMES = 300
 
 
-def run(client: DevApiClient) -> None:
+def run(client: DevApiClient, out_dir: str) -> None:
     """Drive the three workflows; raise AssertionError on any contract violation."""
     # 1. pause -> step -> observe.
     client.pause()

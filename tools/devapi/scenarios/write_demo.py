@@ -122,7 +122,7 @@ def check_bad_paths(client: DevApiClient) -> None:
     print("PASS[6/6] entity.set bad paths + batch whole-or-nothing atomicity all hold over the wire.")
 
 
-def run(client: DevApiClient) -> None:
+def run(client: DevApiClient, out_dir: str) -> None:
     check_read_shape(client)
     check_write_position(client)
     check_write_rotation_normalized(client)
