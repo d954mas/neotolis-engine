@@ -356,71 +356,6 @@ static void increment_kind_counter(NtBuilderContext *ctx, nt_build_asset_kind_t 
     }
 }
 
-/* --- Early dedup: compare decoded_data + encoding opts --- */
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- exact identity lists each active field
-static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
-    if (a->kind != b->kind) {
-        return false;
-    }
-    switch (a->kind) {
-    case NT_BUILD_ASSET_TEXTURE: {
-        const NtBuildTextureData *ta = (const NtBuildTextureData *)a->data;
-        const NtBuildTextureData *tb = (const NtBuildTextureData *)b->data;
-        if (ta->width != tb->width || ta->height != tb->height) {
-            return false;
-        }
-        /* max_size is NOT compared here — it's applied during decode (resize),
-         * so different max_size → different decoded pixels → different hash.
-         * Only encode-affecting options need comparison. */
-        if (ta->opts.format != tb->opts.format) {
-            return false;
-        }
-        /* Sampler defaults are baked into the V3 header — two textures
-         * with same pixels but different filter/wrap must not share an
-         * encoded entry, otherwise one of them gets the wrong sampler. */
-        if (ta->opts.filter_min != tb->opts.filter_min || ta->opts.filter_mag != tb->opts.filter_mag || ta->opts.wrap_u != tb->opts.wrap_u || ta->opts.wrap_v != tb->opts.wrap_v) {
-            return false;
-        }
-        if ((ta->opts.compress.codec != NT_BASISU_CODEC_NONE || ta->opts.gen_mipmaps) != (tb->opts.compress.codec != NT_BASISU_CODEC_NONE || tb->opts.gen_mipmaps)) {
-            return false;
-        }
-        /* premultiplied also affects encoded pixel bytes + header flags;
-         * mirror the opts_hash policy. */
-        if (ta->opts.premultiplied != tb->opts.premultiplied) {
-            return false;
-        }
-        /* Compare compression path */
-        if (ta->opts.compress.codec != tb->opts.compress.codec) {
-            return false;
-        }
-        if (ta->opts.compress.codec != NT_BASISU_CODEC_NONE) {
-            if (ta->opts.compress.codec == NT_BASISU_CODEC_ETC1S) {
-                return ta->opts.compress.etc1s.quality == tb->opts.compress.etc1s.quality && ta->opts.compress.etc1s.endpoint_rdo_threshold == tb->opts.compress.etc1s.endpoint_rdo_threshold &&
-                       ta->opts.compress.etc1s.selector_rdo_threshold == tb->opts.compress.etc1s.selector_rdo_threshold;
-            }
-            return ta->opts.compress.uastc.pack_level == tb->opts.compress.uastc.pack_level && ta->opts.compress.uastc.rdo_lambda == tb->opts.compress.uastc.rdo_lambda;
-        }
-        return true;
-    }
-    case NT_BUILD_ASSET_SHADER: {
-        const NtBuildShaderData *sa = (const NtBuildShaderData *)a->data;
-        const NtBuildShaderData *sb = (const NtBuildShaderData *)b->data;
-        return sa->stage == sb->stage;
-    }
-    case NT_BUILD_ASSET_MESH:
-    case NT_BUILD_ASSET_BLOB:
-    case NT_BUILD_ASSET_FONT:
-    case NT_BUILD_ASSET_ATLAS:
-    case NT_BUILD_ASSET_ATLAS_REGION:
-    case NT_BUILD_ASSET_SKELETON:
-    case NT_BUILD_ASSET_SKIN_BINDING:
-    case NT_BUILD_ASSET_CLIP:
-        return true; /* no encoding opts -- everything is in decoded_data */
-    }
-    return false;
-}
-
 /* Derive asset_type from build asset kind (deterministic 1:1 mapping) */
 static void derive_asset_type(nt_build_asset_kind_t kind, nt_asset_type_t *out_type) {
     switch (kind) {
@@ -679,7 +614,8 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                 /* Non-texture types must always have decoded_data for memcmp verify */
                 NT_BUILD_ASSERT(0 && "hash match but no decoded_data on non-texture entry");
             }
-            if (opts_equal(pe, candidate)) {
+            /* The pixels matched exactly; the encode options are one hashed identity, the cache key. */
+            if (nt_builder_compute_opts_hash(pe) == nt_builder_compute_opts_hash(candidate)) {
                 candidate->dedup_original = (int32_t)i;
                 ctx->early_dedup_count++;
                 NT_LOG_INFO("early dedup: [%u] %s -> [%u] %s", j, candidate->path, i, pe->path);
