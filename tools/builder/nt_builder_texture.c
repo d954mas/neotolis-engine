@@ -54,21 +54,45 @@ nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *op
     return format;
 }
 
-/* Resize RGBA pixels to fit within max_size, preserving aspect ratio.
+uint32_t nt_builder_texture_source_size(nt_texture_pixel_format_t format, uint32_t width, uint32_t height) {
+    const uint64_t pixel_bytes = format == NT_TEXTURE_FORMAT_RGB9E5 ? 3U * sizeof(float) : 4U;
+    const uint64_t size = (uint64_t)width * height * pixel_bytes;
+    NT_BUILD_ASSERT(size <= UINT32_MAX && "texture: decoded source exceeds 4 GiB");
+    return (uint32_t)size;
+}
+
+/* Values Basis UASTC HDR stores without the HDRScale factor a shader would have to apply
+ * (ASTC_HDR_MAX_VAL); the builder neither clamps nor tone-maps. */
+static void assert_hdr_range(const float *rgb, uint32_t pixel_count) {
+    for (uint32_t i = 0; i < pixel_count * 3U; i++) {
+        NT_BUILD_ASSERT(isfinite(rgb[i]) && rgb[i] >= 0.0F && rgb[i] <= 65216.0F && "texture HDR: every RGB value must be finite and in [0, 65216]");
+    }
+}
+
+/* HDR filters have no negative lobes: a ringing filter would make negative colors. */
+static float *resize_hdr(const float *rgb, uint32_t w, uint32_t h, uint32_t out_w, uint32_t out_h) {
+    float *resized = (float *)malloc((size_t)out_w * out_h * 3U * sizeof(float));
+    NT_BUILD_ASSERT(resized && "texture resize: malloc failed");
+    const void *written = stbir_resize(rgb, (int)w, (int)h, 0, resized, (int)out_w, (int)out_h, 0, STBIR_RGB, STBIR_TYPE_FLOAT, STBIR_EDGE_CLAMP, STBIR_FILTER_BOX);
+    NT_BUILD_ASSERT(written && "texture resize: stbir_resize failed");
+    return resized;
+}
+
+/* Resize source pixels to fit within max_size, preserving aspect ratio.
  * Returns the resized buffer (caller frees), or NULL when no resize is needed.
  * *out_w and *out_h receive the final size either way. */
-static unsigned char *resize_if_needed(const unsigned char *pixels, int w, int h, uint32_t max_size, int *out_w, int *out_h) {
-    if (max_size == 0 || ((uint32_t)w <= max_size && (uint32_t)h <= max_size)) {
+static void *resize_if_needed(const void *pixels, nt_texture_pixel_format_t format, uint32_t w, uint32_t h, uint32_t max_size, uint32_t *out_w, uint32_t *out_h) {
+    if (max_size == 0 || (w <= max_size && h <= max_size)) {
         *out_w = w;
         *out_h = h;
         return NULL;
     }
-    if ((uint32_t)w >= (uint32_t)h) {
-        *out_w = (int)max_size;
-        *out_h = (int)((uint32_t)h * max_size / (uint32_t)w);
+    if (w >= h) {
+        *out_w = max_size;
+        *out_h = h * max_size / w;
     } else {
-        *out_h = (int)max_size;
-        *out_w = (int)((uint32_t)w * max_size / (uint32_t)h);
+        *out_h = max_size;
+        *out_w = w * max_size / h;
     }
     if (*out_w < 1) {
         *out_w = 1;
@@ -76,9 +100,12 @@ static unsigned char *resize_if_needed(const unsigned char *pixels, int w, int h
     if (*out_h < 1) {
         *out_h = 1;
     }
-    unsigned char *resized = (unsigned char *)malloc((size_t)*out_w * (size_t)*out_h * 4);
+    if (format == NT_TEXTURE_FORMAT_RGB9E5) {
+        return resize_hdr((const float *)pixels, w, h, *out_w, *out_h);
+    }
+    unsigned char *resized = (unsigned char *)malloc((size_t)*out_w * *out_h * 4);
     NT_BUILD_ASSERT(resized && "texture resize: malloc failed");
-    const unsigned char *written = stbir_resize_uint8_linear(pixels, w, h, 0, resized, *out_w, *out_h, 0, STBIR_RGBA);
+    const unsigned char *written = stbir_resize_uint8_linear((const unsigned char *)pixels, (int)w, (int)h, 0, resized, (int)*out_w, (int)*out_h, 0, STBIR_RGBA);
     NT_BUILD_ASSERT(written && "texture resize: stbir_resize_uint8_linear failed");
     return resized;
 }
@@ -113,66 +140,134 @@ static uint8_t *premultiply_rgba_copy(const uint8_t *rgba, uint32_t pixel_count)
     return out;
 }
 
-/* --- Decode: image data -> RGBA pixels (eager, called from add_*) --- */
+/* --- Decode: image data -> source pixels (eager, called from add_*) --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- assert expansions inflate the count
-uint8_t *nt_builder_decode_texture(const uint8_t *src_data, uint32_t src_size, const nt_tex_opts_t *opts, uint32_t *out_w, uint32_t *out_h) {
+void *nt_builder_decode_texture(const uint8_t *src_data, uint32_t src_size, nt_texture_pixel_format_t format, uint32_t max_size, uint32_t *out_w, uint32_t *out_h) {
     NT_BUILD_ASSERT(src_data && src_size != 0 && out_w && out_h && "texture decode: invalid args");
+    /* No implicit conversion: stbi would tone-map an HDR file to 8 bits or gamma-expand an LDR one. */
+    const bool hdr = format == NT_TEXTURE_FORMAT_RGB9E5;
+    const bool source_hdr = stbi_is_hdr_from_memory(src_data, (int)src_size) != 0;
+    NT_BUILD_ASSERT((!hdr || source_hdr) && "texture decode: RGB9E5 requires an HDR (.hdr) source");
+    NT_BUILD_ASSERT((hdr || !source_hdr) && "texture decode: an HDR source requires format RGB9E5");
     int w = 0;
     int h = 0;
     int channels = 0;
-    unsigned char *pixels = stbi_load_from_memory(src_data, (int)src_size, &w, &h, &channels, 4);
+    void *pixels = hdr ? (void *)stbi_loadf_from_memory(src_data, (int)src_size, &w, &h, &channels, 3) : (void *)stbi_load_from_memory(src_data, (int)src_size, &w, &h, &channels, 4);
     NT_BUILD_ASSERT(pixels && "texture decode: stbi_load_from_memory failed");
     if ((uint32_t)w > NT_BUILD_MAX_TEXTURE_SIZE || (uint32_t)h > NT_BUILD_MAX_TEXTURE_SIZE) {
         stbi_image_free(pixels);
         NT_BUILD_FAIL("texture decode: image exceeds NT_BUILD_MAX_TEXTURE_SIZE", "texture decode: %ux%u exceeds max %u", (uint32_t)w, (uint32_t)h, (uint32_t)NT_BUILD_MAX_TEXTURE_SIZE);
     }
+    if (hdr) {
+        assert_hdr_range((const float *)pixels, (uint32_t)w * (uint32_t)h);
+    }
 
-    int rw = 0;
-    int rh = 0;
-    unsigned char *resized = resize_if_needed(pixels, w, h, opts ? opts->max_size : 0, &rw, &rh);
+    void *resized = resize_if_needed(pixels, format, (uint32_t)w, (uint32_t)h, max_size, out_w, out_h);
     if (resized) {
         stbi_image_free(pixels);
         pixels = resized;
     }
-    *out_w = (uint32_t)rw;
-    *out_h = (uint32_t)rh;
     /* stbi allocates with malloc, so the caller frees either buffer with free. */
-    return (uint8_t *)pixels;
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- assert expansions inflate the count
-uint8_t *nt_builder_decode_texture_raw(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint32_t *out_w, uint32_t *out_h) {
-    NT_BUILD_ASSERT(rgba_pixels && width != 0 && height != 0 && out_w && out_h && "texture raw: invalid args");
-    if (width > NT_BUILD_MAX_TEXTURE_SIZE || height > NT_BUILD_MAX_TEXTURE_SIZE) {
-        NT_BUILD_FAIL("texture raw: image exceeds NT_BUILD_MAX_TEXTURE_SIZE", "texture raw: %ux%u exceeds max %u", width, height, (uint32_t)NT_BUILD_MAX_TEXTURE_SIZE);
-    }
-
-    int rw = 0;
-    int rh = 0;
-    uint8_t *pixels = resize_if_needed(rgba_pixels, (int)width, (int)height, opts ? opts->max_size : 0, &rw, &rh);
-    if (!pixels) {
-        /* The caller owns the result, so an unresized source is copied. */
-        pixels = (uint8_t *)malloc((size_t)width * height * 4);
-        NT_BUILD_ASSERT(pixels && "texture raw: malloc failed");
-        memcpy(pixels, rgba_pixels, (size_t)width * height * 4);
-    }
-    *out_w = (uint32_t)rw;
-    *out_h = (uint32_t)rh;
     return pixels;
 }
 
-/* --- Encode: RGBA pixels -> independent buffer (thread-safe, no shared state) --- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- assert expansions inflate the count
+void *nt_builder_decode_texture_raw(const void *pixels, uint32_t width, uint32_t height, nt_texture_pixel_format_t format, uint32_t max_size, uint32_t *out_w, uint32_t *out_h) {
+    NT_BUILD_ASSERT(pixels && width != 0 && height != 0 && out_w && out_h && "texture raw: invalid args");
+    if (width > NT_BUILD_MAX_TEXTURE_SIZE || height > NT_BUILD_MAX_TEXTURE_SIZE) {
+        NT_BUILD_FAIL("texture raw: image exceeds NT_BUILD_MAX_TEXTURE_SIZE", "texture raw: %ux%u exceeds max %u", width, height, (uint32_t)NT_BUILD_MAX_TEXTURE_SIZE);
+    }
+    if (format == NT_TEXTURE_FORMAT_RGB9E5) {
+        assert_hdr_range((const float *)pixels, width * height);
+    }
 
-void nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint32_t encode_threads, uint8_t **out_data, uint32_t *out_size) {
+    void *result = resize_if_needed(pixels, format, width, height, max_size, out_w, out_h);
+    if (!result) {
+        /* The caller owns the result, so an unresized source is copied. */
+        const uint32_t size = nt_builder_texture_source_size(format, width, height);
+        result = malloc(size);
+        NT_BUILD_ASSERT(result && "texture raw: malloc failed");
+        memcpy(result, pixels, size);
+    }
+    return result;
+}
+
+/* EXT_texture_shared_exponent reference encoder (9-bit mantissas, exponent bias 15).
+ * The clamp to the format maximum (511/512 * 2^16) only absorbs filter rounding:
+ * the source range is asserted at decode. */
+static uint32_t pack_rgb9e5(const float *rgb) {
+    float c[3];
+    float max_c = 0.0F;
+    for (int k = 0; k < 3; k++) {
+        c[k] = rgb[k] < 65408.0F ? rgb[k] : 65408.0F;
+        max_c = c[k] > max_c ? c[k] : max_c;
+    }
+    if (max_c == 0.0F) {
+        return 0;
+    }
+    /* frexpf gives floor(log2) exactly where log2f misrounds next to powers of two. */
+    int e = 0;
+    (void)frexpf(max_c, &e);
+    int exp_shared = (e - 1 < -16 ? -16 : e - 1) + 16;
+    if (floorf(ldexpf(max_c, 24 - exp_shared) + 0.5F) == 512.0F) {
+        exp_shared++;
+    }
+    uint32_t packed = (uint32_t)exp_shared << 27U;
+    for (int k = 0; k < 3; k++) {
+        packed |= (uint32_t)floorf(ldexpf(c[k], 24 - exp_shared) + 0.5F) << (9U * (uint32_t)k);
+    }
+    return packed;
+}
+
+/* Level 0 alone, or the full halved chain back to back. RGB9E5 is not color-renderable,
+ * so the runtime cannot generate its mips; each level is box-filtered from the previous
+ * float level, never from packed RGB9E5. */
+static uint32_t *encode_rgb9e5_chain(const float *rgb, uint32_t width, uint32_t height, bool full_chain, uint16_t *out_levels, uint32_t *out_size) {
+    const uint32_t level_count = full_chain ? nt_texture_full_chain_levels(width, height) : 1;
+    uint64_t total = nt_texture_level_bytes(NT_TEXTURE_FORMAT_RGB9E5, nt_texture_level_extent(width, 0), nt_texture_level_extent(height, 0));
+    for (uint32_t level = 1; level < level_count; level++) {
+        total += nt_texture_level_bytes(NT_TEXTURE_FORMAT_RGB9E5, nt_texture_level_extent(width, level), nt_texture_level_extent(height, level));
+    }
+    NT_BUILD_ASSERT(total <= UINT32_MAX - sizeof(NtTextureAssetHeader) && "texture encode: RGB9E5 chain exceeds 4 GiB");
+    uint32_t *chain = (uint32_t *)malloc((size_t)total);
+    NT_BUILD_ASSERT(chain && "texture encode: malloc failed");
+
+    const float *level_rgb = rgb;
+    float *owned = NULL;
+    uint32_t *dst = chain;
+    for (uint32_t level = 0; level < level_count; level++) {
+        const uint32_t w = nt_texture_level_extent(width, level);
+        const uint32_t h = nt_texture_level_extent(height, level);
+        if (level > 0) {
+            float *next = resize_hdr(level_rgb, nt_texture_level_extent(width, level - 1), nt_texture_level_extent(height, level - 1), w, h);
+            free(owned);
+            owned = next;
+            level_rgb = next;
+        }
+        for (uint32_t i = 0; i < w * h; i++) {
+            dst[i] = pack_rgb9e5(&level_rgb[(size_t)i * 3]);
+        }
+        dst += (size_t)w * h;
+    }
+    free(owned);
+    *out_levels = (uint16_t)level_count;
+    *out_size = (uint32_t)total;
+    return chain;
+}
+
+/* --- Encode: source pixels -> independent buffer (thread-safe, no shared state) --- */
+
+void nt_builder_encode_texture_to_buf(const void *pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint32_t encode_threads, uint8_t **out_data, uint32_t *out_size) {
     uint32_t pixel_count = width * height;
     uint32_t bpp = nt_texture_bpp(opts->format);
     bool compressed = opts->compress.codec != NT_BASISU_CODEC_NONE;
+    bool hdr = opts->format == NT_TEXTURE_FORMAT_RGB9E5;
 
     uint8_t *premul_buf = NULL;
-    const uint8_t *source = rgba_pixels;
+    const uint8_t *source = (const uint8_t *)pixels;
     if (opts->premultiplied) {
-        premul_buf = premultiply_rgba_copy(rgba_pixels, pixel_count);
+        premul_buf = premultiply_rgba_copy(source, pixel_count);
         source = premul_buf;
     }
 
@@ -180,6 +275,7 @@ void nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width
     uint32_t data_size = pixel_count * bpp;
     uint16_t mip_count = 1;
     uint8_t *stripped = NULL;
+    uint32_t *hdr_chain = NULL;
     nt_basisu_encode_result_t enc = {0};
     if (compressed) {
         enc = nt_basisu_encode(encode_threads, source, width, height, opts->format, &opts->compress);
@@ -187,6 +283,9 @@ void nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width
         payload = enc.data;
         data_size = enc.size;
         mip_count = (uint16_t)enc.mip_count;
+    } else if (hdr) {
+        hdr_chain = encode_rgb9e5_chain((const float *)pixels, width, height, opts->gen_mipmaps, &mip_count, &data_size);
+        payload = (const uint8_t *)hdr_chain;
     } else if (bpp < 4) {
         stripped = strip_channels(source, pixel_count, bpp);
         payload = stripped;
@@ -201,7 +300,7 @@ void nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width
     tex_hdr.mip_count = mip_count;
     tex_hdr.compression = (uint8_t)(compressed ? NT_TEXTURE_COMPRESSION_BASIS : NT_TEXTURE_COMPRESSION_RAW);
     tex_hdr.flags = opts->premultiplied ? (uint8_t)NT_TEXTURE_FLAG_PREMULTIPLIED : 0;
-    if (!compressed && opts->gen_mipmaps) {
+    if (!compressed && !hdr && opts->gen_mipmaps) {
         tex_hdr.flags |= (uint8_t)NT_TEXTURE_FLAG_GEN_MIPMAPS;
     }
     tex_hdr.default_min_filter = (uint8_t)opts->filter_min;
@@ -217,6 +316,7 @@ void nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width
     memcpy(buf + sizeof(tex_hdr), payload, data_size);
 
     nt_basisu_encode_free(&enc);
+    free(hdr_chain);
     free(stripped);
     free(premul_buf);
     *out_data = buf;

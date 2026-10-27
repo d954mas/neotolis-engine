@@ -79,6 +79,7 @@ typedef enum {
     NT_BUILD_ERR_KIND_ATLAS_TRIM_OFFSET_OVERFLOW = 11,
     NT_BUILD_ERR_KIND_ATLAS_PAGES_EXHAUSTED = 12,
     NT_BUILD_ERR_KIND_ATLAS_UNFITTABLE = 13,
+    NT_BUILD_ERR_KIND_HDR_IMAGE = 14, /* an HDR (.hdr) image where only LDR is accepted */
 } nt_build_error_kind;
 
 /* Pure-data error detail. Names are COPIED into fixed buffers, never
@@ -237,7 +238,7 @@ const nt_atlas_stats_t *nt_builder_get_atlas_stats(const NtBuilderContext *ctx, 
 /* --- Texture options (game controls format and resize per-texture) --- */
 
 typedef struct {
-    nt_texture_pixel_format_t format; /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8 */
+    nt_texture_pixel_format_t format; /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8. RGB9E5 = HDR, needs an HDR source */
     uint32_t max_size;                /* 0 = no resize, otherwise max(w,h) clamped to this */
     nt_basisu_encode_opts_t compress; /* NONE = raw/uncompressed */
     bool premultiplied;               /* RGBA8 only; default false. Premultiply to avoid dark fringes with bilinear filtering. */
@@ -246,8 +247,9 @@ typedef struct {
     nt_texture_default_filter_t filter_mag; /* default: LINEAR (NEAREST or LINEAR only) */
     nt_texture_default_wrap_t wrap_u;       /* default: REPEAT */
     nt_texture_default_wrap_t wrap_v;       /* default: REPEAT */
-    /* RAW runtime mip generation: defaults true, zero-init false. Required for
-     * mipmap filtering, including material overrides. Ignored by BASIS. */
+    /* RAW mips: defaults true, zero-init false. Required for mipmap filtering,
+     * including material overrides. Generated at runtime, except RGB9E5, whose
+     * chain the builder bakes. Ignored by BASIS. */
     bool gen_mipmaps;
 } nt_tex_opts_t;
 
@@ -493,7 +495,10 @@ void nt_builder_free_pack(NtBuilderContext *ctx);
 void nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, const nt_mesh_opts_t *opts);
 void nt_builder_add_texture(NtBuilderContext *ctx, const char *path, const nt_tex_opts_t *opts);
 void nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id, const nt_tex_opts_t *opts);
+/* RGBA8 pixels for every LDR format. */
 void nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const char *resource_id, const nt_tex_opts_t *opts);
+/* Linear RGB float32 pixels (12 bytes each) for format RGB9E5, finite and in [0, 65216]. */
+void nt_builder_add_texture_raw_f32(NtBuilderContext *ctx, const float *rgb_pixels, uint32_t width, uint32_t height, const char *resource_id, const nt_tex_opts_t *opts);
 void nt_builder_add_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage);
 void nt_builder_add_font(NtBuilderContext *ctx, const char *path, const nt_font_opts_t *opts);
 
@@ -654,7 +659,7 @@ void nt_builder_set_header_dir(NtBuilderContext *ctx, const char *dir);
 void nt_builder_set_gzip_estimate(NtBuilderContext *ctx, bool enabled);
 
 /* --- Builder cache (content-addressed, skips re-encoding unchanged assets) --- */
-#define NT_BUILDER_VERSION 6 /* Bump when encode logic changes to invalidate cache */
+#define NT_BUILDER_VERSION 7 /* Bump when encode logic changes to invalidate cache */
 void nt_builder_set_cache_dir(NtBuilderContext *ctx, const char *dir);
 
 /* --- Parallel encoding (multi-threaded asset encode in finish_pack) --- */

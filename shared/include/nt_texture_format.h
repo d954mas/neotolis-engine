@@ -8,7 +8,7 @@
 #define NT_TEXTURE_MAGIC 0x58455454
 #define NT_TEXTURE_VERSION 3
 
-/* GPU texture/storage formats. Values 1..4, 19 and 20 are also valid packed-asset pixel formats.
+/* GPU texture/storage formats. Values 1..4 and 19..21 are also valid packed-asset pixel formats.
  * An sRGB format stores encoded RGB; sampling returns linear RGB, alpha stays linear. */
 typedef enum {
     NT_TEXTURE_FORMAT_INVALID = 0,
@@ -33,9 +33,10 @@ typedef enum {
     NT_TEXTURE_FORMAT_ASTC_4x4_SRGB8_ALPHA8 = 18, /* GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR */
     NT_TEXTURE_FORMAT_SRGB8_ALPHA8 = 19,          /* 4 bytes per pixel */
     NT_TEXTURE_FORMAT_SRGB8 = 20,                 /* 3 bytes per pixel; not color-renderable, so no runtime mips */
+    NT_TEXTURE_FORMAT_RGB9E5 = 21,                /* GL_RGB9_E5, 4 bytes per pixel: linear unsigned HDR, shared exponent; not color-renderable */
 } nt_texture_format_t;
 
-static inline bool nt_texture_format_valid(nt_texture_format_t fmt) { return fmt >= NT_TEXTURE_FORMAT_RGBA8 && fmt <= NT_TEXTURE_FORMAT_SRGB8; }
+static inline bool nt_texture_format_valid(nt_texture_format_t fmt) { return fmt >= NT_TEXTURE_FORMAT_RGBA8 && fmt <= NT_TEXTURE_FORMAT_RGB9E5; }
 
 static inline bool nt_texture_format_is_depth(nt_texture_format_t fmt) { return fmt >= NT_TEXTURE_FORMAT_DEPTH16 && fmt <= NT_TEXTURE_FORMAT_DEPTH32F; }
 
@@ -48,11 +49,11 @@ static inline bool nt_texture_format_is_integer(nt_texture_format_t fmt) { retur
 /* What a sampler2D reads: colour storage, normalized or float. */
 static inline bool nt_texture_format_is_sampled_color(nt_texture_format_t fmt) { return nt_texture_format_valid(fmt) && !nt_texture_format_is_depth(fmt) && !nt_texture_format_is_integer(fmt); }
 
-/* Builder source formats are the packed-asset subset RGBA8..R8, SRGB8_ALPHA8 and SRGB8. */
+/* Packed-asset pixel formats: RGBA8..R8, SRGB8_ALPHA8, SRGB8 and RGB9E5. */
 typedef nt_texture_format_t nt_texture_pixel_format_t;
 
 static inline bool nt_texture_pixel_format_valid(nt_texture_pixel_format_t fmt) {
-    return (fmt >= NT_TEXTURE_FORMAT_RGBA8 && fmt <= NT_TEXTURE_FORMAT_R8) || fmt == NT_TEXTURE_FORMAT_SRGB8_ALPHA8 || fmt == NT_TEXTURE_FORMAT_SRGB8;
+    return (fmt >= NT_TEXTURE_FORMAT_RGBA8 && fmt <= NT_TEXTURE_FORMAT_R8) || (fmt >= NT_TEXTURE_FORMAT_SRGB8_ALPHA8 && fmt <= NT_TEXTURE_FORMAT_RGB9E5);
 }
 
 /* Bytes per pixel for each format */
@@ -60,6 +61,7 @@ static inline uint32_t nt_texture_bpp(nt_texture_pixel_format_t fmt) {
     switch (fmt) {
     case NT_TEXTURE_FORMAT_RGBA8:
     case NT_TEXTURE_FORMAT_SRGB8_ALPHA8:
+    case NT_TEXTURE_FORMAT_RGB9E5:
         return 4;
     case NT_TEXTURE_FORMAT_RGB8:
     case NT_TEXTURE_FORMAT_SRGB8:
@@ -115,6 +117,7 @@ static inline uint64_t nt_texture_level_bytes(nt_texture_format_t fmt, uint32_t 
         bytes_per_pixel = 8;
         break;
     case NT_TEXTURE_FORMAT_RG16UI:
+    case NT_TEXTURE_FORMAT_RGB9E5:
         bytes_per_pixel = 4;
         break;
     case NT_TEXTURE_FORMAT_RGBA32F:
@@ -152,7 +155,7 @@ typedef enum {
 
 /* Texture header flags (single byte) */
 #define NT_TEXTURE_FLAG_PREMULTIPLIED (1U << 0) /* RGB already multiplied by alpha */
-#define NT_TEXTURE_FLAG_GEN_MIPMAPS (1U << 1)   /* runtime should glGenerateMipmap on RAW upload (no effect on BASIS) */
+#define NT_TEXTURE_FLAG_GEN_MIPMAPS (1U << 1)   /* runtime should glGenerateMipmap on a one-level RAW upload (no effect on BASIS) */
 /* bits 2..7 reserved */
 
 /* Values must match nt_texture_filter_t / nt_texture_wrap_t in nt_gfx.h. */
@@ -183,11 +186,14 @@ typedef enum {
  *   data_size(4)
  *
  * compression field:
- *   RAW(0): uncompressed pixel data follows, data_size = width*height*bpp
+ *   RAW(0): uncompressed levels 0..mip_count-1 follow back to back, no
+ *           padding; mip_count is 1 or the full chain, data_size is the sum
+ *           of nt_texture_level_bytes over the levels
  *   BASIS(1): Basis Universal encoded blob follows
  *
  * format field serves double duty:
- *   RAW: pixel layout and transfer (RGBA8, RGB8, RG8, R8, SRGB8_ALPHA8, SRGB8)
+ *   RAW: pixel layout and transfer (RGBA8, RGB8, RG8, R8, SRGB8_ALPHA8, SRGB8,
+ *        RGB9E5)
  *   BASIS: source channels and transfer (RGBA8/RGB8 linear, SRGB8_ALPHA8/SRGB8
  *          sRGB). sRGB picks the sRGB twin of the transcode target; alpha and
  *          codec come from the Basis blob. The blob's own sRGB flag is not
@@ -197,8 +203,9 @@ typedef enum {
  *   bit 0 = NT_TEXTURE_FLAG_PREMULTIPLIED — RGB values are already multiplied
  *           by alpha. Renderer should use blend (ONE, ONE_MINUS_SRC_ALPHA).
  *   bit 1 = NT_TEXTURE_FLAG_GEN_MIPMAPS — runtime should generate mips on
- *           upload for RAW textures so material sampler overrides can opt
- *           into mipmap filtering. No effect on BASIS (mips are baked).
+ *           upload for one-level RAW textures so material sampler overrides
+ *           can opt into mipmap filtering. Never set with a baked chain.
+ *           No effect on BASIS (mips are baked).
  *
  * default_min/mag_filter, default_wrap_u/v:
  *   Builder-baked defaults (nt_texture_filter_t / nt_texture_wrap_t enum
@@ -208,7 +215,7 @@ typedef enum {
  *   Pixel-art atlases typically pick LINEAR/NEAREST + REPEAT; downscaled
  *   3D textures want LINEAR_MIPMAP_LINEAR.
  *
- * No mip_sizes[] array: RAW mips are calculable from dimensions,
+ * No mip_sizes[] array: RAW level sizes are calculable from dimensions,
  * BASIS mip boundaries are parsed internally by the transcoder.
  */
 #pragma pack(push, 1)

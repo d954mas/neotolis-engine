@@ -58,7 +58,7 @@ void nt_builder_free_pack(NtBuilderContext *ctx);
 
 nt_builder_add_mesh / add_texture / add_shader / add_font   /* one source file */
 nt_builder_add_meshes / add_textures / add_shaders / add_fonts   /* glob pattern */
-nt_builder_add_texture_from_memory / add_texture_raw   /* in-memory pixels */
+nt_builder_add_texture_from_memory / add_texture_raw / add_texture_raw_f32   /* in-memory pixels */
 nt_builder_add_scene_mesh   /* one primitive out of a parsed GLB scene */
 nt_builder_add_blob         /* opaque bytes under a resource id */
 nt_builder_add_asset_root   /* convention-based tree import */
@@ -164,6 +164,22 @@ render to it); use `SRGB8_ALPHA8`, or `gen_mipmaps = false` with a non-mip
 same pixels as `RGBA8` and as `SRGB8_ALPHA8` are two assets. Resize still
 filters encoded values.
 
+`RGB9E5` is linear HDR color (emissive, lightmaps, sky panoramas). The source
+type follows the format and is never converted: `RGB9E5` requires an HDR source
+(Radiance `.hdr`, decoded as float RGB) or `nt_builder_add_texture_raw_f32`
+(RGB float32, 12 bytes per pixel), and every other format requires an LDR
+source or `nt_builder_add_texture_raw` (RGBA8). A mismatch asserts instead of
+tone-mapping an HDR file to 8 bits or gamma-expanding an LDR one. Every source
+value must be finite and in `[0, 65216]` (`ASTC_HDR_MAX_VAL`, the largest value
+Basis UASTC HDR stores without a rescale factor); the builder asserts this on the
+source, before any resize, and never clamps or tone-maps. Resize and mips use a
+box filter on float RGB: a filter with negative lobes would make negative colors.
+The runtime cannot generate `RGB9E5` mips, so `gen_mipmaps = true` makes the
+builder bake the full chain, each level box-filtered from the previous float
+level, and `false` writes one level; the RAW mip-filter rule below applies
+unchanged. `RGB9E5` takes no Basis compression and no premultiplication, and atlas
+pages stay LDR: `nt_atlas_begin` asserts on it.
+
 Basis always emits a full mip chain, independent of `gen_mipmaps` (that flag
 controls RAW runtime mip generation). The builder asserts exactly
 `1 + floor(log2(max(width, height)))` levels; 1x1 is complete with one level.
@@ -243,11 +259,11 @@ computed before canonicalization and are invariant under it.
 The builder distinguishes two failure classes:
 
 - **Programmer invariants, unexpected states, OOM, and missing/unreadable files** assert (`NT_BUILD_ASSERT`) — these are bugs or a broken environment, and crashing surfaces them instantly. The single-asset APIs (`nt_builder_add_texture`, `nt_builder_add_mesh`, `nt_builder_add_font`) also assert on a decode/parse failure of their input.
-- **Content-dependent failures of sprite images inside the ATLAS builder** are recoverable and route to a graceful error channel instead of aborting: undecodable/oversized/zero-dimension sprite images, transparent-after-trim sprites, oversized slice9 borders, contour-vertex overflow, trim-offset overflow, duplicate region names, size/page limits, and unfittable sprites. Geometry selection is total (see [Atlas options](#atlas-options)), so it has no content error kind.
+- **Content-dependent failures of sprite images inside the ATLAS builder** are recoverable and route to a graceful error channel instead of aborting: undecodable/oversized/zero-dimension sprite images, HDR sprite images (atlas pages are LDR), transparent-after-trim sprites, oversized slice9 borders, contour-vertex overflow, trim-offset overflow, duplicate region names, size/page limits, and unfittable sprites. Geometry selection is total (see [Atlas options](#atlas-options)), so it has no content error kind.
 
 `NT_BUILD_ASSERT` is terminal: normal execution ends with `abort()`. Tests may install a non-local-jump hook to verify that an assertion fires, but the interrupted builder context is not reusable and has no rollback guarantee.
 
-The graceful channel is scoped to the atlas builder — it lets a batch of sprites survive one bad member. Content errors stay local to `NtAtlasBuild` while it is collecting. One bad sprite does not stop validation of the remaining sprites in that transaction, so related errors are reported together in stable add order. A failed commit publishes no atlas blob, page texture, metadata, or codegen region; it appends its errors to the pack accumulator and marks the final pack invalid. The accumulator holds up to `NT_BUILD_MAX_ERRORS` (256) content errors; beyond that the tail is dropped and `nt_builder_errors_truncated()` returns true. Atlas-specific kinds use the `NT_BUILD_ERR_KIND_ATLAS_*` prefix; generic image-content kinds remain `NT_BUILD_ERR_KIND_CORRUPT_IMAGE`, `NT_BUILD_ERR_KIND_ZERO_DIM`, and `NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE`. A single-dimension-oversized image file is reported as `IMAGE_TOO_LARGE`, not `CORRUPT_IMAGE`. Callers read committed errors before or after `finish_pack`:
+The graceful channel is scoped to the atlas builder — it lets a batch of sprites survive one bad member. Content errors stay local to `NtAtlasBuild` while it is collecting. One bad sprite does not stop validation of the remaining sprites in that transaction, so related errors are reported together in stable add order. A failed commit publishes no atlas blob, page texture, metadata, or codegen region; it appends its errors to the pack accumulator and marks the final pack invalid. The accumulator holds up to `NT_BUILD_MAX_ERRORS` (256) content errors; beyond that the tail is dropped and `nt_builder_errors_truncated()` returns true. Atlas-specific kinds use the `NT_BUILD_ERR_KIND_ATLAS_*` prefix; generic image-content kinds remain `NT_BUILD_ERR_KIND_CORRUPT_IMAGE`, `NT_BUILD_ERR_KIND_ZERO_DIM`, `NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE` and `NT_BUILD_ERR_KIND_HDR_IMAGE`. A single-dimension-oversized image file is reported as `IMAGE_TOO_LARGE`, not `CORRUPT_IMAGE`. Callers read committed errors before or after `finish_pack`:
 
 - `nt_build_error_t` — pure-data record (kind, atlas/sprite names, dims, limits). Names longer than the fixed record fields retain both ends plus a stable hash instead of being silently truncated.
 - `const nt_build_error_t *nt_builder_get_errors(ctx, &count)` — borrowed, read-only view valid until `nt_builder_free_pack`.
@@ -398,8 +414,8 @@ sharing one payload in the pack.
 Texture cache and early dedup use one identity, `opts_hash`; early dedup
 compares it after an exact pixel match. It covers the effective settings:
 resized dimensions, resolved pixel format, premultiplication, sampler defaults,
-RAW mip-generation flag, compression presence, codec and its active fields above.
-Basis ignores the RAW mip-generation flag. Names, source locations, resize
+RAW mip-generation flag, codec and its active fields above.
+Basis ignores the RAW mip-generation flag; for `RGB9E5` it selects the baked chain. Names, source locations, resize
 limits after resizing, threading, descriptor padding and inactive union bytes
 are not encode identity.
 

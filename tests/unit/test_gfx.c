@@ -2193,6 +2193,63 @@ void test_activate_texture_raw_payload_size_mismatch_asserts(void) {
     expect_raw_size_assert((1 * 2 * 4) - 4);
 }
 
+#define RGB9E5_BLOB_BYTES (sizeof(NtTextureAssetHeader) + 96)
+
+static uint32_t fill_rgb9e5_blob(uint8_t *blob, uint32_t w, uint32_t h, uint16_t mip_count, uint32_t data_size) {
+    NtTextureAssetHeader *hdr = (NtTextureAssetHeader *)blob;
+    memset(blob, 0, RGB9E5_BLOB_BYTES);
+    hdr->magic = NT_TEXTURE_MAGIC;
+    hdr->version = NT_TEXTURE_VERSION;
+    hdr->format = NT_TEXTURE_FORMAT_RGB9E5;
+    hdr->width = w;
+    hdr->height = h;
+    hdr->mip_count = mip_count;
+    hdr->compression = NT_TEXTURE_COMPRESSION_RAW;
+    hdr->data_size = data_size;
+    return (uint32_t)sizeof(NtTextureAssetHeader) + data_size;
+}
+
+/* 3x2 RGB9E5 with its full chain: 3x2 then 1x1, 24 + 4 bytes. */
+void test_activate_texture_raw_chain_uploads_every_level(void) {
+    uint8_t blob[RGB9E5_BLOB_BYTES];
+    uint32_t handle = nt_gfx_activate_texture(blob, fill_rgb9e5_blob(blob, 3, 2, 2, 24 + 4));
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
+    const nt_texture_desc_t desc = nt_gfx_fake_last_texture_desc();
+    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_RGB9E5, desc.format);
+    TEST_ASSERT_EQUAL_UINT8(2, desc.level_count);
+    TEST_ASSERT_FALSE(desc.gen_mipmaps);
+    TEST_ASSERT_EQUAL_PTR(blob + sizeof(NtTextureAssetHeader), desc.data);
+    nt_gfx_deactivate_texture(handle);
+}
+
+void test_activate_texture_raw_chain_size_counts_every_level(void) {
+    uint8_t blob[RGB9E5_BLOB_BYTES];
+    /* Only level 0's bytes under a two-level header. */
+    EXPECT_ASSERT((void)nt_gfx_activate_texture(blob, fill_rgb9e5_blob(blob, 3, 2, 2, 24)));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "RAW data_size differs"));
+}
+
+void test_activate_texture_raw_partial_chain_asserts(void) {
+    uint8_t blob[RGB9E5_BLOB_BYTES];
+    /* 4x4 has three levels; two is neither one nor the full chain. */
+    EXPECT_ASSERT((void)nt_gfx_activate_texture(blob, fill_rgb9e5_blob(blob, 4, 4, 2, 64 + 16)));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "neither 1 nor the full chain"));
+}
+
+void test_activate_texture_raw_chain_with_gen_mipmaps_asserts(void) {
+    uint8_t blob[RGB9E5_BLOB_BYTES];
+    const uint32_t size = fill_rgb9e5_blob(blob, 3, 2, 2, 24 + 4);
+    ((NtTextureAssetHeader *)blob)->flags = NT_TEXTURE_FLAG_GEN_MIPMAPS;
+    EXPECT_ASSERT((void)nt_gfx_activate_texture(blob, size));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "level_count > 1 cannot be combined with gen_mipmaps"));
+}
+
+void test_make_texture_rgb9e5_gen_mipmaps_asserts(void) {
+    const uint32_t texels[4] = {0};
+    EXPECT_ASSERT((void)nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .data = texels, .format = NT_TEXTURE_FORMAT_RGB9E5, .gen_mipmaps = true}));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "RGB9E5 cannot generate mipmaps"));
+}
+
 /* ---- Activator: mesh valid blob (shared fixture = positive control) ---- */
 
 static void fill_valid_mesh_blob(uint8_t *blob) {
@@ -4132,6 +4189,11 @@ int main(void) {
     /* Activator tests */
     RUN_TEST(test_activate_texture_valid_blob);
     RUN_TEST(test_activate_texture_raw_payload_size_mismatch_asserts);
+    RUN_TEST(test_activate_texture_raw_chain_uploads_every_level);
+    RUN_TEST(test_activate_texture_raw_chain_size_counts_every_level);
+    RUN_TEST(test_activate_texture_raw_partial_chain_asserts);
+    RUN_TEST(test_activate_texture_raw_chain_with_gen_mipmaps_asserts);
+    RUN_TEST(test_make_texture_rgb9e5_gen_mipmaps_asserts);
     RUN_TEST(test_activate_texture_zero_dimensions_assert);
     RUN_TEST(test_activate_mesh_valid_blob);
     RUN_TEST(test_frame_rule_rejects_every_live_destroy_while_drawn);

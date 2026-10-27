@@ -340,6 +340,11 @@ sub-rectangle of texels.
 samples linear RGB and leaves alpha linear. `SRGB8` is not color-renderable in
 WebGL 2, so it rejects `gen_mipmaps`.
 
+`RGB9E5` is uncompressed linear HDR storage (`GL_RGB9_E5`, uploaded as
+`GL_UNSIGNED_INT_5_9_9_9_REV` words). It is filterable everywhere and needs no
+capability bit, but it is not color-renderable in WebGL 2, so it rejects
+`gen_mipmaps`; a chain comes in through `level_count`.
+
 `BC7_RGBA` and `BC7_SRGB_ALPHA` additionally require both base dimensions to be
 multiples of 4, including textures smaller than one block. This is the portable WebGL BPTC
 upload contract and asserts before storage creation on every backend. Other
@@ -423,8 +428,9 @@ the public texture formats cannot satisfy them.
 Packs are trusted builder output, so `nt_gfx_activate_texture` asserts the
 header: the pixel format, sampler defaults inside the filter/wrap enums, nonzero
 dimensions within `UINT16_MAX`, a `data_size` equal to the bytes after the
-header, a known `compression`, and for RAW a `data_size` of exactly
-`width * height * bpp` and a `mip_count` of 1. The resource core asserts magic,
+header, a known `compression`, and for RAW a `mip_count` of 1 or the full chain
+with a `data_size` of exactly the sum of `nt_texture_level_bytes` over those
+levels. The resource core asserts magic,
 version and the header size first. A texture above `gpu_caps.max_texture_size`
 is a device limit: the activator logs and returns an invalid handle. Every
 header assert that does not need the payload runs before that check, so a broken

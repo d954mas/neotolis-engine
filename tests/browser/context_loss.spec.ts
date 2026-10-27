@@ -15,6 +15,7 @@ declare global {
       basis_format(): number;
       basis_rgb_format(): number;
       srgb(): [number, number, number, number, number]; // sRGB fixture format, opaque format, corner and 1x1 samples, RAW texel sample
+      hdr(): [number, number, number]; // RAW RGB9E5 format, level-0 corner and 1x1 samples scaled by 1/16
       basis_caps(): number;
       basis_build_targets(): number;
       basis_build_codecs(): number;
@@ -237,7 +238,23 @@ async function checkSrgbFixture(page: Page, label: string, caps: number, buildTa
   return { srgb, srgbLast, texel };
 }
 
-async function checkBasisFixture(page: Page, label: string): Promise<{ corner: number; middle: number; last: number; srgb: number; srgbLast: number; texel: number }> {
+// RAW RGB9E5 (format 21): left half (0.25, 2, 8), right half (8, 0.25, 2), sampled scaled by 1/16 into
+// RGBA8, alpha 1/16. Values above 1 reach the shader unclamped: a clamp would read 16 for both 2 and 8.
+// The 1x1 level is the builder's box average (4.125, 1.125, 5).
+const RGB9E5_FORMAT = 21;
+const HDR_LEFT = [4, 32, 128, 16];
+const HDR_AVERAGE = [66, 18, 80, 16];
+
+async function checkHdrFixture(page: Page, label: string): Promise<{ hdr: number; hdrLast: number }> {
+  const [format, hdr, hdrLast] = await page.evaluate(() => window.__nt!.hdr());
+  console.log(`[hdr ${label}] format=${format} corner=0x${hdr.toString(16)} last=0x${hdrLast.toString(16)}`);
+  expect(format, `${label}: RAW HDR format`).toBe(RGB9E5_FORMAT);
+  expectTexel(hdr, HDR_LEFT, 1, `${label}: RGB9E5 level-0 corner texel`);
+  expectTexel(hdrLast, HDR_AVERAGE, 1, `${label}: RGB9E5 1x1 last level`);
+  return { hdr, hdrLast };
+}
+
+async function checkBasisFixture(page: Page, label: string): Promise<{ corner: number; middle: number; last: number; srgb: number; srgbLast: number; texel: number; hdr: number; hdrLast: number }> {
   await page.waitForFunction(() => window.__nt!.basis_ready(), null, { timeout: 30_000 });
   const caps = await page.evaluate(() => window.__nt!.basis_caps());
   const buildTargets = await page.evaluate(() => window.__nt!.basis_build_targets());
@@ -254,7 +271,7 @@ async function checkBasisFixture(page: Page, label: string): Promise<{ corner: n
   expectTexel(corner, FIXTURE_LEFT, FIXTURE_TOLERANCE, `${label}: level-0 corner texel`);
   expectTexel(middle, FIXTURE_LEFT, FIXTURE_TOLERANCE, `${label}: level-3 corner texel`);
   expectTexel(last, FIXTURE_AVERAGE, 20, `${label}: 1x1 last level`);
-  return { corner, middle, last, ...(await checkSrgbFixture(page, label, caps, buildTargets, codec)) };
+  return { corner, middle, last, ...(await checkSrgbFixture(page, label, caps, buildTargets, codec)), ...(await checkHdrFixture(page, label)) };
 }
 
 test('basis fixture: the transcoded textures keep their format and texels across a context loss', async ({ page }) => {
