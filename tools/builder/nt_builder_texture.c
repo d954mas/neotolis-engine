@@ -11,9 +11,6 @@
 
 #include <math.h>
 
-/* No mapping needed -- builder and runtime share nt_texture_pixel_format_t.
- * BPP lookup uses nt_texture_bpp() from nt_texture_format.h. */
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- assert expansions inflate the count
 nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *opts) {
     nt_tex_opts_t resolved = opts ? *opts : nt_tex_opts_defaults();
@@ -58,8 +55,8 @@ nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *op
 }
 
 /* Resize RGBA pixels to fit within max_size, preserving aspect ratio.
- * Returns resized buffer (caller frees) or NULL if no resize needed.
- * On resize, *out_w and *out_h are updated. */
+ * Returns the resized buffer (caller frees), or NULL when no resize is needed.
+ * *out_w and *out_h receive the final size either way. */
 static unsigned char *resize_if_needed(const unsigned char *pixels, int w, int h, uint32_t max_size, int *out_w, int *out_h) {
     if (max_size == 0 || ((uint32_t)w <= max_size && (uint32_t)h <= max_size)) {
         *out_w = w;
@@ -80,23 +77,17 @@ static unsigned char *resize_if_needed(const unsigned char *pixels, int w, int h
         *out_h = 1;
     }
     unsigned char *resized = (unsigned char *)malloc((size_t)*out_w * (size_t)*out_h * 4);
-    if (!resized) {
-        return NULL;
-    }
-    stbir_resize_uint8_linear(pixels, w, h, 0, resized, *out_w, *out_h, 0, STBIR_RGBA);
+    NT_BUILD_ASSERT(resized && "texture resize: malloc failed");
+    const unsigned char *written = stbir_resize_uint8_linear(pixels, w, h, 0, resized, *out_w, *out_h, 0, STBIR_RGBA);
+    NT_BUILD_ASSERT(written && "texture resize: stbir_resize_uint8_linear failed");
     return resized;
 }
 
-/* Strip RGBA8 source pixels to target channel count */
+/* Strip RGBA8 source pixels to target channel count (1..3) */
 static uint8_t *strip_channels(const uint8_t *rgba, uint32_t pixel_count, uint32_t target_channels) {
-    if (target_channels >= 4) {
-        return NULL; /* no strip needed */
-    }
-    NT_BUILD_ASSERT(rgba && pixel_count > 0 && target_channels > 0 && "strip_channels: invalid args");
+    NT_BUILD_ASSERT(pixel_count > 0 && target_channels > 0 && target_channels < 4 && "strip_channels: invalid args");
     uint8_t *out = (uint8_t *)malloc((size_t)pixel_count * target_channels);
-    if (!out) {
-        return NULL;
-    }
+    NT_BUILD_ASSERT(out && "texture strip_channels: malloc failed");
     for (uint32_t i = 0; i < pixel_count; i++) {
         for (uint32_t c = 0; c < target_channels; c++) {
             out[(i * target_channels) + c] = rgba[(i * 4) + c];
@@ -105,21 +96,11 @@ static uint8_t *strip_channels(const uint8_t *rgba, uint32_t pixel_count, uint32
     return out;
 }
 
-/* Premultiply RGB by alpha in a working copy of the input RGBA buffer.
- * RGB' = round(RGB * A / 255). Alpha channel is left untouched.
- *
- * Applied BEFORE any downstream processing (channel strip for RAW, Basis
- * encode for BASIS) so lossy block compression operates on the correct
- * data — no wasted bits on "invisible" RGB in transparent pixels, and no
- * dark fringes when the GPU bilinearly filters opaque ↔ transparent edges.
- *
- * Returns a heap-allocated buffer (caller frees). Only called when
- * opts->premultiplied is true AND the source format is RGBA8. */
+/* RGB' = round(RGB * A / 255) in a copy, before strip or Basis encode, so block
+ * compression spends no bits on invisible RGB and filtered edges get no dark fringes. */
 static uint8_t *premultiply_rgba_copy(const uint8_t *rgba, uint32_t pixel_count) {
     uint8_t *out = (uint8_t *)malloc((size_t)pixel_count * 4);
-    if (!out) {
-        return NULL;
-    }
+    NT_BUILD_ASSERT(out && "texture premultiply: malloc failed");
     for (uint32_t i = 0; i < pixel_count; i++) {
         uint32_t a = rgba[(i * 4) + 3];
         /* Round-to-nearest: (x * a + 127) / 255. For a=0 result is 0,
@@ -134,82 +115,55 @@ static uint8_t *premultiply_rgba_copy(const uint8_t *rgba, uint32_t pixel_count)
 
 /* --- Decode: image data -> RGBA pixels (eager, called from add_*) --- */
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_build_result_t nt_builder_decode_texture(const uint8_t *src_data, uint32_t src_size, const nt_tex_opts_t *opts, uint8_t **out_pixels, uint32_t *out_w, uint32_t *out_h) {
-    if (!src_data || src_size == 0 || !out_pixels || !out_w || !out_h) {
-        return NT_BUILD_ERR_VALIDATION;
-    }
-
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- assert expansions inflate the count
+uint8_t *nt_builder_decode_texture(const uint8_t *src_data, uint32_t src_size, const nt_tex_opts_t *opts, uint32_t *out_w, uint32_t *out_h) {
+    NT_BUILD_ASSERT(src_data && src_size != 0 && out_w && out_h && "texture decode: invalid args");
     int w = 0;
     int h = 0;
     int channels = 0;
     unsigned char *pixels = stbi_load_from_memory(src_data, (int)src_size, &w, &h, &channels, 4);
     NT_BUILD_ASSERT(pixels && "texture decode: stbi_load_from_memory failed");
-
     if ((uint32_t)w > NT_BUILD_MAX_TEXTURE_SIZE || (uint32_t)h > NT_BUILD_MAX_TEXTURE_SIZE) {
-        NT_LOG_ERROR("texture decode: %ux%u exceeds max %u", (uint32_t)w, (uint32_t)h, (uint32_t)NT_BUILD_MAX_TEXTURE_SIZE);
         stbi_image_free(pixels);
-        return NT_BUILD_ERR_LIMIT;
+        NT_BUILD_FAIL("texture decode: image exceeds NT_BUILD_MAX_TEXTURE_SIZE", "texture decode: %ux%u exceeds max %u", (uint32_t)w, (uint32_t)h, (uint32_t)NT_BUILD_MAX_TEXTURE_SIZE);
     }
 
-    uint32_t max_size = opts ? opts->max_size : 0;
     int rw = 0;
     int rh = 0;
-    unsigned char *resized = resize_if_needed(pixels, w, h, max_size, &rw, &rh);
-    if (max_size > 0 && !resized && ((uint32_t)w > max_size || (uint32_t)h > max_size)) {
-        stbi_image_free(pixels);
-        NT_BUILD_ASSERT(0 && "texture decode: resize_if_needed alloc failed");
-    }
-
+    unsigned char *resized = resize_if_needed(pixels, w, h, opts ? opts->max_size : 0, &rw, &rh);
     if (resized) {
         stbi_image_free(pixels);
-        *out_pixels = (uint8_t *)resized;
-    } else {
-        /* Transfer ownership: stbi uses malloc, caller uses free -- compatible */
-        *out_pixels = (uint8_t *)pixels;
+        pixels = resized;
     }
     *out_w = (uint32_t)rw;
     *out_h = (uint32_t)rh;
-    return NT_BUILD_OK;
+    /* stbi allocates with malloc, so the caller frees either buffer with free. */
+    return (uint8_t *)pixels;
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_build_result_t nt_builder_decode_texture_raw(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint8_t **out_pixels, uint32_t *out_w, uint32_t *out_h) {
-    if (!rgba_pixels || width == 0 || height == 0 || !out_pixels || !out_w || !out_h) {
-        return NT_BUILD_ERR_VALIDATION;
-    }
-
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- assert expansions inflate the count
+uint8_t *nt_builder_decode_texture_raw(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint32_t *out_w, uint32_t *out_h) {
+    NT_BUILD_ASSERT(rgba_pixels && width != 0 && height != 0 && out_w && out_h && "texture raw: invalid args");
     if (width > NT_BUILD_MAX_TEXTURE_SIZE || height > NT_BUILD_MAX_TEXTURE_SIZE) {
-        NT_LOG_ERROR("texture raw: %ux%u exceeds max %u", width, height, (uint32_t)NT_BUILD_MAX_TEXTURE_SIZE);
-        return NT_BUILD_ERR_LIMIT;
+        NT_BUILD_FAIL("texture raw: image exceeds NT_BUILD_MAX_TEXTURE_SIZE", "texture raw: %ux%u exceeds max %u", width, height, (uint32_t)NT_BUILD_MAX_TEXTURE_SIZE);
     }
 
-    uint32_t max_size = opts ? opts->max_size : 0;
     int rw = 0;
     int rh = 0;
-    unsigned char *resized = resize_if_needed(rgba_pixels, (int)width, (int)height, max_size, &rw, &rh);
-    if (max_size > 0 && !resized && (width > max_size || height > max_size)) {
-        NT_BUILD_ASSERT(0 && "texture raw: resize_if_needed alloc failed");
-    }
-
-    if (resized) {
-        *out_pixels = (uint8_t *)resized;
-    } else {
-        /* Always return a malloc'd copy (caller owns) */
-        uint32_t data_size = width * height * 4;
-        uint8_t *copy = (uint8_t *)malloc(data_size);
-        NT_BUILD_ASSERT(copy && "texture raw: malloc failed");
-        memcpy(copy, rgba_pixels, data_size);
-        *out_pixels = copy;
+    uint8_t *pixels = resize_if_needed(rgba_pixels, (int)width, (int)height, opts ? opts->max_size : 0, &rw, &rh);
+    if (!pixels) {
+        /* The caller owns the result, so an unresized source is copied. */
+        pixels = (uint8_t *)malloc((size_t)width * height * 4);
+        NT_BUILD_ASSERT(pixels && "texture raw: malloc failed");
+        memcpy(pixels, rgba_pixels, (size_t)width * height * 4);
     }
     *out_w = (uint32_t)rw;
     *out_h = (uint32_t)rh;
-    return NT_BUILD_OK;
+    return pixels;
 }
 
 /* --- Encode: RGBA pixels -> independent buffer (thread-safe, no shared state) --- */
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint32_t encode_threads, uint8_t **out_data, uint32_t *out_size) {
     uint32_t pixel_count = width * height;
     uint32_t bpp = nt_texture_bpp(opts->format);
@@ -219,7 +173,6 @@ void nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width
     const uint8_t *source = rgba_pixels;
     if (opts->premultiplied) {
         premul_buf = premultiply_rgba_copy(rgba_pixels, pixel_count);
-        NT_BUILD_ASSERT(premul_buf && "texture encode: premultiply alloc failed");
         source = premul_buf;
     }
 
@@ -230,24 +183,18 @@ void nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width
     nt_basisu_encode_result_t enc = {0};
     if (compressed) {
         enc = nt_basisu_encode(encode_threads, source, width, height, opts->format, &opts->compress);
-        NT_BUILD_ASSERT(enc.data && "texture encode: Basis encode failed");
-        uint32_t full_mip_count = 1;
-        for (uint32_t size = width > height ? width : height; size > 1; size >>= 1U) {
-            full_mip_count++;
-        }
-        NT_BUILD_ASSERT(enc.mip_count == full_mip_count && "texture encode: Basis requires a full mip chain");
+        NT_BUILD_ASSERT(enc.mip_count == nt_texture_full_chain_levels(width, height) && "texture encode: Basis requires a full mip chain");
         payload = enc.data;
         data_size = enc.size;
         mip_count = (uint16_t)enc.mip_count;
     } else if (bpp < 4) {
         stripped = strip_channels(source, pixel_count, bpp);
-        NT_BUILD_ASSERT(stripped && "texture encode: strip_channels alloc failed");
         payload = stripped;
     }
 
-    NtTextureAssetHeaderV2 tex_hdr = {0};
+    NtTextureAssetHeader tex_hdr = {0};
     tex_hdr.magic = NT_TEXTURE_MAGIC;
-    tex_hdr.version = NT_TEXTURE_VERSION_V2;
+    tex_hdr.version = NT_TEXTURE_VERSION;
     tex_hdr.format = (uint16_t)opts->format;
     tex_hdr.width = width;
     tex_hdr.height = height;

@@ -9,30 +9,13 @@
 #include <stdlib.h>
 
 #include "hash/nt_hash.h"
-#include "nt_atlas_format.h"      /* NT_ATLAS_XFORM_* stored transform values */
+#include "nt_atlas_format.h" /* NT_ATLAS_XFORM_* stored transform values */
+#include "nt_build_assert.h"
 #include "nt_font_format.h"       /* NtFontAssetHeader, NtFontGlyphEntry, etc. */
 #include "nt_mesh_format.h"       /* nt_stream_type_t */
 #include "nt_texture_format.h"    /* nt_texture_pixel_format_t */
 #include "nt_vertex_locations.h"  /* NT_LOC_* for NtStreamLayout.location */
 #include "skeletal/nt_skeletal.h" /* nt_skeletal_skeleton_t, nt_skin_binding_t */
-
-/* Always-on fatal assert for builder (never compiled out by NDEBUG).
- * The test hook may non-locally observe a failure; the builder context is not
- * reusable afterward. A returning handler is still followed by abort(). */
-typedef void (*nt_build_assert_handler_t)(const char *expr, const char *file, int line);
-extern nt_build_assert_handler_t nt_build_assert_handler;
-
-#ifndef NT_BUILD_ASSERT
-#define NT_BUILD_ASSERT(cond)                                                                                                                                                                          \
-    do {                                                                                                                                                                                               \
-        if (!(cond)) {                                                                                                                                                                                 \
-            if (nt_build_assert_handler)                                                                                                                                                               \
-                nt_build_assert_handler(#cond, __FILE__, __LINE__);                                                                                                                                    \
-            (void)fprintf(stderr, "FATAL: %s:%d: assertion failed: %s\n", __FILE__, __LINE__, #cond);                                                                                                  \
-            abort();                                                                                                                                                                                   \
-        }                                                                                                                                                                                              \
-    } while (0)
-#endif
 
 /* A logged content diagnostic followed by the fatal assert; msg is the assert text tests match on. */
 #define NT_BUILD_FAIL(msg, ...)                                                                                                                                                                        \

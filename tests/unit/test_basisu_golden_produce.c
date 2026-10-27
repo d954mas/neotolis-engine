@@ -96,8 +96,7 @@ static void produce_fixture(const fixture_t *fx) {
     (void)snprintf(file_name, sizeof(file_name), "%s.basis", fx->name);
     write_golden(file_name, enc.data, enc.size);
 
-    nt_basisu_info_t info = {0};
-    TEST_ASSERT_TRUE_MESSAGE(nt_basisu_info(enc.data, enc.size, &info), fx->name);
+    const nt_basisu_info_t info = nt_basisu_info(enc.data, enc.size);
     TEST_ASSERT_EQUAL_INT(fx->codec, info.codec);
     TEST_ASSERT_EQUAL_UINT32(fx->w, info.width);
     TEST_ASSERT_EQUAL_UINT32(fx->h, info.height);
@@ -114,8 +113,7 @@ static void produce_fixture(const fixture_t *fx) {
         uint8_t *out = (uint8_t *)malloc((size_t)bytes);
         TEST_ASSERT_NOT_NULL(out);
         memset(out, 0xCD, (size_t)bytes);
-        const bool ok = nt_basisu_transcode_chain(enc.data, enc.size, &info, s_targets[t], out, (uint32_t)bytes);
-        TEST_ASSERT_TRUE_MESSAGE(ok, fx->name);
+        nt_basisu_transcode_chain(enc.data, enc.size, &info, s_targets[t], out);
         (void)snprintf(file_name, sizeof(file_name), "%s.%s.bin", fx->name, s_target_names[t]);
         write_golden(file_name, out, (size_t)bytes);
         free(out);

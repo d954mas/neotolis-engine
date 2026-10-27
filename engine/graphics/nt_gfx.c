@@ -2693,7 +2693,7 @@ static nt_texture_format_t basis_target_format(const nt_gfx_gpu_caps_t *caps, nt
     }
 }
 
-/* Activate a v2 texture (RAW or Basis Universal compressed) */
+/* Activate a TTEX texture (RAW or Basis Universal compressed) */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     /* make_texture would refuse the result anyway; bail before transcoding
@@ -2701,44 +2701,44 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     if (g_nt_gfx.context_lost) {
         return 0;
     }
-    const NtTextureAssetHeaderV2 *hdr2 = (const NtTextureAssetHeaderV2 *)data;
+    const NtTextureAssetHeader *hdr = (const NtTextureAssetHeader *)data;
 
     // #region header (pack invariants assert; device limits reject)
-    NT_ASSERT(nt_texture_pixel_format_valid((nt_texture_pixel_format_t)hdr2->format) && "texture pixel format invalid");
-    NT_ASSERT(hdr2->default_min_filter <= NT_FILTER_LINEAR_MIPMAP_LINEAR && hdr2->default_mag_filter <= NT_FILTER_LINEAR && hdr2->default_wrap_u <= NT_WRAP_MIRRORED_REPEAT &&
-              hdr2->default_wrap_v <= NT_WRAP_MIRRORED_REPEAT && "texture sampler defaults out of range");
-    if (hdr2->width > g_nt_gfx.gpu_caps.max_texture_size || hdr2->height > g_nt_gfx.gpu_caps.max_texture_size) {
-        NT_LOG_ERROR("activate_texture: %ux%u exceeds GPU max_texture_size %u", hdr2->width, hdr2->height, g_nt_gfx.gpu_caps.max_texture_size);
+    NT_ASSERT(nt_texture_pixel_format_valid((nt_texture_pixel_format_t)hdr->format) && "texture pixel format invalid");
+    NT_ASSERT(hdr->default_min_filter <= NT_FILTER_LINEAR_MIPMAP_LINEAR && hdr->default_mag_filter <= NT_FILTER_LINEAR && hdr->default_wrap_u <= NT_WRAP_MIRRORED_REPEAT &&
+              hdr->default_wrap_v <= NT_WRAP_MIRRORED_REPEAT && "texture sampler defaults out of range");
+    NT_ASSERT(hdr->width != 0 && hdr->height != 0 && hdr->width <= UINT16_MAX && hdr->height <= UINT16_MAX && "texture dimensions out of range");
+    /* Subtraction safe: the resource core checked size >= sizeof header. */
+    NT_ASSERT(hdr->data_size == size - sizeof(NtTextureAssetHeader) && "texture data_size differs from its blob");
+    NT_ASSERT((hdr->compression == NT_TEXTURE_COMPRESSION_RAW || hdr->compression == NT_TEXTURE_COMPRESSION_BASIS) && "texture compression unknown");
+    if (hdr->width > g_nt_gfx.gpu_caps.max_texture_size || hdr->height > g_nt_gfx.gpu_caps.max_texture_size) {
+        NT_LOG_ERROR("activate_texture: %ux%u exceeds GPU max_texture_size %u", hdr->width, hdr->height, g_nt_gfx.gpu_caps.max_texture_size);
         return 0;
     }
-    NT_ASSERT(hdr2->width != 0 && hdr2->height != 0 && hdr2->width <= UINT16_MAX && hdr2->height <= UINT16_MAX && "texture dimensions out of range");
-    /* Subtraction safe: the resource core checked size >= sizeof header. */
-    NT_ASSERT(hdr2->data_size <= size - sizeof(NtTextureAssetHeaderV2) && "texture blob truncated");
-    const uint16_t width = (uint16_t)hdr2->width;
-    const uint16_t height = (uint16_t)hdr2->height;
+    const uint16_t width = (uint16_t)hdr->width;
+    const uint16_t height = (uint16_t)hdr->height;
     // #endregion
 
     /* RAW compression: uncompressed pixel data after header */
-    if (hdr2->compression == NT_TEXTURE_COMPRESSION_RAW) {
-        nt_texture_format_t pixel_fmt = (nt_texture_format_t)hdr2->format;
-        uint64_t expected = (uint64_t)hdr2->width * (uint64_t)hdr2->height * nt_texture_bpp(pixel_fmt);
-        NT_ASSERT(expected <= UINT32_MAX && hdr2->data_size >= (uint32_t)expected && "texture RAW data_size below its pixels");
+    if (hdr->compression == NT_TEXTURE_COMPRESSION_RAW) {
+        nt_texture_format_t pixel_fmt = (nt_texture_format_t)hdr->format;
+        uint64_t expected = (uint64_t)hdr->width * (uint64_t)hdr->height * nt_texture_bpp(pixel_fmt);
+        NT_ASSERT(expected == hdr->data_size && "texture RAW data_size differs from its pixels");
+        NT_ASSERT(hdr->mip_count == 1 && "texture RAW mip_count is not 1");
         nt_texture_desc_t desc = {
             .width = width,
             .height = height,
-            .data = data + sizeof(NtTextureAssetHeaderV2),
+            .data = data + sizeof(NtTextureAssetHeader),
             .format = pixel_fmt,
-            .min_filter = (nt_texture_filter_t)hdr2->default_min_filter,
-            .mag_filter = (nt_texture_filter_t)hdr2->default_mag_filter,
-            .wrap_u = (nt_texture_wrap_t)hdr2->default_wrap_u,
-            .wrap_v = (nt_texture_wrap_t)hdr2->default_wrap_v,
-            .gen_mipmaps = (hdr2->flags & NT_TEXTURE_FLAG_GEN_MIPMAPS) != 0,
+            .min_filter = (nt_texture_filter_t)hdr->default_min_filter,
+            .mag_filter = (nt_texture_filter_t)hdr->default_mag_filter,
+            .wrap_u = (nt_texture_wrap_t)hdr->default_wrap_u,
+            .wrap_v = (nt_texture_wrap_t)hdr->default_wrap_v,
+            .gen_mipmaps = (hdr->flags & NT_TEXTURE_FLAG_GEN_MIPMAPS) != 0,
             .label = NULL,
         };
         return nt_gfx_make_texture(&desc).id;
     }
-
-    NT_ASSERT(hdr2->compression == NT_TEXTURE_COMPRESSION_BASIS && "texture compression unknown");
 
     /* Lazy transcoder init */
     if (!s_transcoder_initialized) {
@@ -2746,21 +2746,17 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
         s_transcoder_initialized = true;
     }
 
-    const uint8_t *basis_data = data + sizeof(NtTextureAssetHeaderV2);
-    uint32_t basis_size = hdr2->data_size;
+    const uint8_t *basis_data = data + sizeof(NtTextureAssetHeader);
+    uint32_t basis_size = hdr->data_size;
 
     // #region blob cross-check
-    nt_basisu_info_t info;
-    if (!nt_basisu_info(basis_data, basis_size, &info)) {
-        NT_LOG_ERROR("activate_texture: Basis blob rejected (bad data, unsupported codec or stub transcoder linked)");
-        return 0;
-    }
-    NT_ASSERT(info.width == hdr2->width && info.height == hdr2->height && "texture header size differs from its Basis blob");
-    NT_ASSERT(info.level_count == hdr2->mip_count && info.level_count == nt_texture_full_chain_levels(width, height) && "texture Basis chain is not the full mip chain");
+    const nt_basisu_info_t info = nt_basisu_info(basis_data, basis_size);
+    NT_ASSERT(info.width == hdr->width && info.height == hdr->height && "texture header size differs from its Basis blob");
+    NT_ASSERT(info.level_count == hdr->mip_count && info.level_count == nt_texture_full_chain_levels(width, height) && "texture Basis chain is not the full mip chain");
     // #endregion
 
     // #region target and staging
-    const bool srgb = nt_texture_format_is_srgb((nt_texture_format_t)hdr2->format);
+    const bool srgb = nt_texture_format_is_srgb((nt_texture_format_t)hdr->format);
     const nt_texture_format_t target = basis_target_format(nt_gfx_gpu_caps(), info.codec, info.has_alpha, srgb, width, height);
 
     uint64_t chain_bytes = 0;
@@ -2780,10 +2776,7 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     // #endregion
 
     // #region transcode the whole chain into staging
-    if (!nt_basisu_transcode_chain(basis_data, basis_size, &info, target, stage, (uint32_t)chain_bytes)) {
-        NT_LOG_ERROR("activate_texture: Basis transcode of the %u-level chain failed", (unsigned)info.level_count);
-        return 0;
-    }
+    nt_basisu_transcode_chain(basis_data, basis_size, &info, target, stage);
     // #endregion
 
     nt_texture_desc_t desc = {
@@ -2791,10 +2784,10 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
         .height = height,
         .data = stage,
         .format = target,
-        .min_filter = (nt_texture_filter_t)hdr2->default_min_filter,
-        .mag_filter = (nt_texture_filter_t)hdr2->default_mag_filter,
-        .wrap_u = (nt_texture_wrap_t)hdr2->default_wrap_u,
-        .wrap_v = (nt_texture_wrap_t)hdr2->default_wrap_v,
+        .min_filter = (nt_texture_filter_t)hdr->default_min_filter,
+        .mag_filter = (nt_texture_filter_t)hdr->default_mag_filter,
+        .wrap_u = (nt_texture_wrap_t)hdr->default_wrap_u,
+        .wrap_v = (nt_texture_wrap_t)hdr->default_wrap_v,
         .level_count = (uint8_t)info.level_count,
         .gen_mipmaps = false,
         .label = NULL,

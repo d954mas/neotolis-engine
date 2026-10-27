@@ -91,7 +91,7 @@ static void build_fixture(nt_basisu_codec_t codec, nt_texture_pixel_format_t for
     uint32_t payload_size = enc.size;
     nt_basisu_encode_free(&enc);
 
-    TEST_ASSERT_TRUE(nt_basisu_info(s_blob + sizeof(*hdr), payload_size, &s_info));
+    s_info = nt_basisu_info(s_blob + sizeof(*hdr), payload_size);
     TEST_ASSERT_EQUAL_UINT32(SRC_LEVELS, s_info.level_count);
 }
 
@@ -115,7 +115,7 @@ static uint32_t chain_bytes(nt_texture_format_t format) {
 /* What the GPU should be showing: the transcoder's own RGBA32 decode of the
  * level under test, so the comparison isolates upload and sampling. */
 static void decode_reference(uint32_t level) {
-    TEST_ASSERT_TRUE(nt_basisu_transcode_chain(fixture_payload(), fixture_payload_size(), &s_info, NT_TEXTURE_FORMAT_RGBA8, s_reference, (uint32_t)sizeof(s_reference)));
+    nt_basisu_transcode_chain(fixture_payload(), fixture_payload_size(), &s_info, NT_TEXTURE_FORMAT_RGBA8, s_reference);
     uint32_t offset = 0;
     for (uint32_t below = 0; below < level; below++) {
         offset += (uint32_t)nt_texture_level_bytes(NT_TEXTURE_FORMAT_RGBA8, level_dim(SRC_W, below), level_dim(SRC_H, below));
@@ -127,7 +127,7 @@ static void decode_reference(uint32_t level) {
 static uint32_t transcode_chain(nt_texture_format_t format) {
     const uint32_t total = chain_bytes(format);
     TEST_ASSERT_LESS_OR_EQUAL_UINT32(sizeof(s_chain), total);
-    TEST_ASSERT_TRUE_MESSAGE(nt_basisu_transcode_chain(fixture_payload(), fixture_payload_size(), &s_info, format, s_chain, total), "transcode failed for a caps-supported format");
+    nt_basisu_transcode_chain(fixture_payload(), fixture_payload_size(), &s_info, format, s_chain);
     return total;
 }
 

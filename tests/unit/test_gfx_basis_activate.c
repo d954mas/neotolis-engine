@@ -19,9 +19,10 @@
 /* --- Assert catching (same hookable-handler longjmp as test_gfx.c) --- */
 
 static jmp_buf s_assert_jmp;
+static const char *s_assert_expr;
 
 static void test_assert_handler(const char *expr, const char *file, int line) {
-    (void)expr;
+    s_assert_expr = expr;
     (void)file;
     (void)line;
     longjmp(s_assert_jmp, 1);
@@ -217,14 +218,12 @@ static uint32_t chain_bytes(nt_texture_format_t format, uint16_t w, uint16_t h) 
 static void expect_transcoder_reusable(basis_fixture_t *fixture) {
     const uint8_t *payload = fixture->blob + sizeof(NtTextureAssetHeader);
     const uint32_t payload_size = fixture->size - (uint32_t)sizeof(NtTextureAssetHeader);
-    nt_basisu_info_t info = {0};
-    TEST_ASSERT_TRUE(nt_basisu_info(payload, payload_size, &info));
+    const nt_basisu_info_t info = nt_basisu_info(payload, payload_size);
     const uint32_t bytes = chain_bytes(NT_TEXTURE_FORMAT_RGBA8, fixture->width, fixture->height);
     uint8_t *out = (uint8_t *)malloc(bytes);
     TEST_ASSERT_NOT_NULL(out);
-    bool transcoded = nt_basisu_transcode_chain(payload, payload_size, &info, NT_TEXTURE_FORMAT_RGBA8, out, bytes);
+    nt_basisu_transcode_chain(payload, payload_size, &info, NT_TEXTURE_FORMAT_RGBA8, out);
     free(out);
-    TEST_ASSERT_TRUE(transcoded);
 }
 
 /* The header's sampler defaults, resolved through the deduplicating cache: an
@@ -444,12 +443,18 @@ void test_header_boundaries_assert_without_touching_the_pool(void) {
     expect_header_assert(&alpha, alpha.size); /* data_size past the end of the blob */
     *fixture_header(&alpha) = good;
     expect_header_assert(&alpha, alpha.size - 1); /* buffer shorter than data_size */
+    expect_header_assert(&alpha, alpha.size + 1); /* a trailing byte data_size does not cover */
 
     fixture_header(&alpha)->width = 12;
     expect_header_assert(&alpha, alpha.size); /* header width the blob disagrees with */
     *fixture_header(&alpha) = good;
     fixture_header(&alpha)->height = 8;
     expect_header_assert(&alpha, alpha.size); /* header height the blob disagrees with */
+    *fixture_header(&alpha) = good;
+    /* Above any GPU limit too: broken pack data, not a device limit. */
+    fixture_header(&alpha)->width = UINT16_MAX + 1U;
+    expect_header_assert(&alpha, alpha.size); /* width past the uint16 range */
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "dimensions out of range"));
     *fixture_header(&alpha) = good;
 
     fixture_header(&alpha)->default_min_filter = NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR + 1;
@@ -477,15 +482,17 @@ void test_header_boundaries_assert_without_touching_the_pool(void) {
 }
 
 #if NT_BASISU_HAS_ETC1S
-void test_corrupted_payload_is_rejected_and_a_good_blob_still_activates(void) {
+void test_corrupted_payload_asserts_and_a_good_blob_still_activates(void) {
     set_caps(true, false, false);
     basis_fixture_t alpha = fixture_encode(96, 64, NT_BASISU_CODEC_ETC1S, true, NT_TEXTURE_FORMAT_RGBA8);
     uint32_t payload = alpha.size - (uint32_t)sizeof(NtTextureAssetHeader);
-    /* Past the header and slice descriptors, inside the ETC1S codebooks. */
-    for (uint32_t i = payload / 4U; i < (payload * 3U) / 4U; i++) {
+    /* The back half of the blob: its header and level descriptors stay intact, so
+     * info passes and the transcoder rejects the corrupted tables. */
+    for (uint32_t i = payload / 2U; i < payload; i++) {
         alpha.blob[sizeof(NtTextureAssetHeader) + i] ^= 0xA5U;
     }
     expect_header_assert(&alpha, alpha.size); /* corrupted Basis payload */
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "start_transcoding failed"));
     fixture_free(&alpha);
 
     basis_fixture_t good = fixture_encode(16, 8, NT_BASISU_CODEC_ETC1S, true, NT_TEXTURE_FORMAT_RGBA8);
@@ -682,7 +689,7 @@ int main(void) {
 #if NT_BASISU_HAS_ETC1S
     RUN_TEST(test_etc1s_caps_matrix_picks_the_first_supported_target);
     RUN_TEST(test_etc1s_unaligned_dimensions_skip_bc7);
-    RUN_TEST(test_corrupted_payload_is_rejected_and_a_good_blob_still_activates);
+    RUN_TEST(test_corrupted_payload_asserts_and_a_good_blob_still_activates);
 #endif
 #if NT_BASISU_HAS_UASTC
     RUN_TEST(test_uastc_caps_matrix_picks_the_first_supported_target);

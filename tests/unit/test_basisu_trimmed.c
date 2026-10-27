@@ -61,8 +61,7 @@ static void check_pair(const char *name, const uint8_t *basis, uint32_t basis_si
     uint8_t *out = (uint8_t *)malloc((size_t)bytes);
     TEST_ASSERT_NOT_NULL(out);
     memset(out, 0xCD, (size_t)bytes);
-    const bool ok = nt_basisu_transcode_chain(basis, basis_size, info, s_targets[t], out, (uint32_t)bytes);
-    TEST_ASSERT_TRUE_MESSAGE(ok, label);
+    nt_basisu_transcode_chain(basis, basis_size, info, s_targets[t], out);
     char file_name[96];
     (void)snprintf(file_name, sizeof(file_name), "%s.%s.bin", name, s_target_names[t]);
     uint32_t golden_size = 0;
@@ -96,9 +95,7 @@ static void check_fixture(const fixture_t *fx) {
     uint32_t basis_size = 0;
     uint8_t *basis = read_file(file_name, &basis_size);
 
-    nt_basisu_info_t info;
-    memset(&info, 0, sizeof(info));
-    TEST_ASSERT_TRUE_MESSAGE(nt_basisu_info(basis, basis_size, &info), name);
+    const nt_basisu_info_t info = nt_basisu_info(basis, basis_size);
     TEST_ASSERT_EQUAL_INT_MESSAGE(fx->codec, info.codec, name);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(fx->w, info.width, name);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(fx->h, info.height, name);

@@ -25,24 +25,18 @@ static bool codec_built(basist::basis_tex_format fmt) {
 
 void nt_basisu_transcoder_global_init(void) { basist::basisu_transcoder_init(); }
 
-bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_t *out_info) {
-    NT_ASSERT(out_info != nullptr);
+nt_basisu_info_t nt_basisu_info(const void *basis_data, uint32_t basis_size) {
     /* get_basis_tex_format answers cETC1S for a header it rejects, indistinguishable
        from a real ETC1S file, so the full header check has to come first. */
-    if (!s_transcoder.validate_header(basis_data, basis_size)) {
-        return false;
-    }
+    const bool header_ok = s_transcoder.validate_header(basis_data, basis_size);
+    NT_ASSERT(header_ok && "basisu: blob header invalid");
     const basist::basis_tex_format fmt = s_transcoder.get_basis_tex_format(basis_data, basis_size);
     NT_ASSERT(codec_built(fmt) && "basisu: blob codec is not compiled into this build (NT_BASISU_HAS_*)");
     const nt_basisu_codec_t codec = fmt == basist::basis_tex_format::cETC1S ? NT_BASISU_CODEC_ETC1S : NT_BASISU_CODEC_UASTC_LDR;
 
     basist::basisu_image_info image_info;
-    if (!s_transcoder.get_image_info(basis_data, basis_size, image_info, 0)) {
-        return false;
-    }
-    out_info->codec = codec;
-    out_info->width = image_info.m_orig_width;
-    out_info->height = image_info.m_orig_height;
+    const bool image_ok = s_transcoder.get_image_info(basis_data, basis_size, image_info, 0);
+    NT_ASSERT(image_ok && "basisu: blob has no image 0");
     /* Upstream accepts a level whose width shrank within the same block count and
        then writes it with its own row stride; the activator derives sizes from
        level 0, so every level must be exactly the halved chain. */
@@ -50,19 +44,15 @@ bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_
         uint32_t level_w = 0;
         uint32_t level_h = 0;
         uint32_t level_blocks = 0;
-        if (!s_transcoder.get_image_level_desc(basis_data, basis_size, 0, level, level_w, level_h, level_blocks)) {
-            return false;
-        }
-        if (level_w != nt_texture_level_extent(image_info.m_orig_width, level) || level_h != nt_texture_level_extent(image_info.m_orig_height, level)) {
-            return false;
-        }
+        const bool level_ok = s_transcoder.get_image_level_desc(basis_data, basis_size, 0, level, level_w, level_h, level_blocks);
+        NT_ASSERT(level_ok && "basisu: blob level descriptor unreadable");
+        NT_ASSERT(level_w == nt_texture_level_extent(image_info.m_orig_width, level) && level_h == nt_texture_level_extent(image_info.m_orig_height, level) &&
+                  "basisu: blob mip chain is not the halved chain");
     }
-    out_info->level_count = image_info.m_total_levels;
-    out_info->has_alpha = image_info.m_alpha_flag;
-    return true;
+    return nt_basisu_info_t{codec, image_info.m_orig_width, image_info.m_orig_height, image_info.m_total_levels, image_info.m_alpha_flag};
 }
 
-bool nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, const nt_basisu_info_t *info, nt_texture_format_t format, void *output, uint32_t capacity_bytes) {
+void nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, const nt_basisu_info_t *info, nt_texture_format_t format, void *output) {
     NT_ASSERT(info != nullptr);
     basist::transcoder_texture_format target;
     uint32_t unit_bytes; /* bytes per 4x4 block, or per pixel for RGBA8 */
@@ -96,30 +86,17 @@ bool nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, cons
         break;
     default:
         NT_ASSERT(0 && "transcode_chain: format is not a Basis transcode target");
-        return false;
     }
 
-    /* The short-buffer contract is recoverable and covers the whole chain, so
-       the total has to be known before the first level is written. */
-    uint64_t chain_bytes = 0;
-    for (uint32_t level = 0; level < info->level_count; level++) {
-        chain_bytes += nt_texture_level_bytes(format, nt_texture_level_extent(info->width, level), nt_texture_level_extent(info->height, level));
-    }
-    if (chain_bytes > capacity_bytes) {
-        return false;
-    }
-
-    if (!s_transcoder.start_transcoding(basis_data, basis_size)) {
-        return false;
-    }
-    bool ok = true;
+    const bool started = s_transcoder.start_transcoding(basis_data, basis_size);
+    NT_ASSERT(started && "basisu: start_transcoding failed");
     uint32_t offset = 0;
-    for (uint32_t level = 0; level < info->level_count && ok; level++) {
+    for (uint32_t level = 0; level < info->level_count; level++) {
         const uint32_t level_bytes = (uint32_t)nt_texture_level_bytes(format, nt_texture_level_extent(info->width, level), nt_texture_level_extent(info->height, level));
         /* Upstream counts blocks (pixels for RGBA32). */
-        ok = s_transcoder.transcode_image_level(basis_data, basis_size, 0, level, (uint8_t *)output + offset, level_bytes / unit_bytes, target);
+        const bool level_ok = s_transcoder.transcode_image_level(basis_data, basis_size, 0, level, (uint8_t *)output + offset, level_bytes / unit_bytes, target);
+        NT_ASSERT(level_ok && "basisu: transcode_image_level failed");
         offset += level_bytes;
     }
     s_transcoder.stop_transcoding();
-    return ok;
 }

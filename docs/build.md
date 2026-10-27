@@ -147,8 +147,8 @@ builder, the transcoder and `nt_gfx` link, so one configure always agrees
 with itself: the builder asserts a texture's codec
 before its cache lookup, `nt_basisu_info` asserts that a blob's codec is
 compiled in, and the activator's selector never picks a target outside the set.
-Transcoding requires the info returned by a successful `nt_basisu_info` call
-on the same blob in this build. The activator's selector skips excluded targets
+Transcoding takes the info `nt_basisu_info` returned for the same blob in this
+build. The activator's selector skips excluded targets
 ([runtime formats](spec/assets/runtime-formats.md#texture-activation-ttex)).
 
 The runtime library `nt_basisu_transcoder` compiles only the admitted decoders

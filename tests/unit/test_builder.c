@@ -749,10 +749,10 @@ void test_texture_round_trip(void) {
     TEST_ASSERT_EQUAL_UINT8(NT_ASSET_TEXTURE, entry.asset_type);
 
     (void)fseek(f, (long)entry.offset, SEEK_SET);
-    NtTextureAssetHeaderV2 tex;
+    NtTextureAssetHeader tex;
     TEST_ASSERT_EQUAL(1, fread(&tex, sizeof(tex), 1, f));
     TEST_ASSERT_EQUAL_UINT32(NT_TEXTURE_MAGIC, tex.magic);
-    TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_VERSION_V2, tex.version);
+    TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_VERSION, tex.version);
     TEST_ASSERT_EQUAL_UINT32(2, tex.width);
     TEST_ASSERT_EQUAL_UINT32(2, tex.height);
     TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_FORMAT_RGBA8, tex.format);
@@ -992,7 +992,7 @@ void test_texture_premultiplied_encoding(void) {
     TEST_ASSERT_EQUAL_UINT8(NT_ASSET_TEXTURE, entry.asset_type);
 
     (void)fseek(f, (long)entry.offset, SEEK_SET);
-    NtTextureAssetHeaderV2 tex;
+    NtTextureAssetHeader tex;
     TEST_ASSERT_EQUAL(1, fread(&tex, sizeof(tex), 1, f));
     TEST_ASSERT_EQUAL_UINT32(NT_TEXTURE_MAGIC, tex.magic);
     TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, tex.compression);
@@ -1614,14 +1614,14 @@ void test_e2e_real_assets(void) {
     TEST_ASSERT_EQUAL_MEMORY(&expected_pos, &vz, 4);
 
     /* Verify texture data (v2 header) */
-    NtTextureAssetHeaderV2 *th = (NtTextureAssetHeaderV2 *)(pack + tex_e->offset);
+    NtTextureAssetHeader *th = (NtTextureAssetHeader *)(pack + tex_e->offset);
     TEST_ASSERT_EQUAL_UINT32(NT_TEXTURE_MAGIC, th->magic);
-    TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_VERSION_V2, th->version);
+    TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_VERSION, th->version);
     TEST_ASSERT_EQUAL_UINT32(512, th->width);
     TEST_ASSERT_EQUAL_UINT32(512, th->height);
     TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, th->compression);
     /* First pixel should be non-zero (Lenna top-left is skin tone) */
-    uint8_t *pixel0 = pack + tex_e->offset + sizeof(NtTextureAssetHeaderV2);
+    uint8_t *pixel0 = pack + tex_e->offset + sizeof(NtTextureAssetHeader);
     TEST_ASSERT_TRUE(pixel0[0] > 100);  /* R */
     TEST_ASSERT_TRUE(pixel0[3] == 255); /* A = opaque */
 
@@ -1769,10 +1769,10 @@ void test_tex_from_memory(void) {
     TEST_ASSERT_EQUAL_UINT8(NT_ASSET_TEXTURE, entry.asset_type);
 
     (void)fseek(f, (long)entry.offset, SEEK_SET);
-    NtTextureAssetHeaderV2 tex;
+    NtTextureAssetHeader tex;
     TEST_ASSERT_EQUAL(1, fread(&tex, sizeof(tex), 1, f));
     TEST_ASSERT_EQUAL_UINT32(NT_TEXTURE_MAGIC, tex.magic);
-    TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_VERSION_V2, tex.version);
+    TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_VERSION, tex.version);
     TEST_ASSERT_EQUAL_UINT32(2, tex.width);
     TEST_ASSERT_EQUAL_UINT32(2, tex.height);
     TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, tex.compression);
@@ -6650,13 +6650,13 @@ void test_atlas_real_pipeline_preserves_hole(void) {
     }
     TEST_ASSERT_NOT_NULL(tex_entry);
 
-    const NtTextureAssetHeaderV2 *tex_hdr = (const NtTextureAssetHeaderV2 *)(pack + tex_entry->offset);
+    const NtTextureAssetHeader *tex_hdr = (const NtTextureAssetHeader *)(pack + tex_entry->offset);
     TEST_ASSERT_EQUAL_HEX32(NT_TEXTURE_MAGIC, tex_hdr->magic);
     TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, tex_hdr->compression);
     /* Atlas pages must be premultiplied. */
     TEST_ASSERT_TRUE_MESSAGE((tex_hdr->flags & NT_TEXTURE_FLAG_PREMULTIPLIED) != 0, "atlas page must have premultiplied flag");
 
-    const uint8_t *page_pixels = (const uint8_t *)tex_hdr + sizeof(NtTextureAssetHeaderV2);
+    const uint8_t *page_pixels = (const uint8_t *)tex_hdr + sizeof(NtTextureAssetHeader);
     uint32_t page_w = tex_hdr->width;
     uint32_t page_h = tex_hdr->height;
 
@@ -8396,10 +8396,10 @@ void test_alpha_threshold_zero_domain_and_compose(void) {
         }
     }
     TEST_ASSERT_NOT_NULL(tex_entry);
-    const NtTextureAssetHeaderV2 *tex_hdr = (const NtTextureAssetHeaderV2 *)(pack + tex_entry->offset);
+    const NtTextureAssetHeader *tex_hdr = (const NtTextureAssetHeader *)(pack + tex_entry->offset);
     TEST_ASSERT_EQUAL_HEX32(NT_TEXTURE_MAGIC, tex_hdr->magic);
     TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, tex_hdr->compression);
-    const uint8_t *page_pixels = (const uint8_t *)tex_hdr + sizeof(NtTextureAssetHeaderV2);
+    const uint8_t *page_pixels = (const uint8_t *)tex_hdr + sizeof(NtTextureAssetHeader);
     uint32_t sprite_rgb = 0;
     uint32_t ghost_rgb = 0;
     uint32_t sub_threshold = 0;

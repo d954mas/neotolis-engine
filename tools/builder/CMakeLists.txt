@@ -32,6 +32,14 @@ set(BASISU_ENCODER_3RDPARTY
     "${NT_ENGINE_ROOT}/deps/basisu/encoder/3rdparty/android_astc_decomp.cpp"
 )
 
+# NT_BUILD_ASSERT's handler: a leaf both the encoder and nt_builder link, so the
+# encoder asserts without depending on nt_builder (a static-library cycle).
+add_library(nt_build_assert STATIC nt_build_assert.c)
+target_include_directories(nt_build_assert PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+nt_set_static_crt(nt_build_assert)
+nt_set_warning_flags(nt_build_assert)
+set_target_properties(nt_build_assert PROPERTIES ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tools/builder/${NT_PRESET_NAME}")
+
 add_library(nt_basisu_encoder STATIC
     nt_basisu_encoder.cpp
     ${BASISU_ENCODER_SOURCES}
@@ -46,7 +54,7 @@ target_include_directories(nt_basisu_encoder PRIVATE
 # the trimmed runtime one; the config target keeps its header defines identical to
 # that TU (ODR). Builder-side executables therefore link nt_basisu_transcoder_full.
 target_link_libraries(nt_basisu_encoder PRIVATE nt_basisu_transcoder_full nt_basisu_transcoder_full_config
-    PUBLIC nt_shared)
+    PUBLIC nt_shared nt_build_assert)
 target_compile_definitions(nt_basisu_encoder PRIVATE _CRT_SECURE_NO_WARNINGS)
 # Suppress warnings in vendored C++ code
 target_compile_options(nt_basisu_encoder PRIVATE -w)
@@ -139,7 +147,7 @@ add_library(nt_builder STATIC
 target_include_directories(nt_builder PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # nt_meshwire_interface, not the impl: a host may combine nt_builder with the
 # meshwire stub; each EXECUTABLE picks real nt_meshwire (decode-back needs it).
-target_link_libraries(nt_builder PUBLIC nt_shared nt_core nt_log_interface nt_time nt_skeletal cgltf stb_image stb_image_resize2 stb_truetype stb_image_write nt_hash mikktspace nt_basisu_encoder nt_meshwire_interface nt_meshwire_encoder glfw glad miniz tinycthread nt_clipper2_bridge)
+target_link_libraries(nt_builder PUBLIC nt_shared nt_core nt_log_interface nt_time nt_skeletal cgltf stb_image stb_image_resize2 stb_truetype stb_image_write nt_hash mikktspace nt_build_assert nt_basisu_encoder nt_meshwire_interface nt_meshwire_encoder glfw glad miniz tinycthread nt_clipper2_bridge)
 
 # Builder uses standard C I/O (fopen, strdup, strncpy) -- suppress MSVC deprecation
 target_compile_definitions(nt_builder PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE NT_LOG_DOMAIN_DEFAULT="builder")

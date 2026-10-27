@@ -1,6 +1,7 @@
 #include "nt_basisu_encoder.h"
 
 #include "basisu_comp.h"
+#include "nt_build_assert.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -11,11 +12,8 @@ void nt_basisu_encoder_init(void) { basisu::basisu_encoder_init(); }
 
 nt_basisu_encode_result_t nt_basisu_encode(uint32_t basis_threads, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, nt_texture_pixel_format_t format,
                                            const nt_basisu_encode_opts_t *opts) {
-    nt_basisu_encode_result_t result = {};
+    NT_BUILD_ASSERT(basis_threads >= 1 && "basisu encode: basis_threads counts the caller");
     const bool has_alpha = format == NT_TEXTURE_FORMAT_RGBA8 || format == NT_TEXTURE_FORMAT_SRGB8_ALPHA8;
-    if (basis_threads < 1) {
-        basis_threads = 1;
-    }
 
     /* Per-call local job_pool — thread-safe, no shared state.
      * basis job_pool(N) = N total threads including caller (1 = caller only, no extra threads). */
@@ -47,7 +45,7 @@ nt_basisu_encode_result_t nt_basisu_encode(uint32_t basis_threads, const uint8_t
         params.m_no_selector_rdo = opts->etc1s.selector_rdo_threshold == 0.0F;
         break;
     default:
-        return result;
+        NT_BUILD_ASSERT(0 && "basisu encode: codec is not a Basis codec");
     }
 
     params.m_create_ktx2_file = false;
@@ -62,34 +60,24 @@ nt_basisu_encode_result_t nt_basisu_encode(uint32_t basis_threads, const uint8_t
     params.m_status_output = false;
 
     basisu::basis_compressor compressor;
-    if (!compressor.init(params)) {
-        return result;
-    }
-
+    const bool init_ok = compressor.init(params);
+    NT_BUILD_ASSERT(init_ok && "basisu encode: compressor init failed");
     const basisu::basis_compressor::error_code ec = compressor.process();
-    if (ec != basisu::basis_compressor::cECSuccess) {
-        return result;
-    }
+    NT_BUILD_ASSERT(ec == basisu::basis_compressor::cECSuccess && "basisu encode: compressor process failed");
 
     const basisu::uint8_vec &output = compressor.get_output_basis_file();
-    if (output.empty()) {
-        return result;
-    }
+    NT_BUILD_ASSERT(!output.empty() && "basisu encode: empty output");
 
+    nt_basisu_encode_result_t result = {};
     result.data = static_cast<uint8_t *>(malloc(output.size()));
-    if (!result.data) {
-        return result;
-    }
+    NT_BUILD_ASSERT(result.data && "basisu encode: malloc failed");
     memcpy(result.data, output.data(), output.size());
     result.size = static_cast<uint32_t>(output.size());
 
     basist::basisu_transcoder local_transcoder;
-    if (local_transcoder.validate_header(result.data, result.size)) {
-        result.mip_count = local_transcoder.get_total_image_levels(result.data, result.size, 0);
-    } else {
-        result.mip_count = 1;
-    }
-
+    const bool header_ok = local_transcoder.validate_header(result.data, result.size);
+    NT_BUILD_ASSERT(header_ok && "basisu encode: output header invalid");
+    result.mip_count = local_transcoder.get_total_image_levels(result.data, result.size, 0);
     return result;
 }
 

@@ -22,9 +22,6 @@
 #include <unistd.h>
 #endif
 
-/* Global hookable handler for NT_BUILD_ASSERT (tests use setjmp/longjmp) */
-nt_build_assert_handler_t nt_build_assert_handler = NULL;
-
 /* --- Entry data management --- */
 
 static void nt_builder_free_entry_data(NtBuildEntry *entry) {
@@ -356,71 +353,6 @@ static void increment_kind_counter(NtBuilderContext *ctx, nt_build_asset_kind_t 
     }
 }
 
-/* --- Early dedup: compare decoded_data + encoding opts --- */
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- exact identity lists each active field
-static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
-    if (a->kind != b->kind) {
-        return false;
-    }
-    switch (a->kind) {
-    case NT_BUILD_ASSET_TEXTURE: {
-        const NtBuildTextureData *ta = (const NtBuildTextureData *)a->data;
-        const NtBuildTextureData *tb = (const NtBuildTextureData *)b->data;
-        if (ta->width != tb->width || ta->height != tb->height) {
-            return false;
-        }
-        /* max_size is NOT compared here — it's applied during decode (resize),
-         * so different max_size → different decoded pixels → different hash.
-         * Only encode-affecting options need comparison. */
-        if (ta->opts.format != tb->opts.format) {
-            return false;
-        }
-        /* Sampler defaults are baked into the V3 header — two textures
-         * with same pixels but different filter/wrap must not share an
-         * encoded entry, otherwise one of them gets the wrong sampler. */
-        if (ta->opts.filter_min != tb->opts.filter_min || ta->opts.filter_mag != tb->opts.filter_mag || ta->opts.wrap_u != tb->opts.wrap_u || ta->opts.wrap_v != tb->opts.wrap_v) {
-            return false;
-        }
-        if ((ta->opts.compress.codec != NT_BASISU_CODEC_NONE || ta->opts.gen_mipmaps) != (tb->opts.compress.codec != NT_BASISU_CODEC_NONE || tb->opts.gen_mipmaps)) {
-            return false;
-        }
-        /* premultiplied also affects encoded pixel bytes + header flags;
-         * mirror the opts_hash policy. */
-        if (ta->opts.premultiplied != tb->opts.premultiplied) {
-            return false;
-        }
-        /* Compare compression path */
-        if (ta->opts.compress.codec != tb->opts.compress.codec) {
-            return false;
-        }
-        if (ta->opts.compress.codec != NT_BASISU_CODEC_NONE) {
-            if (ta->opts.compress.codec == NT_BASISU_CODEC_ETC1S) {
-                return ta->opts.compress.etc1s.quality == tb->opts.compress.etc1s.quality && ta->opts.compress.etc1s.endpoint_rdo_threshold == tb->opts.compress.etc1s.endpoint_rdo_threshold &&
-                       ta->opts.compress.etc1s.selector_rdo_threshold == tb->opts.compress.etc1s.selector_rdo_threshold;
-            }
-            return ta->opts.compress.uastc.pack_level == tb->opts.compress.uastc.pack_level && ta->opts.compress.uastc.rdo_lambda == tb->opts.compress.uastc.rdo_lambda;
-        }
-        return true;
-    }
-    case NT_BUILD_ASSET_SHADER: {
-        const NtBuildShaderData *sa = (const NtBuildShaderData *)a->data;
-        const NtBuildShaderData *sb = (const NtBuildShaderData *)b->data;
-        return sa->stage == sb->stage;
-    }
-    case NT_BUILD_ASSET_MESH:
-    case NT_BUILD_ASSET_BLOB:
-    case NT_BUILD_ASSET_FONT:
-    case NT_BUILD_ASSET_ATLAS:
-    case NT_BUILD_ASSET_ATLAS_REGION:
-    case NT_BUILD_ASSET_SKELETON:
-    case NT_BUILD_ASSET_SKIN_BINDING:
-    case NT_BUILD_ASSET_CLIP:
-        return true; /* no encoding opts -- everything is in decoded_data */
-    }
-    return false;
-}
-
 /* Derive asset_type from build asset kind (deterministic 1:1 mapping) */
 static void derive_asset_type(nt_build_asset_kind_t kind, nt_asset_type_t *out_type) {
     switch (kind) {
@@ -665,7 +597,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                     b_data = nt_builder_redecode_texture(candidate, NULL, NULL);
                     b_owned = true;
                 }
-                bool match = (a_data && b_data) ? (memcmp(a_data, b_data, pe->decoded_size) == 0) : true;
+                bool match = memcmp(a_data, b_data, pe->decoded_size) == 0;
                 if (a_owned) {
                     free(a_data);
                 }
@@ -679,7 +611,8 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                 /* Non-texture types must always have decoded_data for memcmp verify */
                 NT_BUILD_ASSERT(0 && "hash match but no decoded_data on non-texture entry");
             }
-            if (opts_equal(pe, candidate)) {
+            /* The pixels matched exactly; the encode options are one hashed identity, the cache key. */
+            if (nt_builder_compute_opts_hash(pe) == nt_builder_compute_opts_hash(candidate)) {
                 candidate->dedup_original = (int32_t)i;
                 ctx->early_dedup_count++;
                 NT_LOG_INFO("early dedup: [%u] %s -> [%u] %s", j, candidate->path, i, pe->path);
@@ -1353,22 +1286,20 @@ static uint64_t nt_builder_path_id(const char *path) {
 /* Re-decode a texture entry from stored source. Returns malloc'd RGBA buffer. Caller frees.
  * Thread-safe: reads only from pe (immutable after add_*), uses fopen/fread (per-fd) and
  * stbi_load_from_memory (thread-local error state). Called from parallel encode workers. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- assert expansions inflate the count
 static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *out_w, uint32_t *out_h) {
     const NtBuildTextureData *td = (const NtBuildTextureData *)pe->data;
     uint8_t *pixels = NULL;
     uint32_t w = 0;
     uint32_t h = 0;
     if (td->source_data) {
-        nt_build_result_t r = nt_builder_decode_texture(td->source_data, td->source_size, &td->opts, &pixels, &w, &h);
-        NT_BUILD_ASSERT(r == NT_BUILD_OK && "redecode_texture: decode from memory failed");
+        pixels = nt_builder_decode_texture(td->source_data, td->source_size, &td->opts, &w, &h);
     } else if (td->source_path) {
         uint32_t fsize = 0;
         uint8_t *fdata = (uint8_t *)nt_builder_read_file(td->source_path, &fsize);
         NT_BUILD_ASSERT(fdata && "redecode_texture: re-read file failed");
-        nt_build_result_t r = nt_builder_decode_texture(fdata, fsize, &td->opts, &pixels, &w, &h);
+        pixels = nt_builder_decode_texture(fdata, fsize, &td->opts, &w, &h);
         free(fdata);
-        NT_BUILD_ASSERT(r == NT_BUILD_OK && "redecode_texture: decode from file failed");
     } else {
         NT_BUILD_ASSERT(0 && "redecode_texture: no source (raw texture should have decoded_data)");
     }
@@ -1458,12 +1389,10 @@ void nt_builder_add_texture(NtBuilderContext *ctx, const char *path, const nt_te
     free(resolved_path);
 
     /* Decode to RGBA */
-    uint8_t *pixels = NULL;
     uint32_t w = 0;
     uint32_t h = 0;
-    nt_build_result_t r = nt_builder_decode_texture(file_data, file_size, opts, &pixels, &w, &h);
+    uint8_t *pixels = nt_builder_decode_texture(file_data, file_size, opts, &w, &h);
     free(file_data);
-    NT_BUILD_ASSERT(r == NT_BUILD_OK && "add_texture: decode failed");
 
     /* Hash decoded pixels, then free -- re-read from stored path at encode time */
     uint64_t hash = nt_hash64(pixels, w * h * 4).value;
@@ -1529,11 +1458,9 @@ void nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *da
     NT_BUILD_ASSERT(ctx && data && size > 0 && resource_id && "invalid texture_from_memory args");
     nt_texture_pixel_format_t effective_format = nt_builder_assert_texture_opts(opts);
 
-    uint8_t *pixels = NULL;
     uint32_t w = 0;
     uint32_t h = 0;
-    nt_build_result_t r = nt_builder_decode_texture(data, size, opts, &pixels, &w, &h);
-    NT_BUILD_ASSERT(r == NT_BUILD_OK && "add_texture_from_memory: decode failed");
+    uint8_t *pixels = nt_builder_decode_texture(data, size, opts, &w, &h);
 
     /* Hash decoded pixels, then free -- deep copy source for re-decode at encode time */
     uint64_t hash = nt_hash64(pixels, w * h * 4).value;
@@ -1554,11 +1481,9 @@ void nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixel
     NT_BUILD_ASSERT(ctx && rgba_pixels && width > 0 && height > 0 && resource_id && "invalid texture_raw args");
     nt_texture_pixel_format_t effective_format = nt_builder_assert_texture_opts(opts);
 
-    uint8_t *pixels = NULL;
     uint32_t w = 0;
     uint32_t h = 0;
-    nt_build_result_t r = nt_builder_decode_texture_raw(rgba_pixels, width, height, opts, &pixels, &w, &h);
-    NT_BUILD_ASSERT(r == NT_BUILD_OK && "add_texture_raw: decode failed");
+    uint8_t *pixels = nt_builder_decode_texture_raw(rgba_pixels, width, height, opts, &w, &h);
 
     /* Hash and keep decoded_data -- can't re-derive from source */
     uint64_t hash = nt_hash64(pixels, w * h * 4).value;

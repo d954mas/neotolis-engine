@@ -38,6 +38,9 @@ and never picks a format; the transcoder is a codec with no GPU knowledge. That
 staging buffer is the same one mesh activation re-interleaves SoA vertices
 through — one grow-on-demand allocation, freed once it goes idle.
 
+Pack bytes are trusted; which header and blob faults assert and which limits
+return 0 is in [API contracts, Texture activation](../core/api-contracts.md#texture-activation).
+
 The target selector walks a fixed per-codec order and takes the first
 candidate that the GPU (`nt_gfx_gpu_caps()`) reports and the build admits
 (`NT_BASISU_HAS_ETC2/BC7/ASTC`,

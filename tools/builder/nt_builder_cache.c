@@ -16,19 +16,17 @@
 #include <unistd.h>
 #endif
 
-/* --- opts_version_hash: serialize kind + type-specific fields + builder version --- */
+/* The encode identity of an entry: its cache key and, after an exact pixel match, its early-dedup test. */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- exact identity lists each active field
 uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
     uint8_t buf[128];
     uint32_t pos = 0;
 
-    /* Builder version -- invalidates all cache on encoder changes */
     uint32_t version = NT_BUILDER_VERSION;
     memcpy(buf + pos, &version, sizeof(version));
     pos += (uint32_t)sizeof(version);
 
-    /* Asset kind */
     uint32_t kind = (uint32_t)pe->kind;
     memcpy(buf + pos, &kind, sizeof(kind));
     pos += (uint32_t)sizeof(kind);
@@ -36,23 +34,19 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
     switch (pe->kind) {
     case NT_BUILD_ASSET_TEXTURE: {
         const NtBuildTextureData *td = (const NtBuildTextureData *)pe->data;
-        /* Dimensions affect encoded header (width/height stored in NtTextureAssetHeader).
-         * Two textures with same pixels but different aspect ratios must not share cache. */
+        /* Equal pixel bytes can still differ in shape. */
         memcpy(buf + pos, &td->width, sizeof(td->width));
         pos += (uint32_t)sizeof(td->width);
         memcpy(buf + pos, &td->height, sizeof(td->height));
         pos += (uint32_t)sizeof(td->height);
-        /* format (encode-affecting, same as opts_equal) */
         uint32_t format = (uint32_t)td->opts.format;
         memcpy(buf + pos, &format, sizeof(format));
         pos += (uint32_t)sizeof(format);
 
-        /* premultiplied alpha modifies pixel bytes + header flags */
         uint8_t premul = td->opts.premultiplied ? 1 : 0;
         memcpy(buf + pos, &premul, sizeof(premul));
         pos += (uint32_t)sizeof(premul);
 
-        /* Sampler defaults change the encoded header and must invalidate the cache. */
         uint8_t fmin = (uint8_t)td->opts.filter_min;
         uint8_t fmag = (uint8_t)td->opts.filter_mag;
         uint8_t wu = (uint8_t)td->opts.wrap_u;
@@ -64,7 +58,7 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
         buf[pos++] = wv;
         buf[pos++] = gen_mips;
 
-        /* compression path */
+        /* Redundant with codec; kept so existing cache keys stay valid. */
         uint8_t has_compress = td->opts.compress.codec != NT_BASISU_CODEC_NONE ? 1 : 0;
         memcpy(buf + pos, &has_compress, sizeof(has_compress));
         pos += (uint32_t)sizeof(has_compress);
