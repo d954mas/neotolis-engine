@@ -566,14 +566,14 @@ void test_srgb_updates_keep_the_interpretation(void) {
 /* Scaled by 1/16 into RGBA8 with a step at 1 in alpha: values above 1 must reach the
  * shader unclamped, and no float framebuffer is involved. */
 static const char *s_hdr_fs = "precision highp float;\n"
-                              "uniform sampler2D u_tex;\n"
+                              "uniform highp sampler2D u_tex;\n"
                               "in vec2 v_uv;\n"
                               "out vec4 frag_color;\n"
                               "void main() { vec3 c = texture(u_tex, v_uv).rgb; frag_color = vec4(c / 16.0, step(1.0, c.g)); }\n";
 
 static uint8_t hdr_byte(float v) { return (uint8_t)((v / 16.0F * 255.0F) + 0.5F); }
 
-/* Left half (0.25, 2, 8), right half (8, 0.25, 2): a channel swap, flip or clamp fails. */
+/* Left half (0.25, 2, 8), right half (8, 0.25, 2): a channel swap, horizontal flip or clamp fails. */
 void test_raw_rgb9e5_chain_samples_above_one(void) {
     static float rgb[HDR_W * HDR_H * 3];
     for (uint32_t y = 0; y < HDR_H; y++) {

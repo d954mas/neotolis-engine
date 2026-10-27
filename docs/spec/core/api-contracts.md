@@ -343,7 +343,9 @@ WebGL 2, so it rejects `gen_mipmaps`.
 `RGB9E5` is uncompressed linear HDR storage (`GL_RGB9_E5`, uploaded as
 `GL_UNSIGNED_INT_5_9_9_9_REV` words). It is filterable everywhere and needs no
 capability bit, but it is not color-renderable in WebGL 2, so it rejects
-`gen_mipmaps`; a chain comes in through `level_count`.
+`gen_mipmaps`; a chain comes in through `level_count`. A shader that samples it
+declares `highp sampler2D`: GLSL ES samplers default to `lowp`, which only
+guarantees values up to 2.
 
 `BC7_RGBA` and `BC7_SRGB_ALPHA` additionally require both base dimensions to be
 multiples of 4, including textures smaller than one block. This is the portable WebGL BPTC

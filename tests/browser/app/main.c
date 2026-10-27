@@ -170,7 +170,7 @@ static probe_program_t s_probe_programs[PROBE_COUNT] = {
     /* Explicit LOD, not screen-space derivatives: the level under test must not depend on how the
      * driver rounds lambda for a 1x1 viewport. */
     [PROBE_BASIS] = {.vs_source = "void main() { vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)); gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }",
-                     .fs_source = "precision highp float; uniform sampler2D u_basis; layout(std140) uniform Draw { vec4 u_basis_uv; }; out vec4 color;\n"
+                     .fs_source = "precision highp float; uniform highp sampler2D u_basis; layout(std140) uniform Draw { vec4 u_basis_uv; }; out vec4 color;\n"
                                   "void main() { color = textureLod(u_basis, u_basis_uv.xy, u_basis_uv.z) * u_basis_uv.w; }"},
     [PROBE_DEPTH] =
         {.vs_source =
@@ -1055,7 +1055,13 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'rich_link_css': function() {
             return { 'present': _nt_test_rich_link_present() !== 0, 'x': _nt_test_rich_link_css_x(), 'y': _nt_test_rich_link_css_y(), 'w': _nt_test_rich_link_css_w(), 'h': _nt_test_rich_link_css_h() };
         },
-        'rich_link_clicks': function() { return _nt_test_rich_link_clicks() >>> 0; },
+        'rich_link_clicks': function() { return _nt_test_rich_link_clicks() >>> 0; }
+    };
+})
+
+/* A second block because one EM_JS body must stay under the 4095-character C string limit. */
+EM_JS(void, nt_test_install_io_hooks, (void), {
+    Object.assign(window['__nt'], {
         'http_post_echo': function() { _nt_test_http_post_echo(); },
         'http_get_404': function() { _nt_test_http_get_404(); },
         'http_get_slow_timeout': function() { _nt_test_http_get_slow_timeout(); },
@@ -1071,7 +1077,7 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'http_free': function() { _nt_test_http_free(); },
         'crash_load': function() { return UTF8ToString(_nt_test_crash_load()); },
         'crash_clear': function() { _nt_test_crash_clear(); }
-    };
+    });
 })
 /* clang-format on */
 #endif /* __EMSCRIPTEN__ */
@@ -1564,6 +1570,7 @@ int main(int argc, char *argv[]) {
     s_nt_hidden_caption = s_caption;
     s_nt_hidden_caption.color &= 0x00FFFFFFU;
     nt_test_install_hooks(); /* window.__nt smoke-test surface */
+    nt_test_install_io_hooks();
 #endif
 
     nt_log_info("browser_smoke: starting");

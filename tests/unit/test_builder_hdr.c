@@ -138,6 +138,8 @@ void test_rgb9e5_rounding_edges(void) {
     TEST_ASSERT_EQUAL_HEX32(E5(257, 0, 0, 16), pack_one(1.0F + ldexpf(1.0F, -9), 0.0F, 0.0F));
     /* The source limit is not representable: 65216 / 128 = 509.5 rounds to 510, so 65280. */
     TEST_ASSERT_EQUAL_HEX32(E5(510, 0, 0, 31), pack_one(65216.0F, 0.0F, 0.0F));
+    /* Just below half a quantum rounds down; float x + 0.5 would round it up to 1. */
+    TEST_ASSERT_EQUAL_HEX32(E5(256, 0, 0, 16), pack_one(1.0F, nextafterf(ldexpf(1.0F, -9), 0.0F), 0.0F));
 }
 
 // #endregion
@@ -235,10 +237,12 @@ static const float k_hdr_rgb[4 * 2 * 3] = {
 
 static void write_hdr_file(const char *path) { TEST_ASSERT_NOT_EQUAL_INT(0, stbi_write_hdr(path, 4, 2, 3, k_hdr_rgb)); }
 
-static texture_asset_t build_hdr_pack(const char *pack_path, int source, const char *cache_dir) {
+typedef enum { CACHE_NONE, CACHE_COLD, CACHE_WARM } cache_run_t;
+
+static texture_asset_t build_hdr_pack(const char *pack_path, int source, const char *cache_dir, cache_run_t cache_run) {
     const char *hdr_path = TMP_DIR "/source.hdr";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
-    if (cache_dir) {
+    if (cache_run != CACHE_NONE) {
         nt_builder_set_cache_dir(ctx, cache_dir);
     }
     nt_tex_opts_t opts = hdr_opts(true);
@@ -252,17 +256,31 @@ static texture_asset_t build_hdr_pack(const char *pack_path, int source, const c
     } else {
         nt_builder_add_texture_raw_f32(ctx, k_hdr_rgb, 4, 2, hdr_path, &opts);
     }
-    finish(ctx);
+    if (cache_run == CACHE_COLD) {
+        /* An entry left by an earlier run would make the cold build warm. */
+        char entry[512];
+        nt_builder_build_cache_path(cache_dir, ctx->pending[0].decoded_hash, nt_builder_compute_opts_hash(&ctx->pending[0]), entry, sizeof(entry));
+        (void)remove(entry);
+    }
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    if (cache_run != CACHE_NONE) {
+        TEST_ASSERT_EQUAL_UINT32(cache_run == CACHE_WARM ? 1 : 0, ctx->cache_hit_count);
+        TEST_ASSERT_EQUAL_UINT32(cache_run == CACHE_COLD ? 1 : 0, ctx->cache_miss_count);
+    }
+    nt_builder_free_pack(ctx);
     return read_texture(pack_path);
 }
 
 void test_hdr_file_memory_and_float_input_pack_the_same_texture(void) {
     write_hdr_file(TMP_DIR "/source.hdr");
-    texture_asset_t from_file = build_hdr_pack(TMP_DIR "/hdr_file.ntpack", 0, NULL);
-    texture_asset_t from_memory = build_hdr_pack(TMP_DIR "/hdr_memory.ntpack", 1, NULL);
-    texture_asset_t from_floats = build_hdr_pack(TMP_DIR "/hdr_floats.ntpack", 2, NULL);
+    texture_asset_t from_file = build_hdr_pack(TMP_DIR "/hdr_file.ntpack", 0, NULL, CACHE_NONE);
+    texture_asset_t from_memory = build_hdr_pack(TMP_DIR "/hdr_memory.ntpack", 1, NULL, CACHE_NONE);
+    texture_asset_t from_floats = build_hdr_pack(TMP_DIR "/hdr_floats.ntpack", 2, NULL, CACHE_NONE);
+    TEST_ASSERT_EQUAL_UINT16(3, from_floats.hdr.mip_count);
     TEST_ASSERT_EQUAL_UINT16(3, from_file.hdr.mip_count);
+    TEST_ASSERT_EQUAL_UINT16(3, from_memory.hdr.mip_count);
     TEST_ASSERT_EQUAL_UINT32(from_floats.hdr.data_size, from_file.hdr.data_size);
+    TEST_ASSERT_EQUAL_UINT32(from_floats.hdr.data_size, from_memory.hdr.data_size);
     TEST_ASSERT_EQUAL_MEMORY(from_floats.words, from_file.words, from_file.hdr.data_size);
     TEST_ASSERT_EQUAL_MEMORY(from_floats.words, from_memory.words, from_memory.hdr.data_size);
     /* Values above 1 survive decode and pack. */
@@ -278,12 +296,27 @@ void test_hdr_cold_and_warm_cache_pack_the_same_bytes(void) {
     write_hdr_file(TMP_DIR "/source.hdr");
     const char *cache_dir = TMP_DIR "/cache";
     (void)MKDIR(cache_dir);
-    texture_asset_t cold = build_hdr_pack(TMP_DIR "/hdr_cold.ntpack", 0, cache_dir);
-    texture_asset_t warm = build_hdr_pack(TMP_DIR "/hdr_warm.ntpack", 0, cache_dir);
+    texture_asset_t cold = build_hdr_pack(TMP_DIR "/hdr_cold.ntpack", 0, cache_dir, CACHE_COLD);
+    texture_asset_t warm = build_hdr_pack(TMP_DIR "/hdr_warm.ntpack", 0, cache_dir, CACHE_WARM);
     TEST_ASSERT_EQUAL_UINT32(cold.pack_size, warm.pack_size);
     TEST_ASSERT_EQUAL_MEMORY(cold.pack, warm.pack, cold.pack_size);
     free(cold.pack);
     free(warm.pack);
+}
+
+/* For RGB9E5, gen_mipmaps decides the payload (baked chain or one level), so it is part of the key. */
+void test_hdr_gen_mipmaps_alone_changes_the_cache_key(void) {
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/hdr_keys.ntpack");
+    nt_tex_opts_t chain = hdr_opts(true);
+    nt_tex_opts_t one_level = hdr_opts(false);
+    one_level.filter_min = chain.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+    nt_builder_add_texture_raw_f32(ctx, k_hdr_rgb, 4, 2, "chain", &chain);
+    nt_builder_add_texture_raw_f32(ctx, k_hdr_rgb, 4, 2, "one_level", &one_level);
+    TEST_ASSERT_EQUAL_UINT64(ctx->pending[0].decoded_hash, ctx->pending[1].decoded_hash);
+    TEST_ASSERT_TRUE(nt_builder_compute_opts_hash(&ctx->pending[0]) != nt_builder_compute_opts_hash(&ctx->pending[1]));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    TEST_ASSERT_EQUAL_UINT32(0, ctx->early_dedup_count);
+    nt_builder_free_pack(ctx);
 }
 
 // #endregion
@@ -295,6 +328,7 @@ static void expect_raw_value_assert(float value) {
     nt_tex_opts_t opts = hdr_opts(false);
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/bad.ntpack");
     EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_texture_raw_f32(ctx, rgb, 1, 1, "bad", &opts), "finite and in [0, 65216]");
+    nt_builder_free_pack(ctx);
 }
 
 void test_hdr_values_outside_the_source_range_assert(void) {
@@ -304,6 +338,16 @@ void test_hdr_values_outside_the_source_range_assert(void) {
     expect_raw_value_assert(INFINITY);
 }
 
+void test_hdr_file_values_outside_the_source_range_assert(void) {
+    /* Radiance stores 2^17 exactly; the file path checks the decoded floats too. */
+    const float rgb[3] = {131072.0F, 0.0F, 0.0F};
+    TEST_ASSERT_NOT_EQUAL_INT(0, stbi_write_hdr(TMP_DIR "/too_bright.hdr", 1, 1, 3, rgb));
+    nt_tex_opts_t opts = hdr_opts(false);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/bad.ntpack");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_texture(ctx, TMP_DIR "/too_bright.hdr", &opts), "finite and in [0, 65216]");
+    nt_builder_free_pack(ctx);
+}
+
 void test_hdr_range_is_checked_before_resize(void) {
     /* Averaged with its neighbours, -1 would vanish into a valid value. */
     const float rgb[2 * 3] = {-1.0F, 0.0F, 0.0F, 3.0F, 0.0F, 0.0F};
@@ -311,6 +355,7 @@ void test_hdr_range_is_checked_before_resize(void) {
     opts.max_size = 1;
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/bad.ntpack");
     EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_texture_raw_f32(ctx, rgb, 2, 1, "bad", &opts), "finite and in [0, 65216]");
+    nt_builder_free_pack(ctx);
 }
 
 void test_hdr_source_and_format_must_agree(void) {
@@ -321,19 +366,21 @@ void test_hdr_source_and_format_must_agree(void) {
 
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/bad.ntpack");
     EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_texture(ctx, TMP_DIR "/source.png", &opts), "RGB9E5 requires an HDR (.hdr) source");
-    ctx = nt_builder_start_pack(TMP_DIR "/bad.ntpack");
     EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_texture(ctx, TMP_DIR "/source.hdr", NULL), "an HDR source requires format RGB9E5");
-    ctx = nt_builder_start_pack(TMP_DIR "/bad.ntpack");
     EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_texture_raw(ctx, rgba, 1, 1, "bad", &opts), "use nt_builder_add_texture_raw_f32");
     const float rgb[3] = {1.0F, 1.0F, 1.0F};
-    ctx = nt_builder_start_pack(TMP_DIR "/bad.ntpack");
     EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_texture_raw_f32(ctx, rgb, 1, 1, "bad", NULL), "float pixels require format RGB9E5");
+    nt_builder_free_pack(ctx);
 }
 
 void test_hdr_opts_contract(void) {
     nt_tex_opts_t opts = hdr_opts(true);
     opts.compress = nt_tex_compress_uastc_default();
     EXPECT_BUILD_ASSERT_MATCH((void)nt_builder_assert_texture_opts(&opts), "Basis compression requires");
+    /* Premultiplying would treat the float source as RGBA8 bytes. */
+    opts = hdr_opts(true);
+    opts.premultiplied = true;
+    EXPECT_BUILD_ASSERT_MATCH((void)nt_builder_assert_texture_opts(&opts), "premultiplied=true requires RGBA8");
     /* A mip filter without a baked chain has no levels to sample. */
     opts = hdr_opts(false);
     opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR;
@@ -350,6 +397,7 @@ void test_atlas_rgb9e5_page_asserts(void) {
     opts.premultiplied = false; /* premultiplication already rejects every format but RGBA8 */
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas.ntpack");
     EXPECT_BUILD_ASSERT_MATCH((void)nt_atlas_begin(ctx, "page", &opts), "atlas pages are LDR");
+    nt_builder_free_pack(ctx);
 }
 
 void test_atlas_hdr_sprite_is_a_content_error(void) {
@@ -380,7 +428,9 @@ int main(void) {
     RUN_TEST(test_rgb9e5_max_size_resizes_with_the_box_filter);
     RUN_TEST(test_hdr_file_memory_and_float_input_pack_the_same_texture);
     RUN_TEST(test_hdr_cold_and_warm_cache_pack_the_same_bytes);
+    RUN_TEST(test_hdr_gen_mipmaps_alone_changes_the_cache_key);
     RUN_TEST(test_hdr_values_outside_the_source_range_assert);
+    RUN_TEST(test_hdr_file_values_outside_the_source_range_assert);
     RUN_TEST(test_hdr_range_is_checked_before_resize);
     RUN_TEST(test_hdr_source_and_format_must_agree);
     RUN_TEST(test_hdr_opts_contract);

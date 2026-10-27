@@ -1477,8 +1477,8 @@ static nt_gfx_result_t make_texture(const nt_texture_desc_t *desc, nt_texture_t 
         /* Integer storage samples NEAREST only, so extra levels are dead VRAM. */
         NT_ASSERT(local_desc.level_count <= 1 && "integer texture mip levels are not sampleable");
     }
-    /* glGenerateMipmap needs color-renderable storage; WebGL2 does not render to SRGB8 or RGB9E5
-       (desktop GL does, so native runs would hide it). */
+    /* WebGL2 glGenerateMipmap needs color-renderable storage, which SRGB8 and RGB9E5 are not;
+       desktop GL does not require it, so native runs would hide the failure. */
     NT_ASSERT((local_desc.format != NT_TEXTURE_FORMAT_SRGB8 || !local_desc.gen_mipmaps) && "make_texture: SRGB8 cannot generate mipmaps -- use SRGB8_ALPHA8");
     NT_ASSERT((local_desc.format != NT_TEXTURE_FORMAT_RGB9E5 || !local_desc.gen_mipmaps) && "make_texture: RGB9E5 cannot generate mipmaps -- upload a baked chain");
     if (local_desc.format == NT_TEXTURE_FORMAT_RGBA16F) {
@@ -2713,6 +2713,14 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     /* Subtraction safe: the resource core checked size >= sizeof header. */
     NT_ASSERT(hdr->data_size == size - sizeof(NtTextureAssetHeader) && "texture data_size differs from its blob");
     NT_ASSERT((hdr->compression == NT_TEXTURE_COMPRESSION_RAW || hdr->compression == NT_TEXTURE_COMPRESSION_BASIS) && "texture compression unknown");
+    if (hdr->compression == NT_TEXTURE_COMPRESSION_RAW) {
+        NT_ASSERT((hdr->mip_count == 1 || hdr->mip_count == nt_texture_full_chain_levels(hdr->width, hdr->height)) && "texture RAW mip_count is neither 1 nor the full chain");
+        uint64_t expected = 0;
+        for (uint32_t level = 0; level < hdr->mip_count; level++) {
+            expected += nt_texture_level_bytes((nt_texture_pixel_format_t)hdr->format, nt_texture_level_extent(hdr->width, level), nt_texture_level_extent(hdr->height, level));
+        }
+        NT_ASSERT(expected == hdr->data_size && "texture RAW data_size differs from its pixels");
+    }
     if (hdr->width > g_nt_gfx.gpu_caps.max_texture_size || hdr->height > g_nt_gfx.gpu_caps.max_texture_size) {
         NT_LOG_ERROR("activate_texture: %ux%u exceeds GPU max_texture_size %u", hdr->width, hdr->height, g_nt_gfx.gpu_caps.max_texture_size);
         return 0;
@@ -2724,12 +2732,6 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     /* RAW compression: one level or the full chain after the header */
     if (hdr->compression == NT_TEXTURE_COMPRESSION_RAW) {
         nt_texture_format_t pixel_fmt = (nt_texture_format_t)hdr->format;
-        NT_ASSERT((hdr->mip_count == 1 || hdr->mip_count == nt_texture_full_chain_levels(width, height)) && "texture RAW mip_count is neither 1 nor the full chain");
-        uint64_t expected = 0;
-        for (uint32_t level = 0; level < hdr->mip_count; level++) {
-            expected += nt_texture_level_bytes(pixel_fmt, nt_texture_level_extent(width, level), nt_texture_level_extent(height, level));
-        }
-        NT_ASSERT(expected == hdr->data_size && "texture RAW data_size differs from its pixels");
         nt_texture_desc_t desc = {
             .width = width,
             .height = height,

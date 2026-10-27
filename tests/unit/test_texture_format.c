@@ -93,6 +93,7 @@ void test_level_bytes_uncompressed(void) {
     TEST_ASSERT_EQUAL_UINT64(364, nt_texture_level_bytes(NT_TEXTURE_FORMAT_RGBA8, 13, 7));
     TEST_ASSERT_EQUAL_UINT64(364, nt_texture_level_bytes(NT_TEXTURE_FORMAT_SRGB8_ALPHA8, 13, 7));
     TEST_ASSERT_EQUAL_UINT64(273, nt_texture_level_bytes(NT_TEXTURE_FORMAT_SRGB8, 13, 7));
+    TEST_ASSERT_EQUAL_UINT64(364, nt_texture_level_bytes(NT_TEXTURE_FORMAT_RGB9E5, 13, 7));
     TEST_ASSERT_EQUAL_UINT64(182, nt_texture_level_bytes(NT_TEXTURE_FORMAT_RG8, 13, 7));
     TEST_ASSERT_EQUAL_UINT64(91, nt_texture_level_bytes(NT_TEXTURE_FORMAT_R8, 13, 7));
     TEST_ASSERT_EQUAL_UINT64(32, nt_texture_level_bytes(NT_TEXTURE_FORMAT_RGBA16F, 2, 2));

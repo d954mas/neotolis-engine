@@ -64,7 +64,7 @@ uint32_t nt_builder_texture_source_size(nt_texture_pixel_format_t format, uint32
 /* Values Basis UASTC HDR stores without the HDRScale factor a shader would have to apply
  * (ASTC_HDR_MAX_VAL); the builder neither clamps nor tone-maps. */
 static void assert_hdr_range(const float *rgb, uint32_t pixel_count) {
-    for (uint32_t i = 0; i < pixel_count * 3U; i++) {
+    for (size_t i = 0; i < (size_t)pixel_count * 3U; i++) {
         NT_BUILD_ASSERT(isfinite(rgb[i]) && rgb[i] >= 0.0F && rgb[i] <= 65216.0F && "texture HDR: every RGB value must be finite and in [0, 65216]");
     }
 }
@@ -194,15 +194,10 @@ void *nt_builder_decode_texture_raw(const void *pixels, uint32_t width, uint32_t
 }
 
 /* EXT_texture_shared_exponent reference encoder (9-bit mantissas, exponent bias 15).
- * The clamp to the format maximum (511/512 * 2^16) only absorbs filter rounding:
- * the source range is asserted at decode. */
+ * No clamp to the format maximum: the asserted source range [0, 65216] and the box
+ * filter keep every value below it. */
 static uint32_t pack_rgb9e5(const float *rgb) {
-    float c[3];
-    float max_c = 0.0F;
-    for (int k = 0; k < 3; k++) {
-        c[k] = rgb[k] < 65408.0F ? rgb[k] : 65408.0F;
-        max_c = c[k] > max_c ? c[k] : max_c;
-    }
+    const float max_c = fmaxf(rgb[0], fmaxf(rgb[1], rgb[2]));
     if (max_c == 0.0F) {
         return 0;
     }
@@ -210,12 +205,14 @@ static uint32_t pack_rgb9e5(const float *rgb) {
     int e = 0;
     (void)frexpf(max_c, &e);
     int exp_shared = (e - 1 < -16 ? -16 : e - 1) + 16;
-    if (floorf(ldexpf(max_c, 24 - exp_shared) + 0.5F) == 512.0F) {
+    /* roundf is the reference floor(x + 0.5) without the float add, which rounds
+     * 0.5 - 2^-25 up to 1. */
+    if (roundf(ldexpf(max_c, 24 - exp_shared)) == 512.0F) {
         exp_shared++;
     }
     uint32_t packed = (uint32_t)exp_shared << 27U;
-    for (int k = 0; k < 3; k++) {
-        packed |= (uint32_t)floorf(ldexpf(c[k], 24 - exp_shared) + 0.5F) << (9U * (uint32_t)k);
+    for (uint32_t k = 0; k < 3; k++) {
+        packed |= (uint32_t)roundf(ldexpf(rgb[k], 24 - exp_shared)) << (9U * k);
     }
     return packed;
 }
