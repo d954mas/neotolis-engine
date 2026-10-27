@@ -2130,13 +2130,13 @@ void test_gfx_texture_pool_full_asserts(void) {
 /* ---- Activator: a zero dimension in pack bytes asserts ---- */
 
 void test_activate_texture_zero_dimensions_assert(void) {
-    uint8_t blob[sizeof(NtTextureAssetHeaderV2)];
-    NtTextureAssetHeaderV2 *hdr = (NtTextureAssetHeaderV2 *)blob;
+    uint8_t blob[sizeof(NtTextureAssetHeader)];
+    NtTextureAssetHeader *hdr = (NtTextureAssetHeader *)blob;
     const uint32_t sizes[2][2] = {{0, 1}, {1, 0}};
     for (int i = 0; i < 2; i++) {
         memset(blob, 0, sizeof(blob));
         hdr->magic = NT_TEXTURE_MAGIC;
-        hdr->version = NT_TEXTURE_VERSION_V2;
+        hdr->version = NT_TEXTURE_VERSION;
         hdr->format = NT_TEXTURE_FORMAT_RGBA8;
         hdr->width = sizes[i][0];
         hdr->height = sizes[i][1];
@@ -2152,12 +2152,12 @@ void test_activate_texture_valid_blob(void) {
     uint32_t w = 2;
     uint32_t h = 2;
     uint32_t pixel_size = w * h * 4;
-    uint32_t blob_size = (uint32_t)sizeof(NtTextureAssetHeaderV2) + pixel_size;
-    uint8_t blob[sizeof(NtTextureAssetHeaderV2) + 16];
-    NtTextureAssetHeaderV2 *hdr = (NtTextureAssetHeaderV2 *)blob;
+    uint32_t blob_size = (uint32_t)sizeof(NtTextureAssetHeader) + pixel_size;
+    uint8_t blob[sizeof(NtTextureAssetHeader) + 16];
+    NtTextureAssetHeader *hdr = (NtTextureAssetHeader *)blob;
     memset(blob, 0, sizeof(blob));
     hdr->magic = NT_TEXTURE_MAGIC;
-    hdr->version = NT_TEXTURE_VERSION_V2;
+    hdr->version = NT_TEXTURE_VERSION;
     hdr->format = NT_TEXTURE_FORMAT_RGBA8;
     hdr->width = w;
     hdr->height = h;
@@ -2165,7 +2165,7 @@ void test_activate_texture_valid_blob(void) {
     hdr->compression = NT_TEXTURE_COMPRESSION_RAW;
     hdr->data_size = pixel_size;
     /* Fill pixel data with non-zero */
-    memset(blob + sizeof(NtTextureAssetHeaderV2), 0xFF, pixel_size);
+    memset(blob + sizeof(NtTextureAssetHeader), 0xFF, pixel_size);
     uint32_t handle = nt_gfx_activate_texture(blob, blob_size);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
     nt_gfx_deactivate_texture(handle);

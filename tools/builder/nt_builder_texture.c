@@ -245,9 +245,9 @@ void nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width
         payload = stripped;
     }
 
-    NtTextureAssetHeaderV2 tex_hdr = {0};
+    NtTextureAssetHeader tex_hdr = {0};
     tex_hdr.magic = NT_TEXTURE_MAGIC;
-    tex_hdr.version = NT_TEXTURE_VERSION_V2;
+    tex_hdr.version = NT_TEXTURE_VERSION;
     tex_hdr.format = (uint16_t)opts->format;
     tex_hdr.width = width;
     tex_hdr.height = height;

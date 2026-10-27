@@ -2701,7 +2701,7 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     if (g_nt_gfx.context_lost) {
         return 0;
     }
-    const NtTextureAssetHeaderV2 *hdr2 = (const NtTextureAssetHeaderV2 *)data;
+    const NtTextureAssetHeader *hdr2 = (const NtTextureAssetHeader *)data;
 
     // #region header (pack invariants assert; device limits reject)
     NT_ASSERT(nt_texture_pixel_format_valid((nt_texture_pixel_format_t)hdr2->format) && "texture pixel format invalid");
@@ -2713,7 +2713,7 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     }
     NT_ASSERT(hdr2->width != 0 && hdr2->height != 0 && hdr2->width <= UINT16_MAX && hdr2->height <= UINT16_MAX && "texture dimensions out of range");
     /* Subtraction safe: the resource core checked size >= sizeof header. */
-    NT_ASSERT(hdr2->data_size == size - sizeof(NtTextureAssetHeaderV2) && "texture data_size differs from its blob");
+    NT_ASSERT(hdr2->data_size == size - sizeof(NtTextureAssetHeader) && "texture data_size differs from its blob");
     const uint16_t width = (uint16_t)hdr2->width;
     const uint16_t height = (uint16_t)hdr2->height;
     // #endregion
@@ -2726,7 +2726,7 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
         nt_texture_desc_t desc = {
             .width = width,
             .height = height,
-            .data = data + sizeof(NtTextureAssetHeaderV2),
+            .data = data + sizeof(NtTextureAssetHeader),
             .format = pixel_fmt,
             .min_filter = (nt_texture_filter_t)hdr2->default_min_filter,
             .mag_filter = (nt_texture_filter_t)hdr2->default_mag_filter,
@@ -2746,7 +2746,7 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
         s_transcoder_initialized = true;
     }
 
-    const uint8_t *basis_data = data + sizeof(NtTextureAssetHeaderV2);
+    const uint8_t *basis_data = data + sizeof(NtTextureAssetHeader);
     uint32_t basis_size = hdr2->data_size;
 
     // #region blob cross-check

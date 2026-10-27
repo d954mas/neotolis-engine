@@ -236,9 +236,4 @@ static_assert(sizeof(NtTextureAssetHeader) == 28, "TextureAssetHeader must be 28
 _Static_assert(sizeof(NtTextureAssetHeader) == 28, "TextureAssetHeader must be 28 bytes");
 #endif
 
-/* Backward compat alias — code that used V2 suffix continues to compile.
- * The struct is the V3 layout; the alias is purely a name. */
-typedef NtTextureAssetHeader NtTextureAssetHeaderV2;
-#define NT_TEXTURE_VERSION_V2 NT_TEXTURE_VERSION
-
 #endif /* NT_TEXTURE_FORMAT_H */
