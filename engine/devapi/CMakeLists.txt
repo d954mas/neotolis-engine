@@ -111,11 +111,11 @@ if(NT_DEVAPI_GROUP_ENTITY_WRITE)
     target_compile_definitions(nt_devapi_entity_write PUBLIC NT_DEVAPI_GROUP_ENTITY_WRITE=1)
 endif()
 
-# Capture group (capture.frame / capture.region): the first DEFERRED data-returning commands. The seam
+# Capture group (capture.frame / capture.region). The reply is built at nt_devapi_frame_rendered; the
 # producer chains nt_gfx_read_pixels (readback) -> RGB strip + box-average -> nt_fpng (PNG encode) ->
-# nt_base64. nt_devapi_capture.h is the host-facing pre-swap-seam header.
+# nt_base64.
 if(NT_DEVAPI_GROUP_CAPTURE)
-    nt_add_module(nt_devapi_capture LOG_DOMAIN "devapi" nt_devapi_capture.c nt_devapi_capture.h nt_devapi_capture_internal.h)
+    nt_add_module(nt_devapi_capture LOG_DOMAIN "devapi" nt_devapi_capture.c)
     target_link_libraries(nt_devapi_capture PUBLIC nt_devapi PRIVATE nt_gfx_interface nt_fpng nt_base64 nt_window_interface)
     target_compile_definitions(nt_devapi_capture PUBLIC NT_DEVAPI_GROUP_CAPTURE=1)
 endif()

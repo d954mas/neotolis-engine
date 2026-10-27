@@ -261,14 +261,6 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_metrics PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_metrics)
 
-    # --- Window pre-swap hook registry (L1, no GL/GLFW) ---
-    # nt_window_stub = the real shared nt_window.c (hook registry) + a stubbed backend. nt_assert_trap.c
-    # backs the table-full death-test; needs unit/ on the include path for "test_helpers/nt_assert_trap.h".
-    add_executable(test_window_hooks unit/test_window_hooks.c unit/test_helpers/nt_assert_trap.c)
-    target_link_libraries(test_window_hooks PRIVATE nt_window_stub nt_core nt_log_stub unity)
-    target_include_directories(test_window_hooks PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
-    nt_setup_test_target(test_window_hooks)
-
     # --- Log API tests (domain functions, macros, level filtering) ---
     add_executable(test_log_api unit/test_log_api.c)
     target_link_libraries(test_log_api PRIVATE nt_log unity)
@@ -1039,15 +1031,14 @@ if(NOT EMSCRIPTEN)
         endif()
 
         # capture group (capture.frame / capture.region) via submit(): the synthetic nt_gfx_fake
-        # readback feeds the real strip+box+fpng+base64 chain when the seam is driven manually (no GL).
+        # readback feeds the real strip+box+fpng+base64 chain when the test calls nt_devapi_frame_rendered().
+        # The TU includes nt_devapi_capture.c (static helpers), so the group lib is not linked.
         # Consumer-before-provider GNU-ld order: nt_devapi first, nt_gfx_fake/nt_fpng next, core/log last.
-        # The TU is #if-gated on NT_DEVAPI_GROUP_CAPTURE with an #else stub-main, so a group-absent
-        # compile still links clean.
         if(NT_DEVAPI_GROUP_CAPTURE)
             add_executable(test_devapi_capture unit/test_devapi_capture.c)
             target_link_libraries(test_devapi_capture PRIVATE
-                nt_devapi_capture nt_devapi cjson nt_window_stub nt_app_stub
-                nt_gfx_fake nt_basisu_transcoder_stub nt_fpng nt_core nt_log_stub unity
+                nt_devapi cjson nt_window_stub nt_app_stub
+                nt_gfx_fake nt_basisu_transcoder_stub nt_fpng nt_base64 nt_core nt_log_stub unity
              nt_meshwire_stub)
             target_compile_definitions(test_devapi_capture PRIVATE
                 _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1

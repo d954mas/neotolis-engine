@@ -373,13 +373,6 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     # the web target is the Playwright web-smoke gate. Gate only on the layer being enabled.
     if(NT_DEVAPI_ENABLED)
         add_subdirectory(examples/devapi_host)
-        # capture_host needs the deferred-data capture group + a real GL context (the live capture UAT).
-        # It links only the devapi group libs it uses (capture + core), never the nt_ui/obs/entity
-        # chains. Native-only: it wires the TCP transport unconditionally. Gate on both groups so a
-        # config that disables either skips the host cleanly instead of link-failing on a missing lib.
-        if(NOT EMSCRIPTEN AND NT_DEVAPI_GROUP_CAPTURE AND NT_DEVAPI_GROUP_CORE)
-            add_subdirectory(examples/capture_host)
-        endif()
     endif()
     if(NOT EMSCRIPTEN)
         # Declared before tests/ so NT_TEST_ACCESS_LIBS can gate the builder's test surface.

@@ -5,8 +5,6 @@ self-launched here; web PlaywrightTransport / the devapi.spec.ts gate), proving 
 It exercises:
   * discovery        — ping + endpoints/command.describe (game.echo + game.poke, zero engine edits),
   * game.* round-trip — game.echo {msg} read-back + game.poke write flipping an observable host bool,
-  * deferred capture — capture.frame/region must resolve to a REAL PNG on a capture-capable host;
-                       the native host has no GL, so it returns capture_unavailable,
   * deferred items   — perf.stats mem_used + render.set_enabled + time.step (advertised commands MUST pass).
 
 Usage: python tools/devapi/scenarios/devapi_demo.py [--port N] [--no-launch] [--host-bin PATH]
@@ -92,29 +90,6 @@ def _connect_with_retry(port: int, deadline_s: float = 10.0) -> SocketTransport:
     raise ConnectionError(f"could not connect to 127.0.0.1:{port} within {deadline_s}s: {last_exc}")
 
 
-def _drive_deferred_capture(client: DevApiClient) -> None:
-    """Deferred capture.frame/region over a live transport.
-
-    A capture-capable host (web: pre-swap seam armed) MUST reply with a real PNG; the native host
-    (no GL/seam) rejects synchronously with capture_unavailable (the documented outcome).
-    """
-    try:
-        full = client.capture_frame()
-    except DevApiResultError as exc:
-        if "capture_unavailable" in str(exc):
-            print("PASS capture: host drives no pre-swap seam -> capture_unavailable (native devapi_host, expected).")
-            return
-        raise
-    assert full.get("format") == "png", f"capture.frame format is {full.get('format')!r}, expected 'png'"
-    assert full.get("data"), "capture.frame returned an empty data payload"
-    # web half: a sub-rect crop returns the same png contract.
-    view = client.result("view")
-    fb_w, fb_h = int(view["fb_width"]), int(view["fb_height"])
-    region = client.capture_region(0, 0, fb_w * 3 // 4, fb_h * 3 // 4)
-    assert region.get("format") == "png" and region.get("data"), "capture.region payload is not a non-empty PNG"
-    print(f"PASS capture: deferred capture.frame + capture.region yielded real PNGs ({full.get('width')}x{full.get('height')}).")
-
-
 def _drive_deferred_items(client: DevApiClient, advertised: set) -> None:
     """Exercise the web deferrals, advertised-aware: a command this host lists in endpoints MUST pass
     (swallowing its error would let a real obs/render/time break still print PASS); a command absent
@@ -191,14 +166,11 @@ def run(client: DevApiClient) -> None:
     assert bool(poked2["poked"]) != before, "game.poke did not flip the observable host bool"
     print("PASS discovery + game.echo/game.poke: endpoints list both, echo round-trips, poke flips host state.")
 
-    # 3. The riskiest web path: a deferred capture -> real PNG, with the sim frozen in MANUAL.
+    # 3. deferred items (time.step needs MANUAL); capture has its own UAT, capture_demo.py.
     client.set_mode("manual")
-    _drive_deferred_capture(client)
-
-    # 4. deferred items — advertised-aware: a command this host lists in endpoints MUST pass.
     _drive_deferred_items(client, methods)
 
-    print("PASS: canonical run(client) — discovery + game.* + deferred capture + deferred items all machine-checked.")
+    print("PASS: canonical run(client) — discovery + game.* + deferred items all machine-checked.")
 
 
 def main(argv) -> int:
@@ -211,7 +183,7 @@ def main(argv) -> int:
             host_bin = _find_host_bin(argv)
             if not os.path.isfile(host_bin):
                 print(f"error: devapi_host not found at {host_bin}\n"
-                      f"  build it: cmake --build build/_cmake/native-debug --target devapi_host\n"
+                      f"  build it as docs/build.md describes for capture_demo.py,\n"
                       f"  or attach to a running host with --no-launch --port N", file=sys.stderr)
                 return 2
             env = dict(os.environ, NT_DEVAPI_PORT=str(port))

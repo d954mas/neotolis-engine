@@ -35,21 +35,17 @@ bool nt_devapi_parse_f32_param(const cJSON *node, nt_devapi_error *err, const ch
 /* One command can defer its reply: submit returns NULL and poll_response yields the reply once its gate
    opens. Only one deferred reply is in flight: a command submitted while it is pending answers busy. */
 typedef enum nt_devapi_gate {
-    NT_DEVAPI_GATE_FRAMES,  /* g_nt_app.frame advanced by `amount` */
-    NT_DEVAPI_GATE_SECONDS, /* g_nt_app.time advanced by `amount` */
-    NT_DEVAPI_GATE_PRESENT, /* the next pre-swap seam (a frame is presented) */
+    NT_DEVAPI_GATE_FRAMES,   /* g_nt_app.frame advanced by `amount` */
+    NT_DEVAPI_GATE_SECONDS,  /* g_nt_app.time advanced by `amount` */
+    NT_DEVAPI_GATE_RENDERED, /* the next nt_devapi_frame_rendered (a frame is rendered, not yet swapped) */
 } nt_devapi_gate;
 
 /* Defer the in-flight command's reply. nt_devapi_update checks the gate each tick: once it opens, `reply`
    runs with the handler ABI (params and user_data NULL) and its result or error is the response; a gate that
-   can no longer open (sim frozen, time mode changed, rendering off) answers stalled instead. A reply that
+   can no longer open (sim frozen, time mode changed, a frame passed unrendered) answers stalled instead. A reply that
    needs input keeps it in its group: only one reply is ever pending. Returns false with err set inside a
    batch; call it before any side effect a failed defer must not leave. */
 bool nt_devapi_defer(nt_devapi_gate gate, double amount, nt_devapi_handler_fn reply, nt_devapi_error *err);
-
-/* Build a pending PRESENT reply at the pre-swap seam (GL-valid, before swap). A group that defers on
-   PRESENT wraps it with its own host-facing seam. */
-void nt_devapi_run_pre_swap_reply(void);
 
 /* Drop the pending deferred reply (client drop, web reset, shutdown). */
 void nt_devapi_deferred_reset(void);

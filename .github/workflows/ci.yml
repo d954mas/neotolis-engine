@@ -550,7 +550,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # No LFS: devapi_host renders no asset pack (native capture.frame answers capture_unavailable).
+      # No LFS: devapi_host clears a two-tone pattern and loads no asset pack.
       - uses: ./.github/actions/setup
         with:
           extra-packages: python3-pip
@@ -561,7 +561,7 @@ jobs:
         run: python3 -m pip install --user -r tools/devapi/requirements-capture.txt
 
       # Hermetic pixel-health self-test (no GL/socket): exercises pixel_health's negative branches
-      # (not-blank, dims, orientation, channel-order) with synthetic PNGs, so a silent weakening of the
+      # (not-blank, dims) with synthetic PNGs, so a silent weakening of the
       # capture safety net fails here, not only in the live socket run below.
       - name: Pixel-health self-test (hermetic)
         run: python3 tools/devapi/scenarios/pixel_health_selftest.py
@@ -580,6 +580,12 @@ jobs:
         timeout-minutes: 5
         run: xvfb-run -a python3 tools/devapi/scenarios/devapi_demo.py
 
+      # Real native capture: PNG, pattern orientation, region == crop, scale, bad_params, frozen MANUAL frame.
+      # The transport has no read timeout, so the step timeout bounds a capture that never resolves.
+      - name: Run capture live-socket UAT
+        timeout-minutes: 5
+        run: xvfb-run -a python3 tools/devapi/scenarios/capture_demo.py
+
   # The deferred-capture-over-web drain race is invisible to unit tests — only a real headless Chromium
   # proves it; devapi.spec.ts captures in MANUAL with the sim frozen, polling after each rendered frame.
   web-smoke:
@@ -594,7 +600,7 @@ jobs:
           ccache-key: web-smoke
           extra-packages: ffmpeg
 
-      # Capture group ON arms the web host's pre-swap seam (NT_DEVAPI_GROUP_CAPTURE): the deferred
+      # Capture group ON (NT_DEVAPI_GROUP_CAPTURE): the deferred
       # capture.frame resolves to a REAL PNG, the behavior the live spec asserts.
       - name: Build devapi_host wasm (debug, capture and record ON)
         run: |

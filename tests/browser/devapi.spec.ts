@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-// The web devapi bridge the capture-build devapi_host installs (engine/devapi/nt_devapi_web.c,
+// The web devapi bridge devapi_host installs (engine/devapi/nt_devapi_web.c,
 // EM_JS): submit(line) returns the synchronous response line ("" when the command deferred — C
 // returned NULL), poll() returns a queued deferred response line ("" when none ready). No listener
 // on web.
@@ -18,7 +18,7 @@ declare global {
 // arrival order (an unrelated line must not be mistaken for the capture result).
 let nextId = 1;
 
-// Web-smoke gate: only a real headless Chromium drives the pre-swap seam — the deferred capture
+// Web-smoke gate: only a real headless Chromium renders the frame — the deferred capture
 // resolves to real pixels only after a rendered frame.
 test('devapi web transport: discovery + game.* + deferred capture yields a non-blank PNG after context restore', async ({ page }) => {
   const errors: string[] = [];
@@ -26,7 +26,7 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
   await page.goto('/index.html');
 
   // Frame barrier: resolve after two nested requestAnimationFrame calls — one real rendered frame.
-  // The deferred capture's reply is built only INSIDE the swap this schedules.
+  // The deferred capture's reply is built only in the rendered frame this schedules.
   const frame = () =>
     page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 
@@ -81,7 +81,7 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
   expect(Boolean(poke2?.result?.poked)).toBe(!Boolean(poke1?.result?.poked));
 
   // 3. The riskiest web path: a deferred capture.frame -> real PNG, with the sim frozen in MANUAL.
-  //    No time.step: frame() renders, the pre-swap seam builds the reply, and the frame counter stays put.
+  //    No time.step: frame() renders, nt_devapi_frame_rendered builds the reply, and the frame counter stays put.
   await submit('time.set_mode', { mode: 'manual' });
   const frameBefore = (await submit('frame.current'))?.result?.frame;
 
@@ -93,7 +93,7 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
     return window.__devapi!.submit(line); // "" when deferred (the expected web path)
   }, captureId);
 
-  // The deferred data line arrives only after a rendered frame fills the pre-swap seam. Drive frames
+  // The deferred data line arrives only after a rendered frame builds it (nt_devapi_frame_rendered). Drive frames
   // (frame() forces a real rAF render+swap) and poll until the matching id appears, bounded by
   // expect.poll's timeout so a deferred-forever capture never hangs CI.
   let captureResp: { ok?: boolean; result?: { format?: string; data?: string } } | null = null;
@@ -108,7 +108,7 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
     await expect
       .poll(
         async () => {
-          await frame(); // force a real rendered frame -> pre-swap seam builds the reply
+          await frame(); // force a real rendered frame -> nt_devapi_frame_rendered builds the reply
           const s = await page.evaluate((rid) => {
             // Drain queued deferred lines; return the one whose request_id matches the capture.
             for (let i = 0; i < 8; i++) {
@@ -137,7 +137,7 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
   expect((await submit('frame.current'))?.result?.frame).toBe(frameBefore);
 
   // Decode the PNG in-page and assert it is genuinely NON-BLANK: the host renders a two-tone frame, so
-  // a uniform/blank capture (a real seam failure) yields a single colour and fails here, not just "has bytes".
+  // a uniform/blank capture (a real readback failure) yields a single colour and fails here, not just "has bytes".
   const distinctColors = await page.evaluate(async (data) => {
     const img = new Image();
     await new Promise<void>((res, rej) => {

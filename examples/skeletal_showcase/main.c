@@ -11,9 +11,6 @@
 #ifdef NT_DEVAPI_ENABLED
 #include "devapi/nt_devapi.h"
 #include "devapi/nt_devapi_groups.h"
-#ifdef NT_DEVAPI_GROUP_CAPTURE
-#include "devapi/nt_devapi_capture.h"
-#endif
 #ifdef NT_PLATFORM_WEB
 #include "devapi/nt_devapi_web.h"
 #else
@@ -2735,6 +2732,9 @@ static void frame(void) {
     nt_gfx_end_frame();
     nt_example_frames_end(ready && ordering_ready());
     if (render_enabled) {
+#ifdef NT_DEVAPI_ENABLED
+        nt_devapi_frame_rendered();
+#endif
         nt_window_swap_buffers();
     }
 }
@@ -2840,9 +2840,6 @@ int main(int argc, char *argv[]) {
     }
 #else
     nt_devapi_web_install_shim();
-#endif
-#ifdef NT_DEVAPI_GROUP_CAPTURE
-    nt_devapi_capture_install_seam();
 #endif
 #endif
 

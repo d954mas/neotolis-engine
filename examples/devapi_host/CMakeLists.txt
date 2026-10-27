@@ -2,12 +2,12 @@ add_executable(devapi_host main.c)
 target_link_libraries(devapi_host PRIVATE nt_version)
 # The host wires a REAL nt_ui "hud" so ui.* resolve against a probe-able tree; nt_ui pulls its full
 # renderer chain (resource/font/material/atlas/sprite+text/nt_gfx) which must resolve at link even
-# though the host never calls nt_ui_walk. nt_gfx also supplies render.info's draw_calls (0 here, no draw).
+# though the host never calls nt_ui_walk. The host inits nt_gfx and clears a two-tone pattern each frame
+# (no draw calls) for capture and the recorder.
 # GNU ld is single-pass — list each CONSUMER before its PROVIDER: nt_devapi before nt_ui+nt_gfx, nt_ui
 # before its renderer chain. nt_devapi is transitive via nt_devapi_net; pin it explicitly.
 # Transport split (mirrors engine/devapi/CMakeLists.txt): web links nt_devapi_web (push/pull JS
-# bridge, NO socket) + nt_platform_web; native links nt_devapi_net (TCP). Both consume nt_devapi_default;
-# web also pulls nt_gfx for the deferred-capture seam.
+# bridge, NO socket) + nt_platform_web; native links nt_devapi_net (TCP). Both consume nt_devapi_default.
 if(EMSCRIPTEN)
     set(DEVAPI_HOST_TRANSPORT nt_devapi_web nt_platform_web)
 else()

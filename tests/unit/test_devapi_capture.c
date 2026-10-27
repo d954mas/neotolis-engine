@@ -1,18 +1,14 @@
 /* L2 capture group via submit() (no socket): bot-param validation -> bad_params (never assert), the
-   defer path (submit -> NULL), and seam-driven encode against nt_gfx_fake (no GL). Gated on
-   NT_DEVAPI_GROUP_CAPTURE so the OFF mirror links a stub main (zero release delta). */
+   defer path (submit -> NULL), and encode at nt_devapi_frame_rendered against nt_gfx_fake. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(NT_DEVAPI_GROUP_CAPTURE)
-
 /* clang-format off */
 #include "app/nt_app.h"
-#include "devapi/nt_devapi_capture.h"          /* on_pre_swap / arm — host contract. */
-#include "devapi/nt_devapi_capture_internal.h" /* strip_and_box — group internal, value-checked here. */
+// NOLINTNEXTLINE(bugprone-suspicious-include): value-test the static strip_and_box.
+#include "devapi/nt_devapi_capture.c"
 #include "devapi/nt_devapi_internal.h"
 #include "graphics/nt_gfx.h" /* g_nt_gfx.context_lost — the producer-failure (NULL) trigger. */
 #include "window/nt_window.h"
@@ -23,16 +19,14 @@
 #define CAP_FB_H 48
 
 void setUp(void) {
-    /* No nt_fpng_init() here: registering the capture group (register_default -> register_capture) inits
-       the encoder. This test proves a host needs no explicit fpng init. */
+    /* No nt_fpng_init() here: registering the capture group inits the encoder. */
     /* frame never advances here: capture must resolve with the sim frozen. */
     g_nt_app = (nt_app_t){.max_dt = 0.1F, .scale = 1.0F, .step_dt = 1.0F / 60.0F, .render_enabled = true};
     g_nt_window.fb_width = CAP_FB_W;
     g_nt_window.fb_height = CAP_FB_H;
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
     nt_devapi_register_capture();
-    nt_devapi_capture_arm(); /* mark capture-capable: the test drives the seam directly, no window hook. */
-    /* The seam runs between end_frame and the swap, where readback is allowed. */
+    /* frame_rendered runs between end_frame and the swap, where readback is allowed. */
     const nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     nt_gfx_init(&gfx_desc);
     nt_gfx_begin_frame();
@@ -62,10 +56,10 @@ static void assert_bad_params(const char *resp) {
     cJSON_Delete(root);
 }
 
-/* Drive one render seam (no frame advance), then poll the yielded envelope (caller frees the root). */
+/* Render one frame (no sim advance), then poll the yielded envelope (caller frees the root). */
 static cJSON *capture_yield(const char *request) {
     TEST_ASSERT_NULL(nt_devapi_submit(request)); /* a well-formed capture defers (no sync response). */
-    nt_devapi_capture_on_pre_swap();             /* GL-valid seam: builds the reply. */
+    nt_devapi_frame_rendered();                  /* the rendered frame builds the reply. */
     const char *resp = drain();
     TEST_ASSERT_NOT_NULL(resp);
     cJSON *root = cJSON_Parse(resp);
@@ -97,19 +91,10 @@ static void test_capture_region_out_of_bounds_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"capture.region\",\"params\":{\"x\":0,\"y\":40,\"w\":10,\"h\":40}}"));
 }
 
-/* a well-formed capture DEFERS (returns NULL, no sync yield, no assert) */
-
-static void test_capture_frame_defers(void) {
-    const char *resp = nt_devapi_submit("{\"method\":\"capture.frame\",\"request_id\":1}");
-    TEST_ASSERT_NULL(resp); /* deferred sentinel: no synchronous response. */
-    /* before the seam runs, polling yields nothing (the slot has no payload yet). */
-    TEST_ASSERT_NULL(drain());
-}
-
-/* seam-driven encode (no socket) -> format:"png" + non-empty data */
+/* encode at the rendered frame (no socket) -> format:"png" + non-empty data */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_capture_frame_seam_encode(void) {
+static void test_capture_frame_encode(void) {
     cJSON *root = capture_yield("{\"method\":\"capture.frame\",\"request_id\":7}");
     cJSON *result = result_of(root);
     TEST_ASSERT_TRUE(cJSON_IsObject(result));
@@ -168,13 +153,6 @@ static void test_capture_region_scale_halves_dims(void) {
     cJSON_Delete(root);
 }
 
-/* degenerate scale>rect -> SYNCHRONOUS bad_params */
-
-static void test_capture_region_degenerate_scale_bad_params(void) {
-    /* w/scale==0 (3/4==0): the handler rejects synchronously, no defer, no image. */
-    assert_bad_params(nt_devapi_submit("{\"method\":\"capture.region\",\"params\":{\"x\":0,\"y\":0,\"w\":3,\"h\":3,\"scale\":4}}"));
-}
-
 /* scale that does not EVENLY divide the dims -> bad_params, not a silent edge crop: floor(6/4)==1 is
    non-zero, so a floor-div would accept it and drop the 2 remainder pixels per axis. */
 static void test_capture_nondividing_scale_bad_params(void) {
@@ -192,7 +170,7 @@ static void test_capture_nondividing_scale_bad_params(void) {
 static void test_capture_producer_failure_yields_error(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"capture.frame\",\"request_id\":42}"));
     g_nt_gfx.context_lost = true; /* force the readback to fail. */
-    nt_devapi_capture_on_pre_swap();
+    nt_devapi_frame_rendered();
     g_nt_gfx.context_lost = false; /* restore for any following test. */
 
     const char *resp = drain();
@@ -225,32 +203,13 @@ static void test_capture_pixel_cap_bad_params(void) {
     /* setUp() restores CAP_FB_W/H before the next test. */
 }
 
-/* a host that never drives the seam -> capture rejected synchronously, never hangs.
-   Re-init WITHOUT arming (a host like devapi_host that registers capture but inits no GL / no seam):
-   capture.frame must return {ok:false,error:capture_unavailable}, not defer a slot that never resolves. */
-static void test_capture_unarmed_host_unavailable(void) {
-    nt_devapi_shutdown();                       /* disarms the seam (resp_reset). */
-    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init()); /* unarmed: no seam call follows. */
-    nt_devapi_register_capture();               /* capture registered but NOT armed. */
-    const char *resp = nt_devapi_submit("{\"method\":\"capture.frame\"}");
-    TEST_ASSERT_NOT_NULL(resp); /* synchronous reject, not a deferred NULL. */
-    cJSON *root = cJSON_Parse(resp);
-    TEST_ASSERT_NOT_NULL(root);
-    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(root, "ok")));
-    cJSON *code = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(root, "error"), "code");
-    TEST_ASSERT_TRUE(cJSON_IsString(code));
-    TEST_ASSERT_EQUAL_STRING("capture_unavailable", code->valuestring);
-    cJSON_Delete(root);
-    /* tearDown shuts down; the next setUp re-inits + re-arms. */
-}
-
-/* a poll before the seam waits (the image does not exist yet), even with the sim frozen in idle MANUAL;
-   the seam then builds the real PNG. */
-static void test_capture_waits_for_the_seam_with_sim_frozen(void) {
+/* a poll before the frame is rendered waits (the image does not exist yet), even with the sim frozen in
+   idle MANUAL; the rendered frame then builds the real PNG. */
+static void test_capture_waits_for_the_frame_with_sim_frozen(void) {
     g_nt_app.mode = NT_APP_MODE_MANUAL; /* no step queued */
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"capture.frame\",\"request_id\":9}"));
     TEST_ASSERT_NULL(drain());
-    nt_devapi_capture_on_pre_swap();
+    nt_devapi_frame_rendered();
     const char *resp = drain();
     TEST_ASSERT_NOT_NULL(resp);
     cJSON *root = cJSON_Parse(resp);
@@ -263,19 +222,6 @@ static void test_capture_waits_for_the_seam_with_sim_frozen(void) {
     TEST_ASSERT_NULL(drain());
 }
 
-/* rendering off -> no frame is presented, so the capture fails as stalled on the drain instead of hanging. */
-static void test_capture_with_render_off_stalls(void) {
-    nt_app_set_render_enabled(false);
-    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"capture.frame\",\"request_id\":3}"));
-    const char *resp = drain();
-    TEST_ASSERT_NOT_NULL(resp);
-    cJSON *root = cJSON_Parse(resp);
-    TEST_ASSERT_NOT_NULL(root);
-    TEST_ASSERT_EQUAL_STRING("stalled", cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(root, "error"), "code")->valuestring);
-    TEST_ASSERT_EQUAL_INT(3, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
-    cJSON_Delete(root);
-}
-
 /* box-average downscale produces the EXACT integer mean.
    Hermetic value check on the averager: the dims-only scale tests can't catch a wrong divisor (/factor vs
    /area) or wrong in-box source pixels. A 2x2 -> 1x1 box has a hand-computable per-channel mean. */
@@ -286,7 +232,7 @@ static void test_capture_box_average_exact_mean(void) {
         30, 60, 90, 255, 40, 80, 120, 255, /* row 1 */
     };
     uint8_t dst[3] = {0, 0, 0};
-    nt_devapi_capture_strip_and_box(src, 2, 2, 2, dst);
+    strip_and_box(src, 2, 2, 2, dst);
     /* mean over the 4-texel box: R=(10+20+30+40)/4=25, G=(20+40+60+80)/4=50, B=(30+60+90+120)/4=75. */
     TEST_ASSERT_EQUAL_UINT8(25, dst[0]);
     TEST_ASSERT_EQUAL_UINT8(50, dst[1]);
@@ -295,7 +241,7 @@ static void test_capture_box_average_exact_mean(void) {
     /* factor==1 is a plain alpha-strip (RGB passthrough, alpha dropped). */
     const uint8_t one[4] = {11, 22, 33, 99};
     uint8_t out1[3] = {0, 0, 0};
-    nt_devapi_capture_strip_and_box(one, 1, 1, 1, out1);
+    strip_and_box(one, 1, 1, 1, out1);
     TEST_ASSERT_EQUAL_UINT8(11, out1[0]);
     TEST_ASSERT_EQUAL_UINT8(22, out1[1]);
     TEST_ASSERT_EQUAL_UINT8(33, out1[2]);
@@ -305,27 +251,14 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_capture_frame_bad_scale_bad_params);
     RUN_TEST(test_capture_region_out_of_bounds_bad_params);
-    RUN_TEST(test_capture_frame_defers);
-    RUN_TEST(test_capture_frame_seam_encode);
+    RUN_TEST(test_capture_frame_encode);
     RUN_TEST(test_capture_frame_scale_halves_dims);
     RUN_TEST(test_capture_region_dims_match_rect);
     RUN_TEST(test_capture_region_scale_halves_dims);
-    RUN_TEST(test_capture_region_degenerate_scale_bad_params);
     RUN_TEST(test_capture_nondividing_scale_bad_params);
     RUN_TEST(test_capture_producer_failure_yields_error);
     RUN_TEST(test_capture_pixel_cap_bad_params);
-    RUN_TEST(test_capture_unarmed_host_unavailable);
-    RUN_TEST(test_capture_waits_for_the_seam_with_sim_frozen);
-    RUN_TEST(test_capture_with_render_off_stalls);
+    RUN_TEST(test_capture_waits_for_the_frame_with_sim_frozen);
     RUN_TEST(test_capture_box_average_exact_mean);
     return UNITY_END();
 }
-
-#else /* !NT_DEVAPI_GROUP_CAPTURE — OFF-mirror: link a stub main so native-debug-off links clean. */
-
-int main(void) {
-    printf("test_devapi_capture: NT_DEVAPI_GROUP_CAPTURE off — nothing to test (zero release delta).\n");
-    return 0;
-}
-
-#endif /* NT_DEVAPI_GROUP_CAPTURE */

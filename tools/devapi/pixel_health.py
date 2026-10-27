@@ -26,49 +26,15 @@ def decode(b64: str) -> Image.Image:
 def check(img: Image.Image, expected_w: int, expected_h: int) -> None:
     """Assert decoded dims match expected and the frame is not blank. Raises AssertionError on violation.
 
-    not-blank = the pixels are not a single uniform color (ptp == 0 on every channel means every pixel
-    is identical — a black / frozen / empty screen, the exact failure this catches). The capture_host
-    renders a two-tone pattern, so a healthy frame has >= 2 distinct colors.
+    not-blank = the pixels are not a single uniform color (every pixel equals the first one — a black /
+    frozen / empty screen, the exact failure this catches). devapi_host
+    clears a two-tone pattern, so a healthy frame has >= 2 distinct colors.
     """
     assert img.width == expected_w, f"pixel-health: decoded width {img.width} != expected {expected_w}"
     assert img.height == expected_h, f"pixel-health: decoded height {img.height} != expected {expected_h}"
     arr = np.asarray(img)
     assert arr.size > 0, "pixel-health: decoded image is empty"
-    assert float(np.ptp(arr)) > 0.0, "pixel-health: frame is a single uniform color (blank/frozen/empty screen)"
-
-
-def vertical_split_means(img: Image.Image) -> tuple:
-    """Return (top_half_mean, bottom_half_mean) of per-pixel mean intensity.
-
-    Lets a caller assert vertical orientation: a Y-origin flip (top-left vs bottom-left readback) swaps
-    which half a known feature lands in, so the two means invert. Plain floats keep numpy confined here.
-    """
-    arr = np.asarray(img)
-    half = arr.shape[0] // 2
-    return float(arr[:half].mean()), float(arr[half:].mean())
-
-
-def horizontal_split_means(img: Image.Image) -> tuple:
-    """Return (left_half_mean, right_half_mean) of per-pixel mean intensity.
-
-    Horizontal counterpart to vertical_split_means: an X-origin error shifts which half a known feature
-    lands in, inverting the two means.
-    """
-    arr = np.asarray(img)
-    half = arr.shape[1] // 2
-    return float(arr[:, :half].mean()), float(arr[:, half:].mean())
-
-
-def center_channel_means(img: Image.Image) -> tuple:
-    """Return (r, g, b) means of the image's central quarter.
-
-    Samples a host's centered foreground so a caller can assert channel order (RGB vs BGR): a red/blue
-    swap inverts r vs b, which the channel-symmetric not-blank / split-mean checks cannot see.
-    """
-    arr = np.asarray(img)
-    h, w = arr.shape[0], arr.shape[1]
-    c = arr[h // 4:h * 3 // 4, w // 4:w * 3 // 4]
-    return float(c[..., 0].mean()), float(c[..., 1].mean()), float(c[..., 2].mean())
+    assert (arr != arr[0, 0]).any(), "pixel-health: frame is a single uniform color (blank/frozen/empty screen)"
 
 
 def check_payload(payload: dict, expected_w: int, expected_h: int) -> Image.Image:

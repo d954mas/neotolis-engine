@@ -397,8 +397,7 @@ exceeds the 100 ms drift bound, and fails on a drift WARN; it also checks `bad_p
 Native `test_recorder` covers frame selection and the audio stream.
 
 CI only compiles and links the Windows backend (`windows-recorder`). Check its behavior locally with a
-native `devapi_host` that links the RECORDER group (it then inits `nt_gfx` and draws the flash
-pattern) and
+native `devapi_host` that links the RECORDER group (it draws a white flash while recording) and
 `tools/devapi/scenarios/record_demo.py`, which records a lockstep and a real-time clip and runs
 `check_recording.py` on each:
 
@@ -408,6 +407,19 @@ cmake --build build/_cmake/native-record --target devapi_host
 build/examples/devapi_host/native-record/devapi_host.exe &
 python tools/devapi/scenarios/record_demo.py --out build
 ```
+
+Native capture runs live in CI `devapi-smoke`: `tools/devapi/scenarios/devapi_demo.py` and
+`capture_demo.py` launch a `devapi_host` built with the groups of that job. Locally build it in its own
+`-B` directory: the directory name is the preset name, and `native-debug` would overwrite the gate's
+engine libraries in `build/engine/native-debug`.
+
+```bash
+cmake --preset native-debug -B build/_cmake/devapi-smoke -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON -DNT_GFX_CAPTURE_ENABLED=ON
+cmake --build build/_cmake/devapi-smoke --target devapi_host
+python tools/devapi/scenarios/capture_demo.py --host-bin "$PWD/build/examples/devapi_host/devapi-smoke/devapi_host"
+```
+
+On Windows the binary is `devapi_host.exe`.
 
 Browser diagnostics use `tests/browser/diagnostics.spec.ts`. Set
 `NT_SHOWCASE_DIR` to the exact build, distinct `NT_SHOWCASE_PORT`/`NT_DEVAPI_PORT`,

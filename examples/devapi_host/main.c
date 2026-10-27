@@ -5,24 +5,16 @@
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
 #include "devapi/nt_devapi.h"
+#include "graphics/nt_gfx.h"
 #include "version/nt_version.h"
 #ifdef __EMSCRIPTEN__
 #include "devapi/nt_devapi_web.h" /* nt_devapi_web_install_shim — the web push/pull bridge. */
-#ifdef NT_DEVAPI_GROUP_CAPTURE
-#include "devapi/nt_devapi_capture.h" /* nt_devapi_capture_install_seam — pre-swap capture seam. */
-#endif
 #else
 #include "devapi/nt_devapi_net.h"
 #endif
-/* Web capture and record (web and Windows) pull a real GL context and a non-blank frame; without them
-   the host serves commands only. Native capture has its own host, capture_host. */
-#if defined(NT_DEVAPI_GROUP_RECORDER) || (defined(__EMSCRIPTEN__) && defined(NT_DEVAPI_GROUP_CAPTURE))
-#define NT_DEVAPI_HOST_GFX 1
+#ifdef NT_DEVAPI_GROUP_RECORDER
 #include <math.h>
 
-#include "graphics/nt_gfx.h"
-#endif
-#ifdef NT_DEVAPI_GROUP_RECORDER
 #include "recorder/nt_recorder.h"
 #endif
 #include "drawable_comp/nt_drawable_comp.h"
@@ -161,8 +153,7 @@ static void recover_on_client_reset(void) {
     g_nt_app.pending_steps = 0;
 }
 
-#ifdef NT_DEVAPI_HOST_GFX
-/* Two tones make a uniform/blank pre-swap capture observable; record builds add a white flash. */
+/* Two tones make a uniform/blank pre-swap capture observable; a recording adds a white flash. */
 static const float k_bg_color[4] = {0.10F, 0.20F, 0.45F, 1.0F};
 static const float k_fg_color[4] = {0.90F, 0.55F, 0.10F, 1.0F};
 
@@ -177,7 +168,6 @@ static void render_pattern(bool flash) {
     nt_gfx_clear(&(nt_clear_desc_t){.color = true, .clear_color = {fg[0], fg[1], fg[2], fg[3]}});
     nt_gfx_end_pass();
 }
-#endif /* NT_DEVAPI_HOST_GFX */
 
 #ifdef NT_DEVAPI_GROUP_RECORDER
 /* A/V probe for record.*, mixed like a game: each frame pushes the samples for its advance, and the
@@ -230,9 +220,7 @@ static void frame(void) {
 #endif
 
     nt_window_poll();
-#ifdef NT_DEVAPI_HOST_GFX
     nt_gfx_begin_frame();
-#endif
     /* nt_devapi_update must run before nt_input_poll so injected rising edges survive the edge-clear. */
     nt_devapi_update();
     nt_input_poll();
@@ -244,20 +232,18 @@ static void frame(void) {
     declare_hud();
     declare_hud_scaled();
 
-    /* Swap only under the render flag so draw_calls / render.* stay honest. The capture seam runs INSIDE
-       nt_window_swap_buffers (post-render, pre-swap GL-valid point); a gfx build draws the two-tone pattern first
-       so that seam reads a non-blank frame. */
+    /* Swap only under the render flag so draw_calls / render.* stay honest. The two-tone pattern gives
+       capture, read at nt_devapi_frame_rendered before the swap, a non-blank frame. */
     const bool render = nt_app_render_enabled();
-#ifdef NT_DEVAPI_HOST_GFX
     if (render) {
 #ifdef NT_DEVAPI_GROUP_RECORDER
-        render_pattern(second_crossed() || g_nt_app.time - floor(g_nt_app.time) < 0.1);
+        /* Flash only while recording, so captures of a non-recording host stay the plain pattern. */
+        render_pattern(nt_recorder_active() && (second_crossed() || g_nt_app.time - floor(g_nt_app.time) < 0.1));
 #else
         render_pattern(false);
 #endif
     }
     nt_gfx_end_frame();
-#endif
 #ifdef NT_DEVAPI_GROUP_RECORDER
     push_tone(); /* the mixer runs with the update, rendered or not */
     if (render) {
@@ -265,6 +251,7 @@ static void frame(void) {
     }
 #endif
     if (render) {
+        nt_devapi_frame_rendered();
         nt_window_swap_buffers();
     }
 
@@ -327,12 +314,9 @@ int main(void) {
     /* vsync OFF so time.set_fps{fps:0} truly uncaps the managed loop. */
     nt_window_set_vsync(NT_VSYNC_OFF);
     nt_input_init();
-#ifdef NT_DEVAPI_HOST_GFX
-    /* Capture or record build: a real GL context so capture and the recorder read a non-blank frame.
-       The capture group inits its own fpng encoder in nt_devapi_register_capture (no nt_fpng_init here). */
+    /* A real GL context so capture and the recorder read a non-blank frame. */
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     nt_gfx_init(&gfx_desc);
-#endif
 
     /* Obs wiring: host pushes frames into nt_metrics; the log ring captures nt_log_write for log.tail.
        The obs group's commands are registered by nt_devapi_register_default() above. */
@@ -407,11 +391,6 @@ int main(void) {
     /* Web: install the push/pull bridge (window.__devapi). NO listener — the page's own JS is
        the only caller, under the OFF-by-default NT_DEVAPI_ENABLED gate. */
     nt_devapi_web_install_shim();
-#ifdef NT_DEVAPI_GROUP_CAPTURE
-    /* Capture build only: install the pre-swap seam; it needs the real GL context inited above so the
-       deferred capture reads a non-blank PNG. */
-    nt_devapi_capture_install_seam();
-#endif
 #else
     /* Native: opt-in pre-loop gate so a bot can hand over setup before frame 0.
        Bounded; the host does NOT require a client to start. */
@@ -446,9 +425,7 @@ shutdown_devapi:
 #endif
     nt_devapi_shutdown();
 shutdown_base:
-#ifdef NT_DEVAPI_HOST_GFX
-    nt_gfx_shutdown(); /* paired with the nt_gfx_init on the capture/record path above. */
-#endif
+    nt_gfx_shutdown();
     nt_input_shutdown();
     nt_window_shutdown();
     nt_engine_shutdown();

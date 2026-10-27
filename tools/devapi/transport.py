@@ -91,7 +91,7 @@ class SocketTransport(Transport):
 
 
 # One wait per evaluate: a queued line returns at once; otherwise a double rAF (one rendered frame, so
-# the pre-swap seam can fill a deferred capture) and "", so the next evaluate polls. Polling only at
+# nt_devapi_frame_rendered can fill a deferred capture) and "", so the next evaluate polls. Polling only at
 # the start keeps a wait abandoned by a killed client from taking the next client's reply. A background
 # tab stops rAF and so the wait, the same as a host that stops ticking.
 _POLL_AFTER_FRAME_JS = (

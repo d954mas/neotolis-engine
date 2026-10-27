@@ -153,18 +153,18 @@ static void test_overflow_asserts(void) {
 
 static bool fail_without_err(const cJSON *params, cJSON *result_obj, nt_devapi_error *err, void *user_data) { return false; }
 
-static bool defer_to_silent_fail(const cJSON *params, cJSON *result_obj, nt_devapi_error *err, void *user_data) { return nt_devapi_defer(NT_DEVAPI_GATE_PRESENT, 0.0, fail_without_err, err); }
+static bool defer_to_silent_fail(const cJSON *params, cJSON *result_obj, nt_devapi_error *err, void *user_data) { return nt_devapi_defer(NT_DEVAPI_GATE_RENDERED, 0.0, fail_without_err, err); }
 
 static const nt_devapi_command k_silent_fail_cmds[] = {
     {.method = "test.silent_fail", .summary = "defers a reply that returns false without filling err", .params_shape = "{}", .result_shape = "{}", .fn = defer_to_silent_fail},
 };
 
 /* A failing handler must fill err; the dispatcher asserts instead of inventing an error. The reply runs
-   at the pre-swap seam, outside submit, so the trap unwinds past no live request tree. */
+   at nt_devapi_frame_rendered, outside submit, so the trap unwinds past no live request tree. */
 static void test_fail_without_err_asserts(void) {
     nt_devapi_register(k_silent_fail_cmds, NT_COUNTOF(k_silent_fail_cmds), NULL);
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.silent_fail\"}"));
-    NT_TEST_EXPECT_ASSERT(nt_devapi_run_pre_swap_reply());
+    NT_TEST_EXPECT_ASSERT(nt_devapi_frame_rendered());
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "err.code"));
 }
 
