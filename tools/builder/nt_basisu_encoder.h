@@ -23,8 +23,8 @@ typedef struct {
 
 /* Borrows RGBA8 pixels and ETC1S/UASTC_LDR opts for the call. `format` is the
  * pack format (RGBA8, RGB8, SRGB8_ALPHA8 or SRGB8): alpha formats check alpha,
- * sRGB formats filter mips in linear light. Full mip chain; NULL data on failure.
- * Thread-safe after init; basis_threads counts caller (min 1). */
+ * sRGB formats filter mips in linear light. Full mip chain; any encoder failure
+ * is a build assert. Thread-safe after init; basis_threads >= 1 counts the caller. */
 nt_basisu_encode_result_t nt_basisu_encode(uint32_t basis_threads, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, nt_texture_pixel_format_t format, const nt_basisu_encode_opts_t *opts);
 
 /* Free encoder output data */
