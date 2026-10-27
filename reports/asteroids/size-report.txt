@@ -1,5 +1,5 @@
 # Size Report: asteroids (wasm-analysis-paired)
-# Commit: 035db86
+# Commit: 0689d61
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                  64 B
-Code              397983 B
-Data              219164 B
+Code              397666 B
+Data              219008 B
 Custom             13209 B
 ---------------- ----------
-TOTAL             631869 B
+TOTAL             631396 B
 
 ## Top 30 Functions by Size
 
@@ -26,9 +26,9 @@ TOTAL             631869 B
 83583 B   frame
 31662 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
 27440 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
-20947 B   ui_panel
+20946 B   ui_panel
 19237 B   dispatch_command
-17486 B   nt_gfx_activate_texture
+17170 B   nt_gfx_activate_texture
 10756 B   main
  8845 B   Clay__ConfigureOpenElementPtr
  6059 B   Clay__SizeContainersAlongAxis
@@ -55,7 +55,7 @@ TOTAL             631869 B
  2436 B   printf_core
 
 Total functions: 255
-Total code size: 397535 B
+Total code size: 397218 B
 
 ## Built Engine Archives
 
@@ -67,8 +67,8 @@ libnt_app.a                 2828 B
 libnt_app_stub.a            2678 B
 libnt_atlas.a               5452 B
 libnt_base64.a               974 B
-libnt_basisu_transcoder.a  671882 B
-libnt_basisu_transcoder_stub.a     778 B
+libnt_basisu_transcoder.a  671604 B
+libnt_basisu_transcoder_stub.a     774 B
 libnt_clipboard.a           6906 B
 libnt_clipboard_stub.a       840 B
 libnt_comp_storage.a        2008 B
@@ -78,7 +78,7 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               65220 B
-libnt_gfx.a               113400 B
+libnt_gfx.a               113030 B
 libnt_gfx_stub.a            6838 B
 libnt_hash.a                4108 B
 libnt_http.a               18238 B
@@ -125,9 +125,9 @@ libnt_version.a              638 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2667256 B
+TOTAL (archives)         2666604 B
 
 ## Data Segments Summary
 
 Segments: 185
-Total data size: 217772 B
+Total data size: 217616 B
