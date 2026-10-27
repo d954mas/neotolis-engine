@@ -434,10 +434,11 @@ header, a known `compression`, and for RAW a `mip_count` of 1 or the full chain
 with a `data_size` of exactly the sum of `nt_texture_level_bytes` over those
 levels. The resource core asserts magic,
 version and the header size first. A texture above `gpu_caps.max_texture_size`
-is a device limit: the activator logs and returns an invalid handle. Every
-header assert that does not need the payload runs before that check, so a broken
-pack asserts on every device. RAW assets then go through the public constructor
-unchanged.
+is a device limit: the activator logs and returns an invalid handle. The header
+asserts above run before that check, so a broken pack layout asserts on every
+device. RAW assets then go through the public constructor unchanged, and its
+asserts on format and flag combinations (such as `GEN_MIPMAPS` with a chain)
+run only on a device that passed the limit.
 
 A BASIS asset is cross-checked against the blob before anything is created. The
 blob's own dimensions must equal the header's, and its level count must equal
