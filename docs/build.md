@@ -419,6 +419,8 @@ cmake --build build/_cmake/devapi-smoke --target devapi_host
 python tools/devapi/scenarios/capture_demo.py --host-bin "$PWD/build/examples/devapi_host/devapi-smoke/devapi_host"
 ```
 
+On Windows the binary is `devapi_host.exe`.
+
 Browser diagnostics use `tests/browser/diagnostics.spec.ts`. Set
 `NT_SHOWCASE_DIR` to the exact build, distinct `NT_SHOWCASE_PORT`/`NT_DEVAPI_PORT`,
 `CI=1` to forbid server reuse, and matching
