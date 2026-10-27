@@ -230,7 +230,7 @@ void test_rgb9e5_max_size_resizes_with_the_box_filter(void) {
 
 // #region .hdr sources
 
-/* Radiance keeps an 8-bit mantissa per pixel, scaled to the largest channel: every value here is exact in the file. */
+/* Radiance keeps an 8-bit mantissa per channel under one exponent per pixel, set by the largest channel: every value here is exact in the file. */
 static const float k_hdr_rgb[4 * 2 * 3] = {
     0.25F, 2.0F, 8.0F, 8.0F, 0.25F, 2.0F, 2.0F, 8.0F, 0.25F, 65024.0F, 512.0F, 256.0F, 0.0F, 0.0F, 0.0F, 1.5F, 3.0F, 6.0F, 0.125F, 0.25F, 0.5F, 4.0F, 4.0F, 4.0F,
 };

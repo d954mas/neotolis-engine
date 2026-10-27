@@ -239,7 +239,7 @@ async function checkSrgbFixture(page: Page, label: string, caps: number, buildTa
 }
 
 // RAW RGB9E5 (format 21): left half (0.25, 2, 8), right half (8, 0.25, 2), sampled scaled by 1/16 into
-// RGBA8, alpha 1/16. Values above 1 reach the shader unclamped: a clamp would read 16 for both 2 and 8.
+// RGBA8, alpha 1/16. Values above 1 reach the shader unclamped: a clamp to 1 would read byte 16 for both 2 and 8.
 // The 1x1 level is the builder's box average (4.125, 1.125, 5).
 const RGB9E5_FORMAT = 21;
 const HDR_LEFT = [4, 32, 128, 16];
