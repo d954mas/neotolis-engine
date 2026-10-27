@@ -34,7 +34,7 @@ nt_basisu_info_t nt_basisu_info(const void *basis_data, uint32_t basis_size);
  * same blob. `output` holds at least the sum of nt_texture_level_bytes over
  * the chain. `format` is RGBA8, SRGB8_ALPHA8 or a compressed target or its
  * sRGB twin whose NT_BASISU_HAS_* option is ON (the activator's selector never
- * picks another). An upstream failure, its allocations included, is asserted. */
+ * picks another). Any upstream failure is fatal. */
 void nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, const nt_basisu_info_t *info, nt_texture_format_t format, void *output);
 
 #ifdef __cplusplus

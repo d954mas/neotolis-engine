@@ -433,8 +433,9 @@ A BASIS asset is cross-checked against the blob before anything is created. The
 blob's own dimensions must equal the header's, and its level count must equal
 both `mip_count` and the full chain down to 1x1; a mismatch asserts. A lost
 context, a staging allocation failure and an RGBA8 fallback chain above 4 GB
-stay recoverable: the activator logs and returns an invalid handle. The header's `format` field is range-checked at the
-boundary like every other header field. It decides only the transfer: an
+stay recoverable: the activator logs and returns an invalid handle. The
+header's `format` field is range-checked at the boundary like every other
+header field. It decides only the transfer: an
 `SRGB8_ALPHA8` or `SRGB8` header selects the sRGB twin of the target. Alpha and
 codec come from the blob, because the encoder drops alpha slices for a fully
 opaque source.

@@ -397,8 +397,8 @@ sharing one payload in the pack.
 
 Texture cache and early dedup use one identity, `opts_hash`; early dedup
 compares it after an exact pixel match. It covers the effective settings:
-resized dimensions, resolved pixel format, premultiplication, sampler defaults, RAW
-mip-generation flag, compression presence, codec and its active fields above.
+resized dimensions, resolved pixel format, premultiplication, sampler defaults,
+RAW mip-generation flag, compression presence, codec and its active fields above.
 Basis ignores the RAW mip-generation flag. Names, source locations, resize
 limits after resizing, threading, descriptor padding and inactive union bytes
 are not encode identity.
