@@ -2171,6 +2171,22 @@ void test_activate_texture_valid_blob(void) {
     nt_gfx_deactivate_texture(handle);
 }
 
+/* A RAW payload is exactly its pixels: four extra bytes, consistent with the blob, still assert. */
+void test_activate_texture_raw_extra_payload_asserts(void) {
+    uint8_t blob[sizeof(NtTextureAssetHeader) + 16];
+    NtTextureAssetHeader *hdr = (NtTextureAssetHeader *)blob;
+    memset(blob, 0, sizeof(blob));
+    hdr->magic = NT_TEXTURE_MAGIC;
+    hdr->version = NT_TEXTURE_VERSION;
+    hdr->format = NT_TEXTURE_FORMAT_RGBA8;
+    hdr->width = 1;
+    hdr->height = 2;
+    hdr->mip_count = 1;
+    hdr->compression = NT_TEXTURE_COMPRESSION_RAW;
+    hdr->data_size = (1 * 2 * 4) + 4;
+    EXPECT_ASSERT((void)nt_gfx_activate_texture(blob, (uint32_t)sizeof(NtTextureAssetHeader) + hdr->data_size));
+}
+
 /* ---- Activator: mesh valid blob (shared fixture = positive control) ---- */
 
 static void fill_valid_mesh_blob(uint8_t *blob) {
@@ -4109,6 +4125,7 @@ int main(void) {
     RUN_TEST(test_gfx_texture_pool_full_asserts);
     /* Activator tests */
     RUN_TEST(test_activate_texture_valid_blob);
+    RUN_TEST(test_activate_texture_raw_extra_payload_asserts);
     RUN_TEST(test_activate_texture_zero_dimensions_assert);
     RUN_TEST(test_activate_mesh_valid_blob);
     RUN_TEST(test_frame_rule_rejects_every_live_destroy_while_drawn);

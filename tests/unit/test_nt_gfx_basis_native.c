@@ -91,7 +91,7 @@ static void build_fixture(nt_basisu_codec_t codec, nt_texture_pixel_format_t for
     uint32_t payload_size = enc.size;
     nt_basisu_encode_free(&enc);
 
-    nt_basisu_info(s_blob + sizeof(*hdr), payload_size, &s_info);
+    s_info = nt_basisu_info(s_blob + sizeof(*hdr), payload_size);
     TEST_ASSERT_EQUAL_UINT32(SRC_LEVELS, s_info.level_count);
 }
 

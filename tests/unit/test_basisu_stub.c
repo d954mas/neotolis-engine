@@ -13,10 +13,7 @@ static unsigned char out_buf[64];
 
 static void test_stub_global_init_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_basisu_transcoder_global_init()); }
 
-static void test_stub_info_asserts(void) {
-    nt_basisu_info_t info = {0};
-    NT_TEST_EXPECT_ASSERT(nt_basisu_info(fake_basis, sizeof(fake_basis), &info));
-}
+static void test_stub_info_asserts(void) { NT_TEST_EXPECT_ASSERT((void)nt_basisu_info(fake_basis, sizeof(fake_basis))); }
 
 static void test_stub_transcode_chain_asserts(void) {
     const nt_basisu_info_t info = {.codec = NT_BASISU_CODEC_UASTC_LDR, .width = 2, .height = 2, .level_count = 2, .has_alpha = false};

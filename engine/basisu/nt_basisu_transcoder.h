@@ -27,7 +27,7 @@ void nt_basisu_transcoder_global_init(void);
  * header, a mip chain whose level L is not exactly max(1, width >> L) x
  * max(1, height >> L), or a codec this build does not decode (a pack from
  * another configure) is asserted. */
-void nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_t *out_info);
+nt_basisu_info_t nt_basisu_info(const void *basis_data, uint32_t basis_size);
 
 /* Transcode levels 0..N-1 of image 0 into `output` back to back, no padding
  * (level L is max(1, w >> L) x max(1, h >> L)), N and dims from `info` of the

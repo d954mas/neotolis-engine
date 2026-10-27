@@ -422,18 +422,18 @@ the public texture formats cannot satisfy them.
 
 Packs are trusted builder output, so `nt_gfx_activate_texture` asserts the
 header: the pixel format, sampler defaults inside the filter/wrap enums, nonzero
-dimensions within `UINT16_MAX`, a `data_size` inside the blob, a known
-`compression`, and a RAW `data_size` of at least `width * height * bpp`. The
+dimensions within `UINT16_MAX`, a `data_size` equal to the bytes after the
+header, a known `compression`, and a RAW `data_size` of exactly
+`width * height * bpp`. The
 resource core asserts magic, version and the header size first. A texture above
 `gpu_caps.max_texture_size` is a device limit: the activator logs and returns an
 invalid handle. RAW assets then go through the public constructor unchanged.
 
 A BASIS asset is cross-checked against the blob before anything is created. The
 blob's own dimensions must equal the header's, and its level count must equal
-both `mip_count` and the full chain down to 1x1; a mismatch asserts. A blob the
-linked transcoder cannot read or transcode, a lost context, a staging allocation
-failure and an RGBA8 fallback chain above 4 GB stay recoverable: the activator logs
-and returns an invalid handle. The header's `format` field is range-checked at the
+both `mip_count` and the full chain down to 1x1; a mismatch asserts. A lost
+context, a staging allocation failure and an RGBA8 fallback chain above 4 GB
+stay recoverable: the activator logs and returns an invalid handle. The header's `format` field is range-checked at the
 boundary like every other header field. It decides only the transfer: an
 `SRGB8_ALPHA8` or `SRGB8` header selects the sRGB twin of the target. Alpha and
 codec come from the blob, because the encoder drops alpha slices for a fully

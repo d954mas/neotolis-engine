@@ -94,8 +94,7 @@ static void roundtrip(uint32_t width, uint32_t height, nt_basisu_codec_t codec, 
     }
     TEST_ASSERT_EQUAL_UINT32(levels, enc.mip_count);
 
-    nt_basisu_info_t info = {0};
-    nt_basisu_info(enc.data, enc.size, &info);
+    const nt_basisu_info_t info = nt_basisu_info(enc.data, enc.size);
     TEST_ASSERT_EQUAL_INT(codec, info.codec);
     /* Unpadded dimensions: 13x7 stays 13x7, not the 16x8 block padding. */
     TEST_ASSERT_EQUAL_UINT32(width, info.width);
@@ -125,8 +124,7 @@ void test_uastc_alpha(void) { codec_cases(NT_BASISU_CODEC_UASTC_LDR, true); }
 void test_non_basis_header_asserts(void) {
     uint8_t pixels[16 * 8 * 4];
     fill_pixels(pixels, 16, 8, false);
-    nt_basisu_info_t info = {0};
-    NT_TEST_EXPECT_ASSERT(nt_basisu_info(pixels, sizeof(pixels), &info));
+    NT_TEST_EXPECT_ASSERT((void)nt_basisu_info(pixels, sizeof(pixels)));
 }
 
 /* An RGBA source the encoder finds fully opaque loses its alpha slices, so the
@@ -139,8 +137,7 @@ void test_opaque_rgba_source_reports_no_alpha(void) {
     for (uint32_t i = 0; i < codec_count; i++) {
         nt_basisu_encode_result_t enc = nt_basisu_encode(1, pixels, 16, 8, NT_TEXTURE_FORMAT_RGBA8, &codecs[i]);
         TEST_ASSERT_NOT_NULL(enc.data);
-        nt_basisu_info_t info = {0};
-        nt_basisu_info(enc.data, enc.size, &info);
+        const nt_basisu_info_t info = nt_basisu_info(enc.data, enc.size);
         nt_basisu_encode_free(&enc);
         TEST_ASSERT_FALSE(info.has_alpha);
     }
@@ -175,8 +172,7 @@ void test_mip_level_with_a_shrunken_stored_width_asserts(void) {
     nt_basisu_encode_result_t enc = nt_basisu_encode(1, pixels, 13, 7, NT_TEXTURE_FORMAT_RGB8, &opts);
     TEST_ASSERT_NOT_NULL(enc.data);
 
-    nt_basisu_info_t info = {0};
-    nt_basisu_info(enc.data, enc.size, &info);
+    const nt_basisu_info_t info = nt_basisu_info(enc.data, enc.size);
     TEST_ASSERT_EQUAL_UINT32(4, info.level_count);
 
     uint8_t *blob = enc.data;
@@ -196,7 +192,8 @@ void test_mip_level_with_a_shrunken_stored_width_asserts(void) {
     TEST_ASSERT_EQUAL_UINT32(6, read_le(level1 + BASIS_SLICE_ORIG_WIDTH_OFS, 2));
     level1[BASIS_SLICE_ORIG_WIDTH_OFS] = 5;
 
-    NT_TEST_EXPECT_ASSERT(nt_basisu_info(enc.data, enc.size, &info));
+    NT_TEST_EXPECT_ASSERT((void)nt_basisu_info(enc.data, enc.size));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "halved chain"));
     nt_basisu_encode_free(&enc);
 }
 #endif
@@ -233,8 +230,7 @@ static void encode_checker_tail(nt_basisu_codec_t codec, nt_texture_pixel_format
     (void)fclose(file);
     TEST_ASSERT_EQUAL_UINT16(format, header.format);
 
-    nt_basisu_info_t info = {0};
-    nt_basisu_info(basis, header.data_size, &info);
+    const nt_basisu_info_t info = nt_basisu_info(basis, header.data_size);
     /* 8x8 -> 4x4 -> 2x2 -> 1x1: the 4 RGBA8 bytes at the end are the tail level. */
     uint8_t chain[((8 * 8) + (4 * 4) + (2 * 2) + 1) * 4] = {0};
     TEST_ASSERT_EQUAL_UINT32(4, info.level_count);
@@ -312,8 +308,7 @@ static void check_public_pack(const char *path, uint32_t texture_count, const ui
         TEST_ASSERT_LESS_OR_EQUAL_UINT32(sizeof(basis), header.data_size);
         TEST_ASSERT_EQUAL(header.data_size, fread(basis, 1, header.data_size, file));
         TEST_ASSERT_EQUAL(NT_TEXTURE_COMPRESSION_BASIS, header.compression);
-        nt_basisu_info_t info = {0};
-        nt_basisu_info(basis, header.data_size, &info);
+        const nt_basisu_info_t info = nt_basisu_info(basis, header.data_size);
         TEST_ASSERT_EQUAL_INT(codec, info.codec);
         TEST_ASSERT_FALSE(header.flags & NT_TEXTURE_FLAG_GEN_MIPMAPS);
         TEST_ASSERT_EQUAL(NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR, header.default_min_filter);

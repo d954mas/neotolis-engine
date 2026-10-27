@@ -124,6 +124,7 @@ uint8_t *nt_builder_decode_texture(const uint8_t *src_data, uint32_t src_size, c
     unsigned char *pixels = stbi_load_from_memory(src_data, (int)src_size, &w, &h, &channels, 4);
     NT_BUILD_ASSERT(pixels && "texture decode: stbi_load_from_memory failed");
     if ((uint32_t)w > NT_BUILD_MAX_TEXTURE_SIZE || (uint32_t)h > NT_BUILD_MAX_TEXTURE_SIZE) {
+        stbi_image_free(pixels);
         NT_BUILD_FAIL("texture decode: image exceeds NT_BUILD_MAX_TEXTURE_SIZE", "texture decode: %ux%u exceeds max %u", (uint32_t)w, (uint32_t)h, (uint32_t)NT_BUILD_MAX_TEXTURE_SIZE);
     }
 

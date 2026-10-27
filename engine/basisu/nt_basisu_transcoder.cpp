@@ -25,8 +25,7 @@ static bool codec_built(basist::basis_tex_format fmt) {
 
 void nt_basisu_transcoder_global_init(void) { basist::basisu_transcoder_init(); }
 
-void nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_t *out_info) {
-    NT_ASSERT(out_info != nullptr);
+nt_basisu_info_t nt_basisu_info(const void *basis_data, uint32_t basis_size) {
     /* get_basis_tex_format answers cETC1S for a header it rejects, indistinguishable
        from a real ETC1S file, so the full header check has to come first. */
     const bool header_ok = s_transcoder.validate_header(basis_data, basis_size);
@@ -38,9 +37,6 @@ void nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_
     basist::basisu_image_info image_info;
     const bool image_ok = s_transcoder.get_image_info(basis_data, basis_size, image_info, 0);
     NT_ASSERT(image_ok && "basisu: blob has no image 0");
-    out_info->codec = codec;
-    out_info->width = image_info.m_orig_width;
-    out_info->height = image_info.m_orig_height;
     /* Upstream accepts a level whose width shrank within the same block count and
        then writes it with its own row stride; the activator derives sizes from
        level 0, so every level must be exactly the halved chain. */
@@ -52,8 +48,7 @@ void nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_
         NT_ASSERT(level_ok && level_w == nt_texture_level_extent(image_info.m_orig_width, level) && level_h == nt_texture_level_extent(image_info.m_orig_height, level) &&
                   "basisu: blob mip chain is not the halved chain");
     }
-    out_info->level_count = image_info.m_total_levels;
-    out_info->has_alpha = image_info.m_alpha_flag;
+    return nt_basisu_info_t{codec, image_info.m_orig_width, image_info.m_orig_height, image_info.m_total_levels, image_info.m_alpha_flag};
 }
 
 void nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, const nt_basisu_info_t *info, nt_texture_format_t format, void *output) {

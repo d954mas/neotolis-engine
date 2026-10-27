@@ -96,8 +96,7 @@ static void produce_fixture(const fixture_t *fx) {
     (void)snprintf(file_name, sizeof(file_name), "%s.basis", fx->name);
     write_golden(file_name, enc.data, enc.size);
 
-    nt_basisu_info_t info = {0};
-    nt_basisu_info(enc.data, enc.size, &info);
+    const nt_basisu_info_t info = nt_basisu_info(enc.data, enc.size);
     TEST_ASSERT_EQUAL_INT(fx->codec, info.codec);
     TEST_ASSERT_EQUAL_UINT32(fx->w, info.width);
     TEST_ASSERT_EQUAL_UINT32(fx->h, info.height);

@@ -95,9 +95,7 @@ static void check_fixture(const fixture_t *fx) {
     uint32_t basis_size = 0;
     uint8_t *basis = read_file(file_name, &basis_size);
 
-    nt_basisu_info_t info;
-    memset(&info, 0, sizeof(info));
-    nt_basisu_info(basis, basis_size, &info);
+    const nt_basisu_info_t info = nt_basisu_info(basis, basis_size);
     TEST_ASSERT_EQUAL_INT_MESSAGE(fx->codec, info.codec, name);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(fx->w, info.width, name);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(fx->h, info.height, name);

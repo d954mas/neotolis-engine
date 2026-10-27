@@ -58,7 +58,7 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
         buf[pos++] = wv;
         buf[pos++] = gen_mips;
 
-        /* Redundant with codec; dropped together with the next NT_BUILDER_VERSION bump so warm caches stay valid. */
+        /* Redundant with codec; kept so existing cache keys stay valid. */
         uint8_t has_compress = td->opts.compress.codec != NT_BASISU_CODEC_NONE ? 1 : 0;
         memcpy(buf + pos, &has_compress, sizeof(has_compress));
         pos += (uint32_t)sizeof(has_compress);

@@ -217,8 +217,7 @@ static uint32_t chain_bytes(nt_texture_format_t format, uint16_t w, uint16_t h) 
 static void expect_transcoder_reusable(basis_fixture_t *fixture) {
     const uint8_t *payload = fixture->blob + sizeof(NtTextureAssetHeader);
     const uint32_t payload_size = fixture->size - (uint32_t)sizeof(NtTextureAssetHeader);
-    nt_basisu_info_t info = {0};
-    nt_basisu_info(payload, payload_size, &info);
+    const nt_basisu_info_t info = nt_basisu_info(payload, payload_size);
     const uint32_t bytes = chain_bytes(NT_TEXTURE_FORMAT_RGBA8, fixture->width, fixture->height);
     uint8_t *out = (uint8_t *)malloc(bytes);
     TEST_ASSERT_NOT_NULL(out);
@@ -481,7 +480,7 @@ void test_corrupted_payload_asserts_and_a_good_blob_still_activates(void) {
     set_caps(true, false, false);
     basis_fixture_t alpha = fixture_encode(96, 64, NT_BASISU_CODEC_ETC1S, true, NT_TEXTURE_FORMAT_RGBA8);
     uint32_t payload = alpha.size - (uint32_t)sizeof(NtTextureAssetHeader);
-    /* The middle half of the blob: slice and level data, so the chain the blob describes breaks. */
+    /* The middle half of the blob, past its header: info or transcode asserts. */
     for (uint32_t i = payload / 4U; i < (payload * 3U) / 4U; i++) {
         alpha.blob[sizeof(NtTextureAssetHeader) + i] ^= 0xA5U;
     }
