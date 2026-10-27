@@ -47,8 +47,8 @@ typedef enum nt_devapi_gate {
    batch; call it before any side effect a failed defer must not leave. */
 bool nt_devapi_defer(nt_devapi_gate gate, double amount, nt_devapi_handler_fn reply, nt_devapi_error *err);
 
-/* Build a pending PRESENT reply at the pre-swap seam (GL-valid, before swap). A group that defers on
-   PRESENT wraps it with its own host-facing seam. */
+/* Build a pending PRESENT reply at the pre-swap seam (GL-valid, before swap). The group that defers on
+   PRESENT installs it as a window pre-swap hook. */
 void nt_devapi_run_pre_swap_reply(void);
 
 /* Drop the pending deferred reply (client drop, web reset, shutdown). */

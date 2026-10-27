@@ -25,7 +25,7 @@ distilled lessons.
 
 ```bash
 cmake --preset native-debug -B build/_cmake/native-debug-capture \
-  -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON \
+  -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON \
   -DNT_DEVAPI_GROUP_CAPTURE=ON
 cmake --build build/_cmake/native-debug-capture --target <example>
 ```
@@ -74,4 +74,4 @@ cmake --build build/_cmake/native-debug-capture --target <example>
   re-encodes env-var text.
 - Stdout redirect can break GL init in some hosts; printf-debug to a file via
   fopen instead.
-- Reference host wiring: `examples/capture_host`.
+- Reference host wiring: `examples/devapi_host` (registering the capture group installs the seam).

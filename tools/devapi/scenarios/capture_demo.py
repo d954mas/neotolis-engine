@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """DevAPI capture demo — the live-socket UAT for the frame-capture group.
 
-Exercises capture.frame / capture.region end-to-end against a real running examples/capture_host over
+Exercises capture.frame / capture.region end-to-end against a real running examples/devapi_host over
 loopback TCP. Capture is deferred to the pre-swap seam, which only a live socket + real GL context drives.
-The host renders a known two-tone pattern; this UAT confirms the command resolves after a render with a
-decodable, non-blank PNG, region/scale dims are correct, bad params return bad_params over the wire, and
-the pixel-health check passes.
+The host clears a known two-tone pattern; with the sim frozen in MANUAL this UAT checks the PNG decodes,
+the pattern's orientation and channel order, region == the same crop of the full frame, scale dims,
+bad_params over the wire, and that capturing never advances the frame.
 
-devapi_host inits no gfx, so this scenario launches capture_host (a dedicated gfx-backed host). By
-default it launches its own subprocess on a free port and tears it down; attach to an already-running
-host with --no-launch.
+By default it launches its own host subprocess and tears it down; attach to a running host with --no-launch.
 
 Usage: python tools/devapi/scenarios/capture_demo.py [--port N] [--no-launch] [--host-bin PATH] [--save DIR]
   Port resolution: --port N  >  env NT_DEVAPI_PORT  >  default 17890.
@@ -29,10 +27,12 @@ import time
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
     from tools.devapi.client import DevApiClient, DevApiResultError
+    from tools.devapi.scenarios.devapi_demo import _find_host_bin
     from tools.devapi.transport import DEFAULT_PORT, SocketTransport
 else:
     from ..client import DevApiClient, DevApiResultError
     from ..transport import DEFAULT_PORT, SocketTransport
+    from .devapi_demo import _find_host_bin
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
@@ -64,21 +64,6 @@ def resolve_port(argv) -> int:
         if a.isdigit():
             return _parse_port(a)
     return DEFAULT_PORT
-
-
-def _find_host_bin(argv) -> str:
-    """--host-bin PATH override, else the per-preset capture_host built by the capture config.
-
-    capture_host enables only CORE/DISCOVERY/TIME/CAPTURE groups, built into a dedicated cap-host dir —
-    the shared native-debug build enables every group, coupling the host to subsystems it never inits.
-    """
-    for i, a in enumerate(argv):
-        if a == "--host-bin" and i + 1 < len(argv):
-            return argv[i + 1]
-        if a.startswith("--host-bin="):
-            return a.split("=", 1)[1]
-    exe = "capture_host.exe" if os.name == "nt" else "capture_host"
-    return os.path.join(REPO_ROOT, "build", "examples", "capture_host", "cap-host", exe)
 
 
 def _save_dir(argv):
@@ -117,53 +102,39 @@ def run(client: DevApiClient, save_dir=None) -> None:
     fb_h = int(view["fb_height"])
     assert fb_w > 0 and fb_h > 0, f"view returned a zero-size framebuffer ({fb_w}x{fb_h})"
 
-    # 1. capture.frame resolves after a render; a decodable width/height/format/data proves the seam ran.
-    full = client.capture_frame()
-    img = pixel_health.check_payload(full, fb_w, fb_h)
-    # Channel order (RGB vs BGR): the centered fg box is R-dominant orange; a red/blue swap would invert
-    # it and slip past every channel-symmetric check (not-blank, split-means).
-    r_mean, _g_mean, b_mean = pixel_health.center_channel_means(img)
-    assert r_mean > b_mean, (
-        f"capture channel order looks swapped (RGB vs BGR): center-fg mean R={r_mean:.1f} <= B={b_mean:.1f} "
-        "(the orange foreground must be red-dominant)"
-    )
+    # MANUAL with no step queued: the sim stays frozen, so every capture reads the same frame.
+    client.set_mode("manual")
+    frame_before = client.frame_current()["frame"]
+
+    # 1. capture.frame resolves at the next present; probe the pattern (orange box at top-left x 1/8..5/8,
+    #    y 1/8..5/8 on a blue background) so a Y flip, X mirror or R/B swap fails.
+    img = pixel_health.check_payload(client.capture_frame(), fb_w, fb_h).convert("RGB")
+    fg = img.getpixel((fb_w // 4, fb_h // 4))
+    below = img.getpixel((fb_w // 4, fb_h * 3 // 4))
+    right = img.getpixel((fb_w * 3 // 4, fb_h // 4))
+    assert fg[0] > fg[2], f"capture.frame: box pixel {fg} is not red-dominant orange (R/B swap or Y flip?)"
+    assert below[2] > below[0], f"capture.frame: pixel below the box {below} is not the blue background (Y flip?)"
+    assert right[2] > right[0], f"capture.frame: pixel right of the box {right} is not the blue background (X mirror?)"
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)
         img.save(os.path.join(save_dir, "capture_frame.png"))
-    print(f"PASS[1/5] capture.frame: the deferred reply carried a decodable {img.width}x{img.height} PNG.")
+    print(f"PASS[1/5] capture.frame: {fb_w}x{fb_h} PNG, pattern orientation and channel order hold.")
 
-    # 2. capture.region: a sub-rect returns dims matching the rect. The dims + not-blank check is
-    #    position-blind, so the region origin is verified separately below (a flip passes dims+not-blank).
-    rx, ry, rw, rh = 0, 0, fb_w * 3 // 4, fb_h * 3 // 4
-    region = client.capture_region(rx, ry, rw, rh)
-    region_img = pixel_health.check_payload(region, rw, rh)
-    # Region Y-origin: under top-left origin the orange fg sits in the lower band of this crop (top
-    # fb_h/4 rows are pure bg), so bottom must out-mean top — a bottom-left readback inverts this.
-    top_mean, bottom_mean = pixel_health.vertical_split_means(region_img)
-    assert bottom_mean > top_mean, (
-        f"capture.region y-origin looks flipped: top-half mean {top_mean:.1f} >= bottom-half "
-        f"{bottom_mean:.1f} (the orange foreground must sit in the lower band under top-left origin)"
-    )
-    # Region X-origin: a rect straddling the fg box's right edge — left half inside the fg, right half in
-    # the bg, so left must out-mean right. The stub-backed C tests discard x/y, so this is the only
-    # end-to-end x-origin guard.
-    xr, xy, xw, xh = fb_w // 2, fb_h // 4, fb_w // 2, fb_h // 2
-    xspan_img = pixel_health.check_payload(client.capture_region(xr, xy, xw, xh), xw, xh)
-    left_mean, right_mean = pixel_health.horizontal_split_means(xspan_img)
-    assert left_mean > right_mean, (
-        f"capture.region x-origin looks shifted: left-half mean {left_mean:.1f} <= right-half "
-        f"{right_mean:.1f} (the fg box's left portion must dominate a rect straddling its right edge)"
+    # 2. capture.region equals the same crop of the full frame. A non-zero y catches a wrong gl_y conversion.
+    rx, ry, rw, rh = fb_w // 4, fb_h // 16, fb_w // 2, fb_h // 2
+    region = pixel_health.check_payload(client.capture_region(rx, ry, rw, rh), rw, rh).convert("RGB")
+    assert region.tobytes() == img.crop((rx, ry, rx + rw, ry + rh)).tobytes(), (
+        f"capture.region {{x:{rx},y:{ry},w:{rw},h:{rh}}} differs from the same crop of capture.frame"
     )
     if save_dir:
-        region_img.save(os.path.join(save_dir, "capture_region.png"))
-    print(f"PASS[2/5] capture.region {{x:{rx},y:{ry},w:{rw},h:{rh}}}: {rw}x{rh}, not-blank + Y-origin verified (fg in lower band).")
+        region.save(os.path.join(save_dir, "capture_region.png"))
+    print(f"PASS[2/5] capture.region {{x:{rx},y:{ry},w:{rw},h:{rh}}} equals the full-frame crop.")
 
-    # 3. scale 1/2 and 1/4 -> half / quarter dims (box-average downscale).
-    half = client.capture_frame(scale=2)
-    pixel_health.check_payload(half, fb_w // 2, fb_h // 2)
-    quarter = client.capture_frame(scale=4)
-    pixel_health.check_payload(quarter, fb_w // 4, fb_h // 4)
-    print(f"PASS[3/5] capture.frame scale 1/2 -> {fb_w // 2}x{fb_h // 2}, 1/4 -> {fb_w // 4}x{fb_h // 4}.")
+    # 3. scale 2 and 4 on a rect both divide (any framebuffer size): post-scale dims.
+    sw, sh = fb_w - fb_w % 4, fb_h - fb_h % 4
+    for factor in (2, 4):
+        pixel_health.check_payload(client.capture_region(0, 0, sw, sh, scale=factor), sw // factor, sh // factor)
+    print(f"PASS[3/5] capture.region {sw}x{sh} scale 2 -> {sw // 2}x{sh // 2}, scale 4 -> {sw // 4}x{sh // 4}.")
 
     # 4. Bad params -> bad_params over the wire (never an assert / crash on untrusted bot input). Both
     #    axes are proven OOB over the real framebuffer: w>fb_w (X) and h>fb_h (Y).
@@ -180,8 +151,10 @@ def run(client: DevApiClient, save_dir=None) -> None:
             assert "bad_params" in str(exc), f"{label} raised {exc!r}, expected bad_params"
     print("PASS[4/5] bad params (scale=3, region w>fb_w, region h>fb_h, region w=0) -> bad_params over the wire.")
 
-    # 5. Pixel-health summary: the full-frame image already passed decode + dims + not-blank above.
-    print("PASS[5/5] pixel-health: decode + dims + not-blank held on every captured frame.")
+    # 5. MANUAL: capturing never advanced the frozen sim.
+    frame_after = client.frame_current()["frame"]
+    assert frame_after == frame_before, f"capture advanced the MANUAL sim: frame {frame_before} -> {frame_after}"
+    print(f"PASS[5/5] MANUAL: frame.current stayed {frame_before} across every capture.")
 
     print("PASS: capture.* end-to-end over the socket — deferred capture + region + scale + bad_params + pixel-health all machine-asserted.")
 
@@ -196,11 +169,8 @@ def main(argv) -> int:
         if not no_launch:
             host_bin = _find_host_bin(argv)
             if not os.path.isfile(host_bin):
-                print(f"error: capture_host not found at {host_bin}\n"
-                      f"  build it: cmake -B build/_cmake/cap-host -DNT_DEVAPI_ENABLED=ON "
-                      f"-DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON "
-                      f"-DNT_DEVAPI_GROUP_CAPTURE=ON -G Ninja -DCMAKE_C_COMPILER=clang\n"
-                      f"  then: cmake --build build/_cmake/cap-host --target capture_host\n"
+                print(f"error: devapi_host not found at {host_bin}\n"
+                      f"  build it with the devapi-smoke configure line in .github/workflows/ci.yml,\n"
                       f"  or attach to a running host with --no-launch --port N", file=sys.stderr)
                 return 2
             env = dict(os.environ, NT_DEVAPI_PORT=str(port))

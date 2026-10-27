@@ -397,8 +397,7 @@ exceeds the 100 ms drift bound, and fails on a drift WARN; it also checks `bad_p
 Native `test_recorder` covers frame selection and the audio stream.
 
 CI only compiles and links the Windows backend (`windows-recorder`). Check its behavior locally with a
-native `devapi_host` that links the RECORDER group (it then inits `nt_gfx` and draws the flash
-pattern) and
+native `devapi_host` that links the RECORDER group (it draws a white flash while recording) and
 `tools/devapi/scenarios/record_demo.py`, which records a lockstep and a real-time clip and runs
 `check_recording.py` on each:
 

@@ -4,8 +4,6 @@
 
 #include "base64/nt_base64.h"
 #include "core/nt_assert.h"
-#include "devapi/nt_devapi_capture.h"
-#include "devapi/nt_devapi_capture_internal.h"
 #include "devapi/nt_devapi_internal.h"
 #include "fpng/nt_fpng.h"
 #include "graphics/nt_gfx.h"
@@ -28,14 +26,6 @@ _Static_assert((uint64_t)NT_DEVAPI_CAPTURE_MAX_PIXELS * 8U <= UINT32_MAX, "NT_DE
 
 /* Capture wire error codes (group-owned; the generic core never names them). */
 #define NT_DEVAPI_ERR_CAPTURE_FAILED "capture_failed"
-#define NT_DEVAPI_ERR_CAPTURE_UNAVAILABLE "capture_unavailable"
-
-/* "This host drives the pre-swap seam" — set via install_seam; reset each register_capture (fresh init
-   starts unarmed). defer_capture reads it to reject rather than defer a slot that never resolves. NOT
-   reset on client-reset, so a reconnecting client on a capture host stays armed. */
-static bool s_seam_armed;
-
-void nt_devapi_capture_arm(void) { s_seam_armed = true; }
 
 /* The pending capture's rect + scale divisor: only one deferred reply is ever pending. */
 typedef struct capture_ctx {
@@ -51,7 +41,7 @@ static capture_ctx s_capture;
 // #region seam producer
 /* Fused alpha-strip + box-average: rgba8 src -> RGB dst, dst dims = w/factor x h/factor.
    factor==1 is a plain strip (1x1 box). Integer-only, no heap. */
-void nt_devapi_capture_strip_and_box(const uint8_t *src, uint32_t w, uint32_t h, uint32_t factor, uint8_t *dst) {
+static void strip_and_box(const uint8_t *src, uint32_t w, uint32_t h, uint32_t factor, uint8_t *dst) {
     uint32_t ow = w / factor;
     uint32_t oh = h / factor;
     uint32_t area = factor * factor;
@@ -86,10 +76,7 @@ static bool build_payload(cJSON *result, const uint8_t *png, uint32_t png_len, u
         return false;
     }
     uint32_t b64_len = nt_base64_encode(png, png_len, b64, b64_need);
-    if (b64_len == 0U) {
-        free(b64);
-        return false;
-    }
+    NT_ASSERT(b64_len == b64_need); /* b64_need is the exact encoded size; 0 means a too-small buffer. */
     b64[b64_len] = '\0';
 
     devapi_add_number(result, "width", (double)out_w);
@@ -100,14 +87,12 @@ static bool build_payload(cJSON *result, const uint8_t *png, uint32_t png_len, u
     return true;
 }
 
-/* readback -> strip+box -> fpng -> base64 -> result. Failure at any bounded stage returns false (no
-   assert on the path that bot params can reach). */
+/* readback -> strip+box -> fpng -> base64 -> result. Readback (lost context), OOM and encode failures
+   return false: the recoverable capture_failed outcome. */
 static bool capture_produce(const capture_ctx *c, cJSON *result) {
     uint32_t out_w = c->w / c->factor;
     uint32_t out_h = c->h / c->factor;
-    if (out_w == 0U || out_h == 0U) {
-        return false; /* defensive only: the handlers reject non-dividing scale synchronously (bad_params). */
-    }
+    NT_ASSERT(out_w > 0U && out_h > 0U); /* the handlers reject zero and non-dividing sizes as bad_params. */
 
     uint32_t rgba_len = c->w * c->h * 4U;
     uint8_t *rgba = (uint8_t *)malloc((size_t)rgba_len);
@@ -125,7 +110,7 @@ static bool capture_produce(const capture_ctx *c, cJSON *result) {
         free(rgba);
         return false;
     }
-    nt_devapi_capture_strip_and_box(rgba, c->w, c->h, c->factor, rgb);
+    strip_and_box(rgba, c->w, c->h, c->factor, rgb);
     free(rgba);
 
     /* PNG is bounded by the raw RGB size + a small header overhead in the worst (uncompressible) case;
@@ -182,21 +167,7 @@ static bool parse_scale(const cJSON *params, uint32_t *factor, nt_devapi_error *
     return true;
 }
 
-/* Defer a reply carrying the captured rect + factor. `gl_y` is the GL bottom-left y of the
-   rect (top-left y converted by the caller); the row-flip in nt_gfx_read_pixels then yields a
-   top-left sub-rect matching the documented contract. Capture resolves at the next render, sim frozen or not. */
-static bool defer_capture(uint32_t x, uint32_t gl_y, uint32_t w, uint32_t h, uint32_t factor, nt_devapi_error *err) {
-    if (!s_seam_armed) {
-        /* The host advertises capture but never drives the pre-swap seam (e.g. devapi_host, which inits
-           no GL) — a deferred slot would never resolve, hanging the client. Reject synchronously with a
-           distinct code instead. A capture host arms the seam at startup, so this never trips there. */
-        return nt_devapi_fail_code(err, NT_DEVAPI_ERR_CAPTURE_UNAVAILABLE, "capture not available on this host (it does not drive the pre-swap capture seam)");
-    }
-    s_capture = (capture_ctx){.x = x, .y = gl_y, .w = w, .h = h, .factor = factor};
-    return nt_devapi_defer(NT_DEVAPI_GATE_PRESENT, 0.0, capture_reply, err);
-}
-
-/* capture.frame {scale?}: defers a full-framebuffer capture (x=0,y=0,w=fb_width,h=fb_height). */
+/* capture.frame {scale?}: defers a full-framebuffer capture to the next present, sim frozen or not. */
 static bool cmd_capture_frame(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     uint32_t factor = 1U;
     if (!parse_scale(params, &factor, err, "capture.frame: scale must be one of {1, 2, 4}")) {
@@ -213,7 +184,8 @@ static bool cmd_capture_frame(const cJSON *params, cJSON *result, nt_devapi_erro
     if (fb_w % factor != 0U || fb_h % factor != 0U) {
         return nt_devapi_fail(err, "capture.frame: scale must evenly divide the framebuffer dimensions");
     }
-    return defer_capture(0U, 0U, fb_w, fb_h, factor, err);
+    s_capture = (capture_ctx){.w = fb_w, .h = fb_h, .factor = factor};
+    return nt_devapi_defer(NT_DEVAPI_GATE_PRESENT, 0.0, capture_reply, err);
 }
 
 /* capture.region {x,y,w,h,scale?}: validates the rect against the framebuffer (overflow-safe) then
@@ -252,9 +224,9 @@ static bool cmd_capture_region(const cJSON *params, cJSON *result, nt_devapi_err
     }
     /* The docstring contract is top-left origin; glReadPixels reads bottom-left. Convert the rect's
        top-left y to a GL bottom-left y (h<=fb_h-y already proven) so the row-flip yields a top-left
-       sub-rect. Full-frame (capture.frame) is unchanged: fb_h-(0+fb_h)==0. */
-    uint32_t gl_y = fb_h - (y + h);
-    return defer_capture(x, gl_y, w, h, factor, err);
+       sub-rect. */
+    s_capture = (capture_ctx){.x = x, .y = fb_h - (y + h), .w = w, .h = h, .factor = factor};
+    return nt_devapi_defer(NT_DEVAPI_GATE_PRESENT, 0.0, capture_reply, err);
 }
 // #endregion
 
@@ -275,14 +247,10 @@ static const nt_devapi_command k_capture_cmds[] = {
     },
 };
 
-/* Public host-facing seam (the window pre-swap hook target): builds a pending capture reply at the
-   GL-valid point. */
-void nt_devapi_capture_on_pre_swap(void) { nt_devapi_run_pre_swap_reply(); }
-
 void nt_devapi_register_capture(void) {
-    s_seam_armed = false; /* fresh init starts unarmed; the host (re-)arms via install_seam. */
-    /* fpng needs a one-time CPU-feature detect before any encode; do it here so the encoder dependency
-       is the capture group's own concern, not something the game host must know to call. Idempotent. */
+    /* The group owns its dependencies: fpng's one-time CPU-feature detect and the pre-swap seam that
+       resolves PRESENT replies, so a listed capture command always has a way to resolve. Both idempotent. */
     nt_fpng_init();
+    nt_window_add_pre_swap_hook(nt_devapi_run_pre_swap_reply);
     nt_devapi_register(k_capture_cmds, NT_COUNTOF(k_capture_cmds), NULL);
 }

@@ -1039,15 +1039,14 @@ if(NOT EMSCRIPTEN)
         endif()
 
         # capture group (capture.frame / capture.region) via submit(): the synthetic nt_gfx_fake
-        # readback feeds the real strip+box+fpng+base64 chain when the seam is driven manually (no GL).
+        # readback feeds the real strip+box+fpng+base64 chain when the stub window swap runs the seam.
+        # The TU includes nt_devapi_capture.c (static helpers), so the group lib is not linked.
         # Consumer-before-provider GNU-ld order: nt_devapi first, nt_gfx_fake/nt_fpng next, core/log last.
-        # The TU is #if-gated on NT_DEVAPI_GROUP_CAPTURE with an #else stub-main, so a group-absent
-        # compile still links clean.
         if(NT_DEVAPI_GROUP_CAPTURE)
             add_executable(test_devapi_capture unit/test_devapi_capture.c)
             target_link_libraries(test_devapi_capture PRIVATE
-                nt_devapi_capture nt_devapi cjson nt_window_stub nt_app_stub
-                nt_gfx_fake nt_basisu_transcoder_stub nt_fpng nt_core nt_log_stub unity
+                nt_devapi cjson nt_window_stub nt_app_stub
+                nt_gfx_fake nt_basisu_transcoder_stub nt_fpng nt_base64 nt_core nt_log_stub unity
              nt_meshwire_stub)
             target_compile_definitions(test_devapi_capture PRIVATE
                 _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1

@@ -3,7 +3,7 @@
 enable_language(CXX)
 
 # EXCLUDE_FROM_ALL: nt_fpng is linked only by the capture group (engine/devapi, capture-gated) +
-# capture_host + the capture unit test. Keep the 3222-line vendored fpng.cpp out of the default `all`
+# the capture unit test. Keep the 3222-line vendored fpng.cpp out of the default `all`
 # target in configs that never link it (native-release, all WASM presets, devapi-ON/capture-OFF); it
 # is still built on demand when a non-excluded consumer (the capture group) links it.
 add_library(nt_fpng STATIC EXCLUDE_FROM_ALL
