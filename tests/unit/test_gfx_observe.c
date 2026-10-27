@@ -306,7 +306,7 @@ static void test_first_frame_counts_initial_resource_creation(void) {
     TEST_ASSERT_EQUAL_UINT32(5, g_nt_gfx.last_frame.accepted[NT_GFX_OP_CREATE]);
 }
 
-/* The pre-swap capture seam reads after end_frame: work there is legal and counts in the open frame. */
+/* The devapi capture readback runs after end_frame: work there is legal and counts in the open frame. */
 static void test_work_after_end_frame_counts_in_the_open_frame(void) {
     nt_gfx_end_frame();
     (void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8});

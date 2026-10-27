@@ -8,7 +8,7 @@ MANUAL the PNG decodes, the pattern's orientation and channel order, region == t
 frame, scale dims, bad_params over the wire, and that capturing never advances the frame.
 
 By default it launches its own host subprocess and tears it down. --no-launch attaches to a running
-examples/devapi_host (its pattern is probed) and leaves it in RUN.
+examples/devapi_host (its pattern is probed); the host returns to RUN when the client leaves.
 
 Usage: python tools/devapi/scenarios/capture_demo.py [--port N] [--no-launch] [--host-bin PATH] [--save DIR]
   Port resolution: --port N  >  env NT_DEVAPI_PORT  >  default 17890.
@@ -67,7 +67,7 @@ def run(client: DevApiClient, save_dir=None) -> None:
     client.set_mode("manual")
     frame_before = client.frame_current()["frame"]
 
-    # 1. capture.frame resolves at the next present; probe the pattern (orange box at top-left x 1/8..5/8,
+    # 1. capture.frame resolves at the next rendered frame; probe the pattern (orange box at top-left x 1/8..5/8,
     #    y 1/8..5/8 on a blue background) so a Y flip, X mirror or R/B swap fails.
     img = pixel_health.check_payload(client.capture_frame(), fb_w, fb_h).convert("RGB")
     fg = img.getpixel((fb_w // 4, fb_h // 4))
@@ -115,7 +115,6 @@ def run(client: DevApiClient, save_dir=None) -> None:
     # 5. MANUAL: capturing never advanced the frozen sim.
     frame_after = client.frame_current()["frame"]
     assert frame_after == frame_before, f"capture advanced the MANUAL sim: frame {frame_before} -> {frame_after}"
-    client.set_mode("run")  # an attached host keeps running after the UAT
     print(f"PASS[5/5] MANUAL: frame.current stayed {frame_before} across every capture.")
 
     print("PASS: capture.* end-to-end over the socket — deferred capture + region + scale + bad_params + pixel-health all machine-asserted.")

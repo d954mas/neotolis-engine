@@ -961,7 +961,7 @@ renders: after the last pass and before `nt_window_swap_buffers`. Passes run
 only between begin_frame and end_frame; a begin_pass outside them asserts, also
 on a lost context. end_frame executes the frame's recorded draw-phase calls (see
 Draw-phase command stream) and ends the passes, not the counters: work after it
-(resource calls, GPU timing polls, the pre-swap capture seam) still counts in
+(resource calls, GPU timing polls, the devapi capture readback) still counts in
 the open frame. The frame that init opens only loads and starts ended, so
 pre-loop code that draws opens its own begin_frame/end_frame pair. A frame holds
 any number of passes; their counters sum. begin_frame also does the per-frame

@@ -91,10 +91,10 @@ static void test_capture_region_out_of_bounds_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"capture.region\",\"params\":{\"x\":0,\"y\":40,\"w\":10,\"h\":40}}"));
 }
 
-/* seam-driven encode (no socket) -> format:"png" + non-empty data */
+/* encode at the rendered frame (no socket) -> format:"png" + non-empty data */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_capture_frame_seam_encode(void) {
+static void test_capture_frame_encode(void) {
     cJSON *root = capture_yield("{\"method\":\"capture.frame\",\"request_id\":7}");
     cJSON *result = result_of(root);
     TEST_ASSERT_TRUE(cJSON_IsObject(result));
@@ -222,20 +222,6 @@ static void test_capture_waits_for_the_frame_with_sim_frozen(void) {
     TEST_ASSERT_NULL(drain());
 }
 
-/* a whole frame without nt_devapi_frame_rendered (render off, or a host that skips the call) fails the
-   capture as stalled instead of hanging the client. */
-static void test_capture_stalls_after_an_unrendered_frame(void) {
-    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"capture.frame\",\"request_id\":3}"));
-    TEST_ASSERT_NULL(drain()); /* the frame of the request: still waits. */
-    const char *resp = drain();
-    TEST_ASSERT_NOT_NULL(resp);
-    cJSON *root = cJSON_Parse(resp);
-    TEST_ASSERT_NOT_NULL(root);
-    TEST_ASSERT_EQUAL_STRING("stalled", cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(root, "error"), "code")->valuestring);
-    TEST_ASSERT_EQUAL_INT(3, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
-    cJSON_Delete(root);
-}
-
 /* box-average downscale produces the EXACT integer mean.
    Hermetic value check on the averager: the dims-only scale tests can't catch a wrong divisor (/factor vs
    /area) or wrong in-box source pixels. A 2x2 -> 1x1 box has a hand-computable per-channel mean. */
@@ -265,7 +251,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_capture_frame_bad_scale_bad_params);
     RUN_TEST(test_capture_region_out_of_bounds_bad_params);
-    RUN_TEST(test_capture_frame_seam_encode);
+    RUN_TEST(test_capture_frame_encode);
     RUN_TEST(test_capture_frame_scale_halves_dims);
     RUN_TEST(test_capture_region_dims_match_rect);
     RUN_TEST(test_capture_region_scale_halves_dims);
@@ -273,7 +259,6 @@ int main(void) {
     RUN_TEST(test_capture_producer_failure_yields_error);
     RUN_TEST(test_capture_pixel_cap_bad_params);
     RUN_TEST(test_capture_waits_for_the_frame_with_sim_frozen);
-    RUN_TEST(test_capture_stalls_after_an_unrendered_frame);
     RUN_TEST(test_capture_box_average_exact_mean);
     return UNITY_END();
 }

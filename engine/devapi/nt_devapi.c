@@ -483,7 +483,7 @@ static bool clock_ready(void) {
     return (int32_t)(g_nt_app.frame - s_pending.target_frame) >= 0; /* wraps together with g_nt_app.frame. */
 }
 
-/* Resolve the pending clock or RENDERED gate once per tick, before the transports drain, so native and
+/* Resolve the pending clock gate, or stall a RENDERED one, once per tick, before the transports drain, so native and
    web see the same state and a clock reply is read the tick its gate opens. Ready wins over a frozen sim
    (the last step of a crunch both reaches the target and empties the queue), not over a mode switch: RUN
    frames past a manual target are not the steps asked for. */
@@ -494,7 +494,7 @@ static void resolve_pending(void) {
     if (s_pending.gate == NT_DEVAPI_GATE_RENDERED) {
         /* A whole frame between two checks rendered nothing: rendering is off or the host skips the call. */
         if (s_pending.checked) {
-            s_pending.entry = make_error_entry(NT_DEVAPI_ERR_STALLED, "no frame was rendered since the request");
+            s_pending.entry = make_error_entry(NT_DEVAPI_ERR_STALLED, "no nt_devapi_frame_rendered since the request (rendering off, or the host does not call it)");
         }
         s_pending.checked = true;
         return;

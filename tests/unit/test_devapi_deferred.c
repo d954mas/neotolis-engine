@@ -1,5 +1,5 @@
 /* The deferred reply core: submit()->NULL on defer, the reply yields once its gate opens (frames, game
-   seconds, the pre-swap seam) with the original request_id; one reply in flight (busy); a gate that can no
+   seconds, nt_devapi_frame_rendered) with the original request_id; one reply in flight (busy); a gate that can no
    longer open answers stalled; reset frees what the slot owns. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
@@ -223,11 +223,13 @@ static void test_rendered_yields_after_the_frame(void) {
     TEST_ASSERT_NULL(drain());
 }
 
-static void test_rendered_reply_built_before_render_off_still_yields(void) {
+/* A built reply waits for the drain: later updates without a rendered frame do not stall it. */
+static void test_rendered_reply_survives_the_next_updates(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":9,\"params\":{\"gate\":\"rendered\"}}"));
     nt_devapi_frame_rendered();
-    nt_app_set_render_enabled(false);
-    assert_probe(drain(), 7, 9);
+    nt_devapi_update();
+    nt_devapi_update();
+    assert_probe(nt_devapi_poll_response(), 7, 9);
 }
 // #endregion
 
@@ -310,7 +312,7 @@ int main(void) {
     RUN_TEST(test_batch_rejects_deferral_and_runs_the_rest);
     RUN_TEST(test_batch_while_pending_is_busy_per_entry);
     RUN_TEST(test_rendered_yields_after_the_frame);
-    RUN_TEST(test_rendered_reply_built_before_render_off_still_yields);
+    RUN_TEST(test_rendered_reply_survives_the_next_updates);
     RUN_TEST(test_frames_stall_on_pause);
     RUN_TEST(test_frames_stall_on_mode_switch);
     RUN_TEST(test_frames_stall_in_idle_manual);

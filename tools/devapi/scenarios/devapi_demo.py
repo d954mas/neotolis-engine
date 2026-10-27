@@ -183,7 +183,7 @@ def main(argv) -> int:
             host_bin = _find_host_bin(argv)
             if not os.path.isfile(host_bin):
                 print(f"error: devapi_host not found at {host_bin}\n"
-                      f"  build it: cmake --build build/_cmake/native-debug --target devapi_host\n"
+                      f"  build it as docs/build.md describes for capture_demo.py,\n"
                       f"  or attach to a running host with --no-launch --port N", file=sys.stderr)
                 return 2
             env = dict(os.environ, NT_DEVAPI_PORT=str(port))

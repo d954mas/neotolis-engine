@@ -1031,7 +1031,7 @@ if(NOT EMSCRIPTEN)
         endif()
 
         # capture group (capture.frame / capture.region) via submit(): the synthetic nt_gfx_fake
-        # readback feeds the real strip+box+fpng+base64 chain when the stub window swap runs the seam.
+        # readback feeds the real strip+box+fpng+base64 chain when the test calls nt_devapi_frame_rendered().
         # The TU includes nt_devapi_capture.c (static helpers), so the group lib is not linked.
         # Consumer-before-provider GNU-ld order: nt_devapi first, nt_gfx_fake/nt_fpng next, core/log last.
         if(NT_DEVAPI_GROUP_CAPTURE)

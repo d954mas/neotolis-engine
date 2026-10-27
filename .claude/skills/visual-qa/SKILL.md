@@ -7,7 +7,7 @@ description: Headless pixel-level QA of GL rendering via devapi capture.frame (g
 
 GDI/PrintWindow screen capture of GL windows does NOT work in this environment
 (black frames). The working channel is the app capturing its OWN framebuffer via
-devapi `capture.frame` / `capture.region` (glReadPixels at a pre-swap seam —
+devapi `capture.frame` / `capture.region` (glReadPixels at `nt_devapi_frame_rendered()`, before the swap —
 see docs/spec/debug/logging-errors-debugging.md). Battle-tested in the
 game-67-idle AI-studio repo (same engine lineage); the rules below are its
 distilled lessons.
@@ -21,7 +21,8 @@ distilled lessons.
 
 ## Procedure
 
-1. **Build a devapi-enabled config** (dedicated build dir; groups ON):
+1. **Build a devapi-enabled config** (dedicated build dir; groups ON). The example must call
+   `nt_devapi_frame_rendered()` before its swap, or every capture answers `stalled`:
 
 ```bash
 cmake --preset native-debug -B build/_cmake/native-debug-capture \

@@ -38,7 +38,7 @@ typedef struct capture_ctx {
 
 static capture_ctx s_capture;
 
-// #region seam producer
+// #region reply producer
 /* Fused alpha-strip + box-average: rgba8 src -> RGB dst, dst dims = w/factor x h/factor.
    factor==1 is a plain strip (1x1 box). Integer-only, no heap. */
 static void strip_and_box(const uint8_t *src, uint32_t w, uint32_t h, uint32_t factor, uint8_t *dst) {
@@ -184,8 +184,11 @@ static bool cmd_capture_frame(const cJSON *params, cJSON *result, nt_devapi_erro
     if (fb_w % factor != 0U || fb_h % factor != 0U) {
         return nt_devapi_fail(err, "capture.frame: scale must evenly divide the framebuffer dimensions");
     }
+    if (!nt_devapi_defer(NT_DEVAPI_GATE_RENDERED, 0.0, capture_reply, err)) {
+        return false;
+    }
     s_capture = (capture_ctx){.w = fb_w, .h = fb_h, .factor = factor};
-    return nt_devapi_defer(NT_DEVAPI_GATE_RENDERED, 0.0, capture_reply, err);
+    return true;
 }
 
 /* capture.region {x,y,w,h,scale?}: validates the rect against the framebuffer (overflow-safe) then
@@ -225,8 +228,11 @@ static bool cmd_capture_region(const cJSON *params, cJSON *result, nt_devapi_err
     /* The docstring contract is top-left origin; glReadPixels reads bottom-left. Convert the rect's
        top-left y to a GL bottom-left y (h<=fb_h-y already proven) so the row-flip yields a top-left
        sub-rect. */
+    if (!nt_devapi_defer(NT_DEVAPI_GATE_RENDERED, 0.0, capture_reply, err)) {
+        return false;
+    }
     s_capture = (capture_ctx){.x = x, .y = fb_h - (y + h), .w = w, .h = h, .factor = factor};
-    return nt_devapi_defer(NT_DEVAPI_GATE_RENDERED, 0.0, capture_reply, err);
+    return true;
 }
 // #endregion
 
