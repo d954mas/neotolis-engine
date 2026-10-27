@@ -166,6 +166,9 @@ def check_resource_list(client: DevApiClient) -> None:
 
 def run(client: DevApiClient) -> None:
     """Drive every obs surface; raise AssertionError on any contract violation."""
+    # window.__devapi (web) or the socket (native) exists before the first frame completes; the
+    # snapshot reads the last completed frame's counters.
+    client.wait_frames(1)
     check_log_tail(client)
     check_perf_snapshot(client)
     check_perf_stats(client)

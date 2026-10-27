@@ -469,7 +469,8 @@ python -m tools.devapi.scenarios.record_demo --target web --web-dir build/exampl
 
 `record_demo` records in RUN at time scale 7 and fps 50, so a step exceeds the 100 ms drift bound, and
 fails when `record.stop` reports `max_drift_ms` over 100; on web a listener takes that clip, and the
-lockstep download that follows proves nothing else downloaded. It then records offline (MANUAL, 360
+lockstep download that follows proves nothing else downloaded. Native then records 4 s of RUN at
+fps 30 and checks that file with `check_recording.py --real-time`. It then records offline (MANUAL, 360
 steps at fps 30) and checks the MP4 with `tools/devapi/check_recording.py`: streams, frame rate and
 count, 48 kHz stereo audio as long as the video, flash/beep offset within a frame. That needs
 ffmpeg/ffprobe on `PATH` or in `FFMPEG_DIR`. `nt_recorder` is OFF in the push gate: the CI web-smoke

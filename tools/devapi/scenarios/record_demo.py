@@ -5,7 +5,8 @@
   2. real time — RUN at scale 7 (steps over the 100 ms drift bound, so a one-step audio offset would
      show), fps 5 for ~1.5 s: max_drift_ms stays within 100 ms. Web: a listener takes the blob, so
      nothing downloads.
-  3. lockstep — MANUAL, start half a second off a flash, 360 steps of 1/60 at fps 30: 180 frames, checked
+  3. native: real time at fps 30 for 4 s of game time, checked with check_recording.py --real-time.
+  4. lockstep — MANUAL, start half a second off a flash, 360 steps of 1/60 at fps 30: 180 frames, checked
      with check_recording.py (needs ffmpeg/ffprobe on PATH or FFMPEG_DIR).
 
 A start answers not_ready until the web codec probe settles, a moment after load; it is retried.
@@ -117,6 +118,19 @@ def _lockstep(client: DevApiClient, page, downloads: list) -> None:
     print("PASS lockstep: 180 frames, check_recording passed")
 
 
+def _real_time_file(client: DevApiClient) -> None:
+    """Native: a RUN clip at fps 30 decoded and checked like the lockstep one (web takes its blob)."""
+    path = os.path.join(launch.out_dir(), "record_run30.mp4")
+    client.set_mode("run")
+    client.resume()
+    _start(client, path, 30)
+    client.time_wait(4.0)
+    frames = client.result("record.stop")["frames"]
+    assert frames > 0, "real time fps 30: no frames"
+    subprocess.run([sys.executable, CHECK, path, "--fps", "30", "--frames", str(frames), "--real-time"], check=True)
+    print(f"PASS real time fps 30: {frames} frames, check_recording passed")
+
+
 def run(client: DevApiClient) -> None:
     for params in ({"name": "x.mp4", "fps": 0}, {"name": "x.mp4", "fps": 121}, {"name": "", "fps": 5}):
         assert _error_code(client, "record.start", params) == "bad_params", params
@@ -125,6 +139,8 @@ def run(client: DevApiClient) -> None:
     if page:
         page.on("download", lambda d: downloads.append(d))
     _real_time(client, page)
+    if not page:
+        _real_time_file(client)
     _lockstep(client, page, downloads)
 
 

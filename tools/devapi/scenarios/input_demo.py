@@ -35,7 +35,26 @@ def _frozen_state(client: DevApiClient, **params) -> dict:
 
 
 def run(client: DevApiClient) -> None:
-    """Drive the three workflows; raise AssertionError on any contract violation."""
+    """Drive the three workflows; raise AssertionError on any contract violation.
+
+    The host keeps game-owned input state across clients (a disconnect resets only devapi state), so
+    the keys and the player gate this run changes are restored even when it fails.
+    """
+    try:
+        _run(client)
+    finally:
+        try:
+            for k in ("B", "C"):  # keys this run may have left down
+                client.key(k, down=False)
+            client.set_player_enabled(True)
+            client.set_mode("run")
+            client.resume()
+            client.wait_frames(1)  # apply the key-ups before the close drops the schedule
+        except (DevApiResultError, ConnectionError, OSError):
+            pass  # best effort: never mask the run's own failure
+
+
+def _run(client: DevApiClient) -> None:
     # 1. Drain-race — a tap's release pins to the sim-advance count, not wall-clock.
     client.set_mode("manual")
     # Settle C to a known-released state: a prior session may have left a residual down/inject.
