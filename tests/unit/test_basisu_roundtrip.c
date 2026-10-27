@@ -2,6 +2,7 @@
 #include "nt_basisu_transcoder.h"
 #include "nt_builder.h"
 #include "nt_pack_format.h"
+#include "test_helpers/build_assert_trap.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "unity.h"
 #include <string.h>
@@ -125,6 +126,13 @@ void test_non_basis_header_asserts(void) {
     uint8_t pixels[16 * 8 * 4];
     fill_pixels(pixels, 16, 8, false);
     NT_TEST_EXPECT_ASSERT((void)nt_basisu_info(pixels, sizeof(pixels)));
+}
+
+void test_encode_without_threads_asserts(void) {
+    uint8_t pixels[16 * 8 * 4];
+    fill_pixels(pixels, 16, 8, false);
+    const nt_basisu_encode_opts_t opts = nt_tex_compress_etc1s_high();
+    EXPECT_BUILD_ASSERT_MATCH((void)nt_basisu_encode(0, pixels, 16, 8, NT_TEXTURE_FORMAT_RGB8, &opts), "basis_threads");
 }
 
 /* An RGBA source the encoder finds fully opaque loses its alpha slices, so the
@@ -447,6 +455,7 @@ int main(void) {
     RUN_TEST(test_uastc_srgb_mip);
 #endif
     RUN_TEST(test_non_basis_header_asserts);
+    RUN_TEST(test_encode_without_threads_asserts);
     RUN_TEST(test_opaque_rgba_source_reports_no_alpha);
     RUN_TEST(test_public_basis_single_pixel_full_mip_chain);
     RUN_TEST(test_public_basis_file_memory_atlas);

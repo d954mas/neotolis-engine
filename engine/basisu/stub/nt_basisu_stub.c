@@ -13,7 +13,6 @@ nt_basisu_info_t nt_basisu_info(const void *basis_data, uint32_t basis_size) {
     (void)basis_data;
     (void)basis_size;
     NT_BASISU_STUB_TRAP();
-    return (nt_basisu_info_t){0};
 }
 
 void nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, const nt_basisu_info_t *info, nt_texture_format_t format, void *output) {

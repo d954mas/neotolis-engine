@@ -45,7 +45,8 @@ nt_basisu_info_t nt_basisu_info(const void *basis_data, uint32_t basis_size) {
         uint32_t level_h = 0;
         uint32_t level_blocks = 0;
         const bool level_ok = s_transcoder.get_image_level_desc(basis_data, basis_size, 0, level, level_w, level_h, level_blocks);
-        NT_ASSERT(level_ok && level_w == nt_texture_level_extent(image_info.m_orig_width, level) && level_h == nt_texture_level_extent(image_info.m_orig_height, level) &&
+        NT_ASSERT(level_ok && "basisu: blob level descriptor unreadable");
+        NT_ASSERT(level_w == nt_texture_level_extent(image_info.m_orig_width, level) && level_h == nt_texture_level_extent(image_info.m_orig_height, level) &&
                   "basisu: blob mip chain is not the halved chain");
     }
     return nt_basisu_info_t{codec, image_info.m_orig_width, image_info.m_orig_height, image_info.m_total_levels, image_info.m_alpha_flag};
@@ -85,7 +86,6 @@ void nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, cons
         break;
     default:
         NT_ASSERT(0 && "transcode_chain: format is not a Basis transcode target");
-        return;
     }
 
     const bool started = s_transcoder.start_transcoding(basis_data, basis_size);

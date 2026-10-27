@@ -423,11 +423,13 @@ the public texture formats cannot satisfy them.
 Packs are trusted builder output, so `nt_gfx_activate_texture` asserts the
 header: the pixel format, sampler defaults inside the filter/wrap enums, nonzero
 dimensions within `UINT16_MAX`, a `data_size` equal to the bytes after the
-header, a known `compression`, and a RAW `data_size` of exactly
-`width * height * bpp`. The
-resource core asserts magic, version and the header size first. A texture above
-`gpu_caps.max_texture_size` is a device limit: the activator logs and returns an
-invalid handle. RAW assets then go through the public constructor unchanged.
+header, a known `compression`, and for RAW a `data_size` of exactly
+`width * height * bpp` and a `mip_count` of 1. The resource core asserts magic,
+version and the header size first. A texture above `gpu_caps.max_texture_size`
+is a device limit: the activator logs and returns an invalid handle. Every
+header assert that does not need the payload runs before that check, so a broken
+pack asserts on every device. RAW assets then go through the public constructor
+unchanged.
 
 A BASIS asset is cross-checked against the blob before anything is created. The
 blob's own dimensions must equal the header's, and its level count must equal
