@@ -19,9 +19,10 @@
 /* --- Assert catching (same hookable-handler longjmp as test_gfx.c) --- */
 
 static jmp_buf s_assert_jmp;
+static const char *s_assert_expr;
 
 static void test_assert_handler(const char *expr, const char *file, int line) {
-    (void)expr;
+    s_assert_expr = expr;
     (void)file;
     (void)line;
     longjmp(s_assert_jmp, 1);
@@ -450,6 +451,11 @@ void test_header_boundaries_assert_without_touching_the_pool(void) {
     fixture_header(&alpha)->height = 8;
     expect_header_assert(&alpha, alpha.size); /* header height the blob disagrees with */
     *fixture_header(&alpha) = good;
+    /* Above any GPU limit too: broken pack data, not a device limit. */
+    fixture_header(&alpha)->width = UINT16_MAX + 1U;
+    expect_header_assert(&alpha, alpha.size); /* width past the uint16 range */
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "dimensions out of range"));
+    *fixture_header(&alpha) = good;
 
     fixture_header(&alpha)->default_min_filter = NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR + 1;
     expect_header_assert(&alpha, alpha.size); /* min_filter out of range */
@@ -480,11 +486,13 @@ void test_corrupted_payload_asserts_and_a_good_blob_still_activates(void) {
     set_caps(true, false, false);
     basis_fixture_t alpha = fixture_encode(96, 64, NT_BASISU_CODEC_ETC1S, true, NT_TEXTURE_FORMAT_RGBA8);
     uint32_t payload = alpha.size - (uint32_t)sizeof(NtTextureAssetHeader);
-    /* The middle half of the blob, past its header: info or transcode asserts. */
-    for (uint32_t i = payload / 4U; i < (payload * 3U) / 4U; i++) {
+    /* The back half of the blob: its header and level descriptors stay intact, so
+     * info passes and the transcoder rejects the corrupted tables. */
+    for (uint32_t i = payload / 2U; i < payload; i++) {
         alpha.blob[sizeof(NtTextureAssetHeader) + i] ^= 0xA5U;
     }
     expect_header_assert(&alpha, alpha.size); /* corrupted Basis payload */
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "start_transcoding failed"));
     fixture_free(&alpha);
 
     basis_fixture_t good = fixture_encode(16, 8, NT_BASISU_CODEC_ETC1S, true, NT_TEXTURE_FORMAT_RGBA8);
