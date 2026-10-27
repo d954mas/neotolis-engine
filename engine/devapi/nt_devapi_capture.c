@@ -87,8 +87,8 @@ static bool build_payload(cJSON *result, const uint8_t *png, uint32_t png_len, u
     return true;
 }
 
-/* readback -> strip+box -> fpng -> base64 -> result. Readback (lost context), OOM and encode failures
-   return false: the recoverable capture_failed outcome. */
+/* readback -> strip+box -> fpng -> base64 -> result. Readback (lost context), capture-buffer allocation
+   and encode failures return false: the recoverable capture_failed outcome. */
 static bool capture_produce(const capture_ctx *c, cJSON *result) {
     uint32_t out_w = c->w / c->factor;
     uint32_t out_h = c->h / c->factor;

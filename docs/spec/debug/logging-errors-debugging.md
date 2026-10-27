@@ -354,7 +354,7 @@ A bot / AI / smoke-test grabs a **rendered frame** over devapi and verifies it â
 
 **The host calls `nt_devapi_frame_rendered()`.** Each rendered frame, after `nt_gfx_end_frame` and before `nt_window_swap_buffers`, as `nt_recorder_frame` does. With nothing pending it returns at once; calling it after `nt_devapi_shutdown` asserts. A host that registers capture inits `nt_gfx`; without it the readback asserts at the first capture. A host that skips the call (or renders nothing) answers captures with `stalled`, never a hang; send a new capture once rendering is back.
 
-**Failure is a distinguishable envelope.** A readback or encode that fails (lost context, OOM, encode error) yields error code `capture_failed`, never an `ok:true` shape without `data`. Group code: `capture_failed`. Bad bot input (bad `scale`, out-of-bounds / zero-size / non-dividing-`scale` rect) is rejected synchronously as `bad_params` and never asserts.
+**Failure is a distinguishable envelope.** A readback or encode that fails (lost context, a failed capture-buffer allocation, encode error) yields error code `capture_failed`, never an `ok:true` shape without `data`. Group code: `capture_failed`. Bad bot input (bad `scale`, out-of-bounds / zero-size / non-dividing-`scale` rect) is rejected synchronously as `bad_params` and never asserts.
 
 **Caps (DoS backstops, `-D` overridable).** `NT_DEVAPI_CAPTURE_MAX_PIXELS` (default `4096*4096`) bounds a single capture before any allocation; the producer's `uint32` size math is `_Static_assert`-proven wrap-free under that cap (Ã—8 covers the base64 expansion). One deferred reply is in flight at a time, so at most one capture is pending. The Python transport's recv-line cap is sized to cover the engine's worst-case capture line.
 
