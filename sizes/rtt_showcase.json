@@ -5416,5 +5416,47 @@
       "raw": 301848,
       "gzip": 123236
     }
+  },
+  {
+    "commit": "339085e",
+    "date": "2026-10-27T10:56:51Z",
+    "files": {
+      "index.html": {
+        "raw": 1766,
+        "gzip": 1000
+      },
+      "index_simd.wasm": {
+        "raw": 259582,
+        "gzip": 103914
+      },
+      "index.wasm": {
+        "raw": 258478,
+        "gzip": 105616
+      },
+      "index_simd.js": {
+        "raw": 21783,
+        "gzip": 8758
+      },
+      "index.js": {
+        "raw": 21783,
+        "gzip": 8753
+      },
+      "assets/rtt_showcase.ntpack": {
+        "raw": 18664,
+        "gzip": 9545
+      }
+    },
+    "engine": {
+      "raw": 283131,
+      "gzip": 113672
+    },
+    "resources": {
+      "raw": 18664,
+      "gzip": 9545
+    },
+    "total": {
+      "raw": 301795,
+      "gzip": 123217
+    }
   }
 ]

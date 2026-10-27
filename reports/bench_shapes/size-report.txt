@@ -1,5 +1,5 @@
 # Size Report: bench_shapes (wasm-analysis-paired)
-# Commit: 0689d61
+# Commit: 339085e
 
 ## WASM Section Sizes
 
@@ -13,17 +13,17 @@ Memory                 7 B
 Global                 9 B
 Export                71 B
 Elem                  24 B
-Code               77410 B
+Code               77357 B
 Data               14013 B
 Custom              4333 B
 ---------------- ----------
-TOTAL              96674 B
+TOTAL              96621 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-16795 B   frame
+16742 B   frame
 16305 B   main
  3002 B   fmt_fp
  2834 B   rebuild_shapes
@@ -55,7 +55,7 @@ TOTAL              96674 B
   431 B   nt_app_web_frame
 
 Total functions: 102
-Total code size: 77234 B
+Total code size: 77181 B
 
 ## Built Engine Archives
 
@@ -122,10 +122,10 @@ libnt_ui_rich_fx.a          3050 B
 libnt_ui_stub.a             1324 B
 libnt_utf8.a                1098 B
 libnt_version.a              638 B
-libnt_window.a              4608 B
-libnt_window_stub.a         2468 B
+libnt_window.a              4028 B
+libnt_window_stub.a         1888 B
 ------------------------ ----------
-TOTAL (archives)         2666604 B
+TOTAL (archives)         2665444 B
 
 ## Data Segments Summary
 

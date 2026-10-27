@@ -1,5 +1,5 @@
 # Size Report: slice9_demo (wasm-analysis-paired)
-# Commit: 0689d61
+# Commit: 339085e
 
 ## WASM Section Sizes
 
@@ -13,17 +13,17 @@ Memory                 7 B
 Global                 9 B
 Export                71 B
 Elem                  48 B
-Code              199961 B
+Code              199908 B
 Data               10927 B
 Custom              5694 B
 ---------------- ----------
-TOTAL             217760 B
+TOTAL             217707 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-60836 B   frame
+60783 B   frame
 17018 B   dispatch_command
  8803 B   Clay__ConfigureOpenElementPtr
  8141 B   main
@@ -55,7 +55,7 @@ TOTAL             217760 B
  1119 B   nt_input_web_on_blur
 
 Total functions: 160
-Total code size: 199683 B
+Total code size: 199630 B
 
 ## Built Engine Archives
 
@@ -122,10 +122,10 @@ libnt_ui_rich_fx.a          3050 B
 libnt_ui_stub.a             1324 B
 libnt_utf8.a                1098 B
 libnt_version.a              638 B
-libnt_window.a              4608 B
-libnt_window_stub.a         2468 B
+libnt_window.a              4028 B
+libnt_window_stub.a         1888 B
 ------------------------ ----------
-TOTAL (archives)         2666604 B
+TOTAL (archives)         2665444 B
 
 ## Data Segments Summary
 

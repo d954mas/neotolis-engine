@@ -1,5 +1,5 @@
 # Size Report: hello (wasm-analysis-paired)
-# Commit: 0689d61
+# Commit: 339085e
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 8 B
 Export                45 B
 Elem                  14 B
-Code               15743 B
+Code               15696 B
 Data                 807 B
 Custom              1111 B
 ---------------- ----------
-TOTAL              17975 B
+TOTAL              17928 B
 
 ## Top 30 Functions by Size
 
@@ -25,7 +25,7 @@ TOTAL              17975 B
 --------  ----
  3000 B   fmt_fp
  2605 B   printf_core
- 1376 B   frame
+ 1329 B   frame
   929 B   nt_input_web_on_blur
   775 B   nt_input_web_on_pointer_move
   735 B   nt_input_web_on_pointer_down
@@ -55,7 +55,7 @@ TOTAL              17975 B
    50 B   nt_input_web_on_char
 
 Total functions: 35
-Total code size: 15683 B
+Total code size: 15636 B
 
 ## Built Engine Archives
 
@@ -122,10 +122,10 @@ libnt_ui_rich_fx.a          3050 B
 libnt_ui_stub.a             1324 B
 libnt_utf8.a                1098 B
 libnt_version.a              638 B
-libnt_window.a              4608 B
-libnt_window_stub.a         2468 B
+libnt_window.a              4028 B
+libnt_window_stub.a         1888 B
 ------------------------ ----------
-TOTAL (archives)         2666604 B
+TOTAL (archives)         2665444 B
 
 ## Data Segments Summary
 

@@ -1,5 +1,5 @@
 # Size Report: textured_quad (wasm-analysis-paired)
-# Commit: 0689d61
+# Commit: 339085e
 
 ## WASM Section Sizes
 
@@ -13,17 +13,17 @@ Memory                 7 B
 Global                 8 B
 Export                71 B
 Elem                  62 B
-Code               90248 B
+Code               90198 B
 Data                8307 B
 Custom              4890 B
 ---------------- ----------
-TOTAL             104523 B
+TOTAL             104473 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-33522 B   frame
+33472 B   frame
  7078 B   main
  4466 B   nt_gfx_activate_mesh
  3585 B   nt_http_request_ex
@@ -55,7 +55,7 @@ TOTAL             104523 B
   451 B   nt_gfx_activate_shader
 
 Total functions: 134
-Total code size: 90034 B
+Total code size: 89984 B
 
 ## Built Engine Archives
 
@@ -122,10 +122,10 @@ libnt_ui_rich_fx.a          3050 B
 libnt_ui_stub.a             1324 B
 libnt_utf8.a                1098 B
 libnt_version.a              638 B
-libnt_window.a              4608 B
-libnt_window_stub.a         2468 B
+libnt_window.a              4028 B
+libnt_window_stub.a         1888 B
 ------------------------ ----------
-TOTAL (archives)         2666604 B
+TOTAL (archives)         2665444 B
 
 ## Data Segments Summary
 
