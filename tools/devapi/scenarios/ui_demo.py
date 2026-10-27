@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""DevAPI ui demo — the live-socket UAT for the ui.* read + write surface.
+"""DevAPI ui demo — the live-host UAT for the ui.* read + write surface.
 
-Connects to a running examples/devapi_host over loopback TCP and exercises the ui group end-to-end,
-the layer only a live socket proves: resolve a developer string id -> bbox center px -> inject the
+Connects to a running examples/devapi_host over its devapi transport (native or web) and exercises the ui group end-to-end,
+the layer only a live host proves: resolve a developer string id -> bbox center px -> inject the
 SAME low-level pointer events as raw input -> advance the sim -> the widget reacts. The unit/build
 gates cover registration + the in-process probe; this UAT covers the inject->settle->react loop and
-the bad_params paths over a real socket.
+the bad_params paths against a real host.
 
   1. ui.contexts lists the host-registered "hud" context.
   2. ui.tree returns the {space, origin, y_axis, width, height, dpr, projection} metadata block + nodes,
@@ -25,52 +25,17 @@ ui.* are fire-and-forget/immediate: the down/up enqueue and apply only as the si
 the UAT runs in manual mode and step()s between the click and the read-back. Unlike the input UAT there
 is NO blocking-drain-race to assert — the exit code IS the assertion.
 
-Usage: python tools/devapi/scenarios/ui_demo.py [--port N]
-  Port resolution: --port N  >  env NT_DEVAPI_PORT  >  default 17890.
-Returns exit 0 if every observable assertion passes, exit 1 on any failure (connect /
-assertion / protocol). Stdlib only (socket + json) — no pip deps.
+Usage: python -m tools.devapi.scenarios.ui_demo [--target native|web] (options: tools/devapi/launch.py)
+Exit 0 pass, 1 failure, 2 usage / launch (tools/devapi/launch.py).
 """
-import os
 import sys
 
-# Allow running as a plain script by making the repo root importable, so the
-# absolute `tools.devapi.*` imports resolve (mirrors input_demo.py).
-if __package__ in (None, ""):
-    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
-    from tools.devapi.client import DevApiClient, DevApiResultError
-    from tools.devapi.transport import DEFAULT_PORT, SocketTransport
-else:
-    from ..client import DevApiClient, DevApiResultError
-    from ..transport import DEFAULT_PORT, SocketTransport
+from .. import launch
+from ..client import DevApiClient, DevApiResultError
 
-
-def _parse_port(raw: str) -> int:
-    """int() + range-check; clean exit(2) on garbage instead of a raw traceback."""
-    try:
-        port = int(raw)
-    except ValueError:
-        print("error: --port must be an integer 1..65535", file=sys.stderr)
-        sys.exit(2)
-    if not (1 <= port <= 65535):
-        print("error: --port must be an integer 1..65535", file=sys.stderr)
-        sys.exit(2)
-    return port
-
-
-def resolve_port(argv) -> int:
-    """--port N (or positional) > env NT_DEVAPI_PORT > DEFAULT_PORT."""
-    for i, a in enumerate(argv):
-        if a == "--port" and i + 1 < len(argv):
-            return _parse_port(argv[i + 1])
-        if a.startswith("--port="):
-            return _parse_port(a.split("=", 1)[1])
-    env = os.environ.get("NT_DEVAPI_PORT")
-    if env:
-        return _parse_port(env)
-    for a in argv:
-        if a.isdigit():
-            return _parse_port(a)
-    return DEFAULT_PORT
+# Steps until one click has landed: down@0 and up@1 apply on advancing frames, and the widget reads the
+# input one frame later.
+CLICK_STEPS = 3
 
 
 def _find_node(tree, node_id):
@@ -88,14 +53,11 @@ def _btn_enabled(client: DevApiClient, btn_id="hud_btn", ctx=None):
     return v
 
 
-def _click_until_toggled(client: DevApiClient, do_click, before, btn_id="hud_btn", ctx=None) -> bool:
-    """Re-issue do_click() + step until the widget's enabled flips off `before`; True if it toggled."""
-    for _ in range(20):  # generous budget: down@0/up@1 apply across advancing frames (1-frame IM lag)
-        do_click()           # enqueue down+up (fire-and-forget)
-        client.step(count=4)  # advance: release+apply the down, then the up; the click lands
-        if _btn_enabled(client, btn_id, ctx) != before:
-            return True
-    return False
+def _click_toggles(client: DevApiClient, do_click, before, btn_id="hud_btn", ctx=None) -> bool:
+    """One do_click() + CLICK_STEPS steps; True if the widget's enabled flipped off `before`."""
+    do_click()  # enqueue down+up (fire-and-forget)
+    client.step(count=CLICK_STEPS)
+    return _btn_enabled(client, btn_id, ctx) != before
 
 
 def run(client: DevApiClient) -> None:
@@ -128,7 +90,7 @@ def run(client: DevApiClient) -> None:
 
     # 3. ui.click("hud_btn") -> step -> the host toggles hud_btn.enabled (resolve->inject->settle->react).
     before = _btn_enabled(client)
-    toggled = _click_until_toggled(client, lambda: client.ui_click("hud_btn"), before)
+    toggled = _click_toggles(client, lambda: client.ui_click("hud_btn"), before)
     assert toggled, f"ui.click('hud_btn') did not toggle enabled off {before!r} after stepping (resolve->inject->react failed)"
     print("PASS[3/7] ui.click('hud_btn') resolved -> injected -> settled -> the widget toggled (read-back confirms).")
 
@@ -140,7 +102,7 @@ def run(client: DevApiClient) -> None:
     cx = b["x"] + (b["w"] * 0.5)
     cy = b["y"] + (b["h"] * 0.5)  # Y-up center, straight from the bounds — exactly what we feed back.
     before = _btn_enabled(client)
-    toggled = _click_until_toggled(client, lambda: client.ui_click({"x": cx, "y": cy}), before)
+    toggled = _click_toggles(client, lambda: client.ui_click({"x": cx, "y": cy}), before)
     assert toggled, f"ui.click({{x:{cx}, y:{cy}}}) (Y-up bounds center) did not toggle hud_btn — read-bounds != click-{{x,y}} (the flip bug)"
     print(f"PASS[4/7] ui.click({{x:{cx:.1f}, y:{cy:.1f}}}) from Y-up bounds toggled hud_btn (read-bounds -> click-{{x,y}} lands, no bot flip).")
 
@@ -158,7 +120,7 @@ def run(client: DevApiClient) -> None:
     scx = sb["x"] + (sb["w"] * 0.5)
     scy = sb["y"] + (sb["h"] * 0.5)
     before = _btn_enabled(client, "scaled_btn", ctx="hud_scaled")
-    toggled = _click_until_toggled(client, lambda: client.ui_click({"x": scx, "y": scy}, ctx="hud_scaled"), before, "scaled_btn", "hud_scaled")
+    toggled = _click_toggles(client, lambda: client.ui_click({"x": scx, "y": scy}, ctx="hud_scaled"), before, "scaled_btn", "hud_scaled")
     assert toggled, f"ui.click({{x:{scx}, y:{scy}}}, ctx=hud_scaled) did not toggle scaled_btn — the scaled layout->device map failed"
     print(f"PASS[5/7] ui.click({{x:{scx:.1f}, y:{scy:.1f}}}, ctx=hud_scaled) toggled scaled_btn (scaled layout->device via the ctx viewport {vp}).")
 
@@ -190,41 +152,8 @@ def run(client: DevApiClient) -> None:
     client.set_mode("run")
     client.resume()
 
-    print("PASS: ui.* end-to-end over the socket — contexts, tree+metadata, click->react, and the bad_params paths all machine-asserted.")
-
-
-def main(port: int) -> int:
-    transport = None
-    try:
-        transport = SocketTransport("127.0.0.1", port)
-        client = DevApiClient(transport)
-        run(client)
-        return 0
-    except AssertionError as exc:
-        print(f"FAIL: assertion: {exc}")
-        return 1
-    except (DevApiResultError, ValueError) as exc:
-        print(f"FAIL: protocol error: {exc}")
-        return 1
-    except (ConnectionError, TimeoutError, OSError) as exc:
-        print(f"FAIL: transport error talking to 127.0.0.1:{port}: {exc}")
-        return 1
-    finally:
-        # Best-effort restore so an assertion failure mid-run can't leave the long-lived host
-        # MANUAL / paused for the next session. Must not mask the original failure/exit code.
-        if transport is not None:
-            try:
-                client = DevApiClient(transport)
-                client.set_mode("run")
-                client.resume()
-            except (DevApiResultError, ValueError, ConnectionError, TimeoutError, OSError):
-                pass
-            transport.close()
+    print("PASS: ui.* end-to-end over the transport — contexts, tree+metadata, click->react, and the bad_params paths all machine-asserted.")
 
 
 if __name__ == "__main__":
-    args = sys.argv[1:]
-    if "--help" in args or "-h" in args:
-        print(__doc__)
-        sys.exit(0)
-    sys.exit(main(resolve_port(args)))
+    sys.exit(launch.main(run))

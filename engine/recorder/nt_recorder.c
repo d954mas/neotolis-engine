@@ -21,7 +21,8 @@ static struct {
     uint32_t width;
     uint32_t height;
     uint32_t frames;
-    uint64_t audio; /* samples written: the track position */
+    uint64_t audio;   /* samples written: the track position */
+    double max_drift; /* signed, largest magnitude since the first push */
 } s_rec;
 
 static bool finish(void) {
@@ -47,21 +48,27 @@ static bool pad_to(uint64_t end) {
 }
 
 /* Ends with the audio track padded to the video; audio pushed past it stays. */
-static uint32_t end_recording(void) {
+static nt_recorder_stats_t end_recording(void) {
     /* Before padding: audio short of the video shows here even after the one-shot drift WARN. */
     NT_LOG_INFO("%u frames, %.2f s; audio %.2f s before padding (%+.0f ms against the video)", s_rec.frames, (double)s_rec.frames / (double)s_rec.fps, (double)s_rec.audio / NT_RECORDER_AUDIO_RATE,
                 (((double)s_rec.audio / NT_RECORDER_AUDIO_RATE) - ((double)s_rec.frames / (double)s_rec.fps)) * 1000.0);
     if (!pad_to((uint64_t)llround((double)s_rec.frames * NT_RECORDER_AUDIO_RATE / (double)s_rec.fps))) {
         fail();
-        return 0;
+        return (nt_recorder_stats_t){0};
     }
-    return finish() ? s_rec.frames : 0;
+    if (!finish()) {
+        return (nt_recorder_stats_t){0};
+    }
+    return (nt_recorder_stats_t){.frames = s_rec.frames, .max_drift = s_rec.max_drift};
 }
 
 /* Pushed audio carries no timestamps: a mixer that skips or overfills shifts the rest of the track,
    so say so once. */
 static void warn_drift(double t) {
     double drift = ((double)s_rec.audio / NT_RECORDER_AUDIO_RATE) - (t - s_rec.t0);
+    if (fabs(drift) > fabs(s_rec.max_drift)) {
+        s_rec.max_drift = drift;
+    }
     if (!s_rec.drift_warned && fabs(drift) > NT_RECORDER_AUDIO_DRIFT) {
         s_rec.drift_warned = true;
         NT_LOG_WARN("audio %.0f ms %s the clock; push every step's samples from the start, silence included", fabs(drift) * 1000.0, drift < 0.0 ? "behind" : "ahead of");
@@ -91,6 +98,7 @@ bool nt_recorder_start(const char *name, uint32_t fps) {
     s_rec.height = h;
     s_rec.frames = 0;
     s_rec.audio = 0;
+    s_rec.max_drift = 0.0;
     NT_LOG_INFO("%s: recording %ux%u at %u fps", name, w, h, fps);
     return true;
 }
@@ -158,6 +166,8 @@ void nt_recorder_push_audio(const float *stereo48k, uint32_t frames) {
     s_rec.audio += frames;
 }
 
-uint32_t nt_recorder_stop(void) { return s_rec.active ? end_recording() : 0; }
+nt_recorder_stats_t nt_recorder_stop(void) { return s_rec.active ? end_recording() : (nt_recorder_stats_t){0}; }
+
+bool nt_recorder_ready(void) { return nt_recorder_platform_ready(); }
 
 bool nt_recorder_active(void) { return s_rec.active; }

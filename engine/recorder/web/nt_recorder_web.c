@@ -8,6 +8,10 @@
 /* clang-format off */
 EM_JS_DEPS(nt_recorder_web, "$UTF8ToString")
 
+EM_JS(int, nt_recorder_web_ready, (void), {
+    return globalThis['NtRecorder']['ready']() ? 1 : 0;
+})
+
 EM_JS(int, nt_recorder_web_open, (const char *name, uint32_t w, uint32_t h, uint32_t fps), {
     return globalThis['NtRecorder']['open'](UTF8ToString(name), Module['canvas'], w, h, fps) ? 1 : 0;
 })
@@ -24,6 +28,8 @@ EM_JS(void, nt_recorder_web_close, (void), {
     globalThis['NtRecorder']['close']();
 })
 /* clang-format on */
+
+bool nt_recorder_platform_ready(void) { return nt_recorder_web_ready() != 0; }
 
 bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height, uint32_t fps) { return nt_recorder_web_open(name, width, height, fps) != 0; }
 

@@ -1,19 +1,19 @@
 """Compare the paused CPU reference with GPU skinning in skeletal_showcase; requires Pillow and NumPy.
 
-Run from the repository root with Skinned Meshes selected, CPU reference enabled and Bones disabled:
-python -m tools.devapi.scenarios.skeletal_compare --output build/skeletal-compare
-The script captures the stage, toggles CPU reference off, captures again and toggles it back on.
-The compare() function also accepts a client backed by PlaywrightTransport.
+Run from the repository root against a native skeletal_showcase with Skinned Meshes selected, CPU
+reference enabled and Bones disabled (attach with --port 17890, or launch with --host-bin):
+python -m tools.devapi.scenarios.skeletal_compare --port 17890 --out build/skeletal-compare
+The script captures the stage, toggles CPU reference off, captures again and toggles it back on, all in
+MANUAL time; it writes gpu.png, cpu.png and result.json to the --out directory.
 """
-import argparse
 import base64
 import io
 import json
 import re
+import sys
 from pathlib import Path
 
-from tools.devapi.client import DevApiClient
-from tools.devapi.transport import SocketTransport
+from .. import launch
 
 REFERENCE_ID = "skinned/reference"
 
@@ -41,20 +41,24 @@ def _capture_stage(client, np, Image):
     return frame[y:y + h, x:x + w], frame[0, 0]
 
 
-def compare(client, output, backend="native"):
+def run(client):
     import numpy as np
     from PIL import Image
 
-    output = Path(output)
+    output = Path(launch.out_dir())
     output.mkdir(parents=True, exist_ok=True)
-    before = _pose(client)
-    cpu, background = _capture_stage(client, np, Image)
-    client.ui_click(REFERENCE_ID)
-    client.wait_frames(3)
-    after = _pose(client)
-    gpu, _ = _capture_stage(client, np, Image)
-    client.ui_click(REFERENCE_ID)
-    client.wait_frames(3)
+    client.set_mode("manual")
+    try:
+        before = _pose(client)
+        cpu, background = _capture_stage(client, np, Image)
+        client.ui_click(REFERENCE_ID)
+        client.step(3)
+        after = _pose(client)
+        gpu, _ = _capture_stage(client, np, Image)
+        client.ui_click(REFERENCE_ID)
+        client.step(3)
+    finally:
+        client.set_mode("run")
     if before != after:
         raise SystemExit(f"The pose moved between captures ({before} -> {after}); enable CPU reference first so the player pauses")
     if gpu.shape != cpu.shape or gpu.size == 0:
@@ -67,7 +71,7 @@ def compare(client, output, backend="native"):
     bad = int(mismatches.sum())
     Image.fromarray(gpu).save(output / "gpu.png")
     Image.fromarray(cpu).save(output / "cpu.png")
-    report = {"backend": backend, "model": before[0], "clip": before[1], "time": before[2],
+    report = {"model": before[0], "clip": before[1], "time": before[2],
               "covered_pixels": coverage, "mismatched_pixels": bad, "channel_tolerance": 2, "max_fraction": 0.005,
               "mismatch_fraction": bad / coverage if coverage else None,
               "gpu": str(output / "gpu.png"), "cpu": str(output / "cpu.png")}
@@ -76,14 +80,8 @@ def compare(client, output, backend="native"):
         raise SystemExit("Empty model coverage")
     if bad / coverage > 0.005:
         raise SystemExit(f"GPU/CPU mismatch: {bad}/{coverage} pixels")
-    return report
+    print(json.dumps(report, indent=2))
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", type=int, default=17890)
-    parser.add_argument("--output", default="build/skeletal-compare")
-    args = parser.parse_args()
-    with SocketTransport(port=args.port) as transport:
-        report = compare(DevApiClient(transport), args.output)
-    print(json.dumps(report, indent=2))
+    sys.exit(launch.main(run))

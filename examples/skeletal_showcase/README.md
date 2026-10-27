@@ -325,7 +325,7 @@ the report. Keep the engine loop running; only the character player pauses. From
 the repository root, with Pillow and NumPy installed:
 
 ```bash
-python -m tools.devapi.scenarios.skeletal_compare --output build/skeletal-compare
+python -m tools.devapi.scenarios.skeletal_compare --port 17890 --out build/skeletal-compare
 ```
 
 This uses `SocketTransport` and `DevApiClient.capture_frame(scale=1)`: it
@@ -364,8 +364,9 @@ image.src = "data:image/png;base64," + response.result.data;
 document.body.append(image);
 ```
 
-The Python comparator's `compare(client, output, backend)` also accepts a
-`DevApiClient(PlaywrightTransport(page))` for automated browser captures.
+The comparator switches to MANUAL time while it captures and returns to RUN at the end.
+`--target web --web-dir build/examples/skeletal_showcase/wasm-debug` runs it on a
+WebGL2 build through `tools/devapi/launch.py` instead.
 Context-loss restoration is reviewed in code; a full loss/retry run remains
 outside this showcase's evidence.
 
@@ -375,11 +376,11 @@ Death-to-Stand-up midpoints, exercises a same-frame interruption and repeats
 interruptions long enough to prove slot/snapshot reuse:
 
 ```bash
-python -m tools.devapi.scenarios.skeletal_mixing --output build/skeletal-mixing-native
+python -m tools.devapi.scenarios.skeletal_mixing --port 17890 --out build/skeletal-mixing-native
 ```
 
-`run(client, output, backend)` accepts the same Playwright-backed client for
-WebGL2. The JSON report records visible alpha, slot count, snapshot bytes,
+It runs in MANUAL time, stepping the sim between actions, and returns to RUN at the end.
+`--target web --web-dir build/examples/skeletal_showcase/wasm-debug` runs it on WebGL2. The JSON report records visible alpha, slot count, snapshot bytes,
 scene bytes and repeated handoff count alongside the PNGs.
 
 The mixing scenario passed on native and WebGL2 for all five modes. Both runs

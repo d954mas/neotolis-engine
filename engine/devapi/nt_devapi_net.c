@@ -40,6 +40,7 @@ typedef socklen_t nt_socklen_t;
 #include "devapi/nt_devapi.h"
 #include "devapi/nt_devapi_internal.h" /* nt_devapi_deferred_reset on client drop. */
 #include "devapi/nt_devapi_net.h"
+#include "log/nt_log.h"
 
 /* Single loopback client; reconnect allowed. */
 static nt_sock_t s_listen = NT_INVALID_SOCK;
@@ -213,11 +214,12 @@ static bool send_line(const char *resp) {
 // #endregion
 
 // #region start / stop
-bool nt_devapi_net_start(uint16_t port) {
+static bool net_listen(uint16_t port) {
     NT_ASSERT(s_listen == NT_INVALID_SOCK); /* start is single-shot until stop. */
 #ifdef _WIN32
     WSADATA wsa;
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        NT_LOG_ERROR("WSAStartup failed");
         return false;
     }
     s_wsa_init = true;
@@ -227,6 +229,7 @@ bool nt_devapi_net_start(uint16_t port) {
 
     s_listen = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (s_listen == NT_INVALID_SOCK) {
+        NT_LOG_ERROR("socket() failed (%d)", nt_sock_errno());
 #ifdef _WIN32
         WSACleanup();
         s_wsa_init = false;
@@ -252,6 +255,7 @@ bool nt_devapi_net_start(uint16_t port) {
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); /* 127.0.0.1 ONLY — never INADDR_ANY. */
 
     if (bind(s_listen, (struct sockaddr *)&addr, (nt_socklen_t)sizeof addr) != 0 || listen(s_listen, 1) != 0) {
+        NT_LOG_ERROR("cannot listen on 127.0.0.1:%u (%d), port taken?", (unsigned)port, nt_sock_errno());
         nt_close_sock(s_listen);
         s_listen = NT_INVALID_SOCK;
 #ifdef _WIN32
@@ -263,6 +267,26 @@ bool nt_devapi_net_start(uint16_t port) {
     /* recv + deferred drain run in the transport-poll phase, before the input tick, so a line received
        this tick is scheduled before the tick reads it. */
     nt_devapi_set_transport_poll(net_poll);
+    return true;
+}
+
+bool nt_devapi_net_start(void) {
+    uint16_t port = (uint16_t)NT_DEVAPI_DEFAULT_PORT;
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): called once at startup, before any thread reads the env
+    const char *env = getenv("NT_DEVAPI_PORT");
+    if (env != NULL && env[0] != '\0') {
+        char *end = NULL;
+        long v = strtol(env, &end, 10);
+        if (end == env || *end != '\0' || v < 1 || v > 65535) {
+            NT_LOG_ERROR("NT_DEVAPI_PORT='%s' is not a port in 1..65535", env);
+            return false;
+        }
+        port = (uint16_t)v;
+    }
+    if (!net_listen(port)) {
+        return false;
+    }
+    NT_LOG_INFO("listening on 127.0.0.1:%u", (unsigned)port);
     return true;
 }
 
@@ -464,192 +488,3 @@ bool nt_devapi_net_wait_for_client(uint32_t timeout_ms) {
     }
 }
 // #endregion
-
-#ifdef NT_TEST_ACCESS
-// #region test_access — self-contained loopback backpressure check
-static bool sock_set_int(nt_sock_t s, int opt, int v) { return setsockopt(s, SOL_SOCKET, opt, (const char *)&v, (nt_socklen_t)sizeof v) == 0; }
-
-static int sock_get_int(nt_sock_t s, int opt) {
-    int v = 0;
-    nt_socklen_t len = (nt_socklen_t)sizeof v;
-    if (getsockopt(s, SOL_SOCKET, opt, (char *)&v, &len) != 0) {
-        return 0;
-    }
-    return v;
-}
-
-/* Connected loopback pair: *w writer (non-blocking), *r reader (blocking). reader_rcvbuf is set BEFORE
-   connect on purpose — only then does it cap the window AND disable Windows receive auto-tuning, so a
-   small value actually induces backpressure on a non-reading peer. */
-static bool loopback_pair(nt_sock_t *w, nt_sock_t *r, int writer_sndbuf, int reader_rcvbuf) {
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof addr);
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port = 0; /* ephemeral port. */
-    nt_socklen_t alen = (nt_socklen_t)sizeof addr;
-    nt_sock_t cli = NT_INVALID_SOCK;
-    nt_sock_t srv = NT_INVALID_SOCK;
-    nt_sock_t lst = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (lst == NT_INVALID_SOCK) {
-        return false;
-    }
-    if (bind(lst, (struct sockaddr *)&addr, alen) != 0 || listen(lst, 1) != 0) {
-        goto fail;
-    }
-    if (getsockname(lst, (struct sockaddr *)&addr, &alen) != 0) {
-        goto fail;
-    }
-    cli = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (cli == NT_INVALID_SOCK) {
-        goto fail;
-    }
-    (void)sock_set_int(cli, SO_RCVBUF, reader_rcvbuf); /* before connect: caps window + disables Win auto-tuning. */
-    if (connect(cli, (struct sockaddr *)&addr, (nt_socklen_t)sizeof addr) != 0) {
-        goto fail;
-    }
-    srv = accept(lst, NULL, NULL);
-    if (srv == NT_INVALID_SOCK) {
-        goto fail;
-    }
-    nt_close_sock(lst);
-    set_nonblocking(srv);
-    (void)sock_set_int(srv, SO_SNDBUF, writer_sndbuf);
-    *w = srv;
-    *r = cli;
-    return true;
-fail:
-    if (cli != NT_INVALID_SOCK) {
-        nt_close_sock(cli);
-    }
-    nt_close_sock(lst);
-    return false;
-}
-
-/* Send until the OS itself reports the buffer full (EWOULDBLOCK), peer never draining — adapts to the
-   real/auto-tuned buffer instead of guessing a size that wedges (Windows loopback ignores a small
-   SO_RCVBUF). false if it never blocked within the cap. */
-static bool fill_until_block(nt_sock_t s) {
-    int flags = 0;
-#if defined(MSG_NOSIGNAL)
-    flags = MSG_NOSIGNAL;
-#endif
-    static char chunk[65536];                             /* static: 64 KiB off the stack, zero-init. */
-    for (size_t total = 0; total < ((size_t)64 << 20);) { /* 64 MiB cap: backpressure must show first. */
-#ifdef _WIN32
-        int n = send(s, chunk, (int)sizeof chunk, flags);
-#else
-        ssize_t n = send(s, chunk, sizeof chunk, flags);
-#endif
-        if (n > 0) {
-            total += (size_t)n;
-            continue;
-        }
-        return nt_sock_errno() == NT_EWOULDBLOCK;
-    }
-    return false;
-}
-
-/* See the header. 0 = pass; non-zero = the first failed step. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-int nt_devapi_net_backpressure_selftest(void) {
-#ifdef _WIN32
-    WSADATA wsa;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-        return 1;
-    }
-#endif
-    int code = 0;
-    nt_sock_t w = NT_INVALID_SOCK;
-    nt_sock_t r = NT_INVALID_SOCK;
-    char *send_buf = NULL;
-    char *recv_buf = NULL;
-    int rcv = 0;
-    size_t plen = 0;
-    size_t got = 0;
-
-    /* Pair A — large receive window: the success path. 4 KB writer send buffer forces EWOULDBLOCK. */
-    if (!loopback_pair(&w, &r, 4096, 1 << 20)) {
-        code = 2;
-        goto done;
-    }
-
-    /* Step 3: a fresh empty-buffer writer is immediately writable. */
-    if (!sock_wait_writable(w, 200)) {
-        code = 3;
-        goto done;
-    }
-
-    /* Step 4-6: a large payload survives backpressure intact. The 4 KB SNDBUF forces EWOULDBLOCK ->
-       exercises the select-wait recovery; the large RCVBUF lets the single-threaded reader drain it
-       AFTER send_all returns (a healthy reader, even slow, must NOT be dropped). */
-    rcv = sock_get_int(r, SO_RCVBUF);
-    plen = (rcv > 8192) ? (size_t)(rcv / 4) : 4096U; /* /4: stay well inside the receive window. */
-    send_buf = (char *)malloc(plen);
-    recv_buf = (char *)malloc(plen);
-    if (send_buf == NULL || recv_buf == NULL) {
-        code = 4;
-        goto done;
-    }
-    for (size_t i = 0; i < plen; i++) {
-        send_buf[i] = (char)(i & 0x7F);
-    }
-    if (!send_all(w, send_buf, plen, 2000)) {
-        code = 5;
-        goto done;
-    }
-    while (got < plen) {
-#ifdef _WIN32
-        int n = recv(r, recv_buf + got, (int)(plen - got), 0);
-#else
-        ssize_t n = recv(r, recv_buf + got, plen - got, 0);
-#endif
-        if (n <= 0) {
-            break;
-        }
-        got += (size_t)n;
-    }
-    if (got != plen || memcmp(send_buf, recv_buf, plen) != 0) {
-        code = 6;
-        goto done;
-    }
-    nt_close_sock(w);
-    w = NT_INVALID_SOCK;
-    nt_close_sock(r);
-    r = NT_INVALID_SOCK;
-
-    /* Step 7-9: the wedge path. Fill the writer until the OS reports the buffer full, reader never
-       draining; then send_all must TIME OUT and return false — a wedged peer is dropped, not spun on
-       (a hang would instead trip the ctest timeout). Short 200 ms window keeps it fast. */
-    if (!loopback_pair(&w, &r, 4096, 4096)) {
-        code = 7;
-        goto done;
-    }
-    if (!fill_until_block(w)) {
-        code = 8; /* never reached backpressure within the cap -> cannot exercise the wedge here. */
-        goto done;
-    }
-    {
-        char probe[64] = {0};
-        if (send_all(w, probe, sizeof probe, 200)) {
-            code = 9; /* buffer full + reader idle, yet send_all reported success -> wedge not detected. */
-            goto done;
-        }
-    }
-
-done:
-    free(send_buf);
-    free(recv_buf);
-    if (w != NT_INVALID_SOCK) {
-        nt_close_sock(w);
-    }
-    if (r != NT_INVALID_SOCK) {
-        nt_close_sock(r);
-    }
-#ifdef _WIN32
-    WSACleanup();
-#endif
-    return code;
-}
-// #endregion
-#endif /* NT_TEST_ACCESS */

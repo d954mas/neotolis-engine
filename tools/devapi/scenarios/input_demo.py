@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""DevAPI input demo — the live-socket UAT for the input.* inject path.
+"""DevAPI input demo — the live-host UAT for the input.* inject path.
 
-Connects to a running examples/devapi_host over loopback TCP and exercises the three
-behaviors the unit tests structurally cannot cover, because only a live socket runs the
+Connects to a running examples/devapi_host over its devapi transport (native or web) and exercises the three
+behaviors the unit tests structurally cannot cover, because only a live host runs the
 full enqueue -> net_poll -> input_poll -> drain timing:
 
   1. Drain-race — MANUAL mode: a tap (key down@0 + up@offset) stays down across the hold
@@ -17,55 +17,15 @@ full enqueue -> net_poll -> input_poll -> drain timing:
 Scheduling lives in the devapi layer (nt_input is a pure apply layer): an enqueued inject releases
 into nt_input's immediate buffer ONLY on a real sim-advance, then nt_input_poll applies it. So an
 enqueued inject is invisible until a step advances the frame — which is exactly what lets this UAT
-machine-assert the drain-race (offset>0 release pinned to advances) over the socket.
+machine-assert the drain-race (offset>0 release pinned to advances) over the transport.
 
-Usage: python tools/devapi/scenarios/input_demo.py [--port N]
-  Port resolution: --port N  >  env NT_DEVAPI_PORT  >  default 17890.
-Returns exit 0 if every observable assertion passes, exit 1 on any failure (connect /
-assertion / protocol). Stdlib only (socket + json) — no pip deps.
+Usage: python -m tools.devapi.scenarios.input_demo [--target native|web] (options: tools/devapi/launch.py)
+Exit 0 pass, 1 failure, 2 usage / launch (tools/devapi/launch.py).
 """
-import os
 import sys
 
-# Allow running as a plain script by making the repo root importable, so the
-# absolute `tools.devapi.*` imports resolve (mirrors time_render_demo.py).
-if __package__ in (None, ""):
-    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
-    from tools.devapi.client import DevApiClient, DevApiResultError
-    from tools.devapi.transport import DEFAULT_PORT, SocketTransport
-else:
-    from ..client import DevApiClient, DevApiResultError
-    from ..transport import DEFAULT_PORT, SocketTransport
-
-
-def _parse_port(raw: str) -> int:
-    """int() + range-check; clean exit(2) on garbage instead of a raw traceback."""
-    try:
-        port = int(raw)
-    except ValueError:
-        print("error: --port must be an integer 1..65535", file=sys.stderr)
-        sys.exit(2)
-    if not (1 <= port <= 65535):
-        print("error: --port must be an integer 1..65535", file=sys.stderr)
-        sys.exit(2)
-    return port
-
-
-def resolve_port(argv) -> int:
-    """--port N (or positional) > env NT_DEVAPI_PORT > DEFAULT_PORT."""
-    for i, a in enumerate(argv):
-        if a == "--port" and i + 1 < len(argv):
-            return _parse_port(argv[i + 1])
-        if a.startswith("--port="):
-            return _parse_port(a.split("=", 1)[1])
-    env = os.environ.get("NT_DEVAPI_PORT")
-    if env:
-        return _parse_port(env)
-    for a in argv:
-        if a.isdigit():
-            return _parse_port(a)
-    return DEFAULT_PORT
-
+from .. import launch
+from ..client import DevApiClient
 
 def _frozen_state(client: DevApiClient, **params) -> dict:
     # One round trip first: the second read lands after a MANUAL-idle tick whose poll cleared key edges
@@ -83,7 +43,7 @@ def run(client: DevApiClient) -> None:
     client.step(count=1)
     assert client.state(key="C").get("down") is False, "pre-tap settle: C.down expected False"
 
-    # Long hold makes the proof race-free: exact landing step is fragile over a live socket, but the
+    # Long hold makes the proof race-free: exact landing step is fragile over a live host, but the
     # up@offset countdown is deterministic (ticks only on a real advance).
     hold = 8
     client.key("C", hold=hold)  # down@0 + up@offset=hold
@@ -129,46 +89,8 @@ def run(client: DevApiClient) -> None:
     client.set_mode("run")
     client.resume()
 
-    print("PASS: input.* end-to-end over the socket — drain-race, gate cutover, and input.text all machine-asserted.")
-
-
-def main(port: int) -> int:
-    transport = None
-    try:
-        transport = SocketTransport("127.0.0.1", port)
-        client = DevApiClient(transport)
-        run(client)
-        return 0
-    except AssertionError as exc:
-        print(f"FAIL: assertion: {exc}")
-        return 1
-    except (DevApiResultError, ValueError) as exc:
-        print(f"FAIL: protocol error: {exc}")
-        return 1
-    except (ConnectionError, TimeoutError, OSError) as exc:
-        print(f"FAIL: transport error talking to 127.0.0.1:{port}: {exc}")
-        return 1
-    finally:
-        # Best-effort restore so an assertion failure mid-run can't leave the long-lived host
-        # MANUAL / paused / gated for the next session. Must not mask the original failure/exit
-        # code, so any restore error is swallowed.
-        if transport is not None:
-            try:
-                client = DevApiClient(transport)
-                for k in ("B", "C"):  # keys this run may have left down
-                    client.key(k, down=False)
-                client.set_player_enabled(True)
-                client.set_mode("run")
-                client.resume()
-                client.wait_frames(1)  # apply the key-ups before the close drops the schedule
-            except (DevApiResultError, ValueError, ConnectionError, TimeoutError, OSError):
-                pass
-            transport.close()
+    print("PASS: input.* end-to-end over the transport — drain-race, gate cutover, and input.text all machine-asserted.")
 
 
 if __name__ == "__main__":
-    args = sys.argv[1:]
-    if "--help" in args or "-h" in args:
-        print(__doc__)
-        sys.exit(0)
-    sys.exit(main(resolve_port(args)))
+    sys.exit(launch.main(run))

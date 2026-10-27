@@ -167,5 +167,7 @@ else()
     # nt_devapi_net inherits it (a static lib's PRIVATE link does not propagate).
     if(WIN32)
         target_link_libraries(nt_devapi_net PUBLIC ws2_32)
+        # getenv() for NT_DEVAPI_PORT; MSVC CRT deprecates it in favor of _dupenv_s.
+        target_compile_definitions(nt_devapi_net PRIVATE _CRT_SECURE_NO_WARNINGS)
     endif()
 endif()

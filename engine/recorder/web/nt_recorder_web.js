@@ -25,7 +25,7 @@ globalThis['NtRecorder'] = (function () {
                 return aac || supported(AudioEncoder, Object.assign({ codec: 'opus' }, acfg))
                     .then(function (opus) { acodec = opus ? 'opus' : null; return aac; });
             }).then(function (aac) { if (aac) { acodec = 'mp4a.40.2'; } }),
-        ]).then(function () { probed = true; });
+        ]).then(function () { probed = true; }, function () { probed = true; });
     }
     // H.264 levels: [level_idc hex, max frame macroblocks, max macroblocks per second].
     var LEVELS = [['1F', 3600, 108000], ['28', 8192, 245760], ['2A', 8704, 522240], ['32', 22080, 589824], ['33', 36864, 983040],
@@ -44,7 +44,8 @@ globalThis['NtRecorder'] = (function () {
 
     function open(name, canvas, w, h, fps) {
         if (!probed || !profile || !acodec) {
-            if (!probed) { console.warn('nt_recorder: codec probe still running, start again'); }
+            console.warn(!probed ? 'nt_recorder: codec probe still running, start again'
+                                 : 'nt_recorder: no ' + (profile ? 'AAC or Opus' : 'H.264') + ' encoder in this browser');
             return false;
         }
         var mbs = Math.ceil(w / 16) * Math.ceil(h / 16);
@@ -163,5 +164,5 @@ globalThis['NtRecorder'] = (function () {
             .then(done);
     }
 
-    return { 'open': open, 'video': video, 'audio': audio, 'close': close };
+    return { 'ready': function () { return probed; }, 'open': open, 'video': video, 'audio': audio, 'close': close };
 })();

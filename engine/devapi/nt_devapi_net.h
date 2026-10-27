@@ -14,16 +14,18 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Default listen port. Override via env var: NT_DEVAPI_PORT (read by the host at startup). */
+/* Listen port when the NT_DEVAPI_PORT env var is unset or empty. */
 #ifndef NT_DEVAPI_DEFAULT_PORT
 #define NT_DEVAPI_DEFAULT_PORT 17890
 #endif
 
 /* Start the loopback (127.0.0.1 ONLY) TCP server: single client (the newest connection replaces it),
-   JSON-lines, non-blocking.
-   Returns false on socket/bind/listen failure — the port may legitimately be taken, so this
-   is an API-contract return, NOT an assert. Call nt_devapi_init first; pair with _stop. */
-bool nt_devapi_net_start(uint16_t port);
+   JSON-lines, non-blocking. The port comes from the NT_DEVAPI_PORT env var (unset/empty ->
+   NT_DEVAPI_DEFAULT_PORT), so each process can get its own.
+   Returns false (and logs why) on a bad NT_DEVAPI_PORT value or a socket/bind/listen failure — the port
+   may legitimately be taken, so this is an API-contract return, NOT an assert. Call nt_devapi_init
+   first; pair with _stop. */
+bool nt_devapi_net_start(void);
 
 /* Close the client + listen sockets and tear down platform networking (WSACleanup on Windows). */
 void nt_devapi_net_stop(void);
@@ -32,14 +34,5 @@ void nt_devapi_net_stop(void);
    elapses (bounded, not busy-spun). Returns true if a client is connected. The game wires this BEFORE
    its loop when the bot must push setup before frame 0; normal per-frame accept continues after it returns. */
 bool nt_devapi_net_wait_for_client(uint32_t timeout_ms);
-
-// #region test_access
-#ifdef NT_TEST_ACCESS
-/* Self-contained loopback backpressure check (socket code stays here, the platform boundary, so the
-   test driver is platform-agnostic). Returns 0, or the first failed step code: a large payload must
-   survive EWOULDBLOCK intact and a wedged peer must be dropped on a timeout, not busy-spun. */
-int nt_devapi_net_backpressure_selftest(void);
-#endif
-// #endregion
 
 #endif /* NT_DEVAPI_NET_H */

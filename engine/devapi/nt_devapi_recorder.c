@@ -21,6 +21,9 @@ static bool cmd_record_start(const cJSON *params, cJSON *result, nt_devapi_error
     if (nt_recorder_active()) {
         return nt_devapi_fail_code(err, "recording", "record.start: a recording is active");
     }
+    if (!nt_recorder_ready()) {
+        return nt_devapi_fail_code(err, "not_ready", "record.start: the recorder is not ready yet, start again");
+    }
     if (!nt_recorder_start(name->valuestring, fps)) {
         return nt_devapi_fail_code(err, "failed", "record.start: the recorder refused to start (see log and console)");
     }
@@ -28,23 +31,26 @@ static bool cmd_record_start(const cJSON *params, cJSON *result, nt_devapi_error
 }
 
 static bool cmd_record_stop(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    devapi_add_number(result, "frames", (double)nt_recorder_stop());
+    nt_recorder_stats_t stats = nt_recorder_stop();
+    devapi_add_number(result, "frames", (double)stats.frames);
+    devapi_add_number(result, "max_drift_ms", stats.max_drift * 1000.0);
     return true;
 }
 
 static const nt_devapi_command k_record_cmds[] = {
     {
         .method = "record.start",
-        .summary = "start recording an MP4 of the presented frames on game time; web dispatches 'nt-recorder' when the recording ends, Windows writes the file at name (a path)",
+        .summary = "start recording an MP4 of the presented frames on game time; web dispatches 'nt-recorder' when the recording ends, Windows writes the file at name (a path); not_ready while the "
+                   "web codec probe runs",
         .params_shape = "{name:string, fps:int}",
         .result_shape = "{}",
         .fn = cmd_record_start,
     },
     {
         .method = "record.stop",
-        .summary = "stop the recording; frames is 0 when none was active (or it ended itself)",
+        .summary = "stop the recording; all zero when none was active (or it ended itself); max_drift_ms is the signed audio-minus-clock gap of largest magnitude",
         .params_shape = "{}",
-        .result_shape = "{frames:int}",
+        .result_shape = "{frames:int, max_drift_ms:number}",
         .fn = cmd_record_stop,
     },
 };

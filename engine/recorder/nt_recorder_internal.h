@@ -6,9 +6,11 @@
 
 #define NT_RECORDER_AUDIO_RATE 48000U
 
-/* Platform backend. open returns false, after logging why, when it cannot record. video and audio
+/* Platform backend. ready is false while the backend cannot pick its codecs yet (web: the load-time
+   probe is running). open returns false, after logging why, when it cannot record. video and audio
    return false when a write to the encoder fails; the core then ends the recording and still calls
    close: web writes no file, native keeps the fragments already on disk (none without a frame). */
+bool nt_recorder_platform_ready(void);
 bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height, uint32_t fps);
 /* Records the current framebuffer as output frames first .. first + count - 1 (pts index / fps).
    Windows queues a read of it and encodes that read when its ring of three is full, or in close. */

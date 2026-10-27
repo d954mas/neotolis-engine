@@ -1,99 +1,29 @@
 #!/usr/bin/env python3
 """DevAPI canonical demo — one run(client) scenario driven over both transports (native SocketTransport,
-self-launched here; web PlaywrightTransport / the devapi.spec.ts gate), proving native<->web parity.
+web PlaywrightTransport), proving native<->web parity.
 
 It exercises:
   * discovery        — ping + endpoints/command.describe (game.echo + game.poke, zero engine edits),
   * game.* round-trip — game.echo {msg} read-back + game.poke write flipping an observable host bool,
-  * deferred items   — perf.stats mem_used + render.set_enabled + time.step (advertised commands MUST pass).
+  * advertised items — perf.stats mem_used + render.set_enabled (immediate) + time.step (deferred),
+  * native only      — the newest client takes over the socket.
 
-Usage: python tools/devapi/scenarios/devapi_demo.py [--port N] [--no-launch] [--host-bin PATH]
-  Port resolution: --port N  >  env NT_DEVAPI_PORT  >  default 17890.
-Exit 0 if every assertion passes, 1 on assertion / protocol / transport failure, 2 on usage / launch.
-
-Stdlib only; the web driver is the TS spec + PlaywrightTransport for local runs.
+Usage: python -m tools.devapi.scenarios.devapi_demo [--target native|web] (options: tools/devapi/launch.py)
+Exit 0 pass, 1 failure, 2 usage / launch (tools/devapi/launch.py).
 """
 import json
-import os
 import socket
-import subprocess
 import sys
-import time
 
-# Allow running as a plain script by making the repo root importable (mirrors capture_demo.py).
-if __package__ in (None, ""):
-    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
-    from tools.devapi.client import DevApiClient, DevApiResultError
-    from tools.devapi.transport import DEFAULT_PORT, SocketTransport
-else:
-    from ..client import DevApiClient, DevApiResultError
-    from ..transport import DEFAULT_PORT, SocketTransport
-
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+from .. import launch
+from ..client import DevApiClient
+from ..transport import SocketTransport
 
 
-def _parse_port(raw: str) -> int:
-    """int() + range-check; clean exit(2) on garbage instead of a raw traceback."""
-    try:
-        port = int(raw)
-    except ValueError:
-        print("error: --port must be an integer 1..65535", file=sys.stderr)
-        sys.exit(2)
-    if not (1 <= port <= 65535):
-        print("error: --port must be an integer 1..65535", file=sys.stderr)
-        sys.exit(2)
-    return port
-
-
-def resolve_port(argv) -> int:
-    """--port N (or positional) > env NT_DEVAPI_PORT > DEFAULT_PORT."""
-    for i, a in enumerate(argv):
-        if a == "--port" and i + 1 < len(argv):
-            return _parse_port(argv[i + 1])
-        if a.startswith("--port="):
-            return _parse_port(a.split("=", 1)[1])
-    env = os.environ.get("NT_DEVAPI_PORT")
-    if env:
-        return _parse_port(env)
-    for a in argv:
-        if a.isdigit():
-            return _parse_port(a)
-    return DEFAULT_PORT
-
-
-def _find_host_bin(argv) -> str:
-    """--host-bin PATH override, else the native devapi_host (per-preset subdir, then flat fallback)."""
-    for i, a in enumerate(argv):
-        if a == "--host-bin" and i + 1 < len(argv):
-            return argv[i + 1]
-        if a.startswith("--host-bin="):
-            return a.split("=", 1)[1]
-    exe = "devapi_host.exe" if os.name == "nt" else "devapi_host"
-    base = os.path.join(REPO_ROOT, "build", "examples", "devapi_host")
-    # Per-preset build nests under a preset subdir; fall back to the flat layout (--host-bin pins exactly).
-    for cand in (os.path.join(base, "native-debug", exe), os.path.join(base, exe)):
-        if os.path.isfile(cand):
-            return cand
-    return os.path.join(base, exe)
-
-
-def _connect_with_retry(port: int, deadline_s: float = 10.0) -> SocketTransport:
-    """Poll connect() until the freshly-launched host's listen socket is up (or time out)."""
-    end = time.time() + deadline_s
-    last_exc = None
-    while time.time() < end:
-        try:
-            return SocketTransport("127.0.0.1", port)
-        except (ConnectionError, TimeoutError, OSError) as exc:
-            last_exc = exc
-            time.sleep(0.1)
-    raise ConnectionError(f"could not connect to 127.0.0.1:{port} within {deadline_s}s: {last_exc}")
-
-
-def _drive_deferred_items(client: DevApiClient, advertised: set) -> None:
-    """Exercise the web deferrals, advertised-aware: a command this host lists in endpoints MUST pass
-    (swallowing its error would let a real obs/render/time break still print PASS); a command absent
-    from the host's build is skipped. Items: perf.stats mem_used, a render toggle, time.step.
+def _drive_advertised_items(client: DevApiClient, advertised: set) -> None:
+    """Advertised-aware: a command this host lists in endpoints MUST pass (swallowing its error would let a
+    real obs/render/time break still print PASS); a command absent from the host's build is skipped.
+    Items: perf.stats mem_used, a render toggle, time.step.
     """
     exercised = []
     # (1) obs memory read — perf.snapshot is last-frame and lacks mem_used; perf.stats carries it.
@@ -113,7 +43,7 @@ def _drive_deferred_items(client: DevApiClient, advertised: set) -> None:
     if "time.step" in advertised:
         client.step(1)
         exercised.append("time.step")
-    print(f"PASS deferred-items: {', '.join(exercised) or '(none advertised)'} exercised (advertised commands asserted).")
+    print(f"PASS advertised items: {', '.join(exercised) or '(none advertised)'} exercised.")
 
 
 def _raw_ping(port: int) -> None:
@@ -124,9 +54,10 @@ def _raw_ping(port: int) -> None:
         assert reply.get("ok") is True, f"the newest client was not served: {reply}"
 
 
-def _check_newest_client_wins(port: int, client: DevApiClient) -> None:
+def _check_newest_client_wins(client: DevApiClient) -> None:
     """The native host serves the newest connection: a second client is served and the first is dropped;
     a client that reconnects at once is served even before its old close is read."""
+    port = client.transport.port
     _raw_ping(port)
     try:
         client.result("ping")
@@ -142,7 +73,8 @@ def _check_newest_client_wins(port: int, client: DevApiClient) -> None:
 def run(client: DevApiClient) -> None:
     """The ONE transport-agnostic scenario; raise AssertionError on any contract violation.
 
-    Driven IDENTICALLY by SocketTransport (native) and PlaywrightTransport / devapi.spec.ts (web).
+    Driven IDENTICALLY by SocketTransport (native) and PlaywrightTransport (web); the takeover check, last,
+    is socket-only.
     """
     # 1. Discovery (probe half) — endpoints lists BOTH game commands (zero-engine-edit registration).
     client.result("ping")
@@ -166,59 +98,14 @@ def run(client: DevApiClient) -> None:
     assert bool(poked2["poked"]) != before, "game.poke did not flip the observable host bool"
     print("PASS discovery + game.echo/game.poke: endpoints list both, echo round-trips, poke flips host state.")
 
-    # 3. deferred items (time.step needs MANUAL); capture has its own UAT, capture_demo.py.
+    # 3. advertised items (time.step needs MANUAL); capture has its own UAT, capture_demo.py.
     client.set_mode("manual")
-    _drive_deferred_items(client, methods)
+    _drive_advertised_items(client, methods)
 
-    print("PASS: canonical run(client) — discovery + game.* + deferred items all machine-checked.")
-
-
-def main(argv) -> int:
-    no_launch = "--no-launch" in argv
-    port = resolve_port(argv)
-    proc = None
-    transport = None
-    try:
-        if not no_launch:
-            host_bin = _find_host_bin(argv)
-            if not os.path.isfile(host_bin):
-                print(f"error: devapi_host not found at {host_bin}\n"
-                      f"  build it as docs/build.md describes for capture_demo.py,\n"
-                      f"  or attach to a running host with --no-launch --port N", file=sys.stderr)
-                return 2
-            env = dict(os.environ, NT_DEVAPI_PORT=str(port))
-            proc = subprocess.Popen([host_bin], cwd=REPO_ROOT, env=env)
-            transport = _connect_with_retry(port)
-        else:
-            transport = SocketTransport("127.0.0.1", port)
-        client = DevApiClient(transport)
-        run(client)
-        _check_newest_client_wins(port, client)
-        assert proc is None or proc.poll() is None, "the host exited during the client checks"
-        return 0
-    except AssertionError as exc:
-        print(f"FAIL: assertion: {exc}")
-        return 1
-    except (DevApiResultError, ValueError) as exc:
-        print(f"FAIL: protocol error: {exc}")
-        return 1
-    except (ConnectionError, TimeoutError, OSError) as exc:
-        print(f"FAIL: transport error talking to 127.0.0.1:{port}: {exc}")
-        return 1
-    finally:
-        if transport is not None:
-            transport.close()
-        if proc is not None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+    # 4. Last: it drops this client.
+    if isinstance(client.transport, SocketTransport):
+        _check_newest_client_wins(client)
 
 
 if __name__ == "__main__":
-    args = sys.argv[1:]
-    if "--help" in args or "-h" in args:
-        print(__doc__)
-        sys.exit(0)
-    sys.exit(main(args))
+    sys.exit(launch.main(run))

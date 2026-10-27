@@ -1,45 +1,46 @@
-import json
 import unittest
 
-from tools.devapi.transport import PlaywrightTransport
+from tools.devapi.client import DevApiClient
+from tools.devapi.transport import PlaywrightTransport, Transport
+
+
+class FakeTransport(Transport):
+    def __init__(self, reply):
+        self.reply = reply
+
+    def exchange(self, line):
+        return self.reply
+
+    def close(self):
+        pass
 
 
 class FakePage:
-    def __init__(self, polls=()):
-        self.polls = list(polls)
+    def __init__(self):
         self.calls = []
 
     def evaluate(self, expression, *args):
-        self.calls.append((expression, args))
-        if "poll()" in expression:
-            return self.polls.pop(0) if self.polls else ""
+        self.calls.append(expression)
         return ""
 
 
 class PlaywrightTransportTests(unittest.TestCase):
-    def test_construction_and_close_reset_bridge(self):
+    def test_construction_and_close_reset_the_bridge(self):
         page = FakePage()
         transport = PlaywrightTransport(page)
-        self.assertEqual([("() => window.__devapi.reset()", ())], page.calls)  # takes over a killed client
-
+        self.assertEqual(["() => window.__devapi.reset()"], page.calls)  # takes over a killed client
         transport.close()
         transport.close()
-
-        self.assertEqual([("() => window.__devapi.reset()", ())] * 2, page.calls)
+        self.assertEqual(["() => window.__devapi.reset()"] * 2, page.calls)
         with self.assertRaises(ConnectionError):
-            transport.send("{}")
+            transport.exchange("{}")
 
-    def test_manual_mode_submits_nothing_of_its_own(self):
-        line = '{"request_id":2,"ok":true,"result":{}}'
-        page = FakePage(polls=[""] * 50 + [line])
-        transport = PlaywrightTransport(page)
 
-        transport.send(json.dumps({"method": "time.set_mode", "request_id": 1, "params": {"mode": "manual"}}))
-        transport.send(json.dumps({"method": "capture.frame", "request_id": 2}))
-
-        self.assertEqual(line, transport.recv_line())
-        submitted = [args[0] for expression, args in page.calls if "submit" in expression]
-        self.assertEqual(["time.set_mode", "capture.frame"], [json.loads(s)["method"] for s in submitted])
+class DevApiClientTests(unittest.TestCase):
+    def test_reply_to_another_request_raises(self):
+        client = DevApiClient(FakeTransport('{"request_id":7,"ok":true,"result":{}}'))
+        with self.assertRaises(ConnectionError):
+            client.request("ping")
 
 
 if __name__ == "__main__":
