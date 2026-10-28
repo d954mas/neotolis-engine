@@ -365,7 +365,7 @@ typedef struct {
      * The others: 4 per stream shapes draw from, the sprite layouts and the game's own. */
     uint16_t max_vertex_inputs;
     uint16_t max_render_targets; /* default: 16 */
-    uint32_t capture_capacity;   /* event records, default: 0; allocated once at init */
+    uint32_t capture_capacity;   /* event records, default: 0, below 2^24; allocated once at init */
     uint32_t stream_capacity;    /* draw-phase command bytes of one frame, default: 32 KiB; allocated once at init */
     /* Frame storage bytes per frame by stream (NT_GFX_FRAME_*), default: 0 (disabled) except the
      * uniform stream, which every pass's Globals block uses: 16 KiB;
@@ -766,7 +766,7 @@ typedef union {
 } nt_gfx_event_t;
 
 _Static_assert(sizeof(nt_gfx_event_t) == 104, "capture record layout must remain explicit");
-_Static_assert(NT_GFX_OP_COUNT <= 256 && NT_GFX_OBJECT_INSTANCE_LAYOUT < 256 && NT_GFX_RESULT_UNKNOWN < 256, "one-byte record fields");
+_Static_assert(NT_GFX_OP_COUNT <= 256, "operation is one byte in a record");
 
 /* detail of INITIAL/STATE records: which layer's inherited state they snapshot. */
 enum {
@@ -778,7 +778,7 @@ typedef struct {
     bool overflow;
     const nt_gfx_event_t *events;
     uint32_t count;
-    uint32_t execute_begin, execute_end; /* records of the end_frame stream execution, frame storage uploads included */
+    uint32_t execute_begin, execute_end; /* records of the end_frame stream execution, frame storage uploads included; 0 until it ran */
     nt_gfx_counters_t counters;          /* the finalized frame's, even after later unrecorded frames; frame_sequence 0 while recording */
 } nt_gfx_capture_view_t;
 

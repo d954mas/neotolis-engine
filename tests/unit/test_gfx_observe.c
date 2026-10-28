@@ -746,6 +746,9 @@ static void test_creator_op_records_carry_their_handle_and_result(void) {
     bool invalid_buffer = false;
     for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *e = &capture.events[i];
+        /* Every operation ended, and every gfx record's operation came before it. */
+        TEST_ASSERT_TRUE(e->kind != NT_GFX_EVENT_OP || e->result != NT_GFX_RESULT_NONE);
+        TEST_ASSERT_TRUE(e->kind > NT_GFX_EVENT_ARGUMENT || e->link <= i);
         if (e->kind == NT_GFX_EVENT_OP && e->operation == NT_GFX_OP_CREATE) {
             target_result |= e->object_kind == NT_GFX_OBJECT_RENDER_TARGET && e->object == target.id && e->result == NT_GFX_RESULT_ACCEPTED;
             invalid_buffer |= e->object_kind == NT_GFX_OBJECT_BUFFER && e->object == 0 && e->result == NT_GFX_RESULT_CONTEXT_LOST;

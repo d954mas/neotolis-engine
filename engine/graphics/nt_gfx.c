@@ -289,6 +289,21 @@ static uint32_t pipeline_program(uint32_t slot) { return (uint32_t)s_gfx.pipelin
 #if NT_GFX_CAPTURE_ENABLED
 nt_gfx_capture_state_t g_nt_gfx_capture;
 
+nt_gfx_event_t *nt_gfx_capture_reserve_recording(void) {
+    nt_gfx_capture_state_t *capture = &g_nt_gfx_capture;
+    if (capture->view.overflow) {
+        return NULL;
+    }
+    if (capture->view.count == capture->capacity) {
+        capture->view.overflow = true;
+        return NULL;
+    }
+    nt_gfx_event_t *event = &capture->events[capture->view.count];
+    memset(event, 0, sizeof(*event));
+    event->link = capture->link;
+    return event;
+}
+
 const char *nt_gfx_gl_call_name(uint32_t call) {
 #define NT_GFX_GL_CALL_NAME_(name) #name,
     static const char *const names[NT_GFX_GL_COUNT] = {NULL, NT_GFX_GL_CALLS(NT_GFX_GL_CALL_NAME_)};

@@ -1194,12 +1194,11 @@ carry no link: their label overlays those bytes, so read `kind` first.
 A recorded command carries the link of the operation that recorded it, so the
 BACKEND and backend SKIP records it produces when the stream executes in
 `nt_gfx_end_frame` link to that operation. A merged draw issues one call that
-links to the first draw; the draws it joined end CACHE, and each joined the
-nearest earlier ACCEPTED draw operation of the same kind (a merge needs nothing
-recorded in between). The view's `execute_begin` and `execute_end` delimit the
-records of that execution, frame storage uploads included, so a capture reads as
-call-order records, then the execution in command order, then the work after
-`end_frame`.
+links to the first draw; each draw it joined ends CACHE and keeps that draw's
+link in `detail`. The view's `execute_begin` and `execute_end` delimit the records
+of that execution, frame storage uploads included (both 0 until the recorded
+frame's `end_frame`), so a capture reads as call-order records, then the execution
+in command order, then the work after `end_frame`.
 A stage destroyed while a pending link holds it records its `glDeleteShader` where
 that link resolves: among these link records, or inside the program's DESTROY operation; a lost
 context records none. A program's DEFINITION does not imply readiness: one recorded while it links carries

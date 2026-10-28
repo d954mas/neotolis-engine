@@ -28,22 +28,11 @@ extern nt_gfx_capture_state_t g_nt_gfx_capture;
 
 #if NT_GFX_CAPTURE_ENABLED
 void nt_gfx_backend_capture_initial_state(void);
+nt_gfx_event_t *nt_gfx_capture_reserve_recording(void);
 /* Zeroes the next record in place; the caller publishes it by advancing count.
- * NULL when not recording or full; a full array marks overflow, and nothing appends after it. */
-static inline nt_gfx_event_t *nt_gfx_capture_reserve(void) {
-    nt_gfx_capture_state_t *capture = &g_nt_gfx_capture;
-    if (!g_nt_gfx.capture_recording || capture->view.overflow) {
-        return NULL;
-    }
-    if (capture->view.count == capture->capacity) {
-        capture->view.overflow = true;
-        return NULL;
-    }
-    nt_gfx_event_t *event = &capture->events[capture->view.count];
-    memset(event, 0, sizeof(*event));
-    event->link = capture->link;
-    return event;
-}
+ * NULL when not recording or full; a full array marks overflow, and nothing appends after it.
+ * Only the recording test is inline: every GL call of an unrecorded frame pays one branch. */
+static inline nt_gfx_event_t *nt_gfx_capture_reserve(void) { return g_nt_gfx.capture_recording ? nt_gfx_capture_reserve_recording() : NULL; }
 /* Issued-call records are filled in place: open reserves the next slot, commit publishes it. */
 static inline void nt_gfx_capture_open_call(nt_gfx_gl_call_t call) {
     nt_gfx_capture_state_t *capture = &g_nt_gfx_capture;
@@ -138,7 +127,7 @@ static inline void nt_gfx_end_op(const nt_gfx_scope_t *scope, nt_gfx_result_t re
         nt_gfx_end_op(&nt_gfx_scope, nt_gfx_result);                                                                                                                                                   \
     } while (0)
 #else
-/* Request arguments and record construction disappear entirely in capture-OFF builds. */
+/* Request arguments and record construction disappear entirely in capture-OFF builds, so they must be side-effect-free. */
 #define NT_GFX_BEGIN(scope_op, scope_kind, scope_object) const nt_gfx_scope_t nt_gfx_scope = {(scope_op)}
 #define NT_GFX_BEGIN_REQUEST(scope_op, scope_kind, scope_object, ...) NT_GFX_BEGIN(scope_op, scope_kind, scope_object)
 #define NT_GFX_END_OBJECT(result, created) nt_gfx_end_op(&nt_gfx_scope, (result))
