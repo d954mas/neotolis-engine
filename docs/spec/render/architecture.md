@@ -1369,25 +1369,30 @@ records end `CONTEXT_LOST`; a sprite or text material resolved after it notes
 text: a reader can rebuild every record field from it. It writes into the caller's
 buffer like `snprintf`, returning the bytes needed without the terminator, and
 allocates nothing. The text is the capture artifact: DevAPI returns it, clients
-save it, and the Frame Inspector parses it.
+save it, and the Frame Inspector is to parse it.
 
 ```text
 ntcapture 1
 frame sequence=<n> records=<n> overflow=<0|1> execute=<begin>..<end>
 counter <name>=<n>                       (one line per nonzero counter)
-<index> <indent><KIND> op=<OP> [obj=<KIND>:<handle>] [result=<R>] <detail> link=<@index|-> <fields>
+<index> <indent><KIND> op=<OP> [obj=<KIND>:<handle>] [result=<R>] [<detail>] link=<@index|-> <fields>
+<index> <indent>NOTE label="<text>"
+<index> <indent>NOTE_FIELD key="<text>" type=<U32|I32|U64|F32|STR> value=<value>
+<index> <indent>MARKER_PUSH label="<text>"
+<index> <indent>MARKER_POP
 ```
 
-- Counters are named `vertices`, `stream_bytes`, `accepted.<OP>`, `frame_bytes.<stream>`,
+- Counters are named `vertices`, `stream_bytes`, `accepted.<OP>`, `frame_bytes.<stream index>`,
   `gl.<call>` and so on, so the web and native array sizes do not matter.
 - Enums print by name, never by value. `detail` prints as `call=<glCall>` on BACKEND
   and backend SKIP records, `resource=<KIND>` on backend resource DEFINITION records,
-  `layer=FRONTEND|BACKEND` on INITIAL/STATE, and `detail=<n>` otherwise.
-- Fields print as `name=value` for the data arm the record uses (see Frame
-  observation for which record uses which); zero fields are omitted, and arrays
-  print up to their last nonzero element. Issued-call arguments print exactly
-  `arg_count` elements, so a zero argument stays visible (`args=`, `key=` on a cache
-  skip, `values=`).
+  `layer=FRONTEND|BACKEND` on INITIAL/STATE, `joined=@<index>` on a merged draw (the
+  draw it joined), `detail=<n>` otherwise, and is omitted when 0.
+- Fields print as `name=value` for the data arm of the record (table below); zero
+  fields are omitted, and arrays print up to their last nonzero element. Issued-call
+  arguments print exactly `arg_count` elements, so a zero argument stays visible
+  (`args=`, `key=` on a cache skip, `values=`). Formatting asserts that a record holds
+  no data outside its arm.
 - Integers print in decimal as stored; GL arguments are stored as `uint32`.
   Floats print as the shortest `%g` (6 to 9 significant digits) that reads back
   to the same float32, including `-0` and `inf`; NaN prints as `nan:0x<bits>`.
@@ -1396,6 +1401,18 @@ counter <name>=<n>                       (one line per nonzero counter)
 - Indentation (two spaces per open marker and per parent operation) is cosmetic and
   capped at 32 levels, so the text grows linearly with records; `link` is
   authoritative.
+
+| Record | Data arm |
+|---|---|
+| BACKEND, SKIP with a call | `backend` (`key=` on SKIP) |
+| SKIP without a call (inactive texture-set name), ARGUMENT | `binding` |
+| DEFINITION: ATTRIBUTE / PIPELINE / STATE / other | `attribute` / `state` / `backend` / `resource` |
+| INITIAL: STATE of the backend layer, SAMPLER, TEXTURE | `backend` |
+| INITIAL: PASS / other | `pass` / `state` |
+| OP: CREATE, BUFFER_UPLOAD | `resource` |
+| OP: the four draws / PASS / CLEAR | `draw` / `pass` / `clear` |
+| OP: VERTEX_INPUT, UBO, SEGMENT_BEGIN, SEGMENT_POLL | `binding` |
+| OP: other | `state` |
 
 Any change of names, fields or grammar bumps the `ntcapture` version.
 

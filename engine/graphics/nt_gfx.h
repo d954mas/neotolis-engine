@@ -365,7 +365,7 @@ typedef struct {
      * The others: 4 per stream shapes draw from, the sprite layouts and the game's own. */
     uint16_t max_vertex_inputs;
     uint16_t max_render_targets; /* default: 16 */
-    uint32_t capture_capacity;   /* event records, default: 0, below 2^24; allocated once at init */
+    uint32_t capture_capacity;   /* event records per capture array, default: 0, below 2^24; init allocates two arrays */
     uint32_t stream_capacity;    /* draw-phase command bytes of one frame, default: 32 KiB; allocated once at init */
     /* Frame storage bytes per frame by stream (NT_GFX_FRAME_*), default: 0 (disabled) except the
      * uniform stream, which every pass's Globals block uses: 16 KiB;

@@ -47,7 +47,7 @@ void nt_devapi_register(const nt_devapi_command *cmds, size_t count, void *user_
 // #endregion
 
 // #region lifecycle hooks
-/* Three ordered phases run every update: the frame hook (the gfx group stores the frame begin_frame just
+/* Three ordered phases run every update: the frame hook (a group acts on the frame begin_frame just
    finalized) before the transport poll (recv + enqueue), so a command received this tick sees that frame;
    then the tick (the input schedule release), so a line received this tick is scheduled before the tick
    reads it, whatever the registration order. One slot each. Reset hooks fire on a client drop. */

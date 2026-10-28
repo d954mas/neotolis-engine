@@ -150,11 +150,13 @@ static void store_crafted(uint64_t sequence, uint32_t count) {
     store_frame(&view, 0, false);
 }
 
+static uint32_t first_record(const stored_frame *f) { return (uint32_t)(f->view.events - s_records); }
+
 static void expect_ring(const uint64_t *sequences, uint32_t count) {
     TEST_ASSERT_EQUAL_UINT32(count, s_ring.count);
     for (uint32_t i = 0; i < count; i++) {
         TEST_ASSERT_EQUAL_UINT64(sequences[i], frame_at(i)->view.counters.frame_sequence);
-        TEST_ASSERT_TRUE(frame_at(i)->first + frame_at(i)->view.count <= NT_DEVAPI_GFX_RING_RECORDS);
+        TEST_ASSERT_TRUE(first_record(frame_at(i)) + frame_at(i)->view.count <= NT_DEVAPI_GFX_RING_RECORDS);
     }
 }
 
@@ -164,11 +166,11 @@ static void test_ring_wraps_and_evicts_through_the_newest_overlap(void) {
     store_crafted(3, 24); /* wraps to [0,24), evicts 1 */
     store_crafted(4, 16); /* [24,40) */
     expect_ring((const uint64_t[]){2, 3, 4}, 3);
-    TEST_ASSERT_EQUAL_UINT32(40, frame_at(0)->first);
+    TEST_ASSERT_EQUAL_UINT32(40, first_record(frame_at(0)));
     /* 30 records wrap to 0 and overlap 3 and 4, so 2, 3 and 4 all leave. */
     store_crafted(5, 30);
     expect_ring((const uint64_t[]){5}, 1);
-    TEST_ASSERT_EQUAL_UINT32(0, frame_at(0)->first);
+    TEST_ASSERT_EQUAL_UINT32(0, first_record(frame_at(0)));
     /* Exact fit at the end, then the frame-count limit. */
     store_crafted(6, 34);
     expect_ring((const uint64_t[]){5, 6}, 2);
@@ -203,34 +205,47 @@ static void test_off_keeps_the_ring_and_stores_no_frame_in_flight(void) {
     TEST_ASSERT_NOT_EQUAL_UINT64(0, read_sequence("{\"method\":\"gfx.read\"}"));
 }
 
-static void test_a_frame_open_at_on_is_never_stored(void) {
+static void test_on_is_idempotent_and_off_on_clears_the_ring(void) {
     record(true);
-    frame(false);
-    /* Between frames, off then on: the frame gfx records next began after on. */
-    record(false);
-    record(true);
-    const uint64_t on = g_nt_gfx.counters.frame_sequence;
-    frame(false);
-    frame(false);
-    TEST_ASSERT_EQUAL_UINT64(on + 1U, frame_at(0)->view.counters.frame_sequence);
-    /* From C between begin_frame and update: that frame is not recording and is skipped. */
-    nt_gfx_begin_frame();
-    nt_devapi_gfx_record(true);
-    const uint64_t open = g_nt_gfx.counters.frame_sequence;
-    nt_devapi_update();
-    nt_gfx_end_frame();
     frame(false);
     frame(false);
     TEST_ASSERT_EQUAL_UINT32(1, s_ring.count);
-    TEST_ASSERT_EQUAL_UINT64(open + 1U, frame_at(0)->view.counters.frame_sequence);
+    /* On while on keeps the ring and the recording frame. */
+    record(true);
+    frame(false);
+    TEST_ASSERT_EQUAL_UINT32(2, s_ring.count);
+    /* Off then on clears it; the first stored frame records after on. */
+    record(false);
+    record(true);
+    TEST_ASSERT_EQUAL_UINT32(0, s_ring.count);
+    frame(false);
+    frame(false);
+    TEST_ASSERT_GREATER_THAN_UINT32(0, s_ring.count);
 }
 
-static void test_reset_turns_recording_off(void) {
+/* A game turning recording on at the start of its frame, before begin_frame, still marks the step. */
+static void test_on_before_begin_frame_keeps_the_step_frame_advanced(void) {
+    frame(false);
+    g_nt_app.frame++;
+    nt_devapi_gfx_record(true);
+    nt_gfx_begin_frame();
+    nt_devapi_update();
+    nt_gfx_end_frame();
+    frame(false);
+    TEST_ASSERT_EQUAL_UINT32(1, s_ring.count);
+    TEST_ASSERT_TRUE(frame_at(0)->advanced);
+    char line[96];
+    (void)snprintf(line, sizeof(line), "{\"method\":\"gfx.read\",\"params\":{\"sim_frame\":%u}}", g_nt_app.frame);
+    TEST_ASSERT_EQUAL_UINT64(frame_at(0)->view.counters.frame_sequence, read_sequence(line));
+}
+
+/* Recording is game state: a client leaving does not change it. */
+static void test_a_client_reset_keeps_recording(void) {
     record(true);
     frame(false);
     nt_devapi_run_reset_hooks();
     cJSON *root = submit("{\"method\":\"gfx.frames\"}");
-    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(result_of(root), "recording")));
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(result_of(root), "recording")));
     cJSON_Delete(root);
 }
 
@@ -300,8 +315,9 @@ int main(void) {
     RUN_TEST(test_ring_wraps_and_evicts_through_the_newest_overlap);
     RUN_TEST(test_recorded_frames_stay_gapless_over_many_wraps);
     RUN_TEST(test_off_keeps_the_ring_and_stores_no_frame_in_flight);
-    RUN_TEST(test_a_frame_open_at_on_is_never_stored);
-    RUN_TEST(test_reset_turns_recording_off);
+    RUN_TEST(test_on_is_idempotent_and_off_on_clears_the_ring);
+    RUN_TEST(test_on_before_begin_frame_keeps_the_step_frame_advanced);
+    RUN_TEST(test_a_client_reset_keeps_recording);
     RUN_TEST(test_not_ready_and_unknown_frames);
     RUN_TEST(test_reinit_zeroes_the_group);
     RUN_TEST(test_an_overflowed_frame_is_stored_with_one_warning);

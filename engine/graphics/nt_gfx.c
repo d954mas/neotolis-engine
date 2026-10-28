@@ -828,9 +828,7 @@ void nt_gfx_begin_frame(void) {
     if (g_nt_gfx.capture_recording) {
         /* The finished frame moves to done; the next recording writes the other array. */
         g_nt_gfx_capture.view.counters = g_nt_gfx.last_frame;
-        g_nt_gfx_capture.view.events = g_nt_gfx_capture.events;
         g_nt_gfx_capture.done = g_nt_gfx_capture.view;
-        g_nt_gfx_capture.view = (nt_gfx_capture_view_t){0};
         g_nt_gfx_capture.events = g_nt_gfx_capture.events == g_nt_gfx_capture.base ? g_nt_gfx_capture.base + g_nt_gfx_capture.capacity : g_nt_gfx_capture.base;
         g_nt_gfx.capture_recording = false;
     }
@@ -851,7 +849,7 @@ void nt_gfx_begin_frame(void) {
     if (g_nt_gfx_capture.request_pending) {
         g_nt_gfx_capture.request_pending = false;
         g_nt_gfx.capture_recording = true;
-        g_nt_gfx_capture.view = (nt_gfx_capture_view_t){0};
+        g_nt_gfx_capture.view = (nt_gfx_capture_view_t){.events = g_nt_gfx_capture.events};
         capture_initial_state();
     }
 #endif

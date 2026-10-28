@@ -439,7 +439,7 @@ if(NOT EMSCRIPTEN)
     set_property(TEST test_nt_gfx_frame_storage_native APPEND PROPERTY LABELS native)
 
     add_executable(test_nt_gfx_observe_native unit/test_nt_gfx_observe_native.c)
-    target_link_libraries(test_nt_gfx_observe_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
+    target_link_libraries(test_nt_gfx_observe_native PRIVATE $<TARGET_NAME_IF_EXISTS:nt_gfx_capture_text> nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
     nt_setup_test_target(test_nt_gfx_observe_native)
     set_property(TEST test_nt_gfx_observe_native APPEND PROPERTY LABELS native)
 
@@ -958,9 +958,6 @@ if(NOT EMSCRIPTEN)
         endif()
         if(NT_DEVAPI_GROUP_CAPTURE)
             list(APPEND _disc_group_provider_libs nt_fpng)
-        endif()
-        if(NT_DEVAPI_GROUP_GFX)
-            list(APPEND _disc_group_provider_libs nt_gfx_capture_text)
         endif()
         target_link_libraries(test_devapi_discovery PRIVATE
             nt_devapi_default

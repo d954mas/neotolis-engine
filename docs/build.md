@@ -94,7 +94,7 @@ is no longer a valid configuration.
 | `NT_FONT_EMBOLDEN_ENABLED` | OFF | Explicit opt-in, including Debug. |
 | `NT_UI_CLAY_DEBUG_VIEW` | OFF | Explicit opt-in, independent of the Neotolis inspector. |
 | `NT_DEVAPI_ENABLED` | OFF | Group switches are dormant while the master gate is OFF. |
-| `NT_DEVAPI_GROUP_GFX` | OFF | Gfx command recording over DevAPI (`gfx.*`); requires `NT_GFX_CAPTURE_ENABLED`. Ring sizes `NT_DEVAPI_GFX_RING_RECORDS`/`_FRAMES` are `-D` defines; see [Gfx frame recording](spec/debug/logging-errors-debugging.md#gfx-frame-recording-devapi-gfx). |
+| `NT_DEVAPI_GROUP_GFX` | OFF | Gfx command recording over DevAPI (`gfx.*`); requires `NT_GFX_CAPTURE_ENABLED`. Ring sizes are compile definitions `NT_DEVAPI_GFX_RING_RECORDS` (default 163840 records, ~16 MiB) and `NT_DEVAPI_GFX_RING_FRAMES` (default 256), set through `CMAKE_C_FLAGS`, not CMake options; see [Gfx frame recording](spec/debug/logging-errors-debugging.md#gfx-frame-recording-devapi-gfx). |
 | `NT_SKIP_EXAMPLE_PACKS` | Empty | Example pack generation to skip, such as `sponza`. |
 | `NT_BASISU_HAS_ETC1S` | ON | Basis ETC1S: the builder emits it, the runtime decodes it. See [Basis Universal admission](#basis-universal-admission). |
 | `NT_BASISU_HAS_UASTC` | ON | Basis UASTC LDR, same contract. Both codecs OFF is a configure error. |

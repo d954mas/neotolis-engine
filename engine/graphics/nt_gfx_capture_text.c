@@ -10,8 +10,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if NT_GFX_CAPTURE_ENABLED
-
 // #region names
 #define NT_NAME_(prefix, x) [prefix##x] = #x
 static const char *const s_operation_names[NT_GFX_OP_COUNT] = {
@@ -241,15 +239,61 @@ static arm_t record_arm(const nt_gfx_event_t *e) {
     }
 }
 
+/* Records are zeroed when reserved and each writer fills only the arm the text prints, so the text is lossless. */
+static void assert_data_in_arm(const nt_gfx_event_t *e, arm_t arm) {
+    size_t used = sizeof(e->data);
+    switch (arm) {
+    case ARM_BACKEND:
+        used = sizeof(e->data.backend);
+        break;
+    case ARM_RESOURCE:
+        used = sizeof(e->data.resource);
+        break;
+    case ARM_DRAW:
+        used = sizeof(e->data.draw);
+        break;
+    case ARM_BINDING:
+        used = sizeof(e->data.binding);
+        break;
+    case ARM_PASS:
+        used = sizeof(e->data.pass);
+        break;
+    case ARM_CLEAR:
+        used = sizeof(e->data.clear);
+        break;
+    case ARM_ATTRIBUTE:
+        used = sizeof(e->data.attribute);
+        break;
+    case ARM_STATE:
+    case ARM_NONE:
+        break;
+    }
+    const unsigned char *bytes = (const unsigned char *)&e->data;
+    for (size_t i = used; i < sizeof(e->data); i++) {
+        NT_ASSERT(bytes[i] == 0 && "capture text: a record writes data outside the arm the text prints");
+    }
+}
+
+static void put_call(text_t *t, uint32_t detail) {
+    const char *call = nt_gfx_gl_call_name(detail);
+    NT_ASSERT(call != NULL && "capture text: issued call outside the GL call table");
+    put(t, " call=%s", call);
+}
+
+static void put_layer(text_t *t, uint32_t detail) {
+    NT_ASSERT(detail <= NT_GFX_INITIAL_BACKEND && "capture text: INITIAL/STATE names its layer");
+    put(t, " layer=%s", detail == NT_GFX_INITIAL_BACKEND ? "BACKEND" : "FRONTEND");
+}
+
 static void put_detail(text_t *t, const nt_gfx_event_t *e, arm_t arm) {
     if (arm == ARM_BACKEND && (e->kind == NT_GFX_EVENT_BACKEND || e->kind == NT_GFX_EVENT_SKIP)) {
-        const char *call = nt_gfx_gl_call_name(e->detail);
-        NT_ASSERT(call != NULL && "capture text: issued call outside the GL call table");
-        put(t, " call=%s", call);
+        put_call(t, e->detail);
     } else if (e->kind == NT_GFX_EVENT_DEFINITION && e->operation == NT_GFX_OP_STATE) {
         put(t, " resource=%s", NT_TABLE_NAME_(s_object_names, e->detail));
     } else if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_STATE) {
-        put(t, " layer=%s", e->detail == NT_GFX_INITIAL_BACKEND ? "BACKEND" : "FRONTEND");
+        put_layer(t, e->detail);
+    } else if (arm == ARM_DRAW && e->kind == NT_GFX_EVENT_OP && e->detail != 0) {
+        put(t, " joined=@%" PRIu32, e->detail - 1U); /* a merged draw keeps the link of the draw it joined */
     } else {
         put_u32(t, "detail", e->detail);
     }
@@ -379,6 +423,7 @@ static void put_record(text_t *t, const nt_gfx_capture_view_t *view, uint32_t in
         return;
     }
     const arm_t arm = record_arm(e);
+    assert_data_in_arm(e, arm);
     put(t, " op=%s", NT_TABLE_NAME_(s_operation_names, e->operation));
     if (e->object_kind != NT_GFX_OBJECT_NONE || e->object != 0) {
         put(t, " obj=%s:%" PRIu32, NT_TABLE_NAME_(s_object_names, e->object_kind), e->object);
@@ -453,5 +498,3 @@ size_t nt_gfx_capture_format(const nt_gfx_capture_view_t *view, char *out, size_
     }
     return t.len;
 }
-
-#endif

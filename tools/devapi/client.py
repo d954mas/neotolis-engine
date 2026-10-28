@@ -247,7 +247,7 @@ class DevApiClient:
 
     # #region gfx.* wrappers — gfx command recording; every frame records into the host's ring while on.
     def gfx_record(self, enabled: bool) -> Dict[str, Any]:
-        """Turn gfx recording on (clears the ring) or off (keeps it). Result: {recording}."""
+        """Turn gfx recording on or off (off keeps the ring; off then on clears it). Result: {}."""
         return self.result("gfx.record", {"enabled": enabled})
 
     def gfx_frames(self) -> Dict[str, Any]:

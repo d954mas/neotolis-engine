@@ -2751,6 +2751,9 @@ int main(int argc, char *argv[]) {
     nt_example_frames_init(argc, argv);
     nt_input_init();
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+#ifdef NT_DEVAPI_GROUP_GFX
+    gfx_desc.capture_capacity = 16384; /* gfx.record: two arrays of this many records */
+#endif
     gfx_desc.depth = true;
     gfx_desc.max_meshes = 16;
     gfx_desc.max_vertex_inputs = 112;

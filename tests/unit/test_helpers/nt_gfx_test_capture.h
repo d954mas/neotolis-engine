@@ -11,9 +11,7 @@ static inline nt_gfx_capture_view_t nt_test_capture_latest(void) {
     if (!g_nt_gfx.capture_recording) {
         return nt_gfx_capture_read();
     }
-    nt_gfx_capture_view_t view = g_nt_gfx_capture.view;
-    view.events = g_nt_gfx_capture.events; /* a recording frame always has its array */
-    return view;
+    return g_nt_gfx_capture.view;
 }
 #endif
 

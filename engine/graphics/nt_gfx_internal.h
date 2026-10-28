@@ -12,17 +12,15 @@ extern nt_gfx_device_info_t g_nt_gfx_device_info;
 // #region observation storage and owning-site counters
 #if NT_GFX_CAPTURE_ENABLED
 typedef struct {
-    bool request_pending;   /* the next frame records */
-    uint32_t marker_depth;  /* tracked in every frame, recorded or not */
-    nt_gfx_event_t *base;   /* one allocation of two arrays: the recording one and the finalized one */
-    nt_gfx_event_t *events; /* the recording array; view describes it */
-    uint32_t capacity;      /* records per array */
-    nt_gfx_capture_view_t view;
+    bool request_pending;       /* the next frame records */
+    uint32_t marker_depth;      /* tracked in every frame, recorded or not */
+    nt_gfx_event_t *base;       /* one allocation of two arrays: the recording one and the finalized one */
+    nt_gfx_event_t *events;     /* the recording array; view describes it */
+    uint32_t capacity;          /* records per array */
+    nt_gfx_capture_view_t view; /* the recording frame; its events is the recording array */
     nt_gfx_capture_view_t done; /* the last finalized frame, in the other array */
     nt_gfx_event_t *call;       /* issued-call record being filled; NULL when not recording */
     uint32_t link;              /* stamped on every reserved record: index + 1 of the open operation's OP record, or the executing command's */
-    uint32_t call_ints;
-    uint32_t call_floats;
 } nt_gfx_capture_state_t;
 
 extern nt_gfx_capture_state_t g_nt_gfx_capture;
@@ -43,8 +41,6 @@ static inline void nt_gfx_capture_open_call(nt_gfx_gl_call_t call) {
     if (event == NULL) {
         return;
     }
-    capture->call_ints = 0;
-    capture->call_floats = 0;
     event->kind = NT_GFX_EVENT_BACKEND;
     event->operation = (uint8_t)NT_GFX_OP_STATE;
     event->detail = (uint32_t)call;
@@ -52,7 +48,6 @@ static inline void nt_gfx_capture_open_call(nt_gfx_gl_call_t call) {
 }
 static inline void nt_gfx_capture_commit_call(void) {
     if (g_nt_gfx_capture.call != NULL) {
-        g_nt_gfx_capture.call->arg_count = (uint8_t)(g_nt_gfx_capture.call_ints | g_nt_gfx_capture.call_floats << 4);
         g_nt_gfx_capture.view.count++;
         g_nt_gfx_capture.call = NULL;
     }
