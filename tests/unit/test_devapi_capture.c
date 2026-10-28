@@ -1,5 +1,5 @@
 /* L2 capture group via submit() (no socket): bot-param validation -> bad_params (never assert), the
-   defer path (submit -> NULL), and encode at nt_devapi_frame_rendered against nt_gfx_fake. */
+   defer path (submit -> NULL), the rect check and encode at nt_devapi_frame_rendered against nt_gfx_fake. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <stdlib.h>
@@ -11,6 +11,7 @@
 #include "devapi/nt_devapi_capture.c"
 #include "devapi/nt_devapi_internal.h"
 #include "graphics/nt_gfx.h" /* g_nt_gfx.context_lost — the producer-failure (NULL) trigger. */
+#include "test_helpers/nt_gfx_fake.h"
 #include "window/nt_window.h"
 #include "unity.h"
 /* clang-format on */
@@ -70,6 +71,31 @@ static cJSON *capture_yield(const char *request) {
 
 static cJSON *result_of(cJSON *root) { return cJSON_GetObjectItemCaseSensitive(root, "result"); }
 
+/* Submit a capture, resize the framebuffer before the frame renders, return the reply (caller frees). */
+static cJSON *render_resized(const char *request, uint32_t fb_w, uint32_t fb_h) {
+    TEST_ASSERT_NULL(nt_devapi_submit(request));
+    g_nt_window.fb_width = fb_w;
+    g_nt_window.fb_height = fb_h;
+    nt_devapi_frame_rendered();
+    const char *resp = drain();
+    TEST_ASSERT_NOT_NULL(resp);
+    cJSON *root = cJSON_Parse(resp);
+    TEST_ASSERT_NOT_NULL(root);
+    return root;
+}
+
+/* The reply failed with `code` (frees root). */
+static void assert_error(cJSON *root, const char *code) {
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(root, "ok")));
+    cJSON *err = cJSON_GetObjectItemCaseSensitive(root, "error");
+    TEST_ASSERT_NOT_NULL(err);
+    TEST_ASSERT_EQUAL_STRING(code, cJSON_GetObjectItemCaseSensitive(err, "code")->valuestring);
+    cJSON_Delete(root);
+}
+
+/* A capture that defers, then fails at the rendered frame with `code`. */
+static void assert_frame_error(const char *request, const char *code) { assert_error(render_resized(request, g_nt_window.fb_width, g_nt_window.fb_height), code); }
+
 /* bad scale -> bad_params */
 
 static void test_capture_frame_bad_scale_bad_params(void) {
@@ -78,17 +104,19 @@ static void test_capture_frame_bad_scale_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"capture.frame\",\"params\":{\"scale\":\"half\"}}"));
 }
 
-/* bad region -> bad_params */
+/* bad region -> bad_params: malformed at submit, out of bounds at the rendered frame */
 
 static void test_capture_region_out_of_bounds_bad_params(void) {
-    /* x + w > fb_width. */
-    assert_bad_params(nt_devapi_submit("{\"method\":\"capture.region\",\"params\":{\"x\":40,\"y\":0,\"w\":40,\"h\":10}}"));
     /* zero width. */
     assert_bad_params(nt_devapi_submit("{\"method\":\"capture.region\",\"params\":{\"x\":0,\"y\":0,\"w\":0,\"h\":10}}"));
     /* negative width parses as out-of-range u32 -> bad_params (never assert). */
     assert_bad_params(nt_devapi_submit("{\"method\":\"capture.region\",\"params\":{\"x\":0,\"y\":0,\"w\":-1,\"h\":10}}"));
+    /* x + w > fb_width. */
+    assert_frame_error("{\"method\":\"capture.region\",\"params\":{\"x\":40,\"y\":0,\"w\":40,\"h\":10}}", "bad_params");
     /* y + h > fb_height. */
-    assert_bad_params(nt_devapi_submit("{\"method\":\"capture.region\",\"params\":{\"x\":0,\"y\":40,\"w\":10,\"h\":40}}"));
+    assert_frame_error("{\"method\":\"capture.region\",\"params\":{\"x\":0,\"y\":40,\"w\":10,\"h\":40}}", "bad_params");
+    /* x + w wraps uint32: the headroom compare still rejects it. */
+    assert_frame_error("{\"method\":\"capture.region\",\"params\":{\"x\":8,\"y\":0,\"w\":4294967295,\"h\":10}}", "bad_params");
 }
 
 /* encode at the rendered frame (no socket) -> format:"png" + non-empty data */
@@ -157,10 +185,10 @@ static void test_capture_region_scale_halves_dims(void) {
    non-zero, so a floor-div would accept it and drop the 2 remainder pixels per axis. */
 static void test_capture_nondividing_scale_bad_params(void) {
     /* region 6x6 scale 4: 6%4==2 (non-zero floor, but not an even divide) -> bad_params. */
-    assert_bad_params(nt_devapi_submit("{\"method\":\"capture.region\",\"params\":{\"x\":0,\"y\":0,\"w\":6,\"h\":6,\"scale\":4}}"));
+    assert_frame_error("{\"method\":\"capture.region\",\"params\":{\"x\":0,\"y\":0,\"w\":6,\"h\":6,\"scale\":4}}", "bad_params");
     /* frame: a framebuffer not divisible by the scale is rejected too (whole-frame edge crop). */
     g_nt_window.fb_width = 66U; /* 66 % 4 == 2; setUp restores CAP_FB_W before the next test. */
-    assert_bad_params(nt_devapi_submit("{\"method\":\"capture.frame\",\"params\":{\"scale\":4}}"));
+    assert_frame_error("{\"method\":\"capture.frame\",\"params\":{\"scale\":4}}", "bad_params");
 }
 
 /* the reply ran but the readback failed -> {ok:false,error:capture_failed} with the correlated id. A lost
@@ -191,17 +219,56 @@ static void test_capture_producer_failure_yields_error(void) {
     TEST_ASSERT_NULL(drain());
 }
 
-/* pixel cap (DoS backstop) rejects an oversized framebuffer/rect synchronously.
-   A framebuffer/rect above NT_DEVAPI_CAPTURE_MAX_PIXELS (default 4096^2) -> bad_params, no defer, no
-   allocation — the security-relevant cap branch that the 64x48 fixture otherwise can't reach. */
+/* pixel cap (DoS backstop) rejects an oversized framebuffer/rect before any allocation.
+   A framebuffer/rect above NT_DEVAPI_CAPTURE_MAX_PIXELS (default 4096^2) -> bad_params — the
+   security-relevant cap branch that the 64x48 fixture otherwise can't reach. */
 static void test_capture_pixel_cap_bad_params(void) {
     g_nt_window.fb_width = 5000U; /* 5000*5000 = 25M px > the 16.7M (4096^2) cap. */
     g_nt_window.fb_height = 5000U;
-    assert_bad_params(nt_devapi_submit("{\"method\":\"capture.frame\"}"));
+    assert_frame_error("{\"method\":\"capture.frame\"}", "bad_params");
     /* capture.region over a too-large but in-bounds rect trips the same cap (not the bounds check). */
-    assert_bad_params(nt_devapi_submit("{\"method\":\"capture.region\",\"params\":{\"x\":0,\"y\":0,\"w\":5000,\"h\":5000}}"));
+    assert_frame_error("{\"method\":\"capture.region\",\"params\":{\"x\":0,\"y\":0,\"w\":5000,\"h\":5000}}", "bad_params");
     /* setUp() restores CAP_FB_W/H before the next test. */
 }
+
+/* The framebuffer resizes between the request and the rendered frame (web resizes the canvas in
+   nt_window_poll): the capture reads the frame just rendered, at its size. setUp's framebuffer is 64x48. */
+
+static void test_capture_frame_takes_the_rendered_size(void) {
+    cJSON *root = render_resized("{\"method\":\"capture.frame\"}", 32U, 16U);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
+    TEST_ASSERT_EQUAL_INT(32, cJSON_GetObjectItemCaseSensitive(result_of(root), "width")->valueint);
+    TEST_ASSERT_EQUAL_INT(16, cJSON_GetObjectItemCaseSensitive(result_of(root), "height")->valueint);
+    cJSON_Delete(root);
+}
+
+/* A top-left rect keeps its top rows: the GL y comes from the rendered height, 32 - (0 + 8) = 24; the
+   request-time height 48 would give 40. */
+static void test_capture_region_y_from_the_rendered_height(void) {
+    cJSON *root = render_resized("{\"method\":\"capture.region\",\"params\":{\"x\":4,\"y\":0,\"w\":8,\"h\":8}}", CAP_FB_W, 32U);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
+    cJSON_Delete(root);
+    const int *rect = nt_gfx_fake_last_read_rect();
+    TEST_ASSERT_EQUAL_INT(4, rect[0]);
+    TEST_ASSERT_EQUAL_INT(24, rect[1]);
+    TEST_ASSERT_EQUAL_INT(8, rect[2]);
+    TEST_ASSERT_EQUAL_INT(8, rect[3]);
+}
+
+/* A rect that fits at submit but not the shrunk frame: the start fits, the end does not, on each axis. */
+static void test_capture_region_outside_the_shrunk_frame(void) {
+    assert_error(render_resized("{\"method\":\"capture.region\",\"params\":{\"x\":8,\"y\":0,\"w\":16,\"h\":8}}", 16U, CAP_FB_H), "bad_params");
+    assert_error(render_resized("{\"method\":\"capture.region\",\"params\":{\"x\":0,\"y\":8,\"w\":8,\"h\":32}}", CAP_FB_W, 16U), "bad_params");
+}
+
+/* The frame checks run on the rendered size: an odd width no longer divides by 2, growth crosses the cap. */
+static void test_capture_frame_checks_after_resize(void) {
+    assert_error(render_resized("{\"method\":\"capture.frame\",\"params\":{\"scale\":2}}", 33U, 16U), "bad_params");
+    assert_error(render_resized("{\"method\":\"capture.frame\"}", 5000U, 5000U), "bad_params");
+}
+
+/* A hidden canvas has no framebuffer to read. */
+static void test_capture_zero_framebuffer_fails(void) { assert_error(render_resized("{\"method\":\"capture.frame\"}", 0U, 0U), "capture_failed"); }
 
 /* a poll before the frame is rendered waits (the image does not exist yet), even with the sim frozen in
    idle MANUAL; the rendered frame then builds the real PNG. */
@@ -258,6 +325,11 @@ int main(void) {
     RUN_TEST(test_capture_nondividing_scale_bad_params);
     RUN_TEST(test_capture_producer_failure_yields_error);
     RUN_TEST(test_capture_pixel_cap_bad_params);
+    RUN_TEST(test_capture_frame_takes_the_rendered_size);
+    RUN_TEST(test_capture_region_y_from_the_rendered_height);
+    RUN_TEST(test_capture_region_outside_the_shrunk_frame);
+    RUN_TEST(test_capture_frame_checks_after_resize);
+    RUN_TEST(test_capture_zero_framebuffer_fails);
     RUN_TEST(test_capture_waits_for_the_frame_with_sim_frozen);
     RUN_TEST(test_capture_box_average_exact_mean);
     return UNITY_END();

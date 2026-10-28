@@ -216,7 +216,7 @@ class DevApiClient:
 
     # #region capture.* wrappers — deferred commands; result() blocks until a render builds the PNG.
     def capture_frame(self, scale: Optional[int] = None) -> Dict[str, Any]:
-        """Capture the full framebuffer as a PNG. Result: {width,height,format:"png",data:<base64>}.
+        """Capture the full framebuffer, at the rendered frame's size, as a PNG. Result: {width,height,format:"png",data:<base64>}.
 
         Deferred: result() blocks until the next pre-swap render builds the PNG. Works in any time
         mode and never advances the sim: in MANUAL it shows the current state; step first for a new
@@ -233,8 +233,8 @@ class DevApiClient:
     ) -> Dict[str, Any]:
         """Capture an (x,y,w,h) sub-rect of the framebuffer as a PNG. Result: {width,height,format:"png",data:<base64>}.
 
-        Deferred like capture_frame. Top-left origin, bounded to the framebuffer (out-of-bounds /
-        zero-size / over-cap -> bad_params over the wire). `scale` is the integer divisor {1,2,4}
+        Deferred like capture_frame. Top-left origin, bounded to the framebuffer of the rendered frame
+        (out-of-bounds / zero-size / over-cap -> bad_params over the wire). `scale` is the integer divisor {1,2,4}
         applied after the crop.
         """
         params: Dict[str, Any] = {"x": x, "y": y, "w": w, "h": h}
