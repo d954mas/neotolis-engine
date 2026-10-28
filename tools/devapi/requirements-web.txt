@@ -1,0 +1,5 @@
+# Web target of tools/devapi/launch.py (--target web): headless Chromium through playwright-python.
+# Same Playwright version as tests/browser, so both share the downloaded browser. After install:
+#   python -m playwright install --with-deps chromium
+-r requirements-capture.txt
+playwright==1.61.0

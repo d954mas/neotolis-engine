@@ -1,14 +1,20 @@
-"""Capture and validate all Mixing & Crossfades modes in skeletal_showcase."""
+"""Capture and validate all Mixing & Crossfades modes in skeletal_showcase.
 
-import argparse
+Run from the repository root against a native skeletal_showcase (attach with --port 17890, or launch
+with --host-bin):
+python -m tools.devapi.scenarios.skeletal_mixing --port 17890 --out build/skeletal-mixing
+The captures and result.json go to the --out directory.
+"""
+
 import base64
 import json
 import math
 import re
+import sys
 from pathlib import Path
 
-from tools.devapi.client import DevApiClient
-from tools.devapi.transport import SocketTransport
+from .. import launch
+from ..client import DevApiResultError
 
 
 MODES = ("Crossfade", "Blend space", "Partial body", "Override", "Interruption")
@@ -66,9 +72,27 @@ def _assert_mid_crossfade(client, label):
         raise AssertionError(f"{label}: capture is not mid-crossfade: {alpha}")
 
 
-def run(client, output, backend="native"):
-    output = Path(output)
+def run(client, out_dir):
+    print(json.dumps(_run(client, out_dir), indent=2))
+
+
+def _wait_for_ui(client, max_frames=600):
+    """A fresh host answers before its UI has rendered a frame (web: while packs load)."""
+    for _ in range(max_frames):
+        try:
+            client.ui_tree()
+            return
+        except DevApiResultError as exc:
+            if "has not rendered a frame yet" not in str(exc):
+                raise
+        client.wait_frames(1)
+    raise AssertionError(f"the UI did not render a frame within {max_frames} frames")
+
+
+def _run(client, out_dir):
+    output = Path(out_dir)
     output.mkdir(parents=True, exist_ok=True)
+    _wait_for_ui(client)
     _select_scene(client)
     client.wait_frames(5)
     if "Show sources" not in _texts(client):
@@ -152,7 +176,6 @@ def run(client, output, backend="native"):
     captures["Interruption repeated"] = _capture(client, output, "interruption_repeated")
 
     report = {
-        "backend": backend,
         "modes": list(MODES),
         "captures": captures,
         "telemetry": telemetry,
@@ -166,9 +189,4 @@ def run(client, output, backend="native"):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", type=int, default=17890)
-    parser.add_argument("--output", default="build/skeletal-mixing")
-    args = parser.parse_args()
-    with SocketTransport(port=args.port) as transport:
-        print(json.dumps(run(DevApiClient(transport), args.output), indent=2))
+    sys.exit(launch.main(run))

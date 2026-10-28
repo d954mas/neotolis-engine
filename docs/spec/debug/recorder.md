@@ -11,12 +11,21 @@ Related: [Logging, Errors, Debugging](logging-errors-debugging.md) (devapi, fram
 ## API and call placement
 
 ```c
+typedef struct {
+    uint32_t frames;  /* frames sent to the encoder */
+    double max_drift; /* seconds; the signed audio-minus-clock gap of largest magnitude after the first push */
+} nt_recorder_stats_t;
+
+bool nt_recorder_ready(void);
 bool nt_recorder_start(const char *name, uint32_t fps);
 void nt_recorder_frame(double t, double dt);
 void nt_recorder_push_audio(const float *stereo48k, uint32_t frames);
-uint32_t nt_recorder_stop(void);
+nt_recorder_stats_t nt_recorder_stop(void);
 bool nt_recorder_active(void);
 ```
+
+`ready` tells whether a `start` can pick its codecs now: web is not ready until its load-time codec
+probe settles (see Backends); Windows is always ready. Ready does not promise an encoder exists.
 
 The game calls `nt_recorder_frame` once per presented frame, after `nt_gfx_end_frame` and before
 `nt_window_swap_buffers`, and passes its clock: `t` is the time of this frame, `dt` the advance that
@@ -30,15 +39,15 @@ before or after its push.
 
 `start` fixes the size to the window framebuffer, rounded down to even (H.264 4:2:0). It asserts a
 non-empty `name`, `fps` within 1..120 and no active recording. It returns false (logged) when either
-side of that size is under 2 px or the backend refuses: no encoder, a size the encoder rejects, or
-an output that cannot be opened (see Backends). `frame`, `push_audio` and `stop` are no-ops while idle.
-`stop` returns the frames sent to the encoder, 0 when a final write failed (audio, or on Windows the
-last frames, see Backends).
+side of that size is under 2 px or the backend refuses: not ready, no encoder, a size the encoder
+rejects, or an output that cannot be opened (see Backends). `frame`, `push_audio` and `stop` are no-ops while idle.
+`stop` returns the frames sent to the encoder and `max_drift` (see Audio); the whole struct is zero
+while idle and when a final write failed (audio, or on Windows the last frames, see Backends).
 
 A recording also ends on its own, with a WARN, in three cases. A change of the even-rounded
 framebuffer size, and a `frame` call with more than two seconds (`2 · fps`) of due frames (render
 off while time ran), end it with the audio padded to the video. An encoder failure ends it; web
-writes no file, Windows keeps the fragments already on disk. After any of them `stop` returns 0.
+writes no file, Windows keeps the fragments already on disk. After any of them `stop` returns zero stats.
 
 ## Frame selection
 
@@ -71,7 +80,9 @@ A sound the mixer starts at the beginning of a step plays at that step's time. W
 to one frame period after that frame's pts, as the frame shows the nearest step. A gap or a mixer on
 another clock shifts the rest of the track. When the track position differs from the time passed to
 `frame` by more than 100 ms (a mixer block and a 60 Hz step fit inside), a WARN says so once per
-recording. A real-time mixer that renders on an audio thread is the game's to align: it pushes the
+recording. `stop` reports the signed difference of largest magnitude, sampled at each `frame` call after the
+first push, as
+`max_drift` (positive: audio ahead of the clock), so a check can bound it without reading the log. A real-time mixer that renders on an audio thread is the game's to align: it pushes the
 samples rendered for each step on the game clock.
 
 Pushed samples go to the encoder at once, so the track may run ahead of the video while recording
@@ -87,9 +98,10 @@ the task presents it: a `VideoFrame` from the canvas inside the rAF task, before
 finished frame. Frames and samples go to `VideoEncoder` and `AudioEncoder`. Codecs are probed once
 when the script loads: H.264 High, else Constrained Baseline, at the lowest listed level (3.1 to 6.2)
 whose frame size and macroblock rate fit (bitrate `0.1 · w · h · fps`); AAC-LC, else Opus (Firefox,
-Chrome on Linux; editors handle Opus in MP4 poorly), both 192 kbps. `start` returns false while the
-probe runs (a console warning says so; start again), past level 6.2 (a console warning), and in a
-browser without WebCodecs, an H.264 encoder or an AAC/Opus encoder. The probe uses 640x360 at
+Chrome on Linux; editors handle Opus in MP4 poorly), both 192 kbps. While the probe runs
+`nt_recorder_ready` is false and `start` returns false (a console warning says so; start again). Once
+it settles `ready` is true, and `start` still returns false past level 6.2 and in a browser without
+WebCodecs, an H.264 encoder or an AAC/Opus encoder (a console warning names the cause). The probe uses 640x360 at
 30 fps: an encoder that rejects the level picked for the real size ends the recording at the first
 frame call after it reports so (`error` in the event). WebCodecs needs a secure context: a page over
 plain `http` to a LAN address (a phone) has none, so recording there needs `https` or `localhost`.
@@ -150,13 +162,13 @@ reads; when it holds more, the call waits. So lockstep runs at the GPU's and the
 shows a hitch instead of a missing frame, and ten seconds without Media Foundation releasing a sample
 of the awaited buffer counts as an encoder failure. A catch-up call queues all its repeated frames
 (up to two seconds of them) at once over one buffer, so the pixels in flight stay at five buffers.
-`stop` also returns 0 when a write fails while it encodes the last reads, as after any encoder
+`stop` also returns zero stats when a write fails while it encodes the last reads, as after any encoder
 failure. Each audio write, pushed samples or silence, allocates one Media Foundation buffer, and each
 video frame one sample, beside the per-sample allocations of the Media Foundation pipeline itself: a
 dev-only exception to preallocated storage. The readback buffers are destroyed after `MFShutdown`;
 a sample still over one then asserts. An encoder failure ends the recording without `Finalize`,
 which could wait on the dead encoder, and keeps the fragments on disk; so does a failed `Finalize` (WARN), after which
-`stop` still returns the frames. A recording without a frame deletes its file (WARN when it cannot).
+`stop` still returns the stats. A recording without a frame deletes its file (WARN when it cannot).
 
 **Other platforms** define no `nt_recorder` target.
 
@@ -167,13 +179,13 @@ which could wait on the dead encoder, and keeps the fragments on disk; so does a
 
 | Command | Params | Result | Errors |
 |---|---|---|---|
-| `record.start` | `{name, fps}` | `{}` | `bad_params` (name not a non-empty string, fps not an integer 1..120), `recording` (active), `failed` (`start` returned false) |
-| `record.stop` | `{}` | `{frames}` | none of its own; `frames` is 0 when nothing was active, the recording ended on its own, or a final write failed |
+| `record.start` | `{name, fps}` | `{}` | `bad_params` (name not a non-empty string, fps not an integer 1..120), `recording` (active), `not_ready` (`nt_recorder_ready` is false; start again), `failed` (`start` returned false) |
+| `record.stop` | `{}` | `{frames, max_drift_ms}` | none of its own; both are 0 when nothing was active, the recording ended on its own, or a final write failed |
 
 Both commands also answer the core `busy` while a deferred reply is pending ([Logging, Errors, Debugging](logging-errors-debugging.md), Developer API).
 
 On Windows `name` is the file path. The host's first `frame` call after `record.start` sets the
 origin. An offline recording is `time.set_mode{mode:"manual"}`,
 `record.start`, `time.step{count}`, `record.stop`; the default `step_dt` of `1/60` at `fps` 30 records
-every second step. The browser tests and the native check of this sequence are in
-[build instructions](../../build.md).
+every second step. The `record_demo` scenario runs this sequence and a real-time one on native and
+web; see [build instructions](../../build.md).

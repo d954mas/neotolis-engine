@@ -2833,8 +2833,9 @@ int main(int argc, char *argv[]) {
     nt_devapi_ui_set_contexts(s_ui_ctxs, NT_COUNTOF(s_ui_ctxs));
 #endif
 #ifndef NT_PLATFORM_WEB
-    if (!nt_devapi_net_start((uint16_t)NT_DEVAPI_DEFAULT_PORT)) {
-        nt_log_error("skeletal_showcase: devapi port %u unavailable", (unsigned)NT_DEVAPI_DEFAULT_PORT);
+    uint16_t devapi_port = 0;
+    if (!nt_devapi_net_port_from_env(NT_DEVAPI_DEFAULT_PORT, &devapi_port) || !nt_devapi_net_start(devapi_port)) {
+        nt_log_error("skeletal_showcase: devapi server did not start");
         nt_devapi_shutdown();
         return 1;
     }

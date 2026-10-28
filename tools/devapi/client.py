@@ -1,14 +1,14 @@
 """DevApiClient — the reusable harness surface.
 
-request / result / batch / wait_frames / step over a pluggable Transport.
-Replies are correlated by request_id. The engine keeps one deferred reply in flight: a
+request / result / wait_frames / step over a pluggable Transport. One request is in flight at a
+time and its reply must carry its request_id. The engine keeps one deferred reply in flight: a
 command sent while one is pending answers busy, and closing the transport drops it.
 A request waits as long as the engine needs; the caller's outer deadline bounds the session.
 
 Stdlib only (json + socket) — no pip deps. Python 3.8+.
 """
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from .transport import Transport
 
@@ -18,61 +18,31 @@ class DevApiResultError(RuntimeError):
 
 
 class DevApiClient:
-    """Blocking request/response over a Transport, correlated by request_id.
+    """Blocking request/response over a Transport (`transport`), one request in flight.
 
-    Each request gets a monotonic id. The read loop returns the matching reply
-    and stashes any non-matching reply (an out-of-order deferred/pipelined result)
-    in a pending-map for a later request that owns that id.
+    Each request gets a monotonic id; the engine echoes it on every reply to a well-formed request,
+    so a reply with any other id is a protocol fault and raises at once.
     """
 
-    # Cap the unclaimed-reply stash: a server that never lets ids be claimed (framing desync)
-    # must fail fast, not grow memory without bound.
-    _MAX_PENDING = 256
-
     def __init__(self, transport: Transport) -> None:
-        self._transport = transport
+        self.transport = transport
         self._next_id = 1
-        # request_id -> already-received response object waiting to be claimed.
-        self._pending: Dict[Any, Dict[str, Any]] = {}
-
-    def _alloc_id(self) -> int:
-        rid = self._next_id
-        self._next_id += 1
-        return rid
-
-    def _stash(self, obj_id: Any, obj: Dict[str, Any]) -> None:
-        """Hold an out-of-order reply for a later request. A None id can't be claimed -> dropped."""
-        if obj_id is None:
-            return
-        if obj_id not in self._pending and len(self._pending) >= self._MAX_PENDING:
-            raise ConnectionError("pending reply map overflow — server replies not being claimed (framing desync)")
-        self._pending[obj_id] = obj
-
-    def _recv_until(self, rid: Any) -> Dict[str, Any]:
-        """Return the response whose request_id == rid, stashing others by id."""
-        # Already arrived earlier (out of order)? Claim it without reading the wire.
-        if rid in self._pending:
-            return self._pending.pop(rid)
-        while True:
-            line = self._transport.recv_line()
-            try:
-                obj = json.loads(line)
-            except ValueError as exc:
-                raise ValueError(f"protocol error: invalid JSON from server: {line!r}") from exc
-            obj_id = obj.get("request_id")
-            if obj_id == rid:
-                return obj
-            # A reply for a different request (deferred/pipelined) — stash and keep reading.
-            self._stash(obj_id, obj)
 
     def request(self, method: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Send one command, block until its correlated reply arrives, return the raw envelope."""
-        rid = self._alloc_id()
+        """Send one command, block until its reply arrives, return the raw envelope."""
+        rid = self._next_id
+        self._next_id += 1
         msg: Dict[str, Any] = {"method": method, "request_id": rid}
         if params is not None:
             msg["params"] = params
-        self._transport.send(json.dumps(msg))
-        return self._recv_until(rid)
+        line = self.transport.exchange(json.dumps(msg))
+        try:
+            obj = json.loads(line)
+        except ValueError as exc:
+            raise ConnectionError(f"protocol: invalid JSON from server: {line!r}") from exc
+        if not isinstance(obj, dict) or obj.get("request_id") != rid:
+            raise ConnectionError(f"protocol: expected the reply to request_id {rid}, got {line!r}")
+        return obj
 
     def result(self, method: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """request() + assert ok; return the result object, raising on {ok:false}."""
@@ -83,36 +53,6 @@ class DevApiClient:
             message = err.get("message", "(no message)")
             raise DevApiResultError(f"{method} failed: {code}: {message}")
         return resp.get("result", {})
-
-    def batch(self, calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Send one JSON-array line, receive one array reply, return entries in order.
-
-        Each entry carries its OWN request_id so the core's per-entry echoed ids
-        are distinct and individually correlatable (a single shared id would
-        collide). The reply array is returned in submission order.
-        """
-        ids = [self._alloc_id() for _ in calls]
-        arr = []
-        for rid, c in zip(ids, calls):
-            entry: Dict[str, Any] = {"method": c["method"], "request_id": rid}
-            if c.get("params") is not None:
-                entry["params"] = c["params"]
-            arr.append(entry)
-        self._transport.send(json.dumps(arr))
-        while True:
-            line = self._transport.recv_line()
-            try:
-                obj = json.loads(line)
-            except ValueError as exc:
-                raise ValueError(f"protocol error: invalid JSON from server: {line!r}") from exc
-            if isinstance(obj, list):
-                return obj
-            # A non-array line is an out-of-order single reply — stash by its id.
-            self._stash(obj.get("request_id"), obj)
-            # If every batch id arrived as an individual reply, the server isn't framing batches
-            # as arrays — fail instead of blocking forever waiting for an array that won't come.
-            if all(i in self._pending for i in ids):
-                raise ConnectionError("batch: server returned individual envelopes, not an array")
 
     def wait_frames(self, n: int) -> Dict[str, Any]:
         """Block until `n` simulation frames have ADVANCED (not loop iterations).
@@ -141,15 +81,6 @@ class DevApiClient:
         A mode switch while stepping drops the queue and raises DevApiResultError (stalled).
         """
         return self.result("time.step", {"count": count})
-
-    def step_seconds(self, seconds: float) -> Dict[str, Any]:
-        """Advance the MANUAL sim by `seconds` of game time = ceil(seconds/step_dt) fixed-dt frames.
-
-        Sugar over time.step{seconds} for time-authored mechanics (cooldowns, durations). Linear
-        and deterministic in MANUAL since step_dt is fixed. Requires manual mode (raises
-        DevApiResultError in RUN). Deferred; blocks until the steps drain.
-        """
-        return self.result("time.step", {"seconds": seconds})
 
     def pause(self) -> Dict[str, Any]:
         """Zero the simulation dt; the frame callback keeps running (transport poll, bookkeeping)."""
@@ -192,120 +123,6 @@ class DevApiClient:
         if hold is not None:
             params["hold"] = hold
         return self.result("input.key", params)
-
-    def move(
-        self, x: float, y: float, id: Optional[int] = None, type: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Inject a pointer move on the default mouse slot (reserved id) unless id/type given.
-
-        x/y are Y-up (origin bottom-left) in FRAMEBUFFER px — input.* uses the device framebuffer as
-        its basis. This is NOT the same basis as ui.* {x,y} / ui_tree bounds, which are ctx-LAYOUT px:
-        the two coincide only when dpr==1 AND the ctx begin-dims equal the framebuffer (no nt_ui_scale,
-        no HiDPI). Under a scaled/HiDPI ctx, feed ui.click({x,y}) ctx-layout coords, NOT input.* fb coords.
-        """
-        params: Dict[str, Any] = {"x": x, "y": y}
-        if id is not None:
-            params["id"] = id
-        if type is not None:
-            params["type"] = type
-        return self.result("input.move", params)
-
-    def click(
-        self,
-        x: float,
-        y: float,
-        button: Optional[int] = None,
-        id: Optional[int] = None,
-        hold: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        """Inject a pointer down+up (2 atomic entries) on the mouse slot.
-
-        x/y are Y-up (origin bottom-left) in FRAMEBUFFER px — input.*'s device-fb basis, which differs
-        from ui.* {x,y} / ui_tree bounds (ctx-LAYOUT px); they coincide only at dpr==1 AND begin-dims==fb.
-        Default is a 1-frame hold (down@0 + up@1) — a realistic click held across one frame.
-        Pass hold=0 for an instant same-frame click (down+up collapsed into one frame). `hold`
-        is omitted from the request when None so the host-side default of 1 is the single
-        source of truth.
-        """
-        params: Dict[str, Any] = {"x": x, "y": y}
-        if button is not None:
-            params["button"] = button
-        if id is not None:
-            params["id"] = id
-        if hold is not None:
-            params["hold"] = hold
-        return self.result("input.click", params)
-
-    def pointer(
-        self,
-        action: str,
-        id: int,
-        x: Optional[float] = None,
-        y: Optional[float] = None,
-        type: Optional[str] = None,
-        buttons: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        """The pointer primitive: action down/move/up on a given id (default mouse type).
-
-        x/y are Y-up (origin bottom-left) in FRAMEBUFFER px — input.*'s device-fb basis, which differs
-        from ui.* {x,y} / ui_tree bounds (ctx-LAYOUT px); they coincide only at dpr==1 AND begin-dims==fb.
-        """
-        params: Dict[str, Any] = {"action": action, "id": id}
-        if x is not None:
-            params["x"] = x
-        if y is not None:
-            params["y"] = y
-        if type is not None:
-            params["type"] = type
-        if buttons is not None:
-            params["buttons"] = buttons
-        return self.result("input.pointer", params)
-
-    def wheel(
-        self, dx: float = 0.0, dy: float = 0.0, x: Optional[float] = None, y: Optional[float] = None
-    ) -> Dict[str, Any]:
-        """Scroll the mouse slot (notches).
-
-        x/y (when given) are Y-up (origin bottom-left) in FRAMEBUFFER px — input.*'s device-fb basis,
-        which differs from ui.* {x,y} / ui_tree bounds (ctx-LAYOUT px); they coincide only at dpr==1 AND
-        begin-dims==fb. dx/dy are notch deltas (content-scroll sign), NOT spatial coords, so no axis
-        flip applies to them. With x and y, the scroll is self-contained — a move to (x,y) then the
-        wheel, so it lands at (x,y) regardless of prior state. Without x/y it applies at the mouse
-        slot's apply-time position (move first, or it is a no-op if no slot exists).
-        """
-        params: Dict[str, Any] = {"dx": dx, "dy": dy}
-        if x is not None:
-            params["x"] = x
-        if y is not None:
-            params["y"] = y
-        return self.result("input.wheel", params)
-
-    def gesture(
-        self,
-        id: int,
-        points: List[List[float]],
-        type: Optional[str] = None,
-        frame_stride: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        """Inject down@0 + a move per point (frame_stride apart) + up; NO interpolation.
-
-        Each point's x/y is Y-up (origin bottom-left) in FRAMEBUFFER px — input.*'s device-fb basis,
-        which differs from ui.* {x,y} / ui_tree bounds (ctx-LAYOUT px); they coincide only at dpr==1 AND
-        begin-dims==fb.
-        """
-        params: Dict[str, Any] = {"id": id, "points": points}
-        if type is not None:
-            params["type"] = type
-        if frame_stride is not None:
-            params["frame_stride"] = frame_stride
-        return self.result("input.gesture", params)
-
-    def button(self, buttons: int, id: Optional[int] = None) -> Dict[str, Any]:
-        """Set the mouse-button mask {1,2,4} on the given id (default reserved mouse slot)."""
-        params: Dict[str, Any] = {"buttons": buttons}
-        if id is not None:
-            params["id"] = id
-        return self.result("input.button", params)
 
     def set_player_enabled(self, enabled: bool) -> Dict[str, Any]:
         """Toggle the player-input gate (false suppresses the real device; inject still flows)."""
@@ -375,19 +192,6 @@ class DevApiClient:
             params["ctx"] = ctx
         return self.result("ui.click", params)
 
-    def ui_scroll(
-        self,
-        id: Any,
-        dx: float = 0.0,
-        dy: float = 0.0,
-        ctx: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Resolve `id` (string id or Y-up {x,y}, origin bottom-left) -> element center -> synthetic wheel(dx,dy) notches."""
-        params: Dict[str, Any] = {"id": id, "dx": dx, "dy": dy}
-        if ctx is not None:
-            params["ctx"] = ctx
-        return self.result("ui.scroll", params)
-
     def ui_drag(
         self,
         from_: Any,
@@ -441,4 +245,4 @@ class DevApiClient:
     # #endregion
 
     def close(self) -> None:
-        self._transport.close()
+        self.transport.close()

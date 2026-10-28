@@ -64,26 +64,6 @@ static const nt_devapi_command k_game_cmds[] = {
     {.method = "game.poke", .summary = "flip an observable host bool (game state), return {poked}", .params_shape = "{}", .result_shape = "{poked:bool}", .fn = cmd_game_poke},
 };
 
-#ifndef __EMSCRIPTEN__
-/* Resolve the listen port: NT_DEVAPI_DEFAULT_PORT, overridden by env NT_DEVAPI_PORT.
-   Falls back to the default on a missing / unparseable / out-of-range value. Native-only: web has
-   no listener, so no port to resolve. */
-static uint16_t resolve_port(void) {
-    // NOLINTNEXTLINE(concurrency-mt-unsafe) — single-threaded host startup, getenv is fine
-    const char *env = getenv("NT_DEVAPI_PORT");
-    if (env == NULL || env[0] == '\0') {
-        return (uint16_t)NT_DEVAPI_DEFAULT_PORT;
-    }
-    char *end = NULL;
-    long v = strtol(env, &end, 10);
-    if (end == env || *end != '\0' || v < 1 || v > 65535) {
-        printf("[devapi_host] NT_DEVAPI_PORT='%s' invalid, using default %d\n", env, NT_DEVAPI_DEFAULT_PORT);
-        return (uint16_t)NT_DEVAPI_DEFAULT_PORT;
-    }
-    return (uint16_t)v;
-}
-#endif /* !__EMSCRIPTEN__ */
-
 /* Asset-free probe hud (layout + registered-widget slots only; host never calls nt_ui_walk). A button
    carries a togglable enabled flag a synthetic ui.click flips, observable via ui.element. */
 /* Sized to clear nt_ui_min_arena_size for the default desc (create asserts on a too-small arena). */
@@ -330,16 +310,14 @@ int main(void) {
         goto shutdown_base;
     }
 #ifndef __EMSCRIPTEN__
-    /* Native: start the loopback TCP transport. Placed early to fail fast on a taken port before
-       building the UI/entity surface; order vs register_default no longer matters — net_poll runs in
-       the transport-poll phase, ahead of the input tick. Web has no listener, so nothing to start. */
-    {
-        uint16_t port = resolve_port();
-        if (!nt_devapi_net_start(port)) {
-            printf("[devapi_host] failed to start TCP server on port %u (taken?)\n", port);
-            goto shutdown_devapi;
-        }
-        printf("[devapi_host] listening on 127.0.0.1:%u\n", port);
+    /* Native: start the loopback TCP transport (port from NT_DEVAPI_PORT, so the launcher gives each
+       host its own). Placed early to fail fast on a taken port before building the UI/entity surface;
+       order vs register_default no longer matters — net_poll runs in the transport-poll phase, ahead of
+       the input tick. Web has no listener. */
+    uint16_t devapi_port = 0;
+    if (!nt_devapi_net_port_from_env(NT_DEVAPI_DEFAULT_PORT, &devapi_port) || !nt_devapi_net_start(devapi_port)) {
+        printf("[devapi_host] failed to start the devapi TCP server (see the devapi_net log)\n");
+        goto shutdown_devapi;
     }
 #endif                            /* !__EMSCRIPTEN__ */
     nt_devapi_register_default(); /* full host: register every compiled-in group (incl. capture). */
@@ -391,15 +369,7 @@ int main(void) {
     /* Web: install the push/pull bridge (window.__devapi). NO listener — the page's own JS is
        the only caller, under the OFF-by-default NT_DEVAPI_ENABLED gate. */
     nt_devapi_web_install_shim();
-#else
-    /* Native: opt-in pre-loop gate so a bot can hand over setup before frame 0.
-       Bounded; the host does NOT require a client to start. */
-    if (nt_devapi_net_wait_for_client(2000)) {
-        printf("[devapi_host] client connected before loop\n");
-    } else {
-        printf("[devapi_host] no client yet; per-frame accept continues\n");
-    }
-#endif /* __EMSCRIPTEN__ */
+#endif
 
     nt_app_run(frame);
 

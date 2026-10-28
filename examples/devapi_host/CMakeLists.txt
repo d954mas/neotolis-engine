@@ -29,11 +29,6 @@ target_link_libraries(devapi_host PRIVATE
 if(NOT EMSCRIPTEN)
     target_link_libraries(devapi_host PRIVATE nt_fs)
 endif()
-if(WIN32)
-    # ws2_32 is inherited transitively from nt_devapi_net (PUBLIC link); nt_devapi (core) pulls it via nt_devapi_net.
-    # getenv() for the NT_DEVAPI_PORT override (single-threaded host startup).
-    target_compile_definitions(devapi_host PRIVATE _CRT_SECURE_NO_WARNINGS)
-endif()
 
 nt_configure_shell(devapi_host TITLE "DevAPI Host - Neotolis Engine")
 if(EMSCRIPTEN)

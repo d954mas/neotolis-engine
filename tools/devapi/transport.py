@@ -1,13 +1,15 @@
 """DevAPI client transports — the wire under DevApiClient.
 
-A pluggable Transport interface (send a line, read a line, close) plus the
-native SocketTransport: a loopback TCP connection to the engine's devapi
-server, JSON-lines framed on '\\n'. A read waits as long as the engine needs: a
-logically blocked reply fails with stalled, so a read stays pending only on a platform
+A Transport moves one request line out and its one reply line back (exchange) and
+closes. SocketTransport is the native wire: a loopback TCP connection to the engine's
+devapi server, JSON-lines framed on '\\n'. PlaywrightTransport is the web wire: the
+page's window.__devapi bridge. An exchange waits as long as the engine needs: a
+logically blocked reply fails with stalled, so it stays pending only on a platform
 stall or a long requested wait, and the caller's outer deadline (CI step, test runner,
 shell) bounds the session. A new client takes over from the previous one.
 
-Stdlib only (socket) — no pip deps. Python 3.8+.
+Stdlib only (socket); PlaywrightTransport only touches the page handle its caller made.
+Python 3.8+.
 """
 import socket
 from abc import ABC, abstractmethod
@@ -15,22 +17,18 @@ from abc import ABC, abstractmethod
 DEFAULT_CONNECT_TIMEOUT = 5.0
 # Matches the host's NT_DEVAPI_DEFAULT_PORT.
 DEFAULT_PORT = 17890
-# recv_line memory bound: a framing-desync guard, NOT a protocol limit. Sized to cover the engine's
+# Read memory bound: a framing-desync guard, NOT a protocol limit. Sized to cover the engine's
 # capture cap (NT_DEVAPI_CAPTURE_MAX_PIXELS = 4096*4096 worst-case base64 PNG ~= 100 MB) with margin,
 # so the client can always read what the server can produce while the read stays bounded.
 MAX_LINE_BYTES = 112 * 1024 * 1024
 
 
 class Transport(ABC):
-    """One JSON line out, one JSON line in. The client frames; the wire moves bytes."""
+    """One JSON line out, its one JSON line back. The client frames; the wire moves bytes."""
 
     @abstractmethod
-    def send(self, line: str) -> None:
-        """Send one already-serialized JSON line (no trailing newline — the transport adds framing)."""
-
-    @abstractmethod
-    def recv_line(self) -> str:
-        """Block until one framed line arrives; return it WITHOUT the trailing newline."""
+    def exchange(self, line: str) -> str:
+        """Send one serialized JSON line (no trailing newline) and block until the reply line arrives."""
 
     @abstractmethod
     def close(self) -> None:
@@ -61,17 +59,18 @@ class SocketTransport(Transport):
         # they can trip the ENGINE's send timeout mid-line.
         self._f = self._sock.makefile("rb", buffering=256 * 1024)
 
+    @property
+    def port(self) -> int:
+        return self._sock.getpeername()[1]
+
     def __enter__(self) -> "SocketTransport":
         return self
 
     def __exit__(self, *exc) -> None:
         self.close()
 
-    def send(self, line: str) -> None:
-        # sendall loops internally on partial writes; framing newline is the line terminator.
+    def exchange(self, line: str) -> str:
         self._sock.sendall((line + "\n").encode("utf-8"))
-
-    def recv_line(self) -> str:
         # Bound the read (in BYTES) so a desynced stream can never grow memory without limit.
         raw = self._f.readline(MAX_LINE_BYTES)
         if raw == b"":
@@ -104,49 +103,32 @@ _POLL_AFTER_FRAME_JS = (
 class PlaywrightTransport(Transport):
     """JSON-lines over window.__devapi.submit/poll, polled once per rendered frame until a line arrives.
 
-    No socket — drives the web devapi bridge over a Playwright page. send() calls
-    window.__devapi.submit and stashes the SYNCHRONOUS response (a non-deferred command returns its
-    response line immediately; a deferred command — C returned NULL — returns "" and its data line
-    arrives later via poll()). recv_line() returns a stashed line, else polls after each frame until a
-    line appears. Construction and close() reset the bridge, dropping a pending reply, so a client
-    takes over from one that was killed (a new native connection replaces the old one the same way).
-    Construct it after window.__devapi exists. Unlike a native takeover, a replaced live web client
-    gets no error, so drive one page with one client. Like SocketTransport it only moves lines: time
-    advance belongs to the client.
-
-    Playwright Python is NOT a CI dep (the CI web gate is the TS spec); this class is the local/dev
-    web wire and touches only the page handle the caller constructed, so the module stays stdlib-only
-    importable for the native SocketTransport path.
+    No socket — drives the web devapi bridge over a Playwright page (`page`). submit returns the reply
+    at once for an immediate command, or "" for a deferred one, whose line then arrives through poll().
+    Construction and close() reset the bridge, dropping a pending reply, so a client takes over from one
+    that was killed (a new native connection replaces the old one the same way). Construct it after
+    window.__devapi exists. Unlike a native takeover, a replaced live web client gets no error, so drive
+    one page with one client. Like SocketTransport it only moves lines: time advance belongs to the client.
     """
 
     def __init__(self, page) -> None:
-        self._page = page
+        self.page = page
         self._closed = False
-        # Lines received synchronously from submit() but not yet handed to recv_line().
-        self._inbox = []
         page.evaluate("() => window.__devapi.reset()")
 
-    def send(self, line: str) -> None:
+    def exchange(self, line: str) -> str:
         if self._closed:
             raise ConnectionError("transport is closed")
-        # submit returns "" on defer (C returned NULL), else the synchronous response line.
-        resp = self._page.evaluate("(l) => window.__devapi.submit(l)", line)
-        if resp:
-            self._inbox.append(resp)
-
-    def recv_line(self) -> str:
-        if self._closed:
-            raise ConnectionError("transport is closed")
-        if self._inbox:
-            return self._inbox.pop(0)
-        while True:
-            line = self._page.evaluate(_POLL_AFTER_FRAME_JS)
-            if line:
-                return line
+        resp = self.page.evaluate("(l) => window.__devapi.submit(l)", line)
+        while not resp:
+            resp = self.page.evaluate(_POLL_AFTER_FRAME_JS)
+        return resp
 
     def close(self) -> None:
         if self._closed:
             return
         self._closed = True
-        self._inbox.clear()
-        self._page.evaluate("() => window.__devapi.reset()")
+        try:
+            self.page.evaluate("() => window.__devapi.reset()")
+        except Exception:  # noqa: BLE001
+            pass  # a closed or crashed page has nothing to reset; never mask the run's failure

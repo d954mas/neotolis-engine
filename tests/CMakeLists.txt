@@ -27,7 +27,7 @@ if(NOT EMSCRIPTEN)
         nt_atlas nt_ui nt_ui_rich nt_gfx nt_gfx_fake nt_font nt_text_renderer
         nt_resource nt_sprite_renderer nt_mesh_renderer nt_debug_overlay
         nt_skinned_mesh_renderer
-        nt_shape_renderer nt_postfx_blur nt_mem_scratch nt_metrics nt_devapi_net
+        nt_shape_renderer nt_postfx_blur nt_mem_scratch nt_metrics
         nt_builder
     )
     foreach(_lib IN LISTS NT_TEST_ACCESS_LIBS)
@@ -898,15 +898,27 @@ if(NOT EMSCRIPTEN)
         )
         nt_setup_test_target(test_devapi_deferred)
 
-        # Loopback transport backpressure: a large response survives a full send buffer (EWOULDBLOCK ->
-        # select-wait) intact, and a wedged peer is dropped on a bounded timeout, not busy-spun. Links
-        # nt_devapi_net (socket code + ws2_32) ahead of nt_devapi + stubs. Group-independent.
+        # Loopback transport: backpressure and the bounded wait_for_client gate. The TU includes
+        # nt_devapi_net.c (static helpers), so the net lib is not linked; ws2_32 comes in directly.
+        # Group-independent.
         add_executable(test_devapi_net_backpressure unit/test_devapi_net_backpressure.c)
-        target_link_libraries(test_devapi_net_backpressure PRIVATE nt_devapi_net nt_devapi cjson nt_app_stub nt_core nt_log_stub unity)
+        target_link_libraries(test_devapi_net_backpressure PRIVATE nt_devapi cjson nt_app_stub nt_core nt_log_stub unity)
+        if(WIN32)
+            target_link_libraries(test_devapi_net_backpressure PRIVATE ws2_32)
+        endif()
         target_compile_definitions(test_devapi_net_backpressure PRIVATE
-            _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1
+            _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_LOG_DOMAIN="devapi_net"
         )
         nt_setup_test_target(test_devapi_net_backpressure)
+
+        # record.* group against a fake nt_recorder (the test defines its API), so it builds on platforms
+        # without a recorder backend. Group-independent.
+        add_executable(test_devapi_recorder unit/test_devapi_recorder.c ${CMAKE_SOURCE_DIR}/engine/devapi/nt_devapi_recorder.c)
+        target_link_libraries(test_devapi_recorder PRIVATE nt_devapi cjson nt_app_stub nt_core nt_log_stub unity)
+        target_compile_definitions(test_devapi_recorder PRIVATE
+            _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1
+        )
+        nt_setup_test_target(test_devapi_recorder)
 
         # core command group via submit(). engine.info.version comes from nt_version, so the
         # test asserts it against nt_version_engine() directly. Needs the core group.

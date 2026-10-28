@@ -280,6 +280,8 @@ static bool create_writer(void) {
     return good;
 }
 
+bool nt_recorder_platform_ready(void) { return true; }
+
 bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height, uint32_t fps) {
     if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, name, -1, s_mf.path, MAX_PATH) == 0) {
         NT_LOG_WARN("%s: not a UTF-8 path under %d characters", name, MAX_PATH);

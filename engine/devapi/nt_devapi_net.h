@@ -14,16 +14,21 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Default listen port. Override via env var: NT_DEVAPI_PORT (read by the host at startup). */
+/* The conventional listen port: the fallback a host passes to nt_devapi_net_port_from_env. */
 #ifndef NT_DEVAPI_DEFAULT_PORT
 #define NT_DEVAPI_DEFAULT_PORT 17890
 #endif
 
-/* Start the loopback (127.0.0.1 ONLY) TCP server: single client (the newest connection replaces it),
-   JSON-lines, non-blocking.
-   Returns false on socket/bind/listen failure — the port may legitimately be taken, so this
-   is an API-contract return, NOT an assert. Call nt_devapi_init first; pair with _stop. */
+/* Start the loopback (127.0.0.1 ONLY) TCP server on `port`: single client (the newest connection
+   replaces it), JSON-lines, non-blocking. The host picks the port (a fixed value, its CLI, or
+   nt_devapi_net_port_from_env), so each process can get its own.
+   Returns false (and logs why) on a socket/bind/listen failure — the port may legitimately be taken,
+   so this is an API-contract return, NOT an assert. Call nt_devapi_init first; pair with _stop. */
 bool nt_devapi_net_start(uint16_t port);
+
+/* Read the NT_DEVAPI_PORT env var into *port: `fallback` when it is unset or empty. Returns false (and
+   logs why) on a value that is not a port in 1..65535; *port is then unchanged. */
+bool nt_devapi_net_port_from_env(uint16_t fallback, uint16_t *port);
 
 /* Close the client + listen sockets and tear down platform networking (WSACleanup on Windows). */
 void nt_devapi_net_stop(void);
@@ -32,14 +37,5 @@ void nt_devapi_net_stop(void);
    elapses (bounded, not busy-spun). Returns true if a client is connected. The game wires this BEFORE
    its loop when the bot must push setup before frame 0; normal per-frame accept continues after it returns. */
 bool nt_devapi_net_wait_for_client(uint32_t timeout_ms);
-
-// #region test_access
-#ifdef NT_TEST_ACCESS
-/* Self-contained loopback backpressure check (socket code stays here, the platform boundary, so the
-   test driver is platform-agnostic). Returns 0, or the first failed step code: a large payload must
-   survive EWOULDBLOCK intact and a wedged peer must be dropped on a timeout, not busy-spun. */
-int nt_devapi_net_backpressure_selftest(void);
-#endif
-// #endregion
 
 #endif /* NT_DEVAPI_NET_H */

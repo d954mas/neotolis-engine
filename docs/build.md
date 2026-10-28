@@ -368,61 +368,8 @@ fields and copied game context survive with an empty log section.
 upload payloads, checks uploads before render begin and compares output pixels
 with recording off/on/full.
 
-The `devapi-chromium` Playwright project (`devapi.spec.ts`, `record.spec.ts`) serves
-`build/examples/devapi_host/wasm-debug`, built as on the CI web-smoke line (this reconfigures the
-shared wasm-debug cache):
-
-```bash
-emcmake cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
-cmake --build --preset wasm-debug --target devapi_host
-```
-
-CI also runs both specs against a `wasm-release` `devapi_host`, because that preset enables Closure over
-the `window.__devapi` bridge and the `NtRecorder` calls. `NT_DEVAPI_DIR` points the server at it;
-`NT_LOG_MIN_LEVEL=0` keeps the recorder INFO line that `record.spec.ts` reads:
-
-```bash
-emcmake cmake --preset wasm-release -B build/_cmake/wasm-release-devapi -DNT_LOG_MIN_LEVEL=0 -DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
-cmake --build build/_cmake/wasm-release-devapi --target devapi_host
-cd tests/browser && NT_DEVAPI_DIR=../../build/examples/devapi_host/wasm-release-devapi npx playwright test devapi.spec.ts record.spec.ts
-```
-
-`record.spec.ts` records offline (MANUAL, 360 steps at fps 30) and checks the downloaded MP4 with
-`tools/devapi/check_recording.py`: streams, frame rate and count, 48 kHz stereo audio as long as the
-video, flash/beep offset within a frame. That needs python (`$PYTHON`, else `python`/`python3`) and
-ffmpeg/ffprobe on `PATH` or in `FFMPEG_DIR`. A second test records in RUN at time scale 7, so a step
-exceeds the 100 ms drift bound, and fails on a drift WARN; it also checks `bad_params` and a cancelled
-`nt-recorder` event. Its step guard assumes a 60 Hz rAF (CI headless); a faster display fails it.
-`nt_recorder` is OFF in the push gate: the CI web-smoke `wasm-release` run links it under Closure.
-Native `test_recorder` covers frame selection and the audio stream.
-
-CI only compiles and links the Windows backend (`windows-recorder`). Check its behavior locally with a
-native `devapi_host` that links the RECORDER group (it draws a white flash while recording) and
-`tools/devapi/scenarios/record_demo.py`, which records a lockstep and a real-time clip and runs
-`check_recording.py` on each:
-
-```bash
-cmake --preset native-debug -B build/_cmake/native-record -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
-cmake --build build/_cmake/native-record --target devapi_host
-build/examples/devapi_host/native-record/devapi_host.exe &
-python tools/devapi/scenarios/record_demo.py --out build
-```
-
-Native capture runs live in CI `devapi-smoke`: `tools/devapi/scenarios/devapi_demo.py` and
-`capture_demo.py` launch a `devapi_host` built with the groups of that job. Locally build it in its own
-`-B` directory: the directory name is the preset name, and `native-debug` would overwrite the gate's
-engine libraries in `build/engine/native-debug`.
-
-```bash
-cmake --preset native-debug -B build/_cmake/devapi-smoke -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON -DNT_GFX_CAPTURE_ENABLED=ON
-cmake --build build/_cmake/devapi-smoke --target devapi_host
-python tools/devapi/scenarios/capture_demo.py --host-bin "$PWD/build/examples/devapi_host/devapi-smoke/devapi_host"
-```
-
-On Windows the binary is `devapi_host.exe`.
-
 Browser diagnostics use `tests/browser/diagnostics.spec.ts`. Set
-`NT_SHOWCASE_DIR` to the exact build, distinct `NT_SHOWCASE_PORT`/`NT_DEVAPI_PORT`,
+`NT_SHOWCASE_DIR` to the exact build, a distinct `NT_SHOWCASE_PORT`,
 `CI=1` to forbid server reuse, and matching
 `NT_DIAGNOSTICS_PRESET/LOG/UI/GPU/METRICS`. Debug and Release use timer values
 above 32 bits to exercise the 64-bit bridge. General browser smoke tests drive
@@ -465,6 +412,70 @@ python scripts/check_clay_arena.py <off-build-dir> <on-build-dir>
 Build `test_nt_ui_clay_debug_view` in both directories first, with identical
 capacities. Runtime behavior of disabled synthesis/debug-view features remains
 specified in the UI chapters linked above.
+
+### DevAPI scenarios
+
+`tools/devapi/scenarios/*.py` drive `examples/devapi_host` through one Python client on both targets.
+Run them from the repo root with `python -m`; `tools/devapi/launch.py` starts the host:
+
+- `--target native` (default) launches `--host-bin` (default
+  `build/examples/devapi_host/devapi-smoke/devapi_host`, built below) on a free loopback port passed as
+  `NT_DEVAPI_PORT`, with its directory as the working directory; `--port N` attaches to a running host
+  instead.
+- `--target web` serves `--web-dir` (default `build/examples/devapi_host/wasm-debug`) on a free loopback
+  port and drives it in headless Chromium through playwright-python:
+  `pip install -r tools/devapi/requirements-web.txt` then `python -m playwright install chromium`.
+- `--out DIR` receives artifacts (captures, recordings; default `build/devapi-out`).
+
+Exit 0 is a pass, 1 a failure, 2 a usage or launch error. There is no read timeout or retry: the caller's
+outer deadline bounds a run. `web_demo` is web-only (raw-bridge busy/reset, capture after WebGL context
+loss, takeover). `record_demo` needs the RECORDER group, and `capture_demo`, `web_demo` and the skeletal
+scripts need Pillow + numpy (`tools/devapi/requirements-capture.txt`).
+
+CI `devapi-smoke` builds the native host with every group except RECORDER (Linux has no recorder
+backend) and runs `devapi_demo`, `capture_demo`, `obs_demo`, `input_demo`, `time_render_demo`,
+`ui_demo` and `write_demo`. The skeletal scripts drive `skeletal_showcase` and run only by hand. Locally build it in its own `-B` directory: the
+directory name is the preset name, and `native-debug` would overwrite the gate's engine libraries in
+`build/engine/native-debug`. On Windows add `-DNT_DEVAPI_GROUP_RECORDER=ON` to run `record_demo`
+too, the only check of the Windows recorder's behavior (CI `windows-recorder` only builds it):
+
+```bash
+cmake --preset native-debug -B build/_cmake/devapi-smoke -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_INPUT=ON
+cmake --build build/_cmake/devapi-smoke --target devapi_host
+python -m tools.devapi.scenarios.capture_demo --host-bin "$PWD/build/examples/devapi_host/devapi-smoke/devapi_host"
+```
+
+On Windows the binary is `devapi_host.exe`.
+
+CI `web-smoke` builds a wasm-debug host with every group (this reconfigures the shared wasm-debug cache)
+and runs those seven scenarios plus `web_demo` and `record_demo` on it:
+
+```bash
+emcmake cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_INPUT=ON
+cmake --build --preset wasm-debug --target devapi_host
+python -m tools.devapi.scenarios.record_demo --target web --out build/devapi-out
+```
+
+It also builds a `wasm-release` host, because that preset enables Closure over the `window.__devapi`
+bridge and the `NtRecorder` calls, and runs the scenarios that reach that JS: `devapi_demo`, `web_demo`,
+`capture_demo` and `record_demo`. The preset keeps its WARN log floor and has no UI debug tools or
+introspect write, so this host builds only those scenarios' groups:
+
+```bash
+emcmake cmake --preset wasm-release -B build/_cmake/wasm-release-devapi -DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
+cmake --build build/_cmake/wasm-release-devapi --target devapi_host
+python -m tools.devapi.scenarios.record_demo --target web --web-dir build/examples/devapi_host/wasm-release-devapi --out build/devapi-out
+```
+
+`record_demo` records in RUN at time scale 7 and fps 50, so a step exceeds the 100 ms drift bound, and
+fails when `record.stop` reports `max_drift_ms` over 100; on web a listener takes that clip, and the
+lockstep download that follows proves nothing else downloaded. Native then records 4 s of RUN at
+fps 30 and checks that file with `check_recording.py --real-time`. It then records offline (MANUAL, 360
+steps at fps 30) and checks the MP4 with `tools/devapi/check_recording.py`: streams, frame rate and
+count, 48 kHz stereo audio as long as the video, flash/beep offset within a frame. That needs
+ffmpeg/ffprobe on `PATH` or in `FFMPEG_DIR`. `nt_recorder` is OFF in the push gate: the CI web-smoke
+`wasm-release` run links it under Closure. Native `test_recorder` covers frame selection and the audio
+stream.
 
 ## Troubleshooting
 

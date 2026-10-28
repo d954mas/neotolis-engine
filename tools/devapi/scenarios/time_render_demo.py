@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """DevAPI time/render demo — the example bot-driven workflow.
 
-Connects to a running examples/devapi_host over loopback TCP and drives the
+Connects to a running examples/devapi_host over its devapi transport (native or web) and drives the
 time/render/frame command group through three workflows, in order:
 
   1. pause -> step -> observe — pause the sim, switch to manual (lockstep) mode,
@@ -13,58 +13,19 @@ time/render/frame command group through three workflows, in order:
   3. render-off fast test — assert render.info reports {enabled:false, draw_calls:0},
      then restore: render ON + resume.
 
-Usage: python tools/devapi/scenarios/time_render_demo.py [--port N]
-  Port resolution: --port N  >  env NT_DEVAPI_PORT  >  default 17890.
-Returns exit 0 if every assertion passes, exit 1 on any failure (connect /
-assertion). Stdlib only (socket + json) — no pip deps.
+Usage: python -m tools.devapi.scenarios.time_render_demo [--target native|web] (options: tools/devapi/launch.py)
+Exit 0 pass, 1 failure, 2 usage / launch (tools/devapi/launch.py).
 """
-import os
 import sys
 
-# Allow running as a plain script by making the repo root importable, so the
-# absolute `tools.devapi.*` imports resolve (mirrors engine_probe.py).
-if __package__ in (None, ""):
-    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
-    from tools.devapi.client import DevApiClient, DevApiResultError
-    from tools.devapi.transport import DEFAULT_PORT, SocketTransport
-else:
-    from ..client import DevApiClient, DevApiResultError
-    from ..transport import DEFAULT_PORT, SocketTransport
+from .. import launch
+from ..client import DevApiClient
 
 # Lockstep-crunch frame budget — large enough to prove deterministic fast-forward.
 CRUNCH_FRAMES = 300
 
 
-def _parse_port(raw: str) -> int:
-    """int() + range-check; clean exit(2) on garbage instead of a raw traceback."""
-    try:
-        port = int(raw)
-    except ValueError:
-        print("error: --port must be an integer 1..65535", file=sys.stderr)
-        sys.exit(2)
-    if not (1 <= port <= 65535):
-        print("error: --port must be an integer 1..65535", file=sys.stderr)
-        sys.exit(2)
-    return port
-
-
-def resolve_port(argv) -> int:
-    """--port N (or positional) > env NT_DEVAPI_PORT > DEFAULT_PORT."""
-    for i, a in enumerate(argv):
-        if a == "--port" and i + 1 < len(argv):
-            return _parse_port(argv[i + 1])
-        if a.startswith("--port="):
-            return _parse_port(a.split("=", 1)[1])
-    env = os.environ.get("NT_DEVAPI_PORT")
-    if env:
-        return _parse_port(env)
-    for a in argv:
-        if a.isdigit():
-            return _parse_port(a)
-    return DEFAULT_PORT
-
-
-def run(client: DevApiClient) -> None:
+def run(client: DevApiClient, out_dir: str) -> None:
     """Drive the three workflows; raise AssertionError on any contract violation."""
     # 1. pause -> step -> observe.
     client.pause()
@@ -105,30 +66,5 @@ def run(client: DevApiClient) -> None:
     )
 
 
-def main(port: int) -> int:
-    transport = None
-    try:
-        transport = SocketTransport("127.0.0.1", port)
-        client = DevApiClient(transport)
-        run(client)
-        return 0
-    except AssertionError as exc:
-        print(f"FAIL: assertion: {exc}")
-        return 1
-    except (DevApiResultError, ValueError) as exc:
-        print(f"FAIL: protocol error: {exc}")
-        return 1
-    except (ConnectionError, TimeoutError, OSError) as exc:
-        print(f"FAIL: transport error talking to 127.0.0.1:{port}: {exc}")
-        return 1
-    finally:
-        if transport is not None:
-            transport.close()
-
-
 if __name__ == "__main__":
-    args = sys.argv[1:]
-    if "--help" in args or "-h" in args:
-        print(__doc__)
-        sys.exit(0)
-    sys.exit(main(resolve_port(args)))
+    sys.exit(launch.main(run))

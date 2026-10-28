@@ -44,7 +44,10 @@ globalThis['NtRecorder'] = (function () {
 
     function open(name, canvas, w, h, fps) {
         if (!probed || !profile || !acodec) {
-            if (!probed) { console.warn('nt_recorder: codec probe still running, start again'); }
+            console.warn(!probed ? 'nt_recorder: codec probe still running, start again'
+                         : typeof VideoEncoder === 'undefined' || typeof AudioEncoder === 'undefined'
+                             ? 'nt_recorder: no WebCodecs (needs a secure context: https or localhost)'
+                             : 'nt_recorder: no ' + (profile ? 'AAC or Opus' : 'H.264') + ' encoder in this browser');
             return false;
         }
         var mbs = Math.ceil(w / 16) * Math.ceil(h / 16);
@@ -163,5 +166,5 @@ globalThis['NtRecorder'] = (function () {
             .then(done);
     }
 
-    return { 'open': open, 'video': video, 'audio': audio, 'close': close };
+    return { 'ready': function () { return probed; }, 'open': open, 'video': video, 'audio': audio, 'close': close };
 })();

@@ -1,58 +1,33 @@
 #!/usr/bin/env python3
-"""DevAPI capture demo — the live-socket UAT for the frame-capture group.
+"""DevAPI capture demo — the live-host UAT for the frame-capture group.
 
-Exercises capture.frame / capture.region end-to-end against a real running examples/devapi_host over
-loopback TCP. Capture is deferred to the rendered frame, which only a live socket + real GL context drives.
+Exercises capture.frame / capture.region end-to-end against a real running examples/devapi_host, native
+or web. Capture is deferred to the rendered frame, which only a live host + real GL context drives.
 The host clears a known two-tone pattern; this UAT checks a capture in RUN, then with the sim frozen in
 MANUAL the PNG decodes, the pattern's orientation and channel order, region == the same crop of the full
 frame, scale dims, bad_params over the wire, and that capturing never advances the frame.
 
-By default it launches its own host subprocess and tears it down. --no-launch attaches to a running
-examples/devapi_host (its pattern is probed); the host returns to RUN when the client leaves.
+With --port it attaches to a running examples/devapi_host (its pattern is probed); the host returns to
+RUN when the client leaves. The decoded PNGs go to the --out directory.
 
-Usage: python tools/devapi/scenarios/capture_demo.py [--port N] [--no-launch] [--host-bin PATH] [--save DIR]
-  Port resolution: --port N  >  env NT_DEVAPI_PORT  >  default 17890.
-Exit 0 if every assertion passes, 1 on any failure (connect / assertion / protocol),
-2 on a usage / launch error.
+Usage: python -m tools.devapi.scenarios.capture_demo [--target native|web] (options: tools/devapi/launch.py)
+Exit 0 pass, 1 failure, 2 usage / launch (tools/devapi/launch.py).
 
 Pillow + numpy are imported lazily inside the capture branch via tools/devapi/pixel_health.py — the
 harness core stays stdlib-only.
 """
 import os
-import subprocess
 import sys
 
-# Allow running as a plain script by making the repo root importable, so the
-# absolute `tools.devapi.*` imports resolve (mirrors obs_demo.py).
-if __package__ in (None, ""):
-    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
-    from tools.devapi.client import DevApiClient, DevApiResultError
-    from tools.devapi.scenarios.devapi_demo import _connect_with_retry, _find_host_bin, resolve_port
-    from tools.devapi.transport import SocketTransport
-else:
-    from ..client import DevApiClient, DevApiResultError
-    from ..transport import SocketTransport
-    from .devapi_demo import _connect_with_retry, _find_host_bin, resolve_port
+from .. import launch
+from ..client import DevApiClient, DevApiResultError
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-
-
-def _save_dir(argv):
-    """--save DIR -> save decoded PNGs there for human viewing (optional, tooling-side write only)."""
-    for i, a in enumerate(argv):
-        if a == "--save" and i + 1 < len(argv):
-            return argv[i + 1]
-        if a.startswith("--save="):
-            return a.split("=", 1)[1]
-    return None
-
-
-def run(client: DevApiClient, save_dir=None) -> None:
+def run(client: DevApiClient, out_dir: str) -> None:
     """Drive every capture surface; raise AssertionError on any contract violation.
 
     pixel_health (Pillow + numpy) is imported HERE, lazily — the harness core never pulls it.
     """
-    from tools.devapi import pixel_health  # capture-scoped import: lazy, inside the capture branch.
+    from .. import pixel_health  # capture-scoped import: lazy, inside the capture branch.
 
     # Read the live framebuffer dims so expected sizes are derived, never pinned.
     view = client.result("view")
@@ -76,9 +51,7 @@ def run(client: DevApiClient, save_dir=None) -> None:
     assert fg[0] > fg[2], f"capture.frame: box pixel {fg} is not red-dominant orange (R/B swap or Y flip?)"
     assert below[2] > below[0], f"capture.frame: pixel below the box {below} is not the blue background (Y flip?)"
     assert right[2] > right[0], f"capture.frame: pixel right of the box {right} is not the blue background (X mirror?)"
-    if save_dir:
-        os.makedirs(save_dir, exist_ok=True)
-        img.save(os.path.join(save_dir, "capture_frame.png"))
+    img.save(os.path.join(out_dir, "capture_frame.png"))
     print(f"PASS[1/5] capture.frame: {fb_w}x{fb_h} PNG, pattern orientation and channel order hold.")
 
     # 2. capture.region equals the same crop of the full frame. A non-zero y catches a wrong gl_y conversion.
@@ -87,8 +60,7 @@ def run(client: DevApiClient, save_dir=None) -> None:
     assert region.tobytes() == img.crop((rx, ry, rx + rw, ry + rh)).tobytes(), (
         f"capture.region {{x:{rx},y:{ry},w:{rw},h:{rh}}} differs from the same crop of capture.frame"
     )
-    if save_dir:
-        region.save(os.path.join(save_dir, "capture_region.png"))
+    region.save(os.path.join(out_dir, "capture_region.png"))
     print(f"PASS[2/5] capture.region {{x:{rx},y:{ry},w:{rw},h:{rh}}} equals the full-frame crop.")
 
     # 3. scale 2 and 4 on a rect both divide (any framebuffer size): post-scale dims.
@@ -117,54 +89,8 @@ def run(client: DevApiClient, save_dir=None) -> None:
     assert frame_after == frame_before, f"capture advanced the MANUAL sim: frame {frame_before} -> {frame_after}"
     print(f"PASS[5/5] MANUAL: frame.current stayed {frame_before} across every capture.")
 
-    print("PASS: capture.* end-to-end over the socket — deferred capture + region + scale + bad_params + pixel-health all machine-asserted.")
-
-
-def main(argv) -> int:
-    no_launch = "--no-launch" in argv
-    port = resolve_port(argv)
-    save_dir = _save_dir(argv)
-    proc = None
-    transport = None
-    try:
-        if not no_launch:
-            host_bin = _find_host_bin(argv)
-            if not os.path.isfile(host_bin):
-                print(f"error: devapi_host not found at {host_bin}\n"
-                      f"  build it as docs/build.md describes for capture_demo.py,\n"
-                      f"  or attach to a running host with --no-launch --port N", file=sys.stderr)
-                return 2
-            env = dict(os.environ, NT_DEVAPI_PORT=str(port))
-            proc = subprocess.Popen([host_bin], cwd=REPO_ROOT, env=env)
-            transport = _connect_with_retry(port)
-        else:
-            transport = SocketTransport("127.0.0.1", port)
-        client = DevApiClient(transport)
-        run(client, save_dir)
-        return 0
-    except AssertionError as exc:
-        print(f"FAIL: assertion: {exc}")
-        return 1
-    except (DevApiResultError, ValueError) as exc:
-        print(f"FAIL: protocol error: {exc}")
-        return 1
-    except (ConnectionError, TimeoutError, OSError) as exc:
-        print(f"FAIL: transport error talking to 127.0.0.1:{port}: {exc}")
-        return 1
-    finally:
-        if transport is not None:
-            transport.close()
-        if proc is not None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+    print("PASS: capture.* end-to-end over the transport — deferred capture + region + scale + bad_params + pixel-health all machine-asserted.")
 
 
 if __name__ == "__main__":
-    args = sys.argv[1:]
-    if "--help" in args or "-h" in args:
-        print(__doc__)
-        sys.exit(0)
-    sys.exit(main(args))
+    sys.exit(launch.main(run))
