@@ -310,10 +310,12 @@ int main(void) {
         goto shutdown_base;
     }
 #ifndef __EMSCRIPTEN__
-    /* Native: start the loopback TCP transport (port from NT_DEVAPI_PORT). Placed early to fail fast on
-       a taken port before building the UI/entity surface; order vs register_default no longer matters —
-       net_poll runs in the transport-poll phase, ahead of the input tick. Web has no listener. */
-    if (!nt_devapi_net_start()) {
+    /* Native: start the loopback TCP transport (port from NT_DEVAPI_PORT, so the launcher gives each
+       host its own). Placed early to fail fast on a taken port before building the UI/entity surface;
+       order vs register_default no longer matters — net_poll runs in the transport-poll phase, ahead of
+       the input tick. Web has no listener. */
+    uint16_t devapi_port = 0;
+    if (!nt_devapi_net_port_from_env(NT_DEVAPI_DEFAULT_PORT, &devapi_port) || !nt_devapi_net_start(devapi_port)) {
         printf("[devapi_host] failed to start the devapi TCP server (see the devapi_net log)\n");
         goto shutdown_devapi;
     }

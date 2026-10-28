@@ -9,7 +9,7 @@
 #include <string.h>
 
 /* clang-format off */
-// NOLINTNEXTLINE(bugprone-suspicious-include): drives the static send_all / net_listen directly.
+// NOLINTNEXTLINE(bugprone-suspicious-include): drives the static send_all directly.
 #include "devapi/nt_devapi_net.c"
 #include "unity.h"
 /* clang-format on */
@@ -183,7 +183,7 @@ void test_wedged_peer_times_out(void) {
 /* Listens on an ephemeral port (no clash with a running host) and returns it. */
 static uint16_t listen_ephemeral(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
-    TEST_ASSERT_TRUE(net_listen(0));
+    TEST_ASSERT_TRUE(nt_devapi_net_start(0));
     struct sockaddr_in addr;
     nt_socklen_t alen = (nt_socklen_t)sizeof addr;
     TEST_ASSERT_EQUAL_INT(0, getsockname(s_listen, (struct sockaddr *)&addr, &alen));
@@ -221,51 +221,29 @@ static void set_port_env(const char *value) {
 #endif
 }
 
-/* A port free right now: a value built from it can only be refused by the parse, never by bind. */
-static uint16_t free_port(void) {
-    nt_sock_t s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    TEST_ASSERT_TRUE(s != NT_INVALID_SOCK);
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof addr);
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    nt_socklen_t alen = (nt_socklen_t)sizeof addr;
-    int rc = bind(s, (struct sockaddr *)&addr, alen);
-    rc = rc == 0 ? getsockname(s, (struct sockaddr *)&addr, &alen) : rc;
-    nt_close_sock(s);
-    TEST_ASSERT_EQUAL_INT(0, rc);
-    return ntohs(addr.sin_port);
-}
-
-/* A value that is not a port in 1..65535 refuses to start (no fallback to the default port). */
-void test_start_rejects_a_bad_port_env(void) {
-    char junk[16];
-    (void)snprintf(junk, sizeof junk, "%ux", (unsigned)free_port());
-    const char *const bad[] = {"abc", "0", "65536", junk, "-1"};
-    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
-    bool started = false;
-    for (size_t i = 0; i < sizeof bad / sizeof bad[0] && !started; i++) {
-        set_port_env(bad[i]);
-        started = nt_devapi_net_start();
+/* A value that is not a port in 1..65535 is refused (no fallback) and leaves *port unchanged. */
+void test_port_env_rejects_a_bad_value(void) {
+    static const char *const k_bad[] = {"abc", "0", "65536", "80x", "-1"};
+    bool accepted = false;
+    uint16_t port = 7;
+    for (size_t i = 0; i < sizeof k_bad / sizeof k_bad[0] && !accepted; i++) {
+        set_port_env(k_bad[i]);
+        accepted = nt_devapi_net_port_from_env(17890, &port);
     }
     set_port_env("");
-    nt_devapi_shutdown();
-    TEST_ASSERT_FALSE(started);
+    TEST_ASSERT_FALSE(accepted);
+    TEST_ASSERT_EQUAL_UINT16(7, port);
 }
 
-void test_start_listens_on_the_env_port(void) {
-    uint16_t port = free_port();
-    char value[8];
-    (void)snprintf(value, sizeof value, "%u", (unsigned)port);
-    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
-    set_port_env(value);
-    bool started = nt_devapi_net_start();
+void test_port_env_reads_the_value_or_the_fallback(void) {
+    uint16_t port = 0;
+    set_port_env("4321");
+    bool read = nt_devapi_net_port_from_env(17890, &port);
     set_port_env("");
-    TEST_ASSERT_TRUE(started);
-    struct sockaddr_in addr;
-    nt_socklen_t alen = (nt_socklen_t)sizeof addr;
-    TEST_ASSERT_EQUAL_INT(0, getsockname(s_listen, (struct sockaddr *)&addr, &alen));
-    TEST_ASSERT_EQUAL_UINT16(port, ntohs(addr.sin_port));
+    TEST_ASSERT_TRUE(read);
+    TEST_ASSERT_EQUAL_UINT16(4321, port);
+    TEST_ASSERT_TRUE(nt_devapi_net_port_from_env(17890, &port));
+    TEST_ASSERT_EQUAL_UINT16(17890, port);
 }
 
 int main(void) {
@@ -274,7 +252,7 @@ int main(void) {
     RUN_TEST(test_wedged_peer_times_out);
     RUN_TEST(test_wait_for_client_times_out_without_client);
     RUN_TEST(test_wait_for_client_returns_on_connect);
-    RUN_TEST(test_start_rejects_a_bad_port_env);
-    RUN_TEST(test_start_listens_on_the_env_port);
+    RUN_TEST(test_port_env_rejects_a_bad_value);
+    RUN_TEST(test_port_env_reads_the_value_or_the_fallback);
     return UNITY_END();
 }

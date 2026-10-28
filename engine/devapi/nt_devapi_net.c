@@ -214,7 +214,7 @@ static bool send_line(const char *resp) {
 // #endregion
 
 // #region start / stop
-static bool net_listen(uint16_t port) {
+bool nt_devapi_net_start(uint16_t port) {
     NT_ASSERT(s_listen == NT_INVALID_SOCK); /* start is single-shot until stop. */
 #ifdef _WIN32
     WSADATA wsa;
@@ -267,26 +267,24 @@ static bool net_listen(uint16_t port) {
     /* recv + deferred drain run in the transport-poll phase, before the input tick, so a line received
        this tick is scheduled before the tick reads it. */
     nt_devapi_set_transport_poll(net_poll);
+    NT_LOG_INFO("listening on 127.0.0.1:%u", (unsigned)port);
     return true;
 }
 
-bool nt_devapi_net_start(void) {
-    uint16_t port = (uint16_t)NT_DEVAPI_DEFAULT_PORT;
-    // NOLINTNEXTLINE(concurrency-mt-unsafe): called once at startup, before any thread reads the env
+bool nt_devapi_net_port_from_env(uint16_t fallback, uint16_t *port) {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): called at startup, before any thread reads the env
     const char *env = getenv("NT_DEVAPI_PORT");
-    if (env != NULL && env[0] != '\0') {
-        char *end = NULL;
-        long v = strtol(env, &end, 10);
-        if (end == env || *end != '\0' || v < 1 || v > 65535) {
-            NT_LOG_ERROR("NT_DEVAPI_PORT='%s' is not a port in 1..65535", env);
-            return false;
-        }
-        port = (uint16_t)v;
+    if (env == NULL || env[0] == '\0') {
+        *port = fallback;
+        return true;
     }
-    if (!net_listen(port)) {
+    char *end = NULL;
+    long v = strtol(env, &end, 10);
+    if (end == env || *end != '\0' || v < 1 || v > 65535) {
+        NT_LOG_ERROR("NT_DEVAPI_PORT='%s' is not a port in 1..65535", env);
         return false;
     }
-    NT_LOG_INFO("listening on 127.0.0.1:%u", (unsigned)port);
+    *port = (uint16_t)v;
     return true;
 }
 
