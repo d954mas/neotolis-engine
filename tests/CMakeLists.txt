@@ -959,6 +959,9 @@ if(NOT EMSCRIPTEN)
         if(NT_DEVAPI_GROUP_CAPTURE)
             list(APPEND _disc_group_provider_libs nt_fpng)
         endif()
+        if(NT_DEVAPI_GROUP_GFX)
+            list(APPEND _disc_group_provider_libs nt_gfx_capture_text)
+        endif()
         target_link_libraries(test_devapi_discovery PRIVATE
             nt_devapi_default
             $<TARGET_NAME_IF_EXISTS:nt_devapi_core>
@@ -968,6 +971,7 @@ if(NOT EMSCRIPTEN)
             $<TARGET_NAME_IF_EXISTS:nt_devapi_obs>
             $<TARGET_NAME_IF_EXISTS:nt_devapi_entity_write>
             $<TARGET_NAME_IF_EXISTS:nt_devapi_capture>
+            $<TARGET_NAME_IF_EXISTS:nt_devapi_gfx>
             nt_devapi cjson
             nt_ui_stub nt_window_stub nt_app_stub nt_gfx_fake nt_basisu_transcoder_stub nt_input_stub
             ${_disc_group_provider_libs}
@@ -1062,6 +1066,19 @@ if(NOT EMSCRIPTEN)
                 _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1
             )
             nt_setup_test_target(test_devapi_capture)
+        endif()
+
+        # gfx group (gfx.record / gfx.frames / gfx.read) via submit() over nt_gfx_fake; the TU includes
+        # nt_devapi_gfx.c with a small ring, so the group lib is not linked.
+        if(NT_DEVAPI_GROUP_GFX)
+            add_executable(test_devapi_gfx unit/test_devapi_gfx.c)
+            target_link_libraries(test_devapi_gfx PRIVATE
+                nt_devapi cjson nt_window_stub nt_app_stub nt_gfx_capture_text
+                nt_gfx_fake nt_basisu_transcoder_stub nt_core nt_log unity nt_meshwire_stub)
+            target_compile_definitions(test_devapi_gfx PRIVATE
+                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_GROUP_GFX=1 NT_LOG_DOMAIN_DEFAULT="devapi"
+            )
+            nt_setup_test_target(test_devapi_gfx)
         endif()
     endif()
 

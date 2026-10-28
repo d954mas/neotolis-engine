@@ -360,6 +360,28 @@ A bot / AI / smoke-test grabs a **rendered frame** over devapi and verifies it �
 
 **OFF semantics — dev-only, compiled out.** The whole group is gated by `NT_DEVAPI_GROUP_CAPTURE` (default **OFF**, opt-in). When off, `nt_devapi_capture.c` is not compiled, the commands are absent from the registry (`unknown_method`) and discovery, and the vendored fpng encoder is not linked into the binary (zero release delta); as with all of devapi it also vanishes when `NT_DEVAPI_ENABLED` is OFF. `nt_fpng` is built `EXCLUDE_FROM_ALL`, so it compiles only when a capture-enabled target links it.
 
+## Gfx frame recording (devapi `gfx.*`)
+
+A bot, agent or developer turns recording on and reads any recent frame as [capture text](../render/architecture.md#capture-text) at once. The group keeps the history; gfx only records (its two capture arrays let every frame record).
+
+**Recording is a mode.** `gfx.record {enabled:true}` clears the ring and records every frame from the next one until recording turns off; `{enabled:false}` stops and keeps the ring, so its frames stay readable. Game code switches the same mode with `nt_devapi_gfx_record(bool)` (declared in `nt_devapi_groups.h` under `NT_DEVAPI_GROUP_GFX`), valid anywhere in a frame. A frame already open when recording turns on is never stored, and turning it off stores no further frame (the frame recording at that moment and one already requested finish unstored). A client reset turns recording off and keeps the ring. Recording works with rendering disabled, because frames still begin and end; it never changes simulation time, pass order, draw scheduling or renderer state.
+
+**Ring.** The group stores frames in static storage: `NT_DEVAPI_GFX_RING_RECORDS` records (default 163840, ~16 MiB) and `NT_DEVAPI_GFX_RING_FRAMES` frames (default 256), both `-D` overridable. A frame is stored contiguously, only its `count` records; the oldest frames are evicted when the frame ring is full or a new frame overlaps them. The stored frames are always a gapless run of gfx sequences. A frame larger than the record ring asserts (a configuration error: `capture_capacity` above the ring). A frame whose capture overflowed is stored with `overflow` set, and the first one logs one WARN per process naming `capture_capacity`.
+
+**Timing.** `nt_devapi_update` runs the group's frame hook before the transport: it stores the frame `nt_gfx_begin_frame` just finalized, tags it with `sim_frame` (`g_nt_app.frame` read while it recorded) and whether the simulation advanced in it, and requests the next frame. The host calls `nt_devapi_update` once per frame after `nt_gfx_begin_frame` (asserted while recording). On native a command received in that update already sees the stored frame. A `time.step` reply leaves before its frame renders, and that frame is finalized at the next `begin_frame`; on web a submit between frames can arrive first and gets `frame_not_ready`, so a client retries. The group needs the real gfx with a nonzero `capture_capacity` (`devapi_host` sets 16384 when the group is built); the stub is unsupported.
+
+**The command group** (all reply immediately):
+
+| Command | Params | Result | Kind |
+|---|---|---|---|
+| `gfx.record` | `{enabled}` | `{recording}` | turn recording on (clears the ring) or off (keeps it) |
+| `gfx.frames` | `{}` | `{recording, frames:[{sequence,sim_frame,advanced,records,overflow}]}` | **READ** the stored frames, oldest first |
+| `gfx.read` | `{sequence?, sim_frame?}` | `{sequence, sim_frame, text}` | **READ** one stored frame's capture text: the newest with no param; by gfx `sequence`; or by `sim_frame`, the frame in which the simulation advanced to it (idle frames of the same sim frame never match) |
+
+`gfx.read` takes at most one param, an exact non-negative integer (else `bad_params`). A frame newer than the newest stored while recording (a later sequence, a sim frame not reached yet or still recording, any frame of an empty ring) is `frame_not_ready`; anything else not stored (evicted, before recording, never recorded) is `unknown_frame`. Sim frames compare modularly, like the frame gates. To keep the frames before a bug, turn recording off, list them with `gfx.frames` and read each by sequence; the client saves them, the engine writes no files. Group codes: `frame_not_ready`, `unknown_frame`.
+
+**OFF semantics.** The group is gated by `NT_DEVAPI_GROUP_GFX` (default OFF) and requires `NT_GFX_CAPTURE_ENABLED` (a configure-time `FATAL_ERROR`). When off, `nt_devapi_gfx.c` is not compiled, the commands are absent from the registry and discovery, and `nt_gfx_capture_text` is not linked; it vanishes with the rest of devapi when `NT_DEVAPI_ENABLED` is OFF.
+
 ## Override-able compile-time options
 
 The engine follows "use only what you need" — subsystems use CMake options or

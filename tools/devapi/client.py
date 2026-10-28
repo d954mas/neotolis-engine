@@ -8,6 +8,7 @@ A request waits as long as the engine needs; the caller's outer deadline bounds 
 Stdlib only (json + socket) — no pip deps. Python 3.8+.
 """
 import json
+import time
 from typing import Any, Dict, Optional
 
 from .transport import Transport
@@ -241,6 +242,38 @@ class DevApiClient:
         if scale is not None:
             params["scale"] = scale
         return self.result("capture.region", params)
+
+    # #endregion
+
+    # #region gfx.* wrappers — gfx command recording; every frame records into the host's ring while on.
+    def gfx_record(self, enabled: bool) -> Dict[str, Any]:
+        """Turn gfx recording on (clears the ring) or off (keeps it). Result: {recording}."""
+        return self.result("gfx.record", {"enabled": enabled})
+
+    def gfx_frames(self) -> Dict[str, Any]:
+        """List the stored frames, oldest first. Result: {recording, frames:[{sequence,sim_frame,advanced,records,overflow}]}."""
+        return self.result("gfx.frames")
+
+    def gfx_read(self, sequence: Optional[int] = None, sim_frame: Optional[int] = None, timeout: float = 1.0) -> Dict[str, Any]:
+        """Read one stored frame's capture text. Result: {sequence, sim_frame, text}.
+
+        No argument reads the newest frame; `sim_frame` reads the frame where the sim advanced to it (the
+        frame of a step). A step replies before its frame finishes, so frame_not_ready is retried until
+        `timeout` seconds pass; any other error raises at once.
+        """
+        params: Dict[str, Any] = {}
+        if sequence is not None:
+            params["sequence"] = sequence
+        if sim_frame is not None:
+            params["sim_frame"] = sim_frame
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                return self.result("gfx.read", params)
+            except DevApiResultError as exc:
+                if "frame_not_ready" not in str(exc) or time.monotonic() >= deadline:
+                    raise
+            time.sleep(0.005)
 
     # #endregion
 

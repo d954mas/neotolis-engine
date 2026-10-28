@@ -94,6 +94,7 @@ is no longer a valid configuration.
 | `NT_FONT_EMBOLDEN_ENABLED` | OFF | Explicit opt-in, including Debug. |
 | `NT_UI_CLAY_DEBUG_VIEW` | OFF | Explicit opt-in, independent of the Neotolis inspector. |
 | `NT_DEVAPI_ENABLED` | OFF | Group switches are dormant while the master gate is OFF. |
+| `NT_DEVAPI_GROUP_GFX` | OFF | Gfx command recording over DevAPI (`gfx.*`); requires `NT_GFX_CAPTURE_ENABLED`. Ring sizes `NT_DEVAPI_GFX_RING_RECORDS`/`_FRAMES` are `-D` defines; see [Gfx frame recording](spec/debug/logging-errors-debugging.md#gfx-frame-recording-devapi-gfx). |
 | `NT_SKIP_EXAMPLE_PACKS` | Empty | Example pack generation to skip, such as `sponza`. |
 | `NT_BASISU_HAS_ETC1S` | ON | Basis ETC1S: the builder emits it, the runtime decodes it. See [Basis Universal admission](#basis-universal-admission). |
 | `NT_BASISU_HAS_UASTC` | ON | Basis UASTC LDR, same contract. Both codecs OFF is a configure error. |
@@ -434,13 +435,13 @@ scripts need Pillow + numpy (`tools/devapi/requirements-capture.txt`).
 
 CI `devapi-smoke` builds the native host with every group except RECORDER (Linux has no recorder
 backend) and runs `devapi_demo`, `capture_demo`, `obs_demo`, `input_demo`, `time_render_demo`,
-`ui_demo` and `write_demo`. The skeletal scripts drive `skeletal_showcase` and run only by hand. Locally build it in its own `-B` directory: the
+`ui_demo`, `write_demo` and `gfx_demo`. The skeletal scripts drive `skeletal_showcase` and run only by hand. Locally build it in its own `-B` directory: the
 directory name is the preset name, and `native-debug` would overwrite the gate's engine libraries in
 `build/engine/native-debug`. On Windows add `-DNT_DEVAPI_GROUP_RECORDER=ON` to run `record_demo`
 too, the only check of the Windows recorder's behavior (CI `windows-recorder` only builds it):
 
 ```bash
-cmake --preset native-debug -B build/_cmake/devapi-smoke -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_INPUT=ON
+cmake --preset native-debug -B build/_cmake/devapi-smoke -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_GFX=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_INPUT=ON
 cmake --build build/_cmake/devapi-smoke --target devapi_host
 python -m tools.devapi.scenarios.capture_demo --host-bin "$PWD/build/examples/devapi_host/devapi-smoke/devapi_host"
 ```
@@ -448,10 +449,10 @@ python -m tools.devapi.scenarios.capture_demo --host-bin "$PWD/build/examples/de
 On Windows the binary is `devapi_host.exe`.
 
 CI `web-smoke` builds a wasm-debug host with every group (this reconfigures the shared wasm-debug cache)
-and runs those seven scenarios plus `web_demo` and `record_demo` on it:
+and runs those eight scenarios plus `web_demo` and `record_demo` on it:
 
 ```bash
-emcmake cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_INPUT=ON
+emcmake cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_GFX=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_INPUT=ON
 cmake --build --preset wasm-debug --target devapi_host
 python -m tools.devapi.scenarios.record_demo --target web --out build/devapi-out
 ```

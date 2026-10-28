@@ -1,6 +1,8 @@
 #ifndef NT_DEVAPI_GROUPS_H
 #define NT_DEVAPI_GROUPS_H
 
+#include <stdbool.h>
+
 /* Host-facing group registration. The engine is code-first: nt_devapi_init() builds only the
    framework, then a host composes its command surface by registering the groups it wants (explicit
    over implicit — no hidden auto-wiring). Call these AFTER nt_devapi_init(). A host that registers
@@ -25,5 +27,12 @@ void nt_devapi_register_obs(void);
 void nt_devapi_register_entity_write(void);
 void nt_devapi_register_capture(void);
 void nt_devapi_register_recorder(void);
+void nt_devapi_register_gfx(void);
+
+#ifdef NT_DEVAPI_GROUP_GFX
+/* Game switch of the gfx group's recording mode, the same as gfx.record: on clears the ring and records
+   every frame from the next one; off stops and keeps the ring. Valid anywhere in a frame. */
+void nt_devapi_gfx_record(bool enabled);
+#endif
 
 #endif /* NT_DEVAPI_GROUPS_H */

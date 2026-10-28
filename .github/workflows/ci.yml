@@ -408,7 +408,7 @@ jobs:
 
       - name: Build native debug (FULL asserts, devapi ON)
         run: |
-          cmake --preset native-debug -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS" -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_CAPTURE=ON
+          cmake --preset native-debug -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS" -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_GFX=ON
           cmake --build --preset native-debug
           test -f build/engine/native-debug/libnt_core.a
           test -f build/engine/native-debug/libnt_log.a
@@ -523,7 +523,7 @@ jobs:
 
       # devapi groups ON so every devapi TU is in compile_commands.json with its real flags.
       - name: Configure
-        run: cmake --preset native-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_CAPTURE=ON
+        run: cmake --preset native-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_GFX=ON
 
       # The registration gate reads this job's compile DB / CTestTestfiles (devapi-gated tests visible).
       - name: Run CRT-pin, GL-funnel, test-registration and check-script gates
@@ -570,7 +570,7 @@ jobs:
       # UI debug tools, introspect write, the log ring and metrics that UI/ENTITY_WRITE/OBS need).
       - name: Build devapi host
         run: |
-          cmake --preset native-debug -B build/_cmake/devapi-smoke -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS" -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_INPUT=ON
+          cmake --preset native-debug -B build/_cmake/devapi-smoke -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS" -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_GFX=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_INPUT=ON
           cmake --build build/_cmake/devapi-smoke --target devapi_host
 
       # Each scenario launches its own host on a free port (tools/devapi/launch.py); xvfb-run supplies the
@@ -580,7 +580,7 @@ jobs:
         timeout-minutes: 10
         run: |
           rc=0
-          for s in devapi_demo capture_demo obs_demo input_demo time_render_demo ui_demo write_demo; do
+          for s in devapi_demo capture_demo obs_demo input_demo time_render_demo ui_demo write_demo gfx_demo; do
             echo "::group::$s"
             xvfb-run -a python3 -m tools.devapi.scenarios.$s --host-bin "$PWD/build/examples/devapi_host/devapi-smoke/devapi_host" --out build/devapi-out || { echo "::error::$s failed"; rc=1; }
             echo "::endgroup::"
@@ -603,7 +603,7 @@ jobs:
 
       - name: Build devapi_host wasm (debug, every group)
         run: |
-          emcmake cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_INPUT=ON
+          emcmake cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_GFX=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_INPUT=ON
           cmake --build --preset wasm-debug --target devapi_host
 
       # The wasm-release preset enables Closure over the window.__devapi bridge and the recorder's
@@ -629,7 +629,7 @@ jobs:
         timeout-minutes: 15
         run: |
           rc=0
-          for s in devapi_demo web_demo capture_demo obs_demo input_demo time_render_demo ui_demo write_demo record_demo; do
+          for s in devapi_demo web_demo capture_demo obs_demo input_demo time_render_demo ui_demo write_demo record_demo gfx_demo; do
             echo "::group::$s"
             python3 -m tools.devapi.scenarios.$s --target web --out build/devapi-out || { echo "::error::$s failed"; rc=1; }
             echo "::endgroup::"

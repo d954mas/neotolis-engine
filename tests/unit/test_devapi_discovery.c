@@ -185,6 +185,11 @@ static void test_endpoints_lists_compiled_groups(void) {
 #else
     expect_listed(commands, "capture.frame", false);
 #endif
+#ifdef NT_DEVAPI_GROUP_GFX
+    expect_listed(commands, "gfx.read", true);
+#else
+    expect_listed(commands, "gfx.read", false);
+#endif
     cJSON_Delete(root);
 }
 

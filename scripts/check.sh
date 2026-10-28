@@ -120,6 +120,7 @@ TIDY_CI_FLAGS=(
     -DNT_DEVAPI_GROUP_OBS=ON
     -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON
     -DNT_DEVAPI_GROUP_CAPTURE=ON
+    -DNT_DEVAPI_GROUP_GFX=ON
 )
 ensure_tidy_ci() {
     local db="$TIDY_CI_DIR/compile_commands.json"

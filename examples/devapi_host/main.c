@@ -296,6 +296,9 @@ int main(void) {
     nt_input_init();
     /* A real GL context so capture and the recorder read a non-blank frame. */
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+#ifdef NT_DEVAPI_GROUP_GFX
+    gfx_desc.capture_capacity = 16384; /* gfx.record: two arrays of this many records */
+#endif
     nt_gfx_init(&gfx_desc);
 
     /* Obs wiring: host pushes frames into nt_metrics; the log ring captures nt_log_write for log.tail.
