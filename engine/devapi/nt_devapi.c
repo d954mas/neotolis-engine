@@ -47,14 +47,15 @@ void nt_devapi_register(const nt_devapi_command *cmds, size_t count, void *user_
 // #endregion
 
 // #region lifecycle hooks
-/* Two ordered phases run every update: the transport poll (recv + enqueue) before the tick (the input
-   schedule release), so a line received this tick is scheduled before the tick reads it, whatever the
-   registration order. One slot each: native net is the only polling transport, input the only ticker.
-   Reset hooks fire on a client drop. */
+/* Three ordered phases run every update: the frame hook (the gfx group stores the frame begin_frame just
+   finalized) before the transport poll (recv + enqueue), so a command received this tick sees that frame;
+   then the tick (the input schedule release), so a line received this tick is scheduled before the tick
+   reads it, whatever the registration order. One slot each. Reset hooks fire on a client drop. */
 #ifndef NT_DEVAPI_MAX_RESET_HOOKS
 #define NT_DEVAPI_MAX_RESET_HOOKS 8
 #endif
 
+static nt_devapi_hook_fn s_frame_hook;
 static nt_devapi_hook_fn s_transport_hook;
 static nt_devapi_hook_fn s_tick_hook;
 static nt_devapi_hook_fn s_reset_hooks[NT_DEVAPI_MAX_RESET_HOOKS];
@@ -64,6 +65,11 @@ static int s_reset_count;
 void nt_devapi_set_transport_poll(nt_devapi_hook_fn fn) {
     NT_ASSERT(fn != NULL && (s_transport_hook == NULL || s_transport_hook == fn));
     s_transport_hook = fn;
+}
+
+void nt_devapi_set_frame_hook(nt_devapi_hook_fn fn) {
+    NT_ASSERT(fn != NULL && s_frame_hook == NULL);
+    s_frame_hook = fn;
 }
 
 void nt_devapi_set_tick(nt_devapi_hook_fn fn) {
@@ -249,6 +255,7 @@ nt_result_t nt_devapi_init(void) {
     }
     s_count = 0;
     s_transport_hook = NULL; /* groups re-register their lifecycle hooks when a host registers them. */
+    s_frame_hook = NULL;
     s_tick_hook = NULL;
     s_reset_count = 0;
     s_initialized = true;
@@ -261,6 +268,7 @@ nt_result_t nt_devapi_init(void) {
 void nt_devapi_shutdown(void) {
     s_count = 0;
     s_transport_hook = NULL; /* drop group hooks so init->shutdown->init re-registers cleanly. */
+    s_frame_hook = NULL;
     s_tick_hook = NULL;
     s_reset_count = 0;
     cJSON_free(s_resp);
@@ -535,10 +543,13 @@ const char *nt_devapi_poll_response(void) {
     return out;
 }
 
-/* Core per-tick entry: resolves the pending gate, then the transport poll (recv + drain), then the tick
-   (e.g. the input schedule release), naming neither transport nor group. */
+/* Core per-tick entry: resolves the pending gate, then the frame hook, the transport poll (recv + drain)
+   and the tick (e.g. the input schedule release), naming neither transport nor group. */
 void nt_devapi_update(void) {
     resolve_pending();
+    if (s_frame_hook != NULL) {
+        s_frame_hook();
+    }
     if (s_transport_hook != NULL) {
         s_transport_hook();
     }
