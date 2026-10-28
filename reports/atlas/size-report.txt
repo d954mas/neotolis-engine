@@ -1,5 +1,5 @@
 # Size Report: atlas (wasm-analysis-paired)
-# Commit: 1cdfa92
+# Commit: 82b1238
 
 ## WASM Section Sizes
 
@@ -101,7 +101,7 @@ libnt_metrics.a             1530 B
 libnt_platform.a             824 B
 libnt_pool.a                1404 B
 libnt_postfx_blur.a         6798 B
-libnt_recorder.a           15516 B
+libnt_recorder.a           16184 B
 libnt_render.a              7668 B
 libnt_resource.a          232018 B
 libnt_shape_renderer.a    911688 B
@@ -125,7 +125,7 @@ libnt_version.a              638 B
 libnt_window.a              4028 B
 libnt_window_stub.a         1888 B
 ------------------------ ----------
-TOTAL (archives)         2665716 B
+TOTAL (archives)         2666384 B
 
 ## Data Segments Summary
 
