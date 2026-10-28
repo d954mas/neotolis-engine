@@ -18,6 +18,7 @@ typedef struct {
     uint32_t capacity;
     nt_gfx_capture_view_t view;
     nt_gfx_event_t *call; /* issued-call record being filled; NULL when not recording */
+    uint32_t link;        /* stamped on every reserved record: index + 1 of the open operation's OP record, or the executing command's */
     uint32_t call_ints;
     uint32_t call_floats;
 } nt_gfx_capture_state_t;
@@ -27,21 +28,11 @@ extern nt_gfx_capture_state_t g_nt_gfx_capture;
 
 #if NT_GFX_CAPTURE_ENABLED
 void nt_gfx_backend_capture_initial_state(void);
+nt_gfx_event_t *nt_gfx_capture_reserve_recording(void);
 /* Zeroes the next record in place; the caller publishes it by advancing count.
- * NULL when not recording or full; a full array marks overflow, and nothing appends after it. */
-static inline nt_gfx_event_t *nt_gfx_capture_reserve(void) {
-    nt_gfx_capture_state_t *capture = &g_nt_gfx_capture;
-    if (!g_nt_gfx.capture_recording || capture->view.overflow) {
-        return NULL;
-    }
-    if (capture->view.count == capture->capacity) {
-        capture->view.overflow = true;
-        return NULL;
-    }
-    nt_gfx_event_t *event = &capture->events[capture->view.count];
-    memset(event, 0, sizeof(*event));
-    return event;
-}
+ * NULL when not recording or full; a full array marks overflow, and nothing appends after it.
+ * Only the recording test is inline: every GL call of an unrecorded frame pays one branch. */
+static inline nt_gfx_event_t *nt_gfx_capture_reserve(void) { return g_nt_gfx.capture_recording ? nt_gfx_capture_reserve_recording() : NULL; }
 /* Issued-call records are filled in place: open reserves the next slot, commit publishes it. */
 static inline void nt_gfx_capture_open_call(nt_gfx_gl_call_t call) {
     nt_gfx_capture_state_t *capture = &g_nt_gfx_capture;
@@ -53,7 +44,7 @@ static inline void nt_gfx_capture_open_call(nt_gfx_gl_call_t call) {
     capture->call_ints = 0;
     capture->call_floats = 0;
     event->kind = NT_GFX_EVENT_BACKEND;
-    event->operation = NT_GFX_OP_STATE;
+    event->operation = (uint8_t)NT_GFX_OP_STATE;
     event->detail = (uint32_t)call;
     capture->call = event;
 }
@@ -69,7 +60,7 @@ static inline void nt_gfx_capture_commit_call(void) {
         nt_gfx_event_t *const event = nt_gfx_capture_reserve();                                                                                                                                        \
         if (event != NULL) {                                                                                                                                                                           \
             event->kind = (event_kind);                                                                                                                                                                \
-            event->operation = (event_operation);                                                                                                                                                      \
+            event->operation = (uint8_t)(event_operation);                                                                                                                                             \
             __VA_ARGS__;                                                                                                                                                                               \
             g_nt_gfx_capture.view.count++;                                                                                                                                                             \
         }                                                                                                                                                                                              \
@@ -79,37 +70,69 @@ static inline void nt_gfx_capture_commit_call(void) {
 #endif
 
 /* One public operation = one BEGIN and one END, in every build. BEGIN declares
- * op/kind/object as a wrapper-local scope, so operations
+ * the operation and its OP record as a wrapper-local scope, so operations
  * nested inside the implementation cannot clobber them. END counts an ACCEPTED
- * result in accepted[op]; capture builds also record the request and result. */
+ * result in accepted[op]; capture builds also complete the OP record. */
 typedef struct {
     nt_gfx_operation_t operation;
-    nt_gfx_object_kind_t kind;
-    uint32_t object;
+#if NT_GFX_CAPTURE_ENABLED
+    nt_gfx_event_t *record; /* NULL when not recorded */
+#endif
 } nt_gfx_scope_t;
 
-static inline void nt_gfx_end_op(const nt_gfx_scope_t *scope, uint32_t object, nt_gfx_result_t result) {
+#if NT_GFX_CAPTURE_ENABLED
+/* Records the request; the operation's records link to it until its END restores the parent's link. */
+static inline nt_gfx_event_t *nt_gfx_begin_record(nt_gfx_operation_t operation, nt_gfx_object_kind_t kind, uint32_t object) {
+    nt_gfx_event_t *const event = nt_gfx_capture_reserve();
+    if (event != NULL) {
+        event->kind = NT_GFX_EVENT_OP;
+        event->operation = (uint8_t)operation;
+        event->object_kind = (uint8_t)kind;
+        event->object = object;
+        g_nt_gfx_capture.link = ++g_nt_gfx_capture.view.count;
+    }
+    return event;
+}
+#endif
+
+static inline void nt_gfx_end_op(const nt_gfx_scope_t *scope, nt_gfx_result_t result) {
     if (result == NT_GFX_RESULT_ACCEPTED) {
         g_nt_gfx.counters.accepted[scope->operation]++;
     }
-    NT_GFX_RECORD(NT_GFX_EVENT_RESULT, scope->operation, event->object_kind = scope->kind; event->object = object; event->result = result);
+#if NT_GFX_CAPTURE_ENABLED
+    if (scope->record != NULL) {
+        scope->record->result = (uint8_t)result;
+        g_nt_gfx_capture.link = scope->record->link;
+    }
+#endif
 }
 
-#define NT_GFX_BEGIN(scope_op, scope_kind, scope_object)                                                                                                                                               \
-    const nt_gfx_scope_t nt_gfx_scope = {(scope_op), (scope_kind), (scope_object)};                                                                                                                    \
-    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, (scope_op), event->object_kind = (scope_kind); event->object = (scope_object))
-/* The trailing statements fill the request fields of the BEGIN record. */
+#if NT_GFX_CAPTURE_ENABLED
+#define NT_GFX_BEGIN(scope_op, scope_kind, scope_object) const nt_gfx_scope_t nt_gfx_scope = {(scope_op), nt_gfx_begin_record((scope_op), (scope_kind), (scope_object))}
+/* The trailing statements fill the request fields of the OP record. */
 #define NT_GFX_BEGIN_REQUEST(scope_op, scope_kind, scope_object, ...)                                                                                                                                  \
-    const nt_gfx_scope_t nt_gfx_scope = {(scope_op), (scope_kind), (scope_object)};                                                                                                                    \
-    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, (scope_op), event->object_kind = (scope_kind); event->object = (scope_object); __VA_ARGS__)
-#define NT_GFX_END(result) nt_gfx_end_op(&nt_gfx_scope, nt_gfx_scope.object, (result))
+    NT_GFX_BEGIN(scope_op, scope_kind, scope_object);                                                                                                                                                  \
+    if (nt_gfx_scope.record != NULL) {                                                                                                                                                                 \
+        nt_gfx_event_t *const event = nt_gfx_scope.record;                                                                                                                                             \
+        __VA_ARGS__;                                                                                                                                                                                   \
+    }
 /* Creators end with the handle they produced (zero on failure); the result is
  * evaluated first so the implementation has written the handle. */
 #define NT_GFX_END_OBJECT(result, created)                                                                                                                                                             \
     do {                                                                                                                                                                                               \
         const nt_gfx_result_t nt_gfx_result = (result);                                                                                                                                                \
-        nt_gfx_end_op(&nt_gfx_scope, (created), nt_gfx_result);                                                                                                                                        \
+        if (nt_gfx_scope.record != NULL) {                                                                                                                                                             \
+            nt_gfx_scope.record->object = (created);                                                                                                                                                   \
+        }                                                                                                                                                                                              \
+        nt_gfx_end_op(&nt_gfx_scope, nt_gfx_result);                                                                                                                                                   \
     } while (0)
+#else
+/* Request arguments and record construction disappear entirely in capture-OFF builds, so they must be side-effect-free. */
+#define NT_GFX_BEGIN(scope_op, scope_kind, scope_object) const nt_gfx_scope_t nt_gfx_scope = {(scope_op)}
+#define NT_GFX_BEGIN_REQUEST(scope_op, scope_kind, scope_object, ...) NT_GFX_BEGIN(scope_op, scope_kind, scope_object)
+#define NT_GFX_END_OBJECT(result, created) nt_gfx_end_op(&nt_gfx_scope, (result))
+#endif
+#define NT_GFX_END(result) nt_gfx_end_op(&nt_gfx_scope, (result))
 // #endregion
 
 /* ---- Render state machine ---- */

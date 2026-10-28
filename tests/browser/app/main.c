@@ -762,7 +762,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
         nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, tint, sizeof(tint));
     }
     if (mode == 2) {
-        for (uint32_t i = 0; i < 10000; i++) {
+        for (uint32_t i = 0; i <= 16384; i++) { /* one OP record each: more than the capture capacity */
             nt_gfx_set_scissor_enabled(false);
         }
     }

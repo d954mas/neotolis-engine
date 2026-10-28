@@ -289,6 +289,21 @@ static uint32_t pipeline_program(uint32_t slot) { return (uint32_t)s_gfx.pipelin
 #if NT_GFX_CAPTURE_ENABLED
 nt_gfx_capture_state_t g_nt_gfx_capture;
 
+nt_gfx_event_t *nt_gfx_capture_reserve_recording(void) {
+    nt_gfx_capture_state_t *capture = &g_nt_gfx_capture;
+    if (capture->view.overflow) {
+        return NULL;
+    }
+    if (capture->view.count == capture->capacity) {
+        capture->view.overflow = true;
+        return NULL;
+    }
+    nt_gfx_event_t *event = &capture->events[capture->view.count];
+    memset(event, 0, sizeof(*event));
+    event->link = capture->link;
+    return event;
+}
+
 const char *nt_gfx_gl_call_name(uint32_t call) {
 #define NT_GFX_GL_CALL_NAME_(name) #name,
     static const char *const names[NT_GFX_GL_COUNT] = {NULL, NT_GFX_GL_CALLS(NT_GFX_GL_CALL_NAME_)};
@@ -390,7 +405,7 @@ static uint32_t render_target_attachment_format(uint32_t rt_slot, int attachment
 static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) {
     uint32_t slot = nt_pool_slot_index(id);
     NT_GFX_RECORD(
-        NT_GFX_EVENT_DEFINITION, NT_GFX_OP_CREATE, event->object_kind = kind; event->object = id; switch (kind) {
+        NT_GFX_EVENT_DEFINITION, NT_GFX_OP_CREATE, event->object_kind = (uint8_t)kind; event->object = id; switch (kind) {
             case NT_GFX_OBJECT_SHADER:
                 event->data.resource.backend = s_gfx.shader_backends[slot];
                 event->result = NT_GFX_RESULT_UNKNOWN;
@@ -452,9 +467,10 @@ static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) 
 static void capture_attributes(nt_gfx_object_kind_t kind, uint32_t id, const nt_vertex_attr_t *attrs, uint8_t attr_count, uint16_t stride, uint32_t buffer, uint32_t divisor) {
     for (uint32_t a = 0; a < attr_count; a++) {
         const nt_vertex_attr_t *attr = &attrs[a];
-        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_ATTRIBUTE, event->object_kind = kind; event->object = id; event->data.attribute.buffer = buffer; event->data.attribute.offset = attr->offset;
-                      event->data.attribute.stride = stride; event->data.attribute.location = attr->location; event->data.attribute.type = (uint32_t)attr->type;
-                      event->data.attribute.count = attr->count; event->data.attribute.normalized = attr->normalized; event->data.attribute.divisor = divisor;);
+        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_ATTRIBUTE, event->object_kind = (uint8_t)kind; event->object = id; event->data.attribute.buffer = buffer;
+                      event->data.attribute.offset = attr->offset; event->data.attribute.stride = stride; event->data.attribute.location = attr->location;
+                      event->data.attribute.type = (uint32_t)attr->type; event->data.attribute.count = attr->count; event->data.attribute.normalized = attr->normalized;
+                      event->data.attribute.divisor = divisor;);
     }
 }
 
@@ -524,7 +540,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
 #if NT_GFX_CAPTURE_ENABLED
     memset(&g_nt_gfx_capture, 0, sizeof(g_nt_gfx_capture));
-    NT_ASSERT(desc->capture_capacity == 0 || sizeof(nt_gfx_event_t) <= SIZE_MAX / desc->capture_capacity);
+    NT_ASSERT(desc->capture_capacity < (1U << 24) && "capture_capacity: an operation link must fit 24 bits of a stream op word");
     g_nt_gfx_capture.capacity = desc->capture_capacity;
     if (desc->capture_capacity > 0) {
         g_nt_gfx_capture.events = (nt_gfx_event_t *)malloc((size_t)desc->capture_capacity * sizeof(nt_gfx_event_t));
@@ -854,7 +870,16 @@ void nt_gfx_begin_frame(void) {
 void nt_gfx_end_frame(void) {
     NT_ASSERT(g_nt_gfx.initialized);
     NT_ASSERT((s_gfx.render_state == NT_GFX_STATE_IDLE || s_gfx.render_state == NT_GFX_STATE_DRAWN) && "end_frame: needs an open frame with no open pass");
+#if NT_GFX_CAPTURE_ENABLED
+    const uint32_t execute_begin = g_nt_gfx_capture.view.count;
+#endif
     nt_gfx_frame_execute();
+#if NT_GFX_CAPTURE_ENABLED
+    if (g_nt_gfx.capture_recording) {
+        g_nt_gfx_capture.view.execute_begin = execute_begin;
+        g_nt_gfx_capture.view.execute_end = g_nt_gfx_capture.view.count;
+    }
+#endif
     s_gfx.render_state = NT_GFX_STATE_ENDED;
 }
 

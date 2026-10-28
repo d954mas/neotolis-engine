@@ -67,7 +67,11 @@ static inline void *nt_gfx_frame_push(nt_gfx_cmd_t op, uint32_t arg_bytes) {
     }
     uint32_t *w = s->words + s->used;
     s->used += words;
+#if NT_GFX_CAPTURE_ENABLED
+    w[0] = (uint32_t)op | (g_nt_gfx_capture.link << 8); /* the high bits name the recording operation */
+#else
     w[0] = (uint32_t)op;
+#endif
     return w + 1;
 }
 
@@ -109,7 +113,8 @@ static inline void nt_gfx_frame_draw_indexed(uint32_t first_index, uint32_t num_
 }
 /* Extends the previous single-instance draw of the same kind when it is still the last
  * command (any other command moves `used` past `merge_end`) and the range continues;
- * callers keep index data restart-free, so the joined draw is identical. True when merged. */
+ * callers keep index data restart-free, so the joined draw is identical. True when merged.
+ * A recorded merged draw names the draw it joined in its OP record's detail. */
 static inline bool nt_gfx_frame_draw_merging(nt_gfx_cmd_t op, uint32_t first, uint32_t count, uint8_t index_type) {
     nt_gfx_stream_t *s = &g_nt_gfx_stream;
     const uint32_t arg_words = (op == NT_GFX_CMD_DRAW_INDEXED) ? 4U : 3U;
@@ -118,6 +123,12 @@ static inline bool nt_gfx_frame_draw_merging(nt_gfx_cmd_t op, uint32_t first, ui
         /* The backend passes the count as GLsizei. */
         if ((uint64_t)prev[0] + prev[1] == first && (uint64_t)prev[1] + count <= INT32_MAX) {
             prev[1] += count;
+#if NT_GFX_CAPTURE_ENABLED
+            /* Draws never nest, so a nonzero link is this draw's own OP record. */
+            if (g_nt_gfx_capture.link != 0) {
+                g_nt_gfx_capture.events[g_nt_gfx_capture.link - 1U].detail = prev[-1] >> 8;
+            }
+#endif
             return true;
         }
     }

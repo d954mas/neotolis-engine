@@ -106,7 +106,9 @@ segment begin and end. Descriptors are copied into the stream; uniform block
 bytes are copied into frame storage at the call. A binding equal to the current one and an indexed draw that
 continues the previous one record nothing new (see Binding dedup and draw
 merge). `nt_gfx_end_frame` first uploads the frame storage (see Frame storage), then
-executes the stream in call order. Nothing is recorded outside a frame.
+executes the stream in call order. Nothing is recorded outside a frame. Capture
+builds keep the link of the recording operation in bits 8-31 of each command's op
+word, so the stream has the same size with capture ON and OFF.
 
 Every other operation is immediate: creates, destroys, buffer and texture
 updates, activation, queries, the GPU timing toggle and polling.
@@ -827,7 +829,7 @@ Loading does not preserve default-framebuffer contents across presentation
 (`preserveDrawingBuffer` is false) or restore contents after context loss.
 Discard maps to `glInvalidateFramebuffer`; native skips this optional hint when
 the driver lacks ARB_invalidate_subdata. Call capture records attachment enums,
-not pointers. BEGIN/PASS records contain the requested flags; INITIAL/PASS holds
+not pointers. OP/PASS records contain the requested flags; INITIAL/PASS holds
 only cached clear values, with flag fields having no meaning.
 
 Pass color and depth clears are pass-owned operations. In particular,
@@ -1138,7 +1140,7 @@ A context restore is one CONTEXT operation inside the begin_frame that performs
 it and belongs to the frame that begin_frame opens. A new loss is wiped before
 that frame opens, so a recorded frame's snapshot shows the wiped tables and
 `context_lost` set, and the CONTEXT operation follows it. The BACKEND records of
-the restore sit between its BEGIN and RESULT. It ends ACCEPTED when the context came back and
+the restore link to its OP record. It ends ACCEPTED when the context came back and
 CONTEXT_LOST when recreation failed or met a loss. Raw GL names are valid within their
 context segment; a CONTEXT operation in the stream separates segments, and
 frontend handles are the identity across them.
@@ -1150,10 +1152,11 @@ first frame never records. A request made during a recorded frame replaces that
 capture at the begin_frame that finishes it, so read a capture in the following
 frame before requesting again: readable captures are at most every other frame.
 `nt_gfx_desc_t.capture_capacity` reserves one
-event array at init (default zero); a request without capacity asserts. Capture-OFF
-builds ignore the field.
+event array at init (default zero, below 2^24 because a link must fit a stream
+op word); a request without capacity asserts. Capture-OFF builds ignore the field.
 There is no growth or allocation while recording. Each pointer-free POD event
-is 104 bytes, including padding; 16384 records reserve 1.625 MiB. Other storage
+is 104 bytes, including padding; 16384 records reserve 1.625 MiB. Gfx records keep
+`operation`, `object_kind` and `result` in one byte each. Other storage
 consists of fixed control state and counter snapshots, with no second event array.
 All record bytes are initialized before publication. A recorded frame starts at
 the begin_frame that opens it and first snapshots
@@ -1162,33 +1165,44 @@ program uniform/sampler and vertex-input attribute records), into the same array
 Size the capacity for that snapshot plus the frame's commands; a capacity below
 the snapshot overflows before any command is recorded.
 
-`nt_gfx_capture_read` returns metadata by value and an immutable event prefix.
-Read a finished capture right after `nt_gfx_begin_frame`: the prefix remains valid
-until the begin_frame that starts the next requested recording overwrites it, or
-shutdown; unrequested frames preserve it. Two counts in the same sequence delimit
-an operation interval. Keep a capture by copying the metadata and `count` records
+`nt_gfx_capture_read` returns metadata by value and an event prefix that is
+immutable except for the OP records of operations still in progress (an OP is
+final when its call returns). Read a finished capture right after
+`nt_gfx_begin_frame`: the prefix remains valid until the begin_frame that starts
+the next requested recording overwrites it, or shutdown; unrequested frames
+preserve it. Keep a capture by copying the metadata and `count` records
 and redirecting the saved view's pointer to the owned array. An empty view has
 a NULL pointer. The finalized view retains its frame's counters (and so its
 `frame_sequence`) by value even after later unrecorded frames overwrite
 `g_nt_gfx.last_frame`.
 
-Every recorded public operation produces exactly one BEGIN, carrying its
-request arguments, and one RESULT, carrying the outcome `result`; a creator's
-RESULT carries the new handle (zero on failure), while its backend slot and
-names are in the DEFINITION record. BEGIN and RESULT are recorded at the call.
-The BACKEND and backend SKIP records of recorded commands appear when the
-stream executes in `nt_gfx_end_frame`, outside any BEGIN/RESULT pair, and so do the BACKEND
-records of program links that `nt_gfx_begin_frame` finishes, followed by each finished program's
-DEFINITION. A stage destroyed while a pending link holds it records its `glDeleteShader` where
-that link resolves: among these link records, or inside the program's DESTROY pair; a lost
+Every recorded public operation produces exactly one OP record at the call,
+carrying its request arguments; when the call returns, the record holds its outcome
+`result`, and a creator's holds the new handle (zero on failure), while its backend
+slot and names are in the DEFINITION record. Every gfx record (OP, BACKEND, SKIP,
+INITIAL, DEFINITION, ARGUMENT) carries `link`, the index + 1 of the OP record of
+the operation it belongs to, within the same capture; 0 means no operation. Records
+made while an operation runs link to it, so nesting comes from links, not from
+record order: an operation issued inside another (default samplers, cascaded
+destroys) links to its parent, and its own records link to it. `ARGUMENT` records
+are request arguments of their OP (one per texture binding of a texture set);
+immediate backend work inside a draw-phase call, such as a lazy sampler
+recreation, links to that call. Link 0 marks top-level OP records, the begin_frame
+snapshot, and the records of program links that `nt_gfx_begin_frame` finishes
+(their BACKEND records and each finished program's DEFINITION). Notes and markers
+carry no link: their label overlays those bytes, so read `kind` first.
+A recorded command carries the link of the operation that recorded it, so the
+BACKEND and backend SKIP records it produces when the stream executes in
+`nt_gfx_end_frame` link to that operation. A merged draw issues one call that
+links to the first draw; each draw it joined ends CACHE and keeps that draw's
+link in `detail`. The view's `execute_begin` and `execute_end` delimit the records
+of that execution, frame storage uploads included (both 0 until the recorded
+frame's `end_frame`), so a capture reads as call-order records, then the execution
+in command order, then the work after `end_frame`.
+A stage destroyed while a pending link holds it records its `glDeleteShader` where
+that link resolves: among these link records, or inside the program's DESTROY operation; a lost
 context records none. A program's DEFINITION does not imply readiness: one recorded while it links carries
-no reflection. Immediate backend work inside a
-draw-phase call, such as a lazy sampler recreation, stays inside its pair.
-Operations issued inside another operation
-(default samplers, cascaded destroys) nest between its BEGIN and
-RESULT. `ARGUMENT` records are request
-arguments belonging to the enclosing BEGIN (one per texture binding of a texture
-set); `DEFINITION` is reserved for resource and inherited state. Issued backend calls do not
+no reflection. `DEFINITION` is reserved for resource and inherited state. Issued backend calls do not
 prove GL success or GPU completion. The view's `counters` are zero (sequence 0)
 while a frame records and become the finalized frame's at the begin_frame that closes it; `overflow`
 alone reports an incomplete event stream. Overflow stops event appends and never
@@ -1197,8 +1211,8 @@ truncates counters.
 The `object_kind` and `object` pair identifies a full frontend handle, including
 its generation. Backend records instead use `detail` as `nt_gfx_gl_call_t`, whose
 values are named after the issued function (`NT_GFX_GL_glBindVertexArray`), and
-carry raw GL names of one GL context; their operation is always STATE. Inside
-an immediate operation the enclosing BEGIN names the frontend operation. With GPU timing, begin_frame
+carry raw GL names of one GL context; their operation is always STATE and their
+link names the frontend operation, if any. With GPU timing, begin_frame
 runs the timer disjoint check as its own `TIMER_DISJOINT` operation on a live
 context; the query is issued only while a timer query is pending. Each issued call is recorded
 exactly once, at the call site, by the same statement that issues it (an
@@ -1306,7 +1320,8 @@ A note describes the frontend records after it until the next note or marker.
 Immediate operations (creates, uploads) record their backend calls at the call,
 under the current note. Draw-phase calls record theirs when the stream executes
 in `nt_gfx_end_frame`, after the notes made before it; notes made after
-`end_frame` follow that execution. Notes and markers are not draw-stream
+`end_frame` follow that execution. Such a record reaches its note through its
+link: the note that describes its OP record. Notes and markers are not draw-stream
 commands, so draw merging, counters and pixels do not depend on them. Markers do
 not reach external debuggers (a stream command between two draws would end
 their merge).
