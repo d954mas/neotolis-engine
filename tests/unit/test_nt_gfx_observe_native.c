@@ -327,6 +327,86 @@ static void test_frame_storage_upload_is_issued_before_the_replayed_draw(void) {
     TEST_ASSERT_LESS_THAN_UINT32(draw, upload);
 }
 
+static nt_gfx_operation_t owner_operation(const nt_gfx_capture_view_t *capture, const nt_gfx_event_t *e) {
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, e->link);
+    const nt_gfx_event_t *owner = &capture->events[e->link - 1U];
+    TEST_ASSERT_EQUAL(NT_GFX_EVENT_OP, owner->kind);
+    return (nt_gfx_operation_t)owner->operation;
+}
+
+/* After the frame's first operation every issued, skipped and argument record names its
+ * operation; the stream's records lie in the execute range, the readback after it. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one walk checks each owner kind
+static void check_links_name_their_operations(const nt_gfx_capture_view_t *capture, uint32_t pipeline) {
+    const nt_gfx_event_t *events = capture->events;
+    uint32_t first = 0;
+    while (first < capture->count && !(events[first].kind == NT_GFX_EVENT_OP && events[first].object_kind == NT_GFX_OBJECT_PIPELINE && events[first].object == pipeline)) {
+        first++;
+    }
+    TEST_ASSERT_LESS_THAN_UINT32(capture->execute_begin, first);
+    TEST_ASSERT_LESS_THAN_UINT32(capture->execute_end, capture->execute_begin);
+    uint32_t pass = 0;
+    uint32_t draws = 0;
+    uint32_t arguments = 0;
+    bool inactive = false;
+    bool readback = false;
+    for (uint32_t i = first; i < capture->count; i++) {
+        const nt_gfx_event_t *e = &events[i];
+        if (e->kind != NT_GFX_EVENT_BACKEND && e->kind != NT_GFX_EVENT_SKIP && e->kind != NT_GFX_EVENT_ARGUMENT) {
+            continue;
+        }
+        const nt_gfx_operation_t op = owner_operation(capture, e);
+        const bool executed = i >= capture->execute_begin && i < capture->execute_end;
+        if (e->kind == NT_GFX_EVENT_ARGUMENT) {
+            TEST_ASSERT_EQUAL(NT_GFX_OP_TEXTURE_SET, op);
+            arguments++;
+            continue;
+        }
+        if (e->kind == NT_GFX_EVENT_SKIP && e->result == NT_GFX_RESULT_INACTIVE) {
+            TEST_ASSERT_EQUAL(NT_GFX_OP_TEXTURE_SET, op);
+            inactive = true;
+        }
+        pass += (executed && op == NT_GFX_OP_PASS) ? 1U : 0U;
+        if (!executed) {
+            if (e->detail == NT_GFX_GL_glReadPixels) {
+                TEST_ASSERT_GREATER_OR_EQUAL_UINT32(capture->execute_end, i);
+                TEST_ASSERT_EQUAL(NT_GFX_OP_READ_PIXELS, op);
+                readback = true;
+            }
+            continue;
+        }
+        switch (e->detail) {
+        case NT_GFX_GL_glUseProgram:
+            TEST_ASSERT_EQUAL(NT_GFX_OP_PIPELINE, op);
+            break;
+        case NT_GFX_GL_glBindVertexArray:
+            TEST_ASSERT_EQUAL(NT_GFX_OP_VERTEX_INPUT, op);
+            break;
+        case NT_GFX_GL_glBindTexture:
+        case NT_GFX_GL_glBindSampler:
+            TEST_ASSERT_EQUAL(NT_GFX_OP_TEXTURE_SET, op);
+            break;
+        case NT_GFX_GL_glBindBufferRange:
+            TEST_ASSERT_EQUAL(NT_GFX_OP_UBO, op);
+            break;
+        case NT_GFX_GL_glBufferSubData:
+            TEST_ASSERT_EQUAL(NT_GFX_OP_BUFFER_UPLOAD, op);
+            break;
+        case NT_GFX_GL_glDrawArrays:
+            TEST_ASSERT_EQUAL(NT_GFX_OP_DRAW, op);
+            draws++;
+            break;
+        default:
+            break;
+        }
+    }
+    TEST_ASSERT_GREATER_THAN_UINT32(0, pass);
+    TEST_ASSERT_EQUAL_UINT32(1, draws);
+    TEST_ASSERT_EQUAL_UINT32(2, arguments);
+    TEST_ASSERT_TRUE(inactive);
+    TEST_ASSERT_TRUE(readback);
+}
+
 /* Every counted GL call is recorded and every recorded call is counted, per function. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one frame exercises every funnel form
 static void test_complete_capture_matches_gl_counters(void) {
@@ -353,8 +433,9 @@ static void test_complete_capture_matches_gl_counters(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.1F, 0.2F, 0.3F, 1.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(vi);
-    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("tex"), .texture = texture};
-    nt_gfx_apply_texture_bindings(&binding, 1);
+    /* "absent" is not a program sampler: an INACTIVE skip of the texture set. */
+    const nt_gfx_texture_binding_t bindings[2] = {{.name = nt_hash32_str("tex"), .texture = texture}, {.name = nt_hash32_str("absent"), .texture = texture}};
+    nt_gfx_apply_texture_bindings(bindings, 2);
     nt_gfx_bind_uniform_block(NT_GFX_SLOT_DRAW, tint, sizeof(tint));
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
@@ -387,6 +468,153 @@ static void test_complete_capture_matches_gl_counters(void) {
     TEST_ASSERT_EQUAL_UINT64(s_buffer_bytes, c->buffer_upload_bytes);
     TEST_ASSERT_EQUAL_UINT64(s_texture_calls, c->texture_upload_calls);
     TEST_ASSERT_EQUAL_UINT64(s_texture_bytes, c->texture_upload_bytes);
+    check_links_name_their_operations(&capture, pipeline.id);
+}
+
+static uint32_t op_index(const nt_gfx_capture_view_t *capture, uint32_t from, nt_gfx_operation_t operation) {
+    for (uint32_t i = from; i < capture->count; i++) {
+        if (capture->events[i].kind == NT_GFX_EVENT_OP && capture->events[i].operation == operation) {
+            return i;
+        }
+    }
+    return capture->count;
+}
+
+/* A merged draw issues one call linked to the first draw; a note does not end a merge, a viewport does. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- plain and indexed merges in one frame
+static void test_merged_draws_link_to_the_first_draw(void) {
+    static const uint16_t indices[6] = {0, 1, 2, 2, 1, 0};
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){gl_Position=vec4(0.0);}"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "precision mediump float; out vec4 color; void main(){color=vec4(1.0);}"});
+    nt_program_t program = nt_gfx_make_program(vs, fs, NULL);
+    nt_test_gfx_link_wait(program);
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    nt_vertex_input_t plain = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
+    nt_buffer_t ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_IMMUTABLE, .data = indices, .size = sizeof(indices), .index_type = NT_INDEX_UINT16});
+    nt_vertex_input_t indexed = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.index_buffer = ibo});
+    nt_gfx_capture_request();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_bind_vertex_input(plain);
+    nt_gfx_draw(0, 3);
+    NT_GFX_NOTE("between merged draws");
+    nt_gfx_draw(3, 3);
+    nt_gfx_draw(6, 3);
+    nt_gfx_set_viewport(0, 0, 1, 1);
+    nt_gfx_draw(9, 3);
+    nt_gfx_bind_vertex_input(indexed);
+    nt_gfx_draw_indexed(0, 3, 3);
+    nt_gfx_draw_indexed(3, 3, 3);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_FALSE(capture.overflow);
+    uint32_t draw[4];
+    draw[0] = op_index(&capture, 0, NT_GFX_OP_DRAW);
+    for (uint32_t d = 1; d < 4; d++) {
+        draw[d] = op_index(&capture, draw[d - 1] + 1U, NT_GFX_OP_DRAW);
+    }
+    TEST_ASSERT_LESS_THAN_UINT32(capture.count, draw[3]);
+    const nt_gfx_result_t expected[4] = {NT_GFX_RESULT_ACCEPTED, NT_GFX_RESULT_CACHE, NT_GFX_RESULT_CACHE, NT_GFX_RESULT_ACCEPTED};
+    for (uint32_t d = 0; d < 4; d++) {
+        TEST_ASSERT_EQUAL(expected[d], capture.events[draw[d]].result);
+    }
+    const uint32_t indexed_first = op_index(&capture, 0, NT_GFX_OP_DRAW_INDEXED);
+    const uint32_t indexed_second = op_index(&capture, indexed_first + 1U, NT_GFX_OP_DRAW_INDEXED);
+    TEST_ASSERT_LESS_THAN_UINT32(capture.count, indexed_second);
+    TEST_ASSERT_EQUAL(NT_GFX_RESULT_CACHE, capture.events[indexed_second].result);
+    uint32_t arrays = 0;
+    uint32_t elements = 0;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *e = &capture.events[i];
+        if (e->kind != NT_GFX_EVENT_BACKEND) {
+            continue;
+        }
+        if (e->detail == NT_GFX_GL_glDrawArrays) {
+            /* first merged call: three draws of 3; the next starts after the viewport */
+            TEST_ASSERT_EQUAL_UINT32(arrays == 0 ? draw[0] + 1U : draw[3] + 1U, e->link);
+            TEST_ASSERT_EQUAL_UINT32(arrays == 0 ? 9U : 3U, e->data.backend.args[2]);
+            arrays++;
+        }
+        if (e->detail == NT_GFX_GL_glDrawElements) {
+            TEST_ASSERT_EQUAL_UINT32(indexed_first + 1U, e->link);
+            TEST_ASSERT_EQUAL_UINT32(6, e->data.backend.args[1]);
+            elements++;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(2, arrays);
+    TEST_ASSERT_EQUAL_UINT32(1, elements);
+}
+
+static uint32_t sampler_op(const nt_gfx_capture_view_t *capture) {
+    for (uint32_t i = 0; i < capture->count; i++) {
+        if (capture->events[i].kind == NT_GFX_EVENT_OP && capture->events[i].operation == NT_GFX_OP_CREATE && capture->events[i].object_kind == NT_GFX_OBJECT_SAMPLER) {
+            return i;
+        }
+    }
+    return capture->count;
+}
+
+/* Records one frame that makes the first texture after init, which makes its default sampler inside. */
+static nt_gfx_capture_view_t record_first_texture(uint32_t capacity, nt_texture_t *texture) {
+    static const uint8_t pixels[16] = {0};
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    desc.capture_capacity = capacity;
+    nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
+    nt_gfx_capture_request();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    *texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA8, .data = pixels});
+    (void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    return nt_gfx_capture_read();
+}
+
+/* An operation inside another links to it; the parent's later records and the next operation follow the restored link. */
+static void test_nested_operation_links_to_its_parent(void) {
+    nt_texture_t texture;
+    nt_gfx_capture_view_t capture = record_first_texture(4096, &texture);
+    TEST_ASSERT_FALSE(capture.overflow);
+    const uint32_t sampler = sampler_op(&capture);
+    TEST_ASSERT_LESS_THAN_UINT32(capture.count, sampler);
+    const uint32_t parent = capture.events[sampler].link;
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, parent);
+    const nt_gfx_event_t *create = &capture.events[parent - 1U];
+    TEST_ASSERT_EQUAL(NT_GFX_OBJECT_TEXTURE, create->object_kind);
+    TEST_ASSERT_EQUAL_UINT32(texture.id, create->object);
+    TEST_ASSERT_EQUAL_UINT32(0, create->link);
+    bool parent_after_child = false;
+    for (uint32_t i = sampler + 1U; i < capture.count; i++) {
+        parent_after_child |= capture.events[i].kind == NT_GFX_EVENT_DEFINITION && capture.events[i].link == parent;
+    }
+    TEST_ASSERT_TRUE(parent_after_child);
+    const uint32_t buffer = op_index(&capture, sampler + 1U, NT_GFX_OP_CREATE);
+    TEST_ASSERT_LESS_THAN_UINT32(capture.count, buffer);
+    TEST_ASSERT_EQUAL(NT_GFX_OBJECT_BUFFER, capture.events[buffer].object_kind);
+    TEST_ASSERT_EQUAL_UINT32(0, capture.events[buffer].link);
+}
+
+/* An overflow inside a nested operation still completes the operations recorded before it. */
+static void test_overflow_inside_an_operation_keeps_recorded_results(void) {
+    nt_texture_t texture;
+    const nt_gfx_capture_view_t measured = record_first_texture(4096, &texture);
+    const uint32_t sampler = sampler_op(&measured);
+    nt_gfx_capture_view_t capture = record_first_texture(sampler + 1U, &texture);
+    TEST_ASSERT_TRUE(capture.overflow);
+    TEST_ASSERT_EQUAL_UINT32(sampler + 1U, capture.count);
+    const nt_gfx_event_t *child = &capture.events[sampler];
+    TEST_ASSERT_EQUAL(NT_GFX_OBJECT_SAMPLER, child->object_kind);
+    TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, child->result);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, child->object);
+    const nt_gfx_event_t *parent = &capture.events[child->link - 1U];
+    TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, parent->result);
+    TEST_ASSERT_EQUAL_UINT32(texture.id, parent->object);
 }
 
 /* Teardown deletes live objects through the GL funnel after the event array is freed.
@@ -785,6 +1013,9 @@ int main(void) {
     RUN_TEST(test_issued_calls_record_floats_names_and_payloads);
     RUN_TEST(test_frame_storage_upload_is_issued_before_the_replayed_draw);
     RUN_TEST(test_complete_capture_matches_gl_counters);
+    RUN_TEST(test_merged_draws_link_to_the_first_draw);
+    RUN_TEST(test_nested_operation_links_to_its_parent);
+    RUN_TEST(test_overflow_inside_an_operation_keeps_recorded_results);
     RUN_TEST(test_readback_is_recorded_as_issued_call);
     RUN_TEST(test_explicit_clear_records_issued_calls_and_skips_empty_selections);
     RUN_TEST(test_pass_actions_capture_values_and_attachment_enums);

@@ -106,7 +106,9 @@ segment begin and end. Descriptors are copied into the stream; uniform block
 bytes are copied into frame storage at the call. A binding equal to the current one and an indexed draw that
 continues the previous one record nothing new (see Binding dedup and draw
 merge). `nt_gfx_end_frame` first uploads the frame storage (see Frame storage), then
-executes the stream in call order. Nothing is recorded outside a frame.
+executes the stream in call order. Nothing is recorded outside a frame. Capture
+builds keep the link of the recording operation in bits 8-31 of each command's op
+word, so the stream has the same size with capture ON and OFF.
 
 Every other operation is immediate: creates, destroys, buffer and texture
 updates, activation, queries, the GPU timing toggle and polling.
@@ -1150,8 +1152,8 @@ first frame never records. A request made during a recorded frame replaces that
 capture at the begin_frame that finishes it, so read a capture in the following
 frame before requesting again: readable captures are at most every other frame.
 `nt_gfx_desc_t.capture_capacity` reserves one
-event array at init (default zero); a request without capacity asserts. Capture-OFF
-builds ignore the field.
+event array at init (default zero, below 2^24 because a link must fit a stream
+op word); a request without capacity asserts. Capture-OFF builds ignore the field.
 There is no growth or allocation while recording. Each pointer-free POD event
 is 104 bytes, including padding; 16384 records reserve 1.625 MiB. Gfx records keep
 `operation`, `object_kind` and `result` in one byte each. Other storage
@@ -1189,8 +1191,15 @@ recreation, links to that call. Link 0 marks top-level OP records, the begin_fra
 snapshot and the BACKEND records of program links that `nt_gfx_begin_frame`
 finishes, each followed by the finished program's DEFINITION. Notes and markers
 carry no link: their label overlays those bytes, so read `kind` first.
-The BACKEND and backend SKIP records of recorded commands appear when the stream
-executes in `nt_gfx_end_frame`, after the frame's front-end records.
+A recorded command carries the link of the operation that recorded it, so the
+BACKEND and backend SKIP records it produces when the stream executes in
+`nt_gfx_end_frame` link to that operation. A merged draw issues one call that
+links to the first draw; the draws it joined end CACHE, and each joined the
+nearest earlier ACCEPTED draw operation of the same kind (a merge needs nothing
+recorded in between). The view's `execute_begin` and `execute_end` delimit the
+records of that execution, frame storage uploads included, so a capture reads as
+call-order records, then the execution in command order, then the work after
+`end_frame`.
 A stage destroyed while a pending link holds it records its `glDeleteShader` where
 that link resolves: among these link records, or inside the program's DESTROY operation; a lost
 context records none. A program's DEFINITION does not imply readiness: one recorded while it links carries

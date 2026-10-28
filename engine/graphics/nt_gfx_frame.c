@@ -112,7 +112,13 @@ void nt_gfx_frame_execute(void) {
     g_nt_gfx_stream.used = 0;
     g_nt_gfx_stream.merge_end = 0; /* an executed draw is never extended */
     while (w < end) {
+#if NT_GFX_CAPTURE_ENABLED
+        const uint32_t word = *w++;
+        const nt_gfx_cmd_t op = (nt_gfx_cmd_t)(word & 0xFFU);
+        g_nt_gfx_capture.link = word >> 8; /* the command's records belong to the operation that recorded it */
+#else
         const nt_gfx_cmd_t op = (nt_gfx_cmd_t)*w++;
+#endif
         switch (op) {
         case NT_GFX_CMD_BEGIN_PASS: {
             const nt_gfx_cmd_begin_pass_t *c = (const nt_gfx_cmd_begin_pass_t *)w;
@@ -179,4 +185,7 @@ void nt_gfx_frame_execute(void) {
             break;
         }
     }
+#if NT_GFX_CAPTURE_ENABLED
+    g_nt_gfx_capture.link = 0;
+#endif
 }

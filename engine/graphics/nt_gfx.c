@@ -525,7 +525,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
 #if NT_GFX_CAPTURE_ENABLED
     memset(&g_nt_gfx_capture, 0, sizeof(g_nt_gfx_capture));
-    NT_ASSERT(desc->capture_capacity == 0 || sizeof(nt_gfx_event_t) <= SIZE_MAX / desc->capture_capacity);
+    NT_ASSERT(desc->capture_capacity < (1U << 24) && "capture_capacity: an operation link must fit 24 bits of a stream op word");
     g_nt_gfx_capture.capacity = desc->capture_capacity;
     if (desc->capture_capacity > 0) {
         g_nt_gfx_capture.events = (nt_gfx_event_t *)malloc((size_t)desc->capture_capacity * sizeof(nt_gfx_event_t));
@@ -855,7 +855,16 @@ void nt_gfx_begin_frame(void) {
 void nt_gfx_end_frame(void) {
     NT_ASSERT(g_nt_gfx.initialized);
     NT_ASSERT((s_gfx.render_state == NT_GFX_STATE_IDLE || s_gfx.render_state == NT_GFX_STATE_DRAWN) && "end_frame: needs an open frame with no open pass");
+#if NT_GFX_CAPTURE_ENABLED
+    const uint32_t execute_begin = g_nt_gfx_capture.view.count;
+#endif
     nt_gfx_frame_execute();
+#if NT_GFX_CAPTURE_ENABLED
+    if (g_nt_gfx.capture_recording) {
+        g_nt_gfx_capture.view.execute_begin = execute_begin;
+        g_nt_gfx_capture.view.execute_end = g_nt_gfx_capture.view.count;
+    }
+#endif
     s_gfx.render_state = NT_GFX_STATE_ENDED;
 }
 

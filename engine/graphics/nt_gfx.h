@@ -778,7 +778,8 @@ typedef struct {
     bool overflow;
     const nt_gfx_event_t *events;
     uint32_t count;
-    nt_gfx_counters_t counters; /* the finalized frame's, even after later unrecorded frames; frame_sequence 0 while recording */
+    uint32_t execute_begin, execute_end; /* records of the end_frame stream execution, frame storage uploads included */
+    nt_gfx_counters_t counters;          /* the finalized frame's, even after later unrecorded frames; frame_sequence 0 while recording */
 } nt_gfx_capture_view_t;
 
 #if NT_GFX_CAPTURE_ENABLED

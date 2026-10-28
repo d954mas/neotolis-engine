@@ -67,7 +67,11 @@ static inline void *nt_gfx_frame_push(nt_gfx_cmd_t op, uint32_t arg_bytes) {
     }
     uint32_t *w = s->words + s->used;
     s->used += words;
+#if NT_GFX_CAPTURE_ENABLED
+    w[0] = (uint32_t)op | (g_nt_gfx_capture.link << 8); /* the high bits name the recording operation */
+#else
     w[0] = (uint32_t)op;
+#endif
     return w + 1;
 }
 
