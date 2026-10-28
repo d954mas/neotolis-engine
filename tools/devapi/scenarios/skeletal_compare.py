@@ -23,7 +23,7 @@ def _pose(client):
     model = next((name for name in ("Fox", "CesiumMan", "Humanoid") if name + " v" in labels), None)
     pose = next((match for label in labels if (match := re.fullmatch(r"(.+)  ([0-9.]+) / ([0-9.]+) s", label))), None)
     if model is None or pose is None:
-        raise SystemExit("Select Skinned Meshes and keep Controls visible to record model, clip and time")
+        raise AssertionError("Select Skinned Meshes and keep Controls visible to record model, clip and time")
     return model, pose[1], float(pose[2])
 
 
@@ -58,13 +58,16 @@ def run(client, out_dir):
         client.ui_click(REFERENCE_ID)
         client.step(3)
     finally:
-        client.set_mode("run")
+        try:
+            client.set_mode("run")
+        except Exception:  # noqa: BLE001
+            pass  # best effort: never mask the run's own failure
     if before != after:
-        raise SystemExit(f"The pose moved between captures ({before} -> {after}); enable CPU reference first so the player pauses")
+        raise AssertionError(f"The pose moved between captures ({before} -> {after}); enable CPU reference first so the player pauses")
     if gpu.shape != cpu.shape or gpu.size == 0:
-        raise SystemExit(f"Stage captures differ in shape: {gpu.shape} vs {cpu.shape}")
+        raise AssertionError(f"Stage captures differ in shape: {gpu.shape} vs {cpu.shape}")
     if not (np.all(gpu[0] == background) and np.all(cpu[0] == background)):
-        raise SystemExit("Stage must have a clear, uniform background")
+        raise AssertionError("Stage must have a clear, uniform background")
     covered = np.any(gpu != background, axis=2) | np.any(cpu != background, axis=2)
     mismatches = np.any(np.abs(gpu.astype(int) - cpu.astype(int)) > 2, axis=2) & covered
     coverage = int(covered.sum())
@@ -77,9 +80,9 @@ def run(client, out_dir):
               "gpu": str(output / "gpu.png"), "cpu": str(output / "cpu.png")}
     (output / "result.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     if coverage == 0:
-        raise SystemExit("Empty model coverage")
+        raise AssertionError("Empty model coverage")
     if bad / coverage > 0.005:
-        raise SystemExit(f"GPU/CPU mismatch: {bad}/{coverage} pixels")
+        raise AssertionError(f"GPU/CPU mismatch: {bad}/{coverage} pixels")
     print(json.dumps(report, indent=2))
 
 

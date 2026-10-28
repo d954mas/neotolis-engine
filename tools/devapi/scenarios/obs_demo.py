@@ -123,9 +123,13 @@ def check_perf_stats(client: DevApiClient) -> None:
             assert "bad_params" in str(exc), f"perf.stats(unknown channel) raised {exc!r}, expected bad_params"
         print("PASS[3b/5] perf.stats bad budget_ms + unknown channel -> bad_params.")
     finally:
-        # Restore RUN so a follow-on session is not left frozen in MANUAL.
-        client.set_mode("run")
-        client.resume()
+        # Restore RUN so a follow-on session is not left frozen in MANUAL; best effort, so a dead host
+        # does not mask the run's own failure.
+        try:
+            client.set_mode("run")
+            client.resume()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def check_entity_list(client: DevApiClient) -> None:

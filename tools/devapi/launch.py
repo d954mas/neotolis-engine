@@ -5,14 +5,14 @@ A scenario module defines run(client, out_dir) and ends with
         sys.exit(launch.main(run))
 and runs from the repo root as `python -m tools.devapi.scenarios.<name> [options]`:
 
-  --target native  (default) launch the native devapi_host (--host-bin, default the native-debug build)
+  --target native  (default) launch the native devapi_host (--host-bin, default the devapi-smoke build)
                    on a free loopback port passed as NT_DEVAPI_PORT; or attach to a running host
                    with --port N.
   --target web     serve the wasm build (--web-dir, default the wasm-debug build) on a free loopback
                    port and drive it in headless Chromium (playwright-python, the web CI job's pinned
                    dependency: tools/devapi/requirements-web.txt).
-  --out DIR        where scenarios write artifacts (default: the working directory); created, made
-                   absolute and passed to run as out_dir.
+  --out DIR        where scenarios write artifacts (default: build/devapi-out); created, made absolute
+                   and passed to run as out_dir.
 
 A scenario finds its platform in the client: client.transport is a SocketTransport (.port) or a
 PlaywrightTransport (.page). Exit 0 pass, 1 assertion / protocol / transport failure, 2 usage / launch.
@@ -34,7 +34,7 @@ from .transport import PlaywrightTransport, SocketTransport
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _HOST_EXE = "devapi_host.exe" if os.name == "nt" else "devapi_host"
-_DEFAULT_HOST_BIN = os.path.join(REPO_ROOT, "build", "examples", "devapi_host", "native-debug", _HOST_EXE)
+_DEFAULT_HOST_BIN = os.path.join(REPO_ROOT, "build", "examples", "devapi_host", "devapi-smoke", _HOST_EXE)
 _DEFAULT_WEB_DIR = os.path.join(REPO_ROOT, "build", "examples", "devapi_host", "wasm-debug")
 # SwiftShader WebGL2, as tests/browser/playwright.config.ts: headless CI has no GPU.
 _CHROMIUM_ARGS = ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]
@@ -51,7 +51,11 @@ def _free_port() -> int:
 
 def _run_native(args, run) -> None:
     if args.port is not None:
-        with SocketTransport(port=args.port) as transport:
+        try:
+            transport = SocketTransport(port=args.port)
+        except OSError as exc:
+            raise LaunchError(f"cannot attach to 127.0.0.1:{args.port}: {exc}") from exc
+        with transport:
             run(DevApiClient(transport))
         return
     host_bin = os.path.abspath(args.host_bin or _DEFAULT_HOST_BIN)
@@ -129,9 +133,11 @@ def _run_web(args, run) -> None:
             errors = []
             try:
                 page = browser.new_context(viewport={"width": 1280, "height": 720}, accept_downloads=True).new_page()
-                page.on("pageerror", lambda exc: errors.append(str(exc)))
+                # Printed as they happen: a trap leaves the reply pending until the CI step timeout kills
+                # the run, so nothing printed at the end would show the cause.
+                page.on("pageerror", lambda exc: (errors.append(str(exc)), print(f"[pageerror] {exc}", file=sys.stderr, flush=True)))
                 # The engine log goes to the console; forward it so a failure shows its WARN/ERROR lines.
-                page.on("console", lambda msg: print(f"[page] {msg.text}"))
+                page.on("console", lambda msg: print(f"[page] {msg.text}", flush=True))
                 try:
                     page.goto(f"http://127.0.0.1:{server.server_address[1]}/index.html")
                     page.wait_for_function("() => window.__devapi !== undefined", timeout=30_000)
@@ -166,7 +172,7 @@ def main(run) -> int:
     ap.add_argument("--port", type=_port, help="native: attach to a running host on this port")
     ap.add_argument("--host-bin", help="native: devapi_host executable to launch")
     ap.add_argument("--web-dir", help="web: directory with the wasm build's index.html")
-    ap.add_argument("--out", default=os.getcwd(), help="artifact directory")
+    ap.add_argument("--out", default=os.path.join(REPO_ROOT, "build", "devapi-out"), help="artifact directory")
     args = ap.parse_args()
     out_dir = os.path.abspath(args.out)
     scenario = functools.partial(run, out_dir=out_dir)

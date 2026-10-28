@@ -419,13 +419,13 @@ specified in the UI chapters linked above.
 Run them from the repo root with `python -m`; `tools/devapi/launch.py` starts the host:
 
 - `--target native` (default) launches `--host-bin` (default
-  `build/examples/devapi_host/native-debug/devapi_host`) on a free loopback port passed as
+  `build/examples/devapi_host/devapi-smoke/devapi_host`, built below) on a free loopback port passed as
   `NT_DEVAPI_PORT`, with its directory as the working directory; `--port N` attaches to a running host
   instead.
 - `--target web` serves `--web-dir` (default `build/examples/devapi_host/wasm-debug`) on a free loopback
   port and drives it in headless Chromium through playwright-python:
   `pip install -r tools/devapi/requirements-web.txt` then `python -m playwright install chromium`.
-- `--out DIR` receives artifacts (captures, recordings; default the working directory).
+- `--out DIR` receives artifacts (captures, recordings; default `build/devapi-out`).
 
 Exit 0 is a pass, 1 a failure, 2 a usage or launch error. There is no read timeout or retry: the caller's
 outer deadline bounds a run. `web_demo` is web-only (raw-bridge busy/reset, capture after WebGL context

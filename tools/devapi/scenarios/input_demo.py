@@ -50,7 +50,7 @@ def run(client: DevApiClient, out_dir: str) -> None:
             client.set_mode("run")
             client.resume()
             client.wait_frames(1)  # apply the key-ups before the close drops the schedule
-        except (DevApiResultError, ConnectionError, OSError):
+        except Exception:  # noqa: BLE001
             pass  # best effort: never mask the run's own failure
 
 

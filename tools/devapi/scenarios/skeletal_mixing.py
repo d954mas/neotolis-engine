@@ -81,7 +81,10 @@ def run(client, out_dir):
     try:
         print(json.dumps(_run(client, out_dir), indent=2))
     finally:
-        client.set_mode("run")
+        try:
+            client.set_mode("run")
+        except Exception:  # noqa: BLE001
+            pass  # best effort: never mask the run's own failure
 
 
 def _run(client, out_dir):

@@ -579,11 +579,13 @@ jobs:
       - name: Run devapi scenarios (native)
         timeout-minutes: 10
         run: |
+          rc=0
           for s in devapi_demo capture_demo obs_demo input_demo time_render_demo ui_demo write_demo; do
             echo "::group::$s"
-            xvfb-run -a python3 -m tools.devapi.scenarios.$s --host-bin "$PWD/build/examples/devapi_host/devapi-smoke/devapi_host" --out build/devapi-out
+            xvfb-run -a python3 -m tools.devapi.scenarios.$s --host-bin "$PWD/build/examples/devapi_host/devapi-smoke/devapi_host" --out build/devapi-out || { echo "::error::$s failed"; rc=1; }
             echo "::endgroup::"
           done
+          exit $rc
 
   # The web transport (window.__devapi, a capture filled after a rendered frame, the recorder's WebCodecs
   # path) only runs in a real headless Chromium: the same Python scenarios through PlaywrightTransport.
@@ -626,21 +628,25 @@ jobs:
       - name: Run devapi scenarios (wasm-debug)
         timeout-minutes: 15
         run: |
+          rc=0
           for s in devapi_demo web_demo capture_demo obs_demo input_demo time_render_demo ui_demo write_demo record_demo; do
             echo "::group::$s"
-            python3 -m tools.devapi.scenarios.$s --target web --out build/devapi-out
+            python3 -m tools.devapi.scenarios.$s --target web --out build/devapi-out || { echo "::error::$s failed"; rc=1; }
             echo "::endgroup::"
           done
+          exit $rc
 
       # Only the scenarios that reach Closure-renamed JS: the bridge, capture and NtRecorder.
       - name: Run devapi scenarios (wasm-release, Closure subset)
         timeout-minutes: 10
         run: |
+          rc=0
           for s in devapi_demo web_demo capture_demo record_demo; do
             echo "::group::$s"
-            python3 -m tools.devapi.scenarios.$s --target web --web-dir build/examples/devapi_host/wasm-release-devapi --out build/devapi-out-release
+            python3 -m tools.devapi.scenarios.$s --target web --web-dir build/examples/devapi_host/wasm-release-devapi --out build/devapi-out-release || { echo "::error::$s failed"; rc=1; }
             echo "::endgroup::"
           done
+          exit $rc
 
   # Three parts in parallel: the default smoke specs, the Basis admission rows and the
   # release diagnostics rows.

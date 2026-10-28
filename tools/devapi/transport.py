@@ -128,4 +128,7 @@ class PlaywrightTransport(Transport):
         if self._closed:
             return
         self._closed = True
-        self.page.evaluate("() => window.__devapi.reset()")
+        try:
+            self.page.evaluate("() => window.__devapi.reset()")
+        except Exception:  # noqa: BLE001
+            pass  # a closed or crashed page has nothing to reset; never mask the run's failure

@@ -238,7 +238,17 @@ static void test_time_jump_over_two_seconds_ends_the_recording(void) {
     TEST_ASSERT_EQUAL_UINT32(1, s_be.closed_frames);
     TEST_ASSERT_EQUAL_UINT64(1600, s_be.audio_frames);
     TEST_ASSERT_EQUAL_UINT32(1, s_be.warns);
-    nt_recorder_stats_t ended = nt_recorder_stop(); /* self-ended: the stop after it reports nothing */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_recorder_stop().frames); /* self-ended: the stop after it reports nothing */
+}
+
+static void test_self_end_reports_zero_drift(void) {
+    start_at(30, 0.0);
+    frame_at(1.0 / 30.0, 1.0 / 30.0);
+    push_stream(4000); /* ahead of the clock: the next frame samples a non-zero drift */
+    frame_at(2.0 / 30.0, 1.0 / 30.0);
+    frame_at(3.0, 1.0 / 30.0);
+    TEST_ASSERT_FALSE(nt_recorder_active());
+    nt_recorder_stats_t ended = nt_recorder_stop();
     TEST_ASSERT_EQUAL_UINT32(0, ended.frames);
     TEST_ASSERT_TRUE(ended.max_drift == 0.0);
 }
@@ -672,6 +682,7 @@ int main(void) {
     RUN_TEST(test_hitch_resubmits_the_frame);
     RUN_TEST(test_frozen_time_writes_nothing);
     RUN_TEST(test_time_jump_over_two_seconds_ends_the_recording);
+    RUN_TEST(test_self_end_reports_zero_drift);
     RUN_TEST(test_huge_time_jump_ends_quickly);
     RUN_TEST(test_catch_up_bound_is_two_seconds_of_frames);
     RUN_TEST(test_resize_ends_with_audio_padded_to_the_video);

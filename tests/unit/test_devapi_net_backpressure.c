@@ -4,6 +4,7 @@
  * so it reuses that file's platform shim. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -220,18 +221,51 @@ static void set_port_env(const char *value) {
 #endif
 }
 
+/* A port free right now: a value built from it can only be refused by the parse, never by bind. */
+static uint16_t free_port(void) {
+    nt_sock_t s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    TEST_ASSERT_TRUE(s != NT_INVALID_SOCK);
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof addr);
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    nt_socklen_t alen = (nt_socklen_t)sizeof addr;
+    int rc = bind(s, (struct sockaddr *)&addr, alen);
+    rc = rc == 0 ? getsockname(s, (struct sockaddr *)&addr, &alen) : rc;
+    nt_close_sock(s);
+    TEST_ASSERT_EQUAL_INT(0, rc);
+    return ntohs(addr.sin_port);
+}
+
 /* A value that is not a port in 1..65535 refuses to start (no fallback to the default port). */
 void test_start_rejects_a_bad_port_env(void) {
+    char junk[16];
+    (void)snprintf(junk, sizeof junk, "%ux", (unsigned)free_port());
+    const char *const bad[] = {"abc", "0", "65536", junk, "-1"};
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
-    static const char *const k_bad[] = {"abc", "0", "65536", "80x", "-1"};
     bool started = false;
-    for (size_t i = 0; i < sizeof k_bad / sizeof k_bad[0] && !started; i++) {
-        set_port_env(k_bad[i]);
+    for (size_t i = 0; i < sizeof bad / sizeof bad[0] && !started; i++) {
+        set_port_env(bad[i]);
         started = nt_devapi_net_start();
     }
     set_port_env("");
     nt_devapi_shutdown();
     TEST_ASSERT_FALSE(started);
+}
+
+void test_start_listens_on_the_env_port(void) {
+    uint16_t port = free_port();
+    char value[8];
+    (void)snprintf(value, sizeof value, "%u", (unsigned)port);
+    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
+    set_port_env(value);
+    bool started = nt_devapi_net_start();
+    set_port_env("");
+    TEST_ASSERT_TRUE(started);
+    struct sockaddr_in addr;
+    nt_socklen_t alen = (nt_socklen_t)sizeof addr;
+    TEST_ASSERT_EQUAL_INT(0, getsockname(s_listen, (struct sockaddr *)&addr, &alen));
+    TEST_ASSERT_EQUAL_UINT16(port, ntohs(addr.sin_port));
 }
 
 int main(void) {
@@ -241,5 +275,6 @@ int main(void) {
     RUN_TEST(test_wait_for_client_times_out_without_client);
     RUN_TEST(test_wait_for_client_returns_on_connect);
     RUN_TEST(test_start_rejects_a_bad_port_env);
+    RUN_TEST(test_start_listens_on_the_env_port);
     return UNITY_END();
 }

@@ -85,7 +85,9 @@ static void test_stop_reports_frames_and_drift_ms(void) {
     cJSON_Delete(submit(START_LINE));
     s_fake.stats = (nt_recorder_stats_t){.frames = 42, .max_drift = -0.125};
     cJSON *root = submit("{\"method\":\"record.stop\",\"request_id\":2}");
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
     const cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
+    TEST_ASSERT_NOT_NULL(result);
     TEST_ASSERT_EQUAL_INT(42, cJSON_GetObjectItemCaseSensitive(result, "frames")->valueint);
     TEST_ASSERT_TRUE(cJSON_GetObjectItemCaseSensitive(result, "max_drift_ms")->valuedouble == -125.0);
     cJSON_Delete(root);
