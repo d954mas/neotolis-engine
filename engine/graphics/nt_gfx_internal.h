@@ -12,13 +12,15 @@ extern nt_gfx_device_info_t g_nt_gfx_device_info;
 // #region observation storage and owning-site counters
 #if NT_GFX_CAPTURE_ENABLED
 typedef struct {
-    bool request_pending;  /* the next frame records */
-    uint32_t marker_depth; /* tracked in every frame, recorded or not */
-    nt_gfx_event_t *events;
-    uint32_t capacity;
+    bool request_pending;   /* the next frame records */
+    uint32_t marker_depth;  /* tracked in every frame, recorded or not */
+    nt_gfx_event_t *base;   /* one allocation of two arrays: the recording one and the finalized one */
+    nt_gfx_event_t *events; /* the recording array; view describes it */
+    uint32_t capacity;      /* records per array */
     nt_gfx_capture_view_t view;
-    nt_gfx_event_t *call; /* issued-call record being filled; NULL when not recording */
-    uint32_t link;        /* stamped on every reserved record: index + 1 of the open operation's OP record, or the executing command's */
+    nt_gfx_capture_view_t done; /* the last finalized frame, in the other array */
+    nt_gfx_event_t *call;       /* issued-call record being filled; NULL when not recording */
+    uint32_t link;              /* stamped on every reserved record: index + 1 of the open operation's OP record, or the executing command's */
     uint32_t call_ints;
     uint32_t call_floats;
 } nt_gfx_capture_state_t;

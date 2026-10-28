@@ -781,18 +781,18 @@ typedef struct {
     const nt_gfx_event_t *events;
     uint32_t count;
     uint32_t execute_begin, execute_end; /* records of the end_frame stream execution, frame storage uploads included; 0 until it ran */
-    nt_gfx_counters_t counters;          /* the finalized frame's, even after later unrecorded frames; frame_sequence 0 while recording */
+    nt_gfx_counters_t counters;          /* the finalized frame's, even after later unrecorded frames */
 } nt_gfx_capture_view_t;
 
 #if NT_GFX_CAPTURE_ENABLED
 /* Name of an issued-call detail, e.g. "glBindTexture"; NULL outside the table. */
 const char *nt_gfx_gl_call_name(uint32_t call);
-/* One-shot: the next frame records, starting at the begin_frame that opens it.
- * Requires nonzero init capacity. The stub is inert. */
+/* One-shot: the next frame records, starting at the begin_frame that opens it. A request in every
+ * frame records every frame. Requires nonzero init capacity. The stub is inert. */
 void nt_gfx_capture_request(void);
-/* Metadata by value; the event prefix is immutable, except OP records of operations still in
- * progress, until the begin_frame that starts the next requested recording, or shutdown, so read
- * right after begin_frame. Copy count records and metadata to keep. Empty views have events=NULL. */
+/* The last finalized frame: metadata by value, records immutable until the next begin_frame that
+ * finalizes another recording, or shutdown. Copy count records and metadata to keep. Empty views
+ * have events=NULL. */
 nt_gfx_capture_view_t nt_gfx_capture_read(void);
 #endif
 

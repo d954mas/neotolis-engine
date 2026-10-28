@@ -317,8 +317,10 @@ void nt_gfx_capture_request(void) {
 }
 
 nt_gfx_capture_view_t nt_gfx_capture_read(void) {
-    nt_gfx_capture_view_t result = g_nt_gfx_capture.view;
-    result.events = result.count > 0 ? g_nt_gfx_capture.events : NULL;
+    nt_gfx_capture_view_t result = g_nt_gfx_capture.done;
+    if (result.count == 0) {
+        result.events = NULL;
+    }
     return result;
 }
 
@@ -543,8 +545,9 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc->capture_capacity < (1U << 24) && "capture_capacity: an operation link must fit 24 bits of a stream op word");
     g_nt_gfx_capture.capacity = desc->capture_capacity;
     if (desc->capture_capacity > 0) {
-        g_nt_gfx_capture.events = (nt_gfx_event_t *)malloc((size_t)desc->capture_capacity * sizeof(nt_gfx_event_t));
-        NT_ASSERT(g_nt_gfx_capture.events != NULL);
+        g_nt_gfx_capture.base = (nt_gfx_event_t *)malloc((size_t)desc->capture_capacity * 2U * sizeof(nt_gfx_event_t));
+        NT_ASSERT(g_nt_gfx_capture.base != NULL);
+        g_nt_gfx_capture.events = g_nt_gfx_capture.base;
     }
 #endif
     nt_gfx_frame_init(desc);
@@ -599,7 +602,7 @@ void nt_gfx_shutdown(void) {
     /* The open frame is discarded unpublished; teardown calls must not record into the freed array. */
 #if NT_GFX_CAPTURE_ENABLED
     g_nt_gfx.capture_recording = false;
-    free(g_nt_gfx_capture.events);
+    free(g_nt_gfx_capture.base);
 #endif
     /* Delete GL objects before backend teardown, which destroys the WebGL context. */
 
@@ -823,7 +826,12 @@ void nt_gfx_begin_frame(void) {
     g_nt_gfx.last_frame = g_nt_gfx.counters;
 #if NT_GFX_CAPTURE_ENABLED
     if (g_nt_gfx.capture_recording) {
+        /* The finished frame moves to done; the next recording writes the other array. */
         g_nt_gfx_capture.view.counters = g_nt_gfx.last_frame;
+        g_nt_gfx_capture.view.events = g_nt_gfx_capture.events;
+        g_nt_gfx_capture.done = g_nt_gfx_capture.view;
+        g_nt_gfx_capture.view = (nt_gfx_capture_view_t){0};
+        g_nt_gfx_capture.events = g_nt_gfx_capture.events == g_nt_gfx_capture.base ? g_nt_gfx_capture.base + g_nt_gfx_capture.capacity : g_nt_gfx_capture.base;
         g_nt_gfx.capture_recording = false;
     }
 #endif

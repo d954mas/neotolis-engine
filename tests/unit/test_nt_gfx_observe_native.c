@@ -5,6 +5,7 @@
 #include "window/nt_window.h"
 
 #define GLFW_INCLUDE_NONE
+#include "test_helpers/nt_gfx_test_capture.h"
 #include <GLFW/glfw3.h>
 #include <glad/gl.h>
 
@@ -151,7 +152,7 @@ void tearDown(void) {
 
 #if NT_GFX_CAPTURE_ENABLED
 static uint32_t captured_calls(nt_gfx_gl_call_t call) {
-    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    nt_gfx_capture_view_t capture = nt_test_capture_latest();
     TEST_ASSERT_FALSE(capture.overflow);
     uint32_t count = 0;
     for (uint32_t i = 0; i < capture.count; i++) {

@@ -1148,16 +1148,16 @@ frontend handles are the identity across them.
 Command recording is one-shot: `nt_gfx_capture_request` asks for the next frame
 to be recorded. The begin_frame that closes the requesting frame consumes the request
 and starts recording the frame it opens; without a request no frame records. The
-first frame never records. A request made during a recorded frame replaces that
-capture at the begin_frame that finishes it, so read a capture in the following
-frame before requesting again: readable captures are at most every other frame.
-`nt_gfx_desc_t.capture_capacity` reserves one
-event array at init (default zero, below 2^24 because a link must fit a stream
+first frame never records. Recording uses two event arrays: the begin_frame that
+finalizes a recorded frame keeps it in one and records the next requested frame
+into the other, so a request in every frame records every frame.
+`nt_gfx_desc_t.capture_capacity` reserves both arrays, `capture_capacity` records
+each, at init (default zero, below 2^24 because a link must fit a stream
 op word); a request without capacity asserts. Capture-OFF builds ignore the field.
 There is no growth or allocation while recording. Each pointer-free POD event
-is 104 bytes, including padding; 16384 records reserve 1.625 MiB. Gfx records keep
-`operation`, `object_kind` and `result` in one byte each. Other storage
-consists of fixed control state and counter snapshots, with no second event array.
+is 104 bytes, including padding; a capacity of 16384 records reserves 3.25 MiB. Gfx records keep
+`operation`, `object_kind`, `result` and `arg_count` in one byte each. Other storage
+consists of fixed control state and counter snapshots.
 All record bytes are initialized before publication. A recorded frame starts at
 the begin_frame that opens it and first snapshots
 inherited state, including one definition per live resource (plus
@@ -1165,12 +1165,11 @@ program uniform/sampler and vertex-input attribute records), into the same array
 Size the capacity for that snapshot plus the frame's commands; a capacity below
 the snapshot overflows before any command is recorded.
 
-`nt_gfx_capture_read` returns metadata by value and an event prefix that is
-immutable except for the OP records of operations still in progress (an OP is
-final when its call returns). Read a finished capture right after
-`nt_gfx_begin_frame`: the prefix remains valid until the begin_frame that starts
-the next requested recording overwrites it, or shutdown; unrequested frames
-preserve it. Keep a capture by copying the metadata and `count` records
+`nt_gfx_capture_read` returns the last finalized frame: metadata by value and
+immutable records. They stay valid until the next begin_frame that finalizes
+another recorded frame, or shutdown; unrequested frames preserve them, and with
+a request in every frame they are valid for one frame. A frame still recording is
+not readable. Keep a capture by copying the metadata and `count` records
 and redirecting the saved view's pointer to the owned array. An empty view has
 a NULL pointer. The finalized view retains its frame's counters (and so its
 `frame_sequence`) by value even after later unrecorded frames overwrite
@@ -1203,8 +1202,8 @@ A stage destroyed while a pending link holds it records its `glDeleteShader` whe
 that link resolves: among these link records, or inside the program's DESTROY operation; a lost
 context records none. A program's DEFINITION does not imply readiness: one recorded while it links carries
 no reflection. `DEFINITION` is reserved for resource and inherited state. Issued backend calls do not
-prove GL success or GPU completion. The view's `counters` are zero (sequence 0)
-while a frame records and become the finalized frame's at the begin_frame that closes it; `overflow`
+prove GL success or GPU completion. The view's `counters` are the finalized
+frame's, set at the begin_frame that closes it; `overflow`
 alone reports an incomplete event stream. Overflow stops event appends and never
 truncates counters.
 
