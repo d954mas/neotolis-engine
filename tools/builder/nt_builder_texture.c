@@ -27,8 +27,8 @@ nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *op
     bool compressed = compress_opts->codec != NT_BASISU_CODEC_NONE;
     bool filter_min_uses_mips = resolved.filter_min >= NT_TEXTURE_DEFAULT_FILTER_NEAREST_MIPMAP_NEAREST;
     NT_BUILD_ASSERT((compressed || format != NT_TEXTURE_FORMAT_SRGB8 || (!resolved.gen_mipmaps && !filter_min_uses_mips)) &&
-                    "texture opts: RAW SRGB8 cannot generate runtime mips -- use SRGB8_ALPHA8, or gen_mipmaps=false with a non-mip filter_min");
-    NT_BUILD_ASSERT((compressed || !filter_min_uses_mips || resolved.gen_mipmaps) && "texture opts: RAW mipmap filter requires gen_mipmaps=true");
+                    "texture opts: uncompressed SRGB8 cannot generate runtime mips -- use SRGB8_ALPHA8, or gen_mipmaps=false with a non-mip filter_min");
+    NT_BUILD_ASSERT((compressed || !filter_min_uses_mips || resolved.gen_mipmaps) && "texture opts: uncompressed mipmap filter requires gen_mipmaps=true");
 
     if (compressed) {
         NT_BUILD_ASSERT((format == NT_TEXTURE_FORMAT_RGBA8 || format == NT_TEXTURE_FORMAT_RGB8 || format == NT_TEXTURE_FORMAT_SRGB8_ALPHA8 || format == NT_TEXTURE_FORMAT_SRGB8) &&
@@ -295,7 +295,7 @@ void nt_builder_encode_texture_to_buf(const void *pixels, uint32_t width, uint32
     tex_hdr.width = width;
     tex_hdr.height = height;
     tex_hdr.mip_count = mip_count;
-    tex_hdr.compression = (uint8_t)(compressed ? NT_TEXTURE_COMPRESSION_BASIS : NT_TEXTURE_COMPRESSION_RAW);
+    tex_hdr.compression = (uint8_t)(compressed ? NT_TEXTURE_COMPRESSION_BASIS : NT_TEXTURE_COMPRESSION_NONE);
     tex_hdr.flags = opts->premultiplied ? (uint8_t)NT_TEXTURE_FLAG_PREMULTIPLIED : 0;
     if (!compressed && !hdr && opts->gen_mipmaps) {
         tex_hdr.flags |= (uint8_t)NT_TEXTURE_FLAG_GEN_MIPMAPS;

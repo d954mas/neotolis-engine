@@ -1,4 +1,4 @@
-/* HDR texture sources and RAW RGB9E5 packs: decode, range contract, box chain, cache. */
+/* HDR texture sources and uncompressed RGB9E5 packs: decode, range contract, box chain, cache. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -157,7 +157,7 @@ void test_rgb9e5_chain_is_the_full_halved_chain(void) {
     nt_tex_opts_t opts = hdr_opts(true);
     texture_asset_t t = build_raw(TMP_DIR "/chain.ntpack", rgb, 5, 3, &opts);
     TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_FORMAT_RGB9E5, t.hdr.format);
-    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, t.hdr.compression);
+    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_NONE, t.hdr.compression);
     TEST_ASSERT_EQUAL_UINT16(3, t.hdr.mip_count);
     TEST_ASSERT_EQUAL_UINT32((15 + 2 + 1) * 4, t.hdr.data_size);
     /* The runtime cannot generate RGB9E5 mips; the flag would make it try. */
@@ -384,7 +384,7 @@ void test_hdr_opts_contract(void) {
     /* A mip filter without a baked chain has no levels to sample. */
     opts = hdr_opts(false);
     opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR;
-    EXPECT_BUILD_ASSERT_MATCH((void)nt_builder_assert_texture_opts(&opts), "RAW mipmap filter requires gen_mipmaps=true");
+    EXPECT_BUILD_ASSERT_MATCH((void)nt_builder_assert_texture_opts(&opts), "uncompressed mipmap filter requires gen_mipmaps=true");
 }
 
 // #endregion

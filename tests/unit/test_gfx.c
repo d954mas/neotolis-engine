@@ -2141,7 +2141,7 @@ void test_activate_texture_zero_dimensions_assert(void) {
         hdr->width = sizes[i][0];
         hdr->height = sizes[i][1];
         hdr->mip_count = 1;
-        hdr->compression = NT_TEXTURE_COMPRESSION_RAW;
+        hdr->compression = NT_TEXTURE_COMPRESSION_NONE;
         EXPECT_ASSERT((void)nt_gfx_activate_texture(blob, (uint32_t)sizeof(blob)));
     }
 }
@@ -2162,7 +2162,7 @@ void test_activate_texture_valid_blob(void) {
     hdr->width = w;
     hdr->height = h;
     hdr->mip_count = 1;
-    hdr->compression = NT_TEXTURE_COMPRESSION_RAW;
+    hdr->compression = NT_TEXTURE_COMPRESSION_NONE;
     hdr->data_size = pixel_size;
     /* Fill pixel data with non-zero */
     memset(blob + sizeof(NtTextureAssetHeader), 0xFF, pixel_size);
@@ -2171,7 +2171,7 @@ void test_activate_texture_valid_blob(void) {
     nt_gfx_deactivate_texture(handle);
 }
 
-/* A RAW payload is exactly its pixels: four extra bytes, consistent with the blob, still assert. */
+/* An uncompressed payload is exactly its pixels: four extra bytes, consistent with the blob, still assert. */
 static void expect_raw_size_assert(uint32_t data_size) {
     uint8_t blob[sizeof(NtTextureAssetHeader) + 16];
     NtTextureAssetHeader *hdr = (NtTextureAssetHeader *)blob;
@@ -2182,10 +2182,10 @@ static void expect_raw_size_assert(uint32_t data_size) {
     hdr->width = 1;
     hdr->height = 2;
     hdr->mip_count = 1;
-    hdr->compression = NT_TEXTURE_COMPRESSION_RAW;
+    hdr->compression = NT_TEXTURE_COMPRESSION_NONE;
     hdr->data_size = data_size;
     EXPECT_ASSERT((void)nt_gfx_activate_texture(blob, (uint32_t)sizeof(NtTextureAssetHeader) + hdr->data_size));
-    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "RAW data_size differs"));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "uncompressed data_size differs"));
 }
 
 void test_activate_texture_raw_payload_size_mismatch_asserts(void) {
@@ -2204,7 +2204,7 @@ static uint32_t fill_rgb9e5_blob(uint8_t *blob, uint32_t w, uint32_t h, uint16_t
     hdr->width = w;
     hdr->height = h;
     hdr->mip_count = mip_count;
-    hdr->compression = NT_TEXTURE_COMPRESSION_RAW;
+    hdr->compression = NT_TEXTURE_COMPRESSION_NONE;
     hdr->data_size = data_size;
     return (uint32_t)sizeof(NtTextureAssetHeader) + data_size;
 }
@@ -2226,7 +2226,7 @@ void test_activate_texture_raw_chain_size_counts_every_level(void) {
     uint8_t blob[RGB9E5_BLOB_BYTES];
     /* Only level 0's bytes under a two-level header. */
     EXPECT_ASSERT((void)nt_gfx_activate_texture(blob, fill_rgb9e5_blob(blob, 3, 2, 2, 24)));
-    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "RAW data_size differs"));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "uncompressed data_size differs"));
 }
 
 void test_activate_texture_raw_partial_chain_asserts(void) {

@@ -26,7 +26,7 @@ The skeletal activators (NSKL/NSKN/NANM) pin the boundary of that safety net as 
 
 ## Texture activation (TTEX)
 
-A RAW texture uploads the pixels that follow its header as they lie: one level,
+An uncompressed (`NONE`) texture uploads the pixels that follow its header as they lie: one level,
 or the full chain down to 1x1 with levels 0..`mip_count`-1 back to back and no
 padding, each sized by `nt_texture_level_bytes` — the layout of the Basis
 staging buffer below. `data_size` is the sum over those levels, and
@@ -70,8 +70,8 @@ is a pack from another configure, a developer error: `nt_basisu_info` asserts
 at the cross-check; there is no FAILED fallback for it.
 
 The header `format` also carries the transfer. `RGBA8`, `RGB8`, `RG8` and `R8`
-are linear storage; `SRGB8_ALPHA8` and `SRGB8` mark sRGB-encoded color. A RAW
-sRGB texture uploads its encoded bytes to `GL_SRGB8_ALPHA8`/`GL_SRGB8` as they
+are linear storage; `SRGB8_ALPHA8` and `SRGB8` mark sRGB-encoded color. An
+uncompressed sRGB texture uploads its encoded bytes to `GL_SRGB8_ALPHA8`/`GL_SRGB8` as they
 lie. A BASIS sRGB texture takes the sRGB twin of the selected target
 (`ETC2_SRGB8`, `ETC2_SRGB8_ALPHA8`, `BC7_SRGB_ALPHA`, `ASTC_4x4_SRGB8_ALPHA8`;
 the uncompressed fallback becomes `SRGB8_ALPHA8`). The block bits are the same;
@@ -87,17 +87,17 @@ interpretation survives. An sRGB ASTC format expands block endpoints
 differently, so a UASTC texture sampled through it differs by about one step
 before the transfer curve. `SRGB8` is not color-renderable in WebGL 2 and cannot
 generate runtime mips: `nt_gfx_make_texture` asserts on it with `gen_mipmaps`, and the builder
-rejects a RAW `SRGB8` texture with `gen_mipmaps`.
+rejects an uncompressed `SRGB8` texture with `gen_mipmaps`.
 
 `RGB9E5` (`GL_RGB9_E5`, 4 bytes per pixel) is the pack format for linear HDR
 color: unsigned RGB with 9-bit mantissas and a shared 5-bit exponent, no alpha,
-values up to 65408. It is RAW only for now. The runtime cannot generate its
+values up to 65408. It is uncompressed only for now. The runtime cannot generate its
 mips (see [API contracts](../core/api-contracts.md)), so a mipmapped `RGB9E5`
 asset carries the chain the builder baked, laid out as above.
 
 The runtime accepts a single-level texture under any min filter, because
 `GL_TEXTURE_MAX_LEVEL` is then 0 and the storage is mip-complete; the builder
-asserts on that combination for RAW assets ([builder](../builder/builder.md)).
+asserts on that combination for uncompressed assets ([builder](../builder/builder.md)).
 
 ## Mesh format strategy
 

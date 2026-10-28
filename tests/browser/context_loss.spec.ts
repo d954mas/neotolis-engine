@@ -14,8 +14,8 @@ declare global {
       basis_ready(): boolean;
       basis_format(): number;
       basis_rgb_format(): number;
-      srgb(): [number, number, number, number, number]; // sRGB fixture format, opaque format, corner and 1x1 samples, RAW texel sample
-      hdr(): [number, number, number]; // RAW RGB9E5 format, level-0 corner and 1x1 samples scaled by 1/16
+      srgb(): [number, number, number, number, number]; // sRGB fixture format, opaque format, corner and 1x1 samples, uncompressed texel sample
+      hdr(): [number, number, number]; // uncompressed RGB9E5 format, level-0 corner and 1x1 samples scaled by 1/16
       basis_caps(): number;
       basis_build_targets(): number;
       basis_build_codecs(): number;
@@ -222,7 +222,7 @@ const FIXTURE_TOLERANCE = 16;
 // sRGB storage samples linear: the left half decodes to (147,5,5,255); undecoded, red would read 200.
 // Decoding steepens codec error near 200 by about 1.8x, hence the wider tolerance; red discriminates.
 // The 1x1 level averages light, (0.30,0.02,0.30) linear, and alpha 128/255 linearly: an encoded-value
-// mip would read red 48, a lost alpha 255. The RAW texel's 128s decode to 55 with alpha untouched.
+// mip would read red 48, a lost alpha 255. The uncompressed texel's 128s decode to 55 with alpha untouched.
 const FIXTURE_LEFT_LINEAR = [147, 5, 5, 255];
 const FIXTURE_AVERAGE_LINEAR = [76, 5, 76, 191];
 const SRGB_TEXEL_LINEAR = [55, 55, 55, 128];
@@ -234,11 +234,11 @@ async function checkSrgbFixture(page: Page, label: string, caps: number, buildTa
   expect(rgbFormat, `${label}: opaque sRGB transcode target`).toBe(SRGB_TWIN[expectedBasisFormat(caps, buildTargets, false, codec)]);
   expectTexel(srgb, FIXTURE_LEFT_LINEAR, 30, `${label}: sRGB level-0 corner texel`);
   expectTexel(srgbLast, FIXTURE_AVERAGE_LINEAR, 20, `${label}: sRGB 1x1 last level`);
-  expectTexel(texel, SRGB_TEXEL_LINEAR, 1, `${label}: RAW sRGB texel`);
+  expectTexel(texel, SRGB_TEXEL_LINEAR, 1, `${label}: uncompressed sRGB texel`);
   return { srgb, srgbLast, texel };
 }
 
-// RAW RGB9E5 (format 21): left half (0.25, 2, 8), right half (8, 0.25, 2), sampled scaled by 1/16 into
+// Uncompressed RGB9E5 (format 21): left half (0.25, 2, 8), right half (8, 0.25, 2), sampled scaled by 1/16 into
 // RGBA8, alpha 1/16. Values above 1 reach the shader unclamped: a clamp to 1 would read byte 16 for both 2 and 8.
 // The 1x1 level is the builder's box average (4.125, 1.125, 5).
 const RGB9E5_FORMAT = 21;
@@ -248,7 +248,7 @@ const HDR_AVERAGE = [66, 18, 80, 16];
 async function checkHdrFixture(page: Page, label: string): Promise<{ hdr: number; hdrLast: number }> {
   const [format, hdr, hdrLast] = await page.evaluate(() => window.__nt!.hdr());
   console.log(`[hdr ${label}] format=${format} corner=0x${hdr.toString(16)} last=0x${hdrLast.toString(16)}`);
-  expect(format, `${label}: RAW HDR format`).toBe(RGB9E5_FORMAT);
+  expect(format, `${label}: uncompressed HDR format`).toBe(RGB9E5_FORMAT);
   expectTexel(hdr, HDR_LEFT, 1, `${label}: RGB9E5 level-0 corner texel`);
   expectTexel(hdrLast, HDR_AVERAGE, 1, `${label}: RGB9E5 1x1 last level`);
   return { hdr, hdrLast };

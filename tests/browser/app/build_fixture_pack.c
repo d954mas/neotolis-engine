@@ -1,7 +1,7 @@
 /* Browser smoke app's Basis fixture pack: a 128x128 RGBA and a 96x64 opaque RGB
  * texture of two solid halves (ETC1S when its option is ON, else UASTC), so every
  * transcode target lands on the same texels, the same pair stored as sRGB, and a
- * RAW sRGB texel, plus a RAW RGB9E5 HDR texture. main.c requests them all. */
+ * uncompressed sRGB texel, plus an uncompressed RGB9E5 HDR texture. main.c requests them all. */
 
 #include "nt_builder.h"
 
@@ -61,7 +61,7 @@ static void add_pair(NtBuilderContext *ctx, const char *suffix, nt_basisu_encode
     (void)printf("  Textures added: basis_%s_rgba, basis_%s_rgb and their sRGB twins\n", suffix, suffix);
 }
 
-/* One RAW sRGB texel whose 128 bytes sample as 0.21586 linear RGB and 0.50196 alpha. */
+/* One uncompressed sRGB texel whose 128 bytes sample as 0.21586 linear RGB and 0.50196 alpha. */
 static void add_srgb_texel(NtBuilderContext *ctx) {
     static const uint8_t texel[4] = {128, 128, 128, 128};
     nt_tex_opts_t opts = nt_tex_opts_defaults();
@@ -72,7 +72,7 @@ static void add_srgb_texel(NtBuilderContext *ctx) {
     nt_builder_add_texture_raw(ctx, texel, 1, 1, "srgb_texel", &opts);
 }
 
-/* RAW RGB9E5 4x4 with its baked chain: left half (0.25, 2, 8), right half (8, 0.25, 2). */
+/* Uncompressed RGB9E5 4x4 with its baked chain: left half (0.25, 2, 8), right half (8, 0.25, 2). */
 static void add_hdr_texture(NtBuilderContext *ctx) {
     static float rgb[4 * 4 * 3];
     for (uint32_t i = 0; i < 4 * 4; i++) {

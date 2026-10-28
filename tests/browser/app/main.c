@@ -90,11 +90,11 @@ static nt_resource_t s_atlas_handle, s_atlas_tex_handle;
  * Basis transcode path. RGBA carries alpha, RGB is opaque (ETC2 picks RGB8 for it). */
 static nt_resource_t s_basis_tex_handle;
 static nt_resource_t s_basis_rgb_handle;
-/* The same pair stored as sRGB, and a RAW sRGB texel of 128s. */
+/* The same pair stored as sRGB, and an uncompressed sRGB texel of 128s. */
 static nt_resource_t s_basis_srgb_handle;
 static nt_resource_t s_basis_srgb_rgb_handle;
 static nt_resource_t s_srgb_texel_handle;
-/* RAW RGB9E5 with values above 1, sampled scaled by 1/16. */
+/* Uncompressed RGB9E5 with values above 1, sampled scaled by 1/16. */
 static nt_resource_t s_hdr_handle;
 static nt_resource_t s_font_resource;
 static nt_resource_t s_rich_font_resource[4];

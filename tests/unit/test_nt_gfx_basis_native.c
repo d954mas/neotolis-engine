@@ -457,7 +457,7 @@ void test_render_target_color_caps_max_level(void) {
 
 // #endregion
 
-// #region (d) RAW sRGB decode, round trip and updates
+// #region (d) uncompressed sRGB decode, round trip and updates
 
 #define RAMP_W 64U
 #define RAMP_H 4U
@@ -558,7 +558,7 @@ void test_srgb_updates_keep_the_interpretation(void) {
 
 // #endregion
 
-// #region RAW RGB9E5 (HDR)
+// #region uncompressed RGB9E5 (HDR)
 
 #define HDR_W 8U
 #define HDR_H 4U

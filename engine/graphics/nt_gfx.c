@@ -2695,7 +2695,7 @@ static nt_texture_format_t basis_target_format(const nt_gfx_gpu_caps_t *caps, nt
     }
 }
 
-/* Activate a TTEX texture (RAW or Basis Universal compressed) */
+/* Activate a TTEX texture (uncompressed or Basis Universal) */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     /* make_texture would refuse the result anyway; bail before transcoding
@@ -2712,14 +2712,14 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     NT_ASSERT(hdr->width != 0 && hdr->height != 0 && hdr->width <= UINT16_MAX && hdr->height <= UINT16_MAX && "texture dimensions out of range");
     /* Subtraction safe: the resource core checked size >= sizeof header. */
     NT_ASSERT(hdr->data_size == size - sizeof(NtTextureAssetHeader) && "texture data_size differs from its blob");
-    NT_ASSERT((hdr->compression == NT_TEXTURE_COMPRESSION_RAW || hdr->compression == NT_TEXTURE_COMPRESSION_BASIS) && "texture compression unknown");
-    if (hdr->compression == NT_TEXTURE_COMPRESSION_RAW) {
-        NT_ASSERT((hdr->mip_count == 1 || hdr->mip_count == nt_texture_full_chain_levels(hdr->width, hdr->height)) && "texture RAW mip_count is neither 1 nor the full chain");
+    NT_ASSERT((hdr->compression == NT_TEXTURE_COMPRESSION_NONE || hdr->compression == NT_TEXTURE_COMPRESSION_BASIS) && "texture compression unknown");
+    if (hdr->compression == NT_TEXTURE_COMPRESSION_NONE) {
+        NT_ASSERT((hdr->mip_count == 1 || hdr->mip_count == nt_texture_full_chain_levels(hdr->width, hdr->height)) && "texture uncompressed mip_count is neither 1 nor the full chain");
         uint64_t expected = 0;
         for (uint32_t level = 0; level < hdr->mip_count; level++) {
             expected += nt_texture_level_bytes((nt_texture_pixel_format_t)hdr->format, nt_texture_level_extent(hdr->width, level), nt_texture_level_extent(hdr->height, level));
         }
-        NT_ASSERT(expected == hdr->data_size && "texture RAW data_size differs from its pixels");
+        NT_ASSERT(expected == hdr->data_size && "texture uncompressed data_size differs from its pixels");
     }
     if (hdr->width > g_nt_gfx.gpu_caps.max_texture_size || hdr->height > g_nt_gfx.gpu_caps.max_texture_size) {
         NT_LOG_ERROR("activate_texture: %ux%u exceeds GPU max_texture_size %u", hdr->width, hdr->height, g_nt_gfx.gpu_caps.max_texture_size);
@@ -2729,8 +2729,8 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     const uint16_t height = (uint16_t)hdr->height;
     // #endregion
 
-    /* RAW compression: one level or the full chain after the header */
-    if (hdr->compression == NT_TEXTURE_COMPRESSION_RAW) {
+    /* Uncompressed: one level or the full chain after the header */
+    if (hdr->compression == NT_TEXTURE_COMPRESSION_NONE) {
         nt_texture_format_t pixel_fmt = (nt_texture_format_t)hdr->format;
         nt_texture_desc_t desc = {
             .width = width,

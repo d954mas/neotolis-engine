@@ -247,7 +247,7 @@ typedef struct {
     nt_texture_default_filter_t filter_mag; /* default: LINEAR (NEAREST or LINEAR only) */
     nt_texture_default_wrap_t wrap_u;       /* default: REPEAT */
     nt_texture_default_wrap_t wrap_v;       /* default: REPEAT */
-    /* RAW mips: defaults true, zero-init false. Required for mipmap filtering,
+    /* Uncompressed mips: defaults true, zero-init false. Required for mipmap filtering,
      * including material overrides. Generated at runtime, except RGB9E5, whose
      * chain the builder bakes. Ignored by BASIS. */
     bool gen_mipmaps;
@@ -370,7 +370,7 @@ typedef struct {
     nt_texture_default_filter_t filter_mag; /* default: LINEAR (NEAREST or LINEAR only) */
     nt_texture_default_wrap_t wrap_u;       /* default: REPEAT */
     nt_texture_default_wrap_t wrap_v;       /* default: REPEAT */
-    bool gen_mipmaps;                       /* RAW only; default true. See nt_tex_opts_t.gen_mipmaps. */
+    bool gen_mipmaps;                       /* Uncompressed only; default true. See nt_tex_opts_t.gen_mipmaps. */
     bool dedup;                             /* fold sprites with identical content onto one placement (default: true).
                                              * A 0x00 zero-init therefore means dedup OFF — same trade-off as allowed_transforms. */
 } nt_atlas_opts_t;

@@ -137,11 +137,11 @@ static void add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uin
         nt_basisu_encode_opts_t tex_compress = color_compress;
         switch (roles[i]) {
         case TEX_ROLE_DIFFUSE:
-            /* Base color is sRGB-encoded (glTF); the shaders light in linear space. RAW SRGB8 cannot runtime-mip. */
+            /* Base color is sRGB-encoded (glTF); the shaders light in linear space. Uncompressed SRGB8 cannot runtime-mip. */
             opts.format = texture_needs_alpha(scene, i, gltf) || color_compress.codec == NT_BASISU_CODEC_NONE ? NT_TEXTURE_FORMAT_SRGB8_ALPHA8 : NT_TEXTURE_FORMAT_SRGB8;
             break;
         case TEX_ROLE_NORMAL:
-            /* RG8 for RAW (placeholders), RGB8 for Basis (Basis has no 2-channel mode) */
+            /* RG8 uncompressed (placeholders), RGB8 for Basis (Basis has no 2-channel mode) */
             opts.format = normal_compress.codec != NT_BASISU_CODEC_NONE ? NT_TEXTURE_FORMAT_RGB8 : NT_TEXTURE_FORMAT_RG8;
             tex_compress = normal_compress;
             break;

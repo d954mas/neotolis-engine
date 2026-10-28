@@ -149,13 +149,13 @@ static inline uint64_t nt_texture_level_bytes(nt_texture_format_t fmt, uint32_t 
 
 /* Compression type */
 typedef enum {
-    NT_TEXTURE_COMPRESSION_RAW = 0,   /* uncompressed pixel data */
+    NT_TEXTURE_COMPRESSION_NONE = 0,  /* uncompressed pixel data */
     NT_TEXTURE_COMPRESSION_BASIS = 1, /* Basis Universal encoded data */
 } nt_texture_compression_t;
 
 /* Texture header flags (single byte) */
 #define NT_TEXTURE_FLAG_PREMULTIPLIED (1U << 0) /* RGB already multiplied by alpha */
-#define NT_TEXTURE_FLAG_GEN_MIPMAPS (1U << 1)   /* runtime should glGenerateMipmap on a one-level RAW upload (no effect on BASIS) */
+#define NT_TEXTURE_FLAG_GEN_MIPMAPS (1U << 1)   /* runtime should glGenerateMipmap on a one-level uncompressed upload (no effect on BASIS) */
 /* bits 2..7 reserved */
 
 /* Values must match nt_texture_filter_t / nt_texture_wrap_t in nt_gfx.h. */
@@ -186,13 +186,13 @@ typedef enum {
  *   data_size(4)
  *
  * compression field:
- *   RAW(0): uncompressed levels 0..mip_count-1 follow back to back, no
+ *   NONE(0): uncompressed levels 0..mip_count-1 follow back to back, no
  *           padding; mip_count is 1 or the full chain, data_size is the sum
  *           of nt_texture_level_bytes over the levels
  *   BASIS(1): Basis Universal encoded blob follows
  *
  * format field serves double duty:
- *   RAW: pixel layout and transfer (RGBA8, RGB8, RG8, R8, SRGB8_ALPHA8, SRGB8,
+ *   NONE: pixel layout and transfer (RGBA8, RGB8, RG8, R8, SRGB8_ALPHA8, SRGB8,
  *        RGB9E5)
  *   BASIS: source channels and transfer (RGBA8/RGB8 linear, SRGB8_ALPHA8/SRGB8
  *          sRGB). sRGB picks the sRGB twin of the transcode target; alpha and
@@ -203,7 +203,7 @@ typedef enum {
  *   bit 0 = NT_TEXTURE_FLAG_PREMULTIPLIED — RGB values are already multiplied
  *           by alpha. Renderer should use blend (ONE, ONE_MINUS_SRC_ALPHA).
  *   bit 1 = NT_TEXTURE_FLAG_GEN_MIPMAPS — runtime should generate mips on
- *           upload for one-level RAW textures so material sampler overrides
+ *           upload for one-level uncompressed textures so material sampler overrides
  *           can opt into mipmap filtering. Never set with a baked chain.
  *           No effect on BASIS (mips are baked).
  *
@@ -215,7 +215,7 @@ typedef enum {
  *   Pixel-art atlases typically pick LINEAR/NEAREST + REPEAT; downscaled
  *   3D textures want LINEAR_MIPMAP_LINEAR.
  *
- * No mip_sizes[] array: RAW level sizes are calculable from dimensions,
+ * No mip_sizes[] array: uncompressed level sizes are calculable from dimensions,
  * BASIS mip boundaries are parsed internally by the transcoder.
  */
 #pragma pack(push, 1)
@@ -226,7 +226,7 @@ typedef struct {
     uint32_t width;             /* base level width in pixels */
     uint32_t height;            /* base level height in pixels */
     uint16_t mip_count;         /* number of mip levels in chain */
-    uint8_t compression;        /* nt_texture_compression_t: 0=RAW, 1=BASIS */
+    uint8_t compression;        /* nt_texture_compression_t: 0=NONE, 1=BASIS */
     uint8_t flags;              /* NT_TEXTURE_FLAG_* bits */
     uint8_t default_min_filter; /* nt_texture_filter_t enum */
     uint8_t default_mag_filter; /* nt_texture_filter_t enum (NEAREST or LINEAR only) */

@@ -49,7 +49,7 @@ no cut) and fed to both builder contexts. The skinned mesh is primitive 0 of the
 mesh of the node that instantiates skin 0, exported with `POSITION`, `JOINTS`
 and `WEIGHTS`, float32 `TEXCOORD_0` and, for CesiumMan and KayKit, `NORMAL`
 (the Fox primitive has none). Base-color textures come from each primitive
-material and ship as RAW with mipmaps. Both CPU and GPU use the same textured
+material and ship uncompressed with mipmaps. Both CPU and GPU use the same textured
 unlit shading; normals are not used. The Khronos clips are sampled at 24 fps
 and KayKit at 30 fps; the builder prints
 one report line per clip:

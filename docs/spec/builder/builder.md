@@ -138,7 +138,7 @@ meaning and are never used by validation, cache hashing, dedup equality or the e
 Signed zero has the same identity as positive zero.
 
 `compress` is stored by value; `compress.codec == NT_BASISU_CODEC_NONE`
-(the zero initializer) selects RAW. NONE denotes absence of Basis compression
+(the zero initializer) selects an uncompressed texture. NONE denotes absence of Basis compression
 in builder options, not a Basis file codec. File/memory textures decode and
 resize at add time to establish pixel identity. Early dedup re-decodes them
 when a hash match needs byte verification; encoding re-decodes on a cache miss.
@@ -158,7 +158,7 @@ are stored as they are and the GPU decodes them on sampling
 ([runtime formats](../assets/runtime-formats.md#texture-activation-ttex)).
 Basis accepts `RGBA8`, `RGB8`, `SRGB8_ALPHA8` and `SRGB8`. `premultiplied = true`
 requires `RGBA8`: premultiplying encoded sRGB bytes is not premultiplication in
-linear light. A RAW `SRGB8` texture cannot generate runtime mips (WebGL 2 cannot
+linear light. An uncompressed `SRGB8` texture cannot generate runtime mips (WebGL 2 cannot
 render to it); use `SRGB8_ALPHA8`, or `gen_mipmaps = false` with a non-mip
 `filter_min`. The format is part of the cache key and of dedup identity, so the
 same pixels as `RGBA8` and as `SRGB8_ALPHA8` are two assets. Resize still
@@ -176,15 +176,15 @@ source, before any resize, and never clamps or tone-maps. Resize and mips use a
 box filter on float RGB: a filter with negative lobes would make negative colors.
 The runtime cannot generate `RGB9E5` mips, so `gen_mipmaps = true` makes the
 builder bake the full chain, each level box-filtered from the previous float
-level, and `false` writes one level; the RAW mip-filter rule below applies
+level, and `false` writes one level; the uncompressed mip-filter rule below applies
 unchanged. `RGB9E5` takes no Basis compression and no premultiplication, and atlas
 pages stay LDR: `nt_atlas_begin` asserts on it.
 
 Basis always emits a full mip chain, independent of `gen_mipmaps` (that flag
-controls RAW runtime mip generation). The builder asserts exactly
+controls uncompressed runtime mip generation). The builder asserts exactly
 `1 + floor(log2(max(width, height)))` levels; 1x1 is complete with one level.
 Activation cross-checks that count against the blob and the header and asserts
-on any asset that disagrees. A RAW texture whose default min filter asks for
+on any asset that disagrees. An uncompressed texture whose default min filter asks for
 mipmaps without `gen_mipmaps` is a build-time assert (`NT_BUILD_ASSERT`); the
 runtime would accept it and sample level 0.
 
@@ -414,8 +414,8 @@ sharing one payload in the pack.
 Texture cache and early dedup use one identity, `opts_hash`; early dedup
 compares it after an exact pixel match. It covers the effective settings:
 resized dimensions, resolved pixel format, premultiplication, sampler defaults,
-RAW mip-generation flag, codec and its active fields above.
-Basis ignores the RAW mip-generation flag; for `RGB9E5` it selects the baked chain. Names, source locations, resize
+uncompressed mip-generation flag, codec and its active fields above.
+Basis ignores the mip-generation flag; for `RGB9E5` it selects the baked chain. Names, source locations, resize
 limits after resizing, threading, descriptor padding and inactive union bytes
 are not encode identity.
 
@@ -620,7 +620,7 @@ Every frontier adopts the trim-rect candidate, so with `max_vertices >= 4` geome
 - Candidate geometry and the integer geometry prepared for serialization both pass the same selected-geometry proof: inputs valid, opaque area valid, base/selected bounds, topology, full retained-cell coverage, triangulation, metric order, allowance, and ceiling. Corrupt area, allowance, ceiling, polygon, or triangle data fails the proof. Float positions are baked afterward and checked for finiteness.
 - These controls affect builder geometry, composed page pixels, and atlas cache identity. They do not change the runtime API or the on-disk atlas blob format.
 
-**Premultiplied alpha (default):** atlas pages are encoded through the regular texture pipeline with `premultiplied = true`, which writes `RGB' = (RGB * A + 127) / 255` into the page before `strip_channels` (RAW path) or `nt_basisu_encode` (BASIS path). The resulting texture sets `NT_TEXTURE_FLAG_PREMULTIPLIED` in `NtTextureAssetHeader.flags`, and the runtime must draw with `(ONE, ONE_MINUS_SRC_ALPHA)` blending. This is what keeps NFP-packed sprites free of dark fringes at sub-pixel clearance: `(0,0,0,0)` gap pixels are the identity for premultiplied blending, so bilinear filtering at sprite edges stays correct. Setting `premultiplied = false` logs a warning and is only valid for NEAREST-filtered or fully-opaque atlases; setting `premultiplied = true` with a non-RGBA8 `format`, including an sRGB one, is a hard assert.
+**Premultiplied alpha (default):** atlas pages are encoded through the regular texture pipeline with `premultiplied = true`, which writes `RGB' = (RGB * A + 127) / 255` into the page before `strip_channels` (uncompressed path) or `nt_basisu_encode` (BASIS path). The resulting texture sets `NT_TEXTURE_FLAG_PREMULTIPLIED` in `NtTextureAssetHeader.flags`, and the runtime must draw with `(ONE, ONE_MINUS_SRC_ALPHA)` blending. This is what keeps NFP-packed sprites free of dark fringes at sub-pixel clearance: `(0,0,0,0)` gap pixels are the identity for premultiplied blending, so bilinear filtering at sprite edges stays correct. Setting `premultiplied = false` logs a warning and is only valid for NEAREST-filtered or fully-opaque atlases; setting `premultiplied = true` with a non-RGBA8 `format`, including an sRGB one, is a hard assert.
 
 **LDR mip filtering:** for a linear `format` the Basis encoder filters stored RGB
 and alpha values linearly, without an sRGB transfer during downsampling
@@ -630,7 +630,7 @@ texture reduces to roughly RGBA `(128,128,128,128)`, subject to block-compressio
 error. For an sRGB `format` the wrapper sets `m_mip_srgb = true`: RGB averages
 linear light and alpha stays on stored values, so an opaque black/white checker
 reduces to about 188, not 128. sRGB is never premultiplied, so the two rules never
-meet. RAW `SRGB8_ALPHA8` mips come from runtime `glGenerateMipmap`, whose filter
+meet. Uncompressed `SRGB8_ALPHA8` mips come from runtime `glGenerateMipmap`, whose filter
 for sRGB storage the GL ES specification leaves to the driver.
 
 **Hard limits:**

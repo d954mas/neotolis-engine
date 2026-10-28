@@ -466,7 +466,7 @@ static bool page0_opaque_bounds(const char *path, uint32_t *out_minx, uint32_t *
     uint32_t w = th->width;
     uint32_t h = th->height;
     if (th->compression != 0 || (uint64_t)sizeof(NtTextureAssetHeader) + (uint64_t)w * h * 4 > tex->size) {
-        free(buf); /* RAW only + guard the pixel span */
+        free(buf); /* uncompressed only + guard the pixel span */
         return false;
     }
     const uint8_t *px = tblob + sizeof(NtTextureAssetHeader);
