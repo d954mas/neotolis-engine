@@ -77,7 +77,10 @@ def run(client, out_dir):
     try:
         print(json.dumps(_run(client, out_dir), indent=2))
     finally:
-        client.set_player_enabled(True)
+        try:
+            client.set_player_enabled(True)
+        except Exception:  # noqa: BLE001
+            pass  # best effort: never mask the run's own failure
 
 
 def _wait_for_ui(client, max_frames=600):

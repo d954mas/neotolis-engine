@@ -46,7 +46,10 @@ def run(client, out_dir):
     try:
         _run(client, out_dir)
     finally:
-        client.set_player_enabled(True)
+        try:
+            client.set_player_enabled(True)
+        except Exception:  # noqa: BLE001
+            pass  # best effort: never mask the run's own failure
 
 
 def _run(client, out_dir):

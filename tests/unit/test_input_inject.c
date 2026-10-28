@@ -13,6 +13,7 @@ void tearDown(void) { nt_input_shutdown(); }
 
 void test_gate_off_drops_real_key(void) {
     nt_input_set_player_enabled(false);
+    nt_input_poll();
     nt_input_set_key(NT_KEY_A, true); /* real device event — must be dropped at the wrapper */
     TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
 }
@@ -21,16 +22,19 @@ void test_gate_off_releases_held_key(void) {
     nt_input_set_key(NT_KEY_W, true);
     nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_W));
-    nt_input_set_player_enabled(false); /* ON->OFF edge releases the held key */
+    nt_input_set_player_enabled(false);
+    nt_input_poll(); /* the edge poll releases the held key; the game reads the release */
     TEST_ASSERT_TRUE(nt_input_key_is_released(NT_KEY_W));
     TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_W));
 }
 
 void test_gate_off_releases_held_pointer(void) {
     nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F, NT_POINTER_MOUSE, 1);
+    nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
-    nt_input_set_player_enabled(false); /* ON->OFF edge releases the held button (deferred deactivation) */
-    /* The release edge is readable via the PUBLIC query this frame: deactivation is deferred one
+    nt_input_set_player_enabled(false);
+    nt_input_poll(); /* the edge poll releases the held button with deferred deactivation */
+    /* The game reads the release via the PUBLIC query this frame: deactivation is deferred one
        poll (like a normal pointer_up) so find_mouse_pointer still sees the active slot. */
     TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_LEFT));
     TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
@@ -39,22 +43,52 @@ void test_gate_off_releases_held_pointer(void) {
     TEST_ASSERT_FALSE(nt_input_mouse_is_released(NT_BUTTON_LEFT)); /* slot gone -> release no longer readable */
 }
 
-/* OFF->ON releases the bot's pointers too: the returning real mouse gets slot 0 back. */
-void test_gate_reenable_frees_bot_pointer(void) {
+/* OFF->ON with the bot's button held: the game reads the bot's release (nt_ui drops its capture),
+   then the returning real mouse gets slot 0 back. */
+void test_gate_reenable_releases_bot_pointer(void) {
     nt_input_set_player_enabled(false);
-    TEST_ASSERT_TRUE(nt_input_inject_pointer(NT_INJECT_POINTER_MOVE, NT_INPUT_INJECT_POINTER_ID_BASE, 5.0F, 5.0F, 1.0F, NT_POINTER_MOUSE, 0));
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_inject_pointer(NT_INJECT_POINTER_DOWN, NT_INPUT_INJECT_POINTER_ID_BASE, 5.0F, 5.0F, 1.0F, NT_POINTER_MOUSE, 1));
     nt_input_poll();
     TEST_ASSERT_EQUAL_UINT32(NT_INPUT_INJECT_POINTER_ID_BASE, g_nt_input.pointers[0].id);
     nt_input_set_player_enabled(true);
+    nt_input_poll();
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_released);
     nt_input_poll();
     nt_input_pointer_move(0, 10.0F, 10.0F, 1.0F, NT_POINTER_MOUSE, 0);
     TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
     TEST_ASSERT_EQUAL_UINT32(0, g_nt_input.pointers[0].id);
 }
 
+/* The edge poll drops real events: a real pointer then can't take a slot the release still holds. */
+void test_gate_edge_poll_drops_real(void) {
+    nt_input_set_player_enabled(false);
+    nt_input_poll();
+    nt_input_set_player_enabled(true);
+    nt_input_pointer_move(0, 10.0F, 10.0F, 1.0F, NT_POINTER_MOUSE, 0); /* still gated before the edge poll */
+    TEST_ASSERT_FALSE(g_nt_input.pointers[0].active);
+    nt_input_poll();
+    nt_input_pointer_move(0, 10.0F, 10.0F, 1.0F, NT_POINTER_MOUSE, 0);
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
+}
+
+/* A request undone before the next poll is no edge: held real input stays. */
+void test_gate_toggle_within_frame_keeps_input(void) {
+    nt_input_set_key(NT_KEY_A, true);
+    nt_input_poll();
+    nt_input_set_player_enabled(false);
+    nt_input_set_player_enabled(true);
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
+    TEST_ASSERT_FALSE(nt_input_key_is_released(NT_KEY_A));
+}
+
 void test_gate_reenable_applies_real(void) {
     nt_input_set_player_enabled(false);
+    nt_input_poll();
     nt_input_set_player_enabled(true); /* fresh from real devices again */
+    nt_input_poll();
     nt_input_set_key(NT_KEY_B, true);
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_B));
 }
@@ -220,7 +254,9 @@ int main(void) {
     RUN_TEST(test_gate_off_releases_held_key);
     RUN_TEST(test_gate_off_releases_held_pointer);
     RUN_TEST(test_gate_reenable_applies_real);
-    RUN_TEST(test_gate_reenable_frees_bot_pointer);
+    RUN_TEST(test_gate_reenable_releases_bot_pointer);
+    RUN_TEST(test_gate_edge_poll_drops_real);
+    RUN_TEST(test_gate_toggle_within_frame_keeps_input);
     RUN_TEST(test_inject_key_down_up);
     RUN_TEST(test_inject_same_poll_down_then_up);
     RUN_TEST(test_inject_flows_when_gated);

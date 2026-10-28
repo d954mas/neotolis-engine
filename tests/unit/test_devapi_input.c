@@ -687,15 +687,26 @@ static void test_input_state_reregister_drops_old_copy(void) {
     TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_B));
 }
 
-/* A gate cutover right after an advance releases A at once; input.state keeps the advancing poll's
-   A (down and pressed, not released). */
+/* A gate cutover right after an advance releases A in the next (frozen) poll; input.state keeps the
+   advancing poll's A (down and pressed, not released). */
 static void test_input_state_gate_cutover_keeps_advance_edges(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}")));
     advance();
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":false}}")));
-    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
     assert_key_state(true, true, false);
     tick_no_advance();
+    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
+    assert_key_state(true, true, false);
+}
+
+/* The OFF->ON edge releases the bot's held A the same way: input.state still reports the advance. */
+static void test_input_state_gate_reenable_keeps_advance_edges(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":false}}")));
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\",\"down\":true}}")));
+    advance();
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":true}}")));
+    tick_no_advance();
+    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
     assert_key_state(true, true, false);
 }
 
@@ -927,6 +938,7 @@ int main(void) {
     RUN_TEST(test_input_state_survives_frozen_ticks);
     RUN_TEST(test_input_state_copy_survives_client_reset);
     RUN_TEST(test_input_state_gate_cutover_keeps_advance_edges);
+    RUN_TEST(test_input_state_gate_reenable_keeps_advance_edges);
     RUN_TEST(test_input_state_gate_cutover_in_freeze_keeps_copy);
     RUN_TEST(test_input_state_reregister_drops_old_copy);
     RUN_TEST(test_input_describe);

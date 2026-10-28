@@ -29,6 +29,7 @@ static uint32_t s_char_tail; /* next read slot */
 
 /* Gate at the apply seam: covers native drain + web direct apply. */
 static bool s_player_enabled = true;
+static bool s_player_wanted = true; /* the requested gate; nt_input_poll switches to it */
 
 typedef struct {
     uint8_t kind; /* nt_inject_kind_t */
@@ -121,6 +122,7 @@ void nt_input_init(void) {
 #if NT_INPUT_AUTOMATION_ENABLED
     s_inject_count = 0;
     s_player_enabled = true; /* clean default: real devices drive until a bot gates them */
+    s_player_wanted = true;
 #endif
     nt_input_platform_init();
 }
@@ -151,11 +153,22 @@ void nt_input_poll(void) {
         }
     }
 
+#if NT_INPUT_AUTOMATION_ENABLED
+    /* A gate edge works like focus loss: held input releases in this poll, so the game reads the
+       release, and this poll's real events drop, so no new pointer takes a slot the release still holds. */
+    if (s_player_wanted != s_player_enabled) {
+        nt_input_clear_all_keys();
+        nt_input_clear_all_pointers();
+        s_player_enabled = false;
+    }
+#endif
+
     /* Platform backend delivers events (calls set_key, pointer_down/move/up,
        which set edge flags immediately) */
     nt_input_platform_poll();
 
 #if NT_INPUT_AUTOMATION_ENABLED
+    s_player_enabled = s_player_wanted;
     /* Apply the whole immediate inject buffer in the same post-clear window as the native char
        drain, so an injected rising edge survives to this frame's update. The devapi layer staged
        only the due events (it owns the schedule + sim-advance gating). */
@@ -176,6 +189,7 @@ void nt_input_shutdown(void) {
 #if NT_INPUT_AUTOMATION_ENABLED
     s_inject_count = 0;
     s_player_enabled = true;
+    s_player_wanted = true;
 #endif
 }
 
@@ -442,15 +456,7 @@ void nt_input_clear_all_pointers(void) {
 
 #if NT_INPUT_AUTOMATION_ENABLED
 
-void nt_input_set_player_enabled(bool enabled) {
-    /* Either edge releases held input (focus-lost reuse): nothing sticks down, and the side that takes
-       over starts with free pointer slots, so a bot pointer never keeps slot 0 from the returning player. */
-    if (s_player_enabled != enabled) {
-        nt_input_clear_all_keys();
-        nt_input_clear_all_pointers();
-    }
-    s_player_enabled = enabled;
-}
+void nt_input_set_player_enabled(bool enabled) { s_player_wanted = enabled; }
 
 /* Mask at the slot's current position; no prior slot -> create at (0,0) as mouse so the button lands. */
 static void nt_input_pointer_buttons_apply(uint32_t id, uint8_t buttons_mask) {

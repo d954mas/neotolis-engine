@@ -62,6 +62,17 @@ def _click_toggles(client: DevApiClient, do_click, before, btn_id="hud_btn", ctx
 
 def run(client: DevApiClient, out_dir: str) -> None:
     """Drive the ui read + write workflows; raise AssertionError on any contract violation."""
+    client.set_player_enabled(False)  # a real mouse over the window would hide the bot's clicks
+    try:
+        _run(client)
+    finally:
+        try:
+            client.set_player_enabled(True)
+        except Exception:  # noqa: BLE001
+            pass  # best effort: never mask the run's own failure
+
+
+def _run(client: DevApiClient) -> None:
     # Manual mode so the fire-and-forget inject's down/up apply on explicit, deterministic step()s.
     client.set_mode("manual")
     client.step(count=1)

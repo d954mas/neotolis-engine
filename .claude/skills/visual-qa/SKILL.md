@@ -43,7 +43,8 @@ cmake --build build/_cmake/native-debug-capture --target <example>
    so run the client under a shell timeout.
 
 4. **Gate the player before any input (hard rule):** a scenario that clicks, moves or types calls
-   `client.set_player_enabled(False)` first and `set_player_enabled(True)` in a `finally`. A real mouse
+   `client.set_player_enabled(False)` first and a best-effort `set_player_enabled(True)` in a `finally`
+   (wrapped in `try/except`, so it never masks the run's failure). A real mouse
    over the window otherwise holds pointer slot 0 and hides every bot click from a game that reads
    only `pointers[0]` (spec: "Input automation", the player gate).
 
