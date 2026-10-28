@@ -449,7 +449,7 @@ static void test_sched_gesture_ordered_across_frames(void) {
     TEST_ASSERT_TRUE(slot->buttons[NT_BUTTON_LEFT].is_released);
 }
 
-/* input.move on the default mouse slot applies its position on the next advancing tick (by value,
+/* input.move on the bot mouse pointer applies its position on the next advancing tick (by value,
    not just queued count) — exercises sched_release_one's NT_INJECT_POINTER_MOVE branch.
    The input.* {x,y} is Y-up: y=34 must land at device Y = fb_height-34, locking the one flip. */
 static void test_sched_move_applies_on_advance(void) {
@@ -507,7 +507,7 @@ static void test_sched_wheel_applies_on_advance(void) {
 }
 
 /* input.wheel{dx,dy,x,y}: self-contained positioned scroll. The handler enqueues a MOVE to (x,y) on
-   the default mouse slot then the wheel, so after one advance the slot exists at (x,y) and carries
+   the bot mouse pointer then the wheel, so after one advance the slot exists at (x,y) and carries
    the wheel delta — no prior input.move needed. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_sched_wheel_with_coords_scrolls_at_xy(void) {
@@ -730,7 +730,7 @@ static void test_input_state_copy_survives_client_reset(void) {
 
 /* ---- input.button happy path — mask actually presses the mapped mouse button ---- */
 
-/* input.button {buttons:2} on the reserved mouse slot -> after an advance the RIGHT button is down. */
+/* input.button {buttons:2} on the bot mouse pointer -> after an advance the RIGHT button is down. */
 static void test_input_button_right_presses_right(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.button\",\"params\":{\"buttons\":2}}")));
     advance();

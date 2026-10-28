@@ -364,7 +364,7 @@ static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_erro
     return true;
 }
 
-/* sugar = pointer move on the default mouse slot (reserved id). */
+/* sugar = pointer move on the bot mouse pointer (reserved id). */
 static bool cmd_input_move(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     const cJSON *xj = cJSON_GetObjectItemCaseSensitive(params, "x");
     const cJSON *yj = cJSON_GetObjectItemCaseSensitive(params, "y");
@@ -393,7 +393,7 @@ static bool cmd_input_move(const cJSON *params, cJSON *result, nt_devapi_error *
     return true;
 }
 
-/* down@0 + up@hold on the mouse slot; hold default 1 (1-frame click), 0 = same-frame. */
+/* down@0 + up@hold on the bot mouse pointer; hold default 1 (1-frame click), 0 = same-frame. */
 static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     const cJSON *xj = cJSON_GetObjectItemCaseSensitive(params, "x");
     const cJSON *yj = cJSON_GetObjectItemCaseSensitive(params, "y");
@@ -701,14 +701,14 @@ static const nt_devapi_command k_input_cmds[] = {
     },
     {
         .method = "input.move",
-        .summary = "sugar: pointer move on the default mouse slot (reserved id); x/y are Y-up (origin bottom-left), framebuffer px",
+        .summary = "sugar: pointer move on the bot mouse pointer (reserved id); x/y are Y-up (origin bottom-left), framebuffer px",
         .params_shape = "{x:number, y:number, id?:number, type?:string}, origin:bottom-left, y_axis:up, space:framebuffer-px",
         .result_shape = "{queued:number}",
         .fn = cmd_input_move,
     },
     {
         .method = "input.click",
-        .summary = "sugar: pointer down@0 + up@hold (2 entries) on the mouse slot; hold default 1 frame, 0 = same-frame; x/y are Y-up (origin bottom-left), framebuffer px",
+        .summary = "sugar: pointer down@0 + up@hold (2 entries) on the bot mouse pointer; hold default 1 frame, 0 = same-frame; x/y are Y-up (origin bottom-left), framebuffer px",
         .params_shape = "{x:number, y:number, button?:number, id?:number, hold?:number}, origin:bottom-left, y_axis:up, space:framebuffer-px",
         .result_shape = "{queued:number}",
         .fn = cmd_input_click,
@@ -730,7 +730,7 @@ static const nt_devapi_command k_input_cmds[] = {
     },
     {
         .method = "input.button",
-        .summary = "set the mouse-button mask {1,2,4} on the given id (default reserved mouse slot)",
+        .summary = "set the mouse-button mask {1,2,4} on the given id (default: the bot mouse pointer)",
         .params_shape = "{buttons:number, id?:number}",
         .result_shape = "{ok:bool}",
         .fn = cmd_input_button,

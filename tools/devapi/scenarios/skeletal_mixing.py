@@ -73,7 +73,11 @@ def _assert_mid_crossfade(client, label):
 
 
 def run(client, out_dir):
-    print(json.dumps(_run(client, out_dir), indent=2))
+    client.set_player_enabled(False)  # a real mouse over the window would hide the bot's clicks
+    try:
+        print(json.dumps(_run(client, out_dir), indent=2))
+    finally:
+        client.set_player_enabled(True)
 
 
 def _wait_for_ui(client, max_frames=600):

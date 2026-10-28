@@ -39,6 +39,19 @@ void test_gate_off_releases_held_pointer(void) {
     TEST_ASSERT_FALSE(nt_input_mouse_is_released(NT_BUTTON_LEFT)); /* slot gone -> release no longer readable */
 }
 
+/* OFF->ON releases the bot's pointers too: the returning real mouse gets slot 0 back. */
+void test_gate_reenable_frees_bot_pointer(void) {
+    nt_input_set_player_enabled(false);
+    TEST_ASSERT_TRUE(nt_input_inject_pointer(NT_INJECT_POINTER_MOVE, NT_INPUT_INJECT_POINTER_ID_BASE, 5.0F, 5.0F, 1.0F, NT_POINTER_MOUSE, 0));
+    nt_input_poll();
+    TEST_ASSERT_EQUAL_UINT32(NT_INPUT_INJECT_POINTER_ID_BASE, g_nt_input.pointers[0].id);
+    nt_input_set_player_enabled(true);
+    nt_input_poll();
+    nt_input_pointer_move(0, 10.0F, 10.0F, 1.0F, NT_POINTER_MOUSE, 0);
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_input.pointers[0].id);
+}
+
 void test_gate_reenable_applies_real(void) {
     nt_input_set_player_enabled(false);
     nt_input_set_player_enabled(true); /* fresh from real devices again */
@@ -207,6 +220,7 @@ int main(void) {
     RUN_TEST(test_gate_off_releases_held_key);
     RUN_TEST(test_gate_off_releases_held_pointer);
     RUN_TEST(test_gate_reenable_applies_real);
+    RUN_TEST(test_gate_reenable_frees_bot_pointer);
     RUN_TEST(test_inject_key_down_up);
     RUN_TEST(test_inject_same_poll_down_then_up);
     RUN_TEST(test_inject_flows_when_gated);

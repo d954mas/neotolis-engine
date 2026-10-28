@@ -443,8 +443,9 @@ void nt_input_clear_all_pointers(void) {
 #if NT_INPUT_AUTOMATION_ENABLED
 
 void nt_input_set_player_enabled(bool enabled) {
-    /* ON->OFF edge: release held real input so no key/button sticks down (focus-lost reuse). */
-    if (s_player_enabled && !enabled) {
+    /* Either edge releases held input (focus-lost reuse): nothing sticks down, and the side that takes
+       over starts with free pointer slots, so a bot pointer never keeps slot 0 from the returning player. */
+    if (s_player_enabled != enabled) {
         nt_input_clear_all_keys();
         nt_input_clear_all_pointers();
     }
