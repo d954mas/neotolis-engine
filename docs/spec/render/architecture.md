@@ -1389,8 +1389,8 @@ counter <name>=<n>                       (one line per nonzero counter)
   `arg_count` elements, so a zero argument stays visible (`args=`, `key=` on a cache
   skip, `values=`).
 - Integers print in decimal as stored; GL arguments are stored as `uint32`.
-  Floats print with `%.9g`, which round-trips every float32, including `-0` and
-  `inf`; NaN prints as `nan:0x<bits>`.
+  Floats print as the shortest `%g` (6 to 9 significant digits) that reads back
+  to the same float32, including `-0` and `inf`; NaN prints as `nan:0x<bits>`.
 - Note labels, keys and string values are double-quoted; `"`, `\` and bytes outside
   0x20..0x7e print as `\xNN`.
 - Indentation (two spaces per open marker and per parent operation) is cosmetic and

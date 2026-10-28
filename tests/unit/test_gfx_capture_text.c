@@ -50,7 +50,7 @@ static void build_records(nt_gfx_event_t *ev) {
     ev[0].data.pass.target = 3;
     ev[0].data.pass.color[0] = 0.25F;
     ev[0].data.pass.color[3] = 1.0F;
-    ev[0].data.pass.depth = 1.0F;
+    ev[0].data.pass.depth = 1.0F / 3.0F; /* the shortest exact form needs 8 digits */
     ev[0].data.pass.load_color = true;
     ev[1] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_BACKEND, .operation = NT_GFX_OP_STATE, .detail = NT_GFX_GL_glClearColor, .link = 1, .arg_count = 4U << 4};
     ev[1].data.backend.values[0] = 0.25F;
@@ -130,7 +130,7 @@ static const char *const k_expected = "ntcapture 1\n"
                                       "counter accepted.DRAW_INDEXED=1\n"
                                       "counter frame_bytes.1=64\n"
                                       "counter gl.glClearColor=1\n"
-                                      "0 OP op=PASS result=ACCEPTED link=- target=3 color=[0.25,0,0,1] depth=1 load_color=1\n"
+                                      "0 OP op=PASS result=ACCEPTED link=- target=3 color=[0.25,0,0,1] depth=0.33333334 load_color=1\n"
                                       "1   BACKEND op=STATE call=glClearColor link=@0 values=[0.25,0,0,1]\n"
                                       "2 BACKEND op=STATE call=glGenBuffers link=- args=[1,0]\n"
                                       "3 SKIP op=TEXTURE result=CACHE call=glBindTexture link=- key=[7,0]\n"

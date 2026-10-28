@@ -7,6 +7,7 @@
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #if NT_GFX_CAPTURE_ENABLED
@@ -84,13 +85,21 @@ static uint32_t float_bits(float f) {
     return bits;
 }
 
-/* %.9g round-trips every float32; NaN keeps its payload as bits. */
+/* The shortest %g that reads back to the same float32 (9 digits always do); NaN keeps its payload as bits. */
 static void put_float(text_t *t, float f) {
     if (isnan(f)) {
         put(t, "nan:0x%08" PRIx32, float_bits(f));
-    } else {
-        put(t, "%.9g", (double)f);
+        return;
     }
+    char digits[32];
+    int precision = 6;
+    for (; precision < 9; precision++) {
+        (void)snprintf(digits, sizeof(digits), "%.*g", precision, (double)f);
+        if (float_bits(strtof(digits, NULL)) == float_bits(f)) {
+            break;
+        }
+    }
+    put(t, "%.*g", precision, (double)f);
 }
 
 static void put_string(text_t *t, const char *s, size_t size) {
