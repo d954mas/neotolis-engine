@@ -1188,8 +1188,8 @@ destroys) links to its parent, and its own records link to it. `ARGUMENT` record
 are request arguments of their OP (one per texture binding of a texture set);
 immediate backend work inside a draw-phase call, such as a lazy sampler
 recreation, links to that call. Link 0 marks top-level OP records, the begin_frame
-snapshot and the BACKEND records of program links that `nt_gfx_begin_frame`
-finishes, each followed by the finished program's DEFINITION. Notes and markers
+snapshot, and the records of program links that `nt_gfx_begin_frame` finishes
+(their BACKEND records and each finished program's DEFINITION). Notes and markers
 carry no link: their label overlays those bytes, so read `kind` first.
 A recorded command carries the link of the operation that recorded it, so the
 BACKEND and backend SKIP records it produces when the stream executes in
@@ -1212,7 +1212,7 @@ The `object_kind` and `object` pair identifies a full frontend handle, including
 its generation. Backend records instead use `detail` as `nt_gfx_gl_call_t`, whose
 values are named after the issued function (`NT_GFX_GL_glBindVertexArray`), and
 carry raw GL names of one GL context; their operation is always STATE and their
-link names the frontend operation. With GPU timing, begin_frame
+link names the frontend operation, if any. With GPU timing, begin_frame
 runs the timer disjoint check as its own `TIMER_DISJOINT` operation on a live
 context; the query is issued only while a timer query is pending. Each issued call is recorded
 exactly once, at the call site, by the same statement that issues it (an
@@ -1320,7 +1320,8 @@ A note describes the frontend records after it until the next note or marker.
 Immediate operations (creates, uploads) record their backend calls at the call,
 under the current note. Draw-phase calls record theirs when the stream executes
 in `nt_gfx_end_frame`, after the notes made before it; notes made after
-`end_frame` follow that execution. Notes and markers are not draw-stream
+`end_frame` follow that execution. Such a record reaches its note through its
+link: the note that describes its OP record. Notes and markers are not draw-stream
 commands, so draw merging, counters and pixels do not depend on them. Markers do
 not reach external debuggers (a stream command between two draws would end
 their merge).

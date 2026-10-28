@@ -18,7 +18,7 @@ typedef struct {
     uint32_t capacity;
     nt_gfx_capture_view_t view;
     nt_gfx_event_t *call; /* issued-call record being filled; NULL when not recording */
-    uint32_t link;        /* stamped on every reserved record: index + 1 of the open operation's OP record */
+    uint32_t link;        /* stamped on every reserved record: index + 1 of the open operation's OP record, or the executing command's */
     uint32_t call_ints;
     uint32_t call_floats;
 } nt_gfx_capture_state_t;

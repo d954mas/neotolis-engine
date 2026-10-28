@@ -337,7 +337,7 @@ static nt_gfx_operation_t owner_operation(const nt_gfx_capture_view_t *capture, 
     return (nt_gfx_operation_t)owner->operation;
 }
 
-/* After the frame's first operation every issued, skipped and argument record names its
+/* From the pipeline create (the frame's first own operation) every issued, skipped and argument record names its
  * operation; the stream's records lie in the execute range, the readback after it. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one walk checks each owner kind
 static void check_links_name_their_operations(const nt_gfx_capture_view_t *capture, uint32_t pipeline) {
