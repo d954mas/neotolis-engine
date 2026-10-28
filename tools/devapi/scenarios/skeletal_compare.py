@@ -3,8 +3,8 @@
 Run from the repository root against a native skeletal_showcase with Skinned Meshes selected, CPU
 reference enabled and Bones disabled (attach with --port 17890, or launch with --host-bin):
 python -m tools.devapi.scenarios.skeletal_compare --port 17890 --out build/skeletal-compare
-The script captures the stage, toggles CPU reference off, captures again and toggles it back on, all in
-MANUAL time; it writes gpu.png, cpu.png and result.json to the --out directory.
+The script captures the stage, toggles CPU reference off, captures again and toggles it back on; it
+writes gpu.png, cpu.png and result.json to the --out directory.
 """
 import base64
 import io
@@ -47,21 +47,14 @@ def run(client, out_dir):
 
     output = Path(out_dir)
     output.mkdir(parents=True, exist_ok=True)
-    client.set_mode("manual")
-    try:
-        before = _pose(client)
-        cpu, background = _capture_stage(client, np, Image)
-        client.ui_click(REFERENCE_ID)
-        client.step(3)
-        after = _pose(client)
-        gpu, _ = _capture_stage(client, np, Image)
-        client.ui_click(REFERENCE_ID)
-        client.step(3)
-    finally:
-        try:
-            client.set_mode("run")
-        except Exception:  # noqa: BLE001
-            pass  # best effort: never mask the run's own failure
+    before = _pose(client)
+    cpu, background = _capture_stage(client, np, Image)
+    client.ui_click(REFERENCE_ID)
+    client.wait_frames(3)
+    after = _pose(client)
+    gpu, _ = _capture_stage(client, np, Image)
+    client.ui_click(REFERENCE_ID)
+    client.wait_frames(3)
     if before != after:
         raise AssertionError(f"The pose moved between captures ({before} -> {after}); enable CPU reference first so the player pauses")
     if gpu.shape != cpu.shape or gpu.size == 0:

@@ -1,7 +1,7 @@
 """Capture and validate all Mixing & Crossfades modes in skeletal_showcase.
 
 Run from the repository root against a native skeletal_showcase (attach with --port 17890, or launch
-with --host-bin), in MANUAL time:
+with --host-bin):
 python -m tools.devapi.scenarios.skeletal_mixing --port 17890 --out build/skeletal-mixing
 The captures and result.json go to the --out directory.
 """
@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from .. import launch
+from ..client import DevApiResultError
 
 
 MODES = ("Crossfade", "Blend space", "Partial body", "Override", "Interruption")
@@ -27,14 +28,14 @@ def _click_text(client, text):
     node = next(node for node in client.ui_tree()["nodes"] if node.get("visible") and node.get("text") == text)
     bounds = node["bounds"]
     client.ui_click({"x": bounds["x"] + bounds["w"] / 2, "y": bounds["y"] + bounds["h"] / 2})
-    client.step(3)
+    client.wait_frames(3)
 
 
 def _select_scene(client):
     if "Mixing & Crossfades v" in _texts(client):
         return
     client.ui_click("shell/scene_combo")
-    client.step(3)
+    client.wait_frames(3)
     _click_text(client, "Mixing & Crossfades")
 
 
@@ -42,7 +43,7 @@ def _select_mode(client, mode):
     if mode in _texts(client) and mode == next((candidate for candidate in MODES if candidate in _texts(client)), None):
         return
     client.ui_click("mixing/mode")
-    client.step(3)
+    client.wait_frames(3)
     _click_text(client, mode)
 
 
@@ -60,7 +61,7 @@ def _wait_for_slots(client, minimum, max_frames=300):
             match = re.search(r"slots (\d+)/", alpha)
             if match is not None and int(match.group(1)) >= minimum:
                 return
-        client.step(1)
+        client.wait_frames(1)
     raise AssertionError(f"Mixing assets did not produce {minimum} occupied slots within {max_frames} frames")
 
 
@@ -71,32 +72,34 @@ def _assert_mid_crossfade(client, label):
         raise AssertionError(f"{label}: capture is not mid-crossfade: {alpha}")
 
 
-def _advance(client, seconds):
-    """MANUAL: step whole fixed steps covering `seconds` of game time."""
-    client.result("time.step", {"seconds": seconds})
-
-
 def run(client, out_dir):
-    client.set_mode("manual")
-    try:
-        print(json.dumps(_run(client, out_dir), indent=2))
-    finally:
+    print(json.dumps(_run(client, out_dir), indent=2))
+
+
+def _wait_for_ui(client, max_frames=600):
+    """A fresh host answers before its UI has rendered a frame (web: while packs load)."""
+    for _ in range(max_frames):
         try:
-            client.set_mode("run")
-        except Exception:  # noqa: BLE001
-            pass  # best effort: never mask the run's own failure
+            client.ui_tree()
+            return
+        except DevApiResultError as exc:
+            if "has not rendered a frame yet" not in str(exc):
+                raise
+        client.wait_frames(1)
+    raise AssertionError(f"the UI did not render a frame within {max_frames} frames")
 
 
 def _run(client, out_dir):
     output = Path(out_dir)
     output.mkdir(parents=True, exist_ok=True)
+    _wait_for_ui(client)
     _select_scene(client)
-    client.step(5)
+    client.wait_frames(5)
     if "Show sources" not in _texts(client):
         raise AssertionError("Mixing scene controls did not become visible")
     if "Sources: on" not in _texts(client):
         client.ui_click("mixing/sources")
-        client.step(3)
+        client.wait_frames(3)
     if "Sources: on" not in _texts(client):
         raise AssertionError("Show sources did not enable source previews")
 
@@ -107,13 +110,13 @@ def _run(client, out_dir):
         if mode == "Crossfade":
             _wait_for_slots(client, 1)
             client.ui_click("mixing/run_death")
-            _advance(client, 0.55)
+            client.time_wait(0.55)
             _assert_mid_crossfade(client, "Run to Death")
         elif mode in ("Partial body", "Override"):
             _wait_for_slots(client, 2)
-            _advance(client, 0.55)
+            client.time_wait(0.55)
         else:
-            client.step(5)
+            client.wait_frames(5)
         texts = _texts(client)
         alpha = next((text for text in texts if text.startswith("alpha ")), None)
         memory = next((text for text in texts if text.startswith("snapshot ")), None)
@@ -133,12 +136,12 @@ def _run(client, out_dir):
 
     _select_mode(client, "Crossfade")
     client.ui_click("mixing/run_death")
-    _advance(client, 1.05)
+    client.time_wait(1.05)
     death_texts = _texts(client)
     if not any(text.startswith("Death t=") for text in death_texts) or any(text.startswith("Stand up t=") for text in death_texts):
         raise AssertionError("Run to Death did not finish on the held death pose")
     client.ui_click("mixing/get_up")
-    _advance(client, 0.55)
+    client.time_wait(0.55)
     _assert_mid_crossfade(client, "Get up")
     get_up_texts = _texts(client)
     if not any(text.startswith("Death t=") for text in get_up_texts) or not any(text.startswith("Stand up t=") for text in get_up_texts):
@@ -147,11 +150,11 @@ def _run(client, out_dir):
 
     _select_mode(client, "Interruption")
     client.ui_click("mixing/reset")
-    client.step(3)
+    client.wait_frames(3)
     client.ui_click("mixing/play")
-    client.step(2)
+    client.wait_frames(2)
     client.ui_click("mixing/to_jump")
-    client.step(2)
+    client.wait_frames(2)
     handoff_texts = _texts(client)
     handoff_zero = next(text for text in handoff_texts if text.endswith("source; handoffs 1"))
     handoff_alpha = next(text for text in handoff_texts if text.startswith("alpha "))
@@ -159,9 +162,9 @@ def _run(client, out_dir):
     if not handoff_alpha.startswith("alpha 0.00 |"):
         raise AssertionError(f"Handoff did not start at alpha zero: {handoff_alpha}")
     client.ui_click("mixing/play")
-    client.step(2)
+    client.wait_frames(2)
     client.ui_click("mixing/repeat")
-    _advance(client, 1.05)
+    client.time_wait(1.05)
     repeated_texts = _texts(client)
     repeated = next(text for text in repeated_texts if "source; handoffs" in text)
     repeated_memory = next(text for text in repeated_texts if text.startswith("snapshot "))
