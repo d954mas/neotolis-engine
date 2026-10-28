@@ -36,7 +36,7 @@ typedef struct {
     nt_build_shader_stage_t stage;
 } NtBuildShaderData;
 
-/* Texture decode options -- stored alongside decoded RGBA pixels */
+/* Texture decode options -- stored alongside the decoded source pixels */
 typedef struct {
     uint32_t width;
     uint32_t height;
@@ -130,7 +130,7 @@ typedef struct {
 
     /* Decoded intermediate representation (eager, populated at add_* time) */
     uint8_t *decoded_data; /* NULL for file/memory textures (freed after hash) */
-    uint32_t decoded_size; /* always set (RGBA size for textures even if freed) */
+    uint32_t decoded_size; /* always set (decoded source size for textures even if freed) */
     uint64_t decoded_hash; /* xxh64 of decoded_data, computed at add_* time */
 
     /* Early dedup: index of original entry, -1 if not a duplicate */
@@ -263,8 +263,10 @@ nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t reso
 
 /* Internal decode functions -- called from add_* (eager decode) */
 nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *opts);
-uint8_t *nt_builder_decode_texture(const uint8_t *src_data, uint32_t src_size, const nt_tex_opts_t *opts, uint32_t *out_w, uint32_t *out_h);
-uint8_t *nt_builder_decode_texture_raw(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint32_t *out_w, uint32_t *out_h);
+/* Decoded texture source: RGBA8 for LDR formats, RGB float32 for RGB9E5. */
+uint32_t nt_builder_texture_source_size(nt_texture_pixel_format_t format, uint32_t width, uint32_t height);
+void *nt_builder_decode_texture(const uint8_t *src_data, uint32_t src_size, nt_texture_pixel_format_t format, uint32_t max_size, uint32_t *out_w, uint32_t *out_h);
+void *nt_builder_decode_texture_raw(const void *pixels, uint32_t width, uint32_t height, nt_texture_pixel_format_t format, uint32_t max_size, uint32_t *out_w, uint32_t *out_h);
 nt_build_result_t nt_builder_decode_mesh(const char *path, const NtStreamLayout *layout, uint32_t stream_count, nt_tangent_mode_t tangent_mode, const char *mesh_name, uint32_t mesh_index,
                                          uint8_t **out_data, uint32_t *out_size);
 /* Shared stream-layout validation for both mesh decode paths. `label` prefixes log messages. */
@@ -344,7 +346,7 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
 /* Texture options are validated and format-resolved at public ingress.
  * Encoders return independent buffers; invariant failures assert. Shader encoding
  * stays on the main thread because its GL context is thread-bound. */
-void nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint32_t encode_threads, uint8_t **out_data, uint32_t *out_size);
+void nt_builder_encode_texture_to_buf(const void *pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint32_t encode_threads, uint8_t **out_data, uint32_t *out_size);
 void nt_builder_encode_shader_to_buf(const uint8_t *resolved_text, uint32_t text_len, nt_build_shader_stage_t stage, uint8_t **out_data, uint32_t *out_size);
 
 /* Metadata accumulation (called from import functions) */

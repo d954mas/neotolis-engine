@@ -49,7 +49,8 @@ static const format_row_t k_format_rows[] = {
     {NT_TEXTURE_FORMAT_ASTC_4x4_SRGB8_ALPHA8,  true,  false, true,       false,   true,          false,       true,  0},
     {NT_TEXTURE_FORMAT_SRGB8_ALPHA8,           true,  false, false,      false,   true,          true,        true,  4},
     {NT_TEXTURE_FORMAT_SRGB8,                  true,  false, false,      false,   true,          true,        true,  3},
-    {21,                                       false, false, false,      false,   false,         false,       false, 0},
+    {NT_TEXTURE_FORMAT_RGB9E5,                 true,  false, false,      false,   true,          true,        false, 4},
+    {22,                                       false, false, false,      false,   false,         false,       false, 0},
 };
 /* clang-format on */
 
@@ -92,6 +93,7 @@ void test_level_bytes_uncompressed(void) {
     TEST_ASSERT_EQUAL_UINT64(364, nt_texture_level_bytes(NT_TEXTURE_FORMAT_RGBA8, 13, 7));
     TEST_ASSERT_EQUAL_UINT64(364, nt_texture_level_bytes(NT_TEXTURE_FORMAT_SRGB8_ALPHA8, 13, 7));
     TEST_ASSERT_EQUAL_UINT64(273, nt_texture_level_bytes(NT_TEXTURE_FORMAT_SRGB8, 13, 7));
+    TEST_ASSERT_EQUAL_UINT64(364, nt_texture_level_bytes(NT_TEXTURE_FORMAT_RGB9E5, 13, 7));
     TEST_ASSERT_EQUAL_UINT64(182, nt_texture_level_bytes(NT_TEXTURE_FORMAT_RG8, 13, 7));
     TEST_ASSERT_EQUAL_UINT64(91, nt_texture_level_bytes(NT_TEXTURE_FORMAT_R8, 13, 7));
     TEST_ASSERT_EQUAL_UINT64(32, nt_texture_level_bytes(NT_TEXTURE_FORMAT_RGBA16F, 2, 2));

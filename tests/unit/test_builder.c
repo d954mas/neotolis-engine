@@ -756,7 +756,7 @@ void test_texture_round_trip(void) {
     TEST_ASSERT_EQUAL_UINT32(2, tex.width);
     TEST_ASSERT_EQUAL_UINT32(2, tex.height);
     TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_FORMAT_RGBA8, tex.format);
-    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, tex.compression);
+    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_NONE, tex.compression);
     /* NULL opts → nt_tex_opts_defaults(): premultiplied=false, gen_mipmaps=true */
     TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_FLAG_GEN_MIPMAPS, tex.flags);
     TEST_ASSERT_EQUAL_UINT32(2 * 2 * 4, tex.data_size);
@@ -934,7 +934,7 @@ void test_texture_srgb_opts_contract(void) {
     nt_tex_opts_t opts = nt_tex_opts_defaults();
     opts.format = NT_TEXTURE_FORMAT_SRGB8;
     /* Defaults ask for runtime mips, which SRGB8 storage cannot generate. */
-    EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_assert_texture_opts(&opts), "RAW SRGB8 cannot generate runtime mips");
+    EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_assert_texture_opts(&opts), "uncompressed SRGB8 cannot generate runtime mips");
     opts.gen_mipmaps = false;
     opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
     TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_SRGB8, nt_builder_assert_texture_opts(&opts));
@@ -995,7 +995,7 @@ void test_texture_premultiplied_encoding(void) {
     NtTextureAssetHeader tex;
     TEST_ASSERT_EQUAL(1, fread(&tex, sizeof(tex), 1, f));
     TEST_ASSERT_EQUAL_UINT32(NT_TEXTURE_MAGIC, tex.magic);
-    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, tex.compression);
+    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_NONE, tex.compression);
     /* Flag must be set — this is the whole point of premultiplied=true. */
     TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_FLAG_PREMULTIPLIED, tex.flags & NT_TEXTURE_FLAG_PREMULTIPLIED);
     TEST_ASSERT_EQUAL_UINT32(4 * 1 * 4, tex.data_size);
@@ -1619,7 +1619,7 @@ void test_e2e_real_assets(void) {
     TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_VERSION, th->version);
     TEST_ASSERT_EQUAL_UINT32(512, th->width);
     TEST_ASSERT_EQUAL_UINT32(512, th->height);
-    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, th->compression);
+    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_NONE, th->compression);
     /* First pixel should be non-zero (Lenna top-left is skin tone) */
     uint8_t *pixel0 = pack + tex_e->offset + sizeof(NtTextureAssetHeader);
     TEST_ASSERT_TRUE(pixel0[0] > 100);  /* R */
@@ -1775,7 +1775,7 @@ void test_tex_from_memory(void) {
     TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_VERSION, tex.version);
     TEST_ASSERT_EQUAL_UINT32(2, tex.width);
     TEST_ASSERT_EQUAL_UINT32(2, tex.height);
-    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, tex.compression);
+    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_NONE, tex.compression);
 
     (void)fclose(f);
 }
@@ -6652,7 +6652,7 @@ void test_atlas_real_pipeline_preserves_hole(void) {
 
     const NtTextureAssetHeader *tex_hdr = (const NtTextureAssetHeader *)(pack + tex_entry->offset);
     TEST_ASSERT_EQUAL_HEX32(NT_TEXTURE_MAGIC, tex_hdr->magic);
-    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, tex_hdr->compression);
+    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_NONE, tex_hdr->compression);
     /* Atlas pages must be premultiplied. */
     TEST_ASSERT_TRUE_MESSAGE((tex_hdr->flags & NT_TEXTURE_FLAG_PREMULTIPLIED) != 0, "atlas page must have premultiplied flag");
 
@@ -8398,7 +8398,7 @@ void test_alpha_threshold_zero_domain_and_compose(void) {
     TEST_ASSERT_NOT_NULL(tex_entry);
     const NtTextureAssetHeader *tex_hdr = (const NtTextureAssetHeader *)(pack + tex_entry->offset);
     TEST_ASSERT_EQUAL_HEX32(NT_TEXTURE_MAGIC, tex_hdr->magic);
-    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, tex_hdr->compression);
+    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_NONE, tex_hdr->compression);
     const uint8_t *page_pixels = (const uint8_t *)tex_hdr + sizeof(NtTextureAssetHeader);
     uint32_t sprite_rgb = 0;
     uint32_t ghost_rgb = 0;

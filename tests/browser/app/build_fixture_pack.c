@@ -1,7 +1,7 @@
 /* Browser smoke app's Basis fixture pack: a 128x128 RGBA and a 96x64 opaque RGB
  * texture of two solid halves (ETC1S when its option is ON, else UASTC), so every
  * transcode target lands on the same texels, the same pair stored as sRGB, and a
- * RAW sRGB texel. main.c requests them all. */
+ * uncompressed sRGB texel, plus an uncompressed RGB9E5 HDR texture. main.c requests them all. */
 
 #include "nt_builder.h"
 
@@ -61,7 +61,7 @@ static void add_pair(NtBuilderContext *ctx, const char *suffix, nt_basisu_encode
     (void)printf("  Textures added: basis_%s_rgba, basis_%s_rgb and their sRGB twins\n", suffix, suffix);
 }
 
-/* One RAW sRGB texel whose 128 bytes sample as 0.21586 linear RGB and 0.50196 alpha. */
+/* One uncompressed sRGB texel whose 128 bytes sample as 0.21586 linear RGB and 0.50196 alpha. */
 static void add_srgb_texel(NtBuilderContext *ctx) {
     static const uint8_t texel[4] = {128, 128, 128, 128};
     nt_tex_opts_t opts = nt_tex_opts_defaults();
@@ -70,6 +70,22 @@ static void add_srgb_texel(NtBuilderContext *ctx) {
     opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_NEAREST;
     opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_NEAREST;
     nt_builder_add_texture_raw(ctx, texel, 1, 1, "srgb_texel", &opts);
+}
+
+/* Uncompressed RGB9E5 4x4 with its baked chain: left half (0.25, 2, 8), right half (8, 0.25, 2). */
+static void add_hdr_texture(NtBuilderContext *ctx) {
+    static float rgb[4 * 4 * 3];
+    for (uint32_t i = 0; i < 4 * 4; i++) {
+        const bool left = (i % 4) < 2;
+        rgb[(i * 3) + 0] = left ? 0.25F : 8.0F;
+        rgb[(i * 3) + 1] = left ? 2.0F : 0.25F;
+        rgb[(i * 3) + 2] = left ? 8.0F : 2.0F;
+    }
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.format = NT_TEXTURE_FORMAT_RGB9E5;
+    opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
+    opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
+    nt_builder_add_texture_raw_f32(ctx, rgb, 4, 4, "hdr_rgb9e5", &opts);
 }
 
 int main(int argc, char *argv[]) {
@@ -105,6 +121,7 @@ int main(int argc, char *argv[]) {
     add_pair(ctx, "uastc", nt_tex_compress_uastc_default());
 #endif
     add_srgb_texel(ctx);
+    add_hdr_texture(ctx);
 
     nt_build_result_t r = nt_builder_finish_pack(ctx);
     nt_builder_free_pack(ctx);

@@ -16,7 +16,7 @@
 #include "nt_builder.h"        /* NtAtlasBuild, nt_atlas_add_raw, sprite opts */
 #include "nt_pack_format.h"    /* NtPackHeader, NtAssetEntry, NT_ASSET_ATLAS */
 #include "nt_atlas_format.h"   /* NtAtlasHeader, NtAtlasRegion, NtAtlasUv */
-#include "nt_texture_format.h" /* NtTextureAssetHeader, RAW/RGBA8 constants */
+#include "nt_texture_format.h" /* NtTextureAssetHeader, NONE/RGBA8 constants */
 /* clang-format on */
 
 #define NT_ATLAS_DEDUP_ART_W 16
@@ -326,7 +326,7 @@ static inline bool atlas_dedup_read_page_rgba(const void *pack_bytes, size_t pac
     if (th->magic != NT_TEXTURE_MAGIC || th->version != NT_TEXTURE_VERSION) {
         return false;
     }
-    if (th->compression != (uint8_t)NT_TEXTURE_COMPRESSION_RAW || th->format != (uint16_t)NT_TEXTURE_FORMAT_RGBA8) {
+    if (th->compression != (uint8_t)NT_TEXTURE_COMPRESSION_NONE || th->format != (uint16_t)NT_TEXTURE_FORMAT_RGBA8) {
         return false;
     }
     if (th->width == 0 || th->height == 0 || th->width > 0xFFFFU || th->height > 0xFFFFU) {

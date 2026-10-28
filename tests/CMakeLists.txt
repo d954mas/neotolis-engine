@@ -1081,6 +1081,12 @@ if(NOT EMSCRIPTEN)
 
     # Skeletal wire formats live in their own target: test_builder.c is already
     # ~10k lines and these tests need no atlas/glTF fixtures.
+    add_executable(test_builder_hdr unit/test_builder_hdr.c)
+    target_link_libraries(test_builder_hdr PRIVATE nt_builder nt_log unity nt_meshwire)
+    target_include_directories(test_builder_hdr PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    target_compile_definitions(test_builder_hdr PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+    nt_setup_test_target(test_builder_hdr WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
     add_executable(test_builder_skeletal unit/test_builder_skeletal.c)
     target_link_libraries(test_builder_skeletal PRIVATE nt_builder nt_log unity nt_meshwire)
     target_include_directories(test_builder_skeletal PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")

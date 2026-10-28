@@ -288,7 +288,7 @@ void nt_builder_set_threads_auto(NtBuilderContext *ctx) {
 void nt_builder_free_pack(NtBuilderContext *ctx) { nt_builder_free_context(ctx); }
 
 /* Forward declaration for texture re-decode (defined below make_texture_data) */
-static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *out_w, uint32_t *out_h);
+static void *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *out_w, uint32_t *out_h);
 
 void nt_builder_tmp_path(const char *path, char *out, size_t out_size) {
 #ifdef _WIN32
@@ -410,7 +410,7 @@ static void encode_one_asset(const NtBuildEntry *pe, NtEncodeResult *result, uin
     }
     case NT_BUILD_ASSET_TEXTURE: {
         NtBuildTextureData *td = (NtBuildTextureData *)pe->data;
-        uint8_t *pixels = pe->decoded_data;
+        void *pixels = pe->decoded_data;
         bool pixels_owned = false;
 
         if (!pixels) {
@@ -479,6 +479,7 @@ nt_build_result_t nt_builder_result_from_error(const nt_build_error_t *error) {
     }
     switch (error->kind) {
     case NT_BUILD_ERR_KIND_CORRUPT_IMAGE:
+    case NT_BUILD_ERR_KIND_HDR_IMAGE:
         return NT_BUILD_ERR_FORMAT;
     case NT_BUILD_ERR_KIND_ZERO_DIM:
     case NT_BUILD_ERR_KIND_ATLAS_TRANSPARENT_AFTER_TRIM:
@@ -585,8 +586,8 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                 }
             } else if (pe->kind == NT_BUILD_ASSET_TEXTURE) {
                 /* Re-decode textures for verification when decoded_data was freed */
-                uint8_t *a_data = pe->decoded_data;
-                uint8_t *b_data = candidate->decoded_data;
+                void *a_data = pe->decoded_data;
+                void *b_data = candidate->decoded_data;
                 bool a_owned = false;
                 bool b_owned = false;
                 if (!a_data) {
@@ -1283,22 +1284,22 @@ static uint64_t nt_builder_path_id(const char *path) {
 
 /* --- Texture data helper --- */
 
-/* Re-decode a texture entry from stored source. Returns malloc'd RGBA buffer. Caller frees.
+/* Re-decode a texture entry from stored source. Returns malloc'd source pixels. Caller frees.
  * Thread-safe: reads only from pe (immutable after add_*), uses fopen/fread (per-fd) and
  * stbi_load_from_memory (thread-local error state). Called from parallel encode workers. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- assert expansions inflate the count
-static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *out_w, uint32_t *out_h) {
+static void *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *out_w, uint32_t *out_h) {
     const NtBuildTextureData *td = (const NtBuildTextureData *)pe->data;
-    uint8_t *pixels = NULL;
+    void *pixels = NULL;
     uint32_t w = 0;
     uint32_t h = 0;
     if (td->source_data) {
-        pixels = nt_builder_decode_texture(td->source_data, td->source_size, &td->opts, &w, &h);
+        pixels = nt_builder_decode_texture(td->source_data, td->source_size, td->opts.format, td->opts.max_size, &w, &h);
     } else if (td->source_path) {
         uint32_t fsize = 0;
         uint8_t *fdata = (uint8_t *)nt_builder_read_file(td->source_path, &fsize);
         NT_BUILD_ASSERT(fdata && "redecode_texture: re-read file failed");
-        pixels = nt_builder_decode_texture(fdata, fsize, &td->opts, &w, &h);
+        pixels = nt_builder_decode_texture(fdata, fsize, td->opts.format, td->opts.max_size, &w, &h);
         free(fdata);
     } else {
         NT_BUILD_ASSERT(0 && "redecode_texture: no source (raw texture should have decoded_data)");
@@ -1310,7 +1311,8 @@ static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *ou
         *out_h = h;
     }
     /* Encodes are cached under this hash: a source edited since add_* must not be stored under it. */
-    NT_BUILD_ASSERT(nt_hash64(pixels, w * h * 4).value == pe->decoded_hash && "redecode_texture: source changed during the build");
+    NT_BUILD_ASSERT(nt_builder_texture_source_size(td->opts.format, w, h) == pe->decoded_size && nt_hash64(pixels, pe->decoded_size).value == pe->decoded_hash &&
+                    "redecode_texture: source changed during the build");
     return pixels;
 }
 
@@ -1388,19 +1390,19 @@ void nt_builder_add_texture(NtBuilderContext *ctx, const char *path, const nt_te
     NT_BUILD_ASSERT(stored_path && "add_texture: strdup failed");
     free(resolved_path);
 
-    /* Decode to RGBA */
     uint32_t w = 0;
     uint32_t h = 0;
-    uint8_t *pixels = nt_builder_decode_texture(file_data, file_size, opts, &w, &h);
+    void *pixels = nt_builder_decode_texture(file_data, file_size, effective_format, opts ? opts->max_size : 0, &w, &h);
     free(file_data);
 
     /* Hash decoded pixels, then free -- re-read from stored path at encode time */
-    uint64_t hash = nt_hash64(pixels, w * h * 4).value;
+    const uint32_t decoded_size = nt_builder_texture_source_size(effective_format, w, h);
+    uint64_t hash = nt_hash64(pixels, decoded_size).value;
     free(pixels);
 
     NtBuildTextureData *td = make_texture_data(w, h, opts, effective_format);
     td->source_path = stored_path;
-    nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_TEXTURE, td, NULL, w * h * 4, hash);
+    nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_TEXTURE, td, NULL, decoded_size, hash);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1460,10 +1462,11 @@ void nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *da
 
     uint32_t w = 0;
     uint32_t h = 0;
-    uint8_t *pixels = nt_builder_decode_texture(data, size, opts, &w, &h);
+    void *pixels = nt_builder_decode_texture(data, size, effective_format, opts ? opts->max_size : 0, &w, &h);
 
     /* Hash decoded pixels, then free -- deep copy source for re-decode at encode time */
-    uint64_t hash = nt_hash64(pixels, w * h * 4).value;
+    const uint32_t decoded_size = nt_builder_texture_source_size(effective_format, w, h);
+    uint64_t hash = nt_hash64(pixels, decoded_size).value;
     free(pixels);
 
     NtBuildTextureData *td = make_texture_data(w, h, opts, effective_format);
@@ -1472,22 +1475,35 @@ void nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *da
     memcpy(td->source_data, data, size);
     td->source_size = size;
 
-    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, td, NULL, w * h * 4, hash);
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, td, NULL, decoded_size, hash);
 }
 
 /* --- Public add_texture_raw --- */
 
+static void add_texture_pixels(NtBuilderContext *ctx, const void *pixels, uint32_t width, uint32_t height, const char *resource_id, const nt_tex_opts_t *opts,
+                               nt_texture_pixel_format_t effective_format) {
+    uint32_t w = 0;
+    uint32_t h = 0;
+    void *decoded = nt_builder_decode_texture_raw(pixels, width, height, effective_format, opts ? opts->max_size : 0, &w, &h);
+
+    /* Hash and keep decoded_data -- can't re-derive from source */
+    const uint32_t decoded_size = nt_builder_texture_source_size(effective_format, w, h);
+    uint64_t hash = nt_hash64(decoded, decoded_size).value;
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, make_texture_data(w, h, opts, effective_format), (uint8_t *)decoded, decoded_size, hash);
+}
+
 void nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const char *resource_id, const nt_tex_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && rgba_pixels && width > 0 && height > 0 && resource_id && "invalid texture_raw args");
     nt_texture_pixel_format_t effective_format = nt_builder_assert_texture_opts(opts);
+    NT_BUILD_ASSERT(effective_format != NT_TEXTURE_FORMAT_RGB9E5 && "add_texture_raw: RGB9E5 takes float pixels -- use nt_builder_add_texture_raw_f32");
+    add_texture_pixels(ctx, rgba_pixels, width, height, resource_id, opts, effective_format);
+}
 
-    uint32_t w = 0;
-    uint32_t h = 0;
-    uint8_t *pixels = nt_builder_decode_texture_raw(rgba_pixels, width, height, opts, &w, &h);
-
-    /* Hash and keep decoded_data -- can't re-derive from source */
-    uint64_t hash = nt_hash64(pixels, w * h * 4).value;
-    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, make_texture_data(w, h, opts, effective_format), pixels, w * h * 4, hash);
+void nt_builder_add_texture_raw_f32(NtBuilderContext *ctx, const float *rgb_pixels, uint32_t width, uint32_t height, const char *resource_id, const nt_tex_opts_t *opts) {
+    NT_BUILD_ASSERT(ctx && rgb_pixels && width > 0 && height > 0 && resource_id && "invalid texture_raw_f32 args");
+    nt_texture_pixel_format_t effective_format = nt_builder_assert_texture_opts(opts);
+    NT_BUILD_ASSERT(effective_format == NT_TEXTURE_FORMAT_RGB9E5 && "add_texture_raw_f32: float pixels require format RGB9E5");
+    add_texture_pixels(ctx, rgb_pixels, width, height, resource_id, opts, effective_format);
 }
 
 nt_build_result_t nt_builder_add_asset_root(NtBuilderContext *ctx, const char *path) {

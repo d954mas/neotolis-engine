@@ -2112,6 +2112,8 @@ static nt_gfx_gl_fmt_t nt_gfx_gl_texture_format(nt_texture_format_t fmt) {
         return (nt_gfx_gl_fmt_t){GL_SRGB8_ALPHA8, GL_RGBA, GL_UNSIGNED_BYTE, true, false};
     case NT_TEXTURE_FORMAT_SRGB8:
         return (nt_gfx_gl_fmt_t){GL_SRGB8, GL_RGB, GL_UNSIGNED_BYTE, false, false};
+    case NT_TEXTURE_FORMAT_RGB9E5:
+        return (nt_gfx_gl_fmt_t){GL_RGB9_E5, GL_RGB, GL_UNSIGNED_INT_5_9_9_9_REV, true, false};
     case NT_TEXTURE_FORMAT_INVALID:
     default:
         NT_ASSERT(0 && "unsupported texture format");

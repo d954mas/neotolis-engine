@@ -90,10 +90,12 @@ static nt_resource_t s_atlas_handle, s_atlas_tex_handle;
  * Basis transcode path. RGBA carries alpha, RGB is opaque (ETC2 picks RGB8 for it). */
 static nt_resource_t s_basis_tex_handle;
 static nt_resource_t s_basis_rgb_handle;
-/* The same pair stored as sRGB, and a RAW sRGB texel of 128s. */
+/* The same pair stored as sRGB, and an uncompressed sRGB texel of 128s. */
 static nt_resource_t s_basis_srgb_handle;
 static nt_resource_t s_basis_srgb_rgb_handle;
 static nt_resource_t s_srgb_texel_handle;
+/* Uncompressed RGB9E5 with values above 1, sampled scaled by 1/16. */
+static nt_resource_t s_hdr_handle;
 static nt_resource_t s_font_resource;
 static nt_resource_t s_rich_font_resource[4];
 
@@ -168,8 +170,8 @@ static probe_program_t s_probe_programs[PROBE_COUNT] = {
     /* Explicit LOD, not screen-space derivatives: the level under test must not depend on how the
      * driver rounds lambda for a 1x1 viewport. */
     [PROBE_BASIS] = {.vs_source = "void main() { vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)); gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }",
-                     .fs_source = "precision highp float; uniform sampler2D u_basis; layout(std140) uniform Draw { vec4 u_basis_uv; }; out vec4 color;\n"
-                                  "void main() { color = textureLod(u_basis, u_basis_uv.xy, u_basis_uv.z); }"},
+                     .fs_source = "precision highp float; uniform highp sampler2D u_basis; layout(std140) uniform Draw { vec4 u_basis_uv; }; out vec4 color;\n"
+                                  "void main() { color = textureLod(u_basis, u_basis_uv.xy, u_basis_uv.z) * u_basis_uv.w; }"},
     [PROBE_DEPTH] =
         {.vs_source =
              "layout(std140) uniform Draw { vec4 u_depth; }; void main() { vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)); gl_Position = vec4(p * 2.0 - 1.0, u_depth.x, 1.0); }",
@@ -464,7 +466,7 @@ static bool basis_handle_ready(nt_resource_t handle) {
 
 EMSCRIPTEN_KEEPALIVE int nt_test_basis_ready(void) {
     return (basis_handle_ready(s_basis_tex_handle) && basis_handle_ready(s_basis_rgb_handle) && basis_handle_ready(s_basis_srgb_handle) && basis_handle_ready(s_basis_srgb_rgb_handle) &&
-            basis_handle_ready(s_srgb_texel_handle))
+            basis_handle_ready(s_srgb_texel_handle) && basis_handle_ready(s_hdr_handle))
                ? 1
                : 0;
 }
@@ -505,7 +507,7 @@ EMSCRIPTEN_KEEPALIVE int nt_test_basis_single_pixel_format(void) {
 /* Packed RGBA (r | g<<8 | b<<16 | a<<24) of texel (0,0) of one fixture level (0, 3 or 7), drawn
  * through a 1x1 render target with an explicit-LOD sampler override. 0xFFFFFFFF = fixture not ready
  * or readback failed. */
-static unsigned int probe_texel(nt_texture_t tex, int level, float size) {
+static unsigned int probe_texel(nt_texture_t tex, int level, float size, float scale) {
     nt_gfx_begin_frame();
     if (tex.id == 0 || !nt_gfx_texture_ready(tex)) {
         nt_gfx_end_frame();
@@ -528,7 +530,7 @@ static unsigned int probe_texel(nt_texture_t tex, int level, float size) {
     nt_vertex_input_t input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     /* Centre of texel (0,0) at the requested level (the single texel at the last level). */
     const float texel = 0.5F / (size / (float)(1 << level));
-    const float uv[4] = {texel, texel, (float)level, 0.0F};
+    const float uv[4] = {texel, texel, (float)level, scale};
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {1.0F, 0.0F, 1.0F, 1.0F}});
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(input);
@@ -546,14 +548,20 @@ static unsigned int probe_texel(nt_texture_t tex, int level, float size) {
 }
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     NT_ASSERT(level == 0 || level == 3 || level == 7);
-    return probe_texel(basis_fixture_texture(), level, BASIS_FIXTURE_SIZE);
+    return probe_texel(basis_fixture_texture(), level, BASIS_FIXTURE_SIZE, 1.0F);
 }
 /* sRGB storage samples linear values, so these read back decoded. */
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_srgb_sample(int level) {
     NT_ASSERT(level == 0 || level == 7);
-    return probe_texel((nt_texture_t){nt_resource_get(s_basis_srgb_handle)}, level, BASIS_FIXTURE_SIZE);
+    return probe_texel((nt_texture_t){nt_resource_get(s_basis_srgb_handle)}, level, BASIS_FIXTURE_SIZE, 1.0F);
 }
-EMSCRIPTEN_KEEPALIVE unsigned int nt_test_srgb_texel_sample(void) { return probe_texel((nt_texture_t){nt_resource_get(s_srgb_texel_handle)}, 0, 1.0F); }
+EMSCRIPTEN_KEEPALIVE unsigned int nt_test_srgb_texel_sample(void) { return probe_texel((nt_texture_t){nt_resource_get(s_srgb_texel_handle)}, 0, 1.0F, 1.0F); }
+EMSCRIPTEN_KEEPALIVE int nt_test_hdr_format(void) { return (int)nt_gfx_texture_format((nt_texture_t){nt_resource_get(s_hdr_handle)}); }
+/* Level 0 texel (0,0) or the 1x1 level 2, scaled by 1/16 so values above 1 fit RGBA8. */
+EMSCRIPTEN_KEEPALIVE unsigned int nt_test_hdr_sample(int level) {
+    NT_ASSERT(level == 0 || level == 2);
+    return probe_texel((nt_texture_t){nt_resource_get(s_hdr_handle)}, level, 4.0F, 1.0F / 16.0F);
+}
 /* In capture mode every probe frame is captured, so capture covers every pass of the probe. */
 static void probe_begin_frame(int capture) {
 #if NT_GFX_CAPTURE_ENABLED
@@ -1030,6 +1038,7 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'basis_format': function() { return _nt_test_basis_format(); },
         'basis_rgb_format': function() { return _nt_test_basis_rgb_format(); },
         'srgb': function() { return [_nt_test_basis_srgb_format(), _nt_test_basis_srgb_rgb_format(), _nt_test_basis_srgb_sample(0) >>> 0, _nt_test_basis_srgb_sample(7) >>> 0, _nt_test_srgb_texel_sample() >>> 0]; },
+        'hdr': function() { return [_nt_test_hdr_format(), _nt_test_hdr_sample(0) >>> 0, _nt_test_hdr_sample(2) >>> 0]; },
         'basis_caps': function() { return _nt_test_basis_caps(); },
         'basis_build_targets': function() { return _nt_test_basis_build_targets(); },
         'basis_build_codecs': function() { return _nt_test_basis_build_codecs(); },
@@ -1046,7 +1055,13 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'rich_link_css': function() {
             return { 'present': _nt_test_rich_link_present() !== 0, 'x': _nt_test_rich_link_css_x(), 'y': _nt_test_rich_link_css_y(), 'w': _nt_test_rich_link_css_w(), 'h': _nt_test_rich_link_css_h() };
         },
-        'rich_link_clicks': function() { return _nt_test_rich_link_clicks() >>> 0; },
+        'rich_link_clicks': function() { return _nt_test_rich_link_clicks() >>> 0; }
+    };
+})
+
+/* A second block because one EM_JS body must stay under the 4095-character C string limit. */
+EM_JS(void, nt_test_install_io_hooks, (void), {
+    Object.assign(window['__nt'], {
         'http_post_echo': function() { _nt_test_http_post_echo(); },
         'http_get_404': function() { _nt_test_http_get_404(); },
         'http_get_slow_timeout': function() { _nt_test_http_get_slow_timeout(); },
@@ -1062,7 +1077,7 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'http_free': function() { _nt_test_http_free(); },
         'crash_load': function() { return UTF8ToString(_nt_test_crash_load()); },
         'crash_clear': function() { _nt_test_crash_clear(); }
-    };
+    });
 })
 /* clang-format on */
 #endif /* __EMSCRIPTEN__ */
@@ -1484,6 +1499,7 @@ int main(int argc, char *argv[]) {
     s_basis_srgb_rgb_handle = nt_resource_request(nt_hash64_str("basis_uastc_srgb_rgb"), NT_ASSET_TEXTURE);
 #endif
     s_srgb_texel_handle = nt_resource_request(nt_hash64_str("srgb_texel"), NT_ASSET_TEXTURE);
+    s_hdr_handle = nt_resource_request(nt_hash64_str("hdr_rgb9e5"), NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT, NT_ASSET_FONT);
     s_rich_font_resource[0] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_R, NT_ASSET_FONT);
     s_rich_font_resource[1] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_B, NT_ASSET_FONT);
@@ -1554,6 +1570,7 @@ int main(int argc, char *argv[]) {
     s_nt_hidden_caption = s_caption;
     s_nt_hidden_caption.color &= 0x00FFFFFFU;
     nt_test_install_hooks(); /* window.__nt smoke-test surface */
+    nt_test_install_io_hooks();
 #endif
 
     nt_log_info("browser_smoke: starting");

@@ -128,8 +128,8 @@ static const char *texture_format_str(const uint8_t *asset_data, uint32_t asset_
         return "TEX";
     }
     const NtTextureAssetHeader *hdr = (const NtTextureAssetHeader *)asset_data;
-    if (hdr->compression == NT_TEXTURE_COMPRESSION_RAW) {
-        return "TEX|RAW";
+    if (hdr->compression == NT_TEXTURE_COMPRESSION_NONE) {
+        return "TEX|NONE";
     }
     if (hdr->compression == NT_TEXTURE_COMPRESSION_BASIS) {
         const uint8_t *basis_data = asset_data + sizeof(NtTextureAssetHeader);
@@ -369,7 +369,7 @@ static void accumulate_texture_stats(DumpStats *st, const uint8_t *asset_data, u
         return;
     }
     const NtTextureAssetHeader *thdr = (const NtTextureAssetHeader *)asset_data;
-    if (thdr->compression == NT_TEXTURE_COMPRESSION_RAW) {
+    if (thdr->compression == NT_TEXTURE_COMPRESSION_NONE) {
         st->tex_raw_fmt++;
     } else if (thdr->compression == NT_TEXTURE_COMPRESSION_BASIS) {
         const uint8_t *basis_data = asset_data + sizeof(NtTextureAssetHeader);
@@ -451,7 +451,7 @@ static void print_texture_summary(const DumpStats *st) {
     size_t pos = 0;
     uint32_t parts = 0;
     if (st->tex_raw_fmt > 0) {
-        pos += (size_t)snprintf(fmt_str + pos, sizeof(fmt_str) - pos, "%u RAW", st->tex_raw_fmt);
+        pos += (size_t)snprintf(fmt_str + pos, sizeof(fmt_str) - pos, "%u NONE", st->tex_raw_fmt);
         parts++;
     }
     if (st->tex_etc1s > 0) {

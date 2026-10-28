@@ -58,7 +58,7 @@ void nt_builder_free_pack(NtBuilderContext *ctx);
 
 nt_builder_add_mesh / add_texture / add_shader / add_font   /* one source file */
 nt_builder_add_meshes / add_textures / add_shaders / add_fonts   /* glob pattern */
-nt_builder_add_texture_from_memory / add_texture_raw   /* in-memory pixels */
+nt_builder_add_texture_from_memory / add_texture_raw / add_texture_raw_f32   /* in-memory pixels */
 nt_builder_add_scene_mesh   /* one primitive out of a parsed GLB scene */
 nt_builder_add_blob         /* opaque bytes under a resource id */
 nt_builder_add_asset_root   /* convention-based tree import */
@@ -138,7 +138,7 @@ meaning and are never used by validation, cache hashing, dedup equality or the e
 Signed zero has the same identity as positive zero.
 
 `compress` is stored by value; `compress.codec == NT_BASISU_CODEC_NONE`
-(the zero initializer) selects RAW. NONE denotes absence of Basis compression
+(the zero initializer) selects an uncompressed texture. NONE denotes absence of Basis compression
 in builder options, not a Basis file codec. File/memory textures decode and
 resize at add time to establish pixel identity. Early dedup re-decodes them
 when a hash match needs byte verification; encoding re-decodes on a cache miss.
@@ -158,17 +158,33 @@ are stored as they are and the GPU decodes them on sampling
 ([runtime formats](../assets/runtime-formats.md#texture-activation-ttex)).
 Basis accepts `RGBA8`, `RGB8`, `SRGB8_ALPHA8` and `SRGB8`. `premultiplied = true`
 requires `RGBA8`: premultiplying encoded sRGB bytes is not premultiplication in
-linear light. A RAW `SRGB8` texture cannot generate runtime mips (WebGL 2 cannot
+linear light. An uncompressed `SRGB8` texture cannot generate runtime mips (WebGL 2 cannot
 render to it); use `SRGB8_ALPHA8`, or `gen_mipmaps = false` with a non-mip
 `filter_min`. The format is part of the cache key and of dedup identity, so the
 same pixels as `RGBA8` and as `SRGB8_ALPHA8` are two assets. Resize still
 filters encoded values.
 
+`RGB9E5` is linear HDR color (emissive, lightmaps, sky panoramas). The source
+type follows the format and is never converted: `RGB9E5` requires an HDR source
+(Radiance `.hdr`, decoded as float RGB) or `nt_builder_add_texture_raw_f32`
+(RGB float32, 12 bytes per pixel), and every other format requires an LDR
+source or `nt_builder_add_texture_raw` (RGBA8). A mismatch asserts instead of
+tone-mapping an HDR file to 8 bits or gamma-expanding an LDR one. Every source
+value must be finite and in `[0, 65216]` (`ASTC_HDR_MAX_VAL`, the largest value
+Basis UASTC HDR stores without a rescale factor); the builder asserts this on the
+source, before any resize, and never clamps or tone-maps. Resize and mips use a
+box filter on float RGB: a filter with negative lobes would make negative colors.
+The runtime cannot generate `RGB9E5` mips, so `gen_mipmaps = true` makes the
+builder bake the full chain, each level box-filtered from the previous float
+level, and `false` writes one level; the uncompressed mip-filter rule below applies
+unchanged. `RGB9E5` takes no Basis compression and no premultiplication, and atlas
+pages stay LDR: `nt_atlas_begin` asserts on it.
+
 Basis always emits a full mip chain, independent of `gen_mipmaps` (that flag
-controls RAW runtime mip generation). The builder asserts exactly
+controls uncompressed runtime mip generation). The builder asserts exactly
 `1 + floor(log2(max(width, height)))` levels; 1x1 is complete with one level.
 Activation cross-checks that count against the blob and the header and asserts
-on any asset that disagrees. A RAW texture whose default min filter asks for
+on any asset that disagrees. An uncompressed texture whose default min filter asks for
 mipmaps without `gen_mipmaps` is a build-time assert (`NT_BUILD_ASSERT`); the
 runtime would accept it and sample level 0.
 
@@ -243,11 +259,11 @@ computed before canonicalization and are invariant under it.
 The builder distinguishes two failure classes:
 
 - **Programmer invariants, unexpected states, OOM, and missing/unreadable files** assert (`NT_BUILD_ASSERT`) — these are bugs or a broken environment, and crashing surfaces them instantly. The single-asset APIs (`nt_builder_add_texture`, `nt_builder_add_mesh`, `nt_builder_add_font`) also assert on a decode/parse failure of their input.
-- **Content-dependent failures of sprite images inside the ATLAS builder** are recoverable and route to a graceful error channel instead of aborting: undecodable/oversized/zero-dimension sprite images, transparent-after-trim sprites, oversized slice9 borders, contour-vertex overflow, trim-offset overflow, duplicate region names, size/page limits, and unfittable sprites. Geometry selection is total (see [Atlas options](#atlas-options)), so it has no content error kind.
+- **Content-dependent failures of sprite images inside the ATLAS builder** are recoverable and route to a graceful error channel instead of aborting: undecodable/oversized/zero-dimension sprite images, HDR sprite images (atlas pages are LDR), transparent-after-trim sprites, oversized slice9 borders, contour-vertex overflow, trim-offset overflow, duplicate region names, size/page limits, and unfittable sprites. Geometry selection is total (see [Atlas options](#atlas-options)), so it has no content error kind.
 
 `NT_BUILD_ASSERT` is terminal: normal execution ends with `abort()`. Tests may install a non-local-jump hook to verify that an assertion fires, but the interrupted builder context is not reusable and has no rollback guarantee.
 
-The graceful channel is scoped to the atlas builder — it lets a batch of sprites survive one bad member. Content errors stay local to `NtAtlasBuild` while it is collecting. One bad sprite does not stop validation of the remaining sprites in that transaction, so related errors are reported together in stable add order. A failed commit publishes no atlas blob, page texture, metadata, or codegen region; it appends its errors to the pack accumulator and marks the final pack invalid. The accumulator holds up to `NT_BUILD_MAX_ERRORS` (256) content errors; beyond that the tail is dropped and `nt_builder_errors_truncated()` returns true. Atlas-specific kinds use the `NT_BUILD_ERR_KIND_ATLAS_*` prefix; generic image-content kinds remain `NT_BUILD_ERR_KIND_CORRUPT_IMAGE`, `NT_BUILD_ERR_KIND_ZERO_DIM`, and `NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE`. A single-dimension-oversized image file is reported as `IMAGE_TOO_LARGE`, not `CORRUPT_IMAGE`. Callers read committed errors before or after `finish_pack`:
+The graceful channel is scoped to the atlas builder — it lets a batch of sprites survive one bad member. Content errors stay local to `NtAtlasBuild` while it is collecting. One bad sprite does not stop validation of the remaining sprites in that transaction, so related errors are reported together in stable add order. A failed commit publishes no atlas blob, page texture, metadata, or codegen region; it appends its errors to the pack accumulator and marks the final pack invalid. The accumulator holds up to `NT_BUILD_MAX_ERRORS` (256) content errors; beyond that the tail is dropped and `nt_builder_errors_truncated()` returns true. Atlas-specific kinds use the `NT_BUILD_ERR_KIND_ATLAS_*` prefix; generic image-content kinds remain `NT_BUILD_ERR_KIND_CORRUPT_IMAGE`, `NT_BUILD_ERR_KIND_ZERO_DIM`, `NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE` and `NT_BUILD_ERR_KIND_HDR_IMAGE`. A single-dimension-oversized image file is reported as `IMAGE_TOO_LARGE`, not `CORRUPT_IMAGE`. Callers read committed errors before or after `finish_pack`:
 
 - `nt_build_error_t` — pure-data record (kind, atlas/sprite names, dims, limits). Names longer than the fixed record fields retain both ends plus a stable hash instead of being silently truncated.
 - `const nt_build_error_t *nt_builder_get_errors(ctx, &count)` — borrowed, read-only view valid until `nt_builder_free_pack`.
@@ -398,8 +414,8 @@ sharing one payload in the pack.
 Texture cache and early dedup use one identity, `opts_hash`; early dedup
 compares it after an exact pixel match. It covers the effective settings:
 resized dimensions, resolved pixel format, premultiplication, sampler defaults,
-RAW mip-generation flag, compression presence, codec and its active fields above.
-Basis ignores the RAW mip-generation flag. Names, source locations, resize
+uncompressed mip-generation flag, codec and its active fields above.
+Basis ignores the mip-generation flag; for `RGB9E5` it selects the baked chain. Names, source locations, resize
 limits after resizing, threading, descriptor padding and inactive union bytes
 are not encode identity.
 
@@ -604,7 +620,7 @@ Every frontier adopts the trim-rect candidate, so with `max_vertices >= 4` geome
 - Candidate geometry and the integer geometry prepared for serialization both pass the same selected-geometry proof: inputs valid, opaque area valid, base/selected bounds, topology, full retained-cell coverage, triangulation, metric order, allowance, and ceiling. Corrupt area, allowance, ceiling, polygon, or triangle data fails the proof. Float positions are baked afterward and checked for finiteness.
 - These controls affect builder geometry, composed page pixels, and atlas cache identity. They do not change the runtime API or the on-disk atlas blob format.
 
-**Premultiplied alpha (default):** atlas pages are encoded through the regular texture pipeline with `premultiplied = true`, which writes `RGB' = (RGB * A + 127) / 255` into the page before `strip_channels` (RAW path) or `nt_basisu_encode` (BASIS path). The resulting texture sets `NT_TEXTURE_FLAG_PREMULTIPLIED` in `NtTextureAssetHeader.flags`, and the runtime must draw with `(ONE, ONE_MINUS_SRC_ALPHA)` blending. This is what keeps NFP-packed sprites free of dark fringes at sub-pixel clearance: `(0,0,0,0)` gap pixels are the identity for premultiplied blending, so bilinear filtering at sprite edges stays correct. Setting `premultiplied = false` logs a warning and is only valid for NEAREST-filtered or fully-opaque atlases; setting `premultiplied = true` with a non-RGBA8 `format`, including an sRGB one, is a hard assert.
+**Premultiplied alpha (default):** atlas pages are encoded through the regular texture pipeline with `premultiplied = true`, which writes `RGB' = (RGB * A + 127) / 255` into the page before `strip_channels` (uncompressed path) or `nt_basisu_encode` (BASIS path). The resulting texture sets `NT_TEXTURE_FLAG_PREMULTIPLIED` in `NtTextureAssetHeader.flags`, and the runtime must draw with `(ONE, ONE_MINUS_SRC_ALPHA)` blending. This is what keeps NFP-packed sprites free of dark fringes at sub-pixel clearance: `(0,0,0,0)` gap pixels are the identity for premultiplied blending, so bilinear filtering at sprite edges stays correct. Setting `premultiplied = false` logs a warning and is only valid for NEAREST-filtered or fully-opaque atlases; setting `premultiplied = true` with a non-RGBA8 `format`, including an sRGB one, is a hard assert.
 
 **LDR mip filtering:** for a linear `format` the Basis encoder filters stored RGB
 and alpha values linearly, without an sRGB transfer during downsampling
@@ -614,7 +630,7 @@ texture reduces to roughly RGBA `(128,128,128,128)`, subject to block-compressio
 error. For an sRGB `format` the wrapper sets `m_mip_srgb = true`: RGB averages
 linear light and alpha stays on stored values, so an opaque black/white checker
 reduces to about 188, not 128. sRGB is never premultiplied, so the two rules never
-meet. RAW `SRGB8_ALPHA8` mips come from runtime `glGenerateMipmap`, whose filter
+meet. Uncompressed `SRGB8_ALPHA8` mips come from runtime `glGenerateMipmap`, whose filter
 for sRGB storage the GL ES specification leaves to the driver.
 
 **Hard limits:**

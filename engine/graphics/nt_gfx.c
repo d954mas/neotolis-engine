@@ -1477,8 +1477,10 @@ static nt_gfx_result_t make_texture(const nt_texture_desc_t *desc, nt_texture_t 
         /* Integer storage samples NEAREST only, so extra levels are dead VRAM. */
         NT_ASSERT(local_desc.level_count <= 1 && "integer texture mip levels are not sampleable");
     }
-    /* glGenerateMipmap needs color-renderable storage; WebGL2 does not render to SRGB8. */
+    /* WebGL2 glGenerateMipmap needs color-renderable storage, which SRGB8 and RGB9E5 are not;
+       desktop GL does not require it, so native runs would hide the failure. */
     NT_ASSERT((local_desc.format != NT_TEXTURE_FORMAT_SRGB8 || !local_desc.gen_mipmaps) && "make_texture: SRGB8 cannot generate mipmaps -- use SRGB8_ALPHA8");
+    NT_ASSERT((local_desc.format != NT_TEXTURE_FORMAT_RGB9E5 || !local_desc.gen_mipmaps) && "make_texture: RGB9E5 cannot generate mipmaps -- upload a baked chain");
     if (local_desc.format == NT_TEXTURE_FORMAT_RGBA16F) {
         NT_ASSERT((!local_desc.gen_mipmaps || g_nt_gfx.gpu_caps.has_float_render_target) && "RGBA16F mipmaps require float rendering support");
     }
@@ -2693,7 +2695,7 @@ static nt_texture_format_t basis_target_format(const nt_gfx_gpu_caps_t *caps, nt
     }
 }
 
-/* Activate a TTEX texture (RAW or Basis Universal compressed) */
+/* Activate a TTEX texture (uncompressed or Basis Universal) */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     /* make_texture would refuse the result anyway; bail before transcoding
@@ -2710,7 +2712,15 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     NT_ASSERT(hdr->width != 0 && hdr->height != 0 && hdr->width <= UINT16_MAX && hdr->height <= UINT16_MAX && "texture dimensions out of range");
     /* Subtraction safe: the resource core checked size >= sizeof header. */
     NT_ASSERT(hdr->data_size == size - sizeof(NtTextureAssetHeader) && "texture data_size differs from its blob");
-    NT_ASSERT((hdr->compression == NT_TEXTURE_COMPRESSION_RAW || hdr->compression == NT_TEXTURE_COMPRESSION_BASIS) && "texture compression unknown");
+    NT_ASSERT((hdr->compression == NT_TEXTURE_COMPRESSION_NONE || hdr->compression == NT_TEXTURE_COMPRESSION_BASIS) && "texture compression unknown");
+    if (hdr->compression == NT_TEXTURE_COMPRESSION_NONE) {
+        NT_ASSERT((hdr->mip_count == 1 || hdr->mip_count == nt_texture_full_chain_levels(hdr->width, hdr->height)) && "texture uncompressed mip_count is neither 1 nor the full chain");
+        uint64_t expected = 0;
+        for (uint32_t level = 0; level < hdr->mip_count; level++) {
+            expected += nt_texture_level_bytes((nt_texture_pixel_format_t)hdr->format, nt_texture_level_extent(hdr->width, level), nt_texture_level_extent(hdr->height, level));
+        }
+        NT_ASSERT(expected == hdr->data_size && "texture uncompressed data_size differs from its pixels");
+    }
     if (hdr->width > g_nt_gfx.gpu_caps.max_texture_size || hdr->height > g_nt_gfx.gpu_caps.max_texture_size) {
         NT_LOG_ERROR("activate_texture: %ux%u exceeds GPU max_texture_size %u", hdr->width, hdr->height, g_nt_gfx.gpu_caps.max_texture_size);
         return 0;
@@ -2719,12 +2729,9 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     const uint16_t height = (uint16_t)hdr->height;
     // #endregion
 
-    /* RAW compression: uncompressed pixel data after header */
-    if (hdr->compression == NT_TEXTURE_COMPRESSION_RAW) {
+    /* Uncompressed: one level or the full chain after the header */
+    if (hdr->compression == NT_TEXTURE_COMPRESSION_NONE) {
         nt_texture_format_t pixel_fmt = (nt_texture_format_t)hdr->format;
-        uint64_t expected = (uint64_t)hdr->width * (uint64_t)hdr->height * nt_texture_bpp(pixel_fmt);
-        NT_ASSERT(expected == hdr->data_size && "texture RAW data_size differs from its pixels");
-        NT_ASSERT(hdr->mip_count == 1 && "texture RAW mip_count is not 1");
         nt_texture_desc_t desc = {
             .width = width,
             .height = height,
@@ -2735,6 +2742,7 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
             .wrap_u = (nt_texture_wrap_t)hdr->default_wrap_u,
             .wrap_v = (nt_texture_wrap_t)hdr->default_wrap_v,
             .gen_mipmaps = (hdr->flags & NT_TEXTURE_FLAG_GEN_MIPMAPS) != 0,
+            .level_count = (uint8_t)hdr->mip_count,
             .label = NULL,
         };
         return nt_gfx_make_texture(&desc).id;

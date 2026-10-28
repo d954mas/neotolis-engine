@@ -9,6 +9,7 @@
 #include "hash/nt_hash.h"
 #include "nt_basisu_encoder.h"
 #include "nt_builder.h"
+#include "nt_builder_internal.h"
 #include "nt_texture_format.h"
 #include "test_helpers/nt_gfx_test_desc.h"
 #include "test_helpers/nt_gfx_test_frame.h"
@@ -456,7 +457,7 @@ void test_render_target_color_caps_max_level(void) {
 
 // #endregion
 
-// #region (d) RAW sRGB decode, round trip and updates
+// #region (d) uncompressed sRGB decode, round trip and updates
 
 #define RAMP_W 64U
 #define RAMP_H 4U
@@ -557,6 +558,69 @@ void test_srgb_updates_keep_the_interpretation(void) {
 
 // #endregion
 
+// #region uncompressed RGB9E5 (HDR)
+
+#define HDR_W 8U
+#define HDR_H 4U
+
+/* Scaled by 1/16 into RGBA8 with a step at 1 in alpha: values above 1 must reach the
+ * shader unclamped, and no float framebuffer is involved. */
+static const char *s_hdr_fs = "precision highp float;\n"
+                              "uniform highp sampler2D u_tex;\n"
+                              "in vec2 v_uv;\n"
+                              "out vec4 frag_color;\n"
+                              "void main() { vec3 c = texture(u_tex, v_uv).rgb; frag_color = vec4(c / 16.0, step(1.0, c.g)); }\n";
+
+static uint8_t hdr_byte(float v) { return (uint8_t)((v / 16.0F * 255.0F) + 0.5F); }
+
+/* Left half (0.25, 2, 8), right half (8, 0.25, 2): a channel swap, horizontal flip or clamp fails. */
+void test_raw_rgb9e5_chain_samples_above_one(void) {
+    static float rgb[HDR_W * HDR_H * 3];
+    for (uint32_t y = 0; y < HDR_H; y++) {
+        for (uint32_t x = 0; x < HDR_W; x++) {
+            float *px = &rgb[(((size_t)y * HDR_W) + x) * 3];
+            const bool left = x < HDR_W / 2;
+            px[0] = left ? 0.25F : 8.0F;
+            px[1] = left ? 2.0F : 0.25F;
+            px[2] = left ? 8.0F : 2.0F;
+        }
+    }
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.format = NT_TEXTURE_FORMAT_RGB9E5;
+    opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_NEAREST_MIPMAP_NEAREST;
+    opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_NEAREST;
+    opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
+    opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
+    uint8_t *asset = NULL;
+    uint32_t asset_size = 0;
+    nt_builder_encode_texture_to_buf(rgb, HDR_W, HDR_H, &opts, 1, &asset, &asset_size);
+
+    const uint32_t handle = nt_gfx_activate_texture(asset, asset_size);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
+    nt_texture_t tex = {.id = handle};
+    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_RGB9E5, nt_gfx_texture_format(tex));
+    TEST_ASSERT_EQUAL_INT(3, texture_max_level(tex)); /* 8x4 -> 4x2 -> 2x1 -> 1x1 */
+
+    uint8_t want[HDR_W * HDR_H * 4];
+    for (uint32_t i = 0; i < HDR_W * HDR_H; i++) {
+        const bool left = (i % HDR_W) < HDR_W / 2;
+        want[(i * 4U) + 0] = hdr_byte(left ? 0.25F : 8.0F);
+        want[(i * 4U) + 1] = hdr_byte(left ? 2.0F : 0.25F);
+        want[(i * 4U) + 2] = hdr_byte(left ? 8.0F : 2.0F);
+        want[(i * 4U) + 3] = left ? 255 : 0;
+    }
+    render_sampled(tex, NT_SAMPLER_DEFAULT, HDR_W, HDR_H, HDR_W, HDR_H, s_hdr_fs);
+    check_readback_rgba(want, HDR_W, HDR_H, 1);
+
+    /* The 1x1 tail is the builder's box average of both halves. */
+    const uint8_t tail[4] = {hdr_byte(4.125F), hdr_byte(1.125F), hdr_byte(5.0F), 255};
+    render_sampled(tex, NT_SAMPLER_DEFAULT, HDR_W, HDR_H, 1, 1, s_hdr_fs);
+    check_readback_rgba(tail, 1, 1, 1);
+
+    nt_gfx_deactivate_texture(handle);
+    free(asset);
+}
+
 int main(void) {
     /* One hidden window and GL context serve every test; setUp/tearDown reset only engine state. */
     if (!glfwInit()) {
@@ -610,6 +674,7 @@ int main(void) {
     RUN_TEST(test_srgb_texel_128_samples_as_linear_with_linear_alpha);
     RUN_TEST(test_srgb_ramp_decodes_and_encodes_back_to_the_source);
     RUN_TEST(test_srgb_updates_keep_the_interpretation);
+    RUN_TEST(test_raw_rgb9e5_chain_samples_above_one);
     int failures = UNITY_END();
     nt_window_shutdown();
     return failures;

@@ -103,6 +103,9 @@ void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len) {
     case NT_BUILD_ERR_KIND_ZERO_DIM:
         (void)snprintf(buf, len, "atlas '%s', sprite '%s': zero width or height", err->atlas, err->sprite);
         break;
+    case NT_BUILD_ERR_KIND_HDR_IMAGE:
+        (void)snprintf(buf, len, "atlas '%s', sprite '%s': HDR image; atlas pages are LDR", err->atlas, err->sprite);
+        break;
     case NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE:
         /* stbi_info leaves dims unwritten on an oversized-header reject — omit the
          * bogus 0x0 when either dimension is unknown. */
@@ -851,7 +854,9 @@ static nt_texture_pixel_format_t atlas_assert_opts(const nt_atlas_opts_t *opts) 
         .wrap_v = opts->wrap_v,
         .gen_mipmaps = opts->gen_mipmaps,
     };
-    return nt_builder_assert_texture_opts(&texture_opts);
+    const nt_texture_pixel_format_t format = nt_builder_assert_texture_opts(&texture_opts);
+    NT_BUILD_ASSERT(format != NT_TEXTURE_FORMAT_RGB9E5 && "nt_atlas_begin: atlas pages are LDR -- format RGB9E5 is not supported");
+    return format;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1002,6 +1007,13 @@ void nt_atlas_add(NtAtlasBuild *atlas, const char *path, const nt_atlas_sprite_o
         return;
     }
     NT_BUILD_ASSERT(file_data && "atlas_add: failed to read file");
+
+    /* stbi would tone-map an HDR file to 8 bits without a word. */
+    if (stbi_is_hdr_from_memory(file_data, (int)file_size)) {
+        free(file_data);
+        push_content_error(state, add_seq, region_name, NT_BUILD_ERR_KIND_HDR_IMAGE, 0, 0);
+        return;
+    }
 
     /* Decode once so a recognized format's failure reason is not overwritten. */
     int w = 0;
