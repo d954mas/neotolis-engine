@@ -1224,7 +1224,7 @@ locations, status) follows the arguments, a returned mapping (`glMapBufferRange`
 or fence (`glFenceSync`) is a presence bit, and indexed offsets are byte offsets.
 Output pointers are presence bits; their written values are not recorded. Readback, timer-query and debug-group calls are
 issued calls too and are recorded like any other.
-Float arguments occupy `backend.values` in float argument order. `backend.bytes` is actual CPU upload payload, zero for NULL storage.
+Float arguments occupy `backend.values` in float argument order. `arg_count` holds how many integer arguments (low nibble) and float values (high nibble) a call set, so trailing zeros stay distinguishable from absent arguments. `backend.bytes` is actual CPU upload payload, zero for NULL storage.
 No event borrows upload memory, shader source or caller labels.
 
 Resource `DEFINITION/STATE` records with `object_kind=NONE` use `detail` as the
@@ -1276,7 +1276,9 @@ from invalid requests.
 
 `SKIP` records mark work that was not issued without ending an operation:
 backend cache skips (`SKIP/CACHE`) and inactive texture-set names
-(`SKIP/INACTIVE`).
+(`SKIP/INACTIVE`). A backend cache skip names the skipped call in `detail` and carries its cache
+key (not the GL signature) in `backend.args`, counted by `arg_count`; an
+inactive texture-set name has `detail` 0 and uses the binding fields.
 
 Pipeline state records use integers 0–12 for program, depth enable/write/function,
 cull, blend enable, RGB source/destination, alpha source/destination, RGB/alpha

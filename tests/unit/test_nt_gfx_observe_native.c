@@ -258,7 +258,9 @@ static void test_issued_calls_record_floats_names_and_payloads(void) {
     nt_gfx_capture_request();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    (void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = sizeof(data), .data = data});
+    nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = sizeof(data), .data = data});
+    /* Still bound from the create: the update records a SKIP of glBindBuffer. */
+    nt_gfx_update_buffer(buffer, 0, data, sizeof(data));
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.25F, 0.5F, 0.75F, 1.0F}, .clear_depth = 1.0F});
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -268,29 +270,37 @@ static void test_issued_calls_record_floats_names_and_payloads(void) {
     uint32_t generated = 0;
     bool uploaded = false;
     bool cleared = false;
+    bool skipped = false;
     for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *event = &capture.events[i];
+        if (event->kind == NT_GFX_EVENT_SKIP && event->detail == NT_GFX_GL_glBindBuffer) {
+            TEST_ASSERT_EQUAL_UINT8(1, event->arg_count);
+            skipped = true;
+        }
         if (event->kind != NT_GFX_EVENT_BACKEND) {
             continue;
         }
         if (event->detail == NT_GFX_GL_glGenBuffers) {
             TEST_ASSERT_EQUAL_UINT32(1, event->data.backend.args[0]);
+            TEST_ASSERT_EQUAL_UINT8(2, event->arg_count); /* count, then the name */
             generated = event->data.backend.args[1];
         }
         if (event->detail == NT_GFX_GL_glBufferData) {
             TEST_ASSERT_EQUAL_UINT32(sizeof(data), event->data.backend.args[1]);
             TEST_ASSERT_EQUAL_UINT32(1, event->data.backend.args[2]);
             TEST_ASSERT_EQUAL_UINT64(sizeof(data), event->data.backend.bytes);
+            TEST_ASSERT_EQUAL_UINT8(4, event->arg_count);
             uploaded = true;
         }
         /* Exactly representable values, so equality is exact. */
         const float *color = event->data.backend.values;
         if (event->detail == NT_GFX_GL_glClearColor && color[0] == 0.25F && color[1] == 0.5F && color[2] == 0.75F && color[3] == 1.0F) {
+            TEST_ASSERT_EQUAL_UINT8(4U << 4, event->arg_count);
             cleared = true;
         }
     }
     TEST_ASSERT_NOT_EQUAL(0, generated);
-    TEST_ASSERT_TRUE(uploaded && cleared);
+    TEST_ASSERT_TRUE(uploaded && cleared && skipped);
 }
 
 /* Frame storage reaches its buffer before the replayed draw that reads it, in issued order. */

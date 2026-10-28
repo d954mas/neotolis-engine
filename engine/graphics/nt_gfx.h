@@ -712,6 +712,7 @@ typedef union {
         uint8_t operation;   /* nt_gfx_operation_t */
         uint8_t object_kind; /* nt_gfx_object_kind_t */
         uint8_t result;      /* nt_gfx_result_t */
+        uint8_t arg_count;   /* issued calls: integer args (low nibble) and float values (high nibble) set */
         uint32_t object;
         uint32_t detail;
         uint32_t link;
@@ -766,6 +767,7 @@ typedef union {
 } nt_gfx_event_t;
 
 _Static_assert(sizeof(nt_gfx_event_t) == 104, "capture record layout must remain explicit");
+_Static_assert(offsetof(nt_gfx_event_t, object) == 8, "arg_count fills the header padding");
 _Static_assert(NT_GFX_OP_COUNT <= 256, "operation is one byte in a record");
 
 /* detail of INITIAL/STATE records: which layer's inherited state they snapshot. */

@@ -50,6 +50,7 @@ static inline void nt_gfx_capture_open_call(nt_gfx_gl_call_t call) {
 }
 static inline void nt_gfx_capture_commit_call(void) {
     if (g_nt_gfx_capture.call != NULL) {
+        g_nt_gfx_capture.call->arg_count = (uint8_t)(g_nt_gfx_capture.call_ints | g_nt_gfx_capture.call_floats << 4);
         g_nt_gfx_capture.view.count++;
         g_nt_gfx_capture.call = NULL;
     }
