@@ -1,5 +1,5 @@
 # Size Report: asteroids (wasm-analysis-paired)
-# Commit: 339085e
+# Commit: 1cdfa92
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                  64 B
-Code              397613 B
+Code              397881 B
 Data              219008 B
 Custom             13209 B
 ---------------- ----------
-TOTAL             631343 B
+TOTAL             631611 B
 
 ## Top 30 Functions by Size
 
@@ -28,14 +28,14 @@ TOTAL             631343 B
 27440 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 20946 B   ui_panel
 19237 B   dispatch_command
-17170 B   nt_gfx_activate_texture
+17384 B   nt_gfx_activate_texture
 10756 B   main
  8845 B   Clay__ConfigureOpenElementPtr
  6059 B   Clay__SizeContainersAlongAxis
  5766 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
  5643 B   Clay__InitializeEphemeralMemory
  4538 B   basist::transcode_uastc_to_etc1(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
- 4343 B   upload_glyph
+ 4360 B   upload_glyph
  4046 B   nt_gfx_end_frame
  4005 B   Clay__MeasureTextCached
  3920 B   basist::pack_eac(basist::eac_block&, unsigned char const*, unsigned int)
@@ -44,7 +44,7 @@ TOTAL             631343 B
  3365 B   Clay__CloseElement
  3319 B   void std::__2::__introsort<std::__2::_ClassicAlgPolicy, std::__2::ranges::less, unsigned int*, true>(unsigned int*, unsigned int*, std::__2::ranges::less, std::__2::iterator_traits<unsigned int*>::difference_type, bool)
  3262 B   nt_ui_label
- 3028 B   nt_gfx_make_texture
+ 3065 B   nt_gfx_make_texture
  3020 B   fmt_fp
  2610 B   scrollbar_emit_axis
  2608 B   basist::huffman_decoding_table::init(unsigned int, unsigned char const*, unsigned int)
@@ -55,7 +55,7 @@ TOTAL             631343 B
  2436 B   printf_core
 
 Total functions: 255
-Total code size: 397165 B
+Total code size: 397433 B
 
 ## Built Engine Archives
 
@@ -78,7 +78,7 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               65220 B
-libnt_gfx.a               113030 B
+libnt_gfx.a               113302 B
 libnt_gfx_stub.a            6838 B
 libnt_hash.a                4108 B
 libnt_http.a               18238 B
@@ -125,7 +125,7 @@ libnt_version.a              638 B
 libnt_window.a              4028 B
 libnt_window_stub.a         1888 B
 ------------------------ ----------
-TOTAL (archives)         2665444 B
+TOTAL (archives)         2665716 B
 
 ## Data Segments Summary
 

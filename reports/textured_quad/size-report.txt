@@ -1,5 +1,5 @@
 # Size Report: textured_quad (wasm-analysis-paired)
-# Commit: 339085e
+# Commit: 1cdfa92
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 8 B
 Export                71 B
 Elem                  62 B
-Code               90198 B
+Code               90444 B
 Data                8307 B
 Custom              4890 B
 ---------------- ----------
-TOTAL             104473 B
+TOTAL             104719 B
 
 ## Top 30 Functions by Size
 
@@ -28,7 +28,7 @@ TOTAL             104473 B
  4466 B   nt_gfx_activate_mesh
  3585 B   nt_http_request_ex
  3002 B   fmt_fp
- 2954 B   nt_gfx_make_texture
+ 2991 B   nt_gfx_make_texture
  2425 B   printf_core
  1843 B   __rem_pio2f
  1274 B   nt_gfx_frame_create_buffers
@@ -42,6 +42,7 @@ TOTAL             104473 B
   769 B   nt_input_web_on_pointer_down
   690 B   pop_arg_long_double
   677 B   nt_gfx_backend_bind_vertex_input
+  673 B   nt_gfx_activate_texture
   537 B   nt_gfx_bind_uniform_block
   533 B   claim_more_memory
   533 B   nt_gfx_gl_ctx_create
@@ -51,11 +52,10 @@ TOTAL             104473 B
   494 B   nt_gfx_backend_create_sampler
   483 B   find_pack
   468 B   nt_gfx_destroy_texture
-  464 B   nt_gfx_activate_texture
   451 B   nt_gfx_activate_shader
 
 Total functions: 134
-Total code size: 89984 B
+Total code size: 90230 B
 
 ## Built Engine Archives
 
@@ -78,7 +78,7 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               65220 B
-libnt_gfx.a               113030 B
+libnt_gfx.a               113302 B
 libnt_gfx_stub.a            6838 B
 libnt_hash.a                4108 B
 libnt_http.a               18238 B
@@ -125,7 +125,7 @@ libnt_version.a              638 B
 libnt_window.a              4028 B
 libnt_window_stub.a         1888 B
 ------------------------ ----------
-TOTAL (archives)         2665444 B
+TOTAL (archives)         2665716 B
 
 ## Data Segments Summary
 

@@ -1,5 +1,5 @@
 # Size Report: rtt_showcase (wasm-analysis-paired)
-# Commit: 339085e
+# Commit: 1cdfa92
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                65 B
 Elem                  48 B
-Code              235855 B
+Code              236119 B
 Data               21324 B
 Custom              6694 B
 ---------------- ----------
-TOTAL             265134 B
+TOTAL             265398 B
 
 ## Top 30 Functions by Size
 
@@ -31,7 +31,7 @@ TOTAL             265134 B
  8539 B   main
  6038 B   Clay__SizeContainersAlongAxis
  5616 B   Clay__InitializeEphemeralMemory
- 4326 B   upload_glyph
+ 4343 B   upload_glyph
  3992 B   Clay__MeasureTextCached
  3593 B   nt_http_request_ex
  3353 B   Clay__CloseElement
@@ -39,7 +39,7 @@ TOTAL             265134 B
  3007 B   fmt_fp
  2551 B   nt_font_lookup_glyph_offset
  2545 B   atlas_on_resolve
- 2478 B   nt_gfx_make_texture
+ 2515 B   nt_gfx_make_texture
  2428 B   printf_core
  2405 B   nt_sprite_renderer_set_material
  2252 B   nt_gfx_apply_texture_bindings
@@ -55,7 +55,7 @@ TOTAL             265134 B
  1317 B   nt_ui_image
 
 Total functions: 186
-Total code size: 235530 B
+Total code size: 235794 B
 
 ## Built Engine Archives
 
@@ -78,7 +78,7 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               65220 B
-libnt_gfx.a               113030 B
+libnt_gfx.a               113302 B
 libnt_gfx_stub.a            6838 B
 libnt_hash.a                4108 B
 libnt_http.a               18238 B
@@ -125,7 +125,7 @@ libnt_version.a              638 B
 libnt_window.a              4028 B
 libnt_window_stub.a         1888 B
 ------------------------ ----------
-TOTAL (archives)         2665444 B
+TOTAL (archives)         2665716 B
 
 ## Data Segments Summary
 
