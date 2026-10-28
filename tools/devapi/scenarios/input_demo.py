@@ -40,7 +40,6 @@ def run(client: DevApiClient, out_dir: str) -> None:
     The host keeps game-owned input state across clients (a disconnect resets only devapi state), so
     the keys and the player gate this run changes are restored even when it fails.
     """
-    client.set_player_enabled(False)  # a real keyboard would break the hold and text asserts
     try:
         _run(client)
     finally:
@@ -91,7 +90,6 @@ def _run(client: DevApiClient) -> None:
     assert released.get("down") is False and released.get("released") is True, f"gated input.state(B) is {released!r} after the up, expected released"
     on = client.set_player_enabled(True)
     assert on.get("enabled") is True, f"set_player_enabled(True) echoed {on!r}, expected enabled=True"
-    client.set_player_enabled(False)  # keep a real keyboard out of step 3
     print(
         "PASS[2/3] gate cutover: inject observed (B pressed, then released) while player disabled. "
         "NOTE: 'real physical device dropped while gated' needs a live device — manual."

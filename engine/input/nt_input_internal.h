@@ -20,8 +20,7 @@ void nt_input_clear_all_pointers(void);
 
    Player gate: when disabled the public real-apply wrappers (set_key, pointer_*, wheel,
    buffer_char) early-return. The next nt_input_poll switches it; either edge releases held input there.
-   Inject calls the *_apply
-   cores directly so it always flows.
+   Inject calls the *_apply cores directly so it always flows.
 
    Inject API (L1 engine capability; L2 devapi group drives it untrusted): IMMEDIATE only — each call
    stages into the inject buffer, drained whole in the next nt_input_poll. Returns true when the whole

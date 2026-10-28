@@ -573,6 +573,9 @@ static bool cmd_input_set_player_enabled(const cJSON *params, cJSON *result, nt_
         return nt_devapi_fail(err, "input.set_player_enabled: enabled must be a bool");
     }
     bool enabled = cJSON_IsTrue(e);
+    if (enabled) {
+        nt_devapi_input_reset(); /* the bot hands back control: a pending move would recreate its pointer */
+    }
     nt_input_set_player_enabled(enabled);
     devapi_add_bool(result, "enabled", enabled);
     return true;

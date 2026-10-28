@@ -61,8 +61,8 @@ void test_gate_reenable_releases_bot_pointer(void) {
     TEST_ASSERT_EQUAL_UINT32(0, g_nt_input.pointers[0].id);
 }
 
-/* The edge poll drops real events: a real pointer then can't take a slot the release still holds. */
-void test_gate_edge_poll_drops_real(void) {
+/* The gate switches at the poll, not at the call. */
+void test_gate_switches_at_poll(void) {
     nt_input_set_player_enabled(false);
     nt_input_poll();
     nt_input_set_player_enabled(true);
@@ -71,6 +71,17 @@ void test_gate_edge_poll_drops_real(void) {
     nt_input_poll();
     nt_input_pointer_move(0, 10.0F, 10.0F, 1.0F, NT_POINTER_MOUSE, 0);
     TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
+}
+
+/* The #798 path: a real mouse holds slot 0, the gate frees it, the bot's next input takes slot 0. */
+void test_gate_off_gives_bot_slot_0(void) {
+    nt_input_pointer_move(0, 1.0F, 1.0F, 1.0F, NT_POINTER_MOUSE, 0);
+    nt_input_poll();
+    nt_input_set_player_enabled(false);
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_inject_pointer(NT_INJECT_POINTER_DOWN, NT_INPUT_INJECT_POINTER_ID_BASE, 5.0F, 5.0F, 1.0F, NT_POINTER_MOUSE, 1));
+    nt_input_poll();
+    TEST_ASSERT_EQUAL_UINT32(NT_INPUT_INJECT_POINTER_ID_BASE, g_nt_input.pointers[0].id);
 }
 
 /* A request undone before the next poll is no edge: held real input stays. */
@@ -255,7 +266,8 @@ int main(void) {
     RUN_TEST(test_gate_off_releases_held_pointer);
     RUN_TEST(test_gate_reenable_applies_real);
     RUN_TEST(test_gate_reenable_releases_bot_pointer);
-    RUN_TEST(test_gate_edge_poll_drops_real);
+    RUN_TEST(test_gate_switches_at_poll);
+    RUN_TEST(test_gate_off_gives_bot_slot_0);
     RUN_TEST(test_gate_toggle_within_frame_keeps_input);
     RUN_TEST(test_inject_key_down_up);
     RUN_TEST(test_inject_same_poll_down_then_up);

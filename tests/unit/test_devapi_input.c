@@ -152,6 +152,15 @@ static void test_input_set_player_enabled_ok(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":true}}")));
 }
 
+/* Handing control back drops the bot's pending schedule: a queued move must not recreate its pointer. */
+static void test_input_set_player_enabled_true_drops_schedule(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":false}}")));
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.move\",\"params\":{\"x\":1,\"y\":1}}")));
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":true}}")));
+    advance();
+    TEST_ASSERT_FALSE(g_nt_input.pointers[0].active);
+}
+
 /* ---- input.text ---- */
 
 static void test_input_text_ok(void) {
@@ -871,6 +880,7 @@ int main(void) {
     RUN_TEST(test_input_click_queues_two);
     RUN_TEST(test_input_gesture_queues_ordered);
     RUN_TEST(test_input_set_player_enabled_ok);
+    RUN_TEST(test_input_set_player_enabled_true_drops_schedule);
     RUN_TEST(test_input_text_ok);
     RUN_TEST(test_input_text_utf8_multibyte);
     RUN_TEST(test_input_key_unknown_name_bad_params);
