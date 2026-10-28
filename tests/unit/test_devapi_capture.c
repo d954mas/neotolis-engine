@@ -71,19 +71,30 @@ static cJSON *capture_yield(const char *request) {
 
 static cJSON *result_of(cJSON *root) { return cJSON_GetObjectItemCaseSensitive(root, "result"); }
 
-/* A capture that defers, then fails at the rendered frame with `code`. */
-static void assert_frame_error(const char *request, const char *code) {
+/* Submit a capture, resize the framebuffer before the frame renders, return the reply (caller frees). */
+static cJSON *render_resized(const char *request, uint32_t fb_w, uint32_t fb_h) {
     TEST_ASSERT_NULL(nt_devapi_submit(request));
+    g_nt_window.fb_width = fb_w;
+    g_nt_window.fb_height = fb_h;
     nt_devapi_frame_rendered();
     const char *resp = drain();
     TEST_ASSERT_NOT_NULL(resp);
     cJSON *root = cJSON_Parse(resp);
     TEST_ASSERT_NOT_NULL(root);
+    return root;
+}
+
+/* The reply failed with `code` (frees root). */
+static void assert_error(cJSON *root, const char *code) {
     TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(root, "ok")));
     cJSON *err = cJSON_GetObjectItemCaseSensitive(root, "error");
+    TEST_ASSERT_NOT_NULL(err);
     TEST_ASSERT_EQUAL_STRING(code, cJSON_GetObjectItemCaseSensitive(err, "code")->valuestring);
     cJSON_Delete(root);
 }
+
+/* A capture that defers, then fails at the rendered frame with `code`. */
+static void assert_frame_error(const char *request, const char *code) { assert_error(render_resized(request, g_nt_window.fb_width, g_nt_window.fb_height), code); }
 
 /* bad scale -> bad_params */
 
@@ -221,30 +232,19 @@ static void test_capture_pixel_cap_bad_params(void) {
 }
 
 /* The framebuffer resizes between the request and the rendered frame (web resizes the canvas in
-   nt_window_poll): the capture reads the frame just rendered, at its size. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_capture_resize_before_the_frame(void) {
-    /* capture.frame takes the new size. */
-    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"capture.frame\"}"));
-    g_nt_window.fb_width = 32U;
-    g_nt_window.fb_height = 16U;
-    nt_devapi_frame_rendered();
-    const char *resp = drain();
-    TEST_ASSERT_NOT_NULL(resp);
-    cJSON *root = cJSON_Parse(resp);
+   nt_window_poll): the capture reads the frame just rendered, at its size. setUp's framebuffer is 64x48. */
+
+static void test_capture_frame_takes_the_rendered_size(void) {
+    cJSON *root = render_resized("{\"method\":\"capture.frame\"}", 32U, 16U);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
     TEST_ASSERT_EQUAL_INT(32, cJSON_GetObjectItemCaseSensitive(result_of(root), "width")->valueint);
     TEST_ASSERT_EQUAL_INT(16, cJSON_GetObjectItemCaseSensitive(result_of(root), "height")->valueint);
     cJSON_Delete(root);
+}
 
-    /* A top-left rect keeps its top rows: the GL y comes from the new height (32 - (0 + 8)). */
-    g_nt_window.fb_height = 48U;
-    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"capture.region\",\"params\":{\"x\":4,\"y\":0,\"w\":8,\"h\":8}}"));
-    g_nt_window.fb_height = 32U;
-    nt_devapi_frame_rendered();
-    resp = drain();
-    TEST_ASSERT_NOT_NULL(resp);
-    root = cJSON_Parse(resp);
+/* A top-left rect keeps its top rows: the GL y comes from the rendered height (32 - (0 + 8)), not 48. */
+static void test_capture_region_y_from_the_rendered_height(void) {
+    cJSON *root = render_resized("{\"method\":\"capture.region\",\"params\":{\"x\":4,\"y\":0,\"w\":8,\"h\":8}}", CAP_FB_W, 32U);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
     cJSON_Delete(root);
     const int *rect = nt_gfx_fake_last_read_rect();
@@ -252,23 +252,22 @@ static void test_capture_resize_before_the_frame(void) {
     TEST_ASSERT_EQUAL_INT(24, rect[1]);
     TEST_ASSERT_EQUAL_INT(8, rect[2]);
     TEST_ASSERT_EQUAL_INT(8, rect[3]);
-
-    /* A rect valid at submit falls outside the shrunk framebuffer. */
-    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"capture.region\",\"params\":{\"x\":24,\"y\":8,\"w\":8,\"h\":8}}"));
-    g_nt_window.fb_width = 16U;
-    nt_devapi_frame_rendered();
-    resp = drain();
-    TEST_ASSERT_NOT_NULL(resp);
-    root = cJSON_Parse(resp);
-    cJSON *err = cJSON_GetObjectItemCaseSensitive(root, "error");
-    TEST_ASSERT_EQUAL_STRING("bad_params", cJSON_GetObjectItemCaseSensitive(err, "code")->valuestring);
-    cJSON_Delete(root);
-
-    /* A hidden canvas has no framebuffer to read. */
-    g_nt_window.fb_width = 0U;
-    g_nt_window.fb_height = 0U;
-    assert_frame_error("{\"method\":\"capture.frame\"}", "capture_failed");
 }
+
+/* A rect that fits at submit but not the shrunk frame: the start fits, the end does not, on each axis. */
+static void test_capture_region_outside_the_shrunk_frame(void) {
+    assert_error(render_resized("{\"method\":\"capture.region\",\"params\":{\"x\":8,\"y\":0,\"w\":16,\"h\":8}}", 16U, CAP_FB_H), "bad_params");
+    assert_error(render_resized("{\"method\":\"capture.region\",\"params\":{\"x\":0,\"y\":8,\"w\":8,\"h\":32}}", CAP_FB_W, 16U), "bad_params");
+}
+
+/* The frame checks run on the rendered size: an odd width no longer divides by 2, growth crosses the cap. */
+static void test_capture_frame_checks_after_resize(void) {
+    assert_error(render_resized("{\"method\":\"capture.frame\",\"params\":{\"scale\":2}}", 33U, 16U), "bad_params");
+    assert_error(render_resized("{\"method\":\"capture.frame\"}", 5000U, 5000U), "bad_params");
+}
+
+/* A hidden canvas has no framebuffer to read. */
+static void test_capture_zero_framebuffer_fails(void) { assert_error(render_resized("{\"method\":\"capture.frame\"}", 0U, 0U), "capture_failed"); }
 
 /* a poll before the frame is rendered waits (the image does not exist yet), even with the sim frozen in
    idle MANUAL; the rendered frame then builds the real PNG. */
@@ -325,7 +324,11 @@ int main(void) {
     RUN_TEST(test_capture_nondividing_scale_bad_params);
     RUN_TEST(test_capture_producer_failure_yields_error);
     RUN_TEST(test_capture_pixel_cap_bad_params);
-    RUN_TEST(test_capture_resize_before_the_frame);
+    RUN_TEST(test_capture_frame_takes_the_rendered_size);
+    RUN_TEST(test_capture_region_y_from_the_rendered_height);
+    RUN_TEST(test_capture_region_outside_the_shrunk_frame);
+    RUN_TEST(test_capture_frame_checks_after_resize);
+    RUN_TEST(test_capture_zero_framebuffer_fails);
     RUN_TEST(test_capture_waits_for_the_frame_with_sim_frozen);
     RUN_TEST(test_capture_box_average_exact_mean);
     return UNITY_END();
