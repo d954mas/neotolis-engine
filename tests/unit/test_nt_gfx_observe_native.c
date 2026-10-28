@@ -340,7 +340,7 @@ static nt_gfx_operation_t owner_operation(const nt_gfx_capture_view_t *capture, 
 /* From the pipeline create (the frame's first own operation) every issued, skipped and argument record names its
  * operation; the stream's records lie in the execute range, the readback after it. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one walk checks each owner kind
-static void check_links_name_their_operations(const nt_gfx_capture_view_t *capture, uint32_t pipeline) {
+static void check_links_name_their_operations(const nt_gfx_capture_view_t *capture, uint32_t pipeline, uint32_t updated) {
     const nt_gfx_event_t *events = capture->events;
     uint32_t first = 0;
     while (first < capture->count && !(events[first].kind == NT_GFX_EVENT_OP && events[first].object_kind == NT_GFX_OBJECT_PIPELINE && events[first].object == pipeline)) {
@@ -374,6 +374,9 @@ static void check_links_name_their_operations(const nt_gfx_capture_view_t *captu
         if (!executed) {
             /* Recorded commands execute only inside the range. */
             TEST_ASSERT_FALSE(op == NT_GFX_OP_PIPELINE || op == NT_GFX_OP_VERTEX_INPUT || op == NT_GFX_OP_UBO || op == NT_GFX_OP_DRAW);
+            if (e->detail == NT_GFX_GL_glBufferSubData) {
+                TEST_ASSERT_EQUAL_UINT32(updated, events[e->link - 1U].object);
+            }
             if (e->detail == NT_GFX_GL_glReadPixels) {
                 TEST_ASSERT_GREATER_OR_EQUAL_UINT32(capture->execute_end, i);
                 TEST_ASSERT_EQUAL(NT_GFX_OP_READ_PIXELS, op);
@@ -397,6 +400,7 @@ static void check_links_name_their_operations(const nt_gfx_capture_view_t *captu
             break;
         case NT_GFX_GL_glBufferSubData:
             TEST_ASSERT_EQUAL(NT_GFX_OP_BUFFER_UPLOAD, op);
+            TEST_ASSERT_EQUAL_UINT32(nt_gfx_frame_buffer(NT_GFX_FRAME_UNIFORM).id, events[e->link - 1U].object);
             uploads++;
             break;
         case NT_GFX_GL_glDrawArrays:
@@ -476,7 +480,7 @@ static void test_complete_capture_matches_gl_counters(void) {
     TEST_ASSERT_EQUAL_UINT64(s_buffer_bytes, c->buffer_upload_bytes);
     TEST_ASSERT_EQUAL_UINT64(s_texture_calls, c->texture_upload_calls);
     TEST_ASSERT_EQUAL_UINT64(s_texture_bytes, c->texture_upload_bytes);
-    check_links_name_their_operations(&capture, pipeline.id);
+    check_links_name_their_operations(&capture, pipeline.id, buffer.id);
 }
 
 static uint32_t op_index(const nt_gfx_capture_view_t *capture, uint32_t from, nt_gfx_operation_t operation) {

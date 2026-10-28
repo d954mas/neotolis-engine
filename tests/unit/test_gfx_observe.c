@@ -1028,6 +1028,7 @@ static void test_capture_prefix_lifetime_and_saved_snapshot(void) {
     nt_gfx_capture_view_t after = nt_gfx_capture_read();
     TEST_ASSERT_EQUAL_MEMORY(&saved, &before.events[0], sizeof(saved));
     TEST_ASSERT_TRUE(after.count > before.count);
+    TEST_ASSERT_GREATER_THAN_UINT32(0, after.execute_begin);
     TEST_ASSERT_EQUAL_MEMORY(&snapshot, &after.counters, sizeof(snapshot));
 
     /* Unrecorded frames keep the finalized capture. */
@@ -1037,6 +1038,8 @@ static void test_capture_prefix_lifetime_and_saved_snapshot(void) {
     nt_gfx_begin_frame();
     nt_gfx_capture_view_t retained = nt_gfx_capture_read();
     TEST_ASSERT_EQUAL_UINT32(after.count, retained.count);
+    TEST_ASSERT_EQUAL_UINT32(after.execute_begin, retained.execute_begin);
+    TEST_ASSERT_EQUAL_UINT32(after.execute_end, retained.execute_end);
     TEST_ASSERT_EQUAL_MEMORY(&after.counters, &retained.counters, sizeof(snapshot));
     TEST_ASSERT_EQUAL_MEMORY(&saved, &retained.events[0], sizeof(saved));
 
@@ -1094,6 +1097,8 @@ static void test_request_during_recorded_frame_replaces_the_capture(void) {
     nt_gfx_capture_view_t replaced = nt_gfx_capture_read();
     TEST_ASSERT_EQUAL_UINT64(0, replaced.counters.frame_sequence);
     TEST_ASSERT_EQUAL_UINT32(snapshot_records, replaced.count);
+    TEST_ASSERT_EQUAL_UINT32(0, replaced.execute_begin);
+    TEST_ASSERT_EQUAL_UINT32(0, replaced.execute_end);
     for (uint32_t i = 0; i < replaced.count; i++) {
         /* only the inherited-state prefix and begin_frame's own timer check */
         TEST_ASSERT_TRUE(replaced.events[i].kind != NT_GFX_EVENT_OP || replaced.events[i].operation == NT_GFX_OP_TIMER_DISJOINT);
