@@ -654,13 +654,12 @@ static inline uint32_t nt_gfx_draw_calls(const nt_gfx_counters_t *c) {
 }
 
 typedef enum {
-    NT_GFX_EVENT_BEGIN,
-    NT_GFX_EVENT_RESULT,
+    NT_GFX_EVENT_OP,
     NT_GFX_EVENT_BACKEND,
     NT_GFX_EVENT_SKIP,
     NT_GFX_EVENT_INITIAL,
     NT_GFX_EVENT_DEFINITION,
-    NT_GFX_EVENT_ARGUMENT,   /* request argument belonging to the enclosing BEGIN */
+    NT_GFX_EVENT_ARGUMENT,   /* request argument of the OP its link names */
     NT_GFX_EVENT_NOTE,       /* caller context; its NOTE_FIELD records follow */
     NT_GFX_EVENT_NOTE_FIELD, /* one field of the preceding NOTE */
     NT_GFX_EVENT_MARKER_PUSH,
@@ -699,21 +698,23 @@ typedef enum {
     NT_GFX_RESULT_UNKNOWN,
 } nt_gfx_result_t;
 
-/* Pointer-free records. Each public operation is one BEGIN (request) and one
- * RESULT (result; creators add the handle); nested operations sit between. INITIAL and
- * DEFINITION describe inherited or resource state and never represent issued
- * calls; ARGUMENT carries per-element request arguments of the enclosing BEGIN.
+/* Pointer-free records. Each public operation is one OP record: the request at the call, its
+ * result (and a creator's handle) once the call returns. Every gfx record names its operation by
+ * link = OP record index + 1 (0: none); notes and markers have no link and overlay its bytes, so
+ * check kind first. INITIAL and DEFINITION describe inherited or resource state and never
+ * represent issued calls; ARGUMENT carries per-element request arguments of its OP.
  * object is a full typed frontend handle and the cross-context identity; raw names
  * live only in backend data and are valid within their context segment, which a
  * CONTEXT operation ends. Unknown inherited values are explicit. */
 typedef union {
     struct {
         nt_gfx_event_kind_t kind;
-        nt_gfx_operation_t operation;
-        nt_gfx_object_kind_t object_kind;
+        uint8_t operation;   /* nt_gfx_operation_t */
+        uint8_t object_kind; /* nt_gfx_object_kind_t */
+        uint8_t result;      /* nt_gfx_result_t */
         uint32_t object;
         uint32_t detail;
-        nt_gfx_result_t result;
+        uint32_t link;
         union {
             struct {
                 uint64_t bytes;
@@ -733,7 +734,7 @@ typedef union {
             struct {
                 uint32_t target;
                 float color[4], depth;
-                /* Flags are meaningful only in BEGIN records; INITIAL holds cached clear values. */
+                /* Flags are meaningful only in OP records; INITIAL holds cached clear values. */
                 bool load_color, load_depth, discard_color, discard_depth;
             } pass;
             nt_clear_desc_t clear;
@@ -765,6 +766,7 @@ typedef union {
 } nt_gfx_event_t;
 
 _Static_assert(sizeof(nt_gfx_event_t) == 104, "capture record layout must remain explicit");
+_Static_assert(NT_GFX_OP_COUNT <= 256 && NT_GFX_OBJECT_INSTANCE_LAYOUT < 256 && NT_GFX_RESULT_UNKNOWN < 256, "one-byte record fields");
 
 /* detail of INITIAL/STATE records: which layer's inherited state they snapshot. */
 enum {
@@ -785,9 +787,9 @@ const char *nt_gfx_gl_call_name(uint32_t call);
 /* One-shot: the next frame records, starting at the begin_frame that opens it.
  * Requires nonzero init capacity. The stub is inert. */
 void nt_gfx_capture_request(void);
-/* Metadata by value; immutable event prefix until the begin_frame that starts the
- * next requested recording, or shutdown, so read right after begin_frame. Copy count records and
- * metadata to keep. Empty views have events=NULL. */
+/* Metadata by value; the event prefix is immutable, except OP records of operations still in
+ * progress, until the begin_frame that starts the next requested recording, or shutdown, so read
+ * right after begin_frame. Copy count records and metadata to keep. Empty views have events=NULL. */
 nt_gfx_capture_view_t nt_gfx_capture_read(void);
 #endif
 

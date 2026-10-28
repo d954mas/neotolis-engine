@@ -390,7 +390,7 @@ static uint32_t render_target_attachment_format(uint32_t rt_slot, int attachment
 static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) {
     uint32_t slot = nt_pool_slot_index(id);
     NT_GFX_RECORD(
-        NT_GFX_EVENT_DEFINITION, NT_GFX_OP_CREATE, event->object_kind = kind; event->object = id; switch (kind) {
+        NT_GFX_EVENT_DEFINITION, NT_GFX_OP_CREATE, event->object_kind = (uint8_t)kind; event->object = id; switch (kind) {
             case NT_GFX_OBJECT_SHADER:
                 event->data.resource.backend = s_gfx.shader_backends[slot];
                 event->result = NT_GFX_RESULT_UNKNOWN;
@@ -452,9 +452,10 @@ static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) 
 static void capture_attributes(nt_gfx_object_kind_t kind, uint32_t id, const nt_vertex_attr_t *attrs, uint8_t attr_count, uint16_t stride, uint32_t buffer, uint32_t divisor) {
     for (uint32_t a = 0; a < attr_count; a++) {
         const nt_vertex_attr_t *attr = &attrs[a];
-        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_ATTRIBUTE, event->object_kind = kind; event->object = id; event->data.attribute.buffer = buffer; event->data.attribute.offset = attr->offset;
-                      event->data.attribute.stride = stride; event->data.attribute.location = attr->location; event->data.attribute.type = (uint32_t)attr->type;
-                      event->data.attribute.count = attr->count; event->data.attribute.normalized = attr->normalized; event->data.attribute.divisor = divisor;);
+        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_ATTRIBUTE, event->object_kind = (uint8_t)kind; event->object = id; event->data.attribute.buffer = buffer;
+                      event->data.attribute.offset = attr->offset; event->data.attribute.stride = stride; event->data.attribute.location = attr->location;
+                      event->data.attribute.type = (uint32_t)attr->type; event->data.attribute.count = attr->count; event->data.attribute.normalized = attr->normalized;
+                      event->data.attribute.divisor = divisor;);
     }
 }
 

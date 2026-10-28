@@ -185,7 +185,7 @@ static void test_capture_publishes_attachment_mappings_and_skip_reasons(void) {
             TEST_ASSERT_EQUAL_UINT32(7, event->data.resource.height);
             texture_slot = event->data.resource.backend;
         }
-        if (event->kind == NT_GFX_EVENT_RESULT && event->operation == NT_GFX_OP_SCISSOR_ENABLE) {
+        if (event->kind == NT_GFX_EVENT_OP && event->operation == NT_GFX_OP_SCISSOR_ENABLE) {
             TEST_ASSERT_EQUAL(NT_GFX_RESULT_CACHE, event->result);
             cache = true;
         }
@@ -226,8 +226,6 @@ static void test_new_program_defines_sampler_names(void) {
     uint32_t names = 0;
     uint32_t units = 0;
     uint32_t pipeline_states = 0;
-    nt_gfx_operation_t stack[16] = {0};
-    uint32_t depth = 0;
     for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *event = &capture.events[i];
         if (event->kind == NT_GFX_EVENT_INITIAL && event->operation == NT_GFX_OP_SAMPLER) {
@@ -244,15 +242,7 @@ static void test_new_program_defines_sampler_names(void) {
             TEST_ASSERT_EQUAL(NT_GFX_OBJECT_NONE, event->object_kind);
             pipeline_states++;
         }
-        if (event->kind == NT_GFX_EVENT_BEGIN) {
-            TEST_ASSERT_LESS_THAN_UINT32(16, depth);
-            stack[depth++] = event->operation;
-        } else if (event->kind == NT_GFX_EVENT_RESULT) {
-            TEST_ASSERT_GREATER_THAN_UINT32(0, depth);
-            TEST_ASSERT_EQUAL(stack[--depth], event->operation);
-        }
     }
-    TEST_ASSERT_EQUAL_UINT32(0, depth);
     TEST_ASSERT_EQUAL_UINT32(3, names);
     TEST_ASSERT_EQUAL_UINT32(3, units);
     TEST_ASSERT_EQUAL_UINT32(1, pipeline_states);
@@ -448,7 +438,7 @@ static void test_pass_actions_capture_values_and_attachment_enums(void) {
     uint32_t invalidates = 0;
     for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *event = &capture.events[i];
-        if (event->kind == NT_GFX_EVENT_BEGIN && event->operation == NT_GFX_OP_PASS) {
+        if (event->kind == NT_GFX_EVENT_OP && event->operation == NT_GFX_OP_PASS) {
             begin = *event;
             begins++;
         }
@@ -498,7 +488,7 @@ static void test_explicit_clear_records_issued_calls_and_skips_empty_selections(
         if (event->kind == NT_GFX_EVENT_BACKEND && event->detail == NT_GFX_GL_glClear) {
             TEST_ASSERT_EQUAL_HEX32(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, event->data.backend.args[0]);
         }
-        if (event->kind == NT_GFX_EVENT_BEGIN && event->operation == NT_GFX_OP_CLEAR && event->data.clear.color) {
+        if (event->kind == NT_GFX_EVENT_OP && event->operation == NT_GFX_OP_CLEAR && event->data.clear.color) {
             TEST_ASSERT_EQUAL_UINT32(NT_GFX_OBJECT_RENDER_TARGET, event->object_kind);
             TEST_ASSERT_EQUAL_UINT32(0, event->object);
             TEST_ASSERT_TRUE(event->data.clear.depth);
@@ -742,7 +732,7 @@ static void test_a_captured_vertex_input_names_its_instance_tuple(void) {
             TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(layout.id), event->data.backend.args[4]);
             vao_defined = true;
         }
-        if (event->kind == NT_GFX_EVENT_BEGIN && event->operation == NT_GFX_OP_VERTEX_INPUT && event->object == vi.id) {
+        if (event->kind == NT_GFX_EVENT_OP && event->operation == NT_GFX_OP_VERTEX_INPUT && event->object == vi.id) {
             TEST_ASSERT_EQUAL_UINT32(layout.id, event->data.binding.slot);
             TEST_ASSERT_EQUAL_UINT32(instances.id, event->data.binding.secondary);
             TEST_ASSERT_EQUAL_UINT32(offset + 16U, event->data.binding.offset);

@@ -43,8 +43,8 @@ static inline nt_gfx_result_t nt_test_next_draw_result(uint32_t note) {
     const nt_gfx_capture_view_t v = nt_gfx_capture_read();
     for (uint32_t i = note + 1U; i < v.count && v.events[i].kind != NT_GFX_EVENT_NOTE; i++) {
         const nt_gfx_event_t *e = &v.events[i];
-        if (e->kind == NT_GFX_EVENT_RESULT && e->operation >= NT_GFX_OP_DRAW && e->operation <= NT_GFX_OP_DRAW_INDEXED_INSTANCED) {
-            return e->result;
+        if (e->kind == NT_GFX_EVENT_OP && e->operation >= NT_GFX_OP_DRAW && e->operation <= NT_GFX_OP_DRAW_INDEXED_INSTANCED) {
+            return (nt_gfx_result_t)e->result;
         }
     }
     return NT_GFX_RESULT_NONE;
