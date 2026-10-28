@@ -53,6 +53,8 @@ uint32_t nt_gfx_fake_program_create_count(void);
 const char *nt_gfx_fake_last_program_label(void);
 uint32_t nt_gfx_fake_pipeline_create_count(void);
 uint32_t nt_gfx_fake_bind_pipeline_count(void);
+/* The rect of the last backend readback: x, y, w, h with GL bottom-left y. */
+const int *nt_gfx_fake_last_read_rect(void);
 /* Program links finish in nt_gfx_begin_frame; these act there. Hold keeps every link pending. */
 void nt_gfx_fake_hold_program_links(bool hold);
 void nt_gfx_fake_lose_context_on_program_link(void);

@@ -9,9 +9,9 @@
 #include "graphics/nt_gfx.h"
 #include "window/nt_window.h"
 
-/* Capture command group (capture.frame / capture.region). Handlers validate bot params (never assert),
+/* Capture command group (capture.frame / capture.region). Handlers parse bot params (never assert),
    then DEFER a producer that runs at nt_devapi_frame_rendered (GL-valid, before the swap) — that timing is why capture returns its
-   data asynchronously. */
+   data asynchronously. The rect is checked there, against the frame it reads. */
 
 /* Bounded readback buffer: a region capped at the framebuffer keeps w*h*4 small, but the static cap
    is the DoS backstop. 4096x4096 rgba8 = 64 MiB — generous for any real demo FB; -D overridable. */
@@ -27,13 +27,15 @@ _Static_assert((uint64_t)NT_DEVAPI_CAPTURE_MAX_PIXELS * 8U <= UINT32_MAX, "NT_DE
 /* Capture wire error codes (group-owned; the generic core never names them). */
 #define NT_DEVAPI_ERR_CAPTURE_FAILED "capture_failed"
 
-/* The pending capture's rect + scale divisor: only one deferred reply is ever pending. */
+/* The pending capture as the bot asked it (top-left rect + scale divisor): only one deferred reply is
+   ever pending. */
 typedef struct capture_ctx {
     uint32_t x;
     uint32_t y;
     uint32_t w;
     uint32_t h;
     uint32_t factor; /* scale divisor: 1 (full) / 2 (½) / 4 (¼). */
+    bool full;       /* capture.frame: the rect is the whole framebuffer of the rendered frame. */
 } capture_ctx;
 
 static capture_ctx s_capture;
@@ -87,12 +89,13 @@ static bool build_payload(cJSON *result, const uint8_t *png, uint32_t png_len, u
     return true;
 }
 
-/* readback -> strip+box -> fpng -> base64 -> result. Readback (lost context), capture-buffer allocation
-   and encode failures return false: the recoverable capture_failed outcome. */
+/* readback -> strip+box -> fpng -> base64 -> result. `c` is a checked rect with a GL bottom-left y.
+   Readback (lost context), capture-buffer allocation and encode failures return false: the recoverable
+   capture_failed outcome. */
 static bool capture_produce(const capture_ctx *c, cJSON *result) {
     uint32_t out_w = c->w / c->factor;
     uint32_t out_h = c->h / c->factor;
-    NT_ASSERT(out_w > 0U && out_h > 0U); /* the handlers reject zero and non-dividing sizes as bad_params. */
+    NT_ASSERT(out_w > 0U && out_h > 0U); /* capture_reply rejects zero and non-dividing sizes. */
 
     uint32_t rgba_len = c->w * c->h * 4U;
     uint8_t *rgba = (uint8_t *)malloc((size_t)rgba_len);
@@ -133,9 +136,34 @@ static bool capture_produce(const capture_ctx *c, cJSON *result) {
     return built;
 }
 
-/* The deferred reply, run once at nt_devapi_frame_rendered. */
+/* The deferred reply, run once at nt_devapi_frame_rendered. The framebuffer may have resized since the
+   request (web resizes the canvas in nt_window_poll), so the rect is checked against the frame just rendered. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool capture_reply(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    if (!capture_produce(&s_capture, result)) {
+    uint32_t fb_w = g_nt_window.fb_width;
+    uint32_t fb_h = g_nt_window.fb_height;
+    if (fb_w == 0U || fb_h == 0U) {
+        return nt_devapi_fail_code(err, NT_DEVAPI_ERR_CAPTURE_FAILED, "capture failed (the framebuffer has zero size)");
+    }
+    capture_ctx c = s_capture;
+    if (c.full) {
+        c.w = fb_w;
+        c.h = fb_h;
+    }
+    /* Overflow-safe bounds: x + w may wrap, so compare via the headroom (x <= fb_w && w <= fb_w - x). */
+    if (c.x > fb_w || c.w > fb_w - c.x || c.y > fb_h || c.h > fb_h - c.y) {
+        return nt_devapi_fail(err, "capture.region: rect out of framebuffer bounds");
+    }
+    if ((uint64_t)c.w * (uint64_t)c.h > NT_DEVAPI_CAPTURE_MAX_PIXELS) {
+        return nt_devapi_fail(err, "capture: rect exceeds the capture pixel cap");
+    }
+    if (c.w % c.factor != 0U || c.h % c.factor != 0U) {
+        return nt_devapi_fail(err, "capture: scale must evenly divide the captured width and height");
+    }
+    /* The wire is top-left origin; glReadPixels reads bottom-left, and its row flip then yields the
+       top-left sub-rect. */
+    c.y = fb_h - (c.y + c.h);
+    if (!capture_produce(&c, result)) {
         return nt_devapi_fail_code(err, NT_DEVAPI_ERR_CAPTURE_FAILED, "capture failed (framebuffer readback or PNG encode error)");
     }
     return true;
@@ -173,27 +201,15 @@ static bool cmd_capture_frame(const cJSON *params, cJSON *result, nt_devapi_erro
     if (!parse_scale(params, &factor, err, "capture.frame: scale must be one of {1, 2, 4}")) {
         return false;
     }
-    uint32_t fb_w = g_nt_window.fb_width;
-    uint32_t fb_h = g_nt_window.fb_height;
-    if (fb_w == 0U || fb_h == 0U) {
-        return nt_devapi_fail(err, "capture.frame: framebuffer has zero size");
-    }
-    if ((uint64_t)fb_w * (uint64_t)fb_h > NT_DEVAPI_CAPTURE_MAX_PIXELS) {
-        return nt_devapi_fail(err, "capture.frame: framebuffer exceeds the capture pixel cap");
-    }
-    if (fb_w % factor != 0U || fb_h % factor != 0U) {
-        return nt_devapi_fail(err, "capture.frame: scale must evenly divide the framebuffer dimensions");
-    }
     if (!nt_devapi_defer(NT_DEVAPI_GATE_RENDERED, 0.0, capture_reply, err)) {
         return false;
     }
-    s_capture = (capture_ctx){.w = fb_w, .h = fb_h, .factor = factor};
+    s_capture = (capture_ctx){.factor = factor, .full = true};
     return true;
 }
 
-/* capture.region {x,y,w,h,scale?}: validates the rect against the framebuffer (overflow-safe) then
-   defers a sub-rect capture; scale applies after readback (orthogonal to region). */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+/* capture.region {x,y,w,h,scale?}: defers a sub-rect capture; scale applies after readback (orthogonal to
+   region). */
 static bool cmd_capture_region(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     uint32_t x = 0;
     uint32_t y = 0;
@@ -213,25 +229,10 @@ static bool cmd_capture_region(const cJSON *params, cJSON *result, nt_devapi_err
     if (!parse_scale(params, &factor, err, "capture.region: scale must be one of {1, 2, 4}")) {
         return false;
     }
-    uint32_t fb_w = g_nt_window.fb_width;
-    uint32_t fb_h = g_nt_window.fb_height;
-    /* Overflow-safe bounds: x + w may wrap, so compare via the headroom (x <= fb_w && w <= fb_w - x). */
-    if (x > fb_w || w > fb_w - x || y > fb_h || h > fb_h - y) {
-        return nt_devapi_fail(err, "capture.region: rect out of framebuffer bounds");
-    }
-    if ((uint64_t)w * (uint64_t)h > NT_DEVAPI_CAPTURE_MAX_PIXELS) {
-        return nt_devapi_fail(err, "capture.region: rect exceeds the capture pixel cap");
-    }
-    if (w % factor != 0U || h % factor != 0U) {
-        return nt_devapi_fail(err, "capture.region: scale must evenly divide w and h");
-    }
-    /* The docstring contract is top-left origin; glReadPixels reads bottom-left. Convert the rect's
-       top-left y to a GL bottom-left y (h<=fb_h-y already proven) so the row-flip yields a top-left
-       sub-rect. */
     if (!nt_devapi_defer(NT_DEVAPI_GATE_RENDERED, 0.0, capture_reply, err)) {
         return false;
     }
-    s_capture = (capture_ctx){.x = x, .y = fb_h - (y + h), .w = w, .h = h, .factor = factor};
+    s_capture = (capture_ctx){.x = x, .y = y, .w = w, .h = h, .factor = factor};
     return true;
 }
 // #endregion

@@ -389,12 +389,18 @@ void nt_gfx_backend_set_viewport(int x, int y, int w, int h) {
     (void)h;
 }
 
+static int s_last_read_rect[4];
+
+const int *nt_gfx_fake_last_read_rect(void) { return s_last_read_rect; }
+
 /* Synthetic readback: r = GL row, g = column, bottom-left order like glReadPixels,
  * so the shared-layer Y-flip is observable (out row 0 must carry GL row h-1). */
 bool nt_gfx_backend_read_pixels(uint32_t render_target_backend, int x, int y, int w, int h, void *out_rgba8) {
     (void)render_target_backend;
-    (void)x;
-    (void)y;
+    s_last_read_rect[0] = x;
+    s_last_read_rect[1] = y;
+    s_last_read_rect[2] = w;
+    s_last_read_rect[3] = h;
     uint8_t *p = (uint8_t *)out_rgba8;
     for (int row = 0; row < h; row++) {
         for (int col = 0; col < w; col++) {
