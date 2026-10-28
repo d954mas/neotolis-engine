@@ -11,7 +11,7 @@
 
 /* Capture command group (capture.frame / capture.region). Handlers parse bot params (never assert),
    then DEFER a producer that runs at nt_devapi_frame_rendered (GL-valid, before the swap) — that timing is why capture returns its
-   data asynchronously. The rect is checked there, against the frame it reads. */
+   data asynchronously. */
 
 /* Bounded readback buffer: a region capped at the framebuffer keeps w*h*4 small, but the static cap
    is the DoS backstop. 4096x4096 rgba8 = 64 MiB — generous for any real demo FB; -D overridable. */
@@ -95,7 +95,7 @@ static bool build_payload(cJSON *result, const uint8_t *png, uint32_t png_len, u
 static bool capture_produce(const capture_ctx *c, cJSON *result) {
     uint32_t out_w = c->w / c->factor;
     uint32_t out_h = c->h / c->factor;
-    NT_ASSERT(out_w > 0U && out_h > 0U); /* capture_reply rejects zero and non-dividing sizes. */
+    NT_ASSERT(out_w > 0U && out_h > 0U); /* w, h > 0 and scale divides them: checked before the reply reaches here. */
 
     uint32_t rgba_len = c->w * c->h * 4U;
     uint8_t *rgba = (uint8_t *)malloc((size_t)rgba_len);
@@ -160,8 +160,7 @@ static bool capture_reply(const cJSON *params, cJSON *result, nt_devapi_error *e
     if (c.w % c.factor != 0U || c.h % c.factor != 0U) {
         return nt_devapi_fail(err, "capture: scale must evenly divide the captured width and height");
     }
-    /* The wire is top-left origin; glReadPixels reads bottom-left, and its row flip then yields the
-       top-left sub-rect. */
+    /* The wire is top-left origin; nt_gfx_read_pixels takes a GL bottom-left y and returns top-left rows. */
     c.y = fb_h - (c.y + c.h);
     if (!capture_produce(&c, result)) {
         return nt_devapi_fail_code(err, NT_DEVAPI_ERR_CAPTURE_FAILED, "capture failed (framebuffer readback or PNG encode error)");

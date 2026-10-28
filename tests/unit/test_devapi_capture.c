@@ -242,7 +242,8 @@ static void test_capture_frame_takes_the_rendered_size(void) {
     cJSON_Delete(root);
 }
 
-/* A top-left rect keeps its top rows: the GL y comes from the rendered height (32 - (0 + 8)), not 48. */
+/* A top-left rect keeps its top rows: the GL y comes from the rendered height, 32 - (0 + 8) = 24; the
+   request-time height 48 would give 40. */
 static void test_capture_region_y_from_the_rendered_height(void) {
     cJSON *root = render_resized("{\"method\":\"capture.region\",\"params\":{\"x\":4,\"y\":0,\"w\":8,\"h\":8}}", CAP_FB_W, 32U);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));

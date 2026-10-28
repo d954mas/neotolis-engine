@@ -216,7 +216,7 @@ class DevApiClient:
 
     # #region capture.* wrappers — deferred commands; result() blocks until a render builds the PNG.
     def capture_frame(self, scale: Optional[int] = None) -> Dict[str, Any]:
-        """Capture the full framebuffer as a PNG. Result: {width,height,format:"png",data:<base64>}.
+        """Capture the full framebuffer, at the rendered frame's size, as a PNG. Result: {width,height,format:"png",data:<base64>}.
 
         Deferred: result() blocks until the next pre-swap render builds the PNG. Works in any time
         mode and never advances the sim: in MANUAL it shows the current state; step first for a new
