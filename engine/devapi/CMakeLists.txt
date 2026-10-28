@@ -130,7 +130,7 @@ if(NT_DEVAPI_GROUP_RECORDER)
     target_compile_definitions(nt_devapi_recorder PUBLIC NT_DEVAPI_GROUP_RECORDER=1)
 endif()
 
-# Gfx group (gfx.record / gfx.frames / gfx.read): an always-on recording mode over the gfx capture, with a
+# Gfx group (gfx.record / gfx.frames / gfx.read): a recording mode over the gfx capture, with a
 # static ring of recent frames printed as capture text. nt_gfx_capture_text exists only in capture builds.
 if(NT_DEVAPI_GROUP_GFX AND NOT NT_GFX_CAPTURE_ENABLED)
     message(FATAL_ERROR "NT_DEVAPI_GROUP_GFX requires NT_GFX_CAPTURE_ENABLED (the group records gfx captures).")

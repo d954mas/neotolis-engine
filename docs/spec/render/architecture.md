@@ -1368,14 +1368,14 @@ records end `CONTEXT_LOST`; a sprite or text material resolved after it notes
 `nt_gfx_capture_text`, capture builds only) prints a capture view as lossless named
 text: a reader can rebuild every record field from it. It writes into the caller's
 buffer like `snprintf`, returning the bytes needed without the terminator, and
-allocates nothing. The text is the capture artifact: DevAPI returns it, clients
-save it, and the Frame Inspector is to parse it.
+allocates nothing. The text is the capture artifact: DevAPI returns it and clients
+save it.
 
 ```text
 ntcapture 1
 frame sequence=<n> records=<n> overflow=<0|1> execute=<begin>..<end>
 counter <name>=<n>                       (one line per nonzero counter)
-<index> <indent><KIND> op=<OP> [obj=<KIND>:<handle>] [result=<R>] [<detail>] link=<@index|-> <fields>
+<index> <indent><KIND> op=<OP> [obj=<KIND>:<handle>] [result=<R>] [<detail>] [link=@<index>] <fields>
 <index> <indent>NOTE label="<text>"
 <index> <indent>NOTE_FIELD key="<text>" type=<U32|I32|U64|F32|STR> value=<value>
 <index> <indent>MARKER_PUSH label="<text>"
@@ -1384,7 +1384,9 @@ counter <name>=<n>                       (one line per nonzero counter)
 
 - Counters are named `vertices`, `stream_bytes`, `accepted.<OP>`, `frame_bytes.<stream index>`,
   `gl.<call>` and so on, so the web and native array sizes do not matter.
-- Enums print by name, never by value. `detail` prints as `call=<glCall>` on BACKEND
+- Record kinds, operations, object kinds, results, GL calls, note types and counter
+  names print by name; data fields print as stored integers. `link` is omitted when 0.
+  `detail` prints as `call=<glCall>` on BACKEND
   and backend SKIP records, `resource=<KIND>` on backend resource DEFINITION records,
   `layer=FRONTEND|BACKEND` on INITIAL/STATE, `joined=@<index>` on a merged draw (the
   draw it joined), `detail=<n>` otherwise, and is omitted when 0.
@@ -1392,10 +1394,11 @@ counter <name>=<n>                       (one line per nonzero counter)
   fields are omitted, and arrays print up to their last nonzero element. Issued-call
   arguments print exactly `arg_count` elements, so a zero argument stays visible
   (`args=`, `key=` on a cache skip, `values=`). Formatting asserts that a record holds
-  no data outside its arm.
+  no data outside its arm and an issued call no argument beyond its count.
 - Integers print in decimal as stored; GL arguments are stored as `uint32`.
   Floats print as the shortest `%g` (6 to 9 significant digits) that reads back
-  to the same float32, including `-0` and `inf`; NaN prints as `nan:0x<bits>`.
+  to the same float32, including `-0` and `inf`, always with `.` as the decimal point;
+  NaN prints as `nan:0x<bits>`.
 - Note labels, keys and string values are double-quoted; `"`, `\` and bytes outside
   0x20..0x7e print as `\xNN`.
 - Indentation (two spaces per open marker and per parent operation) is cosmetic and

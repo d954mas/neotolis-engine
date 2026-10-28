@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#undef NT_DEVAPI_GFX_RING_RECORDS
+#undef NT_DEVAPI_GFX_RING_FRAMES
 #define NT_DEVAPI_GFX_RING_RECORDS 64U
 #define NT_DEVAPI_GFX_RING_FRAMES 4U
 
@@ -175,7 +177,7 @@ static void test_ring_wraps_and_evicts_through_the_newest_overlap(void) {
     store_crafted(6, 34);
     expect_ring((const uint64_t[]){5, 6}, 2);
     for (uint64_t seq = 7; seq <= 9; seq++) {
-        store_crafted(seq, 0);
+        store_crafted(seq, 1); /* wraps to 0 and evicts 5, then fills up to the frame limit */
     }
     expect_ring((const uint64_t[]){6, 7, 8, 9}, 4);
 }
@@ -193,15 +195,21 @@ static void test_recorded_frames_stay_gapless_over_many_wraps(void) {
 
 /* ---- on / off / reset ---- */
 
-static void test_off_keeps_the_ring_and_stores_no_frame_in_flight(void) {
+/* Off between frames, as a web client does after it sees a bug: the frame just rendered is kept. */
+static void test_off_keeps_the_ring_and_the_frame_in_flight(void) {
     record(true);
     frame(false);
     frame(false);
     const uint32_t stored = s_ring.count;
+    const uint64_t last = g_nt_gfx.counters.frame_sequence;
     record(false);
+    char line[96];
+    (void)snprintf(line, sizeof(line), "{\"method\":\"gfx.read\",\"params\":{\"sequence\":%u}}", (unsigned)last);
+    expect_error(line, "frame_not_ready"); /* still in flight */
     frame(false);
     frame(false);
-    TEST_ASSERT_EQUAL_UINT32(stored, s_ring.count);
+    TEST_ASSERT_EQUAL_UINT32(stored + 1U, s_ring.count);
+    TEST_ASSERT_EQUAL_UINT64(last, frame_at(s_ring.count - 1U)->view.counters.frame_sequence);
     TEST_ASSERT_NOT_EQUAL_UINT64(0, read_sequence("{\"method\":\"gfx.read\"}"));
 }
 
@@ -264,6 +272,7 @@ static void test_not_ready_and_unknown_frames(void) {
     (void)snprintf(line, sizeof(line), "{\"method\":\"gfx.read\",\"params\":{\"sim_frame\":%u}}", g_nt_app.frame + 1U);
     expect_error(line, "frame_not_ready");
     record(false);
+    frame(false); /* stores the frame in flight */
     expect_error(line, "unknown_frame");
     expect_error("{\"method\":\"gfx.read\",\"params\":{\"sequence\":1,\"sim_frame\":1}}", "bad_params");
     expect_error("{\"method\":\"gfx.read\",\"params\":{\"sequence\":-1}}", "bad_params");
@@ -314,7 +323,7 @@ int main(void) {
     RUN_TEST(test_recording_while_paused_stores_no_advanced_frame);
     RUN_TEST(test_ring_wraps_and_evicts_through_the_newest_overlap);
     RUN_TEST(test_recorded_frames_stay_gapless_over_many_wraps);
-    RUN_TEST(test_off_keeps_the_ring_and_stores_no_frame_in_flight);
+    RUN_TEST(test_off_keeps_the_ring_and_the_frame_in_flight);
     RUN_TEST(test_on_is_idempotent_and_off_on_clears_the_ring);
     RUN_TEST(test_on_before_begin_frame_keeps_the_step_frame_advanced);
     RUN_TEST(test_a_client_reset_keeps_recording);

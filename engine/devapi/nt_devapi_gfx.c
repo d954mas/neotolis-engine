@@ -52,7 +52,7 @@ static bool overlaps_stored(uint32_t start, uint32_t count) {
     for (uint32_t i = 0; i < s_ring.count; i++) {
         const stored_frame *f = frame_at(i);
         const uint32_t first = (uint32_t)(f->view.events - s_records);
-        if (count > 0 && f->view.count > 0 && start < first + f->view.count && first < start + count) {
+        if (start < first + f->view.count && first < start + count) {
             return true;
         }
     }
@@ -61,15 +61,14 @@ static bool overlaps_stored(uint32_t start, uint32_t count) {
 
 /* A frame is contiguous, at head or at 0 when it would pass the end; the oldest frames give way. */
 static void store_frame(const nt_gfx_capture_view_t *view, uint32_t sim_frame, bool advanced) {
+    NT_ASSERT(view->count > 0 && "gfx recording: a recorded frame starts with its state snapshot");
     NT_ASSERT(view->count <= NT_DEVAPI_GFX_RING_RECORDS && "gfx recording: a frame is larger than the ring -- raise NT_DEVAPI_GFX_RING_RECORDS or lower capture_capacity");
     const uint32_t start = s_ring.head + view->count <= NT_DEVAPI_GFX_RING_RECORDS ? s_ring.head : 0U;
     while (s_ring.count == NT_DEVAPI_GFX_RING_FRAMES || overlaps_stored(start, view->count)) {
         s_ring.oldest = (s_ring.oldest + 1U) % NT_DEVAPI_GFX_RING_FRAMES;
         s_ring.count--;
     }
-    if (view->count > 0) {
-        memcpy(&s_records[start], view->events, (size_t)view->count * sizeof(nt_gfx_event_t));
-    }
+    memcpy(&s_records[start], view->events, (size_t)view->count * sizeof(nt_gfx_event_t));
     stored_frame *f = &s_frames[(s_ring.oldest + s_ring.count) % NT_DEVAPI_GFX_RING_FRAMES];
     *f = (stored_frame){.view = *view, .sim_frame = sim_frame, .advanced = advanced};
     f->view.events = &s_records[start];
@@ -107,8 +106,8 @@ void nt_devapi_gfx_record(bool enabled) {
         return;
     }
     s_ring.recording = enabled;
-    s_ring.pending = 0; /* off: the frame recording now finishes unstored */
-    if (enabled) {
+    if (enabled) { /* off keeps the frame recording now: the next update stores it */
+        s_ring.pending = 0;
         s_ring.oldest = 0;
         s_ring.count = 0;
         s_ring.head = 0;
@@ -156,7 +155,7 @@ static bool sim_frame_after(uint32_t a, uint32_t b) { return (int32_t)(a - b) > 
 /* Not stored: frame_not_ready when the request is newer than anything stored while recording, so it can
    still arrive; unknown_frame otherwise. */
 static bool fail_not_stored(nt_devapi_error *err, bool newer) {
-    if (s_ring.recording && newer) {
+    if ((s_ring.recording || s_ring.pending != 0) && newer) {
         return nt_devapi_fail_code(err, NT_DEVAPI_ERR_FRAME_NOT_READY, "gfx.read: the frame has not finished recording yet");
     }
     return nt_devapi_fail_code(err, NT_DEVAPI_ERR_UNKNOWN_FRAME, "gfx.read: the frame is not stored (evicted, before recording, or never recorded); gfx.frames lists the ring");
@@ -226,7 +225,8 @@ static bool cmd_gfx_read(const cJSON *params, cJSON *result, nt_devapi_error *er
 static const nt_devapi_command k_gfx_cmds[] = {
     {
         .method = "gfx.record",
-        .summary = "turn gfx command recording on or off; while on, every frame records into a ring of recent frames (turning it on clears the ring, off keeps it)",
+        .summary = "turn gfx command recording on or off; while on, every frame records into a ring of recent frames (off keeps the ring and stores the frame in flight; off then on clears it; on "
+                   "while on changes nothing)",
         .params_shape = "{enabled:boolean}",
         .result_shape = "{}",
         .fn = cmd_gfx_record,

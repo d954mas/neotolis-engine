@@ -83,21 +83,26 @@ static uint32_t float_bits(float f) {
     return bits;
 }
 
-/* The shortest %g that reads back to the same float32 (9 digits always do); NaN keeps its payload as bits. */
+/* The shortest %g that reads back to the same float32 (9 digits always do); NaN keeps its payload as bits.
+ * The decimal point is always '.', whatever the process locale. */
 static void put_float(text_t *t, float f) {
     if (isnan(f)) {
         put(t, "nan:0x%08" PRIx32, float_bits(f));
         return;
     }
     char digits[32];
-    int precision = 6;
-    for (; precision < 9; precision++) {
+    for (int precision = 6; precision <= 9; precision++) {
         (void)snprintf(digits, sizeof(digits), "%.*g", precision, (double)f);
         if (float_bits(strtof(digits, NULL)) == float_bits(f)) {
             break;
         }
     }
-    put(t, "%.*g", precision, (double)f);
+    for (char *c = digits; *c != '\0'; c++) {
+        if (*c == ',') {
+            *c = '.';
+        }
+    }
+    put(t, "%s", digits);
 }
 
 static void put_string(text_t *t, const char *s, size_t size) {
@@ -237,6 +242,19 @@ static arm_t record_arm(const nt_gfx_event_t *e) {
     default:
         return ARM_NONE;
     }
+}
+
+/* An issued call sets only the arguments it counts; other records count none. */
+static void assert_args_counted(const nt_gfx_event_t *e, bool issued) {
+    NT_ASSERT((issued || e->arg_count == 0) && "capture text: only issued calls count arguments");
+    bool counted = true;
+    for (uint32_t i = issued ? e->arg_count & 0x0FU : 12U; i < 12U; i++) {
+        counted = counted && e->data.backend.args[i] == 0;
+    }
+    for (uint32_t i = issued ? (uint32_t)(e->arg_count >> 4) : 4U; i < 4U; i++) {
+        counted = counted && float_bits(e->data.backend.values[i]) == 0;
+    }
+    NT_ASSERT(counted && "capture text: an issued call sets an argument it does not count");
 }
 
 /* Records are zeroed when reserved and each writer fills only the arm the text prints, so the text is lossless. */
@@ -424,6 +442,7 @@ static void put_record(text_t *t, const nt_gfx_capture_view_t *view, uint32_t in
     }
     const arm_t arm = record_arm(e);
     assert_data_in_arm(e, arm);
+    assert_args_counted(e, arm == ARM_BACKEND && (e->kind == NT_GFX_EVENT_BACKEND || e->kind == NT_GFX_EVENT_SKIP));
     put(t, " op=%s", NT_TABLE_NAME_(s_operation_names, e->operation));
     if (e->object_kind != NT_GFX_OBJECT_NONE || e->object != 0) {
         put(t, " obj=%s:%" PRIu32, NT_TABLE_NAME_(s_object_names, e->object_kind), e->object);
@@ -434,8 +453,6 @@ static void put_record(text_t *t, const nt_gfx_capture_view_t *view, uint32_t in
     put_detail(t, e, arm);
     if (e->link != 0) {
         put(t, " link=@%" PRIu32, e->link - 1U);
-    } else {
-        put(t, " link=-");
     }
     put_arm(t, e, arm);
     put(t, "\n");

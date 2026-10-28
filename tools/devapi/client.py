@@ -271,7 +271,7 @@ class DevApiClient:
             try:
                 return self.result("gfx.read", params)
             except DevApiResultError as exc:
-                if "frame_not_ready" not in str(exc) or time.monotonic() >= deadline:
+                if "failed: frame_not_ready:" not in str(exc) or time.monotonic() >= deadline:
                     raise
             time.sleep(0.005)
 
