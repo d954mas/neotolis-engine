@@ -80,12 +80,10 @@ def _check_takeover(page) -> None:
     page.evaluate("() => window.__open()")
     orphan = page.evaluate("() => window.__orphan")
     assert orphan == "", f"the killed client's wait took a reply: {orphan[:120]!r}"
-    for _ in range(10):
-        line = page.evaluate("() => window.__devapi.poll()")
-        if line:
-            break
-        page.evaluate(_FRAME_JS)
-    assert line, "the next client's capture reply never arrived"
+    # The first poll after the orphan woke must find the reply: it was queued while the orphan was
+    # parked, so the orphan had it to take. Waiting for it here would let an empty queue pass.
+    line = page.evaluate("() => window.__devapi.poll()")
+    assert line, "no reply was queued when the orphan woke: the check proved nothing (wait more frames)"
     reply = json.loads(line)
     assert reply.get("request_id") == 950 and reply.get("ok") is True, f"the next client's reply: {line[:120]!r}"
     print("PASS takeover: a parked wait of a killed client leaves the next client's reply alone")

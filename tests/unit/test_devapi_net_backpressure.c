@@ -223,7 +223,7 @@ static void set_port_env(const char *value) {
 
 /* A value that is not a port in 1..65535 is refused (no fallback) and leaves *port unchanged. */
 void test_port_env_rejects_a_bad_value(void) {
-    static const char *const k_bad[] = {"abc", "0", "65536", "80x", "-1"};
+    static const char *const k_bad[] = {"abc", "0", "65536", "80x", "-1", " 8080", "+8080"};
     bool accepted = false;
     uint16_t port = 7;
     for (size_t i = 0; i < sizeof k_bad / sizeof k_bad[0] && !accepted; i++) {

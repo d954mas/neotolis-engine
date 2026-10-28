@@ -30,6 +30,7 @@ typedef socklen_t nt_socklen_t;
 #endif
 // #endregion
 
+#include <ctype.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -280,7 +281,8 @@ bool nt_devapi_net_port_from_env(uint16_t fallback, uint16_t *port) {
     }
     char *end = NULL;
     long v = strtol(env, &end, 10);
-    if (end == env || *end != '\0' || v < 1 || v > 65535) {
+    /* Digits only: strtol alone would also take leading spaces and a sign. */
+    if (!isdigit((unsigned char)env[0]) || *end != '\0' || v < 1 || v > 65535) {
         NT_LOG_ERROR("NT_DEVAPI_PORT='%s' is not a port in 1..65535", env);
         return false;
     }
