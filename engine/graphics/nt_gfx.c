@@ -319,11 +319,12 @@ void nt_gfx_capture_request(void) {
 nt_gfx_capture_view_t nt_gfx_capture_read(void) {
     nt_gfx_capture_view_t result = g_nt_gfx_capture.view;
     result.events = result.count > 0 ? g_nt_gfx_capture.events : NULL;
-    if (g_nt_gfx.capture_recording) {
-        result.counters = g_nt_gfx.counters; /* finalized only at the next begin_frame; complete once the frame ended */
-    }
     return result;
 }
+
+static nt_gfx_capture_hook_fn s_capture_hook; /* outside g_nt_gfx_capture: init and shutdown keep it */
+
+void nt_gfx_capture_set_hook(nt_gfx_capture_hook_fn fn) { s_capture_hook = fn; }
 
 static void copy_note_text(char *dst, size_t size, const char *src) {
     NT_ASSERT(src != NULL && "capture note: NULL string");
@@ -825,7 +826,8 @@ void nt_gfx_begin_frame(void) {
     memset(s_gfx.staged_blocks, 0, sizeof(s_gfx.staged_blocks));
     g_nt_gfx.last_frame = g_nt_gfx.counters;
 #if NT_GFX_CAPTURE_ENABLED
-    if (g_nt_gfx.capture_recording) {
+    const bool finalized = g_nt_gfx.capture_recording;
+    if (finalized) {
         g_nt_gfx_capture.view.counters = g_nt_gfx.last_frame;
         g_nt_gfx.capture_recording = false;
     }
@@ -842,6 +844,10 @@ void nt_gfx_begin_frame(void) {
     }
     open_frame();
 #if NT_GFX_CAPTURE_ENABLED
+    if (s_capture_hook != NULL) {
+        const nt_gfx_capture_view_t view = nt_gfx_capture_read();
+        s_capture_hook(finalized ? &view : NULL);
+    }
     /* Opened after the wipe and before the restore: the snapshot shows the tables the frame starts from. */
     if (g_nt_gfx_capture.request_pending) {
         g_nt_gfx_capture.request_pending = false;

@@ -31,6 +31,9 @@ void setUp(void) {
 }
 
 void tearDown(void) {
+#if NT_GFX_CAPTURE_ENABLED
+    nt_gfx_capture_set_hook(NULL); /* the hook outlives nt_gfx_shutdown */
+#endif
     nt_gfx_shutdown();
     nt_gfx_fake_reset();
 }
@@ -1017,7 +1020,7 @@ static void test_capture_prefix_lifetime_and_saved_snapshot(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_capture_read().count);
     record_next_frame();
     nt_gfx_capture_view_t before = nt_gfx_capture_read();
-    TEST_ASSERT_EQUAL_UINT64(g_nt_gfx.counters.frame_sequence, before.counters.frame_sequence);
+    TEST_ASSERT_EQUAL_UINT64(0, before.counters.frame_sequence);
     TEST_ASSERT_TRUE(before.count > 0);
     nt_gfx_event_t saved = before.events[0];
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
@@ -1095,7 +1098,7 @@ static void test_request_during_recorded_frame_replaces_the_capture(void) {
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_capture_view_t replaced = nt_gfx_capture_read();
-    TEST_ASSERT_EQUAL_UINT64(g_nt_gfx.counters.frame_sequence, replaced.counters.frame_sequence);
+    TEST_ASSERT_EQUAL_UINT64(0, replaced.counters.frame_sequence);
     TEST_ASSERT_EQUAL_UINT32(snapshot_records, replaced.count);
     TEST_ASSERT_EQUAL_UINT32(0, replaced.execute_begin);
     TEST_ASSERT_EQUAL_UINT32(0, replaced.execute_end);
@@ -1105,10 +1108,36 @@ static void test_request_during_recorded_frame_replaces_the_capture(void) {
     }
 }
 
-/* A request in every frame records every frame: between frames the read holds the whole frame just
-   ended, its counters included. Frame f issues f + 1 passes. */
-static void test_request_every_frame_reads_each_frame_between_frames(void) {
-    record_next_frame();
+static uint32_t s_hook_calls;
+static uint32_t s_hook_finalized;
+static uint64_t s_hook_sequence;
+static uint32_t s_hook_passes;
+
+/* Records what every begin_frame hands over and requests the frame opening now. */
+static void count_hook(const nt_gfx_capture_view_t *finalized) {
+    s_hook_calls++;
+    if (finalized != NULL) {
+        s_hook_finalized++;
+        s_hook_sequence = finalized->counters.frame_sequence;
+        s_hook_passes = 0;
+        for (uint32_t i = 0; i < finalized->count; i++) {
+            s_hook_passes += finalized->events[i].kind == NT_GFX_EVENT_OP && finalized->events[i].operation == NT_GFX_OP_PASS;
+        }
+    }
+    nt_gfx_capture_request();
+}
+
+/* The hook gets every begin_frame: NULL before anything recorded, then each finished frame, complete with
+   its counters; a request inside it records the frame opening now, so every frame records. Frame f
+   issues f + 1 passes. */
+static void test_capture_hook_hands_over_every_finished_frame(void) {
+    s_hook_calls = s_hook_finalized = 0;
+    nt_gfx_capture_set_hook(count_hook);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT32(1, s_hook_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, s_hook_finalized);
+    TEST_ASSERT_TRUE(g_nt_gfx.capture_recording);
     for (uint32_t f = 0; f < 3; f++) {
         const uint64_t sequence = g_nt_gfx.counters.frame_sequence;
         for (uint32_t p = 0; p <= f; p++) {
@@ -1116,19 +1145,12 @@ static void test_request_every_frame_reads_each_frame_between_frames(void) {
             nt_gfx_end_pass();
         }
         nt_gfx_end_frame();
-        const nt_gfx_capture_view_t view = nt_gfx_capture_read();
-        TEST_ASSERT_EQUAL_UINT64(sequence, view.counters.frame_sequence);
-        TEST_ASSERT_EQUAL_UINT32(f + 1U, view.counters.accepted[NT_GFX_OP_PASS]);
-        TEST_ASSERT_NOT_EQUAL_UINT32(0, view.execute_end);
-        uint32_t passes = 0;
-        for (uint32_t i = 0; i < view.count; i++) {
-            passes += view.events[i].kind == NT_GFX_EVENT_OP && view.events[i].operation == NT_GFX_OP_PASS;
-        }
-        TEST_ASSERT_EQUAL_UINT32(f + 1U, passes);
-        nt_gfx_capture_request();
         nt_gfx_begin_frame();
-        TEST_ASSERT_EQUAL_UINT64(sequence + 1U, g_nt_gfx.counters.frame_sequence);
+        TEST_ASSERT_EQUAL_UINT32(f + 1U, s_hook_finalized);
+        TEST_ASSERT_EQUAL_UINT64(sequence, s_hook_sequence);
+        TEST_ASSERT_EQUAL_UINT32(f + 1U, s_hook_passes);
     }
+    nt_gfx_capture_set_hook(NULL);
 }
 
 static void test_capture_read_after_shutdown_is_empty(void) {
@@ -1360,7 +1382,7 @@ int main(void) {
     RUN_TEST(test_capture_overflow_does_not_stop_counters);
     RUN_TEST(test_capture_request_records_only_the_next_frame);
     RUN_TEST(test_request_during_recorded_frame_replaces_the_capture);
-    RUN_TEST(test_request_every_frame_reads_each_frame_between_frames);
+    RUN_TEST(test_capture_hook_hands_over_every_finished_frame);
     RUN_TEST(test_capture_read_after_shutdown_is_empty);
     RUN_TEST(test_exact_capacity_and_one_record_short);
     RUN_TEST(test_notes_copy_label_and_typed_fields);

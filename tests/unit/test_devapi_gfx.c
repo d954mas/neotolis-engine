@@ -64,6 +64,20 @@ static void frame_with(bool advance, const char *marker) {
 
 static void frame(bool advance) { frame_with(advance, NULL); }
 
+/* The old host order, the update after begin_frame: the group must store the same frames. */
+static void frame_late_with(bool advance, const char *marker) {
+    if (advance) {
+        g_nt_app.frame++;
+    }
+    nt_gfx_begin_frame();
+    nt_devapi_update();
+    if (marker != NULL) {
+        nt_gfx_marker_push(marker);
+        nt_gfx_marker_pop();
+    }
+    nt_gfx_end_frame();
+}
+
 static cJSON *submit(const char *line) {
     const char *resp = nt_devapi_submit(line);
     TEST_ASSERT_NOT_NULL(resp);
@@ -234,9 +248,94 @@ static void test_recorded_frames_stay_gapless_over_many_wraps(void) {
 
 /* ---- on / off / reset ---- */
 
-/* Off between frames, as a client does after it sees a bug: the frame just ended is kept, none after it,
-   and the list waits until it is stored. */
-static void test_off_between_frames_stores_the_frame_just_ended(void) {
+typedef enum { AT_BETWEEN, AT_BEFORE_BEGIN, AT_MID_FRAME } switch_at;
+
+#define NONE INT32_MIN
+
+/* One switch row: recording state before, the switches applied in order at one point of frame N, and the
+   first and last stored sequence relative to N once three more frames ran (NONE: not checked / empty). */
+typedef struct {
+    const char *switches; /* '1' on, '0' off */
+    switch_at at;
+    int32_t first, last;
+    bool on_before;
+} switch_row;
+
+static void apply(const char *switches, switch_at at) {
+    for (const char *c = switches; *c != '\0'; c++) {
+        if (at == AT_BETWEEN) {
+            record(*c == '1'); /* a command */
+        } else {
+            nt_devapi_gfx_record(*c == '1'); /* game code */
+        }
+    }
+}
+
+static void run_row(const switch_row *row) {
+    if (row->on_before) {
+        record(true);
+        frame(false);
+        frame(false);
+    }
+    const uint64_t n = g_nt_gfx.counters.frame_sequence + 1U;
+    if (row->at == AT_BETWEEN) {
+        apply(row->switches, row->at);
+    }
+    nt_devapi_update();
+    if (row->at == AT_BEFORE_BEGIN) {
+        apply(row->switches, row->at);
+    }
+    nt_gfx_begin_frame();
+    if (row->at == AT_MID_FRAME) {
+        apply(row->switches, row->at);
+    }
+    nt_gfx_end_frame();
+    for (int i = 0; i < 3; i++) {
+        frame(false);
+    }
+    if (row->last == NONE) {
+        TEST_ASSERT_EQUAL_UINT32(0, s_ring.count);
+        return;
+    }
+    TEST_ASSERT_EQUAL_UINT64(n + (uint64_t)(int64_t)row->last, last_stored());
+    if (row->first != NONE) {
+        TEST_ASSERT_EQUAL_UINT64(n + (uint64_t)(int64_t)row->first, frame_at(0)->view.counters.frame_sequence);
+    }
+    if (!s_ring.recording) { /* nothing after the last stored frame */
+        frame(false);
+        frame(false);
+        TEST_ASSERT_EQUAL_UINT64(n + (uint64_t)(int64_t)row->last, last_stored());
+    }
+}
+
+/* On records from the next begin_frame; off still stores the frame recording at the call; off then on
+   keeps that frame as the first of the new ring. */
+static void test_switch_rows(void) {
+    /* clang-format off */
+    static const switch_row rows[] = {
+        {"1", AT_BETWEEN, 0, 2, false},
+        {"1", AT_BEFORE_BEGIN, 0, 2, false},
+        {"1", AT_MID_FRAME, 1, 2, false},
+        {"0", AT_BETWEEN, NONE, -1, true},
+        {"0", AT_BEFORE_BEGIN, NONE, -1, true},
+        {"0", AT_MID_FRAME, NONE, 0, true},
+        {"01", AT_BETWEEN, -1, 2, true},
+        {"01", AT_MID_FRAME, 0, 2, true},
+        {"010", AT_BETWEEN, -1, -1, true},
+        {"010", AT_MID_FRAME, 0, 0, true},
+        {"10", AT_BETWEEN, NONE, NONE, false},
+    };
+    /* clang-format on */
+    for (size_t i = 0; i < NT_COUNTOF(rows); i++) {
+        tearDown();
+        setUp();
+        run_row(&rows[i]);
+    }
+}
+
+/* Off between frames, as a client does after it sees a bug: the list waits until the frame just ended is
+   stored at the next begin_frame. */
+static void test_off_lists_after_the_next_begin_frame(void) {
     record(true);
     frame(false);
     frame(false);
@@ -245,25 +344,10 @@ static void test_off_between_frames_stores_the_frame_just_ended(void) {
     expect_error("{\"method\":\"gfx.frames\"}", "frame_not_ready");
     expect_error("{\"method\":\"gfx.read\"}", "frame_not_ready");
     frame(false);
-    frame(false);
-    TEST_ASSERT_EQUAL_UINT32(2, s_ring.count);
-    TEST_ASSERT_EQUAL_UINT64(ended, last_stored());
     TEST_ASSERT_EQUAL_UINT64(ended, read_sequence("{\"method\":\"gfx.read\"}"));
-}
-
-/* Off from game code inside a recorded frame: that frame is stored, none after it. */
-static void test_off_from_game_code_stores_the_current_frame(void) {
-    record(true);
-    frame(false);
-    nt_devapi_update();
-    nt_gfx_begin_frame();
-    const uint64_t current = g_nt_gfx.counters.frame_sequence;
-    nt_devapi_gfx_record(false);
-    nt_gfx_end_frame();
-    frame(false);
-    frame(false);
-    TEST_ASSERT_EQUAL_UINT32(2, s_ring.count);
-    TEST_ASSERT_EQUAL_UINT64(current, last_stored());
+    cJSON *root = submit("{\"method\":\"gfx.frames\"}");
+    TEST_ASSERT_NOT_NULL(result_of(root)); /* the list answers again */
+    cJSON_Delete(root);
 }
 
 /* After off the list waits for the frame in flight, so every listed frame stays readable. */
@@ -286,94 +370,15 @@ static void test_frames_after_off_waits_for_the_frame_in_flight(void) {
     TEST_ASSERT_EQUAL_UINT32(NT_DEVAPI_GFX_RING_FRAMES, s_ring.count);
 }
 
-/* Off, on, off in one batch between frames: nothing stays in flight, the list answers after one update. */
-static void test_off_on_off_in_one_batch_settles(void) {
+/* A gfx re-init under a live session restarts the sequence: storing it would duplicate sequences. */
+static void test_a_gfx_reinit_while_recording_asserts(void) {
     record(true);
     frame(false);
     frame(false);
-    record(false);
-    record(true);
-    record(false);
-    frame(false);
-    cJSON *root = submit("{\"method\":\"gfx.frames\"}");
-    TEST_ASSERT_EQUAL_INT(0, cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(result_of(root), "frames")));
-    cJSON_Delete(root);
-}
-
-/* On records from the next frame that begins after a hook; off then on drops the old session's frame in flight. */
-static void test_on_records_from_the_next_frame(void) {
-    uint64_t next = g_nt_gfx.counters.frame_sequence + 1U;
-    record(true);
-    frame(false);
-    frame(false);
-    TEST_ASSERT_EQUAL_UINT64(next, frame_at(0)->view.counters.frame_sequence);
-    /* On while on keeps the ring. */
-    record(true);
-    frame(false);
-    TEST_ASSERT_EQUAL_UINT32(2, s_ring.count);
-    /* Off then on clears it and drops the frame in flight. */
-    record(false);
-    record(true);
-    TEST_ASSERT_EQUAL_UINT32(0, s_ring.count);
-    next = g_nt_gfx.counters.frame_sequence + 1U;
-    frame(false);
-    frame(false);
-    TEST_ASSERT_EQUAL_UINT32(1, s_ring.count);
-    TEST_ASSERT_EQUAL_UINT64(next, frame_at(0)->view.counters.frame_sequence);
-    /* From game code in frame N, the first stored frame is N + 1. */
-    nt_devapi_gfx_record(false);
-    frame(false);
-    nt_devapi_update();
-    nt_gfx_begin_frame();
-    next = g_nt_gfx.counters.frame_sequence + 1U;
-    nt_devapi_gfx_record(true);
-    nt_gfx_end_frame();
-    frame(false);
-    frame(false);
-    TEST_ASSERT_EQUAL_UINT64(next, frame_at(0)->view.counters.frame_sequence);
-}
-
-/* A native command arrives in the transport poll inside the update, before the hook of that update. */
-static const char *s_polled_line;
-
-static void poll_line(void) {
-    if (s_polled_line != NULL) {
-        TEST_ASSERT_NOT_NULL(nt_devapi_submit(s_polled_line));
-        s_polled_line = NULL;
-    }
-}
-
-static void test_commands_from_the_transport_poll_act_before_the_hook(void) {
-    nt_devapi_set_transport_poll(poll_line);
-    const uint64_t next = g_nt_gfx.counters.frame_sequence + 1U;
-    s_polled_line = "{\"method\":\"gfx.record\",\"params\":{\"enabled\":true}}";
-    frame(false);
-    frame(false);
-    TEST_ASSERT_EQUAL_UINT64(next, frame_at(0)->view.counters.frame_sequence);
-    const uint64_t ended = g_nt_gfx.counters.frame_sequence;
-    s_polled_line = "{\"method\":\"gfx.record\",\"params\":{\"enabled\":false}}";
-    frame(false);
-    frame(false);
-    TEST_ASSERT_EQUAL_UINT64(ended, last_stored());
-}
-
-/* The host order is the contract: a skipped update asserts. */
-static void test_a_skipped_update_asserts(void) {
-    record(true);
-    frame(false);
-    nt_gfx_begin_frame();
-    nt_gfx_end_frame();
-    NT_TEST_EXPECT_ASSERT(nt_devapi_update());
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "once per frame"));
-}
-
-/* An update inside the requested frame, after its begin_frame, asserts. */
-static void test_an_update_after_begin_frame_asserts(void) {
-    record(true);
-    nt_devapi_update();
-    nt_gfx_begin_frame();
-    NT_TEST_EXPECT_ASSERT(nt_devapi_update());
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "between frames"));
+    nt_gfx_shutdown();
+    nt_gfx_fake_reset();
+    NT_TEST_EXPECT_ASSERT(init_gfx(256); frame(false));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "consecutive"));
 }
 
 /* Recording is game state: a client leaving does not change it. */
@@ -386,6 +391,41 @@ static void test_a_client_reset_keeps_recording(void) {
     cJSON_Delete(root);
 }
 
+/* Same step run in both host orders: identical stored frames, sim frames and advance, marker in the step frame only. */
+static void check_step_run(void (*one)(bool advance, const char *marker)) {
+    const uint64_t first = g_nt_gfx.counters.frame_sequence + 1U;
+    const uint32_t sim = g_nt_app.frame;
+    nt_devapi_gfx_record(true);
+    one(false, NULL);
+    one(true, "step");
+    one(false, NULL);
+    one(false, NULL);
+    TEST_ASSERT_EQUAL_UINT32(3, s_ring.count);
+    for (uint32_t i = 0; i < 3; i++) {
+        const stored_frame *f = frame_at(i);
+        bool marked = false;
+        TEST_ASSERT_EQUAL_UINT64(first + i, read_by_sequence(first + i, &marked));
+        TEST_ASSERT_EQUAL(i == 1, f->advanced);
+        TEST_ASSERT_EQUAL(i == 1, marked);
+        TEST_ASSERT_EQUAL_UINT32(i == 0 ? sim : sim + 1U, f->sim_frame);
+    }
+}
+
+static void test_the_new_host_order_stores_the_step_frame(void) { check_step_run(frame_with); }
+
+static void test_the_old_host_order_stores_the_same_frames(void) { check_step_run(frame_late_with); }
+
+/* A capture requested by other code never enters the ring. */
+static void test_a_foreign_capture_is_not_stored(void) {
+    nt_gfx_capture_request();
+    frame(false);
+    frame(false);
+    TEST_ASSERT_EQUAL_UINT32(0, s_ring.count);
+    cJSON *root = submit("{\"method\":\"gfx.frames\"}");
+    TEST_ASSERT_NOT_NULL(result_of(root)); /* the list answers again */
+    cJSON_Delete(root);
+}
+
 /* ---- errors ---- */
 
 static void test_not_ready_and_unknown_frames(void) {
@@ -393,12 +433,12 @@ static void test_not_ready_and_unknown_frames(void) {
     record(true);
     expect_error("{\"method\":\"gfx.read\"}", "frame_not_ready");
     frame(false);
-    expect_error("{\"method\":\"gfx.read\"}", "frame_not_ready"); /* requested, not stored yet */
+    expect_error("{\"method\":\"gfx.read\"}", "frame_not_ready"); /* recording, stored at the next begin_frame */
     frame(false);
     TEST_ASSERT_EQUAL_UINT64(last_stored(), read_sequence("{\"method\":\"gfx.read\"}"));
     char line[96];
     (void)snprintf(line, sizeof(line), "{\"method\":\"gfx.read\",\"params\":{\"sequence\":%u}}", (unsigned)g_nt_gfx.counters.frame_sequence);
-    expect_error(line, "unknown_frame"); /* the frame just ended: stored by the next update */
+    expect_error(line, "unknown_frame"); /* the frame just ended: stored at the next begin_frame */
     expect_error("{\"method\":\"gfx.read\",\"params\":{\"sequence\":1}}", "unknown_frame");
     expect_error("{\"method\":\"gfx.read\",\"params\":{\"sequence\":4294967296}}", "unknown_frame");
     expect_error("{\"method\":\"gfx.read\",\"params\":{\"sequence\":9007199254740992}}", "bad_params");
@@ -471,15 +511,14 @@ int main(void) {
     RUN_TEST(test_recording_while_paused_stores_no_advanced_frame);
     RUN_TEST(test_ring_wraps_and_evicts_through_the_newest_overlap);
     RUN_TEST(test_recorded_frames_stay_gapless_over_many_wraps);
-    RUN_TEST(test_off_between_frames_stores_the_frame_just_ended);
-    RUN_TEST(test_off_from_game_code_stores_the_current_frame);
+    RUN_TEST(test_switch_rows);
+    RUN_TEST(test_off_lists_after_the_next_begin_frame);
     RUN_TEST(test_frames_after_off_waits_for_the_frame_in_flight);
-    RUN_TEST(test_off_on_off_in_one_batch_settles);
-    RUN_TEST(test_on_records_from_the_next_frame);
-    RUN_TEST(test_commands_from_the_transport_poll_act_before_the_hook);
-    RUN_TEST(test_a_skipped_update_asserts);
-    RUN_TEST(test_an_update_after_begin_frame_asserts);
+    RUN_TEST(test_the_new_host_order_stores_the_step_frame);
+    RUN_TEST(test_the_old_host_order_stores_the_same_frames);
+    RUN_TEST(test_a_foreign_capture_is_not_stored);
     RUN_TEST(test_gfx_work_after_a_read_stays_in_the_frame);
+    RUN_TEST(test_a_gfx_reinit_while_recording_asserts);
     RUN_TEST(test_a_client_reset_keeps_recording);
     RUN_TEST(test_not_ready_and_unknown_frames);
     RUN_TEST(test_reinit_zeroes_the_group);

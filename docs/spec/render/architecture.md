@@ -1149,10 +1149,9 @@ Command recording is one-shot: `nt_gfx_capture_request` asks for the next frame
 to be recorded. The begin_frame that closes the requesting frame consumes the request
 and starts recording the frame it opens; without a request no frame records. The
 first frame never records. A request made during a recorded frame replaces that
-capture at the begin_frame that finishes it. A recorded frame is complete once the
-host's gfx work of that frame is done (post-render readback included) and stays
-readable until the next requested begin_frame starts a new recording, so a reader
-that copies it between frames can request every frame and record every frame.
+capture at the begin_frame that finishes it, so read a capture in the following
+frame before requesting again: readable captures are at most every other frame.
+A reader that records every frame uses the capture hook instead (below).
 `nt_gfx_desc_t.capture_capacity` reserves one
 event array at init (default zero, below 2^24 because a link must fit a stream
 op word); a request without capacity asserts. Capture-OFF builds ignore the field.
@@ -1169,15 +1168,25 @@ the snapshot overflows before any command is recorded.
 
 `nt_gfx_capture_read` returns metadata by value and an event prefix that is
 immutable except for the OP records of operations still in progress (an OP is
-final when its call returns). Read a finished capture between frames or right
-after `nt_gfx_begin_frame`: the prefix remains valid until the begin_frame that
-starts the next requested recording overwrites it, or shutdown; unrequested frames
-preserve it. Between frames the view holds the whole last recorded frame, counters
-included. Keep a capture by copying the metadata and `count` records
+final when its call returns). Read a finished capture right after
+`nt_gfx_begin_frame`: the prefix remains valid until the begin_frame that starts
+the next requested recording overwrites it, or shutdown; unrequested frames
+preserve it. Keep a capture by copying the metadata and `count` records
 and redirecting the saved view's pointer to the owned array. An empty view has
 a NULL pointer. The finalized view retains its frame's counters (and so its
 `frame_sequence`) by value even after later unrecorded frames overwrite
 `g_nt_gfx.last_frame`.
+
+**Capture hook.** `nt_gfx_capture_set_hook(fn)` registers one function that every
+`nt_gfx_begin_frame` calls after it finalizes the previous frame and before a pending
+request starts recording. It gets that frame's finalized view, complete with its
+post-render work and any gfx work issued between frames, valid only during the call,
+or NULL when that frame did not record. The hook may call only
+`nt_gfx_capture_request`, which then records the frame opening now, so a hook that
+requests in every call records every frame and copies each one exactly once, at the
+boundary gfx defines. NULL removes it; it lives until replaced, across `nt_gfx_init`
+and `nt_gfx_shutdown`. The stub asserts on a hook, because it never begins a frame.
+The devapi gfx group is its user.
 
 Every recorded public operation produces exactly one OP record at the call,
 carrying its request arguments; when the call returns, the record holds its outcome
@@ -1206,8 +1215,8 @@ A stage destroyed while a pending link holds it records its `glDeleteShader` whe
 that link resolves: among these link records, or inside the program's DESTROY operation; a lost
 context records none. A program's DEFINITION does not imply readiness: one recorded while it links carries
 no reflection. `DEFINITION` is reserved for resource and inherited state. Issued backend calls do not
-prove GL success or GPU completion. While a frame records, the view's `counters` are
-its counters so far; the begin_frame that closes it keeps them with the view; `overflow`
+prove GL success or GPU completion. The view's `counters` are zero (sequence 0)
+while a frame records and become the finalized frame's at the begin_frame that closes it; `overflow`
 alone reports an incomplete event stream. Overflow stops event appends and never
 truncates counters.
 

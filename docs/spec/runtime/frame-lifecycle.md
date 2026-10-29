@@ -29,7 +29,9 @@ nt_devapi_update      ← optional, dev-only: between frames, before nt_gfx_begi
 nt_gfx_begin_frame    ← closes the previous frame into g_nt_gfx.last_frame, syncs
                         context loss/restore, empties frame storage, opens this frame,
                         finishes program links (completed ones with parallel
-                        compile; every pending one, blocking, without it)
+                        compile; every pending one, blocking, without it);
+                        capture builds call the capture hook with the
+                        finalized frame
 input_begin_frame
     → if pointer pressed && audio suspended → audio_try_resume()
 input_event_apply
