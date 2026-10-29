@@ -171,7 +171,7 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
     /* Pointer events — pass CSS-relative coords, C maps with engine DPR. Every mouse event is a move
        with the buttons (type 3; a release keeps the mouse); touch and pen are contacts. The buttons
        count only from a press on the canvas until they are all up, like a native window: a drag from
-       outside never presses, and a cancel, a lost capture or a blur never leaves a button stuck. */
+       outside never presses, and a cancel or a blur never leaves a button stuck. */
     var mouseButtons = 0;
     var mouseOwned = false;
     function mouseMove(e, buttons) {
@@ -235,12 +235,6 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
     canvas.addEventListener("pointerleave", function(e) {
         if (!isContact(e)) {
             Module['_ntPtrBuf'].push(4, 0, 0, 0, 0, 0, 0);
-        }
-    });
-
-    canvas.addEventListener("lostpointercapture", function(e) {
-        if (!isContact(e) && mouseButtons !== 0) {
-            mouseMove(e, 0); /* capture taken away mid-drag: the release will not reach the canvas */
         }
     });
 
