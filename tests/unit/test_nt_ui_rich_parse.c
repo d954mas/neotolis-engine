@@ -1252,7 +1252,7 @@ static void test_rich_text_zero_id_asserts(void) {
     base.font_id[0] = s_fx.stub_font;
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     nt_ui_rich_begin(s_fx.ctx, &base);
     nt_ui_rich_text_n(s_fx.ctx, "x", 1);
     nt_ui_rich_end(s_fx.ctx);
@@ -1262,7 +1262,7 @@ static void test_rich_text_zero_id_asserts(void) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_text_markup(s_fx.ctx, 0U, NULL, NULL, &base, "x", 1U, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL));
     nt_ui_end(s_fx.ctx);
 }

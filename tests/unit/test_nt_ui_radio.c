@@ -94,7 +94,7 @@ static const Clay_ElementDeclaration s_row_decl = {
 
 /* Drive all three radios in one frame; out[] receives each radio's `changed`. */
 static void rd_frame(const nt_pointer_t *p, int *selected, bool out[3], const bool enabled[3]) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = RD_X, .y = RD_Y0}}, .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
         out[0] = nt_ui_radio(s_fx.ctx, NULL, 0, nt_ui_id("r0"), "Low", selected, 0, &s_style, &s_row_decl, enabled[0]);
         out[1] = nt_ui_radio(s_fx.ctx, NULL, 0, nt_ui_id("r1"), "Med", selected, 1, &s_style, &s_row_decl, enabled[1]);
@@ -175,7 +175,7 @@ static void test_radio_overlay_command_counts(void) {
     int selected = 0;
     nt_pointer_t mouse = {0};
 
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
         (void)nt_ui_radio(s_fx.ctx, NULL, 0, nt_ui_id("ra"), NULL, &selected, 0, &s_style, &s_row_decl, true); /* selected -> box + dot */
         (void)nt_ui_radio(s_fx.ctx, NULL, 0, nt_ui_id("rb"), NULL, &selected, 1, &s_style, &s_row_decl, true); /* unselected -> box only */

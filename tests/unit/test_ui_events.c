@@ -59,7 +59,7 @@ static void declare_btn_element(void) {
 
 /* A frame that declares the bbox and steps via nt_ui_events (cfg). dt drives the gesture clock. */
 static nt_ui_events_t events_btn_frame(const nt_pointer_t *p, float dt, const nt_ui_events_cfg_t *cfg) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, dt, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, dt, p, 1, 0);
     declare_btn_element();
     nt_ui_events_t e = nt_ui_events(s_fx.ctx, nt_ui_id("btn"), cfg);
     nt_ui_end(s_fx.ctx);
@@ -68,7 +68,7 @@ static nt_ui_events_t events_btn_frame(const nt_pointer_t *p, float dt, const nt
 
 /* Warm-up: register btn so next-frame arbitration sees it (front-most resolve reads prev frame). */
 static void warm_btn_frame(const nt_pointer_t *p) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
     declare_btn_element();
     (void)nt_ui_events(s_fx.ctx, nt_ui_id("btn"), NULL);
     nt_ui_end(s_fx.ctx);
@@ -278,7 +278,7 @@ static void test_query_events_idempotent(void) {
 
     /* Release frame: query_events 3x must return identical results AND advance nothing. */
     nt_pointer_t fr = make_pointer(BTN_CX, BTN_CY, false, false, true);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.5F, &fr, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.5F, &fr, 1, 0);
     declare_btn_element();
 
     const uint32_t slots_before = nt_ui_state_used_slots(s_fx.ctx);
@@ -316,7 +316,7 @@ static void test_query_events_surfaces_gestures_after_mutating_step(void) {
 
     /* Hold frame: mutating step then query in the same frame -> ramping hold_progress surfaced. */
     nt_pointer_t fh = make_pointer(BTN_CX, BTN_CY, true, false, false);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.25F, &fh, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.25F, &fh, 1, 0);
     declare_btn_element();
     (void)nt_ui_events(s_fx.ctx, nt_ui_id("btn"), &cfg);
     nt_ui_events_t q0 = nt_ui_query_events(s_fx.ctx, nt_ui_id("btn"));
@@ -327,7 +327,7 @@ static void test_query_events_surfaces_gestures_after_mutating_step(void) {
     TEST_ASSERT_FALSE(q0.long_pressed);
 
     /* Hold past long_press_secs: query must surface the one-shot long_pressed + full hold_progress. */
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F, &fh, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F, &fh, 1, 0);
     declare_btn_element();
     (void)nt_ui_events(s_fx.ctx, nt_ui_id("btn"), &cfg);
     nt_ui_events_t q1 = nt_ui_query_events(s_fx.ctx, nt_ui_id("btn"));
@@ -346,7 +346,7 @@ static void test_query_events_surfaces_gestures_after_mutating_step(void) {
     (void)events_btn_frame(&fr1, 0.05F, &cfg);
 
     nt_pointer_t fp2 = make_pointer(BTN_CX, BTN_CY, true, true, false);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.05F, &fp2, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.05F, &fp2, 1, 0);
     declare_btn_element();
     nt_ui_events_t mut = nt_ui_events(s_fx.ctx, nt_ui_id("btn"), &cfg);
     nt_ui_events_t q2 = nt_ui_query_events(s_fx.ctx, nt_ui_id("btn"));
@@ -368,7 +368,7 @@ static void test_query_events_no_stale_latch_across_frames(void) {
     nt_pointer_t fp = make_pointer(BTN_CX, BTN_CY, true, true, false);
     (void)events_btn_frame(&fp, 0.0F, &cfg);
     nt_pointer_t fh = make_pointer(BTN_CX, BTN_CY, true, false, false);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.5F, &fh, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.5F, &fh, 1, 0);
     declare_btn_element();
     (void)nt_ui_events(s_fx.ctx, nt_ui_id("btn"), &cfg);
     nt_ui_events_t q_live = nt_ui_query_events(s_fx.ctx, nt_ui_id("btn"));
@@ -377,7 +377,7 @@ static void test_query_events_no_stale_latch_across_frames(void) {
     TEST_ASSERT_TRUE(q_live.hold_progress > 0.0F); /* ramp surfaced this frame */
 
     /* Next frame: NO mutating gesture step (cfg==NULL), still holding. query must NOT replay the latch. */
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.5F, &fh, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.5F, &fh, 1, 0);
     declare_btn_element();
     (void)nt_ui_events(s_fx.ctx, nt_ui_id("btn"), NULL); /* base step only, no gesture write */
     nt_ui_events_t q_stale = nt_ui_query_events(s_fx.ctx, nt_ui_id("btn"));

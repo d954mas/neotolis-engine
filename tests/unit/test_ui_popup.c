@@ -76,7 +76,7 @@ static void test_popup_floating_smoke(void) {
     st.ease_speed = 0.0F; /* instant: t snaps to 1 */
     nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .w = 80.0F, .h = 30.0F, .prefer_side = NT_UI_POPUP_BELOW};
     nt_pointer_t p = {.active = true};
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1, 0);
     CLAY({.id = CLAY_ID("base"), .layout = {.sizing = {CLAY_SIZING_FIXED(800), CLAY_SIZING_FIXED(600)}}}) {}
     nt_ui_popup_result_t r = nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, true);
     {
@@ -97,7 +97,7 @@ static void test_popup_zband_and_nesting(void) {
     st.ease_speed = 0.0F;
     nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .w = 80.0F, .h = 30.0F, .prefer_side = NT_UI_POPUP_BELOW};
     nt_pointer_t p = {.active = true};
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1, 0);
     nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, true);
     /* Opaque bodies so each panel subtree emits a RECTANGLE, which Clay stamps with its root's band. */
     CLAY({.id = CLAY_ID("body_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
@@ -132,7 +132,7 @@ static void test_popup_depth_overflow_asserts(void) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     st.ease_speed = 0.0F;
     nt_ui_popup_anchor_t anc = {.x = 0.0F, .y = 0.0F, .w = 10.0F, .h = 10.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
     for (uint32_t i = 0; i < NT_UI_MODAL_MAX_DEPTH; ++i) {
         nt_ui_popup_begin(s_fx.ctx, 0x50B000U + i, &st, &anc, true);
     }
@@ -151,7 +151,7 @@ static void test_popup_present_only_catcher(void) {
     nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .w = 80.0F, .h = 30.0F, .prefer_side = NT_UI_POPUP_BELOW};
 
     /* Open: a catcher is declared. */
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
     nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, true);
     nt_ui_popup_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
@@ -159,7 +159,7 @@ static void test_popup_present_only_catcher(void) {
 
     /* Fully closed: NO catcher (present-only guard). */
     bool open = false;
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
     const bool declared = nt_ui_popup_visible(s_fx.ctx, POP_A, &st, &anc, &open);
     if (declared) {
         nt_ui_popup_end(s_fx.ctx);
@@ -172,7 +172,7 @@ static void test_popup_present_only_catcher(void) {
 /* ---- A fully-closed popup called every frame must NOT block a base widget under the same point. ---- */
 static nt_ui_interaction_t closed_popup_base_frame(const nt_ui_popup_style_t *st, const nt_ui_popup_anchor_t *anc, const nt_pointer_t *p) {
     bool open = false;
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1, 0);
     nt_ui_interaction_t in;
     CLAY({.id = (Clay_ElementId){.id = nt_ui_id("closed_base")}, .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(120)}}}) {
         in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("closed_base"));
@@ -213,7 +213,7 @@ static uint8_t edge_flip_side(uint32_t id, float ax, float ay, uint8_t prefer) {
 
     uint8_t side = (uint8_t)NT_UI_POPUP_CENTER;
     for (int f = 0; f < 2; ++f) {
-        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
         side = nt_ui_popup_begin(s_fx.ctx, id, &st, &anc, true).side;
         {
             CLAY({.id = (Clay_ElementId){.id = id ^ 0xB0D70U}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
@@ -242,7 +242,7 @@ static void test_popup_first_frame_uses_prefer_side(void) {
     st.ease_speed = 0.0F;
     /* Anchor near the bottom border but it is frame 1 -> no measured size -> stays BELOW (A3). */
     nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 560.0F, .w = 40.0F, .h = 24.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
     nt_ui_popup_result_t r = nt_ui_popup_begin(s_fx.ctx, 0x50D001U, &st, &anc, true);
     {
         CLAY({.id = (Clay_ElementId){.id = 0x50D002U}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
@@ -257,7 +257,7 @@ static void test_popup_center_no_flip(void) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     st.ease_speed = 0.0F;
     nt_ui_popup_anchor_t anc = {.prefer_side = NT_UI_POPUP_CENTER};
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
     nt_ui_popup_result_t r = nt_ui_popup_begin(s_fx.ctx, 0x50E001U, &st, &anc, true);
     nt_ui_popup_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
@@ -274,7 +274,7 @@ static void test_popup_outside_click_dismiss(void) {
 
     /* Frame 1: open, register the popup body + catcher (establish prev-frame registry). */
     nt_pointer_t f1 = pointer_at(700.0F, 500.0F, false, false, false);
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &f1, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &f1, 1, 0);
     nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, true);
     {
         CLAY({.id = (Clay_ElementId){.id = POP_A ^ 0xB0D70U}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
@@ -286,7 +286,7 @@ static void test_popup_outside_click_dismiss(void) {
      * the catcher wins the prev-frame topmost-z and reports a click -> close_requested. */
     nt_pointer_t f2 = pointer_at(700.0F, 500.0F, false, false, true);
     f2.buttons[NT_BUTTON_LEFT].is_pressed = true;
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &f2, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &f2, 1, 0);
     nt_ui_popup_result_t r = nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, true);
     {
         CLAY({.id = (Clay_ElementId){.id = POP_A ^ 0xB0D70U}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
@@ -307,7 +307,7 @@ static void test_popup_wrapper_clears_open(void) {
 
     /* Frame 1: open -> declared, register body + catcher. */
     nt_pointer_t f1 = pointer_at(700.0F, 500.0F, false, false, false);
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &f1, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &f1, 1, 0);
     bool declared = nt_ui_popup_visible(s_fx.ctx, POP_A, &st, &anc, &open);
     TEST_ASSERT_TRUE(declared);
     if (declared) {
@@ -320,7 +320,7 @@ static void test_popup_wrapper_clears_open(void) {
     /* Frame 2: outside-click -> wrapper clears *open but STILL returns true (animating closed). */
     nt_pointer_t f2 = pointer_at(700.0F, 500.0F, false, false, true);
     f2.buttons[NT_BUTTON_LEFT].is_pressed = true;
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &f2, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &f2, 1, 0);
     declared = nt_ui_popup_visible(s_fx.ctx, POP_A, &st, &anc, &open);
     TEST_ASSERT_TRUE(declared);
     TEST_ASSERT_FALSE(open); /* outside-click cleared the bool */
@@ -333,7 +333,7 @@ static void test_popup_wrapper_clears_open(void) {
     /* Subsequent frames: t decays; eventually the wrapper returns false (fully closed). */
     bool went_false = false;
     for (int i = 0; i < 300; ++i) {
-        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
         declared = nt_ui_popup_visible(s_fx.ctx, POP_A, &st, &anc, &open);
         if (declared) {
             CLAY({.id = (Clay_ElementId){.id = POP_A ^ 0xB0D70U}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
@@ -354,7 +354,7 @@ static void test_popup_no_dismiss_declares_no_catcher(void) {
     st.ease_speed = 0.0F;
     st.flags = 0U; /* no light-dismiss */
     nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .w = 40.0F, .h = 24.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
     nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, true);
     nt_ui_popup_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
@@ -376,7 +376,7 @@ static void test_popup_clear_state_releases_retained_tween_cell(void) {
 
 /* ---- Open/close tween clamp: t in [0,1], rises while open, decays after close; visible == (t>eps). ---- */
 static void popup_frame(uint32_t id, const nt_ui_popup_style_t *st, const nt_ui_popup_anchor_t *anc, bool open, nt_ui_popup_result_t *out) {
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
     *out = nt_ui_popup_begin(s_fx.ctx, id, st, anc, open);
     nt_ui_popup_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
@@ -423,7 +423,7 @@ static void test_popup_top_id_follows_band(void) {
     nt_pointer_t p = {.active = true};
     /* Two frames: the close-scan target is committed at the next nt_ui_begin (1-frame IM lag). */
     for (int frame = 0; frame < 2; ++frame) {
-        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1, 0);
         CLAY({.id = CLAY_ID("game_hud"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = 500}}) {
             nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, true);
             CLAY({.id = CLAY_ID("body_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
@@ -465,7 +465,7 @@ static void test_popup_top_id_follows_band(void) {
     for (int frame = 0; frame < 2; ++frame) {
         const bool pressing = (frame == 0);
         nt_pointer_t click = pointer_at(700.0F, 500.0F, pressing, pressing, !pressing);
-        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &click, 1);
+        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &click, 1, 0);
         CLAY({.id = CLAY_ID("game_hud"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = 500}}) {
             ra = nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, true);
             nt_ui_popup_end(s_fx.ctx);
@@ -480,7 +480,7 @@ static void test_popup_top_id_follows_band(void) {
     /* The band claim resets each frame: with the lifted wrapper gone, the root-level popup takes top. */
     for (int frame = 0; frame < 2; ++frame) {
         nt_pointer_t idle = pointer_at(700.0F, 500.0F, false, false, false);
-        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &idle, 1);
+        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &idle, 1, 0);
         nt_ui_popup_begin(s_fx.ctx, POP_B, &st, &anc, true);
         nt_ui_popup_end(s_fx.ctx);
         nt_ui_end(s_fx.ctx);
@@ -506,7 +506,7 @@ static void test_popup_dismiss_survives_a_band_tie(void) {
         const bool pressing = (frame == 1);
         const bool releasing = (frame == 2);
         nt_pointer_t p = pointer_at(700.0F, 500.0F, pressing, pressing, releasing);
-        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1, 0);
         ra = nt_ui_popup_begin(s_fx.ctx, POP_A, &hi, &anc, true);
         /* Sized bodies: with 0x0 panels "the click landed outside" would be true even if the panel
          * vanished, and the test could not tell the two apart. */

@@ -243,7 +243,7 @@ A bot drives input through the devapi `input.*` command group, which is a thin L
 | Command | Params | Result | Kind |
 |---|---|---|---|
 | `input.key` | `{key, down?, hold?}` | `{ok}` | inject a key edge (`down` default true), or with `hold` a tap = down@0 + up@hold |
-| `input.pointer` | `{action, id, x?, y?, type?, buttons?}` | `{queued}` | a touch/pen contact: action `down`/`move`/`up` on a given id (`type` touch (default) or pen; `mouse` → `bad_params`, the mouse has its own commands) |
+| `input.pointer` | `{action, id, x?, y?, type?, buttons?}` | `{queued}` | a touch/pen contact: action `down`/`move`/`up` on a given id (`type` touch (default) or pen; `mouse` → `bad_params`, the mouse has its own commands; `buttons` defaults to 1, a touching contact) |
 | `input.move` | `{x, y}` | `{queued}` | sugar: pointer move on the mouse |
 | `input.click` | `{x, y, button?, hold?}` | `{queued}` | sugar: mouse move to (x,y) with the button mask @0 + mask 0 @`hold` (2 entries; the mouse stays, like the real one); `hold` default 1 frame (a realistic 1-frame-held click), `hold=0` = same-frame instant click |
 | `input.wheel` | `{dx?, dy?, x?, y?}` | `{ok}` | scroll the mouse; with `x`/`y` a move to (x,y) then the wheel (self-contained, scrolls AT (x,y)), else at its **apply-time** position (mouse not over the window → no-op) |

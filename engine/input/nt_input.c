@@ -130,35 +130,33 @@ void nt_input_init(void) {
     nt_input_platform_init();
 }
 
-/* Like a browser's primary pointer: a single-pointer consumer never sees a press it did not get,
-   and a held capture never moves to another device. */
-static void primary_update(void) {
-    const nt_pointer_t *cur = &g_nt_input.pointers[g_nt_input.primary];
+static bool pointer_in_use(const nt_pointer_t *p) {
     for (int b = 0; b < NT_BUTTON_MAX; b++) {
-        if (cur->active && (cur->buttons[b].is_down || cur->buttons[b].is_released)) {
-            return;
+        if (p->active && (p->buttons[b].is_down || p->buttons[b].is_released)) {
+            return true;
         }
     }
-    int hover = -1;
+    return false;
+}
+
+/* A single-pointer consumer never sees a press or a release it did not get, and a held capture never
+   moves to another device. Contacts are always held, so only the mouse can take it by hovering. */
+static void primary_update(void) {
+    if (pointer_in_use(&g_nt_input.pointers[g_nt_input.primary])) {
+        return;
+    }
+    bool in_use = false;
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
-        const nt_pointer_t *p = &g_nt_input.pointers[i];
-        if (!p->active) {
-            continue;
-        }
-        bool down = false;
         for (int b = 0; b < NT_BUTTON_MAX; b++) {
-            if (p->buttons[b].is_pressed) {
+            if (g_nt_input.pointers[i].active && g_nt_input.pointers[i].buttons[b].is_pressed) {
                 g_nt_input.primary = (uint8_t)i;
                 return;
             }
-            down = down || p->buttons[b].is_down;
         }
-        if (hover < 0 && !down && !p->deactivate_pending) {
-            hover = i;
-        }
+        in_use = in_use || pointer_in_use(&g_nt_input.pointers[i]);
     }
-    if (hover >= 0) {
-        g_nt_input.primary = (uint8_t)hover;
+    if (!in_use && MOUSE->active && !MOUSE->deactivate_pending) {
+        g_nt_input.primary = 0;
     }
 }
 
@@ -388,8 +386,7 @@ static void nt_input_pointer_move_apply(uint32_t id, float x, float y, float pre
     apply_buttons_mask(ptr, buttons_mask);
 }
 
-void nt_input_pointer_move(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask) {
-    NT_ASSERT(type != NT_POINTER_MOUSE && "nt_input_pointer_move: the mouse uses nt_input_mouse_move");
+void nt_input_pointer_move(uint32_t id, float x, float y, float pressure, uint8_t buttons_mask) {
 #if NT_INPUT_AUTOMATION_ENABLED
     if (!s_player_enabled) {
         return;
@@ -547,7 +544,10 @@ bool nt_input_inject_pointer(nt_inject_kind_t kind, uint32_t id, float x, float 
     if (kind != NT_INJECT_POINTER_DOWN && kind != NT_INJECT_POINTER_MOVE && kind != NT_INJECT_POINTER_UP) {
         return false;
     }
-    if (kind != NT_INJECT_POINTER_UP && (type == (uint8_t)NT_POINTER_MOUSE || type > (uint8_t)NT_POINTER_PEN || buttons_mask > 7U)) {
+    if (kind == NT_INJECT_POINTER_DOWN && (type == (uint8_t)NT_POINTER_MOUSE || type > (uint8_t)NT_POINTER_PEN)) {
+        return false;
+    }
+    if (kind != NT_INJECT_POINTER_UP && buttons_mask > 7U) {
         return false;
     }
     nt_inject_event_t *e = inject_reserve(1);

@@ -224,8 +224,8 @@ static void nt_devapi_input_update(void) {
     }
 }
 
-/* Client reset: drop pending schedule entries only. No clock re-seed: a native reset runs mid-tick, after frame++. */
-/* No game sets the gate, so it is the bot's too: a bot that leaves gated never locks the player out. */
+/* Client reset: drop the schedule and re-enable the gate (no game sets it, so a bot that leaves gated never
+   locks the player out). No clock re-seed: a native reset runs mid-tick, after frame++. */
 static void nt_devapi_input_reset(void) {
     s_sched_count = 0;
     nt_input_set_player_enabled(true);
@@ -361,7 +361,7 @@ static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_erro
     if (!contact_type_from_name(cJSON_GetObjectItemCaseSensitive(params, "type"), &type)) {
         return nt_devapi_fail(err, "input.pointer: type must be 'touch' or 'pen'");
     }
-    uint8_t buttons = 0;
+    uint8_t buttons = 1; /* a touching contact is pressed */
     const cJSON *bj = cJSON_GetObjectItemCaseSensitive(params, "buttons");
     if (bj != NULL) {
         if (!parse_button_mask(bj, "input.pointer: buttons must be an integer mask in [0, 7]", &buttons, err)) {

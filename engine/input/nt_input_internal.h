@@ -14,7 +14,7 @@ void nt_input_mouse_leave(void);
 /* Touch/pen contacts (type NT_POINTER_TOUCH or NT_POINTER_PEN): a down creates one, a move for an
    unknown id is ignored. */
 void nt_input_pointer_down(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask);
-void nt_input_pointer_move(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask);
+void nt_input_pointer_move(uint32_t id, float x, float y, float pressure, uint8_t buttons_mask);
 void nt_input_pointer_up(uint32_t id);
 void nt_input_wheel(float dx, float dy);
 void nt_input_clear_all_keys(void);

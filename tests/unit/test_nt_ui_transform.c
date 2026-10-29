@@ -47,7 +47,7 @@ static bool near_eq(float a, float b, float eps) { return fabsf(a - b) <= eps; }
 /* Walk one frame with a wrapping CLAY block carrying the test transform/opacity. */
 static void walk_with_xform(const nt_ui_transform_t *t, float opacity, float bbox_x, float bbox_y, float bbox_w, float bbox_h, Clay_Color color) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     void *ud = (t != NULL) ? (void *)NT_UI_DATA_XFORM(0U, t, opacity) : NULL;
     CLAY({.id = CLAY_ID("xbox"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = bbox_x, .y = bbox_y}},
@@ -114,7 +114,7 @@ static void test_walker_custom_game_handler_fires(void) {
 
     uint32_t game_data[2] = {0xDEADBEEFU, 42U};
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     nt_ui_custom(s_fx.ctx, NULL, game_data);
     nt_ui_end(s_fx.ctx);
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
@@ -130,7 +130,7 @@ static void test_walker_empty_container_no_crash(void) {
     t.scale_x = 2.0F;
     t.scale_y = 2.0F;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("empty"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 0.0F, .y = 0.0F}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}},
@@ -153,7 +153,7 @@ static void test_walker_no_scratch_alloc(void) {
     const size_t baseline = nt_mem_scratch_used();
     /* Frame 2: declare + walk, then assert scratch wasn't touched by the walk. */
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("xbox"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 50.0F, .y = 50.0F}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(80.0F), CLAY_SIZING_FIXED(40.0F)}},

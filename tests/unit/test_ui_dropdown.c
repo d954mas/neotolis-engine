@@ -101,7 +101,7 @@ static void combo_im_frame_icons(const nt_pointer_t *p, float tx, float ty, cons
                                  nt_ui_dropdown_style_t *st, bool *out_made) {
     bool made = false;
     nt_mem_scratch_reset(); /* per-frame scratch reset, exactly as the engine main loop does */
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1, 0);
     const char *preview = (*selected >= 0 && *selected < count) ? labels[*selected] : "Select...";
     CLAY({.id = (Clay_ElementId){.id = 0xDD0007U}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = tx, .y = ty}}}) {
         if (nt_ui_combo_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, preview, st, open)) {
@@ -418,7 +418,7 @@ static void test_dropdown_eased_open_no_flicker(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void combo_im_frame_busy(const nt_pointer_t *p, const char *const *labels, int count, int *selected, bool *open, nt_ui_dropdown_style_t *st, int n_dummy) {
     nt_mem_scratch_reset();
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1, 0);
     /* Swarm declared BEFORE the combo (real frame order: many widgets precede it). Each dummy EASES a
      * slot (value_speed > 0) so the popup's probe window is already full when it touches the table. */
     const nt_ui_anim_target_t tgt = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F, .value_t = 1.0F};
@@ -568,7 +568,7 @@ static void test_dropdown_iconed_and_plain_rows_share_one_column(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void preview_im_frame(const nt_pointer_t *p, float tx, float ty, nt_ui_dropdown_style_t *st, bool *open) {
     nt_mem_scratch_reset();
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1, 0);
     CLAY({.id = (Clay_ElementId){.id = 0xDD0008U}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = tx, .y = ty}}}) {
         nt_ui_combo_preview_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, st, open);
         {
@@ -657,7 +657,7 @@ static nt_ui_bbox_t combo_im_frame_skip_first(const nt_pointer_t *p, bool hide_f
     bool open = true;
     int selected = -1;
     nt_mem_scratch_reset();
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1, 0);
     CLAY({.id = (Clay_ElementId){.id = 0xDD0009U}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 30.0F, .y = 30.0F}}}) {
         if (nt_ui_combo_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, "Select...", &st, &open)) {
             for (int i = 0; i < 3; ++i) {
@@ -699,7 +699,7 @@ static void test_dropdown_combo_duplicate_key_asserts(void) {
     nt_test_assert_armed = true;
     if (setjmp(nt_test_assert_jmp) == 0) {
         nt_mem_scratch_reset();
-        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1, 0);
         CLAY({.id = (Clay_ElementId){.id = 0xDD000AU}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 30.0F, .y = 30.0F}}}) {
             if (nt_ui_combo_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, "Select...", &st, &open)) {
                 (void)nt_ui_combo_selectable(s_fx.ctx, ROW_KEY(0), "Alpha", false);
@@ -724,7 +724,7 @@ static void combo_im_frame_custom(const nt_pointer_t *p, bool *open, bool *out_c
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
     bool clicked = false;
     nt_mem_scratch_reset();
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1, 0);
     CLAY({.id = (Clay_ElementId){.id = 0xDD000BU}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 30.0F, .y = 30.0F}}}) {
         if (nt_ui_combo_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, "Select...", &st, open)) {
             nt_ui_combo_selectable_begin(s_fx.ctx, ROW_KEY(0), false);

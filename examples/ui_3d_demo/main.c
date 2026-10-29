@@ -893,7 +893,7 @@ static void frame(void) {
 
     if (ui_can_render) {
         const nt_pointer_t *pointer = &g_nt_input.pointers[g_nt_input.primary];
-        nt_ui_begin(s_ctx, fb_w, fb_h, dt, pointer, 1);
+        nt_ui_begin(s_ctx, fb_w, fb_h, dt, pointer, 1, 0);
         nt_ui_set_view_proj(s_ctx, (const float *)vp_3d);
         /* Occlusion: if the cursor ray crosses the central object, block UI beyond it — a panel
          * behind the object can't be clicked through it (game owns the world raycast). */

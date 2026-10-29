@@ -34,11 +34,11 @@ EMSCRIPTEN_KEEPALIVE void nt_input_web_on_pointer_down(int id, float cx, float c
     nt_input_pointer_down((uint32_t)id, fx, fy, pressure, (uint8_t)ptype, (uint8_t)buttons);
 }
 
-EMSCRIPTEN_KEEPALIVE void nt_input_web_on_pointer_move(int id, float cx, float cy, float pressure, int ptype, int buttons) {
+EMSCRIPTEN_KEEPALIVE void nt_input_web_on_pointer_move(int id, float cx, float cy, float pressure, int buttons) {
     float fx;
     float fy;
     map_css_to_fb(cx, cy, &fx, &fy);
-    nt_input_pointer_move((uint32_t)id, fx, fy, pressure, (uint8_t)ptype, (uint8_t)buttons);
+    nt_input_pointer_move((uint32_t)id, fx, fy, pressure, (uint8_t)buttons);
 }
 
 EMSCRIPTEN_KEEPALIVE void nt_input_web_on_pointer_up(int id) { nt_input_pointer_up((uint32_t)id); }
@@ -164,21 +164,28 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
     /* Blur: clear all keys on focus loss */
     canvas.addEventListener("blur", function() {
         Module['_ntBlurred'] = true;
-        mouseButtons = 0; /* the release may land outside; the next wheel must not press again */
+        mouseOwned = false; /* the release may land outside; a held capture or the next wheel must not press again */
+        mouseButtons = 0;
     });
 
     /* Pointer events — pass CSS-relative coords, C maps with engine DPR. Every mouse event is a move
-       with the buttons (type 3; a release keeps the mouse); other types are contacts. The buttons
-       count only under the capture a press on the canvas takes, like a native window: a drag from
-       outside never presses, and a cancel or an uncaptured exit never leaves a button stuck. */
+       with the buttons (type 3; a release keeps the mouse); touch and pen are contacts. The buttons
+       count only from a press on the canvas until they are all up, like a native window: a drag from
+       outside never presses, and a cancel, a lost capture or a blur never leaves a button stuck. */
     var mouseButtons = 0;
+    var mouseOwned = false;
     function mouseMove(e, buttons) {
-        mouseButtons = buttons;
-        Module['_ntPtrBuf'].push(3, 0, e.clientX - rect.left, e.clientY - rect.top, 0, 0, buttons);
+        mouseButtons = buttons & 7; /* back/forward buttons are not engine buttons */
+        mouseOwned = mouseOwned && mouseButtons !== 0;
+        Module['_ntPtrBuf'].push(3, 0, e.clientX - rect.left, e.clientY - rect.top, 0, 0, mouseButtons);
     }
 
     function ownedButtons(e) {
-        return canvas.hasPointerCapture(e.pointerId) ? e.buttons : 0;
+        return mouseOwned ? e.buttons : 0;
+    }
+
+    function isContact(e) {
+        return e.pointerType === "touch" || e.pointerType === "pen";
     }
 
     function contact(type, e) {
@@ -190,43 +197,55 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
     canvas.addEventListener("pointerdown", function(e) {
         canvas.focus();
         canvas.setPointerCapture(e.pointerId);
-        if (e.pointerType === "mouse") {
-            mouseMove(e, e.buttons);
-        } else {
+        if (isContact(e)) {
             contact(0, e);
+        } else {
+            mouseOwned = true;
+            mouseMove(e, e.buttons);
         }
         e.preventDefault();
     });
 
     canvas.addEventListener("pointermove", function(e) {
-        if (e.pointerType === "mouse") {
-            mouseMove(e, ownedButtons(e));
-        } else {
+        if (isContact(e)) {
             contact(1, e);
+        } else {
+            mouseMove(e, ownedButtons(e));
         }
     });
 
     canvas.addEventListener("pointerup", function(e) {
-        if (e.pointerType === "mouse") {
-            mouseMove(e, ownedButtons(e));
-        } else {
+        if (isContact(e)) {
             contact(2, e);
+        } else {
+            mouseMove(e, ownedButtons(e));
+            var x = e.clientX - rect.left;
+            var y = e.clientY - rect.top;
+            if (mouseButtons === 0 && (x < 0 || y < 0 || x >= rect.width || y >= rect.height)) {
+                Module['_ntPtrBuf'].push(4, 0, 0, 0, 0, 0, 0); /* released outside: not every browser sends a pointerleave after a captured drag */
+            }
         }
         e.preventDefault();
     });
 
     canvas.addEventListener("pointercancel", function(e) {
-        if (e.pointerType === "mouse") {
-            mouseMove(e, 0);
-        } else {
+        if (isContact(e)) {
             contact(2, e);
+        } else {
+            mouseMove(e, 0);
         }
         e.preventDefault();
     });
 
     canvas.addEventListener("pointerleave", function(e) {
-        if (e.pointerType === "mouse") {
+        if (!isContact(e)) {
             Module['_ntPtrBuf'].push(4, 0, 0, 0, 0, 0, 0);
+        }
+    });
+
+    canvas.addEventListener("lostpointercapture", function(e) {
+        if (!isContact(e) && mouseButtons !== 0) {
+            mouseMove(e, 0); /* capture taken away mid-drag: the release will not reach the canvas */
         }
     });
 
@@ -292,7 +311,7 @@ EM_JS(void, nt_input_web_flush_events, (void), {
                 pb[i + 1], pb[i + 2], pb[i + 3], pb[i + 4], pb[i + 5], pb[i + 6]);
         } else if (pb[i] === 1) {
             Module['_nt_input_web_on_pointer_move'](
-                pb[i + 1], pb[i + 2], pb[i + 3], pb[i + 4], pb[i + 5], pb[i + 6]);
+                pb[i + 1], pb[i + 2], pb[i + 3], pb[i + 4], pb[i + 6]);
         } else if (pb[i] === 2) {
             Module['_nt_input_web_on_pointer_up'](pb[i + 1]);
         } else if (pb[i] === 3) {

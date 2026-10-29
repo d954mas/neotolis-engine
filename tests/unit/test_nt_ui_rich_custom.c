@@ -61,7 +61,7 @@ static void test_custom_effect_reaches_object_without_stock_module(void) {
     float magnitude = 8.0F;
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(60)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_object(s_fx.ctx, measure, draw, NULL);

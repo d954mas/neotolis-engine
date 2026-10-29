@@ -137,7 +137,7 @@ static int last_emit_x(void) {
  * zIndex only on the RECT. */
 static void test_band_layer_orders_image_after_rect_inside_overlay(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(800.0F), CLAY_SIZING_FIXED(600.0F)}}}) {
         CLAY({.id = CLAY_ID("overlay"),
@@ -160,7 +160,7 @@ static void test_band_layer_orders_image_after_rect_inside_overlay(void) {
  * a segment: the base sprite would paint over the overlay. */
 static void test_band_base_sprite_does_not_paint_over_overlay_image(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(800.0F), CLAY_SIZING_FIXED(600.0F)}}}) {
         nt_ui_image(s_fx.ctx, NT_UI_DATA_LAYER(7), &ref, &k_image_style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(40.0F), CLAY_SIZING_FIXED(40.0F)}}});
@@ -181,7 +181,7 @@ static void test_band_base_sprite_does_not_paint_over_overlay_image(void) {
 /* Same band, same layer: declaration order is the last key. */
 static void test_same_band_same_layer_keeps_declaration_order(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root"), .layout = {.layoutDirection = CLAY_LEFT_TO_RIGHT, .sizing = {CLAY_SIZING_FIXED(800.0F), CLAY_SIZING_FIXED(600.0F)}}}) {
         CLAY({.id = CLAY_ID("first"), .layout = {.sizing = {CLAY_SIZING_FIXED(40.0F), CLAY_SIZING_FIXED(40.0F)}}, .backgroundColor = {0, 255.0F, 0, 255.0F}, .userData = NT_UI_CLAY_DATA(0)}) {}
         CLAY({.id = CLAY_ID("second"), .layout = {.sizing = {CLAY_SIZING_FIXED(40.0F), CLAY_SIZING_FIXED(40.0F)}}, .backgroundColor = {255.0F, 0, 0, 255.0F}, .userData = NT_UI_CLAY_DATA(0)}) {}

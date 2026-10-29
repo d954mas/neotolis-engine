@@ -970,7 +970,7 @@ static bool menu_resolve_nav_and_dismiss(nt_ui_menu_ctx_t *menu, uint32_t menu_i
     menu_mouse_pos(ctx, &mx, &my);
     /* Hover-open: the mouse-aim corridor drives the open chain. Skipped on a keyboard-nav frame so a
      * keyboard-opened submenu is authoritative and never collapses from cursor distance the same frame. */
-    if (!kbd_acted) {
+    if (!kbd_acted && ctx->frame_pointers[ctx->frame_primary].active) {
         menu_resolve_hover_open(menu, menu_id, rt, mx, my, ctx->frame_dt);
     }
     /* Commit a mouse-opened root parent (an explicit click this frame, e.g. touch) so submenu_begin returns

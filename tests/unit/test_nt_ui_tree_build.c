@@ -77,7 +77,7 @@ static void tree_build_setup_ctx_max_elements(uint32_t max_elements) {
 
 static void retained_ids_declare_frame(int32_t first, int32_t count) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     for (int32_t i = first; i < first + count; ++i) {
         CLAY({.id = CLAY_IDI("retained_item", i), .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {}
     }
@@ -89,7 +89,7 @@ static void overflow_declare_boxes(void) { retained_ids_declare_frame(0, 31); }
 
 static void overflow_declare_text(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     for (int32_t i = 0; i < 30; ++i) {
         CLAY({.id = CLAY_IDI("retained_item", i), .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {}
     }
@@ -100,7 +100,7 @@ static void overflow_declare_text(void) {
 /* After a frame of 30 other ids, the clip and its box take hashmap slots 32 and 33. */
 static void retained_ids_declare_clipped_box(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("retained_pad"), .layout = {.sizing = {CLAY_SIZING_FIXED(0.0F), CLAY_SIZING_FIXED(0.0F)}}}) {}
     CLAY({.id = CLAY_ID("retained_clip"), .layout = {.sizing = {CLAY_SIZING_FIXED(100.0F), CLAY_SIZING_FIXED(100.0F)}}, .clip = {.horizontal = true, .vertical = true}}) {
         CLAY({.id = CLAY_ID("retained_box"), .layout = {.sizing = {CLAY_SIZING_FIXED(50.0F), CLAY_SIZING_FIXED(50.0F)}}}) {}
@@ -115,7 +115,7 @@ static void retained_ids_declare_clipped_box(void) {
 /* ---- 1. Empty layout — only auto root container; tree_baked[0] = identity. ---- */
 static void test_identity_root(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     nt_ui_end(s_fx.ctx);
 
     const int32_t N = nt_ui_internal_test_get_tree_baked_count(s_fx.ctx);
@@ -130,7 +130,7 @@ static void test_identity_root(void) {
 /* ---- 2. Single CLAY child with HAS_TRANSFORM (rotation 30deg) — baked composes. ---- */
 static void test_single_xform_root(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     nt_ui_transform_t t = nt_ui_transform_defaults();
     t.rotation_z = DEG2RAD(30.0F);
     CLAY({.id = CLAY_ID("rot_container"),
@@ -158,7 +158,7 @@ static void test_single_xform_root(void) {
 /* ---- 3. Two stacked transforms — leaf inherits composed rotation. ---- */
 static void test_chain_xform_2level(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     nt_ui_transform_t outer = nt_ui_transform_defaults();
     outer.rotation_z = DEG2RAD(10.0F);
     nt_ui_transform_t inner = nt_ui_transform_defaults();
@@ -186,7 +186,7 @@ static void test_chain_xform_2level(void) {
 /* ---- 4. Opacity inheritance — leaf opacity = parent * own. ---- */
 static void test_opacity_inheritance_2level(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     nt_ui_transform_t id_xform = nt_ui_transform_defaults();
     CLAY({.id = CLAY_ID("p"), .layout = {.sizing = {CLAY_SIZING_FIXED(200.0F), CLAY_SIZING_FIXED(200.0F)}}, .userData = (void *)NT_UI_DATA_XFORM(0, &id_xform, 0.5F)}) {
         CLAY({.id = CLAY_ID("c"), .layout = {.sizing = {CLAY_SIZING_FIXED(50.0F), CLAY_SIZING_FIXED(50.0F)}}, .userData = (void *)NT_UI_DATA_XFORM(0, &id_xform, 0.4F)}) {}
@@ -212,7 +212,7 @@ static void test_opacity_inheritance_2level(void) {
  * lexical parent `wrap` still composes its own 45° via main-tree DFS. */
 static void test_floating_attach_to_root_identity_seed(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     nt_ui_transform_t rot = nt_ui_transform_defaults();
     rot.rotation_z = DEG2RAD(45.0F);
     CLAY({.id = CLAY_ID("wrap"), .layout = {.sizing = {CLAY_SIZING_FIXED(400.0F), CLAY_SIZING_FIXED(400.0F)}}, .userData = (void *)NT_UI_DATA_XFORM(0, &rot, 1.0F)}) {
@@ -246,7 +246,7 @@ static void test_floating_attach_to_root_identity_seed(void) {
 /* ---- 6. Floating ATTACH_TO_PARENT → inherits lexical parent's xform. ---- */
 static void test_floating_attach_to_parent_inherits_xform(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     nt_ui_transform_t rot = nt_ui_transform_defaults();
     rot.rotation_z = DEG2RAD(45.0F);
     CLAY({.id = CLAY_ID("card"), .layout = {.sizing = {CLAY_SIZING_FIXED(200.0F), CLAY_SIZING_FIXED(200.0F)}}, .userData = (void *)NT_UI_DATA_XFORM(0, &rot, 1.0F)}) {
@@ -279,7 +279,7 @@ static void test_floating_attach_to_parent_inherits_xform(void) {
  * negative-z float from its real parent — not trip the "parentId not in hashmap" assert on the doc root. */
 static void test_negative_zindex_float_does_not_displace_root_seed(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     nt_ui_transform_t rot = nt_ui_transform_defaults();
     rot.rotation_z = DEG2RAD(35.0F);
     CLAY({.id = CLAY_ID("card"), .layout = {.sizing = {CLAY_SIZING_FIXED(200.0F), CLAY_SIZING_FIXED(200.0F)}}, .userData = (void *)NT_UI_DATA_XFORM(0, &rot, 1.0F)}) {
@@ -315,7 +315,7 @@ static void test_floating_attach_to_element_with_id_inherits_xform(void) {
     rot.rotation_z = DEG2RAD(15.0F);
     /* The second frame re-declares a retained anchor before attaching to it. */
     for (int frame = 0; frame < 2; ++frame) {
-        nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+        nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
         CLAY({.id = CLAY_ID("anchor"),
               .floating = {.attachTo = CLAY_ATTACH_TO_ROOT},
               .layout = {.sizing = {CLAY_SIZING_FIXED(50.0F), CLAY_SIZING_FIXED(50.0F)}},
@@ -348,11 +348,11 @@ static void declare_attached_to_anchor(void) {
 /* Attaching to a parent retained from the previous frame but not yet declared in this one asserts at declaration. */
 static void test_floating_retained_parent_asserts_at_declaration(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("anchor"), .layout = {.sizing = {CLAY_SIZING_FIXED(50.0F), CLAY_SIZING_FIXED(50.0F)}}}) {}
     nt_ui_end(s_fx.ctx);
 
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     TEST_ASSERT_TRUE(Clay_GetElementData(CLAY_ID("anchor")).found);
     NT_TEST_EXPECT_ASSERT(declare_attached_to_anchor());
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "Clay reported a contract violation"));
@@ -385,7 +385,7 @@ static void test_retained_ids_hit_through_clip_in_upper_slot(void) {
     retained_ids_declare_frame(0, 30);
     retained_ids_declare_clipped_box();
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     const bool hit = nt_ui_test_hit(s_fx.ctx, CLAY_ID("retained_box").id, 25.0F, 25.0F);
     const bool found = nt_ui_get_bbox(s_fx.ctx, CLAY_ID("retained_box").id).found;
     nt_ui_end(s_fx.ctx);
@@ -407,7 +407,7 @@ static void test_layout_text_overflow_asserts(void) {
 static void test_retained_ids_first_frame_has_no_bbox(void) {
     tree_build_setup_ctx_max_elements(32U);
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_IDI("retained_item", 0), .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {}
     const bool found = nt_ui_get_bbox(s_fx.ctx, CLAY_IDI("retained_item", 0).id).found;
     nt_ui_end(s_fx.ctx);
@@ -420,7 +420,7 @@ static void test_retained_ids_reused_slot_has_no_stale_bbox(void) {
     retained_ids_declare_frame(0, 1);
     retained_ids_declare_frame(1, 1);
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_IDI("retained_item", 2), .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {}
     const bool found = nt_ui_get_bbox(s_fx.ctx, CLAY_IDI("retained_item", 2).id).found;
     nt_ui_end(s_fx.ctx);
@@ -430,7 +430,7 @@ static void test_retained_ids_reused_slot_has_no_stale_bbox(void) {
 /* ---- 8. Floating chain — A's xform propagates to B (attached to A). ---- */
 static void test_floating_inside_floating_chain(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     nt_ui_transform_t rotA = nt_ui_transform_defaults();
     rotA.rotation_z = DEG2RAD(10.0F);
     nt_ui_transform_t rotB = nt_ui_transform_defaults();
@@ -461,7 +461,7 @@ static void test_floating_inside_floating_chain(void) {
 /* ---- 9. Floating ATTACH_TO_PARENT with OWN xform — composed on seed. ---- */
 static void test_floating_with_own_xform_composes_on_seed(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     nt_ui_transform_t outer = nt_ui_transform_defaults();
     outer.rotation_z = DEG2RAD(10.0F);
     nt_ui_transform_t inner = nt_ui_transform_defaults();
@@ -489,7 +489,7 @@ static void test_floating_with_own_xform_composes_on_seed(void) {
 /* ---- 10. NT_UI_DATA_LAYER singleton — flags=0, no compose. ---- */
 static void test_user_data_singleton_layer_only(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("plain"), .layout = {.sizing = {CLAY_SIZING_FIXED(100.0F), CLAY_SIZING_FIXED(100.0F)}}, .userData = NT_UI_CLAY_DATA(5)}) {}
     nt_ui_end(s_fx.ctx);
 
@@ -509,7 +509,7 @@ static void test_user_data_singleton_layer_only(void) {
 /* ---- 11. NT_UI_DATA_XFORM macro copies transform by value (caller stack lifetime). ---- */
 static void test_user_data_xform_macro_copies_transform_by_value(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     {
         nt_ui_transform_t t = nt_ui_transform_defaults();
         t.rotation_z = DEG2RAD(25.0F);
@@ -551,7 +551,7 @@ static void test_singleton_opacity_default(void) {
  * clipTo=ATTACHED_PARENT) is marked with nt_layout_index = -1. */
 static void test_synthetic_scissor_start_marked(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("clip_parent"), .layout = {.sizing = {CLAY_SIZING_FIXED(300.0F), CLAY_SIZING_FIXED(300.0F)}}, .clip = {.horizontal = true, .vertical = true}}) {
         CLAY({.id = CLAY_ID("the_float"),
               .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT},
@@ -582,7 +582,7 @@ static void test_synthetic_scissor_start_marked(void) {
 /* ---- 14. Empty layout — tree_baked[0] still identity (no game CLAY blocks). ---- */
 static void test_tree_baked_identity_init_on_empty_layout(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     nt_ui_end(s_fx.ctx);
 
     const int32_t N = nt_ui_internal_test_get_tree_baked_count(s_fx.ctx);
@@ -630,13 +630,13 @@ static void test_multi_ctx_tree_storage_isolated(void) {
 
     /* ctx A: declare a rotated container. ctx B: empty layout. */
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     nt_ui_transform_t rot = nt_ui_transform_defaults();
     rot.rotation_z = DEG2RAD(60.0F);
     CLAY({.id = CLAY_ID("ctx_a_rot"), .layout = {.sizing = {CLAY_SIZING_FIXED(100.0F), CLAY_SIZING_FIXED(100.0F)}}, .userData = (void *)NT_UI_DATA_XFORM(0, &rot, 1.0F)}) {}
     nt_ui_end(s_fx.ctx);
 
-    nt_ui_begin(ctx_b, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(ctx_b, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     nt_ui_end(ctx_b);
 
     /* ctx A has at least one element with 60deg rotation. */
@@ -669,7 +669,7 @@ static void test_multi_ctx_tree_storage_isolated(void) {
  * on native-debug (catches O(N²) build-tree blowups). */
 static void test_build_tree_ms_recorded_and_under_budget(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     /* 100 nested boxes + 1 root = 101 elements. Realistic UI bound. */
     enum { N_BOXES = 100 };
     for (int32_t i = 0; i < N_BOXES; ++i) {
@@ -698,7 +698,7 @@ static void test_build_tree_ms_recorded_and_under_budget(void) {
 static void test_inspector_subtree_baked_identity(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     /* No user CLAY blocks — let the inspector emit alone. */
     nt_ui_end(s_fx.ctx);
 
@@ -725,7 +725,7 @@ static void test_inspector_subtree_baked_identity(void) {
 static void test_inspector_active_synthetic_scissor_handled(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     nt_ui_end(s_fx.ctx);
 
     int32_t per_element_count = 0;
@@ -752,7 +752,7 @@ static void test_inspector_active_synthetic_scissor_handled(void) {
  * All four affine coefficients must round-trip exactly (no atan2 decomposition). */
 static void test_shear_composition_nonuniform_scale_then_rotation(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
 
     nt_ui_transform_t outer = nt_ui_transform_defaults();
     outer.scale_x = 2.0F;
@@ -797,7 +797,7 @@ static void test_shear_composition_nonuniform_scale_then_rotation(void) {
  *      Y rotation, which is the card-flip use case driving the 3D refactor. ---- */
 static void test_transform_3d_rotation_y_compose(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     nt_ui_transform_t t = nt_ui_transform_defaults();
     t.rotation_y = DEG2RAD(60.0F);
     CLAY({.id = CLAY_ID("rot_y_card"),

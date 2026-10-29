@@ -65,7 +65,7 @@ static const Clay_ElementDeclaration s_track_decl = {
 
 static void progress_frame_dt(float value, float dt) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, dt, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, dt, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = PG_X, .y = PG_Y}}}) {
         nt_ui_progress(s_fx.ctx, NULL, 0, nt_ui_id("pg"), value, &s_style, &s_track_decl);
     }
@@ -370,7 +370,7 @@ static void test_assert_track_w_zero(void) {
     nt_ui_progress_style_t bad = s_style;
     bad.track_w = 0.0F;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_progress(s_fx.ctx, NULL, 0, nt_ui_id("pg"), 0.5F, &bad, &s_track_decl)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -378,7 +378,7 @@ static void test_assert_track_w_zero(void) {
 /* value not finite -> assert. */
 static void test_assert_value_not_finite(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_progress(s_fx.ctx, NULL, 0, nt_ui_id("pg"), INFINITY, &s_style, &s_track_decl)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -387,7 +387,7 @@ static void test_assert_value_not_finite(void) {
 static void test_assert_data_flags_transform(void) {
     nt_ui_transform_t t = nt_ui_transform_defaults();
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) {
         const nt_ui_element_data_t *bad = NT_UI_DATA_XFORM(0U, &t, 1.0F); /* sets HAS_TRANSFORM|HAS_OPACITY */
         NT_TEST_EXPECT_ASSERT(nt_ui_progress(s_fx.ctx, bad, 0, nt_ui_id("pg"), 0.5F, &s_style, &s_track_decl));

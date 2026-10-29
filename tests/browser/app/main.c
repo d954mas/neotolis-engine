@@ -853,6 +853,7 @@ EMSCRIPTEN_KEEPALIVE double nt_test_gpu_command(int operation, int segment) {
     return 0.0;
 }
 EMSCRIPTEN_KEEPALIVE const char *nt_test_input_buffer(void) { return s_state.cyrillic; }
+EMSCRIPTEN_KEEPALIVE int nt_test_mouse(void) { return (g_nt_input.pointers[0].active ? 1 : 0) | (g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_down ? 2 : 0); }
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_walk_text_cmd_count(void) { return nt_ui_get_last_walk_text_command_count(s_ctx); }
 EMSCRIPTEN_KEEPALIVE float nt_test_field_css_x(void) { return s_nt_field_css_x; }
 EMSCRIPTEN_KEEPALIVE float nt_test_field_css_y(void) { return s_nt_field_css_y; }
@@ -1017,6 +1018,7 @@ EM_JS(void, nt_test_install_hooks, (void), {
     window['__nt'] = {
         get 'ready'() { return _nt_test_ready() !== 0; },
         'input_buffer': function() { return UTF8ToString(_nt_test_input_buffer()); },
+        'mouse': function() { var m = _nt_test_mouse(); return { 'active': (m & 1) !== 0, 'down': (m & 2) !== 0 }; },
         'walk_text_cmd_count': function() { return _nt_test_walk_text_cmd_count() >>> 0; },
         'drawn_frames': function() { return _nt_test_drawn_frames() >>> 0; },
         'restore_frames': function() { return _nt_test_restore_frames() >>> 0; },
@@ -1290,7 +1292,7 @@ static void frame(void) {
                             nt_gfx_program_ready(text_info->program);
 
     if (can_render) {
-        nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &g_nt_input.pointers[g_nt_input.primary], 1);
+        nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &g_nt_input.pointers[g_nt_input.primary], 1, 0);
         nt_ui_set_viewport(s_ctx, nt_ui_viewport_from_scale(&scale));
 
         const nt_ui_label_style_t *caption = &s_caption;

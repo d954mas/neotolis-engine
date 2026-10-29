@@ -125,6 +125,8 @@ static void test_input_pointer_ok(void) {
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
     TEST_ASSERT_EQUAL_INT(1, cJSON_GetObjectItemCaseSensitive(result, "queued")->valueint);
     cJSON_Delete(root);
+    advance();
+    TEST_ASSERT_TRUE(g_nt_input.pointers[1].buttons[NT_BUTTON_LEFT].is_pressed); /* a contact presses without buttons */
 }
 
 static void test_input_click_queues_two(void) {

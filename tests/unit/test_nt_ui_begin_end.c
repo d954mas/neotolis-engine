@@ -32,7 +32,7 @@ static void test_begin_sets_current_ctx(void) {
     nt_pointer_t mouse;
     memset(&mouse, 0, sizeof mouse);
 
-    nt_ui_begin(a, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(a, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     TEST_ASSERT_EQUAL_PTR(a->clay, Clay_GetCurrentContext());
     nt_ui_end(a);
 
@@ -48,8 +48,8 @@ static void test_stray_nested_begin_asserts(void) {
     nt_pointer_t mouse;
     memset(&mouse, 0, sizeof mouse);
 
-    nt_ui_begin(a, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    NT_TEST_EXPECT_ASSERT(nt_ui_begin(b, 800.0F, 600.0F, 0.0F, &mouse, 1));
+    nt_ui_begin(a, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    NT_TEST_EXPECT_ASSERT(nt_ui_begin(b, 800.0F, 600.0F, 0.0F, &mouse, 1, 0));
     /* Assert fires before begin mutates state, so a is still in-frame. */
     nt_ui_end(a);
 
@@ -64,7 +64,7 @@ static void test_end_clears_in_frame(void) {
     nt_pointer_t mouse;
     memset(&mouse, 0, sizeof mouse);
 
-    nt_ui_begin(a, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(a, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     TEST_ASSERT_TRUE(a->in_frame);
     TEST_ASSERT_EQUAL_PTR(a, nt_ui_test_inframe_ctx());
 
@@ -84,7 +84,7 @@ static void test_end_clears_clay_current(void) {
     nt_pointer_t mouse;
     memset(&mouse, 0, sizeof mouse);
 
-    nt_ui_begin(a, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(a, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     TEST_ASSERT_EQUAL_PTR(a->clay, Clay_GetCurrentContext());
     nt_ui_end(a);
     TEST_ASSERT_NULL(Clay_GetCurrentContext());
@@ -104,14 +104,14 @@ static void test_end_without_begin_asserts(void) {
 static void test_clay_debug_view_engine_contract(void) {
     nt_ui_context_t *ctx = nt_ui_create_context(s_arena_a, sizeof s_arena_a, &s_ui_desc);
     nt_pointer_t mouse = {0};
-    nt_ui_begin(ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     TEST_ASSERT_FALSE(Clay_IsDebugModeEnabled());
 #if NT_TEST_CLAY_DEBUG_VIEW
     nt_ui_end(ctx);
     Clay_SetCurrentContext(ctx->clay);
     Clay_SetDebugModeEnabled(true);
     TEST_ASSERT_TRUE(Clay_IsDebugModeEnabled());
-    nt_ui_begin(ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     TEST_ASSERT_FALSE(Clay_IsDebugModeEnabled());
 #elif NT_ASSERT_MODE == NT_ASSERT_FULL
     NT_TEST_EXPECT_ASSERT(Clay_SetDebugModeEnabled(true));

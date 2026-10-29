@@ -77,7 +77,7 @@ static nt_ui_tooltip_style_t test_style(void) {
 /* One full frame: declare the INTERACTIVE target (step_interaction registers it for arbitration +
  * bakes its bbox) + declare the tooltip after it; returns whether the tooltip panel was declared. */
 static bool tooltip_frame_at(const nt_pointer_t *p, nt_ui_tooltip_style_t *st, bool at_bottom) {
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, DT, p, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, DT, p, 1, 0);
     if (at_bottom) {
         /* Float the target near the bottom border (mirrors the dropdown edge-flip fixture). */
         CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 0.0F, .y = TGT_BOTTOM_Y}}}) {
@@ -185,7 +185,7 @@ static void test_tooltip_declares_no_catcher(void) {
  *      mutating step_interaction on the SAME target id sees an unperturbed capture machine. A press on
  *      the target still produces pressed_now/clicked exactly as if the tooltip were not present. ---- */
 static nt_ui_interaction_t target_frame_with_tooltip(const nt_pointer_t *p, nt_ui_tooltip_style_t *st) {
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, DT, p, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, DT, p, 1, 0);
     nt_ui_interaction_t in;
     CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) {
         in = nt_ui_step_interaction(s_fx.ctx, TGT_ID); /* the game's single mutating step */

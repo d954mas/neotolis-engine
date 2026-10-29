@@ -138,7 +138,7 @@ void test_contact_never_takes_slot_0(void) {
 void test_contact_move_and_delta(void) {
     nt_input_pointer_down(42, 100.0F, 200.0F, 0.5F, NT_POINTER_TOUCH, 1);
     nt_input_poll();
-    nt_input_pointer_move(42, 120.0F, 230.0F, 0.5F, NT_POINTER_TOUCH, 1);
+    nt_input_pointer_move(42, 120.0F, 230.0F, 0.5F, 1);
     TEST_ASSERT_TRUE(float_near(120.0F, g_nt_input.pointers[1].x, 1e-3F));
     TEST_ASSERT_TRUE(float_near(20.0F, g_nt_input.pointers[1].dx, 1e-3F));
     TEST_ASSERT_TRUE(float_near(30.0F, g_nt_input.pointers[1].dy, 1e-3F));
@@ -166,7 +166,7 @@ void test_contact_same_id_down_after_up_new_slot(void) {
 }
 
 void test_contact_move_without_down_ignored(void) {
-    nt_input_pointer_move(5, 50.0F, 60.0F, 0.0F, NT_POINTER_PEN, 0); /* a hovering pen */
+    nt_input_pointer_move(5, 50.0F, 60.0F, 0.0F, 0); /* a hovering pen */
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
         TEST_ASSERT_FALSE(g_nt_input.pointers[i].active);
     }

@@ -78,7 +78,7 @@ static void test_defaults_ride_every_base_emit_in_one_batch(void) {
     const Clay_ElementDeclaration box = {.layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(30)}}};
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) {
         CLAY({.id = CLAY_ID("rect"), .layout = box.layout, .backgroundColor = {255, 0, 0, 255}}) {}
         CLAY({.id = CLAY_ID("border"), .layout = box.layout, .border = {.color = {0, 255, 0, 255}, .width = {.left = 2, .right = 2, .top = 2, .bottom = 2}}}) {}
@@ -158,7 +158,7 @@ static void declare_mixed_frame(nt_material_t mat, bool with_radial) {
     const Clay_ElementDeclaration box = {.layout = {.sizing = {CLAY_SIZING_FIXED(64), CLAY_SIZING_FIXED(32)}}};
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) {
         CLAY({.id = CLAY_ID("rounded"), .layout = box.layout, .backgroundColor = {255, 0, 0, 255}, .cornerRadius = CLAY_CORNER_RADIUS(6)}) {}
         nt_ui_image(s_fx.ctx, NULL, &slice_ref, &sliced, &box);

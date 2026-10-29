@@ -181,7 +181,7 @@ static void test_vlist_item_id_ring(void) {
 static nt_ui_vlist_range_t vlist_frame(nt_ui_axis_t axis, uint32_t count, float extent) {
     nt_ui_vlist_range_t r = {1U, 0U};
     nt_pointer_t p = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(VL_VIEW), CLAY_SIZING_FIXED(VL_VIEW)}}}) {
         nt_ui_vlist_style_t st = nt_ui_vlist_style_defaults();
         const Clay_ElementDeclaration decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(VL_VIEW), CLAY_SIZING_FIXED(VL_VIEW)}}};
@@ -287,7 +287,7 @@ static void check_vlist_gap_renders(float gap) {
     const float item_extent = 40.0F;
     for (int frame = 0; frame < 2; ++frame) { /* frame 1 establishes dims; frame 2 reads them back */
         nt_pointer_t p = {0};
-        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
         CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(VL_VIEW), CLAY_SIZING_FIXED(VL_VIEW)}}}) {
             nt_ui_vlist_style_t st = nt_ui_vlist_style_defaults();
             st.gap = gap;
@@ -348,7 +348,7 @@ static void test_vlist_window_exceeds_ring_asserts(void) {
     /* Frame 1 (clean): lay out VL_ID so frame 2 reads its real 200px viewport. Viewport is 0 on
      * frame 1 -> a tiny single-row window, so no assert here. */
     nt_mem_scratch_reset();
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
     nt_ui_vlist_range_t r = nt_ui_vlist_begin(s_fx.ctx, NULL, VL_ID, 1000U, 10.0F, NT_UI_AXIS_Y, &st, &decl);
     for (uint32_t i = r.first; i <= r.last && i < 1000U; ++i) {
         CLAY({.id = (Clay_ElementId){.id = nt_ui_vlist_item_id(s_fx.ctx, i)}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(10.0F)}}}) {}
@@ -359,7 +359,7 @@ static void test_vlist_window_exceeds_ring_asserts(void) {
     /* Frame 2: the oversized window now fires the assert. It fires AFTER the owned scroll clip opens,
      * so the frame is abandoned mid-tree; tearDown closes it defensively (ui_walker_fixture_shutdown). */
     nt_mem_scratch_reset();
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
     NT_TEST_EXPECT_ASSERT((void)nt_ui_vlist_begin(s_fx.ctx, NULL, VL_ID, 1000U, 10.0F, NT_UI_AXIS_Y, &st, &decl));
 }
 
@@ -374,7 +374,7 @@ static void test_vlist_window_exceeds_ring_asserts(void) {
 static void vlist_nested_sweep_frame(float pos_y, uint32_t id_ring) {
     nt_mem_scratch_reset(); /* per-frame UI scratch (element_data/payloads), exactly like the app loop */
     nt_pointer_t p = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
 
     /* Pin vlist_y's offset so the window is deterministic (the state cell exists from frame 2 on).
      * pos==target==raw, vel 0, no gesture flags -> the integrator's in-bounds clamp holds it. */
@@ -444,7 +444,7 @@ static void vlist_begin_with_gap_expect_assert(uint32_t root_id, float item_exte
     st.gap = gap;
     const Clay_ElementDeclaration decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(VL_VIEW), CLAY_SIZING_FIXED(VL_VIEW)}}};
     nt_pointer_t p = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
     CLAY({.id = (Clay_ElementId){.id = root_id}, .layout = {.sizing = {CLAY_SIZING_FIXED(VL_VIEW), CLAY_SIZING_FIXED(VL_VIEW)}}}) {
         NT_TEST_EXPECT_ASSERT((void)nt_ui_vlist_begin(s_fx.ctx, NULL, VL_ID, 100U, item_extent, NT_UI_AXIS_Y, &st, &decl));
     }
@@ -461,7 +461,7 @@ static void test_vlist_begin_negative_overscan_asserts(void) {
     st.overscan = -1;
     const Clay_ElementDeclaration decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(VL_VIEW), CLAY_SIZING_FIXED(VL_VIEW)}}};
     nt_pointer_t p = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
     CLAY({.id = (Clay_ElementId){.id = nt_ui_id("badoverscan")}, .layout = {.sizing = {CLAY_SIZING_FIXED(VL_VIEW), CLAY_SIZING_FIXED(VL_VIEW)}}}) {
         NT_TEST_EXPECT_ASSERT((void)nt_ui_vlist_begin(s_fx.ctx, NULL, VL_ID, 100U, 40.0F, NT_UI_AXIS_Y, &st, &decl));
     }

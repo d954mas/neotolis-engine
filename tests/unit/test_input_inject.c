@@ -233,6 +233,22 @@ void test_primary_held_contact_never_takes_over(void) {
     TEST_ASSERT_EQUAL_UINT32(4, primary_id());
 }
 
+/* The mouse pressed during a touch never takes over: not on its release, not while it hovers with a contact held. */
+void test_primary_mouse_waits_until_nothing_in_use(void) {
+    touch(NT_INJECT_POINTER_DOWN, 1);
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_inject_mouse(1.0F, 1.0F, 1));
+    nt_input_poll();
+    touch(NT_INJECT_POINTER_UP, 1);
+    nt_input_poll();
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_inject_mouse(1.0F, 1.0F, 0));
+    nt_input_poll();
+    TEST_ASSERT_EQUAL_UINT8(1, g_nt_input.primary);
+    nt_input_poll();
+    TEST_ASSERT_EQUAL_UINT8(0, g_nt_input.primary);
+}
+
 void test_overflow_rejects_whole(void) {
     /* Fill the immediate buffer to CAP-1 (no poll, so nothing drains). */
     for (uint32_t i = 0; i < NT_INPUT_INJECT_QUEUE_MAX - 1U; i++) {
@@ -286,6 +302,7 @@ int main(void) {
     RUN_TEST(test_primary_held_mouse_keeps_over_touch_press);
     RUN_TEST(test_primary_releasing_touch_stays);
     RUN_TEST(test_primary_held_contact_never_takes_over);
+    RUN_TEST(test_primary_mouse_waits_until_nothing_in_use);
     RUN_TEST(test_overflow_rejects_whole);
     RUN_TEST(test_inject_rejects_invalid_args);
     return UNITY_END();

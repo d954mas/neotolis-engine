@@ -1484,7 +1484,7 @@ static void build_ui(void) {
     const bool narrow = width < 720;
     const bool compact_status = width < 900;
     const float status_height = compact_status ? 76.0F : 56.0F;
-    nt_ui_begin(s_ui, width, height, g_nt_app.dt, g_nt_input.pointers, NT_INPUT_MAX_POINTERS);
+    nt_ui_begin(s_ui, width, height, g_nt_app.dt, g_nt_input.pointers, NT_INPUT_MAX_POINTERS, g_nt_input.primary);
     nt_ui_set_viewport(s_ui, nt_ui_viewport_from_scale(&s_ui_scale));
     CLAY({.id = CLAY_ID("asteroids.ui_root"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(12), .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
         if (!s_hide_hud) {

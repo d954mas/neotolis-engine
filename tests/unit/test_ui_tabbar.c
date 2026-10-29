@@ -57,7 +57,7 @@ static nt_pointer_t pointer_at(float x, float y, bool is_down, bool is_pressed, 
 static int tabbar_frame_icons(const nt_pointer_t *p, int count, int *active, const nt_atlas_region_ref_t *icons, nt_ui_tabbar_style_t *st) {
     int clicked = -1;
     nt_mem_scratch_reset(); /* per-frame scratch reset (icon payloads alloc here), exactly as the main loop does */
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1, 0);
     CLAY({.id = (Clay_ElementId){.id = 0x7AB0F0U},
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 0.0F, .y = 0.0F}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(300)}}}) {
@@ -74,7 +74,7 @@ static int tabbar_frame(const nt_pointer_t *p, int count, int *active, nt_ui_tab
 static int tabbar_core_frame(const nt_pointer_t *p, int count, int *active, nt_ui_tabbar_style_t *st) {
     static const nt_ui_label_style_t lbl = {.font_id = 0U, .font_size = 14.0F, .color = NT_RGBA8(255, 255, 255, 255)};
     int clicked = -1;
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1, 0);
     CLAY({.id = (Clay_ElementId){.id = 0x7AB0F0U},
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 0.0F, .y = 0.0F}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(300)}}}) {
@@ -110,7 +110,7 @@ static void two_tabbars_with_content_frame(const ui_walker_fixture_t *fx, const 
     int nav_active = 0;
     int demo_active = 1;
 
-    nt_ui_begin(fx->ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
+    nt_ui_begin(fx->ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1, 0);
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT}}) {
         /* Nav: the labels[] convenience wrapper, base = TAB_BASE. */
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_GROW(0)}}}) { (void)nt_ui_tabbar(fx->ctx, NT_UI_DATA_LAYER(1), 2U, TAB_BASE, s_tabs, NULL, 4, &nav_active, &nav_st); }

@@ -358,8 +358,10 @@ void nt_ui_screen_to_layout(const nt_ui_context_t *ctx, const float screen[2], f
 void nt_ui_layout_to_screen(const nt_ui_context_t *ctx, const float layout[2], float out_screen[2]);
 
 /* pointers[0..count) drive multitouch under α-semantics — see nt_ui_capture_t doc. pointers carry
- * RAW DEVICE coords; the ctx converts them to layout space via the viewport at the lazy hit resolve. */
-void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *pointers, uint32_t count);
+ * RAW DEVICE coords; the ctx converts them to layout space via the viewport at the lazy hit resolve.
+ * pointers[primary] anchors menus, rich-text links, the Clay feed and the inspector: a single-pointer UI
+ * passes its one pointer with primary 0, a whole g_nt_input array passes g_nt_input.primary. */
+void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *pointers, uint32_t count, uint32_t primary);
 void nt_ui_end(nt_ui_context_t *ctx);
 
 /* Extensible widget descriptor for the inspector. Descriptors must be pointer-stable

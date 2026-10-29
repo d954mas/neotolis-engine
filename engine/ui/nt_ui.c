@@ -412,29 +412,13 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
 // #endregion
 
 // #region begin_end
-/* One pointer is the primary the game chose; in a whole array the first held pointer, else the first active one. */
-static uint32_t ui_primary_index(const nt_pointer_t *pointers, uint32_t count) {
-    uint32_t first = count;
-    for (uint32_t i = 0; i < count; i++) {
-        if (!pointers[i].active) {
-            continue;
-        }
-        for (int b = 0; b < NT_BUTTON_MAX; b++) {
-            if (pointers[i].buttons[b].is_down || pointers[i].buttons[b].is_released) {
-                return i;
-            }
-        }
-        first = first < count ? first : i;
-    }
-    return first < count ? first : 0U;
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *pointers, uint32_t count) {
+void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *pointers, uint32_t count, uint32_t primary) {
     NT_ASSERT(ctx != NULL && "nt_ui_begin: ctx must be non-NULL");
     NT_ASSERT(s_nt_ui_module_initialized && "nt_ui_begin: nt_ui_module_init() must be called before begin");
     NT_ASSERT(pointers != NULL && "nt_ui_begin: pointers must be non-NULL");
     NT_ASSERT(count > 0U && count <= NT_INPUT_MAX_POINTERS && "nt_ui_begin: count must be 1..NT_INPUT_MAX_POINTERS");
+    NT_ASSERT(primary < count && "nt_ui_begin: primary must index pointers");
     /* isfinite() rejects NaN + +-inf which `> 0.0F` alone lets through. Dims MUST be strictly positive:
        the device->layout resolve divides by the viewport size derived from these, so 0 would trap later
        at the first hit-test — fail-early here with a clear message instead. */
@@ -456,7 +440,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
      * identity default; a scaled app overrides it via nt_ui_set_viewport before the first hit-test). */
     memcpy(ctx->frame_pointers, pointers, sizeof(nt_pointer_t) * count);
     ctx->frame_pointer_count = count;
-    ctx->frame_primary = ui_primary_index(pointers, count);
+    ctx->frame_primary = primary;
     ctx->frame_dt = dt;
     ctx->frame_pointers_converted = false;
 #if NT_UI_DEBUG_TOOLS
@@ -556,13 +540,13 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     }
 #endif
 
-    const nt_pointer_t *primary = &pointers[ctx->frame_primary];
+    const nt_pointer_t *primary_ptr = &pointers[primary];
 
 #if NT_UI_DEBUG_TOOLS
     /* The inspector consumes the LAYOUT-space pointer, tested against LAST frame's solved tree (the
      * BeginLayout below wipes the roots), so the gate + Clay feed convert with prev_*. */
-    float insp_screen[2] = {primary->x, primary->y};
-    float insp_layout[2] = {primary->x, primary->y};
+    float insp_screen[2] = {primary_ptr->x, primary_ptr->y};
+    float insp_layout[2] = {primary_ptr->x, primary_ptr->y};
     if (ctx->prev_viewport.w > 0.0F && ctx->prev_viewport.h > 0.0F && ctx->prev_begin_w > 0.0F && ctx->prev_begin_h > 0.0F) {
         nt_ui_screen_to_layout_vp(&ctx->prev_viewport, ctx->prev_begin_w, ctx->prev_begin_h, insp_screen, insp_layout);
     }
@@ -571,8 +555,8 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     const float clay_pointer_x = insp_layout[0];
     const float clay_pointer_y = insp_layout[1];
 #else
-    const float clay_pointer_x = primary->x;
-    const float clay_pointer_y = primary->y;
+    const float clay_pointer_x = primary_ptr->x;
+    const float clay_pointer_y = primary_ptr->y;
 #endif
 
     /* The game opts into Clay's built-in debug view per frame, after begin. */
@@ -582,7 +566,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     /* Clay v0.14 has no right/middle/wheel buttons; left only. Clay's pointer-over consumer is the
      * inspector only; under DEBUG_TOOLS feed the layout-space pointer so a scaled ctx hover-picks
      * the right zone. Identity viewport => layout==device, so unscaled feeds the raw value unchanged. */
-    Clay_SetPointerState((Clay_Vector2){.x = clay_pointer_x, .y = clay_pointer_y}, primary->buttons[NT_BUTTON_LEFT].is_down);
+    Clay_SetPointerState((Clay_Vector2){.x = clay_pointer_x, .y = clay_pointer_y}, primary_ptr->buttons[NT_BUTTON_LEFT].is_down);
 
     /* nt_ui scroll containers drive their own physics (nt_ui_scroll); Clay built-in scroll bypassed,
      * so drag-scrolling stays off. Still REQUIRED every frame: it runs Clay's clip/scroll-container GC.
@@ -2593,8 +2577,8 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
         out.drag_dx = p->x - out.press_pos[0];
         out.drag_dy = p->y - out.press_pos[1];
     } else {
-        /* No owner — fall back to first hover pidx (if any), else primary pidx=0. */
-        const uint32_t pidx = (s.first_hover_pidx >= 0) ? (uint32_t)s.first_hover_pidx : 0U;
+        /* No owner — fall back to first hover pidx (if any), else the primary. */
+        const uint32_t pidx = (s.first_hover_pidx >= 0) ? (uint32_t)s.first_hover_pidx : ctx->frame_primary;
         const nt_pointer_t *p = &ctx->frame_pointers[pidx];
         out.pointer_id = p->id;
         out.press_pos[0] = p->x;

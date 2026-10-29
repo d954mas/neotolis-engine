@@ -66,7 +66,7 @@ static void declare_btn_element(void) {
 /* A frame that only declares the bbox (no interaction query). Used for frame 1
  * so Clay's hashmap has a prev-frame bbox before the first query. */
 static void declare_btn_frame(const nt_pointer_t *p) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
     declare_btn_element();
     nt_ui_end(s_fx.ctx);
 }
@@ -75,7 +75,7 @@ static void declare_btn_frame(const nt_pointer_t *p) {
  * (INSIDE the frame -- step needs Clay's context set), then end. Mirrors how
  * a game/button calls step_interaction during declaration. */
 static nt_ui_interaction_t query_btn_frame(const nt_pointer_t *p) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
     declare_btn_element();
     nt_ui_interaction_t in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn"));
     nt_ui_end(s_fx.ctx);
@@ -86,7 +86,7 @@ static nt_ui_interaction_t query_btn_frame(const nt_pointer_t *p) {
  * registry. Front-most arbitration reads the PREVIOUS frame's registry, so a widget reacts only from
  * the frame after its first step; the warm-up itself reacts to nothing (empty registry → hot==0). */
 static void warm_btn_frame(const nt_pointer_t *p) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
     declare_btn_element();
     (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn"));
     nt_ui_end(s_fx.ctx);
@@ -94,7 +94,7 @@ static void warm_btn_frame(const nt_pointer_t *p) {
 
 /* Warm-up that registers btn with a specific pad (the resolve hit-tests the registered pad). */
 static void warm_btn_frame_padded(const nt_pointer_t *p, const int16_t pad[4]) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
     declare_btn_element();
     (void)nt_ui_step_interaction_padded(s_fx.ctx, nt_ui_id("btn"), pad);
     nt_ui_end(s_fx.ctx);
@@ -210,7 +210,7 @@ static void test_interaction_disabled_skips(void) {
     /* Disabled = button never calls get_interaction → zeroed result, no capture. */
     nt_pointer_t f2 = make_pointer(BTN_CX, BTN_CY, true, true, false);
     const bool enabled = false;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1, 0);
     declare_btn_element();
     nt_ui_interaction_t in = enabled ? nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn")) : (nt_ui_interaction_t){0};
     nt_ui_end(s_fx.ctx);
@@ -235,7 +235,7 @@ static void test_interaction_padded_hover_and_capture(void) {
     const float right_outside_x = BTN_X + BTN_W + 12.0F;
     const float center_y = BTN_Y + (BTN_H * 0.5F);
     nt_pointer_t f2 = make_pointer(right_outside_x, center_y, true, true, false);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1, 0);
     declare_btn_element();
     nt_ui_interaction_t in = nt_ui_step_interaction_padded(s_fx.ctx, nt_ui_id("btn"), pad_right);
     nt_ui_end(s_fx.ctx);
@@ -262,7 +262,7 @@ static void test_interaction_disabled_with_padding_stays_disabled(void) {
     nt_pointer_t f2 = make_pointer(BTN_CX, BTN_CY, true, true, false);
     const bool enabled = false;
     const int16_t big_pad[4] = {32, 32, 32, 32};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1, 0);
     declare_btn_element();
     /* Mirror the button's disabled branch: query not invoked, zeroed result. */
     nt_ui_interaction_t in = enabled ? nt_ui_step_interaction_padded(s_fx.ctx, nt_ui_id("btn"), big_pad) : (nt_ui_interaction_t){0};
@@ -307,7 +307,7 @@ static void test_interaction_capture_excludes_other_widgets(void) {
 
     /* Frame 1: declare both + step both so they register for next-frame arbitration. */
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false, false);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1, 0);
     CLAY({.id = CLAY_ID("btnA"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = a_x, .y = a_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {
         (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
     }
@@ -319,7 +319,7 @@ static void test_interaction_capture_excludes_other_widgets(void) {
     /* Frame 2: press inside A -> A begins capture. Query A and B in declaration
      * order (game declares both each frame regardless of where the pointer is). */
     nt_pointer_t f2 = make_pointer(a_cx, a_cy, true, true, false);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1, 0);
     CLAY({.id = CLAY_ID("btnA"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = a_x, .y = a_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
     nt_ui_interaction_t inA_press = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
     CLAY({.id = CLAY_ID("btnB"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = b_x, .y = b_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
@@ -336,7 +336,7 @@ static void test_interaction_capture_excludes_other_widgets(void) {
     /* Frame 3: hold the button, slide pointer to B's center. Pointer is now
      * geometrically OVER B but A holds the capture. B must report hovered=false. */
     nt_pointer_t f3 = make_pointer(b_cx, b_cy, true, false, false);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f3, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f3, 1, 0);
     CLAY({.id = CLAY_ID("btnA"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = a_x, .y = a_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
     nt_ui_interaction_t inA_drag = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
     CLAY({.id = CLAY_ID("btnB"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = b_x, .y = b_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
@@ -359,7 +359,7 @@ static void test_interaction_capture_excludes_other_widgets(void) {
      * since pointer is off A), and B is still gated on this frame because the
      * pre-call state of cap is still A. */
     nt_pointer_t f4 = make_pointer(b_cx, b_cy, false, false, true);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f4, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f4, 1, 0);
     CLAY({.id = CLAY_ID("btnA"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = a_x, .y = a_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
     nt_ui_interaction_t inA_rel = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
     /* A processed the release: released_now true, clicked false (off A). Capture cleared. */
@@ -375,7 +375,7 @@ static void test_interaction_capture_excludes_other_widgets(void) {
 
     /* Frame 5: idle, pointer over B -> normal hover (no residual capture). */
     nt_pointer_t f5 = make_pointer(b_cx, b_cy, false, false, false);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f5, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f5, 1, 0);
     CLAY({.id = CLAY_ID("btnA"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = a_x, .y = a_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
     nt_ui_interaction_t inA_drop = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
     (void)inA_drop;
@@ -401,7 +401,7 @@ static void test_query_is_idempotent(void) {
     /* Frame 3: release inside. query is idempotent — N calls return identical
      * clicked=true and leave cap->active_id unchanged (no step → no commit). */
     nt_pointer_t f3 = make_pointer(BTN_CX, BTN_CY, false, false, true);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f3, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f3, 1, 0);
     declare_btn_element();
 
     nt_ui_interaction_t calls[5];
@@ -433,7 +433,7 @@ static void test_step_commits_what_query_previewed(void) {
 
     /* Frame 2: press_now. Pre-query first (capture still 0), then step. */
     nt_pointer_t f2 = make_pointer(BTN_CX, BTN_CY, true, true, false);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1, 0);
     declare_btn_element();
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0));
     nt_ui_interaction_t qA = nt_ui_query_interaction(s_fx.ctx, nt_ui_id("btn"));
@@ -449,7 +449,7 @@ static void test_step_commits_what_query_previewed(void) {
 
     /* Frame 3: release. Query first (capture still owned), then step. */
     nt_pointer_t f3 = make_pointer(BTN_CX, BTN_CY, false, false, true);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f3, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f3, 1, 0);
     declare_btn_element();
     TEST_ASSERT_EQUAL_UINT32(nt_ui_id("btn"), nt_ui_test_capture_active_id(s_fx.ctx, 0));
     nt_ui_interaction_t rA = nt_ui_query_interaction(s_fx.ctx, nt_ui_id("btn"));
@@ -475,7 +475,7 @@ static void test_query_step_under_rotation(void) {
     /* Frame 1: declare the rotated button + step it so prev-frame tree_baked carries it AND it
      * enters the interactive registry for next-frame arbitration. */
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false, false);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1, 0);
     CLAY({.id = CLAY_ID("rotbtn"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BTN_X, .y = BTN_Y}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}},
@@ -493,7 +493,7 @@ static void test_query_step_under_rotation(void) {
     TEST_ASSERT_TRUE(ry > BTN_Y + BTN_H);
 
     nt_pointer_t f2 = make_pointer(rx, ry, true, true, false);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1, 0);
     CLAY({.id = CLAY_ID("rotbtn"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BTN_X, .y = BTN_Y}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}},
@@ -510,7 +510,7 @@ static void test_query_step_under_rotation(void) {
 /* step is strictly in-frame; calling outside begin/end must assert. */
 static void test_step_outside_frame_asserts(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("btn"), .layout = {.sizing = {CLAY_SIZING_FIXED(50), CLAY_SIZING_FIXED(50)}}}) {}
     nt_ui_end(s_fx.ctx);
     /* No begin in flight → step must trip the in-frame assert. */
@@ -523,7 +523,7 @@ static void test_query_outside_frame_returns_prev_frame_state(void) {
     /* Two step frames: frame 1 registers btn, frame 2's resolve (prev = frame-1 registry) makes it
      * hot, so the outside query (which reuses that resolve) admits it past the front-most gate. */
     for (int i = 0; i < 2; ++i) {
-        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
         CLAY({.id = CLAY_ID("btn"), .layout = {.sizing = {CLAY_SIZING_FIXED(50), CLAY_SIZING_FIXED(50)}}}) { (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn")); }
         nt_ui_end(s_fx.ctx);
     }
@@ -537,7 +537,7 @@ static void test_query_outside_frame_returns_prev_frame_state(void) {
 /* Two-pointer frame helper. */
 static nt_ui_interaction_t step_btn_2p(const nt_pointer_t *a, const nt_pointer_t *b) {
     const nt_pointer_t ptrs[2] = {*a, *b};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, ptrs, 2);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, ptrs, 2, 0);
     declare_btn_element();
     nt_ui_interaction_t in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn"));
     nt_ui_end(s_fx.ctx);
@@ -547,7 +547,7 @@ static nt_ui_interaction_t step_btn_2p(const nt_pointer_t *a, const nt_pointer_t
 /* Two-pointer warm-up: declare + step so btn registers for next-frame arbitration. */
 static void warm_btn_2p(const nt_pointer_t *a, const nt_pointer_t *b) {
     const nt_pointer_t ptrs[2] = {*a, *b};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, ptrs, 2);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, ptrs, 2, 0);
     declare_btn_element();
     (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn"));
     nt_ui_end(s_fx.ctx);
@@ -636,7 +636,7 @@ static void test_disabled_widget_blocks_input_behind(void) {
 
     /* Frame 1: declare both. B steps (enabled). A blocks (disabled). Both register for next frame. */
     nt_pointer_t f1 = make_pointer(cx, cy, false, false, false);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1, 0);
     CLAY({.id = CLAY_ID("behindB"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = ox, .y = oy}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {
         (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("behindB"));
     }
@@ -647,7 +647,7 @@ static void test_disabled_widget_blocks_input_behind(void) {
 
     /* Frame 2: press inside the overlap. A (front) is the hot widget; B must see nothing. */
     nt_pointer_t f2 = make_pointer(cx, cy, true, true, false);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1, 0);
     CLAY({.id = CLAY_ID("behindB"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = ox, .y = oy}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
     nt_ui_interaction_t inB = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("behindB"));
     CLAY({.id = CLAY_ID("frontA"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = ox, .y = oy}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
@@ -664,7 +664,7 @@ static void test_disabled_widget_blocks_input_behind(void) {
 
     /* Frame 3: release inside. A never clicks (inert), B still blocked → no click leak. */
     nt_pointer_t f3 = make_pointer(cx, cy, false, false, true);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f3, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f3, 1, 0);
     CLAY({.id = CLAY_ID("behindB"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = ox, .y = oy}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
     nt_ui_interaction_t inB3 = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("behindB"));
     CLAY({.id = CLAY_ID("frontA"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = ox, .y = oy}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
@@ -729,7 +729,7 @@ static void test_multitouch_two_widgets_independent_capture(void) {
     /* Frame 1: declare + step both so they register for next-frame arbitration. */
     nt_pointer_t idle = make_pointer(0.0F, 0.0F, false, false, false);
     const nt_pointer_t f1[2] = {idle, idle};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, f1, 2);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, f1, 2, 0);
     CLAY({.id = CLAY_ID("btnA"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = a_x, .y = a_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {
         (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
     }
@@ -742,7 +742,7 @@ static void test_multitouch_two_widgets_independent_capture(void) {
     nt_pointer_t f0_press = make_pointer(a_cx, a_cy, true, true, false);
     nt_pointer_t f1_press = make_pointer(b_cx, b_cy, true, true, false);
     const nt_pointer_t f2[2] = {f0_press, f1_press};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, f2, 2);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, f2, 2, 0);
     CLAY({.id = CLAY_ID("btnA"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = a_x, .y = a_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
     nt_ui_interaction_t inA = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
     CLAY({.id = CLAY_ID("btnB"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = b_x, .y = b_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
@@ -758,7 +758,7 @@ static void test_multitouch_two_widgets_independent_capture(void) {
     nt_pointer_t f0_rel = make_pointer(a_cx, a_cy, false, false, true);
     nt_pointer_t f1_rel = make_pointer(b_cx, b_cy, false, false, true);
     const nt_pointer_t f3[2] = {f0_rel, f1_rel};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, f3, 2);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, f3, 2, 0);
     CLAY({.id = CLAY_ID("btnA"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = a_x, .y = a_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
     nt_ui_interaction_t inA_rel = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
     CLAY({.id = CLAY_ID("btnB"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = b_x, .y = b_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}

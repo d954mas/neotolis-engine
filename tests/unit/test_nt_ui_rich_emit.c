@@ -104,7 +104,7 @@ static void frame_two_run_text(float container_w, nt_rich_align_t align) {
     base.font_id[0] = s_body_font;
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("rich_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_push_color(s_fx.ctx, 0xFF00FF00U); /* second run: distinct style -> split */
@@ -161,7 +161,7 @@ static void test_rich_block_text_material_overrides_ctx(void) {
 
     nt_gfx_fake_draw_trace_reset(true);
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("rich_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_text_n(s_fx.ctx, "Hello", 5);
@@ -192,7 +192,7 @@ static void test_single_style_one_span_per_line(void) {
     base.font_id[0] = s_fx.stub_font;
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("rich_root2"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_text_n(s_fx.ctx, "onerun", 6);
@@ -213,7 +213,7 @@ static void test_double_walk_is_deterministic(void) {
     base.font_id[0] = s_fx.stub_font;
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("rich_root3"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_text_n(s_fx.ctx, "alpha beta", 10);
@@ -254,7 +254,7 @@ static void frame_multi_face(const nt_font_t fam[4]) {
     }
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("rich_mf_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         /* R B R I R BI R: 7 runs, 4 distinct faces, interleaved (forces transitions in source order). */
@@ -313,7 +313,7 @@ static void frame_synth_italic(void) {
     base.font_id[0] = s_body_font; /* only the regular face; font_id[1..3] stay {0} -> no italic member */
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("rich_si_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_text_n(s_fx.ctx, "up ", 3); /* upright run */
@@ -376,7 +376,7 @@ static void frame_synth_bold(void) {
     base.font_id[0] = s_body_font; /* only the regular face; font_id[1..3] stay {0} -> no bold member */
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("rich_sb_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_text_n(s_fx.ctx, "reg ", 4); /* regular run -> weight 0 */
@@ -441,7 +441,7 @@ static void frame_six_distinct_fonts(const nt_font_t fam[6]) {
     base.font_id[0] = fam[0];
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("rich_6f_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_text_n(s_fx.ctx, "a ", 2); /* family 0 (base) */
@@ -497,7 +497,7 @@ static void frame_text_image_text(nt_material_t img_mat, nt_rich_valign_t valign
     const nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, FX_WHITE_NAME_HASH);
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("rich_img_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         if (tint_abgr != 0xFFFFFFFFU) {
@@ -614,7 +614,7 @@ static void frame_image_with_opacity(nt_material_t img_mat, float opacity) {
     nt_ui_element_data_t block_data = {.user_data = NULL, .layer = 0U, .flags = (uint8_t)NT_UI_ELEM_FLAG_HAS_OPACITY, .transform = nt_ui_transform_defaults(), .opacity = opacity};
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("rich_op_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_text_n(s_fx.ctx, "A ", 2);
@@ -667,7 +667,7 @@ static void frame_two_images(nt_material_t img_mat) {
     const nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, FX_WHITE_NAME_HASH);
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("rich_2img_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_text_n(s_fx.ctx, "A ", 2);
@@ -1087,7 +1087,7 @@ static float frame_tuned_wave_image_y(nt_material_t img_mat, const nt_ui_rich_fx
     const nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, FX_WHITE_NAME_HASH);
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("tw_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_push_effect_ex(s_fx.ctx, nt_ui_rich_fx_wave, params);
@@ -1176,7 +1176,7 @@ static void frame_effected_image(nt_material_t img_mat, nt_ui_rich_fx_fn effect_
     const nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, FX_WHITE_NAME_HASH);
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("rich_fx_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_push_effect(s_fx.ctx, effect_fn); /* effect on TEXT + IMAGE together */
@@ -1259,7 +1259,7 @@ static nt_ui_rich_result_t frame_link(const nt_pointer_t *p) {
     base.font_id[0] = s_fx.stub_font;
 
     nt_ui_rich_result_t res = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
     CLAY({.id = CLAY_ID("link_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {LINK_ROOT_X, LINK_ROOT_Y}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_text_n(s_fx.ctx, "go ", 3);
@@ -1302,7 +1302,7 @@ static nt_ui_rich_result_t frame_link_xform(const nt_pointer_t *p) {
     const nt_ui_element_data_t *xdata = NT_UI_DATA_XFORM(0U, &t, 1.0F);
 
     nt_ui_rich_result_t res = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
     CLAY({.id = CLAY_ID("linkx_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {LINK_ROOT_X, LINK_ROOT_Y}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_text_n(s_fx.ctx, "go ", 3);
@@ -1336,7 +1336,7 @@ static nt_ui_rich_result_t frame_two_links(const nt_pointer_t *p) {
     base.font_id[0] = s_fx.stub_font;
 
     nt_ui_rich_result_t res = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
     CLAY({.id = CLAY_ID("link2_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {LINK_ROOT_X, LINK_ROOT_Y}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_text_n(s_fx.ctx, "go ", 3);
@@ -1464,7 +1464,7 @@ static nt_ui_rich_result_t frame_link_gap(const nt_pointer_t *p) {
     base.font_id[0] = s_fx.stub_font;
 
     nt_ui_rich_result_t res = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
     CLAY(
         {.id = CLAY_ID("link_gap_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {LINK_ROOT_X, LINK_ROOT_Y}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
@@ -1588,7 +1588,7 @@ static void frame_object(nt_ui_rich_fx_fn effect_fn, float time) {
     base.font_id[0] = s_fx.stub_font;
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("obj_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         if (effect_fn != NULL) {
@@ -1655,7 +1655,7 @@ static void test_object_draw_receives_resolved_color(void) {
     nt_ui_element_data_t block_data = {.user_data = NULL, .layer = 0U, .flags = (uint8_t)NT_UI_ELEM_FLAG_HAS_OPACITY, .transform = nt_ui_transform_defaults(), .opacity = block_opacity};
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("obj_col_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_push_color(s_fx.ctx, 0xFF0080FFU); /* 0xAABBGGRR: r=255 g=128 b=0 a=255 */
@@ -1697,7 +1697,7 @@ static void test_object_markup_reaches_draw_fn(void) {
 
     const char *markup = "A <obj=widget/> B";
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("obj_markup_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_text_markup(s_fx.ctx, CLAY_ID("obj_markup").id, NULL, &ts, &base, markup, strlen(markup), 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
     }
@@ -1751,7 +1751,7 @@ static void test_object_world_mat4_matches_block_transform(void) {
     const nt_ui_element_data_t *xdata = NT_UI_DATA_XFORM(0U, &t, 1.0F);
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("obj_xform_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_object(s_fx.ctx, stub_measure, stub_draw, NULL);
@@ -1790,7 +1790,7 @@ static void frame_object_measure(nt_ui_rich_object_measure_fn measure_fn) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("obj_deg_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_object(s_fx.ctx, measure_fn, stub_draw, NULL);
@@ -1828,7 +1828,7 @@ static void frame_object_ascent(void) {
     base.font_id[0] = s_fx.stub_font;
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("obj_asc_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_text_n(s_fx.ctx, "A ", 2);
@@ -1884,7 +1884,7 @@ static void test_two_rich_text_blocks_one_frame_no_trap(void) {
     base.font_id[0] = s_fx.stub_font;
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("rich_multi_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_text_n(s_fx.ctx, "first block", 11);
@@ -1920,7 +1920,7 @@ static nt_ui_rich_result_t frame_markup(const nt_pointer_t *p) {
 
     static const char *const markup = "go <link=here>HERE</link> now";
     nt_ui_rich_result_t res = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
     CLAY({.id = CLAY_ID("mk_root"),
           .layout = {.sizing = {CLAY_SIZING_FIXED(MK_CONTAINER_W), CLAY_SIZING_FIXED(200)}},
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {MK_ROOT_X, MK_ROOT_Y}}}) {
@@ -2008,7 +2008,7 @@ static void frame_object_custom_fn(nt_ui_rich_fx_fn fn, void *user) {
     base.font_id[0] = s_fx.stub_font;
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("obj_cfx_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_push_effect_fn(s_fx.ctx, fn, user);
@@ -2070,7 +2070,7 @@ static void test_custom_fx_runs_via_markup(void) {
     /* "A " has no effect; "<fx=myfx>BB</fx>" runs the custom fn per glyph; the stock wave too. */
     static const char *const markup_fx = "A <fx=myfx>BB</fx> <fx=wavename>CC</fx>";
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("cfx_mk_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_text_markup(s_fx.ctx, CLAY_ID("cfx_mk").id, NULL, &ts, &base, markup_fx, strlen(markup_fx), 400.0F, NT_RICH_ALIGN_LEFT, 0.5F, NULL);
     }
@@ -2100,7 +2100,7 @@ static void frame_text_image_object(void) {
     const nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, FX_WHITE_NAME_HASH);
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("rich_tio_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_text_n(s_fx.ctx, "T ", 2);
@@ -2176,7 +2176,7 @@ static void test_layer_override(void) {
     s_order_draws_at_object_draw = 0xFFFFFFFFU; /* sentinel: stays unset if the object never draws */
     s_order_draws_before = nt_gfx_draw_calls(&g_nt_gfx.counters);
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("rich_lo_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_push_layer(s_fx.ctx, 5U);
@@ -2232,7 +2232,7 @@ static void test_later_band_text_reselects_block_text_material(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = ui_walker_fixture_make_real_font(&s_fx);
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("rich_tm_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_push_layer(s_fx.ctx, 0U);
@@ -2265,7 +2265,7 @@ static void frame_multi_face_two_layers(const nt_font_t fam[4]) {
     }
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("rich_ml_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         /* Layer 0: regular + bold faces. */
@@ -2315,7 +2315,7 @@ static void test_font_group_does_not_cross_layers(void) {
     base.font_id[1] = fam[1];
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("rich_xl_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_push_layer(s_fx.ctx, 0U);
@@ -2352,7 +2352,7 @@ static void frame_two_layer_images(nt_material_t img_mat) {
     const nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, FX_WHITE_NAME_HASH);
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("rich_2li_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_push_layer(s_fx.ctx, 0U);
@@ -2425,7 +2425,7 @@ static void test_mixed_auto_and_explicit_layers(void) {
     const nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, FX_WHITE_NAME_HASH);
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("rich_mix_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_push_layer(s_fx.ctx, 5U);
@@ -2470,7 +2470,7 @@ static void frame_over_cap_layers(void) {
     base.font_id[0] = s_fx.stub_font;
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("rich_cap_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         for (uint8_t L = 0; L < 20U; L++) { /* 20 distinct layers > NT_UI_RICH_MAX_LAYERS (16) */
@@ -2500,7 +2500,7 @@ static void test_late_effect_preserves_plain_text_runs(void) {
     s_obj_draw_calls = 0U;
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("late_fx_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_text_n(s_fx.ctx, "P", 1U);
@@ -2546,7 +2546,7 @@ static void test_tuned_effect_copies_each_push_before_emit(void) {
     s_obj_draw_calls = 0U;
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("copied_fx_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_push_effect_ex(s_fx.ctx, capture_tuned_params, &params);
@@ -2597,7 +2597,7 @@ static void test_markup_effect_capacity_keeps_prior_params_and_balances_close(vo
     s_fx.ctx->rich_max_styles = NT_UI_RICH_MAX_CUSTOM_FX + 2U;
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 4096.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 4096.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("capacity_fx_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(4096), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_text_markup(s_fx.ctx, CLAY_ID("capacity_fx").id, NULL, &ts, &base, markup, used, 4096.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
     }
@@ -2623,7 +2623,7 @@ static void test_nonfinite_base_outline_emits_plain_text(void) {
         base.outline_w = widths[i];
         base.outline_color_abgr = 0xFFFFFFFFU;
         nt_pointer_t mouse = {0};
-        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
         CLAY({.id = CLAY_ID("nonfinite_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
             nt_ui_rich_begin(s_fx.ctx, &base);
             nt_ui_rich_text_n(s_fx.ctx, "A", 1U);
