@@ -538,7 +538,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     }
 #endif
 
-    const nt_pointer_t *primary = &pointers[0];
+    const nt_pointer_t *primary = nt_pointer_primary(pointers, count);
 
 #if NT_UI_DEBUG_TOOLS
     /* The inspector consumes the LAYOUT-space pointer, tested against LAST frame's solved tree (the
@@ -2620,10 +2620,10 @@ void nt_ui_internal_ensure_pointers_layout(nt_ui_context_t *ctx) {
     }
 #if NT_UI_DEBUG_TOOLS
     /* Re-gate the inspector sidebar with THIS frame's viewport now it is known: begin gated using the
-     * PREV-frame viewport (1-frame lag, off only on a resize). frame_pointers[0] is now layout-space; the
+     * PREV-frame viewport (1-frame lag, off only on a resize). frame_pointers are now layout-space; the
      * panel sits at logical x = begin_w - panel_width, so compare the converted pointer.x against it. */
     if (ctx->frame_pointer_count > 0U) {
-        const nt_pointer_t *primary = &ctx->frame_pointers[0];
+        const nt_pointer_t *primary = nt_pointer_primary(ctx->frame_pointers, ctx->frame_pointer_count);
         ctx->inspector_pointer_consumed = ctx->inspector_active && (primary->x >= (ctx->begin_w - ctx->inspector_metrics.panel_width));
     }
 #endif
@@ -2644,6 +2644,9 @@ static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
     Clay_SetCurrentContext(ctx->clay);
     for (uint32_t pidx = 0; pidx < ctx->frame_pointer_count; ++pidx) {
         const nt_pointer_t *p = &ctx->frame_pointers[pidx];
+        if (!p->active) {
+            continue; /* a gone pointer hovers nothing (its hot stays 0) */
+        }
         nt_ui_hot_t best = {0};
         bool found = false;
         int16_t best_zindex = INT16_MIN; /* 2D: highest effective zIndex seen so far */

@@ -160,6 +160,16 @@ static void test_interaction_hover_then_pressed(void) {
     TEST_ASSERT_TRUE(prs.pressed_now);
 }
 
+/* A gone pointer (a mouse that left, a lifted touch) keeps its last position but hovers nothing. */
+static void test_interaction_inactive_pointer_no_hover(void) {
+    nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false, false);
+    warm_btn_frame(&f1);
+    nt_pointer_t f2 = make_pointer(BTN_CX, BTN_CY, false, false, false);
+    f2.active = false;
+    nt_ui_interaction_t in = query_btn_frame(&f2);
+    TEST_ASSERT_FALSE(in.hovered);
+}
+
 /* ---- Test 3: press, release OUTSIDE widget -> cancel (released_now, !clicked) ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_interaction_release_outside_cancels(void) {
@@ -764,6 +774,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_interaction_click_on_release_within_bounds);
     RUN_TEST(test_interaction_hover_then_pressed);
+    RUN_TEST(test_interaction_inactive_pointer_no_hover);
     RUN_TEST(test_interaction_release_outside_cancels);
     RUN_TEST(test_interaction_disabled_skips);
     RUN_TEST(test_interaction_wants_pointer);

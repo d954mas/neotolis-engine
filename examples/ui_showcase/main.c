@@ -3806,7 +3806,7 @@ static void frame(void) {
         nt_ui_set_sprite_material(s_ctx, base_on ? s_base_material : s_sprite_material);
 
         /* Pass the RAW device pointer; the ctx converts it via the scale-derived viewport. */
-        nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &g_nt_input.pointers[0], 1);
+        nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, nt_pointer_primary(g_nt_input.pointers, NT_INPUT_MAX_POINTERS), 1);
         nt_ui_set_viewport(s_ctx, nt_ui_viewport_from_scale(&scale));
 
         CLAY({.id = CLAY_ID("root"),

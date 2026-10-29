@@ -16,12 +16,13 @@ void nt_input_buffer_key(nt_key_t key, bool down) {
     (void)down;
 }
 
-void nt_input_buffer_pointer(bool is_down, double raw_x, double raw_y, uint8_t buttons) {
-    (void)is_down;
+void nt_input_buffer_mouse(double raw_x, double raw_y, uint8_t buttons) {
     (void)raw_x;
     (void)raw_y;
     (void)buttons;
 }
+
+void nt_input_buffer_mouse_leave(void) {}
 
 void nt_input_buffer_wheel(float dx, float dy) {
     (void)dx;

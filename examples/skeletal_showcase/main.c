@@ -2157,7 +2157,7 @@ static void mixing_declare_controls(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_ui(const nt_ui_scale_t *scale) {
-    nt_ui_begin(s_ui, scale->logical_w, scale->logical_h, g_nt_app.dt, &g_nt_input.pointers[0], 1);
+    nt_ui_begin(s_ui, scale->logical_w, scale->logical_h, g_nt_app.dt, nt_pointer_primary(g_nt_input.pointers, NT_INPUT_MAX_POINTERS), 1);
     nt_ui_set_viewport(s_ui, nt_ui_viewport_from_scale(scale));
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 10, .padding = CLAY_PADDING_ALL(10)}}) {
         declare_header();
@@ -2703,7 +2703,7 @@ static void frame(void) {
             s_camera_fit_width = camera_width;
             s_camera_fit_height = s_stage_bbox.height;
         }
-        update_stage_camera(&g_nt_input.pointers[0], &s_ui_scale);
+        update_stage_camera(nt_pointer_primary(g_nt_input.pointers, NT_INPUT_MAX_POINTERS), &s_ui_scale);
     }
     const bool draw_stage = ready && render_enabled;
     if (draw_stage && scene->prepare != NULL) {

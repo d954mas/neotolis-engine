@@ -105,12 +105,8 @@ typedef struct {
 
 #define NT_INPUT_MAX_POINTERS 8
 
-/* The one mouse: both backends report the real mouse with this id, and the bot's mouse defaults to it,
-   so a bot click lands in the slot the game reads. Explicit bot ids are used verbatim. */
-#define NT_INPUT_MOUSE_ID 0U
-
 typedef struct {
-    uint32_t id;             /* NT_INPUT_MOUSE_ID for the mouse; touch/pen: a platform id */
+    uint32_t id;             /* touch/pen: the platform contact id; 0 for the mouse */
     float x, y;              /* Framebuffer pixels, canvas-relative */
     float dx, dy;            /* Movement delta in framebuffer pixels */
     float wheel_dx;          /* Wheel delta in NOTCHES: 1.0 == one physical detent (platform edge
@@ -122,12 +118,44 @@ typedef struct {
     float pressure;          /* 0.0-1.0 */
     uint8_t type;            /* nt_pointer_type_t */
     bool active;             /* Pointer currently exists */
-    bool deactivate_pending; /* pointer_up defers deactivation by one frame */
+    bool deactivate_pending; /* an up or a mouse leave defers deactivation by one frame */
     nt_button_state_t buttons[NT_BUTTON_MAX];
 } nt_pointer_t;
 
+/* The pointer in use, for code that follows one pointer (nt_ui menus and links use the same rule): the
+   first active pointer with a button down, else one released this frame (a lifted touch stays primary
+   for its release frame), else the first active one (in g_nt_input.pointers the mouse comes before
+   contacts). With none active it is pointers[0]. */
+static inline const nt_pointer_t *nt_pointer_primary(const nt_pointer_t *pointers, uint32_t count) {
+    const nt_pointer_t *released = NULL;
+    const nt_pointer_t *first = NULL;
+    for (uint32_t i = 0; i < count; i++) {
+        const nt_pointer_t *p = &pointers[i];
+        if (!p->active) {
+            continue;
+        }
+        for (int b = 0; b < NT_BUTTON_MAX; b++) {
+            if (p->buttons[b].is_down) {
+                return p;
+            }
+            if (p->buttons[b].is_released && released == NULL) {
+                released = p;
+            }
+        }
+        if (first == NULL) {
+            first = p;
+        }
+    }
+    if (released != NULL) {
+        return released;
+    }
+    return first != NULL ? first : pointers;
+}
+
 /* ---- Global input state ---- */
 
+/* pointers[0] is the mouse: active while the cursor is over the window or a button is held, and a
+   button release keeps it. Touch and pen contacts take slots 1.., each from its down to its up. */
 typedef struct {
     nt_pointer_t pointers[NT_INPUT_MAX_POINTERS];
 } nt_input_t;
@@ -179,13 +207,14 @@ void nt_input_set_text_input_mode(nt_text_input_mode_t mode);
 
 /* Event kinds applied through the immediate inject buffer (drained every poll). */
 typedef enum {
-    NT_INJECT_KEY = 0,         /* key down/up */
-    NT_INJECT_POINTER_DOWN,    /* pointer slot create/press */
-    NT_INJECT_POINTER_MOVE,    /* pointer move */
-    NT_INJECT_POINTER_UP,      /* pointer release + deactivate-pending */
-    NT_INJECT_POINTER_BUTTONS, /* set button mask at the slot's CURRENT position (no move, no baked x/y) */
-    NT_INJECT_WHEEL,           /* mouse slot only */
-    NT_INJECT_CHAR,            /* codepoint into the char ring */
+    NT_INJECT_KEY = 0,       /* key down/up */
+    NT_INJECT_MOUSE_MOVE,    /* the mouse at (x,y) with a button mask */
+    NT_INJECT_MOUSE_BUTTONS, /* the mouse's button mask at its CURRENT position (no-op while it is not over the window) */
+    NT_INJECT_POINTER_DOWN,  /* touch/pen contact create/press */
+    NT_INJECT_POINTER_MOVE,  /* touch/pen contact move */
+    NT_INJECT_POINTER_UP,    /* touch/pen contact release + deactivate-pending */
+    NT_INJECT_WHEEL,         /* the mouse only */
+    NT_INJECT_CHAR,          /* codepoint into the char ring */
 } nt_inject_kind_t;
 
 /* Bounded BSS immediate inject buffer cap (-D overridable). */

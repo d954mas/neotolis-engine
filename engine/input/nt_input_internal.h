@@ -7,6 +7,12 @@
    Coordinates are in framebuffer pixels; each backend maps from its own space. */
 
 void nt_input_set_key(nt_key_t key, bool down);
+/* The mouse: every real mouse event is a move with the current button mask (a release keeps the mouse).
+   A leave is ignored while a button is held, so a drag outside the window keeps it. */
+void nt_input_mouse_move(float x, float y, uint8_t buttons_mask);
+void nt_input_mouse_leave(void);
+/* Touch/pen contacts (type NT_POINTER_TOUCH or NT_POINTER_PEN): a down creates one, a move for an
+   unknown id is ignored. */
 void nt_input_pointer_down(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask);
 void nt_input_pointer_move(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask);
 void nt_input_pointer_up(uint32_t id);
@@ -20,8 +26,8 @@ void nt_input_focus_lost(void);
    NT_INPUT_AUTOMATION_ENABLED (devapi input group in the build, or tests); a lean build drops the
    gate, the inject buffer, and all these symbols entirely.
 
-   Player gate: when disabled the public real-apply wrappers (set_key, pointer_*, wheel,
-   buffer_char, focus_lost) early-return. It releases nothing: whoever pressed releases.
+   Player gate: when disabled the public real-apply wrappers (set_key, mouse_move, mouse_leave,
+   pointer_*, wheel, buffer_char, focus_lost) early-return. It releases nothing: whoever pressed releases.
    Inject calls the *_apply cores directly so it always flows.
 
    Inject API (L1 engine capability; L2 devapi group drives it untrusted): IMMEDIATE only — each call
@@ -31,12 +37,12 @@ void nt_input_focus_lost(void);
 #if NT_INPUT_AUTOMATION_ENABLED
 void nt_input_set_player_enabled(bool enabled);
 bool nt_input_inject_key(nt_key_t key, bool down);
+/* A touch/pen contact event: kind POINTER_DOWN/MOVE/UP, type touch or pen. */
 bool nt_input_inject_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask);
-/* Set the button mask on slot `id` at its CURRENT polled position when this applies (apply-time, in
-   schedule order) — never moves the pointer and bakes no x/y. If the slot does not exist yet at apply
-   time it is created at (0,0) (no prior pointer). Lets input.button respect a pending input.move
-   queued ahead of it instead of baking a stale submit-time position. */
-bool nt_input_inject_buttons(uint32_t id, uint8_t buttons_mask);
+bool nt_input_inject_mouse(float x, float y, uint8_t buttons_mask);
+/* The mouse's button mask at its position when this applies (schedule order), so a pending
+   inject_mouse queued ahead of it is honored. No-op while the mouse is not over the window. */
+bool nt_input_inject_mouse_buttons(uint8_t buttons_mask);
 bool nt_input_inject_wheel(float dx, float dy);
 bool nt_input_inject_text(const uint32_t *cps, uint32_t n);
 #endif
@@ -45,7 +51,8 @@ bool nt_input_inject_text(const uint32_t *cps, uint32_t n);
    nt_input_platform_poll() drains them with current DPR. */
 
 void nt_input_buffer_key(nt_key_t key, bool down);
-void nt_input_buffer_pointer(bool is_down, double raw_x, double raw_y, uint8_t buttons);
+void nt_input_buffer_mouse(double raw_x, double raw_y, uint8_t buttons);
+void nt_input_buffer_mouse_leave(void);
 void nt_input_buffer_wheel(float dx, float dy);
 void nt_input_buffer_focus_lost(void);
 

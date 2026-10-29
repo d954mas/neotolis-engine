@@ -5,7 +5,6 @@
 #include "core/nt_assert.h"
 #include "devapi/nt_devapi_input_internal.h" /* the input scheduler reuse surface ui delegates to. */
 #include "devapi/nt_devapi_internal.h"
-#include "input/nt_input.h"   /* nt_inject_kind_t + the mouse id; ui delegates to the input scheduler. */
 #include "ui/nt_ui.h"         /* nt_ui_probe_collect + the POD node + nt_ui_id (resolve via the probe). */
 #include "window/nt_window.h" /* g_nt_window: the one coordinate-space metadata source (like core view). */
 
@@ -284,8 +283,8 @@ static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t
     return nt_devapi_fail(err, "ui: target must be a string id or an {x,y} object");
 }
 
-/* ui.click: resolve id|{x,y} -> center -> DOWN@0 + UP@hold via the SAME inject path as input.click.
-   Fire-and-forget. Whole-or-nothing preflight: reserve both entries or reject (no DOWN without its UP). */
+/* ui.click: resolve id|{x,y} -> center -> mouse press@0 + release@hold via the SAME inject path as input.click.
+   Fire-and-forget. Whole-or-nothing preflight: reserve both entries or reject (no press without its release). */
 static bool cmd_ui_click(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     nt_ui_context_t *ctx = resolve_ctx(params, err);
     if (ctx == NULL) {
@@ -306,8 +305,8 @@ static bool cmd_ui_click(const cJSON *params, cJSON *result, nt_devapi_error *er
     if (!nt_devapi_input_sched_can_reserve(2U)) {
         return nt_devapi_fail(err, "ui.click: inject schedule overflow");
     }
-    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_DOWN, NT_INPUT_MOUSE_ID, cx, cy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, 0);
-    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_UP, NT_INPUT_MOUSE_ID, cx, cy, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, hold);
+    nt_devapi_input_sched_mouse(cx, cy, 1U, 0);
+    nt_devapi_input_sched_mouse_buttons(0, hold);
     devapi_add_number(result, "queued", 2.0);
     return true;
 }
@@ -337,15 +336,15 @@ static bool cmd_ui_scroll(const cJSON *params, cJSON *result, nt_devapi_error *e
     if (!nt_devapi_input_sched_can_reserve(2U)) {
         return nt_devapi_fail(err, "ui.scroll: inject schedule overflow");
     }
-    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, NT_INPUT_MOUSE_ID, cx, cy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 0, 0);
+    nt_devapi_input_sched_mouse(cx, cy, 0, 0);
     nt_devapi_input_sched_wheel(dx, dy, 0);
     devapi_add_number(result, "queued", 2.0);
     return true;
 }
 
-/* ui.drag: resolve `from` AND `to` (id|{x,y}) -> DOWN@from + `frames` explicit interpolated MOVE
-   points (the handler expands them — NO engine-side interpolation owner) + UP@to. frames CAPPED
-   (DoS guard); whole-or-nothing preflight reserves DOWN + frames moves + UP up front. */
+/* ui.drag: resolve `from` AND `to` (id|{x,y}) -> mouse press@from + `frames` explicit interpolated MOVE
+   points (the handler expands them — NO engine-side interpolation owner) + release@to. frames CAPPED
+   (DoS guard); whole-or-nothing preflight reserves press + frames moves + release up front. */
 static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     nt_ui_context_t *ctx = resolve_ctx(params, err);
     if (ctx == NULL) {
@@ -358,8 +357,8 @@ static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err
     if (!resolve_target(params, "from", ctx, &fx, &fy, err) || !resolve_target(params, "to", ctx, &tx, &ty, err)) {
         return false;
     }
-    /* A 0-frame drag emits no MOVE, so the inject UP (which releases at the pointer's CURRENT position,
-       not at `to`) would land back at `from`; frames >= 1 gives the instant from->to->up drag. */
+    /* A 0-frame drag emits no MOVE, so the release (at the mouse's CURRENT position, not at `to`) would
+       land back at `from`; frames >= 1 gives the instant from->to->release drag. */
     const char *bad_frames = "ui.drag: frames must be an integer in " UI_DRAG_FRAMES_RANGE;
     uint16_t frames = 8U; /* default: a short multi-frame drag. */
     const cJSON *frj = cJSON_GetObjectItemCaseSensitive(params, "frames");
@@ -369,21 +368,20 @@ static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err
     if (frames == 0U) {
         return nt_devapi_fail(err, bad_frames);
     }
-    /* DOWN@0 + `frames` interpolated MOVEs (one per frame, t=1..frames) + UP@frames. */
+    /* press@0 + `frames` interpolated MOVEs (one per frame, t=1..frames) + release@frames. */
     uint32_t total = (uint32_t)frames + 2U;
     if (!nt_devapi_input_sched_can_reserve(total)) {
         return nt_devapi_fail(err, "ui.drag: inject schedule overflow");
     }
-    const uint32_t id = NT_INPUT_MOUSE_ID;
-    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_DOWN, id, fx, fy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, 0);
+    nt_devapi_input_sched_mouse(fx, fy, 1U, 0);
     for (uint32_t i = 1; i <= frames; i++) { /* uint32: the cap may be -D'd up to UINT16_MAX */
         /* In double: to - from cannot overflow and keeps its precision; the last MOVE lands exactly on to. */
         double t = (double)i / (double)frames; /* frames >= 1 enforced above, so the divisor is never 0. */
         float mx = i == frames ? tx : (float)((double)fx + (((double)tx - (double)fx) * t));
         float my = i == frames ? ty : (float)((double)fy + (((double)ty - (double)fy) * t));
-        nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, id, mx, my, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, (uint16_t)i);
+        nt_devapi_input_sched_mouse(mx, my, 1U, (uint16_t)i);
     }
-    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_UP, id, tx, ty, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, frames);
+    nt_devapi_input_sched_mouse_buttons(0, frames);
     devapi_add_number(result, "queued", (double)total);
     return true;
 }
@@ -419,7 +417,7 @@ static const nt_devapi_command k_ui_cmds[] = {
     },
     {
         .method = "ui.click",
-        .summary = "resolve a developer string id (or Y-up {x,y}, origin bottom-left — same space as ui.tree bounds) -> center -> synthetic pointer down@0 + up@hold (fire-and-forget; advance a frame "
+        .summary = "resolve a developer string id (or Y-up {x,y}, origin bottom-left — same space as ui.tree bounds) -> center -> mouse press@0 + release@hold (fire-and-forget; advance a frame "
                    "to apply)",
         .params_shape = "{id:string|{x,y}, hold?:number, ctx?:string}",
         .result_shape = "{queued:number}",
@@ -434,8 +432,9 @@ static const nt_devapi_command k_ui_cmds[] = {
     },
     {
         .method = "ui.drag",
-        .summary = "resolve from/to (id|Y-up {x,y}, origin bottom-left) -> down@from + frames interpolated moves + up@to (explicit points, NO interpolation owner; frames in " UI_DRAG_FRAMES_RANGE
-                   ", a 0-frame drag cannot reach `to`; fire-and-forget)",
+        .summary =
+            "resolve from/to (id|Y-up {x,y}, origin bottom-left) -> mouse press@from + frames interpolated moves + release@to (explicit points, NO interpolation owner; frames in " UI_DRAG_FRAMES_RANGE
+            ", a 0-frame drag cannot reach `to`; fire-and-forget)",
         .params_shape = "{from:string|{x,y}, to:string|{x,y}, frames?:number (>=1), ctx?:string}",
         .result_shape = "{queued:number}",
         .fn = cmd_ui_drag,

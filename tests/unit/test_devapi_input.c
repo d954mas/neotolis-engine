@@ -154,7 +154,7 @@ static void test_input_set_player_enabled_ok(void) {
 
 /* A real mouse holds slot 0 (no gate): the bot's click drives that mouse, so it lands on pointers[0]. */
 static void test_input_click_lands_on_real_mouse_slot(void) {
-    nt_input_pointer_move(NT_INPUT_MOUSE_ID, 1.0F, 1.0F, 1.0F, NT_POINTER_MOUSE, 0);
+    nt_input_mouse_move(1.0F, 1.0F, 0);
     nt_input_poll();
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.click\",\"params\":{\"x\":5,\"y\":5}}")));
     advance();
@@ -168,7 +168,7 @@ static void test_input_click_lands_on_real_mouse_slot(void) {
 static void test_input_move_keeps_mouse_type(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.move\",\"params\":{\"x\":10,\"y\":10,\"type\":\"touch\"}}")));
     advance();
-    nt_input_pointer_down(NT_INPUT_MOUSE_ID, 10.0F, 10.0F, 1.0F, NT_POINTER_MOUSE, 1);
+    nt_input_mouse_move(10.0F, 10.0F, 1);
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
 }
 
@@ -212,6 +212,8 @@ static void test_input_pointer_bad_action_bad_params(void) { assert_bad_params(n
 
 static void test_input_pointer_bad_type_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"input.pointer\",\"params\":{\"action\":\"move\",\"id\":0,\"x\":1,\"y\":2,\"type\":\"finger\"}}"));
+    /* the mouse has its own commands: input.pointer is touch/pen only */
+    assert_bad_params(nt_devapi_submit("{\"method\":\"input.pointer\",\"params\":{\"action\":\"down\",\"id\":0,\"x\":1,\"y\":2,\"type\":\"mouse\"}}"));
 }
 
 static void test_input_text_bad_type_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":42}}")); }
@@ -431,12 +433,16 @@ static void test_reset_drops_schedule_keeps_applied_input(void) {
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
 }
 
-/* A client that leaves gated hands the player back. */
+/* A client that leaves gated hands the player back, and the mouse it moved leaves with it. */
 static void test_reset_reenables_player(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":false}}")));
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.move\",\"params\":{\"x\":10,\"y\":10}}")));
+    advance();
     nt_devapi_run_reset_hooks();
     nt_input_set_key(NT_KEY_B, true);
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_B));
+    nt_input_poll();
+    TEST_ASSERT_FALSE(g_nt_input.pointers[0].active);
 }
 
 /* input.key{hold:3} = down@0 + up@3: held across exactly 3 advances, released on the 4th. */
@@ -496,7 +502,7 @@ static void test_sched_move_applies_on_advance(void) {
     advance();
     nt_pointer_t *slot = NULL;
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
-        if (g_nt_input.pointers[i].active && g_nt_input.pointers[i].id == NT_INPUT_MOUSE_ID) {
+        if (i == 0 && g_nt_input.pointers[i].active) {
             slot = &g_nt_input.pointers[i];
             break;
         }
@@ -516,7 +522,7 @@ static void test_input_yup_flip_lands_at_device_y(void) {
     advance(); /* down@0 applies: the slot is created + pressed at the flipped device position. */
     nt_pointer_t *slot = NULL;
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
-        if (g_nt_input.pointers[i].active && g_nt_input.pointers[i].id == NT_INPUT_MOUSE_ID) {
+        if (i == 0 && g_nt_input.pointers[i].active) {
             slot = &g_nt_input.pointers[i];
             break;
         }
@@ -536,7 +542,7 @@ static void test_sched_wheel_applies_on_advance(void) {
     advance(); /* move creates the mouse slot, wheel accumulates on it (same advancing tick). */
     nt_pointer_t *slot = NULL;
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
-        if (g_nt_input.pointers[i].active && g_nt_input.pointers[i].id == NT_INPUT_MOUSE_ID) {
+        if (i == 0 && g_nt_input.pointers[i].active) {
             slot = &g_nt_input.pointers[i];
             break;
         }
@@ -554,7 +560,7 @@ static void test_sched_wheel_with_coords_scrolls_at_xy(void) {
     advance();
     nt_pointer_t *slot = NULL;
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
-        if (g_nt_input.pointers[i].active && g_nt_input.pointers[i].id == NT_INPUT_MOUSE_ID) {
+        if (i == 0 && g_nt_input.pointers[i].active) {
             slot = &g_nt_input.pointers[i];
             break;
         }
@@ -575,7 +581,7 @@ static void test_sched_wheel_no_coords_applies_at_moved_position(void) {
     advance(); /* move creates the slot @ (60,70), wheel accumulates on it in stage order */
     nt_pointer_t *slot = NULL;
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
-        if (g_nt_input.pointers[i].active && g_nt_input.pointers[i].id == NT_INPUT_MOUSE_ID) {
+        if (i == 0 && g_nt_input.pointers[i].active) {
             slot = &g_nt_input.pointers[i];
             break;
         }
@@ -750,6 +756,7 @@ static void test_input_state_copy_survives_client_reset(void) {
 
 /* input.button {buttons:2} on the mouse -> after an advance the RIGHT button is down. */
 static void test_input_button_right_presses_right(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.move\",\"params\":{\"x\":10,\"y\":10}}")));
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.button\",\"params\":{\"buttons\":2}}")));
     advance();
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_RIGHT));
@@ -757,9 +764,9 @@ static void test_input_button_right_presses_right(void) {
     TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
 }
 
-/* Second input.button on the now-active slot exercises the MOVE branch (slot exists) and
-   updates the mask: 4 -> MIDDLE down, RIGHT released (mask cleared its bit). */
+/* A second input.button updates the mask: 4 -> MIDDLE down, RIGHT released (mask cleared its bit). */
 static void test_input_button_move_branch_updates_mask(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.move\",\"params\":{\"x\":10,\"y\":10}}")));
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.button\",\"params\":{\"buttons\":2}}")));
     advance();
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_RIGHT));
@@ -780,7 +787,7 @@ static void test_input_button_applies_at_pending_move_position(void) {
     advance(); /* move (creates slot @100,100) then buttons applied at that slot position, in order */
     nt_pointer_t *slot = NULL;
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
-        if (g_nt_input.pointers[i].active && g_nt_input.pointers[i].id == NT_INPUT_MOUSE_ID) {
+        if (i == 0 && g_nt_input.pointers[i].active) {
             slot = &g_nt_input.pointers[i];
             break;
         }

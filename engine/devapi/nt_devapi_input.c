@@ -37,9 +37,9 @@ typedef struct {
             uint32_t id;
         } pointer_up;
         struct {
-            uint32_t id;
+            float x, y;
             uint8_t buttons_mask;
-        } buttons; /* set mask at the slot's apply-time position */
+        } mouse; /* move; buttons uses only the mask, at the mouse's apply-time position */
         struct {
             float dx, dy;
         } wheel;
@@ -71,7 +71,7 @@ static void sched_key(nt_key_t key, bool down, uint16_t at_frame) {
     e->u.key.down = down;
 }
 
-void nt_devapi_input_sched_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask, uint16_t at_frame) {
+static void sched_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask, uint16_t at_frame) {
     sched_entry_t *e = sched_reserve(1);
     e->frames_remaining = at_frame;
     e->kind = (uint8_t)kind;
@@ -87,13 +87,21 @@ void nt_devapi_input_sched_pointer(nt_inject_kind_t kind, uint32_t id, float x, 
     }
 }
 
-/* Mask applies at the slot's apply-time position (schedule order), so a queued move is honored. */
-static void sched_buttons(uint32_t id, uint8_t buttons_mask, uint16_t at_frame) {
+void nt_devapi_input_sched_mouse(float x, float y, uint8_t buttons_mask, uint16_t at_frame) {
     sched_entry_t *e = sched_reserve(1);
     e->frames_remaining = at_frame;
-    e->kind = NT_INJECT_POINTER_BUTTONS;
-    e->u.buttons.id = id;
-    e->u.buttons.buttons_mask = buttons_mask;
+    e->kind = NT_INJECT_MOUSE_MOVE;
+    e->u.mouse.x = x;
+    e->u.mouse.y = y;
+    e->u.mouse.buttons_mask = buttons_mask;
+}
+
+/* Mask applies at the mouse's apply-time position (schedule order), so a queued move is honored. */
+void nt_devapi_input_sched_mouse_buttons(uint8_t buttons_mask, uint16_t at_frame) {
+    sched_entry_t *e = sched_reserve(1);
+    e->frames_remaining = at_frame;
+    e->kind = NT_INJECT_MOUSE_BUTTONS;
+    e->u.mouse.buttons_mask = buttons_mask;
 }
 
 void nt_devapi_input_sched_wheel(float dx, float dy, uint16_t at_frame) {
@@ -132,13 +140,15 @@ static bool sched_release_one(const sched_entry_t *e) {
     switch ((nt_inject_kind_t)e->kind) {
     case NT_INJECT_KEY:
         return nt_input_inject_key((nt_key_t)e->u.key.key, e->u.key.down);
+    case NT_INJECT_MOUSE_MOVE:
+        return nt_input_inject_mouse(e->u.mouse.x, e->u.mouse.y, e->u.mouse.buttons_mask);
+    case NT_INJECT_MOUSE_BUTTONS:
+        return nt_input_inject_mouse_buttons(e->u.mouse.buttons_mask);
     case NT_INJECT_POINTER_DOWN:
     case NT_INJECT_POINTER_MOVE:
         return nt_input_inject_pointer((nt_inject_kind_t)e->kind, e->u.pointer.id, e->u.pointer.x, e->u.pointer.y, e->u.pointer.pressure, e->u.pointer.type, e->u.pointer.buttons_mask);
     case NT_INJECT_POINTER_UP:
         return nt_input_inject_pointer(NT_INJECT_POINTER_UP, e->u.pointer_up.id, 0.0F, 0.0F, 0.0F, 0, 0);
-    case NT_INJECT_POINTER_BUTTONS:
-        return nt_input_inject_buttons(e->u.buttons.id, e->u.buttons.buttons_mask);
     case NT_INJECT_WHEEL:
         return nt_input_inject_wheel(e->u.wheel.dx, e->u.wheel.dy);
     case NT_INJECT_CHAR: {
@@ -215,10 +225,12 @@ static void nt_devapi_input_update(void) {
 }
 
 /* Client reset: drop pending schedule entries only. No clock re-seed: a native reset runs mid-tick, after frame++. */
-/* No game sets the gate, so it is the bot's too: a bot that leaves gated never locks the player out. */
+/* No game sets the gate, so it is the bot's too: a bot that leaves gated never locks the player out.
+   The mouse the bot moved leaves with it; a real mouse comes back on its next move. */
 static void nt_devapi_input_reset(void) {
     s_sched_count = 0;
     nt_input_set_player_enabled(true);
+    nt_input_mouse_leave();
 }
 // #endregion
 
@@ -244,18 +256,16 @@ static bool nt_input_key_from_name(const char *name, nt_key_t *out) {
     return false;
 }
 
-/* Map an optional pointer "type" string -> nt_pointer_type_t. Default mouse; unknown -> false. */
-static bool pointer_type_from_name(const cJSON *t, uint8_t *out) {
+/* Map an optional contact "type" string -> nt_pointer_type_t. Default touch; the mouse has its own commands. */
+static bool contact_type_from_name(const cJSON *t, uint8_t *out) {
     if (t == NULL) {
-        *out = (uint8_t)NT_POINTER_MOUSE;
+        *out = (uint8_t)NT_POINTER_TOUCH;
         return true;
     }
     if (!cJSON_IsString(t) || t->valuestring == NULL) {
         return false;
     }
-    if (strcmp(t->valuestring, "mouse") == 0) {
-        *out = (uint8_t)NT_POINTER_MOUSE;
-    } else if (strcmp(t->valuestring, "touch") == 0) {
+    if (strcmp(t->valuestring, "touch") == 0) {
         *out = (uint8_t)NT_POINTER_TOUCH;
     } else if (strcmp(t->valuestring, "pen") == 0) {
         *out = (uint8_t)NT_POINTER_PEN;
@@ -317,7 +327,7 @@ static bool cmd_input_key(const cJSON *params, cJSON *result, nt_devapi_error *e
     return true;
 }
 
-/* The pointer primitive: action -> nt_inject_kind_t, type string -> nt_pointer_type_t. */
+/* The contact primitive: action -> nt_inject_kind_t, type string -> nt_pointer_type_t. */
 static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     const cJSON *a = cJSON_GetObjectItemCaseSensitive(params, "action");
     if (!cJSON_IsString(a) || a->valuestring == NULL) {
@@ -350,8 +360,8 @@ static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_erro
         y = flip_y_up_to_device(y);
     }
     uint8_t type;
-    if (!pointer_type_from_name(cJSON_GetObjectItemCaseSensitive(params, "type"), &type)) {
-        return nt_devapi_fail(err, "input.pointer: type must be 'mouse', 'touch' or 'pen'");
+    if (!contact_type_from_name(cJSON_GetObjectItemCaseSensitive(params, "type"), &type)) {
+        return nt_devapi_fail(err, "input.pointer: type must be 'touch' or 'pen'");
     }
     uint8_t buttons = 0;
     const cJSON *bj = cJSON_GetObjectItemCaseSensitive(params, "buttons");
@@ -363,7 +373,7 @@ static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_erro
     if (!nt_devapi_input_sched_can_reserve(1U)) {
         return nt_devapi_fail(err, "input.pointer: inject schedule overflow");
     }
-    nt_devapi_input_sched_pointer(kind, id, x, y, 1.0F, type, buttons, 0);
+    sched_pointer(kind, id, x, y, 1.0F, type, buttons, 0);
     devapi_add_number(result, "queued", 1.0);
     return true;
 }
@@ -381,12 +391,12 @@ static bool cmd_input_move(const cJSON *params, cJSON *result, nt_devapi_error *
     if (!nt_devapi_input_sched_can_reserve(1U)) {
         return nt_devapi_fail(err, "input.move: inject schedule overflow");
     }
-    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, NT_INPUT_MOUSE_ID, x, y, 1.0F, (uint8_t)NT_POINTER_MOUSE, 0, 0);
+    nt_devapi_input_sched_mouse(x, y, 0, 0);
     devapi_add_number(result, "queued", 1.0);
     return true;
 }
 
-/* down@0 + up@hold on the mouse; hold default 1 (1-frame click), 0 = same-frame. */
+/* press@0 + release@hold on the mouse; hold default 1 (1-frame click), 0 = same-frame. The mouse stays, like the real one. */
 static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     const cJSON *xj = cJSON_GetObjectItemCaseSensitive(params, "x");
     const cJSON *yj = cJSON_GetObjectItemCaseSensitive(params, "y");
@@ -413,13 +423,13 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
     if (!nt_devapi_input_sched_can_reserve(2U)) {
         return nt_devapi_fail(err, "input.click: inject schedule overflow");
     }
-    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_DOWN, NT_INPUT_MOUSE_ID, x, y, 1.0F, (uint8_t)NT_POINTER_MOUSE, buttons, 0);
-    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_UP, NT_INPUT_MOUSE_ID, x, y, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, hold);
+    nt_devapi_input_sched_mouse(x, y, buttons, 0);
+    nt_devapi_input_sched_mouse_buttons(0, hold);
     devapi_add_number(result, "queued", 2.0);
     return true;
 }
 
-/* Without x/y the wheel applies at the slot's apply-time position (no submit-time g_nt_input read). */
+/* Without x/y the wheel applies at the mouse's apply-time position (no submit-time g_nt_input read). */
 static bool cmd_input_wheel(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     /* dx/dy are notch deltas (content-scroll sign, see nt_pointer_t.wheel_dy), NOT spatial coords —
        the Y-up flip applies only to the positioned (x,y) below, never to the wheel delta. */
@@ -446,7 +456,7 @@ static bool cmd_input_wheel(const cJSON *params, cJSON *result, nt_devapi_error 
         if (!nt_devapi_input_sched_can_reserve(2U)) {
             return nt_devapi_fail(err, "input.wheel: inject schedule overflow");
         }
-        nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, NT_INPUT_MOUSE_ID, x, y, 1.0F, (uint8_t)NT_POINTER_MOUSE, 0, 0);
+        nt_devapi_input_sched_mouse(x, y, 0, 0);
     } else if (!nt_devapi_input_sched_can_reserve(1U)) {
         return nt_devapi_fail(err, "input.wheel: inject schedule overflow");
     }
@@ -465,8 +475,8 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
         return false;
     }
     uint8_t type;
-    if (!pointer_type_from_name(cJSON_GetObjectItemCaseSensitive(params, "type"), &type)) {
-        return nt_devapi_fail(err, "input.gesture: type must be 'mouse', 'touch' or 'pen'");
+    if (!contact_type_from_name(cJSON_GetObjectItemCaseSensitive(params, "type"), &type)) {
+        return nt_devapi_fail(err, "input.gesture: type must be 'touch' or 'pen'");
     }
     const cJSON *points = cJSON_GetObjectItemCaseSensitive(params, "points");
     if (!cJSON_IsArray(points)) {
@@ -510,7 +520,7 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
     const cJSON *first = cJSON_GetArrayItem(points, 0);
     float fx = (float)cJSON_GetArrayItem(first, 0)->valuedouble;
     float fy = flip_y_up_to_device((float)cJSON_GetArrayItem(first, 1)->valuedouble); /* each point's Y is Y-up. */
-    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_DOWN, id, fx, fy, 1.0F, type, 1U, 0);
+    sched_pointer(NT_INJECT_POINTER_DOWN, id, fx, fy, 1.0F, type, 1U, 0);
     int idx = 0;
     cJSON_ArrayForEach(p, points) {
         if (idx == 0) {
@@ -522,26 +532,25 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
         /* Compute the offset in int64 so the narrowing source is self-evidently within the
            already-validated [0, UINT16_MAX] span (idx <= npoints-1 => at <= last_offset). */
         uint16_t at = (uint16_t)((int64_t)idx * (int64_t)stride);
-        nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, id, mx, my, 1.0F, type, 1U, at);
+        sched_pointer(NT_INJECT_POINTER_MOVE, id, mx, my, 1.0F, type, 1U, at);
         idx++;
     }
-    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_UP, id, 0.0F, 0.0F, 0.0F, type, 0, (uint16_t)last_offset);
+    sched_pointer(NT_INJECT_POINTER_UP, id, 0.0F, 0.0F, 0.0F, type, 0, (uint16_t)last_offset);
     devapi_add_number(result, "queued", (double)npoints + 1.0);
     return true;
 }
 
-/* mouse-button mask {1,2,4}: inject a pointer event carrying the button mask on the mouse. */
+/* mouse-button mask {1,2,4} on the mouse. */
 static bool cmd_input_button(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     const cJSON *bj = cJSON_GetObjectItemCaseSensitive(params, "buttons");
     uint8_t buttons;
     if (!parse_button_mask(bj, "input.button: buttons must be an integer mask in [0, 7]", &buttons, err)) {
         return false;
     }
-    /* Mask applies at the slot's apply-time position (schedule order), so a queued move is honored. */
     if (!nt_devapi_input_sched_can_reserve(1U)) {
         return nt_devapi_fail(err, "input.button: inject schedule overflow");
     }
-    sched_buttons(NT_INPUT_MOUSE_ID, buttons, 0);
+    nt_devapi_input_sched_mouse_buttons(buttons, 0);
     devapi_add_bool(result, "ok", true);
     return true;
 }
@@ -670,7 +679,8 @@ static const nt_devapi_command k_input_cmds[] = {
     },
     {
         .method = "input.pointer",
-        .summary = "the pointer primitive: action down/move/up on a given id (default mouse type); x/y are Y-up (origin bottom-left), framebuffer px — same convention as ui.*",
+        .summary =
+            "a touch/pen contact: action down/move/up on a given id (default touch; the mouse has its own commands); x/y are Y-up (origin bottom-left), framebuffer px — same convention as ui.*",
         .params_shape = "{action:string, id:number, x?:number, y?:number, type?:string, buttons?:number}, origin:bottom-left, y_axis:up, space:framebuffer-px",
         .result_shape = "{queued:number}",
         .fn = cmd_input_pointer,
@@ -684,14 +694,14 @@ static const nt_devapi_command k_input_cmds[] = {
     },
     {
         .method = "input.click",
-        .summary = "sugar: pointer down@0 + up@hold (2 entries) on the mouse; hold default 1 frame, 0 = same-frame; x/y are Y-up (origin bottom-left), framebuffer px",
+        .summary = "sugar: mouse move with the button mask @0 + mask 0 @hold (2 entries; the mouse stays); hold default 1 frame, 0 = same-frame; x/y are Y-up (origin bottom-left), framebuffer px",
         .params_shape = "{x:number, y:number, button?:number, hold?:number}, origin:bottom-left, y_axis:up, space:framebuffer-px",
         .result_shape = "{queued:number}",
         .fn = cmd_input_click,
     },
     {
         .method = "input.wheel",
-        .summary = "scroll the mouse slot (notches); with x/y scrolls AT (x,y), else at the slot's apply-time position (no slot -> no-op); x/y are Y-up (origin bottom-left), framebuffer px; "
+        .summary = "scroll the mouse (notches); with x/y scrolls AT (x,y), else at its apply-time position (mouse not over the window -> no-op); x/y are Y-up (origin bottom-left), framebuffer px; "
                    "dx/dy are notch deltas (not coords)",
         .params_shape = "{dx?:number, dy?:number, x?:number, y?:number}, origin:bottom-left, y_axis:up, space:framebuffer-px",
         .result_shape = "{ok:bool}",

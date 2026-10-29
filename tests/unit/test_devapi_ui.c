@@ -210,7 +210,7 @@ static void advance(void) {
 /* The mouse slot after a release, or NULL if it never landed. */
 static nt_pointer_t *inject_slot(void) {
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
-        if (g_nt_input.pointers[i].active && g_nt_input.pointers[i].id == NT_INPUT_MOUSE_ID) {
+        if (i == 0 && g_nt_input.pointers[i].active) {
             return &g_nt_input.pointers[i];
         }
     }

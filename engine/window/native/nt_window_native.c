@@ -102,7 +102,14 @@ static void glfw_char_callback(GLFWwindow *window, unsigned int codepoint) {
 
 static void glfw_cursor_pos_callback(GLFWwindow *window, double xpos, double ypos) {
     (void)window;
-    nt_input_buffer_pointer(false, xpos, ypos, s_cached_buttons);
+    nt_input_buffer_mouse(xpos, ypos, s_cached_buttons);
+}
+
+static void glfw_cursor_enter_callback(GLFWwindow *window, int entered) {
+    (void)window;
+    if (!entered) {
+        nt_input_buffer_mouse_leave(); /* the first cursor move after an enter brings the mouse back */
+    }
 }
 
 static void glfw_mouse_button_callback(GLFWwindow *window, int button, int action, int mods) {
@@ -134,16 +141,22 @@ static void glfw_mouse_button_callback(GLFWwindow *window, int button, int actio
     double ypos = 0.0;
     glfwGetCursorPos(s_glfw_window, &xpos, &ypos);
 
-    nt_input_buffer_pointer(action == GLFW_PRESS, xpos, ypos, s_cached_buttons);
+    nt_input_buffer_mouse(xpos, ypos, s_cached_buttons);
+    if (s_cached_buttons == 0 && !glfwGetWindowAttrib(s_glfw_window, GLFW_HOVERED)) {
+        nt_input_buffer_mouse_leave(); /* a drag released outside: the leave was ignored while held */
+    }
 }
 
 static void glfw_scroll_callback(GLFWwindow *window, double xoffset, double yoffset) {
     (void)window;
-    /* The wheel lands on the mouse slot, which may be gone (a bot's release): a move restores it. */
-    double xpos = 0.0;
-    double ypos = 0.0;
-    glfwGetCursorPos(s_glfw_window, &xpos, &ypos);
-    nt_input_buffer_pointer(false, xpos, ypos, s_cached_buttons);
+    /* The wheel lands on the mouse: a move to the cursor first, since a bot may have left the mouse elsewhere
+       and GLFW reports no position before the first cursor move. A wheel from outside brings no mouse in. */
+    if (glfwGetWindowAttrib(s_glfw_window, GLFW_HOVERED)) {
+        double xpos = 0.0;
+        double ypos = 0.0;
+        glfwGetCursorPos(s_glfw_window, &xpos, &ypos);
+        nt_input_buffer_mouse(xpos, ypos, s_cached_buttons);
+    }
     /* GLFW yoffset is ±1.0 per notch with OPPOSITE Y sign to the DOM (GLFW: up=+, DOM deltaY: down=+).
      * Web is canonical, so negate yoffset to match. X already agrees (right=+ on both). */
     nt_input_buffer_wheel((float)xoffset, -(float)yoffset);
@@ -233,6 +246,7 @@ void nt_window_init(void) {
     glfwSetKeyCallback(s_glfw_window, glfw_key_callback);
     glfwSetCharCallback(s_glfw_window, glfw_char_callback);
     glfwSetCursorPosCallback(s_glfw_window, glfw_cursor_pos_callback);
+    glfwSetCursorEnterCallback(s_glfw_window, glfw_cursor_enter_callback);
     glfwSetMouseButtonCallback(s_glfw_window, glfw_mouse_button_callback);
     glfwSetScrollCallback(s_glfw_window, glfw_scroll_callback);
     glfwSetWindowFocusCallback(s_glfw_window, glfw_focus_callback);
