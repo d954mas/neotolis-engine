@@ -131,8 +131,7 @@ static void test_the_step_frame_is_the_one_advanced_frame(void) {
     frame(false);
     frame_with(true, "step");
     const uint32_t sim = g_nt_app.frame;
-    frame(false);
-    frame(false); /* stores the idle frame after the step */
+    frame(false); /* the idle frame after the step; gfx.frames stores it */
     cJSON *root = submit("{\"method\":\"gfx.frames\"}");
     const cJSON *frames = cJSON_GetObjectItemCaseSensitive(result_of(root), "frames");
     TEST_ASSERT_EQUAL_INT(4, cJSON_GetArraySize(frames));
@@ -165,7 +164,7 @@ static void test_recording_while_paused_stores_no_advanced_frame(void) {
     frame(false);
     cJSON *root = submit("{\"method\":\"gfx.frames\"}");
     const cJSON *frames = cJSON_GetObjectItemCaseSensitive(result_of(root), "frames");
-    TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(frames));
+    TEST_ASSERT_EQUAL_INT(3, cJSON_GetArraySize(frames));
     const cJSON *f = NULL;
     cJSON_ArrayForEach(f, frames) {
         TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(f, "advanced")));
@@ -234,21 +233,24 @@ static void test_recorded_frames_stay_gapless_over_many_wraps(void) {
 
 /* ---- on / off / reset ---- */
 
-/* Off between frames, as a client does after it sees a bug: the frame just ended is kept, none after it,
-   and the list waits until it is stored. */
+/* Off between frames, as a client does after it sees a bug: the frame just ended is listed and read at
+   once, and no frame after it is stored. */
 static void test_off_between_frames_stores_the_frame_just_ended(void) {
     record(true);
     frame(false);
     frame(false);
     const uint64_t ended = g_nt_gfx.counters.frame_sequence;
     record(false);
-    expect_error("{\"method\":\"gfx.frames\"}", "frame_not_ready");
-    expect_error("{\"method\":\"gfx.read\"}", "frame_not_ready");
+    cJSON *root = submit("{\"method\":\"gfx.frames\"}");
+    const cJSON *frames = cJSON_GetObjectItemCaseSensitive(result_of(root), "frames");
+    TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(frames));
+    TEST_ASSERT_EQUAL_UINT64(ended, (uint64_t)number(cJSON_GetArrayItem(frames, 1), "sequence"));
+    cJSON_Delete(root);
+    TEST_ASSERT_EQUAL_UINT64(ended, read_sequence("{\"method\":\"gfx.read\"}"));
     frame(false);
     frame(false);
     TEST_ASSERT_EQUAL_UINT32(2, s_ring.count);
     TEST_ASSERT_EQUAL_UINT64(ended, last_stored());
-    TEST_ASSERT_EQUAL_UINT64(ended, read_sequence("{\"method\":\"gfx.read\"}"));
 }
 
 /* Off from game code inside a recorded frame: that frame is stored, none after it. */
@@ -266,16 +268,15 @@ static void test_off_from_game_code_stores_the_current_frame(void) {
     TEST_ASSERT_EQUAL_UINT64(current, last_stored());
 }
 
-/* After off the list waits for the frame in flight, so every listed frame stays readable. */
-static void test_frames_after_off_waits_for_the_frame_in_flight(void) {
+/* The list after off already holds the frame just ended, so every listed frame stays readable. */
+static void test_frames_after_off_stay_readable(void) {
     record(true);
     for (int i = 0; i < 6; i++) {
         frame(false); /* fills the 4-frame ring */
     }
     record(false);
-    expect_error("{\"method\":\"gfx.frames\"}", "frame_not_ready");
-    frame(false); /* stores the frame in flight, evicting the oldest */
-    cJSON *root = submit("{\"method\":\"gfx.frames\"}");
+    cJSON *root = submit("{\"method\":\"gfx.frames\"}"); /* stores the frame just ended, evicting the oldest */
+    frame(false);
     const cJSON *f = NULL;
     cJSON_ArrayForEach(f, cJSON_GetObjectItemCaseSensitive(result_of(root), "frames")) {
         bool marked = false;
@@ -357,19 +358,23 @@ static void test_commands_from_the_transport_poll_act_before_the_hook(void) {
     TEST_ASSERT_EQUAL_UINT64(ended, last_stored());
 }
 
-/* The host order is the contract: a skipped update, or an update after begin_frame, asserts. */
-static void test_a_skipped_or_late_update_asserts(void) {
+/* The host order is the contract: a skipped update asserts. */
+static void test_a_skipped_update_asserts(void) {
     record(true);
     frame(false);
     nt_gfx_begin_frame();
     nt_gfx_end_frame();
     NT_TEST_EXPECT_ASSERT(nt_devapi_update());
-    tearDown();
-    setUp();
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "once per frame"));
+}
+
+/* An update inside the requested frame, after its begin_frame, asserts. */
+static void test_an_update_after_begin_frame_asserts(void) {
     record(true);
     nt_devapi_update();
     nt_gfx_begin_frame();
     NT_TEST_EXPECT_ASSERT(nt_devapi_update());
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "between frames"));
 }
 
 /* Recording is game state: a client leaving does not change it. */
@@ -389,12 +394,13 @@ static void test_not_ready_and_unknown_frames(void) {
     record(true);
     expect_error("{\"method\":\"gfx.read\"}", "frame_not_ready");
     frame(false);
-    expect_error("{\"method\":\"gfx.read\"}", "frame_not_ready"); /* requested, not stored yet */
-    frame(false);
-    TEST_ASSERT_EQUAL_UINT64(last_stored(), read_sequence("{\"method\":\"gfx.read\"}"));
-    bool marked = false;
-    TEST_ASSERT_EQUAL_UINT64(0, read_by_sequence(g_nt_gfx.counters.frame_sequence, &marked)); /* the frame just ended */
+    TEST_ASSERT_EQUAL_UINT64(g_nt_gfx.counters.frame_sequence, read_sequence("{\"method\":\"gfx.read\"}")); /* the frame just ended */
+    char line[96];
+    (void)snprintf(line, sizeof(line), "{\"method\":\"gfx.read\",\"params\":{\"sequence\":%u}}", (unsigned)g_nt_gfx.counters.frame_sequence + 1U);
+    expect_error(line, "unknown_frame"); /* still to come */
     expect_error("{\"method\":\"gfx.read\",\"params\":{\"sequence\":1}}", "unknown_frame");
+    expect_error("{\"method\":\"gfx.read\",\"params\":{\"sequence\":4294967296}}", "unknown_frame");
+    expect_error("{\"method\":\"gfx.read\",\"params\":{\"sequence\":9007199254740992}}", "bad_params");
     expect_error("{\"method\":\"gfx.read\",\"params\":{\"sequence\":1.5}}", "bad_params");
     expect_error("{\"method\":\"gfx.read\",\"params\":{\"sequence\":-1}}", "bad_params");
     expect_error("{\"method\":\"gfx.record\",\"params\":{\"enabled\":1}}", "bad_params");
@@ -446,11 +452,12 @@ int main(void) {
     RUN_TEST(test_recorded_frames_stay_gapless_over_many_wraps);
     RUN_TEST(test_off_between_frames_stores_the_frame_just_ended);
     RUN_TEST(test_off_from_game_code_stores_the_current_frame);
-    RUN_TEST(test_frames_after_off_waits_for_the_frame_in_flight);
+    RUN_TEST(test_frames_after_off_stay_readable);
     RUN_TEST(test_off_on_off_in_one_batch_settles);
     RUN_TEST(test_on_records_from_the_next_frame);
     RUN_TEST(test_commands_from_the_transport_poll_act_before_the_hook);
-    RUN_TEST(test_a_skipped_or_late_update_asserts);
+    RUN_TEST(test_a_skipped_update_asserts);
+    RUN_TEST(test_an_update_after_begin_frame_asserts);
     RUN_TEST(test_a_client_reset_keeps_recording);
     RUN_TEST(test_not_ready_and_unknown_frames);
     RUN_TEST(test_reinit_zeroes_the_group);

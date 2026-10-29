@@ -312,7 +312,7 @@ const char *nt_gfx_gl_call_name(uint32_t call) {
 }
 
 void nt_gfx_capture_request(void) {
-    NT_ASSERT(g_nt_gfx_capture.capacity > 0);
+    NT_ASSERT(g_nt_gfx_capture.capacity > 0 && "capture_request: nt_gfx_desc_t.capture_capacity is 0");
     g_nt_gfx_capture.request_pending = true;
 }
 

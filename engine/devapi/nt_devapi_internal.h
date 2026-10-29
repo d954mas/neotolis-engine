@@ -26,6 +26,7 @@ void devapi_add_null(cJSON *obj, const char *key);
    (a blind cast of an out-of-range/NaN/Inf double to unsigned is UB). On violation they fail
    with bad_params and the given message, else write the parsed value to *out. */
 bool nt_devapi_parse_u32_param_exact(const cJSON *node, uint32_t max, nt_devapi_error *err, const char *message, uint32_t *out);
+bool nt_devapi_parse_u53_param_exact(const cJSON *node, nt_devapi_error *err, const char *message, uint64_t *out);
 bool nt_devapi_parse_u16_param_exact(const cJSON *node, uint16_t max, nt_devapi_error *err, const char *message, uint16_t *out);
 /* A bot float: a number whose float form is finite (a finite double past FLT_MAX would narrow to inf
    and poison hit-tests / deltas). Fails with bad_params and message. */

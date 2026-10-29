@@ -177,6 +177,15 @@ bool nt_devapi_parse_u32_param_exact(const cJSON *node, uint32_t max, nt_devapi_
     return true;
 }
 
+bool nt_devapi_parse_u53_param_exact(const cJSON *node, nt_devapi_error *err, const char *message, uint64_t *out) {
+    double d = 0.0;
+    if (!parse_number_exact(node, 9007199254740991.0, err, message, &d)) { /* 2^53 - 1: every integer below is exact in a JSON double */
+        return false;
+    }
+    *out = (uint64_t)d;
+    return true;
+}
+
 bool nt_devapi_parse_u16_param_exact(const cJSON *node, uint16_t max, nt_devapi_error *err, const char *message, uint16_t *out) {
     double d = 0.0;
     if (!parse_number_exact(node, (double)max, err, message, &d)) {

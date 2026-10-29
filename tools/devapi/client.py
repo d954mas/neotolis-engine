@@ -253,14 +253,14 @@ class DevApiClient:
     def gfx_frames(self) -> Dict[str, Any]:
         """List the stored frames, oldest first. Result: {recording, frames:[{sequence,sim_frame,advanced,records,overflow}]}.
 
-        After off the frame in flight is still stored, so frame_not_ready is retried until it is.
+        The list ends at the frame just ended; after off it no longer changes.
         """
-        return self._result_when_ready("gfx.frames", {})
+        return self.result("gfx.frames", {})
 
     def gfx_read(self, sequence: Optional[int] = None) -> Dict[str, Any]:
         """Read one stored frame's capture text: the newest, or by a sequence from gfx.frames. Result: {sequence, sim_frame, text}.
 
-        The newest is frame_not_ready until a frame is stored; that is retried until it is. Any other error raises at once.
+        While recording, the newest is frame_not_ready until the first recorded frame ends; that is retried. Any other error raises at once.
         """
         return self._result_when_ready("gfx.read", {} if sequence is None else {"sequence": sequence})
 

@@ -22,7 +22,11 @@ void setUp(void) {
     nt_devapi_register_time();
 }
 
-void tearDown(void) { nt_devapi_shutdown(); }
+void tearDown(void) {
+    g_nt_gfx.last_frame = (nt_gfx_counters_t){0};
+    g_nt_gfx.counters = (nt_gfx_counters_t){0};
+    nt_devapi_shutdown();
+}
 
 /* ---- helpers (clone of test_devapi_deferred.c cadence) ---- */
 
@@ -252,8 +256,6 @@ static void test_render_info_counts_the_frame_just_rendered(void) {
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"render.info\"}"));
     TEST_ASSERT_EQUAL_INT(3, cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(root, "result"), "draw_calls")->valueint);
     cJSON_Delete(root);
-    g_nt_gfx.last_frame = (nt_gfx_counters_t){0};
-    g_nt_gfx.counters = (nt_gfx_counters_t){0};
 }
 
 /* ---- frame.current ---- */
