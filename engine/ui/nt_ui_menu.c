@@ -982,8 +982,9 @@ static bool menu_resolve_nav_and_dismiss(nt_ui_menu_ctx_t *menu, uint32_t menu_i
             rt->active_depth = 1U;
         }
     }
-    /* Menu-owned outside-click dismiss; skip the opening frame so the arming click does not self-dismiss. */
-    const bool outside_press = nt_input_mouse_is_pressed(NT_BUTTON_LEFT) || nt_input_mouse_is_pressed(NT_BUTTON_RIGHT);
+    /* Menu-owned outside-press dismiss (a click or a tap); skip the opening frame so the arming click does not self-dismiss. */
+    const nt_pointer_t *pp = &ctx->frame_pointers[ctx->frame_primary];
+    const bool outside_press = pp->active && (pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed);
     if (outside_press && !menu_cursor_over_any_panel(ctx, menu_id, rt, mx, my) && ctx->frame_counter != rt->opened_frame) {
         close_chain = true;
     }

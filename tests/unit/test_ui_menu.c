@@ -261,12 +261,8 @@ static void menu_im_open(nt_ui_menu_state_t *st, float anchor_x, float anchor_y)
  * frame record maps focus to a stable item id (focus committed in menu_end is observable next frame —
  * a 1-frame effect). The snapshot pointer is positioned but the keyboard path is what most tests assert
  * against (deterministic, no prev-frame bbox). */
-static void menu_im_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, float px, float py) {
-    nt_pointer_t p = {0};
-    p.x = px;
-    p.y = py;
-    p.active = true;
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1, 0);
+static void menu_im_frame_ptr(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, const nt_pointer_t *p) {
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1, 0);
     nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, st, style);
     const uint32_t file_scope = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
     const uint32_t open_scope = nt_ui_menu_test_item_id(file_scope, KEY_OPEN);
@@ -283,6 +279,19 @@ static void menu_im_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, flo
     (void)nt_ui_menu_item(&s_menu, KEY_EDIT, "Edit");
     nt_ui_menu_end(&s_menu);
     nt_ui_end(s_fx.ctx);
+}
+
+static void menu_im_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, float px, float py) {
+    nt_pointer_t p = {.x = px, .y = py, .active = true};
+    menu_im_frame_ptr(st, style, &p);
+}
+
+/* A frame whose pointer presses the left button at (px,py): a mouse click or a touch tap. */
+static void menu_im_press(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, float px, float py, uint8_t type) {
+    nt_pointer_t p = {.x = px, .y = py, .type = type, .active = true};
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    menu_im_frame_ptr(st, style, &p);
 }
 
 /* ---- Smoke: an open menu declares the root popup and balances the stack; a closed menu declares
@@ -367,14 +376,6 @@ static void test_menu_nested_dismiss_esc_deepest_first(void) {
     TEST_ASSERT_FALSE_MESSAGE(st.open, "second Esc closes the root chain");
 }
 
-/* Drive a clean primary-button press edge into the GLOBAL input state at (px,py) — the menu's
- * outside-click dismiss reads nt_input_mouse_is_pressed (global), NOT the per-frame snapshot. */
-static void menu_mouse_press(float px, float py) {
-    nt_input_poll();               /* clear stale pressed/released edges */
-    nt_input_clear_all_pointers(); /* drop any prior is_down so the next down is a clean rising edge */
-    nt_input_mouse_move(px, py, 1U);
-}
-
 /* ---- Outside-click dismiss: a left-click far outside every open panel closes the whole chain. ---- */
 static void test_menu_outside_click_dismisses_chain(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
@@ -387,10 +388,23 @@ static void test_menu_outside_click_dismisses_chain(void) {
     TEST_ASSERT_TRUE(st.open);
 
     /* frame 2: primary press far from the panel (bottom-right corner) -> menu-owned outside dismiss. */
-    menu_mouse_press(780.0F, 580.0F);
-    menu_im_frame(&st, &style, 780.0F, 580.0F);
+    menu_im_press(&st, &style, 780.0F, 580.0F, NT_POINTER_MOUSE);
 
     TEST_ASSERT_FALSE_MESSAGE(st.open, "outside-click dismisses the whole chain");
+}
+
+/* A touch tap outside dismisses like a click: the menu reads the UI's pointer, not the mouse. */
+static void test_menu_outside_tap_dismisses_chain(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {0};
+    menu_im_open(&st, 120.0F, 80.0F);
+    nt_input_clear_all_keys();
+    menu_im_frame(&st, &style, 700.0F, 500.0F);
+    TEST_ASSERT_TRUE(st.open);
+
+    menu_im_press(&st, &style, 780.0F, 580.0F, NT_POINTER_TOUCH);
+
+    TEST_ASSERT_FALSE_MESSAGE(st.open, "an outside tap dismisses the whole chain");
 }
 
 /* ---- Inside-click does NOT dismiss: a primary press INSIDE the root panel is a row interaction. ---- */
@@ -405,8 +419,7 @@ static void test_menu_inside_click_keeps_open(void) {
     TEST_ASSERT_TRUE(st.open);
 
     /* frame 2: press well inside the root panel body (just below the anchor) -> not a dismiss. */
-    menu_mouse_press(140.0F, 100.0F);
-    menu_im_frame(&st, &style, 140.0F, 100.0F);
+    menu_im_press(&st, &style, 140.0F, 100.0F, NT_POINTER_MOUSE);
 
     TEST_ASSERT_TRUE_MESSAGE(st.open, "a click inside an open panel must NOT dismiss the chain");
 }
@@ -1534,6 +1547,7 @@ int main(void) {
     RUN_TEST(test_menu_root_row_hittable_while_submenu_open);
     RUN_TEST(test_menu_click_root_parent_switches_branch);
     RUN_TEST(test_menu_outside_click_dismisses_chain);
+    RUN_TEST(test_menu_outside_tap_dismisses_chain);
     RUN_TEST(test_menu_right_click_outside_dismisses_chain);
     RUN_TEST(test_menu_inside_click_keeps_open);
     RUN_TEST(test_menu_depth_cap_asserts);
