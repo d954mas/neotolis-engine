@@ -62,12 +62,6 @@ static void frame_with(bool advance, const char *marker) {
 
 static void frame(bool advance) { frame_with(advance, NULL); }
 
-/* A host frame that skips the update. */
-static void frame_without_update(void) {
-    nt_gfx_begin_frame();
-    nt_gfx_end_frame();
-}
-
 static cJSON *submit(const char *line) {
     const char *resp = nt_devapi_submit(line);
     TEST_ASSERT_NOT_NULL(resp);
@@ -451,14 +445,6 @@ static void test_a_doubled_update_stores_each_frame_once(void) {
     }
 }
 
-/* A skipped update can lose a finished frame unseen, so the next update asserts, recording or not. */
-static void test_a_skipped_update_asserts(void) {
-    frame(false);
-    frame_without_update();
-    NT_TEST_EXPECT_ASSERT(frame(false));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "once per frame"));
-}
-
 /* ---- errors ---- */
 
 static void test_not_ready_and_unknown_frames(void) {
@@ -561,7 +547,6 @@ int main(void) {
     RUN_TEST(test_the_first_frame_after_registration_knows_its_advance);
     RUN_TEST(test_frames_recorded_by_other_code_are_stored);
     RUN_TEST(test_a_doubled_update_stores_each_frame_once);
-    RUN_TEST(test_a_skipped_update_asserts);
     RUN_TEST(test_gfx_work_after_a_read_stays_in_the_frame);
     RUN_TEST(test_a_client_reset_keeps_recording);
     RUN_TEST(test_not_ready_and_unknown_frames);

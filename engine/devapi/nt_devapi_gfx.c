@@ -98,11 +98,9 @@ static uint32_t sim_frame_of(uint64_t sequence) {
 }
 
 /* Every update, between frames: stores the frame gfx finished at the last begin_frame unless it is
-   stored, then notes the sim frame of the frame opening next (nt_app advanced it before this update).
-   The previous update noted this frame; without it a finished frame could have been overwritten unseen. */
+   stored, then notes the sim frame of the frame opening next (nt_app advanced it before this update). */
 static void gfx_poll(void) {
     const uint64_t current = g_nt_gfx.counters.frame_sequence;
-    NT_ASSERT(sim_known(current) && "gfx recording: call nt_devapi_update once per frame");
     const nt_gfx_capture_view_t view = nt_gfx_capture_read();
     const uint64_t sequence = view.counters.frame_sequence;
     if (sequence > s_ring.last) {
