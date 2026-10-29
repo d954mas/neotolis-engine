@@ -225,12 +225,10 @@ static void nt_devapi_input_update(void) {
 }
 
 /* Client reset: drop pending schedule entries only. No clock re-seed: a native reset runs mid-tick, after frame++. */
-/* No game sets the gate, so it is the bot's too: a bot that leaves gated never locks the player out.
-   The mouse the bot moved leaves with it; a real mouse comes back on its next move. */
+/* No game sets the gate, so it is the bot's too: a bot that leaves gated never locks the player out. */
 static void nt_devapi_input_reset(void) {
     s_sched_count = 0;
     nt_input_set_player_enabled(true);
-    nt_input_mouse_leave();
 }
 // #endregion
 

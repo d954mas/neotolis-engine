@@ -52,10 +52,9 @@ void nt_input_buffer_key(nt_key_t key, bool down) {
 static void buffer_ptr_event(nt_ptr_event_t ev) {
     if (s_ptr_count < NT_MAX_PTR_EVENTS) {
         s_ptr_buf[s_ptr_count++] = ev;
-    } else {
-        /* Buffer full — overwrite tail so the newest state (especially button
-           release) is never lost. Losing a mid-frame move is acceptable;
-           losing the final press/release causes stuck buttons. */
+    } else if (!ev.is_leave) {
+        /* Buffer full — overwrite tail so the newest mask (especially a release) is never lost.
+           A leave carries no mask, so it is dropped instead: the mouse stays until it returns. */
         s_ptr_buf[NT_MAX_PTR_EVENTS - 1] = ev;
     }
 }

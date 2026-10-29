@@ -107,8 +107,13 @@ static void glfw_cursor_pos_callback(GLFWwindow *window, double xpos, double ypo
 
 static void glfw_cursor_enter_callback(GLFWwindow *window, int entered) {
     (void)window;
-    if (!entered) {
-        nt_input_buffer_mouse_leave(); /* the first cursor move after an enter brings the mouse back */
+    if (entered) {
+        double xpos;
+        double ypos;
+        glfwGetCursorPos(s_glfw_window, &xpos, &ypos);
+        nt_input_buffer_mouse(xpos, ypos, s_cached_buttons); /* a window shown under a still cursor gets no move */
+    } else {
+        nt_input_buffer_mouse_leave();
     }
 }
 

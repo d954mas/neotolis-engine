@@ -164,6 +164,7 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
     /* Blur: clear all keys on focus loss */
     canvas.addEventListener("blur", function() {
         Module['_ntBlurred'] = true;
+        mouseButtons = 0; /* the release may land outside; the next wheel must not press again */
     });
 
     /* Pointer events — pass CSS-relative coords, C maps with engine DPR. Every mouse event is a move

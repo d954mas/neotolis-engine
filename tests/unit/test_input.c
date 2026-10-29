@@ -203,6 +203,13 @@ void test_primary_press_beats_other_release(void) {
     TEST_ASSERT_EQUAL_PTR(&g_nt_input.pointers[2], nt_pointer_primary(g_nt_input.pointers, NT_INPUT_MAX_POINTERS));
 }
 
+void test_mouse_focus_lost_drops_pressure(void) {
+    nt_input_mouse_move(10.0F, 10.0F, 1);
+    nt_input_poll();
+    nt_input_focus_lost();
+    TEST_ASSERT_TRUE(float_near(0.0F, g_nt_input.pointers[0].pressure, 1e-6F));
+}
+
 void test_mouse_convenience(void) {
     nt_input_mouse_move(100.0F, 200.0F, 1);
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
@@ -237,6 +244,7 @@ int main(void) {
     RUN_TEST(test_primary_touch_down_over_hovering_mouse);
     RUN_TEST(test_primary_releasing_touch_stays);
     RUN_TEST(test_primary_press_beats_other_release);
+    RUN_TEST(test_mouse_focus_lost_drops_pressure);
     RUN_TEST(test_mouse_convenience);
     return UNITY_END();
 }

@@ -324,8 +324,6 @@ static void nt_input_pointer_down_apply(uint32_t id, float x, float y, float pre
         ptr->active = true;
         ptr->id = id;
         ptr->type = type;
-    }
-    if (fresh || ptr->deactivate_pending) {
         reset_pointer_transients(ptr);
     }
     ptr->pressure = pressure;
@@ -429,6 +427,7 @@ void nt_input_clear_all_pointers(void) {
             }
             g_nt_input.pointers[i].buttons[b].is_down = false;
         }
+        g_nt_input.pointers[i].pressure = 0.0F;
         g_nt_input.pointers[i].deactivate_pending = true;
     }
 }

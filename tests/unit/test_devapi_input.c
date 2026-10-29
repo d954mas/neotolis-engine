@@ -433,16 +433,15 @@ static void test_reset_drops_schedule_keeps_applied_input(void) {
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
 }
 
-/* A client that leaves gated hands the player back, and the mouse it moved leaves with it. */
+/* A client that leaves gated hands the player back; an observer leaving keeps the real mouse. */
 static void test_reset_reenables_player(void) {
+    nt_input_mouse_move(10.0F, 10.0F, 0);
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":false}}")));
-    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.move\",\"params\":{\"x\":10,\"y\":10}}")));
-    advance();
     nt_devapi_run_reset_hooks();
     nt_input_set_key(NT_KEY_B, true);
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_B));
     nt_input_poll();
-    TEST_ASSERT_FALSE(g_nt_input.pointers[0].active);
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
 }
 
 /* input.key{hold:3} = down@0 + up@3: held across exactly 3 advances, released on the 4th. */
