@@ -1145,20 +1145,20 @@ CONTEXT_LOST when recreation failed or met a loss. Raw GL names are valid within
 context segment; a CONTEXT operation in the stream separates segments, and
 frontend handles are the identity across them.
 
-Command recording is one-shot: `nt_gfx_capture_request` asks for the next frame
-to be recorded. The begin_frame that closes the requesting frame consumes the request
-and starts recording the frame it opens; without a request no frame records. The
-first frame never records. A request made during a recorded frame replaces that
-capture at the begin_frame that finishes it, so read a capture in the following
-frame before requesting again: readable captures are at most every other frame.
-A reader that records every frame uses the capture hook instead (below).
-`nt_gfx_desc_t.capture_capacity` reserves one
-event array at init (default zero, below 2^24 because a link must fit a stream
-op word); a request without capacity asserts. Capture-OFF builds ignore the field.
-There is no growth or allocation while recording. Each pointer-free POD event
-is 104 bytes, including padding; 16384 records reserve 1.625 MiB. Gfx records keep
-`operation`, `object_kind`, `result` and `arg_count` in one byte each. Other storage
-consists of fixed control state and counter snapshots, with no second event array.
+Command recording is one-shot or continuous. `nt_gfx_capture_request` asks for the
+next frame to be recorded: the begin_frame that closes the requesting frame consumes
+the request and starts recording the frame it opens. `nt_gfx_capture_set_continuous(true)`
+records every frame from the next begin_frame until it is turned off; off lets the
+frame recording at that moment finish and records nothing after it. `nt_gfx_init` and
+`nt_gfx_shutdown` turn it off. Without either no frame records, and the first frame
+never records. `nt_gfx_desc_t.capture_capacity` sets the records of one frame (default
+zero, below 2^24 because a link must fit a stream op word); a request or continuous
+mode without capacity asserts. Capture-OFF builds ignore the field. Init reserves two
+halves of that size in one allocation: one holds the last finished frame while the
+other records. There is no growth or allocation while recording. Each pointer-free POD
+event is 104 bytes, including padding; 16384 records per frame reserve 3.25 MiB. Gfx
+records keep `operation`, `object_kind`, `result` and `arg_count` in one byte each.
+Other storage consists of fixed control state and counter snapshots.
 All record bytes are initialized before publication. A recorded frame starts at
 the begin_frame that opens it and first snapshots
 inherited state, including one definition per live resource (plus
@@ -1166,26 +1166,18 @@ program uniform/sampler and vertex-input attribute records), into the same array
 Size the capacity for that snapshot plus the frame's commands; a capacity below
 the snapshot overflows before any command is recorded.
 
-`nt_gfx_capture_read` returns metadata by value and an event prefix that is
-immutable except for the OP records of operations still in progress (an OP is
-final when its call returns). Read a finished capture right after
-`nt_gfx_begin_frame`: the prefix remains valid until the begin_frame that starts
-the next requested recording overwrites it, or shutdown; unrequested frames
-preserve it. Keep a capture by copying the metadata and `count` records
-and redirecting the saved view's pointer to the owned array. An empty view has
-a NULL pointer. The finalized view retains its frame's counters (and so its
-`frame_sequence`) by value even after later unrecorded frames overwrite
-`g_nt_gfx.last_frame`.
-
-**Capture hook.** `nt_gfx_capture_set_hook(fn)` registers one function that every
-`nt_gfx_begin_frame` calls after it finalizes the previous frame. It gets that
-frame's finalized view, complete with its post-render work and any gfx work issued
-between frames, valid only during the call, or NULL when that frame did not record.
-Returning true records the frame opening now, as `nt_gfx_capture_request` does, so a
-hook that always returns true records every frame and copies each one exactly once,
-at the boundary gfx defines. NULL removes it; it lives until replaced, across `nt_gfx_init`
-and `nt_gfx_shutdown`. The stub asserts on a hook, because it never begins a frame.
-The devapi gfx group is its user.
+`nt_gfx_capture_read` returns the last finished recorded frame: metadata by value and
+its immutable records, complete with its post-render work and any gfx work issued
+between frames. A frame finishes at the begin_frame that closes it. Its records stay
+valid until the begin_frame that finishes the next recorded frame, or shutdown, so in
+continuous mode each frame is readable during the whole next frame and a reader that
+copies one per frame gets every frame; unrecorded frames preserve it. The frame still
+recording is not readable. Keep a capture by copying the metadata and `count` records
+and redirecting the saved view's pointer to the owned array. An empty view (before any
+recorded frame finished) has a NULL pointer. The view retains its frame's counters
+(and so its `frame_sequence`) by value even after later frames overwrite
+`g_nt_gfx.last_frame`. The stub asserts on continuous mode, because it never begins a
+frame.
 
 Every recorded public operation produces exactly one OP record at the call,
 carrying its request arguments; when the call returns, the record holds its outcome

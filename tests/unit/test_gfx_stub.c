@@ -125,6 +125,14 @@ static void test_stub_frame_storage_allocation_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 16, 4, &offset));
     NT_TEST_EXPECT_ASSERT(nt_gfx_frame_alloc(NT_GFX_FRAME_UNIFORM, 0, 4, &offset));
 }
+
+#if NT_GFX_CAPTURE_ENABLED
+/* The stub never begins a frame, so a continuous capture would record nothing. */
+static void test_stub_continuous_capture_asserts(void) {
+    nt_gfx_capture_set_continuous(false);
+    NT_TEST_EXPECT_ASSERT(nt_gfx_capture_set_continuous(true));
+}
+#endif
 #endif
 
 int main(void) {
@@ -139,6 +147,9 @@ int main(void) {
     RUN_TEST(test_stub_timer_requires_name_and_output);
     RUN_TEST(test_stub_queries_require_outputs);
     RUN_TEST(test_stub_frame_storage_allocation_asserts);
+#if NT_GFX_CAPTURE_ENABLED
+    RUN_TEST(test_stub_continuous_capture_asserts);
+#endif
 #endif
     return UNITY_END();
 }

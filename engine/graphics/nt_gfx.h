@@ -781,7 +781,7 @@ typedef struct {
     const nt_gfx_event_t *events;
     uint32_t count;
     uint32_t execute_begin, execute_end; /* records of the end_frame stream execution, frame storage uploads included; 0 until it ran */
-    nt_gfx_counters_t counters;          /* the finalized frame's, even after later unrecorded frames; frame_sequence 0 while recording */
+    nt_gfx_counters_t counters;          /* the finished frame's */
 } nt_gfx_capture_view_t;
 
 #if NT_GFX_CAPTURE_ENABLED
@@ -790,17 +790,14 @@ const char *nt_gfx_gl_call_name(uint32_t call);
 /* One-shot: the next frame records, starting at the begin_frame that opens it.
  * Requires nonzero init capacity. The stub is inert. */
 void nt_gfx_capture_request(void);
-/* Metadata by value; the event prefix is immutable, except OP records of operations still in
- * progress, until the begin_frame that starts the next requested recording, or shutdown, so read
- * right after begin_frame. Copy count records and metadata to keep. Empty views have events=NULL. */
+/* While on, every frame from the next begin_frame records; off lets the frame recording now finish.
+ * On requires nonzero init capacity; the stub asserts on it. Init and shutdown turn it off. */
+void nt_gfx_capture_set_continuous(bool on);
+/* The last finished recorded frame (closed by a begin_frame), complete with its post-render and
+ * between-frame work. Its records stay valid until the begin_frame that finishes the next recorded
+ * frame, or shutdown, so a continuous capture is readable during the whole next frame. Copy count
+ * records and metadata to keep. Empty (events=NULL) before any recorded frame finishes. */
 nt_gfx_capture_view_t nt_gfx_capture_read(void);
-/* Called by every nt_gfx_begin_frame after it finalizes the previous frame: finalized is that frame's view,
- * complete with its post-render and between-frame work, valid only during the call; NULL when that frame
- * did not record. Returning true records the frame opening now (as nt_gfx_capture_request), so a hook that
- * always returns true records every frame. NULL removes it; it lives until replaced, across init and
- * shutdown. The stub asserts on a hook. */
-typedef bool (*nt_gfx_capture_hook_fn)(const nt_gfx_capture_view_t *finalized);
-void nt_gfx_capture_set_hook(nt_gfx_capture_hook_fn fn);
 #endif
 
 /* Context from any code for the capture: a label plus typed fields. Called through NT_GFX_NOTE. */
@@ -882,7 +879,8 @@ typedef struct {
     bool context_restored;
     bool initialized;
 #if NT_GFX_CAPTURE_ENABLED
-    bool capture_recording; /* this frame records; read by NT_GFX_NOTE */
+    bool capture_recording;  /* this frame records; read by NT_GFX_NOTE */
+    bool capture_continuous; /* every frame records; nt_gfx_capture_set_continuous */
 #endif
 } nt_gfx_t;
 

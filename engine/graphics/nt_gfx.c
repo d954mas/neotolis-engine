@@ -316,15 +316,12 @@ void nt_gfx_capture_request(void) {
     g_nt_gfx_capture.request_pending = true;
 }
 
-nt_gfx_capture_view_t nt_gfx_capture_read(void) {
-    nt_gfx_capture_view_t result = g_nt_gfx_capture.view;
-    result.events = result.count > 0 ? g_nt_gfx_capture.events : NULL;
-    return result;
+void nt_gfx_capture_set_continuous(bool on) {
+    NT_ASSERT((!on || g_nt_gfx_capture.capacity > 0) && "capture_set_continuous: nt_gfx_desc_t.capture_capacity is 0");
+    g_nt_gfx.capture_continuous = on;
 }
 
-static nt_gfx_capture_hook_fn s_capture_hook; /* outside g_nt_gfx_capture: init and shutdown keep it */
-
-void nt_gfx_capture_set_hook(nt_gfx_capture_hook_fn fn) { s_capture_hook = fn; }
+nt_gfx_capture_view_t nt_gfx_capture_read(void) { return g_nt_gfx_capture.done; }
 
 static void copy_note_text(char *dst, size_t size, const char *src) {
     NT_ASSERT(src != NULL && "capture note: NULL string");
@@ -547,8 +544,9 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc->capture_capacity < (1U << 24) && "capture_capacity: an operation link must fit 24 bits of a stream op word");
     g_nt_gfx_capture.capacity = desc->capture_capacity;
     if (desc->capture_capacity > 0) {
-        g_nt_gfx_capture.events = (nt_gfx_event_t *)malloc((size_t)desc->capture_capacity * sizeof(nt_gfx_event_t));
-        NT_ASSERT(g_nt_gfx_capture.events != NULL);
+        g_nt_gfx_capture.base = (nt_gfx_event_t *)malloc((size_t)desc->capture_capacity * 2U * sizeof(nt_gfx_event_t));
+        NT_ASSERT(g_nt_gfx_capture.base != NULL);
+        g_nt_gfx_capture.events = g_nt_gfx_capture.base;
     }
 #endif
     nt_gfx_frame_init(desc);
@@ -603,7 +601,7 @@ void nt_gfx_shutdown(void) {
     /* The open frame is discarded unpublished; teardown calls must not record into the freed array. */
 #if NT_GFX_CAPTURE_ENABLED
     g_nt_gfx.capture_recording = false;
-    free(g_nt_gfx_capture.events);
+    free(g_nt_gfx_capture.base);
 #endif
     /* Delete GL objects before backend teardown, which destroys the WebGL context. */
 
@@ -826,9 +824,14 @@ void nt_gfx_begin_frame(void) {
     memset(s_gfx.staged_blocks, 0, sizeof(s_gfx.staged_blocks));
     g_nt_gfx.last_frame = g_nt_gfx.counters;
 #if NT_GFX_CAPTURE_ENABLED
-    const bool finalized = g_nt_gfx.capture_recording;
-    if (finalized) {
-        g_nt_gfx_capture.view.counters = g_nt_gfx.last_frame;
+    /* The finished frame keeps its half for reading; the next recording takes the other. */
+    if (g_nt_gfx.capture_recording) {
+        nt_gfx_capture_state_t *capture = &g_nt_gfx_capture;
+        capture->done = capture->view;
+        capture->done.counters = g_nt_gfx.last_frame;
+        capture->done.events = capture->events;
+        capture->view = (nt_gfx_capture_view_t){0};
+        capture->events = capture->events == capture->base ? capture->base + capture->capacity : capture->base;
         g_nt_gfx.capture_recording = false;
     }
 #endif
@@ -844,17 +847,10 @@ void nt_gfx_begin_frame(void) {
     }
     open_frame();
 #if NT_GFX_CAPTURE_ENABLED
-    if (s_capture_hook != NULL) {
-        const nt_gfx_capture_view_t view = nt_gfx_capture_read();
-        if (s_capture_hook(finalized ? &view : NULL)) {
-            nt_gfx_capture_request();
-        }
-    }
     /* Opened after the wipe and before the restore: the snapshot shows the tables the frame starts from. */
-    if (g_nt_gfx_capture.request_pending) {
+    if (g_nt_gfx_capture.request_pending || g_nt_gfx.capture_continuous) {
         g_nt_gfx_capture.request_pending = false;
         g_nt_gfx.capture_recording = true;
-        g_nt_gfx_capture.view = (nt_gfx_capture_view_t){0};
         capture_initial_state();
     }
 #endif

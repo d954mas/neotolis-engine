@@ -78,8 +78,8 @@ const char *nt_devapi_poll_response(void);
 
 /* Per-tick devapi update — the game calls this once per frame, between frames: after the last frame's
    gfx work and swap, before nt_gfx_begin_frame and nt_input_poll. It checks the pending deferred reply's
-   gate, then runs the transport poll (native net's recv + deferred drain), then the tick hook (the
-   input schedule release). */
+   gate, then runs the frame poll (the gfx group stores the last finished capture), the transport poll
+   (native net's recv + deferred drain) and the tick hook (the input schedule release). */
 void nt_devapi_update(void);
 
 /* The rendered frame is readable: call it on each frame the host drew, after nt_gfx_end_frame and before

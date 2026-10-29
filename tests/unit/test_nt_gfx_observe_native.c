@@ -1,6 +1,7 @@
 #include "graphics/nt_gfx.h"
 #include "pool/nt_pool.h"
 #include "test_helpers/nt_gfx_test_frame.h"
+#include "test_helpers/nt_gfx_test_notes.h"
 #include "unity.h"
 #include "window/nt_window.h"
 
@@ -679,7 +680,7 @@ static void test_shutdown_while_recording_writes_no_record(void) {
     nt_gfx_begin_frame();
     nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, buffer.id);
-    TEST_ASSERT_GREATER_THAN_UINT32(0, captured_calls(NT_GFX_GL_glBufferData));
+    TEST_ASSERT_GREATER_THAN_UINT32(0, nt_test_capture_open().count);
     nt_gfx_shutdown();
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 4096;

@@ -787,19 +787,19 @@ static void test_unlinked_programs_drop_queued_shapes(void) {
 void test_shape_flush_notes_each_draw_and_nothing_when_empty(void) {
     nt_gfx_capture_request();
     nt_test_frame_next();
-    const uint32_t before = nt_gfx_capture_read().count;
+    const uint32_t before = nt_test_capture_open().count;
     nt_shape_renderer_flush();
-    TEST_ASSERT_EQUAL_UINT32(before, nt_gfx_capture_read().count);
+    TEST_ASSERT_EQUAL_UINT32(before, nt_test_capture_open().count);
 
     const float c[3] = {0, 0, 0};
     const float size[3] = {1, 1, 1};
     nt_shape_renderer_cube(c, size, NULL, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     const uint32_t note = nt_test_note(before, "shape");
-    TEST_ASSERT_LESS_THAN_UINT32(nt_gfx_capture_read().count, note);
+    TEST_ASSERT_LESS_THAN_UINT32(nt_test_capture_open().count, note);
     TEST_ASSERT_NULL(nt_test_note_field(note, "material"));
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, nt_test_next_draw_result(note));
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_capture_read().count, nt_test_note(note + 1U, "shape"));
+    TEST_ASSERT_EQUAL_UINT32(nt_test_capture_open().count, nt_test_note(note + 1U, "shape"));
 }
 #endif
 

@@ -31,9 +31,6 @@ void setUp(void) {
 }
 
 void tearDown(void) {
-#if NT_GFX_CAPTURE_ENABLED
-    nt_gfx_capture_set_hook(NULL); /* the hook outlives nt_gfx_shutdown */
-#endif
     nt_gfx_shutdown();
     nt_gfx_fake_reset();
 }
@@ -219,7 +216,7 @@ static void test_a_loss_latched_inside_a_pass_closes_the_pass(void) {
     nt_gfx_end_segment();
     nt_gfx_end_pass();
 #if NT_GFX_CAPTURE_ENABLED
-    const nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    const nt_gfx_capture_view_t capture = nt_test_capture_open();
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_ACCEPTED, result_of(capture, NT_GFX_OP_END_PASS, NT_GFX_OBJECT_NONE));
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_ACCEPTED, result_of(capture, NT_GFX_OP_SEGMENT_END, NT_GFX_OBJECT_NONE));
 #endif
@@ -279,7 +276,7 @@ static void test_a_sampler_recreate_and_a_readback_latch_a_loss(void) {
     TEST_ASSERT_EQUAL_UINT32(sampler.id, nt_gfx_make_sampler(&desc).id);
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
 #if NT_GFX_CAPTURE_ENABLED
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_CONTEXT_LOST, result_of(nt_gfx_capture_read(), NT_GFX_OP_CREATE, NT_GFX_OBJECT_SAMPLER));
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_CONTEXT_LOST, result_of(nt_test_capture_open(), NT_GFX_OP_CREATE, NT_GFX_OBJECT_SAMPLER));
 #endif
 
     nt_gfx_fake_set_context_lost(false);
@@ -992,9 +989,9 @@ static void test_draw_trace_preserves_arguments_and_live_prefix(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(vi);
-    uint32_t start = nt_gfx_capture_read().count;
+    uint32_t start = nt_test_capture_open().count;
     nt_gfx_draw_instanced(7, 9, 5);
-    nt_gfx_capture_view_t live = nt_gfx_capture_read();
+    nt_gfx_capture_view_t live = nt_test_capture_open();
     bool found = false;
     for (uint32_t i = start; i < live.count; i++) {
         const nt_gfx_event_t *e = &live.events[i];
@@ -1019,7 +1016,7 @@ static void test_draw_trace_preserves_arguments_and_live_prefix(void) {
 static void test_capture_prefix_lifetime_and_saved_snapshot(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_capture_read().count);
     record_next_frame();
-    nt_gfx_capture_view_t before = nt_gfx_capture_read();
+    nt_gfx_capture_view_t before = nt_test_capture_open();
     TEST_ASSERT_EQUAL_UINT64(0, before.counters.frame_sequence);
     TEST_ASSERT_TRUE(before.count > 0);
     nt_gfx_event_t saved = before.events[0];
@@ -1078,7 +1075,8 @@ static void test_capture_request_records_only_the_next_frame(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_capture_read().count);
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    TEST_ASSERT_GREATER_THAN_UINT32(0, nt_gfx_capture_read().count);
+    TEST_ASSERT_GREATER_THAN_UINT32(0, nt_test_capture_open().count);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_capture_read().count);
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     uint64_t sequence = nt_gfx_capture_read().counters.frame_sequence;
@@ -1087,70 +1085,106 @@ static void test_capture_request_records_only_the_next_frame(void) {
     TEST_ASSERT_EQUAL_UINT64(sequence, nt_gfx_capture_read().counters.frame_sequence);
 }
 
-/* A request during a recorded frame replaces that capture at the begin_frame that finishes it. */
-static void test_request_during_recorded_frame_replaces_the_capture(void) {
+/* A request during a recorded frame records the next frame too; the finished one stays readable. */
+static void test_request_during_recorded_frame_records_the_next_frame(void) {
     record_next_frame();
-    const uint32_t snapshot_records = nt_gfx_capture_read().count;
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_end_pass();
-    TEST_ASSERT_GREATER_THAN_UINT32(snapshot_records, nt_gfx_capture_read().count);
+    const uint64_t first = g_nt_gfx.counters.frame_sequence;
     nt_gfx_capture_request();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    nt_gfx_capture_view_t replaced = nt_gfx_capture_read();
-    TEST_ASSERT_EQUAL_UINT64(0, replaced.counters.frame_sequence);
-    TEST_ASSERT_EQUAL_UINT32(snapshot_records, replaced.count);
-    TEST_ASSERT_EQUAL_UINT32(0, replaced.execute_begin);
-    TEST_ASSERT_EQUAL_UINT32(0, replaced.execute_end);
-    for (uint32_t i = 0; i < replaced.count; i++) {
-        /* only the inherited-state prefix and begin_frame's own timer check */
-        TEST_ASSERT_TRUE(replaced.events[i].kind != NT_GFX_EVENT_OP || replaced.events[i].operation == NT_GFX_OP_TIMER_DISJOINT);
-    }
-}
-
-static uint32_t s_hook_calls;
-static uint32_t s_hook_finalized;
-static uint64_t s_hook_sequence;
-static uint32_t s_hook_passes;
-
-/* Records what every begin_frame hands over and requests the frame opening now. */
-static bool count_hook(const nt_gfx_capture_view_t *finalized) {
-    s_hook_calls++;
-    if (finalized != NULL) {
-        s_hook_finalized++;
-        s_hook_sequence = finalized->counters.frame_sequence;
-        s_hook_passes = 0;
-        for (uint32_t i = 0; i < finalized->count; i++) {
-            s_hook_passes += finalized->events[i].kind == NT_GFX_EVENT_OP && finalized->events[i].operation == NT_GFX_OP_PASS;
-        }
-    }
-    return true;
-}
-
-/* The hook gets every begin_frame: NULL before anything recorded, then each finished frame, complete with
-   its counters; a request inside it records the frame opening now, so every frame records. Frame f
-   issues f + 1 passes. */
-static void test_capture_hook_hands_over_every_finished_frame(void) {
-    s_hook_calls = s_hook_finalized = 0;
-    nt_gfx_capture_set_hook(count_hook);
+    TEST_ASSERT_TRUE(g_nt_gfx.capture_recording);
+    nt_gfx_capture_view_t finished = nt_gfx_capture_read();
+    TEST_ASSERT_EQUAL_UINT64(first, finished.counters.frame_sequence);
+    TEST_ASSERT_GREATER_THAN_UINT32(0, finished.execute_begin);
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    TEST_ASSERT_EQUAL_UINT32(1, s_hook_calls);
-    TEST_ASSERT_EQUAL_UINT32(0, s_hook_finalized);
-    TEST_ASSERT_TRUE(g_nt_gfx.capture_recording);
-    for (uint32_t f = 0; f < 3; f++) {
+    TEST_ASSERT_FALSE(g_nt_gfx.capture_recording);
+    TEST_ASSERT_EQUAL_UINT64(first + 1U, nt_gfx_capture_read().counters.frame_sequence);
+}
+
+/* Frame f issues f + 1 passes and one note naming f. */
+static void issue_frame(uint32_t f) {
+    for (uint32_t p = 0; p <= f; p++) {
+        nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+        nt_gfx_end_pass();
+    }
+    NT_GFX_NOTE("frame", NT_NOTE_U32("f", f));
+}
+
+static void expect_frame(nt_gfx_capture_view_t view, uint32_t f, uint64_t sequence) {
+    TEST_ASSERT_EQUAL_UINT64(sequence, view.counters.frame_sequence);
+    uint32_t passes = 0;
+    uint32_t noted = UINT32_MAX;
+    for (uint32_t i = 0; i < view.count; i++) {
+        passes += view.events[i].kind == NT_GFX_EVENT_OP && view.events[i].operation == NT_GFX_OP_PASS;
+        if (view.events[i].kind == NT_GFX_EVENT_NOTE_FIELD) {
+            noted = view.events[i].field.value.u32;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(f + 1U, passes);
+    TEST_ASSERT_EQUAL_UINT32(f, noted);
+}
+
+/* Continuous capture records every frame from the next begin_frame; each finished frame, complete with
+   its counters, stays readable for the whole next frame; off lets the frame recording finish and
+   records nothing after it. The halves alternate, so frames 0 and 1 also prove the second half. */
+static void test_continuous_capture_keeps_each_finished_frame_for_the_next_frame(void) {
+    nt_gfx_capture_set_continuous(true);
+    TEST_ASSERT_FALSE(g_nt_gfx.capture_recording);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_capture_read().count); /* nothing finished yet */
+    nt_gfx_capture_view_t finished = {0};
+    for (uint32_t f = 0; f < 4; f++) {
         const uint64_t sequence = g_nt_gfx.counters.frame_sequence;
-        for (uint32_t p = 0; p <= f; p++) {
-            nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-            nt_gfx_end_pass();
+        issue_frame(f);
+        if (f > 0) { /* the frame before, intact through this whole frame */
+            expect_frame(finished, f - 1U, sequence - 1U);
         }
         nt_gfx_end_frame();
         nt_gfx_begin_frame();
-        TEST_ASSERT_EQUAL_UINT32(f + 1U, s_hook_finalized);
-        TEST_ASSERT_EQUAL_UINT64(sequence, s_hook_sequence);
-        TEST_ASSERT_EQUAL_UINT32(f + 1U, s_hook_passes);
+        TEST_ASSERT_TRUE(g_nt_gfx.capture_recording);
+        finished = nt_gfx_capture_read();
+        TEST_ASSERT_EQUAL_MEMORY(&g_nt_gfx.last_frame, &finished.counters, sizeof(finished.counters));
+        expect_frame(finished, f, sequence);
     }
-    nt_gfx_capture_set_hook(NULL);
+    nt_gfx_capture_set_continuous(false);
+    const uint64_t last = g_nt_gfx.counters.frame_sequence;
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.capture_recording);
+    TEST_ASSERT_EQUAL_UINT64(last, nt_gfx_capture_read().counters.frame_sequence);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT64(last, nt_gfx_capture_read().counters.frame_sequence);
+}
+
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+static void test_continuous_capture_needs_capacity_and_init_turns_it_off(void) {
+    nt_gfx_capture_set_continuous(true);
+    nt_gfx_end_frame();
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    nt_gfx_init(&desc);
+    TEST_ASSERT_FALSE(g_nt_gfx.capture_continuous);
+    NT_TEST_EXPECT_ASSERT(nt_gfx_capture_set_continuous(true));
+    nt_gfx_capture_set_continuous(false);
+    nt_gfx_begin_frame();
+}
+#endif
+
+/* Shutdown frees the one allocation after an odd number of finished frames (events in the second half). */
+static void test_shutdown_after_an_odd_number_of_finished_frames(void) {
+    record_next_frame();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx_capture.events != g_nt_gfx_capture.base);
+    nt_gfx_end_frame();
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    desc.capture_capacity = 256;
+    nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
 }
 
 static void test_capture_read_after_shutdown_is_empty(void) {
@@ -1170,15 +1204,15 @@ static void test_capture_read_after_shutdown_is_empty(void) {
 
 static void test_notes_copy_label_and_typed_fields(void) {
     NT_GFX_NOTE("unrecorded");
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_capture_read().count);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_test_capture_open().count);
     record_next_frame();
-    const uint32_t first = nt_gfx_capture_read().count;
+    const uint32_t first = nt_test_capture_open().count;
     char name[8] = "boss";
     NT_GFX_NOTE("wave", NT_NOTE_U32("u", 7U), NT_NOTE_I32("i", -3), NT_NOTE_U64("big", UINT64_MAX), NT_NOTE_F32("f", 0.5F), NT_NOTE_STR("name", name));
     NT_GFX_NOTE("bare");
     memcpy(name, "gone", 5);
 
-    const nt_gfx_capture_view_t v = nt_gfx_capture_read();
+    const nt_gfx_capture_view_t v = nt_test_capture_open();
     TEST_ASSERT_EQUAL_UINT32(first + 7U, v.count);
     const nt_gfx_event_t *e = &v.events[first];
     TEST_ASSERT_EQUAL(NT_GFX_EVENT_NOTE, e[0].kind);
@@ -1212,7 +1246,7 @@ static void test_notes_do_not_end_a_draw_merge(void) {
     draw_teardown();
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
     const uint32_t note = nt_test_note(0, "between");
-    TEST_ASSERT_LESS_THAN_UINT32(nt_gfx_capture_read().count, note);
+    TEST_ASSERT_LESS_THAN_UINT32(nt_test_capture_open().count, note);
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_CACHE, nt_test_next_draw_result(note));
 }
 
@@ -1227,7 +1261,7 @@ static void test_markers_nest_in_call_order_and_may_wrap_post_render_work(void) 
     NT_GFX_MARKER_POP();
 
     static const char *const expected[] = {"world", "shadows", NULL, NULL, "after end_frame", NULL};
-    const nt_gfx_capture_view_t v = nt_gfx_capture_read();
+    const nt_gfx_capture_view_t v = nt_test_capture_open();
     uint32_t seen = 0;
     for (uint32_t i = 0; i < v.count; i++) {
         const nt_gfx_event_t *e = &v.events[i];
@@ -1256,17 +1290,17 @@ static uint32_t record_with_spare(uint32_t snapshot, uint32_t spare) {
     s_draw_program = nt_gfx_fake_make_program(NULL, 0);
     nt_gfx_begin_frame();
     record_next_frame();
-    return nt_gfx_capture_read().count;
+    return nt_test_capture_open().count;
 }
 
 /* A note lands with all its fields or not at all, and nothing appends after an overflow. */
 static void test_a_note_that_does_not_fit_overflows_whole(void) {
     record_next_frame();
-    const uint32_t snapshot = nt_gfx_capture_read().count;
+    const uint32_t snapshot = nt_test_capture_open().count;
 
     TEST_ASSERT_EQUAL_UINT32(snapshot, record_with_spare(snapshot, 3));
     NT_GFX_NOTE("fits", NT_NOTE_U32("a", 1U), NT_NOTE_U32("b", 2U));
-    nt_gfx_capture_view_t v = nt_gfx_capture_read();
+    nt_gfx_capture_view_t v = nt_test_capture_open();
     TEST_ASSERT_EQUAL_UINT32(snapshot + 3U, v.count);
     TEST_ASSERT_FALSE(v.overflow);
 
@@ -1274,7 +1308,7 @@ static void test_a_note_that_does_not_fit_overflows_whole(void) {
     NT_GFX_NOTE("too big", NT_NOTE_U32("a", 1U), NT_NOTE_U32("b", 2U));
     NT_GFX_MARKER_PUSH("after");
     NT_GFX_MARKER_POP();
-    v = nt_gfx_capture_read();
+    v = nt_test_capture_open();
     TEST_ASSERT_EQUAL_UINT32(snapshot, v.count);
     TEST_ASSERT_TRUE(v.overflow);
 }
@@ -1381,8 +1415,12 @@ int main(void) {
     RUN_TEST(test_capture_prefix_lifetime_and_saved_snapshot);
     RUN_TEST(test_capture_overflow_does_not_stop_counters);
     RUN_TEST(test_capture_request_records_only_the_next_frame);
-    RUN_TEST(test_request_during_recorded_frame_replaces_the_capture);
-    RUN_TEST(test_capture_hook_hands_over_every_finished_frame);
+    RUN_TEST(test_request_during_recorded_frame_records_the_next_frame);
+    RUN_TEST(test_continuous_capture_keeps_each_finished_frame_for_the_next_frame);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_continuous_capture_needs_capacity_and_init_turns_it_off);
+#endif
+    RUN_TEST(test_shutdown_after_an_odd_number_of_finished_frames);
     RUN_TEST(test_capture_read_after_shutdown_is_empty);
     RUN_TEST(test_exact_capacity_and_one_record_short);
     RUN_TEST(test_notes_copy_label_and_typed_fields);
