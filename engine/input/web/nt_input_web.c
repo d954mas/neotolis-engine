@@ -219,11 +219,6 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
             contact(2, e);
         } else {
             mouseMove(e, ownedButtons(e));
-            var x = e.clientX - rect.left;
-            var y = e.clientY - rect.top;
-            if (mouseButtons === 0 && (x < 0 || y < 0 || x >= rect.width || y >= rect.height)) {
-                Module['_ntPtrBuf'].push(4, 0, 0, 0, 0, 0, 0); /* released outside: not every browser sends a pointerleave after a captured drag */
-            }
         }
         e.preventDefault();
     });
