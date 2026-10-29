@@ -1172,9 +1172,8 @@ immutable except for the OP records of operations still in progress (an OP is
 final when its call returns). Read a finished capture between frames or right
 after `nt_gfx_begin_frame`: the prefix remains valid until the begin_frame that
 starts the next requested recording overwrites it, or shutdown; unrequested frames
-preserve it. Between frames the view's counters are still 0 (they are set when the
-frame finalizes), so a reader there takes `g_nt_gfx.counters`, which hold that
-frame's complete counters. Keep a capture by copying the metadata and `count` records
+preserve it. Between frames the view holds the whole last recorded frame, counters
+included. Keep a capture by copying the metadata and `count` records
 and redirecting the saved view's pointer to the owned array. An empty view has
 a NULL pointer. The finalized view retains its frame's counters (and so its
 `frame_sequence`) by value even after later unrecorded frames overwrite
@@ -1207,8 +1206,8 @@ A stage destroyed while a pending link holds it records its `glDeleteShader` whe
 that link resolves: among these link records, or inside the program's DESTROY operation; a lost
 context records none. A program's DEFINITION does not imply readiness: one recorded while it links carries
 no reflection. `DEFINITION` is reserved for resource and inherited state. Issued backend calls do not
-prove GL success or GPU completion. The view's `counters` are zero (sequence 0)
-while a frame records and become the finalized frame's at the begin_frame that closes it; `overflow`
+prove GL success or GPU completion. While a frame records, the view's `counters` are
+its counters so far; the begin_frame that closes it keeps them with the view; `overflow`
 alone reports an incomplete event stream. Overflow stops event appends and never
 truncates counters.
 

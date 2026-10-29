@@ -79,26 +79,18 @@ static void store_frame(const nt_gfx_capture_view_t *view, uint32_t sim_frame, b
     }
 }
 
-/* Commands and the hook run between frames, where the requested frame is complete once it has ended:
-   the first of them to run stores it. */
-static void store_requested(void) {
-    if (s_ring.requested == 0 || s_ring.requested != g_nt_gfx.counters.frame_sequence) {
-        return;
-    }
-    nt_gfx_capture_view_t done = nt_gfx_capture_read();
-    NT_ASSERT(done.execute_end != 0 && "gfx recording: devapi runs between frames, before nt_gfx_begin_frame");
-    done.counters = g_nt_gfx.counters; /* the view gets them only at the next begin_frame; complete between frames */
-    store_frame(&done, s_ring.last_sim, s_ring.last_advanced);
-    s_ring.requested = 0;
-}
-
-/* Runs each update after this update's commands: frame N just ended, and the request goes to the
-   begin_frame of N + 1. The sim frame is tracked in every update, so a frame's advance is known whenever
-   recording turned on. */
+/* Runs each update between frames, after this update's commands, whose gfx work (recorder buffers) still
+   belongs to frame N, which just ended; the request goes to the begin_frame of N + 1. The sim frame is
+   tracked in every update, so a frame's advance is known whenever recording turned on. */
 static void gfx_frame_hook(void) {
     const uint64_t sequence = g_nt_gfx.counters.frame_sequence;
     NT_ASSERT((s_ring.requested == 0 || s_ring.requested == sequence) && "gfx recording: nt_devapi_update runs once per frame, before nt_gfx_begin_frame");
-    store_requested();
+    if (s_ring.requested != 0) {
+        const nt_gfx_capture_view_t done = nt_gfx_capture_read();
+        NT_ASSERT(done.execute_end != 0 && "gfx recording: nt_devapi_update runs between frames, before nt_gfx_begin_frame");
+        store_frame(&done, s_ring.last_sim, s_ring.last_advanced);
+        s_ring.requested = 0;
+    }
     s_ring.last_advanced = g_nt_app.frame != s_ring.last_sim;
     s_ring.last_sim = g_nt_app.frame;
     if (s_ring.recording) {
@@ -148,9 +140,10 @@ static void add_frame_entry(cJSON *frames, const stored_frame *f) {
 
 static bool cmd_gfx_frames(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
-    (void)err;
     (void)ud;
-    store_requested();
+    if (!s_ring.recording && s_ring.requested != 0) { /* the ring still changes: storing that frame can evict the oldest */
+        return nt_devapi_fail_code(err, NT_DEVAPI_ERR_FRAME_NOT_READY, "gfx.frames: the frame in flight at off is not stored yet");
+    }
     devapi_add_bool(result, "recording", s_ring.recording);
     cJSON *frames = cJSON_AddArrayToObject(result, "frames");
     NT_ASSERT(frames != NULL);
@@ -172,7 +165,6 @@ static const stored_frame *find_sequence(uint64_t sequence) {
 static bool cmd_gfx_read(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     const cJSON *node = cJSON_GetObjectItemCaseSensitive(params, "sequence");
-    store_requested();
     const stored_frame *found = NULL;
     if (node != NULL) {
         uint64_t sequence = 0;
@@ -180,8 +172,8 @@ static bool cmd_gfx_read(const cJSON *params, cJSON *result, nt_devapi_error *er
             return false;
         }
         found = find_sequence(sequence);
-    } else if (s_ring.count == 0 && s_ring.recording) {
-        return nt_devapi_fail_code(err, NT_DEVAPI_ERR_FRAME_NOT_READY, "gfx.read: no recorded frame has ended yet");
+    } else if ((s_ring.requested != 0 && !s_ring.recording) || (s_ring.count == 0 && s_ring.recording)) {
+        return nt_devapi_fail_code(err, NT_DEVAPI_ERR_FRAME_NOT_READY, "gfx.read: the newest frame is not stored yet");
     } else if (s_ring.count > 0) {
         found = frame_at(s_ring.count - 1U);
     }
@@ -211,14 +203,15 @@ static const nt_devapi_command k_gfx_cmds[] = {
     },
     {
         .method = "gfx.frames",
-        .summary = "list the recorded frames in the ring, oldest first, up to the frame just ended",
+        .summary = "list the recorded frames in the ring, oldest first; frame_not_ready after off until the frame in flight is stored",
         .params_shape = "{}",
         .result_shape = "{recording:boolean,frames:[{sequence:number,sim_frame:number,advanced:boolean,records:number,overflow:boolean}]}",
         .fn = cmd_gfx_frames,
     },
     {
         .method = "gfx.read",
-        .summary = "the capture text of one recorded frame: the newest stored (frame_not_ready while recording until the first frame ends) or one by gfx sequence from gfx.frames",
+        .summary = "the capture text of one recorded frame: the newest stored (frame_not_ready while none is stored yet or after off until the frame in flight is) or one by gfx sequence from "
+                   "gfx.frames",
         .params_shape = "{sequence?:number}",
         .result_shape = "{sequence:number,sim_frame:number,text:string}",
         .fn = cmd_gfx_read,

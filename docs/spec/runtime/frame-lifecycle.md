@@ -61,7 +61,8 @@ nt_window_swap_buffers
 The host owns the gfx frame boundary: `nt_gfx_init` opens the first frame and the
 frame callback calls `nt_gfx_begin_frame` once at its start, before any other gfx
 use (the resource and font steps included), also when nothing renders.
-`nt_devapi_update` runs before it, between frames, and uses no gfx. Context
+`nt_devapi_update` runs before it, between frames; gfx work of its commands (recorder
+buffers) belongs to the frame just ended. Context
 loss and restore are synced there, so the whole callback sees one stable
 `context_lost`/`context_restored` state. The callback ends with
 `nt_gfx_end_frame` after its last pass and before `nt_window_swap_buffers`,

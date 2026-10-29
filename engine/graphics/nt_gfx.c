@@ -319,6 +319,9 @@ void nt_gfx_capture_request(void) {
 nt_gfx_capture_view_t nt_gfx_capture_read(void) {
     nt_gfx_capture_view_t result = g_nt_gfx_capture.view;
     result.events = result.count > 0 ? g_nt_gfx_capture.events : NULL;
+    if (g_nt_gfx.capture_recording) {
+        result.counters = g_nt_gfx.counters; /* finalized only at the next begin_frame; complete once the frame ended */
+    }
     return result;
 }
 

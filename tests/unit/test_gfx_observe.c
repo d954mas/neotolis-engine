@@ -1017,7 +1017,7 @@ static void test_capture_prefix_lifetime_and_saved_snapshot(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_capture_read().count);
     record_next_frame();
     nt_gfx_capture_view_t before = nt_gfx_capture_read();
-    TEST_ASSERT_EQUAL_UINT64(0, before.counters.frame_sequence);
+    TEST_ASSERT_EQUAL_UINT64(g_nt_gfx.counters.frame_sequence, before.counters.frame_sequence);
     TEST_ASSERT_TRUE(before.count > 0);
     nt_gfx_event_t saved = before.events[0];
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
@@ -1095,7 +1095,7 @@ static void test_request_during_recorded_frame_replaces_the_capture(void) {
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_capture_view_t replaced = nt_gfx_capture_read();
-    TEST_ASSERT_EQUAL_UINT64(0, replaced.counters.frame_sequence);
+    TEST_ASSERT_EQUAL_UINT64(g_nt_gfx.counters.frame_sequence, replaced.counters.frame_sequence);
     TEST_ASSERT_EQUAL_UINT32(snapshot_records, replaced.count);
     TEST_ASSERT_EQUAL_UINT32(0, replaced.execute_begin);
     TEST_ASSERT_EQUAL_UINT32(0, replaced.execute_end);
@@ -1106,7 +1106,7 @@ static void test_request_during_recorded_frame_replaces_the_capture(void) {
 }
 
 /* A request in every frame records every frame: between frames the read holds the whole frame just
-   ended, with counters still 0 until it finalizes. Frame f issues f + 1 passes. */
+   ended, its counters included. Frame f issues f + 1 passes. */
 static void test_request_every_frame_reads_each_frame_between_frames(void) {
     record_next_frame();
     for (uint32_t f = 0; f < 3; f++) {
@@ -1117,7 +1117,8 @@ static void test_request_every_frame_reads_each_frame_between_frames(void) {
         }
         nt_gfx_end_frame();
         const nt_gfx_capture_view_t view = nt_gfx_capture_read();
-        TEST_ASSERT_EQUAL_UINT64(0, view.counters.frame_sequence);
+        TEST_ASSERT_EQUAL_UINT64(sequence, view.counters.frame_sequence);
+        TEST_ASSERT_EQUAL_UINT32(f + 1U, view.counters.accepted[NT_GFX_OP_PASS]);
         TEST_ASSERT_NOT_EQUAL_UINT32(0, view.execute_end);
         uint32_t passes = 0;
         for (uint32_t i = 0; i < view.count; i++) {

@@ -430,7 +430,7 @@ Run them from the repo root with `python -m`; `tools/devapi/launch.py` starts th
 
 Exit 0 is a pass, 1 a failure, 2 a usage or launch error. There is no read timeout or retry: the caller's
 outer deadline bounds a run. Two gfx helpers wait for a frame that will be stored, with no timeout:
-`gfx_read` retries `frame_not_ready`, and `gfx_step_frame` polls `gfx.frames` until the step frame is listed. `web_demo` is web-only (raw-bridge busy/reset, capture after WebGL context
+`gfx_frames` and `gfx_read` retry `frame_not_ready`, and `gfx_step_frame` polls `gfx.frames` until the step frame is listed. `web_demo` is web-only (raw-bridge busy/reset, capture after WebGL context
 loss, takeover). `record_demo` needs the RECORDER group, and `capture_demo`, `web_demo` and the skeletal
 scripts need Pillow + numpy (`tools/devapi/requirements-capture.txt`).
 
