@@ -48,28 +48,30 @@ static struct {
 // #region ring
 static const stored_frame *frame_at(uint32_t i) { return &s_frames[(s_ring.oldest + i) % NT_DEVAPI_GFX_RING_FRAMES]; }
 
-static bool overlaps_stored(uint32_t start, uint32_t count) {
+static bool follows_newest(uint64_t sequence) { return s_ring.count == 0 || sequence == frame_at(s_ring.count - 1U)->view.counters.frame_sequence + 1U; }
+
+/* The oldest frames that give way to a frame at [start, start + count): up to the newest one it overlaps,
+   and at least one when the frame ring is full. */
+static uint32_t frames_to_drop(uint32_t start, uint32_t count) {
+    uint32_t drop = s_ring.count == NT_DEVAPI_GFX_RING_FRAMES ? 1U : 0U;
     for (uint32_t i = 0; i < s_ring.count; i++) {
         const stored_frame *f = frame_at(i);
         const uint32_t first = (uint32_t)(f->view.events - s_records);
         if (start < first + f->view.count && first < start + count) {
-            return true;
+            drop = i + 1U;
         }
     }
-    return false;
+    return drop;
 }
-
-static bool follows_newest(uint64_t sequence) { return s_ring.count == 0 || sequence == frame_at(s_ring.count - 1U)->view.counters.frame_sequence + 1U; }
 
 /* A frame is contiguous, at head or at 0 when it would pass the end; the oldest frames give way. */
 static void store_frame(const nt_gfx_capture_view_t *view, uint32_t sim_frame, bool advanced) {
     NT_ASSERT(view->count > 0 && "gfx recording: a recorded frame starts with its state snapshot");
     NT_ASSERT(view->count <= NT_DEVAPI_GFX_RING_RECORDS && "gfx recording: a frame is larger than the ring -- raise NT_DEVAPI_GFX_RING_RECORDS or lower capture_capacity");
     const uint32_t start = s_ring.head + view->count <= NT_DEVAPI_GFX_RING_RECORDS ? s_ring.head : 0U;
-    while (s_ring.count == NT_DEVAPI_GFX_RING_FRAMES || overlaps_stored(start, view->count)) {
-        s_ring.oldest = (s_ring.oldest + 1U) % NT_DEVAPI_GFX_RING_FRAMES;
-        s_ring.count--;
-    }
+    const uint32_t drop = frames_to_drop(start, view->count);
+    s_ring.oldest = (s_ring.oldest + drop) % NT_DEVAPI_GFX_RING_FRAMES;
+    s_ring.count -= drop;
     memcpy(&s_records[start], view->events, (size_t)view->count * sizeof(nt_gfx_event_t));
     stored_frame *f = &s_frames[(s_ring.oldest + s_ring.count) % NT_DEVAPI_GFX_RING_FRAMES];
     *f = (stored_frame){.view = *view, .sim_frame = sim_frame, .advanced = advanced};
