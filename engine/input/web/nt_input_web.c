@@ -224,6 +224,8 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
             dx /= WHEEL_PX_PER_NOTCH;
             dy /= WHEEL_PX_PER_NOTCH;
         }
+        /* The wheel lands on the mouse slot, which may be gone (a bot's release): a move restores it. */
+        Module['_ntPtrBuf'].push(1, 0, e.clientX - rect.left, e.clientY - rect.top, e.buttons ? 0.5 : 0, 0, e.buttons);
         Module['_ntWheelBuf'].push(dx, dy);
         e.preventDefault();
     }, {passive: false});

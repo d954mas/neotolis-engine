@@ -139,6 +139,11 @@ static void glfw_mouse_button_callback(GLFWwindow *window, int button, int actio
 
 static void glfw_scroll_callback(GLFWwindow *window, double xoffset, double yoffset) {
     (void)window;
+    /* The wheel lands on the mouse slot, which may be gone (a bot's release): a move restores it. */
+    double xpos = 0.0;
+    double ypos = 0.0;
+    glfwGetCursorPos(s_glfw_window, &xpos, &ypos);
+    nt_input_buffer_pointer(false, xpos, ypos, s_cached_buttons);
     /* GLFW yoffset is ±1.0 per notch with OPPOSITE Y sign to the DOM (GLFW: up=+, DOM deltaY: down=+).
      * Web is canonical, so negate yoffset to match. X already agrees (right=+ on both). */
     nt_input_buffer_wheel((float)xoffset, -(float)yoffset);

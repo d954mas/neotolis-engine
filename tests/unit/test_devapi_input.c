@@ -164,6 +164,14 @@ static void test_input_click_lands_on_real_mouse_slot(void) {
     TEST_ASSERT_TRUE(g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_released);
 }
 
+/* The mouse commands drive only the mouse: a real press after a bot move still reads as the mouse. */
+static void test_input_move_keeps_mouse_type(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.move\",\"params\":{\"x\":10,\"y\":10,\"type\":\"touch\"}}")));
+    advance();
+    nt_input_pointer_down(NT_INPUT_MOUSE_ID, 10.0F, 10.0F, 1.0F, NT_POINTER_MOUSE, 1);
+    TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+}
+
 /* Handing control back keeps the schedule: the bot's pending release still lands. */
 static void test_input_set_player_enabled_true_keeps_schedule(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":false}}")));
@@ -213,8 +221,6 @@ static void test_input_set_player_enabled_bad_type_bad_params(void) { assert_bad
 /* ---- out-of-domain numeric bot input -> bad_params (never silently coerced) ---- */
 
 static void test_input_pointer_negative_id_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.pointer\",\"params\":{\"action\":\"down\",\"id\":-1,\"x\":1,\"y\":2}}")); }
-
-static void test_input_click_negative_id_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.click\",\"params\":{\"x\":1,\"y\":2,\"id\":-5}}")); }
 
 static void test_input_pointer_buttons_out_of_range_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"input.pointer\",\"params\":{\"action\":\"down\",\"id\":0,\"x\":1,\"y\":2,\"buttons\":8}}"));
@@ -873,6 +879,7 @@ int main(void) {
     RUN_TEST(test_input_gesture_queues_ordered);
     RUN_TEST(test_input_set_player_enabled_ok);
     RUN_TEST(test_input_click_lands_on_real_mouse_slot);
+    RUN_TEST(test_input_move_keeps_mouse_type);
     RUN_TEST(test_input_set_player_enabled_true_keeps_schedule);
     RUN_TEST(test_input_text_ok);
     RUN_TEST(test_input_text_utf8_multibyte);
@@ -883,7 +890,6 @@ int main(void) {
     RUN_TEST(test_input_text_bad_type_bad_params);
     RUN_TEST(test_input_set_player_enabled_bad_type_bad_params);
     RUN_TEST(test_input_pointer_negative_id_bad_params);
-    RUN_TEST(test_input_click_negative_id_bad_params);
     RUN_TEST(test_input_pointer_buttons_out_of_range_bad_params);
     RUN_TEST(test_input_click_button_out_of_range_bad_params);
     RUN_TEST(test_input_button_out_of_range_bad_params);
