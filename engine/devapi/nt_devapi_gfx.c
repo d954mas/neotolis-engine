@@ -102,7 +102,6 @@ void nt_devapi_gfx_record(bool enabled) {
     }
     s_ring.recording = enabled;
     if (enabled) {
-        nt_gfx_capture_request(); /* asserts capture_capacity at the switch, not a frame later */
         s_ring.oldest = 0;
         s_ring.count = 0;
         s_ring.head = 0;

@@ -483,7 +483,7 @@ static void test_an_overflowed_frame_is_stored_with_one_warning(void) {
     nt_log_remove_sink(count_overflow_warnings, NULL);
     TEST_ASSERT_EQUAL_UINT32(2, s_ring.count);
     TEST_ASSERT_TRUE(frame_at(0)->view.overflow && frame_at(1)->view.overflow);
-    TEST_ASSERT_EQUAL_INT(1, s_overflow_warnings);
+    TEST_ASSERT_EQUAL_INT(NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_WARN ? 1 : 0, s_overflow_warnings);
     cJSON *root = submit("{\"method\":\"gfx.frames\"}");
     const cJSON *entry = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(result_of(root), "frames"), 0);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(entry, "overflow")));

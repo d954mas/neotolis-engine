@@ -33,7 +33,7 @@ void nt_devapi_register_gfx(void);
 /* Game switch of the gfx group's recording mode, the same as gfx.record: on records every frame from the
    next nt_gfx_begin_frame; off keeps the ring and stores the frame in flight; off then on clears the ring,
    and a frame recording at that moment becomes its first frame. Valid anywhere in a frame once gfx is
-   initialized; on asserts at once without a nonzero capture_capacity. */
+   initialized; without a nonzero capture_capacity the next nt_gfx_begin_frame asserts while on. */
 void nt_devapi_gfx_record(bool enabled);
 #endif
 
