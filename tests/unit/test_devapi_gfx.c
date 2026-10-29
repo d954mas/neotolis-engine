@@ -64,7 +64,7 @@ static void frame_with(bool advance, const char *marker) {
 
 static void frame(bool advance) { frame_with(advance, NULL); }
 
-/* The old host order, the update after begin_frame: the group must store the same frames. */
+/* The update after begin_frame: the group stores the same frames. */
 static void frame_late_with(bool advance, const char *marker) {
     if (advance) {
         g_nt_app.frame++;
@@ -314,6 +314,7 @@ static void test_switch_rows(void) {
     /* clang-format off */
     static const switch_row rows[] = {
         {"1", AT_BETWEEN, 0, 2, false},
+        {"1", AT_MID_FRAME, -1, 2, true},
         {"1", AT_BEFORE_BEGIN, 0, 2, false},
         {"1", AT_MID_FRAME, 1, 2, false},
         {"0", AT_BETWEEN, NONE, -1, true},
@@ -483,6 +484,12 @@ static void test_an_overflowed_frame_is_stored_with_one_warning(void) {
     TEST_ASSERT_EQUAL_UINT32(2, s_ring.count);
     TEST_ASSERT_TRUE(frame_at(0)->view.overflow && frame_at(1)->view.overflow);
     TEST_ASSERT_EQUAL_INT(1, s_overflow_warnings);
+    cJSON *root = submit("{\"method\":\"gfx.frames\"}");
+    const cJSON *entry = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(result_of(root), "frames"), 0);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(entry, "overflow")));
+    TEST_ASSERT_EQUAL_UINT32(frame_at(0)->view.count, (uint32_t)cJSON_GetObjectItemCaseSensitive(entry, "records")->valuedouble);
+    TEST_ASSERT_EQUAL_UINT32(frame_at(0)->sim_frame, (uint32_t)cJSON_GetObjectItemCaseSensitive(entry, "sim_frame")->valuedouble);
+    cJSON_Delete(root);
 }
 
 /* A command between frames can still issue gfx work into the frame just ended (recorder.start makes

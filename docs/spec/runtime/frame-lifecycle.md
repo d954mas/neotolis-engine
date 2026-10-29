@@ -25,7 +25,7 @@ void game_shutdown(void);
 ```text
 platform_step
 nt_devapi_update      ← optional, dev-only: between frames, before nt_gfx_begin_frame
-                        (commands, the gfx recording hook, injected input)
+                        (commands, injected input)
 nt_gfx_begin_frame    ← closes the previous frame into g_nt_gfx.last_frame, syncs
                         context loss/restore, empties frame storage, opens this frame,
                         finishes program links (completed ones with parallel

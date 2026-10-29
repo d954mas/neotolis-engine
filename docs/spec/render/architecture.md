@@ -1178,13 +1178,12 @@ a NULL pointer. The finalized view retains its frame's counters (and so its
 `g_nt_gfx.last_frame`.
 
 **Capture hook.** `nt_gfx_capture_set_hook(fn)` registers one function that every
-`nt_gfx_begin_frame` calls after it finalizes the previous frame and before a pending
-request starts recording. It gets that frame's finalized view, complete with its
-post-render work and any gfx work issued between frames, valid only during the call,
-or NULL when that frame did not record. The hook may call only
-`nt_gfx_capture_request`, which then records the frame opening now, so a hook that
-requests in every call records every frame and copies each one exactly once, at the
-boundary gfx defines. NULL removes it; it lives until replaced, across `nt_gfx_init`
+`nt_gfx_begin_frame` calls after it finalizes the previous frame. It gets that
+frame's finalized view, complete with its post-render work and any gfx work issued
+between frames, valid only during the call, or NULL when that frame did not record.
+Returning true records the frame opening now, as `nt_gfx_capture_request` does, so a
+hook that always returns true records every frame and copies each one exactly once,
+at the boundary gfx defines. NULL removes it; it lives until replaced, across `nt_gfx_init`
 and `nt_gfx_shutdown`. The stub asserts on a hook, because it never begins a frame.
 The devapi gfx group is its user.
 

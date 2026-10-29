@@ -846,7 +846,9 @@ void nt_gfx_begin_frame(void) {
 #if NT_GFX_CAPTURE_ENABLED
     if (s_capture_hook != NULL) {
         const nt_gfx_capture_view_t view = nt_gfx_capture_read();
-        s_capture_hook(finalized ? &view : NULL);
+        if (s_capture_hook(finalized ? &view : NULL)) {
+            nt_gfx_capture_request();
+        }
     }
     /* Opened after the wipe and before the restore: the snapshot shows the tables the frame starts from. */
     if (g_nt_gfx_capture.request_pending) {

@@ -158,6 +158,22 @@ static nt_gfx_capture_view_t read_capture(void) {
     return capture;
 }
 
+/* Backend UBO cache skips; each carries its cache key: slot, offset, size. */
+static uint32_t ubo_cache_skips(const nt_gfx_capture_view_t *capture, uint32_t draw_size, uint32_t globals_size) {
+    uint32_t skips = 0;
+    for (uint32_t i = 0; i < capture->count; i++) {
+        const nt_gfx_event_t *e = &capture->events[i];
+        if (e->kind == NT_GFX_EVENT_SKIP && e->detail == NT_GFX_GL_glBindBufferRange) {
+            TEST_ASSERT_EQUAL_UINT8(3, e->arg_count);
+            const bool draw = e->data.backend.args[0] == NT_GFX_SLOT_DRAW;
+            TEST_ASSERT_TRUE(draw || e->data.backend.args[0] == NT_GFX_SLOT_GLOBALS);
+            TEST_ASSERT_EQUAL_UINT32(draw ? draw_size : globals_size, e->data.backend.args[2]);
+            skips++;
+        }
+    }
+    return skips;
+}
+
 static uint32_t captured_calls(nt_gfx_gl_call_t call) {
     nt_gfx_capture_view_t capture = read_capture();
     TEST_ASSERT_FALSE(capture.overflow);
@@ -905,6 +921,7 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
                 }
             }
             TEST_ASSERT_TRUE(viewport_known);
+            TEST_ASSERT_EQUAL_UINT32(2, ubo_cache_skips(&capture, sizeof(color), sizeof(block)));
         }
 #endif
         nt_gfx_counters_t c = g_nt_gfx.last_frame;

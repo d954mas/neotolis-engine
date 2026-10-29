@@ -794,13 +794,12 @@ void nt_gfx_capture_request(void);
  * progress, until the begin_frame that starts the next requested recording, or shutdown, so read
  * right after begin_frame. Copy count records and metadata to keep. Empty views have events=NULL. */
 nt_gfx_capture_view_t nt_gfx_capture_read(void);
-/* Called by every nt_gfx_begin_frame after it finalizes the previous frame and before a pending request
- * starts recording: finalized is that frame's view, complete with its post-render and between-frame work,
- * valid only during the call; NULL when that frame did not record. The hook may call only
- * nt_gfx_capture_request, which then records the frame opening now, so a request in every call records
- * every frame. NULL removes it; it lives until replaced, across init and shutdown. The stub asserts on a
- * hook. */
-typedef void (*nt_gfx_capture_hook_fn)(const nt_gfx_capture_view_t *finalized);
+/* Called by every nt_gfx_begin_frame after it finalizes the previous frame: finalized is that frame's view,
+ * complete with its post-render and between-frame work, valid only during the call; NULL when that frame
+ * did not record. Returning true records the frame opening now (as nt_gfx_capture_request), so a hook that
+ * always returns true records every frame. NULL removes it; it lives until replaced, across init and
+ * shutdown. The stub asserts on a hook. */
+typedef bool (*nt_gfx_capture_hook_fn)(const nt_gfx_capture_view_t *finalized);
 void nt_gfx_capture_set_hook(nt_gfx_capture_hook_fn fn);
 #endif
 

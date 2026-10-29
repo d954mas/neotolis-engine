@@ -1114,7 +1114,7 @@ static uint64_t s_hook_sequence;
 static uint32_t s_hook_passes;
 
 /* Records what every begin_frame hands over and requests the frame opening now. */
-static void count_hook(const nt_gfx_capture_view_t *finalized) {
+static bool count_hook(const nt_gfx_capture_view_t *finalized) {
     s_hook_calls++;
     if (finalized != NULL) {
         s_hook_finalized++;
@@ -1124,7 +1124,7 @@ static void count_hook(const nt_gfx_capture_view_t *finalized) {
             s_hook_passes += finalized->events[i].kind == NT_GFX_EVENT_OP && finalized->events[i].operation == NT_GFX_OP_PASS;
         }
     }
-    nt_gfx_capture_request();
+    return true;
 }
 
 /* The hook gets every begin_frame: NULL before anything recorded, then each finished frame, complete with

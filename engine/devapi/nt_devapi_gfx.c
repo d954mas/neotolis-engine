@@ -84,7 +84,7 @@ static void store_frame(const nt_gfx_capture_view_t *view, uint32_t sim_frame, b
 /* Called by every nt_gfx_begin_frame, after nt_app advanced the frame: finalized is the frame just
    closed, complete. Only frames this hook requested are stored, so off still stores the frame in flight
    and a capture requested elsewhere never enters the ring. */
-static void gfx_begin_frame(const nt_gfx_capture_view_t *finalized) {
+static bool gfx_begin_frame(const nt_gfx_capture_view_t *finalized) {
     if (finalized != NULL && s_ring.requested) {
         NT_ASSERT(follows_newest(finalized->counters.frame_sequence) && "gfx recording: stored frames are consecutive (re-init gfx only with recording off)");
         store_frame(finalized, s_ring.sim, s_ring.advanced);
@@ -92,9 +92,7 @@ static void gfx_begin_frame(const nt_gfx_capture_view_t *finalized) {
     s_ring.advanced = g_nt_app.frame != s_ring.sim;
     s_ring.sim = g_nt_app.frame;
     s_ring.requested = s_ring.recording;
-    if (s_ring.recording) {
-        nt_gfx_capture_request();
-    }
+    return s_ring.recording;
 }
 
 /* On records from the next frame that begins; off still stores the frame recording now. */
@@ -104,6 +102,7 @@ void nt_devapi_gfx_record(bool enabled) {
     }
     s_ring.recording = enabled;
     if (enabled) {
+        nt_gfx_capture_request(); /* asserts capture_capacity at the switch, not a frame later */
         s_ring.oldest = 0;
         s_ring.count = 0;
         s_ring.head = 0;
