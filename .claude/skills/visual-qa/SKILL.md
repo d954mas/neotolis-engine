@@ -44,9 +44,9 @@ cmake --build build/_cmake/native-debug-capture --target <example>
 
 4. **Gate the player before any input (hard rule):** a scenario that sends pointer input (click, move, drag, scroll) calls
    `client.set_player_enabled(False)` first and a best-effort `set_player_enabled(True)` in a `finally`
-   (wrapped in `try/except`, so it never masks the run's failure). A real mouse
-   over the window otherwise holds pointer slot 0 and hides every bot click from a game that reads
-   only `pointers[0]` (spec: "Input automation", the player gate).
+   (wrapped in `try/except`, so it never masks the run's failure). The bot drives the real mouse's
+   pointer, so a real mouse over the window otherwise moves it between the bot's press and release
+   (spec: "Input automation", the player gate).
 
 5. **Interaction rhythm (hard rule):** observe → act → `frame.wait` → observe;
    capture only after the state is stable. Lazy font glyphs / UI resources need

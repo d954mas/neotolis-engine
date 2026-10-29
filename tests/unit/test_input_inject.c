@@ -13,95 +13,60 @@ void tearDown(void) { nt_input_shutdown(); }
 
 void test_gate_off_drops_real_key(void) {
     nt_input_set_player_enabled(false);
-    nt_input_poll();
     nt_input_set_key(NT_KEY_A, true); /* real device event — must be dropped at the wrapper */
     TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
 }
 
-void test_gate_off_releases_held_key(void) {
+/* The gate filters; it releases nothing. */
+void test_gate_off_keeps_held_key(void) {
     nt_input_set_key(NT_KEY_W, true);
     nt_input_poll();
+    nt_input_set_player_enabled(false);
+    nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_W));
-    nt_input_set_player_enabled(false);
-    nt_input_poll(); /* the edge poll releases the held key; the game reads the release */
-    TEST_ASSERT_TRUE(nt_input_key_is_released(NT_KEY_W));
-    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_W));
-}
-
-void test_gate_off_releases_held_pointer(void) {
-    nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F, NT_POINTER_MOUSE, 1);
-    nt_input_poll();
-    TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
-    nt_input_set_player_enabled(false);
-    nt_input_poll(); /* the edge poll releases the held button with deferred deactivation */
-    /* The game reads the release via the PUBLIC query this frame: deactivation is deferred one
-       poll (like a normal pointer_up) so find_mouse_pointer still sees the active slot. */
-    TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_LEFT));
-    TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
-    nt_input_poll(); /* next poll resolves deactivate_pending -> slot deactivates, no leak */
-    TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
-    TEST_ASSERT_FALSE(nt_input_mouse_is_released(NT_BUTTON_LEFT)); /* slot gone -> release no longer readable */
-}
-
-/* OFF->ON with the bot's button held: the game reads the bot's release (nt_ui drops its capture),
-   then the returning real mouse gets slot 0 back. */
-void test_gate_reenable_releases_bot_pointer(void) {
-    nt_input_set_player_enabled(false);
-    nt_input_poll();
-    TEST_ASSERT_TRUE(nt_input_inject_pointer(NT_INJECT_POINTER_DOWN, NT_INPUT_INJECT_POINTER_ID_BASE, 5.0F, 5.0F, 1.0F, NT_POINTER_MOUSE, 1));
-    nt_input_poll();
-    TEST_ASSERT_EQUAL_UINT32(NT_INPUT_INJECT_POINTER_ID_BASE, g_nt_input.pointers[0].id);
-    nt_input_set_player_enabled(true);
-    nt_input_poll();
-    TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
-    TEST_ASSERT_TRUE(g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_released);
-    nt_input_poll();
-    nt_input_pointer_move(0, 10.0F, 10.0F, 1.0F, NT_POINTER_MOUSE, 0);
-    TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
-    TEST_ASSERT_EQUAL_UINT32(0, g_nt_input.pointers[0].id);
-}
-
-/* The gate switches at the poll, not at the call. */
-void test_gate_switches_at_poll(void) {
-    nt_input_set_player_enabled(false);
-    nt_input_poll();
-    nt_input_set_player_enabled(true);
-    nt_input_pointer_move(0, 10.0F, 10.0F, 1.0F, NT_POINTER_MOUSE, 0); /* still gated before the edge poll */
-    TEST_ASSERT_FALSE(g_nt_input.pointers[0].active);
-    nt_input_poll();
-    nt_input_pointer_move(0, 10.0F, 10.0F, 1.0F, NT_POINTER_MOUSE, 0);
-    TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
-}
-
-/* The #798 path: a real mouse holds slot 0, the gate frees it, the bot's next input takes slot 0. */
-void test_gate_off_gives_bot_slot_0(void) {
-    nt_input_pointer_move(0, 1.0F, 1.0F, 1.0F, NT_POINTER_MOUSE, 0);
-    nt_input_poll();
-    nt_input_set_player_enabled(false);
-    nt_input_poll();
-    TEST_ASSERT_TRUE(nt_input_inject_pointer(NT_INJECT_POINTER_DOWN, NT_INPUT_INJECT_POINTER_ID_BASE, 5.0F, 5.0F, 1.0F, NT_POINTER_MOUSE, 1));
-    nt_input_poll();
-    TEST_ASSERT_EQUAL_UINT32(NT_INPUT_INJECT_POINTER_ID_BASE, g_nt_input.pointers[0].id);
-}
-
-/* A request undone before the next poll is no edge: held real input stays. */
-void test_gate_toggle_within_frame_keeps_input(void) {
-    nt_input_set_key(NT_KEY_A, true);
-    nt_input_poll();
-    nt_input_set_player_enabled(false);
-    nt_input_set_player_enabled(true);
-    nt_input_poll();
-    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
-    TEST_ASSERT_FALSE(nt_input_key_is_released(NT_KEY_A));
+    TEST_ASSERT_FALSE(nt_input_key_is_released(NT_KEY_W));
 }
 
 void test_gate_reenable_applies_real(void) {
     nt_input_set_player_enabled(false);
-    nt_input_poll();
-    nt_input_set_player_enabled(true); /* fresh from real devices again */
-    nt_input_poll();
+    nt_input_set_player_enabled(true);
     nt_input_set_key(NT_KEY_B, true);
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_B));
+}
+
+/* The #798 path: the bot drives the mouse the real one already holds, so its click is on pointers[0]. */
+void test_bot_drives_real_mouse_slot(void) {
+    nt_input_pointer_move(NT_INPUT_MOUSE_ID, 1.0F, 1.0F, 1.0F, NT_POINTER_MOUSE, 0);
+    nt_input_poll();
+    nt_input_set_player_enabled(false);
+    TEST_ASSERT_TRUE(nt_input_inject_pointer(NT_INJECT_POINTER_DOWN, NT_INPUT_MOUSE_ID, 5.0F, 5.0F, 1.0F, NT_POINTER_MOUSE, 1));
+    nt_input_poll();
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_pressed);
+    TEST_ASSERT_FALSE(g_nt_input.pointers[1].active);
+    TEST_ASSERT_TRUE(nt_input_inject_buttons(NT_INPUT_MOUSE_ID, 0));
+    nt_input_poll();
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_released);
+    nt_input_poll();
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].active); /* a released mouse stays, like the real one */
+}
+
+void test_focus_lost_releases_real_input(void) {
+    nt_input_set_key(NT_KEY_A, true);
+    nt_input_pointer_down(NT_INPUT_MOUSE_ID, 1.0F, 1.0F, 1.0F, NT_POINTER_MOUSE, 1);
+    nt_input_poll();
+    nt_input_focus_lost();
+    TEST_ASSERT_TRUE(nt_input_key_is_released(NT_KEY_A));
+    TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_LEFT));
+}
+
+/* Gated, held input is the bot's: a click into another window must not cut a bot drag. */
+void test_gated_focus_lost_keeps_bot_input(void) {
+    nt_input_set_player_enabled(false);
+    TEST_ASSERT_TRUE(nt_input_inject_pointer(NT_INJECT_POINTER_DOWN, NT_INPUT_MOUSE_ID, 5.0F, 5.0F, 1.0F, NT_POINTER_MOUSE, 1));
+    nt_input_poll();
+    nt_input_focus_lost();
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
 }
 
 /* ---- inject is IMMEDIATE — staged this poll, applied this poll ---- */
@@ -204,10 +169,10 @@ void test_inject_buttons_at_current_position(void) {
     TEST_ASSERT_TRUE(float_near(0.0F, g_nt_input.pointers[0].dx, 0.001F)); /* no move -> no delta */
 }
 
-void test_inject_reserved_id(void) {
-    /* A real pointer at id=0 and the convenience synthetic id never collide (different slots). */
-    nt_input_pointer_down(0, 1.0F, 1.0F, 0.0F, NT_POINTER_MOUSE, 1);
-    TEST_ASSERT_TRUE(nt_input_inject_pointer(NT_INJECT_POINTER_DOWN, NT_INPUT_INJECT_POINTER_ID_BASE, 50.0F, 60.0F, 0.5F, NT_POINTER_TOUCH, 1));
+void test_inject_touch_id_own_slot(void) {
+    /* An explicit bot touch id gets its own slot next to the mouse. */
+    nt_input_pointer_down(NT_INPUT_MOUSE_ID, 1.0F, 1.0F, 0.0F, NT_POINTER_MOUSE, 1);
+    TEST_ASSERT_TRUE(nt_input_inject_pointer(NT_INJECT_POINTER_DOWN, 7, 50.0F, 60.0F, 0.5F, NT_POINTER_TOUCH, 1));
     nt_input_poll();
     nt_pointer_t *real = NULL;
     nt_pointer_t *synth = NULL;
@@ -218,7 +183,7 @@ void test_inject_reserved_id(void) {
         if (g_nt_input.pointers[i].id == 0U) {
             real = &g_nt_input.pointers[i];
         }
-        if (g_nt_input.pointers[i].id == NT_INPUT_INJECT_POINTER_ID_BASE) {
+        if (g_nt_input.pointers[i].id == 7U) {
             synth = &g_nt_input.pointers[i];
         }
     }
@@ -262,13 +227,11 @@ void test_inject_rejects_invalid_args(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_gate_off_drops_real_key);
-    RUN_TEST(test_gate_off_releases_held_key);
-    RUN_TEST(test_gate_off_releases_held_pointer);
+    RUN_TEST(test_gate_off_keeps_held_key);
     RUN_TEST(test_gate_reenable_applies_real);
-    RUN_TEST(test_gate_reenable_releases_bot_pointer);
-    RUN_TEST(test_gate_switches_at_poll);
-    RUN_TEST(test_gate_off_gives_bot_slot_0);
-    RUN_TEST(test_gate_toggle_within_frame_keeps_input);
+    RUN_TEST(test_bot_drives_real_mouse_slot);
+    RUN_TEST(test_focus_lost_releases_real_input);
+    RUN_TEST(test_gated_focus_lost_keeps_bot_input);
     RUN_TEST(test_inject_key_down_up);
     RUN_TEST(test_inject_same_poll_down_then_up);
     RUN_TEST(test_inject_flows_when_gated);
@@ -276,7 +239,7 @@ int main(void) {
     RUN_TEST(test_inject_wheel_mouse_slot);
     RUN_TEST(test_inject_button_mask_maps_right_and_middle);
     RUN_TEST(test_inject_buttons_at_current_position);
-    RUN_TEST(test_inject_reserved_id);
+    RUN_TEST(test_inject_touch_id_own_slot);
     RUN_TEST(test_overflow_rejects_whole);
     RUN_TEST(test_inject_rejects_invalid_args);
     return UNITY_END();

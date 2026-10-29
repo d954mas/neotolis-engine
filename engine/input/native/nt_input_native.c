@@ -100,8 +100,7 @@ void nt_input_set_text_input_mode(nt_text_input_mode_t mode) { (void)mode; }
 void nt_input_platform_poll(void) {
     /* Focus lost: clear all state, discard buffered events */
     if (s_focus_lost) {
-        nt_input_clear_all_keys();
-        nt_input_clear_all_pointers();
+        nt_input_focus_lost();
         s_focus_lost = false;
         s_key_count = 0;
         s_ptr_count = 0;
@@ -122,9 +121,9 @@ void nt_input_platform_poll(void) {
         float fx = (float)s_ptr_buf[i].x * dpr;
         float fy = (float)s_ptr_buf[i].y * dpr;
         if (s_ptr_buf[i].is_down) {
-            nt_input_pointer_down(0, fx, fy, 1.0F, NT_POINTER_MOUSE, s_ptr_buf[i].buttons);
+            nt_input_pointer_down(NT_INPUT_MOUSE_ID, fx, fy, 1.0F, NT_POINTER_MOUSE, s_ptr_buf[i].buttons);
         } else {
-            nt_input_pointer_move(0, fx, fy, 1.0F, NT_POINTER_MOUSE, s_ptr_buf[i].buttons);
+            nt_input_pointer_move(NT_INPUT_MOUSE_ID, fx, fy, 1.0F, NT_POINTER_MOUSE, s_ptr_buf[i].buttons);
         }
     }
     s_ptr_count = 0;

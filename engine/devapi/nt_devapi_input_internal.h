@@ -21,6 +21,7 @@
    sched_* calls (single-threaded -> atomic). */
 bool nt_devapi_input_sched_can_reserve(uint32_t n);
 void nt_devapi_input_sched_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask, uint16_t at_frame);
+void nt_devapi_input_sched_buttons(uint32_t id, uint8_t buttons_mask, uint16_t at_frame);
 void nt_devapi_input_sched_wheel(float dx, float dy, uint16_t at_frame);
 
 #endif /* NT_DEVAPI_INPUT_INTERNAL_H */

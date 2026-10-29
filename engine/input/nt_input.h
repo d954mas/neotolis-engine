@@ -105,8 +105,12 @@ typedef struct {
 
 #define NT_INPUT_MAX_POINTERS 8
 
+/* The one mouse: both backends report the real mouse with this id, and the bot's mouse defaults to it,
+   so a bot click lands in the slot the game reads. Explicit bot ids are used verbatim. */
+#define NT_INPUT_MOUSE_ID 0U
+
 typedef struct {
-    uint32_t id;             /* Browser PointerEvent.pointerId */
+    uint32_t id;             /* NT_INPUT_MOUSE_ID for the mouse; touch/pen: a platform id */
     float x, y;              /* Framebuffer pixels, canvas-relative */
     float dx, dy;            /* Movement delta in framebuffer pixels */
     float wheel_dx;          /* Wheel delta in NOTCHES: 1.0 == one physical detent (platform edge
@@ -188,10 +192,6 @@ typedef enum {
 #ifndef NT_INPUT_INJECT_QUEUE_MAX
 #define NT_INPUT_INJECT_QUEUE_MAX 256
 #endif
-
-/* Convenience single-pointer id: a HIGH reserved value so it never collides with a real
-   mouse (id=0) or a small browser pointerId. Explicit bot ids are used verbatim. */
-#define NT_INPUT_INJECT_POINTER_ID_BASE 0x10000000U
 
 /* ---- Mouse convenience helpers ---- */
 

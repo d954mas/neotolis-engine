@@ -53,6 +53,10 @@ typedef struct InputPointer {
     Mouse and touch unify under pointer model
         .
 
+The mouse has one id on every platform, `NT_INPUT_MOUSE_ID` (0); touch and pen use platform ids
+(web: `pointerId + 1`). Devapi input automation drives the same mouse id
+(see "Input automation" in [Logging, errors and debugging](../debug/logging-errors-debugging.md)).
+
 ## Input capture
 
 Capture is stored centrally in input system.

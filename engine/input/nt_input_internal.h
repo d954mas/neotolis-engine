@@ -13,13 +13,15 @@ void nt_input_pointer_up(uint32_t id);
 void nt_input_wheel(float dx, float dy);
 void nt_input_clear_all_keys(void);
 void nt_input_clear_all_pointers(void);
+/* Backends call this on focus loss: the release events never arrive, so held input releases here. */
+void nt_input_focus_lost(void);
 
 /* nt_input automation surface (player gate + synthetic input injection). Compiled only when
    NT_INPUT_AUTOMATION_ENABLED (devapi input group in the build, or tests); a lean build drops the
    gate, the inject buffer, and all these symbols entirely.
 
    Player gate: when disabled the public real-apply wrappers (set_key, pointer_*, wheel,
-   buffer_char) early-return. The next nt_input_poll switches it; either edge releases held input there.
+   buffer_char, focus_lost) early-return. It releases nothing: whoever pressed releases.
    Inject calls the *_apply cores directly so it always flows.
 
    Inject API (L1 engine capability; L2 devapi group drives it untrusted): IMMEDIATE only — each call

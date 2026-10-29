@@ -88,7 +88,7 @@ void nt_devapi_input_sched_pointer(nt_inject_kind_t kind, uint32_t id, float x, 
 }
 
 /* Mask applies at the slot's apply-time position (schedule order), so a queued move is honored. */
-static void sched_buttons(uint32_t id, uint8_t buttons_mask, uint16_t at_frame) {
+void nt_devapi_input_sched_buttons(uint32_t id, uint8_t buttons_mask, uint16_t at_frame) {
     sched_entry_t *e = sched_reserve(1);
     e->frames_remaining = at_frame;
     e->kind = NT_INJECT_POINTER_BUTTONS;
@@ -364,7 +364,7 @@ static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_erro
     return true;
 }
 
-/* sugar = pointer move on the bot mouse pointer (reserved id). */
+/* sugar = pointer move on the mouse. */
 static bool cmd_input_move(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     const cJSON *xj = cJSON_GetObjectItemCaseSensitive(params, "x");
     const cJSON *yj = cJSON_GetObjectItemCaseSensitive(params, "y");
@@ -374,7 +374,7 @@ static bool cmd_input_move(const cJSON *params, cJSON *result, nt_devapi_error *
         return false;
     }
     y = flip_y_up_to_device(y);
-    uint32_t id = NT_INPUT_INJECT_POINTER_ID_BASE;
+    uint32_t id = NT_INPUT_MOUSE_ID;
     const cJSON *idj = cJSON_GetObjectItemCaseSensitive(params, "id");
     if (idj != NULL) {
         if (!nt_devapi_parse_u32_param_exact(idj, UINT32_MAX, err, "input.move: id must be an integer in [0, 4294967295]", &id)) {
@@ -393,7 +393,7 @@ static bool cmd_input_move(const cJSON *params, cJSON *result, nt_devapi_error *
     return true;
 }
 
-/* down@0 + up@hold on the bot mouse pointer; hold default 1 (1-frame click), 0 = same-frame. */
+/* down@0 + button release@hold on the mouse; hold default 1 (1-frame click), 0 = same-frame. */
 static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     const cJSON *xj = cJSON_GetObjectItemCaseSensitive(params, "x");
     const cJSON *yj = cJSON_GetObjectItemCaseSensitive(params, "y");
@@ -403,7 +403,7 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
         return false;
     }
     y = flip_y_up_to_device(y);
-    uint32_t id = NT_INPUT_INJECT_POINTER_ID_BASE;
+    uint32_t id = NT_INPUT_MOUSE_ID;
     const cJSON *idj = cJSON_GetObjectItemCaseSensitive(params, "id");
     if (idj != NULL) {
         if (!nt_devapi_parse_u32_param_exact(idj, UINT32_MAX, err, "input.click: id must be an integer in [0, 4294967295]", &id)) {
@@ -428,7 +428,7 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
         return nt_devapi_fail(err, "input.click: inject schedule overflow");
     }
     nt_devapi_input_sched_pointer(NT_INJECT_POINTER_DOWN, id, x, y, 1.0F, (uint8_t)NT_POINTER_MOUSE, buttons, 0);
-    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_UP, id, x, y, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, hold);
+    nt_devapi_input_sched_buttons(id, 0, hold); /* a mouse releases its button and stays, like the real one */
     devapi_add_number(result, "queued", 2.0);
     return true;
 }
@@ -460,7 +460,7 @@ static bool cmd_input_wheel(const cJSON *params, cJSON *result, nt_devapi_error 
         if (!nt_devapi_input_sched_can_reserve(2U)) {
             return nt_devapi_fail(err, "input.wheel: inject schedule overflow");
         }
-        nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, NT_INPUT_INJECT_POINTER_ID_BASE, x, y, 1.0F, (uint8_t)NT_POINTER_MOUSE, 0, 0);
+        nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, NT_INPUT_MOUSE_ID, x, y, 1.0F, (uint8_t)NT_POINTER_MOUSE, 0, 0);
     } else if (!nt_devapi_input_sched_can_reserve(1U)) {
         return nt_devapi_fail(err, "input.wheel: inject schedule overflow");
     }
@@ -551,7 +551,7 @@ static bool cmd_input_button(const cJSON *params, cJSON *result, nt_devapi_error
     if (!parse_button_mask(bj, "input.button: buttons must be an integer mask in [0, 7]", &buttons, err)) {
         return false;
     }
-    uint32_t id = NT_INPUT_INJECT_POINTER_ID_BASE;
+    uint32_t id = NT_INPUT_MOUSE_ID;
     const cJSON *idj = cJSON_GetObjectItemCaseSensitive(params, "id");
     if (idj != NULL) {
         if (!nt_devapi_parse_u32_param_exact(idj, UINT32_MAX, err, "input.button: id must be an integer in [0, 4294967295]", &id)) {
@@ -562,7 +562,7 @@ static bool cmd_input_button(const cJSON *params, cJSON *result, nt_devapi_error
     if (!nt_devapi_input_sched_can_reserve(1U)) {
         return nt_devapi_fail(err, "input.button: inject schedule overflow");
     }
-    sched_buttons(id, buttons, 0);
+    nt_devapi_input_sched_buttons(id, buttons, 0);
     devapi_add_bool(result, "ok", true);
     return true;
 }
@@ -573,9 +573,6 @@ static bool cmd_input_set_player_enabled(const cJSON *params, cJSON *result, nt_
         return nt_devapi_fail(err, "input.set_player_enabled: enabled must be a bool");
     }
     bool enabled = cJSON_IsTrue(e);
-    if (enabled) {
-        nt_devapi_input_reset(); /* the bot hands back control: a pending move would recreate its pointer */
-    }
     nt_input_set_player_enabled(enabled);
     devapi_add_bool(result, "enabled", enabled);
     return true;
@@ -701,14 +698,14 @@ static const nt_devapi_command k_input_cmds[] = {
     },
     {
         .method = "input.move",
-        .summary = "sugar: pointer move on the bot mouse pointer (reserved id); x/y are Y-up (origin bottom-left), framebuffer px",
+        .summary = "sugar: pointer move on the mouse; x/y are Y-up (origin bottom-left), framebuffer px",
         .params_shape = "{x:number, y:number, id?:number, type?:string}, origin:bottom-left, y_axis:up, space:framebuffer-px",
         .result_shape = "{queued:number}",
         .fn = cmd_input_move,
     },
     {
         .method = "input.click",
-        .summary = "sugar: pointer down@0 + up@hold (2 entries) on the bot mouse pointer; hold default 1 frame, 0 = same-frame; x/y are Y-up (origin bottom-left), framebuffer px",
+        .summary = "sugar: pointer down@0 + button release@hold (2 entries) on the mouse; hold default 1 frame, 0 = same-frame; x/y are Y-up (origin bottom-left), framebuffer px",
         .params_shape = "{x:number, y:number, button?:number, id?:number, hold?:number}, origin:bottom-left, y_axis:up, space:framebuffer-px",
         .result_shape = "{queued:number}",
         .fn = cmd_input_click,
@@ -730,7 +727,7 @@ static const nt_devapi_command k_input_cmds[] = {
     },
     {
         .method = "input.button",
-        .summary = "set the mouse-button mask {1,2,4} on the given id (default: the bot mouse pointer)",
+        .summary = "set the mouse-button mask {1,2,4} on the given id (default: the mouse)",
         .params_shape = "{buttons:number, id?:number}",
         .result_shape = "{ok:bool}",
         .fn = cmd_input_button,

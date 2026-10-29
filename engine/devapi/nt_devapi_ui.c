@@ -306,8 +306,8 @@ static bool cmd_ui_click(const cJSON *params, cJSON *result, nt_devapi_error *er
     if (!nt_devapi_input_sched_can_reserve(2U)) {
         return nt_devapi_fail(err, "ui.click: inject schedule overflow");
     }
-    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_DOWN, NT_INPUT_INJECT_POINTER_ID_BASE, cx, cy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, 0);
-    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_UP, NT_INPUT_INJECT_POINTER_ID_BASE, cx, cy, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, hold);
+    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_DOWN, NT_INPUT_MOUSE_ID, cx, cy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, 0);
+    nt_devapi_input_sched_buttons(NT_INPUT_MOUSE_ID, 0, hold);
     devapi_add_number(result, "queued", 2.0);
     return true;
 }
@@ -337,7 +337,7 @@ static bool cmd_ui_scroll(const cJSON *params, cJSON *result, nt_devapi_error *e
     if (!nt_devapi_input_sched_can_reserve(2U)) {
         return nt_devapi_fail(err, "ui.scroll: inject schedule overflow");
     }
-    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, NT_INPUT_INJECT_POINTER_ID_BASE, cx, cy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 0, 0);
+    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, NT_INPUT_MOUSE_ID, cx, cy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 0, 0);
     nt_devapi_input_sched_wheel(dx, dy, 0);
     devapi_add_number(result, "queued", 2.0);
     return true;
@@ -374,7 +374,7 @@ static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err
     if (!nt_devapi_input_sched_can_reserve(total)) {
         return nt_devapi_fail(err, "ui.drag: inject schedule overflow");
     }
-    const uint32_t id = NT_INPUT_INJECT_POINTER_ID_BASE;
+    const uint32_t id = NT_INPUT_MOUSE_ID;
     nt_devapi_input_sched_pointer(NT_INJECT_POINTER_DOWN, id, fx, fy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, 0);
     for (uint32_t i = 1; i <= frames; i++) { /* uint32: the cap may be -D'd up to UINT16_MAX */
         /* In double: to - from cannot overflow and keeps its precision; the last MOVE lands exactly on to. */
@@ -383,7 +383,7 @@ static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err
         float my = i == frames ? ty : (float)((double)fy + (((double)ty - (double)fy) * t));
         nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, id, mx, my, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, (uint16_t)i);
     }
-    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_UP, id, tx, ty, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, frames);
+    nt_devapi_input_sched_buttons(id, 0, frames);
     devapi_add_number(result, "queued", (double)total);
     return true;
 }
