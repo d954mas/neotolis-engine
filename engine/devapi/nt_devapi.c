@@ -63,12 +63,12 @@ static nt_devapi_hook_fn s_tick_hook;
 static nt_devapi_hook_fn s_reset_hooks[NT_DEVAPI_MAX_RESET_HOOKS];
 static int s_reset_count;
 
-/* Idempotent, so a transport stop->start re-sets the same poll. */
 void nt_devapi_set_frame_poll(nt_devapi_hook_fn fn) {
     NT_ASSERT(fn != NULL && s_frame_hook == NULL);
     s_frame_hook = fn;
 }
 
+/* Idempotent, so a transport stop->start re-sets the same poll. */
 void nt_devapi_set_transport_poll(nt_devapi_hook_fn fn) {
     NT_ASSERT(fn != NULL && (s_transport_hook == NULL || s_transport_hook == fn));
     s_transport_hook = fn;

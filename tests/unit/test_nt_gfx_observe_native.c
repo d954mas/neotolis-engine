@@ -680,7 +680,12 @@ static void test_shutdown_while_recording_writes_no_record(void) {
     nt_gfx_begin_frame();
     nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, buffer.id);
-    TEST_ASSERT_GREATER_THAN_UINT32(0, nt_test_capture_open().count);
+    const nt_gfx_capture_view_t open = nt_test_capture_open();
+    bool uploaded = false;
+    for (uint32_t i = 0; i < open.count; i++) {
+        uploaded |= open.events[i].kind == NT_GFX_EVENT_BACKEND && open.events[i].detail == NT_GFX_GL_glBufferData;
+    }
+    TEST_ASSERT_TRUE(uploaded); /* the recording half holds GL records when shutdown discards it */
     nt_gfx_shutdown();
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 4096;

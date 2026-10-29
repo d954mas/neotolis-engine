@@ -1094,8 +1094,8 @@ upload before the replayed draws that read it.
 Backends without GL (the test fake) issue no GL calls, so `gl[]` and the
 upload fields stay zero there. `NT_GFX_CAPTURE_ENABLED` is a numeric interface
 definition published by the interface target, so every consumer sees the same
-configuration; `nt_gfx_capture_request`, `nt_gfx_capture_read`,
-`nt_gfx_gl_call_name`, `nt_gfx_note_record`, `nt_gfx_marker_push` and
+configuration; `nt_gfx_capture_request`, `nt_gfx_capture_set_continuous`,
+`nt_gfx_capture_read`, `nt_gfx_gl_call_name`, `nt_gfx_note_record`, `nt_gfx_marker_push` and
 `nt_gfx_marker_pop` exist only when it is 1.
 
 `gl[]` counts, by `nt_gfx_gl_call_t`, every GL call the GL backend issues
