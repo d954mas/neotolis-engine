@@ -2631,6 +2631,9 @@ static void mount_pack(const char *name) {
 static void frame(void) {
     nt_window_poll();
     nt_example_frames_begin();
+#ifdef NT_DEVAPI_ENABLED
+    nt_devapi_update();
+#endif
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_TEXTURE);
@@ -2643,9 +2646,6 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         s_atlas_bound = false;
     }
-#ifdef NT_DEVAPI_ENABLED
-    nt_devapi_update();
-#endif
     if (!nt_example_frames_on()) {
         nt_input_poll();
     }
@@ -2752,7 +2752,7 @@ int main(int argc, char *argv[]) {
     nt_input_init();
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
 #ifdef NT_DEVAPI_GROUP_GFX
-    gfx_desc.capture_capacity = 16384; /* gfx.record: two arrays of this many records */
+    gfx_desc.capture_capacity = 16384; /* gfx.record: records of one frame */
 #endif
     gfx_desc.depth = true;
     gfx_desc.max_meshes = 16;

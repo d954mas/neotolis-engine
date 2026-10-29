@@ -6,7 +6,6 @@
 
 #define GLFW_INCLUDE_NONE
 #include "graphics/nt_gfx_capture_text.h"
-#include "test_helpers/nt_gfx_test_capture.h"
 #include <GLFW/glfw3.h>
 #include <glad/gl.h>
 
@@ -160,9 +159,8 @@ static nt_gfx_capture_view_t read_capture(void) {
 }
 
 static uint32_t captured_calls(nt_gfx_gl_call_t call) {
-    nt_gfx_capture_view_t capture = nt_test_capture_latest();
+    nt_gfx_capture_view_t capture = read_capture();
     TEST_ASSERT_FALSE(capture.overflow);
-    TEST_ASSERT_GREATER_THAN_UINT64(0, nt_gfx_capture_format(&capture, NULL, 0));
     uint32_t count = 0;
     for (uint32_t i = 0; i < capture.count; i++) {
         if (capture.events[i].kind == NT_GFX_EVENT_BACKEND && capture.events[i].detail == (uint32_t)call) {

@@ -47,10 +47,11 @@ void nt_devapi_register(const nt_devapi_command *cmds, size_t count, void *user_
 // #endregion
 
 // #region lifecycle hooks
-/* Three ordered phases run every update: the frame hook (a group acts on the frame begin_frame just
-   finalized) before the transport poll (recv + enqueue), so a command received this tick sees that frame;
-   then the tick (the input schedule release), so a line received this tick is scheduled before the tick
-   reads it, whatever the registration order. One slot each. Reset hooks fire on a client drop. */
+/* Three ordered phases run every update, between frames: the transport poll (recv + enqueue); the frame
+   hook (a group acts on the frame just ended, after this update's commands, as on web where commands
+   arrive before the update); then the tick (the input schedule release), so a line received this tick is
+   scheduled before the tick reads it, whatever the registration order. One slot each. Reset hooks fire
+   on a client drop. */
 #ifndef NT_DEVAPI_MAX_RESET_HOOKS
 #define NT_DEVAPI_MAX_RESET_HOOKS 8
 #endif
@@ -543,15 +544,15 @@ const char *nt_devapi_poll_response(void) {
     return out;
 }
 
-/* Core per-tick entry: resolves the pending gate, then the frame hook, the transport poll (recv + drain)
+/* Core per-tick entry: resolves the pending gate, then the transport poll (recv + drain), the frame hook
    and the tick (e.g. the input schedule release), naming neither transport nor group. */
 void nt_devapi_update(void) {
     resolve_pending();
-    if (s_frame_hook != NULL) {
-        s_frame_hook();
-    }
     if (s_transport_hook != NULL) {
         s_transport_hook();
+    }
+    if (s_frame_hook != NULL) {
+        s_frame_hook();
     }
     if (s_tick_hook != NULL) {
         s_tick_hook();

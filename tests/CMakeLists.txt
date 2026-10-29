@@ -1068,7 +1068,7 @@ if(NOT EMSCRIPTEN)
         # gfx group (gfx.record / gfx.frames / gfx.read) via submit() over nt_gfx_fake; the TU includes
         # nt_devapi_gfx.c with a small ring, so the group lib is not linked.
         if(NT_DEVAPI_GROUP_GFX)
-            add_executable(test_devapi_gfx unit/test_devapi_gfx.c)
+            add_executable(test_devapi_gfx unit/test_devapi_gfx.c unit/test_helpers/nt_assert_trap.c)
             target_link_libraries(test_devapi_gfx PRIVATE
                 nt_devapi cjson nt_window_stub nt_app_stub nt_gfx_capture_text
                 nt_gfx_fake nt_basisu_transcoder_stub nt_core nt_log unity nt_meshwire_stub)

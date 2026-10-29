@@ -178,8 +178,8 @@ static bool cmd_render_set_enabled(const cJSON *params, cJSON *result, nt_devapi
 
 static bool cmd_render_info(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     devapi_add_bool(result, "enabled", nt_app_render_enabled());
-    /* Last closed frame: this command runs early in the next frame, before its draws. */
-    devapi_add_number(result, "draw_calls", (double)nt_gfx_draw_calls(&g_nt_gfx.last_frame));
+    /* Commands run between frames: counters hold the frame just rendered, complete. */
+    devapi_add_number(result, "draw_calls", (double)nt_gfx_draw_calls(&g_nt_gfx.counters));
     return true;
 }
 // #endregion

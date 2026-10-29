@@ -365,7 +365,7 @@ typedef struct {
      * The others: 4 per stream shapes draw from, the sprite layouts and the game's own. */
     uint16_t max_vertex_inputs;
     uint16_t max_render_targets; /* default: 16 */
-    uint32_t capture_capacity;   /* event records per capture array, default: 0, below 2^24; init allocates two arrays */
+    uint32_t capture_capacity;   /* event records, default: 0, below 2^24; allocated once at init */
     uint32_t stream_capacity;    /* draw-phase command bytes of one frame, default: 32 KiB; allocated once at init */
     /* Frame storage bytes per frame by stream (NT_GFX_FRAME_*), default: 0 (disabled) except the
      * uniform stream, which every pass's Globals block uses: 16 KiB;
@@ -781,7 +781,7 @@ typedef struct {
     const nt_gfx_event_t *events;
     uint32_t count;
     uint32_t execute_begin, execute_end; /* records of the end_frame stream execution, frame storage uploads included; 0 until it ran */
-    nt_gfx_counters_t counters;          /* the finalized frame's, even after later unrecorded frames */
+    nt_gfx_counters_t counters;          /* the finalized frame's, even after later unrecorded frames; frame_sequence 0 while recording */
 } nt_gfx_capture_view_t;
 
 #if NT_GFX_CAPTURE_ENABLED
@@ -790,9 +790,11 @@ const char *nt_gfx_gl_call_name(uint32_t call);
 /* One-shot: the next frame records, starting at the begin_frame that opens it. A request in every
  * frame records every frame. Requires nonzero init capacity. The stub is inert. */
 void nt_gfx_capture_request(void);
-/* The last finalized frame: metadata by value, records immutable until the next begin_frame that
- * finalizes another recording, or shutdown. Copy count records and metadata to keep. Empty views
- * have events=NULL. */
+/* Metadata by value; the event prefix is immutable, except OP records of operations still in
+ * progress, until the begin_frame that starts the next requested recording, or shutdown. Between
+ * frames it holds the whole last recorded frame; its counters are set only when it finalizes at the
+ * next begin_frame, so read g_nt_gfx.counters then. Copy count records and metadata to keep. Empty
+ * views have events=NULL. */
 nt_gfx_capture_view_t nt_gfx_capture_read(void);
 #endif
 

@@ -1819,7 +1819,7 @@ void test_draw_list_notes_each_run_and_its_skip(void) {
 
     const uint32_t first = nt_test_note(0, "mesh");
     const uint32_t second = nt_test_note(first + 1U, "mesh");
-    TEST_ASSERT_LESS_THAN_UINT32(nt_test_capture_latest().count, second);
+    TEST_ASSERT_LESS_THAN_UINT32(nt_gfx_capture_read().count, second);
     TEST_ASSERT_EQUAL_UINT32(not_ready.id, nt_test_note_u32(first, "material"));
     TEST_ASSERT_EQUAL_UINT32(mesh.id, nt_test_note_u32(first, "mesh"));
     TEST_ASSERT_EQUAL_STRING("program not ready", nt_test_note_str(first, "drop"));
@@ -1828,7 +1828,7 @@ void test_draw_list_notes_each_run_and_its_skip(void) {
     TEST_ASSERT_EQUAL_UINT32(ready.id, nt_test_note_u32(second, "material"));
     TEST_ASSERT_EQUAL_UINT32(mesh.id, nt_test_note_u32(second, "mesh"));
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, nt_test_next_draw_result(second));
-    TEST_ASSERT_EQUAL_UINT32(nt_test_capture_latest().count, nt_test_note(second + 1U, "mesh"));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_capture_read().count, nt_test_note(second + 1U, "mesh"));
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
 }

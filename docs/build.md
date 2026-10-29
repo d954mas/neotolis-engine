@@ -429,7 +429,8 @@ Run them from the repo root with `python -m`; `tools/devapi/launch.py` starts th
 - `--out DIR` receives artifacts (captures, recordings; default `build/devapi-out`).
 
 Exit 0 is a pass, 1 a failure, 2 a usage or launch error. There is no read timeout or retry: the caller's
-outer deadline bounds a run. `web_demo` is web-only (raw-bridge busy/reset, capture after WebGL context
+outer deadline bounds a run. The one retry is the gfx protocol state `frame_not_ready` (a frame that will
+be stored), which the gfx helpers retry with no timeout. `web_demo` is web-only (raw-bridge busy/reset, capture after WebGL context
 loss, takeover). `record_demo` needs the RECORDER group, and `capture_demo`, `web_demo` and the skeletal
 scripts need Pillow + numpy (`tools/devapi/requirements-capture.txt`).
 

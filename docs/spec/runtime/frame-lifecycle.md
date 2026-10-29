@@ -24,6 +24,8 @@ void game_shutdown(void);
 
 ```text
 platform_step
+nt_devapi_update      ← optional, dev-only: between frames, before nt_gfx_begin_frame
+                        (commands, the gfx recording hook, injected input)
 nt_gfx_begin_frame    ← closes the previous frame into g_nt_gfx.last_frame, syncs
                         context loss/restore, empties frame storage, opens this frame,
                         finishes program links (completed ones with parallel
@@ -58,14 +60,16 @@ nt_window_swap_buffers
 
 The host owns the gfx frame boundary: `nt_gfx_init` opens the first frame and the
 frame callback calls `nt_gfx_begin_frame` once at its start, before any other gfx
-use (the resource and font steps included), also when nothing renders. Context
+use (the resource and font steps included), also when nothing renders. Only
+`nt_devapi_update` runs before it, between frames. Context
 loss and restore are synced there, so the whole callback sees one stable
 `context_lost`/`context_restored` state. The callback ends with
 `nt_gfx_end_frame` after its last pass and before `nt_window_swap_buffers`,
 also when nothing renders. Pre-loop loading lands in the first frame, which
 only loads; teardown work after the last callback lands in a frame that
-`nt_gfx_shutdown` discards. Code in the callback (devapi commands, stats
-readers) reads the previous callback's frame from `g_nt_gfx.last_frame`. See
+`nt_gfx_shutdown` discards. Stats readers in the callback read the previous
+callback's frame from `g_nt_gfx.last_frame`; devapi commands run between frames
+and read the frame just ended from `g_nt_gfx.counters`. See
 [frame observation](../render/architecture.md#frame-observation).
 
 `nt_mem_scratch_reset()` MUST run before any scratch allocation in the

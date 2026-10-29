@@ -11,6 +11,7 @@
 /* clang-format off */
 #include "app/nt_app.h"
 #include "devapi/nt_devapi_internal.h"
+#include "graphics/nt_gfx.h"
 #include "unity.h"
 /* clang-format on */
 
@@ -242,6 +243,17 @@ static void test_render_info_reflects_flag(void) {
     /* no draw happened in this headless test -> draw_calls == 0 (nt_gfx_fake returns 0). */
     TEST_ASSERT_EQUAL_INT(0, cJSON_GetObjectItemCaseSensitive(result, "draw_calls")->valueint);
     cJSON_Delete(root);
+}
+
+/* Commands run between frames: draw_calls is the frame just rendered, not the one before it. */
+static void test_render_info_counts_the_frame_just_rendered(void) {
+    g_nt_gfx.last_frame.accepted[NT_GFX_OP_DRAW] = 2;
+    g_nt_gfx.counters.accepted[NT_GFX_OP_DRAW] = 3;
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"render.info\"}"));
+    TEST_ASSERT_EQUAL_INT(3, cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(root, "result"), "draw_calls")->valueint);
+    cJSON_Delete(root);
+    g_nt_gfx.last_frame = (nt_gfx_counters_t){0};
+    g_nt_gfx.counters = (nt_gfx_counters_t){0};
 }
 
 /* ---- frame.current ---- */
@@ -579,6 +591,7 @@ int main(void) {
     RUN_TEST(test_forwarding_to_nt_app);
     RUN_TEST(test_step_deferred_resolves_after_count);
     RUN_TEST(test_render_info_reflects_flag);
+    RUN_TEST(test_render_info_counts_the_frame_just_rendered);
     RUN_TEST(test_frame_current_matches_app);
     RUN_TEST(test_bad_params_cases);
     RUN_TEST(test_frame_wait_int32_bound);

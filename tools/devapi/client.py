@@ -250,34 +250,43 @@ class DevApiClient:
         """Turn gfx recording on or off (off keeps the ring; off then on clears it). Result: {}."""
         return self.result("gfx.record", {"enabled": enabled})
 
-    def gfx_frames(self, timeout: float = 1.0) -> Dict[str, Any]:
+    def gfx_frames(self) -> Dict[str, Any]:
         """List the stored frames, oldest first. Result: {recording, frames:[{sequence,sim_frame,advanced,records,overflow}]}.
 
-        After off the frame in flight is still stored, so frame_not_ready is retried until `timeout` seconds pass.
+        After off the frame in flight is still stored, so frame_not_ready is retried until it is.
         """
-        return self._result_when_ready("gfx.frames", {}, timeout)
+        return self._result_when_ready("gfx.frames", {})
 
-    def gfx_read(self, sequence: Optional[int] = None, sim_frame: Optional[int] = None, timeout: float = 1.0) -> Dict[str, Any]:
-        """Read one stored frame's capture text. Result: {sequence, sim_frame, text}.
+    def gfx_read(self, sequence: Optional[int] = None) -> Dict[str, Any]:
+        """Read one stored frame's capture text: the newest, or by a sequence from gfx.frames. Result: {sequence, sim_frame, text}.
 
-        No argument reads the newest frame; `sim_frame` reads the frame where the sim advanced to it (the
-        frame of a step). A step replies before its frame finishes, so frame_not_ready is retried until
-        `timeout` seconds pass; any other error raises at once.
+        The newest is frame_not_ready until a frame is stored; that is retried until it is. Any other error raises at once.
         """
-        params: Dict[str, Any] = {}
-        if sequence is not None:
-            params["sequence"] = sequence
-        if sim_frame is not None:
-            params["sim_frame"] = sim_frame
-        return self._result_when_ready("gfx.read", params, timeout)
+        return self._result_when_ready("gfx.read", {} if sequence is None else {"sequence": sequence})
 
-    def _result_when_ready(self, method: str, params: Dict[str, Any], timeout: float) -> Dict[str, Any]:
-        deadline = time.monotonic() + timeout
+    def gfx_step_frame(self, sim_frame: int) -> int:
+        """The sequence of the stored frame in which the sim advanced to `sim_frame` (the frame of a step).
+
+        A step replies before its frame is stored, so gfx.frames is polled until that frame is listed. Raises
+        DevApiResultError when it cannot come: recording is off, or the newest stored frame is at or past
+        `sim_frame` without it (evicted, or it began before recording turned on).
+        """
+        while True:
+            listing = self.gfx_frames()
+            frames = listing["frames"]
+            for f in frames:
+                if f["advanced"] and f["sim_frame"] == sim_frame:
+                    return f["sequence"]
+            if not listing["recording"] or (frames and (frames[-1]["sim_frame"] - sim_frame) % 2**32 < 2**31):
+                raise DevApiResultError(f"gfx_step_frame: no stored frame advanced to sim frame {sim_frame}")
+            time.sleep(0.005)
+
+    def _result_when_ready(self, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
         while True:
             try:
                 return self.result(method, params)
             except DevApiResultError as exc:
-                if "failed: frame_not_ready:" not in str(exc) or time.monotonic() >= deadline:
+                if "failed: frame_not_ready:" not in str(exc):
                     raise
             time.sleep(0.005)
 

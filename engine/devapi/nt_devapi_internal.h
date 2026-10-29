@@ -54,10 +54,10 @@ void nt_devapi_deferred_reset(void);
 // #region lifecycle hooks
 /* Lifecycle hooks let an optional group plug into the core/transport without either naming the
    group: a compiled-out group registers nothing, so the core/net TUs carry zero of its symbols. */
-/* One frame hook, one transport poll and one tick, cleared on shutdown and set again after each init,
+/* One transport poll, one frame hook and one tick, cleared on shutdown and set again after each init,
    run in that order. Reset hooks are registered through the public nt_devapi_register_reset. */
-void nt_devapi_set_frame_hook(nt_devapi_hook_fn fn);
 void nt_devapi_set_transport_poll(nt_devapi_hook_fn fn);
+void nt_devapi_set_frame_hook(nt_devapi_hook_fn fn);
 void nt_devapi_set_tick(nt_devapi_hook_fn fn);
 void nt_devapi_run_reset_hooks(void);
 // #endregion
