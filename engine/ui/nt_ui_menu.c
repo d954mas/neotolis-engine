@@ -247,7 +247,7 @@ static void menu_mouse_pos(nt_ui_context_t *ctx, float *mx, float *my) {
      * conversion before handing back a layout-space anchor. Idempotent. */
     nt_ui_internal_ensure_pointers_layout(ctx);
     if (ctx->frame_pointer_count > 0U) {
-        const nt_pointer_t *p = nt_pointer_primary(ctx->frame_pointers, ctx->frame_pointer_count);
+        const nt_pointer_t *p = &ctx->frame_pointers[ctx->frame_primary];
         *mx = p->x;
         *my = p->y;
     } else {

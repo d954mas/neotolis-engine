@@ -412,6 +412,23 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
 // #endregion
 
 // #region begin_end
+/* One pointer is the primary the game chose; in a whole array the first held pointer, else the first active one. */
+static uint32_t ui_primary_index(const nt_pointer_t *pointers, uint32_t count) {
+    uint32_t first = count;
+    for (uint32_t i = 0; i < count; i++) {
+        if (!pointers[i].active) {
+            continue;
+        }
+        for (int b = 0; b < NT_BUTTON_MAX; b++) {
+            if (pointers[i].buttons[b].is_down || pointers[i].buttons[b].is_released) {
+                return i;
+            }
+        }
+        first = first < count ? first : i;
+    }
+    return first < count ? first : 0U;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *pointers, uint32_t count) {
     NT_ASSERT(ctx != NULL && "nt_ui_begin: ctx must be non-NULL");
@@ -439,6 +456,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
      * identity default; a scaled app overrides it via nt_ui_set_viewport before the first hit-test). */
     memcpy(ctx->frame_pointers, pointers, sizeof(nt_pointer_t) * count);
     ctx->frame_pointer_count = count;
+    ctx->frame_primary = ui_primary_index(pointers, count);
     ctx->frame_dt = dt;
     ctx->frame_pointers_converted = false;
 #if NT_UI_DEBUG_TOOLS
@@ -538,7 +556,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     }
 #endif
 
-    const nt_pointer_t *primary = nt_pointer_primary(pointers, count);
+    const nt_pointer_t *primary = &pointers[ctx->frame_primary];
 
 #if NT_UI_DEBUG_TOOLS
     /* The inspector consumes the LAYOUT-space pointer, tested against LAST frame's solved tree (the
@@ -2623,7 +2641,7 @@ void nt_ui_internal_ensure_pointers_layout(nt_ui_context_t *ctx) {
      * PREV-frame viewport (1-frame lag, off only on a resize). frame_pointers are now layout-space; the
      * panel sits at logical x = begin_w - panel_width, so compare the converted pointer.x against it. */
     if (ctx->frame_pointer_count > 0U) {
-        const nt_pointer_t *primary = nt_pointer_primary(ctx->frame_pointers, ctx->frame_pointer_count);
+        const nt_pointer_t *primary = &ctx->frame_pointers[ctx->frame_primary];
         ctx->inspector_pointer_consumed = ctx->inspector_active && (primary->x >= (ctx->begin_w - ctx->inspector_metrics.panel_width));
     }
 #endif

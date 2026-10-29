@@ -2211,9 +2211,9 @@ static void rich_resolve_links(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uin
     if (ctx->frame_pointer_count == 0U) {
         return;
     }
-    /* Links hit-test the PRIMARY pointer only (nt_pointer_primary); multi-pointer link interaction
-     * (a 2nd touch hovering/clicking a different link) is not supported. */
-    const nt_pointer_t *p = nt_pointer_primary(ctx->frame_pointers, ctx->frame_pointer_count);
+    /* Links hit-test the PRIMARY pointer only; multi-pointer link interaction (a 2nd touch
+     * hovering/clicking a different link) is not supported. */
+    const nt_pointer_t *p = &ctx->frame_pointers[ctx->frame_primary];
     if (!p->active) {
         return; /* a gone pointer hovers nothing, like the widget hit test */
     }

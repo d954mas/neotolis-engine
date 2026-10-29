@@ -130,6 +130,38 @@ void nt_input_init(void) {
     nt_input_platform_init();
 }
 
+/* Like a browser's primary pointer: a single-pointer consumer never sees a press it did not get,
+   and a held capture never moves to another device. */
+static void primary_update(void) {
+    const nt_pointer_t *cur = &g_nt_input.pointers[g_nt_input.primary];
+    for (int b = 0; b < NT_BUTTON_MAX; b++) {
+        if (cur->active && (cur->buttons[b].is_down || cur->buttons[b].is_released)) {
+            return;
+        }
+    }
+    int hover = -1;
+    for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
+        const nt_pointer_t *p = &g_nt_input.pointers[i];
+        if (!p->active) {
+            continue;
+        }
+        bool down = false;
+        for (int b = 0; b < NT_BUTTON_MAX; b++) {
+            if (p->buttons[b].is_pressed) {
+                g_nt_input.primary = (uint8_t)i;
+                return;
+            }
+            down = down || p->buttons[b].is_down;
+        }
+        if (hover < 0 && !down && !p->deactivate_pending) {
+            hover = i;
+        }
+    }
+    if (hover >= 0) {
+        g_nt_input.primary = (uint8_t)hover;
+    }
+}
+
 void nt_input_poll(void) {
     /* Deactivate pointers that had pointer_up last frame */
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
@@ -166,6 +198,7 @@ void nt_input_poll(void) {
        only the due events (it owns the schedule + sim-advance gating). */
     inject_drain();
 #endif
+    primary_update();
 }
 
 void nt_input_shutdown(void) {

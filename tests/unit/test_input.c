@@ -172,37 +172,6 @@ void test_contact_move_without_down_ignored(void) {
     }
 }
 
-/* ---- Primary pointer ---- */
-
-void test_primary_none_is_slot_0(void) { TEST_ASSERT_EQUAL_PTR(&g_nt_input.pointers[0], nt_pointer_primary(g_nt_input.pointers, NT_INPUT_MAX_POINTERS)); }
-
-void test_primary_touch_down_over_hovering_mouse(void) {
-    nt_input_mouse_move(1.0F, 1.0F, 0);
-    TEST_ASSERT_EQUAL_PTR(&g_nt_input.pointers[0], nt_pointer_primary(g_nt_input.pointers, NT_INPUT_MAX_POINTERS));
-    nt_input_pointer_down(7, 5.0F, 5.0F, 0.5F, NT_POINTER_TOUCH, 1);
-    TEST_ASSERT_EQUAL_PTR(&g_nt_input.pointers[1], nt_pointer_primary(g_nt_input.pointers, NT_INPUT_MAX_POINTERS));
-}
-
-/* A lifted touch stays primary through its release frame, so a single-pointer consumer sees the click. */
-void test_primary_releasing_touch_stays(void) {
-    nt_input_mouse_move(1.0F, 1.0F, 0);
-    nt_input_pointer_down(7, 5.0F, 5.0F, 0.5F, NT_POINTER_TOUCH, 1);
-    nt_input_poll();
-    nt_input_pointer_up(7);
-    const nt_pointer_t *p = nt_pointer_primary(g_nt_input.pointers, NT_INPUT_MAX_POINTERS);
-    TEST_ASSERT_EQUAL_PTR(&g_nt_input.pointers[1], p);
-    TEST_ASSERT_TRUE(p->buttons[NT_BUTTON_LEFT].is_released);
-}
-
-/* One finger lifts and another lands in the same poll: the press is the primary. */
-void test_primary_press_beats_other_release(void) {
-    nt_input_pointer_down(1, 1.0F, 1.0F, 0.5F, NT_POINTER_TOUCH, 1);
-    nt_input_poll();
-    nt_input_pointer_up(1);
-    nt_input_pointer_down(2, 5.0F, 5.0F, 0.5F, NT_POINTER_TOUCH, 1);
-    TEST_ASSERT_EQUAL_PTR(&g_nt_input.pointers[2], nt_pointer_primary(g_nt_input.pointers, NT_INPUT_MAX_POINTERS));
-}
-
 void test_mouse_focus_lost_drops_pressure(void) {
     nt_input_mouse_move(10.0F, 10.0F, 1);
     nt_input_poll();
@@ -240,10 +209,6 @@ int main(void) {
     RUN_TEST(test_contact_up_deactivates_next_poll);
     RUN_TEST(test_contact_same_id_down_after_up_new_slot);
     RUN_TEST(test_contact_move_without_down_ignored);
-    RUN_TEST(test_primary_none_is_slot_0);
-    RUN_TEST(test_primary_touch_down_over_hovering_mouse);
-    RUN_TEST(test_primary_releasing_touch_stays);
-    RUN_TEST(test_primary_press_beats_other_release);
     RUN_TEST(test_mouse_focus_lost_drops_pressure);
     RUN_TEST(test_mouse_convenience);
     return UNITY_END();

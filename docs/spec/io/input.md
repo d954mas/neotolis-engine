@@ -44,16 +44,16 @@ position and deltas in framebuffer pixels, wheel notches, pressure, type, and pe
 - **Touch and pen contacts take slots 1..7** (7 contacts), each from its down to its up, with the
   platform contact id. A move for an unknown id is ignored, so a hovering pen has no slot (pen
   hover is not supported).
-- **The primary pointer**, for code that follows one pointer: `nt_pointer_primary(pointers, count)`
-  returns the first active pointer with a button down or released this frame, else the first active
-  one, else `pointers[0]`, in slot order: a pointer with a button down comes first, then one released
-  this frame. So a touch in use beats a hovering mouse, a lifted touch stays primary through its
-  release frame, and of two held contacts the lower slot wins. `nt_ui` picks its primary (menu
-  anchor, rich-text links, inspector) with the same rule over the array the game passes. A
-  single-pointer UI passes the primary (`nt_pointer_primary(...)`, count 1); a multi-pointer UI
-  passes the whole array, so a widget capture stays with its slot. With one pointer a capture
-  follows the primary, so a press with the other device while one is held (mouse and touch at
-  once) moves it.
+- **The primary pointer**, for code that follows one pointer: `g_nt_input.pointers[g_nt_input.primary]`,
+  updated at the end of `nt_input_poll`. A pointer becomes primary by a press, or by hovering while
+  no pointer is held (the mouse over the window), and stays primary from its press through its
+  release frame, like the browser's primary pointer. A contact already held when the primary ends
+  never takes over, and a press that lands while the primary is held or releasing is not primary:
+  a single-pointer consumer never sees a press it did not get, and a widget capture never moves to
+  another device. With no candidate the index stays on the last primary, now inactive. A
+  single-pointer UI passes the primary to `nt_ui_begin` with count 1; a multi-pointer UI passes the
+  whole array, so a widget capture stays with its slot (`nt_ui` then anchors menus, rich-text links
+  and the inspector on the first held pointer of the array, else the first active one).
 
 Backends feed the mouse through `nt_input_mouse_move(x, y, buttons)` (every real mouse event,
 including a button change) and `nt_input_mouse_leave()`; contacts through

@@ -122,42 +122,16 @@ typedef struct {
     nt_button_state_t buttons[NT_BUTTON_MAX];
 } nt_pointer_t;
 
-/* The pointer in use, for code that follows one pointer (nt_ui menus and links use the same rule): the
-   first active pointer with a button down, else one released this frame (a lifted touch stays primary
-   for its release frame), else the first active one (in g_nt_input.pointers the mouse comes before
-   contacts). With none active it is pointers[0]. */
-static inline const nt_pointer_t *nt_pointer_primary(const nt_pointer_t *pointers, uint32_t count) {
-    const nt_pointer_t *released = NULL;
-    const nt_pointer_t *first = NULL;
-    for (uint32_t i = 0; i < count; i++) {
-        const nt_pointer_t *p = &pointers[i];
-        if (!p->active) {
-            continue;
-        }
-        for (int b = 0; b < NT_BUTTON_MAX; b++) {
-            if (p->buttons[b].is_down) {
-                return p;
-            }
-            if (p->buttons[b].is_released && released == NULL) {
-                released = p;
-            }
-        }
-        if (first == NULL) {
-            first = p;
-        }
-    }
-    if (released != NULL) {
-        return released;
-    }
-    return first != NULL ? first : pointers;
-}
-
 /* ---- Global input state ---- */
 
 /* pointers[0] is the mouse: active while the cursor is over the window or a button is held, and a
-   button release keeps it. Touch and pen contacts take slots 1.., each from its down to its up. */
+   button release keeps it. Touch and pen contacts take slots 1.., each from its down to its up.
+   primary indexes the pointer a single-pointer consumer follows (updated by nt_input_poll): taken
+   by a press, or by hovering while nothing is held, and kept from the press through its release
+   frame. A contact already held when the primary ends never takes over. */
 typedef struct {
     nt_pointer_t pointers[NT_INPUT_MAX_POINTERS];
+    uint8_t primary;
 } nt_input_t;
 
 extern nt_input_t g_nt_input;

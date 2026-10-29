@@ -183,6 +183,56 @@ void test_inject_buttons_without_mouse_is_noop(void) {
 /* ---- whole-or-nothing overflow rejection (no poll between fills: the buffer drains
    whole each poll, so the cap is probed purely by staging without draining) ---- */
 
+static void touch(nt_inject_kind_t kind, uint32_t id) { TEST_ASSERT_TRUE(nt_input_inject_pointer(kind, id, (float)id, (float)id, 0.5F, NT_POINTER_TOUCH, kind == NT_INJECT_POINTER_UP ? 0 : 1)); }
+
+static uint32_t primary_id(void) { return g_nt_input.pointers[g_nt_input.primary].id; }
+
+void test_primary_touch_press_over_hovering_mouse(void) {
+    nt_input_poll();
+    TEST_ASSERT_EQUAL_UINT8(0, g_nt_input.primary);
+    TEST_ASSERT_TRUE(nt_input_inject_mouse(1.0F, 1.0F, 0));
+    nt_input_poll();
+    TEST_ASSERT_EQUAL_UINT8(0, g_nt_input.primary);
+    touch(NT_INJECT_POINTER_DOWN, 7);
+    nt_input_poll();
+    TEST_ASSERT_EQUAL_UINT8(1, g_nt_input.primary);
+}
+
+void test_primary_held_mouse_keeps_over_touch_press(void) {
+    TEST_ASSERT_TRUE(nt_input_inject_mouse(1.0F, 1.0F, 1));
+    nt_input_poll();
+    touch(NT_INJECT_POINTER_DOWN, 7);
+    nt_input_poll();
+    TEST_ASSERT_EQUAL_UINT8(0, g_nt_input.primary);
+}
+
+/* A lifted touch stays primary through its release frame, so a single-pointer consumer sees the click. */
+void test_primary_releasing_touch_stays(void) {
+    touch(NT_INJECT_POINTER_DOWN, 7);
+    nt_input_poll();
+    touch(NT_INJECT_POINTER_UP, 7);
+    nt_input_poll();
+    TEST_ASSERT_EQUAL_UINT32(7, primary_id());
+    TEST_ASSERT_TRUE(g_nt_input.pointers[g_nt_input.primary].buttons[NT_BUTTON_LEFT].is_released);
+}
+
+/* A finger held before the primary lifts, or landing in its release frame, never takes over; the next press does. */
+void test_primary_held_contact_never_takes_over(void) {
+    touch(NT_INJECT_POINTER_DOWN, 1);
+    nt_input_poll();
+    touch(NT_INJECT_POINTER_DOWN, 2);
+    nt_input_poll();
+    touch(NT_INJECT_POINTER_UP, 1);
+    touch(NT_INJECT_POINTER_DOWN, 3);
+    nt_input_poll();
+    TEST_ASSERT_EQUAL_UINT32(1, primary_id());
+    nt_input_poll();
+    TEST_ASSERT_FALSE(g_nt_input.pointers[g_nt_input.primary].active);
+    touch(NT_INJECT_POINTER_DOWN, 4);
+    nt_input_poll();
+    TEST_ASSERT_EQUAL_UINT32(4, primary_id());
+}
+
 void test_overflow_rejects_whole(void) {
     /* Fill the immediate buffer to CAP-1 (no poll, so nothing drains). */
     for (uint32_t i = 0; i < NT_INPUT_INJECT_QUEUE_MAX - 1U; i++) {
@@ -232,6 +282,10 @@ int main(void) {
     RUN_TEST(test_inject_button_mask_maps_right_and_middle);
     RUN_TEST(test_inject_buttons_at_current_position);
     RUN_TEST(test_inject_buttons_without_mouse_is_noop);
+    RUN_TEST(test_primary_touch_press_over_hovering_mouse);
+    RUN_TEST(test_primary_held_mouse_keeps_over_touch_press);
+    RUN_TEST(test_primary_releasing_touch_stays);
+    RUN_TEST(test_primary_held_contact_never_takes_over);
     RUN_TEST(test_overflow_rejects_whole);
     RUN_TEST(test_inject_rejects_invalid_args);
     return UNITY_END();

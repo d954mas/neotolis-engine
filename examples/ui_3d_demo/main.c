@@ -892,7 +892,7 @@ static void frame(void) {
     const bool ui_can_render = s_atlas_bound && s_font_bound && sprite_info && nt_gfx_program_ready(sprite_info->program) && text_info && nt_gfx_program_ready(text_info->program);
 
     if (ui_can_render) {
-        const nt_pointer_t *pointer = nt_pointer_primary(g_nt_input.pointers, NT_INPUT_MAX_POINTERS);
+        const nt_pointer_t *pointer = &g_nt_input.pointers[g_nt_input.primary];
         nt_ui_begin(s_ctx, fb_w, fb_h, dt, pointer, 1);
         nt_ui_set_view_proj(s_ctx, (const float *)vp_3d);
         /* Occlusion: if the cursor ray crosses the central object, block UI beyond it — a panel

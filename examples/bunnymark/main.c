@@ -313,7 +313,7 @@ static void frame(void) {
     /* One pointer for mouse and touch — using the primary pointer's button
      * state (not nt_input_mouse_*) avoids double-spawn on iOS where touch +
      * mouse events coexist. */
-    const nt_pointer_t *p = nt_pointer_primary(g_nt_input.pointers, NT_INPUT_MAX_POINTERS);
+    const nt_pointer_t *p = &g_nt_input.pointers[g_nt_input.primary];
     float w = (float)s_canvas_w();
     float h = (float)s_canvas_h();
     bool consumed = false;
