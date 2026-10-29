@@ -43,16 +43,6 @@ def _capture_stage(client, np, Image):
 
 def run(client, out_dir):
     client.set_player_enabled(False)  # a real mouse over the window would hide the bot's clicks
-    try:
-        _run(client, out_dir)
-    finally:
-        try:
-            client.set_player_enabled(True)
-        except Exception:  # noqa: BLE001
-            pass  # best effort: never mask the run's own failure
-
-
-def _run(client, out_dir):
     import numpy as np
     from PIL import Image
 

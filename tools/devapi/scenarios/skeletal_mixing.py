@@ -65,6 +65,16 @@ def _wait_for_slots(client, minimum, max_frames=300):
     raise AssertionError(f"Mixing assets did not produce {minimum} occupied slots within {max_frames} frames")
 
 
+def _wait_for_text(client, suffix, max_frames=60):
+    """A click's effect shows a few frames after the click; on web the margin varies per run."""
+    for _ in range(max_frames):
+        texts = _texts(client)
+        if any(text.endswith(suffix) for text in texts):
+            return texts
+        client.wait_frames(1)
+    raise AssertionError(f"no UI text ending with {suffix!r} within {max_frames} frames")
+
+
 def _assert_mid_crossfade(client, label):
     alpha = next(text for text in _texts(client) if text.startswith("alpha "))
     value = float(re.match(r"alpha ([0-9.]+)", alpha).group(1))
@@ -74,13 +84,7 @@ def _assert_mid_crossfade(client, label):
 
 def run(client, out_dir):
     client.set_player_enabled(False)  # a real mouse over the window would hide the bot's clicks
-    try:
-        print(json.dumps(_run(client, out_dir), indent=2))
-    finally:
-        try:
-            client.set_player_enabled(True)
-        except Exception:  # noqa: BLE001
-            pass  # best effort: never mask the run's own failure
+    print(json.dumps(_run(client, out_dir), indent=2))
 
 
 def _wait_for_ui(client, max_frames=600):
@@ -161,8 +165,7 @@ def _run(client, out_dir):
     client.ui_click("mixing/play")
     client.wait_frames(2)
     client.ui_click("mixing/to_jump")
-    client.wait_frames(2)
-    handoff_texts = _texts(client)
+    handoff_texts = _wait_for_text(client, "source; handoffs 1")
     handoff_zero = next(text for text in handoff_texts if text.endswith("source; handoffs 1"))
     handoff_alpha = next(text for text in handoff_texts if text.startswith("alpha "))
     handoff_memory = next(text for text in handoff_texts if text.startswith("snapshot "))

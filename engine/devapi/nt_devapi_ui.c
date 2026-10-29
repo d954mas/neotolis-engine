@@ -5,7 +5,7 @@
 #include "core/nt_assert.h"
 #include "devapi/nt_devapi_input_internal.h" /* the input scheduler reuse surface ui delegates to. */
 #include "devapi/nt_devapi_internal.h"
-#include "input/nt_input.h"   /* nt_inject_kind_t + the reserved mouse id; ui delegates to the input scheduler. */
+#include "input/nt_input.h"   /* nt_inject_kind_t + the mouse id; ui delegates to the input scheduler. */
 #include "ui/nt_ui.h"         /* nt_ui_probe_collect + the POD node + nt_ui_id (resolve via the probe). */
 #include "window/nt_window.h" /* g_nt_window: the one coordinate-space metadata source (like core view). */
 
@@ -307,7 +307,7 @@ static bool cmd_ui_click(const cJSON *params, cJSON *result, nt_devapi_error *er
         return nt_devapi_fail(err, "ui.click: inject schedule overflow");
     }
     nt_devapi_input_sched_pointer(NT_INJECT_POINTER_DOWN, NT_INPUT_MOUSE_ID, cx, cy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, 0);
-    nt_devapi_input_sched_buttons(NT_INPUT_MOUSE_ID, 0, hold);
+    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_UP, NT_INPUT_MOUSE_ID, cx, cy, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, hold);
     devapi_add_number(result, "queued", 2.0);
     return true;
 }
@@ -383,7 +383,7 @@ static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err
         float my = i == frames ? ty : (float)((double)fy + (((double)ty - (double)fy) * t));
         nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, id, mx, my, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, (uint16_t)i);
     }
-    nt_devapi_input_sched_buttons(id, 0, frames);
+    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_UP, id, tx, ty, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, frames);
     devapi_add_number(result, "queued", (double)total);
     return true;
 }

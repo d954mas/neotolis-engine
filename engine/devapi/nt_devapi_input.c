@@ -88,7 +88,7 @@ void nt_devapi_input_sched_pointer(nt_inject_kind_t kind, uint32_t id, float x, 
 }
 
 /* Mask applies at the slot's apply-time position (schedule order), so a queued move is honored. */
-void nt_devapi_input_sched_buttons(uint32_t id, uint8_t buttons_mask, uint16_t at_frame) {
+static void sched_buttons(uint32_t id, uint8_t buttons_mask, uint16_t at_frame) {
     sched_entry_t *e = sched_reserve(1);
     e->frames_remaining = at_frame;
     e->kind = NT_INJECT_POINTER_BUTTONS;
@@ -215,7 +215,11 @@ static void nt_devapi_input_update(void) {
 }
 
 /* Client reset: drop pending schedule entries only. No clock re-seed: a native reset runs mid-tick, after frame++. */
-static void nt_devapi_input_reset(void) { s_sched_count = 0; }
+/* No game sets the gate, so it is the bot's too: a bot that leaves gated never locks the player out. */
+static void nt_devapi_input_reset(void) {
+    s_sched_count = 0;
+    nt_input_set_player_enabled(true);
+}
 // #endregion
 
 /* string -> nt_key_t, indexed by enum value; each name = the enum minus NT_KEY_. */
@@ -393,7 +397,7 @@ static bool cmd_input_move(const cJSON *params, cJSON *result, nt_devapi_error *
     return true;
 }
 
-/* down@0 + button release@hold on the mouse; hold default 1 (1-frame click), 0 = same-frame. */
+/* down@0 + up@hold on the mouse; hold default 1 (1-frame click), 0 = same-frame. */
 static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     const cJSON *xj = cJSON_GetObjectItemCaseSensitive(params, "x");
     const cJSON *yj = cJSON_GetObjectItemCaseSensitive(params, "y");
@@ -428,7 +432,7 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
         return nt_devapi_fail(err, "input.click: inject schedule overflow");
     }
     nt_devapi_input_sched_pointer(NT_INJECT_POINTER_DOWN, id, x, y, 1.0F, (uint8_t)NT_POINTER_MOUSE, buttons, 0);
-    nt_devapi_input_sched_buttons(id, 0, hold); /* a mouse releases its button and stays, like the real one */
+    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_UP, id, x, y, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, hold);
     devapi_add_number(result, "queued", 2.0);
     return true;
 }
@@ -562,7 +566,7 @@ static bool cmd_input_button(const cJSON *params, cJSON *result, nt_devapi_error
     if (!nt_devapi_input_sched_can_reserve(1U)) {
         return nt_devapi_fail(err, "input.button: inject schedule overflow");
     }
-    nt_devapi_input_sched_buttons(id, buttons, 0);
+    sched_buttons(id, buttons, 0);
     devapi_add_bool(result, "ok", true);
     return true;
 }
@@ -705,7 +709,7 @@ static const nt_devapi_command k_input_cmds[] = {
     },
     {
         .method = "input.click",
-        .summary = "sugar: pointer down@0 + button release@hold (2 entries) on the mouse; hold default 1 frame, 0 = same-frame; x/y are Y-up (origin bottom-left), framebuffer px",
+        .summary = "sugar: pointer down@0 + up@hold (2 entries) on the mouse; hold default 1 frame, 0 = same-frame; x/y are Y-up (origin bottom-left), framebuffer px",
         .params_shape = "{x:number, y:number, button?:number, id?:number, hold?:number}, origin:bottom-left, y_axis:up, space:framebuffer-px",
         .result_shape = "{queued:number}",
         .fn = cmd_input_click,

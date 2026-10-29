@@ -15,7 +15,7 @@
 #include "devapi/nt_devapi_input_internal.h" /* NT_DEVAPI_INPUT_SCHED_MAX — the ui drag cap derives from it */
 #include "devapi/nt_devapi_internal.h"
 #include "devapi/nt_devapi_net.h"      /* nt_devapi_update — drives the shared inject schedule on a sim-advance */
-#include "input/nt_input.h"            /* g_nt_input + the reserved inject pointer id, for the Y-up flip read-back */
+#include "input/nt_input.h"            /* g_nt_input + the mouse id, for the Y-up flip read-back */
 #include "memory/nt_mem_scratch.h"     /* CLAY per-element data backing; reset between frames */
 #include "test_helpers/nt_assert_trap.h" /* NT_TEST_EXPECT_ASSERT: the pre-init register death-test */
 #include "test_helpers/ui_test_arena.h"
@@ -207,7 +207,7 @@ static void advance(void) {
     nt_input_poll();
 }
 
-/* The reserved synthetic-mouse slot after a release, or NULL if it never landed. */
+/* The mouse slot after a release, or NULL if it never landed. */
 static nt_pointer_t *inject_slot(void) {
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
         if (g_nt_input.pointers[i].active && g_nt_input.pointers[i].id == NT_INPUT_MOUSE_ID) {

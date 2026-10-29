@@ -34,20 +34,13 @@ void test_gate_reenable_applies_real(void) {
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_B));
 }
 
-/* The #798 path: the bot drives the mouse the real one already holds, so its click is on pointers[0]. */
-void test_bot_drives_real_mouse_slot(void) {
-    nt_input_pointer_move(NT_INPUT_MOUSE_ID, 1.0F, 1.0F, 1.0F, NT_POINTER_MOUSE, 0);
+void test_gate_off_keeps_held_pointer(void) {
+    nt_input_pointer_down(NT_INPUT_MOUSE_ID, 1.0F, 1.0F, 1.0F, NT_POINTER_MOUSE, 1);
     nt_input_poll();
     nt_input_set_player_enabled(false);
-    TEST_ASSERT_TRUE(nt_input_inject_pointer(NT_INJECT_POINTER_DOWN, NT_INPUT_MOUSE_ID, 5.0F, 5.0F, 1.0F, NT_POINTER_MOUSE, 1));
     nt_input_poll();
-    TEST_ASSERT_TRUE(g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_pressed);
-    TEST_ASSERT_FALSE(g_nt_input.pointers[1].active);
-    TEST_ASSERT_TRUE(nt_input_inject_buttons(NT_INPUT_MOUSE_ID, 0));
-    nt_input_poll();
-    TEST_ASSERT_TRUE(g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_released);
-    nt_input_poll();
-    TEST_ASSERT_TRUE(g_nt_input.pointers[0].active); /* a released mouse stays, like the real one */
+    TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+    TEST_ASSERT_FALSE(nt_input_mouse_is_released(NT_BUTTON_LEFT));
 }
 
 void test_focus_lost_releases_real_input(void) {
@@ -62,10 +55,12 @@ void test_focus_lost_releases_real_input(void) {
 /* Gated, held input is the bot's: a click into another window must not cut a bot drag. */
 void test_gated_focus_lost_keeps_bot_input(void) {
     nt_input_set_player_enabled(false);
+    TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_A, true));
     TEST_ASSERT_TRUE(nt_input_inject_pointer(NT_INJECT_POINTER_DOWN, NT_INPUT_MOUSE_ID, 5.0F, 5.0F, 1.0F, NT_POINTER_MOUSE, 1));
     nt_input_poll();
     nt_input_focus_lost();
     nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
 }
 
@@ -100,7 +95,7 @@ void test_inject_flows_when_gated(void) {
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
 }
 
-/* ---- inject pointer down/move/up + wheel + reserved id ---- */
+/* ---- inject pointer down/move/up + wheel ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_inject_pointer_down_move_up(void) {
@@ -169,29 +164,6 @@ void test_inject_buttons_at_current_position(void) {
     TEST_ASSERT_TRUE(float_near(0.0F, g_nt_input.pointers[0].dx, 0.001F)); /* no move -> no delta */
 }
 
-void test_inject_touch_id_own_slot(void) {
-    /* An explicit bot touch id gets its own slot next to the mouse. */
-    nt_input_pointer_down(NT_INPUT_MOUSE_ID, 1.0F, 1.0F, 0.0F, NT_POINTER_MOUSE, 1);
-    TEST_ASSERT_TRUE(nt_input_inject_pointer(NT_INJECT_POINTER_DOWN, 7, 50.0F, 60.0F, 0.5F, NT_POINTER_TOUCH, 1));
-    nt_input_poll();
-    nt_pointer_t *real = NULL;
-    nt_pointer_t *synth = NULL;
-    for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
-        if (!g_nt_input.pointers[i].active) {
-            continue;
-        }
-        if (g_nt_input.pointers[i].id == 0U) {
-            real = &g_nt_input.pointers[i];
-        }
-        if (g_nt_input.pointers[i].id == 7U) {
-            synth = &g_nt_input.pointers[i];
-        }
-    }
-    TEST_ASSERT_NOT_NULL(real);
-    TEST_ASSERT_NOT_NULL(synth);
-    TEST_ASSERT_TRUE(real != synth); /* distinct slots, no collision */
-}
-
 /* ---- whole-or-nothing overflow rejection (no poll between fills: the buffer drains
    whole each poll, so the cap is probed purely by staging without draining) ---- */
 
@@ -229,7 +201,7 @@ int main(void) {
     RUN_TEST(test_gate_off_drops_real_key);
     RUN_TEST(test_gate_off_keeps_held_key);
     RUN_TEST(test_gate_reenable_applies_real);
-    RUN_TEST(test_bot_drives_real_mouse_slot);
+    RUN_TEST(test_gate_off_keeps_held_pointer);
     RUN_TEST(test_focus_lost_releases_real_input);
     RUN_TEST(test_gated_focus_lost_keeps_bot_input);
     RUN_TEST(test_inject_key_down_up);
@@ -239,7 +211,6 @@ int main(void) {
     RUN_TEST(test_inject_wheel_mouse_slot);
     RUN_TEST(test_inject_button_mask_maps_right_and_middle);
     RUN_TEST(test_inject_buttons_at_current_position);
-    RUN_TEST(test_inject_touch_id_own_slot);
     RUN_TEST(test_overflow_rejects_whole);
     RUN_TEST(test_inject_rejects_invalid_args);
     return UNITY_END();

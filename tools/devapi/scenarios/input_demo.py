@@ -37,8 +37,8 @@ def _frozen_state(client: DevApiClient, **params) -> dict:
 def run(client: DevApiClient, out_dir: str) -> None:
     """Drive the three workflows; raise AssertionError on any contract violation.
 
-    The host keeps game-owned input state across clients (a disconnect resets only devapi state), so
-    the keys and the player gate this run changes are restored even when it fails.
+    The host keeps game-owned input state across clients (a disconnect resets only devapi state and the
+    player gate), so the keys this run changes are restored even when it fails.
     """
     try:
         _run(client)
@@ -46,7 +46,6 @@ def run(client: DevApiClient, out_dir: str) -> None:
         try:
             for k in ("B", "C"):  # keys this run may have left down
                 client.key(k, down=False)
-            client.set_player_enabled(True)
             client.set_mode("run")
             client.resume()
             client.wait_frames(1)  # apply the key-ups before the close drops the schedule

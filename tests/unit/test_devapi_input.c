@@ -152,24 +152,21 @@ static void test_input_set_player_enabled_ok(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":true}}")));
 }
 
-/* The #798 path: a real mouse holds slot 0; the bot gates the player and clicks in the same phase. The
-   click lands on pointers[0], and the released mouse keeps its slot. */
+/* A real mouse holds slot 0 (no gate): the bot's click drives that mouse, so it lands on pointers[0]. */
 static void test_input_click_lands_on_real_mouse_slot(void) {
     nt_input_pointer_move(NT_INPUT_MOUSE_ID, 1.0F, 1.0F, 1.0F, NT_POINTER_MOUSE, 0);
     nt_input_poll();
-    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":false}}")));
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.click\",\"params\":{\"x\":5,\"y\":5}}")));
     advance();
     TEST_ASSERT_TRUE(g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_pressed);
+    TEST_ASSERT_FALSE(g_nt_input.pointers[1].active);
     advance();
     TEST_ASSERT_TRUE(g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_released);
-    advance();
-    TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
-    TEST_ASSERT_FALSE(g_nt_input.pointers[1].active);
 }
 
 /* Handing control back keeps the schedule: the bot's pending release still lands. */
-static void test_input_set_player_enabled_true_ungated_keeps_hold(void) {
+static void test_input_set_player_enabled_true_keeps_schedule(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":false}}")));
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\",\"hold\":2}}")));
     advance();
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
@@ -426,6 +423,14 @@ static void test_reset_drops_schedule_keeps_applied_input(void) {
     advance();
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+}
+
+/* A client that leaves gated hands the player back. */
+static void test_reset_reenables_player(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":false}}")));
+    nt_devapi_run_reset_hooks();
+    nt_input_set_key(NT_KEY_B, true);
+    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_B));
 }
 
 /* input.key{hold:3} = down@0 + up@3: held across exactly 3 advances, released on the 4th. */
@@ -868,7 +873,7 @@ int main(void) {
     RUN_TEST(test_input_gesture_queues_ordered);
     RUN_TEST(test_input_set_player_enabled_ok);
     RUN_TEST(test_input_click_lands_on_real_mouse_slot);
-    RUN_TEST(test_input_set_player_enabled_true_ungated_keeps_hold);
+    RUN_TEST(test_input_set_player_enabled_true_keeps_schedule);
     RUN_TEST(test_input_text_ok);
     RUN_TEST(test_input_text_utf8_multibyte);
     RUN_TEST(test_input_key_unknown_name_bad_params);
@@ -910,6 +915,7 @@ int main(void) {
     RUN_TEST(test_sched_offset0_applies_on_advance);
     RUN_TEST(test_sched_pause_freeze);
     RUN_TEST(test_reset_drops_schedule_keeps_applied_input);
+    RUN_TEST(test_reset_reenables_player);
     RUN_TEST(test_sched_hold_releases_after_n_advances);
     RUN_TEST(test_sched_click_default_hold);
     RUN_TEST(test_sched_gesture_ordered_across_frames);

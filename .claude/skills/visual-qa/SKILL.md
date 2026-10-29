@@ -42,9 +42,8 @@ cmake --build build/_cmake/native-debug-capture --target <example>
    `tools/devapi/pixel_health.py`. A request waits as long as the engine needs,
    so run the client under a shell timeout.
 
-4. **Gate the player before any input (hard rule):** a scenario that sends pointer input (click, move, drag, scroll) calls
-   `client.set_player_enabled(False)` first and a best-effort `set_player_enabled(True)` in a `finally`
-   (wrapped in `try/except`, so it never masks the run's failure). The bot drives the real mouse's
+4. **Gate the player before pointer input (hard rule):** a scenario that sends pointer input (click, move, drag, scroll) calls
+   `client.set_player_enabled(False)` first; the client's disconnect re-enables it. The bot drives the real mouse's
    pointer, so a real mouse over the window otherwise moves it between the bot's press and release
    (spec: "Input automation", the player gate).
 
