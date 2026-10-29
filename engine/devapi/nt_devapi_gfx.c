@@ -43,6 +43,7 @@ static struct {
     uint64_t pending; /* sequence of the frame recording for the ring; 0 = none */
     bool pending_advanced;
     uint32_t last_sim; /* g_nt_app.frame at the last update */
+    uint64_t stop;     /* after off: sequence of the frame in flight at off, the last to store; 0 = stored */
 } s_ring;
 
 // #region ring
@@ -87,18 +88,21 @@ static void gfx_frame_hook(void) {
         const nt_gfx_capture_view_t done = nt_gfx_capture_read();
         NT_ASSERT(done.counters.frame_sequence == s_ring.pending && "gfx recording: nt_devapi_update runs once per frame, after nt_gfx_begin_frame");
         store_frame(&done, s_ring.last_sim, s_ring.pending_advanced);
+        if (s_ring.pending == s_ring.stop) {
+            s_ring.stop = 0;
+        }
         s_ring.pending = 0;
     }
     const bool advanced = g_nt_app.frame != s_ring.last_sim;
     s_ring.last_sim = g_nt_app.frame;
-    if (!s_ring.recording) {
-        return;
-    }
-    if (g_nt_gfx.capture_recording) {
-        s_ring.pending = g_nt_gfx.counters.frame_sequence;
+    const uint64_t sequence = g_nt_gfx.counters.frame_sequence;
+    if (g_nt_gfx.capture_recording && (s_ring.recording || sequence == s_ring.stop)) {
+        s_ring.pending = sequence;
         s_ring.pending_advanced = advanced;
     }
-    nt_gfx_capture_request();
+    if (s_ring.recording) {
+        nt_gfx_capture_request();
+    }
 }
 
 void nt_devapi_gfx_record(bool enabled) {
@@ -106,12 +110,15 @@ void nt_devapi_gfx_record(bool enabled) {
         return;
     }
     s_ring.recording = enabled;
-    if (enabled) { /* off keeps the frame recording now: the next update stores it */
+    if (enabled) {
         s_ring.pending = 0;
+        s_ring.stop = 0;
         s_ring.oldest = 0;
         s_ring.count = 0;
         s_ring.head = 0;
         nt_gfx_capture_request();
+    } else { /* the frame recording now, even before this frame's update tagged it, is still stored */
+        s_ring.stop = g_nt_gfx.capture_recording ? g_nt_gfx.counters.frame_sequence : 0U;
     }
 }
 // #endregion
@@ -128,24 +135,29 @@ static bool cmd_gfx_record(const cJSON *params, cJSON *result, nt_devapi_error *
     return true;
 }
 
+static void add_frame_entry(cJSON *frames, const stored_frame *f) {
+    cJSON *entry = cJSON_CreateObject();
+    NT_ASSERT(entry != NULL);
+    devapi_add_number(entry, "sequence", (double)f->view.counters.frame_sequence);
+    devapi_add_number(entry, "sim_frame", (double)f->sim_frame);
+    devapi_add_bool(entry, "advanced", f->advanced);
+    devapi_add_number(entry, "records", (double)f->view.count);
+    devapi_add_bool(entry, "overflow", f->view.overflow);
+    const bool added = cJSON_AddItemToArray(frames, entry);
+    NT_ASSERT(added);
+}
+
 static bool cmd_gfx_frames(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
-    (void)err;
     (void)ud;
+    if (!s_ring.recording && s_ring.stop != 0) { /* the ring still changes: storing that frame can evict the oldest */
+        return nt_devapi_fail_code(err, NT_DEVAPI_ERR_FRAME_NOT_READY, "gfx.frames: the frame in flight at off is not stored yet");
+    }
     devapi_add_bool(result, "recording", s_ring.recording);
     cJSON *frames = cJSON_AddArrayToObject(result, "frames");
     NT_ASSERT(frames != NULL);
     for (uint32_t i = 0; i < s_ring.count; i++) {
-        const stored_frame *f = frame_at(i);
-        cJSON *entry = cJSON_CreateObject();
-        NT_ASSERT(entry != NULL);
-        devapi_add_number(entry, "sequence", (double)f->view.counters.frame_sequence);
-        devapi_add_number(entry, "sim_frame", (double)f->sim_frame);
-        devapi_add_bool(entry, "advanced", f->advanced);
-        devapi_add_number(entry, "records", (double)f->view.count);
-        devapi_add_bool(entry, "overflow", f->view.overflow);
-        const bool added = cJSON_AddItemToArray(frames, entry);
-        NT_ASSERT(added);
+        add_frame_entry(frames, frame_at(i));
     }
     return true;
 }
@@ -155,7 +167,7 @@ static bool sim_frame_after(uint32_t a, uint32_t b) { return (int32_t)(a - b) > 
 /* Not stored: frame_not_ready when the request is newer than anything stored while recording, so it can
    still arrive; unknown_frame otherwise. */
 static bool fail_not_stored(nt_devapi_error *err, bool newer) {
-    if ((s_ring.recording || s_ring.pending != 0) && newer) {
+    if ((s_ring.recording || s_ring.stop != 0) && newer) {
         return nt_devapi_fail_code(err, NT_DEVAPI_ERR_FRAME_NOT_READY, "gfx.read: the frame has not finished recording yet");
     }
     return nt_devapi_fail_code(err, NT_DEVAPI_ERR_UNKNOWN_FRAME, "gfx.read: the frame is not stored (evicted, before recording, or never recorded); gfx.frames lists the ring");
@@ -168,7 +180,12 @@ static const stored_frame *find_sequence(uint32_t sequence, bool *newer) {
             return frame_at(i);
         }
     }
-    const uint64_t next = s_ring.pending != 0 ? s_ring.pending : g_nt_gfx.counters.frame_sequence + 1U;
+    uint64_t next = g_nt_gfx.counters.frame_sequence + 1U;
+    if (s_ring.pending != 0) {
+        next = s_ring.pending;
+    } else if (s_ring.stop != 0) {
+        next = s_ring.stop;
+    }
     *newer = sequence >= next;
     return NULL;
 }
@@ -233,7 +250,7 @@ static const nt_devapi_command k_gfx_cmds[] = {
     },
     {
         .method = "gfx.frames",
-        .summary = "list the recorded frames in the ring, oldest first",
+        .summary = "list the recorded frames in the ring, oldest first; frame_not_ready after off until the frame in flight is stored",
         .params_shape = "{}",
         .result_shape = "{recording:boolean,frames:[{sequence:number,sim_frame:number,advanced:boolean,records:number,overflow:boolean}]}",
         .fn = cmd_gfx_frames,

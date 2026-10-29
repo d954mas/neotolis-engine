@@ -250,9 +250,12 @@ class DevApiClient:
         """Turn gfx recording on or off (off keeps the ring; off then on clears it). Result: {}."""
         return self.result("gfx.record", {"enabled": enabled})
 
-    def gfx_frames(self) -> Dict[str, Any]:
-        """List the stored frames, oldest first. Result: {recording, frames:[{sequence,sim_frame,advanced,records,overflow}]}."""
-        return self.result("gfx.frames")
+    def gfx_frames(self, timeout: float = 1.0) -> Dict[str, Any]:
+        """List the stored frames, oldest first. Result: {recording, frames:[{sequence,sim_frame,advanced,records,overflow}]}.
+
+        After off the frame in flight is still stored, so frame_not_ready is retried until `timeout` seconds pass.
+        """
+        return self._result_when_ready("gfx.frames", {}, timeout)
 
     def gfx_read(self, sequence: Optional[int] = None, sim_frame: Optional[int] = None, timeout: float = 1.0) -> Dict[str, Any]:
         """Read one stored frame's capture text. Result: {sequence, sim_frame, text}.
@@ -266,10 +269,13 @@ class DevApiClient:
             params["sequence"] = sequence
         if sim_frame is not None:
             params["sim_frame"] = sim_frame
+        return self._result_when_ready("gfx.read", params, timeout)
+
+    def _result_when_ready(self, method: str, params: Dict[str, Any], timeout: float) -> Dict[str, Any]:
         deadline = time.monotonic() + timeout
         while True:
             try:
-                return self.result("gfx.read", params)
+                return self.result(method, params)
             except DevApiResultError as exc:
                 if "failed: frame_not_ready:" not in str(exc) or time.monotonic() >= deadline:
                     raise

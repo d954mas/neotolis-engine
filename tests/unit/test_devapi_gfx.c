@@ -213,6 +213,44 @@ static void test_off_keeps_the_ring_and_the_frame_in_flight(void) {
     TEST_ASSERT_NOT_EQUAL_UINT64(0, read_sequence("{\"method\":\"gfx.read\"}"));
 }
 
+/* Off from game code after begin_frame, before this frame's update: that frame records and is stored too,
+   and the frame requested before off is not. */
+static void test_off_before_the_update_keeps_the_frame_begun(void) {
+    record(true);
+    frame(false);
+    frame(false);
+    nt_gfx_begin_frame();
+    const uint64_t begun = g_nt_gfx.counters.frame_sequence;
+    nt_devapi_gfx_record(false);
+    nt_devapi_update();
+    nt_gfx_end_frame();
+    frame(false);
+    frame(false);
+    TEST_ASSERT_EQUAL_UINT64(begun, frame_at(s_ring.count - 1U)->view.counters.frame_sequence);
+    TEST_ASSERT_EQUAL_UINT64(begun, read_sequence("{\"method\":\"gfx.read\"}"));
+}
+
+/* After off the list waits for the frame in flight, so every listed frame stays readable. */
+static void test_frames_after_off_waits_for_the_frame_in_flight(void) {
+    record(true);
+    for (int i = 0; i < 6; i++) {
+        frame(false); /* fills the 4-frame ring */
+    }
+    record(false);
+    expect_error("{\"method\":\"gfx.frames\"}", "frame_not_ready");
+    frame(false); /* stores the frame in flight, evicting the oldest */
+    cJSON *root = submit("{\"method\":\"gfx.frames\"}");
+    const cJSON *f = NULL;
+    cJSON_ArrayForEach(f, cJSON_GetObjectItemCaseSensitive(result_of(root), "frames")) {
+        char line[96];
+        (void)snprintf(line, sizeof(line), "{\"method\":\"gfx.read\",\"params\":{\"sequence\":%u}}", (unsigned)number(f, "sequence"));
+        TEST_ASSERT_EQUAL_UINT64((uint64_t)number(f, "sequence"), read_sequence(line));
+    }
+    cJSON_Delete(root);
+    frame(false);
+    TEST_ASSERT_EQUAL_UINT32(NT_DEVAPI_GFX_RING_FRAMES, s_ring.count);
+}
+
 static void test_on_is_idempotent_and_off_on_clears_the_ring(void) {
     record(true);
     frame(false);
@@ -324,6 +362,8 @@ int main(void) {
     RUN_TEST(test_ring_wraps_and_evicts_through_the_newest_overlap);
     RUN_TEST(test_recorded_frames_stay_gapless_over_many_wraps);
     RUN_TEST(test_off_keeps_the_ring_and_the_frame_in_flight);
+    RUN_TEST(test_off_before_the_update_keeps_the_frame_begun);
+    RUN_TEST(test_frames_after_off_waits_for_the_frame_in_flight);
     RUN_TEST(test_on_is_idempotent_and_off_on_clears_the_ring);
     RUN_TEST(test_on_before_begin_frame_keeps_the_step_frame_advanced);
     RUN_TEST(test_a_client_reset_keeps_recording);
