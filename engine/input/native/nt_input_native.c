@@ -16,7 +16,8 @@ typedef struct {
 typedef struct {
     double x, y;
     uint8_t buttons;
-    bool is_down;
+    bool is_leave;
+    bool is_edge; /* the mask changed here: later moves never coalesce into it, so a press keeps its position */
 } nt_ptr_event_t;
 
 typedef struct {
@@ -28,6 +29,7 @@ static uint32_t s_key_count;
 
 static nt_ptr_event_t s_ptr_buf[NT_MAX_PTR_EVENTS];
 static uint32_t s_ptr_count;
+static uint8_t s_ptr_last_buttons;
 
 static nt_wheel_event_t s_wheel_buf[NT_MAX_WHEEL_EVENTS];
 static uint32_t s_wheel_count;
@@ -47,28 +49,33 @@ void nt_input_buffer_key(nt_key_t key, bool down) {
     }
 }
 
-void nt_input_buffer_pointer(bool is_down, double raw_x, double raw_y, uint8_t buttons) {
-    /* Coalesce consecutive moves: if the tail is also a plain move with the
-       same button mask, overwrite its coordinates instead of appending.
-       Button transitions (is_down=true or changed mask) always get their own
-       slot so press/release events are never lost. */
-    if (!is_down && s_ptr_count > 0) {
+static void buffer_ptr_event(nt_ptr_event_t ev) {
+    if (s_ptr_count < NT_MAX_PTR_EVENTS) {
+        s_ptr_buf[s_ptr_count++] = ev;
+    } else if (!ev.is_leave) {
+        /* Buffer full — overwrite tail so the newest mask (especially a release) is never lost.
+           A leave carries no mask, so it is dropped instead: the mouse stays until it returns. */
+        s_ptr_buf[NT_MAX_PTR_EVENTS - 1] = ev;
+    }
+}
+
+void nt_input_buffer_mouse(double raw_x, double raw_y, uint8_t buttons) {
+    /* Coalesce consecutive moves with the same button mask; a mask change always gets its own
+       entry so press/release events are never lost. */
+    bool is_edge = buttons != s_ptr_last_buttons;
+    s_ptr_last_buttons = buttons;
+    if (!is_edge && s_ptr_count > 0) {
         nt_ptr_event_t *tail = &s_ptr_buf[s_ptr_count - 1];
-        if (!tail->is_down && tail->buttons == buttons) {
+        if (!tail->is_leave && !tail->is_edge) {
             tail->x = raw_x;
             tail->y = raw_y;
             return;
         }
     }
-    if (s_ptr_count < NT_MAX_PTR_EVENTS) {
-        s_ptr_buf[s_ptr_count++] = (nt_ptr_event_t){.x = raw_x, .y = raw_y, .buttons = buttons, .is_down = is_down};
-    } else {
-        /* Buffer full — overwrite tail so the newest state (especially button
-           release) is never lost. Losing a mid-frame move is acceptable;
-           losing the final press/release causes stuck buttons. */
-        s_ptr_buf[NT_MAX_PTR_EVENTS - 1] = (nt_ptr_event_t){.x = raw_x, .y = raw_y, .buttons = buttons, .is_down = is_down};
-    }
+    buffer_ptr_event((nt_ptr_event_t){.x = raw_x, .y = raw_y, .buttons = buttons, .is_edge = is_edge});
 }
+
+void nt_input_buffer_mouse_leave(void) { buffer_ptr_event((nt_ptr_event_t){.is_leave = true}); }
 
 void nt_input_buffer_wheel(float dx, float dy) {
     if (s_wheel_count < NT_MAX_WHEEL_EVENTS) {
@@ -100,8 +107,7 @@ void nt_input_set_text_input_mode(nt_text_input_mode_t mode) { (void)mode; }
 void nt_input_platform_poll(void) {
     /* Focus lost: clear all state, discard buffered events */
     if (s_focus_lost) {
-        nt_input_clear_all_keys();
-        nt_input_clear_all_pointers();
+        nt_input_focus_lost();
         s_focus_lost = false;
         s_key_count = 0;
         s_ptr_count = 0;
@@ -119,12 +125,10 @@ void nt_input_platform_poll(void) {
     s_key_count = 0;
 
     for (uint32_t i = 0; i < s_ptr_count; i++) {
-        float fx = (float)s_ptr_buf[i].x * dpr;
-        float fy = (float)s_ptr_buf[i].y * dpr;
-        if (s_ptr_buf[i].is_down) {
-            nt_input_pointer_down(0, fx, fy, 1.0F, NT_POINTER_MOUSE, s_ptr_buf[i].buttons);
+        if (s_ptr_buf[i].is_leave) {
+            nt_input_mouse_leave();
         } else {
-            nt_input_pointer_move(0, fx, fy, 1.0F, NT_POINTER_MOUSE, s_ptr_buf[i].buttons);
+            nt_input_mouse_move((float)s_ptr_buf[i].x * dpr, (float)s_ptr_buf[i].y * dpr, s_ptr_buf[i].buttons);
         }
     }
     s_ptr_count = 0;

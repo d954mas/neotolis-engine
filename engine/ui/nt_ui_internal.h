@@ -205,6 +205,7 @@ struct nt_ui_context {
 
     nt_pointer_t frame_pointers[NT_INPUT_MAX_POINTERS];
     uint32_t frame_pointer_count;
+    uint32_t frame_primary; /* the nt_ui_begin primary: menus, rich-text links and the inspector follow it */
     float frame_dt;
     /* frame_pointers hold RAW device coords until the lazy hot resolve converts them to layout
      * space via `viewport` (once per frame, gated by frame_pointers_converted). begin defaults the

@@ -613,7 +613,7 @@ static void test_3d_debug_inspector_walk_draws_real_tree_text(void) {
         1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     nt_ui_set_view_proj(s_fx.ctx, identity_vp);
     CLAY({.id = CLAY_ID("debug_tree_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(120.0F), CLAY_SIZING_FIXED(40.0F)}}}) {
         nt_ui_label(s_fx.ctx, NT_UI_DATA_LAYER((nt_ui_layer_t)5), "TreeText", &(nt_ui_label_style_t){.font_id = 0, .font_size = 14, .color = NT_RGBA8(255, 255, 255, 255)});
@@ -644,7 +644,7 @@ static void test_3d_debug_inspector_walk_draws_real_tree_text(void) {
 static void walk_label_frame(bool inspector_walk) {
     ui_walker_fixture_next_frame(&s_fx);
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("swap_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(120.0F), CLAY_SIZING_FIXED(40.0F)}}}) {
         nt_ui_label(s_fx.ctx, NULL, "TreeText", &(nt_ui_label_style_t){.font_id = 0, .font_size = 14, .color = NT_RGBA8(255, 255, 255, 255)});
     }
@@ -684,7 +684,7 @@ static void test_dispatch_3d_element_depth_bias_uses_hierarchy_depth(void) {
         1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     nt_ui_set_view_proj(s_fx.ctx, identity_vp);
     CLAY({.id = CLAY_ID("bias_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(20.0F), CLAY_SIZING_FIXED(20.0F)}}, .backgroundColor = {255.0F, 255.0F, 255.0F, 255.0F}}) {}
     CLAY({.id = CLAY_ID("bias_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(20.0F), CLAY_SIZING_FIXED(20.0F)}}, .backgroundColor = {255.0F, 255.0F, 255.0F, 255.0F}}) {}

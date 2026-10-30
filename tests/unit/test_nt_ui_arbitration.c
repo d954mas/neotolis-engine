@@ -57,7 +57,7 @@ static void declare_two(void) {
 /* Frame 1 helper: declare only (no step) so Clay bakes the bbox/transform for next frame's hit-test.
  * Stepping (hit-testing) on the very first frame is invalid — the transform isn't baked until end. */
 static void declare_only(const nt_pointer_t *p) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
     declare_two();
     nt_ui_end(s_fx.ctx);
 }
@@ -65,7 +65,7 @@ static void declare_only(const nt_pointer_t *p) {
 /* Declare both + step both (order: bottom, then top); returns both interactions. Also records both in
  * this frame's interactive registry, consumed by NEXT frame's resolve. */
 static void step_two(const nt_pointer_t *p, nt_ui_interaction_t *bottom, nt_ui_interaction_t *top) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
     declare_two();
     *bottom = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("bottom"));
     *top = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("top"));
@@ -107,13 +107,13 @@ static void declare_zindexed(void) {
 }
 
 static void declare_zindexed_only(const nt_pointer_t *p) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
     declare_zindexed();
     nt_ui_end(s_fx.ctx);
 }
 
 static void step_zindexed(const nt_pointer_t *p, nt_ui_interaction_t *hiz, nt_ui_interaction_t *lowz) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
     declare_zindexed();
     *hiz = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("hiz"));
     *lowz = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("lowz"));

@@ -9,6 +9,7 @@ declare global {
       walk_text_cmd_count(): number;
       field_visible(): boolean;
       field_css(): { x: number; y: number };
+      mouse(): { active: boolean; down: boolean };
     };
   }
 }
@@ -91,4 +92,56 @@ test('input field: real keydown (Cyrillic) + paste reaches the buffer and the re
   // The typed text must also reach the render path (walker emitted text commands this frame).
   const cmdCount = await page.evaluate(() => window.__nt!.walk_text_cmd_count());
   expect(cmdCount).toBeGreaterThan(0);
+});
+
+// A real mouse dragged from the canvas and released outside it: the captured release lands and the mouse
+// leaves (not every browser sends a pointerleave after a captured drag), so no button sticks.
+test('mouse: a drag released outside the canvas releases and leaves', async ({ page }) => {
+  await page.goto('/index.html');
+  const frame = () => page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+  await page.waitForFunction(() => window.__nt?.ready === true, null, { timeout: 30_000 });
+  const box = await page.evaluate(() => {
+    const c = document.querySelector('canvas')!;
+    c.style.width = '50vw';
+    c.style.height = '50vh';
+    return { w: window.innerWidth, h: window.innerHeight };
+  });
+  await frame();
+  await frame();
+  await page.mouse.move(box.w * 0.25, box.h * 0.25);
+  await frame();
+  await page.mouse.down();
+  await frame();
+  expect(await page.evaluate(() => window.__nt!.mouse())).toEqual({ active: true, down: true });
+  await page.mouse.move(box.w * 0.9, box.h * 0.9, { steps: 4 });
+  await frame();
+  expect(await page.evaluate(() => window.__nt!.mouse())).toEqual({ active: true, down: true });
+  await page.mouse.up();
+  await frame();
+  await frame();
+  expect(await page.evaluate(() => window.__nt!.mouse())).toEqual({ active: false, down: false });
+});
+
+// A blur during a drag releases the mouse; the canvas still holds the capture, so the next move must not
+// press again (the buttons belong to the canvas only from a press on it).
+test('mouse: a blur during a drag releases it for good', async ({ page }) => {
+  await page.goto('/index.html');
+  const frame = () => page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+  await page.waitForFunction(() => window.__nt?.ready === true, null, { timeout: 30_000 });
+  const vp = page.viewportSize()!;
+  await page.mouse.move(vp.width * 0.5, vp.height * 0.5);
+  await frame();
+  await page.mouse.down();
+  await frame();
+  expect(await page.evaluate(() => window.__nt!.mouse())).toEqual({ active: true, down: true });
+  await page.evaluate(() => {
+    const i = document.createElement('input');
+    document.body.appendChild(i);
+    i.focus();
+  });
+  await frame();
+  await page.mouse.move(vp.width * 0.5 + 10, vp.height * 0.5, { steps: 3 });
+  await frame();
+  expect(await page.evaluate(() => window.__nt!.mouse())).toEqual({ active: true, down: false });
+  await page.mouse.up();
 });

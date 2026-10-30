@@ -76,7 +76,7 @@ static const nt_ui_probe_node_t *find_node(const nt_ui_probe_node_t *nodes, uint
 /* A disabled widget reports enabled=false with the inspector OFF. */
 static void test_enabled_false_with_inspector_off(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     const uint32_t id = nt_ui_id("disabled_btn");
     register_widget(id, false);
     TEST_ASSERT_FALSE(nt_ui_internal_widget_enabled(s_fx.ctx, id));
@@ -86,7 +86,7 @@ static void test_enabled_false_with_inspector_off(void) {
 /* An enabled widget reports enabled=true. */
 static void test_enabled_true(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     const uint32_t id = nt_ui_id("enabled_btn");
     register_widget(id, true);
     TEST_ASSERT_TRUE(nt_ui_internal_widget_enabled(s_fx.ctx, id));
@@ -96,7 +96,7 @@ static void test_enabled_true(void) {
 /* An id that was never registered defaults to enabled=true. */
 static void test_enabled_default_true_unregistered(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     TEST_ASSERT_TRUE(nt_ui_internal_widget_enabled(s_fx.ctx, nt_ui_id("never_registered")));
     nt_ui_end(s_fx.ctx);
 }
@@ -114,7 +114,7 @@ static void test_input_disabled_reports_enabled_false(void) {
 
     nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
     const uint32_t id = nt_ui_id("disabled_input");
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id, buf, sizeof buf, &props, &style, &field, false, NULL);
     TEST_ASSERT_FALSE(nt_ui_internal_widget_enabled(s_fx.ctx, id));
     nt_ui_end(s_fx.ctx);
@@ -140,7 +140,7 @@ static void test_slider_disabled_reports_enabled_false(void) {
 
     nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
     const uint32_t id = nt_ui_id("disabled_slider");
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     (void)nt_ui_slider_float(s_fx.ctx, NULL, 0, id, NULL, &value, 0.0F, 1.0F, 0.0F, &style, &track, false);
     TEST_ASSERT_FALSE(nt_ui_internal_widget_enabled(s_fx.ctx, id));
     nt_ui_end(s_fx.ctx);
@@ -153,7 +153,7 @@ static nt_ui_probe_node_t s_nodes[NT_UI_PROBE_MAX_NODES];
 /* A panel with a registered button child reporting role/enabled; collect emits flat POD nodes. */
 static void test_collect_flat_pod_nodes(void) {
     nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("panel"), .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) {
         CLAY({.id = CLAY_ID("child_box"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) {}
     }
@@ -176,7 +176,7 @@ static void test_collect_flat_pod_nodes(void) {
  * cap PARAMETER exercises the same early-stop path the 1024-node BSS cap hits, without a huge tree. */
 static void test_collect_cap_truncation_signaled(void) {
     nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("panel"), .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) {
         CLAY({.id = CLAY_ID("child_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) {}
         CLAY({.id = CLAY_ID("child_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) {}
@@ -202,7 +202,7 @@ static void test_collect_cap_truncation_signaled(void) {
 /* Copy-on-collect: the id_string copy survives a SECOND nt_ui_begin. */
 static void test_collect_id_string_copied(void) {
     nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("persistent")}) {}
     nt_ui_end(s_fx.ctx);
 
@@ -213,7 +213,7 @@ static void test_collect_id_string_copied(void) {
     TEST_ASSERT_EQUAL_STRING("persistent", node->id_string);
 
     /* A second begin (re-using Clay's id-string arena) would dangle a borrowed pointer. */
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("other_tree_a")}) {}
     CLAY({.id = CLAY_ID("other_tree_b")}) {}
     nt_ui_end(s_fx.ctx);
@@ -226,7 +226,7 @@ static void test_collect_id_string_copied(void) {
 static void test_collect_visible_clip_opacity(void) {
     nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
     nt_ui_transform_t ident = nt_ui_transform_defaults();
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("vis_box"), .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) {}
     /* opacity 0 subtree -> composed opacity below the visible threshold. */
     CLAY({.id = CLAY_ID("hidden_box"), .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}, .userData = (void *)NT_UI_DATA_XFORM(0U, &ident, 0.0F)}) {}
@@ -246,7 +246,7 @@ static void test_collect_visible_clip_opacity(void) {
 /* role: a registered widget reports role=WIDGET + def->name; an unregistered box falls back. */
 static void test_collect_role_from_def_name(void) {
     nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("plain_box"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) {}
     CLAY({.id = CLAY_ID("reg_btn"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) {}
     register_widget(nt_ui_id("reg_btn"), true);
@@ -266,7 +266,7 @@ static void test_collect_role_from_def_name(void) {
 /* parent/children: a child reports parent == the panel's id; the panel counts its children. */
 static void test_collect_parent_children(void) {
     nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("outer")}) {
         CLAY({.id = CLAY_ID("inner_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(10), CLAY_SIZING_FIXED(10)}}}) {}
         CLAY({.id = CLAY_ID("inner_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(10), CLAY_SIZING_FIXED(10)}}}) {}
@@ -290,7 +290,7 @@ static void test_collect_parent_children(void) {
  * the text leaf itself reports its own text. */
 static void test_collect_label_distinct_from_text(void) {
     nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("save_box"), .layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(30)}}}) { nt_ui_label(s_fx.ctx, NULL, "Save", &s_label_style); }
     nt_ui_end(s_fx.ctx);
 
@@ -314,7 +314,7 @@ static void test_collect_label_distinct_from_text(void) {
 /* a disabled widget remains in the collected set carrying enabled=false. */
 static void test_collect_all_nodes_disabled_present(void) {
     nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("dis_btn"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) {}
     register_widget(nt_ui_id("dis_btn"), false);
     nt_ui_end(s_fx.ctx);
@@ -362,7 +362,7 @@ static void make_ortho_clay_y_down(float view_proj[16]) {
 /* 2D-plain: a known asymmetric box reports bounds = trivial Y-flip of its Clay bbox. */
 static void test_project_2d_plain_yflip(void) {
     nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("plain"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) {}
     nt_ui_end(s_fx.ctx);
 
@@ -389,7 +389,7 @@ static void test_project_2d_affine_translation(void) {
 
     /* Prime one frame so the baked transform is in tree_baked for the collect frame. */
     for (int frame = 0; frame < 2; ++frame) {
-        nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+        nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
         CLAY({.id = CLAY_ID("xbox"),
               .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}},
               .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}},
@@ -415,7 +415,7 @@ static void test_project_3d_ortho_aabb(void) {
     float vp[16];
     make_ortho_clay_y_down(vp);
     nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     nt_ui_set_view_proj(s_fx.ctx, vp);
     CLAY({.id = CLAY_ID("box3d"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) {}
     nt_ui_end(s_fx.ctx);
@@ -445,7 +445,7 @@ static void test_project_3d_behind_camera_flag(void) {
     memcpy(vp, proj, sizeof vp); /* view = identity: eye at origin, Clay z=0 plane is AT the eye (w=0..<0) */
 
     nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     nt_ui_set_view_proj(s_fx.ctx, vp);
     CLAY({.id = CLAY_ID("behind"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) {
     }
@@ -484,7 +484,7 @@ static void test_collect_owned_tracks_max_elements(void) {
     TEST_ASSERT_NOT_NULL(s_fx.ctx->probe_scratch);
 
     nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("panel"), .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) {
         CLAY({.id = CLAY_ID("child_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) {}
         CLAY({.id = CLAY_ID("child_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) {}

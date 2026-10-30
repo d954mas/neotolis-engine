@@ -52,7 +52,7 @@ static const Clay_RenderCommand *find_first_image_cmd(const nt_ui_context_t *ctx
 /* ---- Test 1: basic image emits IMAGE command ---- */
 static void test_image_basic(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, &ref, &s_style_default, NULL); }
     nt_ui_end(s_fx.ctx);
@@ -76,7 +76,7 @@ static void test_image_slice9_override(void) {
         .slice9_scale = 1.0F,
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, &ref, &s, NULL); }
     nt_ui_end(s_fx.ctx);
@@ -99,7 +99,7 @@ static void test_image_tint_color(void) {
         .slice9_scale = 1.0F,
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, &ref, &s, NULL); }
     nt_ui_end(s_fx.ctx);
@@ -117,7 +117,7 @@ static void test_image_tint_color(void) {
 static void test_image_element_data_passthrough(void) {
     int marker = 77;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NT_UI_DATA_FULL(5, &marker), &ref, &s_style_default, NULL); }
     nt_ui_end(s_fx.ctx);
@@ -139,7 +139,7 @@ static void test_image_flip_bits(void) {
         .slice9_scale = 1.0F,
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, &ref, &s, NULL); }
     nt_ui_end(s_fx.ctx);
@@ -161,7 +161,7 @@ static void test_image_flags_origin(void) {
         .slice9_scale = 1.0F,
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, &ref, &s, NULL); }
     nt_ui_end(s_fx.ctx);
@@ -190,7 +190,7 @@ static void test_image_style_defaults(void) {
 /* ---- Test 8: ref built unresolved resolves to the white index under a ready atlas + memoizes ---- */
 static void test_image_resolves_from_invalid_under_ready_atlas(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     /* Constructed unresolved (region == INVALID); the fixture atlas is READY so the engine resolves it. */
     nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, UI_ATLAS_WHITE_HASH);
     TEST_ASSERT_EQUAL_UINT32(NT_ATLAS_INVALID_REGION, ref.region);
@@ -210,7 +210,7 @@ static void test_image_resolves_from_invalid_under_ready_atlas(void) {
 /* ---- Test 9: ref with a name never present skips emit, no assert (NOT a death test) ---- */
 static void test_image_unresolved_skips_emit_no_assert(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     /* Atlas is READY so resolve runs, but find_region returns INVALID for a never-present name. */
     nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, 0xDEADBEEFCAFEBABEULL);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, &ref, &s_style_default, NULL); }
@@ -227,7 +227,7 @@ static void test_image_unresolved_skips_emit_no_assert(void) {
 /* ---- Test 8: NULL style asserts ---- */
 static void test_image_null_style_asserts(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, 0);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_image(s_fx.ctx, NULL, &ref, NULL, NULL)); }
     nt_ui_end(s_fx.ctx);
@@ -237,7 +237,7 @@ static void test_image_null_style_asserts(void) {
 static void test_image_invalid_atlas_asserts(void) {
     nt_resource_t bad = {.id = 0};
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(bad, 0, 0);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_image(s_fx.ctx, NULL, &ref, &s_style_default, NULL)); }
     nt_ui_end(s_fx.ctx);
@@ -269,7 +269,7 @@ static uint16_t walk_image_top_edge_v(const nt_ui_image_style_t *style) {
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.packed_region_idx);
     const Clay_ElementDeclaration decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(60)}}};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, &ref, style, &decl); }
     nt_ui_end(s_fx.ctx);
     nt_ui_walk(s_fx.ctx, &target);
@@ -332,7 +332,7 @@ static void test_image_black_tint_faded_out_draws_no_opaque_white(void) {
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
     const Clay_ElementDeclaration decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(60)}}};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root"), .userData = NT_UI_CLAY_DATA_XFORM(0U, &t, 0.0F)}) { nt_ui_image(s_fx.ctx, NULL, &ref, &st, &decl); }
     nt_ui_end(s_fx.ctx);
     const uint32_t vertex_used = g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used;

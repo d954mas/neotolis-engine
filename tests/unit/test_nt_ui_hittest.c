@@ -60,7 +60,7 @@ static void forward_xform(float x, float y, float cx, float cy, float sx, float 
 /* Declare the bbox WITH a transform attached via userData (NULL = identity). */
 static void declare_bbox_with_xform(const nt_ui_transform_t *t) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     void *ud = (t != NULL) ? (void *)NT_UI_DATA_XFORM(0U, t, 1.0F) : NULL;
     CLAY({.id = CLAY_ID("htbtn"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}},
@@ -82,7 +82,7 @@ static void assert_bbox_as_declared(void) {
 /* Begin a probe frame (no declaration — hit-test reads PREV frame's tree_baked). */
 static void begin_probe_frame(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     assert_bbox_as_declared();
 }
 
@@ -269,7 +269,7 @@ static void test_hittest_survives_layout_idx_shift_between_frames(void) {
 
     /* Frame 2: declare a NEW element BEFORE htbtn, shifting htbtn's layout idx. */
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("intruder"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 500.0F, .y = 500.0F}}, .layout = {.sizing = {CLAY_SIZING_FIXED(10.0F), CLAY_SIZING_FIXED(10.0F)}}}) {
     }
     CLAY({.id = CLAY_ID("htbtn"),
@@ -299,7 +299,7 @@ static void test_get_bbox_rejects_stale_id(void) {
     /* Sanity: bbox found in the immediately-following frame. */
     {
         nt_pointer_t mouse = {0};
-        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
         nt_ui_bbox_t b = nt_ui_get_bbox(s_fx.ctx, nt_ui_id("htbtn"));
         TEST_ASSERT_TRUE_MESSAGE(b.found, "bbox of just-declared id must be found");
         nt_ui_end(s_fx.ctx);
@@ -308,7 +308,7 @@ static void test_get_bbox_rejects_stale_id(void) {
      * hit_generation[slot] != current_generation -> get_bbox rejects. */
     {
         nt_pointer_t mouse = {0};
-        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
         nt_ui_bbox_t b = nt_ui_get_bbox(s_fx.ctx, nt_ui_id("htbtn"));
         TEST_ASSERT_FALSE_MESSAGE(b.found, "stale id must report found=false");
         TEST_ASSERT_TRUE(b.x == 0.0F && b.y == 0.0F && b.width == 0.0F && b.height == 0.0F);

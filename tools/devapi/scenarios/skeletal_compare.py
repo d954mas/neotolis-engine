@@ -42,6 +42,7 @@ def _capture_stage(client, np, Image):
 
 
 def run(client, out_dir):
+    client.set_player_enabled(False)  # a real mouse over the window would hide the bot's clicks
     import numpy as np
     from PIL import Image
 

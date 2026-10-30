@@ -172,7 +172,7 @@ static void test_callback_receives_layout_bbox_and_composed_frame(void) {
     const nt_ui_transform_t child_transform = nt_ui_transform_defaults();
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("callback_parent"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 20.0F, .y = 30.0F}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}},
@@ -201,7 +201,7 @@ static void test_callback_receives_layout_bbox_and_composed_frame(void) {
     }
 
     /* A new frame must not retain the preceding frame's command callback. */
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     nt_ui_end(s_fx.ctx);
     nt_ui_walk(s_fx.ctx, &target);
     TEST_ASSERT_EQUAL_UINT32(1U, s_callback_a.calls);
@@ -211,7 +211,7 @@ static void test_callback_receives_layout_bbox_and_composed_frame(void) {
 static void test_clay_debug_view_after_begin_reserves_visible_sidebar(void) {
     nt_pointer_t mouse = {0};
     for (uint32_t frame = 0U; frame < 3U; frame++) {
-        nt_ui_begin(s_fx.ctx, 1000.0F, 800.0F, 0.0F, &mouse, 1);
+        nt_ui_begin(s_fx.ctx, 1000.0F, 800.0F, 0.0F, &mouse, 1, 0);
         TEST_ASSERT_FALSE(Clay_IsDebugModeEnabled());
         if (frame != 1U) {
             Clay_SetDebugModeEnabled(true);

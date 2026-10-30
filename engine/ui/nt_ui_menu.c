@@ -247,8 +247,9 @@ static void menu_mouse_pos(nt_ui_context_t *ctx, float *mx, float *my) {
      * conversion before handing back a layout-space anchor. Idempotent. */
     nt_ui_internal_ensure_pointers_layout(ctx);
     if (ctx->frame_pointer_count > 0U) {
-        *mx = ctx->frame_pointers[0].x;
-        *my = ctx->frame_pointers[0].y;
+        const nt_pointer_t *p = &ctx->frame_pointers[ctx->frame_primary];
+        *mx = p->x;
+        *my = p->y;
     } else {
         *mx = 0.0F;
         *my = 0.0F;
@@ -969,7 +970,7 @@ static bool menu_resolve_nav_and_dismiss(nt_ui_menu_ctx_t *menu, uint32_t menu_i
     menu_mouse_pos(ctx, &mx, &my);
     /* Hover-open: the mouse-aim corridor drives the open chain. Skipped on a keyboard-nav frame so a
      * keyboard-opened submenu is authoritative and never collapses from cursor distance the same frame. */
-    if (!kbd_acted) {
+    if (!kbd_acted && ctx->frame_pointers[ctx->frame_primary].active) {
         menu_resolve_hover_open(menu, menu_id, rt, mx, my, ctx->frame_dt);
     }
     /* Commit a mouse-opened root parent (an explicit click this frame, e.g. touch) so submenu_begin returns
@@ -981,8 +982,9 @@ static bool menu_resolve_nav_and_dismiss(nt_ui_menu_ctx_t *menu, uint32_t menu_i
             rt->active_depth = 1U;
         }
     }
-    /* Menu-owned outside-click dismiss; skip the opening frame so the arming click does not self-dismiss. */
-    const bool outside_press = nt_input_mouse_is_pressed(NT_BUTTON_LEFT) || nt_input_mouse_is_pressed(NT_BUTTON_RIGHT);
+    /* Menu-owned outside-press dismiss (a click or a tap); skip the opening frame so the arming click does not self-dismiss. */
+    const nt_pointer_t *pp = &ctx->frame_pointers[ctx->frame_primary];
+    const bool outside_press = pp->active && (pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed);
     if (outside_press && !menu_cursor_over_any_panel(ctx, menu_id, rt, mx, my) && ctx->frame_counter != rt->opened_frame) {
         close_chain = true;
     }

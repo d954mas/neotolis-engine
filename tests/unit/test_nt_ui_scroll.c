@@ -137,7 +137,7 @@ static void test_scroll_wheel_sign(void) {
 static const uint32_t SCROLL_ID = 0x5C0011U;
 
 static void scroll_frame_dt(nt_pointer_t *p, const nt_ui_scroll_style_t *style, float dt) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, dt, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, dt, p, 1, 0);
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, style, NULL);
         {
@@ -225,7 +225,7 @@ static void test_scroll_capture_steal_drag(void) {
     /* Pointer dragged 40 px down (>> 8 px threshold) along the scrolling y axis. */
     p.x = 100.0F;
     p.y = 140.0F;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
     /* Inject AFTER begin (orphan-clear ran) so the simulated inner capture is live. */
     inject_inner_capture(inner_id, 100.0F, 100.0F, 100.0F, 140.0F);
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
@@ -254,7 +254,7 @@ static void test_scroll_capture_steal_drag(void) {
      * by exactly the per-frame finger delta (no threshold dead-zone left to consume). */
     p.y = 160.0F;                             /* +20 px further down */
     p.buttons[NT_BUTTON_LEFT].is_down = true; /* finger still held — the OWNED path routes the drag */
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
     s_fx.ctx->captures[0].active_id = SCROLL_ID; /* container owns it now (claimed last frame) */
     s_fx.ctx->captures[0].press_pos[0] = 100.0F; /* matches last frame's re-anchor (cap->pos was 140) */
     s_fx.ctx->captures[0].press_pos[1] = 140.0F;
@@ -298,7 +298,7 @@ static void test_scroll_capture_steal_dt_zero_no_phantom(void) {
      * velocity to compute — it MUST be zeroed, not left at the stale -5000. */
     p.x = 100.0F;
     p.y = 140.0F;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &p, 1); /* dt == 0 */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &p, 1, 0); /* dt == 0 */
     inject_inner_capture(inner_id, 100.0F, 100.0F, 100.0F, 140.0F);
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &style, NULL);
@@ -329,7 +329,7 @@ static void test_scroll_capture_tap_no_steal(void) {
     /* Tiny 3 px move (< 8 px threshold) — a tap, not a drag. */
     p.x = 101.0F;
     p.y = 103.0F;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
     inject_inner_capture(inner_id, 100.0F, 100.0F, 101.0F, 103.0F);
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &style, NULL);
@@ -353,7 +353,7 @@ static void test_scroll_capture_tap_no_steal(void) {
 /* A scroll frame with a chosen style + content height so the bar emit can be exercised.
  * Container 200x200; content 200 x content_h. */
 static void scrollbar_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style, float content_h) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, style, NULL);
         {
@@ -557,7 +557,7 @@ static const uint32_t SCROLL_ID_B = 0x5C00B2U;
  * both to top" call runs AFTER both are declared (exactly where the demo's button-end fires
  * nt_ui_scroll_to). do_scroll_to gates the call so we can establish state first. */
 static void twin_scroll_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style, bool do_scroll_to) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(500), CLAY_SIZING_FIXED(200)}, .layoutDirection = CLAY_LEFT_TO_RIGHT}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID_A, style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}});
         {
@@ -703,7 +703,7 @@ static void test_scroll_does_not_steal_own_scrollbar(void) {
 
     /* Press on the bar so it captures, then drag 40 px (>threshold) along y. The steal path
      * MUST exclude the container's own bar id, leaving the bar capture intact. */
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
     s_fx.ctx->captures[0].active_id = bar_id;
     s_fx.ctx->captures[0].press_pos[0] = 195.0F;
     s_fx.ctx->captures[0].press_pos[1] = 100.0F;
@@ -730,7 +730,7 @@ static const uint32_t EXCL_INNER_ID = 0x5CE002U;
 /* Outer scroll (300x300 over 300x1000) holding an INNER scroll (200x200 over 200x800) with bars,
  * pinned at the outer content's top-left. Both register their 'scrl' state cells. */
 static void excl_nested_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
     CLAY({.id = CLAY_ID("excl-root"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(300)}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, EXCL_OUTER_ID, style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(300)}}});
         {
@@ -768,7 +768,7 @@ static void test_scroll_does_not_steal_nested_scrollbar(void) {
 
     /* Inject a capture held by the inner bar id, pressed inside the outer, dragged 40 px (>threshold).
      * The OUTER's steal path must exclude it (reverse-tag path), leaving the capture on the inner bar. */
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
     s_fx.ctx->captures[0].active_id = inner_bar_id;
     s_fx.ctx->captures[0].press_pos[0] = 100.0F;
     s_fx.ctx->captures[0].press_pos[1] = 100.0F;
@@ -1131,7 +1131,7 @@ static void test_scroll_steal_continues_across_frames(void) {
     /* Frame 1: inner widget owns the pointer; a 40 px drag steals + claims. */
     p.x = 100.0F;
     p.y = 140.0F;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
     inject_inner_capture(inner_id, 100.0F, 100.0F, 100.0F, 140.0F);
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &style, NULL);
@@ -1389,7 +1389,7 @@ static void test_scroll_velocity_clamp_on_dt_hitch(void) {
 
     /* One frame with a 500 px jump at a 0.001 s dt would sample 500000 px/s raw. */
     p.y = 100.0F - 500.0F;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.001F, &p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.001F, &p, 1, 0);
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &style, NULL);
         {
@@ -1693,7 +1693,7 @@ static void wheel_tile(uint32_t id, const nt_ui_scroll_style_t *style, int rows)
  * Clay_GetElementData, so on the frames A reappears its ancient bbox can overlap the live tiles. */
 static void wheel_grid_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style_a, const nt_ui_scroll_style_t *style_other, int b_rows, float spacer_h, bool drop_a) {
     nt_mem_scratch_reset(); /* per-frame scratch reset, exactly as the engine main loop does */
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
     CLAY({.id = CLAY_ID("wheel-root"), .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 0}}) {
         if (spacer_h > 0.0F) {
             CLAY({.id = CLAY_ID("wheel-spacer"), .layout = {.sizing = {CLAY_SIZING_FIXED(10), CLAY_SIZING_FIXED(spacer_h)}}}) {}
@@ -1787,7 +1787,7 @@ static const uint32_t NEST_INNER_ID = 0x5CF002U;
  * y>200) is outer-only. The pointer is parked by the caller. */
 static void nested_scroll_frame(nt_pointer_t *p) {
     const nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
     CLAY({.id = CLAY_ID("nest-root"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(300)}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, NEST_OUTER_ID, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(300)}}});
         {
@@ -1870,7 +1870,7 @@ static const uint32_t TIE_SMALL_ID = 0x5CF102U;
 
 static void tie_break_frame(nt_pointer_t *p) {
     const nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
     CLAY({.id = CLAY_ID("tie-root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(400)}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, TIE_BIG_ID, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(400)}}});
         {
@@ -2026,7 +2026,7 @@ static void test_scrollbar_nested_clipped_to_outer(void) {
     nt_pointer_t p = {0};
 
     for (int frame = 0; frame < 4; ++frame) {
-        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
         CLAY({.id = CLAY_ID("nested-clip-root"), .layout = {.sizing = {CLAY_SIZING_FIXED(800), CLAY_SIZING_FIXED(600)}, .padding = {.left = 37, .top = 53}}}) {
             nt_ui_scroll_begin(s_fx.ctx, NULL, EXCL_OUTER_ID, &outer_style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(310), CLAY_SIZING_FIXED(190)}}});
             {
@@ -2089,7 +2089,7 @@ static void candidate_overflow_frame(void) {
     nt_pointer_t p = {0};
     p.active = true;
     nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(800), CLAY_SIZING_FIXED(600)}}}) {
         for (uint32_t i = 0; i <= (uint32_t)NT_UI_WHEEL_CANDIDATES; ++i) {
             nt_ui_scroll_begin(s_fx.ctx, NULL, 0x100U + i, &style, NULL);

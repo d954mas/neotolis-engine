@@ -89,7 +89,7 @@ static Clay_BoundingBox declare_and_measure_text(nt_ui_context_t *ctx, const cha
     nt_pointer_t mouse;
     memset(&mouse, 0, sizeof mouse);
 
-    nt_ui_begin(ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
 
     /* Build a Clay_String wrapper from the literal. CLAY_TEXT's first arg
      * is a Clay_String value (not a pointer). */
@@ -158,7 +158,7 @@ static Clay_BoundingBox declare_and_measure_text_ls(nt_ui_context_t *ctx, const 
     nt_pointer_t mouse;
     memset(&mouse, 0, sizeof mouse);
 
-    nt_ui_begin(ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     Clay_String s = {.length = (int32_t)strlen(utf8), .chars = utf8};
     CLAY_TEXT(s, CLAY_TEXT_CONFIG({.fontId = font_id, .fontSize = font_size, .letterSpacing = letter_spacing}));
     nt_ui_end(ctx);

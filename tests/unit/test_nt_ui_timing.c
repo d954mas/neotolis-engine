@@ -48,7 +48,7 @@ void tearDown(void) {
 
 static void build_rect(nt_ui_context_t *ctx) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("timed_rect"), .layout = {.sizing = {CLAY_SIZING_FIXED(97.0F), CLAY_SIZING_FIXED(43.0F)}}, .backgroundColor = {255.0F, 64.0F, 32.0F, 255.0F}}) {}
     s_clock_reads = 0U;
     nt_ui_end(ctx);

@@ -42,16 +42,21 @@ cmake --build build/_cmake/native-debug-capture --target <example>
    `tools/devapi/pixel_health.py`. A request waits as long as the engine needs,
    so run the client under a shell timeout.
 
-4. **Interaction rhythm (hard rule):** observe → act → `frame.wait` → observe;
+4. **Gate the player before pointer input (hard rule):** a scenario that sends pointer input (click, move, drag, scroll) calls
+   `client.set_player_enabled(False)` first; the client's disconnect re-enables it. The bot drives the real mouse's
+   pointer, so a real mouse over the window otherwise moves it between the bot's press and release
+   (spec: "Input automation", the player gate).
+
+5. **Interaction rhythm (hard rule):** observe → act → `frame.wait` → observe;
    capture only after the state is stable. Lazy font glyphs / UI resources need
    tens of frames to settle — wait, then capture, or the frame lies.
 
-5. **Assert on pixels**: small exact region/color assertions beat full-image
+6. **Assert on pixels**: small exact region/color assertions beat full-image
    goldens (fonts + lazy resources + driver variance make frame-exact goldens
    flake; the studio never shipped them). For before/after — capture both and
    diff regions.
 
-6. Kill the app (`taskkill //F //IM <example>.exe` if it lingers).
+7. Kill the app (`taskkill //F //IM <example>.exe` if it lingers).
 
 ## Judging the image (LLM failure modes the studio codified)
 

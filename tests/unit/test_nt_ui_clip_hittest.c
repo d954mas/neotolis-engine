@@ -41,7 +41,7 @@ void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
  * layoutElementClipElementIds entry stays pointed at the wrapping clip. */
 static void declare_clip_with_child(float clip_x, float clip_y, float clip_w, float clip_h, float btn_x, float btn_y, float btn_w, float btn_h, const nt_ui_transform_t *clip_xform) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     void *clip_ud = (clip_xform != NULL) ? (void *)NT_UI_DATA_XFORM(0U, clip_xform, 1.0F) : NULL;
     const float pad_l = btn_x - clip_x;
     const float pad_t = btn_y - clip_y;
@@ -59,7 +59,7 @@ static void test_clip_axis_aligned_misses_outside_clip(void) {
     declare_clip_with_child(0.0F, 0.0F, 200.0F, 200.0F, 100.0F, 100.0F, 200.0F, 100.0F, NULL);
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     nt_ui_bbox_t clip_b = nt_ui_get_bbox(s_fx.ctx, nt_ui_id("clip_outer"));
     nt_ui_bbox_t btn_b = nt_ui_get_bbox(s_fx.ctx, nt_ui_id("clipbtn"));
     TEST_ASSERT_TRUE_MESSAGE(clip_b.found, "clip_outer bbox missing");
@@ -78,7 +78,7 @@ static void test_clip_axis_aligned_hits_inside_clip(void) {
     declare_clip_with_child(0.0F, 0.0F, 200.0F, 200.0F, 100.0F, 100.0F, 200.0F, 100.0F, NULL);
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     const uint32_t id = nt_ui_id("clipbtn");
     /* (150, 150): inside both clip and button. */
     const bool h = nt_ui_test_hit(s_fx.ctx, id, 150.0F, 150.0F);
@@ -92,7 +92,7 @@ static void test_clip_with_rotated_button(void) {
     const nt_ui_transform_t rot30 = {.offset_x = 0, .offset_y = 0, .rotation_z = DEG2RAD(30.0F), .scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F};
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("clip_outer"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 0.0F, .y = 0.0F}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(400.0F), CLAY_SIZING_FIXED(400.0F)}},
@@ -104,7 +104,7 @@ static void test_clip_with_rotated_button(void) {
     }
     nt_ui_end(s_fx.ctx);
 
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     const uint32_t id = nt_ui_id("clipbtn");
     const bool h_center = nt_ui_test_hit(s_fx.ctx, id, 200.0F, 150.0F);
     /* (420, 250) > clip's 400 right edge → clip chain rejects. */
@@ -125,7 +125,7 @@ static void test_clip_rotated_parent(void) {
     const nt_ui_transform_t rot45 = {.offset_x = 0, .offset_y = 0, .rotation_z = DEG2RAD(45.0F), .scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F};
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("clip_outer"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 100.0F, .y = 100.0F}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(200.0F), CLAY_SIZING_FIXED(200.0F)}},
@@ -137,7 +137,7 @@ static void test_clip_rotated_parent(void) {
     }
     nt_ui_end(s_fx.ctx);
 
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     const uint32_t id = nt_ui_id("clipbtn");
     /* Clip's rotation center is (200,200). Point (200,200) is at the diamond center → HIT. */
     const bool h_center = nt_ui_test_hit(s_fx.ctx, id, 200.0F, 200.0F);
@@ -155,7 +155,7 @@ static void test_nested_clips_intersect(void) {
      * descendant to its lexical clip parent (floating breaks this — see
      * declare_clip_with_child comment). Padding positions inner inside outer. */
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("clip_outer"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 0.0F, .y = 0.0F}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(300.0F), CLAY_SIZING_FIXED(300.0F)}, .padding = {.left = 50U, .top = 50U}},
@@ -166,7 +166,7 @@ static void test_nested_clips_intersect(void) {
     }
     nt_ui_end(s_fx.ctx);
 
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
     const uint32_t id = nt_ui_id("clipbtn");
     /* (75, 75): inside both clips → HIT. */
     const bool h_in_both = nt_ui_test_hit(s_fx.ctx, id, 75.0F, 75.0F);

@@ -115,7 +115,7 @@ static const Clay_ElementDeclaration s_row_decl = {
 
 static bool tg_frame(const nt_pointer_t *p, bool *value, bool enabled) {
     bool changed = false;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = TG_X, .y = TG_Y}}}) {
         changed = nt_ui_toggle(s_fx.ctx, NULL, 0, nt_ui_id("tg"), "Mute", value, &s_style, &s_row_decl, enabled);
     }
@@ -127,7 +127,7 @@ static bool tg_frame(const nt_pointer_t *p, bool *value, bool enabled) {
  * (the thumb is the last child of the box). Walk is needed to dispatch sprites. */
 static float thumb_emit_x(bool value) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = TG_X, .y = TG_Y}}}) {
         (void)nt_ui_toggle(s_fx.ctx, NULL, 0, nt_ui_id("tgx"), NULL, &value, &s_style, &s_row_decl, true);
     }
@@ -200,7 +200,7 @@ static void test_thumb_off_position_symmetric(void) {
 static void test_thumb_visible_at_off(void) {
     bool value = false; /* OFF */
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { (void)nt_ui_toggle(s_fx.ctx, NULL, 0, nt_ui_id("tg_off"), NULL, &value, &s_style, &s_row_decl, true); }
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_EQUAL_UINT32(0U, count_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_TEXT));
@@ -235,7 +235,7 @@ static void test_assert_thumb_travel_negative(void) {
     nt_ui_checkbox_style_t bad = s_style;
     bad.overlay_w = bad.box_w; /* overlay_w + 2*thumb_pad > box_w */
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_toggle(s_fx.ctx, NULL, 0, nt_ui_id("tg"), "x", &value, &bad, &s_row_decl, true)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -246,7 +246,7 @@ static void test_assert_thumb_pad_negative(void) {
     nt_ui_checkbox_style_t bad = s_style;
     bad.thumb_pad = -1.0F;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_toggle(s_fx.ctx, NULL, 0, nt_ui_id("tg"), "x", &value, &bad, &s_row_decl, true)); }
     nt_ui_end(s_fx.ctx);
 }

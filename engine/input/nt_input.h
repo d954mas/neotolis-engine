@@ -106,7 +106,7 @@ typedef struct {
 #define NT_INPUT_MAX_POINTERS 8
 
 typedef struct {
-    uint32_t id;             /* Browser PointerEvent.pointerId */
+    uint32_t id;             /* touch/pen: the platform contact id; 0 for the mouse */
     float x, y;              /* Framebuffer pixels, canvas-relative */
     float dx, dy;            /* Movement delta in framebuffer pixels */
     float wheel_dx;          /* Wheel delta in NOTCHES: 1.0 == one physical detent (platform edge
@@ -118,14 +118,20 @@ typedef struct {
     float pressure;          /* 0.0-1.0 */
     uint8_t type;            /* nt_pointer_type_t */
     bool active;             /* Pointer currently exists */
-    bool deactivate_pending; /* pointer_up defers deactivation by one frame */
+    bool deactivate_pending; /* an up or a mouse leave defers deactivation by one frame */
     nt_button_state_t buttons[NT_BUTTON_MAX];
 } nt_pointer_t;
 
 /* ---- Global input state ---- */
 
+/* pointers[0] is the mouse: active while the cursor is over the window or a button is held, and a
+   button release keeps it. Touch and pen contacts take slots 1.., each from its down to its up.
+   primary indexes the pointer a single-pointer consumer follows (updated by nt_input_poll): taken
+   by a press, or by hovering while nothing is held, and kept from the press through its release
+   frame. A contact already held when the primary ends never takes over. */
 typedef struct {
     nt_pointer_t pointers[NT_INPUT_MAX_POINTERS];
+    uint8_t primary;
 } nt_input_t;
 
 extern nt_input_t g_nt_input;
@@ -175,23 +181,20 @@ void nt_input_set_text_input_mode(nt_text_input_mode_t mode);
 
 /* Event kinds applied through the immediate inject buffer (drained every poll). */
 typedef enum {
-    NT_INJECT_KEY = 0,         /* key down/up */
-    NT_INJECT_POINTER_DOWN,    /* pointer slot create/press */
-    NT_INJECT_POINTER_MOVE,    /* pointer move */
-    NT_INJECT_POINTER_UP,      /* pointer release + deactivate-pending */
-    NT_INJECT_POINTER_BUTTONS, /* set button mask at the slot's CURRENT position (no move, no baked x/y) */
-    NT_INJECT_WHEEL,           /* mouse slot only */
-    NT_INJECT_CHAR,            /* codepoint into the char ring */
+    NT_INJECT_KEY = 0,       /* key down/up */
+    NT_INJECT_MOUSE_MOVE,    /* the mouse at (x,y) with a button mask */
+    NT_INJECT_MOUSE_BUTTONS, /* the mouse's button mask at its CURRENT position (no-op while it is not over the window) */
+    NT_INJECT_POINTER_DOWN,  /* touch/pen contact create/press */
+    NT_INJECT_POINTER_MOVE,  /* touch/pen contact move */
+    NT_INJECT_POINTER_UP,    /* touch/pen contact release + deactivate-pending */
+    NT_INJECT_WHEEL,         /* the mouse only */
+    NT_INJECT_CHAR,          /* codepoint into the char ring */
 } nt_inject_kind_t;
 
 /* Bounded BSS immediate inject buffer cap (-D overridable). */
 #ifndef NT_INPUT_INJECT_QUEUE_MAX
 #define NT_INPUT_INJECT_QUEUE_MAX 256
 #endif
-
-/* Convenience single-pointer id: a HIGH reserved value so it never collides with a real
-   mouse (id=0) or a small browser pointerId. Explicit bot ids are used verbatim. */
-#define NT_INPUT_INJECT_POINTER_ID_BASE 0x10000000U
 
 /* ---- Mouse convenience helpers ---- */
 

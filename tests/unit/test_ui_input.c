@@ -124,7 +124,7 @@ static const Clay_RenderCommand *find_field_bg_rect(const nt_ui_context_t *ctx) 
 /* One frame with a single field. Feeds the given pointer; returns the change flag. */
 static bool field_frame(const nt_pointer_t *p, uint32_t id, char *buf, size_t cap, bool enabled, bool *submitted) {
     bool changed = false;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1, 0);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         changed = nt_ui_input_text(s_fx.ctx, NULL, 0, id, buf, cap, &s_props, &s_style, &s_field_decl, enabled, submitted);
     }
@@ -153,7 +153,7 @@ static bool key_frame(uint32_t id, char *buf, size_t cap, nt_key_t key) {
 
 /* One frame with two stacked fields (A on top, B below). Both buffers are char[32]. Feeds the pointer. */
 static void two_field_frame(const nt_pointer_t *p, uint32_t id_a, char *a, uint32_t id_b, char *b) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1, 0);
     CLAY({.id = CLAY_ID("root2"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col2"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
             (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, 32U, &s_props, &s_style, &s_field_decl, true, NULL);
@@ -166,7 +166,7 @@ static void two_field_frame(const nt_pointer_t *p, uint32_t id_a, char *a, uint3
 /* One frame with three stacked fields (A, B, C). B's enabled state is a parameter so Tab-through-disabled
  * can be exercised. All buffers are char[32]. */
 static void three_field_frame(const nt_pointer_t *p, uint32_t ia, char *a, uint32_t ib, char *b, bool b_enabled, uint32_t ic, char *c) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1, 0);
     CLAY({.id = CLAY_ID("root3"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col3"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
             (void)nt_ui_input_text(s_fx.ctx, NULL, 0, ia, a, 32U, &s_props, &s_style, &s_field_decl, true, NULL);
@@ -180,7 +180,7 @@ static void three_field_frame(const nt_pointer_t *p, uint32_t ia, char *a, uint3
 /* One frame with a single GROW-width field inside a fixed-width parent: the field has a real rendered
  * width but its decl carries NO width, exercising the responsive-width (bbox-fallback) scroll path. */
 static void grow_field_frame(const nt_pointer_t *p, uint32_t id, char *buf, size_t cap) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1, 0);
     CLAY({.id = CLAY_ID("rootG"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(IN_W), CLAY_SIZING_FIXED(IN_H)}}}) {
         const Clay_ElementDeclaration grow_decl = {.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(IN_H)}}};
         (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id, buf, cap, &s_props, &s_style, &grow_decl, true, NULL);
@@ -315,7 +315,7 @@ static void test_focus_tab_esc(void) {
     const uint32_t id_b = nt_ui_id("fb");
 
     /* One frame to register both fields + warm their bboxes. */
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1, 0);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
             (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, &s_props, &s_style, &s_field_decl, true, NULL);
@@ -326,7 +326,7 @@ static void test_focus_tab_esc(void) {
 
     /* Press inside field A to focus it. */
     nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &press, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &press, 1, 0);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
             (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, &s_props, &s_style, &s_field_decl, true, NULL);
@@ -340,7 +340,7 @@ static void test_focus_tab_esc(void) {
     /* Tab: focus moves to field B. */
     nt_input_poll();
     nt_input_set_key(NT_KEY_TAB, true);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1, 0);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
             (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, &s_props, &s_style, &s_field_decl, true, NULL);
@@ -354,7 +354,7 @@ static void test_focus_tab_esc(void) {
 
     /* A typed char now only edits B (the focused field); A stays empty. */
     nt_input_buffer_char((uint32_t)'q');
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1, 0);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
             (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, &s_props, &s_style, &s_field_decl, true, NULL);
@@ -368,7 +368,7 @@ static void test_focus_tab_esc(void) {
     /* Esc: unfocus B. */
     nt_input_poll();
     nt_input_set_key(NT_KEY_ESCAPE, true);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1, 0);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
             (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, &s_props, &s_style, &s_field_decl, true, NULL);
@@ -390,13 +390,13 @@ static void test_focus_orphan_cleared(void) {
 
     /* Frame 1 without the field: begin still sees last frame's seen=1, so focus survives this begin
      * but seen stays 0 (the field never runs). */
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1, 0);
     CLAY({.id = CLAY_ID("root")}) {}
     nt_ui_end(s_fx.ctx);
 
     /* Frame 2's begin runs the orphan sweep on seen==0 -> focus is cleared so a global Esc=quit is
      * no longer gated forever. */
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1, 0);
     CLAY({.id = CLAY_ID("root")}) {}
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_FALSE(nt_ui_input_any_focused(s_fx.ctx));
@@ -719,7 +719,7 @@ static void test_clipboard_paste_replaces_selection(void) {
 static void test_password_mask_render(void) {
     /* "Аб" = 2 codepoints / 4 bytes -> the mask string is exactly 2 glyphs, not 4. */
     const char *src = "\xD0\x90\xD0\xB1";
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1); /* scratch frame for the mask alloc */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1, 0); /* scratch frame for the mask alloc */
     const char *masked = nt_ui_input_build_display_text(src, (uint32_t)strlen(src));
     TEST_ASSERT_EQUAL_UINT(2U, (unsigned)strlen(masked)); /* 2 codepoints -> 2 mask chars */
     TEST_ASSERT_EQUAL_UINT8((uint8_t)'*', (uint8_t)masked[0]);
@@ -1131,7 +1131,7 @@ static void test_offscreen_clip_scissor_balanced(void) {
      * the clip's SCISSOR_START on offscreen while still emitting SCISSOR_END (closeClipElement), leaving
      * the render stream unbalanced -> a renderer scissor-stack underflow. The vendored patch forces the
      * START to emit. Count the frozen command stream to assert the pair is balanced. */
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1, 0);
     CLAY({.id = CLAY_ID("rootOff"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = 2000.0F}}}) {
         (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id, buf, sizeof buf, &s_props, &s_style, &s_field_decl, true, NULL);
     }
@@ -1433,28 +1433,28 @@ static void test_scroll_step_caret_follow_fixed_width(void) {
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
 static void test_assert_null_buffer(void) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("f"), NULL, 32U, &s_props, &s_style, &s_field_decl, true, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
 
 static void test_assert_zero_cap(void) {
     char buf[4] = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("f"), buf, 0U, &s_props, &s_style, &s_field_decl, true, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
 
 static void test_assert_null_props(void) {
     char buf[4] = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("f"), buf, sizeof buf, NULL, &s_style, &s_field_decl, true, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
 
 static void test_assert_null_style(void) {
     char buf[4] = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("f"), buf, sizeof buf, &s_props, NULL, &s_field_decl, true, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -1469,7 +1469,7 @@ static void test_field_text_above_modal_band(void) {
     nt_ui_modal_style_t mst = nt_ui_modal_style_defaults();
     mst.ease_speed = 0.0F;
 
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
     (void)nt_ui_modal_begin(s_fx.ctx, 0x1F0001U, &mst, true);
     CLAY({.id = CLAY_ID("modal_panel"), .layout = {.sizing = {CLAY_SIZING_FIXED(400.0F), CLAY_SIZING_FIXED(200.0F)}}, .backgroundColor = {10, 10, 10, 255}}) {
         (void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("modal_field"), buf, sizeof buf, &s_props, &s_style, &s_field_decl, true, NULL);

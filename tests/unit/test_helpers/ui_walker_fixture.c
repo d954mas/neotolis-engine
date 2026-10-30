@@ -216,7 +216,7 @@ float ui_walker_fx_vertex_float(const uint8_t *vertex, uint32_t byte_offset) {
 
 void ui_walker_fixture_inject_cmds(ui_walker_fixture_t *fx, Clay_RenderCommand *cmds, int32_t count, int32_t capacity) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(fx->ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(fx->ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     nt_ui_end(fx->ctx);
     fx->ctx->frozen_cmds.internalArray = cmds;
     fx->ctx->frozen_cmds.length = count;

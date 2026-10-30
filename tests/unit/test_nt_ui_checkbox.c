@@ -125,7 +125,7 @@ static const Clay_ElementDeclaration s_row_decl = {
 
 static bool cb_frame(const nt_pointer_t *p, bool *value, bool enabled) {
     bool changed = false;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = CB_X, .y = CB_Y}}}) {
         changed = nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "Enable", value, &s_style, &s_row_decl, enabled);
     }
@@ -183,7 +183,7 @@ static void test_indicator_only_no_text(void) {
 
     /* Unchecked indicator: box IMAGE present, NO overlay, 0 TEXT. */
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { (void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb_off"), NULL, &value, &s_style, &s_row_decl, true); }
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_EQUAL_UINT32(0U, count_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_TEXT));
@@ -191,7 +191,7 @@ static void test_indicator_only_no_text(void) {
 
     /* Checked indicator: box IMAGE + overlay IMAGE = 2, still 0 TEXT. */
     value = true;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { (void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb_on"), NULL, &value, &s_style, &s_row_decl, true); }
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_EQUAL_UINT32(0U, count_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_TEXT));
@@ -225,7 +225,7 @@ static void test_disabled_no_click_balanced(void) {
 static void test_layer_propagation(void) {
     bool value = true; /* box IMAGE + overlay IMAGE + label TEXT all emit */
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { (void)nt_ui_checkbox(s_fx.ctx, NT_UI_DATA_LAYER(5), 7, nt_ui_id("cb"), "Enable", &value, &s_style, &s_row_decl, true); }
     nt_ui_end(s_fx.ctx);
 
@@ -286,7 +286,7 @@ static void box_and_text_x(uint8_t label_side, float *out_box_x, float *out_text
     s_style.label_side = label_side;
     bool value = false;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { (void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "Enable", &value, &s_style, &s_row_decl, true); }
     nt_ui_end(s_fx.ctx);
     const Clay_RenderCommand *box = first_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_IMAGE);
@@ -318,7 +318,7 @@ static void test_text_color_override(void) {
     s_style.checked[NT_UI_CB_IDLE].text_color = 0xFF3399CCU;
     bool value = true;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { (void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "Enable", &value, &s_style, &s_row_decl, true); }
     nt_ui_end(s_fx.ctx);
     const Clay_RenderCommand *text = first_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_TEXT);
@@ -335,7 +335,7 @@ static void test_text_color_override(void) {
     for (int state = NT_UI_CB_IDLE; state <= NT_UI_CB_DISABLED; ++state) {
         s_style.checked[state].text_color = 0U; /* whichever state the pointer leaves the row in */
     }
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { (void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "Enable", &value, &s_style, &s_row_decl, true); }
     nt_ui_end(s_fx.ctx);
     text = first_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_TEXT);
@@ -351,7 +351,7 @@ static void test_text_color_override(void) {
     for (int state = NT_UI_CB_IDLE; state <= NT_UI_CB_DISABLED; ++state) {
         s_style.checked[state].text_color = 0xFFFFFFFFU;
     }
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { (void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "Enable", &value, &s_style, &s_row_decl, true); }
     nt_ui_end(s_fx.ctx);
     text = first_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_TEXT);
@@ -378,7 +378,7 @@ static void test_style_defaults_valid_baseline(void) {
     s.checked[NT_UI_CB_IDLE].check = art;
     bool value = false;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { (void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("def"), NULL, &value, &s, &s_row_decl, true); }
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1U, count_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_IMAGE));
@@ -391,7 +391,7 @@ static void test_style_defaults_valid_baseline(void) {
 /* One tristate frame at the pinned bbox; same driver shape as cb_frame. */
 static bool tri_frame(const nt_pointer_t *p, nt_ui_tristate_t *value, bool enabled) {
     bool changed = false;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = CB_X, .y = CB_Y}}}) {
         changed = nt_ui_checkbox_tri(s_fx.ctx, NULL, 0, nt_ui_id("tri"), "Enable", value, &s_style, &s_row_decl, enabled);
     }
@@ -438,7 +438,7 @@ static void test_tri_never_mixed_via_click(void) {
  * region_index (the overlay), or UINT32_MAX when no overlay is emitted. */
 static uint32_t tri_overlay_region(nt_ui_tristate_t v) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { (void)nt_ui_checkbox_tri(s_fx.ctx, NULL, 0, nt_ui_id("tri_r"), NULL, &v, &s_style, &s_row_decl, true); }
     nt_ui_end(s_fx.ctx);
     int seen = 0;
@@ -489,7 +489,7 @@ static void test_assert_data_flags_transform(void) {
     bool value = false;
     nt_ui_transform_t t = nt_ui_transform_defaults();
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) {
         const nt_ui_element_data_t *bad = NT_UI_DATA_XFORM(0U, &t, 1.0F); /* sets HAS_TRANSFORM|HAS_OPACITY */
         NT_TEST_EXPECT_ASSERT((void)nt_ui_checkbox(s_fx.ctx, bad, 0, nt_ui_id("cb"), "x", &value, &s_style, &s_row_decl, true));
@@ -503,7 +503,7 @@ static void test_assert_box_w_zero(void) {
     nt_ui_checkbox_style_t bad = s_style;
     bad.box_w = 0.0F;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "x", &value, &bad, &s_row_decl, true)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -514,7 +514,7 @@ static void test_assert_box_h_zero(void) {
     nt_ui_checkbox_style_t bad = s_style;
     bad.box_h = 0.0F;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "x", &value, &bad, &s_row_decl, true)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -526,7 +526,7 @@ static void test_assert_empty_value_row(void) {
     bad.unchecked[NT_UI_CB_IDLE].box = (nt_atlas_region_ref_t){0};
     bad.unchecked[NT_UI_CB_IDLE].check = (nt_atlas_region_ref_t){0};
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "x", &value, &bad, &s_row_decl, true)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -537,7 +537,7 @@ static void test_assert_overlay_w_negative(void) {
     nt_ui_checkbox_style_t bad = s_style;
     bad.overlay_w = -1.0F;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "x", &value, &bad, &s_row_decl, true)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -548,7 +548,7 @@ static void test_assert_state_speed_negative(void) {
     nt_ui_checkbox_style_t bad = s_style;
     bad.state_speed = -1.0F;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "x", &value, &bad, &s_row_decl, true)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -559,7 +559,7 @@ static void test_assert_value_speed_negative(void) {
     nt_ui_checkbox_style_t bad = s_style;
     bad.value_speed = -1.0F;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "x", &value, &bad, &s_row_decl, true)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -570,7 +570,7 @@ static void test_assert_gap_negative(void) {
     nt_ui_checkbox_style_t bad = s_style;
     bad.gap = -1.0F;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "x", &value, &bad, &s_row_decl, true)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -581,7 +581,7 @@ static void test_assert_label_side_invalid(void) {
     nt_ui_checkbox_style_t bad = s_style;
     bad.label_side = 2;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "x", &value, &bad, &s_row_decl, true)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -592,7 +592,7 @@ static void test_assert_box_w_inf(void) {
     nt_ui_checkbox_style_t bad = s_style;
     bad.box_w = INFINITY;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "x", &value, &bad, &s_row_decl, true)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -603,7 +603,7 @@ static void test_assert_overlay_w_inf(void) {
     nt_ui_checkbox_style_t bad = s_style;
     bad.overlay_w = INFINITY;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "x", &value, &bad, &s_row_decl, true)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -612,7 +612,7 @@ static void test_assert_overlay_w_inf(void) {
 static void test_assert_tri_value_invalid(void) {
     nt_ui_tristate_t value = (nt_ui_tristate_t)7; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_checkbox_tri(s_fx.ctx, NULL, 0, nt_ui_id("tri"), "x", &value, &s_style, &s_row_decl, true)); }
     nt_ui_end(s_fx.ctx);
 }

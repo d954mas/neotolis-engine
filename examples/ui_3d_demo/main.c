@@ -892,13 +892,13 @@ static void frame(void) {
     const bool ui_can_render = s_atlas_bound && s_font_bound && sprite_info && nt_gfx_program_ready(sprite_info->program) && text_info && nt_gfx_program_ready(text_info->program);
 
     if (ui_can_render) {
-        const nt_pointer_t mouse_phys = g_nt_input.pointers[0];
-        nt_ui_begin(s_ctx, fb_w, fb_h, dt, &mouse_phys, 1);
+        const nt_pointer_t *pointer = &g_nt_input.pointers[g_nt_input.primary];
+        nt_ui_begin(s_ctx, fb_w, fb_h, dt, pointer, 1, 0);
         nt_ui_set_view_proj(s_ctx, (const float *)vp_3d);
         /* Occlusion: if the cursor ray crosses the central object, block UI beyond it — a panel
          * behind the object can't be clicked through it (game owns the world raycast). */
         float occl_dist = 0.0F;
-        if (cursor_object_distance(mouse_phys.x, mouse_phys.y, fb_w, fb_h, vp_3d, &occl_dist)) {
+        if (cursor_object_distance(pointer->x, pointer->y, fb_w, fb_h, vp_3d, &occl_dist)) {
             nt_ui_set_pointer_occlusion(s_ctx, 0, occl_dist);
         }
         declare_panels();

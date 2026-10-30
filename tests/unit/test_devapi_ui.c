@@ -15,7 +15,7 @@
 #include "devapi/nt_devapi_input_internal.h" /* NT_DEVAPI_INPUT_SCHED_MAX — the ui drag cap derives from it */
 #include "devapi/nt_devapi_internal.h"
 #include "devapi/nt_devapi_net.h"      /* nt_devapi_update — drives the shared inject schedule on a sim-advance */
-#include "input/nt_input.h"            /* g_nt_input + the reserved inject pointer id, for the Y-up flip read-back */
+#include "input/nt_input.h"            /* g_nt_input + the mouse id, for the Y-up flip read-back */
 #include "memory/nt_mem_scratch.h"     /* CLAY per-element data backing; reset between frames */
 #include "test_helpers/nt_assert_trap.h" /* NT_TEST_EXPECT_ASSERT: the pre-init register death-test */
 #include "test_helpers/ui_test_arena.h"
@@ -83,7 +83,7 @@ static void declare_scaled_tree(void) {
     nt_pointer_t mouse = {0};
     mouse.x = -100.0F;
     mouse.y = -100.0F;
-    nt_ui_begin(s_scaled_ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_scaled_ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1, 0);
     nt_ui_set_viewport(s_scaled_ctx, (nt_ui_viewport_t){.x = SCALED_VP_X, .y = SCALED_VP_Y, .w = LAYOUT_W * SCALED_SCALE, .h = LAYOUT_H * SCALED_SCALE});
     CLAY({.id = CLAY_ID("widget"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) {
     }
@@ -99,7 +99,7 @@ static void declare_tree(void) {
     nt_pointer_t mouse = {0};
     mouse.x = -100.0F;
     mouse.y = -100.0F;
-    nt_ui_begin(s_fx.ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("widget"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) {
     }
     nt_ui_widget_register(s_fx.ctx, nt_ui_id("widget"), &NT_UI_BUTTON_DEF, NULL, true);
@@ -124,7 +124,7 @@ static void declare_xform_tree(void) {
         nt_pointer_t mouse = {0};
         mouse.x = -100.0F;
         mouse.y = -100.0F;
-        nt_ui_begin(s_fx.ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1);
+        nt_ui_begin(s_fx.ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1, 0);
         CLAY({.id = CLAY_ID("xwidget"),
               .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}},
               .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}},
@@ -207,10 +207,10 @@ static void advance(void) {
     nt_input_poll();
 }
 
-/* The reserved synthetic-mouse slot after a release, or NULL if it never landed. */
+/* The mouse slot after a release, or NULL if it never landed. */
 static nt_pointer_t *inject_slot(void) {
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
-        if (g_nt_input.pointers[i].active && g_nt_input.pointers[i].id == NT_INPUT_INJECT_POINTER_ID_BASE) {
+        if (i == 0 && g_nt_input.pointers[i].active) {
             return &g_nt_input.pointers[i];
         }
     }
@@ -322,7 +322,7 @@ static void declare_collapsed_tree(void) {
     nt_pointer_t mouse = {0};
     mouse.x = -100.0F;
     mouse.y = -100.0F;
-    nt_ui_begin(s_fx.ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("collapsed"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(0), CLAY_SIZING_FIXED(0)}}}) {}
     nt_ui_widget_register(s_fx.ctx, nt_ui_id("collapsed"), &NT_UI_BUTTON_DEF, NULL, true);
     nt_ui_end(s_fx.ctx);
@@ -408,7 +408,7 @@ static void test_transformed_click_id_targets_projected_center(void) {
     nt_pointer_t mouse = {0};
     mouse.x = -100.0F;
     mouse.y = -100.0F;
-    nt_ui_begin(s_fx.ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_fx.ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("xwidget"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}},
@@ -466,7 +466,7 @@ static void test_scaled_click_string_id_lands_at_device_center(void) {
     nt_pointer_t mouse = {0};
     mouse.x = -100.0F;
     mouse.y = -100.0F;
-    nt_ui_begin(s_scaled_ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_scaled_ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1, 0);
     nt_ui_set_viewport(s_scaled_ctx, (nt_ui_viewport_t){.x = SCALED_VP_X, .y = SCALED_VP_Y, .w = LAYOUT_W * SCALED_SCALE, .h = LAYOUT_H * SCALED_SCALE});
     const float device_pt[2] = {slot->x, slot->y};
     float layout_pt[2];
@@ -497,7 +497,7 @@ static void test_scaled_click_xy_lands_at_device_center(void) {
     nt_pointer_t mouse = {0};
     mouse.x = -100.0F;
     mouse.y = -100.0F;
-    nt_ui_begin(s_scaled_ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1);
+    nt_ui_begin(s_scaled_ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1, 0);
     nt_ui_set_viewport(s_scaled_ctx, (nt_ui_viewport_t){.x = SCALED_VP_X, .y = SCALED_VP_Y, .w = LAYOUT_W * SCALED_SCALE, .h = LAYOUT_H * SCALED_SCALE});
     const float device_pt[2] = {slot->x, slot->y};
     float layout_pt[2];
