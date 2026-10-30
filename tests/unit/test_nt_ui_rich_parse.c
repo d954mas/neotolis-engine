@@ -129,11 +129,8 @@ static nt_ui_rich_fx_result_t parse_stub_fx(uint32_t atom_idx, nt_rich_atom_kind
     return nt_ui_rich_fx_identity(base_color);
 }
 
-/* Stub object measure fn (fixed box) used only to prove object-tag registration guards. */
-static nt_ui_rich_object_measure_t parse_stub_object_measure(void *user_data) {
-    (void)user_data;
-    return (nt_ui_rich_object_measure_t){.width = 8.0F, .height = 8.0F, .ascent = 8.0F};
-}
+/* Stub object size (fixed box) used only to prove object-tag registration guards. */
+static const nt_ui_rich_object_size_t parse_stub_object_size = {.width = 8.0F, .height = 8.0F, .ascent = 8.0F};
 
 static void test_tagset_custom_effect_fn(void) {
     nt_ui_rich_tagset_t ts;
@@ -233,7 +230,7 @@ static void test_tagset_empty_name_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_color(&ts, "", 0xFFFFFFFFU));
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_effect(&ts, "", nt_ui_rich_fx_wave));
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_effect_fn(&ts, "", parse_stub_fx, NULL));
-    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_object_tag(&ts, "", parse_stub_object_measure, NULL, NULL));
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_object_tag(&ts, "", parse_stub_object_size, NULL, NULL));
 }
 
 /* ---- parser malformed-markup death tests ---- */
@@ -511,7 +508,7 @@ static void test_parse_fx_empty_value_graceful(void) {
 static void parse_obj(const char *m) {
     nt_ui_rich_tagset_t ts;
     nt_ui_rich_tagset_init(&ts);
-    nt_ui_rich_tagset_register_object_tag(&ts, "widget", parse_stub_object_measure, NULL, NULL);
+    nt_ui_rich_tagset_register_object_tag(&ts, "widget", parse_stub_object_size, NULL, NULL);
     nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;

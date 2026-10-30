@@ -1149,10 +1149,7 @@ static nt_ui_rich_fx_result_t composition_effect(uint32_t atom_idx, nt_rich_atom
     return result;
 }
 
-static nt_ui_rich_object_measure_t composition_object_measure(void *user_data) {
-    (void)user_data;
-    return (nt_ui_rich_object_measure_t){.width = 320.0F, .height = 32.0F, .ascent = 32.0F};
-}
+static const nt_ui_rich_object_size_t composition_object_size = {.width = 320.0F, .height = 32.0F, .ascent = 32.0F};
 
 static void composition_object_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     (void)user_data;
@@ -1191,7 +1188,7 @@ static void render_rich_composition(nt_ui_context_t *ctx) {
                         nt_ui_rich_image(ctx, nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS__WHITE.value), NT_RICH_VALIGN_BASELINE, 0.0F, 32.0F);
                     }
                 } else {
-                    nt_ui_rich_object(ctx, composition_object_measure, composition_object_draw, NULL);
+                    nt_ui_rich_object(ctx, composition_object_size, composition_object_draw, NULL);
                 }
                 if (effect) {
                     nt_ui_rich_pop(ctx);

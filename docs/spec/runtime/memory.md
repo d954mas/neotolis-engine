@@ -63,11 +63,10 @@ A mark is an earlier `used` of the same arena. `nt_arena_rewind(arena, mark)`
 returns the head to the mark in O(1); marks nest. A mark is invalid after a reset or an
 earlier rewind below it; the assert catches one only while it lies past the
 current head. A rewind frees everything allocated after the mark by any caller,
-so it closes only a scope whose allocations are consumed before it. Code that
-runs inside the scope must not allocate from the arena; the owner of the scope
-asserts it. Example: the rich-text solve rewinds its glyph atoms after placing
-them, and asserts that a game `measure_fn` called inside the solve allocated no
-scratch.
+so it closes only a scope whose allocations are consumed before it and that
+runs no foreign code which could keep its own allocations. Example: the
+rich-text solve rewinds its glyph atoms after placing them; it calls no game
+callback, since object sizes are data.
 
 ### Frame scratch memory
 

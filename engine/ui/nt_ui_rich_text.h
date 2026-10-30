@@ -152,15 +152,13 @@ _Static_assert(sizeof(nt_ui_rich_style_t) == 72, "nt_ui_rich_style_t in-memory s
 /* Use instead of bare {0} -- color_abgr=0 renders fully transparent. */
 nt_ui_rich_style_t nt_ui_rich_style_defaults(void);
 
-/* ---- Object atom callbacks ---- */
+/* ---- Object atoms ---- */
 typedef struct {
     float width;
     float height;
     float ascent; /* above baseline; for valign=baseline placement */
-} nt_ui_rich_object_measure_t;
+} nt_ui_rich_object_size_t;
 
-/* Runs inside the block's solve, which rewinds scratch: must not allocate scratch (asserts). */
-typedef nt_ui_rich_object_measure_t (*nt_ui_rich_object_measure_fn)(void *user_data);
 /* color is the ABSOLUTE resolved RGBA (honours opacity/<color>/fx) -- modulate the draw by it.
  * x,y,w,h are LAYOUT (Clay Y-down) px; apply world_mat4 (it bakes the screen Y-flip) to every
  * position or compose it on the LEFT of your model -- passing identity Y-mirrors the object. */
@@ -192,7 +190,9 @@ void nt_ui_rich_push_effect_fn(nt_ui_context_t *ctx, nt_ui_rich_fx_fn fn, void *
 void nt_ui_rich_push_effect_ex(nt_ui_context_t *ctx, nt_ui_rich_fx_fn fn, const nt_ui_rich_fx_params_t *params);
 void nt_ui_rich_text_n(nt_ui_context_t *ctx, const char *utf8, size_t len);
 void nt_ui_rich_image(nt_ui_context_t *ctx, nt_atlas_region_ref_t ref, nt_rich_valign_t valign, float offset_y, float scale);
-void nt_ui_rich_object(nt_ui_context_t *ctx, nt_ui_rich_object_measure_fn measure_fn, nt_ui_rich_object_draw_fn draw_fn, void *user_data);
+/* Reserves a size.width x size.height box (finite, non-negative); draw_fn (NULL = box only)
+ * paints it at walk with user_data, borrowed until that walk. */
+void nt_ui_rich_object(nt_ui_context_t *ctx, nt_ui_rich_object_size_t size, nt_ui_rich_object_draw_fn draw_fn, void *user_data);
 /* Set/clear, NOT push/pop: link_id starts a pending link, 0 ends it. Links never nest. */
 void nt_ui_rich_link(nt_ui_context_t *ctx, uint32_t link_id);
 void nt_ui_rich_pop(nt_ui_context_t *ctx);

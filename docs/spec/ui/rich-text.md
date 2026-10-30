@@ -245,8 +245,11 @@ nt_ui_rich_pop(ctx);
   nest (HTML no-nested-anchor rule). Style push/pop is separate — popping past
   the base style asserts in both FULL and TRAP.
 - **Custom objects** (`<obj>`): a Flutter-style WidgetSpan — the solver reserves
-  a box via `measure_fn` (text wraps around it; it runs inside the solve's
-  [scoped rewind](../runtime/memory.md#scoped-rewind) and must not allocate scratch, which asserts); the widget calls the game's
+  a box of the object's `nt_ui_rich_object_size_t` (width, height, ascent; text
+  wraps around it). The size is data, not a callback: `nt_ui_rich_object` takes it
+  by value, `nt_ui_rich_tagset_register_object_tag` stores it, and re-registering
+  the name replaces it, so an animated object updates its size before the
+  declaration. No game code runs inside the solve. The widget calls the game's
   `draw_fn(user_data, x, y, w, h, color, world_mat4)` at the solved box. The engine
   never draws the object (renderer-agnostic); a `draw_fn` that emits sprites selects
   its own material first, since the selection it finds is whatever the band's images or an earlier

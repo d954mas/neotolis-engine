@@ -49,15 +49,19 @@ typedef struct {
     /* TEXT: byte range into the shared utf8 buffer. */
     uint32_t text_off;
     uint32_t text_len;
-    /* IMAGE: */
-    nt_atlas_region_ref_t image_ref;
-    nt_rich_valign_t image_valign;
-    float image_offset_y;
-    float image_scale;
-    /* OBJECT: */
-    nt_ui_rich_object_measure_fn object_measure;
-    nt_ui_rich_object_draw_fn object_draw;
-    void *object_user;
+    union { /* by kind */
+        struct {
+            nt_atlas_region_ref_t image_ref;
+            nt_rich_valign_t image_valign;
+            float image_offset_y;
+            float image_scale;
+        };
+        struct {
+            nt_ui_rich_object_size_t object_size;
+            nt_ui_rich_object_draw_fn object_draw;
+            void *object_user;
+        };
+    };
 } nt_ui_rich_run_t;
 
 /* A solved, positioned atom (the solver's output, consumed by emit). TEXT atoms keep a
@@ -491,14 +495,15 @@ void nt_ui_rich_image(nt_ui_context_t *ctx, nt_atlas_region_ref_t ref, nt_rich_v
     r->image_scale = scale;
 }
 
-void nt_ui_rich_object(nt_ui_context_t *ctx, nt_ui_rich_object_measure_fn measure_fn, nt_ui_rich_object_draw_fn draw_fn, void *user_data) {
-    NT_ASSERT(measure_fn != NULL);
+void nt_ui_rich_object(nt_ui_context_t *ctx, nt_ui_rich_object_size_t size, nt_ui_rich_object_draw_fn draw_fn, void *user_data) {
+    /* The size is game-trusted: fail early on a garbage box. */
+    NT_ASSERT(isfinite(size.width) && isfinite(size.height) && isfinite(size.ascent) && size.width >= 0.0F && size.height >= 0.0F && "rich object: size must be finite, non-negative width/height");
     nt_ui_rich_state_t *st = rich_state(ctx);
     const uint16_t style_idx = rich_intern_style(st, rich_style_top(st));
     nt_ui_rich_run_t *r = rich_new_run(st, NT_RICH_ATOM_OBJECT);
     r->style_idx = style_idx;
     r->link_id = st->pending_link;
-    r->object_measure = measure_fn;
+    r->object_size = size;
     r->object_draw = draw_fn;
     r->object_user = user_data;
 }
@@ -895,10 +900,10 @@ static void rich_parse_img(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tags
     nt_ui_rich_image(ctx, nt_atlas_ref(atlas, region_hash), valign, oy, scale);
 }
 
-/* `<obj=name/>` self-close: a game-drawn WidgetSpan (measure_fn sizes the box, draw_fn paints it).
+/* `<obj=name/>` self-close: a game-drawn WidgetSpan (registered size reserves the box, draw_fn paints it).
  * Name resolved via the tagset using the SAME hash as register_object_tag (nt_hash64_str -> the full
  * name bytes), which equals nt_hash64(val, vlen) here since [val,val+vlen) IS the name. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- empty name + unknown/NULL-measure degrade branches
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- empty name + unknown name degrade branches
 static void rich_parse_obj(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, const char *val, uint32_t vlen) {
     /* No tagset -> the lookup below would deref NULL on untrusted markup (<obj=x/> with a text-only,
      * tagset-less config). Log + skip the object. */
@@ -913,13 +918,12 @@ static void rich_parse_obj(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tags
     }
     nt_ui_rich_tagset_object_t obj = {0};
     const bool obj_ok = nt_ui_rich_tagset_lookup_object(tagset, nt_hash64((const void *)val, vlen).value, &obj);
-    /* Unknown name or a (defensively) NULL measure_fn -> log + skip; nt_ui_rich_object asserts
-     * measure_fn != NULL, but register_object_tag rejects NULL measure so this only fires on miss. */
-    if (!obj_ok || obj.measure_fn == NULL) {
+    /* Unknown name -> log + skip. */
+    if (!obj_ok) {
         NT_LOG_WARN_UNIQUE("rich markup: unknown <obj=%.*s/> -- skipped", (int)vlen, val);
         return;
     }
-    nt_ui_rich_object(ctx, obj.measure_fn, obj.draw_fn, obj.user_data);
+    nt_ui_rich_object(ctx, obj.size, obj.draw_fn, obj.user_data);
 }
 
 /* Parse the param tail of `<fx=name amp=8 speed=3>` ([s,s+n) = the bytes AFTER the name, including
@@ -1589,17 +1593,10 @@ static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float container_w, rich
             a->breakable_before = true; /* image: break opportunity on both sides */
             a->run_idx = (uint16_t)ri;
             a->link_id = run->link_id;
-        } else { /* NT_RICH_ATOM_OBJECT: reserve the box via the run's measure_fn. */
-            NT_ASSERT(run->object_measure != NULL && "rich object: measure_fn must be non-NULL");
-            const size_t scratch_used = g_nt_mem_scratch.used;
-            const nt_ui_rich_object_measure_t m = run->object_measure(run->object_user);
-            /* The solve rewinds its scratch, so a measure_fn allocation would die before draw_fn. */
-            NT_ASSERT(g_nt_mem_scratch.used == scratch_used && "rich object: measure_fn must not allocate scratch");
-            /* measure_fn is game-trusted: fail early on a garbage box. */
-            NT_ASSERT(isfinite(m.width) && isfinite(m.height) && isfinite(m.ascent) && m.width >= 0.0F && m.height >= 0.0F && "rich object: measure_fn must return finite, non-negative width/height");
-            const float obj_w = m.width;
-            const float obj_h = m.height;
-            const float obj_asc = m.ascent;
+        } else { /* NT_RICH_ATOM_OBJECT: reserve the run's box. */
+            const float obj_w = run->object_size.width;
+            const float obj_h = run->object_size.height;
+            const float obj_asc = run->object_size.ascent;
             NT_ASSERT(n < cap && "rich atom overflow (NT_UI_RICH_MAX_GLYPHS)");
             rich_atom_t *a = &out[n++];
             memset(a, 0, sizeof *a);
@@ -1965,7 +1962,7 @@ static void rich_emit_objects(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t
         }
         const nt_ui_rich_run_t *run = &st->runs[s->run_idx];
         if (run->object_draw == NULL) {
-            continue; /* measure-only object (box reserved, nothing drawn) */
+            continue; /* box-only object (reserved, nothing drawn) */
         }
         const uint32_t base_color = nt_color_scale_alpha(s->color, frame->opacity);
         const nt_ui_rich_fx_result_t fx = rich_eval_fx(st, s, base_color);

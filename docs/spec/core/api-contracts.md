@@ -90,10 +90,9 @@ whom to whom, and name the free function or destroy event.
 
 ## Scratch-Backed Results
 
-Scratch-backed public results are backed by `nt_mem_scratch`, are valid exactly
+Scratch-backed public results are backed by `g_nt_mem_scratch`, are valid exactly
 until the next `nt_arena_reset(&g_nt_mem_scratch)`, and must not be freed or stored beyond
-that reset. A callback that runs inside a scratch rewind scope says so and
-must not allocate scratch. Do not describe them as valid "until end of frame"; reset placement
+that reset. Do not describe them as valid "until end of frame"; reset placement
 is the contract. Full scratch ownership rules live in
 [Memory Policy](../runtime/memory.md).
 
