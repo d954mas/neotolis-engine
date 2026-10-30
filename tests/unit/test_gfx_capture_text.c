@@ -410,6 +410,7 @@ static void test_bad_text_reports_where_and_keeps_a_prefix(void) {
         {NT_HEADER_ "0 NOTE label=\"n\"\n1 NOTE_FIELD key=\"AAAAAAAAAAAAAAAAAAAAAAAX\" type=U32 value=1\n", "X\"", 0, 1, 4},
         {NT_HEADER_ "0 OP op=CLEAR clear_depth=nan:0x7f800000\n", "nan:", 0, 0, 4},
         {NT_HEADER_ "0 OP op=CLEAR clear_depth=1..5\n", "1..5", 0, 0, 4},
+        {NT_HEADER_ "0 OP op=CLEAR clear_depth=1e100\n", "1e100", 0, 0, 4},
         {NT_HEADER_ "counter frame_bytes.99=5\n0 OP op=PASS\n1 OP op=PASS\n", "99=", 2, -1, 4},
         {"ntcapture 2\nframe sequence=1 platform=native records=0 overflow=2 execute=0..0\n", "2 exec", 0, -1, 4},
         {"ntcapture 2\nframe sequence=1 platform=mars records=0 overflow=0 execute=0..0\n", "mars", 0, -1, 4},

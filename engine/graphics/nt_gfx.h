@@ -792,8 +792,6 @@ typedef struct {
 } nt_gfx_capture_view_t;
 
 #if NT_GFX_CAPTURE_ENABLED
-/* Name of an issued-call detail, e.g. "glBindTexture"; NULL outside the table. */
-const char *nt_gfx_gl_call_name(uint32_t call);
 /* One-shot: the next frame records, starting at the begin_frame that opens it.
  * Requires nonzero init capacity. The stub is inert. */
 void nt_gfx_capture_request(void);

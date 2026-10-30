@@ -387,7 +387,8 @@ if(NOT EMSCRIPTEN)
         target_compile_definitions(test_gfx_capture_text PRIVATE _CRT_SECURE_NO_WARNINGS NT_CAPTURE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/gfx_frames_web.ntcapture.txt")
         nt_setup_test_target(test_gfx_capture_text)
         add_executable(test_gfx_capture_names unit/test_gfx_capture_names.c)
-        target_link_libraries(test_gfx_capture_names PRIVATE nt_gfx_capture_text nt_gfx_fake nt_basisu_transcoder_stub nt_log unity nt_meshwire_stub)
+        # No gfx implementation: reading a capture needs only the capture text module.
+        target_link_libraries(test_gfx_capture_names PRIVATE nt_gfx_capture_text nt_log unity)
         nt_setup_test_target(test_gfx_capture_names)
     endif()
 
@@ -1701,7 +1702,7 @@ if(EMSCRIPTEN)
     # --- The web build's capture parser: native-only names are unknown ---
     if(TARGET nt_gfx_capture_text)
         add_executable(test_gfx_capture_names unit/test_gfx_capture_names.c)
-        target_link_libraries(test_gfx_capture_names PRIVATE nt_gfx_capture_text nt_gfx nt_log_stub unity)
+        target_link_libraries(test_gfx_capture_names PRIVATE nt_gfx_capture_text nt_log_stub unity)
         nt_set_warning_flags(test_gfx_capture_names)
         nt_set_sanitizer_flags(test_gfx_capture_names)
         set_target_properties(test_gfx_capture_names PROPERTIES

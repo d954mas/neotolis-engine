@@ -57,6 +57,13 @@ _Static_assert(sizeof(s_result_names) / sizeof(s_result_names[0]) == NT_GFX_RESU
 _Static_assert(sizeof(s_note_type_names) / sizeof(s_note_type_names[0]) == NT_GFX_NOTE_STR + 1, "every note type has a name");
 _Static_assert(sizeof(s_platform_names) / sizeof(s_platform_names[0]) == NT_GFX_CAPTURE_WEB + 1, "every platform has a name");
 
+const char *nt_gfx_gl_call_name(uint32_t call) {
+#define NT_GFX_GL_CALL_NAME_(name) #name,
+    static const char *const names[NT_GFX_GL_COUNT] = {NULL, NT_GFX_GL_CALLS(NT_GFX_GL_CALL_NAME_)};
+#undef NT_GFX_GL_CALL_NAME_
+    return call < NT_GFX_GL_COUNT ? names[call] : NULL;
+}
+
 #define NT_COUNT_(table) ((uint32_t)(sizeof(table) / sizeof((table)[0])))
 
 /* Tables are complete by the asserts above (and a test for operations); a value outside one is a broken record. */
@@ -658,6 +665,20 @@ static int hex_digit(char c) {
     return c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
 }
 
+/* The 8 hex digits after "nan:0x"; false unless they are NaN bits. */
+static bool nan_bits(const char *hex, float *out) {
+    uint32_t bits = 0;
+    for (size_t i = 0; i < 8; i++) {
+        const int d = hex_digit(hex[i]);
+        if (d < 0) {
+            return false;
+        }
+        bits = (bits << 4) | (uint32_t)d;
+    }
+    memcpy(out, &bits, sizeof(*out));
+    return isnan(*out);
+}
+
 /* The formatter's forms only: decimal %g, inf, -inf and nan:0x<8 hex digits>. strtof reads the process
  * locale's separator, so the bounded token copy takes it in place of '.'. */
 static bool read_float(line_t *l, float *out) {
@@ -667,16 +688,7 @@ static bool read_float(line_t *l, float *out) {
         n++;
     }
     if (n == 14 && memcmp(start, "nan:0x", 6) == 0) {
-        uint32_t bits = 0;
-        for (size_t i = 6; i < 14; i++) {
-            const int d = hex_digit(start[i]);
-            if (d < 0) {
-                return fail(l, "bad float");
-            }
-            bits = (bits << 4) | (uint32_t)d;
-        }
-        memcpy(out, &bits, sizeof(*out));
-        if (!isnan(*out)) {
+        if (!nan_bits(start + 6, out)) {
             return fail(l, "bad float");
         }
         l->p += n;
@@ -706,7 +718,7 @@ static bool read_float(line_t *l, float *out) {
     buf[len] = '\0';
     char *stop = NULL;
     *out = strtof(buf, &stop);
-    if (stop != buf + len) {
+    if (stop != buf + len || (!word && isinf(*out))) { /* a decimal past FLT_MAX is not formatter output */
         return fail(l, "bad float");
     }
     l->p += n;

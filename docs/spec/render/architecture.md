@@ -1095,7 +1095,7 @@ Backends without GL (the test fake) issue no GL calls, so `gl[]` and the
 upload fields stay zero there. `NT_GFX_CAPTURE_ENABLED` is a numeric interface
 definition published by the interface target, so every consumer sees the same
 configuration; `nt_gfx_capture_request`, `nt_gfx_capture_set_continuous`,
-`nt_gfx_capture_read`, `nt_gfx_gl_call_name`, `nt_gfx_note_record`, `nt_gfx_marker_push` and
+`nt_gfx_capture_read`, `nt_gfx_note_record`, `nt_gfx_marker_push` and
 `nt_gfx_marker_pop` exist only when it is 1.
 
 `gl[]` counts, by `nt_gfx_gl_call_t`, every GL call the GL backend issues
@@ -1108,7 +1108,7 @@ expression that issues the call; a grep gate rejects any bare `gl*` call in
 `engine/graphics/gl`. The funnel does no per-call frame check: a frame is
 always open between init and shutdown. The
 single `NT_GFX_GL_CALLS` table in `nt_gfx.h` defines the enum, `NT_GFX_GL_COUNT`
-and, with capture, `nt_gfx_gl_call_name`. WebGL JS calls the web context makes
+and `nt_gfx_gl_call_name` (capture text, so reading a capture needs no gfx backend). WebGL JS calls the web context makes
 directly (`getExtension`, the `glGetQueryObjectui64v` timer-result bridge and
 `glGetString` identity queries through `getParameter`) are
 counted and recorded through `NT_GL_ISSUED` at their C call site, in a separate

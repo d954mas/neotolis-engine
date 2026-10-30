@@ -304,13 +304,6 @@ nt_gfx_event_t *nt_gfx_capture_reserve_recording(void) {
     return event;
 }
 
-const char *nt_gfx_gl_call_name(uint32_t call) {
-#define NT_GFX_GL_CALL_NAME_(name) #name,
-    static const char *const names[NT_GFX_GL_COUNT] = {NULL, NT_GFX_GL_CALLS(NT_GFX_GL_CALL_NAME_)};
-#undef NT_GFX_GL_CALL_NAME_
-    return call < NT_GFX_GL_COUNT ? names[call] : NULL;
-}
-
 void nt_gfx_capture_request(void) {
     NT_ASSERT(g_nt_gfx_capture.capacity > 0 && "capture_request: nt_gfx_desc_t.capture_capacity is 0");
     g_nt_gfx_capture.request_pending = true;
