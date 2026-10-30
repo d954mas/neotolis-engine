@@ -29,7 +29,7 @@ static ui_walker_fixture_t s_fx;
 void setUp(void) {
     nt_test_assert_install();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     /* units_per_em=1000, ascent=800, descent=-200: advance = size/2/char. */
@@ -82,12 +82,12 @@ static void test_mixed_run_advance_sums(void) {
 /* The solve's atom workspace is rewound: the head after the solve sits below the solve's peak. */
 static void test_solve_rewinds_atom_scratch(void) {
     build_hp_icon_full(NT_RICH_VALIGN_BASELINE);
-    const size_t before = nt_mem_scratch_used();
-    TEST_ASSERT_EQUAL_UINT64((uint64_t)before, (uint64_t)nt_mem_scratch_high_water_mark()); /* fresh scratch: no peak above the head yet */
+    const size_t before = g_nt_mem_scratch.used;
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)before, (uint64_t)g_nt_mem_scratch.high_water); /* fresh scratch: no peak above the head yet */
     nt_ui_rich_test_solve(s_fx.ctx, 10000.0F, FONT_SIZE);
-    const size_t after = nt_mem_scratch_used();
+    const size_t after = g_nt_mem_scratch.used;
     TEST_ASSERT_TRUE_MESSAGE(after > before, "solved atoms and links stay allocated");
-    TEST_ASSERT_TRUE_MESSAGE(nt_mem_scratch_high_water_mark() > after, "atoms allocated above the final head were released");
+    TEST_ASSERT_TRUE_MESSAGE(g_nt_mem_scratch.high_water > after, "atoms allocated above the final head were released");
 
     /* Reusing the released range must not touch the solve's output (solved atoms below the mark). */
     const uint32_t n = nt_ui_rich_test_atom_count(s_fx.ctx);
@@ -96,8 +96,8 @@ static void test_solve_rewinds_atom_scratch(void) {
     for (uint32_t i = 0; i < n; i++) {
         snap[i] = nt_ui_rich_test_atom(s_fx.ctx, i);
     }
-    const size_t reuse = nt_mem_scratch_high_water_mark() - after;
-    memset(nt_mem_scratch_alloc(reuse, 1U), 0xFF, reuse);
+    const size_t reuse = g_nt_mem_scratch.high_water - after;
+    memset(nt_arena_alloc(&g_nt_mem_scratch, reuse, 1U), 0xFF, reuse);
     for (uint32_t i = 0; i < n; i++) {
         const nt_ui_rich_test_atom_t a = nt_ui_rich_test_atom(s_fx.ctx, i);
         TEST_ASSERT_TRUE_MESSAGE(a.kind == snap[i].kind && a.line == snap[i].line && a.x == snap[i].x && a.y == snap[i].y && a.w == snap[i].w && a.h == snap[i].h,
@@ -126,7 +126,7 @@ static float icon_y_for_valign(nt_rich_valign_t valign) {
 static void test_icon_baseline_vs_middle_delta(void) {
     const float y_baseline = icon_y_for_valign(NT_RICH_VALIGN_BASELINE);
 
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     const float y_middle = icon_y_for_valign(NT_RICH_VALIGN_MIDDLE);
@@ -176,7 +176,7 @@ static void build_text(const char *utf8, size_t len) {
 }
 
 static void reset_call(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 }

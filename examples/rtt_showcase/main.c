@@ -510,7 +510,7 @@ static void frame(void) {
         make_targets(s_demo.rt_width, s_demo.rt_height);
     }
     nt_input_poll();
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
 
 #ifndef NT_PLATFORM_WEB
     if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {

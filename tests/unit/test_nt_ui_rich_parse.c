@@ -61,7 +61,7 @@ static void sink_detach(void) { nt_log_remove_sink(test_warn_sink, &s_sink); }
 void setUp(void) {
     nt_test_assert_install();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 }
@@ -238,7 +238,7 @@ static void test_tagset_empty_name_asserts(void) {
 
 /* ---- parser malformed-markup death tests ---- */
 static void parse_lit(const char *m) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, NULL, m, strlen(m));
@@ -250,7 +250,7 @@ static void test_parse_unclosed_tag_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[1] = s_fx.stub_font;
     base.font_id[3] = s_fx.stub_font;
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<b>HP", 5U); /* no trap */
@@ -266,7 +266,7 @@ static void test_parse_mismatched_close_graceful(void) {
     base.font_id[1] = s_fx.stub_font;
     base.font_id[3] = s_fx.stub_font;
     base.color_abgr = 0xFF112233U;
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<b>HP</i>x", 10U); /* no trap */
@@ -284,7 +284,7 @@ static void test_parse_unknown_tag_graceful(void) {
     base.font_id[1] = s_fx.stub_font;
     base.font_id[3] = s_fx.stub_font;
     base.color_abgr = 0xFF445566U;
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<bogus>x</bogus>", 16U); /* no trap */
@@ -300,7 +300,7 @@ static void test_parse_bad_hex_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[1] = s_fx.stub_font;
     base.font_id[3] = s_fx.stub_font;
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<color=#zzz>x</color>", 21U); /* no trap */
@@ -311,7 +311,7 @@ static void test_parse_bad_hex_graceful(void) {
 
 /* Reset the per-call rich scratch (mirrors the other parse tests' arrange block). */
 static void parse_reset(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 }
@@ -411,7 +411,7 @@ static void test_parse_orphan_close_graceful(void) {
     base.font_id[1] = s_fx.stub_font;
     base.font_id[3] = s_fx.stub_font;
     base.color_abgr = 0xFF778899U;
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "HP</b>", 6U); /* no trap, no stack underflow */
@@ -426,7 +426,7 @@ static void test_parse_mismatched_link_close_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[1] = s_fx.stub_font;
     base.font_id[3] = s_fx.stub_font;
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<link=1>x</b>y", 14U); /* no trap, no underflow-pop */
@@ -440,7 +440,7 @@ static void test_parse_empty_scale_value_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[1] = s_fx.stub_font;
     base.font_id[3] = s_fx.stub_font;
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<scale=>x</scale>y", 18U); /* no trap */
@@ -457,7 +457,7 @@ static void parse_fx(const char *m) {
     nt_ui_rich_tagset_init(&ts);
     nt_ui_rich_tagset_register_effect(&ts, "wave", nt_ui_rich_fx_wave);
     nt_ui_rich_tagset_register_effect_fn(&ts, "fade", parse_stub_fx, NULL);
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
@@ -512,7 +512,7 @@ static void parse_obj(const char *m) {
     nt_ui_rich_tagset_t ts;
     nt_ui_rich_tagset_init(&ts);
     nt_ui_rich_tagset_register_object_tag(&ts, "widget", parse_stub_object_measure, NULL, NULL);
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
@@ -577,7 +577,7 @@ static void test_parse_obj_null_tagset_graceful(void) {
 
 /* A valid base isolates missing-tagset handling from unrelated configuration errors. */
 static void parse_img_null_tagset(const char *m) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
@@ -606,7 +606,7 @@ static void test_parse_color_null_tagset_graceful(void) {
     base.font_id[1] = s_fx.stub_font;
     base.font_id[3] = s_fx.stub_font;
     base.color_abgr = 0xFF010203U;
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<color=gold>x</color>", 21U); /* no trap, no NULL deref */
@@ -621,7 +621,7 @@ static void test_parse_font_null_tagset_graceful(void) {
     for (uint32_t i = 0; i < 4U; i++) {
         base.font_id[i] = base_face;
     }
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<font=mono>x</font>", 19U); /* no trap, no NULL deref */
@@ -632,7 +632,7 @@ static void test_parse_fx_null_tagset_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[1] = s_fx.stub_font;
     base.font_id[3] = s_fx.stub_font;
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<fx=wave>x</fx>", 15U); /* no trap, no NULL deref */
@@ -645,7 +645,7 @@ static void test_parse_fx_null_tagset_graceful(void) {
 static void parse_img_no_alias(const char *m) {
     nt_ui_rich_tagset_t ts;
     nt_ui_rich_tagset_init(&ts); /* a valid tagset that registers NO atlas alias -> the alias lookup misses */
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
@@ -695,7 +695,7 @@ static void test_parse_img_attrs_match_builder(void) {
     }
 
     /* PARSER: byte-identical markup with the attr tail. */
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     const char *m = "<img=heart scale=1.8 oy=-4 valign=middle/>";
@@ -726,7 +726,7 @@ static void test_parse_img_no_attrs_defaults(void) {
     base.font_id[1] = s_fx.stub_font;
     base.font_id[3] = s_fx.stub_font;
     base.default_atlas.atlas = s_fx.atlas.handle;
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     const char *m = "<img=heart/>";
@@ -774,7 +774,7 @@ static void test_parse_img_bad_attr_float_graceful(void) {
     base.font_id[1] = s_fx.stub_font;
     base.font_id[3] = s_fx.stub_font;
     base.default_atlas.atlas = s_fx.atlas.handle;
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<img=heart scale=abc/>", 22U); /* no trap */
@@ -793,7 +793,7 @@ static void test_parse_img_bad_valign_graceful(void) {
     base.font_id[1] = s_fx.stub_font;
     base.font_id[3] = s_fx.stub_font;
     base.default_atlas.atlas = s_fx.atlas.handle;
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<img=heart valign=sideways/>", 28U); /* no trap */
@@ -815,7 +815,7 @@ static void test_parse_img_unknown_attr_key_graceful(void) {
     base.font_id[1] = s_fx.stub_font;
     base.font_id[3] = s_fx.stub_font;
     base.default_atlas.atlas = s_fx.atlas.handle;
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<img=heart bogus=3/>", 20U); /* no trap */
@@ -835,7 +835,7 @@ static void test_parse_over_deep_style_stack_graceful(void) {
         buf[n++] = '>';
     }
     buf[n++] = 'x'; /* trailing text so a run is produced */
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
@@ -873,7 +873,7 @@ static void test_parse_balanced_at_cap_stays_synced(void) {
         }
         buf[n++] = 'x'; /* trailing text -> must carry the BASE style (stack back at base) */
 
-        nt_mem_scratch_reset();
+        nt_arena_reset(&g_nt_mem_scratch);
         s_fx.ctx->pending_rich = NULL;
         s_fx.ctx->rich_session_open = false;
         nt_ui_rich_parse(s_fx.ctx, NULL, &base, buf, n); /* no trap in FULL: balanced, never over-cap */
@@ -910,7 +910,7 @@ static void test_parse_mixed_tag_stack_sync(void) {
 
     /* <link> wraps the pushes; its </link> must NOT pop the style stack. Balanced, well-formed. */
     const char *m = "<color=accent><link=q1><scale=2><font=hdr>inner</font></scale></link></color>tail";
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, &ts, &base, m, strlen(m));
@@ -936,7 +936,7 @@ static void parse_named_miss(const char *m, nt_ui_rich_style_t *base) {
     const nt_font_t hdr[4] = {{.id = 21}, {.id = 22}, {.id = 23}, {.id = 24}};
     nt_ui_rich_tagset_register_font(&ts, "hdr", hdr);
     nt_ui_rich_tagset_register_effect(&ts, "wave", nt_ui_rich_fx_wave);
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, &ts, base, m, strlen(m));
@@ -977,7 +977,7 @@ static void test_parse_wellformed_nesting_pops_correctly(void) {
     base.font_id[1] = s_fx.stub_font;
     base.font_id[3] = s_fx.stub_font;
     base.color_abgr = 0xFF112233U;
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     /* x: bold+italic ; y: bold (italic popped) ; z: base (bold popped). */
@@ -1001,7 +1001,7 @@ static void test_parse_img_zero_scale_graceful(void) {
     base.font_id[1] = s_fx.stub_font;
     base.font_id[3] = s_fx.stub_font;
     base.default_atlas.atlas = s_fx.atlas.handle;
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<img=heart scale=0/>", 20U); /* no trap */
@@ -1019,13 +1019,13 @@ static void test_parse_scale_nonpositive_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[1] = s_fx.stub_font;
     base.font_id[3] = s_fx.stub_font;
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<scale=0>x</scale>y", 19U); /* no trap */
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_run_style(s_fx.ctx, 0).font_size > 0.0F, "<scale=0> degrades to identity (font_size stays positive, never 0)");
 
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<scale=-1>x</scale>y", 20U); /* no trap */
@@ -1037,14 +1037,14 @@ static void test_parse_scale_nonpositive_graceful(void) {
  * text is preserved; only the inner link is dropped. */
 static void test_parse_nested_link_graceful(void) {
     /* One link parses fine. */
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, NULL, "<link=a>hi</link>", 17U);
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_run_count(s_fx.ctx) == 1U, "single <link> around text -> one run");
 
     /* A nested <link> inside an open <link> -> log + skip, no trap, text preserved. */
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, NULL, "<link=a><link=b>hi</link></link>", 32U); /* no trap */
@@ -1058,7 +1058,7 @@ static void test_parse_nested_link_graceful(void) {
 static void test_parse_non_terminating_bounded(void) {
     char buf[64];
     memset(buf, '<', sizeof buf); /* "<<<<...<" -- no '>' anywhere */
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, NULL, buf, sizeof buf); /* no trap, no loop, no OOB */
@@ -1071,7 +1071,7 @@ static void test_parse_non_terminating_bounded(void) {
 static void test_parse_len_bounded(void) {
     /* The full buffer is well-formed, but we lie about the length: only "<b" is in-bounds. */
     const char *full = "<b>ok</b>";
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, NULL, full, 2U); /* only "<b" visible -> unterminated, bounded */
@@ -1080,7 +1080,7 @@ static void test_parse_len_bounded(void) {
 
 /* (13) a literal-< escape (\<) emits a real '<' in the text, not a tag start. */
 static void test_parse_escape_literal_lt(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     const char *m = "a\\<b"; /* a, literal '<', b */
@@ -1096,7 +1096,7 @@ static void test_parse_escape_literal_lt(void) {
  * carries the bad bytes. */
 static void test_parse_invalid_utf8_graceful(void) {
     const char bad[] = {'h', 'i', (char)0xFF, 'x'}; /* 0xFF is never valid UTF-8 */
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, NULL, bad, sizeof bad); /* no trap */
@@ -1130,7 +1130,7 @@ static void test_parse_utf8_truncation_codepoint_aware(void) {
     buf[n++] = (char)0xA9;
     buf[n++] = 'z'; /* trailing ASCII past the cap -> dropped */
 
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     /* No NT_TEST_EXPECT_ASSERT: a trap here is a FAILURE (the whole point is no trap on valid input). */
@@ -1166,7 +1166,7 @@ static void utf8_truncation_lead_case(const char *seq, uint32_t seq_len) {
     }
     buf[n++] = 'z'; /* trailing ASCII past the cap -> dropped */
 
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, NULL, buf, n); /* a trap here is a FAILURE (valid input) */
@@ -1198,7 +1198,7 @@ static void test_parse_utf8_truncation_4byte_lead(void) {
 
 /* Open a fresh rich builder session (no frame needed; the builder is scratch-only). */
 static void rich_session_begin(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
@@ -1211,7 +1211,7 @@ static void rich_session_begin(void) {
  * base for text-only markup) -> graceful: log + skip the image; the surrounding text "a"/"b" remain.
  * No trap, no IMAGE run. */
 static void test_parse_img_null_base_graceful(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     const char *m = "a<img=icon/>b";
@@ -1259,7 +1259,7 @@ static void test_rich_text_zero_id_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_text(s_fx.ctx, 0U, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL));
     nt_ui_end(s_fx.ctx);
 
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
@@ -1303,7 +1303,7 @@ static void test_parse_layer_matches_builder(void) {
     TEST_ASSERT_EQUAL_UINT8_MESSAGE((uint8_t)NT_UI_RICH_LAYER_AUTO, b_layer[2], "run 2 after </layer> is AUTO again");
 
     /* PARSER: byte-identical markup of the same builder sequence. */
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     const char *m = "a <layer=5>b </layer>c";
@@ -1325,7 +1325,7 @@ static void test_parse_layer_out_of_range_graceful(void) {
         nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
         base.font_id[1] = s_fx.stub_font;
         base.font_id[3] = s_fx.stub_font;
-        nt_mem_scratch_reset();
+        nt_arena_reset(&g_nt_mem_scratch);
         s_fx.ctx->pending_rich = NULL;
         s_fx.ctx->rich_session_open = false;
         nt_ui_rich_parse(s_fx.ctx, NULL, &base, cases[c], strlen(cases[c])); /* no trap */
@@ -1348,7 +1348,7 @@ static void test_log_malformed_logs_once_per_unique(void) {
     base.font_id[3] = s_fx.stub_font;
 
     /* First sight of the bad-hex "#zqzqzq" -> exactly one warn line. */
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<color=#zqzqzq>x</color>", 24U);
@@ -1360,7 +1360,7 @@ static void test_log_malformed_logs_once_per_unique(void) {
 #endif
 
     /* Re-parse the IDENTICAL bad string -> the unique dedup swallows it (still 1 total). */
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<color=#zqzqzq>x</color>", 24U);
@@ -1377,13 +1377,13 @@ static void test_log_distinct_errors_each_log_once(void) {
     base.font_id[1] = s_fx.stub_font;
     base.font_id[3] = s_fx.stub_font;
 
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<color=#wqwqwq>x</color>", 24U);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_sink.warn_count, "first distinct bad value -> one line");
 
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<color=#vqvqvq>x</color>", 24U);
@@ -1415,7 +1415,7 @@ static void test_log_wellformed_silent_and_byte_identical(void) {
 
     /* PARSER: the byte-identical markup, with the sink attached to prove ZERO warn lines. */
     sink_attach();
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "a <b>bold</b> c", 15U);
@@ -1436,9 +1436,9 @@ static void test_base_effect_rejected_before_scratch_allocation(void) {
     const uint8_t invalid_ids[] = {1U, 128U};
     for (uint32_t i = 0; i < sizeof invalid_ids / sizeof invalid_ids[0]; i++) {
         base.effect_id = invalid_ids[i];
-        const size_t used = nt_mem_scratch_used();
+        const size_t used = g_nt_mem_scratch.used;
         NT_TEST_EXPECT_ASSERT(nt_ui_rich_begin(s_fx.ctx, &base));
-        TEST_ASSERT_TRUE_MESSAGE(used == nt_mem_scratch_used(), "invalid base is rejected before scratch allocation");
+        TEST_ASSERT_TRUE_MESSAGE(used == g_nt_mem_scratch.used, "invalid base is rejected before scratch allocation");
         TEST_ASSERT_NULL(s_fx.ctx->pending_rich);
         TEST_ASSERT_FALSE(s_fx.ctx->rich_session_open);
     }

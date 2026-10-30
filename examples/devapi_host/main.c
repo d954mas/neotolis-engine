@@ -208,7 +208,7 @@ static void frame(void) {
     /* Build the hud tree AFTER input_poll so this frame's (possibly injected) pointer drives the
        interaction step. nt_devapi's ui.tree/ui.element read the LAST completed frame — exactly this
        nt_ui_end's baked tables. Scratch is reset each frame for the per-element CLAY data. */
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     declare_hud();
     declare_hud_scaled();
 
@@ -260,8 +260,8 @@ static void frame(void) {
         .gpu_ms = -1.0F,
         .draw_calls = 0,
         .mem_used = s_mem_used,
-        .scratch_hwm = (uint32_t)nt_mem_scratch_high_water_mark(),
-        .scratch_used = (uint32_t)nt_mem_scratch_used(),
+        .scratch_hwm = (uint32_t)g_nt_mem_scratch.high_water,
+        .scratch_used = (uint32_t)g_nt_mem_scratch.used,
     };
     nt_metrics_sample(&mf);
 #endif

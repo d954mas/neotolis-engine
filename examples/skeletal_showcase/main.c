@@ -2649,7 +2649,7 @@ static void frame(void) {
     if (!nt_example_frames_on()) {
         nt_input_poll();
     }
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
 #ifndef NT_PLATFORM_WEB
     const bool modal_was_active = nt_ui_modal_active(s_ui);
     if (!modal_was_active && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {

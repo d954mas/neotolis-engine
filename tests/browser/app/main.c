@@ -1248,7 +1248,7 @@ static void frame(void) {
         s_gpu_restore_pending = !gpu_restore_step();
     }
     nt_input_poll();
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
 
     nt_resource_step();
     link_programs();

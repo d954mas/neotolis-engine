@@ -3684,7 +3684,7 @@ static void frame(void) {
     if (!nt_example_frames_on()) {
         nt_input_poll();
     }
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
 
     /* Gameplay/global hotkeys yield to an open modal so Esc closes the top modal first and the
      * palette/inspector keys don't fire underneath it. nt_ui_modal_active reports last frame's
@@ -3895,8 +3895,8 @@ static void frame(void) {
 #endif
         .draw_calls = nt_gfx_draw_calls(&g_nt_gfx.counters),
         .mem_used = s_mem_used,
-        .scratch_hwm = (uint32_t)nt_mem_scratch_high_water_mark(),
-        .scratch_used = (uint32_t)nt_mem_scratch_used(),
+        .scratch_hwm = (uint32_t)g_nt_mem_scratch.high_water,
+        .scratch_used = (uint32_t)g_nt_mem_scratch.used,
     };
     nt_metrics_sample(&mf);
 #endif

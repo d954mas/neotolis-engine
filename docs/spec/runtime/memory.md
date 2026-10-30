@@ -2,7 +2,7 @@
 
 Memory rules: no heap allocation in the hot path, preallocated component
 storages, resident asset metadata, transient pack blobs, fixed-capacity bump
-arenas (`nt_arena_t`) and one global per-frame arena (`nt_mem_scratch`). Capacities split into compile-time hard caps
+arenas (`nt_arena_t`) and one global per-frame arena (`g_nt_mem_scratch`). Capacities split into compile-time hard caps
 and init-time component capacities chosen by the game.
 
 Related: [Frame Lifecycle](frame-lifecycle.md), [Component Storage](../data/component-storage.md), [Entity System](../data/entity.md)
@@ -60,8 +60,7 @@ since init and survives reset and rewind.
 Lifetime: from allocation until the rewind that closes its scope.
 
 A mark is an earlier `used` of the same arena. `nt_arena_rewind(arena, mark)`
-(`nt_mem_scratch_rewind(mark)` with `nt_mem_scratch_used()` as the mark) returns
-the head to the mark in O(1); marks nest. A mark is invalid after a reset or an
+returns the head to the mark in O(1); marks nest. A mark is invalid after a reset or an
 earlier rewind below it; the assert catches one only while it lies past the
 current head. A rewind frees everything allocated after the mark by any caller,
 so it closes only a scope whose allocations are consumed before it. Code that
@@ -72,22 +71,23 @@ scratch.
 
 ### Frame scratch memory
 
-Lifetime: from allocation until the next `nt_mem_scratch_reset()` (typically the start of the next frame, see [Frame Lifecycle — engine frame order](frame-lifecycle.md)), or a scoped rewind.
+Lifetime: from allocation until the next `nt_arena_reset(&g_nt_mem_scratch)` (typically the start of the next frame, see [Frame Lifecycle — engine frame order](frame-lifecycle.md)), or a scoped rewind.
 
 Examples: `nt_ui_element_data_t` attached to CLAY elements via `NT_UI_DATA_*`
 macros, widget payloads read by `nt_ui_walk`, game per-frame temporaries.
 
-`nt_mem_scratch` (`engine/memory/nt_mem_scratch.h`) is one global `nt_arena_t`
-that any engine module or game code may allocate from. Init allocates its
-memory once:
+`g_nt_mem_scratch` (`engine/memory/nt_mem_scratch.h`) is one global
+`nt_arena_t` that any engine module or game code may allocate from. It is used
+through the `nt_arena_*` functions and fields like any arena; only init and
+shutdown are its own, because they own its memory:
 
 ```c
-nt_mem_scratch_init(256 * 1024);   // boot; the game picks the size
+nt_mem_scratch_init(256 * 1024);                 // boot: mallocs; the game picks the size
 // per frame (see frame-lifecycle.md):
-nt_mem_scratch_reset();            // start of frame
-nt_mem_scratch_alloc(size, align); // anywhere during the frame
-// pointers stay valid until the next nt_mem_scratch_reset()
-nt_mem_scratch_shutdown(); // exit
+nt_arena_reset(&g_nt_mem_scratch);               // start of frame
+nt_arena_alloc(&g_nt_mem_scratch, size, align);  // anywhere during the frame
+// pointers stay valid until the next reset or a rewind below them
+nt_mem_scratch_shutdown();                       // exit: frees
 ```
 
 Type-safe macros: `NT_MEM_SCRATCH_ALLOC(T)`, `NT_MEM_SCRATCH_ALLOC_ARRAY(T, count)`.

@@ -79,7 +79,7 @@ static nt_devapi_ui_context s_ctxs[3];
 /* Declare the same known widget in the scaled ctx, overriding the per-frame identity viewport with a
    non-identity (offset + scale) one BEFORE the first hit-test (the lazy resolve window). */
 static void declare_scaled_tree(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     nt_pointer_t mouse = {0};
     mouse.x = -100.0F;
     mouse.y = -100.0F;
@@ -95,7 +95,7 @@ static void declare_scaled_tree(void) {
    read the LAST completed frame, and nt_ui_get_bbox reads the immediately-preceding frame's bbox, so
    every test re-declares before asserting. */
 static void declare_tree(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     nt_pointer_t mouse = {0};
     mouse.x = -100.0F;
     mouse.y = -100.0F;
@@ -120,7 +120,7 @@ static void declare_xform_tree(void) {
     t.offset_x = XFORM_OX;
     t.offset_y = XFORM_OY;
     for (int frame = 0; frame < 2; ++frame) {
-        nt_mem_scratch_reset();
+        nt_arena_reset(&g_nt_mem_scratch);
         nt_pointer_t mouse = {0};
         mouse.x = -100.0F;
         mouse.y = -100.0F;
@@ -318,7 +318,7 @@ static void test_click_empty_id_bad_params(void) { assert_bad_params(nt_devapi_s
 /* A collapsed (zero-size) node has bounds {.,.,0,0}; ui.click(id) must reject it (bad_params) rather
    than resolve its center to a screen corner — the behind-camera / collapsed-element guard. */
 static void declare_collapsed_tree(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     nt_pointer_t mouse = {0};
     mouse.x = -100.0F;
     mouse.y = -100.0F;
@@ -404,7 +404,7 @@ static void test_transformed_click_id_targets_projected_center(void) {
     nt_ui_transform_t t = nt_ui_transform_defaults();
     t.offset_x = XFORM_OX;
     t.offset_y = XFORM_OY;
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     nt_pointer_t mouse = {0};
     mouse.x = -100.0F;
     mouse.y = -100.0F;
@@ -462,7 +462,7 @@ static void test_scaled_click_string_id_lands_at_device_center(void) {
     /* Round-trip proof: the injected DEVICE coord, converted back to layout via the ctx viewport,
        hit-tests onto the widget. begin reset the viewport to identity, so re-apply the scaled viewport
        before converting the test point device->layout, exactly mirroring the live hit-test path. */
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     nt_pointer_t mouse = {0};
     mouse.x = -100.0F;
     mouse.y = -100.0F;
@@ -493,7 +493,7 @@ static void test_scaled_click_xy_lands_at_device_center(void) {
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
     /* Round-trip proof (mirrors the string-id scaled case): the injected DEVICE coord, converted back
        to layout via the ctx viewport, actually hit-tests onto the widget — not just a number returned. */
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     nt_pointer_t mouse = {0};
     mouse.x = -100.0F;
     mouse.y = -100.0F;

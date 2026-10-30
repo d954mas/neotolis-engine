@@ -1,4 +1,3 @@
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -6,74 +5,20 @@
 #include "test_helpers/nt_assert_trap.h"
 #include "unity.h"
 
+/* Arena behavior (alignment, capacity, reset, rewind) is covered by test_nt_arena;
+ * these pin what scratch owns: its memory and the typed macros. */
+
 void setUp(void) { nt_test_assert_install(); }
 void tearDown(void) {}
 
 static void test_init_then_shutdown(void) {
     nt_mem_scratch_init(4096U);
-    TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)nt_mem_scratch_used());
-    (void)nt_mem_scratch_alloc(4096U, 1U); /* exact capacity fits */
+    TEST_ASSERT_NOT_NULL(g_nt_mem_scratch.base);
+    TEST_ASSERT_EQUAL_UINT64(4096U, (uint64_t)g_nt_mem_scratch.size);
+    (void)nt_arena_alloc(&g_nt_mem_scratch, 4096U, 1U); /* exact capacity fits */
     nt_mem_scratch_shutdown();
-    TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)nt_mem_scratch_used());
-    TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)nt_mem_scratch_high_water_mark());
-}
-
-static void test_alloc_advances_used(void) {
-    nt_mem_scratch_init(4096U);
-    void *a = nt_mem_scratch_alloc(16U, 8U);
-    TEST_ASSERT_NOT_NULL(a);
-    TEST_ASSERT_EQUAL_UINT64(16U, (uint64_t)nt_mem_scratch_used());
-    void *b = nt_mem_scratch_alloc(32U, 8U);
-    TEST_ASSERT_NOT_NULL(b);
-    TEST_ASSERT_EQUAL_UINT64(48U, (uint64_t)nt_mem_scratch_used());
-    TEST_ASSERT_TRUE((uint8_t *)b == (uint8_t *)a + 16);
-    nt_mem_scratch_shutdown();
-}
-
-/* Caller asks for align=8 starting at used=3 -> next alloc must land at 8. */
-static void test_alloc_aligns_up(void) {
-    nt_mem_scratch_init(4096U);
-    (void)nt_mem_scratch_alloc(3U, 1U); /* leave used at 3 */
-    TEST_ASSERT_EQUAL_UINT64(3U, (uint64_t)nt_mem_scratch_used());
-    uint8_t *p = (uint8_t *)nt_mem_scratch_alloc(8U, 8U);
-    /* p's address must be 8-aligned. */
-    TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)((uintptr_t)p & 7U));
-    /* used jumped from 3 to 8 (padding) then +8 alloc => 16. */
-    TEST_ASSERT_EQUAL_UINT64(16U, (uint64_t)nt_mem_scratch_used());
-    nt_mem_scratch_shutdown();
-}
-
-static void test_reset_clears_used(void) {
-    nt_mem_scratch_init(4096U);
-    (void)nt_mem_scratch_alloc(128U, 8U);
-    TEST_ASSERT_EQUAL_UINT64(128U, (uint64_t)nt_mem_scratch_used());
-    nt_mem_scratch_reset();
-    TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)nt_mem_scratch_used());
-    /* Next alloc starts from the base again. */
-    void *p = nt_mem_scratch_alloc(16U, 8U);
-    TEST_ASSERT_EQUAL_UINT64(16U, (uint64_t)nt_mem_scratch_used());
-    (void)p;
-    nt_mem_scratch_shutdown();
-}
-
-/* used() doubles as the mark; the head returns to it and high-water stays. */
-static void test_rewind_to_used_mark(void) {
-    nt_mem_scratch_init(4096U);
-    (void)nt_mem_scratch_alloc(8U, 8U);
-    const size_t mark = nt_mem_scratch_used();
-    (void)nt_mem_scratch_alloc(64U, 8U);
-    nt_mem_scratch_rewind(mark);
-    TEST_ASSERT_EQUAL_UINT64(8U, (uint64_t)nt_mem_scratch_used());
-    TEST_ASSERT_EQUAL_UINT64(72U, (uint64_t)nt_mem_scratch_high_water_mark());
-    NT_TEST_EXPECT_ASSERT(nt_mem_scratch_rewind(mark + 1U));
-    nt_mem_scratch_shutdown();
-}
-
-static void test_overflow_asserts(void) {
-    nt_mem_scratch_init(64U);
-    (void)nt_mem_scratch_alloc(32U, 8U);
-    NT_TEST_EXPECT_ASSERT(nt_mem_scratch_alloc(64U, 8U));
-    nt_mem_scratch_shutdown();
+    TEST_ASSERT_NULL(g_nt_mem_scratch.base);
+    TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)g_nt_mem_scratch.high_water);
 }
 
 static void test_double_init_asserts(void) {
@@ -84,33 +29,11 @@ static void test_double_init_asserts(void) {
 
 static void test_shutdown_without_init_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_mem_scratch_shutdown()); }
 
-static void test_alloc_without_init_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_mem_scratch_alloc(16U, 8U)); }
+static void test_alloc_without_init_asserts(void) { NT_TEST_EXPECT_ASSERT((void)NT_MEM_SCRATCH_ALLOC(uint64_t)); }
 
-static void test_non_pow2_align_asserts(void) {
-    nt_mem_scratch_init(1024U);
-    NT_TEST_EXPECT_ASSERT(nt_mem_scratch_alloc(16U, 3U));
-    nt_mem_scratch_shutdown();
-}
-
-/* align beyond malloc's max_align_t guarantee asserts. */
-static void test_align_over_max_asserts(void) {
-    nt_mem_scratch_init(1024U);
-    NT_TEST_EXPECT_ASSERT(nt_mem_scratch_alloc(16U, 4096U));
-    nt_mem_scratch_shutdown();
-}
-
-/* alloc_array overflow assert: count * elem_size beyond SIZE_MAX. */
-static void test_alloc_array_overflow_asserts(void) {
-    nt_mem_scratch_init(1024U);
-    NT_TEST_EXPECT_ASSERT(nt_mem_scratch_alloc_array(sizeof(uint64_t), (size_t)-1, 8U));
-    nt_mem_scratch_shutdown();
-}
-
-/* Typed macro returns a properly aligned pointer. */
 static void test_alloc_typed_macro(void) {
     nt_mem_scratch_init(4096U);
     uint64_t *p = NT_MEM_SCRATCH_ALLOC(uint64_t);
-    TEST_ASSERT_NOT_NULL(p);
     TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)((uintptr_t)p & 7U));
     *p = 0xCAFEBABEDEADBEEFULL;
     TEST_ASSERT_EQUAL_UINT64(0xCAFEBABEDEADBEEFULL, *p);
@@ -120,30 +43,17 @@ static void test_alloc_typed_macro(void) {
 static void test_alloc_array_macro(void) {
     nt_mem_scratch_init(4096U);
     uint32_t *arr = NT_MEM_SCRATCH_ALLOC_ARRAY(uint32_t, 16);
-    TEST_ASSERT_NOT_NULL(arr);
-    for (uint32_t i = 0U; i < 16U; ++i) {
-        arr[i] = i;
-    }
-    for (uint32_t i = 0U; i < 16U; ++i) {
-        TEST_ASSERT_EQUAL_UINT32(i, arr[i]);
-    }
+    TEST_ASSERT_TRUE(arr == (uint32_t *)g_nt_mem_scratch.base);
+    TEST_ASSERT_EQUAL_UINT64(16U * sizeof(uint32_t), (uint64_t)g_nt_mem_scratch.used);
     nt_mem_scratch_shutdown();
 }
 
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_init_then_shutdown);
-    RUN_TEST(test_alloc_advances_used);
-    RUN_TEST(test_alloc_aligns_up);
-    RUN_TEST(test_reset_clears_used);
-    RUN_TEST(test_rewind_to_used_mark);
-    RUN_TEST(test_overflow_asserts);
     RUN_TEST(test_double_init_asserts);
     RUN_TEST(test_shutdown_without_init_asserts);
     RUN_TEST(test_alloc_without_init_asserts);
-    RUN_TEST(test_non_pow2_align_asserts);
-    RUN_TEST(test_align_over_max_asserts);
-    RUN_TEST(test_alloc_array_overflow_asserts);
     RUN_TEST(test_alloc_typed_macro);
     RUN_TEST(test_alloc_array_macro);
     return UNITY_END();

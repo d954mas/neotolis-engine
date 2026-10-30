@@ -38,7 +38,7 @@ clear from the signature, name, or nearby comment:
 - whether the callee may store the pointer, and until which unregister, clear,
   destroy, replacement, or shutdown event
 - the exact invalidation event: next call, named mutation,
-  `nt_mem_scratch_reset`, unmount, destroy, shutdown, etc.
+  the scratch reset (`nt_arena_reset(&g_nt_mem_scratch)`), unmount, destroy, shutdown, etc.
 - whether `NULL` is a valid result/input or a programmer bug
 - for output parameters, including `out_*`, size, count, progress, and data
   pointers: whether the pointer itself may be `NULL`, what value is written on
@@ -91,7 +91,7 @@ whom to whom, and name the free function or destroy event.
 ## Scratch-Backed Results
 
 Scratch-backed public results are backed by `nt_mem_scratch`, are valid exactly
-until the next `nt_mem_scratch_reset()`, and must not be freed or stored beyond
+until the next `nt_arena_reset(&g_nt_mem_scratch)`, and must not be freed or stored beyond
 that reset. A callback that runs inside a scratch rewind scope says so and
 must not allocate scratch. Do not describe them as valid "until end of frame"; reset placement
 is the contract. Full scratch ownership rules live in
@@ -629,7 +629,7 @@ Use these as wording targets; verify the owning header states exact optionality
 and invalidation events before copying a pattern.
 
 ```c
-/* Returns a scratch-backed view. Valid until the next nt_mem_scratch_reset();
+/* Returns a scratch-backed view. Valid until the next nt_arena_reset(&g_nt_mem_scratch);
  * caller must not free or store beyond that reset. */
 ```
 

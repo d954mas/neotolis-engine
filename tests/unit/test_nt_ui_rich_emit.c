@@ -46,7 +46,7 @@ static nt_font_t s_body_font;
 void setUp(void) {
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
     s_body_font = s_fx.stub_font;
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     /* Deterministic metrics: advance = size/2/char; ascent 800/1000. */
@@ -244,7 +244,7 @@ static void test_double_walk_is_deterministic(void) {
 /* Build a block that interleaves the 4 font faces R B R I R BI R as separate runs (each <color>-split so
  * the solver keeps them as distinct atoms). */
 static void frame_multi_face(const nt_font_t fam[4]) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -305,7 +305,7 @@ static void test_emit_single_face_one_font_switch(void) {
 
 /* Build a block whose second run is italic on a family with NO italic face -> NT_UI_RICH_RUN_SYNTH_ITALIC. */
 static void frame_synth_italic(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -368,7 +368,7 @@ static void test_emit_real_italic_face_no_oblique(void) {
 /* Build a block whose second run is <b> on a family with NO bold face -> NT_UI_RICH_RUN_SYNTH_BOLD. */
 #if NT_FONT_EMBOLDEN_ENABLED
 static void frame_synth_bold(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -433,7 +433,7 @@ static void test_emit_real_bold_face_no_weight(void) {
 /* Build a block with SIX distinct font families on one band (one regular-face text run each), more than
  * any per-block font array could hold. Each push_font swaps the whole family; default variant=regular picks font_id[0]. */
 static void frame_six_distinct_fonts(const nt_font_t fam[6]) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -488,7 +488,7 @@ static void test_emit_more_than_four_fonts_no_drop(void) {
 static void frame_text_image_text(nt_material_t img_mat, nt_rich_valign_t valign, uint32_t tint_abgr) {
     /* Fresh frame: free the per-call rich scratch. pending_rich is released by the terminal
      * nt_ui_rich_text and re-zeroed by nt_ui_begin, so no manual clear is needed here. */
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
 
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
@@ -602,7 +602,7 @@ static void test_inline_image_tint_packed(void) {
 /* Build [text][image][text] under a rich block carrying `opacity`; walk once. The image's
  * sprite tint alpha must fade with the parent opacity (folded at the walker), matching the text path. */
 static void frame_image_with_opacity(nt_material_t img_mat, float opacity) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -657,7 +657,7 @@ static void test_inline_image_fades_with_parent_opacity(void) {
 /* Build [text][img][text][img][text]: two inline images in one block. They emit immediately in the rich
  * self-emit -- one sprite batch, set_material bound once. */
 static void frame_two_images(nt_material_t img_mat) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -1077,7 +1077,7 @@ static void test_fx_params_override_vs_default(void) {
  * record the image quad's first-vertex y (the wave offset folds into it). params NULL -> stock
  * default curve. Reuses the IMAGE-quad position probe -- the same one test (11) trusts. */
 static float frame_tuned_wave_image_y(nt_material_t img_mat, const nt_ui_rich_fx_params_t *params, float time) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -1126,7 +1126,7 @@ static uint8_t markup_wave_atom_effect_id(const char *markup) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
 
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, &ts, &base, markup, strlen(markup));
@@ -1149,7 +1149,7 @@ static void test_fx_push_effect_ex_defaults(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
 
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_begin(s_fx.ctx, &base);
@@ -1166,7 +1166,7 @@ static void test_fx_push_effect_ex_defaults(void) {
 /* Build [text][image][text] with a per-atom EFFECT applied to the whole block. The image run
  * carries the effect_id; emit folds the wave offset into the image quad + the tint into the sprite color. */
 static void frame_effected_image(nt_material_t img_mat, nt_ui_rich_fx_fn effect_fn, float time) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -1251,7 +1251,7 @@ static nt_pointer_t make_ptr(float x, float y, bool down, bool pressed, bool rel
  * link rect lands at a predictable absolute position; walk once with pointer `p`. Returns the
  * resolved link result. The two-pass bbox needs a warm-up frame (first frame has no prev bbox). */
 static nt_ui_rich_result_t frame_link(const nt_pointer_t *p) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -1289,7 +1289,7 @@ static float link_hit_x(void) { return LINK_ROOT_X + (3.0F * 8.0F) + (2.0F * 8.0
  * The block DRAWS its links shifted by (DX,DY); the hit-test must map the pointer through the block's
  * baked transform to resolve them there. Mirrors frame_link's two-pass warm-up contract. */
 static nt_ui_rich_result_t frame_link_xform(const nt_pointer_t *p) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -1328,7 +1328,7 @@ static float link_miss_x(void) { return LINK_ROOT_X + 380.0F; }
 #define LINK_ID_B 0x0B0B0B0BU
 
 static nt_ui_rich_result_t frame_two_links(const nt_pointer_t *p) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -1365,7 +1365,7 @@ static float link2_b_x(void) { return LINK_ROOT_X + (13.0F * 8.0F); }
 /* (13) press+release-on-the-SAME-link click semantics (the press must START on the link the
  * release lands on). hover is purely geometric; a release without a matching press is no click. */
 static void test_link_hover_and_click(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_state_clear_all(s_fx.ctx); /* drop any stale press-latch cell from a prior test */
@@ -1420,7 +1420,7 @@ static void test_link_hover_and_click(void) {
 /* (13b) press inside link A, release inside link B -> NO click on EITHER link (the press target
  * and the release target must be the same link). */
 static void test_link_press_a_release_b_no_click(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_state_clear_all(s_fx.ctx);
@@ -1455,7 +1455,7 @@ static void test_link_press_a_release_b_no_click(void) {
 #define GAP_LINK_ID 0x77777777U
 
 static nt_ui_rich_result_t frame_link_gap(const nt_pointer_t *p) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_state_clear_all(s_fx.ctx);
@@ -1515,7 +1515,7 @@ static void test_link_no_union_across_gap(void) {
  * (the SAME path standard widgets use) -> the pointer at the TRANSFORMED screen position resolves the
  * link, and the pointer at the old untransformed position now misses (draw == hit). */
 static void test_link_hover_honors_block_transform(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_state_clear_all(s_fx.ctx);
@@ -1578,7 +1578,7 @@ static void stub_draw(void *user_data, float x, float y, float w, float h, uint3
 
 /* Build "A [object] B" with an optional effect; walk once. Records the draw_fn call args. */
 static void frame_object(nt_ui_rich_fx_fn effect_fn, float time) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     s_obj_measure_calls = 0;
@@ -1640,7 +1640,7 @@ static void test_object_effect_and_skip(void) {
  * parent opacity folds the <color> rgb + (alpha * opacity) into the callback color, exactly the
  * color the TEXT/IMAGE paths render with. Proves a custom object can honour opacity/<color>/fx. */
 static void test_object_draw_receives_resolved_color(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     s_obj_measure_calls = 0;
@@ -1680,7 +1680,7 @@ static void test_object_draw_receives_resolved_color(void) {
  * nt_ui_rich_text_markup with a string containing <obj=widget/>. Proves the parser dispatch reaches
  * the registered draw_fn (the same path the demo uses) -- not just a direct builder call. */
 static void test_object_markup_reaches_draw_fn(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     s_obj_measure_calls = 0;
@@ -1734,7 +1734,7 @@ static void stub_draw2(void *user_data, float x, float y, float w, float h, uint
  * world matrix every other emit in the block uses -- Y-flip baked in (world[5] < 0) and the block's
  * (DX,DY) translation present. Two objects in one block must get BYTE-EQUAL matrices. */
 static void test_object_world_mat4_matches_block_transform(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     s_obj_draw_calls = 0;
@@ -1784,7 +1784,7 @@ static nt_ui_rich_object_measure_t stub_measure_degenerate(void *user_data) {
     return (nt_ui_rich_object_measure_t){.width = NAN, .height = -5.0F, .ascent = NAN};
 }
 static void frame_object_measure(nt_ui_rich_object_measure_fn measure_fn) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
@@ -1818,7 +1818,7 @@ static nt_ui_rich_object_measure_t stub_measure_ascent(void *user_data) {
 
 /* Build "A [object] B" with a measure fn whose ascent != height; solve and probe the object atom. */
 static void frame_object_ascent(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     s_obj_measure_calls = 0;
@@ -1911,7 +1911,7 @@ static void test_two_rich_text_blocks_one_frame_no_trap(void) {
 /* Drive the PUBLIC markup entry through parse -> solve -> emit -> link in one call, inside a CLAY
  * block positioned at a known offset, and walk once. Markup: "go <link=here>HERE</link> now". */
 static nt_ui_rich_result_t frame_markup(const nt_pointer_t *p) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -1998,7 +1998,7 @@ static nt_ui_rich_fx_result_t custom_fx_param(uint32_t atom_idx, nt_rich_atom_ki
 
 /* Build "A [object] B" pushing a CUSTOM effect fn via the builder; record the object draw box. */
 static void frame_object_custom_fn(nt_ui_rich_fx_fn fn, void *user) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     s_obj_measure_calls = 0;
@@ -2064,7 +2064,7 @@ static void test_custom_fx_runs_via_markup(void) {
 
     s_custom_fx_calls = 0;
     s_custom_fx_seen_user = NULL;
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     /* "A " has no effect; "<fx=myfx>BB</fx>" runs the custom fn per glyph; the stock wave too. */
@@ -2090,7 +2090,7 @@ static void test_custom_fx_runs_via_markup(void) {
 /* Build text + inline image + object with NO <layer> -> the solver must assign the per-kind defaults
  * TEXT=0, IMAGE=1, OBJECT=2 (ascending = further back -> further front). Walk so the atoms get solved. */
 static void frame_text_image_object(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -2163,7 +2163,7 @@ static void order_recording_draw(void *user_data, float x, float y, float w, flo
 /* (L2) <layer=5> override: a push_layer(5) around mixed text + image -> EVERY enclosed atom (any kind)
  * reports layer 5, not the per-kind default. Proves an explicit layer overrides the AUTO-by-kind rule. */
 static void test_layer_override(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -2225,7 +2225,7 @@ static void foreign_text_material_draw(void *user_data, float x, float y, float 
 
 /* (L2b) text in a band after an object that selected another text material draws with the block's. */
 static void test_later_band_text_reselects_block_text_material(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -2255,7 +2255,7 @@ static void test_later_band_text_reselects_block_text_material(void) {
 
 /* Build a multi-face block split across TWO explicit layers: faces R,B on layer 0 and faces I,BI on layer 1. */
 static void frame_multi_face_two_layers(const nt_font_t fam[4]) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -2307,7 +2307,7 @@ static void test_font_group_per_layer(void) {
 static void test_font_group_does_not_cross_layers(void) {
     nt_font_t fam[2];
     make_real_fonts(fam, 2);
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
@@ -2342,7 +2342,7 @@ static void test_font_group_does_not_cross_layers(void) {
  * s_two_layer_first_index is the first index the walk allocates (the red quad's). */
 static uint32_t s_two_layer_first_index;
 static void frame_two_layer_images(nt_material_t img_mat) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -2415,7 +2415,7 @@ static void test_default_mixed_block_paints_bands_in_order(void) {
  * image -> rich_effective_layer is per-ATOM. The wrapped run reports layer 5; the trailing AUTO text falls
  * to the per-kind default 0; the AUTO image to 1. Pins that AUTO resolves per atom, not block-wide. */
 static void test_mixed_auto_and_explicit_layers(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -2462,7 +2462,7 @@ static void test_mixed_auto_and_explicit_layers(void) {
 
 /* More than NT_UI_RICH_MAX_LAYERS distinct layers must assert before overflowing scratch. */
 static void frame_over_cap_layers(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 

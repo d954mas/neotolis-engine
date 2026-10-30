@@ -2128,7 +2128,7 @@ static void frame(void) {
     if (!nt_example_frames_on()) {
         nt_input_poll();
     }
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     /* The notice frame is presented before the blocking generation starts. */
     if (!s_generated && !g_nt_gfx.context_lost) {
         if (s_notice[0] == '\0') {
@@ -2328,7 +2328,7 @@ int main(int argc, char **argv) {
     nt_app_run(frame);
 #ifndef NT_PLATFORM_WEB
     drop_generated();
-    nt_log_info("Asteroids UI: scratch peak=%zu bytes", nt_mem_scratch_high_water_mark());
+    nt_log_info("Asteroids UI: scratch peak=%zu bytes", g_nt_mem_scratch.high_water);
     nt_ui_destroy_context(s_ui);
     nt_ui_module_shutdown();
     nt_sprite_renderer_shutdown();

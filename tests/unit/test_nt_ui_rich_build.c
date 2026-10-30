@@ -27,7 +27,7 @@ static ui_walker_fixture_t s_fx;
 void setUp(void) {
     nt_test_assert_install();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 }
@@ -234,7 +234,7 @@ static void test_markup_equals_builder_core(void) {
     snapshot_runs(s_fx.ctx, &builder);
 
     /* Parser path (fresh scratch). */
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     const char *markup = "<b>HP</b> <img=heart/> full";
@@ -276,7 +276,7 @@ static void test_markup_equals_builder_full(void) {
     run_snapshot_t builder;
     snapshot_runs(s_fx.ctx, &builder);
 
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     const char *markup = "<color=#FF8800>hot</color><scale=1.5>big</scale><font=heading>head</font><link=quest1>go</link>";
@@ -306,7 +306,7 @@ static void test_markup_img_alias(void) {
     run_snapshot_t builder;
     snapshot_runs(s_fx.ctx, &builder);
 
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     const char *markup = "<img=icons:gold/>";
@@ -370,7 +370,7 @@ static void test_runtime_run_cap_respected(void) {
     nt_ui_destroy_context(small);
 
     /* The DEFAULT-cap fixture ctx (desc 0 -> #define 256) accepts the same 5 runs without asserting. */
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     emit_distinct_runs(s_fx.ctx, 5U);
@@ -393,7 +393,7 @@ static void test_runtime_text_cap_respected(void) {
     /* 9 bytes overflow the runtime cap (8) -> assert. The #define (4096) would accept it. */
     small->pending_rich = NULL;
     small->rich_session_open = false;
-    nt_mem_scratch_reset(); /* fresh scratch for the new begin's arrays */
+    nt_arena_reset(&g_nt_mem_scratch); /* fresh scratch for the new begin's arrays */
     small->pending_rich = NULL;
     small->rich_session_open = false;
     NT_TEST_EXPECT_ASSERT({
@@ -406,7 +406,7 @@ static void test_runtime_text_cap_respected(void) {
     nt_ui_destroy_context(small);
 
     /* Default-cap ctx accepts the 9 bytes. */
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_begin(s_fx.ctx, &base);
@@ -438,7 +438,7 @@ static void test_default_caps_when_desc_zero(void) {
     /* A text block near the default 4096 cap fits. */
     deflt->pending_rich = NULL;
     deflt->rich_session_open = false;
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     deflt->pending_rich = NULL;
     deflt->rich_session_open = false;
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();

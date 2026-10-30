@@ -7,8 +7,6 @@
 #include "core/nt_assert.h"
 #include "memory/nt_mem_scratch.h"
 
-/* Scratch shares this TU with the arena so its wrappers inline the arena calls. */
-
 // #region arena
 void nt_arena_init(nt_arena_t *arena, void *base, size_t size) {
     NT_ASSERT(base != NULL && size > 0 && "nt_arena_init: base must be non-NULL (malloc failed?) and size > 0");
@@ -45,28 +43,16 @@ void nt_arena_rewind(nt_arena_t *arena, size_t mark) {
 // #endregion
 
 // #region scratch
-static nt_arena_t s_scratch;
+nt_arena_t g_nt_mem_scratch;
 
 void nt_mem_scratch_init(size_t size_bytes) {
-    NT_ASSERT(s_scratch.base == NULL && "nt_mem_scratch_init: already initialized");
-    nt_arena_init(&s_scratch, malloc(size_bytes), size_bytes);
+    NT_ASSERT(g_nt_mem_scratch.base == NULL && "nt_mem_scratch_init: already initialized");
+    nt_arena_init(&g_nt_mem_scratch, malloc(size_bytes), size_bytes);
 }
 
 void nt_mem_scratch_shutdown(void) {
-    NT_ASSERT(s_scratch.base != NULL && "nt_mem_scratch_shutdown: not initialized");
-    free(s_scratch.base);
-    s_scratch = (nt_arena_t){0};
+    NT_ASSERT(g_nt_mem_scratch.base != NULL && "nt_mem_scratch_shutdown: not initialized");
+    free(g_nt_mem_scratch.base);
+    g_nt_mem_scratch = (nt_arena_t){0};
 }
-
-void nt_mem_scratch_reset(void) { nt_arena_reset(&s_scratch); }
-
-void *nt_mem_scratch_alloc(size_t size, size_t align) { return nt_arena_alloc(&s_scratch, size, align); }
-
-void *nt_mem_scratch_alloc_array(size_t elem_size, size_t count, size_t align) { return nt_arena_alloc_array(&s_scratch, elem_size, count, align); }
-
-void nt_mem_scratch_rewind(size_t mark) { nt_arena_rewind(&s_scratch, mark); }
-
-size_t nt_mem_scratch_used(void) { return s_scratch.used; }
-
-size_t nt_mem_scratch_high_water_mark(void) { return s_scratch.high_water; }
 // #endregion

@@ -372,7 +372,7 @@ static void clipboard_copy_selection(const char *buffer, const nt_ui_input_state
     uint32_t hi = 0U;
     selection_span(st, &lo, &hi);
     const uint32_t n = hi - lo;
-    char *tmp = (char *)nt_mem_scratch_alloc(n + 1U, 1U);
+    char *tmp = (char *)nt_arena_alloc(&g_nt_mem_scratch, n + 1U, 1U);
     NT_ASSERT(tmp != NULL && "nt_ui_input: scratch alloc failed (clipboard copy)");
     memcpy(tmp, &buffer[lo], n);
     tmp[n] = '\0';
@@ -537,7 +537,7 @@ static void emit_rect(nt_ui_context_t *ctx, uint8_t layer, float x, float y, flo
  * test probe (no GL capture) under NT_TEST_ACCESS. */
 const char *nt_ui_input_build_display_text(const char *buffer, uint32_t len) {
     const uint32_t count = codepoint_count(buffer, len);
-    char *masked = (char *)nt_mem_scratch_alloc(count + 1U, 1U);
+    char *masked = (char *)nt_arena_alloc(&g_nt_mem_scratch, count + 1U, 1U);
     NT_ASSERT(masked != NULL && "nt_ui_input: scratch alloc failed (mask)");
     memset(masked, NT_UI_INPUT_MASK_CHAR, count);
     masked[count] = '\0';

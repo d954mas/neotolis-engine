@@ -37,20 +37,20 @@ static void test_full_macro(void) {
 
 /* Layer-only path uses static table (no scratch); FULL with user_data scratches. */
 static void test_layer_only_no_scratch(void) {
-    const size_t before = nt_mem_scratch_used();
+    const size_t before = g_nt_mem_scratch.used;
     const nt_ui_element_data_t *a = NT_UI_DATA_LAYER(0);
     const nt_ui_element_data_t *b = NT_UI_DATA_LAYER(1);
     (void)a;
     (void)b;
-    TEST_ASSERT_EQUAL_UINT64((uint64_t)before, (uint64_t)nt_mem_scratch_used());
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)before, (uint64_t)g_nt_mem_scratch.used);
 }
 
 static void test_full_with_user_data_uses_scratch(void) {
     int payload = 1;
-    const size_t before = nt_mem_scratch_used();
+    const size_t before = g_nt_mem_scratch.used;
     const nt_ui_element_data_t *d = NT_UI_DATA_FULL(2, &payload);
     (void)d;
-    TEST_ASSERT_TRUE(nt_mem_scratch_used() > before);
+    TEST_ASSERT_TRUE(g_nt_mem_scratch.used > before);
 }
 
 /* Layer-only: same layer -> same pointer (static table); different layer -> distinct. */
@@ -80,10 +80,10 @@ static void test_reset_releases_macro_storage(void) {
     int payload = 0;
     const nt_ui_element_data_t *tmp = NT_UI_DATA_FULL(1, &payload);
     (void)tmp;
-    const size_t after_alloc = nt_mem_scratch_used();
+    const size_t after_alloc = g_nt_mem_scratch.used;
     TEST_ASSERT_TRUE(after_alloc > 0U);
-    nt_mem_scratch_reset();
-    TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)nt_mem_scratch_used());
+    nt_arena_reset(&g_nt_mem_scratch);
+    TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)g_nt_mem_scratch.used);
     const nt_ui_element_data_t *d = NT_UI_DATA_LAYER(2);
     TEST_ASSERT_EQUAL_UINT8(2U, d->layer);
 }

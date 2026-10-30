@@ -24,8 +24,8 @@ static bool label_style_has_decoration(const nt_ui_label_style_t *s) { return s-
 
 /* Copy into private frame scratch so the shared per-layer element_data singleton is never mutated. */
 static const nt_ui_element_data_t *label_attach_decoration(const nt_ui_element_data_t *base, const nt_ui_label_style_t *s) {
-    nt_ui_label_deco_t *d = (nt_ui_label_deco_t *)nt_mem_scratch_alloc(sizeof *d, alignof(nt_ui_label_deco_t));
-    nt_ui_element_data_t *ed = (nt_ui_element_data_t *)nt_mem_scratch_alloc(sizeof *ed, alignof(nt_ui_element_data_t));
+    nt_ui_label_deco_t *d = (nt_ui_label_deco_t *)nt_arena_alloc(&g_nt_mem_scratch, sizeof *d, alignof(nt_ui_label_deco_t));
+    nt_ui_element_data_t *ed = (nt_ui_element_data_t *)nt_arena_alloc(&g_nt_mem_scratch, sizeof *ed, alignof(nt_ui_element_data_t));
     d->variant = s->variant;
     d->weight = s->weight;
     d->outline_w = s->outline_w;
@@ -79,7 +79,7 @@ void nt_ui_label(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const c
     /* Clay stores .chars by pointer and the walker reads after declaration returns; copy
      * into per-frame scratch so callers can pass snprintf'd stack buffers safely. */
     const size_t text_len = strlen(text);
-    char *owned = (char *)nt_mem_scratch_alloc(text_len + 1U, _Alignof(char));
+    char *owned = (char *)nt_arena_alloc(&g_nt_mem_scratch, text_len + 1U, _Alignof(char));
     NT_ASSERT(owned != NULL && "nt_ui_label: scratch alloc failed (label text)");
     memcpy(owned, text, text_len + 1U);
     /* A decorated label rides a private element_data carrying the decoration in .special; a plain label

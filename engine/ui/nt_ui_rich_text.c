@@ -31,7 +31,7 @@
 
 // #region data-model
 /* Frame-scratch run-list SoA. Parallel arrays bump-allocated by nt_ui_rich_begin;
- * stale after the next nt_mem_scratch_reset. A run only starts when the COMPOSED
+ * stale after the next scratch reset. A run only starts when the COMPOSED
  * style differs from the current run (dedup against the style table). */
 
 #ifndef NT_UI_RICH_PARSE_TAG_DEPTH
@@ -1591,10 +1591,10 @@ static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float container_w, rich
             a->link_id = run->link_id;
         } else { /* NT_RICH_ATOM_OBJECT: reserve the box via the run's measure_fn. */
             NT_ASSERT(run->object_measure != NULL && "rich object: measure_fn must be non-NULL");
-            const size_t scratch_used = nt_mem_scratch_used();
+            const size_t scratch_used = g_nt_mem_scratch.used;
             const nt_ui_rich_object_measure_t m = run->object_measure(run->object_user);
             /* The solve rewinds its scratch, so a measure_fn allocation would die before draw_fn. */
-            NT_ASSERT(nt_mem_scratch_used() == scratch_used && "rich object: measure_fn must not allocate scratch");
+            NT_ASSERT(g_nt_mem_scratch.used == scratch_used && "rich object: measure_fn must not allocate scratch");
             /* measure_fn is game-trusted: fail early on a garbage box. */
             NT_ASSERT(isfinite(m.width) && isfinite(m.height) && isfinite(m.ascent) && m.width >= 0.0F && m.height >= 0.0F && "rich object: measure_fn must return finite, non-negative width/height");
             const float obj_w = m.width;
@@ -1765,7 +1765,7 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
     st->solved = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_ui_rich_solved_atom_t, atom_cap);
     st->links = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_ui_rich_link_rect_t, NT_UI_RICH_MAX_LINKS);
     /* Atoms die with the solve; solved/links above outlive it until walk. */
-    const size_t atoms_mark = nt_mem_scratch_used();
+    const size_t atoms_mark = g_nt_mem_scratch.used;
     rich_atom_t *atoms = NT_MEM_SCRATCH_ALLOC_ARRAY(rich_atom_t, atom_cap);
     const uint32_t na = rich_build_atoms(st, box_w, atoms, atom_cap);
     st->line_count = rich_break_lines(atoms, na, box_w);
@@ -1871,7 +1871,7 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
     }
 #endif
     st->solved_ready = true;
-    nt_mem_scratch_rewind(atoms_mark);
+    nt_arena_rewind(&g_nt_mem_scratch, atoms_mark);
 }
 // #endregion
 
