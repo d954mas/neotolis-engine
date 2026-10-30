@@ -59,13 +59,17 @@ static inline void nt_gl_count_texture_upload(const void *data, uint64_t bytes) 
 #if NT_GFX_CAPTURE_ENABLED
 /* The put helpers run only while a call record is open: the NT_GL_* forms check once per call. */
 static inline void nt_gl_put_unsigned(uint64_t value) {
-    NT_ASSERT(g_nt_gfx_capture.call_ints < 12);
-    g_nt_gfx_capture.call->data.backend.args[g_nt_gfx_capture.call_ints++] = (uint32_t)value;
+    nt_gfx_event_t *call = g_nt_gfx_capture.call;
+    NT_ASSERT((call->arg_count & 0x0FU) < 12U);
+    call->data.backend.args[call->arg_count & 0x0FU] = (uint32_t)value;
+    call->arg_count++;
 }
 static inline void nt_gl_put_signed(int64_t value) { nt_gl_put_unsigned((uint64_t)value); }
 static inline void nt_gl_put_float(float value) {
-    NT_ASSERT(g_nt_gfx_capture.call_floats < 4);
-    g_nt_gfx_capture.call->data.backend.values[g_nt_gfx_capture.call_floats++] = value;
+    nt_gfx_event_t *call = g_nt_gfx_capture.call;
+    NT_ASSERT((call->arg_count >> 4) < 4U);
+    call->data.backend.values[call->arg_count >> 4] = value;
+    call->arg_count = (uint8_t)(call->arg_count + 0x10U);
 }
 static inline void nt_gl_put_double(double value) { nt_gl_put_float((float)value); }
 static inline void nt_gl_put_pointer(const void *pointer) { nt_gl_put_unsigned(pointer != NULL ? 1U : 0U); }

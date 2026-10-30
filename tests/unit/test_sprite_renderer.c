@@ -2211,7 +2211,7 @@ void test_sprite_renderer_merged_emits_keep_their_notes(void) {
     nt_sprite_renderer_emit_region(s_atlas_res, 0, NT_MATH_MAT4_IDENTITY, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
 
     const uint32_t notes[2] = {nt_test_note(0, "sprite"), nt_test_note(nt_test_note(0, "sprite") + 1U, "sprite")};
-    TEST_ASSERT_LESS_THAN_UINT32(nt_gfx_capture_read().count, notes[1]);
+    TEST_ASSERT_LESS_THAN_UINT32(nt_test_capture_open().count, notes[1]);
     const uint32_t page = nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 0));
     for (uint32_t i = 0; i < 2; i++) {
         TEST_ASSERT_EQUAL_UINT32(mat.id, nt_test_note_u32(notes[i], "material"));
@@ -2220,7 +2220,7 @@ void test_sprite_renderer_merged_emits_keep_their_notes(void) {
     }
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, nt_test_next_draw_result(notes[0]));
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_CACHE, nt_test_next_draw_result(notes[1]));
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_capture_read().count, nt_test_note(notes[1] + 1U, "sprite"));
+    TEST_ASSERT_EQUAL_UINT32(nt_test_capture_open().count, nt_test_note(notes[1] + 1U, "sprite"));
 }
 
 void test_sprite_renderer_linking_program_notes_its_skip(void) {
@@ -2236,7 +2236,7 @@ void test_sprite_renderer_linking_program_notes_its_skip(void) {
     const uint32_t note = nt_test_note(0, "sprite");
     TEST_ASSERT_EQUAL_UINT32(mat.id, nt_test_note_u32(note, "material"));
     TEST_ASSERT_EQUAL_STRING("program not ready", nt_test_note_str(note, "drop"));
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_capture_read().count, nt_test_note(note + 1U, "sprite"));
+    TEST_ASSERT_EQUAL_UINT32(nt_test_capture_open().count, nt_test_note(note + 1U, "sprite"));
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_NONE, nt_test_next_draw_result(note)); /* the last note: scans to the end */
 }
 
@@ -2254,7 +2254,7 @@ void test_sprite_renderer_unready_page_notes_its_skip(void) {
     const uint32_t note = nt_test_note(0, "sprite");
     TEST_ASSERT_EQUAL_UINT32(0, nt_test_note_u32(note, "page"));
     TEST_ASSERT_EQUAL_STRING("page not ready", nt_test_note_str(note, "drop"));
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_capture_read().count, nt_test_note(note + 1U, "sprite"));
+    TEST_ASSERT_EQUAL_UINT32(nt_test_capture_open().count, nt_test_note(note + 1U, "sprite"));
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_NONE, nt_test_next_draw_result(note)); /* the last note: scans to the end */
 }
 #endif

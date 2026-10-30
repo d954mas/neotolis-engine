@@ -1256,7 +1256,7 @@ void test_notes_survive_merges_and_an_unloaded_font_notes_its_skip(void) {
     const uint32_t first = nt_test_note(0, "text");
     const uint32_t second = nt_test_note(first + 1U, "text");
     const uint32_t third = nt_test_note(second + 1U, "text");
-    TEST_ASSERT_LESS_THAN_UINT32(nt_gfx_capture_read().count, third);
+    TEST_ASSERT_LESS_THAN_UINT32(nt_test_capture_open().count, third);
     TEST_ASSERT_EQUAL_UINT32(s_mat.id, nt_test_note_u32(first, "material"));
     TEST_ASSERT_EQUAL_UINT32(s_font.id, nt_test_note_u32(first, "font"));
     TEST_ASSERT_EQUAL_UINT32(s_font.id, nt_test_note_u32(second, "font"));
@@ -1266,7 +1266,7 @@ void test_notes_survive_merges_and_an_unloaded_font_notes_its_skip(void) {
     TEST_ASSERT_EQUAL_STRING("", nt_test_note_str(first, "drop"));
     TEST_ASSERT_EQUAL_STRING("font not loaded", nt_test_note_str(third, "drop"));
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_NONE, nt_test_next_draw_result(third)); /* the last note: scans to the end */
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_capture_read().count, nt_test_note(third + 1U, "text"));
+    TEST_ASSERT_EQUAL_UINT32(nt_test_capture_open().count, nt_test_note(third + 1U, "text"));
     nt_test_frame_close();
     nt_font_destroy(empty);
     open_frame();

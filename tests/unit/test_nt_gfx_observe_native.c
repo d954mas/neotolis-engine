@@ -1,10 +1,12 @@
 #include "graphics/nt_gfx.h"
 #include "pool/nt_pool.h"
 #include "test_helpers/nt_gfx_test_frame.h"
+#include "test_helpers/nt_gfx_test_notes.h"
 #include "unity.h"
 #include "window/nt_window.h"
 
 #define GLFW_INCLUDE_NONE
+#include "graphics/nt_gfx_capture_text.h"
 #include <GLFW/glfw3.h>
 #include <glad/gl.h>
 
@@ -150,8 +152,31 @@ void tearDown(void) {
 }
 
 #if NT_GFX_CAPTURE_ENABLED
+/* The finalized frame; formatting it asserts that every real GL record keeps its data in the arm the text prints. */
+static nt_gfx_capture_view_t read_capture(void) {
+    const nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_GREATER_THAN_UINT64(0, nt_gfx_capture_format(&capture, NULL, 0));
+    return capture;
+}
+
+/* Backend UBO cache skips; each carries its cache key: slot, offset, size. */
+static uint32_t ubo_cache_skips(const nt_gfx_capture_view_t *capture, uint32_t draw_size, uint32_t globals_size) {
+    uint32_t skips = 0;
+    for (uint32_t i = 0; i < capture->count; i++) {
+        const nt_gfx_event_t *e = &capture->events[i];
+        if (e->kind == NT_GFX_EVENT_SKIP && e->detail == NT_GFX_GL_glBindBufferRange) {
+            TEST_ASSERT_EQUAL_UINT8(3, e->arg_count);
+            const bool draw = e->data.backend.args[0] == NT_GFX_SLOT_DRAW;
+            TEST_ASSERT_TRUE(draw || e->data.backend.args[0] == NT_GFX_SLOT_GLOBALS);
+            TEST_ASSERT_EQUAL_UINT32(draw ? draw_size : globals_size, e->data.backend.args[2]);
+            skips++;
+        }
+    }
+    return skips;
+}
+
 static uint32_t captured_calls(nt_gfx_gl_call_t call) {
-    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    nt_gfx_capture_view_t capture = read_capture();
     TEST_ASSERT_FALSE(capture.overflow);
     uint32_t count = 0;
     for (uint32_t i = 0; i < capture.count; i++) {
@@ -174,7 +199,7 @@ static void test_capture_publishes_attachment_mappings_and_skip_reasons(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    nt_gfx_capture_view_t capture = read_capture();
     TEST_ASSERT_FALSE(capture.overflow);
     uint32_t texture_slot = 0;
     bool cache = false;
@@ -222,7 +247,7 @@ static void test_new_program_defines_sampler_names(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    nt_gfx_capture_view_t capture = read_capture();
     uint32_t names = 0;
     uint32_t units = 0;
     uint32_t pipeline_states = 0;
@@ -258,39 +283,49 @@ static void test_issued_calls_record_floats_names_and_payloads(void) {
     nt_gfx_capture_request();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    (void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = sizeof(data), .data = data});
+    nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = sizeof(data), .data = data});
+    /* Still bound from the create: the update records a SKIP of glBindBuffer. */
+    nt_gfx_update_buffer(buffer, 0, data, sizeof(data));
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.25F, 0.5F, 0.75F, 1.0F}, .clear_depth = 1.0F});
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    nt_gfx_capture_view_t capture = read_capture();
     TEST_ASSERT_FALSE(capture.overflow);
     uint32_t generated = 0;
     bool uploaded = false;
     bool cleared = false;
+    bool skipped = false;
     for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *event = &capture.events[i];
+        if (event->kind == NT_GFX_EVENT_SKIP && event->detail == NT_GFX_GL_glBindBuffer) {
+            TEST_ASSERT_EQUAL_UINT8(1, event->arg_count);
+            skipped = true;
+        }
         if (event->kind != NT_GFX_EVENT_BACKEND) {
             continue;
         }
         if (event->detail == NT_GFX_GL_glGenBuffers) {
             TEST_ASSERT_EQUAL_UINT32(1, event->data.backend.args[0]);
+            TEST_ASSERT_EQUAL_UINT8(2, event->arg_count); /* count, then the name */
             generated = event->data.backend.args[1];
         }
         if (event->detail == NT_GFX_GL_glBufferData) {
             TEST_ASSERT_EQUAL_UINT32(sizeof(data), event->data.backend.args[1]);
             TEST_ASSERT_EQUAL_UINT32(1, event->data.backend.args[2]);
             TEST_ASSERT_EQUAL_UINT64(sizeof(data), event->data.backend.bytes);
+            TEST_ASSERT_EQUAL_UINT8(4, event->arg_count);
             uploaded = true;
         }
         /* Exactly representable values, so equality is exact. */
         const float *color = event->data.backend.values;
         if (event->detail == NT_GFX_GL_glClearColor && color[0] == 0.25F && color[1] == 0.5F && color[2] == 0.75F && color[3] == 1.0F) {
+            TEST_ASSERT_EQUAL_UINT8(4U << 4, event->arg_count);
             cleared = true;
         }
     }
     TEST_ASSERT_NOT_EQUAL(0, generated);
-    TEST_ASSERT_TRUE(uploaded && cleared);
+    TEST_ASSERT_TRUE(uploaded && cleared && skipped);
 }
 
 /* Frame storage reaches its buffer before the replayed draw that reads it, in issued order. */
@@ -313,7 +348,7 @@ static void test_frame_storage_upload_is_issued_before_the_replayed_draw(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    nt_gfx_capture_view_t capture = read_capture();
     TEST_ASSERT_FALSE(capture.overflow);
     uint32_t upload = UINT32_MAX;
     uint32_t draw = UINT32_MAX;
@@ -456,7 +491,7 @@ static void test_complete_capture_matches_gl_counters(void) {
     (void)nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_destroy_buffer(buffer);
     nt_gfx_begin_frame();
-    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    nt_gfx_capture_view_t capture = read_capture();
     uint32_t recorded[NT_GFX_GL_COUNT] = {0};
     uint32_t total = 0;
     for (uint32_t i = 0; i < capture.count; i++) {
@@ -523,7 +558,7 @@ static void test_merged_draws_link_to_the_first_draw(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    nt_gfx_capture_view_t capture = read_capture();
     TEST_ASSERT_FALSE(capture.overflow);
     uint32_t draw[4];
     draw[0] = op_index(&capture, 0, NT_GFX_OP_DRAW);
@@ -645,7 +680,12 @@ static void test_shutdown_while_recording_writes_no_record(void) {
     nt_gfx_begin_frame();
     nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, buffer.id);
-    TEST_ASSERT_GREATER_THAN_UINT32(0, captured_calls(NT_GFX_GL_glBufferData));
+    const nt_gfx_capture_view_t open = nt_test_capture_open();
+    bool uploaded = false;
+    for (uint32_t i = 0; i < open.count; i++) {
+        uploaded |= open.events[i].kind == NT_GFX_EVENT_BACKEND && open.events[i].detail == NT_GFX_GL_glBufferData;
+    }
+    TEST_ASSERT_TRUE(uploaded); /* the recording half holds GL records when shutdown discards it */
     nt_gfx_shutdown();
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 4096;
@@ -677,7 +717,7 @@ static void test_pass_actions_capture_values_and_attachment_enums(void) {
     TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    nt_gfx_capture_view_t capture = read_capture();
     TEST_ASSERT_FALSE(capture.overflow);
     nt_gfx_event_t begin = {0};
     nt_gfx_event_t invalidate = {0};
@@ -728,7 +768,7 @@ static void test_explicit_clear_records_issued_calls_and_skips_empty_selections(
     TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.last_frame.accepted[NT_GFX_OP_CLEAR]);
     TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.last_frame.gl[NT_GFX_GL_glClear]);
     TEST_ASSERT_EQUAL_UINT32(3, captured_calls(NT_GFX_GL_glClear));
-    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    nt_gfx_capture_view_t capture = read_capture();
     uint32_t selected = 0;
     for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *event = &capture.events[i];
@@ -757,7 +797,7 @@ static void test_readback_is_recorded_as_issued_call(void) {
     uint8_t pixel[4] = {0};
     TEST_ASSERT_TRUE(nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 1, 1, pixel, sizeof(pixel)));
     nt_gfx_begin_frame();
-    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    nt_gfx_capture_view_t capture = read_capture();
     uint32_t reads = 0;
     for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *event = &capture.events[i];
@@ -876,7 +916,7 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
         nt_gfx_begin_frame();
 #if NT_GFX_CAPTURE_ENABLED
         if (frame == 1) {
-            nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+            nt_gfx_capture_view_t capture = read_capture();
             bool viewport_known = false;
             for (uint32_t i = 0; i < capture.count; i++) {
                 const nt_gfx_event_t *e = &capture.events[i];
@@ -887,6 +927,7 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
                 }
             }
             TEST_ASSERT_TRUE(viewport_known);
+            TEST_ASSERT_EQUAL_UINT32(2, ubo_cache_skips(&capture, sizeof(color), sizeof(block)));
         }
 #endif
         nt_gfx_counters_t c = g_nt_gfx.last_frame;
@@ -962,7 +1003,7 @@ static void test_a_captured_vertex_input_names_its_instance_tuple(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    nt_gfx_capture_view_t capture = read_capture();
     bool layout_defined = false;
     bool vao_defined = false;
     bool requested = false;

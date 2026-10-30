@@ -880,7 +880,7 @@ void test_deformation_split_notes_the_same_material_and_mesh(void) {
     record_skinned_list(items, 2);
 
     const uint32_t notes[2] = {nt_test_note(0, "mesh"), nt_test_note(nt_test_note(0, "mesh") + 1U, "mesh")};
-    const uint32_t count = nt_gfx_capture_read().count;
+    const uint32_t count = nt_test_capture_open().count;
     TEST_ASSERT_LESS_THAN_UINT32(count, notes[1]);
     TEST_ASSERT_EQUAL_UINT32(count, nt_test_note(notes[1] + 1U, "mesh"));
     for (uint32_t i = 0; i < 2; i++) {

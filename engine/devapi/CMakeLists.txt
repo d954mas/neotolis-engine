@@ -130,12 +130,24 @@ if(NT_DEVAPI_GROUP_RECORDER)
     target_compile_definitions(nt_devapi_recorder PUBLIC NT_DEVAPI_GROUP_RECORDER=1)
 endif()
 
+# Gfx group (gfx.record / gfx.frames / gfx.read): a recording mode over the gfx capture, with a
+# static ring of recent frames printed as capture text. nt_gfx_capture_text exists only in capture builds.
+if(NT_DEVAPI_GROUP_GFX AND NOT NT_GFX_CAPTURE_ENABLED)
+    message(FATAL_ERROR "NT_DEVAPI_GROUP_GFX requires NT_GFX_CAPTURE_ENABLED (the group records gfx captures).")
+endif()
+
+if(NT_DEVAPI_GROUP_GFX)
+    nt_add_module(nt_devapi_gfx LOG_DOMAIN "devapi" nt_devapi_gfx.c)
+    target_link_libraries(nt_devapi_gfx PUBLIC nt_devapi PRIVATE nt_gfx_interface nt_gfx_capture_text nt_app_interface nt_log_interface)
+    target_compile_definitions(nt_devapi_gfx PUBLIC NT_DEVAPI_GROUP_GFX=1)
+endif()
+
 # nt_devapi_default -- the "register every compiled-in group" bundle. Links every enabled group lib (so
 # a host linking it gets all groups + their deps) and provides nt_devapi_register_default(). The group
 # libs' PUBLIC NT_DEVAPI_GROUP_<X> defines reach nt_devapi_default.c here, gating its register calls.
 nt_add_module(nt_devapi_default LOG_DOMAIN "devapi" nt_devapi_default.c)
 target_link_libraries(nt_devapi_default PUBLIC nt_devapi)
-foreach(_grp core time input ui obs entity_write capture recorder)
+foreach(_grp core time input ui obs entity_write capture recorder gfx)
     if(TARGET nt_devapi_${_grp})
         target_link_libraries(nt_devapi_default PUBLIC nt_devapi_${_grp})
     endif()

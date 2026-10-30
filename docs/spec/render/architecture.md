@@ -1094,8 +1094,8 @@ upload before the replayed draws that read it.
 Backends without GL (the test fake) issue no GL calls, so `gl[]` and the
 upload fields stay zero there. `NT_GFX_CAPTURE_ENABLED` is a numeric interface
 definition published by the interface target, so every consumer sees the same
-configuration; `nt_gfx_capture_request`, `nt_gfx_capture_read`,
-`nt_gfx_gl_call_name`, `nt_gfx_note_record`, `nt_gfx_marker_push` and
+configuration; `nt_gfx_capture_request`, `nt_gfx_capture_set_continuous`,
+`nt_gfx_capture_read`, `nt_gfx_gl_call_name`, `nt_gfx_note_record`, `nt_gfx_marker_push` and
 `nt_gfx_marker_pop` exist only when it is 1.
 
 `gl[]` counts, by `nt_gfx_gl_call_t`, every GL call the GL backend issues
@@ -1145,19 +1145,20 @@ CONTEXT_LOST when recreation failed or met a loss. Raw GL names are valid within
 context segment; a CONTEXT operation in the stream separates segments, and
 frontend handles are the identity across them.
 
-Command recording is one-shot: `nt_gfx_capture_request` asks for the next frame
-to be recorded. The begin_frame that closes the requesting frame consumes the request
-and starts recording the frame it opens; without a request no frame records. The
-first frame never records. A request made during a recorded frame replaces that
-capture at the begin_frame that finishes it, so read a capture in the following
-frame before requesting again: readable captures are at most every other frame.
-`nt_gfx_desc_t.capture_capacity` reserves one
-event array at init (default zero, below 2^24 because a link must fit a stream
-op word); a request without capacity asserts. Capture-OFF builds ignore the field.
-There is no growth or allocation while recording. Each pointer-free POD event
-is 104 bytes, including padding; 16384 records reserve 1.625 MiB. Gfx records keep
-`operation`, `object_kind` and `result` in one byte each. Other storage
-consists of fixed control state and counter snapshots, with no second event array.
+Command recording is one-shot or continuous. `nt_gfx_capture_request` asks for the
+next frame to be recorded: the begin_frame that closes the requesting frame consumes
+the request and starts recording the frame it opens. `nt_gfx_capture_set_continuous(true)`
+records every frame from the next begin_frame until it is turned off; off lets the
+frame recording at that moment finish and records nothing after it. `nt_gfx_init` and
+`nt_gfx_shutdown` turn it off. Without either no frame records, and the first frame
+never records. `nt_gfx_desc_t.capture_capacity` sets the records of one frame (default
+zero, below 2^24 because a link must fit a stream op word); a request or continuous
+mode without capacity asserts. Capture-OFF builds ignore the field. Init reserves two
+halves of that size in one allocation: one holds the last finished frame while the
+other records. There is no growth or allocation while recording. Each pointer-free POD
+event is 104 bytes, including padding; 16384 records per frame reserve 3.25 MiB. Gfx
+records keep `operation`, `object_kind`, `result` and `arg_count` in one byte each.
+Other storage consists of fixed control state and counter snapshots.
 All record bytes are initialized before publication. A recorded frame starts at
 the begin_frame that opens it and first snapshots
 inherited state, including one definition per live resource (plus
@@ -1165,16 +1166,18 @@ program uniform/sampler and vertex-input attribute records), into the same array
 Size the capacity for that snapshot plus the frame's commands; a capacity below
 the snapshot overflows before any command is recorded.
 
-`nt_gfx_capture_read` returns metadata by value and an event prefix that is
-immutable except for the OP records of operations still in progress (an OP is
-final when its call returns). Read a finished capture right after
-`nt_gfx_begin_frame`: the prefix remains valid until the begin_frame that starts
-the next requested recording overwrites it, or shutdown; unrequested frames
-preserve it. Keep a capture by copying the metadata and `count` records
-and redirecting the saved view's pointer to the owned array. An empty view has
-a NULL pointer. The finalized view retains its frame's counters (and so its
-`frame_sequence`) by value even after later unrecorded frames overwrite
-`g_nt_gfx.last_frame`.
+`nt_gfx_capture_read` returns the last finished recorded frame: metadata by value and
+its immutable records, complete with its post-render work and any gfx work issued
+between frames. A frame finishes at the begin_frame that closes it. Its records stay
+valid until the begin_frame that finishes the next recorded frame, or shutdown, so in
+continuous mode each frame is readable during the whole next frame and a reader that
+copies one per frame gets every frame; unrecorded frames preserve it. The frame still
+recording is not readable. Keep a capture by copying the metadata and `count` records
+and redirecting the saved view's pointer to the owned array. An empty view (before any
+recorded frame finished) has a NULL pointer. The view retains its frame's counters
+(and so its `frame_sequence`) by value even after later frames overwrite
+`g_nt_gfx.last_frame`. The stub asserts on continuous mode, because it never begins a
+frame.
 
 Every recorded public operation produces exactly one OP record at the call,
 carrying its request arguments; when the call returns, the record holds its outcome
@@ -1224,7 +1227,7 @@ locations, status) follows the arguments, a returned mapping (`glMapBufferRange`
 or fence (`glFenceSync`) is a presence bit, and indexed offsets are byte offsets.
 Output pointers are presence bits; their written values are not recorded. Readback, timer-query and debug-group calls are
 issued calls too and are recorded like any other.
-Float arguments occupy `backend.values` in float argument order. `backend.bytes` is actual CPU upload payload, zero for NULL storage.
+Float arguments occupy `backend.values` in float argument order. `arg_count` holds how many integer arguments (low nibble) and float values (high nibble) a call set, so trailing zeros stay distinguishable from absent arguments. `backend.bytes` is actual CPU upload payload, zero for NULL storage.
 No event borrows upload memory, shader source or caller labels.
 
 Resource `DEFINITION/STATE` records with `object_kind=NONE` use `detail` as the
@@ -1276,7 +1279,9 @@ from invalid requests.
 
 `SKIP` records mark work that was not issued without ending an operation:
 backend cache skips (`SKIP/CACHE`) and inactive texture-set names
-(`SKIP/INACTIVE`).
+(`SKIP/INACTIVE`). A backend cache skip names the skipped call in `detail` and carries its cache
+key (not the GL signature) in `backend.args`, counted by `arg_count`; an
+inactive texture-set name has `detail` 0 and uses the binding fields.
 
 Pipeline state records use integers 0–12 for program, depth enable/write/function,
 cull, blend enable, RGB source/destination, alpha source/destination, RGB/alpha
@@ -1360,6 +1365,63 @@ or text selections resolved before the latch, note as usual and their gfx
 records end `CONTEXT_LOST`; a sprite or text material resolved after it notes
 `drop: program not ready`. A mesh create that meets the loss notes
 `drop: context lost`, and later mesh calls of that frame return before noting.
+
+### Capture text
+
+`nt_gfx_capture_format(view, out, cap)` (`graphics/nt_gfx_capture_text.h`, target
+`nt_gfx_capture_text`, capture builds only) prints a capture view as lossless named
+text: a reader can rebuild every record field from it. It writes into the caller's
+buffer like `snprintf`, returning the bytes needed without the terminator, and
+allocates nothing. The text is the capture artifact: DevAPI returns it and clients
+save it.
+
+```text
+ntcapture 1
+frame sequence=<n> records=<n> overflow=<0|1> execute=<begin>..<end>
+counter <name>=<n>                       (one line per nonzero counter)
+<index> <indent><KIND> op=<OP> [obj=<KIND>:<handle>] [result=<R>] [<detail>] [link=@<index>] <fields>
+<index> <indent>NOTE label="<text>"
+<index> <indent>NOTE_FIELD key="<text>" type=<U32|I32|U64|F32|STR> value=<value>
+<index> <indent>MARKER_PUSH label="<text>"
+<index> <indent>MARKER_POP
+```
+
+- Counters are named `vertices`, `stream_bytes`, `accepted.<OP>`, `frame_bytes.<stream index>`,
+  `gl.<call>` and so on, so the web and native array sizes do not matter.
+- Record kinds, operations, object kinds, results, GL calls, note types and counter
+  names print by name; data fields print as stored integers. `link` is omitted when 0.
+  `detail` prints as `call=<glCall>` on BACKEND
+  and backend SKIP records, `resource=<KIND>` on backend resource DEFINITION records,
+  `layer=FRONTEND|BACKEND` on INITIAL/STATE, `joined=@<index>` on a merged draw (the
+  draw it joined), `detail=<n>` otherwise, and is omitted when 0.
+- Fields print as `name=value` for the data arm of the record (table below); zero
+  fields are omitted, and arrays print up to their last nonzero element. Issued-call
+  arguments print exactly `arg_count` elements, so a zero argument stays visible
+  (`args=`, `key=` on a cache skip, `values=`). Formatting asserts that a record holds
+  no data outside its arm and an issued call no argument beyond its count.
+- Integers print in decimal as stored; GL arguments are stored as `uint32`.
+  Floats print as the shortest `%g` (6 to 9 significant digits) that reads back
+  to the same float32, including `-0` and `inf`, always with `.` as the decimal point;
+  NaN prints as `nan:0x<bits>`.
+- Note labels, keys and string values are double-quoted; `"`, `\` and bytes outside
+  0x20..0x7e print as `\xNN`.
+- Indentation (two spaces per open marker and per parent operation) is cosmetic and
+  capped at 32 levels, so the text grows linearly with records; `link` is
+  authoritative.
+
+| Record | Data arm |
+|---|---|
+| BACKEND, SKIP with a call | `backend` (`key=` on SKIP) |
+| SKIP without a call (inactive texture-set name), ARGUMENT | `binding` |
+| DEFINITION: ATTRIBUTE / PIPELINE / STATE / other | `attribute` / `state` / `backend` / `resource` |
+| INITIAL: STATE of the backend layer, SAMPLER, TEXTURE | `backend` |
+| INITIAL: PASS / other | `pass` / `state` |
+| OP: CREATE, BUFFER_UPLOAD | `resource` |
+| OP: the four draws / PASS / CLEAR | `draw` / `pass` / `clear` |
+| OP: VERTEX_INPUT, UBO, SEGMENT_BEGIN, SEGMENT_POLL | `binding` |
+| OP: other | `state` |
+
+Any change of names, fields or grammar bumps the `ntcapture` version.
 
 ## Shape strokes
 

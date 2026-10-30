@@ -8,6 +8,7 @@ A request waits as long as the engine needs; the caller's outer deadline bounds 
 Stdlib only (json + socket) — no pip deps. Python 3.8+.
 """
 import json
+import time
 from typing import Any, Dict, Optional
 
 from .transport import Transport
@@ -241,6 +242,53 @@ class DevApiClient:
         if scale is not None:
             params["scale"] = scale
         return self.result("capture.region", params)
+
+    # #endregion
+
+    # #region gfx.* wrappers — gfx command recording; every frame records into the host's ring while on.
+    def gfx_record(self, enabled: bool) -> Dict[str, Any]:
+        """Turn gfx recording on or off (off stores the frame in flight; the ring is never cleared). Result: {}."""
+        return self.result("gfx.record", {"enabled": enabled})
+
+    def gfx_frames(self) -> Dict[str, Any]:
+        """List the stored frames, oldest first. Result: {recording, frames:[{sequence,sim_frame,advanced,records,overflow}]}.
+
+        After off the frame in flight is still stored, so frame_not_ready is retried until it is.
+        """
+        return self._result_when_ready("gfx.frames", {})
+
+    def gfx_read(self, sequence: Optional[int] = None) -> Dict[str, Any]:
+        """Read one stored frame's capture text: the newest, or by a sequence from gfx.frames. Result: {sequence, sim_frame, text}.
+
+        The newest is frame_not_ready until a frame is stored (and after off until the frame in flight is); that is retried. Any other error raises at once.
+        """
+        return self._result_when_ready("gfx.read", {} if sequence is None else {"sequence": sequence})
+
+    def gfx_step_frame(self, sim_frame: int) -> int:
+        """The sequence of the stored frame in which the sim advanced to `sim_frame` (the frame of a step).
+
+        A step replies before its frame is stored, so gfx.frames is polled until that frame is listed. Raises
+        DevApiResultError when it cannot come: recording is off, or the newest stored frame is at or past
+        `sim_frame` without it (evicted, or it began before recording turned on).
+        """
+        while True:
+            listing = self.gfx_frames()
+            frames = listing["frames"]
+            for f in frames:
+                if f["advanced"] and f["sim_frame"] == sim_frame:
+                    return f["sequence"]
+            if not listing["recording"] or (frames and (frames[-1]["sim_frame"] - sim_frame) % 2**32 < 2**31):
+                raise DevApiResultError(f"gfx_step_frame: no stored frame advanced to sim frame {sim_frame}")
+            time.sleep(0.005)
+
+    def _result_when_ready(self, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        while True:
+            try:
+                return self.result(method, params)
+            except DevApiResultError as exc:
+                if "failed: frame_not_ready:" not in str(exc):
+                    raise
+            time.sleep(0.005)
 
     # #endregion
 

@@ -35,6 +35,7 @@ const char *nt_gfx_gl_call_name(uint32_t call) {
 }
 void nt_gfx_capture_request(void) {}
 nt_gfx_capture_view_t nt_gfx_capture_read(void) { return (nt_gfx_capture_view_t){0}; }
+void nt_gfx_capture_set_continuous(bool on) { NT_ASSERT(!on && "capture_set_continuous: the stub never begins a frame; link the real gfx"); }
 void nt_gfx_note_record(const char *label, const nt_gfx_note_field_t *fields, uint32_t count) {
     (void)label;
     (void)fields;

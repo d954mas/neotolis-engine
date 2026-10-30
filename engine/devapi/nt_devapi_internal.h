@@ -26,6 +26,7 @@ void devapi_add_null(cJSON *obj, const char *key);
    (a blind cast of an out-of-range/NaN/Inf double to unsigned is UB). On violation they fail
    with bad_params and the given message, else write the parsed value to *out. */
 bool nt_devapi_parse_u32_param_exact(const cJSON *node, uint32_t max, nt_devapi_error *err, const char *message, uint32_t *out);
+bool nt_devapi_parse_u53_param_exact(const cJSON *node, nt_devapi_error *err, const char *message, uint64_t *out);
 bool nt_devapi_parse_u16_param_exact(const cJSON *node, uint16_t max, nt_devapi_error *err, const char *message, uint16_t *out);
 /* A bot float: a number whose float form is finite (a finite double past FLT_MAX would narrow to inf
    and poison hit-tests / deltas). Fails with bad_params and message. */
@@ -54,8 +55,9 @@ void nt_devapi_deferred_reset(void);
 // #region lifecycle hooks
 /* Lifecycle hooks let an optional group plug into the core/transport without either naming the
    group: a compiled-out group registers nothing, so the core/net TUs carry zero of its symbols. */
-/* One transport poll and one tick, cleared on shutdown and set again after each init. The poll runs
-   before the tick. Reset hooks are registered through the public nt_devapi_register_reset. */
+/* One frame poll, one transport poll and one tick, cleared on shutdown and set again after each init,
+   run in that order. Reset hooks are registered through the public nt_devapi_register_reset. */
+void nt_devapi_set_frame_poll(nt_devapi_hook_fn fn);
 void nt_devapi_set_transport_poll(nt_devapi_hook_fn fn);
 void nt_devapi_set_tick(nt_devapi_hook_fn fn);
 void nt_devapi_run_reset_hooks(void);

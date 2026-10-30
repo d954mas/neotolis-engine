@@ -29,4 +29,7 @@ void nt_devapi_register_default(void) {
 #ifdef NT_DEVAPI_GROUP_RECORDER
     nt_devapi_register_recorder();
 #endif
+#ifdef NT_DEVAPI_GROUP_GFX
+    nt_devapi_register_gfx();
+#endif
 }

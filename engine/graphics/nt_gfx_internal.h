@@ -12,15 +12,15 @@ extern nt_gfx_device_info_t g_nt_gfx_device_info;
 // #region observation storage and owning-site counters
 #if NT_GFX_CAPTURE_ENABLED
 typedef struct {
-    bool request_pending;  /* the next frame records */
-    uint32_t marker_depth; /* tracked in every frame, recorded or not */
-    nt_gfx_event_t *events;
+    bool request_pending;   /* the next frame records */
+    uint32_t marker_depth;  /* tracked in every frame, recorded or not */
+    nt_gfx_event_t *base;   /* two halves of capacity records, one allocation */
+    nt_gfx_event_t *events; /* the half that records; the other holds done */
     uint32_t capacity;
-    nt_gfx_capture_view_t view;
-    nt_gfx_event_t *call; /* issued-call record being filled; NULL when not recording */
-    uint32_t link;        /* stamped on every reserved record: index + 1 of the open operation's OP record, or the executing command's */
-    uint32_t call_ints;
-    uint32_t call_floats;
+    nt_gfx_capture_view_t view; /* the recording frame, empty when none records; events unset */
+    nt_gfx_capture_view_t done; /* the last finished frame */
+    nt_gfx_event_t *call;       /* issued-call record being filled; NULL when not recording */
+    uint32_t link;              /* stamped on every reserved record: index + 1 of the open operation's OP record, or the executing command's */
 } nt_gfx_capture_state_t;
 
 extern nt_gfx_capture_state_t g_nt_gfx_capture;
@@ -41,8 +41,6 @@ static inline void nt_gfx_capture_open_call(nt_gfx_gl_call_t call) {
     if (event == NULL) {
         return;
     }
-    capture->call_ints = 0;
-    capture->call_floats = 0;
     event->kind = NT_GFX_EVENT_BACKEND;
     event->operation = (uint8_t)NT_GFX_OP_STATE;
     event->detail = (uint32_t)call;

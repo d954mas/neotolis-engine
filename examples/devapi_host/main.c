@@ -200,9 +200,9 @@ static void frame(void) {
 #endif
 
     nt_window_poll();
-    nt_gfx_begin_frame();
-    /* nt_devapi_update must run before nt_input_poll so injected rising edges survive the edge-clear. */
+    /* Between frames, before nt_gfx_begin_frame; before nt_input_poll so injected rising edges survive the edge-clear. */
     nt_devapi_update();
+    nt_gfx_begin_frame();
     nt_input_poll();
 
     /* Build the hud tree AFTER input_poll so this frame's (possibly injected) pointer drives the
@@ -296,6 +296,9 @@ int main(void) {
     nt_input_init();
     /* A real GL context so capture and the recorder read a non-blank frame. */
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+#ifdef NT_DEVAPI_GROUP_GFX
+    gfx_desc.capture_capacity = 16384; /* gfx.record: records of one frame */
+#endif
     nt_gfx_init(&gfx_desc);
 
     /* Obs wiring: host pushes frames into nt_metrics; the log ring captures nt_log_write for log.tail.

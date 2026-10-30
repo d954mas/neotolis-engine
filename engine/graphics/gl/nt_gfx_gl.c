@@ -67,6 +67,11 @@
 /* Longest reflected uniform name plus room for an expanded array index; asserted at link. */
 #define NT_GFX_GL_MAX_UNIFORM_NAME 256
 
+/* A backend cache skip: the GL call it skipped and its cache key, which arg_count counts. */
+#define NT_GFX_RECORD_CACHE_SKIP(op, call, ...)                                                                                                                                                        \
+    NT_GFX_RECORD(NT_GFX_EVENT_SKIP, op, const uint32_t key_[] = {__VA_ARGS__}; event->result = NT_GFX_RESULT_CACHE; event->detail = (call); event->arg_count = (uint8_t)NT_COUNTOF(key_);             \
+                  memcpy(event->data.backend.args, key_, sizeof(key_)))
+
 /* One entry per active sampler element; the unit is fixed at link. The location is needed
  * once, to write the unit. */
 typedef struct {
@@ -1141,7 +1146,7 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
         NT_GL(glUseProgram, program);
         s_gl_cache.program = program;
     } else {
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_PIPELINE, event->result = NT_GFX_RESULT_CACHE; event->detail = NT_GFX_GL_glUseProgram; event->data.backend.args[0] = program;);
+        NT_GFX_RECORD_CACHE_SKIP(NT_GFX_OP_PIPELINE, NT_GFX_GL_glUseProgram, program);
     }
 
     /* Depth test */
@@ -1881,7 +1886,7 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t layout_s
         NT_GL(glBindVertexArray, vi->vao);
         s_gl_cache.vao = vi->vao;
     } else {
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_VERTEX_INPUT, event->result = NT_GFX_RESULT_CACHE; event->detail = NT_GFX_GL_glBindVertexArray; event->data.backend.args[0] = vi->vao;);
+        NT_GFX_RECORD_CACHE_SKIP(NT_GFX_OP_VERTEX_INPUT, NT_GFX_GL_glBindVertexArray, vi->vao);
     }
     if (layout_slot == 0) {
         return;
@@ -1890,8 +1895,7 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t layout_s
     const GLuint buf = s_buffer_gl[buffer_backend];
     /* The tuple this VAO last received: a vertex input bound with one tuple never re-points. */
     if (vi->instance_layout == layout_slot && vi->instance_buffer == buf && vi->instance_offset == byte_offset) {
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_VERTEX_INPUT, event->result = NT_GFX_RESULT_CACHE; event->detail = NT_GFX_GL_glVertexAttribPointer; event->data.backend.args[0] = vi->vao;
-                      event->data.backend.args[1] = buf; event->data.backend.args[2] = byte_offset; event->data.backend.args[3] = layout_slot;);
+        NT_GFX_RECORD_CACHE_SKIP(NT_GFX_OP_VERTEX_INPUT, NT_GFX_GL_glVertexAttribPointer, vi->vao, buf, byte_offset, layout_slot);
         return;
     }
     const nt_gfx_gl_instance_layout_t *layout = &s_instance_layouts[layout_slot];
@@ -2007,7 +2011,7 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, cons
     if (target != GL_ARRAY_BUFFER || s_gl_cache.array_buffer != buf) {
         NT_GL(glBindBuffer, target, buf);
     } else {
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_BUFFER_UPLOAD, event->result = NT_GFX_RESULT_CACHE; event->detail = NT_GFX_GL_glBindBuffer; event->data.backend.args[0] = buf;);
+        NT_GFX_RECORD_CACHE_SKIP(NT_GFX_OP_BUFFER_UPLOAD, NT_GFX_GL_glBindBuffer, buf);
     }
     if (target == GL_ARRAY_BUFFER) {
         s_gl_cache.array_buffer = buf;
@@ -2024,7 +2028,7 @@ void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, 
     NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_buffers && s_buffer_gl[backend_handle] != 0 && "bind_uniform_buffer: requires a live buffer");
     const GLuint buf = s_buffer_gl[backend_handle];
     if (s_gl_cache.uniform_ranges[slot].offset == offset && s_gl_cache.uniform_ranges[slot].size == size) {
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UBO, event->result = NT_GFX_RESULT_CACHE; event->detail = NT_GFX_GL_glBindBufferRange; event->data.backend.args[0] = buf;);
+        NT_GFX_RECORD_CACHE_SKIP(NT_GFX_OP_UBO, NT_GFX_GL_glBindBufferRange, slot, offset, size);
         return;
     }
     NT_GL(glBindBufferRange, GL_UNIFORM_BUFFER, slot, buf, (GLintptr)offset, (GLsizeiptr)size);
@@ -2320,8 +2324,7 @@ static void bind_texture(uint32_t backend_handle, uint32_t slot) {
     NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_textures && s_texture_gl[backend_handle] != 0 && "bind_texture: requires a live texture");
     GLuint tex = s_texture_gl[backend_handle];
     if (s_gl_cache.bound_textures[slot] == tex) {
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_TEXTURE, event->detail = NT_GFX_GL_glBindTexture; event->result = NT_GFX_RESULT_CACHE; event->data.backend.args[0] = tex;
-                      event->data.backend.args[1] = slot;);
+        NT_GFX_RECORD_CACHE_SKIP(NT_GFX_OP_TEXTURE, NT_GFX_GL_glBindTexture, tex, slot);
         return; /* already bound to this slot */
     }
     GLenum unit = GL_TEXTURE0 + slot;
@@ -2376,8 +2379,7 @@ static void bind_sampler(uint32_t backend_handle, uint32_t slot) {
     NT_ASSERT(backend_handle != 0 && "bind_sampler: sampling without a sampler object");
     GLuint sampler = (GLuint)backend_handle;
     if (s_gl_cache.bound_samplers[slot] == sampler) {
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_SAMPLER, event->detail = NT_GFX_GL_glBindSampler; event->result = NT_GFX_RESULT_CACHE; event->data.backend.args[0] = sampler;
-                      event->data.backend.args[1] = slot;);
+        NT_GFX_RECORD_CACHE_SKIP(NT_GFX_OP_SAMPLER, NT_GFX_GL_glBindSampler, sampler, slot);
         return;
     }
     NT_GL(glBindSampler, slot, sampler);

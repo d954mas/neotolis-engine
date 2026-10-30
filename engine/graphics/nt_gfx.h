@@ -712,6 +712,7 @@ typedef union {
         uint8_t operation;   /* nt_gfx_operation_t */
         uint8_t object_kind; /* nt_gfx_object_kind_t */
         uint8_t result;      /* nt_gfx_result_t */
+        uint8_t arg_count;   /* issued calls: integer args (low nibble) and float values (high nibble) set */
         uint32_t object;
         uint32_t detail;
         uint32_t link;
@@ -766,6 +767,7 @@ typedef union {
 } nt_gfx_event_t;
 
 _Static_assert(sizeof(nt_gfx_event_t) == 104, "capture record layout must remain explicit");
+_Static_assert(offsetof(nt_gfx_event_t, object) == 8, "arg_count fills the header padding");
 _Static_assert(NT_GFX_OP_COUNT <= 256, "operation is one byte in a record");
 
 /* detail of INITIAL/STATE records: which layer's inherited state they snapshot. */
@@ -779,7 +781,7 @@ typedef struct {
     const nt_gfx_event_t *events;
     uint32_t count;
     uint32_t execute_begin, execute_end; /* records of the end_frame stream execution, frame storage uploads included; 0 until it ran */
-    nt_gfx_counters_t counters;          /* the finalized frame's, even after later unrecorded frames; frame_sequence 0 while recording */
+    nt_gfx_counters_t counters;          /* the finished frame's */
 } nt_gfx_capture_view_t;
 
 #if NT_GFX_CAPTURE_ENABLED
@@ -788,9 +790,13 @@ const char *nt_gfx_gl_call_name(uint32_t call);
 /* One-shot: the next frame records, starting at the begin_frame that opens it.
  * Requires nonzero init capacity. The stub is inert. */
 void nt_gfx_capture_request(void);
-/* Metadata by value; the event prefix is immutable, except OP records of operations still in
- * progress, until the begin_frame that starts the next requested recording, or shutdown, so read
- * right after begin_frame. Copy count records and metadata to keep. Empty views have events=NULL. */
+/* While on, every frame from the next begin_frame records; off lets the frame recording now finish.
+ * On requires nonzero init capacity; the stub asserts on it. Init and shutdown turn it off. */
+void nt_gfx_capture_set_continuous(bool on);
+/* The last finished recorded frame (closed by a begin_frame), complete with its post-render and
+ * between-frame work. Its records stay valid until the begin_frame that finishes the next recorded
+ * frame, or shutdown, so a continuous capture is readable during the whole next frame. Copy count
+ * records and metadata to keep. Empty (events=NULL) before any recorded frame finishes. */
 nt_gfx_capture_view_t nt_gfx_capture_read(void);
 #endif
 
@@ -873,7 +879,8 @@ typedef struct {
     bool context_restored;
     bool initialized;
 #if NT_GFX_CAPTURE_ENABLED
-    bool capture_recording; /* this frame records; read by NT_GFX_NOTE */
+    bool capture_recording;  /* this frame records; read by NT_GFX_NOTE */
+    bool capture_continuous; /* every frame records; nt_gfx_capture_set_continuous */
 #endif
 } nt_gfx_t;
 

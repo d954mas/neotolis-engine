@@ -25,5 +25,6 @@ void nt_devapi_register_obs(void);
 void nt_devapi_register_entity_write(void);
 void nt_devapi_register_capture(void);
 void nt_devapi_register_recorder(void);
+void nt_devapi_register_gfx(void);
 
 #endif /* NT_DEVAPI_GROUPS_H */
