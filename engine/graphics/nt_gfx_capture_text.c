@@ -679,14 +679,16 @@ static bool read_float(line_t *l, float *out) {
     const char *point = localeconv()->decimal_point; // NOLINT(concurrency-mt-unsafe): read only, like the formatter's strtof
     const size_t point_len = strlen(point);
     const bool word = (n == 3 && memcmp(start, "inf", 3) == 0) || (n == 4 && memcmp(start, "-inf", 4) == 0);
-    char buf[64];
+    char buf[64]; /* 32 token bytes, the one '.' of them replaced by at most 8 */
     size_t len = 0;
+    bool point_seen = false;
     if (n == 0 || n > 32 || point_len > 8) {
         return fail(l, "bad float");
     }
     for (size_t i = 0; i < n; i++) {
         const char c = start[i];
-        if (c == '.' && !word) {
+        if (c == '.' && !word && !point_seen) {
+            point_seen = true;
             memcpy(buf + len, point, point_len);
             len += point_len;
         } else if (word || (c >= '0' && c <= '9') || c == '-' || c == '+' || c == 'e') {
@@ -1075,7 +1077,7 @@ static uint32_t read_records(line_t *l, const char **at, const char *end, nt_gfx
 }
 
 nt_gfx_capture_parsed_t nt_gfx_capture_parse(const char *text, size_t len, nt_gfx_event_t *events, uint32_t cap) {
-    NT_ASSERT((text != NULL || len == 0) && (events != NULL || cap == 0));
+    NT_ASSERT((text != NULL || len == 0) && events != NULL);
     nt_gfx_capture_parsed_t r = {0};
     if (len == 0) {
         r.error = "empty document";

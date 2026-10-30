@@ -1395,7 +1395,9 @@ counter <name>=<n>                       (one line per nonzero counter)
   `detail` prints as `call=<glCall>` on BACKEND
   and backend SKIP records, `resource=<KIND>` on backend resource DEFINITION records,
   `layer=FRONTEND|BACKEND` on INITIAL/STATE, `joined=@<index>` on a merged draw (the
-  draw it joined), `detail=<n>` otherwise, and is omitted when 0.
+  draw it joined), `detail=<n>` otherwise. `resource=` and `layer=` always print;
+  the others are omitted when 0. `link` and `joined` name earlier records: an OP
+  record, a draw for `joined`. Lines end with `\n` alone.
 - Fields print as `name=value` for the data arm of the record (table below); zero
   fields are omitted, and arrays print up to their last nonzero element. Issued-call
   arguments print exactly `arg_count` elements, so a zero argument stays visible
@@ -1445,8 +1447,8 @@ rule decides what survives an error, reported as a static message and a byte off
 - an error in a record line, an unknown name included, keeps the records before it,
   with the execution range clipped to them; so do a missing last newline, fewer lines
   than `records=` and an array of fewer than `records=` elements (`cap`);
-- a line after the last record that does not open a document is an error after a
-  complete frame.
+- a line after the last record that does not open a document (a blank line, a `\r`
+  ending included) is an error after a complete frame.
 
 `overflow=1` is data, not an error. Parsing the formatter's text gives back the same
 record bytes, and formatting them gives back the same text; other accepted input

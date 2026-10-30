@@ -166,6 +166,8 @@ static nt_gfx_capture_view_t read_capture(void) {
     const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(text, len, parsed, capture.count);
     TEST_ASSERT_NULL_MESSAGE(r.error, r.error);
     TEST_ASSERT_EQUAL_UINT32(capture.count, r.view.count);
+    TEST_ASSERT_TRUE(capture.execute_begin == r.view.execute_begin && capture.execute_end == r.view.execute_end);
+    TEST_ASSERT_TRUE(capture.overflow == r.view.overflow && r.view.platform == NT_GFX_CAPTURE_NATIVE);
     TEST_ASSERT_EQUAL_MEMORY(capture.events, parsed, (size_t)capture.count * sizeof(*parsed));
     TEST_ASSERT_EQUAL_MEMORY(&capture.counters, &r.view.counters, sizeof(capture.counters));
     free(parsed);

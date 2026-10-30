@@ -406,6 +406,13 @@ static void test_bad_text_reports_where_and_keeps_a_prefix(void) {
         {NT_HEADER_ "0 NOTE label=\"a\\x00\"\n", "\\x00", 0, 0, 4},
         {NT_HEADER_ "0 OP op=CLEAR clear_depth=0x1p3\n", "0x1p3", 0, 0, 4},
         {NT_HEADER_ "1 OP op=PASS\n", "1 OP", 0, 0, 4},
+        {NT_HEADER_ "0 OP op=SCISSOR integers=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]\n", "15]", 0, 0, 4},
+        {NT_HEADER_ "0 NOTE label=\"n\"\n1 NOTE_FIELD key=\"AAAAAAAAAAAAAAAAAAAAAAAX\" type=U32 value=1\n", "X\"", 0, 1, 4},
+        {NT_HEADER_ "0 OP op=CLEAR clear_depth=nan:0x7f800000\n", "nan:", 0, 0, 4},
+        {NT_HEADER_ "0 OP op=CLEAR clear_depth=1..5\n", "1..5", 0, 0, 4},
+        {NT_HEADER_ "counter frame_bytes.99=5\n0 OP op=PASS\n1 OP op=PASS\n", "99=", 2, -1, 4},
+        {"ntcapture 2\nframe sequence=1 platform=native records=0 overflow=2 execute=0..0\n", "2 exec", 0, -1, 4},
+        {"ntcapture 2\nframe sequence=1 platform=mars records=0 overflow=0 execute=0..0\n", "mars", 0, -1, 4},
     };
     for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
         nt_gfx_event_t ev[4];
@@ -421,6 +428,13 @@ static void test_bad_text_reports_where_and_keeps_a_prefix(void) {
         }
         TEST_ASSERT_EQUAL_UINT64_MESSAGE(len, r.next, rows[i].text);
     }
+    /* A valid prefix keeps the execution range inside its records. */
+    const char *cut = "ntcapture 2\nframe sequence=1 platform=native records=3 overflow=0 execute=1..3\n0 OP op=PASS\n1 OP op=PASS\n2 OP op=NO\n";
+    nt_gfx_event_t ev[3];
+    const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(cut, strlen(cut), ev, 3);
+    TEST_ASSERT_EQUAL_UINT32(2, r.view.count);
+    TEST_ASSERT_EQUAL_UINT32(1, r.view.execute_begin);
+    TEST_ASSERT_EQUAL_UINT32(2, r.view.execute_end);
 }
 
 /* Real frames saved by gfx_demo from the web host: each document parses whole and formats to its own bytes on native. */
