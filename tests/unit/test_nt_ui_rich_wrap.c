@@ -88,7 +88,21 @@ static void test_solve_rewinds_atom_scratch(void) {
     const size_t after = nt_mem_scratch_used();
     TEST_ASSERT_TRUE_MESSAGE(after > before, "solved atoms and links stay allocated");
     TEST_ASSERT_TRUE_MESSAGE(nt_mem_scratch_high_water_mark() > after, "atoms allocated above the final head were released");
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_rich_test_line_count(s_fx.ctx));
+
+    /* Reusing the released range must not touch the solve's output (solved atoms below the mark). */
+    const uint32_t n = nt_ui_rich_test_atom_count(s_fx.ctx);
+    nt_ui_rich_test_atom_t snap[8];
+    TEST_ASSERT_TRUE(n > 0U && n <= 8U);
+    for (uint32_t i = 0; i < n; i++) {
+        snap[i] = nt_ui_rich_test_atom(s_fx.ctx, i);
+    }
+    const size_t reuse = nt_mem_scratch_high_water_mark() - after;
+    memset(nt_mem_scratch_alloc(reuse, 1U), 0xFF, reuse);
+    for (uint32_t i = 0; i < n; i++) {
+        const nt_ui_rich_test_atom_t a = nt_ui_rich_test_atom(s_fx.ctx, i);
+        TEST_ASSERT_TRUE_MESSAGE(a.kind == snap[i].kind && a.line == snap[i].line && a.x == snap[i].x && a.y == snap[i].y && a.w == snap[i].w && a.h == snap[i].h,
+                                 "solved atoms survive reuse of the rewound range");
+    }
 }
 
 /* Return the icon atom's solved y for a given valign (one wide line). */

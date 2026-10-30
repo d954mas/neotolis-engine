@@ -10,7 +10,7 @@ target_link_libraries(ui_3d_demo PRIVATE
     nt_material nt_shared nt_atlas
     nt_sprite_renderer nt_text_renderer nt_font nt_ui
     nt_shape_renderer
-    nt_render nt_hash nt_mem_scratch nt_debug_overlay nt_metrics
+    nt_render nt_hash nt_memory nt_debug_overlay nt_metrics
 )
 # Generated per-pack asset headers from builder
 target_include_directories(ui_3d_demo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")

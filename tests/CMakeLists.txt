@@ -27,7 +27,7 @@ if(NOT EMSCRIPTEN)
         nt_atlas nt_ui nt_ui_rich nt_gfx nt_gfx_fake nt_font nt_text_renderer
         nt_resource nt_sprite_renderer nt_mesh_renderer nt_debug_overlay
         nt_skinned_mesh_renderer
-        nt_shape_renderer nt_postfx_blur nt_mem_scratch nt_metrics
+        nt_shape_renderer nt_postfx_blur nt_memory nt_metrics
         nt_builder
     )
     foreach(_lib IN LISTS NT_TEST_ACCESS_LIBS)
@@ -631,7 +631,7 @@ if(NOT EMSCRIPTEN)
     add_executable(test_asteroids_scene unit/test_asteroids_scene.c)
     target_link_libraries(test_asteroids_scene PRIVATE
         nt_text_renderer nt_font nt_app_stub nt_input_stub nt_window_stub
-        nt_ui nt_atlas nt_sprite_renderer nt_mem_scratch
+        nt_ui nt_atlas nt_sprite_renderer nt_memory
         nt_resource nt_material nt_hash nt_math nt_time nt_shared nt_core nt_version nt_platform
         nt_gfx_fake nt_clipboard_stub nt_basisu_transcoder_stub nt_meshwire_stub nt_http_stub nt_fs_stub nt_log_stub unity
     )
@@ -650,7 +650,7 @@ if(NOT EMSCRIPTEN)
         nt_core nt_version nt_app_stub nt_input_stub nt_window_stub nt_math nt_log_stub nt_time nt_resource
         nt_material nt_shared nt_atlas nt_skeletal nt_skeletal_assets
         nt_sprite_renderer nt_text_renderer nt_font nt_ui nt_shape_renderer
-        nt_render nt_hash nt_mem_scratch nt_entity nt_transform_comp nt_drawable_comp
+        nt_render nt_hash nt_memory nt_entity nt_transform_comp nt_drawable_comp
         nt_mesh_comp nt_material_comp nt_skin_comp nt_skeletal_gpu
         nt_skinned_mesh_renderer nt_gfx_fake nt_http_stub nt_fs_stub nt_platform
         nt_basisu_transcoder_stub nt_meshwire_stub unity
@@ -1423,10 +1423,10 @@ if(NOT EMSCRIPTEN)
     # test_ui_radial registers in the nt_ui walker-test group below: it needs the
     # shared ui_walker_fixture + full UI libs.
 
-    # --- nt_mem_scratch / nt_arena tests ---
+    # --- nt_memory / nt_arena tests ---
     add_executable(test_nt_mem_scratch unit/test_nt_mem_scratch.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_nt_mem_scratch PRIVATE
-        nt_mem_scratch nt_core nt_log_stub unity
+        nt_memory nt_core nt_log_stub unity
     )
     target_include_directories(test_nt_mem_scratch PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_nt_mem_scratch PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -1434,7 +1434,7 @@ if(NOT EMSCRIPTEN)
 
     add_executable(test_nt_arena unit/test_nt_arena.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_nt_arena PRIVATE
-        nt_mem_scratch nt_core nt_log_stub unity
+        nt_memory nt_core nt_log_stub unity
     )
     target_include_directories(test_nt_arena PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_setup_test_target(test_nt_arena)
@@ -1442,7 +1442,7 @@ if(NOT EMSCRIPTEN)
     # --- nt_ui element_data macro tests (exercises macros -> scratch path) ---
     add_executable(test_nt_ui_element_data unit/test_nt_ui_element_data.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_nt_ui_element_data PRIVATE
-        nt_ui nt_mem_scratch nt_core
+        nt_ui nt_memory nt_core
         nt_gfx_fake nt_basisu_transcoder_stub nt_input_stub nt_resource nt_font nt_material nt_atlas
         nt_sprite_renderer nt_text_renderer nt_hash nt_pool
         nt_http_stub nt_fs_stub nt_log_stub unity

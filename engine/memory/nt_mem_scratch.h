@@ -5,8 +5,8 @@
 #include <stdint.h>
 
 /* Global nt_arena_t (memory/nt_arena.h) the engine and game share, reset every frame.
- * All allocations live until the next reset -- pointers from a prior frame are stale.
- * No per-alloc free.
+ * Allocations live until the next reset or a rewind below them -- pointers from a
+ * prior frame are stale. No per-alloc free.
  *
  * Frame loop placement:
  *

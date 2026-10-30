@@ -11,7 +11,7 @@
 
 // #region arena
 void nt_arena_init(nt_arena_t *arena, void *base, size_t size) {
-    NT_ASSERT(base != NULL && size > 0 && "nt_arena_init: base must be non-NULL and size > 0");
+    NT_ASSERT(base != NULL && size > 0 && "nt_arena_init: base must be non-NULL (malloc failed?) and size > 0");
     /* Offsets are aligned relative to base, so base carries the max_align_t guarantee. */
     NT_ASSERT(((uintptr_t)base & (_Alignof(max_align_t) - 1U)) == 0 && "nt_arena_init: base must be aligned to max_align_t");
     *arena = (nt_arena_t){.base = (uint8_t *)base, .size = size};
@@ -22,7 +22,7 @@ void *nt_arena_alloc(nt_arena_t *arena, size_t size, size_t align) {
     NT_ASSERT(size > 0 && "nt_arena_alloc: size must be > 0");
     /* used <= size, so the align-up cannot wrap; an uninitialized arena (size 0) fails here. */
     const size_t aligned = NT_ALIGN_UP(arena->used, align);
-    NT_ASSERT(aligned <= arena->size && size <= arena->size - aligned && "nt_arena_alloc: out of space; raise the arena size");
+    NT_ASSERT(aligned <= arena->size && size <= arena->size - aligned && "nt_arena_alloc: out of space (or arena not initialized); raise the arena size");
     arena->used = aligned + size;
     if (arena->used > arena->high_water) {
         arena->high_water = arena->used;

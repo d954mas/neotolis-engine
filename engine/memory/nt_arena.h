@@ -4,16 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Fixed-capacity bump arena over owner-provided memory. No growth, no per-alloc free;
- * reset() drops everything, rewind() drops everything allocated after a mark.
- * Fields are readable; only the functions below change them.
- *
- *   size_t mark = arena.used;
- *   tmp = nt_arena_alloc(&arena, n, 4);   // valid until rewind/reset
- *   nt_arena_rewind(&arena, mark);
- *
- * A rewind also frees whatever other code allocated from this arena after the
- * mark: rewind only around allocations whose consumers end before it. */
+/* Fixed-capacity bump arena over owner-provided memory; fields are read-only to callers.
+ * A mark is an earlier `used`; rewinding to it frees everything allocated after it, by any caller. */
 typedef struct nt_arena {
     uint8_t *base;
     size_t size;

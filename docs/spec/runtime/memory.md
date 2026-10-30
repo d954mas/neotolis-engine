@@ -61,13 +61,14 @@ Lifetime: from allocation until the rewind that closes its scope.
 
 A mark is an earlier `used` of the same arena. `nt_arena_rewind(arena, mark)`
 (`nt_mem_scratch_rewind(mark)` with `nt_mem_scratch_used()` as the mark) returns
-the head to the mark in O(1). The mark must not be past the current head, which
-also rejects a mark taken before a reset; marks nest. A rewind frees everything
-allocated after the mark by any caller, so it closes only a scope whose
-allocations are consumed before it, and code that runs inside the scope must not
-keep its own allocations past it. Example: the rich-text solve rewinds its glyph
-atoms after placing them, and a game `measure_fn` called inside the solve loses
-its scratch allocations with them.
+the head to the mark in O(1); marks nest. A mark is invalid after a reset or an
+earlier rewind below it; the assert catches one only while it lies past the
+current head. A rewind frees everything allocated after the mark by any caller,
+so it closes only a scope whose allocations are consumed before it. Code that
+runs inside the scope must not allocate from the arena; the owner of the scope
+asserts it. Example: the rich-text solve rewinds its glyph atoms after placing
+them, and asserts that a game `measure_fn` called inside the solve allocated no
+scratch.
 
 ### Frame scratch memory
 

@@ -1591,7 +1591,10 @@ static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float container_w, rich
             a->link_id = run->link_id;
         } else { /* NT_RICH_ATOM_OBJECT: reserve the box via the run's measure_fn. */
             NT_ASSERT(run->object_measure != NULL && "rich object: measure_fn must be non-NULL");
+            const size_t scratch_used = nt_mem_scratch_used();
             const nt_ui_rich_object_measure_t m = run->object_measure(run->object_user);
+            /* The solve rewinds its scratch, so a measure_fn allocation would die before draw_fn. */
+            NT_ASSERT(nt_mem_scratch_used() == scratch_used && "rich object: measure_fn must not allocate scratch");
             /* measure_fn is game-trusted: fail early on a garbage box. */
             NT_ASSERT(isfinite(m.width) && isfinite(m.height) && isfinite(m.ascent) && m.width >= 0.0F && m.height >= 0.0F && "rich object: measure_fn must return finite, non-negative width/height");
             const float obj_w = m.width;

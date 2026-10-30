@@ -92,8 +92,8 @@ whom to whom, and name the free function or destroy event.
 
 Scratch-backed public results are backed by `nt_mem_scratch`, are valid exactly
 until the next `nt_mem_scratch_reset()`, and must not be freed or stored beyond
-that reset. An API that rewinds scratch says so, and allocations made inside
-its scope (callbacks it runs) end at that rewind. Do not describe them as valid "until end of frame"; reset placement
+that reset. A callback that runs inside a scratch rewind scope says so and
+must not allocate scratch. Do not describe them as valid "until end of frame"; reset placement
 is the contract. Full scratch ownership rules live in
 [Memory Policy](../runtime/memory.md).
 
