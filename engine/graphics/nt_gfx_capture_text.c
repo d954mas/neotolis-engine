@@ -3,7 +3,6 @@
 #include "core/nt_assert.h"
 #include "log/nt_log.h"
 
-#include <ctype.h>
 #include <inttypes.h>
 #include <math.h>
 #include <stdarg.h>
@@ -101,7 +100,8 @@ static void put_float(text_t *t, float f) {
     /* The locale's separator is the one run of other bytes ("," or "/" or multibyte): it becomes '.'. */
     char *out = digits;
     for (const char *c = digits; *c != '\0'; c++) {
-        if (isalnum((unsigned char)*c) || *c == '-' || *c == '+') {
+        const unsigned char b = (unsigned char)*c; /* ASCII by value: isalnum follows LC_CTYPE */
+        if ((b >= '0' && b <= '9') || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || b == '-' || b == '+') {
             *out++ = *c;
         } else if (out == digits || out[-1] != '.') {
             *out++ = '.';
