@@ -92,38 +92,42 @@ typedef struct {
     uint8_t size;    /* list capacity; 1 for scalars */
 } field_t;
 
-#define NT_FIELD_(arm, member, type, size) {#member, (uint16_t)offsetof(nt_gfx_event_t, data.arm.member), (type), (size)}
-static const field_t k_backend[] = {NT_FIELD_(backend, args, F_U32S, 12), NT_FIELD_(backend, values, F_F32S, 4), NT_FIELD_(backend, bytes, F_U64, 1)};
-static const field_t k_key[] = {{"key", (uint16_t)offsetof(nt_gfx_event_t, data.backend.args), F_U32S, 12}, NT_FIELD_(backend, values, F_F32S, 4), NT_FIELD_(backend, bytes, F_U64, 1)};
+#define NT_FIELD_(arm, member, type, size) #member, (uint16_t)offsetof(nt_gfx_event_t, data.arm.member), (type), (size)
+static const field_t k_backend[] = {{NT_FIELD_(backend, args, F_U32S, 12)}, {NT_FIELD_(backend, values, F_F32S, 4)}, {NT_FIELD_(backend, bytes, F_U64, 1)}};
+static const field_t k_key[] = {{"key", (uint16_t)offsetof(nt_gfx_event_t, data.backend.args), F_U32S, 12}, {NT_FIELD_(backend, values, F_F32S, 4)}, {NT_FIELD_(backend, bytes, F_U64, 1)}};
 static const field_t k_resource[] = {
-    NT_FIELD_(resource, size, F_U64, 1),  NT_FIELD_(resource, backend, F_U32, 1), NT_FIELD_(resource, related, F_U32S, 3), NT_FIELD_(resource, type, F_U32, 1),   NT_FIELD_(resource, usage, F_U32, 1),
-    NT_FIELD_(resource, width, F_U32, 1), NT_FIELD_(resource, height, F_U32, 1),  NT_FIELD_(resource, format, F_U32, 1),   NT_FIELD_(resource, levels, F_U32, 1), NT_FIELD_(resource, flags, F_U32, 1),
+    {NT_FIELD_(resource, size, F_U64, 1)},   {NT_FIELD_(resource, backend, F_U32, 1)}, {NT_FIELD_(resource, related, F_U32S, 3)}, {NT_FIELD_(resource, type, F_U32, 1)},
+    {NT_FIELD_(resource, usage, F_U32, 1)},  {NT_FIELD_(resource, width, F_U32, 1)},   {NT_FIELD_(resource, height, F_U32, 1)},   {NT_FIELD_(resource, format, F_U32, 1)},
+    {NT_FIELD_(resource, levels, F_U32, 1)}, {NT_FIELD_(resource, flags, F_U32, 1)},
 };
-static const field_t k_draw[] = {NT_FIELD_(draw, first, F_U32, 1), NT_FIELD_(draw, count, F_U32, 1), NT_FIELD_(draw, vertices, F_U32, 1), NT_FIELD_(draw, instances, F_U32, 1),
-                                 NT_FIELD_(draw, vertex_input, F_U32, 1)};
-static const field_t k_binding[] = {NT_FIELD_(binding, secondary, F_U32, 1), NT_FIELD_(binding, name, F_U32, 1), NT_FIELD_(binding, slot, F_U32, 1), NT_FIELD_(binding, offset, F_U32, 1),
-                                    NT_FIELD_(binding, size, F_U32, 1)};
+static const field_t k_draw[] = {
+    {NT_FIELD_(draw, first, F_U32, 1)}, {NT_FIELD_(draw, count, F_U32, 1)}, {NT_FIELD_(draw, vertices, F_U32, 1)}, {NT_FIELD_(draw, instances, F_U32, 1)}, {NT_FIELD_(draw, vertex_input, F_U32, 1)}};
+static const field_t k_binding[] = {{NT_FIELD_(binding, secondary, F_U32, 1)},
+                                    {NT_FIELD_(binding, name, F_U32, 1)},
+                                    {NT_FIELD_(binding, slot, F_U32, 1)},
+                                    {NT_FIELD_(binding, offset, F_U32, 1)},
+                                    {NT_FIELD_(binding, size, F_U32, 1)}};
 static const field_t k_pass[] = {
-    NT_FIELD_(pass, target, F_U32, 1),      NT_FIELD_(pass, color, F_F32S, 4),         NT_FIELD_(pass, depth, F_F32, 1),          NT_FIELD_(pass, load_color, F_BOOL, 1),
-    NT_FIELD_(pass, load_depth, F_BOOL, 1), NT_FIELD_(pass, discard_color, F_BOOL, 1), NT_FIELD_(pass, discard_depth, F_BOOL, 1),
+    {NT_FIELD_(pass, target, F_U32, 1)},      {NT_FIELD_(pass, color, F_F32S, 4)},         {NT_FIELD_(pass, depth, F_F32, 1)},          {NT_FIELD_(pass, load_color, F_BOOL, 1)},
+    {NT_FIELD_(pass, load_depth, F_BOOL, 1)}, {NT_FIELD_(pass, discard_color, F_BOOL, 1)}, {NT_FIELD_(pass, discard_depth, F_BOOL, 1)},
 };
-static const field_t k_clear[] = {NT_FIELD_(clear, clear_color, F_F32S, 4), NT_FIELD_(clear, clear_depth, F_F32, 1), NT_FIELD_(clear, color, F_BOOL, 1), NT_FIELD_(clear, depth, F_BOOL, 1)};
+static const field_t k_clear[] = {{NT_FIELD_(clear, clear_color, F_F32S, 4)}, {NT_FIELD_(clear, clear_depth, F_F32, 1)}, {NT_FIELD_(clear, color, F_BOOL, 1)}, {NT_FIELD_(clear, depth, F_BOOL, 1)}};
 static const field_t k_attribute[] = {
-    NT_FIELD_(attribute, buffer, F_U32, 1), NT_FIELD_(attribute, offset, F_U32, 1), NT_FIELD_(attribute, stride, F_U32, 1),     NT_FIELD_(attribute, location, F_U32, 1),
-    NT_FIELD_(attribute, type, F_U32, 1),   NT_FIELD_(attribute, count, F_U32, 1),  NT_FIELD_(attribute, normalized, F_U32, 1), NT_FIELD_(attribute, divisor, F_U32, 1),
+    {NT_FIELD_(attribute, buffer, F_U32, 1)}, {NT_FIELD_(attribute, offset, F_U32, 1)}, {NT_FIELD_(attribute, stride, F_U32, 1)},     {NT_FIELD_(attribute, location, F_U32, 1)},
+    {NT_FIELD_(attribute, type, F_U32, 1)},   {NT_FIELD_(attribute, count, F_U32, 1)},  {NT_FIELD_(attribute, normalized, F_U32, 1)}, {NT_FIELD_(attribute, divisor, F_U32, 1)},
 };
-static const field_t k_state[] = {NT_FIELD_(state, integers, F_U32S, 14), NT_FIELD_(state, values, F_F32S, 6)};
+static const field_t k_state[] = {{NT_FIELD_(state, integers, F_U32S, 14)}, {NT_FIELD_(state, values, F_F32S, 6)}};
 #undef NT_FIELD_
 
-#define NT_ARM_(fields, member) {(fields), NT_COUNT_(fields), sizeof(((nt_gfx_event_t *)NULL)->data.member)}
+#define NT_ARM_(fields, member) (fields), NT_COUNT_(fields), sizeof(((nt_gfx_event_t *)NULL)->data.member)
 static const struct {
     const field_t *fields;
     uint32_t count;
     size_t bytes; /* data bytes the arm may set; the rest stays zero */
 } k_arms[ARM_COUNT] = {
-    [ARM_BACKEND] = NT_ARM_(k_backend, backend), [ARM_KEY] = NT_ARM_(k_key, backend), [ARM_RESOURCE] = NT_ARM_(k_resource, resource), [ARM_DRAW] = NT_ARM_(k_draw, draw),
-    [ARM_BINDING] = NT_ARM_(k_binding, binding), [ARM_PASS] = NT_ARM_(k_pass, pass),  [ARM_CLEAR] = NT_ARM_(k_clear, clear),          [ARM_ATTRIBUTE] = NT_ARM_(k_attribute, attribute),
-    [ARM_STATE] = NT_ARM_(k_state, state),
+    [ARM_BACKEND] = {NT_ARM_(k_backend, backend)}, [ARM_KEY] = {NT_ARM_(k_key, backend)}, [ARM_RESOURCE] = {NT_ARM_(k_resource, resource)}, [ARM_DRAW] = {NT_ARM_(k_draw, draw)},
+    [ARM_BINDING] = {NT_ARM_(k_binding, binding)}, [ARM_PASS] = {NT_ARM_(k_pass, pass)},  [ARM_CLEAR] = {NT_ARM_(k_clear, clear)},          [ARM_ATTRIBUTE] = {NT_ARM_(k_attribute, attribute)},
+    [ARM_STATE] = {NT_ARM_(k_state, state)},
 };
 #undef NT_ARM_
 
@@ -212,15 +216,15 @@ static const struct {
     uint16_t offset;
     uint8_t bytes;
 } k_counters[] = {
-#define NT_COUNTER_(member) {#member, (uint16_t)offsetof(nt_gfx_counters_t, member), (uint8_t)sizeof(((nt_gfx_counters_t *)NULL)->member)}
-    NT_COUNTER_(vertices),
-    NT_COUNTER_(indices),
-    NT_COUNTER_(instances),
-    NT_COUNTER_(buffer_upload_calls),
-    NT_COUNTER_(buffer_upload_bytes),
-    NT_COUNTER_(texture_upload_calls),
-    NT_COUNTER_(texture_upload_bytes),
-    NT_COUNTER_(stream_bytes),
+#define NT_COUNTER_(member) #member, (uint16_t)offsetof(nt_gfx_counters_t, member), (uint8_t)sizeof(((nt_gfx_counters_t *)NULL)->member)
+    {NT_COUNTER_(vertices)},
+    {NT_COUNTER_(indices)},
+    {NT_COUNTER_(instances)},
+    {NT_COUNTER_(buffer_upload_calls)},
+    {NT_COUNTER_(buffer_upload_bytes)},
+    {NT_COUNTER_(texture_upload_calls)},
+    {NT_COUNTER_(texture_upload_bytes)},
+    {NT_COUNTER_(stream_bytes)},
 #undef NT_COUNTER_
 };
 
@@ -339,7 +343,9 @@ static void put_fields(text_t *t, const nt_gfx_event_t *e, arm_t arm) {
         switch ((field_type_t)f->type) {
         case F_U32:
         case F_BOOL: {
-            const uint32_t v = f->type == F_BOOL ? (uint32_t)*(const bool *)at : list_slot(at, 0);
+            bool flag = false;
+            memcpy(&flag, at, sizeof(flag));
+            const uint32_t v = f->type == F_BOOL ? (uint32_t)flag : list_slot(at, 0);
             if (v != 0) {
                 put(t, " %s=%" PRIu32, f->name, v);
             }
