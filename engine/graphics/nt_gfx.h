@@ -365,7 +365,7 @@ typedef struct {
      * The others: 4 per stream shapes draw from, the sprite layouts and the game's own. */
     uint16_t max_vertex_inputs;
     uint16_t max_render_targets; /* default: 16 */
-    uint32_t capture_capacity;   /* event records, default: 0, below 2^24; allocated once at init */
+    uint32_t capture_capacity;   /* event records of one frame, default: 0, below 2^24; init allocates two halves */
     uint32_t stream_capacity;    /* draw-phase command bytes of one frame, default: 32 KiB; allocated once at init */
     /* Frame storage bytes per frame by stream (NT_GFX_FRAME_*), default: 0 (disabled) except the
      * uniform stream, which every pass's Globals block uses: 16 KiB;
@@ -791,7 +791,7 @@ const char *nt_gfx_gl_call_name(uint32_t call);
  * Requires nonzero init capacity. The stub is inert. */
 void nt_gfx_capture_request(void);
 /* While on, every frame from the next begin_frame records; off lets the frame recording now finish.
- * On requires nonzero init capacity; the stub asserts on it. Init and shutdown turn it off. */
+ * On requires nonzero init capacity; the stub is inert. Init and shutdown turn it off. */
 void nt_gfx_capture_set_continuous(bool on);
 /* The last finished recorded frame (closed by a begin_frame), complete with its post-render and
  * between-frame work. Its records stay valid until the begin_frame that finishes the next recorded
