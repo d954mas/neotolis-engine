@@ -382,6 +382,7 @@ void nt_gfx_marker_push(const char *name) {
     g_nt_gfx_capture.marker_depth++;
     nt_gfx_event_t *event = nt_gfx_capture_reserve();
     if (event != NULL) {
+        *event = (nt_gfx_event_t){0}; /* the label overlays link, which reserve set */
         event->note.kind = NT_GFX_EVENT_MARKER_PUSH;
         copy_note_text(event->note.label, sizeof(event->note.label), name);
         g_nt_gfx_capture.view.count++;
@@ -393,6 +394,7 @@ void nt_gfx_marker_pop(void) {
     g_nt_gfx_capture.marker_depth--;
     nt_gfx_event_t *event = nt_gfx_capture_reserve();
     if (event != NULL) {
+        *event = (nt_gfx_event_t){0};
         event->kind = NT_GFX_EVENT_MARKER_POP;
         g_nt_gfx_capture.view.count++;
     }
@@ -830,6 +832,9 @@ void nt_gfx_begin_frame(void) {
         capture->done = capture->view;
         capture->done.counters = g_nt_gfx.last_frame;
         capture->done.events = capture->events;
+#if defined(NT_PLATFORM_WEB)
+        capture->done.platform = NT_GFX_CAPTURE_WEB;
+#endif
         capture->view = (nt_gfx_capture_view_t){0};
         capture->events = capture->events == capture->base ? capture->base + capture->capacity : capture->base;
         g_nt_gfx.capture_recording = false;

@@ -99,7 +99,7 @@ static uint64_t read_marked(const char *line, bool *marked) {
     if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok"))) {
         const cJSON *result = result_of(root);
         const char *text = cJSON_GetObjectItemCaseSensitive(result, "text")->valuestring;
-        TEST_ASSERT_EQUAL_STRING_LEN("ntcapture 1\n", text, 12);
+        TEST_ASSERT_EQUAL_STRING_LEN("ntcapture 2\n", text, 12);
         *marked = strstr(text, "MARKER_PUSH label=\"step\"") != NULL;
         sequence = (uint64_t)number(result, "sequence");
     }

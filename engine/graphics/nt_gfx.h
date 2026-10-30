@@ -776,8 +776,15 @@ enum {
     NT_GFX_INITIAL_BACKEND = 1,
 };
 
+/* The platform a capture was recorded on: web names are a prefix of native ones (see Capture text). */
+typedef enum {
+    NT_GFX_CAPTURE_NATIVE,
+    NT_GFX_CAPTURE_WEB,
+} nt_gfx_capture_platform_t;
+
 typedef struct {
     bool overflow;
+    nt_gfx_capture_platform_t platform;
     const nt_gfx_event_t *events;
     uint32_t count;
     uint32_t execute_begin, execute_end; /* records of the end_frame stream execution, frame storage uploads included; 0 until it ran */

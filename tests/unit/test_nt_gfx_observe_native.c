@@ -1,3 +1,5 @@
+#include <stdlib.h>
+
 #include "graphics/nt_gfx.h"
 #include "pool/nt_pool.h"
 #include "test_helpers/nt_gfx_test_frame.h"
@@ -152,10 +154,22 @@ void tearDown(void) {
 }
 
 #if NT_GFX_CAPTURE_ENABLED
-/* The finalized frame; formatting it asserts that every real GL record keeps its data in the arm the text prints. */
+/* The finalized frame; formatting it asserts that every real GL record keeps its data in the arm the text
+ * prints, and parsing the text back must give the same record bytes. */
 static nt_gfx_capture_view_t read_capture(void) {
     const nt_gfx_capture_view_t capture = nt_gfx_capture_read();
-    TEST_ASSERT_GREATER_THAN_UINT64(0, nt_gfx_capture_format(&capture, NULL, 0));
+    const size_t len = nt_gfx_capture_format(&capture, NULL, 0);
+    char *text = (char *)malloc(len + 1U);
+    nt_gfx_event_t *parsed = (nt_gfx_event_t *)calloc((size_t)capture.count + 1U, sizeof(*parsed));
+    TEST_ASSERT_TRUE(text != NULL && parsed != NULL);
+    (void)nt_gfx_capture_format(&capture, text, len + 1U);
+    const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(text, len, parsed, capture.count);
+    TEST_ASSERT_NULL_MESSAGE(r.error, r.error);
+    TEST_ASSERT_EQUAL_UINT32(capture.count, r.view.count);
+    TEST_ASSERT_EQUAL_MEMORY(capture.events, parsed, (size_t)capture.count * sizeof(*parsed));
+    TEST_ASSERT_EQUAL_MEMORY(&capture.counters, &r.view.counters, sizeof(capture.counters));
+    free(parsed);
+    free(text);
     return capture;
 }
 

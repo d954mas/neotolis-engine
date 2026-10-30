@@ -1,0 +1,82 @@
+ntcapture 2
+frame sequence=9 platform=web records=29 overflow=0 execute=23..29
+counter stream_bytes=88
+counter accepted.PASS=1
+counter accepted.END_PASS=1
+counter accepted.SCISSOR_ENABLE=1
+counter accepted.TIMER_DISJOINT=1
+counter accepted.CLEAR=1
+counter gl.glClear=2
+counter gl.glClearColor=2
+counter gl.glDisable=1
+counter gl.glEnable=1
+0 INITIAL op=STATE layer=FRONTEND
+1 INITIAL op=SCISSOR_ENABLE integers=[1]
+2 INITIAL op=SCISSOR integers=[160,270,640,360]
+3 DEFINITION op=CREATE obj=BUFFER:65537 size=16384 backend=1 usage=2
+4 INITIAL op=STATE layer=BACKEND args=[0,0,0,33984,1280,720,2,3]
+5 INITIAL op=VIEWPORT integers=[0,0,1280,720]
+6 INITIAL op=PASS color=[0.9,0.55,0.1,1] depth=1
+7 INITIAL op=PIPELINE integers=[0,0,1,513,0,0,1,0,1,0,32774,32774]
+8 INITIAL op=TEXTURE
+9 INITIAL op=TEXTURE args=[1]
+10 INITIAL op=TEXTURE args=[2]
+11 INITIAL op=TEXTURE args=[3]
+12 INITIAL op=TEXTURE args=[4]
+13 INITIAL op=TEXTURE args=[5]
+14 INITIAL op=TEXTURE args=[6]
+15 INITIAL op=TEXTURE args=[7]
+16 DEFINITION op=STATE resource=BUFFER args=[1,3]
+17 OP op=TIMER_DISJOINT result=ACCEPTED
+18 OP op=PASS result=ACCEPTED color=[0.1,0.2,0.45,1] depth=1
+19 OP op=SCISSOR result=CACHE integers=[160,270,640,360]
+20 OP op=SCISSOR_ENABLE result=ACCEPTED integers=[1]
+21 OP op=CLEAR obj=RENDER_TARGET:0 result=ACCEPTED clear_color=[0.9,0.55,0.1,1] color=1
+22 OP op=END_PASS result=ACCEPTED
+23   BACKEND op=STATE call=glDisable link=@18 args=[3089]
+24   BACKEND op=STATE call=glClearColor link=@18 values=[0.1,0.2,0.45,1]
+25   BACKEND op=STATE call=glClear link=@18 args=[16640]
+26   BACKEND op=STATE call=glEnable link=@20 args=[3089]
+27   BACKEND op=STATE call=glClearColor link=@21 values=[0.9,0.55,0.1,1]
+28   BACKEND op=STATE call=glClear link=@21 args=[16384]
+ntcapture 2
+frame sequence=10 platform=web records=29 overflow=0 execute=23..29
+counter stream_bytes=88
+counter accepted.PASS=1
+counter accepted.END_PASS=1
+counter accepted.SCISSOR_ENABLE=1
+counter accepted.TIMER_DISJOINT=1
+counter accepted.CLEAR=1
+counter gl.glClear=2
+counter gl.glClearColor=2
+counter gl.glDisable=1
+counter gl.glEnable=1
+0 INITIAL op=STATE layer=FRONTEND
+1 INITIAL op=SCISSOR_ENABLE integers=[1]
+2 INITIAL op=SCISSOR integers=[160,270,640,360]
+3 DEFINITION op=CREATE obj=BUFFER:65537 size=16384 backend=1 usage=2
+4 INITIAL op=STATE layer=BACKEND args=[0,0,0,33984,1280,720,2,3]
+5 INITIAL op=VIEWPORT integers=[0,0,1280,720]
+6 INITIAL op=PASS color=[0.9,0.55,0.1,1] depth=1
+7 INITIAL op=PIPELINE integers=[0,0,1,513,0,0,1,0,1,0,32774,32774]
+8 INITIAL op=TEXTURE
+9 INITIAL op=TEXTURE args=[1]
+10 INITIAL op=TEXTURE args=[2]
+11 INITIAL op=TEXTURE args=[3]
+12 INITIAL op=TEXTURE args=[4]
+13 INITIAL op=TEXTURE args=[5]
+14 INITIAL op=TEXTURE args=[6]
+15 INITIAL op=TEXTURE args=[7]
+16 DEFINITION op=STATE resource=BUFFER args=[1,3]
+17 OP op=TIMER_DISJOINT result=ACCEPTED
+18 OP op=PASS result=ACCEPTED color=[0.1,0.2,0.45,1] depth=1
+19 OP op=SCISSOR result=CACHE integers=[160,270,640,360]
+20 OP op=SCISSOR_ENABLE result=ACCEPTED integers=[1]
+21 OP op=CLEAR obj=RENDER_TARGET:0 result=ACCEPTED clear_color=[0.9,0.55,0.1,1] color=1
+22 OP op=END_PASS result=ACCEPTED
+23   BACKEND op=STATE call=glDisable link=@18 args=[3089]
+24   BACKEND op=STATE call=glClearColor link=@18 values=[0.1,0.2,0.45,1]
+25   BACKEND op=STATE call=glClear link=@18 args=[16640]
+26   BACKEND op=STATE call=glEnable link=@20 args=[3089]
+27   BACKEND op=STATE call=glClearColor link=@21 values=[0.9,0.55,0.1,1]
+28   BACKEND op=STATE call=glClear link=@21 args=[16384]
