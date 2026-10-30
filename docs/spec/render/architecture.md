@@ -1176,8 +1176,7 @@ recording is not readable. Keep a capture by copying the metadata and `count` re
 and redirecting the saved view's pointer to the owned array. An empty view (before any
 recorded frame finished) has a NULL pointer. The view retains its frame's counters
 (and so its `frame_sequence`) by value even after later frames overwrite
-`g_nt_gfx.last_frame`. The stub asserts on continuous mode, because it never begins a
-frame.
+`g_nt_gfx.last_frame`. The stub never begins a frame, so both switches are inert there.
 
 Every recorded public operation produces exactly one OP record at the call,
 carrying its request arguments; when the call returns, the record holds its outcome
