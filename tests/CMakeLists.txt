@@ -1423,7 +1423,7 @@ if(NOT EMSCRIPTEN)
     # test_ui_radial registers in the nt_ui walker-test group below: it needs the
     # shared ui_walker_fixture + full UI libs.
 
-    # --- nt_mem_scratch tests ---
+    # --- nt_mem_scratch / nt_arena tests ---
     add_executable(test_nt_mem_scratch unit/test_nt_mem_scratch.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_nt_mem_scratch PRIVATE
         nt_mem_scratch nt_core nt_log_stub unity
@@ -1431,6 +1431,13 @@ if(NOT EMSCRIPTEN)
     target_include_directories(test_nt_mem_scratch PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_nt_mem_scratch PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_mem_scratch)
+
+    add_executable(test_nt_arena unit/test_nt_arena.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_nt_arena PRIVATE
+        nt_mem_scratch nt_core nt_log_stub unity
+    )
+    target_include_directories(test_nt_arena PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    nt_setup_test_target(test_nt_arena)
 
     # --- nt_ui element_data macro tests (exercises macros -> scratch path) ---
     add_executable(test_nt_ui_element_data unit/test_nt_ui_element_data.c unit/test_helpers/nt_assert_trap.c)

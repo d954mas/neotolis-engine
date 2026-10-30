@@ -4,19 +4,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Default capacity if the game doesn't have a tighter budget. Override via
- * #define NT_MEM_SCRATCH_DEFAULT_SIZE_BYTES before including this header. */
-#ifndef NT_MEM_SCRATCH_DEFAULT_SIZE_BYTES
-#define NT_MEM_SCRATCH_DEFAULT_SIZE_BYTES (512U * 1024U)
-#endif
-
-/* Bump arena reset every frame. All allocations live until the next reset --
- * pointers from a prior frame are stale. No per-alloc free.
+/* Global nt_arena_t (memory/nt_arena.h) the engine and game share, reset every frame.
+ * All allocations live until the next reset -- pointers from a prior frame are stale.
+ * No per-alloc free.
  *
  * Frame loop placement:
  *
  *   int main(void) {
- *       nt_mem_scratch_init(NT_MEM_SCRATCH_DEFAULT_SIZE_BYTES);
+ *       nt_mem_scratch_init(256U * 1024U);
  *       while (running) {
  *           nt_mem_scratch_reset();   // start of frame, BEFORE any alloc
  *           game_update();            // CLAY({...}), NT_UI_DATA_*, etc.
@@ -41,6 +36,10 @@ void *nt_mem_scratch_alloc(size_t size, size_t align);
 /* Checked-multiply variant: asserts elem_size*count doesn't overflow. */
 void *nt_mem_scratch_alloc_array(size_t elem_size, size_t count, size_t align);
 
+/* mark: an earlier nt_mem_scratch_used(). Frees everything allocated after it, by any
+ * caller -- rewind only around allocations whose consumers end before the rewind. */
+void nt_mem_scratch_rewind(size_t mark);
+
 /* Peak `used` since init. Survives resets so callers can size scratch budget. */
 size_t nt_mem_scratch_high_water_mark(void);
 
@@ -48,11 +47,7 @@ size_t nt_mem_scratch_high_water_mark(void);
 
 #define NT_MEM_SCRATCH_ALLOC_ARRAY(T, count) ((T *)nt_mem_scratch_alloc_array(sizeof(T), (size_t)(count), _Alignof(T)))
 
-/* Current `used` byte count; resets each frame. */
+/* Current `used` byte count; resets each frame. Doubles as a rewind mark. */
 size_t nt_mem_scratch_used(void);
-
-#ifdef NT_TEST_ACCESS
-size_t nt_mem_scratch_test_size(void);
-#endif
 
 #endif /* NT_MEM_SCRATCH_H */

@@ -1759,9 +1759,11 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
     if (atom_cap > NT_UI_RICH_MAX_GLYPHS) {
         atom_cap = NT_UI_RICH_MAX_GLYPHS;
     }
-    rich_atom_t *atoms = NT_MEM_SCRATCH_ALLOC_ARRAY(rich_atom_t, atom_cap);
     st->solved = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_ui_rich_solved_atom_t, atom_cap);
     st->links = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_ui_rich_link_rect_t, NT_UI_RICH_MAX_LINKS);
+    /* Atoms die with the solve; solved/links above outlive it until walk. */
+    const size_t atoms_mark = nt_mem_scratch_used();
+    rich_atom_t *atoms = NT_MEM_SCRATCH_ALLOC_ARRAY(rich_atom_t, atom_cap);
     const uint32_t na = rich_build_atoms(st, box_w, atoms, atom_cap);
     st->line_count = rich_break_lines(atoms, na, box_w);
 
@@ -1866,6 +1868,7 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
     }
 #endif
     st->solved_ready = true;
+    nt_mem_scratch_rewind(atoms_mark);
 }
 // #endregion
 

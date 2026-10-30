@@ -9,19 +9,13 @@
 void setUp(void) { nt_test_assert_install(); }
 void tearDown(void) {}
 
-static void teardown_if_init(void) {
-    /* Used after each death-test path where init/shutdown state is uncertain. */
-    if (nt_mem_scratch_test_size() > 0U) {
-        nt_mem_scratch_shutdown();
-    }
-}
-
 static void test_init_then_shutdown(void) {
     nt_mem_scratch_init(4096U);
-    TEST_ASSERT_EQUAL_UINT64(4096U, (uint64_t)nt_mem_scratch_test_size());
     TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)nt_mem_scratch_used());
+    (void)nt_mem_scratch_alloc(4096U, 1U); /* exact capacity fits */
     nt_mem_scratch_shutdown();
-    TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)nt_mem_scratch_test_size());
+    TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)nt_mem_scratch_used());
+    TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)nt_mem_scratch_high_water_mark());
 }
 
 static void test_alloc_advances_used(void) {
@@ -62,43 +56,54 @@ static void test_reset_clears_used(void) {
     nt_mem_scratch_shutdown();
 }
 
+/* used() doubles as the mark; the head returns to it and high-water stays. */
+static void test_rewind_to_used_mark(void) {
+    nt_mem_scratch_init(4096U);
+    (void)nt_mem_scratch_alloc(8U, 8U);
+    const size_t mark = nt_mem_scratch_used();
+    (void)nt_mem_scratch_alloc(64U, 8U);
+    nt_mem_scratch_rewind(mark);
+    TEST_ASSERT_EQUAL_UINT64(8U, (uint64_t)nt_mem_scratch_used());
+    TEST_ASSERT_EQUAL_UINT64(72U, (uint64_t)nt_mem_scratch_high_water_mark());
+    NT_TEST_EXPECT_ASSERT(nt_mem_scratch_rewind(mark + 1U));
+    nt_mem_scratch_shutdown();
+}
+
 static void test_overflow_asserts(void) {
     nt_mem_scratch_init(64U);
     (void)nt_mem_scratch_alloc(32U, 8U);
     NT_TEST_EXPECT_ASSERT(nt_mem_scratch_alloc(64U, 8U));
-    teardown_if_init();
+    nt_mem_scratch_shutdown();
 }
 
 static void test_double_init_asserts(void) {
     nt_mem_scratch_init(1024U);
     NT_TEST_EXPECT_ASSERT(nt_mem_scratch_init(1024U));
-    teardown_if_init();
+    nt_mem_scratch_shutdown();
 }
 
 static void test_shutdown_without_init_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_mem_scratch_shutdown()); }
 
 static void test_alloc_without_init_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_mem_scratch_alloc(16U, 8U)); }
 
-static void test_reset_without_init_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_mem_scratch_reset()); }
-
 static void test_non_pow2_align_asserts(void) {
     nt_mem_scratch_init(1024U);
     NT_TEST_EXPECT_ASSERT(nt_mem_scratch_alloc(16U, 3U));
-    teardown_if_init();
+    nt_mem_scratch_shutdown();
 }
 
 /* align beyond malloc's max_align_t guarantee asserts. */
 static void test_align_over_max_asserts(void) {
     nt_mem_scratch_init(1024U);
     NT_TEST_EXPECT_ASSERT(nt_mem_scratch_alloc(16U, 4096U));
-    teardown_if_init();
+    nt_mem_scratch_shutdown();
 }
 
 /* alloc_array overflow assert: count * elem_size beyond SIZE_MAX. */
 static void test_alloc_array_overflow_asserts(void) {
     nt_mem_scratch_init(1024U);
     NT_TEST_EXPECT_ASSERT(nt_mem_scratch_alloc_array(sizeof(uint64_t), (size_t)-1, 8U));
-    teardown_if_init();
+    nt_mem_scratch_shutdown();
 }
 
 /* Typed macro returns a properly aligned pointer. */
@@ -131,11 +136,11 @@ int main(void) {
     RUN_TEST(test_alloc_advances_used);
     RUN_TEST(test_alloc_aligns_up);
     RUN_TEST(test_reset_clears_used);
+    RUN_TEST(test_rewind_to_used_mark);
     RUN_TEST(test_overflow_asserts);
     RUN_TEST(test_double_init_asserts);
     RUN_TEST(test_shutdown_without_init_asserts);
     RUN_TEST(test_alloc_without_init_asserts);
-    RUN_TEST(test_reset_without_init_asserts);
     RUN_TEST(test_non_pow2_align_asserts);
     RUN_TEST(test_align_over_max_asserts);
     RUN_TEST(test_alloc_array_overflow_asserts);

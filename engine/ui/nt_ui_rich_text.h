@@ -159,6 +159,7 @@ typedef struct {
     float ascent; /* above baseline; for valign=baseline placement */
 } nt_ui_rich_object_measure_t;
 
+/* Runs inside the block's solve: scratch allocated here is freed when the solve returns. */
 typedef nt_ui_rich_object_measure_t (*nt_ui_rich_object_measure_fn)(void *user_data);
 /* color is the ABSOLUTE resolved RGBA (honours opacity/<color>/fx) -- modulate the draw by it.
  * x,y,w,h are LAYOUT (Clay Y-down) px; apply world_mat4 (it bakes the screen Y-flip) to every
