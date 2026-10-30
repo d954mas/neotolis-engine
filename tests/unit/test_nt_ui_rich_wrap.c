@@ -79,6 +79,18 @@ static void test_mixed_run_advance_sums(void) {
     TEST_ASSERT_TRUE_MESSAGE(approx(total, expect), "sum of atom widths == measure(t1)+icon+measure(t2)");
 }
 
+/* The solve's atom workspace is rewound: the head after the solve sits below the solve's peak. */
+static void test_solve_rewinds_atom_scratch(void) {
+    build_hp_icon_full(NT_RICH_VALIGN_BASELINE);
+    const size_t before = nt_mem_scratch_used();
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)before, (uint64_t)nt_mem_scratch_high_water_mark()); /* fresh scratch: no peak above the head yet */
+    nt_ui_rich_test_solve(s_fx.ctx, 10000.0F, FONT_SIZE);
+    const size_t after = nt_mem_scratch_used();
+    TEST_ASSERT_TRUE_MESSAGE(after > before, "solved atoms and links stay allocated");
+    TEST_ASSERT_TRUE_MESSAGE(nt_mem_scratch_high_water_mark() > after, "atoms allocated above the final head were released");
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_rich_test_line_count(s_fx.ctx));
+}
+
 /* Return the icon atom's solved y for a given valign (one wide line). */
 static float icon_y_for_valign(nt_rich_valign_t valign) {
     build_hp_icon_full(valign);
@@ -394,6 +406,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_font_size_style_field_scales_solve);
     RUN_TEST(test_mixed_run_advance_sums);
+    RUN_TEST(test_solve_rewinds_atom_scratch);
     RUN_TEST(test_icon_baseline_vs_middle_delta);
     RUN_TEST(test_forced_wrap_keeps_icon_on_line1);
     RUN_TEST(test_break_anywhere_no_atom_exceeds_box);
