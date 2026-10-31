@@ -227,7 +227,7 @@ The scene uses one 41-joint KayKit rig, six mesh parts and seven 30 fps clips:
 Idle, Walking_A, Running_A, Jump_Full_Short,
 Unarmed_Melee_Attack_Punch_A, Death_A and Lie_StandUp. The result and optional source previews share
 the same sampled poses and clocks. Frame-local samples and model matrices come
-from `nt_mem_scratch`; the persistent snapshot is 40 bytes per joint. Slot
+from `g_nt_mem_scratch`; the persistent snapshot is 40 bytes per joint. Slot
 overflow is an `NT_ASSERT`, and a zero-gain occupied track still advances.
 
 The five modes expose distinct composition rules:

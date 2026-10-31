@@ -45,7 +45,7 @@ The chapters below define engine behavior.
 | [core/api-contracts.md](core/api-contracts.md) | Public API ownership, lifetime, and naming contract vocabulary |
 | [runtime/platform.md](runtime/platform.md) | Platform layer: Web/WASM target, responsibilities, canvas/DPR handling |
 | [runtime/frame-lifecycle.md](runtime/frame-lifecycle.md) | Frame order, game callbacks, fixed update loop |
-| [runtime/memory.md](runtime/memory.md) | Memory categories, frame scratch arena, capacity policy |
+| [runtime/memory.md](runtime/memory.md) | Memory categories, arenas and scoped rewind, frame scratch arena, capacity policy |
 | [data/entity.md](data/entity.md) | Entity handles, generations, entity table, hierarchy |
 | [data/component-storage.md](data/component-storage.md) | Sparse/dense component storage and typed component APIs |
 | [data/transform.md](data/transform.md) | Transform component, hierarchy inheritance, dirty propagation |
@@ -120,7 +120,7 @@ lifetime, and naming vocabulary.
 | `tools/builder` | [builder/builder.md](builder/builder.md) |
 
 Dir names that do not predict their prefix: `engine/graphics` → `nt_gfx_*`,
-`engine/memory` → `nt_mem_scratch`, `engine/postfx` → `nt_postfx_blur`.
+`engine/memory` → `nt_arena_*` and `g_nt_mem_scratch`, `engine/postfx` → `nt_postfx_blur`.
 `engine/platform` has no public top-level header (web API in `web/nt_platform_web.h`).
 
 ## Task → entry point

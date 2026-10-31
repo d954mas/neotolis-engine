@@ -46,8 +46,7 @@ void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, n
     /* Late-bind: resolve lazily, memoize into *region. Unresolved -> open the container with no bg IMAGE. */
     nt_atlas_resolve_ref(region);
     if (region->region != NT_ATLAS_INVALID_REGION) {
-        nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-        NT_ASSERT(p != NULL && "nt_ui_panel_begin: scratch alloc failed");
+        nt_ui_image_payload_t *p = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
         *p = (nt_ui_image_payload_t){
             .atlas = region->atlas,
             .region_index = region->region,
@@ -83,8 +82,7 @@ void nt_ui_group_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, c
     }
 
     /* type=NONE anchor — walker skips handler but keeps the bbox. */
-    nt_ui_custom_data_t *anchor = NT_MEM_SCRATCH_ALLOC(nt_ui_custom_data_t);
-    NT_ASSERT(anchor != NULL && "nt_ui_group_begin: scratch alloc failed");
+    nt_ui_custom_data_t *anchor = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_custom_data_t);
     *anchor = (nt_ui_custom_data_t){.type = NT_UI_CUSTOM_TYPE_NONE, .data = NULL};
 
     Clay_ElementDeclaration final = (decl != NULL) ? *decl : (Clay_ElementDeclaration){0};

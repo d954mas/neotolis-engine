@@ -315,8 +315,7 @@ static void menu_draw_icon_image(nt_ui_context_t *ctx, uint8_t fill_layer, const
     if (ic.region == NT_ATLAS_INVALID_REGION) {
         return;
     }
-    nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-    NT_ASSERT(p != NULL && "nt_ui_menu: scratch alloc failed (icon payload)");
+    nt_ui_image_payload_t *p = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
     *p = (nt_ui_image_payload_t){.atlas = ic.atlas, .region_index = ic.region, .origin_x = 0.5F, .origin_y = 0.5F, .slice9_scale = 1.0F};
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .image = (Clay_ImageElementConfig){.imageData = p}, .userData = NT_UI_CLAY_DATA(fill_layer)}) {}
 }
@@ -341,8 +340,7 @@ static void menu_declare_marker(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_
     nt_atlas_resolve_ref(&style->arrow);
     const bool has_art = (style->arrow.atlas.id != 0U && style->arrow.region != NT_ATLAS_INVALID_REGION);
     if (has_art) {
-        nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-        NT_ASSERT(p != NULL && "nt_ui_menu: scratch alloc failed (arrow payload)");
+        nt_ui_image_payload_t *p = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
         *p = (nt_ui_image_payload_t){.atlas = style->arrow.atlas, .region_index = style->arrow.region, .origin_x = 0.5F, .origin_y = 0.5F, .slice9_scale = 1.0F};
         const float sz = (style->arrow_size > 0U) ? (float)style->arrow_size : (float)style->item_height * 0.5F;
         CLAY({.id = (Clay_ElementId){.id = arrow_id},
@@ -362,8 +360,7 @@ static void menu_declare_check(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t
     nt_atlas_resolve_ref(&style->checkmark);
     const bool has_art = (style->checkmark.atlas.id != 0U && style->checkmark.region != NT_ATLAS_INVALID_REGION);
     if (has_art) {
-        nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-        NT_ASSERT(p != NULL && "nt_ui_menu: scratch alloc failed (checkmark payload)");
+        nt_ui_image_payload_t *p = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
         *p = (nt_ui_image_payload_t){.atlas = style->checkmark.atlas, .region_index = style->checkmark.region, .origin_x = 0.5F, .origin_y = 0.5F, .slice9_scale = 1.0F};
         const float sz = (style->check_size > 0U) ? (float)style->check_size : (float)style->item_height * 0.5F;
         CLAY({.id = (Clay_ElementId){.id = check_id},
@@ -548,8 +545,7 @@ static void menu_open_panel(nt_ui_context_t *ctx, uint8_t fill_layer, uint32_t m
                                                 .childGap = 2},
                                      .userData = (void *)nt_ui_make_element_data(fill_layer, NULL)};
     if (panel_art) {
-        nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-        NT_ASSERT(p != NULL && "nt_ui_menu: scratch alloc failed (panel payload)");
+        nt_ui_image_payload_t *p = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
         *p = (nt_ui_image_payload_t){.atlas = style->panel_bg.atlas, .region_index = style->panel_bg.region, .slice9_scale = style->slice9_scale};
         panel.image = (Clay_ImageElementConfig){.imageData = p};
         panel.backgroundColor = nt_ui_unpack_tint(style->panel_tint);

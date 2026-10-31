@@ -94,8 +94,7 @@ static void tooltip_declare_caret(uint8_t fill_layer, nt_ui_tooltip_style_t *sty
     }
     const bool above = (side == NT_UI_POPUP_ABOVE); /* tooltip above target -> caret points DOWN */
     const uint8_t flip = above ? NT_SPRITE_FLAG_FLIP_Y : 0U;
-    nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-    NT_ASSERT(p != NULL && "nt_ui_tooltip: scratch alloc failed (caret payload)");
+    nt_ui_image_payload_t *p = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
     *p = (nt_ui_image_payload_t){.atlas = style->caret.atlas, .region_index = style->caret.region, .slice9_scale = 1.0F, .flip_bits = flip};
     /* Attach the caret outside the matching panel edge: its base touches the panel, the apex points at
      * the target. The y-offset pushes it fully clear of the panel by its own height. */
@@ -171,8 +170,7 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8
         if (panel_art) {
             /* slice9 panel art: tint multiplies the sprite; IMAGE bg can't round, so cornerRadius is dropped
              * (rounding is baked into the sprite corners) — same rule as dropdown/menu/tabbar. */
-            nt_ui_image_payload_t *pp = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-            NT_ASSERT(pp != NULL && "nt_ui_tooltip: scratch alloc failed (panel payload)");
+            nt_ui_image_payload_t *pp = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
             *pp = (nt_ui_image_payload_t){.atlas = style->panel_art.atlas, .region_index = style->panel_art.region, .slice9_scale = style->slice9_scale};
             panel.image = (Clay_ImageElementConfig){.imageData = pp};
             panel.backgroundColor = nt_ui_unpack_tint(style->panel_tint);

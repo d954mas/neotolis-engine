@@ -3,6 +3,7 @@
 
 #include "ui/nt_ui_rich_tagset.h"
 
+#include <math.h>
 #include <string.h>
 
 #include "core/nt_assert.h"
@@ -106,12 +107,13 @@ void nt_ui_rich_tagset_register_effect_fn(nt_ui_rich_tagset_t *ts, const char *n
     e->user_data = user_data;
 }
 
-void nt_ui_rich_tagset_register_object_tag(nt_ui_rich_tagset_t *ts, const char *name, nt_ui_rich_object_measure_fn measure_fn, nt_ui_rich_object_draw_fn draw_fn, void *user_data) {
-    NT_ASSERT(ts != NULL && name != NULL && name[0] != '\0' && measure_fn != NULL);
+void nt_ui_rich_tagset_register_object_tag(nt_ui_rich_tagset_t *ts, const char *name, nt_ui_rich_object_size_t size, nt_ui_rich_object_draw_fn draw_fn, void *user_data) {
+    NT_ASSERT(ts != NULL && name != NULL && name[0] != '\0');
+    NT_ASSERT(isfinite(size.width) && isfinite(size.height) && isfinite(size.ascent) && size.width >= 0.0F && size.height >= 0.0F && "rich object tag: size must be finite, non-negative width/height");
     const uint64_t h = nt_hash64_str(name).value;
     for (uint32_t i = 0; i < ts->object_count; i++) {
         if (ts->objects[i].name_hash == h) {
-            ts->objects[i].measure_fn = measure_fn;
+            ts->objects[i].size = size;
             ts->objects[i].draw_fn = draw_fn;
             ts->objects[i].user_data = user_data;
             return;
@@ -120,7 +122,7 @@ void nt_ui_rich_tagset_register_object_tag(nt_ui_rich_tagset_t *ts, const char *
     NT_ASSERT(ts->object_count < NT_UI_RICH_TAGSET_MAX_OBJECTS && "rich tagset object table overflow");
     nt_ui_rich_tagset_object_t *e = &ts->objects[ts->object_count++];
     e->name_hash = h;
-    e->measure_fn = measure_fn;
+    e->size = size;
     e->draw_fn = draw_fn;
     e->user_data = user_data;
 }

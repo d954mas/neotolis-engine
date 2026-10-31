@@ -31,7 +31,7 @@
 
 // #region data-model
 /* Frame-scratch run-list SoA. Parallel arrays bump-allocated by nt_ui_rich_begin;
- * stale after the next nt_mem_scratch_reset. A run only starts when the COMPOSED
+ * stale after the next scratch reset. A run only starts when the COMPOSED
  * style differs from the current run (dedup against the style table). */
 
 #ifndef NT_UI_RICH_PARSE_TAG_DEPTH
@@ -42,22 +42,27 @@
 #define NT_UI_RICH_STACK_DEPTH (NT_UI_RICH_PARSE_TAG_DEPTH + 1) /* push/pop nesting per call */
 
 typedef struct {
-    nt_rich_atom_kind_t kind;
-    uint16_t style_idx; /* index into the dedup'd style table */
+    uint8_t kind;       /* nt_rich_atom_kind_t */
     uint8_t flags;      /* NT_UI_RICH_RUN_* (synthetic italic) */
+    uint16_t style_idx; /* index into the dedup'd style table */
     uint32_t link_id;   /* 0 = not a link */
-    /* TEXT: byte range into the shared utf8 buffer. */
-    uint32_t text_off;
-    uint32_t text_len;
-    /* IMAGE: */
-    nt_atlas_region_ref_t image_ref;
-    nt_rich_valign_t image_valign;
-    float image_offset_y;
-    float image_scale;
-    /* OBJECT: */
-    nt_ui_rich_object_measure_fn object_measure;
-    nt_ui_rich_object_draw_fn object_draw;
-    void *object_user;
+    union {             /* by kind */
+        struct {        /* byte range into the shared utf8 buffer */
+            uint32_t text_off;
+            uint32_t text_len;
+        };
+        struct {
+            nt_atlas_region_ref_t image_ref;
+            nt_rich_valign_t image_valign;
+            float image_offset_y;
+            float image_scale;
+        };
+        struct {
+            nt_ui_rich_object_size_t object_size;
+            nt_ui_rich_object_draw_fn object_draw;
+            void *object_user;
+        };
+    };
 } nt_ui_rich_run_t;
 
 /* A solved, positioned atom (the solver's output, consumed by emit). TEXT atoms keep a
@@ -257,7 +262,7 @@ static nt_ui_rich_run_t *rich_new_run(nt_ui_rich_state_t *st, nt_rich_atom_kind_
     const uint32_t idx = st->run_count++;
     nt_ui_rich_run_t *r = &st->runs[idx];
     memset(r, 0, sizeof *r);
-    r->kind = kind;
+    r->kind = (uint8_t)kind;
     return r;
 }
 // #endregion
@@ -269,19 +274,20 @@ void nt_ui_rich_begin(nt_ui_context_t *ctx, const nt_ui_rich_style_t *base) {
     NT_ASSERT(base == NULL || base->effect_id == 0U);
     NT_ASSERT(!ctx->rich_session_open && "rich-text calls do not nest");
 
-    nt_ui_rich_state_t *st = NT_MEM_SCRATCH_ALLOC(nt_ui_rich_state_t);
+    nt_ui_rich_state_t *st = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_rich_state_t);
     memset(st, 0, sizeof *st);
     /* Resolve per-block caps: desc value or the compile-time #define default (0 -> #define, always > 0). */
     const uint32_t max_runs = ctx->rich_max_runs ? ctx->rich_max_runs : (uint32_t)NT_UI_RICH_MAX_RUNS;
     const uint32_t max_styles = ctx->rich_max_styles ? ctx->rich_max_styles : (uint32_t)NT_UI_RICH_MAX_STYLES;
     const uint32_t max_text_bytes = ctx->rich_max_text_bytes ? ctx->rich_max_text_bytes : (uint32_t)NT_UI_RICH_MAX_TEXT_BYTES;
     NT_ASSERT(max_runs > 0U && max_styles > 0U && max_text_bytes > 0U && "nt_ui_rich_begin: resolved caps must be > 0");
+    NT_ASSERT(max_runs <= UINT16_MAX + 1U && "nt_ui_rich_begin: atoms index runs with uint16_t");
     st->max_runs = max_runs;
     st->max_styles = max_styles;
     st->max_text_bytes = max_text_bytes;
-    st->runs = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_ui_rich_run_t, max_runs);
-    st->styles = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_ui_rich_style_t, max_styles);
-    st->text = NT_MEM_SCRATCH_ALLOC_ARRAY(char, max_text_bytes);
+    st->runs = NT_ARENA_ALLOC_ARRAY(&g_nt_mem_scratch, nt_ui_rich_run_t, max_runs);
+    st->styles = NT_ARENA_ALLOC_ARRAY(&g_nt_mem_scratch, nt_ui_rich_style_t, max_styles);
+    st->text = NT_ARENA_ALLOC_ARRAY(&g_nt_mem_scratch, char, max_text_bytes);
     /* solved[]/links[] are sized to the actual content at solve time (content-proportional,
      * not the full glyph cap) -- keeps the per-call scratch footprint tiny for a label. */
 
@@ -491,14 +497,15 @@ void nt_ui_rich_image(nt_ui_context_t *ctx, nt_atlas_region_ref_t ref, nt_rich_v
     r->image_scale = scale;
 }
 
-void nt_ui_rich_object(nt_ui_context_t *ctx, nt_ui_rich_object_measure_fn measure_fn, nt_ui_rich_object_draw_fn draw_fn, void *user_data) {
-    NT_ASSERT(measure_fn != NULL);
+void nt_ui_rich_object(nt_ui_context_t *ctx, nt_ui_rich_object_size_t size, nt_ui_rich_object_draw_fn draw_fn, void *user_data) {
+    /* The size is game-trusted: fail early on a garbage box. */
+    NT_ASSERT(isfinite(size.width) && isfinite(size.height) && isfinite(size.ascent) && size.width >= 0.0F && size.height >= 0.0F && "rich object: size must be finite, non-negative width/height");
     nt_ui_rich_state_t *st = rich_state(ctx);
     const uint16_t style_idx = rich_intern_style(st, rich_style_top(st));
     nt_ui_rich_run_t *r = rich_new_run(st, NT_RICH_ATOM_OBJECT);
     r->style_idx = style_idx;
     r->link_id = st->pending_link;
-    r->object_measure = measure_fn;
+    r->object_size = size;
     r->object_draw = draw_fn;
     r->object_user = user_data;
 }
@@ -895,10 +902,10 @@ static void rich_parse_img(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tags
     nt_ui_rich_image(ctx, nt_atlas_ref(atlas, region_hash), valign, oy, scale);
 }
 
-/* `<obj=name/>` self-close: a game-drawn WidgetSpan (measure_fn sizes the box, draw_fn paints it).
+/* `<obj=name/>` self-close: a game-drawn WidgetSpan (registered size reserves the box, draw_fn paints it).
  * Name resolved via the tagset using the SAME hash as register_object_tag (nt_hash64_str -> the full
  * name bytes), which equals nt_hash64(val, vlen) here since [val,val+vlen) IS the name. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- empty name + unknown/NULL-measure degrade branches
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- empty name + unknown name degrade branches
 static void rich_parse_obj(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, const char *val, uint32_t vlen) {
     /* No tagset -> the lookup below would deref NULL on untrusted markup (<obj=x/> with a text-only,
      * tagset-less config). Log + skip the object. */
@@ -913,13 +920,12 @@ static void rich_parse_obj(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tags
     }
     nt_ui_rich_tagset_object_t obj = {0};
     const bool obj_ok = nt_ui_rich_tagset_lookup_object(tagset, nt_hash64((const void *)val, vlen).value, &obj);
-    /* Unknown name or a (defensively) NULL measure_fn -> log + skip; nt_ui_rich_object asserts
-     * measure_fn != NULL, but register_object_tag rejects NULL measure so this only fires on miss. */
-    if (!obj_ok || obj.measure_fn == NULL) {
+    /* Unknown name -> log + skip. */
+    if (!obj_ok) {
         NT_LOG_WARN_UNIQUE("rich markup: unknown <obj=%.*s/> -- skipped", (int)vlen, val);
         return;
     }
-    nt_ui_rich_object(ctx, obj.measure_fn, obj.draw_fn, obj.user_data);
+    nt_ui_rich_object(ctx, obj.size, obj.draw_fn, obj.user_data);
 }
 
 /* Parse the param tail of `<fx=name amp=8 speed=3>` ([s,s+n) = the bytes AFTER the name, including
@@ -1589,14 +1595,10 @@ static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float container_w, rich
             a->breakable_before = true; /* image: break opportunity on both sides */
             a->run_idx = (uint16_t)ri;
             a->link_id = run->link_id;
-        } else { /* NT_RICH_ATOM_OBJECT: reserve the box via the run's measure_fn. */
-            NT_ASSERT(run->object_measure != NULL && "rich object: measure_fn must be non-NULL");
-            const nt_ui_rich_object_measure_t m = run->object_measure(run->object_user);
-            /* measure_fn is game-trusted: fail early on a garbage box. */
-            NT_ASSERT(isfinite(m.width) && isfinite(m.height) && isfinite(m.ascent) && m.width >= 0.0F && m.height >= 0.0F && "rich object: measure_fn must return finite, non-negative width/height");
-            const float obj_w = m.width;
-            const float obj_h = m.height;
-            const float obj_asc = m.ascent;
+        } else { /* NT_RICH_ATOM_OBJECT: reserve the run's box. */
+            const float obj_w = run->object_size.width;
+            const float obj_h = run->object_size.height;
+            const float obj_asc = run->object_size.ascent;
             NT_ASSERT(n < cap && "rich atom overflow (NT_UI_RICH_MAX_GLYPHS)");
             rich_atom_t *a = &out[n++];
             memset(a, 0, sizeof *a);
@@ -1759,9 +1761,11 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
     if (atom_cap > NT_UI_RICH_MAX_GLYPHS) {
         atom_cap = NT_UI_RICH_MAX_GLYPHS;
     }
-    rich_atom_t *atoms = NT_MEM_SCRATCH_ALLOC_ARRAY(rich_atom_t, atom_cap);
-    st->solved = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_ui_rich_solved_atom_t, atom_cap);
-    st->links = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_ui_rich_link_rect_t, NT_UI_RICH_MAX_LINKS);
+    st->solved = NT_ARENA_ALLOC_ARRAY(&g_nt_mem_scratch, nt_ui_rich_solved_atom_t, atom_cap);
+    st->links = NT_ARENA_ALLOC_ARRAY(&g_nt_mem_scratch, nt_ui_rich_link_rect_t, NT_UI_RICH_MAX_LINKS);
+    /* Atoms die with the solve; solved/links above outlive it. */
+    const size_t atoms_mark = g_nt_mem_scratch.used;
+    rich_atom_t *atoms = NT_ARENA_ALLOC_ARRAY(&g_nt_mem_scratch, rich_atom_t, atom_cap);
     const uint32_t na = rich_build_atoms(st, box_w, atoms, atom_cap);
     st->line_count = rich_break_lines(atoms, na, box_w);
 
@@ -1866,6 +1870,7 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
     }
 #endif
     st->solved_ready = true;
+    nt_arena_rewind(&g_nt_mem_scratch, atoms_mark);
 }
 // #endregion
 
@@ -1959,7 +1964,7 @@ static void rich_emit_objects(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t
         }
         const nt_ui_rich_run_t *run = &st->runs[s->run_idx];
         if (run->object_draw == NULL) {
-            continue; /* measure-only object (box reserved, nothing drawn) */
+            continue; /* box-only object (reserved, nothing drawn) */
         }
         const uint32_t base_color = nt_color_scale_alpha(s->color, frame->opacity);
         const nt_ui_rich_fx_result_t fx = rich_eval_fx(st, s, base_color);
@@ -2165,8 +2170,7 @@ static void rich_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
  * custom data routes the walk back to self-emit. Inline IMAGE atoms are NOT Clay children -- they emit
  * immediately in the self-emit (rich_emit_images), coalesced into one sprite batch. */
 static void rich_declare_fixed_block(nt_ui_rich_state_t *st, uint32_t id, const nt_ui_element_data_t *data) {
-    nt_ui_custom_data_t *cd = NT_MEM_SCRATCH_ALLOC(nt_ui_custom_data_t);
-    NT_ASSERT(cd != NULL && "nt_ui_rich_text: scratch alloc failed (custom data)");
+    nt_ui_custom_data_t *cd = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_custom_data_t);
     *cd = (nt_ui_custom_data_t){.type = NT_UI_CUSTOM_TYPE_CALLBACK, .data = st, .emit = rich_emit_custom};
 
     Clay_ElementDeclaration decl = {0};
@@ -2346,7 +2350,7 @@ nt_font_t nt_ui_rich_test_run_font(nt_ui_context_t *ctx, uint32_t run) {
 nt_rich_atom_kind_t nt_ui_rich_test_run_kind(nt_ui_context_t *ctx, uint32_t run) {
     nt_ui_rich_state_t *st = rich_state(ctx);
     NT_ASSERT(run < st->run_count);
-    return st->runs[run].kind;
+    return (nt_rich_atom_kind_t)st->runs[run].kind;
 }
 
 uint32_t nt_ui_rich_test_run_link(nt_ui_context_t *ctx, uint32_t run) {
@@ -2363,31 +2367,31 @@ uint32_t nt_ui_rich_test_run_text_len(nt_ui_context_t *ctx, uint32_t run) {
 
 const char *nt_ui_rich_test_run_text(nt_ui_context_t *ctx, uint32_t run) {
     nt_ui_rich_state_t *st = rich_state(ctx);
-    NT_ASSERT(run < st->run_count);
+    NT_ASSERT(run < st->run_count && st->runs[run].kind == NT_RICH_ATOM_TEXT);
     return st->text + st->runs[run].text_off;
 }
 
 nt_atlas_region_ref_t nt_ui_rich_test_run_image_ref(nt_ui_context_t *ctx, uint32_t run) {
     nt_ui_rich_state_t *st = rich_state(ctx);
-    NT_ASSERT(run < st->run_count);
+    NT_ASSERT(run < st->run_count && st->runs[run].kind == NT_RICH_ATOM_IMAGE);
     return st->runs[run].image_ref;
 }
 
 float nt_ui_rich_test_run_image_scale(nt_ui_context_t *ctx, uint32_t run) {
     nt_ui_rich_state_t *st = rich_state(ctx);
-    NT_ASSERT(run < st->run_count);
+    NT_ASSERT(run < st->run_count && st->runs[run].kind == NT_RICH_ATOM_IMAGE);
     return st->runs[run].image_scale;
 }
 
 float nt_ui_rich_test_run_image_offset_y(nt_ui_context_t *ctx, uint32_t run) {
     nt_ui_rich_state_t *st = rich_state(ctx);
-    NT_ASSERT(run < st->run_count);
+    NT_ASSERT(run < st->run_count && st->runs[run].kind == NT_RICH_ATOM_IMAGE);
     return st->runs[run].image_offset_y;
 }
 
 nt_rich_valign_t nt_ui_rich_test_run_image_valign(nt_ui_context_t *ctx, uint32_t run) {
     nt_ui_rich_state_t *st = rich_state(ctx);
-    NT_ASSERT(run < st->run_count);
+    NT_ASSERT(run < st->run_count && st->runs[run].kind == NT_RICH_ATOM_IMAGE);
     return st->runs[run].image_valign;
 }
 

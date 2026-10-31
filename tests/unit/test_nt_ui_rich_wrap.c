@@ -29,7 +29,6 @@ static ui_walker_fixture_t s_fx;
 void setUp(void) {
     nt_test_assert_install();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
-    nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     /* units_per_em=1000, ascent=800, descent=-200: advance = size/2/char. */
@@ -79,6 +78,17 @@ static void test_mixed_run_advance_sums(void) {
     TEST_ASSERT_TRUE_MESSAGE(approx(total, expect), "sum of atom widths == measure(t1)+icon+measure(t2)");
 }
 
+/* The solve's atom workspace is rewound: the head after the solve sits below the solve's peak. */
+static void test_solve_rewinds_atom_scratch(void) {
+    build_hp_icon_full(NT_RICH_VALIGN_BASELINE);
+    const size_t before = g_nt_mem_scratch.used;
+    const size_t high_before = g_nt_mem_scratch.high_water;
+    nt_ui_rich_test_solve(s_fx.ctx, 10000.0F, FONT_SIZE);
+    const size_t after = g_nt_mem_scratch.used;
+    TEST_ASSERT_TRUE_MESSAGE(after > before, "solved atoms and links stay allocated");
+    TEST_ASSERT_TRUE_MESSAGE(g_nt_mem_scratch.high_water > high_before && g_nt_mem_scratch.high_water > after, "atoms allocated above the final head were released");
+}
+
 /* Return the icon atom's solved y for a given valign (one wide line). */
 static float icon_y_for_valign(nt_rich_valign_t valign) {
     build_hp_icon_full(valign);
@@ -100,7 +110,7 @@ static float icon_y_for_valign(nt_rich_valign_t valign) {
 static void test_icon_baseline_vs_middle_delta(void) {
     const float y_baseline = icon_y_for_valign(NT_RICH_VALIGN_BASELINE);
 
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     const float y_middle = icon_y_for_valign(NT_RICH_VALIGN_MIDDLE);
@@ -150,7 +160,7 @@ static void build_text(const char *utf8, size_t len) {
 }
 
 static void reset_call(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 }
@@ -394,6 +404,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_font_size_style_field_scales_solve);
     RUN_TEST(test_mixed_run_advance_sums);
+    RUN_TEST(test_solve_rewinds_atom_scratch);
     RUN_TEST(test_icon_baseline_vs_middle_delta);
     RUN_TEST(test_forced_wrap_keeps_icon_on_line1);
     RUN_TEST(test_break_anywhere_no_atom_exceeds_box);

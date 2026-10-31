@@ -33,7 +33,9 @@ void nt_log_set_level(nt_log_level_t level);
 /* --- Sink hook ---
  * Receives the already-FORMATTED line (no fmt/va_list re-entry), so a sink never
  * re-parses caller input. domain is "" (never NULL) when the call site had none.
- * Bounded fixed registry, single-threaded (same assumption as NT_LOG_ONCE_). */
+ * Bounded fixed registry, single-threaded (same assumption as NT_LOG_ONCE_).
+ * A sink runs inside any engine call, including a scratch rewind scope, so it copies
+ * into its own storage and never allocates from g_nt_mem_scratch. */
 typedef void (*nt_log_sink_fn)(nt_log_level_t level, const char *domain, const char *msg, void *user);
 /* Idempotent: re-adding the exact (fn,user) pair is a no-op (never a duplicate slot). */
 void nt_log_add_sink(nt_log_sink_fn fn, void *user);

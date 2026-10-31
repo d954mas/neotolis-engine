@@ -64,6 +64,8 @@ in the source; the sky and Mars images come from packs. See CREDITS.md.
 #include <stdlib.h>
 #include <string.h>
 
+_Alignas(max_align_t) static uint8_t s_scratch_mem[(size_t)128U * 1024U];
+
 #define AST_MAX 50000U
 #define AST_SUBDIVISIONS 4U
 /* The source's default LOD threshold: smaller selects finer meshes. */
@@ -1249,7 +1251,7 @@ static void init_ui_styles(void) {
 }
 
 static void init_ui(void) {
-    nt_mem_scratch_init((size_t)128U * 1024U);
+    nt_arena_init(&g_nt_mem_scratch, s_scratch_mem, sizeof s_scratch_mem);
     const nt_result_t atlas_result = nt_atlas_init();
     NT_ASSERT(atlas_result == NT_OK);
     nt_ui_module_init();
@@ -2128,7 +2130,7 @@ static void frame(void) {
     if (!nt_example_frames_on()) {
         nt_input_poll();
     }
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     /* The notice frame is presented before the blocking generation starts. */
     if (!s_generated && !g_nt_gfx.context_lost) {
         if (s_notice[0] == '\0') {
@@ -2328,13 +2330,12 @@ int main(int argc, char **argv) {
     nt_app_run(frame);
 #ifndef NT_PLATFORM_WEB
     drop_generated();
-    nt_log_info("Asteroids UI: scratch peak=%zu bytes", nt_mem_scratch_high_water_mark());
+    nt_log_info("Asteroids UI: scratch peak=%zu bytes", g_nt_mem_scratch.high_water);
     nt_ui_destroy_context(s_ui);
     nt_ui_module_shutdown();
     nt_sprite_renderer_shutdown();
     nt_material_destroy(s_ui_material);
     nt_program_ref_drop(&s_ui_program);
-    nt_mem_scratch_shutdown();
     free(s_ui_arena);
     nt_text_renderer_shutdown();
     nt_font_destroy(s_font);

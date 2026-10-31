@@ -41,7 +41,7 @@ resource_step         ← async loading processing (also pumps nt_http_update)
 game-defined resource sync helpers
     → e.g. sprite_comp_sync_resources() after resource publication changes
 audio_update          ← voice state management
-nt_mem_scratch_reset  ← frame scratch arena cleared (see memory.md — memory categories)
+nt_arena_reset(&g_nt_mem_scratch)  ← frame scratch arena cleared (see memory.md — memory categories)
 fixed_update loop
 game_update           ← CLAY layout, NT_UI_DATA_* allocations
 transform_update
@@ -75,7 +75,7 @@ callback's frame from `g_nt_gfx.last_frame`; devapi commands run between frames
 and read the frame just ended from `g_nt_gfx.counters`. See
 [frame observation](../render/architecture.md#frame-observation).
 
-`nt_mem_scratch_reset()` MUST run before any scratch allocation in the
+`nt_arena_reset(&g_nt_mem_scratch)` MUST run before any scratch allocation in the
 current frame — typically right after `audio_update`. Allocating then
 resetting in the same frame invalidates pointers already handed to
 systems (e.g. `nt_ui` retains them through `nt_ui_walk`).

@@ -34,6 +34,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+_Alignas(max_align_t) static uint8_t s_scratch_mem[(size_t)64U * 1024U];
+
 /* game-layer command via the public nt_devapi_register path — zero engine edits. Result uses the
    public cJSON API (devapi_add_* is devapi-internal). */
 static bool cmd_game_echo(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
@@ -208,7 +210,7 @@ static void frame(void) {
     /* Build the hud tree AFTER input_poll so this frame's (possibly injected) pointer drives the
        interaction step. nt_devapi's ui.tree/ui.element read the LAST completed frame — exactly this
        nt_ui_end's baked tables. Scratch is reset each frame for the per-element CLAY data. */
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     declare_hud();
     declare_hud_scaled();
 
@@ -260,8 +262,8 @@ static void frame(void) {
         .gpu_ms = -1.0F,
         .draw_calls = 0,
         .mem_used = s_mem_used,
-        .scratch_hwm = (uint32_t)nt_mem_scratch_high_water_mark(),
-        .scratch_used = (uint32_t)nt_mem_scratch_used(),
+        .scratch_hwm = (uint32_t)g_nt_mem_scratch.high_water,
+        .scratch_used = (uint32_t)g_nt_mem_scratch.used,
     };
     nt_metrics_sample(&mf);
 #endif
@@ -327,10 +329,10 @@ int main(void) {
     nt_devapi_register_reset(recover_on_client_reset);
     nt_devapi_register(k_game_cmds, NT_COUNTOF(k_game_cmds), NULL);
 
-    /* Probe-able "hud" UI context. nt_mem_scratch backs CLAY's per-element data; nt_ui_module_init is
+    /* Probe-able "hud" UI context. g_nt_mem_scratch backs CLAY's per-element data; nt_ui_module_init is
        self-contained (no gfx/font). The host registers the CTX here; the ui group's commands are
        registered by nt_devapi_register_default() above. */
-    nt_mem_scratch_init((size_t)64U * 1024U);
+    nt_arena_init(&g_nt_mem_scratch, s_scratch_mem, sizeof s_scratch_mem);
     nt_ui_module_init();
     {
         const nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
@@ -387,7 +389,6 @@ int main(void) {
     nt_ui_destroy_context(s_hud_ctx);
     nt_ui_destroy_context(s_hud_scaled_ctx);
     nt_ui_module_shutdown();
-    nt_mem_scratch_shutdown();
     nt_drawable_comp_shutdown();
     nt_transform_comp_shutdown();
     nt_entity_shutdown();

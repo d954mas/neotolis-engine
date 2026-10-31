@@ -9,7 +9,7 @@ target_link_libraries(slice9_demo PRIVATE
     nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource
     nt_material nt_shared nt_atlas
     nt_sprite_renderer nt_text_renderer nt_font nt_ui
-    nt_render nt_hash nt_mem_scratch nt_debug_overlay nt_metrics
+    nt_render nt_hash nt_memory nt_debug_overlay nt_metrics
 )
 # Generated per-pack asset headers from builder
 target_include_directories(slice9_demo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")

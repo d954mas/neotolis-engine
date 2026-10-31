@@ -372,8 +372,7 @@ static void clipboard_copy_selection(const char *buffer, const nt_ui_input_state
     uint32_t hi = 0U;
     selection_span(st, &lo, &hi);
     const uint32_t n = hi - lo;
-    char *tmp = (char *)nt_mem_scratch_alloc(n + 1U, 1U);
-    NT_ASSERT(tmp != NULL && "nt_ui_input: scratch alloc failed (clipboard copy)");
+    char *tmp = NT_ARENA_ALLOC_ARRAY(&g_nt_mem_scratch, char, n + 1U);
     memcpy(tmp, &buffer[lo], n);
     tmp[n] = '\0';
     nt_clipboard_set_text(tmp);
@@ -518,8 +517,7 @@ static void emit_rect(nt_ui_context_t *ctx, uint8_t layer, float x, float y, flo
     nt_ui_transform_t tt = nt_ui_transform_defaults();
     tt.offset_x = x;
     tt.offset_y = y;
-    nt_ui_element_data_t *rd = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
-    NT_ASSERT(rd != NULL && "nt_ui_input: scratch alloc failed (rect data)");
+    nt_ui_element_data_t *rd = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_element_data_t);
     *rd = (nt_ui_element_data_t){.user_data = NULL, .layer = layer, .flags = (uint8_t)NT_UI_ELEM_FLAG_HAS_TRANSFORM, .transform = tt, .opacity = 1.0F};
     const Clay_ElementDeclaration rect_decl = {
         .layout = {.sizing = {CLAY_SIZING_FIXED(w), CLAY_SIZING_FIXED(h)}},
@@ -537,8 +535,7 @@ static void emit_rect(nt_ui_context_t *ctx, uint8_t layer, float x, float y, flo
  * test probe (no GL capture) under NT_TEST_ACCESS. */
 const char *nt_ui_input_build_display_text(const char *buffer, uint32_t len) {
     const uint32_t count = codepoint_count(buffer, len);
-    char *masked = (char *)nt_mem_scratch_alloc(count + 1U, 1U);
-    NT_ASSERT(masked != NULL && "nt_ui_input: scratch alloc failed (mask)");
+    char *masked = NT_ARENA_ALLOC_ARRAY(&g_nt_mem_scratch, char, count + 1U);
     memset(masked, NT_UI_INPUT_MASK_CHAR, count);
     masked[count] = '\0';
     return masked;
@@ -576,8 +573,7 @@ static void emit_caret(nt_ui_context_t *ctx, uint8_t layer, float x, float y, fl
     nt_ui_transform_t tt = nt_ui_transform_defaults();
     tt.offset_x = x;
     tt.offset_y = y;
-    nt_ui_element_data_t *cd = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
-    NT_ASSERT(cd != NULL && "nt_ui_input: scratch alloc failed (caret data)");
+    nt_ui_element_data_t *cd = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_element_data_t);
     *cd = (nt_ui_element_data_t){.user_data = NULL, .layer = layer, .flags = (uint8_t)NT_UI_ELEM_FLAG_HAS_TRANSFORM, .transform = tt, .opacity = 1.0F};
     const Clay_ElementDeclaration caret_decl = {
         .layout = {.sizing = {CLAY_SIZING_FIXED(w), CLAY_SIZING_FIXED(h)}},
@@ -597,8 +593,7 @@ static void emit_caret(nt_ui_context_t *ctx, uint8_t layer, float x, float y, fl
  * its box; the walker further intersects that with the box's full ancestor chain (so an outer tab scroll
  * clips them too). The line is vertically centered by the floats' LEFT_CENTER attach. Caller must close. */
 static void emit_content_clip_open(nt_ui_context_t *ctx, uint8_t text_layer) {
-    nt_ui_element_data_t *id = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
-    NT_ASSERT(id != NULL && "nt_ui_input: scratch alloc failed (content clip data)");
+    nt_ui_element_data_t *id = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_element_data_t);
     *id = (nt_ui_element_data_t){.user_data = NULL, .layer = text_layer, .flags = 0U, .transform = nt_ui_transform_defaults(), .opacity = 1.0F};
     const Clay_ElementDeclaration content_decl = {
         .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
@@ -617,8 +612,7 @@ static void emit_text(nt_ui_context_t *ctx, uint8_t text_layer, float x, float y
     nt_ui_transform_t tt = nt_ui_transform_defaults();
     tt.offset_x = x;
     tt.offset_y = y;
-    nt_ui_element_data_t *wd = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
-    NT_ASSERT(wd != NULL && "nt_ui_input: scratch alloc failed (text wrapper data)");
+    nt_ui_element_data_t *wd = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_element_data_t);
     *wd = (nt_ui_element_data_t){.user_data = NULL, .layer = text_layer, .flags = (uint8_t)NT_UI_ELEM_FLAG_HAS_TRANSFORM, .transform = tt, .opacity = 1.0F};
     const Clay_ElementDeclaration text_decl = {
         .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}},
@@ -643,8 +637,7 @@ static nt_ui_image_payload_t *make_bg_payload(nt_atlas_region_ref_t art) {
     if (art.region == NT_ATLAS_INVALID_REGION) {
         return NULL;
     }
-    nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-    NT_ASSERT(p != NULL && "nt_ui_input: scratch alloc failed (bg art payload)");
+    nt_ui_image_payload_t *p = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
     *p = (nt_ui_image_payload_t){.atlas = art.atlas, .region_index = art.region, .slice9_scale = 1.0F};
     return p;
 }
