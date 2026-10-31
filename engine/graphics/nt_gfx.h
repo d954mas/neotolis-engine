@@ -776,7 +776,7 @@ enum {
     NT_GFX_INITIAL_BACKEND = 1,
 };
 
-/* The platform a capture was recorded on: web names are a prefix of native ones (see Capture text). */
+/* The platform a capture was recorded on: web names are a subset of native ones (see Capture text). */
 typedef enum {
     NT_GFX_CAPTURE_NATIVE,
     NT_GFX_CAPTURE_WEB,

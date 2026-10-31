@@ -49,7 +49,7 @@ nt_add_module(nt_gfx_stub LOG_DOMAIN "gfx_stub"
 )
 target_link_libraries(nt_gfx_stub PUBLIC nt_core nt_gfx_interface)
 
-# Capture text: linked only by the devapi gfx group and tests; gl call names resolve from the gfx impl.
+# Capture text: linked only by the devapi gfx group and tests; it owns the GL call names, so reading needs no gfx backend.
 if(NT_GFX_CAPTURE_ENABLED)
     nt_add_module(nt_gfx_capture_text LOG_DOMAIN "gfx"
         nt_gfx_capture_text.c

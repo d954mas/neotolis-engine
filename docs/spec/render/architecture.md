@@ -1428,10 +1428,10 @@ counter <name>=<n>                       (one line per nonzero counter)
 Any change of names, fields or grammar bumps the `ntcapture` version. The
 formatter and the parser walk the same per-arm field tables.
 
-`platform` is `nt_gfx_capture_view_t.platform`, set by gfx at publication. The web
-build's operation and GL call names are a prefix of the native ones (the native-only
-buffer readback names come last), so a native build reads captures of both
-platforms; a web build rejects native-only names.
+`platform` is `nt_gfx_capture_view_t.platform`, set by gfx at publication. The parser
+resolves names as strings in its own build's tables; the web build's operation and
+GL call names are a subset of the native ones, so a native build reads captures of
+both platforms.
 
 `nt_gfx_capture_parse(text, len, events, cap)` reads the document at the start of
 `text` (not terminated) back into records and a view. The text is untrusted: nothing
@@ -1452,8 +1452,8 @@ rule decides what survives an error, reported as a static message and a byte off
 
 `overflow=1` is data, not an error. Parsing the formatter's text gives back the same
 record bytes, and formatting them gives back the same text; other accepted input
-(explicit zeros, different escapes) formats canonically. A frame-storage counter
-index beyond this build's `NT_GFX_MAX_VERTEX_STREAMS` rejects the document.
+(explicit zeros, different escapes) formats canonically. A record's fields are
+accepted only in the formatter's order, each at most once.
 
 ## Shape strokes
 

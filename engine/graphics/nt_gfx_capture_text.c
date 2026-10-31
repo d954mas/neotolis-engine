@@ -57,12 +57,11 @@ _Static_assert(sizeof(s_result_names) / sizeof(s_result_names[0]) == NT_GFX_RESU
 _Static_assert(sizeof(s_note_type_names) / sizeof(s_note_type_names[0]) == NT_GFX_NOTE_STR + 1, "every note type has a name");
 _Static_assert(sizeof(s_platform_names) / sizeof(s_platform_names[0]) == NT_GFX_CAPTURE_WEB + 1, "every platform has a name");
 
-const char *nt_gfx_gl_call_name(uint32_t call) {
 #define NT_GFX_GL_CALL_NAME_(name) #name,
-    static const char *const names[NT_GFX_GL_COUNT] = {NULL, NT_GFX_GL_CALLS(NT_GFX_GL_CALL_NAME_)};
+static const char *const s_gl_call_names[NT_GFX_GL_COUNT] = {NULL, NT_GFX_GL_CALLS(NT_GFX_GL_CALL_NAME_)};
 #undef NT_GFX_GL_CALL_NAME_
-    return call < NT_GFX_GL_COUNT ? names[call] : NULL;
-}
+
+const char *nt_gfx_gl_call_name(uint32_t call) { return call < NT_GFX_GL_COUNT ? s_gl_call_names[call] : NULL; }
 
 #define NT_COUNT_(table) ((uint32_t)(sizeof(table) / sizeof((table)[0])))
 
@@ -99,32 +98,32 @@ typedef struct {
     uint8_t size;    /* list capacity; 1 for scalars */
 } field_t;
 
-#define NT_FIELD_(arm, member, type, size) #member, (uint16_t)offsetof(nt_gfx_event_t, data.arm.member), (type), (size)
-static const field_t k_backend[] = {{NT_FIELD_(backend, args, F_U32S, 12)}, {NT_FIELD_(backend, values, F_F32S, 4)}, {NT_FIELD_(backend, bytes, F_U64, 1)}};
-static const field_t k_key[] = {{"key", (uint16_t)offsetof(nt_gfx_event_t, data.backend.args), F_U32S, 12}, {NT_FIELD_(backend, values, F_F32S, 4)}, {NT_FIELD_(backend, bytes, F_U64, 1)}};
+#define NT_FIELD_(arm, member, type) #member, (uint16_t)offsetof(nt_gfx_event_t, data.arm.member), (type), 1
+#define NT_LIST_(arm, member, type) #member, (uint16_t)offsetof(nt_gfx_event_t, data.arm.member), (type), (uint8_t)NT_COUNT_(((nt_gfx_event_t *)NULL)->data.arm.member)
+static const field_t k_backend[] = {{NT_LIST_(backend, args, F_U32S)}, {NT_LIST_(backend, values, F_F32S)}, {NT_FIELD_(backend, bytes, F_U64)}};
+static const field_t k_key[] = {{"key", (uint16_t)offsetof(nt_gfx_event_t, data.backend.args), F_U32S, (uint8_t)NT_COUNT_(((nt_gfx_event_t *)NULL)->data.backend.args)},
+                                {NT_LIST_(backend, values, F_F32S)},
+                                {NT_FIELD_(backend, bytes, F_U64)}};
 static const field_t k_resource[] = {
-    {NT_FIELD_(resource, size, F_U64, 1)},   {NT_FIELD_(resource, backend, F_U32, 1)}, {NT_FIELD_(resource, related, F_U32S, 3)}, {NT_FIELD_(resource, type, F_U32, 1)},
-    {NT_FIELD_(resource, usage, F_U32, 1)},  {NT_FIELD_(resource, width, F_U32, 1)},   {NT_FIELD_(resource, height, F_U32, 1)},   {NT_FIELD_(resource, format, F_U32, 1)},
-    {NT_FIELD_(resource, levels, F_U32, 1)}, {NT_FIELD_(resource, flags, F_U32, 1)},
+    {NT_FIELD_(resource, size, F_U64)},  {NT_FIELD_(resource, backend, F_U32)}, {NT_LIST_(resource, related, F_U32S)}, {NT_FIELD_(resource, type, F_U32)},   {NT_FIELD_(resource, usage, F_U32)},
+    {NT_FIELD_(resource, width, F_U32)}, {NT_FIELD_(resource, height, F_U32)},  {NT_FIELD_(resource, format, F_U32)},  {NT_FIELD_(resource, levels, F_U32)}, {NT_FIELD_(resource, flags, F_U32)},
 };
 static const field_t k_draw[] = {
-    {NT_FIELD_(draw, first, F_U32, 1)}, {NT_FIELD_(draw, count, F_U32, 1)}, {NT_FIELD_(draw, vertices, F_U32, 1)}, {NT_FIELD_(draw, instances, F_U32, 1)}, {NT_FIELD_(draw, vertex_input, F_U32, 1)}};
-static const field_t k_binding[] = {{NT_FIELD_(binding, secondary, F_U32, 1)},
-                                    {NT_FIELD_(binding, name, F_U32, 1)},
-                                    {NT_FIELD_(binding, slot, F_U32, 1)},
-                                    {NT_FIELD_(binding, offset, F_U32, 1)},
-                                    {NT_FIELD_(binding, size, F_U32, 1)}};
+    {NT_FIELD_(draw, first, F_U32)}, {NT_FIELD_(draw, count, F_U32)}, {NT_FIELD_(draw, vertices, F_U32)}, {NT_FIELD_(draw, instances, F_U32)}, {NT_FIELD_(draw, vertex_input, F_U32)}};
+static const field_t k_binding[] = {
+    {NT_FIELD_(binding, secondary, F_U32)}, {NT_FIELD_(binding, name, F_U32)}, {NT_FIELD_(binding, slot, F_U32)}, {NT_FIELD_(binding, offset, F_U32)}, {NT_FIELD_(binding, size, F_U32)}};
 static const field_t k_pass[] = {
-    {NT_FIELD_(pass, target, F_U32, 1)},      {NT_FIELD_(pass, color, F_F32S, 4)},         {NT_FIELD_(pass, depth, F_F32, 1)},          {NT_FIELD_(pass, load_color, F_BOOL, 1)},
-    {NT_FIELD_(pass, load_depth, F_BOOL, 1)}, {NT_FIELD_(pass, discard_color, F_BOOL, 1)}, {NT_FIELD_(pass, discard_depth, F_BOOL, 1)},
+    {NT_FIELD_(pass, target, F_U32)},      {NT_LIST_(pass, color, F_F32S)},          {NT_FIELD_(pass, depth, F_F32)},          {NT_FIELD_(pass, load_color, F_BOOL)},
+    {NT_FIELD_(pass, load_depth, F_BOOL)}, {NT_FIELD_(pass, discard_color, F_BOOL)}, {NT_FIELD_(pass, discard_depth, F_BOOL)},
 };
-static const field_t k_clear[] = {{NT_FIELD_(clear, clear_color, F_F32S, 4)}, {NT_FIELD_(clear, clear_depth, F_F32, 1)}, {NT_FIELD_(clear, color, F_BOOL, 1)}, {NT_FIELD_(clear, depth, F_BOOL, 1)}};
+static const field_t k_clear[] = {{NT_LIST_(clear, clear_color, F_F32S)}, {NT_FIELD_(clear, clear_depth, F_F32)}, {NT_FIELD_(clear, color, F_BOOL)}, {NT_FIELD_(clear, depth, F_BOOL)}};
 static const field_t k_attribute[] = {
-    {NT_FIELD_(attribute, buffer, F_U32, 1)}, {NT_FIELD_(attribute, offset, F_U32, 1)}, {NT_FIELD_(attribute, stride, F_U32, 1)},     {NT_FIELD_(attribute, location, F_U32, 1)},
-    {NT_FIELD_(attribute, type, F_U32, 1)},   {NT_FIELD_(attribute, count, F_U32, 1)},  {NT_FIELD_(attribute, normalized, F_U32, 1)}, {NT_FIELD_(attribute, divisor, F_U32, 1)},
+    {NT_FIELD_(attribute, buffer, F_U32)}, {NT_FIELD_(attribute, offset, F_U32)}, {NT_FIELD_(attribute, stride, F_U32)},     {NT_FIELD_(attribute, location, F_U32)},
+    {NT_FIELD_(attribute, type, F_U32)},   {NT_FIELD_(attribute, count, F_U32)},  {NT_FIELD_(attribute, normalized, F_U32)}, {NT_FIELD_(attribute, divisor, F_U32)},
 };
-static const field_t k_state[] = {{NT_FIELD_(state, integers, F_U32S, 14)}, {NT_FIELD_(state, values, F_F32S, 6)}};
+static const field_t k_state[] = {{NT_LIST_(state, integers, F_U32S)}, {NT_LIST_(state, values, F_F32S)}};
 #undef NT_FIELD_
+#undef NT_LIST_
 
 #define NT_ARM_(fields, member) (fields), NT_COUNT_(fields), sizeof(((nt_gfx_event_t *)NULL)->data.member)
 static const struct {
@@ -385,10 +384,10 @@ static void put_fields(text_t *t, const nt_gfx_event_t *e, arm_t arm) {
 static void assert_args_counted(const nt_gfx_event_t *e, bool issued) {
     NT_ASSERT((issued || e->arg_count == 0) && "capture text: only issued calls count arguments");
     bool counted = true;
-    for (uint32_t i = issued ? e->arg_count & 0x0FU : 12U; i < 12U; i++) {
+    for (uint32_t i = issued ? e->arg_count & 0x0FU : NT_COUNT_(e->data.backend.args); i < NT_COUNT_(e->data.backend.args); i++) {
         counted = counted && e->data.backend.args[i] == 0;
     }
-    for (uint32_t i = issued ? (uint32_t)(e->arg_count >> 4) : 4U; i < 4U; i++) {
+    for (uint32_t i = issued ? (uint32_t)(e->arg_count >> 4) : NT_COUNT_(e->data.backend.values); i < NT_COUNT_(e->data.backend.values); i++) {
         counted = counted && float_bits(e->data.backend.values[i]) == 0;
     }
     NT_ASSERT(counted && "capture text: an issued call sets an argument it does not count");
@@ -629,7 +628,7 @@ static size_t ident_length(const line_t *l) {
 
 static bool name_is(const char *name, const char *s, size_t n) { return name != NULL && strlen(name) == n && memcmp(name, s, n) == 0; }
 
-/* A name in this build's table; a name only another build knows is unknown here. */
+/* A name in this build's table (a NULL slot never matches); a name only another build knows is unknown here. */
 static bool read_name(line_t *l, const char *const *names, uint32_t count, uint32_t *out) {
     const size_t n = ident_length(l);
     for (uint32_t i = 0; i < count; i++) {
@@ -642,18 +641,6 @@ static bool read_name(line_t *l, const char *const *names, uint32_t count, uint3
     return fail(l, "unknown name");
 }
 #define NT_READ_NAME_(l, table, out) read_name((l), (table), NT_COUNT_(table), (out))
-
-static bool read_call(line_t *l, uint32_t *out) {
-    const size_t n = ident_length(l);
-    for (uint32_t i = 1; i < NT_GFX_GL_COUNT; i++) {
-        if (name_is(nt_gfx_gl_call_name(i), l->p, n)) {
-            *out = i;
-            l->p += n;
-            return true;
-        }
-    }
-    return fail(l, "unknown GL call");
-}
 
 static int hex_digit(char c) {
     if (c >= '0' && c <= '9') {
@@ -865,7 +852,7 @@ static bool read_detail(line_t *l, nt_gfx_event_t *e, const nt_gfx_event_t *even
     switch (detail_kind(e)) {
     case DETAIL_CALL:
         if (take(l, " call=")) {
-            return read_call(l, &e->detail);
+            return NT_READ_NAME_(l, s_gl_call_names, &e->detail);
         }
         return e->kind != NT_GFX_EVENT_BACKEND || fail(l, "an issued call needs call=");
     case DETAIL_RESOURCE:
@@ -1006,7 +993,7 @@ static bool read_counter(line_t *l, nt_gfx_counters_t *c) {
         }
         slot = &c->frame_bytes[i];
     } else if (take(l, "gl.")) {
-        if (!read_call(l, &i)) {
+        if (!NT_READ_NAME_(l, s_gl_call_names, &i)) {
             return false;
         }
         slot = &c->gl[i];
@@ -1065,13 +1052,6 @@ static bool read_header(line_t *l, const char **at, const char *end, nt_gfx_capt
     return true;
 }
 
-static const char *line_start(const char *text, const char *at) {
-    while (at > text && at[-1] != '\n') {
-        at--;
-    }
-    return at;
-}
-
 /* The records= lines from *at into events[0..cap); returns how many parsed, the first failure in l. */
 static uint32_t read_records(line_t *l, const char **at, const char *end, nt_gfx_event_t *events, uint32_t cap, uint32_t records) {
     uint32_t count = 0;
@@ -1124,7 +1104,7 @@ nt_gfx_capture_parsed_t nt_gfx_capture_parse(const char *text, size_t len, nt_gf
     if (l.error != NULL) {
         r.error = l.error;
         r.error_at = (size_t)(l.error_at - text);
-        at = next_document(line_start(text, l.error_at), end);
+        at = next_document(at, end); /* at is the start of the failed line */
     }
     r.next = (size_t)(at - text);
     return r;

@@ -339,6 +339,13 @@ static void test_extremes_round_trip(void) {
     assert_records_round_trip(&view);
 }
 
+/* Issued-call argument counts, cache keys, joined draws and note fields come back byte for byte. */
+static void test_every_arm_round_trips(void) {
+    nt_gfx_event_t ev[NT_RECORD_COUNT];
+    const nt_gfx_capture_view_t view = hand_built_view(ev);
+    assert_records_round_trip(&view);
+}
+
 static void test_documents_parse_back_to_back(void) {
     const char *bad = "ntcapture 2\nframe sequence=1 platform=native records=2 overflow=0 execute=0..0\n0 OP op=PASS\n1 OP op=NO_SUCH_OP\n";
     const char *web_head = "ntcapture 2\nframe sequence=9 platform=web";
@@ -472,6 +479,22 @@ static void test_a_saved_web_file_round_trips(void) {
 }
 
 /* The contract for untrusted text: any cut or damaged byte parses without asserting, and whatever is kept formats. */
+/* Whatever damaged text is accepted formats canonically, and that text parses back to the same records. */
+static void assert_canonical(const nt_gfx_capture_parsed_t *r) {
+    if (r->view.events == NULL) {
+        return;
+    }
+    char *text = format_all(&r->view);
+    nt_gfx_event_t again[NT_RECORD_COUNT];
+    const nt_gfx_capture_parsed_t back = nt_gfx_capture_parse(text, strlen(text), again, NT_RECORD_COUNT);
+    TEST_ASSERT_NULL(back.error);
+    TEST_ASSERT_EQUAL_UINT32(r->view.count, back.view.count);
+    if (back.view.count > 0) { /* Unity refuses an empty compare */
+        TEST_ASSERT_EQUAL_MEMORY(r->view.events, again, (size_t)back.view.count * sizeof(*again));
+    }
+    free(text);
+}
+
 static void test_damaged_text_never_asserts(void) {
     const size_t len = strlen(k_expected);
     char *text = (char *)malloc(len + 1U);
@@ -480,18 +503,14 @@ static void test_damaged_text_never_asserts(void) {
     static const char k_bytes[] = {'0', '9', '@', ' ', '"', '\\', 'x', '\n', 'A', '-', '[', ',', '=', '.'};
     for (size_t cut = 0; cut <= len; cut++) {
         const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(k_expected, cut, ev, NT_RECORD_COUNT);
-        if (r.view.events != NULL) {
-            free(format_all(&r.view));
-        }
+        assert_canonical(&r);
     }
     for (size_t at = 0; at < len; at++) {
         for (size_t b = 0; b < sizeof(k_bytes); b++) {
             memcpy(text, k_expected, len + 1U);
             text[at] = k_bytes[b];
             const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(text, len, ev, NT_RECORD_COUNT);
-            if (r.view.events != NULL) {
-                free(format_all(&r.view));
-            }
+            assert_canonical(&r);
         }
     }
     free(text);
@@ -510,6 +529,7 @@ int main(void) {
     RUN_TEST(test_text_round_trips);
     RUN_TEST(test_a_recorded_frame_round_trips);
     RUN_TEST(test_extremes_round_trip);
+    RUN_TEST(test_every_arm_round_trips);
     RUN_TEST(test_documents_parse_back_to_back);
     RUN_TEST(test_bad_text_reports_where_and_keeps_a_prefix);
     RUN_TEST(test_a_saved_web_file_round_trips);
