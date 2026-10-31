@@ -304,13 +304,6 @@ nt_gfx_event_t *nt_gfx_capture_reserve_recording(void) {
     return event;
 }
 
-const char *nt_gfx_gl_call_name(uint32_t call) {
-#define NT_GFX_GL_CALL_NAME_(name) #name,
-    static const char *const names[NT_GFX_GL_COUNT] = {NULL, NT_GFX_GL_CALLS(NT_GFX_GL_CALL_NAME_)};
-#undef NT_GFX_GL_CALL_NAME_
-    return call < NT_GFX_GL_COUNT ? names[call] : NULL;
-}
-
 void nt_gfx_capture_request(void) {
     NT_ASSERT(g_nt_gfx_capture.capacity > 0 && "capture_request: nt_gfx_desc_t.capture_capacity is 0");
     g_nt_gfx_capture.request_pending = true;
@@ -830,6 +823,9 @@ void nt_gfx_begin_frame(void) {
         capture->done = capture->view;
         capture->done.counters = g_nt_gfx.last_frame;
         capture->done.events = capture->events;
+#if defined(NT_PLATFORM_WEB)
+        capture->done.platform = NT_GFX_CAPTURE_WEB;
+#endif
         capture->view = (nt_gfx_capture_view_t){0};
         capture->events = capture->events == capture->base ? capture->base + capture->capacity : capture->base;
         g_nt_gfx.capture_recording = false;

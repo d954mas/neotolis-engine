@@ -95,7 +95,7 @@ def main():
                     raise RuntimeError(f"{name}: nt_gfx archive not found among {libraries}")
                 symbols = run([nm, "--defined-only", str(library)], args.output / f"{name}-symbols.log")
                 # Extern symbols only: statics and inline helpers may vanish from either build.
-                for producer in ("g_nt_gfx_capture", "nt_gfx_backend_capture_initial_state", "nt_gfx_gl_call_name"):
+                for producer in ("g_nt_gfx_capture", "nt_gfx_backend_capture_initial_state", "nt_gfx_capture_read"):
                     if capture == "OFF" and producer in symbols:
                         raise RuntimeError(f"{name}: disabled producer remains: {producer}")
                     if capture == "ON" and producer not in symbols:

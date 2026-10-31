@@ -1095,7 +1095,7 @@ Backends without GL (the test fake) issue no GL calls, so `gl[]` and the
 upload fields stay zero there. `NT_GFX_CAPTURE_ENABLED` is a numeric interface
 definition published by the interface target, so every consumer sees the same
 configuration; `nt_gfx_capture_request`, `nt_gfx_capture_set_continuous`,
-`nt_gfx_capture_read`, `nt_gfx_gl_call_name`, `nt_gfx_note_record`, `nt_gfx_marker_push` and
+`nt_gfx_capture_read`, `nt_gfx_note_record`, `nt_gfx_marker_push` and
 `nt_gfx_marker_pop` exist only when it is 1.
 
 `gl[]` counts, by `nt_gfx_gl_call_t`, every GL call the GL backend issues
@@ -1108,7 +1108,7 @@ expression that issues the call; a grep gate rejects any bare `gl*` call in
 `engine/graphics/gl`. The funnel does no per-call frame check: a frame is
 always open between init and shutdown. The
 single `NT_GFX_GL_CALLS` table in `nt_gfx.h` defines the enum, `NT_GFX_GL_COUNT`
-and, with capture, `nt_gfx_gl_call_name`. WebGL JS calls the web context makes
+and `nt_gfx_gl_call_name` (capture text, so reading a capture needs no gfx backend). WebGL JS calls the web context makes
 directly (`getExtension`, the `glGetQueryObjectui64v` timer-result bridge and
 `glGetString` identity queries through `getParameter`) are
 counted and recorded through `NT_GL_ISSUED` at their C call site, in a separate
@@ -1372,11 +1372,14 @@ records end `CONTEXT_LOST`; a sprite or text material resolved after it notes
 text: a reader can rebuild every record field from it. It writes into the caller's
 buffer like `snprintf`, returning the bytes needed without the terminator, and
 allocates nothing. The text is the capture artifact: DevAPI returns it and clients
-save it.
+save it. One capture is one document; a capture file holds one or more documents
+back to back, so appending a frame or concatenating files keeps a file valid. Each
+document starts with its own version line and stays self-contained (its own initial
+snapshot, record indices and links).
 
 ```text
-ntcapture 1
-frame sequence=<n> records=<n> overflow=<0|1> execute=<begin>..<end>
+ntcapture 2
+frame sequence=<n> platform=<native|web> records=<n> overflow=<0|1> execute=<begin>..<end>
 counter <name>=<n>                       (one line per nonzero counter)
 <index> <indent><KIND> op=<OP> [obj=<KIND>:<handle>] [result=<R>] [<detail>] [link=@<index>] <fields>
 <index> <indent>NOTE label="<text>"
@@ -1392,7 +1395,9 @@ counter <name>=<n>                       (one line per nonzero counter)
   `detail` prints as `call=<glCall>` on BACKEND
   and backend SKIP records, `resource=<KIND>` on backend resource DEFINITION records,
   `layer=FRONTEND|BACKEND` on INITIAL/STATE, `joined=@<index>` on a merged draw (the
-  draw it joined), `detail=<n>` otherwise, and is omitted when 0.
+  draw it joined), `detail=<n>` otherwise. `resource=` and `layer=` always print;
+  the others are omitted when 0. `link` and `joined` name earlier records: an OP
+  record, a draw for `joined`. Lines end with `\n` alone.
 - Fields print as `name=value` for the data arm of the record (table below); zero
   fields are omitted, and arrays print up to their last nonzero element. Issued-call
   arguments print exactly `arg_count` elements, so a zero argument stays visible
@@ -1420,7 +1425,36 @@ counter <name>=<n>                       (one line per nonzero counter)
 | OP: VERTEX_INPUT, UBO, SEGMENT_BEGIN, SEGMENT_POLL | `binding` |
 | OP: other | `state` |
 
-Any change of names, fields or grammar bumps the `ntcapture` version.
+Any change of names, fields or grammar bumps the `ntcapture` version. The
+formatter and the parser walk the same per-arm field tables.
+
+`platform` is `nt_gfx_capture_view_t.platform`, set by gfx at publication. The parser
+resolves names as strings in its own build's tables; the web build's operation and
+GL call names are a subset of the native ones, so a native build reads captures of
+both platforms.
+
+`nt_gfx_capture_parse(text, len, events, cap)` reads the document at the start of
+`text` (not terminated) back into records and a view. The text is untrusted: nothing
+in it asserts, and every number, name, string and reference is checked against the
+record layout, so whatever it accepts formats without asserting. It allocates
+nothing: every record is one line, so a caller sizes one array for a whole file from
+its line count, parses each document into the free tail and continues at `next`. One
+rule decides what survives an error, reported as a static message and a byte offset
+(`error`, `error_at`):
+
+- an error in the header (version line, frame line, counters) rejects the document:
+  `view.events` is NULL;
+- an error in a record line, an unknown name included, keeps the records before it,
+  with the execution range clipped to them; so do a missing last newline, fewer lines
+  than `records=` and an array of fewer than `records=` elements (`cap`);
+- a line after the last record that does not open a document (a blank line, a `\r`
+  ending included) is an error after a complete frame.
+
+Floats print and read with `.`: formatting and parsing require `LC_NUMERIC` to be
+the C locale, which the engine never changes. `overflow=1` is data, not an error. Parsing the formatter's text gives back the same
+record bytes, and formatting them gives back the same text; other accepted input
+(explicit zeros, different escapes) formats canonically. A record's fields are
+accepted only in the formatter's order, each at most once.
 
 ## Shape strokes
 

@@ -30,7 +30,7 @@ def run(client: DevApiClient, out_dir: str) -> None:
         read = client.gfx_read(sequence)
         text = read["text"]
         assert read["sequence"] == sequence and read["sim_frame"] == sim, f"step frame {sim}/{sequence} read as {read['sim_frame']}/{read['sequence']}"
-        assert text.startswith("ntcapture 1\nframe sequence="), f"capture text header missing: {text[:60]!r}"
+        assert text.startswith("ntcapture 2\nframe sequence="), f"capture text header missing: {text[:60]!r}"
         assert " OP op=PASS " in text and " OP op=CLEAR " in text, "the step frame lacks the host's pass and clear"
     print("PASS[1/4] gfx_step_frame + gfx.read {sequence}: the frame of each of 3 steps, with the host's pass and clear.")
 
@@ -44,12 +44,12 @@ def run(client: DevApiClient, out_dir: str) -> None:
     assert client.gfx_frames() == listing, "the ring changed after off"
     print(f"PASS[2/4] gfx.frames: {len(frames)} gapless frames after off, stable.")
 
-    # 3. Save every stored frame; the client owns files.
-    for f in frames:
-        text = client.gfx_read(sequence=f["sequence"])["text"]
-        with open(os.path.join(out_dir, f"gfx_frame_{f['sequence']}.ntcapture.txt"), "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(text)
-    print(f"PASS[3/4] saved {len(frames)} frames to {out_dir}.")
+    # 3. Save every stored frame into one file: a capture file is its documents back to back; the client owns files.
+    path = os.path.join(out_dir, "gfx_frames.ntcapture.txt")
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        for f in frames:
+            fh.write(client.gfx_read(sequence=f["sequence"])["text"])
+    print(f"PASS[3/4] saved {len(frames)} frames to {path}.")
 
     # 4. A frame before the ring is unknown_frame over the wire; the sim advanced only by the 3 steps.
     try:

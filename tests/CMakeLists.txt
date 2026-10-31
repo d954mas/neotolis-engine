@@ -384,6 +384,7 @@ if(NOT EMSCRIPTEN)
     if(NT_GFX_CAPTURE_ENABLED)
         add_executable(test_gfx_capture_text unit/test_gfx_capture_text.c)
         target_link_libraries(test_gfx_capture_text PRIVATE nt_gfx_capture_text nt_gfx_fake nt_basisu_transcoder_stub nt_log unity nt_meshwire_stub)
+        target_compile_definitions(test_gfx_capture_text PRIVATE _CRT_SECURE_NO_WARNINGS NT_CAPTURE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/gfx_frames_web.ntcapture.txt")
         nt_setup_test_target(test_gfx_capture_text)
     endif()
 
@@ -1693,6 +1694,7 @@ if(EMSCRIPTEN)
     else()
         message(STATUS "Node.js not found; skipping CTest registration for test_basisu_trimmed")
     endif()
+
 endif()
 
 # Crash output survives on EVERY test exe, incl. raw add_executable targets

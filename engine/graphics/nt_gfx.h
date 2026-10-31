@@ -776,8 +776,15 @@ enum {
     NT_GFX_INITIAL_BACKEND = 1,
 };
 
+/* The platform a capture was recorded on: web names are a subset of native ones (see Capture text). */
+typedef enum {
+    NT_GFX_CAPTURE_NATIVE,
+    NT_GFX_CAPTURE_WEB,
+} nt_gfx_capture_platform_t;
+
 typedef struct {
     bool overflow;
+    nt_gfx_capture_platform_t platform;
     const nt_gfx_event_t *events;
     uint32_t count;
     uint32_t execute_begin, execute_end; /* records of the end_frame stream execution, frame storage uploads included; 0 until it ran */
@@ -785,8 +792,6 @@ typedef struct {
 } nt_gfx_capture_view_t;
 
 #if NT_GFX_CAPTURE_ENABLED
-/* Name of an issued-call detail, e.g. "glBindTexture"; NULL outside the table. */
-const char *nt_gfx_gl_call_name(uint32_t call);
 /* One-shot: the next frame records, starting at the begin_frame that opens it.
  * Requires nonzero init capacity. The stub is inert. */
 void nt_gfx_capture_request(void);
