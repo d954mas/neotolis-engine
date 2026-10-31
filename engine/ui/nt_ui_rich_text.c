@@ -42,14 +42,15 @@
 #define NT_UI_RICH_STACK_DEPTH (NT_UI_RICH_PARSE_TAG_DEPTH + 1) /* push/pop nesting per call */
 
 typedef struct {
-    nt_rich_atom_kind_t kind;
-    uint16_t style_idx; /* index into the dedup'd style table */
+    uint8_t kind;       /* nt_rich_atom_kind_t */
     uint8_t flags;      /* NT_UI_RICH_RUN_* (synthetic italic) */
+    uint16_t style_idx; /* index into the dedup'd style table */
     uint32_t link_id;   /* 0 = not a link */
-    /* TEXT: byte range into the shared utf8 buffer. */
-    uint32_t text_off;
-    uint32_t text_len;
-    union { /* by kind */
+    union {             /* by kind */
+        struct {        /* byte range into the shared utf8 buffer */
+            uint32_t text_off;
+            uint32_t text_len;
+        };
         struct {
             nt_atlas_region_ref_t image_ref;
             nt_rich_valign_t image_valign;
@@ -261,7 +262,7 @@ static nt_ui_rich_run_t *rich_new_run(nt_ui_rich_state_t *st, nt_rich_atom_kind_
     const uint32_t idx = st->run_count++;
     nt_ui_rich_run_t *r = &st->runs[idx];
     memset(r, 0, sizeof *r);
-    r->kind = kind;
+    r->kind = (uint8_t)kind;
     return r;
 }
 // #endregion
@@ -2348,7 +2349,7 @@ nt_font_t nt_ui_rich_test_run_font(nt_ui_context_t *ctx, uint32_t run) {
 nt_rich_atom_kind_t nt_ui_rich_test_run_kind(nt_ui_context_t *ctx, uint32_t run) {
     nt_ui_rich_state_t *st = rich_state(ctx);
     NT_ASSERT(run < st->run_count);
-    return st->runs[run].kind;
+    return (nt_rich_atom_kind_t)st->runs[run].kind;
 }
 
 uint32_t nt_ui_rich_test_run_link(nt_ui_context_t *ctx, uint32_t run) {
@@ -2365,7 +2366,7 @@ uint32_t nt_ui_rich_test_run_text_len(nt_ui_context_t *ctx, uint32_t run) {
 
 const char *nt_ui_rich_test_run_text(nt_ui_context_t *ctx, uint32_t run) {
     nt_ui_rich_state_t *st = rich_state(ctx);
-    NT_ASSERT(run < st->run_count);
+    NT_ASSERT(run < st->run_count && st->runs[run].kind == NT_RICH_ATOM_TEXT);
     return st->text + st->runs[run].text_off;
 }
 
