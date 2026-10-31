@@ -68,6 +68,7 @@ uint32_t nt_test_mesh_color_probe(void);
 #define UI_REF_W 1280.0F
 #define UI_REF_H 800.0F
 #define SCRATCH_ARENA_SIZE (1U << 20)
+_Alignas(max_align_t) static uint8_t s_scratch_mem[SCRATCH_ARENA_SIZE];
 #define UI_MAX_ELEMENTS 512U
 // #endregion
 
@@ -1440,7 +1441,7 @@ int main(int argc, char *argv[]) {
 #endif
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
-    nt_mem_scratch_init(SCRATCH_ARENA_SIZE);
+    nt_arena_init(&g_nt_mem_scratch, s_scratch_mem, sizeof s_scratch_mem);
 
     nt_resource_register_type(NT_ASSET_TEXTURE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_texture, .deactivate = nt_gfx_deactivate_texture});
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
@@ -1591,7 +1592,6 @@ int main(int argc, char *argv[]) {
     nt_program_ref_drop(&s_sprite_program);
     nt_program_ref_drop(&s_text_program);
     nt_material_shutdown();
-    nt_mem_scratch_shutdown();
     nt_resource_shutdown();
     nt_fs_shutdown();
     nt_http_shutdown();

@@ -357,7 +357,7 @@ static void test_culling_radius_pads_normalized_uint8_weights(void) {
 }
 
 int main(void) {
-    nt_mem_scratch_init(4096U);
+    nt_arena_init(&g_nt_mem_scratch, s_scratch_mem, sizeof s_scratch_mem); /* the showcase's buffer */
     UNITY_BEGIN();
     RUN_TEST(test_blend_space_uses_adjacent_normalized_weights);
     RUN_TEST(test_blend_space_skips_zero_gain_sampling_without_previews);
@@ -379,6 +379,5 @@ int main(void) {
     RUN_TEST(test_completed_crossfade_shows_only_live_source);
     RUN_TEST(test_culling_radius_pads_normalized_uint8_weights);
     const int result = UNITY_END();
-    nt_mem_scratch_shutdown();
     return result;
 }

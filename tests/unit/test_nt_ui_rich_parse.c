@@ -61,7 +61,6 @@ static void sink_detach(void) { nt_log_remove_sink(test_warn_sink, &s_sink); }
 void setUp(void) {
     nt_test_assert_install();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
-    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 }

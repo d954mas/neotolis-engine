@@ -134,7 +134,7 @@ static void declare_xform_tree(void) {
 }
 
 void setUp(void) {
-    /* Real headless ctx + renderer chain (no window/GLFW); also nt_mem_scratch_init for CLAY data. */
+    /* Real headless ctx + renderer chain (no window/GLFW); also inits g_nt_mem_scratch for CLAY data. */
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
 
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());

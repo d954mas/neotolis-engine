@@ -81,6 +81,7 @@ static const uint8_t s_white_pixel[4] = {255, 255, 255, 255};
 
 #define UI_ARENA_SIZE ((size_t)2U * 1024U * 1024U)
 #define SCRATCH_ARENA_SIZE ((size_t)128U * 1024U)
+_Alignas(max_align_t) static uint8_t s_scratch_mem[SCRATCH_ARENA_SIZE];
 
 #define LAYER_UI_BG 0
 #define LAYER_UI_TEXT 1
@@ -563,7 +564,7 @@ int main(void) {
 #endif
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
-    nt_mem_scratch_init(SCRATCH_ARENA_SIZE);
+    nt_arena_init(&g_nt_mem_scratch, s_scratch_mem, sizeof s_scratch_mem);
     nt_resource_register_type(NT_ASSET_TEXTURE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_texture, .deactivate = nt_gfx_deactivate_texture});
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
     nt_atlas_init();
@@ -642,7 +643,6 @@ int main(void) {
     nt_program_ref_drop(&s_sprite_program);
     nt_program_ref_drop(&s_text_program);
     nt_material_shutdown();
-    nt_mem_scratch_shutdown();
     nt_resource_shutdown();
     nt_fs_shutdown();
     nt_http_shutdown();

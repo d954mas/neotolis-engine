@@ -88,6 +88,7 @@
 #define HUMANOID_JOINT_COUNT 21U
 #define UI_ARENA_SIZE ((size_t)2 * 1024 * 1024)
 #define SCRATCH_ARENA_SIZE ((size_t)128 * 1024)
+_Alignas(max_align_t) static uint8_t s_scratch_mem[SCRATCH_ARENA_SIZE];
 #define STAGE_ID "skeletal_showcase/stage"
 /* Camera numbers are authored for the humanoid; s_fit_scale rescales them per rig. */
 #define CAMERA_MIN 3.5F
@@ -963,7 +964,7 @@ static void mixing_sample_slots(nt_skeletal_trs_t *poses[MIX_TRACK_COUNT]) {
             poses[i] = NULL;
             continue;
         }
-        poses[i] = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_skeletal_trs_t, joints);
+        poses[i] = NT_ARENA_ALLOC_ARRAY(&g_nt_mem_scratch, nt_skeletal_trs_t, joints);
         nt_skeletal_sample(s_mixing_scene.clips[s_mixing_scene.slots[i].clip], s_mixing_scene.slots[i].track.time, poses[i]);
     }
 }
@@ -1067,7 +1068,7 @@ static void mixing_update_blend_space(nt_skeletal_trs_t *poses[MIX_TRACK_COUNT])
         if (gains[i] == 0.0F && !s_mixing_scene.show_sources) {
             continue;
         }
-        poses[i] = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_skeletal_trs_t, s_mixing_scene.skel->joint_count);
+        poses[i] = NT_ARENA_ALLOC_ARRAY(&g_nt_mem_scratch, nt_skeletal_trs_t, s_mixing_scene.skel->joint_count);
         nt_skeletal_sample(s_mixing_scene.clips[s_mixing_scene.slots[i].clip], s_mixing_scene.slots[i].track.time, poses[i]);
         if (gains[i] > 0.0F) {
             inputs[input_count++] = (nt_skeletal_mix_input_t){.pose = poses[i], .gain = gains[i]};
@@ -1089,7 +1090,7 @@ static void mixing_prepare_models(nt_skeletal_trs_t *poses[MIX_TRACK_COUNT]) {
             s_mixing_scene.draw_model[i] = NULL;
             continue;
         }
-        s_mixing_scene.draw_model[i] = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_skeletal_mat34_t, joints);
+        s_mixing_scene.draw_model[i] = NT_ARENA_ALLOC_ARRAY(&g_nt_mem_scratch, nt_skeletal_mat34_t, joints);
         nt_skeletal_fk(s_mixing_scene.skel, pose, s_mixing_scene.draw_model[i], 0, joints);
     }
 }
@@ -1146,7 +1147,7 @@ static void mixing_update(void) {
         mixing_update_blend_space(poses);
         break;
     case MIX_MODE_PARTIAL_BODY: {
-        nt_skeletal_trs_t *signal = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_skeletal_trs_t, s_mixing_scene.skel->joint_count);
+        nt_skeletal_trs_t *signal = NT_ARENA_ALLOC_ARRAY(&g_nt_mem_scratch, nt_skeletal_trs_t, s_mixing_scene.skel->joint_count);
         mixing_compose_locomotion(poses, signal);
         mixing_finish_transition(poses);
         s_mixing_scene.slots[2].gain = 1.0F;
@@ -1177,14 +1178,14 @@ static void mixing_update(void) {
         break;
     }
     case MIX_MODE_INTERRUPTION: {
-        nt_skeletal_trs_t *signal = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_skeletal_trs_t, s_mixing_scene.skel->joint_count);
+        nt_skeletal_trs_t *signal = NT_ARENA_ALLOC_ARRAY(&g_nt_mem_scratch, nt_skeletal_trs_t, s_mixing_scene.skel->joint_count);
         mixing_compose_locomotion(poses, signal);
         s_mixing_scene.slots[2].gain = 1.0F;
         const bool interrupted = s_mixing_scene.pending_target >= 0;
         mixing_process_interruption(signal);
         if (interrupted) {
             if (poses[1] == NULL) {
-                poses[1] = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_skeletal_trs_t, s_mixing_scene.skel->joint_count);
+                poses[1] = NT_ARENA_ALLOC_ARRAY(&g_nt_mem_scratch, nt_skeletal_trs_t, s_mixing_scene.skel->joint_count);
             }
             nt_skeletal_sample(s_mixing_scene.clips[s_mixing_scene.slots[1].clip], s_mixing_scene.slots[1].track.time, poses[1]);
             mixing_compose_locomotion(poses, signal);
@@ -2773,7 +2774,7 @@ int main(int argc, char *argv[]) {
 #endif
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
-    nt_mem_scratch_init(SCRATCH_ARENA_SIZE);
+    nt_arena_init(&g_nt_mem_scratch, s_scratch_mem, sizeof s_scratch_mem);
     nt_resource_register_type(NT_ASSET_TEXTURE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_texture, .deactivate = nt_gfx_deactivate_texture});
     nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_mesh, .deactivate = nt_gfx_deactivate_mesh, .on_post_resolve = on_mesh_published});
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
@@ -2881,7 +2882,6 @@ int main(int argc, char *argv[]) {
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);
     nt_material_shutdown();
-    nt_mem_scratch_shutdown();
     nt_resource_shutdown();
     nt_skeletal_assets_shutdown();
     nt_fs_shutdown();

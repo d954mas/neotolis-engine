@@ -30,4 +30,8 @@ void nt_arena_reset(nt_arena_t *arena);
  * after the mark become stale. */
 void nt_arena_rewind(nt_arena_t *arena, size_t mark);
 
+#define NT_ARENA_ALLOC(arena, T) ((T *)nt_arena_alloc((arena), sizeof(T), _Alignof(T)))
+
+#define NT_ARENA_ALLOC_ARRAY(arena, T, count) ((T *)nt_arena_alloc_array((arena), sizeof(T), (size_t)(count), _Alignof(T)))
+
 #endif /* NT_ARENA_H */

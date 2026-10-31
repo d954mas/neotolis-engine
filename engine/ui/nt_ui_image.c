@@ -57,8 +57,7 @@ void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atla
         return;
     }
 
-    nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-    NT_ASSERT(p != NULL && "nt_ui_image: scratch alloc failed");
+    nt_ui_image_payload_t *p = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
     *p = (nt_ui_image_payload_t){
         .atlas = region->atlas,
         .region_index = region->region,
@@ -112,13 +111,11 @@ void nt_ui_image_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
 
     /* Custom block lives in its own scratch alloc (same frame lifetime as the payload);
      * the payload only carries a pointer, so plain images stay small. */
-    nt_ui_image_custom_block_t *blk = NT_MEM_SCRATCH_ALLOC(nt_ui_image_custom_block_t);
-    NT_ASSERT(blk != NULL && "nt_ui_image_custom: scratch alloc failed (block)");
+    nt_ui_image_custom_block_t *blk = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_custom_block_t);
     *blk = (nt_ui_image_custom_block_t){.custom_bytes = img->custom_bytes, .geom_mode = img->geom_mode};
     memcpy(blk->custom_attrs, img->custom_attrs, img->custom_bytes);
 
-    nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-    NT_ASSERT(p != NULL && "nt_ui_image_custom: scratch alloc failed");
+    nt_ui_image_payload_t *p = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
     *p = (nt_ui_image_payload_t){
         .atlas = img->atlas,
         .region_index = img->region_index,

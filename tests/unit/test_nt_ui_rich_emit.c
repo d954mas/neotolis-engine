@@ -46,7 +46,6 @@ static nt_font_t s_body_font;
 void setUp(void) {
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
     s_body_font = s_fx.stub_font;
-    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     /* Deterministic metrics: advance = size/2/char; ascent 800/1000. */
@@ -1607,8 +1606,8 @@ static void frame_object(nt_ui_rich_fx_fn effect_fn, float time) {
 static void test_object_draws_at_solved_box(void) {
     frame_object(NULL, 0.0F);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_obj_draw_calls, "draw_fn called exactly once");
-    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_w, OBJ_W), "draw_fn w == measured width (box reserved)");
-    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_h, OBJ_H), "draw_fn h == measured height");
+    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_w, OBJ_W), "draw_fn w == object width (box reserved)");
+    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_h, OBJ_H), "draw_fn h == object height");
     /* The object sits after "A " (2 chars * 8px = 16px) from the block origin; x >= that. */
     TEST_ASSERT_TRUE_MESSAGE(s_obj_draw_x >= 16.0F - 1.0F, "object x is past the leading 'A ' text");
 }
@@ -1700,8 +1699,8 @@ static void test_object_markup_reaches_draw_fn(void) {
     nt_ui_walk(s_fx.ctx, &target);
 
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_obj_draw_calls, "<obj=widget/> markup reached draw_fn exactly once (end-to-end)");
-    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_w, OBJ_W), "markup-path draw_fn w == measured width");
-    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_h, OBJ_H), "markup-path draw_fn h == measured height");
+    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_w, OBJ_W), "markup-path draw_fn w == registered width");
+    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_h, OBJ_H), "markup-path draw_fn h == registered height");
 }
 
 /* A second object draw stub that captures ITS world_mat4 into a separate static, so a single frame
@@ -1771,29 +1770,21 @@ static void test_object_world_mat4_matches_block_transform(void) {
     TEST_ASSERT_TRUE_MESSAGE(ty_present, "world_mat4 translation carries the block's Y transform offset");
 }
 
-/* An invalid object size asserts when the object is declared. */
-static const nt_ui_rich_object_size_t stub_size_degenerate = {.width = NAN, .height = -5.0F, .ascent = NAN};
-static void frame_object_size(nt_ui_rich_object_size_t size) {
-    nt_arena_reset(&g_nt_mem_scratch);
-    s_fx.ctx->pending_rich = NULL;
-    s_fx.ctx->rich_session_open = false;
+/* An invalid object size asserts where it is declared or registered, before any solve. */
+static void test_object_degenerate_size_asserts(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
-    nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
-    CLAY({.id = CLAY_ID("obj_deg_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
-        nt_ui_rich_begin(s_fx.ctx, &base);
-        nt_ui_rich_object(s_fx.ctx, size, stub_draw, NULL);
-        nt_ui_rich_end(s_fx.ctx);
-        nt_ui_rich_text(s_fx.ctx, CLAY_ID("obj_deg_rt").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
-    }
-    nt_ui_end(s_fx.ctx);
-    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
-    nt_ui_walk(s_fx.ctx, &target);
+    nt_ui_rich_begin(s_fx.ctx, &base);
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_object(s_fx.ctx, (nt_ui_rich_object_size_t){NAN, 1.0F, 1.0F}, stub_draw, NULL));
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_object(s_fx.ctx, (nt_ui_rich_object_size_t){1.0F, -5.0F, 1.0F}, stub_draw, NULL));
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_object(s_fx.ctx, (nt_ui_rich_object_size_t){1.0F, 1.0F, INFINITY}, stub_draw, NULL));
+    nt_ui_rich_end(s_fx.ctx);
+    nt_ui_rich_tagset_t ts;
+    nt_ui_rich_tagset_init(&ts);
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_object_tag(&ts, "bad", (nt_ui_rich_object_size_t){-1.0F, 1.0F, 1.0F}, stub_draw, NULL));
 }
-static void test_object_degenerate_size_asserts(void) { NT_TEST_EXPECT_ASSERT(frame_object_size(stub_size_degenerate)); }
 
-/* An object whose measured ascent is LESS than its height -> the box must seat by ascent
+/* An object whose ascent is LESS than its height -> the box must seat by ascent
  * (box bottom at baseline + (h - ascent)) and grow the line descent, not hang the whole box
  * above the baseline. */
 #define OBJ_ASC_W 24.0F

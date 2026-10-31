@@ -3,6 +3,7 @@
 
 #include "ui/nt_ui_rich_tagset.h"
 
+#include <math.h>
 #include <string.h>
 
 #include "core/nt_assert.h"
@@ -108,6 +109,7 @@ void nt_ui_rich_tagset_register_effect_fn(nt_ui_rich_tagset_t *ts, const char *n
 
 void nt_ui_rich_tagset_register_object_tag(nt_ui_rich_tagset_t *ts, const char *name, nt_ui_rich_object_size_t size, nt_ui_rich_object_draw_fn draw_fn, void *user_data) {
     NT_ASSERT(ts != NULL && name != NULL && name[0] != '\0');
+    NT_ASSERT(isfinite(size.width) && isfinite(size.height) && isfinite(size.ascent) && size.width >= 0.0F && size.height >= 0.0F && "rich object tag: size must be finite, non-negative width/height");
     const uint64_t h = nt_hash64_str(name).value;
     for (uint32_t i = 0; i < ts->object_count; i++) {
         if (ts->objects[i].name_hash == h) {

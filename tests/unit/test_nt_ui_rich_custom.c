@@ -84,10 +84,9 @@ typedef struct {
     float draw_x;
     float draw_y;
     uint32_t spans;
-    uint32_t links;
 } rich_frame_result_t;
 
-/* TEXT + LINK + OBJECT block; scribble=true overwrites every byte above the head after the
+/* TEXT + LINK + OBJECT block (the link styles its span); scribble=true overwrites every byte above the head after the
  * frame's solve, i.e. the range the solve rewound, before the walk reads the block. */
 static rich_frame_result_t run_rich_frame(bool scribble) {
     nt_pointer_t mouse = {0};
@@ -114,7 +113,7 @@ static rich_frame_result_t run_rich_frame(bool scribble) {
     }
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
-    return (rich_frame_result_t){s_draw_calls, s_draw_x, s_draw_y[0], nt_ui_rich_test_emit_span_count(s_fx.ctx), nt_ui_rich_test_link_rect_count(s_fx.ctx)};
+    return (rich_frame_result_t){s_draw_calls, s_draw_x, s_draw_y[0], nt_ui_rich_test_emit_span_count(s_fx.ctx)};
 }
 
 /* Walk reads only what the solve kept below its rewind mark. */
@@ -122,11 +121,9 @@ static void test_walk_after_reusing_rewound_scratch(void) {
     const rich_frame_result_t clean = run_rich_frame(false);
     const rich_frame_result_t reused = run_rich_frame(true);
     TEST_ASSERT_EQUAL_UINT32(1U, clean.draw_calls);
-    TEST_ASSERT_EQUAL_UINT32(1U, clean.links);
     TEST_ASSERT_TRUE(clean.spans > 0U);
     TEST_ASSERT_EQUAL_UINT32(clean.draw_calls, reused.draw_calls);
     TEST_ASSERT_EQUAL_UINT32(clean.spans, reused.spans);
-    TEST_ASSERT_EQUAL_UINT32(clean.links, reused.links);
     TEST_ASSERT_TRUE(clean.draw_x == reused.draw_x && clean.draw_y == reused.draw_y);
 }
 

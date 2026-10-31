@@ -120,7 +120,7 @@ lifetime, and naming vocabulary.
 | `tools/builder` | [builder/builder.md](builder/builder.md) |
 
 Dir names that do not predict their prefix: `engine/graphics` → `nt_gfx_*`,
-`engine/memory` → `nt_arena_*` and `nt_mem_scratch_*`, `engine/postfx` → `nt_postfx_blur`.
+`engine/memory` → `nt_arena_*` and `g_nt_mem_scratch`, `engine/postfx` → `nt_postfx_blur`.
 `engine/platform` has no public top-level header (web API in `web/nt_platform_web.h`).
 
 ## Task → entry point

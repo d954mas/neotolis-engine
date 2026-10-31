@@ -273,7 +273,7 @@ void nt_ui_rich_begin(nt_ui_context_t *ctx, const nt_ui_rich_style_t *base) {
     NT_ASSERT(base == NULL || base->effect_id == 0U);
     NT_ASSERT(!ctx->rich_session_open && "rich-text calls do not nest");
 
-    nt_ui_rich_state_t *st = NT_MEM_SCRATCH_ALLOC(nt_ui_rich_state_t);
+    nt_ui_rich_state_t *st = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_rich_state_t);
     memset(st, 0, sizeof *st);
     /* Resolve per-block caps: desc value or the compile-time #define default (0 -> #define, always > 0). */
     const uint32_t max_runs = ctx->rich_max_runs ? ctx->rich_max_runs : (uint32_t)NT_UI_RICH_MAX_RUNS;
@@ -283,9 +283,9 @@ void nt_ui_rich_begin(nt_ui_context_t *ctx, const nt_ui_rich_style_t *base) {
     st->max_runs = max_runs;
     st->max_styles = max_styles;
     st->max_text_bytes = max_text_bytes;
-    st->runs = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_ui_rich_run_t, max_runs);
-    st->styles = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_ui_rich_style_t, max_styles);
-    st->text = NT_MEM_SCRATCH_ALLOC_ARRAY(char, max_text_bytes);
+    st->runs = NT_ARENA_ALLOC_ARRAY(&g_nt_mem_scratch, nt_ui_rich_run_t, max_runs);
+    st->styles = NT_ARENA_ALLOC_ARRAY(&g_nt_mem_scratch, nt_ui_rich_style_t, max_styles);
+    st->text = NT_ARENA_ALLOC_ARRAY(&g_nt_mem_scratch, char, max_text_bytes);
     /* solved[]/links[] are sized to the actual content at solve time (content-proportional,
      * not the full glyph cap) -- keeps the per-call scratch footprint tiny for a label. */
 
@@ -1759,11 +1759,11 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
     if (atom_cap > NT_UI_RICH_MAX_GLYPHS) {
         atom_cap = NT_UI_RICH_MAX_GLYPHS;
     }
-    st->solved = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_ui_rich_solved_atom_t, atom_cap);
-    st->links = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_ui_rich_link_rect_t, NT_UI_RICH_MAX_LINKS);
-    /* Atoms die with the solve; solved/links above outlive it until walk. */
+    st->solved = NT_ARENA_ALLOC_ARRAY(&g_nt_mem_scratch, nt_ui_rich_solved_atom_t, atom_cap);
+    st->links = NT_ARENA_ALLOC_ARRAY(&g_nt_mem_scratch, nt_ui_rich_link_rect_t, NT_UI_RICH_MAX_LINKS);
+    /* Atoms die with the solve; solved/links above outlive it. */
     const size_t atoms_mark = g_nt_mem_scratch.used;
-    rich_atom_t *atoms = NT_MEM_SCRATCH_ALLOC_ARRAY(rich_atom_t, atom_cap);
+    rich_atom_t *atoms = NT_ARENA_ALLOC_ARRAY(&g_nt_mem_scratch, rich_atom_t, atom_cap);
     const uint32_t na = rich_build_atoms(st, box_w, atoms, atom_cap);
     st->line_count = rich_break_lines(atoms, na, box_w);
 
@@ -2168,8 +2168,7 @@ static void rich_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
  * custom data routes the walk back to self-emit. Inline IMAGE atoms are NOT Clay children -- they emit
  * immediately in the self-emit (rich_emit_images), coalesced into one sprite batch. */
 static void rich_declare_fixed_block(nt_ui_rich_state_t *st, uint32_t id, const nt_ui_element_data_t *data) {
-    nt_ui_custom_data_t *cd = NT_MEM_SCRATCH_ALLOC(nt_ui_custom_data_t);
-    NT_ASSERT(cd != NULL && "nt_ui_rich_text: scratch alloc failed (custom data)");
+    nt_ui_custom_data_t *cd = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_custom_data_t);
     *cd = (nt_ui_custom_data_t){.type = NT_UI_CUSTOM_TYPE_CALLBACK, .data = st, .emit = rich_emit_custom};
 
     Clay_ElementDeclaration decl = {0};
@@ -2372,25 +2371,25 @@ const char *nt_ui_rich_test_run_text(nt_ui_context_t *ctx, uint32_t run) {
 
 nt_atlas_region_ref_t nt_ui_rich_test_run_image_ref(nt_ui_context_t *ctx, uint32_t run) {
     nt_ui_rich_state_t *st = rich_state(ctx);
-    NT_ASSERT(run < st->run_count);
+    NT_ASSERT(run < st->run_count && st->runs[run].kind == NT_RICH_ATOM_IMAGE);
     return st->runs[run].image_ref;
 }
 
 float nt_ui_rich_test_run_image_scale(nt_ui_context_t *ctx, uint32_t run) {
     nt_ui_rich_state_t *st = rich_state(ctx);
-    NT_ASSERT(run < st->run_count);
+    NT_ASSERT(run < st->run_count && st->runs[run].kind == NT_RICH_ATOM_IMAGE);
     return st->runs[run].image_scale;
 }
 
 float nt_ui_rich_test_run_image_offset_y(nt_ui_context_t *ctx, uint32_t run) {
     nt_ui_rich_state_t *st = rich_state(ctx);
-    NT_ASSERT(run < st->run_count);
+    NT_ASSERT(run < st->run_count && st->runs[run].kind == NT_RICH_ATOM_IMAGE);
     return st->runs[run].image_offset_y;
 }
 
 nt_rich_valign_t nt_ui_rich_test_run_image_valign(nt_ui_context_t *ctx, uint32_t run) {
     nt_ui_rich_state_t *st = rich_state(ctx);
-    NT_ASSERT(run < st->run_count);
+    NT_ASSERT(run < st->run_count && st->runs[run].kind == NT_RICH_ATOM_IMAGE);
     return st->runs[run].image_valign;
 }
 

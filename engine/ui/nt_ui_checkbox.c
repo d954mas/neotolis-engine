@@ -58,8 +58,7 @@ static void assert_row_valid(const nt_ui_cb_state_t row[4]) {
  * transform; opacity<0 -> no opacity (inherits parent). Local builder because the
  * public xform helper forces BOTH, but the box needs transform WITHOUT own opacity. */
 static nt_ui_element_data_t *cb_make_data(void *user_data, uint8_t layer, const nt_ui_transform_t *t, float opacity) {
-    nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
-    NT_ASSERT(d != NULL && "nt_ui_checkbox: scratch alloc failed (element_data)");
+    nt_ui_element_data_t *d = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_element_data_t);
     uint32_t flags = 0U;
     if (t != NULL) {
         flags |= NT_UI_ELEM_FLAG_HAS_TRANSFORM;
@@ -110,8 +109,7 @@ static void cb_emit_box(const cb_emit_args_t *e) {
     };
     /* No-art terminal: atlas.id == 0 => skip the IMAGE. region still INVALID = atlas not ready: skip too. */
     if (e->box_ref.atlas.id != 0U && e->box_ref.region != NT_ATLAS_INVALID_REGION) {
-        nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-        NT_ASSERT(p != NULL && "nt_ui_checkbox: scratch alloc failed (box payload)");
+        nt_ui_image_payload_t *p = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
         *p = (nt_ui_image_payload_t){.atlas = e->box_ref.atlas, .region_index = e->box_ref.region, .slice9_scale = 1.0F};
         box_decl.image = (Clay_ImageElementConfig){.imageData = p};
     }

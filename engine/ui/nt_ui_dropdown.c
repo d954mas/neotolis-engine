@@ -148,8 +148,7 @@ static bool dropdown_resolve_bg(nt_ui_dd_state_t *st, nt_ui_dd_state_t *idle, nt
 /* Apply a resolved per-state look (slice9 art tinted, or flat fill) onto a decl. */
 static void dropdown_apply_bg(Clay_ElementDeclaration *decl, bool has_art, const nt_atlas_region_ref_t *bg, const nt_ui_dd_state_t *st, float slice9_scale) {
     if (has_art) {
-        nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-        NT_ASSERT(p != NULL && "nt_ui_dropdown: scratch alloc failed (image_payload)");
+        nt_ui_image_payload_t *p = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
         *p = (nt_ui_image_payload_t){.atlas = bg->atlas, .region_index = bg->region, .slice9_scale = slice9_scale};
         decl->image = (Clay_ImageElementConfig){.imageData = p};
         decl->backgroundColor = nt_ui_unpack_tint(st->bg_tint);
@@ -176,8 +175,7 @@ static void dropdown_declare_chevron(nt_ui_context_t *ctx, uint8_t fill_layer, u
     if (!dropdown_has_chevron(style)) {
         return;
     }
-    nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-    NT_ASSERT(p != NULL && "nt_ui_dropdown: scratch alloc failed (chevron payload)");
+    nt_ui_image_payload_t *p = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
     *p = (nt_ui_image_payload_t){.atlas = style->chevron.atlas, .region_index = style->chevron.region, .origin_x = 0.5F, .origin_y = 0.5F, .slice9_scale = 1.0F};
     /* Eased rotation tied to the open amount so the affordance reads the open/close reveal. */
     const nt_ui_transform_t chev_t = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .rotation_z = open_t * 3.14159265F};
@@ -247,8 +245,7 @@ static bool dropdown_declare_row(nt_ui_context_t *ctx, uint8_t fill_layer, uint8
                     nt_atlas_region_ref_t ic = *icon; /* by-value copy: per-row refs aren't style-owned, can't memoize */
                     nt_atlas_resolve_ref(&ic);
                     if (ic.region != NT_ATLAS_INVALID_REGION) {
-                        nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-                        NT_ASSERT(p != NULL && "nt_ui_dropdown: scratch alloc failed (icon payload)");
+                        nt_ui_image_payload_t *p = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
                         *p = (nt_ui_image_payload_t){.atlas = ic.atlas, .region_index = ic.region, .origin_x = 0.5F, .origin_y = 0.5F, .slice9_scale = 1.0F};
                         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .image = (Clay_ImageElementConfig){.imageData = p}, .userData = NT_UI_CLAY_DATA(fill_layer)}) {}
                     }
@@ -328,8 +325,7 @@ static void combo_open_trigger(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t
  * cornerRadius is only set in the flat branch. Shared by the scroll-wrapper + plain-panel list bodies. */
 static void combo_apply_panel_bg(Clay_ElementDeclaration *decl, const nt_ui_dropdown_style_t *style, bool panel_art) {
     if (panel_art) {
-        nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-        NT_ASSERT(p != NULL && "nt_ui_dropdown: scratch alloc failed (panel payload)");
+        nt_ui_image_payload_t *p = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
         *p = (nt_ui_image_payload_t){.atlas = style->panel_bg.atlas, .region_index = style->panel_bg.region, .slice9_scale = style->slice9_scale};
         decl->image = (Clay_ImageElementConfig){.imageData = p};
         decl->backgroundColor = nt_ui_unpack_tint(style->panel_tint);

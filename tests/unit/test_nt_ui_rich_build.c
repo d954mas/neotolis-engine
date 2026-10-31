@@ -27,7 +27,6 @@ static ui_walker_fixture_t s_fx;
 void setUp(void) {
     nt_test_assert_install();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
-    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 }
@@ -173,9 +172,11 @@ static void snapshot_runs(nt_ui_context_t *ctx, run_snapshot_t *snap) {
         snap->color[i] = nt_ui_rich_test_run_style(ctx, i).color_abgr;
         snap->flags[i] = nt_ui_rich_test_run_flags(ctx, i);
         snap->link[i] = nt_ui_rich_test_run_link(ctx, i);
-        const nt_atlas_region_ref_t ref = nt_ui_rich_test_run_image_ref(ctx, i);
-        snap->img_hash[i] = ref.name_hash;
-        snap->img_atlas[i] = ref.atlas.id;
+        if (snap->kind[i] == NT_RICH_ATOM_IMAGE) {
+            const nt_atlas_region_ref_t ref = nt_ui_rich_test_run_image_ref(ctx, i);
+            snap->img_hash[i] = ref.name_hash;
+            snap->img_atlas[i] = ref.atlas.id;
+        }
         const uint32_t tl = nt_ui_rich_test_run_text_len(ctx, i);
         snap->text_off[i] = snap->total_bytes;
         snap->text_len[i] = tl;

@@ -53,7 +53,8 @@ nt_arena_reset(&arena);                  // p is stale
 Allocation aligns `align` (a power of 2, at most `_Alignof(max_align_t)`)
 relative to `base`. Running out of space is a configuration error and asserts.
 `used` and `high_water` are readable fields; `high_water` is the peak `used`
-since init and survives reset and rewind.
+since init and survives reset and rewind. Typed macros pass `sizeof(T)` and
+`_Alignof(T)`: `NT_ARENA_ALLOC(arena, T)`, `NT_ARENA_ALLOC_ARRAY(arena, T, count)`.
 
 ### Scoped rewind
 
@@ -77,19 +78,17 @@ macros, widget payloads read by `nt_ui_walk`, game per-frame temporaries.
 
 `g_nt_mem_scratch` (`engine/memory/nt_mem_scratch.h`) is one global
 `nt_arena_t` that any engine module or game code may allocate from. It is used
-through the `nt_arena_*` functions and fields like any arena; only init and
-shutdown are its own, because they own its memory:
+through the `nt_arena_*` functions and fields like any arena, and the game owns
+its memory like any arena's (a static buffer or its own malloc):
 
 ```c
-nt_mem_scratch_init(256 * 1024);                 // boot: mallocs; the game picks the size
+alignas(max_align_t) static uint8_t s_scratch_mem[256 * 1024];  // the game picks the size
+nt_arena_init(&g_nt_mem_scratch, s_scratch_mem, sizeof s_scratch_mem);  // boot
 // per frame (see frame-lifecycle.md):
 nt_arena_reset(&g_nt_mem_scratch);               // start of frame
 nt_arena_alloc(&g_nt_mem_scratch, size, align);  // anywhere during the frame
 // pointers stay valid until the next reset or a rewind below them
-nt_mem_scratch_shutdown();                       // exit: frees
 ```
-
-Type-safe macros: `NT_MEM_SCRATCH_ALLOC(T)`, `NT_MEM_SCRATCH_ALLOC_ARRAY(T, count)`.
 
 ### Frame storage
 

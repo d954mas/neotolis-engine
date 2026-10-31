@@ -623,8 +623,7 @@ const nt_ui_element_data_t *nt_ui_make_element_data(nt_ui_layer_t layer, void *u
     if (user_data == NULL) {
         return &s_default_element_data[layer];
     }
-    nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
-    NT_ASSERT(d != NULL && "nt_ui_make_element_data: scratch alloc failed");
+    nt_ui_element_data_t *d = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_element_data_t);
     *d = (nt_ui_element_data_t){
         .layer = layer,
         .user_data = user_data,
@@ -645,8 +644,7 @@ const nt_ui_element_data_t *nt_ui_make_element_data_xform(nt_ui_layer_t layer, v
               isfinite(transform->rotation_z) && isfinite(transform->offset_x) && isfinite(transform->offset_y) && isfinite(transform->offset_z) &&
               "nt_ui_make_element_data_xform: transform fields must be finite");
     NT_ASSERT(isfinite(opacity) && opacity >= 0.0F && opacity <= 1.0F && "nt_ui_make_element_data_xform: opacity must be finite in [0,1]");
-    nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
-    NT_ASSERT(d != NULL && "nt_ui_make_element_data_xform: scratch alloc failed");
+    nt_ui_element_data_t *d = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_element_data_t);
     *d = (nt_ui_element_data_t){
         .layer = layer,
         .user_data = user_data,
@@ -2072,8 +2070,7 @@ void nt_ui_set_view_proj(nt_ui_context_t *ctx, const float view_proj[16]) {
 void nt_ui_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *elem_data, void *data) {
     NT_ASSERT(ctx != NULL);
     NT_ASSERT(ctx->in_frame);
-    nt_ui_custom_data_t *cd = NT_MEM_SCRATCH_ALLOC(nt_ui_custom_data_t);
-    NT_ASSERT(cd != NULL);
+    nt_ui_custom_data_t *cd = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_custom_data_t);
     *cd = (nt_ui_custom_data_t){.type = NT_UI_CUSTOM_TYPE_GAME, .data = data};
     CLAY({
         .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},

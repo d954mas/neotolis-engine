@@ -1,13 +1,13 @@
 #include "memory/nt_arena.h"
 
 #include <stddef.h>
-#include <stdlib.h>
 
 #include "core/nt_align.h"
 #include "core/nt_assert.h"
 #include "memory/nt_mem_scratch.h"
 
-// #region arena
+nt_arena_t g_nt_mem_scratch;
+
 void nt_arena_init(nt_arena_t *arena, void *base, size_t size) {
     NT_ASSERT(base != NULL && size > 0 && "nt_arena_init: base must be non-NULL (malloc failed?) and size > 0");
     /* Offsets are aligned relative to base, so base carries the max_align_t guarantee. */
@@ -40,19 +40,3 @@ void nt_arena_rewind(nt_arena_t *arena, size_t mark) {
     NT_ASSERT(mark <= arena->used && "nt_arena_rewind: mark is past the head (stale after reset or rewind?)");
     arena->used = mark;
 }
-// #endregion
-
-// #region scratch
-nt_arena_t g_nt_mem_scratch;
-
-void nt_mem_scratch_init(size_t size_bytes) {
-    NT_ASSERT(g_nt_mem_scratch.base == NULL && "nt_mem_scratch_init: already initialized");
-    nt_arena_init(&g_nt_mem_scratch, malloc(size_bytes), size_bytes);
-}
-
-void nt_mem_scratch_shutdown(void) {
-    NT_ASSERT(g_nt_mem_scratch.base != NULL && "nt_mem_scratch_shutdown: not initialized");
-    free(g_nt_mem_scratch.base);
-    g_nt_mem_scratch = (nt_arena_t){0};
-}
-// #endregion

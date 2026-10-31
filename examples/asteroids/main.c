@@ -64,6 +64,8 @@ in the source; the sky and Mars images come from packs. See CREDITS.md.
 #include <stdlib.h>
 #include <string.h>
 
+_Alignas(max_align_t) static uint8_t s_scratch_mem[(size_t)128U * 1024U];
+
 #define AST_MAX 50000U
 #define AST_SUBDIVISIONS 4U
 /* The source's default LOD threshold: smaller selects finer meshes. */
@@ -1249,7 +1251,7 @@ static void init_ui_styles(void) {
 }
 
 static void init_ui(void) {
-    nt_mem_scratch_init((size_t)128U * 1024U);
+    nt_arena_init(&g_nt_mem_scratch, s_scratch_mem, sizeof s_scratch_mem);
     const nt_result_t atlas_result = nt_atlas_init();
     NT_ASSERT(atlas_result == NT_OK);
     nt_ui_module_init();
@@ -2334,7 +2336,6 @@ int main(int argc, char **argv) {
     nt_sprite_renderer_shutdown();
     nt_material_destroy(s_ui_material);
     nt_program_ref_drop(&s_ui_program);
-    nt_mem_scratch_shutdown();
     free(s_ui_arena);
     nt_text_renderer_shutdown();
     nt_font_destroy(s_font);

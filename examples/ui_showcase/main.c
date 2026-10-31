@@ -526,6 +526,7 @@ static bool s_ids_ready;
 /* Decoration tab issues ~22 rich_text calls, each reserving the full MAX_RUNS/MAX_TEXT_BYTES
  * cap (~14 KB) plus decorated-label side tables; 512 KB overflowed the frame scratch. */
 #define SCRATCH_ARENA_SIZE ((size_t)2U * 1024U * 1024U)
+_Alignas(max_align_t) static uint8_t s_scratch_mem[SCRATCH_ARENA_SIZE];
 
 static NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
 
@@ -3927,7 +3928,7 @@ int main(int argc, char *argv[]) {
 #endif
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
-    nt_mem_scratch_init(SCRATCH_ARENA_SIZE);
+    nt_arena_init(&g_nt_mem_scratch, s_scratch_mem, sizeof s_scratch_mem);
 
     nt_resource_register_type(NT_ASSET_TEXTURE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_texture, .deactivate = nt_gfx_deactivate_texture});
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
@@ -4128,7 +4129,6 @@ int main(int argc, char *argv[]) {
     nt_program_ref_drop(&s_base_program);
     nt_material_shutdown();
     nt_debug_overlay_shutdown();
-    nt_mem_scratch_shutdown();
     nt_resource_shutdown();
     nt_fs_shutdown();
     nt_http_shutdown();

@@ -30,6 +30,8 @@
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
 
+_Alignas(max_align_t) static uint8_t s_scratch_mem[(size_t)64U * 1024U];
+
 static nt_material_t make_material(bool with_page_sampler) {
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof desc);
@@ -54,7 +56,7 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
     memset(fx, 0, sizeof *fx);
 
     nt_hash_init(&(nt_hash_desc_t){0});
-    nt_mem_scratch_init((size_t)64U * 1024U); /* NT_UI_DATA_LAYER / NT_UI_DATA_FULL allocate here. */
+    nt_arena_init(&g_nt_mem_scratch, s_scratch_mem, sizeof s_scratch_mem); /* NT_UI_DATA_LAYER / NT_UI_DATA_FULL allocate here. */
     nt_gfx_init(
         &NT_GFX_TEST_DESC(.max_shaders = 32, .max_programs = 16, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16, .max_vertex_inputs = 16, .max_render_targets = 16));
     nt_gfx_begin_frame();
@@ -159,7 +161,6 @@ void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx) {
     nt_atlas_test_reset();
     nt_resource_shutdown();
     nt_gfx_shutdown();
-    nt_mem_scratch_shutdown();
     nt_hash_shutdown();
 }
 

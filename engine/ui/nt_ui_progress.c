@@ -19,8 +19,7 @@ const nt_ui_widget_def_t NT_UI_PROGRESS_DEF = {
 
 /* Scratch element_data carrying layer + whole-widget opacity (no transform). */
 static nt_ui_element_data_t *progress_make_data(void *user_data, uint8_t layer, float opacity) {
-    nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
-    NT_ASSERT(d != NULL && "nt_ui_progress: scratch alloc failed (element_data)");
+    nt_ui_element_data_t *d = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_element_data_t);
     *d = (nt_ui_element_data_t){
         .user_data = user_data,
         .layer = layer,
@@ -73,8 +72,7 @@ void nt_ui_progress(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     track_decl.layout.sizing = (Clay_Sizing){CLAY_SIZING_FIXED(style->track_w), CLAY_SIZING_FIXED(style->track_h)};
     track_decl.userData = (void *)progress_make_data(user, draw_layer, widget_opacity);
     if (style->track.atlas.id != 0U && style->track.region != NT_ATLAS_INVALID_REGION) {
-        nt_ui_image_payload_t *tp = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-        NT_ASSERT(tp != NULL && "nt_ui_progress: scratch alloc failed (track payload)");
+        nt_ui_image_payload_t *tp = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
         *tp = (nt_ui_image_payload_t){.atlas = style->track.atlas, .region_index = style->track.region, .slice9_scale = 1.0F};
         track_decl.image = (Clay_ImageElementConfig){.imageData = tp};
         track_decl.backgroundColor = nt_ui_unpack_tint(style->track_tint);

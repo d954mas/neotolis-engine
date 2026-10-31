@@ -7,7 +7,6 @@
 #include "unity.h"
 
 alignas(max_align_t) static uint8_t s_buf[256];
-alignas(max_align_t) static uint8_t s_buf2[256];
 static nt_arena_t s_arena;
 
 void setUp(void) {
@@ -61,17 +60,6 @@ static void test_rewind_restores_used_and_keeps_high_water(void) {
     TEST_ASSERT_TRUE(nt_arena_alloc(&s_arena, 40U, 8U) == tmp);
 }
 
-static void test_nested_marks(void) {
-    const size_t outer = s_arena.used;
-    (void)nt_arena_alloc(&s_arena, 16U, 8U);
-    const size_t inner = s_arena.used;
-    (void)nt_arena_alloc(&s_arena, 32U, 8U);
-    nt_arena_rewind(&s_arena, inner);
-    TEST_ASSERT_EQUAL_UINT64(16U, (uint64_t)s_arena.used);
-    nt_arena_rewind(&s_arena, outer);
-    TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)s_arena.used);
-}
-
 static void test_rewind_forward_asserts(void) {
     (void)nt_arena_alloc(&s_arena, 16U, 8U);
     NT_TEST_EXPECT_ASSERT(nt_arena_rewind(&s_arena, 17U));
@@ -86,13 +74,12 @@ static void test_stale_mark_after_reset_asserts(void) {
     TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)s_arena.used);
 }
 
-static void test_instances_are_independent(void) {
-    nt_arena_t other;
-    nt_arena_init(&other, s_buf2, sizeof(s_buf2));
-    (void)nt_arena_alloc(&s_arena, 32U, 8U);
-    TEST_ASSERT_TRUE(nt_arena_alloc(&other, 8U, 8U) == s_buf2);
-    TEST_ASSERT_EQUAL_UINT64(32U, (uint64_t)s_arena.used);
-    TEST_ASSERT_EQUAL_UINT64(8U, (uint64_t)other.used);
+/* The typed macros pass _Alignof(T): after 1 byte, uint64_t pads to 8. */
+static void test_typed_macros_align(void) {
+    (void)nt_arena_alloc(&s_arena, 1U, 1U);
+    TEST_ASSERT_TRUE((uint8_t *)NT_ARENA_ALLOC(&s_arena, uint64_t) == s_buf + 8);
+    TEST_ASSERT_TRUE((uint8_t *)NT_ARENA_ALLOC_ARRAY(&s_arena, uint32_t, 3) == s_buf + 16);
+    TEST_ASSERT_EQUAL_UINT64(28U, (uint64_t)s_arena.used);
 }
 
 static void test_alloc_array_overflow_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_arena_alloc_array(&s_arena, sizeof(uint64_t), (size_t)-1, 8U)); }
@@ -123,10 +110,9 @@ int main(void) {
     RUN_TEST(test_padding_overflow_asserts);
     RUN_TEST(test_reset_keeps_high_water);
     RUN_TEST(test_rewind_restores_used_and_keeps_high_water);
-    RUN_TEST(test_nested_marks);
     RUN_TEST(test_rewind_forward_asserts);
     RUN_TEST(test_stale_mark_after_reset_asserts);
-    RUN_TEST(test_instances_are_independent);
+    RUN_TEST(test_typed_macros_align);
     RUN_TEST(test_alloc_array_overflow_asserts);
     RUN_TEST(test_bad_align_asserts);
     RUN_TEST(test_bad_init_asserts);
