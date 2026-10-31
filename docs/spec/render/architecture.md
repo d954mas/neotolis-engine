@@ -1450,7 +1450,8 @@ rule decides what survives an error, reported as a static message and a byte off
 - a line after the last record that does not open a document (a blank line, a `\r`
   ending included) is an error after a complete frame.
 
-`overflow=1` is data, not an error. Parsing the formatter's text gives back the same
+Floats print and read with `.`: formatting and parsing require `LC_NUMERIC` to be
+the C locale, which the engine never changes. `overflow=1` is data, not an error. Parsing the formatter's text gives back the same
 record bytes, and formatting them gives back the same text; other accepted input
 (explicit zeros, different escapes) formats canonically. A record's fields are
 accepted only in the formatter's order, each at most once.
