@@ -1,4 +1,3 @@
-#include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -185,33 +184,6 @@ static void test_size_and_truncation(void) {
     memset(small, 'x', sizeof(small));
     TEST_ASSERT_EQUAL_UINT64(needed, nt_gfx_capture_format(&view, small, sizeof(small)));
     TEST_ASSERT_EQUAL_STRING("ntcapture", small);
-}
-
-/* Floats print with '.' whatever the process locale: a comma (de-DE) or a slash (fa-IR) separator. A
-   locale the platform lacks is skipped. */
-static void test_floats_print_a_point_in_any_locale(void) {
-    nt_gfx_event_t ev[NT_RECORD_COUNT];
-    const nt_gfx_capture_view_t view = hand_built_view(ev);
-    const char *const locales[] = {"de-DE", "de_DE.UTF-8", "fa-IR", "fa_IR.UTF-8"};
-    uint32_t tested = 0;
-    for (size_t i = 0; i < sizeof(locales) / sizeof(locales[0]); i++) {
-        if (setlocale(LC_NUMERIC, locales[i]) != NULL) { // NOLINT(concurrency-mt-unsafe): one test thread
-            char *text = format_all(&view);
-            TEST_ASSERT_EQUAL_STRING(k_expected, text);
-            free(text);
-            nt_gfx_event_t parsed[NT_RECORD_COUNT];
-            const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(k_expected, strlen(k_expected), parsed, NT_RECORD_COUNT);
-            TEST_ASSERT_NULL(r.error);
-            text = format_all(&r.view);
-            TEST_ASSERT_EQUAL_STRING(k_expected, text);
-            free(text);
-            tested++;
-        }
-    }
-    (void)setlocale(LC_NUMERIC, "C"); // NOLINT(concurrency-mt-unsafe)
-    if (tested == 0) {
-        TEST_IGNORE_MESSAGE("no comma or slash locale on this platform");
-    }
 }
 
 static void test_every_operation_has_a_name(void) {
@@ -522,7 +494,6 @@ int main(void) {
 #if NT_GFX_CAPTURE_ENABLED
     RUN_TEST(test_every_data_arm_prints_by_name);
     RUN_TEST(test_size_and_truncation);
-    RUN_TEST(test_floats_print_a_point_in_any_locale);
     RUN_TEST(test_every_operation_has_a_name);
     RUN_TEST(test_deep_markers_cap_the_indent);
     RUN_TEST(test_a_recorded_frame_prints_one_line_per_record);

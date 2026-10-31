@@ -4,7 +4,6 @@
 #include "log/nt_log.h"
 
 #include <inttypes.h>
-#include <locale.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stddef.h>
@@ -266,8 +265,7 @@ static uint32_t float_bits(float f) {
     return bits;
 }
 
-/* The shortest %g that reads back to the same float32 (9 digits always do); NaN keeps its payload as bits.
- * The decimal point is always '.', whatever the process locale. */
+/* The shortest %g that reads back to the same float32 (9 digits always do); NaN keeps its payload as bits. */
 static void put_float(text_t *t, float f) {
     if (isnan(f)) {
         put(t, "nan:0x%08" PRIx32, float_bits(f));
@@ -280,17 +278,6 @@ static void put_float(text_t *t, float f) {
             break;
         }
     }
-    /* The locale's separator is the one run of other bytes ("," or "/" or multibyte): it becomes '.'. */
-    char *out = digits;
-    for (const char *c = digits; *c != '\0'; c++) {
-        const unsigned char b = (unsigned char)*c; /* ASCII by value: isalnum follows LC_CTYPE */
-        if ((b >= '0' && b <= '9') || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || b == '-' || b == '+') {
-            *out++ = *c;
-        } else if (out == digits || out[-1] != '.') {
-            *out++ = '.';
-        }
-    }
-    *out = '\0';
     put(t, "%s", digits);
 }
 
@@ -666,8 +653,7 @@ static bool nan_bits(const char *hex, float *out) {
     return isnan(*out);
 }
 
-/* The formatter's forms only: decimal %g, inf, -inf and nan:0x<8 hex digits>. strtof reads the process
- * locale's separator, so the bounded token copy takes it in place of '.'. */
+/* The formatter's forms only: decimal %g, inf, -inf and nan:0x<8 hex digits>. */
 static bool read_float(line_t *l, float *out) {
     const char *start = l->p;
     size_t n = 0;
@@ -681,31 +667,22 @@ static bool read_float(line_t *l, float *out) {
         l->p += n;
         return true;
     }
-    const char *point = localeconv()->decimal_point; // NOLINT(concurrency-mt-unsafe): read only, like the formatter's strtof
-    const size_t point_len = strlen(point);
     const bool word = (n == 3 && memcmp(start, "inf", 3) == 0) || (n == 4 && memcmp(start, "-inf", 4) == 0);
-    char buf[64]; /* 32 token bytes, the one '.' of them replaced by at most 8 */
-    size_t len = 0;
-    bool point_seen = false;
-    if (n == 0 || n > 32 || point_len > 8) {
+    char buf[33]; /* the token terminated for strtof */
+    if (n == 0 || n >= sizeof(buf)) {
         return fail(l, "bad float");
     }
     for (size_t i = 0; i < n; i++) {
         const char c = start[i];
-        if (c == '.' && !word && !point_seen) {
-            point_seen = true;
-            memcpy(buf + len, point, point_len);
-            len += point_len;
-        } else if (word || (c >= '0' && c <= '9') || c == '-' || c == '+' || c == 'e') {
-            buf[len++] = c;
-        } else {
+        if (!word && !((c >= '0' && c <= '9') || c == '.' || c == '-' || c == '+' || c == 'e')) {
             return fail(l, "bad float");
         }
+        buf[i] = c;
     }
-    buf[len] = '\0';
+    buf[n] = '\0';
     char *stop = NULL;
     *out = strtof(buf, &stop);
-    if (stop != buf + len || (!word && isinf(*out))) { /* a decimal past FLT_MAX is not formatter output */
+    if (stop != buf + n || (!word && isinf(*out))) { /* a decimal past FLT_MAX is not formatter output */
         return fail(l, "bad float");
     }
     l->p += n;
