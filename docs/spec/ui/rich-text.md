@@ -249,7 +249,7 @@ nt_ui_rich_pop(ctx);
   wraps around it). The size is data, not a callback: `nt_ui_rich_object` takes it
   by value, `nt_ui_rich_tagset_register_object_tag` stores it, and re-registering
   the name replaces it, so an animated object updates its size before the
-  declaration. No game code runs inside the solve. The widget calls the game's
+  declaration. No game code runs inside the solve except log sinks. The widget calls the game's
   `draw_fn(user_data, x, y, w, h, color, world_mat4)` at the solved box. The engine
   never draws the object (renderer-agnostic); a `draw_fn` that emits sprites selects
   its own material first, since the selection it finds is whatever the band's images or an earlier
