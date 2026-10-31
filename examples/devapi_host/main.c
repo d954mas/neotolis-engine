@@ -329,7 +329,7 @@ int main(void) {
     nt_devapi_register_reset(recover_on_client_reset);
     nt_devapi_register(k_game_cmds, NT_COUNTOF(k_game_cmds), NULL);
 
-    /* Probe-able "hud" UI context. nt_mem_scratch backs CLAY's per-element data; nt_ui_module_init is
+    /* Probe-able "hud" UI context. g_nt_mem_scratch backs CLAY's per-element data; nt_ui_module_init is
        self-contained (no gfx/font). The host registers the CTX here; the ui group's commands are
        registered by nt_devapi_register_default() above. */
     nt_arena_init(&g_nt_mem_scratch, s_scratch_mem, sizeof s_scratch_mem);

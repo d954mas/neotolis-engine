@@ -281,6 +281,7 @@ void nt_ui_rich_begin(nt_ui_context_t *ctx, const nt_ui_rich_style_t *base) {
     const uint32_t max_styles = ctx->rich_max_styles ? ctx->rich_max_styles : (uint32_t)NT_UI_RICH_MAX_STYLES;
     const uint32_t max_text_bytes = ctx->rich_max_text_bytes ? ctx->rich_max_text_bytes : (uint32_t)NT_UI_RICH_MAX_TEXT_BYTES;
     NT_ASSERT(max_runs > 0U && max_styles > 0U && max_text_bytes > 0U && "nt_ui_rich_begin: resolved caps must be > 0");
+    NT_ASSERT(max_runs <= UINT16_MAX + 1U && "nt_ui_rich_begin: atoms index runs with uint16_t");
     st->max_runs = max_runs;
     st->max_styles = max_styles;
     st->max_text_bytes = max_text_bytes;

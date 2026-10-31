@@ -14,7 +14,7 @@ typedef struct nt_arena {
 } nt_arena_t;
 
 /* base: aligned to _Alignof(max_align_t), size > 0. The owner keeps the memory alive
- * and frees it; the arena never allocates. */
+ * and frees it; the arena never allocates. Re-init drops used and high_water. */
 void nt_arena_init(nt_arena_t *arena, void *base, size_t size);
 
 /* align: power of 2, <= _Alignof(max_align_t). Asserts when the arena is full. */

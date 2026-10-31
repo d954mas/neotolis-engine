@@ -84,6 +84,7 @@ typedef struct {
     float draw_x;
     float draw_y;
     uint32_t spans;
+    uint32_t first_link;
 } rich_frame_result_t;
 
 /* TEXT + LINK + OBJECT block (the link styles its span); scribble=true overwrites every byte above the head after the
@@ -92,6 +93,7 @@ static rich_frame_result_t run_rich_frame(bool scribble) {
     nt_pointer_t mouse = {0};
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
+    nt_ui_rich_result_t out = {0};
     s_draw_calls = 0U;
     nt_arena_reset(&g_nt_mem_scratch);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
@@ -103,7 +105,7 @@ static rich_frame_result_t run_rich_frame(bool scribble) {
         nt_ui_rich_link(s_fx.ctx, 0U);
         nt_ui_rich_object(s_fx.ctx, s_obj_size, draw, NULL);
         nt_ui_rich_end(s_fx.ctx);
-        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich").id, NULL, &base, 200.0F, NT_RICH_ALIGN_LEFT, 0.5F, NULL);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich").id, NULL, &base, 200.0F, NT_RICH_ALIGN_LEFT, 0.5F, &out);
     }
     nt_ui_end(s_fx.ctx);
     if (scribble) {
@@ -113,17 +115,19 @@ static rich_frame_result_t run_rich_frame(bool scribble) {
     }
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
-    return (rich_frame_result_t){s_draw_calls, s_draw_x, s_draw_y[0], nt_ui_rich_test_emit_span_count(s_fx.ctx)};
+    return (rich_frame_result_t){s_draw_calls, s_draw_x, s_draw_y[0], nt_ui_rich_test_emit_span_count(s_fx.ctx), out.first_link};
 }
 
-/* Walk reads only what the solve kept below its rewind mark. */
+/* Results and the walk read only what the solve kept below its rewind mark (solved atoms, links). */
 static void test_walk_after_reusing_rewound_scratch(void) {
     const rich_frame_result_t clean = run_rich_frame(false);
     const rich_frame_result_t reused = run_rich_frame(true);
     TEST_ASSERT_EQUAL_UINT32(1U, clean.draw_calls);
     TEST_ASSERT_TRUE(clean.spans > 0U);
+    TEST_ASSERT_EQUAL_UINT32(7U, clean.first_link);
     TEST_ASSERT_EQUAL_UINT32(clean.draw_calls, reused.draw_calls);
     TEST_ASSERT_EQUAL_UINT32(clean.spans, reused.spans);
+    TEST_ASSERT_EQUAL_UINT32(clean.first_link, reused.first_link);
     TEST_ASSERT_TRUE(clean.draw_x == reused.draw_x && clean.draw_y == reused.draw_y);
 }
 

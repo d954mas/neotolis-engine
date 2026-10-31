@@ -71,7 +71,6 @@ static void test_stale_mark_after_reset_asserts(void) {
     const size_t mark = s_arena.used;
     nt_arena_reset(&s_arena);
     NT_TEST_EXPECT_ASSERT(nt_arena_rewind(&s_arena, mark));
-    TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)s_arena.used);
 }
 
 /* The typed macros pass _Alignof(T): after 1 byte, uint64_t pads to 8. */

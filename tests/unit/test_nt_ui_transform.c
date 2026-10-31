@@ -160,10 +160,10 @@ static void test_walker_no_scratch_alloc(void) {
           .backgroundColor = {200.0F, 100.0F, 50.0F, 255.0F},
           .userData = (void *)NT_UI_DATA_XFORM(0U, &t, 0.9F)}) {}
     nt_ui_end(s_fx.ctx);
-    const size_t before_walk = g_nt_mem_scratch.used;
+    const size_t before_walk = g_nt_mem_scratch.high_water;
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
-    TEST_ASSERT_EQUAL_size_t_MESSAGE(before_walk, g_nt_mem_scratch.used, "walker hot path allocated from scratch arena");
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(before_walk, g_nt_mem_scratch.high_water, "walker hot path allocated from scratch arena");
     (void)baseline;
 }
 

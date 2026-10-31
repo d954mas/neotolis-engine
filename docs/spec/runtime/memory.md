@@ -37,8 +37,8 @@ Lifetime: from allocation until the owner's next `nt_arena_reset` or a rewind
 to a mark taken before the allocation.
 
 `nt_arena_t` (`engine/memory/nt_arena.h`) is a fixed-capacity bump allocator
-over memory its owner provides: a static array, a block from another arena or
-the owner's own `malloc`. The arena never allocates, grows or frees; the owner
+over memory its owner provides: a static array, a block from another arena
+(allocated with `_Alignof(max_align_t)`) or the owner's own `malloc`. The arena never allocates, grows or frees; the owner
 frees the memory. A game or module creates one when its allocations need a
 lifetime independent of frame scratch (an event log, a load-time workspace).
 

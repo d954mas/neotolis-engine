@@ -1777,11 +1777,15 @@ static void test_object_degenerate_size_asserts(void) {
     nt_ui_rich_begin(s_fx.ctx, &base);
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_object(s_fx.ctx, (nt_ui_rich_object_size_t){NAN, 1.0F, 1.0F}, stub_draw, NULL));
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_object(s_fx.ctx, (nt_ui_rich_object_size_t){1.0F, -5.0F, 1.0F}, stub_draw, NULL));
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_object(s_fx.ctx, (nt_ui_rich_object_size_t){INFINITY, 1.0F, 1.0F}, stub_draw, NULL));
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_object(s_fx.ctx, (nt_ui_rich_object_size_t){1.0F, INFINITY, 1.0F}, stub_draw, NULL));
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_object(s_fx.ctx, (nt_ui_rich_object_size_t){1.0F, 1.0F, INFINITY}, stub_draw, NULL));
     nt_ui_rich_end(s_fx.ctx);
     nt_ui_rich_tagset_t ts;
     nt_ui_rich_tagset_init(&ts);
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_object_tag(&ts, "bad", (nt_ui_rich_object_size_t){-1.0F, 1.0F, 1.0F}, stub_draw, NULL));
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_object_tag(&ts, "bad", (nt_ui_rich_object_size_t){1.0F, INFINITY, 1.0F}, stub_draw, NULL));
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_object_tag(&ts, "bad", (nt_ui_rich_object_size_t){1.0F, 1.0F, NAN}, stub_draw, NULL));
 }
 
 /* An object whose ascent is LESS than its height -> the box must seat by ascent
