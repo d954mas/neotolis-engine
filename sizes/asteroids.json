@@ -2840,5 +2840,63 @@
       "raw": 4263474,
       "gzip": 3845591
     }
+  },
+  {
+    "commit": "3912b56",
+    "date": "2026-10-31T10:45:42Z",
+    "files": {
+      "CREDITS.md": {
+        "raw": 6747,
+        "gzip": 2996
+      },
+      "README.md": {
+        "raw": 7545,
+        "gzip": 3691
+      },
+      "index.html": {
+        "raw": 2161,
+        "gzip": 1143
+      },
+      "index_simd.wasm": {
+        "raw": 653660,
+        "gzip": 289408
+      },
+      "index.wasm": {
+        "raw": 619918,
+        "gzip": 283128
+      },
+      "index_simd.js": {
+        "raw": 23397,
+        "gzip": 9493
+      },
+      "index.js": {
+        "raw": 23397,
+        "gzip": 9488
+      },
+      "assets/asteroids_core.ntpack": {
+        "raw": 23908,
+        "gzip": 10270
+      },
+      "assets/asteroids_space.ntpack": {
+        "raw": 3528296,
+        "gzip": 3527488
+      },
+      "assets/asteroids_ui.ntpack": {
+        "raw": 17760,
+        "gzip": 1102
+      }
+    },
+    "engine": {
+      "raw": 693510,
+      "gzip": 306731
+    },
+    "resources": {
+      "raw": 3569964,
+      "gzip": 3538860
+    },
+    "total": {
+      "raw": 4263474,
+      "gzip": 3845591
+    }
   }
 ]
