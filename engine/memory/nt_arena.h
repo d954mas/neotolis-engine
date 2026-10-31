@@ -26,8 +26,8 @@ void *nt_arena_alloc_array(nt_arena_t *arena, size_t elem_size, size_t count, si
 /* Pointers handed out before the reset become stale. */
 void nt_arena_reset(nt_arena_t *arena);
 
-/* mark: an earlier `used` of this arena, <= the current `used`. Pointers allocated
- * after the mark become stale. */
+/* mark: an earlier `used` of this arena, taken in the same function (never stored).
+ * Pointers allocated after the mark become stale. */
 void nt_arena_rewind(nt_arena_t *arena, size_t mark);
 
 #define NT_ARENA_ALLOC(arena, T) ((T *)nt_arena_alloc((arena), sizeof(T), _Alignof(T)))

@@ -61,7 +61,8 @@ since init and survives reset and rewind. Typed macros pass `sizeof(T)` and
 Lifetime: from allocation until the rewind that closes its scope.
 
 A mark is an earlier `used` of the same arena. `nt_arena_rewind(arena, mark)`
-returns the head to the mark in O(1); marks nest. A mark is invalid after a reset or an
+returns the head to the mark in O(1); marks nest. Take a mark and rewind to it in the
+same function; never store a mark. A mark is invalid after a reset or an
 earlier rewind below it; the assert catches one only while it lies past the
 current head. A rewind frees everything allocated after the mark by any caller,
 so it closes only a scope whose allocations are consumed before it and that
