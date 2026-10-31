@@ -149,7 +149,8 @@ static void test_walker_no_scratch_alloc(void) {
     t.offset_x = 5.0F;
     /* Frame 1 emits & walks so any one-shot init paths fire upfront. */
     walk_with_xform(&t, 0.9F, 50.0F, 50.0F, 80.0F, 40.0F, (Clay_Color){.r = 200, .g = 100, .b = 50, .a = 255});
-    nt_arena_reset(&g_nt_mem_scratch);
+    /* Re-init, not reset: high_water must forget frame 1's walk to catch one in frame 2. */
+    nt_arena_init(&g_nt_mem_scratch, g_nt_mem_scratch.base, g_nt_mem_scratch.size);
     const size_t baseline = g_nt_mem_scratch.used;
     /* Frame 2: declare + walk, then assert scratch wasn't touched by the walk. */
     nt_pointer_t mouse = {0};
