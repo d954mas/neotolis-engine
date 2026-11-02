@@ -188,7 +188,7 @@ comes from. It means the same for every format and codec:
 | `RUNTIME` (default) | level 0 and `NT_TEXTURE_FLAG_GEN_MIPMAPS`; the runtime calls `glGenerateMipmap` | uncompressed `RGBA8`, `RGB8`, `RG8`, `R8`, `SRGB8_ALPHA8` |
 | `BAKED` | the full chain down to 1x1, `1 + floor(log2(max(width, height)))` levels | every format and codec |
 
-`RUNTIME` keeps packs smallest; `BAKED` gives every GPU the same mips and serves
+`NONE` and `RUNTIME` store one level and keep packs smallest; `BAKED` gives every GPU the same mips and serves
 the formats WebGL 2 cannot generate for. `RUNTIME` on Basis, `SRGB8` or `RGB9E5`
 is a build-time assert, never a silent switch, so Basis and `RGB9E5` callers that
 start from the defaults choose `BAKED` or `NONE`. A mipmap `filter_min` with `NONE`

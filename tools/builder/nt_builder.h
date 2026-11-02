@@ -239,8 +239,8 @@ const nt_atlas_stats_t *nt_builder_get_atlas_stats(const NtBuilderContext *ctx, 
 
 /* Where a texture's mip chain comes from. NONE and RUNTIME store level 0 only;
  * RUNTIME also sets NT_TEXTURE_FLAG_GEN_MIPMAPS and needs a format the GPU can
- * render to (uncompressed, not SRGB8 or RGB9E5). BAKED stores the full chain. A default
- * mipmap filter_min with NONE asserts; a material override to a mipmap filter on
+ * render to (uncompressed, not SRGB8 or RGB9E5). BAKED stores the full chain. A mipmap
+ * filter_min with NONE asserts; a material override to a mipmap filter on
  * a NONE texture samples level 0. */
 typedef enum {
     NT_TEX_MIPS_NONE = 0,
@@ -378,7 +378,7 @@ typedef struct {
     nt_texture_default_filter_t filter_mag; /* default: LINEAR (NEAREST or LINEAR only) */
     nt_texture_default_wrap_t wrap_u;       /* default: REPEAT */
     nt_texture_default_wrap_t wrap_v;       /* default: REPEAT */
-    nt_tex_mips_t mips;                     /* default RUNTIME; Basis pages need BAKED or NONE. See nt_tex_mips_t. */
+    nt_tex_mips_t mips;                     /* default RUNTIME; Basis and SRGB8 pages need BAKED or NONE. See nt_tex_mips_t. */
     bool dedup;                             /* fold sprites with identical content onto one placement (default: true).
                                              * A 0x00 zero-init therefore means dedup OFF — same trade-off as allowed_transforms. */
 } nt_atlas_opts_t;
