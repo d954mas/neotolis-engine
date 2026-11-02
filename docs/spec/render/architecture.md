@@ -1467,7 +1467,9 @@ a summary whose every number filters the tree to the records it counts, the merg
 break of every plain or indexed draw checked against the recorded `CACHE` (a
 disagreement reads "inspector merge rule out of date"), the request and GL state at a
 record, and the frame's counters rebuilt from its records. `stream_bytes` is shown from
-the counters only: command sizes are not recorded.
+the counters only: command sizes are not recorded. `--monkey SECONDS [SEED]` drives it with random clicks,
+drags, wheel and keys for that long and prints the frame times, to shake out crashes and
+slow frames on large captures.
 
 ## Shape strokes
 

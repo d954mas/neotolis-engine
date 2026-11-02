@@ -26,6 +26,7 @@
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
+#include "time/nt_time.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_input.h"
 #include "ui/nt_ui_label.h"
@@ -125,7 +126,8 @@ static struct {
     bool open_requested;
     uint32_t close_file; /* the file whose x was clicked, closed after the frame's UI; FI_NONE */
     uint32_t cell_seq;
-    uint32_t ui_frame; /* counts declared UI frames */
+    uint32_t ui_frame;    /* counts declared UI frames */
+    uint32_t frame_epoch; /* changes with the selected frame; keys the caches */
     float fb_w;
 } s;
 
@@ -140,6 +142,126 @@ static nt_program_ref_t s_sprite_program, s_text_program;
 
 static fi_frame_t *frame_sel(void) { return &s.files[s.file].frames[s.frame]; }
 static bool frame_ok(const fi_frame_t *fr) { return fr->view.events != NULL; }
+// #endregion
+
+// #region monkey
+/* --monkey SECONDS [SEED]: random clicks, double-clicks, drags, wheel and keys every frame, to shake out
+ * crashes and slow frames; the run prints frame times and exits. The Open... dialog is never pressed. */
+static struct {
+    bool on;
+    double seconds;
+    uint32_t seed;
+    uint32_t frames;
+    double total_ms, worst_ms, started;
+    uint32_t press_frames; /* frames left to hold the button */
+    uint32_t again;        /* frames until the second click of a double-click */
+    nt_key_t key;
+    bool shift, ctrl, alt;
+} s_monkey;
+
+static uint32_t monkey_rand(void) {
+    s_monkey.seed ^= s_monkey.seed << 13U;
+    s_monkey.seed ^= s_monkey.seed >> 17U;
+    s_monkey.seed ^= s_monkey.seed << 5U;
+    return s_monkey.seed;
+}
+
+static bool key_pressed(nt_key_t key) { return s_monkey.on ? (s_monkey.key == key) : nt_input_key_is_pressed(key); }
+
+static bool key_down(nt_key_t key) {
+    if (!s_monkey.on) {
+        return nt_input_key_is_down(key);
+    }
+    if (key == NT_KEY_LSHIFT) {
+        return s_monkey.shift;
+    }
+    if (key == NT_KEY_LCTRL) {
+        return s_monkey.ctrl;
+    }
+    if (key == NT_KEY_LALT) {
+        return s_monkey.alt;
+    }
+    return s_monkey.key == key;
+}
+
+/* Replaces this frame's mouse and keys with random ones. */
+static void monkey_input(float w, float h) {
+    static const nt_key_t k_keys[] = {NT_KEY_ARROW_UP, NT_KEY_ARROW_DOWN, NT_KEY_ARROW_LEFT, NT_KEY_ARROW_RIGHT, NT_KEY_PAGE_UP,   NT_KEY_PAGE_DOWN, NT_KEY_HOME,
+                                      NT_KEY_END,      NT_KEY_D,          NT_KEY_P,          NT_KEY_ENTER,       NT_KEY_BACKSPACE, NT_KEY_ESCAPE,    NT_KEY_C};
+    nt_pointer_t *p = &g_nt_input.pointers[0];
+    g_nt_input.primary = 0;
+    p->active = true;
+    p->wheel_dy = 0.0F;
+    p->dx = 0.0F;
+    p->dy = 0.0F;
+    nt_button_state_t *b = &p->buttons[NT_BUTTON_LEFT];
+    b->is_pressed = false;
+    b->is_released = false;
+    s_monkey.key = NT_KEY_COUNT;
+    if (s_monkey.press_frames > 0) {
+        s_monkey.press_frames--;
+        if (s_monkey.press_frames == 0) {
+            b->is_down = false;
+            b->is_released = true;
+            return;
+        }
+    }
+    if (b->is_down) {
+        p->dx = (float)((int)(monkey_rand() % 21U) - 10);
+        p->x += p->dx; /* a drag */
+        return;
+    }
+    if (s_monkey.again > 0) {
+        s_monkey.again--;
+        if (s_monkey.again == 0) {
+            b->is_down = true;
+            b->is_pressed = true;
+            s_monkey.press_frames = 1;
+            return;
+        }
+    }
+    const uint32_t r = monkey_rand() % 100U;
+    if (r < 35U) {
+        p->dx = ((float)(monkey_rand() % 10000U) / 10000.0F * w) - p->x;
+        p->dy = ((float)(monkey_rand() % 10000U) / 10000.0F * h) - p->y;
+        p->x += p->dx;
+        p->y += p->dy;
+    } else if (r < 65U) {
+        b->is_down = true;
+        b->is_pressed = true;
+        s_monkey.press_frames = 1U + (monkey_rand() % 4U);                            /* a click, or a short drag */
+        s_monkey.again = (monkey_rand() % 4U) == 0 ? 2U + s_monkey.press_frames : 0U; /* sometimes a double-click */
+    } else if (r < 75U) {
+        p->wheel_dy = (float)((int)(monkey_rand() % 7U) - 3);
+    } else {
+        s_monkey.key = k_keys[monkey_rand() % (sizeof(k_keys) / sizeof(k_keys[0]))];
+        const uint32_t mod = monkey_rand() % 8U;
+        s_monkey.shift = mod == 1U;
+        s_monkey.ctrl = mod == 2U;
+        s_monkey.alt = mod == 3U;
+    }
+}
+
+static void monkey_frame_time(void) {
+    const double now = nt_time_now();
+    static double last;
+    if (last > 0.0) {
+        const double ms = (now - last) * 1000.0;
+        s_monkey.total_ms += ms;
+        s_monkey.worst_ms = ms > s_monkey.worst_ms ? ms : s_monkey.worst_ms;
+        if (ms > 50.0) {
+            (void)fprintf(stderr, "monkey: slow frame %.1f ms on page %d, frame %u/%u, selected %u, anchor %u\n", ms, s.page, s.file, s.frame, s.selected, s.anchor);
+        }
+        s_monkey.frames++;
+    }
+    last = now;
+    if (s_monkey.started == 0.0) {
+        s_monkey.started = now;
+    }
+    if (now - s_monkey.started > s_monkey.seconds) {
+        nt_app_quit();
+    }
+}
 // #endregion
 
 // #region helpers
@@ -558,6 +680,7 @@ static void index_groups_and_aliases(const fi_frame_t *fr) {
 static void select_frame(uint32_t file, uint32_t frame) {
     s.file = file;
     s.frame = frame;
+    s.frame_epoch++;
     const fi_frame_t *fr = frame_sel();
     const uint32_t rows = fr->row_count + fr->view.count + 1U;
     free(s.collapsed);
@@ -1086,31 +1209,46 @@ static void row_label(const fi_frame_t *fr, uint32_t k, char *buf, size_t size) 
  * was issued, short where draws merged, red at a problem; group bands alternate; the selection is amber. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_timeline(const fi_frame_t *fr) {
+    enum { ISSUED = 1, MERGED = 2, PROBLEM = 4, MAX_COLUMNS = 1024 };
+    static uint8_t flags[MAX_COLUMNS];
+    static uint32_t targets[MAX_COLUMNS];
+    static uint32_t cached_epoch;
+    static uint32_t cached_columns;
     const uint32_t n = fr->view.count;
     const float width = s.fb_w - (float)SIDE_W - 40.0F;
-    const uint32_t columns = n < (uint32_t)(width / 3.0F) ? n : (uint32_t)(width / 3.0F);
+    uint32_t columns = width > 3.0F ? (uint32_t)(width / 3.0F) : 0U;
+    columns = columns < n ? columns : n;
+    columns = columns < MAX_COLUMNS ? columns : MAX_COLUMNS;
     if (columns == 0) {
         return;
     }
+    if (cached_epoch != s.frame_epoch || cached_columns != columns) { /* one pass over the records per frame and width */
+        cached_epoch = s.frame_epoch;
+        cached_columns = columns;
+        for (uint32_t c = 0; c < columns; c++) {
+            const uint32_t from = (uint32_t)(((uint64_t)c * n) / columns);
+            const uint32_t to = (uint32_t)(((uint64_t)(c + 1U) * n) / columns);
+            flags[c] = 0;
+            targets[c] = from;
+            for (uint32_t i = from; i < to; i++) {
+                const nt_gfx_event_t *e = &fr->view.events[i];
+                const bool draw = e->kind == NT_GFX_EVENT_OP && e->operation >= NT_GFX_OP_DRAW && e->operation <= NT_GFX_OP_DRAW_INDEXED_INSTANCED;
+                targets[c] = draw && targets[c] == from ? i : targets[c];
+                flags[c] |= (uint8_t)((draw && e->result == NT_GFX_RESULT_ACCEPTED ? ISSUED : 0) | (draw && e->result == NT_GFX_RESULT_CACHE ? MERGED : 0) |
+                                      (fi_matches(fr, i, (fi_query_t){.kind = FI_Q_PROBLEM}) ? PROBLEM : 0));
+            }
+        }
+    }
+    const uint32_t selected_column = s.selected < n ? (uint32_t)(((uint64_t)s.selected * columns) / n) : FI_NONE;
     const float column_w = width / (float)columns;
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(16)}, .childAlignment = {.y = CLAY_ALIGN_Y_BOTTOM}}, .backgroundColor = k_bg}) {
         for (uint32_t c = 0; c < columns; c++) {
             const uint32_t from = (uint32_t)(((uint64_t)c * n) / columns);
-            const uint32_t to = (uint32_t)(((uint64_t)(c + 1U) * n) / columns);
-            bool issued = false;
-            bool merged = false;
-            bool problem = false;
-            bool selected = false;
-            uint32_t target = from;
-            for (uint32_t i = from; i < to; i++) {
-                const nt_gfx_event_t *e = &fr->view.events[i];
-                const bool draw = e->kind == NT_GFX_EVENT_OP && e->operation >= NT_GFX_OP_DRAW && e->operation <= NT_GFX_OP_DRAW_INDEXED_INSTANCED;
-                target = draw && target == from ? i : target;
-                issued |= draw && e->result == NT_GFX_RESULT_ACCEPTED;
-                merged |= draw && e->result == NT_GFX_RESULT_CACHE;
-                problem |= fi_matches(fr, i, (fi_query_t){.kind = FI_Q_PROBLEM});
-                selected |= i == s.selected;
-            }
+            const bool issued = (flags[c] & ISSUED) != 0;
+            const bool merged = (flags[c] & MERGED) != 0;
+            const bool problem = (flags[c] & PROBLEM) != 0;
+            const bool selected = c == selected_column;
+            const uint32_t target = targets[c];
             const uint32_t id = next_id();
             const nt_ui_events_t ev = nt_ui_events(s_ctx, id, NULL);
             if (ev.clicked) {
@@ -1192,10 +1330,10 @@ static void declare_tree_bar(void) {
     }
 }
 
-static bool in_range(const fi_frame_t *fr, uint32_t id);
+static bool in_range(const fi_frame_t *fr, uint32_t id, uint32_t row);
 
-static Clay_Color row_background(const fi_frame_t *fr, uint32_t id, bool hovered) {
-    if (s.selected == id || in_range(fr, id)) {
+static Clay_Color row_background(const fi_frame_t *fr, uint32_t id, uint32_t row, bool hovered) {
+    if (s.selected == id || in_range(fr, id, row)) {
         return k_select;
     }
     if (hovered) {
@@ -1209,7 +1347,9 @@ static uint32_t previous(const fi_frame_t *fr, uint32_t at, bool (*accept)(const
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_tree(void) {
-    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}, .clip = {.horizontal = true}}) {
+    const uint32_t area_id = nt_ui_id("tree_area");
+    CLAY(
+        {.id = (Clay_ElementId){.id = area_id}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}, .clip = {.horizontal = true}}) {
         if (s.file_count == 0) {
             text("No capture open.", &k_dim);
         } else if (!frame_ok(frame_sel())) {
@@ -1221,8 +1361,15 @@ static void declare_tree(void) {
             declare_timeline(fr);
             const uint32_t list_id = nt_ui_id("tree");
             const nt_ui_vlist_style_t vstyle = nt_ui_vlist_style_defaults();
+            /* A fixed height from last frame's layout: a growing list makes Clay shrink its tall content in float,
+             * which at a million pixels takes tens of thousands of steps a frame. */
+            const nt_ui_bbox_t area = nt_ui_get_bbox(s_ctx, area_id);
+            const nt_ui_bbox_t list = nt_ui_get_bbox(s_ctx, list_id);
+            float list_h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 900) - 200.0F;
+            list_h = area.found && list.found ? area.y + area.height - list.y : list_h;
+            list_h = list_h > ROW_H ? list_h : ROW_H;
             const nt_ui_vlist_range_t range = nt_ui_vlist_begin(s_ctx, NULL, list_id, s.vis_count, ROW_H, NT_UI_AXIS_Y, &vstyle,
-                                                                &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .backgroundColor = k_panel});
+                                                                &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(list_h)}}, .backgroundColor = k_panel});
             if (s.follow && s.selected != FI_NONE) {
                 const uint32_t at = vis_index_of(s.selected);
                 if (at != FI_NONE && (at < range.first + 3U || at + 3U > range.last)) {
@@ -1245,7 +1392,7 @@ static void declare_tree(void) {
                     s.collapsed[r] ^= 1U;
                     s.dirty = true;
                 } else if (ev.clicked) {
-                    const bool shift = nt_input_key_is_down(NT_KEY_LSHIFT) || nt_input_key_is_down(NT_KEY_RSHIFT);
+                    const bool shift = key_down(NT_KEY_LSHIFT) || key_down(NT_KEY_RSHIFT);
                     s.anchor = shift ? (s.anchor != FI_NONE ? s.anchor : s.selected) : FI_NONE; // NOLINT(readability-avoid-nested-conditional-operator)
                     s.selected = id;
                 }
@@ -1260,7 +1407,7 @@ static void declare_tree(void) {
                 const bool selected = s.selected == id;
                 CLAY({.id = (Clay_ElementId){.id = row_id},
                       .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(ROW_H)}, .padding = {.right = 6}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
-                      .backgroundColor = row_background(fr, id, ev.hovered),
+                      .backgroundColor = row_background(fr, id, r, ev.hovered),
                       .border = {.color = k_select_border, .width = {selected ? 1U : 0U, selected ? 1U : 0U, selected ? 1U : 0U, selected ? 1U : 0U, 0}}}) {
                     CLAY({.id = (Clay_ElementId){.id = fold_id},
                           .layout = {.sizing = {CLAY_SIZING_FIXED(44), CLAY_SIZING_FIXED(ROW_H)}, .childAlignment = {.x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER}},
@@ -1691,19 +1838,24 @@ static bool range_rows(const fi_frame_t *fr, uint32_t *lo, uint32_t *hi) {
     return true;
 }
 
-static bool in_range(const fi_frame_t *fr, uint32_t id) {
+/* row: the id's logical row when the caller knows it, else FI_NONE. */
+static bool in_range(const fi_frame_t *fr, uint32_t id, uint32_t row) {
     static uint32_t lo;
     static uint32_t hi;
-    static uint32_t cached_for = FI_NONE; /* cell_seq of the UI frame the range was resolved in */
+    static uint32_t key_epoch = FI_NONE;
+    static uint32_t key_anchor = FI_NONE;
+    static uint32_t key_selected = FI_NONE;
     static bool valid;
-    if (cached_for != s.ui_frame) {
-        cached_for = s.ui_frame;
+    if (key_epoch != s.frame_epoch || key_anchor != s.anchor || key_selected != s.selected) {
+        key_epoch = s.frame_epoch;
+        key_anchor = s.anchor;
+        key_selected = s.selected;
         valid = range_rows(fr, &lo, &hi);
     }
     if (!valid) {
         return false;
     }
-    const uint32_t r = row_of(fr, id);
+    const uint32_t r = row != FI_NONE ? row : row_of(fr, id);
     return r != FI_NONE && r >= lo && r <= hi;
 }
 
@@ -1822,6 +1974,58 @@ static void link_line(const fi_frame_t *fr, const char *what, uint32_t record) {
     }
 }
 
+/* What the selected-command panel needs from whole-frame scans, computed once per selection, not per UI frame. */
+static struct {
+    uint32_t epoch, at;
+    fi_request_state_t req, prev_req;
+    uint32_t prev_draw;
+    uint32_t gl_at, prev_issue;
+    fi_gl_state_t gl, prev_gl;
+    uint32_t ordinal; /* GL draw calls up to and including this draw */
+    uint32_t children[40];
+    uint32_t child_count;
+} s_panel = {.epoch = FI_NONE};
+
+static bool is_draw_issue(const nt_gfx_event_t *e);
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void panel_cache(const fi_frame_t *fr, uint32_t at) {
+    if (s_panel.epoch == s.frame_epoch && s_panel.at == at) {
+        return;
+    }
+    s_panel.epoch = s.frame_epoch;
+    s_panel.at = at;
+    fi_request_state(fr, at, &s_panel.req);
+    s_panel.prev_draw = previous(fr, at, is_draw_op);
+    if (s_panel.prev_draw != FI_NONE) {
+        fi_request_state(fr, s_panel.prev_draw, &s_panel.prev_req);
+    } else {
+        s_panel.prev_req = s_panel.req;
+    }
+    /* An operation's draw-phase calls issue at end_frame: its GL state is the one after its last call. */
+    s_panel.gl_at = at;
+    s_panel.child_count = 0;
+    for (uint32_t i = at + 1U; i < fr->view.count; i++) {
+        if (fr->parent[i] != at) {
+            continue;
+        }
+        s_panel.gl_at = fr->view.events[i].kind == NT_GFX_EVENT_BACKEND ? i : s_panel.gl_at;
+        if (s_panel.child_count < 40U) {
+            s_panel.children[s_panel.child_count++] = i;
+        }
+    }
+    fi_gl_state(fr, s_panel.gl_at, &s_panel.gl);
+    s_panel.prev_issue = previous(fr, s_panel.gl_at, is_draw_issue);
+    s_panel.prev_gl.count = 0;
+    if (s_panel.prev_issue != FI_NONE) {
+        fi_gl_state(fr, s_panel.prev_issue, &s_panel.prev_gl);
+    }
+    s_panel.ordinal = 0;
+    for (uint32_t i = 0; i <= at; i++) {
+        s_panel.ordinal += is_draw_op(&fr->view.events[i]) && fr->view.events[i].result == NT_GFX_RESULT_ACCEPTED ? 1U : 0U;
+    }
+}
+
 /* For a draw, the answer to "did it cost a GL draw call, and why": merged, or new and what broke the merge. */
 static void declare_verdict(const fi_frame_t *fr, uint32_t id) {
     const nt_gfx_event_t *e = &fr->view.events[id];
@@ -1837,14 +2041,8 @@ static void declare_verdict(const fi_frame_t *fr, uint32_t id) {
         textf(&k_bad, "%s: nothing drawn", nt_gfx_result_name(e->result));
         return;
     }
-    uint32_t ordinal = 0;
-    for (uint32_t i = 0; i <= id; i++) {
-        ordinal += fr->view.events[i].kind == NT_GFX_EVENT_OP && fr->view.events[i].result == NT_GFX_RESULT_ACCEPTED && fr->view.events[i].link == 0 &&
-                           fr->view.events[i].operation >= NT_GFX_OP_DRAW && fr->view.events[i].operation <= NT_GFX_OP_DRAW_INDEXED_INSTANCED
-                       ? 1U
-                       : 0U;
-    }
-    textf(&k_head, "NEW GL draw call %u of %u", ordinal, nt_gfx_draw_calls(&fr->view.counters));
+    panel_cache(fr, id);
+    textf(&k_head, "NEW GL draw call %u of %u", s_panel.ordinal, nt_gfx_draw_calls(&fr->view.counters));
     if (e->operation == NT_GFX_OP_DRAW_INSTANCED || e->operation == NT_GFX_OP_DRAW_INDEXED_INSTANCED) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) { text("instanced draws never merge: joining them would change gl_InstanceID", &k_wrap); }
     } else if (fr->brk[id] != FI_BREAK_NONE) {
@@ -1876,14 +2074,12 @@ static void declare_details(const fi_frame_t *fr) {
         textf(&k_dim, "phase: %s", fi_node_name((fi_node_t)(fr->parent[id] - FI_NODE_BASE)));
     }
     textf(&k_dim, "group: %s", fr->group_key[fr->group[id]]);
-    uint32_t shown = 0;
-    for (uint32_t i = id + 1U; i < fr->view.count && shown < 40; i++) {
-        if (fr->parent[i] == id) {
-            if (shown++ == 0) {
-                section("GL calls and records it caused");
-            }
-            link_line(fr, "", i);
+    panel_cache(fr, id);
+    for (uint32_t k = 0; k < s_panel.child_count; k++) {
+        if (k == 0) {
+            section("GL calls and records it caused");
         }
+        link_line(fr, "", s_panel.children[k]);
     }
 }
 
@@ -2003,16 +2199,10 @@ static void declare_state(const fi_frame_t *fr) {
         text("Select a record: the state shown is the one in effect after it.", &k_dim);
         return;
     }
-    const uint32_t at = s.selected;
-    fi_request_state_t req;
-    fi_request_state_t prev_req;
-    fi_request_state(fr, at, &req);
-    const uint32_t prev_draw = previous(fr, at, is_draw_op);
-    if (prev_draw != FI_NONE) {
-        fi_request_state(fr, prev_draw, &prev_req);
-    } else {
-        prev_req = req;
-    }
+    panel_cache(fr, s.selected);
+    const fi_request_state_t req = s_panel.req;
+    const fi_request_state_t prev_req = s_panel.prev_req;
+    const uint32_t prev_draw = s_panel.prev_draw;
     section(prev_draw != FI_NONE ? "Engine state  (violet: a different value than at the previous draw)" : "Engine state");
     if (prev_draw != FI_NONE) {
         link_line(fr, "previous draw ", prev_draw);
@@ -2038,19 +2228,9 @@ static void declare_state(const fi_frame_t *fr) {
             state_line(fr, name, req.ubo[k], prev_draw != FI_NONE ? prev_req.ubo[k] : req.ubo[k], false);
         }
     }
-    /* An operation's draw-phase calls issue at end_frame: its GL state is the one after its last call. */
-    uint32_t gl_at = at;
-    for (uint32_t i = at + 1U; i < fr->view.count; i++) {
-        gl_at = fr->parent[i] == at && fr->view.events[i].kind == NT_GFX_EVENT_BACKEND ? i : gl_at;
-    }
-    static fi_gl_state_t gl;
-    static fi_gl_state_t prev_gl;
-    fi_gl_state(fr, gl_at, &gl);
-    const uint32_t prev_issue = previous(fr, gl_at, is_draw_issue);
-    prev_gl.count = 0;
-    if (prev_issue != FI_NONE) {
-        fi_gl_state(fr, prev_issue, &prev_gl);
-    }
+    const fi_gl_state_t *gl_now = &s_panel.gl;
+    const fi_gl_state_t *prev_gl = &s_panel.prev_gl;
+    const uint32_t prev_issue = s_panel.prev_issue;
     section("GL state  (violet: a different value than at the previous GL draw)");
     if (button(s.state_all ? "show changes only" : "show all GL state", &k_text, false)) {
         s.state_all = !s.state_all;
@@ -2059,9 +2239,9 @@ static void declare_state(const fi_frame_t *fr) {
         link_line(fr, "previous GL draw ", prev_issue);
     }
     uint32_t shown = 0;
-    for (uint32_t k = 0; k < gl.count; k++) {
-        const fi_gl_slot_t *slot = &gl.slot[k];
-        const uint32_t before = prev_issue != FI_NONE ? slot_before(slot, &prev_gl) : slot->record;
+    for (uint32_t k = 0; k < gl_now->count; k++) {
+        const fi_gl_slot_t *slot = &gl_now->slot[k];
+        const uint32_t before = prev_issue != FI_NONE ? slot_before(slot, prev_gl) : slot->record;
         const bool changed = before != slot->record && !same_value(fr, before, slot->record);
         if (!s.state_all && !changed && prev_issue != FI_NONE) {
             continue;
@@ -2178,7 +2358,7 @@ static void move(int64_t delta) {
     if (s.vis_count == 0) {
         return;
     }
-    const bool shift = nt_input_key_is_down(NT_KEY_LSHIFT) || nt_input_key_is_down(NT_KEY_RSHIFT);
+    const bool shift = key_down(NT_KEY_LSHIFT) || key_down(NT_KEY_RSHIFT);
     if (!shift) {
         s.anchor = FI_NONE;
     } else if (s.anchor == FI_NONE) {
@@ -2228,52 +2408,52 @@ static void handle_keys(void) {
     if (s.file_count == 0 || nt_ui_input_any_focused(s_ctx)) {
         return;
     }
-    const bool shift = nt_input_key_is_down(NT_KEY_LSHIFT) || nt_input_key_is_down(NT_KEY_RSHIFT);
-    const bool ctrl = nt_input_key_is_down(NT_KEY_LCTRL) || nt_input_key_is_down(NT_KEY_RCTRL);
+    const bool shift = key_down(NT_KEY_LSHIFT) || key_down(NT_KEY_RSHIFT);
+    const bool ctrl = key_down(NT_KEY_LCTRL) || key_down(NT_KEY_RCTRL);
     const fi_frame_t *fr = frame_sel();
-    const bool alt = nt_input_key_is_down(NT_KEY_LALT) || nt_input_key_is_down(NT_KEY_RALT);
-    if (alt && (nt_input_key_is_pressed(NT_KEY_ARROW_LEFT) || nt_input_key_is_pressed(NT_KEY_ARROW_RIGHT))) {
-        if (nt_input_key_is_pressed(NT_KEY_ARROW_LEFT)) {
+    const bool alt = key_down(NT_KEY_LALT) || key_down(NT_KEY_RALT);
+    if (alt && (key_pressed(NT_KEY_ARROW_LEFT) || key_pressed(NT_KEY_ARROW_RIGHT))) {
+        if (key_pressed(NT_KEY_ARROW_LEFT)) {
             go_back();
         } else {
             go_forward();
         }
         return;
     }
-    if (ctrl && (nt_input_key_is_pressed(NT_KEY_ARROW_LEFT) || nt_input_key_is_pressed(NT_KEY_ARROW_RIGHT))) {
-        step_frame(nt_input_key_is_pressed(NT_KEY_ARROW_LEFT) ? -1 : 1);
+    if (ctrl && (key_pressed(NT_KEY_ARROW_LEFT) || key_pressed(NT_KEY_ARROW_RIGHT))) {
+        step_frame(key_pressed(NT_KEY_ARROW_LEFT) ? -1 : 1);
         return;
     }
     if (!frame_ok(fr)) {
         return;
     }
-    if (nt_input_key_is_pressed(NT_KEY_ARROW_DOWN)) {
+    if (key_pressed(NT_KEY_ARROW_DOWN)) {
         move(1);
     }
-    if (nt_input_key_is_pressed(NT_KEY_ARROW_UP)) {
+    if (key_pressed(NT_KEY_ARROW_UP)) {
         move(-1);
     }
-    if (nt_input_key_is_pressed(NT_KEY_PAGE_DOWN)) {
+    if (key_pressed(NT_KEY_PAGE_DOWN)) {
         move(30);
     }
-    if (nt_input_key_is_pressed(NT_KEY_PAGE_UP)) {
+    if (key_pressed(NT_KEY_PAGE_UP)) {
         move(-30);
     }
-    if (nt_input_key_is_pressed(NT_KEY_HOME)) {
+    if (key_pressed(NT_KEY_HOME)) {
         move(-(int64_t)s.vis_count);
     }
-    if (nt_input_key_is_pressed(NT_KEY_END)) {
+    if (key_pressed(NT_KEY_END)) {
         move((int64_t)s.vis_count);
     }
     const uint32_t at = vis_index_of(s.selected);
-    if (at != FI_NONE && s.vis_row[at] != FI_NONE && (nt_input_key_is_pressed(NT_KEY_ARROW_LEFT) || nt_input_key_is_pressed(NT_KEY_ARROW_RIGHT))) {
-        s.collapsed[s.vis_row[at]] = nt_input_key_is_pressed(NT_KEY_ARROW_LEFT) ? 1U : 0U;
+    if (at != FI_NONE && s.vis_row[at] != FI_NONE && (key_pressed(NT_KEY_ARROW_LEFT) || key_pressed(NT_KEY_ARROW_RIGHT))) {
+        s.collapsed[s.vis_row[at]] = key_pressed(NT_KEY_ARROW_LEFT) ? 1U : 0U;
         s.dirty = true;
     }
-    if (nt_input_key_is_pressed(NT_KEY_BACKSPACE) && s.selected != FI_NONE && parent_of(fr, s.selected) != FI_NONE) {
+    if (key_pressed(NT_KEY_BACKSPACE) && s.selected != FI_NONE && parent_of(fr, s.selected) != FI_NONE) {
         select_record(parent_of(fr, s.selected));
     }
-    if (nt_input_key_is_pressed(NT_KEY_ENTER) && s.selected < fr->view.count) {
+    if (key_pressed(NT_KEY_ENTER) && s.selected < fr->view.count) {
         const nt_gfx_event_t *e = &fr->view.events[s.selected];
         if (is_mergeable_draw(e) && e->result == NT_GFX_RESULT_CACHE && e->detail > 0 && e->detail <= fr->view.count) {
             select_record(e->detail - 1U);
@@ -2281,16 +2461,16 @@ static void handle_keys(void) {
             select_record(fr->cause[s.selected]);
         }
     }
-    if (nt_input_key_is_pressed(NT_KEY_D)) {
+    if (key_pressed(NT_KEY_D)) {
         jump(shift ? -1 : 1, NT_GFX_OP_DRAW, NT_GFX_OP_DRAW_INDEXED_INSTANCED);
     }
-    if (nt_input_key_is_pressed(NT_KEY_P)) {
+    if (key_pressed(NT_KEY_P)) {
         jump(shift ? -1 : 1, NT_GFX_OP_PASS, NT_GFX_OP_PASS);
     }
-    if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
+    if (key_pressed(NT_KEY_ESCAPE)) {
         clear_filters();
     }
-    if (ctrl && nt_input_key_is_pressed(NT_KEY_C) && s.selected < fr->view.count) {
+    if (ctrl && key_pressed(NT_KEY_C) && s.selected < fr->view.count) {
         copy_selection(fr);
     }
 }
@@ -2410,11 +2590,17 @@ static void try_bind(void) {
 static void frame(void) {
     if (s.open_requested) {
         s.open_requested = false;
-        open_files();
+        if (!s_monkey.on) {
+            open_files();
+        }
     }
     nt_window_poll();
     nt_gfx_begin_frame();
     nt_input_poll();
+    if (s_monkey.on) {
+        monkey_frame_time();
+        monkey_input(s.fb_w > 0.0F ? s.fb_w : 1600.0F, (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 900));
+    }
     nt_mem_scratch_reset();
     handle_keys();
     nt_resource_step();
@@ -2469,6 +2655,23 @@ static void frame(void) {
 // #endregion
 
 // #region main
+/* Files to open, and --monkey SECONDS [SEED]. */
+static void parse_args(int argc, char *argv[]) {
+    for (int a = 1; a < argc; a++) {
+        if (strcmp(argv[a], "--monkey") != 0 || a + 1 >= argc) {
+            add_file(argv[a]);
+            continue;
+        }
+        s_monkey.on = true;
+        s_monkey.seconds = strtod(argv[++a], NULL);
+        s_monkey.seed = 1U;
+        if (a + 1 < argc && isdigit((unsigned char)argv[a + 1][0])) {
+            s_monkey.seed = (uint32_t)strtoul(argv[++a], NULL, 10);
+        }
+        s_monkey.seed = s_monkey.seed != 0 ? s_monkey.seed : 1U;
+    }
+}
+
 static nt_material_t make_material(const char *label) {
     return nt_material_create(&(nt_material_create_desc_t){.blend = nt_blend_alpha_premultiplied(), .depth_test = false, .depth_write = false, .cull_mode = NT_CULL_NONE, .label = label});
 }
@@ -2482,9 +2685,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     nt_fs_init();
-    for (int a = 1; a < argc; a++) {
-        add_file(argv[a]);
-    }
+    parse_args(argc, argv);
 
     g_nt_window.width = 1600;
     g_nt_window.height = 900;
@@ -2538,6 +2739,9 @@ int main(int argc, char *argv[]) {
     nt_resource_set_activate_time_budget(0);
 
     nt_app_run(frame);
+    if (s_monkey.on) {
+        (void)printf("monkey: %u frames, %.2f ms average, %.2f ms worst\n", s_monkey.frames, s_monkey.frames > 0 ? s_monkey.total_ms / s_monkey.frames : 0.0, s_monkey.worst_ms);
+    }
 
     nt_ui_destroy_context(s_ctx);
     free(s_ui_arena);
