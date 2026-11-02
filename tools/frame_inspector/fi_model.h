@@ -152,7 +152,7 @@ typedef struct {
 
 /* Reads and parses a capture file; false when it cannot be read. */
 bool fi_file_open(fi_file_t *file, const char *path);
-/* Parses text (malloc'd, len bytes; the file takes it) into frames. */
+/* Parses text (malloc'd, len bytes; the file takes it) into frames. The file's name keeps control bytes as \xNN. */
 void fi_file_load(fi_file_t *file, const char *name, char *text, size_t len);
 void fi_file_close(fi_file_t *file);
 /* The index-th frame of the files in their order, counting rejected ones: the frame's address. Sequences

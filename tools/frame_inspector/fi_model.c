@@ -120,12 +120,27 @@ static fi_frame_t *push_frame(fi_file_t *file, uint32_t *cap) {
     return fr;
 }
 
+/* src with control bytes as \xNN, as capture text prints them: a file name or group key stays one line in
+ * an answer. */
+static void one_line(const char *src, char *buf, size_t size) {
+    size_t n = 0;
+    for (const char *c = src; *c != '\0' && n + 5U < size; c++) {
+        const uint8_t b = (uint8_t)*c;
+        if (b < 0x20U || b == 0x7fU) {
+            n += (size_t)snprintf(buf + n, size - n, "\\x%02x", b);
+        } else {
+            buf[n++] = *c;
+        }
+    }
+    buf[n] = '\0';
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void fi_file_load(fi_file_t *file, const char *name, char *text, size_t len) {
     memset(file, 0, sizeof(*file));
-    const size_t name_len = strlen(name);
-    file->name = (char *)fi_alloc(name_len + 1, 1);
-    memcpy(file->name, name, name_len);
+    const size_t name_size = (strlen(name) * 4U) + 5U;
+    file->name = (char *)fi_alloc(name_size, 1);
+    one_line(name, file->name, name_size);
     file->text = text;
     file->len = len;
     /* Records are the lines that start with their index: a file of empty lines asks for no memory. */
@@ -248,17 +263,8 @@ static uint32_t intern_group(fi_frame_t *fr, uint32_t *slot, uint32_t mask, uint
     fr->group_label[g] = label;
     const char *base = parent != 0 ? fr->group_key[parent] : "";
     const char *sep = note ? " > " : "/";
-    char shown[FI_KEY_LEN]; /* control bytes as \xNN, as capture text prints them: a key stays one line */
-    size_t n = 0;
-    for (const char *c = label; *c != '\0' && n + 5U < sizeof(shown); c++) {
-        const uint8_t b = (uint8_t)*c;
-        if (b < 0x20U || b == 0x7fU) {
-            n += (size_t)snprintf(shown + n, sizeof(shown) - n, "\\x%02x", b);
-        } else {
-            shown[n++] = *c;
-        }
-    }
-    shown[n] = '\0';
+    char shown[FI_KEY_LEN];
+    one_line(label, shown, sizeof(shown));
     (void)snprintf(fr->group_key[g], FI_KEY_LEN, "%s%s%s", base, parent != 0 || note ? sep + (parent == 0) : "", shown); /* "> ui" at the top */
     return g;
 }

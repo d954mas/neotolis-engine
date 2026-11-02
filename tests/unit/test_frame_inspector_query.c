@@ -181,10 +181,11 @@ static void test_a_repeated_sequence_has_two_addresses(void) {
     memcpy(text, s_file.text, len);
     memcpy(text + len, s_file.text, len);
     fi_file_close(&s_file);
-    fi_file_load(&s_file, "joined", text, len * 2);
+    fi_file_load(&s_file, "joined\n= ok", text, len * 2); /* a name's line break cannot end an answer */
     TEST_ASSERT_EQUAL_UINT32(2, s_file.frame_count);
     assert_holds(ask("frames", true), "\n* 0 51 714 9 47 38 67 93952 0\n  1 51 714 9 47 38 67 93952 0\n");
-    assert_holds(ask("frame 1", true), "frame 1  # sequence 51, file 0 joined");
+    assert_holds(ask("frame 1", true), "frame 1  # sequence 51, file 0 joined\\x0a= ok, 714 records\n");
+    assert_holds(ask("frames", true), "\nfile 0 joined\\x0a= ok  # 2 frames\n");
     TEST_ASSERT_EQUAL_UINT32(1, s_session.frame);
     assert_holds(ask("frames", true), "\n  0 51 714 9 47 38 67 93952 0\n* 1 51 ");
 }
