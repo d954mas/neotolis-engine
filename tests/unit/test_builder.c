@@ -1059,16 +1059,17 @@ void test_texture_mips_baked_averages_each_channel_without_alpha_weighting(void)
     free(asset);
 }
 
-/* Each level filters the level before it at that level's size: a gradient has one
- * exact chain, and a wrong source level or offset changes it. */
+/* Each level filters the stored bytes of the level before it. 7 -> 3 -> 1: level 1
+ * is {1.43, 0, 0} -> {1, 0, 0}, so level 2 is 0.33 -> 0; filtering level 0 straight
+ * to 1x1 would give 4/7 -> 1. */
 void test_texture_mips_baked_chain_filters_the_previous_level(void) {
-    const uint8_t row[4 * 4] = {0, 0, 0, 0, 40, 0, 0, 0, 80, 0, 0, 0, 120, 0, 0, 0};
+    const uint8_t row[7 * 4] = {3, 0, 0, 0, 0, 0, 0, 0, 1};
     nt_tex_opts_t opts = nt_tex_opts_defaults();
     opts.mips = NT_TEX_MIPS_BAKED;
     opts.format = NT_TEXTURE_FORMAT_R8;
     NtTextureAssetHeader hdr;
-    uint8_t *asset = encode_mips_asset(row, 4, 1, &opts, &hdr);
-    const uint8_t chain[7] = {0, 40, 80, 120, 20, 100, 60};
+    uint8_t *asset = encode_mips_asset(row, 7, 1, &opts, &hdr);
+    const uint8_t chain[11] = {3, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0};
     TEST_ASSERT_EQUAL_UINT16(3, hdr.mip_count);
     TEST_ASSERT_EQUAL_UINT32(sizeof(chain), hdr.data_size);
     TEST_ASSERT_EQUAL_UINT8_ARRAY(chain, asset + sizeof(hdr), sizeof(chain));
