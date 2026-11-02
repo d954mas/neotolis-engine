@@ -98,7 +98,7 @@ asset carries the chain the builder baked, laid out as above.
 
 The runtime accepts a single-level texture under any min filter, because
 `GL_TEXTURE_MAX_LEVEL` is then 0 and the storage is mip-complete; the builder
-asserts on that combination (`mips = NONE` with a mipmap `filter_min`) for every asset
+asserts only `mips = NONE` with a mipmap `filter_min`, for every codec
 ([builder](../builder/builder.md)).
 
 ## Mesh format strategy

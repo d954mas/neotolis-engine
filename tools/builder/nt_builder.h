@@ -239,7 +239,7 @@ const nt_atlas_stats_t *nt_builder_get_atlas_stats(const NtBuilderContext *ctx, 
 
 /* Where a texture's mip chain comes from. NONE and RUNTIME store level 0 only;
  * RUNTIME also sets NT_TEXTURE_FLAG_GEN_MIPMAPS and needs a format the GPU can
- * render to (RAW, not SRGB8 or RGB9E5). BAKED stores the full chain. A default
+ * render to (uncompressed, not SRGB8 or RGB9E5). BAKED stores the full chain. A default
  * mipmap filter_min with NONE asserts; a material override to a mipmap filter on
  * a NONE texture samples level 0. */
 typedef enum {

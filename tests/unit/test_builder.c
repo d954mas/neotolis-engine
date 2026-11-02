@@ -958,6 +958,8 @@ void test_texture_srgb_opts_contract(void) {
 
 /* --- Mip modes --- */
 
+static uint8_t *read_file_bytes(const char *path, uint32_t *out_size);
+
 static uint8_t *encode_mips_asset(const void *pixels, uint32_t w, uint32_t h, const nt_tex_opts_t *opts, NtTextureAssetHeader *hdr) {
     TEST_ASSERT_EQUAL_INT(opts->format, nt_builder_assert_texture_opts(opts));
     uint8_t *asset = NULL;
@@ -1044,6 +1046,33 @@ void test_texture_mips_baked_averages_each_channel_without_alpha_weighting(void)
     TEST_ASSERT_EQUAL_UINT8(level1[3], level1[1]);
     TEST_ASSERT_EQUAL_UINT8(level1[3], level1[2]);
     free(asset);
+
+    /* Two channels filter on their own too: G is not an alpha that weights R. */
+    const uint8_t rg_quad[16] = {255, 0, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 255, 0, 0, 0};
+    opts = nt_tex_opts_defaults();
+    opts.mips = NT_TEX_MIPS_BAKED;
+    opts.format = NT_TEXTURE_FORMAT_RG8;
+    asset = encode_mips_asset(rg_quad, 2, 2, &opts, &hdr);
+    level1 = asset + sizeof(hdr) + 8;
+    TEST_ASSERT_UINT8_WITHIN(1, 128, level1[0]);
+    TEST_ASSERT_UINT8_WITHIN(1, 128, level1[1]);
+    free(asset);
+}
+
+/* Each level filters the level before it at that level's size: a gradient has one
+ * exact chain, and a wrong source level or offset changes it. */
+void test_texture_mips_baked_chain_filters_the_previous_level(void) {
+    const uint8_t row[4 * 4] = {0, 0, 0, 0, 40, 0, 0, 0, 80, 0, 0, 0, 120, 0, 0, 0};
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.mips = NT_TEX_MIPS_BAKED;
+    opts.format = NT_TEXTURE_FORMAT_R8;
+    NtTextureAssetHeader hdr;
+    uint8_t *asset = encode_mips_asset(row, 4, 1, &opts, &hdr);
+    const uint8_t chain[7] = {0, 40, 80, 120, 20, 100, 60};
+    TEST_ASSERT_EQUAL_UINT16(3, hdr.mip_count);
+    TEST_ASSERT_EQUAL_UINT32(sizeof(chain), hdr.data_size);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(chain, asset + sizeof(hdr), sizeof(chain));
+    free(asset);
 }
 
 void test_texture_mips_none_and_runtime_store_one_level(void) {
@@ -1056,6 +1085,7 @@ void test_texture_mips_none_and_runtime_store_one_level(void) {
     uint8_t *asset = encode_mips_asset(rgba, 16, 8, &opts, &hdr);
     TEST_ASSERT_EQUAL_UINT16(1, hdr.mip_count);
     TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_FLAG_GEN_MIPMAPS, hdr.flags & NT_TEXTURE_FLAG_GEN_MIPMAPS);
+    TEST_ASSERT_EQUAL_UINT32(sizeof(rgba), hdr.data_size);
     free(asset);
 
     opts.mips = NT_TEX_MIPS_NONE;
@@ -1097,6 +1127,45 @@ void test_atlas_mips_follow_the_texture_rules(void) {
     EXPECT_BUILD_ASSERT_MATCH(ctx, (void)nt_atlas_begin(ctx, "page", &atlas), "mips RUNTIME cannot serve");
 }
 
+/* The atlas mip mode reaches the packed page. */
+void test_atlas_page_carries_the_mip_mode(void) {
+    const nt_tex_mips_t modes[] = {NT_TEX_MIPS_RUNTIME, NT_TEX_MIPS_BAKED};
+    uint8_t rgba[8 * 8 * 4];
+    memset(rgba, 200, sizeof(rgba));
+    for (uint32_t m = 0; m < 2; m++) {
+        nt_atlas_opts_t atlas = nt_atlas_opts_defaults();
+        atlas.mips = modes[m];
+        NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/mips_atlas_page.ntpack");
+        NtAtlasBuild *build = nt_atlas_begin(ctx, "page", &atlas);
+        nt_atlas_add_raw(build, rgba, 8, 8, &(nt_atlas_sprite_opts_t){.name = "square.png", .origin_x = 0.5F, .origin_y = 0.5F});
+        (void)nt_atlas_commit(build);
+        TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+        nt_builder_free_pack(ctx);
+
+        uint32_t pack_size = 0;
+        uint8_t *pack = read_file_bytes(TMP_DIR "/mips_atlas_page.ntpack", &pack_size);
+        TEST_ASSERT_NOT_NULL(pack);
+        const NtPackHeader *pack_hdr = (const NtPackHeader *)pack;
+        const NtAssetEntry *entries = (const NtAssetEntry *)(pack + sizeof(NtPackHeader));
+        const NtTextureAssetHeader *tex = NULL;
+        for (uint32_t i = 0; i < pack_hdr->asset_count; i++) {
+            if (entries[i].asset_type == NT_ASSET_TEXTURE) {
+                tex = (const NtTextureAssetHeader *)(pack + entries[i].offset);
+            }
+        }
+        TEST_ASSERT_NOT_NULL(tex);
+        if (modes[m] == NT_TEX_MIPS_BAKED) {
+            TEST_ASSERT_TRUE(tex->mip_count > 1);
+            TEST_ASSERT_EQUAL_UINT16(nt_texture_full_chain_levels(tex->width, tex->height), tex->mip_count);
+            TEST_ASSERT_EQUAL_UINT8(0, tex->flags & NT_TEXTURE_FLAG_GEN_MIPMAPS);
+        } else {
+            TEST_ASSERT_EQUAL_UINT16(1, tex->mip_count);
+            TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_FLAG_GEN_MIPMAPS, tex->flags & NT_TEXTURE_FLAG_GEN_MIPMAPS);
+        }
+        free(pack);
+    }
+}
+
 /* RAW NONE/RUNTIME/BAKED, then Basis NONE/BAKED: equal pixels, only the mode differs. */
 void test_texture_mips_alone_changes_the_cache_key(void) {
     const uint8_t rgba[4 * 4 * 4] = {10, 20, 30, 40, 50, 60, 70, 80};
@@ -1123,6 +1192,7 @@ void test_texture_mips_alone_changes_the_cache_key(void) {
     }
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     TEST_ASSERT_EQUAL_UINT32(0, ctx->early_dedup_count);
+    TEST_ASSERT_EQUAL_UINT32(0, ctx->dedup_count);
     nt_builder_free_pack(ctx);
 }
 
@@ -10211,9 +10281,11 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_texture_srgb_opts_contract);
     RUN_TEST(test_texture_mips_baked_stores_the_full_chain_for_every_raw_format);
     RUN_TEST(test_texture_mips_baked_averages_each_channel_without_alpha_weighting);
+    RUN_TEST(test_texture_mips_baked_chain_filters_the_previous_level);
     RUN_TEST(test_texture_mips_none_and_runtime_store_one_level);
     RUN_TEST(test_texture_mips_opts_contract);
     RUN_TEST(test_atlas_mips_follow_the_texture_rules);
+    RUN_TEST(test_atlas_page_carries_the_mip_mode);
     RUN_TEST(test_texture_mips_alone_changes_the_cache_key);
 
     /* AABB edge extrude */

@@ -225,19 +225,29 @@ static size_t chain_bytes(uint32_t width, uint32_t height, uint32_t level_count,
     return total;
 }
 
-/* Fills levels 1.. of `chain` behind level 0, each box-filtered from the previous one.
- * No alpha weighting: straight and premultiplied alpha filter every channel on its
- * own. An sRGB type averages RGB in linear light and alpha linearly. */
-static void fill_mips(uint8_t *chain, uint32_t width, uint32_t height, uint32_t level_count, uint32_t pixel_bytes, stbir_pixel_layout layout, stbir_datatype type) {
-    uint8_t *prev = chain;
+/* Fills levels 1.. into `rest`, back to back, each box-filtered from the previous
+ * one (level 1 from `level0`). No alpha weighting: straight and premultiplied alpha
+ * filter every channel on its own. An sRGB type averages RGB in linear light and
+ * alpha linearly. */
+static void fill_mips(const uint8_t *level0, uint8_t *rest, uint32_t width, uint32_t height, uint32_t level_count, uint32_t pixel_bytes, stbir_pixel_layout layout, stbir_datatype type) {
+    const uint8_t *prev = level0;
+    uint8_t *dst = rest;
     for (uint32_t level = 1; level < level_count; level++) {
-        const uint32_t pw = nt_texture_level_extent(width, level - 1);
-        const uint32_t ph = nt_texture_level_extent(height, level - 1);
-        uint8_t *dst = prev + ((size_t)pw * ph * pixel_bytes);
-        const void *written =
-            stbir_resize(prev, (int)pw, (int)ph, 0, dst, (int)nt_texture_level_extent(width, level), (int)nt_texture_level_extent(height, level), 0, layout, type, STBIR_EDGE_CLAMP, STBIR_FILTER_BOX);
+        const uint32_t lw = nt_texture_level_extent(width, level);
+        const uint32_t lh = nt_texture_level_extent(height, level);
+        const void *written = stbir_resize(prev, (int)nt_texture_level_extent(width, level - 1), (int)nt_texture_level_extent(height, level - 1), 0, dst, (int)lw, (int)lh, 0, layout, type,
+                                           STBIR_EDGE_CLAMP, STBIR_FILTER_BOX);
         NT_BUILD_ASSERT(written && "texture mips: stbir_resize failed");
         prev = dst;
+        dst += (size_t)lw * lh * pixel_bytes;
+    }
+}
+
+static void pack_rgb9e5_texels(const void *rgb, size_t texels, uint8_t *dst) {
+    const float *f = (const float *)rgb;
+    for (size_t i = 0; i < texels; i++) {
+        const uint32_t packed = pack_rgb9e5(&f[i * 3]);
+        memcpy(dst + (i * sizeof(packed)), &packed, sizeof(packed));
     }
 }
 
@@ -245,17 +255,17 @@ static void fill_mips(uint8_t *chain, uint32_t width, uint32_t height, uint32_t 
 static void write_raw_levels(const void *source, nt_texture_pixel_format_t format, uint32_t width, uint32_t height, uint32_t level_count, uint8_t *dst) {
     const size_t texels = (size_t)width * height;
     if (format == NT_TEXTURE_FORMAT_RGB9E5) {
-        /* Each level filters the previous float level, never packed RGB9E5. */
-        float *rgb = (float *)malloc(chain_bytes(width, height, level_count, 3U * sizeof(float)));
-        NT_BUILD_ASSERT(rgb && "texture encode: malloc failed");
-        memcpy(rgb, source, texels * 3U * sizeof(float));
-        fill_mips((uint8_t *)rgb, width, height, level_count, 3U * sizeof(float), STBIR_RGB, STBIR_TYPE_FLOAT);
-        const size_t chain_texels = chain_bytes(width, height, level_count, 1);
-        for (size_t i = 0; i < chain_texels; i++) {
-            const uint32_t packed = pack_rgb9e5(&rgb[i * 3]);
-            memcpy(dst + (i * sizeof(packed)), &packed, sizeof(packed));
+        pack_rgb9e5_texels(source, texels, dst);
+        if (level_count == 1) {
+            return;
         }
-        free(rgb);
+        /* Each level filters the previous float level, never packed RGB9E5. */
+        const size_t rest_texels = chain_bytes(width, height, level_count, 1) - texels;
+        float *rest = (float *)malloc(rest_texels * 3U * sizeof(float));
+        NT_BUILD_ASSERT(rest && "texture encode: malloc failed");
+        fill_mips(source, (uint8_t *)rest, width, height, level_count, 3U * sizeof(float), STBIR_RGB, STBIR_TYPE_FLOAT);
+        pack_rgb9e5_texels(rest, rest_texels, dst + (texels * sizeof(uint32_t)));
+        free(rest);
         return;
     }
     const uint32_t bpp = nt_texture_bpp(format);
@@ -266,13 +276,11 @@ static void write_raw_levels(const void *source, nt_texture_pixel_format_t forma
     }
     /* stb takes a channel count 1..3 as its layout; RGBA_NO_AW also serves premultiplied data. */
     const stbir_pixel_layout layout = bpp == 4 ? STBIR_RGBA_NO_AW : (stbir_pixel_layout)bpp;
-    fill_mips(dst, width, height, level_count, bpp, layout, nt_texture_format_is_srgb(format) ? STBIR_TYPE_UINT8_SRGB : STBIR_TYPE_UINT8);
+    fill_mips(dst, dst + (texels * bpp), width, height, level_count, bpp, layout, nt_texture_format_is_srgb(format) ? STBIR_TYPE_UINT8_SRGB : STBIR_TYPE_UINT8);
 }
 
-/* A baked RGBA8 chain at 16384 is 1.4 GiB; much larger would overflow the 32-bit TTEX data_size. */
-_Static_assert(NT_BUILD_MAX_TEXTURE_SIZE <= 16384, "NT_BUILD_MAX_TEXTURE_SIZE above 16384 overflows the TTEX data_size");
-
-static NtTextureAssetHeader texture_header(const nt_tex_opts_t *opts, uint32_t width, uint32_t height, uint32_t level_count, uint32_t data_size) {
+static NtTextureAssetHeader texture_header(const nt_tex_opts_t *opts, uint32_t width, uint32_t height, uint32_t level_count, size_t data_size) {
+    NT_BUILD_ASSERT(data_size <= UINT32_MAX - sizeof(NtTextureAssetHeader) && "texture encode: levels overflow the 32-bit TTEX data_size");
     const bool compressed = opts->compress.codec != NT_BASISU_CODEC_NONE;
     return (NtTextureAssetHeader){
         .magic = NT_TEXTURE_MAGIC,
@@ -287,7 +295,7 @@ static NtTextureAssetHeader texture_header(const nt_tex_opts_t *opts, uint32_t w
         .default_mag_filter = (uint8_t)opts->filter_mag,
         .default_wrap_u = (uint8_t)opts->wrap_u,
         .default_wrap_v = (uint8_t)opts->wrap_v,
-        .data_size = data_size,
+        .data_size = (uint32_t)data_size,
     };
 }
 
@@ -315,9 +323,9 @@ void nt_builder_encode_texture_to_buf(const void *pixels, uint32_t width, uint32
         data_size = chain_bytes(width, height, level_count, nt_texture_bpp(opts->format));
     }
 
-    const NtTextureAssetHeader tex_hdr = texture_header(opts, width, height, level_count, (uint32_t)data_size);
+    const NtTextureAssetHeader tex_hdr = texture_header(opts, width, height, level_count, data_size);
 
-    const uint32_t total_asset_size = (uint32_t)sizeof(tex_hdr) + (uint32_t)data_size;
+    const uint32_t total_asset_size = (uint32_t)sizeof(tex_hdr) + tex_hdr.data_size;
     uint8_t *buf = (uint8_t *)malloc(total_asset_size);
     NT_BUILD_ASSERT(buf && "texture encode: malloc failed");
     memcpy(buf, &tex_hdr, sizeof(tex_hdr));

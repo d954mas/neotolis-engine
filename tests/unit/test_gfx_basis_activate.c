@@ -455,6 +455,7 @@ void test_header_boundaries_assert_without_touching_the_pool(void) {
     expect_header_assert(&alpha, alpha.size); /* mip_count neither 1 nor the full chain */
     fixture_header(&alpha)->mip_count = 1;
     expect_header_assert(&alpha, alpha.size); /* one level over a full Basis chain */
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "differs from its header"));
     *fixture_header(&alpha) = good;
 
     fixture_header(&alpha)->data_size = good.data_size + 1;

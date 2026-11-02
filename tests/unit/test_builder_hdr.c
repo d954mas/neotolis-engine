@@ -203,6 +203,8 @@ void test_rgb9e5_chain_box_filters_each_level(void) {
     EXPECT_NEAR(1.0F / 32.0F, 8.0F, px[0]);
     unpack_rgb9e5(t.words[6], px);
     EXPECT_NEAR(0.0F, 0.0F, px[0]);
+    unpack_rgb9e5(t.words[7], px); /* level 2 filters level 1 */
+    EXPECT_NEAR(1.0F / 64.0F, 4.0F, px[0]);
     free(t.pack);
 }
 
