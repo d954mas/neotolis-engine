@@ -38,18 +38,22 @@ static const char *ask(const char *line, bool ok) {
 static void assert_holds(const char *text, const char *want) { TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, want), want); }
 
 static void test_commands_answer_and_reject_bad_input(void) {
-    static const char *const k_ok[] = {"help",       "frames",        "frame 51",    "frame 51 0",  "summary",          "groups",           "record @0", "state @300",
+    static const char *const k_ok[] = {"help",       "frames",        "frame 0",     "summary",     "groups",           "record @0",        "state @300",
                                        "state init", "state end all", "find glDraw", "list merged", "list g2.gl_draws", "list break.range", "list drops"};
     for (uint32_t k = 0; k < sizeof(k_ok) / sizeof(k_ok[0]); k++) {
         (void)ask(k_ok[k], true);
     }
+    char find[208] = "find "; /* find reads the whole rest, past the 159 characters of an argument */
+    memset(find + 5, 'x', 200);
+    find[205] = '\0';
+    assert_holds(ask(find, true), "records 0\n");
     static const struct {
         const char *line, *why;
     } k_bad[] = {{"bogus", "unknown command"},
                  {"", "unknown command"},
-                 {"frame 7", "no frame with sequence 7"},
-                 {"frame 51x", "frame SEQUENCE [FILE]"},
-                 {"frame 51 1", "frame SEQUENCE [FILE]"},
+                 {"frame 1", "no readable frame 1"},
+                 {"frame 0x", "frame INDEX"},
+                 {"frame 0 1", "too many arguments"},
                  {"record", "a record is needed"},
                  {"record @999999", "no record @999999"},
                  {"record @3x", "no record @3x"},
@@ -67,8 +71,8 @@ static void test_commands_answer_and_reject_bad_input(void) {
     for (uint32_t k = 0; k < sizeof(k_bad) / sizeof(k_bad[0]); k++) {
         assert_holds(ask(k_bad[k].line, false), k_bad[k].why);
     }
-    (void)ask("frame 7", false); /* a failed frame keeps the frame commands read */
-    assert_holds(ask("frames", true), "\n* 51 ");
+    (void)ask("frame 1", false); /* a failed frame keeps the frame commands read */
+    assert_holds(ask("frames", true), "\n* 0 51 ");
     const size_t all = strlen(ask("state @700 all", true)); /* tabs and trailing spaces change nothing */
     TEST_ASSERT_EQUAL_size_t(all, strlen(ask("state\t@700  all  ", true)));
     TEST_ASSERT_GREATER_THAN_size_t(strlen(ask("state @700", true)), all);
@@ -169,6 +173,22 @@ static void test_state_views(void) {
     TEST_ASSERT_TRUE(lines[scissor].changed); /* enabled at the start, disabled at the end */
 }
 
+/* Files of two runs joined repeat a sequence: the index still reaches the second frame. */
+static void test_a_repeated_sequence_has_two_addresses(void) {
+    const size_t len = s_file.len;
+    char *text = (char *)malloc((len * 2) + 1);
+    TEST_ASSERT_NOT_NULL(text);
+    memcpy(text, s_file.text, len);
+    memcpy(text + len, s_file.text, len);
+    fi_file_close(&s_file);
+    fi_file_load(&s_file, "joined", text, len * 2);
+    TEST_ASSERT_EQUAL_UINT32(2, s_file.frame_count);
+    assert_holds(ask("frames", true), "\n* 0 51 714 9 47 38 67 93952 0\n  1 51 714 9 47 38 67 93952 0\n");
+    assert_holds(ask("frame 1", true), "frame 1  # sequence 51, file 0 joined");
+    TEST_ASSERT_EQUAL_UINT32(1, s_session.frame);
+    assert_holds(ask("frames", true), "\n  0 51 714 9 47 38 67 93952 0\n* 1 51 ");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_commands_answer_and_reject_bad_input);
@@ -176,5 +196,6 @@ int main(void) {
     RUN_TEST(test_groups_add_up_to_the_frame);
     RUN_TEST(test_record_tells_merged_and_broken_draws);
     RUN_TEST(test_state_views);
+    RUN_TEST(test_a_repeated_sequence_has_two_addresses);
     return UNITY_END();
 }

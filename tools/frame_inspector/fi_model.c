@@ -248,7 +248,18 @@ static uint32_t intern_group(fi_frame_t *fr, uint32_t *slot, uint32_t mask, uint
     fr->group_label[g] = label;
     const char *base = parent != 0 ? fr->group_key[parent] : "";
     const char *sep = note ? " > " : "/";
-    (void)snprintf(fr->group_key[g], FI_KEY_LEN, "%s%s%s", base, parent != 0 || note ? sep + (parent == 0) : "", label); /* "> ui" at the top */
+    char shown[FI_KEY_LEN]; /* control bytes as \xNN, as capture text prints them: a key stays one line */
+    size_t n = 0;
+    for (const char *c = label; *c != '\0' && n + 5U < sizeof(shown); c++) {
+        const uint8_t b = (uint8_t)*c;
+        if (b < 0x20U || b == 0x7fU) {
+            n += (size_t)snprintf(shown + n, sizeof(shown) - n, "\\x%02x", b);
+        } else {
+            shown[n++] = *c;
+        }
+    }
+    shown[n] = '\0';
+    (void)snprintf(fr->group_key[g], FI_KEY_LEN, "%s%s%s", base, parent != 0 || note ? sep + (parent == 0) : "", shown); /* "> ui" at the top */
     return g;
 }
 
@@ -1173,15 +1184,15 @@ fi_verdict_t fi_verdict(const fi_frame_t *frame, uint32_t record) {
     return v;
 }
 
-bool fi_find_frame(const fi_file_t *files, uint32_t count, uint64_t sequence, uint32_t only_file, uint32_t *file, uint32_t *frame) {
-    for (uint32_t f = 0; f < count; f++) {
-        for (uint32_t k = 0; (only_file == FI_NONE || f == only_file) && k < files[f].frame_count; k++) {
-            const fi_frame_t *fr = &files[f].frames[k];
-            if (fr->view.events != NULL && fr->view.counters.frame_sequence == sequence) {
+bool fi_frame_at(const fi_file_t *files, uint32_t count, uint64_t index, uint32_t *file, uint32_t *frame) {
+    for (uint32_t f = 0; f < count; index -= files[f++].frame_count) {
+        if (index < files[f].frame_count) {
+            const bool readable = files[f].frames[index].view.events != NULL;
+            if (readable) {
                 *file = f;
-                *frame = k;
-                return true;
+                *frame = (uint32_t)index;
             }
+            return readable;
         }
     }
     return false;

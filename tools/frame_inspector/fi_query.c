@@ -515,21 +515,21 @@ bool fi_group_has_work(const fi_frame_t *frame, uint32_t group) {
 static const char *const k_metrics[FI_METRIC_COUNT] = {"requests", "gl_draws", "gl_calls", "upload_bytes", "drops"};
 
 static void cmd_frames(const fi_session_t *q, fi_out_t *out) {
-    put(out, "# file frame: sequence records gl_draw_calls draw_requests merged gl_calls upload_bytes problems; * marks the frame commands read\n");
-    for (uint32_t f = 0; f < q->file_count; f++) {
+    put(out, "# frame sequence records gl_draw_calls draw_requests merged gl_calls upload_bytes problems; * marks the frame commands read\n");
+    for (uint32_t f = 0, index = 0; f < q->file_count; f++) {
         const fi_file_t *file = &q->files[f];
         put(out, "file %u %s  # %u frames\n", f, file->name, file->frame_count);
-        for (uint32_t k = 0; k < file->frame_count; k++) {
+        for (uint32_t k = 0; k < file->frame_count; k++, index++) {
             const fi_frame_t *fr = &file->frames[k];
             const char mark = f == q->file && k == q->frame ? '*' : ' ';
             if (fr->view.events == NULL) {
-                put(out, "%c rejected  # %s\n", mark, fr->error != NULL ? fr->error : "?");
+                put(out, "%c %u rejected  # %s\n", mark, index, fr->error != NULL ? fr->error : "?");
                 continue;
             }
             const fi_summary_t *sm = &fr->summary;
             const char *note = fr->view.overflow ? "  # events truncated: counters complete, records not" : "";
             note = fr->error != NULL ? "  # incomplete: a record failed to parse" : note;
-            put(out, "%c %llu %u %llu %llu %llu %llu %llu %llu%s\n", mark, (unsigned long long)fr->view.counters.frame_sequence, fr->view.count, (unsigned long long)sm->draw_calls.n,
+            put(out, "%c %u %llu %u %llu %llu %llu %llu %llu %llu%s\n", mark, index, (unsigned long long)fr->view.counters.frame_sequence, fr->view.count, (unsigned long long)sm->draw_calls.n,
                 (unsigned long long)sm->vertices.n, (unsigned long long)sm->merged.n, (unsigned long long)sm->gl_any.n, (unsigned long long)sm->upload[2].sum, (unsigned long long)sm->problems.n,
                 note);
         }
@@ -542,19 +542,18 @@ static bool parse_number(const char *arg, unsigned long long *value) {
     return isdigit((unsigned char)arg[0]) && *end == '\0';
 }
 
-static bool cmd_frame(fi_session_t *q, const char *arg, const char *file_arg, fi_out_t *out) {
-    unsigned long long sequence = 0;
-    unsigned long long only = FI_NONE;
-    const bool any_file = file_arg[0] == '\0';
-    if (!parse_number(arg, &sequence) || (!any_file && (!parse_number(file_arg, &only) || only >= q->file_count))) {
-        put(out, "error: frame SEQUENCE [FILE]\n");
+static bool cmd_frame(fi_session_t *q, const char *arg, fi_out_t *out) {
+    unsigned long long index = 0;
+    if (!parse_number(arg, &index)) {
+        put(out, "error: frame INDEX (the first column of frames)\n");
         return false;
     }
-    if (fi_find_frame(q->files, q->file_count, sequence, (uint32_t)only, &q->file, &q->frame)) {
-        put(out, "frame %llu  # file %u %s, %u records\n", sequence, q->file, q->files[q->file].name, q->files[q->file].frames[q->frame].view.count);
+    if (fi_frame_at(q->files, q->file_count, index, &q->file, &q->frame)) {
+        const fi_frame_t *fr = &q->files[q->file].frames[q->frame];
+        put(out, "frame %llu  # sequence %llu, file %u %s, %u records\n", index, (unsigned long long)fr->view.counters.frame_sequence, q->file, q->files[q->file].name, fr->view.count);
         return true;
     }
-    put(out, "error: no frame with sequence %s%s%s (see frames)\n", arg, any_file ? "" : " in file ", file_arg);
+    put(out, "error: no readable frame %s (see frames)\n", arg);
     return false;
 }
 
@@ -786,7 +785,7 @@ static bool key_query(const fi_frame_t *fr, const char *key, fi_query_t *q) {
 static void cmd_help(fi_out_t *out) {
     put(out, "# every answer is lines of: key value  # meaning. Records read @N. --serve ends each answer with = ok or = error.\n"
              "frames                     # every frame of the open files; * marks the one commands read\n"
-             "frame SEQUENCE [FILE]      # read the frame with this capture sequence (FILE: its index in frames)\n"
+             "frame INDEX                # read this frame: the first column of frames\n"
              "summary                    # the frame's numbers, each with a key for list\n"
              "groups                     # per marker and note: requests, GL draws, GL calls, upload bytes, drops\n"
              "record @N                  # the record, merged or a new GL draw and why, its parent, group and GL calls\n"
@@ -841,16 +840,17 @@ bool fi_query(fi_session_t *session, const char *text, fi_out_t *out) {
     char arg[160];
     const bool command_fits = next_word(&p, command, sizeof(command));
     const char *rest = p; /* the argument and what follows it */
-    if (!next_word(&p, arg, sizeof(arg))) {
-        put(out, "error: an argument is longer than %u characters\n", (unsigned)sizeof(arg) - 1U);
-        return false;
-    }
+    const bool arg_fits = next_word(&p, arg, sizeof(arg));
     if (!command_fits || !fi_query_command(command)) {
         put(out, "error: unknown command %s; help lists them\n", command);
         return false;
     }
+    if (!arg_fits && strcmp(command, "find") != 0) { /* find reads the whole rest */
+        put(out, "error: an argument is longer than %u characters\n", (unsigned)sizeof(arg) - 1U);
+        return false;
+    }
     const bool bare = strcmp(command, "help") == 0 || strcmp(command, "frames") == 0 || strcmp(command, "summary") == 0 || strcmp(command, "groups") == 0;
-    if ((bare && rest[0] != '\0') || (strcmp(command, "record") == 0 && p[0] != '\0')) {
+    if ((bare && rest[0] != '\0') || ((strcmp(command, "record") == 0 || strcmp(command, "frame") == 0) && p[0] != '\0')) {
         put(out, "error: too many arguments: %s; help lists the commands\n", rest);
         return false;
     }
@@ -863,7 +863,7 @@ bool fi_query(fi_session_t *session, const char *text, fi_out_t *out) {
         return true;
     }
     if (strcmp(command, "frame") == 0) {
-        return cmd_frame(session, arg, p, out);
+        return cmd_frame(session, arg, out);
     }
     const fi_frame_t *fr = &session->files[session->file].frames[session->frame];
     if (fr->view.events == NULL) {

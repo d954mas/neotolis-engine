@@ -1,14 +1,14 @@
 /* Frame inspector: opens capture files (render architecture, "Capture text") and shows what each recorded
- * frame did. Usage: frame_inspector [file...] [--frame SEQUENCE] [--page frames|commands|info|init|end]
+ * frame did. Usage: frame_inspector [file...] [--frame INDEX] [--page frames|commands|info|init|end]
  * [--select RECORD] [--filter TEXT] [--monkey SECONDS [SEED]]; Open... adds more files. --frame takes the
- * capture's "frame sequence=", --select a record's @ number in that frame. Run it by its path: its asset pack
+ * frame's index across the files (query frames lists them), --select a record's @ number in that frame. Run it by its path: its asset pack
  * is found next to argv[0].
  * Pages: Frames (per-file tracks of draw calls, GL calls, upload and records on one zoomable axis; a click
  * picks a frame, a click again opens it), Commands (the logical tree with a panel for the selection or a
  * Shift range), Information (numbers that filter the tree to their records), Init and End state.
  * --monkey drives random clicks, drags, wheel and keys for that long and prints the frame times.
- * Without a window, for scripts and agents: frame_inspector query FILE... [--frame SEQUENCE] COMMAND [ARGS]
- * answers one command; frame_inspector --serve FILE... [--frame SEQUENCE] answers a command per stdin line,
+ * Without a window, for scripts and agents: frame_inspector query FILE... [--frame INDEX] COMMAND [ARGS]
+ * answers one command; frame_inspector --serve FILE... [--frame INDEX] answers a command per stdin line,
  * each answer between a "> command" line and a "= ok" or "= error" line. Answers are "key value  # meaning" lines; help lists the commands:
  * frames, frame, summary, groups, record @N, state @N|init|end [all], find TEXT, list KEY (a summary key). */
 
@@ -2370,8 +2370,8 @@ static void frame(void) {
 // #endregion
 
 // #region main
-/* Files to open, --monkey SECONDS [SEED], and where the window opens: --frame SEQUENCE (the capture's frame
- * sequence), --page frames|commands|info|init|end, --select RECORD (its @ number), --filter TEXT. */
+/* Files to open, --monkey SECONDS [SEED], and where the window opens: --frame INDEX (the frame's index across
+ * the files), --page frames|commands|info|init|end, --select RECORD (its @ number), --filter TEXT. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void parse_args(int argc, char *argv[]) {
     static const char *const k_pages[PAGE_COUNT] = {"frames", "commands", "info", "init", "end"};
@@ -2410,11 +2410,11 @@ static void parse_args(int argc, char *argv[]) {
     uint32_t file = 0;
     uint32_t at = 0;
     char *end = NULL;
-    const uint64_t sequence = frame != NULL ? strtoull(frame, &end, 10) : 0U;
-    if (frame != NULL && end != frame && *end == '\0' && fi_find_frame(s.files, s.file_count, sequence, FI_NONE, &file, &at)) {
+    const uint64_t index = frame != NULL ? strtoull(frame, &end, 10) : 0U;
+    if (frame != NULL && isdigit((unsigned char)frame[0]) && *end == '\0' && fi_frame_at(s.files, s.file_count, index, &file, &at)) {
         select_frame(file, at);
     } else if (frame != NULL) {
-        nt_log_error("frame_inspector: no frame with sequence %s in the open files", frame);
+        nt_log_error("frame_inspector: no readable frame %s in the open files", frame);
     }
     if (filter != NULL) {
         (void)snprintf(s.filter, sizeof(s.filter), "%s", filter);
@@ -2437,7 +2437,7 @@ static nt_material_t make_material(const char *label) {
     return nt_material_create(&(nt_material_create_desc_t){.blend = nt_blend_alpha_premultiplied(), .depth_test = false, .depth_write = false, .cull_mode = NT_CULL_NONE, .label = label});
 }
 
-/* query FILE... [--frame SEQUENCE] COMMAND [ARGS], or --serve FILE... [--frame SEQUENCE] with a command per stdin
+/* query FILE... [--frame INDEX] COMMAND [ARGS], or --serve FILE... [--frame INDEX] with a command per stdin
  * line: answers on stdout, no window and no gfx. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static int run_query(int argc, char *argv[]) {
@@ -2473,8 +2473,8 @@ static int run_query(int argc, char *argv[]) {
         }
     }
     if ((session.file_count == 0 && strcmp(line, "help") != 0) || (!serve && !command)) {
-        (void)fprintf(stderr, "usage: frame_inspector query FILE... [--frame SEQUENCE] COMMAND [ARGS]  (query help lists the commands)\n"
-                              "       frame_inspector --serve FILE... [--frame SEQUENCE]   (a command per stdin line)\n");
+        (void)fprintf(stderr, "usage: frame_inspector query FILE... [--frame INDEX] COMMAND [ARGS]  (query help lists the commands)\n"
+                              "       frame_inspector --serve FILE... [--frame INDEX]   (a command per stdin line)\n");
         return 1;
     }
     fi_out_t out = {0};
@@ -2486,7 +2486,7 @@ static int run_query(int argc, char *argv[]) {
     }
     const char *text = out.text != NULL ? out.text : "";
     if (serve && frame != NULL) {
-        (void)printf("> %s\n%.*s%s= %s\n", select, (int)out.len, text, out.len > 0 ? "" : "error: the sequence is too long\n", ok ? "ok" : "error");
+        (void)printf("> %s\n%.*s%s= %s\n", select, (int)out.len, text, out.len > 0 ? "" : "error: the index is too long\n", ok ? "ok" : "error");
     } else {
         (void)printf("%.*s", (int)out.len, text);
     }
@@ -2497,7 +2497,7 @@ static int run_query(int argc, char *argv[]) {
             c = getchar();
         }
         line[strcspn(line, "\r\n")] = '\0';
-        if (line[strspn(line, " \t")] == '\0') { /* a blank line asks nothing and gets no answer */
+        if (whole && line[strspn(line, " \t")] == '\0') { /* a blank line asks nothing and gets no answer */
             continue;
         }
         const bool fits = whole && strlen(line) <= 1023U;

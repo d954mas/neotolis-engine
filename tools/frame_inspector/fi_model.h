@@ -155,9 +155,9 @@ bool fi_file_open(fi_file_t *file, const char *path);
 /* Parses text (malloc'd, len bytes; the file takes it) into frames. */
 void fi_file_load(fi_file_t *file, const char *name, char *text, size_t len);
 void fi_file_close(fi_file_t *file);
-/* The frame with this capture sequence ("frame sequence=" of its header) in any file, or only in only_file;
- * a frame whose header was rejected has none. */
-bool fi_find_frame(const fi_file_t *files, uint32_t count, uint64_t sequence, uint32_t only_file, uint32_t *file, uint32_t *frame);
+/* The index-th frame of the files in their order, counting rejected ones: the frame's address. Sequences
+ * repeat once files of two runs are joined. False past the last frame or for a rejected header. */
+bool fi_frame_at(const fi_file_t *files, uint32_t count, uint64_t index, uint32_t *file, uint32_t *frame);
 
 /* Request state at an operation: for each piece of frontend binding state, the OP (or frontend INITIAL)
  * record that set it, FI_NONE when unset. Pass-scoped pieces reset at every PASS. */
