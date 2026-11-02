@@ -112,17 +112,14 @@ static void *resize_if_needed(const void *pixels, nt_texture_pixel_format_t form
     return resized;
 }
 
-/* Strip RGBA8 source pixels to target channel count (1..3) */
-static uint8_t *strip_channels(const uint8_t *rgba, uint32_t pixel_count, uint32_t target_channels) {
-    NT_BUILD_ASSERT(pixel_count > 0 && target_channels > 0 && target_channels < 4 && "strip_channels: invalid args");
-    uint8_t *out = (uint8_t *)malloc((size_t)pixel_count * target_channels);
-    NT_BUILD_ASSERT(out && "texture strip_channels: malloc failed");
+/* Strip RGBA8 source pixels to target channel count (1..3) into `out`. */
+static void strip_channels(const uint8_t *rgba, uint32_t pixel_count, uint32_t target_channels, uint8_t *out) {
+    NT_BUILD_ASSERT(target_channels > 0 && target_channels < 4 && "strip_channels: invalid args");
     for (uint32_t i = 0; i < pixel_count; i++) {
         for (uint32_t c = 0; c < target_channels; c++) {
             out[(i * target_channels) + c] = rgba[(i * 4) + c];
         }
     }
-    return out;
 }
 
 /* RGB' = round(RGB * A / 255) in a copy, before strip or Basis encode, so block
@@ -219,18 +216,19 @@ static uint32_t pack_rgb9e5(const float *rgb) {
     return packed;
 }
 
-/* Level 0 followed, for a chain, by each level box-filtered from the previous one,
- * back to back in one buffer. No alpha weighting: straight and premultiplied alpha
- * filter every channel on its own. An sRGB type averages RGB in linear light and
- * alpha linearly. */
-static void *build_chain(const void *level0, uint32_t width, uint32_t height, uint32_t level_count, uint32_t pixel_bytes, stbir_pixel_layout layout, stbir_datatype type, size_t *out_size) {
+/* Bytes of `level_count` levels of `pixel_bytes` texels, back to back. */
+static size_t chain_bytes(uint32_t width, uint32_t height, uint32_t level_count, uint32_t pixel_bytes) {
     size_t total = (size_t)width * height * pixel_bytes;
     for (uint32_t level = 1; level < level_count; level++) {
         total += (size_t)nt_texture_level_extent(width, level) * nt_texture_level_extent(height, level) * pixel_bytes;
     }
-    uint8_t *chain = (uint8_t *)malloc(total);
-    NT_BUILD_ASSERT(chain && "texture mips: malloc failed");
-    memcpy(chain, level0, (size_t)width * height * pixel_bytes);
+    return total;
+}
+
+/* Fills levels 1.. of `chain` behind level 0, each box-filtered from the previous one.
+ * No alpha weighting: straight and premultiplied alpha filter every channel on its
+ * own. An sRGB type averages RGB in linear light and alpha linearly. */
+static void fill_mips(uint8_t *chain, uint32_t width, uint32_t height, uint32_t level_count, uint32_t pixel_bytes, stbir_pixel_layout layout, stbir_datatype type) {
     uint8_t *prev = chain;
     for (uint32_t level = 1; level < level_count; level++) {
         const uint32_t pw = nt_texture_level_extent(width, level - 1);
@@ -241,35 +239,56 @@ static void *build_chain(const void *level0, uint32_t width, uint32_t height, ui
         NT_BUILD_ASSERT(written && "texture mips: stbir_resize failed");
         prev = dst;
     }
-    *out_size = total;
-    return chain;
 }
 
-/* Uncompressed levels in the stored layout, in a new buffer. */
-static uint8_t *encode_raw_levels(const void *source, nt_texture_pixel_format_t format, uint32_t width, uint32_t height, uint32_t level_count, size_t *out_size) {
+/* Uncompressed levels in the stored layout, written to `dst`. */
+static void write_raw_levels(const void *source, nt_texture_pixel_format_t format, uint32_t width, uint32_t height, uint32_t level_count, uint8_t *dst) {
+    const size_t texels = (size_t)width * height;
     if (format == NT_TEXTURE_FORMAT_RGB9E5) {
         /* Each level filters the previous float level, never packed RGB9E5. */
-        size_t float_size = 0;
-        float *rgb = (float *)build_chain(source, width, height, level_count, 3U * sizeof(float), STBIR_RGB, STBIR_TYPE_FLOAT, &float_size);
-        const size_t texels = float_size / (3U * sizeof(float));
-        uint32_t *packed = (uint32_t *)malloc(texels * sizeof(uint32_t));
-        NT_BUILD_ASSERT(packed && "texture encode: malloc failed");
-        for (size_t i = 0; i < texels; i++) {
-            packed[i] = pack_rgb9e5(&rgb[i * 3]);
+        float *rgb = (float *)malloc(chain_bytes(width, height, level_count, 3U * sizeof(float)));
+        NT_BUILD_ASSERT(rgb && "texture encode: malloc failed");
+        memcpy(rgb, source, texels * 3U * sizeof(float));
+        fill_mips((uint8_t *)rgb, width, height, level_count, 3U * sizeof(float), STBIR_RGB, STBIR_TYPE_FLOAT);
+        const size_t chain_texels = chain_bytes(width, height, level_count, 1);
+        for (size_t i = 0; i < chain_texels; i++) {
+            const uint32_t packed = pack_rgb9e5(&rgb[i * 3]);
+            memcpy(dst + (i * sizeof(packed)), &packed, sizeof(packed));
         }
         free(rgb);
-        *out_size = texels * sizeof(uint32_t);
-        return (uint8_t *)packed;
+        return;
     }
     const uint32_t bpp = nt_texture_bpp(format);
-    NT_BUILD_ASSERT(bpp != 0 && width * height != 0 && "texture encode: empty RAW image");
-    uint8_t *stripped = bpp < 4 ? strip_channels((const uint8_t *)source, width * height, bpp) : NULL;
+    if (bpp == 4) {
+        memcpy(dst, source, texels * 4U);
+    } else {
+        strip_channels((const uint8_t *)source, width * height, bpp, dst);
+    }
     /* stb takes a channel count 1..3 as its layout; RGBA_NO_AW also serves premultiplied data. */
     const stbir_pixel_layout layout = bpp == 4 ? STBIR_RGBA_NO_AW : (stbir_pixel_layout)bpp;
-    const stbir_datatype type = nt_texture_format_is_srgb(format) ? STBIR_TYPE_UINT8_SRGB : STBIR_TYPE_UINT8;
-    uint8_t *chain = (uint8_t *)build_chain(stripped ? stripped : source, width, height, level_count, bpp, layout, type, out_size);
-    free(stripped);
-    return chain;
+    fill_mips(dst, width, height, level_count, bpp, layout, nt_texture_format_is_srgb(format) ? STBIR_TYPE_UINT8_SRGB : STBIR_TYPE_UINT8);
+}
+
+/* A baked RGBA8 chain at 16384 is 1.4 GiB; much larger would overflow the 32-bit TTEX data_size. */
+_Static_assert(NT_BUILD_MAX_TEXTURE_SIZE <= 16384, "NT_BUILD_MAX_TEXTURE_SIZE above 16384 overflows the TTEX data_size");
+
+static NtTextureAssetHeader texture_header(const nt_tex_opts_t *opts, uint32_t width, uint32_t height, uint32_t level_count, uint32_t data_size) {
+    const bool compressed = opts->compress.codec != NT_BASISU_CODEC_NONE;
+    return (NtTextureAssetHeader){
+        .magic = NT_TEXTURE_MAGIC,
+        .version = NT_TEXTURE_VERSION,
+        .format = (uint16_t)opts->format,
+        .width = width,
+        .height = height,
+        .mip_count = (uint16_t)level_count,
+        .compression = (uint8_t)(compressed ? NT_TEXTURE_COMPRESSION_BASIS : NT_TEXTURE_COMPRESSION_NONE),
+        .flags = (uint8_t)((opts->premultiplied ? NT_TEXTURE_FLAG_PREMULTIPLIED : 0U) | (opts->mips == NT_TEX_MIPS_RUNTIME ? NT_TEXTURE_FLAG_GEN_MIPMAPS : 0U)),
+        .default_min_filter = (uint8_t)opts->filter_min,
+        .default_mag_filter = (uint8_t)opts->filter_mag,
+        .default_wrap_u = (uint8_t)opts->wrap_u,
+        .default_wrap_v = (uint8_t)opts->wrap_v,
+        .data_size = data_size,
+    };
 }
 
 /* --- Encode: source pixels -> independent buffer (thread-safe, no shared state) --- */
@@ -286,47 +305,29 @@ void nt_builder_encode_texture_to_buf(const void *pixels, uint32_t width, uint32
         source = premul_buf;
     }
 
-    const uint8_t *payload = NULL;
-    size_t data_size = 0;
-    uint8_t *owned = NULL;
     nt_basisu_encode_result_t enc = {0};
+    size_t data_size = 0;
     if (compressed) {
         enc = nt_basisu_encode(encode_threads, source, width, height, opts->format, &opts->compress, baked);
         NT_BUILD_ASSERT(enc.mip_count == level_count && "texture encode: Basis level count differs from the mip mode");
-        payload = enc.data;
         data_size = enc.size;
     } else {
-        owned = encode_raw_levels(source, opts->format, width, height, level_count, &data_size);
-        payload = owned;
+        data_size = chain_bytes(width, height, level_count, nt_texture_bpp(opts->format));
     }
-    /* Fits uint32: NT_BUILD_MAX_TEXTURE_SIZE and the 16384 atlas page cap bound a baked chain below 1.5 GiB. */
 
-    NtTextureAssetHeader tex_hdr = {0};
-    tex_hdr.magic = NT_TEXTURE_MAGIC;
-    tex_hdr.version = NT_TEXTURE_VERSION;
-    tex_hdr.format = (uint16_t)opts->format;
-    tex_hdr.width = width;
-    tex_hdr.height = height;
-    tex_hdr.mip_count = (uint16_t)level_count;
-    tex_hdr.compression = (uint8_t)(compressed ? NT_TEXTURE_COMPRESSION_BASIS : NT_TEXTURE_COMPRESSION_NONE);
-    tex_hdr.flags = opts->premultiplied ? (uint8_t)NT_TEXTURE_FLAG_PREMULTIPLIED : 0;
-    if (opts->mips == NT_TEX_MIPS_RUNTIME) {
-        tex_hdr.flags |= (uint8_t)NT_TEXTURE_FLAG_GEN_MIPMAPS;
-    }
-    tex_hdr.default_min_filter = (uint8_t)opts->filter_min;
-    tex_hdr.default_mag_filter = (uint8_t)opts->filter_mag;
-    tex_hdr.default_wrap_u = (uint8_t)opts->wrap_u;
-    tex_hdr.default_wrap_v = (uint8_t)opts->wrap_v;
-    tex_hdr.data_size = (uint32_t)data_size;
+    const NtTextureAssetHeader tex_hdr = texture_header(opts, width, height, level_count, (uint32_t)data_size);
 
     const uint32_t total_asset_size = (uint32_t)sizeof(tex_hdr) + (uint32_t)data_size;
     uint8_t *buf = (uint8_t *)malloc(total_asset_size);
     NT_BUILD_ASSERT(buf && "texture encode: malloc failed");
     memcpy(buf, &tex_hdr, sizeof(tex_hdr));
-    memcpy(buf + sizeof(tex_hdr), payload, data_size);
+    if (compressed) {
+        memcpy(buf + sizeof(tex_hdr), enc.data, enc.size);
+    } else {
+        write_raw_levels(source, opts->format, width, height, level_count, buf + sizeof(tex_hdr));
+    }
 
     nt_basisu_encode_free(&enc);
-    free(owned);
     free(premul_buf);
     *out_data = buf;
     *out_size = total_asset_size;
