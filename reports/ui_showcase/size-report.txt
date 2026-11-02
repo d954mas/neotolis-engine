@@ -1,46 +1,46 @@
 # Size Report: ui_showcase (wasm-analysis-paired)
-# Commit: 3912b56
+# Commit: c4e479c
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
-Type                 537 B
+Type                 530 B
 Import               619 B
-Function             346 B
+Function             341 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                95 B
-Elem                 138 B
-Code              380666 B
-Data               41107 B
-Custom             11308 B
+Elem                 130 B
+Code              381038 B
+Data               41157 B
+Custom             11186 B
 ---------------- ----------
-TOTAL             434837 B
+TOTAL             435117 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-79481 B   frame
+79468 B   frame
 17022 B   dispatch_command
 13283 B   create_gpu
- 9447 B   input_field
- 9320 B   main
+ 9769 B   input_field
+ 9301 B   main
  8846 B   Clay__ConfigureOpenElementPtr
- 8213 B   nt_ui_rich_text_markup
+ 8283 B   nt_ui_rich_text_markup
  6059 B   Clay__SizeContainersAlongAxis
  5868 B   nt_ui_scroll_begin
  5643 B   Clay__InitializeEphemeralMemory
- 4907 B   render_rich
+ 5014 B   render_rich
  4582 B   render_radial
  4345 B   upload_glyph
- 4298 B   slider_core
+ 4280 B   slider_core
+ 4042 B   rich_solve
  4005 B   Clay__MeasureTextCached
- 3868 B   rich_emit_custom
- 3727 B   rich_solve
- 3634 B   menu_im_row
+ 3862 B   rich_emit_custom
+ 3620 B   menu_im_row
  3604 B   nt_http_request_ex
  3365 B   Clay__CloseElement
  3261 B   nt_ui_label
@@ -49,13 +49,13 @@ TOTAL             434837 B
  3011 B   fmt_fp
  2877 B   nt_ui_popup_begin_internal
  2687 B   nt_material_apply
- 2593 B   scrollbar_emit_axis
- 2563 B   nt_ui_tooltip
+ 2577 B   scrollbar_emit_axis
+ 2557 B   nt_ui_tooltip
  2551 B   nt_font_lookup_glyph_offset
  2546 B   atlas_on_resolve
 
-Total functions: 344
-Total code size: 380062 B
+Total functions: 339
+Total code size: 380440 B
 
 ## Built Engine Archives
 
@@ -91,7 +91,7 @@ libnt_log_ring.a             696 B
 libnt_log_stub.a             746 B
 libnt_material.a            3728 B
 libnt_material_comp.a       2104 B
-libnt_mem_scratch.a         2016 B
+libnt_memory.a              1170 B
 libnt_mesh_comp.a           2028 B
 libnt_mesh_renderer.a       3572 B
 libnt_meshwire.a            3326 B
@@ -116,8 +116,8 @@ libnt_sprite_renderer.a    16198 B
 libnt_text_renderer.a       7702 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                352064 B
-libnt_ui_rich.a            39024 B
+libnt_ui.a                352764 B
+libnt_ui_rich.a            39736 B
 libnt_ui_rich_fx.a          3050 B
 libnt_ui_stub.a             1324 B
 libnt_utf8.a                1098 B
@@ -125,9 +125,9 @@ libnt_version.a              638 B
 libnt_window.a              4028 B
 libnt_window_stub.a         1888 B
 ------------------------ ----------
-TOTAL (archives)         2668858 B
+TOTAL (archives)         2669424 B
 
 ## Data Segments Summary
 
 Segments: 169
-Total data size: 39916 B
+Total data size: 39966 B

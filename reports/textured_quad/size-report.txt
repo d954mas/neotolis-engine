@@ -1,5 +1,5 @@
 # Size Report: textured_quad (wasm-analysis-paired)
-# Commit: 3912b56
+# Commit: c4e479c
 
 ## WASM Section Sizes
 
@@ -91,7 +91,7 @@ libnt_log_ring.a             696 B
 libnt_log_stub.a             746 B
 libnt_material.a            3728 B
 libnt_material_comp.a       2104 B
-libnt_mem_scratch.a         2016 B
+libnt_memory.a              1170 B
 libnt_mesh_comp.a           2028 B
 libnt_mesh_renderer.a       3572 B
 libnt_meshwire.a            3326 B
@@ -116,8 +116,8 @@ libnt_sprite_renderer.a    16198 B
 libnt_text_renderer.a       7702 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                352064 B
-libnt_ui_rich.a            39024 B
+libnt_ui.a                352764 B
+libnt_ui_rich.a            39736 B
 libnt_ui_rich_fx.a          3050 B
 libnt_ui_stub.a             1324 B
 libnt_utf8.a                1098 B
@@ -125,7 +125,7 @@ libnt_version.a              638 B
 libnt_window.a              4028 B
 libnt_window_stub.a         1888 B
 ------------------------ ----------
-TOTAL (archives)         2668858 B
+TOTAL (archives)         2669424 B
 
 ## Data Segments Summary
 
