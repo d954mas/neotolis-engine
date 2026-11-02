@@ -1,6 +1,7 @@
 #include "file_dialog/nt_file_dialog.h"
 
 #include "core/nt_assert.h"
+#include "log/nt_log.h"
 #include "tinyfiledialogs.h"
 
 #include <stdint.h>
@@ -32,6 +33,9 @@ uint32_t nt_file_dialog_open(const char *title, const char *pattern, char *out, 
         used += n + 1;
         count++;
         p += n + (bar != NULL ? 1U : 0U);
+    }
+    if (count == 0 && chosen != NULL && *chosen != '\0') {
+        NT_LOG_WARN("open: the chosen path is longer than %zu bytes", cap);
     }
     return count;
 }

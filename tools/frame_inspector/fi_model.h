@@ -130,7 +130,7 @@ typedef struct {
     /* Short names for handles (pipe#3): per kind, numbered in order of first appearance. */
     uint32_t *alias_object, *alias_number, *alias_slot, alias_mask;
     uint8_t *alias_kind;
-    uint32_t *def;                     /* per DESTROY operation: the definition of the object it destroyed, FI_NONE */
+    uint32_t *def;                     /* per operation on an object: the object's latest definition before it, FI_NONE */
     fi_buffer_upload_t *buffer_upload; /* the biggest first */
     uint32_t buffer_upload_count;
     /* Merge check: per draw the break and the record that caused it (the command between, or the previous draw). */
@@ -175,6 +175,7 @@ typedef struct {
 typedef struct {
     fi_gl_slot_t slot[FI_GL_SLOTS];
     uint32_t count;
+    bool full; /* more state than slots: the rest is not shown */
 } fi_gl_state_t;
 void fi_gl_state(const fi_frame_t *frame, uint32_t at, fi_gl_state_t *out);
 
@@ -187,14 +188,22 @@ uint32_t fi_row_of(const fi_frame_t *frame, uint32_t id);
 fi_tally_t fi_tally(const fi_frame_t *frame, uint32_t id);
 /* The alias number of a handle (pipe#3 is 3), 0 when the frame never names it. */
 uint32_t fi_alias(const fi_frame_t *frame, uint32_t kind, uint32_t object);
-/* The same group in another frame of the file, by its key; FI_NONE when it has none. */
-uint32_t fi_group_in(const fi_frame_t *frame, const char *key);
+/* Group g of frame `from` in frame `to`: the same marker path and note; FI_NONE when `to` has none. */
+uint32_t fi_group_in(const fi_frame_t *to, const fi_frame_t *from, uint32_t g);
+/* The tree parent of a record or phase; FI_NONE above the frame. */
+uint32_t fi_parent(const fi_frame_t *frame, uint32_t id);
+/* The draw a merged (CACHE) draw joined; FI_NONE for anything else. */
+uint32_t fi_joined(const fi_frame_t *frame, uint32_t record);
+/* Whether two records that set one piece of request state leave it alike: an inherited value (INITIAL)
+ * and a request (OP) compare by value, a texture set by its textures. FI_NONE is unset. */
+bool fi_same_setting(const fi_frame_t *frame, uint32_t a, uint32_t b);
+/* Whether two records that set one GL slot leave the same value: an inherited cache entry and a call compare
+ * by the bound name. */
+bool fi_gl_same(const fi_frame_t *frame, const fi_gl_slot_t *slot, uint32_t a, uint32_t b);
 bool fi_is_draw(const nt_gfx_event_t *e); /* a draw request of any kind */
 bool fi_is_draw_call(uint32_t call);      /* glDrawArrays, glDrawElements and their instanced forms */
-/* The frame's counters rebuilt from its records. stream_bytes and frame_bytes come from the view: command
- * sizes and storage streams are not in the records (the frame storage upload total is FI_Q_FRAME_STORE). */
-nt_gfx_counters_t fi_recount(const fi_frame_t *frame);
-/* Each counter next to its recount; the frame storage total and every op and GL call either side counted. */
+/* Each counter next to its recount from the records; the frame storage total and every op and GL call either
+ * side counted. stream_bytes has no recount: command sizes are not recorded. */
 typedef struct {
     char name[64];
     uint64_t counter, recount;

@@ -74,6 +74,16 @@ static const fi_frame_t *load_events(const nt_gfx_event_t *ev, uint32_t count, c
     return load(text, len);
 }
 
+/* Every counter equals its recount from the records. */
+static void assert_counters_match(const fi_frame_t *fr) {
+    fi_counter_row_t rows[FI_COUNTER_ROWS];
+    const uint32_t n = fi_counter_rows(fr, rows);
+    TEST_ASSERT_GREATER_THAN_UINT32(0, n);
+    for (uint32_t k = 0; k < n; k++) {
+        TEST_ASSERT_EQUAL_UINT64_MESSAGE(rows[k].counter, rows[k].recount, rows[k].name);
+    }
+}
+
 static const fi_frame_t *capture(void (*body)(void)) {
     size_t len = 0;
     char *text = record(body, &len);
@@ -153,7 +163,8 @@ static void test_a_marker_and_a_note_of_one_label_differ(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(marker, note);
     TEST_ASSERT_EQUAL_STRING("ui", fr->group_key[marker]);
     TEST_ASSERT_EQUAL_STRING("> ui", fr->group_key[note]);
-    TEST_ASSERT_EQUAL_UINT32(note, fi_group_in(fr, "> ui"));
+    TEST_ASSERT_EQUAL_UINT32(note, fi_group_in(fr, fr, note));
+    TEST_ASSERT_EQUAL_UINT32(marker, fi_group_in(fr, fr, marker));
 }
 
 /* The snapshot opens begin_frame; the frame storage upload of the uniform block belongs to end_frame. */
@@ -194,6 +205,36 @@ static void test_a_finished_link_is_not_the_snapshot(void) {
     TEST_ASSERT_EQUAL_UINT32(FI_NODE_BASE + FI_NODE_PROGRAM_LINKS, fr->parent[1]);
     TEST_ASSERT_EQUAL_UINT32(FI_NODE_BASE + FI_NODE_PROGRAM_LINKS, fr->parent[2]);
     TEST_ASSERT_EQUAL_UINT64(1, fi_cell(fr, (fi_query_t){.kind = FI_Q_RESOURCE, .a = NT_GFX_OBJECT_PROGRAM, .b = FI_RES_LIVE}).n);
+}
+
+/* A restored context remakes the frame storage buffers inside begin_frame; the game's buffers come after. */
+static void test_a_context_restore_belongs_to_begin_frame(void) {
+    nt_gfx_event_t ev[3 + (2 * NT_GFX_FRAME_STREAM_COUNT)];
+    memset(ev, 0, sizeof(ev));
+    uint32_t n = 0;
+    ev[n].kind = NT_GFX_EVENT_OP;
+    ev[n].operation = NT_GFX_OP_CONTEXT;
+    ev[n++].result = NT_GFX_RESULT_ACCEPTED;
+    for (uint32_t k = 0; k < NT_GFX_FRAME_STREAM_COUNT; k++) {
+        for (uint32_t op = 0; op < 2; op++) {
+            ev[n].kind = NT_GFX_EVENT_OP;
+            ev[n].operation = op == 0 ? NT_GFX_OP_DESTROY : NT_GFX_OP_CREATE;
+            ev[n].object_kind = NT_GFX_OBJECT_BUFFER;
+            ev[n].object = 0x10001 + k;
+            ev[n++].result = NT_GFX_RESULT_ACCEPTED;
+        }
+    }
+    ev[n] = ev[n - 1];
+    ev[n++].object = 0x20001; /* the game's own buffer */
+    nt_gfx_counters_t counters = {0};
+    counters.accepted[NT_GFX_OP_CONTEXT] = 1;
+    counters.accepted[NT_GFX_OP_DESTROY] = NT_GFX_FRAME_STREAM_COUNT;
+    counters.accepted[NT_GFX_OP_CREATE] = NT_GFX_FRAME_STREAM_COUNT + 1;
+    const fi_frame_t *fr = load_events(ev, n, &counters);
+    for (uint32_t i = 0; i + 1U < n; i++) {
+        TEST_ASSERT_EQUAL_UINT32(FI_NODE_BASE + FI_NODE_BEGIN_FRAME, fr->parent[i]);
+    }
+    TEST_ASSERT_EQUAL_UINT32(FI_NODE_BASE + FI_NODE_CALLS, fr->parent[n - 1U]);
 }
 
 /* Rows hold every record once, each after its parent and one level deeper. */
@@ -317,10 +358,9 @@ static void test_each_number_counts_the_records_its_query_selects(void) {
 /* Counters rebuilt from the records equal the recorded ones. */
 static void test_recount_equals_the_counters(void) {
     const fi_frame_t *fr = capture(merge_body);
-    const nt_gfx_counters_t c = fi_recount(fr);
-    TEST_ASSERT_EQUAL_MEMORY(&fr->view.counters, &c, sizeof(c));
-    TEST_ASSERT_GREATER_THAN_UINT64(0, c.vertices);
-    TEST_ASSERT_GREATER_THAN_UINT64(0, c.indices);
+    assert_counters_match(fr);
+    TEST_ASSERT_GREATER_THAN_UINT64(0, fr->summary.vertices.sum);
+    TEST_ASSERT_GREATER_THAN_UINT64(0, fr->summary.indices.sum);
 }
 
 /* Uploads count issued calls with payload by call; a texture definition is sized by its levels. */
@@ -355,8 +395,7 @@ static void test_uploads_and_resource_bytes(void) {
     TEST_ASSERT_EQUAL_UINT64((4 * 4 + 2 * 2 + 1) * 4, fi_cell(fr, (fi_query_t){.kind = FI_Q_RESOURCE, .a = NT_GFX_OBJECT_TEXTURE, .b = FI_RES_LIVE}).sum);
     TEST_ASSERT_EQUAL_UINT64(64, fi_cell(fr, (fi_query_t){.kind = FI_Q_UPLOAD, .a = 0}).sum);
     TEST_ASSERT_EQUAL_UINT64(1, fi_cell(fr, (fi_query_t){.kind = FI_Q_OP_CALLS, .a = NT_GFX_OP_BUFFER_UPLOAD}).n);
-    const nt_gfx_counters_t c = fi_recount(fr);
-    TEST_ASSERT_EQUAL_MEMORY(&counters, &c, sizeof(c));
+    assert_counters_match(fr);
     TEST_ASSERT_EQUAL_UINT32(1, fr->buffer_upload_count);
     TEST_ASSERT_EQUAL_UINT32(0x20001, fr->buffer_upload[0].object);
     TEST_ASSERT_EQUAL_UINT64(64, fr->buffer_upload[0].bytes);
@@ -388,8 +427,7 @@ static void test_real_captures_recount(void) {
             const fi_frame_t *fr = &s_file.frames[f];
             TEST_ASSERT_NULL(fr->error);
             TEST_ASSERT_EQUAL_UINT32(FI_NONE, fr->merge_mismatch);
-            const nt_gfx_counters_t c = fi_recount(fr);
-            TEST_ASSERT_EQUAL_MEMORY(&fr->view.counters, &c, sizeof(c));
+            assert_counters_match(fr);
             TEST_ASSERT_GREATER_THAN_UINT64(0, fi_cell(fr, (fi_query_t){.kind = FI_Q_GL_CALL, .a = NT_GFX_GL_glClear}).n);
         }
         fi_file_close(&s_file);
@@ -412,6 +450,49 @@ static void request_body(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_vertex_input(s_vi);
     nt_gfx_end_pass();
+}
+
+static void texture_set_body(void) {
+    draw_setup();
+    nt_gfx_set_scissor(1, 2, 3, 4);
+    nt_gfx_set_scissor(5, 6, 7, 8);
+    nt_gfx_set_scissor(1, 2, 3, 4);
+    nt_gfx_end_pass();
+}
+
+/* Two scissor requests with one value are the same setting, another value is not; an inherited and a
+ * requested value compare by value. */
+static void test_settings_compare_by_value(void) {
+    const fi_frame_t *fr = capture(texture_set_body);
+    const uint32_t a = find_op(fr, NT_GFX_OP_SCISSOR, 0);
+    const uint32_t b = find_op(fr, NT_GFX_OP_SCISSOR, 1);
+    const uint32_t c = find_op(fr, NT_GFX_OP_SCISSOR, 2);
+    TEST_ASSERT_TRUE(fi_same_setting(fr, a, c));
+    TEST_ASSERT_FALSE(fi_same_setting(fr, a, b));
+    TEST_ASSERT_FALSE(fi_same_setting(fr, a, FI_NONE));
+}
+
+/* A texture set compares by the textures in its ARGUMENT records, not by its count. */
+static void test_texture_sets_compare_by_textures(void) {
+    nt_gfx_event_t ev[4];
+    memset(ev, 0, sizeof(ev));
+    for (uint32_t k = 0; k < 4; k += 2) {
+        ev[k].kind = NT_GFX_EVENT_OP;
+        ev[k].operation = NT_GFX_OP_TEXTURE_SET;
+        ev[k].object_kind = NT_GFX_OBJECT_PIPELINE;
+        ev[k].object = 0x10001;
+        ev[k].result = NT_GFX_RESULT_ACCEPTED;
+        ev[k].data.state.integers[0] = 1;
+        ev[k + 1].kind = NT_GFX_EVENT_ARGUMENT;
+        ev[k + 1].operation = NT_GFX_OP_TEXTURE_SET;
+        ev[k + 1].object_kind = NT_GFX_OBJECT_TEXTURE;
+        ev[k + 1].object = 0x20001 + k;
+        ev[k + 1].link = k + 1U;
+    }
+    nt_gfx_counters_t counters = {0};
+    counters.accepted[NT_GFX_OP_TEXTURE_SET] = 2;
+    const fi_frame_t *fr = load_events(ev, 4, &counters);
+    TEST_ASSERT_FALSE(fi_same_setting(fr, 0, 2));
 }
 
 /* PASS resets the pass bindings, an invalid pipeline unbinds, the scissor carries over passes. */
@@ -441,6 +522,30 @@ static const fi_gl_slot_t *gl_slot(const fi_gl_state_t *st, uint32_t call, uint3
         }
     }
     return NULL;
+}
+
+/* An inherited cache entry and a bind call of the same name leave the slot alike. */
+static void test_gl_slots_compare_by_name(void) {
+    nt_gfx_event_t ev[3];
+    memset(ev, 0, sizeof(ev));
+    ev[0].kind = NT_GFX_EVENT_INITIAL;
+    ev[0].operation = NT_GFX_OP_STATE;
+    ev[0].detail = NT_GFX_INITIAL_BACKEND;
+    ev[0].data.backend.args[0] = 6; /* program */
+    ev[0].data.backend.args[3] = 0x84C0;
+    for (uint32_t k = 1; k < 3; k++) {
+        ev[k].kind = NT_GFX_EVENT_BACKEND;
+        ev[k].operation = NT_GFX_OP_STATE;
+        ev[k].detail = NT_GFX_GL_glUseProgram;
+        ev[k].arg_count = 1;
+        ev[k].data.backend.args[0] = 5 + k; /* 6, then 7 */
+    }
+    nt_gfx_counters_t counters = {0};
+    counters.gl[NT_GFX_GL_glUseProgram] = 2;
+    const fi_frame_t *fr = load_events(ev, 3, &counters);
+    const fi_gl_slot_t slot = {.call = NT_GFX_GL_glUseProgram};
+    TEST_ASSERT_TRUE(fi_gl_same(fr, &slot, 0, 1));
+    TEST_ASSERT_FALSE(fi_gl_same(fr, &slot, 0, 2));
 }
 
 /* A texture bind lands on the active unit, inherited as a GL enum; a restored context starts over. */
@@ -534,7 +639,10 @@ static void test_an_overflowed_frame_opens(void) {
     const fi_frame_t *fr = capture(overflow_body);
     TEST_ASSERT_TRUE(fr->view.overflow);
     TEST_ASSERT_GREATER_THAN_UINT32(0, fr->row_count);
-    TEST_ASSERT_LESS_THAN_UINT64(fr->view.counters.vertices, fi_recount(fr).vertices);
+    fi_counter_row_t rows[FI_COUNTER_ROWS];
+    (void)fi_counter_rows(fr, rows);
+    TEST_ASSERT_EQUAL_STRING("vertices", rows[0].name);
+    TEST_ASSERT_LESS_THAN_UINT64(rows[0].counter, rows[0].recount);
 }
 // #endregion
 
@@ -543,6 +651,7 @@ int main(void) {
     RUN_TEST(test_notes_cover_the_operations_after_them);
     RUN_TEST(test_a_marker_and_a_note_of_one_label_differ);
     RUN_TEST(test_a_finished_link_is_not_the_snapshot);
+    RUN_TEST(test_a_context_restore_belongs_to_begin_frame);
     RUN_TEST(test_phases_follow_the_frame);
     RUN_TEST(test_rows_are_a_preorder_of_the_tree);
     RUN_TEST(test_merge_rule_matches_the_frontend);
@@ -553,6 +662,9 @@ int main(void) {
     RUN_TEST(test_draw_buffers_is_not_a_draw_call);
     RUN_TEST(test_real_captures_recount);
     RUN_TEST(test_request_state_follows_the_frontend_rules);
+    RUN_TEST(test_settings_compare_by_value);
+    RUN_TEST(test_texture_sets_compare_by_textures);
+    RUN_TEST(test_gl_slots_compare_by_name);
     RUN_TEST(test_gl_state_follows_issued_calls);
     RUN_TEST(test_damage_stays_inside_its_document);
     RUN_TEST(test_an_overflowed_frame_opens);

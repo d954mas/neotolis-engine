@@ -341,7 +341,10 @@ release diagnostics as three parallel parts). Deploy requires all of
 them. Native test configures pass `NT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"`:
 tests read their own fixtures, so only `packs` runs the example builders. Tool
 packs are the exception: `tools/frame_inspector` exists only in capture builds, so its
-pack builds in `native-debug`, which also checks its committed `tools/*/generated` header. Add a
+pack builds in every full native capture build (`native-debug`, `native-release-test`);
+`native-debug` checks its committed `tools/*/generated` header. Tool packs stay out of
+`NT_ALL_EXAMPLE_PACKS` and skip lists: they register only in capture builds, so a
+capture-off configure would reject the name. Add a
 new example to `NT_ALL_EXAMPLE_PACKS`; the `packs` guard fails until it is listed.
 The wasm jobs build only the paired presets: a paired `index.wasm` is the
 baseline build, so smoke, ctest and symbol checks run there. Narrow configures

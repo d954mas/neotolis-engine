@@ -3,9 +3,7 @@
  * Usage: build_frame_inspector_packs <pack_dir>
  * Run from the project root directory. */
 
-/* clang-format off */
 #include "nt_builder.h"
-/* clang-format on */
 
 #include <stdio.h>
 
@@ -69,7 +67,7 @@ int main(int argc, char *argv[]) {
     nt_atlas_add_raw(atlas, white_pixel, 1, 1, &white_opts);
     (void)nt_atlas_commit(atlas);
 
-    nt_builder_add_font(ctx, "examples/asteroids/raw/DejaVuSansMono.ttf", &(nt_font_opts_t){.charset = NT_CHARSET_ASCII, .resource_name = "frame_inspector/mono"});
+    nt_builder_add_font(ctx, "assets/fonts/DejaVuSansMono.ttf", &(nt_font_opts_t){.charset = NT_CHARSET_ASCII, .resource_name = "frame_inspector/mono"});
 
     const nt_build_result_t r = nt_builder_finish_pack(ctx);
     nt_builder_free_pack(ctx);

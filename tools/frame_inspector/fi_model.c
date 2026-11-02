@@ -262,7 +262,7 @@ static void assign_parents(fi_frame_t *fr, uint32_t *stack, uint32_t *slot, uint
     }
     uint32_t top = 0;
     uint32_t note = FI_NONE;
-    bool restoring = false; /* after CONTEXT, begin_frame remakes the frame storage buffers */
+    uint32_t remake = 0; /* frame storage buffers begin_frame still remakes after a restored context */
     for (uint32_t i = 0; i < n; i++) {
         const nt_gfx_event_t *e = &ev[i];
         if (i == fr->view.execute_begin && fr->view.execute_end != 0) {
@@ -294,10 +294,16 @@ static void assign_parents(fi_frame_t *fr, uint32_t *stack, uint32_t *slot, uint
             break;
         default: {
             const bool op = e->kind == NT_GFX_EVENT_OP;
-            restoring = op && e->link == 0 ? (e->operation == NT_GFX_OP_CONTEXT || (restoring && e->operation == NT_GFX_OP_CREATE)) : restoring;
+            /* A restored context remakes each frame storage stream: DESTROY of the old buffer if any, then CREATE. */
+            const bool storage = op && e->link == 0 && remake > 0 && e->object_kind == NT_GFX_OBJECT_BUFFER && (e->operation == NT_GFX_OP_DESTROY || e->operation == NT_GFX_OP_CREATE);
+            remake -= storage && e->operation == NT_GFX_OP_CREATE ? 1U : 0U;
+            remake = storage ? remake : 0U;
+            if (op && e->link == 0 && e->operation == NT_GFX_OP_CONTEXT) {
+                remake = e->result == NT_GFX_RESULT_ACCEPTED ? NT_GFX_FRAME_STREAM_COUNT : 0U;
+            }
             if (owner(fr, i) != FI_NONE && owner(fr, i) < i) {
                 parent = owner(fr, i);
-            } else if (op && (restoring || e->operation == NT_GFX_OP_TIMER_DISJOINT)) {
+            } else if (op && (storage || e->operation == NT_GFX_OP_CONTEXT || e->operation == NT_GFX_OP_TIMER_DISJOINT)) {
                 parent = FI_NODE_BASE + FI_NODE_BEGIN_FRAME; /* only begin_frame restores, remakes and checks the timer */
             } else if (!op) {
                 parent = FI_NODE_BASE + (i < snapshot_end ? FI_NODE_SNAPSHOT : FI_NODE_PROGRAM_LINKS);
@@ -392,6 +398,19 @@ static void build_rows(fi_frame_t *fr) {
     free(stack_depth);
 }
 
+uint32_t fi_parent(const fi_frame_t *frame, uint32_t id) {
+    if (id < frame->view.count) {
+        return frame->parent[id];
+    }
+    const uint32_t up = id >= FI_NODE_BASE && id - FI_NODE_BASE < FI_NODE_COUNT ? node_parent(id - FI_NODE_BASE) : FI_NODE_ROOT;
+    return up == FI_NODE_ROOT ? FI_NONE : FI_NODE_BASE + up;
+}
+
+uint32_t fi_joined(const fi_frame_t *frame, uint32_t record) {
+    const nt_gfx_event_t *e = &frame->view.events[record];
+    return fi_is_draw(e) && e->result == NT_GFX_RESULT_CACHE && e->detail > 0 && e->detail <= frame->view.count ? e->detail - 1U : FI_NONE;
+}
+
 uint32_t fi_row_of(const fi_frame_t *frame, uint32_t id) {
     if (id < frame->view.count) {
         return frame->record_row[id];
@@ -460,7 +479,7 @@ static void index_handles(fi_frame_t *fr) {
         const uint32_t k = *slot - 1U;
         if (e->kind == NT_GFX_EVENT_DEFINITION && e->operation == NT_GFX_OP_CREATE) {
             last_def[k] = i;
-        } else if (e->kind == NT_GFX_EVENT_OP && e->operation == NT_GFX_OP_DESTROY) {
+        } else if (e->kind == NT_GFX_EVENT_OP) {
             fr->def[i] = last_def[k];
         }
     }
@@ -608,7 +627,8 @@ static uint32_t contributions(const fi_frame_t *fr, uint32_t i, fi_query_t *q, u
             }
         }
         if (e->operation == NT_GFX_OP_DESTROY && result == NT_GFX_RESULT_ACCEPTED && e->object_kind < FI_OBJECTS) {
-            FI_ADD_(FI_Q_RESOURCE, e->object_kind, FI_RES_DESTROYED, fr->def[i] != FI_NONE ? definition_bytes(&fr->view.events[fr->def[i]]) : 0);
+            const nt_gfx_event_t *def = fr->def[i] != FI_NONE ? &fr->view.events[fr->def[i]] : NULL;
+            FI_ADD_(FI_Q_RESOURCE, e->object_kind, FI_RES_DESTROYED, def != NULL && def->data.resource.backend != 0 ? definition_bytes(def) : 0); /* a husk held nothing */
         }
         if (e->operation == NT_GFX_OP_BUFFER_UPLOAD && e->link == 0 && in_execute(fr, i)) {
             FI_ADD_(FI_Q_FRAME_STORE, 0, 0, e->data.resource.size);
@@ -709,10 +729,7 @@ static fi_cell_t *cell_in(fi_summary_t *s, uint32_t group_count, fi_query_t q) {
     return NULL;
 }
 
-static void add_record(const fi_frame_t *fr, uint32_t i, fi_summary_t *s) {
-    fi_query_t qs[FI_MAX_CONTRIB];
-    uint64_t sums[FI_MAX_CONTRIB];
-    const uint32_t c = contributions(fr, i, qs, sums);
+static void add_contributions(const fi_frame_t *fr, fi_summary_t *s, const fi_query_t *qs, const uint64_t *sums, uint32_t c) {
     for (uint32_t k = 0; k < c; k++) {
         fi_cell_t *cell = cell_in(s, fr->group_count, qs[k]);
         if (cell != NULL) {
@@ -744,7 +761,9 @@ uint32_t fi_range(const fi_frame_t *frame, uint32_t lo, uint32_t hi, fi_summary_
     uint32_t records = 0;
     for (uint32_t r = lo; r <= hi && r < frame->row_count; r++) {
         if (frame->row[r] < FI_NODE_BASE) {
-            add_record(frame, frame->row[r], out);
+            fi_query_t qs[FI_MAX_CONTRIB];
+            uint64_t sums[FI_MAX_CONTRIB];
+            add_contributions(frame, out, qs, sums, contributions(frame, frame->row[r], qs, sums));
             records++;
         }
     }
@@ -759,18 +778,30 @@ fi_tally_t fi_tally(const fi_frame_t *frame, uint32_t id) {
     return id >= FI_NODE_BASE && id - FI_NODE_BASE < FI_NODE_COUNT ? frame->tally[n + (id - FI_NODE_BASE)] : (fi_tally_t){0};
 }
 
-uint32_t fi_group_in(const fi_frame_t *frame, const char *key) {
-    for (uint32_t g = 0; g < frame->group_count; g++) {
-        if (strcmp(frame->group_key[g], key) == 0) {
-            return g;
+/* Whether group a of frame x and group b of frame y have the same marker path and note. */
+static bool same_group(const fi_frame_t *x, uint32_t a, const fi_frame_t *y, uint32_t b) {
+    for (; a != 0 && b != 0; a = x->group_parent[a], b = y->group_parent[b]) {
+        if (x->group_is_note[a] != y->group_is_note[b] || strcmp(x->group_label[a], y->group_label[b]) != 0) {
+            return false;
+        }
+    }
+    return a == b;
+}
+
+uint32_t fi_group_in(const fi_frame_t *to, const fi_frame_t *from, uint32_t g) {
+    for (uint32_t k = 0; k < to->group_count && g < from->group_count; k++) {
+        if (same_group(to, k, from, g)) {
+            return k;
         }
     }
     return FI_NONE;
 }
 
-nt_gfx_counters_t fi_recount(const fi_frame_t *frame) {
+/* The frame's counters rebuilt from its records; stream and storage sizes come from the view. */
+static nt_gfx_counters_t recount(const fi_frame_t *frame) {
     const fi_summary_t *s = &frame->summary;
-    nt_gfx_counters_t c = {0};
+    nt_gfx_counters_t c;
+    memset(&c, 0, sizeof(c)); /* padding too: counters compare as bytes */
     c.frame_sequence = frame->view.counters.frame_sequence;
     c.stream_bytes = frame->view.counters.stream_bytes;
     memcpy(c.frame_bytes, frame->view.counters.frame_bytes, sizeof(c.frame_bytes));
@@ -792,7 +823,7 @@ nt_gfx_counters_t fi_recount(const fi_frame_t *frame) {
 
 uint32_t fi_counter_rows(const fi_frame_t *frame, fi_counter_row_t rows[FI_COUNTER_ROWS]) {
     const nt_gfx_counters_t *c = &frame->view.counters;
-    const nt_gfx_counters_t r = fi_recount(frame);
+    const nt_gfx_counters_t r = recount(frame);
     uint64_t frame_bytes = 0;
     for (uint32_t k = 0; k < NT_GFX_FRAME_STREAM_COUNT; k++) {
         frame_bytes += c->frame_bytes[k];
@@ -831,9 +862,9 @@ static void build_summary(fi_frame_t *fr) {
     fi_query_t qs[FI_MAX_CONTRIB];
     uint64_t sums[FI_MAX_CONTRIB];
     for (uint32_t i = 0; i < n; i++) {
-        add_record(fr, i, &fr->summary);
-        fi_tally_t add = {0};
         const uint32_t c = contributions(fr, i, qs, sums);
+        add_contributions(fr, &fr->summary, qs, sums, c);
+        fi_tally_t add = {0};
         for (uint32_t k = 0; k < c; k++) {
             add.draws += qs[k].kind == FI_Q_VERTICES ? 1U : 0U; /* every counted draw adds vertices */
             add.merged += qs[k].kind == FI_Q_MERGED ? 1U : 0U;
@@ -883,6 +914,9 @@ void fi_request_state(const fi_frame_t *frame, uint32_t at, fi_request_state_t *
         }
         const bool set = e->result == NT_GFX_RESULT_ACCEPTED;
         switch (e->operation) {
+        case NT_GFX_OP_CONTEXT: /* a restored context starts with scissor off */
+            out->scissor_enable = set ? FI_NONE : out->scissor_enable;
+            break;
         case NT_GFX_OP_PASS: /* begin_pass discards the pass mirrors whatever it returns */
             out->pass = set ? i : FI_NONE;
             out->pipeline = out->vertex_input = out->texture_set = out->viewport = out->scissor_enable = FI_NONE;
@@ -893,6 +927,11 @@ void fi_request_state(const fi_frame_t *frame, uint32_t at, fi_request_state_t *
             break;
         case NT_GFX_OP_PIPELINE:
             if (set) {
+                /* The texture set is program state: a pipeline on another program needs a new one (nt_gfx bind_pipeline). */
+                const uint32_t before = out->pipeline != FI_NONE ? frame->def[out->pipeline] : FI_NONE;
+                const uint32_t after = frame->def[i];
+                const bool same_program = before != FI_NONE && after != FI_NONE && ev[before].data.resource.related[0] == ev[after].data.resource.related[0];
+                out->texture_set = same_program ? out->texture_set : FI_NONE;
                 out->pipeline = i;
             } else if (e->result == NT_GFX_RESULT_INVALID_HANDLE) { /* the unbind */
                 out->pipeline = out->texture_set = FI_NONE;
@@ -935,6 +974,17 @@ static void gl_set(fi_gl_state_t *st, uint32_t call, uint32_t k0, uint32_t k1, u
     }
     if (st->count < FI_GL_SLOTS) {
         st->slot[st->count++] = (fi_gl_slot_t){.call = call, .key = {k0, k1}, .record = record, .inherited = inherited};
+    } else {
+        st->full = true;
+    }
+}
+
+static void gl_drop(fi_gl_state_t *st, uint32_t call, uint32_t k0) {
+    for (uint32_t k = 0; k < st->count; k++) {
+        if (st->slot[k].call == call && st->slot[k].key[0] == k0) {
+            st->slot[k] = st->slot[--st->count];
+            return;
+        }
     }
 }
 
@@ -942,6 +992,7 @@ static void gl_set(fi_gl_state_t *st, uint32_t call, uint32_t k0, uint32_t k1, u
 #define FI_GL_TEXTURE_2D 0x0DE1U
 #define FI_GL_FRAMEBUFFER 0x8D40U
 #define FI_GL_ARRAY_BUFFER 0x8892U
+#define FI_GL_ELEMENT_ARRAY_BUFFER 0x8893U
 
 /* A texture unit from its GL enum (GL_TEXTURE0 + unit). */
 static uint32_t unit_of(uint32_t gl_enum) { return gl_enum >= FI_GL_TEXTURE0 ? gl_enum - FI_GL_TEXTURE0 : 0U; }
@@ -950,6 +1001,7 @@ static uint32_t unit_of(uint32_t gl_enum) { return gl_enum >= FI_GL_TEXTURE0 ? g
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void fi_gl_state(const fi_frame_t *frame, uint32_t at, fi_gl_state_t *out) {
     out->count = 0;
+    out->full = false;
     const nt_gfx_event_t *ev = frame->view.events;
     bool backend = false;
     uint32_t unit = 0;
@@ -1006,8 +1058,11 @@ void fi_gl_state(const fi_frame_t *frame, uint32_t at, fi_gl_state_t *out) {
         case NT_GFX_GL_glDisable:
             gl_set(out, NT_GFX_GL_glEnable, a[0], 0, i, false);
             break;
-        case NT_GFX_GL_glUseProgram:
         case NT_GFX_GL_glBindVertexArray:
+            gl_drop(out, NT_GFX_GL_glBindBuffer, FI_GL_ELEMENT_ARRAY_BUFFER); /* the element buffer is VAO state */
+            gl_set(out, e->detail, 0, 0, i, false);
+            break;
+        case NT_GFX_GL_glUseProgram:
         case NT_GFX_GL_glViewport:
         case NT_GFX_GL_glScissor:
         case NT_GFX_GL_glDepthMask:
@@ -1028,6 +1083,131 @@ void fi_gl_state(const fi_frame_t *frame, uint32_t at, fi_gl_state_t *out) {
     }
 }
 // #endregion
+
+/* Records are parsed into zeroed storage, so equal arguments are equal bytes. */
+static bool same_data(const nt_gfx_event_t *x, const nt_gfx_event_t *y) {
+    uint8_t xb[sizeof(x->data)];
+    uint8_t yb[sizeof(y->data)];
+    memcpy(xb, &x->data, sizeof(xb));
+    memcpy(yb, &y->data, sizeof(yb));
+    return memcmp(xb, yb, sizeof(xb)) == 0;
+}
+
+bool fi_same_setting(const fi_frame_t *frame, uint32_t a, uint32_t b) {
+    if (a == b) {
+        return true;
+    }
+    if (a == FI_NONE || b == FI_NONE) {
+        return false;
+    }
+    const nt_gfx_event_t *x = &frame->view.events[a];
+    const nt_gfx_event_t *y = &frame->view.events[b];
+    const bool unknown_x = x->kind == NT_GFX_EVENT_INITIAL && x->result == NT_GFX_RESULT_UNKNOWN;
+    const bool unknown_y = y->kind == NT_GFX_EVENT_INITIAL && y->result == NT_GFX_RESULT_UNKNOWN;
+    const bool request = (x->kind == NT_GFX_EVENT_INITIAL || x->kind == NT_GFX_EVENT_OP) && (y->kind == NT_GFX_EVENT_INITIAL || y->kind == NT_GFX_EVENT_OP);
+    if (unknown_x || unknown_y || !(x->kind == y->kind || request) || x->operation != y->operation || x->object_kind != y->object_kind || x->object != y->object || x->detail != y->detail) {
+        return false;
+    }
+    if (!same_data(x, y)) {
+        return false;
+    }
+    if (x->operation != NT_GFX_OP_TEXTURE_SET) {
+        return true;
+    }
+    /* A texture set names its textures in the ARGUMENT records after it. */
+    uint32_t i = a + 1U;
+    uint32_t k = b + 1U;
+    for (; i < frame->view.count && frame->parent[i] == a && frame->view.events[i].kind == NT_GFX_EVENT_ARGUMENT; i++, k++) {
+        const nt_gfx_event_t *p = &frame->view.events[i];
+        const nt_gfx_event_t *q = k < frame->view.count && frame->parent[k] == b ? &frame->view.events[k] : NULL;
+        if (q == NULL || q->kind != NT_GFX_EVENT_ARGUMENT || p->object != q->object || !same_data(p, q)) {
+            return false;
+        }
+    }
+    return k >= frame->view.count || frame->parent[k] != b || frame->view.events[k].kind != NT_GFX_EVENT_ARGUMENT;
+}
+
+/* The name a GL slot holds after record `r`: a bind call's argument or the backend cache entry it inherited. */
+static bool gl_value(const fi_frame_t *frame, const fi_gl_slot_t *slot, uint32_t r, uint32_t *value) {
+    const nt_gfx_event_t *e = &frame->view.events[r];
+    const uint32_t *a = e->data.backend.args;
+    if (e->kind == NT_GFX_EVENT_BACKEND) {
+        switch (e->detail) {
+        case NT_GFX_GL_glUseProgram:
+        case NT_GFX_GL_glBindVertexArray:
+            *value = a[0];
+            return true;
+        case NT_GFX_GL_glActiveTexture:
+            *value = unit_of(a[0]);
+            return true;
+        case NT_GFX_GL_glBindFramebuffer:
+        case NT_GFX_GL_glBindBuffer:
+        case NT_GFX_GL_glBindTexture:
+        case NT_GFX_GL_glBindSampler:
+            *value = a[1];
+            return true;
+        default:
+            return false;
+        }
+    }
+    if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_STATE && e->detail == NT_GFX_INITIAL_BACKEND) {
+        switch (slot->call) {
+        case NT_GFX_GL_glUseProgram:
+            *value = a[0];
+            return true;
+        case NT_GFX_GL_glBindVertexArray:
+            *value = a[1];
+            return true;
+        case NT_GFX_GL_glBindFramebuffer:
+            *value = a[2];
+            return true;
+        case NT_GFX_GL_glActiveTexture:
+            *value = unit_of(a[3]);
+            return true;
+        case NT_GFX_GL_glBindBuffer:
+            *value = a[7];
+            return true;
+        default:
+            return false;
+        }
+    }
+    if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_TEXTURE) {
+        *value = slot->call == NT_GFX_GL_glBindSampler ? a[2] : a[1];
+        return true;
+    }
+    return false;
+}
+
+static const uint32_t *viewport_of(const fi_frame_t *frame, uint32_t r) {
+    const nt_gfx_event_t *e = &frame->view.events[r];
+    if (e->kind == NT_GFX_EVENT_BACKEND && e->detail == NT_GFX_GL_glViewport) {
+        return e->data.backend.args;
+    }
+    return e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_VIEWPORT ? e->data.state.integers : NULL;
+}
+
+bool fi_gl_same(const fi_frame_t *frame, const fi_gl_slot_t *slot, uint32_t a, uint32_t b) {
+    if (a == b) {
+        return true;
+    }
+    if (a == FI_NONE || b == FI_NONE) {
+        return false;
+    }
+    uint32_t va = 0;
+    uint32_t vb = 0;
+    if (gl_value(frame, slot, a, &va) && gl_value(frame, slot, b, &vb)) {
+        return va == vb;
+    }
+    /* The inherited viewport holds the rectangle the call takes as arguments. */
+    const uint32_t *ra = viewport_of(frame, a);
+    const uint32_t *rb = viewport_of(frame, b);
+    if (slot->call == NT_GFX_GL_glViewport && ra != NULL && rb != NULL) {
+        return ra[0] == rb[0] && ra[1] == rb[1] && ra[2] == rb[2] && ra[3] == rb[3];
+    }
+    const nt_gfx_event_t *x = &frame->view.events[a];
+    const nt_gfx_event_t *y = &frame->view.events[b];
+    return x->kind == y->kind && x->detail == y->detail && x->arg_count == y->arg_count && same_data(x, y);
+}
 
 static void index_frame(fi_frame_t *fr) {
     const uint32_t n = fr->view.count;
