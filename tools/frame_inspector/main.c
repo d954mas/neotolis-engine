@@ -856,7 +856,7 @@ static void declare_track(uint32_t f, track_t t, uint64_t max, uint32_t hovered)
     const fi_file_t *file = &s.files[f];
     const uint32_t id = nt_ui_fmix_id(0x7A3C0001U, (f * TRACK_COUNT) + (uint32_t)t + 1U);
     const nt_ui_bbox_t box = nt_ui_get_bbox(s_ctx, id);
-    const nt_ui_events_t ev = nt_ui_events(s_ctx, id, NULL);
+    const nt_ui_events_t ev = nt_ui_events(s_ctx, id, &(nt_ui_events_cfg_t){.double_click = true});
     axis_input(&ev, box);
     const float width = box.found ? box.width : s.fb_w - TRACK_LABEL_W;
     const double frame_w = (double)width / s.axis_count;
@@ -867,8 +867,10 @@ static void declare_track(uint32_t f, track_t t, uint64_t max, uint32_t hovered)
         if (k < file->frame_count) {
             s.hover_file = ev.hovered ? f : s.hover_file;
             s.hover_frame = ev.hovered ? k : s.hover_frame;
-            if (ev.clicked && (ev.drag_dx < 3.0F && ev.drag_dx > -3.0F)) {
-                select_frame(f, k);
+            if (ev.clicked && (ev.drag_dx < 3.0F && ev.drag_dx > -3.0F) && (f != s.file || k != s.frame)) {
+                select_frame(f, k); /* a click picks the frame; a double-click opens it */
+            }
+            if (ev.double_clicked) {
                 s.page = PAGE_COMMANDS;
             }
         }
@@ -883,12 +885,9 @@ static void declare_track(uint32_t f, track_t t, uint64_t max, uint32_t hovered)
             }
         }
         CELL_(90) { textf(&k_dim, "max %llu", (unsigned long long)max); }
-        const float offset = (float)((s.axis_first - (double)first) * frame_w);
-        CLAY({.id = (Clay_ElementId){.id = id},
-              .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(TRACK_H)}, .childAlignment = {.y = CLAY_ALIGN_Y_BOTTOM}},
-              .backgroundColor = k_bg,
-              .clip = {.horizontal = true, .childOffset = {-offset, 0}}}) {
-            const double end = s.axis_first + s.axis_count + 1.0;
+        /* No clip: Clay counts every clip as a scroll container and has few; the axis starts on a whole frame instead. */
+        CLAY({.id = (Clay_ElementId){.id = id}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(TRACK_H)}, .childAlignment = {.y = CLAY_ALIGN_Y_BOTTOM}}, .backgroundColor = k_bg}) {
+            const double end = (double)first + s.axis_count - 0.5;
             for (uint32_t k = first; k < file->frame_count && (double)k < end; k += step) {
                 uint32_t pick = k; /* the column's largest frame */
                 bool bad = false;
@@ -932,7 +931,7 @@ static void declare_track(uint32_t f, track_t t, uint64_t max, uint32_t hovered)
 static void declare_frame_table(void) {
     static const float k_w[] = {60, 70, 130, 70, 80, 90, 110, 80};
     static const char *const k_heads[] = {"pos", "frame", "GL draw calls", "draws", "merged", "GL calls", "upload KiB", "problems"};
-    CLAY({.layout = {.padding = {0, 0, 12, 2}}}) { text("All frames (click a row to open it)", &k_head); }
+    CLAY({.layout = {.padding = {0, 0, 12, 2}}}) { text("All frames (click: pick, double-click: open in Commands)", &k_head); }
     ROW_(4) {
         for (uint32_t c = 0; c < sizeof(k_w) / sizeof(k_w[0]); c++) {
             CELL_(k_w[c]) { text(k_heads[c], &k_dim); }
@@ -945,9 +944,11 @@ static void declare_frame_table(void) {
         for (uint32_t k = 0; k < s.files[f].frame_count; k++) {
             const fi_frame_t *fr = &s.files[f].frames[k];
             const uint32_t id = next_id();
-            const nt_ui_events_t ev = nt_ui_events(s_ctx, id, NULL);
-            if (ev.clicked) {
+            const nt_ui_events_t ev = nt_ui_events(s_ctx, id, &(nt_ui_events_cfg_t){.double_click = true});
+            if (ev.clicked && (f != s.file || k != s.frame)) {
                 select_frame(f, k);
+            }
+            if (ev.double_clicked) {
                 s.page = PAGE_COMMANDS;
             }
             const bool sel = f == s.file && k == s.frame;
@@ -1274,9 +1275,7 @@ static void declare_tree(void) {
                         text(number, call ? &k_dim : &k_text);
                     }
                     CELL_(96) { text(badge, badge_style); }
-                    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(ROW_H)}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}, .clip = {.horizontal = true}}) {
-                        text(buf, row_style(fr, id));
-                    }
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(ROW_H)}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) { text(buf, row_style(fr, id)); }
                 }
             }
             nt_ui_vlist_end(s_ctx);
@@ -1424,7 +1423,7 @@ static void stat(const char *name, fi_query_t q, uint64_t value) {
         return;
     }
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(330), CLAY_SIZING_FIT(0)}}, .clip = {.horizontal = true}}) { text(name, &k_text); }
+        CELL_(330) { text(name, &k_text); }
         CELL_(90) { number(q, value, name); }
     }
 }
@@ -2300,7 +2299,7 @@ static void handle_keys(void) {
 static void declare_status(void) {
     if (s.page == PAGE_FRAMES && s.hover_file != FI_NONE && s.hover_file < s.file_count) {
         const fi_frame_t *fr = &s.files[s.hover_file].frames[s.hover_frame];
-        textf(&k_text, "frame %llu: %llu GL draw calls, %llu GL calls, %llu KiB uploaded, %u records  (click: open it)", (unsigned long long)fr->view.counters.frame_sequence,
+        textf(&k_text, "frame %llu: %llu GL draw calls, %llu GL calls, %llu KiB uploaded, %u records  (click: pick, double-click: open)", (unsigned long long)fr->view.counters.frame_sequence,
               (unsigned long long)track_value(fr, TRACK_DRAW_CALLS), (unsigned long long)track_value(fr, TRACK_GL_CALLS), (unsigned long long)track_value(fr, TRACK_UPLOAD), fr->view.count);
         return;
     }
@@ -2310,7 +2309,7 @@ static void declare_status(void) {
     }
     switch ((page_t)s.page) {
     case PAGE_FRAMES:
-        text("wheel: zoom   drag: pan   fit: all frames   click a frame or a row: open it in Commands   Ctrl+Left/Right: previous/next frame", &k_dim);
+        text("click: pick a frame   double-click: open it in Commands   wheel: zoom   drag: pan   fit: all frames   Ctrl+Left/Right: previous/next frame", &k_dim);
         break;
     case PAGE_COMMANDS: {
         const fi_frame_t *fr = frame_sel();
