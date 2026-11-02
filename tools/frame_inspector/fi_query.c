@@ -380,12 +380,13 @@ typedef struct {
     uint32_t n;
     const fi_frame_t *fr;
     const char *section;
+    bool all; /* zeros too: every key list accepts */
 } numbers_t;
 
 static void number(numbers_t *ns, fi_query_t q, bool sum, const char *key, const char *meaning) {
     const fi_cell_t c = fi_cell(ns->fr, q);
     const uint64_t value = sum ? c.sum : c.n;
-    if (value == 0 && c.n == 0) {
+    if (!ns->all && value == 0 && c.n == 0) {
         return;
     }
     NT_ASSERT(ns->n < FI_NUMBERS);
@@ -441,7 +442,7 @@ static void resource_numbers(numbers_t *ns) {
             (void)snprintf(key, sizeof(key), "res.%s.%s", nt_gfx_object_kind_name(kind), k_res[r]);
             (void)snprintf(meaning, sizeof(meaning), "%s %s", nt_gfx_object_kind_name(kind), k_meaning[r]);
             number(ns, q, false, key, meaning);
-            if (fi_cell(ns->fr, q).sum > 0) {
+            if (ns->all || fi_cell(ns->fr, q).sum > 0) {
                 (void)snprintf(key, sizeof(key), "res.%s.%s.bytes", nt_gfx_object_kind_name(kind), k_res[r]);
                 (void)snprintf(meaning, sizeof(meaning), "%s %s: bytes requested from GL", nt_gfx_object_kind_name(kind), k_meaning[r]);
                 number(ns, q, true, key, meaning);
@@ -481,7 +482,7 @@ static void gl_numbers(numbers_t *ns) {
     for (;;) { /* most frequent first */
         uint32_t best = NT_GFX_GL_COUNT;
         for (uint32_t c = 0; c < NT_GFX_GL_COUNT; c++) {
-            best = !listed[c] && sm->gl[c].n > 0 && (best == NT_GFX_GL_COUNT || sm->gl[c].n > sm->gl[best].n) ? c : best;
+            best = !listed[c] && (ns->all || sm->gl[c].n > 0) && (best == NT_GFX_GL_COUNT || sm->gl[c].n > sm->gl[best].n) ? c : best;
         }
         if (best == NT_GFX_GL_COUNT) {
             return;
@@ -494,8 +495,8 @@ static void gl_numbers(numbers_t *ns) {
     }
 }
 
-uint32_t fi_numbers(const fi_frame_t *frame, fi_number_t out[FI_NUMBERS]) {
-    numbers_t ns = {.out = out, .fr = frame};
+uint32_t fi_numbers(const fi_frame_t *frame, bool all, fi_number_t out[FI_NUMBERS]) {
+    numbers_t ns = {.out = out, .fr = frame, .all = all};
     frame_numbers(&ns);
     resource_numbers(&ns);
     operation_numbers(&ns);
@@ -525,9 +526,11 @@ static void cmd_frames(const fi_session_t *q, fi_out_t *out) {
                 continue;
             }
             const fi_summary_t *sm = &fr->summary;
+            const char *note = fr->view.overflow ? "  # events truncated: counters complete, records not" : "";
+            note = fr->error != NULL ? "  # incomplete: a record failed to parse" : note;
             put(out, "%c %llu %u %llu %llu %llu %llu %llu %llu%s\n", mark, (unsigned long long)fr->view.counters.frame_sequence, fr->view.count, (unsigned long long)sm->draw_calls.n,
                 (unsigned long long)sm->vertices.n, (unsigned long long)sm->merged.n, (unsigned long long)sm->gl_any.n, (unsigned long long)sm->upload[2].sum, (unsigned long long)sm->problems.n,
-                fr->error != NULL ? "  # incomplete" : "");
+                note);
         }
     }
 }
@@ -575,7 +578,7 @@ static void cmd_summary(const fi_frame_t *fr, fi_out_t *out) {
     if (fr->merge_mismatch != FI_NONE) {
         put(out, "merge_rule_mismatch @%u  # the inspector's merge rule is out of date from this draw\n", fr->merge_mismatch);
     }
-    const uint32_t n = fi_numbers(fr, numbers);
+    const uint32_t n = fi_numbers(fr, false, numbers);
     const char *section = "";
     for (uint32_t k = 0; k < n; k++) {
         if (numbers[k].section != section) {
@@ -761,7 +764,7 @@ static void put_matches(const fi_frame_t *fr, fi_query_t q, const char *needle, 
 /* The query behind KEY: a number of summary, or gN.METRIC of groups. */
 static bool key_query(const fi_frame_t *fr, const char *key, fi_query_t *q) {
     static fi_number_t numbers[FI_NUMBERS];
-    const uint32_t n = fi_numbers(fr, numbers);
+    const uint32_t n = fi_numbers(fr, true, numbers);
     for (uint32_t k = 0; k < n; k++) {
         if (strcmp(numbers[k].key, key) == 0) {
             *q = numbers[k].q;
@@ -784,7 +787,7 @@ static bool key_query(const fi_frame_t *fr, const char *key, fi_query_t *q) {
 }
 
 static void cmd_help(fi_out_t *out) {
-    put(out, "# every answer is lines of: key value  # meaning. Records read @N.\n"
+    put(out, "# every answer is lines of: key value  # meaning. Records read @N. --serve ends each answer with = ok or = error.\n"
              "frames                     # every frame of the open files; * marks the one commands read\n"
              "frame SEQUENCE [FILE]      # read the frame with this capture sequence (FILE: its index in frames)\n"
              "summary                    # the frame's numbers, each with a key for list\n"
@@ -839,6 +842,15 @@ bool fi_query(fi_session_t *session, const char *text, fi_out_t *out) {
     next_word(&p, command, sizeof(command));
     const char *rest = p; /* the argument and what follows it */
     next_word(&p, arg, sizeof(arg));
+    if (!fi_query_command(command)) {
+        put(out, "error: unknown command %s; help lists them\n", command);
+        return false;
+    }
+    const bool bare = strcmp(command, "help") == 0 || strcmp(command, "frames") == 0 || strcmp(command, "summary") == 0 || strcmp(command, "groups") == 0;
+    if ((bare && rest[0] != '\0') || (strcmp(command, "record") == 0 && p[0] != '\0')) {
+        put(out, "error: too many arguments: %s; help lists the commands\n", rest);
+        return false;
+    }
     if (strcmp(command, "help") == 0) {
         cmd_help(out);
         return true;
@@ -850,13 +862,9 @@ bool fi_query(fi_session_t *session, const char *text, fi_out_t *out) {
     if (strcmp(command, "frame") == 0) {
         return cmd_frame(session, arg, p, out);
     }
-    if (!fi_query_command(command)) {
-        put(out, "error: unknown command %s; help lists them\n", command);
-        return false;
-    }
     const fi_frame_t *fr = &session->files[session->file].frames[session->frame];
-    if (fr->view.events == NULL || fr->view.count == 0) {
-        put(out, "error: the frame has no records: %s\n", fr->error != NULL ? fr->error : "?");
+    if (fr->view.events == NULL) {
+        put(out, "error: the frame's header was rejected: %s\n", fr->error != NULL ? fr->error : "?");
         return false;
     }
     if (strcmp(command, "summary") == 0) {

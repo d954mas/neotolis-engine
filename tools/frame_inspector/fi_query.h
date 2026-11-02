@@ -38,7 +38,8 @@ typedef struct {
     uint64_t value;
 } fi_number_t;
 #define FI_NUMBERS (32U + (FI_OBJECTS * FI_RES_COUNT * 2U) + ((uint32_t)NT_GFX_OP_COUNT * (FI_RESULTS + 3U)) + (uint32_t)NT_GFX_GL_COUNT)
-uint32_t fi_numbers(const fi_frame_t *frame, fi_number_t out[FI_NUMBERS]);
+/* all: zeros too, so a key stays valid on any frame; without it only the numbers worth showing. */
+uint32_t fi_numbers(const fi_frame_t *frame, bool all, fi_number_t out[FI_NUMBERS]);
 /* Whether a group holds draw requests, GL calls or drops: groups and the Information page show only these. */
 bool fi_group_has_work(const fi_frame_t *frame, uint32_t group);
 

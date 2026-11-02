@@ -38,13 +38,13 @@ static const char *ask(const char *line, bool ok) {
 static void assert_holds(const char *text, const char *want) { TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, want), want); }
 
 static void test_commands_answer_and_reject_bad_input(void) {
-    static const char *const k_ok[] = {"help",       "frames",     "frame 51",      "frame 51 0",  "summary",     "groups",          "record @0",
-                                       "state @300", "state init", "state end all", "find glDraw", "list merged", "list g2.gl_draws"};
+    static const char *const k_ok[] = {"help",       "frames",        "frame 51",    "frame 51 0",  "summary",          "groups",           "record @0", "state @300",
+                                       "state init", "state end all", "find glDraw", "list merged", "list g2.gl_draws", "list break.range", "list drops"};
     for (uint32_t k = 0; k < sizeof(k_ok) / sizeof(k_ok[0]); k++) {
         (void)ask(k_ok[k], true);
     }
-    static const char *const k_bad[] = {"bogus",         "frame 7", "frame 51x",    "frame 51 1",        "record @999999",  "record @3x",
-                                        "state @5 most", "find",    "list nothing", "list g99.gl_draws", "list g2.nothing", ""};
+    static const char *const k_bad[] = {"bogus",        "frame 7",           "frame 51x",       "frame 51 1", "record @999999", "record @3x",   "state @5 most", "find",
+                                        "list nothing", "list g99.gl_draws", "list g2.nothing", "",           "summary extra",  "record @1 @2", "groups g1"};
     for (uint32_t k = 0; k < sizeof(k_bad) / sizeof(k_bad[0]); k++) {
         (void)ask(k_bad[k], false);
     }
@@ -57,7 +57,7 @@ static void test_commands_answer_and_reject_bad_input(void) {
 static void test_every_number_lists_its_records(void) {
     static fi_number_t numbers[FI_NUMBERS];
     const fi_frame_t *fr = &s_file.frames[0];
-    const uint32_t n = fi_numbers(fr, numbers);
+    const uint32_t n = fi_numbers(fr, false, numbers);
     TEST_ASSERT_GREATER_THAN_UINT32(20, n);
     char want[96];
     for (uint32_t k = 0; k < n; k++) {

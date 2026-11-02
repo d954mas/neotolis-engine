@@ -397,6 +397,9 @@ if(NOT EMSCRIPTEN)
         target_link_libraries(test_frame_inspector_query PRIVATE fi_model nt_gfx_fake nt_fs nt_basisu_transcoder_stub nt_log unity nt_meshwire_stub)
         target_compile_definitions(test_frame_inspector_query PRIVATE NT_NATIVE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/gfx_frame_native_skeletal.ntcapture.txt")
         nt_setup_test_target(test_frame_inspector_query)
+        add_test(NAME frame_inspector_serve
+                 COMMAND ${CMAKE_COMMAND} -DINSPECTOR=$<TARGET_FILE:frame_inspector> -DCAPTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/gfx_frame_native_skeletal.ntcapture.txt
+                         -DWORK=${CMAKE_CURRENT_BINARY_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/frame_inspector_serve.cmake)
     endif()
 
     add_executable(test_gfx unit/test_gfx.c)

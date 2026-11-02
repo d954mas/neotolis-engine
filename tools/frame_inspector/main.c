@@ -9,7 +9,7 @@
  * --monkey drives random clicks, drags, wheel and keys for that long and prints the frame times.
  * Without a window, for scripts and agents: frame_inspector query FILE... [--frame SEQUENCE] COMMAND [ARGS]
  * answers one command; frame_inspector --serve FILE... [--frame SEQUENCE] answers a command per stdin line,
- * each answer after a "> command" line. Answers are "key value  # meaning" lines; help lists the commands:
+ * each answer between a "> command" line and a "= ok" or "= error" line. Answers are "key value  # meaning" lines; help lists the commands:
  * frames, frame, summary, groups, record @N, state @N|init|end [all], find TEXT, list KEY (a summary key). */
 
 #include "app/nt_app.h"
@@ -1490,7 +1490,7 @@ static void declare_numbers(const fi_frame_t *fr, const char *name, const char *
     static uint32_t count;
     if (epoch != s.frame_epoch) {
         epoch = s.frame_epoch;
-        count = fi_numbers(fr, numbers);
+        count = fi_numbers(fr, false, numbers);
     }
     section(title);
     for (uint32_t k = 0; k < count; k++) {
@@ -2460,7 +2460,7 @@ static int run_query(int argc, char *argv[]) {
     const char *frame = NULL;
     bool command = false;
     for (int a = 2; a < argc; a++) {
-        if (strcmp(argv[a], "--frame") == 0 && a + 1 < argc) {
+        if (!command && strcmp(argv[a], "--frame") == 0 && a + 1 < argc) {
             frame = argv[++a];
         } else if (command || (!serve && fi_query_command(argv[a]))) {
             command = true;
@@ -2491,8 +2491,14 @@ static int run_query(int argc, char *argv[]) {
     if (ok && !serve) {
         ok = fi_query(&session, line, &out);
     }
-    (void)printf("%s%s%s%.*s", serve && frame != NULL ? "> " : "", serve && frame != NULL ? select : "", serve && frame != NULL ? "\n" : "", (int)out.len, out.text != NULL ? out.text : "");
-    while (serve && fgets(line, sizeof(line), stdin) != NULL) {
+    const char *text = out.text != NULL ? out.text : "";
+    if (serve && frame != NULL) {
+        (void)printf("> %s\n%.*s= %s\n", select, (int)out.len, text, ok ? "ok" : "error");
+    } else {
+        (void)printf("%.*s", (int)out.len, text);
+    }
+    (void)fflush(stdout); /* a client waits for this before it sends a command */
+    while (ok && serve && fgets(line, sizeof(line), stdin) != NULL) {
         const bool whole = strchr(line, '\n') != NULL || feof(stdin) != 0;
         line[strcspn(line, "\r\n")] = '\0';
         for (int c = 0; !whole && c != '\n' && c != EOF;) { /* drop the rest of a line too long to read */
@@ -2502,10 +2508,8 @@ static int run_query(int argc, char *argv[]) {
             continue;
         }
         out.len = 0;
-        if (whole) {
-            (void)fi_query(&session, line, &out);
-        }
-        (void)printf("> %s\n%.*s%s", line, (int)out.len, out.text != NULL ? out.text : "", whole ? "" : "error: the line is too long\n");
+        const bool answered = whole && fi_query(&session, line, &out);
+        (void)printf("> %s\n%.*s%s= %s\n", line, (int)out.len, out.text != NULL ? out.text : "", whole ? "" : "error: the line is too long\n", answered ? "ok" : "error");
         (void)fflush(stdout);
     }
     free(out.text);

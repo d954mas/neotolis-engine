@@ -836,11 +836,11 @@ uint32_t fi_counter_rows(const fi_frame_t *frame, fi_counter_row_t rows[FI_COUNT
     FI_ROW_("vertices", c->vertices, r.vertices, false);
     FI_ROW_("indices", c->indices, r.indices, false);
     FI_ROW_("instances", c->instances, r.instances, false);
-    FI_ROW_("buffer upload calls", c->buffer_upload_calls, r.buffer_upload_calls, false);
-    FI_ROW_("buffer upload bytes", c->buffer_upload_bytes, r.buffer_upload_bytes, true);
-    FI_ROW_("texture upload calls", c->texture_upload_calls, r.texture_upload_calls, false);
-    FI_ROW_("texture upload bytes", c->texture_upload_bytes, r.texture_upload_bytes, true);
-    FI_ROW_("frame storage bytes", frame_bytes, frame->summary.frame_store.sum, true);
+    FI_ROW_("buffer_upload_calls", c->buffer_upload_calls, r.buffer_upload_calls, false);
+    FI_ROW_("buffer_upload_bytes", c->buffer_upload_bytes, r.buffer_upload_bytes, true);
+    FI_ROW_("texture_upload_calls", c->texture_upload_calls, r.texture_upload_calls, false);
+    FI_ROW_("texture_upload_bytes", c->texture_upload_bytes, r.texture_upload_bytes, true);
+    FI_ROW_("frame_storage_bytes", frame_bytes, frame->summary.frame_store.sum, true);
 #undef FI_ROW_
     for (uint32_t op = 0; op < NT_GFX_OP_COUNT; op++) {
         if (c->accepted[op] != 0 || r.accepted[op] != 0) {
