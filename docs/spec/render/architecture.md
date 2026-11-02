@@ -1459,7 +1459,9 @@ accepted only in the formatter's order, each at most once.
 `nt_gfx_object_kind_name` return the names the text uses, NULL outside their tables.
 
 `tools/frame_inspector` (native capture builds) opens capture files from the command
-line and shows each frame: the logical tree (begin_frame, the game's calls under their
+line or its Open... dialog (`nt_file_dialog`) and shows them as per-file tracks of draw
+calls, GL calls, upload bytes and records over the frames; a click inspects a frame: the
+logical tree (begin_frame, the game's calls under their
 markers and notes, end_frame's frame storage uploads and execution, the work after it),
 a summary whose every number filters the tree to the records it counts, the merge
 break of every plain or indexed draw checked against the recorded `CACHE` (a

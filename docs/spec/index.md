@@ -104,7 +104,7 @@ lifetime, and naming vocabulary.
 | *(`engine/skeletal_bank` — planned, epic #472)* | [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) |
 | `engine/fs`, `engine/http` | [assets/async-loading.md](assets/async-loading.md) (pack I/O), [core/module-layout.md](core/module-layout.md) (swappable) |
 | `engine/time` | [runtime/frame-lifecycle.md](runtime/frame-lifecycle.md) |
-| `engine/window`, `engine/platform` | [runtime/platform.md](runtime/platform.md) |
+| `engine/window`, `engine/platform`, `engine/file_dialog` | [runtime/platform.md](runtime/platform.md) |
 | `engine/app` | [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) (time & render control), [runtime/frame-lifecycle.md](runtime/frame-lifecycle.md) |
 | `engine/log`, `engine/version`, `engine/crash`, `engine/devapi`, `engine/debug_overlay`, `engine/metrics`, `engine/introspect` | [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) |
 | `engine/recorder` | [debug/recorder.md](debug/recorder.md) |

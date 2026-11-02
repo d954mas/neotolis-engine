@@ -43,12 +43,15 @@ typedef enum {
     FI_Q_OP_CALLS,    /* a = operation: issued GL calls linked to it */
     FI_Q_OP_SKIPS,    /* a = operation: backend SKIP records linked to it */
     FI_Q_GL_CALL,     /* a = nt_gfx_gl_call_t */
+    FI_Q_GL_ANY,      /* every issued GL call */
+    FI_Q_DRAW_CALL,   /* issued GL draw calls (glDraw*) */
+    FI_Q_SKIP,        /* every backend SKIP record */
     FI_Q_VERTICES,    /* draws that count geometry; sum = vertices x instances */
     FI_Q_INDICES,     /* indexed draws; sum = indices x instances */
     FI_Q_INSTANCES,   /* instanced draws; sum = instances */
     FI_Q_MERGED,      /* draws merged into the previous one (CACHE) */
     FI_Q_BREAK,       /* a = fi_break_t */
-    FI_Q_UPLOAD,      /* a = 0 buffer, 1 texture: issued calls with payload; sum = bytes */
+    FI_Q_UPLOAD,      /* a = 0 buffer, 1 texture, 2 either: issued calls with payload; sum = bytes */
     FI_Q_FRAME_STORE, /* frame storage uploads of end_frame; sum = bytes */
     FI_Q_RESOURCE,    /* a = nt_gfx_object_kind_t, b = fi_res_t; sum = bytes requested from GL */
     FI_Q_GROUP,       /* a = group, b = fi_metric_t */
@@ -80,9 +83,10 @@ typedef struct {
     fi_cell_t op_calls[NT_GFX_OP_COUNT];
     fi_cell_t op_skips[NT_GFX_OP_COUNT];
     fi_cell_t gl[NT_GFX_GL_COUNT];
+    fi_cell_t gl_any, draw_calls, skips;
     fi_cell_t vertices, indices, instances, merged;
     fi_cell_t brk[FI_BREAK_COUNT];
-    fi_cell_t upload[2];
+    fi_cell_t upload[3];
     fi_cell_t frame_store;
     fi_cell_t resource[FI_OBJECTS][FI_RES_COUNT];
     fi_cell_t drops, problems;

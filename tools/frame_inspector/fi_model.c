@@ -10,7 +10,7 @@
 #include <string.h>
 
 #define FI_NODE_ROOT FI_NODE_COUNT
-#define FI_MAX_CONTRIB 8
+#define FI_MAX_CONTRIB 12
 
 // #region helpers
 static void *fi_alloc(size_t count, size_t size) {
@@ -22,6 +22,10 @@ static void *fi_alloc(size_t count, size_t size) {
 static bool is_draw(uint32_t op) { return op == NT_GFX_OP_DRAW || op == NT_GFX_OP_DRAW_INSTANCED || op == NT_GFX_OP_DRAW_INDEXED || op == NT_GFX_OP_DRAW_INDEXED_INSTANCED; }
 static bool is_instanced(uint32_t op) { return op == NT_GFX_OP_DRAW_INSTANCED || op == NT_GFX_OP_DRAW_INDEXED_INSTANCED; }
 static bool is_indexed(uint32_t op) { return op == NT_GFX_OP_DRAW_INDEXED || op == NT_GFX_OP_DRAW_INDEXED_INSTANCED; }
+static bool is_draw_call(uint32_t call) {
+    const char *name = nt_gfx_gl_call_name(call);
+    return name != NULL && strncmp(name, "glDraw", 6) == 0;
+}
 static bool is_gfx(const nt_gfx_event_t *e) { return e->kind <= NT_GFX_EVENT_ARGUMENT; }
 static bool in_execute(const fi_frame_t *fr, uint32_t i) { return fr->view.execute_end != 0 && i >= fr->view.execute_begin && i < fr->view.execute_end; }
 
@@ -472,6 +476,10 @@ static uint32_t contributions(const fi_frame_t *fr, uint32_t i, fi_query_t *q, u
     }
     case NT_GFX_EVENT_BACKEND:
         FI_ADD_(FI_Q_GL_CALL, e->detail, 0, 0);
+        FI_ADD_(FI_Q_GL_ANY, 0, 0, 0);
+        if (is_draw_call(e->detail)) {
+            FI_ADD_(FI_Q_DRAW_CALL, 0, 0, 0);
+        }
         FI_ADD_(FI_Q_GROUP, g, FI_METRIC_CALLS, 0);
         if (op != FI_NONE) {
             FI_ADD_(FI_Q_OP_CALLS, fr->view.events[op].operation, 0, 0);
@@ -479,10 +487,12 @@ static uint32_t contributions(const fi_frame_t *fr, uint32_t i, fi_query_t *q, u
         if (e->data.backend.bytes > 0) {
             const bool buffer = e->detail == NT_GFX_GL_glBufferData || e->detail == NT_GFX_GL_glBufferSubData;
             FI_ADD_(FI_Q_UPLOAD, buffer ? 0U : 1U, 0, e->data.backend.bytes);
+            FI_ADD_(FI_Q_UPLOAD, 2, 0, e->data.backend.bytes);
             FI_ADD_(FI_Q_GROUP, g, FI_METRIC_BYTES, e->data.backend.bytes);
         }
         break;
     case NT_GFX_EVENT_SKIP:
+        FI_ADD_(FI_Q_SKIP, 0, 0, 0);
         if (op != FI_NONE) {
             FI_ADD_(FI_Q_OP_SKIPS, fr->view.events[op].operation, 0, 0);
         }
@@ -525,6 +535,12 @@ static fi_cell_t *cell_of(const fi_frame_t *fr, fi_query_t q) {
         return op ? &s->op_skips[q.a] : NULL;
     case FI_Q_GL_CALL:
         return q.a < NT_GFX_GL_COUNT ? &s->gl[q.a] : NULL;
+    case FI_Q_GL_ANY:
+        return &s->gl_any;
+    case FI_Q_DRAW_CALL:
+        return &s->draw_calls;
+    case FI_Q_SKIP:
+        return &s->skips;
     case FI_Q_VERTICES:
         return &s->vertices;
     case FI_Q_INDICES:
@@ -536,7 +552,7 @@ static fi_cell_t *cell_of(const fi_frame_t *fr, fi_query_t q) {
     case FI_Q_BREAK:
         return q.a < FI_BREAK_COUNT ? &s->brk[q.a] : NULL;
     case FI_Q_UPLOAD:
-        return q.a < 2 ? &s->upload[q.a] : NULL;
+        return q.a < 3 ? &s->upload[q.a] : NULL;
     case FI_Q_FRAME_STORE:
         return &s->frame_store;
     case FI_Q_RESOURCE:

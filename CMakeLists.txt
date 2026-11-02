@@ -327,6 +327,7 @@ if(NOT EMSCRIPTEN)
     add_subdirectory(deps/stb EXCLUDE_FROM_ALL)
     add_subdirectory(deps/mikktspace EXCLUDE_FROM_ALL)
     add_subdirectory(deps/miniz EXCLUDE_FROM_ALL)
+    add_subdirectory(deps/tinyfiledialogs EXCLUDE_FROM_ALL)
 
     # GLFW calls CRT functions (assert, sscanf, powf, wcscpy) that resolve to
     # __declspec(dllimport) stubs under the default -D_DLL flag — missing with a static UCRT.
