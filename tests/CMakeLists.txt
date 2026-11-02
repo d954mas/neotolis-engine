@@ -387,6 +387,13 @@ if(NOT EMSCRIPTEN)
         target_compile_definitions(test_gfx_capture_text PRIVATE _CRT_SECURE_NO_WARNINGS NT_CAPTURE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/gfx_frames_web.ntcapture.txt")
         nt_setup_test_target(test_gfx_capture_text)
     endif()
+    if(TARGET fi_model)
+        add_executable(test_frame_inspector_model unit/test_frame_inspector_model.c)
+        target_link_libraries(test_frame_inspector_model PRIVATE fi_model nt_gfx_fake nt_basisu_transcoder_stub nt_log unity nt_meshwire_stub)
+        target_compile_definitions(test_frame_inspector_model PRIVATE NT_CAPTURE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/gfx_frames_web.ntcapture.txt"
+                                                                     NT_NATIVE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/gfx_frame_native_skeletal.ntcapture.txt")
+        nt_setup_test_target(test_frame_inspector_model)
+    endif()
 
     add_executable(test_gfx unit/test_gfx.c)
     target_link_libraries(test_gfx PRIVATE nt_gfx_fake nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire)

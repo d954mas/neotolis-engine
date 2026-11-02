@@ -92,7 +92,7 @@ jobs:
               bad=1
             fi
           done
-          git diff --exit-code -- 'examples/*/generated' || {
+          git diff --exit-code -- 'examples/*/generated' 'tools/*/generated' || {
             echo "::error::committed generated headers are stale — commit the refresh"
             bad=1
           }

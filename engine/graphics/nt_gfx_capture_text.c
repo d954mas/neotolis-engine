@@ -70,6 +70,10 @@ static const char *table_name(const char *const *names, uint32_t count, uint32_t
     return names[value];
 }
 #define NT_TABLE_NAME_(table, value) table_name((table), NT_COUNT_(table), (value))
+
+const char *nt_gfx_operation_name(uint32_t operation) { return operation < NT_COUNT_(s_operation_names) ? s_operation_names[operation] : NULL; }
+const char *nt_gfx_result_name(uint32_t result) { return result < NT_COUNT_(s_result_names) ? s_result_names[result] : NULL; }
+const char *nt_gfx_object_kind_name(uint32_t kind) { return kind < NT_COUNT_(s_object_names) ? s_object_names[kind] : NULL; }
 // #endregion
 
 // #region layout

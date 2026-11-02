@@ -1455,6 +1455,17 @@ the C locale, which the engine never changes. `overflow=1` is data, not an error
 record bytes, and formatting them gives back the same text; other accepted input
 (explicit zeros, different escapes) formats canonically. A record's fields are
 accepted only in the formatter's order, each at most once.
+`nt_gfx_gl_call_name`, `nt_gfx_operation_name`, `nt_gfx_result_name` and
+`nt_gfx_object_kind_name` return the names the text uses, NULL outside their tables.
+
+`tools/frame_inspector` (native capture builds) opens capture files from the command
+line and shows each frame: the logical tree (begin_frame, the game's calls under their
+markers and notes, end_frame's frame storage uploads and execution, the work after it),
+a summary whose every number filters the tree to the records it counts, the merge
+break of every plain or indexed draw checked against the recorded `CACHE` (a
+disagreement reads "inspector merge rule out of date"), the request and GL state at a
+record, and the frame's counters rebuilt from its records. `stream_bytes` is shown from
+the counters only: command sizes are not recorded.
 
 ## Shape strokes
 

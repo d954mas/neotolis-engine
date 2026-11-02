@@ -92,9 +92,9 @@ static inline uint32_t nt_texture_level_extent(uint32_t d, uint32_t level) {
     return extent > 0 ? extent : 1;
 }
 
-/* Bytes of one mip level of the given size. Returns 0 for INVALID and depth
- * formats; callers exclude those before calling. uint64 because 32768x32768
- * RGBA8 is exactly 2^32. */
+/* Bytes of one mip level of the given size; 0 for INVALID. Depth formats give the
+ * size of their GL upload type (DEPTH24 travels as 32-bit). uint64 because
+ * 32768x32768 RGBA8 is exactly 2^32. */
 static inline uint64_t nt_texture_level_bytes(nt_texture_format_t fmt, uint32_t w, uint32_t h) {
     uint64_t bytes_per_block = 0;
     uint64_t bytes_per_pixel = 0;
@@ -108,6 +108,7 @@ static inline uint64_t nt_texture_level_bytes(nt_texture_format_t fmt, uint32_t 
         bytes_per_pixel = 3;
         break;
     case NT_TEXTURE_FORMAT_RG8:
+    case NT_TEXTURE_FORMAT_DEPTH16:
         bytes_per_pixel = 2;
         break;
     case NT_TEXTURE_FORMAT_R8:
@@ -118,6 +119,8 @@ static inline uint64_t nt_texture_level_bytes(nt_texture_format_t fmt, uint32_t 
         break;
     case NT_TEXTURE_FORMAT_RG16UI:
     case NT_TEXTURE_FORMAT_RGB9E5:
+    case NT_TEXTURE_FORMAT_DEPTH24:
+    case NT_TEXTURE_FORMAT_DEPTH32F:
         bytes_per_pixel = 4;
         break;
     case NT_TEXTURE_FORMAT_RGBA32F:
@@ -136,9 +139,6 @@ static inline uint64_t nt_texture_level_bytes(nt_texture_format_t fmt, uint32_t 
         bytes_per_block = 16;
         break;
     case NT_TEXTURE_FORMAT_INVALID:
-    case NT_TEXTURE_FORMAT_DEPTH16:
-    case NT_TEXTURE_FORMAT_DEPTH24:
-    case NT_TEXTURE_FORMAT_DEPTH32F:
         return 0;
     }
     if (bytes_per_block != 0) {
