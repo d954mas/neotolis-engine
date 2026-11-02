@@ -1,6 +1,8 @@
 /* Frame inspector: opens capture files (render architecture, "Capture text") and shows what each recorded
- * frame did. Usage: frame_inspector [file...] [--monkey SECONDS [SEED]]; Open... adds more files. Run it by
- * its path: its asset pack is found next to argv[0].
+ * frame did. Usage: frame_inspector [file...] [--frame SEQUENCE] [--page frames|commands|info|init|end]
+ * [--select RECORD] [--filter TEXT] [--monkey SECONDS [SEED]]; Open... adds more files. --frame takes the
+ * capture's "frame sequence=", --select a record's @ number in that frame. Run it by its path: its asset pack
+ * is found next to argv[0].
  * Pages: Frames (per-file tracks of draw calls, GL calls, upload and records on one zoomable axis; a click
  * picks a frame, a click again opens it), Commands (the logical tree with a panel for the selection or a
  * Shift range), Information (numbers that filter the tree to their records), Init and End state.
@@ -1501,18 +1503,21 @@ static void declare_tree(void) {
             const nt_ui_vlist_style_t vstyle = list_style(height);
             const nt_ui_vlist_range_t range = nt_ui_vlist_begin(s_ctx, NULL, list_id, s.vis_count, ROW_H, NT_UI_AXIS_Y, &vstyle,
                                                                 &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(height)}}, .backgroundColor = k_panel});
-            if (s.scroll_top) {
+            /* Scroll requests wait for a list that exists: on the window's first frame there is none to scroll. */
+            const bool listed = nt_ui_get_bbox(s_ctx, slot_id).found;
+            if (s.scroll_top && listed) {
                 nt_ui_scroll_to(s_ctx, list_id, 0.0F, 0.0F);
                 s.scroll_top = false;
             }
             {
-                if (s.follow && s.selected != FI_NONE && !s.dirty) { /* after the rows rebuild */
+                if (s.follow && s.selected != FI_NONE && !s.dirty && listed) { /* after the rows rebuild */
                     const uint32_t at = vis_index_of(s.selected);
                     const uint32_t half = (uint32_t)(height / ROW_H) / 2U;
-                    if (at != FI_NONE && (at < range.first + 3U || at + 3U > range.last)) {
-                        nt_ui_scroll_to(s_ctx, list_id, 0.0F, (float)(at > half ? at - half : 0U) * ROW_H);
+                    const bool shown = at == FI_NONE || (at >= range.first + 3U && at + 3U <= range.last);
+                    if (!shown) {
+                        nt_ui_scroll_to(s_ctx, list_id, 0.0F, -(float)(at > half ? at - half : 0U) * ROW_H); /* Clay sign: down is negative */
                     }
-                    s.follow = false;
+                    s.follow = !shown; /* until the row shows: a list that just appeared may not take the first request */
                 }
                 char buf[640];
                 /* The draw the selected one is compared with, tagged in the gutter. */
@@ -2787,20 +2792,78 @@ static void frame(void) {
 // #endregion
 
 // #region main
-/* Files to open, and --monkey SECONDS [SEED]. */
+/* The frame of a file whose capture sequence is `sequence` (the "frame sequence=" of its header). */
+static bool find_sequence(uint64_t sequence, uint32_t *file, uint32_t *frame) {
+    for (uint32_t f = 0; f < s.file_count; f++) {
+        for (uint32_t k = 0; k < s.files[f].frame_count; k++) {
+            if (s.files[f].frames[k].view.counters.frame_sequence == sequence) {
+                *file = f;
+                *frame = k;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/* Files to open, --monkey SECONDS [SEED], and where the window opens: --frame SEQUENCE (the capture's frame
+ * sequence), --page frames|commands|info|init|end, --select RECORD (its @ number), --filter TEXT. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void parse_args(int argc, char *argv[]) {
+    static const char *const k_pages[PAGE_COUNT] = {"frames", "commands", "info", "init", "end"};
+    const char *frame = NULL;
+    const char *page = NULL;
+    const char *select = NULL;
+    const char *filter = NULL;
     for (int a = 1; a < argc; a++) {
-        if (strcmp(argv[a], "--monkey") != 0 || a + 1 >= argc) {
-            add_file(argv[a]);
-            continue;
+        const char *arg = argv[a];
+        const bool value = a + 1 < argc;
+        if (strcmp(arg, "--frame") == 0 && value) {
+            frame = argv[++a];
+        } else if (strcmp(arg, "--page") == 0 && value) {
+            page = argv[++a];
+        } else if (strcmp(arg, "--select") == 0 && value) {
+            select = argv[++a];
+        } else if (strcmp(arg, "--filter") == 0 && value) {
+            filter = argv[++a];
+        } else if (strcmp(arg, "--monkey") == 0 && value) {
+            s_monkey.on = true;
+            s_monkey.seconds = strtod(argv[++a], NULL);
+            s_monkey.seed = 1U;
+            if (a + 1 < argc && isdigit((unsigned char)argv[a + 1][0])) {
+                s_monkey.seed = (uint32_t)strtoul(argv[++a], NULL, 10);
+            }
+            s_monkey.seed = s_monkey.seed != 0 ? s_monkey.seed : 1U;
+        } else if (strncmp(arg, "--", 2) == 0) {
+            nt_log_error("frame_inspector: unknown option %s (--frame N, --page frames|commands|info|init|end, --select N, --filter TEXT, --monkey S [SEED])", arg);
+        } else {
+            add_file(arg);
         }
-        s_monkey.on = true;
-        s_monkey.seconds = strtod(argv[++a], NULL);
-        s_monkey.seed = 1U;
-        if (a + 1 < argc && isdigit((unsigned char)argv[a + 1][0])) {
-            s_monkey.seed = (uint32_t)strtoul(argv[++a], NULL, 10);
-        }
-        s_monkey.seed = s_monkey.seed != 0 ? s_monkey.seed : 1U;
+    }
+    if (s.file_count == 0) {
+        return;
+    }
+    uint32_t file = 0;
+    uint32_t at = 0;
+    if (frame != NULL && find_sequence(strtoull(frame, NULL, 10), &file, &at)) {
+        select_frame(file, at);
+    } else if (frame != NULL) {
+        nt_log_error("frame_inspector: no frame with sequence %s in the open files", frame);
+    }
+    if (filter != NULL) {
+        (void)snprintf(s.filter, sizeof(s.filter), "%s", filter);
+        s.dirty = true;
+    }
+    const fi_frame_t *fr = frame_sel();
+    const uint32_t record = select != NULL ? (uint32_t)strtoul(select[0] == '@' ? select + 1 : select, NULL, 10) : FI_NONE;
+    if (select != NULL && frame_ok(fr) && record < fr->view.count) {
+        reveal(record);
+        s.page = PAGE_COMMANDS;
+    } else if (select != NULL) {
+        nt_log_error("frame_inspector: frame %llu has no record %s", (unsigned long long)fr->view.counters.frame_sequence, select);
+    }
+    for (int p = 0; page != NULL && p < PAGE_COUNT; p++) {
+        s.page = strcmp(page, k_pages[p]) == 0 ? p : s.page;
     }
 }
 
