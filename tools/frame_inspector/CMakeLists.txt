@@ -3,7 +3,7 @@ set(FRAME_INSPECTOR_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/build/tools/frame_inspector/
 set(FRAME_INSPECTOR_PACK_DIR "${CMAKE_SOURCE_DIR}/build/tools/frame_inspector")
 
 # The model has no UI and no gfx backend, so the unit tests link it alone.
-add_library(fi_model STATIC fi_model.c fi_model.h)
+add_library(fi_model STATIC fi_model.c fi_model.h fi_query.c fi_query.h)
 target_include_directories(fi_model PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(fi_model PUBLIC nt_gfx_capture_text nt_core nt_fs_interface nt_log_interface nt_shared)
 target_compile_definitions(fi_model PRIVATE _CRT_SECURE_NO_WARNINGS)

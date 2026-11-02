@@ -1083,6 +1083,83 @@ void fi_gl_state(const fi_frame_t *frame, uint32_t at, fi_gl_state_t *out) {
         }
     }
 }
+
+/* The last record before `at` that the predicate accepts, FI_NONE without one. */
+static uint32_t previous(const fi_frame_t *fr, uint32_t at, bool (*accept)(const nt_gfx_event_t *)) {
+    for (uint32_t i = at; i-- > 0;) {
+        if (accept(&fr->view.events[i])) {
+            return i;
+        }
+    }
+    return FI_NONE;
+}
+
+static bool is_draw_op(const nt_gfx_event_t *e) { return e->link == 0 && fi_is_draw(e); }
+static bool is_draw_issue(const nt_gfx_event_t *e) { return e->kind == NT_GFX_EVENT_BACKEND && fi_is_draw_call(e->detail); }
+
+void fi_state_at(const fi_frame_t *frame, uint32_t at, fi_state_view_t *out) {
+    *out = (fi_state_view_t){.was_name = "previous draw", .was_gl_name = "previous GL draw", .link_was = true};
+    fi_request_state(frame, at, &out->req);
+    out->was = previous(frame, at, is_draw_op);
+    out->was_req = out->req;
+    if (out->was != FI_NONE) {
+        fi_request_state(frame, out->was, &out->was_req);
+    }
+    /* An operation's draw-phase calls issue at end_frame: its GL state is the one after its last call. A merged
+     * draw issued nothing; it ran with the call of the draw it joined. */
+    const uint32_t joined = fi_joined(frame, at);
+    const uint32_t source = joined != FI_NONE ? joined : at;
+    out->gl_at = at;
+    for (uint32_t i = source + 1U; i < frame->view.count; i++) {
+        out->gl_at = frame->parent[i] == source && frame->view.events[i].kind == NT_GFX_EVENT_BACKEND ? i : out->gl_at;
+    }
+    fi_gl_state(frame, out->gl_at, &out->gl);
+    out->was_gl_at = previous(frame, out->gl_at, is_draw_issue);
+    if (out->was_gl_at != FI_NONE) {
+        fi_gl_state(frame, out->was_gl_at, &out->was_gl);
+    }
+}
+
+/* The last record begin_frame wrote: the state the game's first call starts from. */
+static uint32_t frame_start(const fi_frame_t *fr) {
+    const uint32_t top = fi_row_of(fr, FI_NODE_BASE + FI_NODE_BEGIN_FRAME);
+    uint32_t last = FI_NONE;
+    for (uint32_t r = top + 1U; top != FI_NONE && r < fr->row_count && fr->depth[r] > fr->depth[top]; r++) {
+        last = fr->row[r] < FI_NODE_BASE && (last == FI_NONE || fr->row[r] > last) ? fr->row[r] : last;
+    }
+    return last;
+}
+
+bool fi_state_frame(const fi_frame_t *frame, bool end, fi_state_view_t *out) {
+    const uint32_t start = frame_start(frame);
+    if (start == FI_NONE) {
+        return false;
+    }
+    *out = (fi_state_view_t){.was = FI_NONE, .was_gl_at = FI_NONE, .gl_at = start, .was_name = "", .was_gl_name = ""};
+    fi_request_state(frame, start, &out->req);
+    fi_gl_state(frame, start, &out->gl);
+    out->was_req = out->req;
+    if (end) {
+        const uint32_t last = frame->view.count - 1U;
+        out->was = start;
+        out->was_gl_at = start;
+        out->gl_at = last;
+        out->was_name = "frame start";
+        out->was_gl_name = "frame start";
+        out->was_gl = out->gl;
+        fi_request_state(frame, last, &out->req);
+        fi_gl_state(frame, last, &out->gl);
+    }
+    return true;
+}
+
+uint32_t fi_draw_ordinal(const fi_frame_t *frame, uint32_t at) {
+    uint32_t n = 0;
+    for (uint32_t i = 0; i <= at && i < frame->view.count; i++) {
+        n += is_draw_op(&frame->view.events[i]) && frame->view.events[i].result == NT_GFX_RESULT_ACCEPTED ? 1U : 0U;
+    }
+    return n;
+}
 // #endregion
 
 /* Records are parsed into zeroed storage, so equal arguments are equal bytes. */

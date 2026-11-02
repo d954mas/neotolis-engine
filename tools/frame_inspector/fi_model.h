@@ -180,6 +180,23 @@ typedef struct {
 } fi_gl_state_t;
 void fi_gl_state(const fi_frame_t *frame, uint32_t at, fi_gl_state_t *out);
 
+/* Request and GL state at a record, next to the state at an earlier record it is compared with. */
+typedef struct {
+    fi_request_state_t req, was_req;
+    fi_gl_state_t gl, was_gl;
+    uint32_t gl_at;          /* the record whose GL state is shown: an operation's last GL call */
+    uint32_t was, was_gl_at; /* the records compared with, FI_NONE: nothing */
+    const char *was_name, *was_gl_name;
+    bool link_was; /* a draw worth a link; the frame start is only a point in time */
+} fi_state_view_t;
+/* At a record, compared with the previous draw request and the previous GL draw call. */
+void fi_state_at(const fi_frame_t *frame, uint32_t at, fi_state_view_t *out);
+/* The state begin_frame left (init), or after the frame's last record compared with it (end); false when the
+ * frame recorded no begin_frame state. */
+bool fi_state_frame(const fi_frame_t *frame, bool end, fi_state_view_t *out);
+/* GL draw calls issued up to and including this draw request. */
+uint32_t fi_draw_ordinal(const fi_frame_t *frame, uint32_t at);
+
 bool fi_matches(const fi_frame_t *frame, uint32_t record, fi_query_t q);
 fi_cell_t fi_cell(const fi_frame_t *frame, fi_query_t q);
 /* The summary of the records in rows lo..hi (folded rows included), without groups; returns the record count. */
