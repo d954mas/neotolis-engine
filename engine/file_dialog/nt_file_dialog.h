@@ -10,8 +10,9 @@
 
 /* Shows the system's open-file dialog and blocks until the user closes it. Writes the chosen paths
  * to out back to back, each NUL-terminated, and returns how many fit in cap bytes; 0 on cancel.
- * pattern filters the listed files ("*.txt"); NULL lists all. On Linux the dialog comes from zenity,
- * kdialog or a similar helper; without one it returns 0. */
+ * pattern filters the listed files ("*.txt"); NULL lists all. Paths are in the encoding fopen takes
+ * (the ANSI code page on Windows); a name containing '|' comes back split. On Linux the dialog comes
+ * from zenity, kdialog or a similar helper; without one it returns 0 at once. */
 uint32_t nt_file_dialog_open(const char *title, const char *pattern, char *out, size_t cap);
 
 #endif /* NT_FILE_DIALOG_H */

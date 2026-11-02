@@ -147,6 +147,10 @@ handlers. The crash consumer borrows a stable view; it owns no GPU copy.
 whose platform backend CMake picks; a platform without a backend defines no target. The Windows
 backend reads the window through `nt_gfx`, so its executable links `nt_gfx`, not the stub.
 
+`nt_file_dialog` has the same shape: native only, no interface or stub, built only when an
+executable links it (the frame inspector does); the browser has no filesystem, so wasm defines no
+target.
+
 `engine/renderers/nt_mesh_renderer` is one source built as two link-selected
 variant targets: `nt_mesh_renderer` and `nt_skinned_mesh_renderer`. Each target
 sets the variant for its consumers; an executable links exactly one (linking

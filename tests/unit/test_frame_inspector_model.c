@@ -61,6 +61,19 @@ static const fi_frame_t *load(char *text, size_t len) {
     return &s_file.frames[0];
 }
 
+/* Formats hand-made records into capture text and loads it. */
+static const fi_frame_t *load_events(const nt_gfx_event_t *ev, uint32_t count, const nt_gfx_counters_t *counters) {
+    nt_gfx_capture_view_t view = {.events = ev, .count = count};
+    if (counters != NULL) {
+        view.counters = *counters;
+    }
+    const size_t len = nt_gfx_capture_format(&view, NULL, 0);
+    char *text = (char *)malloc(len + 1);
+    TEST_ASSERT_NOT_NULL(text);
+    nt_gfx_capture_format(&view, text, len + 1);
+    return load(text, len);
+}
+
 static const fi_frame_t *capture(void (*body)(void)) {
     size_t len = 0;
     char *text = record(body, &len);
@@ -126,6 +139,23 @@ static void test_notes_cover_the_operations_after_them(void) {
     TEST_ASSERT_EQUAL_UINT64(1, fi_cell(fr, (fi_query_t){.kind = FI_Q_GROUP, .a = fr->group[sprite], .b = FI_METRIC_DROPS}).n);
 }
 
+static void same_label_body(void) {
+    NT_GFX_MARKER_PUSH("ui");
+    NT_GFX_MARKER_POP();
+    NT_GFX_NOTE("ui", NT_NOTE_U32("n", 1));
+}
+
+/* A marker and a note of one label are two groups, and their keys tell them apart. */
+static void test_a_marker_and_a_note_of_one_label_differ(void) {
+    const fi_frame_t *fr = capture(same_label_body);
+    const uint32_t marker = fr->group[find_kind(fr, NT_GFX_EVENT_MARKER_PUSH, 0)];
+    const uint32_t note = fr->group[find_kind(fr, NT_GFX_EVENT_NOTE, 0)];
+    TEST_ASSERT_NOT_EQUAL_UINT32(marker, note);
+    TEST_ASSERT_EQUAL_STRING("ui", fr->group_key[marker]);
+    TEST_ASSERT_EQUAL_STRING("> ui", fr->group_key[note]);
+    TEST_ASSERT_EQUAL_UINT32(note, fi_group_in(fr, "> ui"));
+}
+
 /* The snapshot opens begin_frame; the frame storage upload of the uniform block belongs to end_frame. */
 static void test_phases_follow_the_frame(void) {
     const fi_frame_t *fr = capture(tree_body);
@@ -136,6 +166,34 @@ static void test_phases_follow_the_frame(void) {
     TEST_ASSERT_EQUAL_UINT32(0, fr->group[storage]);
     TEST_ASSERT_EQUAL_UINT64(1, fi_cell(fr, (fi_query_t){.kind = FI_Q_FRAME_STORE}).n);
     TEST_ASSERT_EQUAL_UINT64(16, fi_cell(fr, (fi_query_t){.kind = FI_Q_FRAME_STORE}).sum);
+}
+
+/* A program that finished linking in begin_frame is a finished link, not inherited state. */
+static void test_a_finished_link_is_not_the_snapshot(void) {
+    nt_gfx_event_t ev[4];
+    memset(ev, 0, sizeof(ev));
+    ev[0].kind = NT_GFX_EVENT_DEFINITION;
+    ev[0].operation = NT_GFX_OP_CREATE;
+    ev[0].object_kind = NT_GFX_OBJECT_PROGRAM;
+    ev[0].object = 0x10001;
+    ev[0].data.resource.backend = 1;
+    ev[1].kind = NT_GFX_EVENT_BACKEND;
+    ev[1].operation = NT_GFX_OP_STATE;
+    ev[1].detail = NT_GFX_GL_glGetProgramiv;
+    ev[2] = ev[0];
+    ev[2].object = 0x10002;
+    ev[2].data.resource.backend = 2;
+    ev[3].kind = NT_GFX_EVENT_OP;
+    ev[3].operation = NT_GFX_OP_VIEWPORT;
+    ev[3].result = NT_GFX_RESULT_ACCEPTED;
+    nt_gfx_counters_t counters = {0};
+    counters.gl[NT_GFX_GL_glGetProgramiv] = 1;
+    counters.accepted[NT_GFX_OP_VIEWPORT] = 1;
+    const fi_frame_t *fr = load_events(ev, 4, &counters);
+    TEST_ASSERT_EQUAL_UINT32(FI_NODE_BASE + FI_NODE_SNAPSHOT, fr->parent[0]);
+    TEST_ASSERT_EQUAL_UINT32(FI_NODE_BASE + FI_NODE_PROGRAM_LINKS, fr->parent[1]);
+    TEST_ASSERT_EQUAL_UINT32(FI_NODE_BASE + FI_NODE_PROGRAM_LINKS, fr->parent[2]);
+    TEST_ASSERT_EQUAL_UINT64(1, fi_cell(fr, (fi_query_t){.kind = FI_Q_RESOURCE, .a = NT_GFX_OBJECT_PROGRAM, .b = FI_RES_LIVE}).n);
 }
 
 /* Rows hold every record once, each after its parent and one level deeper. */
@@ -191,6 +249,15 @@ static void test_merge_rule_matches_the_frontend(void) {
     TEST_ASSERT_EQUAL_UINT32(find_op(fr, NT_GFX_OP_VIEWPORT, 0), fr->cause[find_op(fr, NT_GFX_OP_DRAW, 4)]);
     TEST_ASSERT_EQUAL_UINT64(3, fi_cell(fr, (fi_query_t){.kind = FI_Q_MERGED}).n);
     TEST_ASSERT_EQUAL_UINT64(3, fi_cell(fr, (fi_query_t){.kind = FI_Q_BREAK, .a = FI_BREAK_COMMAND}).n);
+    /* The frame row's tally and a range over every row give the summary's numbers. */
+    const fi_tally_t all = fi_tally(fr, FI_NODE_BASE + FI_NODE_FRAME);
+    TEST_ASSERT_EQUAL_UINT32(fr->summary.vertices.n, all.draws);
+    TEST_ASSERT_EQUAL_UINT32(fr->summary.merged.n, all.merged);
+    TEST_ASSERT_EQUAL_UINT32(fr->summary.draw_calls.n, all.gl_draws);
+    fi_summary_t range;
+    TEST_ASSERT_EQUAL_UINT32(fr->view.count, fi_range(fr, 0, fr->row_count - 1U, &range));
+    TEST_ASSERT_EQUAL_UINT64(fr->summary.vertices.sum, range.vertices.sum);
+    TEST_ASSERT_EQUAL_UINT64(fr->summary.draw_calls.n, range.draw_calls.n);
 }
 
 /* A merge the rule does not predict marks the frame. */
@@ -219,7 +286,7 @@ static void test_a_wrong_merge_marks_the_frame(void) {
     fi_file_load(&s_file, "test", planted, len);
     TEST_ASSERT_NULL(s_file.frames[0].error);
     const fi_frame_t *fr = &s_file.frames[0];
-    TEST_ASSERT_NOT_EQUAL_UINT32(FI_NONE, fr->merge_mismatch);
+    TEST_ASSERT_EQUAL_UINT32(find_op(fr, NT_GFX_OP_DRAW, 2), fr->merge_mismatch);
 }
 // #endregion
 
@@ -278,21 +345,35 @@ static void test_uploads_and_resource_bytes(void) {
     ev[2].detail = NT_GFX_GL_glBufferSubData;
     ev[2].link = 2;
     ev[2].data.backend.bytes = 64;
-    nt_gfx_capture_view_t view = {.events = ev, .count = 3};
-    view.counters.accepted[NT_GFX_OP_BUFFER_UPLOAD] = 1;
-    view.counters.gl[NT_GFX_GL_glBufferSubData] = 1;
-    view.counters.buffer_upload_calls = 1;
-    view.counters.buffer_upload_bytes = 64;
-    const size_t len = nt_gfx_capture_format(&view, NULL, 0);
-    char *text = (char *)malloc(len + 1);
-    TEST_ASSERT_NOT_NULL(text);
-    nt_gfx_capture_format(&view, text, len + 1);
-    const fi_frame_t *fr = load(text, len);
+    ev[1].object = 0x20001;
+    nt_gfx_counters_t counters = {0};
+    counters.accepted[NT_GFX_OP_BUFFER_UPLOAD] = 1;
+    counters.gl[NT_GFX_GL_glBufferSubData] = 1;
+    counters.buffer_upload_calls = 1;
+    counters.buffer_upload_bytes = 64;
+    const fi_frame_t *fr = load_events(ev, 3, &counters);
     TEST_ASSERT_EQUAL_UINT64((4 * 4 + 2 * 2 + 1) * 4, fi_cell(fr, (fi_query_t){.kind = FI_Q_RESOURCE, .a = NT_GFX_OBJECT_TEXTURE, .b = FI_RES_LIVE}).sum);
     TEST_ASSERT_EQUAL_UINT64(64, fi_cell(fr, (fi_query_t){.kind = FI_Q_UPLOAD, .a = 0}).sum);
     TEST_ASSERT_EQUAL_UINT64(1, fi_cell(fr, (fi_query_t){.kind = FI_Q_OP_CALLS, .a = NT_GFX_OP_BUFFER_UPLOAD}).n);
     const nt_gfx_counters_t c = fi_recount(fr);
-    TEST_ASSERT_EQUAL_MEMORY(&view.counters, &c, sizeof(c));
+    TEST_ASSERT_EQUAL_MEMORY(&counters, &c, sizeof(c));
+    TEST_ASSERT_EQUAL_UINT32(1, fr->buffer_upload_count);
+    TEST_ASSERT_EQUAL_UINT32(0x20001, fr->buffer_upload[0].object);
+    TEST_ASSERT_EQUAL_UINT64(64, fr->buffer_upload[0].bytes);
+    TEST_ASSERT_EQUAL_UINT32(1, fi_alias(fr, NT_GFX_OBJECT_BUFFER, 0x20001));
+}
+
+/* Only the four draw functions count as GL draw calls: glDrawBuffers selects attachments. */
+static void test_draw_buffers_is_not_a_draw_call(void) {
+    nt_gfx_event_t ev[2];
+    memset(ev, 0, sizeof(ev));
+    ev[0].kind = NT_GFX_EVENT_BACKEND;
+    ev[0].operation = NT_GFX_OP_STATE;
+    ev[0].detail = NT_GFX_GL_glDrawBuffers;
+    ev[1] = ev[0];
+    ev[1].detail = NT_GFX_GL_glDrawArrays;
+    const fi_frame_t *fr = load_events(ev, 2, NULL);
+    TEST_ASSERT_EQUAL_UINT64(1, fi_cell(fr, (fi_query_t){.kind = FI_Q_DRAW_CALL}).n);
 }
 /* Real captures (web clears; a native skeletal_showcase frame with merged draws): every frame's counters
  * rebuild from its records and its merges follow the rule. */
@@ -323,6 +404,7 @@ static void test_real_captures_recount(void) {
 // #region state folds
 static void request_body(void) {
     draw_setup();
+    nt_gfx_bind_pipeline(s_pipeline); /* CACHE: already bound */
     nt_gfx_set_scissor(1, 2, 3, 4);
     nt_gfx_set_viewport(0, 0, 4, 4);
     nt_gfx_bind_pipeline((nt_pipeline_t){.id = 0x00FF00FFU}); /* invalid: the unbind */
@@ -337,11 +419,12 @@ static void test_request_state_follows_the_frontend_rules(void) {
     const fi_frame_t *fr = capture(request_body);
     fi_request_state_t st;
     const uint32_t viewport = find_op(fr, NT_GFX_OP_VIEWPORT, 0);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_RESULT_CACHE, fr->view.events[find_op(fr, NT_GFX_OP_PIPELINE, 1)].result);
     fi_request_state(fr, viewport, &st);
     TEST_ASSERT_EQUAL_UINT32(find_op(fr, NT_GFX_OP_PIPELINE, 0), st.pipeline);
     TEST_ASSERT_EQUAL_UINT32(viewport, st.viewport);
     TEST_ASSERT_EQUAL_UINT32(find_op(fr, NT_GFX_OP_SCISSOR, 0), st.scissor);
-    fi_request_state(fr, find_op(fr, NT_GFX_OP_PIPELINE, 1), &st);
+    fi_request_state(fr, find_op(fr, NT_GFX_OP_PIPELINE, 2), &st);
     TEST_ASSERT_EQUAL_UINT32(FI_NONE, st.pipeline);
     TEST_ASSERT_EQUAL_UINT32(find_op(fr, NT_GFX_OP_VERTEX_INPUT, 0), st.vertex_input);
     fi_request_state(fr, find_op(fr, NT_GFX_OP_VERTEX_INPUT, 1), &st);
@@ -360,44 +443,47 @@ static const fi_gl_slot_t *gl_slot(const fi_gl_state_t *st, uint32_t call, uint3
     return NULL;
 }
 
-/* A texture bind lands on the active unit; a restored context starts over. */
+/* A texture bind lands on the active unit, inherited as a GL enum; a restored context starts over. */
 static void test_gl_state_follows_issued_calls(void) {
-    nt_gfx_event_t ev[5];
+    nt_gfx_event_t ev[6];
     memset(ev, 0, sizeof(ev));
     ev[0].kind = NT_GFX_EVENT_INITIAL;
     ev[0].operation = NT_GFX_OP_STATE;
     ev[0].detail = NT_GFX_INITIAL_BACKEND;
-    ev[0].data.backend.args[0] = 3;
-    for (uint32_t k = 1; k < 5; k++) {
+    ev[0].data.backend.args[3] = 0x84C2; /* GL_TEXTURE2 */
+    for (uint32_t k = 1; k < 6; k++) {
         ev[k].kind = NT_GFX_EVENT_BACKEND;
         ev[k].operation = NT_GFX_OP_STATE;
     }
-    ev[1].detail = NT_GFX_GL_glActiveTexture;
-    ev[1].arg_count = 1;
-    ev[1].data.backend.args[0] = 0x84C1;
-    ev[2].detail = NT_GFX_GL_glBindTexture;
-    ev[2].arg_count = 2;
-    ev[2].data.backend.args[0] = 0x0DE1;
-    ev[2].data.backend.args[1] = 7;
-    ev[3].kind = NT_GFX_EVENT_OP;
-    ev[3].operation = NT_GFX_OP_CONTEXT;
-    ev[3].result = NT_GFX_RESULT_ACCEPTED;
-    ev[4].detail = NT_GFX_GL_glUseProgram;
-    ev[4].arg_count = 1;
-    ev[4].data.backend.args[0] = 9;
-    const nt_gfx_capture_view_t view = {.events = ev, .count = 5};
-    const size_t len = nt_gfx_capture_format(&view, NULL, 0);
-    char *text = (char *)malloc(len + 1);
-    TEST_ASSERT_NOT_NULL(text);
-    nt_gfx_capture_format(&view, text, len + 1);
-    const fi_frame_t *fr = load(text, len);
+    ev[1].detail = NT_GFX_GL_glBindTexture;
+    ev[1].arg_count = 2;
+    ev[1].data.backend.args[0] = 0x0DE1;
+    ev[1].data.backend.args[1] = 5;
+    ev[2].detail = NT_GFX_GL_glActiveTexture;
+    ev[2].arg_count = 1;
+    ev[2].data.backend.args[0] = 0x84C1;
+    ev[3] = ev[1];
+    ev[3].data.backend.args[1] = 7;
+    ev[4].kind = NT_GFX_EVENT_OP;
+    ev[4].operation = NT_GFX_OP_CONTEXT;
+    ev[4].result = NT_GFX_RESULT_ACCEPTED;
+    ev[5].detail = NT_GFX_GL_glUseProgram;
+    ev[5].arg_count = 1;
+    ev[5].data.backend.args[0] = 9;
+    nt_gfx_counters_t counters = {0};
+    counters.gl[NT_GFX_GL_glBindTexture] = 2;
+    counters.gl[NT_GFX_GL_glActiveTexture] = 1;
+    counters.gl[NT_GFX_GL_glUseProgram] = 1;
+    counters.accepted[NT_GFX_OP_CONTEXT] = 1;
+    const fi_frame_t *fr = load_events(ev, 6, &counters);
     fi_gl_state_t st;
-    fi_gl_state(fr, 2, &st);
-    TEST_ASSERT_EQUAL_UINT32(2, gl_slot(&st, NT_GFX_GL_glBindTexture, 1, 0x0DE1)->record);
+    fi_gl_state(fr, 3, &st);
+    TEST_ASSERT_EQUAL_UINT32(1, gl_slot(&st, NT_GFX_GL_glBindTexture, 2, 0x0DE1)->record);
+    TEST_ASSERT_EQUAL_UINT32(3, gl_slot(&st, NT_GFX_GL_glBindTexture, 1, 0x0DE1)->record);
     TEST_ASSERT_TRUE(gl_slot(&st, NT_GFX_GL_glUseProgram, 0, 0)->inherited);
-    fi_gl_state(fr, 4, &st);
+    fi_gl_state(fr, 5, &st);
     TEST_ASSERT_EQUAL_UINT32(1, st.count);
-    TEST_ASSERT_EQUAL_UINT32(4, gl_slot(&st, NT_GFX_GL_glUseProgram, 0, 0)->record);
+    TEST_ASSERT_EQUAL_UINT32(5, gl_slot(&st, NT_GFX_GL_glUseProgram, 0, 0)->record);
 }
 // #endregion
 
@@ -455,6 +541,8 @@ static void test_an_overflowed_frame_opens(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_notes_cover_the_operations_after_them);
+    RUN_TEST(test_a_marker_and_a_note_of_one_label_differ);
+    RUN_TEST(test_a_finished_link_is_not_the_snapshot);
     RUN_TEST(test_phases_follow_the_frame);
     RUN_TEST(test_rows_are_a_preorder_of_the_tree);
     RUN_TEST(test_merge_rule_matches_the_frontend);
@@ -462,6 +550,7 @@ int main(void) {
     RUN_TEST(test_each_number_counts_the_records_its_query_selects);
     RUN_TEST(test_recount_equals_the_counters);
     RUN_TEST(test_uploads_and_resource_bytes);
+    RUN_TEST(test_draw_buffers_is_not_a_draw_call);
     RUN_TEST(test_real_captures_recount);
     RUN_TEST(test_request_state_follows_the_frontend_rules);
     RUN_TEST(test_gl_state_follows_issued_calls);

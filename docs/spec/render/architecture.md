@@ -1458,18 +1458,11 @@ accepted only in the formatter's order, each at most once.
 `nt_gfx_gl_call_name`, `nt_gfx_operation_name`, `nt_gfx_result_name` and
 `nt_gfx_object_kind_name` return the names the text uses, NULL outside their tables.
 
-`tools/frame_inspector` (native capture builds) opens capture files from the command
-line or its Open... dialog (`nt_file_dialog`) and shows them as per-file tracks of draw
-calls, GL calls, upload bytes and records over the frames; a click inspects a frame: the
-logical tree (begin_frame, the game's calls under their
-markers and notes, end_frame's frame storage uploads and execution, the work after it),
-a summary whose every number filters the tree to the records it counts, the merge
-break of every plain or indexed draw checked against the recorded `CACHE` (a
-disagreement reads "inspector merge rule out of date"), the request and GL state at a
-record, and the frame's counters rebuilt from its records. `stream_bytes` is shown from
-the counters only: command sizes are not recorded. `--monkey SECONDS [SEED]` drives it with random clicks,
-drags, wheel and keys for that long and prints the frame times, to shake out crashes and
-slow frames on large captures.
+`tools/frame_inspector` (native capture builds) reads capture files through this parser;
+its pages and keys are described in its `main.c`. Its numbers follow this chapter: it
+checks every plain or indexed draw's merge against the recorded `CACHE` and rebuilds the
+frame's counters from the records (`stream_bytes` is shown from the counters only:
+command sizes are not recorded).
 
 ## Shape strokes
 

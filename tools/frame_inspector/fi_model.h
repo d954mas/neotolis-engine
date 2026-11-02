@@ -57,7 +57,7 @@ typedef enum {
     FI_Q_RESOURCE,    /* a = nt_gfx_object_kind_t, b = fi_res_t; sum = bytes requested from GL */
     FI_Q_GROUP,       /* a = group, b = fi_metric_t */
     FI_Q_DROP,        /* renderer `drop` note fields */
-    FI_Q_PROBLEM,     /* drops and results other than ACCEPTED/CACHE; a SKIP is the backend cache working */
+    FI_Q_PROBLEM,     /* drops and results other than ACCEPTED/CACHE/NONE; a SKIP is the backend cache working */
 } fi_query_kind_t;
 
 typedef enum { FI_RES_LIVE, FI_RES_CREATED, FI_RES_DESTROYED, FI_RES_COUNT } fi_res_t;
@@ -94,27 +94,49 @@ typedef struct {
     fi_cell_t *group; /* [group_count][FI_METRIC_COUNT] */
 } fi_summary_t;
 
+/* Under a tree row: draw requests (ACCEPTED or CACHE), those merged, and the GL draw calls issued. */
+typedef struct {
+    uint32_t draws, merged, gl_draws;
+} fi_tally_t;
+
+/* Bytes uploaded into one buffer by issued calls, and the first operation that uploaded them. */
+typedef struct {
+    uint32_t object, first, calls;
+    uint64_t bytes;
+} fi_buffer_upload_t;
+
 typedef struct {
     nt_gfx_capture_view_t view; /* events NULL: the header was rejected */
     const char *error;          /* NULL when the document parsed whole */
     uint32_t error_line, error_col;
     const char **line; /* record i's text line in the file, without its index; ends at '\n' */
     const char *text_end;
-    uint32_t first_op; /* the first OP record: link-0 INITIAL/DEFINITION before it are the snapshot */
     /* Logical tree: rows in display order, each a record index or FI_NODE_BASE + fi_node_t. */
     uint32_t *row;
     uint16_t *depth;
     uint32_t row_count;
-    uint32_t *parent; /* per record: a record index or FI_NODE_BASE + fi_node_t */
-    /* Group: the note or marker that governs a record, as marker path + note label. Group 0 is "no group". */
+    uint32_t *record_row;             /* per record: its row */
+    uint32_t node_row[FI_NODE_COUNT]; /* per phase: its row, FI_NONE when the frame has none */
+    uint32_t *parent;                 /* per record: a record index or FI_NODE_BASE + fi_node_t */
+    fi_tally_t *tally;                /* per record, then per phase (count + node) */
+    /* Group: the note or marker that governs a record. Group 0 is "no group". A key reads "scene/ui > mesh":
+     * the marker path, then the note; identity is the parent group, the kind and the label, not the text. */
     uint32_t *group;
     char (*group_key)[FI_KEY_LEN];
+    uint32_t *group_parent;
+    uint8_t *group_is_note;
+    const char **group_label;
     uint32_t group_count;
+    /* Short names for handles (pipe#3): per kind, numbered in order of first appearance. */
+    uint32_t *alias_object, *alias_number, *alias_slot, alias_mask;
+    uint8_t *alias_kind;
+    uint32_t *def;                     /* per DESTROY operation: the definition of the object it destroyed, FI_NONE */
+    fi_buffer_upload_t *buffer_upload; /* the biggest first */
+    uint32_t buffer_upload_count;
     /* Merge check: per draw the break and the record that caused it (the command between, or the previous draw). */
     uint8_t *brk;
     uint32_t *cause;
     uint32_t merge_mismatch; /* first draw the merge rule predicts wrongly; FI_NONE when it holds */
-    bool timing;             /* the frame ran GPU timing, so segments recorded commands */
     fi_summary_t summary;
 } fi_frame_t;
 
@@ -158,13 +180,30 @@ void fi_gl_state(const fi_frame_t *frame, uint32_t at, fi_gl_state_t *out);
 
 bool fi_matches(const fi_frame_t *frame, uint32_t record, fi_query_t q);
 fi_cell_t fi_cell(const fi_frame_t *frame, fi_query_t q);
+/* The summary of the records in rows lo..hi (folded rows included), without groups; returns the record count. */
+uint32_t fi_range(const fi_frame_t *frame, uint32_t lo, uint32_t hi, fi_summary_t *out);
+/* The row of a record or phase, FI_NONE when the frame has none. */
+uint32_t fi_row_of(const fi_frame_t *frame, uint32_t id);
+fi_tally_t fi_tally(const fi_frame_t *frame, uint32_t id);
+/* The alias number of a handle (pipe#3 is 3), 0 when the frame never names it. */
+uint32_t fi_alias(const fi_frame_t *frame, uint32_t kind, uint32_t object);
+/* The same group in another frame of the file, by its key; FI_NONE when it has none. */
+uint32_t fi_group_in(const fi_frame_t *frame, const char *key);
+bool fi_is_draw(const nt_gfx_event_t *e); /* a draw request of any kind */
+bool fi_is_draw_call(uint32_t call);      /* glDrawArrays, glDrawElements and their instanced forms */
 /* The frame's counters rebuilt from its records. stream_bytes and frame_bytes come from the view: command
  * sizes and storage streams are not in the records (the frame storage upload total is FI_Q_FRAME_STORE). */
 nt_gfx_counters_t fi_recount(const fi_frame_t *frame);
+/* Each counter next to its recount; the frame storage total and every op and GL call either side counted. */
+typedef struct {
+    char name[64];
+    uint64_t counter, recount;
+    bool bytes;
+} fi_counter_row_t;
+#define FI_COUNTER_ROWS ((uint32_t)NT_GFX_OP_COUNT + (uint32_t)NT_GFX_GL_COUNT + 8U)
+uint32_t fi_counter_rows(const fi_frame_t *frame, fi_counter_row_t rows[FI_COUNTER_ROWS]);
 /* The record's line text and its length. */
 size_t fi_record_text(const fi_frame_t *frame, uint32_t record, const char **text);
-/* Bytes GL was asked to hold for a resource definition: buffer size, texture levels. */
-uint64_t fi_definition_bytes(const nt_gfx_event_t *e);
 
 const char *fi_node_name(fi_node_t node);
 const char *fi_break_name(fi_break_t brk);

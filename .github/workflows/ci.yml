@@ -92,7 +92,7 @@ jobs:
               bad=1
             fi
           done
-          git diff --exit-code -- 'examples/*/generated' 'tools/*/generated' || {
+          git diff --exit-code -- 'examples/*/generated' || {
             echo "::error::committed generated headers are stale — commit the refresh"
             bad=1
           }
@@ -414,6 +414,14 @@ jobs:
           test -f build/engine/native-debug/libnt_log.a
           test -f build/engine/native-debug/libnt_log_stub.a
           ./build/tools/builder/native-debug/builder
+
+      # Tool packs (capture builds only) are built here, not in `packs`, so their headers are checked here.
+      - name: Check committed tool headers
+        run: |
+          git diff --exit-code -- 'tools/*/generated' || {
+            echo "::error::committed tools/*/generated headers are stale — commit the refresh"
+            exit 1
+          }
 
       - name: Run tests (debug)
         run: xvfb-run -a bash scripts/ci_ctest.sh --preset native-debug

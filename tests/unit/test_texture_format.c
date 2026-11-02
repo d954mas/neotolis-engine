@@ -106,13 +106,11 @@ void test_level_bytes_max_size_does_not_wrap(void) {
     TEST_ASSERT_EQUAL_UINT64(UINT64_C(4294967296), nt_texture_level_bytes(NT_TEXTURE_FORMAT_RGBA8, 32768, 32768));
 }
 
-void test_level_bytes_invalid_is_zero(void) { TEST_ASSERT_EQUAL_UINT64(0, nt_texture_level_bytes(NT_TEXTURE_FORMAT_INVALID, 13, 7)); }
-
-/* Depth sizes follow the GL upload type: DEPTH24 travels as GL_UNSIGNED_INT. */
-void test_level_bytes_depth(void) {
-    TEST_ASSERT_EQUAL_UINT64(13 * 7 * 2, nt_texture_level_bytes(NT_TEXTURE_FORMAT_DEPTH16, 13, 7));
-    TEST_ASSERT_EQUAL_UINT64(13 * 7 * 4, nt_texture_level_bytes(NT_TEXTURE_FORMAT_DEPTH24, 13, 7));
-    TEST_ASSERT_EQUAL_UINT64(13 * 7 * 4, nt_texture_level_bytes(NT_TEXTURE_FORMAT_DEPTH32F, 13, 7));
+void test_level_bytes_unsized_formats_are_zero(void) {
+    TEST_ASSERT_EQUAL_UINT64(0, nt_texture_level_bytes(NT_TEXTURE_FORMAT_INVALID, 13, 7));
+    TEST_ASSERT_EQUAL_UINT64(0, nt_texture_level_bytes(NT_TEXTURE_FORMAT_DEPTH16, 13, 7));
+    TEST_ASSERT_EQUAL_UINT64(0, nt_texture_level_bytes(NT_TEXTURE_FORMAT_DEPTH24, 13, 7));
+    TEST_ASSERT_EQUAL_UINT64(0, nt_texture_level_bytes(NT_TEXTURE_FORMAT_DEPTH32F, 13, 7));
 }
 
 int main(void) {
@@ -122,8 +120,7 @@ int main(void) {
     RUN_TEST(test_level_bytes_compressed_blocks);
     RUN_TEST(test_level_bytes_uncompressed);
     RUN_TEST(test_level_bytes_max_size_does_not_wrap);
-    RUN_TEST(test_level_bytes_invalid_is_zero);
-    RUN_TEST(test_level_bytes_depth);
+    RUN_TEST(test_level_bytes_unsized_formats_are_zero);
 
     return UNITY_END();
 }
