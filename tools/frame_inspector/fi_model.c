@@ -496,7 +496,6 @@ static uint32_t contributions(const fi_frame_t *fr, uint32_t i, fi_query_t *q, u
         if (op != FI_NONE) {
             FI_ADD_(FI_Q_OP_SKIPS, fr->view.events[op].operation, 0, 0);
         }
-        FI_ADD_(FI_Q_PROBLEM, 0, 0, 0);
         break;
     case NT_GFX_EVENT_DEFINITION:
         if (e->operation == NT_GFX_OP_CREATE && e->object_kind != NT_GFX_OBJECT_NONE && e->object_kind < FI_OBJECTS) { /* ATTRIBUTE records name their object too */

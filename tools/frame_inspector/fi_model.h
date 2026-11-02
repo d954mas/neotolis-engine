@@ -56,7 +56,7 @@ typedef enum {
     FI_Q_RESOURCE,    /* a = nt_gfx_object_kind_t, b = fi_res_t; sum = bytes requested from GL */
     FI_Q_GROUP,       /* a = group, b = fi_metric_t */
     FI_Q_DROP,        /* renderer `drop` note fields */
-    FI_Q_PROBLEM,     /* drops, results other than ACCEPTED/CACHE, SKIP records */
+    FI_Q_PROBLEM,     /* drops and results other than ACCEPTED/CACHE; a SKIP is the backend cache working */
 } fi_query_kind_t;
 
 typedef enum { FI_RES_LIVE, FI_RES_CREATED, FI_RES_DESTROYED, FI_RES_COUNT } fi_res_t;

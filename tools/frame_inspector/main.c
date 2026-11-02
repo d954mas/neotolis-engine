@@ -30,7 +30,6 @@
 #include "ui/nt_ui_label.h"
 #include "ui/nt_ui_scale.h"
 #include "ui/nt_ui_scroll.h"
-#include "ui/nt_ui_tabbar.h"
 #include "ui/nt_ui_vlist.h"
 #include "window/nt_window.h"
 
@@ -41,12 +40,14 @@
 #include <string.h>
 
 #define MAX_FILES 16
-#define ROW_H 18.0F
-#define FONT 14.0F
+#define ROW_H 20.0F
+#define FONT 15.0F
 #define LAYER_RECT 0
 #define LAYER_TEXT 1
-#define SIDE_W 680
-#define TRACK_H 22.0F
+#define SIDE_W 560
+#define OUTLINE_W 270
+#define TRACK_H 40.0F
+#define TRACK_LABEL_W 300.0F
 
 // #region palette
 static const Clay_Color k_bg = {24, 26, 30, 255};
@@ -57,6 +58,8 @@ static const Clay_Color k_bar = {110, 116, 130, 255};
 static const Clay_Color k_bar_bad = {200, 70, 60, 255};
 static const Clay_Color k_bar_warn = {220, 150, 50, 255};
 static const Clay_Color k_bar_sel = {90, 160, 255, 255};
+static const Clay_Color k_hover_bar = {170, 176, 190, 255};
+static const Clay_Color k_draw_bg = {34, 52, 82, 255}; /* draws and clears, as in Spector */
 #define TEXT_(r, g, b) {.font_id = 0, .font_size = FONT, .color = NT_RGBA8(r, g, b, 255), .wrap_mode = CLAY_TEXT_WRAP_NONE}
 static const nt_ui_label_style_t k_text = TEXT_(220, 222, 228);
 static const nt_ui_label_style_t k_dim = TEXT_(140, 145, 155);
@@ -66,14 +69,16 @@ static const nt_ui_label_style_t k_bad = TEXT_(255, 110, 100);
 static const nt_ui_label_style_t k_warn = TEXT_(240, 180, 80);
 static const nt_ui_label_style_t k_note = TEXT_(140, 210, 140);
 static const nt_ui_label_style_t k_marker = TEXT_(230, 210, 120);
-static const nt_ui_label_style_t k_backend = TEXT_(160, 175, 200);
+static const nt_ui_label_style_t k_backend = TEXT_(150, 165, 190);
+static const nt_ui_label_style_t k_state = TEXT_(130, 215, 140);
 static const nt_ui_label_style_t k_big = {.font_id = 0, .font_size = 24.0F, .color = NT_RGBA8(120, 180, 255, 255), .wrap_mode = CLAY_TEXT_WRAP_NONE};
 static const nt_ui_label_style_t k_wrap = {.font_id = 0, .font_size = FONT, .color = NT_RGBA8(220, 222, 228, 255)};
 // #endregion
 
 // #region state
 typedef enum { VIEW_LOGICAL, VIEW_RAW, VIEW_GL, VIEW_COUNT } view_t;
-typedef enum { TAB_SUMMARY, TAB_DETAILS, TAB_STATE, TAB_COUNTERS, TAB_COUNT } tab_t;
+/* One task per page, as in Spector: frames over time, the frame's commands, its numbers, its start and end state. */
+typedef enum { PAGE_FRAMES, PAGE_COMMANDS, PAGE_INFO, PAGE_INIT, PAGE_END, PAGE_COUNT } page_t;
 typedef enum { TRACK_DRAW_CALLS, TRACK_GL_CALLS, TRACK_UPLOAD, TRACK_RECORDS, TRACK_COUNT } track_t;
 
 static struct {
@@ -87,7 +92,11 @@ static struct {
     char filter[64];
     fi_query_t query;
     char query_label[96];
-    int tab;
+    int page;
+    uint32_t *group_draws; /* per NOTE/MARKER_PUSH record: the draws it holds, for the outline */
+    double axis_first;     /* the frame axis: first visible frame index and how many are visible (0: fit) */
+    double axis_count;
+    double drag_first;
     uint8_t *collapsed; /* per logical row of the selected frame */
     uint32_t *vis;      /* visible row ids */
     uint32_t *vis_row;  /* their logical row, FI_NONE in flat lists */
@@ -362,6 +371,16 @@ static void select_frame(uint32_t file, uint32_t frame) {
     free(s.vis);
     free(s.vis_row);
     free(s.vis_depth);
+    free(s.group_draws);
+    s.group_draws = (uint32_t *)calloc(fr->view.count + 1U, sizeof(uint32_t));
+    for (uint32_t i = 0; i < fr->view.count; i++) {
+        const nt_gfx_event_t *e = &fr->view.events[i];
+        if (e->kind == NT_GFX_EVENT_OP && e->operation >= NT_GFX_OP_DRAW && e->operation <= NT_GFX_OP_DRAW_INDEXED_INSTANCED) {
+            for (uint32_t p = fr->parent[i]; p < fr->view.count; p = fr->parent[p]) {
+                s.group_draws[p] += fr->view.events[p].kind == NT_GFX_EVENT_NOTE || fr->view.events[p].kind == NT_GFX_EVENT_MARKER_PUSH ? 1U : 0U;
+            }
+        }
+    }
     s.collapsed = (uint8_t *)calloc(rows, 1);
     s.vis = (uint32_t *)calloc(rows, sizeof(uint32_t));
     s.vis_row = (uint32_t *)calloc(rows, sizeof(uint32_t));
@@ -432,6 +451,7 @@ static void add_file(const char *path) {
         fi_file_close(file);
     } else if (++s.file_count == 1) {
         select_frame(0, 0);
+        s.page = PAGE_COMMANDS;
     }
 }
 
@@ -555,40 +575,114 @@ static void declare_file_header(uint32_t f) {
     }
 }
 
-/* One track: a column per frame of the file, height = the metric against its maximum over all files. */
+/* The frame axis shared by every track of every file: frame k sits in the same column in all files. */
+static uint32_t axis_frames(void) {
+    uint32_t most = 1;
+    for (uint32_t f = 0; f < s.file_count; f++) {
+        most = s.files[f].frame_count > most ? s.files[f].frame_count : most;
+    }
+    return most;
+}
+
+static void axis_clamp(void) {
+    const double most = (double)axis_frames();
+    if (s.axis_count <= 0.0 || s.axis_count > most) {
+        s.axis_count = most;
+    }
+    s.axis_count = s.axis_count < 4.0 && most >= 4.0 ? 4.0 : s.axis_count;
+    s.axis_first = s.axis_first > most - s.axis_count ? most - s.axis_count : s.axis_first;
+    s.axis_first = s.axis_first < 0.0 ? 0.0 : s.axis_first;
+}
+
+/* Wheel zooms around the cursor, a drag pans; both move every track at once. */
+static void axis_input(const nt_ui_events_t *ev, nt_ui_bbox_t box) {
+    if (!box.found || box.width <= 0.0F) {
+        return;
+    }
+    const double at = ((double)ev->pos[0] - (double)box.x) / (double)box.width;
+    const float wheel = g_nt_input.pointers[g_nt_input.primary].wheel_dy;
+    if (ev->hovered && wheel != 0.0F) {
+        const double cursor = s.axis_first + (at * s.axis_count);
+        s.axis_count *= wheel > 0.0F ? 1.25 : 0.8;
+        axis_clamp();
+        s.axis_first = cursor - (at * s.axis_count);
+        axis_clamp();
+    }
+    if (ev->pressed_now) {
+        s.drag_first = s.axis_first;
+    }
+    if (ev->pressed) {
+        s.axis_first = s.drag_first - ((double)ev->drag_dx / (double)box.width * s.axis_count);
+        axis_clamp();
+    }
+}
+
+/* One track, profiler style: the visible frames side by side over the width, each a filled column whose
+ * height is the metric against its maximum over all files. When frames outnumber the columns, a column
+ * shows the largest of its frames, so a spike never disappears. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void declare_track(uint32_t f, track_t t, uint64_t max, float bar_w) {
+static void declare_track(uint32_t f, track_t t, uint64_t max, uint32_t hovered) {
     static const char *const k_names[TRACK_COUNT] = {"draw calls", "GL calls", "upload KiB", "records"};
+    NT_ASSERT(t < TRACK_COUNT);
     const fi_file_t *file = &s.files[f];
+    const uint32_t id = nt_ui_fmix_id(0x7A3C0001U, (f * TRACK_COUNT) + (uint32_t)t + 1U);
+    const nt_ui_bbox_t box = nt_ui_get_bbox(s_ctx, id);
+    const nt_ui_events_t ev = nt_ui_events(s_ctx, id, NULL);
+    axis_input(&ev, box);
+    const float width = box.found ? box.width : s.fb_w - TRACK_LABEL_W;
+    const double frame_w = (double)width / s.axis_count;
+    const uint32_t step = frame_w >= 2.0 ? 1U : (uint32_t)(2.0 / frame_w) + 1U;
+    const uint32_t first = (uint32_t)s.axis_first;
+    if (box.found && (ev.hovered || ev.clicked)) {
+        const uint32_t k = (uint32_t)(s.axis_first + (((double)ev.pos[0] - (double)box.x) / (double)box.width * s.axis_count));
+        if (k < file->frame_count) {
+            s.hover_file = ev.hovered ? f : s.hover_file;
+            s.hover_frame = ev.hovered ? k : s.hover_frame;
+            if (ev.clicked && (ev.drag_dx < 3.0F && ev.drag_dx > -3.0F)) {
+                select_frame(f, k);
+                s.page = PAGE_COMMANDS;
+            }
+        }
+    }
     ROW_(6) {
         CELL_(110) { text(k_names[t], &k_dim); }
-        CELL_(70) {
-            if (f == s.file) {
-                textf(&k_text, "%llu", (unsigned long long)track_value(frame_sel(), t));
+        CELL_(80) {
+            uint32_t at = f == s.file ? s.frame : FI_NONE;
+            at = hovered != FI_NONE ? hovered : at;
+            if (at != FI_NONE) {
+                textf(hovered != FI_NONE ? &k_head : &k_text, "%llu", (unsigned long long)track_value(&file->frames[at], t));
             }
         }
         CELL_(90) { textf(&k_dim, "max %llu", (unsigned long long)max); }
-        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(TRACK_H)}, .childGap = 1, .childAlignment = {.y = CLAY_ALIGN_Y_BOTTOM}}}) {
-            for (uint32_t k = 0; k < file->frame_count; k++) {
-                const fi_frame_t *fr = &file->frames[k];
-                const uint32_t id = next_id();
-                const nt_ui_events_t ev = nt_ui_events(s_ctx, id, NULL);
-                if (ev.clicked) {
-                    select_frame(f, k);
+        const float offset = (float)((s.axis_first - (double)first) * frame_w);
+        CLAY({.id = (Clay_ElementId){.id = id},
+              .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(TRACK_H)}, .childAlignment = {.y = CLAY_ALIGN_Y_BOTTOM}},
+              .backgroundColor = k_bg,
+              .clip = {.horizontal = true, .childOffset = {-offset, 0}}}) {
+            const double end = s.axis_first + s.axis_count + 1.0;
+            for (uint32_t k = first; k < file->frame_count && (double)k < end; k += step) {
+                uint32_t pick = k; /* the column's largest frame */
+                bool bad = false;
+                bool warn = false;
+                bool sel = false;
+                bool hot = false;
+                for (uint32_t j = k; j < k + step && j < file->frame_count; j++) {
+                    const fi_frame_t *fr = &file->frames[j];
+                    pick = track_value(fr, t) > track_value(&file->frames[pick], t) ? j : pick;
+                    bad |= !frame_ok(fr) || fr->error != NULL;
+                    warn |= frame_ok(fr) && (fr->merge_mismatch != FI_NONE || fr->view.overflow);
+                    sel |= f == s.file && j == s.frame;
+                    hot |= j == hovered;
                 }
-                if (ev.hovered) {
-                    s.hover_file = f;
-                    s.hover_frame = k;
-                }
-                const bool bad = !frame_ok(fr) || fr->error != NULL;
-                const bool warn = frame_ok(fr) && (fr->merge_mismatch != FI_NONE || fr->view.overflow);
-                Clay_Color color = ev.hovered ? k_hover : k_bar;
+                Clay_Color color = hot ? k_hover_bar : k_bar;
                 color = warn ? k_bar_warn : color;
                 color = bad ? k_bar_bad : color;
-                color = f == s.file && k == s.frame ? k_bar_sel : color;
-                const float h = bad ? TRACK_H : 2.0F + ((TRACK_H - 2.0F) * (float)track_value(fr, t) / (float)(max > 0 ? max : 1));
-                /* The full-height cell takes the click; the bar inside shows the value. */
-                CLAY({.id = (Clay_ElementId){.id = id}, .layout = {.sizing = {CLAY_SIZING_FIXED(bar_w), CLAY_SIZING_FIXED(TRACK_H)}, .childAlignment = {.y = CLAY_ALIGN_Y_BOTTOM}}}) {
+                color = sel ? k_bar_sel : color;
+                const float h = bad ? TRACK_H : 2.0F + ((TRACK_H - 2.0F) * (float)track_value(&file->frames[pick], t) / (float)(max > 0 ? max : 1));
+                const float column = (float)(frame_w * step);
+                const float gap = column >= 6.0F ? 1.0F : 0.0F;
+                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(column), CLAY_SIZING_FIXED(TRACK_H)}, .padding = {.right = (uint16_t)gap}, .childAlignment = {.y = CLAY_ALIGN_Y_BOTTOM}},
+                      .backgroundColor = hot ? k_hover : k_bg}) {
                     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(h)}}, .backgroundColor = color}) {}
                 }
             }
@@ -598,9 +692,7 @@ static void declare_track(uint32_t f, track_t t, uint64_t max, float bar_w) {
 
 static void declare_frames(void) {
     uint64_t max[TRACK_COUNT] = {0};
-    uint32_t most = 1;
     for (uint32_t f = 0; f < s.file_count; f++) {
-        most = s.files[f].frame_count > most ? s.files[f].frame_count : most;
         for (uint32_t k = 0; k < s.files[f].frame_count; k++) {
             for (int t = 0; t < TRACK_COUNT; t++) {
                 const uint64_t v = track_value(&s.files[f].frames[k], (track_t)t);
@@ -608,28 +700,32 @@ static void declare_frames(void) {
             }
         }
     }
-    /* Every frame stays visible: columns narrow as frames grow. */
-    float bar_w = ((s.fb_w - 330.0F) / (float)most) - 1.0F;
-    bar_w = bar_w > 14.0F ? 14.0F : bar_w;
-    bar_w = bar_w < 1.0F ? 1.0F : bar_w;
+    axis_clamp();
+    /* Hover is known from the previous frame's layout, so every track marks the same column. */
+    const uint32_t hover_file = s.hover_file;
+    const uint32_t hover_frame = s.hover_frame;
     s.hover_file = FI_NONE;
     const nt_ui_scroll_style_t scroll = nt_ui_scroll_style_defaults();
     nt_ui_scroll_begin(
         s_ctx, NULL, nt_ui_id("frames"), &scroll,
-        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0, 280)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .padding = CLAY_PADDING_ALL(6), .childGap = 3},
+        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .padding = CLAY_PADDING_ALL(8), .childGap = 4},
                                    .backgroundColor = k_panel});
     ROW_(10) {
-        if (button("Open...", &k_link, false)) {
-            s.open_requested = true;
+        if (s.file_count > 0) {
+            textf(&k_dim, "frames %u..%u of %u", (uint32_t)s.axis_first, (uint32_t)(s.axis_first + s.axis_count) - 1U, axis_frames());
+            if (button("fit", &k_text, false)) {
+                s.axis_count = 0.0;
+                s.axis_first = 0.0;
+            }
+            text("wheel: zoom   drag: pan   hover: read every track   click: open the frame in Commands   blue: current frame   red: rejected   orange: overflow or merge rule stale", &k_dim);
+        } else {
+            text("Open a capture file (ntcapture text, one or more frames).", &k_dim);
         }
-        text(s.file_count > 0 ? "Frames: one column per frame; click a column to inspect that frame. Red: rejected or incomplete. Orange: overflow or merge rule out of date."
-                              : "Open a capture file (ntcapture text, one or more frames).",
-             &k_dim);
     }
     for (uint32_t f = 0; f < s.file_count; f++) {
         declare_file_header(f);
         for (int t = 0; t < TRACK_COUNT; t++) {
-            declare_track(f, (track_t)t, max[t], bar_w);
+            declare_track(f, (track_t)t, max[t], f == hover_file ? hover_frame : FI_NONE);
         }
     }
     nt_ui_scroll_end(s_ctx);
@@ -637,18 +733,24 @@ static void declare_frames(void) {
 // #endregion
 
 // #region tree
+/* Spector's colors: state changes green, redundant work orange (CACHE, backend SKIP), failures red;
+ * draws and clears get a blue background (row_background). */
 static const nt_ui_label_style_t *row_style(const fi_frame_t *fr, uint32_t id) {
     if (id >= FI_NODE_BASE) {
         return &k_head;
     }
     const nt_gfx_event_t *e = &fr->view.events[id];
-    if (e->kind == NT_GFX_EVENT_SKIP) {
-        return &k_warn;
-    }
     if (fi_matches(fr, id, (fi_query_t){.kind = FI_Q_PROBLEM})) {
         return &k_bad;
     }
     switch (e->kind) {
+    case NT_GFX_EVENT_OP:
+        if (e->result == NT_GFX_RESULT_CACHE) {
+            return &k_warn;
+        }
+        return e->operation >= NT_GFX_OP_DRAW && e->operation <= NT_GFX_OP_DRAW_INDEXED_INSTANCED ? &k_head : &k_state;
+    case NT_GFX_EVENT_SKIP:
+        return &k_warn;
     case NT_GFX_EVENT_BACKEND:
         return &k_backend;
     case NT_GFX_EVENT_NOTE:
@@ -657,13 +759,14 @@ static const nt_ui_label_style_t *row_style(const fi_frame_t *fr, uint32_t id) {
     case NT_GFX_EVENT_MARKER_PUSH:
     case NT_GFX_EVENT_MARKER_POP:
         return &k_marker;
-    case NT_GFX_EVENT_INITIAL:
-    case NT_GFX_EVENT_DEFINITION:
-    case NT_GFX_EVENT_ARGUMENT:
-        return &k_dim;
     default:
-        return &k_text;
+        return &k_dim;
     }
+}
+
+static bool draws_pixels(const fi_frame_t *fr, uint32_t id) {
+    const nt_gfx_event_t *e = &fr->view.events[id];
+    return id < fr->view.count && e->kind == NT_GFX_EVENT_OP && (e->operation == NT_GFX_OP_CLEAR || (e->operation >= NT_GFX_OP_DRAW && e->operation <= NT_GFX_OP_DRAW_INDEXED_INSTANCED));
 }
 
 static void row_label(const fi_frame_t *fr, uint32_t k, char *buf, size_t size) {
@@ -722,20 +825,30 @@ static void declare_tree_bar(void) {
             }
         } else {
             textf(&k_dim, "%u rows   colors:", s.vis_count);
-            text("request", &k_text);
+            text("draw/clear (blue row)", &k_head);
+            text("state change", &k_state);
+            text("already set / cached", &k_warn);
             text("GL call", &k_backend);
-            text("skipped GL", &k_warn);
             text("note", &k_note);
             text("marker", &k_marker);
-            text("problem", &k_bad);
-            text("inherited state", &k_dim);
+            text("failure", &k_bad);
         }
     }
 }
 
+static Clay_Color row_background(const fi_frame_t *fr, uint32_t id, bool hovered) {
+    if (s.selected == id) {
+        return k_select;
+    }
+    if (hovered) {
+        return k_hover;
+    }
+    return id < FI_NODE_BASE && draws_pixels(fr, id) ? k_draw_bg : k_panel;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_tree(void) {
-    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}}) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}, .clip = {.horizontal = true}}) {
         if (s.file_count == 0) {
             text("No capture open.", &k_dim);
         } else if (!frame_ok(frame_sel())) {
@@ -773,7 +886,7 @@ static void declare_tree(void) {
                 const char *res = id < FI_NODE_BASE ? result_text(&fr->view.events[id], result, sizeof(result), &result_style) : "";
                 CLAY({.id = (Clay_ElementId){.id = row_id},
                       .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(ROW_H)}, .padding = {.left = 4, .right = 6}, .childGap = 8, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
-                      .backgroundColor = s.selected == id ? k_select : (ev.hovered ? k_hover : k_panel)}) {
+                      .backgroundColor = row_background(fr, id, ev.hovered)}) {
                     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(ROW_H)}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}, .clip = {.horizontal = true}}) {
                         text(buf, row_style(fr, id));
                     }
@@ -823,7 +936,7 @@ static void declare_banners(const fi_frame_t *fr) {
 }
 
 static void card(fi_query_t q, const char *value, const char *label, const char *detail) {
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(162), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .padding = CLAY_PADDING_ALL(6), .childGap = 2}, .backgroundColor = k_bg}) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(220), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .padding = {8, 8, 4, 4}}, .backgroundColor = k_bg}) {
         number_styled(q, value, label, &k_big);
         text(label, &k_text);
         text(detail, &k_dim);
@@ -841,22 +954,20 @@ static void declare_card(const fi_frame_t *fr) {
     (void)snprintf(detail[0], sizeof(detail[0]), "%llu draws, %llu merged", (unsigned long long)sm->vertices.n, (unsigned long long)sm->merged.n);
     (void)snprintf(detail[1], sizeof(detail[1]), "%llu skipped by cache", (unsigned long long)sm->skips.n);
     (void)snprintf(detail[2], sizeof(detail[2]), "in %llu upload calls", (unsigned long long)sm->upload[2].n);
-    (void)snprintf(detail[3], sizeof(detail[3]), "drops, fails, skips");
-    textf(&k_dim, "frame %llu  %s  %u records", (unsigned long long)fr->view.counters.frame_sequence, fr->view.platform == NT_GFX_CAPTURE_WEB ? "web" : "native", fr->view.count);
+    (void)snprintf(detail[3], sizeof(detail[3]), "drops and failed requests");
     ROW_(6) {
         card((fi_query_t){.kind = FI_Q_DRAW_CALL}, value[0], "GL draw calls", detail[0]);
         card((fi_query_t){.kind = FI_Q_GL_ANY}, value[1], "GL calls", detail[1]);
         card((fi_query_t){.kind = FI_Q_UPLOAD, .a = 2}, value[2], "uploaded", detail[2]);
         card((fi_query_t){.kind = FI_Q_PROBLEM}, value[3], "problems", detail[3]);
     }
-    declare_banners(fr);
 }
 
 /* Plain sentences about what the frame did, each a filter for the records it is about. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_insights(const fi_frame_t *fr) {
     const fi_summary_t *sm = &fr->summary;
-    section("Insights (click one to see its records)");
+    section("Insights (click: show the records)");
     if (sm->merged.n > 0) {
         insight((fi_query_t){.kind = FI_Q_MERGED}, &k_link, "%llu draws merged into the previous draw: no new GL draw call", (unsigned long long)sm->merged.n);
     }
@@ -879,13 +990,13 @@ static void declare_insights(const fi_frame_t *fr) {
         }
     }
     if (sm->skips.n > 0) {
-        insight((fi_query_t){.kind = FI_Q_SKIP}, &k_link, "%llu GL calls skipped by the backend cache (SKIP)", (unsigned long long)sm->skips.n);
+        insight((fi_query_t){.kind = FI_Q_SKIP}, &k_link, "%llu GL calls skipped by the backend cache (SKIP): state was already there", (unsigned long long)sm->skips.n);
     }
     if (sm->drops.n > 0) {
         insight((fi_query_t){.kind = FI_Q_DROP}, &k_bad, "%llu renderer drops", (unsigned long long)sm->drops.n);
     }
-    if (!fr->view.overflow && counters_differ(fr) && button("the frame's counters differ from its records: see Counters", &k_bad, false)) {
-        s.tab = TAB_COUNTERS;
+    if (!fr->view.overflow && counters_differ(fr)) {
+        text("the frame's counters differ from its records: see Counters check", &k_bad);
     }
 }
 
@@ -893,20 +1004,21 @@ static void stat(const char *name, fi_query_t q, uint64_t value) {
     if (value == 0 && fi_cell(frame_sel(), q).n == 0) {
         return;
     }
-    ROW_(8) {
-        CELL_(320) { text(name, &k_text); }
-        number(q, value, name);
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}, .clip = {.horizontal = true}}) { text(name, &k_text); }
+        CELL_(70) { number(q, value, name); }
     }
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_funnel(const fi_frame_t *fr) {
-    static const float k_w[] = {190, 80, 80, 70, 70, 60, 60};
-    static const char *const k_heads[] = {"operation", "requested", "ACCEPTED", "CACHE", "GL calls", "SKIP", "nested"};
+    static const float k_w[] = {210, 44, 80, 60, 44, 44, 44};
+    static const char *const k_heads[] = {"operation", "req", "ACCEPTED", "CACHE", "GL", "SKIP", "nest"};
     section("Operations");
-    text("ACCEPTED: done or recorded. CACHE: a bind already set, a draw merged into the previous one, or a create that", &k_dim);
-    text("found an existing object.", &k_dim);
-    text("GL calls: what the operation issued. SKIP: GL calls the backend cache left out. nested: inside another operation.", &k_dim);
+    text("ACCEPTED: done or recorded. CACHE: bind already set,", &k_dim);
+    text("draw merged, or create found an existing object.", &k_dim);
+    text("GL: calls it issued. SKIP: calls the backend cache left", &k_dim);
+    text("out. nest: inside another operation.", &k_dim);
     ROW_(4) {
         for (int c = 0; c < 7; c++) {
             CELL_(k_w[c]) { text(k_heads[c], &k_dim); }
@@ -952,7 +1064,7 @@ static void declare_draws(const fi_frame_t *fr) {
     const fi_summary_t *sm = &fr->summary;
     char name[96];
     section("Draws");
-    stat("draws requested (ACCEPTED or CACHE)", (fi_query_t){.kind = FI_Q_VERTICES}, sm->vertices.n);
+    stat("draws (ACCEPTED or CACHE)", (fi_query_t){.kind = FI_Q_VERTICES}, sm->vertices.n);
     stat("merged into the previous draw (CACHE)", (fi_query_t){.kind = FI_Q_MERGED}, sm->merged.n);
     stat("GL draw calls issued", (fi_query_t){.kind = FI_Q_DRAW_CALL}, sm->draw_calls.n);
     for (uint32_t c = 0; c < NT_GFX_GL_COUNT; c++) {
@@ -975,7 +1087,7 @@ static void declare_transfers(const fi_frame_t *fr) {
     stat("texture upload bytes", (fi_query_t){.kind = FI_Q_UPLOAD, .a = 1}, sm->upload[1].sum);
     stat("  of them frame storage at end_frame", (fi_query_t){.kind = FI_Q_FRAME_STORE}, sm->frame_store.sum);
     ROW_(8) {
-        CELL_(320) { text("draw-phase command stream bytes", &k_text); }
+        CELL_(190) { text("command stream bytes", &k_text); }
         textf(&k_text, "%u (counter only)", fr->view.counters.stream_bytes);
     }
 }
@@ -992,7 +1104,7 @@ static void declare_resources(const fi_frame_t *fr) {
             char name[96];
             (void)snprintf(name, sizeof(name), "%s %s", nt_gfx_object_kind_name(kind), k_res[r]);
             ROW_(8) {
-                CELL_(320) { text(name, &k_text); }
+                CELL_(300) { text(name, &k_text); }
                 number((fi_query_t){.kind = FI_Q_RESOURCE, .a = kind, .b = (uint8_t)r}, c.n, name);
                 if (c.sum > 0) {
                     textf(&k_dim, "%.1f KiB", (double)c.sum / 1024.0);
@@ -1030,9 +1142,9 @@ static void declare_groups(const fi_frame_t *fr) {
     static const char *const k_heads[FI_METRIC_COUNT] = {"draws", "GL calls", "upload B", "drops"};
     section("By marker and note");
     ROW_(4) {
-        CELL_(330) { text("group", &k_dim); }
+        CELL_(190) { text("group", &k_dim); }
         for (int m = 0; m < FI_METRIC_COUNT; m++) {
-            CELL_(70) { text(k_heads[m], &k_dim); }
+            CELL_(50) { text(k_heads[m], &k_dim); }
         }
     }
     for (uint32_t g = 0; g < fr->group_count; g++) {
@@ -1041,25 +1153,144 @@ static void declare_groups(const fi_frame_t *fr) {
             continue;
         }
         ROW_(4) {
-            CELL_(330) { textf(&k_text, "%.42s", fr->group_key[g]); }
+            CELL_(190) { textf(&k_text, "%.24s", fr->group_key[g]); }
             for (uint32_t m = 0; m < FI_METRIC_COUNT; m++) {
                 char label[FI_KEY_LEN + 16];
                 (void)snprintf(label, sizeof(label), "%s of %s", k_heads[m], fr->group_key[g]);
-                CELL_(70) { number((fi_query_t){.kind = FI_Q_GROUP, .a = g, .b = (uint8_t)m}, m == FI_METRIC_BYTES ? c[m].sum : c[m].n, label); }
+                CELL_(50) { number((fi_query_t){.kind = FI_Q_GROUP, .a = g, .b = (uint8_t)m}, m == FI_METRIC_BYTES ? c[m].sum : c[m].n, label); }
             }
         }
     }
 }
 
-static void declare_summary(const fi_frame_t *fr) {
+static void declare_counters(const fi_frame_t *fr);
+static void declare_details(const fi_frame_t *fr);
+static void declare_state(const fi_frame_t *fr);
+static void link_line(const fi_frame_t *fr, const char *what, uint32_t record);
+
+/* Information: the frame's numbers in one readable column; a click on a number shows its records. */
+static void declare_info_page(void) {
+    const fi_frame_t *fr = frame_sel();
+    const nt_ui_scroll_style_t scroll = nt_ui_scroll_style_defaults();
+    nt_ui_scroll_begin(
+        s_ctx, NULL, nt_ui_id("info"), &scroll,
+        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .padding = CLAY_PADDING_ALL(12), .childGap = 3},
+                                   .backgroundColor = k_panel});
+    text("Click a number or a sentence to see its records in Commands.", &k_dim);
     declare_card(fr);
-    declare_insights(fr);
-    declare_draws(fr);
-    declare_transfers(fr);
-    declare_funnel(fr);
-    declare_resources(fr);
-    declare_gl_calls(fr);
-    declare_groups(fr);
+    declare_banners(fr);
+    CLAY({.layout = {.childGap = 40}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(620), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 3}}) {
+            declare_insights(fr);
+            declare_draws(fr);
+            declare_transfers(fr);
+            declare_resources(fr);
+            declare_groups(fr);
+        }
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(620), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 3}}) {
+            declare_funnel(fr);
+            declare_gl_calls(fr);
+            declare_counters(fr);
+        }
+    }
+    nt_ui_scroll_end(s_ctx);
+}
+
+/* The outline left of the commands: markers and renderer notes with their draws; a click selects one.
+ * The column is where per-draw frame images go once captures carry them. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void declare_outline(void) {
+    const fi_frame_t *fr = frame_sel();
+    const nt_ui_scroll_style_t scroll = nt_ui_scroll_style_defaults();
+    nt_ui_scroll_begin(
+        s_ctx, NULL, nt_ui_id("outline"), &scroll,
+        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(OUTLINE_W), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .padding = CLAY_PADDING_ALL(6), .childGap = 1},
+                                   .backgroundColor = k_panel});
+    text("Groups", &k_head);
+    uint32_t depth = 0;
+    char buf[160];
+    for (uint32_t i = 0; i < fr->view.count; i++) {
+        const nt_gfx_event_t *e = &fr->view.events[i];
+        if (e->kind == NT_GFX_EVENT_MARKER_POP) {
+            depth -= depth > 0 ? 1U : 0U;
+            continue;
+        }
+        if (e->kind != NT_GFX_EVENT_NOTE && e->kind != NT_GFX_EVENT_MARKER_PUSH) {
+            continue;
+        }
+        /* Notes with the same label in a row (one per sprite or text run) read as one entry. */
+        uint32_t runs = 1;
+        uint32_t draws = s.group_draws[i];
+        uint32_t last = i;
+        for (uint32_t k = i + 1U; e->kind == NT_GFX_EVENT_NOTE && k < fr->view.count; k++) {
+            const nt_gfx_event_t *next = &fr->view.events[k];
+            if (next->kind == NT_GFX_EVENT_MARKER_PUSH || next->kind == NT_GFX_EVENT_MARKER_POP || (next->kind == NT_GFX_EVENT_NOTE && strcmp(next->note.label, e->note.label) != 0)) {
+                break;
+            }
+            if (next->kind == NT_GFX_EVENT_NOTE) {
+                runs++;
+                draws += s.group_draws[k];
+                last = k;
+            }
+        }
+        char times[16] = "";
+        if (runs > 1) {
+            (void)snprintf(times, sizeof(times), " x%u", runs);
+        }
+        (void)snprintf(buf, sizeof(buf), "%*s%.36s%s  %u draw%s", (int)(2U * depth), "", e->note.label, times, draws, draws == 1 ? "" : "s");
+        if (button(buf, e->kind == NT_GFX_EVENT_MARKER_PUSH ? &k_marker : &k_note, s.selected >= i && s.selected <= last)) {
+            select_record(i);
+        }
+        i = last;
+        depth += e->kind == NT_GFX_EVENT_MARKER_PUSH ? 1U : 0U;
+    }
+    nt_ui_scroll_end(s_ctx);
+}
+
+/* The selected command: what it is, why it merged or not, its GL calls and the state it ran with. */
+static void declare_selection(void) {
+    const nt_ui_scroll_style_t scroll = nt_ui_scroll_style_defaults();
+    nt_ui_scroll_begin(
+        s_ctx, NULL, nt_ui_id("selection"), &scroll,
+        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(SIDE_W), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .padding = CLAY_PADDING_ALL(8), .childGap = 2},
+                                   .backgroundColor = k_panel});
+    const fi_frame_t *fr = frame_sel();
+    text("Selected command", &k_head);
+    declare_details(fr);
+    if (s.selected < fr->view.count) {
+        declare_state(fr);
+    }
+    nt_ui_scroll_end(s_ctx);
+}
+
+/* Init state: what the frame inherited (the begin_frame snapshot); End state: what it left. */
+static void declare_state_page(bool end) {
+    const fi_frame_t *fr = frame_sel();
+    const nt_ui_scroll_style_t scroll = nt_ui_scroll_style_defaults();
+    nt_ui_scroll_begin(
+        s_ctx, NULL, nt_ui_id(end ? "end_state" : "init_state"), &scroll,
+        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .padding = CLAY_PADDING_ALL(12), .childGap = 2},
+                                   .backgroundColor = k_panel});
+    if (end) {
+        text("State after the frame's last record: the engine's bindings and the GL state it left.", &k_dim);
+        const uint32_t last = fr->view.count - 1U;
+        const uint32_t keep = s.selected;
+        const bool all = s.state_all;
+        s.selected = last;
+        s.state_all = true;
+        declare_state(fr);
+        s.selected = keep;
+        s.state_all = all;
+    } else {
+        text("What the frame inherited: the snapshot begin_frame recorded before any work, then the links it finished.", &k_dim);
+        for (uint32_t i = 0; i < fr->view.count; i++) {
+            const uint32_t p = fr->parent[i];
+            if (p == FI_NODE_BASE + FI_NODE_SNAPSHOT || p == FI_NODE_BASE + FI_NODE_PROGRAM_LINKS) {
+                link_line(fr, "", i);
+            }
+        }
+    }
+    nt_ui_scroll_end(s_ctx);
 }
 // #endregion
 
@@ -1267,7 +1498,7 @@ static void declare_state(const fi_frame_t *fr) {
 // #region counters
 static void counter_row(const char *name, uint64_t counter, uint64_t recount, bool bytes) {
     ROW_(8) {
-        CELL_(300) { text(name, counter != recount ? &k_bad : &k_text); }
+        CELL_(190) { text(name, counter != recount ? &k_bad : &k_text); }
         CELL_(170) {
             if (bytes) {
                 textf(&k_text, "%llu (%.1f KiB)", (unsigned long long)counter, (double)counter / 1024.0);
@@ -1319,13 +1550,14 @@ static void declare_counters(const fi_frame_t *fr) {
             (void)snprintf(rows[n++].name, sizeof(rows[0].name), "gl.%s", nt_gfx_gl_call_name(k));
         }
     }
-    text("The engine's counters of this frame, checked against a recount from its records.", &k_dim);
-    text("A difference means a capture or inspector bug; an overflowed frame cannot be checked.", &k_dim);
+    section("Counters check");
+    text("The frame's counters against a recount from its", &k_dim);
+    text("records: a difference is a capture or inspector bug.", &k_dim);
     if (fr->view.overflow) {
         text("events truncated, counters complete: no check", &k_warn);
     }
     ROW_(8) {
-        CELL_(300) { text("stream bytes", &k_text); }
+        CELL_(190) { text("stream bytes", &k_text); }
         textf(&k_text, "%u (counter only: command sizes are not recorded)", c->stream_bytes);
     }
     for (int pass = 0; pass < 2; pass++) { /* differences first */
@@ -1469,44 +1701,56 @@ static void declare_status(void) {
 // #endregion
 
 // #region frame
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void declare_menu(void) {
+    static const char *const k_pages[PAGE_COUNT] = {"Frames", "Commands", "Information", "Init state", "End state"};
+    ROW_(6) {
+        if (button("Open...", &k_link, false)) {
+            s.open_requested = true;
+        }
+        text("  ", &k_dim);
+        for (int p = 0; p < PAGE_COUNT; p++) {
+            if (button(k_pages[p], &k_head, s.page == p) && s.file_count > 0) {
+                s.page = p;
+            }
+        }
+        if (s.file_count > 0) {
+            const fi_frame_t *fr = frame_sel();
+            text("  ", &k_dim);
+            if (button("<", &k_text, false)) {
+                step_frame(-1);
+            }
+            textf(&k_head, "frame %llu", (unsigned long long)fr->view.counters.frame_sequence);
+            if (button(">", &k_text, false)) {
+                step_frame(1);
+            }
+            textf(&k_dim, "%u/%u of %s, %s", s.frame + 1U, s.files[s.file].frame_count, s.files[s.file].name, frame_ok(fr) && fr->view.platform == NT_GFX_CAPTURE_WEB ? "web" : "native");
+            if (frame_ok(fr)) {
+                declare_banners(fr);
+            }
+        }
+    }
+}
+
 static void declare_ui(void) {
-    static const char *const k_tabs[TAB_COUNT] = {"Summary", "Details", "State", "Counters"};
     s.cell_seq = 0;
     CLAY({.id = CLAY_ID("root"),
           .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .padding = CLAY_PADDING_ALL(6), .childGap = 6},
           .backgroundColor = k_bg}) {
-        declare_frames();
+        declare_menu();
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .childGap = 6}}) {
-            declare_tree();
-            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(SIDE_W), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}}) {
-                nt_ui_tabbar_style_t tabs = nt_ui_tabbar_style_defaults();
-                tabs.dir = NT_UI_TABBAR_HORIZONTAL;
-                tabs.font_size = FONT;
-                tabs.tab_extent = 110;
-                tabs.selected.scale = 1.0F;
-                tabs.hover.scale = 1.0F;
-                (void)nt_ui_tabbar(s_ctx, NT_UI_DATA_LAYER(LAYER_RECT), LAYER_TEXT, nt_ui_id("tabs"), k_tabs, NULL, TAB_COUNT, &s.tab, &tabs);
-                const nt_ui_scroll_style_t scroll = nt_ui_scroll_style_defaults();
-                nt_ui_scroll_begin(
-                    s_ctx, NULL, nt_ui_id("side"), &scroll,
-                    &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .padding = CLAY_PADDING_ALL(8), .childGap = 2},
-                                               .backgroundColor = k_panel});
-                if (s.file_count > 0) {
-                    const fi_frame_t *fr = frame_sel();
-                    if (!frame_ok(fr)) {
-                        textf(&k_bad, "rejected: %s at line %u:%u", fr->error != NULL ? fr->error : "?", fr->error_line, fr->error_col);
-                    } else if (s.tab == TAB_SUMMARY) {
-                        declare_summary(fr);
-                    } else if (s.tab == TAB_DETAILS) {
-                        declare_details(fr);
-                    } else if (s.tab == TAB_STATE) {
-                        declare_state(fr);
-                    } else {
-                        declare_counters(fr);
-                    }
-                }
-                nt_ui_scroll_end(s_ctx);
+            if (s.file_count == 0 || s.page == PAGE_FRAMES) {
+                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) { declare_frames(); }
+            } else if (!frame_ok(frame_sel())) {
+                const fi_frame_t *fr = frame_sel();
+                textf(&k_bad, "frame rejected: %s at line %u:%u", fr->error != NULL ? fr->error : "?", fr->error_line, fr->error_col);
+            } else if (s.page == PAGE_COMMANDS) {
+                declare_outline();
+                declare_tree();
+                declare_selection();
+            } else if (s.page == PAGE_INFO) {
+                declare_info_page();
+            } else {
+                declare_state_page(s.page == PAGE_END);
             }
         }
         ROW_(12) { declare_status(); }
@@ -1677,6 +1921,7 @@ int main(int argc, char *argv[]) {
         fi_file_close(&s.files[f]);
     }
     free(s.collapsed);
+    free(s.group_draws);
     free(s.vis);
     free(s.vis_row);
     free(s.vis_depth);
