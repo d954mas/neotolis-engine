@@ -1019,14 +1019,19 @@ static void declare_track(uint32_t f, track_t t, uint64_t max, uint32_t hovered)
         CELL_(90) { textf(&k_dim, "max %llu", (unsigned long long)max); }
         /* No clip: Clay counts every clip as a scroll container and has few; the axis starts on a whole frame instead. */
         CLAY({.id = (Clay_ElementId){.id = id}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(TRACK_H)}, .childAlignment = {.y = CLAY_ALIGN_Y_BOTTOM}}, .backgroundColor = k_bg}) {
-            /* Columns hold `step` frames from a multiple of step; their edges fall on whole pixels, so they fill the
-             * track exactly, and the first and last are cut to the part that shows. */
+            /* Columns hold `step` frames from a multiple of step, the first and last cut to the part that shows. Their
+             * widths are shares of the track, not pixels from the last layout: a pixel width from a wider frame (the
+             * first one, a shrinking window) would hold the track open. */
             const uint32_t start = from_frame > 0.0 ? (uint32_t)from_frame : 0U;
+            if (from_frame < 0.0) { /* overscrolled past the first frame: the empty space before it */
+                CLAY({.layout = {.sizing = {CLAY_SIZING_PERCENT((float)(-from_frame / s.axis_count) * 0.999F), CLAY_SIZING_FIXED(TRACK_H)}}}) {}
+            }
             for (uint32_t k = (start / step) * step; k < file->frame_count && (double)k < to_frame; k += step) {
                 const double lo = (double)k > from_frame ? (double)k : from_frame;
                 const double hi = (double)(k + step) < to_frame ? (double)(k + step) : to_frame;
-                const float column = (float)((uint32_t)((hi - from_frame) * frame_w) - (uint32_t)((lo - from_frame) * frame_w));
-                if (column <= 0.0F) {
+                const float share = (float)((hi - lo) / s.axis_count) * 0.999F; /* under 1 in sum: Clay would squeeze a row that overflows by a rounding */
+                const float column = share * width;
+                if (share <= 0.0F) {
                     continue;
                 }
                 uint32_t pick = k; /* the column's largest frame */
@@ -1050,7 +1055,7 @@ static void declare_track(uint32_t f, track_t t, uint64_t max, uint32_t hovered)
                 const bool label = column >= 34.0F; /* wide columns print their value over the bar */
                 const float room = label ? TRACK_H - 16.0F : TRACK_H;
                 const float h = bad ? room : 2.0F + ((room - 2.0F) * (float)track_value(&file->frames[pick], t) / (float)(max > 0 ? max : 1));
-                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(column), CLAY_SIZING_FIXED(TRACK_H)},
+                CLAY({.layout = {.sizing = {CLAY_SIZING_PERCENT(share), CLAY_SIZING_FIXED(TRACK_H)},
                                  .padding = {.right = (uint16_t)gap},
                                  .layoutDirection = CLAY_TOP_TO_BOTTOM,
                                  .childAlignment = {.y = CLAY_ALIGN_Y_BOTTOM}},
@@ -1110,7 +1115,7 @@ static void declare_frame_table(void) {
     }
 }
 
-/* The overview strip, aligned with the tracks: its thumb is the part of the frames that shows. Drag the
+/* The scrollbar under the tracks: its thumb is the part of the frames that shows. Drag the
  * thumb, or press beside it to centre the axis there. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_axis_strip(void) {
@@ -1137,14 +1142,14 @@ static void declare_axis_strip(void) {
         }
     }
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
-        CELL_(110) { text("frames shown", &k_dim); }
+        CELL_(110) { textf(&k_dim, "%u..%u of %u", (uint32_t)first + 1U, (uint32_t)(first + s.axis_count), axis_frames()); }
         CELL_(80) {}
         CELL_(90) {}
         CLAY({.id = (Clay_ElementId){.id = id}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(12)}}, .backgroundColor = k_bg, .cornerRadius = CLAY_CORNER_RADIUS(3)}) {
-            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(thumb_x), CLAY_SIZING_FIXED(12)}}}) {}
-            CLAY(
-                {.layout = {.sizing = {CLAY_SIZING_FIXED(thumb_w), CLAY_SIZING_FIXED(12)}}, .backgroundColor = ev.hovered || ev.pressed ? k_hover_bar : k_bar, .cornerRadius = CLAY_CORNER_RADIUS(3)}) {
-            }
+            CLAY({.layout = {.sizing = {CLAY_SIZING_PERCENT(width > 0.0F ? thumb_x / width : 0.0F), CLAY_SIZING_FIXED(12)}}}) {}
+            CLAY({.layout = {.sizing = {CLAY_SIZING_PERCENT(width > 0.0F ? thumb_w / width : 1.0F), CLAY_SIZING_FIXED(12)}},
+                  .backgroundColor = ev.hovered || ev.pressed ? k_hover_bar : k_bar,
+                  .cornerRadius = CLAY_CORNER_RADIUS(3)}) {}
         }
     }
 }
@@ -1172,8 +1177,7 @@ static void declare_frames(void) {
                                    .backgroundColor = k_panel});
     ROW_(10) {
         if (s.file_count > 0) {
-            const double held = axis_hold(s.axis_first);
-            textf(&k_dim, "positions %u..%u of %u (files align by position in the file)", (uint32_t)held + 1U, (uint32_t)(held + s.axis_count), axis_frames());
+            text("files align by position in the file", &k_dim);
             if (button("fit", &k_text, false)) {
                 s.axis_count = 0.0;
                 s.axis_first = 0.0;
@@ -1183,9 +1187,6 @@ static void declare_frames(void) {
             text("Open a capture file (ntcapture text, one or more frames).", &k_dim);
         }
     }
-    if (s.file_count > 0) {
-        declare_axis_strip();
-    }
     uint32_t frames = 0;
     for (uint32_t f = 0; f < s.file_count; f++) {
         declare_file_header(f);
@@ -1193,6 +1194,9 @@ static void declare_frames(void) {
         for (int t = 0; t < TRACK_COUNT; t++) {
             declare_track(f, (track_t)t, max[t], f == hover_file ? hover_frame : FI_NONE);
         }
+    }
+    if (s.file_count > 0) {
+        declare_axis_strip(); /* under the tracks, as their scrollbar */
     }
     axis_settle();
     if (frames <= 200U) {
