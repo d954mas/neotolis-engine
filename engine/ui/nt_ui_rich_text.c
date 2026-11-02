@@ -1705,8 +1705,6 @@ static void rich_line_metrics(const rich_atom_t *atoms, uint32_t na, float *out_
         if (atoms[i].kind == NT_RICH_ATOM_IMAGE || atoms[i].kind == NT_RICH_ATOM_OBJECT) {
             rich_image_metrics(&atoms[i], mid_ref, out_asc, out_desc);
         }
-    }
-    for (uint32_t i = 0; i < na; i++) {
         *out_w += atoms[i].advance;
     }
     *out_mid_ref = mid_ref;
@@ -1788,12 +1786,14 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
      * outside the block (worst on the first frame). Pre-scan line widths to learn max_line_w, then
      * align against it. Explicit container_w aligns against the box as before. */
     float max_line_w = 0.0F;
-    float scan_width = 0.0F;
-    for (uint32_t i = 0; i < na; i++) {
-        scan_width += atoms[i].advance;
-        if (i + 1U == na || atoms[i + 1U].line != atoms[i].line) {
-            max_line_w = (scan_width > max_line_w) ? scan_width : max_line_w;
-            scan_width = 0.0F;
+    if (!(container_w > 0.0F)) {
+        float scan_width = 0.0F;
+        for (uint32_t i = 0; i < na; i++) {
+            scan_width += atoms[i].advance;
+            if (i + 1U == na || atoms[i + 1U].line != atoms[i].line) {
+                max_line_w = (scan_width > max_line_w) ? scan_width : max_line_w;
+                scan_width = 0.0F;
+            }
         }
     }
     const float align_w = (container_w > 0.0F) ? box_w : max_line_w;
