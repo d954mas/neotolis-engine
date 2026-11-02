@@ -105,9 +105,10 @@ int main(int argc, char *argv[]) {
     atlas_opts.premultiplied = true;
     /* UASTC matches HD so both packs share the GPU transcode path. */
     atlas_opts.compress = nt_tex_compress_uastc_default();
-    atlas_opts.mips = NT_TEX_MIPS_BAKED;
     /* LINEAR no-mips: bunnymark stress test wants honest per-fragment cost,
-     * not driver mipmap fast-path. Defold's sprite default. */
+     * not driver mipmap fast-path. Defold's sprite default. No filter samples a
+     * chain, so none is stored. */
+    atlas_opts.mips = NT_TEX_MIPS_NONE;
     atlas_opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
     atlas_opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
     atlas_opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;

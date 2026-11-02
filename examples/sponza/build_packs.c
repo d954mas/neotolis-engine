@@ -116,11 +116,9 @@ static bool texture_needs_alpha(const nt_glb_scene_t *scene, uint32_t tex_index,
     return false;
 }
 
-/* --- Add all textures with per-role format, optional resize, and optional compression --- */
-/* color_compress: compression for diffuse/specular/unknown textures (NONE = no compression)
- * normal_compress: compression for normal maps (NONE = no compression) */
+/* --- Add all textures with per-role format, optional resize and Basis compression --- */
+/* color_compress: codec for diffuse/specular/unknown textures; normal_compress: codec for normal maps */
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t max_size, nt_basisu_encode_opts_t color_compress, nt_basisu_encode_opts_t normal_compress) {
     tex_role_t *roles = build_texture_roles(scene);
     cgltf_data *gltf = (cgltf_data *)scene->_internal;
@@ -137,16 +135,16 @@ static void add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uin
         nt_basisu_encode_opts_t tex_compress = color_compress;
         switch (roles[i]) {
         case TEX_ROLE_DIFFUSE:
-            /* Base color is sRGB-encoded (glTF); the shaders light in linear space. Uncompressed SRGB8 cannot runtime-mip. */
-            opts.format = texture_needs_alpha(scene, i, gltf) || color_compress.codec == NT_BASISU_CODEC_NONE ? NT_TEXTURE_FORMAT_SRGB8_ALPHA8 : NT_TEXTURE_FORMAT_SRGB8;
+            /* Base color is sRGB-encoded (glTF); the shaders light in linear space. */
+            opts.format = texture_needs_alpha(scene, i, gltf) ? NT_TEXTURE_FORMAT_SRGB8_ALPHA8 : NT_TEXTURE_FORMAT_SRGB8;
             break;
         case TEX_ROLE_NORMAL:
-            /* RG8 uncompressed (placeholders), RGB8 for Basis (Basis has no 2-channel mode) */
-            opts.format = normal_compress.codec != NT_BASISU_CODEC_NONE ? NT_TEXTURE_FORMAT_RGB8 : NT_TEXTURE_FORMAT_RG8;
+            /* Basis has no 2-channel mode. */
+            opts.format = NT_TEXTURE_FORMAT_RGB8;
             tex_compress = normal_compress;
             break;
         case TEX_ROLE_SPECULAR:
-            opts.format = color_compress.codec != NT_BASISU_CODEC_NONE ? NT_TEXTURE_FORMAT_RGB8 : NT_TEXTURE_FORMAT_RG8;
+            opts.format = NT_TEXTURE_FORMAT_RGB8;
             break;
         case TEX_ROLE_UNKNOWN:
             opts.format = NT_TEXTURE_FORMAT_RGBA8;
@@ -154,7 +152,7 @@ static void add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uin
         }
 
         opts.compress = tex_compress;
-        opts.mips = tex_compress.codec != NT_BASISU_CODEC_NONE ? NT_TEX_MIPS_BAKED : NT_TEX_MIPS_RUNTIME;
+        opts.mips = NT_TEX_MIPS_BAKED;
         nt_builder_add_texture_from_memory(ctx, scene->textures[i].data, scene->textures[i].size, tex_rid(i), &opts);
         added++;
     }
