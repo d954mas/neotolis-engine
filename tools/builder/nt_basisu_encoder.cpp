@@ -11,7 +11,7 @@ extern "C" {
 void nt_basisu_encoder_init(void) { basisu::basisu_encoder_init(); }
 
 nt_basisu_encode_result_t nt_basisu_encode(uint32_t basis_threads, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, nt_texture_pixel_format_t format,
-                                           const nt_basisu_encode_opts_t *opts) {
+                                           const nt_basisu_encode_opts_t *opts, bool mips) {
     NT_BUILD_ASSERT(basis_threads >= 1 && "basisu encode: basis_threads counts the caller");
     const bool has_alpha = format == NT_TEXTURE_FORMAT_RGBA8 || format == NT_TEXTURE_FORMAT_SRGB8_ALPHA8;
 
@@ -49,7 +49,7 @@ nt_basisu_encode_result_t nt_basisu_encode(uint32_t basis_threads, const uint8_t
     }
 
     params.m_create_ktx2_file = false;
-    params.m_mip_gen = true;
+    params.m_mip_gen = mips;
     /* Premultiplied RGB and alpha must share one filter on stored values; sRGB is never
        premultiplied (the texture opts assert), so its RGB mips average linear light. */
     params.m_mip_srgb = nt_texture_format_is_srgb(format);

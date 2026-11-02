@@ -158,9 +158,8 @@ are stored as they are and the GPU decodes them on sampling
 ([runtime formats](../assets/runtime-formats.md#texture-activation-ttex)).
 Basis accepts `RGBA8`, `RGB8`, `SRGB8_ALPHA8` and `SRGB8`. `premultiplied = true`
 requires `RGBA8`: premultiplying encoded sRGB bytes is not premultiplication in
-linear light. An uncompressed `SRGB8` texture cannot generate runtime mips (WebGL 2 cannot
-render to it); use `SRGB8_ALPHA8`, or `gen_mipmaps = false` with a non-mip
-`filter_min`. The format is part of the cache key and of dedup identity, so the
+linear light. An uncompressed `SRGB8` texture cannot take `mips = RUNTIME` (WebGL 2 cannot
+render to it); use `BAKED`, `NONE` or `SRGB8_ALPHA8`. The format is part of the cache key and of dedup identity, so the
 same pixels as `RGBA8` and as `SRGB8_ALPHA8` are two assets. Resize still
 filters encoded values.
 
@@ -174,19 +173,31 @@ value must be finite and in `[0, 65216]` (`ASTC_HDR_MAX_VAL`, the largest value
 Basis UASTC HDR stores without a rescale factor); the builder asserts this on the
 source, before any resize, and never clamps or tone-maps. Resize and mips use a
 box filter on float RGB: a filter with negative lobes would make negative colors.
-The runtime cannot generate `RGB9E5` mips, so `gen_mipmaps = true` makes the
-builder bake the full chain, each level box-filtered from the previous float
-level, and `false` writes one level; the uncompressed mip-filter rule below applies
-unchanged. `RGB9E5` takes no Basis compression and no premultiplication, and atlas
+The runtime cannot generate `RGB9E5` mips either, so it takes `mips = BAKED`
+(each level box-filtered from the previous float level, never from packed
+`RGB9E5`) or `NONE`. `RGB9E5` takes no Basis compression and no premultiplication, and atlas
 pages stay LDR: `nt_atlas_begin` asserts on it.
 
-Basis always emits a full mip chain, independent of `gen_mipmaps` (that flag
-controls uncompressed runtime mip generation). The builder asserts exactly
-`1 + floor(log2(max(width, height)))` levels; 1x1 is complete with one level.
-Activation cross-checks that count against the blob and the header and asserts
-on any asset that disagrees. An uncompressed texture whose default min filter asks for
-mipmaps without `gen_mipmaps` is a build-time assert (`NT_BUILD_ASSERT`); the
-runtime would accept it and sample level 0.
+`mips` (`nt_tex_mips_t`, in texture and atlas options) says where the mip chain
+comes from. It means the same for every format and codec:
+
+| Mode | Stored | Allowed for |
+|---|---|---|
+| `NONE` (zero-init) | level 0 | every format and codec |
+| `RUNTIME` (default) | level 0 and `NT_TEXTURE_FLAG_GEN_MIPMAPS`; the runtime calls `glGenerateMipmap` | uncompressed `RGBA8`, `RGB8`, `RG8`, `R8`, `SRGB8_ALPHA8` |
+| `BAKED` | the full chain down to 1x1, `1 + floor(log2(max(width, height)))` levels | every format and codec |
+
+`RUNTIME` keeps packs smallest; `BAKED` gives every GPU the same mips and serves
+the formats WebGL 2 cannot generate for. `RUNTIME` on Basis, `SRGB8` or `RGB9E5`
+is a build-time assert, never a silent switch, so Basis and `RGB9E5` callers that
+start from the defaults choose `BAKED` or `NONE`. A mipmap `filter_min` with `NONE`
+asserts too; a material override to a mipmap filter on a one-level texture
+samples level 0. Uncompressed `BAKED` levels are box-filtered from the previous
+level in the stored layout, every channel on its own (no alpha weighting, so
+premultiplied data stays premultiplied); sRGB formats average RGB in linear
+light and alpha linearly. Basis bakes with its own mip filter (see LDR mip
+filtering below). The builder asserts the encoder's level count against the
+mode, and activation cross-checks it against the blob and the header.
 
 An RGBA8 source whose pixels are all opaque is encoded without alpha slices —
 the encoder checks the actual pixels, not the declared channel count. The
@@ -414,8 +425,7 @@ sharing one payload in the pack.
 Texture cache and early dedup use one identity, `opts_hash`; early dedup
 compares it after an exact pixel match. It covers the effective settings:
 resized dimensions, resolved pixel format, premultiplication, sampler defaults,
-uncompressed mip-generation flag, codec and its active fields above.
-Basis ignores the mip-generation flag; for `RGB9E5` it selects the baked chain. Names, source locations, resize
+mip mode, codec and its active fields above. Names, source locations, resize
 limits after resizing, threading, descriptor padding and inactive union bytes
 are not encode identity.
 
@@ -630,7 +640,8 @@ texture reduces to roughly RGBA `(128,128,128,128)`, subject to block-compressio
 error. For an sRGB `format` the wrapper sets `m_mip_srgb = true`: RGB averages
 linear light and alpha stays on stored values, so an opaque black/white checker
 reduces to about 188, not 128. sRGB is never premultiplied, so the two rules never
-meet. Uncompressed `SRGB8_ALPHA8` mips come from runtime `glGenerateMipmap`, whose filter
+meet. Uncompressed `BAKED` sRGB mips average linear light the same way. With
+`RUNTIME`, uncompressed `SRGB8_ALPHA8` mips come from `glGenerateMipmap`, whose filter
 for sRGB storage the GL ES specification leaves to the driver.
 
 **Hard limits:**

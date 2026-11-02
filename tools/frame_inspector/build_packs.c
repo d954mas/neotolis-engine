@@ -59,7 +59,7 @@ int main(int argc, char *argv[]) {
     atlas_opts.compress = (nt_basisu_encode_opts_t){0};
     atlas_opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
     atlas_opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
-    atlas_opts.gen_mipmaps = false;
+    atlas_opts.mips = NT_TEX_MIPS_NONE;
     NtAtlasBuild *atlas = nt_atlas_begin(ctx, "frame_inspector_atlas", &atlas_opts);
     static const uint8_t white_pixel[4] = {255, 255, 255, 255};
     nt_atlas_sprite_opts_t white_opts = nt_atlas_sprite_opts_defaults();

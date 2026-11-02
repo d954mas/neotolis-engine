@@ -58,6 +58,7 @@ static void build_space(const char *directory) {
     tex.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
     tex.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
     tex.compress = nt_tex_compress_etc1s_default();
+    tex.mips = NT_TEX_MIPS_BAKED;
     nt_tex_opts_t mars = tex;
     mars.format = NT_TEXTURE_FORMAT_SRGB8; /* planet.frag lights in linear */
     nt_builder_add_texture(ctx, "examples/asteroids/raw/Mars.jpg", &mars);
@@ -119,7 +120,7 @@ static void build_ui(const char *directory) {
     opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
     opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
     opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
-    opts.gen_mipmaps = false;
+    opts.mips = NT_TEX_MIPS_NONE;
     NtAtlasBuild *atlas = nt_atlas_begin(ctx, "asteroids_ui_atlas", &opts);
     static const uint8_t white[4] = {255, 255, 255, 255};
     nt_atlas_sprite_opts_t sprite = nt_atlas_sprite_opts_defaults();

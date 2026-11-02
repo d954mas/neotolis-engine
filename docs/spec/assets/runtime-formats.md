@@ -30,7 +30,8 @@ An uncompressed (`NONE`) texture uploads the pixels that follow its header as th
 or the full chain down to 1x1 with levels 0..`mip_count`-1 back to back and no
 padding, each sized by `nt_texture_level_bytes` — the layout of the Basis
 staging buffer below. `data_size` is the sum over those levels, and
-`NT_TEXTURE_FLAG_GEN_MIPMAPS` belongs to one-level textures only. For a BASIS
+`NT_TEXTURE_FLAG_GEN_MIPMAPS` (builder `mips = RUNTIME`) belongs to one-level
+textures only. A BASIS blob also carries one level or the full chain. For a BASIS
 texture the activator in `nt_gfx` owns everything above the GL call: it
 cross-checks the blob against the header, picks the GPU target format, and
 transcodes the whole mip chain in one codec call, back to back into the shared
@@ -87,7 +88,7 @@ interpretation survives. An sRGB ASTC format expands block endpoints
 differently, so a UASTC texture sampled through it differs by about one step
 before the transfer curve. `SRGB8` is not color-renderable in WebGL 2 and cannot
 generate runtime mips: `nt_gfx_make_texture` asserts on it with `gen_mipmaps`, and the builder
-rejects an uncompressed `SRGB8` texture with `gen_mipmaps`.
+rejects `mips = RUNTIME` for an uncompressed `SRGB8` texture.
 
 `RGB9E5` (`GL_RGB9_E5`, 4 bytes per pixel) is the pack format for linear HDR
 color: unsigned RGB with 9-bit mantissas and a shared 5-bit exponent, no alpha,
@@ -97,7 +98,8 @@ asset carries the chain the builder baked, laid out as above.
 
 The runtime accepts a single-level texture under any min filter, because
 `GL_TEXTURE_MAX_LEVEL` is then 0 and the storage is mip-complete; the builder
-asserts on that combination for uncompressed assets ([builder](../builder/builder.md)).
+asserts on that combination (`mips = NONE` with a mipmap `filter_min`) for every asset
+([builder](../builder/builder.md)).
 
 ## Mesh format strategy
 

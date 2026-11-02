@@ -852,7 +852,7 @@ static nt_texture_pixel_format_t atlas_assert_opts(const nt_atlas_opts_t *opts) 
         .filter_mag = opts->filter_mag,
         .wrap_u = opts->wrap_u,
         .wrap_v = opts->wrap_v,
-        .gen_mipmaps = opts->gen_mipmaps,
+        .mips = opts->mips,
     };
     const nt_texture_pixel_format_t format = nt_builder_assert_texture_opts(&texture_opts);
     NT_BUILD_ASSERT(format != NT_TEXTURE_FORMAT_RGB9E5 && "nt_atlas_begin: atlas pages are LDR -- format RGB9E5 is not supported");
@@ -3858,7 +3858,7 @@ static void pipeline_publish_outputs(AtlasPipeline *p) {
         td->opts.filter_mag = p->opts->filter_mag;
         td->opts.wrap_u = p->opts->wrap_u;
         td->opts.wrap_v = p->opts->wrap_v;
-        td->opts.gen_mipmaps = p->opts->gen_mipmaps;
+        td->opts.mips = p->opts->mips;
         nt_builder_add_entry(ctx, tex_path, NT_BUILD_ASSET_TEXTURE, td, p->page_pixels[pg], (uint32_t)pixel_bytes, tex_hash);
         p->page_pixels[pg] = NULL;
         free(tex_path);

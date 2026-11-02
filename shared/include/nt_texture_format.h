@@ -155,7 +155,7 @@ typedef enum {
 
 /* Texture header flags (single byte) */
 #define NT_TEXTURE_FLAG_PREMULTIPLIED (1U << 0) /* RGB already multiplied by alpha */
-#define NT_TEXTURE_FLAG_GEN_MIPMAPS (1U << 1)   /* runtime should glGenerateMipmap on a one-level uncompressed upload (no effect on BASIS) */
+#define NT_TEXTURE_FLAG_GEN_MIPMAPS (1U << 1)   /* runtime should glGenerateMipmap on a one-level uncompressed upload */
 /* bits 2..7 reserved */
 
 /* Values must match nt_texture_filter_t / nt_texture_wrap_t in nt_gfx.h. */
@@ -203,9 +203,8 @@ typedef enum {
  *   bit 0 = NT_TEXTURE_FLAG_PREMULTIPLIED — RGB values are already multiplied
  *           by alpha. Renderer should use blend (ONE, ONE_MINUS_SRC_ALPHA).
  *   bit 1 = NT_TEXTURE_FLAG_GEN_MIPMAPS — runtime should generate mips on
- *           upload for one-level uncompressed textures so material sampler overrides
- *           can opt into mipmap filtering. Never set with a baked chain.
- *           No effect on BASIS (mips are baked).
+ *           upload of a one-level uncompressed texture (builder mips = RUNTIME).
+ *           Never set with a baked chain or on BASIS.
  *
  * default_min/mag_filter, default_wrap_u/v:
  *   Builder-baked defaults (nt_texture_filter_t / nt_texture_wrap_t enum

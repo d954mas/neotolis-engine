@@ -115,7 +115,7 @@ int main(int argc, char *argv[]) {
     atlas_opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
     atlas_opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
     atlas_opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
-    atlas_opts.gen_mipmaps = false;
+    atlas_opts.mips = NT_TEX_MIPS_NONE;
 
     NtAtlasBuild *atlas = nt_atlas_begin(ctx, "ui_showcase_atlas", &atlas_opts);
 
@@ -311,7 +311,7 @@ int main(int argc, char *argv[]) {
     radial_opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
     radial_opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
     radial_opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
-    radial_opts.gen_mipmaps = false;
+    radial_opts.mips = NT_TEX_MIPS_NONE;
 
     NtAtlasBuild *radial_atlas = nt_atlas_begin(ctx, "ui_showcase_radial_art", &radial_opts);
 

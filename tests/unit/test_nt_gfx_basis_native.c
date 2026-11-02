@@ -68,7 +68,7 @@ static void fill_source(void) {
 static void build_fixture(nt_basisu_codec_t codec, nt_texture_pixel_format_t format) {
     fill_source();
     nt_basisu_encode_opts_t opts = codec == NT_BASISU_CODEC_ETC1S ? nt_tex_compress_etc1s_high() : nt_tex_compress_uastc_default();
-    nt_basisu_encode_result_t enc = nt_basisu_encode(1, s_src, SRC_W, SRC_H, format, &opts);
+    nt_basisu_encode_result_t enc = nt_basisu_encode(1, s_src, SRC_W, SRC_H, format, &opts, true);
     TEST_ASSERT_NOT_NULL(enc.data);
     TEST_ASSERT_EQUAL_UINT32(SRC_LEVELS, enc.mip_count);
     TEST_ASSERT_LESS_OR_EQUAL_UINT32(sizeof(s_blob) - sizeof(NtTextureAssetHeader), enc.size);
@@ -587,6 +587,7 @@ void test_raw_rgb9e5_chain_samples_above_one(void) {
     }
     nt_tex_opts_t opts = nt_tex_opts_defaults();
     opts.format = NT_TEXTURE_FORMAT_RGB9E5;
+    opts.mips = NT_TEX_MIPS_BAKED;
     opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_NEAREST_MIPMAP_NEAREST;
     opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_NEAREST;
     opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
@@ -617,6 +618,26 @@ void test_raw_rgb9e5_chain_samples_above_one(void) {
     render_sampled(tex, NT_SAMPLER_DEFAULT, HDR_W, HDR_H, 1, 1, s_hdr_fs);
     check_readback_rgba(tail, 1, 1, 1);
 
+    nt_gfx_deactivate_texture(handle);
+    free(asset);
+}
+
+/* A Basis texture built without mips is one level on the GPU too. */
+void test_basis_without_mips_uploads_one_level(void) {
+    fill_source();
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.compress = ANY_CODEC == NT_BASISU_CODEC_ETC1S ? nt_tex_compress_etc1s_high() : nt_tex_compress_uastc_default();
+    opts.mips = NT_TEX_MIPS_NONE;
+    opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+    uint8_t *asset = NULL;
+    uint32_t asset_size = 0;
+    nt_builder_encode_texture_to_buf(s_src, SRC_W, SRC_H, &opts, 1, &asset, &asset_size);
+
+    const uint32_t handle = nt_gfx_activate_texture(asset, asset_size);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
+    nt_texture_t tex = {.id = handle};
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(tex));
+    TEST_ASSERT_EQUAL_INT(0, texture_max_level(tex));
     nt_gfx_deactivate_texture(handle);
     free(asset);
 }
@@ -675,6 +696,7 @@ int main(void) {
     RUN_TEST(test_srgb_ramp_decodes_and_encodes_back_to_the_source);
     RUN_TEST(test_srgb_updates_keep_the_interpretation);
     RUN_TEST(test_raw_rgb9e5_chain_samples_above_one);
+    RUN_TEST(test_basis_without_mips_uploads_one_level);
     int failures = UNITY_END();
     nt_window_shutdown();
     return failures;

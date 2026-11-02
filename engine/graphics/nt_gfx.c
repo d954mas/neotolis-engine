@@ -2741,8 +2741,8 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     /* Subtraction safe: the resource core checked size >= sizeof header. */
     NT_ASSERT(hdr->data_size == size - sizeof(NtTextureAssetHeader) && "texture data_size differs from its blob");
     NT_ASSERT((hdr->compression == NT_TEXTURE_COMPRESSION_NONE || hdr->compression == NT_TEXTURE_COMPRESSION_BASIS) && "texture compression unknown");
+    NT_ASSERT((hdr->mip_count == 1 || hdr->mip_count == nt_texture_full_chain_levels(hdr->width, hdr->height)) && "texture mip_count is neither 1 nor the full chain");
     if (hdr->compression == NT_TEXTURE_COMPRESSION_NONE) {
-        NT_ASSERT((hdr->mip_count == 1 || hdr->mip_count == nt_texture_full_chain_levels(hdr->width, hdr->height)) && "texture uncompressed mip_count is neither 1 nor the full chain");
         uint64_t expected = 0;
         for (uint32_t level = 0; level < hdr->mip_count; level++) {
             expected += nt_texture_level_bytes((nt_texture_pixel_format_t)hdr->format, nt_texture_level_extent(hdr->width, level), nt_texture_level_extent(hdr->height, level));
@@ -2788,7 +2788,7 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     // #region blob cross-check
     const nt_basisu_info_t info = nt_basisu_info(basis_data, basis_size);
     NT_ASSERT(info.width == hdr->width && info.height == hdr->height && "texture header size differs from its Basis blob");
-    NT_ASSERT(info.level_count == hdr->mip_count && info.level_count == nt_texture_full_chain_levels(width, height) && "texture Basis chain is not the full mip chain");
+    NT_ASSERT(info.level_count == hdr->mip_count && "texture Basis level count differs from its header");
     // #endregion
 
     // #region target and staging
