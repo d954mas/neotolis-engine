@@ -109,6 +109,8 @@ static struct {
     uint8_t *alias_kind;
     uint32_t *alias_number;
     uint32_t alias_count;
+    uint32_t *alias_slot; /* open addressing: alias index + 1, 0 = empty */
+    uint32_t alias_mask;
     uint32_t history[HISTORY]; /* rows jumped from, for Back */
     uint32_t history_count;
     uint32_t future[HISTORY];
@@ -394,13 +396,23 @@ static const char *alias_prefix(uint32_t kind) {
     return kind < sizeof(k_short) / sizeof(k_short[0]) ? k_short[kind] : "obj";
 }
 
+/* The alias slot of (kind, object): its index + 1, or the empty slot to fill. */
+static uint32_t *alias_slot(uint32_t kind, uint32_t object) {
+    uint32_t h = (object * 0x9E3779B1U) ^ (kind * 0x85EBCA77U);
+    for (;; h++) {
+        uint32_t *slot = &s.alias_slot[h & s.alias_mask];
+        if (*slot == 0 || (s.alias_object[*slot - 1U] == object && s.alias_kind[*slot - 1U] == kind)) {
+            return slot;
+        }
+    }
+}
+
 /* pipe#3 for a handle: kinds are numbered in order of first appearance in the frame. */
 static void alias_of(uint32_t kind, uint32_t object, char *buf, size_t size) {
-    for (uint32_t k = 0; k < s.alias_count; k++) {
-        if (s.alias_object[k] == object && s.alias_kind[k] == kind) {
-            (void)snprintf(buf, size, "%s#%u", alias_prefix(kind), s.alias_number[k]);
-            return;
-        }
+    const uint32_t k = s.alias_slot != NULL ? *alias_slot(kind, object) : 0U;
+    if (k != 0) {
+        (void)snprintf(buf, size, "%s#%u", alias_prefix(kind), s.alias_number[k - 1U]);
+        return;
     }
     (void)snprintf(buf, size, "%s:%u", alias_prefix(kind), object);
 }
@@ -641,6 +653,7 @@ static void index_groups_and_aliases(const fi_frame_t *fr) {
     free(s.alias_object);
     free(s.alias_kind);
     free(s.alias_number);
+    free(s.alias_slot);
     s.group_draws = (uint32_t *)calloc(n, sizeof(uint32_t));
     s.group_gl = (uint32_t *)calloc(n, sizeof(uint32_t));
     s.group_merged = (uint32_t *)calloc(n, sizeof(uint32_t));
@@ -649,6 +662,13 @@ static void index_groups_and_aliases(const fi_frame_t *fr) {
     s.alias_number = (uint32_t *)calloc(n, sizeof(uint32_t));
     NT_ASSERT(s.group_draws != NULL && s.group_gl != NULL && s.group_merged != NULL && s.alias_object != NULL && s.alias_kind != NULL && s.alias_number != NULL);
     s.alias_count = 0;
+    uint32_t slots = 16U;
+    while (slots < 2U * n) {
+        slots *= 2U;
+    }
+    s.alias_slot = (uint32_t *)calloc(slots, sizeof(uint32_t));
+    NT_ASSERT(s.alias_slot != NULL);
+    s.alias_mask = slots - 1U;
     uint32_t next[FI_OBJECTS] = {0};
     for (uint32_t i = 0; i < fr->view.count; i++) {
         const nt_gfx_event_t *e = &fr->view.events[i];
@@ -665,11 +685,9 @@ static void index_groups_and_aliases(const fi_frame_t *fr) {
         if (e->kind > NT_GFX_EVENT_ARGUMENT || e->object_kind == 0 || e->object_kind >= FI_OBJECTS || e->object == 0) {
             continue;
         }
-        bool known = false;
-        for (uint32_t k = 0; k < s.alias_count && !known; k++) {
-            known = s.alias_object[k] == e->object && s.alias_kind[k] == e->object_kind;
-        }
-        if (!known) {
+        uint32_t *slot = alias_slot(e->object_kind, e->object);
+        if (*slot == 0) {
+            *slot = s.alias_count + 1U;
             s.alias_object[s.alias_count] = e->object;
             s.alias_kind[s.alias_count] = e->object_kind;
             s.alias_number[s.alias_count++] = ++next[e->object_kind];
@@ -1345,11 +1363,11 @@ static Clay_Color row_background(const fi_frame_t *fr, uint32_t id, uint32_t row
 static bool is_draw_op(const nt_gfx_event_t *e);
 static uint32_t previous(const fi_frame_t *fr, uint32_t at, bool (*accept)(const nt_gfx_event_t *));
 
+static float list_height(uint32_t slot_id);
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_tree(void) {
-    const uint32_t area_id = nt_ui_id("tree_area");
-    CLAY(
-        {.id = (Clay_ElementId){.id = area_id}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}, .clip = {.horizontal = true}}) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}, .clip = {.horizontal = true}}) {
         if (s.file_count == 0) {
             text("No capture open.", &k_dim);
         } else if (!frame_ok(frame_sel())) {
@@ -1361,71 +1379,68 @@ static void declare_tree(void) {
             declare_timeline(fr);
             const uint32_t list_id = nt_ui_id("tree");
             const nt_ui_vlist_style_t vstyle = nt_ui_vlist_style_defaults();
-            /* A fixed height from last frame's layout: a growing list makes Clay shrink its tall content in float,
-             * which at a million pixels takes tens of thousands of steps a frame. */
-            const nt_ui_bbox_t area = nt_ui_get_bbox(s_ctx, area_id);
-            const nt_ui_bbox_t list = nt_ui_get_bbox(s_ctx, list_id);
-            float list_h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 900) - 200.0F;
-            list_h = area.found && list.found ? area.y + area.height - list.y : list_h;
-            list_h = list_h > ROW_H ? list_h : ROW_H;
-            const nt_ui_vlist_range_t range = nt_ui_vlist_begin(s_ctx, NULL, list_id, s.vis_count, ROW_H, NT_UI_AXIS_Y, &vstyle,
-                                                                &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(list_h)}}, .backgroundColor = k_panel});
-            if (s.follow && s.selected != FI_NONE) {
-                const uint32_t at = vis_index_of(s.selected);
-                if (at != FI_NONE && (at < range.first + 3U || at + 3U > range.last)) {
-                    nt_ui_scroll_to(s_ctx, list_id, 0.0F, (float)(at > 10U ? at - 10U : 0U) * ROW_H);
+            const uint32_t slot_id = nt_ui_id("tree_slot");
+            CLAY({.id = (Clay_ElementId){.id = slot_id}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .clip = {.vertical = true}}) {
+                const nt_ui_vlist_range_t range =
+                    nt_ui_vlist_begin(s_ctx, NULL, list_id, s.vis_count, ROW_H, NT_UI_AXIS_Y, &vstyle,
+                                      &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(list_height(slot_id))}}, .backgroundColor = k_panel});
+                if (s.follow && s.selected != FI_NONE) {
+                    const uint32_t at = vis_index_of(s.selected);
+                    if (at != FI_NONE && (at < range.first + 3U || at + 3U > range.last)) {
+                        nt_ui_scroll_to(s_ctx, list_id, 0.0F, (float)(at > 10U ? at - 10U : 0U) * ROW_H);
+                    }
+                    s.follow = false;
                 }
-                s.follow = false;
-            }
-            char buf[640];
-            /* The draw the selected one is compared with, tagged in the gutter. */
-            const uint32_t compared = s.selected < fr->view.count && is_draw_op(&fr->view.events[s.selected]) ? previous(fr, s.selected, is_draw_op) : FI_NONE;
-            for (uint32_t k = range.first; k <= range.last && k < s.vis_count; ++k) {
-                const uint32_t id = s.vis[k];
-                const uint32_t r = s.vis_row[k];
-                const uint32_t row_id = nt_ui_vlist_item_id(s_ctx, k);
-                const uint32_t fold_id = nt_ui_child_id(row_id, "fold");
-                const nt_ui_events_t ev = nt_ui_events(s_ctx, row_id, NULL);
-                const nt_ui_events_t fold_ev = nt_ui_events(s_ctx, fold_id, NULL);
-                const bool parent = r != FI_NONE && r + 1U < fr->row_count && fr->depth[r + 1U] > fr->depth[r];
-                if (fold_ev.clicked && parent) {
-                    s.collapsed[r] ^= 1U;
-                    s.dirty = true;
-                } else if (ev.clicked) {
-                    const bool shift = key_down(NT_KEY_LSHIFT) || key_down(NT_KEY_RSHIFT);
-                    s.anchor = shift ? (s.anchor != FI_NONE ? s.anchor : s.selected) : FI_NONE; // NOLINT(readability-avoid-nested-conditional-operator)
-                    s.selected = id;
-                }
-                row_label(fr, k, buf, sizeof(buf));
-                const nt_ui_label_style_t *badge_style = &k_dim;
-                const char *badge = id < FI_NODE_BASE ? result_text(&fr->view.events[id], &badge_style) : "";
-                const bool call = id < FI_NODE_BASE && (fr->view.events[id].kind == NT_GFX_EVENT_BACKEND || fr->view.events[id].kind == NT_GFX_EVENT_SKIP);
-                char number[16] = "";
-                if (id < FI_NODE_BASE) {
-                    (void)snprintf(number, sizeof(number), "@%u", id);
-                }
-                const bool selected = s.selected == id;
-                CLAY({.id = (Clay_ElementId){.id = row_id},
-                      .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(ROW_H)}, .padding = {.right = 6}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
-                      .backgroundColor = row_background(fr, id, r, ev.hovered),
-                      .border = {.color = k_select_border, .width = {selected ? 1U : 0U, selected ? 1U : 0U, selected ? 1U : 0U, selected ? 1U : 0U, 0}}}) {
-                    CLAY({.id = (Clay_ElementId){.id = fold_id},
-                          .layout = {.sizing = {CLAY_SIZING_FIXED(44), CLAY_SIZING_FIXED(ROW_H)}, .childAlignment = {.x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER}},
-                          .backgroundColor = fold_ev.hovered && parent ? k_hover : (Clay_Color){0}}) {
-                        if (id == compared) {
-                            text("prev", &k_changed);
-                        } else if (parent) {
-                            text(s.collapsed[r] != 0 ? "+" : "-", &k_head);
+                char buf[640];
+                /* The draw the selected one is compared with, tagged in the gutter. */
+                const uint32_t compared = s.selected < fr->view.count && is_draw_op(&fr->view.events[s.selected]) ? previous(fr, s.selected, is_draw_op) : FI_NONE;
+                for (uint32_t k = range.first; k <= range.last && k < s.vis_count; ++k) {
+                    const uint32_t id = s.vis[k];
+                    const uint32_t r = s.vis_row[k];
+                    const uint32_t row_id = nt_ui_vlist_item_id(s_ctx, k);
+                    const uint32_t fold_id = nt_ui_child_id(row_id, "fold");
+                    const nt_ui_events_t ev = nt_ui_events(s_ctx, row_id, NULL);
+                    const nt_ui_events_t fold_ev = nt_ui_events(s_ctx, fold_id, NULL);
+                    const bool parent = r != FI_NONE && r + 1U < fr->row_count && fr->depth[r + 1U] > fr->depth[r];
+                    if (fold_ev.clicked && parent) {
+                        s.collapsed[r] ^= 1U;
+                        s.dirty = true;
+                    } else if (ev.clicked) {
+                        const bool shift = key_down(NT_KEY_LSHIFT) || key_down(NT_KEY_RSHIFT);
+                        s.anchor = shift ? (s.anchor != FI_NONE ? s.anchor : s.selected) : FI_NONE; // NOLINT(readability-avoid-nested-conditional-operator)
+                        s.selected = id;
+                    }
+                    row_label(fr, k, buf, sizeof(buf));
+                    const nt_ui_label_style_t *badge_style = &k_dim;
+                    const char *badge = id < FI_NODE_BASE ? result_text(&fr->view.events[id], &badge_style) : "";
+                    const bool call = id < FI_NODE_BASE && (fr->view.events[id].kind == NT_GFX_EVENT_BACKEND || fr->view.events[id].kind == NT_GFX_EVENT_SKIP);
+                    char number[16] = "";
+                    if (id < FI_NODE_BASE) {
+                        (void)snprintf(number, sizeof(number), "@%u", id);
+                    }
+                    const bool selected = s.selected == id;
+                    CLAY({.id = (Clay_ElementId){.id = row_id},
+                          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(ROW_H)}, .padding = {.right = 6}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
+                          .backgroundColor = row_background(fr, id, r, ev.hovered),
+                          .border = {.color = k_select_border, .width = {selected ? 1U : 0U, selected ? 1U : 0U, selected ? 1U : 0U, selected ? 1U : 0U, 0}}}) {
+                        CLAY({.id = (Clay_ElementId){.id = fold_id},
+                              .layout = {.sizing = {CLAY_SIZING_FIXED(44), CLAY_SIZING_FIXED(ROW_H)}, .childAlignment = {.x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER}},
+                              .backgroundColor = fold_ev.hovered && parent ? k_hover : (Clay_Color){0}}) {
+                            if (id == compared) {
+                                text("prev", &k_changed);
+                            } else if (parent) {
+                                text(s.collapsed[r] != 0 ? "+" : "-", &k_head);
+                            }
                         }
+                        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(64), CLAY_SIZING_FIXED(ROW_H)}, .childAlignment = {.x = CLAY_ALIGN_X_RIGHT, .y = CLAY_ALIGN_Y_CENTER}}}) {
+                            text(number, call ? &k_dim : &k_text);
+                        }
+                        CELL_(96) { text(badge, badge_style); }
+                        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(ROW_H)}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) { text(buf, row_style(fr, id)); }
                     }
-                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(64), CLAY_SIZING_FIXED(ROW_H)}, .childAlignment = {.x = CLAY_ALIGN_X_RIGHT, .y = CLAY_ALIGN_Y_CENTER}}}) {
-                        text(number, call ? &k_dim : &k_text);
-                    }
-                    CELL_(96) { text(badge, badge_style); }
-                    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(ROW_H)}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) { text(buf, row_style(fr, id)); }
                 }
+                nt_ui_vlist_end(s_ctx);
             }
-            nt_ui_vlist_end(s_ctx);
         }
     }
 }
@@ -1926,33 +1941,95 @@ static void declare_selection(void) {
     nt_ui_scroll_end(s_ctx);
 }
 
-/* Init state: what the frame inherited (the begin_frame snapshot); End state: what it left. */
-static void declare_state_page(bool end) {
-    const fi_frame_t *fr = frame_sel();
-    const nt_ui_scroll_style_t scroll = nt_ui_scroll_style_defaults();
-    nt_ui_scroll_begin(
-        s_ctx, NULL, nt_ui_id(end ? "end_state" : "init_state"), &scroll,
-        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .padding = CLAY_PADDING_ALL(12), .childGap = 2},
-                                   .backgroundColor = k_panel});
-    if (end) {
-        text("State after the frame's last record: the engine's bindings and the GL state it left.", &k_dim);
-        const uint32_t last = fr->view.count - 1U;
-        const uint32_t keep = s.selected;
-        const bool all = s.state_all;
-        s.selected = last;
-        s.state_all = true;
-        declare_state(fr);
-        s.selected = keep;
-        s.state_all = all;
-    } else {
-        text("What the frame inherited: the snapshot begin_frame recorded before any work, then the links it finished.", &k_dim);
-        for (uint32_t i = 0; i < fr->view.count; i++) {
-            const uint32_t p = fr->parent[i];
-            if (p == FI_NODE_BASE + FI_NODE_SNAPSHOT || p == FI_NODE_BASE + FI_NODE_PROGRAM_LINKS) {
-                link_line(fr, "", i);
+/* A list's height from last frame's layout of its GROW slot. The slot clips, so the list never props it open; a growing
+ * list instead makes Clay shrink its tall content in float, which at a million pixels takes tens of thousands of steps. */
+static float list_height(uint32_t slot_id) {
+    const nt_ui_bbox_t slot = nt_ui_get_bbox(s_ctx, slot_id);
+    const float h = slot.found ? slot.height : (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 900) - 200.0F;
+    return h > ROW_H ? h : ROW_H;
+}
+
+/* The selected frame's snapshot and finished-link records, listed once per frame. */
+static struct {
+    uint32_t *record;
+    uint32_t count, cap;
+    uint32_t epoch;
+} s_init = {.epoch = FI_NONE};
+
+static void index_init_records(const fi_frame_t *fr) {
+    if (s_init.epoch == s.frame_epoch) {
+        return;
+    }
+    s_init.epoch = s.frame_epoch;
+    s_init.count = 0;
+    for (uint32_t i = 0; i < fr->view.count; i++) {
+        const uint32_t p = fr->parent[i];
+        if (p != FI_NODE_BASE + FI_NODE_SNAPSHOT && p != FI_NODE_BASE + FI_NODE_PROGRAM_LINKS) {
+            continue;
+        }
+        if (s_init.count == s_init.cap) {
+            s_init.cap = s_init.cap != 0 ? s_init.cap * 2U : 256U;
+            uint32_t *grown = (uint32_t *)realloc(s_init.record, s_init.cap * sizeof(uint32_t));
+            NT_ASSERT(grown != NULL);
+            s_init.record = grown;
+        }
+        s_init.record[s_init.count++] = i;
+    }
+}
+
+/* Init state: what the frame inherited (the begin_frame snapshot and finished links), one row per record. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void declare_init_page(const fi_frame_t *fr) {
+    index_init_records(fr);
+    const uint32_t init_count = s_init.count;
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .padding = CLAY_PADDING_ALL(12), .childGap = 6}, .backgroundColor = k_panel}) {
+        textf(&k_dim, "What the frame inherited: the snapshot begin_frame recorded before any work, then the links it finished (%u records). Click one to see it in Commands.", init_count);
+        const uint32_t list_id = nt_ui_id("init_list");
+        const uint32_t slot_id = nt_ui_id("init_slot");
+        const nt_ui_vlist_style_t vstyle = nt_ui_vlist_style_defaults();
+        CLAY({.id = (Clay_ElementId){.id = slot_id}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .clip = {.vertical = true}}) {
+            const nt_ui_vlist_range_t range =
+                nt_ui_vlist_begin(s_ctx, NULL, list_id, init_count, ROW_H, NT_UI_AXIS_Y, &vstyle,
+                                  &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(list_height(slot_id))}}, .backgroundColor = k_panel});
+            char number[16];
+            char body[400];
+            for (uint32_t k = range.first; k <= range.last && k < init_count; ++k) {
+                const uint32_t record = s_init.record[k];
+                const uint32_t row_id = nt_ui_vlist_item_id(s_ctx, k);
+                const nt_ui_events_t ev = nt_ui_events(s_ctx, row_id, NULL);
+                if (ev.clicked) {
+                    select_record(record);
+                    s.page = PAGE_COMMANDS;
+                }
+                (void)snprintf(number, sizeof(number), "@%u", record);
+                row_text(fr, record, body, sizeof(body));
+                CLAY({.id = (Clay_ElementId){.id = row_id},
+                      .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(ROW_H)}, .padding = {.right = 6}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
+                      .backgroundColor = ev.hovered ? k_hover : k_panel}) {
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(64), CLAY_SIZING_FIXED(ROW_H)}, .childAlignment = {.x = CLAY_ALIGN_X_RIGHT, .y = CLAY_ALIGN_Y_CENTER}}}) { text(number, &k_text); }
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(ROW_H)}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) { text(body, row_style(fr, record)); }
+                }
             }
+            nt_ui_vlist_end(s_ctx);
         }
     }
+}
+
+/* End state: the engine's bindings and the GL state after the frame's last record. */
+static void declare_end_page(const fi_frame_t *fr) {
+    const nt_ui_scroll_style_t scroll = nt_ui_scroll_style_defaults();
+    nt_ui_scroll_begin(
+        s_ctx, NULL, nt_ui_id("end_state"), &scroll,
+        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .padding = CLAY_PADDING_ALL(12), .childGap = 2},
+                                   .backgroundColor = k_panel});
+    text("State after the frame's last record: the engine's bindings and the GL state it left.", &k_dim);
+    const uint32_t keep = s.selected;
+    const bool all = s.state_all;
+    s.selected = fr->view.count - 1U;
+    s.state_all = true;
+    declare_state(fr);
+    s.selected = keep;
+    s.state_all = all;
     nt_ui_scroll_end(s_ctx);
 }
 // #endregion
@@ -2559,8 +2636,10 @@ static void declare_ui(void) {
                 declare_selection();
             } else if (s.page == PAGE_INFO) {
                 declare_info_page();
+            } else if (s.page == PAGE_INIT) {
+                declare_init_page(frame_sel());
             } else {
-                declare_state_page(s.page == PAGE_END);
+                declare_end_page(frame_sel());
             }
         }
         ROW_(12) { declare_status(); }
@@ -2762,6 +2841,8 @@ int main(int argc, char *argv[]) {
     free(s.alias_object);
     free(s.alias_kind);
     free(s.alias_number);
+    free(s.alias_slot);
+    free(s_init.record);
     free(s.vis);
     free(s.vis_row);
     free(s.vis_depth);
