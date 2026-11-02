@@ -9,8 +9,8 @@
  * --monkey drives random clicks, drags, wheel and keys for that long and prints the frame times.
  * Without a window, for scripts and agents: frame_inspector query FILE... [--frame SEQUENCE] COMMAND [ARGS]
  * answers one command; frame_inspector --serve FILE... [--frame SEQUENCE] answers a command per stdin line,
- * each answer after a "> command" line. Commands (help lists them, fi_query.h): frames, frame SEQUENCE,
- * summary, groups, record @N, state @N|init|end [all], find TEXT, list draws|problems|merged|group NAME|op NAME. */
+ * each answer after a "> command" line. Answers are "key value  # meaning" lines; help lists the commands:
+ * frames, frame, summary, groups, record @N, state @N|init|end [all], find TEXT, list KEY (a summary key). */
 
 #include "app/nt_app.h"
 #include "atlas/nt_atlas.h"
@@ -291,7 +291,6 @@ static void monkey_frame_time(void) {
 // #endregion
 
 // #region helpers
-static bool is_mergeable_draw(const nt_gfx_event_t *e) { return e->kind == NT_GFX_EVENT_OP && (e->operation == NT_GFX_OP_DRAW || e->operation == NT_GFX_OP_DRAW_INDEXED); }
 
 /* A file name shortened in the middle, so both its start and its extension stay readable. */
 static void short_name(const char *name, char *buf, size_t size) {
@@ -1484,13 +1483,23 @@ static void declare_insights(const fi_frame_t *fr) {
     }
 }
 
-static void stat(const char *name, fi_query_t q, uint64_t value) {
-    if (value == 0 && fi_cell(frame_sel(), q).n == 0) {
-        return;
+/* One section of the frame's numbers, as summary prints them: the meaning, then the number. */
+static void declare_numbers(const fi_frame_t *fr, const char *name, const char *title) {
+    static fi_number_t numbers[FI_NUMBERS];
+    static uint32_t epoch = FI_NONE;
+    static uint32_t count;
+    if (epoch != s.frame_epoch) {
+        epoch = s.frame_epoch;
+        count = fi_numbers(fr, numbers);
     }
-    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
-        CELL_(330) { text(name, &k_text); }
-        CELL_(90) { number(q, value, name); }
+    section(title);
+    for (uint32_t k = 0; k < count; k++) {
+        if (strcmp(numbers[k].section, name) == 0) {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
+                CELL_(330) { text(numbers[k].meaning, &k_text); }
+                CELL_(90) { number(numbers[k].q, numbers[k].value, numbers[k].meaning); }
+            }
+        }
     }
 }
 
@@ -1542,38 +1551,6 @@ static void declare_funnel(const fi_frame_t *fr) {
     }
 }
 
-static void declare_draws(const fi_frame_t *fr) {
-    const fi_summary_t *sm = &fr->summary;
-    char name[96];
-    section("Draws");
-    stat("draw requests (ACCEPTED or CACHE)", (fi_query_t){.kind = FI_Q_VERTICES}, sm->vertices.n);
-    stat("merged into the previous draw (CACHE)", (fi_query_t){.kind = FI_Q_MERGED}, sm->merged.n);
-    stat("GL draw calls issued", (fi_query_t){.kind = FI_Q_DRAW_CALL}, sm->draw_calls.n);
-    for (uint32_t c = 0; c < NT_GFX_GL_COUNT; c++) {
-        if (fi_is_draw_call(c) && sm->gl[c].n > 0) {
-            (void)snprintf(name, sizeof(name), "  %s", nt_gfx_gl_call_name(c));
-            stat(name, (fi_query_t){.kind = FI_Q_GL_CALL, .a = c}, sm->gl[c].n);
-        }
-    }
-    stat("vertices (x instances)", (fi_query_t){.kind = FI_Q_VERTICES}, sm->vertices.sum);
-    stat("indices (x instances)", (fi_query_t){.kind = FI_Q_INDICES}, sm->indices.sum);
-    stat("instances of instanced draws", (fi_query_t){.kind = FI_Q_INSTANCES}, sm->instances.sum);
-}
-
-static void declare_transfers(const fi_frame_t *fr) {
-    const fi_summary_t *sm = &fr->summary;
-    section("Uploads (bytes sent to GL)");
-    stat("buffer upload calls", (fi_query_t){.kind = FI_Q_UPLOAD, .a = 0}, sm->upload[0].n);
-    stat("buffer upload bytes", (fi_query_t){.kind = FI_Q_UPLOAD, .a = 0}, sm->upload[0].sum);
-    stat("texture upload calls", (fi_query_t){.kind = FI_Q_UPLOAD, .a = 1}, sm->upload[1].n);
-    stat("texture upload bytes", (fi_query_t){.kind = FI_Q_UPLOAD, .a = 1}, sm->upload[1].sum);
-    stat("  of them frame storage at end_frame", (fi_query_t){.kind = FI_Q_FRAME_STORE}, sm->frame_store.sum);
-    ROW_(8) {
-        CELL_(190) { text("command stream bytes", &k_text); }
-        textf(&k_text, "%u (counter only)", fr->view.counters.stream_bytes);
-    }
-}
-
 /* Which buffers received the uploaded bytes, the biggest first; a click opens the upload. */
 static void declare_uploads_by_buffer(const fi_frame_t *fr) {
     enum { SHOWN = 16 };
@@ -1594,51 +1571,6 @@ static void declare_uploads_by_buffer(const fi_frame_t *fr) {
     }
 }
 
-static void declare_resources(const fi_frame_t *fr) {
-    static const char *const k_res[FI_RES_COUNT] = {"live at frame start", "created", "destroyed"};
-    section("Resources (bytes requested from GL, from definitions)");
-    for (uint32_t kind = 1; kind < FI_OBJECTS; kind++) {
-        for (uint32_t r = 0; r < FI_RES_COUNT; r++) {
-            const fi_cell_t c = fr->summary.resource[kind][r];
-            if (c.n == 0) {
-                continue;
-            }
-            char name[96];
-            (void)snprintf(name, sizeof(name), "%s %s", nt_gfx_object_kind_name(kind), k_res[r]);
-            ROW_(8) {
-                CELL_(300) { text(name, &k_text); }
-                number((fi_query_t){.kind = FI_Q_RESOURCE, .a = kind, .b = (uint8_t)r}, c.n, name);
-                if (c.sum > 0) {
-                    textf(&k_dim, "%.1f KiB", (double)c.sum / 1024.0);
-                }
-            }
-        }
-    }
-}
-
-static void declare_gl_calls(const fi_frame_t *fr) {
-    section("GL calls by name");
-    uint32_t order[NT_GFX_GL_COUNT];
-    uint32_t n = 0;
-    for (uint32_t c = 0; c < NT_GFX_GL_COUNT; c++) {
-        if (fr->summary.gl[c].n > 0) {
-            order[n++] = c;
-        }
-    }
-    for (uint32_t a = 1; a < n; a++) { /* insertion sort, most frequent first */
-        const uint32_t v = order[a];
-        uint32_t b = a;
-        while (b > 0 && fr->summary.gl[order[b - 1]].n < fr->summary.gl[v].n) {
-            order[b] = order[b - 1];
-            b--;
-        }
-        order[b] = v;
-    }
-    for (uint32_t k = 0; k < n; k++) {
-        stat(nt_gfx_gl_call_name(order[k]), (fi_query_t){.kind = FI_Q_GL_CALL, .a = order[k]}, fr->summary.gl[order[k]].n);
-    }
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_groups(const fi_frame_t *fr) {
     static const char *const k_heads[FI_METRIC_COUNT] = {"requests", "GL draws", "GL calls", "upload B", "drops"};
@@ -1656,7 +1588,7 @@ static void declare_groups(const fi_frame_t *fr) {
     uint32_t hidden = 0;
     for (uint32_t g = 0; g < fr->group_count; g++) {
         const fi_cell_t *c = &fr->summary.group[(size_t)g * FI_METRIC_COUNT];
-        if (c[FI_METRIC_DRAWS].n + c[FI_METRIC_CALLS].n + c[FI_METRIC_DROPS].n == 0) {
+        if (!fi_group_has_work(fr, g)) {
             continue;
         }
         if (shown == SHOWN) {
@@ -1701,13 +1633,14 @@ static void declare_info_page(void) {
             declare_insights(fr);
             declare_groups(fr);
             declare_uploads_by_buffer(fr);
-            declare_draws(fr);
-            declare_transfers(fr);
-            declare_resources(fr);
+            declare_numbers(fr, "draws", "Draws");
+            declare_numbers(fr, "uploads", "Uploads (bytes sent to GL)");
+            textf(&k_text, "command stream bytes %u (counter only)", fr->view.counters.stream_bytes);
+            declare_numbers(fr, "resources", "Resources (bytes requested from GL, from definitions)");
         }
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(640), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 3}}) {
             declare_funnel(fr);
-            declare_gl_calls(fr);
+            declare_numbers(fr, "gl calls", "GL calls by name");
             declare_counters(fr);
         }
     }
@@ -1858,7 +1791,7 @@ static void link_line(const fi_frame_t *fr, const char *what, uint32_t record) {
 static struct {
     uint32_t epoch, at;
     fi_state_view_t st; /* compared with the previous draw and the previous GL draw */
-    uint32_t ordinal;   /* GL draw calls up to and including this draw */
+    fi_verdict_t verdict;
     uint32_t children[40];
     uint32_t child_count, child_total;
 } s_panel = {.epoch = FI_NONE};
@@ -1879,7 +1812,7 @@ static void panel_cache(const fi_frame_t *fr, uint32_t at) {
             s_panel.children[s_panel.child_count++] = i;
         }
     }
-    s_panel.ordinal = fi_draw_ordinal(fr, at);
+    s_panel.verdict = fi_verdict(fr, at);
 }
 
 static const fi_state_view_t *panel_state(const fi_frame_t *fr, uint32_t at) {
@@ -1889,28 +1822,29 @@ static const fi_state_view_t *panel_state(const fi_frame_t *fr, uint32_t at) {
 
 /* For a draw, the answer to "did it cost a GL draw call, and why": merged, or new and what broke the merge. */
 static void declare_verdict(const fi_frame_t *fr, uint32_t id) {
-    const nt_gfx_event_t *e = &fr->view.events[id];
-    if (!fi_is_draw(e)) {
-        return;
-    }
-    if (fi_joined(fr, id) != FI_NONE) {
-        text("MERGED: no new GL draw call; its range joined an earlier draw", &k_warn);
-        link_line(fr, "joined ", fi_joined(fr, id));
-        return;
-    }
-    if (e->result != NT_GFX_RESULT_ACCEPTED) {
-        textf(&k_bad, "%s: nothing drawn", nt_gfx_result_name(e->result));
-        return;
-    }
     panel_cache(fr, id);
-    textf(&k_head, "NEW GL draw call %u of %u", s_panel.ordinal, nt_gfx_draw_calls(&fr->view.counters));
-    if (e->operation == NT_GFX_OP_DRAW_INSTANCED || e->operation == NT_GFX_OP_DRAW_INDEXED_INSTANCED) {
-        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) { text("instanced draws never merge: joining them would change gl_InstanceID", &k_wrap); }
-    } else if (fr->brk[id] != FI_BREAK_NONE) {
-        textf(&k_warn, "not merged: %s", fi_break_name((fi_break_t)fr->brk[id]));
-        if (fr->cause[id] != FI_NONE) {
-            link_line(fr, "because of ", fr->cause[id]);
+    const fi_verdict_t *v = &s_panel.verdict;
+    switch ((fi_verdict_kind_t)v->kind) {
+    case FI_VERDICT_MERGED:
+        text("MERGED: no new GL draw call; its range joined an earlier draw", &k_warn);
+        link_line(fr, "joined ", v->joined);
+        break;
+    case FI_VERDICT_FAILED:
+        textf(&k_bad, "%s: nothing drawn", nt_gfx_result_name(fr->view.events[id].result));
+        break;
+    case FI_VERDICT_NEW:
+        textf(&k_head, "NEW GL draw call %u of %u", v->ordinal, nt_gfx_draw_calls(&fr->view.counters));
+        if (v->instanced) {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) { text("instanced draws never merge: joining them would change gl_InstanceID", &k_wrap); }
+        } else if (v->brk != FI_BREAK_NONE) {
+            textf(&k_warn, "not merged: %s", fi_break_name((fi_break_t)v->brk));
+            if (v->cause != FI_NONE) {
+                link_line(fr, "because of ", v->cause);
+            }
         }
+        break;
+    case FI_VERDICT_NOT_DRAW:
+        break;
     }
 }
 
@@ -1992,10 +1926,11 @@ static void declare_state(const fi_frame_t *fr, const fi_state_view_t *st, bool 
     const bool compared = st->was != FI_NONE;
     char title[96];
     char prefix[48];
-    (void)snprintf(title, sizeof(title), "Engine state  (violet: a different value than at the %s)", st->was_name);
+    const bool link_was = st->compare == FI_COMPARE_PREVIOUS_DRAW; /* the frame start is only a point in time */
+    (void)snprintf(title, sizeof(title), "Engine state  (violet: a different value than at the %s)", fi_compare_name(st->compare, false));
     section(compared ? title : "Engine state");
-    if (compared && st->link_was) {
-        (void)snprintf(prefix, sizeof(prefix), "%s ", st->was_name);
+    if (compared && link_was) {
+        (void)snprintf(prefix, sizeof(prefix), "%s ", fi_compare_name(st->compare, false));
         link_line(fr, prefix, st->was);
     }
     uint32_t k = 0;
@@ -2003,14 +1938,14 @@ static void declare_state(const fi_frame_t *fr, const fi_state_view_t *st, bool 
         state_line(fr, &lines[k]);
     }
     const uint32_t prev_issue = st->was_gl_at;
-    (void)snprintf(title, sizeof(title), "GL state  (violet: a different value than at the %s)", st->was_gl_name);
+    (void)snprintf(title, sizeof(title), "GL state  (violet: a different value than at the %s)", fi_compare_name(st->compare, true));
     section(prev_issue != FI_NONE ? title : "GL state");
     if (prev_issue != FI_NONE) {
         if (button(*all ? "show changes only" : "show all GL state", &k_text, false)) {
             *all = !*all;
         }
-        if (st->link_was) {
-            (void)snprintf(prefix, sizeof(prefix), "%s ", st->was_gl_name);
+        if (link_was) {
+            (void)snprintf(prefix, sizeof(prefix), "%s ", fi_compare_name(st->compare, true));
             link_line(fr, prefix, prev_issue);
         }
     }
@@ -2025,8 +1960,8 @@ static void declare_state(const fi_frame_t *fr, const fi_state_view_t *st, bool 
     if (st->gl.full) {
         text("more GL state than the inspector tracks: the rest is not shown", &k_warn);
     }
-    if (shown == 0) {
-        textf(&k_dim, "no GL state changed since the %s", st->was_gl_name);
+    if (shown == 0 && prev_issue != FI_NONE) {
+        textf(&k_dim, "no GL state changed since the %s", fi_compare_name(st->compare, true));
     }
 }
 // #endregion
@@ -2240,7 +2175,7 @@ static void declare_status(void) {
         break;
     case PAGE_COMMANDS: {
         const fi_frame_t *fr = frame_sel();
-        const bool draw = s.selected < fr->view.count && is_mergeable_draw(&fr->view.events[s.selected]);
+        const bool draw = s.selected < fr->view.count && fi_is_mergeable_draw(&fr->view.events[s.selected]);
         textf(&k_dim, "%sUp/Down select  -/+ or Left/Right fold  D/P next draw/pass (Shift: back)  Backspace parent  Alt+Left/Right back/fwd (pages too)  Ctrl+C copy  Esc clear filter",
               draw ? "Enter: the draw it joined or what broke the merge   " : "");
         break;
@@ -2516,34 +2451,39 @@ static nt_material_t make_material(const char *label) {
  * line: answers on stdout, no window and no gfx. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static int run_query(int argc, char *argv[]) {
+    static fi_file_t files[MAX_FILES];
     const bool serve = strcmp(argv[1], "--serve") == 0;
     (void)nt_fs_init();
+    fi_session_t session = {.files = files};
     char line[1024] = "";
+    size_t at = 0;
     const char *frame = NULL;
-    int a = 2;
-    for (; a < argc; a++) {
+    bool command = false;
+    for (int a = 2; a < argc; a++) {
         if (strcmp(argv[a], "--frame") == 0 && a + 1 < argc) {
             frame = argv[++a];
-        } else if (!serve && fi_query_command(argv[a])) {
-            break;
-        } else if (s.file_count == MAX_FILES || !fi_file_open(&s.files[s.file_count], argv[a])) {
-            (void)fprintf(stderr, "frame_inspector: cannot read %s\n", argv[a]);
+        } else if (command || (!serve && fi_query_command(argv[a]))) {
+            command = true;
+            const int n = snprintf(line + at, sizeof(line) - at, "%s%s", at > 0 ? " " : "", argv[a]);
+            if (n < 0 || (size_t)n >= sizeof(line) - at) {
+                (void)fprintf(stderr, "frame_inspector: the command is longer than %u characters\n", (unsigned)sizeof(line) - 1U);
+                return 1;
+            }
+            at += (size_t)n;
+        } else if (session.file_count == MAX_FILES || !fi_file_open(&files[session.file_count], argv[a])) {
+            (void)fprintf(stderr, session.file_count > 0 && !serve ? "frame_inspector: unknown command or unreadable file %s (help lists the commands)\n" : "frame_inspector: cannot read %s\n",
+                          argv[a]);
             return 1;
-        } else if (s.files[s.file_count++].frame_count == 0) {
+        } else if (files[session.file_count++].frame_count == 0) {
             (void)fprintf(stderr, "frame_inspector: %s holds no capture\n", argv[a]);
             return 1;
         }
     }
-    for (size_t at = 0; a < argc; a++) {
-        const int n = snprintf(line + at, sizeof(line) - at, "%s%s", at > 0 ? " " : "", argv[a]);
-        at += n > 0 && (size_t)n < sizeof(line) - at ? (size_t)n : 0U;
-    }
-    if (s.file_count == 0 || (!serve && line[0] == '\0')) {
+    if (session.file_count == 0 || (!serve && !command)) {
         (void)fprintf(stderr, "usage: frame_inspector query FILE... [--frame SEQUENCE] COMMAND [ARGS]\n"
                               "       frame_inspector --serve FILE... [--frame SEQUENCE]   (a command per stdin line)\n");
         return 1;
     }
-    fi_session_t session = {.files = s.files, .file_count = s.file_count};
     fi_out_t out = {0};
     char select[48];
     (void)snprintf(select, sizeof(select), "frame %s", frame != NULL ? frame : "");
@@ -2551,19 +2491,26 @@ static int run_query(int argc, char *argv[]) {
     if (ok && !serve) {
         ok = fi_query(&session, line, &out);
     }
-    if (out.len > 0) {
-        (void)fwrite(out.text, 1, out.len, stdout);
-    }
+    (void)printf("%s%s%s%.*s", serve && frame != NULL ? "> " : "", serve && frame != NULL ? select : "", serve && frame != NULL ? "\n" : "", (int)out.len, out.text != NULL ? out.text : "");
     while (serve && fgets(line, sizeof(line), stdin) != NULL) {
+        const bool whole = strchr(line, '\n') != NULL || feof(stdin) != 0;
         line[strcspn(line, "\r\n")] = '\0';
+        for (int c = 0; !whole && c != '\n' && c != EOF;) { /* drop the rest of a line too long to read */
+            c = getchar();
+        }
+        if (line[0] == '\0') {
+            continue;
+        }
         out.len = 0;
-        (void)fi_query(&session, line, &out);
-        (void)printf("> %s\n%.*s", line, (int)out.len, out.text != NULL ? out.text : "");
+        if (whole) {
+            (void)fi_query(&session, line, &out);
+        }
+        (void)printf("> %s\n%.*s%s", line, (int)out.len, out.text != NULL ? out.text : "", whole ? "" : "error: the line is too long\n");
         (void)fflush(stdout);
     }
     free(out.text);
-    for (uint32_t f = 0; f < s.file_count; f++) {
-        fi_file_close(&s.files[f]);
+    for (uint32_t f = 0; f < session.file_count; f++) {
+        fi_file_close(&files[f]);
     }
     nt_fs_shutdown();
     return ok ? 0 : 1;

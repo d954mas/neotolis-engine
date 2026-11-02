@@ -29,6 +29,8 @@ bool fi_is_draw(const nt_gfx_event_t *e) {
            (e->operation == NT_GFX_OP_DRAW || e->operation == NT_GFX_OP_DRAW_INSTANCED || e->operation == NT_GFX_OP_DRAW_INDEXED || e->operation == NT_GFX_OP_DRAW_INDEXED_INSTANCED);
 }
 
+bool fi_is_mergeable_draw(const nt_gfx_event_t *e) { return e->kind == NT_GFX_EVENT_OP && (e->operation == NT_GFX_OP_DRAW || e->operation == NT_GFX_OP_DRAW_INDEXED); }
+
 bool fi_is_draw_call(uint32_t call) {
     return call == NT_GFX_GL_glDrawArrays || call == NT_GFX_GL_glDrawArraysInstanced || call == NT_GFX_GL_glDrawElements || call == NT_GFX_GL_glDrawElementsInstanced;
 }
@@ -1098,7 +1100,7 @@ static bool is_draw_op(const nt_gfx_event_t *e) { return e->link == 0 && fi_is_d
 static bool is_draw_issue(const nt_gfx_event_t *e) { return e->kind == NT_GFX_EVENT_BACKEND && fi_is_draw_call(e->detail); }
 
 void fi_state_at(const fi_frame_t *frame, uint32_t at, fi_state_view_t *out) {
-    *out = (fi_state_view_t){.was_name = "previous draw", .was_gl_name = "previous GL draw", .link_was = true};
+    *out = (fi_state_view_t){.compare = FI_COMPARE_PREVIOUS_DRAW};
     fi_request_state(frame, at, &out->req);
     out->was = previous(frame, at, is_draw_op);
     out->was_req = out->req;
@@ -1135,7 +1137,7 @@ bool fi_state_frame(const fi_frame_t *frame, bool end, fi_state_view_t *out) {
     if (start == FI_NONE) {
         return false;
     }
-    *out = (fi_state_view_t){.was = FI_NONE, .was_gl_at = FI_NONE, .gl_at = start, .was_name = "", .was_gl_name = ""};
+    *out = (fi_state_view_t){.was = FI_NONE, .was_gl_at = FI_NONE, .gl_at = start};
     fi_request_state(frame, start, &out->req);
     fi_gl_state(frame, start, &out->gl);
     out->was_req = out->req;
@@ -1144,8 +1146,7 @@ bool fi_state_frame(const fi_frame_t *frame, bool end, fi_state_view_t *out) {
         out->was = start;
         out->was_gl_at = start;
         out->gl_at = last;
-        out->was_name = "frame start";
-        out->was_gl_name = "frame start";
+        out->compare = FI_COMPARE_FRAME_START;
         out->was_gl = out->gl;
         fi_request_state(frame, last, &out->req);
         fi_gl_state(frame, last, &out->gl);
@@ -1153,12 +1154,24 @@ bool fi_state_frame(const fi_frame_t *frame, bool end, fi_state_view_t *out) {
     return true;
 }
 
-uint32_t fi_draw_ordinal(const fi_frame_t *frame, uint32_t at) {
-    uint32_t n = 0;
-    for (uint32_t i = 0; i <= at && i < frame->view.count; i++) {
-        n += is_draw_op(&frame->view.events[i]) && frame->view.events[i].result == NT_GFX_RESULT_ACCEPTED ? 1U : 0U;
+fi_verdict_t fi_verdict(const fi_frame_t *frame, uint32_t record) {
+    const nt_gfx_event_t *e = &frame->view.events[record];
+    fi_verdict_t v = {.kind = FI_VERDICT_NOT_DRAW, .joined = fi_joined(frame, record), .cause = frame->cause[record], .brk = frame->brk[record]};
+    if (!fi_is_draw(e)) {
+        return v;
     }
-    return n;
+    if (v.joined != FI_NONE) {
+        v.kind = FI_VERDICT_MERGED;
+    } else if (e->result != NT_GFX_RESULT_ACCEPTED) {
+        v.kind = FI_VERDICT_FAILED;
+    } else {
+        v.kind = FI_VERDICT_NEW;
+        v.instanced = !fi_is_mergeable_draw(e);
+        for (uint32_t i = 0; i <= record; i++) {
+            v.ordinal += is_draw_op(&frame->view.events[i]) && frame->view.events[i].result == NT_GFX_RESULT_ACCEPTED ? 1U : 0U;
+        }
+    }
+    return v;
 }
 // #endregion
 

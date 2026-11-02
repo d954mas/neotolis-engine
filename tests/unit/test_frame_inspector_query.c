@@ -1,5 +1,5 @@
-/* Frame inspector query mode on the native fixture: every command answers, groups add up to the frame, a draw's
- * record tells whether it merged and why not. */
+/* Frame inspector query mode and the state views it shares with the window, on the native fixture (frame 51:
+ * 47 draw requests, 9 GL draw calls, groups shape/sprite/text). */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,8 +15,9 @@ static fi_out_t s_out;
 
 void setUp(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_fs_init());
-    TEST_ASSERT_TRUE(fi_file_open(&s_file, NT_NATIVE_FIXTURE));
+    const bool opened = fi_file_open(&s_file, NT_NATIVE_FIXTURE);
     nt_fs_shutdown();
+    TEST_ASSERT_TRUE(opened);
     s_session = (fi_session_t){.files = &s_file, .file_count = 1};
 }
 
@@ -26,7 +27,7 @@ void tearDown(void) {
     s_out = (fi_out_t){0};
 }
 
-/* The answer to one command line, NUL-terminated. */
+/* The answer to one command line, NUL-terminated; a failed command still says why. */
 static const char *ask(const char *line, bool ok) {
     s_out.len = 0;
     TEST_ASSERT_EQUAL_MESSAGE(ok, fi_query(&s_session, line, &s_out), line);
@@ -34,72 +35,117 @@ static const char *ask(const char *line, bool ok) {
     return s_out.text;
 }
 
-static void test_every_command_answers(void) {
-    static const char *const k_lines[] = {"help",          "frames",      "frame 51",   "summary",       "groups",      "record @0",         "state @300",          "state init",
-                                          "state end all", "find glDraw", "list draws", "list problems", "list merged", "list group sprite", "list op draw_indexed"};
-    for (uint32_t k = 0; k < sizeof(k_lines) / sizeof(k_lines[0]); k++) {
-        (void)ask(k_lines[k], true);
+static void assert_holds(const char *text, const char *want) { TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, want), want); }
+
+static void test_commands_answer_and_reject_bad_input(void) {
+    static const char *const k_ok[] = {"help",       "frames",     "frame 51",      "frame 51 0",  "summary",     "groups",          "record @0",
+                                       "state @300", "state init", "state end all", "find glDraw", "list merged", "list g2.gl_draws"};
+    for (uint32_t k = 0; k < sizeof(k_ok) / sizeof(k_ok[0]); k++) {
+        (void)ask(k_ok[k], true);
     }
-    (void)ask("bogus", false);
-    (void)ask("frame 7", false);
-    (void)ask("record @999999", false);
-    (void)ask("list group nothing-like-it", false);
+    static const char *const k_bad[] = {"bogus",         "frame 7", "frame 51x",    "frame 51 1",        "record @999999",  "record @3x",
+                                        "state @5 most", "find",    "list nothing", "list g99.gl_draws", "list g2.nothing", ""};
+    for (uint32_t k = 0; k < sizeof(k_bad) / sizeof(k_bad[0]); k++) {
+        (void)ask(k_bad[k], false);
+    }
+    const size_t all = strlen(ask("state @700 all", true)); /* tabs and trailing spaces change nothing */
+    TEST_ASSERT_EQUAL_size_t(all, strlen(ask("state\t@700  all  ", true)));
+    TEST_ASSERT_GREATER_THAN_size_t(strlen(ask("state @700", true)), all);
 }
 
-/* The total row of groups equals the frame's numbers: every GL draw call belongs to one group. */
+/* Every number summary prints has a key, and list KEY prints exactly the records it counts. */
+static void test_every_number_lists_its_records(void) {
+    static fi_number_t numbers[FI_NUMBERS];
+    const fi_frame_t *fr = &s_file.frames[0];
+    const uint32_t n = fi_numbers(fr, numbers);
+    TEST_ASSERT_GREATER_THAN_UINT32(20, n);
+    char want[96];
+    for (uint32_t k = 0; k < n; k++) {
+        (void)snprintf(want, sizeof(want), "\n%-36s %10llu  # ", numbers[k].key, (unsigned long long)numbers[k].value);
+        TEST_ASSERT_NOT_NULL_MESSAGE(strstr(ask("summary", true), want), numbers[k].key);
+        char line[64];
+        (void)snprintf(line, sizeof(line), "list %s", numbers[k].key);
+        (void)snprintf(want, sizeof(want), "records %llu\n", (unsigned long long)fi_cell(fr, numbers[k].q).n);
+        TEST_ASSERT_NOT_NULL_MESSAGE(strstr(ask(line, true), want), numbers[k].key);
+    }
+    assert_holds(ask("summary", true), "\ngl_draw_calls                                 9  # ");
+    assert_holds(ask("list merged", true), "records 38\n");
+    assert_holds(ask("list gl_draw_calls", true), "records 9\n");
+}
+
+/* Each group row sums into the frame: 9 GL draw calls as the engine counted them, 5 of them for sprites. */
 static void test_groups_add_up_to_the_frame(void) {
     const char *text = ask("groups", true);
-    const char *total = strstr(text, "  total\n");
-    TEST_ASSERT_NOT_NULL(total);
-    while (total > text && total[-1] != '\n') {
-        total--;
+    assert_holds(text, "\ng2 19 5 23 0 0  # > sprite\n");
+    unsigned long long sum[5] = {0};
+    unsigned long long total[5] = {0};
+    for (const char *l = text; *l != '\0'; l = strchr(l, '\n') + 1) {
+        const bool row = l[0] == 'g';
+        if (row || strncmp(l, "total ", 6) == 0) {
+            char *at = strchr(l, ' ');
+            for (uint32_t k = 0; k < 5; k++) {
+                const unsigned long long v = strtoull(at, &at, 10);
+                sum[k] += row ? v : 0U;
+                total[k] = row ? total[k] : v;
+            }
+        }
     }
-    unsigned long long n[5] = {0};
-    char *at = (char *)total;
+    TEST_ASSERT_EQUAL_UINT64(nt_gfx_draw_calls(&s_file.frames[0].view.counters), sum[1]);
+    TEST_ASSERT_EQUAL_UINT64(9, sum[1]);
+    TEST_ASSERT_EQUAL_UINT64(47, sum[0]);
     for (uint32_t k = 0; k < 5; k++) {
-        n[k] = strtoull(at, &at, 10);
+        TEST_ASSERT_EQUAL_UINT64(sum[k], total[k]);
     }
-    const fi_summary_t *sm = &s_file.frames[0].summary;
-    TEST_ASSERT_EQUAL_UINT64(sm->vertices.n, n[0]);
-    TEST_ASSERT_EQUAL_UINT64(sm->draw_calls.n, n[1]);
-    TEST_ASSERT_EQUAL_UINT64(sm->gl_any.n, n[2]);
-    TEST_ASSERT_EQUAL_UINT64(sm->upload[2].sum, n[3]);
-    TEST_ASSERT_EQUAL_UINT64(sm->drops.n, n[4]);
-    TEST_ASSERT_GREATER_THAN_UINT64(0, n[1]);
 }
 
-/* A merged draw names the draw it joined; a draw that broke the merge names the break and its cause. */
+/* @224 starts a new GL draw because a vertex input was set before it; @233 joins it; @204 is instanced. */
 static void test_record_tells_merged_and_broken_draws(void) {
+    const char *text = ask("record @224", true);
+    assert_holds(text, "new_gl_draw 3 of 9\nnot_merged  # a command recorded between\nbecause @223  VERTEX_INPUT");
+    assert_holds(text, "caused @680  glDrawElements");
+    text = ask("record @233", true);
+    assert_holds(text, "merged  # no new GL draw call");
+    assert_holds(text, "joined @224 ");
+    assert_holds(ask("record @204", true), "new_gl_draw 1 of 9\nnot_merged instanced");
+}
+
+/* A draw's state compares with the previous draw; its GL state is its own last call, or the call of the draw a
+ * merged draw joined. The frame's end compares with its start. */
+static void test_state_views(void) {
     const fi_frame_t *fr = &s_file.frames[0];
-    uint32_t merged = FI_NONE;
-    uint32_t broken = FI_NONE;
-    for (uint32_t i = 0; i < fr->view.count; i++) {
-        merged = merged == FI_NONE && fi_joined(fr, i) != FI_NONE ? i : merged;
-        broken = broken == FI_NONE && fr->brk[i] != FI_BREAK_NONE && fr->cause[i] != FI_NONE ? i : broken;
+    static fi_state_view_t v;
+    fi_state_at(fr, 635, &v);
+    TEST_ASSERT_EQUAL_UINT32(623, v.was);
+    TEST_ASSERT_EQUAL_UINT32(712, v.gl_at);
+    TEST_ASSERT_EQUAL_UINT32(709, v.was_gl_at);
+    TEST_ASSERT_EQUAL_UINT8(FI_COMPARE_PREVIOUS_DRAW, v.compare);
+    TEST_ASSERT_EQUAL_UINT32(9, fi_verdict(fr, 635).ordinal);
+    fi_state_at(fr, 233, &v);
+    TEST_ASSERT_EQUAL_UINT32(224, v.was);
+    TEST_ASSERT_EQUAL_UINT32(680, v.gl_at);
+    TEST_ASSERT_TRUE(fi_state_frame(fr, false, &v));
+    TEST_ASSERT_EQUAL_UINT32(FI_NONE, v.was);
+    TEST_ASSERT_EQUAL_UINT32(194, v.gl_at);
+    TEST_ASSERT_TRUE(fi_state_frame(fr, true, &v));
+    TEST_ASSERT_EQUAL_UINT32(194, v.was);
+    TEST_ASSERT_EQUAL_UINT32(fr->view.count - 1U, v.gl_at);
+    TEST_ASSERT_EQUAL_UINT8(FI_COMPARE_FRAME_START, v.compare);
+    static fi_state_line_t lines[FI_STATE_LINES];
+    const uint32_t n = fi_state_lines(fr, &v, lines);
+    uint32_t scissor = FI_NONE;
+    for (uint32_t k = 0; k < n; k++) {
+        scissor = lines[k].gl && strcmp(lines[k].name, "GL_SCISSOR_TEST") == 0 ? k : scissor;
     }
-    TEST_ASSERT_NOT_EQUAL(FI_NONE, merged);
-    TEST_ASSERT_NOT_EQUAL(FI_NONE, broken);
-    char line[64];
-    char want[96];
-    (void)snprintf(line, sizeof(line), "record @%u", merged);
-    const char *text = ask(line, true);
-    (void)snprintf(want, sizeof(want), "MERGED: no new GL draw call");
-    TEST_ASSERT_NOT_NULL(strstr(text, want));
-    (void)snprintf(want, sizeof(want), "joined @%u ", fi_joined(fr, merged));
-    TEST_ASSERT_NOT_NULL(strstr(text, want));
-    (void)snprintf(line, sizeof(line), "record @%u", broken);
-    text = ask(line, true);
-    TEST_ASSERT_NOT_NULL(strstr(text, "NEW GL draw call"));
-    (void)snprintf(want, sizeof(want), "not merged: %s\n", fi_break_name((fi_break_t)fr->brk[broken]));
-    TEST_ASSERT_NOT_NULL(strstr(text, want));
-    (void)snprintf(want, sizeof(want), "because of @%u ", fr->cause[broken]);
-    TEST_ASSERT_NOT_NULL(strstr(text, want));
+    TEST_ASSERT_NOT_EQUAL(FI_NONE, scissor);
+    TEST_ASSERT_TRUE(lines[scissor].changed); /* enabled at the start, disabled at the end */
 }
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_every_command_answers);
+    RUN_TEST(test_commands_answer_and_reject_bad_input);
+    RUN_TEST(test_every_number_lists_its_records);
     RUN_TEST(test_groups_add_up_to_the_frame);
     RUN_TEST(test_record_tells_merged_and_broken_draws);
+    RUN_TEST(test_state_views);
     return UNITY_END();
 }

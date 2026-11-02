@@ -1,8 +1,8 @@
 #ifndef FI_QUERY_H
 #define FI_QUERY_H
 
-/* Frame inspector text: records, state and a frame's numbers as plain lines. The window shows these lines and
- * the query mode prints them, so an answer and the window agree. No UI and no gfx backend. */
+/* Frame inspector text: record and state lines the window and the query mode both show, the frame's numbers
+ * both list, and the query commands. No UI and no gfx backend. */
 
 #include "fi_model.h"
 
@@ -25,6 +25,23 @@ typedef struct {
 #define FI_STATE_LINES (16U + FI_GL_SLOTS)
 uint32_t fi_state_lines(const fi_frame_t *frame, const fi_state_view_t *view, fi_state_line_t out[FI_STATE_LINES]);
 
+/* What a state view is compared with, as text: "previous draw", "previous GL draw", "frame start". */
+const char *fi_compare_name(uint8_t compare, bool gl);
+
+/* A number of the frame: a key for scripts, its meaning, its value and the query for the records behind it. The
+ * Information page shows the same numbers; summary prints them and list KEY prints their records. */
+typedef struct {
+    char key[48];
+    char meaning[96];
+    const char *section;
+    fi_query_t q;
+    uint64_t value;
+} fi_number_t;
+#define FI_NUMBERS (32U + (FI_OBJECTS * FI_RES_COUNT * 2U) + ((uint32_t)NT_GFX_OP_COUNT * (FI_RESULTS + 3U)) + (uint32_t)NT_GFX_GL_COUNT)
+uint32_t fi_numbers(const fi_frame_t *frame, fi_number_t out[FI_NUMBERS]);
+/* Whether a group holds draw requests, GL calls or drops: groups and the Information page show only these. */
+bool fi_group_has_work(const fi_frame_t *frame, uint32_t group);
+
 /* Text appended to a malloc'd buffer that grows; the caller frees text. */
 typedef struct {
     char *text;
@@ -41,8 +58,7 @@ typedef struct {
 /* Whether a word names a command. */
 bool fi_query_command(const char *word);
 /* Runs one command line and appends its answer; false for an unknown command or a bad argument (the answer
- * says why). Commands: help, frames, frame SEQUENCE, summary, groups, record @N, state @N|init|end [all],
- * find TEXT, list draws|problems|merged|group NAME|op NAME. */
+ * says why). The help command lists the commands. */
 bool fi_query(fi_session_t *session, const char *line, fi_out_t *out);
 
 #endif /* FI_QUERY_H */

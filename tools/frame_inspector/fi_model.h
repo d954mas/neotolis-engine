@@ -180,22 +180,31 @@ typedef struct {
 } fi_gl_state_t;
 void fi_gl_state(const fi_frame_t *frame, uint32_t at, fi_gl_state_t *out);
 
+/* What a state view is compared with. */
+typedef enum { FI_COMPARE_NONE, FI_COMPARE_PREVIOUS_DRAW, FI_COMPARE_FRAME_START } fi_compare_t;
 /* Request and GL state at a record, next to the state at an earlier record it is compared with. */
 typedef struct {
     fi_request_state_t req, was_req;
     fi_gl_state_t gl, was_gl;
     uint32_t gl_at;          /* the record whose GL state is shown: an operation's last GL call */
     uint32_t was, was_gl_at; /* the records compared with, FI_NONE: nothing */
-    const char *was_name, *was_gl_name;
-    bool link_was; /* a draw worth a link; the frame start is only a point in time */
+    uint8_t compare;         /* fi_compare_t */
 } fi_state_view_t;
 /* At a record, compared with the previous draw request and the previous GL draw call. */
 void fi_state_at(const fi_frame_t *frame, uint32_t at, fi_state_view_t *out);
 /* The state begin_frame left (init), or after the frame's last record compared with it (end); false when the
  * frame recorded no begin_frame state. */
 bool fi_state_frame(const fi_frame_t *frame, bool end, fi_state_view_t *out);
-/* GL draw calls issued up to and including this draw request. */
-uint32_t fi_draw_ordinal(const fi_frame_t *frame, uint32_t at);
+/* Whether a draw request cost a GL draw call: merged into an earlier draw (joined), failed, or new; a new one has
+ * its ordinal among the frame's GL draw calls and, unless instanced, what broke the merge (brk, cause). */
+typedef enum { FI_VERDICT_NOT_DRAW, FI_VERDICT_MERGED, FI_VERDICT_FAILED, FI_VERDICT_NEW } fi_verdict_kind_t;
+typedef struct {
+    uint8_t kind; /* fi_verdict_kind_t */
+    uint8_t brk;  /* fi_break_t */
+    bool instanced;
+    uint32_t joined, cause, ordinal;
+} fi_verdict_t;
+fi_verdict_t fi_verdict(const fi_frame_t *frame, uint32_t record);
 
 bool fi_matches(const fi_frame_t *frame, uint32_t record, fi_query_t q);
 fi_cell_t fi_cell(const fi_frame_t *frame, fi_query_t q);
@@ -218,8 +227,9 @@ bool fi_same_setting(const fi_frame_t *frame, uint32_t a, uint32_t b);
 /* Whether two records that set one GL slot leave the same value: an inherited cache entry and a call compare
  * by the bound name. */
 bool fi_gl_same(const fi_frame_t *frame, const fi_gl_slot_t *slot, uint32_t a, uint32_t b);
-bool fi_is_draw(const nt_gfx_event_t *e); /* a draw request of any kind */
-bool fi_is_draw_call(uint32_t call);      /* glDrawArrays, glDrawElements and their instanced forms */
+bool fi_is_draw(const nt_gfx_event_t *e);           /* a draw request of any kind */
+bool fi_is_mergeable_draw(const nt_gfx_event_t *e); /* a plain or indexed draw: instanced draws never merge */
+bool fi_is_draw_call(uint32_t call);                /* glDrawArrays, glDrawElements and their instanced forms */
 /* Each counter next to its recount from the records; the frame storage total and every op and GL call either
  * side counted. stream_bytes has no recount: command sizes are not recorded. */
 typedef struct {
