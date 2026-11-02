@@ -1,12 +1,16 @@
 /* Frame inspector: opens capture files (render architecture, "Capture text") and shows what each recorded
- * frame did. Usage: frame_inspector [file...] [--frame SEQUENCE] [--page frames|commands|info|init|end]
+ * frame did. Usage: frame_inspector [file...] [--frame INDEX] [--page frames|commands|info|init|end]
  * [--select RECORD] [--filter TEXT] [--monkey SECONDS [SEED]]; Open... adds more files. --frame takes the
- * capture's "frame sequence=", --select a record's @ number in that frame. Run it by its path: its asset pack
+ * frame's index across the files (query frames lists them), --select a record's @ number in that frame. Run it by its path: its asset pack
  * is found next to argv[0].
  * Pages: Frames (per-file tracks of draw calls, GL calls, upload and records on one zoomable axis; a click
  * picks a frame, a click again opens it), Commands (the logical tree with a panel for the selection or a
  * Shift range), Information (numbers that filter the tree to their records), Init and End state.
- * --monkey drives random clicks, drags, wheel and keys for that long and prints the frame times. */
+ * --monkey drives random clicks, drags, wheel and keys for that long and prints the frame times.
+ * Without a window, for scripts and agents: frame_inspector query FILE... [--frame INDEX] COMMAND [ARGS]
+ * answers one command; frame_inspector --serve FILE... [--frame INDEX] answers a command per stdin line,
+ * each answer between a "> command" line and a "= ok" or "= error" line. Answers are "key value  # meaning" lines; help lists the commands:
+ * frames, frame, summary, groups, record @N, state @N|init|end [all], find TEXT, list KEY (a summary key). */
 
 #include "app/nt_app.h"
 #include "atlas/nt_atlas.h"
@@ -15,6 +19,7 @@
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "fi_model.h"
+#include "fi_query.h"
 #include "file_dialog/nt_file_dialog.h"
 #include "font/nt_font.h"
 #include "frame_inspector.h"
@@ -44,6 +49,10 @@
 
 #include <ctype.h>
 #include <math.h>
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -286,21 +295,6 @@ static void monkey_frame_time(void) {
 // #endregion
 
 // #region helpers
-static bool contains_ci(const char *text, size_t len, const char *needle) {
-    const size_t n = strlen(needle);
-    for (size_t i = 0; n > 0 && i + n <= len; i++) {
-        size_t k = 0;
-        while (k < n && tolower((unsigned char)text[i + k]) == tolower((unsigned char)needle[k])) {
-            k++;
-        }
-        if (k == n) {
-            return true;
-        }
-    }
-    return n == 0;
-}
-
-static bool is_mergeable_draw(const nt_gfx_event_t *e) { return e->kind == NT_GFX_EVENT_OP && (e->operation == NT_GFX_OP_DRAW || e->operation == NT_GFX_OP_DRAW_INDEXED); }
 
 /* A file name shortened in the middle, so both its start and its extension stay readable. */
 static void short_name(const char *name, char *buf, size_t size) {
@@ -312,218 +306,12 @@ static void short_name(const char *name, char *buf, size_t size) {
     }
 }
 
-static const char *gl_enum_name(uint32_t v) {
-    switch (v) {
-    case 0x8D40U:
-        return "GL_FRAMEBUFFER";
-    case 0x8892U:
-        return "GL_ARRAY_BUFFER";
-    case 0x8893U:
-        return "GL_ELEMENT_ARRAY_BUFFER";
-    case 0x8A11U:
-        return "GL_UNIFORM_BUFFER";
-    case 0x88EBU:
-        return "GL_PIXEL_PACK_BUFFER";
-    case 0x88ECU:
-        return "GL_PIXEL_UNPACK_BUFFER";
-    case 0x8F36U:
-        return "GL_COPY_READ_BUFFER";
-    case 0x8F37U:
-        return "GL_COPY_WRITE_BUFFER";
-    case 0x0BE2U:
-        return "GL_BLEND";
-    case 0x0B71U:
-        return "GL_DEPTH_TEST";
-    case 0x0B44U:
-        return "GL_CULL_FACE";
-    case 0x0C11U:
-        return "GL_SCISSOR_TEST";
-    case 0x8037U:
-        return "GL_POLYGON_OFFSET_FILL";
-    case 0x0B90U:
-        return "GL_STENCIL_TEST";
-    case 0x0CF5U:
-        return "GL_UNPACK_ALIGNMENT";
-    case 0x0D05U:
-        return "GL_PACK_ALIGNMENT";
-    case 0x0DE1U:
-        return "GL_TEXTURE_2D";
-    case 0x8513U:
-        return "GL_TEXTURE_CUBE_MAP";
-    default:
-        return NULL;
-    }
-}
-
-/* GL enums by argument position, for the calls whose arguments are enums. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static const char *arg_enum(uint32_t call, uint32_t index, uint32_t v, char *buf, size_t size) {
-    static const char *const k_modes[] = {"GL_POINTS", "GL_LINES", "GL_LINE_LOOP", "GL_LINE_STRIP", "GL_TRIANGLES", "GL_TRIANGLE_STRIP", "GL_TRIANGLE_FAN"};
-    static const char *const k_funcs[] = {"GL_NEVER", "GL_LESS", "GL_EQUAL", "GL_LEQUAL", "GL_GREATER", "GL_NOTEQUAL", "GL_GEQUAL", "GL_ALWAYS"};
-    static const char *const k_blend[] = {"GL_SRC_COLOR", "GL_ONE_MINUS_SRC_COLOR", "GL_SRC_ALPHA", "GL_ONE_MINUS_SRC_ALPHA",
-                                          "GL_DST_ALPHA", "GL_ONE_MINUS_DST_ALPHA", "GL_DST_COLOR", "GL_ONE_MINUS_DST_COLOR"};
-    switch (call) {
-    case NT_GFX_GL_glEnable:
-    case NT_GFX_GL_glDisable:
-    case NT_GFX_GL_glBindBuffer:
-    case NT_GFX_GL_glBindBufferRange:
-    case NT_GFX_GL_glBindFramebuffer:
-    case NT_GFX_GL_glBindTexture:
-    case NT_GFX_GL_glPixelStorei:
-        return index == 0 ? gl_enum_name(v) : NULL;
-    case NT_GFX_GL_glActiveTexture:
-        (void)snprintf(buf, size, "GL_TEXTURE%u", v - 0x84C0U);
-        return index == 0 && v >= 0x84C0U && v < 0x84E0U ? buf : NULL;
-    case NT_GFX_GL_glClear:
-        (void)snprintf(buf, size, "%s%s%s", (v & 0x4000U) != 0 ? "COLOR|" : "", (v & 0x100U) != 0 ? "DEPTH|" : "", (v & 0x400U) != 0 ? "STENCIL|" : "");
-        buf[strlen(buf) > 0 ? strlen(buf) - 1U : 0U] = '\0';
-        return index == 0 && v != 0 ? buf : NULL;
-    case NT_GFX_GL_glDrawArrays:
-    case NT_GFX_GL_glDrawArraysInstanced:
-    case NT_GFX_GL_glDrawElements:
-    case NT_GFX_GL_glDrawElementsInstanced:
-        if (index == 0 && v < 7) {
-            return k_modes[v];
-        }
-        if (index == 2 && (call == NT_GFX_GL_glDrawElements || call == NT_GFX_GL_glDrawElementsInstanced)) {
-            return v == 0x1401U ? "GL_UNSIGNED_BYTE" : (v == 0x1403U ? "GL_UNSIGNED_SHORT" : (v == 0x1405U ? "GL_UNSIGNED_INT" : NULL)); // NOLINT(readability-avoid-nested-conditional-operator)
-        }
-        return NULL;
-    case NT_GFX_GL_glDepthFunc:
-        return index == 0 && v >= 0x200U && v < 0x208U ? k_funcs[v - 0x200U] : NULL;
-    case NT_GFX_GL_glCullFace:
-        return index == 0 && v == 0x404U ? "GL_FRONT" : (index == 0 && v == 0x405U ? "GL_BACK" : NULL); // NOLINT(readability-avoid-nested-conditional-operator)
-    case NT_GFX_GL_glBlendFuncSeparate:
-        if (v <= 1U) {
-            return v == 0 ? "GL_ZERO" : "GL_ONE";
-        }
-        return v >= 0x300U && v < 0x308U ? k_blend[v - 0x300U] : NULL;
-    case NT_GFX_GL_glBlendEquationSeparate:
-        return v == 0x8006U ? "GL_FUNC_ADD" : (v == 0x800AU ? "GL_FUNC_SUBTRACT" : (v == 0x800BU ? "GL_FUNC_REVERSE_SUBTRACT" : NULL)); // NOLINT(readability-avoid-nested-conditional-operator)
-    default:
-        return NULL;
-    }
-}
-
-static const char *alias_prefix(uint32_t kind) {
-    static const char *const k_short[] = {"obj", "shader", "prog", "pipe", "vi", "buf", "tex", "smp", "rt", "layout"};
-    return kind < sizeof(k_short) / sizeof(k_short[0]) ? k_short[kind] : "obj";
-}
-
-/* pipe#3 for a handle: kinds are numbered in order of first appearance in the frame. */
-static void alias_of(const fi_frame_t *fr, uint32_t kind, uint32_t object, char *buf, size_t size) {
-    const uint32_t k = fi_alias(fr, kind, object);
-    if (k != 0) {
-        (void)snprintf(buf, size, "%s#%u", alias_prefix(kind), k);
-    } else {
-        (void)snprintf(buf, size, "%s:%u", alias_prefix(kind), object);
-    }
-}
-
-static void append(char *buf, size_t size, size_t *at, const char *src, size_t n) {
-    for (size_t i = 0; i < n && *at + 1 < size; i++) {
-        buf[(*at)++] = src[i];
-    }
-    buf[*at] = '\0';
-}
-
-static bool token_is(const char *t, size_t n, const char *prefix) { return n >= strlen(prefix) && memcmp(t, prefix, strlen(prefix)) == 0; }
-
-/* The GL call's integer arguments, enums by name: (GL_SCISSOR_TEST). */
-static void append_args(const nt_gfx_event_t *e, char *buf, size_t size, size_t *at) {
-    const uint32_t count = e->arg_count & 15U;
-    for (uint32_t k = 0; k < count && k < 12U; k++) {
-        char decoded[48];
-        const char *name = arg_enum(e->detail, k, e->data.backend.args[k], decoded, sizeof(decoded));
-        char number[16];
-        (void)snprintf(number, sizeof(number), "%u", e->data.backend.args[k]);
-        append(buf, size, at, k == 0 ? "(" : ",", 1);
-        append(buf, size, at, name != NULL ? name : number, strlen(name != NULL ? name : number));
-    }
-    if (count > 0) {
-        append(buf, size, at, ")", 1);
-    }
-}
-
-/* The record's capture-text line without what the row shows elsewhere: the kind tag of operations and
- * GL calls, op=STATE, the result (its own column), the link to the row's parent and draw details (the
- * panel's). Handles read as short names (pipe#3) and GL calls as calls: glEnable(GL_SCISSOR_TEST). */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void row_text(const fi_frame_t *fr, uint32_t id, char *buf, size_t size) {
-    const nt_gfx_event_t *e = &fr->view.events[id];
-    const char *line = NULL;
-    const size_t len = fi_record_text(fr, id, &line);
-    const bool call = e->kind == NT_GFX_EVENT_BACKEND || e->kind == NT_GFX_EVENT_SKIP;
-    char parent_link[24];
-    (void)snprintf(parent_link, sizeof(parent_link), "link=@%u", fr->parent[id]);
-    size_t at = 0;
-    buf[0] = '\0';
-    char alias[32];
-    for (size_t i = 0; i < len;) {
-        size_t j = i;
-        bool quoted = false;
-        while (j < len && (quoted || line[j] != ' ')) {
-            if (line[j] == '\\' && j + 1 < len) {
-                j++;
-            } else if (line[j] == '"') {
-                quoted = !quoted;
-            }
-            j++;
-        }
-        const char *t = line + i;
-        const size_t n = j - i;
-        const bool tag = i == 0 && (e->kind == NT_GFX_EVENT_OP || call);
-        i = j + 1;
-        const bool draw_detail = e->kind == NT_GFX_EVENT_OP && (token_is(t, n, "first=") || token_is(t, n, "vertices=") || token_is(t, n, "instances=") || token_is(t, n, "joined="));
-        if (tag || draw_detail || token_is(t, n, "result=") || token_is(t, n, "args=[") || (call && token_is(t, n, "op=")) || (n == strlen(parent_link) && memcmp(t, parent_link, n) == 0)) {
-            continue;
-        }
-        if (at > 0 && buf[at - 1] != ' ') {
-            append(buf, size, &at, " ", 1);
-        }
-        if (token_is(t, n, "op=") || token_is(t, n, "call=")) {
-            const size_t skip = t[0] == 'o' ? 3 : 5;
-            append(buf, size, &at, t + skip, n - skip);
-            if (e->kind == NT_GFX_EVENT_BACKEND && t[0] == 'c') {
-                append_args(e, buf, size, &at);
-            }
-        } else if (token_is(t, n, "obj=") || token_is(t, n, "vertex_input=")) {
-            const bool obj = t[0] == 'o';
-            alias_of(fr, obj ? e->object_kind : NT_GFX_OBJECT_VERTEX_INPUT, obj ? e->object : e->data.draw.vertex_input, alias, sizeof(alias));
-            append(buf, size, &at, alias, strlen(alias));
-        } else if (e->kind == NT_GFX_EVENT_SKIP && token_is(t, n, "key=")) {
-            append(buf, size, &at, "cache ", 6); /* a skip records its cache key, not the GL arguments */
-            append(buf, size, &at, t, n);
-        } else {
-            append(buf, size, &at, t, n);
-        }
-    }
-    if (e->kind == NT_GFX_EVENT_OP && (e->operation == NT_GFX_OP_DRAW_INSTANCED || e->operation == NT_GFX_OP_DRAW_INDEXED_INSTANCED)) {
-        (void)snprintf(buf + at, size - at, " x%u", e->data.draw.instances);
-    } else if (e->kind == NT_GFX_EVENT_OP && e->operation == NT_GFX_OP_SCISSOR_ENABLE) {
-        (void)snprintf(buf + at, size - at, " %s", e->data.state.integers[0] != 0 ? "on" : "off");
-    }
-}
-
-/* The badge column: blank when a request did its work; what CACHE means for this operation; skips; failures. */
-static const char *result_text(const nt_gfx_event_t *e, const nt_ui_label_style_t **style) {
-    *style = &k_warn;
+/* The badge's color: a skip, redundant work (CACHE), a failure. */
+static const nt_ui_label_style_t *result_style(const nt_gfx_event_t *e) {
     if (e->kind == NT_GFX_EVENT_SKIP) {
-        *style = &k_skip;
-        return "GL skipped";
+        return &k_skip;
     }
-    if (e->kind != NT_GFX_EVENT_OP || e->result == NT_GFX_RESULT_NONE || e->result == NT_GFX_RESULT_ACCEPTED) {
-        return "";
-    }
-    if (e->result == NT_GFX_RESULT_CACHE) {
-        if (is_mergeable_draw(e)) {
-            return "merged";
-        }
-        return e->operation == NT_GFX_OP_CREATE ? "found" : "already set";
-    }
-    *style = &k_bad;
-    const char *name = nt_gfx_result_name(e->result);
-    return name != NULL ? name : "?";
+    return e->result == NT_GFX_RESULT_CACHE ? &k_warn : &k_bad;
 }
 // #endregion
 
@@ -547,7 +335,7 @@ static bool passes(const fi_frame_t *fr, uint32_t i) {
     if (s.filter[0] != '\0') {
         const char *line = NULL;
         const size_t len = fi_record_text(fr, i, &line);
-        return contains_ci(line, len, s.filter);
+        return fi_contains_ci(line, len, s.filter);
     }
     return true;
 }
@@ -1324,7 +1112,7 @@ static void row_label(const fi_frame_t *fr, uint32_t k, char *buf, size_t size) 
         return;
     }
     char body[512];
-    row_text(fr, id, body, sizeof(body));
+    fi_row_text(fr, id, body, sizeof(body));
     const int n = snprintf(buf, size, "%*s%s", indent, "", body);
     const nt_gfx_event_t *e = &fr->view.events[id];
     const bool group = e->kind == NT_GFX_EVENT_NOTE || e->kind == NT_GFX_EVENT_MARKER_PUSH;
@@ -1482,7 +1270,8 @@ static void record_cells(const fi_frame_t *fr, uint32_t id, const char *body) {
     const char *badge = "";
     if (id < FI_NODE_BASE) {
         (void)snprintf(number, sizeof(number), "@%u", id);
-        badge = result_text(&fr->view.events[id], &badge_style);
+        badge = fi_result_word(&fr->view.events[id]);
+        badge_style = result_style(&fr->view.events[id]);
     }
     const bool call = id < FI_NODE_BASE && (fr->view.events[id].kind == NT_GFX_EVENT_BACKEND || fr->view.events[id].kind == NT_GFX_EVENT_SKIP);
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(64), CLAY_SIZING_FIXED(ROW_H)}, .childAlignment = {.x = CLAY_ALIGN_X_RIGHT, .y = CLAY_ALIGN_Y_CENTER}}}) { text(number, call ? &k_dim : &k_text); }
@@ -1698,13 +1487,23 @@ static void declare_insights(const fi_frame_t *fr) {
     }
 }
 
-static void stat(const char *name, fi_query_t q, uint64_t value) {
-    if (value == 0 && fi_cell(frame_sel(), q).n == 0) {
-        return;
+/* One section of the frame's numbers, as summary prints them: the meaning, then the number. */
+static void declare_numbers(const fi_frame_t *fr, fi_section_t name, const char *title) {
+    static fi_number_t numbers[FI_NUMBERS];
+    static uint32_t epoch = FI_NONE;
+    static uint32_t count;
+    if (epoch != s.frame_epoch) {
+        epoch = s.frame_epoch;
+        count = fi_numbers(fr, false, numbers);
     }
-    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
-        CELL_(330) { text(name, &k_text); }
-        CELL_(90) { number(q, value, name); }
+    section(title);
+    for (uint32_t k = 0; k < count; k++) {
+        if (numbers[k].section == name) {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
+                CELL_(530) { text(numbers[k].meaning, &k_text); }
+                CELL_(90) { number(numbers[k].q, numbers[k].value, numbers[k].meaning); }
+            }
+        }
     }
 }
 
@@ -1756,38 +1555,6 @@ static void declare_funnel(const fi_frame_t *fr) {
     }
 }
 
-static void declare_draws(const fi_frame_t *fr) {
-    const fi_summary_t *sm = &fr->summary;
-    char name[96];
-    section("Draws");
-    stat("draw requests (ACCEPTED or CACHE)", (fi_query_t){.kind = FI_Q_VERTICES}, sm->vertices.n);
-    stat("merged into the previous draw (CACHE)", (fi_query_t){.kind = FI_Q_MERGED}, sm->merged.n);
-    stat("GL draw calls issued", (fi_query_t){.kind = FI_Q_DRAW_CALL}, sm->draw_calls.n);
-    for (uint32_t c = 0; c < NT_GFX_GL_COUNT; c++) {
-        if (fi_is_draw_call(c) && sm->gl[c].n > 0) {
-            (void)snprintf(name, sizeof(name), "  %s", nt_gfx_gl_call_name(c));
-            stat(name, (fi_query_t){.kind = FI_Q_GL_CALL, .a = c}, sm->gl[c].n);
-        }
-    }
-    stat("vertices (x instances)", (fi_query_t){.kind = FI_Q_VERTICES}, sm->vertices.sum);
-    stat("indices (x instances)", (fi_query_t){.kind = FI_Q_INDICES}, sm->indices.sum);
-    stat("instances of instanced draws", (fi_query_t){.kind = FI_Q_INSTANCES}, sm->instances.sum);
-}
-
-static void declare_transfers(const fi_frame_t *fr) {
-    const fi_summary_t *sm = &fr->summary;
-    section("Uploads (bytes sent to GL)");
-    stat("buffer upload calls", (fi_query_t){.kind = FI_Q_UPLOAD, .a = 0}, sm->upload[0].n);
-    stat("buffer upload bytes", (fi_query_t){.kind = FI_Q_UPLOAD, .a = 0}, sm->upload[0].sum);
-    stat("texture upload calls", (fi_query_t){.kind = FI_Q_UPLOAD, .a = 1}, sm->upload[1].n);
-    stat("texture upload bytes", (fi_query_t){.kind = FI_Q_UPLOAD, .a = 1}, sm->upload[1].sum);
-    stat("  of them frame storage at end_frame", (fi_query_t){.kind = FI_Q_FRAME_STORE}, sm->frame_store.sum);
-    ROW_(8) {
-        CELL_(190) { text("command stream bytes", &k_text); }
-        textf(&k_text, "%u (counter only)", fr->view.counters.stream_bytes);
-    }
-}
-
 /* Which buffers received the uploaded bytes, the biggest first; a click opens the upload. */
 static void declare_uploads_by_buffer(const fi_frame_t *fr) {
     enum { SHOWN = 16 };
@@ -1799,57 +1566,12 @@ static void declare_uploads_by_buffer(const fi_frame_t *fr) {
     char label[96];
     for (uint32_t k = 0; k < fr->buffer_upload_count && k < SHOWN; k++) {
         const fi_buffer_upload_t *u = &fr->buffer_upload[k];
-        alias_of(fr, NT_GFX_OBJECT_BUFFER, u->object, alias, sizeof(alias));
+        fi_alias_text(fr, NT_GFX_OBJECT_BUFFER, u->object, alias, sizeof(alias));
         (void)snprintf(label, sizeof(label), "%-10s %8.1f KiB in %u call%s", alias, (double)u->bytes / 1024.0, u->calls, u->calls == 1 ? "" : "s");
         open_record(button(label, &k_link, s.selected == u->first), u->first);
     }
     if (fr->buffer_upload_count > SHOWN) {
         textf(&k_dim, "... %u more buffers", fr->buffer_upload_count - SHOWN);
-    }
-}
-
-static void declare_resources(const fi_frame_t *fr) {
-    static const char *const k_res[FI_RES_COUNT] = {"live at frame start", "created", "destroyed"};
-    section("Resources (bytes requested from GL, from definitions)");
-    for (uint32_t kind = 1; kind < FI_OBJECTS; kind++) {
-        for (uint32_t r = 0; r < FI_RES_COUNT; r++) {
-            const fi_cell_t c = fr->summary.resource[kind][r];
-            if (c.n == 0) {
-                continue;
-            }
-            char name[96];
-            (void)snprintf(name, sizeof(name), "%s %s", nt_gfx_object_kind_name(kind), k_res[r]);
-            ROW_(8) {
-                CELL_(300) { text(name, &k_text); }
-                number((fi_query_t){.kind = FI_Q_RESOURCE, .a = kind, .b = (uint8_t)r}, c.n, name);
-                if (c.sum > 0) {
-                    textf(&k_dim, "%.1f KiB", (double)c.sum / 1024.0);
-                }
-            }
-        }
-    }
-}
-
-static void declare_gl_calls(const fi_frame_t *fr) {
-    section("GL calls by name");
-    uint32_t order[NT_GFX_GL_COUNT];
-    uint32_t n = 0;
-    for (uint32_t c = 0; c < NT_GFX_GL_COUNT; c++) {
-        if (fr->summary.gl[c].n > 0) {
-            order[n++] = c;
-        }
-    }
-    for (uint32_t a = 1; a < n; a++) { /* insertion sort, most frequent first */
-        const uint32_t v = order[a];
-        uint32_t b = a;
-        while (b > 0 && fr->summary.gl[order[b - 1]].n < fr->summary.gl[v].n) {
-            order[b] = order[b - 1];
-            b--;
-        }
-        order[b] = v;
-    }
-    for (uint32_t k = 0; k < n; k++) {
-        stat(nt_gfx_gl_call_name(order[k]), (fi_query_t){.kind = FI_Q_GL_CALL, .a = order[k]}, fr->summary.gl[order[k]].n);
     }
 }
 
@@ -1870,7 +1592,7 @@ static void declare_groups(const fi_frame_t *fr) {
     uint32_t hidden = 0;
     for (uint32_t g = 0; g < fr->group_count; g++) {
         const fi_cell_t *c = &fr->summary.group[(size_t)g * FI_METRIC_COUNT];
-        if (c[FI_METRIC_DRAWS].n + c[FI_METRIC_CALLS].n + c[FI_METRIC_DROPS].n == 0) {
+        if (!fi_group_has_work(fr, g)) {
             continue;
         }
         if (shown == SHOWN) {
@@ -1894,9 +1616,8 @@ static void declare_groups(const fi_frame_t *fr) {
 
 static void declare_counters(const fi_frame_t *fr);
 static void declare_details(const fi_frame_t *fr);
-typedef struct state_view state_view_t;
-static void declare_state(const fi_frame_t *fr, const state_view_t *st, bool *all);
-static const state_view_t *panel_state(const fi_frame_t *fr, uint32_t at);
+static void declare_state(const fi_frame_t *fr, const fi_state_view_t *st, bool *all);
+static const fi_state_view_t *panel_state(const fi_frame_t *fr, uint32_t at);
 static void declare_raw(const fi_frame_t *fr, uint32_t id);
 static void link_line(const fi_frame_t *fr, const char *what, uint32_t record);
 
@@ -1916,13 +1637,14 @@ static void declare_info_page(void) {
             declare_insights(fr);
             declare_groups(fr);
             declare_uploads_by_buffer(fr);
-            declare_draws(fr);
-            declare_transfers(fr);
-            declare_resources(fr);
+            declare_numbers(fr, FI_SECTION_FRAME, "Frame");
+            declare_numbers(fr, FI_SECTION_DRAWS, "Draws");
+            declare_numbers(fr, FI_SECTION_UPLOADS, "Uploads (bytes sent to GL)");
+            declare_numbers(fr, FI_SECTION_RESOURCES, "Resources (bytes requested from GL, from definitions)");
         }
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(640), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 3}}) {
             declare_funnel(fr);
-            declare_gl_calls(fr);
+            declare_numbers(fr, FI_SECTION_GL, "GL calls by name");
             declare_counters(fr);
         }
     }
@@ -2019,44 +1741,17 @@ static nt_ui_vlist_style_t list_style(float height) {
     return style;
 }
 
-/* Request and GL state at a record, next to the state at an earlier record it is compared with. */
-struct state_view {
-    fi_request_state_t req, was_req;
-    fi_gl_state_t gl, was_gl;
-    uint32_t was, was_gl_at; /* the records compared with, FI_NONE: nothing */
-    const char *was_name, *was_gl_name;
-    bool link_was; /* a draw worth a link; the frame start is only a point in time */
-};
-
-/* The last record begin_frame wrote: the state the game's first call starts from. */
-static uint32_t frame_start(const fi_frame_t *fr) {
-    const uint32_t top = fi_row_of(fr, FI_NODE_BASE + FI_NODE_BEGIN_FRAME);
-    uint32_t last = FI_NONE;
-    for (uint32_t r = top + 1U; top != FI_NONE && r < fr->row_count && fr->depth[r] > fr->depth[top]; r++) {
-        last = fr->row[r] < FI_NODE_BASE && (last == FI_NONE || fr->row[r] > last) ? fr->row[r] : last;
-    }
-    return last;
-}
-
 /* Init and End state show one view: the state at the frame's start, and at its end compared with the start. */
 static void declare_frame_state(const fi_frame_t *fr, bool end) {
     static struct {
-        uint32_t epoch, start;
-        state_view_t init, end;
+        uint32_t epoch;
+        bool recorded;
+        fi_state_view_t init, end;
     } view = {.epoch = FI_NONE};
     if (view.epoch != s.frame_epoch) {
         view.epoch = s.frame_epoch;
-        view.start = frame_start(fr);
-        const uint32_t start = view.start;
-        if (start != FI_NONE) {
-            view.init = (state_view_t){.was = FI_NONE, .was_gl_at = FI_NONE, .was_name = "", .was_gl_name = ""};
-            fi_request_state(fr, start, &view.init.req);
-            fi_gl_state(fr, start, &view.init.gl);
-            view.init.was_req = view.init.req;
-            view.end = (state_view_t){.was = start, .was_gl_at = start, .was_name = "frame start", .was_gl_name = "frame start", .was_req = view.init.req, .was_gl = view.init.gl};
-            fi_request_state(fr, fr->view.count - 1U, &view.end.req);
-            fi_gl_state(fr, fr->view.count - 1U, &view.end.gl);
-        }
+        view.recorded = fi_state_frame(fr, false, &view.init);
+        (void)fi_state_frame(fr, true, &view.end);
     }
     const nt_ui_scroll_style_t scroll = nt_ui_scroll_style_defaults();
     nt_ui_scroll_begin(
@@ -2068,7 +1763,7 @@ static void declare_frame_state(const fi_frame_t *fr, bool end) {
     } else {
         text("State the game's first call starts from: what begin_frame inherited. Its records are under begin_frame in Commands.", &k_dim);
     }
-    if (view.start == FI_NONE) {
+    if (!view.recorded) {
         text("The frame recorded no begin_frame state.", &k_dim);
     } else {
         declare_state(fr, end ? &view.end : &view.init, &s.state_all);
@@ -2080,7 +1775,7 @@ static void declare_frame_state(const fi_frame_t *fr, bool end) {
 // #region details
 static void link_line(const fi_frame_t *fr, const char *what, uint32_t record) {
     char body[400];
-    row_text(fr, record, body, sizeof(body));
+    fi_row_text(fr, record, body, sizeof(body));
     char buf[512];
     (void)snprintf(buf, sizeof(buf), "%s@%u  %s", what, record, body);
     const bool commands = s.page == PAGE_COMMANDS;
@@ -2099,36 +1794,21 @@ static void link_line(const fi_frame_t *fr, const char *what, uint32_t record) {
 /* What the selected-command panel needs from whole-frame scans, computed once per selection, not per UI frame. */
 static struct {
     uint32_t epoch, at;
-    state_view_t st; /* compared with the previous draw and the previous GL draw */
-    uint32_t gl_at;
-    uint32_t ordinal; /* GL draw calls up to and including this draw */
+    fi_state_view_t st; /* compared with the previous draw and the previous GL draw */
+    fi_verdict_t verdict;
     uint32_t children[40];
     uint32_t child_count, child_total;
 } s_panel = {.epoch = FI_NONE};
 
-static bool is_draw_op(const nt_gfx_event_t *e);
-static bool is_draw_issue(const nt_gfx_event_t *e);
-static uint32_t previous(const fi_frame_t *fr, uint32_t at, bool (*accept)(const nt_gfx_event_t *));
-
 static uint32_t panel_prev_draw(void) { return s_panel.st.was; }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void panel_cache(const fi_frame_t *fr, uint32_t at) {
     if (s_panel.epoch == s.frame_epoch && s_panel.at == at) {
         return;
     }
     s_panel.epoch = s.frame_epoch;
     s_panel.at = at;
-    state_view_t *st = &s_panel.st;
-    st->was_name = "previous draw";
-    st->was_gl_name = "previous GL draw";
-    st->link_was = true;
-    fi_request_state(fr, at, &st->req);
-    st->was = previous(fr, at, is_draw_op);
-    st->was_req = st->req;
-    if (st->was != FI_NONE) {
-        fi_request_state(fr, st->was, &st->was_req);
-    }
+    fi_state_at(fr, at, &s_panel.st);
     s_panel.child_count = 0;
     s_panel.child_total = 0;
     for (uint32_t i = at + 1U; i < fr->view.count; i++) {
@@ -2136,55 +1816,41 @@ static void panel_cache(const fi_frame_t *fr, uint32_t at) {
             s_panel.children[s_panel.child_count++] = i;
         }
     }
-    /* An operation's draw-phase calls issue at end_frame: its GL state is the one after its last call. A merged
-     * draw issued nothing; it ran with the call of the draw it joined. */
-    const uint32_t joined = fi_joined(fr, at);
-    const uint32_t source = joined != FI_NONE ? joined : at;
-    s_panel.gl_at = at;
-    for (uint32_t i = source + 1U; i < fr->view.count; i++) {
-        s_panel.gl_at = fr->parent[i] == source && fr->view.events[i].kind == NT_GFX_EVENT_BACKEND ? i : s_panel.gl_at;
-    }
-    fi_gl_state(fr, s_panel.gl_at, &st->gl);
-    st->was_gl_at = previous(fr, s_panel.gl_at, is_draw_issue);
-    st->was_gl.count = 0;
-    if (st->was_gl_at != FI_NONE) {
-        fi_gl_state(fr, st->was_gl_at, &st->was_gl);
-    }
-    s_panel.ordinal = 0;
-    for (uint32_t i = 0; i <= at; i++) {
-        s_panel.ordinal += is_draw_op(&fr->view.events[i]) && fr->view.events[i].result == NT_GFX_RESULT_ACCEPTED ? 1U : 0U;
-    }
+    s_panel.verdict = fi_verdict(fr, at);
 }
 
-static const state_view_t *panel_state(const fi_frame_t *fr, uint32_t at) {
+static const fi_state_view_t *panel_state(const fi_frame_t *fr, uint32_t at) {
     panel_cache(fr, at);
     return &s_panel.st;
 }
 
 /* For a draw, the answer to "did it cost a GL draw call, and why": merged, or new and what broke the merge. */
 static void declare_verdict(const fi_frame_t *fr, uint32_t id) {
-    const nt_gfx_event_t *e = &fr->view.events[id];
-    if (!fi_is_draw(e)) {
-        return;
-    }
-    if (fi_joined(fr, id) != FI_NONE) {
-        text("MERGED: no new GL draw call; its range joined an earlier draw", &k_warn);
-        link_line(fr, "joined ", fi_joined(fr, id));
-        return;
-    }
-    if (e->result != NT_GFX_RESULT_ACCEPTED) {
-        textf(&k_bad, "%s: nothing drawn", nt_gfx_result_name(e->result));
-        return;
-    }
     panel_cache(fr, id);
-    textf(&k_head, "NEW GL draw call %u of %u", s_panel.ordinal, nt_gfx_draw_calls(&fr->view.counters));
-    if (e->operation == NT_GFX_OP_DRAW_INSTANCED || e->operation == NT_GFX_OP_DRAW_INDEXED_INSTANCED) {
-        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) { text("instanced draws never merge: joining them would change gl_InstanceID", &k_wrap); }
-    } else if (fr->brk[id] != FI_BREAK_NONE) {
-        textf(&k_warn, "not merged: %s", fi_break_name((fi_break_t)fr->brk[id]));
-        if (fr->cause[id] != FI_NONE) {
-            link_line(fr, "because of ", fr->cause[id]);
+    const fi_verdict_t *v = &s_panel.verdict;
+    switch ((fi_verdict_kind_t)v->kind) {
+    case FI_VERDICT_MERGED:
+        text("MERGED: no new GL draw call; its range joined an earlier draw", &k_warn);
+        if (fi_joined(fr, id) != FI_NONE) {
+            link_line(fr, "joined ", fi_joined(fr, id));
         }
+        break;
+    case FI_VERDICT_FAILED:
+        textf(&k_bad, "%s: nothing drawn", nt_gfx_result_name(fr->view.events[id].result));
+        break;
+    case FI_VERDICT_NEW:
+        textf(&k_head, "NEW GL draw call %u of %u", v->ordinal, nt_gfx_draw_calls(&fr->view.counters));
+        if (!fi_is_mergeable_draw(&fr->view.events[id])) {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) { text("instanced draws never merge: joining them would change gl_InstanceID", &k_wrap); }
+        } else if (fr->brk[id] != FI_BREAK_NONE) {
+            textf(&k_warn, "not merged: %s", fi_break_name((fi_break_t)fr->brk[id]));
+            if (fr->cause[id] != FI_NONE) {
+                link_line(fr, "because of ", fr->cause[id]);
+            }
+        }
+        break;
+    case FI_VERDICT_NOT_DRAW:
+        break;
     }
 }
 
@@ -2199,7 +1865,7 @@ static void declare_details(const fi_frame_t *fr) {
         return;
     }
     char body[600];
-    row_text(fr, id, body, sizeof(body));
+    fi_row_text(fr, id, body, sizeof(body));
     textf(&k_head, "@%u", id);
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) { text(body, &k_wrap); }
     declare_verdict(fr, id);
@@ -2232,160 +1898,72 @@ static void declare_raw(const fi_frame_t *fr, uint32_t id) {
     const nt_gfx_event_t *e = &fr->view.events[id];
     if (e->kind <= NT_GFX_EVENT_ARGUMENT && e->object_kind != 0 && e->object_kind < FI_OBJECTS && e->object != 0) {
         char alias[32];
-        alias_of(fr, e->object_kind, e->object, alias, sizeof(alias));
+        fi_alias_text(fr, e->object_kind, e->object, alias, sizeof(alias));
         textf(&k_dim, "obj %u is %s", e->object, alias);
     }
 }
 // #endregion
 
 // #region state
-/* The last record before `at` that the predicate accepts, FI_NONE without one. */
-static uint32_t previous(const fi_frame_t *fr, uint32_t at, bool (*accept)(const nt_gfx_event_t *)) {
-    for (uint32_t i = at; i-- > 0;) {
-        if (accept(&fr->view.events[i])) {
-            return i;
-        }
-    }
-    return FI_NONE;
-}
-
-static bool is_draw_op(const nt_gfx_event_t *e) { return e->link == 0 && fi_is_draw(e); }
-static bool is_draw_issue(const nt_gfx_event_t *e) { return e->kind == NT_GFX_EVENT_BACKEND && fi_is_draw_call(e->detail); }
-
-static void state_line(const fi_frame_t *fr, const char *name, uint32_t record, uint32_t before, bool inherited, bool changed) {
+static void state_line(const fi_frame_t *fr, const fi_state_line_t *l) {
     ROW_(6) {
-        const nt_ui_label_style_t *style = inherited ? &k_dim : &k_text;
-        CELL_(210) { text(name, changed ? &k_changed : style); }
-        if (record == FI_NONE) {
+        const nt_ui_label_style_t *style = l->inherited ? &k_dim : &k_text;
+        CELL_(210) { text(l->name, l->changed ? &k_changed : style); }
+        if (l->now == FI_NONE) {
             text("unset", &k_dim);
         } else {
-            link_line(fr, inherited ? "inherited " : "", record);
+            link_line(fr, l->inherited ? "inherited " : "", l->now);
         }
     }
-    if (changed && before != FI_NONE) {
+    if (l->changed && l->before != FI_NONE) {
         ROW_(6) {
             CELL_(210) { text("  was", &k_changed); }
-            link_line(fr, "", before);
+            link_line(fr, "", l->before);
         }
     }
 }
-
-static void gl_slot_name(const fi_gl_slot_t *slot, char *buf, size_t size) {
-    const char *key = gl_enum_name(slot->key[0]);
-    char hex[16];
-    (void)snprintf(hex, sizeof(hex), "0x%x", slot->key[0]);
-    key = key != NULL ? key : hex;
-    switch (slot->call) {
-    case NT_GFX_GL_NONE:
-        (void)snprintf(buf, size, "fixed function");
-        break;
-    case NT_GFX_GL_glBindTexture:
-        (void)snprintf(buf, size, "texture unit %u", slot->key[0]);
-        break;
-    case NT_GFX_GL_glBindSampler:
-        (void)snprintf(buf, size, "sampler unit %u", slot->key[0]);
-        break;
-    case NT_GFX_GL_glBindBufferRange:
-        (void)snprintf(buf, size, "%s #%u", key, slot->key[1]);
-        break;
-    case NT_GFX_GL_glEnable:
-    case NT_GFX_GL_glBindBuffer:
-    case NT_GFX_GL_glBindFramebuffer:
-    case NT_GFX_GL_glPixelStorei:
-        (void)snprintf(buf, size, "%s", key);
-        break;
-    default:
-        (void)snprintf(buf, size, "%s", nt_gfx_gl_call_name(slot->call) + 2);
-        break;
-    }
-}
-
-/* The record that set this slot at the earlier point, FI_NONE when it was not set there. */
-static uint32_t slot_before(const fi_gl_slot_t *slot, const fi_gl_state_t *before) {
-    for (uint32_t p = 0; p < before->count; p++) {
-        const fi_gl_slot_t *old = &before->slot[p];
-        if (old->call == slot->call && old->key[0] == slot->key[0] && old->key[1] == slot->key[1]) {
-            return old->record;
-        }
-    }
-    return FI_NONE;
-}
-
-static bool scissor_on(const fi_frame_t *fr, uint32_t record) { return record != FI_NONE && fr->view.events[record].data.state.integers[0] != 0; }
 
 /* Request and GL state of a view; violet marks a value that differs from the record it is compared with.
  * `all` shows unchanged GL state too. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void declare_state(const fi_frame_t *fr, const state_view_t *st, bool *all) {
-    const fi_request_state_t *req = &st->req;
-    const fi_request_state_t *was_req = &st->was_req;
+static void declare_state(const fi_frame_t *fr, const fi_state_view_t *st, bool *all) {
+    static fi_state_line_t lines[FI_STATE_LINES];
+    const uint32_t n = fi_state_lines(fr, st, *all, lines);
     const bool compared = st->was != FI_NONE;
     char title[96];
     char prefix[48];
-    (void)snprintf(title, sizeof(title), "Engine state  (violet: a different value than at the %s)", st->was_name);
+    const bool link_was = st->compare == FI_COMPARE_PREVIOUS_DRAW; /* the frame start is only a point in time */
+    (void)snprintf(title, sizeof(title), "Engine state  (violet: a different value than at the %s)", fi_compare_name(st->compare, false));
     section(compared ? title : "Engine state");
-    if (compared && st->link_was) {
-        (void)snprintf(prefix, sizeof(prefix), "%s ", st->was_name);
+    if (compared && link_was) {
+        (void)snprintf(prefix, sizeof(prefix), "%s ", fi_compare_name(st->compare, false));
         link_line(fr, prefix, st->was);
     }
-    /* Grouped by stage: output, program, input, raster. */
-    const struct {
-        const char *name;
-        uint32_t now, before;
-    } rows[] = {{"output: pass", req->pass, was_req->pass},
-                {"program: pipeline", req->pipeline, was_req->pipeline},
-                {"program: textures", req->texture_set, was_req->texture_set},
-                {"input: vertex input", req->vertex_input, was_req->vertex_input},
-                {"raster: viewport", req->viewport, was_req->viewport},
-                {"raster: scissor", req->scissor, was_req->scissor},
-                {"raster: scissor on", req->scissor_enable, was_req->scissor_enable}};
-    for (uint32_t k = 0; k < sizeof(rows) / sizeof(rows[0]); k++) {
-        const uint32_t before = compared ? rows[k].before : rows[k].now;
-        bool changed = !fi_same_setting(fr, before, rows[k].now);
-        if (k + 1U == sizeof(rows) / sizeof(rows[0])) { /* unset scissor is off: a pass or a restore turned it off */
-            changed = scissor_on(fr, before) != scissor_on(fr, rows[k].now);
-        }
-        state_line(fr, rows[k].name, rows[k].now, before, rows[k].now != FI_NONE && fr->view.events[rows[k].now].kind == NT_GFX_EVENT_INITIAL, changed);
+    uint32_t k = 0;
+    for (; k < n && !lines[k].gl; k++) {
+        state_line(fr, &lines[k]);
     }
-    char name[48];
-    for (uint32_t k = 0; k < 8; k++) {
-        if (req->ubo[k] != FI_NONE || was_req->ubo[k] != FI_NONE) {
-            (void)snprintf(name, sizeof(name), "program: uniform slot %u", k);
-            const uint32_t before = compared ? was_req->ubo[k] : req->ubo[k];
-            state_line(fr, name, req->ubo[k], before, false, !fi_same_setting(fr, before, req->ubo[k]));
-        }
-    }
-    const fi_gl_state_t *gl_now = &st->gl;
-    const fi_gl_state_t *prev_gl = &st->was_gl;
     const uint32_t prev_issue = st->was_gl_at;
-    (void)snprintf(title, sizeof(title), "GL state  (violet: a different value than at the %s)", st->was_gl_name);
+    (void)snprintf(title, sizeof(title), "GL state  (violet: a different value than at the %s)", fi_compare_name(st->compare, true));
     section(prev_issue != FI_NONE ? title : "GL state");
     if (prev_issue != FI_NONE) {
         if (button(*all ? "show changes only" : "show all GL state", &k_text, false)) {
             *all = !*all;
         }
-        if (st->link_was) {
-            (void)snprintf(prefix, sizeof(prefix), "%s ", st->was_gl_name);
+        if (link_was) {
+            (void)snprintf(prefix, sizeof(prefix), "%s ", fi_compare_name(st->compare, true));
             link_line(fr, prefix, prev_issue);
         }
     }
-    uint32_t shown = 0;
-    for (uint32_t k = 0; k < gl_now->count; k++) {
-        const fi_gl_slot_t *slot = &gl_now->slot[k];
-        const uint32_t before = prev_issue != FI_NONE ? slot_before(slot, prev_gl) : slot->record;
-        const bool changed = !fi_gl_same(fr, slot, before, slot->record);
-        if (!*all && !changed && prev_issue != FI_NONE) {
-            continue;
-        }
-        gl_slot_name(slot, name, sizeof(name));
-        state_line(fr, name, slot->record, before, slot->inherited, changed);
-        shown++;
+    const uint32_t shown = n - k;
+    for (; k < n; k++) {
+        state_line(fr, &lines[k]);
     }
-    if (gl_now->full) {
+    if (st->gl.full) {
         text("more GL state than the inspector tracks: the rest is not shown", &k_warn);
     }
-    if (shown == 0) {
-        textf(&k_dim, "no GL state changed since the %s", st->was_gl_name);
+    if (shown == 0 && prev_issue != FI_NONE) {
+        textf(&k_dim, "no GL state changed since the %s", fi_compare_name(st->compare, true));
     }
 }
 // #endregion
@@ -2599,7 +2177,7 @@ static void declare_status(void) {
         break;
     case PAGE_COMMANDS: {
         const fi_frame_t *fr = frame_sel();
-        const bool draw = s.selected < fr->view.count && is_mergeable_draw(&fr->view.events[s.selected]);
+        const bool draw = s.selected < fr->view.count && fi_is_mergeable_draw(&fr->view.events[s.selected]);
         textf(&k_dim, "%sUp/Down select  -/+ or Left/Right fold  D/P next draw/pass (Shift: back)  Backspace parent  Alt+Left/Right back/fwd (pages too)  Ctrl+C copy  Esc clear filter",
               draw ? "Enter: the draw it joined or what broke the merge   " : "");
         break;
@@ -2792,22 +2370,8 @@ static void frame(void) {
 // #endregion
 
 // #region main
-/* The frame of a file whose capture sequence is `sequence` (the "frame sequence=" of its header). */
-static bool find_sequence(uint64_t sequence, uint32_t *file, uint32_t *frame) {
-    for (uint32_t f = 0; f < s.file_count; f++) {
-        for (uint32_t k = 0; k < s.files[f].frame_count; k++) {
-            if (s.files[f].frames[k].view.counters.frame_sequence == sequence) {
-                *file = f;
-                *frame = k;
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-/* Files to open, --monkey SECONDS [SEED], and where the window opens: --frame SEQUENCE (the capture's frame
- * sequence), --page frames|commands|info|init|end, --select RECORD (its @ number), --filter TEXT. */
+/* Files to open, --monkey SECONDS [SEED], and where the window opens: --frame INDEX (the frame's index across
+ * the files), --page frames|commands|info|init|end, --select RECORD (its @ number), --filter TEXT. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void parse_args(int argc, char *argv[]) {
     static const char *const k_pages[PAGE_COUNT] = {"frames", "commands", "info", "init", "end"};
@@ -2845,10 +2409,12 @@ static void parse_args(int argc, char *argv[]) {
     }
     uint32_t file = 0;
     uint32_t at = 0;
-    if (frame != NULL && find_sequence(strtoull(frame, NULL, 10), &file, &at)) {
+    char *end = NULL;
+    const uint64_t index = frame != NULL ? strtoull(frame, &end, 10) : 0U;
+    if (frame != NULL && isdigit((unsigned char)frame[0]) && *end == '\0' && fi_frame_at(s.files, s.file_count, index, &file, &at)) {
         select_frame(file, at);
     } else if (frame != NULL) {
-        nt_log_error("frame_inspector: no frame with sequence %s in the open files", frame);
+        nt_log_error("frame_inspector: no readable frame %s in the open files", frame);
     }
     if (filter != NULL) {
         (void)snprintf(s.filter, sizeof(s.filter), "%s", filter);
@@ -2871,7 +2437,88 @@ static nt_material_t make_material(const char *label) {
     return nt_material_create(&(nt_material_create_desc_t){.blend = nt_blend_alpha_premultiplied(), .depth_test = false, .depth_write = false, .cull_mode = NT_CULL_NONE, .label = label});
 }
 
+/* query FILE... [--frame INDEX] COMMAND [ARGS], or --serve FILE... [--frame INDEX] with a command per stdin
+ * line: answers on stdout, no window and no gfx. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static int run_query(int argc, char *argv[]) {
+    static fi_file_t files[MAX_FILES];
+#ifdef _WIN32
+    (void)_setmode(_fileno(stdout), _O_BINARY); /* answers end in \n on every OS: a client matches "= ok" exactly */
+#endif
+    const bool serve = strcmp(argv[1], "--serve") == 0;
+    (void)nt_fs_init();
+    fi_session_t session = {.files = files};
+    char line[1027] = ""; /* a 1023-character command, its \r\n and the NUL */
+    size_t at = 0;
+    const char *frame = NULL;
+    bool command = false;
+    for (int a = 2; a < argc; a++) {
+        if (!command && strcmp(argv[a], "--frame") == 0 && a + 1 < argc) {
+            frame = argv[++a];
+        } else if (command || (!serve && fi_query_command(argv[a]))) {
+            command = true;
+            const int n = snprintf(line + at, 1024U - at, "%s%s", at > 0 ? " " : "", argv[a]);
+            if (n < 0 || (size_t)n >= 1024U - at) {
+                (void)fprintf(stderr, "frame_inspector: the command is longer than 1023 characters\n");
+                return 1;
+            }
+            at += (size_t)n;
+        } else if (session.file_count == MAX_FILES || !fi_file_open(&files[session.file_count], argv[a])) {
+            (void)fprintf(stderr, session.file_count > 0 && !serve ? "frame_inspector: unknown command or unreadable file %s (help lists the commands)\n" : "frame_inspector: cannot read %s\n",
+                          argv[a]);
+            return 1;
+        } else if (files[session.file_count++].frame_count == 0) {
+            (void)fprintf(stderr, "frame_inspector: %s holds no capture\n", argv[a]);
+            return 1;
+        }
+    }
+    if ((session.file_count == 0 && strcmp(line, "help") != 0) || (!serve && !command)) {
+        (void)fprintf(stderr, "usage: frame_inspector query FILE... [--frame INDEX] COMMAND [ARGS]  (query help lists the commands)\n"
+                              "       frame_inspector --serve FILE... [--frame INDEX]   (a command per stdin line)\n");
+        return 1;
+    }
+    fi_out_t out = {0};
+    char select[48];
+    const int selected = snprintf(select, sizeof(select), "frame %s", frame != NULL ? frame : "");
+    bool ok = frame == NULL || (selected > 0 && (size_t)selected < sizeof(select) && fi_query(&session, select, &out));
+    if (ok && !serve) {
+        ok = fi_query(&session, line, &out);
+    }
+    const char *text = out.text != NULL ? out.text : "";
+    if (serve && frame != NULL) {
+        (void)printf("> %s\n%.*s%s= %s\n", select, (int)out.len, text, out.len > 0 ? "" : "error: the index is too long\n", ok ? "ok" : "error");
+    } else {
+        (void)printf("%.*s", (int)out.len, text);
+    }
+    (void)fflush(stdout); /* a client waits for this before it sends a command */
+    while (ok && serve && fgets(line, sizeof(line), stdin) != NULL) {
+        const bool whole = strchr(line, '\n') != NULL || feof(stdin) != 0;
+        for (int c = 0; !whole && c != '\n' && c != EOF;) { /* drop the rest of a line too long to read */
+            c = getchar();
+        }
+        line[strcspn(line, "\r\n")] = '\0';
+        if (whole && line[strspn(line, " \t")] == '\0') { /* a blank line asks nothing and gets no answer */
+            continue;
+        }
+        const bool fits = whole && strlen(line) <= 1023U;
+        out.len = 0;
+        const bool answered = fits && fi_query(&session, line, &out);
+        (void)printf("> %s\n%.*s%s= %s\n", line, (int)out.len, out.text != NULL ? out.text : "", fits ? "" : "error: the line is longer than 1023 characters\n", answered ? "ok" : "error");
+        (void)fflush(stdout);
+    }
+    free(out.text);
+    for (uint32_t f = 0; f < session.file_count; f++) {
+        fi_file_close(&files[f]);
+    }
+    nt_fs_shutdown();
+    return ok ? 0 : 1;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 int main(int argc, char *argv[]) {
+    if (argc > 1 && (strcmp(argv[1], "query") == 0 || strcmp(argv[1], "--serve") == 0)) {
+        return run_query(argc, argv);
+    }
     nt_engine_config_t config = {.app_name = "frame_inspector"};
     s.anchor = FI_NONE;
     s.axis_fit = true;

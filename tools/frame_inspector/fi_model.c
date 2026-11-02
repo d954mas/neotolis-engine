@@ -29,6 +29,8 @@ bool fi_is_draw(const nt_gfx_event_t *e) {
            (e->operation == NT_GFX_OP_DRAW || e->operation == NT_GFX_OP_DRAW_INSTANCED || e->operation == NT_GFX_OP_DRAW_INDEXED || e->operation == NT_GFX_OP_DRAW_INDEXED_INSTANCED);
 }
 
+bool fi_is_mergeable_draw(const nt_gfx_event_t *e) { return e->kind == NT_GFX_EVENT_OP && (e->operation == NT_GFX_OP_DRAW || e->operation == NT_GFX_OP_DRAW_INDEXED); }
+
 bool fi_is_draw_call(uint32_t call) {
     return call == NT_GFX_GL_glDrawArrays || call == NT_GFX_GL_glDrawArraysInstanced || call == NT_GFX_GL_glDrawElements || call == NT_GFX_GL_glDrawElementsInstanced;
 }
@@ -118,12 +120,27 @@ static fi_frame_t *push_frame(fi_file_t *file, uint32_t *cap) {
     return fr;
 }
 
+/* src with control bytes as \xNN, as capture text prints them: a file name or group key stays one line in
+ * an answer. */
+static void one_line(const char *src, char *buf, size_t size) {
+    size_t n = 0;
+    for (const char *c = src; *c != '\0' && n + 5U < size; c++) {
+        const uint8_t b = (uint8_t)*c;
+        if (b < 0x20U || b == 0x7fU) {
+            n += (size_t)snprintf(buf + n, size - n, "\\x%02x", b);
+        } else {
+            buf[n++] = *c;
+        }
+    }
+    buf[n] = '\0';
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void fi_file_load(fi_file_t *file, const char *name, char *text, size_t len) {
     memset(file, 0, sizeof(*file));
-    const size_t name_len = strlen(name);
-    file->name = (char *)fi_alloc(name_len + 1, 1);
-    memcpy(file->name, name, name_len);
+    const size_t name_size = (strlen(name) * 4U) + 5U;
+    file->name = (char *)fi_alloc(name_size, 1);
+    one_line(name, file->name, name_size);
     file->text = text;
     file->len = len;
     /* Records are the lines that start with their index: a file of empty lines asks for no memory. */
@@ -246,7 +263,9 @@ static uint32_t intern_group(fi_frame_t *fr, uint32_t *slot, uint32_t mask, uint
     fr->group_label[g] = label;
     const char *base = parent != 0 ? fr->group_key[parent] : "";
     const char *sep = note ? " > " : "/";
-    (void)snprintf(fr->group_key[g], FI_KEY_LEN, "%s%s%s", base, parent != 0 || note ? sep + (parent == 0) : "", label); /* "> ui" at the top */
+    char shown[FI_KEY_LEN];
+    one_line(label, shown, sizeof(shown));
+    (void)snprintf(fr->group_key[g], FI_KEY_LEN, "%s%s%s", base, parent != 0 || note ? sep + (parent == 0) : "", shown); /* "> ui" at the top */
     return g;
 }
 
@@ -834,11 +853,11 @@ uint32_t fi_counter_rows(const fi_frame_t *frame, fi_counter_row_t rows[FI_COUNT
     FI_ROW_("vertices", c->vertices, r.vertices, false);
     FI_ROW_("indices", c->indices, r.indices, false);
     FI_ROW_("instances", c->instances, r.instances, false);
-    FI_ROW_("buffer upload calls", c->buffer_upload_calls, r.buffer_upload_calls, false);
-    FI_ROW_("buffer upload bytes", c->buffer_upload_bytes, r.buffer_upload_bytes, true);
-    FI_ROW_("texture upload calls", c->texture_upload_calls, r.texture_upload_calls, false);
-    FI_ROW_("texture upload bytes", c->texture_upload_bytes, r.texture_upload_bytes, true);
-    FI_ROW_("frame storage bytes", frame_bytes, frame->summary.frame_store.sum, true);
+    FI_ROW_("buffer_upload_calls", c->buffer_upload_calls, r.buffer_upload_calls, false);
+    FI_ROW_("buffer_upload_bytes", c->buffer_upload_bytes, r.buffer_upload_bytes, true);
+    FI_ROW_("texture_upload_calls", c->texture_upload_calls, r.texture_upload_calls, false);
+    FI_ROW_("texture_upload_bytes", c->texture_upload_bytes, r.texture_upload_bytes, true);
+    FI_ROW_("frame_store_bytes", frame_bytes, frame->summary.frame_store.sum, true);
 #undef FI_ROW_
     for (uint32_t op = 0; op < NT_GFX_OP_COUNT; op++) {
         if (c->accepted[op] != 0 || r.accepted[op] != 0) {
@@ -1082,6 +1101,107 @@ void fi_gl_state(const fi_frame_t *frame, uint32_t at, fi_gl_state_t *out) {
             break;
         }
     }
+}
+
+/* The last record before `at` that the predicate accepts, FI_NONE without one. */
+static uint32_t previous(const fi_frame_t *fr, uint32_t at, bool (*accept)(const nt_gfx_event_t *)) {
+    for (uint32_t i = at; i-- > 0;) {
+        if (accept(&fr->view.events[i])) {
+            return i;
+        }
+    }
+    return FI_NONE;
+}
+
+static bool is_draw_op(const nt_gfx_event_t *e) { return e->link == 0 && fi_is_draw(e); }
+static bool is_draw_issue(const nt_gfx_event_t *e) { return e->kind == NT_GFX_EVENT_BACKEND && fi_is_draw_call(e->detail); }
+
+void fi_state_at(const fi_frame_t *frame, uint32_t at, fi_state_view_t *out) {
+    *out = (fi_state_view_t){.compare = FI_COMPARE_PREVIOUS_DRAW};
+    fi_request_state(frame, at, &out->req);
+    out->was = previous(frame, at, is_draw_op);
+    out->was_req = out->req;
+    if (out->was != FI_NONE) {
+        fi_request_state(frame, out->was, &out->was_req);
+    }
+    /* An operation's draw-phase calls issue at end_frame: its GL state is the one after its last call. A merged
+     * draw issued nothing; it ran with the call of the draw it joined. */
+    const uint32_t joined = fi_joined(frame, at);
+    const uint32_t source = joined != FI_NONE ? joined : at;
+    out->gl_at = at;
+    for (uint32_t i = source + 1U; i < frame->view.count; i++) {
+        out->gl_at = frame->parent[i] == source && frame->view.events[i].kind == NT_GFX_EVENT_BACKEND ? i : out->gl_at;
+    }
+    fi_gl_state(frame, out->gl_at, &out->gl);
+    out->was_gl_at = previous(frame, out->gl_at, is_draw_issue);
+    if (out->was_gl_at != FI_NONE) {
+        fi_gl_state(frame, out->was_gl_at, &out->was_gl);
+    }
+}
+
+/* The last record begin_frame wrote: the state the game's first call starts from. */
+static uint32_t frame_start(const fi_frame_t *fr) {
+    const uint32_t top = fi_row_of(fr, FI_NODE_BASE + FI_NODE_BEGIN_FRAME);
+    uint32_t last = FI_NONE;
+    for (uint32_t r = top + 1U; top != FI_NONE && r < fr->row_count && fr->depth[r] > fr->depth[top]; r++) {
+        last = fr->row[r] < FI_NODE_BASE && (last == FI_NONE || fr->row[r] > last) ? fr->row[r] : last;
+    }
+    return last;
+}
+
+bool fi_state_frame(const fi_frame_t *frame, bool end, fi_state_view_t *out) {
+    const uint32_t start = frame_start(frame);
+    if (start == FI_NONE) {
+        return false;
+    }
+    *out = (fi_state_view_t){.was = FI_NONE, .was_gl_at = FI_NONE, .gl_at = start};
+    fi_request_state(frame, start, &out->req);
+    fi_gl_state(frame, start, &out->gl);
+    out->was_req = out->req;
+    if (end) {
+        const uint32_t last = frame->view.count - 1U;
+        out->was = start;
+        out->was_gl_at = start;
+        out->gl_at = last;
+        out->compare = FI_COMPARE_FRAME_START;
+        out->was_gl = out->gl;
+        fi_request_state(frame, last, &out->req);
+        fi_gl_state(frame, last, &out->gl);
+    }
+    return true;
+}
+
+fi_verdict_t fi_verdict(const fi_frame_t *frame, uint32_t record) {
+    const nt_gfx_event_t *e = &frame->view.events[record];
+    fi_verdict_t v = {.kind = FI_VERDICT_NOT_DRAW};
+    if (!fi_is_draw(e)) {
+        return v;
+    }
+    if (e->result == NT_GFX_RESULT_CACHE) {
+        v.kind = FI_VERDICT_MERGED;
+    } else if (e->result != NT_GFX_RESULT_ACCEPTED) {
+        v.kind = FI_VERDICT_FAILED;
+    } else {
+        v.kind = FI_VERDICT_NEW;
+        for (uint32_t i = 0; i <= record; i++) {
+            v.ordinal += (i == record || is_draw_op(&frame->view.events[i])) && frame->view.events[i].result == NT_GFX_RESULT_ACCEPTED ? 1U : 0U;
+        }
+    }
+    return v;
+}
+
+bool fi_frame_at(const fi_file_t *files, uint32_t count, uint64_t index, uint32_t *file, uint32_t *frame) {
+    for (uint32_t f = 0; f < count; index -= files[f++].frame_count) {
+        if (index < files[f].frame_count) {
+            const bool readable = files[f].frames[index].view.events != NULL;
+            if (readable) {
+                *file = f;
+                *frame = (uint32_t)index;
+            }
+            return readable;
+        }
+    }
+    return false;
 }
 // #endregion
 

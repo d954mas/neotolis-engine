@@ -167,6 +167,14 @@ static void test_a_marker_and_a_note_of_one_label_differ(void) {
     TEST_ASSERT_EQUAL_UINT32(marker, fi_group_in(fr, fr, marker));
 }
 
+static void control_label_body(void) { NT_GFX_NOTE("a\nb", NT_NOTE_U32("n", 1)); }
+
+/* A label's line break shows as \x0a: a group key is one line wherever it is printed. */
+static void test_a_group_key_is_one_line(void) {
+    const fi_frame_t *fr = capture(control_label_body);
+    TEST_ASSERT_EQUAL_STRING("> a\\x0ab", fr->group_key[fr->group[find_kind(fr, NT_GFX_EVENT_NOTE, 0)]]);
+}
+
 /* The snapshot opens begin_frame; the frame storage upload of the uniform block belongs to end_frame. */
 static void test_phases_follow_the_frame(void) {
     const fi_frame_t *fr = capture(tree_body);
@@ -672,6 +680,7 @@ int main(void) {
     RUN_TEST(test_gl_slots_compare_by_name);
     RUN_TEST(test_gl_state_follows_issued_calls);
     RUN_TEST(test_damage_stays_inside_its_document);
+    RUN_TEST(test_a_group_key_is_one_line);
     RUN_TEST(test_an_overflowed_frame_opens);
     return UNITY_END();
 }
