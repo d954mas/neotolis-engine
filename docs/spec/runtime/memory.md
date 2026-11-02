@@ -1,8 +1,8 @@
 # Memory Policy
 
 Memory rules: no heap allocation in the hot path, preallocated component
-storages, resident asset metadata, transient pack blobs, and a per-frame bump
-scratch arena (`nt_mem_scratch`). Capacities split into compile-time hard caps
+storages, resident asset metadata, transient pack blobs, fixed-capacity bump
+arenas (`nt_arena_t`) and one global per-frame arena (`g_nt_mem_scratch`). Capacities split into compile-time hard caps
 and init-time component capacities chosen by the game.
 
 Related: [Frame Lifecycle](frame-lifecycle.md), [Component Storage](../data/component-storage.md), [Entity System](../data/entity.md)
@@ -31,24 +31,66 @@ Lifetime ≈ load operation or recent-use cache window.
 
 Examples: loaded pack blob, manifest read buffer, temporary decompression buffer if ever needed.
 
-### Frame scratch memory
+### Arenas
 
-Lifetime: from allocation until the next `nt_mem_scratch_reset()` (typically the start of the next frame, see [Frame Lifecycle — engine frame order](frame-lifecycle.md)).
+Lifetime: from allocation until the owner's next `nt_arena_reset` or a rewind
+to a mark taken before the allocation.
 
-Examples: render item arrays, temporary sort arrays, transient CPU batch buffers, build temp lists in render pass, `nt_ui_element_data_t` attached to CLAY elements via `NT_UI_DATA_*` macros.
-
-The engine provides a global bump arena in `engine/memory/nt_mem_scratch`:
+`nt_arena_t` (`engine/memory/nt_arena.h`) is a fixed-capacity bump allocator
+over memory its owner provides: a static array, a block from another arena
+(allocated with `_Alignof(max_align_t)`) or the owner's own `malloc`. The arena never allocates, grows or frees; the owner
+frees the memory. A game or module creates one when its allocations need a
+lifetime independent of frame scratch (an event log, a load-time workspace).
 
 ```c
-nt_mem_scratch_init(NT_MEM_SCRATCH_DEFAULT_SIZE_BYTES); // boot, default 512 KB
-// per frame (see frame-lifecycle.md):
-nt_mem_scratch_reset();            // start of frame
-nt_mem_scratch_alloc(size, align); // anywhere during the frame
-// pointers stay valid until the next nt_mem_scratch_reset()
-nt_mem_scratch_shutdown(); // exit
+alignas(max_align_t) static uint8_t buf[64 * 1024];
+nt_arena_t arena;
+nt_arena_init(&arena, buf, sizeof(buf)); // base aligned to max_align_t
+void *p = nt_arena_alloc(&arena, size, align);
+nt_arena_reset(&arena);                  // p is stale
 ```
 
-Type-safe macros: `NT_MEM_SCRATCH_ALLOC(T)`, `NT_MEM_SCRATCH_ALLOC_ARRAY(T, count)`.
+Allocation aligns `align` (a power of 2, at most `_Alignof(max_align_t)`)
+relative to `base`. Running out of space is a configuration error and asserts.
+`used` and `high_water` are readable fields; `high_water` is the peak `used`
+since init and survives reset and rewind. Typed macros pass `sizeof(T)` and
+`_Alignof(T)`: `NT_ARENA_ALLOC(arena, T)`, `NT_ARENA_ALLOC_ARRAY(arena, T, count)`.
+
+### Scoped rewind
+
+Lifetime: from allocation until the rewind that closes its scope.
+
+A mark is an earlier `used` of the same arena. `nt_arena_rewind(arena, mark)`
+returns the head to the mark in O(1); marks nest. Take a mark and rewind to it in the
+same function; never store a mark. A mark is invalid after a reset or an
+earlier rewind below it; the assert catches one only while it lies past the
+current head. A rewind frees everything allocated after the mark by any caller,
+so it closes only a scope whose allocations are consumed before it and that
+runs no foreign code which could keep its own allocations. Log sinks are the
+exception that runs everywhere, so a sink never allocates from `g_nt_mem_scratch`.
+Example: the rich-text solve rewinds its glyph atoms after placing them; it calls
+no game callback except log sinks, since object sizes are data.
+
+### Frame scratch memory
+
+Lifetime: from allocation until the next `nt_arena_reset(&g_nt_mem_scratch)` (typically the start of the next frame, see [Frame Lifecycle — engine frame order](frame-lifecycle.md)), or a scoped rewind.
+
+Examples: `nt_ui_element_data_t` attached to CLAY elements via `NT_UI_DATA_*`
+macros, widget payloads read by `nt_ui_walk`, game per-frame temporaries.
+
+`g_nt_mem_scratch` (`engine/memory/nt_mem_scratch.h`) is one global
+`nt_arena_t` that any engine module or game code may allocate from. It is used
+through the `nt_arena_*` functions and fields like any arena, and the game owns
+its memory like any arena's (a static buffer or its own malloc):
+
+```c
+alignas(max_align_t) static uint8_t s_scratch_mem[256 * 1024];  // the game picks the size
+nt_arena_init(&g_nt_mem_scratch, s_scratch_mem, sizeof s_scratch_mem);  // boot
+// per frame (see frame-lifecycle.md):
+nt_arena_reset(&g_nt_mem_scratch);               // start of frame
+nt_arena_alloc(&g_nt_mem_scratch, size, align);  // anywhere during the frame
+// pointers stay valid until the next reset or a rewind below them
+```
 
 ### Frame storage
 

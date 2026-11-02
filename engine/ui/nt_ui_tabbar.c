@@ -215,8 +215,7 @@ bool nt_ui_tab_begin(nt_ui_context_t *ctx, int index, bool active) {
         /* slice9 atlas bg: tint multiplies the art; no flat backgroundColor (the IMAGE carries it). Clay
          * rejects IMAGE + cornerRadius, so an IMAGE tab is NOT rounded here — rounding is baked into the
          * sprite's slice9 corners. (Setting both trips Clay's contract assert.) */
-        nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-        NT_ASSERT(p != NULL && "nt_ui_tabbar: scratch alloc failed (image_payload)");
+        nt_ui_image_payload_t *p = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
         *p = (nt_ui_image_payload_t){.atlas = bg.atlas, .region_index = bg.region, .slice9_scale = style->slice9_scale};
         decl.image = (Clay_ImageElementConfig){.imageData = p};
         decl.backgroundColor = nt_ui_unpack_tint(st->bg_tint);
@@ -270,8 +269,7 @@ static void tabbar_draw_icon_image(nt_ui_context_t *ctx, uint8_t fill_layer, con
     if (ic.region == NT_ATLAS_INVALID_REGION) {
         return;
     }
-    nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-    NT_ASSERT(p != NULL && "nt_ui_tabbar: scratch alloc failed (icon payload)");
+    nt_ui_image_payload_t *p = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
     *p = (nt_ui_image_payload_t){.atlas = ic.atlas, .region_index = ic.region, .origin_x = 0.5F, .origin_y = 0.5F, .slice9_scale = 1.0F};
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .image = (Clay_ImageElementConfig){.imageData = p}, .userData = NT_UI_CLAY_DATA(fill_layer)}) {}
 }

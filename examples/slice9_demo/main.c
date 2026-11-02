@@ -99,6 +99,7 @@ static const nt_ui_label_style_t g_child_label_style = {
 // #region engine state
 #define UI_ARENA_SIZE ((size_t)2U * 1024U * 1024U)
 #define SCRATCH_ARENA_SIZE ((size_t)256U * 1024U)
+_Alignas(max_align_t) static uint8_t s_scratch_mem[SCRATCH_ARENA_SIZE];
 
 static NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
 
@@ -352,7 +353,7 @@ static void frame(void) {
     if (!nt_example_frames_on()) {
         nt_input_poll();
     }
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
 
 #ifndef NT_PLATFORM_WEB
     if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
@@ -533,8 +534,8 @@ static void frame(void) {
 #endif
         .draw_calls = nt_gfx_draw_calls(&g_nt_gfx.counters),
         .mem_used = s_mem_used,
-        .scratch_hwm = (uint32_t)nt_mem_scratch_high_water_mark(),
-        .scratch_used = (uint32_t)nt_mem_scratch_used(),
+        .scratch_hwm = (uint32_t)g_nt_mem_scratch.high_water,
+        .scratch_used = (uint32_t)g_nt_mem_scratch.used,
     };
     nt_metrics_sample(&mf);
 #endif
@@ -571,7 +572,7 @@ int main(int argc, char *argv[]) {
 #endif
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
-    nt_mem_scratch_init(SCRATCH_ARENA_SIZE);
+    nt_arena_init(&g_nt_mem_scratch, s_scratch_mem, sizeof s_scratch_mem);
 
     nt_resource_register_type(NT_ASSET_TEXTURE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_texture, .deactivate = nt_gfx_deactivate_texture});
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
@@ -657,7 +658,6 @@ int main(int argc, char *argv[]) {
     nt_program_ref_drop(&s_text_program);
     nt_material_shutdown();
     nt_debug_overlay_shutdown();
-    nt_mem_scratch_shutdown();
     nt_resource_shutdown();
     nt_fs_shutdown();
     nt_http_shutdown();

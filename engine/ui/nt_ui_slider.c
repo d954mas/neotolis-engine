@@ -69,8 +69,7 @@ static inline float slider_value_to_frac(float value, float min, float max) { re
 
 /* Scratch element_data with optional opacity (no transform). */
 static nt_ui_element_data_t *slider_make_data(void *user_data, uint8_t layer, float opacity) {
-    nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
-    NT_ASSERT(d != NULL && "nt_ui_slider: scratch alloc failed (element_data)");
+    nt_ui_element_data_t *d = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_element_data_t);
     uint32_t flags = 0U;
     if (opacity >= 0.0F) {
         flags |= NT_UI_ELEM_FLAG_HAS_OPACITY;
@@ -155,8 +154,7 @@ static void slider_compose(nt_ui_context_t *ctx, const nt_ui_element_data_t *dat
     track_decl.userData = (void *)slider_make_data(user, layer, eased_opacity);
     /* Track background art on the container itself (no-art skip). */
     if (track_ref.atlas.id != 0U && track_ref.region != NT_ATLAS_INVALID_REGION) {
-        nt_ui_image_payload_t *tp = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-        NT_ASSERT(tp != NULL && "nt_ui_slider: scratch alloc failed (track payload)");
+        nt_ui_image_payload_t *tp = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
         *tp = (nt_ui_image_payload_t){.atlas = track_ref.atlas, .region_index = track_ref.region, .slice9_scale = 1.0F};
         track_decl.image = (Clay_ImageElementConfig){.imageData = tp};
         track_decl.backgroundColor = nt_ui_unpack_tint(cell->track_tint);
@@ -196,8 +194,7 @@ static void slider_compose(nt_ui_context_t *ctx, const nt_ui_element_data_t *dat
             const float usable_w = style->track_w - style->thumb_w;
             tt.offset_x = fraction * ((usable_w > 0.0F) ? usable_w : 0.0F);
         }
-        nt_ui_element_data_t *thumb_data = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
-        NT_ASSERT(thumb_data != NULL && "nt_ui_slider: scratch alloc failed (thumb data)");
+        nt_ui_element_data_t *thumb_data = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_element_data_t);
         *thumb_data = (nt_ui_element_data_t){.user_data = NULL, .layer = layer, .flags = (uint8_t)NT_UI_ELEM_FLAG_HAS_TRANSFORM, .transform = tt, .opacity = 1.0F};
         nt_ui_image_style_t thumb_style = nt_ui_image_style_defaults();
         thumb_style.color_packed = cell->thumb_tint;

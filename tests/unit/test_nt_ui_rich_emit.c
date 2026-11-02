@@ -46,7 +46,6 @@ static nt_font_t s_body_font;
 void setUp(void) {
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
     s_body_font = s_fx.stub_font;
-    nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     /* Deterministic metrics: advance = size/2/char; ascent 800/1000. */
@@ -244,7 +243,7 @@ static void test_double_walk_is_deterministic(void) {
 /* Build a block that interleaves the 4 font faces R B R I R BI R as separate runs (each <color>-split so
  * the solver keeps them as distinct atoms). */
 static void frame_multi_face(const nt_font_t fam[4]) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -305,7 +304,7 @@ static void test_emit_single_face_one_font_switch(void) {
 
 /* Build a block whose second run is italic on a family with NO italic face -> NT_UI_RICH_RUN_SYNTH_ITALIC. */
 static void frame_synth_italic(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -368,7 +367,7 @@ static void test_emit_real_italic_face_no_oblique(void) {
 /* Build a block whose second run is <b> on a family with NO bold face -> NT_UI_RICH_RUN_SYNTH_BOLD. */
 #if NT_FONT_EMBOLDEN_ENABLED
 static void frame_synth_bold(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -433,7 +432,7 @@ static void test_emit_real_bold_face_no_weight(void) {
 /* Build a block with SIX distinct font families on one band (one regular-face text run each), more than
  * any per-block font array could hold. Each push_font swaps the whole family; default variant=regular picks font_id[0]. */
 static void frame_six_distinct_fonts(const nt_font_t fam[6]) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -488,7 +487,7 @@ static void test_emit_more_than_four_fonts_no_drop(void) {
 static void frame_text_image_text(nt_material_t img_mat, nt_rich_valign_t valign, uint32_t tint_abgr) {
     /* Fresh frame: free the per-call rich scratch. pending_rich is released by the terminal
      * nt_ui_rich_text and re-zeroed by nt_ui_begin, so no manual clear is needed here. */
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
 
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
@@ -602,7 +601,7 @@ static void test_inline_image_tint_packed(void) {
 /* Build [text][image][text] under a rich block carrying `opacity`; walk once. The image's
  * sprite tint alpha must fade with the parent opacity (folded at the walker), matching the text path. */
 static void frame_image_with_opacity(nt_material_t img_mat, float opacity) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -657,7 +656,7 @@ static void test_inline_image_fades_with_parent_opacity(void) {
 /* Build [text][img][text][img][text]: two inline images in one block. They emit immediately in the rich
  * self-emit -- one sprite batch, set_material bound once. */
 static void frame_two_images(nt_material_t img_mat) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -1077,7 +1076,7 @@ static void test_fx_params_override_vs_default(void) {
  * record the image quad's first-vertex y (the wave offset folds into it). params NULL -> stock
  * default curve. Reuses the IMAGE-quad position probe -- the same one test (11) trusts. */
 static float frame_tuned_wave_image_y(nt_material_t img_mat, const nt_ui_rich_fx_params_t *params, float time) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -1126,7 +1125,7 @@ static uint8_t markup_wave_atom_effect_id(const char *markup) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
 
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, &ts, &base, markup, strlen(markup));
@@ -1149,7 +1148,7 @@ static void test_fx_push_effect_ex_defaults(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
 
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_begin(s_fx.ctx, &base);
@@ -1166,7 +1165,7 @@ static void test_fx_push_effect_ex_defaults(void) {
 /* Build [text][image][text] with a per-atom EFFECT applied to the whole block. The image run
  * carries the effect_id; emit folds the wave offset into the image quad + the tint into the sprite color. */
 static void frame_effected_image(nt_material_t img_mat, nt_ui_rich_fx_fn effect_fn, float time) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -1251,7 +1250,7 @@ static nt_pointer_t make_ptr(float x, float y, bool down, bool pressed, bool rel
  * link rect lands at a predictable absolute position; walk once with pointer `p`. Returns the
  * resolved link result. The two-pass bbox needs a warm-up frame (first frame has no prev bbox). */
 static nt_ui_rich_result_t frame_link(const nt_pointer_t *p) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -1289,7 +1288,7 @@ static float link_hit_x(void) { return LINK_ROOT_X + (3.0F * 8.0F) + (2.0F * 8.0
  * The block DRAWS its links shifted by (DX,DY); the hit-test must map the pointer through the block's
  * baked transform to resolve them there. Mirrors frame_link's two-pass warm-up contract. */
 static nt_ui_rich_result_t frame_link_xform(const nt_pointer_t *p) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -1328,7 +1327,7 @@ static float link_miss_x(void) { return LINK_ROOT_X + 380.0F; }
 #define LINK_ID_B 0x0B0B0B0BU
 
 static nt_ui_rich_result_t frame_two_links(const nt_pointer_t *p) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -1365,7 +1364,7 @@ static float link2_b_x(void) { return LINK_ROOT_X + (13.0F * 8.0F); }
 /* (13) press+release-on-the-SAME-link click semantics (the press must START on the link the
  * release lands on). hover is purely geometric; a release without a matching press is no click. */
 static void test_link_hover_and_click(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_state_clear_all(s_fx.ctx); /* drop any stale press-latch cell from a prior test */
@@ -1420,7 +1419,7 @@ static void test_link_hover_and_click(void) {
 /* (13b) press inside link A, release inside link B -> NO click on EITHER link (the press target
  * and the release target must be the same link). */
 static void test_link_press_a_release_b_no_click(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_state_clear_all(s_fx.ctx);
@@ -1455,7 +1454,7 @@ static void test_link_press_a_release_b_no_click(void) {
 #define GAP_LINK_ID 0x77777777U
 
 static nt_ui_rich_result_t frame_link_gap(const nt_pointer_t *p) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_state_clear_all(s_fx.ctx);
@@ -1515,7 +1514,7 @@ static void test_link_no_union_across_gap(void) {
  * (the SAME path standard widgets use) -> the pointer at the TRANSFORMED screen position resolves the
  * link, and the pointer at the old untransformed position now misses (draw == hit). */
 static void test_link_hover_honors_block_transform(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_state_clear_all(s_fx.ctx);
@@ -1552,17 +1551,12 @@ static void test_link_hover_honors_block_transform(void) {
 #define OBJ_W 24.0F
 #define OBJ_H 18.0F
 
-static uint32_t s_obj_measure_calls;
 static uint32_t s_obj_draw_calls;
 static float s_obj_draw_x, s_obj_draw_y, s_obj_draw_w, s_obj_draw_h;
 static uint32_t s_obj_draw_color;
 static float s_obj_draw_world[16];
 
-static nt_ui_rich_object_measure_t stub_measure(void *user_data) {
-    (void)user_data;
-    s_obj_measure_calls++;
-    return (nt_ui_rich_object_measure_t){.width = OBJ_W, .height = OBJ_H, .ascent = OBJ_H};
-}
+static const nt_ui_rich_object_size_t stub_size = {.width = OBJ_W, .height = OBJ_H, .ascent = OBJ_H};
 
 static void stub_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     (void)user_data;
@@ -1578,10 +1572,9 @@ static void stub_draw(void *user_data, float x, float y, float w, float h, uint3
 
 /* Build "A [object] B" with an optional effect; walk once. Records the draw_fn call args. */
 static void frame_object(nt_ui_rich_fx_fn effect_fn, float time) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
-    s_obj_measure_calls = 0;
     s_obj_draw_calls = 0;
 
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
@@ -1595,7 +1588,7 @@ static void frame_object(nt_ui_rich_fx_fn effect_fn, float time) {
             nt_ui_rich_push_effect(s_fx.ctx, effect_fn);
         }
         nt_ui_rich_text_n(s_fx.ctx, "A ", 2);
-        nt_ui_rich_object(s_fx.ctx, stub_measure, stub_draw, NULL);
+        nt_ui_rich_object(s_fx.ctx, stub_size, stub_draw, NULL);
         nt_ui_rich_text_n(s_fx.ctx, " B", 2);
         if (effect_fn != NULL) {
             nt_ui_rich_pop(s_fx.ctx);
@@ -1608,14 +1601,13 @@ static void frame_object(nt_ui_rich_fx_fn effect_fn, float time) {
     nt_ui_walk(s_fx.ctx, &target);
 }
 
-/* (14) an OBJECT run reserves a box via measure_fn and calls draw_fn(x,y,w,h) exactly once at
+/* (14) an OBJECT run reserves its size box and calls draw_fn(x,y,w,h) exactly once at
  * the solved box position; the surrounding text wraps around the reserved box. */
 static void test_object_draws_at_solved_box(void) {
     frame_object(NULL, 0.0F);
-    TEST_ASSERT_TRUE_MESSAGE(s_obj_measure_calls >= 1U, "measure_fn called to reserve the box");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_obj_draw_calls, "draw_fn called exactly once");
-    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_w, OBJ_W), "draw_fn w == measured width (box reserved)");
-    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_h, OBJ_H), "draw_fn h == measured height");
+    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_w, OBJ_W), "draw_fn w == object width (box reserved)");
+    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_h, OBJ_H), "draw_fn h == object height");
     /* The object sits after "A " (2 chars * 8px = 16px) from the block origin; x >= that. */
     TEST_ASSERT_TRUE_MESSAGE(s_obj_draw_x >= 16.0F - 1.0F, "object x is past the leading 'A ' text");
 }
@@ -1640,10 +1632,9 @@ static void test_object_effect_and_skip(void) {
  * parent opacity folds the <color> rgb + (alpha * opacity) into the callback color, exactly the
  * color the TEXT/IMAGE paths render with. Proves a custom object can honour opacity/<color>/fx. */
 static void test_object_draw_receives_resolved_color(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
-    s_obj_measure_calls = 0;
     s_obj_draw_calls = 0;
     s_obj_draw_color = 0U;
 
@@ -1659,7 +1650,7 @@ static void test_object_draw_receives_resolved_color(void) {
     CLAY({.id = CLAY_ID("obj_col_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_push_color(s_fx.ctx, 0xFF0080FFU); /* 0xAABBGGRR: r=255 g=128 b=0 a=255 */
-        nt_ui_rich_object(s_fx.ctx, stub_measure, stub_draw, NULL);
+        nt_ui_rich_object(s_fx.ctx, stub_size, stub_draw, NULL);
         nt_ui_rich_pop(s_fx.ctx);
         nt_ui_rich_end(s_fx.ctx);
         nt_ui_rich_text(s_fx.ctx, CLAY_ID("obj_col").id, &block_data, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
@@ -1680,17 +1671,19 @@ static void test_object_draw_receives_resolved_color(void) {
  * nt_ui_rich_text_markup with a string containing <obj=widget/>. Proves the parser dispatch reaches
  * the registered draw_fn (the same path the demo uses) -- not just a direct builder call. */
 static void test_object_markup_reaches_draw_fn(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
-    s_obj_measure_calls = 0;
     s_obj_draw_calls = 0;
     s_obj_draw_w = 0.0F;
     s_obj_draw_h = 0.0F;
 
     nt_ui_rich_tagset_t ts;
     nt_ui_rich_tagset_init(&ts);
-    nt_ui_rich_tagset_register_object_tag(&ts, "widget", stub_measure, stub_draw, NULL);
+    /* Re-registering a name replaces its size: the walk must see the second one. */
+    nt_ui_rich_tagset_register_object_tag(&ts, "widget", (nt_ui_rich_object_size_t){1.0F, 1.0F, 1.0F}, stub_draw, NULL);
+    nt_ui_rich_tagset_register_object_tag(&ts, "widget", stub_size, stub_draw, NULL);
+    TEST_ASSERT_EQUAL_UINT32(1U, ts.object_count);
 
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
@@ -1705,10 +1698,9 @@ static void test_object_markup_reaches_draw_fn(void) {
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_TRUE_MESSAGE(s_obj_measure_calls >= 1U, "<obj=widget/> markup reserved the box via measure_fn");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_obj_draw_calls, "<obj=widget/> markup reached draw_fn exactly once (end-to-end)");
-    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_w, OBJ_W), "markup-path draw_fn w == measured width");
-    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_h, OBJ_H), "markup-path draw_fn h == measured height");
+    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_w, OBJ_W), "markup-path draw_fn w == registered width");
+    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_h, OBJ_H), "markup-path draw_fn h == registered height");
 }
 
 /* A second object draw stub that captures ITS world_mat4 into a separate static, so a single frame
@@ -1734,7 +1726,7 @@ static void stub_draw2(void *user_data, float x, float y, float w, float h, uint
  * world matrix every other emit in the block uses -- Y-flip baked in (world[5] < 0) and the block's
  * (DX,DY) translation present. Two objects in one block must get BYTE-EQUAL matrices. */
 static void test_object_world_mat4_matches_block_transform(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     s_obj_draw_calls = 0;
@@ -1754,9 +1746,9 @@ static void test_object_world_mat4_matches_block_transform(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
     CLAY({.id = CLAY_ID("obj_xform_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
-        nt_ui_rich_object(s_fx.ctx, stub_measure, stub_draw, NULL);
+        nt_ui_rich_object(s_fx.ctx, stub_size, stub_draw, NULL);
         nt_ui_rich_text_n(s_fx.ctx, " ", 1);
-        nt_ui_rich_object(s_fx.ctx, stub_measure, stub_draw2, NULL);
+        nt_ui_rich_object(s_fx.ctx, stub_size, stub_draw2, NULL);
         nt_ui_rich_end(s_fx.ctx);
         nt_ui_rich_text(s_fx.ctx, CLAY_ID("obj_xform_rt").id, xdata, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
     }
@@ -1778,50 +1770,38 @@ static void test_object_world_mat4_matches_block_transform(void) {
     TEST_ASSERT_TRUE_MESSAGE(ty_present, "world_mat4 translation carries the block's Y transform offset");
 }
 
-/* Invalid object measurements assert before entering the layout solver. */
-static nt_ui_rich_object_measure_t stub_measure_degenerate(void *user_data) {
-    (void)user_data;
-    return (nt_ui_rich_object_measure_t){.width = NAN, .height = -5.0F, .ascent = NAN};
-}
-static void frame_object_measure(nt_ui_rich_object_measure_fn measure_fn) {
-    nt_mem_scratch_reset();
-    s_fx.ctx->pending_rich = NULL;
-    s_fx.ctx->rich_session_open = false;
+/* An invalid object size asserts where it is declared or registered, before any solve. */
+static void test_object_degenerate_size_asserts(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
-    nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
-    CLAY({.id = CLAY_ID("obj_deg_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
-        nt_ui_rich_begin(s_fx.ctx, &base);
-        nt_ui_rich_object(s_fx.ctx, measure_fn, stub_draw, NULL);
-        nt_ui_rich_end(s_fx.ctx);
-        nt_ui_rich_text(s_fx.ctx, CLAY_ID("obj_deg_rt").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
-    }
-    nt_ui_end(s_fx.ctx);
-    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
-    nt_ui_walk(s_fx.ctx, &target);
+    nt_ui_rich_begin(s_fx.ctx, &base);
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_object(s_fx.ctx, (nt_ui_rich_object_size_t){NAN, 1.0F, 1.0F}, stub_draw, NULL));
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_object(s_fx.ctx, (nt_ui_rich_object_size_t){1.0F, -5.0F, 1.0F}, stub_draw, NULL));
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_object(s_fx.ctx, (nt_ui_rich_object_size_t){INFINITY, 1.0F, 1.0F}, stub_draw, NULL));
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_object(s_fx.ctx, (nt_ui_rich_object_size_t){1.0F, INFINITY, 1.0F}, stub_draw, NULL));
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_object(s_fx.ctx, (nt_ui_rich_object_size_t){1.0F, 1.0F, INFINITY}, stub_draw, NULL));
+    nt_ui_rich_end(s_fx.ctx);
+    nt_ui_rich_tagset_t ts;
+    nt_ui_rich_tagset_init(&ts);
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_object_tag(&ts, "bad", (nt_ui_rich_object_size_t){-1.0F, 1.0F, 1.0F}, stub_draw, NULL));
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_object_tag(&ts, "bad", (nt_ui_rich_object_size_t){1.0F, INFINITY, 1.0F}, stub_draw, NULL));
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_object_tag(&ts, "bad", (nt_ui_rich_object_size_t){1.0F, 1.0F, NAN}, stub_draw, NULL));
 }
-static void test_object_degenerate_measure_asserts(void) { NT_TEST_EXPECT_ASSERT(frame_object_measure(stub_measure_degenerate)); }
 
-/* An object whose measured ascent is LESS than its height -> the box must seat by ascent
+/* An object whose ascent is LESS than its height -> the box must seat by ascent
  * (box bottom at baseline + (h - ascent)) and grow the line descent, not hang the whole box
  * above the baseline. */
 #define OBJ_ASC_W 24.0F
 #define OBJ_ASC_H 18.0F
 #define OBJ_ASC_ASCENT 12.0F /* < height: 6px must fall below the baseline as descent */
 
-static nt_ui_rich_object_measure_t stub_measure_ascent(void *user_data) {
-    (void)user_data;
-    s_obj_measure_calls++;
-    return (nt_ui_rich_object_measure_t){.width = OBJ_ASC_W, .height = OBJ_ASC_H, .ascent = OBJ_ASC_ASCENT};
-}
+static const nt_ui_rich_object_size_t stub_size_ascent = {.width = OBJ_ASC_W, .height = OBJ_ASC_H, .ascent = OBJ_ASC_ASCENT};
 
-/* Build "A [object] B" with a measure fn whose ascent != height; solve and probe the object atom. */
+/* Build "A [object] B" with a size whose ascent != height; solve and probe the object atom. */
 static void frame_object_ascent(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
-    s_obj_measure_calls = 0;
     s_obj_draw_calls = 0;
 
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
@@ -1832,7 +1812,7 @@ static void frame_object_ascent(void) {
     CLAY({.id = CLAY_ID("obj_asc_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_text_n(s_fx.ctx, "A ", 2);
-        nt_ui_rich_object(s_fx.ctx, stub_measure_ascent, stub_draw, NULL);
+        nt_ui_rich_object(s_fx.ctx, stub_size_ascent, stub_draw, NULL);
         nt_ui_rich_text_n(s_fx.ctx, " B", 2);
         nt_ui_rich_end(s_fx.ctx);
         nt_ui_rich_text(s_fx.ctx, CLAY_ID("obj_asc").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
@@ -1911,7 +1891,7 @@ static void test_two_rich_text_blocks_one_frame_no_trap(void) {
 /* Drive the PUBLIC markup entry through parse -> solve -> emit -> link in one call, inside a CLAY
  * block positioned at a known offset, and walk once. Markup: "go <link=here>HERE</link> now". */
 static nt_ui_rich_result_t frame_markup(const nt_pointer_t *p) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -1998,10 +1978,9 @@ static nt_ui_rich_fx_result_t custom_fx_param(uint32_t atom_idx, nt_rich_atom_ki
 
 /* Build "A [object] B" pushing a CUSTOM effect fn via the builder; record the object draw box. */
 static void frame_object_custom_fn(nt_ui_rich_fx_fn fn, void *user) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
-    s_obj_measure_calls = 0;
     s_obj_draw_calls = 0;
 
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
@@ -2013,7 +1992,7 @@ static void frame_object_custom_fn(nt_ui_rich_fx_fn fn, void *user) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_push_effect_fn(s_fx.ctx, fn, user);
         nt_ui_rich_text_n(s_fx.ctx, "A ", 2);
-        nt_ui_rich_object(s_fx.ctx, stub_measure, stub_draw, NULL);
+        nt_ui_rich_object(s_fx.ctx, stub_size, stub_draw, NULL);
         nt_ui_rich_text_n(s_fx.ctx, " B", 2);
         nt_ui_rich_pop(s_fx.ctx);
         nt_ui_rich_end(s_fx.ctx);
@@ -2064,7 +2043,7 @@ static void test_custom_fx_runs_via_markup(void) {
 
     s_custom_fx_calls = 0;
     s_custom_fx_seen_user = NULL;
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     /* "A " has no effect; "<fx=myfx>BB</fx>" runs the custom fn per glyph; the stock wave too. */
@@ -2090,7 +2069,7 @@ static void test_custom_fx_runs_via_markup(void) {
 /* Build text + inline image + object with NO <layer> -> the solver must assign the per-kind defaults
  * TEXT=0, IMAGE=1, OBJECT=2 (ascending = further back -> further front). Walk so the atoms get solved. */
 static void frame_text_image_object(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -2106,7 +2085,7 @@ static void frame_text_image_object(void) {
         nt_ui_rich_text_n(s_fx.ctx, "T ", 2);
         nt_ui_rich_image(s_fx.ctx, ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
         nt_ui_rich_text_n(s_fx.ctx, " ", 1);
-        nt_ui_rich_object(s_fx.ctx, stub_measure, stub_draw, NULL);
+        nt_ui_rich_object(s_fx.ctx, stub_size, stub_draw, NULL);
         nt_ui_rich_end(s_fx.ctx);
         nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_tio").id, NULL, &base, 800.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
     }
@@ -2163,7 +2142,7 @@ static void order_recording_draw(void *user_data, float x, float y, float w, flo
 /* (L2) <layer=5> override: a push_layer(5) around mixed text + image -> EVERY enclosed atom (any kind)
  * reports layer 5, not the per-kind default. Proves an explicit layer overrides the AUTO-by-kind rule. */
 static void test_layer_override(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -2183,7 +2162,7 @@ static void test_layer_override(void) {
         nt_ui_rich_text_n(s_fx.ctx, "X ", 2);
         nt_ui_rich_image(s_fx.ctx, ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
         nt_ui_rich_text_n(s_fx.ctx, " Y", 2);
-        nt_ui_rich_object(s_fx.ctx, stub_measure, order_recording_draw, NULL); /* same <layer=5> band as text + image */
+        nt_ui_rich_object(s_fx.ctx, stub_size, order_recording_draw, NULL); /* same <layer=5> band as text + image */
         nt_ui_rich_pop(s_fx.ctx);
         nt_ui_rich_end(s_fx.ctx);
         nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_lo").id, NULL, &base, 800.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
@@ -2225,7 +2204,7 @@ static void foreign_text_material_draw(void *user_data, float x, float y, float 
 
 /* (L2b) text in a band after an object that selected another text material draws with the block's. */
 static void test_later_band_text_reselects_block_text_material(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -2236,7 +2215,7 @@ static void test_later_band_text_reselects_block_text_material(void) {
     CLAY({.id = CLAY_ID("rich_tm_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_push_layer(s_fx.ctx, 0U);
-        nt_ui_rich_object(s_fx.ctx, stub_measure, foreign_text_material_draw, NULL);
+        nt_ui_rich_object(s_fx.ctx, stub_size, foreign_text_material_draw, NULL);
         nt_ui_rich_pop(s_fx.ctx);
         nt_ui_rich_push_layer(s_fx.ctx, 1U);
         nt_ui_rich_text_n(s_fx.ctx, "after", 5);
@@ -2255,7 +2234,7 @@ static void test_later_band_text_reselects_block_text_material(void) {
 
 /* Build a multi-face block split across TWO explicit layers: faces R,B on layer 0 and faces I,BI on layer 1. */
 static void frame_multi_face_two_layers(const nt_font_t fam[4]) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -2307,7 +2286,7 @@ static void test_font_group_per_layer(void) {
 static void test_font_group_does_not_cross_layers(void) {
     nt_font_t fam[2];
     make_real_fonts(fam, 2);
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
@@ -2342,7 +2321,7 @@ static void test_font_group_does_not_cross_layers(void) {
  * s_two_layer_first_index is the first index the walk allocates (the red quad's). */
 static uint32_t s_two_layer_first_index;
 static void frame_two_layer_images(nt_material_t img_mat) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -2415,7 +2394,7 @@ static void test_default_mixed_block_paints_bands_in_order(void) {
  * image -> rich_effective_layer is per-ATOM. The wrapped run reports layer 5; the trailing AUTO text falls
  * to the per-kind default 0; the AUTO image to 1. Pins that AUTO resolves per atom, not block-wide. */
 static void test_mixed_auto_and_explicit_layers(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -2462,7 +2441,7 @@ static void test_mixed_auto_and_explicit_layers(void) {
 
 /* More than NT_UI_RICH_MAX_LAYERS distinct layers must assert before overflowing scratch. */
 static void frame_over_cap_layers(void) {
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
@@ -2505,7 +2484,7 @@ static void test_late_effect_preserves_plain_text_runs(void) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_text_n(s_fx.ctx, "P", 1U);
         nt_ui_rich_push_effect_fn(s_fx.ctx, custom_fx_param, &param);
-        nt_ui_rich_object(s_fx.ctx, stub_measure, stub_draw, NULL);
+        nt_ui_rich_object(s_fx.ctx, stub_size, stub_draw, NULL);
         nt_ui_rich_pop(s_fx.ctx);
         nt_ui_rich_text_n(s_fx.ctx, "Q", 1U);
         nt_ui_rich_end(s_fx.ctx);
@@ -2550,11 +2529,11 @@ static void test_tuned_effect_copies_each_push_before_emit(void) {
     CLAY({.id = CLAY_ID("copied_fx_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_push_effect_ex(s_fx.ctx, capture_tuned_params, &params);
-        nt_ui_rich_object(s_fx.ctx, stub_measure, stub_draw, NULL);
+        nt_ui_rich_object(s_fx.ctx, stub_size, stub_draw, NULL);
         nt_ui_rich_pop(s_fx.ctx);
         params = (nt_ui_rich_fx_params_t){.amp = 7.0F, .speed = 11.0F};
         nt_ui_rich_push_effect_ex(s_fx.ctx, capture_tuned_params, &params);
-        nt_ui_rich_object(s_fx.ctx, stub_measure, stub_draw, NULL);
+        nt_ui_rich_object(s_fx.ctx, stub_size, stub_draw, NULL);
         nt_ui_rich_pop(s_fx.ctx);
         nt_ui_rich_end(s_fx.ctx);
         nt_ui_rich_text(s_fx.ctx, CLAY_ID("copied_fx").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
@@ -2579,7 +2558,7 @@ static void test_markup_effect_capacity_keeps_prior_params_and_balances_close(vo
     nt_ui_rich_tagset_t ts;
     nt_ui_rich_tagset_init(&ts);
     nt_ui_rich_tagset_register_effect(&ts, "copy", capture_tuned_params);
-    nt_ui_rich_tagset_register_object_tag(&ts, "box", stub_measure, stub_draw, NULL);
+    nt_ui_rich_tagset_register_object_tag(&ts, "box", stub_size, stub_draw, NULL);
 
     char markup[((NT_UI_RICH_MAX_CUSTOM_FX + 1U) * 64U) + 16U];
     size_t used = 0U;
@@ -2703,7 +2682,7 @@ int main(void) {
     RUN_TEST(test_object_draw_receives_resolved_color);
     RUN_TEST(test_object_markup_reaches_draw_fn);
     RUN_TEST(test_object_world_mat4_matches_block_transform);
-    RUN_TEST(test_object_degenerate_measure_asserts);
+    RUN_TEST(test_object_degenerate_size_asserts);
     RUN_TEST(test_object_baseline_honours_ascent);
     RUN_TEST(test_two_rich_text_blocks_one_frame_no_trap);
     RUN_TEST(test_markup_e2e_emit_and_link);

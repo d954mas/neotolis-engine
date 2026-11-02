@@ -11,7 +11,7 @@
 
 #include "font/nt_font.h"         /* nt_font_t */
 #include "resource/nt_resource.h" /* nt_resource_t (atlas alias handle) */
-#include "ui/nt_ui_rich_text.h"   /* nt_ui_rich_fx_fn + object measure/draw fns */
+#include "ui/nt_ui_rich_text.h"   /* nt_ui_rich_fx_fn + object size/draw fn */
 
 /* ---- Vocabulary caps (no heap; NT_ASSERT on overflow) ---- */
 #ifndef NT_UI_RICH_TAGSET_MAX_FONTS
@@ -56,7 +56,7 @@ typedef struct {
 
 typedef struct {
     uint64_t name_hash;
-    nt_ui_rich_object_measure_fn measure_fn;
+    nt_ui_rich_object_size_t size;
     nt_ui_rich_object_draw_fn draw_fn;
     void *user_data;
 } nt_ui_rich_tagset_object_t;
@@ -88,7 +88,8 @@ void nt_ui_rich_tagset_register_color(nt_ui_rich_tagset_t *ts, const char *name,
 void nt_ui_rich_tagset_register_effect(nt_ui_rich_tagset_t *ts, const char *name, nt_ui_rich_fx_fn fn);
 /* Borrow user_data until the consuming walk; markup amp/speed is ignored. */
 void nt_ui_rich_tagset_register_effect_fn(nt_ui_rich_tagset_t *ts, const char *name, nt_ui_rich_fx_fn fn, void *user_data);
-void nt_ui_rich_tagset_register_object_tag(nt_ui_rich_tagset_t *ts, const char *name, nt_ui_rich_object_measure_fn measure_fn, nt_ui_rich_object_draw_fn draw_fn, void *user_data);
+/* Registering an existing name replaces size, draw_fn and user_data: re-register to change an animated object's size. */
+void nt_ui_rich_tagset_register_object_tag(nt_ui_rich_tagset_t *ts, const char *name, nt_ui_rich_object_size_t size, nt_ui_rich_object_draw_fn draw_fn, void *user_data);
 
 /* ---- Lookup by name_hash (xxh64). Tagset and output pointers must be non-NULL.
  * Returns true and writes outputs on hit; false leaves outputs unchanged. ---- */

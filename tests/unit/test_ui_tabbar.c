@@ -56,7 +56,7 @@ static nt_pointer_t pointer_at(float x, float y, bool is_down, bool is_pressed, 
  * top-left so each tab's bbox is known. Returns the clicked index (-1 if none). */
 static int tabbar_frame_icons(const nt_pointer_t *p, int count, int *active, const nt_atlas_region_ref_t *icons, nt_ui_tabbar_style_t *st) {
     int clicked = -1;
-    nt_mem_scratch_reset(); /* per-frame scratch reset (icon payloads alloc here), exactly as the main loop does */
+    nt_arena_reset(&g_nt_mem_scratch); /* per-frame scratch reset (icon payloads alloc here), exactly as the main loop does */
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1, 0);
     CLAY({.id = (Clay_ElementId){.id = 0x7AB0F0U},
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 0.0F, .y = 0.0F}},

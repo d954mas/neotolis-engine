@@ -160,7 +160,7 @@ target_link_libraries(nt_ui
         nt_material
         nt_input_interface
         nt_clipboard_interface
-        nt_mem_scratch
+        nt_memory
         # PUBLIC: nt_atlas_region_ref_t appears in public widget headers
         # (nt_ui_button.h / nt_ui_image.h / nt_ui_panel.h).
         nt_atlas
@@ -182,7 +182,7 @@ nt_add_module(nt_ui_rich LOG_DOMAIN "ui.rich"
 )
 target_include_directories(nt_ui_rich SYSTEM PRIVATE "${NT_ENGINE_ROOT}/deps/clay")
 target_link_libraries(nt_ui_rich
-    PUBLIC nt_ui_interface nt_atlas nt_font nt_material nt_mem_scratch
+    PUBLIC nt_ui_interface nt_atlas nt_font nt_material nt_memory
     PRIVATE nt_sprite_renderer nt_text_renderer nt_gfx_interface nt_hash nt_utf8 nt_log_interface)
 
 nt_add_module(nt_ui_rich_fx LOG_DOMAIN "ui.rich_fx" nt_ui_rich_fx.c nt_ui_rich_fx.h)

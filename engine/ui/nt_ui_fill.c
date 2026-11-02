@@ -10,8 +10,7 @@
 
 /* Scratch element_data carrying layer + opacity (no transform). */
 static nt_ui_element_data_t *fill_make_data(uint8_t layer, float opacity) {
-    nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
-    NT_ASSERT(d != NULL && "nt_ui_fill: scratch alloc failed (element_data)");
+    nt_ui_element_data_t *d = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_element_data_t);
     *d = (nt_ui_element_data_t){.user_data = NULL, .layer = layer, .flags = (uint8_t)NT_UI_ELEM_FLAG_HAS_OPACITY, .transform = nt_ui_transform_defaults(), .opacity = opacity};
     return d;
 }

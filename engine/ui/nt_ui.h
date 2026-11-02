@@ -237,7 +237,7 @@ _Static_assert(sizeof(nt_ui_transform_t) == 36, "nt_ui_transform_t — fail loud
 _Static_assert(NT_UI_LAYER_DEBUG_HIGHLIGHT >= 240 && NT_UI_LAYER_DEBUG_PANEL_BG >= 240 && NT_UI_LAYER_DEBUG_PANEL_TEXT >= 240, "debug layers must be in engine-reserved range 240-255");
 #endif /* NT_UI_DEBUG_TOOLS */
 
-/* Allocates from nt_mem_scratch — game MUST init scratch before any CLAY({...}) declaration. */
+/* Allocates from g_nt_mem_scratch — game MUST init scratch before any CLAY({...}) declaration. */
 const nt_ui_element_data_t *nt_ui_make_element_data(nt_ui_layer_t layer, void *user_data);
 
 /* Scratch-alloc + sets HAS_TRANSFORM | HAS_OPACITY. Transform copied by value. */

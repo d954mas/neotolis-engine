@@ -38,7 +38,7 @@ the command's `data`. Rich text creates one CALLBACK command per solved block;
 the walker has no direct reference to the rich renderer.
 
 The command and payload must outlive every consuming walk. Frame-scratch data
-is invalidated by `nt_mem_scratch_reset`; the engine never frees user data.
+is invalidated by the scratch reset (`nt_arena_reset(&g_nt_mem_scratch)`); the engine never frees user data.
 Repeated walks may invoke the callback again. A callback must not re-enter walk,
 change the layout tree, or reset scratch. It preserves active clipping and owns
 the GPU state it touches. Sprites and text record at the call, so call order is

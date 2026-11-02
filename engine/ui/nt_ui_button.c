@@ -131,8 +131,7 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     /* Resolved atlas.id == 0 = text-only button (no art). region still INVALID = atlas not ready yet:
      * skip the IMAGE this frame (mirror the image skip) rather than emit an invalid region_index. */
     if (st_atlas.id != 0U && region != NT_ATLAS_INVALID_REGION) {
-        nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-        NT_ASSERT(p != NULL && "nt_ui_button_begin: scratch alloc failed (image_payload)");
+        nt_ui_image_payload_t *p = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
         *p = (nt_ui_image_payload_t){
             .atlas = st_atlas,
             .region_index = region,

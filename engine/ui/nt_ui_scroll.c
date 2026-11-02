@@ -597,8 +597,7 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
 
 /* Scratch element_data carrying layer + whole-bar opacity (no transform). */
 static nt_ui_element_data_t *scrollbar_make_data(uint8_t layer, float opacity) {
-    nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
-    NT_ASSERT(d != NULL && "nt_ui_scrollbar: scratch alloc failed (element_data)");
+    nt_ui_element_data_t *d = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_element_data_t);
     *d = (nt_ui_element_data_t){.user_data = NULL, .layer = layer, .flags = (uint8_t)NT_UI_ELEM_FLAG_HAS_OPACITY, .transform = nt_ui_transform_defaults(), .opacity = opacity};
     return d;
 }
@@ -827,8 +826,7 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
     track_decl.id = (Clay_ElementId){.id = bar_id};
     track_decl.userData = (void *)scrollbar_make_data(layer, opacity);
     if (track_ref.atlas.id != 0U && track_ref.region != NT_ATLAS_INVALID_REGION) {
-        nt_ui_image_payload_t *tp = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-        NT_ASSERT(tp != NULL && "nt_ui_scrollbar: scratch alloc failed (track payload)");
+        nt_ui_image_payload_t *tp = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
         *tp = (nt_ui_image_payload_t){.atlas = track_ref.atlas, .region_index = track_ref.region, .slice9_scale = 1.0F};
         track_decl.image = (Clay_ImageElementConfig){.imageData = tp};
         track_decl.backgroundColor = nt_ui_unpack_tint(style->track_tint);
