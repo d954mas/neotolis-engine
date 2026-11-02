@@ -21,6 +21,7 @@ typedef enum {
     FI_NODE_CALLS,
     FI_NODE_END_FRAME, /* frame storage uploads, then the command stream execution */
     FI_NODE_AFTER,
+    FI_NODE_FRAME, /* the root: every phase sits under it, so one fold folds the frame */
     FI_NODE_COUNT,
 } fi_node_t;
 

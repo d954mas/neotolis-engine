@@ -51,7 +51,8 @@ uint64_t fi_definition_bytes(const nt_gfx_event_t *e) {
 }
 
 const char *fi_node_name(fi_node_t node) {
-    static const char *const k_names[FI_NODE_COUNT] = {"begin_frame", "snapshot: inherited state", "program links", "calls", "end_frame: frame storage, then the command stream", "after end_frame"};
+    static const char *const k_names[FI_NODE_COUNT] = {
+        "begin_frame: inherited state, finished links", "inherited state (snapshot)", "finished program links", "game calls", "end_frame: frame storage upload", "after end_frame", "frame"};
     return node < FI_NODE_COUNT ? k_names[node] : "?";
 }
 
@@ -299,7 +300,11 @@ static void build_rows(fi_frame_t *fr) {
             attached[parent - n] = true;
             const uint32_t node = parent - n;
             child = parent;
-            parent = n + (node == FI_NODE_SNAPSHOT || node == FI_NODE_PROGRAM_LINKS ? FI_NODE_BEGIN_FRAME : FI_NODE_ROOT);
+            if (node == FI_NODE_SNAPSHOT || node == FI_NODE_PROGRAM_LINKS) {
+                parent = n + FI_NODE_BEGIN_FRAME;
+            } else {
+                parent = n + (node == FI_NODE_FRAME ? FI_NODE_ROOT : FI_NODE_FRAME);
+            }
         }
     }
     fr->row = (uint32_t *)fi_alloc(ids, sizeof(uint32_t));
