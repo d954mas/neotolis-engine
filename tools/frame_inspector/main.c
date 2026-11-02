@@ -124,6 +124,8 @@ static struct {
     double axis_first; /* the frame axis: first visible frame index and how many are visible (0: fit) */
     double axis_count;
     double drag_first;
+    double strip_grab;  /* where in the strip's thumb the pointer took it, in frames */
+    bool axis_dragged;  /* a track or the strip holds the axis this frame: no spring back */
     float track_wheel;  /* the wheel over a track: it zooms the frame axis and never scrolls the page */
     float track_pan;    /* Shift+wheel or a sideways wheel over a track: it pans the axis */
     uint8_t *collapsed; /* per logical row of the selected frame */
@@ -910,11 +912,36 @@ static uint32_t axis_frames(void) {
 static void axis_clamp(void) {
     const double most = (double)axis_frames();
     s.axis_count = s.axis_count < 1.0 || s.axis_count > most ? most : (double)(uint32_t)(s.axis_count + 0.5);
-    s.axis_first = s.axis_first > most - s.axis_count ? most - s.axis_count : s.axis_first;
-    s.axis_first = s.axis_first < 0.0 ? 0.0 : s.axis_first;
 }
 
-/* Wheel zooms around the cursor; a drag, Shift+wheel or a sideways wheel pans; every track moves at once. */
+/* The start the axis rests at: from the first frame to the one that shows the last frame at the right edge. */
+static double axis_hold(double first) {
+    const double last = (double)axis_frames() - s.axis_count;
+    first = first > last ? last : first;
+    return first < 0.0 ? 0.0 : first;
+}
+
+/* Past either end a drag meets resistance and shows the empty space there; released, the axis springs back. */
+static double axis_overscroll(double first) {
+    const double held = axis_hold(first);
+    const double over = (first - held) * 0.35;
+    const double most = s.axis_count * 0.25;
+    return held + (over > most ? most : (over < -most ? -most : over)); // NOLINT(readability-avoid-nested-conditional-operator)
+}
+
+static void axis_settle(void) {
+    if (s.axis_dragged) {
+        return;
+    }
+    const double held = axis_hold(s.axis_first);
+    const double k = (double)g_nt_app.dt * 14.0;
+    s.axis_first += (held - s.axis_first) * (k < 1.0 ? k : 1.0);
+    const double left = held - s.axis_first;
+    s.axis_first = left < 0.002 && left > -0.002 ? held : s.axis_first;
+}
+
+/* Wheel zooms around the cursor; a drag, Shift+wheel or a sideways wheel pans; every track moves at once.
+ * Zoom and pan may overshoot an end; axis_settle springs the axis back. */
 static void axis_input(const nt_ui_events_t *ev, nt_ui_bbox_t box) {
     if (!box.found || box.width <= 0.0F) {
         return;
@@ -932,19 +959,17 @@ static void axis_input(const nt_ui_events_t *ev, nt_ui_bbox_t box) {
         }
         axis_clamp();
         s.axis_first = cursor - (at * s.axis_count);
-        axis_clamp();
     }
     if (ev->hovered && s.track_pan != 0.0F) {
         const double tenth = s.axis_count / 10.0;
-        s.axis_first += (double)s.track_pan * (tenth > 1.0 ? tenth : 1.0);
-        axis_clamp();
+        s.axis_first = axis_overscroll(s.axis_first + ((double)s.track_pan * (tenth > 1.0 ? tenth : 1.0)));
     }
     if (ev->pressed_now) {
         s.drag_first = s.axis_first;
     }
     if (ev->pressed) {
-        s.axis_first = s.drag_first - ((double)ev->drag_dx / (double)box.width * s.axis_count);
-        axis_clamp();
+        s.axis_first = axis_overscroll(s.drag_first - ((double)ev->drag_dx / (double)box.width * s.axis_count));
+        s.axis_dragged = true;
     }
 }
 
@@ -968,8 +993,9 @@ static void declare_track(uint32_t f, track_t t, uint64_t max, uint32_t hovered)
     const uint32_t step = frame_w >= min_w ? 1U : (uint32_t)(min_w / frame_w) + 1U;
     const double from_frame = s.axis_first;
     const double to_frame = s.axis_first + s.axis_count;
-    if (box.found && (ev.hovered || ev.clicked)) {
-        const uint32_t k = (uint32_t)(from_frame + (((double)ev.pos[0] - (double)box.x) / frame_w));
+    const double pointed = from_frame + (((double)ev.pos[0] - (double)box.x) / frame_w);
+    if (box.found && (ev.hovered || ev.clicked) && pointed >= 0.0) {
+        const uint32_t k = (uint32_t)pointed;
         if (k < file->frame_count) {
             s.hover_file = ev.hovered ? f : s.hover_file;
             s.hover_frame = ev.hovered ? k : s.hover_frame;
@@ -995,7 +1021,8 @@ static void declare_track(uint32_t f, track_t t, uint64_t max, uint32_t hovered)
         CLAY({.id = (Clay_ElementId){.id = id}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(TRACK_H)}, .childAlignment = {.y = CLAY_ALIGN_Y_BOTTOM}}, .backgroundColor = k_bg}) {
             /* Columns hold `step` frames from a multiple of step; their edges fall on whole pixels, so they fill the
              * track exactly, and the first and last are cut to the part that shows. */
-            for (uint32_t k = ((uint32_t)from_frame / step) * step; k < file->frame_count && (double)k < to_frame; k += step) {
+            const uint32_t start = from_frame > 0.0 ? (uint32_t)from_frame : 0U;
+            for (uint32_t k = (start / step) * step; k < file->frame_count && (double)k < to_frame; k += step) {
                 const double lo = (double)k > from_frame ? (double)k : from_frame;
                 const double hi = (double)(k + step) < to_frame ? (double)(k + step) : to_frame;
                 const float column = (float)((uint32_t)((hi - from_frame) * frame_w) - (uint32_t)((lo - from_frame) * frame_w));
@@ -1083,6 +1110,45 @@ static void declare_frame_table(void) {
     }
 }
 
+/* The overview strip, aligned with the tracks: its thumb is the part of the frames that shows. Drag the
+ * thumb, or press beside it to centre the axis there. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void declare_axis_strip(void) {
+    const uint32_t id = nt_ui_id("axis_strip");
+    const nt_ui_bbox_t box = nt_ui_get_bbox(s_ctx, id);
+    const nt_ui_events_t ev = nt_ui_events(s_ctx, id, NULL);
+    const double most = (double)axis_frames();
+    const double first = axis_hold(s.axis_first);
+    const float width = box.found ? box.width : 0.0F;
+    float thumb_w = (float)(s.axis_count / most) * width;
+    thumb_w = thumb_w > 8.0F ? thumb_w : 8.0F;
+    float thumb_x = (float)(first / most) * width;
+    thumb_x = thumb_x + thumb_w > width ? width - thumb_w : thumb_x;
+    thumb_x = thumb_x > 0.0F ? thumb_x : 0.0F;
+    if (box.found && width > 0.0F) {
+        const double at = ((double)ev.pos[0] - (double)box.x) / (double)width * most;
+        if (ev.pressed_now) {
+            const bool on_thumb = ev.pos[0] >= box.x + thumb_x && ev.pos[0] <= box.x + thumb_x + thumb_w;
+            s.strip_grab = on_thumb ? at - first : s.axis_count / 2.0;
+        }
+        if (ev.pressed) {
+            s.axis_first = axis_hold(at - s.strip_grab);
+            s.axis_dragged = true;
+        }
+    }
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
+        CELL_(110) { text("frames shown", &k_dim); }
+        CELL_(80) {}
+        CELL_(90) {}
+        CLAY({.id = (Clay_ElementId){.id = id}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(12)}}, .backgroundColor = k_bg, .cornerRadius = CLAY_CORNER_RADIUS(3)}) {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(thumb_x), CLAY_SIZING_FIXED(12)}}}) {}
+            CLAY(
+                {.layout = {.sizing = {CLAY_SIZING_FIXED(thumb_w), CLAY_SIZING_FIXED(12)}}, .backgroundColor = ev.hovered || ev.pressed ? k_hover_bar : k_bar, .cornerRadius = CLAY_CORNER_RADIUS(3)}) {
+            }
+        }
+    }
+}
+
 static void declare_frames(void) {
     uint64_t max[TRACK_COUNT] = {0};
     for (uint32_t f = 0; f < s.file_count; f++) {
@@ -1094,6 +1160,7 @@ static void declare_frames(void) {
         }
     }
     axis_clamp();
+    s.axis_dragged = false;
     /* Hover is known from the previous frame's layout, so every track marks the same column. */
     const uint32_t hover_file = s.hover_file;
     const uint32_t hover_frame = s.hover_frame;
@@ -1105,7 +1172,8 @@ static void declare_frames(void) {
                                    .backgroundColor = k_panel});
     ROW_(10) {
         if (s.file_count > 0) {
-            textf(&k_dim, "positions %u..%u of %u (files align by position in the file)", (uint32_t)s.axis_first + 1U, (uint32_t)(s.axis_first + s.axis_count), axis_frames());
+            const double held = axis_hold(s.axis_first);
+            textf(&k_dim, "positions %u..%u of %u (files align by position in the file)", (uint32_t)held + 1U, (uint32_t)(held + s.axis_count), axis_frames());
             if (button("fit", &k_text, false)) {
                 s.axis_count = 0.0;
                 s.axis_first = 0.0;
@@ -1115,6 +1183,9 @@ static void declare_frames(void) {
             text("Open a capture file (ntcapture text, one or more frames).", &k_dim);
         }
     }
+    if (s.file_count > 0) {
+        declare_axis_strip();
+    }
     uint32_t frames = 0;
     for (uint32_t f = 0; f < s.file_count; f++) {
         declare_file_header(f);
@@ -1123,6 +1194,7 @@ static void declare_frames(void) {
             declare_track(f, (track_t)t, max[t], f == hover_file ? hover_frame : FI_NONE);
         }
     }
+    axis_settle();
     if (frames <= 200U) {
         declare_frame_table();
     }
@@ -2462,7 +2534,7 @@ static void declare_status(void) {
     }
     switch ((page_t)s.page) {
     case PAGE_FRAMES:
-        text("click: pick a frame   double-click: open it in Commands   wheel: zoom   drag: pan   fit: all frames   Ctrl+Left/Right: previous/next frame", &k_dim);
+        text("click: pick a frame   double-click: open it in Commands   wheel: zoom   drag, Shift+wheel or the strip: pan   fit: all frames   Ctrl+Left/Right: previous/next frame", &k_dim);
         break;
     case PAGE_COMMANDS: {
         const fi_frame_t *fr = frame_sel();
