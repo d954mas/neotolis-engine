@@ -757,7 +757,7 @@ void test_texture_round_trip(void) {
     TEST_ASSERT_EQUAL_UINT32(2, tex.height);
     TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_FORMAT_RGBA8, tex.format);
     TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_NONE, tex.compression);
-    /* NULL opts → nt_tex_opts_defaults(): premultiplied=false, gen_mipmaps=true */
+    /* NULL opts → nt_tex_opts_defaults(): premultiplied=false, mips=RUNTIME */
     TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_FLAG_GEN_MIPMAPS, tex.flags);
     TEST_ASSERT_EQUAL_UINT32(2 * 2 * 4, tex.data_size);
 
@@ -774,6 +774,7 @@ void test_texture_invalid_compress_mode_asserts_at_add(void) {
     nt_basisu_encode_opts_t compress = nt_tex_compress_etc1s_default();
     compress.codec = (nt_basisu_codec_t)99; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange) -- invalid enum is the subject under test
     opts.compress = compress;
+    opts.mips = NT_TEX_MIPS_BAKED;
 
     EXPECT_BUILD_ASSERT(ctx, nt_builder_add_texture(ctx, png_path, &opts));
 }
@@ -781,12 +782,14 @@ void test_texture_invalid_compress_mode_asserts_at_add(void) {
 static void expect_texture_compress_opts_assert(nt_basisu_encode_opts_t compress) {
     nt_tex_opts_t opts = nt_tex_opts_defaults();
     opts.compress = compress;
+    opts.mips = NT_TEX_MIPS_BAKED;
     EXPECT_BUILD_ASSERT(NULL, (void)nt_builder_assert_texture_opts(&opts));
 }
 
 void test_texture_compress_rdo_boundaries(void) {
     nt_tex_opts_t opts = nt_tex_opts_defaults();
     opts.compress = nt_tex_compress_etc1s_default();
+    opts.mips = NT_TEX_MIPS_BAKED;
 
 #if NT_BASISU_HAS_ETC1S
     opts.compress.etc1s.endpoint_rdo_threshold = 0.0F;
@@ -849,7 +852,7 @@ void test_texture_option_aliases_are_canonicalized(void) {
     nt_tex_opts_t opts = nt_tex_opts_defaults();
     nt_basisu_encode_opts_t compress = ANY_COMPRESS();
     opts.format = 0;
-    opts.gen_mipmaps = false;
+    opts.mips = NT_TEX_MIPS_BAKED;
     opts.compress = compress;
     nt_builder_add_texture_raw(ctx, pixel, 1, 1, "pixel", &opts);
 
@@ -867,7 +870,7 @@ void test_atlas_texture_option_aliases_are_canonicalized(void) {
     nt_atlas_opts_t atlas_opts = nt_atlas_opts_defaults();
     atlas_opts.format = 0;
     atlas_opts.compress = compress;
-    atlas_opts.gen_mipmaps = false;
+    atlas_opts.mips = NT_TEX_MIPS_BAKED;
     NtAtlasBuild *atlas_build_453 = nt_atlas_begin(ctx, "atlas", &atlas_opts);
     nt_atlas_add_raw(atlas_build_453, pixel, 1, 1, &(nt_atlas_sprite_opts_t){.name = "pixel.png", .origin_x = 0.5F, .origin_y = 0.5F});
     (void)nt_atlas_commit(atlas_build_453);
@@ -934,20 +937,264 @@ void test_texture_srgb_opts_contract(void) {
     nt_tex_opts_t opts = nt_tex_opts_defaults();
     opts.format = NT_TEXTURE_FORMAT_SRGB8;
     /* Defaults ask for runtime mips, which SRGB8 storage cannot generate. */
-    EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_assert_texture_opts(&opts), "uncompressed SRGB8 cannot generate runtime mips");
-    opts.gen_mipmaps = false;
+    EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_assert_texture_opts(&opts), "mips RUNTIME cannot serve");
+    opts.mips = NT_TEX_MIPS_BAKED;
+    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_SRGB8, nt_builder_assert_texture_opts(&opts));
+    opts.mips = NT_TEX_MIPS_NONE;
     opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
     TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_SRGB8, nt_builder_assert_texture_opts(&opts));
     /* Basis bakes its own mips, so SRGB8 is fine there. */
     opts = nt_tex_opts_defaults();
     opts.format = NT_TEXTURE_FORMAT_SRGB8;
     opts.compress = NT_BASISU_HAS_UASTC ? nt_tex_compress_uastc_default() : nt_tex_compress_etc1s_default();
+    opts.mips = NT_TEX_MIPS_BAKED;
     TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_SRGB8, nt_builder_assert_texture_opts(&opts));
     opts.format = NT_TEXTURE_FORMAT_SRGB8_ALPHA8;
     TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_SRGB8_ALPHA8, nt_builder_assert_texture_opts(&opts));
     /* Premultiplying encoded bytes is not linear-light premultiplication. */
     opts.premultiplied = true;
     EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_assert_texture_opts(&opts), "premultiplied=true requires RGBA8");
+}
+
+/* --- Mip modes --- */
+
+static uint8_t *read_file_bytes(const char *path, uint32_t *out_size);
+
+static uint8_t *encode_mips_asset(const void *pixels, uint32_t w, uint32_t h, const nt_tex_opts_t *opts, NtTextureAssetHeader *hdr) {
+    TEST_ASSERT_EQUAL_INT(opts->format, nt_builder_assert_texture_opts(opts));
+    uint8_t *asset = NULL;
+    uint32_t size = 0;
+    nt_builder_encode_texture_to_buf(pixels, w, h, opts, 1, &asset, &size);
+    memcpy(hdr, asset, sizeof(*hdr));
+    TEST_ASSERT_EQUAL_UINT32(sizeof(*hdr) + hdr->data_size, size);
+    return asset;
+}
+
+void test_texture_mips_baked_stores_the_full_chain_for_every_raw_format(void) {
+    static const nt_texture_pixel_format_t formats[] = {NT_TEXTURE_FORMAT_RGBA8, NT_TEXTURE_FORMAT_RGB8,         NT_TEXTURE_FORMAT_RG8,
+                                                        NT_TEXTURE_FORMAT_R8,    NT_TEXTURE_FORMAT_SRGB8_ALPHA8, NT_TEXTURE_FORMAT_SRGB8};
+    /* A constant image stays constant at every level, so a wrong level offset or a
+     * level filtered from the wrong source shows up as a stray texel. */
+    static const uint8_t texel[4] = {40, 90, 160, 220};
+    uint8_t rgba[13 * 7 * 4];
+    for (uint32_t i = 0; i < sizeof(rgba); i++) {
+        rgba[i] = texel[i % 4];
+    }
+    for (uint32_t f = 0; f < sizeof(formats) / sizeof(formats[0]); f++) {
+        nt_tex_opts_t opts = nt_tex_opts_defaults();
+        opts.format = formats[f];
+        opts.mips = NT_TEX_MIPS_BAKED;
+        NtTextureAssetHeader hdr;
+        uint8_t *asset = encode_mips_asset(rgba, 13, 7, &opts, &hdr);
+        /* 13x7, 6x3, 3x1, 1x1 */
+        TEST_ASSERT_EQUAL_UINT16(4, hdr.mip_count);
+        TEST_ASSERT_EQUAL_UINT8(0, hdr.flags & NT_TEXTURE_FLAG_GEN_MIPMAPS);
+        const uint32_t bpp = nt_texture_bpp(formats[f]);
+        TEST_ASSERT_EQUAL_UINT32(((13 * 7) + (6 * 3) + (3 * 1) + 1) * bpp, hdr.data_size);
+        for (uint32_t i = 0; i < hdr.data_size; i++) {
+            TEST_ASSERT_EQUAL_UINT8(texel[i % bpp], asset[sizeof(hdr) + i]);
+        }
+        free(asset);
+    }
+}
+
+/* 2x2 -> 1x1 is the mean of four texels per channel. A mean ending in .5 may round
+ * either way, hence the tolerance of 1. */
+void test_texture_mips_baked_averages_each_channel_without_alpha_weighting(void) {
+    /* R 0/255/0/255 -> 127.5 (alpha weighting would give 0), G -> 75, B -> 25, A -> 127.5. */
+    const uint8_t quad[16] = {0, 200, 10, 255, 255, 100, 20, 0, 0, 0, 30, 255, 255, 0, 40, 0};
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.mips = NT_TEX_MIPS_BAKED;
+    NtTextureAssetHeader hdr;
+    uint8_t *asset = encode_mips_asset(quad, 2, 2, &opts, &hdr);
+    const uint8_t *level1 = asset + sizeof(hdr) + 16;
+    TEST_ASSERT_UINT8_WITHIN(1, 128, level1[0]);
+    TEST_ASSERT_EQUAL_UINT8(75, level1[1]);
+    TEST_ASSERT_EQUAL_UINT8(25, level1[2]);
+    TEST_ASSERT_UINT8_WITHIN(1, 128, level1[3]);
+    free(asset);
+
+    /* sRGB RGB averages in linear light: sRGB 0 and 255 -> linear 0.5 -> sRGB 187.5
+     * (byte averaging would give 128). Alpha stays linear: 255/0 -> 127.5, not 187.5. */
+    const uint8_t srgb_quad[16] = {0, 255, 0, 255, 255, 255, 0, 0, 0, 255, 0, 255, 255, 255, 0, 0};
+    opts.format = NT_TEXTURE_FORMAT_SRGB8_ALPHA8;
+    asset = encode_mips_asset(srgb_quad, 2, 2, &opts, &hdr);
+    level1 = asset + sizeof(hdr) + 16;
+    TEST_ASSERT_UINT8_WITHIN(1, 188, level1[0]);
+    TEST_ASSERT_EQUAL_UINT8(255, level1[1]);
+    TEST_ASSERT_EQUAL_UINT8(0, level1[2]);
+    TEST_ASSERT_UINT8_WITHIN(1, 128, level1[3]);
+    free(asset);
+    /* Three-channel SRGB8 (alpha stripped) averages in linear light too: level 1 follows 2x2x3 bytes. */
+    opts.format = NT_TEXTURE_FORMAT_SRGB8;
+    asset = encode_mips_asset(srgb_quad, 2, 2, &opts, &hdr);
+    level1 = asset + sizeof(hdr) + 12;
+    TEST_ASSERT_UINT8_WITHIN(1, 188, level1[0]);
+    TEST_ASSERT_EQUAL_UINT8(255, level1[1]);
+    TEST_ASSERT_EQUAL_UINT8(0, level1[2]);
+    free(asset);
+
+    /* Premultiplied white at alternating coverage stays premultiplied: RGB == A. */
+    const uint8_t coverage[16] = {255, 255, 255, 255, 255, 255, 255, 0, 255, 255, 255, 255, 255, 255, 255, 0};
+    opts = nt_tex_opts_defaults();
+    opts.mips = NT_TEX_MIPS_BAKED;
+    opts.premultiplied = true;
+    asset = encode_mips_asset(coverage, 2, 2, &opts, &hdr);
+    level1 = asset + sizeof(hdr) + 16;
+    TEST_ASSERT_UINT8_WITHIN(1, 128, level1[3]);
+    TEST_ASSERT_EQUAL_UINT8(level1[3], level1[0]);
+    TEST_ASSERT_EQUAL_UINT8(level1[3], level1[1]);
+    TEST_ASSERT_EQUAL_UINT8(level1[3], level1[2]);
+    free(asset);
+
+    /* Two channels filter on their own too: G is not an alpha that weights R. */
+    const uint8_t rg_quad[16] = {255, 0, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 255, 0, 0, 0};
+    opts = nt_tex_opts_defaults();
+    opts.mips = NT_TEX_MIPS_BAKED;
+    opts.format = NT_TEXTURE_FORMAT_RG8;
+    asset = encode_mips_asset(rg_quad, 2, 2, &opts, &hdr);
+    level1 = asset + sizeof(hdr) + 8;
+    TEST_ASSERT_UINT8_WITHIN(1, 128, level1[0]);
+    TEST_ASSERT_UINT8_WITHIN(1, 128, level1[1]);
+    free(asset);
+}
+
+/* Each level filters the stored bytes of the level before it. 7 -> 3 -> 1: level 1
+ * is {1.43, 0, 0} -> {1, 0, 0}, so level 2 is 0.33 -> 0; filtering level 0 straight
+ * to 1x1 would give 4/7 -> 1. */
+void test_texture_mips_baked_chain_filters_the_previous_level(void) {
+    const uint8_t row[7 * 4] = {3, 0, 0, 0, 0, 0, 0, 0, 1};
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.mips = NT_TEX_MIPS_BAKED;
+    opts.format = NT_TEXTURE_FORMAT_R8;
+    NtTextureAssetHeader hdr;
+    uint8_t *asset = encode_mips_asset(row, 7, 1, &opts, &hdr);
+    const uint8_t chain[11] = {3, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0};
+    TEST_ASSERT_EQUAL_UINT16(3, hdr.mip_count);
+    TEST_ASSERT_EQUAL_UINT32(sizeof(chain), hdr.data_size);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(chain, asset + sizeof(hdr), sizeof(chain));
+    free(asset);
+}
+
+void test_texture_mips_none_and_runtime_store_one_level(void) {
+    uint8_t rgba[16 * 8 * 4];
+    for (uint32_t i = 0; i < sizeof(rgba); i++) {
+        rgba[i] = (uint8_t)(i * 11U);
+    }
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    NtTextureAssetHeader hdr;
+    uint8_t *asset = encode_mips_asset(rgba, 16, 8, &opts, &hdr);
+    TEST_ASSERT_EQUAL_UINT16(1, hdr.mip_count);
+    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_FLAG_GEN_MIPMAPS, hdr.flags & NT_TEXTURE_FLAG_GEN_MIPMAPS);
+    TEST_ASSERT_EQUAL_UINT32(sizeof(rgba), hdr.data_size);
+    free(asset);
+
+    opts.mips = NT_TEX_MIPS_NONE;
+    opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+    asset = encode_mips_asset(rgba, 16, 8, &opts, &hdr);
+    TEST_ASSERT_EQUAL_UINT16(1, hdr.mip_count);
+    TEST_ASSERT_EQUAL_UINT8(0, hdr.flags & NT_TEXTURE_FLAG_GEN_MIPMAPS);
+    TEST_ASSERT_EQUAL_UINT32(sizeof(rgba), hdr.data_size);
+    free(asset);
+
+    /* Basis drops its chain the same way. */
+    opts.compress = ANY_COMPRESS();
+    asset = encode_mips_asset(rgba, 16, 8, &opts, &hdr);
+    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_BASIS, hdr.compression);
+    TEST_ASSERT_EQUAL_UINT16(1, hdr.mip_count);
+    free(asset);
+    opts.mips = NT_TEX_MIPS_BAKED;
+    asset = encode_mips_asset(rgba, 16, 8, &opts, &hdr);
+    TEST_ASSERT_EQUAL_UINT16(5, hdr.mip_count);
+    free(asset);
+}
+
+void test_texture_mips_opts_contract(void) {
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.compress = ANY_COMPRESS();
+    EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_assert_texture_opts(&opts), "mips RUNTIME cannot serve");
+    /* No levels to sample, whatever the codec. */
+    opts.mips = NT_TEX_MIPS_NONE;
+    EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_assert_texture_opts(&opts), "a mipmap filter_min requires mips RUNTIME or BAKED");
+    opts.mips = (nt_tex_mips_t)3;
+    EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_assert_texture_opts(&opts), "mips out of range");
+}
+
+/* Atlas pages go through the same rules. */
+void test_atlas_mips_follow_the_texture_rules(void) {
+    nt_atlas_opts_t atlas = nt_atlas_opts_defaults();
+    atlas.compress = ANY_COMPRESS();
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/mips_atlas.ntpack");
+    EXPECT_BUILD_ASSERT_MATCH(ctx, (void)nt_atlas_begin(ctx, "page", &atlas), "mips RUNTIME cannot serve");
+}
+
+/* The atlas mip mode reaches the packed page. */
+void test_atlas_page_carries_the_mip_mode(void) {
+    const nt_tex_mips_t modes[] = {NT_TEX_MIPS_RUNTIME, NT_TEX_MIPS_BAKED};
+    uint8_t rgba[8 * 8 * 4];
+    memset(rgba, 200, sizeof(rgba));
+    for (uint32_t m = 0; m < 2; m++) {
+        nt_atlas_opts_t atlas = nt_atlas_opts_defaults();
+        atlas.mips = modes[m];
+        NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/mips_atlas_page.ntpack");
+        NtAtlasBuild *build = nt_atlas_begin(ctx, "page", &atlas);
+        nt_atlas_add_raw(build, rgba, 8, 8, &(nt_atlas_sprite_opts_t){.name = "square.png", .origin_x = 0.5F, .origin_y = 0.5F});
+        (void)nt_atlas_commit(build);
+        TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+        nt_builder_free_pack(ctx);
+
+        uint32_t pack_size = 0;
+        uint8_t *pack = read_file_bytes(TMP_DIR "/mips_atlas_page.ntpack", &pack_size);
+        TEST_ASSERT_NOT_NULL(pack);
+        const NtPackHeader *pack_hdr = (const NtPackHeader *)pack;
+        const NtAssetEntry *entries = (const NtAssetEntry *)(pack + sizeof(NtPackHeader));
+        const NtTextureAssetHeader *tex = NULL;
+        for (uint32_t i = 0; i < pack_hdr->asset_count; i++) {
+            if (entries[i].asset_type == NT_ASSET_TEXTURE) {
+                tex = (const NtTextureAssetHeader *)(pack + entries[i].offset);
+            }
+        }
+        TEST_ASSERT_NOT_NULL(tex);
+        if (modes[m] == NT_TEX_MIPS_BAKED) {
+            TEST_ASSERT_TRUE(tex->mip_count > 1);
+            TEST_ASSERT_EQUAL_UINT16(nt_texture_full_chain_levels(tex->width, tex->height), tex->mip_count);
+            TEST_ASSERT_EQUAL_UINT8(0, tex->flags & NT_TEXTURE_FLAG_GEN_MIPMAPS);
+        } else {
+            TEST_ASSERT_EQUAL_UINT16(1, tex->mip_count);
+            TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_FLAG_GEN_MIPMAPS, tex->flags & NT_TEXTURE_FLAG_GEN_MIPMAPS);
+        }
+        free(pack);
+    }
+}
+
+/* RAW NONE/RUNTIME/BAKED, then Basis NONE/BAKED: equal pixels, only the mode differs. */
+void test_texture_mips_alone_changes_the_cache_key(void) {
+    const uint8_t rgba[4 * 4 * 4] = {10, 20, 30, 40, 50, 60, 70, 80};
+    const nt_tex_mips_t modes[] = {NT_TEX_MIPS_NONE, NT_TEX_MIPS_RUNTIME, NT_TEX_MIPS_BAKED, NT_TEX_MIPS_NONE, NT_TEX_MIPS_BAKED};
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/mips_keys.ntpack");
+    uint64_t hashes[5];
+    for (uint32_t i = 0; i < 5; i++) {
+        nt_tex_opts_t opts = nt_tex_opts_defaults();
+        opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+        opts.mips = modes[i];
+        if (i >= 3) {
+            opts.compress = ANY_COMPRESS();
+        }
+        char name[16];
+        (void)snprintf(name, sizeof(name), "mips_%u", i);
+        nt_builder_add_texture_raw(ctx, rgba, 4, 4, name, &opts);
+        hashes[i] = nt_builder_compute_opts_hash(&ctx->pending[i]);
+    }
+    TEST_ASSERT_EQUAL_UINT64(ctx->pending[0].decoded_hash, ctx->pending[4].decoded_hash);
+    for (uint32_t i = 0; i < 5; i++) {
+        for (uint32_t j = 0; j < i; j++) {
+            TEST_ASSERT_TRUE(hashes[j] != hashes[i]);
+        }
+    }
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    TEST_ASSERT_EQUAL_UINT32(0, ctx->early_dedup_count);
+    TEST_ASSERT_EQUAL_UINT32(0, ctx->dedup_count);
+    nt_builder_free_pack(ctx);
 }
 
 /* --- Premultiplied alpha: formula + flag propagation --- */
@@ -4573,6 +4820,7 @@ void test_basis_effective_cache_and_dedup_identity(void) {
         for (uint32_t i = 0; i < variant_count; i++) {
             nt_tex_opts_t opts = nt_tex_opts_defaults();
             opts.compress = variants[i];
+            opts.mips = NT_TEX_MIPS_BAKED;
             char name[32];
             (void)snprintf(name, sizeof(name), "basis_%u", i);
             /* Poison all storage, then initialize only the selected fields. */
@@ -4594,7 +4842,6 @@ void test_basis_effective_cache_and_dedup_identity(void) {
                 TEST_ASSERT_TRUE(hashes[j] != hashes[i]);
             }
             opts.compress = variants[i];
-            opts.gen_mipmaps = false;
             (void)snprintf(name, sizeof(name), "alias_%u", i);
             nt_builder_add_texture_raw(ctx, pixel, 1, 1, name, &opts);
             TEST_ASSERT_EQUAL_UINT64(hashes[i], nt_builder_compute_opts_hash(&ctx->pending[(2 * i) + 1]));
@@ -7007,6 +7254,7 @@ void test_atlas_begin_compress_bad_format_asserts_after_failed_pack(void) {
     nt_atlas_opts_t bad = nt_atlas_opts_defaults();
     nt_basisu_encode_opts_t comp = nt_tex_compress_etc1s_lowest();
     bad.compress = comp;
+    bad.mips = NT_TEX_MIPS_BAKED;
     bad.premultiplied = false;         /* let the compress+format check fire, not premultiplied */
     bad.format = NT_TEXTURE_FORMAT_R8; /* R8 has no Basis equivalent */
     EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_begin(ctx, "next", &bad));
@@ -7020,6 +7268,7 @@ void test_atlas_begin_bad_compress_mode_asserts_after_failed_pack(void) {
     nt_basisu_encode_opts_t compress = nt_tex_compress_etc1s_default();
     compress.codec = (nt_basisu_codec_t)99; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange) -- invalid enum is the subject under test
     bad.compress = compress;
+    bad.mips = NT_TEX_MIPS_BAKED;
     EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_begin(ctx, "next", &bad));
 }
 
@@ -7031,6 +7280,7 @@ void test_atlas_begin_bad_compress_quality_asserts_after_failed_pack(void) {
     nt_basisu_encode_opts_t etc = nt_tex_compress_etc1s_default();
     etc.etc1s.quality = 0;
     etc_bad.compress = etc;
+    etc_bad.mips = NT_TEX_MIPS_BAKED;
     EXPECT_BUILD_ASSERT(etc_ctx, (void)nt_atlas_begin(etc_ctx, "next", &etc_bad));
 
     NtBuilderContext *uastc_ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_uastc_quality.ntpack");
@@ -7040,6 +7290,7 @@ void test_atlas_begin_bad_compress_quality_asserts_after_failed_pack(void) {
     nt_basisu_encode_opts_t uastc = nt_tex_compress_uastc_default();
     uastc.uastc.pack_level = 5;
     uastc_bad.compress = uastc;
+    uastc_bad.mips = NT_TEX_MIPS_BAKED;
     EXPECT_BUILD_ASSERT(uastc_ctx, (void)nt_atlas_begin(uastc_ctx, "next", &uastc_bad));
 }
 
@@ -7051,6 +7302,7 @@ void test_atlas_begin_bad_compress_rdo_asserts_after_failed_pack(void) {
     nt_basisu_encode_opts_t compress = nt_tex_compress_etc1s_default();
     compress.etc1s.endpoint_rdo_threshold = NAN;
     bad.compress = compress;
+    bad.mips = NT_TEX_MIPS_BAKED;
     EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_begin(ctx, "next", &bad));
 }
 
@@ -8360,7 +8612,7 @@ void test_alpha_threshold_zero_domain_and_compose(void) {
     opts.alpha_threshold = 128;
     opts.premultiplied = false; /* keep raw RGB observable in the page */
     opts.power_of_two = false;
-    opts.gen_mipmaps = false;
+    opts.mips = NT_TEX_MIPS_NONE;
     opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_NEAREST;
     opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_NEAREST;
     NtBuilderContext *ctx = nt_builder_start_pack(path);
@@ -10028,6 +10280,14 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_texture_premultiplied_encoding);
     RUN_TEST(test_texture_srgb_twin_of_the_same_pixels_is_a_separate_asset);
     RUN_TEST(test_texture_srgb_opts_contract);
+    RUN_TEST(test_texture_mips_baked_stores_the_full_chain_for_every_raw_format);
+    RUN_TEST(test_texture_mips_baked_averages_each_channel_without_alpha_weighting);
+    RUN_TEST(test_texture_mips_baked_chain_filters_the_previous_level);
+    RUN_TEST(test_texture_mips_none_and_runtime_store_one_level);
+    RUN_TEST(test_texture_mips_opts_contract);
+    RUN_TEST(test_atlas_mips_follow_the_texture_rules);
+    RUN_TEST(test_atlas_page_carries_the_mip_mode);
+    RUN_TEST(test_texture_mips_alone_changes_the_cache_key);
 
     /* AABB edge extrude */
     RUN_TEST(test_extrude_edges_aabb_l_shape);

@@ -51,12 +51,12 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
         uint8_t fmag = (uint8_t)td->opts.filter_mag;
         uint8_t wu = (uint8_t)td->opts.wrap_u;
         uint8_t wv = (uint8_t)td->opts.wrap_v;
-        uint8_t gen_mips = (td->opts.compress.codec != NT_BASISU_CODEC_NONE || td->opts.gen_mipmaps) ? 1 : 0;
+        uint8_t mips = (uint8_t)td->opts.mips;
         buf[pos++] = fmin;
         buf[pos++] = fmag;
         buf[pos++] = wu;
         buf[pos++] = wv;
-        buf[pos++] = gen_mips;
+        buf[pos++] = mips;
 
         if (td->opts.compress.codec != NT_BASISU_CODEC_NONE) {
             uint32_t codec = (uint32_t)td->opts.compress.codec;

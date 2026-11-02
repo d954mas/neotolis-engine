@@ -154,6 +154,7 @@ static void add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uin
         }
 
         opts.compress = tex_compress;
+        opts.mips = tex_compress.codec != NT_BASISU_CODEC_NONE ? NT_TEX_MIPS_BAKED : NT_TEX_MIPS_RUNTIME;
         nt_builder_add_texture_from_memory(ctx, scene->textures[i].data, scene->textures[i].size, tex_rid(i), &opts);
         added++;
     }

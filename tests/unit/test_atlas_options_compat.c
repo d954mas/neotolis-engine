@@ -20,8 +20,8 @@ _Static_assert(offsetof(nt_atlas_sprite_opts_t, dedup) > offsetof(nt_atlas_sprit
 /* Anchor the current atlas layout so the next reorder is loud, not silent. */
 _Static_assert(offsetof(nt_atlas_opts_t, max_added_area_percent) > offsetof(nt_atlas_opts_t, max_vertices), "atlas v2 layout: area budget sits after max_vertices");
 _Static_assert(offsetof(nt_atlas_opts_t, allowed_transforms) > offsetof(nt_atlas_opts_t, shape), "atlas v2 layout: transform mask sits after shape");
-_Static_assert(offsetof(nt_atlas_opts_t, gen_mipmaps) > offsetof(nt_atlas_opts_t, wrap_v), "atlas v2 layout: controls append-only from this baseline");
-_Static_assert(offsetof(nt_atlas_opts_t, dedup) > offsetof(nt_atlas_opts_t, gen_mipmaps), "atlas v2 layout: dedup flag is appended");
+_Static_assert(offsetof(nt_atlas_opts_t, mips) > offsetof(nt_atlas_opts_t, wrap_v), "atlas v2 layout: controls append-only from this baseline");
+_Static_assert(offsetof(nt_atlas_opts_t, dedup) > offsetof(nt_atlas_opts_t, mips), "atlas v2 layout: dedup flag is appended");
 
 int main(void) {
     const nt_basisu_encode_opts_t compress = nt_tex_compress_etc1s_default();
@@ -68,7 +68,7 @@ int main(void) {
         atlas.margin != 103 || atlas.extrude != 104 || atlas.alpha_threshold != 105 || atlas.max_vertices != 6 || atlas.max_added_area_percent != 7.5F || atlas.shape != NT_ATLAS_SHAPE_CONVEX_HULL ||
         atlas.allowed_transforms != NT_ATLAS_TRANSFORMS_IDENTITY_ROT90 || !atlas.power_of_two || atlas.debug_png || !atlas.premultiplied || atlas.pixels_per_unit != 1.25F ||
         atlas.filter_min != NT_TEXTURE_DEFAULT_FILTER_NEAREST || atlas.filter_mag != NT_TEXTURE_DEFAULT_FILTER_NEAREST || atlas.wrap_u != NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE ||
-        atlas.wrap_v != NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE || atlas.gen_mipmaps || !atlas.dedup) {
+        atlas.wrap_v != NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE || atlas.mips != NT_TEX_MIPS_NONE || !atlas.dedup) {
         return 1;
     }
     if (sprite.name == NULL || sprite.name[0] != 'l' || sprite.origin_x != 0.25F || sprite.origin_y != 0.75F || sprite.slice9_left != 11 || sprite.slice9_right != 12 || sprite.slice9_top != 13 ||

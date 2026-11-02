@@ -132,7 +132,6 @@ static void add_character(NtBuilderContext *rig_ctx, NtBuilderContext *clip_ctx,
     const nt_glb_texture_t *texture = &scene.textures[surface->diffuse_index];
     nt_tex_opts_t texture_opts = nt_tex_opts_defaults();
     texture_opts.compress = (nt_basisu_encode_opts_t){0};
-    texture_opts.gen_mipmaps = true;
     texture_opts.max_size = 256; /* deformation checks need no texel detail */
     nt_builder_add_texture_from_memory(rig_ctx, texture->data, texture->size, desc->texture_id, &texture_opts);
 
@@ -268,7 +267,6 @@ int main(int argc, char *argv[]) {
     nt_builder_add_shader(rig_ctx, "assets/shaders/mesh_inst.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_tex_opts_t solid_opts = nt_tex_opts_defaults();
     solid_opts.compress = (nt_basisu_encode_opts_t){0};
-    solid_opts.gen_mipmaps = true;
     static const uint8_t white_texture[4] = {255, 255, 255, 255};
     static const uint8_t tint_texture[4] = {110, 185, 255, 255};
     nt_builder_add_texture_raw(rig_ctx, white_texture, 1, 1, "skeletal_showcase/white.texture", &solid_opts);
@@ -282,7 +280,6 @@ int main(int argc, char *argv[]) {
     atlas_opts.extrude = 1;
     atlas_opts.premultiplied = true;
     atlas_opts.compress = (nt_basisu_encode_opts_t){0};
-    atlas_opts.gen_mipmaps = true;
     NtAtlasBuild *atlas = nt_atlas_begin(rig_ctx, "skeletal_showcase_ui", &atlas_opts);
     static const uint8_t white[4] = {255, 255, 255, 255};
     nt_atlas_sprite_opts_t white_opts = nt_atlas_sprite_opts_defaults();

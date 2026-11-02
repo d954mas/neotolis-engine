@@ -430,9 +430,9 @@ the public texture formats cannot satisfy them.
 Packs are trusted builder output, so `nt_gfx_activate_texture` asserts the
 header: the pixel format, sampler defaults inside the filter/wrap enums, nonzero
 dimensions within `UINT16_MAX`, a `data_size` equal to the bytes after the
-header, a known `compression`, and for an uncompressed texture a `mip_count` of 1 or the full chain
-with a `data_size` of exactly the sum of `nt_texture_level_bytes` over those
-levels. The resource core asserts magic,
+header, a known `compression`, a `mip_count` of 1 or the full chain, and for an
+uncompressed texture a `data_size` of exactly the sum of `nt_texture_level_bytes`
+over those levels. The resource core asserts magic,
 version and the header size first. A texture above `gpu_caps.max_texture_size`
 is a device limit: the activator logs and returns an invalid handle. The header
 asserts above run before that check, so a broken pack layout asserts on every
@@ -442,7 +442,7 @@ run only on a device that passed the limit.
 
 A BASIS asset is cross-checked against the blob before anything is created. The
 blob's own dimensions must equal the header's, and its level count must equal
-both `mip_count` and the full chain down to 1x1; a mismatch asserts. A lost
+`mip_count`; a mismatch asserts. A lost
 context, a staging allocation failure and an RGBA8 fallback chain above 4 GB
 stay recoverable: the activator logs and returns an invalid handle. The
 header's `format` field is range-checked at the boundary like every other

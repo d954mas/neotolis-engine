@@ -87,7 +87,7 @@ static void roundtrip(uint32_t width, uint32_t height, nt_basisu_codec_t codec, 
     uint8_t src[MAX_W * MAX_H * 4];
     fill_pixels(src, width, height, alpha);
     nt_basisu_encode_opts_t opts = codec == NT_BASISU_CODEC_ETC1S ? nt_tex_compress_etc1s_high() : nt_tex_compress_uastc_default();
-    nt_basisu_encode_result_t enc = nt_basisu_encode(1, src, width, height, alpha ? NT_TEXTURE_FORMAT_RGBA8 : NT_TEXTURE_FORMAT_RGB8, &opts);
+    nt_basisu_encode_result_t enc = nt_basisu_encode(1, src, width, height, alpha ? NT_TEXTURE_FORMAT_RGBA8 : NT_TEXTURE_FORMAT_RGB8, &opts, true);
     TEST_ASSERT_NOT_NULL(enc.data);
     uint32_t levels = 1;
     for (uint32_t size = width > height ? width : height; size > 1; size >>= 1U) {
@@ -132,7 +132,7 @@ void test_encode_without_threads_asserts(void) {
     uint8_t pixels[16 * 8 * 4];
     fill_pixels(pixels, 16, 8, false);
     const nt_basisu_encode_opts_t opts = nt_tex_compress_etc1s_high();
-    EXPECT_BUILD_ASSERT_MATCH((void)nt_basisu_encode(0, pixels, 16, 8, NT_TEXTURE_FORMAT_RGB8, &opts), "basis_threads");
+    EXPECT_BUILD_ASSERT_MATCH((void)nt_basisu_encode(0, pixels, 16, 8, NT_TEXTURE_FORMAT_RGB8, &opts, true), "basis_threads");
 }
 
 /* An RGBA source the encoder finds fully opaque loses its alpha slices, so the
@@ -143,7 +143,7 @@ void test_opaque_rgba_source_reports_no_alpha(void) {
     nt_basisu_encode_opts_t codecs[2];
     const uint32_t codec_count = enabled_codec_presets(codecs);
     for (uint32_t i = 0; i < codec_count; i++) {
-        nt_basisu_encode_result_t enc = nt_basisu_encode(1, pixels, 16, 8, NT_TEXTURE_FORMAT_RGBA8, &codecs[i]);
+        nt_basisu_encode_result_t enc = nt_basisu_encode(1, pixels, 16, 8, NT_TEXTURE_FORMAT_RGBA8, &codecs[i], true);
         TEST_ASSERT_NOT_NULL(enc.data);
         const nt_basisu_info_t info = nt_basisu_info(enc.data, enc.size);
         nt_basisu_encode_free(&enc);
@@ -177,7 +177,7 @@ void test_mip_level_with_a_shrunken_stored_width_asserts(void) {
     fill_pixels(pixels, 13, 7, false);
     nt_basisu_encode_opts_t opts = nt_tex_compress_uastc_default();
     /* Opaque UASTC: exactly one slice per level, so level 1 has its own desc. */
-    nt_basisu_encode_result_t enc = nt_basisu_encode(1, pixels, 13, 7, NT_TEXTURE_FORMAT_RGB8, &opts);
+    nt_basisu_encode_result_t enc = nt_basisu_encode(1, pixels, 13, 7, NT_TEXTURE_FORMAT_RGB8, &opts, true);
     TEST_ASSERT_NOT_NULL(enc.data);
 
     const nt_basisu_info_t info = nt_basisu_info(enc.data, enc.size);
@@ -218,6 +218,7 @@ static void encode_checker_tail(nt_basisu_codec_t codec, nt_texture_pixel_format
     nt_tex_opts_t opts = nt_tex_opts_defaults();
     opts.format = format;
     opts.compress = codec == NT_BASISU_CODEC_ETC1S ? nt_tex_compress_etc1s_high() : nt_tex_compress_uastc_default();
+    opts.mips = NT_TEX_MIPS_BAKED;
     NtBuilderContext *ctx = nt_builder_start_pack("basis_checker.ntpack");
     nt_builder_add_texture_raw(ctx, pixels, 8, 8, "checker", &opts);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
@@ -386,7 +387,7 @@ void test_public_basis_file_memory_atlas(void) {
         opts.compress = codecs[i];
         opts.max_size = 8;
         opts.premultiplied = true;
-        opts.gen_mipmaps = false;
+        opts.mips = NT_TEX_MIPS_BAKED;
         nt_builder_add_texture(ctx, "basis_source.tga", &opts);
         opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
         nt_builder_add_texture_from_memory(ctx, tga, sizeof(tga), "memory", &opts);
@@ -397,6 +398,7 @@ void test_public_basis_file_memory_atlas(void) {
         nt_builder_add_texture_raw(ctx, pixels, 16, 8, "raw_pixels", &opts);
         nt_atlas_opts_t atlas_opts = nt_atlas_opts_defaults();
         atlas_opts.compress = codecs[i];
+        atlas_opts.mips = NT_TEX_MIPS_BAKED;
         atlas_opts.max_size = 32;
         atlas_opts.padding = 0;
         atlas_opts.shape = NT_ATLAS_SHAPE_RECT;
@@ -427,6 +429,7 @@ void test_public_basis_single_pixel_full_mip_chain(void) {
     for (uint32_t i = 0; i < codec_count; i++) {
         nt_tex_opts_t opts = nt_tex_opts_defaults();
         opts.compress = codecs[i];
+        opts.mips = NT_TEX_MIPS_BAKED;
         const char *path = codecs[i].codec == NT_BASISU_CODEC_ETC1S ? "basis_single_etc1s.ntpack" : "basis_single_uastc.ntpack";
         NtBuilderContext *ctx = nt_builder_start_pack(path);
         nt_builder_add_texture_raw(ctx, pixel, 1, 1, "pixel", &opts);

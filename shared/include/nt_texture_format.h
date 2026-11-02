@@ -155,7 +155,7 @@ typedef enum {
 
 /* Texture header flags (single byte) */
 #define NT_TEXTURE_FLAG_PREMULTIPLIED (1U << 0) /* RGB already multiplied by alpha */
-#define NT_TEXTURE_FLAG_GEN_MIPMAPS (1U << 1)   /* runtime should glGenerateMipmap on a one-level uncompressed upload (no effect on BASIS) */
+#define NT_TEXTURE_FLAG_GEN_MIPMAPS (1U << 1)   /* runtime should glGenerateMipmap on a one-level uncompressed upload */
 /* bits 2..7 reserved */
 
 /* Values must match nt_texture_filter_t / nt_texture_wrap_t in nt_gfx.h. */
@@ -189,7 +189,8 @@ typedef enum {
  *   NONE(0): uncompressed levels 0..mip_count-1 follow back to back, no
  *           padding; mip_count is 1 or the full chain, data_size is the sum
  *           of nt_texture_level_bytes over the levels
- *   BASIS(1): Basis Universal encoded blob follows
+ *   BASIS(1): Basis Universal encoded blob follows; mip_count is 1 or the
+ *            full chain and equals the blob's level count
  *
  * format field serves double duty:
  *   NONE: pixel layout and transfer (RGBA8, RGB8, RG8, R8, SRGB8_ALPHA8, SRGB8,
@@ -203,9 +204,9 @@ typedef enum {
  *   bit 0 = NT_TEXTURE_FLAG_PREMULTIPLIED — RGB values are already multiplied
  *           by alpha. Renderer should use blend (ONE, ONE_MINUS_SRC_ALPHA).
  *   bit 1 = NT_TEXTURE_FLAG_GEN_MIPMAPS — runtime should generate mips on
- *           upload for one-level uncompressed textures so material sampler overrides
- *           can opt into mipmap filtering. Never set with a baked chain.
- *           No effect on BASIS (mips are baked).
+ *           upload of a one-level uncompressed texture. The builder writes it
+ *           only for mips = RUNTIME, which it allows only uncompressed;
+ *           BASIS uploads ignore it.
  *
  * default_min/mag_filter, default_wrap_u/v:
  *   Builder-baked defaults (nt_texture_filter_t / nt_texture_wrap_t enum

@@ -40,6 +40,7 @@ static void add_pair(NtBuilderContext *ctx, const char *suffix, nt_basisu_encode
 
     nt_tex_opts_t opts = nt_tex_opts_defaults();
     opts.compress = compress;
+    opts.mips = NT_TEX_MIPS_BAKED;
     opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
     opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
 
@@ -66,7 +67,7 @@ static void add_srgb_texel(NtBuilderContext *ctx) {
     static const uint8_t texel[4] = {128, 128, 128, 128};
     nt_tex_opts_t opts = nt_tex_opts_defaults();
     opts.format = NT_TEXTURE_FORMAT_SRGB8_ALPHA8;
-    opts.gen_mipmaps = false;
+    opts.mips = NT_TEX_MIPS_NONE;
     opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_NEAREST;
     opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_NEAREST;
     nt_builder_add_texture_raw(ctx, texel, 1, 1, "srgb_texel", &opts);
@@ -83,6 +84,7 @@ static void add_hdr_texture(NtBuilderContext *ctx) {
     }
     nt_tex_opts_t opts = nt_tex_opts_defaults();
     opts.format = NT_TEXTURE_FORMAT_RGB9E5;
+    opts.mips = NT_TEX_MIPS_BAKED;
     opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
     opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
     nt_builder_add_texture_raw_f32(ctx, rgb, 4, 4, "hdr_rgb9e5", &opts);

@@ -1494,8 +1494,8 @@ static void add_texture_pixels(NtBuilderContext *ctx, const void *pixels, uint32
 
 void nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const char *resource_id, const nt_tex_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && rgba_pixels && width > 0 && height > 0 && resource_id && "invalid texture_raw args");
+    NT_BUILD_ASSERT((!opts || opts->format != NT_TEXTURE_FORMAT_RGB9E5) && "add_texture_raw: RGB9E5 takes float pixels -- use nt_builder_add_texture_raw_f32");
     nt_texture_pixel_format_t effective_format = nt_builder_assert_texture_opts(opts);
-    NT_BUILD_ASSERT(effective_format != NT_TEXTURE_FORMAT_RGB9E5 && "add_texture_raw: RGB9E5 takes float pixels -- use nt_builder_add_texture_raw_f32");
     add_texture_pixels(ctx, rgba_pixels, width, height, resource_id, opts, effective_format);
 }
 

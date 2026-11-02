@@ -237,6 +237,17 @@ const nt_atlas_stats_t *nt_builder_get_atlas_stats(const NtBuilderContext *ctx, 
 
 /* --- Texture options (game controls format and resize per-texture) --- */
 
+/* Where a texture's mip chain comes from. NONE and RUNTIME store level 0 only;
+ * RUNTIME also sets NT_TEXTURE_FLAG_GEN_MIPMAPS and needs a format the GPU can
+ * render to (uncompressed, not SRGB8 or RGB9E5). BAKED stores the full chain. A mipmap
+ * filter_min with NONE asserts; a material override to a mipmap filter on
+ * a NONE texture samples level 0. */
+typedef enum {
+    NT_TEX_MIPS_NONE = 0,
+    NT_TEX_MIPS_RUNTIME = 1,
+    NT_TEX_MIPS_BAKED = 2,
+} nt_tex_mips_t;
+
 typedef struct {
     nt_texture_pixel_format_t format; /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8. RGB9E5 = HDR, needs an HDR source */
     uint32_t max_size;                /* 0 = no resize, otherwise max(w,h) clamped to this */
@@ -247,10 +258,7 @@ typedef struct {
     nt_texture_default_filter_t filter_mag; /* default: LINEAR (NEAREST or LINEAR only) */
     nt_texture_default_wrap_t wrap_u;       /* default: REPEAT */
     nt_texture_default_wrap_t wrap_v;       /* default: REPEAT */
-    /* Uncompressed mips: defaults true, zero-init false. Required for mipmap filtering,
-     * including material overrides. Generated at runtime, except RGB9E5, whose
-     * chain the builder bakes. Ignored by BASIS. */
-    bool gen_mipmaps;
+    nt_tex_mips_t mips;                     /* default RUNTIME; zero-init NONE. Basis, SRGB8 and RGB9E5 need BAKED or NONE. */
 } nt_tex_opts_t;
 
 static inline nt_tex_opts_t nt_tex_opts_defaults(void) {
@@ -263,7 +271,7 @@ static inline nt_tex_opts_t nt_tex_opts_defaults(void) {
         .filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR,
         .wrap_u = NT_TEXTURE_DEFAULT_WRAP_REPEAT,
         .wrap_v = NT_TEXTURE_DEFAULT_WRAP_REPEAT,
-        .gen_mipmaps = true,
+        .mips = NT_TEX_MIPS_RUNTIME,
     };
 }
 
@@ -370,7 +378,7 @@ typedef struct {
     nt_texture_default_filter_t filter_mag; /* default: LINEAR (NEAREST or LINEAR only) */
     nt_texture_default_wrap_t wrap_u;       /* default: REPEAT */
     nt_texture_default_wrap_t wrap_v;       /* default: REPEAT */
-    bool gen_mipmaps;                       /* Uncompressed only; default true. See nt_tex_opts_t.gen_mipmaps. */
+    nt_tex_mips_t mips;                     /* default RUNTIME; Basis and SRGB8 pages need BAKED or NONE. See nt_tex_mips_t. */
     bool dedup;                             /* fold sprites with identical content onto one placement (default: true).
                                              * A 0x00 zero-init therefore means dedup OFF — same trade-off as allowed_transforms. */
 } nt_atlas_opts_t;
@@ -397,7 +405,7 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
         .filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR,
         .wrap_u = NT_TEXTURE_DEFAULT_WRAP_REPEAT,
         .wrap_v = NT_TEXTURE_DEFAULT_WRAP_REPEAT,
-        .gen_mipmaps = true,
+        .mips = NT_TEX_MIPS_RUNTIME,
         .dedup = true,
     };
 }
@@ -659,7 +667,7 @@ void nt_builder_set_header_dir(NtBuilderContext *ctx, const char *dir);
 void nt_builder_set_gzip_estimate(NtBuilderContext *ctx, bool enabled);
 
 /* --- Builder cache (content-addressed, skips re-encoding unchanged assets) --- */
-#define NT_BUILDER_VERSION 7 /* Bump when encode logic changes to invalidate cache */
+#define NT_BUILDER_VERSION 8 /* Bump when encode logic changes to invalidate cache */
 void nt_builder_set_cache_dir(NtBuilderContext *ctx, const char *dir);
 
 /* --- Parallel encoding (multi-threaded asset encode in finish_pack) --- */
