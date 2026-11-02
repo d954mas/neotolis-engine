@@ -203,8 +203,8 @@ typedef enum {
  *   bit 0 = NT_TEXTURE_FLAG_PREMULTIPLIED — RGB values are already multiplied
  *           by alpha. Renderer should use blend (ONE, ONE_MINUS_SRC_ALPHA).
  *   bit 1 = NT_TEXTURE_FLAG_GEN_MIPMAPS — runtime should generate mips on
- *           upload of a one-level uncompressed texture (builder mips = RUNTIME).
- *           Never set with a baked chain or on BASIS.
+ *           upload of a one-level uncompressed texture. The builder writes it
+ *           only for mips = RUNTIME, which it allows only uncompressed.
  *
  * default_min/mag_filter, default_wrap_u/v:
  *   Builder-baked defaults (nt_texture_filter_t / nt_texture_wrap_t enum

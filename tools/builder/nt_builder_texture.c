@@ -245,8 +245,7 @@ static void *build_chain(const void *level0, uint32_t width, uint32_t height, ui
     return chain;
 }
 
-/* Uncompressed levels in the stored layout, or NULL when `source` (RGBA8, one
- * level) is already the payload. *out_size is the payload size either way. */
+/* Uncompressed levels in the stored layout, in a new buffer. */
 static uint8_t *encode_raw_levels(const void *source, nt_texture_pixel_format_t format, uint32_t width, uint32_t height, uint32_t level_count, size_t *out_size) {
     if (format == NT_TEXTURE_FORMAT_RGB9E5) {
         /* Each level filters the previous float level, never packed RGB9E5. */
@@ -263,21 +262,18 @@ static uint8_t *encode_raw_levels(const void *source, nt_texture_pixel_format_t 
         return (uint8_t *)packed;
     }
     const uint32_t bpp = nt_texture_bpp(format);
-    *out_size = (size_t)width * height * bpp;
+    NT_BUILD_ASSERT(bpp != 0 && width * height != 0 && "texture encode: empty RAW image");
     uint8_t *stripped = bpp < 4 ? strip_channels((const uint8_t *)source, width * height, bpp) : NULL;
-    if (level_count == 1) {
-        return stripped;
-    }
-    static const stbir_pixel_layout layouts[5] = {STBIR_1CHANNEL, STBIR_1CHANNEL, STBIR_2CHANNEL, STBIR_RGB, STBIR_RGBA_NO_AW};
+    /* stb takes a channel count 1..3 as its layout; RGBA_NO_AW also serves premultiplied data. */
+    const stbir_pixel_layout layout = bpp == 4 ? STBIR_RGBA_NO_AW : (stbir_pixel_layout)bpp;
     const stbir_datatype type = nt_texture_format_is_srgb(format) ? STBIR_TYPE_UINT8_SRGB : STBIR_TYPE_UINT8;
-    uint8_t *chain = (uint8_t *)build_chain(stripped ? stripped : source, width, height, level_count, bpp, layouts[bpp], type, out_size);
+    uint8_t *chain = (uint8_t *)build_chain(stripped ? stripped : source, width, height, level_count, bpp, layout, type, out_size);
     free(stripped);
     return chain;
 }
 
 /* --- Encode: source pixels -> independent buffer (thread-safe, no shared state) --- */
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- assert expansions inflate the count
 void nt_builder_encode_texture_to_buf(const void *pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint32_t encode_threads, uint8_t **out_data, uint32_t *out_size) {
     const bool compressed = opts->compress.codec != NT_BASISU_CODEC_NONE;
     const bool baked = opts->mips == NT_TEX_MIPS_BAKED;
@@ -301,9 +297,9 @@ void nt_builder_encode_texture_to_buf(const void *pixels, uint32_t width, uint32
         data_size = enc.size;
     } else {
         owned = encode_raw_levels(source, opts->format, width, height, level_count, &data_size);
-        payload = owned ? owned : source;
+        payload = owned;
     }
-    NT_BUILD_ASSERT(data_size <= UINT32_MAX - sizeof(NtTextureAssetHeader) && "texture encode: payload exceeds 4 GiB");
+    /* Fits uint32: NT_BUILD_MAX_TEXTURE_SIZE and the 16384 atlas page cap bound a baked chain below 1.5 GiB. */
 
     NtTextureAssetHeader tex_hdr = {0};
     tex_hdr.magic = NT_TEXTURE_MAGIC;

@@ -844,6 +844,7 @@ static nt_texture_pixel_format_t atlas_assert_opts(const nt_atlas_opts_t *opts) 
     NT_BUILD_ASSERT(opts->pixels_per_unit > 0.0F && isfinite(opts->pixels_per_unit) && "nt_atlas_begin: pixels_per_unit must be > 0 and finite");
     NT_BUILD_ASSERT(1.0F / opts->pixels_per_unit > 0.0F && isfinite(1.0F / opts->pixels_per_unit) && "nt_atlas_begin: inverse_pixels_per_unit must be positive and finite");
     // #endregion
+    NT_BUILD_ASSERT(opts->format != NT_TEXTURE_FORMAT_RGB9E5 && "nt_atlas_begin: atlas pages are LDR -- format RGB9E5 is not supported");
     nt_tex_opts_t texture_opts = {
         .format = opts->format,
         .compress = opts->compress,
@@ -854,9 +855,7 @@ static nt_texture_pixel_format_t atlas_assert_opts(const nt_atlas_opts_t *opts) 
         .wrap_v = opts->wrap_v,
         .mips = opts->mips,
     };
-    const nt_texture_pixel_format_t format = nt_builder_assert_texture_opts(&texture_opts);
-    NT_BUILD_ASSERT(format != NT_TEXTURE_FORMAT_RGB9E5 && "nt_atlas_begin: atlas pages are LDR -- format RGB9E5 is not supported");
-    return format;
+    return nt_builder_assert_texture_opts(&texture_opts);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)

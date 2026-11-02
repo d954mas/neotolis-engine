@@ -127,6 +127,7 @@ compression.uastc.pack_level = 3;
 compression.uastc.rdo_lambda = 0.5F;
 nt_tex_opts_t texture = nt_tex_opts_defaults();
 texture.compress = compression;
+texture.mips = NT_TEX_MIPS_BAKED;
 nt_builder_add_texture(ctx, "assets/normal.png", &texture);
 ```
 

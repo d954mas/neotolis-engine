@@ -409,6 +409,10 @@ void test_blob_without_mips_activates_as_one_level(void) {
     fixture_header(&one)->mip_count = 2;
     expect_header_assert(&one, one.size);
     TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "neither 1 nor the full chain"));
+    /* A legal count is still checked against the blob. */
+    fixture_header(&one)->mip_count = (uint16_t)full_chain_levels(13, 7);
+    expect_header_assert(&one, one.size);
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "differs from its header"));
     fixture_free(&one);
 }
 
@@ -446,9 +450,11 @@ void test_header_boundaries_assert_without_touching_the_pool(void) {
     const NtTextureAssetHeader good = *fixture_header(&alpha);
 
     fixture_header(&alpha)->mip_count = (uint16_t)(good.mip_count + 1);
-    expect_header_assert(&alpha, alpha.size); /* mip_count above the Basis chain */
+    expect_header_assert(&alpha, alpha.size); /* mip_count above the full chain */
     fixture_header(&alpha)->mip_count = (uint16_t)(good.mip_count - 1);
-    expect_header_assert(&alpha, alpha.size); /* mip_count below the Basis chain */
+    expect_header_assert(&alpha, alpha.size); /* mip_count neither 1 nor the full chain */
+    fixture_header(&alpha)->mip_count = 1;
+    expect_header_assert(&alpha, alpha.size); /* one level over a full Basis chain */
     *fixture_header(&alpha) = good;
 
     fixture_header(&alpha)->data_size = good.data_size + 1;

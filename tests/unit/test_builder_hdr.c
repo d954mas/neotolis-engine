@@ -394,11 +394,19 @@ void test_hdr_opts_contract(void) {
 
 // #region atlases stay LDR
 
+/* The float entry point is named before any mip rule, whatever the mode. */
+void test_rgba_entry_rejects_rgb9e5_first(void) {
+    const uint8_t rgba[4] = {0};
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.format = NT_TEXTURE_FORMAT_RGB9E5;
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/rgba_entry.ntpack");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_texture_raw(ctx, rgba, 1, 1, "hdr", &opts), "use nt_builder_add_texture_raw_f32");
+    nt_builder_free_pack(ctx);
+}
+
 void test_atlas_rgb9e5_page_asserts(void) {
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.format = NT_TEXTURE_FORMAT_RGB9E5;
-    opts.mips = NT_TEX_MIPS_BAKED;
-    opts.premultiplied = false; /* premultiplication already rejects every format but RGBA8 */
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas.ntpack");
     EXPECT_BUILD_ASSERT_MATCH((void)nt_atlas_begin(ctx, "page", &opts), "atlas pages are LDR");
     nt_builder_free_pack(ctx);
@@ -438,6 +446,7 @@ int main(void) {
     RUN_TEST(test_hdr_range_is_checked_before_resize);
     RUN_TEST(test_hdr_source_and_format_must_agree);
     RUN_TEST(test_hdr_opts_contract);
+    RUN_TEST(test_rgba_entry_rejects_rgb9e5_first);
     RUN_TEST(test_atlas_rgb9e5_page_asserts);
     RUN_TEST(test_atlas_hdr_sprite_is_a_content_error);
     return UNITY_END();
