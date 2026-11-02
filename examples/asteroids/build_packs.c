@@ -35,7 +35,7 @@ static void finish_pack(NtBuilderContext *ctx) {
 
 static void build_core(const char *directory) {
     NtBuilderContext *ctx = start_pack(directory, "asteroids_core");
-    nt_builder_add_font(ctx, "examples/asteroids/raw/DejaVuSansMono.ttf", &(nt_font_opts_t){.charset = NT_CHARSET_ASCII, .resource_name = "asteroids/font"});
+    nt_builder_add_font(ctx, "assets/fonts/DejaVuSansMono.ttf", &(nt_font_opts_t){.charset = NT_CHARSET_ASCII, .resource_name = "asteroids/font"});
     const char *const programs[] = {"rock", "planet", "sky", "noise"};
     const char *const vertices[] = {"scene", "planet", "sky", "noise"};
     for (uint32_t i = 0; i < 4; i++) {

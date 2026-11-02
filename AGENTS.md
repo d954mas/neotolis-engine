@@ -66,7 +66,7 @@ alternative, what each catches. The developer decides.
 - Fix failures before committing. A fresh full gate is authoritative; targeted tests alone can use stale binaries.
 - Never run two `check.sh`/`ctest` processes in one tree at once, including subagents. Remove `build/.check.lock` only after confirming its owner is dead.
 - Before pushing new C test/tool files, run `clang-tidy -p build/_cmake/tidy-ci <file>` directly; see [check details](docs/build.md#checks).
-- Commit deterministic regenerated `examples/*/generated/*.h` when pack builds reveal stale committed copies.
+- Commit deterministic regenerated `examples/*/generated/*.h` and `tools/*/generated/*.h` when pack builds reveal stale committed copies.
 
 ## Evidence and review
 

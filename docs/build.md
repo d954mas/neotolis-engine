@@ -37,8 +37,8 @@ packs cause an explicit WASM build failure.
 The first Sponza encode can take hours. To defer it, configure native builds
 with `-DNT_SKIP_EXAMPLE_PACKS=sponza`; this cache setting persists. Reset it with
 `-DNT_SKIP_EXAMPLE_PACKS=` when Sponza is needed. Warm encodes reuse
-`build/examples/*/_cache`. Generated `examples/*/generated/*.h` are
-deterministic tracked output; commit refreshed copies when a pack build reveals
+`build/examples/*/_cache`. Generated `examples/*/generated/*.h` and
+`tools/*/generated/*.h` are deterministic tracked output; commit refreshed copies when a pack build reveals
 they were stale.
 
 Every native build runs each example's pack builder; it exits at once while
@@ -339,7 +339,12 @@ native-release build, example packs from the release builder, pack guards) and
 `lint`, `devapi-smoke`, `web-smoke` and `browser-test` (smoke, Basis rows and
 release diagnostics as three parallel parts). Deploy requires all of
 them. Native test configures pass `NT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"`:
-tests read their own fixtures, so only `packs` runs the example builders. Add a
+tests read their own fixtures, so only `packs` runs the example builders. Tool
+packs are the exception: `tools/frame_inspector` exists only in capture builds, so its
+pack builds in every full native capture build (`native-debug`, `native-release-test`);
+`native-debug` checks its committed `tools/*/generated` header. Tool packs stay out of
+`NT_ALL_EXAMPLE_PACKS` and skip lists: they register only in capture builds, so a
+capture-off configure would reject the name. Add a
 new example to `NT_ALL_EXAMPLE_PACKS`; the `packs` guard fails until it is listed.
 The wasm jobs build only the paired presets: a paired `index.wasm` is the
 baseline build, so smoke, ctest and symbol checks run there. Narrow configures

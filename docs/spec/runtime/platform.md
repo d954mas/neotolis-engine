@@ -67,6 +67,18 @@ Platform does **not** handle:
 - material logic
 - resource manifests
 
+## File dialog
+
+`nt_file_dialog_open(title, pattern, out, cap)` (`engine/file_dialog`, native only) shows the
+system's open-file dialog over the vendored tinyfiledialogs and blocks until it closes. It
+writes the chosen paths back to back, each NUL-terminated, and returns how many fit; 0 on
+cancel. Paths come in the encoding `fopen` takes (the ANSI code page on Windows), so
+`nt_fs` opens them; a name containing `|` comes back split. Windows uses the system dialog;
+Linux needs zenity, kdialog or a similar helper and returns 0 at once without one, rather
+than tinyfiledialogs' blocking console prompt. The browser has no filesystem: there is no web implementation, and
+including the header in a wasm build is an error. Tools call it between frames, since the
+dialog blocks the loop.
+
 ## Process probes
 
 `core/nt_platform.h` declares process probes; `engine/platform` implements them

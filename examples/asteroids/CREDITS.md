@@ -85,7 +85,7 @@ author is implied.
 
 ## HUD font
 
-- Local file: `raw/DejaVuSansMono.ttf`.
+- Local file: `assets/fonts/DejaVuSansMono.ttf` (shared with tools/frame_inspector).
 - Family: [DejaVu Sans Mono](https://dejavu-fonts.github.io/).
 - Copyright (c) 2003 by Bitstream, Inc. All Rights Reserved.
   Bitstream Vera is a trademark of Bitstream, Inc. DejaVu changes are in the public domain.

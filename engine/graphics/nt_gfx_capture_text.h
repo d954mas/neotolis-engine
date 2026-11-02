@@ -7,6 +7,10 @@
 
 /* Name of an issued-call detail, e.g. "glBindTexture"; NULL outside the table. */
 const char *nt_gfx_gl_call_name(uint32_t call);
+/* Names the capture text uses ("DRAW", "CACHE", "TEXTURE"); NULL outside their tables. */
+const char *nt_gfx_operation_name(uint32_t operation);
+const char *nt_gfx_result_name(uint32_t result);
+const char *nt_gfx_object_kind_name(uint32_t kind);
 
 /* Lossless named text of a capture (grammar in the render architecture spec, "Capture text").
  * Returns the bytes the text needs, without the terminator; writes at most cap - 1 of them plus a
