@@ -64,7 +64,7 @@
 // #region palette
 static const Clay_Color k_bg = {24, 26, 30, 255};
 static const Clay_Color k_panel = {32, 35, 41, 255};
-static const Clay_Color k_hover = {48, 52, 62, 255};
+static const Clay_Color k_hover = {60, 66, 80, 255};
 static const Clay_Color k_select = {92, 70, 24, 255}; /* amber: never confused with blue draw rows */
 static const Clay_Color k_bar = {110, 116, 130, 255};
 static const Clay_Color k_bar_bad = {200, 70, 60, 255};
@@ -81,10 +81,10 @@ static const nt_ui_label_style_t k_dim = TEXT_(140, 145, 155);
 static const nt_ui_label_style_t k_head = TEXT_(255, 255, 255);
 static const nt_ui_label_style_t k_link = TEXT_(120, 180, 255);
 static const nt_ui_label_style_t k_bad = TEXT_(255, 110, 100);
-static const nt_ui_label_style_t k_warn = TEXT_(240, 180, 80);
-static const nt_ui_label_style_t k_note = TEXT_(140, 210, 140);
-static const nt_ui_label_style_t k_marker = TEXT_(230, 210, 120);
-static const nt_ui_label_style_t k_backend = TEXT_(150, 165, 190);
+static const nt_ui_label_style_t k_warn = TEXT_(245, 150, 50);
+static const nt_ui_label_style_t k_note = TEXT_(235, 150, 190);
+static const nt_ui_label_style_t k_marker = TEXT_(235, 215, 100);
+static const nt_ui_label_style_t k_backend = TEXT_(165, 185, 225);
 static const nt_ui_label_style_t k_state = TEXT_(130, 215, 140);
 static const nt_ui_label_style_t k_skip = TEXT_(110, 200, 200); /* a GL call the backend cache left out */
 static const nt_ui_label_style_t k_link_wrap = {.font_id = 0, .font_size = FONT, .color = NT_RGBA8(120, 180, 255, 255)};
