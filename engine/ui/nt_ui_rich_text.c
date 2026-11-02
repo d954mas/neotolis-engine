@@ -1495,7 +1495,7 @@ static void rich_push_text_atom(rich_atom_t *out, uint32_t *n, uint32_t cap, con
  * <= container_w (break-anywhere). Each chunk width is the WHOLE-prefix measure so inter-glyph
  * kerning counts -- a per-codepoint sum drops kerning and overflows under a kerning font. */
 static void rich_break_anywhere(rich_atom_t *out, uint32_t *n, uint32_t cap, const nt_ui_rich_run_t *run, nt_font_t font, float size, uint32_t color, uint8_t effect_id, uint8_t layer, float t_asc,
-                                float t_desc, const char *text, uint32_t word_off, uint32_t word_len, float container_w, uint16_t run_idx, bool first_breakable) {
+                                float t_desc, const char *text, uint32_t word_off, uint32_t word_len, float container_w, uint16_t run_idx, bool first_breakable, float *chunk_width) {
     uint32_t chunk_start = word_off;
     uint32_t i = word_off;
     const uint32_t word_end = word_off + word_len;
@@ -1503,7 +1503,6 @@ static void rich_break_anywhere(rich_atom_t *out, uint32_t *n, uint32_t cap, con
     uint32_t last_boundary = word_off; /* last codepoint boundary that still fit */
     float cur_w = 0.0F;                /* measured width of [chunk_start, i) -- prefix incl. kerning */
     float prev_w = 0.0F;               /* measured width of [chunk_start, last_boundary) */
-    bool emitted = false;
     while (i < word_end) {
         uint32_t state = NT_UTF8_ACCEPT;
         do {
@@ -1513,11 +1512,14 @@ static void rich_break_anywhere(rich_atom_t *out, uint32_t *n, uint32_t cap, con
         /* Prefix from chunk_start -> the running width carries inter-glyph kerning (NOT an isolated
          * per-glyph sum, which would drop it and let the chunk overflow under a kerning font). */
         cur_w = nt_font_measure_n(font, text + chunk_start, i - chunk_start, size, 0.0F).width;
-        if (cur_w > container_w && last_boundary > chunk_start) {
+        if (*chunk_width + cur_w > container_w && (last_boundary > chunk_start || *chunk_width > 0.0F)) {
             /* Commit the chunk up to the previous boundary; restart the new chunk at this glyph. */
             const uint32_t clen = last_boundary - chunk_start;
-            rich_push_text_atom(out, n, cap, run, font, size, color, effect_id, layer, t_asc, t_desc, chunk_start, clen, prev_w, emitted ? true : first_breakable, run_idx);
-            emitted = true;
+            if (clen > 0U) {
+                rich_push_text_atom(out, n, cap, run, font, size, color, effect_id, layer, t_asc, t_desc, chunk_start, clen, prev_w, first_breakable, run_idx);
+            }
+            first_breakable = true;
+            *chunk_width = 0.0F;
             chunk_start = last_boundary;
             /* Re-seed the prefix from the new chunk_start: re-measure [chunk_start, i) so the carried
              * tail's width matches a standalone chunk (its own kerning chain, no left neighbour). */
@@ -1529,7 +1531,8 @@ static void rich_break_anywhere(rich_atom_t *out, uint32_t *n, uint32_t cap, con
     /* Trailing chunk (or the whole word if it never exceeded). */
     if (chunk_start < word_end) {
         const uint32_t clen = word_end - chunk_start;
-        rich_push_text_atom(out, n, cap, run, font, size, color, effect_id, layer, t_asc, t_desc, chunk_start, clen, cur_w, emitted ? true : first_breakable, run_idx);
+        rich_push_text_atom(out, n, cap, run, font, size, color, effect_id, layer, t_asc, t_desc, chunk_start, clen, cur_w, first_breakable, run_idx);
+        *chunk_width += cur_w;
     }
 }
 
@@ -1538,6 +1541,7 @@ static void rich_break_anywhere(rich_atom_t *out, uint32_t *n, uint32_t cap, con
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- word-split + overflow policy
 static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float container_w, rich_atom_t *out, uint32_t cap) {
     uint32_t n = 0;
+    float chunk_width = 0.0F; /* A word can continue across style runs. */
     for (uint32_t ri = 0; ri < st->run_count; ri++) {
         const nt_ui_rich_run_t *run = &st->runs[ri];
         const nt_ui_rich_style_t *style = &st->styles[run->style_idx];
@@ -1564,12 +1568,17 @@ static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float container_w, rich
                 }
                 const uint32_t word_len = i - word_start;
                 const float advance = nt_font_measure_n(font, st->text + word_start, word_len, size, 0.0F).width;
-                const bool breakable = (n > 0U);
-                /* OVERFLOW POLICY: a single word wider than the box breaks anywhere. */
-                if (advance > container_w && container_w > 0.0F) {
-                    rich_break_anywhere(out, &n, cap, run, font, size, style->color_abgr, style->effect_id, layer, t_asc, t_desc, st->text, word_start, word_len, container_w, (uint16_t)ri, breakable);
+                const bool breakable = n == 0U || out[n - 1U].kind != NT_RICH_ATOM_TEXT || st->text[word_start - 1U] == ' ';
+                if (breakable) {
+                    chunk_width = 0.0F;
+                }
+                /* Split only when the whole word fragment chain exceeds the box. */
+                if (chunk_width + advance > container_w) {
+                    rich_break_anywhere(out, &n, cap, run, font, size, style->color_abgr, style->effect_id, layer, t_asc, t_desc, st->text, word_start, word_len, container_w, (uint16_t)ri, breakable,
+                                        &chunk_width);
                 } else {
                     rich_push_text_atom(out, &n, cap, run, font, size, style->color_abgr, style->effect_id, layer, t_asc, t_desc, word_start, word_len, advance, breakable, (uint16_t)ri);
+                    chunk_width += advance;
                 }
             }
         } else if (run->kind == NT_RICH_ATOM_IMAGE) {
@@ -1623,14 +1632,21 @@ static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float container_w, rich
 static uint32_t rich_break_lines(rich_atom_t *atoms, uint32_t na, float container_w) {
     float line_w = 0.0F;
     uint32_t line = 0;
-    for (uint32_t i = 0; i < na; i++) {
-        const float aw = atoms[i].advance;
-        if (line_w > 0.0F && atoms[i].breakable_before && (line_w + aw) > container_w) {
-            line++; /* break BEFORE this atom (greedy) */
+    for (uint32_t i = 0; i < na;) {
+        uint32_t end = i + 1U;
+        float width = atoms[i].advance;
+        while (end < na && !atoms[end].breakable_before) {
+            width += atoms[end++].advance;
+        }
+        if (line_w > 0.0F && line_w + width > container_w) {
+            line++;
             line_w = 0.0F;
         }
-        atoms[i].line = line;
-        line_w += aw;
+        /* Keep a word's styled fragments together, including break-anywhere chunks. */
+        for (; i < end; i++) {
+            atoms[i].line = line;
+        }
+        line_w += width;
     }
     return (na > 0U) ? (line + 1U) : 0U;
 }
@@ -1661,13 +1677,10 @@ static void rich_image_metrics(const rich_atom_t *a, float mid_ref, float *io_as
 /* The MIDDLE-valign x-height reference for a line: its text ascent, or the tallest image box when
  * the line has no text (so an image-dominant line still centers). Reserve AND placement share it
  * Also accumulates the line's text ascent/descent into io_asc/io_desc. */
-static float rich_line_text_metrics(const rich_atom_t *atoms, uint32_t na, uint32_t L, float *io_asc, float *io_desc) {
+static float rich_line_text_metrics(const rich_atom_t *atoms, uint32_t na, float *io_asc, float *io_desc) {
     float text_asc = 0.0F;
     float max_box_h = 0.0F;
     for (uint32_t i = 0; i < na; i++) {
-        if (atoms[i].line != L) {
-            continue;
-        }
         if (atoms[i].kind == NT_RICH_ATOM_TEXT) {
             text_asc = (atoms[i].asc > text_asc) ? atoms[i].asc : text_asc;
             *io_asc = (atoms[i].asc > *io_asc) ? atoms[i].asc : *io_asc;
@@ -1682,21 +1695,19 @@ static float rich_line_text_metrics(const rich_atom_t *atoms, uint32_t na, uint3
 /* Per-line max ascent/descent over the line's atoms + the line's pixel width. out_mid_ref is the
  * MIDDLE-valign x-height reference (see rich_line_text_metrics); PLACEMENT must reuse it so a
  * centered image seats inside its reserved box. */
-static void rich_line_metrics(const rich_atom_t *atoms, uint32_t na, uint32_t L, float *out_asc, float *out_desc, float *out_w, float *out_mid_ref) {
+static void rich_line_metrics(const rich_atom_t *atoms, uint32_t na, float *out_asc, float *out_desc, float *out_w, float *out_mid_ref) {
     *out_asc = 0.0F;
     *out_desc = 0.0F;
     *out_w = 0.0F;
-    const float mid_ref = rich_line_text_metrics(atoms, na, L, out_asc, out_desc);
+    const float mid_ref = rich_line_text_metrics(atoms, na, out_asc, out_desc);
     for (uint32_t i = 0; i < na; i++) {
         /* IMAGE + OBJECT both reserve a box that demands line ascent/descent. */
-        if (atoms[i].line == L && (atoms[i].kind == NT_RICH_ATOM_IMAGE || atoms[i].kind == NT_RICH_ATOM_OBJECT)) {
+        if (atoms[i].kind == NT_RICH_ATOM_IMAGE || atoms[i].kind == NT_RICH_ATOM_OBJECT) {
             rich_image_metrics(&atoms[i], mid_ref, out_asc, out_desc);
         }
     }
     for (uint32_t i = 0; i < na; i++) {
-        if (atoms[i].line == L) {
-            *out_w += atoms[i].advance;
-        }
+        *out_w += atoms[i].advance;
     }
     *out_mid_ref = mid_ref;
 }
@@ -1777,35 +1788,36 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
      * outside the block (worst on the first frame). Pre-scan line widths to learn max_line_w, then
      * align against it. Explicit container_w aligns against the box as before. */
     float max_line_w = 0.0F;
-    for (uint32_t L = 0; L < st->line_count; L++) {
-        float line_w = 0.0F;
-        for (uint32_t i = 0; i < na; i++) {
-            if (atoms[i].line == L) {
-                line_w += atoms[i].advance;
-            }
+    float scan_width = 0.0F;
+    for (uint32_t i = 0; i < na; i++) {
+        scan_width += atoms[i].advance;
+        if (i + 1U == na || atoms[i + 1U].line != atoms[i].line) {
+            max_line_w = (scan_width > max_line_w) ? scan_width : max_line_w;
+            scan_width = 0.0F;
         }
-        max_line_w = (line_w > max_line_w) ? line_w : max_line_w;
     }
     const float align_w = (container_w > 0.0F) ? box_w : max_line_w;
 
     float pen_y = 0.0F;
     uint32_t glyph_cursor = 0; /* running per-glyph effect index across the whole block */
+    uint32_t line_begin = 0;
     for (uint32_t L = 0; L < st->line_count; L++) {
+        uint32_t line_end = line_begin + 1U;
+        while (line_end < na && atoms[line_end].line == L) {
+            line_end++;
+        }
         float asc = 0.0F;
         float desc = 0.0F;
         float line_w = 0.0F;
         float mid_ref = 0.0F;
-        rich_line_metrics(atoms, na, L, &asc, &desc, &line_w, &mid_ref);
+        rich_line_metrics(atoms + line_begin, line_end - line_begin, &asc, &desc, &line_w, &mid_ref);
         const float line_h = asc + desc;
         const float baseline_y = pen_y + asc;
         const float ox = rich_align_ox(align, align_w, line_w);
 
         float pen_x = ox;
         uint32_t prev_link_id = 0U; /* link id of the immediately-preceding atom on this line (0 = none/gap) */
-        for (uint32_t i = 0; i < na; i++) {
-            if (atoms[i].line != L) {
-                continue;
-            }
+        for (uint32_t i = line_begin; i < line_end; i++) {
             const rich_atom_t *a = &atoms[i];
             NT_ASSERT(st->solved_count < na && "rich solved-atom overflow");
             nt_ui_rich_solved_atom_t *s = &st->solved[st->solved_count++];
@@ -1852,6 +1864,7 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
             pen_x += a->advance;
         }
         pen_y += line_h;
+        line_begin = line_end;
     }
     /* The FIXED block hosts the container width (explicit) or the max line width (grow) -- the
      * same width L/C/R aligned against, so alignment stays inside the block. */

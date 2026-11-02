@@ -65,7 +65,13 @@ forms; pure-intrinsic markup parses with a `NULL` tagset.
   / effect / image-material) changes — adjacent same-style text coalesces.
 - **Solver.** A word-wrap + baseline solver resolves every atom (glyph, image,
   object) to a box at a container width, stacking lines on a per-line max
-  baseline. Horizontal alignment (L/C/R) offsets each line.
+  baseline. Style boundaries inside a word are not wrap opportunities: its
+  fragments move together when they fit on an empty line. Overlong words split
+  at UTF-8 codepoint boundaries, filling each chunk across style runs; images
+  and objects remain unbreakable with wrap opportunities on both sides.
+  Horizontal alignment (L/C/R) offsets each line. Once line breaks are known,
+  metrics and placement visit contiguous line ranges in O(atom count), without
+  a per-line scan of the whole paragraph.
 - **One Clay FIXED block.** The solved total size feeds a single
   `CLAY_SIZING_FIXED` Clay element; text emits during that element's
   custom-walk via `NT_UI_CUSTOM_TYPE_CALLBACK`. Keeping text under one measured

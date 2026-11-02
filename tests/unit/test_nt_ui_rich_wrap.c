@@ -165,6 +165,108 @@ static void reset_call(void) {
     s_fx.ctx->rich_session_open = false;
 }
 
+static void test_word_crosses_style_boundary(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    nt_ui_rich_begin(s_fx.ctx, &base);
+    nt_ui_rich_text_n(s_fx.ctx, "a hel", 5);
+    nt_ui_rich_push_color(s_fx.ctx, 0xFF0000FFU);
+    nt_ui_rich_text_n(s_fx.ctx, "lo", 2);
+    nt_ui_rich_pop(s_fx.ctx);
+    nt_ui_rich_end(s_fx.ctx);
+    nt_ui_rich_test_solve(s_fx.ctx, 50.0F, FONT_SIZE);
+
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_rich_test_line_count(s_fx.ctx));
+    float widths[2] = {0};
+    for (uint32_t i = 0; i < nt_ui_rich_test_atom_count(s_fx.ctx); i++) {
+        const nt_ui_rich_test_atom_t a = nt_ui_rich_test_atom(s_fx.ctx, i);
+        TEST_ASSERT_TRUE(a.line < 2U);
+        widths[a.line] += a.w;
+        TEST_ASSERT_TRUE(approx(a.x + a.w, widths[a.line]));
+    }
+    TEST_ASSERT_TRUE_MESSAGE(approx(widths[0], 20.0F), "only 'a ' stays on the first line");
+    TEST_ASSERT_TRUE_MESSAGE(approx(widths[1], 50.0F), "the entire styled word 'hello' moves together");
+}
+
+static void test_whitespace_crosses_style_boundary(void) {
+    static const char *const before[] = {"ab ", "ab"};
+    static const char *const after[] = {"cd", " cd"};
+    for (uint32_t c = 0; c < 2U; c++) {
+        reset_call();
+        nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+        base.font_id[0] = s_fx.stub_font;
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_text_n(s_fx.ctx, before[c], strlen(before[c]));
+        nt_ui_rich_push_color(s_fx.ctx, 0xFF0000FFU);
+        nt_ui_rich_text_n(s_fx.ctx, after[c], strlen(after[c]));
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_test_solve(s_fx.ctx, 30.0F, FONT_SIZE);
+
+        TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_rich_test_line_count(s_fx.ctx));
+        float widths[2] = {0};
+        for (uint32_t i = 0; i < nt_ui_rich_test_atom_count(s_fx.ctx); i++) {
+            const nt_ui_rich_test_atom_t a = nt_ui_rich_test_atom(s_fx.ctx, i);
+            TEST_ASSERT_TRUE(a.line < 2U);
+            widths[a.line] += a.w;
+        }
+        TEST_ASSERT_TRUE_MESSAGE(approx(widths[0], 30.0F), "space remains on the preceding line in either style");
+        TEST_ASSERT_TRUE_MESSAGE(approx(widths[1], 20.0F), "the next word wraps at the actual space");
+    }
+}
+
+static void test_overlong_styled_word_fills_lines_at_codepoint_boundaries(void) {
+    static const char *const before[] = {"ab", "\xE2\x82\xAC\xE2\x82\xAC"};
+    static const char *const after[] = {"cdef", "\xE2\x82\xAC\xE2\x82\xAC\xE2\x82\xAC\xE2\x82\xAC"};
+    for (uint32_t c = 0; c < 2U; c++) {
+        reset_call();
+        nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+        base.font_id[0] = s_fx.stub_font;
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_text_n(s_fx.ctx, before[c], strlen(before[c]));
+        nt_ui_rich_push_color(s_fx.ctx, 0xFF0000FFU);
+        nt_ui_rich_text_n(s_fx.ctx, after[c], strlen(after[c]));
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_test_solve(s_fx.ctx, 30.0F, FONT_SIZE);
+
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_ui_rich_test_line_count(s_fx.ctx), "six glyphs fill two lines despite the style change after glyph two");
+        float widths[2] = {0};
+        for (uint32_t i = 0; i < nt_ui_rich_test_atom_count(s_fx.ctx); i++) {
+            const nt_ui_rich_test_atom_t a = nt_ui_rich_test_atom(s_fx.ctx, i);
+            TEST_ASSERT_TRUE(a.line < 2U);
+            widths[a.line] += a.w;
+            TEST_ASSERT_TRUE(a.x + a.w <= 30.0F + 1e-3F);
+            TEST_ASSERT_TRUE(a.w >= 10.0F && approx(a.w / 10.0F, (float)(uint32_t)(a.w / 10.0F)));
+        }
+        TEST_ASSERT_TRUE(approx(widths[0], 30.0F));
+        TEST_ASSERT_TRUE(approx(widths[1], 30.0F));
+    }
+}
+
+static void test_image_and_object_boundaries_allow_wrap_without_spaces(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    nt_ui_rich_begin(s_fx.ctx, &base);
+    nt_ui_rich_text_n(s_fx.ctx, "ab", 2);
+    nt_ui_rich_image(s_fx.ctx, icon_ref(), NT_RICH_VALIGN_BASELINE, 0.0F, ICON_SCALE);
+    nt_ui_rich_text_n(s_fx.ctx, "cd", 2);
+    nt_ui_rich_object(s_fx.ctx, (nt_ui_rich_object_size_t){18.0F, 12.0F, 9.0F}, NULL, NULL);
+    nt_ui_rich_text_n(s_fx.ctx, "ef", 2);
+    nt_ui_rich_end(s_fx.ctx);
+    nt_ui_rich_test_solve(s_fx.ctx, 30.0F, FONT_SIZE);
+
+    TEST_ASSERT_EQUAL_UINT32(5U, nt_ui_rich_test_line_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(5U, nt_ui_rich_test_atom_count(s_fx.ctx));
+    const float widths[] = {20.0F, ICON_SCALE, 20.0F, 18.0F, 20.0F};
+    for (uint32_t i = 0; i < 5U; i++) {
+        const nt_ui_rich_test_atom_t a = nt_ui_rich_test_atom(s_fx.ctx, i);
+        TEST_ASSERT_EQUAL_UINT32(i, a.line);
+        TEST_ASSERT_TRUE(approx(a.x, 0.0F));
+        TEST_ASSERT_TRUE(approx(a.w, widths[i]));
+    }
+}
+
 /* (4) break-anywhere: a single word longer than container_w breaks mid-glyph so no
  * atom's x-extent exceeds the box. "AAAAAAAA" = 8 chars * 10px = 80px in a 30px box. */
 static void test_break_anywhere_no_atom_exceeds_box(void) {
@@ -402,6 +504,10 @@ static void test_font_size_style_field_scales_solve(void) {
 
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_word_crosses_style_boundary);
+    RUN_TEST(test_whitespace_crosses_style_boundary);
+    RUN_TEST(test_overlong_styled_word_fills_lines_at_codepoint_boundaries);
+    RUN_TEST(test_image_and_object_boundaries_allow_wrap_without_spaces);
     RUN_TEST(test_font_size_style_field_scales_solve);
     RUN_TEST(test_mixed_run_advance_sums);
     RUN_TEST(test_solve_rewinds_atom_scratch);
