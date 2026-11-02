@@ -65,7 +65,13 @@ forms; pure-intrinsic markup parses with a `NULL` tagset.
   / effect / image-material) changes — adjacent same-style text coalesces.
 - **Solver.** A word-wrap + baseline solver resolves every atom (glyph, image,
   object) to a box at a container width, stacking lines on a per-line max
-  baseline. Horizontal alignment (L/C/R) offsets each line.
+  baseline. Style boundaries inside a word are not wrap opportunities: its
+  fragments move together when they fit on an empty line. Overlong words split
+  at UTF-8 codepoint boundaries, filling each chunk across style runs; images
+  and objects remain unbreakable with wrap opportunities on both sides.
+  Horizontal alignment (L/C/R) offsets each line. Once line breaks are known,
+  metrics and placement visit contiguous line ranges in O(atom count), without
+  a per-line scan of the whole paragraph.
 - **One Clay FIXED block.** The solved total size feeds a single
   `CLAY_SIZING_FIXED` Clay element; text emits during that element's
   custom-walk via `NT_UI_CUSTOM_TYPE_CALLBACK`. Keeping text under one measured
@@ -245,7 +251,11 @@ nt_ui_rich_pop(ctx);
   nest (HTML no-nested-anchor rule). Style push/pop is separate — popping past
   the base style asserts in both FULL and TRAP.
 - **Custom objects** (`<obj>`): a Flutter-style WidgetSpan — the solver reserves
-  a box via `measure_fn` (text wraps around it); the widget calls the game's
+  a box of the object's `nt_ui_rich_object_size_t` (width, height, ascent; text
+  wraps around it). The size is data, not a callback: `nt_ui_rich_object` takes it
+  by value, `nt_ui_rich_tagset_register_object_tag` stores it, and re-registering
+  the name replaces it, so an animated object updates its size before the
+  declaration. No game code runs inside the solve except log sinks. The widget calls the game's
   `draw_fn(user_data, x, y, w, h, color, world_mat4)` at the solved box. The engine
   never draws the object (renderer-agnostic); a `draw_fn` that emits sprites selects
   its own material first, since the selection it finds is whatever the band's images or an earlier

@@ -6,7 +6,7 @@ add_executable(rtt_showcase main.c)
 target_link_libraries(rtt_showcase PRIVATE nt_version)
 target_link_libraries(rtt_showcase PRIVATE
     nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_shape_renderer nt_material nt_postfx_blur
-    nt_resource nt_atlas nt_hash nt_mem_scratch nt_sprite_renderer nt_text_renderer nt_font nt_ui
+    nt_resource nt_atlas nt_hash nt_memory nt_sprite_renderer nt_text_renderer nt_font nt_ui
     nt_render nt_shared
 )
 target_include_directories(rtt_showcase PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")

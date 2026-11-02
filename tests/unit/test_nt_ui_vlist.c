@@ -347,7 +347,7 @@ static void test_vlist_window_exceeds_ring_asserts(void) {
 
     /* Frame 1 (clean): lay out VL_ID so frame 2 reads its real 200px viewport. Viewport is 0 on
      * frame 1 -> a tiny single-row window, so no assert here. */
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
     nt_ui_vlist_range_t r = nt_ui_vlist_begin(s_fx.ctx, NULL, VL_ID, 1000U, 10.0F, NT_UI_AXIS_Y, &st, &decl);
     for (uint32_t i = r.first; i <= r.last && i < 1000U; ++i) {
@@ -358,7 +358,7 @@ static void test_vlist_window_exceeds_ring_asserts(void) {
 
     /* Frame 2: the oversized window now fires the assert. It fires AFTER the owned scroll clip opens,
      * so the frame is abandoned mid-tree; tearDown closes it defensively (ui_walker_fixture_shutdown). */
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
     NT_TEST_EXPECT_ASSERT((void)nt_ui_vlist_begin(s_fx.ctx, NULL, VL_ID, 1000U, 10.0F, NT_UI_AXIS_Y, &st, &decl));
 }
@@ -372,7 +372,7 @@ static void test_vlist_window_exceeds_ring_asserts(void) {
 #define VL_BIG_COL_W 80.0F
 
 static void vlist_nested_sweep_frame(float pos_y, uint32_t id_ring) {
-    nt_mem_scratch_reset(); /* per-frame UI scratch (element_data/payloads), exactly like the app loop */
+    nt_arena_reset(&g_nt_mem_scratch); /* per-frame UI scratch (element_data/payloads), exactly like the app loop */
     nt_pointer_t p = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
 

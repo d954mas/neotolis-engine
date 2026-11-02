@@ -68,6 +68,7 @@ uint32_t nt_test_mesh_color_probe(void);
 #define UI_REF_W 1280.0F
 #define UI_REF_H 800.0F
 #define SCRATCH_ARENA_SIZE (1U << 20)
+_Alignas(max_align_t) static uint8_t s_scratch_mem[SCRATCH_ARENA_SIZE];
 #define UI_MAX_ELEMENTS 512U
 // #endregion
 
@@ -1149,10 +1150,7 @@ static nt_ui_rich_fx_result_t composition_effect(uint32_t atom_idx, nt_rich_atom
     return result;
 }
 
-static nt_ui_rich_object_measure_t composition_object_measure(void *user_data) {
-    (void)user_data;
-    return (nt_ui_rich_object_measure_t){.width = 320.0F, .height = 32.0F, .ascent = 32.0F};
-}
+static const nt_ui_rich_object_size_t composition_object_size = {.width = 320.0F, .height = 32.0F, .ascent = 32.0F};
 
 static void composition_object_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     (void)user_data;
@@ -1191,7 +1189,7 @@ static void render_rich_composition(nt_ui_context_t *ctx) {
                         nt_ui_rich_image(ctx, nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS__WHITE.value), NT_RICH_VALIGN_BASELINE, 0.0F, 32.0F);
                     }
                 } else {
-                    nt_ui_rich_object(ctx, composition_object_measure, composition_object_draw, NULL);
+                    nt_ui_rich_object(ctx, composition_object_size, composition_object_draw, NULL);
                 }
                 if (effect) {
                     nt_ui_rich_pop(ctx);
@@ -1248,7 +1246,7 @@ static void frame(void) {
         s_gpu_restore_pending = !gpu_restore_step();
     }
     nt_input_poll();
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
 
     nt_resource_step();
     link_programs();
@@ -1443,7 +1441,7 @@ int main(int argc, char *argv[]) {
 #endif
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
-    nt_mem_scratch_init(SCRATCH_ARENA_SIZE);
+    nt_arena_init(&g_nt_mem_scratch, s_scratch_mem, sizeof s_scratch_mem);
 
     nt_resource_register_type(NT_ASSET_TEXTURE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_texture, .deactivate = nt_gfx_deactivate_texture});
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
@@ -1594,7 +1592,6 @@ int main(int argc, char *argv[]) {
     nt_program_ref_drop(&s_sprite_program);
     nt_program_ref_drop(&s_text_program);
     nt_material_shutdown();
-    nt_mem_scratch_shutdown();
     nt_resource_shutdown();
     nt_fs_shutdown();
     nt_http_shutdown();

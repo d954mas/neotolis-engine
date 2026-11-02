@@ -22,7 +22,7 @@ function(nt_add_ui_composition name rich effects link_rich)
     endif()
     target_link_libraries(${name} PRIVATE
         nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
-        nt_resource nt_hash nt_pool nt_atlas nt_core nt_mem_scratch
+        nt_resource nt_hash nt_pool nt_atlas nt_core nt_memory
         nt_gfx_stub nt_basisu_transcoder_stub nt_meshwire_stub
         nt_clipboard_stub nt_http_stub)
     if(NOT EMSCRIPTEN)

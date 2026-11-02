@@ -15,7 +15,7 @@ target_link_libraries(skeletal_showcase PRIVATE
     nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource
     nt_material nt_shared nt_atlas nt_skeletal nt_skeletal_assets
     nt_sprite_renderer nt_text_renderer nt_font nt_ui nt_shape_renderer
-    nt_render nt_hash nt_mem_scratch
+    nt_render nt_hash nt_memory
     nt_entity nt_transform_comp nt_drawable_comp nt_mesh_comp nt_material_comp
     nt_skin_comp nt_skeletal_gpu nt_skinned_mesh_renderer
 )

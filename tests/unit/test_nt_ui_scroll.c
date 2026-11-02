@@ -1692,7 +1692,7 @@ static void wheel_tile(uint32_t id, const nt_ui_scroll_style_t *style, int rows)
  * other tiles reflow up into the space A vacated). A stale bbox is still returned found=true by
  * Clay_GetElementData, so on the frames A reappears its ancient bbox can overlap the live tiles. */
 static void wheel_grid_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style_a, const nt_ui_scroll_style_t *style_other, int b_rows, float spacer_h, bool drop_a) {
-    nt_mem_scratch_reset(); /* per-frame scratch reset, exactly as the engine main loop does */
+    nt_arena_reset(&g_nt_mem_scratch); /* per-frame scratch reset, exactly as the engine main loop does */
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
     CLAY({.id = CLAY_ID("wheel-root"), .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 0}}) {
         if (spacer_h > 0.0F) {

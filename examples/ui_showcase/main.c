@@ -526,6 +526,7 @@ static bool s_ids_ready;
 /* Decoration tab issues ~22 rich_text calls, each reserving the full MAX_RUNS/MAX_TEXT_BYTES
  * cap (~14 KB) plus decorated-label side tables; 512 KB overflowed the frame scratch. */
 #define SCRATCH_ARENA_SIZE ((size_t)2U * 1024U * 1024U)
+_Alignas(max_align_t) static uint8_t s_scratch_mem[SCRATCH_ARENA_SIZE];
 
 static NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
 
@@ -2161,10 +2162,7 @@ static rich_obj_demo_t s_rich_obj_demo;
 #define RICH_OBJ_SPIN 24.0F
 
 /* LIVE PROGRESS BAR: a dim track + a bright value rect filled to `progress` of the width. */
-static nt_ui_rich_object_measure_t rich_obj_bar_measure(void *user_data) {
-    (void)user_data;
-    return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_BAR_W, .height = RICH_OBJ_BAR_H, .ascent = 11.0F};
-}
+static const nt_ui_rich_object_size_t rich_obj_bar_size = {.width = RICH_OBJ_BAR_W, .height = RICH_OBJ_BAR_H, .ascent = 11.0F};
 static void rich_obj_bar_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     const rich_obj_demo_t *d = (const rich_obj_demo_t *)user_data;
     /* The selection this callback finds is the band's image material: select its own. */
@@ -2187,10 +2185,7 @@ static void rich_obj_bar_draw(void *user_data, float x, float y, float w, float 
 /* SPINNING ICON: a white quad rotated about its own center (the icon texture was intentionally
  * dropped). A true 3D cube is the SAME hook with the game's own 3D render into the box -- this 2D
  * rotation proves the mechanism. */
-static nt_ui_rich_object_measure_t rich_obj_spin_measure(void *user_data) {
-    (void)user_data;
-    return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_SPIN, .height = RICH_OBJ_SPIN, .ascent = 18.0F};
-}
+static const nt_ui_rich_object_size_t rich_obj_spin_size = {.width = RICH_OBJ_SPIN, .height = RICH_OBJ_SPIN, .ascent = 18.0F};
 static void rich_obj_spin_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     const rich_obj_demo_t *d = (const rich_obj_demo_t *)user_data;
     nt_sprite_renderer_set_material(d->material);
@@ -2217,11 +2212,8 @@ static void rich_obj_spin_draw(void *user_data, float x, float y, float w, float
 /* Perspective cube remapped into the box's NDC sub-rect (no glViewport/scissor touch); the walker's
  * active scroll-clip scissor clips it to the panel. draw_fn gets LAYOUT (Y-down) box px + frame world_mat4. */
 #define RICH_OBJ_CUBE 64.0F
-static nt_ui_rich_object_measure_t rich_obj_cube_measure(void *user_data) {
-    (void)user_data;
-    /* Square box; ascent ~0.6*h centres the cube on the text line (not floating high above it). */
-    return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_CUBE, .height = RICH_OBJ_CUBE, .ascent = 40.0F};
-}
+/* Square box; ascent ~0.6*h centres the cube on the text line (not floating high above it). */
+static const nt_ui_rich_object_size_t rich_obj_cube_size = {.width = RICH_OBJ_CUBE, .height = RICH_OBJ_CUBE, .ascent = 40.0F};
 static void rich_obj_cube_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     const rich_obj_demo_t *d = (const rich_obj_demo_t *)user_data;
     if (w <= 0.0F || h <= 0.0F) {
@@ -2289,10 +2281,7 @@ static void rich_obj_cube_draw(void *user_data, float x, float y, float w, float
  * only the sample leans -- the oblique changes per draw. */
 #define RICH_OBJ_SWEEP_W 360.0F
 #define RICH_OBJ_SWEEP_H 112.0F
-static nt_ui_rich_object_measure_t rich_obj_oblique_measure(void *user_data) {
-    (void)user_data;
-    return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_SWEEP_W, .height = RICH_OBJ_SWEEP_H, .ascent = 20.0F};
-}
+static const nt_ui_rich_object_size_t rich_obj_oblique_size = {.width = RICH_OBJ_SWEEP_W, .height = RICH_OBJ_SWEEP_H, .ascent = 20.0F};
 /* LAYOUT(Y-down) pen -> world text model with the text Y-up<->layout Y-down flip on col1 (mirrors the
  * engine's rich_span_model). The lean is the style's oblique, NOT baked here. */
 static void rich_obj_text_model(const float world[16], float ox, float oy, float out[16]) {
@@ -2365,9 +2354,9 @@ static void rich_ensure_setup(void) {
     s_rich_obj_demo.white_region = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS__WHITE.value);
     s_rich_obj_demo.material = s_sprite_material;
     s_rich_obj_demo.clock = &s_state.rich.time;
-    nt_ui_rich_tagset_register_object_tag(&s_rich_tagset, "loadbar", rich_obj_bar_measure, rich_obj_bar_draw, &s_rich_obj_demo);
-    nt_ui_rich_tagset_register_object_tag(&s_rich_tagset, "spin", rich_obj_spin_measure, rich_obj_spin_draw, &s_rich_obj_demo);
-    nt_ui_rich_tagset_register_object_tag(&s_rich_tagset, "cube", rich_obj_cube_measure, rich_obj_cube_draw, &s_rich_obj_demo);
+    nt_ui_rich_tagset_register_object_tag(&s_rich_tagset, "loadbar", rich_obj_bar_size, rich_obj_bar_draw, &s_rich_obj_demo);
+    nt_ui_rich_tagset_register_object_tag(&s_rich_tagset, "spin", rich_obj_spin_size, rich_obj_spin_draw, &s_rich_obj_demo);
+    nt_ui_rich_tagset_register_object_tag(&s_rich_tagset, "cube", rich_obj_cube_size, rich_obj_cube_draw, &s_rich_obj_demo);
 
     s_rich_ready = true;
 }
@@ -2690,7 +2679,7 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
         /* Shear-angle sweep: the SAME word at oblique 0.1/0.2/0.3/0.4 via set_oblique (markup is fixed at 0.2). */
         nt_ui_rich_style_t sweep_base = rich_base_style();
         nt_ui_rich_begin(ctx, &sweep_base);
-        nt_ui_rich_object(ctx, rich_obj_oblique_measure, rich_obj_oblique_draw, NULL);
+        nt_ui_rich_object(ctx, rich_obj_oblique_size, rich_obj_oblique_draw, NULL);
         nt_ui_rich_end(ctx);
         nt_ui_rich_text(ctx, nt_ui_id("showcase/rich_oblique_sweep"), NT_UI_DATA_LAYER(LAYER_TEXT), &sweep_base, container_w, NT_RICH_ALIGN_LEFT, st->rich.time, NULL);
     }
@@ -3684,7 +3673,7 @@ static void frame(void) {
     if (!nt_example_frames_on()) {
         nt_input_poll();
     }
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
 
     /* Gameplay/global hotkeys yield to an open modal so Esc closes the top modal first and the
      * palette/inspector keys don't fire underneath it. nt_ui_modal_active reports last frame's
@@ -3895,8 +3884,8 @@ static void frame(void) {
 #endif
         .draw_calls = nt_gfx_draw_calls(&g_nt_gfx.counters),
         .mem_used = s_mem_used,
-        .scratch_hwm = (uint32_t)nt_mem_scratch_high_water_mark(),
-        .scratch_used = (uint32_t)nt_mem_scratch_used(),
+        .scratch_hwm = (uint32_t)g_nt_mem_scratch.high_water,
+        .scratch_used = (uint32_t)g_nt_mem_scratch.used,
     };
     nt_metrics_sample(&mf);
 #endif
@@ -3939,7 +3928,7 @@ int main(int argc, char *argv[]) {
 #endif
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
-    nt_mem_scratch_init(SCRATCH_ARENA_SIZE);
+    nt_arena_init(&g_nt_mem_scratch, s_scratch_mem, sizeof s_scratch_mem);
 
     nt_resource_register_type(NT_ASSET_TEXTURE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_texture, .deactivate = nt_gfx_deactivate_texture});
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
@@ -4140,7 +4129,6 @@ int main(int argc, char *argv[]) {
     nt_program_ref_drop(&s_base_program);
     nt_material_shutdown();
     nt_debug_overlay_shutdown();
-    nt_mem_scratch_shutdown();
     nt_resource_shutdown();
     nt_fs_shutdown();
     nt_http_shutdown();
