@@ -1460,8 +1460,8 @@ accepted only in the formatter's order, each at most once.
 
 `tools/frame_inspector` (native capture builds) reads capture files through this parser;
 its pages and keys are described in its `main.c`. Its `query` and `--serve` modes print the
-same records, state and numbers as text without a window, so a script or an agent reads
-what the window shows. Its numbers follow this chapter: it
+window's records, state and numbers (one list for both) as key-value text without a window,
+so a script or an agent reads what the window shows; the window adds its sentences. Its numbers follow this chapter: it
 checks every plain or indexed draw's merge against the recorded `CACHE` and rebuilds the
 frame's counters from the records (`stream_bytes` is shown from the counters only:
 command sizes are not recorded).

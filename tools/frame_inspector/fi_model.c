@@ -840,7 +840,7 @@ uint32_t fi_counter_rows(const fi_frame_t *frame, fi_counter_row_t rows[FI_COUNT
     FI_ROW_("buffer_upload_bytes", c->buffer_upload_bytes, r.buffer_upload_bytes, true);
     FI_ROW_("texture_upload_calls", c->texture_upload_calls, r.texture_upload_calls, false);
     FI_ROW_("texture_upload_bytes", c->texture_upload_bytes, r.texture_upload_bytes, true);
-    FI_ROW_("frame_storage_bytes", frame_bytes, frame->summary.frame_store.sum, true);
+    FI_ROW_("frame_store_bytes", frame_bytes, frame->summary.frame_store.sum, true);
 #undef FI_ROW_
     for (uint32_t op = 0; op < NT_GFX_OP_COUNT; op++) {
         if (c->accepted[op] != 0 || r.accepted[op] != 0) {
@@ -1156,22 +1156,35 @@ bool fi_state_frame(const fi_frame_t *frame, bool end, fi_state_view_t *out) {
 
 fi_verdict_t fi_verdict(const fi_frame_t *frame, uint32_t record) {
     const nt_gfx_event_t *e = &frame->view.events[record];
-    fi_verdict_t v = {.kind = FI_VERDICT_NOT_DRAW, .joined = fi_joined(frame, record), .cause = frame->cause[record], .brk = frame->brk[record]};
+    fi_verdict_t v = {.kind = FI_VERDICT_NOT_DRAW};
     if (!fi_is_draw(e)) {
         return v;
     }
-    if (v.joined != FI_NONE) {
+    if (e->result == NT_GFX_RESULT_CACHE) {
         v.kind = FI_VERDICT_MERGED;
     } else if (e->result != NT_GFX_RESULT_ACCEPTED) {
         v.kind = FI_VERDICT_FAILED;
     } else {
         v.kind = FI_VERDICT_NEW;
-        v.instanced = !fi_is_mergeable_draw(e);
         for (uint32_t i = 0; i <= record; i++) {
-            v.ordinal += is_draw_op(&frame->view.events[i]) && frame->view.events[i].result == NT_GFX_RESULT_ACCEPTED ? 1U : 0U;
+            v.ordinal += (i == record || is_draw_op(&frame->view.events[i])) && frame->view.events[i].result == NT_GFX_RESULT_ACCEPTED ? 1U : 0U;
         }
     }
     return v;
+}
+
+bool fi_find_frame(const fi_file_t *files, uint32_t count, uint64_t sequence, uint32_t only_file, uint32_t *file, uint32_t *frame) {
+    for (uint32_t f = 0; f < count; f++) {
+        for (uint32_t k = 0; (only_file == FI_NONE || f == only_file) && k < files[f].frame_count; k++) {
+            const fi_frame_t *fr = &files[f].frames[k];
+            if (fr->view.events != NULL && fr->view.counters.frame_sequence == sequence) {
+                *file = f;
+                *frame = k;
+                return true;
+            }
+        }
+    }
+    return false;
 }
 // #endregion
 

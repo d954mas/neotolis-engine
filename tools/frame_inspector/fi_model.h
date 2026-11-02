@@ -155,6 +155,9 @@ bool fi_file_open(fi_file_t *file, const char *path);
 /* Parses text (malloc'd, len bytes; the file takes it) into frames. */
 void fi_file_load(fi_file_t *file, const char *name, char *text, size_t len);
 void fi_file_close(fi_file_t *file);
+/* The frame with this capture sequence ("frame sequence=" of its header) in any file, or only in only_file;
+ * a frame whose header was rejected has none. */
+bool fi_find_frame(const fi_file_t *files, uint32_t count, uint64_t sequence, uint32_t only_file, uint32_t *file, uint32_t *frame);
 
 /* Request state at an operation: for each piece of frontend binding state, the OP (or frontend INITIAL)
  * record that set it, FI_NONE when unset. Pass-scoped pieces reset at every PASS. */
@@ -195,14 +198,12 @@ void fi_state_at(const fi_frame_t *frame, uint32_t at, fi_state_view_t *out);
 /* The state begin_frame left (init), or after the frame's last record compared with it (end); false when the
  * frame recorded no begin_frame state. */
 bool fi_state_frame(const fi_frame_t *frame, bool end, fi_state_view_t *out);
-/* Whether a draw request cost a GL draw call: merged into an earlier draw (joined), failed, or new; a new one has
- * its ordinal among the frame's GL draw calls and, unless instanced, what broke the merge (brk, cause). */
+/* Whether a draw request cost a GL draw call: merged into an earlier draw (fi_joined), failed, or new with its
+ * ordinal among the frame's GL draw calls (what broke the merge is brk and cause of the frame). */
 typedef enum { FI_VERDICT_NOT_DRAW, FI_VERDICT_MERGED, FI_VERDICT_FAILED, FI_VERDICT_NEW } fi_verdict_kind_t;
 typedef struct {
     uint8_t kind; /* fi_verdict_kind_t */
-    uint8_t brk;  /* fi_break_t */
-    bool instanced;
-    uint32_t joined, cause, ordinal;
+    uint32_t ordinal;
 } fi_verdict_t;
 fi_verdict_t fi_verdict(const fi_frame_t *frame, uint32_t record);
 

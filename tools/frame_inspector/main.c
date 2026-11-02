@@ -49,6 +49,10 @@
 
 #include <ctype.h>
 #include <math.h>
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1484,7 +1488,7 @@ static void declare_insights(const fi_frame_t *fr) {
 }
 
 /* One section of the frame's numbers, as summary prints them: the meaning, then the number. */
-static void declare_numbers(const fi_frame_t *fr, const char *name, const char *title) {
+static void declare_numbers(const fi_frame_t *fr, fi_section_t name, const char *title) {
     static fi_number_t numbers[FI_NUMBERS];
     static uint32_t epoch = FI_NONE;
     static uint32_t count;
@@ -1494,9 +1498,9 @@ static void declare_numbers(const fi_frame_t *fr, const char *name, const char *
     }
     section(title);
     for (uint32_t k = 0; k < count; k++) {
-        if (strcmp(numbers[k].section, name) == 0) {
+        if (numbers[k].section == name) {
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
-                CELL_(330) { text(numbers[k].meaning, &k_text); }
+                CELL_(530) { text(numbers[k].meaning, &k_text); }
                 CELL_(90) { number(numbers[k].q, numbers[k].value, numbers[k].meaning); }
             }
         }
@@ -1633,14 +1637,14 @@ static void declare_info_page(void) {
             declare_insights(fr);
             declare_groups(fr);
             declare_uploads_by_buffer(fr);
-            declare_numbers(fr, "draws", "Draws");
-            declare_numbers(fr, "uploads", "Uploads (bytes sent to GL)");
-            textf(&k_text, "command stream bytes %u (counter only)", fr->view.counters.stream_bytes);
-            declare_numbers(fr, "resources", "Resources (bytes requested from GL, from definitions)");
+            declare_numbers(fr, FI_SECTION_FRAME, "Frame");
+            declare_numbers(fr, FI_SECTION_DRAWS, "Draws");
+            declare_numbers(fr, FI_SECTION_UPLOADS, "Uploads (bytes sent to GL)");
+            declare_numbers(fr, FI_SECTION_RESOURCES, "Resources (bytes requested from GL, from definitions)");
         }
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(640), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 3}}) {
             declare_funnel(fr);
-            declare_numbers(fr, "gl calls", "GL calls by name");
+            declare_numbers(fr, FI_SECTION_GL, "GL calls by name");
             declare_counters(fr);
         }
     }
@@ -1827,19 +1831,21 @@ static void declare_verdict(const fi_frame_t *fr, uint32_t id) {
     switch ((fi_verdict_kind_t)v->kind) {
     case FI_VERDICT_MERGED:
         text("MERGED: no new GL draw call; its range joined an earlier draw", &k_warn);
-        link_line(fr, "joined ", v->joined);
+        if (fi_joined(fr, id) != FI_NONE) {
+            link_line(fr, "joined ", fi_joined(fr, id));
+        }
         break;
     case FI_VERDICT_FAILED:
         textf(&k_bad, "%s: nothing drawn", nt_gfx_result_name(fr->view.events[id].result));
         break;
     case FI_VERDICT_NEW:
         textf(&k_head, "NEW GL draw call %u of %u", v->ordinal, nt_gfx_draw_calls(&fr->view.counters));
-        if (v->instanced) {
+        if (!fi_is_mergeable_draw(&fr->view.events[id])) {
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) { text("instanced draws never merge: joining them would change gl_InstanceID", &k_wrap); }
-        } else if (v->brk != FI_BREAK_NONE) {
-            textf(&k_warn, "not merged: %s", fi_break_name((fi_break_t)v->brk));
-            if (v->cause != FI_NONE) {
-                link_line(fr, "because of ", v->cause);
+        } else if (fr->brk[id] != FI_BREAK_NONE) {
+            textf(&k_warn, "not merged: %s", fi_break_name((fi_break_t)fr->brk[id]));
+            if (fr->cause[id] != FI_NONE) {
+                link_line(fr, "because of ", fr->cause[id]);
             }
         }
         break;
@@ -1922,7 +1928,7 @@ static void state_line(const fi_frame_t *fr, const fi_state_line_t *l) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_state(const fi_frame_t *fr, const fi_state_view_t *st, bool *all) {
     static fi_state_line_t lines[FI_STATE_LINES];
-    const uint32_t n = fi_state_lines(fr, st, lines);
+    const uint32_t n = fi_state_lines(fr, st, *all, lines);
     const bool compared = st->was != FI_NONE;
     char title[96];
     char prefix[48];
@@ -1949,13 +1955,9 @@ static void declare_state(const fi_frame_t *fr, const fi_state_view_t *st, bool 
             link_line(fr, prefix, prev_issue);
         }
     }
-    uint32_t shown = 0;
+    const uint32_t shown = n - k;
     for (; k < n; k++) {
-        if (!*all && !lines[k].changed && prev_issue != FI_NONE) {
-            continue;
-        }
         state_line(fr, &lines[k]);
-        shown++;
     }
     if (st->gl.full) {
         text("more GL state than the inspector tracks: the rest is not shown", &k_warn);
@@ -2368,20 +2370,6 @@ static void frame(void) {
 // #endregion
 
 // #region main
-/* The frame of a file whose capture sequence is `sequence` (the "frame sequence=" of its header). */
-static bool find_sequence(uint64_t sequence, uint32_t *file, uint32_t *frame) {
-    for (uint32_t f = 0; f < s.file_count; f++) {
-        for (uint32_t k = 0; k < s.files[f].frame_count; k++) {
-            if (s.files[f].frames[k].view.counters.frame_sequence == sequence) {
-                *file = f;
-                *frame = k;
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
 /* Files to open, --monkey SECONDS [SEED], and where the window opens: --frame SEQUENCE (the capture's frame
  * sequence), --page frames|commands|info|init|end, --select RECORD (its @ number), --filter TEXT. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -2421,7 +2409,9 @@ static void parse_args(int argc, char *argv[]) {
     }
     uint32_t file = 0;
     uint32_t at = 0;
-    if (frame != NULL && find_sequence(strtoull(frame, NULL, 10), &file, &at)) {
+    char *end = NULL;
+    const uint64_t sequence = frame != NULL ? strtoull(frame, &end, 10) : 0U;
+    if (frame != NULL && end != frame && *end == '\0' && fi_find_frame(s.files, s.file_count, sequence, FI_NONE, &file, &at)) {
         select_frame(file, at);
     } else if (frame != NULL) {
         nt_log_error("frame_inspector: no frame with sequence %s in the open files", frame);
@@ -2452,10 +2442,13 @@ static nt_material_t make_material(const char *label) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static int run_query(int argc, char *argv[]) {
     static fi_file_t files[MAX_FILES];
+#ifdef _WIN32
+    (void)_setmode(_fileno(stdout), _O_BINARY); /* answers end in \n on every OS: a client matches "= ok" exactly */
+#endif
     const bool serve = strcmp(argv[1], "--serve") == 0;
     (void)nt_fs_init();
     fi_session_t session = {.files = files};
-    char line[1024] = "";
+    char line[1027] = ""; /* a 1023-character command, its \r\n and the NUL */
     size_t at = 0;
     const char *frame = NULL;
     bool command = false;
@@ -2464,9 +2457,9 @@ static int run_query(int argc, char *argv[]) {
             frame = argv[++a];
         } else if (command || (!serve && fi_query_command(argv[a]))) {
             command = true;
-            const int n = snprintf(line + at, sizeof(line) - at, "%s%s", at > 0 ? " " : "", argv[a]);
-            if (n < 0 || (size_t)n >= sizeof(line) - at) {
-                (void)fprintf(stderr, "frame_inspector: the command is longer than %u characters\n", (unsigned)sizeof(line) - 1U);
+            const int n = snprintf(line + at, 1024U - at, "%s%s", at > 0 ? " " : "", argv[a]);
+            if (n < 0 || (size_t)n >= 1024U - at) {
+                (void)fprintf(stderr, "frame_inspector: the command is longer than 1023 characters\n");
                 return 1;
             }
             at += (size_t)n;
@@ -2479,37 +2472,38 @@ static int run_query(int argc, char *argv[]) {
             return 1;
         }
     }
-    if (session.file_count == 0 || (!serve && !command)) {
-        (void)fprintf(stderr, "usage: frame_inspector query FILE... [--frame SEQUENCE] COMMAND [ARGS]\n"
+    if ((session.file_count == 0 && strcmp(line, "help") != 0) || (!serve && !command)) {
+        (void)fprintf(stderr, "usage: frame_inspector query FILE... [--frame SEQUENCE] COMMAND [ARGS]  (query help lists the commands)\n"
                               "       frame_inspector --serve FILE... [--frame SEQUENCE]   (a command per stdin line)\n");
         return 1;
     }
     fi_out_t out = {0};
     char select[48];
-    (void)snprintf(select, sizeof(select), "frame %s", frame != NULL ? frame : "");
-    bool ok = frame == NULL || fi_query(&session, select, &out);
+    const int selected = snprintf(select, sizeof(select), "frame %s", frame != NULL ? frame : "");
+    bool ok = frame == NULL || (selected > 0 && (size_t)selected < sizeof(select) && fi_query(&session, select, &out));
     if (ok && !serve) {
         ok = fi_query(&session, line, &out);
     }
     const char *text = out.text != NULL ? out.text : "";
     if (serve && frame != NULL) {
-        (void)printf("> %s\n%.*s= %s\n", select, (int)out.len, text, ok ? "ok" : "error");
+        (void)printf("> %s\n%.*s%s= %s\n", select, (int)out.len, text, out.len > 0 ? "" : "error: the sequence is too long\n", ok ? "ok" : "error");
     } else {
         (void)printf("%.*s", (int)out.len, text);
     }
     (void)fflush(stdout); /* a client waits for this before it sends a command */
     while (ok && serve && fgets(line, sizeof(line), stdin) != NULL) {
         const bool whole = strchr(line, '\n') != NULL || feof(stdin) != 0;
-        line[strcspn(line, "\r\n")] = '\0';
         for (int c = 0; !whole && c != '\n' && c != EOF;) { /* drop the rest of a line too long to read */
             c = getchar();
         }
-        if (line[0] == '\0') {
+        line[strcspn(line, "\r\n")] = '\0';
+        if (line[strspn(line, " \t")] == '\0') { /* a blank line asks nothing and gets no answer */
             continue;
         }
+        const bool fits = whole && strlen(line) <= 1023U;
         out.len = 0;
-        const bool answered = whole && fi_query(&session, line, &out);
-        (void)printf("> %s\n%.*s%s= %s\n", line, (int)out.len, out.text != NULL ? out.text : "", whole ? "" : "error: the line is too long\n", answered ? "ok" : "error");
+        const bool answered = fits && fi_query(&session, line, &out);
+        (void)printf("> %s\n%.*s%s= %s\n", line, (int)out.len, out.text != NULL ? out.text : "", fits ? "" : "error: the line is longer than 1023 characters\n", answered ? "ok" : "error");
         (void)fflush(stdout);
     }
     free(out.text);

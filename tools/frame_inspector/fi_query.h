@@ -23,17 +23,19 @@ typedef struct {
     bool inherited, changed, gl;
 } fi_state_line_t;
 #define FI_STATE_LINES (16U + FI_GL_SLOTS)
-uint32_t fi_state_lines(const fi_frame_t *frame, const fi_state_view_t *view, fi_state_line_t out[FI_STATE_LINES]);
+/* all: every GL line; otherwise only the GL lines that changed, when the view compares with a GL draw. */
+uint32_t fi_state_lines(const fi_frame_t *frame, const fi_state_view_t *view, bool all, fi_state_line_t out[FI_STATE_LINES]);
 
 /* What a state view is compared with, as text: "previous draw", "previous GL draw", "frame start". */
 const char *fi_compare_name(uint8_t compare, bool gl);
 
 /* A number of the frame: a key for scripts, its meaning, its value and the query for the records behind it. The
- * Information page shows the same numbers; summary prints them and list KEY prints their records. */
+ * Information page shows these numbers (operations as its table); summary prints them, list KEY their records. */
+typedef enum { FI_SECTION_FRAME, FI_SECTION_DRAWS, FI_SECTION_UPLOADS, FI_SECTION_RESOURCES, FI_SECTION_OPERATIONS, FI_SECTION_GL } fi_section_t;
 typedef struct {
     char key[48];
     char meaning[96];
-    const char *section;
+    uint8_t section; /* fi_section_t */
     fi_query_t q;
     uint64_t value;
 } fi_number_t;

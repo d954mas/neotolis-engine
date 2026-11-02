@@ -43,11 +43,32 @@ static void test_commands_answer_and_reject_bad_input(void) {
     for (uint32_t k = 0; k < sizeof(k_ok) / sizeof(k_ok[0]); k++) {
         (void)ask(k_ok[k], true);
     }
-    static const char *const k_bad[] = {"bogus",        "frame 7",           "frame 51x",       "frame 51 1", "record @999999", "record @3x",   "state @5 most", "find",
-                                        "list nothing", "list g99.gl_draws", "list g2.nothing", "",           "summary extra",  "record @1 @2", "groups g1"};
+    static const struct {
+        const char *line, *why;
+    } k_bad[] = {{"bogus", "unknown command"},
+                 {"", "unknown command"},
+                 {"frame 7", "no frame with sequence 7"},
+                 {"frame 51x", "frame SEQUENCE [FILE]"},
+                 {"frame 51 1", "frame SEQUENCE [FILE]"},
+                 {"record", "a record is needed"},
+                 {"record @999999", "no record @999999"},
+                 {"record @3x", "no record @3x"},
+                 {"record @1 @2", "too many arguments"},
+                 {"state @5 most", "state @N|init|end [all]"},
+                 {"summary extra", "too many arguments"},
+                 {"groups g1", "too many arguments"},
+                 {"find", "find needs TEXT"},
+                 {"list nothing", "list needs a key"},
+                 {"list g99.gl_draws", "list needs a key"},
+                 {"list g2.nothing", "list needs a key"},
+                 {"list merged extra", "list needs a key"},
+                 {"record @0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005",
+                  "longer than 159"}};
     for (uint32_t k = 0; k < sizeof(k_bad) / sizeof(k_bad[0]); k++) {
-        (void)ask(k_bad[k], false);
+        assert_holds(ask(k_bad[k].line, false), k_bad[k].why);
     }
+    (void)ask("frame 7", false); /* a failed frame keeps the frame commands read */
+    assert_holds(ask("frames", true), "\n* 51 ");
     const size_t all = strlen(ask("state @700 all", true)); /* tabs and trailing spaces change nothing */
     TEST_ASSERT_EQUAL_size_t(all, strlen(ask("state\t@700  all  ", true)));
     TEST_ASSERT_GREATER_THAN_size_t(strlen(ask("state @700", true)), all);
@@ -71,6 +92,13 @@ static void test_every_number_lists_its_records(void) {
     assert_holds(ask("summary", true), "\ngl_draw_calls                                 9  # ");
     assert_holds(ask("list merged", true), "records 38\n");
     assert_holds(ask("list gl_draw_calls", true), "records 9\n");
+    const uint32_t keys = fi_numbers(fr, true, numbers); /* every key, zeros too: each names one number */
+    for (uint32_t a = 0; a < keys; a++) {
+        TEST_ASSERT_NULL_MESSAGE(strstr(numbers[a].key, "null"), numbers[a].key);
+        for (uint32_t b = a + 1U; b < keys; b++) {
+            TEST_ASSERT_NOT_EQUAL_INT_MESSAGE(0, strcmp(numbers[a].key, numbers[b].key), numbers[a].key);
+        }
+    }
 }
 
 /* Each group row sums into the frame: 9 GL draw calls as the engine counted them, 5 of them for sprites. */
@@ -93,9 +121,9 @@ static void test_groups_add_up_to_the_frame(void) {
     TEST_ASSERT_EQUAL_UINT64(nt_gfx_draw_calls(&s_file.frames[0].view.counters), sum[1]);
     TEST_ASSERT_EQUAL_UINT64(9, sum[1]);
     TEST_ASSERT_EQUAL_UINT64(47, sum[0]);
-    for (uint32_t k = 0; k < 5; k++) {
-        TEST_ASSERT_EQUAL_UINT64(sum[k], total[k]);
-    }
+    TEST_ASSERT_EQUAL_UINT64(s_file.frames[0].summary.gl_any.n, sum[2]);
+    TEST_ASSERT_EQUAL_UINT64(93952, sum[3]);
+    TEST_ASSERT_EQUAL_UINT64(sum[1], total[1]);
 }
 
 /* @224 starts a new GL draw because a vertex input was set before it; @233 joins it; @204 is instanced. */
@@ -103,6 +131,7 @@ static void test_record_tells_merged_and_broken_draws(void) {
     const char *text = ask("record @224", true);
     assert_holds(text, "new_gl_draw 3 of 9\nnot_merged  # a command recorded between\nbecause @223  VERTEX_INPUT");
     assert_holds(text, "caused @680  glDrawElements");
+    assert_holds(text, "\ninside @216  NOTE label=\"sprite\"\ngroup g2  # > sprite\n");
     text = ask("record @233", true);
     assert_holds(text, "merged  # no new GL draw call");
     assert_holds(text, "joined @224 ");
@@ -131,7 +160,7 @@ static void test_state_views(void) {
     TEST_ASSERT_EQUAL_UINT32(fr->view.count - 1U, v.gl_at);
     TEST_ASSERT_EQUAL_UINT8(FI_COMPARE_FRAME_START, v.compare);
     static fi_state_line_t lines[FI_STATE_LINES];
-    const uint32_t n = fi_state_lines(fr, &v, lines);
+    const uint32_t n = fi_state_lines(fr, &v, true, lines);
     uint32_t scissor = FI_NONE;
     for (uint32_t k = 0; k < n; k++) {
         scissor = lines[k].gl && strcmp(lines[k].name, "GL_SCISSOR_TEST") == 0 ? k : scissor;
