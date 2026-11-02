@@ -605,6 +605,109 @@ static void test_gl_state_follows_issued_calls(void) {
 }
 // #endregion
 
+// #region compare
+static bool s_split; /* compare_body records a viewport between two draws that merge without it */
+
+static void compare_body(void) {
+    NT_GFX_NOTE("sprite", NT_NOTE_U32("n", 3));
+    draw_setup();
+    nt_gfx_draw(0, 3);
+    if (s_split) {
+        nt_gfx_set_viewport(0, 0, 4, 4);
+    }
+    nt_gfx_draw(3, 3);
+    nt_gfx_draw(6, 3);
+    nt_gfx_end_pass();
+}
+
+/* The rows of the diff's only group with requests named `label`, as kind letters: = ~ - +. */
+static void diff_letters(const fi_diff_t *d, const fi_frame_t *b, const char *label, char *out) {
+    for (uint32_t g = 0; g < d->group_count; g++) {
+        if (d->group[g].b != FI_NONE && strcmp(b->group_key[d->group[g].b], label) == 0) {
+            for (uint32_t r = 0; r < d->group[g].count; r++) {
+                out[r] = "=~-+"[d->row[d->group[g].first + r].kind];
+            }
+            out[d->group[g].count] = '\0';
+            return;
+        }
+    }
+    TEST_FAIL_MESSAGE("group not compared");
+}
+
+/* A frame against itself differs nowhere; a viewport recorded between two draws is only in B, and the draw
+ * after it changes: it no longer merges, so it ends ACCEPTED and names the break. */
+static void test_compare_aligns_requests_and_names_changes(void) {
+    s_split = false;
+    size_t len = 0;
+    char *text = record(compare_body, &len);
+    const fi_frame_t *a = load(text, len);
+    fi_diff_t d;
+    fi_diff(a, a, &d);
+    for (uint32_t r = 0; r < d.row_count; r++) {
+        TEST_ASSERT_EQUAL_UINT8(FI_DIFF_SAME, d.row[r].kind);
+    }
+    for (uint32_t g = 0; g < d.group_count; g++) {
+        TEST_ASSERT_EQUAL_UINT32(d.group[g].a, d.group[g].b);
+        TEST_ASSERT_TRUE(d.group[g].aligned);
+    }
+    fi_diff_free(&d);
+
+    s_split = true;
+    fi_file_t split = {0};
+    text = record(compare_body, &len);
+    fi_file_load(&split, "split", text, len);
+    const fi_frame_t *b = &split.frames[0];
+    fi_diff(a, b, &d);
+    char letters[64];
+    diff_letters(&d, b, "> sprite", letters);
+    TEST_ASSERT_EQUAL_STRING("=====+~==", letters); /* note, pass, pipeline, vertex input, draw, viewport, draw, draw, end pass */
+    const uint32_t viewport = find_op(b, NT_GFX_OP_VIEWPORT, 0);
+    const uint32_t moved = find_op(b, NT_GFX_OP_DRAW, 1);
+    for (uint32_t r = 0; r < d.row_count; r++) {
+        if (d.row[r].kind == FI_DIFF_ONLY_B) {
+            TEST_ASSERT_EQUAL_UINT32(viewport, d.row[r].b);
+        }
+        if (d.row[r].kind == FI_DIFF_CHANGED) {
+            TEST_ASSERT_EQUAL_UINT32(moved, d.row[r].b);
+            TEST_ASSERT_EQUAL_UINT32(find_op(a, NT_GFX_OP_DRAW, 1), d.row[r].a);
+            TEST_ASSERT_EQUAL_UINT8(FI_CHANGE_RESULT | FI_CHANGE_MERGE, d.row[r].change); /* the fake backend issues no GL calls */
+        }
+    }
+    fi_diff_free(&d);
+    fi_file_close(&split);
+}
+
+/* Requests too far apart to align are listed, A's then B's, never paired. */
+static void test_compare_lists_what_it_cannot_align(void) {
+    const uint32_t half = FI_DIFF_EDITS + 8U;
+    nt_gfx_event_t *ev = (nt_gfx_event_t *)calloc((size_t)2U * half, sizeof(nt_gfx_event_t));
+    TEST_ASSERT_NOT_NULL(ev);
+    for (uint32_t i = 0; i < 2U * half; i++) {
+        ev[i].kind = NT_GFX_EVENT_OP;
+        ev[i].operation = i < half ? NT_GFX_OP_VIEWPORT : NT_GFX_OP_SCISSOR;
+        ev[i].result = NT_GFX_RESULT_ACCEPTED;
+    }
+    const fi_frame_t *a = load_events(ev, half, NULL);
+    fi_file_t other = {0};
+    nt_gfx_capture_view_t view = {.events = ev + half, .count = half};
+    const size_t len = nt_gfx_capture_format(&view, NULL, 0);
+    char *text = (char *)malloc(len + 1);
+    TEST_ASSERT_NOT_NULL(text);
+    nt_gfx_capture_format(&view, text, len + 1);
+    fi_file_load(&other, "other", text, len);
+    fi_diff_t d;
+    fi_diff(a, &other.frames[0], &d);
+    TEST_ASSERT_EQUAL_UINT32(1, d.group_count);
+    TEST_ASSERT_FALSE(d.group[0].aligned);
+    TEST_ASSERT_EQUAL_UINT32(2U * half, d.group[0].count);
+    TEST_ASSERT_EQUAL_UINT8(FI_DIFF_ONLY_A, d.row[0].kind);
+    TEST_ASSERT_EQUAL_UINT8(FI_DIFF_ONLY_B, d.row[half].kind);
+    fi_diff_free(&d);
+    fi_file_close(&other);
+    free(ev);
+}
+// #endregion
+
 // #region damaged files
 /* A broken record keeps the frame's prefix; a broken header rejects only its own document. */
 static void test_damage_stays_inside_its_document(void) {
@@ -682,5 +785,7 @@ int main(void) {
     RUN_TEST(test_damage_stays_inside_its_document);
     RUN_TEST(test_a_group_key_is_one_line);
     RUN_TEST(test_an_overflowed_frame_opens);
+    RUN_TEST(test_compare_aligns_requests_and_names_changes);
+    RUN_TEST(test_compare_lists_what_it_cannot_align);
     return UNITY_END();
 }

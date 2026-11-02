@@ -37,11 +37,17 @@ typedef struct {
     char meaning[96];
     uint8_t section; /* fi_section_t */
     fi_query_t q;
+    bool sum; /* the value is the query's sum (bytes, vertices), not its record count */
     uint64_t value;
 } fi_number_t;
 #define FI_NUMBERS (32U + (FI_OBJECTS * FI_RES_COUNT * 2U) + ((uint32_t)NT_GFX_OP_COUNT * (FI_RESULTS + 3U)) + (uint32_t)NT_GFX_GL_COUNT)
 /* all: zeros too, so a key stays valid on any frame; without it only the numbers worth showing. */
 uint32_t fi_numbers(const fi_frame_t *frame, bool all, fi_number_t out[FI_NUMBERS]);
+/* The same number in another frame: keys are the same on every frame. */
+uint64_t fi_number_in(const fi_frame_t *frame, const fi_number_t *number);
+/* What changed in a changed pair of fi_diff, e.g. "CACHE -> ACCEPTED; break: merged -> a command recorded between"
+ * or, for a viewport or scissor, A's values: "A: VIEWPORT integers=[0,0,1280,720]". */
+void fi_change_text(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_row_t *row, char *buf, size_t size);
 /* Whether a group holds draw requests, GL calls or drops: groups and the Information page show only these. */
 bool fi_group_has_work(const fi_frame_t *frame, uint32_t group);
 

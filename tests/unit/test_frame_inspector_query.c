@@ -190,6 +190,92 @@ static void test_a_repeated_sequence_has_two_addresses(void) {
     assert_holds(ask("frames", true), "\n  0 51 714 9 47 38 67 93952 0\n* 1 51 ");
 }
 
+/* The fixture and a copy whose draw @233 draws 12 indices, not 6: frame 0 and frame 1 of one file. */
+static void load_fixture_and_variant(void) {
+    const size_t len = s_file.len;
+    char *text = (char *)malloc((len * 2) + 1);
+    TEST_ASSERT_NOT_NULL(text);
+    memcpy(text, s_file.text, len);
+    memcpy(text + len, s_file.text, len);
+    text[len * 2] = '\0';
+    char *draw = strstr(text + len, "\n233 OP op=DRAW_INDEXED");
+    TEST_ASSERT_NOT_NULL(draw);
+    char *count = strstr(draw, " count=6 ");
+    TEST_ASSERT_NOT_NULL(count);
+    count[7] = '7'; /* count=7: one character, so the rest of the line stays */
+    fi_file_close(&s_file);
+    fi_file_load(&s_file, "pair", text, len * 2);
+    TEST_ASSERT_EQUAL_UINT32(2, s_file.frame_count);
+}
+
+/* Compare's A and B columns are each frame's own numbers; the changed draw is the only difference, in its group. */
+static void test_compare_tells_what_differs(void) {
+    load_fixture_and_variant();
+    (void)ask("frame 1", true);
+    static fi_number_t a_numbers[FI_NUMBERS];
+    static fi_number_t b_numbers[FI_NUMBERS];
+    const fi_frame_t *a = &s_file.frames[0];
+    const fi_frame_t *b = &s_file.frames[1];
+    const uint32_t n = fi_numbers(a, true, a_numbers);
+    TEST_ASSERT_EQUAL_UINT32(n, fi_numbers(b, true, b_numbers));
+    for (uint32_t k = 0; k < n; k++) { /* keys line up, and a number read in the other frame is that frame's own */
+        TEST_ASSERT_EQUAL_STRING(a_numbers[k].key, b_numbers[k].key);
+        TEST_ASSERT_EQUAL_UINT64_MESSAGE(a_numbers[k].value, fi_number_in(a, &b_numbers[k]), a_numbers[k].key);
+    }
+    const char *text = ask("compare 0", true);
+    assert_holds(text, "\nindices                                   19176      19177          +1  # indices drawn (x instances)\n");
+    assert_holds(text, "\ng2.commands                                   1  # > sprite: requests that differ, of ");
+    assert_holds(text, "\ndiffer 2  # ");
+    text = ask("compare 0 g2", true);
+    assert_holds(text, "\n~ @233    @233    DRAW_INDEXED pipe#9 count=7 vi#6  # count 6 -> 7\n");
+    assert_holds(text, "\nrows 124 differ 1\n");
+    assert_holds(ask("compare 1", true), "\ndiffer 0  # ");
+    static const struct {
+        const char *line, *why;
+    } k_bad[] = {{"compare", "compare INDEX [GROUP]"},
+                 {"compare x", "compare INDEX [GROUP]"},
+                 {"compare 9", "no readable frame 9"},
+                 {"compare 0 g99", "no group g99"},
+                 {"compare 0 g2 g3", "compare INDEX [GROUP]"}};
+    for (uint32_t k = 0; k < sizeof(k_bad) / sizeof(k_bad[0]); k++) {
+        assert_holds(ask(k_bad[k].line, false), k_bad[k].why);
+    }
+}
+
+/* The same skeletal_showcase frame on native and web: every group pairs, every request aligns, and only the
+ * viewports and scissors differ, because the two windows differ in size. */
+static void test_native_and_web_align(void) {
+    static fi_file_t files[2];
+    TEST_ASSERT_EQUAL(NT_OK, nt_fs_init());
+    const bool opened = fi_file_open(&files[0], NT_NATIVE_FIXTURE) && fi_file_open(&files[1], NT_WEB_FIXTURE);
+    nt_fs_shutdown();
+    TEST_ASSERT_TRUE(opened);
+    const fi_frame_t *a = &files[0].frames[0];
+    const fi_frame_t *b = &files[1].frames[0];
+    TEST_ASSERT_EQUAL(NT_GFX_CAPTURE_WEB, b->view.platform);
+    fi_diff_t d;
+    fi_diff(a, b, &d);
+    uint32_t changed = 0;
+    for (uint32_t g = 0; g < d.group_count; g++) {
+        TEST_ASSERT_NOT_EQUAL_UINT32(FI_NONE, d.group[g].a);
+        TEST_ASSERT_NOT_EQUAL_UINT32(FI_NONE, d.group[g].b);
+        TEST_ASSERT_TRUE(d.group[g].aligned);
+    }
+    for (uint32_t r = 0; r < d.row_count; r++) {
+        TEST_ASSERT_TRUE(d.row[r].kind == FI_DIFF_SAME || d.row[r].kind == FI_DIFF_CHANGED);
+        if (d.row[r].kind == FI_DIFF_CHANGED) {
+            const uint8_t op = b->view.events[d.row[r].b].operation;
+            TEST_ASSERT_TRUE(op == NT_GFX_OP_VIEWPORT || op == NT_GFX_OP_SCISSOR);
+            TEST_ASSERT_EQUAL_UINT8(FI_CHANGE_ARGS, d.row[r].change);
+            changed++;
+        }
+    }
+    TEST_ASSERT_GREATER_THAN_UINT32(0, changed);
+    fi_diff_free(&d);
+    fi_file_close(&files[0]);
+    fi_file_close(&files[1]);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_commands_answer_and_reject_bad_input);
@@ -198,5 +284,7 @@ int main(void) {
     RUN_TEST(test_record_tells_merged_and_broken_draws);
     RUN_TEST(test_state_views);
     RUN_TEST(test_a_repeated_sequence_has_two_addresses);
+    RUN_TEST(test_compare_tells_what_differs);
+    RUN_TEST(test_native_and_web_align);
     return UNITY_END();
 }

@@ -1,16 +1,18 @@
 /* Frame inspector: opens capture files (render architecture, "Capture text") and shows what each recorded
- * frame did. Usage: frame_inspector [file...] [--frame INDEX] [--page frames|commands|info|init|end]
+ * frame did. Usage: frame_inspector [file...] [--frame INDEX] [--base INDEX] [--page frames|commands|info|compare|init|end]
  * [--select RECORD] [--filter TEXT] [--monkey SECONDS [SEED]]; Open... adds more files. --frame takes the
  * frame's index across the files (query frames lists them), --select a record's @ number in that frame. Run it by its path: its asset pack
  * is found next to argv[0].
  * Pages: Frames (per-file tracks of draw calls, GL calls, upload and records on one zoomable axis; a click
  * picks a frame, a click again opens it), Commands (the logical tree with a panel for the selection or a
- * Shift range), Information (numbers that filter the tree to their records), Init and End state.
+ * Shift range), Information (numbers that filter the tree to their records), Compare (the frame against a
+ * base frame set with B: numbers, groups and their requests aligned like a text diff), Init and End state.
  * --monkey drives random clicks, drags, wheel and keys for that long and prints the frame times.
  * Without a window, for scripts and agents: frame_inspector query FILE... [--frame INDEX] COMMAND [ARGS]
  * answers one command; frame_inspector --serve FILE... [--frame INDEX] answers a command per stdin line,
  * each answer between a "> command" line and a "= ok" or "= error" line. Answers are "key value  # meaning" lines; help lists the commands:
- * frames, frame, summary, groups, record @N, state @N|init|end [all], find TEXT, list KEY (a summary key). */
+ * frames, frame, summary, groups, record @N, state @N|init|end [all], find TEXT, list KEY (a summary key),
+ * compare INDEX [GROUP]. */
 
 #include "app/nt_app.h"
 #include "atlas/nt_atlas.h"
@@ -81,6 +83,7 @@ static const Clay_Color k_bar = {110, 116, 130, 255};
 static const Clay_Color k_bar_bad = {200, 70, 60, 255};
 static const Clay_Color k_bar_warn = {220, 150, 50, 255};
 static const Clay_Color k_bar_sel = {90, 160, 255, 255};
+static const Clay_Color k_bar_base = {120, 200, 120, 255}; /* Compare's base frame A */
 static const Clay_Color k_hover_bar = {170, 176, 190, 255};
 static const Clay_Color k_draw_bg = {34, 52, 82, 255}; /* draws and clears, as in Spector */
 static const Clay_Color k_select_border = {250, 200, 90, 255};
@@ -107,8 +110,9 @@ static const nt_ui_label_style_t k_wrap = {.font_id = 0, .font_size = FONT, .col
 
 // #region state
 typedef enum { VIEW_LOGICAL, VIEW_RAW, VIEW_GL, VIEW_COUNT } view_t;
-/* One task per page, as in Spector: frames over time, the frame's commands, its numbers, its start and end state. */
-typedef enum { PAGE_FRAMES, PAGE_COMMANDS, PAGE_INFO, PAGE_INIT, PAGE_END, PAGE_COUNT } page_t;
+/* One task per page, as in Spector: frames over time, the frame's commands, its numbers, the frame against a base
+ * frame, its start and end state. */
+typedef enum { PAGE_FRAMES, PAGE_COMMANDS, PAGE_INFO, PAGE_COMPARE, PAGE_INIT, PAGE_END, PAGE_COUNT } page_t;
 typedef enum { TRACK_DRAW_CALLS, TRACK_GL_CALLS, TRACK_UPLOAD, TRACK_RECORDS, TRACK_COUNT } track_t;
 
 /* A place to go back to: a page, a frame and the row selected there. */
@@ -160,7 +164,11 @@ static struct {
     bool copy_requested;
     uint32_t close_file; /* the file whose x was clicked; FI_NONE */
     uint32_t cell_seq;
-    uint32_t frame_epoch; /* changes with the selected frame; keys the caches */
+    uint32_t frame_epoch;           /* changes with the selected frame; keys the caches */
+    uint32_t base_file, base_frame; /* Compare's frame A, base_file FI_NONE without one */
+    uint32_t base_epoch;            /* changes with the base */
+    bool compare_all;               /* Compare lists equal numbers and groups too */
+    uint64_t compare_pick;          /* the Compare cell clicked once */
     float fb_w;
 } s;
 
@@ -216,8 +224,8 @@ static uint32_t monkey_rand(void) {
 
 /* Replaces this frame's mouse and keys with random ones. */
 static void monkey_input(float w, float h) {
-    static const nt_key_t k_keys[] = {NT_KEY_ARROW_UP, NT_KEY_ARROW_DOWN, NT_KEY_ARROW_LEFT, NT_KEY_ARROW_RIGHT, NT_KEY_PAGE_UP,   NT_KEY_PAGE_DOWN, NT_KEY_HOME,
-                                      NT_KEY_END,      NT_KEY_D,          NT_KEY_P,          NT_KEY_ENTER,       NT_KEY_BACKSPACE, NT_KEY_ESCAPE,    NT_KEY_C};
+    static const nt_key_t k_keys[] = {NT_KEY_ARROW_UP, NT_KEY_ARROW_DOWN, NT_KEY_ARROW_LEFT, NT_KEY_ARROW_RIGHT, NT_KEY_PAGE_UP, NT_KEY_PAGE_DOWN, NT_KEY_HOME, NT_KEY_END,
+                                      NT_KEY_D,        NT_KEY_P,          NT_KEY_ENTER,      NT_KEY_BACKSPACE,   NT_KEY_ESCAPE,  NT_KEY_C,         NT_KEY_B};
     nt_pointer_t *p = &g_nt_input.pointers[0];
     g_nt_input.primary = 0;
     p->active = true;
@@ -512,8 +520,8 @@ static void fold_all(bool fold) {
     s.dirty = true;
 }
 
-static void set_query(fi_query_t q, const char *label) {
-    remember();
+/* Filters Commands to a number's records. */
+static void apply_query(fi_query_t q, const char *label) {
     s.query = q;
     s.page = PAGE_COMMANDS;
     s.view = VIEW_LOGICAL; /* the GL-calls view would hide the requests a number counts */
@@ -524,12 +532,28 @@ static void set_query(fi_query_t q, const char *label) {
     s.dirty = true;
 }
 
+static void set_query(fi_query_t q, const char *label) {
+    remember();
+    apply_query(q, label);
+}
+
 static void clear_filters(void) {
     s.query = (fi_query_t){0};
     s.filter[0] = '\0';
     s.problems = false;
     s.draws_only = false;
     s.dirty = true;
+}
+
+/* B on any page makes the selected frame the base A; on the base itself it clears it. */
+static void toggle_base(void) {
+    if (s.base_file == s.file && s.base_frame == s.frame) {
+        s.base_file = FI_NONE;
+    } else if (frame_ok(frame_sel())) {
+        s.base_file = s.file;
+        s.base_frame = s.frame;
+    }
+    s.base_epoch++;
 }
 // #endregion
 
@@ -571,6 +595,8 @@ static void close_file(uint32_t f) {
     s.file_count--;
     s.history_count = 0;
     s.future_count = 0;
+    s.base_file = s.base_file == f ? FI_NONE : s.base_file - (s.base_file != FI_NONE && s.base_file > f ? 1U : 0U);
+    s.base_epoch++;
     if (!current) {
         s.file -= s.file > f ? 1U : 0U;
         return;
@@ -912,17 +938,20 @@ static void declare_track(uint32_t f, track_t t, uint64_t max, uint32_t step) {
                 bool bad = false;
                 bool warn = false;
                 bool sel = false;
+                bool base = false;
                 bool hot = false;
                 for (uint32_t j = k; j < k + step && j < file->frame_count; j++) {
                     const fi_frame_t *fr = &file->frames[j];
                     bad |= !frame_ok(fr) || fr->error != NULL;
                     warn |= frame_ok(fr) && (fr->merge_mismatch != FI_NONE || fr->view.overflow);
                     sel |= f == s.file && j == s.frame;
+                    base |= f == s.base_file && j == s.base_frame;
                     hot |= j == hovered;
                 }
                 Clay_Color color = hot ? k_hover_bar : k_bar;
                 color = warn ? k_bar_warn : color;
                 color = bad ? k_bar_bad : color;
+                color = base ? k_bar_base : color;
                 color = sel ? k_bar_sel : color;
                 const float gap = column >= 6.0F ? 1.0F : 0.0F;
                 const bool label = column >= 34.0F; /* wide columns print their value over the bar */
@@ -984,7 +1013,7 @@ static void declare_frame_table(void) {
             const bool sel = f == s.file && k == s.frame;
             const nt_ui_label_style_t *style = sel ? &k_head : &k_text;
             CLAY({.id = (Clay_ElementId){.id = id}, .layout = {.childGap = 4}, .backgroundColor = sel ? k_select : (ev.hovered ? k_hover : k_panel)}) {
-                CELL_(k_w[0]) { textf(style, "%u", k + 1U); }
+                CELL_(k_w[0]) { textf(style, "%u%s", k + 1U, f == s.base_file && k == s.base_frame ? " A" : ""); }
                 CELL_(k_w[1]) { textf(style, "%llu", (unsigned long long)fr->view.counters.frame_sequence); }
                 if (!frame_ok(fr)) {
                     textf(&k_bad, "rejected: %s", fr->error != NULL ? fr->error : "?");
@@ -1029,7 +1058,11 @@ static void declare_frames(void) {
                 if (button("fit", &k_text, s.axis_fit)) {
                     s.axis_fit = true;
                 }
-                text("blue: current   red: rejected   orange: overflow or merge rule stale", &k_dim);
+                text("blue: current   green: base A of Compare   red: rejected   orange: overflow or merge rule stale", &k_dim);
+                const bool is_base = s.base_file == s.file && s.base_frame == s.frame;
+                if (button(is_base ? "clear base (B)" : "set base (B)", &k_text, is_base)) {
+                    toggle_base();
+                }
             } else {
                 text("Open a capture file (ntcapture text, one or more frames).", &k_dim);
             }
@@ -1772,6 +1805,312 @@ static void declare_frame_state(const fi_frame_t *fr, bool end) {
 }
 // #endregion
 
+// #region compare
+/* Compare: the selected frame (B) against the base (A), numbers first, then the groups and their commands
+ * aligned. One flat list of rows, so a frame of thousands of requests scrolls as Commands does. */
+typedef enum { CMP_TITLE, CMP_NUMBER, CMP_GROUP, CMP_DIFF, CMP_SAME } cmp_kind_t;
+typedef struct {
+    uint8_t kind; /* cmp_kind_t */
+    uint32_t a;   /* title: section (FI_SECTION_GL + 1: groups); number: its index; group: its index; diff: its row */
+    uint32_t b;   /* same: the run's row count */
+} cmp_row_t;
+
+static struct {
+    uint32_t epoch, base_epoch; /* the frames compared */
+    fi_diff_t diff;
+    fi_number_t numbers[FI_NUMBERS];
+    uint64_t was[FI_NUMBERS]; /* each number in A */
+    uint32_t number_count;
+    uint8_t *open; /* per group: its commands show */
+    uint8_t *full; /* per group: its runs of same rows show */
+    cmp_row_t *rows;
+    uint32_t row_count;
+    bool dirty;
+} s_cmp = {.epoch = FI_NONE};
+
+static const fi_frame_t *base_frame(void) { return &s.files[s.base_file].frames[s.base_frame]; }
+
+static uint64_t metric(const fi_frame_t *fr, uint32_t group, uint32_t m) {
+    const fi_cell_t *c = &fr->summary.group[((size_t)group * FI_METRIC_COUNT) + m];
+    return m == FI_METRIC_BYTES ? c->sum : c->n;
+}
+
+static bool group_differs(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_group_t *g) {
+    bool differ = g->differ > 0 || g->a == FI_NONE || g->b == FI_NONE;
+    for (uint32_t m = 0; m < FI_METRIC_COUNT && !differ; m++) {
+        differ = metric(a, g->a, m) != metric(b, g->b, m);
+    }
+    return differ;
+}
+
+static uint64_t gap(uint64_t x, uint64_t y) { return x > y ? x - y : y - x; }
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void compare_rows(const fi_frame_t *a, const fi_frame_t *b) {
+    s_cmp.dirty = false;
+    s_cmp.row_count = 0;
+    static uint32_t order[FI_NUMBERS];
+    for (uint32_t section = FI_SECTION_FRAME; section <= FI_SECTION_GL; section++) {
+        uint32_t count = 0;
+        for (uint32_t k = 0; k < s_cmp.number_count; k++) {
+            const fi_number_t *x = &s_cmp.numbers[k];
+            if (x->section != section || (!s.compare_all && x->value == s_cmp.was[k])) {
+                continue;
+            }
+            uint32_t at = count++; /* the biggest change first */
+            for (; at > 0 && gap(s_cmp.was[order[at - 1U]], s_cmp.numbers[order[at - 1U]].value) < gap(s_cmp.was[k], x->value); at--) {
+                order[at] = order[at - 1U];
+            }
+            order[at] = k;
+        }
+        if (count > 0) {
+            s_cmp.rows[s_cmp.row_count++] = (cmp_row_t){.kind = CMP_TITLE, .a = section};
+        }
+        for (uint32_t c = 0; c < count; c++) {
+            s_cmp.rows[s_cmp.row_count++] = (cmp_row_t){.kind = CMP_NUMBER, .a = order[c]};
+        }
+    }
+    s_cmp.rows[s_cmp.row_count++] = (cmp_row_t){.kind = CMP_TITLE, .a = FI_SECTION_GL + 1U};
+    const fi_diff_t *d = &s_cmp.diff;
+    for (uint32_t g = 0; g < d->group_count; g++) {
+        const fi_diff_group_t *dg = &d->group[g];
+        if (!s.compare_all && !group_differs(a, b, dg)) {
+            continue;
+        }
+        s_cmp.rows[s_cmp.row_count++] = (cmp_row_t){.kind = CMP_GROUP, .a = g};
+        for (uint32_t r = dg->first; s_cmp.open[g] != 0 && r < dg->first + dg->count;) {
+            uint32_t end = r;
+            while (end < dg->first + dg->count && d->row[end].kind == FI_DIFF_SAME) {
+                end++;
+            }
+            if (s_cmp.full[g] == 0 && end - r >= 3U) {
+                s_cmp.rows[s_cmp.row_count++] = (cmp_row_t){.kind = CMP_SAME, .a = r, .b = end - r};
+                r = end;
+            } else {
+                s_cmp.rows[s_cmp.row_count++] = (cmp_row_t){.kind = CMP_DIFF, .a = r++};
+            }
+        }
+    }
+}
+
+/* The diff and the numbers once per pair of frames; groups that differ start open. */
+static void compare_cache(const fi_frame_t *a, const fi_frame_t *b) {
+    if (s_cmp.epoch != s.frame_epoch || s_cmp.base_epoch != s.base_epoch) {
+        s_cmp.epoch = s.frame_epoch;
+        s_cmp.base_epoch = s.base_epoch;
+        fi_diff_free(&s_cmp.diff);
+        free(s_cmp.open);
+        free(s_cmp.full);
+        free(s_cmp.rows);
+        fi_diff(a, b, &s_cmp.diff);
+        s_cmp.number_count = fi_numbers(b, true, s_cmp.numbers);
+        for (uint32_t k = 0; k < s_cmp.number_count; k++) {
+            s_cmp.was[k] = fi_number_in(a, &s_cmp.numbers[k]);
+        }
+        const fi_diff_t *d = &s_cmp.diff;
+        s_cmp.open = (uint8_t *)calloc((size_t)d->group_count + 1U, 1);
+        s_cmp.full = (uint8_t *)calloc((size_t)d->group_count + 1U, 1);
+        s_cmp.rows = (cmp_row_t *)calloc((size_t)FI_NUMBERS + 16U + d->group_count + d->row_count, sizeof(cmp_row_t));
+        NT_ASSERT(s_cmp.open != NULL && s_cmp.full != NULL && s_cmp.rows != NULL);
+        for (uint32_t g = 0; g < d->group_count; g++) {
+            s_cmp.open[g] = d->group[g].differ > 0 ? 1U : 0U;
+        }
+        s_cmp.dirty = true;
+    }
+    if (s_cmp.dirty) {
+        compare_rows(a, b);
+    }
+}
+
+/* Opens a record or a number's records in frame A or B; Back returns to Compare. */
+static void open_in(uint32_t file, uint32_t frame, uint32_t record, fi_query_t q, const char *label) {
+    remember();
+    if (file != s.file || frame != s.frame) {
+        select_frame(file, frame);
+    }
+    if (record != FI_NONE) {
+        reveal(record);
+        s.page = PAGE_COMMANDS;
+    } else {
+        apply_query(q, label);
+    }
+}
+
+/* A cell of side A (0) or B (1): a click picks it, a second click opens it in that frame. */
+static bool compare_cell(const char *label, const nt_ui_label_style_t *style, uint32_t side, uint32_t index) {
+    const uint64_t target = ((uint64_t)4U << 60U) | ((uint64_t)side << 59U) | index;
+    const bool clicked = button(label, style, s.compare_pick == target);
+    if (clicked && second_click(target)) {
+        return true;
+    }
+    s.compare_pick = clicked ? target : s.compare_pick;
+    return false;
+}
+
+static void declare_compare_number(const fi_frame_t *a, const fi_frame_t *b, uint32_t k) {
+    const fi_number_t *x = &s_cmp.numbers[k];
+    const uint64_t was = s_cmp.was[k];
+    char buf[32];
+    CELL_(560) { text(x->meaning, &k_text); }
+    for (uint32_t side = 0; side < 2U; side++) {
+        const uint64_t v = side == 0 ? was : x->value;
+        (void)snprintf(buf, sizeof(buf), "%llu", (unsigned long long)v);
+        CELL_(100) {
+            if (fi_cell(side == 0 ? a : b, x->q).n == 0) {
+                text(buf, &k_dim);
+            } else if (compare_cell(buf, &k_link, side, k)) {
+                open_in(side == 0 ? s.base_file : s.file, side == 0 ? s.base_frame : s.frame, FI_NONE, x->q, x->meaning);
+            }
+        }
+    }
+    (void)snprintf(buf, sizeof(buf), "%+lld", (long long)(x->value - was));
+    CELL_(100) { text(x->value == was ? "" : buf, &k_changed); }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void declare_compare_group(const fi_frame_t *a, const fi_frame_t *b, uint32_t g, bool clicked) {
+    static const char *const k_names[FI_METRIC_COUNT] = {"requests", "GL draws", "GL calls", "upload B", "drops"};
+    const fi_diff_group_t *dg = &s_cmp.diff.group[g];
+    if (clicked) {
+        s_cmp.open[g] ^= 1U;
+        s_cmp.dirty = true;
+    }
+    CELL_(20) { text(s_cmp.open[g] != 0 ? "-" : "+", &k_head); }
+    CELL_(300) { textf(&k_head, "%.40s", dg->b != FI_NONE ? b->group_key[dg->b] : a->group_key[dg->a]); }
+    if (dg->a == FI_NONE || dg->b == FI_NONE) {
+        textf(&k_changed, "only in %s: %u requests", dg->a == FI_NONE ? "B" : "A", dg->count);
+        return;
+    }
+    char buf[256];
+    size_t at = 0;
+    buf[0] = '\0';
+    for (uint32_t m = 0; m < FI_METRIC_COUNT; m++) {
+        const uint64_t va = metric(a, dg->a, m);
+        const uint64_t vb = metric(b, dg->b, m);
+        if (va != vb && at < sizeof(buf)) {
+            at += (size_t)snprintf(buf + at, sizeof(buf) - at, "%s %llu -> %llu   ", k_names[m], (unsigned long long)va, (unsigned long long)vb);
+        }
+    }
+    if (dg->differ > 0 && at < sizeof(buf)) {
+        (void)snprintf(buf + at, sizeof(buf) - at, "%u of %u requests differ", dg->differ, dg->count);
+    }
+    text(buf[0] != '\0' ? buf : "same", buf[0] != '\0' ? &k_changed : &k_dim);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void declare_compare_diff(const fi_frame_t *a, const fi_frame_t *b, uint32_t r) {
+    static const nt_ui_label_style_t *const k_styles[] = {&k_dim, &k_changed, &k_bad, &k_state};
+    const fi_diff_row_t *row = &s_cmp.diff.row[r];
+    CELL_(20) {}
+    CELL_(20) { textf(k_styles[row->kind], "%c", "=~-+"[row->kind]); }
+    char buf[640];
+    const uint32_t records[2] = {row->a, row->b};
+    for (uint32_t side = 0; side < 2U; side++) {
+        CELL_(70) {
+            if (records[side] != FI_NONE) {
+                (void)snprintf(buf, sizeof(buf), "@%u", records[side]);
+                if (compare_cell(buf, &k_link, side, 0x8000000U + r)) {
+                    open_in(side == 0 ? s.base_file : s.file, side == 0 ? s.base_frame : s.frame, records[side], (fi_query_t){0}, "");
+                }
+            }
+        }
+    }
+    fi_row_text(row->b != FI_NONE ? b : a, row->b != FI_NONE ? row->b : row->a, buf, sizeof(buf));
+    CELL_(460) { textf(row->kind == FI_DIFF_SAME ? &k_dim : &k_text, "%.60s", buf); }
+    if (row->kind == FI_DIFF_CHANGED) {
+        fi_change_text(a, b, row, buf, sizeof(buf));
+        text(buf, &k_changed);
+    } else if (row->kind != FI_DIFF_SAME) {
+        text(row->kind == FI_DIFF_ONLY_A ? "only in A" : "only in B", k_styles[row->kind]);
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void declare_compare_list(void);
+
+static void declare_compare_page(void) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .padding = CLAY_PADDING_ALL(8), .childGap = 4}, .backgroundColor = k_panel}) {
+        if (s.base_file == FI_NONE) {
+            text("No base frame. On Frames pick a frame and press B (or set base): it becomes A, and the frame you pick next is B.", &k_dim);
+        } else {
+            declare_compare_list();
+        }
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void declare_compare_list(void) {
+    static const char *const k_titles[] = {
+        "Frame", "Draws", "Uploads", "Resources", "Operations", "GL calls by name", "Groups and their commands (click a group: fold; - only in A, + only in B, ~ changed)"};
+    {
+        const fi_frame_t *a = base_frame();
+        const fi_frame_t *b = frame_sel();
+        compare_cache(a, b);
+        ROW_(10) {
+            textf(&k_head, "A: frame %llu", (unsigned long long)a->view.counters.frame_sequence);
+            textf(&k_dim, "(%s, %s)", s.files[s.base_file].name, a->view.platform == NT_GFX_CAPTURE_WEB ? "web" : "native");
+            textf(&k_head, "  B: frame %llu", (unsigned long long)b->view.counters.frame_sequence);
+            textf(&k_dim, "(%s, %s)", s.files[s.file].name, b->view.platform == NT_GFX_CAPTURE_WEB ? "web" : "native");
+            if (button(s.compare_all ? "showing all" : "showing what differs", &k_text, s.compare_all)) {
+                s.compare_all = !s.compare_all;
+                s_cmp.dirty = true;
+            }
+        }
+        ROW_(4) {
+            CELL_(560) { text("number", &k_dim); }
+            CELL_(100) { text("A", &k_dim); }
+            CELL_(100) { text("B", &k_dim); }
+            CELL_(100) { text("B - A", &k_dim); }
+        }
+        const uint32_t list_id = nt_ui_id("compare");
+        const uint32_t slot_id = nt_ui_id("compare_slot");
+        CLAY({.id = (Clay_ElementId){.id = slot_id}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .clip = {.vertical = true}}) {
+            const float height = list_height(slot_id);
+            const nt_ui_vlist_style_t vstyle = list_style(height);
+            const nt_ui_vlist_range_t range = nt_ui_vlist_begin(s_ctx, NULL, list_id, s_cmp.row_count, ROW_H, NT_UI_AXIS_Y, &vstyle,
+                                                                &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(height)}}});
+            for (uint32_t k = range.first; k <= range.last && k < s_cmp.row_count; ++k) {
+                const cmp_row_t *row = &s_cmp.rows[k];
+                const uint32_t row_id = nt_ui_vlist_item_id(s_ctx, k);
+                const nt_ui_events_t ev = nt_ui_events(s_ctx, row_id, NULL);
+                const bool fold = row->kind == CMP_GROUP || row->kind == CMP_SAME;
+                CLAY({.id = (Clay_ElementId){.id = row_id},
+                      .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(ROW_H)}, .childGap = 4, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
+                      .backgroundColor = fold && ev.hovered ? k_hover : (Clay_Color){0}}) {
+                    switch ((cmp_kind_t)row->kind) {
+                    case CMP_TITLE:
+                        text(k_titles[row->a], &k_head);
+                        break;
+                    case CMP_NUMBER:
+                        declare_compare_number(a, b, row->a);
+                        break;
+                    case CMP_GROUP:
+                        declare_compare_group(a, b, row->a, ev.clicked);
+                        break;
+                    case CMP_DIFF:
+                        declare_compare_diff(a, b, row->a);
+                        break;
+                    case CMP_SAME:
+                        CELL_(40) {}
+                        textf(&k_dim, "... %u same requests (click: show)", row->b);
+                        if (ev.clicked) {
+                            for (uint32_t g = 0; g < s_cmp.diff.group_count; g++) {
+                                const fi_diff_group_t *dg = &s_cmp.diff.group[g];
+                                s_cmp.full[g] |= row->a >= dg->first && row->a < dg->first + dg->count ? 1U : 0U;
+                            }
+                            s_cmp.dirty = true;
+                        }
+                        break;
+                    }
+                }
+            }
+            nt_ui_vlist_end(s_ctx);
+        }
+    }
+}
+
+// #endregion
+
 // #region details
 static void link_line(const fi_frame_t *fr, const char *what, uint32_t record) {
     char body[400];
@@ -2109,6 +2448,9 @@ static void handle_keys(void) {
         }
         return;
     }
+    if (s_keys.pressed[NT_KEY_B]) {
+        toggle_base();
+    }
     if (!frame_ok(fr) || s.page != PAGE_COMMANDS) { /* the rest act on the command list */
         return;
     }
@@ -2185,6 +2527,9 @@ static void declare_status(void) {
     case PAGE_INFO:
         text("click: pick a number, again: its records in Commands   Alt+Left: back", &k_dim);
         break;
+    case PAGE_COMPARE:
+        text("click a number or @record: pick, again: open it in that frame   B: this frame becomes the base A   Ctrl+Left/Right: next frame B   Alt+Left: back", &k_dim);
+        break;
     case PAGE_INIT:
     case PAGE_END:
     case PAGE_COUNT:
@@ -2213,8 +2558,8 @@ static void declare_frame_picker(void) {
 }
 
 static void declare_menu(void) {
-    static const char *const k_pages[PAGE_COUNT] = {"Frames", "Commands", "Information", "Init state", "End state"};
-    ROW_(6) {
+    static const char *const k_pages[PAGE_COUNT] = {"Frames", "Commands", "Information", "Compare", "Init state", "End state"};
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
         if (button("Open...", &k_link, false)) {
             s.open_requested = true;
         }
@@ -2230,8 +2575,10 @@ static void declare_menu(void) {
                 s.page = p;
             }
         }
-        if (s.file_count > 0) {
-            declare_frame_picker();
+        if (s.file_count > 0) { /* the frame and its banners give way first when the row is too narrow */
+            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}, .clip = {.horizontal = true}}) {
+                declare_frame_picker();
+            }
         }
     }
 }
@@ -2253,6 +2600,8 @@ static void declare_ui(void) {
                 declare_selection();
             } else if (s.page == PAGE_INFO) {
                 declare_info_page();
+            } else if (s.page == PAGE_COMPARE) {
+                declare_compare_page();
             } else {
                 declare_frame_state(frame_sel(), s.page == PAGE_END);
             }
@@ -2374,8 +2723,9 @@ static void frame(void) {
  * the files), --page frames|commands|info|init|end, --select RECORD (its @ number), --filter TEXT. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void parse_args(int argc, char *argv[]) {
-    static const char *const k_pages[PAGE_COUNT] = {"frames", "commands", "info", "init", "end"};
+    static const char *const k_pages[PAGE_COUNT] = {"frames", "commands", "info", "compare", "init", "end"};
     const char *frame = NULL;
+    const char *base = NULL;
     const char *page = NULL;
     const char *select = NULL;
     const char *filter = NULL;
@@ -2384,6 +2734,8 @@ static void parse_args(int argc, char *argv[]) {
         const bool value = a + 1 < argc;
         if (strcmp(arg, "--frame") == 0 && value) {
             frame = argv[++a];
+        } else if (strcmp(arg, "--base") == 0 && value) {
+            base = argv[++a];
         } else if (strcmp(arg, "--page") == 0 && value) {
             page = argv[++a];
         } else if (strcmp(arg, "--select") == 0 && value) {
@@ -2399,7 +2751,7 @@ static void parse_args(int argc, char *argv[]) {
             }
             s_monkey.seed = s_monkey.seed != 0 ? s_monkey.seed : 1U;
         } else if (strncmp(arg, "--", 2) == 0) {
-            nt_log_error("frame_inspector: unknown option %s (--frame N, --page frames|commands|info|init|end, --select N, --filter TEXT, --monkey S [SEED])", arg);
+            nt_log_error("frame_inspector: unknown option %s (--frame N, --base N, --page frames|commands|info|compare|init|end, --select N, --filter TEXT, --monkey S [SEED])", arg);
         } else {
             add_file(arg);
         }
@@ -2415,6 +2767,12 @@ static void parse_args(int argc, char *argv[]) {
         select_frame(file, at);
     } else if (frame != NULL) {
         nt_log_error("frame_inspector: no readable frame %s in the open files", frame);
+    }
+    const uint64_t base_index = base != NULL ? strtoull(base, &end, 10) : 0U;
+    if (base != NULL && isdigit((unsigned char)base[0]) && *end == '\0' && fi_frame_at(s.files, s.file_count, base_index, &s.base_file, &s.base_frame)) {
+        s.base_epoch++;
+    } else if (base != NULL) {
+        nt_log_error("frame_inspector: no readable base frame %s in the open files", base);
     }
     if (filter != NULL) {
         (void)snprintf(s.filter, sizeof(s.filter), "%s", filter);
@@ -2525,6 +2883,7 @@ int main(int argc, char *argv[]) {
     s.flash = FI_NONE;
     s.close_file = FI_NONE;
     s.hover_file = FI_NONE;
+    s.base_file = FI_NONE;
     if (nt_engine_init(&config) != NT_OK) {
         return 1;
     }
