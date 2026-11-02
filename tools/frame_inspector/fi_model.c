@@ -640,6 +640,7 @@ static uint32_t contributions(const fi_frame_t *fr, uint32_t i, fi_query_t *q, u
         FI_ADD_(FI_Q_GL_ANY, 0, 0, 0);
         if (fi_is_draw_call(e->detail)) {
             FI_ADD_(FI_Q_DRAW_CALL, 0, 0, 0);
+            FI_ADD_(FI_Q_GROUP, g, FI_METRIC_DRAW_CALLS, 0);
         }
         FI_ADD_(FI_Q_GROUP, g, FI_METRIC_CALLS, 0);
         if (op != FI_NONE) {

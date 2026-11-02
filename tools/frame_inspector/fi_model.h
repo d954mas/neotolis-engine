@@ -61,7 +61,8 @@ typedef enum {
 } fi_query_kind_t;
 
 typedef enum { FI_RES_LIVE, FI_RES_CREATED, FI_RES_DESTROYED, FI_RES_COUNT } fi_res_t;
-typedef enum { FI_METRIC_DRAWS, FI_METRIC_CALLS, FI_METRIC_BYTES, FI_METRIC_DROPS, FI_METRIC_COUNT } fi_metric_t;
+/* Per group: draw requests, the GL draw calls they issued (merged requests share one), every GL call, bytes, drops. */
+typedef enum { FI_METRIC_DRAWS, FI_METRIC_DRAW_CALLS, FI_METRIC_CALLS, FI_METRIC_BYTES, FI_METRIC_DROPS, FI_METRIC_COUNT } fi_metric_t;
 
 typedef struct {
     uint8_t kind; /* fi_query_kind_t */

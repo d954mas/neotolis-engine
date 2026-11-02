@@ -295,6 +295,11 @@ static void test_merge_rule_matches_the_frontend(void) {
     TEST_ASSERT_EQUAL_UINT32(fr->summary.vertices.n, all.draws);
     TEST_ASSERT_EQUAL_UINT32(fr->summary.merged.n, all.merged);
     TEST_ASSERT_EQUAL_UINT32(fr->summary.draw_calls.n, all.gl_draws);
+    uint64_t by_group = 0; /* every GL draw call belongs to one group */
+    for (uint32_t g = 0; g < fr->group_count; g++) {
+        by_group += fi_cell(fr, (fi_query_t){.kind = FI_Q_GROUP, .a = g, .b = FI_METRIC_DRAW_CALLS}).n;
+    }
+    TEST_ASSERT_EQUAL_UINT64(fr->summary.draw_calls.n, by_group);
     fi_summary_t range;
     TEST_ASSERT_EQUAL_UINT32(fr->view.count, fi_range(fr, 0, fr->row_count - 1U, &range));
     TEST_ASSERT_EQUAL_UINT64(fr->summary.vertices.sum, range.vertices.sum);

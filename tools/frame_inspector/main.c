@@ -153,6 +153,7 @@ static struct {
     float fb_w;
 } s;
 
+_Alignas(max_align_t) static uint8_t s_scratch_mem[(size_t)4U * 1024U * 1024U]; /* frame scratch: UI text and Clay data */
 static nt_ui_context_t *s_ctx;
 static void *s_ui_arena;
 static nt_resource_t s_atlas;
@@ -1079,7 +1080,7 @@ static void track_labels(const char *name, const char *value, const nt_ui_label_
  * height is the metric against its maximum over all files. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_track(uint32_t f, track_t t, uint64_t max, uint32_t step) {
-    static const char *const k_names[TRACK_COUNT] = {"draw calls", "GL calls", "upload KiB", "records"};
+    static const char *const k_names[TRACK_COUNT] = {"GL draw calls", "GL calls", "upload KiB", "records"};
     NT_ASSERT(t < TRACK_COUNT);
     const fi_file_t *file = &s.files[f];
     const uint32_t hovered = s.hover_file == f ? s.hover_frame : FI_NONE;
@@ -1172,7 +1173,7 @@ static void declare_strip(float thumb_x, float thumb_w) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_frame_table(void) {
     static const float k_w[] = {60, 70, 130, 70, 80, 90, 110, 80};
-    static const char *const k_heads[] = {"pos", "frame", "GL draw calls", "draws", "merged", "GL calls", "upload KiB", "problems"};
+    static const char *const k_heads[] = {"pos", "frame", "GL draw calls", "requests", "merged", "GL calls", "upload KiB", "problems"};
     CLAY({.layout = {.padding = {0, 0, 12, 2}}}) { text("All frames (click: pick, again: open in Commands)", &k_head); }
     ROW_(4) {
         for (uint32_t c = 0; c < sizeof(k_w) / sizeof(k_w[0]); c++) {
@@ -1327,7 +1328,7 @@ static void row_label(const fi_frame_t *fr, uint32_t k, char *buf, size_t size) 
     const bool group = e->kind == NT_GFX_EVENT_NOTE || e->kind == NT_GFX_EVENT_MARKER_PUSH;
     const fi_tally_t t = fi_tally(fr, id);
     if (group && t.draws > 0 && n > 0 && (size_t)n < size) {
-        (void)snprintf(buf + n, size - (size_t)n, "   %u draw%s -> %u GL draw%s, %u merged", t.draws, t.draws == 1 ? "" : "s", t.gl_draws, t.gl_draws == 1 ? "" : "s", t.merged);
+        (void)snprintf(buf + n, size - (size_t)n, "   %u draw request%s -> %u GL draw call%s, %u merged", t.draws, t.draws == 1 ? "" : "s", t.gl_draws, t.gl_draws == 1 ? "" : "s", t.merged);
     } else if (fr->brk[id] != FI_BREAK_NONE && n > 0 && (size_t)n < size) {
         (void)snprintf(buf + n, size - (size_t)n, "   new GL draw: %s", fi_break_name((fi_break_t)fr->brk[id]));
     }
@@ -1618,7 +1619,7 @@ static void declare_card(const fi_frame_t *fr) {
     (void)snprintf(value[1], sizeof(value[1]), "%llu", (unsigned long long)sm->gl_any.n);
     (void)snprintf(value[2], sizeof(value[2]), "%.1f KiB", (double)sm->upload[2].sum / 1024.0);
     (void)snprintf(value[3], sizeof(value[3]), "%llu", (unsigned long long)sm->problems.n);
-    (void)snprintf(detail[0], sizeof(detail[0]), "%llu draws, %llu merged", (unsigned long long)sm->vertices.n, (unsigned long long)sm->merged.n);
+    (void)snprintf(detail[0], sizeof(detail[0]), "%llu requests, %llu merged", (unsigned long long)sm->vertices.n, (unsigned long long)sm->merged.n);
     (void)snprintf(detail[1], sizeof(detail[1]), "%llu skipped by GL cache", (unsigned long long)sm->skips.n);
     (void)snprintf(detail[2], sizeof(detail[2]), "in %llu upload calls", (unsigned long long)sm->upload[2].n);
     (void)snprintf(detail[3], sizeof(detail[3]), "drops and failed requests");
@@ -1634,7 +1635,7 @@ static void declare_card(const fi_frame_t *fr) {
 static void declare_draw_equation(const fi_frame_t *fr) {
     const fi_summary_t *sm = &fr->summary;
     const uint64_t instanced = sm->op[NT_GFX_OP_DRAW_INSTANCED][NT_GFX_RESULT_ACCEPTED].n + sm->op[NT_GFX_OP_DRAW_INDEXED_INSTANCED][NT_GFX_RESULT_ACCEPTED].n;
-    textf(&k_text, "%llu draws -> %llu GL draw calls:", (unsigned long long)sm->vertices.n, (unsigned long long)sm->draw_calls.n);
+    textf(&k_text, "%llu draw requests -> %llu GL draw calls:", (unsigned long long)sm->vertices.n, (unsigned long long)sm->draw_calls.n);
     if (sm->merged.n > 0) {
         insight((fi_query_t){.kind = FI_Q_MERGED}, &k_link, "  %llu merged into the previous draw (no GL call)", (unsigned long long)sm->merged.n);
     }
@@ -1754,7 +1755,7 @@ static void declare_draws(const fi_frame_t *fr) {
     const fi_summary_t *sm = &fr->summary;
     char name[96];
     section("Draws");
-    stat("draws (ACCEPTED or CACHE)", (fi_query_t){.kind = FI_Q_VERTICES}, sm->vertices.n);
+    stat("draw requests (ACCEPTED or CACHE)", (fi_query_t){.kind = FI_Q_VERTICES}, sm->vertices.n);
     stat("merged into the previous draw (CACHE)", (fi_query_t){.kind = FI_Q_MERGED}, sm->merged.n);
     stat("GL draw calls issued", (fi_query_t){.kind = FI_Q_DRAW_CALL}, sm->draw_calls.n);
     for (uint32_t c = 0; c < NT_GFX_GL_COUNT; c++) {
@@ -1849,10 +1850,12 @@ static void declare_gl_calls(const fi_frame_t *fr) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_groups(const fi_frame_t *fr) {
-    static const char *const k_heads[FI_METRIC_COUNT] = {"draws", "GL calls", "upload B", "drops"};
+    static const char *const k_heads[FI_METRIC_COUNT] = {"requests", "GL draws", "GL calls", "upload B", "drops"};
     section("Where the work is: by marker and note");
+    text("requests: draw requests to the engine", &k_dim);
+    text("GL draws: GL draw calls they cost (merged requests share one)", &k_dim);
     ROW_(4) {
-        CELL_(300) { text("group (marker path > note)", &k_dim); }
+        CELL_(200) { text("marker path > note", &k_dim); }
         for (int m = 0; m < FI_METRIC_COUNT; m++) {
             CELL_(80) { text(k_heads[m], &k_dim); }
         }
@@ -1871,7 +1874,7 @@ static void declare_groups(const fi_frame_t *fr) {
         }
         shown++;
         ROW_(4) {
-            CELL_(300) { textf(&k_text, "%.36s", fr->group_key[g]); }
+            CELL_(200) { textf(&k_text, "%.24s", fr->group_key[g]); }
             for (uint32_t m = 0; m < FI_METRIC_COUNT; m++) {
                 char label[FI_KEY_LEN + 16];
                 (void)snprintf(label, sizeof(label), "%s of %s", k_heads[m], fr->group_key[g]);
@@ -1957,7 +1960,7 @@ static void declare_range(const fi_frame_t *fr, uint32_t lo, uint32_t hi) {
     }
     const fi_summary_t *sm = &range.sum;
     textf(&k_head, "%u records selected (Shift+click or Shift+Up/Down)", range.records);
-    textf(&k_text, "%llu draws -> %llu GL draw calls, %llu merged", (unsigned long long)sm->vertices.n, (unsigned long long)sm->draw_calls.n, (unsigned long long)sm->merged.n);
+    textf(&k_text, "%llu draw requests -> %llu GL draw calls, %llu merged", (unsigned long long)sm->vertices.n, (unsigned long long)sm->draw_calls.n, (unsigned long long)sm->merged.n);
     textf(&k_text, "%llu GL calls, %llu left out by the GL cache", (unsigned long long)sm->gl_any.n, (unsigned long long)sm->skips.n);
     textf(&k_text, "%.1f KiB uploaded", (double)sm->upload[2].sum / 1024.0);
     textf(sm->problems.n > 0 ? &k_bad : &k_text, "%llu problems", (unsigned long long)sm->problems.n);
@@ -2721,7 +2724,7 @@ static void frame(void) {
         monkey_frame_time();
         monkey_input(s.fb_w > 0.0F ? s.fb_w : 1600.0F, (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 900));
     }
-    nt_mem_scratch_reset();
+    nt_arena_reset(&g_nt_mem_scratch);
     if (s.dirty) {
         rebuild_rows(); /* keys move over the rows the last click left */
     }
@@ -2828,7 +2831,7 @@ int main(int argc, char *argv[]) {
     nt_gfx_init(&gfx);
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
-    nt_mem_scratch_init((size_t)4U * 1024U * 1024U);
+    nt_arena_init(&g_nt_mem_scratch, s_scratch_mem, sizeof s_scratch_mem);
     nt_resource_register_type(NT_ASSET_TEXTURE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_texture, .deactivate = nt_gfx_deactivate_texture});
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
     nt_atlas_init();
