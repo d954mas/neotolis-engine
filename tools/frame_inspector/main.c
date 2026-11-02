@@ -125,6 +125,7 @@ static struct {
     double axis_count;
     double drag_first;
     float track_wheel;  /* the wheel over a track: it zooms the frame axis and never scrolls the page */
+    float track_pan;    /* Shift+wheel or a sideways wheel over a track: it pans the axis */
     uint8_t *collapsed; /* per logical row of the selected frame */
     uint32_t *vis;      /* visible row ids */
     uint32_t *vis_row;  /* their logical row, FI_NONE in flat lists */
@@ -904,16 +905,16 @@ static uint32_t axis_frames(void) {
     return most;
 }
 
-/* The axis shows whole frames, from one to all of them; 0 frames means all. Whole frames keep every column
- * inside its track: a fractional first frame would draw one column more than fits. */
+/* The axis shows a whole number of frames, from one to all (0 means all), from any point: a drag moves it
+ * smoothly and the columns at either edge are drawn cut to what shows. */
 static void axis_clamp(void) {
     const double most = (double)axis_frames();
     s.axis_count = s.axis_count < 1.0 || s.axis_count > most ? most : (double)(uint32_t)(s.axis_count + 0.5);
-    s.axis_first = (double)(uint32_t)(s.axis_first > 0.0 ? s.axis_first + 0.5 : 0.0);
     s.axis_first = s.axis_first > most - s.axis_count ? most - s.axis_count : s.axis_first;
+    s.axis_first = s.axis_first < 0.0 ? 0.0 : s.axis_first;
 }
 
-/* Wheel zooms around the cursor, a drag pans; both move every track at once. */
+/* Wheel zooms around the cursor; a drag, Shift+wheel or a sideways wheel pans; every track moves at once. */
 static void axis_input(const nt_ui_events_t *ev, nt_ui_bbox_t box) {
     if (!box.found || box.width <= 0.0F) {
         return;
@@ -931,6 +932,11 @@ static void axis_input(const nt_ui_events_t *ev, nt_ui_bbox_t box) {
         }
         axis_clamp();
         s.axis_first = cursor - (at * s.axis_count);
+        axis_clamp();
+    }
+    if (ev->hovered && s.track_pan != 0.0F) {
+        const double tenth = s.axis_count / 10.0;
+        s.axis_first += (double)s.track_pan * (tenth > 1.0 ? tenth : 1.0);
         axis_clamp();
     }
     if (ev->pressed_now) {
@@ -960,12 +966,10 @@ static void declare_track(uint32_t f, track_t t, uint64_t max, uint32_t hovered)
     const double budget = (double)width / (3000.0 / (TRACK_COUNT * s.file_count));
     const double min_w = budget > 2.0 ? budget : 2.0;
     const uint32_t step = frame_w >= min_w ? 1U : (uint32_t)(min_w / frame_w) + 1U;
-    const uint32_t first = (uint32_t)s.axis_first;
-    const uint32_t shown = (uint32_t)s.axis_count;
-    const uint32_t columns = (shown + step - 1U) / step;
-    const float column = (float)(uint32_t)(width / (float)columns); /* whole pixels: the columns never outgrow the track */
+    const double from_frame = s.axis_first;
+    const double to_frame = s.axis_first + s.axis_count;
     if (box.found && (ev.hovered || ev.clicked)) {
-        const uint32_t k = first + (uint32_t)(((double)ev.pos[0] - (double)box.x) / ((double)column / step));
+        const uint32_t k = (uint32_t)(from_frame + (((double)ev.pos[0] - (double)box.x) / frame_w));
         if (k < file->frame_count) {
             s.hover_file = ev.hovered ? f : s.hover_file;
             s.hover_frame = ev.hovered ? k : s.hover_frame;
@@ -989,7 +993,15 @@ static void declare_track(uint32_t f, track_t t, uint64_t max, uint32_t hovered)
         CELL_(90) { textf(&k_dim, "max %llu", (unsigned long long)max); }
         /* No clip: Clay counts every clip as a scroll container and has few; the axis starts on a whole frame instead. */
         CLAY({.id = (Clay_ElementId){.id = id}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(TRACK_H)}, .childAlignment = {.y = CLAY_ALIGN_Y_BOTTOM}}, .backgroundColor = k_bg}) {
-            for (uint32_t k = first; k < file->frame_count && k < first + shown; k += step) {
+            /* Columns hold `step` frames from a multiple of step; their edges fall on whole pixels, so they fill the
+             * track exactly, and the first and last are cut to the part that shows. */
+            for (uint32_t k = ((uint32_t)from_frame / step) * step; k < file->frame_count && (double)k < to_frame; k += step) {
+                const double lo = (double)k > from_frame ? (double)k : from_frame;
+                const double hi = (double)(k + step) < to_frame ? (double)(k + step) : to_frame;
+                const float column = (float)((uint32_t)((hi - from_frame) * frame_w) - (uint32_t)((lo - from_frame) * frame_w));
+                if (column <= 0.0F) {
+                    continue;
+                }
                 uint32_t pick = k; /* the column's largest frame */
                 bool bad = false;
                 bool warn = false;
@@ -2608,8 +2620,14 @@ static void frame(void) {
     const bool can_render = s_bound_atlas && s_bound_font && sprite != NULL && nt_gfx_program_ready(sprite->program) && txt != NULL && nt_gfx_program_ready(txt->program);
     /* A wheel over a track (hovered last frame) zooms the axis; the page scroll must not see it too. */
     nt_pointer_t *pointer = &g_nt_input.pointers[g_nt_input.primary];
-    s.track_wheel = s.page == PAGE_FRAMES && s.hover_file != FI_NONE ? pointer->wheel_dy : 0.0F;
-    pointer->wheel_dy = s.track_wheel != 0.0F ? 0.0F : pointer->wheel_dy;
+    const bool over_track = s.page == PAGE_FRAMES && s.hover_file != FI_NONE;
+    const bool shift = key_down(NT_KEY_LSHIFT) || key_down(NT_KEY_RSHIFT);
+    s.track_wheel = over_track && !shift ? pointer->wheel_dy : 0.0F;
+    s.track_pan = over_track ? pointer->wheel_dx - (shift ? pointer->wheel_dy : 0.0F) : 0.0F;
+    if (over_track) {
+        pointer->wheel_dx = 0.0F;
+        pointer->wheel_dy = 0.0F;
+    }
     if (can_render) {
         nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &g_nt_input.pointers[g_nt_input.primary], 1, 0);
         nt_ui_set_viewport(s_ctx, nt_ui_viewport_from_scale(&scale));
