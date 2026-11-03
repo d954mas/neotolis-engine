@@ -821,7 +821,7 @@ typedef struct {
         int32_t i32;
         uint64_t u64;
         float f32;
-        const char *str; /* NULL reads as "" */
+        const char *str;
     } value;
 } nt_gfx_note_field_t;
 

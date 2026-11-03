@@ -451,6 +451,13 @@ static void test_strings_past_the_array_keep_a_prefix(void) {
     TEST_ASSERT_EQUAL_UINT32(1, r.view.count);
     TEST_ASSERT_EQUAL_UINT32(4, r.view.string_bytes);
     TEST_ASSERT_EQUAL_STRING("ab", r.view.strings + ev[0].note.label);
+
+    /* A line whose first string fits and second does not drops both. */
+    const char *field = NT_HEADER_ "0 NOTE label=\"ab\"\n1 NOTE_FIELD key=\"k\" type=STR value=\"long\"\n";
+    const nt_gfx_capture_parsed_t f = nt_gfx_capture_parse(field, strlen(field), ev, 2, strings, sizeof(strings));
+    TEST_ASSERT_NOT_NULL(f.error);
+    TEST_ASSERT_EQUAL_UINT32(1, f.view.count);
+    TEST_ASSERT_EQUAL_UINT32(4, f.view.string_bytes);
 }
 
 /* Real frames saved by gfx_demo from the web host: each document parses whole and formats to its own bytes on native. */

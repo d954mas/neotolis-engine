@@ -131,8 +131,8 @@ void fi_alias_text(const fi_frame_t *frame, uint32_t kind, uint32_t object, char
         (void)snprintf(buf, size, "%s#%u", alias_prefix(kind), a.ordinal);
     } else {
         char label[FI_ALIAS_LEN];
-        fi_one_line(a.label, label, sizeof(label));
-        (void)snprintf(buf, size, "%s/%.*s#%u", alias_prefix(kind), (int)(size > 24U ? size - 24U : 0U), label, a.ordinal);
+        fi_one_line(a.label, label, size > 24U && size - 24U < sizeof(label) ? size - 24U : sizeof(label)); /* whole escapes; the number always fits */
+        (void)snprintf(buf, size, "%s/%s#%u", alias_prefix(kind), label, a.ordinal);
     }
 }
 

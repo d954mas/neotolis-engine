@@ -174,7 +174,7 @@ the restore a lost program asserts. Binding a pipeline whose program is not
 ready asserts.
 
 `nt_gfx_make_pipeline` is get-or-create: a descriptor equal to a live
-pipeline's (the label is not identity, and gfx stores none) returns that
+pipeline's (the label is not identity: the first creator's label stays) returns that
 handle and records a `CACHE` result. gfx owns pipelines; there is no pipeline
 destroy. A pipeline lives until its program is destroyed, a context loss, or
 `nt_gfx_shutdown`, so `max_pipelines` budgets every distinct state made
@@ -558,7 +558,7 @@ attribute count over `NT_GFX_MAX_VERTEX_ATTRS`, a stride over the WebGL2 cap of
 pool all assert. The returned vertex input is caller-owned and destroyed with
 `nt_gfx_destroy_vertex_input`; it borrows the referenced buffers, whose
 destruction may invalidate it through the documented cascade. The descriptor
-and label are borrowed only for the call.
+is borrowed only for the call; its label is static storage, kept for the capture.
 
 `nt_gfx_make_instance_layout` asserts the same layout rules
 (1..`NT_GFX_MAX_VERTEX_ATTRS` (16) attributes, stride 1..255), a call before

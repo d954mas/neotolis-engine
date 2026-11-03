@@ -34,6 +34,7 @@ static struct {
     /* set_material; draws read it */
     struct {
         nt_material_t material;
+        const nt_material_info_t *info;
         nt_program_t program; /* the program `pipeline` was built on: a replace keeps the material handle */
         nt_pipeline_t pipeline;
         uint64_t frame; /* gfx frame of the selection */
@@ -115,6 +116,7 @@ static void resolve_material(nt_material_t mat, const nt_material_info_t *info) 
     NT_ASSERT(g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].capacity > 0 && g_nt_gfx_frame_storage[NT_GFX_FRAME_INDEX].capacity > 0 &&
               "text renderer: set nt_gfx_desc_t.frame_capacity[NT_GFX_FRAME_VERTEX] and [NT_GFX_FRAME_INDEX]");
     s_text.current.material = mat;
+    s_text.current.info = info;
     s_text.current.program = info->program;
     s_text.current.pipeline = find_or_create_pipeline(info);
     if (s_text.current.pipeline.id != 0 && find_or_create_vertex_input().id == 0) {
@@ -426,20 +428,20 @@ void nt_text_renderer_draw_n(const nt_text_style_t *style, const float model[16]
         return;
     }
     if (s_text.current.pipeline.id == 0) {
-        NT_GFX_NOTE("text", NT_NOTE_STR("material", nt_material_get_info(s_text.current.material)->label), NT_NOTE_U32("font", style->font.id), NT_NOTE_STR("drop", "program not ready"));
+        NT_GFX_NOTE("text", nt_renderer_note_material(s_text.current.info, s_text.current.material), NT_NOTE_U32("font", style->font.id), NT_NOTE_STR("drop", "program not ready"));
         return;
     }
 
     nt_font_metrics_t metrics = nt_font_get_metrics(style->font);
     if (metrics.units_per_em == 0) {
-        NT_GFX_NOTE("text", NT_NOTE_STR("material", nt_material_get_info(s_text.current.material)->label), NT_NOTE_U32("font", style->font.id), NT_NOTE_STR("drop", "font not loaded"));
+        NT_GFX_NOTE("text", nt_renderer_note_material(s_text.current.info, s_text.current.material), NT_NOTE_U32("font", style->font.id), NT_NOTE_STR("drop", "font not loaded"));
         return; /* no resource loaded yet (or all unmounted) */
     }
     if (!nt_gfx_texture_ready(nt_font_get_curve_texture(style->font))) {
-        NT_GFX_NOTE("text", NT_NOTE_STR("material", nt_material_get_info(s_text.current.material)->label), NT_NOTE_U32("font", style->font.id), NT_NOTE_STR("drop", "font texture not ready"));
+        NT_GFX_NOTE("text", nt_renderer_note_material(s_text.current.info, s_text.current.material), NT_NOTE_U32("font", style->font.id), NT_NOTE_STR("drop", "font texture not ready"));
         return;
     }
-    NT_GFX_NOTE("text", NT_NOTE_STR("material", nt_material_get_info(s_text.current.material)->label), NT_NOTE_U32("font", style->font.id));
+    NT_GFX_NOTE("text", nt_renderer_note_material(s_text.current.info, s_text.current.material), NT_NOTE_U32("font", style->font.id));
     const float size = style->size;
     float scale = size / (float)metrics.units_per_em;
 

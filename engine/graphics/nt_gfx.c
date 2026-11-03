@@ -361,7 +361,7 @@ static void copy_note_field(nt_gfx_event_t *dst, const nt_gfx_note_field_t *src)
         dst->field.value.f32 = src->value.f32;
         break;
     case NT_GFX_NOTE_STR:
-        dst->field.value.str = capture_string(src->value.str); /* NULL reads as "": a debug name the caller may not have */
+        dst->field.value.str = capture_note_text(src->value.str);
         break;
     default:
         NT_ASSERT(0 && "capture note: unknown field type");
@@ -380,6 +380,7 @@ void nt_gfx_note_record(const char *label, const nt_gfx_note_field_t *fields, ui
         capture->view.overflow = true;
         return;
     }
+    const uint32_t string_bytes = capture->view.string_bytes;
     nt_gfx_event_t *note = &capture->events[capture->view.count];
     memset(note, 0, (size_t)(count + 1U) * sizeof(*note));
     note->note.kind = NT_GFX_EVENT_NOTE;
@@ -387,7 +388,9 @@ void nt_gfx_note_record(const char *label, const nt_gfx_note_field_t *fields, ui
     for (uint32_t i = 0; i < count; i++) {
         copy_note_field(&note[i + 1U], &fields[i]);
     }
-    if (!capture->view.overflow) {
+    if (capture->view.overflow) {
+        capture->view.string_bytes = string_bytes; /* the strings of a note left unpublished */
+    } else {
         capture->view.count += count + 1U;
     }
 }

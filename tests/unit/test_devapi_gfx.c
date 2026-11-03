@@ -185,7 +185,7 @@ static void store_crafted(uint64_t sequence, uint32_t count) {
     for (uint32_t i = 0; i < count; i++) {
         s_source[i].object = ((uint32_t)sequence * 100U) + i;
     }
-    nt_gfx_capture_view_t view = {.events = s_source, .count = count};
+    nt_gfx_capture_view_t view = {.events = s_source, .count = count, .strings = ""}; /* no strings, but never a NULL source */
     view.counters.frame_sequence = sequence;
     store_frame(&view, 0, false);
 }
@@ -243,6 +243,9 @@ static void test_a_frame_block_holds_its_strings(void) {
     TEST_ASSERT_EQUAL_PTR(&s_records[15], frame_at(1)->view.strings);
     TEST_ASSERT_EQUAL_UINT32(sizeof(strings), frame_at(1)->view.string_bytes);
     TEST_ASSERT_EQUAL_MEMORY(strings, frame_at(1)->view.strings, sizeof(strings));
+    store_crafted(5, 30); /* the next frame goes after the strings: [26,56) */
+    expect_ring((const uint64_t[]){3, 4, 5}, 3);
+    TEST_ASSERT_EQUAL_UINT32(26, first_record(frame_at(2)));
 }
 
 static void test_recorded_frames_stay_gapless_over_many_wraps(void) {

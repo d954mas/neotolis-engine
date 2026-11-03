@@ -796,13 +796,14 @@ static void labeled_body(void) {
     }
 }
 
-/* B's snapshot holds one more live buffer that B never uses: the frames' requests are equal and pair. */
+/* B's snapshot holds one more live buffer of the same label that B never uses: numbered after the frame's work,
+ * it shifts nothing, so the frames' requests are equal and pair. */
 static void test_compare_ignores_an_unused_live_object(void) {
     s_extra = false;
     size_t len = 0;
     char *text = record(labeled_body, &len);
     const fi_frame_t *a = load(&s_file, text, len);
-    const nt_buffer_t unused = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16, .label = "unused"});
+    const nt_buffer_t unused = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16, .label = "shared"});
     text = record(labeled_body, &len);
     nt_gfx_destroy_buffer(unused);
     fi_file_t other = {0};
@@ -901,6 +902,12 @@ static void test_handles_without_definitions_get_aliases(void) {
     TEST_ASSERT_EQUAL_UINT32(1, fi_alias(fr, NT_GFX_OBJECT_VERTEX_INPUT, 7).ordinal);
     TEST_ASSERT_EQUAL_UINT32(1, fi_alias(fr, NT_GFX_OBJECT_BUFFER, 8).ordinal);
     TEST_ASSERT_EQUAL_UINT32(1, fi_alias(fr, NT_GFX_OBJECT_INSTANCE_LAYOUT, 9).ordinal);
+    fi_file_close(&s_file);
+
+    nt_gfx_event_t texture = {.kind = NT_GFX_EVENT_DEFINITION, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_TEXTURE, .object = 7};
+    texture.data.resource.related[0] = 3; /* its default sampler */
+    fr = load_events(&s_file, &texture, 1, NULL);
+    TEST_ASSERT_EQUAL_UINT32(1, fi_alias(fr, NT_GFX_OBJECT_SAMPLER, 3).ordinal);
 }
 
 /* Matches inside the changed middle: A's VIEWPORTs (v) and SCISSORs (s) "svvs" against B's "vvsv" keep the

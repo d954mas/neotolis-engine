@@ -1158,7 +1158,8 @@ mode without capacity asserts. `capture_string_capacity` sets the string bytes o
 `capture_capacity` is. Capture-OFF builds ignore both fields. Init reserves two halves of
 records and two of string bytes in one allocation: one half of each holds the last finished
 frame while the other records. There is no growth or allocation while recording. Each pointer-free POD
-event is 104 bytes, including padding; 16384 records per frame reserve 3.25 MiB. Gfx
+event is 104 bytes, including padding; 16384 records per frame reserve 3.25 MiB, plus
+twice `capture_string_capacity`. Gfx
 records keep `operation`, `object_kind`, `result` and `arg_count` in one byte each.
 Other storage consists of fixed control state and counter snapshots.
 All record bytes are initialized before publication. A recorded frame starts at
@@ -1316,9 +1317,9 @@ with the gfx records, so they share the capture's lifetime, copy rule and
 overflow. Only `kind` is common with gfx records: a note or marker keeps its
 label in `note.label`, a field its `type`, `key` and `value` in `field`. Label,
 key and string value are capture strings, copied at the call, so callers may pass
-temporary buffers of any length. Label and key must not be NULL, and a marker name is
-checked in every frame; a NULL string value reads as `""` (renderers note a material
-by its label, which may be absent). A note lands with all its fields and strings or, when they do not
+temporary buffers of any length; they must not be NULL, and a marker name is checked
+in every frame. Renderers note a material by its label, or by its handle as
+`material_id` when it has none. A note lands with all its fields and strings or, when they do not
 fit, sets `overflow`; no record appends after an overflow. Each note costs one record
 plus one per field, and its strings' bytes, so per-call notes (one per sprite emit)
 need capacity sized for them.
@@ -1336,12 +1337,14 @@ published; strings have no length limit of their own.
 Every desc `label` and `nt_gfx_make_program`'s label is a debug name in static
 storage: capture builds keep the pointer per live object and copy the text into each
 recorded frame. A create's resource `DEFINITION` and every later begin_frame snapshot
-carry it in `resource.label`; the OP record of the create keeps only its presence.
+carry it in `resource.label`; the OP record of the create does not.
 Every create stores its label, none included, so a reused slot never shows an earlier
 object's. A cache hit (pipelines, samplers) keeps the first creator's label: the label
 is not identity. Samplers gfx makes for textures are unlabeled, so a labeled sampler
 whose key equals one of them stays unlabeled. Instance layouts have no label.
-Capture-OFF builds store no label.
+Capture-OFF builds keep no per-object label table. The snapshot copies every live
+object's label into each recorded frame, so `capture_string_capacity` covers those
+labels plus the frame's note text (sprite notes take about 30 bytes each).
 
 A note describes the frontend records after it until the next note or marker.
 Immediate operations (creates, uploads) record their backend calls at the call,
