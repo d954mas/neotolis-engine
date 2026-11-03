@@ -344,40 +344,6 @@ void test_etc1s_caps_matrix_picks_the_first_supported_target(void) { caps_matrix
 void test_uastc_caps_matrix_picks_the_first_supported_target(void) { caps_matrix_for_codec(NT_BASISU_CODEC_UASTC_LDR); }
 #endif
 
-static void unaligned_caps_matrix_for_codec(nt_basisu_codec_t codec) {
-    static const uint16_t dimensions[][2] = {{13, 7}, {1, 1}, {8, 2}, {2, 8}};
-    for (size_t i = 0; i < sizeof(dimensions) / sizeof(dimensions[0]); i++) {
-        basis_fixture_t alpha = fixture_encode(dimensions[i][0], dimensions[i][1], codec, true, NT_TEXTURE_FORMAT_RGBA8, true);
-        basis_fixture_t rgb = fixture_encode(dimensions[i][0], dimensions[i][1], codec, false, NT_TEXTURE_FORMAT_RGB8, true);
-        basis_fixture_t opaque_rgba = fixture_encode(dimensions[i][0], dimensions[i][1], codec, false, NT_TEXTURE_FORMAT_RGBA8, true);
-
-        /* WebGL BPTC requires both base dimensions to be multiples of four:
-         * BC7 drops out of the order whatever the caps say. */
-        for (size_t row = 0; row < CAPS_ROW_COUNT; row++) {
-            const bool astc = s_caps_rows[row][1];
-            const bool etc2 = s_caps_rows[row][2];
-            set_caps(s_caps_rows[row][0], astc, etc2);
-            check_target(&alpha, first_admitted(codec, false, astc, etc2, true));
-            check_target(&rgb, first_admitted(codec, false, astc, etc2, false));
-            check_target(&opaque_rgba, first_admitted(codec, false, astc, etc2, false));
-        }
-        set_caps(true, false, false);
-        check_target(&alpha, NT_TEXTURE_FORMAT_RGBA8);
-        check_target(&rgb, NT_TEXTURE_FORMAT_RGBA8);
-
-        fixture_free(&alpha);
-        fixture_free(&rgb);
-        fixture_free(&opaque_rgba);
-    }
-}
-
-#if NT_BASISU_HAS_ETC1S
-void test_etc1s_unaligned_dimensions_skip_bc7(void) { unaligned_caps_matrix_for_codec(NT_BASISU_CODEC_ETC1S); }
-#endif
-#if NT_BASISU_HAS_UASTC
-void test_uastc_unaligned_dimensions_skip_bc7(void) { unaligned_caps_matrix_for_codec(NT_BASISU_CODEC_UASTC_LDR); }
-#endif
-
 #if !NT_BASISU_HAS_ETC1S || !NT_BASISU_HAS_UASTC
 /* The native encoder still emits the codec whose option is OFF; a pack from
  * another configure is a developer error, asserted at the blob check before
@@ -395,25 +361,29 @@ void test_blob_of_a_codec_outside_the_set_asserts_before_staging(void) {
 }
 #endif
 
-void test_single_pixel_blob_activates_as_one_level(void) {
-    basis_fixture_t one = fixture_encode(1, 1, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8, true);
-    TEST_ASSERT_EQUAL_UINT8(1, one.mip_count);
+/* The builder block-aligns every Basis level 0, so an unaligned blob is broken pack data. */
+void test_unaligned_blob_asserts(void) {
+    static const uint16_t dimensions[][2] = {{13, 7}, {1, 1}, {8, 2}, {2, 8}};
     set_caps(true, false, false);
-    check_target(&one, NT_TEXTURE_FORMAT_RGBA8);
-    fixture_free(&one);
+    for (size_t i = 0; i < sizeof(dimensions) / sizeof(dimensions[0]); i++) {
+        basis_fixture_t alpha = fixture_encode(dimensions[i][0], dimensions[i][1], ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8, true);
+        expect_header_assert(&alpha, alpha.size);
+        TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "not a multiple of 4"));
+        fixture_free(&alpha);
+    }
 }
 
 void test_blob_without_mips_activates_as_one_level(void) {
-    basis_fixture_t one = fixture_encode(13, 7, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8, false);
+    basis_fixture_t one = fixture_encode(16, 8, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8, false);
     TEST_ASSERT_EQUAL_UINT8(1, one.mip_count);
     set_caps(true, false, false);
-    check_target(&one, NT_TEXTURE_FORMAT_RGBA8);
+    check_target(&one, first_admitted(ANY_CODEC, true, false, false, true));
     /* A count that is neither one level nor the full chain is broken pack data. */
     fixture_header(&one)->mip_count = 2;
     expect_header_assert(&one, one.size);
     TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "neither 1 nor the full chain"));
     /* A legal count is still checked against the blob. */
-    fixture_header(&one)->mip_count = (uint16_t)full_chain_levels(13, 7);
+    fixture_header(&one)->mip_count = (uint16_t)full_chain_levels(16, 8);
     expect_header_assert(&one, one.size);
     TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "differs from its header"));
     fixture_free(&one);
@@ -432,7 +402,7 @@ void test_asymmetric_blob_activates_with_a_full_chain(void) {
 // #region uncompressed fallback contract
 
 void test_rgba8_fallback_rejects_sub_updates(void) {
-    basis_fixture_t alpha = fixture_encode(13, 7, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8, true);
+    basis_fixture_t alpha = fixture_encode(16, 8, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8, true);
     set_caps(false, false, false);
     uint32_t handle = activate_expecting(&alpha, NT_TEXTURE_FORMAT_RGBA8);
     nt_texture_t tex = {.id = handle};
@@ -449,7 +419,7 @@ void test_rgba8_fallback_rejects_sub_updates(void) {
 
 void test_header_boundaries_assert_without_touching_the_pool(void) {
     set_caps(true, false, false);
-    basis_fixture_t alpha = fixture_encode(13, 7, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8, true);
+    basis_fixture_t alpha = fixture_encode(16, 8, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8, true);
     const NtTextureAssetHeader good = *fixture_header(&alpha);
 
     fixture_header(&alpha)->mip_count = (uint16_t)(good.mip_count + 1);
@@ -470,7 +440,7 @@ void test_header_boundaries_assert_without_touching_the_pool(void) {
     fixture_header(&alpha)->width = 12;
     expect_header_assert(&alpha, alpha.size); /* header width the blob disagrees with */
     *fixture_header(&alpha) = good;
-    fixture_header(&alpha)->height = 8;
+    fixture_header(&alpha)->height = 4;
     expect_header_assert(&alpha, alpha.size); /* header height the blob disagrees with */
     *fixture_header(&alpha) = good;
     /* Above any GPU limit too: broken pack data, not a device limit. */
@@ -499,7 +469,7 @@ void test_header_boundaries_assert_without_touching_the_pool(void) {
     *fixture_header(&alpha) = good;
 
     /* The unmutated fixture still activates: the asserts above came from the mutations. */
-    check_target(&alpha, NT_TEXTURE_FORMAT_RGBA8);
+    check_target(&alpha, first_admitted(ANY_CODEC, true, false, false, true));
     fixture_free(&alpha);
 }
 
@@ -710,17 +680,15 @@ int main(void) {
     nt_basisu_encoder_init();
 #if NT_BASISU_HAS_ETC1S
     RUN_TEST(test_etc1s_caps_matrix_picks_the_first_supported_target);
-    RUN_TEST(test_etc1s_unaligned_dimensions_skip_bc7);
     RUN_TEST(test_corrupted_payload_asserts_and_a_good_blob_still_activates);
 #endif
 #if NT_BASISU_HAS_UASTC
     RUN_TEST(test_uastc_caps_matrix_picks_the_first_supported_target);
-    RUN_TEST(test_uastc_unaligned_dimensions_skip_bc7);
 #endif
 #if !NT_BASISU_HAS_ETC1S || !NT_BASISU_HAS_UASTC
     RUN_TEST(test_blob_of_a_codec_outside_the_set_asserts_before_staging);
 #endif
-    RUN_TEST(test_single_pixel_blob_activates_as_one_level);
+    RUN_TEST(test_unaligned_blob_asserts);
     RUN_TEST(test_blob_without_mips_activates_as_one_level);
     RUN_TEST(test_asymmetric_blob_activates_with_a_full_chain);
     RUN_TEST(test_rgba8_fallback_rejects_sub_updates);

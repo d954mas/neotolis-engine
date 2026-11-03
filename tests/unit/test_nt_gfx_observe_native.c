@@ -107,6 +107,7 @@ static void GLAD_API_PTR count_attribute_pointer(GLuint index, GLint size, GLenu
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 4096;
+    desc.capture_string_capacity = 16384;
     desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 4096;
     desc.frame_capacity[NT_GFX_FRAME_VERTEX + 1] = 4096;
     desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096;
@@ -163,13 +164,18 @@ static nt_gfx_capture_view_t read_capture(void) {
     nt_gfx_event_t *parsed = (nt_gfx_event_t *)calloc((size_t)capture.count + 1U, sizeof(*parsed));
     TEST_ASSERT_TRUE(text != NULL && parsed != NULL);
     (void)nt_gfx_capture_format(&capture, text, len + 1U);
-    const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(text, len, parsed, capture.count);
+    char *strings = (char *)malloc(len + 1U);
+    TEST_ASSERT_NOT_NULL(strings);
+    const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(text, len, parsed, capture.count, strings, (uint32_t)len + 1U);
     TEST_ASSERT_NULL_MESSAGE(r.error, r.error);
     TEST_ASSERT_EQUAL_UINT32(capture.count, r.view.count);
     TEST_ASSERT_TRUE(capture.execute_begin == r.view.execute_begin && capture.execute_end == r.view.execute_end);
     TEST_ASSERT_TRUE(capture.overflow == r.view.overflow && r.view.platform == NT_GFX_CAPTURE_NATIVE);
     TEST_ASSERT_EQUAL_MEMORY(capture.events, parsed, (size_t)capture.count * sizeof(*parsed));
     TEST_ASSERT_EQUAL_MEMORY(&capture.counters, &r.view.counters, sizeof(capture.counters));
+    TEST_ASSERT_EQUAL_UINT32(capture.string_bytes, r.view.string_bytes);
+    TEST_ASSERT_EQUAL_MEMORY(capture.strings, r.view.strings, capture.string_bytes);
+    free(strings);
     free(parsed);
     free(text);
     return capture;
@@ -546,7 +552,7 @@ static uint32_t op_index(const nt_gfx_capture_view_t *capture, uint32_t from, nt
 /* A merged draw issues one call linked to the first draw; a note does not end a merge, a bind does. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- plain and indexed merges in one frame
 static void test_merged_draws_link_to_the_first_draw(void) {
-    static const uint16_t indices[6] = {0, 1, 2, 2, 1, 0};
+    static const uint16_t indices[9] = {0, 1, 2, 2, 1, 0, 0, 1, 2};
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){gl_Position=vec4(0.0);}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "precision mediump float; out vec4 color; void main(){color=vec4(1.0);}"});
     nt_program_t program = nt_gfx_make_program(vs, fs, NULL);
@@ -569,8 +575,8 @@ static void test_merged_draws_link_to_the_first_draw(void) {
     nt_gfx_bind_vertex_input(other);
     nt_gfx_draw(9, 3);
     nt_gfx_bind_vertex_input(indexed);
-    nt_gfx_draw_indexed(0, 3, 3);
-    nt_gfx_draw_indexed(3, 3, 3);
+    nt_gfx_draw_indexed(3, 3, 3); /* from index 3: the merged call's offset is 6 bytes */
+    nt_gfx_draw_indexed(6, 3, 3);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
@@ -609,6 +615,7 @@ static void test_merged_draws_link_to_the_first_draw(void) {
         if (e->detail == NT_GFX_GL_glDrawElements) {
             TEST_ASSERT_EQUAL_UINT32(indexed_first + 1U, e->link);
             TEST_ASSERT_EQUAL_UINT32(6, e->data.backend.args[1]);
+            TEST_ASSERT_EQUAL_UINT32(3U * sizeof(uint16_t), e->data.backend.args[3]); /* the byte offset, not a pointer flag */
             elements++;
         }
     }
@@ -631,6 +638,7 @@ static nt_gfx_capture_view_t record_first_texture(uint32_t capacity, nt_texture_
     nt_gfx_shutdown();
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = capacity;
+    desc.capture_string_capacity = 16384;
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
     nt_gfx_capture_request();
@@ -705,6 +713,7 @@ static void test_shutdown_while_recording_writes_no_record(void) {
     nt_gfx_shutdown();
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 4096;
+    desc.capture_string_capacity = 16384;
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
     nt_gfx_capture_view_t view = nt_gfx_capture_read();

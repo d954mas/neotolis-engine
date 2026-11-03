@@ -1334,7 +1334,22 @@ static void *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *out_w
     return pixels;
 }
 
-static NtBuildTextureData *make_texture_data(uint32_t w, uint32_t h, const nt_tex_opts_t *opts, nt_texture_pixel_format_t effective_format) {
+/* A max_size resize block-aligns level 0, so only a source at its own size can miss. */
+static void assert_basis_block_aligned(const char *source, uint32_t w, uint32_t h, const nt_tex_opts_t *opts) {
+    if (!opts || opts->compress.codec == NT_BASISU_CODEC_NONE) {
+        return;
+    }
+    uint32_t lw = 0;
+    uint32_t lh = 0;
+    nt_builder_texture_target_extent(w, h, opts->max_size, &lw, &lh);
+    if (lw % 4 != 0 || lh % 4 != 0) {
+        NT_BUILD_FAIL("texture: a Basis texture needs width and height that are multiples of 4", "texture '%s': Basis level 0 is %ux%u -- edit the source so both sides are multiples of 4", source, lw,
+                      lh);
+    }
+}
+
+static NtBuildTextureData *make_texture_data(const char *source, uint32_t w, uint32_t h, const nt_tex_opts_t *opts, nt_texture_pixel_format_t effective_format) {
+    assert_basis_block_aligned(source, w, h, opts);
     NtBuildTextureData *td = (NtBuildTextureData *)calloc(1, sizeof(NtBuildTextureData));
     NT_BUILD_ASSERT(td && "texture data alloc failed");
     td->width = w;
@@ -1418,7 +1433,7 @@ void nt_builder_add_texture(NtBuilderContext *ctx, const char *path, const nt_te
     uint64_t hash = nt_hash64(pixels, decoded_size).value;
     free(pixels);
 
-    NtBuildTextureData *td = make_texture_data(w, h, opts, effective_format);
+    NtBuildTextureData *td = make_texture_data(stored_path, w, h, opts, effective_format);
     td->source_path = stored_path;
     nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_TEXTURE, td, NULL, decoded_size, hash);
 }
@@ -1487,7 +1502,7 @@ void nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *da
     uint64_t hash = nt_hash64(pixels, decoded_size).value;
     free(pixels);
 
-    NtBuildTextureData *td = make_texture_data(w, h, opts, effective_format);
+    NtBuildTextureData *td = make_texture_data(resource_id, w, h, opts, effective_format);
     td->source_data = (uint8_t *)malloc(size);
     NT_BUILD_ASSERT(td->source_data && "add_texture_from_memory: source copy alloc failed");
     memcpy(td->source_data, data, size);
@@ -1505,7 +1520,7 @@ static void add_texture_pixels(NtBuilderContext *ctx, const void *pixels, uint32
     /* Hash and keep decoded_data -- can't re-derive from source */
     const uint32_t decoded_size = nt_builder_texture_source_size(effective_format, width, height);
     uint64_t hash = nt_hash64(decoded, decoded_size).value;
-    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, make_texture_data(width, height, opts, effective_format), (uint8_t *)decoded, decoded_size, hash);
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, make_texture_data(resource_id, width, height, opts, effective_format), (uint8_t *)decoded, decoded_size, hash);
 }
 
 void nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const char *resource_id, const nt_tex_opts_t *opts) {

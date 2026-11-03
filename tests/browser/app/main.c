@@ -242,7 +242,7 @@ static bool mesh_probe_create(void) {
     s_mesh_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_mesh_vs_src, .label = "mesh_probe_vs"});
     s_mesh_fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_mesh_fs_src, .label = "mesh_probe_fs"});
     s_mesh_program = nt_gfx_make_program(s_mesh_vs, s_mesh_fs, "browser/mesh");
-    s_mesh_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = s_mesh_program, .label = "mesh_probe_pipeline"});
+    s_mesh_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = s_mesh_program});
     const nt_vertex_input_desc_t vi_desc = {
         .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
         .vertex_buffer = info->vbo,
@@ -483,28 +483,6 @@ EMSCRIPTEN_KEEPALIVE int nt_test_basis_caps(void) {
 }
 EMSCRIPTEN_KEEPALIVE int nt_test_basis_build_targets(void) { return (NT_BASISU_HAS_BC7 ? 1 : 0) | (NT_BASISU_HAS_ASTC ? 2 : 0) | (NT_BASISU_HAS_ETC2 ? 4 : 0); }
 EMSCRIPTEN_KEEPALIVE int nt_test_basis_build_codecs(void) { return (NT_BASISU_HAS_ETC1S ? 1 : 0) | (NT_BASISU_HAS_UASTC ? 2 : 0); }
-/* -1 when the build has no UASTC decoder for the embedded blob. */
-EMSCRIPTEN_KEEPALIVE int nt_test_basis_single_pixel_format(void) {
-#if !NT_BASISU_HAS_UASTC
-    return -1;
-#else
-    /* Builder-produced TTEX: UASTC, 1x1 RGBA {70, 120, 190, 180}, one mip. */
-    static const uint8_t blob[] = {
-        0x54, 0x54, 0x45, 0x58, 0x03, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x05, 0x01, 0x01, 0x01, 0x93, 0x00, 0x00, 0x00, 0x73, 0x42,
-        0x13, 0x00, 0x4D, 0x00, 0x0E, 0x8D, 0x46, 0x00, 0x00, 0x00, 0xEA, 0xF8, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x6C, 0x00, 0x00, 0x00, 0x4D, 0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00, 0x4B, 0x56, 0x01, 0x00, 0x00, 0x00, 0x43, 0x5B, 0x0D, 0x05, 0x00, 0x00, 0x00, 0x42, 0x61,
-        0x73, 0x69, 0x73, 0x55, 0x4C, 0x69, 0x62, 0x56, 0x65, 0x72, 0x73, 0x32, 0x2E, 0x35, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x83,
-        0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x51, 0x88, 0xD7, 0x08, 0xCF, 0x97, 0x16, 0x24, 0x67, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    };
-    nt_texture_t texture = {nt_gfx_activate_texture(blob, sizeof(blob))};
-    int format = nt_gfx_texture_ready(texture) ? (int)nt_gfx_texture_format(texture) : 0;
-    if (texture.id != 0) {
-        nt_gfx_destroy_texture(texture);
-    }
-    return format;
-#endif
-}
 /* Packed RGBA (r | g<<8 | b<<16 | a<<24) of texel (0,0) of one fixture level (0, 3 or 7), drawn
  * through a 1x1 render target with an explicit-LOD sampler override. 0xFFFFFFFF = fixture not ready
  * or readback failed. */
@@ -1046,7 +1024,6 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'basis_build_targets': function() { return _nt_test_basis_build_targets(); },
         'basis_build_codecs': function() { return _nt_test_basis_build_codecs(); },
         'basis_sample': function(level) { return _nt_test_basis_sample(level) >>> 0; },
-        'basis_single_pixel_format': function() { return _nt_test_basis_single_pixel_format(); },
         'shape_stroke_probe': function() { return _nt_test_shape_stroke_probe() >>> 0; },
         'mesh_color_probe': function() { return _nt_test_mesh_color_probe() >>> 0; },
         'gpu_command': function(operation, segment) { return _nt_test_gpu_command(operation, segment || 0); },
@@ -1429,6 +1406,7 @@ int main(int argc, char *argv[]) {
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     gfx_desc.capture_capacity = 16384;
+    gfx_desc.capture_string_capacity = 512U * 1024U;
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 512U * 1024U; /* the mesh probe's instances, the sprites, the text and the shape probe */
     _Static_assert(NT_GFX_MAX_VERTEX_STREAMS >= 2, "the mesh probe draws from a second vertex stream");
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX + 1] = 1024U; /* the mesh probe's skinned instances */

@@ -43,6 +43,7 @@ nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *op
 
     const nt_basisu_encode_opts_t *compress_opts = &resolved.compress;
     bool compressed = compress_opts->codec != NT_BASISU_CODEC_NONE;
+    NT_BUILD_ASSERT(resolved.max_size % 4 == 0 && "texture opts: max_size must be 0 or a multiple of 4");
     bool filter_min_uses_mips = resolved.filter_min >= NT_TEXTURE_DEFAULT_FILTER_NEAREST_MIPMAP_NEAREST;
     NT_BUILD_ASSERT((unsigned)resolved.mips <= (unsigned)NT_TEX_MIPS_BAKED && "texture opts: mips out of range");
     NT_BUILD_ASSERT((resolved.mips != NT_TEX_MIPS_NONE || !filter_min_uses_mips) && "texture opts: a mipmap filter_min requires mips RUNTIME or BAKED");
@@ -89,21 +90,20 @@ static void assert_hdr_range(const float *rgb, uint32_t pixel_count) {
     }
 }
 
+/* The shorter side scaled with the longer one to max_size, rounded down to the 4x4 block (at least one block). */
+static uint32_t scaled_short_side(uint32_t short_side, uint32_t long_side, uint32_t max_size) {
+    const uint32_t side = (short_side * max_size / long_side) & ~3U;
+    return side < 4 ? 4 : side;
+}
+
 void nt_builder_texture_target_extent(uint32_t width, uint32_t height, uint32_t max_size, uint32_t *out_w, uint32_t *out_h) {
     if (max_size == 0 || (width <= max_size && height <= max_size)) {
         *out_w = width;
         *out_h = height;
         return;
     }
-    if (width >= height) {
-        *out_w = max_size;
-        *out_h = height * max_size / width;
-    } else {
-        *out_h = max_size;
-        *out_w = width * max_size / height;
-    }
-    *out_w = *out_w < 1 ? 1 : *out_w;
-    *out_h = *out_h < 1 ? 1 : *out_h;
+    *out_w = width >= height ? max_size : scaled_short_side(width, height, max_size);
+    *out_h = width >= height ? scaled_short_side(height, width, max_size) : max_size;
 }
 
 /* Strip RGBA8 source pixels to target channel count (1..3) into `out`. */
@@ -338,20 +338,22 @@ static double tap_weight(nt_tex_filter_t filter, double i, double center, double
 }
 
 static axis_taps_t axis_taps(uint32_t in, uint32_t out, nt_tex_filter_t filter, nt_texture_default_wrap_t wrap) {
-    NT_BUILD_ASSERT(out >= 1 && out <= in && "texture resize: only downscales");
+    NT_BUILD_ASSERT(out >= 1 && "texture resize: empty axis");
     static const double supports[3] = {[NT_TEX_FILTER_BOX] = 0.5, [NT_TEX_FILTER_MITCHELL] = 2.0, [NT_TEX_FILTER_KAISER] = 3.0};
     const double scale = (double)in / out;
+    /* Kernels widen with a downscale; an upscale (a short side rounded up to the 4x4 block) keeps them at one texel. */
+    const double stretch = fmax(scale, 1.0);
     const double support = supports[filter];
-    axis_taps_t a = {.taps = (uint32_t)ceil(2.0 * support * scale) + 2};
+    axis_taps_t a = {.taps = (uint32_t)ceil(2.0 * support * stretch) + 2};
     a.index = (uint32_t *)malloc((size_t)out * a.taps * sizeof(uint32_t));
     a.weight = (float *)malloc((size_t)out * a.taps * sizeof(float));
     NT_BUILD_ASSERT(a.index && a.weight && "texture resize: malloc failed");
     for (uint32_t o = 0; o < out; o++) {
         const double center = (o + 0.5) * scale;
-        const int64_t first = (int64_t)floor(center - (support * scale));
+        const int64_t first = (int64_t)floor(center - (support * stretch));
         double sum = 0.0;
         for (uint32_t k = 0; k < a.taps; k++) {
-            const double w = tap_weight(filter, (double)(first + k), center, scale);
+            const double w = tap_weight(filter, (double)(first + k), center, stretch);
             a.weight[((size_t)o * a.taps) + k] = (float)w;
             sum += w;
             a.index[((size_t)o * a.taps) + k] = wrap_tap(first + k, in, wrap);

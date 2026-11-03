@@ -30,7 +30,7 @@ def run(client: DevApiClient, out_dir: str) -> None:
         read = client.gfx_read(sequence)
         text = read["text"]
         assert read["sequence"] == sequence and read["sim_frame"] == sim, f"step frame {sim}/{sequence} read as {read['sim_frame']}/{read['sequence']}"
-        assert text.startswith("ntcapture 2\nframe sequence="), f"capture text header missing: {text[:60]!r}"
+        assert text.startswith("ntcapture 3\nframe sequence="), f"capture text header missing: {text[:60]!r}"
         assert " OP op=PASS " in text and " OP op=CLEAR " in text, "the step frame lacks the host's pass and clear"
     print("PASS[1/4] gfx_step_frame + gfx.read {sequence}: the frame of each of 3 steps, with the host's pass and clear.")
 

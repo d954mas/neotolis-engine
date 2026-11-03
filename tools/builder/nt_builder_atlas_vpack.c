@@ -27,7 +27,8 @@
  *       chosen page.
  *
  * 4. POT expansion: round each page's used_w/used_h up to a power of two if
- *    opts.power_of_two, otherwise use the tight size.
+ *    opts.power_of_two, otherwise use the tight size; then round up to the 4x4
+ *    block, so a Basis page can take BC7 (WebGL BPTC needs it on level 0).
  *
  * ============================================================================
  * vpack_try_page — the inner search
@@ -2056,6 +2057,8 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
             final_w = vpack_next_pot(final_w);
             final_h = vpack_next_pot(final_h);
         }
+        final_w = (final_w + 3U) & ~3U;
+        final_h = (final_h + 3U) & ~3U;
         out_page_w[i] = final_w;
         out_page_h[i] = final_h;
     }

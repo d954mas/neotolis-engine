@@ -514,7 +514,7 @@ void test_margin_override_content_centered(void) {
     opts.margin = 0;
     opts.extrude = 0;
     opts.padding = 0;
-    opts.power_of_two = false; /* tight page → page edges hug the reserved footprint */
+    opts.power_of_two = false; /* tight page (36, already a 4x4-block multiple) → page edges hug the reserved footprint */
     NtAtlasBuild *atlas_build_396 = nt_atlas_begin(ctx, "center", &opts);
 
     enum { SQ = 20, MARGIN_OVERRIDE = 8 };

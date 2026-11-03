@@ -1,4 +1,4 @@
-/* Frame inspector query mode and the state views it shares with the window, on the native fixture (frame 51:
+/* Frame inspector query mode and the state views it shares with the window, on the native fixture (frame 1009:
  * 47 draw requests, 9 GL draw calls, groups shape/sprite/text). */
 
 #include <stdio.h>
@@ -72,7 +72,7 @@ static void test_commands_answer_and_reject_bad_input(void) {
         assert_holds(ask(k_bad[k].line, false), k_bad[k].why);
     }
     (void)ask("frame 1", false); /* a failed frame keeps the frame commands read */
-    assert_holds(ask("frames", true), "\n* 0 51 ");
+    assert_holds(ask("frames", true), "\n* 0 1009 ");
     const size_t all = strlen(ask("state @700 all", true)); /* tabs and trailing spaces change nothing */
     TEST_ASSERT_EQUAL_size_t(all, strlen(ask("state\t@700  all  ", true)));
     TEST_ASSERT_GREATER_THAN_size_t(strlen(ask("state @700", true)), all);
@@ -183,11 +183,174 @@ static void test_a_repeated_sequence_has_two_addresses(void) {
     fi_file_close(&s_file);
     fi_file_load(&s_file, "joined\n= ok", text, len * 2); /* a name's line break cannot end an answer */
     TEST_ASSERT_EQUAL_UINT32(2, s_file.frame_count);
-    assert_holds(ask("frames", true), "\n* 0 51 714 9 47 38 67 93952 0\n  1 51 714 9 47 38 67 93952 0\n");
-    assert_holds(ask("frame 1", true), "frame 1  # sequence 51, file 0 joined\\x0a= ok, 714 records\n");
+    assert_holds(ask("frames", true), "\n* 0 1009 714 9 47 38 67 93952 0\n  1 1009 714 9 47 38 67 93952 0\n");
+    assert_holds(ask("frame 1", true), "frame 1  # sequence 1009, file 0 joined\\x0a= ok, 714 records\n");
     assert_holds(ask("frames", true), "\nfile 0 joined\\x0a= ok  # 2 frames\n");
     TEST_ASSERT_EQUAL_UINT32(1, s_session.frame);
-    assert_holds(ask("frames", true), "\n  0 51 714 9 47 38 67 93952 0\n* 1 51 ");
+    assert_holds(ask("frames", true), "\n  0 1009 714 9 47 38 67 93952 0\n* 1 1009 ");
+}
+
+/* The fixture as frame 0 and an edited copy as frame 1 of one file. Each edit puts `to` in place of the first
+ * `from` after `at`; the two are one length, so the rest of the line stays. */
+typedef struct {
+    const char *at, *from, *to;
+} edit_t;
+
+static void load_variant(const edit_t *edits, uint32_t count) {
+    const size_t len = s_file.len;
+    char *text = (char *)malloc((len * 2) + 1);
+    TEST_ASSERT_NOT_NULL(text);
+    memcpy(text, s_file.text, len);
+    memcpy(text + len, s_file.text, len);
+    text[len * 2] = '\0';
+    for (uint32_t k = 0; k < count; k++) {
+        char *at = strstr(text + len, edits[k].at);
+        TEST_ASSERT_NOT_NULL(at);
+        char *from = strstr(at, edits[k].from);
+        TEST_ASSERT_TRUE(from != NULL && from < strchr(at + 1, '\n'));
+        TEST_ASSERT_EQUAL_size_t(strlen(edits[k].from), strlen(edits[k].to));
+        memcpy(from, edits[k].to, strlen(edits[k].to));
+    }
+    fi_file_close(&s_file);
+    fi_file_load(&s_file, "pair", text, len * 2);
+    TEST_ASSERT_EQUAL_UINT32(2, s_file.frame_count);
+}
+
+/* Compare's A and B columns are each frame's own numbers, the biggest change first; the edited requests are
+ * the only differences, each saying what changed. */
+static void test_compare_tells_what_differs(void) {
+    static const edit_t k_edits[] = {
+        {"\n233 OP op=DRAW_INDEXED", " count=6 ", " count=7 "}, {"\n209 OP op=DRAW_INDEXED_INSTANCED", "instances=42", "instances=99"}, {"\n211 OP op=VIEWPORT", "1280,800]", "1280,801]"}};
+    load_variant(k_edits, 3);
+    (void)ask("frame 1", true);
+    static fi_number_t a_numbers[FI_NUMBERS];
+    static fi_number_t b_numbers[FI_NUMBERS];
+    const fi_frame_t *a = &s_file.frames[0];
+    const fi_frame_t *b = &s_file.frames[1];
+    const uint32_t n = fi_numbers(a, true, a_numbers);
+    TEST_ASSERT_EQUAL_UINT32(n, fi_numbers(b, true, b_numbers));
+    for (uint32_t k = 0; k < n; k++) { /* keys line up, and a number read in the other frame is that frame's own */
+        TEST_ASSERT_EQUAL_STRING(a_numbers[k].key, b_numbers[k].key);
+        TEST_ASSERT_EQUAL_UINT64_MESSAGE(a_numbers[k].value, fi_number_in(a, &b_numbers[k]), a_numbers[k].key);
+    }
+    const char *text = ask("compare 0", true);
+    const char *vertices = strstr(text, "\nvertices                                   5251       5650        +399  # ");
+    const char *indices = strstr(text, "\nindices                                   19176      19519        +343  # ");
+    const char *instances = strstr(text, "\ninstances                                    63        120         +57  # ");
+    TEST_ASSERT_TRUE(vertices != NULL && indices > vertices && instances > indices);
+    assert_holds(text, "\ng2.commands                                   1  # > sprite: requests that differ, of ");
+    assert_holds(text, "\ndiffer 5  # ");
+    text = ask("compare 0 g2", true);
+    assert_holds(text, "\ngroup g2  # > sprite; 1 of 124 requests differ\n");
+    assert_holds(text, "\n~ @233    @233    DRAW_INDEXED pipe/skeletal_showcase/sprite#1 count=7 vi/sprite_vi#1  # count 6 -> 7\n");
+    assert_holds(text, "\nrows 124 differ 1\n");
+    text = ask("compare 0 g1", true);
+    assert_holds(text, "\n= 9 same  # @200..@208 in A, @200..@208 in B\n~ @209    @209    ");
+    assert_holds(text, " x99  # instances 42 -> 99\n= @210    @210    SCISSOR_ENABLE off\n");
+    assert_holds(text, "  # A: VIEWPORT integers=[0,0,1280,800]\n");
+    assert_holds(ask("compare 1", true), "\ndiffer 0  # ");
+    static const struct {
+        const char *line, *why;
+    } k_bad[] = {{"compare", "compare INDEX [GROUP] (INDEX:"},
+                 {"compare x", "compare INDEX [GROUP] (INDEX:"},
+                 {"compare 9", "no readable frame 9"},
+                 {"compare 0 g99", "no group g99"},
+                 {"compare 0 g2 g3", "compare INDEX [GROUP]; help"}};
+    for (uint32_t k = 0; k < sizeof(k_bad) / sizeof(k_bad[0]); k++) {
+        assert_holds(ask(k_bad[k].line, false), k_bad[k].why);
+    }
+}
+
+/* The same skeletal_showcase frame on native and web: every group pairs, every request aligns, and only the
+ * viewports and scissors differ, because the two windows differ in size. */
+static void test_native_and_web_align(void) {
+    static fi_file_t files[2];
+    TEST_ASSERT_EQUAL(NT_OK, nt_fs_init());
+    const bool opened = fi_file_open(&files[0], NT_NATIVE_FIXTURE) && fi_file_open(&files[1], NT_WEB_FIXTURE);
+    nt_fs_shutdown();
+    TEST_ASSERT_TRUE(opened);
+    const fi_frame_t *a = &files[0].frames[0];
+    const fi_frame_t *b = &files[1].frames[0];
+    TEST_ASSERT_EQUAL(NT_GFX_CAPTURE_WEB, b->view.platform);
+    fi_diff_t d;
+    fi_diff(a, b, &d);
+    uint32_t changed = 0;
+    for (uint32_t g = 0; g < d.group_count; g++) {
+        TEST_ASSERT_NOT_EQUAL_UINT32(FI_NONE, d.group[g].a);
+        TEST_ASSERT_NOT_EQUAL_UINT32(FI_NONE, d.group[g].b);
+        TEST_ASSERT_TRUE(d.group[g].aligned);
+    }
+    for (uint32_t r = 0; r < d.row_count; r++) {
+        TEST_ASSERT_TRUE(d.row[r].kind == FI_DIFF_SAME || d.row[r].kind == FI_DIFF_CHANGED);
+        if (d.row[r].kind == FI_DIFF_CHANGED) {
+            const uint8_t op = b->view.events[d.row[r].b].operation;
+            TEST_ASSERT_TRUE(op == NT_GFX_OP_VIEWPORT || op == NT_GFX_OP_SCISSOR);
+            TEST_ASSERT_EQUAL_UINT8(FI_CHANGE_ARGS, d.row[r].change);
+            changed++;
+        }
+    }
+    TEST_ASSERT_GREATER_THAN_UINT32(0, changed);
+    fi_diff_free(&d);
+    fi_file_close(&files[0]);
+    fi_file_close(&files[1]);
+}
+
+/* Renamed notes make a new group: B's is only in B, A's old one is a.gN only in A, and both list their requests. */
+static void test_compare_names_groups_only_one_frame_has(void) {
+    static const edit_t k_renamed[] = {{"\n200 NOTE", "\"shape\"", "\"shapf\""}, {"\n205 NOTE", "\"shape\"", "\"shapf\""}};
+    load_variant(k_renamed, 2);
+    (void)ask("frame 1", true);
+    const fi_frame_t *a = &s_file.frames[0];
+    uint32_t g = 0;
+    while (g < a->group_count && strcmp(a->group_key[g], "> shape") != 0) {
+        g++;
+    }
+    TEST_ASSERT_LESS_THAN_UINT32(a->group_count, g);
+    char line[64];
+    const char *text = ask("compare 0", true);
+    (void)snprintf(line, sizeof(line), "\na.g%u.requests ", g);
+    assert_holds(text, line);
+    assert_holds(text, "  # only in A: > shape\n");
+    assert_holds(text, "  # only in B: > shapf\n");
+    fi_diff_t d;
+    fi_diff(a, &s_file.frames[1], &d);
+    uint32_t differ = 0;
+    for (uint32_t k = 0; k < d.group_count; k++) {
+        differ += fi_group_differs(a, &s_file.frames[1], &d.group[k]) ? 1U : 0U;
+    }
+    TEST_ASSERT_EQUAL_UINT32(2, differ); /* the old name and the new */
+    fi_diff_free(&d);
+    (void)snprintf(line, sizeof(line), "compare 0 a.g%u", g);
+    text = ask(line, true);
+    assert_holds(text, "  # > shape; only in A; requests ");
+    assert_holds(text, "\n- @200    -       ");
+}
+
+/* A labeled handle shows kind, label and number as one token: a space or control byte shows escaped, and a label
+ * too long for the alias is cut on a whole escape, never into the number. */
+static void test_aliases_show_labels(void) {
+    char text[512];
+    char label[210];
+    memset(label, 'x', sizeof(label) - 1U);
+    memcpy(label + 98, "\\x0a", 4); /* its escape is the last that fits */
+    label[sizeof(label) - 1U] = '\0';
+    const int len = snprintf(text, sizeof(text),
+                             "ntcapture 3\nframe sequence=1 platform=native records=3 overflow=0 execute=0..0\n0 DEFINITION op=CREATE obj=BUFFER:65537 label=\"mesh one\\x0a\"\n"
+                             "1 DEFINITION op=CREATE obj=BUFFER:65538 label=\"%s\"\n2 OP op=UBO obj=BUFFER:65538\n",
+                             label);
+    fi_file_t file = {0};
+    char *owned = (char *)malloc((size_t)len);
+    TEST_ASSERT_NOT_NULL(owned);
+    memcpy(owned, text, (size_t)len);
+    fi_file_load(&file, "labels", owned, (size_t)len);
+    TEST_ASSERT_NULL(file.frames[0].error);
+    char alias[FI_ALIAS_LEN];
+    fi_alias_text(&file.frames[0], NT_GFX_OBJECT_BUFFER, 65537, alias, sizeof(alias));
+    TEST_ASSERT_EQUAL_STRING("buf/mesh\\x20one\\x0a#1", alias);
+    fi_alias_text(&file.frames[0], NT_GFX_OBJECT_BUFFER, 65538, alias, sizeof(alias));
+    TEST_ASSERT_EQUAL_STRING("\\x0a#1", alias + strlen(alias) - 6U);
+    TEST_ASSERT_EQUAL_MEMORY("buf/xxxx", alias, 8);
+    fi_file_close(&file);
 }
 
 int main(void) {
@@ -198,5 +361,9 @@ int main(void) {
     RUN_TEST(test_record_tells_merged_and_broken_draws);
     RUN_TEST(test_state_views);
     RUN_TEST(test_a_repeated_sequence_has_two_addresses);
+    RUN_TEST(test_compare_tells_what_differs);
+    RUN_TEST(test_native_and_web_align);
+    RUN_TEST(test_compare_names_groups_only_one_frame_has);
+    RUN_TEST(test_aliases_show_labels);
     return UNITY_END();
 }

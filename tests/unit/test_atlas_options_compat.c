@@ -29,7 +29,7 @@ int main(void) {
     const nt_atlas_opts_t atlas = {
         .compress = compress,
         .format = NT_TEXTURE_FORMAT_RG8,
-        .max_size = 101,
+        .max_size = 100,
         .padding = 102,
         .margin = 103,
         .extrude = 104,
@@ -64,7 +64,7 @@ int main(void) {
     };
 
     if (atlas.compress.codec != compress.codec || atlas.compress.etc1s.quality != compress.etc1s.quality || atlas.compress.etc1s.endpoint_rdo_threshold != compress.etc1s.endpoint_rdo_threshold ||
-        atlas.compress.etc1s.selector_rdo_threshold != compress.etc1s.selector_rdo_threshold || atlas.format != NT_TEXTURE_FORMAT_RG8 || atlas.max_size != 101 || atlas.padding != 102 ||
+        atlas.compress.etc1s.selector_rdo_threshold != compress.etc1s.selector_rdo_threshold || atlas.format != NT_TEXTURE_FORMAT_RG8 || atlas.max_size != 100 || atlas.padding != 102 ||
         atlas.margin != 103 || atlas.extrude != 104 || atlas.alpha_threshold != 105 || atlas.max_vertices != 6 || atlas.max_added_area_percent != 7.5F || atlas.shape != NT_ATLAS_SHAPE_CONVEX_HULL ||
         atlas.allowed_transforms != NT_ATLAS_TRANSFORMS_IDENTITY_ROT90 || !atlas.power_of_two || atlas.debug_png || atlas.process.rgb != NT_TEX_RGB_DATA || atlas.process.alpha != NT_TEX_ALPHA_DATA ||
         atlas.process.resize_filter != NT_TEX_FILTER_KAISER || atlas.process.mip_filter != NT_TEX_FILTER_MITCHELL || atlas.pixels_per_unit != 1.25F ||

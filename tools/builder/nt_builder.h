@@ -305,7 +305,8 @@ static inline nt_tex_process_t nt_tex_process_normal(void) {
 
 typedef struct {
     nt_texture_pixel_format_t format; /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8. RGB9E5 = HDR, needs an HDR source */
-    uint32_t max_size;                /* 0 = no resize, otherwise level 0 fits max(w,h) to this with process.resize_filter */
+    uint32_t max_size;                /* 0 = no resize, otherwise a multiple of 4: level 0 fits max(w,h) to it with
+                                       * process.resize_filter, the shorter side rounded down to a multiple of 4 */
     nt_basisu_encode_opts_t compress; /* NONE = raw/uncompressed */
     nt_tex_process_t process;         /* default nt_tex_process_color() */
     /* Baked sampler defaults; materials may override them per binding. */
@@ -400,7 +401,7 @@ typedef enum {
 typedef struct {
     nt_basisu_encode_opts_t compress; /* NONE = raw/uncompressed */
     nt_texture_pixel_format_t format; /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8 */
-    uint32_t max_size;                /* max atlas page dimension (default: 2048) */
+    uint32_t max_size;                /* max atlas page dimension, a multiple of 4 (default: 2048) */
     uint32_t padding;                 /* extra spacing between sprites after extrude (default: 2) */
     uint32_t margin;                  /* atlas edge margin (default: 0) */
     uint32_t extrude;                 /* AABB edge duplication count, <= max_size. Must be 0 unless shape is RECT. */
@@ -411,7 +412,7 @@ typedef struct {
     uint8_t allowed_transforms;   /* D4 transform mask (NT_ATLAS_TRANSFORM_* bits); identity is the implicit floor.
                                    * 0xFF = all 8 orientations (default), 0x01 = identity only.
                                    * A 0x00 zero-init behaves as identity-only. Bit i permits stored value i. */
-    bool power_of_two;            /* round atlas dims to POT (default: true) */
+    bool power_of_two;            /* round atlas dims to POT; max_size must then be a power of two (default: true) */
     bool debug_png;               /* write debug atlas page PNGs (default: false) */
     nt_tex_process_t process;     /* page processing; default {.alpha = PREMULTIPLIED}, which keeps bilinear
                                    * filtering correct at sprite gaps. Pages are never resized. */

@@ -444,8 +444,8 @@ static void check_public_pack(const char *path, uint32_t texture_count, const ui
         NtTextureAssetHeader header = {0};
         TEST_ASSERT_EQUAL(1, fread(&header, sizeof(header), 1, file));
         if (!atlas_page) {
-            TEST_ASSERT_EQUAL_UINT32(texture_count == 1 ? 1 : 8, header.width);
-            TEST_ASSERT_EQUAL_UINT32(texture_count == 1 ? 1 : 4, header.height);
+            TEST_ASSERT_EQUAL_UINT32(texture_count == 1 ? 4 : 8, header.width);
+            TEST_ASSERT_EQUAL_UINT32(4, header.height);
         }
         TEST_ASSERT_EQUAL_UINT8(texture_count == 1 ? 0 : NT_TEXTURE_FLAG_PREMULTIPLIED, header.flags);
         uint8_t basis[16384] = {0};
@@ -557,17 +557,22 @@ void test_public_basis_file_memory_atlas(void) {
     }
 }
 
-void test_public_basis_single_pixel_full_mip_chain(void) {
+/* One uniform 4x4 block, the smallest level 0 Basis accepts; its chain still ends at 1x1. */
+void test_public_basis_one_block_full_mip_chain(void) {
     const uint8_t pixel[4] = {70, 120, 190, 180};
+    uint8_t block[4 * 4 * 4];
+    for (size_t i = 0; i < sizeof(block); i += 4) {
+        memcpy(block + i, pixel, sizeof(pixel));
+    }
     nt_basisu_encode_opts_t codecs[2];
     const uint32_t codec_count = enabled_codec_presets(codecs);
     for (uint32_t i = 0; i < codec_count; i++) {
         nt_tex_opts_t opts = nt_tex_opts_defaults();
         opts.compress = codecs[i];
         opts.mips = NT_TEX_MIPS_BAKED;
-        const char *path = codecs[i].codec == NT_BASISU_CODEC_ETC1S ? "basis_single_etc1s.ntpack" : "basis_single_uastc.ntpack";
+        const char *path = codecs[i].codec == NT_BASISU_CODEC_ETC1S ? "basis_block_etc1s.ntpack" : "basis_block_uastc.ntpack";
         NtBuilderContext *ctx = nt_builder_start_pack(path);
-        nt_builder_add_texture_raw(ctx, pixel, 1, 1, "pixel", &opts);
+        nt_builder_add_texture_raw(ctx, block, 4, 4, "block", &opts);
         nt_build_result_t result = nt_builder_finish_pack(ctx);
         nt_builder_free_pack(ctx);
         TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
@@ -599,7 +604,7 @@ int main(void) {
     RUN_TEST(test_opaque_rgba_source_reports_no_alpha);
     RUN_TEST(test_encoder_stores_the_caller_levels);
     RUN_TEST(test_alpha_less_formats_encode_opaque_levels);
-    RUN_TEST(test_public_basis_single_pixel_full_mip_chain);
+    RUN_TEST(test_public_basis_one_block_full_mip_chain);
     RUN_TEST(test_public_basis_file_memory_atlas);
     return UNITY_END();
 }

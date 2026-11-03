@@ -191,7 +191,6 @@ static void make_quad_resources(void) {
         .depth_write = false,
         .depth_func = NT_DEPTH_ALWAYS,
         .cull_mode = 0,
-        .label = "rtt_quad_pipeline",
     });
     rtt_quad_vertex_t verts[QUAD_COUNT * 6];
     for (uint32_t q = 0; q < QUAD_COUNT; q++) {

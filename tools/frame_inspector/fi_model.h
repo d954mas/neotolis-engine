@@ -128,9 +128,10 @@ typedef struct {
     uint8_t *group_is_note;
     const char **group_label;
     uint32_t group_count;
-    /* Short names for handles (pipe#3): per kind, numbered in order of first appearance. */
-    uint32_t *alias_object, *alias_number, *alias_slot, alias_mask;
+    /* Short names for handles (vi/mesh#3): per kind and label, numbered by first use in the frame's work. */
+    uint32_t *alias_object, *alias_ordinal, *alias_slot, alias_mask;
     uint8_t *alias_kind;
+    const char **alias_label;          /* the frame's strings; "" when unlabeled */
     uint32_t *def;                     /* per operation on an object: the object's latest definition before it, FI_NONE */
     fi_buffer_upload_t *buffer_upload; /* the biggest first */
     uint32_t buffer_upload_count;
@@ -146,6 +147,7 @@ typedef struct {
     char *text;
     size_t len;
     nt_gfx_event_t *events;
+    char *strings; /* every document's strings, back to back */
     fi_frame_t *frames;
     uint32_t frame_count;
 } fi_file_t;
@@ -214,8 +216,17 @@ uint32_t fi_range(const fi_frame_t *frame, uint32_t lo, uint32_t hi, fi_summary_
 /* The row of a record or phase, FI_NONE when the frame has none. */
 uint32_t fi_row_of(const fi_frame_t *frame, uint32_t id);
 fi_tally_t fi_tally(const fi_frame_t *frame, uint32_t id);
-/* The alias number of a handle (pipe#3 is 3), 0 when the frame never names it. */
-uint32_t fi_alias(const fi_frame_t *frame, uint32_t kind, uint32_t object);
+/* A handle as two frames compare it: its label and its number among the frame's objects of its kind and label,
+ * counted by first use in the frame's work, then the snapshot's (vi/mesh#3: label "mesh", ordinal 3). */
+typedef struct {
+    const char *label; /* "" when unlabeled */
+    uint32_t ordinal;  /* 0 when the frame never names the handle */
+} fi_alias_t;
+
+fi_alias_t fi_alias(const fi_frame_t *frame, uint32_t kind, uint32_t object);
+/* src on one line, cut to fit size on a whole escape: control bytes as \xNN, and for a token (an alias label)
+ * also space, quote, backslash and non-ASCII bytes, so the text splits on spaces. */
+void fi_one_line(const char *src, char *buf, size_t size, bool token);
 /* Group g of frame `from` in frame `to`: the same marker path and note; FI_NONE when `to` has none. */
 uint32_t fi_group_in(const fi_frame_t *to, const fi_frame_t *from, uint32_t g);
 /* The tree parent of a record or phase; FI_NONE above the frame. */
@@ -242,6 +253,32 @@ typedef struct {
 uint32_t fi_counter_rows(const fi_frame_t *frame, fi_counter_row_t rows[FI_COUNTER_ROWS]);
 /* The record's line text and its length. */
 size_t fi_record_text(const fi_frame_t *frame, uint32_t record, const char **text);
+
+/* Two frames compared group by group (groups with requests: B's in order, then those only A has); requests
+ * (OP and NOTE records) align like a text diff, paired by kind, operation, aliases (pipe#9) and note label.
+ * What a pair compares: render architecture, "Capture text". GL calls are counted, not aligned. */
+typedef enum { FI_DIFF_SAME, FI_DIFF_CHANGED, FI_DIFF_ONLY_A, FI_DIFF_ONLY_B } fi_diff_kind_t;
+enum { FI_CHANGE_RESULT = 1, FI_CHANGE_MERGE = 2, FI_CHANGE_CALLS = 4, FI_CHANGE_ARGS = 8, FI_CHANGE_ITEMS = 16 /* the request's own records */ };
+typedef struct {
+    uint32_t a, b;             /* records, FI_NONE on the side without one */
+    uint32_t calls_a, calls_b; /* GL calls each issued: the BACKEND records it links */
+    uint8_t kind;              /* fi_diff_kind_t */
+    uint8_t change;            /* FI_CHANGE_ bits of a changed pair */
+} fi_diff_row_t;
+typedef struct {
+    uint32_t a, b;         /* the group in A and in B, FI_NONE on the side without it */
+    uint32_t first, count; /* its rows */
+    uint32_t differ;       /* rows that are not SAME */
+    bool aligned;          /* false: more than FI_DIFF_EDITS edits apart; after the common ends, A's rows then B's */
+} fi_diff_group_t;
+typedef struct {
+    fi_diff_group_t *group;
+    fi_diff_row_t *row;
+    uint32_t group_count, row_count;
+} fi_diff_t;
+#define FI_DIFF_EDITS 1024U
+void fi_diff(const fi_frame_t *a, const fi_frame_t *b, fi_diff_t *out);
+void fi_diff_free(fi_diff_t *diff);
 
 const char *fi_node_name(fi_node_t node);
 const char *fi_break_name(fi_break_t brk);
