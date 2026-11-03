@@ -79,9 +79,11 @@ const char *nt_gfx_event_kind_name(uint32_t kind) { return kind < NT_COUNT_(s_ki
 
 // #region layout
 /* Field lists shared by format, parse and readers (nt_gfx_capture_fields), so they cannot drift. */
+// clang-format off: clang-format versions disagree on braces in a macro body
 #define NT_AT_(member) (uint16_t)offsetof(nt_gfx_event_t, data.member)
 #define NT_ONE_(member, name, type, meaning, sub) {(name), NT_AT_(member), NT_GFX_FIELD_##type, 1, NT_GFX_MEANING_##meaning, (uint8_t)(sub)}
 #define NT_LIST_(member, name, type, meaning, sub) {(name), NT_AT_(member), NT_GFX_FIELD_##type, (uint8_t)NT_COUNT_(((nt_gfx_event_t *)NULL)->data.member), NT_GFX_MEANING_##meaning, (uint8_t)(sub)}
+// clang-format on
 /* A scalar named after its member. */
 #define NT_F_(arm, member, type, meaning, sub) NT_ONE_(arm.member, #member, type, meaning, sub)
 #define NT_LABEL_(arm) NT_F_(arm, label, STR, PLAIN, 0)

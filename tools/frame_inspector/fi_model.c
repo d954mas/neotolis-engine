@@ -120,11 +120,13 @@ static fi_frame_t *push_frame(fi_file_t *file, uint32_t *cap) {
     return fr;
 }
 
-void fi_one_line(const char *src, char *buf, size_t size, bool token) {
+void fi_one_line(const char *src, char *buf, size_t size, fi_text_t mode) {
     size_t n = 0;
     for (const char *c = src; *c != '\0' && n + 5U < size; c++) {
         const uint8_t b = (uint8_t)*c;
-        if (b < 0x20U || b == 0x7fU || (token && (b == ' ' || b == '"' || b == '\\' || b > 0x7eU))) {
+        const bool quoted = mode != FI_TEXT_PLAIN && (b == '"' || b == '\\');
+        const bool token = mode == FI_TEXT_TOKEN && (b == ' ' || b == '#' || b > 0x7eU);
+        if (b < 0x20U || b == 0x7fU || quoted || token) {
             n += (size_t)snprintf(buf + n, size - n, "\\x%02x", b);
         } else {
             buf[n++] = *c;
@@ -138,7 +140,7 @@ void fi_file_load(fi_file_t *file, const char *name, char *text, size_t len) {
     memset(file, 0, sizeof(*file));
     const size_t name_size = (strlen(name) * 4U) + 5U;
     file->name = (char *)fi_alloc(name_size, 1);
-    fi_one_line(name, file->name, name_size, false);
+    fi_one_line(name, file->name, name_size, FI_TEXT_PLAIN);
     file->text = text;
     file->len = len;
     /* Records are the lines that start with their index: a file of empty lines asks for no memory. A document's
@@ -270,7 +272,7 @@ static uint32_t intern_group(fi_frame_t *fr, uint32_t *slot, uint32_t mask, uint
     const char *base = parent != 0 ? fr->group_key[parent] : "";
     const char *sep = note ? " > " : "/";
     char shown[FI_KEY_LEN];
-    fi_one_line(label, shown, sizeof(shown), false);
+    fi_one_line(label, shown, sizeof(shown), FI_TEXT_PLAIN);
     (void)snprintf(fr->group_key[g], FI_KEY_LEN, "%s%s%s", base, parent != 0 || note ? sep + (parent == 0) : "", shown); /* "> ui" at the top */
     return g;
 }
@@ -1278,8 +1280,11 @@ void fi_state_at(const fi_frame_t *frame, uint32_t at, fi_state_view_t *out) {
         fi_request_state(frame, out->was, &out->was_req);
     }
     /* An operation's draw-phase calls issue at end_frame: its GL state is the one after its last call. A merged
-     * draw issued nothing; it ran with the call of the draw it joined. A GL call is its own GL point. */
-    const uint32_t gl_anchor = frame->view.events[at].kind == NT_GFX_EVENT_BACKEND || frame->view.events[at].kind == NT_GFX_EVENT_SKIP ? at : request;
+     * draw issued nothing; it ran with the call of the draw it joined. An operation and a GL call are their own GL point
+     * (a nested operation too); an argument or a definition is its operation's. */
+    const nt_gfx_event_kind_t kind = frame->view.events[at].kind;
+    const bool own_point = kind == NT_GFX_EVENT_OP || kind == NT_GFX_EVENT_BACKEND || kind == NT_GFX_EVENT_SKIP || owner(frame, at) == FI_NONE;
+    const uint32_t gl_anchor = own_point ? at : owner(frame, at);
     const uint32_t joined = fi_joined(frame, gl_anchor);
     const uint32_t source = joined != FI_NONE ? joined : gl_anchor;
     out->gl_at = gl_anchor;
@@ -1402,7 +1407,8 @@ bool fi_same_setting(const fi_frame_t *frame, uint32_t a, uint32_t b) {
     return k >= frame->view.count || frame->parent[k] != b || frame->view.events[k].kind != NT_GFX_EVENT_ARGUMENT;
 }
 
-bool fi_gl_value(const fi_frame_t *frame, const fi_gl_slot_t *slot, uint32_t r, uint32_t *value) {
+/* The GL name (or texture unit) a slot holds after record r; false when r sets the slot without a name. */
+static bool gl_value(const fi_frame_t *frame, const fi_gl_slot_t *slot, uint32_t r, uint32_t *value) {
     const nt_gfx_event_t *e = &frame->view.events[r];
     const uint32_t *a = e->data.backend.args;
     if (e->kind == NT_GFX_EVENT_BACKEND) {
@@ -1480,7 +1486,7 @@ bool fi_gl_same(const fi_frame_t *frame, const fi_gl_slot_t *slot, uint32_t a, u
     }
     uint32_t va = 0;
     uint32_t vb = 0;
-    if (fi_gl_value(frame, slot, a, &va) && fi_gl_value(frame, slot, b, &vb)) {
+    if (gl_value(frame, slot, a, &va) && gl_value(frame, slot, b, &vb)) {
         return va == vb;
     }
     /* The inherited viewport holds the rectangle the call takes as arguments. */

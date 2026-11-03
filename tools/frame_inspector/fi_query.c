@@ -5,6 +5,7 @@
 #include "log/nt_log.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -167,7 +168,9 @@ enum {
     FI_DOMAIN_GL_BOOL,
 };
 
+// clang-format off: clang-format versions disagree on braces in a macro body
 #define FI_NAMES_(...) {(const char *const[]){__VA_ARGS__}, sizeof((const char *const[]){__VA_ARGS__}) / sizeof(const char *)}
+// clang-format on
 /* Engine enum names by domain, indexed by value. */
 static const struct {
     const char *const *names;
@@ -274,7 +277,7 @@ void fi_alias_text(const fi_frame_t *frame, uint32_t kind, uint32_t object, char
         (void)snprintf(buf, size, "%s#%u", alias_prefix(kind), a.ordinal);
     } else {
         char label[FI_ALIAS_LEN - 24U]; /* room left for the kind, '/', '#' and the number */
-        fi_one_line(a.label, label, sizeof(label), true);
+        fi_one_line(a.label, label, sizeof(label), FI_TEXT_TOKEN);
         (void)snprintf(buf, size, a.alone ? "%s/%s" : "%s/%s#%u", alias_prefix(kind), label, a.ordinal);
     }
 }
@@ -290,6 +293,22 @@ static void appendf(char *buf, size_t size, size_t *at, const char *fmt, ...) {
     va_end(args);
     *at += n > 0 ? (size_t)n : 0U;
     *at = *at < size ? *at : size - 1U;
+}
+
+/* The shortest %g that reads back to the same float32, so two different values never print alike. */
+static const char *float_text(float f, char out[24]) {
+    for (int precision = 6; precision <= 9; precision++) {
+        (void)snprintf(out, 24, "%.*g", precision, (double)f);
+        const float back = strtof(out, NULL);
+        uint32_t a = 0;
+        uint32_t b = 0;
+        memcpy(&a, &back, sizeof(a));
+        memcpy(&b, &f, sizeof(b));
+        if (a == b || isnan(f)) {
+            break;
+        }
+    }
+    return out;
 }
 
 /* Render target 0 is the default framebuffer; every other handle 0 binds nothing. */
@@ -329,7 +348,6 @@ typedef enum {
     FI_ARG_SIGNED,
     FI_ARG_POINTER, /* a pointer's presence: data or NULL */
     FI_ARG_ENUM,    /* sub: a value set (nt_gfx_capture_domain_t or FI_DOMAIN_*) */
-    FI_ARG_NAME,    /* sub: nt_gfx_gl_object_t */
 } fi_arg_kind_t;
 typedef struct {
     uint8_t kind, sub;
@@ -340,98 +358,74 @@ typedef struct {
     bool repeat; /* the last argument repeats: gen/delete names, attachment lists */
 } fi_call_t;
 
+// clang-format off: clang-format versions disagree on braces in a macro body
 #define FI_U_ {FI_ARG_PLAIN, 0}
 #define FI_I_ {FI_ARG_SIGNED, 0}
-#define FI_B_ {FI_ARG_PLAIN, 0} /* bytes */
 #define FI_P_ {FI_ARG_POINTER, 0}
 #define FI_E_ {FI_ARG_ENUM, NT_GFX_DOMAIN_GL}
 #define FI_D_(domain) {FI_ARG_ENUM, (domain)}
-#define FI_N_(kind) {FI_ARG_NAME, NT_GFX_GL_OBJECT_##kind}
 #define FI_CALL_(...) {(const fi_arg_t[]){__VA_ARGS__}, (uint8_t)(sizeof((const fi_arg_t[]){__VA_ARGS__}) / sizeof(fi_arg_t)), false}
 #define FI_LIST_(...) {(const fi_arg_t[]){__VA_ARGS__}, (uint8_t)(sizeof((const fi_arg_t[]){__VA_ARGS__}) / sizeof(fi_arg_t)), true}
+// clang-format on
 /* Arguments in capture order (pointers are presence bits, gen/delete the count then the names, a returned value
- * last). A call without an entry prints plain numbers. GL signatures are an external contract, so they live here. */
+ * last). A call without an entry prints plain numbers, GL names included. */
 static const fi_call_t k_calls[NT_GFX_GL_COUNT] = {
     [NT_GFX_GL_glActiveTexture] = FI_CALL_(FI_D_(NT_GFX_DOMAIN_GL_TEXTURE_UNIT)),
-    [NT_GFX_GL_glAttachShader] = FI_CALL_(FI_N_(PROGRAM), FI_N_(SHADER)),
-    [NT_GFX_GL_glBeginQuery] = FI_CALL_(FI_E_, FI_N_(QUERY)),
-    [NT_GFX_GL_glBindBuffer] = FI_CALL_(FI_E_, FI_N_(BUFFER)),
-    [NT_GFX_GL_glBindBufferRange] = FI_CALL_(FI_E_, FI_U_, FI_N_(BUFFER), FI_B_, FI_B_),
-    [NT_GFX_GL_glBindFramebuffer] = FI_CALL_(FI_E_, FI_N_(FRAMEBUFFER)),
-    [NT_GFX_GL_glBindSampler] = FI_CALL_(FI_U_, FI_N_(SAMPLER)),
-    [NT_GFX_GL_glBindTexture] = FI_CALL_(FI_E_, FI_N_(TEXTURE)),
-    [NT_GFX_GL_glBindVertexArray] = FI_CALL_(FI_N_(VERTEX_ARRAY)),
+    [NT_GFX_GL_glBeginQuery] = FI_CALL_(FI_E_, FI_U_),
+    [NT_GFX_GL_glBindBuffer] = FI_CALL_(FI_E_, FI_U_),
+    [NT_GFX_GL_glBindBufferRange] = FI_CALL_(FI_E_, FI_U_, FI_U_, FI_U_, FI_U_),
+    [NT_GFX_GL_glBindFramebuffer] = FI_CALL_(FI_E_, FI_U_),
+    [NT_GFX_GL_glBindTexture] = FI_CALL_(FI_E_, FI_U_),
     [NT_GFX_GL_glBlendEquationSeparate] = FI_CALL_(FI_E_, FI_E_),
     [NT_GFX_GL_glBlendFuncSeparate] = FI_LIST_(FI_D_(NT_GFX_DOMAIN_GL_BLEND_FACTOR)),
-    [NT_GFX_GL_glBufferData] = FI_CALL_(FI_E_, FI_B_, FI_P_, FI_E_),
-    [NT_GFX_GL_glBufferSubData] = FI_CALL_(FI_E_, FI_B_, FI_B_, FI_P_),
+    [NT_GFX_GL_glBufferData] = FI_CALL_(FI_E_, FI_U_, FI_P_, FI_E_),
+    [NT_GFX_GL_glBufferSubData] = FI_CALL_(FI_E_, FI_U_, FI_U_, FI_P_),
     [NT_GFX_GL_glCheckFramebufferStatus] = FI_CALL_(FI_E_, FI_E_),
     [NT_GFX_GL_glClear] = FI_CALL_(FI_D_(FI_DOMAIN_GL_CLEAR_MASK)),
-    [NT_GFX_GL_glCompileShader] = FI_CALL_(FI_N_(SHADER)),
-    [NT_GFX_GL_glCompressedTexImage2D] = FI_CALL_(FI_E_, FI_U_, FI_E_, FI_U_, FI_U_, FI_U_, FI_B_, FI_P_),
-    [NT_GFX_GL_glCreateProgram] = FI_CALL_(FI_N_(PROGRAM)),
-    [NT_GFX_GL_glCreateShader] = FI_CALL_(FI_E_, FI_N_(SHADER)),
+    [NT_GFX_GL_glCompressedTexImage2D] = FI_CALL_(FI_E_, FI_U_, FI_E_, FI_U_, FI_U_, FI_U_, FI_U_, FI_P_),
+    [NT_GFX_GL_glCreateShader] = FI_CALL_(FI_E_, FI_U_),
     [NT_GFX_GL_glCullFace] = FI_CALL_(FI_E_),
-    [NT_GFX_GL_glDeleteBuffers] = FI_LIST_(FI_U_, FI_N_(BUFFER)),
-    [NT_GFX_GL_glDeleteFramebuffers] = FI_LIST_(FI_U_, FI_N_(FRAMEBUFFER)),
-    [NT_GFX_GL_glDeleteProgram] = FI_CALL_(FI_N_(PROGRAM)),
-    [NT_GFX_GL_glDeleteQueries] = FI_LIST_(FI_U_, FI_N_(QUERY)),
-    [NT_GFX_GL_glDeleteSamplers] = FI_LIST_(FI_U_, FI_N_(SAMPLER)),
-    [NT_GFX_GL_glDeleteShader] = FI_CALL_(FI_N_(SHADER)),
-    [NT_GFX_GL_glDeleteTextures] = FI_LIST_(FI_U_, FI_N_(TEXTURE)),
-    [NT_GFX_GL_glDeleteVertexArrays] = FI_LIST_(FI_U_, FI_N_(VERTEX_ARRAY)),
     [NT_GFX_GL_glDepthFunc] = FI_CALL_(FI_E_),
     [NT_GFX_GL_glDepthMask] = FI_CALL_(FI_D_(FI_DOMAIN_GL_BOOL)),
     [NT_GFX_GL_glDisable] = FI_CALL_(FI_E_),
     [NT_GFX_GL_glDrawArrays] = FI_CALL_(FI_D_(FI_DOMAIN_GL_PRIMITIVE), FI_U_, FI_U_),
     [NT_GFX_GL_glDrawArraysInstanced] = FI_CALL_(FI_D_(FI_DOMAIN_GL_PRIMITIVE), FI_U_, FI_U_, FI_U_),
     [NT_GFX_GL_glDrawBuffers] = FI_CALL_(FI_U_, FI_P_),
-    [NT_GFX_GL_glDrawElements] = FI_CALL_(FI_D_(FI_DOMAIN_GL_PRIMITIVE), FI_U_, FI_E_, FI_B_),
-    [NT_GFX_GL_glDrawElementsInstanced] = FI_CALL_(FI_D_(FI_DOMAIN_GL_PRIMITIVE), FI_U_, FI_E_, FI_B_, FI_U_),
+    [NT_GFX_GL_glDrawElements] = FI_CALL_(FI_D_(FI_DOMAIN_GL_PRIMITIVE), FI_U_, FI_E_, FI_U_),
+    [NT_GFX_GL_glDrawElementsInstanced] = FI_CALL_(FI_D_(FI_DOMAIN_GL_PRIMITIVE), FI_U_, FI_E_, FI_U_, FI_U_),
     [NT_GFX_GL_glEnable] = FI_CALL_(FI_E_),
     [NT_GFX_GL_glEndQuery] = FI_CALL_(FI_E_),
-    [NT_GFX_GL_glFramebufferTexture2D] = FI_CALL_(FI_E_, FI_E_, FI_E_, FI_N_(TEXTURE), FI_U_),
-    [NT_GFX_GL_glGenBuffers] = FI_LIST_(FI_U_, FI_N_(BUFFER)),
-    [NT_GFX_GL_glGenFramebuffers] = FI_LIST_(FI_U_, FI_N_(FRAMEBUFFER)),
-    [NT_GFX_GL_glGenQueries] = FI_LIST_(FI_U_, FI_N_(QUERY)),
-    [NT_GFX_GL_glGenSamplers] = FI_LIST_(FI_U_, FI_N_(SAMPLER)),
-    [NT_GFX_GL_glGenTextures] = FI_LIST_(FI_U_, FI_N_(TEXTURE)),
-    [NT_GFX_GL_glGenVertexArrays] = FI_LIST_(FI_U_, FI_N_(VERTEX_ARRAY)),
+    [NT_GFX_GL_glFramebufferTexture2D] = FI_CALL_(FI_E_, FI_E_, FI_E_, FI_U_, FI_U_),
     [NT_GFX_GL_glGenerateMipmap] = FI_CALL_(FI_E_),
-    [NT_GFX_GL_glGetActiveUniformBlockiv] = FI_CALL_(FI_N_(PROGRAM), FI_U_, FI_E_, FI_P_),
+    [NT_GFX_GL_glGetActiveUniformBlockiv] = FI_CALL_(FI_U_, FI_U_, FI_E_, FI_P_),
     [NT_GFX_GL_glGetError] = FI_CALL_(FI_E_),
-    [NT_GFX_GL_glGetProgramiv] = FI_CALL_(FI_N_(PROGRAM), FI_E_, FI_P_),
-    [NT_GFX_GL_glGetQueryObjectui64v] = FI_CALL_(FI_N_(QUERY), FI_E_, FI_P_),
-    [NT_GFX_GL_glGetQueryObjectuiv] = FI_CALL_(FI_N_(QUERY), FI_E_, FI_P_),
-    [NT_GFX_GL_glGetShaderiv] = FI_CALL_(FI_N_(SHADER), FI_E_, FI_P_),
+    [NT_GFX_GL_glGetProgramiv] = FI_CALL_(FI_U_, FI_E_, FI_P_),
+    [NT_GFX_GL_glGetQueryObjectui64v] = FI_CALL_(FI_U_, FI_E_, FI_P_),
+    [NT_GFX_GL_glGetQueryObjectuiv] = FI_CALL_(FI_U_, FI_E_, FI_P_),
+    [NT_GFX_GL_glGetShaderiv] = FI_CALL_(FI_U_, FI_E_, FI_P_),
     [NT_GFX_GL_glGetString] = FI_CALL_(FI_E_, FI_P_),
-    [NT_GFX_GL_glGetUniformLocation] = FI_CALL_(FI_N_(PROGRAM), FI_P_, FI_I_),
+    [NT_GFX_GL_glGetUniformLocation] = FI_CALL_(FI_U_, FI_P_, FI_I_),
     [NT_GFX_GL_glInvalidateFramebuffer] = FI_LIST_(FI_E_, FI_U_, FI_E_),
-    [NT_GFX_GL_glLinkProgram] = FI_CALL_(FI_N_(PROGRAM)),
     [NT_GFX_GL_glPixelStorei] = FI_CALL_(FI_E_, FI_U_),
     [NT_GFX_GL_glReadBuffer] = FI_CALL_(FI_E_),
     [NT_GFX_GL_glReadPixels] = FI_CALL_(FI_I_, FI_I_, FI_U_, FI_U_, FI_E_, FI_E_, FI_P_),
-    [NT_GFX_GL_glSamplerParameteri] = FI_CALL_(FI_N_(SAMPLER), FI_E_, FI_E_),
+    [NT_GFX_GL_glSamplerParameteri] = FI_CALL_(FI_U_, FI_E_, FI_E_),
     [NT_GFX_GL_glScissor] = FI_CALL_(FI_I_, FI_I_, FI_U_, FI_U_),
-    [NT_GFX_GL_glShaderSource] = FI_CALL_(FI_N_(SHADER), FI_U_, FI_P_, FI_P_),
+    [NT_GFX_GL_glShaderSource] = FI_CALL_(FI_U_, FI_U_, FI_P_, FI_P_),
     [NT_GFX_GL_glTexImage2D] = FI_CALL_(FI_E_, FI_U_, FI_E_, FI_U_, FI_U_, FI_U_, FI_E_, FI_E_, FI_P_),
     [NT_GFX_GL_glTexParameteri] = FI_CALL_(FI_E_, FI_E_, FI_E_),
     [NT_GFX_GL_glTexSubImage2D] = FI_CALL_(FI_E_, FI_U_, FI_U_, FI_U_, FI_U_, FI_U_, FI_E_, FI_E_, FI_P_),
     [NT_GFX_GL_glUniform1i] = FI_CALL_(FI_I_, FI_I_),
-    [NT_GFX_GL_glUniformBlockBinding] = FI_CALL_(FI_N_(PROGRAM), FI_U_, FI_U_),
-    [NT_GFX_GL_glUseProgram] = FI_CALL_(FI_N_(PROGRAM)),
-    [NT_GFX_GL_glVertexAttribPointer] = FI_CALL_(FI_U_, FI_U_, FI_E_, FI_D_(FI_DOMAIN_GL_BOOL), FI_B_, FI_B_),
+    [NT_GFX_GL_glVertexAttribPointer] = FI_CALL_(FI_U_, FI_U_, FI_E_, FI_D_(FI_DOMAIN_GL_BOOL), FI_U_, FI_U_),
     [NT_GFX_GL_glViewport] = FI_CALL_(FI_I_, FI_I_, FI_U_, FI_U_),
 };
 #undef FI_LIST_
 #undef FI_CALL_
 #undef FI_U_
 #undef FI_I_
-#undef FI_B_
 #undef FI_P_
 #undef FI_E_
 #undef FI_D_
-#undef FI_N_
 
 /* Argument k of a call by its table; a call or position the table leaves out is a plain number. */
 static fi_arg_t call_arg(const fi_call_t *c, uint32_t k) {
@@ -467,7 +461,8 @@ static void call_text(const fi_frame_t *fr, const nt_gfx_event_t *e, char *buf, 
         appendf(buf, size, at, "%s%s", k > 0 ? "," : "", v);
     }
     for (uint32_t k = 0; k < floats; k++) {
-        appendf(buf, size, at, "%s%g", k > 0 || ints > 0 ? "," : "", (double)e->data.backend.values[k]);
+        char real[24];
+        appendf(buf, size, at, "%s%s", k > 0 || ints > 0 ? "," : "", float_text(e->data.backend.values[k], real));
     }
     appendf(buf, size, at, ")");
     if (e->data.backend.bytes > 0) {
@@ -503,9 +498,10 @@ static void floats_text(const char *name, const unsigned char *p, uint32_t capac
     if (count == 0) {
         return;
     }
-    appendf(buf, size, at, " %s=[%g", name, (double)values[0]);
+    char real[24];
+    appendf(buf, size, at, " %s=[%s", name, float_text(values[0], real));
     for (uint32_t i = 1; i < count; i++) {
-        appendf(buf, size, at, ",%g", (double)values[i]);
+        appendf(buf, size, at, ",%s", float_text(values[i], real));
     }
     appendf(buf, size, at, "]");
 }
@@ -539,7 +535,8 @@ static void field_text(const fi_frame_t *fr, const nt_gfx_capture_field_t *field
     case NT_GFX_FIELD_F32:
         memcpy(&real, p, sizeof(real));
         if (real != 0.0F) {
-            appendf(buf, size, at, " %s=%g", field->name, (double)real);
+            char digits[24];
+            appendf(buf, size, at, " %s=%s", field->name, float_text(real, digits));
         }
         break;
     case NT_GFX_FIELD_BOOL:
@@ -554,7 +551,7 @@ static void field_text(const fi_frame_t *fr, const nt_gfx_capture_field_t *field
     case NT_GFX_FIELD_STR:
         memcpy(&str, p, sizeof(str));
         if (str != 0) {
-            fi_one_line(fr->view.strings + str, text, sizeof(text), false);
+            fi_one_line(fr->view.strings + str, text, sizeof(text), FI_TEXT_QUOTED);
             appendf(buf, size, at, " %s=\"%s\"", field->name, text);
         }
         break;
@@ -583,7 +580,7 @@ static void fields_text(const fi_frame_t *fr, const nt_gfx_event_t *e, const cha
 static void note_field_text(const fi_frame_t *fr, const nt_gfx_event_t *e, char *buf, size_t size, size_t *at) {
     char key[64];
     char value[FI_ALIAS_LEN];
-    fi_one_line(fr->view.strings + e->field.key, key, sizeof(key), true);
+    fi_one_line(fr->view.strings + e->field.key, key, sizeof(key), FI_TEXT_TOKEN);
     switch (e->field.type) {
     case NT_GFX_NOTE_U32:
         (void)snprintf(value, sizeof(value), "%u", e->field.value.u32);
@@ -595,11 +592,11 @@ static void note_field_text(const fi_frame_t *fr, const nt_gfx_event_t *e, char 
         (void)snprintf(value, sizeof(value), "%llu", (unsigned long long)e->field.value.u64);
         break;
     case NT_GFX_NOTE_F32:
-        (void)snprintf(value, sizeof(value), "%g", (double)e->field.value.f32);
+        (void)float_text(e->field.value.f32, value);
         break;
     case NT_GFX_NOTE_STR: {
         char text[FI_ALIAS_LEN - 2U];
-        fi_one_line(fr->view.strings + e->field.value.str, text, sizeof(text), false);
+        fi_one_line(fr->view.strings + e->field.value.str, text, sizeof(text), FI_TEXT_QUOTED);
         (void)snprintf(value, sizeof(value), "\"%s\"", text);
         break;
     }

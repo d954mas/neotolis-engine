@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -852,6 +853,9 @@ static void test_nested_records_take_the_top_request_state(void) {
     TEST_ASSERT_EQUAL_UINT32(0, top.req.viewport);
     TEST_ASSERT_EQUAL_UINT32(0, call.req.viewport); /* not the viewport the frame sets after the create */
     TEST_ASSERT_EQUAL_UINT32(3, call.gl_at);        /* a GL call is its own GL point */
+    static fi_state_view_t nested;
+    fi_state_at(fr, 2, &nested);
+    TEST_ASSERT_EQUAL_UINT32(3, nested.gl_at); /* a nested operation's own GL point, not its parent's */
     fi_file_close(&s_file);
 }
 
@@ -873,6 +877,38 @@ static void test_note_handles_number_their_objects(void) {
     const fi_frame_t *fr = load(&s_file, text, len);
     TEST_ASSERT_EQUAL_UINT32(1, fi_alias(fr, NT_GFX_OBJECT_TEXTURE, 0x10002).ordinal);
     TEST_ASSERT_EQUAL_UINT32(2, fi_alias(fr, NT_GFX_OBJECT_TEXTURE, 0x10001).ordinal);
+    fi_file_close(&s_file);
+}
+
+/* Row text keeps apart what the records keep apart: two floats one ulp apart, a quoted string's backslash and
+ * quote, and a label that holds '#' next to an alias number. */
+static void test_rows_keep_values_apart(void) {
+    nt_gfx_event_t ev[5];
+    memset(ev, 0, sizeof(ev));
+    ev[0] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_DEFINITION, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_BUFFER, .object = 0x10001};
+    ev[0].data.buffer.label = 1; /* "mesh#1": one buffer, so its alias has no number of its own */
+    ev[1] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_PASS, .result = NT_GFX_RESULT_ACCEPTED};
+    ev[1].data.pass.depth = nextafterf(0.5F, 1.0F);
+    ev[2].note.kind = NT_GFX_EVENT_NOTE;
+    ev[3].field.kind = NT_GFX_EVENT_NOTE_FIELD;
+    ev[3].field.type = NT_GFX_NOTE_STR;
+    ev[3].field.key = 8;
+    ev[3].field.value.str = 10;
+    ev[4] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_UBO, .object_kind = NT_GFX_OBJECT_BUFFER, .object = 0x10001, .result = NT_GFX_RESULT_ACCEPTED};
+    static const char k_strings[] = "\0mesh#1\0v\0a\\b\"";
+    nt_gfx_capture_view_t view = {.events = ev, .count = 5, .strings = k_strings, .string_bytes = sizeof(k_strings)};
+    const size_t len = nt_gfx_capture_format(&view, NULL, 0);
+    char *text = (char *)malloc(len + 1);
+    TEST_ASSERT_NOT_NULL(text);
+    nt_gfx_capture_format(&view, text, len + 1);
+    const fi_frame_t *fr = load(&s_file, text, len);
+    char row[256];
+    fi_row_text(fr, 1, row, sizeof(row));
+    TEST_ASSERT_EQUAL_STRING("PASS target=default framebuffer depth=0.50000006", row);
+    fi_row_text(fr, 3, row, sizeof(row));
+    TEST_ASSERT_EQUAL_STRING("NOTE_FIELD v=\"a\\x5cb\\x22\"", row);
+    fi_row_text(fr, 4, row, sizeof(row));
+    TEST_ASSERT_EQUAL_STRING("UBO buf/mesh\\x231", row);
     fi_file_close(&s_file);
 }
 
@@ -1186,6 +1222,7 @@ int main(void) {
     RUN_TEST(test_compare_names_note_handles_and_read_sources);
     RUN_TEST(test_nested_records_take_the_top_request_state);
     RUN_TEST(test_note_handles_number_their_objects);
+    RUN_TEST(test_rows_keep_values_apart);
     RUN_TEST(test_compare_checks_what_a_create_defines);
     RUN_TEST(test_compare_ignores_an_unused_live_object);
     RUN_TEST(test_compare_pairs_objects_by_label);
