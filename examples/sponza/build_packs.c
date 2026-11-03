@@ -100,20 +100,47 @@ static tex_role_t *build_texture_roles(const nt_glb_scene_t *scene) {
     return roles;
 }
 
-/* Check if any material uses this texture as a diffuse with alpha */
-static bool texture_needs_alpha(const nt_glb_scene_t *scene, uint32_t tex_index, const cgltf_data *gltf) {
-    for (uint32_t mi = 0; mi < scene->material_count; mi++) {
-        if (scene->materials[mi].diffuse_index != tex_index) {
+/* The alpha shader's cutoff as the manifest stores it, in whole hundredths. */
+static uint8_t alpha_cutoff_x100(const nt_glb_material_t *mat) { return (uint8_t)(mat->alpha_cutoff * 100.0F); }
+
+/* The texel alpha an alpha-tested material passes from: the shader discards
+ * texture.a * baseColorFactor.a below the manifest cutoff. */
+static float material_texel_cutoff(const nt_glb_material_t *mat) {
+    const char *name = mat->name ? mat->name : "(unnamed)";
+    if (!(mat->base_color[3] > 0.0F)) {
+        (void)fprintf(stderr, "sponza: material '%s' is alpha tested with baseColorFactor alpha 0\n", name);
+        NT_BUILD_ASSERT(0 && "sponza: an alpha-tested material has baseColorFactor alpha 0");
+    }
+    const float cutoff = ((float)alpha_cutoff_x100(mat) / 100.0F) / mat->base_color[3];
+    if (cutoff > 1.0F) {
+        (void)fprintf(stderr, "sponza: material '%s' discards every texel (cutoff %.3f)\n", name, (double)cutoff);
+        NT_BUILD_ASSERT(0 && "sponza: an alpha-tested material discards every texel");
+    }
+    return cutoff;
+}
+
+/* Whether a base colour image is alpha tested (glTF MASK or BLEND, both drawn by the
+ * alpha shader), and the texel cutoff every material using it agrees on. */
+static bool texture_alpha_cutoff(const nt_glb_scene_t *scene, uint32_t tex_index, const cgltf_data *gltf, float *out_cutoff) {
+    bool tested = false;
+    float cutoff = 0.0F;
+    for (uint32_t mi = 0; mi < scene->material_count && mi < gltf->materials_count; mi++) {
+        const nt_glb_material_t *mat = &scene->materials[mi];
+        const cgltf_alpha_mode am = gltf->materials[mi].alpha_mode;
+        if (mat->diffuse_index != tex_index || (am != cgltf_alpha_mode_mask && am != cgltf_alpha_mode_blend)) {
             continue;
         }
-        if (mi < gltf->materials_count) {
-            cgltf_alpha_mode am = gltf->materials[mi].alpha_mode;
-            if (am == cgltf_alpha_mode_mask || am == cgltf_alpha_mode_blend) {
-                return true;
-            }
+        const char *name = mat->name ? mat->name : "(unnamed)";
+        const float material_cutoff = material_texel_cutoff(mat);
+        if (tested && material_cutoff != cutoff) {
+            (void)fprintf(stderr, "sponza: material '%s' tests image %u at %.3f, another at %.3f\n", name, tex_index, (double)material_cutoff, (double)cutoff);
+            NT_BUILD_ASSERT(0 && "sponza: materials sharing an alpha-tested image disagree on its cutoff");
         }
+        tested = true;
+        cutoff = material_cutoff;
     }
-    return false;
+    *out_cutoff = cutoff;
+    return tested;
 }
 
 /* --- Add all textures with per-role format, optional resize and Basis compression --- */
@@ -133,21 +160,34 @@ static void add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uin
         nt_tex_opts_t opts = nt_tex_opts_defaults();
         opts.max_size = max_size;
         nt_basisu_encode_opts_t tex_compress = color_compress;
+        float cutoff = 0.0F;
         switch (roles[i]) {
         case TEX_ROLE_DIFFUSE:
             /* Base color is sRGB-encoded (glTF); the shaders light in linear space. */
-            opts.format = texture_needs_alpha(scene, i, gltf) ? NT_TEXTURE_FORMAT_SRGB8_ALPHA8 : NT_TEXTURE_FORMAT_SRGB8;
+            if (texture_alpha_cutoff(scene, i, gltf, &cutoff)) {
+                /* Foliage keeps its alpha-test coverage on every mip. */
+                opts.format = NT_TEXTURE_FORMAT_SRGB8_ALPHA8;
+                opts.process.alpha_cutoff = cutoff;
+            } else {
+                /* Opaque colour takes the sharpest mips. */
+                opts.format = NT_TEXTURE_FORMAT_SRGB8;
+                opts.process.mip_filter = NT_TEX_FILTER_KAISER;
+            }
             break;
         case TEX_ROLE_NORMAL:
             /* Basis has no 2-channel mode. */
             opts.format = NT_TEXTURE_FORMAT_RGB8;
+            opts.process = nt_tex_process_normal();
             tex_compress = normal_compress;
             break;
         case TEX_ROLE_SPECULAR:
             opts.format = NT_TEXTURE_FORMAT_RGB8;
+            opts.process = nt_tex_process_data();
             break;
         case TEX_ROLE_UNKNOWN:
+            /* No material slot names its meaning, so its bytes are kept as data. */
             opts.format = NT_TEXTURE_FORMAT_RGBA8;
+            opts.process = nt_tex_process_data();
             break;
         }
 
@@ -193,6 +233,7 @@ static void add_placeholder_textures(NtBuilderContext *ctx, const nt_glb_scene_t
         const uint8_t *pixels = NULL;
         nt_tex_opts_t opts = nt_tex_opts_defaults();
         opts.format = NT_TEXTURE_FORMAT_RGB8;
+        opts.process = nt_tex_process_data(); /* 1x1 stand-ins for a normal and a roughness map */
 
         switch (roles[i]) {
         case TEX_ROLE_NORMAL:
@@ -327,7 +368,7 @@ static void build_manifest_blob(NtBuilderContext *ctx, const nt_glb_scene_t *sce
             }
 
             mn->shader_type = shader_type;
-            mn->alpha_cutoff_x100 = (mat != NULL) ? (uint8_t)(mat->alpha_cutoff * 100.0F) : 50;
+            mn->alpha_cutoff_x100 = (mat != NULL) ? alpha_cutoff_x100(mat) : 50;
 
             entry_idx++;
         }
