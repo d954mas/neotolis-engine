@@ -1,4 +1,3 @@
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -888,7 +887,8 @@ static void test_rows_keep_values_apart(void) {
     ev[0] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_DEFINITION, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_BUFFER, .object = 0x10001};
     ev[0].data.buffer.label = 1; /* "mesh#1": one buffer, so its alias has no number of its own */
     ev[1] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_PASS, .result = NT_GFX_RESULT_ACCEPTED};
-    ev[1].data.pass.depth = nextafterf(0.5F, 1.0F);
+    const uint32_t next_after_half = 0x3F000001U; /* the float32 one ulp above 0.5 */
+    memcpy(&ev[1].data.pass.depth, &next_after_half, sizeof(float));
     ev[2].note.kind = NT_GFX_EVENT_NOTE;
     ev[3].field.kind = NT_GFX_EVENT_NOTE_FIELD;
     ev[3].field.type = NT_GFX_NOTE_STR;
