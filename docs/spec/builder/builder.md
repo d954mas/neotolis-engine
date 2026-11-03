@@ -233,7 +233,7 @@ foliage.mips = NT_TEX_MIPS_BAKED;
 | `alpha` | `STRAIGHT` (0), `PREMULTIPLIED`, `DATA` | `STRAIGHT`: RGB filters alpha-weighted, and every stored level fills the RGB of texels with alpha 8 or less with nearby visible colour. `PREMULTIPLIED`: the same filtering, then each stored level is premultiplied once, `(c * a + 127) / 255`, and the header sets `NT_TEXTURE_FLAG_PREMULTIPLIED`; `RGBA8` only. `DATA`: alpha filters as an independent channel and RGB under alpha 0 is kept. |
 | `resize_filter` | `BOX` (0), `MITCHELL`, `KAISER` | Level 0 when `max_size` shrinks the source, at any ratio |
 | `mip_filter` | `BOX` (0), `MITCHELL`, `KAISER` | Levels 1..N, each 2:1 from the previous level; anything but `BOX` requires `mips = BAKED` |
-| `alpha_cutoff` | 0 (off) or (0, 1] | The alpha-test threshold the shader applies. Every stored mip keeps the coverage of level 0 at it; requires a format with alpha and `mips = BAKED`, and atlas pages refuse it. |
+| `alpha_cutoff` | 0 (off) or (0, 1] | The alpha-test threshold the shader applies. Every stored mip gets the attainable coverage closest to level 0's at it; requires a format with alpha and `mips = BAKED`, and atlas pages refuse it. |
 
 | Preset | `rgb` | `alpha` | `resize_filter` | `mip_filter` |
 |---|---|---|---|---|
@@ -273,23 +273,29 @@ The pipeline:
    ringing happen only on stored levels, so they never accumulate down the chain.
    `NORMAL` normalizes each core before it feeds the next level. Dilation and
    premultiplication touch only stored levels.
-4. `alpha_cutoff`, per stored mip: the shader passes texels with alpha at or above
-   `T`, the smallest byte with `T / 255 >= alpha_cutoff`. Coverage is the fraction
-   of texels at or above `T`. Each mip scales its alpha once,
-   `A = min(255, floor(A * s + 0.5))`, so that its coverage is the attainable one
-   closest to level 0's: a 256-bin histogram gives the coverage at every byte `t`,
-   and zero; a tie keeps the coverage the level has, then the larger `t`; and
-   `s = (T - 0.5) / (t - 0.5)` moves exactly the texels at or above `t` to `T` or
-   above. The contract is the closest attainable coverage, not a fixed tolerance:
-   a 4x4 level moves in steps of 1/16. The core is never scaled, so the next level
-   filters the unscaled alpha.
-5. `STRAIGHT` dilation, per stored level: a hole (alpha 8 or less) next to visible
+4. `STRAIGHT` dilation, per stored level: a hole (alpha 8 or less) next to visible
    texels takes their alpha-weighted mean, then push-pull fills the rest with
    alpha-weighted nearby colour, in linear light for sRGB. A level with nothing
    visible takes the `BOX` filter of the level above it; a source with nothing visible is
    stored as it is. Holes keep their alpha. On an odd-sized `REPEAT` level the
    push-pull pyramid wraps at its own size, so a fill at the seam may take colour
    from one texel further along.
+5. `alpha_cutoff`, per stored mip, after dilation (holes are found on the filtered
+   alpha, before scaling lifts some of them into view): the shader passes texels
+   with alpha at or above `T`, the smallest byte with `T / 255 >= alpha_cutoff`.
+   Coverage is the fraction of texels at or above `T`. Each mip scales its alpha
+   once, `A = min(255, floor(A * s + 0.5))`, so that its coverage is the attainable
+   one closest to level 0's: a 256-bin histogram gives the coverage of a split at
+   every byte, and of covering nothing; a tie keeps the coverage the level has,
+   then the larger split byte. `s` puts `T - 0.5` midway between the highest
+   excluded and the lowest included alpha, which leaves block compression margin
+   on both sides. The contract is the closest attainable coverage, not a fixed
+   tolerance: a 4x4 level moves in steps of 1/16. The core is never scaled, so the
+   next level filters the unscaled alpha. Decoded UASTC stays within about 2% of
+   level 0 on levels of 64 texels or more; the ETC1S alpha slice keeps that on
+   large levels but is too coarse to hold coverage at 4x4, so alpha-tested
+   textures take UASTC. A cutoff exactly on a byte step (`k / 255`) leaves texels
+   exactly at `T` to the GPU float compare; a cutoff between steps does not.
 
 Filter and dilation edges follow the sampler wrap per axis: `REPEAT` wraps,
 `CLAMP_TO_EDGE` clamps. `MIRRORED_REPEAT` filters as `CLAMP_TO_EDGE`, a deviation:
@@ -533,7 +539,7 @@ Texture cache and early dedup use one identity, `opts_hash`; early dedup
 compares it after an exact pixel match. It covers the effective settings:
 source and level-0 dimensions, resolved pixel format, the `process` fields that
 can change the bytes (`rgb` for ETC1S or when it is `NORMAL`, `alpha` for formats with alpha,
-`resize_filter` when level 0 shrinks, `mip_filter` for `BAKED`, `alpha_cutoff`), sampler defaults,
+`resize_filter` when level 0 shrinks, `mip_filter` for `BAKED`, the `alpha_cutoff` threshold byte), sampler defaults,
 mip mode, codec and its active fields above. The same file added at two
 `max_size` values that shrink it differently is two assets. Names, source locations, resize
 limits after resizing, threading, descriptor padding and inactive union bytes

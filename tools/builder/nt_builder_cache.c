@@ -54,9 +54,8 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
         buf[pos++] = nt_texture_pixel_format_has_alpha(td->opts.format) ? (uint8_t)process->alpha : 0U;
         buf[pos++] = resized ? (uint8_t)process->resize_filter : 0U;
         buf[pos++] = td->opts.mips == NT_TEX_MIPS_BAKED ? (uint8_t)process->mip_filter : 0U;
-        const float cutoff = process->alpha_cutoff == 0.0F ? 0.0F : process->alpha_cutoff; /* -0 is 0 */
-        memcpy(buf + pos, &cutoff, sizeof(cutoff));
-        pos += (uint32_t)sizeof(cutoff);
+        /* The threshold byte, not the float: cutoffs between two bytes build the same levels. */
+        buf[pos++] = process->alpha_cutoff > 0.0F ? (uint8_t)nt_builder_texture_cutoff_byte(process->alpha_cutoff) : 0U;
 
         uint8_t fmin = (uint8_t)td->opts.filter_min;
         uint8_t fmag = (uint8_t)td->opts.filter_mag;

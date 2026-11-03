@@ -192,8 +192,7 @@ static uint32_t pack_rgb9e5(const float *rgb) {
 }
 
 // #region coverage
-/* The alpha byte the shader's test passes from: the smallest b with b / 255 >= cutoff. */
-static uint32_t cutoff_byte(float cutoff) {
+uint32_t nt_builder_texture_cutoff_byte(float cutoff) {
     uint32_t b = 1;
     while (b < 255 && (float)b / 255.0F < cutoff) {
         b++;
@@ -214,10 +213,10 @@ static void alpha_counts(const uint8_t *rgba, size_t texels, uint64_t counts[257
 }
 
 /* Scales a stored level's alpha so its coverage at `threshold` is the attainable
- * one closest to level 0's (covered0 of texels0). Candidates are the coverage at
- * every byte t, and zero; a tie keeps the current coverage, then the larger t.
- * s = (threshold - 0.5) / (t - 0.5) moves exactly the texels at or above t to at
- * or above threshold. */
+ * one closest to level 0's (covered0 of texels0). Candidates split the level at
+ * every byte t, or cover nothing; a tie keeps the current coverage, then the
+ * larger t. The scale puts threshold - 0.5 midway between the highest excluded
+ * and the lowest included alpha, so block compression has margin on both sides. */
 static void preserve_coverage(uint8_t *rgba, size_t texels, uint32_t threshold, uint64_t covered0, size_t texels0) {
     uint64_t counts[257];
     alpha_counts(rgba, texels, counts);
@@ -235,11 +234,15 @@ static void preserve_coverage(uint8_t *rgba, size_t texels, uint32_t threshold, 
     if (best == threshold) {
         return;
     }
-    uint32_t max_alpha = 0;
-    for (size_t i = 0; i < texels; i++) {
-        max_alpha = rgba[(i * 4U) + 3U] > max_alpha ? rgba[(i * 4U) + 3U] : max_alpha;
+    uint32_t included = best; /* lowest alpha present at or above best, 256 for none */
+    while (included < 256 && counts[included] == counts[included + 1]) {
+        included++;
     }
-    const float scale = ((float)threshold - 0.5F) / (best == 256 ? (float)max_alpha + 0.5F : (float)best - 0.5F);
+    uint32_t excluded = best - 1; /* highest alpha present below best; 0 always maps to 0 */
+    while (excluded > 0 && counts[excluded] == counts[excluded + 1]) {
+        excluded--;
+    }
+    const float scale = ((float)threshold - 0.5F) / ((float)(included + excluded) * 0.5F);
     for (size_t i = 0; i < texels; i++) {
         uint8_t *a = &rgba[(i * 4U) + 3U];
         *a = (uint8_t)fminf(255.0F, floorf(((float)*a * scale) + 0.5F));
@@ -757,18 +760,19 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
     for (uint32_t i = 0; i < 256; i++) {
         dc.lin[i] = srgb ? srgb_to_linear((float)i / 255.0F) : (float)i / 255.0F;
     }
-    const uint32_t threshold = process->alpha_cutoff > 0.0F ? cutoff_byte(process->alpha_cutoff) : 0;
-    uint64_t counts0[257];
-    alpha_counts(chain, (size_t)w * h, counts0);
+    const uint32_t threshold = process->alpha_cutoff > 0.0F ? nt_builder_texture_cutoff_byte(process->alpha_cutoff) : 0;
+    uint64_t counts0[257] = {0};
+    if (threshold > 0) {
+        alpha_counts(chain, (size_t)w * h, counts0);
+    }
     uint8_t *level_px = chain;
     const uint8_t *prev = NULL;
     for (uint32_t level = 0; level < level_count; level++) {
         const uint32_t lw = nt_texture_level_extent(w, level);
         const uint32_t lh = nt_texture_level_extent(h, level);
         const size_t texels = (size_t)lw * lh;
-        if (threshold > 0 && level > 0) {
-            preserve_coverage(level_px, texels, threshold, counts0[threshold], (size_t)w * h);
-        }
+        /* Dilation first: holes are found on the filtered alpha, before coverage
+           scaling lifts some of them into view. */
         if (dilate) {
             scan_level(level_px, texels, &visible, &hole);
             if (!visible) {
@@ -776,6 +780,9 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
             } else if (hole) {
                 dilate_level(&dc, level_px, lw, lh);
             }
+        }
+        if (threshold > 0 && level > 0) {
+            preserve_coverage(level_px, texels, threshold, counts0[threshold], (size_t)w * h);
         }
         if (process->alpha == NT_TEX_ALPHA_PREMULTIPLIED) {
             for (size_t i = 0; i < texels; i++) {

@@ -267,6 +267,8 @@ nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *op
 uint32_t nt_builder_texture_source_size(nt_texture_pixel_format_t format, uint32_t width, uint32_t height);
 void *nt_builder_decode_texture(const uint8_t *src_data, uint32_t src_size, nt_texture_pixel_format_t format, uint32_t *out_w, uint32_t *out_h);
 void *nt_builder_decode_texture_raw(const void *pixels, uint32_t width, uint32_t height, nt_texture_pixel_format_t format);
+/* The alpha byte an alpha test at `cutoff` passes from: the smallest b with b / 255 >= cutoff. */
+uint32_t nt_builder_texture_cutoff_byte(float cutoff);
 /* Level 0 size: max(w, h) fitted to max_size (0 = source size), aspect kept, at least 1. */
 void nt_builder_texture_target_extent(uint32_t width, uint32_t height, uint32_t max_size, uint32_t *out_w, uint32_t *out_h);
 nt_build_result_t nt_builder_decode_mesh(const char *path, const NtStreamLayout *layout, uint32_t stream_count, nt_tangent_mode_t tangent_mode, const char *mesh_name, uint32_t mesh_index,
