@@ -54,8 +54,8 @@ typedef struct {
 /* Input sprite for atlas packing (populated during atlas_add_*) */
 typedef struct {
     uint8_t *rgba;         /* decoded RGBA pixels (owned, heap) */
-    uint32_t width;        /* decoded image width */
-    uint32_t height;       /* decoded image height */
+    uint32_t width;        /* source width; level 0 is fitted to opts.max_size at encode */
+    uint32_t height;       /* source height */
     char *name;            /* region name for hash (owned, heap) */
     float origin_x;        /* default 0.5 */
     float origin_y;        /* default 0.5 */
@@ -265,8 +265,10 @@ nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t reso
 nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *opts);
 /* Decoded texture source: RGBA8 for LDR formats, RGB float32 for RGB9E5. */
 uint32_t nt_builder_texture_source_size(nt_texture_pixel_format_t format, uint32_t width, uint32_t height);
-void *nt_builder_decode_texture(const uint8_t *src_data, uint32_t src_size, nt_texture_pixel_format_t format, uint32_t max_size, uint32_t *out_w, uint32_t *out_h);
-void *nt_builder_decode_texture_raw(const void *pixels, uint32_t width, uint32_t height, nt_texture_pixel_format_t format, uint32_t max_size, uint32_t *out_w, uint32_t *out_h);
+void *nt_builder_decode_texture(const uint8_t *src_data, uint32_t src_size, nt_texture_pixel_format_t format, uint32_t *out_w, uint32_t *out_h);
+void *nt_builder_decode_texture_raw(const void *pixels, uint32_t width, uint32_t height, nt_texture_pixel_format_t format);
+/* Level 0 size: max(w, h) fitted to max_size (0 = source size), aspect kept, at least 1. */
+void nt_builder_texture_target_extent(uint32_t width, uint32_t height, uint32_t max_size, uint32_t *out_w, uint32_t *out_h);
 nt_build_result_t nt_builder_decode_mesh(const char *path, const NtStreamLayout *layout, uint32_t stream_count, nt_tangent_mode_t tangent_mode, const char *mesh_name, uint32_t mesh_index,
                                          uint8_t **out_data, uint32_t *out_size);
 /* Shared stream-layout validation for both mesh decode paths. `label` prefixes log messages. */

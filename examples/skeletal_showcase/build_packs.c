@@ -278,7 +278,6 @@ int main(int argc, char *argv[]) {
     atlas_opts.padding = 1;
     atlas_opts.margin = 1;
     atlas_opts.extrude = 1;
-    atlas_opts.premultiplied = true;
     atlas_opts.compress = (nt_basisu_encode_opts_t){0};
     NtAtlasBuild *atlas = nt_atlas_begin(rig_ctx, "skeletal_showcase_ui", &atlas_opts);
     static const uint8_t white[4] = {255, 255, 255, 255};

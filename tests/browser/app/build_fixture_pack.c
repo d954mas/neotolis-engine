@@ -84,6 +84,7 @@ static void add_hdr_texture(NtBuilderContext *ctx) {
     }
     nt_tex_opts_t opts = nt_tex_opts_defaults();
     opts.format = NT_TEXTURE_FORMAT_RGB9E5;
+    opts.process = (nt_tex_process_t){0};
     opts.mips = NT_TEX_MIPS_BAKED;
     opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
     opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;

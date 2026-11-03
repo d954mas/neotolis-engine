@@ -217,9 +217,10 @@ void test_mip_level_with_a_shrunken_stored_width_asserts(void) {
 // NOLINTBEGIN(clang-analyzer-unix.Stream)
 /* The Basis payload of one raw texture built as a pack through the public
  * builder, so its format reaches the encoder. Returns the payload size. */
-static uint32_t encode_raw_pack(nt_basisu_codec_t codec, nt_texture_pixel_format_t format, const uint8_t *pixels, uint32_t width, uint32_t height, uint8_t basis[4096]) {
+static uint32_t encode_raw_pack(nt_basisu_codec_t codec, nt_texture_pixel_format_t format, nt_tex_alpha_t alpha, const uint8_t *pixels, uint32_t width, uint32_t height, uint8_t basis[4096]) {
     nt_tex_opts_t opts = nt_tex_opts_defaults();
     opts.format = format;
+    opts.process.alpha = alpha;
     opts.compress = codec == NT_BASISU_CODEC_ETC1S ? nt_tex_compress_etc1s_high() : nt_tex_compress_uastc_default();
     opts.mips = NT_TEX_MIPS_BAKED;
     NtBuilderContext *ctx = nt_builder_start_pack("basis_raw.ntpack");
@@ -245,7 +246,7 @@ static uint32_t encode_raw_pack(nt_basisu_codec_t codec, nt_texture_pixel_format
 // NOLINTEND(clang-analyzer-unix.Stream)
 
 /* The decoded 1x1 tail of an 8x8 checker of `even` and `odd` texels. */
-static void encode_checker_tail(nt_basisu_codec_t codec, nt_texture_pixel_format_t format, const uint8_t even[4], const uint8_t odd[4], uint8_t out_tail[4]) {
+static void encode_checker_tail(nt_basisu_codec_t codec, nt_texture_pixel_format_t format, nt_tex_alpha_t alpha, const uint8_t even[4], const uint8_t odd[4], uint8_t out_tail[4]) {
     uint8_t pixels[8 * 8 * 4];
     for (uint32_t y = 0; y < 8; y++) {
         for (uint32_t x = 0; x < 8; x++) {
@@ -253,7 +254,7 @@ static void encode_checker_tail(nt_basisu_codec_t codec, nt_texture_pixel_format
         }
     }
     uint8_t basis[4096] = {0};
-    const uint32_t size = encode_raw_pack(codec, format, pixels, 8, 8, basis);
+    const uint32_t size = encode_raw_pack(codec, format, alpha, pixels, 8, 8, basis);
     const nt_basisu_info_t info = nt_basisu_info(basis, size);
     /* 8x8 -> 4x4 -> 2x2 -> 1x1: the 4 RGBA8 bytes at the end are the tail level. */
     uint8_t chain[((8 * 8) + (4 * 4) + (2 * 2) + 1) * 4] = {0};
@@ -309,7 +310,7 @@ void test_alpha_less_formats_encode_opaque_levels(void) {
     for (uint32_t c = 0; c < codec_count; c++) {
         for (uint32_t f = 0; f < 2; f++) {
             uint8_t basis[4096] = {0};
-            const uint32_t size = encode_raw_pack(codecs[c].codec, formats[f], pixels, 8, 8, basis);
+            const uint32_t size = encode_raw_pack(codecs[c].codec, formats[f], NT_TEX_ALPHA_STRAIGHT, pixels, 8, 8, basis);
             const nt_basisu_info_t info = nt_basisu_info(basis, size);
             TEST_ASSERT_FALSE(info.has_alpha);
             TEST_ASSERT_EQUAL_UINT32(4, info.level_count);
@@ -322,14 +323,20 @@ void test_alpha_less_formats_encode_opaque_levels(void) {
     }
 }
 
-static void check_premultiplied_mip(nt_basisu_codec_t codec) {
-    static const uint8_t black[4] = {0, 0, 0, 0};
-    static const uint8_t white[4] = {255, 255, 255, 255};
-    uint8_t mip[4];
-    encode_checker_tail(codec, NT_TEXTURE_FORMAT_RGBA8, black, white, mip);
-    /* Equal opaque-white and transparent-black coverage averages every channel to 128. */
-    for (uint32_t c = 0; c < 4; c++) {
-        TEST_ASSERT_INT_WITHIN(8, 128, mip[c]);
+/* The builder's chain reaches Basis in every alpha mode: opaque red and blue at
+ * alpha 64 average alpha-weighted (STRAIGHT), per channel (DATA), or
+ * alpha-weighted and then premultiplied once (PREMULTIPLIED). */
+static void check_alpha_mode_mips(nt_basisu_codec_t codec) {
+    static const uint8_t red[4] = {255, 0, 0, 255};
+    static const uint8_t faint_blue[4] = {0, 0, 255, 64};
+    static const nt_tex_alpha_t modes[3] = {NT_TEX_ALPHA_STRAIGHT, NT_TEX_ALPHA_DATA, NT_TEX_ALPHA_PREMULTIPLIED};
+    static const uint8_t expected[3][4] = {{204, 0, 51, 160}, {128, 0, 128, 160}, {128, 0, 32, 160}};
+    for (uint32_t m = 0; m < 3; m++) {
+        uint8_t mip[4];
+        encode_checker_tail(codec, NT_TEXTURE_FORMAT_RGBA8, modes[m], red, faint_blue, mip);
+        for (uint32_t c = 0; c < 4; c++) {
+            TEST_ASSERT_INT_WITHIN(8, expected[m][c], mip[c]);
+        }
     }
 }
 
@@ -340,20 +347,20 @@ static void check_srgb_mip(nt_basisu_codec_t codec) {
     static const uint8_t opaque_white[4] = {255, 255, 255, 255};
     static const uint8_t clear_white[4] = {255, 255, 255, 0};
     uint8_t mip[4];
-    encode_checker_tail(codec, NT_TEXTURE_FORMAT_SRGB8_ALPHA8, opaque_black, opaque_white, mip);
+    encode_checker_tail(codec, NT_TEXTURE_FORMAT_SRGB8_ALPHA8, NT_TEX_ALPHA_STRAIGHT, opaque_black, opaque_white, mip);
     for (uint32_t c = 0; c < 3; c++) {
         TEST_ASSERT_INT_WITHIN(8, 188, mip[c]);
     }
     TEST_ASSERT_INT_WITHIN(8, 255, mip[3]);
-    encode_checker_tail(codec, NT_TEXTURE_FORMAT_SRGB8_ALPHA8, clear_white, opaque_white, mip);
+    encode_checker_tail(codec, NT_TEXTURE_FORMAT_SRGB8_ALPHA8, NT_TEX_ALPHA_STRAIGHT, clear_white, opaque_white, mip);
     TEST_ASSERT_INT_WITHIN(8, 128, mip[3]);
 }
 
 #if NT_BASISU_HAS_ETC1S
-void test_etc1s_premultiplied_mip(void) { check_premultiplied_mip(NT_BASISU_CODEC_ETC1S); }
+void test_etc1s_alpha_mode_mips(void) { check_alpha_mode_mips(NT_BASISU_CODEC_ETC1S); }
 #endif
 #if NT_BASISU_HAS_UASTC
-void test_uastc_premultiplied_mip(void) { check_premultiplied_mip(NT_BASISU_CODEC_UASTC_LDR); }
+void test_uastc_alpha_mode_mips(void) { check_alpha_mode_mips(NT_BASISU_CODEC_UASTC_LDR); }
 #endif
 #if NT_BASISU_HAS_ETC1S
 void test_etc1s_srgb_mip(void) { check_srgb_mip(NT_BASISU_CODEC_ETC1S); }
@@ -461,7 +468,7 @@ void test_public_basis_file_memory_atlas(void) {
         nt_tex_opts_t opts = nt_tex_opts_defaults();
         opts.compress = codecs[i];
         opts.max_size = 8;
-        opts.premultiplied = true;
+        opts.process.alpha = NT_TEX_ALPHA_PREMULTIPLIED;
         opts.mips = NT_TEX_MIPS_BAKED;
         nt_builder_add_texture(ctx, "basis_source.tga", &opts);
         opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
@@ -522,14 +529,14 @@ int main(void) {
 #if NT_BASISU_HAS_ETC1S
     RUN_TEST(test_etc1s_rgb);
     RUN_TEST(test_etc1s_alpha);
-    RUN_TEST(test_etc1s_premultiplied_mip);
+    RUN_TEST(test_etc1s_alpha_mode_mips);
     RUN_TEST(test_etc1s_srgb_mip);
 #endif
 #if NT_BASISU_HAS_UASTC
     RUN_TEST(test_uastc_rgb);
     RUN_TEST(test_uastc_alpha);
     RUN_TEST(test_mip_level_with_a_shrunken_stored_width_asserts);
-    RUN_TEST(test_uastc_premultiplied_mip);
+    RUN_TEST(test_uastc_alpha_mode_mips);
     RUN_TEST(test_uastc_srgb_mip);
 #endif
     RUN_TEST(test_non_basis_header_asserts);

@@ -37,6 +37,7 @@ void tearDown(void) {}
 static nt_tex_opts_t hdr_opts(nt_tex_mips_t mips) {
     nt_tex_opts_t opts = nt_tex_opts_defaults();
     opts.format = NT_TEXTURE_FORMAT_RGB9E5;
+    opts.process = (nt_tex_process_t){0};
     opts.mips = mips;
     if (mips == NT_TEX_MIPS_NONE) {
         opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
@@ -381,8 +382,8 @@ void test_hdr_opts_contract(void) {
     EXPECT_BUILD_ASSERT_MATCH((void)nt_builder_assert_texture_opts(&opts), "Basis compression requires");
     /* Premultiplying would treat the float source as RGBA8 bytes. */
     opts = hdr_opts(NT_TEX_MIPS_BAKED);
-    opts.premultiplied = true;
-    EXPECT_BUILD_ASSERT_MATCH((void)nt_builder_assert_texture_opts(&opts), "premultiplied=true requires RGBA8");
+    opts.process.alpha = NT_TEX_ALPHA_PREMULTIPLIED;
+    EXPECT_BUILD_ASSERT_MATCH((void)nt_builder_assert_texture_opts(&opts), "process.alpha PREMULTIPLIED requires RGBA8");
     /* A mip filter without a baked chain has no levels to sample. */
     opts = hdr_opts(NT_TEX_MIPS_NONE);
     opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR;

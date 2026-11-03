@@ -109,7 +109,6 @@ int main(int argc, char *argv[]) {
     atlas_opts.padding = 2;
     atlas_opts.margin = 2;
     atlas_opts.extrude = 1;
-    atlas_opts.premultiplied = true;
     atlas_opts.compress = (nt_basisu_encode_opts_t){0};
     atlas_opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
     atlas_opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
@@ -306,7 +305,6 @@ int main(int argc, char *argv[]) {
     radial_opts.margin = 0;
     radial_opts.extrude = 0;
     radial_opts.power_of_two = false; /* tight page == sprite dims -> UV [0,1] */
-    radial_opts.premultiplied = true;
     radial_opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
     radial_opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
     radial_opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;

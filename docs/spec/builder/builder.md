@@ -140,13 +140,13 @@ Signed zero has the same identity as positive zero.
 
 `compress` is stored by value; `compress.codec == NT_BASISU_CODEC_NONE`
 (the zero initializer) selects an uncompressed texture. NONE denotes absence of Basis compression
-in builder options, not a Basis file codec. File/memory textures decode and
-resize at add time to establish pixel identity. Early dedup re-decodes them
-when a hash match needs byte verification; encoding re-decodes on a cache miss.
-File inputs retain a copied path for re-reading; memory inputs retain a copy
-of the encoded bytes. Raw-pixel inputs retain copied, resized pixels. Atlas
-pages use the same texture encoder. Premultiplication runs after resize and
-before encoding.
+in builder options, not a Basis file codec. File/memory textures decode at add
+time, at their source size, to establish pixel identity; every resize, mip and
+alpha step runs at encode (see [texture processing](#texture-processing)). Early
+dedup re-decodes them when a hash match needs byte verification; encoding
+re-decodes on a cache miss. File inputs retain a copied path for re-reading;
+memory inputs retain a copy of the encoded bytes. Raw-pixel inputs retain copied
+pixels. Atlas pages use the same texture encoder.
 
 `format` also selects the color encoding. `SRGB8_ALPHA8` and `SRGB8` mark
 sRGB-encoded color for a shader that lights in linear space and encodes its
@@ -157,12 +157,12 @@ their textures keep `RGBA8` even though the art is sRGB. The game chooses per
 texture; nothing is inferred from file names or material slots. Source bytes
 are stored as they are and the GPU decodes them on sampling
 ([runtime formats](../assets/runtime-formats.md#texture-activation-ttex)).
-Basis accepts `RGBA8`, `RGB8`, `SRGB8_ALPHA8` and `SRGB8`. `premultiplied = true`
-requires `RGBA8`: premultiplying encoded sRGB bytes is not premultiplication in
-linear light. An uncompressed `SRGB8` texture cannot take `mips = RUNTIME` (WebGL 2 cannot
+Basis accepts `RGBA8`, `RGB8`, `SRGB8_ALPHA8` and `SRGB8`. `process.alpha =
+PREMULTIPLIED` requires `RGBA8`: premultiplying encoded sRGB bytes is not
+premultiplication in linear light. An uncompressed `SRGB8` texture cannot take `mips = RUNTIME` (WebGL 2 cannot
 render to it); use `BAKED`, `NONE` or `SRGB8_ALPHA8`. The format is part of the cache key and of dedup identity, so the
-same pixels as `RGBA8` and as `SRGB8_ALPHA8` are two assets. Resize still
-filters encoded values.
+same pixels as `RGBA8` and as `SRGB8_ALPHA8` are two assets. Resize and mips of
+sRGB formats filter linear light.
 
 `RGB9E5` is linear HDR color (emissive, lightmaps, sky panoramas). The source
 type follows the format and is never converted: `RGB9E5` requires an HDR source
@@ -173,11 +173,12 @@ tone-mapping an HDR file to 8 bits or gamma-expanding an LDR one. Every source
 value must be finite and in `[0, 65216]` (`ASTC_HDR_MAX_VAL`, the largest value
 Basis UASTC HDR stores without a rescale factor); the builder asserts this on the
 source, before any resize, and never clamps or tone-maps. Resize and mips use a
-box filter on float RGB: a filter with negative lobes would make negative colors.
-The runtime cannot generate `RGB9E5` mips either, so it takes `mips = BAKED`
-(each level box-filtered from the previous float level, never from packed
-`RGB9E5`) or `NONE`. `RGB9E5` takes no Basis compression and no premultiplication, and atlas
-pages stay LDR: `nt_atlas_begin` asserts on it.
+box filter on float RGB: a filter with negative lobes would make negative colors,
+so `RGB9E5` takes `.process = (nt_tex_process_t){0}` (the colour preset's
+`MITCHELL` asserts). The runtime cannot generate `RGB9E5` mips either, so it takes
+`mips = BAKED` (each level box-filtered from the previous float level, never from
+packed `RGB9E5`) or `NONE`. `RGB9E5` takes no Basis compression and no
+premultiplication, and atlas pages stay LDR: `nt_atlas_begin` asserts on it.
 
 `mips` (`nt_tex_mips_t`, in texture and atlas options) says where the mip chain
 comes from. It means the same for every format and codec:
@@ -193,14 +194,73 @@ the formats WebGL 2 cannot generate for. `RUNTIME` on Basis, `SRGB8` or `RGB9E5`
 is a build-time assert, never a silent switch, so Basis and `RGB9E5` callers that
 start from the defaults choose `BAKED` or `NONE`. A mipmap `filter_min` with `NONE`
 asserts too; a material override to a mipmap filter on a one-level texture
-samples level 0. The builder box-filters every `BAKED` level from the previous
-one, for uncompressed and Basis textures alike: every channel on its own (no
-alpha weighting, so premultiplied data stays premultiplied); sRGB formats
-average RGB in linear light and alpha linearly. Basis compresses these levels
-as given (`m_source_mipmap_images`) and builds no mips of its own; a format
-without alpha sends opaque levels, so the blob has no alpha slices. The encoder
-asserts its output level count against its input, and activation cross-checks
-it against the blob and the header.
+samples level 0. The builder builds every `BAKED` level (see
+[texture processing](#texture-processing)), for uncompressed and Basis textures
+alike. Basis compresses these levels as given (`m_source_mipmap_images`) and
+builds no mips of its own; a format without alpha sends opaque levels, so the
+blob has no alpha slices. The encoder asserts its output level count against its
+input, and activation cross-checks it against the blob and the header.
+
+### Texture processing
+
+`process` (`nt_tex_process_t`, in texture and atlas options) says what the
+pixels mean, and the builder resizes, mips and encodes them for that meaning:
+
+```c
+nt_tex_opts_t albedo = nt_tex_opts_defaults(); /* .process = nt_tex_process_color() */
+albedo.format = NT_TEXTURE_FORMAT_SRGB8_ALPHA8;
+albedo.mips = NT_TEX_MIPS_BAKED;
+
+nt_tex_opts_t roughness = nt_tex_opts_defaults();
+roughness.format = NT_TEXTURE_FORMAT_R8;
+roughness.process = nt_tex_process_data();
+```
+
+| Field | Values | Effect |
+|---|---|---|
+| `rgb` | `COLOR` (0), `DATA` | The ETC1S metric: perceptual for `COLOR`, linear for `DATA`. UASTC LDR and uncompressed textures ignore it. sRGB formats require `COLOR`. |
+| `alpha` | `STRAIGHT` (0), `PREMULTIPLIED`, `DATA` | `STRAIGHT`: RGB filters alpha-weighted, and every stored level fills the RGB of texels with alpha 8 or less with nearby visible colour. `PREMULTIPLIED`: the same filtering, then each stored level is premultiplied once, `(c * a + 127) / 255`, and the header sets `NT_TEXTURE_FLAG_PREMULTIPLIED`; `RGBA8` only. `DATA`: alpha filters as an independent channel and RGB under alpha 0 is kept. |
+| `resize_filter` | `BOX` (0), `MITCHELL`, `KAISER` | Level 0 when `max_size` shrinks the source, at any ratio |
+| `mip_filter` | `BOX` (0), `MITCHELL`, `KAISER` | Levels 1..N, each 2:1 from the previous level; anything but `BOX` requires `mips = BAKED` |
+
+| Preset | `rgb` | `alpha` | `resize_filter` | `mip_filter` |
+|---|---|---|---|---|
+| `nt_tex_process_color()` (texture defaults) | `COLOR` | `STRAIGHT` | `MITCHELL` | `BOX` |
+| `nt_tex_process_data()` | `DATA` | `DATA` | `BOX` | `BOX` |
+| atlas defaults | `COLOR` | `PREMULTIPLIED` | `MITCHELL` | `BOX` |
+
+Zero is valid for every format: `BOX` everywhere, colour, straight alpha. `BOX`
+is an area average with no ringing (on NPOT sizes it weighs partial texels by
+area). `MITCHELL` downscales with less moire than `BOX` and rings by about 3%; at
+exactly 2:1 it is softer than `BOX`. `KAISER` (the basisu windowed sinc: support 3,
+40 dB) keeps the most detail and rings most, so it is fenced to opaque colour: it
+requires `rgb = COLOR` and a format without alpha. A `KAISER` level with a side of
+2 texels or less is box filtered, because the wrapped stb kernel breaks there.
+
+The pipeline:
+
+1. Decode at the source size. A format without alpha (`RGB8`, `RG8`, `R8`,
+   `SRGB8`, `RGB9E5`) works on opaque texels, so `alpha` has no effect on it.
+2. Level 0 copies the source when it already fits `max_size`; otherwise
+   `resize_filter` fits `max(width, height)` to `max_size`, keeping the aspect.
+3. Level n filters the previous level's core with `mip_filter`. The core is level
+   0's bytes, then half-float linear values: rounding, sRGB encoding and the clamp
+   of ringing happen only on stored levels, so they never accumulate down the
+   chain. Dilation and premultiplication also touch only stored levels.
+4. `STRAIGHT` dilation, per stored level: a hole (alpha 8 or less) next to visible
+   texels takes their alpha-weighted mean, then push-pull fills the rest with
+   alpha-weighted nearby colour, in linear light for sRGB. A level with nothing
+   visible takes the mean colour of the level above it; a source with nothing
+   visible is stored as it is. Holes keep their alpha.
+
+Filter and dilation edges follow the sampler wrap per axis: `REPEAT` wraps,
+`CLAMP_TO_EDGE` clamps. `MIRRORED_REPEAT` filters as `CLAMP_TO_EDGE`, a deviation:
+the stb reflect mode is one texel off the GL mirrored repeat.
+
+Dilation keeps bilinear filtering, Basis blocks and `RUNTIME` mips free of the
+black that transparent texels usually hold. `glGenerateMipmap` does not weight by
+alpha, so with `RUNTIME` partially transparent texels and sprites of several
+colours still shift colour by area.
 
 An RGBA8 source whose pixels are all opaque is encoded without alpha slices —
 the encoder checks the actual pixels, not the declared channel count. The
@@ -427,7 +487,7 @@ sharing one payload in the pack.
 
 Texture cache and early dedup use one identity, `opts_hash`; early dedup
 compares it after an exact pixel match. It covers the effective settings:
-resized dimensions, resolved pixel format, premultiplication, sampler defaults,
+source and level-0 dimensions, resolved pixel format, `process`, sampler defaults,
 mip mode, codec and its active fields above. Names, source locations, resize
 limits after resizing, threading, descriptor padding and inactive union bytes
 are not encode identity.
@@ -622,7 +682,7 @@ Named mask presets are exact bit sets: `NT_ATLAS_TRANSFORMS_IDENTITY`,
 
 Every frontier adopts the trim-rect candidate, so with `max_vertices >= 4` geometry selection is provably total: there is no content-dependent geometry failure. An invalid selection for an in-range trim is a builder bug and asserts.
 
-- `alpha_threshold` defines retained pixels for trimming, geometry, and page composition. A pixel is retained and copied into the atlas page when `alpha >= effective_alpha_threshold`; below-threshold pixels inside the trim rectangle compose as transparent. `0` is legal and means "retain every pixel": no trim, a fully transparent sprite still publishes (transparent-after-trim cannot fire), and the RGB of zero-alpha pixels composes into the page (observable with `premultiplied = false`). Per-sprite overrides use `has_alpha_threshold` so an explicit `0` remains representable; zero-initialized sprite options inherit the atlas value. Anti-aliased fringe pixels participate when their alpha reaches the configured threshold.
+- `alpha_threshold` defines retained pixels for trimming, geometry, and page composition. A pixel is retained and copied into the atlas page when `alpha >= effective_alpha_threshold`; below-threshold pixels inside the trim rectangle compose as transparent. `0` is legal and means "retain every pixel": no trim, a fully transparent sprite still publishes (transparent-after-trim cannot fire), and the RGB of zero-alpha pixels composes into the page (observable with `process.alpha = DATA`). Per-sprite overrides use `has_alpha_threshold` so an explicit `0` remains representable; zero-initialized sprite options inherit the atlas value. Anti-aliased fringe pixels participate when their alpha reaches the configured threshold.
 - `max_vertices` is a hard ceiling for serialized region polygons. The atlas default is 8; the range is 4..16 — a trim-clamped triangle cannot cover any mask that touches all four sides of its (tight) trim rect, so 3 is rejected at the API boundary. Per-sprite `0` inherits the atlas value.
 - `max_added_area_percent` is the user-facing simplification tolerance. It is finite and non-negative; the atlas default is 10%. Per-sprite overrides use `has_max_added_area_percent` so an explicit `0%` remains representable, while zero-initialized sprite options still inherit the atlas value.
 - Geometry uses one retained-cell set after effective alpha resolution and trim. `Aopaque` is the total retained unit-cell area. For every vertex count populated by the deterministic candidate generators, the builder keeps the tightest proven candidate. `Abase` is the smallest exact area among those feasible candidates. A candidate is eligible when `(Acandidate - Abase) / Aopaque * 100 <= max_added_area_percent`; the selector then chooses the fewest vertices, then smaller exact area, then stable generator/coordinate ties.
@@ -633,17 +693,11 @@ Every frontier adopts the trim-rect candidate, so with `max_vertices >= 4` geome
 - Candidate geometry and the integer geometry prepared for serialization both pass the same selected-geometry proof: inputs valid, opaque area valid, base/selected bounds, topology, full retained-cell coverage, triangulation, metric order, allowance, and ceiling. Corrupt area, allowance, ceiling, polygon, or triangle data fails the proof. Float positions are baked afterward and checked for finiteness.
 - These controls affect builder geometry, composed page pixels, and atlas cache identity. They do not change the runtime API or the on-disk atlas blob format.
 
-**Premultiplied alpha (default):** atlas pages are encoded through the regular texture pipeline with `premultiplied = true`, which writes `RGB' = (RGB * A + 127) / 255` into the page before `strip_channels` (uncompressed path) or `nt_basisu_encode` (BASIS path). The resulting texture sets `NT_TEXTURE_FLAG_PREMULTIPLIED` in `NtTextureAssetHeader.flags`, and the runtime must draw with `(ONE, ONE_MINUS_SRC_ALPHA)` blending. This is what keeps NFP-packed sprites free of dark fringes at sub-pixel clearance: `(0,0,0,0)` gap pixels are the identity for premultiplied blending, so bilinear filtering at sprite edges stays correct. Setting `premultiplied = false` logs a warning and is only valid for NEAREST-filtered or fully-opaque atlases; setting `premultiplied = true` with a non-RGBA8 `format`, including an sRGB one, is a hard assert.
+**Premultiplied alpha (default):** atlas pages are encoded through the regular texture pipeline, and the atlas defaults set `process.alpha = PREMULTIPLIED`: every stored page level is filtered alpha-weighted and then premultiplied once, `RGB' = (RGB * A + 127) / 255`, before `strip_channels` (uncompressed path) or `nt_basisu_encode` (BASIS path). The resulting texture sets `NT_TEXTURE_FLAG_PREMULTIPLIED` in `NtTextureAssetHeader.flags`, and the runtime must draw with `(ONE, ONE_MINUS_SRC_ALPHA)` blending. This is what keeps NFP-packed sprites free of dark fringes at sub-pixel clearance: `(0,0,0,0)` gap pixels are the identity for premultiplied blending, so bilinear filtering at sprite edges stays correct. `STRAIGHT` pages fill gap RGB by dilation instead, and `DATA` keeps the composed RGB; `PREMULTIPLIED` with a non-RGBA8 `format`, including an sRGB one, is a hard assert.
 
-**LDR mip filtering:** `BAKED` box filtering of a linear `format` averages stored
-RGB and alpha values, which keeps the premultiplied relationship through the
-chain: a half-coverage opaque-white/transparent-black texture reduces to roughly
-RGBA `(128,128,128,128)`, subject to block-compression error. An sRGB `format`
-averages RGB in linear light and alpha on stored values, so an opaque black/white
-checker reduces to about 188, not 128. sRGB is never premultiplied, so the two
-rules never meet. With `RUNTIME`, uncompressed `SRGB8_ALPHA8` mips come from
-`glGenerateMipmap`, whose filter for sRGB storage the GL ES specification leaves
-to the driver.
+**LDR mip filtering:** `BAKED` atlas pages follow [texture processing](#texture-processing).
+With `RUNTIME`, uncompressed `SRGB8_ALPHA8` mips come from `glGenerateMipmap`, whose filter
+for sRGB storage the GL ES specification leaves to the driver.
 
 **Hard limits:**
 - `0 <= extrude <= max_size`; non-zero atlas extrude requires `NT_ATLAS_SHAPE_RECT`.

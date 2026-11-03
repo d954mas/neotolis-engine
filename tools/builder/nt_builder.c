@@ -801,7 +801,10 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             NtBuildEntry *pe = &ctx->pending[work_indices[wi]];
             if (pe->kind == NT_BUILD_ASSET_TEXTURE) {
                 NtBuildTextureData *td = (NtBuildTextureData *)pe->data;
-                if (td->opts.compress.codec != NT_BASISU_CODEC_NONE && td->width * td->height >= 128 * 128) {
+                uint32_t tw = 0;
+                uint32_t th = 0;
+                nt_builder_texture_target_extent(td->width, td->height, td->opts.max_size, &tw, &th);
+                if (td->opts.compress.codec != NT_BASISU_CODEC_NONE && tw * th >= 128 * 128) {
                     heavy_count++;
                 }
             }
@@ -1294,12 +1297,12 @@ static void *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *out_w
     uint32_t w = 0;
     uint32_t h = 0;
     if (td->source_data) {
-        pixels = nt_builder_decode_texture(td->source_data, td->source_size, td->opts.format, td->opts.max_size, &w, &h);
+        pixels = nt_builder_decode_texture(td->source_data, td->source_size, td->opts.format, &w, &h);
     } else if (td->source_path) {
         uint32_t fsize = 0;
         uint8_t *fdata = (uint8_t *)nt_builder_read_file(td->source_path, &fsize);
         NT_BUILD_ASSERT(fdata && "redecode_texture: re-read file failed");
-        pixels = nt_builder_decode_texture(fdata, fsize, td->opts.format, td->opts.max_size, &w, &h);
+        pixels = nt_builder_decode_texture(fdata, fsize, td->opts.format, &w, &h);
         free(fdata);
     } else {
         NT_BUILD_ASSERT(0 && "redecode_texture: no source (raw texture should have decoded_data)");
@@ -1392,7 +1395,7 @@ void nt_builder_add_texture(NtBuilderContext *ctx, const char *path, const nt_te
 
     uint32_t w = 0;
     uint32_t h = 0;
-    void *pixels = nt_builder_decode_texture(file_data, file_size, effective_format, opts ? opts->max_size : 0, &w, &h);
+    void *pixels = nt_builder_decode_texture(file_data, file_size, effective_format, &w, &h);
     free(file_data);
 
     /* Hash decoded pixels, then free -- re-read from stored path at encode time */
@@ -1462,7 +1465,7 @@ void nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *da
 
     uint32_t w = 0;
     uint32_t h = 0;
-    void *pixels = nt_builder_decode_texture(data, size, effective_format, opts ? opts->max_size : 0, &w, &h);
+    void *pixels = nt_builder_decode_texture(data, size, effective_format, &w, &h);
 
     /* Hash decoded pixels, then free -- deep copy source for re-decode at encode time */
     const uint32_t decoded_size = nt_builder_texture_source_size(effective_format, w, h);
@@ -1482,14 +1485,12 @@ void nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *da
 
 static void add_texture_pixels(NtBuilderContext *ctx, const void *pixels, uint32_t width, uint32_t height, const char *resource_id, const nt_tex_opts_t *opts,
                                nt_texture_pixel_format_t effective_format) {
-    uint32_t w = 0;
-    uint32_t h = 0;
-    void *decoded = nt_builder_decode_texture_raw(pixels, width, height, effective_format, opts ? opts->max_size : 0, &w, &h);
+    void *decoded = nt_builder_decode_texture_raw(pixels, width, height, effective_format);
 
     /* Hash and keep decoded_data -- can't re-derive from source */
-    const uint32_t decoded_size = nt_builder_texture_source_size(effective_format, w, h);
+    const uint32_t decoded_size = nt_builder_texture_source_size(effective_format, width, height);
     uint64_t hash = nt_hash64(decoded, decoded_size).value;
-    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, make_texture_data(w, h, opts, effective_format), (uint8_t *)decoded, decoded_size, hash);
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, make_texture_data(width, height, opts, effective_format), (uint8_t *)decoded, decoded_size, hash);
 }
 
 void nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const char *resource_id, const nt_tex_opts_t *opts) {

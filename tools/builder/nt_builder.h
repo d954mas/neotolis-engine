@@ -248,11 +248,56 @@ typedef enum {
     NT_TEX_MIPS_BAKED = 2,
 } nt_tex_mips_t;
 
+/* What RGB holds. COLOR picks Basis's perceptual metric, DATA its linear one; on
+ * uncompressed textures both give the same bytes. sRGB formats require COLOR. */
+typedef enum {
+    NT_TEX_RGB_COLOR = 0,
+    NT_TEX_RGB_DATA = 1,
+} nt_tex_rgb_t;
+
+/* What A means. STRAIGHT and PREMULTIPLIED filter RGB alpha-weighted; STRAIGHT
+ * also fills the RGB of near-transparent texels with nearby visible colour, so
+ * bilinear and GPU mips never pull in black. PREMULTIPLIED premultiplies each
+ * stored level (RGBA8 only). DATA filters alpha as an independent channel and
+ * keeps RGB under A=0. Formats without alpha store opaque texels, so `alpha`
+ * has no effect on them. */
+typedef enum {
+    NT_TEX_ALPHA_STRAIGHT = 0,
+    NT_TEX_ALPHA_PREMULTIPLIED = 1,
+    NT_TEX_ALPHA_DATA = 2,
+} nt_tex_alpha_t;
+
+/* BOX is an area average with no ringing, valid for every format. MITCHELL is a
+ * quality downscale at any ratio (about 3% ringing). KAISER is the sharpest and
+ * is for opaque colour only: it requires rgb COLOR and a format without alpha.
+ * RGB9E5 takes BOX only. */
+typedef enum {
+    NT_TEX_FILTER_BOX = 0,
+    NT_TEX_FILTER_MITCHELL = 1,
+    NT_TEX_FILTER_KAISER = 2,
+} nt_tex_filter_t;
+
+/* How the builder resizes, mips and encodes a texture's pixels. Zero (BOX
+ * everywhere) is valid for every format; the presets set the recommended values. */
+typedef struct {
+    nt_tex_rgb_t rgb;
+    nt_tex_alpha_t alpha;
+    nt_tex_filter_t resize_filter; /* level 0 down to max_size, any ratio */
+    nt_tex_filter_t mip_filter;    /* levels 1..N, 2:1; anything but BOX requires mips BAKED */
+} nt_tex_process_t;
+
+static inline nt_tex_process_t nt_tex_process_color(void) {
+    return (nt_tex_process_t){.rgb = NT_TEX_RGB_COLOR, .alpha = NT_TEX_ALPHA_STRAIGHT, .resize_filter = NT_TEX_FILTER_MITCHELL, .mip_filter = NT_TEX_FILTER_BOX};
+}
+static inline nt_tex_process_t nt_tex_process_data(void) {
+    return (nt_tex_process_t){.rgb = NT_TEX_RGB_DATA, .alpha = NT_TEX_ALPHA_DATA, .resize_filter = NT_TEX_FILTER_BOX, .mip_filter = NT_TEX_FILTER_BOX};
+}
+
 typedef struct {
     nt_texture_pixel_format_t format; /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8. RGB9E5 = HDR, needs an HDR source */
-    uint32_t max_size;                /* 0 = no resize, otherwise max(w,h) clamped to this */
+    uint32_t max_size;                /* 0 = no resize, otherwise level 0 fits max(w,h) to this with process.resize_filter */
     nt_basisu_encode_opts_t compress; /* NONE = raw/uncompressed */
-    bool premultiplied;               /* RGBA8 only; default false. Premultiply to avoid dark fringes with bilinear filtering. */
+    nt_tex_process_t process;         /* default nt_tex_process_color() */
     /* Baked sampler defaults; materials may override them per binding. */
     nt_texture_default_filter_t filter_min; /* default: LINEAR_MIPMAP_LINEAR */
     nt_texture_default_filter_t filter_mag; /* default: LINEAR (NEAREST or LINEAR only) */
@@ -266,7 +311,7 @@ static inline nt_tex_opts_t nt_tex_opts_defaults(void) {
         .format = NT_TEXTURE_FORMAT_RGBA8,
         .max_size = 0,
         .compress = {0},
-        .premultiplied = false,
+        .process = nt_tex_process_color(),
         .filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR,
         .filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR,
         .wrap_u = NT_TEXTURE_DEFAULT_WRAP_REPEAT,
@@ -358,11 +403,8 @@ typedef struct {
                                    * A 0x00 zero-init behaves as identity-only. Bit i permits stored value i. */
     bool power_of_two;            /* round atlas dims to POT (default: true) */
     bool debug_png;               /* write debug atlas page PNGs (default: false) */
-    bool premultiplied;           /* true (default) = premultiply RGB by alpha during page encoding.
-                                   * Required for correct bilinear filtering at sprite gaps.
-                                   * Only meaningful for NT_TEXTURE_FORMAT_RGBA8.
-                                   * Setting false is supported but emits a warning — valid only for
-                                   * NEAREST-filtered or fully opaque atlases. */
+    nt_tex_process_t process;     /* page processing; default nt_tex_process_color() with alpha PREMULTIPLIED,
+                                   * which keeps bilinear filtering correct at sprite gaps */
     float pixels_per_unit;        /* Atlas-level scale: source pixels per world unit.
                                    * 1.0F = 1 source pixel per unit (default). The builder bakes its inverse
                                    * into source-space positions and stores it in the atlas header.
@@ -399,7 +441,7 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
         .allowed_transforms = NT_ATLAS_TRANSFORMS_ALL,
         .power_of_two = true,
         .debug_png = false,
-        .premultiplied = true,
+        .process = {.rgb = NT_TEX_RGB_COLOR, .alpha = NT_TEX_ALPHA_PREMULTIPLIED, .resize_filter = NT_TEX_FILTER_MITCHELL, .mip_filter = NT_TEX_FILTER_BOX},
         .pixels_per_unit = 1.0F, /* 1 source pixel == 1 world unit by default */
         .filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR,
         .filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR,

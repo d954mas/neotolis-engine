@@ -558,8 +558,8 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     pos += (uint32_t)sizeof(opts->max_vertices);
     opts_buf[pos++] = opts->alpha_threshold;
     /* Only pack/compose-affecting opts go here. Post-pack fields (format,
-     * premultiplied, debug_png, compress) are handled by the texture cache
-     * and must NOT appear — otherwise changing e.g. premultiplied triggers
+     * process, debug_png, compress) are handled by the texture cache
+     * and must NOT appear — otherwise changing e.g. process.alpha triggers
      * a full re-pack when only re-encode is needed. */
     uint8_t flags = (uint8_t)(opts->power_of_two ? 2 : 0);
     opts_buf[pos++] = flags;
@@ -848,7 +848,7 @@ static nt_texture_pixel_format_t atlas_assert_opts(const nt_atlas_opts_t *opts) 
     nt_tex_opts_t texture_opts = {
         .format = opts->format,
         .compress = opts->compress,
-        .premultiplied = opts->premultiplied,
+        .process = opts->process,
         .filter_min = opts->filter_min,
         .filter_mag = opts->filter_mag,
         .wrap_u = opts->wrap_u,
@@ -3850,7 +3850,7 @@ static void pipeline_publish_outputs(AtlasPipeline *p) {
         td->opts.format = p->opts->format;
         td->opts.max_size = 0;
         td->opts.compress = p->opts->compress;
-        td->opts.premultiplied = p->opts->premultiplied;
+        td->opts.process = p->opts->process;
         /* Propagate atlas-level sampler defaults to the page texture header so
          * the activator creates the right sampler for this atlas page. */
         td->opts.filter_min = p->opts->filter_min;
@@ -3981,14 +3981,6 @@ nt_build_result_t nt_atlas_commit(NtAtlasBuild *atlas) {
     }
 
     NT_BUILD_ASSERT(state->sprite_count > 0 && "atlas_commit: atlas has no sprites");
-
-    /* Warn on non-premultiplied atlases. Bilinear filtering at sprite gaps
-     * mixes opaque pixels with transparent (0,0,0,0) background, producing
-     * dark fringes. Valid use cases (NEAREST filter, fully opaque sprites)
-     * exist but are rare — keep the user aware. */
-    if (!state->opts.premultiplied) {
-        NT_LOG_WARN("atlas '%s': premultiplied=false — bilinear filter will cause dark fringes at sprite edges. Use only with NEAREST filter or fully opaque sprites.", state->name);
-    }
 
     NT_LOG_INFO("  atlas_commit: %u sprites, starting pipeline...", p.sprite_count);
 #if NT_LOG_MIN_LEVEL == 0
