@@ -246,10 +246,10 @@ size_t fi_record_text(const fi_frame_t *frame, uint32_t record, const char **tex
 /* Two frames compared group by group: the groups of B in their order, then the groups only A has. In each,
  * the requests (OP and NOTE records) of both frames are aligned like a text diff. Two requests pair when
  * their kind, operation and object aliases (pipe#9) match, so runs whose handles differ still pair; a pair
- * whose result, merge break, GL calls or arguments differ is changed. GL calls are counted, not aligned:
- * backends issue different calls for one request. */
+ * whose result, merge break, GL calls, arguments (handles as aliases) or ARGUMENT and NOTE_FIELD records
+ * differ is changed. GL calls are counted, not aligned: backends issue different calls for one request. */
 typedef enum { FI_DIFF_SAME, FI_DIFF_CHANGED, FI_DIFF_ONLY_A, FI_DIFF_ONLY_B } fi_diff_kind_t;
-enum { FI_CHANGE_RESULT = 1, FI_CHANGE_MERGE = 2, FI_CHANGE_CALLS = 4, FI_CHANGE_ARGS = 8 };
+enum { FI_CHANGE_RESULT = 1, FI_CHANGE_MERGE = 2, FI_CHANGE_CALLS = 4, FI_CHANGE_ARGS = 8, FI_CHANGE_ITEMS = 16 /* ARGUMENT or NOTE_FIELD records */ };
 typedef struct {
     uint32_t a, b;             /* records, FI_NONE on the side without one */
     uint32_t calls_a, calls_b; /* GL calls each issued: the BACKEND records it links */

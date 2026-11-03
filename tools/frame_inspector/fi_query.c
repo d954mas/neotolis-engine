@@ -511,6 +511,25 @@ uint64_t fi_number_in(const fi_frame_t *frame, const fi_number_t *number) {
     return number->sum ? c.sum : c.n;
 }
 
+static uint64_t gap(uint64_t x, uint64_t y) { return x > y ? x - y : y - x; }
+
+void fi_number_diff(const fi_frame_t *a, const fi_frame_t *b, fi_number_diff_t *out) {
+    out->count = fi_numbers(b, true, out->number);
+    for (uint32_t k = 0; k < out->count; k++) { /* fi_numbers lists them by section: sort inside each */
+        out->was[k] = fi_number_in(a, &out->number[k]);
+        const uint64_t change = gap(out->was[k], out->number[k].value);
+        uint32_t at = k;
+        for (; at > 0; at--) {
+            const uint32_t prev = out->order[at - 1U];
+            if (out->number[prev].section != out->number[k].section || gap(out->was[prev], out->number[prev].value) >= change) {
+                break;
+            }
+            out->order[at] = prev;
+        }
+        out->order[at] = k;
+    }
+}
+
 static void appendf(char *buf, size_t size, size_t *at, const char *fmt, ...) NT_PRINTF_ATTR(4, 5);
 static void appendf(char *buf, size_t size, size_t *at, const char *fmt, ...) {
     if (*at + 1U >= size) {
@@ -544,14 +563,14 @@ void fi_change_text(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_row_
         appendf(buf, size, &at, "%sGL calls %u -> %u", sep, row->calls_a, row->calls_b);
         sep = "; ";
     }
+    if ((row->change & FI_CHANGE_ITEMS) != 0) {
+        appendf(buf, size, &at, "%s%s differ", sep, x->kind == NT_GFX_EVENT_NOTE ? "fields" : "argument records");
+        sep = "; ";
+    }
     if ((row->change & FI_CHANGE_ARGS) == 0) {
         return;
     }
-    if (x->kind == NT_GFX_EVENT_NOTE) {
-        appendf(buf, size, &at, "%sfields differ", sep);
-        return;
-    }
-    if (!fi_is_draw(x)) { /* viewport and scissor: A's values, B's are on the row */
+    if (!fi_is_draw(x)) { /* A's request; B's is on the row */
         char was[256];
         fi_row_text(a, row->a, was, sizeof(was));
         appendf(buf, size, &at, "%sA: %s", sep, was);
@@ -571,6 +590,22 @@ void fi_change_text(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_row_
 bool fi_group_has_work(const fi_frame_t *frame, uint32_t group) {
     const fi_cell_t *c = &frame->summary.group[(size_t)group * FI_METRIC_COUNT];
     return c[FI_METRIC_DRAWS].n + c[FI_METRIC_CALLS].n + c[FI_METRIC_DROPS].n > 0;
+}
+
+uint64_t fi_group_metric(const fi_frame_t *frame, uint32_t group, uint32_t metric) {
+    if (group == FI_NONE) {
+        return 0;
+    }
+    const fi_cell_t *c = &frame->summary.group[((size_t)group * FI_METRIC_COUNT) + metric];
+    return metric == FI_METRIC_BYTES ? c->sum : c->n;
+}
+
+bool fi_group_differs(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_group_t *group) {
+    bool differ = group->differ > 0 || group->a == FI_NONE || group->b == FI_NONE;
+    for (uint32_t m = 0; m < FI_METRIC_COUNT && !differ; m++) {
+        differ = fi_group_metric(a, group->a, m) != fi_group_metric(b, group->b, m);
+    }
+    return differ;
 }
 // #endregion
 
@@ -860,8 +895,6 @@ static void put_side(fi_out_t *out, const char *name, uint64_t index, const fi_f
         fr->view.platform == NT_GFX_CAPTURE_WEB ? "web" : "native", fr->view.count);
 }
 
-static uint64_t magnitude(uint64_t a, uint64_t b) { return a > b ? a - b : b - a; }
-
 /* A group of a comparison by the frame that has it: gN in B, a.gN when only A has it. */
 static void group_name(const fi_diff_group_t *g, char *buf, size_t size) {
     if (g->b != FI_NONE) {
@@ -873,60 +906,47 @@ static void group_name(const fi_diff_group_t *g, char *buf, size_t size) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void compare_numbers(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_t *d, fi_out_t *out) {
-    static fi_number_t numbers[FI_NUMBERS];
-    static uint64_t was[FI_NUMBERS];
-    static uint32_t order[FI_NUMBERS];
-    const uint32_t n = fi_numbers(b, true, numbers);
+    static fi_number_diff_t nd;
+    fi_number_diff(a, b, &nd);
     uint32_t differ = 0;
-    for (uint32_t section = FI_SECTION_FRAME; section <= FI_SECTION_GL; section++) {
-        uint32_t count = 0;
-        for (uint32_t k = 0; k < n; k++) {
-            was[k] = numbers[k].section == section ? fi_number_in(a, &numbers[k]) : numbers[k].value;
-            if (was[k] == numbers[k].value) {
-                continue;
-            }
-            uint32_t at = count++; /* the biggest change first */
-            for (; at > 0 && magnitude(was[order[at - 1U]], numbers[order[at - 1U]].value) < magnitude(was[k], numbers[k].value); at--) {
-                order[at] = order[at - 1U];
-            }
-            order[at] = k;
+    uint32_t section = FI_NONE;
+    for (uint32_t c = 0; c < nd.count; c++) {
+        const uint32_t k = nd.order[c];
+        const fi_number_t *x = &nd.number[k];
+        if (x->value == nd.was[k]) {
+            continue;
         }
-        if (count > 0) {
+        if (x->section != section) {
+            section = x->section;
             put(out, "# == %s\n", k_sections[section]);
         }
-        for (uint32_t c = 0; c < count; c++) {
-            const fi_number_t *x = &numbers[order[c]];
-            put(out, "%-36s %10llu %10llu %+11lld  # %s\n", x->key, (unsigned long long)was[order[c]], (unsigned long long)x->value, (long long)(x->value - was[order[c]]), x->meaning);
-        }
-        differ += count;
+        put(out, "%-36s %10llu %10llu %+11lld  # %s\n", x->key, (unsigned long long)nd.was[k], (unsigned long long)x->value, (long long)(x->value - nd.was[k]), x->meaning);
+        differ++;
     }
-    put(out, "# == groups: a group only one frame has is only_a or only_b; compare INDEX GROUP lists its commands\n");
+    put(out, "# == groups: gN.METRIC A B delta (a.gN: a group only A has); gN.commands N  # requests that differ,\n");
+    put(out, "# compare INDEX gN lists them\n");
     char name[24];
+    char metric[48];
     for (uint32_t g = 0; g < d->group_count; g++) {
         const fi_diff_group_t *dg = &d->group[g];
         group_name(dg, name, sizeof(name));
         const char *key = dg->b != FI_NONE ? b->group_key[dg->b] : a->group_key[dg->a];
+        const char *only = "";
         if (dg->a == FI_NONE || dg->b == FI_NONE) {
-            put(out, "%-36s %s  # %s\n", name, dg->a == FI_NONE ? "only_b" : "only_a", key);
-            differ++;
-            continue;
+            only = dg->a == FI_NONE ? "only in B: " : "only in A: ";
         }
-        const fi_cell_t *ca = &a->summary.group[(size_t)dg->a * FI_METRIC_COUNT];
-        const fi_cell_t *cb = &b->summary.group[(size_t)dg->b * FI_METRIC_COUNT];
         for (uint32_t m = 0; m < FI_METRIC_COUNT; m++) {
-            const uint64_t va = m == FI_METRIC_BYTES ? ca[m].sum : ca[m].n;
-            const uint64_t vb = m == FI_METRIC_BYTES ? cb[m].sum : cb[m].n;
+            const uint64_t va = fi_group_metric(a, dg->a, m);
+            const uint64_t vb = fi_group_metric(b, dg->b, m);
             if (va != vb) {
-                char metric[48];
                 (void)snprintf(metric, sizeof(metric), "%s.%s", name, k_metrics[m]);
-                put(out, "%-36s %10llu %10llu %+11lld  # %s\n", metric, (unsigned long long)va, (unsigned long long)vb, (long long)(vb - va), key);
+                put(out, "%-36s %10llu %10llu %+11lld  # %s%s\n", metric, (unsigned long long)va, (unsigned long long)vb, (long long)(vb - va), only, key);
                 differ++;
             }
         }
         if (dg->differ > 0) {
-            char metric[48];
             (void)snprintf(metric, sizeof(metric), "%s.commands", name);
-            put(out, "%-36s %10u  # %s: requests that differ, of %u rows\n", metric, dg->differ, key, dg->count);
+            put(out, "%-36s %10u  # %s%s: requests that differ, of %u rows\n", metric, dg->differ, only, key, dg->count);
             differ++;
         }
     }

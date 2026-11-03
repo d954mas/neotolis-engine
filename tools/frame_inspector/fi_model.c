@@ -1436,43 +1436,80 @@ static bool same_key(const req_key_t *x, const req_key_t *y) {
            (x->label == NULL ? y->label == NULL : y->label != NULL && strcmp(x->label, y->label) == 0);
 }
 
-static bool same_event(const nt_gfx_event_t *x, const nt_gfx_event_t *y) {
-    uint8_t xb[sizeof(*x)];
-    uint8_t yb[sizeof(*y)];
-    memcpy(xb, x, sizeof(xb));
-    memcpy(yb, y, sizeof(yb));
+/* A gfx record as two frames compare it: handles as aliases; links, joined draws, GL names and the result
+ * (compared on its own) left out. */
+static nt_gfx_event_t canonical(const fi_frame_t *fr, uint32_t i) {
+    static const uint8_t k_related[FI_OBJECTS] = {[NT_GFX_OBJECT_PROGRAM] = NT_GFX_OBJECT_SHADER,
+                                                  [NT_GFX_OBJECT_PIPELINE] = NT_GFX_OBJECT_PROGRAM,
+                                                  [NT_GFX_OBJECT_VERTEX_INPUT] = NT_GFX_OBJECT_BUFFER,
+                                                  [NT_GFX_OBJECT_RENDER_TARGET] = NT_GFX_OBJECT_TEXTURE};
+    nt_gfx_event_t c;
+    memcpy(&c, &fr->view.events[i], sizeof(c));
+    if (!is_gfx(&c)) {
+        return c;
+    }
+    c.object = fi_alias(fr, c.object_kind, c.object);
+    c.link = 0;
+    c.result = 0;
+    if (fi_is_draw(&c)) {
+        c.detail = 0;
+        c.data.draw.vertex_input = fi_alias(fr, NT_GFX_OBJECT_VERTEX_INPUT, c.data.draw.vertex_input);
+    } else if (c.operation == NT_GFX_OP_CREATE && c.object_kind < FI_OBJECTS) {
+        c.data.resource.backend = 0;
+        for (uint32_t k = 0; k < 3U && k_related[c.object_kind] != 0; k++) {
+            c.data.resource.related[k] = fi_alias(fr, k_related[c.object_kind], c.data.resource.related[k]);
+        }
+    } else if (c.operation == NT_GFX_OP_PASS) {
+        c.data.pass.target = fi_alias(fr, NT_GFX_OBJECT_RENDER_TARGET, c.data.pass.target);
+    } else if (c.operation == NT_GFX_OP_VERTEX_INPUT) {
+        c.data.binding.secondary = fi_alias(fr, NT_GFX_OBJECT_BUFFER, c.data.binding.secondary);
+        c.data.binding.slot = fi_alias(fr, NT_GFX_OBJECT_INSTANCE_LAYOUT, c.data.binding.slot);
+    } else if (c.operation == NT_GFX_OP_TEXTURE_SET && c.kind == NT_GFX_EVENT_ARGUMENT) {
+        c.data.binding.secondary = fi_alias(fr, NT_GFX_OBJECT_SAMPLER, c.data.binding.secondary);
+    }
+    return c;
+}
+
+static bool same_record(const fi_frame_t *fa, uint32_t i, const fi_frame_t *fb, uint32_t j) {
+    const nt_gfx_event_t x = canonical(fa, i);
+    const nt_gfx_event_t y = canonical(fb, j);
+    uint8_t xb[sizeof(x)];
+    uint8_t yb[sizeof(y)];
+    memcpy(xb, &x, sizeof(xb));
+    memcpy(yb, &y, sizeof(yb));
     return memcmp(xb, yb, sizeof(xb)) == 0;
 }
 
-/* What differs between two paired requests. Arguments compare only where they hold no handles: draw ranges,
- * viewport and scissor values, note fields. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static uint8_t change_of(const side_t *sa, uint32_t ra, const side_t *sb, uint32_t rb) {
-    const nt_gfx_event_t *x = &sa->fr->view.events[ra];
-    const nt_gfx_event_t *y = &sb->fr->view.events[rb];
-    if (x->kind == NT_GFX_EVENT_NOTE) {
-        for (uint32_t k = 1; ra + k < sa->fr->view.count && rb + k < sb->fr->view.count; k++) {
-            const bool fx = x[k].kind == NT_GFX_EVENT_NOTE_FIELD;
-            const bool fy = y[k].kind == NT_GFX_EVENT_NOTE_FIELD;
-            if (fx != fy || (fx && !same_event(&x[k], &y[k]))) {
-                return FI_CHANGE_ARGS;
-            }
-            if (!fx) {
-                break;
-            }
+/* After record i, the next NOTE_FIELD of note r or ARGUMENT of operation r; FI_NONE past its last. */
+static uint32_t next_item(const fi_frame_t *fr, uint32_t r, uint32_t i) {
+    const bool note = fr->view.events[r].kind == NT_GFX_EVENT_NOTE;
+    for (i++; i < fr->view.count; i++) {
+        const nt_gfx_event_t *e = &fr->view.events[i];
+        if (note || owner(fr, i) != r) {
+            return note && e->kind == NT_GFX_EVENT_NOTE_FIELD ? i : FI_NONE;
         }
-        return 0;
+        if (e->kind == NT_GFX_EVENT_ARGUMENT) {
+            return i;
+        }
     }
+    return FI_NONE;
+}
+
+/* What differs between two paired requests. */
+static uint8_t change_of(const side_t *sa, uint32_t ra, const side_t *sb, uint32_t rb) {
+    const fi_frame_t *fa = sa->fr;
+    const fi_frame_t *fb = sb->fr;
     uint8_t change = 0;
-    change |= x->result != y->result ? FI_CHANGE_RESULT : 0U;
-    change |= sa->fr->brk[ra] != sb->fr->brk[rb] ? FI_CHANGE_MERGE : 0U;
-    change |= sa->calls[ra] != sb->calls[rb] ? FI_CHANGE_CALLS : 0U;
-    if (fi_is_draw(x)) {
-        const bool same =
-            x->data.draw.first == y->data.draw.first && x->data.draw.count == y->data.draw.count && x->data.draw.vertices == y->data.draw.vertices && x->data.draw.instances == y->data.draw.instances;
-        change |= same ? 0U : FI_CHANGE_ARGS;
-    } else if (x->operation == NT_GFX_OP_VIEWPORT || x->operation == NT_GFX_OP_SCISSOR || x->operation == NT_GFX_OP_SCISSOR_ENABLE) {
-        change |= same_data(x, y) ? 0U : FI_CHANGE_ARGS;
+    if (fa->view.events[ra].kind == NT_GFX_EVENT_OP) {
+        change |= fa->view.events[ra].result != fb->view.events[rb].result ? FI_CHANGE_RESULT : 0U;
+        change |= fa->brk[ra] != fb->brk[rb] ? FI_CHANGE_MERGE : 0U;
+        change |= sa->calls[ra] != sb->calls[rb] ? FI_CHANGE_CALLS : 0U;
+        change |= same_record(fa, ra, fb, rb) ? 0U : FI_CHANGE_ARGS;
+    }
+    for (uint32_t i = next_item(fa, ra, ra), j = next_item(fb, rb, rb); i != FI_NONE || j != FI_NONE; i = next_item(fa, ra, i), j = next_item(fb, rb, j)) {
+        if (i == FI_NONE || j == FI_NONE || !same_record(fa, i, fb, j)) {
+            return change | FI_CHANGE_ITEMS;
+        }
     }
     return change;
 }
@@ -1532,8 +1569,8 @@ static void emit(emit_t *o, int32_t i, int32_t j) {
     o->differ += r->kind != FI_DIFF_SAME ? 1U : 0U;
 }
 
-/* The rows of one group pair: the common start, the middle aligned (or A's then B's when too different), the
- * common end. */
+/* The rows of one group pair: the common start, the middle aligned (or A's then B's when one side has none or
+ * they are too different), the common end. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool align(emit_t *o, int32_t n, int32_t m, int32_t *trace) {
     const req_key_t *x = o->a->key + o->a0;
@@ -1549,10 +1586,10 @@ static bool align(emit_t *o, int32_t n, int32_t m, int32_t *trace) {
     }
     const int32_t n2 = n - head - tail;
     const int32_t m2 = m - head - tail;
-    int32_t edits = 0;
+    int32_t edits = -1; /* one side empty: its rows need no search */
     const int32_t most = n2 + m2 < (int32_t)FI_DIFF_EDITS ? n2 + m2 : (int32_t)FI_DIFF_EDITS;
-    const bool aligned = myers(x + head, n2, y + head, m2, most, trace, &edits);
-    if (aligned) { /* trace back from the end, rows in reverse, then turn them round */
+    const bool aligned = n2 == 0 || m2 == 0 || myers(x + head, n2, y + head, m2, most, trace, &edits);
+    if (edits >= 0) { /* trace back from the end, rows in reverse, then turn them round */
         const uint32_t from = o->count;
         int32_t xx = n2;
         int32_t yy = m2;
@@ -1631,15 +1668,15 @@ void fi_diff(const fi_frame_t *a, const fi_frame_t *b, fi_diff_t *out) {
     uint32_t widest = 0;
     for (uint32_t g = 0; g < b->group_count; g++) {
         const uint32_t m = sb.start[g + 1U] - sb.start[g];
-        if (m == 0) {
-            continue;
-        }
         uint32_t found = FI_NONE;
         for (uint32_t h = key_hash(b->group_key[g]); slot[h & (slots - 1U)] != 0 && found == FI_NONE; h++) {
             const uint32_t k = slot[h & (slots - 1U)] - 1U;
-            found = same_group(a, k, b, g) && sa.start[k + 1U] > sa.start[k] ? k : FI_NONE;
+            found = same_group(a, k, b, g) ? k : FI_NONE;
         }
         const uint32_t n = found != FI_NONE ? sa.start[found + 1U] - sa.start[found] : 0U;
+        if (n + m == 0) {
+            continue;
+        }
         if (found != FI_NONE) {
             paired[found] = 1;
         }

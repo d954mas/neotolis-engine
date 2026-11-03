@@ -1463,8 +1463,8 @@ its pages and keys are described in its `main.c`. Its `query` and `--serve` mode
 window's records, state and numbers (one list for both) as key-value text without a window,
 so a script or an agent reads what the window shows; the window adds its sentences. Two frames, of one
 run or of two (native and web, before and after a change), compare by number keys and by group (marker
-path and note); inside a group their requests align like a text diff, handles matched by first use
-(`pipe#9`), since handles follow creation order. Its numbers follow this chapter: it
+path and note); inside a group their requests align like a text diff and compare with their arguments
+and ARGUMENT records, handles matched by first use (`pipe#9`), since handles follow creation order. Its numbers follow this chapter: it
 checks every plain or indexed draw's merge against the recorded `CACHE` and rebuilds the
 frame's counters from the records (`stream_bytes` is shown from the counters only:
 command sizes are not recorded).

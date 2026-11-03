@@ -190,19 +190,27 @@ static void test_a_repeated_sequence_has_two_addresses(void) {
     assert_holds(ask("frames", true), "\n  0 51 714 9 47 38 67 93952 0\n* 1 51 ");
 }
 
-/* The fixture and a copy whose draw @233 draws 12 indices, not 6: frame 0 and frame 1 of one file. */
-static void load_fixture_and_variant(void) {
+/* The fixture as frame 0 and an edited copy as frame 1 of one file. Each edit puts `to` in place of the first
+ * `from` after `at`; the two are one length, so the rest of the line stays. */
+typedef struct {
+    const char *at, *from, *to;
+} edit_t;
+
+static void load_variant(const edit_t *edits, uint32_t count) {
     const size_t len = s_file.len;
     char *text = (char *)malloc((len * 2) + 1);
     TEST_ASSERT_NOT_NULL(text);
     memcpy(text, s_file.text, len);
     memcpy(text + len, s_file.text, len);
     text[len * 2] = '\0';
-    char *draw = strstr(text + len, "\n233 OP op=DRAW_INDEXED");
-    TEST_ASSERT_NOT_NULL(draw);
-    char *count = strstr(draw, " count=6 ");
-    TEST_ASSERT_NOT_NULL(count);
-    count[7] = '7'; /* count=7: one character, so the rest of the line stays */
+    for (uint32_t k = 0; k < count; k++) {
+        char *at = strstr(text + len, edits[k].at);
+        TEST_ASSERT_NOT_NULL(at);
+        char *from = strstr(at, edits[k].from);
+        TEST_ASSERT_NOT_NULL(from);
+        TEST_ASSERT_EQUAL_size_t(strlen(edits[k].from), strlen(edits[k].to));
+        memcpy(from, edits[k].to, strlen(edits[k].to));
+    }
     fi_file_close(&s_file);
     fi_file_load(&s_file, "pair", text, len * 2);
     TEST_ASSERT_EQUAL_UINT32(2, s_file.frame_count);
@@ -210,7 +218,8 @@ static void load_fixture_and_variant(void) {
 
 /* Compare's A and B columns are each frame's own numbers; the changed draw is the only difference, in its group. */
 static void test_compare_tells_what_differs(void) {
-    load_fixture_and_variant();
+    static const edit_t k_count[] = {{"\n233 OP op=DRAW_INDEXED", " count=6 ", " count=7 "}};
+    load_variant(k_count, 1);
     (void)ask("frame 1", true);
     static fi_number_t a_numbers[FI_NUMBERS];
     static fi_number_t b_numbers[FI_NUMBERS];
@@ -276,6 +285,29 @@ static void test_native_and_web_align(void) {
     fi_file_close(&files[1]);
 }
 
+/* Renamed notes make a new group: B's is only_b, A's old one is a.gN, and both list their requests. */
+static void test_compare_names_groups_only_one_frame_has(void) {
+    static const edit_t k_renamed[] = {{"\n200 NOTE", "\"shape\"", "\"shapf\""}, {"\n205 NOTE", "\"shape\"", "\"shapf\""}};
+    load_variant(k_renamed, 2);
+    (void)ask("frame 1", true);
+    const fi_frame_t *a = &s_file.frames[0];
+    uint32_t g = 0;
+    while (g < a->group_count && strcmp(a->group_key[g], "> shape") != 0) {
+        g++;
+    }
+    TEST_ASSERT_LESS_THAN_UINT32(a->group_count, g);
+    char line[64];
+    const char *text = ask("compare 0", true);
+    (void)snprintf(line, sizeof(line), "\na.g%u.requests ", g);
+    assert_holds(text, line);
+    assert_holds(text, "  # only in A: > shape\n");
+    assert_holds(text, "  # only in B: > shapf\n");
+    (void)snprintf(line, sizeof(line), "compare 0 a.g%u", g);
+    text = ask(line, true);
+    assert_holds(text, "  # > shape\n");
+    assert_holds(text, "\n- @200    -       ");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_commands_answer_and_reject_bad_input);
@@ -286,5 +318,6 @@ int main(void) {
     RUN_TEST(test_a_repeated_sequence_has_two_addresses);
     RUN_TEST(test_compare_tells_what_differs);
     RUN_TEST(test_native_and_web_align);
+    RUN_TEST(test_compare_names_groups_only_one_frame_has);
     return UNITY_END();
 }

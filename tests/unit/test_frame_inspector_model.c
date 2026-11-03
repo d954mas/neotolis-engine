@@ -677,34 +677,113 @@ static void test_compare_aligns_requests_and_names_changes(void) {
     fi_file_close(&split);
 }
 
-/* Requests too far apart to align are listed, A's then B's, never paired. */
-static void test_compare_lists_what_it_cannot_align(void) {
-    const uint32_t half = FI_DIFF_EDITS + 8U;
-    nt_gfx_event_t *ev = (nt_gfx_event_t *)calloc((size_t)2U * half, sizeof(nt_gfx_event_t));
-    TEST_ASSERT_NOT_NULL(ev);
-    for (uint32_t i = 0; i < 2U * half; i++) {
-        ev[i].kind = NT_GFX_EVENT_OP;
-        ev[i].operation = i < half ? NT_GFX_OP_VIEWPORT : NT_GFX_OP_SCISSOR;
-        ev[i].result = NT_GFX_RESULT_ACCEPTED;
-    }
-    const fi_frame_t *a = load_events(ev, half, NULL);
-    fi_file_t other = {0};
-    nt_gfx_capture_view_t view = {.events = ev + half, .count = half};
+/* Formats hand-made records into a second file, so two frames of records can be compared. */
+static const fi_frame_t *load_other(fi_file_t *file, const nt_gfx_event_t *ev, uint32_t count) {
+    nt_gfx_capture_view_t view = {.events = ev, .count = count};
     const size_t len = nt_gfx_capture_format(&view, NULL, 0);
     char *text = (char *)malloc(len + 1);
     TEST_ASSERT_NOT_NULL(text);
     nt_gfx_capture_format(&view, text, len + 1);
-    fi_file_load(&other, "other", text, len);
+    fi_file_load(file, "other", text, len);
+    TEST_ASSERT_EQUAL_UINT32(1, file->frame_count);
+    return &file->frames[0];
+}
+
+/* A pipeline, a GL call A's issues and B's does not, then two texture sets. The second names texture
+ * `second` of the two the frame uses, as its alias. */
+static uint32_t handles_body(nt_gfx_event_t *ev, uint32_t base, bool call, uint32_t second) {
+    const uint32_t pipeline = base + 1U;
+    const uint32_t texture[2] = {base + 2U, base + 3U};
+    uint32_t n = 0;
+    ev[n++] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_PIPELINE, .object_kind = NT_GFX_OBJECT_PIPELINE, .object = pipeline, .result = NT_GFX_RESULT_ACCEPTED};
+    if (call) {
+        ev[n++] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_BACKEND, .operation = NT_GFX_OP_PIPELINE, .detail = NT_GFX_GL_glUseProgram, .link = 1};
+    }
+    for (uint32_t k = 0; k < 2U; k++) {
+        const uint32_t op = n;
+        ev[n++] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_TEXTURE_SET, .object_kind = NT_GFX_OBJECT_PIPELINE, .object = pipeline, .result = NT_GFX_RESULT_ACCEPTED};
+        ev[op].data.state.integers[0] = 1;
+        ev[n++] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_ARGUMENT, .operation = NT_GFX_OP_TEXTURE_SET, .object_kind = NT_GFX_OBJECT_TEXTURE, .object = texture[k == 0 ? 0 : second], .link = op + 1U};
+    }
+    return n;
+}
+
+/* Requests pair and match by alias, whatever their handles: B's handles all differ from A's. A GL call
+ * fewer and a texture set naming the other texture are the changes. */
+static void test_compare_pairs_handles_by_alias(void) {
+    nt_gfx_event_t ev[2][6];
+    const uint32_t na = handles_body(ev[0], 10, true, 1);
+    const fi_frame_t *a = load_events(ev[0], na, NULL);
+    fi_file_t other = {0};
+    const fi_frame_t *b = load_other(&other, ev[1], handles_body(ev[1], 20, false, 1));
     fi_diff_t d;
-    fi_diff(a, &other.frames[0], &d);
+    fi_diff(a, b, &d);
     TEST_ASSERT_EQUAL_UINT32(1, d.group_count);
-    TEST_ASSERT_FALSE(d.group[0].aligned);
-    TEST_ASSERT_EQUAL_UINT32(2U * half, d.group[0].count);
-    TEST_ASSERT_EQUAL_UINT8(FI_DIFF_ONLY_A, d.row[0].kind);
-    TEST_ASSERT_EQUAL_UINT8(FI_DIFF_ONLY_B, d.row[half].kind);
+    char letters[8];
+    diff_letters(&d, b, b->group_key[d.group[0].b], letters);
+    TEST_ASSERT_EQUAL_STRING("~==", letters); /* the pipeline, two texture sets */
+    TEST_ASSERT_EQUAL_UINT8(FI_CHANGE_CALLS, d.row[0].change);
+    TEST_ASSERT_EQUAL_UINT32(1, d.row[0].calls_a);
+    TEST_ASSERT_EQUAL_UINT32(0, d.row[0].calls_b);
     fi_diff_free(&d);
     fi_file_close(&other);
+
+    b = load_other(&other, ev[1], handles_body(ev[1], 20, true, 0));
+    fi_diff(a, b, &d);
+    diff_letters(&d, b, b->group_key[d.group[0].b], letters);
+    TEST_ASSERT_EQUAL_STRING("==~", letters);
+    TEST_ASSERT_EQUAL_UINT8(FI_CHANGE_ITEMS, d.row[2].change);
+    fi_diff_free(&d);
+    fi_file_close(&other);
+}
+
+/* One group of `viewports` VIEWPORT requests in A against B's `same` VIEWPORTs then `scissors` SCISSORs. */
+static void diff_runs(uint32_t viewports, uint32_t same, uint32_t scissors, fi_file_t files[2], fi_diff_t *d) {
+    const uint32_t total = viewports + same + scissors;
+    nt_gfx_event_t *ev = (nt_gfx_event_t *)calloc(total, sizeof(nt_gfx_event_t));
+    TEST_ASSERT_NOT_NULL(ev);
+    for (uint32_t i = 0; i < total; i++) {
+        ev[i].kind = NT_GFX_EVENT_OP;
+        ev[i].operation = i < viewports + same ? NT_GFX_OP_VIEWPORT : NT_GFX_OP_SCISSOR;
+        ev[i].result = NT_GFX_RESULT_ACCEPTED;
+    }
+    const fi_frame_t *a = load_other(&files[0], ev, viewports);
+    const fi_frame_t *b = load_other(&files[1], ev + viewports, same + scissors);
+    fi_diff(a, b, d);
     free(ev);
+    TEST_ASSERT_EQUAL_UINT32(1, d->group_count);
+    TEST_ASSERT_EQUAL_UINT32((viewports > same ? viewports : same) + scissors, d->group[0].count);
+}
+
+/* FI_DIFF_EDITS edits still align; one more lists A's requests, then B's, never paired. Requests only one
+ * side adds need no search, however many. */
+static void test_compare_aligns_up_to_its_edit_limit(void) {
+    static fi_file_t files[2];
+    fi_diff_t d;
+    const uint32_t half = FI_DIFF_EDITS / 2U;
+    diff_runs(half, 0, half, files, &d);
+    TEST_ASSERT_TRUE(d.group[0].aligned);
+    TEST_ASSERT_EQUAL_UINT32(FI_DIFF_EDITS, d.group[0].differ);
+    fi_diff_free(&d);
+    fi_file_close(&files[0]);
+    fi_file_close(&files[1]);
+
+    diff_runs(half + 1U, 0, half, files, &d);
+    TEST_ASSERT_FALSE(d.group[0].aligned);
+    TEST_ASSERT_EQUAL_UINT8(FI_DIFF_ONLY_A, d.row[0].kind);
+    TEST_ASSERT_EQUAL_UINT8(FI_DIFF_ONLY_B, d.row[half + 1U].kind);
+    fi_diff_free(&d);
+    fi_file_close(&files[0]);
+    fi_file_close(&files[1]);
+
+    diff_runs(FI_DIFF_EDITS + 8U, FI_DIFF_EDITS + 8U, FI_DIFF_EDITS + 8U, files, &d);
+    TEST_ASSERT_TRUE(d.group[0].aligned);
+    TEST_ASSERT_EQUAL_UINT32(FI_DIFF_EDITS + 8U, d.group[0].differ);
+    TEST_ASSERT_EQUAL_UINT8(FI_DIFF_SAME, d.row[0].kind);
+    TEST_ASSERT_EQUAL_UINT8(FI_DIFF_ONLY_B, d.row[d.group[0].count - 1U].kind);
+    fi_diff_free(&d);
+    fi_file_close(&files[0]);
+    fi_file_close(&files[1]);
 }
 // #endregion
 
@@ -786,6 +865,7 @@ int main(void) {
     RUN_TEST(test_a_group_key_is_one_line);
     RUN_TEST(test_an_overflowed_frame_opens);
     RUN_TEST(test_compare_aligns_requests_and_names_changes);
-    RUN_TEST(test_compare_lists_what_it_cannot_align);
+    RUN_TEST(test_compare_pairs_handles_by_alias);
+    RUN_TEST(test_compare_aligns_up_to_its_edit_limit);
     return UNITY_END();
 }
