@@ -250,7 +250,7 @@ typedef enum {
 
 typedef struct {
     nt_texture_pixel_format_t format; /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8. RGB9E5 = HDR, needs an HDR source */
-    uint32_t max_size;                /* 0 = no resize, otherwise max(w,h) clamped to this */
+    uint32_t max_size;                /* 0 = no resize, otherwise max(w,h) clamped to this; Basis: 0 or a multiple of 4 */
     nt_basisu_encode_opts_t compress; /* NONE = raw/uncompressed */
     bool premultiplied;               /* RGBA8 only; default false. Premultiply to avoid dark fringes with bilinear filtering. */
     /* Baked sampler defaults; materials may override them per binding. */
@@ -345,7 +345,7 @@ typedef enum {
 typedef struct {
     nt_basisu_encode_opts_t compress; /* NONE = raw/uncompressed */
     nt_texture_pixel_format_t format; /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8 */
-    uint32_t max_size;                /* max atlas page dimension (default: 2048) */
+    uint32_t max_size;                /* max atlas page dimension, >= 4 (default: 2048) */
     uint32_t padding;                 /* extra spacing between sprites after extrude (default: 2) */
     uint32_t margin;                  /* atlas edge margin (default: 0) */
     uint32_t extrude;                 /* AABB edge duplication count, <= max_size. Must be 0 unless shape is RECT. */
@@ -356,7 +356,7 @@ typedef struct {
     uint8_t allowed_transforms;   /* D4 transform mask (NT_ATLAS_TRANSFORM_* bits); identity is the implicit floor.
                                    * 0xFF = all 8 orientations (default), 0x01 = identity only.
                                    * A 0x00 zero-init behaves as identity-only. Bit i permits stored value i. */
-    bool power_of_two;            /* round atlas dims to POT (default: true) */
+    bool power_of_two;            /* round atlas dims to POT; placement uses the POT <= max_size (default: true) */
     bool debug_png;               /* write debug atlas page PNGs (default: false) */
     bool premultiplied;           /* true (default) = premultiply RGB by alpha during page encoding.
                                    * Required for correct bilinear filtering at sprite gaps.

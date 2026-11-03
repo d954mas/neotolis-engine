@@ -27,8 +27,8 @@
  *       chosen page.
  *
  * 4. POT expansion: round each page's used_w/used_h up to a power of two if
- *    opts.power_of_two, otherwise use the tight size; a compressed page is then
- *    rounded up to the 4x4 block.
+ *    opts.power_of_two, otherwise use the tight size; then round up to the 4x4
+ *    block, so a Basis page can take BC7 (WebGL BPTC needs it on level 0).
  *
  * ============================================================================
  * vpack_try_page — the inner search
@@ -157,10 +157,7 @@ uint32_t vpack_page_bound(const nt_atlas_opts_t *opts) {
     if (opts->power_of_two && vpack_next_pot(bound) != bound) {
         bound = vpack_next_pot(bound) / 2;
     }
-    if (nt_basisu_compressed(&opts->compress)) {
-        bound = nt_basisu_block_floor(bound);
-    }
-    return bound;
+    return bound & ~3U;
 }
 
 /* --- Public helpers --- */
@@ -1880,7 +1877,6 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
     uint32_t padding = opts->padding;
     uint32_t margin = opts->margin;
     uint32_t max_size = vpack_page_bound(opts);
-    const bool block_align = nt_basisu_compressed(&opts->compress);
     NT_LOG_INFO("  vector_pack: thread_count=%u, sprites=%u", thread_count, sprite_count);
 
     pack_stats_reset(stats);
@@ -2069,10 +2065,8 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
             final_w = vpack_next_pot(final_w);
             final_h = vpack_next_pot(final_h);
         }
-        if (block_align) {
-            final_w = nt_basisu_block_floor(final_w + 3U);
-            final_h = nt_basisu_block_floor(final_h + 3U);
-        }
+        final_w = (final_w + 3U) & ~3U;
+        final_h = (final_h + 3U) & ~3U;
         out_page_w[i] = final_w;
         out_page_h[i] = final_h;
     }

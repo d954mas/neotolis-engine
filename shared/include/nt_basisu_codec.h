@@ -1,7 +1,6 @@
 #ifndef NT_BASISU_CODEC_H
 #define NT_BASISU_CODEC_H
 
-#include <stdbool.h>
 #include <stdint.h>
 
 typedef enum {
@@ -25,10 +24,5 @@ typedef struct {
         } uastc;
     };
 } nt_basisu_encode_opts_t;
-
-static inline bool nt_basisu_compressed(const nt_basisu_encode_opts_t *opts) { return opts->codec != NT_BASISU_CODEC_NONE; }
-
-/* Basis targets are 4x4-block formats, and WebGL BPTC refuses a level 0 that is not block-aligned. */
-static inline uint32_t nt_basisu_block_floor(uint32_t v) { return v & ~3U; }
 
 #endif /* NT_BASISU_CODEC_H */

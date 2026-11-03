@@ -140,8 +140,8 @@ void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len) {
         (void)snprintf(buf, len, "atlas '%s': ran out of pages (max_size=%u)", err->atlas, err->max_size);
         break;
     case NT_BUILD_ERR_KIND_ATLAS_UNFITTABLE:
-        (void)snprintf(buf, len, "atlas '%s', sprite '%s': %ux%u + padding %u + margin %u + extrude %u does not fit an empty page of side %u", err->atlas, err->sprite, err->w, err->h, err->padding,
-                       err->margin, err->detail_a, err->max_size);
+        (void)snprintf(buf, len, "atlas '%s', sprite '%s': %ux%u + padding %u + margin %u + extrude %u does not fit an empty page of side %u (max_size %u)", err->atlas, err->sprite, err->w, err->h,
+                       err->padding, err->margin, err->detail_a, err->detail_b, err->max_size);
         break;
     case NT_BUILD_ERR_KIND_NONE:
     default:
@@ -558,11 +558,10 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     pos += (uint32_t)sizeof(opts->max_vertices);
     opts_buf[pos++] = opts->alpha_threshold;
     /* Only pack/compose-affecting opts go here. Post-pack fields (format,
-     * premultiplied, debug_png, compress settings) are handled by the texture
-     * cache and must NOT appear — otherwise changing e.g. premultiplied triggers
-     * a full re-pack when only re-encode is needed. Whether pages are compressed
-     * at all is the exception: it block-aligns the page size. */
-    uint8_t flags = (uint8_t)((opts->power_of_two ? 2 : 0) | (nt_basisu_compressed(&opts->compress) ? 4 : 0));
+     * premultiplied, debug_png, compress) are handled by the texture cache
+     * and must NOT appear — otherwise changing e.g. premultiplied triggers
+     * a full re-pack when only re-encode is needed. */
+    uint8_t flags = (uint8_t)(opts->power_of_two ? 2 : 0);
     opts_buf[pos++] = flags;
     opts_buf[pos++] = opts->allowed_transforms;
     opts_buf[pos++] = (uint8_t)opts->shape;
@@ -834,7 +833,7 @@ static nt_texture_pixel_format_t atlas_assert_opts(const nt_atlas_opts_t *opts) 
     NT_BUILD_ASSERT(opts->padding <= opts->max_size && "nt_atlas_begin: padding exceeds max_size");
     NT_BUILD_ASSERT(opts->margin <= opts->max_size && "nt_atlas_begin: margin exceeds max_size");
     NT_BUILD_ASSERT(opts->extrude <= opts->max_size && "nt_atlas_begin: extrude exceeds max_size");
-    NT_BUILD_ASSERT((!nt_basisu_compressed(&opts->compress) || opts->max_size >= 4) && "nt_atlas_begin: a compressed atlas needs max_size >= 4 (one 4x4 block)");
+    NT_BUILD_ASSERT(opts->max_size >= 4 && "nt_atlas_begin: max_size must be >= 4 (one 4x4 block)");
     NT_BUILD_ASSERT(isfinite(opts->max_added_area_percent) && opts->max_added_area_percent >= 0.0F && "nt_atlas_begin: max_added_area_percent must be finite and non-negative");
     /* unsigned cast catches a negative value cast into the enum too. */
     NT_BUILD_ASSERT((unsigned)opts->shape <= (unsigned)NT_ATLAS_SHAPE_CONCAVE_CONTOUR && "nt_atlas_begin: opts.shape out of range");
@@ -3035,8 +3034,9 @@ static void pipeline_validate(AtlasPipeline *p) {
                               .h = p->trim_h[k],
                               .padding = p->opts->padding,
                               .margin = effective_margin,
-                              .max_size = vpack_page_bound(p->opts),
-                              .detail_a = effective_extrude};
+                              .max_size = p->opts->max_size,
+                              .detail_a = effective_extrude,
+                              .detail_b = vpack_page_bound(p->opts)};
         error_copy_name(e.atlas, p->state->name);
         error_copy_name(e.sprite, p->sprites[k].name);
         atlas_push_error(p->state, p->sprites[k].add_seq, &e);

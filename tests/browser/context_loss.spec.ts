@@ -20,7 +20,6 @@ declare global {
       basis_build_targets(): number;
       basis_build_codecs(): number;
       basis_sample(level: number): number;
-      basis_single_pixel_format(): number;
       float_probe(useTexture: number): number;
     };
     __ntLossExtension?: WEBGL_lose_context;
@@ -306,29 +305,6 @@ test('basis fixture: the transcoded textures keep their format and texels across
   const after = await checkBasisFixture(page, 'after restore');
   expect(after, 'texels after re-activation').toEqual(before);
   expect(errors, 'unexpected browser/gfx errors').toEqual([]);
-});
-
-test('basis fixture: a single pixel skips BC7 level-zero restrictions', async ({ page }) => {
-  const errors: string[] = [];
-  page.on('pageerror', (error) => errors.push(error.message));
-  page.on('console', (message) => {
-    const text = message.text();
-    if (message.type() === 'error' || /\b(abort(?:ed)?|(?:GL_)?INVALID_\w+|(?:GL_)?OUT_OF_MEMORY)\b/i.test(text)) errors.push(text);
-  });
-  await page.goto('/index.html');
-  await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready(), null, { timeout: 30_000 });
-  const buildTargets = await page.evaluate(() => window.__nt!.basis_build_targets());
-  const buildCodecs = await page.evaluate(() => window.__nt!.basis_build_codecs());
-  // The embedded blob is UASTC and the restriction under test is BC7's. The 1x1 observes it only
-  // where BC7 is UASTC's first candidate: no ASTC admitted and reported.
-  test.skip((buildTargets & 1) === 0 || (buildCodecs & 2) === 0, 'build admits no BC7 target or no UASTC codec');
-  const caps = await page.evaluate(() => window.__nt!.basis_caps());
-  expect(caps & 1, 'BC7 must be available to exercise its level-zero restriction').toBe(1);
-  test.skip((caps & buildTargets & 2) !== 0, 'ASTC precedes BC7 for UASTC; the level-zero rule is unobservable here');
-  const format = await page.evaluate(() => window.__nt!.basis_single_pixel_format());
-  const expected = expectedBasisFormat(caps & ~1, buildTargets, true, CODEC_UASTC);
-  expect(errors, 'single-pixel Basis activation must not emit WebGL errors').toEqual([]);
-  expect(format, 'single-pixel Basis activation selects the next supported target').toBe(expected);
 });
 
 test('mesh pixel probe detects an omitted Draw block bind', async ({ page }) => {

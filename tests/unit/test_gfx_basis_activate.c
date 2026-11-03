@@ -341,6 +341,23 @@ void test_etc1s_caps_matrix_picks_the_first_supported_target(void) { caps_matrix
 void test_uastc_caps_matrix_picks_the_first_supported_target(void) { caps_matrix_for_codec(NT_BASISU_CODEC_UASTC_LDR); }
 #endif
 
+#if !NT_BASISU_HAS_ETC1S || !NT_BASISU_HAS_UASTC
+/* The native encoder still emits the codec whose option is OFF; a pack from
+ * another configure is a developer error, asserted at the blob check before
+ * any staging. */
+void test_blob_of_a_codec_outside_the_set_asserts_before_staging(void) {
+    const nt_basisu_codec_t outside = NT_BASISU_HAS_ETC1S ? NT_BASISU_CODEC_UASTC_LDR : NT_BASISU_CODEC_ETC1S;
+    basis_fixture_t alpha = fixture_encode(16, 8, outside, true, NT_TEXTURE_FORMAT_RGBA8, true);
+    set_caps(true, true, true);
+    nt_gfx_fake_reset();
+    EXPECT_ASSERT((void)nt_gfx_activate_texture(alpha.blob, alpha.size));
+    TEST_ASSERT_NULL(nt_gfx_test_stage_ptr());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_texture_create_count());
+    expect_full_pool_available();
+    fixture_free(&alpha);
+}
+#endif
+
 /* The builder block-aligns every Basis level 0, so an unaligned blob is broken pack data. */
 void test_unaligned_blob_asserts(void) {
     static const uint16_t dimensions[][2] = {{13, 7}, {1, 1}, {8, 2}, {2, 8}};

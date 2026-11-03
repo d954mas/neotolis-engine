@@ -2789,7 +2789,7 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     NT_ASSERT(info.width == hdr->width && info.height == hdr->height && "texture header size differs from its Basis blob");
     NT_ASSERT(info.level_count == hdr->mip_count && "texture Basis level count differs from its header");
     /* The builder block-aligns every Basis level 0, so BC7 (WebGL BPTC) is always eligible. */
-    NT_ASSERT(nt_basisu_block_floor(info.width) == info.width && nt_basisu_block_floor(info.height) == info.height && "texture Basis level 0 is not a multiple of 4");
+    NT_ASSERT(info.width % 4 == 0 && info.height % 4 == 0 && "texture Basis level 0 is not a multiple of 4");
     // #endregion
 
     // #region target and staging
