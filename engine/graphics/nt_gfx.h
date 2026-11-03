@@ -364,9 +364,10 @@ typedef struct {
      * vertex stream it is drawn from, plus one if drawn from any other buffer (nt_gfx_mesh_vertex_input).
      * The others: 4 per stream shapes draw from, the sprite layouts and the game's own. */
     uint16_t max_vertex_inputs;
-    uint16_t max_render_targets; /* default: 16 */
-    uint32_t capture_capacity;   /* event records of one frame, default: 0, below 2^24; init allocates two halves */
-    uint32_t stream_capacity;    /* draw-phase command bytes of one frame, default: 32 KiB; allocated once at init */
+    uint16_t max_render_targets;      /* default: 16 */
+    uint32_t capture_capacity;        /* event records of one frame, default: 0, below 2^24; init allocates two halves */
+    uint32_t capture_string_capacity; /* string bytes of one frame (labels, note text), default: 0; nonzero iff capture_capacity is */
+    uint32_t stream_capacity;         /* draw-phase command bytes of one frame, default: 32 KiB; allocated once at init */
     /* Frame storage bytes per frame by stream (NT_GFX_FRAME_*), default: 0 (disabled) except the
      * uniform stream, which every pass's Globals block uses: 16 KiB;
      * each enabled stream is a CPU staging copy plus a GPU buffer, allocated once at init. */
@@ -384,7 +385,7 @@ typedef struct {
 typedef struct {
     nt_shader_type_t type;
     const char *source;
-    const char *label;
+    const char *label; /* debug name; static storage */
 } nt_shader_desc_t;
 
 /* Program + fixed render state only; vertex input is a separate owned object
@@ -402,14 +403,13 @@ typedef struct {
     bool polygon_offset;         /* enable GL_POLYGON_OFFSET_FILL */
     float polygon_offset_factor; /* glPolygonOffset factor (typically 1.0) */
     float polygon_offset_units;  /* glPolygonOffset units (typically 1.0) */
-    const char *label;           /* not identity, and gfx stores none */
 } nt_pipeline_desc_t;
 
 typedef struct {
     nt_vertex_layout_t layout; /* per-vertex attrs, divisor 0; attr_count 0 = attribute-less (gl_VertexID) */
     nt_buffer_t vertex_buffer; /* NT_BUFFER_VERTEX; required iff layout.attr_count > 0 */
     nt_buffer_t index_buffer;  /* optional ({0} = non-indexed); NT_BUFFER_INDEX with index_type != NT_INDEX_NONE */
-    const char *label;         /* optional debug name; borrowed for the call */
+    const char *label;         /* debug name; static storage */
 } nt_vertex_input_desc_t;
 
 typedef struct {
@@ -418,7 +418,7 @@ typedef struct {
     const void *data;
     uint32_t size;
     uint8_t index_type; /* INDEX buffers: NT_INDEX_NONE/NT_INDEX_UINT16/NT_INDEX_UINT32 */
-    const char *label;
+    const char *label;  /* debug name; static storage */
 } nt_buffer_desc_t;
 
 typedef struct {
@@ -434,7 +434,7 @@ typedef struct {
     /* 0 or 1 = base level only; N = data holds levels 0..N-1 back to back with
      * no padding (KTX/DDS layout). Any count from 1 to the full chain is legal. */
     uint8_t level_count;
-    const char *label;
+    const char *label; /* debug name; static storage */
 } nt_texture_desc_t;
 
 typedef struct {
@@ -446,7 +446,7 @@ typedef struct {
      * through a comparison sampler for the shadow lookup and through a plain
      * sampler for a raw-depth view. Non-NONE requires DEPTH* storage. */
     nt_compare_func_t compare_func;
-    const char *label; /* debug name; static storage */
+    const char *label; /* debug name for GL failure logs; not identity, so a capture names no sampler */
 } nt_sampler_desc_t;
 
 /* The target borrows live single-level textures of one size; an invalid handle
@@ -698,6 +698,9 @@ typedef enum {
     NT_GFX_RESULT_UNKNOWN,
 } nt_gfx_result_t;
 
+/* A string of a capture: its offset in the view's strings. 0 is the leading "", which stands for none. */
+typedef uint32_t nt_gfx_capture_string_t;
+
 /* Pointer-free records. Each public operation is one OP record: the request at the call, its
  * result (and a creator's handle) once the call returns. Every gfx record names its operation by
  * link = OP record index + 1 (0: none); notes and markers have no link and overlay its bytes, so
@@ -725,6 +728,7 @@ typedef union {
             struct {
                 uint64_t size;
                 uint32_t backend, related[3], type, usage, width, height, format, levels, flags;
+                nt_gfx_capture_string_t label; /* DEFINITION: the object's desc label */
             } resource;
             struct {
                 uint32_t first, count, vertices, instances, vertex_input;
@@ -750,18 +754,18 @@ typedef union {
     };
     struct {
         nt_gfx_event_kind_t kind;
-        char label[100]; /* NOTE label or MARKER_PUSH name */
+        nt_gfx_capture_string_t label; /* NOTE label or MARKER_PUSH name */
     } note;
     struct {
         nt_gfx_event_kind_t kind;
         nt_gfx_note_type_t type;
-        char key[24];
+        nt_gfx_capture_string_t key;
         union {
             uint32_t u32;
             int32_t i32;
             uint64_t u64;
             float f32;
-            char str[72];
+            nt_gfx_capture_string_t str;
         } value;
     } field;
 } nt_gfx_event_t;
@@ -783,10 +787,12 @@ typedef enum {
 } nt_gfx_capture_platform_t;
 
 typedef struct {
-    bool overflow;
+    bool overflow; /* the records or the strings ran out: nothing after the last record */
     nt_gfx_capture_platform_t platform;
     const nt_gfx_event_t *events;
     uint32_t count;
+    const char *strings; /* the frame's strings, NUL-terminated back to back; strings[0] is "" */
+    uint32_t string_bytes;
     uint32_t execute_begin, execute_end; /* records of the end_frame stream execution, frame storage uploads included; 0 until it ran */
     nt_gfx_counters_t counters;          /* the finished frame's */
 } nt_gfx_capture_view_t;
@@ -799,9 +805,10 @@ void nt_gfx_capture_request(void);
  * On requires nonzero init capacity; the stub is inert. Init and shutdown turn it off. */
 void nt_gfx_capture_set_continuous(bool on);
 /* The last finished recorded frame (closed by a begin_frame), complete with its post-render and
- * between-frame work. Its records stay valid until the begin_frame that finishes the next recorded
- * frame, or shutdown, so a continuous capture is readable during the whole next frame. Copy count
- * records and metadata to keep. Empty (events=NULL) before any recorded frame finishes. */
+ * between-frame work. Its records and strings stay valid until the begin_frame that finishes the next
+ * recorded frame, or shutdown, so a continuous capture is readable during the whole next frame. To keep
+ * it, copy the metadata, count records and string_bytes strings, and point events and strings at the
+ * copies. Empty (events=NULL) before any recorded frame finishes. */
 nt_gfx_capture_view_t nt_gfx_capture_read(void);
 #endif
 
@@ -959,12 +966,12 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
  * whose GPU object a loss discarded -- recreate the stages and relink. Only a stale stage handle asserts.
  * label is an optional debug name; static storage. */
 nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs, const char *label);
-/* Returns the live pipeline of an equal desc (the label is not identity, and gfx keeps none) or
+/* Returns the live pipeline of an equal desc or
  * creates one; gfx owns it until its program is destroyed. Accepts a linking program; binding the
  * pipeline asserts until the program is ready. Creation preserves the currently bound pipeline. */
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
 /* Caller owns the result; destroy it with nt_gfx_destroy_vertex_input. The VI
- * borrows its buffers; creation borrows desc/label and preserves the bound VI.
+ * borrows its buffers; creation borrows desc and preserves the bound VI.
  * INVALID means context loss; caller errors assert. */
 nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc);
 /* Registers a per-instance layout (divisor 1) for nt_gfx_bind_vertex_input_instanced, or returns

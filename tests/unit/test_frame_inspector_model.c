@@ -17,6 +17,7 @@ static nt_buffer_t s_vbo;
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 512;
+    desc.capture_string_capacity = 16384;
     desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 4096;
     desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096;
     nt_gfx_init(&desc);
@@ -412,7 +413,7 @@ static void test_uploads_and_resource_bytes(void) {
     TEST_ASSERT_EQUAL_UINT32(1, fr->buffer_upload_count);
     TEST_ASSERT_EQUAL_UINT32(0x20001, fr->buffer_upload[0].object);
     TEST_ASSERT_EQUAL_UINT64(64, fr->buffer_upload[0].bytes);
-    TEST_ASSERT_EQUAL_UINT32(1, fi_alias(fr, NT_GFX_OBJECT_BUFFER, 0x20001));
+    TEST_ASSERT_EQUAL_UINT32(1, fi_alias(fr, NT_GFX_OBJECT_BUFFER, 0x20001).ordinal);
 }
 
 /* Only the four draw functions count as GL draw calls: glDrawBuffers selects attachments. */
@@ -785,6 +786,130 @@ static void test_compare_checks_what_a_create_defines(void) {
     }
 }
 
+static bool s_extra; /* labeled_body creates a buffer labeled "extra" before "shared" */
+
+static void labeled_body(void) {
+    const nt_buffer_t extra = s_extra ? nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16, .label = "extra"}) : (nt_buffer_t){0};
+    nt_gfx_destroy_buffer(nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 48, .label = "shared"}));
+    if (s_extra) {
+        nt_gfx_destroy_buffer(extra);
+    }
+}
+
+/* B's snapshot holds one more live buffer of the same label that B never uses: numbered after the frame's work,
+ * it shifts nothing, so the frames' requests are equal and pair. */
+static void test_compare_ignores_an_unused_live_object(void) {
+    s_extra = false;
+    size_t len = 0;
+    char *text = record(labeled_body, &len);
+    const fi_frame_t *a = load(&s_file, text, len);
+    const nt_buffer_t unused = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16, .label = "shared"});
+    text = record(labeled_body, &len);
+    nt_gfx_destroy_buffer(unused);
+    fi_file_t other = {0};
+    const fi_frame_t *b = load(&other, text, len);
+    fi_diff_t d;
+    fi_diff(a, b, &d);
+    char letters[8];
+    diff_letters(&d, b, b->group_key[d.group[0].b], letters);
+    TEST_ASSERT_EQUAL_STRING("===", letters); /* timer, create, destroy */
+    fi_diff_free(&d);
+    fi_file_close(&other);
+}
+
+/* B creates and uses a buffer of another label before the shared one: only that buffer is new, and the
+ * shared buffer still pairs. */
+static void test_compare_pairs_objects_by_label(void) {
+    s_extra = false;
+    size_t len = 0;
+    char *text = record(labeled_body, &len);
+    const fi_frame_t *a = load(&s_file, text, len);
+    s_extra = true;
+    text = record(labeled_body, &len);
+    s_extra = false;
+    fi_file_t other = {0};
+    const fi_frame_t *b = load(&other, text, len);
+    fi_diff_t d;
+    fi_diff(a, b, &d);
+    char letters[8];
+    diff_letters(&d, b, b->group_key[d.group[0].b], letters);
+    TEST_ASSERT_EQUAL_STRING("=+==+", letters); /* timer, create extra, create shared, destroy shared, destroy extra */
+    fi_diff_free(&d);
+    fi_file_close(&other);
+}
+
+static const char *s_labels[2] = {"mesh", "mesh"}; /* pair_body's buffers */
+static uint32_t s_second_size = 48;
+
+static void pair_body(void) {
+    const nt_buffer_t first = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16, .label = s_labels[0]});
+    const nt_buffer_t second = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = s_second_size, .label = s_labels[1]});
+    nt_gfx_destroy_buffer(second);
+    nt_gfx_destroy_buffer(first);
+}
+
+/* The rows of pair_body in A (default labels and size) against B recorded with `labels` and `second_size`. */
+static void pair_letters(const char *labels[2], uint32_t second_size, char *letters) {
+    size_t len = 0;
+    char *text = record(pair_body, &len);
+    const fi_frame_t *a = load(&s_file, text, len);
+    s_labels[0] = labels[0];
+    s_labels[1] = labels[1];
+    s_second_size = second_size;
+    text = record(pair_body, &len);
+    s_labels[0] = "mesh";
+    s_labels[1] = "mesh";
+    s_second_size = 48;
+    fi_file_t other = {0};
+    const fi_frame_t *b = load(&other, text, len);
+    fi_diff_t d;
+    fi_diff(a, b, &d);
+    diff_letters(&d, b, b->group_key[d.group[0].b], letters);
+    fi_diff_free(&d);
+    fi_file_close(&other);
+    fi_file_close(&s_file);
+}
+
+/* Objects of one label pair by their number within it: a changed second "mesh" is that object changed. A
+ * renamed object is another object: nothing of it pairs. The alias shows kind, label and number. */
+static void test_compare_pairs_one_label_by_number(void) {
+    char letters[8];
+    pair_letters((const char *[2]){"mesh", "mesh"}, 64, letters);
+    TEST_ASSERT_EQUAL_STRING("==~==", letters); /* timer, create, create, destroy, destroy */
+
+    pair_letters((const char *[2]){"mesh", "renamed"}, 48, letters);
+    TEST_ASSERT_NULL(strchr(letters, '~'));
+    uint32_t same = 0;
+    for (const char *c = letters; *c != '\0'; c++) {
+        same += *c == '=';
+    }
+    TEST_ASSERT_EQUAL_UINT32(3, same); /* timer, the first mesh's create and destroy */
+
+    size_t len = 0;
+    char *text = record(pair_body, &len);
+    const fi_frame_t *fr = load(&s_file, text, len);
+    const fi_alias_t second = fi_alias(fr, NT_GFX_OBJECT_BUFFER, fr->view.events[find_op(fr, NT_GFX_OP_CREATE, 1)].object);
+    TEST_ASSERT_EQUAL_STRING("mesh", second.label);
+    TEST_ASSERT_EQUAL_UINT32(2, second.ordinal);
+}
+
+/* A request may name handles the frame never defines (a hand-made or cut capture): each still gets an alias. */
+static void test_handles_without_definitions_get_aliases(void) {
+    nt_gfx_event_t ev = {.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_VERTEX_INPUT, .object_kind = NT_GFX_OBJECT_VERTEX_INPUT, .object = 7, .result = NT_GFX_RESULT_ACCEPTED};
+    ev.data.binding.secondary = 8;
+    ev.data.binding.slot = 9;
+    const fi_frame_t *fr = load_events(&s_file, &ev, 1, NULL);
+    TEST_ASSERT_EQUAL_UINT32(1, fi_alias(fr, NT_GFX_OBJECT_VERTEX_INPUT, 7).ordinal);
+    TEST_ASSERT_EQUAL_UINT32(1, fi_alias(fr, NT_GFX_OBJECT_BUFFER, 8).ordinal);
+    TEST_ASSERT_EQUAL_UINT32(1, fi_alias(fr, NT_GFX_OBJECT_INSTANCE_LAYOUT, 9).ordinal);
+    fi_file_close(&s_file);
+
+    nt_gfx_event_t texture = {.kind = NT_GFX_EVENT_DEFINITION, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_TEXTURE, .object = 7};
+    texture.data.resource.related[0] = 3; /* its default sampler */
+    fr = load_events(&s_file, &texture, 1, NULL);
+    TEST_ASSERT_EQUAL_UINT32(1, fi_alias(fr, NT_GFX_OBJECT_SAMPLER, 3).ordinal);
+}
+
 /* Matches inside the changed middle: A's VIEWPORTs (v) and SCISSORs (s) "svvs" against B's "vvsv" keep the
  * one longest common run "vvs", in order. */
 static void test_compare_keeps_the_longest_common_run(void) {
@@ -884,7 +1009,7 @@ static void test_damage_stays_inside_its_document(void) {
     memcpy(text, one, len);
     memcpy(text + len, one, len);
     free(one);
-    text[10] = '9'; /* "ntcapture 2" becomes an unknown version */
+    text[10] = '9'; /* "ntcapture 3" becomes an unknown version */
     fi_file_load(&s_file, "test", text, len * 2);
     TEST_ASSERT_EQUAL_UINT32(2, s_file.frame_count);
     TEST_ASSERT_NULL(s_file.frames[0].view.events);
@@ -937,6 +1062,10 @@ int main(void) {
     RUN_TEST(test_compare_aligns_requests_and_names_changes);
     RUN_TEST(test_compare_pairs_handles_by_alias);
     RUN_TEST(test_compare_checks_what_a_create_defines);
+    RUN_TEST(test_compare_ignores_an_unused_live_object);
+    RUN_TEST(test_compare_pairs_objects_by_label);
+    RUN_TEST(test_compare_pairs_one_label_by_number);
+    RUN_TEST(test_handles_without_definitions_get_aliases);
     RUN_TEST(test_compare_keeps_the_longest_common_run);
     RUN_TEST(test_compare_aligns_up_to_its_edit_limit);
     return UNITY_END();

@@ -23,6 +23,7 @@ static void count_error_logs(nt_log_level_t level, const char *domain, const cha
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 256;
+    desc.capture_string_capacity = 16384;
     desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 4096;
     desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096;
     nt_gfx_init(&desc);
@@ -1058,6 +1059,7 @@ static void test_capture_overflow_does_not_stop_counters(void) {
     nt_gfx_shutdown();
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 1;
+    desc.capture_string_capacity = 16384;
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
     record_next_frame();
@@ -1183,6 +1185,7 @@ static void test_shutdown_after_an_odd_number_of_finished_frames(void) {
     nt_gfx_shutdown();
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 256;
+    desc.capture_string_capacity = 16384;
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
 }
@@ -1202,6 +1205,106 @@ static void test_capture_read_after_shutdown_is_empty(void) {
     nt_gfx_begin_frame();
 }
 
+/* The label of the create DEFINITION of an object in the open frame; NULL when it has none. */
+static const char *definition_label(nt_gfx_object_kind_t kind, uint32_t object) {
+    const nt_gfx_capture_view_t v = nt_test_capture_open();
+    for (uint32_t i = 0; i < v.count; i++) {
+        const nt_gfx_event_t *e = &v.events[i];
+        if (e->kind == NT_GFX_EVENT_DEFINITION && e->operation == NT_GFX_OP_CREATE && e->object_kind == kind && e->object == object) {
+            return v.strings + e->data.resource.label;
+        }
+    }
+    return NULL;
+}
+
+/* A create's DEFINITION and every later snapshot name the object by its desc label, a pipeline by its program's;
+ * a sampler, shared by key, has none, and neither has an unlabeled object in a reused slot. */
+static void test_definitions_carry_the_desc_label(void) {
+    record_next_frame();
+    const nt_buffer_t probe = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16, .label = "probe"});
+    const nt_sampler_t shadow = nt_gfx_make_sampler(&(nt_sampler_desc_t){.compare_func = NT_COMPARE_LEQUAL, .label = "shadow"});
+    static const uint32_t pixel = 0xFFFFFFFFU;
+    const nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "vs"});
+    const nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "fs"});
+    const nt_program_t program = nt_gfx_make_program(vs, fs, "program");
+    const nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    const nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.label = "vi"});
+    const nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = &pixel, .format = NT_TEXTURE_FORMAT_RGBA8, .label = "texture"});
+    const nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = texture, .label = "target"});
+    TEST_ASSERT_EQUAL_STRING("vs", definition_label(NT_GFX_OBJECT_SHADER, vs.id));
+    TEST_ASSERT_EQUAL_STRING("fs", definition_label(NT_GFX_OBJECT_SHADER, fs.id));
+    TEST_ASSERT_EQUAL_STRING("program", definition_label(NT_GFX_OBJECT_PROGRAM, program.id));
+    TEST_ASSERT_EQUAL_STRING("vi", definition_label(NT_GFX_OBJECT_VERTEX_INPUT, vi.id));
+    TEST_ASSERT_EQUAL_STRING("texture", definition_label(NT_GFX_OBJECT_TEXTURE, texture.id));
+    TEST_ASSERT_EQUAL_STRING("target", definition_label(NT_GFX_OBJECT_RENDER_TARGET, target.id));
+    TEST_ASSERT_EQUAL_STRING("probe", definition_label(NT_GFX_OBJECT_BUFFER, probe.id));
+    TEST_ASSERT_EQUAL_STRING("program", definition_label(NT_GFX_OBJECT_PIPELINE, pipeline.id)); /* named by its program */
+    TEST_ASSERT_EQUAL_STRING("", definition_label(NT_GFX_OBJECT_SAMPLER, shadow.id));           /* shared by key: no name */
+
+    record_next_frame(); /* the snapshot */
+    TEST_ASSERT_EQUAL_STRING("program", definition_label(NT_GFX_OBJECT_PROGRAM, program.id));
+    TEST_ASSERT_EQUAL_STRING("target", definition_label(NT_GFX_OBJECT_RENDER_TARGET, target.id));
+    TEST_ASSERT_EQUAL_STRING("probe", definition_label(NT_GFX_OBJECT_BUFFER, probe.id));
+    TEST_ASSERT_EQUAL_STRING("program", definition_label(NT_GFX_OBJECT_PIPELINE, pipeline.id));
+
+    nt_gfx_destroy_buffer(probe);
+    const nt_buffer_t unlabeled = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(probe.id), nt_pool_slot_index(unlabeled.id));
+    TEST_ASSERT_EQUAL_STRING("", definition_label(NT_GFX_OBJECT_BUFFER, unlabeled.id));
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+}
+
+/* Reopens gfx with room for `spare` string bytes after a recorded frame's snapshot (frame storage buffers are
+ * labeled), and records that frame. */
+static void record_with_strings(uint32_t spare) {
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    desc.capture_capacity = 256;
+    desc.capture_string_capacity = 16384;
+    nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
+    record_next_frame();
+    const uint32_t snapshot = g_nt_gfx_capture.view.string_bytes;
+    nt_gfx_end_frame();
+    nt_gfx_shutdown();
+    desc.capture_string_capacity = snapshot + spare;
+    nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
+    record_next_frame();
+    TEST_ASSERT_EQUAL_UINT32(snapshot, g_nt_gfx_capture.view.string_bytes);
+}
+
+/* A string that does not fit sets overflow and publishes nothing: no note without all its fields, no
+ * definition without its label. Exact room publishes. */
+static void test_strings_that_do_not_fit_publish_nothing(void) {
+    record_with_strings(3); /* "n" fits, the key "k" does not */
+    uint32_t before = nt_test_capture_open().count;
+    NT_GFX_NOTE("n", NT_NOTE_U32("k", 1U));
+    TEST_ASSERT_TRUE(g_nt_gfx_capture.view.overflow);
+    TEST_ASSERT_EQUAL_UINT32(before, nt_test_capture_open().count);
+
+    record_with_strings(1); /* a marker name that does not fit: no MARKER_PUSH with an empty name */
+    before = nt_test_capture_open().count;
+    NT_GFX_MARKER_PUSH("m");
+    TEST_ASSERT_TRUE(g_nt_gfx_capture.view.overflow);
+    TEST_ASSERT_EQUAL_UINT32(before, nt_test_capture_open().count);
+    NT_GFX_MARKER_POP();
+
+    record_with_strings(4); /* exactly "n" and "k" */
+    before = nt_test_capture_open().count;
+    NT_GFX_NOTE("n", NT_NOTE_U32("k", 1U));
+    TEST_ASSERT_FALSE(g_nt_gfx_capture.view.overflow);
+    TEST_ASSERT_EQUAL_UINT32(before + 2U, nt_test_capture_open().count);
+
+    record_with_strings(4);
+    const nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16, .label = "long"});
+    TEST_ASSERT_TRUE(g_nt_gfx_capture.view.overflow);
+    TEST_ASSERT_NULL(definition_label(NT_GFX_OBJECT_BUFFER, buffer.id));
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+}
+
 static void test_notes_copy_label_and_typed_fields(void) {
     NT_GFX_NOTE("unrecorded");
     TEST_ASSERT_EQUAL_UINT32(0, nt_test_capture_open().count);
@@ -1216,12 +1319,12 @@ static void test_notes_copy_label_and_typed_fields(void) {
     TEST_ASSERT_EQUAL_UINT32(first + 7U, v.count);
     const nt_gfx_event_t *e = &v.events[first];
     TEST_ASSERT_EQUAL(NT_GFX_EVENT_NOTE, e[0].kind);
-    TEST_ASSERT_EQUAL_STRING("wave", e[0].note.label);
+    TEST_ASSERT_EQUAL_STRING("wave", v.strings + e[0].note.label);
     for (uint32_t i = 1; i <= 5; i++) {
         TEST_ASSERT_EQUAL(NT_GFX_EVENT_NOTE_FIELD, e[i].kind);
     }
     TEST_ASSERT_EQUAL(NT_GFX_NOTE_U32, e[1].field.type);
-    TEST_ASSERT_EQUAL_STRING("u", e[1].field.key);
+    TEST_ASSERT_EQUAL_STRING("u", v.strings + e[1].field.key);
     TEST_ASSERT_EQUAL_UINT32(7, e[1].field.value.u32);
     TEST_ASSERT_EQUAL(NT_GFX_NOTE_I32, e[2].field.type);
     TEST_ASSERT_EQUAL_INT32(-3, e[2].field.value.i32);
@@ -1231,10 +1334,10 @@ static void test_notes_copy_label_and_typed_fields(void) {
     const float half = 0.5F;
     TEST_ASSERT_EQUAL_MEMORY(&half, &e[4].field.value.f32, sizeof(half));
     TEST_ASSERT_EQUAL(NT_GFX_NOTE_STR, e[5].field.type);
-    TEST_ASSERT_EQUAL_STRING("name", e[5].field.key);
-    TEST_ASSERT_EQUAL_STRING("boss", e[5].field.value.str); /* copied at the call */
+    TEST_ASSERT_EQUAL_STRING("name", v.strings + e[5].field.key);
+    TEST_ASSERT_EQUAL_STRING("boss", v.strings + e[5].field.value.str); /* copied at the call */
     TEST_ASSERT_EQUAL(NT_GFX_EVENT_NOTE, e[6].kind);
-    TEST_ASSERT_EQUAL_STRING("bare", e[6].note.label);
+    TEST_ASSERT_EQUAL_STRING("bare", v.strings + e[6].note.label);
 }
 
 static void test_notes_do_not_end_a_draw_merge(void) {
@@ -1271,7 +1374,7 @@ static void test_markers_nest_in_call_order_and_may_wrap_post_render_work(void) 
         TEST_ASSERT_LESS_THAN_UINT32(6, seen);
         TEST_ASSERT_EQUAL(expected[seen] != NULL ? NT_GFX_EVENT_MARKER_PUSH : NT_GFX_EVENT_MARKER_POP, e->kind);
         if (expected[seen] != NULL) {
-            TEST_ASSERT_EQUAL_STRING(expected[seen], e->note.label);
+            TEST_ASSERT_EQUAL_STRING(expected[seen], v.strings + e->note.label);
         }
         seen++;
     }
@@ -1284,6 +1387,7 @@ static uint32_t record_with_spare(uint32_t snapshot, uint32_t spare) {
     nt_gfx_shutdown();
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = snapshot + spare;
+    desc.capture_string_capacity = 16384;
     desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 4096; /* as in setUp */
     desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096;
     nt_gfx_init(&desc);
@@ -1323,6 +1427,7 @@ static void test_exact_capacity_and_one_record_short(void) {
         nt_gfx_shutdown();
         nt_gfx_desc_t desc = nt_gfx_desc_defaults();
         desc.capture_capacity = needed - missing;
+        desc.capture_string_capacity = 16384;
         desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 4096; /* as in setUp: the recorded frame uploads */
         desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096;
         nt_gfx_init(&desc);
@@ -1350,12 +1455,18 @@ static void test_a_marker_open_at_begin_frame_asserts(void) {
     nt_gfx_begin_frame();
 }
 
-static void test_a_note_string_longer_than_its_record_asserts(void) {
+/* Strings have no length limit, but a note's label, keys and string values and a marker name are required. */
+static void test_a_note_string_is_required(void) {
     record_next_frame();
-    char key[32];
-    memset(key, 'k', 24);
-    key[24] = '\0';
-    NT_TEST_EXPECT_ASSERT(NT_GFX_NOTE("n", NT_NOTE_U32(key, 1U)));
+    char key[300];
+    memset(key, 'k', sizeof(key) - 1U);
+    key[sizeof(key) - 1U] = '\0';
+    NT_GFX_NOTE("n", NT_NOTE_U32(key, 1U));
+    TEST_ASSERT_EQUAL_UINT32(299, (uint32_t)strlen(nt_test_capture_open().strings + nt_test_capture_open().events[nt_test_note(0, "n") + 1U].field.key));
+    NT_TEST_EXPECT_ASSERT(NT_GFX_NOTE("n", NT_NOTE_U32(NULL, 1U)));
+    NT_TEST_EXPECT_ASSERT(NT_GFX_NOTE("n", NT_NOTE_STR("k", NULL)));
+    NT_TEST_EXPECT_ASSERT(NT_GFX_NOTE(NULL));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_marker_push(NULL));
 }
 #endif
 
@@ -1423,6 +1534,8 @@ int main(void) {
     RUN_TEST(test_shutdown_after_an_odd_number_of_finished_frames);
     RUN_TEST(test_capture_read_after_shutdown_is_empty);
     RUN_TEST(test_exact_capacity_and_one_record_short);
+    RUN_TEST(test_definitions_carry_the_desc_label);
+    RUN_TEST(test_strings_that_do_not_fit_publish_nothing);
     RUN_TEST(test_notes_copy_label_and_typed_fields);
     RUN_TEST(test_notes_do_not_end_a_draw_merge);
     RUN_TEST(test_markers_nest_in_call_order_and_may_wrap_post_render_work);
@@ -1430,7 +1543,7 @@ int main(void) {
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_marker_pop_without_push_asserts);
     RUN_TEST(test_a_marker_open_at_begin_frame_asserts);
-    RUN_TEST(test_a_note_string_longer_than_its_record_asserts);
+    RUN_TEST(test_a_note_string_is_required);
 #endif
 #endif
     return UNITY_END();

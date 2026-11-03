@@ -92,7 +92,7 @@ typedef enum {
     ARM_COUNT,
 } arm_t;
 
-typedef enum { F_U32, F_U64, F_F32, F_BOOL, F_U32S, F_F32S } field_type_t;
+typedef enum { F_U32, F_U64, F_F32, F_BOOL, F_U32S, F_F32S, F_STR } field_type_t;
 
 typedef struct {
     const char *name;
@@ -108,8 +108,9 @@ static const field_t k_key[] = {{"key", (uint16_t)offsetof(nt_gfx_event_t, data.
                                 {NT_LIST_(backend, values, F_F32S)},
                                 {NT_FIELD_(backend, bytes, F_U64)}};
 static const field_t k_resource[] = {
-    {NT_FIELD_(resource, size, F_U64)},  {NT_FIELD_(resource, backend, F_U32)}, {NT_LIST_(resource, related, F_U32S)}, {NT_FIELD_(resource, type, F_U32)},   {NT_FIELD_(resource, usage, F_U32)},
-    {NT_FIELD_(resource, width, F_U32)}, {NT_FIELD_(resource, height, F_U32)},  {NT_FIELD_(resource, format, F_U32)},  {NT_FIELD_(resource, levels, F_U32)}, {NT_FIELD_(resource, flags, F_U32)},
+    {NT_FIELD_(resource, size, F_U64)},   {NT_FIELD_(resource, backend, F_U32)}, {NT_LIST_(resource, related, F_U32S)}, {NT_FIELD_(resource, type, F_U32)},
+    {NT_FIELD_(resource, usage, F_U32)},  {NT_FIELD_(resource, width, F_U32)},   {NT_FIELD_(resource, height, F_U32)},  {NT_FIELD_(resource, format, F_U32)},
+    {NT_FIELD_(resource, levels, F_U32)}, {NT_FIELD_(resource, flags, F_U32)},   {NT_FIELD_(resource, label, F_STR)},
 };
 static const field_t k_draw[] = {
     {NT_FIELD_(draw, first, F_U32)}, {NT_FIELD_(draw, count, F_U32)}, {NT_FIELD_(draw, vertices, F_U32)}, {NT_FIELD_(draw, instances, F_U32)}, {NT_FIELD_(draw, vertex_input, F_U32)}};
@@ -285,9 +286,15 @@ static void put_float(text_t *t, float f) {
     put(t, "%s", digits);
 }
 
-static void put_string(text_t *t, const char *s, size_t size) {
+/* A string of the view, checked: the records name strings by offset. */
+static const char *view_string(const nt_gfx_capture_view_t *view, nt_gfx_capture_string_t s) {
+    NT_ASSERT(s < view->string_bytes && "capture text: a string offset outside the frame's strings");
+    return view->strings + s;
+}
+
+static void put_string(text_t *t, const char *s) {
     put(t, "\"");
-    for (size_t i = 0; i < size && s[i] != '\0'; i++) {
+    for (size_t i = 0; s[i] != '\0'; i++) {
         const unsigned char c = (unsigned char)s[i];
         if (c < 0x20U || c > 0x7eU || c == '"' || c == '\\') {
             put(t, "\\x%02x", c);
@@ -329,7 +336,7 @@ static void put_list(text_t *t, const char *key, const unsigned char *at, field_
 }
 
 /* Zero scalars are omitted; an issued call's lists print exactly their counted elements, so a zero argument stays visible. */
-static void put_fields(text_t *t, const nt_gfx_event_t *e, arm_t arm) {
+static void put_fields(text_t *t, const nt_gfx_capture_view_t *view, const nt_gfx_event_t *e, arm_t arm) {
     const bool issued = issued_call(e, arm);
     const unsigned char *base = (const unsigned char *)e;
     for (uint32_t i = 0; i < k_arms[arm].count; i++) {
@@ -367,6 +374,15 @@ static void put_fields(text_t *t, const nt_gfx_event_t *e, arm_t arm) {
         case F_F32S:
             put_list(t, f->name, at, F_F32S, f->size, issued ? e->arg_count >> 4 : -1);
             break;
+        case F_STR: {
+            nt_gfx_capture_string_t str = 0;
+            memcpy(&str, at, sizeof(str));
+            if (str != 0) {
+                put(t, " %s=", f->name);
+                put_string(t, view_string(view, str));
+            }
+            break;
+        }
         }
     }
 }
@@ -421,9 +437,9 @@ static void put_detail(text_t *t, const nt_gfx_event_t *e) {
     }
 }
 
-static void put_field(text_t *t, const nt_gfx_event_t *e) {
+static void put_field(text_t *t, const nt_gfx_capture_view_t *view, const nt_gfx_event_t *e) {
     put(t, " key=");
-    put_string(t, e->field.key, sizeof(e->field.key));
+    put_string(t, view_string(view, e->field.key));
     put(t, " type=%s value=", NT_TABLE_NAME_(s_note_type_names, (uint32_t)e->field.type));
     switch (e->field.type) {
     case NT_GFX_NOTE_U32:
@@ -439,7 +455,7 @@ static void put_field(text_t *t, const nt_gfx_event_t *e) {
         put_float(t, e->field.value.f32);
         break;
     case NT_GFX_NOTE_STR:
-        put_string(t, e->field.value.str, sizeof(e->field.value.str));
+        put_string(t, view_string(view, e->field.value.str));
         break;
     }
 }
@@ -464,9 +480,9 @@ static void put_record(text_t *t, const nt_gfx_capture_view_t *view, uint32_t in
     if (!gfx) {
         if (e->kind == NT_GFX_EVENT_NOTE || e->kind == NT_GFX_EVENT_MARKER_PUSH) {
             put(t, " label=");
-            put_string(t, e->note.label, sizeof(e->note.label));
+            put_string(t, view_string(view, e->note.label));
         } else if (e->kind == NT_GFX_EVENT_NOTE_FIELD) {
-            put_field(t, e);
+            put_field(t, view, e);
         }
         put(t, "\n");
         return;
@@ -485,7 +501,7 @@ static void put_record(text_t *t, const nt_gfx_capture_view_t *view, uint32_t in
     if (e->link != 0) {
         put(t, " link=@%" PRIu32, e->link - 1U);
     }
-    put_fields(t, e, arm);
+    put_fields(t, view, e, arm);
     put(t, "\n");
 }
 
@@ -521,7 +537,7 @@ size_t nt_gfx_capture_format(const nt_gfx_capture_view_t *view, char *out, size_
     if (cap > 0) {
         out[0] = '\0';
     }
-    put(&t, "ntcapture 2\n");
+    put(&t, "ntcapture 3\n");
     put(&t, "frame sequence=%" PRIu64 " platform=%s records=%" PRIu32 " overflow=%d execute=%" PRIu32 "..%" PRIu32 "\n", view->counters.frame_sequence,
         NT_TABLE_NAME_(s_platform_names, (uint32_t)view->platform), view->count, view->overflow ? 1 : 0, view->execute_begin, view->execute_end);
     put_counters(&t, &view->counters);
@@ -693,39 +709,55 @@ static bool read_float(line_t *l, float *out) {
     return true;
 }
 
-/* A quoted string: printable bytes and \xNN for the rest; no NUL, at most size - 1 bytes. */
-static bool read_string(line_t *l, char *dst, size_t size) {
+/* The caller's string bytes the document fills; used counts bytes[0], the "" of offset 0. */
+typedef struct {
+    char *bytes;
+    uint32_t cap;
+    uint32_t used;
+} strings_t;
+
+/* The string byte at l->p and the text it takes (itself or \xNN, never NUL); -1 when it is none. */
+static int string_byte(const line_t *l, size_t *step) {
+    const unsigned char c = (unsigned char)*l->p;
+    *step = 1;
+    if (c != '\\') {
+        return c >= 0x20U && c <= 0x7eU ? c : -1;
+    }
+    const int hi = l->end - l->p >= 4 && l->p[1] == 'x' ? hex_digit(l->p[2]) : -1;
+    const int lo = hi >= 0 ? hex_digit(l->p[3]) : -1;
+    *step = 4;
+    return lo < 0 || (hi == 0 && lo == 0) ? -1 : (hi << 4) | lo;
+}
+
+/* A quoted string: printable bytes and \xNN for the rest, no NUL; appended to strings, "" as offset 0. */
+static bool read_string(line_t *l, strings_t *strings, nt_gfx_capture_string_t *out) {
     if (!take(l, "\"")) {
         return fail(l, "expected a string");
     }
-    size_t n = 0;
-    for (;;) {
-        if (l->p == l->end) {
-            return fail(l, "unterminated string");
+    const uint32_t start = strings->used;
+    uint32_t n = 0;
+    while (l->p < l->end && *l->p != '"') {
+        size_t step = 0;
+        const int c = string_byte(l, &step);
+        if (c < 0) {
+            return fail(l, *l->p == '\\' ? "bad escape" : "bad string byte");
         }
-        unsigned char c = (unsigned char)*l->p;
-        size_t step = 1;
-        if (c == '"') {
-            l->p++;
-            return true;
+        if (n + 1U >= strings->cap - start) {
+            return fail(l, "capacity: more string bytes than the array holds");
         }
-        if (c == '\\') {
-            const int hi = l->end - l->p >= 4 && l->p[1] == 'x' ? hex_digit(l->p[2]) : -1;
-            const int lo = hi >= 0 ? hex_digit(l->p[3]) : -1;
-            if (lo < 0 || (hi == 0 && lo == 0)) {
-                return fail(l, "bad escape");
-            }
-            c = (unsigned char)((hi << 4) | lo);
-            step = 4;
-        } else if (c < 0x20U || c > 0x7eU) {
-            return fail(l, "bad string byte");
-        }
-        if (n + 1 >= size) {
-            return fail(l, "string too long");
-        }
-        dst[n++] = (char)c;
+        strings->bytes[start + n++] = (char)c;
         l->p += step;
     }
+    if (l->p == l->end) {
+        return fail(l, "unterminated string");
+    }
+    l->p++;
+    if (n > 0) {
+        strings->bytes[start + n] = '\0';
+        strings->used = start + n + 1U;
+    }
+    *out = n > 0 ? start : 0U;
+    return true;
 }
 
 /* `[a,b,...]` into consecutive 4-byte slots. */
@@ -767,7 +799,7 @@ static bool take_field(line_t *l, const char *name) {
 }
 
 /* Fields in table order, each optional; an issued call's lists set its arg_count. */
-static bool read_fields(line_t *l, nt_gfx_event_t *e, arm_t arm) {
+static bool read_fields(line_t *l, strings_t *strings, nt_gfx_event_t *e, arm_t arm) {
     const bool issued = issued_call(e, arm);
     unsigned char *base = (unsigned char *)e;
     for (uint32_t i = 0; i < k_arms[arm].count; i++) {
@@ -805,6 +837,12 @@ static bool read_fields(line_t *l, nt_gfx_event_t *e, arm_t arm) {
                 e->arg_count = (uint8_t)(f->type == F_U32S ? (e->arg_count & 0xF0U) | n : (e->arg_count & 0x0FU) | (n << 4));
             }
             break;
+        case F_STR: {
+            nt_gfx_capture_string_t str = 0;
+            ok = read_string(l, strings, &str);
+            memcpy(at, &str, sizeof(str));
+            break;
+        }
         }
         if (!ok) {
             return false;
@@ -856,7 +894,7 @@ static bool read_detail(line_t *l, nt_gfx_event_t *e, const nt_gfx_event_t *even
     return false;
 }
 
-static bool read_gfx(line_t *l, nt_gfx_event_t *events, uint32_t index) {
+static bool read_gfx(line_t *l, strings_t *strings, nt_gfx_event_t *events, uint32_t index) {
     nt_gfx_event_t *e = &events[index];
     uint32_t v = 0;
     if (!expect(l, " op=") || !NT_READ_NAME_(l, s_operation_names, &v)) {
@@ -878,12 +916,12 @@ static bool read_gfx(line_t *l, nt_gfx_event_t *events, uint32_t index) {
     if (!read_detail(l, e, events, index) || (take(l, " link=@") && !read_ref(l, events, index, false, &e->link))) {
         return false;
     }
-    return read_fields(l, e, record_arm(e));
+    return read_fields(l, strings, e, record_arm(e));
 }
 
-static bool read_note_field(line_t *l, nt_gfx_event_t *e) {
+static bool read_note_field(line_t *l, strings_t *strings, nt_gfx_event_t *e) {
     uint32_t type = 0;
-    if (!expect(l, " key=") || !read_string(l, e->field.key, sizeof(e->field.key)) || !expect(l, " type=") || !NT_READ_NAME_(l, s_note_type_names, &type) || !expect(l, " value=")) {
+    if (!expect(l, " key=") || !read_string(l, strings, &e->field.key) || !expect(l, " type=") || !NT_READ_NAME_(l, s_note_type_names, &type) || !expect(l, " value=")) {
         return false;
     }
     e->field.type = (nt_gfx_note_type_t)type;
@@ -904,12 +942,12 @@ static bool read_note_field(line_t *l, nt_gfx_event_t *e) {
     case NT_GFX_NOTE_F32:
         return read_float(l, &e->field.value.f32);
     case NT_GFX_NOTE_STR:
-        return read_string(l, e->field.value.str, sizeof(e->field.value.str));
+        return read_string(l, strings, &e->field.value.str);
     }
     return false;
 }
 
-static bool read_record(line_t *l, nt_gfx_event_t *events, uint32_t index) {
+static bool read_record(line_t *l, strings_t *strings, nt_gfx_event_t *events, uint32_t index) {
     nt_gfx_event_t *e = &events[index];
     memset(e, 0, sizeof(*e));
     const char *start = l->p;
@@ -934,16 +972,16 @@ static bool read_record(line_t *l, nt_gfx_event_t *events, uint32_t index) {
     switch (e->kind) {
     case NT_GFX_EVENT_NOTE:
     case NT_GFX_EVENT_MARKER_PUSH:
-        return expect(l, " label=") && read_string(l, e->note.label, sizeof(e->note.label)) && at_end(l);
+        return expect(l, " label=") && read_string(l, strings, &e->note.label) && at_end(l);
     case NT_GFX_EVENT_NOTE_FIELD:
         if (index == 0 || (events[index - 1U].kind != NT_GFX_EVENT_NOTE && events[index - 1U].kind != NT_GFX_EVENT_NOTE_FIELD)) {
             return fail(l, "a note field must follow its note");
         }
-        return read_note_field(l, e) && at_end(l);
+        return read_note_field(l, strings, e) && at_end(l);
     case NT_GFX_EVENT_MARKER_POP:
         return at_end(l);
     default:
-        return read_gfx(l, events, index);
+        return read_gfx(l, strings, events, index);
     }
 }
 
@@ -1009,7 +1047,7 @@ static bool read_header(line_t *l, const char **at, const char *end, nt_gfx_capt
     if (!open_line(l, *at, end) || !expect(l, "ntcapture ")) {
         return false;
     }
-    if (!take(l, "2") || l->p != l->end) {
+    if (!take(l, "3") || l->p != l->end) {
         return fail(l, "unsupported ntcapture version");
     }
     *at = l->end + 1;
@@ -1033,19 +1071,22 @@ static bool read_header(line_t *l, const char **at, const char *end, nt_gfx_capt
     return true;
 }
 
-/* The records= lines from *at into events[0..cap); returns how many parsed, the first failure in l. */
-static uint32_t read_records(line_t *l, const char **at, const char *end, nt_gfx_event_t *events, uint32_t cap, uint32_t records) {
+/* The records= lines from *at into events[0..cap); returns how many parsed, the first failure in l. A failed
+ * line's strings are dropped with it. */
+static uint32_t read_records(line_t *l, const char **at, const char *end, strings_t *strings, nt_gfx_event_t *events, uint32_t cap, uint32_t records) {
     uint32_t count = 0;
     for (; count < records; count++) {
+        const uint32_t used = strings->used;
         l->p = *at;
         if (*at == end || is_document_start(*at, end)) {
             (void)fail(l, "truncated: fewer records than records=");
         } else if (count == cap) {
             (void)fail(l, "capacity: more records than the array holds");
-        } else if (open_line(l, *at, end) && read_record(l, events, count)) {
+        } else if (open_line(l, *at, end) && read_record(l, strings, events, count)) {
             *at = l->end + 1;
             continue;
         }
+        strings->used = used;
         return count;
     }
     if (*at < end && !is_document_start(*at, end)) {
@@ -1055,8 +1096,8 @@ static uint32_t read_records(line_t *l, const char **at, const char *end, nt_gfx
     return count;
 }
 
-nt_gfx_capture_parsed_t nt_gfx_capture_parse(const char *text, size_t len, nt_gfx_event_t *events, uint32_t cap) {
-    NT_ASSERT((text != NULL || len == 0) && events != NULL);
+nt_gfx_capture_parsed_t nt_gfx_capture_parse(const char *text, size_t len, nt_gfx_event_t *events, uint32_t cap, char *strings, uint32_t string_cap) {
+    NT_ASSERT((text != NULL || len == 0) && events != NULL && strings != NULL && string_cap > 0);
     nt_gfx_capture_parsed_t r = {0};
     if (len == 0) {
         r.error = "empty document";
@@ -1075,10 +1116,14 @@ nt_gfx_capture_parsed_t nt_gfx_capture_parse(const char *text, size_t len, nt_gf
         r.error_at = (size_t)(l.error_at - text);
         return r;
     }
-    const uint32_t count = read_records(&l, &at, end, events, cap, records);
+    strings[0] = '\0';
+    strings_t pool = {.bytes = strings, .cap = string_cap, .used = 1};
+    const uint32_t count = read_records(&l, &at, end, &pool, events, cap, records);
     /* A valid prefix stays a usable view: the execution range is clipped to it. */
     view.events = events;
     view.count = count;
+    view.strings = strings;
+    view.string_bytes = pool.used;
     view.execute_begin = view.execute_begin < count ? view.execute_begin : count;
     view.execute_end = view.execute_end < count ? view.execute_end : count;
     r.view = view;

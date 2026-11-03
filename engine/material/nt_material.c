@@ -116,8 +116,7 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     info->depth_write = desc->depth_write;
     info->cull_mode = desc->cull_mode;
 
-    /* Debug label (caller must ensure static storage / string literal) */
-    info->label = desc->label;
+    info->label = desc->label != NULL ? desc->label : "";
 
     rec->params_size = desc->params_size;
     if (desc->params_size > 0) {

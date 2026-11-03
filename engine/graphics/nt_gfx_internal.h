@@ -14,9 +14,11 @@ extern nt_gfx_device_info_t g_nt_gfx_device_info;
 typedef struct {
     bool request_pending;   /* the next frame records */
     uint32_t marker_depth;  /* tracked in every frame, recorded or not */
-    nt_gfx_event_t *base;   /* two halves of capacity records, one allocation */
+    nt_gfx_event_t *base;   /* two halves of capacity records, then two halves of string_capacity bytes, one allocation */
     nt_gfx_event_t *events; /* the half that records; the other holds done */
+    char *strings;          /* the strings half that records, swapped with events */
     uint32_t capacity;
+    uint32_t string_capacity;
     nt_gfx_capture_view_t view; /* the recording frame, empty when none records; events unset */
     nt_gfx_capture_view_t done; /* the last finished frame */
     nt_gfx_event_t *call;       /* issued-call record being filled; NULL when not recording */

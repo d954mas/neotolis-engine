@@ -74,6 +74,7 @@ static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
         .program = nt_gfx_make_program(vs, fs, NULL),
         .blend = blend,
         .cull_mode = NT_CULL_NONE,
+        .label = "text_test_material",
     });
     return material;
 }
@@ -179,8 +180,8 @@ static void test_assert_handler(const char *expr, const char *file, int line) {
 void setUp(void) {
     nt_assert_handler = test_assert_handler;
     nt_gfx_fake_reset();
-    nt_gfx_init(&NT_GFX_TEST_DESC(.capture_capacity = 4096U, .max_shaders = 16, .max_programs = 8, .max_pipelines = 8, .max_buffers = 16, .max_textures = 32, .max_meshes = 8, .max_vertex_inputs = 16,
-                                  .max_render_targets = 16));
+    nt_gfx_init(&NT_GFX_TEST_DESC(.capture_capacity = 4096U, .capture_string_capacity = 16384U, .max_shaders = 16, .max_programs = 8, .max_pipelines = 8, .max_buffers = 16, .max_textures = 32,
+                                  .max_meshes = 8, .max_vertex_inputs = 16, .max_render_targets = 16));
     nt_gfx_begin_frame();
     nt_gfx_fake_set_samplers((const char *const[]){"u_curve_texture"}, 1);
     nt_hash_init(&(nt_hash_desc_t){0});
@@ -410,6 +411,7 @@ void test_text_material_may_declare_its_own_textures(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     nt_material_t textured = nt_material_create(&(nt_material_create_desc_t){
+        .label = "test_material",
         .program = nt_gfx_make_program(vs, fs, NULL),
         .cull_mode = NT_CULL_NONE,
         .textures[0] = {.name = "u_extra", .resource = NT_RESOURCE_INVALID},
@@ -534,8 +536,10 @@ void test_material_params_bind_once_per_change(void) {
     nt_program_t shared = nt_gfx_make_program(vs, fs, NULL);
     static const float red[4] = {1, 0, 0, 1};
     static const float green[4] = {0, 1, 0, 1};
-    nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE, .params = red, .params_size = sizeof(red)});
-    nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE, .params = green, .params_size = sizeof(green)});
+    nt_material_t a =
+        nt_material_create(&(nt_material_create_desc_t){.label = "test_material", .program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE, .params = red, .params_size = sizeof(red)});
+    nt_material_t b = nt_material_create(
+        &(nt_material_create_desc_t){.label = "test_material", .program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE, .params = green, .params_size = sizeof(green)});
 
     nt_test_frame_finish_links();
     nt_gfx_fake_reset();
@@ -571,8 +575,8 @@ void test_materials_sharing_a_program_share_one_pipeline(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     nt_program_t shared = nt_gfx_make_program(vs, fs, NULL);
-    nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
-    nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
+    nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.label = "test_material", .program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
+    nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.label = "test_material", .program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
 
     nt_test_frame_finish_links();
     nt_gfx_fake_reset();
@@ -589,8 +593,8 @@ void test_one_program_with_two_render_states_builds_two_pipelines(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     nt_program_t shared = nt_gfx_make_program(vs, fs, NULL);
-    nt_material_t opaque_mat = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_opaque(), .cull_mode = NT_CULL_NONE});
-    nt_material_t blended = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
+    nt_material_t opaque_mat = nt_material_create(&(nt_material_create_desc_t){.label = "test_material", .program = shared, .blend = nt_blend_opaque(), .cull_mode = NT_CULL_NONE});
+    nt_material_t blended = nt_material_create(&(nt_material_create_desc_t){.label = "test_material", .program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
 
     nt_test_frame_finish_links();
     nt_gfx_fake_reset();
@@ -612,8 +616,8 @@ void test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines(void
     nt_shader_t fs1 = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     nt_program_t p1 = nt_gfx_make_program(vs1, fs1, NULL);
     TEST_ASSERT_EQUAL_UINT32(p0.id + 1, p1.id);
-    nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.program = p0, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_BACK});
-    nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.program = p1, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
+    nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.label = "test_material", .program = p0, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_BACK});
+    nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.label = "test_material", .program = p1, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
 
     nt_test_frame_finish_links();
     nt_gfx_fake_reset();
@@ -1257,7 +1261,7 @@ void test_notes_survive_merges_and_an_unloaded_font_notes_its_skip(void) {
     const uint32_t second = nt_test_note(first + 1U, "text");
     const uint32_t third = nt_test_note(second + 1U, "text");
     TEST_ASSERT_LESS_THAN_UINT32(nt_test_capture_open().count, third);
-    TEST_ASSERT_EQUAL_UINT32(s_mat.id, nt_test_note_u32(first, "material"));
+    TEST_ASSERT_EQUAL_STRING(nt_material_get_info(s_mat)->label, nt_test_note_str(first, "material"));
     TEST_ASSERT_EQUAL_UINT32(s_font.id, nt_test_note_u32(first, "font"));
     TEST_ASSERT_EQUAL_UINT32(s_font.id, nt_test_note_u32(second, "font"));
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, nt_test_next_draw_result(first));

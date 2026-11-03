@@ -1,4 +1,4 @@
-/* Frame inspector query mode and the state views it shares with the window, on the native fixture (frame 51:
+/* Frame inspector query mode and the state views it shares with the window, on the native fixture (frame 1009:
  * 47 draw requests, 9 GL draw calls, groups shape/sprite/text). */
 
 #include <stdio.h>
@@ -72,7 +72,7 @@ static void test_commands_answer_and_reject_bad_input(void) {
         assert_holds(ask(k_bad[k].line, false), k_bad[k].why);
     }
     (void)ask("frame 1", false); /* a failed frame keeps the frame commands read */
-    assert_holds(ask("frames", true), "\n* 0 51 ");
+    assert_holds(ask("frames", true), "\n* 0 1009 ");
     const size_t all = strlen(ask("state @700 all", true)); /* tabs and trailing spaces change nothing */
     TEST_ASSERT_EQUAL_size_t(all, strlen(ask("state\t@700  all  ", true)));
     TEST_ASSERT_GREATER_THAN_size_t(strlen(ask("state @700", true)), all);
@@ -183,11 +183,11 @@ static void test_a_repeated_sequence_has_two_addresses(void) {
     fi_file_close(&s_file);
     fi_file_load(&s_file, "joined\n= ok", text, len * 2); /* a name's line break cannot end an answer */
     TEST_ASSERT_EQUAL_UINT32(2, s_file.frame_count);
-    assert_holds(ask("frames", true), "\n* 0 51 714 9 47 38 67 93952 0\n  1 51 714 9 47 38 67 93952 0\n");
-    assert_holds(ask("frame 1", true), "frame 1  # sequence 51, file 0 joined\\x0a= ok, 714 records\n");
+    assert_holds(ask("frames", true), "\n* 0 1009 714 9 47 38 67 93952 0\n  1 1009 714 9 47 38 67 93952 0\n");
+    assert_holds(ask("frame 1", true), "frame 1  # sequence 1009, file 0 joined\\x0a= ok, 714 records\n");
     assert_holds(ask("frames", true), "\nfile 0 joined\\x0a= ok  # 2 frames\n");
     TEST_ASSERT_EQUAL_UINT32(1, s_session.frame);
-    assert_holds(ask("frames", true), "\n  0 51 714 9 47 38 67 93952 0\n* 1 51 ");
+    assert_holds(ask("frames", true), "\n  0 1009 714 9 47 38 67 93952 0\n* 1 1009 ");
 }
 
 /* The fixture as frame 0 and an edited copy as frame 1 of one file. Each edit puts `to` in place of the first
@@ -242,7 +242,7 @@ static void test_compare_tells_what_differs(void) {
     assert_holds(text, "\ndiffer 5  # ");
     text = ask("compare 0 g2", true);
     assert_holds(text, "\ngroup g2  # > sprite; 1 of 124 requests differ\n");
-    assert_holds(text, "\n~ @233    @233    DRAW_INDEXED pipe#9 count=7 vi#6  # count 6 -> 7\n");
+    assert_holds(text, "\n~ @233    @233    DRAW_INDEXED pipe/skeletal_showcase/sprite#1 count=7 vi/sprite_vi#1  # count 6 -> 7\n");
     assert_holds(text, "\nrows 124 differ 1\n");
     text = ask("compare 0 g1", true);
     assert_holds(text, "\n= 9 same  # @200..@208 in A, @200..@208 in B\n~ @209    @209    ");
@@ -326,6 +326,33 @@ static void test_compare_names_groups_only_one_frame_has(void) {
     assert_holds(text, "\n- @200    -       ");
 }
 
+/* A labeled handle shows kind, label and number as one token: a space or control byte shows escaped, and a label
+ * too long for the alias is cut on a whole escape, never into the number. */
+static void test_aliases_show_labels(void) {
+    char text[512];
+    char label[210];
+    memset(label, 'x', sizeof(label) - 1U);
+    memcpy(label + 98, "\\x0a", 4); /* its escape is the last that fits */
+    label[sizeof(label) - 1U] = '\0';
+    const int len = snprintf(text, sizeof(text),
+                             "ntcapture 3\nframe sequence=1 platform=native records=3 overflow=0 execute=0..0\n0 DEFINITION op=CREATE obj=BUFFER:65537 label=\"mesh one\\x0a\"\n"
+                             "1 DEFINITION op=CREATE obj=BUFFER:65538 label=\"%s\"\n2 OP op=UBO obj=BUFFER:65538\n",
+                             label);
+    fi_file_t file = {0};
+    char *owned = (char *)malloc((size_t)len);
+    TEST_ASSERT_NOT_NULL(owned);
+    memcpy(owned, text, (size_t)len);
+    fi_file_load(&file, "labels", owned, (size_t)len);
+    TEST_ASSERT_NULL(file.frames[0].error);
+    char alias[FI_ALIAS_LEN];
+    fi_alias_text(&file.frames[0], NT_GFX_OBJECT_BUFFER, 65537, alias, sizeof(alias));
+    TEST_ASSERT_EQUAL_STRING("buf/mesh\\x20one\\x0a#1", alias);
+    fi_alias_text(&file.frames[0], NT_GFX_OBJECT_BUFFER, 65538, alias, sizeof(alias));
+    TEST_ASSERT_EQUAL_STRING("\\x0a#1", alias + strlen(alias) - 6U);
+    TEST_ASSERT_EQUAL_MEMORY("buf/xxxx", alias, 8);
+    fi_file_close(&file);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_commands_answer_and_reject_bad_input);
@@ -337,5 +364,6 @@ int main(void) {
     RUN_TEST(test_compare_tells_what_differs);
     RUN_TEST(test_native_and_web_align);
     RUN_TEST(test_compare_names_groups_only_one_frame_has);
+    RUN_TEST(test_aliases_show_labels);
     return UNITY_END();
 }

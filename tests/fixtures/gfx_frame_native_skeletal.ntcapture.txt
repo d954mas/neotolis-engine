@@ -1,5 +1,5 @@
-ntcapture 2
-frame sequence=51 platform=native records=714 overflow=0 execute=639..714
+ntcapture 3
+frame sequence=1009 platform=native records=714 overflow=0 execute=639..714
 counter vertices=5251
 counter indices=19176
 counter instances=63
@@ -40,11 +40,11 @@ counter gl.glViewport=2
 0 INITIAL op=STATE layer=FRONTEND
 1 INITIAL op=SCISSOR_ENABLE
 2 INITIAL op=SCISSOR integers=[0,29,1280,611]
-3 DEFINITION op=CREATE obj=SHADER:65537 result=UNKNOWN backend=1
-4 DEFINITION op=CREATE obj=SHADER:65538 result=UNKNOWN backend=2
-5 DEFINITION op=CREATE obj=SHADER:65539 result=UNKNOWN backend=3
-6 DEFINITION op=CREATE obj=SHADER:65540 result=UNKNOWN backend=4
-7 DEFINITION op=CREATE obj=SHADER:65541 result=UNKNOWN backend=5
+3 DEFINITION op=CREATE obj=SHADER:65537 result=UNKNOWN backend=1 label="shape_fs"
+4 DEFINITION op=CREATE obj=SHADER:65538 result=UNKNOWN backend=2 label="shape_fill_vs"
+5 DEFINITION op=CREATE obj=SHADER:65539 result=UNKNOWN backend=3 label="shape_batch_vs"
+6 DEFINITION op=CREATE obj=SHADER:65540 result=UNKNOWN backend=4 label="shape_wire_vs"
+7 DEFINITION op=CREATE obj=SHADER:65541 result=UNKNOWN backend=5 label="shape_line_vs"
 8 DEFINITION op=CREATE obj=SHADER:65542 result=UNKNOWN backend=10
 9 DEFINITION op=CREATE obj=SHADER:65543 result=UNKNOWN backend=11
 10 DEFINITION op=CREATE obj=SHADER:65544 result=UNKNOWN backend=12
@@ -52,40 +52,40 @@ counter gl.glViewport=2
 12 DEFINITION op=CREATE obj=SHADER:65546 result=UNKNOWN backend=14
 13 DEFINITION op=CREATE obj=SHADER:65547 result=UNKNOWN backend=15
 14 DEFINITION op=CREATE obj=SHADER:65548 result=UNKNOWN backend=16
-15 DEFINITION op=CREATE obj=PROGRAM:65537 result=UNKNOWN backend=1
-16 DEFINITION op=CREATE obj=PROGRAM:65538 result=UNKNOWN backend=2
-17 DEFINITION op=CREATE obj=PROGRAM:65539 result=UNKNOWN backend=3
-18 DEFINITION op=CREATE obj=PROGRAM:65540 result=UNKNOWN backend=4
-19 DEFINITION op=CREATE obj=PROGRAM:65541 result=UNKNOWN backend=5
-20 DEFINITION op=CREATE obj=PROGRAM:65542 result=UNKNOWN backend=6
-21 DEFINITION op=CREATE obj=PROGRAM:65543 result=UNKNOWN backend=7
-22 DEFINITION op=CREATE obj=PROGRAM:65544 result=UNKNOWN backend=8
-23 DEFINITION op=CREATE obj=PIPELINE:65537 backend=1 related=[65537]
-24 DEFINITION op=CREATE obj=PIPELINE:65538 backend=2 related=[65538]
-25 DEFINITION op=CREATE obj=PIPELINE:65539 backend=3 related=[65539]
-26 DEFINITION op=CREATE obj=PIPELINE:65540 backend=4 related=[65540]
-27 DEFINITION op=CREATE obj=PIPELINE:65541 backend=5 related=[65537]
-28 DEFINITION op=CREATE obj=PIPELINE:65542 backend=6 related=[65538]
-29 DEFINITION op=CREATE obj=PIPELINE:65543 backend=7 related=[65539]
-30 DEFINITION op=CREATE obj=PIPELINE:65544 backend=8 related=[65540]
-31 DEFINITION op=CREATE obj=PIPELINE:65545 backend=9 related=[65543]
-32 DEFINITION op=CREATE obj=PIPELINE:65546 backend=10 related=[65544]
-33 DEFINITION op=CREATE obj=VERTEX_INPUT:65537 result=UNKNOWN backend=1 related=[65539]
-34 DEFINITION op=CREATE obj=VERTEX_INPUT:65538 result=UNKNOWN backend=2 related=[65540,65541] type=1
-35 DEFINITION op=CREATE obj=VERTEX_INPUT:65539 result=UNKNOWN backend=3 related=[65542,65543] type=1
-36 DEFINITION op=CREATE obj=VERTEX_INPUT:65540 result=UNKNOWN backend=4 related=[65544,65545] type=1
-37 DEFINITION op=CREATE obj=VERTEX_INPUT:65541 result=UNKNOWN backend=5 related=[65544,65545] type=1
-38 DEFINITION op=CREATE obj=VERTEX_INPUT:65542 result=UNKNOWN backend=6 related=[65539,65537] type=2
-39 DEFINITION op=CREATE obj=VERTEX_INPUT:65543 result=UNKNOWN backend=7 related=[65539,65537] type=2
-40 DEFINITION op=CREATE obj=BUFFER:65537 size=32768 backend=1 type=1 usage=2 format=2
-41 DEFINITION op=CREATE obj=BUFFER:65538 size=16384 backend=2 usage=2
-42 DEFINITION op=CREATE obj=BUFFER:65539 size=229376 backend=3 usage=2
-43 DEFINITION op=CREATE obj=BUFFER:65540 size=6208 backend=4
-44 DEFINITION op=CREATE obj=BUFFER:65541 size=3828 backend=5 type=1 format=1
-45 DEFINITION op=CREATE obj=BUFFER:65542 size=72128 backend=6
-46 DEFINITION op=CREATE obj=BUFFER:65543 size=4224 backend=7 type=1 format=1
-47 DEFINITION op=CREATE obj=BUFFER:65544 size=56 backend=8
-48 DEFINITION op=CREATE obj=BUFFER:65545 size=24 backend=9 type=1 format=1
+15 DEFINITION op=CREATE obj=PROGRAM:65537 result=UNKNOWN backend=1 label="shape/fill"
+16 DEFINITION op=CREATE obj=PROGRAM:65538 result=UNKNOWN backend=2 label="shape/batch"
+17 DEFINITION op=CREATE obj=PROGRAM:65539 result=UNKNOWN backend=3 label="shape/wire"
+18 DEFINITION op=CREATE obj=PROGRAM:65540 result=UNKNOWN backend=4 label="shape/line"
+19 DEFINITION op=CREATE obj=PROGRAM:65541 result=UNKNOWN backend=5 label="skeletal_showcase/skin"
+20 DEFINITION op=CREATE obj=PROGRAM:65542 result=UNKNOWN backend=6 label="skeletal_showcase/static"
+21 DEFINITION op=CREATE obj=PROGRAM:65543 result=UNKNOWN backend=7 label="skeletal_showcase/sprite"
+22 DEFINITION op=CREATE obj=PROGRAM:65544 result=UNKNOWN backend=8 label="skeletal_showcase/text"
+23 DEFINITION op=CREATE obj=PIPELINE:65537 backend=1 related=[65537] label="shape/fill"
+24 DEFINITION op=CREATE obj=PIPELINE:65538 backend=2 related=[65538] label="shape/batch"
+25 DEFINITION op=CREATE obj=PIPELINE:65539 backend=3 related=[65539] label="shape/wire"
+26 DEFINITION op=CREATE obj=PIPELINE:65540 backend=4 related=[65540] label="shape/line"
+27 DEFINITION op=CREATE obj=PIPELINE:65541 backend=5 related=[65537] label="shape/fill"
+28 DEFINITION op=CREATE obj=PIPELINE:65542 backend=6 related=[65538] label="shape/batch"
+29 DEFINITION op=CREATE obj=PIPELINE:65543 backend=7 related=[65539] label="shape/wire"
+30 DEFINITION op=CREATE obj=PIPELINE:65544 backend=8 related=[65540] label="shape/line"
+31 DEFINITION op=CREATE obj=PIPELINE:65545 backend=9 related=[65543] label="skeletal_showcase/sprite"
+32 DEFINITION op=CREATE obj=PIPELINE:65546 backend=10 related=[65544] label="skeletal_showcase/text"
+33 DEFINITION op=CREATE obj=VERTEX_INPUT:65537 result=UNKNOWN backend=1 related=[65539] label="shape_batch_vi"
+34 DEFINITION op=CREATE obj=VERTEX_INPUT:65538 result=UNKNOWN backend=2 related=[65540,65541] type=1 label="shape_fill_vi"
+35 DEFINITION op=CREATE obj=VERTEX_INPUT:65539 result=UNKNOWN backend=3 related=[65542,65543] type=1 label="shape_wire_vi"
+36 DEFINITION op=CREATE obj=VERTEX_INPUT:65540 result=UNKNOWN backend=4 related=[65544,65545] type=1 label="shape_line_vi"
+37 DEFINITION op=CREATE obj=VERTEX_INPUT:65541 result=UNKNOWN backend=5 related=[65544,65545] type=1 label="shape_stroke_vi"
+38 DEFINITION op=CREATE obj=VERTEX_INPUT:65542 result=UNKNOWN backend=6 related=[65539,65537] type=2 label="sprite_vi"
+39 DEFINITION op=CREATE obj=VERTEX_INPUT:65543 result=UNKNOWN backend=7 related=[65539,65537] type=2 label="text_vi"
+40 DEFINITION op=CREATE obj=BUFFER:65537 size=32768 backend=1 type=1 usage=2 format=2 label="frame_index"
+41 DEFINITION op=CREATE obj=BUFFER:65538 size=16384 backend=2 usage=2 label="frame_uniform"
+42 DEFINITION op=CREATE obj=BUFFER:65539 size=229376 backend=3 usage=2 label="frame_vertex"
+43 DEFINITION op=CREATE obj=BUFFER:65540 size=6208 backend=4 label="shape_fill_templates"
+44 DEFINITION op=CREATE obj=BUFFER:65541 size=3828 backend=5 type=1 format=1 label="shape_fill_templates"
+45 DEFINITION op=CREATE obj=BUFFER:65542 size=72128 backend=6 label="shape_wire_templates"
+46 DEFINITION op=CREATE obj=BUFFER:65543 size=4224 backend=7 type=1 format=1 label="shape_wire_templates"
+47 DEFINITION op=CREATE obj=BUFFER:65544 size=56 backend=8 label="shape_line_template"
+48 DEFINITION op=CREATE obj=BUFFER:65545 size=24 backend=9 type=1 format=1 label="shape_line_template"
 49 DEFINITION op=CREATE obj=BUFFER:65546 size=13440 backend=10
 50 DEFINITION op=CREATE obj=BUFFER:65547 size=3840 backend=11 type=1 format=1
 51 DEFINITION op=CREATE obj=BUFFER:65548 size=4032 backend=12
@@ -107,8 +107,8 @@ counter gl.glViewport=2
 67 DEFINITION op=CREATE obj=BUFFER:65564 size=2856 backend=28 type=1 format=1
 68 DEFINITION op=CREATE obj=BUFFER:65565 size=17520 backend=29
 69 DEFINITION op=CREATE obj=BUFFER:65566 size=2856 backend=30 type=1 format=1
-70 DEFINITION op=CREATE obj=TEXTURE:65537 backend=1 related=[1] width=2048 height=256 format=5 levels=1
-71 DEFINITION op=CREATE obj=TEXTURE:65538 backend=2 related=[1] width=144 height=256 format=7 levels=1
+70 DEFINITION op=CREATE obj=TEXTURE:65537 backend=1 related=[1] width=2048 height=256 format=5 levels=1 label="font_curve"
+71 DEFINITION op=CREATE obj=TEXTURE:65538 backend=2 related=[1] width=144 height=256 format=7 levels=1 label="skeletal_gpu_palettes"
 72 DEFINITION op=CREATE obj=TEXTURE:65539 backend=3 related=[2] width=1 height=1 format=1 levels=1
 73 DEFINITION op=CREATE obj=TEXTURE:65540 backend=4 related=[2] width=1 height=1 format=1 levels=1
 74 DEFINITION op=CREATE obj=TEXTURE:65541 backend=5 related=[2] width=256 height=256 format=1 levels=9
@@ -254,7 +254,7 @@ counter gl.glViewport=2
 214 OP op=VIEWPORT result=CACHE integers=[0,0,1280,800]
 215 OP op=CREATE obj=PIPELINE:65545 result=CACHE related=[65543]
 216 NOTE label="sprite"
-217 NOTE_FIELD key="material" type=U32 value=65537
+217 NOTE_FIELD key="material" type=STR value="skeletal_showcase_sprite"
 218 NOTE_FIELD key="page" type=U32 value=65541
 219 OP op=PIPELINE obj=PIPELINE:65545 result=ACCEPTED
 220 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -263,7 +263,7 @@ counter gl.glViewport=2
 223 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=ACCEPTED
 224 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=ACCEPTED count=6 vertices=4 instances=1 vertex_input=65542
 225 NOTE label="sprite"
-226 NOTE_FIELD key="material" type=U32 value=65537
+226 NOTE_FIELD key="material" type=STR value="skeletal_showcase_sprite"
 227 NOTE_FIELD key="page" type=U32 value=65541
 228 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
 229 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -272,7 +272,7 @@ counter gl.glViewport=2
 232 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
 233 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@224 first=6 count=6 vertices=4 instances=1 vertex_input=65542
 234 NOTE label="sprite"
-235 NOTE_FIELD key="material" type=U32 value=65537
+235 NOTE_FIELD key="material" type=STR value="skeletal_showcase_sprite"
 236 NOTE_FIELD key="page" type=U32 value=65541
 237 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
 238 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -281,7 +281,7 @@ counter gl.glViewport=2
 241 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
 242 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@224 first=12 count=6 vertices=4 instances=1 vertex_input=65542
 243 NOTE label="sprite"
-244 NOTE_FIELD key="material" type=U32 value=65537
+244 NOTE_FIELD key="material" type=STR value="skeletal_showcase_sprite"
 245 NOTE_FIELD key="page" type=U32 value=65541
 246 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
 247 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -290,7 +290,7 @@ counter gl.glViewport=2
 250 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
 251 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@224 first=18 count=6 vertices=4 instances=1 vertex_input=65542
 252 NOTE label="sprite"
-253 NOTE_FIELD key="material" type=U32 value=65537
+253 NOTE_FIELD key="material" type=STR value="skeletal_showcase_sprite"
 254 NOTE_FIELD key="page" type=U32 value=65541
 255 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
 256 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -300,7 +300,7 @@ counter gl.glViewport=2
 260 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@224 first=24 count=6 vertices=4 instances=1 vertex_input=65542
 261 OP op=CREATE obj=PIPELINE:65546 result=CACHE related=[65544]
 262 NOTE label="text"
-263 NOTE_FIELD key="material" type=U32 value=65538
+263 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 264 NOTE_FIELD key="font" type=U32 value=65537
 265 OP op=PIPELINE obj=PIPELINE:65546 result=ACCEPTED
 266 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -309,7 +309,7 @@ counter gl.glViewport=2
 269 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=ACCEPTED
 270 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=ACCEPTED first=30 count=144 vertices=96 instances=1 vertex_input=65543
 271 NOTE label="text"
-272 NOTE_FIELD key="material" type=U32 value=65538
+272 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 273 NOTE_FIELD key="font" type=U32 value=65537
 274 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 275 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -318,7 +318,7 @@ counter gl.glViewport=2
 278 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
 279 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@270 first=174 count=30 vertices=20 instances=1 vertex_input=65543
 280 NOTE label="text"
-281 NOTE_FIELD key="material" type=U32 value=65538
+281 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 282 NOTE_FIELD key="font" type=U32 value=65537
 283 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 284 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -327,7 +327,7 @@ counter gl.glViewport=2
 287 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
 288 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@270 first=204 count=84 vertices=56 instances=1 vertex_input=65543
 289 NOTE label="text"
-290 NOTE_FIELD key="material" type=U32 value=65538
+290 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 291 NOTE_FIELD key="font" type=U32 value=65537
 292 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 293 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -336,7 +336,7 @@ counter gl.glViewport=2
 296 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
 297 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@270 first=288 count=72 vertices=48 instances=1 vertex_input=65543
 298 NOTE label="text"
-299 NOTE_FIELD key="material" type=U32 value=65538
+299 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 300 NOTE_FIELD key="font" type=U32 value=65537
 301 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 302 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -345,7 +345,7 @@ counter gl.glViewport=2
 305 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
 306 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@270 first=360 count=78 vertices=52 instances=1 vertex_input=65543
 307 NOTE label="text"
-308 NOTE_FIELD key="material" type=U32 value=65538
+308 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 309 NOTE_FIELD key="font" type=U32 value=65537
 310 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 311 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -354,7 +354,7 @@ counter gl.glViewport=2
 314 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
 315 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@270 first=438 count=414 vertices=276 instances=1 vertex_input=65543
 316 NOTE label="text"
-317 NOTE_FIELD key="material" type=U32 value=65538
+317 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 318 NOTE_FIELD key="font" type=U32 value=65537
 319 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 320 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -363,7 +363,7 @@ counter gl.glViewport=2
 323 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
 324 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@270 first=852 count=192 vertices=128 instances=1 vertex_input=65543
 325 NOTE label="text"
-326 NOTE_FIELD key="material" type=U32 value=65538
+326 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 327 NOTE_FIELD key="font" type=U32 value=65537
 328 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 329 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -372,7 +372,7 @@ counter gl.glViewport=2
 332 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
 333 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@270 first=1044 count=240 vertices=160 instances=1 vertex_input=65543
 334 NOTE label="text"
-335 NOTE_FIELD key="material" type=U32 value=65538
+335 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 336 NOTE_FIELD key="font" type=U32 value=65537
 337 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 338 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -381,7 +381,7 @@ counter gl.glViewport=2
 341 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
 342 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@270 first=1284 count=48 vertices=32 instances=1 vertex_input=65543
 343 NOTE label="text"
-344 NOTE_FIELD key="material" type=U32 value=65538
+344 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 345 NOTE_FIELD key="font" type=U32 value=65537
 346 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 347 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -392,7 +392,7 @@ counter gl.glViewport=2
 352 OP op=SCISSOR result=ACCEPTED integers=[0,29,1280,611]
 353 OP op=SCISSOR_ENABLE result=ACCEPTED integers=[1]
 354 NOTE label="sprite"
-355 NOTE_FIELD key="material" type=U32 value=65537
+355 NOTE_FIELD key="material" type=STR value="skeletal_showcase_sprite"
 356 NOTE_FIELD key="page" type=U32 value=65541
 357 OP op=PIPELINE obj=PIPELINE:65545 result=ACCEPTED
 358 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -401,7 +401,7 @@ counter gl.glViewport=2
 361 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=ACCEPTED
 362 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=ACCEPTED first=1362 count=6 vertices=4 instances=1 vertex_input=65542
 363 NOTE label="sprite"
-364 NOTE_FIELD key="material" type=U32 value=65537
+364 NOTE_FIELD key="material" type=STR value="skeletal_showcase_sprite"
 365 NOTE_FIELD key="page" type=U32 value=65541
 366 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
 367 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -410,7 +410,7 @@ counter gl.glViewport=2
 370 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
 371 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@362 first=1368 count=6 vertices=4 instances=1 vertex_input=65542
 372 NOTE label="sprite"
-373 NOTE_FIELD key="material" type=U32 value=65537
+373 NOTE_FIELD key="material" type=STR value="skeletal_showcase_sprite"
 374 NOTE_FIELD key="page" type=U32 value=65541
 375 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
 376 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -419,7 +419,7 @@ counter gl.glViewport=2
 379 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
 380 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@362 first=1374 count=6 vertices=4 instances=1 vertex_input=65542
 381 NOTE label="sprite"
-382 NOTE_FIELD key="material" type=U32 value=65537
+382 NOTE_FIELD key="material" type=STR value="skeletal_showcase_sprite"
 383 NOTE_FIELD key="page" type=U32 value=65541
 384 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
 385 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -428,7 +428,7 @@ counter gl.glViewport=2
 388 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
 389 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@362 first=1380 count=6 vertices=4 instances=1 vertex_input=65542
 390 NOTE label="sprite"
-391 NOTE_FIELD key="material" type=U32 value=65537
+391 NOTE_FIELD key="material" type=STR value="skeletal_showcase_sprite"
 392 NOTE_FIELD key="page" type=U32 value=65541
 393 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
 394 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -437,7 +437,7 @@ counter gl.glViewport=2
 397 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
 398 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@362 first=1386 count=6 vertices=4 instances=1 vertex_input=65542
 399 NOTE label="sprite"
-400 NOTE_FIELD key="material" type=U32 value=65537
+400 NOTE_FIELD key="material" type=STR value="skeletal_showcase_sprite"
 401 NOTE_FIELD key="page" type=U32 value=65541
 402 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
 403 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -446,7 +446,7 @@ counter gl.glViewport=2
 406 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
 407 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@362 first=1392 count=54 vertices=16 instances=1 vertex_input=65542
 408 NOTE label="sprite"
-409 NOTE_FIELD key="material" type=U32 value=65537
+409 NOTE_FIELD key="material" type=STR value="skeletal_showcase_sprite"
 410 NOTE_FIELD key="page" type=U32 value=65541
 411 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
 412 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -455,7 +455,7 @@ counter gl.glViewport=2
 415 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
 416 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@362 first=1446 count=54 vertices=16 instances=1 vertex_input=65542
 417 NOTE label="sprite"
-418 NOTE_FIELD key="material" type=U32 value=65537
+418 NOTE_FIELD key="material" type=STR value="skeletal_showcase_sprite"
 419 NOTE_FIELD key="page" type=U32 value=65541
 420 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
 421 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -464,7 +464,7 @@ counter gl.glViewport=2
 424 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
 425 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@362 first=1500 count=54 vertices=16 instances=1 vertex_input=65542
 426 NOTE label="sprite"
-427 NOTE_FIELD key="material" type=U32 value=65537
+427 NOTE_FIELD key="material" type=STR value="skeletal_showcase_sprite"
 428 NOTE_FIELD key="page" type=U32 value=65541
 429 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
 430 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -473,7 +473,7 @@ counter gl.glViewport=2
 433 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
 434 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@362 first=1554 count=54 vertices=16 instances=1 vertex_input=65542
 435 NOTE label="sprite"
-436 NOTE_FIELD key="material" type=U32 value=65537
+436 NOTE_FIELD key="material" type=STR value="skeletal_showcase_sprite"
 437 NOTE_FIELD key="page" type=U32 value=65541
 438 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
 439 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -482,7 +482,7 @@ counter gl.glViewport=2
 442 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
 443 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@362 first=1608 count=54 vertices=16 instances=1 vertex_input=65542
 444 NOTE label="sprite"
-445 NOTE_FIELD key="material" type=U32 value=65537
+445 NOTE_FIELD key="material" type=STR value="skeletal_showcase_sprite"
 446 NOTE_FIELD key="page" type=U32 value=65541
 447 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
 448 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -491,7 +491,7 @@ counter gl.glViewport=2
 451 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
 452 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@362 first=1662 count=54 vertices=16 instances=1 vertex_input=65542
 453 NOTE label="text"
-454 NOTE_FIELD key="material" type=U32 value=65538
+454 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 455 NOTE_FIELD key="font" type=U32 value=65537
 456 OP op=PIPELINE obj=PIPELINE:65546 result=ACCEPTED
 457 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -500,7 +500,7 @@ counter gl.glViewport=2
 460 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=ACCEPTED
 461 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=ACCEPTED first=1716 count=18 vertices=12 instances=1 vertex_input=65543
 462 NOTE label="text"
-463 NOTE_FIELD key="material" type=U32 value=65538
+463 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 464 NOTE_FIELD key="font" type=U32 value=65537
 465 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 466 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -509,7 +509,7 @@ counter gl.glViewport=2
 469 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
 470 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=1734 count=54 vertices=36 instances=1 vertex_input=65543
 471 NOTE label="text"
-472 NOTE_FIELD key="material" type=U32 value=65538
+472 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 473 NOTE_FIELD key="font" type=U32 value=65537
 474 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 475 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -518,7 +518,7 @@ counter gl.glViewport=2
 478 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
 479 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=1788 count=66 vertices=44 instances=1 vertex_input=65543
 480 NOTE label="text"
-481 NOTE_FIELD key="material" type=U32 value=65538
+481 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 482 NOTE_FIELD key="font" type=U32 value=65537
 483 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 484 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -527,7 +527,7 @@ counter gl.glViewport=2
 487 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
 488 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=1854 count=24 vertices=16 instances=1 vertex_input=65543
 489 NOTE label="text"
-490 NOTE_FIELD key="material" type=U32 value=65538
+490 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 491 NOTE_FIELD key="font" type=U32 value=65537
 492 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 493 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -536,7 +536,7 @@ counter gl.glViewport=2
 496 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
 497 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=1878 count=24 vertices=16 instances=1 vertex_input=65543
 498 NOTE label="text"
-499 NOTE_FIELD key="material" type=U32 value=65538
+499 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 500 NOTE_FIELD key="font" type=U32 value=65537
 501 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 502 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -545,7 +545,7 @@ counter gl.glViewport=2
 505 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
 506 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=1902 count=48 vertices=32 instances=1 vertex_input=65543
 507 NOTE label="text"
-508 NOTE_FIELD key="material" type=U32 value=65538
+508 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 509 NOTE_FIELD key="font" type=U32 value=65537
 510 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 511 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -554,7 +554,7 @@ counter gl.glViewport=2
 514 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
 515 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=1950 count=78 vertices=52 instances=1 vertex_input=65543
 516 NOTE label="text"
-517 NOTE_FIELD key="material" type=U32 value=65538
+517 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 518 NOTE_FIELD key="font" type=U32 value=65537
 519 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 520 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -563,7 +563,7 @@ counter gl.glViewport=2
 523 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
 524 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=2028 count=42 vertices=28 instances=1 vertex_input=65543
 525 NOTE label="text"
-526 NOTE_FIELD key="material" type=U32 value=65538
+526 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 527 NOTE_FIELD key="font" type=U32 value=65537
 528 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 529 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -572,7 +572,7 @@ counter gl.glViewport=2
 532 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
 533 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=2070 count=72 vertices=48 instances=1 vertex_input=65543
 534 NOTE label="text"
-535 NOTE_FIELD key="material" type=U32 value=65538
+535 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 536 NOTE_FIELD key="font" type=U32 value=65537
 537 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 538 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -581,7 +581,7 @@ counter gl.glViewport=2
 541 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
 542 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=2142 count=66 vertices=44 instances=1 vertex_input=65543
 543 NOTE label="text"
-544 NOTE_FIELD key="material" type=U32 value=65538
+544 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 545 NOTE_FIELD key="font" type=U32 value=65537
 546 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 547 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -590,7 +590,7 @@ counter gl.glViewport=2
 550 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
 551 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=2208 count=168 vertices=112 instances=1 vertex_input=65543
 552 NOTE label="text"
-553 NOTE_FIELD key="material" type=U32 value=65538
+553 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 554 NOTE_FIELD key="font" type=U32 value=65537
 555 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 556 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -599,7 +599,7 @@ counter gl.glViewport=2
 559 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
 560 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=2376 count=42 vertices=28 instances=1 vertex_input=65543
 561 NOTE label="text"
-562 NOTE_FIELD key="material" type=U32 value=65538
+562 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 563 NOTE_FIELD key="font" type=U32 value=65537
 564 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 565 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -608,7 +608,7 @@ counter gl.glViewport=2
 568 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
 569 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=2418 count=42 vertices=28 instances=1 vertex_input=65543
 570 NOTE label="text"
-571 NOTE_FIELD key="material" type=U32 value=65538
+571 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 572 NOTE_FIELD key="font" type=U32 value=65537
 573 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 574 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -617,7 +617,7 @@ counter gl.glViewport=2
 577 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
 578 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=2460 count=42 vertices=28 instances=1 vertex_input=65543
 579 NOTE label="text"
-580 NOTE_FIELD key="material" type=U32 value=65538
+580 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 581 NOTE_FIELD key="font" type=U32 value=65537
 582 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 583 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -626,7 +626,7 @@ counter gl.glViewport=2
 586 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
 587 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=2502 count=180 vertices=120 instances=1 vertex_input=65543
 588 NOTE label="text"
-589 NOTE_FIELD key="material" type=U32 value=65538
+589 NOTE_FIELD key="material" type=STR value="skeletal_showcase_text"
 590 NOTE_FIELD key="font" type=U32 value=65537
 591 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
 592 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -641,7 +641,7 @@ counter gl.glViewport=2
 601 OP op=SCISSOR result=CACHE integers=[0,29,1280,611]
 602 OP op=SCISSOR_ENABLE result=ACCEPTED integers=[1]
 603 NOTE label="sprite"
-604 NOTE_FIELD key="material" type=U32 value=65537
+604 NOTE_FIELD key="material" type=STR value="skeletal_showcase_sprite"
 605 NOTE_FIELD key="page" type=U32 value=65541
 606 OP op=PIPELINE obj=PIPELINE:65545 result=ACCEPTED
 607 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -653,7 +653,7 @@ counter gl.glViewport=2
 613 OP op=SCISSOR result=CACHE integers=[0,29,1280,611]
 614 OP op=SCISSOR_ENABLE result=ACCEPTED integers=[1]
 615 NOTE label="sprite"
-616 NOTE_FIELD key="material" type=U32 value=65537
+616 NOTE_FIELD key="material" type=STR value="skeletal_showcase_sprite"
 617 NOTE_FIELD key="page" type=U32 value=65541
 618 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
 619 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -665,7 +665,7 @@ counter gl.glViewport=2
 625 OP op=SCISSOR result=CACHE integers=[0,29,1280,611]
 626 OP op=SCISSOR_ENABLE result=ACCEPTED integers=[1]
 627 NOTE label="sprite"
-628 NOTE_FIELD key="material" type=U32 value=65537
+628 NOTE_FIELD key="material" type=STR value="skeletal_showcase_sprite"
 629 NOTE_FIELD key="page" type=U32 value=65541
 630 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
 631 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
@@ -701,7 +701,7 @@ counter gl.glViewport=2
 661   BACKEND op=STATE call=glBindVertexArray link=@202 args=[3]
 662   SKIP op=VERTEX_INPUT result=CACHE call=glVertexAttribPointer link=@202 key=[3,3,0,1]
 663   SKIP op=UBO result=CACHE call=glBindBufferRange link=@203 key=[2,256,96]
-664   BACKEND op=STATE call=glDrawElementsInstanced link=@204 args=[4,768,5123,1,21]
+664   BACKEND op=STATE call=glDrawElementsInstanced link=@204 args=[4,768,5123,180,21]
 665   BACKEND op=STATE call=glUseProgram link=@206 args=[9]
 666   BACKEND op=STATE call=glDisable link=@206 args=[32823]
 667   BACKEND op=STATE call=glBindVertexArray link=@207 args=[5]
@@ -722,19 +722,19 @@ counter gl.glViewport=2
 682   BACKEND op=STATE call=glBindTexture link=@267 args=[3553,1]
 683   BACKEND op=STATE call=glBindSampler link=@267 args=[0,1]
 684   BACKEND op=STATE call=glBindVertexArray link=@269 args=[8]
-685   BACKEND op=STATE call=glDrawElements link=@270 args=[4,1332,5125,1]
+685   BACKEND op=STATE call=glDrawElements link=@270 args=[4,1332,5125,120]
 686   BACKEND op=STATE call=glScissor link=@352 args=[0,29,1280,611]
 687   BACKEND op=STATE call=glEnable link=@353 args=[3089]
 688   BACKEND op=STATE call=glUseProgram link=@357 args=[19]
 689   BACKEND op=STATE call=glBindTexture link=@359 args=[3553,5]
 690   BACKEND op=STATE call=glBindSampler link=@359 args=[0,2]
 691   BACKEND op=STATE call=glBindVertexArray link=@361 args=[7]
-692   BACKEND op=STATE call=glDrawElements link=@362 args=[4,354,5125,1]
+692   BACKEND op=STATE call=glDrawElements link=@362 args=[4,354,5125,5448]
 693   BACKEND op=STATE call=glUseProgram link=@456 args=[20]
 694   BACKEND op=STATE call=glBindTexture link=@458 args=[3553,1]
 695   BACKEND op=STATE call=glBindSampler link=@458 args=[0,1]
 696   BACKEND op=STATE call=glBindVertexArray link=@460 args=[8]
-697   BACKEND op=STATE call=glDrawElements link=@461 args=[4,1062,5125,1]
+697   BACKEND op=STATE call=glDrawElements link=@461 args=[4,1062,5125,6864]
 698   BACKEND op=STATE call=glDisable link=@597 args=[3089]
 699   BACKEND op=STATE call=glEnable link=@599 args=[3089]
 700   BACKEND op=STATE call=glDisable link=@600 args=[3089]
@@ -743,11 +743,11 @@ counter gl.glViewport=2
 703   BACKEND op=STATE call=glBindTexture link=@608 args=[3553,5]
 704   BACKEND op=STATE call=glBindSampler link=@608 args=[0,2]
 705   BACKEND op=STATE call=glBindVertexArray link=@610 args=[7]
-706   BACKEND op=STATE call=glDrawElements link=@611 args=[4,6,5125,1]
+706   BACKEND op=STATE call=glDrawElements link=@611 args=[4,6,5125,11112]
 707   BACKEND op=STATE call=glDisable link=@612 args=[3089]
 708   BACKEND op=STATE call=glEnable link=@614 args=[3089]
-709   BACKEND op=STATE call=glDrawElements link=@623 args=[4,6,5125,1]
+709   BACKEND op=STATE call=glDrawElements link=@623 args=[4,6,5125,11136]
 710   BACKEND op=STATE call=glDisable link=@624 args=[3089]
 711   BACKEND op=STATE call=glEnable link=@626 args=[3089]
-712   BACKEND op=STATE call=glDrawElements link=@635 args=[4,6,5125,1]
+712   BACKEND op=STATE call=glDrawElements link=@635 args=[4,6,5125,11160]
 713   BACKEND op=STATE call=glDisable link=@636 args=[3089]

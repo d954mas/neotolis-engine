@@ -71,6 +71,7 @@ static nt_material_create_desc_t make_test_desc(void) {
     nt_material_create_desc_t d;
     memset(&d, 0, sizeof(d));
     d.program = (nt_program_t){.id = 1};
+    d.label = "test_material";
     d.textures[0].name = "u_albedo";
     d.textures[0].resource = (nt_resource_t){.id = 3};
     d.texture_count = 1;
@@ -190,6 +191,13 @@ void test_material_makes_no_gpu_buffer(void) {
     nt_gfx_fake_reset();
     TEST_ASSERT_TRUE(nt_material_valid(nt_material_create(&d)));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_last_buffer_desc().size);
+}
+
+/* Renderers note a material by its label, so a material without one reads "". */
+void test_a_missing_label_reads_empty(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    d.label = NULL;
+    TEST_ASSERT_EQUAL_STRING("", nt_material_get_info(nt_material_create(&d))->label);
 }
 
 /* The bytes mirror a std140 block of 16-byte members, so the size is a multiple of 16. */
@@ -571,6 +579,7 @@ int main(void) {
     /* Create / query */
     RUN_TEST(test_create_basic);
     RUN_TEST(test_material_makes_no_gpu_buffer);
+    RUN_TEST(test_a_missing_label_reads_empty);
     RUN_TEST(test_create_asserts_bad_params);
     RUN_TEST(test_set_params_asserts_size_or_handle);
     RUN_TEST(test_blend_opaque_disables_blending);

@@ -366,7 +366,7 @@ range, or depth-sampling comparison state.
 
 **Cache identity.** gfx deduplicates pipelines: `nt_gfx_make_pipeline`
 returns the live pipeline whose descriptor has the same exact identity, or
-creates one. The label is not identity, and gfx stores none. A
+creates one. A
 latched context loss returns invalid before the lookup. A hit needs no other
 check: destroying a program and a context loss clear its pipelines' keys, so a
 live entry has a live program, and its state passed validation at creation.
@@ -1153,10 +1153,13 @@ frame recording at that moment finish and records nothing after it. `nt_gfx_init
 `nt_gfx_shutdown` turn it off. Without either no frame records, and the first frame
 never records. `nt_gfx_desc_t.capture_capacity` sets the records of one frame (default
 zero, below 2^24 because a link must fit a stream op word); a request or continuous
-mode without capacity asserts. Capture-OFF builds ignore the field. Init reserves two
-halves of that size in one allocation: one holds the last finished frame while the
-other records. There is no growth or allocation while recording. Each pointer-free POD
-event is 104 bytes, including padding; 16384 records per frame reserve 3.25 MiB. Gfx
+mode without capacity asserts. `capture_string_capacity` sets the string bytes of one frame
+(labels and note text, see "Capture strings and object labels"); it is nonzero exactly when
+`capture_capacity` is. Capture-OFF builds ignore both fields. Init reserves two halves of
+records and two of string bytes in one allocation: one half of each holds the last finished
+frame while the other records. There is no growth or allocation while recording. Each pointer-free POD
+event is 104 bytes, including padding; 16384 records per frame reserve 3.25 MiB, plus
+twice `capture_string_capacity`. Gfx
 records keep `operation`, `object_kind`, `result` and `arg_count` in one byte each.
 Other storage consists of fixed control state and counter snapshots.
 All record bytes are initialized before publication. A recorded frame starts at
@@ -1167,13 +1170,13 @@ Size the capacity for that snapshot plus the frame's commands; a capacity below
 the snapshot overflows before any command is recorded.
 
 `nt_gfx_capture_read` returns the last finished recorded frame: metadata by value and
-its immutable records, complete with its post-render work and any gfx work issued
-between frames. A frame finishes at the begin_frame that closes it. Its records stay
+its immutable records and strings, complete with its post-render work and any gfx work issued
+between frames. A frame finishes at the begin_frame that closes it. Its records and strings stay
 valid until the begin_frame that finishes the next recorded frame, or shutdown, so in
 continuous mode each frame is readable during the whole next frame and a reader that
 copies one per frame gets every frame; unrecorded frames preserve it. The frame still
-recording is not readable. Keep a capture by copying the metadata and `count` records
-and redirecting the saved view's pointer to the owned array. An empty view (before any
+recording is not readable. Keep a capture by copying the metadata, `count` records and
+`string_bytes` strings, with `events` and `strings` pointing at the copies. An empty view (before any
 recorded frame finished) has a NULL pointer. The view retains its frame's counters
 (and so its `frame_sequence`) by value even after later frames overwrite
 `g_nt_gfx.last_frame`. The stub never begins a frame, so both switches are inert there.
@@ -1192,7 +1195,7 @@ immediate backend work inside a draw-phase call, such as a lazy sampler
 recreation, links to that call. Link 0 marks top-level OP records, the begin_frame
 snapshot, and the records of program links that `nt_gfx_begin_frame` finishes
 (their BACKEND records and each finished program's DEFINITION). Notes and markers
-carry no link: their label overlays those bytes, so read `kind` first.
+carry no link: their label reference overlays those bytes, so read `kind` first.
 A recorded command carries the link of the operation that recorded it, so the
 BACKEND and backend SKIP records it produces when the stream executes in
 `nt_gfx_end_frame` link to that operation. A merged draw issues one call that
@@ -1227,7 +1230,7 @@ or fence (`glFenceSync`) is a presence bit, and indexed offsets are byte offsets
 Output pointers are presence bits; their written values are not recorded. Readback, timer-query and debug-group calls are
 issued calls too and are recorded like any other.
 Float arguments occupy `backend.values` in float argument order. `arg_count` holds how many integer arguments (low nibble) and float values (high nibble) a call set, so trailing zeros stay distinguishable from absent arguments. `backend.bytes` is actual CPU upload payload, zero for NULL storage.
-No event borrows upload memory, shader source or caller labels.
+No event borrows upload memory, shader source or caller labels: strings are copied into the frame's strings.
 
 Resource `DEFINITION/STATE` records with `object_kind=NONE` use `detail` as the
 resource kind and `backend.args[0..1]` as backend slot/raw GL name. Frontend resource definitions
@@ -1313,12 +1316,30 @@ Notes, fields and markers are records of the same event array, in call order
 with the gfx records, so they share the capture's lifetime, copy rule and
 overflow. Only `kind` is common with gfx records: a note or marker keeps its
 label in `note.label`, a field its `type`, `key` and `value` in `field`. Label,
-key and string value are copied at the call, so callers may pass temporary
-buffers. They are shorter than 100, 24 and 72 bytes: a recorded frame asserts
-the lengths, and a marker name is checked in every frame. A note lands with all
-its fields or, when they do not fit, sets `overflow`; no record appends after an
-overflow. Each note costs one record plus one per field, so per-call notes (one
-per sprite emit) need capacity sized for them.
+key and string value are capture strings, copied at the call, so callers may pass
+temporary buffers of any length; they must not be NULL, and a marker name is checked
+in every frame. Renderers note a material by its label. A note lands with all its fields and strings or, when they do not
+fit, sets `overflow`; no record appends after an overflow. Each note costs one record
+plus one per field, and its strings' bytes, so per-call notes (one per sprite emit)
+need capacity sized for them.
+
+### Capture strings and object labels
+
+Every string of a capture (note labels, keys and string values, marker names, object
+labels) lives in the frame's strings: NUL-terminated bytes back to back, starting with
+the `""` of offset 0. A record names a string by its offset
+(`nt_gfx_capture_string_t`); offset 0 means none. `nt_gfx_capture_view_t.strings`
+and `string_bytes` hold them next to the records. A string is appended before its
+record, so a string that does not fit sets `overflow` and its record is never
+published; strings have no length limit of their own.
+
+Every desc `label` and `nt_gfx_make_program`'s label is a debug name in static
+storage: capture builds keep the pointer per live object and copy the text into each
+recorded frame. A create's resource `DEFINITION` and every later begin_frame snapshot
+carry it in `resource.label`; the OP record of the create does not. A pipeline, shared
+by equal descs, is named by its program; samplers, shared by key, and instance layouts
+have no name. `capture_string_capacity` covers the snapshot's labels plus the frame's
+note text: a sprite note takes 21 bytes plus its material label.
 
 A note describes the frontend records after it until the next note or marker.
 Immediate operations (creates, uploads) record their backend calls at the call,
@@ -1378,10 +1399,10 @@ document starts with its own version line and stays self-contained (its own init
 snapshot, record indices and links).
 
 ```text
-ntcapture 2
+ntcapture 3
 frame sequence=<n> platform=<native|web> records=<n> overflow=<0|1> execute=<begin>..<end>
 counter <name>=<n>                       (one line per nonzero counter)
-<index> <indent><KIND> op=<OP> [obj=<KIND>:<handle>] [result=<R>] [<detail>] [link=@<index>] <fields>
+<index> <indent><KIND> op=<OP> [obj=<KIND>:<handle>] [result=<R>] [<detail>] [link=@<index>] <fields> [label="<text>"]
 <index> <indent>NOTE label="<text>"
 <index> <indent>NOTE_FIELD key="<text>" type=<U32|I32|U64|F32|STR> value=<value>
 <index> <indent>MARKER_PUSH label="<text>"
@@ -1407,8 +1428,9 @@ counter <name>=<n>                       (one line per nonzero counter)
   Floats print as the shortest `%g` (6 to 9 significant digits) that reads back
   to the same float32, including `-0` and `inf`, always with `.` as the decimal point;
   NaN prints as `nan:0x<bits>`.
-- Note labels, keys and string values are double-quoted; `"`, `\` and bytes outside
-  0x20..0x7e print as `\xNN`.
+- Strings (note labels, keys and string values, marker names, object labels) are
+  double-quoted; `"`, `\` and bytes outside 0x20..0x7e print as `\xNN`. A resource
+  record's `label` prints last, omitted when empty.
 - Indentation (two spaces per open marker and per parent operation) is cosmetic and
   capped at 32 levels, so the text grows linearly with records; `link` is
   authoritative.
@@ -1433,20 +1455,23 @@ resolves names as strings in its own build's tables; the web build's operation a
 GL call names are a subset of the native ones, so a native build reads captures of
 both platforms.
 
-`nt_gfx_capture_parse(text, len, events, cap)` reads the document at the start of
-`text` (not terminated) back into records and a view. The text is untrusted: nothing
-in it asserts, and every number, name, string and reference is checked against the
-record layout, so whatever it accepts formats without asserting. It allocates
-nothing: every record is one line, so a caller sizes one array for a whole file from
-its line count, parses each document into the free tail and continues at `next`. One
+`nt_gfx_capture_parse(text, len, events, cap, strings, string_cap)` reads the document at
+the start of `text` (not terminated) back into records, strings and a view. The text is
+untrusted: nothing in it asserts, and every number, name, string and reference is checked
+against the record layout, so whatever it accepts formats without asserting. It allocates
+nothing: every record is one line and a document's strings never outgrow its text, so a
+caller sizes one record array from a file's line count and one string array from its length
+plus one, parses each document into the free tails and continues at `next` past the
+document's `count` records and `string_bytes`. One
 rule decides what survives an error, reported as a static message and a byte offset
 (`error`, `error_at`):
 
 - an error in the header (version line, frame line, counters) rejects the document:
   `view.events` is NULL;
 - an error in a record line, an unknown name included, keeps the records before it,
-  with the execution range clipped to them; so do a missing last newline, fewer lines
-  than `records=` and an array of fewer than `records=` elements (`cap`);
+  with the execution range clipped to them and its strings dropped; so do a missing
+  last newline, fewer lines than `records=`, an array of fewer than `records=` elements
+  (`cap`) and a string array too short for the strings (`string_cap`);
 - a line after the last record that does not open a document (a blank line, a `\r`
   ending included) is an error after a complete frame.
 
@@ -1465,8 +1490,11 @@ so a script or an agent reads what the window shows; the window adds its sentenc
 run or of two (native and web, before and after a change), compare by number keys and by group (marker
 path and note); inside a group their requests align like a text diff. A pair compares its result, merge
 break, GL call count, arguments and the records the request wrote (ARGUMENT, resource and attribute
-DEFINITION, NOTE_FIELD); handles compare as aliases numbered by first use in the frame (`pipe#9`), so runs
-whose handles differ still pair; GL calls are counted per request, not aligned, as backends issue different
+DEFINITION, NOTE_FIELD) and strings as text. Handles compare as aliases: an object's kind, label and number
+among the frame's objects of that kind and label, counted by first use in the frame's work, then in the
+snapshot (`vi/mesh#3`, unlabeled `vi#3`). Runs whose handles differ still pair, a live object the frame never
+uses shifts no number, and an object of another label shifts none of this label's; a renamed object is another
+object; GL calls are counted per request, not aligned, as backends issue different
 calls for one request. Between their common start and end, requests more than 1024 edits apart list A's,
 then B's. Its numbers follow this chapter: it
 checks every plain or indexed draw's merge against the recorded `CACHE` and rebuilds the

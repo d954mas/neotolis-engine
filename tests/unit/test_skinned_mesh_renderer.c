@@ -195,7 +195,8 @@ void setUp(void) {
     nt_gfx_fake_reset();
     s_surface_pack_created = false;
     nt_hash_init(&(nt_hash_desc_t){0});
-    nt_gfx_init(&NT_GFX_TEST_DESC(.capture_capacity = 4096U, .max_shaders = 8, .max_programs = 8, .max_pipelines = 16, .max_buffers = 32, .max_textures = 16, .max_meshes = 8,
+    nt_gfx_init(&NT_GFX_TEST_DESC(.capture_capacity = 4096U, .capture_string_capacity = 16384U, .max_shaders = 8, .max_programs = 8, .max_pipelines = 16, .max_buffers = 32, .max_textures = 16,
+                                  .max_meshes = 8,
                                   /* 48 non-mesh inputs + the per-(mesh, stream) vertex inputs of 8 meshes. */
                                   .max_vertex_inputs = 96, .max_render_targets = 4));
     nt_gfx_begin_frame();
@@ -884,7 +885,7 @@ void test_deformation_split_notes_the_same_material_and_mesh(void) {
     TEST_ASSERT_LESS_THAN_UINT32(count, notes[1]);
     TEST_ASSERT_EQUAL_UINT32(count, nt_test_note(notes[1] + 1U, "mesh"));
     for (uint32_t i = 0; i < 2; i++) {
-        TEST_ASSERT_EQUAL_UINT32(material.id, nt_test_note_u32(notes[i], "material"));
+        TEST_ASSERT_EQUAL_STRING(nt_material_get_info(material)->label, nt_test_note_str(notes[i], "material"));
         TEST_ASSERT_EQUAL_UINT32(mesh.id, nt_test_note_u32(notes[i], "mesh"));
         TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, nt_test_next_draw_result(notes[i]));
     }

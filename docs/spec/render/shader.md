@@ -162,8 +162,8 @@ extension for each stage, cut to 2 KB, ahead of the driver logs that a
 journal keeping its tail should retain. A stage without text logs nothing.
 Native GL compiles the packed source as is and logs no translation.
 
-The label is an optional debug name in static storage, like material labels; the
-program stores the pointer. NULL or empty labels report `<unnamed>`. Labels do not
+The label is an optional debug name in static storage; the program stores the
+pointer, and the capture names the program's pipelines by it. NULL or empty labels report `<unnamed>`. Labels do not
 affect program identity or readiness.
 
 ## ShaderAsset purpose

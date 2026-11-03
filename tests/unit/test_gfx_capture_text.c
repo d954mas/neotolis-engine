@@ -12,6 +12,7 @@ static nt_program_t s_program;
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 256;
+    desc.capture_string_capacity = 16384;
     desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 4096;
     desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096;
     nt_gfx_init(&desc);
@@ -34,7 +35,20 @@ static char *format_all(const nt_gfx_capture_view_t *view) {
     return text;
 }
 
-static void set_text(char *dst, const char *src) { memcpy(dst, src, strlen(src) + 1); }
+/* Strings of hand-built views, in record order as gfx appends them; [0] is the "" of offset 0. */
+static char s_strings[256];
+static uint32_t s_string_bytes;
+
+static nt_gfx_capture_string_t add_string(const char *src) {
+    const uint32_t at = s_string_bytes;
+    memcpy(s_strings + at, src, strlen(src) + 1);
+    s_string_bytes += (uint32_t)strlen(src) + 1U;
+    return at;
+}
+
+/* Parsed strings: the document's own (one file's documents share it), then a second parse's. */
+static char s_parsed[1U << 20];
+static char s_again[1U << 20];
 
 static float float_from_bits(uint32_t bits) {
     float f = 0.0F;
@@ -47,6 +61,7 @@ static float float_from_bits(uint32_t bits) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size) -- one record per data arm
 static void build_records(nt_gfx_event_t *ev) {
     memset(ev, 0, NT_RECORD_COUNT * sizeof(*ev));
+    s_string_bytes = 1;
     ev[0] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_PASS, .result = NT_GFX_RESULT_ACCEPTED};
     ev[0].data.pass.target = 3;
     ev[0].data.pass.color[0] = 0.25F;
@@ -64,21 +79,21 @@ static void build_records(nt_gfx_event_t *ev) {
     ev[4] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_SKIP, .operation = NT_GFX_OP_TEXTURE_SET, .result = NT_GFX_RESULT_INACTIVE};
     ev[4].data.binding.name = 99;
     ev[5].note.kind = NT_GFX_EVENT_MARKER_PUSH;
-    set_text(ev[5].note.label, "frame \"a\"\n");
+    ev[5].note.label = add_string("frame \"a\"\n");
     ev[6].note.kind = NT_GFX_EVENT_NOTE;
-    set_text(ev[6].note.label, "mesh");
+    ev[6].note.label = add_string("mesh");
     const nt_gfx_note_type_t types[5] = {NT_GFX_NOTE_U32, NT_GFX_NOTE_I32, NT_GFX_NOTE_U64, NT_GFX_NOTE_F32, NT_GFX_NOTE_STR};
     const char *keys[5] = {"material", "offset", "bits", "scale", "drop"};
     for (int i = 0; i < 5; i++) {
         ev[7 + i].field.kind = NT_GFX_EVENT_NOTE_FIELD;
         ev[7 + i].field.type = types[i];
-        set_text(ev[7 + i].field.key, keys[i]);
+        ev[7 + i].field.key = add_string(keys[i]);
     }
     ev[7].field.value.u32 = 5;
     ev[8].field.value.i32 = -2;
     ev[9].field.value.u64 = 1ULL << 60;
     ev[10].field.value.f32 = -0.0F;
-    set_text(ev[11].field.value.str, "font not loaded");
+    ev[11].field.value.str = add_string("font not loaded");
     ev[12] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_DRAW_INDEXED, .object_kind = NT_GFX_OBJECT_PIPELINE, .object = 65537, .result = NT_GFX_RESULT_ACCEPTED};
     ev[12].data.draw.first = 6;
     ev[12].data.draw.count = 3;
@@ -92,6 +107,7 @@ static void build_records(nt_gfx_event_t *ev) {
     ev[13].data.resource.height = 7;
     ev[13].data.resource.format = 1;
     ev[13].data.resource.levels = 1;
+    ev[13].data.resource.label = add_string("albedo");
     ev[14] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_DEFINITION, .operation = NT_GFX_OP_STATE, .detail = NT_GFX_OBJECT_TEXTURE};
     ev[14].data.backend.args[0] = 2;
     ev[14].data.backend.args[1] = 11;
@@ -124,7 +140,7 @@ static void build_records(nt_gfx_event_t *ev) {
     ev[22].data.draw.count = 3;
 }
 
-static const char *const k_expected = "ntcapture 2\n"
+static const char *const k_expected = "ntcapture 3\n"
                                       "frame sequence=9 platform=native records=23 overflow=1 execute=12..13\n"
                                       "counter vertices=4\n"
                                       "counter buffer_upload_bytes=1099511627776\n"
@@ -144,7 +160,7 @@ static const char *const k_expected = "ntcapture 2\n"
                                       "10   NOTE_FIELD key=\"scale\" type=F32 value=-0\n"
                                       "11   NOTE_FIELD key=\"drop\" type=STR value=\"font not loaded\"\n"
                                       "12   OP op=DRAW_INDEXED obj=PIPELINE:65537 result=ACCEPTED first=6 count=3 vertices=4 instances=1 vertex_input=65538\n"
-                                      "13   DEFINITION op=CREATE obj=TEXTURE:65539 backend=2 related=[5] width=13 height=7 format=1 levels=1\n"
+                                      "13   DEFINITION op=CREATE obj=TEXTURE:65539 backend=2 related=[5] width=13 height=7 format=1 levels=1 label=\"albedo\"\n"
                                       "14   DEFINITION op=STATE resource=TEXTURE args=[2,11]\n"
                                       "15   DEFINITION op=ATTRIBUTE obj=VERTEX_INPUT:65540 buffer=65541 stride=16 location=1 type=3 count=2\n"
                                       "16   INITIAL op=STATE layer=BACKEND args=[4,0,0,0,640,480]\n"
@@ -157,7 +173,7 @@ static const char *const k_expected = "ntcapture 2\n"
 
 static nt_gfx_capture_view_t hand_built_view(nt_gfx_event_t *ev) {
     build_records(ev);
-    nt_gfx_capture_view_t view = {.overflow = true, .events = ev, .count = NT_RECORD_COUNT, .execute_begin = 12, .execute_end = 13};
+    nt_gfx_capture_view_t view = {.overflow = true, .events = ev, .count = NT_RECORD_COUNT, .execute_begin = 12, .execute_end = 13, .strings = s_strings, .string_bytes = s_string_bytes};
     view.counters.frame_sequence = 9;
     view.counters.vertices = 4;
     view.counters.buffer_upload_bytes = 1ULL << 40;
@@ -202,10 +218,10 @@ static void test_deep_markers_cap_the_indent(void) {
     memset(ev, 0, sizeof(ev));
     for (int i = 0; i < DEPTH; i++) {
         ev[i].note.kind = NT_GFX_EVENT_MARKER_PUSH;
-        ev[i].note.label[0] = 'm';
+        ev[i].note.label = 1;
     }
     ev[DEPTH].note.kind = NT_GFX_EVENT_NOTE;
-    const nt_gfx_capture_view_t view = {.events = ev, .count = DEPTH + 1};
+    const nt_gfx_capture_view_t view = {.events = ev, .count = DEPTH + 1, .strings = "\0m", .string_bytes = 3};
     char *text = format_all(&view);
     const char *last = strstr(text, "40 ");
     TEST_ASSERT_NOT_NULL(last);
@@ -241,7 +257,7 @@ static void test_a_recorded_frame_prints_one_line_per_record(void) {
 /* Text -> records -> text gives the same bytes. */
 static void test_text_round_trips(void) {
     nt_gfx_event_t ev[NT_RECORD_COUNT];
-    const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(k_expected, strlen(k_expected), ev, NT_RECORD_COUNT);
+    const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(k_expected, strlen(k_expected), ev, NT_RECORD_COUNT, s_parsed, sizeof(s_parsed));
     TEST_ASSERT_NULL(r.error);
     TEST_ASSERT_EQUAL_UINT64(strlen(k_expected), r.next);
     TEST_ASSERT_EQUAL_UINT32(NT_RECORD_COUNT, r.view.count);
@@ -257,9 +273,11 @@ static void assert_records_round_trip(const nt_gfx_capture_view_t *view) {
     char *text = format_all(view);
     nt_gfx_event_t *parsed = (nt_gfx_event_t *)calloc(view->count + 1U, sizeof(*parsed));
     TEST_ASSERT_NOT_NULL(parsed);
-    const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(text, strlen(text), parsed, view->count);
+    const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(text, strlen(text), parsed, view->count, s_parsed, sizeof(s_parsed));
     TEST_ASSERT_NULL(r.error);
     TEST_ASSERT_EQUAL_UINT32(view->count, r.view.count);
+    TEST_ASSERT_EQUAL_UINT32(view->string_bytes, r.view.string_bytes);
+    TEST_ASSERT_EQUAL_MEMORY(view->strings, r.view.strings, view->string_bytes);
     TEST_ASSERT_EQUAL_UINT32(view->execute_begin, r.view.execute_begin);
     TEST_ASSERT_EQUAL_UINT32(view->execute_end, r.view.execute_end);
     TEST_ASSERT_EQUAL(view->platform, r.view.platform);
@@ -306,8 +324,10 @@ static void test_extremes_round_trip(void) {
     ev[1].data.resource.size = UINT64_MAX;
     ev[1].data.resource.related[2] = UINT32_MAX;
     ev[2].note.kind = NT_GFX_EVENT_NOTE;
-    memset(ev[2].note.label, 'x', sizeof(ev[2].note.label) - 1U); /* the longest label */
-    const nt_gfx_capture_view_t view = {.events = ev, .count = 3, .platform = NT_GFX_CAPTURE_WEB};
+    static char strings[302];
+    memset(strings + 1, 'x', 300); /* strings have no length limit */
+    ev[2].note.label = 1;
+    const nt_gfx_capture_view_t view = {.events = ev, .count = 3, .platform = NT_GFX_CAPTURE_WEB, .strings = strings, .string_bytes = sizeof(strings)};
     assert_records_round_trip(&view);
 }
 
@@ -319,8 +339,8 @@ static void test_every_arm_round_trips(void) {
 }
 
 static void test_documents_parse_back_to_back(void) {
-    const char *bad = "ntcapture 2\nframe sequence=1 platform=native records=2 overflow=0 execute=0..0\n0 OP op=PASS\n1 OP op=NO_SUCH_OP\n";
-    const char *web_head = "ntcapture 2\nframe sequence=9 platform=web";
+    const char *bad = "ntcapture 3\nframe sequence=1 platform=native records=2 overflow=0 execute=0..0\n0 OP op=PASS\n1 OP op=NO_SUCH_OP\n";
+    const char *web_head = "ntcapture 3\nframe sequence=9 platform=web";
     const char *tail = strstr(k_expected, " records="); /* the same records, recorded on the other platform */
     const size_t len = strlen(k_expected) + strlen(bad) + strlen(web_head) + strlen(tail);
     char *text = (char *)malloc(len + 1U);
@@ -329,17 +349,20 @@ static void test_documents_parse_back_to_back(void) {
     nt_gfx_event_t ev[(NT_RECORD_COUNT * 2) + 2];
     size_t at = 0;
     uint32_t used = 0;
+    uint32_t string_used = 0;
     const char *errors[3] = {NULL, NULL, NULL};
     uint32_t counts[3] = {0};
     uint32_t documents = 0;
     while (at < strlen(text) && documents < 3) {
-        const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(text + at, strlen(text) - at, ev + used, (uint32_t)(sizeof(ev) / sizeof(ev[0])) - used);
+        const nt_gfx_capture_parsed_t r =
+            nt_gfx_capture_parse(text + at, strlen(text) - at, ev + used, (uint32_t)(sizeof(ev) / sizeof(ev[0])) - used, s_parsed + string_used, (uint32_t)sizeof(s_parsed) - string_used);
         errors[documents] = r.error;
         counts[documents] = r.view.count;
         if (documents == 2) {
             TEST_ASSERT_EQUAL(NT_GFX_CAPTURE_WEB, r.view.platform);
         }
         used += r.view.count;
+        string_used += r.view.string_bytes;
         at += r.next;
         documents++;
     }
@@ -354,7 +377,7 @@ static void test_documents_parse_back_to_back(void) {
     free(text);
 }
 
-#define NT_HEADER_ "ntcapture 2\nframe sequence=1 platform=native records=2 overflow=0 execute=0..0\n"
+#define NT_HEADER_ "ntcapture 3\nframe sequence=1 platform=native records=2 overflow=0 execute=0..0\n"
 
 /* Each outcome: rejected (NULL events) or the records kept, and where the error points (`at`: its first
  * occurrence in the text; NULL: the end of the text). */
@@ -369,7 +392,7 @@ static void test_bad_text_reports_where_and_keeps_a_prefix(void) {
         {"ntcapture 1\n", "1\n", 0, -1, 4},
         {"nt\n", "nt", 0, -1, 4},
         {NT_HEADER_ "counter bogus=1\n0 OP op=PASS\n1 OP op=PASS\n", "bogus", 0, -1, 4},
-        {"ntcapture 2\nframe sequence=1 platform=native records=1 overflow=0 execute=0..2\n0 OP op=PASS\n", "\n0 OP", 0, -1, 4},
+        {"ntcapture 3\nframe sequence=1 platform=native records=1 overflow=0 execute=0..2\n0 OP op=PASS\n", "\n0 OP", 0, -1, 4},
         {NT_HEADER_ "0 OP op=PASS\n1 OP op=NO_SUCH_OP\n", "NO_SUCH", 0, 1, 4},
         {NT_HEADER_ "0 OP op=PASS\n", NULL, 0, 1, 4},
         {NT_HEADER_ "0 OP op=PASS\n1 OP op=PASS", "1 OP", 0, 1, 4},
@@ -386,18 +409,17 @@ static void test_bad_text_reports_where_and_keeps_a_prefix(void) {
         {NT_HEADER_ "0 OP op=CLEAR clear_depth=0x1p3\n", "0x1p3", 0, 0, 4},
         {NT_HEADER_ "1 OP op=PASS\n", "1 OP", 0, 0, 4},
         {NT_HEADER_ "0 OP op=SCISSOR integers=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]\n", "15]", 0, 0, 4},
-        {NT_HEADER_ "0 NOTE label=\"n\"\n1 NOTE_FIELD key=\"AAAAAAAAAAAAAAAAAAAAAAAX\" type=U32 value=1\n", "X\"", 0, 1, 4},
         {NT_HEADER_ "0 OP op=CLEAR clear_depth=nan:0x7f800000\n", "nan:", 0, 0, 4},
         {NT_HEADER_ "0 OP op=CLEAR clear_depth=1..5\n", "1..5", 0, 0, 4},
         {NT_HEADER_ "0 OP op=CLEAR clear_depth=1e100\n", "1e100", 0, 0, 4},
         {NT_HEADER_ "counter frame_bytes.99=5\n0 OP op=PASS\n1 OP op=PASS\n", "99=", 2, -1, 4},
-        {"ntcapture 2\nframe sequence=1 platform=native records=0 overflow=2 execute=0..0\n", "2 exec", 0, -1, 4},
-        {"ntcapture 2\nframe sequence=1 platform=mars records=0 overflow=0 execute=0..0\n", "mars", 0, -1, 4},
+        {"ntcapture 3\nframe sequence=1 platform=native records=0 overflow=2 execute=0..0\n", "2 exec", 0, -1, 4},
+        {"ntcapture 3\nframe sequence=1 platform=mars records=0 overflow=0 execute=0..0\n", "mars", 0, -1, 4},
     };
     for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
         nt_gfx_event_t ev[4];
         const size_t len = strlen(rows[i].text);
-        const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(rows[i].text, len, ev, rows[i].cap);
+        const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(rows[i].text, len, ev, rows[i].cap, s_parsed, sizeof(s_parsed));
         TEST_ASSERT_NOT_NULL_MESSAGE(r.error, rows[i].text);
         const size_t expected_at = rows[i].at != NULL ? (size_t)(strstr(rows[i].text, rows[i].at) - rows[i].text) + rows[i].skip : len;
         TEST_ASSERT_EQUAL_UINT64_MESSAGE(expected_at, r.error_at, rows[i].text);
@@ -409,12 +431,33 @@ static void test_bad_text_reports_where_and_keeps_a_prefix(void) {
         TEST_ASSERT_EQUAL_UINT64_MESSAGE(len, r.next, rows[i].text);
     }
     /* A valid prefix keeps the execution range inside its records. */
-    const char *cut = "ntcapture 2\nframe sequence=1 platform=native records=3 overflow=0 execute=1..3\n0 OP op=PASS\n1 OP op=PASS\n2 OP op=NO\n";
+    const char *cut = "ntcapture 3\nframe sequence=1 platform=native records=3 overflow=0 execute=1..3\n0 OP op=PASS\n1 OP op=PASS\n2 OP op=NO\n";
     nt_gfx_event_t ev[3];
-    const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(cut, strlen(cut), ev, 3);
+    const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(cut, strlen(cut), ev, 3, s_parsed, sizeof(s_parsed));
     TEST_ASSERT_EQUAL_UINT32(2, r.view.count);
     TEST_ASSERT_EQUAL_UINT32(1, r.view.execute_begin);
     TEST_ASSERT_EQUAL_UINT32(2, r.view.execute_end);
+}
+
+/* Strings that run past the array end the document like records do: the lines before keep their strings, the
+ * failed line's are dropped. */
+static void test_strings_past_the_array_keep_a_prefix(void) {
+    const char *text = NT_HEADER_ "0 NOTE label=\"ab\"\n1 NOTE label=\"cdef\"\n";
+    nt_gfx_event_t ev[2];
+    char strings[6];
+    const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(text, strlen(text), ev, 2, strings, sizeof(strings));
+    TEST_ASSERT_NOT_NULL(r.error);
+    TEST_ASSERT_EQUAL_UINT64((size_t)(strstr(text, "cdef") - text) + 1U, r.error_at); /* only "c" and its NUL fit beside "ab" */
+    TEST_ASSERT_EQUAL_UINT32(1, r.view.count);
+    TEST_ASSERT_EQUAL_UINT32(4, r.view.string_bytes);
+    TEST_ASSERT_EQUAL_STRING("ab", r.view.strings + ev[0].note.label);
+
+    /* A line whose first string fits and second does not drops both. */
+    const char *field = NT_HEADER_ "0 NOTE label=\"ab\"\n1 NOTE_FIELD key=\"k\" type=STR value=\"long\"\n";
+    const nt_gfx_capture_parsed_t f = nt_gfx_capture_parse(field, strlen(field), ev, 2, strings, sizeof(strings));
+    TEST_ASSERT_NOT_NULL(f.error);
+    TEST_ASSERT_EQUAL_UINT32(1, f.view.count);
+    TEST_ASSERT_EQUAL_UINT32(4, f.view.string_bytes);
 }
 
 /* Real frames saved by gfx_demo from the web host: each document parses whole and formats to its own bytes on native. */
@@ -433,9 +476,10 @@ static void test_a_saved_web_file_round_trips(void) {
     nt_gfx_event_t *events = (nt_gfx_event_t *)calloc((size_t)lines + 1U, sizeof(*events));
     TEST_ASSERT_NOT_NULL(events);
     uint32_t used = 0;
+    uint32_t string_used = 0;
     uint32_t documents = 0;
     for (size_t at = 0; at < len; documents++) {
-        const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(text + at, len - at, events + used, lines - used);
+        const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(text + at, len - at, events + used, lines - used, s_parsed + string_used, (uint32_t)sizeof(s_parsed) - string_used);
         TEST_ASSERT_NULL_MESSAGE(r.error, r.error);
         TEST_ASSERT_EQUAL(NT_GFX_CAPTURE_WEB, r.view.platform);
         char *again = format_all(&r.view);
@@ -443,6 +487,7 @@ static void test_a_saved_web_file_round_trips(void) {
         TEST_ASSERT_EQUAL_MEMORY(text + at, again, r.next);
         free(again);
         used += r.view.count;
+        string_used += r.view.string_bytes;
         at += r.next;
     }
     TEST_ASSERT_GREATER_OR_EQUAL_UINT32(2, documents);
@@ -458,9 +503,11 @@ static void assert_canonical(const nt_gfx_capture_parsed_t *r) {
     }
     char *text = format_all(&r->view);
     nt_gfx_event_t again[NT_RECORD_COUNT];
-    const nt_gfx_capture_parsed_t back = nt_gfx_capture_parse(text, strlen(text), again, NT_RECORD_COUNT);
+    const nt_gfx_capture_parsed_t back = nt_gfx_capture_parse(text, strlen(text), again, NT_RECORD_COUNT, s_again, sizeof(s_again));
     TEST_ASSERT_NULL(back.error);
     TEST_ASSERT_EQUAL_UINT32(r->view.count, back.view.count);
+    TEST_ASSERT_EQUAL_UINT32(r->view.string_bytes, back.view.string_bytes);
+    TEST_ASSERT_EQUAL_MEMORY(r->view.strings, back.view.strings, back.view.string_bytes);
     if (back.view.count > 0) { /* Unity refuses an empty compare */
         TEST_ASSERT_EQUAL_MEMORY(r->view.events, again, (size_t)back.view.count * sizeof(*again));
     }
@@ -474,14 +521,14 @@ static void test_damaged_text_never_asserts(void) {
     nt_gfx_event_t ev[NT_RECORD_COUNT];
     static const char k_bytes[] = {'0', '9', '@', ' ', '"', '\\', 'x', '\n', 'A', '-', '[', ',', '=', '.'};
     for (size_t cut = 0; cut <= len; cut++) {
-        const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(k_expected, cut, ev, NT_RECORD_COUNT);
+        const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(k_expected, cut, ev, NT_RECORD_COUNT, s_parsed, sizeof(s_parsed));
         assert_canonical(&r);
     }
     for (size_t at = 0; at < len; at++) {
         for (size_t b = 0; b < sizeof(k_bytes); b++) {
             memcpy(text, k_expected, len + 1U);
             text[at] = k_bytes[b];
-            const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(text, len, ev, NT_RECORD_COUNT);
+            const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(text, len, ev, NT_RECORD_COUNT, s_parsed, sizeof(s_parsed));
             assert_canonical(&r);
         }
     }
@@ -503,6 +550,7 @@ int main(void) {
     RUN_TEST(test_every_arm_round_trips);
     RUN_TEST(test_documents_parse_back_to_back);
     RUN_TEST(test_bad_text_reports_where_and_keeps_a_prefix);
+    RUN_TEST(test_strings_past_the_array_keep_a_prefix);
     RUN_TEST(test_a_saved_web_file_round_trips);
     RUN_TEST(test_damaged_text_never_asserts);
 #endif
