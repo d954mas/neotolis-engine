@@ -364,10 +364,7 @@ static void j_ref(nt_introspect_sink *s, const char *key, nt_ref_kind_t kind, ui
     if (kind == NT_REF_MATERIAL) {
         nt_material_t mat = {.id = (uint32_t)id};
         if (nt_material_valid(mat)) {
-            const nt_material_info_t *info = nt_material_get_info(mat);
-            if (info != NULL && info->label != NULL) {
-                devapi_add_string(ref, "label", info->label);
-            }
+            devapi_add_string(ref, "label", nt_material_get_info(mat)->label);
         }
     }
 }

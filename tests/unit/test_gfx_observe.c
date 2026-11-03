@@ -1217,19 +1217,17 @@ static const char *definition_label(nt_gfx_object_kind_t kind, uint32_t object) 
     return NULL;
 }
 
-/* A create's DEFINITION and every later snapshot name the object by its desc label; a cache hit keeps the first
- * creator's label, and an unlabeled object in a reused slot has none. */
+/* A create's DEFINITION and every later snapshot name the object by its desc label, a pipeline by its program's;
+ * a sampler, shared by key, has none, and neither has an unlabeled object in a reused slot. */
 static void test_definitions_carry_the_desc_label(void) {
     record_next_frame();
     const nt_buffer_t probe = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16, .label = "probe"});
-    const nt_pipeline_t first = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = s_draw_program, .label = "first"});
-    TEST_ASSERT_EQUAL_UINT32(first.id, nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = s_draw_program, .label = "second"}).id);
-    /* No texture makes a comparison sampler, so this one is not a default sampler's cache hit. */
     const nt_sampler_t shadow = nt_gfx_make_sampler(&(nt_sampler_desc_t){.compare_func = NT_COMPARE_LEQUAL, .label = "shadow"});
     static const uint32_t pixel = 0xFFFFFFFFU;
     const nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "vs"});
     const nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "fs"});
     const nt_program_t program = nt_gfx_make_program(vs, fs, "program");
+    const nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     const nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.label = "vi"});
     const nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = &pixel, .format = NT_TEXTURE_FORMAT_RGBA8, .label = "texture"});
     const nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = texture, .label = "target"});
@@ -1240,15 +1238,14 @@ static void test_definitions_carry_the_desc_label(void) {
     TEST_ASSERT_EQUAL_STRING("texture", definition_label(NT_GFX_OBJECT_TEXTURE, texture.id));
     TEST_ASSERT_EQUAL_STRING("target", definition_label(NT_GFX_OBJECT_RENDER_TARGET, target.id));
     TEST_ASSERT_EQUAL_STRING("probe", definition_label(NT_GFX_OBJECT_BUFFER, probe.id));
-    TEST_ASSERT_EQUAL_STRING("first", definition_label(NT_GFX_OBJECT_PIPELINE, first.id));
-    TEST_ASSERT_EQUAL_STRING("shadow", definition_label(NT_GFX_OBJECT_SAMPLER, shadow.id));
+    TEST_ASSERT_EQUAL_STRING("program", definition_label(NT_GFX_OBJECT_PIPELINE, pipeline.id)); /* named by its program */
+    TEST_ASSERT_EQUAL_STRING("", definition_label(NT_GFX_OBJECT_SAMPLER, shadow.id));          /* shared by key: no name */
 
     record_next_frame(); /* the snapshot */
     TEST_ASSERT_EQUAL_STRING("program", definition_label(NT_GFX_OBJECT_PROGRAM, program.id));
     TEST_ASSERT_EQUAL_STRING("target", definition_label(NT_GFX_OBJECT_RENDER_TARGET, target.id));
     TEST_ASSERT_EQUAL_STRING("probe", definition_label(NT_GFX_OBJECT_BUFFER, probe.id));
-    TEST_ASSERT_EQUAL_STRING("first", definition_label(NT_GFX_OBJECT_PIPELINE, first.id));
-    TEST_ASSERT_EQUAL_STRING("shadow", definition_label(NT_GFX_OBJECT_SAMPLER, shadow.id));
+    TEST_ASSERT_EQUAL_STRING("program", definition_label(NT_GFX_OBJECT_PIPELINE, pipeline.id));
 
     nt_gfx_destroy_buffer(probe);
     const nt_buffer_t unlabeled = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});

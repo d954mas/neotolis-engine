@@ -1,5 +1,5 @@
 ntcapture 3
-frame sequence=232 platform=web records=714 overflow=0 execute=639..714
+frame sequence=235 platform=web records=714 overflow=0 execute=639..714
 counter vertices=5251
 counter indices=19176
 counter instances=63
@@ -60,16 +60,16 @@ counter gl.glViewport=2
 20 DEFINITION op=CREATE obj=PROGRAM:65542 result=UNKNOWN backend=6 label="skeletal_showcase/static"
 21 DEFINITION op=CREATE obj=PROGRAM:65543 result=UNKNOWN backend=7 label="skeletal_showcase/sprite"
 22 DEFINITION op=CREATE obj=PROGRAM:65544 result=UNKNOWN backend=8 label="skeletal_showcase/text"
-23 DEFINITION op=CREATE obj=PIPELINE:65537 backend=1 related=[65537] label="shape_fill_pipeline"
-24 DEFINITION op=CREATE obj=PIPELINE:65538 backend=2 related=[65538] label="shape_batch_pipeline"
-25 DEFINITION op=CREATE obj=PIPELINE:65539 backend=3 related=[65539] label="shape_wire_pipeline"
-26 DEFINITION op=CREATE obj=PIPELINE:65540 backend=4 related=[65540] label="shape_line_pipeline"
-27 DEFINITION op=CREATE obj=PIPELINE:65541 backend=5 related=[65537] label="shape_fill_pipeline"
-28 DEFINITION op=CREATE obj=PIPELINE:65542 backend=6 related=[65538] label="shape_batch_pipeline"
-29 DEFINITION op=CREATE obj=PIPELINE:65543 backend=7 related=[65539] label="shape_wire_pipeline"
-30 DEFINITION op=CREATE obj=PIPELINE:65544 backend=8 related=[65540] label="shape_line_pipeline"
-31 DEFINITION op=CREATE obj=PIPELINE:65545 backend=9 related=[65543] label="skeletal_showcase_sprite"
-32 DEFINITION op=CREATE obj=PIPELINE:65546 backend=10 related=[65544] label="skeletal_showcase_text"
+23 DEFINITION op=CREATE obj=PIPELINE:65537 backend=1 related=[65537] label="shape/fill"
+24 DEFINITION op=CREATE obj=PIPELINE:65538 backend=2 related=[65538] label="shape/batch"
+25 DEFINITION op=CREATE obj=PIPELINE:65539 backend=3 related=[65539] label="shape/wire"
+26 DEFINITION op=CREATE obj=PIPELINE:65540 backend=4 related=[65540] label="shape/line"
+27 DEFINITION op=CREATE obj=PIPELINE:65541 backend=5 related=[65537] label="shape/fill"
+28 DEFINITION op=CREATE obj=PIPELINE:65542 backend=6 related=[65538] label="shape/batch"
+29 DEFINITION op=CREATE obj=PIPELINE:65543 backend=7 related=[65539] label="shape/wire"
+30 DEFINITION op=CREATE obj=PIPELINE:65544 backend=8 related=[65540] label="shape/line"
+31 DEFINITION op=CREATE obj=PIPELINE:65545 backend=9 related=[65543] label="skeletal_showcase/sprite"
+32 DEFINITION op=CREATE obj=PIPELINE:65546 backend=10 related=[65544] label="skeletal_showcase/text"
 33 DEFINITION op=CREATE obj=VERTEX_INPUT:65537 result=UNKNOWN backend=1 related=[65539] label="shape_batch_vi"
 34 DEFINITION op=CREATE obj=VERTEX_INPUT:65538 result=UNKNOWN backend=2 related=[65540,65541] type=1 label="shape_fill_vi"
 35 DEFINITION op=CREATE obj=VERTEX_INPUT:65539 result=UNKNOWN backend=3 related=[65542,65543] type=1 label="shape_wire_vi"
@@ -151,10 +151,10 @@ counter gl.glViewport=2
 111 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:6 offset=48 stride=64 location=12 type=4 count=4 divisor=1
 112 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:6 offset=56 stride=64 location=13 count=1 divisor=1
 113 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:6 offset=60 stride=64 location=11 type=2 count=4 normalized=1 divisor=1
-114 INITIAL op=STATE layer=BACKEND args=[63,68,0,33984,1280,720,2,5]
+114 INITIAL op=STATE layer=BACKEND args=[52,68,0,33984,1280,720,2,5]
 115 INITIAL op=VIEWPORT integers=[0,0,1280,720]
 116 INITIAL op=PASS color=[0.035,0.05,0.08,1] depth=1
-117 INITIAL op=PIPELINE integers=[63,0,0,515,0,1,1,771,1,771,32774,32774] values=[0,0,0,0,1,1]
+117 INITIAL op=PIPELINE integers=[52,0,0,515,0,1,1,771,1,771,32774,32774] values=[0,0,0,0,1,1]
 118 DEFINITION op=PIPELINE detail=1 integers=[1,0,0,515,0,0,0,0,0,0,32774,32774]
 119 DEFINITION op=PIPELINE detail=2 integers=[2,0,0,515,0,0,0,0,0,0,32774,32774]
 120 DEFINITION op=PIPELINE detail=3 integers=[3,0,0,515,0,0,0,0,0,0,32774,32774]
@@ -177,14 +177,14 @@ counter gl.glViewport=2
 137 DEFINITION op=STATE resource=PROGRAM args=[2,12]
 138 DEFINITION op=STATE resource=PROGRAM args=[3,13]
 139 DEFINITION op=STATE resource=PROGRAM args=[4,14]
-140 DEFINITION op=STATE resource=PROGRAM args=[5,61]
+140 DEFINITION op=STATE resource=PROGRAM args=[5,50]
 141 INITIAL op=SAMPLER args=[5,3428070614,1]
 142 INITIAL op=SAMPLER args=[5,2847690556,2,1]
-143 DEFINITION op=STATE resource=PROGRAM args=[6,62]
+143 DEFINITION op=STATE resource=PROGRAM args=[6,51]
 144 INITIAL op=SAMPLER args=[6,2847690556,1]
-145 DEFINITION op=STATE resource=PROGRAM args=[7,63]
+145 DEFINITION op=STATE resource=PROGRAM args=[7,52]
 146 INITIAL op=SAMPLER args=[7,2847690556,1]
-147 DEFINITION op=STATE resource=PROGRAM args=[8,64]
+147 DEFINITION op=STATE resource=PROGRAM args=[8,53]
 148 INITIAL op=SAMPLER args=[8,2054201044,1]
 149 DEFINITION op=STATE resource=BUFFER args=[1,3]
 150 DEFINITION op=STATE resource=BUFFER args=[2,4]
@@ -204,16 +204,16 @@ counter gl.glViewport=2
 164 DEFINITION op=STATE resource=BUFFER args=[16,46]
 165 DEFINITION op=STATE resource=BUFFER args=[17,48]
 166 DEFINITION op=STATE resource=BUFFER args=[18,49]
-167 DEFINITION op=STATE resource=BUFFER args=[19,51]
-168 DEFINITION op=STATE resource=BUFFER args=[20,52]
-169 DEFINITION op=STATE resource=BUFFER args=[21,53]
-170 DEFINITION op=STATE resource=BUFFER args=[22,54]
-171 DEFINITION op=STATE resource=BUFFER args=[23,55]
-172 DEFINITION op=STATE resource=BUFFER args=[24,56]
-173 DEFINITION op=STATE resource=BUFFER args=[25,57]
-174 DEFINITION op=STATE resource=BUFFER args=[26,58]
-175 DEFINITION op=STATE resource=BUFFER args=[27,59]
-176 DEFINITION op=STATE resource=BUFFER args=[28,60]
+167 DEFINITION op=STATE resource=BUFFER args=[19,55]
+168 DEFINITION op=STATE resource=BUFFER args=[20,56]
+169 DEFINITION op=STATE resource=BUFFER args=[21,57]
+170 DEFINITION op=STATE resource=BUFFER args=[22,58]
+171 DEFINITION op=STATE resource=BUFFER args=[23,59]
+172 DEFINITION op=STATE resource=BUFFER args=[24,60]
+173 DEFINITION op=STATE resource=BUFFER args=[25,61]
+174 DEFINITION op=STATE resource=BUFFER args=[26,62]
+175 DEFINITION op=STATE resource=BUFFER args=[27,63]
+176 DEFINITION op=STATE resource=BUFFER args=[28,64]
 177 DEFINITION op=STATE resource=BUFFER args=[29,65]
 178 DEFINITION op=STATE resource=BUFFER args=[30,66]
 179 DEFINITION op=STATE resource=TEXTURE args=[1,26]
@@ -222,7 +222,7 @@ counter gl.glViewport=2
 182 DEFINITION op=STATE resource=TEXTURE args=[4,44]
 183 DEFINITION op=STATE resource=TEXTURE args=[5,45]
 184 DEFINITION op=STATE resource=TEXTURE args=[6,47]
-185 DEFINITION op=STATE resource=TEXTURE args=[7,50]
+185 DEFINITION op=STATE resource=TEXTURE args=[7,54]
 186 DEFINITION op=STATE resource=TEXTURE args=[8,67]
 187 DEFINITION op=STATE resource=VERTEX_INPUT args=[1,21]
 188 DEFINITION op=STATE resource=VERTEX_INPUT args=[2,22,5,0,1]
@@ -710,7 +710,7 @@ counter gl.glViewport=2
 670   BACKEND op=STATE call=glDisable link=@210 args=[3089]
 671   BACKEND op=STATE call=glViewport link=@211 args=[0,0,1280,720]
 672   BACKEND op=STATE call=glBindBufferRange link=@212 args=[35345,0,4,512,256]
-673   BACKEND op=STATE call=glUseProgram link=@219 args=[63]
+673   BACKEND op=STATE call=glUseProgram link=@219 args=[52]
 674   BACKEND op=STATE call=glDisable link=@219 args=[2929]
 675   BACKEND op=STATE call=glDepthMask link=@219 args=[0]
 676   BACKEND op=STATE call=glEnable link=@219 args=[3042]
@@ -718,19 +718,19 @@ counter gl.glViewport=2
 678   SKIP op=SAMPLER result=CACHE call=glBindSampler link=@221 key=[43,0]
 679   BACKEND op=STATE call=glBindVertexArray link=@223 args=[68]
 680   BACKEND op=STATE call=glDrawElements link=@224 args=[4,30,5125,0]
-681   BACKEND op=STATE call=glUseProgram link=@265 args=[64]
+681   BACKEND op=STATE call=glUseProgram link=@265 args=[53]
 682   BACKEND op=STATE call=glBindTexture link=@267 args=[3553,26]
 683   BACKEND op=STATE call=glBindSampler link=@267 args=[0,27]
 684   BACKEND op=STATE call=glBindVertexArray link=@269 args=[69]
 685   BACKEND op=STATE call=glDrawElements link=@270 args=[4,1332,5125,120]
 686   BACKEND op=STATE call=glScissor link=@352 args=[0,26,1280,550]
 687   BACKEND op=STATE call=glEnable link=@353 args=[3089]
-688   BACKEND op=STATE call=glUseProgram link=@357 args=[63]
+688   BACKEND op=STATE call=glUseProgram link=@357 args=[52]
 689   BACKEND op=STATE call=glBindTexture link=@359 args=[3553,45]
 690   BACKEND op=STATE call=glBindSampler link=@359 args=[0,43]
 691   BACKEND op=STATE call=glBindVertexArray link=@361 args=[68]
 692   BACKEND op=STATE call=glDrawElements link=@362 args=[4,354,5125,5448]
-693   BACKEND op=STATE call=glUseProgram link=@456 args=[64]
+693   BACKEND op=STATE call=glUseProgram link=@456 args=[53]
 694   BACKEND op=STATE call=glBindTexture link=@458 args=[3553,26]
 695   BACKEND op=STATE call=glBindSampler link=@458 args=[0,27]
 696   BACKEND op=STATE call=glBindVertexArray link=@460 args=[69]
@@ -739,7 +739,7 @@ counter gl.glViewport=2
 699   BACKEND op=STATE call=glEnable link=@599 args=[3089]
 700   BACKEND op=STATE call=glDisable link=@600 args=[3089]
 701   BACKEND op=STATE call=glEnable link=@602 args=[3089]
-702   BACKEND op=STATE call=glUseProgram link=@606 args=[63]
+702   BACKEND op=STATE call=glUseProgram link=@606 args=[52]
 703   BACKEND op=STATE call=glBindTexture link=@608 args=[3553,45]
 704   BACKEND op=STATE call=glBindSampler link=@608 args=[0,43]
 705   BACKEND op=STATE call=glBindVertexArray link=@610 args=[68]

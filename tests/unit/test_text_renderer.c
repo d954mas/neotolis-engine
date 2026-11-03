@@ -410,7 +410,8 @@ void test_quad_covers_fp16_rounded_tofu(void) {
 void test_text_material_may_declare_its_own_textures(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
-    nt_material_t textured = nt_material_create(&(nt_material_create_desc_t){.label = "test_material", 
+    nt_material_t textured = nt_material_create(&(nt_material_create_desc_t){
+        .label = "test_material",
         .program = nt_gfx_make_program(vs, fs, NULL),
         .cull_mode = NT_CULL_NONE,
         .textures[0] = {.name = "u_extra", .resource = NT_RESOURCE_INVALID},
@@ -535,8 +536,10 @@ void test_material_params_bind_once_per_change(void) {
     nt_program_t shared = nt_gfx_make_program(vs, fs, NULL);
     static const float red[4] = {1, 0, 0, 1};
     static const float green[4] = {0, 1, 0, 1};
-    nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.label = "test_material", .program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE, .params = red, .params_size = sizeof(red)});
-    nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.label = "test_material", .program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE, .params = green, .params_size = sizeof(green)});
+    nt_material_t a =
+        nt_material_create(&(nt_material_create_desc_t){.label = "test_material", .program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE, .params = red, .params_size = sizeof(red)});
+    nt_material_t b = nt_material_create(
+        &(nt_material_create_desc_t){.label = "test_material", .program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE, .params = green, .params_size = sizeof(green)});
 
     nt_test_frame_finish_links();
     nt_gfx_fake_reset();

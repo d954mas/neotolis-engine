@@ -1,5 +1,5 @@
 ntcapture 3
-frame sequence=999 platform=native records=714 overflow=0 execute=639..714
+frame sequence=1009 platform=native records=714 overflow=0 execute=639..714
 counter vertices=5251
 counter indices=19176
 counter instances=63
@@ -60,16 +60,16 @@ counter gl.glViewport=2
 20 DEFINITION op=CREATE obj=PROGRAM:65542 result=UNKNOWN backend=6 label="skeletal_showcase/static"
 21 DEFINITION op=CREATE obj=PROGRAM:65543 result=UNKNOWN backend=7 label="skeletal_showcase/sprite"
 22 DEFINITION op=CREATE obj=PROGRAM:65544 result=UNKNOWN backend=8 label="skeletal_showcase/text"
-23 DEFINITION op=CREATE obj=PIPELINE:65537 backend=1 related=[65537] label="shape_fill_pipeline"
-24 DEFINITION op=CREATE obj=PIPELINE:65538 backend=2 related=[65538] label="shape_batch_pipeline"
-25 DEFINITION op=CREATE obj=PIPELINE:65539 backend=3 related=[65539] label="shape_wire_pipeline"
-26 DEFINITION op=CREATE obj=PIPELINE:65540 backend=4 related=[65540] label="shape_line_pipeline"
-27 DEFINITION op=CREATE obj=PIPELINE:65541 backend=5 related=[65537] label="shape_fill_pipeline"
-28 DEFINITION op=CREATE obj=PIPELINE:65542 backend=6 related=[65538] label="shape_batch_pipeline"
-29 DEFINITION op=CREATE obj=PIPELINE:65543 backend=7 related=[65539] label="shape_wire_pipeline"
-30 DEFINITION op=CREATE obj=PIPELINE:65544 backend=8 related=[65540] label="shape_line_pipeline"
-31 DEFINITION op=CREATE obj=PIPELINE:65545 backend=9 related=[65543] label="skeletal_showcase_sprite"
-32 DEFINITION op=CREATE obj=PIPELINE:65546 backend=10 related=[65544] label="skeletal_showcase_text"
+23 DEFINITION op=CREATE obj=PIPELINE:65537 backend=1 related=[65537] label="shape/fill"
+24 DEFINITION op=CREATE obj=PIPELINE:65538 backend=2 related=[65538] label="shape/batch"
+25 DEFINITION op=CREATE obj=PIPELINE:65539 backend=3 related=[65539] label="shape/wire"
+26 DEFINITION op=CREATE obj=PIPELINE:65540 backend=4 related=[65540] label="shape/line"
+27 DEFINITION op=CREATE obj=PIPELINE:65541 backend=5 related=[65537] label="shape/fill"
+28 DEFINITION op=CREATE obj=PIPELINE:65542 backend=6 related=[65538] label="shape/batch"
+29 DEFINITION op=CREATE obj=PIPELINE:65543 backend=7 related=[65539] label="shape/wire"
+30 DEFINITION op=CREATE obj=PIPELINE:65544 backend=8 related=[65540] label="shape/line"
+31 DEFINITION op=CREATE obj=PIPELINE:65545 backend=9 related=[65543] label="skeletal_showcase/sprite"
+32 DEFINITION op=CREATE obj=PIPELINE:65546 backend=10 related=[65544] label="skeletal_showcase/text"
 33 DEFINITION op=CREATE obj=VERTEX_INPUT:65537 result=UNKNOWN backend=1 related=[65539] label="shape_batch_vi"
 34 DEFINITION op=CREATE obj=VERTEX_INPUT:65538 result=UNKNOWN backend=2 related=[65540,65541] type=1 label="shape_fill_vi"
 35 DEFINITION op=CREATE obj=VERTEX_INPUT:65539 result=UNKNOWN backend=3 related=[65542,65543] type=1 label="shape_wire_vi"

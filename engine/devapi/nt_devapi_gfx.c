@@ -55,7 +55,7 @@ static struct {
 // #region ring
 static const stored_frame *frame_at(uint32_t i) { return &s_frames[(s_ring.oldest + i) % NT_DEVAPI_GFX_RING_FRAMES]; }
 
-/* Ring records a frame takes: its records, then its strings rounded up to whole records. */
+/* The frame's string bytes as whole ring records. */
 static uint32_t string_records(const nt_gfx_capture_view_t *view) { return (uint32_t)((view->string_bytes + sizeof(nt_gfx_event_t) - 1U) / sizeof(nt_gfx_event_t)); }
 
 /* The oldest frames that give way to a frame at [start, start + block): up to the newest one it overlaps,

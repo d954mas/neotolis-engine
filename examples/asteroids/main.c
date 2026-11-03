@@ -876,7 +876,7 @@ static void record_noise_atlas(nt_program_t program) {
     if (!nt_gfx_vertex_input_valid(s_empty_input)) {
         s_empty_input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.label = "asteroid_noise"});
     }
-    const nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program, .cull_mode = NT_CULL_NONE, .label = "asteroid_noise"});
+    const nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program, .cull_mode = NT_CULL_NONE});
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_noise_atlas});
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(s_empty_input);
@@ -1111,8 +1111,7 @@ static bool prepare_gpu(void) {
                                                                         .depth_test = true,
                                                                         .depth_write = i != 2,
                                                                         .depth_func = NT_DEPTH_GEQUAL,
-                                                                        .cull_mode = i == 2 ? NT_CULL_NONE : NT_CULL_FRONT,
-                                                                        .label = "asteroids_scene"});
+                                                                        .cull_mode = i == 2 ? NT_CULL_NONE : NT_CULL_FRONT});
         }
         ready = s_pipelines[i].id != 0 && ready;
     }

@@ -412,7 +412,7 @@ static const nt_vertex_layout_t k_line_instance_layout = {
 };
 
 /* Filled geometry gets a depth bias so strokes over it win the depth test. */
-static nt_pipeline_t make_fill_pipeline(nt_program_t program, bool depth, const char *label) {
+static nt_pipeline_t make_fill_pipeline(nt_program_t program, bool depth) {
     return nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = program,
         .depth_test = depth,
@@ -422,18 +422,16 @@ static nt_pipeline_t make_fill_pipeline(nt_program_t program, bool depth, const 
         .polygon_offset = depth,
         .polygon_offset_factor = depth ? 1.0F : 0.0F,
         .polygon_offset_units = depth ? 1.0F : 0.0F,
-        .label = label,
     });
 }
 
-static nt_pipeline_t make_stroke_pipeline(nt_program_t program, bool depth, const char *label) {
+static nt_pipeline_t make_stroke_pipeline(nt_program_t program, bool depth) {
     return nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = program,
         .depth_test = depth,
         .depth_write = depth,
         .depth_func = NT_DEPTH_LEQUAL,
         .cull_mode = 0,
-        .label = label,
     });
 }
 
@@ -861,10 +859,10 @@ static void create_gpu(void) {
     s_shape.gpu.wire_prog = nt_gfx_make_program(s_shape.gpu.wire_vs, s_shape.gpu.fs, "shape/wire");
     s_shape.gpu.line_prog = nt_gfx_make_program(s_shape.gpu.line_vs, s_shape.gpu.fs, "shape/line");
     for (int depth = 0; depth < 2; depth++) {
-        s_shape.gpu.fill_pip[depth] = make_fill_pipeline(s_shape.gpu.fill_prog, depth != 0, "shape_fill_pipeline");
-        s_shape.gpu.batch_pip[depth] = make_fill_pipeline(s_shape.gpu.batch_prog, depth != 0, "shape_batch_pipeline");
-        s_shape.gpu.wire_pip[depth] = make_stroke_pipeline(s_shape.gpu.wire_prog, depth != 0, "shape_wire_pipeline");
-        s_shape.gpu.line_pip[depth] = make_stroke_pipeline(s_shape.gpu.line_prog, depth != 0, "shape_line_pipeline");
+        s_shape.gpu.fill_pip[depth] = make_fill_pipeline(s_shape.gpu.fill_prog, depth != 0);
+        s_shape.gpu.batch_pip[depth] = make_fill_pipeline(s_shape.gpu.batch_prog, depth != 0);
+        s_shape.gpu.wire_pip[depth] = make_stroke_pipeline(s_shape.gpu.wire_prog, depth != 0);
+        s_shape.gpu.line_pip[depth] = make_stroke_pipeline(s_shape.gpu.line_prog, depth != 0);
     }
 
     uint32_t fill_vertices = 0;

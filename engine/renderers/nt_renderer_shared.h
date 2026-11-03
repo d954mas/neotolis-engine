@@ -18,7 +18,6 @@ static inline nt_pipeline_desc_t nt_renderer_material_pipeline_desc(const nt_mat
         .depth_func = NT_DEPTH_LESS,
         .blend = material->blend,
         .cull_mode = (uint8_t)material->cull_mode,
-        .label = material->label,
     };
 }
 

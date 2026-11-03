@@ -33,7 +33,7 @@ _Static_assert(NT_DEPTH_NEVER < 8, "depth func lane is 3 bits");
  * size. A field that fits an existing padding hole moves nothing -- review by hand. */
 _Static_assert(offsetof(nt_pipeline_desc_t, depth_func) == 8 && offsetof(nt_pipeline_desc_t, cull_mode) == 12 && offsetof(nt_pipeline_desc_t, blend) == 16 &&
                    offsetof(nt_pipeline_desc_t, polygon_offset) == 40 && offsetof(nt_pipeline_desc_t, polygon_offset_factor) == 44 && offsetof(nt_pipeline_desc_t, polygon_offset_units) == 48 &&
-                   offsetof(nt_pipeline_desc_t, label) == (sizeof(void *) == 8 ? 56 : 52) && sizeof(nt_pipeline_desc_t) == (sizeof(void *) == 8 ? 64 : 56),
+                   sizeof(nt_pipeline_desc_t) == 52,
                "nt_pipeline_desc_t changed -- update pipeline_key");
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
@@ -419,11 +419,12 @@ static uint32_t render_target_attachment_format(uint32_t rt_slot, int attachment
     return s_gfx.render_target_metas[rt_slot].attachments[attachment].id != 0 ? render_target_attachment_meta(rt_slot, attachment)->format : 0;
 }
 
+/* Objects shared by key (samplers) and instance layouts have no name of their own; a pipeline is its program's. */
 static const char *object_label(nt_gfx_object_kind_t kind, uint32_t id) {
-    if (kind == NT_GFX_OBJECT_SAMPLER) {
-        return s_gfx.sampler_cache[id - 1].desc.label;
+    if (kind == NT_GFX_OBJECT_PIPELINE) {
+        return s_gfx.labels[NT_GFX_OBJECT_PROGRAM][nt_pool_slot_index(pipeline_program(nt_pool_slot_index(id)))];
     }
-    return kind <= NT_GFX_OBJECT_RENDER_TARGET ? s_gfx.labels[kind][nt_pool_slot_index(id)] : NULL;
+    return kind <= NT_GFX_OBJECT_RENDER_TARGET && s_gfx.labels[kind] != NULL ? s_gfx.labels[kind][nt_pool_slot_index(id)] : NULL;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one record schema per owned resource kind
@@ -605,7 +606,6 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
 #if NT_GFX_CAPTURE_ENABLED
     const nt_pool_t *const label_pools[] = {[NT_GFX_OBJECT_SHADER] = &s_gfx.shader_pool,
                                             [NT_GFX_OBJECT_PROGRAM] = &s_gfx.program_pool,
-                                            [NT_GFX_OBJECT_PIPELINE] = &s_gfx.pipeline_pool,
                                             [NT_GFX_OBJECT_VERTEX_INPUT] = &s_gfx.vertex_input_pool,
                                             [NT_GFX_OBJECT_BUFFER] = &s_gfx.buffer_pool,
                                             [NT_GFX_OBJECT_TEXTURE] = &s_gfx.texture_pool,
@@ -1315,7 +1315,7 @@ static nt_gfx_result_t make_pipeline(const nt_pipeline_desc_t *desc, nt_pipeline
     s_gfx.pipeline_keys[slot] = key;
 
     out->id = id;
-    NT_GFX_DEFINE_CREATED(NT_GFX_OBJECT_PIPELINE, id, desc->label);
+    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_PIPELINE, id);
     return NT_GFX_RESULT_ACCEPTED;
 }
 

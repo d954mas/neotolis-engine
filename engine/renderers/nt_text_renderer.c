@@ -65,7 +65,6 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *info) {
         .depth_func = NT_DEPTH_LEQUAL,
         .blend = info->blend,
         .cull_mode = (uint8_t)info->cull_mode,
-        .label = info->label,
     };
     return nt_gfx_make_pipeline(&desc);
 }

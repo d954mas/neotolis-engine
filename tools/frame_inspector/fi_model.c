@@ -587,7 +587,7 @@ static void index_aliases(fi_frame_t *fr) {
                 fr->alias_label[count - 1U] = "";
             }
         }
-        if (e->kind == NT_GFX_EVENT_DEFINITION && e->operation == NT_GFX_OP_CREATE && e->data.resource.label != 0 && h.count > 0 && e->object != 0) {
+        if (e->kind == NT_GFX_EVENT_DEFINITION && e->operation == NT_GFX_OP_CREATE && e->data.resource.label != 0 && e->object_kind != 0 && e->object_kind < FI_OBJECTS && e->object != 0) {
             fr->alias_label[*alias_slot(fr, e->object_kind, e->object) - 1U] = fr->view.strings + e->data.resource.label;
         }
     }
@@ -595,7 +595,6 @@ static void index_aliases(fi_frame_t *fr) {
 }
 
 /* Each operation's object definition and the bytes uploaded per buffer, in record order. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void index_handles(fi_frame_t *fr) {
     index_aliases(fr);
     const uint32_t n = fr->view.count;

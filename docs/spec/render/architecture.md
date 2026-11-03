@@ -366,7 +366,7 @@ range, or depth-sampling comparison state.
 
 **Cache identity.** gfx deduplicates pipelines: `nt_gfx_make_pipeline`
 returns the live pipeline whose descriptor has the same exact identity, or
-creates one. The label is not identity. A
+creates one. A
 latched context loss returns invalid before the lookup. A hit needs no other
 check: destroying a program and a context loss clear its pipelines' keys, so a
 live entry has a live program, and its state passed validation at creation.
@@ -1336,10 +1336,10 @@ published; strings have no length limit of their own.
 Every desc `label` and `nt_gfx_make_program`'s label is a debug name in static
 storage: capture builds keep the pointer per live object and copy the text into each
 recorded frame. A create's resource `DEFINITION` and every later begin_frame snapshot
-carry it in `resource.label`; the OP record of the create does not. A cache hit
-(pipelines, samplers) keeps the first creator's label, and samplers gfx makes for
-textures have none. Instance layouts have no label. `capture_string_capacity` covers
-the snapshot's labels plus the frame's note text (sprite notes take about 30 bytes each).
+carry it in `resource.label`; the OP record of the create does not. A pipeline, shared
+by equal descs, is named by its program; samplers, shared by key, and instance layouts
+have no name. `capture_string_capacity` covers the snapshot's labels plus the frame's
+note text: a sprite note takes 21 bytes plus its material label.
 
 A note describes the frontend records after it until the next note or marker.
 Immediate operations (creates, uploads) record their backend calls at the call,

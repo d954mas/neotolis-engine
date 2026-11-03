@@ -1340,10 +1340,10 @@ void test_gfx_make_pipeline_returns_the_live_pipeline_of_an_equal_desc(void) {
     nt_gfx_fake_reset();
     nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs(), NULL);
     const uint32_t accepted = g_nt_gfx.counters.accepted[NT_GFX_OP_CREATE];
-    nt_pipeline_t first = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = true, .label = "first"});
-    nt_pipeline_t again = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = true, .label = "second"});
+    nt_pipeline_t first = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = true});
+    nt_pipeline_t again = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = true});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, first.id);
-    TEST_ASSERT_EQUAL_UINT32(first.id, again.id); /* the label is not identity */
+    TEST_ASSERT_EQUAL_UINT32(first.id, again.id);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_pipeline_create_count());
     TEST_ASSERT_EQUAL_UINT32(accepted + 1U, g_nt_gfx.counters.accepted[NT_GFX_OP_CREATE]); /* a hit is CACHE */
 }
@@ -1427,7 +1427,6 @@ static nt_pipeline_desc_t key_base_desc(uint32_t program_id) {
     d.depth_write = true;
     d.blend = nt_blend_alpha();
     d.cull_mode = 1;
-    d.label = "base";
     return d;
 }
 

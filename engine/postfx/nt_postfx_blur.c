@@ -169,7 +169,6 @@ static void make_gpu_resources(void) {
         .depth_write = false,
         .depth_func = NT_DEPTH_ALWAYS,
         .cull_mode = 0,
-        .label = "postfx_blur_pipeline",
     });
     s_blur.triangle_vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_VERTEX,

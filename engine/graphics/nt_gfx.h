@@ -403,7 +403,6 @@ typedef struct {
     bool polygon_offset;         /* enable GL_POLYGON_OFFSET_FILL */
     float polygon_offset_factor; /* glPolygonOffset factor (typically 1.0) */
     float polygon_offset_units;  /* glPolygonOffset units (typically 1.0) */
-    const char *label;           /* debug name; static storage; not identity */
 } nt_pipeline_desc_t;
 
 typedef struct {
@@ -447,7 +446,7 @@ typedef struct {
      * through a comparison sampler for the shadow lookup and through a plain
      * sampler for a raw-depth view. Non-NONE requires DEPTH* storage. */
     nt_compare_func_t compare_func;
-    const char *label; /* debug name; static storage; not identity */
+    const char *label; /* debug name for GL failure logs; not identity, so a capture names no sampler */
 } nt_sampler_desc_t;
 
 /* The target borrows live single-level textures of one size; an invalid handle
@@ -966,7 +965,7 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
  * whose GPU object a loss discarded -- recreate the stages and relink. Only a stale stage handle asserts.
  * label is an optional debug name; static storage. */
 nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs, const char *label);
-/* Returns the live pipeline of an equal desc (the label is not identity) or
+/* Returns the live pipeline of an equal desc or
  * creates one; gfx owns it until its program is destroyed. Accepts a linking program; binding the
  * pipeline asserts until the program is ready. Creation preserves the currently bound pipeline. */
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
