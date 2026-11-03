@@ -61,8 +61,8 @@ candidate that the GPU (`nt_gfx_gpu_caps()`) reports and the build admits
   endpoints; an ETC2 target is a real-time re-encode rather than a repack.
 
 ETC2 chooses `ETC2_RGBA8` or `ETC2_RGB8` by the blob's alpha flag. A BASIS
-level 0 is a multiple of 4 on both sides, so BC7 (WebGL BPTC) is always
-eligible; WebGL accepts the smaller levels of a halved chain as they come.
+level 0 is a multiple of 4 on both sides, so size never excludes BC7 (WebGL
+BPTC); WebGL accepts the smaller levels of a halved chain as they come.
 RGBA8 is always the last candidate, so selection never fails. The caps are
 what the context reports, not whether the decode is native: desktop GL 4.3+ reports ETC2 even
 where the driver decompresses it on upload, so such a context stores an ETC1S

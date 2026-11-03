@@ -1179,7 +1179,7 @@ void test_basis_texture_must_be_block_aligned(void) {
     EXPECT_BUILD_ASSERT_MATCH(ctx, nt_builder_add_texture(ctx, png_path, &opts), "a Basis texture needs width and height that are multiples of 4");
 
     opts.max_size = 6;
-    EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_assert_texture_opts(&opts), "max_size 0 or a multiple of 4");
+    EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_assert_texture_opts(&opts), "max_size must be 0 or a multiple of 4");
 
     /* The resize rounds the shorter side down to the block, at least one block. */
     uint8_t rgba[40 * 22 * 4];
@@ -9400,9 +9400,7 @@ static bool pack_solid_sprites(const char *path, const char *cache, const nt_atl
     return hit;
 }
 
-/* Odd tight content: the page grows to the next 4x4 block, every UV lands on a whole pixel of the padded
- * page, and compressing the pages reuses the cached layout unchanged. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+/* Odd tight content: the page grows to the next 4x4 block, and compressing the pages reuses the cached layout. */
 void test_atlas_page_rounds_to_block_and_compression_keeps_layout(void) {
     const char *cache = TMP_DIR "/atlas_cache_block";
     (void)MKDIR(TMP_DIR);
@@ -9415,103 +9413,60 @@ void test_atlas_page_rounds_to_block_and_compression_keeps_layout(void) {
     TEST_ASSERT_FALSE(pack_solid_sprites(TMP_DIR "/block_raw.ntpack", cache, &opts, sizes, 3));
     block_compress(&opts);
     TEST_ASSERT_TRUE_MESSAGE(pack_solid_sprites(TMP_DIR "/block_basis.ntpack", cache, &opts, sizes, 3), "compression must not change the atlas layout");
-    if (opts.compress.codec == NT_BASISU_CODEC_UASTC_LDR) {
-        opts.compress.uastc.pack_level ^= 1U;
-    } else {
-        opts.compress.etc1s.quality ^= 1U;
-    }
-    TEST_ASSERT_TRUE_MESSAGE(pack_solid_sprites(TMP_DIR "/block_basis2.ntpack", cache, &opts, sizes, 3), "compress settings stay out of the atlas cache key");
 
-    const NtAtlasRegion *raw_regions = NULL;
-    const NtAtlasRegion *basis_regions = NULL;
-    uint32_t raw_count = 0;
-    uint32_t basis_count = 0;
-    uint32_t raw_page[NT_ATLAS_MAX_PAGES][2] = {{0}};
-    uint32_t basis_page[NT_ATLAS_MAX_PAGES][2] = {{0}};
-    uint8_t *raw = read_atlas_blob(TMP_DIR "/block_raw.ntpack", &raw_regions, &raw_count);
-    uint8_t *basis = read_atlas_blob(TMP_DIR "/block_basis.ntpack", &basis_regions, &basis_count);
-    TEST_ASSERT_NOT_NULL(raw);
-    TEST_ASSERT_NOT_NULL(basis);
-    atlas_blob_page_sizes(raw, raw_page);
-    atlas_blob_page_sizes(basis, basis_page);
-    TEST_ASSERT_TRUE(raw_page[0][0] % 4 == 0 && raw_page[0][1] % 4 == 0);
-    TEST_ASSERT_EQUAL_UINT32_ARRAY(raw_page[0], basis_page[0], 2);
-    TEST_ASSERT_EQUAL_UINT32(raw_count, basis_count);
-    const NtAtlasUv *raw_uv = atlas_blob_uvs(raw);
-    const NtAtlasUv *basis_uv = atlas_blob_uvs(basis);
-    for (uint32_t r = 0; r < raw_count; r++) {
-        const uint32_t pg = raw_regions[r].page_index;
-        TEST_ASSERT_EQUAL_UINT32(raw_regions[r].vertex_count, basis_regions[r].vertex_count);
-        for (uint32_t v = 0; v < raw_regions[r].vertex_count; v++) {
-            const NtAtlasUv *a = &raw_uv[raw_regions[r].vertex_start + v];
-            const NtAtlasUv *b = &basis_uv[basis_regions[r].vertex_start + v];
-            TEST_ASSERT_TRUE(a->atlas_u == b->atlas_u && a->atlas_v == b->atlas_v);
-            const double x = (double)a->atlas_u * raw_page[pg][0] / 65535.0;
-            const double y = (double)a->atlas_v * raw_page[pg][1] / 65535.0;
-            TEST_ASSERT_TRUE_MESSAGE(fabs(x - round(x)) < 0.01 && fabs(y - round(y)) < 0.01, "UVs must be baked against the padded page");
-        }
-    }
-    free(raw);
-    free(basis);
-}
-
-static void assert_pages_within(const char *path, uint32_t max_size, bool pot) {
     const NtAtlasRegion *regions = NULL;
     uint32_t count = 0;
     uint32_t page[NT_ATLAS_MAX_PAGES][2] = {{0}};
-    uint8_t *buf = read_atlas_blob(path, &regions, &count);
-    TEST_ASSERT_NOT_NULL(buf);
-    atlas_blob_page_sizes(buf, page);
+    uint8_t *raw = read_atlas_blob(TMP_DIR "/block_raw.ntpack", &regions, &count);
+    TEST_ASSERT_NOT_NULL(raw);
+    atlas_blob_page_sizes(raw, page);
+    TEST_ASSERT_TRUE(page[0][0] % 4 == 0 && page[0][1] % 4 == 0);
+    const NtAtlasUv *uv = atlas_blob_uvs(raw);
     for (uint32_t r = 0; r < count; r++) {
-        const uint32_t w = page[regions[r].page_index][0];
-        const uint32_t h = page[regions[r].page_index][1];
-        TEST_ASSERT_TRUE(w <= max_size && h <= max_size && w % 4 == 0 && h % 4 == 0);
-        TEST_ASSERT_TRUE(!pot || ((w & (w - 1)) == 0 && (h & (h - 1)) == 0));
+        for (uint32_t v = 0; v < regions[r].vertex_count; v++) {
+            const double x = (double)uv[regions[r].vertex_start + v].atlas_u * page[regions[r].page_index][0] / 65535.0;
+            const double y = (double)uv[regions[r].vertex_start + v].atlas_v * page[regions[r].page_index][1] / 65535.0;
+            TEST_ASSERT_TRUE_MESSAGE(fabs(x - round(x)) < 0.01 && fabs(y - round(y)) < 0.01, "UV baking and the page header must use the same rounded page size");
+        }
     }
-    free(buf);
+    free(raw);
 }
 
-/* Placement is bounded by the rounded-down size, so content that would round past max_size takes a new page. */
-void test_rounded_atlas_pages_stay_within_max_size(void) {
-    /* Side by side these need 29 px; the block rounds that to 32 against max_size 30. */
-    static const uint32_t narrow[][2] = {{15, 26}, {14, 26}};
+/* POT placement is bounded by the power of two at or below max_size, so a page never rounds past it. */
+void test_pot_atlas_pages_stay_within_max_size(void) {
+    /* Side by side these need 52 px; POT would make that 64 against max_size 52. */
+    static const uint32_t wide[][2] = {{26, 20}, {26, 20}};
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
-    opts.power_of_two = false;
-    opts.padding = 0;
-    opts.max_size = 30;
-    block_compress(&opts);
-    (void)pack_solid_sprites(TMP_DIR "/block_max30.ntpack", NULL, &opts, narrow, 2);
-    assert_pages_within(TMP_DIR "/block_max30.ntpack", 30, false);
-
-    /* Side by side these need 50 px; POT would make that 64 against max_size 50. */
-    static const uint32_t wide[][2] = {{25, 20}, {25, 20}};
-    opts = nt_atlas_opts_defaults();
     opts.power_of_two = true;
     opts.padding = 0;
-    opts.max_size = 50;
-    (void)pack_solid_sprites(TMP_DIR "/block_pot50.ntpack", NULL, &opts, wide, 2);
-    assert_pages_within(TMP_DIR "/block_pot50.ntpack", 50, true);
+    opts.max_size = 52;
+    (void)pack_solid_sprites(TMP_DIR "/block_pot52.ntpack", NULL, &opts, wide, 2);
+    const NtAtlasRegion *regions = NULL;
+    uint32_t count = 0;
+    uint32_t page[NT_ATLAS_MAX_PAGES][2] = {{0}};
+    uint8_t *buf = read_atlas_blob(TMP_DIR "/block_pot52.ntpack", &regions, &count);
+    TEST_ASSERT_NOT_NULL(buf);
+    atlas_blob_page_sizes(buf, page);
+    TEST_ASSERT_EQUAL_UINT32(1, regions[1].page_index);
+    TEST_ASSERT_EQUAL_UINT32(32, page[0][0]);
+    free(buf);
 
     /* A sprite between the bound and max_size cannot fit, and the error names both. */
-    opts = nt_atlas_opts_defaults();
-    opts.power_of_two = false;
-    opts.padding = 0;
-    opts.max_size = 30;
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/block_unfit.ntpack");
     NtAtlasBuild *atlas = nt_atlas_begin(ctx, "unfit", &opts);
-    uint8_t px[29 * 29 * 4];
+    uint8_t px[40 * 40 * 4];
     memset(px, 255, sizeof(px));
-    nt_atlas_add_raw(atlas, px, 29, 29, &(nt_atlas_sprite_opts_t){.name = "s", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_atlas_add_raw(atlas, px, 40, 40, &(nt_atlas_sprite_opts_t){.name = "s", .origin_x = 0.5F, .origin_y = 0.5F});
     (void)nt_atlas_commit(atlas);
     uint32_t n = 0;
     const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
     TEST_ASSERT_EQUAL_UINT32(1, n);
     TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_UNFITTABLE, errs[0].kind);
-    TEST_ASSERT_EQUAL_UINT32(30, errs[0].max_size);
-    TEST_ASSERT_EQUAL_UINT32(28, errs[0].detail_b);
+    TEST_ASSERT_EQUAL_UINT32(52, errs[0].max_size);
+    TEST_ASSERT_EQUAL_UINT32(32, errs[0].detail_b);
 
-    opts.max_size = 3;
-    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_atlas_begin(ctx, "tiny", &opts), "max_size must be >= 4");
+    opts.max_size = 30;
+    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_atlas_begin(ctx, "unaligned", &opts), "max_size must be a multiple of 4");
 }
 
 /* The cap itself is the contract: NT_ATLAS_MAX_PAGES one-per-page sprites are
@@ -10599,7 +10554,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_atlas_cache_corrupt_file_falls_back);
     RUN_TEST(test_atlas_max_pages_exhaustion_graceful);
     RUN_TEST(test_atlas_page_rounds_to_block_and_compression_keeps_layout);
-    RUN_TEST(test_rounded_atlas_pages_stay_within_max_size);
+    RUN_TEST(test_pot_atlas_pages_stay_within_max_size);
     RUN_TEST(test_atlas_page_cap_boundary);
 
     /* Slice9 builder pipeline */

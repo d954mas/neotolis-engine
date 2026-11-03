@@ -91,7 +91,7 @@ typedef struct {
     char sprite[NT_BUILD_ERR_NAME_MAX];
     uint32_t w, h;
     uint32_t padding, margin, max_size;
-    uint32_t detail_a, detail_b; /* per-kind extras */
+    uint32_t detail_a, detail_b; /* per-kind extras; UNFITTABLE: effective extrude, placement bound */
 } nt_build_error_t;
 
 /* Explicit stream layout -- game declares which glTF attributes to extract */
@@ -250,7 +250,7 @@ typedef enum {
 
 typedef struct {
     nt_texture_pixel_format_t format; /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8. RGB9E5 = HDR, needs an HDR source */
-    uint32_t max_size;                /* 0 = no resize, otherwise max(w,h) clamped to this; Basis: 0 or a multiple of 4 */
+    uint32_t max_size;                /* 0 = no resize, otherwise a multiple of 4 that max(w,h) is clamped to */
     nt_basisu_encode_opts_t compress; /* NONE = raw/uncompressed */
     bool premultiplied;               /* RGBA8 only; default false. Premultiply to avoid dark fringes with bilinear filtering. */
     /* Baked sampler defaults; materials may override them per binding. */
@@ -345,7 +345,7 @@ typedef enum {
 typedef struct {
     nt_basisu_encode_opts_t compress; /* NONE = raw/uncompressed */
     nt_texture_pixel_format_t format; /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8 */
-    uint32_t max_size;                /* max atlas page dimension, >= 4 (default: 2048) */
+    uint32_t max_size;                /* max atlas page dimension, a multiple of 4 (default: 2048) */
     uint32_t padding;                 /* extra spacing between sprites after extrude (default: 2) */
     uint32_t margin;                  /* atlas edge margin (default: 0) */
     uint32_t extrude;                 /* AABB edge duplication count, <= max_size. Must be 0 unless shape is RECT. */

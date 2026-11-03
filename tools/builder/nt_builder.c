@@ -1294,12 +1294,12 @@ static void *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *out_w
     uint32_t w = 0;
     uint32_t h = 0;
     if (td->source_data) {
-        pixels = nt_builder_decode_texture(td->source_data, td->source_size, td->opts.format, td->opts.max_size, td->opts.compress.codec != NT_BASISU_CODEC_NONE, &w, &h);
+        pixels = nt_builder_decode_texture(td->source_data, td->source_size, td->opts.format, td->opts.max_size, &w, &h);
     } else if (td->source_path) {
         uint32_t fsize = 0;
         uint8_t *fdata = (uint8_t *)nt_builder_read_file(td->source_path, &fsize);
         NT_BUILD_ASSERT(fdata && "redecode_texture: re-read file failed");
-        pixels = nt_builder_decode_texture(fdata, fsize, td->opts.format, td->opts.max_size, td->opts.compress.codec != NT_BASISU_CODEC_NONE, &w, &h);
+        pixels = nt_builder_decode_texture(fdata, fsize, td->opts.format, td->opts.max_size, &w, &h);
         free(fdata);
     } else {
         NT_BUILD_ASSERT(0 && "redecode_texture: no source (raw texture should have decoded_data)");
@@ -1398,7 +1398,7 @@ void nt_builder_add_texture(NtBuilderContext *ctx, const char *path, const nt_te
 
     uint32_t w = 0;
     uint32_t h = 0;
-    void *pixels = nt_builder_decode_texture(file_data, file_size, effective_format, opts ? opts->max_size : 0, opts && opts->compress.codec != NT_BASISU_CODEC_NONE, &w, &h);
+    void *pixels = nt_builder_decode_texture(file_data, file_size, effective_format, opts ? opts->max_size : 0, &w, &h);
     free(file_data);
 
     /* Hash decoded pixels, then free -- re-read from stored path at encode time */
@@ -1468,7 +1468,7 @@ void nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *da
 
     uint32_t w = 0;
     uint32_t h = 0;
-    void *pixels = nt_builder_decode_texture(data, size, effective_format, opts ? opts->max_size : 0, opts && opts->compress.codec != NT_BASISU_CODEC_NONE, &w, &h);
+    void *pixels = nt_builder_decode_texture(data, size, effective_format, opts ? opts->max_size : 0, &w, &h);
 
     /* Hash decoded pixels, then free -- deep copy source for re-decode at encode time */
     const uint32_t decoded_size = nt_builder_texture_source_size(effective_format, w, h);
@@ -1490,7 +1490,7 @@ static void add_texture_pixels(NtBuilderContext *ctx, const void *pixels, uint32
                                nt_texture_pixel_format_t effective_format) {
     uint32_t w = 0;
     uint32_t h = 0;
-    void *decoded = nt_builder_decode_texture_raw(pixels, width, height, effective_format, opts ? opts->max_size : 0, opts && opts->compress.codec != NT_BASISU_CODEC_NONE, &w, &h);
+    void *decoded = nt_builder_decode_texture_raw(pixels, width, height, effective_format, opts ? opts->max_size : 0, &w, &h);
 
     /* Hash and keep decoded_data -- can't re-derive from source */
     const uint32_t decoded_size = nt_builder_texture_source_size(effective_format, w, h);

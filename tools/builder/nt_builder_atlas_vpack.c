@@ -157,7 +157,7 @@ uint32_t vpack_page_bound(const nt_atlas_opts_t *opts) {
     if (opts->power_of_two && vpack_next_pot(bound) != bound) {
         bound = vpack_next_pot(bound) / 2;
     }
-    return bound & ~3U;
+    return bound;
 }
 
 /* --- Public helpers --- */
