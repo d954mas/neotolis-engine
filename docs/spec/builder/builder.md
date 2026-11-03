@@ -193,12 +193,14 @@ the formats WebGL 2 cannot generate for. `RUNTIME` on Basis, `SRGB8` or `RGB9E5`
 is a build-time assert, never a silent switch, so Basis and `RGB9E5` callers that
 start from the defaults choose `BAKED` or `NONE`. A mipmap `filter_min` with `NONE`
 asserts too; a material override to a mipmap filter on a one-level texture
-samples level 0. Uncompressed `BAKED` levels are box-filtered from the previous
-level in the stored layout, every channel on its own (no alpha weighting, so
-premultiplied data stays premultiplied); sRGB formats average RGB in linear
-light and alpha linearly. Basis bakes with its own mip filter (see LDR mip
-filtering below). The builder asserts the encoder's level count against the
-mode, and activation cross-checks it against the blob and the header.
+samples level 0. The builder box-filters every `BAKED` level from the previous
+one, for uncompressed and Basis textures alike: every channel on its own (no
+alpha weighting, so premultiplied data stays premultiplied); sRGB formats
+average RGB in linear light and alpha linearly. Basis compresses these levels
+as given (`m_source_mipmap_images`) and builds no mips of its own; a format
+without alpha sends opaque levels, so the blob has no alpha slices. The encoder
+asserts its output level count against its input, and activation cross-checks
+it against the blob and the header.
 
 An RGBA8 source whose pixels are all opaque is encoded without alpha slices —
 the encoder checks the actual pixels, not the declared channel count. The
@@ -633,17 +635,15 @@ Every frontier adopts the trim-rect candidate, so with `max_vertices >= 4` geome
 
 **Premultiplied alpha (default):** atlas pages are encoded through the regular texture pipeline with `premultiplied = true`, which writes `RGB' = (RGB * A + 127) / 255` into the page before `strip_channels` (uncompressed path) or `nt_basisu_encode` (BASIS path). The resulting texture sets `NT_TEXTURE_FLAG_PREMULTIPLIED` in `NtTextureAssetHeader.flags`, and the runtime must draw with `(ONE, ONE_MINUS_SRC_ALPHA)` blending. This is what keeps NFP-packed sprites free of dark fringes at sub-pixel clearance: `(0,0,0,0)` gap pixels are the identity for premultiplied blending, so bilinear filtering at sprite edges stays correct. Setting `premultiplied = false` logs a warning and is only valid for NEAREST-filtered or fully-opaque atlases; setting `premultiplied = true` with a non-RGBA8 `format`, including an sRGB one, is a hard assert.
 
-**LDR mip filtering:** for a linear `format` the Basis encoder filters stored RGB
-and alpha values linearly, without an sRGB transfer during downsampling
-(`m_mip_srgb = false`, set by the wrapper). This preserves the premultiplied
-relationship through the mip chain. A half-coverage opaque-white/transparent-black
-texture reduces to roughly RGBA `(128,128,128,128)`, subject to block-compression
-error. For an sRGB `format` the wrapper sets `m_mip_srgb = true`: RGB averages
-linear light and alpha stays on stored values, so an opaque black/white checker
-reduces to about 188, not 128. sRGB is never premultiplied, so the two rules never
-meet. Uncompressed `BAKED` sRGB mips average linear light the same way. With
-`RUNTIME`, uncompressed `SRGB8_ALPHA8` mips come from `glGenerateMipmap`, whose filter
-for sRGB storage the GL ES specification leaves to the driver.
+**LDR mip filtering:** `BAKED` box filtering of a linear `format` averages stored
+RGB and alpha values, which keeps the premultiplied relationship through the
+chain: a half-coverage opaque-white/transparent-black texture reduces to roughly
+RGBA `(128,128,128,128)`, subject to block-compression error. An sRGB `format`
+averages RGB in linear light and alpha on stored values, so an opaque black/white
+checker reduces to about 188, not 128. sRGB is never premultiplied, so the two
+rules never meet. With `RUNTIME`, uncompressed `SRGB8_ALPHA8` mips come from
+`glGenerateMipmap`, whose filter for sRGB storage the GL ES specification leaves
+to the driver.
 
 **Hard limits:**
 - `0 <= extrude <= max_size`; non-zero atlas extrude requires `NT_ATLAS_SHAPE_RECT`.

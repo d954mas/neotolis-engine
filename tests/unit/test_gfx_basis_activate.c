@@ -12,6 +12,7 @@
 #include "nt_mesh_format.h"
 #include "nt_texture_format.h"
 #include "nt_vertex_locations.h"
+#include "test_helpers/basis_test_chain.h"
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/nt_gfx_test_desc.h"
 #include "unity.h"
@@ -95,10 +96,12 @@ static basis_fixture_t fixture_encode(uint16_t w, uint16_t h, nt_basisu_codec_t 
     TEST_ASSERT_NOT_NULL(src);
     fill_source(src, w, h, source_alpha);
     nt_basisu_encode_opts_t opts = codec == NT_BASISU_CODEC_ETC1S ? nt_tex_compress_etc1s_high() : nt_tex_compress_uastc_default();
-    nt_basisu_encode_result_t enc = nt_basisu_encode(1, src, w, h, (nt_texture_pixel_format_t)hdr_format, &opts, mips);
+    const uint32_t levels = mips ? full_chain_levels(w, h) : 1;
+    basis_test_chain_t chain = basis_test_chain(src, w, h, levels);
+    nt_basisu_encode_result_t enc = nt_basisu_encode(1, chain.levels, chain.count, w, h, (nt_texture_pixel_format_t)hdr_format, &opts, true);
+    basis_test_chain_free(&chain);
     free(src);
     TEST_ASSERT_NOT_NULL(enc.data);
-    TEST_ASSERT_EQUAL_UINT32(mips ? full_chain_levels(w, h) : 1, enc.mip_count);
 
     basis_fixture_t fixture = {0};
     fixture.size = (uint32_t)sizeof(NtTextureAssetHeader) + enc.size;
@@ -111,7 +114,7 @@ static basis_fixture_t fixture_encode(uint16_t w, uint16_t h, nt_basisu_codec_t 
     hdr->format = hdr_format;
     hdr->width = w;
     hdr->height = h;
-    hdr->mip_count = (uint16_t)enc.mip_count;
+    hdr->mip_count = (uint16_t)levels;
     hdr->compression = NT_TEXTURE_COMPRESSION_BASIS;
     hdr->flags = 0;
     hdr->default_min_filter = NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR;

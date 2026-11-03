@@ -279,6 +279,30 @@ static void write_raw_levels(const void *source, nt_texture_pixel_format_t forma
     fill_mips(dst, dst + (texels * bpp), width, height, level_count, bpp, layout, nt_texture_format_is_srgb(format) ? STBIR_TYPE_UINT8_SRGB : STBIR_TYPE_UINT8);
 }
 
+/* Basis gets the builder's RGBA8 levels; a format without alpha sends opaque
+ * ones, because basisu scans user levels for alpha. */
+static nt_basisu_encode_result_t encode_basis_levels(const uint8_t *source, uint32_t width, uint32_t height, uint32_t level_count, const nt_tex_opts_t *opts, uint32_t encode_threads) {
+    const size_t texels = (size_t)width * height;
+    uint8_t *chain = (uint8_t *)malloc(chain_bytes(width, height, level_count, 4));
+    NT_BUILD_ASSERT(chain && "texture encode: malloc failed");
+    memcpy(chain, source, texels * 4U);
+    if (opts->format == NT_TEXTURE_FORMAT_RGB8 || opts->format == NT_TEXTURE_FORMAT_SRGB8) {
+        for (size_t i = 0; i < texels; i++) {
+            chain[(i * 4U) + 3U] = 255;
+        }
+    }
+    fill_mips(chain, chain + (texels * 4U), width, height, level_count, 4, STBIR_RGBA_NO_AW, nt_texture_format_is_srgb(opts->format) ? STBIR_TYPE_UINT8_SRGB : STBIR_TYPE_UINT8);
+    const uint8_t *levels[32];
+    const uint8_t *level = chain;
+    for (uint32_t l = 0; l < level_count; l++) {
+        levels[l] = level;
+        level += (size_t)nt_texture_level_extent(width, l) * nt_texture_level_extent(height, l) * 4U;
+    }
+    const nt_basisu_encode_result_t enc = nt_basisu_encode(encode_threads, levels, level_count, width, height, opts->format, &opts->compress, true);
+    free(chain);
+    return enc;
+}
+
 static NtTextureAssetHeader texture_header(const nt_tex_opts_t *opts, uint32_t width, uint32_t height, uint32_t level_count, size_t data_size) {
     NT_BUILD_ASSERT(data_size <= UINT32_MAX - sizeof(NtTextureAssetHeader) && "texture encode: levels overflow the 32-bit TTEX data_size");
     const bool compressed = opts->compress.codec != NT_BASISU_CODEC_NONE;
@@ -316,8 +340,7 @@ void nt_builder_encode_texture_to_buf(const void *pixels, uint32_t width, uint32
     nt_basisu_encode_result_t enc = {0};
     size_t data_size = 0;
     if (compressed) {
-        enc = nt_basisu_encode(encode_threads, source, width, height, opts->format, &opts->compress, baked);
-        NT_BUILD_ASSERT(enc.mip_count == level_count && "texture encode: Basis level count differs from the mip mode");
+        enc = encode_basis_levels(source, width, height, level_count, opts, encode_threads);
         data_size = enc.size;
     } else {
         data_size = chain_bytes(width, height, level_count, nt_texture_bpp(opts->format));

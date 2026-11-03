@@ -11,6 +11,7 @@
 #include "nt_builder.h"
 #include "nt_builder_internal.h"
 #include "nt_texture_format.h"
+#include "test_helpers/basis_test_chain.h"
 #include "test_helpers/nt_gfx_test_desc.h"
 #include "test_helpers/nt_gfx_test_frame.h"
 #include "unity.h"
@@ -68,9 +69,10 @@ static void fill_source(void) {
 static void build_fixture(nt_basisu_codec_t codec, nt_texture_pixel_format_t format) {
     fill_source();
     nt_basisu_encode_opts_t opts = codec == NT_BASISU_CODEC_ETC1S ? nt_tex_compress_etc1s_high() : nt_tex_compress_uastc_default();
-    nt_basisu_encode_result_t enc = nt_basisu_encode(1, s_src, SRC_W, SRC_H, format, &opts, true);
+    basis_test_chain_t chain = basis_test_chain(s_src, SRC_W, SRC_H, SRC_LEVELS);
+    nt_basisu_encode_result_t enc = nt_basisu_encode(1, chain.levels, chain.count, SRC_W, SRC_H, format, &opts, true);
+    basis_test_chain_free(&chain);
     TEST_ASSERT_NOT_NULL(enc.data);
-    TEST_ASSERT_EQUAL_UINT32(SRC_LEVELS, enc.mip_count);
     TEST_ASSERT_LESS_OR_EQUAL_UINT32(sizeof(s_blob) - sizeof(NtTextureAssetHeader), enc.size);
 
     NtTextureAssetHeader *hdr = (NtTextureAssetHeader *)s_blob;
@@ -80,7 +82,7 @@ static void build_fixture(nt_basisu_codec_t codec, nt_texture_pixel_format_t for
     hdr->format = (uint16_t)format;
     hdr->width = SRC_W;
     hdr->height = SRC_H;
-    hdr->mip_count = (uint16_t)enc.mip_count;
+    hdr->mip_count = SRC_LEVELS;
     hdr->compression = NT_TEXTURE_COMPRESSION_BASIS;
     hdr->default_min_filter = NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR;
     hdr->default_mag_filter = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
