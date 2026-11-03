@@ -218,12 +218,12 @@ function expectTexel(sample: number, expected: number[], tolerance: number, labe
 // so 16 keeps every real target while a channel swap or a flip still misses by 160, and the 1x1
 // average misses an unweighted mip by 27 in red and blue.
 const FIXTURE_LEFT = [200, 40, 40, 255];
-const FIXTURE_AVERAGE = [147, 40, 94, 191];
+const FIXTURE_AVERAGE = [147, 40, 93, 191];
 const FIXTURE_TOLERANCE = 16;
 // sRGB storage samples linear: the left half decodes to (147,5,5,255); undecoded, red would read 200.
 // Decoding steepens codec error near 200 by about 1.8x, hence the wider tolerance; red discriminates.
 // The 1x1 level averages light weighted by alpha, (0.392,0.021,0.207) linear, and alpha 128/255
-// linearly: an encoded-value mip would read red 73, an unweighted one 76, a lost alpha 255. The
+// linearly: an encoded-value mip would read red 74, an unweighted one 76, a lost alpha 255. The
 // uncompressed texel's 128s decode to 55 with alpha untouched.
 const FIXTURE_LEFT_LINEAR = [147, 5, 5, 255];
 const FIXTURE_AVERAGE_LINEAR = [100, 5, 53, 191];

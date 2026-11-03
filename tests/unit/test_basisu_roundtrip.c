@@ -136,6 +136,9 @@ void test_encode_without_threads_asserts(void) {
     const nt_basisu_encode_opts_t opts = nt_tex_compress_etc1s_high();
     const uint8_t *levels[1] = {pixels};
     EXPECT_BUILD_ASSERT_MATCH((void)nt_basisu_encode(0, levels, 1, 16, 8, NT_TEXTURE_FORMAT_RGB8, &opts, true), "basis_threads");
+    /* 16x8 has 5 levels; a sixth has no size. */
+    EXPECT_BUILD_ASSERT_MATCH((void)nt_basisu_encode(1, levels, 6, 16, 8, NT_TEXTURE_FORMAT_RGB8, &opts, true), "level_count outside");
+    EXPECT_BUILD_ASSERT_MATCH((void)nt_basisu_encode(1, levels, 0, 16, 8, NT_TEXTURE_FORMAT_RGB8, &opts, true), "level_count outside");
 }
 
 /* An RGBA source the encoder finds fully opaque loses its alpha slices, so the

@@ -14,7 +14,7 @@ nt_basisu_encode_result_t nt_basisu_encode(uint32_t basis_threads, const uint8_t
                                            const nt_basisu_encode_opts_t *opts, bool perceptual) {
     NT_BUILD_ASSERT(basis_threads >= 1 && "basisu encode: basis_threads counts the caller");
     NT_BUILD_ASSERT(level_count >= 1 && level_count <= nt_texture_full_chain_levels(width, height) && "basisu encode: level_count outside 1..full chain");
-    const bool has_alpha = format == NT_TEXTURE_FORMAT_RGBA8 || format == NT_TEXTURE_FORMAT_SRGB8_ALPHA8;
+    const bool has_alpha = nt_texture_pixel_format_has_alpha(format);
 
     /* Per-call local job_pool — thread-safe, no shared state.
      * basis job_pool(N) = N total threads including caller (1 = caller only, no extra threads). */

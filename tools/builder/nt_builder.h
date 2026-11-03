@@ -248,8 +248,9 @@ typedef enum {
     NT_TEX_MIPS_BAKED = 2,
 } nt_tex_mips_t;
 
-/* What RGB holds. COLOR picks Basis's perceptual metric, DATA its linear one; on
- * uncompressed textures both give the same bytes. sRGB formats require COLOR. */
+/* What RGB holds. COLOR picks the ETC1S perceptual metric, DATA its linear one;
+ * UASTC LDR and uncompressed textures give the same bytes for both. sRGB formats
+ * require COLOR. */
 typedef enum {
     NT_TEX_RGB_COLOR = 0,
     NT_TEX_RGB_DATA = 1,
@@ -404,7 +405,8 @@ typedef struct {
     bool power_of_two;            /* round atlas dims to POT (default: true) */
     bool debug_png;               /* write debug atlas page PNGs (default: false) */
     nt_tex_process_t process;     /* page processing; default nt_tex_process_color() with alpha PREMULTIPLIED,
-                                   * which keeps bilinear filtering correct at sprite gaps */
+                                   * which keeps bilinear filtering correct at sprite gaps. Pages are
+                                   * never resized, so resize_filter has no effect. */
     float pixels_per_unit;        /* Atlas-level scale: source pixels per world unit.
                                    * 1.0F = 1 source pixel per unit (default). The builder bakes its inverse
                                    * into source-space positions and stores it in the atlas header.
@@ -427,7 +429,7 @@ typedef struct {
 
 /* Default atlas options */
 static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
-    return (nt_atlas_opts_t){
+    nt_atlas_opts_t opts = {
         .compress = {0},
         .format = NT_TEXTURE_FORMAT_RGBA8,
         .max_size = 2048,
@@ -441,7 +443,6 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
         .allowed_transforms = NT_ATLAS_TRANSFORMS_ALL,
         .power_of_two = true,
         .debug_png = false,
-        .process = {.rgb = NT_TEX_RGB_COLOR, .alpha = NT_TEX_ALPHA_PREMULTIPLIED, .resize_filter = NT_TEX_FILTER_MITCHELL, .mip_filter = NT_TEX_FILTER_BOX},
         .pixels_per_unit = 1.0F, /* 1 source pixel == 1 world unit by default */
         .filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR,
         .filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR,
@@ -450,6 +451,9 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
         .mips = NT_TEX_MIPS_RUNTIME,
         .dedup = true,
     };
+    opts.process = nt_tex_process_color();
+    opts.process.alpha = NT_TEX_ALPHA_PREMULTIPLIED;
+    return opts;
 }
 
 /* --- Atlas sprite options (per-sprite, passed to nt_atlas_add*) --- */

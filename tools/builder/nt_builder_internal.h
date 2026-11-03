@@ -38,8 +38,8 @@ typedef struct {
 
 /* Texture decode options -- stored alongside the decoded source pixels */
 typedef struct {
-    uint32_t width;
-    uint32_t height;
+    uint32_t width;       /* source width; level 0 is fitted to opts.max_size at encode */
+    uint32_t height;      /* source height */
     nt_tex_opts_t opts;   /* copied texture options */
     uint8_t *source_data; /* deep-copied encoded image bytes for re-decode (owned, NULL if from file) */
     uint32_t source_size; /* 0 if from file */
@@ -54,8 +54,8 @@ typedef struct {
 /* Input sprite for atlas packing (populated during atlas_add_*) */
 typedef struct {
     uint8_t *rgba;         /* decoded RGBA pixels (owned, heap) */
-    uint32_t width;        /* source width; level 0 is fitted to opts.max_size at encode */
-    uint32_t height;       /* source height */
+    uint32_t width;        /* decoded image width */
+    uint32_t height;       /* decoded image height */
     char *name;            /* region name for hash (owned, heap) */
     float origin_x;        /* default 0.5 */
     float origin_y;        /* default 0.5 */

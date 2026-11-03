@@ -29,8 +29,7 @@ nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *op
                     "texture opts: RGB9E5 requires BOX filters -- use .process = (nt_tex_process_t){0}");
     /* Kaiser rings in alpha, in alpha-weighted edges and in numeric data. */
     const bool kaiser = process->resize_filter == NT_TEX_FILTER_KAISER || process->mip_filter == NT_TEX_FILTER_KAISER;
-    NT_BUILD_ASSERT((!kaiser || (process->rgb == NT_TEX_RGB_COLOR && format != NT_TEXTURE_FORMAT_RGBA8 && format != NT_TEXTURE_FORMAT_SRGB8_ALPHA8)) &&
-                    "texture opts: KAISER requires process.rgb COLOR and a format without alpha");
+    NT_BUILD_ASSERT((!kaiser || (process->rgb == NT_TEX_RGB_COLOR && !nt_texture_pixel_format_has_alpha(format))) && "texture opts: KAISER requires process.rgb COLOR and a format without alpha");
     NT_BUILD_ASSERT((process->mip_filter == NT_TEX_FILTER_BOX || resolved.mips == NT_TEX_MIPS_BAKED) && "texture opts: a mip_filter other than BOX requires mips BAKED");
     NT_BUILD_ASSERT((unsigned)resolved.filter_min <= (unsigned)NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR && "texture opts: filter_min out of range");
     NT_BUILD_ASSERT((unsigned)resolved.filter_mag <= (unsigned)NT_TEXTURE_DEFAULT_FILTER_LINEAR && "texture opts: filter_mag must be NEAREST or LINEAR");
@@ -194,8 +193,6 @@ static size_t chain_bytes(uint32_t width, uint32_t height, uint32_t level_count,
 
 /* --- Level pipeline: level 0, then each level filtered from the previous core --- */
 
-static bool format_has_alpha(nt_texture_pixel_format_t format) { return format == NT_TEXTURE_FORMAT_RGBA8 || format == NT_TEXTURE_FORMAT_SRGB8_ALPHA8; }
-
 /* MIRROR filters as CLAMP: stb's REFLECT is one texel off GL's mirrored repeat. */
 static stbir_edge wrap_edge(nt_texture_default_wrap_t wrap) { return wrap == NT_TEXTURE_DEFAULT_WRAP_REPEAT ? STBIR_EDGE_WRAP : STBIR_EDGE_CLAMP; }
 
@@ -238,17 +235,21 @@ static float kaiser_support(float scale, void *user_data) {
 }
 
 /* One stb resize with the texture's filter and per-axis edges. */
-static void resize_level(const void *in, uint32_t in_w, uint32_t in_h, stbir_datatype in_type, void *out, uint32_t out_w, uint32_t out_h, stbir_datatype out_type, stbir_pixel_layout layout,
-                         nt_tex_filter_t filter, const nt_tex_opts_t *opts) {
+static void resize_level(const void *in, uint32_t in_w, uint32_t in_h, stbir_datatype in_type, stbir_pixel_layout in_layout, void *out, uint32_t out_w, uint32_t out_h, stbir_datatype out_type,
+                         stbir_pixel_layout out_layout, nt_tex_filter_t filter, const nt_tex_opts_t *opts) {
     STBIR_RESIZE resize;
-    stbir_resize_init(&resize, in, (int)in_w, (int)in_h, 0, out, (int)out_w, (int)out_h, 0, layout, in_type);
+    stbir_resize_init(&resize, in, (int)in_w, (int)in_h, 0, out, (int)out_w, (int)out_h, 0, in_layout, in_type);
     stbir_set_datatypes(&resize, in_type, out_type);
-    (void)stbir_set_edgemodes(&resize, wrap_edge(opts->wrap_u), wrap_edge(opts->wrap_v));
-    /* stb's wrapped Kaiser kernel overlaps its own buffers at a 2-px output; levels
+    (void)stbir_set_pixel_layouts(&resize, in_layout, out_layout);
+    /* stb's wrapped Kaiser overlaps its own buffers at a 2-px output width; levels
        that small gain nothing from a sharper filter. */
-    if (filter == NT_TEX_FILTER_KAISER && (out_w <= 2 || out_h <= 2)) {
+    if (filter == NT_TEX_FILTER_KAISER && opts->wrap_u == NT_TEXTURE_DEFAULT_WRAP_REPEAT && out_w <= 2) {
         filter = NT_TEX_FILTER_BOX;
     }
+    /* A downscaling box never reaches past an edge, and stb's wrapped box returns
+       garbage at some ratios (70 -> 2), so it always runs clamped. */
+    const bool box = filter == NT_TEX_FILTER_BOX;
+    (void)stbir_set_edgemodes(&resize, box ? STBIR_EDGE_CLAMP : wrap_edge(opts->wrap_u), box ? STBIR_EDGE_CLAMP : wrap_edge(opts->wrap_v));
     if (filter == NT_TEX_FILTER_KAISER) {
         (void)stbir_set_filter_callbacks(&resize, kaiser_kernel, kaiser_support, kaiser_kernel, kaiser_support);
     } else {
@@ -276,11 +277,20 @@ static uint8_t unit_to_byte(float v) {
     return (uint8_t)floorf((clamped * 255.0F) + 0.5F);
 }
 
-/* A stored level from a half-float linear core; ringing is clamped only here. */
-static void quantize_core(const uint16_t *core, size_t texels, bool srgb, uint8_t *out) {
-    for (size_t i = 0; i < texels * 4U; i++) {
-        const float v = half_to_float(core[i]);
-        out[i] = unit_to_byte(srgb && (i % 4U) != 3U ? linear_to_srgb(fmaxf(v, 0.0F)) : v);
+/* A stored straight-alpha level from a half-float linear core. A premultiplied
+ * core is divided by its alpha only here, so a near-zero alpha never feeds the
+ * next level; ringing is clamped only here too. */
+static void quantize_core(const uint16_t *core, size_t texels, bool srgb, bool premultiplied, uint8_t *out) {
+    for (size_t i = 0; i < texels; i++) {
+        const float a = half_to_float(core[(i * 4U) + 3U]);
+        for (uint32_t c = 0; c < 3; c++) {
+            float v = half_to_float(core[(i * 4U) + c]);
+            if (premultiplied) {
+                v = a > 0.0F ? v / a : 0.0F;
+            }
+            out[(i * 4U) + c] = unit_to_byte(srgb ? linear_to_srgb(fmaxf(v, 0.0F)) : v);
+        }
+        out[(i * 4U) + 3U] = unit_to_byte(a);
     }
 }
 
@@ -507,29 +517,40 @@ static void dilate_level(const dilate_ctx_t *dc, uint8_t *rgba, uint32_t w, uint
     free(ring_a);
 }
 
-static bool level_has_visible(const uint8_t *rgba, size_t texels) {
-    for (size_t i = 0; i < texels; i++) {
-        if (rgba[(i * 4U) + 3U] > DILATE_HOLE_ALPHA) {
-            return true;
-        }
+/* Whether a stored level has a visible texel and whether it has a hole. */
+static void scan_level(const uint8_t *rgba, size_t texels, bool *visible, bool *hole) {
+    *visible = false;
+    *hole = false;
+    for (size_t i = 0; i < texels && !(*visible && *hole); i++) {
+        const bool texel_visible = rgba[(i * 4U) + 3U] > DILATE_HOLE_ALPHA;
+        *visible = *visible || texel_visible;
+        *hole = *hole || !texel_visible;
     }
-    return false;
 }
 
-/* A level with nothing visible takes the plain mean colour of the previous one. */
-static void fill_empty_level(const dilate_ctx_t *dc, uint8_t *rgba, size_t texels, const uint8_t *prev, size_t prev_texels) {
-    float mean[3] = {0};
-    for (size_t i = 0; i < prev_texels; i++) {
-        for (uint32_t c = 0; c < 3; c++) {
-            mean[c] += dc->lin[prev[(i * 4U) + c]];
+/* A level with nothing visible takes the box of the previous level's colour, in
+ * double: a float sum over millions of texels drifts. */
+static void fill_empty_level(const dilate_ctx_t *dc, uint8_t *rgba, uint32_t w, uint32_t h, const uint8_t *prev, uint32_t pw, uint32_t ph) {
+    for (uint32_t y = 0; y < h; y++) {
+        for (uint32_t x = 0; x < w; x++) {
+            /* Integer partition: every previous texel lands in exactly one box. */
+            const uint32_t x0 = x * pw / w;
+            const uint32_t x1 = (x + 1) * pw / w;
+            const uint32_t y0 = y * ph / h;
+            const uint32_t y1 = (y + 1) * ph / h;
+            double sum[3] = {0};
+            for (uint32_t py = y0; py < y1; py++) {
+                for (uint32_t px = x0; px < x1; px++) {
+                    for (uint32_t c = 0; c < 3; c++) {
+                        sum[c] += (double)dc->lin[prev[((((size_t)py * pw) + px) * 4U) + c]];
+                    }
+                }
+            }
+            const double count = (double)(x1 - x0) * (double)(y1 - y0);
+            for (uint32_t c = 0; c < 3; c++) {
+                rgba[((((size_t)y * w) + x) * 4U) + c] = encode_linear(dc, (float)(sum[c] / count));
+            }
         }
-    }
-    uint8_t rgb[3];
-    for (uint32_t c = 0; c < 3; c++) {
-        rgb[c] = encode_linear(dc, mean[c] / (float)prev_texels);
-    }
-    for (size_t i = 0; i < texels; i++) {
-        memcpy(&rgba[i * 4U], rgb, 3);
     }
 }
 // #endregion
@@ -542,10 +563,13 @@ static void fill_empty_level(const dilate_ctx_t *dc, uint8_t *rgba, size_t texel
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one pass per pipeline stage
 static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t src_h, uint32_t w, uint32_t h, uint32_t level_count, const nt_tex_opts_t *opts) {
     const nt_tex_process_t *process = &opts->process;
-    const bool alpha = format_has_alpha(opts->format);
+    const bool alpha = nt_texture_pixel_format_has_alpha(opts->format);
     const bool srgb = nt_texture_format_is_srgb(opts->format);
     const stbir_datatype byte_type = srgb ? STBIR_TYPE_UINT8_SRGB : STBIR_TYPE_UINT8;
-    const stbir_pixel_layout layout = alpha && process->alpha != NT_TEX_ALPHA_DATA ? STBIR_RGBA : STBIR_RGBA_NO_AW;
+    /* Alpha-weighted layouts filter straight bytes into a premultiplied core. */
+    const bool weighted = alpha && process->alpha != NT_TEX_ALPHA_DATA;
+    const stbir_pixel_layout layout = weighted ? STBIR_RGBA : STBIR_RGBA_NO_AW;
+    const stbir_pixel_layout core_layout = weighted ? STBIR_RGBA_PM : STBIR_RGBA_NO_AW;
     uint8_t *chain = (uint8_t *)malloc(chain_bytes(w, h, level_count, 4));
     NT_BUILD_ASSERT(chain && "texture levels: malloc failed");
 
@@ -564,7 +588,7 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
     if (src_w == w && src_h == h) {
         memcpy(chain, source, src_texels * 4U);
     } else {
-        resize_level(source, src_w, src_h, byte_type, chain, w, h, byte_type, layout, process->resize_filter, opts);
+        resize_level(source, src_w, src_h, byte_type, layout, chain, w, h, byte_type, layout, process->resize_filter, opts);
     }
     free(opaque);
     // #endregion
@@ -582,15 +606,15 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
             const uint32_t lw = nt_texture_level_extent(w, level);
             const uint32_t lh = nt_texture_level_extent(h, level);
             if (level == 1) {
-                resize_level(chain, pw, ph, byte_type, next, lw, lh, STBIR_TYPE_HALF_FLOAT, layout, process->mip_filter, opts);
+                resize_level(chain, pw, ph, byte_type, layout, next, lw, lh, STBIR_TYPE_HALF_FLOAT, core_layout, process->mip_filter, opts);
             } else {
-                resize_level(core, pw, ph, STBIR_TYPE_HALF_FLOAT, next, lw, lh, STBIR_TYPE_HALF_FLOAT, layout, process->mip_filter, opts);
+                resize_level(core, pw, ph, STBIR_TYPE_HALF_FLOAT, core_layout, next, lw, lh, STBIR_TYPE_HALF_FLOAT, core_layout, process->mip_filter, opts);
             }
             uint16_t *swap = core;
             core = next;
             next = swap;
             stored += (size_t)pw * ph * 4U;
-            quantize_core(core, (size_t)lw * lh, srgb, stored);
+            quantize_core(core, (size_t)lw * lh, srgb, weighted, stored);
         }
         free(core);
         free(next);
@@ -598,23 +622,26 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
     // #endregion
 
     // #region stored copies
-    const bool dilate = alpha && process->alpha == NT_TEX_ALPHA_STRAIGHT && level_has_visible(chain, (size_t)w * h);
+    bool visible = false;
+    bool hole = false;
+    scan_level(chain, (size_t)w * h, &visible, &hole);
+    const bool dilate = alpha && process->alpha == NT_TEX_ALPHA_STRAIGHT && visible;
     dilate_ctx_t dc = {.srgb = srgb, .wrap_x = opts->wrap_u == NT_TEXTURE_DEFAULT_WRAP_REPEAT, .wrap_y = opts->wrap_v == NT_TEXTURE_DEFAULT_WRAP_REPEAT};
     for (uint32_t i = 0; i < 256; i++) {
         dc.lin[i] = srgb ? srgb_to_linear((float)i / 255.0F) : (float)i / 255.0F;
     }
     uint8_t *level_px = chain;
     const uint8_t *prev = NULL;
-    size_t prev_texels = 0;
     for (uint32_t level = 0; level < level_count; level++) {
         const uint32_t lw = nt_texture_level_extent(w, level);
         const uint32_t lh = nt_texture_level_extent(h, level);
         const size_t texels = (size_t)lw * lh;
         if (dilate) {
-            if (level_has_visible(level_px, texels)) {
+            scan_level(level_px, texels, &visible, &hole);
+            if (!visible) {
+                fill_empty_level(&dc, level_px, lw, lh, prev, nt_texture_level_extent(w, level - 1), nt_texture_level_extent(h, level - 1));
+            } else if (hole) {
                 dilate_level(&dc, level_px, lw, lh);
-            } else {
-                fill_empty_level(&dc, level_px, texels, prev, prev_texels);
             }
         }
         if (process->alpha == NT_TEX_ALPHA_PREMULTIPLIED) {
@@ -626,7 +653,6 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
             }
         }
         prev = level_px;
-        prev_texels = texels;
         level_px += texels * 4U;
     }
     // #endregion
@@ -640,14 +666,14 @@ static float *build_hdr_levels(const float *source, uint32_t src_w, uint32_t src
     if (src_w == w && src_h == h) {
         memcpy(chain, source, (size_t)w * h * 3U * sizeof(float));
     } else {
-        resize_level(source, src_w, src_h, STBIR_TYPE_FLOAT, chain, w, h, STBIR_TYPE_FLOAT, STBIR_RGB, NT_TEX_FILTER_BOX, opts);
+        resize_level(source, src_w, src_h, STBIR_TYPE_FLOAT, STBIR_RGB, chain, w, h, STBIR_TYPE_FLOAT, STBIR_RGB, NT_TEX_FILTER_BOX, opts);
     }
     float *prev = chain;
     for (uint32_t level = 1; level < level_count; level++) {
         const uint32_t pw = nt_texture_level_extent(w, level - 1);
         const uint32_t ph = nt_texture_level_extent(h, level - 1);
         float *dst = prev + ((size_t)pw * ph * 3U);
-        resize_level(prev, pw, ph, STBIR_TYPE_FLOAT, dst, nt_texture_level_extent(w, level), nt_texture_level_extent(h, level), STBIR_TYPE_FLOAT, STBIR_RGB, NT_TEX_FILTER_BOX, opts);
+        resize_level(prev, pw, ph, STBIR_TYPE_FLOAT, STBIR_RGB, dst, nt_texture_level_extent(w, level), nt_texture_level_extent(h, level), STBIR_TYPE_FLOAT, STBIR_RGB, NT_TEX_FILTER_BOX, opts);
         prev = dst;
     }
     return chain;

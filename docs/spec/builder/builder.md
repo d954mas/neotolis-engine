@@ -227,15 +227,17 @@ roughness.process = nt_tex_process_data();
 |---|---|---|---|---|
 | `nt_tex_process_color()` (texture defaults) | `COLOR` | `STRAIGHT` | `MITCHELL` | `BOX` |
 | `nt_tex_process_data()` | `DATA` | `DATA` | `BOX` | `BOX` |
-| atlas defaults | `COLOR` | `PREMULTIPLIED` | `MITCHELL` | `BOX` |
+| atlas defaults | `COLOR` | `PREMULTIPLIED` | `MITCHELL` (no effect: pages are never resized) | `BOX` |
 
 Zero is valid for every format: `BOX` everywhere, colour, straight alpha. `BOX`
 is an area average with no ringing (on NPOT sizes it weighs partial texels by
 area). `MITCHELL` downscales with less moire than `BOX` and rings by about 3%; at
 exactly 2:1 it is softer than `BOX`. `KAISER` (the basisu windowed sinc: support 3,
 40 dB) keeps the most detail and rings most, so it is fenced to opaque colour: it
-requires `rgb = COLOR` and a format without alpha. A `KAISER` level with a side of
-2 texels or less is box filtered, because the wrapped stb kernel breaks there.
+requires `rgb = COLOR` and a format without alpha. A `KAISER` level 2 texels wide
+or less under `wrap_u = REPEAT` is box filtered, because the wrapped stb kernel
+breaks there. A non-`BOX` filter on a wrapped level narrower than its kernel
+(about 6 texels) wraps a truncated kernel.
 
 The pipeline:
 
@@ -244,18 +246,27 @@ The pipeline:
 2. Level 0 copies the source when it already fits `max_size`; otherwise
    `resize_filter` fits `max(width, height)` to `max_size`, keeping the aspect.
 3. Level n filters the previous level's core with `mip_filter`. The core is level
-   0's bytes, then half-float linear values: rounding, sRGB encoding and the clamp
-   of ringing happen only on stored levels, so they never accumulate down the
-   chain. Dilation and premultiplication also touch only stored levels.
+   0's bytes, then half-float linear values, premultiplied for `STRAIGHT` and
+   `PREMULTIPLIED`: division by alpha, rounding, sRGB encoding and the clamp of
+   ringing happen only on stored levels, so they never accumulate down the chain.
+   Dilation and premultiplication also touch only stored levels.
 4. `STRAIGHT` dilation, per stored level: a hole (alpha 8 or less) next to visible
    texels takes their alpha-weighted mean, then push-pull fills the rest with
    alpha-weighted nearby colour, in linear light for sRGB. A level with nothing
-   visible takes the mean colour of the level above it; a source with nothing
-   visible is stored as it is. Holes keep their alpha.
+   visible takes the box of the level above it; a source with nothing visible is
+   stored as it is. Holes keep their alpha. On an odd-sized `REPEAT` level the
+   push-pull pyramid wraps at its own size, so a fill at the seam may take colour
+   from one texel further along.
 
 Filter and dilation edges follow the sampler wrap per axis: `REPEAT` wraps,
 `CLAMP_TO_EDGE` clamps. `MIRRORED_REPEAT` filters as `CLAMP_TO_EDGE`, a deviation:
-the stb reflect mode is one texel off the GL mirrored repeat.
+the stb reflect mode is one texel off the GL mirrored repeat. `BOX` always runs
+clamped: a downscaling box never reaches past an edge, and the wrapped stb box
+returns garbage at some ratios (70 to 2).
+
+Peak memory per encode is about five times the source RGBA bytes: the source,
+the stored chain, two half-float cores and the dilation pyramid. Basis adds its
+own copy of the levels.
 
 Dilation keeps bilinear filtering, Basis blocks and `RUNTIME` mips free of the
 black that transparent texels usually hold. `glGenerateMipmap` does not weight by
@@ -487,8 +498,11 @@ sharing one payload in the pack.
 
 Texture cache and early dedup use one identity, `opts_hash`; early dedup
 compares it after an exact pixel match. It covers the effective settings:
-source and level-0 dimensions, resolved pixel format, `process`, sampler defaults,
-mip mode, codec and its active fields above. Names, source locations, resize
+source and level-0 dimensions, resolved pixel format, the `process` fields that
+can change the bytes (`rgb` for ETC1S, `alpha` for formats with alpha,
+`resize_filter` when level 0 shrinks, `mip_filter` for `BAKED`), sampler defaults,
+mip mode, codec and its active fields above. The same file added at two
+`max_size` values that shrink it differently is two assets. Names, source locations, resize
 limits after resizing, threading, descriptor padding and inactive union bytes
 are not encode identity.
 

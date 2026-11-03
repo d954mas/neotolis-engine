@@ -45,10 +45,15 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
         memcpy(buf + pos, &format, sizeof(format));
         pos += (uint32_t)sizeof(format);
 
-        buf[pos++] = (uint8_t)td->opts.process.rgb;
-        buf[pos++] = (uint8_t)td->opts.process.alpha;
-        buf[pos++] = (uint8_t)td->opts.process.resize_filter;
-        buf[pos++] = (uint8_t)td->opts.process.mip_filter;
+        /* Only process fields that can change the bytes: the metric reaches ETC1S
+           alone, alpha only formats with alpha, resize_filter only a shrinking
+           level 0, mip_filter only a baked chain. */
+        const nt_tex_process_t *process = &td->opts.process;
+        const bool resized = target[0] != td->width || target[1] != td->height;
+        buf[pos++] = td->opts.compress.codec == NT_BASISU_CODEC_ETC1S ? (uint8_t)process->rgb : 0U;
+        buf[pos++] = nt_texture_pixel_format_has_alpha(td->opts.format) ? (uint8_t)process->alpha : 0U;
+        buf[pos++] = resized ? (uint8_t)process->resize_filter : 0U;
+        buf[pos++] = td->opts.mips == NT_TEX_MIPS_BAKED ? (uint8_t)process->mip_filter : 0U;
 
         uint8_t fmin = (uint8_t)td->opts.filter_min;
         uint8_t fmag = (uint8_t)td->opts.filter_mag;
