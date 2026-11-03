@@ -155,16 +155,16 @@ counter gl.glViewport=2
 115 INITIAL op=VIEWPORT width=1280 height=720
 116 INITIAL op=PASS color=[0.035,0.05,0.08,1] depth=1
 117 INITIAL op=PIPELINE program_gl=52 depth_func=515 blend=1 src_rgb=1 dst_rgb=771 src_alpha=1 dst_alpha=771 op_rgb=32774 op_alpha=32774 offset_factor=1 offset_units=1
-118 DEFINITION op=PIPELINE detail=1 program_slot=1 depth_func=515 op_rgb=32774 op_alpha=32774
-119 DEFINITION op=PIPELINE detail=2 program_slot=2 depth_func=515 op_rgb=32774 op_alpha=32774
-120 DEFINITION op=PIPELINE detail=3 program_slot=3 depth_func=515 op_rgb=32774 op_alpha=32774
-121 DEFINITION op=PIPELINE detail=4 program_slot=4 depth_func=515 op_rgb=32774 op_alpha=32774
-122 DEFINITION op=PIPELINE detail=5 program_slot=1 depth_test=1 depth_write=1 depth_func=515 op_rgb=32774 op_alpha=32774 polygon_offset=1 offset_factor=1 offset_units=1
-123 DEFINITION op=PIPELINE detail=6 program_slot=2 depth_test=1 depth_write=1 depth_func=515 op_rgb=32774 op_alpha=32774 polygon_offset=1 offset_factor=1 offset_units=1
-124 DEFINITION op=PIPELINE detail=7 program_slot=3 depth_test=1 depth_write=1 depth_func=515 op_rgb=32774 op_alpha=32774
-125 DEFINITION op=PIPELINE detail=8 program_slot=4 depth_test=1 depth_write=1 depth_func=515 op_rgb=32774 op_alpha=32774
-126 DEFINITION op=PIPELINE detail=9 program_slot=7 depth_func=513 blend=1 src_rgb=1 dst_rgb=771 src_alpha=1 dst_alpha=771 op_rgb=32774 op_alpha=32774
-127 DEFINITION op=PIPELINE detail=10 program_slot=8 depth_func=515 blend=1 src_rgb=1 dst_rgb=771 src_alpha=1 dst_alpha=771 op_rgb=32774 op_alpha=32774
+118 DEFINITION op=PIPELINE slot=1 program_slot=1 depth_func=515 op_rgb=32774 op_alpha=32774
+119 DEFINITION op=PIPELINE slot=2 program_slot=2 depth_func=515 op_rgb=32774 op_alpha=32774
+120 DEFINITION op=PIPELINE slot=3 program_slot=3 depth_func=515 op_rgb=32774 op_alpha=32774
+121 DEFINITION op=PIPELINE slot=4 program_slot=4 depth_func=515 op_rgb=32774 op_alpha=32774
+122 DEFINITION op=PIPELINE slot=5 program_slot=1 depth_test=1 depth_write=1 depth_func=515 op_rgb=32774 op_alpha=32774 polygon_offset=1 offset_factor=1 offset_units=1
+123 DEFINITION op=PIPELINE slot=6 program_slot=2 depth_test=1 depth_write=1 depth_func=515 op_rgb=32774 op_alpha=32774 polygon_offset=1 offset_factor=1 offset_units=1
+124 DEFINITION op=PIPELINE slot=7 program_slot=3 depth_test=1 depth_write=1 depth_func=515 op_rgb=32774 op_alpha=32774
+125 DEFINITION op=PIPELINE slot=8 program_slot=4 depth_test=1 depth_write=1 depth_func=515 op_rgb=32774 op_alpha=32774
+126 DEFINITION op=PIPELINE slot=9 program_slot=7 depth_func=513 blend=1 src_rgb=1 dst_rgb=771 src_alpha=1 dst_alpha=771 op_rgb=32774 op_alpha=32774
+127 DEFINITION op=PIPELINE slot=10 program_slot=8 depth_func=515 blend=1 src_rgb=1 dst_rgb=771 src_alpha=1 dst_alpha=771 op_rgb=32774 op_alpha=32774
 128 INITIAL op=TEXTURE texture=45 sampler=43
 129 INITIAL op=TEXTURE unit=1
 130 INITIAL op=TEXTURE unit=2
@@ -699,13 +699,13 @@ counter gl.glViewport=2
 659   BACKEND op=STATE call=glDisable link=@201 args=[3042]
 660   BACKEND op=STATE call=glEnable link=@201 args=[32823]
 661   BACKEND op=STATE call=glBindVertexArray link=@202 args=[22]
-662   SKIP op=VERTEX_INPUT result=CACHE call=glVertexAttribPointer link=@202 key=[22,5,0,1]
-663   SKIP op=UBO result=CACHE call=glBindBufferRange link=@203 key=[2,256,96]
+662   SKIP op=VERTEX_INPUT result=CACHE call=glVertexAttribPointer link=@202 vertex_array=22 buffer=5 layout=1
+663   SKIP op=UBO result=CACHE call=glBindBufferRange link=@203 slot=2 offset=256 size=96
 664   BACKEND op=STATE call=glDrawElementsInstanced link=@204 args=[4,768,5123,180,21]
 665   BACKEND op=STATE call=glUseProgram link=@206 args=[14]
 666   BACKEND op=STATE call=glDisable link=@206 args=[32823]
 667   BACKEND op=STATE call=glBindVertexArray link=@207 args=[24]
-668   SKIP op=VERTEX_INPUT result=CACHE call=glVertexAttribPointer link=@207 key=[24,5,924,3]
+668   SKIP op=VERTEX_INPUT result=CACHE call=glVertexAttribPointer link=@207 vertex_array=24 buffer=5 offset=924 layout=3
 669   BACKEND op=STATE call=glDrawElementsInstanced link=@209 args=[4,6,5123,0,42]
 670   BACKEND op=STATE call=glDisable link=@210 args=[3089]
 671   BACKEND op=STATE call=glViewport link=@211 args=[0,0,1280,720]
@@ -714,8 +714,8 @@ counter gl.glViewport=2
 674   BACKEND op=STATE call=glDisable link=@219 args=[2929]
 675   BACKEND op=STATE call=glDepthMask link=@219 args=[0]
 676   BACKEND op=STATE call=glEnable link=@219 args=[3042]
-677   SKIP op=TEXTURE result=CACHE call=glBindTexture link=@221 key=[45,0]
-678   SKIP op=SAMPLER result=CACHE call=glBindSampler link=@221 key=[43,0]
+677   SKIP op=TEXTURE result=CACHE call=glBindTexture link=@221 texture=45
+678   SKIP op=SAMPLER result=CACHE call=glBindSampler link=@221 sampler=43
 679   BACKEND op=STATE call=glBindVertexArray link=@223 args=[68]
 680   BACKEND op=STATE call=glDrawElements link=@224 args=[4,30,5125,0]
 681   BACKEND op=STATE call=glUseProgram link=@265 args=[53]

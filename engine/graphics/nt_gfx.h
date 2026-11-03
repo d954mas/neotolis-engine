@@ -812,6 +812,7 @@ typedef union {
                 union {
                     uint32_t program_slot, program_gl;
                 };
+                uint32_t slot; /* definition: the backend pipeline slot */
                 uint32_t depth_test, depth_write, depth_func, cull, blend, src_rgb, dst_rgb, src_alpha, dst_alpha, op_rgb, op_alpha, polygon_offset;
                 float blend_color[4], offset_factor, offset_units;
             } pipeline_state;

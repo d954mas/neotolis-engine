@@ -812,10 +812,6 @@ static void test_compare_names_note_handles_and_read_sources(void) {
         fi_diff(a, b, &d);
         char letters[16];
         diff_letters(&d, b, b->group_key[d.group[0].b], letters);
-#if defined(NT_PLATFORM_WEB)
-        letters[1] = '=';
-        letters[2] = '\0';
-#endif
         TEST_ASSERT_EQUAL_STRING(k_cases[k].letters, letters);
         fi_diff_free(&d);
         fi_file_close(&other);
@@ -828,6 +824,56 @@ static void test_compare_names_note_handles_and_read_sources(void) {
     TEST_ASSERT_EQUAL_STRING("BUFFER_READ buf#1 width=4 height=4 source=default framebuffer", row);
     fi_file_close(&other);
 #endif
+}
+
+/* A record of a nested operation (a default sampler made inside a texture create, its GL call) has the engine
+ * state of the top-level operation. */
+static void test_nested_records_take_the_top_request_state(void) {
+    nt_gfx_event_t ev[5];
+    memset(ev, 0, sizeof(ev));
+    ev[0] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_VIEWPORT, .result = NT_GFX_RESULT_ACCEPTED};
+    ev[0].data.rect.width = 4;
+    ev[1] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_TEXTURE, .object = 0x10001, .result = NT_GFX_RESULT_ACCEPTED};
+    ev[2] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_SAMPLER, .object = 1, .result = NT_GFX_RESULT_ACCEPTED, .link = 2};
+    ev[3] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_BACKEND, .operation = NT_GFX_OP_STATE, .detail = NT_GFX_GL_glGenSamplers, .link = 3, .arg_count = 2};
+    ev[3].data.backend.args[0] = 1;
+    ev[3].data.backend.args[1] = 7;
+    ev[4] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_VIEWPORT, .result = NT_GFX_RESULT_ACCEPTED};
+    ev[4].data.rect.width = 8;
+    nt_gfx_counters_t counters = {0};
+    counters.gl[NT_GFX_GL_glGenSamplers] = 1;
+    counters.accepted[NT_GFX_OP_VIEWPORT] = 2;
+    counters.accepted[NT_GFX_OP_CREATE] = 2;
+    const fi_frame_t *fr = load_events(&s_file, ev, 5, &counters);
+    static fi_state_view_t top;
+    static fi_state_view_t call;
+    fi_state_at(fr, 1, &top);
+    fi_state_at(fr, 3, &call);
+    TEST_ASSERT_EQUAL_UINT32(0, top.req.viewport);
+    TEST_ASSERT_EQUAL_UINT32(0, call.req.viewport); /* not the viewport the frame sets after the create */
+    TEST_ASSERT_EQUAL_UINT32(3, call.gl_at);        /* a GL call is its own GL point */
+    fi_file_close(&s_file);
+}
+
+/* A note's handle counts as a use: the texture it names first is #1 of the unlabeled textures. */
+static void test_note_handles_number_their_objects(void) {
+    nt_gfx_event_t ev[3];
+    memset(ev, 0, sizeof(ev));
+    ev[0].note.kind = NT_GFX_EVENT_NOTE;
+    ev[1].field.kind = NT_GFX_EVENT_NOTE_FIELD;
+    ev[1].field.type = NT_GFX_NOTE_HANDLE;
+    ev[1].field.value.handle.kind = NT_GFX_OBJECT_TEXTURE;
+    ev[1].field.value.handle.id = 0x10002;
+    ev[2] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_ARGUMENT, .operation = NT_GFX_OP_TEXTURE_SET, .object_kind = NT_GFX_OBJECT_TEXTURE, .object = 0x10001};
+    nt_gfx_capture_view_t view = {.events = ev, .count = 3, .strings = "", .string_bytes = 1};
+    const size_t len = nt_gfx_capture_format(&view, NULL, 0);
+    char *text = (char *)malloc(len + 1);
+    TEST_ASSERT_NOT_NULL(text);
+    nt_gfx_capture_format(&view, text, len + 1);
+    const fi_frame_t *fr = load(&s_file, text, len);
+    TEST_ASSERT_EQUAL_UINT32(1, fi_alias(fr, NT_GFX_OBJECT_TEXTURE, 0x10002).ordinal);
+    TEST_ASSERT_EQUAL_UINT32(2, fi_alias(fr, NT_GFX_OBJECT_TEXTURE, 0x10001).ordinal);
+    fi_file_close(&s_file);
 }
 
 static uint16_t s_offset; /* layout_body's attribute offset */
@@ -1138,6 +1184,8 @@ int main(void) {
     RUN_TEST(test_compare_aligns_requests_and_names_changes);
     RUN_TEST(test_compare_pairs_handles_by_alias);
     RUN_TEST(test_compare_names_note_handles_and_read_sources);
+    RUN_TEST(test_nested_records_take_the_top_request_state);
+    RUN_TEST(test_note_handles_number_their_objects);
     RUN_TEST(test_compare_checks_what_a_create_defines);
     RUN_TEST(test_compare_ignores_an_unused_live_object);
     RUN_TEST(test_compare_pairs_objects_by_label);

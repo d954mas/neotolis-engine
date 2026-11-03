@@ -73,6 +73,10 @@ static const struct {
     {0x2802U, "GL_TEXTURE_WRAP_S"},
     {0x2803U, "GL_TEXTURE_WRAP_T"},
     {0x2901U, "GL_REPEAT"},
+    {0x8001U, "GL_CONSTANT_COLOR"},
+    {0x8002U, "GL_ONE_MINUS_CONSTANT_COLOR"},
+    {0x8003U, "GL_CONSTANT_ALPHA"},
+    {0x8004U, "GL_ONE_MINUS_CONSTANT_ALPHA"},
     {0x8006U, "GL_FUNC_ADD"},
     {0x8007U, "GL_MIN"},
     {0x8008U, "GL_MAX"},
@@ -81,6 +85,7 @@ static const struct {
     {0x8037U, "GL_POLYGON_OFFSET_FILL"},
     {0x8051U, "GL_RGB8"},
     {0x8058U, "GL_RGBA8"},
+    {0x80E1U, "GL_BGRA"},
     {0x812FU, "GL_CLAMP_TO_EDGE"},
     {0x813CU, "GL_TEXTURE_BASE_LEVEL"},
     {0x813DU, "GL_TEXTURE_MAX_LEVEL"},
@@ -110,6 +115,7 @@ static const struct {
     {0x88ECU, "GL_PIXEL_UNPACK_BUFFER"},
     {0x8A11U, "GL_UNIFORM_BUFFER"},
     {0x8A36U, "GL_ACTIVE_UNIFORM_BLOCKS"},
+    {0x8A35U, "GL_ACTIVE_UNIFORM_BLOCK_MAX_NAME_LENGTH"},
     {0x8A40U, "GL_UNIFORM_BLOCK_DATA_SIZE"},
     {0x8B30U, "GL_FRAGMENT_SHADER"},
     {0x8B31U, "GL_VERTEX_SHADER"},
@@ -117,7 +123,9 @@ static const struct {
     {0x8B82U, "GL_LINK_STATUS"},
     {0x8B84U, "GL_INFO_LOG_LENGTH"},
     {0x8B86U, "GL_ACTIVE_UNIFORMS"},
+    {0x8B87U, "GL_ACTIVE_UNIFORM_MAX_LENGTH"},
     {0x8C3DU, "GL_RGB9_E5"},
+    {0x8C3EU, "GL_UNSIGNED_INT_5_9_9_9_REV"},
     {0x8C41U, "GL_SRGB8"},
     {0x8C43U, "GL_SRGB8_ALPHA8"},
     {0x8CA8U, "GL_READ_FRAMEBUFFER"},
@@ -126,6 +134,7 @@ static const struct {
     {0x8CD5U, "GL_FRAMEBUFFER_COMPLETE"},
     {0x8CE0U, "GL_COLOR_ATTACHMENT0"},
     {0x8D00U, "GL_DEPTH_ATTACHMENT"},
+    {0x8D20U, "GL_STENCIL_ATTACHMENT"},
     {0x8D40U, "GL_FRAMEBUFFER"},
     {0x8D99U, "GL_RGBA_INTEGER"},
     {0x8E8CU, "GL_COMPRESSED_RGBA_BPTC_UNORM"},
@@ -133,6 +142,7 @@ static const struct {
     {0x8F36U, "GL_COPY_READ_BUFFER"},
     {0x8F37U, "GL_COPY_WRITE_BUFFER"},
     {0x9117U, "GL_SYNC_GPU_COMMANDS_COMPLETE"},
+    {0x91B1U, "GL_COMPLETION_STATUS_KHR"},
     {0x9274U, "GL_COMPRESSED_RGB8_ETC2"},
     {0x9275U, "GL_COMPRESSED_SRGB8_ETC2"},
     {0x9278U, "GL_COMPRESSED_RGBA8_ETC2_EAC"},
@@ -152,8 +162,7 @@ static const char *gl_enum_name(uint32_t v) {
 
 /* Value sets only GL call arguments use, after the capture field table's domains. */
 enum {
-    FI_DOMAIN_GL = NT_GFX_DOMAIN_COUNT, /* a GLenum whose value alone names it */
-    FI_DOMAIN_GL_PRIMITIVE,
+    FI_DOMAIN_GL_PRIMITIVE = NT_GFX_DOMAIN_COUNT,
     FI_DOMAIN_GL_CLEAR_MASK,
     FI_DOMAIN_GL_BOOL,
 };
@@ -181,6 +190,9 @@ static const struct {
 _Static_assert(NT_TEXTURE_FORMAT_RGB9E5 == 21 && NT_FILTER_LINEAR_MIPMAP_LINEAR == 5 && NT_WRAP_MIRRORED_REPEAT == 2 && NT_COMPARE_NEVER == 8 && NT_VERTEX_INT16 == 5 && NT_USAGE_STREAM == 2 &&
                    NT_INDEX_UINT32 == 2 && NT_SHADER_FRAGMENT == 1,
                "frame inspector: an engine enum changed; update k_engine_enums");
+#if !defined(NT_PLATFORM_WEB)
+_Static_assert(NT_BUFFER_READBACK == 2, "frame inspector: a buffer type changed; update k_engine_enums");
+#endif
 
 /* Bit n is location n, printed as runs: 1-4,7. */
 static const char *locations_text(uint32_t v, char *buf, size_t size) {
@@ -280,17 +292,8 @@ static void appendf(char *buf, size_t size, size_t *at, const char *fmt, ...) {
     *at = *at < size ? *at : size - 1U;
 }
 
-/* Handle 0 where the engine gives it a meaning; every other unset handle is "unbound". */
-static const char *zero_handle(uint32_t kind) {
-    switch (kind) {
-    case NT_GFX_OBJECT_RENDER_TARGET:
-        return "default framebuffer";
-    case NT_GFX_OBJECT_SAMPLER:
-        return "default sampler";
-    default:
-        return "unbound";
-    }
-}
+/* Render target 0 is the default framebuffer; every other handle 0 binds nothing. */
+static const char *zero_handle(uint32_t kind) { return kind == NT_GFX_OBJECT_RENDER_TARGET ? "default framebuffer" : "unbound"; }
 
 /* One value as a reader names it. */
 static void value_text(const fi_frame_t *fr, uint8_t meaning, uint8_t sub, uint32_t v, char *buf, size_t size) {
@@ -307,9 +310,7 @@ static void value_text(const fi_frame_t *fr, uint8_t meaning, uint8_t sub, uint3
     case NT_GFX_MEANING_HASH:
         (void)snprintf(buf, size, "0x%08x", v);
         return;
-    case NT_GFX_MEANING_GL_ENUM:
-    case NT_GFX_MEANING_ENUM:
-    case NT_GFX_MEANING_FLAGS:
+    case NT_GFX_MEANING_VALUE:
         name = domain_name(sub, v, named, sizeof(named));
         break;
     default:
@@ -322,10 +323,16 @@ static void value_text(const fi_frame_t *fr, uint8_t meaning, uint8_t sub, uint3
     }
 }
 
-/* An argument of an issued call or a cache skip's key: its meaning and, for keys, its name. */
+/* How an issued call's argument reads (capture encoding, render architecture "Frame observation"). */
+typedef enum {
+    FI_ARG_PLAIN,
+    FI_ARG_SIGNED,
+    FI_ARG_POINTER, /* a pointer's presence: data or NULL */
+    FI_ARG_ENUM,    /* sub: a value set (nt_gfx_capture_domain_t or FI_DOMAIN_*) */
+    FI_ARG_NAME,    /* sub: nt_gfx_gl_object_t */
+} fi_arg_kind_t;
 typedef struct {
-    const char *name;
-    uint8_t meaning, sub;
+    uint8_t kind, sub;
 } fi_arg_t;
 typedef struct {
     const fi_arg_t *args;
@@ -333,17 +340,17 @@ typedef struct {
     bool repeat; /* the last argument repeats: gen/delete names, attachment lists */
 } fi_call_t;
 
-#define FI_U_ {NULL, NT_GFX_MEANING_NUMBER, 0}
-#define FI_I_ {NULL, NT_GFX_MEANING_NUMBER, 1} /* sub 1: a signed value */
-#define FI_B_ {NULL, NT_GFX_MEANING_BYTES, 0}
-#define FI_P_ {NULL, NT_GFX_MEANING_BOOL, 0} /* a pointer's presence */
-#define FI_E_ {NULL, NT_GFX_MEANING_GL_ENUM, FI_DOMAIN_GL}
-#define FI_D_(domain) {NULL, NT_GFX_MEANING_GL_ENUM, (domain)}
-#define FI_N_(kind) {NULL, NT_GFX_MEANING_GL_NAME, NT_GFX_GL_OBJECT_##kind}
+#define FI_U_ {FI_ARG_PLAIN, 0}
+#define FI_I_ {FI_ARG_SIGNED, 0}
+#define FI_B_ {FI_ARG_PLAIN, 0} /* bytes */
+#define FI_P_ {FI_ARG_POINTER, 0}
+#define FI_E_ {FI_ARG_ENUM, NT_GFX_DOMAIN_GL}
+#define FI_D_(domain) {FI_ARG_ENUM, (domain)}
+#define FI_N_(kind) {FI_ARG_NAME, NT_GFX_GL_OBJECT_##kind}
 #define FI_CALL_(...) {(const fi_arg_t[]){__VA_ARGS__}, (uint8_t)(sizeof((const fi_arg_t[]){__VA_ARGS__}) / sizeof(fi_arg_t)), false}
 #define FI_LIST_(...) {(const fi_arg_t[]){__VA_ARGS__}, (uint8_t)(sizeof((const fi_arg_t[]){__VA_ARGS__}) / sizeof(fi_arg_t)), true}
-/* Arguments in capture order (render architecture, "Frame observation": pointers are presence bits, gen/delete
- * the count then the names, a returned value last). A call without an entry prints plain numbers. */
+/* Arguments in capture order (pointers are presence bits, gen/delete the count then the names, a returned value
+ * last). A call without an entry prints plain numbers. GL signatures are an external contract, so they live here. */
 static const fi_call_t k_calls[NT_GFX_GL_COUNT] = {
     [NT_GFX_GL_glActiveTexture] = FI_CALL_(FI_D_(NT_GFX_DOMAIN_GL_TEXTURE_UNIT)),
     [NT_GFX_GL_glAttachShader] = FI_CALL_(FI_N_(PROGRAM), FI_N_(SHADER)),
@@ -378,7 +385,7 @@ static const fi_call_t k_calls[NT_GFX_GL_COUNT] = {
     [NT_GFX_GL_glDisable] = FI_CALL_(FI_E_),
     [NT_GFX_GL_glDrawArrays] = FI_CALL_(FI_D_(FI_DOMAIN_GL_PRIMITIVE), FI_U_, FI_U_),
     [NT_GFX_GL_glDrawArraysInstanced] = FI_CALL_(FI_D_(FI_DOMAIN_GL_PRIMITIVE), FI_U_, FI_U_, FI_U_),
-    [NT_GFX_GL_glDrawBuffers] = FI_LIST_(FI_U_, FI_E_),
+    [NT_GFX_GL_glDrawBuffers] = FI_CALL_(FI_U_, FI_P_),
     [NT_GFX_GL_glDrawElements] = FI_CALL_(FI_D_(FI_DOMAIN_GL_PRIMITIVE), FI_U_, FI_E_, FI_B_),
     [NT_GFX_GL_glDrawElementsInstanced] = FI_CALL_(FI_D_(FI_DOMAIN_GL_PRIMITIVE), FI_U_, FI_E_, FI_B_, FI_U_),
     [NT_GFX_GL_glEnable] = FI_CALL_(FI_E_),
@@ -417,19 +424,6 @@ static const fi_call_t k_calls[NT_GFX_GL_COUNT] = {
     [NT_GFX_GL_glViewport] = FI_CALL_(FI_I_, FI_I_, FI_U_, FI_U_),
 };
 #undef FI_LIST_
-#define FI_K_(name, meaning, sub) {(name), NT_GFX_MEANING_##meaning, (sub)}
-/* A cache skip records the backend cache's key, not the call's arguments (nt_gfx_gl.c NT_GFX_RECORD_CACHE_SKIP). */
-static const fi_call_t k_keys[NT_GFX_GL_COUNT] = {
-    [NT_GFX_GL_glUseProgram] = FI_CALL_(FI_K_("program", GL_NAME, NT_GFX_GL_OBJECT_PROGRAM)),
-    [NT_GFX_GL_glBindVertexArray] = FI_CALL_(FI_K_("vertex_array", GL_NAME, NT_GFX_GL_OBJECT_VERTEX_ARRAY)),
-    [NT_GFX_GL_glVertexAttribPointer] = FI_CALL_(FI_K_("vertex_array", GL_NAME, NT_GFX_GL_OBJECT_VERTEX_ARRAY), FI_K_("buffer", GL_NAME, NT_GFX_GL_OBJECT_BUFFER), FI_K_("offset", BYTES, 0),
-                                                 FI_K_("layout", SLOT, NT_GFX_OBJECT_INSTANCE_LAYOUT)),
-    [NT_GFX_GL_glBindBuffer] = FI_CALL_(FI_K_("buffer", GL_NAME, NT_GFX_GL_OBJECT_BUFFER)),
-    [NT_GFX_GL_glBindBufferRange] = FI_CALL_(FI_K_("slot", NUMBER, 0), FI_K_("offset", BYTES, 0), FI_K_("size", BYTES, 0)),
-    [NT_GFX_GL_glBindTexture] = FI_CALL_(FI_K_("texture", GL_NAME, NT_GFX_GL_OBJECT_TEXTURE), FI_K_("unit", NUMBER, 0)),
-    [NT_GFX_GL_glBindSampler] = FI_CALL_(FI_K_("sampler", GL_NAME, NT_GFX_GL_OBJECT_SAMPLER), FI_K_("unit", NUMBER, 0)),
-};
-#undef FI_K_
 #undef FI_CALL_
 #undef FI_U_
 #undef FI_I_
@@ -441,22 +435,23 @@ static const fi_call_t k_keys[NT_GFX_GL_COUNT] = {
 
 /* Argument k of a call by its table; a call or position the table leaves out is a plain number. */
 static fi_arg_t call_arg(const fi_call_t *c, uint32_t k) {
-    if (c->count == 0) {
-        return (fi_arg_t){NULL, NT_GFX_MEANING_NUMBER, 0};
-    }
     if (k < c->count) {
         return c->args[k];
     }
-    return c->repeat ? c->args[c->count - 1U] : (fi_arg_t){NULL, NT_GFX_MEANING_NUMBER, 0};
+    return c->repeat && c->count > 0 ? c->args[c->count - 1U] : (fi_arg_t){FI_ARG_PLAIN, 0};
 }
 
-static void arg_text(const fi_frame_t *fr, fi_arg_t a, uint32_t v, char *buf, size_t size) {
-    if (a.meaning == NT_GFX_MEANING_BOOL) {
+static void arg_text(fi_arg_t a, uint32_t v, char *buf, size_t size) {
+    char named[64];
+    const char *name = a.kind == FI_ARG_ENUM ? domain_name(a.sub, v, named, sizeof(named)) : NULL;
+    if (a.kind == FI_ARG_POINTER) {
         (void)snprintf(buf, size, "%s", v != 0 ? "data" : "NULL");
-    } else if (a.meaning == NT_GFX_MEANING_NUMBER && a.sub == 1U) {
+    } else if (a.kind == FI_ARG_SIGNED) {
         (void)snprintf(buf, size, "%d", (int32_t)v);
+    } else if (name != NULL) {
+        (void)snprintf(buf, size, "%s", name);
     } else {
-        value_text(fr, a.meaning, a.sub, v, buf, size);
+        (void)snprintf(buf, size, "%u", v);
     }
 }
 
@@ -468,7 +463,7 @@ static void call_text(const fi_frame_t *fr, const nt_gfx_event_t *e, char *buf, 
     appendf(buf, size, at, "%s(", nt_gfx_gl_call_name(e->detail));
     for (uint32_t k = 0; k < ints; k++) {
         char v[96];
-        arg_text(fr, call_arg(c, k), e->data.backend.args[k], v, sizeof(v));
+        arg_text(call_arg(c, k), e->data.backend.args[k], v, sizeof(v));
         appendf(buf, size, at, "%s%s", k > 0 ? "," : "", v);
     }
     for (uint32_t k = 0; k < floats; k++) {
@@ -480,25 +475,8 @@ static void call_text(const fi_frame_t *fr, const nt_gfx_event_t *e, char *buf, 
     }
 }
 
-/* A cache skip: the call it left out and its key by name. */
-static void key_text(const fi_frame_t *fr, const nt_gfx_event_t *e, char *buf, size_t size, size_t *at) {
-    const fi_call_t *c = e->detail < NT_GFX_GL_COUNT ? &k_keys[e->detail] : &(fi_call_t){0};
-    appendf(buf, size, at, "%s cache", nt_gfx_gl_call_name(e->detail));
-    for (uint32_t k = 0; k < (e->arg_count & 15U); k++) {
-        const fi_arg_t a = call_arg(c, k);
-        char v[96];
-        arg_text(fr, a, e->data.backend.args[k], v, sizeof(v));
-        if (a.name != NULL) {
-            appendf(buf, size, at, " %s=%s", a.name, v);
-        } else {
-            appendf(buf, size, at, "%s%s", k == 0 ? " key=" : ",", v);
-        }
-    }
-}
-
-/* A request's handle field 0 reads as what 0 means there (the default framebuffer or sampler); other zero
- * fields are left out, as in the capture text. */
-static bool shows_zero(const nt_gfx_capture_field_t *field, bool request) { return request && field->meaning == NT_GFX_MEANING_HANDLE && strcmp(zero_handle(field->sub), "unbound") != 0; }
+/* A request's render target 0 is the default framebuffer; other zero fields are left out, as in the capture text. */
+static bool shows_zero(const nt_gfx_capture_field_t *field, bool request) { return request && field->meaning == NT_GFX_MEANING_HANDLE && field->sub == NT_GFX_OBJECT_RENDER_TARGET; }
 
 static void u32_field_text(const fi_frame_t *fr, const nt_gfx_capture_field_t *field, uint32_t v, bool request, bool draw, char *buf, size_t size, size_t *at) {
     char text[FI_ALIAS_LEN];
@@ -507,7 +485,7 @@ static void u32_field_text(const fi_frame_t *fr, const nt_gfx_capture_field_t *f
             appendf(buf, size, at, " %s", field->name);
         }
     } else if (field->meaning == NT_GFX_MEANING_HANDLE && draw) { /* a draw's vertex input: the row's second name */
-        fi_alias_text(fr, field->sub, v, text, sizeof(text));
+        value_text(fr, field->meaning, field->sub, v, text, sizeof(text));
         appendf(buf, size, at, " %s", text);
     } else if (v != 0 || shows_zero(field, request)) {
         value_text(fr, field->meaning, field->sub, v, text, sizeof(text));
@@ -655,8 +633,9 @@ static void row_text(const fi_frame_t *frame, uint32_t record, const char *only,
         call_text(frame, e, buf, size, &at);
         return;
     }
-    if (e->kind == NT_GFX_EVENT_SKIP && e->detail != 0) {
-        key_text(frame, e, buf, size, &at);
+    if (e->kind == NT_GFX_EVENT_SKIP && e->detail != 0) { /* a cache skip: the call it left out, then its key's fields */
+        appendf(buf, size, &at, "%s cache", nt_gfx_gl_call_name(e->detail));
+        fields_text(frame, e, only, buf, size, &at);
         return;
     }
     if (e->kind != NT_GFX_EVENT_OP) {
@@ -672,8 +651,6 @@ static void row_text(const fi_frame_t *frame, uint32_t record, const char *only,
         appendf(buf, size, &at, " %s", nt_gfx_object_kind_name(e->detail));
     } else if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_STATE) {
         appendf(buf, size, &at, " %s", e->detail == NT_GFX_INITIAL_BACKEND ? "BACKEND" : "FRONTEND");
-    } else if (e->kind == NT_GFX_EVENT_DEFINITION && e->operation == NT_GFX_OP_PIPELINE) {
-        appendf(buf, size, &at, " slot=%u", e->detail); /* the backend pipeline slot */
     }
     fields_text(frame, e, only, buf, size, &at);
     if (e->kind == NT_GFX_EVENT_OP && (e->operation == NT_GFX_OP_DRAW_INSTANCED || e->operation == NT_GFX_OP_DRAW_INDEXED_INSTANCED)) {
@@ -751,6 +728,9 @@ static const char *slot_field(const fi_frame_t *fr, const fi_gl_slot_t *slot, ui
     const nt_gfx_event_t *e = &fr->view.events[record];
     if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_TEXTURE) {
         return slot->call == NT_GFX_GL_glBindSampler ? "sampler" : "texture";
+    }
+    if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_PASS) {
+        return "color"; /* the clear color slot; the cached depth is another slot's */
     }
     if (e->kind != NT_GFX_EVENT_INITIAL || e->operation != NT_GFX_OP_STATE) {
         return NULL;
@@ -1063,7 +1043,7 @@ void fi_change_text(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_row_
         return;
     }
     if (!fi_is_draw(x)) { /* A's request; B's is on the row */
-        char was[256];
+        char was[400];
         fi_row_text(a, row->a, was, sizeof(was));
         appendf(buf, size, &at, "%sA: %s", sep, was);
         return;

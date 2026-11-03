@@ -74,7 +74,7 @@ static void build_records(nt_gfx_event_t *ev) {
     /* A trailing zero argument is still an argument. */
     ev[2] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_BACKEND, .operation = NT_GFX_OP_STATE, .detail = NT_GFX_GL_glGenBuffers, .arg_count = 2};
     ev[2].data.backend.args[0] = 1;
-    ev[3] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_SKIP, .operation = NT_GFX_OP_TEXTURE, .result = NT_GFX_RESULT_CACHE, .detail = NT_GFX_GL_glBindTexture, .arg_count = 2};
+    ev[3] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_SKIP, .operation = NT_GFX_OP_TEXTURE, .result = NT_GFX_RESULT_CACHE, .detail = NT_GFX_GL_glBindTexture};
     ev[3].data.backend.args[0] = 7;
     ev[4] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_SKIP, .operation = NT_GFX_OP_TEXTURE_SET, .result = NT_GFX_RESULT_INACTIVE};
     ev[4].data.texture_binding.name = 99;
@@ -157,7 +157,7 @@ static const char *const k_expected = "ntcapture 4\n"
                                       "0 OP op=PASS result=ACCEPTED target=3 color=[0.25,0,0,1] depth=0.33333334 load_color=1\n"
                                       "1   BACKEND op=STATE call=glClearColor link=@0 values=[0.25,0,0,1]\n"
                                       "2 BACKEND op=STATE call=glGenBuffers args=[1,0]\n"
-                                      "3 SKIP op=TEXTURE result=CACHE call=glBindTexture key=[7,0]\n"
+                                      "3 SKIP op=TEXTURE result=CACHE call=glBindTexture texture=7\n"
                                       "4 SKIP op=TEXTURE_SET result=INACTIVE name=99\n"
                                       "5 MARKER_PUSH label=\"frame \\x22a\\x22\\x0a\"\n"
                                       "6   NOTE label=\"mesh\"\n"
@@ -392,8 +392,27 @@ static void fill_fields(nt_gfx_event_t *e, uint32_t seed) {
             break;
         }
     }
-    if (e->kind == NT_GFX_EVENT_BACKEND || (e->kind == NT_GFX_EVENT_SKIP && e->detail != 0)) {
+    if (e->kind == NT_GFX_EVENT_BACKEND) {
         e->arg_count = (uint8_t)(12U | (4U << 4));
+    }
+}
+
+/* No byte of a record belongs to two of its fields. */
+static void assert_fields_disjoint(const nt_gfx_event_t *e) {
+    uint8_t owner[sizeof(nt_gfx_event_t)] = {0};
+    const nt_gfx_capture_field_t *fields = NULL;
+    const uint32_t n = nt_gfx_capture_fields(e, &fields);
+    for (uint32_t f = 0; f < n; f++) {
+        size_t width = (size_t)fields[f].size * 4U;
+        if (fields[f].type == NT_GFX_FIELD_U64) {
+            width = 8U;
+        } else if (fields[f].type == NT_GFX_FIELD_BOOL) {
+            width = 1U;
+        }
+        for (size_t b = fields[f].offset; b < fields[f].offset + width; b++) {
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, owner[b], fields[f].name);
+            owner[b] = (uint8_t)(f + 1U);
+        }
     }
 }
 
@@ -428,6 +447,7 @@ static void test_every_shape_round_trips(void) {
             continue;
         }
         TEST_ASSERT_LESS_THAN_UINT32(MAX_RECORDS, count);
+        assert_fields_disjoint(&e);
         fill_fields(&e, count * 16U);
         ev[count++] = e;
     }
@@ -435,6 +455,52 @@ static void test_every_shape_round_trips(void) {
     const nt_gfx_capture_view_t view = {.events = ev, .count = count, .strings = s_strings, .string_bytes = s_string_bytes};
     assert_records_round_trip(&view);
     free(ev);
+}
+
+/* Writers fill the fields their records print: a recorded frame formats (no byte outside a record's fields), and
+ * the unpacked sampler, the texture and buffer requests and a signed rectangle hold the values passed. */
+static void test_writers_fill_their_fields(void) {
+    nt_gfx_capture_request();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    const nt_sampler_desc_t sd = {.min_filter = NT_FILTER_LINEAR_MIPMAP_NEAREST, .mag_filter = NT_FILTER_LINEAR, .wrap_u = NT_WRAP_REPEAT, .wrap_v = NT_WRAP_MIRRORED_REPEAT};
+    const nt_sampler_t smp = nt_gfx_make_sampler(&sd);
+    const uint8_t pixel[4] = {0};
+    (void)nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = pixel, .format = NT_TEXTURE_FORMAT_RGBA8, .gen_mipmaps = true});
+    (void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_STREAM, .size = 16, .index_type = NT_INDEX_UINT16});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_set_scissor(-3, 4, 5, 6);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    const nt_gfx_capture_view_t view = nt_gfx_capture_read();
+    free(format_all(&view));
+    uint32_t seen = 0;
+    for (uint32_t i = 0; i < view.count; i++) {
+        const nt_gfx_event_t *e = &view.events[i];
+        if (e->kind == NT_GFX_EVENT_DEFINITION && e->operation == NT_GFX_OP_CREATE && e->object_kind == NT_GFX_OBJECT_SAMPLER && e->object == smp.id) {
+            TEST_ASSERT_EQUAL_UINT32(NT_FILTER_LINEAR_MIPMAP_NEAREST, e->data.sampler.min_filter);
+            TEST_ASSERT_EQUAL_UINT32(NT_FILTER_LINEAR, e->data.sampler.mag_filter);
+            TEST_ASSERT_EQUAL_UINT32(NT_WRAP_REPEAT, e->data.sampler.wrap_u);
+            TEST_ASSERT_EQUAL_UINT32(NT_WRAP_MIRRORED_REPEAT, e->data.sampler.wrap_v);
+            seen |= 1U;
+        } else if (e->kind == NT_GFX_EVENT_OP && e->operation == NT_GFX_OP_CREATE && e->object_kind == NT_GFX_OBJECT_TEXTURE) {
+            TEST_ASSERT_TRUE(e->data.texture.gen_mipmaps);
+            TEST_ASSERT_EQUAL_UINT32(NT_TEXTURE_FORMAT_RGBA8, e->data.texture.format);
+            seen |= 2U;
+        } else if (e->kind == NT_GFX_EVENT_OP && e->operation == NT_GFX_OP_CREATE && e->object_kind == NT_GFX_OBJECT_BUFFER) {
+            TEST_ASSERT_EQUAL_UINT32(NT_BUFFER_INDEX, e->data.buffer.type);
+            TEST_ASSERT_EQUAL_UINT32(NT_USAGE_STREAM, e->data.buffer.usage);
+            TEST_ASSERT_EQUAL_UINT32(NT_INDEX_UINT16, e->data.buffer.index_type);
+            TEST_ASSERT_FALSE(e->data.buffer.data);
+            seen |= 4U;
+        } else if (e->kind == NT_GFX_EVENT_OP && e->operation == NT_GFX_OP_SCISSOR) {
+            TEST_ASSERT_EQUAL_INT32(-3, e->data.rect.x);
+            TEST_ASSERT_EQUAL_INT32(6, e->data.rect.height);
+            seen |= 8U;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(15U, seen);
 }
 
 static void test_documents_parse_back_to_back(void) {
@@ -504,6 +570,7 @@ static void test_bad_text_reports_where_and_keeps_a_prefix(void) {
         {NT_HEADER_ "0 OP op=SCISSOR x=2147483648\n", "2147483648", 0, 0, 4},
         {NT_HEADER_ "0 OP op=SCISSOR x=-2147483649\n", "2147483649", 0, 0, 4},
         {NT_HEADER_ "0 NOTE label=\"a\"\n1 NOTE_FIELD key=\"k\" type=HANDLE value=NOPE:1\n", "NOPE", 0, 1, 4},
+        {NT_HEADER_ "0 NOTE label=\"a\"\n1 NOTE_FIELD key=\"k\" type=HANDLE value=NONE:1\n", ":1", 0, 1, 4}, /* gfx never records a handle of no kind */
         {NT_HEADER_ "0 OP op=PASS\r\n", "\r", 0, 0, 4},
         {NT_HEADER_ "0 BACKEND op=STATE args=[1]\n", " args", 0, 0, 4},
         {NT_HEADER_ "0 NOTE_FIELD key=\"k\" type=U32 value=1\n", " key", 0, 0, 4},
@@ -651,6 +718,7 @@ int main(void) {
     RUN_TEST(test_extremes_round_trip);
     RUN_TEST(test_every_arm_round_trips);
     RUN_TEST(test_every_shape_round_trips);
+    RUN_TEST(test_writers_fill_their_fields);
     RUN_TEST(test_documents_parse_back_to_back);
     RUN_TEST(test_bad_text_reports_where_and_keeps_a_prefix);
     RUN_TEST(test_strings_past_the_array_keep_a_prefix);

@@ -1235,10 +1235,9 @@ No event borrows upload memory, shader source or caller labels: strings are copi
 Every data field has one meaning. `nt_gfx_capture_fields(e, &fields)`
 (`graphics/nt_gfx_capture_text.h`) returns a gfx record's fields in text order,
 chosen by its kind, operation, object kind and `detail`: each field's name, offset,
-storage type and meaning (a number, bool, byte size or offset, name hash, frontend
-handle of an object kind, backend slot of an object kind, raw GL name of a GL object
-kind, GL enum or engine enum of a value set, a flag set, or an issued call's
-arguments). The capture text, its parser and readers such as the Frame Inspector
+storage type and meaning (a plain value, a bool, a name hash, a frontend handle of an
+object kind, a backend slot of an object kind, a raw GL name of a GL object kind, or
+one value of a set: an engine enum, a GL enum or a flag set). The capture text, its parser and readers such as the Frame Inspector
 walk that one description. A `CREATE` request and its `DEFINITION` share their
 object's fields: the request leaves `slot` and `label` 0, and the definition leaves
 the request-only fields 0.
@@ -1256,7 +1255,7 @@ the request-only fields 0.
 | CREATE, INSTANCE_LAYOUT | `slot`, `stride` (bytes), `locations` (bit n: location n) |
 | DEFINITION/ATTRIBUTE | `buffer` (handle, 0 for an instance layout), `offset`, `stride`, `location`, `type` (`nt_vertex_type_t`), `count`, `normalized`, `divisor` |
 | DEFINITION/STATE (`detail`: resource kind) | `slot`, `gl_name`: the program, buffer, texture, the vertex input's VAO or the render target's framebuffer; a vertex input adds `instance_buffer` (GL name, 0 without one), `instance_offset` and `instance_layout` (slot) |
-| DEFINITION/PIPELINE (`detail`: pipeline slot) | `program_slot`, then the pipeline state |
+| DEFINITION/PIPELINE | `slot` (the backend pipeline slot), `program_slot`, then the pipeline state |
 | INITIAL/PIPELINE | `program_gl` (the current GL program), then the pipeline state |
 | pipeline state | `depth_test`, `depth_write`, `depth_func` (GL), `cull` (0 none, 1 back, 2 front), `blend`, `src_rgb`, `dst_rgb`, `src_alpha`, `dst_alpha` (GL blend factors), `op_rgb`, `op_alpha` (GL blend equations), `polygon_offset`, `blend_color`, `offset_factor`, `offset_units` |
 | INITIAL/STATE, FRONTEND | `context_lost` |
@@ -1265,7 +1264,7 @@ the request-only fields 0.
 | INITIAL/TEXTURE | `unit`, `texture`, `sampler` (GL names) |
 | PASS | `target` (render target handle, 0 the default framebuffer), `color`, `depth`, `load_color`, `load_depth`, `discard_color`, `discard_depth`; INITIAL/PASS holds the cached clear values only |
 | VIEWPORT, SCISSOR, READ_PIXELS, TEXTURE_UPLOAD (OP and INITIAL) | `x`, `y`, `width`, `height` (signed) |
-| BUFFER_READ | `x`, `y`, `width`, `height`, `source` (render target handle, 0 the default framebuffer) |
+| BUFFER_READ (native) | `x`, `y`, `width`, `height`, `source` (render target handle, 0 the default framebuffer) |
 | SCISSOR_ENABLE (OP and INITIAL), GPU_TIMING | `on` |
 | BUFFER_UPLOAD | `size`, `offset` (bytes), `data` (data present) |
 | VERTEX_INPUT | `buffer`, `layout` (instance buffer and instance layout handles, 0 for the plain bind), `offset` (bytes) |
@@ -1274,7 +1273,8 @@ the request-only fields 0.
 | SEGMENT_BEGIN, SEGMENT_POLL | `name` (hash) |
 | the four draws | `first`, `count`, `vertices`, `instances`, `vertex_input` (handle) |
 | CLEAR | `clear_color`, `clear_depth`, `color`, `depth` |
-| BACKEND; SKIP with a call | `args`, `values`, `bytes`; a skip's `key` instead of `args` |
+| BACKEND | `args`, `values`, `bytes` |
+| SKIP with a call (`detail`: the skipped call) | its cache key: `glUseProgram` `program`; `glBindVertexArray` `vertex_array`; `glVertexAttribPointer` `vertex_array`, `buffer` (GL names), `offset`, `layout` (instance layout slot); `glBindBuffer` `buffer`; `glBindBufferRange` `slot`, `offset`, `size`; `glBindTexture` `texture`, `unit`; `glBindSampler` `sampler`, `unit` |
 
 Every other record has no data fields. A husk's definition carries `slot` or
 `gl_name` 0. Shader, program and vertex-input definitions carry result `UNKNOWN`:
@@ -1309,8 +1309,8 @@ requests.
 `SKIP` records mark work that was not issued without ending an operation:
 backend cache skips (`SKIP/CACHE`) and inactive texture-set names
 (`SKIP/INACTIVE`). A backend cache skip names the skipped call in `detail` and carries its cache
-key (not the GL signature) in `backend.args`, counted by `arg_count`; an
-inactive texture-set name has `detail` 0.
+key (not the GL signature) as that call's key fields; an inactive texture-set name has
+`detail` 0.
 
 Only the backend defines pipeline state, in its slots and enums; the frontend
 pipeline definition names its program handle. `DEFINITION/ATTRIBUTE` records are
@@ -1445,7 +1445,7 @@ counter <name>=<n>                       (one line per nonzero counter)
 - Fields print as `name=value` in the order `nt_gfx_capture_fields` gives (Frame
   observation, the field table); zero fields are omitted, and arrays print up to their
   last nonzero element. Issued-call arguments print exactly `arg_count` elements, so a
-  zero argument stays visible (`args=`, `key=` on a cache skip, `values=`). Formatting
+  zero argument stays visible (`args=`, `values=`). Formatting
   asserts that a record holds no data outside its fields and an issued call no
   argument beyond its count.
 - Integers print in decimal as stored, signed fields with a sign; GL arguments are stored as `uint32`.

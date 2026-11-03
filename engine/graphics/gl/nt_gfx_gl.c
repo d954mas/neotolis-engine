@@ -67,10 +67,9 @@
 /* Longest reflected uniform name plus room for an expanded array index; asserted at link. */
 #define NT_GFX_GL_MAX_UNIFORM_NAME 256
 
-/* A backend cache skip: the GL call it skipped and its cache key, which arg_count counts. */
+/* A backend cache skip: the GL call it skipped and its cache key (capture field table, per call). */
 #define NT_GFX_RECORD_CACHE_SKIP(op, call, ...)                                                                                                                                                        \
-    NT_GFX_RECORD(NT_GFX_EVENT_SKIP, op, const uint32_t key_[] = {__VA_ARGS__}; event->result = NT_GFX_RESULT_CACHE; event->detail = (call); event->arg_count = (uint8_t)NT_COUNTOF(key_);             \
-                  memcpy(event->data.backend.args, key_, sizeof(key_)))
+    NT_GFX_RECORD(NT_GFX_EVENT_SKIP, op, const uint32_t key_[] = {__VA_ARGS__}; event->result = NT_GFX_RESULT_CACHE; event->detail = (call); memcpy(event->data.backend.args, key_, sizeof(key_)))
 
 /* One entry per active sampler element; the unit is fixed at link. The location is needed
  * once, to write the unit. */
@@ -280,7 +279,8 @@ static void capture_program_definition(uint32_t i) {
 
 static void capture_pipeline_definition(uint32_t slot) {
     const nt_gfx_gl_pipeline_t *pip = &s_pipelines[slot];
-    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_PIPELINE, event->detail = slot; event->data.pipeline_state.program_slot = pip->program_slot; NT_GL_CAPTURE_PIPELINE_STATE_(*pip));
+    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_PIPELINE, event->data.pipeline_state.slot = slot; event->data.pipeline_state.program_slot = pip->program_slot;
+                  NT_GL_CAPTURE_PIPELINE_STATE_(*pip));
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- bounded snapshots of separate backend tables

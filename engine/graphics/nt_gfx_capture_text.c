@@ -84,25 +84,34 @@ const char *nt_gfx_event_kind_name(uint32_t kind) { return kind < NT_COUNT_(s_ki
 #define NT_LIST_(member, name, type, meaning, sub) {(name), NT_AT_(member), NT_GFX_FIELD_##type, (uint8_t)NT_COUNT_(((nt_gfx_event_t *)NULL)->data.member), NT_GFX_MEANING_##meaning, (uint8_t)(sub)}
 /* A scalar named after its member. */
 #define NT_F_(arm, member, type, meaning, sub) NT_ONE_(arm.member, #member, type, meaning, sub)
-#define NT_LABEL_(arm) NT_F_(arm, label, STR, NUMBER, 0)
+#define NT_LABEL_(arm) NT_F_(arm, label, STR, PLAIN, 0)
 #define NT_SLOT_(arm, kind) NT_F_(arm, slot, U32, SLOT, NT_GFX_OBJECT_##kind)
 #define NT_HANDLE_(arm, member, kind) NT_F_(arm, member, U32, HANDLE, NT_GFX_OBJECT_##kind)
 #define NT_GL_NAME_(arm, member, kind) NT_F_(arm, member, U32, GL_NAME, NT_GFX_GL_OBJECT_##kind)
-#define NT_ENUM_(arm, member, domain) NT_F_(arm, member, U32, ENUM, NT_GFX_DOMAIN_##domain)
-#define NT_GL_ENUM_(arm, member, domain) NT_F_(arm, member, U32, GL_ENUM, NT_GFX_DOMAIN_##domain)
-#define NT_N_(arm, member) NT_F_(arm, member, U32, NUMBER, 0)
+#define NT_ENUM_(arm, member, domain) NT_F_(arm, member, U32, VALUE, NT_GFX_DOMAIN_##domain)
+#define NT_N_(arm, member) NT_F_(arm, member, U32, PLAIN, 0)
+/* Element k of a cache skip's key. */
+#define NT_KEY_(k, name, meaning, sub) NT_ONE_(backend.args[k], (name), U32, meaning, sub)
 
 typedef nt_gfx_capture_field_t field_t;
 
-static const field_t k_backend[] = {NT_LIST_(backend.args, "args", U32S, GL_ARGS, 0), NT_LIST_(backend.values, "values", F32S, GL_ARGS, 0), NT_F_(backend, bytes, U64, BYTES, 0)};
-static const field_t k_key[] = {NT_LIST_(backend.args, "key", U32S, GL_ARGS, 0), NT_LIST_(backend.values, "values", F32S, GL_ARGS, 0), NT_F_(backend, bytes, U64, BYTES, 0)};
+static const field_t k_backend[] = {NT_LIST_(backend.args, "args", U32S, PLAIN, 0), NT_LIST_(backend.values, "values", F32S, PLAIN, 0), NT_F_(backend, bytes, U64, PLAIN, 0)};
+/* A cache skip's key, per skipped call (gl backend NT_GFX_RECORD_CACHE_SKIP): the cache entry, not the GL signature. */
+static const field_t k_key_program[] = {NT_KEY_(0, "program", GL_NAME, NT_GFX_GL_OBJECT_PROGRAM)};
+static const field_t k_key_vertex_array[] = {NT_KEY_(0, "vertex_array", GL_NAME, NT_GFX_GL_OBJECT_VERTEX_ARRAY)};
+static const field_t k_key_attributes[] = {NT_KEY_(0, "vertex_array", GL_NAME, NT_GFX_GL_OBJECT_VERTEX_ARRAY), NT_KEY_(1, "buffer", GL_NAME, NT_GFX_GL_OBJECT_BUFFER), NT_KEY_(2, "offset", PLAIN, 0),
+                                           NT_KEY_(3, "layout", SLOT, NT_GFX_OBJECT_INSTANCE_LAYOUT)};
+static const field_t k_key_buffer[] = {NT_KEY_(0, "buffer", GL_NAME, NT_GFX_GL_OBJECT_BUFFER)};
+static const field_t k_key_buffer_range[] = {NT_KEY_(0, "slot", PLAIN, 0), NT_KEY_(1, "offset", PLAIN, 0), NT_KEY_(2, "size", PLAIN, 0)};
+static const field_t k_key_texture[] = {NT_KEY_(0, "texture", GL_NAME, NT_GFX_GL_OBJECT_TEXTURE), NT_KEY_(1, "unit", PLAIN, 0)};
+static const field_t k_key_sampler[] = {NT_KEY_(0, "sampler", GL_NAME, NT_GFX_GL_OBJECT_SAMPLER), NT_KEY_(1, "unit", PLAIN, 0)};
 static const field_t k_shader[] = {NT_GL_NAME_(shader, gl_name, SHADER), NT_ENUM_(shader, stage, SHADER_TYPE), NT_LABEL_(shader)};
 static const field_t k_program[] = {NT_SLOT_(program, PROGRAM), NT_HANDLE_(program, vertex_shader, SHADER), NT_HANDLE_(program, fragment_shader, SHADER), NT_LABEL_(program)};
 static const field_t k_pipeline[] = {NT_SLOT_(pipeline, PIPELINE), NT_HANDLE_(pipeline, program, PROGRAM), NT_LABEL_(pipeline)};
 static const field_t k_vertex_input[] = {NT_SLOT_(vertex_input, VERTEX_INPUT), NT_HANDLE_(vertex_input, vertex_buffer, BUFFER), NT_HANDLE_(vertex_input, index_buffer, BUFFER),
                                          NT_ENUM_(vertex_input, index_type, INDEX_TYPE), NT_LABEL_(vertex_input)};
 static const field_t k_buffer[] = {
-    NT_F_(buffer, size, U64, BYTES, 0), NT_SLOT_(buffer, BUFFER), NT_ENUM_(buffer, type, BUFFER_TYPE), NT_ENUM_(buffer, usage, BUFFER_USAGE), NT_ENUM_(buffer, index_type, INDEX_TYPE),
+    NT_F_(buffer, size, U64, PLAIN, 0), NT_SLOT_(buffer, BUFFER), NT_ENUM_(buffer, type, BUFFER_TYPE), NT_ENUM_(buffer, usage, BUFFER_USAGE), NT_ENUM_(buffer, index_type, INDEX_TYPE),
     NT_F_(buffer, data, BOOL, BOOL, 0), NT_LABEL_(buffer)};
 static const field_t k_texture[] = {NT_SLOT_(texture, TEXTURE),
                                     NT_N_(texture, width),
@@ -122,14 +131,14 @@ static const field_t k_render_target[] = {NT_SLOT_(render_target, RENDER_TARGET)
                                           NT_ENUM_(render_target, color_format, TEXTURE_FORMAT),
                                           NT_ENUM_(render_target, depth_format, TEXTURE_FORMAT),
                                           NT_LABEL_(render_target)};
-static const field_t k_instance_layout[] = {NT_SLOT_(instance_layout, INSTANCE_LAYOUT), NT_F_(instance_layout, stride, U32, BYTES, 0),
-                                            NT_F_(instance_layout, locations, U32, FLAGS, NT_GFX_DOMAIN_LOCATIONS)};
-static const field_t k_attribute[] = {NT_HANDLE_(attribute, buffer, BUFFER),      NT_F_(attribute, offset, U32, BYTES, 0),
-                                      NT_F_(attribute, stride, U32, BYTES, 0),    NT_N_(attribute, location),
+static const field_t k_instance_layout[] = {NT_SLOT_(instance_layout, INSTANCE_LAYOUT), NT_F_(instance_layout, stride, U32, PLAIN, 0),
+                                            NT_F_(instance_layout, locations, U32, VALUE, NT_GFX_DOMAIN_LOCATIONS)};
+static const field_t k_attribute[] = {NT_HANDLE_(attribute, buffer, BUFFER),      NT_F_(attribute, offset, U32, PLAIN, 0),
+                                      NT_F_(attribute, stride, U32, PLAIN, 0),    NT_N_(attribute, location),
                                       NT_ENUM_(attribute, type, VERTEX_TYPE),     NT_N_(attribute, count),
                                       NT_F_(attribute, normalized, U32, BOOL, 0), NT_N_(attribute, divisor)};
-static const field_t k_upload[] = {NT_F_(upload, size, U64, BYTES, 0), NT_F_(upload, offset, U32, BYTES, 0), NT_F_(upload, data, BOOL, BOOL, 0)};
-#define NT_RECT_ NT_F_(rect, x, I32, NUMBER, 0), NT_F_(rect, y, I32, NUMBER, 0), NT_F_(rect, width, I32, NUMBER, 0), NT_F_(rect, height, I32, NUMBER, 0)
+static const field_t k_upload[] = {NT_F_(upload, size, U64, PLAIN, 0), NT_F_(upload, offset, U32, PLAIN, 0), NT_F_(upload, data, BOOL, BOOL, 0)};
+#define NT_RECT_ NT_F_(rect, x, I32, PLAIN, 0), NT_F_(rect, y, I32, PLAIN, 0), NT_F_(rect, width, I32, PLAIN, 0), NT_F_(rect, height, I32, PLAIN, 0)
 static const field_t k_rect[] = {NT_RECT_};
 #if !defined(NT_PLATFORM_WEB)
 static const field_t k_read[] = {NT_RECT_, NT_HANDLE_(rect, source, RENDER_TARGET)};
@@ -139,23 +148,23 @@ static const field_t k_toggle[] = {NT_F_(toggle, on, BOOL, BOOL, 0)};
 static const field_t k_frontend[] = {NT_F_(frontend, context_lost, BOOL, BOOL, 0)};
 static const field_t k_texture_set[] = {NT_N_(texture_set, count)};
 static const field_t k_texture_binding[] = {NT_F_(texture_binding, name, U32, HASH, 0), NT_HANDLE_(texture_binding, sampler, SAMPLER)};
-static const field_t k_instance_binding[] = {NT_HANDLE_(instance_binding, buffer, BUFFER), NT_HANDLE_(instance_binding, layout, INSTANCE_LAYOUT), NT_F_(instance_binding, offset, U32, BYTES, 0)};
-static const field_t k_ubo[] = {NT_N_(ubo, slot), NT_F_(ubo, offset, U32, BYTES, 0), NT_F_(ubo, size, U32, BYTES, 0)};
+static const field_t k_instance_binding[] = {NT_HANDLE_(instance_binding, buffer, BUFFER), NT_HANDLE_(instance_binding, layout, INSTANCE_LAYOUT), NT_F_(instance_binding, offset, U32, PLAIN, 0)};
+static const field_t k_ubo[] = {NT_N_(ubo, slot), NT_F_(ubo, offset, U32, PLAIN, 0), NT_F_(ubo, size, U32, PLAIN, 0)};
 static const field_t k_segment[] = {NT_F_(segment, name, U32, HASH, 0)};
 static const field_t k_draw[] = {NT_N_(draw, first), NT_N_(draw, count), NT_N_(draw, vertices), NT_N_(draw, instances), NT_HANDLE_(draw, vertex_input, VERTEX_INPUT)};
 static const field_t k_pass[] = {
-    NT_HANDLE_(pass, target, RENDER_TARGET), NT_LIST_(pass.color, "color", F32S, NUMBER, 0), NT_F_(pass, depth, F32, NUMBER, 0),        NT_F_(pass, load_color, BOOL, BOOL, 0),
-    NT_F_(pass, load_depth, BOOL, BOOL, 0),  NT_F_(pass, discard_color, BOOL, BOOL, 0),      NT_F_(pass, discard_depth, BOOL, BOOL, 0),
+    NT_HANDLE_(pass, target, RENDER_TARGET), NT_LIST_(pass.color, "color", F32S, PLAIN, 0), NT_F_(pass, depth, F32, PLAIN, 0),         NT_F_(pass, load_color, BOOL, BOOL, 0),
+    NT_F_(pass, load_depth, BOOL, BOOL, 0),  NT_F_(pass, discard_color, BOOL, BOOL, 0),     NT_F_(pass, discard_depth, BOOL, BOOL, 0),
 };
-static const field_t k_clear[] = {NT_LIST_(clear.clear_color, "clear_color", F32S, NUMBER, 0), NT_F_(clear, clear_depth, F32, NUMBER, 0), NT_F_(clear, color, BOOL, BOOL, 0),
+static const field_t k_clear[] = {NT_LIST_(clear.clear_color, "clear_color", F32S, PLAIN, 0), NT_F_(clear, clear_depth, F32, PLAIN, 0), NT_F_(clear, color, BOOL, BOOL, 0),
                                   NT_F_(clear, depth, BOOL, BOOL, 0)};
 #define NT_PIPELINE_STATE_                                                                                                                                                                             \
-    NT_F_(pipeline_state, depth_test, U32, BOOL, 0), NT_F_(pipeline_state, depth_write, U32, BOOL, 0), NT_GL_ENUM_(pipeline_state, depth_func, GL_FUNC), NT_ENUM_(pipeline_state, cull, CULL_MODE),    \
-        NT_F_(pipeline_state, blend, U32, BOOL, 0), NT_GL_ENUM_(pipeline_state, src_rgb, GL_BLEND_FACTOR), NT_GL_ENUM_(pipeline_state, dst_rgb, GL_BLEND_FACTOR),                                      \
-        NT_GL_ENUM_(pipeline_state, src_alpha, GL_BLEND_FACTOR), NT_GL_ENUM_(pipeline_state, dst_alpha, GL_BLEND_FACTOR), NT_GL_ENUM_(pipeline_state, op_rgb, GL_BLEND_EQUATION),                      \
-        NT_GL_ENUM_(pipeline_state, op_alpha, GL_BLEND_EQUATION), NT_F_(pipeline_state, polygon_offset, U32, BOOL, 0), NT_LIST_(pipeline_state.blend_color, "blend_color", F32S, NUMBER, 0),           \
-        NT_F_(pipeline_state, offset_factor, F32, NUMBER, 0), NT_F_(pipeline_state, offset_units, F32, NUMBER, 0)
-static const field_t k_pipeline_definition[] = {NT_F_(pipeline_state, program_slot, U32, SLOT, NT_GFX_OBJECT_PROGRAM), NT_PIPELINE_STATE_};
+    NT_F_(pipeline_state, depth_test, U32, BOOL, 0), NT_F_(pipeline_state, depth_write, U32, BOOL, 0), NT_ENUM_(pipeline_state, depth_func, GL), NT_ENUM_(pipeline_state, cull, CULL_MODE),            \
+        NT_F_(pipeline_state, blend, U32, BOOL, 0), NT_ENUM_(pipeline_state, src_rgb, GL_BLEND_FACTOR), NT_ENUM_(pipeline_state, dst_rgb, GL_BLEND_FACTOR),                                            \
+        NT_ENUM_(pipeline_state, src_alpha, GL_BLEND_FACTOR), NT_ENUM_(pipeline_state, dst_alpha, GL_BLEND_FACTOR), NT_ENUM_(pipeline_state, op_rgb, GL), NT_ENUM_(pipeline_state, op_alpha, GL),      \
+        NT_F_(pipeline_state, polygon_offset, U32, BOOL, 0), NT_LIST_(pipeline_state.blend_color, "blend_color", F32S, PLAIN, 0), NT_F_(pipeline_state, offset_factor, F32, PLAIN, 0),                 \
+        NT_F_(pipeline_state, offset_units, F32, PLAIN, 0)
+static const field_t k_pipeline_definition[] = {NT_SLOT_(pipeline_state, PIPELINE), NT_F_(pipeline_state, program_slot, U32, SLOT, NT_GFX_OBJECT_PROGRAM), NT_PIPELINE_STATE_};
 static const field_t k_pipeline_inherited[] = {NT_GL_NAME_(pipeline_state, program_gl, PROGRAM), NT_PIPELINE_STATE_};
 #undef NT_PIPELINE_STATE_
 #define NT_BACKEND_RESOURCE_(kind, gl_kind) NT_F_(backend_resource, slot, U32, SLOT, NT_GFX_OBJECT_##kind), NT_GL_NAME_(backend_resource, gl_name, gl_kind)
@@ -164,19 +173,19 @@ static const field_t k_backend_buffer[] = {NT_BACKEND_RESOURCE_(BUFFER, BUFFER)}
 static const field_t k_backend_texture[] = {NT_BACKEND_RESOURCE_(TEXTURE, TEXTURE)};
 static const field_t k_backend_render_target[] = {NT_BACKEND_RESOURCE_(RENDER_TARGET, FRAMEBUFFER)};
 static const field_t k_backend_vertex_input[] = {NT_BACKEND_RESOURCE_(VERTEX_INPUT, VERTEX_ARRAY), NT_GL_NAME_(backend_resource, instance_buffer, BUFFER),
-                                                 NT_F_(backend_resource, instance_offset, U32, BYTES, 0), NT_F_(backend_resource, instance_layout, U32, SLOT, NT_GFX_OBJECT_INSTANCE_LAYOUT)};
+                                                 NT_F_(backend_resource, instance_offset, U32, PLAIN, 0), NT_F_(backend_resource, instance_layout, U32, SLOT, NT_GFX_OBJECT_INSTANCE_LAYOUT)};
 #undef NT_BACKEND_RESOURCE_
 static const field_t k_backend_state[] = {NT_GL_NAME_(backend_state, program, PROGRAM),
                                           NT_GL_NAME_(backend_state, vertex_array, VERTEX_ARRAY),
                                           NT_GL_NAME_(backend_state, framebuffer, FRAMEBUFFER),
-                                          NT_GL_ENUM_(backend_state, active_texture, GL_TEXTURE_UNIT),
+                                          NT_ENUM_(backend_state, active_texture, GL_TEXTURE_UNIT),
                                           NT_N_(backend_state, width),
                                           NT_N_(backend_state, height),
                                           NT_GL_NAME_(backend_state, upload_vertex_array, VERTEX_ARRAY),
                                           NT_GL_NAME_(backend_state, array_buffer, BUFFER)};
 static const field_t k_texture_unit[] = {NT_N_(texture_unit, unit), NT_GL_NAME_(texture_unit, texture, TEXTURE), NT_GL_NAME_(texture_unit, sampler, SAMPLER)};
 static const field_t k_program_sampler[] = {NT_F_(program_sampler, program, U32, SLOT, NT_GFX_OBJECT_PROGRAM), NT_F_(program_sampler, name, U32, HASH, 0), NT_N_(program_sampler, unit),
-                                            NT_ENUM_(program_sampler, sampler_class, SAMPLER_CLASS), NT_F_(program_sampler, location, I32, NUMBER, 0)};
+                                            NT_ENUM_(program_sampler, sampler_class, SAMPLER_CLASS), NT_F_(program_sampler, location, I32, PLAIN, 0)};
 #undef NT_AT_
 #undef NT_ONE_
 #undef NT_LIST_
@@ -186,8 +195,8 @@ static const field_t k_program_sampler[] = {NT_F_(program_sampler, program, U32,
 #undef NT_HANDLE_
 #undef NT_GL_NAME_
 #undef NT_ENUM_
-#undef NT_GL_ENUM_
 #undef NT_N_
+#undef NT_KEY_
 
 typedef struct {
     const field_t *fields;
@@ -238,6 +247,27 @@ static shape_t backend_resource_shape(uint32_t resource) {
         return NT_SHAPE_(k_backend_render_target);
     case NT_GFX_OBJECT_VERTEX_INPUT:
         return NT_SHAPE_(k_backend_vertex_input);
+    default:
+        return (shape_t){0};
+    }
+}
+
+static shape_t key_shape(uint32_t call) {
+    switch (call) {
+    case NT_GFX_GL_glUseProgram:
+        return NT_SHAPE_(k_key_program);
+    case NT_GFX_GL_glBindVertexArray:
+        return NT_SHAPE_(k_key_vertex_array);
+    case NT_GFX_GL_glVertexAttribPointer:
+        return NT_SHAPE_(k_key_attributes);
+    case NT_GFX_GL_glBindBuffer:
+        return NT_SHAPE_(k_key_buffer);
+    case NT_GFX_GL_glBindBufferRange:
+        return NT_SHAPE_(k_key_buffer_range);
+    case NT_GFX_GL_glBindTexture:
+        return NT_SHAPE_(k_key_texture);
+    case NT_GFX_GL_glBindSampler:
+        return NT_SHAPE_(k_key_sampler);
     default:
         return (shape_t){0};
     }
@@ -310,7 +340,7 @@ static shape_t record_shape(const nt_gfx_event_t *e) {
     case NT_GFX_EVENT_BACKEND:
         return NT_SHAPE_(k_backend);
     case NT_GFX_EVENT_SKIP:
-        return e->detail != 0 ? NT_SHAPE_(k_key) : NT_SHAPE_(k_texture_binding);
+        return e->detail != 0 ? key_shape(e->detail) : NT_SHAPE_(k_texture_binding);
     case NT_GFX_EVENT_ARGUMENT:
         return NT_SHAPE_(k_texture_binding);
     case NT_GFX_EVENT_DEFINITION:
@@ -340,7 +370,8 @@ uint32_t nt_gfx_capture_fields(const nt_gfx_event_t *e, const nt_gfx_capture_fie
     return s.count;
 }
 
-/* How `detail` prints. It decides the shape of SKIP, INITIAL/STATE and DEFINITION/STATE, so a reader takes it before the fields. */
+/* How `detail` prints: the GL call, the resource kind, the layer or the joined draw. It decides the shape of BACKEND and SKIP keys,
+ * INITIAL/STATE and DEFINITION/STATE, so a reader takes it before the fields. */
 typedef enum { DETAIL_PLAIN, DETAIL_CALL, DETAIL_RESOURCE, DETAIL_LAYER, DETAIL_JOINED } detail_kind_t;
 
 static detail_kind_t detail_kind(const nt_gfx_event_t *e) {
@@ -356,8 +387,8 @@ static detail_kind_t detail_kind(const nt_gfx_event_t *e) {
     return e->kind == NT_GFX_EVENT_OP && is_draw(e->operation) ? DETAIL_JOINED : DETAIL_PLAIN; /* a merged draw keeps the link of the draw it joined */
 }
 
-/* An issued call and a cache skip's key count their arguments in arg_count. */
-static bool issued_call(const nt_gfx_event_t *e) { return e->kind == NT_GFX_EVENT_BACKEND || (e->kind == NT_GFX_EVENT_SKIP && e->detail != 0); }
+/* An issued call counts its arguments in arg_count. */
+static bool issued_call(const nt_gfx_event_t *e) { return e->kind == NT_GFX_EVENT_BACKEND; }
 
 static size_t field_bytes(const field_t *f) {
     switch ((nt_gfx_field_type_t)f->type) {
@@ -490,17 +521,20 @@ static void put_list(text_t *t, const char *key, const unsigned char *at, nt_gfx
 
 /* Zero scalars are omitted; an issued call's lists print exactly their counted elements, so a zero argument stays visible. */
 /* A nonzero integer field: unsigned, bool or signed. */
+/* A nonzero integer field: unsigned, bool or signed; each read at its own width. */
 static void put_integer(text_t *t, const field_t *f, const unsigned char *at) {
-    bool flag = false;
-    int32_t sign = 0;
-    memcpy(&flag, at, sizeof(flag));
-    memcpy(&sign, at, sizeof(sign));
-    if (f->type == NT_GFX_FIELD_I32 && sign != 0) {
-        put(t, " %s=%" PRId32, f->name, sign);
+    if (f->type == NT_GFX_FIELD_I32) {
+        int32_t sign = 0;
+        memcpy(&sign, at, sizeof(sign));
+        if (sign != 0) {
+            put(t, " %s=%" PRId32, f->name, sign);
+        }
         return;
     }
+    bool flag = false;
+    memcpy(&flag, at, sizeof(flag));
     const uint32_t v = f->type == NT_GFX_FIELD_BOOL ? (uint32_t)flag : list_slot(at, 0);
-    if (f->type != NT_GFX_FIELD_I32 && v != 0) {
+    if (v != 0) {
         put(t, " %s=%" PRIu32, f->name, v);
     }
 }
@@ -566,15 +600,13 @@ static void assert_args_counted(const nt_gfx_event_t *e, bool issued) {
 
 /* Records are zeroed when reserved and each writer fills only fields of its record's shape, so the text is lossless. */
 static void assert_data_in_shape(const nt_gfx_event_t *e, shape_t shape) {
-    bool covered[sizeof(e->data)] = {false};
+    static const unsigned char k_zero[sizeof(e->data)] = {0};
+    unsigned char rest[sizeof(e->data)];
+    memcpy(rest, &e->data, sizeof(rest));
     for (uint32_t i = 0; i < shape.count; i++) {
-        const size_t from = shape.fields[i].offset - offsetof(nt_gfx_event_t, data);
-        memset(covered + from, 1, field_bytes(&shape.fields[i]));
+        memset(rest + (shape.fields[i].offset - offsetof(nt_gfx_event_t, data)), 0, field_bytes(&shape.fields[i]));
     }
-    const unsigned char *bytes = (const unsigned char *)&e->data;
-    for (size_t i = 0; i < sizeof(e->data); i++) {
-        NT_ASSERT((covered[i] || bytes[i] == 0) && "capture text: a record writes data outside the fields the text prints");
-    }
+    NT_ASSERT(memcmp(rest, k_zero, sizeof(rest)) == 0 && "capture text: a record writes data outside the fields the text prints");
 }
 
 static void put_detail(text_t *t, const nt_gfx_event_t *e) {
@@ -1123,8 +1155,14 @@ static bool read_note_field(line_t *l, strings_t *strings, nt_gfx_event_t *e) {
         return read_float(l, &e->field.value.f32);
     case NT_GFX_NOTE_STR:
         return read_string(l, strings, &e->field.value.str);
-    case NT_GFX_NOTE_HANDLE:
-        return NT_READ_NAME_(l, s_object_names, &e->field.value.handle.kind) && expect(l, ":") && read_u32(l, &e->field.value.handle.id);
+    case NT_GFX_NOTE_HANDLE: /* gfx records a handle of an object kind only */
+        if (!NT_READ_NAME_(l, s_object_names, &e->field.value.handle.kind)) {
+            return false;
+        }
+        if (e->field.value.handle.kind == NT_GFX_OBJECT_NONE) {
+            return fail(l, "a handle needs an object kind");
+        }
+        return expect(l, ":") && read_u32(l, &e->field.value.handle.id);
     }
     return false;
 }

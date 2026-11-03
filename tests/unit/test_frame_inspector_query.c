@@ -368,7 +368,10 @@ static void test_rows_decode_captured_values(void) {
     assert_holds(ask("record @218", true), "@218  NOTE_FIELD page=tex#1\n");
     assert_holds(ask("record @639", true), "@639  BUFFER_UPLOAD buf/frame_index size=11184 data\n");
     assert_holds(ask("record @642", true), "@642  glBufferSubData(GL_ELEMENT_ARRAY_BUFFER,0,11184,data) bytes=11184\n");
-    assert_holds(ask("record @678", true), "@678  glBindSampler cache sampler=2 unit=0  [GL skipped]\n");
+    assert_holds(ask("record @678", true), "@678  glBindSampler cache sampler=2  [GL skipped]\n");
+    assert_holds(ask("record @662", true), "@662  glVertexAttribPointer cache vertex_array=3 buffer=3 layout=1  [GL skipped]\n");
+    assert_holds(ask("record @663", true), "@663  glBindBufferRange cache slot=2 offset=256 size=96  [GL skipped]\n");
+    assert_holds(ask("record @118", true), "@118  DEFINITION PIPELINE slot=1 program_slot=1 depth_func=GL_LEQUAL ");
     assert_holds(ask("record @195", true), "@195  PASS target=default framebuffer color=[0.035,0.05,0.08,1] depth=1");
 }
 
@@ -391,6 +394,26 @@ static void test_state_of_a_gl_call_is_its_request_state(void) {
     TEST_ASSERT_EQUAL_STRING_LEN(upload, call, strstr(upload, "\n# GL state") - upload);
 }
 
+/* Every row of the native and web fixtures is built from fields: no generic list survives outside an issued call. */
+static void test_every_row_names_its_fields(void) {
+    fi_file_t web = {0};
+    TEST_ASSERT_EQUAL(NT_OK, nt_fs_init());
+    const bool opened = fi_file_open(&web, NT_WEB_FIXTURE);
+    nt_fs_shutdown();
+    TEST_ASSERT_TRUE(opened);
+    const fi_frame_t *frames[2] = {&s_file.frames[0], &web.frames[0]};
+    for (uint32_t f = 0; f < 2; f++) {
+        for (uint32_t i = 0; i < frames[f]->view.count; i++) {
+            char row[600];
+            fi_row_text(frames[f], i, row, sizeof(row));
+            TEST_ASSERT_TRUE_MESSAGE(row[0] != '\0', row);
+            TEST_ASSERT_TRUE_MESSAGE(strstr(row, "=[") == NULL || strstr(row, "color=[") != NULL, row); /* only colors are lists */
+            TEST_ASSERT_NULL_MESSAGE(strstr(row, "integers"), row);
+            TEST_ASSERT_NULL_MESSAGE(strstr(row, "key="), row);
+        }
+    }
+    fi_file_close(&web);
+}
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_commands_answer_and_reject_bad_input);
@@ -405,5 +428,6 @@ int main(void) {
     RUN_TEST(test_aliases_show_labels);
     RUN_TEST(test_rows_decode_captured_values);
     RUN_TEST(test_state_of_a_gl_call_is_its_request_state);
+    RUN_TEST(test_every_row_names_its_fields);
     return UNITY_END();
 }

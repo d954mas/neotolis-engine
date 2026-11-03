@@ -516,12 +516,12 @@ static nt_gfx_capture_string_t label_of(const nt_gfx_event_t *e) {
     return 0;
 }
 
-/* A resource definition's backend identifier (slot or GL name); 0 marks a husk. */
+/* A resource definition's own backend identifier: its slot, or the GL name of a shader or sampler; 0 marks a husk. */
 static uint32_t backend_of(const nt_gfx_event_t *e) {
     const nt_gfx_capture_field_t *f = NULL;
     const uint32_t n = nt_gfx_capture_fields(e, &f);
     for (uint32_t k = 0; k < n; k++) {
-        if (f[k].meaning == NT_GFX_MEANING_SLOT || f[k].meaning == NT_GFX_MEANING_GL_NAME) {
+        if ((f[k].meaning == NT_GFX_MEANING_SLOT && f[k].sub == e->object_kind) || f[k].meaning == NT_GFX_MEANING_GL_NAME) {
             uint32_t v = 0;
             memcpy(&v, (const unsigned char *)e + f[k].offset, sizeof(v));
             return v;
@@ -1278,10 +1278,11 @@ void fi_state_at(const fi_frame_t *frame, uint32_t at, fi_state_view_t *out) {
         fi_request_state(frame, out->was, &out->was_req);
     }
     /* An operation's draw-phase calls issue at end_frame: its GL state is the one after its last call. A merged
-     * draw issued nothing; it ran with the call of the draw it joined. */
-    const uint32_t joined = fi_joined(frame, at);
-    const uint32_t source = joined != FI_NONE ? joined : at;
-    out->gl_at = at;
+     * draw issued nothing; it ran with the call of the draw it joined. A GL call is its own GL point. */
+    const uint32_t gl_anchor = frame->view.events[at].kind == NT_GFX_EVENT_BACKEND || frame->view.events[at].kind == NT_GFX_EVENT_SKIP ? at : request;
+    const uint32_t joined = fi_joined(frame, gl_anchor);
+    const uint32_t source = joined != FI_NONE ? joined : gl_anchor;
+    out->gl_at = gl_anchor;
     for (uint32_t i = source + 1U; i < frame->view.count; i++) {
         out->gl_at = frame->parent[i] == source && frame->view.events[i].kind == NT_GFX_EVENT_BACKEND ? i : out->gl_at;
     }
@@ -1631,7 +1632,8 @@ static nt_gfx_event_t canonical(const nt_gfx_event_t *e) {
     if (fi_is_draw(&c)) {
         c.detail = 0;
     }
-    /* Slots and GL names are backend state; strings compare as text and a definition's label is its alias. */
+    /* Slots and GL names are backend state (among compared records only definitions carry them); strings compare
+     * as text and a definition's label is its alias. */
     const nt_gfx_capture_field_t *f = NULL;
     const uint32_t n = nt_gfx_capture_fields(&c, &f);
     for (uint32_t k = 0; k < n; k++) {
