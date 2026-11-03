@@ -1,5 +1,5 @@
 # Size Report: text (wasm-analysis-paired)
-# Commit: a951312
+# Commit: 1c04aa5
 
 ## WASM Section Sizes
 
@@ -13,19 +13,19 @@ Memory                 7 B
 Global                 8 B
 Export                83 B
 Elem                  30 B
-Code               88485 B
-Data                8666 B
+Code               88493 B
+Data                8650 B
 Custom              4240 B
 ---------------- ----------
-TOTAL             102450 B
+TOTAL             102442 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-28326 B   frame
+28327 B   frame
  5861 B   nt_text_renderer_draw
- 4610 B   main
+ 4617 B   main
  4236 B   upload_glyph
  3585 B   nt_http_request_ex
  3002 B   fmt_fp
@@ -55,7 +55,7 @@ TOTAL             102450 B
   451 B   nt_gfx_activate_shader
 
 Total functions: 107
-Total code size: 88306 B
+Total code size: 88314 B
 
 ## Built Engine Archives
 
@@ -78,7 +78,7 @@ libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               65220 B
-libnt_gfx.a               113242 B
+libnt_gfx.a               113246 B
 libnt_gfx_stub.a            6838 B
 libnt_hash.a                4108 B
 libnt_http.a               18238 B
@@ -89,31 +89,31 @@ libnt_introspect.a           908 B
 libnt_log.a                11916 B
 libnt_log_ring.a             696 B
 libnt_log_stub.a             746 B
-libnt_material.a            3728 B
+libnt_material.a            3784 B
 libnt_material_comp.a       2104 B
 libnt_memory.a              1170 B
 libnt_mesh_comp.a           2028 B
-libnt_mesh_renderer.a       3572 B
+libnt_mesh_renderer.a       3462 B
 libnt_meshwire.a            3326 B
 libnt_meshwire_encoder.a    3540 B
 libnt_meshwire_stub.a        722 B
 libnt_metrics.a             1530 B
 libnt_platform.a             824 B
 libnt_pool.a                1404 B
-libnt_postfx_blur.a         6798 B
+libnt_postfx_blur.a         6726 B
 libnt_recorder.a           16184 B
 libnt_render.a              7668 B
 libnt_resource.a          232018 B
-libnt_shape_renderer.a    911688 B
+libnt_shape_renderer.a    911296 B
 libnt_skeletal.a            7464 B
 libnt_skeletal_assets.a     4046 B
 libnt_skeletal_gpu.a        2622 B
 libnt_skin_comp.a           2238 B
-libnt_skinned_mesh_renderer.a    5944 B
+libnt_skinned_mesh_renderer.a    5804 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a         8744 B
-libnt_sprite_renderer.a    16198 B
-libnt_text_renderer.a       7702 B
+libnt_sprite_renderer.a    16114 B
+libnt_text_renderer.a       7650 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
 libnt_ui.a                352764 B
@@ -125,9 +125,9 @@ libnt_version.a              638 B
 libnt_window.a              4028 B
 libnt_window_stub.a         1888 B
 ------------------------ ----------
-TOTAL (archives)         2669364 B
+TOTAL (archives)         2668574 B
 
 ## Data Segments Summary
 
 Segments: 24
-Total data size: 8499 B
+Total data size: 8483 B
