@@ -759,18 +759,13 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
 
     // #region level 0
     const size_t src_texels = (size_t)src_w * src_h;
-    uint8_t *opaque = NULL;
-    if (!alpha) {
-        opaque = (uint8_t *)malloc(src_texels * 4U);
-        NT_BUILD_ASSERT(opaque && "texture levels: malloc failed");
-        memcpy(opaque, source, src_texels * 4U);
-        for (size_t i = 0; i < src_texels; i++) {
-            opaque[(i * 4U) + 3U] = 255;
-        }
-        if (normal && opts->format == NT_TEXTURE_FORMAT_RG8) {
-            rebuild_normal_z(opaque, src_texels);
-        }
-        source = opaque;
+    uint8_t *rebuilt = NULL;
+    if (normal && opts->format == NT_TEXTURE_FORMAT_RG8) {
+        rebuilt = (uint8_t *)malloc(src_texels * 4U);
+        NT_BUILD_ASSERT(rebuilt && "texture levels: malloc failed");
+        memcpy(rebuilt, source, src_texels * 4U);
+        rebuild_normal_z(rebuilt, src_texels);
+        source = rebuilt;
     }
     if (src_w == w && src_h == h) {
         memcpy(chain, source, src_texels * 4U);
@@ -785,7 +780,13 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
         quantize_core(resized, (size_t)w * h, srgb, weighted, chain);
         free(resized);
     }
-    free(opaque);
+    free(rebuilt);
+    /* Without alpha nothing weights by it, so opaque level 0 is all the chain needs. */
+    if (!alpha) {
+        for (size_t i = 0; i < (size_t)w * h; i++) {
+            chain[(i * 4U) + 3U] = 255;
+        }
+    }
     // #endregion
 
     // #region chain
@@ -867,30 +868,46 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
     return chain;
 }
 
-/* HDR levels as float RGBA (alpha unused): box filtered, since negative lobes
- * would make negative colours. */
-static float *build_hdr_levels(const float *source, uint32_t src_w, uint32_t src_h, uint32_t w, uint32_t h, uint32_t level_count, const nt_tex_opts_t *opts) {
-    float *chain = (float *)malloc(chain_bytes(w, h, level_count, 4U * sizeof(float)));
-    NT_BUILD_ASSERT(chain && "texture levels: malloc failed");
-    const resample_src_t rgb = {.pixels = source, .w = src_w, .h = src_h, .channels = 3};
-    resample(&rgb, chain, w, h, NT_TEX_FILTER_BOX, opts); /* at 1:1 the box is the identity */
-    float *prev = chain;
-    for (uint32_t level = 1; level < level_count; level++) {
-        const uint32_t pw = nt_texture_level_extent(w, level - 1);
-        const uint32_t ph = nt_texture_level_extent(h, level - 1);
-        float *dst = prev + ((size_t)pw * ph * 4U);
-        const resample_src_t src = {.pixels = prev, .w = pw, .h = ph, .channels = 4};
-        resample(&src, dst, nt_texture_level_extent(w, level), nt_texture_level_extent(h, level), NT_TEX_FILTER_BOX, opts);
-        prev = dst;
-    }
-    return chain;
-}
-
-static void pack_rgb9e5_texels(const float *rgba, size_t texels, uint8_t *dst) {
+static void pack_rgb9e5_texels(const float *pixels, size_t texels, uint32_t channels, uint8_t *dst) {
     for (size_t i = 0; i < texels; i++) {
-        const uint32_t packed = pack_rgb9e5(&rgba[i * 4]);
+        const uint32_t packed = pack_rgb9e5(&pixels[i * channels]);
         memcpy(dst + (i * sizeof(packed)), &packed, sizeof(packed));
     }
+}
+
+/* RGB9E5 levels packed into `dst` as they are built, each box filtered from the
+ * previous float level (negative lobes would make negative colours). The source
+ * serves as level 0 at its own size, so at most two float levels live at a time. */
+static void encode_hdr_levels(const float *source, uint32_t src_w, uint32_t src_h, uint32_t w, uint32_t h, uint32_t level_count, const nt_tex_opts_t *opts, uint8_t *dst) {
+    resample_src_t prev = {.pixels = source, .w = src_w, .h = src_h, .channels = 3};
+    float *resized = NULL;
+    if (src_w != w || src_h != h) {
+        resized = (float *)malloc((size_t)w * h * 4U * sizeof(float));
+        NT_BUILD_ASSERT(resized && "texture levels: malloc failed");
+        resample(&prev, resized, w, h, NT_TEX_FILTER_BOX, opts);
+        prev = (resample_src_t){.pixels = resized, .w = w, .h = h, .channels = 4};
+    }
+    pack_rgb9e5_texels((const float *)prev.pixels, (size_t)w * h, prev.channels, dst);
+    dst += (size_t)w * h * sizeof(uint32_t);
+    /* Odd levels go to the first buffer, even ones to the second. */
+    float *cores[2] = {NULL, NULL};
+    if (level_count > 1) {
+        cores[0] = (float *)malloc((size_t)nt_texture_level_extent(w, 1) * nt_texture_level_extent(h, 1) * 4U * sizeof(float));
+        cores[1] = (float *)malloc((size_t)nt_texture_level_extent(w, 2) * nt_texture_level_extent(h, 2) * 4U * sizeof(float));
+        NT_BUILD_ASSERT(cores[0] && cores[1] && "texture levels: malloc failed");
+    }
+    for (uint32_t level = 1; level < level_count; level++) {
+        const uint32_t lw = nt_texture_level_extent(w, level);
+        const uint32_t lh = nt_texture_level_extent(h, level);
+        float *core = cores[(level - 1) & 1U];
+        resample(&prev, core, lw, lh, NT_TEX_FILTER_BOX, opts);
+        pack_rgb9e5_texels(core, (size_t)lw * lh, 4, dst);
+        dst += (size_t)lw * lh * sizeof(uint32_t);
+        prev = (resample_src_t){.pixels = core, .w = lw, .h = lh, .channels = 4};
+    }
+    free(resized);
+    free(cores[0]);
+    free(cores[1]);
 }
 
 static NtTextureAssetHeader texture_header(const nt_tex_opts_t *opts, uint32_t width, uint32_t height, uint32_t level_count, size_t data_size) {
@@ -923,12 +940,11 @@ void nt_builder_encode_texture_to_buf(const void *pixels, uint32_t width, uint32
     const uint32_t level_count = opts->mips == NT_TEX_MIPS_BAKED ? nt_texture_full_chain_levels(w, h) : 1;
     const size_t texels = chain_bytes(w, h, level_count, 1);
 
-    float *hdr = NULL;
+    const bool hdr = opts->format == NT_TEXTURE_FORMAT_RGB9E5;
     uint8_t *levels = NULL;
     nt_basisu_encode_result_t enc = {0};
     size_t data_size = 0;
-    if (opts->format == NT_TEXTURE_FORMAT_RGB9E5) {
-        hdr = build_hdr_levels((const float *)pixels, width, height, w, h, level_count, opts);
+    if (hdr) {
         data_size = texels * sizeof(uint32_t);
     } else {
         levels = build_ldr_levels((const uint8_t *)pixels, width, height, w, h, level_count, opts);
@@ -947,7 +963,7 @@ void nt_builder_encode_texture_to_buf(const void *pixels, uint32_t width, uint32
     memcpy(buf, &tex_hdr, sizeof(tex_hdr));
     uint8_t *dst = buf + sizeof(tex_hdr);
     if (hdr) {
-        pack_rgb9e5_texels(hdr, texels, dst);
+        encode_hdr_levels((const float *)pixels, width, height, w, h, level_count, opts, dst);
     } else if (compressed) {
         memcpy(dst, enc.data, enc.size);
     } else if (nt_texture_bpp(opts->format) == 4) {
@@ -957,7 +973,6 @@ void nt_builder_encode_texture_to_buf(const void *pixels, uint32_t width, uint32
     }
 
     nt_basisu_encode_free(&enc);
-    free(hdr);
     free(levels);
     *out_data = buf;
     *out_size = total_asset_size;

@@ -307,7 +307,9 @@ and clamps otherwise.
 Peak memory per encode is about five times the source RGBA bytes: the source,
 the stored chain, two float cores (levels 1 and 2 at 16 bytes per texel) and the
 dilation pyramid. A resized level 0 adds a float copy of it, four times its RGBA
-bytes, before the chain starts. Basis adds its own copy of the levels.
+bytes, before the chain starts. Basis adds its own copy of the levels. `RGB9E5`
+packs each level as it is built: the float source, the packed asset and two float
+levels (a resized level 0 adds one).
 
 Dilation keeps bilinear filtering, Basis blocks and `RUNTIME` mips free of the
 black that transparent texels usually hold. `glGenerateMipmap` does not weight by
