@@ -122,7 +122,7 @@ static fi_frame_t *push_frame(fi_file_t *file, uint32_t *cap) {
 
 /* src with control bytes as \xNN, as capture text prints them: a file name or group key stays one line in
  * an answer. */
-static void one_line(const char *src, char *buf, size_t size) {
+void fi_one_line(const char *src, char *buf, size_t size) {
     size_t n = 0;
     for (const char *c = src; *c != '\0' && n + 5U < size; c++) {
         const uint8_t b = (uint8_t)*c;
@@ -140,20 +140,27 @@ void fi_file_load(fi_file_t *file, const char *name, char *text, size_t len) {
     memset(file, 0, sizeof(*file));
     const size_t name_size = (strlen(name) * 4U) + 5U;
     file->name = (char *)fi_alloc(name_size, 1);
-    one_line(name, file->name, name_size);
+    fi_one_line(name, file->name, name_size);
     file->text = text;
     file->len = len;
-    /* Records are the lines that start with their index: a file of empty lines asks for no memory. */
+    /* Records are the lines that start with their index: a file of empty lines asks for no memory. A document's
+     * strings take at most its length plus one. */
     uint32_t records = 1;
+    uint32_t documents = 1;
     for (size_t i = 0; i < len; i++) {
-        records += (i == 0 || text[i - 1] == '\n') && text[i] >= '0' && text[i] <= '9';
+        const bool line = i == 0 || text[i - 1] == '\n';
+        records += line && text[i] >= '0' && text[i] <= '9';
+        documents += line && text[i] == 'n';
     }
     file->events = (nt_gfx_event_t *)fi_alloc(records, sizeof(nt_gfx_event_t));
+    const uint32_t string_cap = (uint32_t)len + documents;
+    file->strings = (char *)fi_alloc(string_cap, 1);
     uint32_t used = 0;
+    uint32_t string_used = 0;
     uint32_t cap = 0;
     uint32_t base_line = 1; /* the line the document starts on */
     for (size_t at = 0; at < len;) {
-        const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(text + at, len - at, file->events + used, records - used);
+        const nt_gfx_capture_parsed_t r = nt_gfx_capture_parse(text + at, len - at, file->events + used, records - used, file->strings + string_used, string_cap - string_used);
         fi_frame_t *fr = push_frame(file, &cap);
         fr->view = r.view;
         fr->error = r.error;
@@ -171,6 +178,7 @@ void fi_file_load(fi_file_t *file, const char *name, char *text, size_t len) {
         }
         if (r.view.events != NULL) {
             used += r.view.count;
+            string_used += r.view.string_bytes;
             index_lines(fr, text + at, text + at + r.next);
             index_frame(fr);
         }
@@ -215,7 +223,8 @@ void fi_file_close(fi_file_t *file) {
         free(fr->group_is_note);
         free((void *)fr->group_label);
         free(fr->alias_object);
-        free(fr->alias_number);
+        free(fr->alias_ordinal);
+        free((void *)fr->alias_label);
         free(fr->alias_slot);
         free(fr->alias_kind);
         free(fr->def);
@@ -226,6 +235,7 @@ void fi_file_close(fi_file_t *file) {
     }
     free(file->frames);
     free(file->events);
+    free(file->strings);
     free(file->text);
     free(file->name);
     memset(file, 0, sizeof(*file));
@@ -264,9 +274,18 @@ static uint32_t intern_group(fi_frame_t *fr, uint32_t *slot, uint32_t mask, uint
     const char *base = parent != 0 ? fr->group_key[parent] : "";
     const char *sep = note ? " > " : "/";
     char shown[FI_KEY_LEN];
-    one_line(label, shown, sizeof(shown));
+    fi_one_line(label, shown, sizeof(shown));
     (void)snprintf(fr->group_key[g], FI_KEY_LEN, "%s%s%s", base, parent != 0 || note ? sep + (parent == 0) : "", shown); /* "> ui" at the top */
     return g;
+}
+
+/* The snapshot is the leading run of link-0 INITIAL/DEFINITION records; finished links follow it. */
+static uint32_t snapshot_length(const nt_gfx_event_t *ev, uint32_t n) {
+    uint32_t end = 0;
+    while (end < n && ev[end].link == 0 && (ev[end].kind == NT_GFX_EVENT_INITIAL || ev[end].kind == NT_GFX_EVENT_DEFINITION)) {
+        end++;
+    }
+    return end;
 }
 
 /* Parent of every record: the record it belongs to (link, note, marker) or a phase of the frame. */
@@ -274,11 +293,7 @@ static uint32_t intern_group(fi_frame_t *fr, uint32_t *slot, uint32_t mask, uint
 static void assign_parents(fi_frame_t *fr, uint32_t *stack, uint32_t *slot, uint32_t mask) {
     const nt_gfx_event_t *ev = fr->view.events;
     const uint32_t n = fr->view.count;
-    /* The snapshot is the leading run of link-0 INITIAL/DEFINITION records; finished links follow it. */
-    uint32_t snapshot_end = 0;
-    while (snapshot_end < n && ev[snapshot_end].link == 0 && (ev[snapshot_end].kind == NT_GFX_EVENT_INITIAL || ev[snapshot_end].kind == NT_GFX_EVENT_DEFINITION)) {
-        snapshot_end++;
-    }
+    const uint32_t snapshot_end = snapshot_length(ev, n);
     uint32_t top = 0;
     uint32_t note = FI_NONE;
     uint32_t remake = 0; /* frame storage buffers begin_frame still remakes after a restored context */
@@ -296,7 +311,7 @@ static void assign_parents(fi_frame_t *fr, uint32_t *stack, uint32_t *slot, uint
         uint32_t parent = scope;
         switch (e->kind) {
         case NT_GFX_EVENT_MARKER_PUSH:
-            fr->group[i] = intern_group(fr, slot, mask, base, false, e->note.label);
+            fr->group[i] = intern_group(fr, slot, mask, base, false, fr->view.strings + e->note.label);
             stack[top++] = i;
             note = FI_NONE;
             break;
@@ -305,7 +320,7 @@ static void assign_parents(fi_frame_t *fr, uint32_t *stack, uint32_t *slot, uint
             note = FI_NONE;
             break;
         case NT_GFX_EVENT_NOTE:
-            fr->group[i] = intern_group(fr, slot, mask, base, true, e->note.label);
+            fr->group[i] = intern_group(fr, slot, mask, base, true, fr->view.strings + e->note.label);
             note = i;
             break;
         case NT_GFX_EVENT_NOTE_FIELD:
@@ -450,27 +465,150 @@ static uint32_t *alias_slot(const fi_frame_t *fr, uint32_t kind, uint32_t object
     }
 }
 
-uint32_t fi_alias(const fi_frame_t *frame, uint32_t kind, uint32_t object) {
+fi_alias_t fi_alias(const fi_frame_t *frame, uint32_t kind, uint32_t object) {
     const uint32_t k = frame->alias_slot != NULL ? *alias_slot(frame, kind, object) : 0U;
-    return k != 0 ? frame->alias_number[k - 1U] : 0U;
+    return k != 0 ? (fi_alias_t){frame->alias_label[k - 1U], frame->alias_ordinal[k - 1U]} : (fi_alias_t){"", 0};
 }
 
-/* Aliases, each DESTROY's definition, and the bytes uploaded per buffer, in one pass over the records. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void index_handles(fi_frame_t *fr) {
+/* The handles a record names, as kinds and offsets into it: its object, then what its operation names. Backend
+ * records hold GL names, so only their object is a handle. */
+enum { FI_HANDLES = 4 };
+typedef struct {
+    uint8_t kind[FI_HANDLES];
+    uint16_t at[FI_HANDLES];
+    uint32_t count;
+} handles_t;
+
+static void add_handle(handles_t *h, uint32_t kind, size_t at) {
+    h->kind[h->count] = (uint8_t)kind;
+    h->at[h->count++] = (uint16_t)at;
+}
+
+static handles_t handles_of(const nt_gfx_event_t *e) {
+    static const uint8_t k_related[FI_OBJECTS] = {[NT_GFX_OBJECT_PROGRAM] = NT_GFX_OBJECT_SHADER,
+                                                  [NT_GFX_OBJECT_PIPELINE] = NT_GFX_OBJECT_PROGRAM,
+                                                  [NT_GFX_OBJECT_VERTEX_INPUT] = NT_GFX_OBJECT_BUFFER,
+                                                  [NT_GFX_OBJECT_TEXTURE] = NT_GFX_OBJECT_SAMPLER,
+                                                  [NT_GFX_OBJECT_RENDER_TARGET] = NT_GFX_OBJECT_TEXTURE};
+    handles_t h = {0};
+    if (!is_gfx(e)) {
+        return h;
+    }
+    if (e->object_kind != 0 && e->object_kind < FI_OBJECTS) {
+        add_handle(&h, e->object_kind, offsetof(nt_gfx_event_t, object));
+    }
+    const bool frontend =
+        e->kind == NT_GFX_EVENT_OP || e->kind == NT_GFX_EVENT_ARGUMENT || (e->kind == NT_GFX_EVENT_DEFINITION && (e->operation == NT_GFX_OP_CREATE || e->operation == NT_GFX_OP_ATTRIBUTE));
+    if (!frontend) {
+        return h;
+    }
+    if (fi_is_draw(e)) {
+        add_handle(&h, NT_GFX_OBJECT_VERTEX_INPUT, offsetof(nt_gfx_event_t, data.draw.vertex_input));
+    } else if (e->operation == NT_GFX_OP_CREATE && e->object_kind < FI_OBJECTS && k_related[e->object_kind] != 0) {
+        for (uint32_t k = 0; k < 3U; k++) {
+            add_handle(&h, k_related[e->object_kind], offsetof(nt_gfx_event_t, data.resource.related) + (k * sizeof(uint32_t)));
+        }
+    } else if (e->operation == NT_GFX_OP_PASS) {
+        add_handle(&h, NT_GFX_OBJECT_RENDER_TARGET, offsetof(nt_gfx_event_t, data.pass.target));
+    } else if (e->operation == NT_GFX_OP_VERTEX_INPUT) {
+        add_handle(&h, NT_GFX_OBJECT_BUFFER, offsetof(nt_gfx_event_t, data.binding.secondary));
+        add_handle(&h, NT_GFX_OBJECT_INSTANCE_LAYOUT, offsetof(nt_gfx_event_t, data.binding.slot));
+    } else if (e->operation == NT_GFX_OP_TEXTURE_SET && e->kind == NT_GFX_EVENT_ARGUMENT) {
+        add_handle(&h, NT_GFX_OBJECT_SAMPLER, offsetof(nt_gfx_event_t, data.binding.secondary));
+    } else if (e->operation == NT_GFX_OP_ATTRIBUTE) {
+        add_handle(&h, NT_GFX_OBJECT_BUFFER, offsetof(nt_gfx_event_t, data.attribute.buffer));
+    }
+    return h;
+}
+
+static uint32_t handle_at(const nt_gfx_event_t *e, uint16_t at) {
+    uint32_t v = 0;
+    memcpy(&v, (const unsigned char *)e + at, sizeof(v));
+    return v;
+}
+
+static uint32_t string_hash(const char *s) {
+    uint32_t h = 2166136261U;
+    for (; *s != '\0'; s++) {
+        h = (h ^ (uint8_t)*s) * 16777619U;
+    }
+    return h;
+}
+
+/* Ordinals per kind and label, in alias order. */
+static void number_aliases(fi_frame_t *fr, uint32_t count) {
+    const uint32_t slots = table_size(count);
+    uint32_t *first = (uint32_t *)fi_alloc(slots, sizeof(uint32_t));     /* per kind and label: its first alias + 1 */
+    uint32_t *seen = (uint32_t *)fi_alloc(count + 1U, sizeof(uint32_t)); /* per first alias: the aliases of its kind and label so far */
+    for (uint32_t a = 0; a < count; a++) {
+        for (uint32_t h = string_hash(fr->alias_label[a]) ^ (fr->alias_kind[a] * 0x85EBCA77U);; h++) {
+            uint32_t *slot = &first[h & (slots - 1U)];
+            if (*slot == 0) {
+                *slot = a + 1U;
+                seen[a] = 1;
+                fr->alias_ordinal[a] = 1;
+                break;
+            }
+            const uint32_t b = *slot - 1U;
+            if (fr->alias_kind[b] == fr->alias_kind[a] && strcmp(fr->alias_label[b], fr->alias_label[a]) == 0) {
+                fr->alias_ordinal[a] = ++seen[b];
+                break;
+            }
+        }
+    }
+    free(first);
+    free(seen);
+}
+
+/* Aliases: every handle the records name, in order of first use after the snapshot, then the snapshot's, so a
+ * live object the frame never touches shifts no number; a definition's label names its object. */
+static void index_aliases(fi_frame_t *fr) {
     const uint32_t n = fr->view.count;
-    fr->alias_object = (uint32_t *)fi_alloc(n, sizeof(uint32_t));
-    fr->alias_number = (uint32_t *)fi_alloc(n, sizeof(uint32_t));
-    fr->alias_kind = (uint8_t *)fi_alloc(n, sizeof(uint8_t));
-    const uint32_t slots = table_size(n);
+    const nt_gfx_event_t *ev = fr->view.events;
+    uint32_t cap = 1;
+    for (uint32_t i = 0; i < n; i++) {
+        cap += handles_of(&ev[i]).count;
+    }
+    fr->alias_object = (uint32_t *)fi_alloc(cap, sizeof(uint32_t));
+    fr->alias_ordinal = (uint32_t *)fi_alloc(cap, sizeof(uint32_t));
+    fr->alias_kind = (uint8_t *)fi_alloc(cap, sizeof(uint8_t));
+    fr->alias_label = (const char **)fi_alloc(cap, sizeof(const char *));
+    const uint32_t slots = table_size(cap);
     fr->alias_slot = (uint32_t *)fi_alloc(slots, sizeof(uint32_t));
     fr->alias_mask = slots - 1U;
-    fr->def = (uint32_t *)fi_alloc(n, sizeof(uint32_t));
-    uint32_t *last_def = (uint32_t *)fi_alloc(n, sizeof(uint32_t)); /* per alias: its latest CREATE definition */
-    uint32_t *upload = (uint32_t *)fi_alloc(n, sizeof(uint32_t));   /* per alias: its buffer upload row + 1 */
-    fr->buffer_upload = (fi_buffer_upload_t *)fi_alloc(n, sizeof(fi_buffer_upload_t));
+    const uint32_t snapshot = snapshot_length(ev, n);
     uint32_t count = 0;
-    uint32_t next[FI_OBJECTS] = {0};
+    for (uint32_t s = 0; s < n; s++) {
+        const uint32_t i = s < n - snapshot ? snapshot + s : s - (n - snapshot);
+        const nt_gfx_event_t *e = &ev[i];
+        const handles_t h = handles_of(e);
+        for (uint32_t k = 0; k < h.count; k++) {
+            const uint32_t object = handle_at(e, h.at[k]);
+            uint32_t *slot = object != 0 ? alias_slot(fr, h.kind[k], object) : NULL;
+            if (slot != NULL && *slot == 0) {
+                *slot = ++count;
+                fr->alias_object[count - 1U] = object;
+                fr->alias_kind[count - 1U] = h.kind[k];
+                fr->alias_label[count - 1U] = "";
+            }
+        }
+        if (e->kind == NT_GFX_EVENT_DEFINITION && e->operation == NT_GFX_OP_CREATE && e->data.resource.label != 0 && h.count > 0 && e->object != 0) {
+            fr->alias_label[*alias_slot(fr, e->object_kind, e->object) - 1U] = fr->view.strings + e->data.resource.label;
+        }
+    }
+    number_aliases(fr, count);
+}
+
+/* Each operation's object definition and the bytes uploaded per buffer, in record order. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void index_handles(fi_frame_t *fr) {
+    index_aliases(fr);
+    const uint32_t n = fr->view.count;
+    const uint32_t aliases = fr->alias_mask + 1U;
+    fr->def = (uint32_t *)fi_alloc(n, sizeof(uint32_t));
+    uint32_t *last_def = (uint32_t *)fi_alloc(aliases, sizeof(uint32_t)); /* per alias: its latest CREATE definition + 1 */
+    uint32_t *upload = (uint32_t *)fi_alloc(aliases, sizeof(uint32_t));   /* per alias: its buffer upload row + 1 */
+    fr->buffer_upload = (fi_buffer_upload_t *)fi_alloc(n, sizeof(fi_buffer_upload_t));
     for (uint32_t i = 0; i < n; i++) {
         const nt_gfx_event_t *e = &fr->view.events[i];
         fr->def[i] = FI_NONE;
@@ -487,19 +625,11 @@ static void index_handles(fi_frame_t *fr) {
         if (!is_gfx(e) || e->object_kind == 0 || e->object_kind >= FI_OBJECTS || e->object == 0) {
             continue;
         }
-        uint32_t *slot = alias_slot(fr, e->object_kind, e->object);
-        if (*slot == 0) {
-            *slot = count + 1U;
-            fr->alias_object[count] = e->object;
-            fr->alias_kind[count] = e->object_kind;
-            last_def[count] = FI_NONE;
-            fr->alias_number[count++] = ++next[e->object_kind];
-        }
-        const uint32_t k = *slot - 1U;
+        const uint32_t k = *alias_slot(fr, e->object_kind, e->object) - 1U;
         if (e->kind == NT_GFX_EVENT_DEFINITION && e->operation == NT_GFX_OP_CREATE) {
-            last_def[k] = i;
+            last_def[k] = i + 1U;
         } else if (e->kind == NT_GFX_EVENT_OP) {
-            fr->def[i] = last_def[k];
+            fr->def[i] = last_def[k] != 0 ? last_def[k] - 1U : FI_NONE;
         }
     }
     free(last_def);
@@ -688,7 +818,7 @@ static uint32_t contributions(const fi_frame_t *fr, uint32_t i, fi_query_t *q, u
         }
         break;
     case NT_GFX_EVENT_NOTE_FIELD:
-        if (e->field.type == NT_GFX_NOTE_STR && strcmp(e->field.key, "drop") == 0) {
+        if (e->field.type == NT_GFX_NOTE_STR && strcmp(fr->view.strings + e->field.key, "drop") == 0) {
             FI_ADD_(FI_Q_DROP, 0, 0, 0);
             FI_ADD_(FI_Q_PROBLEM, 0, 0, 0);
             FI_ADD_(FI_Q_GROUP, g, FI_METRIC_DROPS, 0);
@@ -1363,10 +1493,10 @@ static void index_frame(fi_frame_t *fr) {
 }
 
 // #region compare
-/* What pairs two requests across frames: handles as aliases, a note by its label. */
+/* What pairs two requests across frames: a gfx request by its handles as aliases, a note by its label. */
 typedef struct {
     uint8_t kind, op, object_kind;
-    uint32_t object, vertex_input;
+    fi_alias_t object, vertex_input;
     const char *label;
 } req_key_t;
 
@@ -1413,13 +1543,13 @@ static void side_build(side_t *s, const fi_frame_t *fr) {
         req_key_t *key = &s->key[k];
         key->kind = (uint8_t)e->kind;
         if (e->kind == NT_GFX_EVENT_NOTE) {
-            key->label = e->note.label;
+            key->label = fr->view.strings + e->note.label;
             continue;
         }
         key->op = e->operation;
         key->object_kind = e->object_kind;
         key->object = fi_alias(fr, e->object_kind, e->object);
-        key->vertex_input = fi_is_draw(e) ? fi_alias(fr, NT_GFX_OBJECT_VERTEX_INPUT, e->data.draw.vertex_input) : 0U;
+        key->vertex_input = fi_is_draw(e) ? fi_alias(fr, NT_GFX_OBJECT_VERTEX_INPUT, e->data.draw.vertex_input) : (fi_alias_t){"", 0};
     }
     free(at);
 }
@@ -1431,55 +1561,76 @@ static void side_free(side_t *s) {
     free(s->calls);
 }
 
+static bool same_alias(fi_alias_t x, fi_alias_t y) { return x.ordinal == y.ordinal && strcmp(x.label, y.label) == 0; }
+
 static bool same_key(const req_key_t *x, const req_key_t *y) {
-    return x->kind == y->kind && x->op == y->op && x->object_kind == y->object_kind && x->object == y->object && x->vertex_input == y->vertex_input &&
-           (x->label == NULL ? y->label == NULL : y->label != NULL && strcmp(x->label, y->label) == 0);
+    if (x->kind != y->kind) {
+        return false;
+    }
+    if (x->kind == NT_GFX_EVENT_NOTE) {
+        return strcmp(x->label, y->label) == 0;
+    }
+    return x->op == y->op && x->object_kind == y->object_kind && same_alias(x->object, y->object) && same_alias(x->vertex_input, y->vertex_input);
 }
 
-/* A gfx record as two frames compare it: handles as aliases; links, joined draws, GL names and the result
- * (compared on its own) left out. */
-static nt_gfx_event_t canonical(const fi_frame_t *fr, uint32_t i) {
-    static const uint8_t k_related[FI_OBJECTS] = {[NT_GFX_OBJECT_PROGRAM] = NT_GFX_OBJECT_SHADER,
-                                                  [NT_GFX_OBJECT_PIPELINE] = NT_GFX_OBJECT_PROGRAM,
-                                                  [NT_GFX_OBJECT_VERTEX_INPUT] = NT_GFX_OBJECT_BUFFER,
-                                                  [NT_GFX_OBJECT_RENDER_TARGET] = NT_GFX_OBJECT_TEXTURE};
+/* A record as two frames compare it, without what same_record compares on its own (handles as aliases, strings
+ * as text) or not at all: links, joined draws, GL names, the result, the label a create defines (its alias holds it). */
+static nt_gfx_event_t canonical(const nt_gfx_event_t *e) {
     nt_gfx_event_t c;
-    memcpy(&c, &fr->view.events[i], sizeof(c));
+    memcpy(&c, e, sizeof(c));
+    if (c.kind == NT_GFX_EVENT_NOTE || c.kind == NT_GFX_EVENT_MARKER_PUSH) {
+        c.note.label = 0;
+    } else if (c.kind == NT_GFX_EVENT_NOTE_FIELD) {
+        c.field.key = 0;
+        if (c.field.type == NT_GFX_NOTE_STR) {
+            c.field.value.str = 0;
+        }
+    }
     if (!is_gfx(&c)) {
         return c;
     }
-    c.object = fi_alias(fr, c.object_kind, c.object);
+    const handles_t h = handles_of(&c);
+    for (uint32_t k = 0; k < h.count; k++) {
+        memset((unsigned char *)&c + h.at[k], 0, sizeof(uint32_t));
+    }
     c.link = 0;
     c.result = 0;
     if (fi_is_draw(&c)) {
         c.detail = 0;
-        c.data.draw.vertex_input = fi_alias(fr, NT_GFX_OBJECT_VERTEX_INPUT, c.data.draw.vertex_input);
-    } else if (c.operation == NT_GFX_OP_CREATE && c.object_kind < FI_OBJECTS) {
+    } else if (c.operation == NT_GFX_OP_CREATE) {
         c.data.resource.backend = 0;
-        for (uint32_t k = 0; k < 3U && k_related[c.object_kind] != 0; k++) {
-            c.data.resource.related[k] = fi_alias(fr, k_related[c.object_kind], c.data.resource.related[k]);
-        }
-    } else if (c.operation == NT_GFX_OP_PASS) {
-        c.data.pass.target = fi_alias(fr, NT_GFX_OBJECT_RENDER_TARGET, c.data.pass.target);
-    } else if (c.operation == NT_GFX_OP_VERTEX_INPUT) {
-        c.data.binding.secondary = fi_alias(fr, NT_GFX_OBJECT_BUFFER, c.data.binding.secondary);
-        c.data.binding.slot = fi_alias(fr, NT_GFX_OBJECT_INSTANCE_LAYOUT, c.data.binding.slot);
-    } else if (c.operation == NT_GFX_OP_TEXTURE_SET && c.kind == NT_GFX_EVENT_ARGUMENT) {
-        c.data.binding.secondary = fi_alias(fr, NT_GFX_OBJECT_SAMPLER, c.data.binding.secondary);
-    } else if (c.operation == NT_GFX_OP_ATTRIBUTE) {
-        c.data.attribute.buffer = fi_alias(fr, NT_GFX_OBJECT_BUFFER, c.data.attribute.buffer);
+        c.data.resource.label = 0;
     }
     return c;
 }
 
+static bool same_string(const fi_frame_t *fa, nt_gfx_capture_string_t x, const fi_frame_t *fb, nt_gfx_capture_string_t y) { return strcmp(fa->view.strings + x, fb->view.strings + y) == 0; }
+
 static bool same_record(const fi_frame_t *fa, uint32_t i, const fi_frame_t *fb, uint32_t j) {
-    const nt_gfx_event_t x = canonical(fa, i);
-    const nt_gfx_event_t y = canonical(fb, j);
+    const nt_gfx_event_t *e = &fa->view.events[i];
+    const nt_gfx_event_t *f = &fb->view.events[j];
+    const nt_gfx_event_t x = canonical(e);
+    const nt_gfx_event_t y = canonical(f);
     uint8_t xb[sizeof(x)];
     uint8_t yb[sizeof(y)];
     memcpy(xb, &x, sizeof(xb));
     memcpy(yb, &y, sizeof(yb));
-    return memcmp(xb, yb, sizeof(xb)) == 0;
+    if (memcmp(xb, yb, sizeof(xb)) != 0) {
+        return false;
+    }
+    if (e->kind == NT_GFX_EVENT_NOTE || e->kind == NT_GFX_EVENT_MARKER_PUSH) {
+        return same_string(fa, e->note.label, fb, f->note.label);
+    }
+    if (e->kind == NT_GFX_EVENT_NOTE_FIELD) {
+        return same_string(fa, e->field.key, fb, f->field.key) && (e->field.type != NT_GFX_NOTE_STR || same_string(fa, e->field.value.str, fb, f->field.value.str));
+    }
+    const handles_t h = handles_of(e); /* f has the same kind, operation and object kind */
+    for (uint32_t k = 0; k < h.count; k++) {
+        if (!same_alias(fi_alias(fa, h.kind[k], handle_at(e, h.at[k])), fi_alias(fb, h.kind[k], handle_at(f, h.at[k])))) {
+            return false;
+        }
+    }
+    return true;
 }
 
 /* After record i, the next record request r wrote itself: a NOTE_FIELD of note r, an ARGUMENT or a

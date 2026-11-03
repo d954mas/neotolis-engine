@@ -124,11 +124,15 @@ static const char *alias_prefix(uint32_t kind) {
 }
 
 void fi_alias_text(const fi_frame_t *frame, uint32_t kind, uint32_t object, char *buf, size_t size) {
-    const uint32_t k = fi_alias(frame, kind, object);
-    if (k != 0) {
-        (void)snprintf(buf, size, "%s#%u", alias_prefix(kind), k);
-    } else {
+    const fi_alias_t a = fi_alias(frame, kind, object);
+    if (a.ordinal == 0) {
         (void)snprintf(buf, size, "%s:%u", alias_prefix(kind), object);
+    } else if (a.label[0] == '\0') {
+        (void)snprintf(buf, size, "%s#%u", alias_prefix(kind), a.ordinal);
+    } else {
+        char label[FI_ALIAS_LEN];
+        fi_one_line(a.label, label, sizeof(label));
+        (void)snprintf(buf, size, "%s/%.*s#%u", alias_prefix(kind), (int)(size > 24U ? size - 24U : 0U), label, a.ordinal);
     }
 }
 
@@ -167,7 +171,7 @@ void fi_row_text(const fi_frame_t *frame, uint32_t record, char *buf, size_t siz
     (void)snprintf(parent_link, sizeof(parent_link), "link=@%u", frame->parent[record]);
     size_t at = 0;
     buf[0] = '\0';
-    char alias[32];
+    char alias[FI_ALIAS_LEN];
     for (size_t i = 0; i < len;) {
         size_t j = i;
         bool quoted = false;

@@ -238,8 +238,8 @@ void setUp(void) {
     memset(s_test_tex_res, 0, sizeof(s_test_tex_res));
     s_test_tex_pack_created = false;
     nt_hash_init(&(nt_hash_desc_t){0});
-    nt_gfx_init(&NT_GFX_TEST_DESC(.capture_capacity = 4096U, .max_shaders = 32, .max_programs = 64, .max_pipelines = 64, .max_buffers = 256, .max_textures = 32, .max_meshes = 32,
-                                  .max_vertex_inputs = TEST_MAX_VERTEX_INPUTS, .max_render_targets = 16));
+    nt_gfx_init(&NT_GFX_TEST_DESC(.capture_capacity = 4096U, .capture_string_capacity = 16384U, .max_shaders = 32, .max_programs = 64, .max_pipelines = 64, .max_buffers = 256, .max_textures = 32,
+                                  .max_meshes = 32, .max_vertex_inputs = TEST_MAX_VERTEX_INPUTS, .max_render_targets = 16));
     nt_gfx_begin_frame();
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_entity_init(&(nt_entity_desc_t){.max_entities = 64});

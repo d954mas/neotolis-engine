@@ -214,6 +214,10 @@ static struct {
     nt_gfx_texture_meta_t *texture_metas; /* format + dimensions for update_texture validation */
     nt_gfx_vertex_input_meta_t *vertex_input_metas;
     nt_gfx_render_target_meta_t *render_target_metas;
+#if NT_GFX_CAPTURE_ENABLED
+    /* Desc labels of pool objects by kind and slot, for the capture; samplers keep theirs in sampler_cache. */
+    const char **labels[NT_GFX_OBJECT_RENDER_TARGET + 1];
+#endif
 
     /* Sampler cache (dedup by descriptor; samplers are immutable after create
      * and shared across materials/textures). nt_sampler_t.id is 1+slot. */
@@ -316,17 +320,33 @@ void nt_gfx_capture_set_continuous(bool on) {
 
 nt_gfx_capture_view_t nt_gfx_capture_read(void) { return g_nt_gfx_capture.done; }
 
-static void copy_note_text(char *dst, size_t size, const char *src) {
-    NT_ASSERT(src != NULL && "capture note: NULL string");
-    const size_t len = strlen(src);
-    NT_ASSERT(len < size && "capture note: string too long for its record");
-    memcpy(dst, src, len + 1);
+/* The string's offset in the recording frame's strings: 0 for NULL or "", and when nothing records. Appended
+ * before its record: a string that does not fit sets overflow, so its record is never reserved. */
+static nt_gfx_capture_string_t capture_string(const char *s) {
+    nt_gfx_capture_state_t *capture = &g_nt_gfx_capture;
+    if (!g_nt_gfx.capture_recording || capture->view.overflow || s == NULL || s[0] == '\0') {
+        return 0;
+    }
+    const size_t size = strlen(s) + 1U;
+    const uint32_t at = capture->view.string_bytes;
+    if (size > capture->string_capacity - at) {
+        capture->view.overflow = true;
+        return 0;
+    }
+    memcpy(capture->strings + at, s, size);
+    capture->view.string_bytes += (uint32_t)size;
+    return at;
+}
+
+static nt_gfx_capture_string_t capture_note_text(const char *s) {
+    NT_ASSERT(s != NULL && "capture note: NULL string");
+    return capture_string(s);
 }
 
 static void copy_note_field(nt_gfx_event_t *dst, const nt_gfx_note_field_t *src) {
     dst->field.kind = NT_GFX_EVENT_NOTE_FIELD;
     dst->field.type = src->type;
-    copy_note_text(dst->field.key, sizeof(dst->field.key), src->key);
+    dst->field.key = capture_note_text(src->key);
     switch (src->type) {
     case NT_GFX_NOTE_U32:
         dst->field.value.u32 = src->value.u32;
@@ -341,7 +361,7 @@ static void copy_note_field(nt_gfx_event_t *dst, const nt_gfx_note_field_t *src)
         dst->field.value.f32 = src->value.f32;
         break;
     case NT_GFX_NOTE_STR:
-        copy_note_text(dst->field.value.str, sizeof(dst->field.value.str), src->value.str);
+        dst->field.value.str = capture_note_text(src->value.str);
         break;
     default:
         NT_ASSERT(0 && "capture note: unknown field type");
@@ -354,7 +374,8 @@ void nt_gfx_note_record(const char *label, const nt_gfx_note_field_t *fields, ui
     if (capture->view.overflow) {
         return;
     }
-    /* All or nothing: a reader takes every NOTE_FIELD after a NOTE as its fields. */
+    /* All or nothing: a reader takes every NOTE_FIELD after a NOTE as its fields. Strings that run out
+     * set overflow on the way, and the records are then left unpublished. */
     if (capture->capacity - capture->view.count <= count) {
         capture->view.overflow = true;
         return;
@@ -362,21 +383,24 @@ void nt_gfx_note_record(const char *label, const nt_gfx_note_field_t *fields, ui
     nt_gfx_event_t *note = &capture->events[capture->view.count];
     memset(note, 0, (size_t)(count + 1U) * sizeof(*note));
     note->note.kind = NT_GFX_EVENT_NOTE;
-    copy_note_text(note->note.label, sizeof(note->note.label), label);
+    note->note.label = capture_note_text(label);
     for (uint32_t i = 0; i < count; i++) {
         copy_note_field(&note[i + 1U], &fields[i]);
     }
-    capture->view.count += count + 1U;
+    if (!capture->view.overflow) {
+        capture->view.count += count + 1U;
+    }
 }
 
 void nt_gfx_marker_push(const char *name) {
-    /* Checked in every frame, not only recorded ones: markers are rare and a long name must not wait for a capture. */
-    NT_ASSERT(name != NULL && strlen(name) < sizeof(g_nt_gfx_capture.events[0].note.label) && "nt_gfx_marker_push: name is required and must fit its record");
+    /* Checked in every frame, not only recorded ones: a missing name must not wait for a capture. */
+    NT_ASSERT(name != NULL && "nt_gfx_marker_push: name is required");
     g_nt_gfx_capture.marker_depth++;
+    const nt_gfx_capture_string_t label = capture_string(name);
     nt_gfx_event_t *event = nt_gfx_capture_reserve();
     if (event != NULL) {
         event->note.kind = NT_GFX_EVENT_MARKER_PUSH;
-        copy_note_text(event->note.label, sizeof(event->note.label), name);
+        event->note.label = label;
         g_nt_gfx_capture.view.count++;
     }
 }
@@ -395,11 +419,19 @@ static uint32_t render_target_attachment_format(uint32_t rt_slot, int attachment
     return s_gfx.render_target_metas[rt_slot].attachments[attachment].id != 0 ? render_target_attachment_meta(rt_slot, attachment)->format : 0;
 }
 
+static const char *object_label(nt_gfx_object_kind_t kind, uint32_t id) {
+    if (kind == NT_GFX_OBJECT_SAMPLER) {
+        return s_gfx.sampler_cache[id - 1].desc.label;
+    }
+    return kind <= NT_GFX_OBJECT_RENDER_TARGET ? s_gfx.labels[kind][nt_pool_slot_index(id)] : NULL;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one record schema per owned resource kind
 static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) {
     uint32_t slot = nt_pool_slot_index(id);
+    const nt_gfx_capture_string_t label = capture_string(object_label(kind, id));
     NT_GFX_RECORD(
-        NT_GFX_EVENT_DEFINITION, NT_GFX_OP_CREATE, event->object_kind = (uint8_t)kind; event->object = id; switch (kind) {
+        NT_GFX_EVENT_DEFINITION, NT_GFX_OP_CREATE, event->object_kind = (uint8_t)kind; event->object = id; event->data.resource.label = label; switch (kind) {
             case NT_GFX_OBJECT_SHADER:
                 event->data.resource.backend = s_gfx.shader_backends[slot];
                 event->result = NT_GFX_RESULT_UNKNOWN;
@@ -457,6 +489,8 @@ static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) 
         });
 }
 #define NT_GFX_DEFINE_RESOURCE(kind, id) capture_resource_definition(kind, id)
+/* Every create stores its label, NULL included, so a reused slot never shows an earlier object's. */
+#define NT_GFX_DEFINE_CREATED(kind, id, label) (s_gfx.labels[kind][nt_pool_slot_index(id)] = (label), capture_resource_definition(kind, id))
 
 static void capture_attributes(nt_gfx_object_kind_t kind, uint32_t id, const nt_vertex_attr_t *attrs, uint8_t attr_count, uint16_t stride, uint32_t buffer, uint32_t divisor) {
     for (uint32_t a = 0; a < attr_count; a++) {
@@ -505,6 +539,7 @@ static void capture_initial_state(void) {
 }
 #else
 #define NT_GFX_DEFINE_RESOURCE(kind, id) ((void)0)
+#define NT_GFX_DEFINE_CREATED(kind, id, label) ((void)0)
 #endif
 
 /* The next frame starts at once: gfx work is always inside a frame between init and shutdown. */
@@ -535,11 +570,16 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
 #if NT_GFX_CAPTURE_ENABLED
     memset(&g_nt_gfx_capture, 0, sizeof(g_nt_gfx_capture));
     NT_ASSERT(desc->capture_capacity < (1U << 24) && "capture_capacity: an operation link must fit 24 bits of a stream op word");
+    NT_ASSERT((desc->capture_capacity > 0) == (desc->capture_string_capacity > 0) && "capture_string_capacity: set it exactly when capture_capacity is set");
     g_nt_gfx_capture.capacity = desc->capture_capacity;
+    g_nt_gfx_capture.string_capacity = desc->capture_string_capacity;
     if (desc->capture_capacity > 0) {
-        g_nt_gfx_capture.base = (nt_gfx_event_t *)malloc((size_t)desc->capture_capacity * 2U * sizeof(nt_gfx_event_t));
+        const size_t record_bytes = (size_t)desc->capture_capacity * 2U * sizeof(nt_gfx_event_t);
+        NT_ASSERT((size_t)desc->capture_string_capacity <= (SIZE_MAX - record_bytes) / 2U && "capture_string_capacity: the capture does not fit the address space");
+        g_nt_gfx_capture.base = (nt_gfx_event_t *)malloc(record_bytes + ((size_t)desc->capture_string_capacity * 2U));
         NT_ASSERT(g_nt_gfx_capture.base != NULL);
         g_nt_gfx_capture.events = g_nt_gfx_capture.base;
+        g_nt_gfx_capture.strings = (char *)(g_nt_gfx_capture.base + ((size_t)desc->capture_capacity * 2U));
     }
 #endif
     nt_gfx_frame_init(desc);
@@ -562,6 +602,15 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     s_gfx.vertex_input_metas = (nt_gfx_vertex_input_meta_t *)calloc(desc->max_vertex_inputs + 1, sizeof(nt_gfx_vertex_input_meta_t));
     s_gfx.texture_metas = (nt_gfx_texture_meta_t *)calloc(desc->max_textures + 1, sizeof(nt_gfx_texture_meta_t));
     s_gfx.render_target_metas = (nt_gfx_render_target_meta_t *)calloc(max_render_targets + 1, sizeof(nt_gfx_render_target_meta_t));
+#if NT_GFX_CAPTURE_ENABLED
+    s_gfx.labels[NT_GFX_OBJECT_SHADER] = (const char **)calloc(desc->max_shaders + 1, sizeof(const char *));
+    s_gfx.labels[NT_GFX_OBJECT_PROGRAM] = (const char **)calloc(desc->max_programs + 1, sizeof(const char *));
+    s_gfx.labels[NT_GFX_OBJECT_PIPELINE] = (const char **)calloc(desc->max_pipelines + 1, sizeof(const char *));
+    s_gfx.labels[NT_GFX_OBJECT_VERTEX_INPUT] = (const char **)calloc(desc->max_vertex_inputs + 1, sizeof(const char *));
+    s_gfx.labels[NT_GFX_OBJECT_BUFFER] = (const char **)calloc(desc->max_buffers + 1, sizeof(const char *));
+    s_gfx.labels[NT_GFX_OBJECT_TEXTURE] = (const char **)calloc(desc->max_textures + 1, sizeof(const char *));
+    s_gfx.labels[NT_GFX_OBJECT_RENDER_TARGET] = (const char **)calloc(max_render_targets + 1, sizeof(const char *));
+#endif
 
     /* The init frame only loads: passes wait for the host's begin_frame. */
     s_gfx.render_state = NT_GFX_STATE_ENDED;
@@ -661,6 +710,11 @@ void nt_gfx_shutdown(void) {
     free(s_gfx.vertex_input_metas);
     free(s_gfx.texture_metas);
     free(s_gfx.render_target_metas);
+#if NT_GFX_CAPTURE_ENABLED
+    for (uint32_t k = 0; k <= NT_GFX_OBJECT_RENDER_TARGET; k++) {
+        free((void *)s_gfx.labels[k]);
+    }
+#endif
     free(s_gfx.mesh_table);
     free(s_gfx.mesh_vertex_inputs);
     free(s_stage_buf);
@@ -823,11 +877,14 @@ void nt_gfx_begin_frame(void) {
         capture->done = capture->view;
         capture->done.counters = g_nt_gfx.last_frame;
         capture->done.events = capture->events;
+        capture->done.strings = capture->strings;
 #if defined(NT_PLATFORM_WEB)
         capture->done.platform = NT_GFX_CAPTURE_WEB;
 #endif
         capture->view = (nt_gfx_capture_view_t){0};
         capture->events = capture->events == capture->base ? capture->base + capture->capacity : capture->base;
+        char *const strings = (char *)(capture->base + ((size_t)capture->capacity * 2U));
+        capture->strings = capture->strings == strings ? strings + capture->string_capacity : strings;
         g_nt_gfx.capture_recording = false;
     }
 #endif
@@ -847,6 +904,8 @@ void nt_gfx_begin_frame(void) {
     if (g_nt_gfx_capture.request_pending || g_nt_gfx.capture_continuous) {
         g_nt_gfx_capture.request_pending = false;
         g_nt_gfx.capture_recording = true;
+        g_nt_gfx_capture.strings[0] = '\0';
+        g_nt_gfx_capture.view.string_bytes = 1;
         capture_initial_state();
     }
 #endif
@@ -1105,7 +1164,7 @@ static nt_gfx_result_t make_shader(const nt_shader_desc_t *desc, nt_shader_t *ou
     s_gfx.shader_backends[slot] = backend;
 
     out->id = id;
-    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_SHADER, id);
+    NT_GFX_DEFINE_CREATED(NT_GFX_OBJECT_SHADER, id, desc->label);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -1146,7 +1205,7 @@ static nt_gfx_result_t make_program(nt_shader_t vs, nt_shader_t fs, const char *
     s_gfx.program_states[nt_pool_slot_index(id)] = NT_GFX_PROGRAM_LINKING;
 
     out->id = id;
-    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_PROGRAM, id);
+    NT_GFX_DEFINE_CREATED(NT_GFX_OBJECT_PROGRAM, id, label);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -1250,7 +1309,7 @@ static nt_gfx_result_t make_pipeline(const nt_pipeline_desc_t *desc, nt_pipeline
     s_gfx.pipeline_keys[slot] = key;
 
     out->id = id;
-    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_PIPELINE, id);
+    NT_GFX_DEFINE_CREATED(NT_GFX_OBJECT_PIPELINE, id, desc->label);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -1318,7 +1377,7 @@ static nt_gfx_result_t make_vertex_input(const nt_vertex_input_desc_t *desc, nt_
     };
 
     out->id = id;
-    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_VERTEX_INPUT, id);
+    NT_GFX_DEFINE_CREATED(NT_GFX_OBJECT_VERTEX_INPUT, id, desc->label);
 #if NT_GFX_CAPTURE_ENABLED
     capture_attributes(NT_GFX_OBJECT_VERTEX_INPUT, id, desc->layout.attrs, desc->layout.attr_count, desc->layout.stride, desc->vertex_buffer.id, 0);
 #endif
@@ -1419,7 +1478,7 @@ static nt_gfx_result_t make_buffer(const nt_buffer_desc_t *desc, nt_buffer_t *ou
     s_gfx.buffer_metas[slot].size = desc->size;
 
     out->id = id;
-    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_BUFFER, id);
+    NT_GFX_DEFINE_CREATED(NT_GFX_OBJECT_BUFFER, id, desc->label);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -1562,7 +1621,7 @@ static nt_gfx_result_t make_texture(const nt_texture_desc_t *desc, nt_texture_t 
     s_gfx.texture_metas[slot].default_sampler = default_sampler;
 
     out->id = id;
-    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_TEXTURE, id);
+    NT_GFX_DEFINE_CREATED(NT_GFX_OBJECT_TEXTURE, id, desc->label);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -1625,7 +1684,7 @@ static nt_gfx_result_t make_render_target(const nt_render_target_desc_t *desc, n
 
     s_gfx.render_target_metas[slot] = (nt_gfx_render_target_meta_t){.attachments = {desc->color, desc->depth}};
     out->id = id;
-    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_RENDER_TARGET, id);
+    NT_GFX_DEFINE_CREATED(NT_GFX_OBJECT_RENDER_TARGET, id, desc->label);
     return NT_GFX_RESULT_ACCEPTED;
 }
 

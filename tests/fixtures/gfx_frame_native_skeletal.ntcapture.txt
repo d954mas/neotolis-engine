@@ -1,4 +1,4 @@
-ntcapture 2
+ntcapture 3
 frame sequence=51 platform=native records=714 overflow=0 execute=639..714
 counter vertices=5251
 counter indices=19176

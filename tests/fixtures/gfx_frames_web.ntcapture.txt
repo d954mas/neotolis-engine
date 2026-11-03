@@ -1,4 +1,4 @@
-ntcapture 2
+ntcapture 3
 frame sequence=9 platform=web records=29 overflow=0 execute=23..29
 counter stream_bytes=88
 counter accepted.PASS=1
@@ -39,7 +39,7 @@ counter gl.glEnable=1
 26   BACKEND op=STATE call=glEnable link=@20 args=[3089]
 27   BACKEND op=STATE call=glClearColor link=@21 values=[0.9,0.55,0.1,1]
 28   BACKEND op=STATE call=glClear link=@21 args=[16384]
-ntcapture 2
+ntcapture 3
 frame sequence=10 platform=web records=29 overflow=0 execute=23..29
 counter stream_bytes=88
 counter accepted.PASS=1

@@ -29,6 +29,7 @@ static void start(uint32_t capacity) {
     g_nt_app = (nt_app_t){.max_dt = 0.1F, .scale = 1.0F, .step_dt = 1.0F / 60.0F, .render_enabled = true};
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = capacity;
+    desc.capture_string_capacity = 16384;
     nt_gfx_init(&desc);
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
     nt_devapi_register_gfx();
@@ -99,7 +100,7 @@ static uint64_t read_marked(const char *line, bool *marked) {
     if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok"))) {
         const cJSON *result = result_of(root);
         const char *text = cJSON_GetObjectItemCaseSensitive(result, "text")->valuestring;
-        TEST_ASSERT_EQUAL_STRING_LEN("ntcapture 2\n", text, 12);
+        TEST_ASSERT_EQUAL_STRING_LEN("ntcapture 3\n", text, 12);
         *marked = strstr(text, "MARKER_PUSH label=\"step\"") != NULL;
         sequence = (uint64_t)number(result, "sequence");
     }
@@ -220,6 +221,28 @@ static void test_ring_wraps_and_evicts_through_the_newest_overlap(void) {
         store_crafted(seq, 1); /* wraps to 0 and evicts 5, then fills up to the frame limit */
     }
     expect_ring((const uint64_t[]){6, 7, 8, 9}, 4);
+}
+
+/* A frame's strings follow its records in its block: a block whose strings reach a stored frame evicts it, and
+ * the strings come back whole. */
+static void test_a_frame_block_holds_its_strings(void) {
+    static char strings[1100];
+    memset(strings, 's', sizeof(strings) - 1U);
+    strings[0] = '\0';
+    strings[sizeof(strings) - 1U] = '\0';
+    store_crafted(1, 20);
+    store_crafted(2, 40); /* [20,60) */
+    store_crafted(3, 10); /* wraps to [0,10), evicts 1 */
+    for (uint32_t i = 0; i < 5U; i++) {
+        s_source[i].object = (4U * 100U) + i;
+    }
+    nt_gfx_capture_view_t view = {.events = s_source, .count = 5, .strings = strings, .string_bytes = sizeof(strings)};
+    view.counters.frame_sequence = 4;
+    store_frame(&view, 0, false); /* records [10,15), strings 11 records [15,26): only the strings reach 2 */
+    expect_ring((const uint64_t[]){3, 4}, 2);
+    TEST_ASSERT_EQUAL_PTR(&s_records[15], frame_at(1)->view.strings);
+    TEST_ASSERT_EQUAL_UINT32(sizeof(strings), frame_at(1)->view.string_bytes);
+    TEST_ASSERT_EQUAL_MEMORY(strings, frame_at(1)->view.strings, sizeof(strings));
 }
 
 static void test_recorded_frames_stay_gapless_over_many_wraps(void) {
@@ -539,6 +562,7 @@ int main(void) {
     RUN_TEST(test_the_step_frame_is_the_one_advanced_frame);
     RUN_TEST(test_recording_while_paused_stores_no_advanced_frame);
     RUN_TEST(test_ring_wraps_and_evicts_through_the_newest_overlap);
+    RUN_TEST(test_a_frame_block_holds_its_strings);
     RUN_TEST(test_recorded_frames_stay_gapless_over_many_wraps);
     RUN_TEST(test_switch_rows);
     RUN_TEST(test_off_lists_after_the_frame_just_ended_is_stored);

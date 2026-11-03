@@ -242,7 +242,7 @@ static void test_compare_tells_what_differs(void) {
     assert_holds(text, "\ndiffer 5  # ");
     text = ask("compare 0 g2", true);
     assert_holds(text, "\ngroup g2  # > sprite; 1 of 124 requests differ\n");
-    assert_holds(text, "\n~ @233    @233    DRAW_INDEXED pipe#9 count=7 vi#6  # count 6 -> 7\n");
+    assert_holds(text, "\n~ @233    @233    DRAW_INDEXED pipe#3 count=7 vi#3  # count 6 -> 7\n");
     assert_holds(text, "\nrows 124 differ 1\n");
     text = ask("compare 0 g1", true);
     assert_holds(text, "\n= 9 same  # @200..@208 in A, @200..@208 in B\n~ @209    @209    ");
@@ -326,6 +326,32 @@ static void test_compare_names_groups_only_one_frame_has(void) {
     assert_holds(text, "\n- @200    -       ");
 }
 
+/* A labeled handle shows kind, label and number; a label too long for the alias is cut, never the number, and a
+ * control byte shows escaped. */
+static void test_aliases_show_labels(void) {
+    char text[512];
+    char label[201];
+    memset(label, 'x', 200);
+    label[200] = '\0';
+    const int len = snprintf(text, sizeof(text),
+                             "ntcapture 3\nframe sequence=1 platform=native records=3 overflow=0 execute=0..0\n0 DEFINITION op=CREATE obj=BUFFER:65537 label=\"mesh\\x0a\"\n"
+                             "1 DEFINITION op=CREATE obj=BUFFER:65538 label=\"%s\"\n2 OP op=UBO obj=BUFFER:65538\n",
+                             label);
+    fi_file_t file = {0};
+    char *owned = (char *)malloc((size_t)len);
+    TEST_ASSERT_NOT_NULL(owned);
+    memcpy(owned, text, (size_t)len);
+    fi_file_load(&file, "labels", owned, (size_t)len);
+    TEST_ASSERT_NULL(file.frames[0].error);
+    char alias[FI_ALIAS_LEN];
+    fi_alias_text(&file.frames[0], NT_GFX_OBJECT_BUFFER, 65537, alias, sizeof(alias));
+    TEST_ASSERT_EQUAL_STRING("buf/mesh\\x0a#1", alias);
+    fi_alias_text(&file.frames[0], NT_GFX_OBJECT_BUFFER, 65538, alias, sizeof(alias));
+    TEST_ASSERT_EQUAL_STRING("#1", alias + strlen(alias) - 2U);
+    TEST_ASSERT_EQUAL_MEMORY("buf/xxxx", alias, 8);
+    fi_file_close(&file);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_commands_answer_and_reject_bad_input);
@@ -337,5 +363,6 @@ int main(void) {
     RUN_TEST(test_compare_tells_what_differs);
     RUN_TEST(test_native_and_web_align);
     RUN_TEST(test_compare_names_groups_only_one_frame_has);
+    RUN_TEST(test_aliases_show_labels);
     return UNITY_END();
 }

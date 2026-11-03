@@ -24,10 +24,11 @@ typedef struct {
     const char *error;          /* static message; NULL when the document parsed whole */
 } nt_gfx_capture_parsed_t;
 
-/* Parses the document at the start of text (len bytes, not terminated) into events[0..cap), events non-NULL. The text is
- * untrusted: nothing in it asserts. A header error rejects the document; a record error, an unknown name
- * included, keeps the records before it. A file holds documents back to back: parse again at next.
- * Every record is one line, so the file's line count bounds the records of all its documents. Requires LC_NUMERIC "C". */
-nt_gfx_capture_parsed_t nt_gfx_capture_parse(const char *text, size_t len, nt_gfx_event_t *events, uint32_t cap);
+/* Parses the document at the start of text (len bytes, not terminated) into events[0..cap) and its strings into
+ * strings[0..string_cap), both non-NULL, string_cap > 0. The text is untrusted: nothing in it asserts. A header
+ * error rejects the document; a record error, an unknown name included, keeps the records before it. A file holds
+ * documents back to back: parse again at next. Every record is one line, so the file's line count bounds the
+ * records of all its documents; a document's string bytes are at most its length plus one. Requires LC_NUMERIC "C". */
+nt_gfx_capture_parsed_t nt_gfx_capture_parse(const char *text, size_t len, nt_gfx_event_t *events, uint32_t cap, char *strings, uint32_t string_cap);
 
 #endif /* NT_GFX_CAPTURE_TEXT_H */

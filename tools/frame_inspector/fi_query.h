@@ -9,7 +9,9 @@
 /* The record's capture-text line without what a tree row shows elsewhere (its kind tag, result, parent link
  * and draw details); handles as short names (pipe#3), GL calls as calls: glEnable(GL_SCISSOR_TEST). */
 void fi_row_text(const fi_frame_t *frame, uint32_t record, char *buf, size_t size);
-/* pipe#3 for a handle; kinds are numbered in order of first appearance in the frame. */
+/* A handle as the views name it: vi/mesh#3, vi#3 unlabeled, vi:65537 when the frame never names it (fi_alias); a
+ * long label is cut, never the number. */
+#define FI_ALIAS_LEN 128
 void fi_alias_text(const fi_frame_t *frame, uint32_t kind, uint32_t object, char *buf, size_t size);
 /* The badge of a record: blank when a request did its work, what CACHE means for its operation, a skip, a failure. */
 const char *fi_result_word(const nt_gfx_event_t *e);

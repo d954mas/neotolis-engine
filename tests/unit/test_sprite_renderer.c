@@ -450,8 +450,8 @@ static uint32_t sprite_batch_key(nt_entity_t entity, nt_material_t material) {
 /* ---- setUp / tearDown ---- */
 
 static nt_gfx_desc_t test_gfx_desc(void) {
-    return NT_GFX_TEST_DESC(.capture_capacity = 4096U, .max_shaders = 32, .max_programs = 16, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16, .max_vertex_inputs = 16,
-                            .max_render_targets = 16);
+    return NT_GFX_TEST_DESC(.capture_capacity = 4096U, .capture_string_capacity = 16384U, .max_shaders = 32, .max_programs = 16, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32,
+                            .max_meshes = 16, .max_vertex_inputs = 16, .max_render_targets = 16);
 }
 
 static void setup_with_gfx_desc(const nt_gfx_desc_t *gfx_desc) {

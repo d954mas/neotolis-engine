@@ -1615,7 +1615,7 @@ static void declare_uploads_by_buffer(const fi_frame_t *fr) {
         return;
     }
     section("Uploads by buffer");
-    char alias[32];
+    char alias[FI_ALIAS_LEN];
     char label[96];
     for (uint32_t k = 0; k < fr->buffer_upload_count && k < SHOWN; k++) {
         const fi_buffer_upload_t *u = &fr->buffer_upload[k];
@@ -2185,7 +2185,7 @@ static void declare_raw(const fi_frame_t *fr, uint32_t id) {
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) { text(buf, &k_wrap); }
     const nt_gfx_event_t *e = &fr->view.events[id];
     if (e->kind <= NT_GFX_EVENT_ARGUMENT && e->object_kind != 0 && e->object_kind < FI_OBJECTS && e->object != 0) {
-        char alias[32];
+        char alias[FI_ALIAS_LEN];
         fi_alias_text(fr, e->object_kind, e->object, alias, sizeof(alias));
         textf(&k_dim, "obj %u is %s", e->object, alias);
     }

@@ -128,9 +128,10 @@ typedef struct {
     uint8_t *group_is_note;
     const char **group_label;
     uint32_t group_count;
-    /* Short names for handles (pipe#3): per kind, numbered in order of first appearance. */
-    uint32_t *alias_object, *alias_number, *alias_slot, alias_mask;
+    /* Short names for handles (vi/mesh#3): per kind and label, numbered by first use in the frame's work. */
+    uint32_t *alias_object, *alias_ordinal, *alias_slot, alias_mask;
     uint8_t *alias_kind;
+    const char **alias_label;          /* the frame's strings; "" when unlabeled */
     uint32_t *def;                     /* per operation on an object: the object's latest definition before it, FI_NONE */
     fi_buffer_upload_t *buffer_upload; /* the biggest first */
     uint32_t buffer_upload_count;
@@ -146,6 +147,7 @@ typedef struct {
     char *text;
     size_t len;
     nt_gfx_event_t *events;
+    char *strings; /* every document's strings, back to back */
     fi_frame_t *frames;
     uint32_t frame_count;
 } fi_file_t;
@@ -214,8 +216,16 @@ uint32_t fi_range(const fi_frame_t *frame, uint32_t lo, uint32_t hi, fi_summary_
 /* The row of a record or phase, FI_NONE when the frame has none. */
 uint32_t fi_row_of(const fi_frame_t *frame, uint32_t id);
 fi_tally_t fi_tally(const fi_frame_t *frame, uint32_t id);
-/* The alias number of a handle (pipe#3 is 3), 0 when the frame never names it. */
-uint32_t fi_alias(const fi_frame_t *frame, uint32_t kind, uint32_t object);
+/* A handle as two frames compare it: its label and its number among the frame's objects of its kind and label,
+ * counted by first use in the frame's work, then the snapshot's (vi/mesh#3: label "mesh", ordinal 3). */
+typedef struct {
+    const char *label; /* "" when unlabeled */
+    uint32_t ordinal;  /* 0 when the frame never names the handle */
+} fi_alias_t;
+
+fi_alias_t fi_alias(const fi_frame_t *frame, uint32_t kind, uint32_t object);
+/* src on one line, control bytes as \xNN, cut to fit size. */
+void fi_one_line(const char *src, char *buf, size_t size);
 /* Group g of frame `from` in frame `to`: the same marker path and note; FI_NONE when `to` has none. */
 uint32_t fi_group_in(const fi_frame_t *to, const fi_frame_t *from, uint32_t g);
 /* The tree parent of a record or phase; FI_NONE above the frame. */
