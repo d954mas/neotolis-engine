@@ -103,7 +103,7 @@ static tex_role_t *build_texture_roles(const nt_glb_scene_t *scene) {
 
 /* The alpha shader's cutoff as the manifest stores it, in whole hundredths. glTF
  * sets no maximum; above 1 every texel is discarded, which 1 already does. */
-static uint8_t alpha_cutoff_x100(const nt_glb_material_t *mat) { return (uint8_t)(fminf(fmaxf(mat->alpha_cutoff, 0.0F), 1.0F) * 100.0F); }
+static uint8_t alpha_cutoff_x100(const nt_glb_material_t *mat) { return (uint8_t)lroundf(fminf(fmaxf(mat->alpha_cutoff, 0.0F), 1.0F) * 100.0F); }
 
 /* The texel alpha an alpha-tested material passes from, as a cutoff on a byte step:
  * the smallest byte b the shader keeps, (b / 255) * baseColorFactor.a >= its cutoff,

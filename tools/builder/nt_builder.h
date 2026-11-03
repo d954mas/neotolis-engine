@@ -286,7 +286,7 @@ typedef enum {
 typedef struct {
     nt_tex_rgb_t rgb;
     nt_tex_alpha_t alpha;
-    nt_tex_filter_t resize_filter; /* level 0 down to max_size, any ratio */
+    nt_tex_filter_t resize_filter; /* level 0 to max_size: any downscale, and a short side under 4 grows to 4 */
     nt_tex_filter_t mip_filter;    /* levels 1..N, 2:1; anything but BOX requires mips BAKED */
     float alpha_cutoff;            /* 0 = off. The shader's alpha-test threshold in [0, 1]: every mip gets the
                                     * attainable coverage closest to level 0's at it. Requires a format with
@@ -306,7 +306,8 @@ static inline nt_tex_process_t nt_tex_process_normal(void) {
 typedef struct {
     nt_texture_pixel_format_t format; /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8. RGB9E5 = HDR, needs an HDR source */
     uint32_t max_size;                /* 0 = no resize, otherwise a multiple of 4: level 0 fits max(w,h) to it with
-                                       * process.resize_filter, the shorter side rounded down to a multiple of 4 */
+                                       * process.resize_filter, the shorter side rounded down to a multiple of 4,
+                                       * at least 4 */
     nt_basisu_encode_opts_t compress; /* NONE = raw/uncompressed */
     nt_tex_process_t process;         /* default nt_tex_process_color() */
     /* Baked sampler defaults; materials may override them per binding. */
@@ -720,7 +721,7 @@ void nt_builder_set_header_dir(NtBuilderContext *ctx, const char *dir);
 void nt_builder_set_gzip_estimate(NtBuilderContext *ctx, bool enabled);
 
 /* --- Builder cache (content-addressed, skips re-encoding unchanged assets) --- */
-#define NT_BUILDER_VERSION 14 /* Bump when encode logic changes to invalidate cache */
+#define NT_BUILDER_VERSION 15 /* Bump when encode logic changes to invalidate cache */
 void nt_builder_set_cache_dir(NtBuilderContext *ctx, const char *dir);
 
 /* --- Parallel encoding (multi-threaded asset encode in finish_pack) --- */

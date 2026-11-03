@@ -235,7 +235,7 @@ foliage.mips = NT_TEX_MIPS_BAKED;
 |---|---|---|
 | `rgb` | `COLOR` (0), `DATA`, `NORMAL` | `COLOR` and `DATA` pick the ETC1S metric, perceptual or linear; UASTC LDR and uncompressed textures give the same bytes for both. `NORMAL` is a tangent-space unit vector stored as `c * 2 - 1`, encoded with the linear metric (see below). sRGB formats require `COLOR`. |
 | `alpha` | `STRAIGHT` (0), `PREMULTIPLIED`, `DATA` | `STRAIGHT`: RGB filters alpha-weighted, and every stored level fills the RGB of near-transparent texels with nearby visible colour (dilation). `PREMULTIPLIED`: the same filtering, then each stored level is premultiplied once, `(c * a + 127) / 255`, and the header sets `NT_TEXTURE_FLAG_PREMULTIPLIED`; `RGBA8` only. It dilates only with `alpha_cutoff`. `DATA`: alpha filters as an independent channel and RGB under alpha 0 is kept. |
-| `resize_filter` | `BOX` (0), `MITCHELL`, `KAISER` | Level 0 when `max_size` shrinks the source, at any ratio |
+| `resize_filter` | `BOX` (0), `MITCHELL`, `KAISER` | Level 0 when `max_size` resizes the source: any downscale, and a short side under 4 grows to 4; an axis that keeps its size is copied |
 | `mip_filter` | `BOX` (0), `MITCHELL`, `KAISER` | Levels 1..N, each 2:1 from the previous level; anything but `BOX` requires `mips = BAKED` |
 | `alpha_cutoff` | 0 (off) or (0, 1] | The alpha-test threshold the shader applies. Every stored mip gets the attainable coverage closest to level 0's at it; requires a format with alpha and `mips = BAKED`, and atlas pages refuse it. |
 
@@ -302,8 +302,8 @@ The pipeline:
 
 Filter taps past an edge follow the sampler wrap per axis, as GL samples it:
 `REPEAT` wraps, `CLAMP_TO_EDGE` clamps, `MIRRORED_REPEAT` reflects with period
-`2n`. A `BOX` downscale never reaches past an edge. Dilation wraps on `REPEAT`
-and clamps otherwise.
+`2n`. A `BOX` downscale never reaches past an edge. Dilation wraps on `REPEAT`;
+otherwise its ring pass ignores texels past the edge and push-pull clamps.
 
 Dilation keeps bilinear filtering, Basis blocks and `RUNTIME` mips free of the
 black that transparent texels usually hold. `glGenerateMipmap` does not weight by
@@ -746,7 +746,7 @@ Every frontier adopts the trim-rect candidate, so with `max_vertices >= 4` geome
 - Candidate geometry and the integer geometry prepared for serialization both pass the same selected-geometry proof: inputs valid, opaque area valid, base/selected bounds, topology, full retained-cell coverage, triangulation, metric order, allowance, and ceiling. Corrupt area, allowance, ceiling, polygon, or triangle data fails the proof. Float positions are baked afterward and checked for finiteness.
 - These controls affect builder geometry, composed page pixels, and atlas cache identity. They do not change the runtime API or the on-disk atlas blob format.
 
-**Premultiplied alpha (default):** atlas pages are encoded through the regular texture pipeline, and the atlas defaults set `process.alpha = PREMULTIPLIED`: every stored page level is filtered alpha-weighted and then premultiplied once, `RGB' = (RGB * A + 127) / 255`, before `strip_channels` (uncompressed path) or `nt_basisu_encode` (BASIS path). The resulting texture sets `NT_TEXTURE_FLAG_PREMULTIPLIED` in `NtTextureAssetHeader.flags`, and the runtime must draw with `(ONE, ONE_MINUS_SRC_ALPHA)` blending. This is what keeps NFP-packed sprites free of dark fringes at sub-pixel clearance: `(0,0,0,0)` gap pixels are the identity for premultiplied blending, so bilinear filtering at sprite edges stays correct. `STRAIGHT` pages fill gap RGB by dilation instead, and `DATA` keeps the composed RGB; `PREMULTIPLIED` with a non-RGBA8 `format`, including an sRGB one, is a hard assert.
+**Premultiplied alpha (default):** atlas pages are encoded through the regular texture pipeline, and the atlas defaults set `process.alpha = PREMULTIPLIED`: every stored page level is filtered alpha-weighted and then premultiplied once, `RGB' = (RGB * A + 127) / 255`, before it is stored (uncompressed `RGBA8`) or passed to `nt_basisu_encode` (BASIS path). The resulting texture sets `NT_TEXTURE_FLAG_PREMULTIPLIED` in `NtTextureAssetHeader.flags`, and the runtime must draw with `(ONE, ONE_MINUS_SRC_ALPHA)` blending. This is what keeps NFP-packed sprites free of dark fringes at sub-pixel clearance: `(0,0,0,0)` gap pixels are the identity for premultiplied blending, so bilinear filtering at sprite edges stays correct. `STRAIGHT` pages fill gap RGB by dilation instead, and `DATA` keeps the composed RGB; `PREMULTIPLIED` with a non-RGBA8 `format`, including an sRGB one, is a hard assert.
 
 **LDR mip filtering:** `BAKED` atlas pages follow [texture processing](#texture-processing).
 With `RUNTIME`, uncompressed `SRGB8_ALPHA8` mips come from `glGenerateMipmap`, whose filter

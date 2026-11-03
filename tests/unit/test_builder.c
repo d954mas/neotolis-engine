@@ -1172,6 +1172,7 @@ void test_atlas_page_carries_the_mip_mode(void) {
 }
 
 /* WebGL BPTC needs a block-aligned level 0; the activator asserts on an unaligned Basis blob. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- death tests and the rounded extents
 void test_basis_texture_must_be_block_aligned(void) {
     const char *png_path = TMP_DIR "/basis_unaligned_2x2.png";
     write_test_png(png_path);
@@ -1179,6 +1180,9 @@ void test_basis_texture_must_be_block_aligned(void) {
     opts.compress = ANY_COMPRESS();
     opts.mips = NT_TEX_MIPS_BAKED;
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/basis_unaligned.ntpack");
+    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_builder_add_texture(ctx, png_path, &opts), "a Basis texture needs width and height that are multiples of 4");
+    opts.max_size = 8; /* above the source: level 0 keeps the unaligned 2x2 */
+    ctx = nt_builder_start_pack(TMP_DIR "/basis_unaligned_above.ntpack");
     EXPECT_BUILD_ASSERT_MATCH(ctx, nt_builder_add_texture(ctx, png_path, &opts), "a Basis texture needs width and height that are multiples of 4");
 
     opts.max_size = 6;
@@ -1264,7 +1268,7 @@ static nt_tex_opts_t straight_baked_opts(void) {
     return opts;
 }
 
-/* Bug caught: source shape missing from the key. 9x4 and 12x3 hold the same bytes
+/* The source shape is part of the key: 9x4 and 12x3 hold the same bytes
  * and both fit max_size 4 as 4x4, yet are different images. */
 void test_texture_source_shape_is_part_of_the_identity(void) {
     uint8_t rgba[36 * 4];
@@ -1281,6 +1285,7 @@ void test_texture_source_shape_is_part_of_the_identity(void) {
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     TEST_ASSERT_EQUAL_UINT32(0, ctx->early_dedup_count);
     TEST_ASSERT_EQUAL_UINT32(0, ctx->dedup_count);
+    TEST_ASSERT_EQUAL_UINT32(0, ctx->dedup_warn_count); /* another image, not other options */
     nt_builder_free_pack(ctx);
 
     NtTextureAssetHeader a_hdr;
@@ -1329,8 +1334,8 @@ static uint64_t process_key(NtBuilderContext *ctx, nt_tex_process_t process, nt_
     return nt_builder_compute_opts_hash(&ctx->pending[ctx->pending_count - 1]);
 }
 
-/* Bug caught: a process field missing from the key, fields summed so that swapped
- * values collide ((DATA, STRAIGHT) against (COLOR, PREMULTIPLIED), (MITCHELL, BOX)
+/* Every process field is in the key by value: no field is missing, swapped values
+ * never collide ((DATA, STRAIGHT) against (COLOR, PREMULTIPLIED), (MITCHELL, BOX)
  * against (BOX, MITCHELL)), or a filter hashed as a bool. */
 void test_texture_process_fields_change_the_cache_key(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/process_keys.ntpack");
@@ -1344,7 +1349,7 @@ void test_texture_process_fields_change_the_cache_key(void) {
     variants[5].mip_filter = NT_TEX_FILTER_MITCHELL;
     variants[6].rgb = NT_TEX_RGB_DATA;
     variants[7] = (nt_tex_process_t){.rgb = NT_TEX_RGB_NORMAL, .alpha = NT_TEX_ALPHA_DATA};
-    uint64_t hashes[11];
+    uint64_t hashes[12];
     for (uint32_t i = 0; i < 8; i++) {
         hashes[i] = process_key(ctx, variants[i], NT_TEXTURE_FORMAT_RGBA8, none, 4);
     }
@@ -1352,7 +1357,8 @@ void test_texture_process_fields_change_the_cache_key(void) {
     hashes[8] = process_key(ctx, (nt_tex_process_t){.resize_filter = NT_TEX_FILTER_MITCHELL}, NT_TEXTURE_FORMAT_RGB8, none, 4);
     hashes[9] = process_key(ctx, (nt_tex_process_t){.resize_filter = NT_TEX_FILTER_KAISER}, NT_TEXTURE_FORMAT_RGB8, none, 4);
     hashes[10] = process_key(ctx, (nt_tex_process_t){.mip_filter = NT_TEX_FILTER_KAISER}, NT_TEXTURE_FORMAT_RGB8, none, 4);
-    for (uint32_t i = 0; i < 11; i++) {
+    hashes[11] = process_key(ctx, (nt_tex_process_t){.mip_filter = NT_TEX_FILTER_MITCHELL}, NT_TEXTURE_FORMAT_RGB8, none, 4);
+    for (uint32_t i = 0; i < 12; i++) {
         for (uint32_t j = 0; j < i; j++) {
             if (j < 8 && i >= 8) {
                 continue; /* different formats */
@@ -1387,7 +1393,7 @@ void test_texture_formats_without_alpha_ignore_source_alpha(void) {
     }
 }
 
-/* Bug caught: level 0 averaged as bytes, or with clamped edges. sRGB 0/255 columns
+/* Level 0 averages light with wrapped edges: sRGB 0/255 columns
  * at exactly 2:1 under REPEAT are linear 0.5 everywhere, sRGB 188. */
 void test_texture_level0_resize_averages_light_with_wrapped_edges(void) {
     uint8_t rgba[8 * 8 * 4];
@@ -1408,7 +1414,7 @@ void test_texture_level0_resize_averages_light_with_wrapped_edges(void) {
     free(asset);
 }
 
-/* Bug caught: resize_filter ignored. A lone bright column lands differently under
+/* resize_filter selects the kernel: a lone bright column lands differently under
  * BOX (its pair only) and MITCHELL (spread over neighbours). */
 void test_texture_resize_filter_selects_the_kernel(void) {
     uint8_t rgba[16 * 1 * 4];
@@ -1424,12 +1430,14 @@ void test_texture_resize_filter_selects_the_kernel(void) {
     uint8_t *mitchell = encode_mips_asset(rgba, 16, 1, &opts, &hdr);
     TEST_ASSERT_EQUAL_UINT8(0, asset_texel(box, &hdr, 0, 2, 0)[0]);
     TEST_ASSERT_UINT8_WITHIN(1, 128, asset_texel(box, &hdr, 0, 3, 0)[0]);
-    TEST_ASSERT_TRUE(abs((int)asset_texel(mitchell, &hdr, 0, 3, 0)[0] - 128) > 4 || abs((int)asset_texel(mitchell, &hdr, 0, 2, 0)[0]) > 4);
+    /* Mitchell B = C = 1/3 at 2:1: the column weighs 0.39 into texel 3 and 0.13 into texel 4. */
+    TEST_ASSERT_UINT8_WITHIN(1, 100, asset_texel(mitchell, &hdr, 0, 3, 0)[0]);
+    TEST_ASSERT_UINT8_WITHIN(1, 33, asset_texel(mitchell, &hdr, 0, 4, 0)[0]);
     free(box);
     free(mitchell);
 }
 
-/* Bug caught: blur at 1:1, or RGB under A=0 rewritten for DATA. */
+/* A level 0 at its source size is a copy, and DATA keeps RGB under A=0. */
 void test_texture_level0_copies_the_source_at_its_size(void) {
     uint8_t rgba[7 * 5 * 4];
     for (uint32_t i = 0; i < sizeof(rgba); i++) {
@@ -1476,7 +1484,7 @@ void test_texture_chain_alpha_modes(void) {
     TEST_ASSERT_UINT8_WITHIN(1, 160, tail[3]);
     free(asset);
 
-    /* Bug caught: a weighted core reweighted by alpha again (a squared) from level 2 on. */
+    /* A weighted core is weighted by alpha once, also from level 2 on. */
     const uint8_t quad[16] = {255, 0, 0, 255, 255, 0, 0, 255, 0, 0, 255, 64, 0, 0, 255, 64};
     opts.process.alpha = NT_TEX_ALPHA_STRAIGHT;
     asset = encode_mips_asset(quad, 4, 1, &opts, &hdr);
@@ -1486,7 +1494,7 @@ void test_texture_chain_alpha_modes(void) {
     TEST_ASSERT_UINT8_WITHIN(1, 160, tail[3]);
     free(asset);
 
-    /* Bug caught: premultiplying a level built from premultiplied texels. */
+    /* Premultiplied once, also on levels built from premultiplied texels. */
     uint8_t half_red[4 * 4 * 4];
     fill_rgba(half_red, 0, 16, (const uint8_t[4]){255, 0, 0, 128});
     opts.process.alpha = NT_TEX_ALPHA_PREMULTIPLIED;
@@ -1498,7 +1506,7 @@ void test_texture_chain_alpha_modes(void) {
     free(asset);
 }
 
-/* Bug caught: ringing clamped between levels. Kaiser rings below zero beside
+/* Ringing is clamped only on stored levels. Kaiser rings below zero beside
  * lines every 8 texels; the true level-3 mean is 255/8, a chain clamped at every
  * level drifts to about 36.8. */
 void test_texture_chain_keeps_ringing_until_stored(void) {
@@ -1578,7 +1586,7 @@ static void edge_corner(nt_tex_filter_t resize_filter, nt_tex_filter_t mip_filte
     free(asset);
 }
 
-/* Bug caught: edges taken from the wrong axis or ignored. The bright last column
+/* Filter edges follow wrap per axis: the bright last column
  * reaches column 0 only when u wraps, the bright last row reaches row 0 only when
  * v wraps: at level 0 through Mitchell, and at level 1 through each mip filter with
  * level 0 an untouched copy. */
@@ -1651,6 +1659,42 @@ void test_texture_resize_keeps_a_constant_at_any_ratio(void) {
     }
 }
 
+/* An upscaled short side keeps one-texel kernels, and an axis the resize keeps is
+ * copied. Rows 0 and 255 of a 64x2 BOX resize to 32x4 interpolate to 0, 64, 191,
+ * 255; alternating rows of a 32x4 MITCHELL resize to 16x4 stay 0, 255, 0, 255. */
+void test_texture_resize_short_side_interpolates_or_copies(void) {
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.format = NT_TEXTURE_FORMAT_RGB8;
+    opts.mips = NT_TEX_MIPS_NONE;
+    opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+    opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
+    opts.max_size = 32;
+    opts.process.resize_filter = NT_TEX_FILTER_BOX;
+    uint8_t rgba[64 * 4 * 4];
+    fill_rgba(rgba, 0, 64, (const uint8_t[4]){0, 0, 0, 255});
+    fill_rgba(rgba, 64, 64, (const uint8_t[4]){255, 255, 255, 255});
+    NtTextureAssetHeader hdr;
+    uint8_t *asset = encode_mips_asset(rgba, 64, 2, &opts, &hdr);
+    TEST_ASSERT_EQUAL_UINT32(4, hdr.height);
+    const uint8_t interpolated[4] = {0, 64, 191, 255};
+    for (uint32_t y = 0; y < 4; y++) {
+        TEST_ASSERT_UINT8_WITHIN(1, interpolated[y], asset_texel(asset, &hdr, 0, 5, y)[0]);
+    }
+    free(asset);
+
+    for (uint32_t y = 0; y < 4; y++) {
+        fill_rgba(rgba, (size_t)y * 32, 32, (const uint8_t[4]){(uint8_t)(y % 2 ? 255 : 0), 0, 0, 255});
+    }
+    opts.max_size = 16;
+    opts.process.resize_filter = NT_TEX_FILTER_MITCHELL;
+    asset = encode_mips_asset(rgba, 32, 4, &opts, &hdr);
+    TEST_ASSERT_EQUAL_UINT32(4, hdr.height);
+    for (uint32_t y = 0; y < 4; y++) {
+        TEST_ASSERT_EQUAL_UINT8(y % 2 ? 255 : 0, asset_texel(asset, &hdr, 0, 5, y)[0]);
+    }
+    free(asset);
+}
+
 /* MIRRORED_REPEAT matches GL: mirroring an image repeats it next to its own
  * reflection, so its resize equals the left half of that pair resized with REPEAT. */
 void test_texture_mirror_matches_gl(void) {
@@ -1690,6 +1734,7 @@ void test_texture_mirror_matches_gl(void) {
     }
 }
 
+// #region dilation
 /* Fills blend the donors in linear light (lin(R) + lin(G) stays 1, for sRGB too),
  * keep visible texels, and a hole next to one donor takes exactly that donor (the
  * ring pass). */
@@ -1726,7 +1771,7 @@ void test_texture_dilation_blends_donors_and_keeps_visible_texels(void) {
     }
 }
 
-/* Bug caught: dilation clamps a tiling texture. Texel 7 touches texel 0 only when u repeats. */
+/* Dilation wraps a tiling texture: texel 7 touches texel 0 only when u repeats. */
 void test_texture_dilation_wraps_repeat_edges(void) {
     uint8_t rgba[8 * 4] = {0};
     fill_rgba(rgba, 0, 1, (const uint8_t[4]){255, 0, 0, 255});
@@ -1781,7 +1826,7 @@ void test_texture_dilation_reaches_every_texel(void) {
     free(asset);
 }
 
-/* Bug caught: only A=0 counts as a hole. Near-transparent texels (A 1..8) take the
+/* Near-transparent texels are holes too: A 1..8 take the
  * donor colour and keep their alpha; A=9 is visible and stays as it is. A cutoff
  * threshold T lowers the hole alpha to T - 1, so a texel at A = T keeps its colour.
  * PREMULTIPLIED keeps its filtered colour, and with a cutoff stores the donor
@@ -1856,8 +1901,8 @@ void test_texture_dilation_empty_levels_keep_where_colour_was(void) {
     free(asset);
 }
 
-/* Bug caught: an empty level filled from the level above after that level was
- * premultiplied, so its white was premultiplied twice and came out black. */
+/* An empty level fills from the straight level above, so its white is premultiplied
+ * once, not twice into black. */
 void test_texture_premultiplied_empty_level_is_premultiplied_once(void) {
     const uint8_t pair[8] = {255, 255, 255, 16, 0, 0, 0, 0};
     nt_tex_opts_t opts = straight_baked_opts();
@@ -2074,7 +2119,7 @@ void test_texture_normal_resized_level0_is_unit_length(void) {
     free(asset);
 }
 
-/* Bug caught: only the stored copy is normalized. Left, normals at +-60 degrees
+/* Every mip core is normalized, not only its stored copy. Left, normals at +-60 degrees
  * average to length 0.5; right, a flat 30 degrees. Level 2 tilts 15 degrees from
  * the normalized level 1, 20 degrees from the raw one. */
 void test_texture_normal_core_feeds_the_next_level_normalized(void) {
@@ -2367,7 +2412,7 @@ void test_texture_alpha_cutoff_can_cover_nothing(void) {
     free(asset);
 }
 
-/* Bug caught: coverage scaling before dilation. A block of A=8 white sits beside one
+/* Dilation runs before coverage scaling. A block of A=8 white sits beside one
  * opaque green texel per 8x8 block; at level 3 the scale lifts every texel past the
  * threshold, and each must show the dilated green, not the white. */
 void test_texture_alpha_cutoff_lifts_only_dilated_colour(void) {
@@ -2464,8 +2509,7 @@ void test_texture_premultiplied_encoding(void) {
     /* Four hand-picked pixels covering interesting alpha values:
      *   alpha=255 → RGB unchanged (lossless)
      *   alpha=128 → RGB ≈ half  (tests round-to-nearest)
-     *   alpha=9   → RGB collapses to near-zero (alpha 8 or less is a hole and takes
-     *               its neighbours' colour first)
+     *   alpha=9   → RGB collapses to near-zero
      *   alpha=0   → RGB fully zeroed */
     uint8_t raw_pixels[4 * 4] = {
         /* (R, G, B, A) */
@@ -8520,7 +8564,7 @@ void test_atlas_begin_compress_bad_format_asserts_after_failed_pack(void) {
     bad.mips = NT_TEX_MIPS_BAKED;
     bad.process.alpha = NT_TEX_ALPHA_STRAIGHT; /* let the compress+format check fire, not premultiplied */
     bad.format = NT_TEXTURE_FORMAT_R8;         /* R8 has no Basis equivalent */
-    EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_begin(ctx, "next", &bad));
+    EXPECT_BUILD_ASSERT_MATCH(ctx, (void)nt_atlas_begin(ctx, "next", &bad), "Basis compression requires");
 }
 
 void test_atlas_begin_bad_compress_mode_asserts_after_failed_pack(void) {
@@ -11698,6 +11742,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_texture_filter_edges_follow_wrap_per_axis);
     RUN_TEST(test_texture_resize_keeps_a_constant_at_any_ratio);
     RUN_TEST(test_texture_mirror_matches_gl);
+    RUN_TEST(test_texture_resize_short_side_interpolates_or_copies);
     RUN_TEST(test_texture_dilation_empty_levels_keep_where_colour_was);
     RUN_TEST(test_texture_dilation_blends_donors_and_keeps_visible_texels);
     RUN_TEST(test_texture_dilation_wraps_repeat_edges);
@@ -11723,9 +11768,6 @@ int main(int argc, char *argv[]) {
 #if NT_BASISU_HAS_ETC1S
     RUN_TEST(test_texture_rgb_picks_the_basis_metric);
 #endif
-#if NT_BASISU_HAS_UASTC
-#endif
-
     /* AABB edge extrude */
     RUN_TEST(test_extrude_edges_aabb_l_shape);
     RUN_TEST(test_extrude_edges_preserve_hole);

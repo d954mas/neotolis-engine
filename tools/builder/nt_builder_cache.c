@@ -16,7 +16,7 @@
 #include <unistd.h>
 #endif
 
-/* The encode identity of an entry: its cache key and, after an exact pixel match, its early-dedup test. */
+/* The encode identity of an entry: its cache key, and early dedup's test after a pixel-hash match. */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- exact identity lists each active field
 uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {

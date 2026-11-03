@@ -579,7 +579,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             if (pe->decoded_hash != candidate->decoded_hash) {
                 continue;
             }
-            /* One source at two level-0 sizes is two assets, not the same data. */
+            /* Another source shape or level-0 size is another image, not the same data. */
             if (pe->kind == NT_BUILD_ASSET_TEXTURE) {
                 const NtBuildTextureData *ta = (const NtBuildTextureData *)pe->data;
                 const NtBuildTextureData *tb = (const NtBuildTextureData *)candidate->data;
@@ -587,7 +587,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                 uint32_t b_extent[2] = {0};
                 nt_builder_texture_target_extent(ta->width, ta->height, ta->opts.max_size, &a_extent[0], &a_extent[1]);
                 nt_builder_texture_target_extent(tb->width, tb->height, tb->opts.max_size, &b_extent[0], &b_extent[1]);
-                if (a_extent[0] != b_extent[0] || a_extent[1] != b_extent[1]) {
+                if (ta->width != tb->width || ta->height != tb->height || a_extent[0] != b_extent[0] || a_extent[1] != b_extent[1]) {
                     continue;
                 }
             }

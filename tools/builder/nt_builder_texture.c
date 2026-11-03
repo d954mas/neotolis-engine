@@ -15,6 +15,7 @@ nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *op
 
     NT_BUILD_ASSERT(nt_texture_pixel_format_valid(format) && "texture opts: invalid format");
     const nt_tex_process_t *process = &resolved.process;
+    NT_BUILD_ASSERT((unsigned)resolved.mips <= (unsigned)NT_TEX_MIPS_BAKED && "texture opts: mips out of range");
     NT_BUILD_ASSERT((unsigned)process->rgb <= (unsigned)NT_TEX_RGB_NORMAL && "texture opts: process.rgb out of range");
     NT_BUILD_ASSERT((unsigned)process->alpha <= (unsigned)NT_TEX_ALPHA_DATA && "texture opts: process.alpha out of range");
     NT_BUILD_ASSERT((unsigned)process->resize_filter <= (unsigned)NT_TEX_FILTER_KAISER && "texture opts: process.resize_filter out of range");
@@ -45,7 +46,6 @@ nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *op
     bool compressed = compress_opts->codec != NT_BASISU_CODEC_NONE;
     NT_BUILD_ASSERT(resolved.max_size % 4 == 0 && "texture opts: max_size must be 0 or a multiple of 4");
     bool filter_min_uses_mips = resolved.filter_min >= NT_TEXTURE_DEFAULT_FILTER_NEAREST_MIPMAP_NEAREST;
-    NT_BUILD_ASSERT((unsigned)resolved.mips <= (unsigned)NT_TEX_MIPS_BAKED && "texture opts: mips out of range");
     NT_BUILD_ASSERT((resolved.mips != NT_TEX_MIPS_NONE || !filter_min_uses_mips) && "texture opts: a mipmap filter_min requires mips RUNTIME or BAKED");
 
     if (compressed) {
@@ -337,8 +337,22 @@ static double tap_weight(nt_tex_filter_t filter, double i, double center, double
     return filter == NT_TEX_FILTER_MITCHELL ? mitchell(x) : kaiser(x);
 }
 
+/* Taps of an axis the resize keeps: each output texel is its input texel. */
+static axis_taps_t copy_taps(uint32_t n) {
+    axis_taps_t a = {.taps = 1, .index = (uint32_t *)malloc((size_t)n * sizeof(uint32_t)), .weight = (float *)malloc((size_t)n * sizeof(float))};
+    NT_BUILD_ASSERT(a.index && a.weight && "texture resize: malloc failed");
+    for (uint32_t o = 0; o < n; o++) {
+        a.index[o] = o;
+        a.weight[o] = 1.0F;
+    }
+    return a;
+}
+
 static axis_taps_t axis_taps(uint32_t in, uint32_t out, nt_tex_filter_t filter, nt_texture_default_wrap_t wrap) {
     NT_BUILD_ASSERT(out >= 1 && "texture resize: empty axis");
+    if (in == out) {
+        return copy_taps(out); /* MITCHELL is not an interpolator and would blur a kept axis */
+    }
     static const double supports[3] = {[NT_TEX_FILTER_BOX] = 0.5, [NT_TEX_FILTER_MITCHELL] = 2.0, [NT_TEX_FILTER_KAISER] = 3.0};
     const double scale = (double)in / out;
     /* Kernels widen with a downscale; an upscale (a short side rounded up to the 4x4 block) keeps them at one texel. */
@@ -447,14 +461,14 @@ static uint8_t encode_unit(float v, bool srgb) {
     return (uint8_t)floorf(((srgb ? linear_to_srgb(clamped) : clamped) * 255.0F) + 0.5F);
 }
 
-/* A stored straight-alpha level from a float linear core. A premultiplied core is
+/* A stored straight-alpha level from a float linear core. An alpha-weighted core is
  * divided by its alpha only here, so a near-zero alpha never feeds the next level. */
-static void quantize_core(const float *core, size_t texels, bool srgb, bool premultiplied, uint8_t *out) {
+static void quantize_core(const float *core, size_t texels, bool srgb, bool weighted, uint8_t *out) {
     for (size_t i = 0; i < texels; i++) {
         const float a = core[(i * 4U) + 3U];
         for (uint32_t c = 0; c < 3; c++) {
             float v = core[(i * 4U) + c];
-            if (premultiplied) {
+            if (weighted) {
                 v = a > 0.0F ? v / a : 0.0F;
             }
             out[(i * 4U) + c] = encode_unit(v, srgb);
@@ -496,7 +510,7 @@ static void rebuild_normal_z(uint8_t *rgba, size_t texels) {
 
 // #region dilation
 typedef struct {
-    float lin[256];      /* stored byte -> linear value */
+    const float *lin;    /* stored byte -> linear value */
     uint32_t hole_alpha; /* texels at or below it are holes: their filtered RGB is ringing divided by a tiny A */
     bool srgb;
     bool wrap_x;
@@ -827,10 +841,10 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
     const uint32_t threshold = process->alpha_cutoff > 0.0F ? nt_builder_texture_cutoff_byte(process->alpha_cutoff) : 0;
     /* A texel the alpha test passes is never a hole. */
     dilate_ctx_t dc = {.hole_alpha = threshold > 0 && threshold <= 8 ? threshold - 1 : 8,
+                       .lin = lin,
                        .srgb = srgb,
                        .wrap_x = opts->wrap_u == NT_TEXTURE_DEFAULT_WRAP_REPEAT,
                        .wrap_y = opts->wrap_v == NT_TEXTURE_DEFAULT_WRAP_REPEAT};
-    memcpy(dc.lin, lin, sizeof(lin));
     /* Premultiplied colour needs a fill only where coverage scaling lifts it into view. */
     bool dilate = weighted && (process->alpha == NT_TEX_ALPHA_STRAIGHT || threshold > 0);
     uint64_t counts0[257] = {0};

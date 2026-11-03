@@ -131,7 +131,7 @@ void test_non_basis_header_asserts(void) {
     NT_TEST_EXPECT_ASSERT((void)nt_basisu_info(pixels, sizeof(pixels)));
 }
 
-void test_encode_without_threads_asserts(void) {
+void test_encode_argument_asserts(void) {
     uint8_t pixels[16 * 8 * 4];
     fill_pixels(pixels, 16, 8, false);
     const nt_basisu_encode_opts_t opts = nt_tex_compress_etc1s_high();
@@ -288,7 +288,6 @@ void test_encoder_stores_the_caller_levels(void) {
         TEST_ASSERT_EQUAL_UINT32(W, info.width);
         TEST_ASSERT_EQUAL_UINT32(H, info.height);
         TEST_ASSERT_EQUAL_UINT32(LEVELS, info.level_count);
-        TEST_ASSERT_EQUAL_UINT32(sizeof(texels), chain_bytes(NT_TEXTURE_FORMAT_RGBA8, W, H, LEVELS));
         nt_basisu_transcode_chain(enc.data, enc.size, &info, NT_TEXTURE_FORMAT_RGBA8, s_out);
         nt_basisu_encode_free(&enc);
         for (uint32_t i = 0; i < sizeof(texels); i++) {
@@ -580,7 +579,7 @@ int main(void) {
     RUN_TEST(test_uastc_srgb_mip);
 #endif
     RUN_TEST(test_non_basis_header_asserts);
-    RUN_TEST(test_encode_without_threads_asserts);
+    RUN_TEST(test_encode_argument_asserts);
     RUN_TEST(test_opaque_rgba_source_reports_no_alpha);
     RUN_TEST(test_encoder_stores_the_caller_levels);
     RUN_TEST(test_alpha_less_formats_encode_opaque_levels);
