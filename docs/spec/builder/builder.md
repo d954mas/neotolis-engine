@@ -609,11 +609,9 @@ Fields and defaults are in `nt_atlas_opts_t` / `nt_atlas_shape_t`
 - `extrude > 0` is legal only with `shape == NT_ATLAS_SHAPE_RECT`.
 - `allowed_transforms` has identity as an implicit floor: a mask of 0 inherits the
   atlas mask, never "nothing allowed".
-- `max_size` is a multiple of 4 in `4..16384`. Pages never exceed it: with
-  `power_of_two` placement uses the largest power of two `<= max_size`. Every page
-  side is then rounded up to a multiple of 4 with transparent padding, so a Basis
-  page can take BC7. An `UNFITTABLE` record carries `max_size` and the placement
-  bound (`detail_b`).
+- `max_size` is a multiple of 4 in `4..16384`, and a power of two with
+  `power_of_two`, so pages never exceed it. Every page side is rounded up to a
+  multiple of 4 with transparent padding, so a Basis page can take BC7.
 
 Named mask presets are exact bit sets: `NT_ATLAS_TRANSFORMS_IDENTITY`,
 `NT_ATLAS_TRANSFORMS_IDENTITY_ROT90`, `NT_ATLAS_TRANSFORMS_ROTATIONS`,

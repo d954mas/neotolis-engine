@@ -140,8 +140,8 @@ void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len) {
         (void)snprintf(buf, len, "atlas '%s': ran out of pages (max_size=%u)", err->atlas, err->max_size);
         break;
     case NT_BUILD_ERR_KIND_ATLAS_UNFITTABLE:
-        (void)snprintf(buf, len, "atlas '%s', sprite '%s': %ux%u + padding %u + margin %u + extrude %u does not fit an empty page of side %u (max_size %u)", err->atlas, err->sprite, err->w, err->h,
-                       err->padding, err->margin, err->detail_a, err->detail_b, err->max_size);
+        (void)snprintf(buf, len, "atlas '%s', sprite '%s': %ux%u + padding %u + margin %u + extrude %u does not fit an empty page of max_size %u", err->atlas, err->sprite, err->w, err->h,
+                       err->padding, err->margin, err->detail_a, err->max_size);
         break;
     case NT_BUILD_ERR_KIND_NONE:
     default:
@@ -830,6 +830,7 @@ static nt_texture_pixel_format_t atlas_assert_opts(const nt_atlas_opts_t *opts) 
     NT_BUILD_ASSERT(opts->max_vertices >= 4 && opts->max_vertices <= 16 &&
                     "nt_atlas_begin: max_vertices must be 4..16 (a trim-clamped triangle cannot cover a full-perimeter mask; NFP buffer limit nA+nB <= 32)");
     NT_BUILD_ASSERT(opts->max_size >= 4 && opts->max_size <= 16384 && opts->max_size % 4 == 0 && "nt_atlas_begin: max_size must be a multiple of 4 in 4..16384");
+    NT_BUILD_ASSERT((!opts->power_of_two || (opts->max_size & (opts->max_size - 1)) == 0) && "nt_atlas_begin: with power_of_two, max_size must be a power of two");
     NT_BUILD_ASSERT(opts->padding <= opts->max_size && "nt_atlas_begin: padding exceeds max_size");
     NT_BUILD_ASSERT(opts->margin <= opts->max_size && "nt_atlas_begin: margin exceeds max_size");
     NT_BUILD_ASSERT(opts->extrude <= opts->max_size && "nt_atlas_begin: extrude exceeds max_size");
@@ -3034,8 +3035,7 @@ static void pipeline_validate(AtlasPipeline *p) {
                               .padding = p->opts->padding,
                               .margin = effective_margin,
                               .max_size = p->opts->max_size,
-                              .detail_a = effective_extrude,
-                              .detail_b = vpack_page_bound(p->opts)};
+                              .detail_a = effective_extrude};
         error_copy_name(e.atlas, p->state->name);
         error_copy_name(e.sprite, p->sprites[k].name);
         atlas_push_error(p->state, p->sprites[k].add_seq, &e);

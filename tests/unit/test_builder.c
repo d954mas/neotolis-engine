@@ -9436,50 +9436,28 @@ void test_atlas_page_rounds_to_block_and_compression_keeps_layout(void) {
     free(raw);
 }
 
-/* POT placement is bounded by the power of two at or below max_size, so a page never rounds past it. */
-void test_pot_atlas_pages_stay_within_max_size(void) {
-    /* Side by side these need 52 px; POT would make that 64 against max_size 52. */
-    static const uint32_t wide[][2] = {{26, 20}, {26, 20}};
+/* A POT page below one block rounds up to it; POT mode needs a power-of-two max_size. */
+void test_pot_atlas_page_rounds_to_block(void) {
+    static const uint32_t dot[][2] = {{1, 1}};
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.power_of_two = true;
     opts.padding = 0;
-    opts.max_size = 52;
-    (void)pack_solid_sprites(TMP_DIR "/block_pot52.ntpack", NULL, &opts, wide, 2);
+    opts.max_size = 64;
+    (void)pack_solid_sprites(TMP_DIR "/block_pot_dot.ntpack", NULL, &opts, dot, 1);
     const NtAtlasRegion *regions = NULL;
     uint32_t count = 0;
     uint32_t page[NT_ATLAS_MAX_PAGES][2] = {{0}};
-    uint8_t *buf = read_atlas_blob(TMP_DIR "/block_pot52.ntpack", &regions, &count);
-    TEST_ASSERT_NOT_NULL(buf);
-    atlas_blob_page_sizes(buf, page);
-    TEST_ASSERT_EQUAL_UINT32(2, count);
-    TEST_ASSERT_EQUAL_UINT32(1, regions[1].page_index);
-    TEST_ASSERT_EQUAL_UINT32(32, page[0][0]);
-    TEST_ASSERT_EQUAL_UINT32(32, page[1][0]);
-    free(buf);
-
-    /* A POT page below one block still rounds up to it. */
-    static const uint32_t dot[][2] = {{1, 1}};
-    (void)pack_solid_sprites(TMP_DIR "/block_pot_dot.ntpack", NULL, &opts, dot, 1);
-    buf = read_atlas_blob(TMP_DIR "/block_pot_dot.ntpack", &regions, &count);
+    uint8_t *buf = read_atlas_blob(TMP_DIR "/block_pot_dot.ntpack", &regions, &count);
     TEST_ASSERT_NOT_NULL(buf);
     atlas_blob_page_sizes(buf, page);
     TEST_ASSERT_TRUE(page[0][0] == 4 && page[0][1] == 4);
     free(buf);
 
-    /* A sprite between the bound and max_size cannot fit, and the error names both. */
-    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/block_unfit.ntpack");
-    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "unfit", &opts);
-    uint8_t px[40 * 40 * 4];
-    memset(px, 255, sizeof(px));
-    nt_atlas_add_raw(atlas, px, 40, 40, &(nt_atlas_sprite_opts_t){.name = "s", .origin_x = 0.5F, .origin_y = 0.5F});
-    (void)nt_atlas_commit(atlas);
-    uint32_t n = 0;
-    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
-    TEST_ASSERT_EQUAL_UINT32(1, n);
-    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_UNFITTABLE, errs[0].kind);
-    TEST_ASSERT_EQUAL_UINT32(52, errs[0].max_size);
-    TEST_ASSERT_EQUAL_UINT32(32, errs[0].detail_b);
-
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/block_pot_bad.ntpack");
+    opts.max_size = 52;
+    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_atlas_begin(ctx, "pot", &opts), "max_size must be a power of two");
+    ctx = nt_builder_start_pack(TMP_DIR "/block_unaligned.ntpack");
+    opts.power_of_two = false;
     opts.max_size = 30;
     EXPECT_BUILD_ASSERT_MATCH(ctx, nt_atlas_begin(ctx, "unaligned", &opts), "max_size must be a multiple of 4");
 }
@@ -10569,7 +10547,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_atlas_cache_corrupt_file_falls_back);
     RUN_TEST(test_atlas_max_pages_exhaustion_graceful);
     RUN_TEST(test_atlas_page_rounds_to_block_and_compression_keeps_layout);
-    RUN_TEST(test_pot_atlas_pages_stay_within_max_size);
+    RUN_TEST(test_pot_atlas_page_rounds_to_block);
     RUN_TEST(test_atlas_page_cap_boundary);
 
     /* Slice9 builder pipeline */

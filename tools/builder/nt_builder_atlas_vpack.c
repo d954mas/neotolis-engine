@@ -152,8 +152,6 @@ static inline uint32_t vpack_next_pot(uint32_t v) {
 }
 #endif
 
-uint32_t vpack_page_bound(const nt_atlas_opts_t *opts) { return opts->power_of_two ? vpack_next_pot(opts->max_size + 1) / 2 : opts->max_size; }
-
 /* --- Public helpers --- */
 
 void pack_stats_reset(PackStats *stats) { memset(stats, 0, sizeof(*stats)); }
@@ -1809,7 +1807,7 @@ bool vpack_sprite_fits_empty_page(const Point2D *hull, uint32_t hull_count, cons
     int32_t margin = (int32_t)opts->margin;
     int32_t extrude = (int32_t)opts->extrude;
     int32_t min_edge = margin > extrude ? margin : extrude;
-    int32_t max_size = (int32_t)vpack_page_bound(opts);
+    int32_t max_size = (int32_t)opts->max_size;
     int32_t min_cand_x = (min_edge - a0 < min_edge) ? min_edge : (min_edge - a0);
     int32_t min_cand_y = (min_edge - a1 < min_edge) ? min_edge : (min_edge - a1);
     int32_t max_cand_x = max_size - margin - a2 - 1;
@@ -1870,7 +1868,7 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
     uint32_t extrude = opts->extrude;
     uint32_t padding = opts->padding;
     uint32_t margin = opts->margin;
-    uint32_t max_size = vpack_page_bound(opts);
+    uint32_t max_size = opts->max_size;
     NT_LOG_INFO("  vector_pack: thread_count=%u, sprites=%u", thread_count, sprite_count);
 
     pack_stats_reset(stats);

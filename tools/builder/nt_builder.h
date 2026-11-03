@@ -91,7 +91,7 @@ typedef struct {
     char sprite[NT_BUILD_ERR_NAME_MAX];
     uint32_t w, h;
     uint32_t padding, margin, max_size;
-    uint32_t detail_a, detail_b; /* per-kind extras; UNFITTABLE: effective extrude, placement bound */
+    uint32_t detail_a, detail_b; /* per-kind extras */
 } nt_build_error_t;
 
 /* Explicit stream layout -- game declares which glTF attributes to extract */
@@ -356,7 +356,7 @@ typedef struct {
     uint8_t allowed_transforms;   /* D4 transform mask (NT_ATLAS_TRANSFORM_* bits); identity is the implicit floor.
                                    * 0xFF = all 8 orientations (default), 0x01 = identity only.
                                    * A 0x00 zero-init behaves as identity-only. Bit i permits stored value i. */
-    bool power_of_two;            /* round atlas dims to POT; placement uses the POT <= max_size (default: true) */
+    bool power_of_two;            /* round atlas dims to POT; max_size must then be a power of two (default: true) */
     bool debug_png;               /* write debug atlas page PNGs (default: false) */
     bool premultiplied;           /* true (default) = premultiply RGB by alpha during page encoding.
                                    * Required for correct bilinear filtering at sprite gaps.
