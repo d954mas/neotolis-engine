@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "fi_model.h"
+#include "fi_query.h"
 #include "fs/nt_fs.h"
 #include "graphics/nt_gfx.h"
 #include "graphics/nt_gfx_capture_text.h"
@@ -196,13 +197,13 @@ static void test_a_finished_link_is_not_the_snapshot(void) {
     ev[0].operation = NT_GFX_OP_CREATE;
     ev[0].object_kind = NT_GFX_OBJECT_PROGRAM;
     ev[0].object = 0x10001;
-    ev[0].data.resource.backend = 1;
+    ev[0].data.program.slot = 1;
     ev[1].kind = NT_GFX_EVENT_BACKEND;
     ev[1].operation = NT_GFX_OP_STATE;
     ev[1].detail = NT_GFX_GL_glGetProgramiv;
     ev[2] = ev[0];
     ev[2].object = 0x10002;
-    ev[2].data.resource.backend = 2;
+    ev[2].data.program.slot = 2;
     ev[3].kind = NT_GFX_EVENT_OP;
     ev[3].operation = NT_GFX_OP_VIEWPORT;
     ev[3].result = NT_GFX_RESULT_ACCEPTED;
@@ -385,11 +386,11 @@ static void test_uploads_and_resource_bytes(void) {
     ev[0].operation = NT_GFX_OP_CREATE;
     ev[0].object_kind = NT_GFX_OBJECT_TEXTURE;
     ev[0].object = 0x10001;
-    ev[0].data.resource.backend = 1;
-    ev[0].data.resource.width = 4;
-    ev[0].data.resource.height = 4;
-    ev[0].data.resource.format = NT_TEXTURE_FORMAT_RGBA8;
-    ev[0].data.resource.levels = 3;
+    ev[0].data.texture.slot = 1;
+    ev[0].data.texture.width = 4;
+    ev[0].data.texture.height = 4;
+    ev[0].data.texture.format = NT_TEXTURE_FORMAT_RGBA8;
+    ev[0].data.texture.levels = 3;
     ev[1].kind = NT_GFX_EVENT_OP;
     ev[1].operation = NT_GFX_OP_BUFFER_UPLOAD;
     ev[1].object_kind = NT_GFX_OBJECT_BUFFER;
@@ -496,7 +497,7 @@ static void test_texture_sets_compare_by_textures(void) {
         ev[k].object_kind = NT_GFX_OBJECT_PIPELINE;
         ev[k].object = 0x10001;
         ev[k].result = NT_GFX_RESULT_ACCEPTED;
-        ev[k].data.state.integers[0] = 1;
+        ev[k].data.texture_set.count = 1;
         ev[k + 1].kind = NT_GFX_EVENT_ARGUMENT;
         ev[k + 1].operation = NT_GFX_OP_TEXTURE_SET;
         ev[k + 1].object_kind = NT_GFX_OBJECT_TEXTURE;
@@ -545,8 +546,8 @@ static void test_gl_slots_compare_by_name(void) {
     ev[0].kind = NT_GFX_EVENT_INITIAL;
     ev[0].operation = NT_GFX_OP_STATE;
     ev[0].detail = NT_GFX_INITIAL_BACKEND;
-    ev[0].data.backend.args[0] = 6; /* program */
-    ev[0].data.backend.args[3] = 0x84C0;
+    ev[0].data.backend_state.program = 6;
+    ev[0].data.backend_state.active_texture = 0x84C0;
     for (uint32_t k = 1; k < 3; k++) {
         ev[k].kind = NT_GFX_EVENT_BACKEND;
         ev[k].operation = NT_GFX_OP_STATE;
@@ -569,7 +570,7 @@ static void test_gl_state_follows_issued_calls(void) {
     ev[0].kind = NT_GFX_EVENT_INITIAL;
     ev[0].operation = NT_GFX_OP_STATE;
     ev[0].detail = NT_GFX_INITIAL_BACKEND;
-    ev[0].data.backend.args[3] = 0x84C2; /* GL_TEXTURE2 */
+    ev[0].data.backend_state.active_texture = 0x84C2; /* GL_TEXTURE2 */
     for (uint32_t k = 1; k < 6; k++) {
         ev[k].kind = NT_GFX_EVENT_BACKEND;
         ev[k].operation = NT_GFX_OP_STATE;
@@ -707,21 +708,21 @@ static uint32_t handles_body(nt_gfx_event_t *ev, uint32_t base, bool call, uint3
     for (uint32_t k = 0; k < 2U; k++) {
         const uint32_t op = n;
         ev[n++] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_TEXTURE_SET, .object_kind = NT_GFX_OBJECT_PIPELINE, .object = pipeline, .result = NT_GFX_RESULT_ACCEPTED};
-        ev[op].data.state.integers[0] = 1;
+        ev[op].data.texture_set.count = 1;
         ev[n++] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_ARGUMENT, .operation = NT_GFX_OP_TEXTURE_SET, .object_kind = NT_GFX_OBJECT_TEXTURE, .object = texture[k == 0 ? 0 : second], .link = op + 1U};
-        ev[n - 1U].data.binding.secondary = base + 5U; /* sampler */
+        ev[n - 1U].data.texture_binding.sampler = base + 5U;
     }
     ev[n] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_PASS, .result = NT_GFX_RESULT_ACCEPTED};
     ev[n++].data.pass.target = base + 6U;
     ev[n] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_VERTEX_INPUT, .object_kind = NT_GFX_OBJECT_VERTEX_INPUT, .object = vi, .result = NT_GFX_RESULT_ACCEPTED};
-    ev[n].data.binding.secondary = base + 7U; /* instance buffer */
-    ev[n++].data.binding.slot = base + 8U;    /* instance layout */
+    ev[n].data.instance_binding.buffer = base + 7U;
+    ev[n++].data.instance_binding.layout = base + 8U;
     ev[n] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_DRAW, .object_kind = NT_GFX_OBJECT_PIPELINE, .object = pipeline, .result = NT_GFX_RESULT_ACCEPTED};
     ev[n].data.draw.count = 3;
     ev[n++].data.draw.vertex_input = vi;
     ev[n] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_PIPELINE, .object = base + 9U, .result = NT_GFX_RESULT_ACCEPTED};
-    ev[n].data.resource.backend = base;
-    ev[n++].data.resource.related[0] = base + 10U; /* program */
+    ev[n].data.pipeline.slot = base;
+    ev[n++].data.pipeline.program = base + 10U;
     return n;
 }
 
@@ -752,6 +753,81 @@ static void test_compare_pairs_handles_by_alias(void) {
     TEST_ASSERT_EQUAL_UINT8(FI_CHANGE_ITEMS, d.row[2].change);
     fi_diff_free(&d);
     fi_file_close(&other);
+}
+
+/* A frame that defines a render target and two textures under handles from base, then a note naming one of the
+ * textures (`page`) and, on native, a buffer read of the render target or the default framebuffer. */
+static const fi_frame_t *read_and_note_frame(fi_file_t *file, nt_gfx_event_t *ev, uint32_t base, uint32_t page, bool screen) {
+    uint32_t n = 0;
+    memset(ev, 0, 6 * sizeof(*ev));
+    ev[n++] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_DEFINITION, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_RENDER_TARGET, .object = base};
+    for (uint32_t k = 0; k < 2U; k++) { /* labeled: an unlabeled object is named by its first use, so it pairs by role */
+        ev[n] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_DEFINITION, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_TEXTURE, .object = base + 1U + k};
+        ev[n++].data.texture.label = 6U + (2U * k);
+    }
+    ev[n].note.kind = NT_GFX_EVENT_NOTE;
+    ev[n++].note.label = 1;
+    ev[n].field.kind = NT_GFX_EVENT_NOTE_FIELD;
+    ev[n].field.type = NT_GFX_NOTE_HANDLE;
+    ev[n].field.key = 1;
+    ev[n].field.value.handle.kind = NT_GFX_OBJECT_TEXTURE;
+    ev[n++].field.value.handle.id = base + 1U + page;
+#if !defined(NT_PLATFORM_WEB)
+    ev[n] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_BUFFER_READ, .object_kind = NT_GFX_OBJECT_BUFFER, .object = base + 3U, .result = NT_GFX_RESULT_ACCEPTED};
+    ev[n].data.rect.width = 4;
+    ev[n].data.rect.height = 4;
+    ev[n++].data.rect.source = screen ? 0U : base;
+#endif
+    nt_gfx_capture_view_t view = {.events = ev, .count = n, .strings = "\0page\0a\0b", .string_bytes = 10};
+    const size_t len = nt_gfx_capture_format(&view, NULL, 0);
+    char *text = (char *)malloc(len + 1);
+    TEST_ASSERT_NOT_NULL(text);
+    nt_gfx_capture_format(&view, text, len + 1);
+    return load(file, text, len);
+}
+
+/* A note's texture handle and a buffer read's render target compare by alias: two runs under other handles are
+ * the same, another texture or the default framebuffer is a change. */
+static void test_compare_names_note_handles_and_read_sources(void) {
+    nt_gfx_event_t ev[2][6];
+    const fi_frame_t *a = read_and_note_frame(&s_file, ev[0], 0x10001U, 0, false);
+    char row[256];
+    fi_row_text(a, 4, row, sizeof(row));
+    TEST_ASSERT_EQUAL_STRING("NOTE_FIELD page=tex/a", row);
+    fi_file_t other = {0};
+    const struct {
+        uint32_t page;
+        bool screen;
+        const char *letters;
+    } k_cases[] = {
+        {0, false, "=="},
+        {1, false, "~="},
+#if !defined(NT_PLATFORM_WEB)
+        {0, true, "=~"},
+#endif
+    };
+    for (uint32_t k = 0; k < sizeof(k_cases) / sizeof(k_cases[0]); k++) {
+        const fi_frame_t *b = read_and_note_frame(&other, ev[1], 0x20005U, k_cases[k].page, k_cases[k].screen);
+        fi_diff_t d;
+        fi_diff(a, b, &d);
+        char letters[16];
+        diff_letters(&d, b, b->group_key[d.group[0].b], letters);
+#if defined(NT_PLATFORM_WEB)
+        letters[1] = '=';
+        letters[2] = '\0';
+#endif
+        TEST_ASSERT_EQUAL_STRING(k_cases[k].letters, letters);
+        fi_diff_free(&d);
+        fi_file_close(&other);
+    }
+#if !defined(NT_PLATFORM_WEB)
+    fi_row_text(a, 5, row, sizeof(row));
+    TEST_ASSERT_EQUAL_STRING("BUFFER_READ buf#1 width=4 height=4 source=rt#1", row);
+    const fi_frame_t *b = read_and_note_frame(&other, ev[1], 0x20005U, 0, true);
+    fi_row_text(b, 5, row, sizeof(row));
+    TEST_ASSERT_EQUAL_STRING("BUFFER_READ buf#1 width=4 height=4 source=default framebuffer", row);
+    fi_file_close(&other);
+#endif
 }
 
 static uint16_t s_offset; /* layout_body's attribute offset */
@@ -896,8 +972,8 @@ static void test_compare_pairs_one_label_by_number(void) {
 /* A request may name handles the frame never defines (a hand-made or cut capture): each still gets an alias. */
 static void test_handles_without_definitions_get_aliases(void) {
     nt_gfx_event_t ev = {.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_VERTEX_INPUT, .object_kind = NT_GFX_OBJECT_VERTEX_INPUT, .object = 7, .result = NT_GFX_RESULT_ACCEPTED};
-    ev.data.binding.secondary = 8;
-    ev.data.binding.slot = 9;
+    ev.data.instance_binding.buffer = 8;
+    ev.data.instance_binding.layout = 9;
     const fi_frame_t *fr = load_events(&s_file, &ev, 1, NULL);
     TEST_ASSERT_EQUAL_UINT32(1, fi_alias(fr, NT_GFX_OBJECT_VERTEX_INPUT, 7).ordinal);
     TEST_ASSERT_EQUAL_UINT32(1, fi_alias(fr, NT_GFX_OBJECT_BUFFER, 8).ordinal);
@@ -905,7 +981,7 @@ static void test_handles_without_definitions_get_aliases(void) {
     fi_file_close(&s_file);
 
     nt_gfx_event_t texture = {.kind = NT_GFX_EVENT_DEFINITION, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_TEXTURE, .object = 7};
-    texture.data.resource.related[0] = 3; /* its default sampler */
+    texture.data.texture.sampler = 3;
     fr = load_events(&s_file, &texture, 1, NULL);
     TEST_ASSERT_EQUAL_UINT32(1, fi_alias(fr, NT_GFX_OBJECT_SAMPLER, 3).ordinal);
 }
@@ -1009,7 +1085,7 @@ static void test_damage_stays_inside_its_document(void) {
     memcpy(text, one, len);
     memcpy(text + len, one, len);
     free(one);
-    text[10] = '9'; /* "ntcapture 3" becomes an unknown version */
+    text[10] = '9'; /* "ntcapture 4" becomes an unknown version */
     fi_file_load(&s_file, "test", text, len * 2);
     TEST_ASSERT_EQUAL_UINT32(2, s_file.frame_count);
     TEST_ASSERT_NULL(s_file.frames[0].view.events);
@@ -1061,6 +1137,7 @@ int main(void) {
     RUN_TEST(test_an_overflowed_frame_opens);
     RUN_TEST(test_compare_aligns_requests_and_names_changes);
     RUN_TEST(test_compare_pairs_handles_by_alias);
+    RUN_TEST(test_compare_names_note_handles_and_read_sources);
     RUN_TEST(test_compare_checks_what_a_create_defines);
     RUN_TEST(test_compare_ignores_an_unused_live_object);
     RUN_TEST(test_compare_pairs_objects_by_label);

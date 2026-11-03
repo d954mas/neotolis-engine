@@ -2221,7 +2221,7 @@ void test_sprite_renderer_merged_emits_keep_their_notes(void) {
     const uint32_t page = nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 0));
     for (uint32_t i = 0; i < 2; i++) {
         TEST_ASSERT_EQUAL_STRING(nt_material_get_info(mat)->label, nt_test_note_str(notes[i], "material"));
-        TEST_ASSERT_EQUAL_UINT32(page, nt_test_note_u32(notes[i], "page"));
+        TEST_ASSERT_EQUAL_UINT32(page, nt_test_note_handle(notes[i], "page", NT_GFX_OBJECT_TEXTURE));
         TEST_ASSERT_EQUAL_STRING("", nt_test_note_str(notes[i], "drop"));
     }
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, nt_test_next_draw_result(notes[0]));
@@ -2258,7 +2258,7 @@ void test_sprite_renderer_unready_page_notes_its_skip(void) {
     nt_sprite_renderer_emit_region(s_atlas_res, 0, NT_MATH_MAT4_IDENTITY, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
 
     const uint32_t note = nt_test_note(0, "sprite");
-    TEST_ASSERT_EQUAL_UINT32(0, nt_test_note_u32(note, "page"));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_test_note_handle(note, "page", NT_GFX_OBJECT_TEXTURE));
     TEST_ASSERT_EQUAL_STRING("page not ready", nt_test_note_str(note, "drop"));
     TEST_ASSERT_EQUAL_UINT32(nt_test_capture_open().count, nt_test_note(note + 1U, "sprite"));
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_NONE, nt_test_next_draw_result(note)); /* the last note: scans to the end */

@@ -378,7 +378,7 @@ if(NOT EMSCRIPTEN)
 
     # --- Graphics module tests ---
     add_executable(test_gfx_observe unit/test_gfx_observe.c unit/test_helpers/nt_assert_trap.c)
-    target_link_libraries(test_gfx_observe PRIVATE nt_gfx_fake nt_basisu_transcoder_stub nt_log unity nt_meshwire_stub)
+    target_link_libraries(test_gfx_observe PRIVATE nt_gfx_fake nt_gfx_capture_text nt_basisu_transcoder_stub nt_log unity nt_meshwire_stub)
     nt_setup_test_target(test_gfx_observe)
 
     if(NT_GFX_CAPTURE_ENABLED)

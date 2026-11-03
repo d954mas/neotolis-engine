@@ -363,6 +363,11 @@ static void copy_note_field(nt_gfx_event_t *dst, const nt_gfx_note_field_t *src)
     case NT_GFX_NOTE_STR:
         dst->field.value.str = capture_note_text(src->value.str);
         break;
+    case NT_GFX_NOTE_HANDLE:
+        NT_ASSERT(src->value.handle.kind > NT_GFX_OBJECT_NONE && src->value.handle.kind <= NT_GFX_OBJECT_INSTANCE_LAYOUT && "capture note: handle of no gfx object kind");
+        dst->field.value.handle.id = src->value.handle.id;
+        dst->field.value.handle.kind = src->value.handle.kind;
+        break;
     default:
         NT_ASSERT(0 && "capture note: unknown field type");
     }
@@ -427,63 +432,78 @@ static const char *object_label(nt_gfx_object_kind_t kind, uint32_t id) {
     return kind <= NT_GFX_OBJECT_RENDER_TARGET && s_gfx.labels[kind] != NULL ? s_gfx.labels[kind][nt_pool_slot_index(id)] : NULL;
 }
 
+static void capture_sampler_desc(nt_gfx_event_t *event, const nt_sampler_desc_t *desc) {
+    event->data.sampler.min_filter = (uint32_t)desc->min_filter;
+    event->data.sampler.mag_filter = (uint32_t)desc->mag_filter;
+    event->data.sampler.wrap_u = (uint32_t)desc->wrap_u;
+    event->data.sampler.wrap_v = (uint32_t)desc->wrap_v;
+    event->data.sampler.compare = (uint32_t)desc->compare_func;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one record schema per owned resource kind
 static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) {
     uint32_t slot = nt_pool_slot_index(id);
     const nt_gfx_capture_string_t label = capture_string(object_label(kind, id));
     NT_GFX_RECORD(
-        NT_GFX_EVENT_DEFINITION, NT_GFX_OP_CREATE, event->object_kind = (uint8_t)kind; event->object = id; event->data.resource.label = label; switch (kind) {
+        NT_GFX_EVENT_DEFINITION, NT_GFX_OP_CREATE, event->object_kind = (uint8_t)kind; event->object = id; switch (kind) {
             case NT_GFX_OBJECT_SHADER:
-                event->data.resource.backend = s_gfx.shader_backends[slot];
+                event->data.shader.gl_name = s_gfx.shader_backends[slot];
+                event->data.shader.label = label;
                 event->result = NT_GFX_RESULT_UNKNOWN;
                 break;
             case NT_GFX_OBJECT_PROGRAM:
-                event->data.resource.backend = program_has_gpu(slot) ? slot : 0;
+                event->data.program.slot = program_has_gpu(slot) ? slot : 0;
+                event->data.program.label = label;
                 event->result = NT_GFX_RESULT_UNKNOWN;
                 break;
             case NT_GFX_OBJECT_PIPELINE:
-                event->data.resource.backend = slot;
-                event->data.resource.related[0] = pipeline_program(slot);
+                event->data.pipeline.slot = slot;
+                event->data.pipeline.program = pipeline_program(slot);
+                event->data.pipeline.label = label;
                 break;
             case NT_GFX_OBJECT_VERTEX_INPUT:
-                event->data.resource.backend = slot;
-                event->data.resource.related[0] = s_gfx.vertex_input_metas[slot].vbo_id;
-                event->data.resource.related[1] = s_gfx.vertex_input_metas[slot].ibo_id;
-                event->data.resource.type = s_gfx.vertex_input_metas[slot].index_type;
+                event->data.vertex_input.slot = slot;
+                event->data.vertex_input.vertex_buffer = s_gfx.vertex_input_metas[slot].vbo_id;
+                event->data.vertex_input.index_buffer = s_gfx.vertex_input_metas[slot].ibo_id;
+                event->data.vertex_input.index_type = s_gfx.vertex_input_metas[slot].index_type;
+                event->data.vertex_input.label = label;
                 event->result = NT_GFX_RESULT_UNKNOWN;
                 break;
             case NT_GFX_OBJECT_BUFFER:
-                event->data.resource.backend = s_gfx.buffer_metas[slot].live ? slot : 0;
-                event->data.resource.size = s_gfx.buffer_metas[slot].size;
-                event->data.resource.type = s_gfx.buffer_metas[slot].type;
-                event->data.resource.usage = s_gfx.buffer_metas[slot].usage;
-                event->data.resource.format = s_gfx.buffer_metas[slot].index_type;
+                event->data.buffer.slot = s_gfx.buffer_metas[slot].live ? slot : 0;
+                event->data.buffer.size = s_gfx.buffer_metas[slot].size;
+                event->data.buffer.type = s_gfx.buffer_metas[slot].type;
+                event->data.buffer.usage = s_gfx.buffer_metas[slot].usage;
+                event->data.buffer.index_type = s_gfx.buffer_metas[slot].index_type;
+                event->data.buffer.label = label;
                 break;
             case NT_GFX_OBJECT_TEXTURE:
-                event->data.resource.backend = s_gfx.texture_metas[slot].live ? slot : 0;
-                event->data.resource.width = s_gfx.texture_metas[slot].width;
-                event->data.resource.height = s_gfx.texture_metas[slot].height;
-                event->data.resource.format = s_gfx.texture_metas[slot].format;
-                event->data.resource.levels = s_gfx.texture_metas[slot].mip_count;
-                event->data.resource.related[0] = s_gfx.texture_metas[slot].default_sampler.id;
+                event->data.texture.slot = s_gfx.texture_metas[slot].live ? slot : 0;
+                event->data.texture.width = s_gfx.texture_metas[slot].width;
+                event->data.texture.height = s_gfx.texture_metas[slot].height;
+                event->data.texture.format = s_gfx.texture_metas[slot].format;
+                event->data.texture.levels = s_gfx.texture_metas[slot].mip_count;
+                event->data.texture.sampler = s_gfx.texture_metas[slot].default_sampler.id;
+                event->data.texture.label = label;
                 break;
             case NT_GFX_OBJECT_SAMPLER:
-                event->data.resource.backend = s_gfx.sampler_cache[id - 1].backend;
-                event->data.resource.flags = s_gfx.sampler_cache[id - 1].key;
+                event->data.sampler.gl_name = s_gfx.sampler_cache[id - 1].backend;
+                capture_sampler_desc(event, &s_gfx.sampler_cache[id - 1].desc);
                 break;
             case NT_GFX_OBJECT_RENDER_TARGET:
-                event->data.resource.backend = slot;
-                event->data.resource.related[0] = s_gfx.render_target_metas[slot].attachments[NT_GFX_RT_COLOR].id;
-                event->data.resource.related[1] = s_gfx.render_target_metas[slot].attachments[NT_GFX_RT_DEPTH].id;
-                event->data.resource.width = render_target_size_meta(slot)->width;
-                event->data.resource.height = render_target_size_meta(slot)->height;
-                event->data.resource.format = render_target_attachment_format(slot, NT_GFX_RT_COLOR);
-                event->data.resource.usage = render_target_attachment_format(slot, NT_GFX_RT_DEPTH);
+                event->data.render_target.slot = slot;
+                event->data.render_target.color = s_gfx.render_target_metas[slot].attachments[NT_GFX_RT_COLOR].id;
+                event->data.render_target.depth = s_gfx.render_target_metas[slot].attachments[NT_GFX_RT_DEPTH].id;
+                event->data.render_target.width = render_target_size_meta(slot)->width;
+                event->data.render_target.height = render_target_size_meta(slot)->height;
+                event->data.render_target.color_format = render_target_attachment_format(slot, NT_GFX_RT_COLOR);
+                event->data.render_target.depth_format = render_target_attachment_format(slot, NT_GFX_RT_DEPTH);
+                event->data.render_target.label = label;
                 break;
             case NT_GFX_OBJECT_INSTANCE_LAYOUT:
-                event->data.resource.backend = slot;
-                event->data.resource.size = s_gfx.instance_layouts[slot].stride;
-                event->data.resource.flags = s_gfx.instance_layouts[slot].mask;
+                event->data.instance_layout.slot = slot;
+                event->data.instance_layout.stride = s_gfx.instance_layouts[slot].stride;
+                event->data.instance_layout.locations = s_gfx.instance_layouts[slot].mask;
                 break;
             case NT_GFX_OBJECT_NONE:
                 break;
@@ -512,13 +532,14 @@ static void capture_instance_layout(uint32_t id) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record macros expand at owning sites
 static void capture_initial_state(void) {
     /* Pass-scoped mirrors are discarded by the first begin_pass, so only frame-crossing state is recorded. */
-    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_STATE, event->detail = NT_GFX_INITIAL_FRONTEND; event->data.state.integers[0] = g_nt_gfx.context_lost;);
-    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SCISSOR_ENABLE, event->data.state.integers[0] = s_gfx.scissor_enabled);
+    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_STATE, event->detail = NT_GFX_INITIAL_FRONTEND; event->data.frontend.context_lost = g_nt_gfx.context_lost;);
+    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SCISSOR_ENABLE, event->data.toggle.on = s_gfx.scissor_enabled);
     /* The carried-over scissor box explains an equal set_scissor that ends CACHE in the capture. */
     if (s_gfx.scissor_rect[2] < 0) {
         NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SCISSOR, event->result = NT_GFX_RESULT_UNKNOWN);
     } else {
-        NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SCISSOR, for (uint32_t i = 0; i < 4; i++) { event->data.state.integers[i] = (uint32_t)s_gfx.scissor_rect[i]; });
+        NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SCISSOR, event->data.rect.x = s_gfx.scissor_rect[0]; event->data.rect.y = s_gfx.scissor_rect[1]; event->data.rect.width = s_gfx.scissor_rect[2];
+                      event->data.rect.height = s_gfx.scissor_rect[3]);
     }
     const nt_pool_t *pools[] = {&s_gfx.shader_pool, &s_gfx.program_pool, &s_gfx.pipeline_pool, &s_gfx.vertex_input_pool, &s_gfx.buffer_pool, &s_gfx.texture_pool, &s_gfx.render_target_pool};
     const nt_gfx_object_kind_t kinds[] = {NT_GFX_OBJECT_SHADER, NT_GFX_OBJECT_PROGRAM, NT_GFX_OBJECT_PIPELINE,     NT_GFX_OBJECT_VERTEX_INPUT,
@@ -1004,8 +1025,8 @@ static nt_gfx_result_t read_pixels(nt_render_target_t src, int x, int y, int w, 
 bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint8_t *out, uint32_t out_cap) {
     /* Only an ended frame has executed every draw; the window holds it until the swap. */
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_ENDED && "read_pixels: read between nt_gfx_end_frame and nt_gfx_begin_frame");
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_READ_PIXELS, src.id != 0 ? NT_GFX_OBJECT_RENDER_TARGET : NT_GFX_OBJECT_NONE, src.id, event->data.state.integers[0] = (uint32_t)x;
-                         event->data.state.integers[1] = (uint32_t)y; event->data.state.integers[2] = (uint32_t)w; event->data.state.integers[3] = (uint32_t)h);
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_READ_PIXELS, src.id != 0 ? NT_GFX_OBJECT_RENDER_TARGET : NT_GFX_OBJECT_NONE, src.id, event->data.rect.x = x; event->data.rect.y = y; event->data.rect.width = w;
+                         event->data.rect.height = h);
     const nt_gfx_result_t result = read_pixels(src, x, y, w, h, out, out_cap);
     NT_GFX_END(result);
     return result == NT_GFX_RESULT_ACCEPTED;
@@ -1032,8 +1053,8 @@ static nt_gfx_result_t read_pixels_to_buffer(nt_render_target_t src, int x, int 
 
 void nt_gfx_read_pixels_to_buffer(nt_render_target_t src, int x, int y, int w, int h, nt_buffer_t buf) {
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_ENDED && "read_pixels_to_buffer: read between nt_gfx_end_frame and nt_gfx_begin_frame");
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_BUFFER_READ, NT_GFX_OBJECT_BUFFER, buf.id, event->data.state.integers[0] = (uint32_t)x; event->data.state.integers[1] = (uint32_t)y;
-                         event->data.state.integers[2] = (uint32_t)w; event->data.state.integers[3] = (uint32_t)h; event->data.state.integers[4] = src.id);
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_BUFFER_READ, NT_GFX_OBJECT_BUFFER, buf.id, event->data.rect.x = x; event->data.rect.y = y; event->data.rect.width = w; event->data.rect.height = h;
+                         event->data.rect.source = src.id);
     NT_GFX_END(read_pixels_to_buffer(src, x, y, w, h, buf));
 }
 
@@ -1171,7 +1192,7 @@ static nt_gfx_result_t make_shader(const nt_shader_desc_t *desc, nt_shader_t *ou
 }
 
 nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc) {
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_CREATE, NT_GFX_OBJECT_SHADER, 0, if (desc != NULL) { event->data.resource.type = (uint32_t)desc->type; });
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_CREATE, NT_GFX_OBJECT_SHADER, 0, if (desc != NULL) { event->data.shader.stage = (uint32_t)desc->type; });
     nt_shader_t result = {0};
     NT_GFX_END_OBJECT(make_shader(desc, &result), result.id);
     return result;
@@ -1212,7 +1233,7 @@ static nt_gfx_result_t make_program(nt_shader_t vs, nt_shader_t fs, const char *
 }
 
 nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs, const char *label) {
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_CREATE, NT_GFX_OBJECT_PROGRAM, 0, event->data.resource.related[0] = vs.id; event->data.resource.related[1] = fs.id);
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_CREATE, NT_GFX_OBJECT_PROGRAM, 0, event->data.program.vertex_shader = vs.id; event->data.program.fragment_shader = fs.id);
     nt_program_t result = {0};
     NT_GFX_END_OBJECT(make_program(vs, fs, label, &result), result.id);
     return result;
@@ -1316,7 +1337,7 @@ static nt_gfx_result_t make_pipeline(const nt_pipeline_desc_t *desc, nt_pipeline
 }
 
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_CREATE, NT_GFX_OBJECT_PIPELINE, 0, if (desc != NULL) { event->data.resource.related[0] = desc->program.id; });
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_CREATE, NT_GFX_OBJECT_PIPELINE, 0, if (desc != NULL) { event->data.pipeline.program = desc->program.id; });
     nt_pipeline_t result = {0};
     NT_GFX_END_OBJECT(make_pipeline(desc, &result), result.id);
     return result;
@@ -1389,8 +1410,8 @@ static nt_gfx_result_t make_vertex_input(const nt_vertex_input_desc_t *desc, nt_
 nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc) {
     NT_GFX_BEGIN_REQUEST(
         NT_GFX_OP_CREATE, NT_GFX_OBJECT_VERTEX_INPUT, 0, if (desc != NULL) {
-            event->data.resource.related[0] = desc->vertex_buffer.id;
-            event->data.resource.related[1] = desc->index_buffer.id;
+            event->data.vertex_input.vertex_buffer = desc->vertex_buffer.id;
+            event->data.vertex_input.index_buffer = desc->index_buffer.id;
         });
     nt_vertex_input_t result = {0};
     NT_GFX_END_OBJECT(make_vertex_input(desc, &result), result.id);
@@ -1487,11 +1508,11 @@ static nt_gfx_result_t make_buffer(const nt_buffer_desc_t *desc, nt_buffer_t *ou
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
     NT_GFX_BEGIN_REQUEST(
         NT_GFX_OP_CREATE, NT_GFX_OBJECT_BUFFER, 0, if (desc != NULL) {
-            event->data.resource.size = desc->size;
-            event->data.resource.type = (uint32_t)desc->type;
-            event->data.resource.usage = (uint32_t)desc->usage;
-            event->data.resource.format = desc->index_type;
-            event->data.resource.flags = desc->data != NULL;
+            event->data.buffer.size = desc->size;
+            event->data.buffer.type = (uint32_t)desc->type;
+            event->data.buffer.usage = (uint32_t)desc->usage;
+            event->data.buffer.index_type = desc->index_type;
+            event->data.buffer.data = desc->data != NULL;
         });
     nt_buffer_t result = {0};
     NT_GFX_END_OBJECT(make_buffer(desc, &result), result.id);
@@ -1630,11 +1651,11 @@ static nt_gfx_result_t make_texture(const nt_texture_desc_t *desc, nt_texture_t 
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     NT_GFX_BEGIN_REQUEST(
         NT_GFX_OP_CREATE, NT_GFX_OBJECT_TEXTURE, 0, if (desc != NULL) {
-            event->data.resource.width = desc->width;
-            event->data.resource.height = desc->height;
-            event->data.resource.format = (uint32_t)desc->format;
-            event->data.resource.levels = desc->level_count;
-            event->data.resource.flags = desc->gen_mipmaps;
+            event->data.texture.width = desc->width;
+            event->data.texture.height = desc->height;
+            event->data.texture.format = (uint32_t)desc->format;
+            event->data.texture.levels = desc->level_count;
+            event->data.texture.gen_mipmaps = desc->gen_mipmaps;
         });
     nt_texture_t result = {0};
     NT_GFX_END_OBJECT(make_texture(desc, &result), result.id);
@@ -1693,8 +1714,8 @@ static nt_gfx_result_t make_render_target(const nt_render_target_desc_t *desc, n
 nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc) {
     NT_GFX_BEGIN_REQUEST(
         NT_GFX_OP_CREATE, NT_GFX_OBJECT_RENDER_TARGET, 0, if (desc != NULL) {
-            event->data.resource.related[0] = desc->color.id;
-            event->data.resource.related[1] = desc->depth.id;
+            event->data.render_target.color = desc->color.id;
+            event->data.render_target.depth = desc->depth.id;
         });
     nt_render_target_t result = {0};
     NT_GFX_END_OBJECT(make_render_target(desc, &result), result.id);
@@ -2039,8 +2060,8 @@ static nt_gfx_result_t bind_vertex_input_instanced(nt_vertex_input_t vi, nt_inst
 }
 
 void nt_gfx_bind_vertex_input_instanced(nt_vertex_input_t vi, nt_instance_layout_t layout, nt_buffer_t instance_buffer, uint32_t byte_offset) {
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_VERTEX_INPUT, NT_GFX_OBJECT_VERTEX_INPUT, vi.id, event->data.binding.secondary = instance_buffer.id; event->data.binding.slot = layout.id;
-                         event->data.binding.offset = byte_offset);
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_VERTEX_INPUT, NT_GFX_OBJECT_VERTEX_INPUT, vi.id, event->data.instance_binding.buffer = instance_buffer.id; event->data.instance_binding.layout = layout.id;
+                         event->data.instance_binding.offset = byte_offset);
     NT_GFX_END(bind_vertex_input_instanced(vi, layout, instance_buffer, byte_offset));
 }
 
@@ -2136,9 +2157,9 @@ static nt_gfx_result_t apply_texture_bindings(const nt_gfx_texture_binding_t *bi
     for (uint8_t i = 0; i < count; i++) {
         nt_gfx_sampler_info_t info = {0};
         NT_GFX_RECORD(NT_GFX_EVENT_ARGUMENT, NT_GFX_OP_TEXTURE_SET, event->object_kind = NT_GFX_OBJECT_TEXTURE; event->object = bindings[i].texture.id;
-                      event->data.binding.name = bindings[i].name.value; event->data.binding.secondary = bindings[i].sampler.id;);
+                      event->data.texture_binding.name = bindings[i].name.value; event->data.texture_binding.sampler = bindings[i].sampler.id;);
         if (!nt_gfx_backend_program_sampler_info(program_backend, bindings[i].name.value, &info)) {
-            NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_TEXTURE_SET, event->result = NT_GFX_RESULT_INACTIVE; event->data.binding.name = bindings[i].name.value;);
+            NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_TEXTURE_SET, event->result = NT_GFX_RESULT_INACTIVE; event->data.texture_binding.name = bindings[i].name.value;);
             continue;
         }
         const uint8_t bit = (uint8_t)(1U << info.unit);
@@ -2180,7 +2201,7 @@ static nt_gfx_result_t apply_texture_bindings(const nt_gfx_texture_binding_t *bi
 }
 
 void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uint8_t count) {
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_TEXTURE_SET, NT_GFX_OBJECT_PIPELINE, s_gfx.bound_pipeline, event->data.state.integers[0] = count);
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_TEXTURE_SET, NT_GFX_OBJECT_PIPELINE, s_gfx.bound_pipeline, event->data.texture_set.count = count);
     NT_GFX_END(apply_texture_bindings(bindings, count));
 }
 
@@ -2350,7 +2371,7 @@ nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {
     NT_GFX_BEGIN_REQUEST(
         NT_GFX_OP_CREATE, NT_GFX_OBJECT_SAMPLER, 0, if (desc != NULL) {
             const nt_sampler_desc_t normalized = sampler_normalize(desc);
-            event->data.resource.flags = sampler_pack_key(&normalized);
+            capture_sampler_desc(event, &normalized);
         });
     nt_sampler_t result = {0};
     NT_GFX_END_OBJECT(make_sampler(desc, &result), result.id);
@@ -2382,8 +2403,7 @@ static nt_gfx_result_t set_scissor(int x, int y, int w, int h) {
 }
 
 void nt_gfx_set_scissor(int x, int y, int w, int h) {
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_SCISSOR, NT_GFX_OBJECT_NONE, 0, event->data.state.integers[0] = (uint32_t)x; event->data.state.integers[1] = (uint32_t)y;
-                         event->data.state.integers[2] = (uint32_t)w; event->data.state.integers[3] = (uint32_t)h);
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_SCISSOR, NT_GFX_OBJECT_NONE, 0, event->data.rect.x = x; event->data.rect.y = y; event->data.rect.width = w; event->data.rect.height = h);
     NT_GFX_END(set_scissor(x, y, w, h));
 }
 
@@ -2402,7 +2422,7 @@ static nt_gfx_result_t set_scissor_enabled(bool enabled) {
 }
 
 void nt_gfx_set_scissor_enabled(bool enabled) {
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_SCISSOR_ENABLE, NT_GFX_OBJECT_NONE, 0, event->data.state.integers[0] = enabled);
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_SCISSOR_ENABLE, NT_GFX_OBJECT_NONE, 0, event->data.toggle.on = enabled);
     NT_GFX_END(set_scissor_enabled(enabled));
 }
 
@@ -2425,8 +2445,7 @@ static nt_gfx_result_t set_viewport(int x, int y, int w, int h) {
 }
 
 void nt_gfx_set_viewport(int x, int y, int w, int h) {
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_VIEWPORT, NT_GFX_OBJECT_NONE, 0, event->data.state.integers[0] = (uint32_t)x; event->data.state.integers[1] = (uint32_t)y;
-                         event->data.state.integers[2] = (uint32_t)w; event->data.state.integers[3] = (uint32_t)h);
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_VIEWPORT, NT_GFX_OBJECT_NONE, 0, event->data.rect.x = x; event->data.rect.y = y; event->data.rect.width = w; event->data.rect.height = h);
     NT_GFX_END(set_viewport(x, y, w, h));
 }
 
@@ -2572,7 +2591,7 @@ void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size) {
         s_gfx.staged_blocks[slot] = (nt_gfx_block_binding_t){offset, size};
     }
     const bool equal = staged && ((s_gfx.bound_blocks >> slot) & 1U) != 0;
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, storage->buffer.id, event->data.binding.slot = slot; event->data.binding.offset = offset; event->data.binding.size = size);
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, storage->buffer.id, event->data.ubo.slot = slot; event->data.ubo.offset = offset; event->data.ubo.size = size);
     if (lost) {
         NT_GFX_END(NT_GFX_RESULT_CONTEXT_LOST);
         return;
@@ -2601,7 +2620,7 @@ static nt_gfx_result_t unbind_uniform_block(uint32_t slot) {
 }
 
 void nt_gfx_unbind_uniform_block(uint32_t slot) {
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, 0, event->data.binding.slot = slot);
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, 0, event->data.ubo.slot = slot);
     NT_GFX_END(unbind_uniform_block(slot));
 }
 
@@ -2630,7 +2649,7 @@ static nt_gfx_result_t buffer_update(nt_buffer_t buf, uint32_t offset, const voi
 }
 
 void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size) {
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_BUFFER_UPLOAD, NT_GFX_OBJECT_BUFFER, buf.id, event->data.resource.size = size; event->data.resource.related[0] = offset; event->data.resource.flags = data != NULL);
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_BUFFER_UPLOAD, NT_GFX_OBJECT_BUFFER, buf.id, event->data.upload.size = size; event->data.upload.offset = offset; event->data.upload.data = data != NULL);
     NT_GFX_END(buffer_update(buf, offset, data, size));
 }
 
@@ -2649,7 +2668,7 @@ static nt_gfx_result_t begin_segment(const char *name) {
 
 void nt_gfx_begin_segment(const char *name) {
     NT_ASSERT(name != NULL);
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_SEGMENT_BEGIN, NT_GFX_OBJECT_NONE, 0, event->data.binding.name = nt_hash32_str(name).value);
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_SEGMENT_BEGIN, NT_GFX_OBJECT_NONE, 0, event->data.segment.name = nt_hash32_str(name).value);
     NT_GFX_END(begin_segment(name));
 }
 
@@ -2675,7 +2694,7 @@ static nt_gfx_result_t poll_segment_time_ns(const char *name, uint64_t *out_ns) 
 
 bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
     NT_ASSERT(name != NULL && out_ns != NULL);
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_SEGMENT_POLL, NT_GFX_OBJECT_NONE, 0, event->data.binding.name = nt_hash32_str(name).value);
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_SEGMENT_POLL, NT_GFX_OBJECT_NONE, 0, event->data.segment.name = nt_hash32_str(name).value);
     const nt_gfx_result_t result = poll_segment_time_ns(name, out_ns);
     NT_GFX_END(result);
     return result == NT_GFX_RESULT_ACCEPTED;
@@ -2684,7 +2703,7 @@ bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
 void nt_gfx_set_gpu_timing_enabled(bool enabled) {
     /* The backend closes an active segment now, so a toggle may not split the recorded segments of a frame. */
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_ENDED && "set_gpu_timing_enabled: toggle between nt_gfx_end_frame and nt_gfx_begin_frame");
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_GPU_TIMING, NT_GFX_OBJECT_NONE, 0, event->data.state.integers[0] = enabled);
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_GPU_TIMING, NT_GFX_OBJECT_NONE, 0, event->data.toggle.on = enabled);
     nt_gfx_backend_set_gpu_timing_enabled(enabled);
     NT_GFX_END(NT_GFX_RESULT_ACCEPTED);
 }
@@ -2719,8 +2738,8 @@ static nt_gfx_result_t update_texture(nt_texture_t tex, uint16_t x, uint16_t y, 
 }
 
 void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *data) {
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_TEXTURE_UPLOAD, NT_GFX_OBJECT_TEXTURE, tex.id, event->data.state.integers[0] = x; event->data.state.integers[1] = y; event->data.state.integers[2] = w;
-                         event->data.state.integers[3] = h);
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_TEXTURE_UPLOAD, NT_GFX_OBJECT_TEXTURE, tex.id, event->data.rect.x = (int32_t)x; event->data.rect.y = (int32_t)y; event->data.rect.width = (int32_t)w;
+                         event->data.rect.height = (int32_t)h);
     NT_GFX_END(update_texture(tex, x, y, w, h, data));
 }
 

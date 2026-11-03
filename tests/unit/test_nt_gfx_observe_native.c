@@ -228,9 +228,9 @@ static void test_capture_publishes_attachment_mappings_and_skip_reasons(void) {
     for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *event = &capture.events[i];
         if (event->kind == NT_GFX_EVENT_DEFINITION && event->object_kind == NT_GFX_OBJECT_TEXTURE && event->object == color.id) {
-            TEST_ASSERT_EQUAL_UINT32(13, event->data.resource.width);
-            TEST_ASSERT_EQUAL_UINT32(7, event->data.resource.height);
-            texture_slot = event->data.resource.backend;
+            TEST_ASSERT_EQUAL_UINT32(13, event->data.texture.width);
+            TEST_ASSERT_EQUAL_UINT32(7, event->data.texture.height);
+            texture_slot = event->data.texture.slot;
         }
         if (event->kind == NT_GFX_EVENT_OP && event->operation == NT_GFX_OP_SCISSOR_ENABLE) {
             TEST_ASSERT_EQUAL(NT_GFX_RESULT_CACHE, event->result);
@@ -241,8 +241,8 @@ static void test_capture_publishes_attachment_mappings_and_skip_reasons(void) {
     bool mapping = false;
     for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *event = &capture.events[i];
-        if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_STATE && event->detail == NT_GFX_OBJECT_TEXTURE && event->data.backend.args[0] == texture_slot) {
-            TEST_ASSERT_NOT_EQUAL(0, event->data.backend.args[1]);
+        if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_STATE && event->detail == NT_GFX_OBJECT_TEXTURE && event->data.backend_resource.slot == texture_slot) {
+            TEST_ASSERT_NOT_EQUAL(0, event->data.backend_resource.gl_name);
             mapping = true;
         }
     }
@@ -279,13 +279,13 @@ static void test_new_program_defines_sampler_names(void) {
         TEST_ASSERT_TRUE(event->kind != NT_GFX_EVENT_OP || event->result != NT_GFX_RESULT_NONE);
         TEST_ASSERT_TRUE(event->kind > NT_GFX_EVENT_ARGUMENT || event->link <= i);
         if (event->kind == NT_GFX_EVENT_INITIAL && event->operation == NT_GFX_OP_SAMPLER) {
-            if (event->data.backend.args[1] == nt_hash32_str("a").value) {
+            if (event->data.program_sampler.name == nt_hash32_str("a").value) {
                 names |= 1;
             }
-            if (event->data.backend.args[1] == nt_hash32_str("b").value) {
+            if (event->data.program_sampler.name == nt_hash32_str("b").value) {
                 names |= 2;
             }
-            units |= 1U << event->data.backend.args[3];
+            units |= 1U << event->data.program_sampler.unit;
         }
         /* Pipeline state is defined once, by the backend, in its slots and enums. */
         if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_PIPELINE) {
@@ -946,8 +946,8 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
             for (uint32_t i = 0; i < capture.count; i++) {
                 const nt_gfx_event_t *e = &capture.events[i];
                 if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_VIEWPORT) {
-                    TEST_ASSERT_EQUAL_UINT32(g_nt_window.fb_width, e->data.state.integers[2]);
-                    TEST_ASSERT_EQUAL_UINT32(g_nt_window.fb_height, e->data.state.integers[3]);
+                    TEST_ASSERT_EQUAL_INT32(g_nt_window.fb_width, e->data.rect.width);
+                    TEST_ASSERT_EQUAL_INT32(g_nt_window.fb_height, e->data.rect.height);
                     viewport_known = true;
                 }
             }
@@ -1035,20 +1035,21 @@ static void test_a_captured_vertex_input_names_its_instance_tuple(void) {
     for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *event = &capture.events[i];
         if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_CREATE && event->object_kind == NT_GFX_OBJECT_INSTANCE_LAYOUT && event->object == layout.id) {
-            TEST_ASSERT_EQUAL_UINT64(16, event->data.resource.size);
+            TEST_ASSERT_EQUAL_UINT32(16, event->data.instance_layout.stride);
             layout_defined = true;
         }
-        if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_STATE && event->detail == NT_GFX_OBJECT_VERTEX_INPUT && event->data.backend.args[0] == nt_pool_slot_index(vi.id)) {
-            TEST_ASSERT_NOT_EQUAL_UINT32(0, event->data.backend.args[1]);
-            TEST_ASSERT_NOT_EQUAL_UINT32(0, event->data.backend.args[2]);
-            TEST_ASSERT_EQUAL_UINT32(0, event->data.backend.args[3]);
-            TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(layout.id), event->data.backend.args[4]);
+        if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_STATE && event->detail == NT_GFX_OBJECT_VERTEX_INPUT &&
+            event->data.backend_resource.slot == nt_pool_slot_index(vi.id)) {
+            TEST_ASSERT_NOT_EQUAL_UINT32(0, event->data.backend_resource.gl_name);
+            TEST_ASSERT_NOT_EQUAL_UINT32(0, event->data.backend_resource.instance_buffer);
+            TEST_ASSERT_EQUAL_UINT32(0, event->data.backend_resource.instance_offset);
+            TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(layout.id), event->data.backend_resource.instance_layout);
             vao_defined = true;
         }
         if (event->kind == NT_GFX_EVENT_OP && event->operation == NT_GFX_OP_VERTEX_INPUT && event->object == vi.id) {
-            TEST_ASSERT_EQUAL_UINT32(layout.id, event->data.binding.slot);
-            TEST_ASSERT_EQUAL_UINT32(instances.id, event->data.binding.secondary);
-            TEST_ASSERT_EQUAL_UINT32(offset + 16U, event->data.binding.offset);
+            TEST_ASSERT_EQUAL_UINT32(layout.id, event->data.instance_binding.layout);
+            TEST_ASSERT_EQUAL_UINT32(instances.id, event->data.instance_binding.buffer);
+            TEST_ASSERT_EQUAL_UINT32(offset + 16U, event->data.instance_binding.offset);
             requested = true;
         }
     }

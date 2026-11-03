@@ -131,6 +131,7 @@ typedef struct {
     /* Short names for handles (vi/mesh#3): per kind and label, numbered by first use in the frame's work. */
     uint32_t *alias_object, *alias_ordinal, *alias_slot, alias_mask;
     uint8_t *alias_kind;
+    uint8_t *alias_alone;              /* per alias: the only object of its kind and label in the frame */
     const char **alias_label;          /* the frame's strings; "" when unlabeled */
     uint32_t *def;                     /* per operation on an object: the object's latest definition before it, FI_NONE */
     fi_buffer_upload_t *buffer_upload; /* the biggest first */
@@ -221,6 +222,7 @@ fi_tally_t fi_tally(const fi_frame_t *frame, uint32_t id);
 typedef struct {
     const char *label; /* "" when unlabeled */
     uint32_t ordinal;  /* 0 when the frame never names the handle */
+    bool alone;        /* the only object of its kind and label: a label alone names it */
 } fi_alias_t;
 
 fi_alias_t fi_alias(const fi_frame_t *frame, uint32_t kind, uint32_t object);
@@ -239,6 +241,8 @@ bool fi_same_setting(const fi_frame_t *frame, uint32_t a, uint32_t b);
 /* Whether two records that set one GL slot leave the same value: an inherited cache entry and a call compare
  * by the bound name. */
 bool fi_gl_same(const fi_frame_t *frame, const fi_gl_slot_t *slot, uint32_t a, uint32_t b);
+/* The GL name (or texture unit) a slot holds after record r; false when r sets the slot without a name. */
+bool fi_gl_value(const fi_frame_t *frame, const fi_gl_slot_t *slot, uint32_t r, uint32_t *value);
 bool fi_is_draw(const nt_gfx_event_t *e);           /* a draw request of any kind */
 bool fi_is_mergeable_draw(const nt_gfx_event_t *e); /* a plain or indexed draw: instanced draws never merge */
 bool fi_is_draw_call(uint32_t call);                /* glDrawArrays, glDrawElements and their instanced forms */
