@@ -90,7 +90,7 @@ static void produce_fixture(const fixture_t *fx) {
         opts.uastc.rdo_lambda = 1.0F;
     }
     basis_test_chain_t chain = basis_test_chain(pixels, fx->w, fx->h, fx->levels);
-    nt_basisu_encode_result_t enc = nt_basisu_encode(1, chain.levels, chain.count, fx->w, fx->h, fx->alpha ? NT_TEXTURE_FORMAT_RGBA8 : NT_TEXTURE_FORMAT_RGB8, &opts, true);
+    nt_basisu_encode_result_t enc = nt_basisu_encode(1, chain.data, chain.count, fx->w, fx->h, fx->alpha ? NT_TEXTURE_FORMAT_RGBA8 : NT_TEXTURE_FORMAT_RGB8, &opts, true);
     basis_test_chain_free(&chain);
     free(pixels);
     TEST_ASSERT_NOT_NULL_MESSAGE(enc.data, fx->name);

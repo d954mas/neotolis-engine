@@ -70,7 +70,7 @@ static void build_fixture(nt_basisu_codec_t codec, nt_texture_pixel_format_t for
     fill_source();
     nt_basisu_encode_opts_t opts = codec == NT_BASISU_CODEC_ETC1S ? nt_tex_compress_etc1s_high() : nt_tex_compress_uastc_default();
     basis_test_chain_t chain = basis_test_chain(s_src, SRC_W, SRC_H, SRC_LEVELS);
-    nt_basisu_encode_result_t enc = nt_basisu_encode(1, chain.levels, chain.count, SRC_W, SRC_H, format, &opts, true);
+    nt_basisu_encode_result_t enc = nt_basisu_encode(1, chain.data, chain.count, SRC_W, SRC_H, format, &opts, true);
     basis_test_chain_free(&chain);
     TEST_ASSERT_NOT_NULL(enc.data);
     TEST_ASSERT_LESS_OR_EQUAL_UINT32(sizeof(s_blob) - sizeof(NtTextureAssetHeader), enc.size);

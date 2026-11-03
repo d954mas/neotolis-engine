@@ -3,10 +3,6 @@
 #include "nt_basisu_encoder.h"
 #include "nt_texture_format.h"
 #include "stb_image.h"
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wlanguage-extension-token"
-#include "stb_image_resize2.h"
-#pragma clang diagnostic pop
 /* clang-format on */
 
 #include <math.h>
@@ -261,8 +257,10 @@ static size_t chain_bytes(uint32_t width, uint32_t height, uint32_t level_count,
 
 /* --- Level pipeline: level 0, then each level filtered from the previous core --- */
 
-/* MIRROR filters as CLAMP: stb's REFLECT is one texel off GL's mirrored repeat. */
-static stbir_edge wrap_edge(nt_texture_default_wrap_t wrap) { return wrap == NT_TEXTURE_DEFAULT_WRAP_REPEAT ? STBIR_EDGE_WRAP : STBIR_EDGE_CLAMP; }
+// #region resampler
+/* A separable downscaler: per axis a table of taps, edges by the sampler wrap,
+ * then one output row at a time (input rows weighted into one row, then across).
+ * Rows are converted to linear float RGBA as they are read. */
 
 static double bessel0(double x) {
     const double half = 0.5 * x;
@@ -280,135 +278,207 @@ static double bessel0(double x) {
 }
 
 /* basisu's kaiser_filter: a windowed sinc over support 3 with 40 dB attenuation. */
-static float kaiser_kernel(float x, float scale, void *user_data) {
-    (void)scale;
-    (void)user_data;
-    const double t = fabs((double)x);
+static double kaiser(double x) {
+    const double t = fabs(x);
     if (t >= 3.0) {
-        return 0.0F;
+        return 0.0;
     }
     const double att = 40.0;
     const double alpha = exp(log(0.58417 * (att - 20.96)) * 0.4) + (0.07886 * (att - 20.96));
     const double ratio = t / 3.0;
     const double window = bessel0(alpha * sqrt(1.0 - (ratio * ratio))) / bessel0(alpha);
     const double pi_t = 3.14159265358979323846 * t;
-    const double sinc = t < 1e-6 ? 1.0 : sin(pi_t) / pi_t;
-    return (float)(sinc * window);
+    return (t < 1e-6 ? 1.0 : sin(pi_t) / pi_t) * window;
 }
 
-static float kaiser_support(float scale, void *user_data) {
-    (void)scale;
-    (void)user_data;
-    return 3.0F;
-}
-
-/* One stb resize with the texture's filter and per-axis edges. */
-static void resize_level(const void *in, uint32_t in_w, uint32_t in_h, stbir_datatype in_type, stbir_pixel_layout in_layout, void *out, uint32_t out_w, uint32_t out_h, stbir_datatype out_type,
-                         stbir_pixel_layout out_layout, nt_tex_filter_t filter, const nt_tex_opts_t *opts) {
-    STBIR_RESIZE resize;
-    stbir_resize_init(&resize, in, (int)in_w, (int)in_h, 0, out, (int)out_w, (int)out_h, 0, in_layout, in_type);
-    stbir_set_datatypes(&resize, in_type, out_type);
-    (void)stbir_set_pixel_layouts(&resize, in_layout, out_layout);
-    /* stb's wrapped Kaiser breaks at a 2-px output along a wrapped axis (a buffer
-       overlap across, a crash down); levels that small gain nothing from it. */
-    const bool kaiser_breaks = (opts->wrap_u == NT_TEXTURE_DEFAULT_WRAP_REPEAT && out_w <= 2) || (opts->wrap_v == NT_TEXTURE_DEFAULT_WRAP_REPEAT && out_h <= 2);
-    if (filter == NT_TEX_FILTER_KAISER && kaiser_breaks) {
-        filter = NT_TEX_FILTER_BOX;
+/* Mitchell-Netravali with B = C = 1/3, support 2. */
+static double mitchell(double x) {
+    const double t = fabs(x);
+    if (t < 1.0) {
+        return (16.0 + (t * t * ((21.0 * t) - 36.0))) / 18.0;
     }
-    /* A downscaling box never reaches past an edge, and stb's wrapped box returns
-       garbage at some ratios (70 -> 2), so it always runs clamped. */
-    const bool box = filter == NT_TEX_FILTER_BOX;
-    (void)stbir_set_edgemodes(&resize, box ? STBIR_EDGE_CLAMP : wrap_edge(opts->wrap_u), box ? STBIR_EDGE_CLAMP : wrap_edge(opts->wrap_v));
-    if (filter == NT_TEX_FILTER_KAISER) {
-        (void)stbir_set_filter_callbacks(&resize, kaiser_kernel, kaiser_support, kaiser_kernel, kaiser_support);
-    } else {
-        const stbir_filter stb_filter = filter == NT_TEX_FILTER_MITCHELL ? STBIR_FILTER_MITCHELL : STBIR_FILTER_BOX;
-        (void)stbir_set_filters(&resize, stb_filter, stb_filter);
+    if (t < 2.0) {
+        return (32.0 + (t * (-60.0 + (t * (36.0 - (7.0 * t)))))) / 18.0;
     }
-    const int resized = stbir_resize_extended(&resize);
-    NT_BUILD_ASSERT(resized && "texture resize: stbir_resize_extended failed");
+    return 0.0;
 }
 
-static float half_to_float(uint16_t half) {
-    const uint32_t exponent = (half >> 10U) & 0x1FU;
-    const uint32_t mantissa = half & 0x3FFU;
-    NT_BUILD_ASSERT(exponent != 0x1FU && "texture levels: non-finite half-float core");
-    const float magnitude = exponent == 0 ? ldexpf((float)mantissa, -24) : ldexpf((float)(mantissa | 0x400U), (int)exponent - 25);
-    return (half & 0x8000U) ? -magnitude : magnitude;
+/* Texel of tap `i` on an axis of `n` texels, as the GL sampler wraps it. */
+static uint32_t wrap_tap(int64_t i, uint32_t n, nt_texture_default_wrap_t wrap) {
+    const int64_t len = n;
+    if (wrap == NT_TEXTURE_DEFAULT_WRAP_REPEAT) {
+        return (uint32_t)(((i % len) + len) % len);
+    }
+    if (wrap == NT_TEXTURE_DEFAULT_WRAP_MIRRORED_REPEAT) {
+        const int64_t m = ((i % (2 * len)) + (2 * len)) % (2 * len);
+        return (uint32_t)(m < len ? m : (2 * len) - 1 - m);
+    }
+    if (i < 0) {
+        return 0;
+    }
+    return (uint32_t)(i >= len ? len - 1 : i);
 }
+
+/* Taps of one axis: output texel o reads index[o * taps + k] with weight[...]. */
+typedef struct {
+    uint32_t taps;
+    uint32_t *index;
+    float *weight;
+} axis_taps_t;
+
+/* Weight of input texel `i` for an output texel centred at `center` (input units).
+ * BOX weighs the texel by its overlap with the output footprint; the other filters
+ * sample their kernel, stretched by the ratio, at the texel centre. */
+static double tap_weight(nt_tex_filter_t filter, double i, double center, double scale) {
+    if (filter == NT_TEX_FILTER_BOX) {
+        return fmax(0.0, fmin(i + 1.0, center + (0.5 * scale)) - fmax(i, center - (0.5 * scale)));
+    }
+    const double x = (i + 0.5 - center) / scale;
+    return filter == NT_TEX_FILTER_MITCHELL ? mitchell(x) : kaiser(x);
+}
+
+static axis_taps_t axis_taps(uint32_t in, uint32_t out, nt_tex_filter_t filter, nt_texture_default_wrap_t wrap) {
+    NT_BUILD_ASSERT(out >= 1 && out <= in && "texture resize: only downscales");
+    static const double supports[3] = {[NT_TEX_FILTER_BOX] = 0.5, [NT_TEX_FILTER_MITCHELL] = 2.0, [NT_TEX_FILTER_KAISER] = 3.0};
+    const double scale = (double)in / out;
+    const double support = supports[filter];
+    axis_taps_t a = {.taps = (uint32_t)ceil(2.0 * support * scale) + 2};
+    a.index = (uint32_t *)malloc((size_t)out * a.taps * sizeof(uint32_t));
+    a.weight = (float *)malloc((size_t)out * a.taps * sizeof(float));
+    NT_BUILD_ASSERT(a.index && a.weight && "texture resize: malloc failed");
+    for (uint32_t o = 0; o < out; o++) {
+        const double center = (o + 0.5) * scale;
+        const int64_t first = (int64_t)floor(center - (support * scale));
+        double sum = 0.0;
+        for (uint32_t k = 0; k < a.taps; k++) {
+            const double w = tap_weight(filter, (double)(first + k), center, scale);
+            a.weight[((size_t)o * a.taps) + k] = (float)w;
+            sum += w;
+            a.index[((size_t)o * a.taps) + k] = wrap_tap(first + k, in, wrap);
+        }
+        for (uint32_t k = 0; k < a.taps; k++) {
+            a.weight[((size_t)o * a.taps) + k] = (float)((double)a.weight[((size_t)o * a.taps) + k] / sum);
+        }
+    }
+    return a;
+}
+
+/* A resample input: RGBA bytes (read through `lin`, optionally premultiplied) or
+ * float RGBA, or float RGB for HDR (alpha 1). */
+typedef struct {
+    const void *pixels;
+    uint32_t w;
+    uint32_t h;
+    const float *lin; /* byte -> linear value; NULL for float input */
+    uint32_t channels;
+    bool premultiply;
+} resample_src_t;
+
+static void load_row(const resample_src_t *s, uint32_t y, float *row) {
+    if (s->lin == NULL) {
+        const float *f = (const float *)s->pixels + ((size_t)y * s->w * s->channels);
+        for (uint32_t x = 0; x < s->w; x++) {
+            for (uint32_t c = 0; c < 4; c++) {
+                row[(x * 4U) + c] = c < s->channels ? f[(x * s->channels) + c] : 1.0F;
+            }
+        }
+        return;
+    }
+    const uint8_t *p = (const uint8_t *)s->pixels + ((size_t)y * s->w * 4U);
+    for (uint32_t x = 0; x < s->w; x++) {
+        const float a = (float)p[(x * 4U) + 3U] / 255.0F;
+        for (uint32_t c = 0; c < 3; c++) {
+            row[(x * 4U) + c] = s->lin[p[(x * 4U) + c]] * (s->premultiply ? a : 1.0F);
+        }
+        row[(x * 4U) + 3U] = a;
+    }
+}
+
+/* Downscales `s` into ow x oh float RGBA. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one separable filter, rows then columns
+static void resample(const resample_src_t *s, float *out, uint32_t ow, uint32_t oh, nt_tex_filter_t filter, const nt_tex_opts_t *opts) {
+    axis_taps_t ax = axis_taps(s->w, ow, filter, opts->wrap_u);
+    axis_taps_t ay = axis_taps(s->h, oh, filter, opts->wrap_v);
+    float *row = (float *)malloc((size_t)s->w * 4U * sizeof(float));
+    float *acc = (float *)malloc((size_t)s->w * 4U * sizeof(float));
+    NT_BUILD_ASSERT(row && acc && "texture resize: malloc failed");
+    for (uint32_t oy = 0; oy < oh; oy++) {
+        memset(acc, 0, (size_t)s->w * 4U * sizeof(float));
+        for (uint32_t k = 0; k < ay.taps; k++) {
+            const float wy = ay.weight[((size_t)oy * ay.taps) + k];
+            if (wy == 0.0F) {
+                continue;
+            }
+            load_row(s, ay.index[((size_t)oy * ay.taps) + k], row);
+            for (size_t i = 0; i < (size_t)s->w * 4U; i++) {
+                acc[i] += wy * row[i];
+            }
+        }
+        for (uint32_t ox = 0; ox < ow; ox++) {
+            float *dst = &out[(((size_t)oy * ow) + ox) * 4U];
+            dst[0] = dst[1] = dst[2] = dst[3] = 0.0F;
+            for (uint32_t k = 0; k < ax.taps; k++) {
+                const float wx = ax.weight[((size_t)ox * ax.taps) + k];
+                const float *src = &acc[(size_t)ax.index[((size_t)ox * ax.taps) + k] * 4U];
+                for (uint32_t c = 0; c < 4; c++) {
+                    dst[c] += wx * src[c];
+                }
+            }
+        }
+    }
+    free(row);
+    free(acc);
+    free(ax.index);
+    free(ax.weight);
+    free(ay.index);
+    free(ay.weight);
+}
+// #endregion
 
 static float srgb_to_linear(float v) { return v <= 0.04045F ? v / 12.92F : powf((v + 0.055F) / 1.055F, 2.4F); }
 
 static float linear_to_srgb(float v) { return v <= 0.0031308F ? v * 12.92F : (1.055F * powf(v, 1.0F / 2.4F)) - 0.055F; }
 
-static uint8_t unit_to_byte(float v) {
+/* A linear value as a stored byte; ringing is clamped here. */
+static uint8_t encode_unit(float v, bool srgb) {
     const float clamped = fminf(fmaxf(v, 0.0F), 1.0F);
-    return (uint8_t)floorf((clamped * 255.0F) + 0.5F);
+    return (uint8_t)floorf(((srgb ? linear_to_srgb(clamped) : clamped) * 255.0F) + 0.5F);
 }
 
-/* A stored straight-alpha level from a half-float linear core. A premultiplied
- * core is divided by its alpha only here, so a near-zero alpha never feeds the
- * next level; ringing is clamped only here too. */
-static void quantize_core(const uint16_t *core, size_t texels, bool srgb, bool premultiplied, uint8_t *out) {
+/* A stored straight-alpha level from a float linear core. A premultiplied core is
+ * divided by its alpha only here, so a near-zero alpha never feeds the next level. */
+static void quantize_core(const float *core, size_t texels, bool srgb, bool premultiplied, uint8_t *out) {
     for (size_t i = 0; i < texels; i++) {
-        const float a = half_to_float(core[(i * 4U) + 3U]);
+        const float a = core[(i * 4U) + 3U];
         for (uint32_t c = 0; c < 3; c++) {
-            float v = half_to_float(core[(i * 4U) + c]);
+            float v = core[(i * 4U) + c];
             if (premultiplied) {
                 v = a > 0.0F ? v / a : 0.0F;
             }
-            out[(i * 4U) + c] = unit_to_byte(srgb ? linear_to_srgb(fmaxf(v, 0.0F)) : v);
+            out[(i * 4U) + c] = encode_unit(v, srgb);
         }
-        out[(i * 4U) + 3U] = unit_to_byte(a);
+        out[(i * 4U) + 3U] = encode_unit(a, false);
     }
 }
 
-/* Round-to-nearest float to half, for values in [0, 1]. */
-static uint16_t float_to_half(float value) {
-    uint32_t bits = 0;
-    memcpy(&bits, &value, sizeof(bits));
-    const int32_t exponent = (int32_t)((bits >> 23U) & 0xFFU) - 127 + 15;
-    uint32_t mantissa = bits & 0x7FFFFFU;
-    NT_BUILD_ASSERT(value >= 0.0F && value <= 1.0F && "texture levels: half-float core value outside [0, 1]");
-    if (exponent <= 0) {
-        if (exponent < -10) {
-            return 0;
-        }
-        mantissa |= 0x800000U;
-        const uint32_t shift = (uint32_t)(14 - exponent);
-        return (uint16_t)((mantissa >> shift) + ((mantissa >> (shift - 1U)) & 1U));
-    }
-    return (uint16_t)((((uint32_t)exponent << 10U) | (mantissa >> 13U)) + ((mantissa >> 12U) & 1U));
-}
-
-/* Encoded normal (c * 2 - 1) to its unit vector, encoded again. An average
- * shorter than about two byte steps (opposite normals cancelling; a byte cannot
- * hold an exact 0) becomes +Z. */
-static void unit_normal(float v[3]) {
-    for (uint32_t c = 0; c < 3; c++) {
-        v[c] = (v[c] * 2.0F) - 1.0F;
-    }
-    const float length = sqrtf((v[0] * v[0]) + (v[1] * v[1]) + (v[2] * v[2]));
-    if (length < 0.02F) {
-        v[0] = 0.5F;
-        v[1] = 0.5F;
-        v[2] = 1.0F;
-        return;
-    }
-    for (uint32_t c = 0; c < 3; c++) {
-        v[c] = (v[c] / length * 0.5F) + 0.5F;
-    }
-}
-
-static void normalize_core(uint16_t *core, size_t texels) {
+/* Encoded normals (c * 2 - 1) to unit vectors, encoded again. An average shorter
+ * than about two byte steps (opposite normals cancelling; a byte cannot hold an
+ * exact 0) becomes +Z. */
+static void normalize_core(float *core, size_t texels) {
     for (size_t i = 0; i < texels; i++) {
-        float v[3];
+        float *v = &core[i * 4U];
+        float n[3];
         for (uint32_t c = 0; c < 3; c++) {
-            v[c] = half_to_float(core[(i * 4U) + c]);
+            n[c] = (v[c] * 2.0F) - 1.0F;
         }
-        unit_normal(v);
+        const float length = sqrtf((n[0] * n[0]) + (n[1] * n[1]) + (n[2] * n[2]));
+        if (length < 0.02F) {
+            v[0] = v[1] = 0.5F;
+            v[2] = 1.0F;
+            continue;
+        }
         for (uint32_t c = 0; c < 3; c++) {
-            core[(i * 4U) + c] = float_to_half(fminf(fmaxf(v[c], 0.0F), 1.0F));
+            v[c] = (n[c] / length * 0.5F) + 0.5F;
         }
     }
 }
@@ -418,23 +488,18 @@ static void rebuild_normal_z(uint8_t *rgba, size_t texels) {
     for (size_t i = 0; i < texels; i++) {
         const float x = ((float)rgba[i * 4U] / 127.5F) - 1.0F;
         const float y = ((float)rgba[(i * 4U) + 1U] / 127.5F) - 1.0F;
-        rgba[(i * 4U) + 2U] = unit_to_byte((sqrtf(fmaxf(0.0F, 1.0F - (x * x) - (y * y))) * 0.5F) + 0.5F);
+        rgba[(i * 4U) + 2U] = encode_unit((sqrtf(fmaxf(0.0F, 1.0F - (x * x) - (y * y))) * 0.5F) + 0.5F, false);
     }
 }
 
 // #region dilation
-/* Texels at or below this alpha are holes: alpha-weighted filters divide ringing
- * by a tiny A, so their RGB is garbage and gets replaced. */
-#define DILATE_HOLE_ALPHA 8U
-
 typedef struct {
-    float lin[256]; /* stored byte -> linear value */
+    float lin[256];      /* stored byte -> linear value */
+    uint32_t hole_alpha; /* texels at or below it are holes: their filtered RGB is ringing divided by a tiny A */
     bool srgb;
     bool wrap_x;
     bool wrap_y;
 } dilate_ctx_t;
-
-static uint8_t encode_linear(const dilate_ctx_t *dc, float v) { return unit_to_byte(dc->srgb ? linear_to_srgb(fmaxf(v, 0.0F)) : v); }
 
 /* Neighbour coordinate by the axis edge rule; -1 when CLAMP leaves the level. */
 static int32_t edge_coord(int32_t c, uint32_t n, bool wrap) {
@@ -454,7 +519,7 @@ static float ring_mean(const dilate_ctx_t *dc, const uint8_t *rgba, uint32_t w, 
         const int32_t nx = edge_coord((int32_t)x + (d % 3) - 1, w, dc->wrap_x);
         const int32_t ny = edge_coord((int32_t)y + (d / 3) - 1, h, dc->wrap_y);
         const uint8_t *n = nx < 0 || ny < 0 ? NULL : &rgba[(((size_t)ny * w) + (uint32_t)nx) * 4U];
-        if (!n || n[3] <= DILATE_HOLE_ALPHA) {
+        if (!n || n[3] <= dc->hole_alpha) {
             continue;
         }
         for (uint32_t c = 0; c < 3; c++) {
@@ -480,12 +545,12 @@ static void dilate_ring(const dilate_ctx_t *dc, uint8_t *rgba, uint32_t w, uint3
         for (uint32_t x = 0; x < w; x++) {
             uint8_t *px = &rgba[(((size_t)y * w) + x) * 4U];
             float rgb[3] = {0};
-            const float mean_a = px[3] <= DILATE_HOLE_ALPHA ? ring_mean(dc, rgba, w, h, x, y, rgb) : 0.0F;
+            const float mean_a = px[3] <= dc->hole_alpha ? ring_mean(dc, rgba, w, h, x, y, rgb) : 0.0F;
             if (mean_a == 0.0F) {
                 continue;
             }
             for (uint32_t c = 0; c < 3; c++) {
-                px[c] = encode_linear(dc, rgb[c]);
+                px[c] = encode_unit(rgb[c], dc->srgb);
             }
             ring_a[((size_t)y * w) + x] = (uint8_t)(mean_a + 0.5F);
         }
@@ -515,7 +580,7 @@ static float pyr_texel(const dilate_pyr_t *p, uint32_t k, size_t f, float rgb[3]
     for (uint32_t c = 0; c < 3; c++) {
         rgb[c] = p->dc->lin[px[c]];
     }
-    return (float)(px[3] > DILATE_HOLE_ALPHA ? px[3] : p->ring_a[f]) / 255.0F;
+    return (float)(px[3] > p->dc->hole_alpha ? px[3] : p->ring_a[f]) / 255.0F;
 }
 
 /* Level k: the alpha-weighted mean of its up to four children, weight capped at 1. */
@@ -601,13 +666,13 @@ static void fill_holes(const dilate_pyr_t *p) {
     for (uint32_t y = 0; y < p->dims[0][1]; y++) {
         for (uint32_t x = 0; x < w; x++) {
             uint8_t *px = &p->rgba[(((size_t)y * w) + x) * 4U];
-            if (px[3] > DILATE_HOLE_ALPHA || p->ring_a[((size_t)y * w) + x] != 0) {
+            if (px[3] > p->dc->hole_alpha || p->ring_a[((size_t)y * w) + x] != 0) {
                 continue;
             }
             float parent[3];
             tent_sample(p, 1, x, y, parent);
             for (uint32_t c = 0; c < 3; c++) {
-                px[c] = encode_linear(p->dc, parent[c]);
+                px[c] = encode_unit(parent[c], p->dc->srgb);
             }
         }
     }
@@ -615,7 +680,7 @@ static void fill_holes(const dilate_pyr_t *p) {
 
 /* Fills the RGB of every hole of one stored level: a ring pass, then push-pull
  * over alpha-weighted float sums (pull by ceil-halving, push by tent). The level
- * must have a visible texel. */
+ * has a visible texel and a hole, so it has two texels or more. */
 static void dilate_level(const dilate_ctx_t *dc, uint8_t *rgba, uint32_t w, uint32_t h) {
     uint8_t *ring_a = (uint8_t *)calloc((size_t)w * h, 1);
     NT_BUILD_ASSERT(ring_a && "texture dilation: malloc failed");
@@ -630,41 +695,43 @@ static void dilate_level(const dilate_ctx_t *dc, uint8_t *rgba, uint32_t w, uint
         total += (size_t)p.dims[p.count][0] * p.dims[p.count][1] * 4U;
         p.count++;
     }
-    if (p.count > 1) { /* a 1x1 level with a visible texel has no hole */
-        p.data = (float *)calloc(total, sizeof(float));
-        NT_BUILD_ASSERT(p.data && "texture dilation: malloc failed");
-        for (uint32_t k = 1; k < p.count; k++) {
-            pull_level(&p, k);
-        }
-        for (uint32_t k = p.count - 2; k >= 1; k--) {
-            push_level(&p, k);
-        }
-        fill_holes(&p);
-        free(p.data);
+    NT_BUILD_ASSERT(total > 0 && "texture dilation: one texel is never a hole beside a visible one");
+    p.data = (float *)calloc(total, sizeof(float));
+    NT_BUILD_ASSERT(p.data && "texture dilation: malloc failed");
+    for (uint32_t k = 1; k < p.count; k++) {
+        pull_level(&p, k);
     }
+    for (uint32_t k = p.count - 2; k >= 1; k--) {
+        push_level(&p, k);
+    }
+    fill_holes(&p);
+    free(p.data);
     free(ring_a);
 }
 
 /* Whether a stored level has a visible texel and whether it has a hole. */
-static void scan_level(const uint8_t *rgba, size_t texels, bool *visible, bool *hole) {
+static void scan_level(const uint8_t *rgba, size_t texels, uint32_t hole_alpha, bool *visible, bool *hole) {
     *visible = false;
     *hole = false;
     for (size_t i = 0; i < texels && !(*visible && *hole); i++) {
-        const bool texel_visible = rgba[(i * 4U) + 3U] > DILATE_HOLE_ALPHA;
+        const bool texel_visible = rgba[(i * 4U) + 3U] > hole_alpha;
         *visible = *visible || texel_visible;
         *hole = *hole || !texel_visible;
     }
 }
 
 /* A level with nothing visible takes the colour of a box filter of the previous
- * level (area weights, linear light for sRGB) and keeps its own alpha. */
-static void fill_empty_level(uint8_t *rgba, uint32_t w, uint32_t h, const uint8_t *prev, uint32_t pw, uint32_t ph, stbir_datatype byte_type, const nt_tex_opts_t *opts) {
+ * level (area weights, linear light) and keeps its own alpha. */
+static void fill_empty_level(const dilate_ctx_t *dc, uint8_t *rgba, uint32_t w, uint32_t h, const uint8_t *prev, uint32_t pw, uint32_t ph, const nt_tex_opts_t *opts) {
     const size_t texels = (size_t)w * h;
-    uint8_t *box = (uint8_t *)malloc(texels * 4U);
+    float *box = (float *)malloc(texels * 4U * sizeof(float));
     NT_BUILD_ASSERT(box && "texture dilation: malloc failed");
-    resize_level(prev, pw, ph, byte_type, STBIR_RGBA_NO_AW, box, w, h, byte_type, STBIR_RGBA_NO_AW, NT_TEX_FILTER_BOX, opts);
+    const resample_src_t src = {.pixels = prev, .w = pw, .h = ph, .lin = dc->lin, .channels = 4};
+    resample(&src, box, w, h, NT_TEX_FILTER_BOX, opts);
     for (size_t i = 0; i < texels; i++) {
-        memcpy(&rgba[i * 4U], &box[i * 4U], 3);
+        for (uint32_t c = 0; c < 3; c++) {
+            rgba[(i * 4U) + c] = encode_unit(box[(i * 4U) + c], dc->srgb);
+        }
     }
     free(box);
 }
@@ -672,20 +739,21 @@ static void fill_empty_level(uint8_t *rgba, uint32_t w, uint32_t h, const uint8_
 
 /* Stored RGBA8 levels of a w x h texture, back to back. Level 0 is the source
  * (opaque for a format without alpha), copied or resized with resize_filter.
- * Level n filters level n-1's core with mip_filter: level 0's bytes, then
- * half-float linear values, so quantization and sRGB rounding never accumulate.
- * Dilation and premultiply touch only the stored copies. */
+ * Level n filters level n-1's core with mip_filter: level 0's bytes, then float
+ * linear values, premultiplied when alpha weights, so rounding, sRGB encoding and
+ * division by alpha never accumulate. The stored copies are then dilated, scaled
+ * for coverage and premultiplied, in that order. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one pass per pipeline stage
 static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t src_h, uint32_t w, uint32_t h, uint32_t level_count, const nt_tex_opts_t *opts) {
     const nt_tex_process_t *process = &opts->process;
     const bool alpha = nt_texture_pixel_format_has_alpha(opts->format);
     const bool srgb = nt_texture_format_is_srgb(opts->format);
-    const stbir_datatype byte_type = srgb ? STBIR_TYPE_UINT8_SRGB : STBIR_TYPE_UINT8;
-    /* Alpha-weighted layouts filter straight bytes into a premultiplied core. */
     const bool weighted = alpha && process->alpha != NT_TEX_ALPHA_DATA;
     const bool normal = process->rgb == NT_TEX_RGB_NORMAL;
-    const stbir_pixel_layout layout = weighted ? STBIR_RGBA : STBIR_RGBA_NO_AW;
-    const stbir_pixel_layout core_layout = weighted ? STBIR_RGBA_PM : STBIR_RGBA_NO_AW;
+    float lin[256];
+    for (uint32_t i = 0; i < 256; i++) {
+        lin[i] = srgb ? srgb_to_linear((float)i / 255.0F) : (float)i / 255.0F;
+    }
     uint8_t *chain = (uint8_t *)malloc(chain_bytes(w, h, level_count, 4));
     NT_BUILD_ASSERT(chain && "texture levels: malloc failed");
 
@@ -706,61 +774,56 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
     }
     if (src_w == w && src_h == h) {
         memcpy(chain, source, src_texels * 4U);
-    } else if (normal) {
-        /* Normalized in float before the bytes, like every mip. */
-        uint16_t *resized = (uint16_t *)malloc((size_t)w * h * 4U * sizeof(uint16_t));
+    } else {
+        float *resized = (float *)malloc((size_t)w * h * 4U * sizeof(float));
         NT_BUILD_ASSERT(resized && "texture levels: malloc failed");
-        resize_level(source, src_w, src_h, byte_type, layout, resized, w, h, STBIR_TYPE_HALF_FLOAT, core_layout, process->resize_filter, opts);
-        normalize_core(resized, (size_t)w * h);
+        const resample_src_t src = {.pixels = source, .w = src_w, .h = src_h, .lin = lin, .channels = 4, .premultiply = weighted};
+        resample(&src, resized, w, h, process->resize_filter, opts);
+        if (normal) {
+            normalize_core(resized, (size_t)w * h);
+        }
         quantize_core(resized, (size_t)w * h, srgb, weighted, chain);
         free(resized);
-    } else {
-        resize_level(source, src_w, src_h, byte_type, layout, chain, w, h, byte_type, layout, process->resize_filter, opts);
     }
     free(opaque);
     // #endregion
 
     // #region chain
     if (level_count > 1) {
-        const size_t core_halves = (size_t)nt_texture_level_extent(w, 1) * nt_texture_level_extent(h, 1) * 4U;
-        uint16_t *core = (uint16_t *)malloc(core_halves * sizeof(uint16_t));
-        uint16_t *next = (uint16_t *)malloc(core_halves * sizeof(uint16_t));
-        NT_BUILD_ASSERT(core && next && "texture levels: malloc failed");
+        /* Odd levels go to the first buffer, even ones to the second. */
+        float *cores[2] = {(float *)malloc((size_t)nt_texture_level_extent(w, 1) * nt_texture_level_extent(h, 1) * 4U * sizeof(float)),
+                           (float *)malloc((size_t)nt_texture_level_extent(w, 2) * nt_texture_level_extent(h, 2) * 4U * sizeof(float))};
+        NT_BUILD_ASSERT(cores[0] && cores[1] && "texture levels: malloc failed");
         uint8_t *stored = chain;
         for (uint32_t level = 1; level < level_count; level++) {
             const uint32_t pw = nt_texture_level_extent(w, level - 1);
             const uint32_t ph = nt_texture_level_extent(h, level - 1);
             const uint32_t lw = nt_texture_level_extent(w, level);
             const uint32_t lh = nt_texture_level_extent(h, level);
-            if (level == 1) {
-                resize_level(chain, pw, ph, byte_type, layout, next, lw, lh, STBIR_TYPE_HALF_FLOAT, core_layout, process->mip_filter, opts);
-            } else {
-                resize_level(core, pw, ph, STBIR_TYPE_HALF_FLOAT, core_layout, next, lw, lh, STBIR_TYPE_HALF_FLOAT, core_layout, process->mip_filter, opts);
-            }
-            uint16_t *swap = core;
-            core = next;
-            next = swap;
+            float *core = cores[(level - 1) & 1U];
+            const resample_src_t src = level == 1 ? (resample_src_t){.pixels = chain, .w = pw, .h = ph, .lin = lin, .channels = 4, .premultiply = weighted}
+                                                  : (resample_src_t){.pixels = cores[level & 1U], .w = pw, .h = ph, .channels = 4};
+            resample(&src, core, lw, lh, process->mip_filter, opts);
             if (normal) {
                 normalize_core(core, (size_t)lw * lh);
             }
             stored += (size_t)pw * ph * 4U;
             quantize_core(core, (size_t)lw * lh, srgb, weighted, stored);
         }
-        free(core);
-        free(next);
+        free(cores[0]);
+        free(cores[1]);
     }
     // #endregion
 
     // #region stored copies
-    bool visible = false;
-    bool hole = false;
-    scan_level(chain, (size_t)w * h, &visible, &hole);
-    const bool dilate = alpha && process->alpha == NT_TEX_ALPHA_STRAIGHT && visible;
-    dilate_ctx_t dc = {.srgb = srgb, .wrap_x = opts->wrap_u == NT_TEXTURE_DEFAULT_WRAP_REPEAT, .wrap_y = opts->wrap_v == NT_TEXTURE_DEFAULT_WRAP_REPEAT};
-    for (uint32_t i = 0; i < 256; i++) {
-        dc.lin[i] = srgb ? srgb_to_linear((float)i / 255.0F) : (float)i / 255.0F;
-    }
     const uint32_t threshold = process->alpha_cutoff > 0.0F ? nt_builder_texture_cutoff_byte(process->alpha_cutoff) : 0;
+    /* A texel the alpha test passes is never a hole. */
+    dilate_ctx_t dc = {.hole_alpha = threshold > 0 && threshold <= 8 ? threshold - 1 : 8,
+                       .srgb = srgb,
+                       .wrap_x = opts->wrap_u == NT_TEXTURE_DEFAULT_WRAP_REPEAT,
+                       .wrap_y = opts->wrap_v == NT_TEXTURE_DEFAULT_WRAP_REPEAT};
+    memcpy(dc.lin, lin, sizeof(lin));
+    bool dilate = weighted;
     uint64_t counts0[257] = {0};
     if (threshold > 0) {
         alpha_counts(chain, (size_t)w * h, counts0);
@@ -772,11 +835,16 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
         const uint32_t lh = nt_texture_level_extent(h, level);
         const size_t texels = (size_t)lw * lh;
         /* Dilation first: holes are found on the filtered alpha, before coverage
-           scaling lifts some of them into view. */
+           scaling lifts some of them into view. A source with nothing visible is
+           stored as it is. */
         if (dilate) {
-            scan_level(level_px, texels, &visible, &hole);
-            if (!visible) {
-                fill_empty_level(level_px, lw, lh, prev, nt_texture_level_extent(w, level - 1), nt_texture_level_extent(h, level - 1), byte_type, opts);
+            bool visible = false;
+            bool hole = false;
+            scan_level(level_px, texels, dc.hole_alpha, &visible, &hole);
+            if (!visible && level == 0) {
+                dilate = false;
+            } else if (!visible) {
+                fill_empty_level(&dc, level_px, lw, lh, prev, nt_texture_level_extent(w, level - 1), nt_texture_level_extent(h, level - 1), opts);
             } else if (hole) {
                 dilate_level(&dc, level_px, lw, lh);
             }
@@ -799,29 +867,28 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
     return chain;
 }
 
-/* HDR levels as float RGB: box filtered, since negative lobes would make negative colours. */
+/* HDR levels as float RGBA (alpha unused): box filtered, since negative lobes
+ * would make negative colours. */
 static float *build_hdr_levels(const float *source, uint32_t src_w, uint32_t src_h, uint32_t w, uint32_t h, uint32_t level_count, const nt_tex_opts_t *opts) {
-    float *chain = (float *)malloc(chain_bytes(w, h, level_count, 3U * sizeof(float)));
+    float *chain = (float *)malloc(chain_bytes(w, h, level_count, 4U * sizeof(float)));
     NT_BUILD_ASSERT(chain && "texture levels: malloc failed");
-    if (src_w == w && src_h == h) {
-        memcpy(chain, source, (size_t)w * h * 3U * sizeof(float));
-    } else {
-        resize_level(source, src_w, src_h, STBIR_TYPE_FLOAT, STBIR_RGB, chain, w, h, STBIR_TYPE_FLOAT, STBIR_RGB, NT_TEX_FILTER_BOX, opts);
-    }
+    const resample_src_t rgb = {.pixels = source, .w = src_w, .h = src_h, .channels = 3};
+    resample(&rgb, chain, w, h, NT_TEX_FILTER_BOX, opts); /* at 1:1 the box is the identity */
     float *prev = chain;
     for (uint32_t level = 1; level < level_count; level++) {
         const uint32_t pw = nt_texture_level_extent(w, level - 1);
         const uint32_t ph = nt_texture_level_extent(h, level - 1);
-        float *dst = prev + ((size_t)pw * ph * 3U);
-        resize_level(prev, pw, ph, STBIR_TYPE_FLOAT, STBIR_RGB, dst, nt_texture_level_extent(w, level), nt_texture_level_extent(h, level), STBIR_TYPE_FLOAT, STBIR_RGB, NT_TEX_FILTER_BOX, opts);
+        float *dst = prev + ((size_t)pw * ph * 4U);
+        const resample_src_t src = {.pixels = prev, .w = pw, .h = ph, .channels = 4};
+        resample(&src, dst, nt_texture_level_extent(w, level), nt_texture_level_extent(h, level), NT_TEX_FILTER_BOX, opts);
         prev = dst;
     }
     return chain;
 }
 
-static void pack_rgb9e5_texels(const float *rgb, size_t texels, uint8_t *dst) {
+static void pack_rgb9e5_texels(const float *rgba, size_t texels, uint8_t *dst) {
     for (size_t i = 0; i < texels; i++) {
-        const uint32_t packed = pack_rgb9e5(&rgb[i * 3]);
+        const uint32_t packed = pack_rgb9e5(&rgba[i * 4]);
         memcpy(dst + (i * sizeof(packed)), &packed, sizeof(packed));
     }
 }
@@ -866,13 +933,7 @@ void nt_builder_encode_texture_to_buf(const void *pixels, uint32_t width, uint32
     } else {
         levels = build_ldr_levels((const uint8_t *)pixels, width, height, w, h, level_count, opts);
         if (compressed) {
-            const uint8_t *level_ptrs[32];
-            const uint8_t *level = levels;
-            for (uint32_t l = 0; l < level_count; l++) {
-                level_ptrs[l] = level;
-                level += (size_t)nt_texture_level_extent(w, l) * nt_texture_level_extent(h, l) * 4U;
-            }
-            enc = nt_basisu_encode(encode_threads, level_ptrs, level_count, w, h, opts->format, &opts->compress, opts->process.rgb == NT_TEX_RGB_COLOR);
+            enc = nt_basisu_encode(encode_threads, levels, level_count, w, h, opts->format, &opts->compress, opts->process.rgb == NT_TEX_RGB_COLOR);
             data_size = enc.size;
         } else {
             data_size = texels * nt_texture_bpp(opts->format);

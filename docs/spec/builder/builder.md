@@ -173,7 +173,7 @@ tone-mapping an HDR file to 8 bits or gamma-expanding an LDR one. Every source
 value must be finite and in `[0, 65216]` (`ASTC_HDR_MAX_VAL`, the largest value
 Basis UASTC HDR stores without a rescale factor); the builder asserts this on the
 source, before any resize, and never clamps or tone-maps. Resize and mips use a
-box filter on float RGB: a filter with negative lobes would make negative colors,
+`BOX` filter on float RGB: a filter with negative lobes would make negative colors,
 so `RGB9E5` takes `.process = (nt_tex_process_t){0}` (the colour preset's
 `MITCHELL` asserts). The runtime cannot generate `RGB9E5` mips either, so it takes
 `mips = BAKED` (each level box-filtered from the previous float level, never from
@@ -230,7 +230,7 @@ foliage.mips = NT_TEX_MIPS_BAKED;
 | Field | Values | Effect |
 |---|---|---|
 | `rgb` | `COLOR` (0), `DATA`, `NORMAL` | `COLOR` and `DATA` pick the ETC1S metric, perceptual or linear; UASTC LDR and uncompressed textures give the same bytes for both. `NORMAL` is a tangent-space unit vector stored as `c * 2 - 1`, encoded with the linear metric (see below). sRGB formats require `COLOR`. |
-| `alpha` | `STRAIGHT` (0), `PREMULTIPLIED`, `DATA` | `STRAIGHT`: RGB filters alpha-weighted, and every stored level fills the RGB of texels with alpha 8 or less with nearby visible colour. `PREMULTIPLIED`: the same filtering, then each stored level is premultiplied once, `(c * a + 127) / 255`, and the header sets `NT_TEXTURE_FLAG_PREMULTIPLIED`; `RGBA8` only. `DATA`: alpha filters as an independent channel and RGB under alpha 0 is kept. |
+| `alpha` | `STRAIGHT` (0), `PREMULTIPLIED`, `DATA` | `STRAIGHT`: RGB filters alpha-weighted, and every stored level fills the RGB of near-transparent texels with nearby visible colour (dilation). `PREMULTIPLIED`: the same, then each stored level is premultiplied once, `(c * a + 127) / 255`, and the header sets `NT_TEXTURE_FLAG_PREMULTIPLIED`; `RGBA8` only. `DATA`: alpha filters as an independent channel and RGB under alpha 0 is kept. |
 | `resize_filter` | `BOX` (0), `MITCHELL`, `KAISER` | Level 0 when `max_size` shrinks the source, at any ratio |
 | `mip_filter` | `BOX` (0), `MITCHELL`, `KAISER` | Levels 1..N, each 2:1 from the previous level; anything but `BOX` requires `mips = BAKED` |
 | `alpha_cutoff` | 0 (off) or (0, 1] | The alpha-test threshold the shader applies. Every stored mip gets the attainable coverage closest to level 0's at it; requires a format with alpha and `mips = BAKED`, and atlas pages refuse it. |
@@ -242,15 +242,15 @@ foliage.mips = NT_TEX_MIPS_BAKED;
 | `nt_tex_process_normal()` | `NORMAL` | `DATA` | `MITCHELL` | `BOX` |
 | atlas defaults | `COLOR` | `PREMULTIPLIED` | `MITCHELL` (no effect: pages are never resized) | `BOX` |
 
-Zero is valid for every format: `BOX` everywhere, colour, straight alpha. `BOX`
-is an area average with no ringing (on NPOT sizes it weighs partial texels by
-area). `MITCHELL` downscales with less moire than `BOX` and rings by about 3%; at
-exactly 2:1 it is softer than `BOX`. `KAISER` (the basisu windowed sinc: support 3,
-40 dB) keeps the most detail and rings most, so it is fenced to opaque colour: it
-requires `rgb = COLOR` and a format without alpha. A `KAISER` resize to 2 texels
-or less along a `REPEAT` axis is box filtered, because the wrapped stb kernel
-breaks there. A non-`BOX` filter on a wrapped level narrower than its kernel
-(about 6 texels) wraps a truncated kernel.
+Zero is valid for every format: `BOX` everywhere, colour, straight alpha. The
+builder's own separable resampler runs all three, downscale only, at any ratio.
+`BOX` weighs each input texel by its overlap with the output texel, so it has no
+ringing and handles NPOT sizes. `MITCHELL` (B = C = 1/3, support 2) downscales
+with less moire than `BOX` and rings by about 3%; at exactly 2:1 it is softer than
+`BOX`. `KAISER` (the basisu windowed sinc: support 3, 40 dB) keeps the most detail
+and rings most, so it is fenced to opaque colour: it requires `rgb = COLOR` and a
+format without alpha. Kernels stretch by the downscale ratio, and their weights
+are normalized per output texel, so a constant stays constant.
 
 `NORMAL` requires `RGBA8`, `RGB8` or `RG8` and `mips` `NONE` or `BAKED`: GPU mips
 would not renormalize. On `RGBA8` it requires `alpha = DATA`, so a decal normal
@@ -268,18 +268,21 @@ The pipeline:
 2. Level 0 copies the source when it already fits `max_size`; otherwise
    `resize_filter` fits `max(width, height)` to `max_size`, keeping the aspect.
 3. Level n filters the previous level's core with `mip_filter`. The core is level
-   0's bytes, then half-float linear values, premultiplied for `STRAIGHT` and
+   0's bytes, then float32 linear values, premultiplied for `STRAIGHT` and
    `PREMULTIPLIED`: division by alpha, rounding, sRGB encoding and the clamp of
    ringing happen only on stored levels, so they never accumulate down the chain.
-   `NORMAL` normalizes each core before it feeds the next level. Dilation and
-   premultiplication touch only stored levels.
-4. `STRAIGHT` dilation, per stored level: a hole (alpha 8 or less) next to visible
-   texels takes their alpha-weighted mean, then push-pull fills the rest with
-   alpha-weighted nearby colour, in linear light for sRGB. A level with nothing
-   visible takes the `BOX` filter of the level above it; a source with nothing visible is
-   stored as it is. Holes keep their alpha. On an odd-sized `REPEAT` level the
-   push-pull pyramid wraps at its own size, so a fill at the seam may take colour
-   from one texel further along.
+   `NORMAL` normalizes each core before it feeds the next level. Dilation, coverage
+   and premultiplication touch only stored levels, in that order.
+4. Dilation (`STRAIGHT` and `PREMULTIPLIED`), per stored level: a hole is a texel
+   with alpha 8 or less, or below `T` (step 5) when `T <= 8`, so a texel the
+   alpha test passes is never a hole. A hole next to visible texels takes their
+   alpha-weighted mean, then push-pull fills the rest with alpha-weighted nearby
+   colour, in linear light for sRGB. A level with nothing visible takes the `BOX`
+   filter of the level above it; a source with nothing visible is stored as it is.
+   Holes keep their alpha, so for `PREMULTIPLIED` the fill only matters on holes
+   with alpha above 0. On an odd-sized `REPEAT` level the push-pull pyramid wraps
+   at its own size, so a fill at the seam may take colour from one texel further
+   along.
 5. `alpha_cutoff`, per stored mip, after dilation (holes are found on the filtered
    alpha, before scaling lifts some of them into view): the shader passes texels
    with alpha at or above `T`, the smallest byte with `T / 255 >= alpha_cutoff`.
@@ -291,22 +294,20 @@ The pipeline:
    excluded and the lowest included alpha, which leaves block compression margin
    on both sides. The contract is the closest attainable coverage, not a fixed
    tolerance: a 4x4 level moves in steps of 1/16. The core is never scaled, so the
-   next level filters the unscaled alpha. Decoded UASTC stays within about 2% of
-   level 0 on levels of 64 texels or more. ETC1S is cheaper and keeps that on
-   large levels, but its alpha slice is coarse on the smallest mips: on the sponza
-   foliage at 512 px, mips 5 and 6 keep 76-100% of the coverage against 91-102%
-   with UASTC, for 9% more pack. A cutoff exactly on a byte step (`k / 255`) leaves texels
+   next level filters the unscaled alpha. Basis compresses the scaled levels:
+   UASTC keeps the coverage closer than ETC1S, whose alpha slice is coarse on the
+   smallest mips. A cutoff exactly on a byte step (`k / 255`) leaves texels
    exactly at `T` to the GPU float compare; a cutoff between steps does not.
 
-Filter and dilation edges follow the sampler wrap per axis: `REPEAT` wraps,
-`CLAMP_TO_EDGE` clamps. `MIRRORED_REPEAT` filters as `CLAMP_TO_EDGE`, a deviation:
-the stb reflect mode is one texel off the GL mirrored repeat. `BOX` always runs
-clamped: a downscaling box never reaches past an edge, and the wrapped stb box
-returns garbage at some ratios (70 to 2).
+Filter taps past an edge follow the sampler wrap per axis, as GL samples it:
+`REPEAT` wraps, `CLAMP_TO_EDGE` clamps, `MIRRORED_REPEAT` reflects with period
+`2n`. A `BOX` downscale never reaches past an edge. Dilation wraps on `REPEAT`
+and clamps otherwise.
 
 Peak memory per encode is about five times the source RGBA bytes: the source,
-the stored chain, two half-float cores and the dilation pyramid. Basis adds its
-own copy of the levels.
+the stored chain, two float cores (levels 1 and 2 at 16 bytes per texel) and the
+dilation pyramid. A resized level 0 adds a float copy of it, four times its RGBA
+bytes, before the chain starts. Basis adds its own copy of the levels.
 
 Dilation keeps bilinear filtering, Basis blocks and `RUNTIME` mips free of the
 black that transparent texels usually hold. `glGenerateMipmap` does not weight by

@@ -633,9 +633,6 @@ int main(int argc, char **argv) {
 
     /* 4. GFX init -- Sponza needs larger pools (69 textures, 103 meshes) */
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
-#ifdef NT_DEVAPI_GROUP_GFX
-    gfx_desc.capture_capacity = 16384; /* gfx.record: records of one frame */
-#endif
     gfx_desc.max_textures = 256;
     gfx_desc.max_buffers = 512;
     gfx_desc.max_meshes = 256;
@@ -720,7 +717,18 @@ int main(int argc, char **argv) {
         nt_log_error("sponza: devapi init failed");
         return 1;
     }
-    nt_devapi_register_default();
+#ifdef NT_DEVAPI_GROUP_CORE
+    nt_devapi_register_core();
+#endif
+#ifdef NT_DEVAPI_GROUP_TIME
+    nt_devapi_register_time();
+#endif
+#ifdef NT_DEVAPI_GROUP_INPUT
+    nt_devapi_register_input();
+#endif
+#ifdef NT_DEVAPI_GROUP_CAPTURE
+    nt_devapi_register_capture();
+#endif
 #ifndef NT_PLATFORM_WEB
     uint16_t devapi_port = 0;
     if (!nt_devapi_net_port_from_env(NT_DEVAPI_DEFAULT_PORT, &devapi_port) || !nt_devapi_net_start(devapi_port)) {

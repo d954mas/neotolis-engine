@@ -10,7 +10,7 @@ extern "C" {
 
 void nt_basisu_encoder_init(void) { basisu::basisu_encoder_init(); }
 
-nt_basisu_encode_result_t nt_basisu_encode(uint32_t basis_threads, const uint8_t *const *levels, uint32_t level_count, uint32_t width, uint32_t height, nt_texture_pixel_format_t format,
+nt_basisu_encode_result_t nt_basisu_encode(uint32_t basis_threads, const uint8_t *levels, uint32_t level_count, uint32_t width, uint32_t height, nt_texture_pixel_format_t format,
                                            const nt_basisu_encode_opts_t *opts, bool perceptual) {
     NT_BUILD_ASSERT(basis_threads >= 1 && "basisu encode: basis_threads counts the caller");
     NT_BUILD_ASSERT(level_count >= 1 && level_count <= nt_texture_full_chain_levels(width, height) && "basisu encode: level_count outside 1..full chain");
@@ -24,11 +24,13 @@ nt_basisu_encode_result_t nt_basisu_encode(uint32_t basis_threads, const uint8_t
     params.m_pJob_pool = &local_pool;
     params.m_multithreading = (basis_threads > 1);
 
-    params.m_source_images.push_back(basisu::image(levels[0], width, height, 4));
+    params.m_source_images.push_back(basisu::image(levels, width, height, 4));
     if (level_count > 1) {
         params.m_source_mipmap_images.resize(1);
+        const uint8_t *level_px = levels;
         for (uint32_t level = 1; level < level_count; level++) {
-            params.m_source_mipmap_images[0].push_back(basisu::image(levels[level], nt_texture_level_extent(width, level), nt_texture_level_extent(height, level), 4));
+            level_px += (size_t)nt_texture_level_extent(width, level - 1) * nt_texture_level_extent(height, level - 1) * 4U;
+            params.m_source_mipmap_images[0].push_back(basisu::image(level_px, nt_texture_level_extent(width, level), nt_texture_level_extent(height, level), 4));
         }
     }
 
