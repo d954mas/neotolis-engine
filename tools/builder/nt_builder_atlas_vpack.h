@@ -76,13 +76,13 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
                      bool *out_pages_exhausted);
 
 /* Empty-page fit test for one sprite. Returns false when the sprite's inflated
- * hull cannot fit an empty max_size page — pipeline_tile_pack uses this for the
+ * hull cannot fit an empty page of side vpack_page_bound — pipeline_tile_pack uses this for the
  * graceful UNFITTABLE pre-check before vector_pack. Bit-exact with the
  * real placement fit test (same inflate + per-axis bound), so it is never
  * stricter than vector_pack for any shape. */
 bool vpack_sprite_fits_empty_page(const Point2D *hull, uint32_t hull_count, const nt_atlas_opts_t *opts);
 
-/* Largest page side placement may use: the POT at or below max_size, so the final POT rounding stays within max_size. */
+/* Largest page side placement may use: max_size, or with power_of_two the POT at or below it, so the final rounding stays within max_size. */
 uint32_t vpack_page_bound(const nt_atlas_opts_t *opts);
 
 #ifdef __cplusplus

@@ -64,8 +64,10 @@ void test_parse_u32_strict_rejects_partial_signed_and_overflow(void) {
 void test_parse_max_size_enforces_builder_range(void) {
     uint32_t value = 0U;
     TEST_ASSERT_FALSE(atlas_bench_parse_max_size("0", &value));
-    TEST_ASSERT_TRUE(atlas_bench_parse_max_size("1", &value));
-    TEST_ASSERT_EQUAL_UINT32(1U, value);
+    TEST_ASSERT_FALSE(atlas_bench_parse_max_size("1", &value));
+    TEST_ASSERT_FALSE(atlas_bench_parse_max_size("6", &value));
+    TEST_ASSERT_TRUE(atlas_bench_parse_max_size("4", &value));
+    TEST_ASSERT_EQUAL_UINT32(4U, value);
     TEST_ASSERT_TRUE(atlas_bench_parse_max_size("16384", &value));
     TEST_ASSERT_EQUAL_UINT32(16384U, value);
     TEST_ASSERT_FALSE(atlas_bench_parse_max_size("16385", &value));

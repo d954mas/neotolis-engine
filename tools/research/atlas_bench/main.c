@@ -219,7 +219,7 @@ int main(int argc, char *argv[]) {
     const char *shape_arg = argv[4];
     uint32_t max_size = 0U;
     if (!atlas_bench_parse_max_size(argv[5], &max_size)) {
-        (void)fprintf(stderr, "atlas_bench: max_size must be an integer in 1..%u\n", ATLAS_BENCH_MAX_ATLAS_SIZE);
+        (void)fprintf(stderr, "atlas_bench: max_size must be a multiple of 4 in 4..%u\n", ATLAS_BENCH_MAX_ATLAS_SIZE);
         return 1;
     }
     uint32_t max_sprites = 0U;

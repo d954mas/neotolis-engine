@@ -26,7 +26,7 @@ bool atlas_bench_parse_u32_strict(const char *text, uint32_t *out_value) {
 
 bool atlas_bench_parse_max_size(const char *text, uint32_t *out_value) {
     uint32_t value = 0U;
-    if (!atlas_bench_parse_u32_strict(text, &value) || value == 0U || value > ATLAS_BENCH_MAX_ATLAS_SIZE) {
+    if (!atlas_bench_parse_u32_strict(text, &value) || value < 4U || value % 4U != 0U || value > ATLAS_BENCH_MAX_ATLAS_SIZE) {
         return false;
     }
     *out_value = value;

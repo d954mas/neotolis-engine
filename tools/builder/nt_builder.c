@@ -1316,13 +1316,16 @@ static void *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *out_w
     return pixels;
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- assert expansions inflate the count
-static NtBuildTextureData *make_texture_data(const char *source, uint32_t w, uint32_t h, const nt_tex_opts_t *opts, nt_texture_pixel_format_t effective_format) {
-    /* A max_size resize already block-aligns, so only an unresized source can miss. */
+/* A max_size resize already block-aligns, so only an unresized source can miss. */
+static void assert_basis_block_aligned(const char *source, uint32_t w, uint32_t h, const nt_tex_opts_t *opts) {
     if (opts && opts->compress.codec != NT_BASISU_CODEC_NONE && (w % 4 != 0 || h % 4 != 0)) {
         NT_BUILD_FAIL("texture: a Basis texture needs width and height that are multiples of 4", "texture '%s': Basis level 0 is %ux%u -- edit the source so both sides are multiples of 4", source, w,
                       h);
     }
+}
+
+static NtBuildTextureData *make_texture_data(const char *source, uint32_t w, uint32_t h, const nt_tex_opts_t *opts, nt_texture_pixel_format_t effective_format) {
+    assert_basis_block_aligned(source, w, h, opts);
     NtBuildTextureData *td = (NtBuildTextureData *)calloc(1, sizeof(NtBuildTextureData));
     NT_BUILD_ASSERT(td && "texture data alloc failed");
     td->width = w;

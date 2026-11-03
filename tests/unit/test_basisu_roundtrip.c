@@ -435,9 +435,9 @@ void test_public_basis_one_block_full_mip_chain(void) {
         nt_tex_opts_t opts = nt_tex_opts_defaults();
         opts.compress = codecs[i];
         opts.mips = NT_TEX_MIPS_BAKED;
-        const char *path = codecs[i].codec == NT_BASISU_CODEC_ETC1S ? "basis_single_etc1s.ntpack" : "basis_single_uastc.ntpack";
+        const char *path = codecs[i].codec == NT_BASISU_CODEC_ETC1S ? "basis_block_etc1s.ntpack" : "basis_block_uastc.ntpack";
         NtBuilderContext *ctx = nt_builder_start_pack(path);
-        nt_builder_add_texture_raw(ctx, block, 4, 4, "pixel", &opts);
+        nt_builder_add_texture_raw(ctx, block, 4, 4, "block", &opts);
         nt_build_result_t result = nt_builder_finish_pack(ctx);
         nt_builder_free_pack(ctx);
         TEST_ASSERT_EQUAL(NT_BUILD_OK, result);

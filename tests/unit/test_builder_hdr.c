@@ -352,7 +352,7 @@ void test_hdr_file_values_outside_the_source_range_assert(void) {
 
 void test_hdr_range_is_checked_before_resize(void) {
     /* Averaged with its neighbours, -1 would vanish into a valid value. */
-    float rgb[8 * 3] = {-1.0F};
+    float rgb[8 * 3] = {-1.0F, 0.0F, 0.0F, 3.0F};
     nt_tex_opts_t opts = hdr_opts(NT_TEX_MIPS_NONE);
     opts.max_size = 4;
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/bad.ntpack");

@@ -152,13 +152,7 @@ static inline uint32_t vpack_next_pot(uint32_t v) {
 }
 #endif
 
-uint32_t vpack_page_bound(const nt_atlas_opts_t *opts) {
-    uint32_t bound = opts->max_size;
-    if (opts->power_of_two && vpack_next_pot(bound) != bound) {
-        bound = vpack_next_pot(bound) / 2;
-    }
-    return bound;
-}
+uint32_t vpack_page_bound(const nt_atlas_opts_t *opts) { return opts->power_of_two ? vpack_next_pot(opts->max_size + 1) / 2 : opts->max_size; }
 
 /* --- Public helpers --- */
 
