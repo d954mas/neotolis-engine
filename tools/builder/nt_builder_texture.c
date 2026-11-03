@@ -388,6 +388,7 @@ typedef struct {
     const float *lin; /* byte -> linear value; NULL for float input */
     uint32_t channels;
     bool premultiply;
+    bool rebuild_z; /* RG8 normal bytes: Z from XY, in float */
 } resample_src_t;
 
 static void load_row(const resample_src_t *s, uint32_t y, float *row) {
@@ -405,6 +406,12 @@ static void load_row(const resample_src_t *s, uint32_t y, float *row) {
         const float a = (float)p[(x * 4U) + 3U] / 255.0F;
         for (uint32_t c = 0; c < 3; c++) {
             row[(x * 4U) + c] = s->lin[p[(x * 4U) + c]] * (s->premultiply ? a : 1.0F);
+        }
+        if (s->rebuild_z) {
+            float *t = &row[(size_t)x * 4U];
+            const float nx = (t[0] * 2.0F) - 1.0F;
+            const float ny = (t[1] * 2.0F) - 1.0F;
+            t[2] = (sqrtf(fmaxf(0.0F, 1.0F - (nx * nx) - (ny * ny))) * 0.5F) + 0.5F;
         }
         row[(x * 4U) + 3U] = a;
     }
@@ -479,8 +486,9 @@ static void quantize_core(const float *core, size_t texels, bool srgb, bool weig
 
 /* Encoded normals (c * 2 - 1) to unit vectors, encoded again. An average shorter
  * than about two byte steps (opposite normals cancelling; a byte cannot hold an
- * exact 0) becomes +Z. */
-static void normalize_core(float *core, size_t texels) {
+ * exact 0) becomes +Z. `positive_z` reflects -Z cores, which RG8 cannot store, so
+ * the next level filters what RG8 rebuilds. */
+static void normalize_core(float *core, size_t texels, bool positive_z) {
     for (size_t i = 0; i < texels; i++) {
         float *v = &core[i * 4U];
         float n[3];
@@ -493,18 +501,10 @@ static void normalize_core(float *core, size_t texels) {
             v[2] = 1.0F;
             continue;
         }
+        n[2] = positive_z ? fabsf(n[2]) : n[2];
         for (uint32_t c = 0; c < 3; c++) {
             v[c] = (n[c] / length * 0.5F) + 0.5F;
         }
-    }
-}
-
-/* RG8 normals store XY only, so Z is rebuilt for filtering and normalization. */
-static void rebuild_normal_z(uint8_t *rgba, size_t texels) {
-    for (size_t i = 0; i < texels; i++) {
-        const float x = ((float)rgba[i * 4U] / 127.5F) - 1.0F;
-        const float y = ((float)rgba[(i * 4U) + 1U] / 127.5F) - 1.0F;
-        rgba[(i * 4U) + 2U] = encode_unit((sqrtf(fmaxf(0.0F, 1.0F - (x * x) - (y * y))) * 0.5F) + 0.5F, false);
     }
 }
 
@@ -775,31 +775,23 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
 
     // #region level 0
     const size_t src_texels = (size_t)src_w * src_h;
-    float *resized = NULL; /* a resized level 0's float core, which level 1 filters */
-    uint8_t *rebuilt = NULL;
-    if (normal && opts->format == NT_TEXTURE_FORMAT_RG8) {
-        rebuilt = (uint8_t *)malloc(src_texels * 4U);
-        NT_BUILD_ASSERT(rebuilt && "texture levels: malloc failed");
-        memcpy(rebuilt, source, src_texels * 4U);
-        rebuild_normal_z(rebuilt, src_texels);
-        source = rebuilt;
-    }
+    float *resized = NULL;                                                   /* a resized level 0's float core, which level 1 filters */
+    const bool rg8_normal = normal && opts->format == NT_TEXTURE_FORMAT_RG8; /* XY is authoritative */
     if (src_w == w && src_h == h) {
         memcpy(chain, source, src_texels * 4U);
     } else {
         resized = (float *)malloc((size_t)w * h * 4U * sizeof(float));
         NT_BUILD_ASSERT(resized && "texture levels: malloc failed");
-        const resample_src_t src = {.pixels = source, .w = src_w, .h = src_h, .lin = lin, .channels = 4, .premultiply = weighted};
+        const resample_src_t src = {.pixels = source, .w = src_w, .h = src_h, .lin = lin, .channels = 4, .premultiply = weighted, .rebuild_z = rg8_normal};
         resample(&src, resized, w, h, process->resize_filter, opts);
         for (size_t i = 0; !alpha && i < (size_t)w * h; i++) {
             resized[(i * 4U) + 3U] = 1.0F;
         }
         if (normal) {
-            normalize_core(resized, (size_t)w * h);
+            normalize_core(resized, (size_t)w * h, rg8_normal);
         }
         quantize_core(resized, (size_t)w * h, srgb, weighted, chain);
     }
-    free(rebuilt);
     /* Without alpha nothing weights by it, so an opaque level 0 is all the chain needs. */
     for (size_t i = 0; !alpha && i < (size_t)w * h; i++) {
         chain[(i * 4U) + 3U] = 255;
@@ -822,11 +814,11 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
             resample_src_t src = {.pixels = cores[level & 1U], .w = pw, .h = ph, .channels = 4};
             if (level == 1) {
                 src = resized ? (resample_src_t){.pixels = resized, .w = pw, .h = ph, .channels = 4}
-                              : (resample_src_t){.pixels = chain, .w = pw, .h = ph, .lin = lin, .channels = 4, .premultiply = weighted};
+                              : (resample_src_t){.pixels = chain, .w = pw, .h = ph, .lin = lin, .channels = 4, .premultiply = weighted, .rebuild_z = rg8_normal};
             }
             resample(&src, core, lw, lh, process->mip_filter, opts);
             if (normal) {
-                normalize_core(core, (size_t)lw * lh);
+                normalize_core(core, (size_t)lw * lh, rg8_normal);
             }
             stored += (size_t)pw * ph * 4U;
             quantize_core(core, (size_t)lw * lh, srgb, weighted, stored);

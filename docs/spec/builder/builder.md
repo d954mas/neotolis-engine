@@ -258,7 +258,9 @@ are normalized per output texel, so a constant stays constant.
 `NORMAL` requires `RGBA8`, `RGB8` or `RG8` and `mips` `NONE` or `BAKED`: GPU mips
 would not renormalize. On `RGBA8` it requires `alpha = DATA`, so a decal normal
 with a coverage mask is not supported, and atlas pages refuse it. `RG8` rebuilds Z
-from XY before any filtering (XY is authoritative). A resized level 0 and every
+from XY in float as it reads the bytes, before any filtering (XY is
+authoritative), and its normalized cores reflect to +Z: RG8 holds one hemisphere,
+so each level filters what the stored one rebuilds. A resized level 0 and every
 mip core are normalized in float before they are stored; an average shorter than
 0.02 (opposite normals cancelling, given that a byte cannot hold an exact 0)
 becomes +Z. A level 0 at its source size keeps the source bytes.

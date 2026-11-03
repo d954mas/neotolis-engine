@@ -2148,6 +2148,58 @@ void test_texture_normal_core_feeds_the_next_level_normalized(void) {
     free(asset);
 }
 
+/* RG8 rebuilds Z in float. Two nearly opposite normals average below the +Z
+ * threshold, so their mip is +Z; a Z rounded to a byte first (1/255) pushes the
+ * mean past it and tilts the mip by about 78 degrees. */
+void test_texture_normal_rg8_rebuilds_z_unrounded(void) {
+    const uint8_t rgba[8] = {254, 110, 0, 255, 2, 150, 0, 255};
+    nt_tex_opts_t opts = straight_baked_opts();
+    opts.format = NT_TEXTURE_FORMAT_RG8;
+    opts.process = nt_tex_process_normal();
+    NtTextureAssetHeader hdr;
+    uint8_t *asset = encode_mips_asset(rgba, 2, 1, &opts, &hdr);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(((const uint8_t[2]){128, 128}), asset_texel(asset, &hdr, 1, 0, 0), 2);
+    free(asset);
+}
+
+/* An RG8 mip filters what RG8 stores. Mitchell rings a core into -Z, which RG8
+ * cannot hold: the core reflects to +Z, so level 1 is the box of the stored level 0
+ * with its rebuilt Z, normalized. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- an oracle over the stored level
+void test_texture_normal_rg8_mips_filter_the_stored_hemisphere(void) {
+    static const uint8_t xy[8][2] = {{128, 128}, {0, 128}, {0, 128}, {255, 128}, {255, 128}, {255, 128}, {255, 128}, {255, 128}};
+    uint8_t rgba[8 * 4];
+    for (uint32_t i = 0; i < 8; i++) {
+        fill_rgba(rgba, i, 1, (const uint8_t[4]){xy[i][0], xy[i][1], 0, 255});
+    }
+    nt_tex_opts_t opts = straight_baked_opts();
+    opts.format = NT_TEXTURE_FORMAT_RG8;
+    opts.process = nt_tex_process_normal();
+    opts.max_size = 4;
+    opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
+    NtTextureAssetHeader hdr;
+    uint8_t *asset = encode_mips_asset(rgba, 8, 1, &opts, &hdr);
+    const uint32_t w1 = nt_texture_level_extent(hdr.width, 1);
+    const uint32_t h1 = nt_texture_level_extent(hdr.height, 1);
+    for (uint32_t i = 0; i < w1 * h1; i++) {
+        double sum[3] = {0.0, 0.0, 0.0};
+        for (uint32_t k = 0; k < 4; k++) {
+            const uint8_t *px = asset_texel(asset, &hdr, 0, ((i % w1) * 2) + (k % 2), ((i / w1) * 2) + (k / 2));
+            const double x = (px[0] / 127.5) - 1.0;
+            const double y = (px[1] / 127.5) - 1.0;
+            sum[0] += x;
+            sum[1] += y;
+            sum[2] += sqrt(fmax(0.0, 1.0 - (x * x) - (y * y)));
+        }
+        const double length = sqrt((sum[0] * sum[0]) + (sum[1] * sum[1]) + (sum[2] * sum[2]));
+        const uint8_t *mip = asset_texel(asset, &hdr, 1, i % w1, i / w1);
+        for (uint32_t c = 0; c < 2; c++) {
+            TEST_ASSERT_UINT8_WITHIN(2, (uint8_t)lround(((sum[c] / length * 0.5) + 0.5) * 255.0), mip[c]);
+        }
+    }
+    free(asset);
+}
+
 /* RG8 stores XY only: its B channel never reaches the result, and Z is rebuilt. */
 void test_texture_normal_rg8_ignores_the_source_blue(void) {
     uint8_t truth[16 * 16 * 4];
@@ -11762,6 +11814,8 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_texture_normal_levels_follow_the_normalized_reference);
     RUN_TEST(test_texture_normal_resized_level0_is_unit_length);
     RUN_TEST(test_texture_normal_rg8_ignores_the_source_blue);
+    RUN_TEST(test_texture_normal_rg8_rebuilds_z_unrounded);
+    RUN_TEST(test_texture_normal_rg8_mips_filter_the_stored_hemisphere);
     RUN_TEST(test_texture_normal_cancelled_pair_becomes_up);
     RUN_TEST(test_texture_normal_core_feeds_the_next_level_normalized);
     RUN_TEST(test_texture_normal_opts_contract);
