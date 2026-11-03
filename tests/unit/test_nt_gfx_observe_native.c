@@ -552,7 +552,7 @@ static uint32_t op_index(const nt_gfx_capture_view_t *capture, uint32_t from, nt
 /* A merged draw issues one call linked to the first draw; a note does not end a merge, a bind does. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- plain and indexed merges in one frame
 static void test_merged_draws_link_to_the_first_draw(void) {
-    static const uint16_t indices[6] = {0, 1, 2, 2, 1, 0};
+    static const uint16_t indices[9] = {0, 1, 2, 2, 1, 0, 0, 1, 2};
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){gl_Position=vec4(0.0);}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "precision mediump float; out vec4 color; void main(){color=vec4(1.0);}"});
     nt_program_t program = nt_gfx_make_program(vs, fs, NULL);
@@ -575,8 +575,8 @@ static void test_merged_draws_link_to_the_first_draw(void) {
     nt_gfx_bind_vertex_input(other);
     nt_gfx_draw(9, 3);
     nt_gfx_bind_vertex_input(indexed);
-    nt_gfx_draw_indexed(0, 3, 3);
-    nt_gfx_draw_indexed(3, 3, 3);
+    nt_gfx_draw_indexed(3, 3, 3); /* from index 3: the merged call's offset is 6 bytes */
+    nt_gfx_draw_indexed(6, 3, 3);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
@@ -615,6 +615,7 @@ static void test_merged_draws_link_to_the_first_draw(void) {
         if (e->detail == NT_GFX_GL_glDrawElements) {
             TEST_ASSERT_EQUAL_UINT32(indexed_first + 1U, e->link);
             TEST_ASSERT_EQUAL_UINT32(6, e->data.backend.args[1]);
+            TEST_ASSERT_EQUAL_UINT32(3U * sizeof(uint16_t), e->data.backend.args[3]); /* the byte offset, not a pointer flag */
             elements++;
         }
     }

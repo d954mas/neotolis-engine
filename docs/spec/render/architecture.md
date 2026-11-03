@@ -1316,8 +1316,9 @@ with the gfx records, so they share the capture's lifetime, copy rule and
 overflow. Only `kind` is common with gfx records: a note or marker keeps its
 label in `note.label`, a field its `type`, `key` and `value` in `field`. Label,
 key and string value are capture strings, copied at the call, so callers may pass
-temporary buffers of any length; they must not be NULL, and a marker name is checked
-in every frame. A note lands with all its fields and strings or, when they do not
+temporary buffers of any length. Label and key must not be NULL, and a marker name is
+checked in every frame; a NULL string value reads as `""` (renderers note a material
+by its label, which may be absent). A note lands with all its fields and strings or, when they do not
 fit, sets `overflow`; no record appends after an overflow. Each note costs one record
 plus one per field, and its strings' bytes, so per-call notes (one per sprite emit)
 need capacity sized for them.

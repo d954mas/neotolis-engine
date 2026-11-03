@@ -261,10 +261,10 @@ static bool emit_begin(uint32_t page_tex, uint32_t vertex_count, uint32_t index_
     NT_ASSERT(m->frame == g_nt_gfx.counters.frame_sequence && "sprite emit: call nt_sprite_renderer_set_material in this frame");
     /* A sprite waits for its atlas page, whatever its shader samples. */
     if (m->pipeline.id == 0 || page_tex == 0) {
-        NT_GFX_NOTE("sprite", NT_NOTE_U32("material", m->material.id), NT_NOTE_U32("page", page_tex), NT_NOTE_STR("drop", m->pipeline.id == 0 ? "program not ready" : "page not ready"));
+        NT_GFX_NOTE("sprite", NT_NOTE_STR("material", m->info->label), NT_NOTE_U32("page", page_tex), NT_NOTE_STR("drop", m->pipeline.id == 0 ? "program not ready" : "page not ready"));
         return false;
     }
-    NT_GFX_NOTE("sprite", NT_NOTE_U32("material", m->material.id), NT_NOTE_U32("page", page_tex));
+    NT_GFX_NOTE("sprite", NT_NOTE_STR("material", m->info->label), NT_NOTE_U32("page", page_tex));
     record_state(m, page_tex);
     uint32_t voff = 0;
     uint32_t ioff = 0;
@@ -813,12 +813,12 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
                   "sprite render item: sprite is unresolved or tombstoned");
         const uint32_t page_tex = nt_resource_get(sv.resolved[leader_sprite].page_resource);
         /* Before the resolve, so the run's pipeline and vertex-input creates fall under its note. */
-        NT_GFX_NOTE("sprite", NT_NOTE_U32("material", mat->id), NT_NOTE_U32("page", page_tex));
+        NT_GFX_NOTE("sprite", NT_NOTE_STR("material", mat_info->label), NT_NOTE_U32("page", page_tex));
         if (mat->id != m.material.id) {
             resolve_material(*mat, mat_info, &m);
         }
         if (m.pipeline.id == 0 || page_tex == 0) {
-            NT_GFX_NOTE("sprite", NT_NOTE_U32("material", mat->id), NT_NOTE_U32("page", page_tex), NT_NOTE_STR("drop", m.pipeline.id == 0 ? "program not ready" : "page not ready"));
+            NT_GFX_NOTE("sprite", NT_NOTE_STR("material", mat_info->label), NT_NOTE_U32("page", page_tex), NT_NOTE_STR("drop", m.pipeline.id == 0 ? "program not ready" : "page not ready"));
             run_start = run_end;
             continue;
         }

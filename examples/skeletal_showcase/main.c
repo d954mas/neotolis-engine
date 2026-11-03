@@ -2753,7 +2753,7 @@ int main(int argc, char *argv[]) {
     nt_input_init();
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
 #ifdef NT_DEVAPI_GROUP_GFX
-    gfx_desc.capture_capacity = 16384;               /* gfx.record: records of one frame */
+    gfx_desc.capture_capacity = 16384;              /* gfx.record: records of one frame */
     gfx_desc.capture_string_capacity = 64U * 1024U; /* gfx.record: string bytes of one frame */
 #endif
     gfx_desc.depth = true;

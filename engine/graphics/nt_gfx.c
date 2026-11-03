@@ -361,7 +361,7 @@ static void copy_note_field(nt_gfx_event_t *dst, const nt_gfx_note_field_t *src)
         dst->field.value.f32 = src->value.f32;
         break;
     case NT_GFX_NOTE_STR:
-        dst->field.value.str = capture_note_text(src->value.str);
+        dst->field.value.str = capture_string(src->value.str); /* NULL reads as "": a debug name the caller may not have */
         break;
     default:
         NT_ASSERT(0 && "capture note: unknown field type");

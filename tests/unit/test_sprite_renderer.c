@@ -2214,7 +2214,7 @@ void test_sprite_renderer_merged_emits_keep_their_notes(void) {
     TEST_ASSERT_LESS_THAN_UINT32(nt_test_capture_open().count, notes[1]);
     const uint32_t page = nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 0));
     for (uint32_t i = 0; i < 2; i++) {
-        TEST_ASSERT_EQUAL_UINT32(mat.id, nt_test_note_u32(notes[i], "material"));
+        TEST_ASSERT_EQUAL_STRING(nt_material_get_info(mat)->label, nt_test_note_str(notes[i], "material"));
         TEST_ASSERT_EQUAL_UINT32(page, nt_test_note_u32(notes[i], "page"));
         TEST_ASSERT_EQUAL_STRING("", nt_test_note_str(notes[i], "drop"));
     }
@@ -2234,7 +2234,7 @@ void test_sprite_renderer_linking_program_notes_its_skip(void) {
     nt_gfx_fake_hold_program_links(false);
 
     const uint32_t note = nt_test_note(0, "sprite");
-    TEST_ASSERT_EQUAL_UINT32(mat.id, nt_test_note_u32(note, "material"));
+    TEST_ASSERT_EQUAL_STRING(nt_material_get_info(mat)->label, nt_test_note_str(note, "material"));
     TEST_ASSERT_EQUAL_STRING("program not ready", nt_test_note_str(note, "drop"));
     TEST_ASSERT_EQUAL_UINT32(nt_test_capture_open().count, nt_test_note(note + 1U, "sprite"));
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_NONE, nt_test_next_draw_result(note)); /* the last note: scans to the end */

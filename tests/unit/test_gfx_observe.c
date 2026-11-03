@@ -1436,7 +1436,7 @@ static void test_a_marker_open_at_begin_frame_asserts(void) {
     nt_gfx_begin_frame();
 }
 
-/* Strings have no length limit, but a note's label, keys and string values are required. */
+/* Strings have no length limit; a note's label and keys are required, a string value may be NULL. */
 static void test_a_note_string_is_required(void) {
     record_next_frame();
     char key[300];
@@ -1445,6 +1445,9 @@ static void test_a_note_string_is_required(void) {
     NT_GFX_NOTE("n", NT_NOTE_U32(key, 1U));
     TEST_ASSERT_EQUAL_UINT32(299, (uint32_t)strlen(nt_test_capture_open().strings + nt_test_capture_open().events[nt_test_note(0, "n") + 1U].field.key));
     NT_TEST_EXPECT_ASSERT(NT_GFX_NOTE("n", NT_NOTE_U32(NULL, 1U)));
+    NT_GFX_NOTE("unnamed", NT_NOTE_STR("material", NULL)); /* a string value may be absent */
+    TEST_ASSERT_EQUAL_STRING("", nt_test_note_str(nt_test_note(0, "unnamed"), "material"));
+    TEST_ASSERT_EQUAL(NT_GFX_NOTE_STR, nt_test_note_field(nt_test_note(0, "unnamed"), "material")->field.type);
 }
 #endif
 

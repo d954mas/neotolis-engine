@@ -74,6 +74,7 @@ static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
         .program = nt_gfx_make_program(vs, fs, NULL),
         .blend = blend,
         .cull_mode = NT_CULL_NONE,
+        .label = "text_test_material",
     });
     return material;
 }
@@ -1257,7 +1258,7 @@ void test_notes_survive_merges_and_an_unloaded_font_notes_its_skip(void) {
     const uint32_t second = nt_test_note(first + 1U, "text");
     const uint32_t third = nt_test_note(second + 1U, "text");
     TEST_ASSERT_LESS_THAN_UINT32(nt_test_capture_open().count, third);
-    TEST_ASSERT_EQUAL_UINT32(s_mat.id, nt_test_note_u32(first, "material"));
+    TEST_ASSERT_EQUAL_STRING(nt_material_get_info(s_mat)->label, nt_test_note_str(first, "material"));
     TEST_ASSERT_EQUAL_UINT32(s_font.id, nt_test_note_u32(first, "font"));
     TEST_ASSERT_EQUAL_UINT32(s_font.id, nt_test_note_u32(second, "font"));
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, nt_test_next_draw_result(first));

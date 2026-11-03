@@ -1234,7 +1234,7 @@ void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices, uint32_t 
 void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type) {
     const bool wide = index_type == NT_INDEX_UINT32;
     const GLenum gl_type = wide ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT;
-    const void *offset = nt_gl_offset((uintptr_t)first_index * (wide ? sizeof(uint32_t) : sizeof(uint16_t)));
+    const nt_gl_offset_t offset = nt_gl_offset((uintptr_t)first_index * (wide ? sizeof(uint32_t) : sizeof(uint16_t)));
     if (instance_count == 1) {
         NT_GL(glDrawElements, GL_TRIANGLES, (GLsizei)num_indices, gl_type, offset);
     } else {
