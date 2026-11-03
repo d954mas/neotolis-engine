@@ -612,6 +612,8 @@ void test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines(void
 
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
+
+    desc.label = "test_material";
     desc.depth_test = true;
     desc.depth_write = true;
     desc.blend = nt_blend_opaque();
@@ -1804,8 +1806,7 @@ void test_mesh_stream_cannot_overlap_the_color_location(void) {
 /* Each run notes its material and mesh before its work; a run whose program is not ready notes the skip. */
 void test_draw_list_notes_each_run_and_its_skip(void) {
     nt_mesh_t mesh = create_test_mesh();
-    /* Unlabeled: its note names it by handle. */
-    nt_material_t not_ready = nt_material_create(&(nt_material_create_desc_t){.program = create_test_program(), .blend = nt_blend_opaque(), .cull_mode = NT_CULL_BACK});
+    nt_material_t not_ready = nt_material_create(&(nt_material_create_desc_t){.label = "not_ready", .program = create_test_program(), .blend = nt_blend_opaque(), .cull_mode = NT_CULL_BACK});
     nt_material_t ready = create_test_material();
     nt_material_set_program(not_ready, NT_PROGRAM_INVALID);
     nt_entity_t e0 = create_test_entity(mesh, not_ready);
@@ -1821,8 +1822,7 @@ void test_draw_list_notes_each_run_and_its_skip(void) {
     const uint32_t first = nt_test_note(0, "mesh");
     const uint32_t second = nt_test_note(first + 1U, "mesh");
     TEST_ASSERT_LESS_THAN_UINT32(nt_test_capture_open().count, second);
-    TEST_ASSERT_EQUAL_UINT32(not_ready.id, nt_test_note_u32(first, "material_id"));
-    TEST_ASSERT_NULL(nt_test_note_field(first, "material"));
+    TEST_ASSERT_EQUAL_STRING("not_ready", nt_test_note_str(first, "material"));
     TEST_ASSERT_EQUAL_UINT32(mesh.id, nt_test_note_u32(first, "mesh"));
     TEST_ASSERT_EQUAL_STRING("program not ready", nt_test_note_str(first, "drop"));
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_NONE, nt_test_next_draw_result(first));

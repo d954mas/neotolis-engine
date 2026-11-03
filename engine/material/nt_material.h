@@ -68,7 +68,7 @@ typedef struct {
     bool depth_write;
     nt_blend_state_t blend;
     nt_cull_mode_t cull_mode;
-    const char *label; /* debug name — must be string literal or static storage */
+    const char *label; /* required debug name; static storage */
 } nt_material_create_desc_t;
 
 /* ---- Init descriptor ---- */
@@ -101,7 +101,7 @@ typedef struct {
     bool depth_test;
     bool depth_write;
     nt_cull_mode_t cull_mode;
-    const char *label; /* debug name (string literal, static storage) */
+    const char *label; /* debug name, never NULL; static storage */
 } nt_material_info_t;
 
 /* ---- Lifecycle ---- */

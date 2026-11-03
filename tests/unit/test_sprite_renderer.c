@@ -628,6 +628,8 @@ void test_neighbouring_programs_one_depth_write_step_apart_get_their_own_pipelin
 
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
+
+    desc.label = "test_material";
     desc.depth_test = false;
     desc.blend = nt_blend_opaque();
     desc.cull_mode = NT_CULL_NONE;
@@ -2023,6 +2025,8 @@ void test_sprite_renderer_draws_after_context_restore_without_a_restore_call(voi
     s_atlas_res = register_test_atlas(0xD9ULL);
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
+
+    desc.label = "test_material";
     desc.program = nt_gfx_fake_make_program(NULL, 0);
     desc.cull_mode = NT_CULL_NONE;
     desc.params = s_tint_one;
@@ -2122,6 +2126,8 @@ void test_sprite_renderer_undeclared_sampler_after_textured_material_asserts(voi
     const nt_program_t program = nt_gfx_fake_make_program((const char *const[]){"u_texture", "u_extra"}, 2);
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
+
+    desc.label = "test_material";
     desc.program = program;
     desc.cull_mode = NT_CULL_NONE;
     const nt_material_t bare = nt_material_create(&desc);

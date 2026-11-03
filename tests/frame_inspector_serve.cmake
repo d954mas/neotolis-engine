@@ -6,7 +6,7 @@
 string(REPEAT " " 1030 spaces)
 file(WRITE "${WORK}/serve_commands.txt" "groups\nrecord @3x\n\n  \t\nsummary extra\n${spaces}summary\nlist gl_draw_calls\n")
 execute_process(COMMAND "${INSPECTOR}" --serve "${CAPTURE}" --frame 0 INPUT_FILE "${WORK}/serve_commands.txt" OUTPUT_VARIABLE out RESULT_VARIABLE rc)
-set(want "^> frame 0\nframe 0  # sequence 51, [^\n]*\n= ok\n"
+set(want "^> frame 0\nframe 0  # sequence 999, [^\n]*\n= ok\n"
          "> groups\n(#[^\n]*\n)+(g[0-9]+ [^\n]*\n)+total 47 9 67 93952 0\n= ok\n"
          "> record @3x\nerror: [^\n]*\n= error\n"
          "> summary extra\nerror: too many arguments[^\n]*\n= error\n"

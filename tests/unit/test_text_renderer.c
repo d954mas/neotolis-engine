@@ -410,7 +410,7 @@ void test_quad_covers_fp16_rounded_tofu(void) {
 void test_text_material_may_declare_its_own_textures(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
-    nt_material_t textured = nt_material_create(&(nt_material_create_desc_t){
+    nt_material_t textured = nt_material_create(&(nt_material_create_desc_t){.label = "test_material", 
         .program = nt_gfx_make_program(vs, fs, NULL),
         .cull_mode = NT_CULL_NONE,
         .textures[0] = {.name = "u_extra", .resource = NT_RESOURCE_INVALID},
@@ -535,8 +535,8 @@ void test_material_params_bind_once_per_change(void) {
     nt_program_t shared = nt_gfx_make_program(vs, fs, NULL);
     static const float red[4] = {1, 0, 0, 1};
     static const float green[4] = {0, 1, 0, 1};
-    nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE, .params = red, .params_size = sizeof(red)});
-    nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE, .params = green, .params_size = sizeof(green)});
+    nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.label = "test_material", .program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE, .params = red, .params_size = sizeof(red)});
+    nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.label = "test_material", .program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE, .params = green, .params_size = sizeof(green)});
 
     nt_test_frame_finish_links();
     nt_gfx_fake_reset();
@@ -572,8 +572,8 @@ void test_materials_sharing_a_program_share_one_pipeline(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     nt_program_t shared = nt_gfx_make_program(vs, fs, NULL);
-    nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
-    nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
+    nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.label = "test_material", .program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
+    nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.label = "test_material", .program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
 
     nt_test_frame_finish_links();
     nt_gfx_fake_reset();
@@ -590,8 +590,8 @@ void test_one_program_with_two_render_states_builds_two_pipelines(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     nt_program_t shared = nt_gfx_make_program(vs, fs, NULL);
-    nt_material_t opaque_mat = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_opaque(), .cull_mode = NT_CULL_NONE});
-    nt_material_t blended = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
+    nt_material_t opaque_mat = nt_material_create(&(nt_material_create_desc_t){.label = "test_material", .program = shared, .blend = nt_blend_opaque(), .cull_mode = NT_CULL_NONE});
+    nt_material_t blended = nt_material_create(&(nt_material_create_desc_t){.label = "test_material", .program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
 
     nt_test_frame_finish_links();
     nt_gfx_fake_reset();
@@ -613,8 +613,8 @@ void test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines(void
     nt_shader_t fs1 = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     nt_program_t p1 = nt_gfx_make_program(vs1, fs1, NULL);
     TEST_ASSERT_EQUAL_UINT32(p0.id + 1, p1.id);
-    nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.program = p0, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_BACK});
-    nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.program = p1, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
+    nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.label = "test_material", .program = p0, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_BACK});
+    nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.label = "test_material", .program = p1, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
 
     nt_test_frame_finish_links();
     nt_gfx_fake_reset();

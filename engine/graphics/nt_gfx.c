@@ -603,8 +603,12 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     s_gfx.texture_metas = (nt_gfx_texture_meta_t *)calloc(desc->max_textures + 1, sizeof(nt_gfx_texture_meta_t));
     s_gfx.render_target_metas = (nt_gfx_render_target_meta_t *)calloc(max_render_targets + 1, sizeof(nt_gfx_render_target_meta_t));
 #if NT_GFX_CAPTURE_ENABLED
-    const nt_pool_t *const label_pools[] = {[NT_GFX_OBJECT_SHADER] = &s_gfx.shader_pool,        [NT_GFX_OBJECT_PROGRAM] = &s_gfx.program_pool, [NT_GFX_OBJECT_PIPELINE] = &s_gfx.pipeline_pool,
-                                            [NT_GFX_OBJECT_VERTEX_INPUT] = &s_gfx.vertex_input_pool, [NT_GFX_OBJECT_BUFFER] = &s_gfx.buffer_pool, [NT_GFX_OBJECT_TEXTURE] = &s_gfx.texture_pool,
+    const nt_pool_t *const label_pools[] = {[NT_GFX_OBJECT_SHADER] = &s_gfx.shader_pool,
+                                            [NT_GFX_OBJECT_PROGRAM] = &s_gfx.program_pool,
+                                            [NT_GFX_OBJECT_PIPELINE] = &s_gfx.pipeline_pool,
+                                            [NT_GFX_OBJECT_VERTEX_INPUT] = &s_gfx.vertex_input_pool,
+                                            [NT_GFX_OBJECT_BUFFER] = &s_gfx.buffer_pool,
+                                            [NT_GFX_OBJECT_TEXTURE] = &s_gfx.texture_pool,
                                             [NT_GFX_OBJECT_RENDER_TARGET] = &s_gfx.render_target_pool};
     for (uint32_t k = NT_GFX_OBJECT_SHADER; k <= NT_GFX_OBJECT_RENDER_TARGET; k++) {
         if (label_pools[k] != NULL) {

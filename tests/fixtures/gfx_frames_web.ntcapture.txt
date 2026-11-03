@@ -1,5 +1,5 @@
 ntcapture 3
-frame sequence=9 platform=web records=29 overflow=0 execute=23..29
+frame sequence=5 platform=web records=29 overflow=0 execute=23..29
 counter stream_bytes=88
 counter accepted.PASS=1
 counter accepted.END_PASS=1
@@ -13,7 +13,7 @@ counter gl.glEnable=1
 0 INITIAL op=STATE layer=FRONTEND
 1 INITIAL op=SCISSOR_ENABLE integers=[1]
 2 INITIAL op=SCISSOR integers=[160,270,640,360]
-3 DEFINITION op=CREATE obj=BUFFER:65537 size=16384 backend=1 usage=2
+3 DEFINITION op=CREATE obj=BUFFER:65537 size=16384 backend=1 usage=2 label="frame_uniform"
 4 INITIAL op=STATE layer=BACKEND args=[0,0,0,33984,1280,720,2,3]
 5 INITIAL op=VIEWPORT integers=[0,0,1280,720]
 6 INITIAL op=PASS color=[0.9,0.55,0.1,1] depth=1
@@ -40,7 +40,7 @@ counter gl.glEnable=1
 27   BACKEND op=STATE call=glClearColor link=@21 values=[0.9,0.55,0.1,1]
 28   BACKEND op=STATE call=glClear link=@21 args=[16384]
 ntcapture 3
-frame sequence=10 platform=web records=29 overflow=0 execute=23..29
+frame sequence=6 platform=web records=29 overflow=0 execute=23..29
 counter stream_bytes=88
 counter accepted.PASS=1
 counter accepted.END_PASS=1
@@ -54,7 +54,7 @@ counter gl.glEnable=1
 0 INITIAL op=STATE layer=FRONTEND
 1 INITIAL op=SCISSOR_ENABLE integers=[1]
 2 INITIAL op=SCISSOR integers=[160,270,640,360]
-3 DEFINITION op=CREATE obj=BUFFER:65537 size=16384 backend=1 usage=2
+3 DEFINITION op=CREATE obj=BUFFER:65537 size=16384 backend=1 usage=2 label="frame_uniform"
 4 INITIAL op=STATE layer=BACKEND args=[0,0,0,33984,1280,720,2,3]
 5 INITIAL op=VIEWPORT integers=[0,0,1280,720]
 6 INITIAL op=PASS color=[0.9,0.55,0.1,1] depth=1
