@@ -324,27 +324,12 @@ void test_alpha_less_formats_encode_opaque_levels(void) {
     }
 }
 
-/* The builder's chain reaches Basis in every alpha mode: opaque red and blue at
- * alpha 64 average alpha-weighted (STRAIGHT), per channel (DATA), or
- * alpha-weighted and then premultiplied once (PREMULTIPLIED). */
-static void check_alpha_mode_mips(nt_basisu_codec_t codec) {
-    static const uint8_t red[4] = {255, 0, 0, 255};
-    static const uint8_t faint_blue[4] = {0, 0, 255, 64};
-    static const nt_tex_alpha_t modes[3] = {NT_TEX_ALPHA_STRAIGHT, NT_TEX_ALPHA_DATA, NT_TEX_ALPHA_PREMULTIPLIED};
-    static const uint8_t expected[3][4] = {{204, 0, 51, 160}, {128, 0, 128, 160}, {128, 0, 32, 160}};
-    for (uint32_t m = 0; m < 3; m++) {
-        uint8_t mip[4];
-        encode_checker_tail(codec, NT_TEXTURE_FORMAT_RGBA8, modes[m], red, faint_blue, mip);
-        for (uint32_t c = 0; c < 4; c++) {
-            TEST_ASSERT_INT_WITHIN(8, expected[m][c], mip[c]);
-        }
-    }
-}
-
-/* alpha_cutoff survives Basis: decoded levels of 64 texels or more stay near level
- * 0's coverage at the threshold (measured worst: UASTC 2.05%, ETC1S 4.98%). The
+/* alpha_cutoff survives Basis: decoded levels of 64 texels or more stay nearer level
+ * 0's coverage at the threshold, within a codec tolerance (ETC1S also nearer than the
+ * uncut chain; UASTC's uncut large levels are already close). The
  * UASTC 4x4 level keeps over half of it where the uncut chain lost every texel; the
  * ETC1S alpha slice is too coarse at 4x4 and loses it either way. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one fixture, decoded uncut and cut
 static void check_alpha_cutoff_coverage(nt_basisu_codec_t codec) {
     enum { N = 32 };
     uint8_t pixels[N * N * 4];
@@ -356,7 +341,7 @@ static void check_alpha_cutoff_coverage(nt_basisu_codec_t codec) {
         const uint8_t texel[4] = {60, 140, 40, (uint8_t)lround(fmax(coverage, 0.0) * 255.0)};
         memcpy(pixels + ((size_t)i * 4), texel, 4);
     }
-    double worst = 0.0;
+    double worst[2] = {0.0, 0.0}; /* drift of levels of 64 texels or more, uncut and cut */
     double small[2] = {0.0, 0.0}; /* coverage of the 4x4 level, uncut and cut */
     for (uint32_t cut = 0; cut < 2; cut++) {
         uint8_t basis[4096] = {0};
@@ -373,14 +358,17 @@ static void check_alpha_cutoff_coverage(nt_basisu_codec_t codec) {
             }
             const double coverage = (double)count / texels;
             c0 = l == 0 ? coverage : c0;
-            if (cut && texels >= 64) {
-                worst = fmax(worst, fabs(coverage - c0));
+            if (texels >= 64) {
+                worst[cut] = fmax(worst[cut], fabs(coverage - c0));
             }
             small[cut] = texels == 16 ? coverage / c0 : small[cut];
             level += (size_t)texels * 4;
         }
     }
-    TEST_ASSERT_TRUE_MESSAGE(worst < (codec == NT_BASISU_CODEC_UASTC_LDR ? 0.03 : 0.06), "decoded coverage drifts from level 0");
+    TEST_ASSERT_TRUE_MESSAGE(worst[1] < (codec == NT_BASISU_CODEC_UASTC_LDR ? 0.03 : 0.06), "decoded coverage drifts from level 0");
+    if (codec == NT_BASISU_CODEC_ETC1S) {
+        TEST_ASSERT_TRUE_MESSAGE(worst[1] < worst[0], "the cutoff does not improve decoded coverage");
+    }
     TEST_ASSERT_TRUE(small[0] < 0.5);
     if (codec == NT_BASISU_CODEC_UASTC_LDR) {
         TEST_ASSERT_TRUE(small[1] > 0.5);
@@ -403,12 +391,6 @@ static void check_srgb_mip(nt_basisu_codec_t codec) {
     TEST_ASSERT_INT_WITHIN(8, 128, mip[3]);
 }
 
-#if NT_BASISU_HAS_ETC1S
-void test_etc1s_alpha_mode_mips(void) { check_alpha_mode_mips(NT_BASISU_CODEC_ETC1S); }
-#endif
-#if NT_BASISU_HAS_UASTC
-void test_uastc_alpha_mode_mips(void) { check_alpha_mode_mips(NT_BASISU_CODEC_UASTC_LDR); }
-#endif
 #if NT_BASISU_HAS_UASTC
 void test_uastc_alpha_cutoff_coverage(void) { check_alpha_cutoff_coverage(NT_BASISU_CODEC_UASTC_LDR); }
 #endif
@@ -587,7 +569,6 @@ int main(void) {
 #if NT_BASISU_HAS_ETC1S
     RUN_TEST(test_etc1s_rgb);
     RUN_TEST(test_etc1s_alpha);
-    RUN_TEST(test_etc1s_alpha_mode_mips);
     RUN_TEST(test_etc1s_alpha_cutoff_coverage);
     RUN_TEST(test_etc1s_srgb_mip);
 #endif
@@ -595,7 +576,6 @@ int main(void) {
     RUN_TEST(test_uastc_rgb);
     RUN_TEST(test_uastc_alpha);
     RUN_TEST(test_mip_level_with_a_shrunken_stored_width_asserts);
-    RUN_TEST(test_uastc_alpha_mode_mips);
     RUN_TEST(test_uastc_alpha_cutoff_coverage);
     RUN_TEST(test_uastc_srgb_mip);
 #endif

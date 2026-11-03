@@ -2320,6 +2320,22 @@ void test_texture_alpha_cutoff_tie_keeps_the_level(void) {
     free(cut);
 }
 
+/* Equidistant coverages take the larger split byte. Level 0 covers 1/2 at T = 128;
+ * level 1 {125, 118, 118, 110} reaches 1/4 (splits 119..125) or 3/4 (111..118) but
+ * never 1/2, so only texel 0 passes. */
+void test_texture_alpha_cutoff_tie_takes_the_larger_split(void) {
+    const uint8_t row[32] = {9, 9, 9, 250, 9, 9, 9, 0, 9, 9, 9, 236, 9, 9, 9, 0, 9, 9, 9, 236, 9, 9, 9, 0, 9, 9, 9, 220, 9, 9, 9, 0};
+    nt_tex_opts_t opts = straight_baked_opts();
+    opts.process.alpha = NT_TEX_ALPHA_DATA;
+    opts.process.alpha_cutoff = 0.5F;
+    NtTextureAssetHeader hdr;
+    uint8_t *asset = encode_mips_asset(row, 8, 1, &opts, &hdr);
+    for (uint32_t x = 0; x < 4; x++) {
+        TEST_ASSERT_EQUAL(x == 0, asset_texel(asset, &hdr, 1, x, 0)[3] >= 128);
+    }
+    free(asset);
+}
+
 /* The scale centres the threshold in the gap: level 0 alpha {0, 255, 71, 255} covers
  * 1/2 at T = 128; level 1 {128, 163} must drop to 1/2, with the kept texel and the
  * dropped one each at least 8 steps from T, so a block codec's error cannot flip them. */
@@ -11692,6 +11708,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_texture_process_opts_contract);
     RUN_TEST(test_texture_alpha_cutoff_keeps_the_closest_coverage);
     RUN_TEST(test_texture_alpha_cutoff_tie_keeps_the_level);
+    RUN_TEST(test_texture_alpha_cutoff_tie_takes_the_larger_split);
     RUN_TEST(test_texture_alpha_cutoff_centres_the_threshold);
     RUN_TEST(test_texture_alpha_cutoff_can_cover_nothing);
     RUN_TEST(test_texture_alpha_cutoff_lifts_only_dilated_colour);
