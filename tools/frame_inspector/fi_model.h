@@ -224,8 +224,9 @@ typedef struct {
 } fi_alias_t;
 
 fi_alias_t fi_alias(const fi_frame_t *frame, uint32_t kind, uint32_t object);
-/* src on one line, control bytes as \xNN, cut to fit size. */
-void fi_one_line(const char *src, char *buf, size_t size);
+/* src on one line, cut to fit size on a whole escape: control bytes as \xNN, and for a token (an alias label)
+ * also space, quote, backslash and non-ASCII bytes, so the text splits on spaces. */
+void fi_one_line(const char *src, char *buf, size_t size, bool token);
 /* Group g of frame `from` in frame `to`: the same marker path and note; FI_NONE when `to` has none. */
 uint32_t fi_group_in(const fi_frame_t *to, const fi_frame_t *from, uint32_t g);
 /* The tree parent of a record or phase; FI_NONE above the frame. */

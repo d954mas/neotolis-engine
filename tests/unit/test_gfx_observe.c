@@ -1283,11 +1283,9 @@ static void record_with_strings(uint32_t spare) {
 static void test_strings_that_do_not_fit_publish_nothing(void) {
     record_with_strings(3); /* "n" fits, the key "k" does not */
     uint32_t before = nt_test_capture_open().count;
-    const uint32_t string_bytes = g_nt_gfx_capture.view.string_bytes;
     NT_GFX_NOTE("n", NT_NOTE_U32("k", 1U));
     TEST_ASSERT_TRUE(g_nt_gfx_capture.view.overflow);
     TEST_ASSERT_EQUAL_UINT32(before, nt_test_capture_open().count);
-    TEST_ASSERT_EQUAL_UINT32(string_bytes, g_nt_gfx_capture.view.string_bytes); /* "n" leaves with its note */
 
     record_with_strings(1); /* a marker name that does not fit: no MARKER_PUSH with an empty name */
     before = nt_test_capture_open().count;

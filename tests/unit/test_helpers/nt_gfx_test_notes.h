@@ -44,7 +44,7 @@ static inline uint32_t nt_test_note_u32(uint32_t note, const char *key) {
 
 static inline const char *nt_test_note_str(uint32_t note, const char *key) {
     const nt_gfx_event_t *field = nt_test_note_field(note, key);
-    return field != NULL && field->field.type == NT_GFX_NOTE_STR ? g_nt_gfx_capture.strings + field->field.value.str : "";
+    return field != NULL && field->field.type == NT_GFX_NOTE_STR ? nt_test_capture_open().strings + field->field.value.str : "";
 }
 
 /* Result of the first draw after the NOTE at index note and before the next NOTE; NT_GFX_RESULT_NONE when none. */

@@ -326,15 +326,16 @@ static void test_compare_names_groups_only_one_frame_has(void) {
     assert_holds(text, "\n- @200    -       ");
 }
 
-/* A labeled handle shows kind, label and number; a label too long for the alias is cut, never the number, and a
- * control byte shows escaped. */
+/* A labeled handle shows kind, label and number as one token: a space or control byte shows escaped, and a label
+ * too long for the alias is cut on a whole escape, never into the number. */
 static void test_aliases_show_labels(void) {
     char text[512];
-    char label[201];
-    memset(label, 'x', 200);
-    label[200] = '\0';
+    char label[210];
+    memset(label, 'x', sizeof(label) - 1U);
+    memcpy(label + 98, "\\x0a", 4); /* its escape is the last that fits */
+    label[sizeof(label) - 1U] = '\0';
     const int len = snprintf(text, sizeof(text),
-                             "ntcapture 3\nframe sequence=1 platform=native records=3 overflow=0 execute=0..0\n0 DEFINITION op=CREATE obj=BUFFER:65537 label=\"mesh\\x0a\"\n"
+                             "ntcapture 3\nframe sequence=1 platform=native records=3 overflow=0 execute=0..0\n0 DEFINITION op=CREATE obj=BUFFER:65537 label=\"mesh one\\x0a\"\n"
                              "1 DEFINITION op=CREATE obj=BUFFER:65538 label=\"%s\"\n2 OP op=UBO obj=BUFFER:65538\n",
                              label);
     fi_file_t file = {0};
@@ -345,9 +346,9 @@ static void test_aliases_show_labels(void) {
     TEST_ASSERT_NULL(file.frames[0].error);
     char alias[FI_ALIAS_LEN];
     fi_alias_text(&file.frames[0], NT_GFX_OBJECT_BUFFER, 65537, alias, sizeof(alias));
-    TEST_ASSERT_EQUAL_STRING("buf/mesh\\x0a#1", alias);
+    TEST_ASSERT_EQUAL_STRING("buf/mesh\\x20one\\x0a#1", alias);
     fi_alias_text(&file.frames[0], NT_GFX_OBJECT_BUFFER, 65538, alias, sizeof(alias));
-    TEST_ASSERT_EQUAL_STRING("#1", alias + strlen(alias) - 2U);
+    TEST_ASSERT_EQUAL_STRING("\\x0a#1", alias + strlen(alias) - 6U);
     TEST_ASSERT_EQUAL_MEMORY("buf/xxxx", alias, 8);
     fi_file_close(&file);
 }

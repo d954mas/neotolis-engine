@@ -120,13 +120,11 @@ static fi_frame_t *push_frame(fi_file_t *file, uint32_t *cap) {
     return fr;
 }
 
-/* src with control bytes as \xNN, as capture text prints them: a file name or group key stays one line in
- * an answer. */
-void fi_one_line(const char *src, char *buf, size_t size) {
+void fi_one_line(const char *src, char *buf, size_t size, bool token) {
     size_t n = 0;
     for (const char *c = src; *c != '\0' && n + 5U < size; c++) {
         const uint8_t b = (uint8_t)*c;
-        if (b < 0x20U || b == 0x7fU) {
+        if (b < 0x20U || b == 0x7fU || (token && (b == ' ' || b == '"' || b == '\\' || b > 0x7eU))) {
             n += (size_t)snprintf(buf + n, size - n, "\\x%02x", b);
         } else {
             buf[n++] = *c;
@@ -140,20 +138,17 @@ void fi_file_load(fi_file_t *file, const char *name, char *text, size_t len) {
     memset(file, 0, sizeof(*file));
     const size_t name_size = (strlen(name) * 4U) + 5U;
     file->name = (char *)fi_alloc(name_size, 1);
-    fi_one_line(name, file->name, name_size);
+    fi_one_line(name, file->name, name_size, false);
     file->text = text;
     file->len = len;
     /* Records are the lines that start with their index: a file of empty lines asks for no memory. A document's
-     * strings take at most its length plus one. */
+     * strings never outgrow its text. */
     uint32_t records = 1;
-    uint32_t documents = 1;
     for (size_t i = 0; i < len; i++) {
-        const bool line = i == 0 || text[i - 1] == '\n';
-        records += line && text[i] >= '0' && text[i] <= '9';
-        documents += line && text[i] == 'n';
+        records += (i == 0 || text[i - 1] == '\n') && text[i] >= '0' && text[i] <= '9';
     }
     file->events = (nt_gfx_event_t *)fi_alloc(records, sizeof(nt_gfx_event_t));
-    const uint32_t string_cap = (uint32_t)len + documents;
+    const uint32_t string_cap = (uint32_t)len + 1U;
     file->strings = (char *)fi_alloc(string_cap, 1);
     uint32_t used = 0;
     uint32_t string_used = 0;
@@ -274,7 +269,7 @@ static uint32_t intern_group(fi_frame_t *fr, uint32_t *slot, uint32_t mask, uint
     const char *base = parent != 0 ? fr->group_key[parent] : "";
     const char *sep = note ? " > " : "/";
     char shown[FI_KEY_LEN];
-    fi_one_line(label, shown, sizeof(shown));
+    fi_one_line(label, shown, sizeof(shown), false);
     (void)snprintf(fr->group_key[g], FI_KEY_LEN, "%s%s%s", base, parent != 0 || note ? sep + (parent == 0) : "", shown); /* "> ui" at the top */
     return g;
 }

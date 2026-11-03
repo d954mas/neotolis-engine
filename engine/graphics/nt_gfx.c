@@ -380,7 +380,6 @@ void nt_gfx_note_record(const char *label, const nt_gfx_note_field_t *fields, ui
         capture->view.overflow = true;
         return;
     }
-    const uint32_t string_bytes = capture->view.string_bytes;
     nt_gfx_event_t *note = &capture->events[capture->view.count];
     memset(note, 0, (size_t)(count + 1U) * sizeof(*note));
     note->note.kind = NT_GFX_EVENT_NOTE;
@@ -388,9 +387,7 @@ void nt_gfx_note_record(const char *label, const nt_gfx_note_field_t *fields, ui
     for (uint32_t i = 0; i < count; i++) {
         copy_note_field(&note[i + 1U], &fields[i]);
     }
-    if (capture->view.overflow) {
-        capture->view.string_bytes = string_bytes; /* the strings of a note left unpublished */
-    } else {
+    if (!capture->view.overflow) {
         capture->view.count += count + 1U;
     }
 }
@@ -606,13 +603,15 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     s_gfx.texture_metas = (nt_gfx_texture_meta_t *)calloc(desc->max_textures + 1, sizeof(nt_gfx_texture_meta_t));
     s_gfx.render_target_metas = (nt_gfx_render_target_meta_t *)calloc(max_render_targets + 1, sizeof(nt_gfx_render_target_meta_t));
 #if NT_GFX_CAPTURE_ENABLED
-    s_gfx.labels[NT_GFX_OBJECT_SHADER] = (const char **)calloc(desc->max_shaders + 1, sizeof(const char *));
-    s_gfx.labels[NT_GFX_OBJECT_PROGRAM] = (const char **)calloc(desc->max_programs + 1, sizeof(const char *));
-    s_gfx.labels[NT_GFX_OBJECT_PIPELINE] = (const char **)calloc(desc->max_pipelines + 1, sizeof(const char *));
-    s_gfx.labels[NT_GFX_OBJECT_VERTEX_INPUT] = (const char **)calloc(desc->max_vertex_inputs + 1, sizeof(const char *));
-    s_gfx.labels[NT_GFX_OBJECT_BUFFER] = (const char **)calloc(desc->max_buffers + 1, sizeof(const char *));
-    s_gfx.labels[NT_GFX_OBJECT_TEXTURE] = (const char **)calloc(desc->max_textures + 1, sizeof(const char *));
-    s_gfx.labels[NT_GFX_OBJECT_RENDER_TARGET] = (const char **)calloc(max_render_targets + 1, sizeof(const char *));
+    const nt_pool_t *const label_pools[] = {[NT_GFX_OBJECT_SHADER] = &s_gfx.shader_pool,        [NT_GFX_OBJECT_PROGRAM] = &s_gfx.program_pool, [NT_GFX_OBJECT_PIPELINE] = &s_gfx.pipeline_pool,
+                                            [NT_GFX_OBJECT_VERTEX_INPUT] = &s_gfx.vertex_input_pool, [NT_GFX_OBJECT_BUFFER] = &s_gfx.buffer_pool, [NT_GFX_OBJECT_TEXTURE] = &s_gfx.texture_pool,
+                                            [NT_GFX_OBJECT_RENDER_TARGET] = &s_gfx.render_target_pool};
+    for (uint32_t k = NT_GFX_OBJECT_SHADER; k <= NT_GFX_OBJECT_RENDER_TARGET; k++) {
+        if (label_pools[k] != NULL) {
+            s_gfx.labels[k] = (const char **)calloc(label_pools[k]->capacity + 1U, sizeof(const char *));
+            NT_ASSERT(s_gfx.labels[k] != NULL && "gfx init: out of memory");
+        }
+    }
 #endif
 
     /* The init frame only loads: passes wait for the host's begin_frame. */

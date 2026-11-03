@@ -248,6 +248,15 @@ static void test_a_frame_block_holds_its_strings(void) {
     TEST_ASSERT_EQUAL_UINT32(26, first_record(frame_at(2)));
 }
 
+/* A frame whose strings alone pass the ring asserts instead of wrapping the size check. */
+static void test_a_frame_larger_than_the_ring_asserts(void) {
+    nt_gfx_capture_view_t view = {.events = s_source, .count = 1, .strings = "", .string_bytes = (NT_DEVAPI_GFX_RING_RECORDS + 1U) * (uint32_t)sizeof(nt_gfx_event_t)};
+    NT_TEST_EXPECT_ASSERT(store_frame(&view, 0, false));
+    view.string_bytes = (NT_DEVAPI_GFX_RING_RECORDS - 1U) * (uint32_t)sizeof(nt_gfx_event_t); /* with 2 records, one over */
+    view.count = 2;
+    NT_TEST_EXPECT_ASSERT(store_frame(&view, 0, false));
+}
+
 static void test_recorded_frames_stay_gapless_over_many_wraps(void) {
     record(true);
     for (int i = 0; i < 40; i++) {
@@ -566,6 +575,7 @@ int main(void) {
     RUN_TEST(test_recording_while_paused_stores_no_advanced_frame);
     RUN_TEST(test_ring_wraps_and_evicts_through_the_newest_overlap);
     RUN_TEST(test_a_frame_block_holds_its_strings);
+    RUN_TEST(test_a_frame_larger_than_the_ring_asserts);
     RUN_TEST(test_recorded_frames_stay_gapless_over_many_wraps);
     RUN_TEST(test_switch_rows);
     RUN_TEST(test_off_lists_after_the_frame_just_ended_is_stored);

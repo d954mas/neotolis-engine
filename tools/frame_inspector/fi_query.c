@@ -130,8 +130,8 @@ void fi_alias_text(const fi_frame_t *frame, uint32_t kind, uint32_t object, char
     } else if (a.label[0] == '\0') {
         (void)snprintf(buf, size, "%s#%u", alias_prefix(kind), a.ordinal);
     } else {
-        char label[FI_ALIAS_LEN];
-        fi_one_line(a.label, label, size > 24U && size - 24U < sizeof(label) ? size - 24U : sizeof(label)); /* whole escapes; the number always fits */
+        char label[FI_ALIAS_LEN - 24U]; /* room left for the kind, '/', '#' and the number */
+        fi_one_line(a.label, label, sizeof(label), true);
         (void)snprintf(buf, size, "%s/%s#%u", alias_prefix(kind), label, a.ordinal);
     }
 }

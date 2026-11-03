@@ -366,7 +366,7 @@ range, or depth-sampling comparison state.
 
 **Cache identity.** gfx deduplicates pipelines: `nt_gfx_make_pipeline`
 returns the live pipeline whose descriptor has the same exact identity, or
-creates one. The label is not identity: a hit returns the first creator's pipeline and label. A
+creates one. The label is not identity. A
 latched context loss returns invalid before the lookup. A hit needs no other
 check: destroying a program and a context loss clear its pipelines' keys, so a
 live entry has a live program, and its state passed validation at creation.
@@ -1337,14 +1337,10 @@ published; strings have no length limit of their own.
 Every desc `label` and `nt_gfx_make_program`'s label is a debug name in static
 storage: capture builds keep the pointer per live object and copy the text into each
 recorded frame. A create's resource `DEFINITION` and every later begin_frame snapshot
-carry it in `resource.label`; the OP record of the create does not.
-Every create stores its label, none included, so a reused slot never shows an earlier
-object's. A cache hit (pipelines, samplers) keeps the first creator's label: the label
-is not identity. Samplers gfx makes for textures are unlabeled, so a labeled sampler
-whose key equals one of them stays unlabeled. Instance layouts have no label.
-Capture-OFF builds keep no per-object label table. The snapshot copies every live
-object's label into each recorded frame, so `capture_string_capacity` covers those
-labels plus the frame's note text (sprite notes take about 30 bytes each).
+carry it in `resource.label`; the OP record of the create does not. A cache hit
+(pipelines, samplers) keeps the first creator's label, and samplers gfx makes for
+textures have none. Instance layouts have no label. `capture_string_capacity` covers
+the snapshot's labels plus the frame's note text (sprite notes take about 30 bytes each).
 
 A note describes the frontend records after it until the next note or marker.
 Immediate operations (creates, uploads) record their backend calls at the call,
@@ -1464,10 +1460,10 @@ both platforms.
 the start of `text` (not terminated) back into records, strings and a view. The text is
 untrusted: nothing in it asserts, and every number, name, string and reference is checked
 against the record layout, so whatever it accepts formats without asserting. It allocates
-nothing: every record is one line and a document's string bytes are at most its length plus
-one, so a caller sizes one record array from a file's line count and one string array from
-its length plus its documents, parses each document into the free tails and continues at
-`next` past the document's `count` records and `string_bytes`. One
+nothing: every record is one line and a document's strings never outgrow its text, so a
+caller sizes one record array from a file's line count and one string array from its length
+plus one, parses each document into the free tails and continues at `next` past the
+document's `count` records and `string_bytes`. One
 rule decides what survives an error, reported as a static message and a byte offset
 (`error`, `error_at`):
 

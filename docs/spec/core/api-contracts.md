@@ -174,7 +174,7 @@ the restore a lost program asserts. Binding a pipeline whose program is not
 ready asserts.
 
 `nt_gfx_make_pipeline` is get-or-create: a descriptor equal to a live
-pipeline's (the label is not identity: the first creator's label stays) returns that
+pipeline's (the label is not identity) returns that
 handle and records a `CACHE` result. gfx owns pipelines; there is no pipeline
 destroy. A pipeline lives until its program is destroyed, a context loss, or
 `nt_gfx_shutdown`, so `max_pipelines` budgets every distinct state made

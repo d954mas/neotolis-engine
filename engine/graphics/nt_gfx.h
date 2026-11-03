@@ -403,7 +403,7 @@ typedef struct {
     bool polygon_offset;         /* enable GL_POLYGON_OFFSET_FILL */
     float polygon_offset_factor; /* glPolygonOffset factor (typically 1.0) */
     float polygon_offset_units;  /* glPolygonOffset units (typically 1.0) */
-    const char *label;           /* debug name; static storage; not identity: an equal desc returns the first creator's pipeline and label */
+    const char *label;           /* debug name; static storage; not identity */
 } nt_pipeline_desc_t;
 
 typedef struct {
@@ -447,7 +447,7 @@ typedef struct {
      * through a comparison sampler for the shadow lookup and through a plain
      * sampler for a raw-depth view. Non-NONE requires DEPTH* storage. */
     nt_compare_func_t compare_func;
-    const char *label; /* debug name; static storage; not identity: an equal desc returns the first creator's sampler and label */
+    const char *label; /* debug name; static storage; not identity */
 } nt_sampler_desc_t;
 
 /* The target borrows live single-level textures of one size; an invalid handle
