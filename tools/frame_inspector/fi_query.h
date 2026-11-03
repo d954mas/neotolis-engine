@@ -37,13 +37,39 @@ typedef struct {
     char meaning[96];
     uint8_t section; /* fi_section_t */
     fi_query_t q;
+    bool sum; /* the value is the query's sum (bytes, vertices), not its record count */
     uint64_t value;
 } fi_number_t;
 #define FI_NUMBERS (32U + (FI_OBJECTS * FI_RES_COUNT * 2U) + ((uint32_t)NT_GFX_OP_COUNT * (FI_RESULTS + 3U)) + (uint32_t)NT_GFX_GL_COUNT)
 /* all: zeros too, so a key stays valid on any frame; without it only the numbers worth showing. */
 uint32_t fi_numbers(const fi_frame_t *frame, bool all, fi_number_t out[FI_NUMBERS]);
+/* The same number in another frame: keys are the same on every frame. */
+uint64_t fi_number_in(const fi_frame_t *frame, const fi_number_t *number);
+/* B's numbers with each one's value in A, for Compare: order runs by section and, in each, by the size of
+ * the change, biggest first, so equal numbers come last. */
+typedef struct {
+    fi_number_t number[FI_NUMBERS];
+    uint64_t was[FI_NUMBERS];
+    uint32_t order[FI_NUMBERS];
+    uint32_t count;
+} fi_number_diff_t;
+void fi_number_diff(const fi_frame_t *a, const fi_frame_t *b, fi_number_diff_t *out);
+/* What changed in a changed pair of fi_diff, e.g. "CACHE -> ACCEPTED; break: merged -> a command recorded between"
+ * or, for arguments other than a draw's range, A's request: "A: VIEWPORT integers=[0,0,1280,720]". */
+void fi_change_text(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_row_t *row, char *buf, size_t size);
+/* What sets a compared group apart, e.g. "only in A; requests 3 -> 4; 2 of 9 requests differ"; empty when
+ * nothing does. */
+void fi_group_change_text(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_group_t *group, char *buf, size_t size);
+/* From row r of a group: the end of the run of same rows there when it shows as one line (three or more), else r. */
+uint32_t fi_diff_fold(const fi_diff_t *diff, const fi_diff_group_t *group, uint32_t r);
+/* fi_metric_t names for people. */
+extern const char *const fi_metric_names[FI_METRIC_COUNT];
 /* Whether a group holds draw requests, GL calls or drops: groups and the Information page show only these. */
 bool fi_group_has_work(const fi_frame_t *frame, uint32_t group);
+/* A group's fi_metric_t value; 0 for group FI_NONE, the frame a compared group is missing from. */
+uint64_t fi_group_metric(const fi_frame_t *frame, uint32_t group, uint32_t metric);
+/* Whether a compared group differs: only one frame has it, a metric or a request differs. */
+bool fi_group_differs(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_group_t *group);
 
 /* Text appended to a malloc'd buffer that grows; the caller frees text. */
 typedef struct {

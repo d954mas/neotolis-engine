@@ -396,6 +396,7 @@ static void number(numbers_t *ns, fi_query_t q, bool sum, const char *key, const
     (void)snprintf(x->meaning, sizeof(x->meaning), "%s", meaning);
     x->section = ns->section;
     x->q = q;
+    x->sum = sum;
     x->value = value;
 }
 
@@ -505,9 +506,141 @@ uint32_t fi_numbers(const fi_frame_t *frame, bool all, fi_number_t out[FI_NUMBER
     return ns.n;
 }
 
+uint64_t fi_number_in(const fi_frame_t *frame, const fi_number_t *number) {
+    const fi_cell_t c = fi_cell(frame, number->q);
+    return number->sum ? c.sum : c.n;
+}
+
+static uint64_t gap(uint64_t x, uint64_t y) { return x > y ? x - y : y - x; }
+
+void fi_number_diff(const fi_frame_t *a, const fi_frame_t *b, fi_number_diff_t *out) {
+    out->count = fi_numbers(b, true, out->number);
+    for (uint32_t k = 0; k < out->count; k++) { /* fi_numbers lists them by section: sort inside each */
+        out->was[k] = fi_number_in(a, &out->number[k]);
+        const uint64_t change = gap(out->was[k], out->number[k].value);
+        uint32_t at = k;
+        for (; at > 0; at--) {
+            const uint32_t prev = out->order[at - 1U];
+            if (out->number[prev].section != out->number[k].section || gap(out->was[prev], out->number[prev].value) >= change) {
+                break;
+            }
+            out->order[at] = prev;
+        }
+        out->order[at] = k;
+    }
+}
+
+static void appendf(char *buf, size_t size, size_t *at, const char *fmt, ...) NT_PRINTF_ATTR(4, 5);
+static void appendf(char *buf, size_t size, size_t *at, const char *fmt, ...) {
+    if (*at + 1U >= size) {
+        return;
+    }
+    va_list args;
+    va_start(args, fmt);
+    const int n = vsnprintf(buf + *at, size - *at, fmt, args);
+    va_end(args);
+    if (n > 0) {
+        *at = *at + (size_t)n < size ? *at + (size_t)n : size - 1U;
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void fi_change_text(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_row_t *row, char *buf, size_t size) {
+    const nt_gfx_event_t *x = &a->view.events[row->a];
+    const nt_gfx_event_t *y = &b->view.events[row->b];
+    size_t at = 0;
+    buf[0] = '\0';
+    const char *sep = "";
+    if ((row->change & FI_CHANGE_RESULT) != 0) {
+        appendf(buf, size, &at, "%s -> %s", nt_gfx_result_name(x->result), nt_gfx_result_name(y->result));
+        sep = "; ";
+    }
+    if ((row->change & FI_CHANGE_MERGE) != 0) {
+        appendf(buf, size, &at, "%sbreak: %s -> %s", sep, fi_break_name((fi_break_t)a->brk[row->a]), fi_break_name((fi_break_t)b->brk[row->b]));
+        sep = "; ";
+    }
+    if ((row->change & FI_CHANGE_CALLS) != 0) {
+        appendf(buf, size, &at, "%sGL calls %u -> %u", sep, row->calls_a, row->calls_b);
+        sep = "; ";
+    }
+    if ((row->change & FI_CHANGE_ITEMS) != 0) {
+        appendf(buf, size, &at, "%s%s differ", sep, x->kind == NT_GFX_EVENT_NOTE ? "fields" : "its records");
+        sep = "; ";
+    }
+    if ((row->change & FI_CHANGE_ARGS) == 0) {
+        return;
+    }
+    if (!fi_is_draw(x)) { /* A's request; B's is on the row */
+        char was[256];
+        fi_row_text(a, row->a, was, sizeof(was));
+        appendf(buf, size, &at, "%sA: %s", sep, was);
+        return;
+    }
+    static const char *const k_names[] = {"first", "count", "vertices", "instances"};
+    const uint32_t xs[] = {x->data.draw.first, x->data.draw.count, x->data.draw.vertices, x->data.draw.instances};
+    const uint32_t ys[] = {y->data.draw.first, y->data.draw.count, y->data.draw.vertices, y->data.draw.instances};
+    for (uint32_t k = 0; k < 4U; k++) {
+        if (xs[k] != ys[k]) {
+            appendf(buf, size, &at, "%s%s %u -> %u", sep, k_names[k], xs[k], ys[k]);
+            sep = "; ";
+        }
+    }
+}
+
 bool fi_group_has_work(const fi_frame_t *frame, uint32_t group) {
     const fi_cell_t *c = &frame->summary.group[(size_t)group * FI_METRIC_COUNT];
     return c[FI_METRIC_DRAWS].n + c[FI_METRIC_CALLS].n + c[FI_METRIC_DROPS].n > 0;
+}
+
+uint64_t fi_group_metric(const fi_frame_t *frame, uint32_t group, uint32_t metric) {
+    if (group == FI_NONE) {
+        return 0;
+    }
+    const fi_cell_t *c = &frame->summary.group[((size_t)group * FI_METRIC_COUNT) + metric];
+    return metric == FI_METRIC_BYTES ? c->sum : c->n;
+}
+
+const char *const fi_metric_names[FI_METRIC_COUNT] = {"requests", "GL draws", "GL calls", "upload B", "drops"};
+
+void fi_group_change_text(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_group_t *group, char *buf, size_t size) {
+    size_t at = 0;
+    buf[0] = '\0';
+    const char *sep = "";
+    if (group->a == FI_NONE || group->b == FI_NONE) {
+        appendf(buf, size, &at, "only in %s", group->a == FI_NONE ? "B" : "A");
+        sep = "; ";
+    }
+    for (uint32_t m = 0; m < FI_METRIC_COUNT; m++) {
+        const uint64_t va = fi_group_metric(a, group->a, m);
+        const uint64_t vb = fi_group_metric(b, group->b, m);
+        if (va != vb) {
+            appendf(buf, size, &at, "%s%s %llu -> %llu", sep, fi_metric_names[m], (unsigned long long)va, (unsigned long long)vb);
+            sep = "; ";
+        }
+    }
+    if (group->differ > 0) {
+        appendf(buf, size, &at, "%s%u of %u requests differ", sep, group->differ, group->count);
+        sep = "; ";
+    }
+    if (!group->aligned) {
+        appendf(buf, size, &at, "%stoo different to align: A's requests, then B's", sep);
+    }
+}
+
+uint32_t fi_diff_fold(const fi_diff_t *diff, const fi_diff_group_t *group, uint32_t r) {
+    uint32_t end = r;
+    while (end < group->first + group->count && diff->row[end].kind == FI_DIFF_SAME) {
+        end++;
+    }
+    return end - r >= 3U ? end : r;
+}
+
+bool fi_group_differs(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_group_t *group) {
+    bool differ = group->differ > 0 || group->a == FI_NONE || group->b == FI_NONE;
+    for (uint32_t m = 0; m < FI_METRIC_COUNT && !differ; m++) {
+        differ = fi_group_metric(a, group->a, m) != fi_group_metric(b, group->b, m);
+    }
+    return differ;
 }
 // #endregion
 
@@ -557,6 +690,8 @@ static bool cmd_frame(fi_session_t *q, const char *arg, fi_out_t *out) {
     return false;
 }
 
+static const char *const k_sections[] = {"frame", "draws", "uploads", "resources", "operations", "gl calls"};
+
 static void cmd_summary(const fi_frame_t *fr, fi_out_t *out) {
     static fi_number_t numbers[FI_NUMBERS];
     static fi_counter_row_t rows[FI_COUNTER_ROWS];
@@ -572,7 +707,6 @@ static void cmd_summary(const fi_frame_t *fr, fi_out_t *out) {
         put(out, "merge_rule_mismatch @%u  # the inspector's merge rule is out of date from this draw\n", fr->merge_mismatch);
     }
     const uint32_t n = fi_numbers(fr, false, numbers);
-    static const char *const k_sections[] = {"frame", "draws", "uploads", "resources", "operations", "gl calls"};
     for (uint32_t k = 0; k < n; k++) {
         if (k == 0 || numbers[k].section != numbers[k - 1U].section) {
             put(out, "# == %s\n", k_sections[numbers[k].section]);
@@ -782,6 +916,155 @@ static bool key_query(const fi_frame_t *fr, const char *key, fi_query_t *q) {
     return false;
 }
 
+// #region compare
+static uint64_t frame_index(const fi_session_t *q, uint32_t file, uint32_t frame) {
+    uint64_t index = frame;
+    for (uint32_t f = 0; f < file; f++) {
+        index += q->files[f].frame_count;
+    }
+    return index;
+}
+
+static void put_side(fi_out_t *out, const char *name, uint64_t index, const fi_file_t *file, const fi_frame_t *fr) {
+    put(out, "%s frame %llu  # sequence %llu, file %s, %s, %u records\n", name, (unsigned long long)index, (unsigned long long)fr->view.counters.frame_sequence, file->name,
+        fr->view.platform == NT_GFX_CAPTURE_WEB ? "web" : "native", fr->view.count);
+}
+
+/* A group of a comparison by the frame that has it: gN in B, a.gN when only A has it. */
+static void group_name(const fi_diff_group_t *g, char *buf, size_t size) {
+    if (g->b != FI_NONE) {
+        (void)snprintf(buf, size, "g%u", g->b);
+    } else {
+        (void)snprintf(buf, size, "a.g%u", g->a);
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void compare_numbers(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_t *d, fi_out_t *out) {
+    static fi_number_diff_t nd;
+    fi_number_diff(a, b, &nd);
+    uint32_t differ = 0;
+    uint32_t section = FI_NONE;
+    for (uint32_t c = 0; c < nd.count; c++) {
+        const uint32_t k = nd.order[c];
+        const fi_number_t *x = &nd.number[k];
+        if (x->value == nd.was[k]) {
+            continue;
+        }
+        if (x->section != section) {
+            section = x->section;
+            put(out, "# == %s\n", k_sections[section]);
+        }
+        put(out, "%-36s %10llu %10llu %+11lld  # %s\n", x->key, (unsigned long long)nd.was[k], (unsigned long long)x->value, (long long)(x->value - nd.was[k]), x->meaning);
+        differ++;
+    }
+    put(out, "# == groups: gN.METRIC A B delta (a.gN: a group only A has); gN.commands N  # requests that differ,\n");
+    put(out, "# compare INDEX gN lists them\n");
+    char name[24];
+    char metric[48];
+    for (uint32_t g = 0; g < d->group_count; g++) {
+        const fi_diff_group_t *dg = &d->group[g];
+        group_name(dg, name, sizeof(name));
+        const char *key = dg->b != FI_NONE ? b->group_key[dg->b] : a->group_key[dg->a];
+        const char *only = "";
+        if (dg->a == FI_NONE || dg->b == FI_NONE) {
+            only = dg->a == FI_NONE ? "only in B: " : "only in A: ";
+        }
+        for (uint32_t m = 0; m < FI_METRIC_COUNT; m++) {
+            const uint64_t va = fi_group_metric(a, dg->a, m);
+            const uint64_t vb = fi_group_metric(b, dg->b, m);
+            if (va != vb) {
+                (void)snprintf(metric, sizeof(metric), "%s.%s", name, k_metrics[m]);
+                put(out, "%-36s %10llu %10llu %+11lld  # %s%s\n", metric, (unsigned long long)va, (unsigned long long)vb, (long long)(vb - va), only, key);
+                differ++;
+            }
+        }
+        if (dg->differ > 0) {
+            (void)snprintf(metric, sizeof(metric), "%s.commands", name);
+            put(out, "%-36s %10u  # %s%s: requests that differ, of %u rows\n", metric, dg->differ, only, key, dg->count);
+            differ++;
+        }
+    }
+    put(out, "differ %u  # numbers and group lines above\n", differ);
+}
+
+static void put_diff_row(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_row_t *r, fi_out_t *out) {
+    char ra[16] = "-";
+    char rb[16] = "-";
+    if (r->a != FI_NONE) {
+        (void)snprintf(ra, sizeof(ra), "@%u", r->a);
+    }
+    if (r->b != FI_NONE) {
+        (void)snprintf(rb, sizeof(rb), "@%u", r->b);
+    }
+    char body[600];
+    fi_row_text(r->b != FI_NONE ? b : a, r->b != FI_NONE ? r->b : r->a, body, sizeof(body));
+    char change[256] = "";
+    if (r->kind == FI_DIFF_CHANGED) {
+        fi_change_text(a, b, r, change, sizeof(change));
+    }
+    put(out, "%c %-7s %-7s %s%s%s\n", "=~-+"[r->kind], ra, rb, body, change[0] != '\0' ? "  # " : "", change);
+}
+
+/* A group's commands side by side; runs of three or more same rows print as one line. */
+static bool compare_group(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_t *d, const char *wanted, fi_out_t *out) {
+    char name[24];
+    for (uint32_t g = 0; g < d->group_count; g++) {
+        const fi_diff_group_t *dg = &d->group[g];
+        group_name(dg, name, sizeof(name));
+        if (strcmp(name, wanted) != 0) {
+            continue;
+        }
+        put(out, "# = same, ~ changed, - only A, + only B; then the records in A and B and the request  # what changed\n");
+        char change[256];
+        fi_group_change_text(a, b, dg, change, sizeof(change));
+        put(out, "group %s  # %s%s%s\n", name, dg->b != FI_NONE ? b->group_key[dg->b] : a->group_key[dg->a], change[0] != '\0' ? "; " : "", change);
+        for (uint32_t r = dg->first; r < dg->first + dg->count;) {
+            const uint32_t end = fi_diff_fold(d, dg, r);
+            if (end > r) {
+                put(out, "= %u same  # @%u..@%u in A, @%u..@%u in B\n", end - r, d->row[r].a, d->row[end - 1U].a, d->row[r].b, d->row[end - 1U].b);
+                r = end;
+                continue;
+            }
+            put_diff_row(a, b, &d->row[r], out);
+            r++;
+        }
+        put(out, "rows %u differ %u\n", dg->count, dg->differ);
+        return true;
+    }
+    put(out, "error: no group %s in this comparison (compare INDEX lists them)\n", wanted);
+    return false;
+}
+
+static bool cmd_compare(const fi_session_t *q, const fi_frame_t *fr, const char *arg, const char *group, fi_out_t *out) {
+    unsigned long long index = 0;
+    uint32_t file = 0;
+    uint32_t frame = 0;
+    if (!parse_number(arg, &index)) {
+        put(out, "error: compare INDEX [GROUP] (INDEX: the base frame A, the first column of frames)\n");
+        return false;
+    }
+    if (!fi_frame_at(q->files, q->file_count, index, &file, &frame)) {
+        put(out, "error: no readable frame %s (see frames)\n", arg);
+        return false;
+    }
+    const fi_frame_t *base = &q->files[file].frames[frame];
+    put(out, "# key A B delta  # meaning, for what differs: the biggest change first in each section\n");
+    put_side(out, "a", index, &q->files[file], base);
+    put_side(out, "b", frame_index(q, q->file, q->frame), &q->files[q->file], fr);
+    fi_diff_t d;
+    fi_diff(base, fr, &d);
+    bool ok = true;
+    if (group[0] == '\0') {
+        compare_numbers(base, fr, &d, out);
+    } else {
+        ok = compare_group(base, fr, &d, group, out);
+    }
+    fi_diff_free(&d);
+    return ok;
+}
+// #endregion
+
 static void cmd_help(fi_out_t *out) {
     put(out, "# every answer is lines of: key value  # meaning. Records read @N. --serve ends each answer with = ok or = error.\n"
              "frames                     # every frame of the open files; * marks the one commands read\n"
@@ -791,10 +1074,12 @@ static void cmd_help(fi_out_t *out) {
              "record @N                  # the record, merged or a new GL draw and why, its parent, group and GL calls\n"
              "state @N|init|end [all]    # engine and GL state; * marks a change against the previous draw or the start\n"
              "find TEXT                  # records whose captured line holds TEXT (any case)\n"
-             "list KEY                   # the records behind a number: a summary key or gN.METRIC of groups\n");
+             "list KEY                   # the records behind a number: a summary key or gN.METRIC of groups\n"
+             "compare INDEX [GROUP]      # this frame (B) against frame INDEX (A): numbers and groups that differ; with a\n"
+             "                           # group of its list (gN, a.gN), that group's commands aligned\n");
 }
 
-static const char *const k_commands[] = {"help", "frames", "frame", "summary", "groups", "record", "state", "find", "list"};
+static const char *const k_commands[] = {"help", "frames", "frame", "summary", "groups", "record", "state", "find", "list", "compare"};
 
 bool fi_query_command(const char *word) {
     for (uint32_t k = 0; k < sizeof(k_commands) / sizeof(k_commands[0]); k++) {
@@ -880,6 +1165,14 @@ bool fi_query(fi_session_t *session, const char *text, fi_out_t *out) {
     }
     if (strcmp(command, "state") == 0) {
         return cmd_state(fr, arg, p, out);
+    }
+    if (strcmp(command, "compare") == 0) {
+        char group[24];
+        if (!next_word(&p, group, sizeof(group)) || p[0] != '\0') {
+            put(out, "error: compare INDEX [GROUP]; help lists the commands\n");
+            return false;
+        }
+        return cmd_compare(session, fr, arg, group, out);
     }
     uint32_t record = 0;
     if (strcmp(command, "record") == 0) {

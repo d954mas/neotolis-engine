@@ -243,6 +243,32 @@ uint32_t fi_counter_rows(const fi_frame_t *frame, fi_counter_row_t rows[FI_COUNT
 /* The record's line text and its length. */
 size_t fi_record_text(const fi_frame_t *frame, uint32_t record, const char **text);
 
+/* Two frames compared group by group (groups with requests: B's in order, then those only A has); requests
+ * (OP and NOTE records) align like a text diff, paired by kind, operation, aliases (pipe#9) and note label.
+ * What a pair compares: render architecture, "Capture text". GL calls are counted, not aligned. */
+typedef enum { FI_DIFF_SAME, FI_DIFF_CHANGED, FI_DIFF_ONLY_A, FI_DIFF_ONLY_B } fi_diff_kind_t;
+enum { FI_CHANGE_RESULT = 1, FI_CHANGE_MERGE = 2, FI_CHANGE_CALLS = 4, FI_CHANGE_ARGS = 8, FI_CHANGE_ITEMS = 16 /* the request's own records */ };
+typedef struct {
+    uint32_t a, b;             /* records, FI_NONE on the side without one */
+    uint32_t calls_a, calls_b; /* GL calls each issued: the BACKEND records it links */
+    uint8_t kind;              /* fi_diff_kind_t */
+    uint8_t change;            /* FI_CHANGE_ bits of a changed pair */
+} fi_diff_row_t;
+typedef struct {
+    uint32_t a, b;         /* the group in A and in B, FI_NONE on the side without it */
+    uint32_t first, count; /* its rows */
+    uint32_t differ;       /* rows that are not SAME */
+    bool aligned;          /* false: more than FI_DIFF_EDITS edits apart; after the common ends, A's rows then B's */
+} fi_diff_group_t;
+typedef struct {
+    fi_diff_group_t *group;
+    fi_diff_row_t *row;
+    uint32_t group_count, row_count;
+} fi_diff_t;
+#define FI_DIFF_EDITS 1024U
+void fi_diff(const fi_frame_t *a, const fi_frame_t *b, fi_diff_t *out);
+void fi_diff_free(fi_diff_t *diff);
+
 const char *fi_node_name(fi_node_t node);
 const char *fi_break_name(fi_break_t brk);
 

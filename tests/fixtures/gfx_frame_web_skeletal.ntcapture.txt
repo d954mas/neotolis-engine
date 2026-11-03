@@ -1,0 +1,753 @@
+ntcapture 2
+frame sequence=44 platform=web records=714 overflow=0 execute=639..714
+counter vertices=5251
+counter indices=19176
+counter instances=63
+counter buffer_upload_calls=3
+counter buffer_upload_bytes=93952
+counter stream_bytes=668
+counter accepted.PASS=1
+counter accepted.END_PASS=1
+counter accepted.PIPELINE=7
+counter accepted.VERTEX_INPUT=7
+counter accepted.TEXTURE_SET=5
+counter accepted.VIEWPORT=2
+counter accepted.SCISSOR=2
+counter accepted.SCISSOR_ENABLE=12
+counter accepted.UBO=3
+counter accepted.BUFFER_UPLOAD=3
+counter accepted.DRAW_INDEXED=7
+counter accepted.DRAW_INDEXED_INSTANCED=2
+counter accepted.TIMER_DISJOINT=1
+counter frame_bytes.0=11184
+counter frame_bytes.1=768
+counter frame_bytes.2=82000
+counter gl.glBindBuffer=4
+counter gl.glBindBufferRange=2
+counter gl.glBindSampler=4
+counter gl.glBindTexture=4
+counter gl.glBindVertexArray=9
+counter gl.glBufferSubData=3
+counter gl.glClear=1
+counter gl.glDepthMask=2
+counter gl.glDisable=9
+counter gl.glDrawElements=7
+counter gl.glDrawElementsInstanced=2
+counter gl.glEnable=9
+counter gl.glScissor=2
+counter gl.glUseProgram=7
+counter gl.glViewport=2
+0 INITIAL op=STATE layer=FRONTEND
+1 INITIAL op=SCISSOR_ENABLE
+2 INITIAL op=SCISSOR integers=[0,26,1280,550]
+3 DEFINITION op=CREATE obj=SHADER:65537 result=UNKNOWN backend=6
+4 DEFINITION op=CREATE obj=SHADER:65538 result=UNKNOWN backend=7
+5 DEFINITION op=CREATE obj=SHADER:65539 result=UNKNOWN backend=8
+6 DEFINITION op=CREATE obj=SHADER:65540 result=UNKNOWN backend=9
+7 DEFINITION op=CREATE obj=SHADER:65541 result=UNKNOWN backend=10
+8 DEFINITION op=CREATE obj=SHADER:65542 result=UNKNOWN backend=35
+9 DEFINITION op=CREATE obj=SHADER:65543 result=UNKNOWN backend=36
+10 DEFINITION op=CREATE obj=SHADER:65544 result=UNKNOWN backend=37
+11 DEFINITION op=CREATE obj=SHADER:65545 result=UNKNOWN backend=38
+12 DEFINITION op=CREATE obj=SHADER:65546 result=UNKNOWN backend=39
+13 DEFINITION op=CREATE obj=SHADER:65547 result=UNKNOWN backend=40
+14 DEFINITION op=CREATE obj=SHADER:65548 result=UNKNOWN backend=41
+15 DEFINITION op=CREATE obj=PROGRAM:65537 result=UNKNOWN backend=1
+16 DEFINITION op=CREATE obj=PROGRAM:65538 result=UNKNOWN backend=2
+17 DEFINITION op=CREATE obj=PROGRAM:65539 result=UNKNOWN backend=3
+18 DEFINITION op=CREATE obj=PROGRAM:65540 result=UNKNOWN backend=4
+19 DEFINITION op=CREATE obj=PROGRAM:65541 result=UNKNOWN backend=5
+20 DEFINITION op=CREATE obj=PROGRAM:65542 result=UNKNOWN backend=6
+21 DEFINITION op=CREATE obj=PROGRAM:65543 result=UNKNOWN backend=7
+22 DEFINITION op=CREATE obj=PROGRAM:65544 result=UNKNOWN backend=8
+23 DEFINITION op=CREATE obj=PIPELINE:65537 backend=1 related=[65537]
+24 DEFINITION op=CREATE obj=PIPELINE:65538 backend=2 related=[65538]
+25 DEFINITION op=CREATE obj=PIPELINE:65539 backend=3 related=[65539]
+26 DEFINITION op=CREATE obj=PIPELINE:65540 backend=4 related=[65540]
+27 DEFINITION op=CREATE obj=PIPELINE:65541 backend=5 related=[65537]
+28 DEFINITION op=CREATE obj=PIPELINE:65542 backend=6 related=[65538]
+29 DEFINITION op=CREATE obj=PIPELINE:65543 backend=7 related=[65539]
+30 DEFINITION op=CREATE obj=PIPELINE:65544 backend=8 related=[65540]
+31 DEFINITION op=CREATE obj=PIPELINE:65545 backend=9 related=[65543]
+32 DEFINITION op=CREATE obj=PIPELINE:65546 backend=10 related=[65544]
+33 DEFINITION op=CREATE obj=VERTEX_INPUT:65537 result=UNKNOWN backend=1 related=[65539]
+34 DEFINITION op=CREATE obj=VERTEX_INPUT:65538 result=UNKNOWN backend=2 related=[65540,65541] type=1
+35 DEFINITION op=CREATE obj=VERTEX_INPUT:65539 result=UNKNOWN backend=3 related=[65542,65543] type=1
+36 DEFINITION op=CREATE obj=VERTEX_INPUT:65540 result=UNKNOWN backend=4 related=[65544,65545] type=1
+37 DEFINITION op=CREATE obj=VERTEX_INPUT:65541 result=UNKNOWN backend=5 related=[65544,65545] type=1
+38 DEFINITION op=CREATE obj=VERTEX_INPUT:65542 result=UNKNOWN backend=6 related=[65539,65537] type=2
+39 DEFINITION op=CREATE obj=VERTEX_INPUT:65543 result=UNKNOWN backend=7 related=[65539,65537] type=2
+40 DEFINITION op=CREATE obj=BUFFER:65537 size=32768 backend=1 type=1 usage=2 format=2
+41 DEFINITION op=CREATE obj=BUFFER:65538 size=16384 backend=2 usage=2
+42 DEFINITION op=CREATE obj=BUFFER:65539 size=229376 backend=3 usage=2
+43 DEFINITION op=CREATE obj=BUFFER:65540 size=6208 backend=4
+44 DEFINITION op=CREATE obj=BUFFER:65541 size=3828 backend=5 type=1 format=1
+45 DEFINITION op=CREATE obj=BUFFER:65542 size=72128 backend=6
+46 DEFINITION op=CREATE obj=BUFFER:65543 size=4224 backend=7 type=1 format=1
+47 DEFINITION op=CREATE obj=BUFFER:65544 size=56 backend=8
+48 DEFINITION op=CREATE obj=BUFFER:65545 size=24 backend=9 type=1 format=1
+49 DEFINITION op=CREATE obj=BUFFER:65546 size=13440 backend=10
+50 DEFINITION op=CREATE obj=BUFFER:65547 size=3840 backend=11 type=1 format=1
+51 DEFINITION op=CREATE obj=BUFFER:65548 size=4032 backend=12
+52 DEFINITION op=CREATE obj=BUFFER:65549 size=1152 backend=13 type=1 format=1
+53 DEFINITION op=CREATE obj=BUFFER:65550 size=4032 backend=14
+54 DEFINITION op=CREATE obj=BUFFER:65551 size=1152 backend=15 type=1 format=1
+55 DEFINITION op=CREATE obj=BUFFER:65552 size=48384 backend=16
+56 DEFINITION op=CREATE obj=BUFFER:65553 size=130920 backend=17
+57 DEFINITION op=CREATE obj=BUFFER:65554 size=28032 backend=18 type=1 format=1
+58 DEFINITION op=CREATE obj=BUFFER:65555 size=19440 backend=19
+59 DEFINITION op=CREATE obj=BUFFER:65556 size=3564 backend=20 type=1 format=1
+60 DEFINITION op=CREATE obj=BUFFER:65557 size=19440 backend=21
+61 DEFINITION op=CREATE obj=BUFFER:65558 size=3564 backend=22 type=1 format=1
+62 DEFINITION op=CREATE obj=BUFFER:65559 size=45640 backend=23
+63 DEFINITION op=CREATE obj=BUFFER:65560 size=6312 backend=24 type=1 format=1
+64 DEFINITION op=CREATE obj=BUFFER:65561 size=29080 backend=25
+65 DEFINITION op=CREATE obj=BUFFER:65562 size=5736 backend=26 type=1 format=1
+66 DEFINITION op=CREATE obj=BUFFER:65563 size=17520 backend=27
+67 DEFINITION op=CREATE obj=BUFFER:65564 size=2856 backend=28 type=1 format=1
+68 DEFINITION op=CREATE obj=BUFFER:65565 size=17520 backend=29
+69 DEFINITION op=CREATE obj=BUFFER:65566 size=2856 backend=30 type=1 format=1
+70 DEFINITION op=CREATE obj=TEXTURE:65537 backend=1 related=[1] width=2048 height=256 format=5 levels=1
+71 DEFINITION op=CREATE obj=TEXTURE:65538 backend=2 related=[1] width=144 height=256 format=7 levels=1
+72 DEFINITION op=CREATE obj=TEXTURE:65539 backend=3 related=[2] width=1 height=1 format=1 levels=1
+73 DEFINITION op=CREATE obj=TEXTURE:65540 backend=4 related=[2] width=1 height=1 format=1 levels=1
+74 DEFINITION op=CREATE obj=TEXTURE:65541 backend=5 related=[2] width=256 height=256 format=1 levels=9
+75 DEFINITION op=CREATE obj=TEXTURE:65542 backend=6 related=[2] width=256 height=256 format=1 levels=9
+76 DEFINITION op=CREATE obj=TEXTURE:65543 backend=7 related=[2] width=256 height=256 format=1 levels=9
+77 DEFINITION op=CREATE obj=TEXTURE:65544 backend=8 related=[2] width=256 height=256 format=1 levels=9
+78 DEFINITION op=CREATE obj=SAMPLER:1 backend=27
+79 DEFINITION op=CREATE obj=SAMPLER:2 backend=43 flags=93
+80 DEFINITION op=CREATE obj=INSTANCE_LAYOUT:1 size=44 backend=1 flags=30
+81 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:1 stride=44 location=1 count=3 divisor=1
+82 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:1 offset=12 stride=44 location=2 count=3 divisor=1
+83 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:1 offset=24 stride=44 location=3 count=4 divisor=1
+84 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:1 offset=40 stride=44 location=4 type=2 count=4 normalized=1 divisor=1
+85 DEFINITION op=CREATE obj=INSTANCE_LAYOUT:2 size=48 backend=2 flags=480
+86 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:2 stride=48 location=5 count=3 divisor=1
+87 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:2 offset=12 stride=48 location=6 count=4 divisor=1
+88 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:2 offset=28 stride=48 location=7 count=4 divisor=1
+89 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:2 offset=44 stride=48 location=8 type=2 count=4 normalized=1 divisor=1
+90 DEFINITION op=CREATE obj=INSTANCE_LAYOUT:3 size=32 backend=3 flags=62
+91 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:3 stride=32 location=1 count=4 divisor=1
+92 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:3 stride=32 location=2 count=3 divisor=1
+93 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:3 offset=16 stride=32 location=3 count=3 divisor=1
+94 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:3 offset=16 stride=32 location=4 count=3 divisor=1
+95 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:3 offset=28 stride=32 location=5 type=2 count=4 normalized=1 divisor=1
+96 DEFINITION op=CREATE obj=INSTANCE_LAYOUT:4 size=56 backend=4 flags=62
+97 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:4 stride=56 location=1 count=4 divisor=1
+98 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:4 offset=16 stride=56 location=2 count=3 divisor=1
+99 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:4 offset=28 stride=56 location=3 count=3 divisor=1
+100 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:4 offset=40 stride=56 location=4 count=3 divisor=1
+101 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:4 offset=52 stride=56 location=5 type=2 count=4 normalized=1 divisor=1
+102 DEFINITION op=CREATE obj=INSTANCE_LAYOUT:5 size=52 backend=5 flags=3840
+103 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:5 stride=52 location=8 count=4 divisor=1
+104 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:5 offset=16 stride=52 location=9 count=4 divisor=1
+105 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:5 offset=32 stride=52 location=10 count=4 divisor=1
+106 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:5 offset=48 stride=52 location=11 type=2 count=4 normalized=1 divisor=1
+107 DEFINITION op=CREATE obj=INSTANCE_LAYOUT:6 size=64 backend=6 flags=16128
+108 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:6 stride=64 location=8 count=4 divisor=1
+109 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:6 offset=16 stride=64 location=9 count=4 divisor=1
+110 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:6 offset=32 stride=64 location=10 count=4 divisor=1
+111 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:6 offset=48 stride=64 location=12 type=4 count=4 divisor=1
+112 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:6 offset=56 stride=64 location=13 count=1 divisor=1
+113 DEFINITION op=ATTRIBUTE obj=INSTANCE_LAYOUT:6 offset=60 stride=64 location=11 type=2 count=4 normalized=1 divisor=1
+114 INITIAL op=STATE layer=BACKEND args=[66,68,0,33984,1280,720,2,5]
+115 INITIAL op=VIEWPORT integers=[0,0,1280,720]
+116 INITIAL op=PASS color=[0.035,0.05,0.08,1] depth=1
+117 INITIAL op=PIPELINE integers=[66,0,0,515,0,1,1,771,1,771,32774,32774] values=[0,0,0,0,1,1]
+118 DEFINITION op=PIPELINE detail=1 integers=[1,0,0,515,0,0,0,0,0,0,32774,32774]
+119 DEFINITION op=PIPELINE detail=2 integers=[2,0,0,515,0,0,0,0,0,0,32774,32774]
+120 DEFINITION op=PIPELINE detail=3 integers=[3,0,0,515,0,0,0,0,0,0,32774,32774]
+121 DEFINITION op=PIPELINE detail=4 integers=[4,0,0,515,0,0,0,0,0,0,32774,32774]
+122 DEFINITION op=PIPELINE detail=5 integers=[1,1,1,515,0,0,0,0,0,0,32774,32774,1] values=[0,0,0,0,1,1]
+123 DEFINITION op=PIPELINE detail=6 integers=[2,1,1,515,0,0,0,0,0,0,32774,32774,1] values=[0,0,0,0,1,1]
+124 DEFINITION op=PIPELINE detail=7 integers=[3,1,1,515,0,0,0,0,0,0,32774,32774]
+125 DEFINITION op=PIPELINE detail=8 integers=[4,1,1,515,0,0,0,0,0,0,32774,32774]
+126 DEFINITION op=PIPELINE detail=9 integers=[7,0,0,513,0,1,1,771,1,771,32774,32774]
+127 DEFINITION op=PIPELINE detail=10 integers=[8,0,0,515,0,1,1,771,1,771,32774,32774]
+128 INITIAL op=TEXTURE args=[0,45,43]
+129 INITIAL op=TEXTURE args=[1]
+130 INITIAL op=TEXTURE args=[2]
+131 INITIAL op=TEXTURE args=[3]
+132 INITIAL op=TEXTURE args=[4]
+133 INITIAL op=TEXTURE args=[5]
+134 INITIAL op=TEXTURE args=[6]
+135 INITIAL op=TEXTURE args=[7]
+136 DEFINITION op=STATE resource=PROGRAM args=[1,11]
+137 DEFINITION op=STATE resource=PROGRAM args=[2,12]
+138 DEFINITION op=STATE resource=PROGRAM args=[3,13]
+139 DEFINITION op=STATE resource=PROGRAM args=[4,14]
+140 DEFINITION op=STATE resource=PROGRAM args=[5,64]
+141 INITIAL op=SAMPLER args=[5,3428070614,1]
+142 INITIAL op=SAMPLER args=[5,2847690556,2,1]
+143 DEFINITION op=STATE resource=PROGRAM args=[6,65]
+144 INITIAL op=SAMPLER args=[6,2847690556,1]
+145 DEFINITION op=STATE resource=PROGRAM args=[7,66]
+146 INITIAL op=SAMPLER args=[7,2847690556,1]
+147 DEFINITION op=STATE resource=PROGRAM args=[8,67]
+148 INITIAL op=SAMPLER args=[8,2054201044,1]
+149 DEFINITION op=STATE resource=BUFFER args=[1,3]
+150 DEFINITION op=STATE resource=BUFFER args=[2,4]
+151 DEFINITION op=STATE resource=BUFFER args=[3,5]
+152 DEFINITION op=STATE resource=BUFFER args=[4,15]
+153 DEFINITION op=STATE resource=BUFFER args=[5,16]
+154 DEFINITION op=STATE resource=BUFFER args=[6,17]
+155 DEFINITION op=STATE resource=BUFFER args=[7,18]
+156 DEFINITION op=STATE resource=BUFFER args=[8,19]
+157 DEFINITION op=STATE resource=BUFFER args=[9,20]
+158 DEFINITION op=STATE resource=BUFFER args=[10,29]
+159 DEFINITION op=STATE resource=BUFFER args=[11,30]
+160 DEFINITION op=STATE resource=BUFFER args=[12,31]
+161 DEFINITION op=STATE resource=BUFFER args=[13,32]
+162 DEFINITION op=STATE resource=BUFFER args=[14,33]
+163 DEFINITION op=STATE resource=BUFFER args=[15,34]
+164 DEFINITION op=STATE resource=BUFFER args=[16,46]
+165 DEFINITION op=STATE resource=BUFFER args=[17,48]
+166 DEFINITION op=STATE resource=BUFFER args=[18,49]
+167 DEFINITION op=STATE resource=BUFFER args=[19,51]
+168 DEFINITION op=STATE resource=BUFFER args=[20,52]
+169 DEFINITION op=STATE resource=BUFFER args=[21,53]
+170 DEFINITION op=STATE resource=BUFFER args=[22,54]
+171 DEFINITION op=STATE resource=BUFFER args=[23,55]
+172 DEFINITION op=STATE resource=BUFFER args=[24,56]
+173 DEFINITION op=STATE resource=BUFFER args=[25,57]
+174 DEFINITION op=STATE resource=BUFFER args=[26,58]
+175 DEFINITION op=STATE resource=BUFFER args=[27,59]
+176 DEFINITION op=STATE resource=BUFFER args=[28,60]
+177 DEFINITION op=STATE resource=BUFFER args=[29,61]
+178 DEFINITION op=STATE resource=BUFFER args=[30,62]
+179 DEFINITION op=STATE resource=TEXTURE args=[1,26]
+180 DEFINITION op=STATE resource=TEXTURE args=[2,28]
+181 DEFINITION op=STATE resource=TEXTURE args=[3,42]
+182 DEFINITION op=STATE resource=TEXTURE args=[4,44]
+183 DEFINITION op=STATE resource=TEXTURE args=[5,45]
+184 DEFINITION op=STATE resource=TEXTURE args=[6,47]
+185 DEFINITION op=STATE resource=TEXTURE args=[7,50]
+186 DEFINITION op=STATE resource=TEXTURE args=[8,63]
+187 DEFINITION op=STATE resource=VERTEX_INPUT args=[1,21]
+188 DEFINITION op=STATE resource=VERTEX_INPUT args=[2,22,5,0,1]
+189 DEFINITION op=STATE resource=VERTEX_INPUT args=[3,23]
+190 DEFINITION op=STATE resource=VERTEX_INPUT args=[4,24,5,924,3]
+191 DEFINITION op=STATE resource=VERTEX_INPUT args=[5,25]
+192 DEFINITION op=STATE resource=VERTEX_INPUT args=[6,68]
+193 DEFINITION op=STATE resource=VERTEX_INPUT args=[7,69]
+194 OP op=TIMER_DISJOINT result=ACCEPTED
+195 OP op=PASS result=ACCEPTED color=[0.035,0.05,0.08,1] depth=1
+196 OP op=SCISSOR_ENABLE result=ACCEPTED integers=[1]
+197 OP op=VIEWPORT result=ACCEPTED integers=[26,27,867,488]
+198 OP op=SCISSOR result=ACCEPTED integers=[26,27,867,488]
+199 OP op=UBO obj=BUFFER:65538 result=ACCEPTED size=256
+200 NOTE label="shape"
+201 OP op=PIPELINE obj=PIPELINE:65541 result=ACCEPTED
+202 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65538 result=ACCEPTED secondary=65539 slot=1
+203 OP op=UBO obj=BUFFER:65538 result=ACCEPTED slot=2 offset=256 size=96
+204 OP op=DRAW_INDEXED_INSTANCED obj=PIPELINE:65541 result=ACCEPTED first=90 count=768 vertices=153 instances=21 vertex_input=65538
+205 NOTE label="shape"
+206 OP op=PIPELINE obj=PIPELINE:65544 result=ACCEPTED
+207 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65540 result=ACCEPTED secondary=65539 slot=3 offset=924
+208 OP op=UBO obj=BUFFER:65538 result=CACHE slot=2 offset=256 size=96
+209 OP op=DRAW_INDEXED_INSTANCED obj=PIPELINE:65544 result=ACCEPTED count=6 vertices=7 instances=42 vertex_input=65540
+210 OP op=SCISSOR_ENABLE result=ACCEPTED
+211 OP op=VIEWPORT result=ACCEPTED integers=[0,0,1280,720]
+212 OP op=UBO obj=BUFFER:65538 result=ACCEPTED offset=512 size=256
+213 OP op=SCISSOR_ENABLE result=CACHE
+214 OP op=VIEWPORT result=CACHE integers=[0,0,1280,720]
+215 OP op=CREATE obj=PIPELINE:65545 result=CACHE related=[65543]
+216 NOTE label="sprite"
+217 NOTE_FIELD key="material" type=U32 value=65537
+218 NOTE_FIELD key="page" type=U32 value=65541
+219 OP op=PIPELINE obj=PIPELINE:65545 result=ACCEPTED
+220 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+221 OP op=TEXTURE_SET obj=PIPELINE:65545 result=ACCEPTED integers=[1]
+222   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65541 link=@221 name=2847690556
+223 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=ACCEPTED
+224 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=ACCEPTED count=6 vertices=4 instances=1 vertex_input=65542
+225 NOTE label="sprite"
+226 NOTE_FIELD key="material" type=U32 value=65537
+227 NOTE_FIELD key="page" type=U32 value=65541
+228 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
+229 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+230 OP op=TEXTURE_SET obj=PIPELINE:65545 result=CACHE integers=[1]
+231   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65541 link=@230 name=2847690556
+232 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
+233 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@224 first=6 count=6 vertices=4 instances=1 vertex_input=65542
+234 NOTE label="sprite"
+235 NOTE_FIELD key="material" type=U32 value=65537
+236 NOTE_FIELD key="page" type=U32 value=65541
+237 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
+238 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+239 OP op=TEXTURE_SET obj=PIPELINE:65545 result=CACHE integers=[1]
+240   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65541 link=@239 name=2847690556
+241 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
+242 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@224 first=12 count=6 vertices=4 instances=1 vertex_input=65542
+243 NOTE label="sprite"
+244 NOTE_FIELD key="material" type=U32 value=65537
+245 NOTE_FIELD key="page" type=U32 value=65541
+246 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
+247 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+248 OP op=TEXTURE_SET obj=PIPELINE:65545 result=CACHE integers=[1]
+249   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65541 link=@248 name=2847690556
+250 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
+251 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@224 first=18 count=6 vertices=4 instances=1 vertex_input=65542
+252 NOTE label="sprite"
+253 NOTE_FIELD key="material" type=U32 value=65537
+254 NOTE_FIELD key="page" type=U32 value=65541
+255 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
+256 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+257 OP op=TEXTURE_SET obj=PIPELINE:65545 result=CACHE integers=[1]
+258   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65541 link=@257 name=2847690556
+259 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
+260 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@224 first=24 count=6 vertices=4 instances=1 vertex_input=65542
+261 OP op=CREATE obj=PIPELINE:65546 result=CACHE related=[65544]
+262 NOTE label="text"
+263 NOTE_FIELD key="material" type=U32 value=65538
+264 NOTE_FIELD key="font" type=U32 value=65537
+265 OP op=PIPELINE obj=PIPELINE:65546 result=ACCEPTED
+266 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+267 OP op=TEXTURE_SET obj=PIPELINE:65546 result=ACCEPTED integers=[1]
+268   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@267 name=2054201044
+269 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=ACCEPTED
+270 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=ACCEPTED first=30 count=144 vertices=96 instances=1 vertex_input=65543
+271 NOTE label="text"
+272 NOTE_FIELD key="material" type=U32 value=65538
+273 NOTE_FIELD key="font" type=U32 value=65537
+274 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+275 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+276 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+277   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@276 name=2054201044
+278 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+279 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@270 first=174 count=30 vertices=20 instances=1 vertex_input=65543
+280 NOTE label="text"
+281 NOTE_FIELD key="material" type=U32 value=65538
+282 NOTE_FIELD key="font" type=U32 value=65537
+283 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+284 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+285 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+286   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@285 name=2054201044
+287 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+288 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@270 first=204 count=84 vertices=56 instances=1 vertex_input=65543
+289 NOTE label="text"
+290 NOTE_FIELD key="material" type=U32 value=65538
+291 NOTE_FIELD key="font" type=U32 value=65537
+292 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+293 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+294 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+295   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@294 name=2054201044
+296 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+297 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@270 first=288 count=72 vertices=48 instances=1 vertex_input=65543
+298 NOTE label="text"
+299 NOTE_FIELD key="material" type=U32 value=65538
+300 NOTE_FIELD key="font" type=U32 value=65537
+301 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+302 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+303 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+304   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@303 name=2054201044
+305 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+306 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@270 first=360 count=78 vertices=52 instances=1 vertex_input=65543
+307 NOTE label="text"
+308 NOTE_FIELD key="material" type=U32 value=65538
+309 NOTE_FIELD key="font" type=U32 value=65537
+310 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+311 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+312 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+313   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@312 name=2054201044
+314 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+315 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@270 first=438 count=414 vertices=276 instances=1 vertex_input=65543
+316 NOTE label="text"
+317 NOTE_FIELD key="material" type=U32 value=65538
+318 NOTE_FIELD key="font" type=U32 value=65537
+319 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+320 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+321 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+322   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@321 name=2054201044
+323 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+324 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@270 first=852 count=192 vertices=128 instances=1 vertex_input=65543
+325 NOTE label="text"
+326 NOTE_FIELD key="material" type=U32 value=65538
+327 NOTE_FIELD key="font" type=U32 value=65537
+328 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+329 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+330 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+331   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@330 name=2054201044
+332 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+333 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@270 first=1044 count=240 vertices=160 instances=1 vertex_input=65543
+334 NOTE label="text"
+335 NOTE_FIELD key="material" type=U32 value=65538
+336 NOTE_FIELD key="font" type=U32 value=65537
+337 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+338 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+339 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+340   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@339 name=2054201044
+341 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+342 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@270 first=1284 count=48 vertices=32 instances=1 vertex_input=65543
+343 NOTE label="text"
+344 NOTE_FIELD key="material" type=U32 value=65538
+345 NOTE_FIELD key="font" type=U32 value=65537
+346 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+347 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+348 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+349   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@348 name=2054201044
+350 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+351 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@270 first=1332 count=30 vertices=20 instances=1 vertex_input=65543
+352 OP op=SCISSOR result=ACCEPTED integers=[0,26,1280,550]
+353 OP op=SCISSOR_ENABLE result=ACCEPTED integers=[1]
+354 NOTE label="sprite"
+355 NOTE_FIELD key="material" type=U32 value=65537
+356 NOTE_FIELD key="page" type=U32 value=65541
+357 OP op=PIPELINE obj=PIPELINE:65545 result=ACCEPTED
+358 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+359 OP op=TEXTURE_SET obj=PIPELINE:65545 result=ACCEPTED integers=[1]
+360   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65541 link=@359 name=2847690556
+361 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=ACCEPTED
+362 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=ACCEPTED first=1362 count=6 vertices=4 instances=1 vertex_input=65542
+363 NOTE label="sprite"
+364 NOTE_FIELD key="material" type=U32 value=65537
+365 NOTE_FIELD key="page" type=U32 value=65541
+366 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
+367 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+368 OP op=TEXTURE_SET obj=PIPELINE:65545 result=CACHE integers=[1]
+369   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65541 link=@368 name=2847690556
+370 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
+371 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@362 first=1368 count=6 vertices=4 instances=1 vertex_input=65542
+372 NOTE label="sprite"
+373 NOTE_FIELD key="material" type=U32 value=65537
+374 NOTE_FIELD key="page" type=U32 value=65541
+375 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
+376 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+377 OP op=TEXTURE_SET obj=PIPELINE:65545 result=CACHE integers=[1]
+378   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65541 link=@377 name=2847690556
+379 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
+380 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@362 first=1374 count=6 vertices=4 instances=1 vertex_input=65542
+381 NOTE label="sprite"
+382 NOTE_FIELD key="material" type=U32 value=65537
+383 NOTE_FIELD key="page" type=U32 value=65541
+384 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
+385 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+386 OP op=TEXTURE_SET obj=PIPELINE:65545 result=CACHE integers=[1]
+387   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65541 link=@386 name=2847690556
+388 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
+389 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@362 first=1380 count=6 vertices=4 instances=1 vertex_input=65542
+390 NOTE label="sprite"
+391 NOTE_FIELD key="material" type=U32 value=65537
+392 NOTE_FIELD key="page" type=U32 value=65541
+393 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
+394 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+395 OP op=TEXTURE_SET obj=PIPELINE:65545 result=CACHE integers=[1]
+396   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65541 link=@395 name=2847690556
+397 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
+398 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@362 first=1386 count=6 vertices=4 instances=1 vertex_input=65542
+399 NOTE label="sprite"
+400 NOTE_FIELD key="material" type=U32 value=65537
+401 NOTE_FIELD key="page" type=U32 value=65541
+402 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
+403 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+404 OP op=TEXTURE_SET obj=PIPELINE:65545 result=CACHE integers=[1]
+405   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65541 link=@404 name=2847690556
+406 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
+407 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@362 first=1392 count=54 vertices=16 instances=1 vertex_input=65542
+408 NOTE label="sprite"
+409 NOTE_FIELD key="material" type=U32 value=65537
+410 NOTE_FIELD key="page" type=U32 value=65541
+411 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
+412 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+413 OP op=TEXTURE_SET obj=PIPELINE:65545 result=CACHE integers=[1]
+414   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65541 link=@413 name=2847690556
+415 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
+416 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@362 first=1446 count=54 vertices=16 instances=1 vertex_input=65542
+417 NOTE label="sprite"
+418 NOTE_FIELD key="material" type=U32 value=65537
+419 NOTE_FIELD key="page" type=U32 value=65541
+420 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
+421 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+422 OP op=TEXTURE_SET obj=PIPELINE:65545 result=CACHE integers=[1]
+423   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65541 link=@422 name=2847690556
+424 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
+425 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@362 first=1500 count=54 vertices=16 instances=1 vertex_input=65542
+426 NOTE label="sprite"
+427 NOTE_FIELD key="material" type=U32 value=65537
+428 NOTE_FIELD key="page" type=U32 value=65541
+429 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
+430 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+431 OP op=TEXTURE_SET obj=PIPELINE:65545 result=CACHE integers=[1]
+432   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65541 link=@431 name=2847690556
+433 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
+434 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@362 first=1554 count=54 vertices=16 instances=1 vertex_input=65542
+435 NOTE label="sprite"
+436 NOTE_FIELD key="material" type=U32 value=65537
+437 NOTE_FIELD key="page" type=U32 value=65541
+438 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
+439 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+440 OP op=TEXTURE_SET obj=PIPELINE:65545 result=CACHE integers=[1]
+441   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65541 link=@440 name=2847690556
+442 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
+443 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@362 first=1608 count=54 vertices=16 instances=1 vertex_input=65542
+444 NOTE label="sprite"
+445 NOTE_FIELD key="material" type=U32 value=65537
+446 NOTE_FIELD key="page" type=U32 value=65541
+447 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
+448 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+449 OP op=TEXTURE_SET obj=PIPELINE:65545 result=CACHE integers=[1]
+450   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65541 link=@449 name=2847690556
+451 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
+452 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=CACHE joined=@362 first=1662 count=54 vertices=16 instances=1 vertex_input=65542
+453 NOTE label="text"
+454 NOTE_FIELD key="material" type=U32 value=65538
+455 NOTE_FIELD key="font" type=U32 value=65537
+456 OP op=PIPELINE obj=PIPELINE:65546 result=ACCEPTED
+457 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+458 OP op=TEXTURE_SET obj=PIPELINE:65546 result=ACCEPTED integers=[1]
+459   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@458 name=2054201044
+460 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=ACCEPTED
+461 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=ACCEPTED first=1716 count=18 vertices=12 instances=1 vertex_input=65543
+462 NOTE label="text"
+463 NOTE_FIELD key="material" type=U32 value=65538
+464 NOTE_FIELD key="font" type=U32 value=65537
+465 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+466 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+467 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+468   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@467 name=2054201044
+469 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+470 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=1734 count=54 vertices=36 instances=1 vertex_input=65543
+471 NOTE label="text"
+472 NOTE_FIELD key="material" type=U32 value=65538
+473 NOTE_FIELD key="font" type=U32 value=65537
+474 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+475 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+476 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+477   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@476 name=2054201044
+478 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+479 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=1788 count=66 vertices=44 instances=1 vertex_input=65543
+480 NOTE label="text"
+481 NOTE_FIELD key="material" type=U32 value=65538
+482 NOTE_FIELD key="font" type=U32 value=65537
+483 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+484 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+485 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+486   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@485 name=2054201044
+487 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+488 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=1854 count=24 vertices=16 instances=1 vertex_input=65543
+489 NOTE label="text"
+490 NOTE_FIELD key="material" type=U32 value=65538
+491 NOTE_FIELD key="font" type=U32 value=65537
+492 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+493 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+494 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+495   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@494 name=2054201044
+496 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+497 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=1878 count=24 vertices=16 instances=1 vertex_input=65543
+498 NOTE label="text"
+499 NOTE_FIELD key="material" type=U32 value=65538
+500 NOTE_FIELD key="font" type=U32 value=65537
+501 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+502 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+503 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+504   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@503 name=2054201044
+505 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+506 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=1902 count=48 vertices=32 instances=1 vertex_input=65543
+507 NOTE label="text"
+508 NOTE_FIELD key="material" type=U32 value=65538
+509 NOTE_FIELD key="font" type=U32 value=65537
+510 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+511 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+512 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+513   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@512 name=2054201044
+514 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+515 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=1950 count=78 vertices=52 instances=1 vertex_input=65543
+516 NOTE label="text"
+517 NOTE_FIELD key="material" type=U32 value=65538
+518 NOTE_FIELD key="font" type=U32 value=65537
+519 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+520 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+521 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+522   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@521 name=2054201044
+523 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+524 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=2028 count=42 vertices=28 instances=1 vertex_input=65543
+525 NOTE label="text"
+526 NOTE_FIELD key="material" type=U32 value=65538
+527 NOTE_FIELD key="font" type=U32 value=65537
+528 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+529 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+530 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+531   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@530 name=2054201044
+532 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+533 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=2070 count=72 vertices=48 instances=1 vertex_input=65543
+534 NOTE label="text"
+535 NOTE_FIELD key="material" type=U32 value=65538
+536 NOTE_FIELD key="font" type=U32 value=65537
+537 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+538 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+539 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+540   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@539 name=2054201044
+541 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+542 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=2142 count=66 vertices=44 instances=1 vertex_input=65543
+543 NOTE label="text"
+544 NOTE_FIELD key="material" type=U32 value=65538
+545 NOTE_FIELD key="font" type=U32 value=65537
+546 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+547 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+548 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+549   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@548 name=2054201044
+550 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+551 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=2208 count=168 vertices=112 instances=1 vertex_input=65543
+552 NOTE label="text"
+553 NOTE_FIELD key="material" type=U32 value=65538
+554 NOTE_FIELD key="font" type=U32 value=65537
+555 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+556 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+557 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+558   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@557 name=2054201044
+559 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+560 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=2376 count=42 vertices=28 instances=1 vertex_input=65543
+561 NOTE label="text"
+562 NOTE_FIELD key="material" type=U32 value=65538
+563 NOTE_FIELD key="font" type=U32 value=65537
+564 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+565 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+566 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+567   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@566 name=2054201044
+568 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+569 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=2418 count=42 vertices=28 instances=1 vertex_input=65543
+570 NOTE label="text"
+571 NOTE_FIELD key="material" type=U32 value=65538
+572 NOTE_FIELD key="font" type=U32 value=65537
+573 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+574 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+575 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+576   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@575 name=2054201044
+577 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+578 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=2460 count=42 vertices=28 instances=1 vertex_input=65543
+579 NOTE label="text"
+580 NOTE_FIELD key="material" type=U32 value=65538
+581 NOTE_FIELD key="font" type=U32 value=65537
+582 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+583 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+584 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+585   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@584 name=2054201044
+586 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+587 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=2502 count=180 vertices=120 instances=1 vertex_input=65543
+588 NOTE label="text"
+589 NOTE_FIELD key="material" type=U32 value=65538
+590 NOTE_FIELD key="font" type=U32 value=65537
+591 OP op=PIPELINE obj=PIPELINE:65546 result=CACHE
+592 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+593 OP op=TEXTURE_SET obj=PIPELINE:65546 result=CACHE integers=[1]
+594   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65537 link=@593 name=2054201044
+595 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65543 result=CACHE
+596 OP op=DRAW_INDEXED obj=PIPELINE:65546 result=CACHE joined=@461 first=2682 count=96 vertices=64 instances=1 vertex_input=65543
+597 OP op=SCISSOR_ENABLE result=ACCEPTED
+598 OP op=SCISSOR result=CACHE integers=[0,26,1280,550]
+599 OP op=SCISSOR_ENABLE result=ACCEPTED integers=[1]
+600 OP op=SCISSOR_ENABLE result=ACCEPTED
+601 OP op=SCISSOR result=CACHE integers=[0,26,1280,550]
+602 OP op=SCISSOR_ENABLE result=ACCEPTED integers=[1]
+603 NOTE label="sprite"
+604 NOTE_FIELD key="material" type=U32 value=65537
+605 NOTE_FIELD key="page" type=U32 value=65541
+606 OP op=PIPELINE obj=PIPELINE:65545 result=ACCEPTED
+607 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+608 OP op=TEXTURE_SET obj=PIPELINE:65545 result=ACCEPTED integers=[1]
+609   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65541 link=@608 name=2847690556
+610 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=ACCEPTED
+611 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=ACCEPTED first=2778 count=6 vertices=4 instances=1 vertex_input=65542
+612 OP op=SCISSOR_ENABLE result=ACCEPTED
+613 OP op=SCISSOR result=CACHE integers=[0,26,1280,550]
+614 OP op=SCISSOR_ENABLE result=ACCEPTED integers=[1]
+615 NOTE label="sprite"
+616 NOTE_FIELD key="material" type=U32 value=65537
+617 NOTE_FIELD key="page" type=U32 value=65541
+618 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
+619 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+620 OP op=TEXTURE_SET obj=PIPELINE:65545 result=CACHE integers=[1]
+621   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65541 link=@620 name=2847690556
+622 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
+623 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=ACCEPTED first=2784 count=6 vertices=4 instances=1 vertex_input=65542
+624 OP op=SCISSOR_ENABLE result=ACCEPTED
+625 OP op=SCISSOR result=CACHE integers=[0,26,1280,550]
+626 OP op=SCISSOR_ENABLE result=ACCEPTED integers=[1]
+627 NOTE label="sprite"
+628 NOTE_FIELD key="material" type=U32 value=65537
+629 NOTE_FIELD key="page" type=U32 value=65541
+630 OP op=PIPELINE obj=PIPELINE:65545 result=CACHE
+631 OP op=UBO obj=BUFFER:0 result=CACHE slot=1
+632 OP op=TEXTURE_SET obj=PIPELINE:65545 result=CACHE integers=[1]
+633   ARGUMENT op=TEXTURE_SET obj=TEXTURE:65541 link=@632 name=2847690556
+634 OP op=VERTEX_INPUT obj=VERTEX_INPUT:65542 result=CACHE
+635 OP op=DRAW_INDEXED obj=PIPELINE:65545 result=ACCEPTED first=2790 count=6 vertices=4 instances=1 vertex_input=65542
+636 OP op=SCISSOR_ENABLE result=ACCEPTED
+637 OP op=SCISSOR_ENABLE result=CACHE
+638 OP op=END_PASS result=ACCEPTED
+639 OP op=BUFFER_UPLOAD obj=BUFFER:65537 result=ACCEPTED size=11184 flags=1
+640   BACKEND op=STATE call=glBindVertexArray link=@639 args=[2]
+641   BACKEND op=STATE call=glBindBuffer link=@639 args=[34963,3]
+642   BACKEND op=STATE call=glBufferSubData link=@639 args=[34963,0,11184,1] bytes=11184
+643   BACKEND op=STATE call=glBindBuffer link=@639 args=[34963,0]
+644   BACKEND op=STATE call=glBindVertexArray link=@639 args=[68]
+645 OP op=BUFFER_UPLOAD obj=BUFFER:65538 result=ACCEPTED size=768 flags=1
+646   BACKEND op=STATE call=glBindBuffer link=@645 args=[34962,4]
+647   BACKEND op=STATE call=glBufferSubData link=@645 args=[34962,0,768,1] bytes=768
+648 OP op=BUFFER_UPLOAD obj=BUFFER:65539 result=ACCEPTED size=82000 flags=1
+649   BACKEND op=STATE call=glBindBuffer link=@648 args=[34962,5]
+650   BACKEND op=STATE call=glBufferSubData link=@648 args=[34962,0,82000,1] bytes=82000
+651   BACKEND op=STATE call=glDepthMask link=@195 args=[1]
+652   BACKEND op=STATE call=glClear link=@195 args=[16640]
+653   BACKEND op=STATE call=glEnable link=@196 args=[3089]
+654   BACKEND op=STATE call=glViewport link=@197 args=[26,27,867,488]
+655   BACKEND op=STATE call=glScissor link=@198 args=[26,27,867,488]
+656   BACKEND op=STATE call=glBindBufferRange link=@199 args=[35345,0,4,0,256]
+657   BACKEND op=STATE call=glUseProgram link=@201 args=[11]
+658   BACKEND op=STATE call=glEnable link=@201 args=[2929]
+659   BACKEND op=STATE call=glDisable link=@201 args=[3042]
+660   BACKEND op=STATE call=glEnable link=@201 args=[32823]
+661   BACKEND op=STATE call=glBindVertexArray link=@202 args=[22]
+662   SKIP op=VERTEX_INPUT result=CACHE call=glVertexAttribPointer link=@202 key=[22,5,0,1]
+663   SKIP op=UBO result=CACHE call=glBindBufferRange link=@203 key=[2,256,96]
+664   BACKEND op=STATE call=glDrawElementsInstanced link=@204 args=[4,768,5123,1,21]
+665   BACKEND op=STATE call=glUseProgram link=@206 args=[14]
+666   BACKEND op=STATE call=glDisable link=@206 args=[32823]
+667   BACKEND op=STATE call=glBindVertexArray link=@207 args=[24]
+668   SKIP op=VERTEX_INPUT result=CACHE call=glVertexAttribPointer link=@207 key=[24,5,924,3]
+669   BACKEND op=STATE call=glDrawElementsInstanced link=@209 args=[4,6,5123,0,42]
+670   BACKEND op=STATE call=glDisable link=@210 args=[3089]
+671   BACKEND op=STATE call=glViewport link=@211 args=[0,0,1280,720]
+672   BACKEND op=STATE call=glBindBufferRange link=@212 args=[35345,0,4,512,256]
+673   BACKEND op=STATE call=glUseProgram link=@219 args=[66]
+674   BACKEND op=STATE call=glDisable link=@219 args=[2929]
+675   BACKEND op=STATE call=glDepthMask link=@219 args=[0]
+676   BACKEND op=STATE call=glEnable link=@219 args=[3042]
+677   SKIP op=TEXTURE result=CACHE call=glBindTexture link=@221 key=[45,0]
+678   SKIP op=SAMPLER result=CACHE call=glBindSampler link=@221 key=[43,0]
+679   BACKEND op=STATE call=glBindVertexArray link=@223 args=[68]
+680   BACKEND op=STATE call=glDrawElements link=@224 args=[4,30,5125,0]
+681   BACKEND op=STATE call=glUseProgram link=@265 args=[67]
+682   BACKEND op=STATE call=glBindTexture link=@267 args=[3553,26]
+683   BACKEND op=STATE call=glBindSampler link=@267 args=[0,27]
+684   BACKEND op=STATE call=glBindVertexArray link=@269 args=[69]
+685   BACKEND op=STATE call=glDrawElements link=@270 args=[4,1332,5125,1]
+686   BACKEND op=STATE call=glScissor link=@352 args=[0,26,1280,550]
+687   BACKEND op=STATE call=glEnable link=@353 args=[3089]
+688   BACKEND op=STATE call=glUseProgram link=@357 args=[66]
+689   BACKEND op=STATE call=glBindTexture link=@359 args=[3553,45]
+690   BACKEND op=STATE call=glBindSampler link=@359 args=[0,43]
+691   BACKEND op=STATE call=glBindVertexArray link=@361 args=[68]
+692   BACKEND op=STATE call=glDrawElements link=@362 args=[4,354,5125,1]
+693   BACKEND op=STATE call=glUseProgram link=@456 args=[67]
+694   BACKEND op=STATE call=glBindTexture link=@458 args=[3553,26]
+695   BACKEND op=STATE call=glBindSampler link=@458 args=[0,27]
+696   BACKEND op=STATE call=glBindVertexArray link=@460 args=[69]
+697   BACKEND op=STATE call=glDrawElements link=@461 args=[4,1062,5125,1]
+698   BACKEND op=STATE call=glDisable link=@597 args=[3089]
+699   BACKEND op=STATE call=glEnable link=@599 args=[3089]
+700   BACKEND op=STATE call=glDisable link=@600 args=[3089]
+701   BACKEND op=STATE call=glEnable link=@602 args=[3089]
+702   BACKEND op=STATE call=glUseProgram link=@606 args=[66]
+703   BACKEND op=STATE call=glBindTexture link=@608 args=[3553,45]
+704   BACKEND op=STATE call=glBindSampler link=@608 args=[0,43]
+705   BACKEND op=STATE call=glBindVertexArray link=@610 args=[68]
+706   BACKEND op=STATE call=glDrawElements link=@611 args=[4,6,5125,1]
+707   BACKEND op=STATE call=glDisable link=@612 args=[3089]
+708   BACKEND op=STATE call=glEnable link=@614 args=[3089]
+709   BACKEND op=STATE call=glDrawElements link=@623 args=[4,6,5125,1]
+710   BACKEND op=STATE call=glDisable link=@624 args=[3089]
+711   BACKEND op=STATE call=glEnable link=@626 args=[3089]
+712   BACKEND op=STATE call=glDrawElements link=@635 args=[4,6,5125,1]
+713   BACKEND op=STATE call=glDisable link=@636 args=[3089]

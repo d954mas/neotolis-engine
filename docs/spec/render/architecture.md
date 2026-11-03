@@ -1461,7 +1461,14 @@ accepted only in the formatter's order, each at most once.
 `tools/frame_inspector` (native capture builds) reads capture files through this parser;
 its pages and keys are described in its `main.c`. Its `query` and `--serve` modes print the
 window's records, state and numbers (one list for both) as key-value text without a window,
-so a script or an agent reads what the window shows; the window adds its sentences. Its numbers follow this chapter: it
+so a script or an agent reads what the window shows; the window adds its sentences. Two frames, of one
+run or of two (native and web, before and after a change), compare by number keys and by group (marker
+path and note); inside a group their requests align like a text diff. A pair compares its result, merge
+break, GL call count, arguments and the records the request wrote (ARGUMENT, resource and attribute
+DEFINITION, NOTE_FIELD); handles compare as aliases numbered by first use in the frame (`pipe#9`), so runs
+whose handles differ still pair; GL calls are counted per request, not aligned, as backends issue different
+calls for one request. Between their common start and end, requests more than 1024 edits apart list A's,
+then B's. Its numbers follow this chapter: it
 checks every plain or indexed draw's merge against the recorded `CACHE` and rebuilds the
 frame's counters from the records (`stream_bytes` is shown from the counters only:
 command sizes are not recorded).

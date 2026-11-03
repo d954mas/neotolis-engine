@@ -1361,3 +1361,361 @@ static void index_frame(fi_frame_t *fr) {
     check_merges(fr);
     build_summary(fr);
 }
+
+// #region compare
+/* What pairs two requests across frames: handles as aliases, a note by its label. */
+typedef struct {
+    uint8_t kind, op, object_kind;
+    uint32_t object, vertex_input;
+    const char *label;
+} req_key_t;
+
+/* One frame's requests bucketed by group in record order, with the GL calls each issued (as op_calls counts them). */
+typedef struct {
+    const fi_frame_t *fr;
+    uint32_t *start; /* per group: its first entry in order; start[group_count] ends the last */
+    uint32_t *order;
+    req_key_t *key; /* per entry of order */
+    uint32_t *calls;
+} side_t;
+
+static bool is_request(const nt_gfx_event_t *e) { return e->kind == NT_GFX_EVENT_OP || e->kind == NT_GFX_EVENT_NOTE; }
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void side_build(side_t *s, const fi_frame_t *fr) {
+    const uint32_t n = fr->view.count;
+    s->fr = fr;
+    s->start = (uint32_t *)fi_alloc((size_t)fr->group_count + 1U, sizeof(uint32_t));
+    s->calls = (uint32_t *)fi_alloc(n, sizeof(uint32_t));
+    for (uint32_t i = 0; i < n; i++) {
+        const nt_gfx_event_t *e = &fr->view.events[i];
+        const uint32_t op = e->kind == NT_GFX_EVENT_BACKEND ? owner(fr, i) : FI_NONE;
+        if (op != FI_NONE) {
+            s->calls[op]++;
+        }
+        s->start[fr->group[i] + 1U] += is_request(e) ? 1U : 0U;
+    }
+    for (uint32_t g = 0; g < fr->group_count; g++) {
+        s->start[g + 1U] += s->start[g];
+    }
+    const uint32_t total = s->start[fr->group_count];
+    s->order = (uint32_t *)fi_alloc(total, sizeof(uint32_t));
+    s->key = (req_key_t *)fi_alloc(total, sizeof(req_key_t));
+    uint32_t *at = (uint32_t *)fi_alloc(fr->group_count, sizeof(uint32_t));
+    memcpy(at, s->start, (size_t)fr->group_count * sizeof(uint32_t));
+    for (uint32_t i = 0; i < n; i++) {
+        const nt_gfx_event_t *e = &fr->view.events[i];
+        if (!is_request(e)) {
+            continue;
+        }
+        const uint32_t k = at[fr->group[i]]++;
+        s->order[k] = i;
+        req_key_t *key = &s->key[k];
+        key->kind = (uint8_t)e->kind;
+        if (e->kind == NT_GFX_EVENT_NOTE) {
+            key->label = e->note.label;
+            continue;
+        }
+        key->op = e->operation;
+        key->object_kind = e->object_kind;
+        key->object = fi_alias(fr, e->object_kind, e->object);
+        key->vertex_input = fi_is_draw(e) ? fi_alias(fr, NT_GFX_OBJECT_VERTEX_INPUT, e->data.draw.vertex_input) : 0U;
+    }
+    free(at);
+}
+
+static void side_free(side_t *s) {
+    free(s->start);
+    free(s->order);
+    free(s->key);
+    free(s->calls);
+}
+
+static bool same_key(const req_key_t *x, const req_key_t *y) {
+    return x->kind == y->kind && x->op == y->op && x->object_kind == y->object_kind && x->object == y->object && x->vertex_input == y->vertex_input &&
+           (x->label == NULL ? y->label == NULL : y->label != NULL && strcmp(x->label, y->label) == 0);
+}
+
+/* A gfx record as two frames compare it: handles as aliases; links, joined draws, GL names and the result
+ * (compared on its own) left out. */
+static nt_gfx_event_t canonical(const fi_frame_t *fr, uint32_t i) {
+    static const uint8_t k_related[FI_OBJECTS] = {[NT_GFX_OBJECT_PROGRAM] = NT_GFX_OBJECT_SHADER,
+                                                  [NT_GFX_OBJECT_PIPELINE] = NT_GFX_OBJECT_PROGRAM,
+                                                  [NT_GFX_OBJECT_VERTEX_INPUT] = NT_GFX_OBJECT_BUFFER,
+                                                  [NT_GFX_OBJECT_RENDER_TARGET] = NT_GFX_OBJECT_TEXTURE};
+    nt_gfx_event_t c;
+    memcpy(&c, &fr->view.events[i], sizeof(c));
+    if (!is_gfx(&c)) {
+        return c;
+    }
+    c.object = fi_alias(fr, c.object_kind, c.object);
+    c.link = 0;
+    c.result = 0;
+    if (fi_is_draw(&c)) {
+        c.detail = 0;
+        c.data.draw.vertex_input = fi_alias(fr, NT_GFX_OBJECT_VERTEX_INPUT, c.data.draw.vertex_input);
+    } else if (c.operation == NT_GFX_OP_CREATE && c.object_kind < FI_OBJECTS) {
+        c.data.resource.backend = 0;
+        for (uint32_t k = 0; k < 3U && k_related[c.object_kind] != 0; k++) {
+            c.data.resource.related[k] = fi_alias(fr, k_related[c.object_kind], c.data.resource.related[k]);
+        }
+    } else if (c.operation == NT_GFX_OP_PASS) {
+        c.data.pass.target = fi_alias(fr, NT_GFX_OBJECT_RENDER_TARGET, c.data.pass.target);
+    } else if (c.operation == NT_GFX_OP_VERTEX_INPUT) {
+        c.data.binding.secondary = fi_alias(fr, NT_GFX_OBJECT_BUFFER, c.data.binding.secondary);
+        c.data.binding.slot = fi_alias(fr, NT_GFX_OBJECT_INSTANCE_LAYOUT, c.data.binding.slot);
+    } else if (c.operation == NT_GFX_OP_TEXTURE_SET && c.kind == NT_GFX_EVENT_ARGUMENT) {
+        c.data.binding.secondary = fi_alias(fr, NT_GFX_OBJECT_SAMPLER, c.data.binding.secondary);
+    } else if (c.operation == NT_GFX_OP_ATTRIBUTE) {
+        c.data.attribute.buffer = fi_alias(fr, NT_GFX_OBJECT_BUFFER, c.data.attribute.buffer);
+    }
+    return c;
+}
+
+static bool same_record(const fi_frame_t *fa, uint32_t i, const fi_frame_t *fb, uint32_t j) {
+    const nt_gfx_event_t x = canonical(fa, i);
+    const nt_gfx_event_t y = canonical(fb, j);
+    uint8_t xb[sizeof(x)];
+    uint8_t yb[sizeof(y)];
+    memcpy(xb, &x, sizeof(xb));
+    memcpy(yb, &y, sizeof(yb));
+    return memcmp(xb, yb, sizeof(xb)) == 0;
+}
+
+/* After record i, the next record request r wrote itself: a NOTE_FIELD of note r, an ARGUMENT or a
+ * resource or attribute DEFINITION of operation r. The backend's records (GL calls, GL names) are left out:
+ * backends differ. FI_NONE past its last. */
+static uint32_t next_item(const fi_frame_t *fr, uint32_t r, uint32_t i) {
+    const bool note = fr->view.events[r].kind == NT_GFX_EVENT_NOTE;
+    for (i++; i < fr->view.count; i++) {
+        const nt_gfx_event_t *e = &fr->view.events[i];
+        if (note || owner(fr, i) != r) {
+            return note && e->kind == NT_GFX_EVENT_NOTE_FIELD ? i : FI_NONE;
+        }
+        if (e->kind == NT_GFX_EVENT_ARGUMENT || (e->kind == NT_GFX_EVENT_DEFINITION && (e->operation == NT_GFX_OP_CREATE || e->operation == NT_GFX_OP_ATTRIBUTE))) {
+            return i;
+        }
+    }
+    return FI_NONE;
+}
+
+/* What differs between two paired requests. */
+static uint8_t change_of(const side_t *sa, uint32_t ra, const side_t *sb, uint32_t rb) {
+    const fi_frame_t *fa = sa->fr;
+    const fi_frame_t *fb = sb->fr;
+    uint8_t change = 0;
+    if (fa->view.events[ra].kind == NT_GFX_EVENT_OP) {
+        change |= fa->view.events[ra].result != fb->view.events[rb].result ? FI_CHANGE_RESULT : 0U;
+        change |= fa->brk[ra] != fb->brk[rb] ? FI_CHANGE_MERGE : 0U;
+        change |= sa->calls[ra] != sb->calls[rb] ? FI_CHANGE_CALLS : 0U;
+        change |= same_record(fa, ra, fb, rb) ? 0U : FI_CHANGE_ARGS;
+    }
+    for (uint32_t i = next_item(fa, ra, ra), j = next_item(fb, rb, rb); i != FI_NONE || j != FI_NONE; i = next_item(fa, ra, i), j = next_item(fb, rb, j)) {
+        if (i == FI_NONE || j == FI_NONE || !same_record(fa, i, fb, j)) {
+            return change | FI_CHANGE_ITEMS;
+        }
+    }
+    return change;
+}
+
+/* Myers' greedy diff of x and y: per edit count d, the furthest x on each diagonal k, kept so the path can be
+ * traced back; d edits take (d + 1)^2 entries of trace. False when more than `most` edits separate them. */
+static bool myers(const req_key_t *x, int32_t n, const req_key_t *y, int32_t m, int32_t most, int32_t *trace, int32_t *edits) {
+    for (int32_t d = 0; d <= most; d++) {
+        int32_t *v = trace + ((size_t)d * (size_t)d) + d;
+        const int32_t *prev = d > 0 ? trace + ((size_t)(d - 1) * (size_t)(d - 1)) + (d - 1) : NULL;
+        for (int32_t k = -d; k <= d; k += 2) {
+            int32_t xx = 0;
+            if (prev != NULL) {
+                xx = k == -d || (k != d && prev[k - 1] < prev[k + 1]) ? prev[k + 1] : prev[k - 1] + 1;
+            }
+            int32_t yy = xx - k;
+            while (xx < n && yy < m && same_key(&x[xx], &y[yy])) {
+                xx++;
+                yy++;
+            }
+            v[k] = xx;
+            if (xx >= n && yy >= m) {
+                *edits = d;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+typedef struct {
+    const side_t *a, *b;
+    uint32_t a0, b0; /* the group's first entries in each side's order */
+    fi_diff_row_t *rows;
+    uint32_t count;
+    uint32_t differ;
+} emit_t;
+
+/* Writes row `at`: entry i of A and entry j of B; -1 for the side without one. */
+static void emit(emit_t *o, uint32_t at, int32_t i, int32_t j) {
+    fi_diff_row_t *r = &o->rows[at];
+    *r = (fi_diff_row_t){.a = FI_NONE, .b = FI_NONE, .kind = FI_DIFF_SAME};
+    if (i >= 0) {
+        r->a = o->a->order[o->a0 + (uint32_t)i];
+        r->calls_a = o->a->calls[r->a];
+    }
+    if (j >= 0) {
+        r->b = o->b->order[o->b0 + (uint32_t)j];
+        r->calls_b = o->b->calls[r->b];
+    }
+    if (i < 0 || j < 0) {
+        r->kind = i < 0 ? FI_DIFF_ONLY_B : FI_DIFF_ONLY_A;
+    } else {
+        r->change = change_of(o->a, r->a, o->b, r->b);
+        r->kind = r->change != 0 ? FI_DIFF_CHANGED : FI_DIFF_SAME;
+    }
+    o->differ += r->kind != FI_DIFF_SAME ? 1U : 0U;
+}
+
+/* The rows of one group pair: the common start, the middle aligned (or A's then B's when one side has none or
+ * they are too different), the common end. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool align(emit_t *o, int32_t n, int32_t m, int32_t *trace) {
+    const req_key_t *x = o->a->key + o->a0;
+    const req_key_t *y = o->b->key + o->b0;
+    int32_t head = 0;
+    while (head < n && head < m && same_key(&x[head], &y[head])) {
+        emit(o, o->count++, head, head);
+        head++;
+    }
+    int32_t tail = 0;
+    while (tail < n - head && tail < m - head && same_key(&x[n - 1 - tail], &y[m - 1 - tail])) {
+        tail++;
+    }
+    const int32_t n2 = n - head - tail;
+    const int32_t m2 = m - head - tail;
+    int32_t edits = -1; /* one side empty: its rows need no search */
+    const int32_t most = n2 + m2 < (int32_t)FI_DIFF_EDITS ? n2 + m2 : (int32_t)FI_DIFF_EDITS;
+    const bool aligned = n2 == 0 || m2 == 0 || myers(x + head, n2, y + head, m2, most, trace, &edits);
+    if (edits >= 0) { /* traced back from the end, so the rows fill from the last: matches + edits of them */
+        uint32_t at = o->count + (uint32_t)((n2 + m2 + edits) / 2);
+        o->count = at;
+        int32_t xx = n2;
+        int32_t yy = m2;
+        for (int32_t d = edits; d > 0; d--) {
+            const int32_t *prev = trace + ((size_t)(d - 1) * (size_t)(d - 1)) + (d - 1);
+            const int32_t k = xx - yy;
+            const bool down = k == -d || (k != d && prev[k - 1] < prev[k + 1]);
+            const int32_t pk = down ? k + 1 : k - 1;
+            const int32_t px = prev[pk];
+            const int32_t py = px - pk;
+            while (xx > (down ? px : px + 1) && yy > (down ? py + 1 : py)) {
+                xx--;
+                yy--;
+                emit(o, --at, head + xx, head + yy);
+            }
+            if (down) {
+                yy--;
+                emit(o, --at, -1, head + yy);
+            } else {
+                xx--;
+                emit(o, --at, head + xx, -1);
+            }
+        }
+        while (xx > 0 && yy > 0) {
+            xx--;
+            yy--;
+            emit(o, --at, head + xx, head + yy);
+        }
+    } else {
+        for (int32_t i = 0; i < n2; i++) {
+            emit(o, o->count++, head + i, -1);
+        }
+        for (int32_t j = 0; j < m2; j++) {
+            emit(o, o->count++, -1, head + j);
+        }
+    }
+    for (int32_t t = tail; t > 0; t--) {
+        emit(o, o->count++, n - t, m - t);
+    }
+    return aligned;
+}
+
+static uint32_t key_hash(const char *key) {
+    uint32_t h = 2166136261U;
+    for (const char *c = key; *c != '\0'; c++) {
+        h = (h ^ (uint8_t)*c) * 16777619U;
+    }
+    return h;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void fi_diff(const fi_frame_t *a, const fi_frame_t *b, fi_diff_t *out) {
+    side_t sa;
+    side_t sb;
+    side_build(&sa, a);
+    side_build(&sb, b);
+    /* A's groups by key text; a hit counts only when the identity matches too, as in fi_group_in. */
+    const uint32_t slots = table_size(a->group_count);
+    uint32_t *slot = (uint32_t *)fi_alloc(slots, sizeof(uint32_t));
+    for (uint32_t g = 0; g < a->group_count; g++) {
+        uint32_t h = key_hash(a->group_key[g]);
+        while (slot[h & (slots - 1U)] != 0) {
+            h++;
+        }
+        slot[h & (slots - 1U)] = g + 1U;
+    }
+    uint8_t *paired = (uint8_t *)fi_alloc(a->group_count, 1);
+    *out = (fi_diff_t){0};
+    out->group = (fi_diff_group_t *)fi_alloc((size_t)a->group_count + b->group_count, sizeof(fi_diff_group_t));
+    out->row = (fi_diff_row_t *)fi_alloc((size_t)sa.start[a->group_count] + sb.start[b->group_count], sizeof(fi_diff_row_t));
+    uint32_t widest = 0;
+    for (uint32_t g = 0; g < b->group_count; g++) {
+        const uint32_t m = sb.start[g + 1U] - sb.start[g];
+        uint32_t found = FI_NONE;
+        for (uint32_t h = key_hash(b->group_key[g]); slot[h & (slots - 1U)] != 0 && found == FI_NONE; h++) {
+            const uint32_t k = slot[h & (slots - 1U)] - 1U;
+            found = same_group(a, k, b, g) ? k : FI_NONE;
+        }
+        const uint32_t n = found != FI_NONE ? sa.start[found + 1U] - sa.start[found] : 0U;
+        if (n + m == 0) {
+            continue;
+        }
+        if (found != FI_NONE) {
+            paired[found] = 1;
+        }
+        out->group[out->group_count++] = (fi_diff_group_t){.a = found, .b = g};
+        widest = n + m > widest ? n + m : widest;
+    }
+    for (uint32_t g = 0; g < a->group_count; g++) {
+        const uint32_t n = sa.start[g + 1U] - sa.start[g];
+        if (paired[g] == 0 && n > 0) {
+            out->group[out->group_count++] = (fi_diff_group_t){.a = g, .b = FI_NONE};
+            widest = n > widest ? n : widest;
+        }
+    }
+    const size_t most = (widest < FI_DIFF_EDITS ? widest : FI_DIFF_EDITS) + 1U;
+    int32_t *trace = (int32_t *)fi_alloc(most * most, sizeof(int32_t));
+    emit_t o = {.a = &sa, .b = &sb, .rows = out->row};
+    for (uint32_t k = 0; k < out->group_count; k++) {
+        fi_diff_group_t *dg = &out->group[k];
+        o.a0 = dg->a != FI_NONE ? sa.start[dg->a] : 0U;
+        o.b0 = dg->b != FI_NONE ? sb.start[dg->b] : 0U;
+        const int32_t n = dg->a != FI_NONE ? (int32_t)(sa.start[dg->a + 1U] - o.a0) : 0;
+        const int32_t m = dg->b != FI_NONE ? (int32_t)(sb.start[dg->b + 1U] - o.b0) : 0;
+        dg->first = o.count;
+        o.differ = 0;
+        dg->aligned = align(&o, n, m, trace);
+        dg->count = o.count - dg->first;
+        dg->differ = o.differ;
+    }
+    out->row_count = o.count;
+    free(trace);
+    free(paired);
+    free(slot);
+    side_free(&sa);
+    side_free(&sb);
+}
+
+void fi_diff_free(fi_diff_t *diff) {
+    free(diff->group);
+    free(diff->row);
+    *diff = (fi_diff_t){0};
+}
+// #endregion

@@ -105,7 +105,7 @@ lifetime, and naming vocabulary.
 | `engine/fs`, `engine/http` | [assets/async-loading.md](assets/async-loading.md) (pack I/O), [core/module-layout.md](core/module-layout.md) (swappable) |
 | `engine/time` | [runtime/frame-lifecycle.md](runtime/frame-lifecycle.md) |
 | `engine/window`, `engine/platform`, `engine/file_dialog` | [runtime/platform.md](runtime/platform.md) |
-| `tools/frame_inspector` | [render/architecture.md](render/architecture.md) ("Capture text"; pages, keys and the windowless `query`/`--serve` commands in its `main.c`) |
+| `tools/frame_inspector` | [render/architecture.md](render/architecture.md) ("Capture text"; pages, keys, frame compare and the windowless `query`/`--serve` commands in its `main.c`) |
 | `engine/app` | [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) (time & render control), [runtime/frame-lifecycle.md](runtime/frame-lifecycle.md) |
 | `engine/log`, `engine/version`, `engine/crash`, `engine/devapi`, `engine/debug_overlay`, `engine/metrics`, `engine/introspect` | [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) |
 | `engine/recorder` | [debug/recorder.md](debug/recorder.md) |
