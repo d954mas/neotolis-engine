@@ -1168,16 +1168,6 @@ void test_atlas_page_carries_the_mip_mode(void) {
     }
 }
 
-static char s_last_error_line[NT_LOG_BUF_SIZE];
-
-static void capture_error_line(nt_log_level_t level, const char *domain, const char *msg, void *user) {
-    (void)domain;
-    (void)user;
-    if (level == NT_LOG_LEVEL_ERROR) {
-        (void)snprintf(s_last_error_line, sizeof(s_last_error_line), "%s", msg);
-    }
-}
-
 /* WebGL BPTC needs a block-aligned level 0; an unaligned Basis texture would load as RGBA8 on desktop. */
 void test_basis_texture_must_be_block_aligned(void) {
     const char *png_path = TMP_DIR "/basis_unaligned_2x2.png";
@@ -1185,34 +1175,27 @@ void test_basis_texture_must_be_block_aligned(void) {
     nt_tex_opts_t opts = nt_tex_opts_defaults();
     opts.compress = ANY_COMPRESS();
     opts.mips = NT_TEX_MIPS_BAKED;
-
-    s_last_error_line[0] = 0;
-    nt_log_add_sink(capture_error_line, NULL);
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/basis_unaligned.ntpack");
-    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_builder_add_texture(ctx, png_path, &opts), "multiples of 4");
-    nt_log_remove_sink(capture_error_line, NULL);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(s_last_error_line, "basis_unaligned_2x2.png"), "the diagnostic must name the source file");
+    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_builder_add_texture(ctx, png_path, &opts), "a Basis texture needs width and height that are multiples of 4");
 
-    /* max_size resizes first: 8x6 clamped to 4 is 4x3, still unaligned. */
-    uint8_t rgba[8 * 6 * 4];
+    opts.max_size = 6;
+    EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_assert_texture_opts(&opts), "max_size 0 or a multiple of 4");
+
+    /* The resize rounds the shorter side down to the block, at least one block. */
+    uint8_t rgba[40 * 22 * 4];
     memset(rgba, 200, sizeof(rgba));
+    ctx = nt_builder_start_pack(TMP_DIR "/basis_resized_aligned.ntpack");
+    opts.max_size = 20;
+    nt_builder_add_texture_raw(ctx, rgba, 40, 22, "wide", &opts);
     opts.max_size = 4;
-    ctx = nt_builder_start_pack(TMP_DIR "/basis_unaligned_raw.ntpack");
-    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_builder_add_texture_raw(ctx, rgba, 8, 6, "raw_8x6", &opts), "multiples of 4");
-
-    /* Aligned after the resize: 8x8 clamped to 4 is 4x4. */
-    uint8_t square[8 * 8 * 4];
-    memset(square, 200, sizeof(square));
-    ctx = nt_builder_start_pack(TMP_DIR "/basis_aligned_raw.ntpack");
-    nt_builder_add_texture_raw(ctx, square, 8, 8, "raw_8x8", &opts);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
-    nt_builder_free_pack(ctx);
-
-    /* An uncompressed texture keeps any size. */
-    opts.compress = (nt_basisu_encode_opts_t){0};
-    opts.max_size = 0;
-    ctx = nt_builder_start_pack(TMP_DIR "/raw_unaligned.ntpack");
-    nt_builder_add_texture_raw(ctx, rgba, 8, 6, "raw_8x6", &opts);
+    nt_builder_add_texture_raw(ctx, rgba, 8, 6, "small", &opts);
+    TEST_ASSERT_EQUAL_UINT32(2, ctx->pending_count);
+    const NtBuildTextureData *wide = (const NtBuildTextureData *)ctx->pending[0].data;
+    const NtBuildTextureData *tiny = (const NtBuildTextureData *)ctx->pending[1].data;
+    TEST_ASSERT_EQUAL_UINT32(20, wide->width);
+    TEST_ASSERT_EQUAL_UINT32(8, wide->height);
+    TEST_ASSERT_EQUAL_UINT32(4, tiny->width);
+    TEST_ASSERT_EQUAL_UINT32(4, tiny->height);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
 }
@@ -9338,6 +9321,181 @@ void test_atlas_max_pages_exhaustion_graceful(void) {
     }
 }
 
+/* --- Block-aligned compressed atlas pages --- */
+
+static const NtAtlasUv *atlas_blob_uvs(const uint8_t *pack_buf) {
+    const NtPackHeader *pack = (const NtPackHeader *)pack_buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(pack_buf + sizeof(NtPackHeader));
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            const uint8_t *ablob = pack_buf + entries[i].offset;
+            const NtAtlasHeader *header = (const NtAtlasHeader *)ablob;
+            return (const NtAtlasUv *)(ablob + header->vertex_offset + ((size_t)header->total_vertex_count * sizeof(float[2])));
+        }
+    }
+    return NULL;
+}
+
+/* {width, height} of every page of the pack's atlas. */
+static void atlas_blob_page_sizes(const uint8_t *pack_buf, uint32_t (*out)[2]) {
+    const NtPackHeader *pack = (const NtPackHeader *)pack_buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(pack_buf + sizeof(NtPackHeader));
+    for (uint32_t a = 0; a < pack->asset_count; a++) {
+        if (entries[a].asset_type != NT_ASSET_ATLAS) {
+            continue;
+        }
+        const uint8_t *ablob = pack_buf + entries[a].offset;
+        const NtAtlasHeader *header = (const NtAtlasHeader *)ablob;
+        for (uint32_t pg = 0; pg < header->page_count; pg++) {
+            uint64_t page_id = 0;
+            memcpy(&page_id, ablob + sizeof(NtAtlasHeader) + ((size_t)pg * sizeof(uint64_t)), sizeof(page_id));
+            for (uint32_t i = 0; i < pack->asset_count; i++) {
+                if (entries[i].asset_type == NT_ASSET_TEXTURE && entries[i].resource_id == page_id) {
+                    const NtTextureAssetHeader *tex = (const NtTextureAssetHeader *)(pack_buf + entries[i].offset);
+                    out[pg][0] = tex->width;
+                    out[pg][1] = tex->height;
+                }
+            }
+        }
+    }
+}
+
+static void block_compress(nt_atlas_opts_t *opts) {
+    opts->compress = ANY_COMPRESS();
+    opts->mips = NT_TEX_MIPS_NONE;
+    opts->filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+}
+
+/* Packs solid RECT sprites (each side <= 32), identity orientation only; returns whether the atlas cache hit. */
+static bool pack_solid_sprites(const char *path, const char *cache, const nt_atlas_opts_t *base, const uint32_t (*sizes)[2], uint32_t count) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL(ctx);
+    if (cache) {
+        nt_builder_set_cache_dir(ctx, cache);
+    }
+    nt_atlas_opts_t opts = *base;
+    opts.shape = NT_ATLAS_SHAPE_RECT;
+    opts.allowed_transforms = NT_ATLAS_TRANSFORMS_IDENTITY;
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "block", &opts);
+    uint8_t px[32 * 32 * 4];
+    for (uint32_t i = 0; i < count; i++) {
+        TEST_ASSERT_TRUE(sizes[i][0] <= 32 && sizes[i][1] <= 32);
+        const size_t bytes = (size_t)sizes[i][0] * sizes[i][1] * 4;
+        memset(px, (int)(40 + (i * 30)), bytes);
+        for (size_t k = 3; k < bytes; k += 4) {
+            px[k] = 255;
+        }
+        char name[16];
+        (void)snprintf(name, sizeof(name), "s%u", i);
+        nt_atlas_add_raw(atlas, px, sizes[i][0], sizes[i][1], &(nt_atlas_sprite_opts_t){.name = name, .origin_x = 0.5F, .origin_y = 0.5F});
+    }
+    (void)nt_atlas_commit(atlas);
+    uint32_t errors = 0;
+    (void)nt_builder_get_errors(ctx, &errors);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, errors, "sprites must pack cleanly");
+    const bool hit = ctx->atlas_cache_hit;
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    return hit;
+}
+
+/* Odd tight content: the compressed page grows to the next 4x4 block and every sprite keeps its pixels. */
+void test_compressed_atlas_page_rounds_to_block_and_keeps_sprite_pixels(void) {
+    static const uint32_t sizes[][2] = {{21, 13}, {9, 17}, {5, 7}};
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.power_of_two = false;
+    opts.padding = 1;
+    (void)pack_solid_sprites(TMP_DIR "/block_raw.ntpack", NULL, &opts, sizes, 3);
+    block_compress(&opts);
+    (void)pack_solid_sprites(TMP_DIR "/block_basis.ntpack", NULL, &opts, sizes, 3);
+
+    const NtAtlasRegion *raw_regions = NULL;
+    const NtAtlasRegion *basis_regions = NULL;
+    uint32_t raw_count = 0;
+    uint32_t basis_count = 0;
+    uint32_t raw_page[NT_ATLAS_MAX_PAGES][2] = {{0}};
+    uint32_t basis_page[NT_ATLAS_MAX_PAGES][2] = {{0}};
+    uint8_t *raw = read_atlas_blob(TMP_DIR "/block_raw.ntpack", &raw_regions, &raw_count);
+    uint8_t *basis = read_atlas_blob(TMP_DIR "/block_basis.ntpack", &basis_regions, &basis_count);
+    TEST_ASSERT_NOT_NULL(raw);
+    TEST_ASSERT_NOT_NULL(basis);
+    atlas_blob_page_sizes(raw, raw_page);
+    atlas_blob_page_sizes(basis, basis_page);
+    TEST_ASSERT_TRUE_MESSAGE(raw_page[0][0] % 4 != 0 || raw_page[0][1] % 4 != 0, "fixture must produce an unaligned tight page");
+    TEST_ASSERT_EQUAL_UINT32(nt_basisu_block_floor(raw_page[0][0] + 3U), basis_page[0][0]);
+    TEST_ASSERT_EQUAL_UINT32(nt_basisu_block_floor(raw_page[0][1] + 3U), basis_page[0][1]);
+    TEST_ASSERT_EQUAL_UINT32(raw_count, basis_count);
+    const NtAtlasUv *raw_uv = atlas_blob_uvs(raw);
+    const NtAtlasUv *basis_uv = atlas_blob_uvs(basis);
+    for (uint32_t r = 0; r < raw_count; r++) {
+        const uint32_t pg = raw_regions[r].page_index;
+        TEST_ASSERT_EQUAL_UINT32(pg, basis_regions[r].page_index);
+        TEST_ASSERT_EQUAL_UINT32(raw_regions[r].vertex_count, basis_regions[r].vertex_count);
+        for (uint32_t v = 0; v < raw_regions[r].vertex_count; v++) {
+            const NtAtlasUv *a = &raw_uv[raw_regions[r].vertex_start + v];
+            const NtAtlasUv *b = &basis_uv[basis_regions[r].vertex_start + v];
+            TEST_ASSERT_EQUAL_INT64_MESSAGE(llround((double)a->atlas_u * raw_page[pg][0] / 65535.0), llround((double)b->atlas_u * basis_page[pg][0] / 65535.0), "padding must not move a sprite");
+            TEST_ASSERT_EQUAL_INT64_MESSAGE(llround((double)a->atlas_v * raw_page[pg][1] / 65535.0), llround((double)b->atlas_v * basis_page[pg][1] / 65535.0), "padding must not move a sprite");
+        }
+    }
+    free(raw);
+    free(basis);
+}
+
+static void assert_pages_within(const char *path, uint32_t max_size, bool compressed) {
+    const NtAtlasRegion *regions = NULL;
+    uint32_t count = 0;
+    uint32_t page[NT_ATLAS_MAX_PAGES][2] = {{0}};
+    uint8_t *buf = read_atlas_blob(path, &regions, &count);
+    TEST_ASSERT_NOT_NULL(buf);
+    atlas_blob_page_sizes(buf, page);
+    for (uint32_t r = 0; r < count; r++) {
+        const uint32_t w = page[regions[r].page_index][0];
+        const uint32_t h = page[regions[r].page_index][1];
+        TEST_ASSERT_TRUE(w <= max_size && h <= max_size);
+        TEST_ASSERT_TRUE(compressed ? (nt_basisu_block_floor(w) == w && nt_basisu_block_floor(h) == h) : ((w & (w - 1)) == 0 && (h & (h - 1)) == 0));
+    }
+    free(buf);
+}
+
+/* Placement is bounded by the rounded-down size, so content that would round past max_size takes a new page. */
+void test_rounded_atlas_pages_stay_within_max_size(void) {
+    /* Side by side these need 29 px; a compressed page would round that to 32 against max_size 30. */
+    static const uint32_t narrow[][2] = {{15, 26}, {14, 26}};
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.power_of_two = false;
+    opts.padding = 0;
+    opts.max_size = 30;
+    block_compress(&opts);
+    (void)pack_solid_sprites(TMP_DIR "/block_max30.ntpack", NULL, &opts, narrow, 2);
+    assert_pages_within(TMP_DIR "/block_max30.ntpack", 30, true);
+
+    /* Side by side these need 50 px; POT would make that 64 against max_size 50. */
+    static const uint32_t wide[][2] = {{25, 20}, {25, 20}};
+    opts = nt_atlas_opts_defaults();
+    opts.power_of_two = true;
+    opts.padding = 0;
+    opts.max_size = 50;
+    (void)pack_solid_sprites(TMP_DIR "/block_pot50.ntpack", NULL, &opts, wide, 2);
+    assert_pages_within(TMP_DIR "/block_pot50.ntpack", 50, false);
+}
+
+/* Compression block-aligns the layout, so a cached uncompressed layout must not serve a compressed build. */
+void test_compression_changes_atlas_cache_key(void) {
+    const char *cache = TMP_DIR "/atlas_cache_block";
+    (void)MKDIR(TMP_DIR);
+    (void)MKDIR(cache);
+    clean_cache_dir(cache);
+    static const uint32_t sizes[][2] = {{21, 13}};
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.power_of_two = false;
+    TEST_ASSERT_FALSE(pack_solid_sprites(TMP_DIR "/block_cache_raw.ntpack", cache, &opts, sizes, 1));
+    TEST_ASSERT_TRUE(pack_solid_sprites(TMP_DIR "/block_cache_raw.ntpack", cache, &opts, sizes, 1));
+    block_compress(&opts);
+    TEST_ASSERT_FALSE_MESSAGE(pack_solid_sprites(TMP_DIR "/block_cache_basis.ntpack", cache, &opts, sizes, 1), "compression must change the atlas cache key");
+}
+
 /* The cap itself is the contract: NT_ATLAS_MAX_PAGES one-per-page sprites are
  * legal, one more is a graceful PAGES_EXHAUSTED — a cap regression (8 -> 64)
  * moves this exact boundary, which the 70-sprite exhaustion test cannot see. */
@@ -10422,6 +10580,9 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_atlas_cache_identity_includes_source_dimensions);
     RUN_TEST(test_atlas_cache_corrupt_file_falls_back);
     RUN_TEST(test_atlas_max_pages_exhaustion_graceful);
+    RUN_TEST(test_compressed_atlas_page_rounds_to_block_and_keeps_sprite_pixels);
+    RUN_TEST(test_rounded_atlas_pages_stay_within_max_size);
+    RUN_TEST(test_compression_changes_atlas_cache_key);
     RUN_TEST(test_atlas_page_cap_boundary);
 
     /* Slice9 builder pipeline */

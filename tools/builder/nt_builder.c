@@ -642,7 +642,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         }
         if (pe->kind == NT_BUILD_ASSET_TEXTURE) {
             NtBuildTextureData *td = (NtBuildTextureData *)pe->data;
-            if (td->opts.compress.codec != NT_BASISU_CODEC_NONE) {
+            if (nt_basisu_compressed(&td->opts.compress)) {
                 needs_basis = true;
             }
         }
@@ -801,7 +801,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             NtBuildEntry *pe = &ctx->pending[work_indices[wi]];
             if (pe->kind == NT_BUILD_ASSET_TEXTURE) {
                 NtBuildTextureData *td = (NtBuildTextureData *)pe->data;
-                if (td->opts.compress.codec != NT_BASISU_CODEC_NONE && td->width * td->height >= 128 * 128) {
+                if (nt_basisu_compressed(&td->opts.compress) && td->width * td->height >= 128 * 128) {
                     heavy_count++;
                 }
             }
@@ -1294,12 +1294,12 @@ static void *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *out_w
     uint32_t w = 0;
     uint32_t h = 0;
     if (td->source_data) {
-        pixels = nt_builder_decode_texture(td->source_data, td->source_size, td->opts.format, td->opts.max_size, &w, &h);
+        pixels = nt_builder_decode_texture(td->source_data, td->source_size, td->opts.format, td->opts.max_size, nt_basisu_compressed(&td->opts.compress), &w, &h);
     } else if (td->source_path) {
         uint32_t fsize = 0;
         uint8_t *fdata = (uint8_t *)nt_builder_read_file(td->source_path, &fsize);
         NT_BUILD_ASSERT(fdata && "redecode_texture: re-read file failed");
-        pixels = nt_builder_decode_texture(fdata, fsize, td->opts.format, td->opts.max_size, &w, &h);
+        pixels = nt_builder_decode_texture(fdata, fsize, td->opts.format, td->opts.max_size, nt_basisu_compressed(&td->opts.compress), &w, &h);
         free(fdata);
     } else {
         NT_BUILD_ASSERT(0 && "redecode_texture: no source (raw texture should have decoded_data)");
@@ -1316,17 +1316,13 @@ static void *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *out_w
     return pixels;
 }
 
-/* WebGL BPTC rejects a level 0 that is not block-aligned, so such a texture would fall back to RGBA8 on desktop.
- * `source` names the texture in the diagnostic: the file path or the resource id. */
-static void assert_basis_block_aligned(const char *source, uint32_t w, uint32_t h, const nt_tex_opts_t *opts) {
-    if (opts && opts->compress.codec != NT_BASISU_CODEC_NONE && (w % 4 != 0 || h % 4 != 0)) {
-        NT_BUILD_FAIL("texture: a Basis-compressed texture needs width and height that are multiples of 4",
-                      "texture '%s': Basis-compressed level 0 is %ux%u (after max_size), not a multiple of 4 -- resize the source or pick a block-aligned max_size", source, w, h);
-    }
-}
-
 static NtBuildTextureData *make_texture_data(const char *source, uint32_t w, uint32_t h, const nt_tex_opts_t *opts, nt_texture_pixel_format_t effective_format) {
-    assert_basis_block_aligned(source, w, h, opts);
+    /* A max_size resize already block-aligns, so only an unresized source can miss. */
+    const bool aligned = !opts || !nt_basisu_compressed(&opts->compress) || (nt_basisu_block_floor(w) == w && nt_basisu_block_floor(h) == h);
+    if (!aligned) {
+        NT_LOG_ERROR("texture '%s': Basis level 0 is %ux%u -- edit the source so both sides are multiples of 4", source, w, h);
+    }
+    NT_BUILD_ASSERT(aligned && "texture: a Basis texture needs width and height that are multiples of 4");
     NtBuildTextureData *td = (NtBuildTextureData *)calloc(1, sizeof(NtBuildTextureData));
     NT_BUILD_ASSERT(td && "texture data alloc failed");
     td->width = w;
@@ -1402,7 +1398,7 @@ void nt_builder_add_texture(NtBuilderContext *ctx, const char *path, const nt_te
 
     uint32_t w = 0;
     uint32_t h = 0;
-    void *pixels = nt_builder_decode_texture(file_data, file_size, effective_format, opts ? opts->max_size : 0, &w, &h);
+    void *pixels = nt_builder_decode_texture(file_data, file_size, effective_format, opts ? opts->max_size : 0, opts && nt_basisu_compressed(&opts->compress), &w, &h);
     free(file_data);
 
     /* Hash decoded pixels, then free -- re-read from stored path at encode time */
@@ -1472,7 +1468,7 @@ void nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *da
 
     uint32_t w = 0;
     uint32_t h = 0;
-    void *pixels = nt_builder_decode_texture(data, size, effective_format, opts ? opts->max_size : 0, &w, &h);
+    void *pixels = nt_builder_decode_texture(data, size, effective_format, opts ? opts->max_size : 0, opts && nt_basisu_compressed(&opts->compress), &w, &h);
 
     /* Hash decoded pixels, then free -- deep copy source for re-decode at encode time */
     const uint32_t decoded_size = nt_builder_texture_source_size(effective_format, w, h);
@@ -1494,7 +1490,7 @@ static void add_texture_pixels(NtBuilderContext *ctx, const void *pixels, uint32
                                nt_texture_pixel_format_t effective_format) {
     uint32_t w = 0;
     uint32_t h = 0;
-    void *decoded = nt_builder_decode_texture_raw(pixels, width, height, effective_format, opts ? opts->max_size : 0, &w, &h);
+    void *decoded = nt_builder_decode_texture_raw(pixels, width, height, effective_format, opts ? opts->max_size : 0, opts && nt_basisu_compressed(&opts->compress), &w, &h);
 
     /* Hash and keep decoded_data -- can't re-derive from source */
     const uint32_t decoded_size = nt_builder_texture_source_size(effective_format, w, h);

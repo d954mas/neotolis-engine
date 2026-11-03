@@ -82,6 +82,9 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
  * stricter than vector_pack for any shape. */
 bool vpack_sprite_fits_empty_page(const Point2D *hull, uint32_t hull_count, const nt_atlas_opts_t *opts);
 
+/* Largest page side placement may use: the final POT or 4x4-block rounding of a page that fits it still fits max_size. */
+uint32_t vpack_page_bound(const nt_atlas_opts_t *opts);
+
 #ifdef __cplusplus
 }
 #endif

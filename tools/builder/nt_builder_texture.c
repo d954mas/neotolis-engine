@@ -24,7 +24,7 @@ nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *op
     NT_BUILD_ASSERT((unsigned)resolved.wrap_v <= (unsigned)NT_TEXTURE_DEFAULT_WRAP_MIRRORED_REPEAT && "texture opts: wrap_v out of range");
 
     const nt_basisu_encode_opts_t *compress_opts = &resolved.compress;
-    bool compressed = compress_opts->codec != NT_BASISU_CODEC_NONE;
+    bool compressed = nt_basisu_compressed(compress_opts);
     bool filter_min_uses_mips = resolved.filter_min >= NT_TEXTURE_DEFAULT_FILTER_NEAREST_MIPMAP_NEAREST;
     NT_BUILD_ASSERT((unsigned)resolved.mips <= (unsigned)NT_TEX_MIPS_BAKED && "texture opts: mips out of range");
     NT_BUILD_ASSERT((resolved.mips != NT_TEX_MIPS_NONE || !filter_min_uses_mips) && "texture opts: a mipmap filter_min requires mips RUNTIME or BAKED");
@@ -36,6 +36,7 @@ nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *op
         /* The runtime of the same configure refuses a codec whose NT_BASISU_HAS_* is OFF. */
         NT_BUILD_ASSERT(((compress_opts->codec == NT_BASISU_CODEC_ETC1S && NT_BASISU_HAS_ETC1S) || (compress_opts->codec == NT_BASISU_CODEC_UASTC_LDR && NT_BASISU_HAS_UASTC)) &&
                         "texture opts: codec NT_BASISU_HAS_* option is OFF in this build");
+        NT_BUILD_ASSERT(nt_basisu_block_floor(resolved.max_size) == resolved.max_size && "texture opts: a Basis texture needs max_size 0 or a multiple of 4");
         if (compress_opts->codec == NT_BASISU_CODEC_ETC1S) {
             NT_BUILD_ASSERT((compress_opts->etc1s.quality >= 1 && compress_opts->etc1s.quality <= 255) && "texture opts: ETC1S quality must be 1..255");
             NT_BUILD_ASSERT((isfinite(compress_opts->etc1s.selector_rdo_threshold) && compress_opts->etc1s.selector_rdo_threshold >= 0.0F && compress_opts->etc1s.selector_rdo_threshold <= 1.0e10F) &&
@@ -80,28 +81,26 @@ static float *resize_hdr(const float *rgb, uint32_t w, uint32_t h, uint32_t out_
     return resized;
 }
 
+/* The shorter side scaled with the longer one to max_size; block_align rounds it down to the 4x4 block. */
+static uint32_t scaled_short_side(uint32_t short_side, uint32_t long_side, uint32_t max_size, bool block_align) {
+    const uint32_t side = short_side * max_size / long_side;
+    if (block_align) {
+        return side < 4 ? 4 : nt_basisu_block_floor(side);
+    }
+    return side < 1 ? 1 : side;
+}
+
 /* Resize source pixels to fit within max_size, preserving aspect ratio.
  * Returns the resized buffer (caller frees), or NULL when no resize is needed.
  * *out_w and *out_h receive the final size either way. */
-static void *resize_if_needed(const void *pixels, nt_texture_pixel_format_t format, uint32_t w, uint32_t h, uint32_t max_size, uint32_t *out_w, uint32_t *out_h) {
+static void *resize_if_needed(const void *pixels, nt_texture_pixel_format_t format, uint32_t w, uint32_t h, uint32_t max_size, bool block_align, uint32_t *out_w, uint32_t *out_h) {
     if (max_size == 0 || (w <= max_size && h <= max_size)) {
         *out_w = w;
         *out_h = h;
         return NULL;
     }
-    if (w >= h) {
-        *out_w = max_size;
-        *out_h = h * max_size / w;
-    } else {
-        *out_h = max_size;
-        *out_w = w * max_size / h;
-    }
-    if (*out_w < 1) {
-        *out_w = 1;
-    }
-    if (*out_h < 1) {
-        *out_h = 1;
-    }
+    *out_w = w >= h ? max_size : scaled_short_side(w, h, max_size, block_align);
+    *out_h = w >= h ? scaled_short_side(h, w, max_size, block_align) : max_size;
     if (format == NT_TEXTURE_FORMAT_RGB9E5) {
         return resize_hdr((const float *)pixels, w, h, *out_w, *out_h);
     }
@@ -142,7 +141,7 @@ static uint8_t *premultiply_rgba_copy(const uint8_t *rgba, uint32_t pixel_count)
 /* --- Decode: image data -> source pixels (eager, called from add_*) --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- assert expansions inflate the count
-void *nt_builder_decode_texture(const uint8_t *src_data, uint32_t src_size, nt_texture_pixel_format_t format, uint32_t max_size, uint32_t *out_w, uint32_t *out_h) {
+void *nt_builder_decode_texture(const uint8_t *src_data, uint32_t src_size, nt_texture_pixel_format_t format, uint32_t max_size, bool block_align, uint32_t *out_w, uint32_t *out_h) {
     NT_BUILD_ASSERT(src_data && src_size != 0 && out_w && out_h && "texture decode: invalid args");
     /* No implicit conversion: stbi would tone-map an HDR file to 8 bits or gamma-expand an LDR one. */
     const bool hdr = format == NT_TEXTURE_FORMAT_RGB9E5;
@@ -162,7 +161,7 @@ void *nt_builder_decode_texture(const uint8_t *src_data, uint32_t src_size, nt_t
         assert_hdr_range((const float *)pixels, (uint32_t)w * (uint32_t)h);
     }
 
-    void *resized = resize_if_needed(pixels, format, (uint32_t)w, (uint32_t)h, max_size, out_w, out_h);
+    void *resized = resize_if_needed(pixels, format, (uint32_t)w, (uint32_t)h, max_size, block_align, out_w, out_h);
     if (resized) {
         stbi_image_free(pixels);
         pixels = resized;
@@ -172,7 +171,7 @@ void *nt_builder_decode_texture(const uint8_t *src_data, uint32_t src_size, nt_t
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- assert expansions inflate the count
-void *nt_builder_decode_texture_raw(const void *pixels, uint32_t width, uint32_t height, nt_texture_pixel_format_t format, uint32_t max_size, uint32_t *out_w, uint32_t *out_h) {
+void *nt_builder_decode_texture_raw(const void *pixels, uint32_t width, uint32_t height, nt_texture_pixel_format_t format, uint32_t max_size, bool block_align, uint32_t *out_w, uint32_t *out_h) {
     NT_BUILD_ASSERT(pixels && width != 0 && height != 0 && out_w && out_h && "texture raw: invalid args");
     if (width > NT_BUILD_MAX_TEXTURE_SIZE || height > NT_BUILD_MAX_TEXTURE_SIZE) {
         NT_BUILD_FAIL("texture raw: image exceeds NT_BUILD_MAX_TEXTURE_SIZE", "texture raw: %ux%u exceeds max %u", width, height, (uint32_t)NT_BUILD_MAX_TEXTURE_SIZE);
@@ -181,7 +180,7 @@ void *nt_builder_decode_texture_raw(const void *pixels, uint32_t width, uint32_t
         assert_hdr_range((const float *)pixels, width * height);
     }
 
-    void *result = resize_if_needed(pixels, format, width, height, max_size, out_w, out_h);
+    void *result = resize_if_needed(pixels, format, width, height, max_size, block_align, out_w, out_h);
     if (!result) {
         /* The caller owns the result, so an unresized source is copied. */
         const uint32_t size = nt_builder_texture_source_size(format, width, height);
@@ -281,7 +280,7 @@ static void write_raw_levels(const void *source, nt_texture_pixel_format_t forma
 
 static NtTextureAssetHeader texture_header(const nt_tex_opts_t *opts, uint32_t width, uint32_t height, uint32_t level_count, size_t data_size) {
     NT_BUILD_ASSERT(data_size <= UINT32_MAX - sizeof(NtTextureAssetHeader) && "texture encode: levels overflow the 32-bit TTEX data_size");
-    const bool compressed = opts->compress.codec != NT_BASISU_CODEC_NONE;
+    const bool compressed = nt_basisu_compressed(&opts->compress);
     return (NtTextureAssetHeader){
         .magic = NT_TEXTURE_MAGIC,
         .version = NT_TEXTURE_VERSION,
@@ -301,8 +300,9 @@ static NtTextureAssetHeader texture_header(const nt_tex_opts_t *opts, uint32_t w
 
 /* --- Encode: source pixels -> independent buffer (thread-safe, no shared state) --- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- assert expansions inflate the count
 void nt_builder_encode_texture_to_buf(const void *pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint32_t encode_threads, uint8_t **out_data, uint32_t *out_size) {
-    const bool compressed = opts->compress.codec != NT_BASISU_CODEC_NONE;
+    const bool compressed = nt_basisu_compressed(&opts->compress);
     const bool baked = opts->mips == NT_TEX_MIPS_BAKED;
     const uint32_t level_count = baked ? nt_texture_full_chain_levels(width, height) : 1;
 
@@ -316,6 +316,7 @@ void nt_builder_encode_texture_to_buf(const void *pixels, uint32_t width, uint32
     nt_basisu_encode_result_t enc = {0};
     size_t data_size = 0;
     if (compressed) {
+        NT_BUILD_ASSERT(nt_basisu_block_floor(width) == width && nt_basisu_block_floor(height) == height && "texture encode: Basis level 0 must be a multiple of 4");
         enc = nt_basisu_encode(encode_threads, source, width, height, opts->format, &opts->compress, baked);
         NT_BUILD_ASSERT(enc.mip_count == level_count && "texture encode: Basis level count differs from the mip mode");
         data_size = enc.size;

@@ -58,7 +58,7 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
         buf[pos++] = wv;
         buf[pos++] = mips;
 
-        if (td->opts.compress.codec != NT_BASISU_CODEC_NONE) {
+        if (nt_basisu_compressed(&td->opts.compress)) {
             uint32_t codec = (uint32_t)td->opts.compress.codec;
             memcpy(buf + pos, &codec, sizeof(codec));
             pos += (uint32_t)sizeof(codec);
