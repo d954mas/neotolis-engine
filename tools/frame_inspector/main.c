@@ -1864,7 +1864,7 @@ static void compare_rows(const fi_frame_t *a, const fi_frame_t *b) {
     }
 }
 
-/* The diff and the numbers once per pair of frames, kept across Back and forward so folds stay; groups that
+/* The diff and the numbers of the last pair compared, so Back and forward to it keep its folds; groups that
  * differ start open. */
 static void compare_cache(const fi_frame_t *a, const fi_frame_t *b) {
     if (s_cmp.base_file != s.base_file || s_cmp.base_frame != s.base_frame || s_cmp.file != s.file || s_cmp.frame != s.frame) {

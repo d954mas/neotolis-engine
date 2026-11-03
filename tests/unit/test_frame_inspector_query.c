@@ -295,7 +295,7 @@ static void test_native_and_web_align(void) {
     fi_file_close(&files[1]);
 }
 
-/* Renamed notes make a new group: B's is only_b, A's old one is a.gN, and both list their requests. */
+/* Renamed notes make a new group: B's is only in B, A's old one is a.gN only in A, and both list their requests. */
 static void test_compare_names_groups_only_one_frame_has(void) {
     static const edit_t k_renamed[] = {{"\n200 NOTE", "\"shape\"", "\"shapf\""}, {"\n205 NOTE", "\"shape\"", "\"shapf\""}};
     load_variant(k_renamed, 2);

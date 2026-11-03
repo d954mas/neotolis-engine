@@ -1466,7 +1466,9 @@ run or of two (native and web, before and after a change), compare by number key
 path and note); inside a group their requests align like a text diff. A pair compares its result, merge
 break, GL call count, arguments and the records the request wrote (ARGUMENT, resource and attribute
 DEFINITION, NOTE_FIELD); handles compare as aliases numbered by first use in the frame (`pipe#9`), so runs
-whose handles differ still pair. Requests more than 1024 edits apart list A's, then B's. Its numbers follow this chapter: it
+whose handles differ still pair; GL calls are counted per request, not aligned, as backends issue different
+calls for one request. Between their common start and end, requests more than 1024 edits apart list A's,
+then B's. Its numbers follow this chapter: it
 checks every plain or indexed draw's merge against the recorded `CACHE` and rebuilds the
 frame's counters from the records (`stream_bytes` is shown from the counters only:
 command sizes are not recorded).

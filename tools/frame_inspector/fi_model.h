@@ -243,12 +243,9 @@ uint32_t fi_counter_rows(const fi_frame_t *frame, fi_counter_row_t rows[FI_COUNT
 /* The record's line text and its length. */
 size_t fi_record_text(const fi_frame_t *frame, uint32_t record, const char **text);
 
-/* Two frames compared group by group: the groups of B in their order, then the groups only A has. In each,
- * the requests (OP and NOTE records) of both frames are aligned like a text diff. Two requests pair when
- * their kind, operation, object and vertex-input aliases (pipe#9) and note label match, so runs whose
- * handles differ still pair; a pair whose result, merge break, GL calls, arguments (handles as aliases) or
- * own records (ARGUMENT, resource and attribute DEFINITION, NOTE_FIELD) differ is changed. GL calls are
- * counted, not aligned: backends issue different calls for one request. */
+/* Two frames compared group by group (groups with requests: B's in order, then those only A has); requests
+ * (OP and NOTE records) align like a text diff, paired by kind, operation, aliases (pipe#9) and note label.
+ * What a pair compares: render architecture, "Capture text". GL calls are counted, not aligned. */
 typedef enum { FI_DIFF_SAME, FI_DIFF_CHANGED, FI_DIFF_ONLY_A, FI_DIFF_ONLY_B } fi_diff_kind_t;
 enum { FI_CHANGE_RESULT = 1, FI_CHANGE_MERGE = 2, FI_CHANGE_CALLS = 4, FI_CHANGE_ARGS = 8, FI_CHANGE_ITEMS = 16 /* the request's own records */ };
 typedef struct {
