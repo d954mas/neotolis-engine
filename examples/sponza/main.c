@@ -33,6 +33,15 @@
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
 #include "version/nt_version.h"
+#ifdef NT_DEVAPI_ENABLED
+#include "devapi/nt_devapi.h"
+#include "devapi/nt_devapi_groups.h"
+#ifdef NT_PLATFORM_WEB
+#include "devapi/nt_devapi_web.h"
+#else
+#include "devapi/nt_devapi_net.h"
+#endif
+#endif
 #include <inttypes.h>
 #ifndef NT_PLATFORM_WEB
 #include "fs/nt_fs.h"
@@ -346,6 +355,9 @@ static void load_scene_from_manifest(void) {
 static void frame(void) {
     nt_window_poll();
     nt_example_frames_begin();
+#ifdef NT_DEVAPI_ENABLED
+    nt_devapi_update();
+#endif
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_MESH);
@@ -588,6 +600,9 @@ static void frame(void) {
     nt_gfx_end_frame();
     nt_example_frames_end(s_full_promoted && s_scene_loaded);
 
+#ifdef NT_DEVAPI_ENABLED
+    nt_devapi_frame_rendered();
+#endif
     nt_window_swap_buffers();
 }
 
@@ -692,11 +707,33 @@ int main(int argc, char **argv) {
 
     /* 17. Loading screen stays until geo pack is ready (see frame()) */
 
+#ifdef NT_DEVAPI_ENABLED
+    if (nt_devapi_init() != NT_OK) {
+        nt_log_error("sponza: devapi init failed");
+        return 1;
+    }
+    nt_devapi_register_default();
+#ifndef NT_PLATFORM_WEB
+    uint16_t devapi_port = 0;
+    if (!nt_devapi_net_port_from_env(NT_DEVAPI_DEFAULT_PORT, &devapi_port) || !nt_devapi_net_start(devapi_port)) {
+        nt_log_error("sponza: devapi server did not start");
+        nt_devapi_shutdown();
+        return 1;
+    }
+#else
+    nt_devapi_web_install_shim();
+#endif
+#endif
+
     /* 18. Run main loop */
     nt_app_run(frame);
 
     /* 19. Shutdown (native only) */
 #ifndef NT_PLATFORM_WEB
+#ifdef NT_DEVAPI_ENABLED
+    nt_devapi_net_stop();
+    nt_devapi_shutdown();
+#endif
     nt_mesh_renderer_shutdown();
     nt_drawable_comp_shutdown();
     nt_material_comp_shutdown();

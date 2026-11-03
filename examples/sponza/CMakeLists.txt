@@ -5,6 +5,13 @@ set(SP_PACK_DIR "${CMAKE_SOURCE_DIR}/build/examples/sponza")
 # Runtime demo
 add_executable(sponza main.c)
 target_link_libraries(sponza PRIVATE nt_version)
+if(NT_DEVAPI_ENABLED)
+    if(EMSCRIPTEN)
+        target_link_libraries(sponza PRIVATE nt_devapi_web nt_devapi_default)
+    else()
+        target_link_libraries(sponza PRIVATE nt_devapi_net nt_devapi_default)
+    endif()
+endif()
 target_link_libraries(sponza PRIVATE nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource nt_material nt_shared nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp nt_mesh_renderer nt_render nt_hash)
 # Generated per-pack asset headers from builder
 target_include_directories(sponza PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
