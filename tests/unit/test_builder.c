@@ -1853,6 +1853,18 @@ void test_texture_dilation_empty_levels_keep_where_colour_was(void) {
     free(asset);
 }
 
+/* Bug caught: an empty level filled from the level above after that level was
+ * premultiplied, so its colour was premultiplied twice: (0, 0, 0, 8), not 8 8 8 8. */
+void test_texture_premultiplied_empty_level_is_premultiplied_once(void) {
+    const uint8_t pair[8] = {255, 255, 255, 16, 0, 0, 0, 0};
+    nt_tex_opts_t opts = straight_baked_opts();
+    opts.process.alpha = NT_TEX_ALPHA_PREMULTIPLIED;
+    NtTextureAssetHeader hdr;
+    uint8_t *asset = encode_mips_asset(pair, 2, 1, &opts, &hdr);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(((const uint8_t[4]){8, 8, 8, 8}), asset_texel(asset, &hdr, 1, 0, 0), 4);
+    free(asset);
+}
+
 /* GPU RUNTIME mips average blocks without alpha weighting: after dilation every
  * 8x8 block of a disk sprite that shows any coverage keeps the sprite colour. */
 void test_texture_dilation_keeps_runtime_mips_free_of_black(void) {
@@ -11558,6 +11570,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_texture_dilation_fills_empty_tail_levels);
     RUN_TEST(test_texture_dilation_replaces_near_transparent_colour);
     RUN_TEST(test_texture_dilation_keeps_runtime_mips_free_of_black);
+    RUN_TEST(test_texture_premultiplied_empty_level_is_premultiplied_once);
     RUN_TEST(test_texture_process_opts_contract);
     RUN_TEST(test_texture_alpha_cutoff_keeps_the_closest_coverage);
     RUN_TEST(test_texture_alpha_cutoff_tie_keeps_the_level);

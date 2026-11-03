@@ -741,8 +741,8 @@ static void fill_empty_level(const dilate_ctx_t *dc, uint8_t *rgba, uint32_t w, 
  * (opaque for a format without alpha), copied or resized with resize_filter.
  * Level n filters level n-1's core with mip_filter: level 0's bytes, then float
  * linear values, premultiplied when alpha weights, so rounding, sRGB encoding and
- * division by alpha never accumulate. The stored copies are then dilated, scaled
- * for coverage and premultiplied, in that order. */
+ * division by alpha never accumulate. The stored copies are then dilated and scaled
+ * for coverage level by level, and premultiplied last. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one pass per pipeline stage
 static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t src_h, uint32_t w, uint32_t h, uint32_t level_count, const nt_tex_opts_t *opts) {
     const nt_tex_process_t *process = &opts->process;
@@ -852,16 +852,16 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
         if (threshold > 0 && level > 0) {
             preserve_coverage(level_px, texels, threshold, counts0[threshold], (size_t)w * h);
         }
-        if (process->alpha == NT_TEX_ALPHA_PREMULTIPLIED) {
-            for (size_t i = 0; i < texels; i++) {
-                uint8_t *px = &level_px[i * 4U];
-                for (uint32_t c = 0; c < 3; c++) {
-                    px[c] = (uint8_t)((((uint32_t)px[c] * px[3]) + 127U) / 255U);
-                }
-            }
-        }
         prev = level_px;
         level_px += texels * 4U;
+    }
+    /* Last, over the whole chain: an empty level fills from the straight level above. */
+    if (process->alpha == NT_TEX_ALPHA_PREMULTIPLIED) {
+        for (uint8_t *px = chain; px < level_px; px += 4) {
+            for (uint32_t c = 0; c < 3; c++) {
+                px[c] = (uint8_t)((((uint32_t)px[c] * px[3]) + 127U) / 255U);
+            }
+        }
     }
     // #endregion
     return chain;
