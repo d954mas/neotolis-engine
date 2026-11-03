@@ -1335,6 +1335,8 @@ void test_texture_process_fields_change_the_cache_key(void) {
                      process_key(ctx, (nt_tex_process_t){.rgb = NT_TEX_RGB_NORMAL, .alpha = NT_TEX_ALPHA_DATA}, NT_TEXTURE_FORMAT_RGBA8, none, 2));
 #if NT_BASISU_HAS_ETC1S
     const nt_basisu_encode_opts_t etc1s = nt_tex_compress_etc1s_default();
+    TEST_ASSERT_TRUE(process_key(ctx, (nt_tex_process_t){.rgb = NT_TEX_RGB_DATA}, NT_TEXTURE_FORMAT_RGBA8, etc1s, 2) !=
+                     process_key(ctx, (nt_tex_process_t){.alpha = NT_TEX_ALPHA_PREMULTIPLIED}, NT_TEXTURE_FORMAT_RGBA8, etc1s, 2));
     TEST_ASSERT_TRUE(process_key(ctx, (nt_tex_process_t){0}, NT_TEXTURE_FORMAT_RGBA8, etc1s, 2) != process_key(ctx, (nt_tex_process_t){.rgb = NT_TEX_RGB_DATA}, NT_TEXTURE_FORMAT_RGBA8, etc1s, 2));
 #endif
     nt_builder_free_pack(ctx);
@@ -1453,6 +1455,16 @@ void test_texture_chain_alpha_modes(void) {
     TEST_ASSERT_UINT8_WITHIN(1, 160, tail[3]);
     free(asset);
 
+    /* Bug caught: a weighted core reweighted by alpha again (a squared) from level 2 on. */
+    const uint8_t quad[16] = {255, 0, 0, 255, 255, 0, 0, 255, 0, 0, 255, 64, 0, 0, 255, 64};
+    opts.process.alpha = NT_TEX_ALPHA_STRAIGHT;
+    asset = encode_mips_asset(quad, 4, 1, &opts, &hdr);
+    tail = asset_texel(asset, &hdr, 2, 0, 0);
+    TEST_ASSERT_UINT8_WITHIN(1, 204, tail[0]);
+    TEST_ASSERT_UINT8_WITHIN(1, 51, tail[2]);
+    TEST_ASSERT_UINT8_WITHIN(1, 160, tail[3]);
+    free(asset);
+
     /* Bug caught: premultiplying a level built from premultiplied texels. */
     uint8_t half_red[4 * 4 * 4];
     fill_rgba(half_red, 0, 16, (const uint8_t[4]){255, 0, 0, 128});
@@ -1567,6 +1579,46 @@ void test_texture_filter_edges_follow_wrap_per_axis(void) {
         TEST_ASSERT_EQUAL_INT(0, v[0]);
         TEST_ASSERT_GREATER_THAN_INT(4, v[1]);
     }
+}
+
+/* MIRRORED_REPEAT resizes exactly like CLAMP_TO_EDGE (a documented deviation). */
+void test_texture_mirror_filters_as_clamp(void) {
+    uint8_t rgba[16 * 16 * 4];
+    for (uint32_t i = 0; i < 256; i++) {
+        fill_rgba(rgba, i, 1, (const uint8_t[4]){(i % 16) == 15 ? 255 : 0, (uint8_t)(i * 3U), 40, 255});
+    }
+    uint8_t *asset[2];
+    NtTextureAssetHeader hdr;
+    for (uint32_t m = 0; m < 2; m++) {
+        nt_tex_opts_t opts = straight_baked_opts();
+        opts.format = NT_TEXTURE_FORMAT_RGB8;
+        opts.max_size = 8;
+        opts.process.mip_filter = NT_TEX_FILTER_MITCHELL;
+        opts.wrap_u = m ? NT_TEXTURE_DEFAULT_WRAP_MIRRORED_REPEAT : NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
+        opts.wrap_v = opts.wrap_u;
+        asset[m] = encode_mips_asset(rgba, 16, 16, &opts, &hdr);
+    }
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(asset[0] + sizeof(hdr), asset[1] + sizeof(hdr), hdr.data_size);
+    free(asset[0]);
+    free(asset[1]);
+}
+
+/* Bug caught: a wrapped Kaiser resize to 2 rows crashes inside stb; such a level
+ * is box filtered. */
+void test_texture_kaiser_resize_to_two_wrapped_rows(void) {
+    uint8_t rgba[64 * 16 * 4];
+    fill_rgba(rgba, 0, (size_t)64 * 16, (const uint8_t[4]){128, 64, 32, 255});
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.format = NT_TEXTURE_FORMAT_RGB8;
+    opts.process.resize_filter = NT_TEX_FILTER_KAISER;
+    opts.max_size = 8;
+    NtTextureAssetHeader hdr;
+    uint8_t *asset = encode_mips_asset(rgba, 64, 16, &opts, &hdr);
+    TEST_ASSERT_EQUAL_UINT32(2, hdr.height);
+    for (uint32_t i = 0; i < 16; i++) {
+        TEST_ASSERT_EQUAL_UINT8_ARRAY(((const uint8_t[3]){128, 64, 32}), asset + sizeof(hdr) + ((size_t)i * 3), 3);
+    }
+    free(asset);
 }
 
 /* Bug caught: BOX run through the wrapped stb path, which returns garbage at some
@@ -1780,9 +1832,11 @@ void test_texture_dilation_empty_levels_keep_where_colour_was(void) {
     NtTextureAssetHeader hdr;
     uint8_t *asset = encode_mips_asset(rgba, 64, 64, &opts, &hdr);
     free(rgba);
-    TEST_ASSERT_TRUE(asset_texel(asset, &hdr, 3, 0, 0)[3] <= 8); /* level 3 is empty */
-    TEST_ASSERT_GREATER_THAN_UINT8(asset_texel(asset, &hdr, 3, 0, 4)[2] + 64, asset_texel(asset, &hdr, 3, 0, 4)[0]);
-    TEST_ASSERT_GREATER_THAN_UINT8(asset_texel(asset, &hdr, 3, 7, 4)[0] + 64, asset_texel(asset, &hdr, 3, 7, 4)[2]);
+    const uint8_t *left = asset_texel(asset, &hdr, 3, 0, 4);
+    const uint8_t *right = asset_texel(asset, &hdr, 3, 7, 4);
+    TEST_ASSERT_TRUE(left[3] <= 8 && right[3] <= 8); /* the donors faded: level 3 is empty */
+    TEST_ASSERT_GREATER_THAN_INT(left[2] + 64, left[0]);
+    TEST_ASSERT_GREATER_THAN_INT(right[0] + 64, right[2]);
     free(asset);
 }
 
@@ -1889,7 +1943,8 @@ void test_texture_process_opts_contract(void) {
 }
 
 #if NT_BASISU_HAS_ETC1S
-/* rgb picks the ETC1S metric: COLOR is the perceptual encode, DATA the linear one. */
+/* rgb picks the ETC1S metric: COLOR is the perceptual encode, DATA and NORMAL the
+ * linear one, and the two encodes differ. */
 void test_texture_rgb_picks_the_basis_metric(void) {
     uint8_t rgba[16 * 16 * 4];
     for (uint32_t i = 0; i < 256; i++) {
@@ -1901,16 +1956,41 @@ void test_texture_rgb_picks_the_basis_metric(void) {
     opts.mips = NT_TEX_MIPS_NONE;
     opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
     const uint8_t *levels[1] = {rgba};
-    for (uint32_t perceptual = 0; perceptual < 2; perceptual++) {
-        opts.process.rgb = perceptual ? NT_TEX_RGB_COLOR : NT_TEX_RGB_DATA;
+    nt_basisu_encode_result_t direct[2] = {nt_basisu_encode(1, levels, 1, 16, 16, NT_TEXTURE_FORMAT_RGB8, &opts.compress, false),
+                                           nt_basisu_encode(1, levels, 1, 16, 16, NT_TEXTURE_FORMAT_RGB8, &opts.compress, true)};
+    TEST_ASSERT_TRUE(direct[0].size != direct[1].size || memcmp(direct[0].data, direct[1].data, direct[0].size) != 0);
+    const nt_tex_rgb_t modes[3] = {NT_TEX_RGB_DATA, NT_TEX_RGB_COLOR, NT_TEX_RGB_NORMAL};
+    for (uint32_t m = 0; m < 3; m++) {
+        opts.process = m == 2 ? nt_tex_process_normal() : nt_tex_process_color();
+        opts.process.rgb = modes[m];
         NtTextureAssetHeader hdr;
         uint8_t *asset = encode_mips_asset(rgba, 16, 16, &opts, &hdr);
-        nt_basisu_encode_result_t direct = nt_basisu_encode(1, levels, 1, 16, 16, NT_TEXTURE_FORMAT_RGB8, &opts.compress, perceptual != 0);
-        TEST_ASSERT_EQUAL_UINT32(direct.size, hdr.data_size);
-        TEST_ASSERT_EQUAL_UINT8_ARRAY(direct.data, asset + sizeof(hdr), direct.size);
-        nt_basisu_encode_free(&direct);
+        const nt_basisu_encode_result_t *expected = &direct[m == 1 ? 1 : 0];
+        TEST_ASSERT_EQUAL_UINT32(expected->size, hdr.data_size);
+        TEST_ASSERT_EQUAL_UINT8_ARRAY(expected->data, asset + sizeof(hdr), expected->size);
         free(asset);
     }
+    nt_basisu_encode_free(&direct[0]);
+    nt_basisu_encode_free(&direct[1]);
+}
+#endif
+
+#if NT_BASISU_HAS_UASTC
+/* The cache key folds COLOR and DATA together outside ETC1S because UASTC LDR,
+ * RDO included, never reads the metric; a basisu update that does breaks this. */
+void test_texture_uastc_ignores_the_rgb_metric(void) {
+    uint8_t rgba[16 * 16 * 4];
+    for (uint32_t i = 0; i < 256; i++) {
+        fill_rgba(rgba, i, 1, (const uint8_t[4]){(uint8_t)(i * 13U), (uint8_t)(i * 7U), (uint8_t)(255U - i), 255});
+    }
+    const uint8_t *levels[1] = {rgba};
+    const nt_basisu_encode_opts_t uastc = nt_tex_compress_uastc_default();
+    nt_basisu_encode_result_t linear = nt_basisu_encode(1, levels, 1, 16, 16, NT_TEXTURE_FORMAT_RGB8, &uastc, false);
+    nt_basisu_encode_result_t perceptual = nt_basisu_encode(1, levels, 1, 16, 16, NT_TEXTURE_FORMAT_RGB8, &uastc, true);
+    TEST_ASSERT_EQUAL_UINT32(linear.size, perceptual.size);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(linear.data, perceptual.data, linear.size);
+    nt_basisu_encode_free(&linear);
+    nt_basisu_encode_free(&perceptual);
 }
 #endif
 
@@ -1926,6 +2006,16 @@ static void decode_normal(const uint8_t *px, double out[3]) {
     for (uint32_t c = 0; c < 3; c++) {
         out[c] /= length;
     }
+}
+
+/* A stored normal is unit length and within 2 degrees of `reference`. */
+static void expect_normal_near(const uint8_t *px, const double reference[3]) {
+    const double raw_length = sqrt(pow((px[0] / 127.5) - 1.0, 2) + pow((px[1] / 127.5) - 1.0, 2) + pow((px[2] / 127.5) - 1.0, 2));
+    TEST_ASSERT_TRUE_MESSAGE(fabs(raw_length - 1.0) < 0.02, "stored normal is not unit length");
+    double stored[3];
+    decode_normal(px, stored);
+    const double dot = (stored[0] * reference[0]) + (stored[1] * reference[1]) + (stored[2] * reference[2]);
+    TEST_ASSERT_TRUE_MESSAGE(dot > cos(2.0 * 3.14159265358979 / 180.0), "normal level deviates from the reference");
 }
 
 /* An asymmetric tilted field: every texel leans by a different angle. */
@@ -1975,13 +2065,7 @@ void test_texture_normal_levels_follow_the_normalized_reference(void) {
                 for (uint32_t c = 0; c < 3; c++) {
                     reference[(y * N) + x][c] = sum[c] / length;
                 }
-                const uint8_t *px = asset_texel(asset, &hdr, level, x, y);
-                const double raw_length = sqrt(pow((px[0] / 127.5) - 1.0, 2) + pow((px[1] / 127.5) - 1.0, 2) + pow((px[2] / 127.5) - 1.0, 2));
-                TEST_ASSERT_TRUE_MESSAGE(fabs(raw_length - 1.0) < 0.02, "stored normal is not unit length");
-                double stored[3];
-                decode_normal(px, stored);
-                const double dot = (stored[0] * reference[(y * N) + x][0]) + (stored[1] * reference[(y * N) + x][1]) + (stored[2] * reference[(y * N) + x][2]);
-                TEST_ASSERT_TRUE_MESSAGE(dot > cos(2.0 * 3.14159265358979 / 180.0), "normal level deviates from the reference");
+                expect_normal_near(asset_texel(asset, &hdr, level, x, y), reference[(y * N) + x]);
             }
         }
         if (size == 1) {
@@ -1992,6 +2076,62 @@ void test_texture_normal_levels_follow_the_normalized_reference(void) {
     free(asset);
 }
 
+/* A resized level 0 is normalized too. */
+void test_texture_normal_resized_level0_is_unit_length(void) {
+    uint8_t rgba[32 * 32 * 4];
+    for (uint32_t i = 0; i < 32 * 32; i++) {
+        double n[3];
+        tilted_normal(i % 32, i / 32, n);
+        for (uint32_t c = 0; c < 3; c++) {
+            rgba[((size_t)i * 4) + c] = (uint8_t)lround(((n[c] * 0.5) + 0.5) * 255.0);
+        }
+        rgba[((size_t)i * 4) + 3] = 255;
+    }
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.format = NT_TEXTURE_FORMAT_RGB8;
+    opts.process = nt_tex_process_normal();
+    opts.mips = NT_TEX_MIPS_NONE;
+    opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+    opts.max_size = 16;
+    NtTextureAssetHeader hdr;
+    uint8_t *asset = encode_mips_asset(rgba, 32, 32, &opts, &hdr);
+    for (uint32_t i = 0; i < 16 * 16; i++) {
+        const uint8_t *px = asset + sizeof(hdr) + ((size_t)i * 3);
+        const double length = sqrt(pow((px[0] / 127.5) - 1.0, 2) + pow((px[1] / 127.5) - 1.0, 2) + pow((px[2] / 127.5) - 1.0, 2));
+        TEST_ASSERT_TRUE_MESSAGE(fabs(length - 1.0) < 0.02, "resized level 0 is not unit length");
+    }
+    free(asset);
+}
+
+/* Bug caught: only the stored copy is normalized. Left, normals at +-60 degrees
+ * average to length 0.5; right, a flat 30 degrees. Level 2 tilts 15 degrees from
+ * the normalized level 1, 20 degrees from the raw one. */
+void test_texture_normal_core_feeds_the_next_level_normalized(void) {
+    const double s60 = sin(60.0 * 3.14159265358979 / 180.0);
+    const double tilts[4][3] = {{s60, 0.0, 0.5}, {-s60, 0.0, 0.5}, {0.5, 0.0, sqrt(0.75)}, {0.5, 0.0, sqrt(0.75)}};
+    uint8_t rgba[4 * 2 * 4];
+    for (uint32_t y = 0; y < 2; y++) {
+        for (uint32_t x = 0; x < 4; x++) {
+            const double *n = tilts[x < 2 ? (x + y) % 2 : 2];
+            uint8_t *px = &rgba[(((size_t)y * 4) + x) * 4];
+            for (uint32_t c = 0; c < 3; c++) {
+                px[c] = (uint8_t)lround(((n[c] * 0.5) + 0.5) * 255.0);
+            }
+            px[3] = 255;
+        }
+    }
+    nt_tex_opts_t opts = straight_baked_opts();
+    opts.format = NT_TEXTURE_FORMAT_RGB8;
+    opts.process = nt_tex_process_normal();
+    NtTextureAssetHeader hdr;
+    uint8_t *asset = encode_mips_asset(rgba, 4, 2, &opts, &hdr);
+    double n[3];
+    decode_normal(asset_texel(asset, &hdr, 2, 0, 0), n);
+    const double degrees = atan2(n[0], n[2]) * 180.0 / 3.14159265358979;
+    TEST_ASSERT_TRUE_MESSAGE(fabs(degrees - 15.0) < 2.0, "level 2 did not filter the normalized level 1");
+    free(asset);
+}
+
 /* RG8 stores XY only: its B channel never reaches the result, and Z is rebuilt. */
 void test_texture_normal_rg8_ignores_the_source_blue(void) {
     uint8_t rgba[2][16 * 16 * 4];
@@ -1999,7 +2139,7 @@ void test_texture_normal_rg8_ignores_the_source_blue(void) {
         double n[3];
         tilted_normal(i % 16, i / 16, n);
         for (uint32_t v = 0; v < 2; v++) {
-            rgba[v][i * 4] = (uint8_t)lround(((n[0] * 0.5) + 0.5) * 255.0);
+            rgba[v][(size_t)i * 4] = (uint8_t)lround(((n[0] * 0.5) + 0.5) * 255.0);
             rgba[v][(i * 4) + 1] = (uint8_t)lround(((n[1] * 0.5) + 0.5) * 255.0);
             rgba[v][(i * 4) + 2] = v ? 200 : 0; /* not symmetric about 127.5: z = -1 and z = 0.57 */
             rgba[v][(i * 4) + 3] = 255;
@@ -2013,6 +2153,31 @@ void test_texture_normal_rg8_ignores_the_source_blue(void) {
     uint8_t *low = encode_mips_asset(rgba[0], 16, 16, &opts, &hdr);
     uint8_t *high = encode_mips_asset(rgba[1], 16, 16, &opts, &hdr);
     TEST_ASSERT_EQUAL_UINT8_ARRAY(low + sizeof(hdr), high + sizeof(hdr), hdr.data_size);
+
+    /* The rebuilt Z is the true one: XY match the field stored as RGB8 with its Z. */
+    uint8_t truth[16 * 16 * 4];
+    for (uint32_t i = 0; i < 256; i++) {
+        double n[3];
+        tilted_normal(i % 16, i / 16, n);
+        for (uint32_t c = 0; c < 3; c++) {
+            truth[(i * 4) + c] = (uint8_t)lround(((n[c] * 0.5) + 0.5) * 255.0);
+        }
+        truth[(i * 4) + 3] = 255;
+    }
+    nt_tex_opts_t rgb_opts = opts;
+    rgb_opts.format = NT_TEXTURE_FORMAT_RGB8;
+    NtTextureAssetHeader rgb_hdr;
+    uint8_t *rgb = encode_mips_asset(truth, 16, 16, &rgb_opts, &rgb_hdr);
+    for (uint32_t level = 0; level < hdr.mip_count; level++) {
+        const uint32_t size = nt_texture_level_extent(8, level);
+        for (uint32_t i = 0; i < size * size; i++) {
+            const uint8_t *xy = asset_texel(low, &hdr, level, i % size, i / size);
+            const uint8_t *xyz = asset_texel(rgb, &rgb_hdr, level, i % size, i / size);
+            TEST_ASSERT_UINT8_WITHIN(1, xyz[0], xy[0]);
+            TEST_ASSERT_UINT8_WITHIN(1, xyz[1], xy[1]);
+        }
+    }
+    free(rgb);
     free(low);
     free(high);
 
@@ -2029,7 +2194,7 @@ void test_texture_normal_rg8_ignores_the_source_blue(void) {
 
 /* Opposite normals average to nothing; the level stores +Z instead of a random direction. */
 void test_texture_normal_cancelled_pair_becomes_up(void) {
-    const uint8_t pair[8] = {255, 128, 128, 255, 0, 127, 127, 255};
+    const uint8_t pair[8] = {255, 128, 128, 255, 0, 128, 128, 255}; /* +X and -X; 0 encodes as 128 */
     nt_tex_opts_t opts = straight_baked_opts();
     opts.format = NT_TEXTURE_FORMAT_RGB8;
     opts.process = nt_tex_process_normal();
@@ -2061,6 +2226,7 @@ void test_texture_normal_encodes_with_basis(void) {
     free(asset);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one death test per rule
 void test_texture_normal_opts_contract(void) {
     static const nt_texture_pixel_format_t refused[2] = {NT_TEXTURE_FORMAT_R8, NT_TEXTURE_FORMAT_RGB9E5};
     for (uint32_t f = 0; f < 2; f++) {
@@ -2081,6 +2247,11 @@ void test_texture_normal_opts_contract(void) {
     TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts));
     opts.format = NT_TEXTURE_FORMAT_SRGB8_ALPHA8;
     EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_assert_texture_opts(&opts), "an sRGB format requires process.rgb COLOR");
+
+    nt_atlas_opts_t atlas = nt_atlas_opts_defaults();
+    atlas.process = nt_tex_process_normal();
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/normal_atlas.ntpack");
+    EXPECT_BUILD_ASSERT_MATCH(ctx, (void)nt_atlas_begin(ctx, "page", &atlas), "process.rgb NORMAL is not supported");
 }
 // #endregion
 
@@ -11185,6 +11356,8 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_texture_kaiser_is_sharper_than_mitchell_and_box);
     RUN_TEST(test_texture_filter_edges_follow_wrap_per_axis);
     RUN_TEST(test_texture_box_resize_is_exact_under_repeat);
+    RUN_TEST(test_texture_mirror_filters_as_clamp);
+    RUN_TEST(test_texture_kaiser_resize_to_two_wrapped_rows);
     RUN_TEST(test_texture_mitchell_chain_survives_cancelled_alpha);
     RUN_TEST(test_texture_dilation_blends_srgb_in_linear_light);
     RUN_TEST(test_texture_dilation_empty_levels_keep_where_colour_was);
@@ -11197,12 +11370,17 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_texture_dilation_keeps_runtime_mips_free_of_black);
     RUN_TEST(test_texture_process_opts_contract);
     RUN_TEST(test_texture_normal_levels_follow_the_normalized_reference);
+    RUN_TEST(test_texture_normal_resized_level0_is_unit_length);
     RUN_TEST(test_texture_normal_rg8_ignores_the_source_blue);
     RUN_TEST(test_texture_normal_cancelled_pair_becomes_up);
+    RUN_TEST(test_texture_normal_core_feeds_the_next_level_normalized);
     RUN_TEST(test_texture_normal_encodes_with_basis);
     RUN_TEST(test_texture_normal_opts_contract);
 #if NT_BASISU_HAS_ETC1S
     RUN_TEST(test_texture_rgb_picks_the_basis_metric);
+#endif
+#if NT_BASISU_HAS_UASTC
+    RUN_TEST(test_texture_uastc_ignores_the_rgb_metric);
 #endif
 
     /* AABB edge extrude */

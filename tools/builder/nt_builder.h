@@ -250,8 +250,8 @@ typedef enum {
 
 /* What RGB holds. COLOR picks the ETC1S perceptual metric, DATA its linear one;
  * UASTC LDR and uncompressed textures give the same bytes for both. NORMAL is a
- * tangent-space unit vector (c * 2 - 1): linear metric, renormalized on every
- * level, and RG8 rebuilds Z from XY. sRGB formats require COLOR. */
+ * tangent-space unit vector (c * 2 - 1): linear metric, renormalized on a resized
+ * level 0 and on every mip, and RG8 rebuilds Z from XY. sRGB formats require COLOR. */
 typedef enum {
     NT_TEX_RGB_COLOR = 0,
     NT_TEX_RGB_DATA = 1,
@@ -718,7 +718,7 @@ void nt_builder_set_header_dir(NtBuilderContext *ctx, const char *dir);
 void nt_builder_set_gzip_estimate(NtBuilderContext *ctx, bool enabled);
 
 /* --- Builder cache (content-addressed, skips re-encoding unchanged assets) --- */
-#define NT_BUILDER_VERSION 9 /* Bump when encode logic changes to invalidate cache */
+#define NT_BUILDER_VERSION 10 /* Bump when encode logic changes to invalidate cache */
 void nt_builder_set_cache_dir(NtBuilderContext *ctx, const char *dir);
 
 /* --- Parallel encoding (multi-threaded asset encode in finish_pack) --- */

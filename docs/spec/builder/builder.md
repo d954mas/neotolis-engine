@@ -214,11 +214,17 @@ albedo.mips = NT_TEX_MIPS_BAKED;
 nt_tex_opts_t roughness = nt_tex_opts_defaults();
 roughness.format = NT_TEXTURE_FORMAT_R8;
 roughness.process = nt_tex_process_data();
+
+nt_tex_opts_t normal = nt_tex_opts_defaults();
+normal.format = NT_TEXTURE_FORMAT_RGB8;
+normal.process = nt_tex_process_normal();
+normal.compress = nt_tex_compress_uastc_default();
+normal.mips = NT_TEX_MIPS_BAKED;
 ```
 
 | Field | Values | Effect |
 |---|---|---|
-| `rgb` | `COLOR` (0), `DATA` | The ETC1S metric: perceptual for `COLOR`, linear for `DATA`. UASTC LDR and uncompressed textures ignore it. sRGB formats require `COLOR`. |
+| `rgb` | `COLOR` (0), `DATA`, `NORMAL` | `COLOR` and `DATA` pick the ETC1S metric, perceptual or linear; UASTC LDR and uncompressed textures give the same bytes for both. `NORMAL` is a tangent-space unit vector stored as `c * 2 - 1`, encoded with the linear metric (see below). sRGB formats require `COLOR`. |
 | `alpha` | `STRAIGHT` (0), `PREMULTIPLIED`, `DATA` | `STRAIGHT`: RGB filters alpha-weighted, and every stored level fills the RGB of texels with alpha 8 or less with nearby visible colour. `PREMULTIPLIED`: the same filtering, then each stored level is premultiplied once, `(c * a + 127) / 255`, and the header sets `NT_TEXTURE_FLAG_PREMULTIPLIED`; `RGBA8` only. `DATA`: alpha filters as an independent channel and RGB under alpha 0 is kept. |
 | `resize_filter` | `BOX` (0), `MITCHELL`, `KAISER` | Level 0 when `max_size` shrinks the source, at any ratio |
 | `mip_filter` | `BOX` (0), `MITCHELL`, `KAISER` | Levels 1..N, each 2:1 from the previous level; anything but `BOX` requires `mips = BAKED` |
@@ -227,6 +233,7 @@ roughness.process = nt_tex_process_data();
 |---|---|---|---|---|
 | `nt_tex_process_color()` (texture defaults) | `COLOR` | `STRAIGHT` | `MITCHELL` | `BOX` |
 | `nt_tex_process_data()` | `DATA` | `DATA` | `BOX` | `BOX` |
+| `nt_tex_process_normal()` | `NORMAL` | `DATA` | `MITCHELL` | `BOX` |
 | atlas defaults | `COLOR` | `PREMULTIPLIED` | `MITCHELL` (no effect: pages are never resized) | `BOX` |
 
 Zero is valid for every format: `BOX` everywhere, colour, straight alpha. `BOX`
@@ -234,10 +241,19 @@ is an area average with no ringing (on NPOT sizes it weighs partial texels by
 area). `MITCHELL` downscales with less moire than `BOX` and rings by about 3%; at
 exactly 2:1 it is softer than `BOX`. `KAISER` (the basisu windowed sinc: support 3,
 40 dB) keeps the most detail and rings most, so it is fenced to opaque colour: it
-requires `rgb = COLOR` and a format without alpha. A `KAISER` level 2 texels wide
-or less under `wrap_u = REPEAT` is box filtered, because the wrapped stb kernel
+requires `rgb = COLOR` and a format without alpha. A `KAISER` resize to 2 texels
+or less along a `REPEAT` axis is box filtered, because the wrapped stb kernel
 breaks there. A non-`BOX` filter on a wrapped level narrower than its kernel
 (about 6 texels) wraps a truncated kernel.
+
+`NORMAL` requires `RGBA8`, `RGB8` or `RG8` and `mips` `NONE` or `BAKED`: GPU mips
+would not renormalize. On `RGBA8` it requires `alpha = DATA`, so a decal normal
+with a coverage mask is not supported, and atlas pages refuse it. `RG8` rebuilds Z
+from XY before any filtering (XY is authoritative). A resized level 0 and every
+mip core are normalized in float before they are stored; an average shorter than
+0.02 (opposite normals cancelling, given that a byte cannot hold an exact 0)
+becomes +Z. A level 0 at its source size keeps the source bytes. Normals take
+UASTC better than ETC1S, whose blocks share one colour line.
 
 The pipeline:
 
@@ -249,11 +265,12 @@ The pipeline:
    0's bytes, then half-float linear values, premultiplied for `STRAIGHT` and
    `PREMULTIPLIED`: division by alpha, rounding, sRGB encoding and the clamp of
    ringing happen only on stored levels, so they never accumulate down the chain.
-   Dilation and premultiplication also touch only stored levels.
+   `NORMAL` normalizes each core before it feeds the next level. Dilation and
+   premultiplication touch only stored levels.
 4. `STRAIGHT` dilation, per stored level: a hole (alpha 8 or less) next to visible
    texels takes their alpha-weighted mean, then push-pull fills the rest with
    alpha-weighted nearby colour, in linear light for sRGB. A level with nothing
-   visible takes the box of the level above it; a source with nothing visible is
+   visible takes the `BOX` filter of the level above it; a source with nothing visible is
    stored as it is. Holes keep their alpha. On an odd-sized `REPEAT` level the
    push-pull pyramid wraps at its own size, so a fill at the seam may take colour
    from one texel further along.
@@ -499,7 +516,7 @@ sharing one payload in the pack.
 Texture cache and early dedup use one identity, `opts_hash`; early dedup
 compares it after an exact pixel match. It covers the effective settings:
 source and level-0 dimensions, resolved pixel format, the `process` fields that
-can change the bytes (`rgb` for ETC1S, `alpha` for formats with alpha,
+can change the bytes (`rgb` for ETC1S or when it is `NORMAL`, `alpha` for formats with alpha,
 `resize_filter` when level 0 shrinks, `mip_filter` for `BAKED`), sampler defaults,
 mip mode, codec and its active fields above. The same file added at two
 `max_size` values that shrink it differently is two assets. Names, source locations, resize

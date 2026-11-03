@@ -246,9 +246,10 @@ static void resize_level(const void *in, uint32_t in_w, uint32_t in_h, stbir_dat
     stbir_resize_init(&resize, in, (int)in_w, (int)in_h, 0, out, (int)out_w, (int)out_h, 0, in_layout, in_type);
     stbir_set_datatypes(&resize, in_type, out_type);
     (void)stbir_set_pixel_layouts(&resize, in_layout, out_layout);
-    /* stb's wrapped Kaiser overlaps its own buffers at a 2-px output width; levels
-       that small gain nothing from a sharper filter. */
-    if (filter == NT_TEX_FILTER_KAISER && opts->wrap_u == NT_TEXTURE_DEFAULT_WRAP_REPEAT && out_w <= 2) {
+    /* stb's wrapped Kaiser breaks at a 2-px output along a wrapped axis (a buffer
+       overlap across, a crash down); levels that small gain nothing from it. */
+    const bool kaiser_breaks = (opts->wrap_u == NT_TEXTURE_DEFAULT_WRAP_REPEAT && out_w <= 2) || (opts->wrap_v == NT_TEXTURE_DEFAULT_WRAP_REPEAT && out_h <= 2);
+    if (filter == NT_TEX_FILTER_KAISER && kaiser_breaks) {
         filter = NT_TEX_FILTER_BOX;
     }
     /* A downscaling box never reaches past an edge, and stb's wrapped box returns
@@ -305,7 +306,7 @@ static uint16_t float_to_half(float value) {
     memcpy(&bits, &value, sizeof(bits));
     const int32_t exponent = (int32_t)((bits >> 23U) & 0xFFU) - 127 + 15;
     uint32_t mantissa = bits & 0x7FFFFFU;
-    NT_BUILD_ASSERT((bits >> 31U) == 0 && exponent < 31 && "texture levels: half-float core value outside [0, 1]");
+    NT_BUILD_ASSERT(value >= 0.0F && value <= 1.0F && "texture levels: half-float core value outside [0, 1]");
     if (exponent <= 0) {
         if (exponent < -10) {
             return 0;
@@ -317,14 +318,15 @@ static uint16_t float_to_half(float value) {
     return (uint16_t)((((uint32_t)exponent << 10U) | (mantissa >> 13U)) + ((mantissa >> 12U) & 1U));
 }
 
-/* Encoded normal (c * 2 - 1) to its unit vector, encoded again; a cancelled
- * average becomes +Z. */
+/* Encoded normal (c * 2 - 1) to its unit vector, encoded again. An average
+ * shorter than about two byte steps (opposite normals cancelling; a byte cannot
+ * hold an exact 0) becomes +Z. */
 static void unit_normal(float v[3]) {
     for (uint32_t c = 0; c < 3; c++) {
         v[c] = (v[c] * 2.0F) - 1.0F;
     }
     const float length = sqrtf((v[0] * v[0]) + (v[1] * v[1]) + (v[2] * v[2]));
-    if (length < 1e-4F) {
+    if (length < 0.02F) {
         v[0] = 0.5F;
         v[1] = 0.5F;
         v[2] = 1.0F;
@@ -332,19 +334,6 @@ static void unit_normal(float v[3]) {
     }
     for (uint32_t c = 0; c < 3; c++) {
         v[c] = (v[c] / length * 0.5F) + 0.5F;
-    }
-}
-
-static void normalize_bytes(uint8_t *rgba, size_t texels) {
-    for (size_t i = 0; i < texels; i++) {
-        float v[3];
-        for (uint32_t c = 0; c < 3; c++) {
-            v[c] = (float)rgba[(i * 4U) + c] / 255.0F;
-        }
-        unit_normal(v);
-        for (uint32_t c = 0; c < 3; c++) {
-            rgba[(i * 4U) + c] = unit_to_byte(v[c]);
-        }
     }
 }
 
@@ -604,30 +593,17 @@ static void scan_level(const uint8_t *rgba, size_t texels, bool *visible, bool *
     }
 }
 
-/* A level with nothing visible takes the box of the previous level's colour, in
- * double: a float sum over millions of texels drifts. */
-static void fill_empty_level(const dilate_ctx_t *dc, uint8_t *rgba, uint32_t w, uint32_t h, const uint8_t *prev, uint32_t pw, uint32_t ph) {
-    for (uint32_t y = 0; y < h; y++) {
-        for (uint32_t x = 0; x < w; x++) {
-            /* Integer partition: every previous texel lands in exactly one box. */
-            const uint32_t x0 = x * pw / w;
-            const uint32_t x1 = (x + 1) * pw / w;
-            const uint32_t y0 = y * ph / h;
-            const uint32_t y1 = (y + 1) * ph / h;
-            double sum[3] = {0};
-            for (uint32_t py = y0; py < y1; py++) {
-                for (uint32_t px = x0; px < x1; px++) {
-                    for (uint32_t c = 0; c < 3; c++) {
-                        sum[c] += (double)dc->lin[prev[((((size_t)py * pw) + px) * 4U) + c]];
-                    }
-                }
-            }
-            const double count = (double)(x1 - x0) * (double)(y1 - y0);
-            for (uint32_t c = 0; c < 3; c++) {
-                rgba[((((size_t)y * w) + x) * 4U) + c] = encode_linear(dc, (float)(sum[c] / count));
-            }
-        }
+/* A level with nothing visible takes the colour of a box filter of the previous
+ * level (area weights, linear light for sRGB) and keeps its own alpha. */
+static void fill_empty_level(uint8_t *rgba, uint32_t w, uint32_t h, const uint8_t *prev, uint32_t pw, uint32_t ph, stbir_datatype byte_type, const nt_tex_opts_t *opts) {
+    const size_t texels = (size_t)w * h;
+    uint8_t *box = (uint8_t *)malloc(texels * 4U);
+    NT_BUILD_ASSERT(box && "texture dilation: malloc failed");
+    resize_level(prev, pw, ph, byte_type, STBIR_RGBA_NO_AW, box, w, h, byte_type, STBIR_RGBA_NO_AW, NT_TEX_FILTER_BOX, opts);
+    for (size_t i = 0; i < texels; i++) {
+        memcpy(&rgba[i * 4U], &box[i * 4U], 3);
     }
+    free(box);
 }
 // #endregion
 
@@ -667,11 +643,16 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
     }
     if (src_w == w && src_h == h) {
         memcpy(chain, source, src_texels * 4U);
+    } else if (normal) {
+        /* Normalized in float before the bytes, like every mip. */
+        uint16_t *resized = (uint16_t *)malloc((size_t)w * h * 4U * sizeof(uint16_t));
+        NT_BUILD_ASSERT(resized && "texture levels: malloc failed");
+        resize_level(source, src_w, src_h, byte_type, layout, resized, w, h, STBIR_TYPE_HALF_FLOAT, core_layout, process->resize_filter, opts);
+        normalize_core(resized, (size_t)w * h);
+        quantize_core(resized, (size_t)w * h, srgb, weighted, chain);
+        free(resized);
     } else {
         resize_level(source, src_w, src_h, byte_type, layout, chain, w, h, byte_type, layout, process->resize_filter, opts);
-        if (normal) {
-            normalize_bytes(chain, (size_t)w * h);
-        }
     }
     free(opaque);
     // #endregion
@@ -725,7 +706,7 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
         if (dilate) {
             scan_level(level_px, texels, &visible, &hole);
             if (!visible) {
-                fill_empty_level(&dc, level_px, lw, lh, prev, nt_texture_level_extent(w, level - 1), nt_texture_level_extent(h, level - 1));
+                fill_empty_level(level_px, lw, lh, prev, nt_texture_level_extent(w, level - 1), nt_texture_level_extent(h, level - 1), byte_type, opts);
             } else if (hole) {
                 dilate_level(&dc, level_px, lw, lh);
             }

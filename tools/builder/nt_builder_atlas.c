@@ -845,6 +845,8 @@ static nt_texture_pixel_format_t atlas_assert_opts(const nt_atlas_opts_t *opts) 
     NT_BUILD_ASSERT(1.0F / opts->pixels_per_unit > 0.0F && isfinite(1.0F / opts->pixels_per_unit) && "nt_atlas_begin: inverse_pixels_per_unit must be positive and finite");
     // #endregion
     NT_BUILD_ASSERT(opts->format != NT_TEXTURE_FORMAT_RGB9E5 && "nt_atlas_begin: atlas pages are LDR -- format RGB9E5 is not supported");
+    /* Gap texels would decode as back-facing normals and bleed into sprite edges. */
+    NT_BUILD_ASSERT(opts->process.rgb != NT_TEX_RGB_NORMAL && "nt_atlas_begin: atlas pages are colour -- process.rgb NORMAL is not supported");
     nt_tex_opts_t texture_opts = {
         .format = opts->format,
         .compress = opts->compress,
