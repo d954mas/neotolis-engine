@@ -1107,11 +1107,8 @@ static bool prepare_gpu(void) {
     for (uint32_t i = 0; i < 3; i++) {
         if (!nt_gfx_pipeline_valid(s_pipelines[i]) && nt_gfx_program_ready(s_programs[i].program)) {
             /* Rock and planet fronts are clockwise after the LH projection; the camera sits inside the sky. */
-            s_pipelines[i] = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = s_programs[i].program,
-                                                                        .depth_test = true,
-                                                                        .depth_write = i != 2,
-                                                                        .depth_func = NT_DEPTH_GEQUAL,
-                                                                        .cull_mode = i == 2 ? NT_CULL_NONE : NT_CULL_FRONT});
+            s_pipelines[i] = nt_gfx_make_pipeline(
+                &(nt_pipeline_desc_t){.program = s_programs[i].program, .depth_test = true, .depth_write = i != 2, .depth_func = NT_DEPTH_GEQUAL, .cull_mode = i == 2 ? NT_CULL_NONE : NT_CULL_FRONT});
         }
         ready = s_pipelines[i].id != 0 && ready;
     }

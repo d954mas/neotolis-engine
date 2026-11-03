@@ -1239,7 +1239,7 @@ static void test_definitions_carry_the_desc_label(void) {
     TEST_ASSERT_EQUAL_STRING("target", definition_label(NT_GFX_OBJECT_RENDER_TARGET, target.id));
     TEST_ASSERT_EQUAL_STRING("probe", definition_label(NT_GFX_OBJECT_BUFFER, probe.id));
     TEST_ASSERT_EQUAL_STRING("program", definition_label(NT_GFX_OBJECT_PIPELINE, pipeline.id)); /* named by its program */
-    TEST_ASSERT_EQUAL_STRING("", definition_label(NT_GFX_OBJECT_SAMPLER, shadow.id));          /* shared by key: no name */
+    TEST_ASSERT_EQUAL_STRING("", definition_label(NT_GFX_OBJECT_SAMPLER, shadow.id));           /* shared by key: no name */
 
     record_next_frame(); /* the snapshot */
     TEST_ASSERT_EQUAL_STRING("program", definition_label(NT_GFX_OBJECT_PROGRAM, program.id));
