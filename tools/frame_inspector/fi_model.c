@@ -1466,6 +1466,8 @@ static nt_gfx_event_t canonical(const fi_frame_t *fr, uint32_t i) {
         c.data.binding.slot = fi_alias(fr, NT_GFX_OBJECT_INSTANCE_LAYOUT, c.data.binding.slot);
     } else if (c.operation == NT_GFX_OP_TEXTURE_SET && c.kind == NT_GFX_EVENT_ARGUMENT) {
         c.data.binding.secondary = fi_alias(fr, NT_GFX_OBJECT_SAMPLER, c.data.binding.secondary);
+    } else if (c.operation == NT_GFX_OP_ATTRIBUTE) {
+        c.data.attribute.buffer = fi_alias(fr, NT_GFX_OBJECT_BUFFER, c.data.attribute.buffer);
     }
     return c;
 }
@@ -1480,7 +1482,9 @@ static bool same_record(const fi_frame_t *fa, uint32_t i, const fi_frame_t *fb, 
     return memcmp(xb, yb, sizeof(xb)) == 0;
 }
 
-/* After record i, the next NOTE_FIELD of note r or ARGUMENT of operation r; FI_NONE past its last. */
+/* After record i, the next record request r wrote itself: a NOTE_FIELD of note r, an ARGUMENT or a
+ * resource or attribute DEFINITION of operation r. The backend's records (GL calls, GL names) are left out:
+ * backends differ. FI_NONE past its last. */
 static uint32_t next_item(const fi_frame_t *fr, uint32_t r, uint32_t i) {
     const bool note = fr->view.events[r].kind == NT_GFX_EVENT_NOTE;
     for (i++; i < fr->view.count; i++) {
@@ -1488,7 +1492,7 @@ static uint32_t next_item(const fi_frame_t *fr, uint32_t r, uint32_t i) {
         if (note || owner(fr, i) != r) {
             return note && e->kind == NT_GFX_EVENT_NOTE_FIELD ? i : FI_NONE;
         }
-        if (e->kind == NT_GFX_EVENT_ARGUMENT) {
+        if (e->kind == NT_GFX_EVENT_ARGUMENT || (e->kind == NT_GFX_EVENT_DEFINITION && (e->operation == NT_GFX_OP_CREATE || e->operation == NT_GFX_OP_ATTRIBUTE))) {
             return i;
         }
     }
@@ -1548,9 +1552,9 @@ typedef struct {
     uint32_t differ;
 } emit_t;
 
-/* Appends the row of entry i of A and entry j of B; -1 for the side without one. */
-static void emit(emit_t *o, int32_t i, int32_t j) {
-    fi_diff_row_t *r = &o->rows[o->count++];
+/* Writes row `at`: entry i of A and entry j of B; -1 for the side without one. */
+static void emit(emit_t *o, uint32_t at, int32_t i, int32_t j) {
+    fi_diff_row_t *r = &o->rows[at];
     *r = (fi_diff_row_t){.a = FI_NONE, .b = FI_NONE, .kind = FI_DIFF_SAME};
     if (i >= 0) {
         r->a = o->a->order[o->a0 + (uint32_t)i];
@@ -1577,7 +1581,7 @@ static bool align(emit_t *o, int32_t n, int32_t m, int32_t *trace) {
     const req_key_t *y = o->b->key + o->b0;
     int32_t head = 0;
     while (head < n && head < m && same_key(&x[head], &y[head])) {
-        emit(o, head, head);
+        emit(o, o->count++, head, head);
         head++;
     }
     int32_t tail = 0;
@@ -1589,8 +1593,9 @@ static bool align(emit_t *o, int32_t n, int32_t m, int32_t *trace) {
     int32_t edits = -1; /* one side empty: its rows need no search */
     const int32_t most = n2 + m2 < (int32_t)FI_DIFF_EDITS ? n2 + m2 : (int32_t)FI_DIFF_EDITS;
     const bool aligned = n2 == 0 || m2 == 0 || myers(x + head, n2, y + head, m2, most, trace, &edits);
-    if (edits >= 0) { /* trace back from the end, rows in reverse, then turn them round */
-        const uint32_t from = o->count;
+    if (edits >= 0) { /* traced back from the end, so the rows fill from the last: matches + edits of them */
+        uint32_t at = o->count + (uint32_t)((n2 + m2 + edits) / 2);
+        o->count = at;
         int32_t xx = n2;
         int32_t yy = m2;
         for (int32_t d = edits; d > 0; d--) {
@@ -1603,36 +1608,31 @@ static bool align(emit_t *o, int32_t n, int32_t m, int32_t *trace) {
             while (xx > (down ? px : px + 1) && yy > (down ? py + 1 : py)) {
                 xx--;
                 yy--;
-                emit(o, head + xx, head + yy);
+                emit(o, --at, head + xx, head + yy);
             }
             if (down) {
                 yy--;
-                emit(o, -1, head + yy);
+                emit(o, --at, -1, head + yy);
             } else {
                 xx--;
-                emit(o, head + xx, -1);
+                emit(o, --at, head + xx, -1);
             }
         }
         while (xx > 0 && yy > 0) {
             xx--;
             yy--;
-            emit(o, head + xx, head + yy);
-        }
-        for (uint32_t lo = from, hi = o->count; lo + 1U < hi; lo++, hi--) {
-            const fi_diff_row_t t = o->rows[lo];
-            o->rows[lo] = o->rows[hi - 1U];
-            o->rows[hi - 1U] = t;
+            emit(o, --at, head + xx, head + yy);
         }
     } else {
         for (int32_t i = 0; i < n2; i++) {
-            emit(o, head + i, -1);
+            emit(o, o->count++, head + i, -1);
         }
         for (int32_t j = 0; j < m2; j++) {
-            emit(o, -1, head + j);
+            emit(o, o->count++, -1, head + j);
         }
     }
     for (int32_t t = tail; t > 0; t--) {
-        emit(o, n - t, m - t);
+        emit(o, o->count++, n - t, m - t);
     }
     return aligned;
 }

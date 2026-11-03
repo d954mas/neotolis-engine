@@ -141,8 +141,7 @@ static struct {
     fi_query_t picked_query; /* a number clicked once outside Commands; a second click opens its records */
     uint64_t click_target;   /* the last click's target and time: a second click within 0.4 s opens it */
     double click_time;
-    uint64_t compare_pick; /* the Compare cell clicked once */
-    uint32_t flash;        /* the row a jump landed on, lit until flash_until */
+    uint32_t flash; /* the row a jump landed on, lit until flash_until */
     double flash_until;
     double axis_first; /* the frame axis: first visible frame (fractional) and how many are visible */
     double axis_count;
@@ -176,8 +175,8 @@ static struct {
 typedef enum { CMP_TITLE, CMP_NUMBER, CMP_GROUP, CMP_DIFF, CMP_SAME } cmp_kind_t;
 typedef struct {
     uint8_t kind; /* cmp_kind_t */
-    uint32_t a;   /* title: section (FI_SECTION_GL + 1: groups); number: its index; group: its index; diff: its row */
-    uint32_t b;   /* same: the run's row count */
+    uint32_t a;   /* title: section (FI_SECTION_GL + 1: groups); number: its index; group, same: the group; diff: its row */
+    uint32_t b;   /* same: the run's first row */
 } cmp_row_t;
 
 static struct {
@@ -1631,14 +1630,13 @@ static void declare_uploads_by_buffer(const fi_frame_t *fr) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_groups(const fi_frame_t *fr) {
-    static const char *const k_heads[FI_METRIC_COUNT] = {"requests", "GL draws", "GL calls", "upload B", "drops"};
     section("Where the work is: by marker and note");
     text("requests: draw requests to the engine", &k_dim);
     text("GL draws: GL draw calls they cost (merged requests share one)", &k_dim);
     ROW_(4) {
         CELL_(200) { text("marker path > note", &k_dim); }
         for (int m = 0; m < FI_METRIC_COUNT; m++) {
-            CELL_(80) { text(k_heads[m], &k_dim); }
+            CELL_(80) { text(fi_metric_names[m], &k_dim); }
         }
     }
     enum { SHOWN = 200 }; /* a frame of per-entity notes would pass Clay's element count */
@@ -1658,7 +1656,7 @@ static void declare_groups(const fi_frame_t *fr) {
             CELL_(200) { textf(&k_text, "%.24s", fr->group_key[g]); }
             for (uint32_t m = 0; m < FI_METRIC_COUNT; m++) {
                 char label[FI_KEY_LEN + 16];
-                (void)snprintf(label, sizeof(label), "%s of %s", k_heads[m], fr->group_key[g]);
+                (void)snprintf(label, sizeof(label), "%s of %s", fi_metric_names[m], fr->group_key[g]);
                 CELL_(80) { number((fi_query_t){.kind = FI_Q_GROUP, .a = g, .b = (uint8_t)m}, m == FI_METRIC_BYTES ? c[m].sum : c[m].n, label); }
             }
         }
@@ -1855,12 +1853,9 @@ static void compare_rows(const fi_frame_t *a, const fi_frame_t *b) {
         }
         s_cmp.rows[s_cmp.row_count++] = (cmp_row_t){.kind = CMP_GROUP, .a = g};
         for (uint32_t r = dg->first; s_cmp.open[g] != 0 && r < dg->first + dg->count;) {
-            uint32_t end = r;
-            while (end < dg->first + dg->count && d->row[end].kind == FI_DIFF_SAME) {
-                end++;
-            }
-            if (s_cmp.full[g] == 0 && end - r >= 3U) {
-                s_cmp.rows[s_cmp.row_count++] = (cmp_row_t){.kind = CMP_SAME, .a = r, .b = end - r};
+            const uint32_t end = s_cmp.full[g] == 0 ? fi_diff_fold(d, dg, r) : r;
+            if (end > r) {
+                s_cmp.rows[s_cmp.row_count++] = (cmp_row_t){.kind = CMP_SAME, .a = g, .b = r};
                 r = end;
             } else {
                 s_cmp.rows[s_cmp.row_count++] = (cmp_row_t){.kind = CMP_DIFF, .a = r++};
@@ -1877,7 +1872,7 @@ static void compare_cache(const fi_frame_t *a, const fi_frame_t *b) {
         s_cmp.base_frame = s.base_frame;
         s_cmp.file = s.file;
         s_cmp.frame = s.frame;
-        s.compare_pick = 0;
+        s.click_target = 0; /* a pick names a row of the old pair */
         fi_diff_free(&s_cmp.diff);
         free(s_cmp.open);
         free(s_cmp.full);
@@ -1913,15 +1908,11 @@ static void open_in(uint32_t file, uint32_t frame, uint32_t record, fi_query_t q
     }
 }
 
-/* A cell of side A (0) or B (1): a click picks it, a second click opens it in that frame. */
+/* A cell of side A (bit 0 clear) or B (set), of a number or (bit 1) a diff row: a click picks it, a second
+ * click opens it in that frame. */
 static bool compare_cell(const char *label, const nt_ui_label_style_t *style, uint32_t side, uint32_t index) {
     const uint64_t target = CLICK_TAG(CLICK_COMPARE) | ((uint64_t)side << 32U) | index;
-    const bool clicked = button(label, style, s.compare_pick == target);
-    if (clicked && second_click(target)) {
-        return true;
-    }
-    s.compare_pick = clicked ? target : s.compare_pick;
-    return false;
+    return button(label, style, s.click_target == target) && second_click(target);
 }
 
 static void declare_compare_number(const fi_frame_t *a, const fi_frame_t *b, uint32_t k) {
@@ -1946,7 +1937,6 @@ static void declare_compare_number(const fi_frame_t *a, const fi_frame_t *b, uin
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_compare_group(const fi_frame_t *a, const fi_frame_t *b, uint32_t g, bool clicked) {
-    static const char *const k_names[FI_METRIC_COUNT] = {"requests", "GL draws", "GL calls", "upload B", "drops"};
     const fi_diff_group_t *dg = &s_cmp.diff.group[g];
     if (clicked) {
         s_cmp.open[g] ^= 1U;
@@ -1955,21 +1945,7 @@ static void declare_compare_group(const fi_frame_t *a, const fi_frame_t *b, uint
     CELL_(20) { text(s_cmp.open[g] != 0 ? "-" : "+", &k_head); }
     CELL_(300) { textf(&k_head, "%.40s", dg->b != FI_NONE ? b->group_key[dg->b] : a->group_key[dg->a]); }
     char buf[256];
-    size_t at = 0;
-    buf[0] = '\0';
-    if (dg->a == FI_NONE || dg->b == FI_NONE) {
-        at += (size_t)snprintf(buf, sizeof(buf), "only in %s   ", dg->a == FI_NONE ? "B" : "A");
-    }
-    for (uint32_t m = 0; m < FI_METRIC_COUNT; m++) {
-        const uint64_t va = fi_group_metric(a, dg->a, m);
-        const uint64_t vb = fi_group_metric(b, dg->b, m);
-        if (va != vb && at < sizeof(buf)) {
-            at += (size_t)snprintf(buf + at, sizeof(buf) - at, "%s %llu -> %llu   ", k_names[m], (unsigned long long)va, (unsigned long long)vb);
-        }
-    }
-    if (dg->differ > 0 && at < sizeof(buf)) {
-        (void)snprintf(buf + at, sizeof(buf) - at, "%u of %u requests differ", dg->differ, dg->count);
-    }
+    fi_group_change_text(a, b, dg, buf, sizeof(buf));
     text(buf[0] != '\0' ? buf : "same", buf[0] != '\0' ? &k_changed : &k_dim);
 }
 
@@ -1985,7 +1961,7 @@ static void declare_compare_diff(const fi_frame_t *a, const fi_frame_t *b, uint3
         CELL_(70) {
             if (records[side] != FI_NONE) {
                 (void)snprintf(buf, sizeof(buf), "@%u", records[side]);
-                if (compare_cell(buf, &k_link, side, 0x8000000U + r)) {
+                if (compare_cell(buf, &k_link, side | 2U, r)) {
                     open_in(side == 0 ? s.base_file : s.file, side == 0 ? s.base_frame : s.frame, records[side], (fi_query_t){0}, "");
                 }
             }
@@ -2025,6 +2001,9 @@ static void declare_compare_list(void) {
             CELL_(100) { text("B", &k_dim); }
             CELL_(100) { text("B - A", &k_dim); }
         }
+        if (s_cmp.row_count == 1) { /* only the groups title */
+            text(a == b ? "A is this frame: pick another frame as B (Ctrl+Left/Right)." : "The frames do not differ.", &k_dim);
+        }
         const uint32_t list_id = nt_ui_id("compare");
         const uint32_t slot_id = nt_ui_id("compare_slot");
         CLAY({.id = (Clay_ElementId){.id = slot_id}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .clip = {.vertical = true}}) {
@@ -2055,12 +2034,9 @@ static void declare_compare_list(void) {
                         break;
                     case CMP_SAME:
                         CELL_(40) {}
-                        textf(&k_dim, "... %u same requests (click: show)", row->b);
+                        textf(&k_dim, "... %u same requests (click: show the group's)", fi_diff_fold(&s_cmp.diff, &s_cmp.diff.group[row->a], row->b) - row->b);
                         if (ev.clicked) {
-                            for (uint32_t g = 0; g < s_cmp.diff.group_count; g++) {
-                                const fi_diff_group_t *dg = &s_cmp.diff.group[g];
-                                s_cmp.full[g] |= row->a >= dg->first && row->a < dg->first + dg->count ? 1U : 0U;
-                            }
+                            s_cmp.full[row->a] = 1;
                             s_cmp.dirty = true;
                         }
                         break;
@@ -2934,6 +2910,10 @@ int main(int argc, char *argv[]) {
     free(s.vis);
     free(s.vis_row);
     free(s.vis_depth);
+    fi_diff_free(&s_cmp.diff);
+    free(s_cmp.open);
+    free(s_cmp.full);
+    free(s_cmp.rows);
     nt_gfx_shutdown();
     nt_input_shutdown();
     nt_window_shutdown();

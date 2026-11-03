@@ -57,6 +57,13 @@ void fi_number_diff(const fi_frame_t *a, const fi_frame_t *b, fi_number_diff_t *
 /* What changed in a changed pair of fi_diff, e.g. "CACHE -> ACCEPTED; break: merged -> a command recorded between"
  * or, for arguments other than a draw's range, A's request: "A: VIEWPORT integers=[0,0,1280,720]". */
 void fi_change_text(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_row_t *row, char *buf, size_t size);
+/* What sets a compared group apart, e.g. "only in A; requests 3 -> 4; 2 of 9 requests differ"; empty when
+ * nothing does. */
+void fi_group_change_text(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_group_t *group, char *buf, size_t size);
+/* From row r of a group: the end of the run of same rows there when it shows as one line (three or more), else r. */
+uint32_t fi_diff_fold(const fi_diff_t *diff, const fi_diff_group_t *group, uint32_t r);
+/* fi_metric_t names for people. */
+extern const char *const fi_metric_names[FI_METRIC_COUNT];
 /* Whether a group holds draw requests, GL calls or drops: groups and the Information page show only these. */
 bool fi_group_has_work(const fi_frame_t *frame, uint32_t group);
 /* A group's fi_metric_t value; 0 for group FI_NONE, the frame a compared group is missing from. */

@@ -54,15 +54,15 @@ static char *record(void (*body)(void), size_t *len) {
     return text;
 }
 
-static const fi_frame_t *load(char *text, size_t len) {
-    fi_file_load(&s_file, "test", text, len);
-    TEST_ASSERT_EQUAL_UINT32(1, s_file.frame_count);
-    TEST_ASSERT_NULL(s_file.frames[0].error);
-    return &s_file.frames[0];
+static const fi_frame_t *load(fi_file_t *file, char *text, size_t len) {
+    fi_file_load(file, "test", text, len);
+    TEST_ASSERT_EQUAL_UINT32(1, file->frame_count);
+    TEST_ASSERT_NULL(file->frames[0].error);
+    return &file->frames[0];
 }
 
-/* Formats hand-made records into capture text and loads it. */
-static const fi_frame_t *load_events(const nt_gfx_event_t *ev, uint32_t count, const nt_gfx_counters_t *counters) {
+/* Formats hand-made records into capture text and loads it into file. */
+static const fi_frame_t *load_events(fi_file_t *file, const nt_gfx_event_t *ev, uint32_t count, const nt_gfx_counters_t *counters) {
     nt_gfx_capture_view_t view = {.events = ev, .count = count};
     if (counters != NULL) {
         view.counters = *counters;
@@ -71,7 +71,7 @@ static const fi_frame_t *load_events(const nt_gfx_event_t *ev, uint32_t count, c
     char *text = (char *)malloc(len + 1);
     TEST_ASSERT_NOT_NULL(text);
     nt_gfx_capture_format(&view, text, len + 1);
-    return load(text, len);
+    return load(file, text, len);
 }
 
 /* Every counter equals its recount from the records. */
@@ -87,7 +87,7 @@ static void assert_counters_match(const fi_frame_t *fr) {
 static const fi_frame_t *capture(void (*body)(void)) {
     size_t len = 0;
     char *text = record(body, &len);
-    return load(text, len);
+    return load(&s_file, text, len);
 }
 
 /* The nth (0-based) top-level or nested OP record of an operation. */
@@ -208,7 +208,7 @@ static void test_a_finished_link_is_not_the_snapshot(void) {
     nt_gfx_counters_t counters = {0};
     counters.gl[NT_GFX_GL_glGetProgramiv] = 1;
     counters.accepted[NT_GFX_OP_VIEWPORT] = 1;
-    const fi_frame_t *fr = load_events(ev, 4, &counters);
+    const fi_frame_t *fr = load_events(&s_file, ev, 4, &counters);
     TEST_ASSERT_EQUAL_UINT32(FI_NODE_BASE + FI_NODE_SNAPSHOT, fr->parent[0]);
     TEST_ASSERT_EQUAL_UINT32(FI_NODE_BASE + FI_NODE_PROGRAM_LINKS, fr->parent[1]);
     TEST_ASSERT_EQUAL_UINT32(FI_NODE_BASE + FI_NODE_PROGRAM_LINKS, fr->parent[2]);
@@ -238,7 +238,7 @@ static void test_a_context_restore_belongs_to_begin_frame(void) {
     counters.accepted[NT_GFX_OP_CONTEXT] = 1;
     counters.accepted[NT_GFX_OP_DESTROY] = NT_GFX_FRAME_STREAM_COUNT;
     counters.accepted[NT_GFX_OP_CREATE] = NT_GFX_FRAME_STREAM_COUNT + 1;
-    const fi_frame_t *fr = load_events(ev, n, &counters);
+    const fi_frame_t *fr = load_events(&s_file, ev, n, &counters);
     for (uint32_t i = 0; i + 1U < n; i++) {
         TEST_ASSERT_EQUAL_UINT32(FI_NODE_BASE + FI_NODE_BEGIN_FRAME, fr->parent[i]);
     }
@@ -404,7 +404,7 @@ static void test_uploads_and_resource_bytes(void) {
     counters.gl[NT_GFX_GL_glBufferSubData] = 1;
     counters.buffer_upload_calls = 1;
     counters.buffer_upload_bytes = 64;
-    const fi_frame_t *fr = load_events(ev, 3, &counters);
+    const fi_frame_t *fr = load_events(&s_file, ev, 3, &counters);
     TEST_ASSERT_EQUAL_UINT64((4 * 4 + 2 * 2 + 1) * 4, fi_cell(fr, (fi_query_t){.kind = FI_Q_RESOURCE, .a = NT_GFX_OBJECT_TEXTURE, .b = FI_RES_LIVE}).sum);
     TEST_ASSERT_EQUAL_UINT64(64, fi_cell(fr, (fi_query_t){.kind = FI_Q_UPLOAD, .a = 0}).sum);
     TEST_ASSERT_EQUAL_UINT64(1, fi_cell(fr, (fi_query_t){.kind = FI_Q_OP_CALLS, .a = NT_GFX_OP_BUFFER_UPLOAD}).n);
@@ -424,7 +424,7 @@ static void test_draw_buffers_is_not_a_draw_call(void) {
     ev[0].detail = NT_GFX_GL_glDrawBuffers;
     ev[1] = ev[0];
     ev[1].detail = NT_GFX_GL_glDrawArrays;
-    const fi_frame_t *fr = load_events(ev, 2, NULL);
+    const fi_frame_t *fr = load_events(&s_file, ev, 2, NULL);
     TEST_ASSERT_EQUAL_UINT64(1, fi_cell(fr, (fi_query_t){.kind = FI_Q_DRAW_CALL}).n);
 }
 /* Real captures (web clears; a native skeletal_showcase frame with merged draws): every frame's counters
@@ -504,7 +504,7 @@ static void test_texture_sets_compare_by_textures(void) {
     }
     nt_gfx_counters_t counters = {0};
     counters.accepted[NT_GFX_OP_TEXTURE_SET] = 2;
-    const fi_frame_t *fr = load_events(ev, 4, &counters);
+    const fi_frame_t *fr = load_events(&s_file, ev, 4, &counters);
     TEST_ASSERT_FALSE(fi_same_setting(fr, 0, 2));
 }
 
@@ -555,7 +555,7 @@ static void test_gl_slots_compare_by_name(void) {
     }
     nt_gfx_counters_t counters = {0};
     counters.gl[NT_GFX_GL_glUseProgram] = 2;
-    const fi_frame_t *fr = load_events(ev, 3, &counters);
+    const fi_frame_t *fr = load_events(&s_file, ev, 3, &counters);
     const fi_gl_slot_t slot = {.call = NT_GFX_GL_glUseProgram};
     TEST_ASSERT_TRUE(fi_gl_same(fr, &slot, 0, 1));
     TEST_ASSERT_FALSE(fi_gl_same(fr, &slot, 0, 2));
@@ -593,7 +593,7 @@ static void test_gl_state_follows_issued_calls(void) {
     counters.gl[NT_GFX_GL_glActiveTexture] = 1;
     counters.gl[NT_GFX_GL_glUseProgram] = 1;
     counters.accepted[NT_GFX_OP_CONTEXT] = 1;
-    const fi_frame_t *fr = load_events(ev, 6, &counters);
+    const fi_frame_t *fr = load_events(&s_file, ev, 6, &counters);
     fi_gl_state_t st;
     fi_gl_state(fr, 3, &st);
     TEST_ASSERT_EQUAL_UINT32(1, gl_slot(&st, NT_GFX_GL_glBindTexture, 2, 0x0DE1)->record);
@@ -606,10 +606,11 @@ static void test_gl_state_follows_issued_calls(void) {
 // #endregion
 
 // #region compare
-static bool s_split; /* compare_body records a viewport between two draws that merge without it */
+static bool s_split;     /* compare_body records a viewport between two draws that merge without it */
+static uint32_t s_n = 3; /* compare_body's note field */
 
 static void compare_body(void) {
-    NT_GFX_NOTE("sprite", NT_NOTE_U32("n", 3));
+    NT_GFX_NOTE("sprite", NT_NOTE_U32("n", s_n));
     draw_setup();
     nt_gfx_draw(0, 3);
     if (s_split) {
@@ -640,7 +641,7 @@ static void test_compare_aligns_requests_and_names_changes(void) {
     s_split = false;
     size_t len = 0;
     char *text = record(compare_body, &len);
-    const fi_frame_t *a = load(text, len);
+    const fi_frame_t *a = load(&s_file, text, len);
     fi_diff_t d;
     fi_diff(a, a, &d);
     for (uint32_t r = 0; r < d.row_count; r++) {
@@ -655,8 +656,7 @@ static void test_compare_aligns_requests_and_names_changes(void) {
     s_split = true;
     fi_file_t split = {0};
     text = record(compare_body, &len);
-    fi_file_load(&split, "split", text, len);
-    const fi_frame_t *b = &split.frames[0];
+    const fi_frame_t *b = load(&split, text, len);
     fi_diff(a, b, &d);
     char letters[64];
     diff_letters(&d, b, "> sprite", letters);
@@ -675,25 +675,29 @@ static void test_compare_aligns_requests_and_names_changes(void) {
     }
     fi_diff_free(&d);
     fi_file_close(&split);
+
+    s_split = false; /* a note field of another value changes the note */
+    s_n = 4;
+    text = record(compare_body, &len);
+    b = load(&split, text, len);
+    s_n = 3;
+    fi_diff(a, b, &d);
+    diff_letters(&d, b, "> sprite", letters);
+    TEST_ASSERT_EQUAL_STRING("~=======", letters);
+    for (uint32_t r = 0; r < d.row_count; r++) {
+        TEST_ASSERT_EQUAL_UINT8(d.row[r].b == find_kind(b, NT_GFX_EVENT_NOTE, 0) ? FI_CHANGE_ITEMS : 0, d.row[r].change);
+    }
+    fi_diff_free(&d);
+    fi_file_close(&split);
 }
 
-/* Formats hand-made records into a second file, so two frames of records can be compared. */
-static const fi_frame_t *load_other(fi_file_t *file, const nt_gfx_event_t *ev, uint32_t count) {
-    nt_gfx_capture_view_t view = {.events = ev, .count = count};
-    const size_t len = nt_gfx_capture_format(&view, NULL, 0);
-    char *text = (char *)malloc(len + 1);
-    TEST_ASSERT_NOT_NULL(text);
-    nt_gfx_capture_format(&view, text, len + 1);
-    fi_file_load(file, "other", text, len);
-    TEST_ASSERT_EQUAL_UINT32(1, file->frame_count);
-    return &file->frames[0];
-}
-
-/* A pipeline, a GL call A's issues and B's does not, then two texture sets. The second names texture
- * `second` of the two the frame uses, as its alias. */
+/* A pipeline, a GL call A's issues and B's does not, two texture sets, then a pass, a vertex input, a draw
+ * and a create, each naming handles in its arguments. The second texture set names texture `second` of the
+ * two the frame uses, as its alias. */
 static uint32_t handles_body(nt_gfx_event_t *ev, uint32_t base, bool call, uint32_t second) {
     const uint32_t pipeline = base + 1U;
     const uint32_t texture[2] = {base + 2U, base + 3U};
+    const uint32_t vi = base + 4U;
     uint32_t n = 0;
     ev[n++] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_PIPELINE, .object_kind = NT_GFX_OBJECT_PIPELINE, .object = pipeline, .result = NT_GFX_RESULT_ACCEPTED};
     if (call) {
@@ -704,35 +708,101 @@ static uint32_t handles_body(nt_gfx_event_t *ev, uint32_t base, bool call, uint3
         ev[n++] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_TEXTURE_SET, .object_kind = NT_GFX_OBJECT_PIPELINE, .object = pipeline, .result = NT_GFX_RESULT_ACCEPTED};
         ev[op].data.state.integers[0] = 1;
         ev[n++] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_ARGUMENT, .operation = NT_GFX_OP_TEXTURE_SET, .object_kind = NT_GFX_OBJECT_TEXTURE, .object = texture[k == 0 ? 0 : second], .link = op + 1U};
+        ev[n - 1U].data.binding.secondary = base + 5U; /* sampler */
     }
+    ev[n] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_PASS, .result = NT_GFX_RESULT_ACCEPTED};
+    ev[n++].data.pass.target = base + 6U;
+    ev[n] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_VERTEX_INPUT, .object_kind = NT_GFX_OBJECT_VERTEX_INPUT, .object = vi, .result = NT_GFX_RESULT_ACCEPTED};
+    ev[n].data.binding.secondary = base + 7U; /* instance buffer */
+    ev[n++].data.binding.slot = base + 8U;    /* instance layout */
+    ev[n] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_DRAW, .object_kind = NT_GFX_OBJECT_PIPELINE, .object = pipeline, .result = NT_GFX_RESULT_ACCEPTED};
+    ev[n].data.draw.count = 3;
+    ev[n++].data.draw.vertex_input = vi;
+    ev[n] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_PIPELINE, .object = base + 9U, .result = NT_GFX_RESULT_ACCEPTED};
+    ev[n].data.resource.backend = base;
+    ev[n++].data.resource.related[0] = base + 10U; /* program */
     return n;
 }
 
 /* Requests pair and match by alias, whatever their handles: B's handles all differ from A's. A GL call
  * fewer and a texture set naming the other texture are the changes. */
 static void test_compare_pairs_handles_by_alias(void) {
-    nt_gfx_event_t ev[2][6];
+    nt_gfx_event_t ev[2][12];
     const uint32_t na = handles_body(ev[0], 10, true, 1);
-    const fi_frame_t *a = load_events(ev[0], na, NULL);
+    const fi_frame_t *a = load_events(&s_file, ev[0], na, NULL);
     fi_file_t other = {0};
-    const fi_frame_t *b = load_other(&other, ev[1], handles_body(ev[1], 20, false, 1));
+    const fi_frame_t *b = load_events(&other, ev[1], handles_body(ev[1], 20, false, 1), NULL);
     fi_diff_t d;
     fi_diff(a, b, &d);
     TEST_ASSERT_EQUAL_UINT32(1, d.group_count);
-    char letters[8];
+    char letters[16];
     diff_letters(&d, b, b->group_key[d.group[0].b], letters);
-    TEST_ASSERT_EQUAL_STRING("~==", letters); /* the pipeline, two texture sets */
+    TEST_ASSERT_EQUAL_STRING("~======", letters); /* the pipeline, two texture sets, pass, vertex input, draw, create */
     TEST_ASSERT_EQUAL_UINT8(FI_CHANGE_CALLS, d.row[0].change);
     TEST_ASSERT_EQUAL_UINT32(1, d.row[0].calls_a);
     TEST_ASSERT_EQUAL_UINT32(0, d.row[0].calls_b);
     fi_diff_free(&d);
     fi_file_close(&other);
 
-    b = load_other(&other, ev[1], handles_body(ev[1], 20, true, 0));
+    b = load_events(&other, ev[1], handles_body(ev[1], 20, true, 0), NULL);
     fi_diff(a, b, &d);
     diff_letters(&d, b, b->group_key[d.group[0].b], letters);
-    TEST_ASSERT_EQUAL_STRING("==~", letters);
+    TEST_ASSERT_EQUAL_STRING("==~====", letters);
     TEST_ASSERT_EQUAL_UINT8(FI_CHANGE_ITEMS, d.row[2].change);
+    fi_diff_free(&d);
+    fi_file_close(&other);
+}
+
+static uint16_t s_offset; /* layout_body's attribute offset */
+
+static void layout_body(void) { /* destroyed again, so the next frame's snapshot is this one's */
+    const nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 48});
+    nt_gfx_destroy_vertex_input(nt_gfx_make_vertex_input(
+        &(nt_vertex_input_desc_t){.layout = {.attr_count = 1, .stride = 16, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = s_offset}}}, .vertex_buffer = vbo}));
+    nt_gfx_destroy_buffer(vbo);
+}
+
+/* A buffer and a vertex input created in each frame, under other handles: equal layouts pair as same, an
+ * attribute at another offset changes the vertex input's create through its DEFINITION records. */
+static void test_compare_checks_what_a_create_defines(void) {
+    size_t len = 0;
+    char *text = record(layout_body, &len);
+    const fi_frame_t *a = load(&s_file, text, len);
+    fi_file_t other = {0};
+    for (uint16_t offset = 0; offset <= 4U; offset += 4U) {
+        s_offset = offset;
+        text = record(layout_body, &len);
+        const fi_frame_t *b = load(&other, text, len);
+        TEST_ASSERT_NOT_EQUAL_UINT32(a->view.events[find_op(a, NT_GFX_OP_CREATE, 0)].object, b->view.events[find_op(b, NT_GFX_OP_CREATE, 0)].object);
+        fi_diff_t d;
+        fi_diff(a, b, &d);
+        char letters[8];
+        diff_letters(&d, b, b->group_key[d.group[0].b], letters);
+        TEST_ASSERT_EQUAL_STRING(offset == 0 ? "=====" : "==~==", letters); /* timer, two creates, two destroys */
+        TEST_ASSERT_EQUAL_UINT8(offset == 0 ? 0 : FI_CHANGE_ITEMS, d.row[2].change);
+        fi_diff_free(&d);
+        fi_file_close(&other);
+    }
+}
+
+/* Matches inside the changed middle: A's VIEWPORTs (v) and SCISSORs (s) "svvs" against B's "vvsv" keep the
+ * one longest common run "vvs", in order. */
+static void test_compare_keeps_the_longest_common_run(void) {
+    nt_gfx_event_t ev[8];
+    const char *ops = "svvsvvsv";
+    for (uint32_t i = 0; i < 8U; i++) {
+        ev[i] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = ops[i] == 'v' ? NT_GFX_OP_VIEWPORT : NT_GFX_OP_SCISSOR, .result = NT_GFX_RESULT_ACCEPTED};
+    }
+    const fi_frame_t *a = load_events(&s_file, ev, 4, NULL);
+    fi_file_t other = {0};
+    const fi_frame_t *b = load_events(&other, ev + 4, 4, NULL);
+    fi_diff_t d;
+    fi_diff(a, b, &d);
+    char letters[8];
+    diff_letters(&d, b, b->group_key[d.group[0].b], letters);
+    TEST_ASSERT_EQUAL_STRING("-===+", letters);
+    TEST_ASSERT_EQUAL_UINT32(0, d.row[0].a);
+    TEST_ASSERT_EQUAL_UINT32(3, d.row[4].b);
     fi_diff_free(&d);
     fi_file_close(&other);
 }
@@ -747,8 +817,8 @@ static void diff_runs(uint32_t viewports, uint32_t same, uint32_t scissors, fi_f
         ev[i].operation = i < viewports + same ? NT_GFX_OP_VIEWPORT : NT_GFX_OP_SCISSOR;
         ev[i].result = NT_GFX_RESULT_ACCEPTED;
     }
-    const fi_frame_t *a = load_other(&files[0], ev, viewports);
-    const fi_frame_t *b = load_other(&files[1], ev + viewports, same + scissors);
+    const fi_frame_t *a = load_events(&files[0], ev, viewports, NULL);
+    const fi_frame_t *b = load_events(&files[1], ev + viewports, same + scissors, NULL);
     fi_diff(a, b, d);
     free(ev);
     TEST_ASSERT_EQUAL_UINT32(1, d->group_count);
@@ -866,6 +936,8 @@ int main(void) {
     RUN_TEST(test_an_overflowed_frame_opens);
     RUN_TEST(test_compare_aligns_requests_and_names_changes);
     RUN_TEST(test_compare_pairs_handles_by_alias);
+    RUN_TEST(test_compare_checks_what_a_create_defines);
+    RUN_TEST(test_compare_keeps_the_longest_common_run);
     RUN_TEST(test_compare_aligns_up_to_its_edit_limit);
     return UNITY_END();
 }

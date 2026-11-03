@@ -564,7 +564,7 @@ void fi_change_text(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_row_
         sep = "; ";
     }
     if ((row->change & FI_CHANGE_ITEMS) != 0) {
-        appendf(buf, size, &at, "%s%s differ", sep, x->kind == NT_GFX_EVENT_NOTE ? "fields" : "argument records");
+        appendf(buf, size, &at, "%s%s differ", sep, x->kind == NT_GFX_EVENT_NOTE ? "fields" : "its records");
         sep = "; ";
     }
     if ((row->change & FI_CHANGE_ARGS) == 0) {
@@ -598,6 +598,41 @@ uint64_t fi_group_metric(const fi_frame_t *frame, uint32_t group, uint32_t metri
     }
     const fi_cell_t *c = &frame->summary.group[((size_t)group * FI_METRIC_COUNT) + metric];
     return metric == FI_METRIC_BYTES ? c->sum : c->n;
+}
+
+const char *const fi_metric_names[FI_METRIC_COUNT] = {"requests", "GL draws", "GL calls", "upload B", "drops"};
+
+void fi_group_change_text(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_group_t *group, char *buf, size_t size) {
+    size_t at = 0;
+    buf[0] = '\0';
+    const char *sep = "";
+    if (group->a == FI_NONE || group->b == FI_NONE) {
+        appendf(buf, size, &at, "only in %s", group->a == FI_NONE ? "B" : "A");
+        sep = "; ";
+    }
+    for (uint32_t m = 0; m < FI_METRIC_COUNT; m++) {
+        const uint64_t va = fi_group_metric(a, group->a, m);
+        const uint64_t vb = fi_group_metric(b, group->b, m);
+        if (va != vb) {
+            appendf(buf, size, &at, "%s%s %llu -> %llu", sep, fi_metric_names[m], (unsigned long long)va, (unsigned long long)vb);
+            sep = "; ";
+        }
+    }
+    if (group->differ > 0) {
+        appendf(buf, size, &at, "%s%u of %u requests differ", sep, group->differ, group->count);
+        sep = "; ";
+    }
+    if (!group->aligned) {
+        appendf(buf, size, &at, "%stoo different to align: A's requests, then B's", sep);
+    }
+}
+
+uint32_t fi_diff_fold(const fi_diff_t *diff, const fi_diff_group_t *group, uint32_t r) {
+    uint32_t end = r;
+    while (end < group->first + group->count && diff->row[end].kind == FI_DIFF_SAME) {
+        end++;
+    }
+    return end - r >= 3U ? end : r;
 }
 
 bool fi_group_differs(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_group_t *group) {
@@ -981,13 +1016,12 @@ static bool compare_group(const fi_frame_t *a, const fi_frame_t *b, const fi_dif
             continue;
         }
         put(out, "# = same, ~ changed, - only A, + only B; then the records in A and B and the request  # what changed\n");
-        put(out, "group %s  # %s%s\n", name, dg->b != FI_NONE ? b->group_key[dg->b] : a->group_key[dg->a], dg->aligned ? "" : "; too different to align: A's requests, then B's");
+        char change[256];
+        fi_group_change_text(a, b, dg, change, sizeof(change));
+        put(out, "group %s  # %s%s%s\n", name, dg->b != FI_NONE ? b->group_key[dg->b] : a->group_key[dg->a], change[0] != '\0' ? "; " : "", change);
         for (uint32_t r = dg->first; r < dg->first + dg->count;) {
-            uint32_t end = r;
-            while (end < dg->first + dg->count && d->row[end].kind == FI_DIFF_SAME) {
-                end++;
-            }
-            if (end - r >= 3U) {
+            const uint32_t end = fi_diff_fold(d, dg, r);
+            if (end > r) {
                 put(out, "= %u same  # @%u..@%u in A, @%u..@%u in B\n", end - r, d->row[r].a, d->row[end - 1U].a, d->row[r].b, d->row[end - 1U].b);
                 r = end;
                 continue;

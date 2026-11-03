@@ -207,7 +207,7 @@ static void load_variant(const edit_t *edits, uint32_t count) {
         char *at = strstr(text + len, edits[k].at);
         TEST_ASSERT_NOT_NULL(at);
         char *from = strstr(at, edits[k].from);
-        TEST_ASSERT_NOT_NULL(from);
+        TEST_ASSERT_TRUE(from != NULL && from < strchr(at + 1, '\n'));
         TEST_ASSERT_EQUAL_size_t(strlen(edits[k].from), strlen(edits[k].to));
         memcpy(from, edits[k].to, strlen(edits[k].to));
     }
@@ -216,10 +216,12 @@ static void load_variant(const edit_t *edits, uint32_t count) {
     TEST_ASSERT_EQUAL_UINT32(2, s_file.frame_count);
 }
 
-/* Compare's A and B columns are each frame's own numbers; the changed draw is the only difference, in its group. */
+/* Compare's A and B columns are each frame's own numbers, the biggest change first; the edited requests are
+ * the only differences, each saying what changed. */
 static void test_compare_tells_what_differs(void) {
-    static const edit_t k_count[] = {{"\n233 OP op=DRAW_INDEXED", " count=6 ", " count=7 "}};
-    load_variant(k_count, 1);
+    static const edit_t k_edits[] = {
+        {"\n233 OP op=DRAW_INDEXED", " count=6 ", " count=7 "}, {"\n209 OP op=DRAW_INDEXED_INSTANCED", "instances=42", "instances=99"}, {"\n211 OP op=VIEWPORT", "1280,800]", "1280,801]"}};
+    load_variant(k_edits, 3);
     (void)ask("frame 1", true);
     static fi_number_t a_numbers[FI_NUMBERS];
     static fi_number_t b_numbers[FI_NUMBERS];
@@ -232,20 +234,28 @@ static void test_compare_tells_what_differs(void) {
         TEST_ASSERT_EQUAL_UINT64_MESSAGE(a_numbers[k].value, fi_number_in(a, &b_numbers[k]), a_numbers[k].key);
     }
     const char *text = ask("compare 0", true);
-    assert_holds(text, "\nindices                                   19176      19177          +1  # indices drawn (x instances)\n");
+    const char *vertices = strstr(text, "\nvertices                                   5251       5650        +399  # ");
+    const char *indices = strstr(text, "\nindices                                   19176      19519        +343  # ");
+    const char *instances = strstr(text, "\ninstances                                    63        120         +57  # ");
+    TEST_ASSERT_TRUE(vertices != NULL && indices > vertices && instances > indices);
     assert_holds(text, "\ng2.commands                                   1  # > sprite: requests that differ, of ");
-    assert_holds(text, "\ndiffer 2  # ");
+    assert_holds(text, "\ndiffer 5  # ");
     text = ask("compare 0 g2", true);
+    assert_holds(text, "\ngroup g2  # > sprite; 1 of 124 requests differ\n");
     assert_holds(text, "\n~ @233    @233    DRAW_INDEXED pipe#9 count=7 vi#6  # count 6 -> 7\n");
     assert_holds(text, "\nrows 124 differ 1\n");
+    text = ask("compare 0 g1", true);
+    assert_holds(text, "\n= 9 same  # @200..@208 in A, @200..@208 in B\n~ @209    @209    ");
+    assert_holds(text, " x99  # instances 42 -> 99\n= @210    @210    SCISSOR_ENABLE off\n");
+    assert_holds(text, "  # A: VIEWPORT integers=[0,0,1280,800]\n");
     assert_holds(ask("compare 1", true), "\ndiffer 0  # ");
     static const struct {
         const char *line, *why;
-    } k_bad[] = {{"compare", "compare INDEX [GROUP]"},
-                 {"compare x", "compare INDEX [GROUP]"},
+    } k_bad[] = {{"compare", "compare INDEX [GROUP] (INDEX:"},
+                 {"compare x", "compare INDEX [GROUP] (INDEX:"},
                  {"compare 9", "no readable frame 9"},
                  {"compare 0 g99", "no group g99"},
-                 {"compare 0 g2 g3", "compare INDEX [GROUP]"}};
+                 {"compare 0 g2 g3", "compare INDEX [GROUP]; help"}};
     for (uint32_t k = 0; k < sizeof(k_bad) / sizeof(k_bad[0]); k++) {
         assert_holds(ask(k_bad[k].line, false), k_bad[k].why);
     }
@@ -302,9 +312,17 @@ static void test_compare_names_groups_only_one_frame_has(void) {
     assert_holds(text, line);
     assert_holds(text, "  # only in A: > shape\n");
     assert_holds(text, "  # only in B: > shapf\n");
+    fi_diff_t d;
+    fi_diff(a, &s_file.frames[1], &d);
+    uint32_t differ = 0;
+    for (uint32_t k = 0; k < d.group_count; k++) {
+        differ += fi_group_differs(a, &s_file.frames[1], &d.group[k]) ? 1U : 0U;
+    }
+    TEST_ASSERT_EQUAL_UINT32(2, differ); /* the old name and the new */
+    fi_diff_free(&d);
     (void)snprintf(line, sizeof(line), "compare 0 a.g%u", g);
     text = ask(line, true);
-    assert_holds(text, "  # > shape\n");
+    assert_holds(text, "  # > shape; only in A; requests ");
     assert_holds(text, "\n- @200    -       ");
 }
 
