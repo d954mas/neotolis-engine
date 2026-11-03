@@ -249,11 +249,13 @@ typedef enum {
 } nt_tex_mips_t;
 
 /* What RGB holds. COLOR picks the ETC1S perceptual metric, DATA its linear one;
- * UASTC LDR and uncompressed textures give the same bytes for both. sRGB formats
- * require COLOR. */
+ * UASTC LDR and uncompressed textures give the same bytes for both. NORMAL is a
+ * tangent-space unit vector (c * 2 - 1): linear metric, renormalized on every
+ * level, and RG8 rebuilds Z from XY. sRGB formats require COLOR. */
 typedef enum {
     NT_TEX_RGB_COLOR = 0,
     NT_TEX_RGB_DATA = 1,
+    NT_TEX_RGB_NORMAL = 2,
 } nt_tex_rgb_t;
 
 /* What A means. STRAIGHT and PREMULTIPLIED filter RGB alpha-weighted; STRAIGHT
@@ -292,6 +294,9 @@ static inline nt_tex_process_t nt_tex_process_color(void) {
 }
 static inline nt_tex_process_t nt_tex_process_data(void) {
     return (nt_tex_process_t){.rgb = NT_TEX_RGB_DATA, .alpha = NT_TEX_ALPHA_DATA, .resize_filter = NT_TEX_FILTER_BOX, .mip_filter = NT_TEX_FILTER_BOX};
+}
+static inline nt_tex_process_t nt_tex_process_normal(void) {
+    return (nt_tex_process_t){.rgb = NT_TEX_RGB_NORMAL, .alpha = NT_TEX_ALPHA_DATA, .resize_filter = NT_TEX_FILTER_MITCHELL, .mip_filter = NT_TEX_FILTER_BOX};
 }
 
 typedef struct {

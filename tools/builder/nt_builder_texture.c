@@ -18,7 +18,7 @@ nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *op
 
     NT_BUILD_ASSERT(nt_texture_pixel_format_valid(format) && "texture opts: invalid format");
     const nt_tex_process_t *process = &resolved.process;
-    NT_BUILD_ASSERT((unsigned)process->rgb <= (unsigned)NT_TEX_RGB_DATA && "texture opts: process.rgb out of range");
+    NT_BUILD_ASSERT((unsigned)process->rgb <= (unsigned)NT_TEX_RGB_NORMAL && "texture opts: process.rgb out of range");
     NT_BUILD_ASSERT((unsigned)process->alpha <= (unsigned)NT_TEX_ALPHA_DATA && "texture opts: process.alpha out of range");
     NT_BUILD_ASSERT((unsigned)process->resize_filter <= (unsigned)NT_TEX_FILTER_KAISER && "texture opts: process.resize_filter out of range");
     NT_BUILD_ASSERT((unsigned)process->mip_filter <= (unsigned)NT_TEX_FILTER_KAISER && "texture opts: process.mip_filter out of range");
@@ -31,6 +31,11 @@ nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *op
     const bool kaiser = process->resize_filter == NT_TEX_FILTER_KAISER || process->mip_filter == NT_TEX_FILTER_KAISER;
     NT_BUILD_ASSERT((!kaiser || (process->rgb == NT_TEX_RGB_COLOR && !nt_texture_pixel_format_has_alpha(format))) && "texture opts: KAISER requires process.rgb COLOR and a format without alpha");
     NT_BUILD_ASSERT((process->mip_filter == NT_TEX_FILTER_BOX || resolved.mips == NT_TEX_MIPS_BAKED) && "texture opts: a mip_filter other than BOX requires mips BAKED");
+    /* GPU mips would not renormalize; R8 holds no vector and RGB9E5 is colour. */
+    NT_BUILD_ASSERT((process->rgb != NT_TEX_RGB_NORMAL || (format != NT_TEXTURE_FORMAT_R8 && format != NT_TEXTURE_FORMAT_RGB9E5 && resolved.mips != NT_TEX_MIPS_RUNTIME)) &&
+                    "texture opts: process.rgb NORMAL requires RGBA8, RGB8 or RG8 and mips NONE or BAKED");
+    NT_BUILD_ASSERT((process->rgb != NT_TEX_RGB_NORMAL || !nt_texture_pixel_format_has_alpha(format) || process->alpha == NT_TEX_ALPHA_DATA) &&
+                    "texture opts: process.rgb NORMAL with an alpha format requires process.alpha DATA");
     NT_BUILD_ASSERT((unsigned)resolved.filter_min <= (unsigned)NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR && "texture opts: filter_min out of range");
     NT_BUILD_ASSERT((unsigned)resolved.filter_mag <= (unsigned)NT_TEXTURE_DEFAULT_FILTER_LINEAR && "texture opts: filter_mag must be NEAREST or LINEAR");
     NT_BUILD_ASSERT((unsigned)resolved.wrap_u <= (unsigned)NT_TEXTURE_DEFAULT_WRAP_MIRRORED_REPEAT && "texture opts: wrap_u out of range");
@@ -291,6 +296,77 @@ static void quantize_core(const uint16_t *core, size_t texels, bool srgb, bool p
             out[(i * 4U) + c] = unit_to_byte(srgb ? linear_to_srgb(fmaxf(v, 0.0F)) : v);
         }
         out[(i * 4U) + 3U] = unit_to_byte(a);
+    }
+}
+
+/* Round-to-nearest float to half, for values in [0, 1]. */
+static uint16_t float_to_half(float value) {
+    uint32_t bits = 0;
+    memcpy(&bits, &value, sizeof(bits));
+    const int32_t exponent = (int32_t)((bits >> 23U) & 0xFFU) - 127 + 15;
+    uint32_t mantissa = bits & 0x7FFFFFU;
+    NT_BUILD_ASSERT((bits >> 31U) == 0 && exponent < 31 && "texture levels: half-float core value outside [0, 1]");
+    if (exponent <= 0) {
+        if (exponent < -10) {
+            return 0;
+        }
+        mantissa |= 0x800000U;
+        const uint32_t shift = (uint32_t)(14 - exponent);
+        return (uint16_t)((mantissa >> shift) + ((mantissa >> (shift - 1U)) & 1U));
+    }
+    return (uint16_t)((((uint32_t)exponent << 10U) | (mantissa >> 13U)) + ((mantissa >> 12U) & 1U));
+}
+
+/* Encoded normal (c * 2 - 1) to its unit vector, encoded again; a cancelled
+ * average becomes +Z. */
+static void unit_normal(float v[3]) {
+    for (uint32_t c = 0; c < 3; c++) {
+        v[c] = (v[c] * 2.0F) - 1.0F;
+    }
+    const float length = sqrtf((v[0] * v[0]) + (v[1] * v[1]) + (v[2] * v[2]));
+    if (length < 1e-4F) {
+        v[0] = 0.5F;
+        v[1] = 0.5F;
+        v[2] = 1.0F;
+        return;
+    }
+    for (uint32_t c = 0; c < 3; c++) {
+        v[c] = (v[c] / length * 0.5F) + 0.5F;
+    }
+}
+
+static void normalize_bytes(uint8_t *rgba, size_t texels) {
+    for (size_t i = 0; i < texels; i++) {
+        float v[3];
+        for (uint32_t c = 0; c < 3; c++) {
+            v[c] = (float)rgba[(i * 4U) + c] / 255.0F;
+        }
+        unit_normal(v);
+        for (uint32_t c = 0; c < 3; c++) {
+            rgba[(i * 4U) + c] = unit_to_byte(v[c]);
+        }
+    }
+}
+
+static void normalize_core(uint16_t *core, size_t texels) {
+    for (size_t i = 0; i < texels; i++) {
+        float v[3];
+        for (uint32_t c = 0; c < 3; c++) {
+            v[c] = half_to_float(core[(i * 4U) + c]);
+        }
+        unit_normal(v);
+        for (uint32_t c = 0; c < 3; c++) {
+            core[(i * 4U) + c] = float_to_half(fminf(fmaxf(v[c], 0.0F), 1.0F));
+        }
+    }
+}
+
+/* RG8 normals store XY only, so Z is rebuilt for filtering and normalization. */
+static void rebuild_normal_z(uint8_t *rgba, size_t texels) {
+    for (size_t i = 0; i < texels; i++) {
+        const float x = ((float)rgba[i * 4U] / 127.5F) - 1.0F;
+        const float y = ((float)rgba[(i * 4U) + 1U] / 127.5F) - 1.0F;
+        rgba[(i * 4U) + 2U] = unit_to_byte((sqrtf(fmaxf(0.0F, 1.0F - (x * x) - (y * y))) * 0.5F) + 0.5F);
     }
 }
 
@@ -568,6 +644,7 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
     const stbir_datatype byte_type = srgb ? STBIR_TYPE_UINT8_SRGB : STBIR_TYPE_UINT8;
     /* Alpha-weighted layouts filter straight bytes into a premultiplied core. */
     const bool weighted = alpha && process->alpha != NT_TEX_ALPHA_DATA;
+    const bool normal = process->rgb == NT_TEX_RGB_NORMAL;
     const stbir_pixel_layout layout = weighted ? STBIR_RGBA : STBIR_RGBA_NO_AW;
     const stbir_pixel_layout core_layout = weighted ? STBIR_RGBA_PM : STBIR_RGBA_NO_AW;
     uint8_t *chain = (uint8_t *)malloc(chain_bytes(w, h, level_count, 4));
@@ -583,12 +660,18 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
         for (size_t i = 0; i < src_texels; i++) {
             opaque[(i * 4U) + 3U] = 255;
         }
+        if (normal && opts->format == NT_TEXTURE_FORMAT_RG8) {
+            rebuild_normal_z(opaque, src_texels);
+        }
         source = opaque;
     }
     if (src_w == w && src_h == h) {
         memcpy(chain, source, src_texels * 4U);
     } else {
         resize_level(source, src_w, src_h, byte_type, layout, chain, w, h, byte_type, layout, process->resize_filter, opts);
+        if (normal) {
+            normalize_bytes(chain, (size_t)w * h);
+        }
     }
     free(opaque);
     // #endregion
@@ -613,6 +696,9 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
             uint16_t *swap = core;
             core = next;
             next = swap;
+            if (normal) {
+                normalize_core(core, (size_t)lw * lh);
+            }
             stored += (size_t)pw * ph * 4U;
             quantize_core(core, (size_t)lw * lh, srgb, weighted, stored);
         }
