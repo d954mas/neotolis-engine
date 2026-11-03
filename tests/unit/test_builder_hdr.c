@@ -209,17 +209,17 @@ void test_rgb9e5_chain_box_filters_each_level(void) {
 }
 
 void test_rgb9e5_max_size_resizes_with_the_box_filter(void) {
-    float rgb[4 * 2 * 3];
-    for (uint32_t i = 0; i < 4 * 2; i++) {
+    float rgb[16 * 8 * 3];
+    for (uint32_t i = 0; i < 16 * 8; i++) {
         rgb[(i * 3) + 0] = (i % 2 == 0) ? 8.0F : 0.0F;
         rgb[(i * 3) + 1] = 2.0F;
         rgb[(i * 3) + 2] = 0.25F;
     }
     nt_tex_opts_t opts = hdr_opts(NT_TEX_MIPS_NONE);
-    opts.max_size = 2;
-    texture_asset_t t = build_raw(TMP_DIR "/resize.ntpack", rgb, 4, 2, &opts);
-    TEST_ASSERT_EQUAL_UINT32(2, t.hdr.width);
-    TEST_ASSERT_EQUAL_UINT32(1, t.hdr.height);
+    opts.max_size = 8;
+    texture_asset_t t = build_raw(TMP_DIR "/resize.ntpack", rgb, 16, 8, &opts);
+    TEST_ASSERT_EQUAL_UINT32(8, t.hdr.width);
+    TEST_ASSERT_EQUAL_UINT32(4, t.hdr.height);
     float px[3];
     unpack_rgb9e5(t.words[0], px);
     EXPECT_NEAR(1.0F / 64.0F, 4.0F, px[0]);
@@ -352,11 +352,11 @@ void test_hdr_file_values_outside_the_source_range_assert(void) {
 
 void test_hdr_range_is_checked_before_resize(void) {
     /* Averaged with its neighbours, -1 would vanish into a valid value. */
-    const float rgb[2 * 3] = {-1.0F, 0.0F, 0.0F, 3.0F, 0.0F, 0.0F};
+    float rgb[8 * 3] = {-1.0F, 0.0F, 0.0F, 3.0F};
     nt_tex_opts_t opts = hdr_opts(NT_TEX_MIPS_NONE);
-    opts.max_size = 1;
+    opts.max_size = 4;
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/bad.ntpack");
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_texture_raw_f32(ctx, rgb, 2, 1, "bad", &opts), "finite and in [0, 65216]");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_texture_raw_f32(ctx, rgb, 8, 1, "bad", &opts), "finite and in [0, 65216]");
     nt_builder_free_pack(ctx);
 }
 

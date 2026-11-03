@@ -469,7 +469,7 @@ static void debug_draw_hull_outline(uint8_t *page, uint32_t pw, uint32_t ph, con
  * apart re-opens either forged-file headroom or permanent cache misses. */
 enum { ATLAS_MAX_REGIONS = UINT16_MAX };
 
-enum { ATLAS_CACHE_KEY_VERSION = 22 };
+enum { ATLAS_CACHE_KEY_VERSION = 24 };
 
 /* Per-sprite key record: hash + source dims + origin, then the raw override block. */
 enum { KEY_OV_OFF = sizeof(uint64_t) + (2 * sizeof(uint32_t)) + (2 * sizeof(float)) };
@@ -829,7 +829,8 @@ static nt_texture_pixel_format_t atlas_assert_opts(const nt_atlas_opts_t *opts) 
      * guard, so max_vertices 1|2 yields a degenerate (line/point) polygon. */
     NT_BUILD_ASSERT(opts->max_vertices >= 4 && opts->max_vertices <= 16 &&
                     "nt_atlas_begin: max_vertices must be 4..16 (a trim-clamped triangle cannot cover a full-perimeter mask; NFP buffer limit nA+nB <= 32)");
-    NT_BUILD_ASSERT(opts->max_size > 0 && opts->max_size <= 16384 && "nt_atlas_begin: max_size must be 1..16384");
+    NT_BUILD_ASSERT(opts->max_size >= 4 && opts->max_size <= 16384 && opts->max_size % 4 == 0 && "nt_atlas_begin: max_size must be a multiple of 4 in 4..16384");
+    NT_BUILD_ASSERT((!opts->power_of_two || (opts->max_size & (opts->max_size - 1)) == 0) && "nt_atlas_begin: with power_of_two, max_size must be a power of two");
     NT_BUILD_ASSERT(opts->padding <= opts->max_size && "nt_atlas_begin: padding exceeds max_size");
     NT_BUILD_ASSERT(opts->margin <= opts->max_size && "nt_atlas_begin: margin exceeds max_size");
     NT_BUILD_ASSERT(opts->extrude <= opts->max_size && "nt_atlas_begin: extrude exceeds max_size");

@@ -25,6 +25,7 @@ nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *op
 
     const nt_basisu_encode_opts_t *compress_opts = &resolved.compress;
     bool compressed = compress_opts->codec != NT_BASISU_CODEC_NONE;
+    NT_BUILD_ASSERT(resolved.max_size % 4 == 0 && "texture opts: max_size must be 0 or a multiple of 4");
     bool filter_min_uses_mips = resolved.filter_min >= NT_TEXTURE_DEFAULT_FILTER_NEAREST_MIPMAP_NEAREST;
     NT_BUILD_ASSERT((unsigned)resolved.mips <= (unsigned)NT_TEX_MIPS_BAKED && "texture opts: mips out of range");
     NT_BUILD_ASSERT((resolved.mips != NT_TEX_MIPS_NONE || !filter_min_uses_mips) && "texture opts: a mipmap filter_min requires mips RUNTIME or BAKED");
@@ -80,6 +81,12 @@ static float *resize_hdr(const float *rgb, uint32_t w, uint32_t h, uint32_t out_
     return resized;
 }
 
+/* The shorter side scaled with the longer one to max_size, rounded down to the 4x4 block (at least one block). */
+static uint32_t scaled_short_side(uint32_t short_side, uint32_t long_side, uint32_t max_size) {
+    const uint32_t side = (short_side * max_size / long_side) & ~3U;
+    return side < 4 ? 4 : side;
+}
+
 /* Resize source pixels to fit within max_size, preserving aspect ratio.
  * Returns the resized buffer (caller frees), or NULL when no resize is needed.
  * *out_w and *out_h receive the final size either way. */
@@ -89,19 +96,8 @@ static void *resize_if_needed(const void *pixels, nt_texture_pixel_format_t form
         *out_h = h;
         return NULL;
     }
-    if (w >= h) {
-        *out_w = max_size;
-        *out_h = h * max_size / w;
-    } else {
-        *out_h = max_size;
-        *out_w = w * max_size / h;
-    }
-    if (*out_w < 1) {
-        *out_w = 1;
-    }
-    if (*out_h < 1) {
-        *out_h = 1;
-    }
+    *out_w = w >= h ? max_size : scaled_short_side(w, h, max_size);
+    *out_h = w >= h ? scaled_short_side(h, w, max_size) : max_size;
     if (format == NT_TEXTURE_FORMAT_RGB9E5) {
         return resize_hdr((const float *)pixels, w, h, *out_w, *out_h);
     }

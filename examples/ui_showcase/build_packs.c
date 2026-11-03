@@ -305,7 +305,7 @@ int main(int argc, char *argv[]) {
     radial_opts.padding = 0;
     radial_opts.margin = 0;
     radial_opts.extrude = 0;
-    radial_opts.power_of_two = false; /* tight page == sprite dims -> UV [0,1] */
+    radial_opts.power_of_two = false; /* tight page == sprite dims (a 4x4-block multiple) -> UV [0,1] */
     radial_opts.premultiplied = true;
     radial_opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
     radial_opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR;

@@ -441,8 +441,8 @@ asserts on format and flag combinations (such as `GEN_MIPMAPS` with a chain)
 run only on a device that passed the limit.
 
 A BASIS asset is cross-checked against the blob before anything is created. The
-blob's own dimensions must equal the header's, and its level count must equal
-`mip_count`; a mismatch asserts. A lost
+blob's own dimensions must equal the header's and be multiples of 4, and its
+level count must equal `mip_count`; a mismatch asserts. A lost
 context, a staging allocation failure and an RGBA8 fallback chain above 4 GB
 stay recoverable: the activator logs and returns an invalid handle. The
 header's `format` field is range-checked at the boundary like every other
@@ -458,8 +458,6 @@ supports and the build admits (`NT_BASISU_HAS_BC7/ASTC/ETC2`) — ETC1S:
 alpha) — then `RGBA8` as the always-available fallback; an sRGB header takes
 each candidate's sRGB twin and `SRGB8_ALPHA8` as the fallback
 ([runtime formats](../assets/runtime-formats.md#texture-activation-ttex)).
-`BC7_RGBA` is eligible only when both base dimensions are multiples of 4;
-otherwise selection continues with the next candidate of that order.
 `nt_gfx_texture_format` reports that choice.
 The activator transcodes the whole chain into the shared staging buffer with one
 codec call and then creates the texture through `nt_gfx_make_texture`, which is
