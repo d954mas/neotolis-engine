@@ -80,7 +80,7 @@ int main(void) {
 
     const nt_atlas_opts_t defaults = nt_atlas_opts_defaults();
     if (defaults.allowed_transforms != NT_ATLAS_TRANSFORMS_ALL || !defaults.dedup || defaults.process.alpha != NT_TEX_ALPHA_PREMULTIPLIED || defaults.process.rgb != NT_TEX_RGB_COLOR ||
-        defaults.process.resize_filter != NT_TEX_FILTER_MITCHELL || defaults.process.mip_filter != NT_TEX_FILTER_BOX) {
+        defaults.process.resize_filter != NT_TEX_FILTER_BOX || defaults.process.mip_filter != NT_TEX_FILTER_BOX) {
         return 3;
     }
 

@@ -261,7 +261,8 @@ typedef enum {
 /* What A means. STRAIGHT and PREMULTIPLIED filter RGB alpha-weighted; STRAIGHT
  * also fills the RGB of near-transparent texels with nearby visible colour, so
  * bilinear and GPU mips never pull in black. PREMULTIPLIED premultiplies each
- * stored level (RGBA8 only). DATA filters alpha as an independent channel and
+ * stored level (RGBA8 only) and fills only with alpha_cutoff, whose coverage
+ * scaling would bring near-transparent colour into view. DATA filters alpha as an independent channel and
  * keeps RGB under A=0. Formats without alpha store opaque texels, so `alpha`
  * has no effect on them. */
 typedef enum {
@@ -271,7 +272,7 @@ typedef enum {
 } nt_tex_alpha_t;
 
 /* BOX is an area average with no ringing, valid for every format. MITCHELL is a
- * quality downscale at any ratio (about 3% ringing). KAISER is the sharpest and
+ * quality downscale at any ratio with a little ringing. KAISER is the sharpest and
  * is for opaque colour only: it requires rgb COLOR and a format without alpha.
  * RGB9E5 takes BOX only. */
 typedef enum {
@@ -412,9 +413,8 @@ typedef struct {
                                    * A 0x00 zero-init behaves as identity-only. Bit i permits stored value i. */
     bool power_of_two;            /* round atlas dims to POT (default: true) */
     bool debug_png;               /* write debug atlas page PNGs (default: false) */
-    nt_tex_process_t process;     /* page processing; default nt_tex_process_color() with alpha PREMULTIPLIED,
-                                   * which keeps bilinear filtering correct at sprite gaps. Pages are
-                                   * never resized, so resize_filter has no effect. */
+    nt_tex_process_t process;     /* page processing; default {.alpha = PREMULTIPLIED}, which keeps bilinear
+                                   * filtering correct at sprite gaps. Pages are never resized. */
     float pixels_per_unit;        /* Atlas-level scale: source pixels per world unit.
                                    * 1.0F = 1 source pixel per unit (default). The builder bakes its inverse
                                    * into source-space positions and stores it in the atlas header.
@@ -437,7 +437,7 @@ typedef struct {
 
 /* Default atlas options */
 static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
-    nt_atlas_opts_t opts = {
+    return (nt_atlas_opts_t){
         .compress = {0},
         .format = NT_TEXTURE_FORMAT_RGBA8,
         .max_size = 2048,
@@ -458,10 +458,8 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
         .wrap_v = NT_TEXTURE_DEFAULT_WRAP_REPEAT,
         .mips = NT_TEX_MIPS_RUNTIME,
         .dedup = true,
+        .process = {.alpha = NT_TEX_ALPHA_PREMULTIPLIED},
     };
-    opts.process = nt_tex_process_color();
-    opts.process.alpha = NT_TEX_ALPHA_PREMULTIPLIED;
-    return opts;
 }
 
 /* --- Atlas sprite options (per-sprite, passed to nt_atlas_add*) --- */
@@ -721,7 +719,7 @@ void nt_builder_set_header_dir(NtBuilderContext *ctx, const char *dir);
 void nt_builder_set_gzip_estimate(NtBuilderContext *ctx, bool enabled);
 
 /* --- Builder cache (content-addressed, skips re-encoding unchanged assets) --- */
-#define NT_BUILDER_VERSION 12 /* Bump when encode logic changes to invalidate cache */
+#define NT_BUILDER_VERSION 14 /* Bump when encode logic changes to invalidate cache */
 void nt_builder_set_cache_dir(NtBuilderContext *ctx, const char *dir);
 
 /* --- Parallel encoding (multi-threaded asset encode in finish_pack) --- */

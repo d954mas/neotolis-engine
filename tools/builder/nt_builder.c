@@ -579,7 +579,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             if (pe->decoded_hash != candidate->decoded_hash) {
                 continue;
             }
-            /* One source at two level-0 sizes is two assets: skip it before any re-decode. */
+            /* One source at two level-0 sizes is two assets, not the same data. */
             if (pe->kind == NT_BUILD_ASSET_TEXTURE) {
                 const NtBuildTextureData *ta = (const NtBuildTextureData *)pe->data;
                 const NtBuildTextureData *tb = (const NtBuildTextureData *)candidate->data;
@@ -590,6 +590,16 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                 if (a_extent[0] != b_extent[0] || a_extent[1] != b_extent[1]) {
                     continue;
                 }
+            }
+            /* The encode options are one hashed identity, the cache key. Different
+               options are never merged, so they are reported without a re-decode. */
+            if (nt_builder_compute_opts_hash(pe) != nt_builder_compute_opts_hash(candidate)) {
+                if (ctx->dedup_warn_count < NT_BUILD_MAX_ASSETS) {
+                    ctx->dedup_warn_a[ctx->dedup_warn_count] = i;
+                    ctx->dedup_warn_b[ctx->dedup_warn_count] = j;
+                    ctx->dedup_warn_count++;
+                }
+                continue;
             }
             /* Hash match -- verify with memcmp */
             if (pe->decoded_data && candidate->decoded_data) {
@@ -624,16 +634,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                 /* Non-texture types must always have decoded_data for memcmp verify */
                 NT_BUILD_ASSERT(0 && "hash match but no decoded_data on non-texture entry");
             }
-            /* The pixels matched exactly; the encode options are one hashed identity, the cache key. */
-            if (nt_builder_compute_opts_hash(pe) == nt_builder_compute_opts_hash(candidate)) {
-                candidate->dedup_original = (int32_t)i;
-                ctx->early_dedup_count++;
-                NT_LOG_INFO("early dedup: [%u] %s -> [%u] %s", j, candidate->path, i, pe->path);
-            } else if (ctx->dedup_warn_count < NT_BUILD_MAX_ASSETS) {
-                ctx->dedup_warn_a[ctx->dedup_warn_count] = i;
-                ctx->dedup_warn_b[ctx->dedup_warn_count] = j;
-                ctx->dedup_warn_count++;
-            }
+            candidate->dedup_original = (int32_t)i;
+            ctx->early_dedup_count++;
+            NT_LOG_INFO("early dedup: [%u] %s -> [%u] %s", j, candidate->path, i, pe->path);
         }
     }
     // #endregion

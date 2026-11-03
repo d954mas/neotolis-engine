@@ -739,8 +739,8 @@ static void fill_empty_level(const dilate_ctx_t *dc, uint8_t *rgba, uint32_t w, 
 
 /* Stored RGBA8 levels of a w x h texture, back to back. Level 0 is the source
  * (opaque for a format without alpha), copied or resized with resize_filter.
- * Level n filters level n-1's core with mip_filter: level 0's bytes, then float
- * linear values, premultiplied when alpha weights, so rounding, sRGB encoding and
+ * Level n filters level n-1's core with mip_filter: level 0's float core (its bytes
+ * when it is a copy), then float linear values, premultiplied when alpha weights, so rounding, sRGB encoding and
  * division by alpha never accumulate. The stored copies are then dilated and scaled
  * for coverage level by level, and premultiplied last. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one pass per pipeline stage
@@ -759,6 +759,7 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
 
     // #region level 0
     const size_t src_texels = (size_t)src_w * src_h;
+    float *resized = NULL; /* a resized level 0's float core, which level 1 filters */
     uint8_t *rebuilt = NULL;
     if (normal && opts->format == NT_TEXTURE_FORMAT_RG8) {
         rebuilt = (uint8_t *)malloc(src_texels * 4U);
@@ -770,22 +771,22 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
     if (src_w == w && src_h == h) {
         memcpy(chain, source, src_texels * 4U);
     } else {
-        float *resized = (float *)malloc((size_t)w * h * 4U * sizeof(float));
+        resized = (float *)malloc((size_t)w * h * 4U * sizeof(float));
         NT_BUILD_ASSERT(resized && "texture levels: malloc failed");
         const resample_src_t src = {.pixels = source, .w = src_w, .h = src_h, .lin = lin, .channels = 4, .premultiply = weighted};
         resample(&src, resized, w, h, process->resize_filter, opts);
+        for (size_t i = 0; !alpha && i < (size_t)w * h; i++) {
+            resized[(i * 4U) + 3U] = 1.0F;
+        }
         if (normal) {
             normalize_core(resized, (size_t)w * h);
         }
         quantize_core(resized, (size_t)w * h, srgb, weighted, chain);
-        free(resized);
     }
     free(rebuilt);
-    /* Without alpha nothing weights by it, so opaque level 0 is all the chain needs. */
-    if (!alpha) {
-        for (size_t i = 0; i < (size_t)w * h; i++) {
-            chain[(i * 4U) + 3U] = 255;
-        }
+    /* Without alpha nothing weights by it, so an opaque level 0 is all the chain needs. */
+    for (size_t i = 0; !alpha && i < (size_t)w * h; i++) {
+        chain[(i * 4U) + 3U] = 255;
     }
     // #endregion
 
@@ -802,8 +803,11 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
             const uint32_t lw = nt_texture_level_extent(w, level);
             const uint32_t lh = nt_texture_level_extent(h, level);
             float *core = cores[(level - 1) & 1U];
-            const resample_src_t src = level == 1 ? (resample_src_t){.pixels = chain, .w = pw, .h = ph, .lin = lin, .channels = 4, .premultiply = weighted}
-                                                  : (resample_src_t){.pixels = cores[level & 1U], .w = pw, .h = ph, .channels = 4};
+            resample_src_t src = {.pixels = cores[level & 1U], .w = pw, .h = ph, .channels = 4};
+            if (level == 1) {
+                src = resized ? (resample_src_t){.pixels = resized, .w = pw, .h = ph, .channels = 4}
+                              : (resample_src_t){.pixels = chain, .w = pw, .h = ph, .lin = lin, .channels = 4, .premultiply = weighted};
+            }
             resample(&src, core, lw, lh, process->mip_filter, opts);
             if (normal) {
                 normalize_core(core, (size_t)lw * lh);
@@ -814,6 +818,7 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
         free(cores[0]);
         free(cores[1]);
     }
+    free(resized);
     // #endregion
 
     // #region stored copies
@@ -824,7 +829,8 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
                        .wrap_x = opts->wrap_u == NT_TEXTURE_DEFAULT_WRAP_REPEAT,
                        .wrap_y = opts->wrap_v == NT_TEXTURE_DEFAULT_WRAP_REPEAT};
     memcpy(dc.lin, lin, sizeof(lin));
-    bool dilate = weighted;
+    /* Premultiplied colour needs a fill only where coverage scaling lifts it into view. */
+    bool dilate = weighted && (process->alpha == NT_TEX_ALPHA_STRAIGHT || threshold > 0);
     uint64_t counts0[257] = {0};
     if (threshold > 0) {
         alpha_counts(chain, (size_t)w * h, counts0);

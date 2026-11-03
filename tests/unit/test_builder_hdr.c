@@ -212,7 +212,7 @@ void test_rgb9e5_chain_box_filters_each_level(void) {
 void test_rgb9e5_max_size_resizes_with_the_box_filter(void) {
     float rgb[4 * 2 * 3];
     for (uint32_t i = 0; i < 4 * 2; i++) {
-        rgb[(i * 3) + 0] = (i % 2 == 0) ? 8.0F : 0.0F;
+        rgb[(i * 3) + 0] = ((const float[4]){8.0F, 0.0F, 4.0F, 0.0F})[i % 4];
         rgb[(i * 3) + 1] = 2.0F;
         rgb[(i * 3) + 2] = 0.25F;
     }
@@ -224,6 +224,10 @@ void test_rgb9e5_max_size_resizes_with_the_box_filter(void) {
     float px[3];
     unpack_rgb9e5(t.words[0], px);
     EXPECT_NEAR(1.0F / 64.0F, 4.0F, px[0]);
+    EXPECT_NEAR(1.0F / 64.0F, 2.0F, px[1]);
+    EXPECT_NEAR(1.0F / 64.0F, 0.25F, px[2]);
+    unpack_rgb9e5(t.words[1], px); /* the resized level is read as RGBA, the source as RGB */
+    EXPECT_NEAR(1.0F / 64.0F, 2.0F, px[0]);
     EXPECT_NEAR(1.0F / 64.0F, 2.0F, px[1]);
     EXPECT_NEAR(1.0F / 64.0F, 0.25F, px[2]);
     free(t.pack);

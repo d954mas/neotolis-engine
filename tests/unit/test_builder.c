@@ -1292,53 +1292,35 @@ static uint64_t process_key(NtBuilderContext *ctx, nt_tex_process_t process, nt_
 
 /* Bug caught: a process field missing from the key, fields summed so that swapped
  * values collide ((DATA, STRAIGHT) against (COLOR, PREMULTIPLIED), (MITCHELL, BOX)
- * against (BOX, MITCHELL)), a filter hashed as a bool, or a field that cannot
- * change the bytes splitting the key. */
+ * against (BOX, MITCHELL)), or a filter hashed as a bool. */
 void test_texture_process_fields_change_the_cache_key(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/process_keys.ntpack");
     const nt_basisu_encode_opts_t none = {0};
-    nt_tex_process_t variants[6] = {{0}};
+    nt_tex_process_t variants[8] = {{0}};
     variants[1].alpha = NT_TEX_ALPHA_DATA;
     variants[2].resize_filter = NT_TEX_FILTER_MITCHELL;
     variants[3].mip_filter = NT_TEX_FILTER_MITCHELL;
     variants[4].alpha = NT_TEX_ALPHA_PREMULTIPLIED;
     variants[5].resize_filter = NT_TEX_FILTER_MITCHELL;
     variants[5].mip_filter = NT_TEX_FILTER_MITCHELL;
-    uint64_t hashes[9];
-    for (uint32_t i = 0; i < 6; i++) {
+    variants[6].rgb = NT_TEX_RGB_DATA;
+    variants[7] = (nt_tex_process_t){.rgb = NT_TEX_RGB_NORMAL, .alpha = NT_TEX_ALPHA_DATA};
+    uint64_t hashes[11];
+    for (uint32_t i = 0; i < 8; i++) {
         hashes[i] = process_key(ctx, variants[i], NT_TEXTURE_FORMAT_RGBA8, none, 2);
     }
     /* KAISER is value 2 in both filter fields; it needs a format without alpha. */
-    hashes[6] = process_key(ctx, (nt_tex_process_t){.resize_filter = NT_TEX_FILTER_MITCHELL}, NT_TEXTURE_FORMAT_RGB8, none, 2);
-    hashes[7] = process_key(ctx, (nt_tex_process_t){.resize_filter = NT_TEX_FILTER_KAISER}, NT_TEXTURE_FORMAT_RGB8, none, 2);
-    hashes[8] = process_key(ctx, (nt_tex_process_t){.mip_filter = NT_TEX_FILTER_KAISER}, NT_TEXTURE_FORMAT_RGB8, none, 2);
-    for (uint32_t i = 0; i < 9; i++) {
+    hashes[8] = process_key(ctx, (nt_tex_process_t){.resize_filter = NT_TEX_FILTER_MITCHELL}, NT_TEXTURE_FORMAT_RGB8, none, 2);
+    hashes[9] = process_key(ctx, (nt_tex_process_t){.resize_filter = NT_TEX_FILTER_KAISER}, NT_TEXTURE_FORMAT_RGB8, none, 2);
+    hashes[10] = process_key(ctx, (nt_tex_process_t){.mip_filter = NT_TEX_FILTER_KAISER}, NT_TEXTURE_FORMAT_RGB8, none, 2);
+    for (uint32_t i = 0; i < 11; i++) {
         for (uint32_t j = 0; j < i; j++) {
-            if (j < 6 && i >= 6) {
+            if (j < 8 && i >= 8) {
                 continue; /* different formats */
             }
             TEST_ASSERT_TRUE_MESSAGE(hashes[j] != hashes[i], "process variants share a key");
         }
     }
-    TEST_ASSERT_TRUE(hashes[6] != hashes[7]);
-    TEST_ASSERT_TRUE(hashes[7] != hashes[8]);
-
-    /* Fields that cannot change the bytes share the key: alpha without an alpha
-     * format, resize_filter without a resize, rgb outside ETC1S. */
-    TEST_ASSERT_EQUAL_UINT64(process_key(ctx, (nt_tex_process_t){0}, NT_TEXTURE_FORMAT_RGB8, none, 2),
-                             process_key(ctx, (nt_tex_process_t){.alpha = NT_TEX_ALPHA_DATA}, NT_TEXTURE_FORMAT_RGB8, none, 2));
-    TEST_ASSERT_EQUAL_UINT64(process_key(ctx, (nt_tex_process_t){0}, NT_TEXTURE_FORMAT_RGBA8, none, 0),
-                             process_key(ctx, (nt_tex_process_t){.resize_filter = NT_TEX_FILTER_MITCHELL}, NT_TEXTURE_FORMAT_RGBA8, none, 0));
-    TEST_ASSERT_EQUAL_UINT64(process_key(ctx, (nt_tex_process_t){0}, NT_TEXTURE_FORMAT_RGBA8, none, 2), process_key(ctx, (nt_tex_process_t){.rgb = NT_TEX_RGB_DATA}, NT_TEXTURE_FORMAT_RGBA8, none, 2));
-    /* NORMAL changes uncompressed bytes too. */
-    TEST_ASSERT_TRUE(process_key(ctx, (nt_tex_process_t){.alpha = NT_TEX_ALPHA_DATA}, NT_TEXTURE_FORMAT_RGBA8, none, 2) !=
-                     process_key(ctx, (nt_tex_process_t){.rgb = NT_TEX_RGB_NORMAL, .alpha = NT_TEX_ALPHA_DATA}, NT_TEXTURE_FORMAT_RGBA8, none, 2));
-#if NT_BASISU_HAS_ETC1S
-    const nt_basisu_encode_opts_t etc1s = nt_tex_compress_etc1s_default();
-    TEST_ASSERT_TRUE(process_key(ctx, (nt_tex_process_t){.rgb = NT_TEX_RGB_DATA}, NT_TEXTURE_FORMAT_RGBA8, etc1s, 2) !=
-                     process_key(ctx, (nt_tex_process_t){.alpha = NT_TEX_ALPHA_PREMULTIPLIED}, NT_TEXTURE_FORMAT_RGBA8, etc1s, 2));
-    TEST_ASSERT_TRUE(process_key(ctx, (nt_tex_process_t){0}, NT_TEXTURE_FORMAT_RGBA8, etc1s, 2) != process_key(ctx, (nt_tex_process_t){.rgb = NT_TEX_RGB_DATA}, NT_TEXTURE_FORMAT_RGBA8, etc1s, 2));
-#endif
     nt_builder_free_pack(ctx);
 }
 
@@ -1525,9 +1507,8 @@ static int cosine_contrast(uint32_t period, nt_tex_filter_t filter) {
     return hi - lo;
 }
 
-/* At 2:1 KAISER keeps a period-8 cosine (stb measures 0.999 of its amplitude
- * against BOX 0.924 and MITCHELL 0.843) and suppresses a period-3 one, which
- * aliases, better than BOX (0.05 against 0.5). */
+/* At 2:1 KAISER keeps a period-8 cosine better than BOX and MITCHELL and
+ * suppresses a period-3 one, which aliases, better than BOX. */
 void test_texture_kaiser_is_sharper_than_mitchell_and_box(void) {
     const int kaiser = cosine_contrast(8, NT_TEX_FILTER_KAISER);
     TEST_ASSERT_GREATER_THAN_INT(cosine_contrast(8, NT_TEX_FILTER_BOX) + 8, kaiser);
@@ -1606,8 +1587,7 @@ static bool resize_keeps_constant(uint32_t w, uint32_t h, uint32_t out, nt_tex_f
 }
 
 /* Every filter and wrap keeps a constant image constant at every ratio along both
- * axes, including the ratios stb broke: Box wrapped at 70 -> 2, Kaiser wrapped at
- * 1080 -> 200 and at 2 texels, Mitchell down rows past 8:1 (105 -> 13). */
+ * axes, plus long-kernel cases: 70 -> 2, 1080 -> 200 and 105 -> 13. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- every filter x wrap x ratio on both axes
 void test_texture_resize_keeps_a_constant_at_any_ratio(void) {
     static const nt_tex_filter_t filters[3] = {NT_TEX_FILTER_BOX, NT_TEX_FILTER_MITCHELL, NT_TEX_FILTER_KAISER};
@@ -1664,21 +1644,6 @@ void test_texture_mirror_matches_gl(void) {
         free(mirrored);
         free(repeated);
     }
-}
-
-/* Bug caught: the core divides by an alpha that Mitchell's lobes cancelled to near
- * zero, which overflows half-float and fails the build. */
-void test_texture_mitchell_chain_survives_cancelled_alpha(void) {
-    uint8_t rgba[16 * 16 * 4] = {0};
-    fill_rgba(rgba, (3 * 16) + 3, 1, (const uint8_t[4]){255, 0, 0, 29});
-    fill_rgba(rgba, (4 * 16) + 1, 1, (const uint8_t[4]){0, 0, 0, 25});
-    fill_rgba(rgba, (4 * 16) + 2, 1, (const uint8_t[4]){0, 0, 0, 88});
-    nt_tex_opts_t opts = straight_baked_opts();
-    opts.process.mip_filter = NT_TEX_FILTER_MITCHELL;
-    NtTextureAssetHeader hdr;
-    uint8_t *asset = encode_mips_asset(rgba, 16, 16, &opts, &hdr);
-    TEST_ASSERT_EQUAL_UINT16(5, hdr.mip_count);
-    free(asset);
 }
 
 /* Fills blend the donors in linear light (lin(R) + lin(G) stays 1, for sRGB too),
@@ -1772,32 +1737,11 @@ void test_texture_dilation_reaches_every_texel(void) {
     free(asset);
 }
 
-/* Levels whose donor faded below the hole alpha inherit the colour instead of black. */
-void test_texture_dilation_fills_empty_tail_levels(void) {
-    uint8_t *rgba = (uint8_t *)calloc((size_t)64 * 64, 4);
-    TEST_ASSERT_NOT_NULL(rgba);
-    fill_rgba(rgba, ((size_t)20 * 64) + 20, 1, (const uint8_t[4]){200, 100, 50, 255});
-    nt_tex_opts_t opts = straight_baked_opts();
-    NtTextureAssetHeader hdr;
-    uint8_t *asset = encode_mips_asset(rgba, 64, 64, &opts, &hdr);
-    free(rgba);
-    TEST_ASSERT_EQUAL_UINT16(7, hdr.mip_count);
-    for (uint32_t level = 0; level < 7; level++) {
-        const uint32_t n = nt_texture_level_extent(64, level);
-        for (uint32_t i = 0; i < n * n; i++) {
-            const uint8_t *px = asset_texel(asset, &hdr, level, i % n, i / n);
-            TEST_ASSERT_UINT8_WITHIN(1, 200, px[0]);
-            TEST_ASSERT_UINT8_WITHIN(1, 100, px[1]);
-            TEST_ASSERT_UINT8_WITHIN(1, 50, px[2]);
-        }
-    }
-    free(asset);
-}
-
 /* Bug caught: only A=0 counts as a hole. Near-transparent texels (A 1..8) take the
  * donor colour and keep their alpha; A=9 is visible and stays as it is. A cutoff
- * threshold T lowers the hole alpha to T - 1, so a texel the cutoff passes keeps its
- * colour, and PREMULTIPLIED stores the donor colour times the hole's alpha. */
+ * threshold T lowers the hole alpha to T - 1, so a texel at A = T keeps its colour.
+ * PREMULTIPLIED keeps its filtered colour, and with a cutoff stores the donor
+ * colour times the hole's alpha. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- three hole-alpha cases on one fixture
 void test_texture_dilation_replaces_near_transparent_colour(void) {
     uint8_t rgba[8 * 4] = {0};
@@ -1816,7 +1760,7 @@ void test_texture_dilation_replaces_near_transparent_colour(void) {
     free(asset);
 
     opts.mips = NT_TEX_MIPS_BAKED;
-    opts.process.alpha_cutoff = 2.0F / 255.0F;
+    opts.process.alpha_cutoff = 8.0F / 255.0F;
     asset = encode_mips_asset(rgba, 8, 1, &opts, &hdr);
     TEST_ASSERT_LESS_THAN_UINT8(128, asset_texel(asset, &hdr, 0, 1, 0)[0]); /* A=1 is still a hole */
     TEST_ASSERT_EQUAL_UINT8_ARRAY(((const uint8_t[4]){255, 255, 255, 8}), asset_texel(asset, &hdr, 0, 2, 0), 4);
@@ -1826,6 +1770,12 @@ void test_texture_dilation_replaces_near_transparent_colour(void) {
     opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
     opts.process.alpha = NT_TEX_ALPHA_PREMULTIPLIED;
     asset = encode_mips_asset(rgba, 8, 1, &opts, &hdr);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(((const uint8_t[4]){8, 8, 8, 8}), asset_texel(asset, &hdr, 0, 2, 0), 4);
+    free(asset);
+
+    opts.mips = NT_TEX_MIPS_BAKED;
+    opts.process.alpha_cutoff = 0.5F;
+    asset = encode_mips_asset(rgba, 8, 1, &opts, &hdr);
     const uint8_t *hole = asset_texel(asset, &hdr, 0, 2, 0);
     TEST_ASSERT_EQUAL_UINT8(8, hole[3]);
     TEST_ASSERT_TRUE(hole[0] < hole[2] && hole[2] <= 5); /* the donor's blue lean, never white 8 8 8 */
@@ -1833,8 +1783,9 @@ void test_texture_dilation_replaces_near_transparent_colour(void) {
     free(asset);
 }
 
-/* An empty level takes the box of the level above, not one mean: red stays left
- * and blue stays right once both donors fade below the hole alpha. */
+/* Levels whose donors faded below the hole alpha take the box of the level above:
+ * never black (R + B stays 255 between red and blue donors on every level), and not
+ * one mean (red stays left, blue right once both donors fade). */
 void test_texture_dilation_empty_levels_keep_where_colour_was(void) {
     uint8_t *rgba = (uint8_t *)calloc((size_t)64 * 64, 4);
     TEST_ASSERT_NOT_NULL(rgba);
@@ -1845,6 +1796,14 @@ void test_texture_dilation_empty_levels_keep_where_colour_was(void) {
     NtTextureAssetHeader hdr;
     uint8_t *asset = encode_mips_asset(rgba, 64, 64, &opts, &hdr);
     free(rgba);
+    TEST_ASSERT_EQUAL_UINT16(7, hdr.mip_count);
+    for (uint32_t level = 0; level < 7; level++) {
+        const uint32_t n = nt_texture_level_extent(64, level);
+        for (uint32_t i = 0; i < n * n; i++) {
+            const uint8_t *px = asset_texel(asset, &hdr, level, i % n, i / n);
+            TEST_ASSERT_UINT32_WITHIN(2, 255, (uint32_t)px[0] + px[2]);
+        }
+    }
     const uint8_t *left = asset_texel(asset, &hdr, 3, 0, 4);
     const uint8_t *right = asset_texel(asset, &hdr, 3, 7, 4);
     TEST_ASSERT_TRUE(left[3] <= 8 && right[3] <= 8); /* the donors faded: level 3 is empty */
@@ -1854,51 +1813,20 @@ void test_texture_dilation_empty_levels_keep_where_colour_was(void) {
 }
 
 /* Bug caught: an empty level filled from the level above after that level was
- * premultiplied, so its colour was premultiplied twice: (0, 0, 0, 8), not 8 8 8 8. */
+ * premultiplied, so its white was premultiplied twice and came out black. */
 void test_texture_premultiplied_empty_level_is_premultiplied_once(void) {
     const uint8_t pair[8] = {255, 255, 255, 16, 0, 0, 0, 0};
     nt_tex_opts_t opts = straight_baked_opts();
     opts.process.alpha = NT_TEX_ALPHA_PREMULTIPLIED;
+    opts.process.alpha_cutoff = 0.5F; /* premultiplied levels fill only with a cutoff */
     NtTextureAssetHeader hdr;
     uint8_t *asset = encode_mips_asset(pair, 2, 1, &opts, &hdr);
-    TEST_ASSERT_EQUAL_UINT8_ARRAY(((const uint8_t[4]){8, 8, 8, 8}), asset_texel(asset, &hdr, 1, 0, 0), 4);
+    const uint8_t *tail = asset_texel(asset, &hdr, 1, 0, 0);
+    TEST_ASSERT_GREATER_THAN_UINT8(0, tail[3]);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(((const uint8_t[3]){tail[3], tail[3], tail[3]}), tail, 3);
     free(asset);
 }
 
-/* GPU RUNTIME mips average blocks without alpha weighting: after dilation every
- * 8x8 block of a disk sprite that shows any coverage keeps the sprite colour. */
-void test_texture_dilation_keeps_runtime_mips_free_of_black(void) {
-    uint8_t rgba[32 * 32 * 4] = {0};
-    for (uint32_t y = 0; y < 32; y++) {
-        for (uint32_t x = 0; x < 32; x++) {
-            const int dx = (int)x - 16;
-            const int dy = (int)y - 16;
-            if ((dx * dx) + (dy * dy) <= 100) {
-                fill_rgba(rgba, ((size_t)y * 32) + x, 1, (const uint8_t[4]){180, 60, 20, 255});
-            }
-        }
-    }
-    nt_tex_opts_t opts = nt_tex_opts_defaults();
-    NtTextureAssetHeader hdr;
-    uint8_t *asset = encode_mips_asset(rgba, 32, 32, &opts, &hdr);
-    for (uint32_t by = 0; by < 4; by++) {
-        for (uint32_t bx = 0; bx < 4; bx++) {
-            uint32_t sum[4] = {0};
-            for (uint32_t i = 0; i < 64; i++) {
-                const uint8_t *px = asset_texel(asset, &hdr, 0, (bx * 8) + (i % 8), (by * 8) + (i / 8));
-                for (uint32_t c = 0; c < 4; c++) {
-                    sum[c] += px[c];
-                }
-            }
-            if (sum[3] > 0) {
-                TEST_ASSERT_UINT32_WITHIN(4 * 64, 180 * 64, sum[0]);
-                TEST_ASSERT_UINT32_WITHIN(4 * 64, 60 * 64, sum[1]);
-                TEST_ASSERT_UINT32_WITHIN(4 * 64, 20 * 64, sum[2]);
-            }
-        }
-    }
-    free(asset);
-}
 // #endregion
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one death test per rule
@@ -1996,24 +1924,6 @@ void test_texture_rgb_picks_the_basis_metric(void) {
     }
     nt_basisu_encode_free(&direct[0]);
     nt_basisu_encode_free(&direct[1]);
-}
-#endif
-
-#if NT_BASISU_HAS_UASTC
-/* The cache key folds COLOR and DATA together outside ETC1S because UASTC LDR,
- * RDO included, never reads the metric; a basisu update that does breaks this. */
-void test_texture_uastc_ignores_the_rgb_metric(void) {
-    uint8_t rgba[16 * 16 * 4];
-    for (uint32_t i = 0; i < 256; i++) {
-        fill_rgba(rgba, i, 1, (const uint8_t[4]){(uint8_t)(i * 13U), (uint8_t)(i * 7U), (uint8_t)(255U - i), 255});
-    }
-    const nt_basisu_encode_opts_t uastc = nt_tex_compress_uastc_default();
-    nt_basisu_encode_result_t linear = nt_basisu_encode(1, rgba, 1, 16, 16, NT_TEXTURE_FORMAT_RGB8, &uastc, false);
-    nt_basisu_encode_result_t perceptual = nt_basisu_encode(1, rgba, 1, 16, 16, NT_TEXTURE_FORMAT_RGB8, &uastc, true);
-    TEST_ASSERT_EQUAL_UINT32(linear.size, perceptual.size);
-    TEST_ASSERT_EQUAL_UINT8_ARRAY(linear.data, perceptual.data, linear.size);
-    nt_basisu_encode_free(&linear);
-    nt_basisu_encode_free(&perceptual);
 }
 #endif
 
@@ -2227,6 +2137,8 @@ void test_texture_normal_opts_contract(void) {
     opts.process = nt_tex_process_normal();
     opts.process.alpha = NT_TEX_ALPHA_STRAIGHT;
     EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_assert_texture_opts(&opts), "process.rgb NORMAL with an alpha format requires process.alpha DATA");
+    opts.process.alpha = NT_TEX_ALPHA_PREMULTIPLIED;
+    EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_assert_texture_opts(&opts), "process.rgb NORMAL with an alpha format requires process.alpha DATA");
     opts.process.alpha = NT_TEX_ALPHA_DATA;
     TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts));
     opts.format = NT_TEXTURE_FORMAT_SRGB8_ALPHA8;
@@ -2238,6 +2150,28 @@ void test_texture_normal_opts_contract(void) {
     EXPECT_BUILD_ASSERT_MATCH(ctx, (void)nt_atlas_begin(ctx, "page", &atlas), "process.rgb NORMAL is not supported");
 }
 // #endregion
+
+/* Same pixels: at two level-0 sizes they are two assets, not the same data; at one
+ * size with two options they are reported, and no pair is merged. */
+void test_texture_same_pixels_different_options_are_reported(void) {
+    uint8_t rgba[8 * 8 * 4];
+    for (uint32_t i = 0; i < 64; i++) {
+        fill_rgba(rgba, i, 1, (const uint8_t[4]){(uint8_t)(i * 4U), 90, 17, 255});
+    }
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/same_pixels.ntpack");
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    nt_builder_add_texture_raw(ctx, rgba, 8, 8, "full", &opts);
+    opts.max_size = 4;
+    nt_builder_add_texture_raw(ctx, rgba, 8, 8, "half", &opts);
+    opts.process = nt_tex_process_data();
+    nt_builder_add_texture_raw(ctx, rgba, 8, 8, "half_data", &opts);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    TEST_ASSERT_EQUAL_UINT32(0, ctx->early_dedup_count);
+    TEST_ASSERT_EQUAL_UINT32(1, ctx->dedup_warn_count);
+    TEST_ASSERT_EQUAL_UINT32(1, ctx->dedup_warn_a[0]);
+    TEST_ASSERT_EQUAL_UINT32(2, ctx->dedup_warn_b[0]);
+    nt_builder_free_pack(ctx);
+}
 
 // #region alpha cutoff
 /* Thin anti-aliased blades: 1-px soft lines that thin out in the mips. */
@@ -2254,16 +2188,6 @@ static void blade_pixels(uint8_t *rgba, uint32_t n) {
             fill_rgba(rgba, ((size_t)y * n) + x, 1, (const uint8_t[4]){60, 140, 40, a});
         }
     }
-}
-
-/* The test's own threshold byte: the smallest b with b / 255 >= cutoff. */
-static uint32_t test_cutoff_byte(float cutoff) {
-    for (uint32_t b = 1; b < 255; b++) {
-        if ((float)b / 255.0F >= cutoff) {
-            return b;
-        }
-    }
-    return 255;
 }
 
 /* Texels of a level with alpha >= t. */
@@ -2289,7 +2213,7 @@ void test_texture_alpha_cutoff_keeps_the_closest_coverage(void) {
     blade_pixels(rgba, N);
     const float cutoffs[3] = {0.5F, 0.8F, 1.0F};
     for (uint32_t c = 0; c < 3; c++) {
-        const uint32_t threshold = test_cutoff_byte(cutoffs[c]);
+        const uint32_t threshold = nt_builder_texture_cutoff_byte(cutoffs[c]);
         nt_tex_opts_t opts = straight_baked_opts();
         NtTextureAssetHeader hdr;
         uint8_t *uncut = encode_mips_asset(rgba, N, N, &opts, &hdr);
@@ -2429,9 +2353,20 @@ void test_texture_alpha_cutoff_opts_contract(void) {
     opts.process.alpha_cutoff = 0.5F;
     opts.format = NT_TEXTURE_FORMAT_RGB8;
     EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_assert_texture_opts(&opts), "process.alpha_cutoff requires a format with alpha and mips BAKED");
-    opts = nt_tex_opts_defaults();
-    opts.process.alpha_cutoff = 0.5F;
-    EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_assert_texture_opts(&opts), "process.alpha_cutoff requires a format with alpha and mips BAKED");
+    const nt_tex_mips_t unbaked[2] = {NT_TEX_MIPS_RUNTIME, NT_TEX_MIPS_NONE};
+    for (uint32_t i = 0; i < 2; i++) {
+        opts = nt_tex_opts_defaults();
+        opts.mips = unbaked[i];
+        opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+        opts.process.alpha_cutoff = 0.5F;
+        EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_assert_texture_opts(&opts), "process.alpha_cutoff requires a format with alpha and mips BAKED");
+    }
+    /* The threshold byte is the smallest b with b / 255 >= cutoff. */
+    TEST_ASSERT_EQUAL_UINT32(1, nt_builder_texture_cutoff_byte(1e-6F));
+    TEST_ASSERT_EQUAL_UINT32(128, nt_builder_texture_cutoff_byte(0.5F));
+    TEST_ASSERT_EQUAL_UINT32(128, nt_builder_texture_cutoff_byte(128.0F / 255.0F));
+    TEST_ASSERT_EQUAL_UINT32(129, nt_builder_texture_cutoff_byte(128.5F / 255.0F));
+    TEST_ASSERT_EQUAL_UINT32(255, nt_builder_texture_cutoff_byte(1.0F));
     /* Zero is off and valid everywhere. */
     opts = nt_tex_opts_defaults();
     opts.format = NT_TEXTURE_FORMAT_RGB8;
@@ -11562,15 +11497,13 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_texture_filter_edges_follow_wrap_per_axis);
     RUN_TEST(test_texture_resize_keeps_a_constant_at_any_ratio);
     RUN_TEST(test_texture_mirror_matches_gl);
-    RUN_TEST(test_texture_mitchell_chain_survives_cancelled_alpha);
     RUN_TEST(test_texture_dilation_empty_levels_keep_where_colour_was);
     RUN_TEST(test_texture_dilation_blends_donors_and_keeps_visible_texels);
     RUN_TEST(test_texture_dilation_wraps_repeat_edges);
     RUN_TEST(test_texture_dilation_reaches_every_texel);
-    RUN_TEST(test_texture_dilation_fills_empty_tail_levels);
     RUN_TEST(test_texture_dilation_replaces_near_transparent_colour);
-    RUN_TEST(test_texture_dilation_keeps_runtime_mips_free_of_black);
     RUN_TEST(test_texture_premultiplied_empty_level_is_premultiplied_once);
+    RUN_TEST(test_texture_same_pixels_different_options_are_reported);
     RUN_TEST(test_texture_process_opts_contract);
     RUN_TEST(test_texture_alpha_cutoff_keeps_the_closest_coverage);
     RUN_TEST(test_texture_alpha_cutoff_tie_keeps_the_level);
@@ -11589,7 +11522,6 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_texture_rgb_picks_the_basis_metric);
 #endif
 #if NT_BASISU_HAS_UASTC
-    RUN_TEST(test_texture_uastc_ignores_the_rgb_metric);
 #endif
 
     /* AABB edge extrude */

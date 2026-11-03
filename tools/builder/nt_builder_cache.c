@@ -45,15 +45,11 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
         memcpy(buf + pos, &format, sizeof(format));
         pos += (uint32_t)sizeof(format);
 
-        /* Only process fields that can change the bytes: NORMAL always, COLOR and
-           DATA only through the ETC1S metric, alpha only formats with alpha,
-           resize_filter only a shrinking level 0, mip_filter only a baked chain. */
         const nt_tex_process_t *process = &td->opts.process;
-        const bool resized = target[0] != td->width || target[1] != td->height;
-        buf[pos++] = process->rgb == NT_TEX_RGB_NORMAL || td->opts.compress.codec == NT_BASISU_CODEC_ETC1S ? (uint8_t)process->rgb : 0U;
-        buf[pos++] = nt_texture_pixel_format_has_alpha(td->opts.format) ? (uint8_t)process->alpha : 0U;
-        buf[pos++] = resized ? (uint8_t)process->resize_filter : 0U;
-        buf[pos++] = (uint8_t)process->mip_filter; /* the rules keep it BOX unless BAKED */
+        buf[pos++] = (uint8_t)process->rgb;
+        buf[pos++] = (uint8_t)process->alpha;
+        buf[pos++] = (uint8_t)process->resize_filter;
+        buf[pos++] = (uint8_t)process->mip_filter;
         /* The threshold byte, not the float: cutoffs between two bytes build the same levels. */
         buf[pos++] = process->alpha_cutoff > 0.0F ? (uint8_t)nt_builder_texture_cutoff_byte(process->alpha_cutoff) : 0U;
 
