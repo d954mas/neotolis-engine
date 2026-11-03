@@ -28,8 +28,8 @@ multiple of 16 up to `NT_MATERIAL_MAX_PARAM_BYTES` (256), asserted at create.
 There are no param names: the block layout is the contract between the shader
 and the struct.
 
-`nt_material_create_desc_t.label` is required, a debug name in static storage:
-renderers name the material in capture notes by it.
+`nt_material_create_desc_t.label` is an optional debug name in static storage;
+renderers name the material in capture notes by it, `""` when it has none.
 
 A material keeps its params as CPU bytes and owns no GPU state.
 `nt_material_set_params(mat, data, size)` replaces them (`size` must equal the

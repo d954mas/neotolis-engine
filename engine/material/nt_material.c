@@ -59,7 +59,6 @@ void nt_material_shutdown(void) {
 nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     NT_ASSERT(s_mat.initialized); /* create before init */
     NT_ASSERT(desc);              /* NULL descriptor */
-    NT_ASSERT(desc->label != NULL && "nt_material_create: label is required: renderers name the material in capture notes by it");
 
     /* Range-check before a slot is taken: the cache keys pack these into fixed bit
      * lanes. Unconditional -- a disabled blend still has to hold valid values. */
@@ -117,7 +116,7 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     info->depth_write = desc->depth_write;
     info->cull_mode = desc->cull_mode;
 
-    info->label = desc->label;
+    info->label = desc->label != NULL ? desc->label : "";
 
     rec->params_size = desc->params_size;
     if (desc->params_size > 0) {

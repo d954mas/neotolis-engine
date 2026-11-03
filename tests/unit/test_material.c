@@ -193,11 +193,11 @@ void test_material_makes_no_gpu_buffer(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_last_buffer_desc().size);
 }
 
-/* Renderers name the material's pipelines and capture notes by its label. */
-void test_create_requires_a_label(void) {
+/* Renderers note a material by its label, so a material without one reads "". */
+void test_a_missing_label_reads_empty(void) {
     nt_material_create_desc_t d = make_test_desc();
     d.label = NULL;
-    NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
+    TEST_ASSERT_EQUAL_STRING("", nt_material_get_info(nt_material_create(&d))->label);
 }
 
 /* The bytes mirror a std140 block of 16-byte members, so the size is a multiple of 16. */
@@ -579,7 +579,7 @@ int main(void) {
     /* Create / query */
     RUN_TEST(test_create_basic);
     RUN_TEST(test_material_makes_no_gpu_buffer);
-    RUN_TEST(test_create_requires_a_label);
+    RUN_TEST(test_a_missing_label_reads_empty);
     RUN_TEST(test_create_asserts_bad_params);
     RUN_TEST(test_set_params_asserts_size_or_handle);
     RUN_TEST(test_blend_opaque_disables_blending);
