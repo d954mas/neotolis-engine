@@ -1170,13 +1170,13 @@ Size the capacity for that snapshot plus the frame's commands; a capacity below
 the snapshot overflows before any command is recorded.
 
 `nt_gfx_capture_read` returns the last finished recorded frame: metadata by value and
-its immutable records, complete with its post-render work and any gfx work issued
-between frames. A frame finishes at the begin_frame that closes it. Its records stay
+its immutable records and strings, complete with its post-render work and any gfx work issued
+between frames. A frame finishes at the begin_frame that closes it. Its records and strings stay
 valid until the begin_frame that finishes the next recorded frame, or shutdown, so in
 continuous mode each frame is readable during the whole next frame and a reader that
 copies one per frame gets every frame; unrecorded frames preserve it. The frame still
-recording is not readable. Keep a capture by copying the metadata and `count` records
-and redirecting the saved view's pointer to the owned array. An empty view (before any
+recording is not readable. Keep a capture by copying the metadata, `count` records and
+`string_bytes` strings, with `events` and `strings` pointing at the copies. An empty view (before any
 recorded frame finished) has a NULL pointer. The view retains its frame's counters
 (and so its `frame_sequence`) by value even after later frames overwrite
 `g_nt_gfx.last_frame`. The stub never begins a frame, so both switches are inert there.

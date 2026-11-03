@@ -1616,7 +1616,7 @@ static void declare_uploads_by_buffer(const fi_frame_t *fr) {
     }
     section("Uploads by buffer");
     char alias[FI_ALIAS_LEN];
-    char label[96];
+    char label[FI_ALIAS_LEN + 64U]; /* the alias and its upload numbers, never cut */
     for (uint32_t k = 0; k < fr->buffer_upload_count && k < SHOWN; k++) {
         const fi_buffer_upload_t *u = &fr->buffer_upload[k];
         fi_alias_text(fr, NT_GFX_OBJECT_BUFFER, u->object, alias, sizeof(alias));

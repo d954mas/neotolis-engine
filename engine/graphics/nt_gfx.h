@@ -805,9 +805,10 @@ void nt_gfx_capture_request(void);
  * On requires nonzero init capacity; the stub is inert. Init and shutdown turn it off. */
 void nt_gfx_capture_set_continuous(bool on);
 /* The last finished recorded frame (closed by a begin_frame), complete with its post-render and
- * between-frame work. Its records stay valid until the begin_frame that finishes the next recorded
- * frame, or shutdown, so a continuous capture is readable during the whole next frame. Copy count
- * records and metadata to keep. Empty (events=NULL) before any recorded frame finishes. */
+ * between-frame work. Its records and strings stay valid until the begin_frame that finishes the next
+ * recorded frame, or shutdown, so a continuous capture is readable during the whole next frame. To keep
+ * it, copy the metadata, count records and string_bytes strings, and point events and strings at the
+ * copies. Empty (events=NULL) before any recorded frame finishes. */
 nt_gfx_capture_view_t nt_gfx_capture_read(void);
 #endif
 

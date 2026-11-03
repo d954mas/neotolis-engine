@@ -29,7 +29,7 @@ There are no param names: the block layout is the contract between the shader
 and the struct.
 
 `nt_material_create_desc_t.label` is required, a debug name in static storage:
-renderers name the material's pipelines and capture notes by it.
+renderers name the material in capture notes by it.
 
 A material keeps its params as CPU bytes and owns no GPU state.
 `nt_material_set_params(mat, data, size)` replaces them (`size` must equal the
