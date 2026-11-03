@@ -157,6 +157,12 @@ their textures keep `RGBA8` even though the art is sRGB. The game chooses per
 texture; nothing is inferred from file names or material slots. Source bytes
 are stored as they are and the GPU decodes them on sampling
 ([runtime formats](../assets/runtime-formats.md#texture-activation-ttex)).
+A Basis-compressed texture needs a level 0 whose width and height, after the
+`max_size` resize, are multiples of 4: WebGL BPTC refuses anything else, so the
+runtime would store it as RGBA8 on BC7-only desktops. The builder logs the
+source file or resource id and asserts at add time. Atlas pages round
+themselves (see [Atlas options](#atlas-options)).
+
 Basis accepts `RGBA8`, `RGB8`, `SRGB8_ALPHA8` and `SRGB8`. `premultiplied = true`
 requires `RGBA8`: premultiplying encoded sRGB bytes is not premultiplication in
 linear light. An uncompressed `SRGB8` texture cannot take `mips = RUNTIME` (WebGL 2 cannot
@@ -605,6 +611,14 @@ Fields and defaults are in `nt_atlas_opts_t` / `nt_atlas_shape_t`
 - `extrude > 0` is legal only with `shape == NT_ATLAS_SHAPE_RECT`.
 - `allowed_transforms` has identity as an implicit floor: a mask of 0 inherits the
   atlas mask, never "nothing allowed".
+- Page size: `power_of_two` rounds each page side up to a power of two;
+  otherwise the page hugs its content. A compressed page (`compress.codec !=
+  NONE`) is then rounded up to a multiple of 4, the 4x4 block size, so BC7 is
+  usable; the padding is transparent and UVs are baked against the padded size.
+  An uncompressed page keeps its tight size. The final size never exceeds
+  `max_size`: placement is bounded by `max_size` rounded down to a power of two
+  (with `power_of_two`) and to a multiple of 4 (when compressed). A compressed
+  atlas needs `max_size >= 4`.
 
 Named mask presets are exact bit sets: `NT_ATLAS_TRANSFORMS_IDENTITY`,
 `NT_ATLAS_TRANSFORMS_IDENTITY_ROT90`, `NT_ATLAS_TRANSFORMS_ROTATIONS`,
@@ -718,7 +732,7 @@ An alias whose relative transform is **not** identity does not come out byte-ide
 
 Separate from the per-asset [builder cache](#builder-cache) because atlas placement is a global decision over the whole sprite set.
 
-**Cache key:** `xxh64(per_sprite(decoded_hash + source_width + source_height + origin_x + origin_y + raw_overrides) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. `ATLAS_CACHE_KEY_VERSION` is currently 22. Pack options include atlas `alpha_threshold`, `max_vertices`, `max_added_area_percent`, the `allowed_transforms` mask, and the atlas `dedup` flag; per-sprite identity includes threshold, max-vertices, the transform-mask override, the tri-state dedup override, and the explicit max-added-area and alpha-threshold presence bits even when they currently resolve to inherited values. Slice9 is the transform-mask exception: its accepted `0` and `IDENTITY` inputs are canonicalized to the same stored `IDENTITY` override because they have identical forced behavior. Each overridable payload participates only when its presence bit is true; otherwise the unused value is canonicalized to zero. This keeps cache and dedup behavior safe if atlas defaults or resolution rules change. Signed zero is canonicalized before storage and hashing. Per-sprite data is hashed in add order because cached placements reference sprites by index. Source dimensions are part of identity because the same flat RGBA bytes can describe different image shapes. Only pack/compose-affecting options are included; post-pack fields are handled by the texture encode cache.
+**Cache key:** `xxh64(per_sprite(decoded_hash + source_width + source_height + origin_x + origin_y + raw_overrides) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. `ATLAS_CACHE_KEY_VERSION` is currently 23. Pack options include atlas `alpha_threshold`, `max_vertices`, `max_added_area_percent`, the `allowed_transforms` mask, the atlas `dedup` flag, and whether pages are compressed (it block-aligns the page size; the codec settings themselves stay with the texture cache); per-sprite identity includes threshold, max-vertices, the transform-mask override, the tri-state dedup override, and the explicit max-added-area and alpha-threshold presence bits even when they currently resolve to inherited values. Slice9 is the transform-mask exception: its accepted `0` and `IDENTITY` inputs are canonicalized to the same stored `IDENTITY` override because they have identical forced behavior. Each overridable payload participates only when its presence bit is true; otherwise the unused value is canonicalized to zero. This keeps cache and dedup behavior safe if atlas defaults or resolution rules change. Signed zero is canonicalized before storage and hashing. Per-sprite data is hashed in add order because cached placements reference sprites by index. Source dimensions are part of identity because the same flat RGBA bytes can describe different image shapes. Only pack/compose-affecting options are included; post-pack fields are handled by the texture encode cache.
 
 **Storage:** one `atlas_<key>.bin` file per cache entry, containing the placement table and composed page pixels. On hit, the pipeline skips pack, compose, and cache write; debug output, serialization, and publish still run.
 

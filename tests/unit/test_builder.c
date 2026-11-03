@@ -846,7 +846,8 @@ void test_texture_compress_rdo_boundaries(void) {
 }
 
 void test_texture_option_aliases_are_canonicalized(void) {
-    uint8_t pixel[4] = {255, 255, 255, 255};
+    uint8_t pixel[4 * 4 * 4];
+    memset(pixel, 255, sizeof(pixel));
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/texture_format_canonical.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
     nt_tex_opts_t opts = nt_tex_opts_defaults();
@@ -854,7 +855,7 @@ void test_texture_option_aliases_are_canonicalized(void) {
     opts.format = 0;
     opts.mips = NT_TEX_MIPS_BAKED;
     opts.compress = compress;
-    nt_builder_add_texture_raw(ctx, pixel, 1, 1, "pixel", &opts);
+    nt_builder_add_texture_raw(ctx, pixel, 4, 4, "pixel", &opts);
 
     TEST_ASSERT_EQUAL_UINT32(1, ctx->pending_count);
     const NtBuildTextureData *td = (const NtBuildTextureData *)ctx->pending[0].data;
@@ -1165,6 +1166,55 @@ void test_atlas_page_carries_the_mip_mode(void) {
         }
         free(pack);
     }
+}
+
+static char s_last_error_line[NT_LOG_BUF_SIZE];
+
+static void capture_error_line(nt_log_level_t level, const char *domain, const char *msg, void *user) {
+    (void)domain;
+    (void)user;
+    if (level == NT_LOG_LEVEL_ERROR) {
+        (void)snprintf(s_last_error_line, sizeof(s_last_error_line), "%s", msg);
+    }
+}
+
+/* WebGL BPTC needs a block-aligned level 0; an unaligned Basis texture would load as RGBA8 on desktop. */
+void test_basis_texture_must_be_block_aligned(void) {
+    const char *png_path = TMP_DIR "/basis_unaligned_2x2.png";
+    write_test_png(png_path);
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.compress = ANY_COMPRESS();
+    opts.mips = NT_TEX_MIPS_BAKED;
+
+    s_last_error_line[0] = 0;
+    nt_log_add_sink(capture_error_line, NULL);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/basis_unaligned.ntpack");
+    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_builder_add_texture(ctx, png_path, &opts), "multiples of 4");
+    nt_log_remove_sink(capture_error_line, NULL);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(s_last_error_line, "basis_unaligned_2x2.png"), "the diagnostic must name the source file");
+
+    /* max_size resizes first: 8x6 clamped to 4 is 4x3, still unaligned. */
+    uint8_t rgba[8 * 6 * 4];
+    memset(rgba, 200, sizeof(rgba));
+    opts.max_size = 4;
+    ctx = nt_builder_start_pack(TMP_DIR "/basis_unaligned_raw.ntpack");
+    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_builder_add_texture_raw(ctx, rgba, 8, 6, "raw_8x6", &opts), "multiples of 4");
+
+    /* Aligned after the resize: 8x8 clamped to 4 is 4x4. */
+    uint8_t square[8 * 8 * 4];
+    memset(square, 200, sizeof(square));
+    ctx = nt_builder_start_pack(TMP_DIR "/basis_aligned_raw.ntpack");
+    nt_builder_add_texture_raw(ctx, square, 8, 8, "raw_8x8", &opts);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    /* An uncompressed texture keeps any size. */
+    opts.compress = (nt_basisu_encode_opts_t){0};
+    opts.max_size = 0;
+    ctx = nt_builder_start_pack(TMP_DIR "/raw_unaligned.ntpack");
+    nt_builder_add_texture_raw(ctx, rgba, 8, 6, "raw_8x6", &opts);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
 }
 
 /* RAW NONE/RUNTIME/BAKED, then Basis NONE/BAKED: equal pixels, only the mode differs. */
@@ -4811,7 +4861,14 @@ void test_basis_effective_cache_and_dedup_identity(void) {
     variants[variant_count++].uastc.rdo_lambda = 2.0F;
     variants[variant_count++] = nt_tex_compress_uastc_highest();
 #endif
-    const uint8_t pixel[4] = {70, 120, 190, 180};
+    /* One 4x4 block: Basis level 0 must be block-aligned. */
+    uint8_t pixel[4 * 4 * 4];
+    for (size_t i = 0; i < sizeof(pixel); i += 4) {
+        pixel[i] = 70;
+        pixel[i + 1] = 120;
+        pixel[i + 2] = 190;
+        pixel[i + 3] = 180;
+    }
     for (uint32_t warm = 0; warm < 2; warm++) {
         NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/basis_identity.ntpack");
         nt_builder_set_cache_dir(ctx, cache);
@@ -4836,14 +4893,14 @@ void test_basis_effective_cache_and_dedup_identity(void) {
                 alias.uastc.rdo_lambda = variants[i].uastc.rdo_lambda == 0.0F ? -0.0F : variants[i].uastc.rdo_lambda;
             }
             opts.compress = alias;
-            nt_builder_add_texture_raw(ctx, pixel, 1, 1, name, &opts);
+            nt_builder_add_texture_raw(ctx, pixel, 4, 4, name, &opts);
             hashes[i] = nt_builder_compute_opts_hash(&ctx->pending[2 * (size_t)i]);
             for (uint32_t j = 0; j < i; j++) {
                 TEST_ASSERT_TRUE(hashes[j] != hashes[i]);
             }
             opts.compress = variants[i];
             (void)snprintf(name, sizeof(name), "alias_%u", i);
-            nt_builder_add_texture_raw(ctx, pixel, 1, 1, name, &opts);
+            nt_builder_add_texture_raw(ctx, pixel, 4, 4, name, &opts);
             TEST_ASSERT_EQUAL_UINT64(hashes[i], nt_builder_compute_opts_hash(&ctx->pending[(2 * i) + 1]));
         }
         TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
@@ -10287,6 +10344,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_texture_mips_opts_contract);
     RUN_TEST(test_atlas_mips_follow_the_texture_rules);
     RUN_TEST(test_atlas_page_carries_the_mip_mode);
+    RUN_TEST(test_basis_texture_must_be_block_aligned);
     RUN_TEST(test_texture_mips_alone_changes_the_cache_key);
 
     /* AABB edge extrude */

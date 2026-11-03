@@ -27,7 +27,9 @@
  *       chosen page.
  *
  * 4. POT expansion: round each page's used_w/used_h up to a power of two if
- *    opts.power_of_two, otherwise use the tight size.
+ *    opts.power_of_two, otherwise use the tight size; a compressed page is then
+ *    rounded up to the 4x4 block. Placement is bounded by vpack_page_bound, so
+ *    the rounded size never exceeds opts.max_size.
  *
  * ============================================================================
  * vpack_try_page — the inner search
@@ -150,6 +152,21 @@ static inline uint32_t vpack_next_pot(uint32_t v) {
     return 1U << (32 - __builtin_clz(v - 1));
 }
 #endif
+
+/* --- Page bounds --- */
+
+/* Placement bound: the final POT or 4x4-block rounding of a page that fits it
+ * still fits max_size. Block-compressed formats need block-aligned level 0. */
+static uint32_t vpack_page_bound(const nt_atlas_opts_t *opts) {
+    uint32_t bound = opts->max_size;
+    if (opts->power_of_two && vpack_next_pot(bound) != bound) {
+        bound = vpack_next_pot(bound) / 2;
+    }
+    if (opts->compress.codec != NT_BASISU_CODEC_NONE) {
+        bound &= ~3U;
+    }
+    return bound;
+}
 
 /* --- Public helpers --- */
 
@@ -1806,7 +1823,7 @@ bool vpack_sprite_fits_empty_page(const Point2D *hull, uint32_t hull_count, cons
     int32_t margin = (int32_t)opts->margin;
     int32_t extrude = (int32_t)opts->extrude;
     int32_t min_edge = margin > extrude ? margin : extrude;
-    int32_t max_size = (int32_t)opts->max_size;
+    int32_t max_size = (int32_t)vpack_page_bound(opts);
     int32_t min_cand_x = (min_edge - a0 < min_edge) ? min_edge : (min_edge - a0);
     int32_t min_cand_y = (min_edge - a1 < min_edge) ? min_edge : (min_edge - a1);
     int32_t max_cand_x = max_size - margin - a2 - 1;
@@ -1867,7 +1884,8 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
     uint32_t extrude = opts->extrude;
     uint32_t padding = opts->padding;
     uint32_t margin = opts->margin;
-    uint32_t max_size = opts->max_size;
+    uint32_t max_size = vpack_page_bound(opts);
+    const bool block_align = opts->compress.codec != NT_BASISU_CODEC_NONE;
     NT_LOG_INFO("  vector_pack: thread_count=%u, sprites=%u", thread_count, sprite_count);
 
     pack_stats_reset(stats);
@@ -2055,6 +2073,10 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
         if (opts->power_of_two) {
             final_w = vpack_next_pot(final_w);
             final_h = vpack_next_pot(final_h);
+        }
+        if (block_align) {
+            final_w = (final_w + 3U) & ~3U;
+            final_h = (final_h + 3U) & ~3U;
         }
         out_page_w[i] = final_w;
         out_page_h[i] = final_h;

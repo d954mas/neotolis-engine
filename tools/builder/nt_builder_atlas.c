@@ -469,7 +469,7 @@ static void debug_draw_hull_outline(uint8_t *page, uint32_t pw, uint32_t ph, con
  * apart re-opens either forged-file headroom or permanent cache misses. */
 enum { ATLAS_MAX_REGIONS = UINT16_MAX };
 
-enum { ATLAS_CACHE_KEY_VERSION = 22 };
+enum { ATLAS_CACHE_KEY_VERSION = 23 };
 
 /* Per-sprite key record: hash + source dims + origin, then the raw override block. */
 enum { KEY_OV_OFF = sizeof(uint64_t) + (2 * sizeof(uint32_t)) + (2 * sizeof(float)) };
@@ -558,10 +558,11 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     pos += (uint32_t)sizeof(opts->max_vertices);
     opts_buf[pos++] = opts->alpha_threshold;
     /* Only pack/compose-affecting opts go here. Post-pack fields (format,
-     * premultiplied, debug_png, compress) are handled by the texture cache
-     * and must NOT appear — otherwise changing e.g. premultiplied triggers
-     * a full re-pack when only re-encode is needed. */
-    uint8_t flags = (uint8_t)(opts->power_of_two ? 2 : 0);
+     * premultiplied, debug_png, compress settings) are handled by the texture
+     * cache and must NOT appear — otherwise changing e.g. premultiplied triggers
+     * a full re-pack when only re-encode is needed. Whether pages are compressed
+     * at all is the exception: it block-aligns the page size. */
+    uint8_t flags = (uint8_t)((opts->power_of_two ? 2 : 0) | (opts->compress.codec != NT_BASISU_CODEC_NONE ? 4 : 0));
     opts_buf[pos++] = flags;
     opts_buf[pos++] = opts->allowed_transforms;
     opts_buf[pos++] = (uint8_t)opts->shape;
@@ -833,6 +834,7 @@ static nt_texture_pixel_format_t atlas_assert_opts(const nt_atlas_opts_t *opts) 
     NT_BUILD_ASSERT(opts->padding <= opts->max_size && "nt_atlas_begin: padding exceeds max_size");
     NT_BUILD_ASSERT(opts->margin <= opts->max_size && "nt_atlas_begin: margin exceeds max_size");
     NT_BUILD_ASSERT(opts->extrude <= opts->max_size && "nt_atlas_begin: extrude exceeds max_size");
+    NT_BUILD_ASSERT((opts->compress.codec == NT_BASISU_CODEC_NONE || opts->max_size >= 4) && "nt_atlas_begin: a compressed atlas needs max_size >= 4 (one 4x4 block)");
     NT_BUILD_ASSERT(isfinite(opts->max_added_area_percent) && opts->max_added_area_percent >= 0.0F && "nt_atlas_begin: max_added_area_percent must be finite and non-negative");
     /* unsigned cast catches a negative value cast into the enum too. */
     NT_BUILD_ASSERT((unsigned)opts->shape <= (unsigned)NT_ATLAS_SHAPE_CONCAVE_CONTOUR && "nt_atlas_begin: opts.shape out of range");
@@ -3847,6 +3849,7 @@ static void pipeline_publish_outputs(AtlasPipeline *p) {
         NT_BUILD_ASSERT(td && "pipeline_publish_outputs: alloc failed");
         td->width = p->page_w[pg];
         td->height = p->page_h[pg];
+        NT_BUILD_ASSERT((p->opts->compress.codec == NT_BASISU_CODEC_NONE || (td->width % 4 == 0 && td->height % 4 == 0)) && "pipeline_publish_outputs: compressed page is not 4x4-block aligned");
         td->opts.format = p->opts->format;
         td->opts.max_size = 0;
         td->opts.compress = p->opts->compress;
