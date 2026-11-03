@@ -287,6 +287,8 @@ typedef struct {
     nt_tex_alpha_t alpha;
     nt_tex_filter_t resize_filter; /* level 0 down to max_size, any ratio */
     nt_tex_filter_t mip_filter;    /* levels 1..N, 2:1; anything but BOX requires mips BAKED */
+    float alpha_cutoff;            /* 0 = off. The shader's alpha-test threshold in [0, 1]: every mip keeps
+                                    * the coverage of level 0 at it. Requires a format with alpha and mips BAKED. */
 } nt_tex_process_t;
 
 static inline nt_tex_process_t nt_tex_process_color(void) {

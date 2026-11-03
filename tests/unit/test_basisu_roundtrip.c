@@ -6,6 +6,7 @@
 #include "test_helpers/build_assert_trap.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "unity.h"
+#include <math.h>
 #include <string.h>
 
 #define MAX_W 96U
@@ -220,10 +221,10 @@ void test_mip_level_with_a_shrunken_stored_width_asserts(void) {
 // NOLINTBEGIN(clang-analyzer-unix.Stream)
 /* The Basis payload of one raw texture built as a pack through the public
  * builder, so its format reaches the encoder. Returns the payload size. */
-static uint32_t encode_raw_pack(nt_basisu_codec_t codec, nt_texture_pixel_format_t format, nt_tex_alpha_t alpha, const uint8_t *pixels, uint32_t width, uint32_t height, uint8_t basis[4096]) {
+static uint32_t encode_raw_pack(nt_basisu_codec_t codec, nt_texture_pixel_format_t format, nt_tex_process_t process, const uint8_t *pixels, uint32_t width, uint32_t height, uint8_t basis[4096]) {
     nt_tex_opts_t opts = nt_tex_opts_defaults();
     opts.format = format;
-    opts.process.alpha = alpha;
+    opts.process = process;
     opts.compress = codec == NT_BASISU_CODEC_ETC1S ? nt_tex_compress_etc1s_high() : nt_tex_compress_uastc_default();
     opts.mips = NT_TEX_MIPS_BAKED;
     NtBuilderContext *ctx = nt_builder_start_pack("basis_raw.ntpack");
@@ -257,7 +258,7 @@ static void encode_checker_tail(nt_basisu_codec_t codec, nt_texture_pixel_format
         }
     }
     uint8_t basis[4096] = {0};
-    const uint32_t size = encode_raw_pack(codec, format, alpha, pixels, 8, 8, basis);
+    const uint32_t size = encode_raw_pack(codec, format, (nt_tex_process_t){.alpha = alpha}, pixels, 8, 8, basis);
     const nt_basisu_info_t info = nt_basisu_info(basis, size);
     /* 8x8 -> 4x4 -> 2x2 -> 1x1: the 4 RGBA8 bytes at the end are the tail level. */
     uint8_t chain[((8 * 8) + (4 * 4) + (2 * 2) + 1) * 4] = {0};
@@ -313,7 +314,7 @@ void test_alpha_less_formats_encode_opaque_levels(void) {
     for (uint32_t c = 0; c < codec_count; c++) {
         for (uint32_t f = 0; f < 2; f++) {
             uint8_t basis[4096] = {0};
-            const uint32_t size = encode_raw_pack(codecs[c].codec, formats[f], NT_TEX_ALPHA_STRAIGHT, pixels, 8, 8, basis);
+            const uint32_t size = encode_raw_pack(codecs[c].codec, formats[f], (nt_tex_process_t){0}, pixels, 8, 8, basis);
             const nt_basisu_info_t info = nt_basisu_info(basis, size);
             TEST_ASSERT_FALSE(info.has_alpha);
             TEST_ASSERT_EQUAL_UINT32(4, info.level_count);
@@ -343,6 +344,49 @@ static void check_alpha_mode_mips(nt_basisu_codec_t codec) {
     }
 }
 
+/* alpha_cutoff survives Basis: decoded levels of 64 texels or more stay within 3%
+ * of level 0's coverage at the threshold, and the 4x4 level keeps over half of it,
+ * where the uncut chain has lost every texel. */
+static void check_alpha_cutoff_coverage(nt_basisu_codec_t codec) {
+    enum { N = 32 };
+    uint8_t pixels[N * N * 4];
+    for (uint32_t i = 0; i < N * N; i++) {
+        const uint32_t row = i / N;
+        const double d = fabs((double)(i % N) - 8.0 - (0.35 * row));
+        const double d2 = fabs((double)(i % N) - 21.0 - (0.35 * row));
+        const double coverage = fmax(fmin(1.0, 1.6 - d), fmin(1.0, 1.6 - d2));
+        const uint8_t texel[4] = {60, 140, 40, (uint8_t)lround(fmax(coverage, 0.0) * 255.0)};
+        memcpy(pixels + ((size_t)i * 4), texel, 4);
+    }
+    double worst = 0.0;
+    double small[2] = {0.0, 0.0}; /* coverage of the 4x4 level, uncut and cut */
+    for (uint32_t cut = 0; cut < 2; cut++) {
+        uint8_t basis[4096] = {0};
+        const uint32_t size = encode_raw_pack(codec, NT_TEXTURE_FORMAT_RGBA8, (nt_tex_process_t){.alpha_cutoff = cut ? 0.5F : 0.0F}, pixels, N, N, basis);
+        const nt_basisu_info_t info = nt_basisu_info(basis, size);
+        nt_basisu_transcode_chain(basis, size, &info, NT_TEXTURE_FORMAT_RGBA8, s_out);
+        const uint8_t *level = s_out;
+        double c0 = 0.0;
+        for (uint32_t l = 0; l < info.level_count; l++) {
+            const uint32_t texels = nt_texture_level_extent(N, l) * nt_texture_level_extent(N, l);
+            uint32_t count = 0;
+            for (uint32_t i = 0; i < texels; i++) {
+                count += level[((size_t)i * 4) + 3] >= 128 ? 1U : 0U;
+            }
+            const double coverage = (double)count / texels;
+            c0 = l == 0 ? coverage : c0;
+            if (cut && texels >= 64) {
+                worst = fmax(worst, fabs(coverage - c0));
+            }
+            small[cut] = texels == 16 ? coverage / c0 : small[cut];
+            level += (size_t)texels * 4;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(worst < 0.03, "decoded coverage drifts from level 0");
+    TEST_ASSERT_TRUE(small[0] < 0.5);
+    TEST_ASSERT_TRUE(small[1] > 0.5);
+}
+
 /* sRGB mips average light, not encoded numbers: black/white gives 188 (0.5 linear), not 128.
  * Alpha stays linear. */
 static void check_srgb_mip(nt_basisu_codec_t codec) {
@@ -364,6 +408,9 @@ void test_etc1s_alpha_mode_mips(void) { check_alpha_mode_mips(NT_BASISU_CODEC_ET
 #endif
 #if NT_BASISU_HAS_UASTC
 void test_uastc_alpha_mode_mips(void) { check_alpha_mode_mips(NT_BASISU_CODEC_UASTC_LDR); }
+#endif
+#if NT_BASISU_HAS_UASTC
+void test_uastc_alpha_cutoff_coverage(void) { check_alpha_cutoff_coverage(NT_BASISU_CODEC_UASTC_LDR); }
 #endif
 #if NT_BASISU_HAS_ETC1S
 void test_etc1s_srgb_mip(void) { check_srgb_mip(NT_BASISU_CODEC_ETC1S); }
@@ -540,6 +587,7 @@ int main(void) {
     RUN_TEST(test_uastc_alpha);
     RUN_TEST(test_mip_level_with_a_shrunken_stored_width_asserts);
     RUN_TEST(test_uastc_alpha_mode_mips);
+    RUN_TEST(test_uastc_alpha_cutoff_coverage);
     RUN_TEST(test_uastc_srgb_mip);
 #endif
     RUN_TEST(test_non_basis_header_asserts);

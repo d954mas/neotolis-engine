@@ -10,6 +10,7 @@
 /* clang-format on */
 
 #include <math.h>
+#include <stdlib.h>
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- assert expansions inflate the count
 nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *opts) {
@@ -34,6 +35,9 @@ nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *op
     /* GPU mips would not renormalize; R8 holds no vector and RGB9E5 is colour. */
     NT_BUILD_ASSERT((process->rgb != NT_TEX_RGB_NORMAL || (format != NT_TEXTURE_FORMAT_R8 && format != NT_TEXTURE_FORMAT_RGB9E5 && resolved.mips != NT_TEX_MIPS_RUNTIME)) &&
                     "texture opts: process.rgb NORMAL requires RGBA8, RGB8 or RG8 and mips NONE or BAKED");
+    NT_BUILD_ASSERT(isfinite(process->alpha_cutoff) && process->alpha_cutoff >= 0.0F && process->alpha_cutoff <= 1.0F && "texture opts: process.alpha_cutoff must be in [0, 1]");
+    NT_BUILD_ASSERT((process->alpha_cutoff == 0.0F || (nt_texture_pixel_format_has_alpha(format) && resolved.mips == NT_TEX_MIPS_BAKED)) &&
+                    "texture opts: process.alpha_cutoff requires a format with alpha and mips BAKED");
     NT_BUILD_ASSERT((process->rgb != NT_TEX_RGB_NORMAL || !nt_texture_pixel_format_has_alpha(format) || process->alpha == NT_TEX_ALPHA_DATA) &&
                     "texture opts: process.rgb NORMAL with an alpha format requires process.alpha DATA");
     NT_BUILD_ASSERT((unsigned)resolved.filter_min <= (unsigned)NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR && "texture opts: filter_min out of range");
@@ -186,6 +190,62 @@ static uint32_t pack_rgb9e5(const float *rgb) {
     }
     return packed;
 }
+
+// #region coverage
+/* The alpha byte the shader's test passes from: the smallest b with b / 255 >= cutoff. */
+static uint32_t cutoff_byte(float cutoff) {
+    uint32_t b = 1;
+    while (b < 255 && (float)b / 255.0F < cutoff) {
+        b++;
+    }
+    return b;
+}
+
+/* counts[t] = texels with alpha >= t, for t in 0..256, from one histogram. */
+static void alpha_counts(const uint8_t *rgba, size_t texels, uint64_t counts[257]) {
+    uint64_t histogram[256] = {0};
+    for (size_t i = 0; i < texels; i++) {
+        histogram[rgba[(i * 4U) + 3U]]++;
+    }
+    counts[256] = 0;
+    for (uint32_t t = 256; t-- > 0;) {
+        counts[t] = counts[t + 1] + histogram[t];
+    }
+}
+
+/* Scales a stored level's alpha so its coverage at `threshold` is the attainable
+ * one closest to level 0's (covered0 of texels0). Candidates are the coverage at
+ * every byte t, and zero; a tie keeps the current coverage, then the larger t.
+ * s = (threshold - 0.5) / (t - 0.5) moves exactly the texels at or above t to at
+ * or above threshold. */
+static void preserve_coverage(uint8_t *rgba, size_t texels, uint32_t threshold, uint64_t covered0, size_t texels0) {
+    uint64_t counts[257];
+    alpha_counts(rgba, texels, counts);
+    /* |counts[t] / texels - covered0 / texels0|, compared exactly in integers. */
+    const int64_t target = (int64_t)(covered0 * texels);
+    uint32_t best = threshold;
+    int64_t best_error = llabs(((int64_t)(counts[threshold] * texels0)) - target);
+    for (uint32_t t = 256; t >= 1; t--) {
+        const int64_t error = llabs(((int64_t)(counts[t] * texels0)) - target);
+        if (error < best_error) {
+            best = t;
+            best_error = error;
+        }
+    }
+    if (best == threshold) {
+        return;
+    }
+    uint32_t max_alpha = 0;
+    for (size_t i = 0; i < texels; i++) {
+        max_alpha = rgba[(i * 4U) + 3U] > max_alpha ? rgba[(i * 4U) + 3U] : max_alpha;
+    }
+    const float scale = ((float)threshold - 0.5F) / (best == 256 ? (float)max_alpha + 0.5F : (float)best - 0.5F);
+    for (size_t i = 0; i < texels; i++) {
+        uint8_t *a = &rgba[(i * 4U) + 3U];
+        *a = (uint8_t)fminf(255.0F, floorf(((float)*a * scale) + 0.5F));
+    }
+}
+// #endregion
 
 /* Bytes of `level_count` levels of `pixel_bytes` texels, back to back. */
 static size_t chain_bytes(uint32_t width, uint32_t height, uint32_t level_count, uint32_t pixel_bytes) {
@@ -697,12 +757,18 @@ static uint8_t *build_ldr_levels(const uint8_t *source, uint32_t src_w, uint32_t
     for (uint32_t i = 0; i < 256; i++) {
         dc.lin[i] = srgb ? srgb_to_linear((float)i / 255.0F) : (float)i / 255.0F;
     }
+    const uint32_t threshold = process->alpha_cutoff > 0.0F ? cutoff_byte(process->alpha_cutoff) : 0;
+    uint64_t counts0[257];
+    alpha_counts(chain, (size_t)w * h, counts0);
     uint8_t *level_px = chain;
     const uint8_t *prev = NULL;
     for (uint32_t level = 0; level < level_count; level++) {
         const uint32_t lw = nt_texture_level_extent(w, level);
         const uint32_t lh = nt_texture_level_extent(h, level);
         const size_t texels = (size_t)lw * lh;
+        if (threshold > 0 && level > 0) {
+            preserve_coverage(level_px, texels, threshold, counts0[threshold], (size_t)w * h);
+        }
         if (dilate) {
             scan_level(level_px, texels, &visible, &hole);
             if (!visible) {

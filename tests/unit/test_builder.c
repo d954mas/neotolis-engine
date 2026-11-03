@@ -2255,6 +2255,158 @@ void test_texture_normal_opts_contract(void) {
 }
 // #endregion
 
+// #region alpha cutoff
+/* Thin anti-aliased blades: 1-px soft lines that thin out in the mips. */
+static void blade_pixels(uint8_t *rgba, uint32_t n) {
+    for (uint32_t y = 0; y < n; y++) {
+        for (uint32_t x = 0; x < n; x++) {
+            double coverage = 0.0;
+            for (uint32_t blade = 0; blade < 5; blade++) {
+                const double cx = 6.0 + (blade * 12.3);
+                const double d = fabs((double)x - cx - (0.35 * y));
+                coverage = fmax(coverage, fmin(1.0, 1.6 - d)); /* a solid core with soft edges */
+            }
+            const uint8_t a = (uint8_t)lround(fmax(coverage, 0.0) * 255.0);
+            fill_rgba(rgba, ((size_t)y * n) + x, 1, (const uint8_t[4]){60, 140, 40, a});
+        }
+    }
+}
+
+/* The test's own threshold byte: the smallest b with b / 255 >= cutoff. */
+static uint32_t test_cutoff_byte(float cutoff) {
+    for (uint32_t b = 1; b < 255; b++) {
+        if ((float)b / 255.0F >= cutoff) {
+            return b;
+        }
+    }
+    return 255;
+}
+
+/* Texels of a level with alpha >= t. */
+static uint32_t covered(const uint8_t *asset, const NtTextureAssetHeader *hdr, uint32_t level, uint32_t t) {
+    const uint32_t lw = nt_texture_level_extent(hdr->width, level);
+    const uint32_t lh = nt_texture_level_extent(hdr->height, level);
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < lw * lh; i++) {
+        count += asset_texel(asset, hdr, level, i % lw, i / lw)[3] >= t ? 1U : 0U;
+    }
+    return count;
+}
+
+/* Every level keeps the closest attainable coverage. The oracle needs no scales: from
+ * the level without the cutoff it takes the smallest |coverage(t) - level 0| over every
+ * t and zero, and the cutoff level must reach exactly that. One scale per level maps
+ * the uncut alpha to the cut one, and without the cutoff coverage falls by over 10%. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- oracle, single-scale and control per level
+void test_texture_alpha_cutoff_keeps_the_closest_coverage(void) {
+    enum { N = 64 };
+    uint8_t *rgba = (uint8_t *)malloc((size_t)N * N * 4);
+    TEST_ASSERT_NOT_NULL(rgba);
+    blade_pixels(rgba, N);
+    const float cutoffs[3] = {0.5F, 0.8F, 1.0F};
+    for (uint32_t c = 0; c < 3; c++) {
+        const uint32_t threshold = test_cutoff_byte(cutoffs[c]);
+        nt_tex_opts_t opts = straight_baked_opts();
+        NtTextureAssetHeader hdr;
+        uint8_t *uncut = encode_mips_asset(rgba, N, N, &opts, &hdr);
+        opts.process.alpha_cutoff = cutoffs[c];
+        uint8_t *cut = encode_mips_asset(rgba, N, N, &opts, &hdr);
+        const double c0 = (double)covered(cut, &hdr, 0, threshold) / (N * N);
+        TEST_ASSERT_TRUE(c0 > 0.05);
+        uint32_t scaled_levels = 0;
+        bool control_fell = false;
+        for (uint32_t level = 1; level < hdr.mip_count; level++) {
+            const uint32_t texels = nt_texture_level_extent(N, level) * nt_texture_level_extent(N, level);
+            double best = fabs(c0);
+            for (uint32_t t = 1; t <= 255; t++) {
+                best = fmin(best, fabs(((double)covered(uncut, &hdr, level, t) / texels) - c0));
+            }
+            const double got = fabs(((double)covered(cut, &hdr, level, threshold) / texels) - c0);
+            TEST_ASSERT_TRUE_MESSAGE(fabs(got - best) < 1e-12, "level coverage is not the closest attainable");
+            control_fell = control_fell || ((double)covered(uncut, &hdr, level, threshold) / texels) < 0.9 * c0;
+            /* One s for the whole level: the intervals of A_cut = min(255, floor(A * s + 0.5)) meet. */
+            double lo = 0.0;
+            double hi = 1e9;
+            bool changed = false;
+            for (uint32_t i = 0; i < texels; i++) {
+                const uint32_t lw = nt_texture_level_extent(N, level);
+                const uint32_t row = i / lw;
+                const double a = asset_texel(uncut, &hdr, level, i % lw, row)[3];
+                const double b = asset_texel(cut, &hdr, level, i % lw, row)[3];
+                changed = changed || a != b;
+                if (a > 0 && b < 255) {
+                    lo = fmax(lo, (b - 0.5) / a);
+                    hi = fmin(hi, (b + 0.5) / a);
+                } else if (a > 0) {
+                    lo = fmax(lo, 254.5 / a);
+                }
+            }
+            TEST_ASSERT_TRUE_MESSAGE(lo < hi, "a level is not scaled by one factor");
+            scaled_levels += changed ? 1U : 0U;
+        }
+        TEST_ASSERT_TRUE(control_fell);
+        TEST_ASSERT_GREATER_OR_EQUAL_UINT32(2, scaled_levels);
+        free(uncut);
+        free(cut);
+    }
+    free(rgba);
+}
+
+/* A tie keeps the coverage the level already has. Level 0 {255, 85, 85, 87} covers 1/4
+ * at T = 200; level 1 {170, 86} covers 0, and 1/2 is as far from 1/4: nothing moves. */
+void test_texture_alpha_cutoff_tie_keeps_the_level(void) {
+    const uint8_t row[16] = {9, 9, 9, 255, 9, 9, 9, 85, 9, 9, 9, 85, 9, 9, 9, 87};
+    nt_tex_opts_t opts = straight_baked_opts();
+    opts.process.alpha = NT_TEX_ALPHA_DATA;
+    NtTextureAssetHeader hdr;
+    uint8_t *uncut = encode_mips_asset(row, 4, 1, &opts, &hdr);
+    opts.process.alpha_cutoff = 200.0F / 255.0F;
+    uint8_t *cut = encode_mips_asset(row, 4, 1, &opts, &hdr);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(uncut + sizeof(hdr), cut + sizeof(hdr), hdr.data_size);
+    free(uncut);
+    free(cut);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one death test per rule
+void test_texture_alpha_cutoff_opts_contract(void) {
+    const float refused[3] = {-0.1F, 1.5F, NAN};
+    for (uint32_t i = 0; i < 3; i++) {
+        nt_tex_opts_t opts = straight_baked_opts();
+        opts.process.alpha_cutoff = refused[i];
+        EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_assert_texture_opts(&opts), "process.alpha_cutoff must be in [0, 1]");
+    }
+    nt_tex_opts_t opts = straight_baked_opts();
+    opts.process.alpha_cutoff = 0.5F;
+    opts.format = NT_TEXTURE_FORMAT_RGB8;
+    EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_assert_texture_opts(&opts), "process.alpha_cutoff requires a format with alpha and mips BAKED");
+    opts = nt_tex_opts_defaults();
+    opts.process.alpha_cutoff = 0.5F;
+    EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_assert_texture_opts(&opts), "process.alpha_cutoff requires a format with alpha and mips BAKED");
+    /* Zero is off and valid everywhere. */
+    opts = nt_tex_opts_defaults();
+    opts.format = NT_TEXTURE_FORMAT_RGB8;
+    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_RGB8, nt_builder_assert_texture_opts(&opts));
+
+    nt_atlas_opts_t atlas = nt_atlas_opts_defaults();
+    atlas.mips = NT_TEX_MIPS_BAKED;
+    atlas.process.alpha_cutoff = 0.5F;
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/cutoff_atlas.ntpack");
+    EXPECT_BUILD_ASSERT_MATCH(ctx, (void)nt_atlas_begin(ctx, "page", &atlas), "process.alpha_cutoff must be 0 for atlas pages");
+}
+
+/* The cutoff is part of the key; -0 is 0. */
+void test_texture_alpha_cutoff_changes_the_cache_key(void) {
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/cutoff_keys.ntpack");
+    const nt_basisu_encode_opts_t none = {0};
+    const uint64_t off = process_key(ctx, (nt_tex_process_t){0}, NT_TEXTURE_FORMAT_RGBA8, none, 0);
+    TEST_ASSERT_EQUAL_UINT64(off, process_key(ctx, (nt_tex_process_t){.alpha_cutoff = -0.0F}, NT_TEXTURE_FORMAT_RGBA8, none, 0));
+    const uint64_t half = process_key(ctx, (nt_tex_process_t){.alpha_cutoff = 0.5F}, NT_TEXTURE_FORMAT_RGBA8, none, 0);
+    TEST_ASSERT_TRUE(off != half);
+    TEST_ASSERT_TRUE(half != process_key(ctx, (nt_tex_process_t){.alpha_cutoff = 0.6F}, NT_TEXTURE_FORMAT_RGBA8, none, 0));
+    nt_builder_free_pack(ctx);
+}
+// #endregion
+
 /* --- Premultiplied alpha: formula + flag propagation --- */
 
 /* Known input → known output through the real encoder, exercising
@@ -11369,6 +11521,10 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_texture_dilation_replaces_near_transparent_colour);
     RUN_TEST(test_texture_dilation_keeps_runtime_mips_free_of_black);
     RUN_TEST(test_texture_process_opts_contract);
+    RUN_TEST(test_texture_alpha_cutoff_keeps_the_closest_coverage);
+    RUN_TEST(test_texture_alpha_cutoff_tie_keeps_the_level);
+    RUN_TEST(test_texture_alpha_cutoff_opts_contract);
+    RUN_TEST(test_texture_alpha_cutoff_changes_the_cache_key);
     RUN_TEST(test_texture_normal_levels_follow_the_normalized_reference);
     RUN_TEST(test_texture_normal_resized_level0_is_unit_length);
     RUN_TEST(test_texture_normal_rg8_ignores_the_source_blue);
