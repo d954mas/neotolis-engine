@@ -131,7 +131,9 @@ static const field_t k_attribute[] = {NT_HANDLE_(attribute, buffer, BUFFER),    
 static const field_t k_upload[] = {NT_F_(upload, size, U64, BYTES, 0), NT_F_(upload, offset, U32, BYTES, 0), NT_F_(upload, data, BOOL, BOOL, 0)};
 #define NT_RECT_ NT_F_(rect, x, I32, NUMBER, 0), NT_F_(rect, y, I32, NUMBER, 0), NT_F_(rect, width, I32, NUMBER, 0), NT_F_(rect, height, I32, NUMBER, 0)
 static const field_t k_rect[] = {NT_RECT_};
+#if !defined(NT_PLATFORM_WEB)
 static const field_t k_read[] = {NT_RECT_, NT_HANDLE_(rect, source, RENDER_TARGET)};
+#endif
 #undef NT_RECT_
 static const field_t k_toggle[] = {NT_F_(toggle, on, BOOL, BOOL, 0)};
 static const field_t k_frontend[] = {NT_F_(frontend, context_lost, BOOL, BOOL, 0)};

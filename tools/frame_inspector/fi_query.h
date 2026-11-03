@@ -6,10 +6,11 @@
 
 #include "fi_model.h"
 
-/* The record's capture-text line without what a tree row shows elsewhere (its kind tag, result, parent link
- * and draw details); handles as short names (pipe#3), GL calls as calls: glEnable(GL_SCISSOR_TEST). */
+/* The record as a row, from its fields (capture field table): values decoded by meaning, handles as aliases
+ * (pipe/mesh), GL calls as calls (glEnable(GL_SCISSOR_TEST)); without what a tree row shows elsewhere (its
+ * result, parent link and a draw's first, vertices and instances). */
 void fi_row_text(const fi_frame_t *frame, uint32_t record, char *buf, size_t size);
-/* A handle as the views name it: vi/mesh#3, vi#3 unlabeled, vi:65537 when the frame never names it (fi_alias); a
+/* A handle as the views name it: vi/mesh, vi/mesh#3 when the label repeats, vi#3 unlabeled, vi:65537 when the frame never names it (fi_alias); a
  * long label is cut, never the number. buf holds FI_ALIAS_LEN bytes. */
 #define FI_ALIAS_LEN 128
 void fi_alias_text(const fi_frame_t *frame, uint32_t kind, uint32_t object, char *buf, size_t size);

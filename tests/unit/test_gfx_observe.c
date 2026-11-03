@@ -1,7 +1,6 @@
 #include <string.h>
 
 #include "graphics/nt_gfx.h"
-#include "graphics/nt_gfx_capture_text.h"
 #include "graphics/nt_gfx_frame.h"
 #include "graphics/nt_gfx_internal.h"
 #include "log/nt_log.h"
@@ -1213,16 +1212,24 @@ static const char *definition_label(nt_gfx_object_kind_t kind, uint32_t object) 
     for (uint32_t i = 0; i < v.count; i++) {
         const nt_gfx_event_t *e = &v.events[i];
         if (e->kind == NT_GFX_EVENT_DEFINITION && e->operation == NT_GFX_OP_CREATE && e->object_kind == kind && e->object == object) {
-            const nt_gfx_capture_field_t *fields = NULL;
-            const uint32_t n = nt_gfx_capture_fields(e, &fields);
-            for (uint32_t f = 0; f < n; f++) {
-                if (strcmp(fields[f].name, "label") == 0) {
-                    nt_gfx_capture_string_t label = 0;
-                    memcpy(&label, (const unsigned char *)e + fields[f].offset, sizeof(label));
-                    return v.strings + label;
-                }
+            switch (kind) {
+            case NT_GFX_OBJECT_SHADER:
+                return v.strings + e->data.shader.label;
+            case NT_GFX_OBJECT_PROGRAM:
+                return v.strings + e->data.program.label;
+            case NT_GFX_OBJECT_PIPELINE:
+                return v.strings + e->data.pipeline.label;
+            case NT_GFX_OBJECT_VERTEX_INPUT:
+                return v.strings + e->data.vertex_input.label;
+            case NT_GFX_OBJECT_BUFFER:
+                return v.strings + e->data.buffer.label;
+            case NT_GFX_OBJECT_TEXTURE:
+                return v.strings + e->data.texture.label;
+            case NT_GFX_OBJECT_RENDER_TARGET:
+                return v.strings + e->data.render_target.label;
+            default:
+                return ""; /* samplers and instance layouts have no label field */
             }
-            return "";
         }
     }
     return NULL;
