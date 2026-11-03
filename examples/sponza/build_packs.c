@@ -101,33 +101,36 @@ static tex_role_t *build_texture_roles(const nt_glb_scene_t *scene) {
 }
 
 /* The alpha shader's cutoff as the manifest stores it, in whole hundredths. */
-static uint8_t alpha_cutoff_x100(const nt_glb_material_t *mat) { return (uint8_t)(mat->alpha_cutoff * 100.0F); }
-
-/* The texel alpha an alpha-tested material passes from: the shader discards
- * texture.a * baseColorFactor.a below the manifest cutoff. */
-static float material_texel_cutoff(const nt_glb_material_t *mat) {
-    const char *name = mat->name ? mat->name : "(unnamed)";
-    if (!(mat->base_color[3] > 0.0F)) {
-        (void)fprintf(stderr, "sponza: material '%s' is alpha tested with baseColorFactor alpha 0\n", name);
-        NT_BUILD_ASSERT(0 && "sponza: an alpha-tested material has baseColorFactor alpha 0");
-    }
-    const float cutoff = ((float)alpha_cutoff_x100(mat) / 100.0F) / mat->base_color[3];
-    if (cutoff > 1.0F) {
-        (void)fprintf(stderr, "sponza: material '%s' discards every texel (cutoff %.3f)\n", name, (double)cutoff);
-        NT_BUILD_ASSERT(0 && "sponza: an alpha-tested material discards every texel");
-    }
-    return cutoff;
+static uint8_t alpha_cutoff_x100(const nt_glb_material_t *mat) {
+    NT_BUILD_ASSERT(mat->alpha_cutoff >= 0.0F && mat->alpha_cutoff <= 1.0F && "sponza: a glTF alphaCutoff outside [0, 1]");
+    return (uint8_t)(mat->alpha_cutoff * 100.0F);
 }
 
-/* Whether a base colour image is alpha tested (glTF MASK or BLEND, both drawn by the
- * alpha shader), and the texel cutoff every material using it agrees on. */
+/* The texel alpha an alpha-tested material passes from, as a cutoff on a byte step:
+ * the smallest byte b the shader keeps, (b / 255) * baseColorFactor.a >= its cutoff,
+ * evaluated in the same float order. */
+static float material_texel_cutoff(const nt_glb_material_t *mat) {
+    const char *name = mat->name ? mat->name : "(unnamed)";
+    const float shader_cutoff = (float)alpha_cutoff_x100(mat) / 100.0F;
+    uint32_t b = 0;
+    while (b <= 255 && ((float)b / 255.0F) * mat->base_color[3] < shader_cutoff) {
+        b++;
+    }
+    if (b > 255) {
+        (void)fprintf(stderr, "sponza: material '%s' discards every texel (cutoff %.3f, baseColorFactor alpha %.3f)\n", name, (double)shader_cutoff, (double)mat->base_color[3]);
+        NT_BUILD_ASSERT(0 && "sponza: an alpha-tested material discards every texel");
+    }
+    return (float)b / 255.0F;
+}
+
+/* Whether a base colour image is drawn by the alpha shader, and the texel cutoff
+ * every material using it agrees on. */
 static bool texture_alpha_cutoff(const nt_glb_scene_t *scene, uint32_t tex_index, const cgltf_data *gltf, float *out_cutoff) {
     bool tested = false;
     float cutoff = 0.0F;
-    for (uint32_t mi = 0; mi < scene->material_count && mi < gltf->materials_count; mi++) {
+    for (uint32_t mi = 0; mi < scene->material_count; mi++) {
         const nt_glb_material_t *mat = &scene->materials[mi];
-        const cgltf_alpha_mode am = gltf->materials[mi].alpha_mode;
-        if (mat->diffuse_index != tex_index || (am != cgltf_alpha_mode_mask && am != cgltf_alpha_mode_blend)) {
+        if (mat->diffuse_index != tex_index || classify_material(mat, &gltf->materials[mi]) != SPONZA_SHADER_ALPHA) {
             continue;
         }
         const char *name = mat->name ? mat->name : "(unnamed)";
@@ -144,7 +147,7 @@ static bool texture_alpha_cutoff(const nt_glb_scene_t *scene, uint32_t tex_index
 }
 
 /* --- Add all textures with per-role format, optional resize and Basis compression --- */
-/* color_compress: codec for diffuse/specular/unknown textures; normal_compress: codec for normal maps */
+/* color_compress: codec for colour and data textures; normal_compress: codec for normal maps */
 
 static void add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t max_size, nt_basisu_encode_opts_t color_compress, nt_basisu_encode_opts_t normal_compress) {
     tex_role_t *roles = build_texture_roles(scene);
@@ -269,6 +272,7 @@ static void add_neutral_textures(NtBuilderContext *ctx) {
     static const uint8_t s_white_rgba[4] = {255, 255, 255, 255};
     nt_tex_opts_t opts = nt_tex_opts_defaults();
     opts.format = NT_TEXTURE_FORMAT_RGB8;
+    opts.process = nt_tex_process_data(); /* white albedo, roughness 1, or a flat normal: plain numbers */
     nt_builder_add_texture_raw(ctx, s_white_rgba, 1, 1, "sponza/neutral_white", &opts);
     nt_builder_add_texture_raw(ctx, s_flat_normal_rgba, 1, 1, "sponza/neutral_normal", &opts);
 }

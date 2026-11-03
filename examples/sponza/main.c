@@ -550,60 +550,65 @@ static void frame(void) {
 
     /* ---- Render ---- */
 
-    nt_gfx_begin_pass(&(nt_pass_desc_t){
-        .clear_color = {0.529F, 0.808F, 0.922F, 1.0F}, /* sky blue */
-        .clear_depth = 1.0F,
-        .discard_depth = true,
-    });
+    const bool render_enabled = nt_app_render_enabled();
+    if (render_enabled) {
+        nt_gfx_begin_pass(&(nt_pass_desc_t){
+            .clear_color = {0.529F, 0.808F, 0.922F, 1.0F}, /* sky blue */
+            .clear_depth = 1.0F,
+            .discard_depth = true,
+        });
 
-    if (item_count > 0) {
-        /* View block (slot 0) */
-        nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &uniforms, sizeof(uniforms));
+        if (item_count > 0) {
+            /* View block (slot 0) */
+            nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &uniforms, sizeof(uniforms));
 
-        /* Lighting block (slot 1) */
-        nt_lighting_t lighting = {
-            .light_dir = {0.5F, 0.7F, 0.5F, 0.0F},    /* angled sunlight */
-            .light_color = {1.0F, 0.95F, 0.9F, 1.2F}, /* warm white, intensity 1.2 */
-            .ambient = {0.6F, 0.65F, 0.8F, 0.08F},    /* cool ambient, intensity 0.08 */
-        };
-        nt_gfx_bind_uniform_block(NT_GFX_SLOT_GAME, &lighting, sizeof(lighting));
+            /* Lighting block (slot 1) */
+            nt_lighting_t lighting = {
+                .light_dir = {0.5F, 0.7F, 0.5F, 0.0F},    /* angled sunlight */
+                .light_color = {1.0F, 0.95F, 0.9F, 1.2F}, /* warm white, intensity 1.2 */
+                .ambient = {0.6F, 0.65F, 0.8F, 0.08F},    /* cool ambient, intensity 0.08 */
+            };
+            nt_gfx_bind_uniform_block(NT_GFX_SLOT_GAME, &lighting, sizeof(lighting));
 
-        /* Draw all render items */
-        nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, items, item_count);
+            /* Draw all render items */
+            nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, items, item_count);
 
 #if NT_LOG_MIN_LEVEL == 0
-        /* Per-second FPS + render stats */
-        {
-            static double s_stats_accum;
-            static uint32_t s_stats_frames;
-            static float s_stats_max_dt;
-            s_stats_accum += (double)g_nt_app.dt;
-            s_stats_frames++;
-            if (g_nt_app.dt > s_stats_max_dt) {
-                s_stats_max_dt = g_nt_app.dt;
+            /* Per-second FPS + render stats */
+            {
+                static double s_stats_accum;
+                static uint32_t s_stats_frames;
+                static float s_stats_max_dt;
+                s_stats_accum += (double)g_nt_app.dt;
+                s_stats_frames++;
+                if (g_nt_app.dt > s_stats_max_dt) {
+                    s_stats_max_dt = g_nt_app.dt;
+                }
+                if (s_stats_accum >= 1.0) {
+                    float avg_fps = (float)s_stats_frames / (float)s_stats_accum;
+                    float min_fps = (s_stats_max_dt > 0.0F) ? (1.0F / s_stats_max_dt) : 0.0F;
+                    nt_log_info("FPS avg=%.1f min=%.1f dt=%.4f spd=%.0f | draws=%u inst=%" PRIu64 " verts=%" PRIu64 " tris=%" PRIu64 " items=%u/%u", (double)avg_fps, (double)min_fps,
+                                (double)g_nt_app.dt, (double)s_move_speed, nt_gfx_draw_calls(&g_nt_gfx.counters), g_nt_gfx.counters.instances, g_nt_gfx.counters.vertices,
+                                g_nt_gfx.counters.indices / 3, item_count, s_entity_count);
+                    s_stats_accum = 0.0;
+                    s_stats_frames = 0;
+                    s_stats_max_dt = 0.0F;
+                }
             }
-            if (s_stats_accum >= 1.0) {
-                float avg_fps = (float)s_stats_frames / (float)s_stats_accum;
-                float min_fps = (s_stats_max_dt > 0.0F) ? (1.0F / s_stats_max_dt) : 0.0F;
-                nt_log_info("FPS avg=%.1f min=%.1f dt=%.4f spd=%.0f | draws=%u inst=%" PRIu64 " verts=%" PRIu64 " tris=%" PRIu64 " items=%u/%u", (double)avg_fps, (double)min_fps, (double)g_nt_app.dt,
-                            (double)s_move_speed, nt_gfx_draw_calls(&g_nt_gfx.counters), g_nt_gfx.counters.instances, g_nt_gfx.counters.vertices, g_nt_gfx.counters.indices / 3, item_count,
-                            s_entity_count);
-                s_stats_accum = 0.0;
-                s_stats_frames = 0;
-                s_stats_max_dt = 0.0F;
-            }
-        }
 #endif
-    }
+        }
 
-    nt_gfx_end_pass();
+        nt_gfx_end_pass();
+    }
     nt_gfx_end_frame();
     nt_example_frames_end(s_full_promoted && s_scene_loaded);
 
+    if (render_enabled) {
 #ifdef NT_DEVAPI_ENABLED
-    nt_devapi_frame_rendered();
+        nt_devapi_frame_rendered();
 #endif
-    nt_window_swap_buffers();
+        nt_window_swap_buffers();
+    }
 }
 
 int main(int argc, char **argv) {
@@ -628,6 +633,9 @@ int main(int argc, char **argv) {
 
     /* 4. GFX init -- Sponza needs larger pools (69 textures, 103 meshes) */
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+#ifdef NT_DEVAPI_GROUP_GFX
+    gfx_desc.capture_capacity = 16384; /* gfx.record: records of one frame */
+#endif
     gfx_desc.max_textures = 256;
     gfx_desc.max_buffers = 512;
     gfx_desc.max_meshes = 256;

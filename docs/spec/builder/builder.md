@@ -292,9 +292,10 @@ The pipeline:
    on both sides. The contract is the closest attainable coverage, not a fixed
    tolerance: a 4x4 level moves in steps of 1/16. The core is never scaled, so the
    next level filters the unscaled alpha. Decoded UASTC stays within about 2% of
-   level 0 on levels of 64 texels or more; the ETC1S alpha slice keeps that on
-   large levels but is too coarse to hold coverage at 4x4, so alpha-tested
-   textures take UASTC. A cutoff exactly on a byte step (`k / 255`) leaves texels
+   level 0 on levels of 64 texels or more. ETC1S is cheaper and keeps that on
+   large levels, but its alpha slice is coarse on the smallest mips: on the sponza
+   foliage at 512 px, mips 5 and 6 keep 76-100% of the coverage against 91-102%
+   with UASTC, for 9% more pack. A cutoff exactly on a byte step (`k / 255`) leaves texels
    exactly at `T` to the GPU float compare; a cutoff between steps does not.
 
 Filter and dilation edges follow the sampler wrap per axis: `REPEAT` wraps,
