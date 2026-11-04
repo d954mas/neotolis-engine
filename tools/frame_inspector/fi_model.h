@@ -5,6 +5,7 @@
  * and summary. No UI and no gfx backend, so the tests drive it directly. */
 
 #include "graphics/nt_gfx.h"
+#include "graphics/nt_gfx_capture_text.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -106,6 +107,16 @@ typedef struct {
     uint64_t bytes;
 } fi_buffer_upload_t;
 
+/* What a GL name stood for at one record: the frontend object it belonged to then, an engine-internal object
+ * by its role, or nothing the frame recorded. */
+typedef enum { FI_GL_UNKNOWN, FI_GL_OBJECT, FI_GL_UPLOAD_VAO, FI_GL_TIMER_QUERY } fi_gl_owner_t;
+typedef struct {
+    uint16_t at;   /* the name's byte offset in the record */
+    uint8_t owner; /* fi_gl_owner_t */
+    uint8_t kind;  /* FI_GL_OBJECT: nt_gfx_object_kind_t */
+    uint32_t object;
+} fi_gl_ref_t;
+
 typedef struct {
     nt_gfx_capture_view_t view; /* events NULL: the header was rejected */
     const char *error;          /* NULL when the document parsed whole */
@@ -133,6 +144,8 @@ typedef struct {
     uint8_t *alias_kind;
     const char **alias_label;          /* the frame's strings; "" when unlabeled */
     uint32_t *def;                     /* per operation on an object: the object's latest definition before it, FI_NONE */
+    uint32_t *gl_first;                /* per record: its first gl_ref; record count + 1 entries */
+    fi_gl_ref_t *gl_ref;               /* every GL name of every record, resolved at its record */
     fi_buffer_upload_t *buffer_upload; /* the biggest first */
     uint32_t buffer_upload_count;
     /* Merge check: per draw the break and the record that caused it (the command between, or the previous draw). */
@@ -236,13 +249,69 @@ uint32_t fi_group_in(const fi_frame_t *to, const fi_frame_t *from, uint32_t g);
 uint32_t fi_parent(const fi_frame_t *frame, uint32_t id);
 /* The draw a merged (CACHE) draw joined; FI_NONE for anything else. */
 uint32_t fi_joined(const fi_frame_t *frame, uint32_t record);
+/* The GL draw call that drew a draw request: its own, or for a merged draw that of the draw its merges joined;
+ * FI_NONE when no GL draw call names it. */
+uint32_t fi_gl_draw(const fi_frame_t *frame, uint32_t record);
 /* Whether two records that set one piece of request state leave it alike: an inherited value (INITIAL)
  * and a request (OP) compare by value, a texture set by its textures. FI_NONE is unset. */
 bool fi_same_setting(const fi_frame_t *frame, uint32_t a, uint32_t b);
 /* Whether two records that set one GL slot leave the same value: an inherited cache entry and a call compare
  * by the bound name. */
 bool fi_gl_same(const fi_frame_t *frame, const fi_gl_slot_t *slot, uint32_t a, uint32_t b);
-/* The GL name (or texture unit) a slot holds after record r; false when r sets the slot without a name. */
+
+/* How an issued call's argument reads (capture encoding, render architecture "Frame observation"). */
+typedef enum {
+    FI_ARG_PLAIN,
+    FI_ARG_SIGNED,
+    FI_ARG_POINTER, /* a pointer's presence: data or NULL */
+    FI_ARG_ENUM,    /* sub: a value set (nt_gfx_capture_domain_t or FI_DOMAIN_*) */
+    FI_ARG_NAME,    /* sub: nt_gfx_gl_object_t */
+} fi_arg_kind_t;
+/* Value sets only GL call arguments use, after the capture field table's domains. */
+enum {
+    FI_DOMAIN_GL_PRIMITIVE = NT_GFX_DOMAIN_COUNT,
+    FI_DOMAIN_GL_CLEAR_MASK,
+    FI_DOMAIN_GL_BOOL,
+};
+typedef struct {
+    uint8_t kind, sub;
+} fi_arg_t;
+/* Argument k of an issued call; a call or position without an entry is a plain number. */
+fi_arg_t fi_call_arg(uint32_t call, uint32_t k);
+
+/* The GL name at byte offset `at` of a record, resolved at that record. */
+fi_gl_ref_t fi_gl_ref(const fi_frame_t *frame, uint32_t record, uint32_t at);
+/* A role's words: "upload VAO", "timer query"; NULL for an object or an unknown name. */
+const char *fi_gl_role(uint8_t owner);
+
+/* The frontend objects a record names: its own object, its handle fields, a note's handle, and the GL names it
+ * holds resolved at that record. field: the capture field's name, "obj", or an issued call's argument index. */
+typedef struct {
+    const char *field;
+    uint8_t kind;
+    uint32_t object;
+} fi_named_t;
+#define FI_NAMED 24U
+uint32_t fi_named_objects(const fi_frame_t *frame, uint32_t record, fi_named_t out[FI_NAMED]);
+
+/* One object through the frame, by one scan: its definition, the GL names it held (a new one after a context
+ * restore or a re-creation), and every record that names it, by group and then in record order. */
+typedef struct {
+    uint32_t name, from; /* a GL name, and the first record that names the object by it */
+} fi_gl_span_t;
+#define FI_GL_SPANS 8U
+typedef struct {
+    uint8_t kind;
+    uint32_t object;
+    uint32_t definition; /* its latest CREATE definition, FI_NONE: the frame has none */
+    fi_gl_span_t span[FI_GL_SPANS];
+    uint32_t span_count;
+    bool spans_full;  /* more GL names than FI_GL_SPANS: the rest are not listed */
+    uint32_t *record; /* malloc'd */
+    uint32_t count;
+} fi_object_t;
+void fi_object(const fi_frame_t *frame, uint32_t kind, uint32_t object, fi_object_t *out);
+void fi_object_free(fi_object_t *object);
 
 bool fi_is_draw(const nt_gfx_event_t *e);           /* a draw request of any kind */
 bool fi_is_mergeable_draw(const nt_gfx_event_t *e); /* a plain or indexed draw: instanced draws never merge */

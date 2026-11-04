@@ -111,14 +111,15 @@ static const nt_ui_label_style_t k_wrap = {.font_id = 0, .font_size = FONT, .col
 // #region state
 typedef enum { VIEW_LOGICAL, VIEW_RAW, VIEW_GL, VIEW_COUNT } view_t;
 /* One task per page, as in Spector: frames over time, the frame's commands, its numbers, the frame against a base
- * frame, its start and end state. */
-typedef enum { PAGE_FRAMES, PAGE_COMMANDS, PAGE_INFO, PAGE_COMPARE, PAGE_INIT, PAGE_END, PAGE_COUNT } page_t;
+ * frame, its start and end state, one object through the frame. */
+typedef enum { PAGE_FRAMES, PAGE_COMMANDS, PAGE_INFO, PAGE_COMPARE, PAGE_INIT, PAGE_END, PAGE_OBJECT, PAGE_COUNT } page_t;
 typedef enum { TRACK_DRAW_CALLS, TRACK_GL_CALLS, TRACK_UPLOAD, TRACK_RECORDS, TRACK_COUNT } track_t;
 
-/* A place to go back to: a page, a frame and the row selected there. */
+/* A place to go back to: a page, a frame, the row selected there and the object Object shows. */
 typedef struct {
     int page;
     uint32_t file, frame, selected;
+    uint32_t obj_kind, obj;
 } place_t;
 
 static struct {
@@ -134,6 +135,7 @@ static struct {
     fi_query_t query;
     char query_label[96];
     int page;
+    uint32_t obj_kind, obj;   /* the object Object shows; obj 0: none picked */
     place_t history[HISTORY]; /* places left by a click or a jump, for Back */
     uint32_t history_count;
     place_t future[HISTORY];
@@ -474,7 +476,7 @@ static void reveal(uint32_t id) {
     s.flash_until = nt_time_now() + 0.8;
 }
 
-static place_t here(void) { return (place_t){.page = s.page, .file = s.file, .frame = s.frame, .selected = s.selected}; }
+static place_t here(void) { return (place_t){.page = s.page, .file = s.file, .frame = s.frame, .selected = s.selected, .obj_kind = s.obj_kind, .obj = s.obj}; }
 
 /* Pushes the current place for Back, unless it is already the last one. */
 static void remember(void) {
@@ -496,6 +498,8 @@ static void go_to(place_t p) {
         select_frame(p.file, p.frame);
     }
     s.page = p.page;
+    s.obj_kind = p.obj_kind;
+    s.obj = p.obj;
     if (p.selected != FI_NONE) {
         reveal(p.selected);
     } else {
@@ -510,6 +514,13 @@ static void select_record(uint32_t id) {
     }
     reveal(id);
     s.page = PAGE_COMMANDS;
+}
+
+static void open_object(uint32_t kind, uint32_t object) {
+    remember();
+    s.obj_kind = kind;
+    s.obj = object;
+    s.page = PAGE_OBJECT;
 }
 
 /* History holds file and frame numbers: closing a file drops it (close_file). */
@@ -2127,6 +2138,9 @@ static void declare_verdict(const fi_frame_t *fr, uint32_t id) {
         if (fi_joined(fr, id) != FI_NONE) {
             link_line(fr, "joined ", fi_joined(fr, id));
         }
+        if (fi_gl_draw(fr, id) != FI_NONE) {
+            link_line(fr, "GL draw ", fi_gl_draw(fr, id));
+        }
         break;
     case FI_VERDICT_FAILED:
         textf(&k_bad, "%s: nothing drawn", nt_gfx_result_name(fr->view.events[id].result));
@@ -2144,6 +2158,29 @@ static void declare_verdict(const fi_frame_t *fr, uint32_t id) {
         break;
     case FI_VERDICT_NOT_DRAW:
         break;
+    }
+}
+
+/* The objects a record names, each a link to its Object page. */
+static void declare_objects(const fi_frame_t *fr, uint32_t id) {
+    fi_named_t named[FI_NAMED];
+    const uint32_t n = fi_named_objects(fr, id, named);
+    for (uint32_t k = 0; k < n; k++) {
+        if (k == 0) {
+            section("Objects it names");
+        }
+        char buf[FI_ALIAS_LEN + 64];
+        char alias[FI_ALIAS_LEN];
+        fi_alias_text(fr, named[k].kind, named[k].object, alias, sizeof(alias));
+        (void)snprintf(buf, sizeof(buf), "%s: %s", named[k].field, alias);
+        const uint32_t ui = next_id();
+        const nt_ui_events_t ev = nt_ui_events(s_ctx, ui, NULL);
+        CLAY({.id = (Clay_ElementId){.id = ui}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .padding = {4, 4, 1, 1}}, .backgroundColor = ev.hovered ? k_hover : k_panel}) {
+            text(buf, &k_link_wrap);
+        }
+        if (ev.clicked) {
+            open_object(named[k].kind, named[k].object);
+        }
     }
 }
 
@@ -2168,6 +2205,7 @@ static void declare_details(const fi_frame_t *fr) {
         textf(&k_dim, "phase: %s", fi_node_name((fi_node_t)(fr->parent[id] - FI_NODE_BASE)));
     }
     textf(&k_dim, "group: %s", fr->group_key[fr->group[id]]);
+    declare_objects(fr, id);
     panel_cache(fr, id);
     for (uint32_t k = 0; k < s_panel.child_count; k++) {
         if (k == 0) {
@@ -2262,6 +2300,74 @@ static void declare_state(const fi_frame_t *fr, const fi_state_view_t *st, bool 
     if (shown == 0 && prev_issue != FI_NONE) {
         textf(&k_dim, "no GL state changed since the %s", fi_compare_name(st->compare, true));
     }
+}
+// #endregion
+
+// #region object
+/* One object through the frame: its definition, the GL names it held, every record that names it by group.
+ * Built by one scan when the object or the frame changes. */
+static void declare_object_page(const fi_frame_t *fr) {
+    static struct {
+        uint32_t epoch, kind, object;
+        fi_object_t obj;
+    } view = {.epoch = FI_NONE};
+    if (s.obj == 0) {
+        text("Pick an object: a record's \"Objects it names\" in Commands opens it here.", &k_dim);
+        return;
+    }
+    if (view.epoch != s.frame_epoch || view.kind != s.obj_kind || view.object != s.obj) {
+        fi_object_free(&view.obj);
+        fi_object(fr, s.obj_kind, s.obj, &view.obj);
+        view.epoch = s.frame_epoch;
+        view.kind = s.obj_kind;
+        view.object = s.obj;
+    }
+    const fi_object_t *o = &view.obj;
+    const nt_ui_scroll_style_t scroll = nt_ui_scroll_style_defaults();
+    nt_ui_scroll_begin(
+        s_ctx, NULL, nt_ui_id("object"), &scroll,
+        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .padding = CLAY_PADDING_ALL(12), .childGap = 2},
+                                   .backgroundColor = k_panel});
+    char alias[FI_ALIAS_LEN];
+    fi_alias_text(fr, o->kind, o->object, alias, sizeof(alias));
+    textf(&k_head, "%s  (%s %u)", alias, nt_gfx_object_kind_name(o->kind), o->object);
+    if (fr->view.overflow || fr->error != NULL) {
+        textf(&k_warn, "the frame %s: records after it are missing", fr->view.overflow ? "overflowed" : "parsed only up to an error");
+    }
+    section("Definition");
+    if (o->definition != FI_NONE) {
+        link_line(fr, "", o->definition);
+    } else {
+        text("none: the frame holds no CREATE definition of it", &k_dim);
+    }
+    if (o->span_count > 0) {
+        section("GL names (a new one after a context restore or a re-creation)");
+    }
+    for (uint32_t k = 0; k < o->span_count; k++) {
+        char what[48];
+        (void)snprintf(what, sizeof(what), "GL name %u from ", o->span[k].name);
+        link_line(fr, what, o->span[k].from);
+    }
+    if (o->spans_full) {
+        text("... more GL names than listed", &k_dim);
+    }
+    char title[64];
+    (void)snprintf(title, sizeof(title), "Records that name it (%u), by group", o->count);
+    section(title);
+    enum { SHOWN = 400 };
+    uint32_t group = FI_NONE;
+    for (uint32_t k = 0; k < o->count && k < SHOWN; k++) {
+        const uint32_t g = fr->group[o->record[k]];
+        if (g != group) {
+            textf(&k_head, "%s", fr->group_key[g]);
+            group = g;
+        }
+        link_line(fr, "", o->record[k]);
+    }
+    if (o->count > SHOWN) {
+        textf(&k_dim, "... %u more; query mode lists them all: object @%u", o->count - SHOWN, o->record[0]);
+    }
+    nt_ui_scroll_end(s_ctx);
 }
 // #endregion
 
@@ -2490,6 +2596,7 @@ static void declare_status(void) {
         break;
     case PAGE_INIT:
     case PAGE_END:
+    case PAGE_OBJECT:
     case PAGE_COUNT:
         text("click: pick a record, again: open it in Commands   Alt+Left: back", &k_dim);
         break;
@@ -2516,7 +2623,7 @@ static void declare_frame_picker(void) {
 }
 
 static void declare_menu(void) {
-    static const char *const k_pages[PAGE_COUNT] = {"Frames", "Commands", "Information", "Compare", "Init state", "End state"};
+    static const char *const k_pages[PAGE_COUNT] = {"Frames", "Commands", "Information", "Compare", "Init state", "End state", "Object"};
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
         if (button("Open...", &k_link, false)) {
             s.open_requested = true;
@@ -2560,6 +2667,8 @@ static void declare_ui(void) {
                 declare_info_page();
             } else if (s.page == PAGE_COMPARE) {
                 declare_compare_page();
+            } else if (s.page == PAGE_OBJECT) {
+                declare_object_page(frame_sel());
             } else {
                 declare_frame_state(frame_sel(), s.page == PAGE_END);
             }
@@ -2682,7 +2791,7 @@ static void frame(void) {
  * @ number), --filter TEXT. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void parse_args(int argc, char *argv[]) {
-    static const char *const k_pages[PAGE_COUNT] = {"frames", "commands", "info", "compare", "init", "end"};
+    static const char *const k_pages[PAGE_COUNT] = {"frames", "commands", "info", "compare", "init", "end", "object"};
     const char *frame = NULL;
     const char *base = NULL;
     const char *page = NULL;

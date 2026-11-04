@@ -139,7 +139,23 @@ static void test_record_tells_merged_and_broken_draws(void) {
     text = ask("record @233", true);
     assert_holds(text, "merged  # no new GL draw call");
     assert_holds(text, "joined @224 ");
+    assert_holds(text, "\ngl_draw @680  glDrawElements(");
     assert_holds(ask("record @204", true), "new_gl_draw 1 of 9\nnot_merged instanced");
+}
+
+/* A texture of the snapshot and of the sprite group: its definition, its GL name, and its records by group. */
+static void test_object_lists_where_it_is_named(void) {
+    assert_holds(ask("record @128", true), "\nobject texture tex#1  # object @128.texture\nobject sampler smp#2  # object @128.sampler\n");
+    const char *text = ask("object @128.texture", true);
+    assert_holds(text, "object tex#1  # TEXTURE 65541\ndefinition @74  DEFINITION CREATE tex#1 slot=5 ");
+    assert_holds(text, "\ngl_name 5 from @128\nrecords 44\ngroup g0  # (no note or marker)\n  @74  ");
+    assert_holds(text, "\n  @183  DEFINITION STATE TEXTURE slot=5 gl_name=5 tex#1\ngroup g2  # > sprite\n  @218  NOTE_FIELD page=tex#1\n");
+    assert_holds(text, "\n  @689  glBindTexture(GL_TEXTURE_2D,5 tex#1)\n");
+    TEST_ASSERT_EQUAL_STRING(text, ask("object @74", true)); /* a definition names its own object first */
+    assert_holds(ask("object @657.0", true), "object prog/shape/fill#1  # PROGRAM ");
+    assert_holds(ask("object @128.unit", false), "error: record @128 names no object by unit");
+    assert_holds(ask("object @1", false), "error: record @1 names no object;");
+    assert_holds(ask("object", false), "error: object needs @N[.FIELD]");
 }
 
 /* A draw's state compares with the previous draw; its GL state is its own last call, or the call of the draw a
@@ -359,17 +375,18 @@ static void test_aliases_show_labels(void) {
 /* Rows name every captured value by its field: packed backend state, pipeline state, engine enums, flag sets,
  * handles in notes, GL call arguments and cache keys; the record page keeps the line as captured. */
 static void test_rows_decode_captured_values(void) {
-    assert_holds(ask("record @114", true), "@114  INITIAL STATE BACKEND program=19 vertex_array=7 active_texture=GL_TEXTURE0 width=1280 height=800 upload_vertex_array=1 array_buffer=3\n");
+    assert_holds(ask("record @114", true), "@114  INITIAL STATE BACKEND program=19 prog/skeletal_showcase/sprite#1 vertex_array=7 vi/sprite_vi#1 active_texture=GL_TEXTURE0 "
+                                           "width=1280 height=800 upload_vertex_array=1 upload VAO array_buffer=3 buf/frame_vertex#1\n");
     assert_holds(ask("record @114", true), "\ncaptured INITIAL op=STATE layer=BACKEND program=19 vertex_array=7 active_texture=33984 ");
-    assert_holds(ask("record @117", true), "INITIAL PIPELINE program_gl=19 depth_func=GL_LEQUAL blend src_rgb=GL_ONE dst_rgb=GL_ONE_MINUS_SRC_ALPHA ");
+    assert_holds(ask("record @117", true), "INITIAL PIPELINE program_gl=19 prog/skeletal_showcase/sprite#1 depth_func=GL_LEQUAL blend src_rgb=GL_ONE dst_rgb=GL_ONE_MINUS_SRC_ALPHA ");
     assert_holds(ask("record @79", true), "DEFINITION CREATE smp#2 gl_name=2 min_filter=LINEAR_MIPMAP_LINEAR mag_filter=LINEAR wrap_u=REPEAT wrap_v=REPEAT\n");
     assert_holds(ask("record @90", true), "DEFINITION CREATE layout#2 slot=3 stride=32 locations=1-5\n");
     assert_holds(ask("record @36", true), " vertex_buffer=buf/shape_line_template#1 index_buffer=buf/shape_line_template#2 index_type=U16 ");
     assert_holds(ask("record @218", true), "@218  NOTE_FIELD page=tex#1\n");
     assert_holds(ask("record @639", true), "@639  BUFFER_UPLOAD buf/frame_index#1 size=11184 data\n");
     assert_holds(ask("record @642", true), "@642  glBufferSubData(GL_ELEMENT_ARRAY_BUFFER,0,11184,data) bytes=11184\n");
-    assert_holds(ask("record @678", true), "@678  glBindSampler cache sampler=2  [GL skipped]\n");
-    assert_holds(ask("record @662", true), "@662  glVertexAttribPointer cache vertex_array=3 buffer=3 layout=1  [GL skipped]\n");
+    assert_holds(ask("record @678", true), "@678  glBindSampler cache sampler=2 smp#2  [GL skipped]\n");
+    assert_holds(ask("record @662", true), "@662  glVertexAttribPointer cache vertex_array=3 vi/shape_fill_vi#1 buffer=3 buf/frame_vertex#1 layout=1  [GL skipped]\n");
     assert_holds(ask("record @663", true), "@663  glBindBufferRange cache slot=2 offset=256 size=96  [GL skipped]\n");
     assert_holds(ask("record @118", true), "@118  DEFINITION PIPELINE slot=1 program_slot=1 depth_func=GL_LEQUAL ");
     assert_holds(ask("record @195", true), "@195  PASS target=default framebuffer color=[0.035,0.05,0.08,1] depth=1");
@@ -382,9 +399,9 @@ static void test_state_of_a_gl_call_is_its_request_state(void) {
     assert_holds(text, "\ncompared previous draw @260  ");
     assert_holds(text, "\n  output: pass               @195  PASS ");
     assert_holds(text, "\n* program: pipeline          @265  PIPELINE pipe/skeletal_showcase/text#1\n");
-    assert_holds(text, "\n* UseProgram                 @681  glUseProgram(20)\n");
-    assert_holds(text, "\n    was @128  INITIAL TEXTURE texture=5\n");
-    assert_holds(text, "\n    was @128  INITIAL TEXTURE sampler=2\n");
+    assert_holds(text, "\n* UseProgram                 @681  glUseProgram(20 prog/skeletal_showcase/text#1)\n");
+    assert_holds(text, "\n    was @128  INITIAL TEXTURE texture=5 tex#1\n");
+    assert_holds(text, "\n    was @128  INITIAL TEXTURE sampler=2 smp#2\n");
     assert_holds(text, "\n  GL_FRAMEBUFFER             inherited @114  INITIAL STATE BACKEND framebuffer=0\n");
     /* The inherited pass record holds the clear color and depth together; its line shows both. */
     assert_holds(ask("state init all", true), "INITIAL PASS color=[0.035,0.05,0.08,1] depth=1\n");
@@ -416,12 +433,33 @@ static void test_every_row_names_its_fields(void) {
     }
     fi_file_close(&web);
 }
+
+/* Every GL name of the native and web fixtures reads as the object it belonged to, or as a role. */
+static void test_every_gl_name_has_an_owner(void) {
+    fi_file_t web = {0};
+    TEST_ASSERT_EQUAL(NT_OK, nt_fs_init());
+    const bool opened = fi_file_open(&web, NT_WEB_FIXTURE);
+    nt_fs_shutdown();
+    TEST_ASSERT_TRUE(opened);
+    const fi_frame_t *frames[2] = {&s_file.frames[0], &web.frames[0]};
+    uint32_t names = 0;
+    for (uint32_t f = 0; f < 2; f++) {
+        const fi_frame_t *fr = frames[f];
+        for (uint32_t k = 0; k < fr->gl_first[fr->view.count]; k++) {
+            TEST_ASSERT_NOT_EQUAL(FI_GL_UNKNOWN, fr->gl_ref[k].owner);
+            names++;
+        }
+    }
+    TEST_ASSERT_GREATER_THAN_UINT32(200, names);
+    fi_file_close(&web);
+}
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_commands_answer_and_reject_bad_input);
     RUN_TEST(test_every_number_lists_its_records);
     RUN_TEST(test_groups_add_up_to_the_frame);
     RUN_TEST(test_record_tells_merged_and_broken_draws);
+    RUN_TEST(test_object_lists_where_it_is_named);
     RUN_TEST(test_state_views);
     RUN_TEST(test_a_repeated_sequence_has_two_addresses);
     RUN_TEST(test_compare_tells_what_differs);
@@ -431,5 +469,6 @@ int main(void) {
     RUN_TEST(test_rows_decode_captured_values);
     RUN_TEST(test_state_of_a_gl_call_is_its_request_state);
     RUN_TEST(test_every_row_names_its_fields);
+    RUN_TEST(test_every_gl_name_has_an_owner);
     return UNITY_END();
 }

@@ -8,6 +8,7 @@
 #include <inttypes.h>
 #include <math.h>
 #include <stdarg.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -161,13 +162,6 @@ static const char *gl_enum_name(uint32_t v) {
     }
     return NULL;
 }
-
-/* Value sets only GL call arguments use, after the capture field table's domains. */
-enum {
-    FI_DOMAIN_GL_PRIMITIVE = NT_GFX_DOMAIN_COUNT,
-    FI_DOMAIN_GL_CLEAR_MASK,
-    FI_DOMAIN_GL_BOOL,
-};
 
 // clang-format off: clang-format versions disagree on braces in a macro body
 #define FI_NAMES_(...) {(const char *const[]){__VA_ARGS__}, sizeof((const char *const[]){__VA_ARGS__}) / sizeof(const char *)}
@@ -349,97 +343,20 @@ static void value_text(const fi_frame_t *fr, uint8_t meaning, uint8_t sub, uint3
     }
 }
 
-/* How an issued call's argument reads (capture encoding, render architecture "Frame observation"). */
-typedef enum {
-    FI_ARG_PLAIN,
-    FI_ARG_SIGNED,
-    FI_ARG_POINTER, /* a pointer's presence: data or NULL */
-    FI_ARG_ENUM,    /* sub: a value set (nt_gfx_capture_domain_t or FI_DOMAIN_*) */
-} fi_arg_kind_t;
-typedef struct {
-    uint8_t kind, sub;
-} fi_arg_t;
-typedef struct {
-    const fi_arg_t *args;
-    uint8_t count;
-    bool repeat; /* the last argument repeats: gen/delete names, attachment lists */
-} fi_call_t;
-
-// clang-format off: clang-format versions disagree on braces in a macro body
-#define FI_U_ {FI_ARG_PLAIN, 0}
-#define FI_I_ {FI_ARG_SIGNED, 0}
-#define FI_P_ {FI_ARG_POINTER, 0}
-#define FI_E_ {FI_ARG_ENUM, NT_GFX_DOMAIN_GL}
-#define FI_D_(domain) {FI_ARG_ENUM, (domain)}
-#define FI_CALL_(...) {(const fi_arg_t[]){__VA_ARGS__}, (uint8_t)(sizeof((const fi_arg_t[]){__VA_ARGS__}) / sizeof(fi_arg_t)), false}
-#define FI_LIST_(...) {(const fi_arg_t[]){__VA_ARGS__}, (uint8_t)(sizeof((const fi_arg_t[]){__VA_ARGS__}) / sizeof(fi_arg_t)), true}
-// clang-format on
-/* Arguments in capture order (pointers are presence bits, gen/delete the count then the names, a returned value
- * last). A call without an entry prints plain numbers, GL names included. */
-static const fi_call_t k_calls[NT_GFX_GL_COUNT] = {
-    [NT_GFX_GL_glActiveTexture] = FI_CALL_(FI_D_(NT_GFX_DOMAIN_GL_TEXTURE_UNIT)),
-    [NT_GFX_GL_glBeginQuery] = FI_CALL_(FI_E_, FI_U_),
-    [NT_GFX_GL_glBindBuffer] = FI_CALL_(FI_E_, FI_U_),
-    [NT_GFX_GL_glBindBufferRange] = FI_CALL_(FI_E_, FI_U_, FI_U_, FI_U_, FI_U_),
-    [NT_GFX_GL_glBindFramebuffer] = FI_CALL_(FI_E_, FI_U_),
-    [NT_GFX_GL_glBindTexture] = FI_CALL_(FI_E_, FI_U_),
-    [NT_GFX_GL_glBlendEquationSeparate] = FI_CALL_(FI_E_, FI_E_),
-    [NT_GFX_GL_glBlendFuncSeparate] = FI_LIST_(FI_D_(NT_GFX_DOMAIN_GL_BLEND_FACTOR)),
-    [NT_GFX_GL_glBufferData] = FI_CALL_(FI_E_, FI_U_, FI_P_, FI_E_),
-    [NT_GFX_GL_glBufferSubData] = FI_CALL_(FI_E_, FI_U_, FI_U_, FI_P_),
-    [NT_GFX_GL_glCheckFramebufferStatus] = FI_CALL_(FI_E_, FI_E_),
-    [NT_GFX_GL_glClear] = FI_CALL_(FI_D_(FI_DOMAIN_GL_CLEAR_MASK)),
-    [NT_GFX_GL_glCompressedTexImage2D] = FI_CALL_(FI_E_, FI_U_, FI_E_, FI_U_, FI_U_, FI_U_, FI_U_, FI_P_),
-    [NT_GFX_GL_glCreateShader] = FI_CALL_(FI_E_, FI_U_),
-    [NT_GFX_GL_glCullFace] = FI_CALL_(FI_E_),
-    [NT_GFX_GL_glDepthFunc] = FI_CALL_(FI_E_),
-    [NT_GFX_GL_glDepthMask] = FI_CALL_(FI_D_(FI_DOMAIN_GL_BOOL)),
-    [NT_GFX_GL_glDisable] = FI_CALL_(FI_E_),
-    [NT_GFX_GL_glDrawArrays] = FI_CALL_(FI_D_(FI_DOMAIN_GL_PRIMITIVE), FI_U_, FI_U_),
-    [NT_GFX_GL_glDrawArraysInstanced] = FI_CALL_(FI_D_(FI_DOMAIN_GL_PRIMITIVE), FI_U_, FI_U_, FI_U_),
-    [NT_GFX_GL_glDrawBuffers] = FI_CALL_(FI_U_, FI_P_),
-    [NT_GFX_GL_glDrawElements] = FI_CALL_(FI_D_(FI_DOMAIN_GL_PRIMITIVE), FI_U_, FI_E_, FI_U_),
-    [NT_GFX_GL_glDrawElementsInstanced] = FI_CALL_(FI_D_(FI_DOMAIN_GL_PRIMITIVE), FI_U_, FI_E_, FI_U_, FI_U_),
-    [NT_GFX_GL_glEnable] = FI_CALL_(FI_E_),
-    [NT_GFX_GL_glEndQuery] = FI_CALL_(FI_E_),
-    [NT_GFX_GL_glFramebufferTexture2D] = FI_CALL_(FI_E_, FI_E_, FI_E_, FI_U_, FI_U_),
-    [NT_GFX_GL_glGenerateMipmap] = FI_CALL_(FI_E_),
-    [NT_GFX_GL_glGetActiveUniformBlockiv] = FI_CALL_(FI_U_, FI_U_, FI_E_, FI_P_),
-    [NT_GFX_GL_glGetError] = FI_CALL_(FI_E_),
-    [NT_GFX_GL_glGetProgramiv] = FI_CALL_(FI_U_, FI_E_, FI_P_),
-    [NT_GFX_GL_glGetQueryObjectui64v] = FI_CALL_(FI_U_, FI_E_, FI_P_),
-    [NT_GFX_GL_glGetQueryObjectuiv] = FI_CALL_(FI_U_, FI_E_, FI_P_),
-    [NT_GFX_GL_glGetShaderiv] = FI_CALL_(FI_U_, FI_E_, FI_P_),
-    [NT_GFX_GL_glGetString] = FI_CALL_(FI_E_, FI_P_),
-    [NT_GFX_GL_glGetUniformLocation] = FI_CALL_(FI_U_, FI_P_, FI_I_),
-    [NT_GFX_GL_glInvalidateFramebuffer] = FI_LIST_(FI_E_, FI_U_, FI_E_),
-    [NT_GFX_GL_glPixelStorei] = FI_CALL_(FI_E_, FI_U_),
-    [NT_GFX_GL_glReadBuffer] = FI_CALL_(FI_E_),
-    [NT_GFX_GL_glReadPixels] = FI_CALL_(FI_I_, FI_I_, FI_U_, FI_U_, FI_E_, FI_E_, FI_P_),
-    [NT_GFX_GL_glSamplerParameteri] = FI_CALL_(FI_U_, FI_E_, FI_E_),
-    [NT_GFX_GL_glScissor] = FI_CALL_(FI_I_, FI_I_, FI_U_, FI_U_),
-    [NT_GFX_GL_glShaderSource] = FI_CALL_(FI_U_, FI_U_, FI_P_, FI_P_),
-    [NT_GFX_GL_glTexImage2D] = FI_CALL_(FI_E_, FI_U_, FI_E_, FI_U_, FI_U_, FI_U_, FI_E_, FI_E_, FI_P_),
-    [NT_GFX_GL_glTexParameteri] = FI_CALL_(FI_E_, FI_E_, FI_E_),
-    [NT_GFX_GL_glTexSubImage2D] = FI_CALL_(FI_E_, FI_U_, FI_U_, FI_U_, FI_U_, FI_U_, FI_E_, FI_E_, FI_P_),
-    [NT_GFX_GL_glUniform1i] = FI_CALL_(FI_I_, FI_I_),
-    [NT_GFX_GL_glVertexAttribPointer] = FI_CALL_(FI_U_, FI_U_, FI_E_, FI_D_(FI_DOMAIN_GL_BOOL), FI_U_, FI_U_),
-    [NT_GFX_GL_glViewport] = FI_CALL_(FI_I_, FI_I_, FI_U_, FI_U_),
-};
-#undef FI_LIST_
-#undef FI_CALL_
-#undef FI_U_
-#undef FI_I_
-#undef FI_P_
-#undef FI_E_
-#undef FI_D_
-
-/* Argument k of a call by its table; a call or position the table leaves out is a plain number. */
-static fi_arg_t call_arg(const fi_call_t *c, uint32_t k) {
-    if (k < c->count) {
-        return c->args[k];
+/* A GL name and what it stood for at its record: "19 prog/skeletal_showcase/text#1", "1 upload VAO", or the bare
+ * name when the frame never recorded its owner or the row already names it (a definition's own name). */
+static void gl_name_text(const fi_frame_t *fr, const nt_gfx_event_t *e, size_t at, uint32_t v, char *buf, size_t size) {
+    const fi_gl_ref_t ref = fi_gl_ref(fr, (uint32_t)(e - fr->view.events), (uint32_t)at);
+    const char *role = fi_gl_role(ref.owner);
+    char alias[FI_ALIAS_LEN];
+    if (ref.owner == FI_GL_OBJECT && !(ref.kind == e->object_kind && ref.object == e->object)) {
+        fi_alias_text(fr, ref.kind, ref.object, alias, sizeof(alias));
+        (void)snprintf(buf, size, "%u %s", v, alias);
+    } else if (role != NULL) {
+        (void)snprintf(buf, size, "%u %s", v, role);
+    } else {
+        (void)snprintf(buf, size, "%u", v);
     }
-    return c->repeat && c->count > 0 ? c->args[c->count - 1U] : (fi_arg_t){FI_ARG_PLAIN, 0};
 }
 
 static void arg_text(fi_arg_t a, uint32_t v, char *buf, size_t size) {
@@ -458,13 +375,17 @@ static void arg_text(fi_arg_t a, uint32_t v, char *buf, size_t size) {
 
 /* An issued call as code: glBindBufferRange(GL_UNIFORM_BUFFER,0,2,512,256), floats after the integers. */
 static void call_text(const fi_frame_t *fr, const nt_gfx_event_t *e, char *buf, size_t size, size_t *at) {
-    const fi_call_t *c = e->detail < NT_GFX_GL_COUNT ? &k_calls[e->detail] : &(fi_call_t){0};
     const uint32_t ints = e->arg_count & 15U;
     const uint32_t floats = e->arg_count >> 4;
     appendf(buf, size, at, "%s(", nt_gfx_gl_call_name(e->detail));
     for (uint32_t k = 0; k < ints; k++) {
-        char v[96];
-        arg_text(call_arg(c, k), e->data.backend.args[k], v, sizeof(v));
+        char v[FI_ALIAS_LEN + 16];
+        const fi_arg_t a = fi_call_arg(e->detail, k);
+        if (a.kind == FI_ARG_NAME && e->data.backend.args[k] != 0) {
+            gl_name_text(fr, e, offsetof(nt_gfx_event_t, data.backend.args) + ((size_t)k * sizeof(uint32_t)), e->data.backend.args[k], v, sizeof(v));
+        } else {
+            arg_text(a, e->data.backend.args[k], v, sizeof(v));
+        }
         appendf(buf, size, at, "%s%s", k > 0 ? "," : "", v);
     }
     for (uint32_t k = 0; k < floats; k++) {
@@ -480,12 +401,15 @@ static void call_text(const fi_frame_t *fr, const nt_gfx_event_t *e, char *buf, 
 /* A request's render target 0 is the default framebuffer; other zero fields are left out, as in the capture text. */
 static bool shows_zero(const nt_gfx_capture_field_t *field, bool request) { return request && field->meaning == NT_GFX_MEANING_HANDLE && field->sub == NT_GFX_OBJECT_RENDER_TARGET; }
 
-static void u32_field_text(const fi_frame_t *fr, const nt_gfx_capture_field_t *field, uint32_t v, bool request, bool draw, char *buf, size_t size, size_t *at) {
-    char text[FI_ALIAS_LEN];
+static void u32_field_text(const fi_frame_t *fr, const nt_gfx_event_t *e, const nt_gfx_capture_field_t *field, uint32_t v, bool request, bool draw, char *buf, size_t size, size_t *at) {
+    char text[FI_ALIAS_LEN + 16];
     if (field->meaning == NT_GFX_MEANING_BOOL) {
         if (v != 0) {
             appendf(buf, size, at, " %s", field->name);
         }
+    } else if (field->meaning == NT_GFX_MEANING_GL_NAME && v != 0) {
+        gl_name_text(fr, e, field->offset, v, text, sizeof(text));
+        appendf(buf, size, at, " %s=%s", field->name, text);
     } else if (field->meaning == NT_GFX_MEANING_HANDLE && draw) { /* a draw's vertex input: the row's second name */
         value_text(fr, field->meaning, field->sub, v, text, sizeof(text));
         appendf(buf, size, at, " %s", text);
@@ -514,7 +438,8 @@ static void floats_text(const char *name, const unsigned char *p, uint32_t capac
 }
 
 /* One data field, named and decoded. */
-static void field_text(const fi_frame_t *fr, const nt_gfx_capture_field_t *field, const unsigned char *p, bool request, bool draw, char *buf, size_t size, size_t *at) {
+static void field_text(const fi_frame_t *fr, const nt_gfx_event_t *e, const nt_gfx_capture_field_t *field, bool request, bool draw, char *buf, size_t size, size_t *at) {
+    const unsigned char *p = (const unsigned char *)e + field->offset;
     uint32_t v = 0;
     int32_t s = 0;
     uint64_t wide = 0;
@@ -525,7 +450,7 @@ static void field_text(const fi_frame_t *fr, const nt_gfx_capture_field_t *field
     switch ((nt_gfx_field_type_t)field->type) {
     case NT_GFX_FIELD_U32:
         memcpy(&v, p, sizeof(v));
-        u32_field_text(fr, field, v, request, draw, buf, size, at);
+        u32_field_text(fr, e, field, v, request, draw, buf, size, at);
         break;
     case NT_GFX_FIELD_I32:
         memcpy(&s, p, sizeof(s));
@@ -578,7 +503,7 @@ static void fields_text(const fi_frame_t *fr, const nt_gfx_event_t *e, const cha
         const bool picked = only == NULL || strcmp(f[k].name, only) == 0;
         const bool shown = !draw || f[k].meaning == NT_GFX_MEANING_HANDLE || strcmp(f[k].name, "count") == 0;
         if (picked && shown) {
-            field_text(fr, &f[k], (const unsigned char *)e + f[k].offset, request, draw, buf, size, at);
+            field_text(fr, e, &f[k], request, draw, buf, size, at);
         }
     }
 }
@@ -1242,6 +1167,9 @@ static void put_verdict(const fi_frame_t *fr, uint32_t id, fi_out_t *out) {
         if (fi_joined(fr, id) != FI_NONE) {
             put_record(out, fr, "joined ", fi_joined(fr, id));
         }
+        if (fi_gl_draw(fr, id) != FI_NONE) {
+            put_record(out, fr, "gl_draw ", fi_gl_draw(fr, id));
+        }
         break;
     case FI_VERDICT_FAILED:
         put(out, "failed %s  # nothing drawn\n", nt_gfx_result_name(fr->view.events[id].result));
@@ -1271,6 +1199,13 @@ static void cmd_record(const fi_frame_t *fr, uint32_t id, fi_out_t *out) {
         put(out, "phase %s\n", fi_node_name((fi_node_t)(fr->parent[id] - FI_NODE_BASE)));
     }
     put(out, "group g%u  # %s\n", fr->group[id], fr->group_key[fr->group[id]]);
+    fi_named_t named[FI_NAMED];
+    const uint32_t n = fi_named_objects(fr, id, named);
+    for (uint32_t k = 0; k < n; k++) {
+        char alias[FI_ALIAS_LEN];
+        fi_alias_text(fr, named[k].kind, named[k].object, alias, sizeof(alias));
+        put(out, "object %s %s  # object @%u.%s\n", named[k].field, alias, id, named[k].field);
+    }
     for (uint32_t i = id + 1U; i < fr->view.count; i++) {
         if (fr->parent[i] == id) {
             put_record(out, fr, "caused ", i);
@@ -1279,6 +1214,60 @@ static void cmd_record(const fi_frame_t *fr, uint32_t id, fi_out_t *out) {
     const char *line = NULL;
     const size_t len = fi_record_text(fr, id, &line);
     put(out, "captured %.*s\n", (int)len, line);
+}
+
+/* object @N[.FIELD]: the object record N names (by FIELD when it names several), and every record of the frame
+ * that names it. */
+static bool cmd_object(const fi_frame_t *fr, const char *arg, fi_out_t *out) {
+    char at[24];
+    const char *dot = strchr(arg, '.');
+    const size_t len = dot != NULL ? (size_t)(dot - arg) : strlen(arg);
+    (void)snprintf(at, sizeof(at), "%.*s", (int)(len < sizeof(at) ? len : sizeof(at) - 1U), arg);
+    uint32_t record = 0;
+    if (!parse_record(fr, at, &record, out)) {
+        return false;
+    }
+    fi_named_t named[FI_NAMED];
+    const uint32_t n = fi_named_objects(fr, record, named);
+    uint32_t pick = dot == NULL && n > 0 ? 0U : FI_NONE;
+    for (uint32_t k = 0; dot != NULL && k < n && pick == FI_NONE; k++) {
+        pick = strcmp(named[k].field, dot + 1) == 0 ? k : FI_NONE;
+    }
+    if (pick == FI_NONE) {
+        put(out, "error: record @%u names no object%s%s; record @%u lists its objects\n", record, dot != NULL ? " by " : "", dot != NULL ? dot + 1 : "", record);
+        return false;
+    }
+    fi_object_t obj;
+    fi_object(fr, named[pick].kind, named[pick].object, &obj);
+    char alias[FI_ALIAS_LEN];
+    fi_alias_text(fr, obj.kind, obj.object, alias, sizeof(alias));
+    put(out, "object %s  # %s %u\n", alias, nt_gfx_object_kind_name(obj.kind), obj.object);
+    if (fr->view.overflow || fr->error != NULL) {
+        put(out, "incomplete  # the frame %s: records after it are missing\n", fr->view.overflow ? "overflowed" : "parsed only up to an error");
+    }
+    if (obj.definition != FI_NONE) {
+        put_record(out, fr, "definition ", obj.definition);
+    } else {
+        put(out, "definition none  # the frame holds no CREATE definition of it\n");
+    }
+    for (uint32_t k = 0; k < obj.span_count; k++) {
+        put(out, "gl_name %u from @%u\n", obj.span[k].name, obj.span[k].from);
+    }
+    if (obj.spans_full) {
+        put(out, "gl_name ...  # more GL names than listed\n");
+    }
+    put(out, "records %u\n", obj.count);
+    uint32_t group = FI_NONE;
+    for (uint32_t k = 0; k < obj.count; k++) {
+        const uint32_t g = fr->group[obj.record[k]];
+        if (g != group) {
+            put(out, "group g%u  # %s\n", g, fr->group_key[g]);
+            group = g;
+        }
+        put_record(out, fr, "  ", obj.record[k]);
+    }
+    fi_object_free(&obj);
+    return true;
 }
 
 static void put_state_record(fi_out_t *out, const fi_frame_t *fr, const char *prefix, const fi_state_line_t *l, uint32_t record) {
@@ -1552,7 +1541,9 @@ static void cmd_help(fi_out_t *out) {
              "frame INDEX                # read this frame: the first column of frames\n"
              "summary                    # the frame's numbers, each with a key for list\n"
              "groups                     # per marker and note: requests, GL draws, GL calls, upload bytes, drops\n"
-             "record @N                  # the record, merged or a new GL draw and why, its parent, group and GL calls\n"
+             "record @N                  # the record, merged or a new GL draw and why, its parent, group, objects and GL calls\n"
+             "object @N[.FIELD]          # the object record N names (by FIELD of its object lines): its definition, its GL\n"
+             "                           # names, and every record of the frame that names it, by group\n"
              "state @N|init|end [all]    # engine and GL state; * marks a change against the previous draw or the start\n"
              "find TEXT                  # records whose captured line holds TEXT (any case)\n"
              "list KEY                   # the records behind a number: a summary key or gN.METRIC of groups\n"
@@ -1560,13 +1551,14 @@ static void cmd_help(fi_out_t *out) {
              "                           # group of its list (gN, a.gN), that group's commands aligned\n"
              "# rows: each record's fields by name, values decoded (GL_LEQUAL, U16, tex/atlas); record @N adds the line as\n"
              "# captured, raw. Zero fields are left out; a request's unset render target or sampler reads as its default.\n"
-             "# objects: kind/label (buf/frame_uniform), kind/label#N when the frame has more than one with that label,\n"
-             "# kind#N when unlabeled; N counts first use in the frame's work, then the snapshot's, per kind and label.\n"
+             "# objects: kind/label#N (buf/frame_uniform#1), kind#N when unlabeled; N counts first use in the frame's work,\n"
+             "# then the snapshot's, per kind and label. A GL name reads with the object it belonged to at that record\n"
+             "# (glUseProgram(19 prog/sprite#1)), or its role (upload VAO, timer query); a bare number: the frame never said.\n"
              "# badges: [merged] joined the previous GL draw, [already set] the engine held that state, [found] a cached\n"
              "# object, [GL skipped] the GL cache held that value (its cache key follows the call name).\n");
 }
 
-static const char *const k_commands[] = {"help", "frames", "frame", "summary", "groups", "record", "state", "find", "list", "compare"};
+static const char *const k_commands[] = {"help", "frames", "frame", "summary", "groups", "record", "state", "find", "list", "compare", "object"};
 
 bool fi_query_command(const char *word) {
     for (uint32_t k = 0; k < sizeof(k_commands) / sizeof(k_commands[0]); k++) {
@@ -1669,6 +1661,9 @@ bool fi_query(fi_session_t *session, const char *text, fi_out_t *out) {
         cmd_record(fr, record, out);
         return true;
     }
+    if (strcmp(command, "object") == 0 && arg[0] != '\0' && p[0] == '\0') {
+        return cmd_object(fr, arg, out);
+    }
     if (strcmp(command, "find") == 0 && rest[0] != '\0') {
         put_matches(fr, (fi_query_t){0}, rest, out);
         return true;
@@ -1678,7 +1673,13 @@ bool fi_query(fi_session_t *session, const char *text, fi_out_t *out) {
         put_matches(fr, q, "", out);
         return true;
     }
-    put(out, "error: %s needs %s; help lists the commands\n", command, command[0] == 'f' ? "TEXT" : "a key of summary or gN.METRIC of groups");
+    const char *needs = "a key of summary or gN.METRIC of groups";
+    if (strcmp(command, "find") == 0) {
+        needs = "TEXT";
+    } else if (strcmp(command, "object") == 0) {
+        needs = "@N[.FIELD]";
+    }
+    put(out, "error: %s needs %s; help lists the commands\n", command, needs);
     return false;
 }
 // #endregion

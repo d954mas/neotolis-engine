@@ -1513,6 +1513,18 @@ checks every plain or indexed draw's merge against the recorded `CACHE` and rebu
 frame's counters from the records (`stream_bytes` is shown from the counters only:
 command sizes are not recorded).
 
+A GL name reads as the frontend object it belonged to at its record (`glUseProgram(19 prog/sprite#1)`),
+resolved in one forward pass: slots and GL names are reused within a frame, so one map of the frame's end would
+misname earlier rows. A frontend definition gives its object a slot or, for a shader or sampler, a GL name; a
+backend definition (`DEFINITION STATE`) gives a slot's GL name; the snapshot's definitions hold from its first
+record, as it describes one moment. A create call's names belong to its operation's object when that object has
+the names' GL kind, else to the object a later definition of the same operation gives them (a lazy sampler
+re-creation), else, in a context restore, to the upload VAO. A delete call ends its names after its row; a
+top-level `CONTEXT` operation ends every name. A husk (slot or name 0) owns nothing. Every query name is a timer
+query. A name nothing recorded reads as its number. The Object page and `object @N[.FIELD]` show one object of a
+record: its definition, the GL names it held, and every record that names it, by group, built by one scan when
+opened.
+
 ## Shape strokes
 
 `nt_shape_renderer` owns immediate-mode shape geometry and batches it until
