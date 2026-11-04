@@ -302,7 +302,7 @@ static void load_scene_from_manifest(void) {
             /* Alpha: diffuse only, 3 streams, double-sided */
             mat_desc.textures[0] = (nt_material_texture_desc_t){.name = "u_diffuse", .resource = (mn->diffuse_rid != 0) ? s_tex_handles[tex_base + 0] : s_neutral_white_handle};
             mat_desc.texture_count = 1;
-            params[4] = (float)mn->alpha_cutoff_x100 / 100.0F;
+            params[4] = mn->alpha_cutoff;
             mat_desc.params_size = sizeof(params);
             mat_desc.blend = nt_blend_opaque();
             mat_desc.cull_mode = NT_CULL_NONE; /* double-sided for foliage */

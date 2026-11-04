@@ -559,6 +559,13 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     double cache_restore_secs = 0.0;
 #endif
 
+    /* One encode identity per entry: early dedup compares it, the cache keys on it. */
+    uint64_t *opts_hashes = (uint64_t *)calloc(ctx->pending_count, sizeof(uint64_t));
+    NT_BUILD_ASSERT(opts_hashes && "finish_pack: alloc failed");
+    for (uint32_t i = 0; i < ctx->pending_count; i++) {
+        opts_hashes[i] = nt_builder_compute_opts_hash(&ctx->pending[i]);
+    }
+
     // #region Early dedup
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         NtBuildEntry *pe = &ctx->pending[i];
@@ -593,7 +600,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             }
             /* The encode options are one hashed identity, the cache key. Different
                options are never merged, so they are reported without a re-decode. */
-            if (nt_builder_compute_opts_hash(pe) != nt_builder_compute_opts_hash(candidate)) {
+            if (opts_hashes[i] != opts_hashes[j]) {
                 if (ctx->dedup_warn_count < NT_BUILD_MAX_ASSETS) {
                     ctx->dedup_warn_a[ctx->dedup_warn_count] = i;
                     ctx->dedup_warn_b[ctx->dedup_warn_count] = j;
@@ -645,8 +652,6 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     /* Per-asset encode results (heap-allocated to support large asset counts) */
     NtEncodeResult *results = (NtEncodeResult *)calloc(ctx->pending_count, sizeof(NtEncodeResult));
     NT_BUILD_ASSERT(results && "finish_pack: alloc failed");
-    uint64_t *opts_hashes = (uint64_t *)calloc(ctx->pending_count, sizeof(uint64_t));
-    NT_BUILD_ASSERT(opts_hashes && "finish_pack: alloc failed");
 
     /* Basis global initialization must finish before encode workers start. */
     bool needs_basis = false;
@@ -690,7 +695,6 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
         /* Shader cache: check before encode */
         if (ctx->cache_dir) {
-            opts_hashes[i] = nt_builder_compute_opts_hash(pe);
             uint8_t *cached_data = NULL;
             uint32_t cached_size = 0;
             nt_cache_status_t status = nt_builder_cache_lookup(ctx->cache_dir, pe->decoded_hash, opts_hashes[i], &cached_data, &cached_size);
@@ -746,7 +750,6 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             continue;
         }
 
-        opts_hashes[i] = nt_builder_compute_opts_hash(pe);
         uint8_t *cached_data = NULL;
         uint32_t cached_size = 0;
         nt_cache_status_t status = nt_builder_cache_lookup(ctx->cache_dir, pe->decoded_hash, opts_hashes[i], &cached_data, &cached_size);

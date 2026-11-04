@@ -16,7 +16,6 @@
 
 #include "cgltf.h"
 
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -101,16 +100,12 @@ static tex_role_t *build_texture_roles(const nt_glb_scene_t *scene) {
     return roles;
 }
 
-/* The alpha shader's cutoff as the manifest stores it, in whole hundredths. glTF
- * sets no maximum; above 1 every texel is discarded, which 1 already does. */
-static uint8_t alpha_cutoff_x100(const nt_glb_material_t *mat) { return (uint8_t)lroundf(fminf(fmaxf(mat->alpha_cutoff, 0.0F), 1.0F) * 100.0F); }
-
 /* The texel alpha an alpha-tested material passes from, as a cutoff on a byte step:
  * the smallest byte b the shader keeps, (b / 255) * baseColorFactor.a >= its cutoff,
  * evaluated in the same float order. */
 static float material_texel_cutoff(const nt_glb_material_t *mat) {
     const char *name = mat->name ? mat->name : "(unnamed)";
-    const float shader_cutoff = (float)alpha_cutoff_x100(mat) / 100.0F;
+    const float shader_cutoff = mat->alpha_cutoff;
     uint32_t b = 0;
     while (b <= 255 && ((float)b / 255.0F) * mat->base_color[3] < shader_cutoff) {
         b++;
@@ -371,7 +366,7 @@ static void build_manifest_blob(NtBuilderContext *ctx, const nt_glb_scene_t *sce
             }
 
             mn->shader_type = shader_type;
-            mn->alpha_cutoff_x100 = (mat != NULL) ? alpha_cutoff_x100(mat) : 50;
+            mn->alpha_cutoff = (mat != NULL) ? mat->alpha_cutoff : 0.5F;
 
             entry_idx++;
         }
