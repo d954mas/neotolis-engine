@@ -793,7 +793,7 @@ static void test_compare_names_note_handles_and_read_sources(void) {
     const fi_frame_t *a = read_and_note_frame(&s_file, ev[0], 0x10001U, 0, false);
     char row[256];
     fi_row_text(a, 4, row, sizeof(row));
-    TEST_ASSERT_EQUAL_STRING("NOTE_FIELD page=tex/a", row);
+    TEST_ASSERT_EQUAL_STRING("NOTE_FIELD page=tex/a#1", row);
     fi_file_t other = {0};
     const struct {
         uint32_t page;
@@ -885,7 +885,7 @@ static void test_rows_keep_values_apart(void) {
     nt_gfx_event_t ev[6];
     memset(ev, 0, sizeof(ev));
     ev[0] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_DEFINITION, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_BUFFER, .object = 0x10001};
-    ev[0].data.buffer.label = 1; /* "mesh#1": one buffer, so its alias has no number of its own */
+    ev[0].data.buffer.label = 1; /* "mesh#1": the label's own # must not read as the alias number */
     ev[1] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_PASS, .result = NT_GFX_RESULT_ACCEPTED};
     const uint32_t next_after_half = 0x3F000001U; /* the float32 one ulp above 0.5 */
     memcpy(&ev[1].data.pass.depth, &next_after_half, sizeof(float));
@@ -911,7 +911,7 @@ static void test_rows_keep_values_apart(void) {
     fi_row_text(fr, 3, row, sizeof(row));
     TEST_ASSERT_EQUAL_STRING("NOTE_FIELD v=\"a\\x5cb\\x22\"", row);
     fi_row_text(fr, 4, row, sizeof(row));
-    TEST_ASSERT_EQUAL_STRING("UBO buf/mesh\\x231", row);
+    TEST_ASSERT_EQUAL_STRING("UBO buf/mesh\\x231#1", row);
     fi_row_text(fr, 5, row, sizeof(row));
     TEST_ASSERT_EQUAL_STRING("PASS target=default framebuffer depth=nan:0x7fc00001", row);
     fi_file_close(&s_file);

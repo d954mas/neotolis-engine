@@ -224,7 +224,6 @@ void fi_file_close(fi_file_t *file) {
         free((void *)fr->alias_label);
         free(fr->alias_slot);
         free(fr->alias_kind);
-        free(fr->alias_alone);
         free(fr->def);
         free(fr->buffer_upload);
         free(fr->brk);
@@ -465,7 +464,7 @@ static uint32_t *alias_slot(const fi_frame_t *fr, uint32_t kind, uint32_t object
 
 fi_alias_t fi_alias(const fi_frame_t *frame, uint32_t kind, uint32_t object) {
     const uint32_t k = frame->alias_slot != NULL ? *alias_slot(frame, kind, object) : 0U;
-    return k != 0 ? (fi_alias_t){frame->alias_label[k - 1U], frame->alias_ordinal[k - 1U], frame->alias_alone[k - 1U] != 0} : (fi_alias_t){"", 0, false};
+    return k != 0 ? (fi_alias_t){frame->alias_label[k - 1U], frame->alias_ordinal[k - 1U]} : (fi_alias_t){"", 0};
 }
 
 /* The handles a record names, as kinds and offsets into it: its object, then its HANDLE fields (capture field
@@ -549,31 +548,24 @@ static uint32_t string_hash(const char *s) {
 /* Ordinals per kind and label, in alias order. */
 static void number_aliases(fi_frame_t *fr, uint32_t count) {
     const uint32_t slots = table_size(count);
-    uint32_t *first = (uint32_t *)fi_alloc(slots, sizeof(uint32_t));      /* per kind and label: its first alias + 1 */
-    uint32_t *seen = (uint32_t *)fi_alloc(count + 1U, sizeof(uint32_t));  /* per first alias: the aliases of its kind and label so far */
-    uint32_t *group = (uint32_t *)fi_alloc(count + 1U, sizeof(uint32_t)); /* per alias: the first alias of its kind and label */
+    uint32_t *first = (uint32_t *)fi_alloc(slots, sizeof(uint32_t));     /* per kind and label: its first alias + 1 */
+    uint32_t *seen = (uint32_t *)fi_alloc(count + 1U, sizeof(uint32_t)); /* per first alias: the aliases of its kind and label so far */
     for (uint32_t a = 0; a < count; a++) {
         for (uint32_t h = string_hash(fr->alias_label[a]) ^ (fr->alias_kind[a] * 0x85EBCA77U);; h++) {
             uint32_t *slot = &first[h & (slots - 1U)];
             if (*slot == 0) {
                 *slot = a + 1U;
                 seen[a] = 1;
-                group[a] = a;
                 fr->alias_ordinal[a] = 1;
                 break;
             }
             const uint32_t b = *slot - 1U;
             if (fr->alias_kind[b] == fr->alias_kind[a] && strcmp(fr->alias_label[b], fr->alias_label[a]) == 0) {
                 fr->alias_ordinal[a] = ++seen[b];
-                group[a] = b;
                 break;
             }
         }
     }
-    for (uint32_t a = 0; a < count; a++) {
-        fr->alias_alone[a] = seen[group[a]] == 1U;
-    }
-    free(group);
     free(first);
     free(seen);
 }
@@ -591,7 +583,6 @@ static void index_aliases(fi_frame_t *fr) {
     fr->alias_ordinal = (uint32_t *)fi_alloc(cap, sizeof(uint32_t));
     fr->alias_kind = (uint8_t *)fi_alloc(cap, sizeof(uint8_t));
     fr->alias_label = (const char **)fi_alloc(cap, sizeof(const char *));
-    fr->alias_alone = (uint8_t *)fi_alloc(cap, sizeof(uint8_t));
     const uint32_t slots = table_size(cap);
     fr->alias_slot = (uint32_t *)fi_alloc(slots, sizeof(uint32_t));
     fr->alias_mask = slots - 1U;
@@ -1589,7 +1580,7 @@ static void side_build(side_t *s, const fi_frame_t *fr) {
         key->op = e->operation;
         key->object_kind = e->object_kind;
         key->object = fi_alias(fr, e->object_kind, e->object);
-        key->vertex_input = fi_is_draw(e) ? fi_alias(fr, NT_GFX_OBJECT_VERTEX_INPUT, e->data.draw.vertex_input) : (fi_alias_t){"", 0, false};
+        key->vertex_input = fi_is_draw(e) ? fi_alias(fr, NT_GFX_OBJECT_VERTEX_INPUT, e->data.draw.vertex_input) : (fi_alias_t){"", 0};
     }
     free(at);
 }

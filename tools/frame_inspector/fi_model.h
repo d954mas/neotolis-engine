@@ -131,7 +131,6 @@ typedef struct {
     /* Short names for handles (vi/mesh#3): per kind and label, numbered by first use in the frame's work. */
     uint32_t *alias_object, *alias_ordinal, *alias_slot, alias_mask;
     uint8_t *alias_kind;
-    uint8_t *alias_alone;              /* per alias: the only object of its kind and label in the frame */
     const char **alias_label;          /* the frame's strings; "" when unlabeled */
     uint32_t *def;                     /* per operation on an object: the object's latest definition before it, FI_NONE */
     fi_buffer_upload_t *buffer_upload; /* the biggest first */
@@ -222,7 +221,6 @@ fi_tally_t fi_tally(const fi_frame_t *frame, uint32_t id);
 typedef struct {
     const char *label; /* "" when unlabeled */
     uint32_t ordinal;  /* 0 when the frame never names the handle */
-    bool alone;        /* the only object of its kind and label: a label alone names it */
 } fi_alias_t;
 
 fi_alias_t fi_alias(const fi_frame_t *frame, uint32_t kind, uint32_t object);

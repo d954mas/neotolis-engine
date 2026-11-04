@@ -279,7 +279,7 @@ void fi_alias_text(const fi_frame_t *frame, uint32_t kind, uint32_t object, char
     } else {
         char label[FI_ALIAS_LEN - 24U]; /* room left for the kind, '/', '#' and the number */
         fi_one_line(a.label, label, sizeof(label), FI_TEXT_TOKEN);
-        (void)snprintf(buf, size, a.alone ? "%s/%s" : "%s/%s#%u", alias_prefix(kind), label, a.ordinal);
+        (void)snprintf(buf, size, "%s/%s#%u", alias_prefix(kind), label, a.ordinal);
     }
 }
 

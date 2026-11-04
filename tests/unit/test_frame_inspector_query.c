@@ -242,7 +242,7 @@ static void test_compare_tells_what_differs(void) {
     assert_holds(text, "\ndiffer 5  # ");
     text = ask("compare 0 g2", true);
     assert_holds(text, "\ngroup g2  # > sprite; 1 of 124 requests differ\n");
-    assert_holds(text, "\n~ @233    @233    DRAW_INDEXED pipe/skeletal_showcase/sprite count=7 vi/sprite_vi  # count 6 -> 7\n");
+    assert_holds(text, "\n~ @233    @233    DRAW_INDEXED pipe/skeletal_showcase/sprite#1 count=7 vi/sprite_vi#1  # count 6 -> 7\n");
     assert_holds(text, "\nrows 124 differ 1\n");
     text = ask("compare 0 g1", true);
     assert_holds(text, "\n= 9 same  # @200..@208 in A, @200..@208 in B\n~ @209    @209    ");
@@ -351,7 +351,7 @@ static void test_aliases_show_labels(void) {
     fi_alias_text(&file.frames[0], NT_GFX_OBJECT_BUFFER, 65539, alias, sizeof(alias));
     TEST_ASSERT_EQUAL_STRING("buf/mesh\\x20one\\x0a#2", alias);
     fi_alias_text(&file.frames[0], NT_GFX_OBJECT_BUFFER, 65538, alias, sizeof(alias));
-    TEST_ASSERT_EQUAL_STRING("\\x0a", alias + strlen(alias) - 4U); /* the only one with its label: no number */
+    TEST_ASSERT_EQUAL_STRING("\\x0a#1", alias + strlen(alias) - 6U); /* the only one with its label: still numbered */
     TEST_ASSERT_EQUAL_MEMORY("buf/xxxx", alias, 8);
     fi_file_close(&file);
 }
@@ -366,7 +366,7 @@ static void test_rows_decode_captured_values(void) {
     assert_holds(ask("record @90", true), "DEFINITION CREATE layout#2 slot=3 stride=32 locations=1-5\n");
     assert_holds(ask("record @36", true), " vertex_buffer=buf/shape_line_template#1 index_buffer=buf/shape_line_template#2 index_type=U16 ");
     assert_holds(ask("record @218", true), "@218  NOTE_FIELD page=tex#1\n");
-    assert_holds(ask("record @639", true), "@639  BUFFER_UPLOAD buf/frame_index size=11184 data\n");
+    assert_holds(ask("record @639", true), "@639  BUFFER_UPLOAD buf/frame_index#1 size=11184 data\n");
     assert_holds(ask("record @642", true), "@642  glBufferSubData(GL_ELEMENT_ARRAY_BUFFER,0,11184,data) bytes=11184\n");
     assert_holds(ask("record @678", true), "@678  glBindSampler cache sampler=2  [GL skipped]\n");
     assert_holds(ask("record @662", true), "@662  glVertexAttribPointer cache vertex_array=3 buffer=3 layout=1  [GL skipped]\n");
@@ -381,7 +381,7 @@ static void test_state_of_a_gl_call_is_its_request_state(void) {
     const char *text = ask("state @685 all", true);
     assert_holds(text, "\ncompared previous draw @260  ");
     assert_holds(text, "\n  output: pass               @195  PASS ");
-    assert_holds(text, "\n* program: pipeline          @265  PIPELINE pipe/skeletal_showcase/text\n");
+    assert_holds(text, "\n* program: pipeline          @265  PIPELINE pipe/skeletal_showcase/text#1\n");
     assert_holds(text, "\n* UseProgram                 @681  glUseProgram(20)\n");
     assert_holds(text, "\n    was @128  INITIAL TEXTURE texture=5\n");
     assert_holds(text, "\n    was @128  INITIAL TEXTURE sampler=2\n");
