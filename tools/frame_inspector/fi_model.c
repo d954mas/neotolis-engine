@@ -446,10 +446,8 @@ uint32_t fi_joined(const fi_frame_t *frame, uint32_t record) {
 }
 
 uint32_t fi_gl_draw(const fi_frame_t *frame, uint32_t record) {
-    uint32_t head = record;
-    for (uint32_t j = fi_joined(frame, head); j != FI_NONE && j < head; j = fi_joined(frame, head)) { /* a merge joins an earlier draw */
-        head = j;
-    }
+    const uint32_t joined = fi_joined(frame, record); /* the draw that wrote the command, never another merge */
+    const uint32_t head = joined != FI_NONE ? joined : record;
     for (uint32_t i = head + 1U; i < frame->view.count; i++) {
         const nt_gfx_event_t *e = &frame->view.events[i];
         if (e->kind == NT_GFX_EVENT_BACKEND && e->link == head + 1U && fi_is_draw_call(e->detail)) {
@@ -490,31 +488,33 @@ enum { FI_HANDLES = 4 };
 typedef struct {
     uint8_t kind[FI_HANDLES];
     uint16_t at[FI_HANDLES];
+    const char *field[FI_HANDLES]; /* the capture field's name, "obj", or NULL for a note's handle */
     uint32_t count;
 } handles_t;
 
-static void add_handle(handles_t *h, uint32_t kind, size_t at) {
+static void add_handle(handles_t *h, uint32_t kind, size_t at, const char *field) {
     h->kind[h->count] = (uint8_t)kind;
+    h->field[h->count] = field;
     h->at[h->count++] = (uint16_t)at;
 }
 
 static handles_t handles_of(const nt_gfx_event_t *e) {
     handles_t h = {0};
     if (e->kind == NT_GFX_EVENT_NOTE_FIELD && e->field.type == NT_GFX_NOTE_HANDLE && e->field.value.handle.kind < FI_OBJECTS) {
-        add_handle(&h, e->field.value.handle.kind, offsetof(nt_gfx_event_t, field.value.handle.id));
+        add_handle(&h, e->field.value.handle.kind, offsetof(nt_gfx_event_t, field.value.handle.id), NULL);
     }
     if (!is_gfx(e)) {
         return h;
     }
     if (e->object_kind != 0 && e->object_kind < FI_OBJECTS) {
-        add_handle(&h, e->object_kind, offsetof(nt_gfx_event_t, object));
+        add_handle(&h, e->object_kind, offsetof(nt_gfx_event_t, object), "obj");
     }
     const nt_gfx_capture_field_t *f = NULL;
     const uint32_t n = nt_gfx_capture_fields(e, &f);
     for (uint32_t k = 0; k < n; k++) {
         if (f[k].meaning == NT_GFX_MEANING_HANDLE) {
             NT_ASSERT(h.count < FI_HANDLES && "frame inspector: a record names more handles than FI_HANDLES");
-            add_handle(&h, f[k].sub, f[k].offset);
+            add_handle(&h, f[k].sub, f[k].offset, f[k].name);
         }
     }
     return h;
@@ -548,7 +548,7 @@ static uint32_t backend_of(const nt_gfx_event_t *e) {
     return 0;
 }
 
-static uint32_t handle_at(const nt_gfx_event_t *e, uint16_t at) {
+static uint32_t handle_at(const nt_gfx_event_t *e, size_t at) {
     uint32_t v = 0;
     memcpy(&v, (const unsigned char *)e + at, sizeof(v));
     return v;
@@ -677,7 +677,8 @@ static void index_handles(fi_frame_t *fr) {
 typedef struct {
     const fi_arg_t *args;
     uint8_t count;
-    bool repeat; /* the last argument repeats: gen/delete names, attachment lists */
+    bool repeat;  /* the last argument repeats: gen/delete names, attachment lists */
+    bool creates; /* its name arguments are names GL just made */
 } fi_call_t;
 
 // clang-format off: clang-format versions disagree on braces in a macro body
@@ -687,8 +688,10 @@ typedef struct {
 #define FI_E_ {FI_ARG_ENUM, NT_GFX_DOMAIN_GL}
 #define FI_D_(domain) {FI_ARG_ENUM, (domain)}
 #define FI_N_(gl_kind) {FI_ARG_NAME, NT_GFX_GL_OBJECT_##gl_kind}
-#define FI_CALL_(...) {(const fi_arg_t[]){__VA_ARGS__}, (uint8_t)(sizeof((const fi_arg_t[]){__VA_ARGS__}) / sizeof(fi_arg_t)), false}
-#define FI_LIST_(...) {(const fi_arg_t[]){__VA_ARGS__}, (uint8_t)(sizeof((const fi_arg_t[]){__VA_ARGS__}) / sizeof(fi_arg_t)), true}
+#define FI_CALL_(...) {(const fi_arg_t[]){__VA_ARGS__}, (uint8_t)(sizeof((const fi_arg_t[]){__VA_ARGS__}) / sizeof(fi_arg_t)), false, false}
+#define FI_LIST_(...) {(const fi_arg_t[]){__VA_ARGS__}, (uint8_t)(sizeof((const fi_arg_t[]){__VA_ARGS__}) / sizeof(fi_arg_t)), true, false}
+#define FI_GEN_(gl_kind) {(const fi_arg_t[]){FI_U_, FI_N_(gl_kind)}, 2, true, true}
+#define FI_MAKE_(...) {(const fi_arg_t[]){__VA_ARGS__}, (uint8_t)(sizeof((const fi_arg_t[]){__VA_ARGS__}) / sizeof(fi_arg_t)), false, true}
 // clang-format on
 /* Arguments in capture order (pointers are presence bits, gen/delete the count then the names, a returned value
  * last). */
@@ -710,8 +713,8 @@ static const fi_call_t k_calls[NT_GFX_GL_COUNT] = {
     [NT_GFX_GL_glClear] = FI_CALL_(FI_D_(FI_DOMAIN_GL_CLEAR_MASK)),
     [NT_GFX_GL_glCompileShader] = FI_CALL_(FI_N_(SHADER)),
     [NT_GFX_GL_glCompressedTexImage2D] = FI_CALL_(FI_E_, FI_U_, FI_E_, FI_U_, FI_U_, FI_U_, FI_U_, FI_P_),
-    [NT_GFX_GL_glCreateProgram] = FI_CALL_(FI_N_(PROGRAM)),
-    [NT_GFX_GL_glCreateShader] = FI_CALL_(FI_E_, FI_N_(SHADER)),
+    [NT_GFX_GL_glCreateProgram] = FI_MAKE_(FI_N_(PROGRAM)),
+    [NT_GFX_GL_glCreateShader] = FI_MAKE_(FI_E_, FI_N_(SHADER)),
     [NT_GFX_GL_glCullFace] = FI_CALL_(FI_E_),
     [NT_GFX_GL_glDeleteBuffers] = FI_LIST_(FI_U_, FI_N_(BUFFER)),
     [NT_GFX_GL_glDeleteFramebuffers] = FI_LIST_(FI_U_, FI_N_(FRAMEBUFFER)),
@@ -732,12 +735,12 @@ static const fi_call_t k_calls[NT_GFX_GL_COUNT] = {
     [NT_GFX_GL_glEnable] = FI_CALL_(FI_E_),
     [NT_GFX_GL_glEndQuery] = FI_CALL_(FI_E_),
     [NT_GFX_GL_glFramebufferTexture2D] = FI_CALL_(FI_E_, FI_E_, FI_E_, FI_N_(TEXTURE), FI_U_),
-    [NT_GFX_GL_glGenBuffers] = FI_LIST_(FI_U_, FI_N_(BUFFER)),
-    [NT_GFX_GL_glGenFramebuffers] = FI_LIST_(FI_U_, FI_N_(FRAMEBUFFER)),
-    [NT_GFX_GL_glGenQueries] = FI_LIST_(FI_U_, FI_N_(QUERY)),
-    [NT_GFX_GL_glGenSamplers] = FI_LIST_(FI_U_, FI_N_(SAMPLER)),
-    [NT_GFX_GL_glGenTextures] = FI_LIST_(FI_U_, FI_N_(TEXTURE)),
-    [NT_GFX_GL_glGenVertexArrays] = FI_LIST_(FI_U_, FI_N_(VERTEX_ARRAY)),
+    [NT_GFX_GL_glGenBuffers] = FI_GEN_(BUFFER),
+    [NT_GFX_GL_glGenFramebuffers] = FI_GEN_(FRAMEBUFFER),
+    [NT_GFX_GL_glGenQueries] = FI_GEN_(QUERY),
+    [NT_GFX_GL_glGenSamplers] = FI_GEN_(SAMPLER),
+    [NT_GFX_GL_glGenTextures] = FI_GEN_(TEXTURE),
+    [NT_GFX_GL_glGenVertexArrays] = FI_GEN_(VERTEX_ARRAY),
     [NT_GFX_GL_glGenerateMipmap] = FI_CALL_(FI_E_),
     [NT_GFX_GL_glGetActiveUniform] = FI_CALL_(FI_N_(PROGRAM)),
     [NT_GFX_GL_glGetActiveUniformBlockName] = FI_CALL_(FI_N_(PROGRAM)),
@@ -769,6 +772,8 @@ static const fi_call_t k_calls[NT_GFX_GL_COUNT] = {
     [NT_GFX_GL_glVertexAttribPointer] = FI_CALL_(FI_U_, FI_U_, FI_E_, FI_D_(FI_DOMAIN_GL_BOOL), FI_U_, FI_U_),
     [NT_GFX_GL_glViewport] = FI_CALL_(FI_I_, FI_I_, FI_U_, FI_U_),
 };
+#undef FI_MAKE_
+#undef FI_GEN_
 #undef FI_LIST_
 #undef FI_CALL_
 #undef FI_U_
@@ -786,37 +791,7 @@ fi_arg_t fi_call_arg(uint32_t call, uint32_t k) {
     return c->repeat && c->count > 0 ? c->args[c->count - 1U] : (fi_arg_t){FI_ARG_PLAIN, 0};
 }
 
-static bool creates_names(uint32_t call) {
-    switch (call) {
-    case NT_GFX_GL_glGenBuffers:
-    case NT_GFX_GL_glGenFramebuffers:
-    case NT_GFX_GL_glGenQueries:
-    case NT_GFX_GL_glGenSamplers:
-    case NT_GFX_GL_glGenTextures:
-    case NT_GFX_GL_glGenVertexArrays:
-    case NT_GFX_GL_glCreateProgram:
-    case NT_GFX_GL_glCreateShader:
-        return true;
-    default:
-        return false;
-    }
-}
-
-static bool deletes_names(uint32_t call) {
-    switch (call) {
-    case NT_GFX_GL_glDeleteBuffers:
-    case NT_GFX_GL_glDeleteFramebuffers:
-    case NT_GFX_GL_glDeleteProgram:
-    case NT_GFX_GL_glDeleteQueries:
-    case NT_GFX_GL_glDeleteSamplers:
-    case NT_GFX_GL_glDeleteShader:
-    case NT_GFX_GL_glDeleteTextures:
-    case NT_GFX_GL_glDeleteVertexArrays:
-        return true;
-    default:
-        return false;
-    }
-}
+static bool creates_names(uint32_t call) { return call < NT_GFX_GL_COUNT && k_calls[call].creates; }
 // #endregion
 
 // #region gl names
@@ -922,12 +897,6 @@ typedef struct {
     gl_table_t names, slots;
 } gl_owners_t;
 
-static uint32_t u32_at(const nt_gfx_event_t *e, size_t at) {
-    uint32_t v = 0;
-    memcpy(&v, (const unsigned char *)e + at, sizeof(v));
-    return v;
-}
-
 static void own_name(gl_owners_t *o, uint8_t gl, uint32_t name, gl_owner_t owner) {
     gl_owner_t *e = gl_entry(&o->names, gl, name);
     e->owner = owner.owner;
@@ -942,28 +911,27 @@ static void own_slot(gl_owners_t *o, uint32_t kind, uint32_t slot, uint32_t obje
  * name; a backend definition (STATE) holds a slot's GL name. A slot or name of 0 is a husk: nothing. In an
  * operation on an object of the slot's kind, the slot is that object's before its frontend definition says so. */
 static void learn_definition(gl_owners_t *o, const nt_gfx_event_t *e, const nt_gfx_event_t *op) {
-    const nt_gfx_capture_field_t *f = NULL;
-    const uint32_t n = nt_gfx_capture_fields(e, &f);
-    const bool frontend = e->operation == NT_GFX_OP_CREATE && e->object_kind != 0 && e->object_kind < FI_OBJECTS && e->object != 0;
-    const bool backend = e->operation == NT_GFX_OP_STATE && e->detail < FI_OBJECTS;
-    uint32_t slot = 0;
-    for (uint32_t k = 0; k < n; k++) {
-        const uint32_t v = f[k].type == NT_GFX_FIELD_U32 ? u32_at(e, f[k].offset) : 0U;
-        if (v == 0) {
-            continue;
+    if (e->operation == NT_GFX_OP_STATE) {
+        const uint32_t slot = e->data.backend_resource.slot;
+        const uint32_t name = e->data.backend_resource.gl_name;
+        const uint8_t gl = gl_kind_of(e->detail);
+        if (slot == 0 || name == 0 || gl == NT_GFX_GL_OBJECT_NONE) {
+            return;
         }
-        if (frontend && f[k].meaning == NT_GFX_MEANING_SLOT && f[k].sub == e->object_kind) {
-            own_slot(o, e->object_kind, v, e->object);
-        } else if (frontend && f[k].meaning == NT_GFX_MEANING_GL_NAME) {
-            own_name(o, f[k].sub, v, (gl_owner_t){.owner = FI_GL_OBJECT, .kind = e->object_kind, .id = e->object});
-        } else if (backend && f[k].meaning == NT_GFX_MEANING_SLOT && f[k].sub == e->detail) {
-            slot = v;
-        } else if (backend && slot != 0 && f[k].meaning == NT_GFX_MEANING_GL_NAME && f[k].sub == gl_kind_of(e->detail)) {
-            own_name(o, f[k].sub, v, (gl_owner_t){.owner = FI_GL_OBJECT, .kind = (uint8_t)e->detail, .id = slot, .via_slot = true});
-            if (op != NULL && op->object_kind == e->detail && op->object != 0) {
-                own_slot(o, e->detail, slot, op->object);
-            }
+        own_name(o, gl, name, (gl_owner_t){.owner = FI_GL_OBJECT, .kind = (uint8_t)e->detail, .id = slot, .via_slot = true});
+        if (op != NULL && op->object_kind == e->detail && op->object != 0) {
+            own_slot(o, e->detail, slot, op->object);
         }
+        return;
+    }
+    const uint32_t v = backend_of(e);
+    if (e->operation != NT_GFX_OP_CREATE || e->object_kind >= FI_OBJECTS || e->object == 0 || v == 0) {
+        return;
+    }
+    if (e->object_kind == NT_GFX_OBJECT_SHADER || e->object_kind == NT_GFX_OBJECT_SAMPLER) { /* backend_of: their GL name */
+        own_name(o, gl_kind_of(e->object_kind), v, (gl_owner_t){.owner = FI_GL_OBJECT, .kind = e->object_kind, .id = e->object});
+    } else {
+        own_slot(o, e->object_kind, v, e->object);
     }
 }
 
@@ -983,7 +951,7 @@ static gl_owner_t created_owner(const fi_frame_t *fr, uint32_t i, uint8_t gl, ui
         }
         const gl_names_t g = gl_names_of(d);
         for (uint32_t k = 0; k < g.count; k++) {
-            if (g.gl[k] == gl && u32_at(d, g.at[k]) == name) {
+            if (g.gl[k] == gl && handle_at(d, g.at[k]) == name) {
                 return (gl_owner_t){.owner = FI_GL_OBJECT, .kind = d->object_kind, .id = d->object};
             }
         }
@@ -1003,8 +971,8 @@ static void learn(const fi_frame_t *fr, gl_owners_t *o, uint32_t i) {
     } else if (e->kind == NT_GFX_EVENT_BACKEND && creates_names(e->detail)) {
         const gl_names_t g = gl_names_of(e);
         for (uint32_t k = 0; k < g.count; k++) {
-            const uint32_t name = u32_at(e, g.at[k]);
-            if (name != 0) {
+            const uint32_t name = handle_at(e, g.at[k]);
+            if (name != 0 && g.gl[k] != NT_GFX_GL_OBJECT_QUERY) {
                 own_name(o, g.gl[k], name, created_owner(fr, i, g.gl[k], name));
             }
         }
@@ -1024,8 +992,8 @@ static fi_gl_ref_t resolve(gl_owners_t *o, uint8_t gl, uint32_t name, uint16_t a
 
 /* Every GL name of every record resolved at its record, in one forward pass: slots and GL names are reused
  * within a frame, so one final map would misname earlier rows. The snapshot describes one moment, so its
- * definitions own names from its first record; a top-level context restore forgets every name. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+ * definitions own names from its first record. A deleted or lost name comes back only through a create call,
+ * which owns it again, so deletes and context restores need no bookkeeping. */
 static void index_gl_names(fi_frame_t *fr) {
     const uint32_t n = fr->view.count;
     const nt_gfx_event_t *ev = fr->view.events;
@@ -1044,23 +1012,16 @@ static void index_gl_names(fi_frame_t *fr) {
     uint32_t count = 0;
     for (uint32_t i = 0; i < n; i++) {
         const nt_gfx_event_t *e = &ev[i];
-        if (e->kind == NT_GFX_EVENT_OP && e->operation == NT_GFX_OP_CONTEXT && e->link == 0) {
-            memset(o.names.entry, 0, (size_t)slots * sizeof(gl_owner_t));
-            memset(o.slots.entry, 0, (size_t)slots * sizeof(gl_owner_t));
-        }
         if (i >= snapshot) {
             learn(fr, &o, i);
         }
         fr->gl_first[i] = count;
         const gl_names_t g = gl_names_of(e);
         for (uint32_t k = 0; k < g.count; k++) {
-            const uint32_t name = u32_at(e, g.at[k]);
+            const uint32_t name = handle_at(e, g.at[k]);
             if (name != 0) {
                 fr->gl_ref[count++] = resolve(&o, g.gl[k], name, g.at[k]);
             }
-        }
-        for (uint32_t k = 0; e->kind == NT_GFX_EVENT_BACKEND && deletes_names(e->detail) && k < g.count; k++) {
-            gl_entry(&o.names, g.gl[k], u32_at(e, g.at[k]))->owner = FI_GL_UNKNOWN;
         }
     }
     fr->gl_first[n] = count;
@@ -1082,8 +1043,10 @@ fi_gl_ref_t fi_gl_ref(const fi_frame_t *frame, uint32_t record, uint32_t at) {
 /* Short names for an issued call's arguments: the field of fi_named_t. */
 static const char *const k_arg_names[] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"};
 
+_Static_assert(FI_NAMED >= FI_HANDLES + FI_GL_NAMES, "frame inspector: FI_NAMED holds every handle and GL name of a record");
+
 static void add_named(fi_named_t *out, uint32_t *n, const char *field, uint32_t kind, uint32_t object) {
-    if (object != 0 && *n < FI_NAMED) {
+    if (object != 0) {
         out[(*n)++] = (fi_named_t){.field = field, .kind = (uint8_t)kind, .object = object};
     }
 }
@@ -1091,34 +1054,22 @@ static void add_named(fi_named_t *out, uint32_t *n, const char *field, uint32_t 
 uint32_t fi_named_objects(const fi_frame_t *frame, uint32_t record, fi_named_t out[FI_NAMED]) {
     const nt_gfx_event_t *e = &frame->view.events[record];
     uint32_t n = 0;
-    if (e->kind == NT_GFX_EVENT_NOTE_FIELD && e->field.type == NT_GFX_NOTE_HANDLE && e->field.value.handle.kind < FI_OBJECTS) {
-        add_named(out, &n, frame->view.strings + e->field.key, e->field.value.handle.kind, e->field.value.handle.id);
-    }
-    if (!is_gfx(e)) {
-        return n;
-    }
-    if (e->object_kind != 0 && e->object_kind < FI_OBJECTS) {
-        add_named(out, &n, "obj", e->object_kind, e->object);
+    const handles_t h = handles_of(e);
+    for (uint32_t k = 0; k < h.count; k++) {
+        add_named(out, &n, h.field[k] != NULL ? h.field[k] : frame->view.strings + e->field.key, h.kind[k], handle_at(e, h.at[k]));
     }
     const nt_gfx_capture_field_t *f = NULL;
-    const uint32_t count = nt_gfx_capture_fields(e, &f);
-    for (uint32_t k = 0; k < count; k++) {
-        if (f[k].meaning == NT_GFX_MEANING_HANDLE) {
-            add_named(out, &n, f[k].name, f[k].sub, u32_at(e, f[k].offset));
-        }
-    }
+    const uint32_t count = is_gfx(e) ? nt_gfx_capture_fields(e, &f) : 0U;
+    const size_t args = offsetof(nt_gfx_event_t, data.backend.args);
     for (uint32_t k = frame->gl_first[record]; k < frame->gl_first[record + 1U]; k++) {
         const fi_gl_ref_t *ref = &frame->gl_ref[k];
-        if (ref->owner != FI_GL_OBJECT) {
+        if (ref->owner != FI_GL_OBJECT || (ref->kind == e->object_kind && ref->object == e->object)) { /* a definition's own name */
             continue;
         }
-        const char *field = "?";
-        for (uint32_t j = 0; j < count; j++) {
+        const bool arg = e->kind == NT_GFX_EVENT_BACKEND && ref->at >= args;
+        const char *field = arg ? k_arg_names[(ref->at - args) / sizeof(uint32_t)] : "?";
+        for (uint32_t j = 0; !arg && j < count; j++) {
             field = f[j].offset == ref->at ? f[j].name : field;
-        }
-        const size_t args = offsetof(nt_gfx_event_t, data.backend.args);
-        if (e->kind == NT_GFX_EVENT_BACKEND && ref->at >= args) {
-            field = k_arg_names[(ref->at - args) / sizeof(uint32_t)];
         }
         add_named(out, &n, field, ref->kind, ref->object);
     }
@@ -1147,7 +1098,7 @@ void fi_object(const fi_frame_t *frame, uint32_t kind, uint32_t object, fi_objec
         }
         for (uint32_t k = frame->gl_first[i]; k < frame->gl_first[i + 1U]; k++) {
             const fi_gl_ref_t *ref = &frame->gl_ref[k];
-            const uint32_t name = u32_at(e, ref->at);
+            const uint32_t name = handle_at(e, ref->at);
             const bool held = ref->owner == FI_GL_OBJECT && ref->kind == kind && ref->object == object;
             if (held && (out->span_count == 0 || out->span[out->span_count - 1U].name != name)) {
                 out->spans_full = out->spans_full || out->span_count == FI_GL_SPANS;
@@ -1180,9 +1131,9 @@ void fi_object_free(fi_object_t *object) {
 // #endregion
 
 // #region merge check
-/* Whether an operation recorded a draw-phase command (nt_gfx.c), apart from plain and indexed draws. */
-static bool records_command(const nt_gfx_event_t *e, bool timing) {
-    if (e->kind != NT_GFX_EVENT_OP || e->result != NT_GFX_RESULT_ACCEPTED || e->link != 0) {
+/* A request the command stream carries to end_frame (nt_gfx.c), whatever its result. */
+static bool streamed(const nt_gfx_event_t *e) {
+    if (e->kind != NT_GFX_EVENT_OP || e->link != 0) {
         return false;
     }
     switch (e->operation) {
@@ -1194,9 +1145,26 @@ static bool records_command(const nt_gfx_event_t *e, bool timing) {
     case NT_GFX_OP_SCISSOR:
     case NT_GFX_OP_SCISSOR_ENABLE:
     case NT_GFX_OP_VIEWPORT:
+    case NT_GFX_OP_DRAW:
+    case NT_GFX_OP_DRAW_INDEXED:
     case NT_GFX_OP_DRAW_INSTANCED:
     case NT_GFX_OP_DRAW_INDEXED_INSTANCED:
+    case NT_GFX_OP_CLEAR:
+    case NT_GFX_OP_UBO:
+    case NT_GFX_OP_SEGMENT_BEGIN:
+    case NT_GFX_OP_SEGMENT_END:
         return true;
+    default:
+        return false;
+    }
+}
+
+/* Whether an operation recorded a draw-phase command, apart from plain and indexed draws. */
+static bool records_command(const nt_gfx_event_t *e, bool timing) {
+    if (!streamed(e) || e->result != NT_GFX_RESULT_ACCEPTED || fi_is_mergeable_draw(e)) {
+        return false;
+    }
+    switch (e->operation) {
     case NT_GFX_OP_CLEAR:
         return e->data.clear.color || e->data.clear.depth;
     case NT_GFX_OP_UBO:
@@ -1205,7 +1173,7 @@ static bool records_command(const nt_gfx_event_t *e, bool timing) {
     case NT_GFX_OP_SEGMENT_END:
         return timing; /* segments record commands only when the frame runs GPU timing */
     default:
-        return false;
+        return true;
     }
 }
 
@@ -1777,16 +1745,20 @@ static uint32_t previous(const fi_frame_t *fr, uint32_t at, bool (*accept)(const
 }
 
 static bool is_draw_op(const nt_gfx_event_t *e) { return e->link == 0 && fi_is_draw(e); }
+
+static uint32_t top_request(const fi_frame_t *fr, uint32_t i) {
+    while (owner(fr, i) != FI_NONE) {
+        i = owner(fr, i);
+    }
+    return i;
+}
 static bool is_draw_issue(const nt_gfx_event_t *e) { return e->kind == NT_GFX_EVENT_BACKEND && fi_is_draw_call(e->detail); }
 
 void fi_state_at(const fi_frame_t *frame, uint32_t at, fi_state_view_t *out) {
     *out = (fi_state_view_t){.compare = FI_COMPARE_PREVIOUS_DRAW};
     /* A record of an operation (a GL call at end_frame, an argument, a definition) has the engine state of its
      * top-level operation, wherever the record lands. */
-    uint32_t request = at;
-    while (owner(frame, request) != FI_NONE) {
-        request = owner(frame, request);
-    }
+    const uint32_t request = top_request(frame, at);
     fi_request_state(frame, request, &out->req);
     out->was = previous(frame, request, is_draw_op);
     out->was_req = out->req;
@@ -1804,6 +1776,12 @@ void fi_state_at(const fi_frame_t *frame, uint32_t at, fi_state_view_t *out) {
     out->gl_at = gl_anchor;
     for (uint32_t i = source + 1U; i < frame->view.count; i++) {
         out->gl_at = frame->parent[i] == source && frame->view.events[i].kind == NT_GFX_EVENT_BACKEND ? i : out->gl_at;
+    }
+    /* A streamed request that issued nothing (a state already set) runs at end_frame after the requests before it:
+     * its GL state is the last call they issued, not the state before execution. */
+    const bool silent = out->gl_at == gl_anchor && gl_anchor == request && streamed(&frame->view.events[request]);
+    for (uint32_t i = frame->view.execute_begin; silent && request < frame->view.execute_begin && i < frame->view.execute_end; i++) {
+        out->gl_at = frame->view.events[i].kind == NT_GFX_EVENT_BACKEND && top_request(frame, i) < request ? i : out->gl_at;
     }
     fi_gl_state(frame, out->gl_at, &out->gl);
     out->was_gl_at = previous(frame, out->gl_at, is_draw_issue);

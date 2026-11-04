@@ -1222,7 +1222,11 @@ static bool cmd_object(const fi_frame_t *fr, const char *arg, fi_out_t *out) {
     char at[24];
     const char *dot = strchr(arg, '.');
     const size_t len = dot != NULL ? (size_t)(dot - arg) : strlen(arg);
-    (void)snprintf(at, sizeof(at), "%.*s", (int)(len < sizeof(at) ? len : sizeof(at) - 1U), arg);
+    if (len >= sizeof(at)) {
+        put(out, "error: the frame has no record %.*s\n", (int)len, arg);
+        return false;
+    }
+    (void)snprintf(at, sizeof(at), "%.*s", (int)len, arg);
     uint32_t record = 0;
     if (!parse_record(fr, at, &record, out)) {
         return false;

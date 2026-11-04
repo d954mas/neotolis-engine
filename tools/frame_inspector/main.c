@@ -1,18 +1,19 @@
 /* Frame inspector: opens capture files (render architecture, "Capture text") and shows what each recorded
- * frame did. Usage: frame_inspector [file...] [--frame INDEX] [--base INDEX] [--page frames|commands|info|compare|init|end]
+ * frame did. Usage: frame_inspector [file...] [--frame INDEX] [--base INDEX] [--page frames|commands|info|compare|init|end|object]
  * [--select RECORD] [--filter TEXT] [--monkey SECONDS [SEED]]; Open... adds more files. --frame takes the
  * frame's index across the files (query frames lists them), --select a record's @ number in that frame. Run it by its path: its asset pack
  * is found next to argv[0].
  * Pages: Frames (per-file tracks of draw calls, GL calls, upload and records on one zoomable axis; a click
  * picks a frame, a click again opens it), Commands (the logical tree with a panel for the selection or a
  * Shift range), Information (numbers that filter the tree to their records), Compare (the frame against a
- * base frame set with B: numbers, groups and their requests aligned like a text diff), Init and End state.
+ * base frame set with B: numbers, groups and their requests aligned like a text diff), Init and End state, Object
+ * (one object a record names, from its panel: its definition, GL names and every record that names it).
  * --monkey drives random clicks, drags, wheel and keys for that long and prints the frame times.
  * Without a window, for scripts and agents: frame_inspector query FILE... [--frame INDEX] COMMAND [ARGS]
  * answers one command; frame_inspector --serve FILE... [--frame INDEX] answers a command per stdin line,
  * each answer between a "> command" line and a "= ok" or "= error" line. Answers are "key value  # meaning" lines; help lists the commands:
  * frames, frame, summary, groups, record @N, state @N|init|end [all], find TEXT, list KEY (a summary key),
- * compare INDEX [GROUP]. */
+ * compare INDEX [GROUP], object @N[.FIELD]. */
 
 #include "app/nt_app.h"
 #include "atlas/nt_atlas.h"
@@ -421,6 +422,7 @@ static void clear_filters(void);
 /* A group filter follows its group into the new frame: group numbers are per frame. */
 static void select_frame(uint32_t file, uint32_t frame) {
     const fi_frame_t *was = s.query.kind == FI_Q_GROUP ? frame_sel() : NULL;
+    s.obj = file != s.file ? 0U : s.obj; /* handles name objects of one capture file */
     s.file = file;
     s.frame = frame;
     s.frame_epoch++;
@@ -620,6 +622,7 @@ static void close_file(uint32_t f) {
     const bool current = s.file == f;
     fi_file_close(&s.files[f]);
     memmove(&s.files[f], &s.files[f + 1U], (s.file_count - f - 1U) * sizeof(fi_file_t));
+    s.obj = 0; /* the files shift: an index no longer names the file the object came from */
     s.file_count--;
     s.history_count = 0;
     s.future_count = 0;
@@ -2102,6 +2105,7 @@ static struct {
     fi_verdict_t verdict;
     uint32_t children[40];
     uint32_t child_count, child_total;
+    uint32_t gl_draw; /* a merged draw's GL draw call */
 } s_panel = {.epoch = FI_NONE};
 
 static uint32_t panel_prev_draw(void) { return s_panel.st.was; }
@@ -2121,6 +2125,7 @@ static void panel_cache(const fi_frame_t *fr, uint32_t at) {
         }
     }
     s_panel.verdict = fi_verdict(fr, at);
+    s_panel.gl_draw = fi_gl_draw(fr, at);
 }
 
 static const fi_state_view_t *panel_state(const fi_frame_t *fr, uint32_t at) {
@@ -2138,8 +2143,8 @@ static void declare_verdict(const fi_frame_t *fr, uint32_t id) {
         if (fi_joined(fr, id) != FI_NONE) {
             link_line(fr, "joined ", fi_joined(fr, id));
         }
-        if (fi_gl_draw(fr, id) != FI_NONE) {
-            link_line(fr, "GL draw ", fi_gl_draw(fr, id));
+        if (s_panel.gl_draw != FI_NONE) {
+            link_line(fr, "GL draw ", s_panel.gl_draw);
         }
         break;
     case FI_VERDICT_FAILED:
@@ -2321,6 +2326,7 @@ static void declare_object_page(const fi_frame_t *fr) {
         view.epoch = s.frame_epoch;
         view.kind = s.obj_kind;
         view.object = s.obj;
+        nt_ui_scroll_to(s_ctx, nt_ui_id("object"), 0.0F, 0.0F);
     }
     const fi_object_t *o = &view.obj;
     const nt_ui_scroll_style_t scroll = nt_ui_scroll_style_defaults();
@@ -2365,7 +2371,13 @@ static void declare_object_page(const fi_frame_t *fr) {
         link_line(fr, "", o->record[k]);
     }
     if (o->count > SHOWN) {
-        textf(&k_dim, "... %u more; query mode lists them all: object @%u", o->count - SHOWN, o->record[0]);
+        fi_named_t named[FI_NAMED];
+        const uint32_t n = fi_named_objects(fr, o->record[0], named);
+        const char *field = "?";
+        for (uint32_t k = n; k-- > 0;) {
+            field = named[k].kind == o->kind && named[k].object == o->object ? named[k].field : field;
+        }
+        textf(&k_dim, "... %u more; query mode lists them all: object @%u.%s", o->count - SHOWN, o->record[0], field);
     }
     nt_ui_scroll_end(s_ctx);
 }
@@ -2787,7 +2799,7 @@ static void frame(void) {
 
 // #region main
 /* Files to open, --monkey SECONDS [SEED], and where the window opens: --frame INDEX (the frame's index across
- * the files), --base INDEX (Compare's A), --page frames|commands|info|compare|init|end, --select RECORD (its
+ * the files), --base INDEX (Compare's A), --page frames|commands|info|compare|init|end|object, --select RECORD (its
  * @ number), --filter TEXT. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void parse_args(int argc, char *argv[]) {
@@ -2819,7 +2831,7 @@ static void parse_args(int argc, char *argv[]) {
             }
             s_monkey.seed = s_monkey.seed != 0 ? s_monkey.seed : 1U;
         } else if (strncmp(arg, "--", 2) == 0) {
-            nt_log_error("frame_inspector: unknown option %s (--frame N, --base N, --page frames|commands|info|compare|init|end, --select N, --filter TEXT, --monkey S [SEED])", arg);
+            nt_log_error("frame_inspector: unknown option %s (--frame N, --base N, --page frames|commands|info|compare|init|end|object, --select N, --filter TEXT, --monkey S [SEED])", arg);
         } else {
             add_file(arg);
         }

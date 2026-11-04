@@ -291,7 +291,7 @@ typedef struct {
     uint8_t kind;
     uint32_t object;
 } fi_named_t;
-#define FI_NAMED 24U
+#define FI_NAMED 28U
 uint32_t fi_named_objects(const fi_frame_t *frame, uint32_t record, fi_named_t out[FI_NAMED]);
 
 /* One object through the frame, by one scan: its definition, the GL names it held (a new one after a context

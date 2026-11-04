@@ -153,6 +153,10 @@ static void test_object_lists_where_it_is_named(void) {
     assert_holds(text, "\n  @689  glBindTexture(GL_TEXTURE_2D,5 tex#1)\n");
     TEST_ASSERT_EQUAL_STRING(text, ask("object @74", true)); /* a definition names its own object first */
     assert_holds(ask("object @657.0", true), "object prog/shape/fill#1  # PROGRAM ");
+    /* frame_vertex's GL calls at end_frame (g0) list before its shape requests (g1): by group, not by record */
+    assert_holds(ask("object @114.array_buffer", true), "\n  @649  glBindBuffer(GL_ARRAY_BUFFER,3 buf/frame_vertex#1)\ngroup g1  # > shape\n  @202  ");
+    TEST_ASSERT_NULL(strstr(ask("record @79", true), "object gl_name")); /* a definition's own GL name is not a second object */
+    assert_holds(ask("object @000000000000000000000000009", false), "error: the frame has no record @000000000000000000000000009");
     assert_holds(ask("object @128.unit", false), "error: record @128 names no object by unit");
     assert_holds(ask("object @1", false), "error: record @1 names no object;");
     assert_holds(ask("object", false), "error: object needs @N[.FIELD]");
@@ -413,6 +417,14 @@ static void test_state_of_a_gl_call_is_its_request_state(void) {
     TEST_ASSERT_EQUAL_STRING_LEN(upload, call, strstr(upload, "\n# GL state") - upload);
 }
 
+/* A command that issued no GL call (@228, a pipeline already set) runs in the stream after the draw before it: its GL
+ * state is that draw's last call, not the state before execution. */
+static void test_a_command_without_calls_takes_the_stream_point(void) {
+    const char *text = ask("state @228 all", true);
+    assert_holds(text, "\n# GL state at @680\n");
+    assert_holds(text, "\n* UseProgram                 @673  glUseProgram(19 prog/skeletal_showcase/sprite#1)\n");
+}
+
 /* Every row of the native and web fixtures is built from fields: no generic list survives outside an issued call. */
 static void test_every_row_names_its_fields(void) {
     fi_file_t web = {0};
@@ -468,6 +480,7 @@ int main(void) {
     RUN_TEST(test_aliases_show_labels);
     RUN_TEST(test_rows_decode_captured_values);
     RUN_TEST(test_state_of_a_gl_call_is_its_request_state);
+    RUN_TEST(test_a_command_without_calls_takes_the_stream_point);
     RUN_TEST(test_every_row_names_its_fields);
     RUN_TEST(test_every_gl_name_has_an_owner);
     return UNITY_END();
