@@ -1540,7 +1540,7 @@ static void cmd_help(fi_out_t *out) {
              "# rows: each record's fields by name, values decoded (GL_LEQUAL, U16, tex/atlas); record @N adds the line as\n"
              "# captured, raw. Zero fields are left out; a request's unset render target or sampler reads as its default.\n"
              "# objects: kind/label#N (buf/frame_uniform#1), kind#N when unlabeled; samplers and instance layouts, shared by\n"
-             "# content, by their content (smp/linear_mip_linear_repeat#1, layout/44B:1-4#1); N counts first use in the frame's work,\n"
+             "# content, by their content (smp/linear_mip_linear_repeat#1, layout/44B:1-4~ac44#1); N counts first use in the frame's work,\n"
              "# then the snapshot's, per kind and label. A GL name reads with the object it belonged to at that record\n"
              "# (glUseProgram(19 prog/sprite#1)), or its role (upload VAO, timer query); a bare number: the frame never said.\n"
              "# badges: [merged] joined the previous GL draw, [already set] the engine held that state, [found] a cached\n"

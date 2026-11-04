@@ -388,7 +388,7 @@ static void test_rows_decode_captured_values(void) {
     assert_holds(ask("record @114", true), "\ncaptured INITIAL op=STATE layer=BACKEND program=19 vertex_array=7 active_texture=33984 ");
     assert_holds(ask("record @117", true), "INITIAL PIPELINE program_gl=19 prog/skeletal_showcase/sprite#1 depth_func=GL_LEQUAL blend src_rgb=GL_ONE dst_rgb=GL_ONE_MINUS_SRC_ALPHA ");
     assert_holds(ask("record @79", true), "DEFINITION CREATE smp/linear_mip_linear_repeat#1 gl_name=2 min_filter=LINEAR_MIPMAP_LINEAR mag_filter=LINEAR wrap_u=REPEAT wrap_v=REPEAT\n");
-    assert_holds(ask("record @90", true), "DEFINITION CREATE layout/32B:1fx4,2fx3@0,3fx3@16,4fx3@16,5u8x4n#1 slot=3 stride=32 locations=1-5\n");
+    assert_holds(ask("record @90", true), "DEFINITION CREATE layout/32B:1-5~78d4#1 slot=3 stride=32 locations=1-5\n");
     assert_holds(ask("record @36", true), " vertex_buffer=buf/shape_line_template#1 index_buffer=buf/shape_line_template#2 index_type=U16 ");
     assert_holds(ask("record @218", true), "@218  NOTE_FIELD page=tex#1\n");
     assert_holds(ask("record @639", true), "@639  BUFFER_UPLOAD buf/frame_index#1 size=11184 data\n");

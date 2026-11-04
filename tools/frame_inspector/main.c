@@ -2789,7 +2789,7 @@ static void frame(void) {
 // #region main
 /* Files to open, --monkey SECONDS [SEED], and where the window opens: --frame INDEX (the frame's index across
  * the files), --base INDEX (Compare's A), --page frames|commands|info|compare|init|end|object, --select RECORD (its
- * @ number), --filter TEXT. */
+ * @ number; with --page object, the first object it names), --filter TEXT. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void parse_args(int argc, char *argv[]) {
     static const char *const k_pages[PAGE_COUNT] = {"frames", "commands", "info", "compare", "init", "end", "object"};
@@ -2855,6 +2855,11 @@ static void parse_args(int argc, char *argv[]) {
     }
     for (int p = 0; page != NULL && p < PAGE_COUNT; p++) {
         s.page = strcmp(page, k_pages[p]) == 0 ? p : s.page;
+    }
+    fi_named_t named[FI_NAMED];
+    if (s.page == PAGE_OBJECT && select != NULL && frame_ok(fr) && record < fr->view.count && fi_named_objects(fr, record, named) > 0) {
+        s.obj_kind = named[0].kind; /* the first object the selected record names */
+        s.obj = named[0].object;
     }
 }
 

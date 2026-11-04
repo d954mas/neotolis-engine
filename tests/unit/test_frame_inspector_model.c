@@ -1296,8 +1296,8 @@ static nt_gfx_event_t layout_attribute(uint32_t location, uint32_t type, uint32_
 }
 
 /* A sampler and an instance layout are shared by content, so their content names them; a mag filter shows only
- * when it differs from the min filter's, a wrap per axis only when the axes differ, an attribute's offset only when
- * it does not follow the previous attribute. */
+ * when it differs from the min filter's, a wrap per axis only when the axes differ; a layout by stride, locations
+ * and a hash of its attributes. */
 static void test_shared_objects_take_their_content_as_name(void) {
     nt_gfx_event_t ev[6];
     memset(ev, 0, sizeof(ev));
@@ -1321,7 +1321,13 @@ static void test_shared_objects_take_their_content_as_name(void) {
     fi_alias_text(fr, NT_GFX_OBJECT_SAMPLER, 1, alias, sizeof(alias));
     TEST_ASSERT_EQUAL_STRING("smp/linear_mag_nearest_clamp_repeat_lequal#1", alias);
     fi_alias_text(fr, NT_GFX_OBJECT_INSTANCE_LAYOUT, 1, alias, sizeof(alias));
-    TEST_ASSERT_EQUAL_STRING("layout/44B:1fx3,2fx3,4u8x4n,7hx2@32#1", alias);
+    TEST_ASSERT_EQUAL_STRING("layout/44B:1-2,4,7~bd2d#1", alias);
+    ev[5].data.attribute.offset = 28; /* the same locations, another layout: its attributes' hash tells them apart */
+    fi_file_close(&s_file);
+    fr = load_built((nt_gfx_capture_view_t){.events = ev, .count = 6, .strings = "", .string_bytes = 1});
+    fi_alias_text(fr, NT_GFX_OBJECT_INSTANCE_LAYOUT, 1, alias, sizeof(alias));
+    TEST_ASSERT_EQUAL_STRING_LEN("layout/44B:1-2,4,7~", alias, 19);
+    TEST_ASSERT_NOT_EQUAL(0, strcmp("layout/44B:1-2,4,7~bd2d#1", alias));
 }
 
 /* The restore, right after begin_frame's snapshot, resets the GL state and then makes the upload VAO. */

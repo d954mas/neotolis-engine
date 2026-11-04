@@ -612,33 +612,20 @@ const char *fi_locations_text(uint32_t v, char *buf, size_t size) {
     return v != 0 ? buf : NULL;
 }
 
-_Static_assert(NT_FILTER_LINEAR_MIPMAP_LINEAR == 5 && NT_WRAP_MIRRORED_REPEAT == 2 && NT_COMPARE_NEVER == 8 && NT_VERTEX_INT16 == 5,
-               "frame inspector: an engine enum changed; update the content names");
+_Static_assert(NT_FILTER_LINEAR_MIPMAP_LINEAR == 5 && NT_WRAP_MIRRORED_REPEAT == 2 && NT_COMPARE_NEVER == 8, "frame inspector: an engine enum changed; update the content names");
 
-/* An instance layout by what makes it equal (nt_gfx.c instance_layout_equal): its stride, then per attribute its
- * location, type, count, normalization, and its offset where it does not follow the previous one: 44B:1fx3,4u8x4n.
- * The ATTRIBUTE definitions after its definition hold them. False for a type the engine does not make. */
-static bool layout_label(const nt_gfx_event_t *ev, uint32_t n, uint32_t i, char out[FI_CONTENT_LABEL]) {
-    static const char *const k_type[] = {"f", "h", "u8", "i8", "u16", "i16"};
-    static const uint8_t k_size[] = {4, 2, 1, 1, 2, 2};
-    size_t at = (size_t)snprintf(out, FI_CONTENT_LABEL, "%uB:", ev[i].data.instance_layout.stride);
-    uint32_t packed = 0;
+/* An instance layout by what makes it equal (nt_gfx.c instance_layout_equal), kept short: its stride and locations,
+ * then a hash of its attributes' types, counts, normalization and offsets (the ATTRIBUTE definitions after its own,
+ * which print them): 44B:1-4~ac44. */
+static uint32_t layout_hash(const nt_gfx_event_t *ev, uint32_t n, uint32_t i) {
+    uint32_t h = 2166136261U;
     for (uint32_t j = i + 1U; j < n && ev[j].kind == NT_GFX_EVENT_DEFINITION && ev[j].operation == NT_GFX_OP_ATTRIBUTE && ev[j].object == ev[i].object; j++) {
-        const uint32_t type = ev[j].data.attribute.type;
-        const uint32_t offset = ev[j].data.attribute.offset;
-        if (type >= sizeof(k_type) / sizeof(k_type[0])) {
-            return false;
+        const uint32_t format[] = {ev[j].data.attribute.location, ev[j].data.attribute.type, ev[j].data.attribute.count, ev[j].data.attribute.normalized, ev[j].data.attribute.offset};
+        for (uint32_t k = 0; k < sizeof(format) / sizeof(format[0]); k++) {
+            h = (h ^ format[k]) * 16777619U;
         }
-        if (at < FI_CONTENT_LABEL) {
-            at += (size_t)snprintf(out + at, FI_CONTENT_LABEL - at, "%s%u%sx%u%s", j > i + 1U ? "," : "", ev[j].data.attribute.location, k_type[type], ev[j].data.attribute.count,
-                                   ev[j].data.attribute.normalized != 0 ? "n" : "");
-        }
-        if (at < FI_CONTENT_LABEL && offset != packed) {
-            at += (size_t)snprintf(out + at, FI_CONTENT_LABEL - at, "@%u", offset);
-        }
-        packed = offset + (k_size[type] * ev[j].data.attribute.count);
     }
-    return true;
+    return h;
 }
 
 /* A sampler by its filters, wraps and compare: linear_mip_linear_repeat. A mag filter shows only when it is not the
@@ -667,7 +654,13 @@ static void name_alias(fi_frame_t *fr, uint32_t i, uint32_t a) {
     const bool layout = e->object_kind == NT_GFX_OBJECT_INSTANCE_LAYOUT;
     const bool sampler = e->object_kind == NT_GFX_OBJECT_SAMPLER;
     const nt_gfx_capture_string_t label = label_of(e);
-    if ((layout && layout_label(fr->view.events, fr->view.count, i, fr->content_label[a])) || (sampler && sampler_label(e, fr->content_label[a]))) {
+    char locations[48];
+    if (layout) {
+        const uint32_t h = layout_hash(fr->view.events, fr->view.count, i);
+        (void)snprintf(fr->content_label[a], FI_CONTENT_LABEL, "%uB:%s~%04x", e->data.instance_layout.stride,
+                       fi_locations_text(e->data.instance_layout.locations, locations, sizeof(locations)) != NULL ? locations : "", (h ^ (h >> 16)) & 0xFFFFU);
+    }
+    if (layout || (sampler && sampler_label(e, fr->content_label[a]))) {
         fr->alias_label[a] = fr->content_label[a];
     } else if (label != 0) {
         fr->alias_label[a] = fr->view.strings + label;
