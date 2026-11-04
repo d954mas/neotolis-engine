@@ -42,6 +42,12 @@ static inline uint32_t nt_test_note_u32(uint32_t note, const char *key) {
     return field != NULL && field->field.type == NT_GFX_NOTE_U32 ? field->field.value.u32 : UINT32_MAX;
 }
 
+/* The handle of a HANDLE field of that kind; UINT32_MAX when the note has none. */
+static inline uint32_t nt_test_note_handle(uint32_t note, const char *key, nt_gfx_object_kind_t kind) {
+    const nt_gfx_event_t *field = nt_test_note_field(note, key);
+    return field != NULL && field->field.type == NT_GFX_NOTE_HANDLE && field->field.value.handle.kind == (uint32_t)kind ? field->field.value.handle.id : UINT32_MAX;
+}
+
 static inline const char *nt_test_note_str(uint32_t note, const char *key) {
     const nt_gfx_event_t *field = nt_test_note_field(note, key);
     return field != NULL && field->field.type == NT_GFX_NOTE_STR ? nt_test_capture_open().strings + field->field.value.str : "";

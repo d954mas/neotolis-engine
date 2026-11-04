@@ -43,7 +43,7 @@ static const char *const s_result_names[] = {
 };
 
 static const char *const s_note_type_names[] = {
-    NT_NAME_(NT_GFX_NOTE_, U32), NT_NAME_(NT_GFX_NOTE_, I32), NT_NAME_(NT_GFX_NOTE_, U64), NT_NAME_(NT_GFX_NOTE_, F32), NT_NAME_(NT_GFX_NOTE_, STR),
+    NT_NAME_(NT_GFX_NOTE_, U32), NT_NAME_(NT_GFX_NOTE_, I32), NT_NAME_(NT_GFX_NOTE_, U64), NT_NAME_(NT_GFX_NOTE_, F32), NT_NAME_(NT_GFX_NOTE_, STR), NT_NAME_(NT_GFX_NOTE_, HANDLE),
 };
 #undef NT_NAME_
 
@@ -53,7 +53,7 @@ static const char *const s_layer_names[] = {[NT_GFX_INITIAL_FRONTEND] = "FRONTEN
 _Static_assert(sizeof(s_kind_names) / sizeof(s_kind_names[0]) == NT_GFX_EVENT_MARKER_POP + 1, "every event kind has a name");
 _Static_assert(sizeof(s_object_names) / sizeof(s_object_names[0]) == NT_GFX_OBJECT_INSTANCE_LAYOUT + 1, "every object kind has a name");
 _Static_assert(sizeof(s_result_names) / sizeof(s_result_names[0]) == NT_GFX_RESULT_UNKNOWN + 1, "every result has a name");
-_Static_assert(sizeof(s_note_type_names) / sizeof(s_note_type_names[0]) == NT_GFX_NOTE_STR + 1, "every note type has a name");
+_Static_assert(sizeof(s_note_type_names) / sizeof(s_note_type_names[0]) == NT_GFX_NOTE_HANDLE + 1, "every note type has a name");
 _Static_assert(sizeof(s_platform_names) / sizeof(s_platform_names[0]) == NT_GFX_CAPTURE_WEB + 1, "every platform has a name");
 
 #define NT_GFX_GL_CALL_NAME_(name) #name,
@@ -74,135 +74,306 @@ static const char *table_name(const char *const *names, uint32_t count, uint32_t
 const char *nt_gfx_operation_name(uint32_t operation) { return operation < NT_COUNT_(s_operation_names) ? s_operation_names[operation] : NULL; }
 const char *nt_gfx_result_name(uint32_t result) { return result < NT_COUNT_(s_result_names) ? s_result_names[result] : NULL; }
 const char *nt_gfx_object_kind_name(uint32_t kind) { return kind < NT_COUNT_(s_object_names) ? s_object_names[kind] : NULL; }
+const char *nt_gfx_event_kind_name(uint32_t kind) { return kind < NT_COUNT_(s_kind_names) ? s_kind_names[kind] : NULL; }
 // #endregion
 
 // #region layout
-/* Field lists shared by format and parse, so the two directions cannot drift. */
-typedef enum {
-    ARM_NONE,
-    ARM_BACKEND,
-    ARM_KEY, /* a backend cache skip: the skipped call's cache key */
-    ARM_RESOURCE,
-    ARM_DRAW,
-    ARM_BINDING,
-    ARM_PASS,
-    ARM_CLEAR,
-    ARM_ATTRIBUTE,
-    ARM_STATE,
-    ARM_COUNT,
-} arm_t;
+/* Field lists shared by format, parse and readers (nt_gfx_capture_fields), so they cannot drift. */
+// clang-format off: clang-format versions disagree on braces in a macro body
+#define NT_AT_(member) (uint16_t)offsetof(nt_gfx_event_t, data.member)
+#define NT_ONE_(member, name, type, meaning, sub) {(name), NT_AT_(member), NT_GFX_FIELD_##type, 1, NT_GFX_MEANING_##meaning, (uint8_t)(sub)}
+#define NT_LIST_(member, name, type, meaning, sub) {(name), NT_AT_(member), NT_GFX_FIELD_##type, (uint8_t)NT_COUNT_(((nt_gfx_event_t *)NULL)->data.member), NT_GFX_MEANING_##meaning, (uint8_t)(sub)}
+// clang-format on
+/* A scalar named after its member. */
+#define NT_F_(arm, member, type, meaning, sub) NT_ONE_(arm.member, #member, type, meaning, sub)
+#define NT_LABEL_(arm) NT_F_(arm, label, STR, PLAIN, 0)
+#define NT_SLOT_(arm, kind) NT_F_(arm, slot, U32, SLOT, NT_GFX_OBJECT_##kind)
+#define NT_HANDLE_(arm, member, kind) NT_F_(arm, member, U32, HANDLE, NT_GFX_OBJECT_##kind)
+#define NT_GL_NAME_(arm, member, kind) NT_F_(arm, member, U32, GL_NAME, NT_GFX_GL_OBJECT_##kind)
+#define NT_ENUM_(arm, member, domain) NT_F_(arm, member, U32, VALUE, NT_GFX_DOMAIN_##domain)
+#define NT_N_(arm, member) NT_F_(arm, member, U32, PLAIN, 0)
+/* Element k of a cache skip's key. */
+#define NT_KEY_(k, name, meaning, sub) NT_ONE_(backend.args[k], (name), U32, meaning, sub)
 
-typedef enum { F_U32, F_U64, F_F32, F_BOOL, F_U32S, F_F32S, F_STR } field_type_t;
+typedef nt_gfx_capture_field_t field_t;
+
+static const field_t k_backend[] = {NT_LIST_(backend.args, "args", U32S, PLAIN, 0), NT_LIST_(backend.values, "values", F32S, PLAIN, 0), NT_F_(backend, bytes, U64, PLAIN, 0)};
+/* A cache skip's key, per skipped call (gl backend NT_GFX_RECORD_CACHE_SKIP): the cache entry, not the GL signature. */
+static const field_t k_key_program[] = {NT_KEY_(0, "program", GL_NAME, NT_GFX_GL_OBJECT_PROGRAM)};
+static const field_t k_key_vertex_array[] = {NT_KEY_(0, "vertex_array", GL_NAME, NT_GFX_GL_OBJECT_VERTEX_ARRAY)};
+static const field_t k_key_attributes[] = {NT_KEY_(0, "vertex_array", GL_NAME, NT_GFX_GL_OBJECT_VERTEX_ARRAY), NT_KEY_(1, "buffer", GL_NAME, NT_GFX_GL_OBJECT_BUFFER), NT_KEY_(2, "offset", PLAIN, 0),
+                                           NT_KEY_(3, "layout", SLOT, NT_GFX_OBJECT_INSTANCE_LAYOUT)};
+static const field_t k_key_buffer[] = {NT_KEY_(0, "buffer", GL_NAME, NT_GFX_GL_OBJECT_BUFFER)};
+static const field_t k_key_buffer_range[] = {NT_KEY_(0, "slot", PLAIN, 0), NT_KEY_(1, "offset", PLAIN, 0), NT_KEY_(2, "size", PLAIN, 0)};
+static const field_t k_key_texture[] = {NT_KEY_(0, "texture", GL_NAME, NT_GFX_GL_OBJECT_TEXTURE), NT_KEY_(1, "unit", PLAIN, 0)};
+static const field_t k_key_sampler[] = {NT_KEY_(0, "sampler", GL_NAME, NT_GFX_GL_OBJECT_SAMPLER), NT_KEY_(1, "unit", PLAIN, 0)};
+static const field_t k_shader[] = {NT_GL_NAME_(shader, gl_name, SHADER), NT_ENUM_(shader, stage, SHADER_TYPE), NT_LABEL_(shader)};
+static const field_t k_program[] = {NT_SLOT_(program, PROGRAM), NT_HANDLE_(program, vertex_shader, SHADER), NT_HANDLE_(program, fragment_shader, SHADER), NT_LABEL_(program)};
+static const field_t k_pipeline[] = {NT_SLOT_(pipeline, PIPELINE), NT_HANDLE_(pipeline, program, PROGRAM), NT_LABEL_(pipeline)};
+static const field_t k_vertex_input[] = {NT_SLOT_(vertex_input, VERTEX_INPUT), NT_HANDLE_(vertex_input, vertex_buffer, BUFFER), NT_HANDLE_(vertex_input, index_buffer, BUFFER),
+                                         NT_ENUM_(vertex_input, index_type, INDEX_TYPE), NT_LABEL_(vertex_input)};
+static const field_t k_buffer[] = {
+    NT_F_(buffer, size, U64, PLAIN, 0), NT_SLOT_(buffer, BUFFER), NT_ENUM_(buffer, type, BUFFER_TYPE), NT_ENUM_(buffer, usage, BUFFER_USAGE), NT_ENUM_(buffer, index_type, INDEX_TYPE),
+    NT_F_(buffer, data, BOOL, BOOL, 0), NT_LABEL_(buffer)};
+static const field_t k_texture[] = {NT_SLOT_(texture, TEXTURE),
+                                    NT_N_(texture, width),
+                                    NT_N_(texture, height),
+                                    NT_ENUM_(texture, format, TEXTURE_FORMAT),
+                                    NT_N_(texture, levels),
+                                    NT_HANDLE_(texture, sampler, SAMPLER),
+                                    NT_F_(texture, gen_mipmaps, BOOL, BOOL, 0),
+                                    NT_LABEL_(texture)};
+static const field_t k_sampler[] = {NT_GL_NAME_(sampler, gl_name, SAMPLER),  NT_ENUM_(sampler, min_filter, TEXTURE_FILTER), NT_ENUM_(sampler, mag_filter, TEXTURE_FILTER),
+                                    NT_ENUM_(sampler, wrap_u, TEXTURE_WRAP), NT_ENUM_(sampler, wrap_v, TEXTURE_WRAP),       NT_ENUM_(sampler, compare, COMPARE_FUNC)};
+static const field_t k_render_target[] = {NT_SLOT_(render_target, RENDER_TARGET),
+                                          NT_HANDLE_(render_target, color, TEXTURE),
+                                          NT_HANDLE_(render_target, depth, TEXTURE),
+                                          NT_N_(render_target, width),
+                                          NT_N_(render_target, height),
+                                          NT_ENUM_(render_target, color_format, TEXTURE_FORMAT),
+                                          NT_ENUM_(render_target, depth_format, TEXTURE_FORMAT),
+                                          NT_LABEL_(render_target)};
+static const field_t k_instance_layout[] = {NT_SLOT_(instance_layout, INSTANCE_LAYOUT), NT_F_(instance_layout, stride, U32, PLAIN, 0),
+                                            NT_F_(instance_layout, locations, U32, VALUE, NT_GFX_DOMAIN_LOCATIONS)};
+static const field_t k_attribute[] = {NT_HANDLE_(attribute, buffer, BUFFER),      NT_F_(attribute, offset, U32, PLAIN, 0),
+                                      NT_F_(attribute, stride, U32, PLAIN, 0),    NT_N_(attribute, location),
+                                      NT_ENUM_(attribute, type, VERTEX_TYPE),     NT_N_(attribute, count),
+                                      NT_F_(attribute, normalized, U32, BOOL, 0), NT_N_(attribute, divisor)};
+static const field_t k_upload[] = {NT_F_(upload, size, U64, PLAIN, 0), NT_F_(upload, offset, U32, PLAIN, 0), NT_F_(upload, data, BOOL, BOOL, 0)};
+#define NT_RECT_ NT_F_(rect, x, I32, PLAIN, 0), NT_F_(rect, y, I32, PLAIN, 0), NT_F_(rect, width, I32, PLAIN, 0), NT_F_(rect, height, I32, PLAIN, 0)
+static const field_t k_rect[] = {NT_RECT_};
+#if !defined(NT_PLATFORM_WEB)
+static const field_t k_read[] = {NT_RECT_, NT_HANDLE_(rect, source, RENDER_TARGET)};
+#endif
+#undef NT_RECT_
+static const field_t k_toggle[] = {NT_F_(toggle, on, BOOL, BOOL, 0)};
+static const field_t k_frontend[] = {NT_F_(frontend, context_lost, BOOL, BOOL, 0)};
+static const field_t k_texture_set[] = {NT_N_(texture_set, count)};
+static const field_t k_texture_binding[] = {NT_F_(texture_binding, name, U32, HASH, 0), NT_HANDLE_(texture_binding, sampler, SAMPLER)};
+static const field_t k_instance_binding[] = {NT_HANDLE_(instance_binding, buffer, BUFFER), NT_HANDLE_(instance_binding, layout, INSTANCE_LAYOUT), NT_F_(instance_binding, offset, U32, PLAIN, 0)};
+static const field_t k_ubo[] = {NT_N_(ubo, slot), NT_F_(ubo, offset, U32, PLAIN, 0), NT_F_(ubo, size, U32, PLAIN, 0)};
+static const field_t k_segment[] = {NT_F_(segment, name, U32, HASH, 0)};
+static const field_t k_draw[] = {NT_N_(draw, first), NT_N_(draw, count), NT_N_(draw, vertices), NT_N_(draw, instances), NT_HANDLE_(draw, vertex_input, VERTEX_INPUT)};
+static const field_t k_pass[] = {
+    NT_HANDLE_(pass, target, RENDER_TARGET), NT_LIST_(pass.color, "color", F32S, PLAIN, 0), NT_F_(pass, depth, F32, PLAIN, 0),         NT_F_(pass, load_color, BOOL, BOOL, 0),
+    NT_F_(pass, load_depth, BOOL, BOOL, 0),  NT_F_(pass, discard_color, BOOL, BOOL, 0),     NT_F_(pass, discard_depth, BOOL, BOOL, 0),
+};
+static const field_t k_clear[] = {NT_LIST_(clear.clear_color, "clear_color", F32S, PLAIN, 0), NT_F_(clear, clear_depth, F32, PLAIN, 0), NT_F_(clear, color, BOOL, BOOL, 0),
+                                  NT_F_(clear, depth, BOOL, BOOL, 0)};
+#define NT_PIPELINE_STATE_                                                                                                                                                                             \
+    NT_F_(pipeline_state, depth_test, U32, BOOL, 0), NT_F_(pipeline_state, depth_write, U32, BOOL, 0), NT_ENUM_(pipeline_state, depth_func, GL), NT_ENUM_(pipeline_state, cull, CULL_MODE),            \
+        NT_F_(pipeline_state, blend, U32, BOOL, 0), NT_ENUM_(pipeline_state, src_rgb, GL_BLEND_FACTOR), NT_ENUM_(pipeline_state, dst_rgb, GL_BLEND_FACTOR),                                            \
+        NT_ENUM_(pipeline_state, src_alpha, GL_BLEND_FACTOR), NT_ENUM_(pipeline_state, dst_alpha, GL_BLEND_FACTOR), NT_ENUM_(pipeline_state, op_rgb, GL), NT_ENUM_(pipeline_state, op_alpha, GL),      \
+        NT_F_(pipeline_state, polygon_offset, U32, BOOL, 0), NT_LIST_(pipeline_state.blend_color, "blend_color", F32S, PLAIN, 0), NT_F_(pipeline_state, offset_factor, F32, PLAIN, 0),                 \
+        NT_F_(pipeline_state, offset_units, F32, PLAIN, 0)
+static const field_t k_pipeline_definition[] = {NT_SLOT_(pipeline_state, PIPELINE), NT_F_(pipeline_state, program_slot, U32, SLOT, NT_GFX_OBJECT_PROGRAM), NT_PIPELINE_STATE_};
+static const field_t k_pipeline_inherited[] = {NT_GL_NAME_(pipeline_state, program_gl, PROGRAM), NT_PIPELINE_STATE_};
+#undef NT_PIPELINE_STATE_
+#define NT_BACKEND_RESOURCE_(kind, gl_kind) NT_F_(backend_resource, slot, U32, SLOT, NT_GFX_OBJECT_##kind), NT_GL_NAME_(backend_resource, gl_name, gl_kind)
+static const field_t k_backend_program[] = {NT_BACKEND_RESOURCE_(PROGRAM, PROGRAM)};
+static const field_t k_backend_buffer[] = {NT_BACKEND_RESOURCE_(BUFFER, BUFFER)};
+static const field_t k_backend_texture[] = {NT_BACKEND_RESOURCE_(TEXTURE, TEXTURE)};
+static const field_t k_backend_render_target[] = {NT_BACKEND_RESOURCE_(RENDER_TARGET, FRAMEBUFFER)};
+static const field_t k_backend_vertex_input[] = {NT_BACKEND_RESOURCE_(VERTEX_INPUT, VERTEX_ARRAY), NT_GL_NAME_(backend_resource, instance_buffer, BUFFER),
+                                                 NT_F_(backend_resource, instance_offset, U32, PLAIN, 0), NT_F_(backend_resource, instance_layout, U32, SLOT, NT_GFX_OBJECT_INSTANCE_LAYOUT)};
+#undef NT_BACKEND_RESOURCE_
+static const field_t k_backend_state[] = {NT_GL_NAME_(backend_state, program, PROGRAM),
+                                          NT_GL_NAME_(backend_state, vertex_array, VERTEX_ARRAY),
+                                          NT_GL_NAME_(backend_state, framebuffer, FRAMEBUFFER),
+                                          NT_ENUM_(backend_state, active_texture, GL_TEXTURE_UNIT),
+                                          NT_N_(backend_state, width),
+                                          NT_N_(backend_state, height),
+                                          NT_GL_NAME_(backend_state, upload_vertex_array, VERTEX_ARRAY),
+                                          NT_GL_NAME_(backend_state, array_buffer, BUFFER)};
+static const field_t k_texture_unit[] = {NT_N_(texture_unit, unit), NT_GL_NAME_(texture_unit, texture, TEXTURE), NT_GL_NAME_(texture_unit, sampler, SAMPLER)};
+static const field_t k_program_sampler[] = {NT_F_(program_sampler, program, U32, SLOT, NT_GFX_OBJECT_PROGRAM), NT_F_(program_sampler, name, U32, HASH, 0), NT_N_(program_sampler, unit),
+                                            NT_ENUM_(program_sampler, sampler_class, SAMPLER_CLASS), NT_F_(program_sampler, location, I32, PLAIN, 0)};
+#undef NT_AT_
+#undef NT_ONE_
+#undef NT_LIST_
+#undef NT_F_
+#undef NT_LABEL_
+#undef NT_SLOT_
+#undef NT_HANDLE_
+#undef NT_GL_NAME_
+#undef NT_ENUM_
+#undef NT_N_
+#undef NT_KEY_
 
 typedef struct {
-    const char *name;
-    uint16_t offset; /* into the record */
-    uint8_t type;    /* field_type_t */
-    uint8_t size;    /* list capacity; 1 for scalars */
-} field_t;
-
-#define NT_FIELD_(arm, member, type) #member, (uint16_t)offsetof(nt_gfx_event_t, data.arm.member), (type), 1
-#define NT_LIST_(arm, member, type) #member, (uint16_t)offsetof(nt_gfx_event_t, data.arm.member), (type), (uint8_t)NT_COUNT_(((nt_gfx_event_t *)NULL)->data.arm.member)
-static const field_t k_backend[] = {{NT_LIST_(backend, args, F_U32S)}, {NT_LIST_(backend, values, F_F32S)}, {NT_FIELD_(backend, bytes, F_U64)}};
-static const field_t k_key[] = {{"key", (uint16_t)offsetof(nt_gfx_event_t, data.backend.args), F_U32S, (uint8_t)NT_COUNT_(((nt_gfx_event_t *)NULL)->data.backend.args)},
-                                {NT_LIST_(backend, values, F_F32S)},
-                                {NT_FIELD_(backend, bytes, F_U64)}};
-static const field_t k_resource[] = {
-    {NT_FIELD_(resource, size, F_U64)},   {NT_FIELD_(resource, backend, F_U32)}, {NT_LIST_(resource, related, F_U32S)}, {NT_FIELD_(resource, type, F_U32)},
-    {NT_FIELD_(resource, usage, F_U32)},  {NT_FIELD_(resource, width, F_U32)},   {NT_FIELD_(resource, height, F_U32)},  {NT_FIELD_(resource, format, F_U32)},
-    {NT_FIELD_(resource, levels, F_U32)}, {NT_FIELD_(resource, flags, F_U32)},   {NT_FIELD_(resource, label, F_STR)},
-};
-static const field_t k_draw[] = {
-    {NT_FIELD_(draw, first, F_U32)}, {NT_FIELD_(draw, count, F_U32)}, {NT_FIELD_(draw, vertices, F_U32)}, {NT_FIELD_(draw, instances, F_U32)}, {NT_FIELD_(draw, vertex_input, F_U32)}};
-static const field_t k_binding[] = {
-    {NT_FIELD_(binding, secondary, F_U32)}, {NT_FIELD_(binding, name, F_U32)}, {NT_FIELD_(binding, slot, F_U32)}, {NT_FIELD_(binding, offset, F_U32)}, {NT_FIELD_(binding, size, F_U32)}};
-static const field_t k_pass[] = {
-    {NT_FIELD_(pass, target, F_U32)},      {NT_LIST_(pass, color, F_F32S)},          {NT_FIELD_(pass, depth, F_F32)},          {NT_FIELD_(pass, load_color, F_BOOL)},
-    {NT_FIELD_(pass, load_depth, F_BOOL)}, {NT_FIELD_(pass, discard_color, F_BOOL)}, {NT_FIELD_(pass, discard_depth, F_BOOL)},
-};
-static const field_t k_clear[] = {{NT_LIST_(clear, clear_color, F_F32S)}, {NT_FIELD_(clear, clear_depth, F_F32)}, {NT_FIELD_(clear, color, F_BOOL)}, {NT_FIELD_(clear, depth, F_BOOL)}};
-static const field_t k_attribute[] = {
-    {NT_FIELD_(attribute, buffer, F_U32)}, {NT_FIELD_(attribute, offset, F_U32)}, {NT_FIELD_(attribute, stride, F_U32)},     {NT_FIELD_(attribute, location, F_U32)},
-    {NT_FIELD_(attribute, type, F_U32)},   {NT_FIELD_(attribute, count, F_U32)},  {NT_FIELD_(attribute, normalized, F_U32)}, {NT_FIELD_(attribute, divisor, F_U32)},
-};
-static const field_t k_state[] = {{NT_LIST_(state, integers, F_U32S)}, {NT_LIST_(state, values, F_F32S)}};
-#undef NT_FIELD_
-#undef NT_LIST_
-
-#define NT_ARM_(fields, member) (fields), NT_COUNT_(fields), sizeof(((nt_gfx_event_t *)NULL)->data.member)
-static const struct {
     const field_t *fields;
     uint32_t count;
-    size_t bytes; /* data bytes the arm may set; the rest stays zero */
-} k_arms[ARM_COUNT] = {
-    [ARM_BACKEND] = {NT_ARM_(k_backend, backend)}, [ARM_KEY] = {NT_ARM_(k_key, backend)}, [ARM_RESOURCE] = {NT_ARM_(k_resource, resource)}, [ARM_DRAW] = {NT_ARM_(k_draw, draw)},
-    [ARM_BINDING] = {NT_ARM_(k_binding, binding)}, [ARM_PASS] = {NT_ARM_(k_pass, pass)},  [ARM_CLEAR] = {NT_ARM_(k_clear, clear)},          [ARM_ATTRIBUTE] = {NT_ARM_(k_attribute, attribute)},
-    [ARM_STATE] = {NT_ARM_(k_state, state)},
-};
-#undef NT_ARM_
+} shape_t;
+#define NT_SHAPE_(fields) ((shape_t){(fields), NT_COUNT_(fields)})
 
 static bool is_draw(uint32_t operation) {
     return operation == NT_GFX_OP_DRAW || operation == NT_GFX_OP_DRAW_INSTANCED || operation == NT_GFX_OP_DRAW_INDEXED || operation == NT_GFX_OP_DRAW_INDEXED_INSTANCED;
 }
 
-/* Which data arm a gfx record fills; the render architecture spec, "Frame observation", names them. */
-static arm_t record_arm(const nt_gfx_event_t *e) {
-    switch (e->kind) {
-    case NT_GFX_EVENT_BACKEND:
-        return ARM_BACKEND;
-    case NT_GFX_EVENT_SKIP:
-        return e->detail != 0 ? ARM_KEY : ARM_BINDING;
-    case NT_GFX_EVENT_ARGUMENT:
-        return ARM_BINDING;
-    case NT_GFX_EVENT_DEFINITION:
-        switch (e->operation) {
-        case NT_GFX_OP_ATTRIBUTE:
-            return ARM_ATTRIBUTE;
-        case NT_GFX_OP_PIPELINE:
-            return ARM_STATE;
-        case NT_GFX_OP_STATE:
-            return ARM_BACKEND;
-        default:
-            return ARM_RESOURCE;
-        }
-    case NT_GFX_EVENT_INITIAL:
-        switch (e->operation) {
-        case NT_GFX_OP_STATE:
-            return e->detail == NT_GFX_INITIAL_BACKEND ? ARM_BACKEND : ARM_STATE;
-        case NT_GFX_OP_SAMPLER:
-        case NT_GFX_OP_TEXTURE:
-            return ARM_BACKEND;
-        case NT_GFX_OP_PASS:
-            return ARM_PASS;
-        default:
-            return ARM_STATE;
-        }
-    case NT_GFX_EVENT_OP:
-        if (is_draw(e->operation)) {
-            return ARM_DRAW;
-        }
-        switch (e->operation) {
-        case NT_GFX_OP_CREATE:
-        case NT_GFX_OP_BUFFER_UPLOAD:
-            return ARM_RESOURCE;
-        case NT_GFX_OP_PASS:
-            return ARM_PASS;
-        case NT_GFX_OP_CLEAR:
-            return ARM_CLEAR;
-        case NT_GFX_OP_VERTEX_INPUT:
-        case NT_GFX_OP_UBO:
-        case NT_GFX_OP_SEGMENT_BEGIN:
-        case NT_GFX_OP_SEGMENT_POLL:
-            return ARM_BINDING;
-        default:
-            return ARM_STATE;
-        }
+/* A CREATE request and its definition share their object's fields; a request leaves slot and label 0. */
+static shape_t object_shape(uint32_t object_kind) {
+    switch (object_kind) {
+    case NT_GFX_OBJECT_SHADER:
+        return NT_SHAPE_(k_shader);
+    case NT_GFX_OBJECT_PROGRAM:
+        return NT_SHAPE_(k_program);
+    case NT_GFX_OBJECT_PIPELINE:
+        return NT_SHAPE_(k_pipeline);
+    case NT_GFX_OBJECT_VERTEX_INPUT:
+        return NT_SHAPE_(k_vertex_input);
+    case NT_GFX_OBJECT_BUFFER:
+        return NT_SHAPE_(k_buffer);
+    case NT_GFX_OBJECT_TEXTURE:
+        return NT_SHAPE_(k_texture);
+    case NT_GFX_OBJECT_SAMPLER:
+        return NT_SHAPE_(k_sampler);
+    case NT_GFX_OBJECT_RENDER_TARGET:
+        return NT_SHAPE_(k_render_target);
+    case NT_GFX_OBJECT_INSTANCE_LAYOUT:
+        return NT_SHAPE_(k_instance_layout);
     default:
-        return ARM_NONE;
+        return (shape_t){0};
     }
 }
 
-/* How `detail` prints. It decides the arm of SKIP and INITIAL/STATE, so a reader takes it before the fields. */
+/* A backend slot's GL name, by the resource kind in detail. */
+static shape_t backend_resource_shape(uint32_t resource) {
+    switch (resource) {
+    case NT_GFX_OBJECT_PROGRAM:
+        return NT_SHAPE_(k_backend_program);
+    case NT_GFX_OBJECT_BUFFER:
+        return NT_SHAPE_(k_backend_buffer);
+    case NT_GFX_OBJECT_TEXTURE:
+        return NT_SHAPE_(k_backend_texture);
+    case NT_GFX_OBJECT_RENDER_TARGET:
+        return NT_SHAPE_(k_backend_render_target);
+    case NT_GFX_OBJECT_VERTEX_INPUT:
+        return NT_SHAPE_(k_backend_vertex_input);
+    default:
+        return (shape_t){0};
+    }
+}
+
+static shape_t key_shape(uint32_t call) {
+    switch (call) {
+    case NT_GFX_GL_glUseProgram:
+        return NT_SHAPE_(k_key_program);
+    case NT_GFX_GL_glBindVertexArray:
+        return NT_SHAPE_(k_key_vertex_array);
+    case NT_GFX_GL_glVertexAttribPointer:
+        return NT_SHAPE_(k_key_attributes);
+    case NT_GFX_GL_glBindBuffer:
+        return NT_SHAPE_(k_key_buffer);
+    case NT_GFX_GL_glBindBufferRange:
+        return NT_SHAPE_(k_key_buffer_range);
+    case NT_GFX_GL_glBindTexture:
+        return NT_SHAPE_(k_key_texture);
+    case NT_GFX_GL_glBindSampler:
+        return NT_SHAPE_(k_key_sampler);
+    default:
+        return (shape_t){0};
+    }
+}
+
+static shape_t initial_shape(const nt_gfx_event_t *e) {
+    switch (e->operation) {
+    case NT_GFX_OP_STATE:
+        return e->detail == NT_GFX_INITIAL_BACKEND ? NT_SHAPE_(k_backend_state) : NT_SHAPE_(k_frontend);
+    case NT_GFX_OP_SAMPLER:
+        return NT_SHAPE_(k_program_sampler);
+    case NT_GFX_OP_TEXTURE:
+        return NT_SHAPE_(k_texture_unit);
+    case NT_GFX_OP_PASS:
+        return NT_SHAPE_(k_pass);
+    case NT_GFX_OP_PIPELINE:
+        return NT_SHAPE_(k_pipeline_inherited);
+    case NT_GFX_OP_VIEWPORT:
+    case NT_GFX_OP_SCISSOR:
+        return NT_SHAPE_(k_rect);
+    case NT_GFX_OP_SCISSOR_ENABLE:
+        return NT_SHAPE_(k_toggle);
+    default:
+        return (shape_t){0};
+    }
+}
+
+static shape_t operation_shape(const nt_gfx_event_t *e) {
+    if (is_draw(e->operation)) {
+        return NT_SHAPE_(k_draw);
+    }
+    switch (e->operation) {
+    case NT_GFX_OP_CREATE:
+        return object_shape(e->object_kind);
+    case NT_GFX_OP_BUFFER_UPLOAD:
+        return NT_SHAPE_(k_upload);
+    case NT_GFX_OP_PASS:
+        return NT_SHAPE_(k_pass);
+    case NT_GFX_OP_CLEAR:
+        return NT_SHAPE_(k_clear);
+    case NT_GFX_OP_VERTEX_INPUT:
+        return NT_SHAPE_(k_instance_binding);
+    case NT_GFX_OP_UBO:
+        return NT_SHAPE_(k_ubo);
+    case NT_GFX_OP_SEGMENT_BEGIN:
+    case NT_GFX_OP_SEGMENT_POLL:
+        return NT_SHAPE_(k_segment);
+    case NT_GFX_OP_TEXTURE_SET:
+        return NT_SHAPE_(k_texture_set);
+    case NT_GFX_OP_SCISSOR:
+    case NT_GFX_OP_VIEWPORT:
+    case NT_GFX_OP_READ_PIXELS:
+    case NT_GFX_OP_TEXTURE_UPLOAD:
+        return NT_SHAPE_(k_rect);
+#if !defined(NT_PLATFORM_WEB)
+    case NT_GFX_OP_BUFFER_READ:
+        return NT_SHAPE_(k_read);
+#endif
+    case NT_GFX_OP_SCISSOR_ENABLE:
+    case NT_GFX_OP_GPU_TIMING:
+        return NT_SHAPE_(k_toggle);
+    default:
+        return (shape_t){0};
+    }
+}
+
+/* The fields a gfx record fills; the render architecture spec, "Frame observation", names them. */
+static shape_t record_shape(const nt_gfx_event_t *e) {
+    switch (e->kind) {
+    case NT_GFX_EVENT_BACKEND:
+        return NT_SHAPE_(k_backend);
+    case NT_GFX_EVENT_SKIP:
+        return e->detail != 0 ? key_shape(e->detail) : NT_SHAPE_(k_texture_binding);
+    case NT_GFX_EVENT_ARGUMENT:
+        return NT_SHAPE_(k_texture_binding);
+    case NT_GFX_EVENT_DEFINITION:
+        switch (e->operation) {
+        case NT_GFX_OP_ATTRIBUTE:
+            return NT_SHAPE_(k_attribute);
+        case NT_GFX_OP_PIPELINE:
+            return NT_SHAPE_(k_pipeline_definition);
+        case NT_GFX_OP_STATE:
+            return backend_resource_shape(e->detail);
+        default:
+            return object_shape(e->object_kind);
+        }
+    case NT_GFX_EVENT_INITIAL:
+        return initial_shape(e);
+    case NT_GFX_EVENT_OP:
+        return operation_shape(e);
+    default:
+        return (shape_t){0};
+    }
+}
+
+uint32_t nt_gfx_capture_fields(const nt_gfx_event_t *e, const nt_gfx_capture_field_t **out) {
+    NT_ASSERT(e != NULL && out != NULL);
+    const shape_t s = record_shape(e);
+    *out = s.fields;
+    return s.count;
+}
+
+/* How `detail` prints: the GL call, the resource kind, the layer or the joined draw. It decides the shape of BACKEND and SKIP keys,
+ * INITIAL/STATE and DEFINITION/STATE, so a reader takes it before the fields. */
 typedef enum { DETAIL_PLAIN, DETAIL_CALL, DETAIL_RESOURCE, DETAIL_LAYER, DETAIL_JOINED } detail_kind_t;
 
 static detail_kind_t detail_kind(const nt_gfx_event_t *e) {
@@ -218,7 +389,22 @@ static detail_kind_t detail_kind(const nt_gfx_event_t *e) {
     return e->kind == NT_GFX_EVENT_OP && is_draw(e->operation) ? DETAIL_JOINED : DETAIL_PLAIN; /* a merged draw keeps the link of the draw it joined */
 }
 
-static bool issued_call(const nt_gfx_event_t *e, arm_t arm) { return arm == ARM_KEY || (arm == ARM_BACKEND && e->kind == NT_GFX_EVENT_BACKEND); }
+/* An issued call counts its arguments in arg_count. */
+static bool issued_call(const nt_gfx_event_t *e) { return e->kind == NT_GFX_EVENT_BACKEND; }
+
+static size_t field_bytes(const field_t *f) {
+    switch ((nt_gfx_field_type_t)f->type) {
+    case NT_GFX_FIELD_U64:
+        return sizeof(uint64_t);
+    case NT_GFX_FIELD_BOOL:
+        return sizeof(bool);
+    case NT_GFX_FIELD_U32S:
+    case NT_GFX_FIELD_F32S:
+        return (size_t)f->size * sizeof(uint32_t);
+    default:
+        return sizeof(uint32_t);
+    }
+}
 
 /* Counters with a fixed name, in print order; the arrays print by name after them. */
 static const struct {
@@ -306,7 +492,7 @@ static void put_string(text_t *t, const char *s) {
 }
 
 /* count elements, or the prefix up to the last nonzero one when count is negative. */
-static void put_list(text_t *t, const char *key, const unsigned char *at, field_type_t type, uint32_t size, int count) {
+static void put_list(text_t *t, const char *key, const unsigned char *at, nt_gfx_field_type_t type, uint32_t size, int count) {
     NT_ASSERT(count <= (int)size && "capture text: an issued call counts more arguments than its record holds");
     uint32_t n = (uint32_t)count;
     if (count < 0) {
@@ -324,7 +510,7 @@ static void put_list(text_t *t, const char *key, const unsigned char *at, field_
         if (i > 0) {
             put(t, ",");
         }
-        if (type == F_U32S) {
+        if (type == NT_GFX_FIELD_U32S) {
             put(t, "%" PRIu32, bits);
         } else {
             float v = 0.0F;
@@ -336,45 +522,59 @@ static void put_list(text_t *t, const char *key, const unsigned char *at, field_
 }
 
 /* Zero scalars are omitted; an issued call's lists print exactly their counted elements, so a zero argument stays visible. */
-static void put_fields(text_t *t, const nt_gfx_capture_view_t *view, const nt_gfx_event_t *e, arm_t arm) {
-    const bool issued = issued_call(e, arm);
+/* A nonzero integer field: unsigned, bool or signed. */
+/* A nonzero integer field: unsigned, bool or signed; each read at its own width. */
+static void put_integer(text_t *t, const field_t *f, const unsigned char *at) {
+    if (f->type == NT_GFX_FIELD_I32) {
+        int32_t sign = 0;
+        memcpy(&sign, at, sizeof(sign));
+        if (sign != 0) {
+            put(t, " %s=%" PRId32, f->name, sign);
+        }
+        return;
+    }
+    bool flag = false;
+    memcpy(&flag, at, sizeof(flag));
+    const uint32_t v = f->type == NT_GFX_FIELD_BOOL ? (uint32_t)flag : list_slot(at, 0);
+    if (v != 0) {
+        put(t, " %s=%" PRIu32, f->name, v);
+    }
+}
+
+static void put_fields(text_t *t, const nt_gfx_capture_view_t *view, const nt_gfx_event_t *e, shape_t shape) {
+    const bool issued = issued_call(e);
     const unsigned char *base = (const unsigned char *)e;
-    for (uint32_t i = 0; i < k_arms[arm].count; i++) {
-        const field_t *f = &k_arms[arm].fields[i];
+    for (uint32_t i = 0; i < shape.count; i++) {
+        const field_t *f = &shape.fields[i];
         const unsigned char *at = base + f->offset;
         uint64_t wide = 0;
         float real = 0.0F;
-        switch ((field_type_t)f->type) {
-        case F_U32:
-        case F_BOOL: {
-            bool flag = false;
-            memcpy(&flag, at, sizeof(flag));
-            const uint32_t v = f->type == F_BOOL ? (uint32_t)flag : list_slot(at, 0);
-            if (v != 0) {
-                put(t, " %s=%" PRIu32, f->name, v);
-            }
+        switch ((nt_gfx_field_type_t)f->type) {
+        case NT_GFX_FIELD_U32:
+        case NT_GFX_FIELD_BOOL:
+        case NT_GFX_FIELD_I32:
+            put_integer(t, f, at);
             break;
-        }
-        case F_U64:
+        case NT_GFX_FIELD_U64:
             memcpy(&wide, at, sizeof(wide));
             if (wide != 0) {
                 put(t, " %s=%" PRIu64, f->name, wide);
             }
             break;
-        case F_F32:
+        case NT_GFX_FIELD_F32:
             memcpy(&real, at, sizeof(real));
             if (float_bits(real) != 0) {
                 put(t, " %s=", f->name);
                 put_float(t, real);
             }
             break;
-        case F_U32S:
-            put_list(t, f->name, at, F_U32S, f->size, issued ? (int)(e->arg_count & 0x0FU) : -1);
+        case NT_GFX_FIELD_U32S:
+            put_list(t, f->name, at, NT_GFX_FIELD_U32S, f->size, issued ? (int)(e->arg_count & 0x0FU) : -1);
             break;
-        case F_F32S:
-            put_list(t, f->name, at, F_F32S, f->size, issued ? e->arg_count >> 4 : -1);
+        case NT_GFX_FIELD_F32S:
+            put_list(t, f->name, at, NT_GFX_FIELD_F32S, f->size, issued ? e->arg_count >> 4 : -1);
             break;
-        case F_STR: {
+        case NT_GFX_FIELD_STR: {
             nt_gfx_capture_string_t str = 0;
             memcpy(&str, at, sizeof(str));
             if (str != 0) {
@@ -400,13 +600,15 @@ static void assert_args_counted(const nt_gfx_event_t *e, bool issued) {
     NT_ASSERT(counted && "capture text: an issued call sets an argument it does not count");
 }
 
-/* Records are zeroed when reserved and each writer fills only the arm the text prints, so the text is lossless. */
-static void assert_data_in_arm(const nt_gfx_event_t *e, arm_t arm) {
-    const size_t used = arm == ARM_NONE ? sizeof(e->data) : k_arms[arm].bytes;
-    const unsigned char *bytes = (const unsigned char *)&e->data;
-    for (size_t i = used; i < sizeof(e->data); i++) {
-        NT_ASSERT(bytes[i] == 0 && "capture text: a record writes data outside the arm the text prints");
+/* Records are zeroed when reserved and each writer fills only fields of its record's shape, so the text is lossless. */
+static void assert_data_in_shape(const nt_gfx_event_t *e, shape_t shape) {
+    static const unsigned char k_zero[sizeof(e->data)] = {0};
+    unsigned char rest[sizeof(e->data)];
+    memcpy(rest, &e->data, sizeof(rest));
+    for (uint32_t i = 0; i < shape.count; i++) {
+        memset(rest + (shape.fields[i].offset - offsetof(nt_gfx_event_t, data)), 0, field_bytes(&shape.fields[i]));
     }
+    NT_ASSERT(memcmp(rest, k_zero, sizeof(rest)) == 0 && "capture text: a record writes data outside the fields the text prints");
 }
 
 static void put_detail(text_t *t, const nt_gfx_event_t *e) {
@@ -457,6 +659,9 @@ static void put_field(text_t *t, const nt_gfx_capture_view_t *view, const nt_gfx
     case NT_GFX_NOTE_STR:
         put_string(t, view_string(view, e->field.value.str));
         break;
+    case NT_GFX_NOTE_HANDLE:
+        put(t, "%s:%" PRIu32, NT_TABLE_NAME_(s_object_names, e->field.value.handle.kind), e->field.value.handle.id);
+        break;
     }
 }
 
@@ -487,9 +692,9 @@ static void put_record(text_t *t, const nt_gfx_capture_view_t *view, uint32_t in
         put(t, "\n");
         return;
     }
-    const arm_t arm = record_arm(e);
-    assert_data_in_arm(e, arm);
-    assert_args_counted(e, issued_call(e, arm));
+    const shape_t shape = record_shape(e);
+    assert_data_in_shape(e, shape);
+    assert_args_counted(e, issued_call(e));
     put(t, " op=%s", NT_TABLE_NAME_(s_operation_names, e->operation));
     if (e->object_kind != NT_GFX_OBJECT_NONE || e->object != 0) {
         put(t, " obj=%s:%" PRIu32, NT_TABLE_NAME_(s_object_names, e->object_kind), e->object);
@@ -501,7 +706,7 @@ static void put_record(text_t *t, const nt_gfx_capture_view_t *view, uint32_t in
     if (e->link != 0) {
         put(t, " link=@%" PRIu32, e->link - 1U);
     }
-    put_fields(t, view, e, arm);
+    put_fields(t, view, e, shape);
     put(t, "\n");
 }
 
@@ -537,7 +742,7 @@ size_t nt_gfx_capture_format(const nt_gfx_capture_view_t *view, char *out, size_
     if (cap > 0) {
         out[0] = '\0';
     }
-    put(&t, "ntcapture 3\n");
+    put(&t, "ntcapture 4\n");
     put(&t, "frame sequence=%" PRIu64 " platform=%s records=%" PRIu32 " overflow=%d execute=%" PRIu32 "..%" PRIu32 "\n", view->counters.frame_sequence,
         NT_TABLE_NAME_(s_platform_names, (uint32_t)view->platform), view->count, view->overflow ? 1 : 0, view->execute_begin, view->execute_end);
     put_counters(&t, &view->counters);
@@ -761,7 +966,7 @@ static bool read_string(line_t *l, strings_t *strings, nt_gfx_capture_string_t *
 }
 
 /* `[a,b,...]` into consecutive 4-byte slots. */
-static bool read_list(line_t *l, unsigned char *at, field_type_t type, uint32_t size, uint32_t *count) {
+static bool read_list(line_t *l, unsigned char *at, nt_gfx_field_type_t type, uint32_t size, uint32_t *count) {
     if (!expect(l, "[")) {
         return false;
     }
@@ -772,10 +977,10 @@ static bool read_list(line_t *l, unsigned char *at, field_type_t type, uint32_t 
         if (n == size) {
             return fail(l, "list too long");
         }
-        if (type == F_U32S ? !read_u32(l, &bits) : !read_float(l, &real)) {
+        if (type == NT_GFX_FIELD_U32S ? !read_u32(l, &bits) : !read_float(l, &real)) {
             return false;
         }
-        if (type == F_F32S) {
+        if (type == NT_GFX_FIELD_F32S) {
             memcpy(&bits, &real, sizeof(bits));
         }
         memcpy(at + ((size_t)n * sizeof(bits)), &bits, sizeof(bits));
@@ -798,46 +1003,62 @@ static bool take_field(line_t *l, const char *name) {
     return true;
 }
 
+/* An optional '-' then decimal digits within int32. */
+static bool read_i32(line_t *l, int32_t *out) {
+    uint64_t v = 0;
+    const bool negative = take(l, "-");
+    if (!read_uint(l, negative ? (uint64_t)INT32_MAX + 1U : (uint64_t)INT32_MAX, &v)) {
+        return false;
+    }
+    *out = negative ? (int32_t)(-(int64_t)v) : (int32_t)v;
+    return true;
+}
+
 /* Fields in table order, each optional; an issued call's lists set its arg_count. */
-static bool read_fields(line_t *l, strings_t *strings, nt_gfx_event_t *e, arm_t arm) {
-    const bool issued = issued_call(e, arm);
+static bool read_fields(line_t *l, strings_t *strings, nt_gfx_event_t *e, shape_t shape) {
+    const bool issued = issued_call(e);
     unsigned char *base = (unsigned char *)e;
-    for (uint32_t i = 0; i < k_arms[arm].count; i++) {
-        const field_t *f = &k_arms[arm].fields[i];
+    for (uint32_t i = 0; i < shape.count; i++) {
+        const field_t *f = &shape.fields[i];
         unsigned char *at = base + f->offset;
         uint64_t v = 0;
         uint32_t n = 0;
+        int32_t sign = 0;
         bool ok = true;
         if (!take_field(l, f->name)) {
             continue;
         }
-        switch ((field_type_t)f->type) {
-        case F_U32:
+        switch ((nt_gfx_field_type_t)f->type) {
+        case NT_GFX_FIELD_U32:
             ok = read_uint(l, UINT32_MAX, &v);
             memcpy(at, &(uint32_t){(uint32_t)v}, sizeof(uint32_t));
             break;
-        case F_U64:
+        case NT_GFX_FIELD_I32:
+            ok = read_i32(l, &sign);
+            memcpy(at, &sign, sizeof(sign));
+            break;
+        case NT_GFX_FIELD_U64:
             ok = read_uint(l, UINT64_MAX, &v);
             memcpy(at, &v, sizeof(v));
             break;
-        case F_BOOL:
+        case NT_GFX_FIELD_BOOL:
             ok = read_uint(l, 1, &v);
             *(bool *)at = v != 0;
             break;
-        case F_F32: {
+        case NT_GFX_FIELD_F32: {
             float real = 0.0F;
             ok = read_float(l, &real);
             memcpy(at, &real, sizeof(real));
             break;
         }
-        case F_U32S:
-        case F_F32S:
-            ok = read_list(l, at, (field_type_t)f->type, f->size, &n);
+        case NT_GFX_FIELD_U32S:
+        case NT_GFX_FIELD_F32S:
+            ok = read_list(l, at, (nt_gfx_field_type_t)f->type, f->size, &n);
             if (ok && issued) {
-                e->arg_count = (uint8_t)(f->type == F_U32S ? (e->arg_count & 0xF0U) | n : (e->arg_count & 0x0FU) | (n << 4));
+                e->arg_count = (uint8_t)(f->type == NT_GFX_FIELD_U32S ? (e->arg_count & 0xF0U) | n : (e->arg_count & 0x0FU) | (n << 4));
             }
             break;
-        case F_STR: {
+        case NT_GFX_FIELD_STR: {
             nt_gfx_capture_string_t str = 0;
             ok = read_string(l, strings, &str);
             memcpy(at, &str, sizeof(str));
@@ -916,7 +1137,7 @@ static bool read_gfx(line_t *l, strings_t *strings, nt_gfx_event_t *events, uint
     if (!read_detail(l, e, events, index) || (take(l, " link=@") && !read_ref(l, events, index, false, &e->link))) {
         return false;
     }
-    return read_fields(l, strings, e, record_arm(e));
+    return read_fields(l, strings, e, record_shape(e));
 }
 
 static bool read_note_field(line_t *l, strings_t *strings, nt_gfx_event_t *e) {
@@ -925,24 +1146,25 @@ static bool read_note_field(line_t *l, strings_t *strings, nt_gfx_event_t *e) {
         return false;
     }
     e->field.type = (nt_gfx_note_type_t)type;
-    uint64_t v = 0;
     switch (e->field.type) {
     case NT_GFX_NOTE_U32:
         return read_u32(l, &e->field.value.u32);
-    case NT_GFX_NOTE_I32: {
-        const bool negative = take(l, "-");
-        if (!read_uint(l, negative ? (uint64_t)INT32_MAX + 1U : (uint64_t)INT32_MAX, &v)) {
-            return false;
-        }
-        e->field.value.i32 = negative ? (int32_t)(-(int64_t)v) : (int32_t)v;
-        return true;
-    }
+    case NT_GFX_NOTE_I32:
+        return read_i32(l, &e->field.value.i32);
     case NT_GFX_NOTE_U64:
         return read_uint(l, UINT64_MAX, &e->field.value.u64);
     case NT_GFX_NOTE_F32:
         return read_float(l, &e->field.value.f32);
     case NT_GFX_NOTE_STR:
         return read_string(l, strings, &e->field.value.str);
+    case NT_GFX_NOTE_HANDLE: /* gfx records a handle of an object kind only */
+        if (!NT_READ_NAME_(l, s_object_names, &e->field.value.handle.kind)) {
+            return false;
+        }
+        if (e->field.value.handle.kind == NT_GFX_OBJECT_NONE) {
+            return fail(l, "a handle needs an object kind");
+        }
+        return expect(l, ":") && read_u32(l, &e->field.value.handle.id);
     }
     return false;
 }
@@ -1047,7 +1269,7 @@ static bool read_header(line_t *l, const char **at, const char *end, nt_gfx_capt
     if (!open_line(l, *at, end) || !expect(l, "ntcapture ")) {
         return false;
     }
-    if (!take(l, "3") || l->p != l->end) {
+    if (!take(l, "4") || l->p != l->end) {
         return fail(l, "unsupported ntcapture version");
     }
     *at = l->end + 1;

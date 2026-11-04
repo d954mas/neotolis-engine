@@ -220,7 +220,7 @@ static void load_variant(const edit_t *edits, uint32_t count) {
  * the only differences, each saying what changed. */
 static void test_compare_tells_what_differs(void) {
     static const edit_t k_edits[] = {
-        {"\n233 OP op=DRAW_INDEXED", " count=6 ", " count=7 "}, {"\n209 OP op=DRAW_INDEXED_INSTANCED", "instances=42", "instances=99"}, {"\n211 OP op=VIEWPORT", "1280,800]", "1280,801]"}};
+        {"\n233 OP op=DRAW_INDEXED", " count=6 ", " count=7 "}, {"\n209 OP op=DRAW_INDEXED_INSTANCED", "instances=42", "instances=99"}, {"\n211 OP op=VIEWPORT", "height=800", "height=801"}};
     load_variant(k_edits, 3);
     (void)ask("frame 1", true);
     static fi_number_t a_numbers[FI_NUMBERS];
@@ -247,7 +247,7 @@ static void test_compare_tells_what_differs(void) {
     text = ask("compare 0 g1", true);
     assert_holds(text, "\n= 9 same  # @200..@208 in A, @200..@208 in B\n~ @209    @209    ");
     assert_holds(text, " x99  # instances 42 -> 99\n= @210    @210    SCISSOR_ENABLE off\n");
-    assert_holds(text, "  # A: VIEWPORT integers=[0,0,1280,800]\n");
+    assert_holds(text, "  # A: VIEWPORT width=1280 height=800\n");
     assert_holds(ask("compare 1", true), "\ndiffer 0  # ");
     static const struct {
         const char *line, *why;
@@ -335,8 +335,9 @@ static void test_aliases_show_labels(void) {
     memcpy(label + 98, "\\x0a", 4); /* its escape is the last that fits */
     label[sizeof(label) - 1U] = '\0';
     const int len = snprintf(text, sizeof(text),
-                             "ntcapture 3\nframe sequence=1 platform=native records=3 overflow=0 execute=0..0\n0 DEFINITION op=CREATE obj=BUFFER:65537 label=\"mesh one\\x0a\"\n"
-                             "1 DEFINITION op=CREATE obj=BUFFER:65538 label=\"%s\"\n2 OP op=UBO obj=BUFFER:65538\n",
+                             "ntcapture 4\nframe sequence=1 platform=native records=4 overflow=0 execute=0..0\n0 DEFINITION op=CREATE obj=BUFFER:65537 label=\"mesh one\\x0a\"\n"
+                             "1 DEFINITION op=CREATE obj=BUFFER:65538 label=\"%s\"\n2 DEFINITION op=CREATE obj=BUFFER:65539 label=\"mesh one\\x0a\"\n"
+                             "3 OP op=UBO obj=BUFFER:65538\n",
                              label);
     fi_file_t file = {0};
     char *owned = (char *)malloc((size_t)len);
@@ -346,13 +347,75 @@ static void test_aliases_show_labels(void) {
     TEST_ASSERT_NULL(file.frames[0].error);
     char alias[FI_ALIAS_LEN];
     fi_alias_text(&file.frames[0], NT_GFX_OBJECT_BUFFER, 65537, alias, sizeof(alias));
-    TEST_ASSERT_EQUAL_STRING("buf/mesh\\x20one\\x0a#1", alias);
+    TEST_ASSERT_EQUAL_STRING("buf/mesh\\x20one\\x0a#1", alias); /* two buffers share the label: the number tells them apart */
+    fi_alias_text(&file.frames[0], NT_GFX_OBJECT_BUFFER, 65539, alias, sizeof(alias));
+    TEST_ASSERT_EQUAL_STRING("buf/mesh\\x20one\\x0a#2", alias);
     fi_alias_text(&file.frames[0], NT_GFX_OBJECT_BUFFER, 65538, alias, sizeof(alias));
-    TEST_ASSERT_EQUAL_STRING("\\x0a#1", alias + strlen(alias) - 6U);
+    TEST_ASSERT_EQUAL_STRING("\\x0a#1", alias + strlen(alias) - 6U); /* the only one with its label: still numbered */
     TEST_ASSERT_EQUAL_MEMORY("buf/xxxx", alias, 8);
     fi_file_close(&file);
 }
 
+/* Rows name every captured value by its field: packed backend state, pipeline state, engine enums, flag sets,
+ * handles in notes, GL call arguments and cache keys; the record page keeps the line as captured. */
+static void test_rows_decode_captured_values(void) {
+    assert_holds(ask("record @114", true), "@114  INITIAL STATE BACKEND program=19 vertex_array=7 active_texture=GL_TEXTURE0 width=1280 height=800 upload_vertex_array=1 array_buffer=3\n");
+    assert_holds(ask("record @114", true), "\ncaptured INITIAL op=STATE layer=BACKEND program=19 vertex_array=7 active_texture=33984 ");
+    assert_holds(ask("record @117", true), "INITIAL PIPELINE program_gl=19 depth_func=GL_LEQUAL blend src_rgb=GL_ONE dst_rgb=GL_ONE_MINUS_SRC_ALPHA ");
+    assert_holds(ask("record @79", true), "DEFINITION CREATE smp#2 gl_name=2 min_filter=LINEAR_MIPMAP_LINEAR mag_filter=LINEAR wrap_u=REPEAT wrap_v=REPEAT\n");
+    assert_holds(ask("record @90", true), "DEFINITION CREATE layout#2 slot=3 stride=32 locations=1-5\n");
+    assert_holds(ask("record @36", true), " vertex_buffer=buf/shape_line_template#1 index_buffer=buf/shape_line_template#2 index_type=U16 ");
+    assert_holds(ask("record @218", true), "@218  NOTE_FIELD page=tex#1\n");
+    assert_holds(ask("record @639", true), "@639  BUFFER_UPLOAD buf/frame_index#1 size=11184 data\n");
+    assert_holds(ask("record @642", true), "@642  glBufferSubData(GL_ELEMENT_ARRAY_BUFFER,0,11184,data) bytes=11184\n");
+    assert_holds(ask("record @678", true), "@678  glBindSampler cache sampler=2  [GL skipped]\n");
+    assert_holds(ask("record @662", true), "@662  glVertexAttribPointer cache vertex_array=3 buffer=3 layout=1  [GL skipped]\n");
+    assert_holds(ask("record @663", true), "@663  glBindBufferRange cache slot=2 offset=256 size=96  [GL skipped]\n");
+    assert_holds(ask("record @118", true), "@118  DEFINITION PIPELINE slot=1 program_slot=1 depth_func=GL_LEQUAL ");
+    assert_holds(ask("record @195", true), "@195  PASS target=default framebuffer color=[0.035,0.05,0.08,1] depth=1");
+}
+
+/* A GL call issued at end_frame has the engine state of the request that recorded it, compared with the draw
+ * before that request; its GL state stays its own. An inherited backend record shows only the slot's field. */
+static void test_state_of_a_gl_call_is_its_request_state(void) {
+    const char *text = ask("state @685 all", true);
+    assert_holds(text, "\ncompared previous draw @260  ");
+    assert_holds(text, "\n  output: pass               @195  PASS ");
+    assert_holds(text, "\n* program: pipeline          @265  PIPELINE pipe/skeletal_showcase/text#1\n");
+    assert_holds(text, "\n* UseProgram                 @681  glUseProgram(20)\n");
+    assert_holds(text, "\n    was @128  INITIAL TEXTURE texture=5\n");
+    assert_holds(text, "\n    was @128  INITIAL TEXTURE sampler=2\n");
+    assert_holds(text, "\n  GL_FRAMEBUFFER             inherited @114  INITIAL STATE BACKEND framebuffer=0\n");
+    /* The inherited pass record holds the clear color and depth together; its line shows both. */
+    assert_holds(ask("state init all", true), "INITIAL PASS color=[0.035,0.05,0.08,1] depth=1\n");
+    /* An operation with no link (a frame storage upload) is its own request. */
+    static char upload[4096];
+    (void)snprintf(upload, sizeof(upload), "%s", strstr(ask("state @639", true), "\n# engine state"));
+    const char *call = strstr(ask("state @642", true), "\n# engine state");
+    TEST_ASSERT_NOT_NULL(call);
+    TEST_ASSERT_EQUAL_STRING_LEN(upload, call, strstr(upload, "\n# GL state") - upload);
+}
+
+/* Every row of the native and web fixtures is built from fields: no generic list survives outside an issued call. */
+static void test_every_row_names_its_fields(void) {
+    fi_file_t web = {0};
+    TEST_ASSERT_EQUAL(NT_OK, nt_fs_init());
+    const bool opened = fi_file_open(&web, NT_WEB_FIXTURE);
+    nt_fs_shutdown();
+    TEST_ASSERT_TRUE(opened);
+    const fi_frame_t *frames[2] = {&s_file.frames[0], &web.frames[0]};
+    for (uint32_t f = 0; f < 2; f++) {
+        for (uint32_t i = 0; i < frames[f]->view.count; i++) {
+            char row[600];
+            fi_row_text(frames[f], i, row, sizeof(row));
+            TEST_ASSERT_TRUE_MESSAGE(row[0] != '\0', row);
+            TEST_ASSERT_TRUE_MESSAGE(strstr(row, "=[") == NULL || strstr(row, "color=[") != NULL, row); /* only colors are lists */
+            TEST_ASSERT_NULL_MESSAGE(strstr(row, "integers"), row);
+            TEST_ASSERT_NULL_MESSAGE(strstr(row, "key="), row);
+        }
+    }
+    fi_file_close(&web);
+}
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_commands_answer_and_reject_bad_input);
@@ -365,5 +428,8 @@ int main(void) {
     RUN_TEST(test_native_and_web_align);
     RUN_TEST(test_compare_names_groups_only_one_frame_has);
     RUN_TEST(test_aliases_show_labels);
+    RUN_TEST(test_rows_decode_captured_values);
+    RUN_TEST(test_state_of_a_gl_call_is_its_request_state);
+    RUN_TEST(test_every_row_names_its_fields);
     return UNITY_END();
 }

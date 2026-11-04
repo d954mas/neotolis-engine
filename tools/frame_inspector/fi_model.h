@@ -226,7 +226,10 @@ typedef struct {
 fi_alias_t fi_alias(const fi_frame_t *frame, uint32_t kind, uint32_t object);
 /* src on one line, cut to fit size on a whole escape: control bytes as \xNN, and for a token (an alias label)
  * also space, quote, backslash and non-ASCII bytes, so the text splits on spaces. */
-void fi_one_line(const char *src, char *buf, size_t size, bool token);
+/* What fi_one_line escapes besides control bytes: nothing (a file name), quote and backslash (a quoted string),
+ * or also space, '#' and non-ASCII bytes (a token: an alias label or a key, so text splits on spaces and '#' ends a label). */
+typedef enum { FI_TEXT_PLAIN, FI_TEXT_QUOTED, FI_TEXT_TOKEN } fi_text_t;
+void fi_one_line(const char *src, char *buf, size_t size, fi_text_t mode);
 /* Group g of frame `from` in frame `to`: the same marker path and note; FI_NONE when `to` has none. */
 uint32_t fi_group_in(const fi_frame_t *to, const fi_frame_t *from, uint32_t g);
 /* The tree parent of a record or phase; FI_NONE above the frame. */
@@ -239,6 +242,8 @@ bool fi_same_setting(const fi_frame_t *frame, uint32_t a, uint32_t b);
 /* Whether two records that set one GL slot leave the same value: an inherited cache entry and a call compare
  * by the bound name. */
 bool fi_gl_same(const fi_frame_t *frame, const fi_gl_slot_t *slot, uint32_t a, uint32_t b);
+/* The GL name (or texture unit) a slot holds after record r; false when r sets the slot without a name. */
+
 bool fi_is_draw(const nt_gfx_event_t *e);           /* a draw request of any kind */
 bool fi_is_mergeable_draw(const nt_gfx_event_t *e); /* a plain or indexed draw: instanced draws never merge */
 bool fi_is_draw_call(uint32_t call);                /* glDrawArrays, glDrawElements and their instanced forms */

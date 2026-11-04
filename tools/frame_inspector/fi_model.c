@@ -45,18 +45,18 @@ static uint32_t owner(const fi_frame_t *fr, uint32_t i) {
  * of the GL storage type (DEPTH24 as 32-bit); the runtime never uploads depth, so the shared table has none. */
 static uint64_t definition_bytes(const nt_gfx_event_t *e) {
     if (e->object_kind == NT_GFX_OBJECT_BUFFER) {
-        return e->data.resource.size;
+        return e->data.buffer.size;
     }
     if (e->object_kind != NT_GFX_OBJECT_TEXTURE) {
         return 0;
     }
-    const nt_texture_format_t fmt = (nt_texture_format_t)e->data.resource.format;
+    const nt_texture_format_t fmt = (nt_texture_format_t)e->data.texture.format;
     const uint64_t depth = fmt == NT_TEXTURE_FORMAT_DEPTH16 ? 2U : 4U;
-    const uint32_t levels = e->data.resource.levels > 0 ? e->data.resource.levels : 1;
+    const uint32_t levels = e->data.texture.levels > 0 ? e->data.texture.levels : 1;
     uint64_t bytes = 0;
     for (uint32_t l = 0; l < levels && l < 32; l++) {
-        const uint32_t w = nt_texture_level_extent(e->data.resource.width, l);
-        const uint32_t h = nt_texture_level_extent(e->data.resource.height, l);
+        const uint32_t w = nt_texture_level_extent(e->data.texture.width, l);
+        const uint32_t h = nt_texture_level_extent(e->data.texture.height, l);
         bytes += nt_texture_format_is_depth(fmt) ? depth * w * h : nt_texture_level_bytes(fmt, w, h);
     }
     return bytes;
@@ -120,11 +120,13 @@ static fi_frame_t *push_frame(fi_file_t *file, uint32_t *cap) {
     return fr;
 }
 
-void fi_one_line(const char *src, char *buf, size_t size, bool token) {
+void fi_one_line(const char *src, char *buf, size_t size, fi_text_t mode) {
     size_t n = 0;
     for (const char *c = src; *c != '\0' && n + 5U < size; c++) {
         const uint8_t b = (uint8_t)*c;
-        if (b < 0x20U || b == 0x7fU || (token && (b == ' ' || b == '"' || b == '\\' || b > 0x7eU))) {
+        const bool quoted = mode != FI_TEXT_PLAIN && (b == '"' || b == '\\');
+        const bool token = mode == FI_TEXT_TOKEN && (b == ' ' || b == '#' || b > 0x7eU);
+        if (b < 0x20U || b == 0x7fU || quoted || token) {
             n += (size_t)snprintf(buf + n, size - n, "\\x%02x", b);
         } else {
             buf[n++] = *c;
@@ -138,7 +140,7 @@ void fi_file_load(fi_file_t *file, const char *name, char *text, size_t len) {
     memset(file, 0, sizeof(*file));
     const size_t name_size = (strlen(name) * 4U) + 5U;
     file->name = (char *)fi_alloc(name_size, 1);
-    fi_one_line(name, file->name, name_size, false);
+    fi_one_line(name, file->name, name_size, FI_TEXT_PLAIN);
     file->text = text;
     file->len = len;
     /* Records are the lines that start with their index: a file of empty lines asks for no memory. A document's
@@ -269,7 +271,7 @@ static uint32_t intern_group(fi_frame_t *fr, uint32_t *slot, uint32_t mask, uint
     const char *base = parent != 0 ? fr->group_key[parent] : "";
     const char *sep = note ? " > " : "/";
     char shown[FI_KEY_LEN];
-    fi_one_line(label, shown, sizeof(shown), false);
+    fi_one_line(label, shown, sizeof(shown), FI_TEXT_PLAIN);
     (void)snprintf(fr->group_key[g], FI_KEY_LEN, "%s%s%s", base, parent != 0 || note ? sep + (parent == 0) : "", shown); /* "> ui" at the top */
     return g;
 }
@@ -465,8 +467,8 @@ fi_alias_t fi_alias(const fi_frame_t *frame, uint32_t kind, uint32_t object) {
     return k != 0 ? (fi_alias_t){frame->alias_label[k - 1U], frame->alias_ordinal[k - 1U]} : (fi_alias_t){"", 0};
 }
 
-/* The handles a record names, as kinds and offsets into it: its object, then what its operation names. Backend
- * records hold GL names, so only their object is a handle. */
+/* The handles a record names, as kinds and offsets into it: its object, then its HANDLE fields (capture field
+ * table), or a note field's handle. Backend records hold slots and GL names, which are not handles. */
 enum { FI_HANDLES = 4 };
 typedef struct {
     uint8_t kind[FI_HANDLES];
@@ -480,40 +482,53 @@ static void add_handle(handles_t *h, uint32_t kind, size_t at) {
 }
 
 static handles_t handles_of(const nt_gfx_event_t *e) {
-    static const uint8_t k_related[FI_OBJECTS] = {[NT_GFX_OBJECT_PROGRAM] = NT_GFX_OBJECT_SHADER,
-                                                  [NT_GFX_OBJECT_PIPELINE] = NT_GFX_OBJECT_PROGRAM,
-                                                  [NT_GFX_OBJECT_VERTEX_INPUT] = NT_GFX_OBJECT_BUFFER,
-                                                  [NT_GFX_OBJECT_TEXTURE] = NT_GFX_OBJECT_SAMPLER,
-                                                  [NT_GFX_OBJECT_RENDER_TARGET] = NT_GFX_OBJECT_TEXTURE};
     handles_t h = {0};
+    if (e->kind == NT_GFX_EVENT_NOTE_FIELD && e->field.type == NT_GFX_NOTE_HANDLE && e->field.value.handle.kind < FI_OBJECTS) {
+        add_handle(&h, e->field.value.handle.kind, offsetof(nt_gfx_event_t, field.value.handle.id));
+    }
     if (!is_gfx(e)) {
         return h;
     }
     if (e->object_kind != 0 && e->object_kind < FI_OBJECTS) {
         add_handle(&h, e->object_kind, offsetof(nt_gfx_event_t, object));
     }
-    const bool frontend =
-        e->kind == NT_GFX_EVENT_OP || e->kind == NT_GFX_EVENT_ARGUMENT || (e->kind == NT_GFX_EVENT_DEFINITION && (e->operation == NT_GFX_OP_CREATE || e->operation == NT_GFX_OP_ATTRIBUTE));
-    if (!frontend) {
-        return h;
-    }
-    if (fi_is_draw(e)) {
-        add_handle(&h, NT_GFX_OBJECT_VERTEX_INPUT, offsetof(nt_gfx_event_t, data.draw.vertex_input));
-    } else if (e->operation == NT_GFX_OP_CREATE && e->object_kind < FI_OBJECTS && k_related[e->object_kind] != 0) {
-        for (uint32_t k = 0; k < 3U; k++) {
-            add_handle(&h, k_related[e->object_kind], offsetof(nt_gfx_event_t, data.resource.related) + (k * sizeof(uint32_t)));
+    const nt_gfx_capture_field_t *f = NULL;
+    const uint32_t n = nt_gfx_capture_fields(e, &f);
+    for (uint32_t k = 0; k < n; k++) {
+        if (f[k].meaning == NT_GFX_MEANING_HANDLE) {
+            NT_ASSERT(h.count < FI_HANDLES && "frame inspector: a record names more handles than FI_HANDLES");
+            add_handle(&h, f[k].sub, f[k].offset);
         }
-    } else if (e->operation == NT_GFX_OP_PASS) {
-        add_handle(&h, NT_GFX_OBJECT_RENDER_TARGET, offsetof(nt_gfx_event_t, data.pass.target));
-    } else if (e->operation == NT_GFX_OP_VERTEX_INPUT) {
-        add_handle(&h, NT_GFX_OBJECT_BUFFER, offsetof(nt_gfx_event_t, data.binding.secondary));
-        add_handle(&h, NT_GFX_OBJECT_INSTANCE_LAYOUT, offsetof(nt_gfx_event_t, data.binding.slot));
-    } else if (e->operation == NT_GFX_OP_TEXTURE_SET && e->kind == NT_GFX_EVENT_ARGUMENT) {
-        add_handle(&h, NT_GFX_OBJECT_SAMPLER, offsetof(nt_gfx_event_t, data.binding.secondary));
-    } else if (e->operation == NT_GFX_OP_ATTRIBUTE) {
-        add_handle(&h, NT_GFX_OBJECT_BUFFER, offsetof(nt_gfx_event_t, data.attribute.buffer));
     }
     return h;
+}
+
+/* A definition's desc label (its STR field), 0 when its kind has none. */
+static nt_gfx_capture_string_t label_of(const nt_gfx_event_t *e) {
+    const nt_gfx_capture_field_t *f = NULL;
+    const uint32_t n = nt_gfx_capture_fields(e, &f);
+    for (uint32_t k = 0; k < n; k++) {
+        if (f[k].type == NT_GFX_FIELD_STR) {
+            nt_gfx_capture_string_t s = 0;
+            memcpy(&s, (const unsigned char *)e + f[k].offset, sizeof(s));
+            return s;
+        }
+    }
+    return 0;
+}
+
+/* A resource definition's own backend identifier: its slot, or the GL name of a shader or sampler; 0 marks a husk. */
+static uint32_t backend_of(const nt_gfx_event_t *e) {
+    const nt_gfx_capture_field_t *f = NULL;
+    const uint32_t n = nt_gfx_capture_fields(e, &f);
+    for (uint32_t k = 0; k < n; k++) {
+        if ((f[k].meaning == NT_GFX_MEANING_SLOT && f[k].sub == e->object_kind) || f[k].meaning == NT_GFX_MEANING_GL_NAME) {
+            uint32_t v = 0;
+            memcpy(&v, (const unsigned char *)e + f[k].offset, sizeof(v));
+            return v;
+        }
+    }
+    return 0;
 }
 
 static uint32_t handle_at(const nt_gfx_event_t *e, uint16_t at) {
@@ -587,8 +602,9 @@ static void index_aliases(fi_frame_t *fr) {
                 fr->alias_label[count - 1U] = "";
             }
         }
-        if (e->kind == NT_GFX_EVENT_DEFINITION && e->operation == NT_GFX_OP_CREATE && e->data.resource.label != 0 && e->object_kind != 0 && e->object_kind < FI_OBJECTS && e->object != 0) {
-            fr->alias_label[*alias_slot(fr, e->object_kind, e->object) - 1U] = fr->view.strings + e->data.resource.label;
+        const nt_gfx_capture_string_t label = e->kind == NT_GFX_EVENT_DEFINITION && e->operation == NT_GFX_OP_CREATE ? label_of(e) : 0U;
+        if (label != 0 && e->object_kind != 0 && e->object_kind < FI_OBJECTS && e->object != 0) {
+            fr->alias_label[*alias_slot(fr, e->object_kind, e->object) - 1U] = fr->view.strings + label;
         }
     }
     number_aliases(fr, count);
@@ -771,10 +787,10 @@ static uint32_t contributions(const fi_frame_t *fr, uint32_t i, fi_query_t *q, u
         }
         if (e->operation == NT_GFX_OP_DESTROY && result == NT_GFX_RESULT_ACCEPTED && e->object_kind < FI_OBJECTS) {
             const nt_gfx_event_t *def = fr->def[i] != FI_NONE ? &fr->view.events[fr->def[i]] : NULL;
-            FI_ADD_(FI_Q_RESOURCE, e->object_kind, FI_RES_DESTROYED, def != NULL && def->data.resource.backend != 0 ? definition_bytes(def) : 0); /* a husk held nothing */
+            FI_ADD_(FI_Q_RESOURCE, e->object_kind, FI_RES_DESTROYED, def != NULL && backend_of(def) != 0 ? definition_bytes(def) : 0); /* a husk held nothing */
         }
         if (e->operation == NT_GFX_OP_BUFFER_UPLOAD && e->link == 0 && in_execute(fr, i)) {
-            FI_ADD_(FI_Q_FRAME_STORE, 0, 0, e->data.resource.size);
+            FI_ADD_(FI_Q_FRAME_STORE, 0, 0, e->data.upload.size);
         }
         break;
     }
@@ -804,7 +820,7 @@ static uint32_t contributions(const fi_frame_t *fr, uint32_t i, fi_query_t *q, u
         break;
     case NT_GFX_EVENT_DEFINITION:
         if (e->operation == NT_GFX_OP_CREATE && e->object_kind != NT_GFX_OBJECT_NONE && e->object_kind < FI_OBJECTS) { /* ATTRIBUTE records name their object too */
-            if (fr->parent[i] == FI_NODE_BASE + FI_NODE_SNAPSHOT && e->data.resource.backend != 0) {                   /* a husk defines backend 0 */
+            if (fr->parent[i] == FI_NODE_BASE + FI_NODE_SNAPSHOT && backend_of(e) != 0) {                              /* a husk defines backend 0 */
                 FI_ADD_(FI_Q_RESOURCE, e->object_kind, FI_RES_LIVE, definition_bytes(e));
             } else if (op != FI_NONE && fr->view.events[op].operation == NT_GFX_OP_CREATE) {
                 FI_ADD_(FI_Q_RESOURCE, e->object_kind, FI_RES_CREATED, definition_bytes(e));
@@ -1074,7 +1090,7 @@ void fi_request_state(const fi_frame_t *frame, uint32_t at, fi_request_state_t *
                 /* The texture set is program state: a pipeline on another program needs a new one (nt_gfx bind_pipeline). */
                 const uint32_t before = out->pipeline != FI_NONE ? frame->def[out->pipeline] : FI_NONE;
                 const uint32_t after = frame->def[i];
-                const bool same_program = before != FI_NONE && after != FI_NONE && ev[before].data.resource.related[0] == ev[after].data.resource.related[0];
+                const bool same_program = before != FI_NONE && after != FI_NONE && ev[before].data.pipeline.program == ev[after].data.pipeline.program;
                 out->texture_set = same_program ? out->texture_set : FI_NONE;
                 out->pipeline = i;
             } else if (e->result == NT_GFX_RESULT_INVALID_HANDLE) { /* the unbind */
@@ -1097,8 +1113,8 @@ void fi_request_state(const fi_frame_t *frame, uint32_t at, fi_request_state_t *
             out->scissor_enable = set ? i : out->scissor_enable;
             break;
         case NT_GFX_OP_UBO:
-            if (set && e->data.binding.slot < 8) {
-                out->ubo[e->data.binding.slot] = e->object != 0 ? i : FI_NONE;
+            if (set && e->data.ubo.slot < 8) {
+                out->ubo[e->data.ubo.slot] = e->object != 0 ? i : FI_NONE;
             }
             break;
         default:
@@ -1160,7 +1176,7 @@ void fi_gl_state(const fi_frame_t *frame, uint32_t at, fi_gl_state_t *out) {
         if (e->kind == NT_GFX_EVENT_INITIAL) {
             if (e->operation == NT_GFX_OP_STATE && e->detail == NT_GFX_INITIAL_BACKEND) {
                 backend = true;
-                unit = unit_of(a[3]);
+                unit = unit_of(e->data.backend_state.active_texture);
                 gl_set(out, NT_GFX_GL_glUseProgram, 0, 0, i, true);
                 gl_set(out, NT_GFX_GL_glBindVertexArray, 0, 0, i, true);
                 gl_set(out, NT_GFX_GL_glBindFramebuffer, FI_GL_FRAMEBUFFER, 0, i, true);
@@ -1173,8 +1189,8 @@ void fi_gl_state(const fi_frame_t *frame, uint32_t at, fi_gl_state_t *out) {
             } else if (backend && e->operation == NT_GFX_OP_PIPELINE) {
                 gl_set(out, NT_GFX_GL_NONE, 0, 0, i, true); /* fixed-function cache in backend enums */
             } else if (backend && e->operation == NT_GFX_OP_TEXTURE) {
-                gl_set(out, NT_GFX_GL_glBindTexture, a[0], FI_GL_TEXTURE_2D, i, true);
-                gl_set(out, NT_GFX_GL_glBindSampler, a[0], 0, i, true);
+                gl_set(out, NT_GFX_GL_glBindTexture, e->data.texture_unit.unit, FI_GL_TEXTURE_2D, i, true);
+                gl_set(out, NT_GFX_GL_glBindSampler, e->data.texture_unit.unit, 0, i, true);
             }
             continue;
         }
@@ -1242,17 +1258,27 @@ static bool is_draw_issue(const nt_gfx_event_t *e) { return e->kind == NT_GFX_EV
 
 void fi_state_at(const fi_frame_t *frame, uint32_t at, fi_state_view_t *out) {
     *out = (fi_state_view_t){.compare = FI_COMPARE_PREVIOUS_DRAW};
-    fi_request_state(frame, at, &out->req);
-    out->was = previous(frame, at, is_draw_op);
+    /* A record of an operation (a GL call at end_frame, an argument, a definition) has the engine state of its
+     * top-level operation, wherever the record lands. */
+    uint32_t request = at;
+    while (owner(frame, request) != FI_NONE) {
+        request = owner(frame, request);
+    }
+    fi_request_state(frame, request, &out->req);
+    out->was = previous(frame, request, is_draw_op);
     out->was_req = out->req;
     if (out->was != FI_NONE) {
         fi_request_state(frame, out->was, &out->was_req);
     }
     /* An operation's draw-phase calls issue at end_frame: its GL state is the one after its last call. A merged
-     * draw issued nothing; it ran with the call of the draw it joined. */
-    const uint32_t joined = fi_joined(frame, at);
-    const uint32_t source = joined != FI_NONE ? joined : at;
-    out->gl_at = at;
+     * draw issued nothing; it ran with the call of the draw it joined. An operation and a GL call are their own GL point
+     * (a nested operation too); an argument or a definition is its operation's. */
+    const nt_gfx_event_kind_t kind = frame->view.events[at].kind;
+    const bool own_point = kind == NT_GFX_EVENT_OP || kind == NT_GFX_EVENT_BACKEND || kind == NT_GFX_EVENT_SKIP || owner(frame, at) == FI_NONE;
+    const uint32_t gl_anchor = own_point ? at : owner(frame, at);
+    const uint32_t joined = fi_joined(frame, gl_anchor);
+    const uint32_t source = joined != FI_NONE ? joined : gl_anchor;
+    out->gl_at = gl_anchor;
     for (uint32_t i = source + 1U; i < frame->view.count; i++) {
         out->gl_at = frame->parent[i] == source && frame->view.events[i].kind == NT_GFX_EVENT_BACKEND ? i : out->gl_at;
     }
@@ -1372,7 +1398,7 @@ bool fi_same_setting(const fi_frame_t *frame, uint32_t a, uint32_t b) {
     return k >= frame->view.count || frame->parent[k] != b || frame->view.events[k].kind != NT_GFX_EVENT_ARGUMENT;
 }
 
-/* The name a GL slot holds after record `r`: a bind call's argument or the backend cache entry it inherited. */
+/* The GL name (or texture unit) a slot holds after record r; false when r sets the slot without a name. */
 static bool gl_value(const fi_frame_t *frame, const fi_gl_slot_t *slot, uint32_t r, uint32_t *value) {
     const nt_gfx_event_t *e = &frame->view.events[r];
     const uint32_t *a = e->data.backend.args;
@@ -1398,37 +1424,48 @@ static bool gl_value(const fi_frame_t *frame, const fi_gl_slot_t *slot, uint32_t
     if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_STATE && e->detail == NT_GFX_INITIAL_BACKEND) {
         switch (slot->call) {
         case NT_GFX_GL_glUseProgram:
-            *value = a[0];
+            *value = e->data.backend_state.program;
             return true;
         case NT_GFX_GL_glBindVertexArray:
-            *value = a[1];
+            *value = e->data.backend_state.vertex_array;
             return true;
         case NT_GFX_GL_glBindFramebuffer:
-            *value = a[2];
+            *value = e->data.backend_state.framebuffer;
             return true;
         case NT_GFX_GL_glActiveTexture:
-            *value = unit_of(a[3]);
+            *value = unit_of(e->data.backend_state.active_texture);
             return true;
         case NT_GFX_GL_glBindBuffer:
-            *value = a[7];
+            *value = e->data.backend_state.array_buffer;
             return true;
         default:
             return false;
         }
     }
     if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_TEXTURE) {
-        *value = slot->call == NT_GFX_GL_glBindSampler ? a[2] : a[1];
+        *value = slot->call == NT_GFX_GL_glBindSampler ? e->data.texture_unit.sampler : e->data.texture_unit.texture;
         return true;
     }
     return false;
 }
 
-static const uint32_t *viewport_of(const fi_frame_t *frame, uint32_t r) {
+/* The rectangle a viewport call or the inherited viewport holds; false for any other record. */
+static bool viewport_of(const fi_frame_t *frame, uint32_t r, int32_t out[4]) {
     const nt_gfx_event_t *e = &frame->view.events[r];
     if (e->kind == NT_GFX_EVENT_BACKEND && e->detail == NT_GFX_GL_glViewport) {
-        return e->data.backend.args;
+        for (uint32_t k = 0; k < 4; k++) {
+            out[k] = (int32_t)e->data.backend.args[k];
+        }
+        return true;
     }
-    return e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_VIEWPORT ? e->data.state.integers : NULL;
+    if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_VIEWPORT) {
+        out[0] = e->data.rect.x;
+        out[1] = e->data.rect.y;
+        out[2] = e->data.rect.width;
+        out[3] = e->data.rect.height;
+        return true;
+    }
+    return false;
 }
 
 bool fi_gl_same(const fi_frame_t *frame, const fi_gl_slot_t *slot, uint32_t a, uint32_t b) {
@@ -1444,10 +1481,10 @@ bool fi_gl_same(const fi_frame_t *frame, const fi_gl_slot_t *slot, uint32_t a, u
         return va == vb;
     }
     /* The inherited viewport holds the rectangle the call takes as arguments. */
-    const uint32_t *ra = viewport_of(frame, a);
-    const uint32_t *rb = viewport_of(frame, b);
-    if (slot->call == NT_GFX_GL_glViewport && ra != NULL && rb != NULL) {
-        return ra[0] == rb[0] && ra[1] == rb[1] && ra[2] == rb[2] && ra[3] == rb[3];
+    int32_t ra[4];
+    int32_t rb[4];
+    if (slot->call == NT_GFX_GL_glViewport && viewport_of(frame, a, ra) && viewport_of(frame, b, rb)) {
+        return memcmp(ra, rb, sizeof(ra)) == 0;
     }
     const nt_gfx_event_t *x = &frame->view.events[a];
     const nt_gfx_event_t *y = &frame->view.events[b];
@@ -1572,6 +1609,10 @@ static bool same_key(const req_key_t *x, const req_key_t *y) {
 static nt_gfx_event_t canonical(const nt_gfx_event_t *e) {
     nt_gfx_event_t c;
     memcpy(&c, e, sizeof(c));
+    const handles_t h = handles_of(&c);
+    for (uint32_t k = 0; k < h.count; k++) {
+        memset((unsigned char *)&c + h.at[k], 0, sizeof(uint32_t));
+    }
     if (c.kind == NT_GFX_EVENT_NOTE || c.kind == NT_GFX_EVENT_MARKER_PUSH) {
         c.note.label = 0;
     } else if (c.kind == NT_GFX_EVENT_NOTE_FIELD) {
@@ -1583,17 +1624,19 @@ static nt_gfx_event_t canonical(const nt_gfx_event_t *e) {
     if (!is_gfx(&c)) {
         return c;
     }
-    const handles_t h = handles_of(&c);
-    for (uint32_t k = 0; k < h.count; k++) {
-        memset((unsigned char *)&c + h.at[k], 0, sizeof(uint32_t));
-    }
     c.link = 0;
     c.result = 0;
     if (fi_is_draw(&c)) {
         c.detail = 0;
-    } else if (c.operation == NT_GFX_OP_CREATE) {
-        c.data.resource.backend = 0;
-        c.data.resource.label = 0;
+    }
+    /* Slots and GL names are backend state (among compared records only definitions carry them); strings compare
+     * as text and a definition's label is its alias. */
+    const nt_gfx_capture_field_t *f = NULL;
+    const uint32_t n = nt_gfx_capture_fields(&c, &f);
+    for (uint32_t k = 0; k < n; k++) {
+        if (f[k].meaning == NT_GFX_MEANING_SLOT || f[k].meaning == NT_GFX_MEANING_GL_NAME || f[k].type == NT_GFX_FIELD_STR) {
+            memset((unsigned char *)&c + f[k].offset, 0, sizeof(uint32_t));
+        }
     }
     return c;
 }
@@ -1615,10 +1658,11 @@ static bool same_record(const fi_frame_t *fa, uint32_t i, const fi_frame_t *fb, 
     if (e->kind == NT_GFX_EVENT_NOTE || e->kind == NT_GFX_EVENT_MARKER_PUSH) {
         return same_string(fa, e->note.label, fb, f->note.label);
     }
-    if (e->kind == NT_GFX_EVENT_NOTE_FIELD) {
-        return same_string(fa, e->field.key, fb, f->field.key) && (e->field.type != NT_GFX_NOTE_STR || same_string(fa, e->field.value.str, fb, f->field.value.str));
+    if (e->kind == NT_GFX_EVENT_NOTE_FIELD &&
+        (!same_string(fa, e->field.key, fb, f->field.key) || (e->field.type == NT_GFX_NOTE_STR && !same_string(fa, e->field.value.str, fb, f->field.value.str)))) {
+        return false;
     }
-    const handles_t h = handles_of(e); /* f has the same kind, operation and object kind */
+    const handles_t h = handles_of(e); /* f has the same kind, operation, object kind and note type */
     for (uint32_t k = 0; k < h.count; k++) {
         if (!same_alias(fi_alias(fa, h.kind[k], handle_at(e, h.at[k])), fi_alias(fb, h.kind[k], handle_at(f, h.at[k])))) {
             return false;

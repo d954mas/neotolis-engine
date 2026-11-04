@@ -5,10 +5,250 @@
 #include "log/nt_log.h"
 
 #include <ctype.h>
+#include <inttypes.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+// #region value names
+/* GL enum names, for values whose name does not depend on the argument (the domain decides 0, 1 and units). */
+static const struct {
+    uint32_t value;
+    const char *name;
+} k_gl_enums[] = {
+    {0x0200U, "GL_NEVER"},
+    {0x0201U, "GL_LESS"},
+    {0x0202U, "GL_EQUAL"},
+    {0x0203U, "GL_LEQUAL"},
+    {0x0204U, "GL_GREATER"},
+    {0x0205U, "GL_NOTEQUAL"},
+    {0x0206U, "GL_GEQUAL"},
+    {0x0207U, "GL_ALWAYS"},
+    {0x0300U, "GL_SRC_COLOR"},
+    {0x0301U, "GL_ONE_MINUS_SRC_COLOR"},
+    {0x0302U, "GL_SRC_ALPHA"},
+    {0x0303U, "GL_ONE_MINUS_SRC_ALPHA"},
+    {0x0304U, "GL_DST_ALPHA"},
+    {0x0305U, "GL_ONE_MINUS_DST_ALPHA"},
+    {0x0306U, "GL_DST_COLOR"},
+    {0x0307U, "GL_ONE_MINUS_DST_COLOR"},
+    {0x0308U, "GL_SRC_ALPHA_SATURATE"},
+    {0x0404U, "GL_FRONT"},
+    {0x0405U, "GL_BACK"},
+    {0x0408U, "GL_FRONT_AND_BACK"},
+    {0x0B44U, "GL_CULL_FACE"},
+    {0x0B71U, "GL_DEPTH_TEST"},
+    {0x0B90U, "GL_STENCIL_TEST"},
+    {0x0BE2U, "GL_BLEND"},
+    {0x0C11U, "GL_SCISSOR_TEST"},
+    {0x0CF5U, "GL_UNPACK_ALIGNMENT"},
+    {0x0D05U, "GL_PACK_ALIGNMENT"},
+    {0x0DE1U, "GL_TEXTURE_2D"},
+    {0x1400U, "GL_BYTE"},
+    {0x1401U, "GL_UNSIGNED_BYTE"},
+    {0x1402U, "GL_SHORT"},
+    {0x1403U, "GL_UNSIGNED_SHORT"},
+    {0x1404U, "GL_INT"},
+    {0x1405U, "GL_UNSIGNED_INT"},
+    {0x1406U, "GL_FLOAT"},
+    {0x140BU, "GL_HALF_FLOAT"},
+    {0x1800U, "GL_COLOR"},
+    {0x1801U, "GL_DEPTH"},
+    {0x1802U, "GL_STENCIL"},
+    {0x1902U, "GL_DEPTH_COMPONENT"},
+    {0x1903U, "GL_RED"},
+    {0x1907U, "GL_RGB"},
+    {0x1908U, "GL_RGBA"},
+    {0x1F00U, "GL_VENDOR"},
+    {0x1F01U, "GL_RENDERER"},
+    {0x1F02U, "GL_VERSION"},
+    {0x2600U, "GL_NEAREST"},
+    {0x2601U, "GL_LINEAR"},
+    {0x2700U, "GL_NEAREST_MIPMAP_NEAREST"},
+    {0x2701U, "GL_LINEAR_MIPMAP_NEAREST"},
+    {0x2702U, "GL_NEAREST_MIPMAP_LINEAR"},
+    {0x2703U, "GL_LINEAR_MIPMAP_LINEAR"},
+    {0x2800U, "GL_TEXTURE_MAG_FILTER"},
+    {0x2801U, "GL_TEXTURE_MIN_FILTER"},
+    {0x2802U, "GL_TEXTURE_WRAP_S"},
+    {0x2803U, "GL_TEXTURE_WRAP_T"},
+    {0x2901U, "GL_REPEAT"},
+    {0x8001U, "GL_CONSTANT_COLOR"},
+    {0x8002U, "GL_ONE_MINUS_CONSTANT_COLOR"},
+    {0x8003U, "GL_CONSTANT_ALPHA"},
+    {0x8004U, "GL_ONE_MINUS_CONSTANT_ALPHA"},
+    {0x8006U, "GL_FUNC_ADD"},
+    {0x8007U, "GL_MIN"},
+    {0x8008U, "GL_MAX"},
+    {0x800AU, "GL_FUNC_SUBTRACT"},
+    {0x800BU, "GL_FUNC_REVERSE_SUBTRACT"},
+    {0x8037U, "GL_POLYGON_OFFSET_FILL"},
+    {0x8051U, "GL_RGB8"},
+    {0x8058U, "GL_RGBA8"},
+    {0x80E1U, "GL_BGRA"},
+    {0x812FU, "GL_CLAMP_TO_EDGE"},
+    {0x813CU, "GL_TEXTURE_BASE_LEVEL"},
+    {0x813DU, "GL_TEXTURE_MAX_LEVEL"},
+    {0x81A5U, "GL_DEPTH_COMPONENT16"},
+    {0x81A6U, "GL_DEPTH_COMPONENT24"},
+    {0x8227U, "GL_RG"},
+    {0x8228U, "GL_RG_INTEGER"},
+    {0x8229U, "GL_R8"},
+    {0x822BU, "GL_RG8"},
+    {0x823AU, "GL_RG16UI"},
+    {0x8370U, "GL_MIRRORED_REPEAT"},
+    {0x8814U, "GL_RGBA32F"},
+    {0x881AU, "GL_RGBA16F"},
+    {0x884CU, "GL_TEXTURE_COMPARE_MODE"},
+    {0x884DU, "GL_TEXTURE_COMPARE_FUNC"},
+    {0x884EU, "GL_COMPARE_REF_TO_TEXTURE"},
+    {0x8866U, "GL_QUERY_RESULT"},
+    {0x8867U, "GL_QUERY_RESULT_AVAILABLE"},
+    {0x8892U, "GL_ARRAY_BUFFER"},
+    {0x8893U, "GL_ELEMENT_ARRAY_BUFFER"},
+    {0x88BFU, "GL_TIME_ELAPSED"},
+    {0x88E0U, "GL_STREAM_DRAW"},
+    {0x88E1U, "GL_STREAM_READ"},
+    {0x88E4U, "GL_STATIC_DRAW"},
+    {0x88E8U, "GL_DYNAMIC_DRAW"},
+    {0x88EBU, "GL_PIXEL_PACK_BUFFER"},
+    {0x88ECU, "GL_PIXEL_UNPACK_BUFFER"},
+    {0x8A11U, "GL_UNIFORM_BUFFER"},
+    {0x8A36U, "GL_ACTIVE_UNIFORM_BLOCKS"},
+    {0x8A35U, "GL_ACTIVE_UNIFORM_BLOCK_MAX_NAME_LENGTH"},
+    {0x8A40U, "GL_UNIFORM_BLOCK_DATA_SIZE"},
+    {0x8B30U, "GL_FRAGMENT_SHADER"},
+    {0x8B31U, "GL_VERTEX_SHADER"},
+    {0x8B81U, "GL_COMPILE_STATUS"},
+    {0x8B82U, "GL_LINK_STATUS"},
+    {0x8B84U, "GL_INFO_LOG_LENGTH"},
+    {0x8B86U, "GL_ACTIVE_UNIFORMS"},
+    {0x8B87U, "GL_ACTIVE_UNIFORM_MAX_LENGTH"},
+    {0x8C3DU, "GL_RGB9_E5"},
+    {0x8C3EU, "GL_UNSIGNED_INT_5_9_9_9_REV"},
+    {0x8C41U, "GL_SRGB8"},
+    {0x8C43U, "GL_SRGB8_ALPHA8"},
+    {0x8CA8U, "GL_READ_FRAMEBUFFER"},
+    {0x8CA9U, "GL_DRAW_FRAMEBUFFER"},
+    {0x8CACU, "GL_DEPTH_COMPONENT32F"},
+    {0x8CD5U, "GL_FRAMEBUFFER_COMPLETE"},
+    {0x8CE0U, "GL_COLOR_ATTACHMENT0"},
+    {0x8D00U, "GL_DEPTH_ATTACHMENT"},
+    {0x8D20U, "GL_STENCIL_ATTACHMENT"},
+    {0x8D40U, "GL_FRAMEBUFFER"},
+    {0x8D99U, "GL_RGBA_INTEGER"},
+    {0x8E8CU, "GL_COMPRESSED_RGBA_BPTC_UNORM"},
+    {0x8E8DU, "GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM"},
+    {0x8F36U, "GL_COPY_READ_BUFFER"},
+    {0x8F37U, "GL_COPY_WRITE_BUFFER"},
+    {0x9117U, "GL_SYNC_GPU_COMMANDS_COMPLETE"},
+    {0x91B1U, "GL_COMPLETION_STATUS_KHR"},
+    {0x9274U, "GL_COMPRESSED_RGB8_ETC2"},
+    {0x9275U, "GL_COMPRESSED_SRGB8_ETC2"},
+    {0x9278U, "GL_COMPRESSED_RGBA8_ETC2_EAC"},
+    {0x9279U, "GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC"},
+    {0x93B0U, "GL_COMPRESSED_RGBA_ASTC_4x4_KHR"},
+    {0x93D0U, "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR"},
+};
+
+static const char *gl_enum_name(uint32_t v) {
+    for (size_t i = 0; i < sizeof(k_gl_enums) / sizeof(k_gl_enums[0]); i++) {
+        if (k_gl_enums[i].value == v) {
+            return k_gl_enums[i].name;
+        }
+    }
+    return NULL;
+}
+
+/* Value sets only GL call arguments use, after the capture field table's domains. */
+enum {
+    FI_DOMAIN_GL_PRIMITIVE = NT_GFX_DOMAIN_COUNT,
+    FI_DOMAIN_GL_CLEAR_MASK,
+    FI_DOMAIN_GL_BOOL,
+};
+
+// clang-format off: clang-format versions disagree on braces in a macro body
+#define FI_NAMES_(...) {(const char *const[]){__VA_ARGS__}, sizeof((const char *const[]){__VA_ARGS__}) / sizeof(const char *)}
+// clang-format on
+/* Engine enum names by domain, indexed by value. */
+static const struct {
+    const char *const *names;
+    size_t count;
+} k_engine_enums[NT_GFX_DOMAIN_COUNT] = {
+    [NT_GFX_DOMAIN_SHADER_TYPE] = FI_NAMES_("VERTEX", "FRAGMENT"),
+    [NT_GFX_DOMAIN_BUFFER_TYPE] = FI_NAMES_("VERTEX", "INDEX", "READBACK"),
+    [NT_GFX_DOMAIN_BUFFER_USAGE] = FI_NAMES_("IMMUTABLE", "DYNAMIC", "STREAM"),
+    [NT_GFX_DOMAIN_INDEX_TYPE] = FI_NAMES_("NONE", "U16", "U32"),
+    [NT_GFX_DOMAIN_TEXTURE_FORMAT] = FI_NAMES_("INVALID", "RGBA8", "RGB8", "RG8", "R8", "RGBA16F", "RG16UI", "RGBA32F", "DEPTH16", "DEPTH24", "DEPTH32F", "ETC2_RGB8", "ETC2_RGBA8", "BC7_RGBA",
+                                               "ASTC_4x4_RGBA", "ETC2_SRGB8", "ETC2_SRGB8_ALPHA8", "BC7_SRGB_ALPHA", "ASTC_4x4_SRGB8_ALPHA8", "SRGB8_ALPHA8", "SRGB8", "RGB9E5"),
+    [NT_GFX_DOMAIN_TEXTURE_FILTER] = FI_NAMES_("NEAREST", "LINEAR", "NEAREST_MIPMAP_NEAREST", "LINEAR_MIPMAP_NEAREST", "NEAREST_MIPMAP_LINEAR", "LINEAR_MIPMAP_LINEAR"),
+    [NT_GFX_DOMAIN_TEXTURE_WRAP] = FI_NAMES_("CLAMP_TO_EDGE", "REPEAT", "MIRRORED_REPEAT"),
+    [NT_GFX_DOMAIN_COMPARE_FUNC] = FI_NAMES_("NONE", "LEQUAL", "LESS", "GEQUAL", "GREATER", "EQUAL", "NOTEQUAL", "ALWAYS", "NEVER"),
+    [NT_GFX_DOMAIN_VERTEX_TYPE] = FI_NAMES_("FLOAT", "HALF", "UINT8", "INT8", "UINT16", "INT16"),
+    [NT_GFX_DOMAIN_CULL_MODE] = FI_NAMES_("NONE", "BACK", "FRONT"),
+    [NT_GFX_DOMAIN_SAMPLER_CLASS] = FI_NAMES_("FLOAT", "SHADOW", "UINT"),
+};
+#undef FI_NAMES_
+_Static_assert(NT_TEXTURE_FORMAT_RGB9E5 == 21 && NT_FILTER_LINEAR_MIPMAP_LINEAR == 5 && NT_WRAP_MIRRORED_REPEAT == 2 && NT_COMPARE_NEVER == 8 && NT_VERTEX_INT16 == 5 && NT_USAGE_STREAM == 2 &&
+                   NT_INDEX_UINT32 == 2 && NT_SHADER_FRAGMENT == 1,
+               "frame inspector: an engine enum changed; update k_engine_enums");
+#if !defined(NT_PLATFORM_WEB)
+_Static_assert(NT_BUFFER_READBACK == 2, "frame inspector: a buffer type changed; update k_engine_enums");
+#endif
+
+/* Bit n is location n, printed as runs: 1-4,7. */
+static const char *locations_text(uint32_t v, char *buf, size_t size) {
+    size_t at = 0;
+    buf[0] = '\0';
+    for (uint32_t bit = 0; bit < 32 && at + 8 < size; bit++) {
+        const bool starts_run = (v & (1U << bit)) != 0 && (bit == 0 || (v & (1U << (bit - 1U))) == 0);
+        if (!starts_run) {
+            continue;
+        }
+        uint32_t last = bit;
+        while (last + 1U < 32 && (v & (1U << (last + 1U))) != 0) {
+            last++;
+        }
+        at += (size_t)snprintf(buf + at, size - at, last > bit ? "%s%u-%u" : "%s%u", at > 0 ? "," : "", bit, last);
+    }
+    return v != 0 ? buf : NULL;
+}
+
+static const char *clear_mask_text(uint32_t v, char *buf, size_t size) {
+    (void)snprintf(buf, size, "%s%s%s", (v & 0x4000U) != 0 ? "COLOR|" : "", (v & 0x100U) != 0 ? "DEPTH|" : "", (v & 0x400U) != 0 ? "STENCIL|" : "");
+    buf[strlen(buf) > 0 ? strlen(buf) - 1U : 0U] = '\0';
+    return v != 0 && (v & ~0x4500U) == 0 ? buf : NULL;
+}
+
+/* A value by its domain: an engine or GL enum name, a flag set; NULL when the domain has no name for it. */
+static const char *domain_name(uint32_t domain, uint32_t v, char *buf, size_t size) {
+    static const char *const k_modes[] = {"GL_POINTS", "GL_LINES", "GL_LINE_LOOP", "GL_LINE_STRIP", "GL_TRIANGLES", "GL_TRIANGLE_STRIP", "GL_TRIANGLE_FAN"};
+    static const char *const k_zero_one[] = {"GL_ZERO", "GL_ONE"};
+    static const char *const k_bools[] = {"GL_FALSE", "GL_TRUE"};
+    if (domain < NT_GFX_DOMAIN_COUNT && k_engine_enums[domain].names != NULL) {
+        return v < k_engine_enums[domain].count ? k_engine_enums[domain].names[v] : NULL;
+    }
+    switch (domain) {
+    case NT_GFX_DOMAIN_GL_BLEND_FACTOR:
+        return v <= 1U ? k_zero_one[v] : gl_enum_name(v);
+    case NT_GFX_DOMAIN_GL_TEXTURE_UNIT:
+        (void)snprintf(buf, size, "GL_TEXTURE%u", v - 0x84C0U);
+        return v >= 0x84C0U && v < 0x84E0U ? buf : NULL;
+    case NT_GFX_DOMAIN_LOCATIONS:
+        return locations_text(v, buf, size);
+    case FI_DOMAIN_GL_PRIMITIVE:
+        return v < sizeof(k_modes) / sizeof(k_modes[0]) ? k_modes[v] : NULL;
+    case FI_DOMAIN_GL_CLEAR_MASK:
+        return clear_mask_text(v, buf, size);
+    case FI_DOMAIN_GL_BOOL:
+        return v <= 1U ? k_bools[v] : NULL;
+    default:
+        return gl_enum_name(v);
+    }
+}
+// #endregion
 
 // #region record text
 bool fi_contains_ci(const char *text, size_t len, const char *needle) {
@@ -25,99 +265,6 @@ bool fi_contains_ci(const char *text, size_t len, const char *needle) {
     return n == 0;
 }
 
-static const char *gl_enum_name(uint32_t v) {
-    switch (v) {
-    case 0x8D40U:
-        return "GL_FRAMEBUFFER";
-    case 0x8892U:
-        return "GL_ARRAY_BUFFER";
-    case 0x8893U:
-        return "GL_ELEMENT_ARRAY_BUFFER";
-    case 0x8A11U:
-        return "GL_UNIFORM_BUFFER";
-    case 0x88EBU:
-        return "GL_PIXEL_PACK_BUFFER";
-    case 0x88ECU:
-        return "GL_PIXEL_UNPACK_BUFFER";
-    case 0x8F36U:
-        return "GL_COPY_READ_BUFFER";
-    case 0x8F37U:
-        return "GL_COPY_WRITE_BUFFER";
-    case 0x0BE2U:
-        return "GL_BLEND";
-    case 0x0B71U:
-        return "GL_DEPTH_TEST";
-    case 0x0B44U:
-        return "GL_CULL_FACE";
-    case 0x0C11U:
-        return "GL_SCISSOR_TEST";
-    case 0x8037U:
-        return "GL_POLYGON_OFFSET_FILL";
-    case 0x0B90U:
-        return "GL_STENCIL_TEST";
-    case 0x0CF5U:
-        return "GL_UNPACK_ALIGNMENT";
-    case 0x0D05U:
-        return "GL_PACK_ALIGNMENT";
-    case 0x0DE1U:
-        return "GL_TEXTURE_2D";
-    case 0x8513U:
-        return "GL_TEXTURE_CUBE_MAP";
-    default:
-        return NULL;
-    }
-}
-
-/* GL enums by argument position, for the calls whose arguments are enums. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static const char *arg_enum(uint32_t call, uint32_t index, uint32_t v, char *buf, size_t size) {
-    static const char *const k_modes[] = {"GL_POINTS", "GL_LINES", "GL_LINE_LOOP", "GL_LINE_STRIP", "GL_TRIANGLES", "GL_TRIANGLE_STRIP", "GL_TRIANGLE_FAN"};
-    static const char *const k_funcs[] = {"GL_NEVER", "GL_LESS", "GL_EQUAL", "GL_LEQUAL", "GL_GREATER", "GL_NOTEQUAL", "GL_GEQUAL", "GL_ALWAYS"};
-    static const char *const k_blend[] = {"GL_SRC_COLOR", "GL_ONE_MINUS_SRC_COLOR", "GL_SRC_ALPHA", "GL_ONE_MINUS_SRC_ALPHA",
-                                          "GL_DST_ALPHA", "GL_ONE_MINUS_DST_ALPHA", "GL_DST_COLOR", "GL_ONE_MINUS_DST_COLOR"};
-    switch (call) {
-    case NT_GFX_GL_glEnable:
-    case NT_GFX_GL_glDisable:
-    case NT_GFX_GL_glBindBuffer:
-    case NT_GFX_GL_glBindBufferRange:
-    case NT_GFX_GL_glBindFramebuffer:
-    case NT_GFX_GL_glBindTexture:
-    case NT_GFX_GL_glPixelStorei:
-        return index == 0 ? gl_enum_name(v) : NULL;
-    case NT_GFX_GL_glActiveTexture:
-        (void)snprintf(buf, size, "GL_TEXTURE%u", v - 0x84C0U);
-        return index == 0 && v >= 0x84C0U && v < 0x84E0U ? buf : NULL;
-    case NT_GFX_GL_glClear:
-        (void)snprintf(buf, size, "%s%s%s", (v & 0x4000U) != 0 ? "COLOR|" : "", (v & 0x100U) != 0 ? "DEPTH|" : "", (v & 0x400U) != 0 ? "STENCIL|" : "");
-        buf[strlen(buf) > 0 ? strlen(buf) - 1U : 0U] = '\0';
-        return index == 0 && v != 0 ? buf : NULL;
-    case NT_GFX_GL_glDrawArrays:
-    case NT_GFX_GL_glDrawArraysInstanced:
-    case NT_GFX_GL_glDrawElements:
-    case NT_GFX_GL_glDrawElementsInstanced:
-        if (index == 0 && v < 7) {
-            return k_modes[v];
-        }
-        if (index == 2 && (call == NT_GFX_GL_glDrawElements || call == NT_GFX_GL_glDrawElementsInstanced)) {
-            return v == 0x1401U ? "GL_UNSIGNED_BYTE" : (v == 0x1403U ? "GL_UNSIGNED_SHORT" : (v == 0x1405U ? "GL_UNSIGNED_INT" : NULL)); // NOLINT(readability-avoid-nested-conditional-operator)
-        }
-        return NULL;
-    case NT_GFX_GL_glDepthFunc:
-        return index == 0 && v >= 0x200U && v < 0x208U ? k_funcs[v - 0x200U] : NULL;
-    case NT_GFX_GL_glCullFace:
-        return index == 0 && v == 0x404U ? "GL_FRONT" : (index == 0 && v == 0x405U ? "GL_BACK" : NULL); // NOLINT(readability-avoid-nested-conditional-operator)
-    case NT_GFX_GL_glBlendFuncSeparate:
-        if (v <= 1U) {
-            return v == 0 ? "GL_ZERO" : "GL_ONE";
-        }
-        return v >= 0x300U && v < 0x308U ? k_blend[v - 0x300U] : NULL;
-    case NT_GFX_GL_glBlendEquationSeparate:
-        return v == 0x8006U ? "GL_FUNC_ADD" : (v == 0x800AU ? "GL_FUNC_SUBTRACT" : (v == 0x800BU ? "GL_FUNC_REVERSE_SUBTRACT" : NULL)); // NOLINT(readability-avoid-nested-conditional-operator)
-    default:
-        return NULL;
-    }
-}
-
 static const char *alias_prefix(uint32_t kind) {
     static const char *const k_short[] = {"obj", "shader", "prog", "pipe", "vi", "buf", "tex", "smp", "rt", "layout"};
     return kind < sizeof(k_short) / sizeof(k_short[0]) ? k_short[kind] : "obj";
@@ -131,90 +278,392 @@ void fi_alias_text(const fi_frame_t *frame, uint32_t kind, uint32_t object, char
         (void)snprintf(buf, size, "%s#%u", alias_prefix(kind), a.ordinal);
     } else {
         char label[FI_ALIAS_LEN - 24U]; /* room left for the kind, '/', '#' and the number */
-        fi_one_line(a.label, label, sizeof(label), true);
+        fi_one_line(a.label, label, sizeof(label), FI_TEXT_TOKEN);
         (void)snprintf(buf, size, "%s/%s#%u", alias_prefix(kind), label, a.ordinal);
     }
 }
 
-static void append(char *buf, size_t size, size_t *at, const char *src, size_t n) {
-    for (size_t i = 0; i < n && *at + 1 < size; i++) {
-        buf[(*at)++] = src[i];
+static void appendf(char *buf, size_t size, size_t *at, const char *fmt, ...) NT_PRINTF_ATTR(4, 5);
+static void appendf(char *buf, size_t size, size_t *at, const char *fmt, ...) {
+    if (*at + 1U >= size) {
+        return;
     }
-    buf[*at] = '\0';
+    va_list args;
+    va_start(args, fmt);
+    const int n = vsnprintf(buf + *at, size - *at, fmt, args);
+    va_end(args);
+    *at += n > 0 ? (size_t)n : 0U;
+    *at = *at < size ? *at : size - 1U;
 }
 
-static bool token_is(const char *t, size_t n, const char *prefix) { return n >= strlen(prefix) && memcmp(t, prefix, strlen(prefix)) == 0; }
+static uint32_t float_bits(float f) {
+    uint32_t bits = 0;
+    memcpy(&bits, &f, sizeof(bits));
+    return bits;
+}
 
-/* The GL call's integer arguments, enums by name: (GL_SCISSOR_TEST). */
-static void append_args(const nt_gfx_event_t *e, char *buf, size_t size, size_t *at) {
-    const uint32_t count = e->arg_count & 15U;
-    for (uint32_t k = 0; k < count && k < 12U; k++) {
-        char decoded[48];
-        const char *name = arg_enum(e->detail, k, e->data.backend.args[k], decoded, sizeof(decoded));
-        char number[16];
-        (void)snprintf(number, sizeof(number), "%u", e->data.backend.args[k]);
-        append(buf, size, at, k == 0 ? "(" : ",", 1);
-        append(buf, size, at, name != NULL ? name : number, strlen(name != NULL ? name : number));
+/* The capture's float forms: the shortest %g that reads back to the same float32, NaN as its bits, so two
+ * different values never print alike. */
+static const char *float_text(float f, char out[24]) {
+    if (isnan(f)) {
+        (void)snprintf(out, 24, "nan:0x%08" PRIx32, float_bits(f));
+        return out;
     }
-    if (count > 0) {
-        append(buf, size, at, ")", 1);
+    for (int precision = 6; precision <= 9; precision++) {
+        (void)snprintf(out, 24, "%.*g", precision, (double)f);
+        if (float_bits(strtof(out, NULL)) == float_bits(f)) {
+            break;
+        }
+    }
+    return out;
+}
+
+/* Render target 0 is the default framebuffer; every other handle 0 binds nothing. */
+static const char *zero_handle(uint32_t kind) { return kind == NT_GFX_OBJECT_RENDER_TARGET ? "default framebuffer" : "unbound"; }
+
+/* One value as a reader names it. */
+static void value_text(const fi_frame_t *fr, uint8_t meaning, uint8_t sub, uint32_t v, char *buf, size_t size) {
+    char named[64];
+    const char *name = NULL;
+    switch ((nt_gfx_field_meaning_t)meaning) {
+    case NT_GFX_MEANING_HANDLE:
+        if (v == 0) {
+            (void)snprintf(buf, size, "%s", zero_handle(sub));
+        } else {
+            fi_alias_text(fr, sub, v, buf, size);
+        }
+        return;
+    case NT_GFX_MEANING_HASH:
+        (void)snprintf(buf, size, "0x%08x", v);
+        return;
+    case NT_GFX_MEANING_VALUE:
+        name = domain_name(sub, v, named, sizeof(named));
+        break;
+    default:
+        break;
+    }
+    if (name != NULL) {
+        (void)snprintf(buf, size, "%s", name);
+    } else {
+        (void)snprintf(buf, size, "%u", v);
     }
 }
+
+/* How an issued call's argument reads (capture encoding, render architecture "Frame observation"). */
+typedef enum {
+    FI_ARG_PLAIN,
+    FI_ARG_SIGNED,
+    FI_ARG_POINTER, /* a pointer's presence: data or NULL */
+    FI_ARG_ENUM,    /* sub: a value set (nt_gfx_capture_domain_t or FI_DOMAIN_*) */
+} fi_arg_kind_t;
+typedef struct {
+    uint8_t kind, sub;
+} fi_arg_t;
+typedef struct {
+    const fi_arg_t *args;
+    uint8_t count;
+    bool repeat; /* the last argument repeats: gen/delete names, attachment lists */
+} fi_call_t;
+
+// clang-format off: clang-format versions disagree on braces in a macro body
+#define FI_U_ {FI_ARG_PLAIN, 0}
+#define FI_I_ {FI_ARG_SIGNED, 0}
+#define FI_P_ {FI_ARG_POINTER, 0}
+#define FI_E_ {FI_ARG_ENUM, NT_GFX_DOMAIN_GL}
+#define FI_D_(domain) {FI_ARG_ENUM, (domain)}
+#define FI_CALL_(...) {(const fi_arg_t[]){__VA_ARGS__}, (uint8_t)(sizeof((const fi_arg_t[]){__VA_ARGS__}) / sizeof(fi_arg_t)), false}
+#define FI_LIST_(...) {(const fi_arg_t[]){__VA_ARGS__}, (uint8_t)(sizeof((const fi_arg_t[]){__VA_ARGS__}) / sizeof(fi_arg_t)), true}
+// clang-format on
+/* Arguments in capture order (pointers are presence bits, gen/delete the count then the names, a returned value
+ * last). A call without an entry prints plain numbers, GL names included. */
+static const fi_call_t k_calls[NT_GFX_GL_COUNT] = {
+    [NT_GFX_GL_glActiveTexture] = FI_CALL_(FI_D_(NT_GFX_DOMAIN_GL_TEXTURE_UNIT)),
+    [NT_GFX_GL_glBeginQuery] = FI_CALL_(FI_E_, FI_U_),
+    [NT_GFX_GL_glBindBuffer] = FI_CALL_(FI_E_, FI_U_),
+    [NT_GFX_GL_glBindBufferRange] = FI_CALL_(FI_E_, FI_U_, FI_U_, FI_U_, FI_U_),
+    [NT_GFX_GL_glBindFramebuffer] = FI_CALL_(FI_E_, FI_U_),
+    [NT_GFX_GL_glBindTexture] = FI_CALL_(FI_E_, FI_U_),
+    [NT_GFX_GL_glBlendEquationSeparate] = FI_CALL_(FI_E_, FI_E_),
+    [NT_GFX_GL_glBlendFuncSeparate] = FI_LIST_(FI_D_(NT_GFX_DOMAIN_GL_BLEND_FACTOR)),
+    [NT_GFX_GL_glBufferData] = FI_CALL_(FI_E_, FI_U_, FI_P_, FI_E_),
+    [NT_GFX_GL_glBufferSubData] = FI_CALL_(FI_E_, FI_U_, FI_U_, FI_P_),
+    [NT_GFX_GL_glCheckFramebufferStatus] = FI_CALL_(FI_E_, FI_E_),
+    [NT_GFX_GL_glClear] = FI_CALL_(FI_D_(FI_DOMAIN_GL_CLEAR_MASK)),
+    [NT_GFX_GL_glCompressedTexImage2D] = FI_CALL_(FI_E_, FI_U_, FI_E_, FI_U_, FI_U_, FI_U_, FI_U_, FI_P_),
+    [NT_GFX_GL_glCreateShader] = FI_CALL_(FI_E_, FI_U_),
+    [NT_GFX_GL_glCullFace] = FI_CALL_(FI_E_),
+    [NT_GFX_GL_glDepthFunc] = FI_CALL_(FI_E_),
+    [NT_GFX_GL_glDepthMask] = FI_CALL_(FI_D_(FI_DOMAIN_GL_BOOL)),
+    [NT_GFX_GL_glDisable] = FI_CALL_(FI_E_),
+    [NT_GFX_GL_glDrawArrays] = FI_CALL_(FI_D_(FI_DOMAIN_GL_PRIMITIVE), FI_U_, FI_U_),
+    [NT_GFX_GL_glDrawArraysInstanced] = FI_CALL_(FI_D_(FI_DOMAIN_GL_PRIMITIVE), FI_U_, FI_U_, FI_U_),
+    [NT_GFX_GL_glDrawBuffers] = FI_CALL_(FI_U_, FI_P_),
+    [NT_GFX_GL_glDrawElements] = FI_CALL_(FI_D_(FI_DOMAIN_GL_PRIMITIVE), FI_U_, FI_E_, FI_U_),
+    [NT_GFX_GL_glDrawElementsInstanced] = FI_CALL_(FI_D_(FI_DOMAIN_GL_PRIMITIVE), FI_U_, FI_E_, FI_U_, FI_U_),
+    [NT_GFX_GL_glEnable] = FI_CALL_(FI_E_),
+    [NT_GFX_GL_glEndQuery] = FI_CALL_(FI_E_),
+    [NT_GFX_GL_glFramebufferTexture2D] = FI_CALL_(FI_E_, FI_E_, FI_E_, FI_U_, FI_U_),
+    [NT_GFX_GL_glGenerateMipmap] = FI_CALL_(FI_E_),
+    [NT_GFX_GL_glGetActiveUniformBlockiv] = FI_CALL_(FI_U_, FI_U_, FI_E_, FI_P_),
+    [NT_GFX_GL_glGetError] = FI_CALL_(FI_E_),
+    [NT_GFX_GL_glGetProgramiv] = FI_CALL_(FI_U_, FI_E_, FI_P_),
+    [NT_GFX_GL_glGetQueryObjectui64v] = FI_CALL_(FI_U_, FI_E_, FI_P_),
+    [NT_GFX_GL_glGetQueryObjectuiv] = FI_CALL_(FI_U_, FI_E_, FI_P_),
+    [NT_GFX_GL_glGetShaderiv] = FI_CALL_(FI_U_, FI_E_, FI_P_),
+    [NT_GFX_GL_glGetString] = FI_CALL_(FI_E_, FI_P_),
+    [NT_GFX_GL_glGetUniformLocation] = FI_CALL_(FI_U_, FI_P_, FI_I_),
+    [NT_GFX_GL_glInvalidateFramebuffer] = FI_LIST_(FI_E_, FI_U_, FI_E_),
+    [NT_GFX_GL_glPixelStorei] = FI_CALL_(FI_E_, FI_U_),
+    [NT_GFX_GL_glReadBuffer] = FI_CALL_(FI_E_),
+    [NT_GFX_GL_glReadPixels] = FI_CALL_(FI_I_, FI_I_, FI_U_, FI_U_, FI_E_, FI_E_, FI_P_),
+    [NT_GFX_GL_glSamplerParameteri] = FI_CALL_(FI_U_, FI_E_, FI_E_),
+    [NT_GFX_GL_glScissor] = FI_CALL_(FI_I_, FI_I_, FI_U_, FI_U_),
+    [NT_GFX_GL_glShaderSource] = FI_CALL_(FI_U_, FI_U_, FI_P_, FI_P_),
+    [NT_GFX_GL_glTexImage2D] = FI_CALL_(FI_E_, FI_U_, FI_E_, FI_U_, FI_U_, FI_U_, FI_E_, FI_E_, FI_P_),
+    [NT_GFX_GL_glTexParameteri] = FI_CALL_(FI_E_, FI_E_, FI_E_),
+    [NT_GFX_GL_glTexSubImage2D] = FI_CALL_(FI_E_, FI_U_, FI_U_, FI_U_, FI_U_, FI_U_, FI_E_, FI_E_, FI_P_),
+    [NT_GFX_GL_glUniform1i] = FI_CALL_(FI_I_, FI_I_),
+    [NT_GFX_GL_glVertexAttribPointer] = FI_CALL_(FI_U_, FI_U_, FI_E_, FI_D_(FI_DOMAIN_GL_BOOL), FI_U_, FI_U_),
+    [NT_GFX_GL_glViewport] = FI_CALL_(FI_I_, FI_I_, FI_U_, FI_U_),
+};
+#undef FI_LIST_
+#undef FI_CALL_
+#undef FI_U_
+#undef FI_I_
+#undef FI_P_
+#undef FI_E_
+#undef FI_D_
+
+/* Argument k of a call by its table; a call or position the table leaves out is a plain number. */
+static fi_arg_t call_arg(const fi_call_t *c, uint32_t k) {
+    if (k < c->count) {
+        return c->args[k];
+    }
+    return c->repeat && c->count > 0 ? c->args[c->count - 1U] : (fi_arg_t){FI_ARG_PLAIN, 0};
+}
+
+static void arg_text(fi_arg_t a, uint32_t v, char *buf, size_t size) {
+    char named[64];
+    const char *name = a.kind == FI_ARG_ENUM ? domain_name(a.sub, v, named, sizeof(named)) : NULL;
+    if (a.kind == FI_ARG_POINTER) {
+        (void)snprintf(buf, size, "%s", v != 0 ? "data" : "NULL");
+    } else if (a.kind == FI_ARG_SIGNED) {
+        (void)snprintf(buf, size, "%d", (int32_t)v);
+    } else if (name != NULL) {
+        (void)snprintf(buf, size, "%s", name);
+    } else {
+        (void)snprintf(buf, size, "%u", v);
+    }
+}
+
+/* An issued call as code: glBindBufferRange(GL_UNIFORM_BUFFER,0,2,512,256), floats after the integers. */
+static void call_text(const fi_frame_t *fr, const nt_gfx_event_t *e, char *buf, size_t size, size_t *at) {
+    const fi_call_t *c = e->detail < NT_GFX_GL_COUNT ? &k_calls[e->detail] : &(fi_call_t){0};
+    const uint32_t ints = e->arg_count & 15U;
+    const uint32_t floats = e->arg_count >> 4;
+    appendf(buf, size, at, "%s(", nt_gfx_gl_call_name(e->detail));
+    for (uint32_t k = 0; k < ints; k++) {
+        char v[96];
+        arg_text(call_arg(c, k), e->data.backend.args[k], v, sizeof(v));
+        appendf(buf, size, at, "%s%s", k > 0 ? "," : "", v);
+    }
+    for (uint32_t k = 0; k < floats; k++) {
+        char real[24];
+        appendf(buf, size, at, "%s%s", k > 0 || ints > 0 ? "," : "", float_text(e->data.backend.values[k], real));
+    }
+    appendf(buf, size, at, ")");
+    if (e->data.backend.bytes > 0) {
+        appendf(buf, size, at, " bytes=%llu", (unsigned long long)e->data.backend.bytes);
+    }
+}
+
+/* A request's render target 0 is the default framebuffer; other zero fields are left out, as in the capture text. */
+static bool shows_zero(const nt_gfx_capture_field_t *field, bool request) { return request && field->meaning == NT_GFX_MEANING_HANDLE && field->sub == NT_GFX_OBJECT_RENDER_TARGET; }
+
+static void u32_field_text(const fi_frame_t *fr, const nt_gfx_capture_field_t *field, uint32_t v, bool request, bool draw, char *buf, size_t size, size_t *at) {
+    char text[FI_ALIAS_LEN];
+    if (field->meaning == NT_GFX_MEANING_BOOL) {
+        if (v != 0) {
+            appendf(buf, size, at, " %s", field->name);
+        }
+    } else if (field->meaning == NT_GFX_MEANING_HANDLE && draw) { /* a draw's vertex input: the row's second name */
+        value_text(fr, field->meaning, field->sub, v, text, sizeof(text));
+        appendf(buf, size, at, " %s", text);
+    } else if (v != 0 || shows_zero(field, request)) {
+        value_text(fr, field->meaning, field->sub, v, text, sizeof(text));
+        appendf(buf, size, at, " %s=%s", field->name, text);
+    }
+}
+
+static void floats_text(const char *name, const unsigned char *p, uint32_t capacity, char *buf, size_t size, size_t *at) {
+    float values[8];
+    uint32_t count = capacity < 8U ? capacity : 8U;
+    memcpy(values, p, (size_t)count * sizeof(float));
+    while (count > 0 && values[count - 1U] == 0.0F) {
+        count--;
+    }
+    if (count == 0) {
+        return;
+    }
+    char real[24];
+    appendf(buf, size, at, " %s=[%s", name, float_text(values[0], real));
+    for (uint32_t i = 1; i < count; i++) {
+        appendf(buf, size, at, ",%s", float_text(values[i], real));
+    }
+    appendf(buf, size, at, "]");
+}
+
+/* One data field, named and decoded. */
+static void field_text(const fi_frame_t *fr, const nt_gfx_capture_field_t *field, const unsigned char *p, bool request, bool draw, char *buf, size_t size, size_t *at) {
+    uint32_t v = 0;
+    int32_t s = 0;
+    uint64_t wide = 0;
+    float real = 0.0F;
+    bool flag = false;
+    nt_gfx_capture_string_t str = 0;
+    char text[FI_ALIAS_LEN];
+    switch ((nt_gfx_field_type_t)field->type) {
+    case NT_GFX_FIELD_U32:
+        memcpy(&v, p, sizeof(v));
+        u32_field_text(fr, field, v, request, draw, buf, size, at);
+        break;
+    case NT_GFX_FIELD_I32:
+        memcpy(&s, p, sizeof(s));
+        if (s != 0) {
+            appendf(buf, size, at, " %s=%d", field->name, s);
+        }
+        break;
+    case NT_GFX_FIELD_U64:
+        memcpy(&wide, p, sizeof(wide));
+        if (wide != 0) {
+            appendf(buf, size, at, " %s=%llu", field->name, (unsigned long long)wide);
+        }
+        break;
+    case NT_GFX_FIELD_F32:
+        memcpy(&real, p, sizeof(real));
+        if (real != 0.0F) {
+            char digits[24];
+            appendf(buf, size, at, " %s=%s", field->name, float_text(real, digits));
+        }
+        break;
+    case NT_GFX_FIELD_BOOL:
+        memcpy(&flag, p, sizeof(flag));
+        if (flag) {
+            appendf(buf, size, at, " %s", field->name);
+        }
+        break;
+    case NT_GFX_FIELD_F32S:
+        floats_text(field->name, p, field->size, buf, size, at);
+        break;
+    case NT_GFX_FIELD_STR:
+        memcpy(&str, p, sizeof(str));
+        if (str != 0) {
+            fi_one_line(fr->view.strings + str, text, sizeof(text), FI_TEXT_QUOTED);
+            appendf(buf, size, at, " %s=\"%s\"", field->name, text);
+        }
+        break;
+    case NT_GFX_FIELD_U32S:
+        break; /* issued calls only: call_text */
+    }
+}
+
+/* The record's data fields by the capture field table, named and decoded; only: the one field to print, NULL for
+ * all. A draw shows its count and vertex input: first, vertices and instances are the row's xN and Compare's. */
+static void fields_text(const fi_frame_t *fr, const nt_gfx_event_t *e, const char *only, char *buf, size_t size, size_t *at) {
+    const nt_gfx_capture_field_t *f = NULL;
+    const uint32_t n = nt_gfx_capture_fields(e, &f);
+    const bool request = e->kind == NT_GFX_EVENT_OP || e->kind == NT_GFX_EVENT_ARGUMENT;
+    const bool draw = fi_is_draw(e);
+    for (uint32_t k = 0; k < n; k++) {
+        const bool picked = only == NULL || strcmp(f[k].name, only) == 0;
+        const bool shown = !draw || f[k].meaning == NT_GFX_MEANING_HANDLE || strcmp(f[k].name, "count") == 0;
+        if (picked && shown) {
+            field_text(fr, &f[k], (const unsigned char *)e + f[k].offset, request, draw, buf, size, at);
+        }
+    }
+}
+
+/* What a note field holds: its key and value, a handle as its alias. */
+static void note_field_text(const fi_frame_t *fr, const nt_gfx_event_t *e, char *buf, size_t size, size_t *at) {
+    char key[64];
+    char value[FI_ALIAS_LEN];
+    fi_one_line(fr->view.strings + e->field.key, key, sizeof(key), FI_TEXT_TOKEN);
+    switch (e->field.type) {
+    case NT_GFX_NOTE_U32:
+        (void)snprintf(value, sizeof(value), "%u", e->field.value.u32);
+        break;
+    case NT_GFX_NOTE_I32:
+        (void)snprintf(value, sizeof(value), "%d", e->field.value.i32);
+        break;
+    case NT_GFX_NOTE_U64:
+        (void)snprintf(value, sizeof(value), "%llu", (unsigned long long)e->field.value.u64);
+        break;
+    case NT_GFX_NOTE_F32:
+        (void)float_text(e->field.value.f32, value);
+        break;
+    case NT_GFX_NOTE_STR: {
+        char text[FI_ALIAS_LEN - 2U];
+        fi_one_line(fr->view.strings + e->field.value.str, text, sizeof(text), FI_TEXT_QUOTED);
+        (void)snprintf(value, sizeof(value), "\"%s\"", text);
+        break;
+    }
+    case NT_GFX_NOTE_HANDLE:
+        value_text(fr, NT_GFX_MEANING_HANDLE, (uint8_t)e->field.value.handle.kind, e->field.value.handle.id, value, sizeof(value));
+        break;
+    }
+    appendf(buf, size, at, "NOTE_FIELD %s=%s", key, value);
+}
+
+static void row_text(const fi_frame_t *frame, uint32_t record, const char *only, char *buf, size_t size);
+
+void fi_row_text(const fi_frame_t *frame, uint32_t record, char *buf, size_t size) { row_text(frame, record, NULL, buf, size); }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void fi_row_text(const fi_frame_t *frame, uint32_t record, char *buf, size_t size) {
+static void row_text(const fi_frame_t *frame, uint32_t record, const char *only, char *buf, size_t size) {
     const nt_gfx_event_t *e = &frame->view.events[record];
-    const char *line = NULL;
-    const size_t len = fi_record_text(frame, record, &line);
-    const bool call = e->kind == NT_GFX_EVENT_BACKEND || e->kind == NT_GFX_EVENT_SKIP;
-    char parent_link[24];
-    (void)snprintf(parent_link, sizeof(parent_link), "link=@%u", frame->parent[record]);
     size_t at = 0;
     buf[0] = '\0';
-    char alias[FI_ALIAS_LEN];
-    for (size_t i = 0; i < len;) {
-        size_t j = i;
-        bool quoted = false;
-        while (j < len && (quoted || line[j] != ' ')) {
-            if (line[j] == '\\' && j + 1 < len) {
-                j++;
-            } else if (line[j] == '"') {
-                quoted = !quoted;
-            }
-            j++;
-        }
-        const char *t = line + i;
-        const size_t n = j - i;
-        const bool tag = i == 0 && (e->kind == NT_GFX_EVENT_OP || call);
-        i = j + 1;
-        const bool draw_detail = e->kind == NT_GFX_EVENT_OP && (token_is(t, n, "first=") || token_is(t, n, "vertices=") || token_is(t, n, "instances=") || token_is(t, n, "joined="));
-        if (tag || draw_detail || token_is(t, n, "result=") || token_is(t, n, "args=[") || (call && token_is(t, n, "op=")) || (n == strlen(parent_link) && memcmp(t, parent_link, n) == 0)) {
-            continue;
-        }
-        if (at > 0 && buf[at - 1] != ' ') {
-            append(buf, size, &at, " ", 1);
-        }
-        if (token_is(t, n, "op=") || token_is(t, n, "call=")) {
-            const size_t skip = t[0] == 'o' ? 3 : 5;
-            append(buf, size, &at, t + skip, n - skip);
-            if (e->kind == NT_GFX_EVENT_BACKEND && t[0] == 'c') {
-                append_args(e, buf, size, &at);
-            }
-        } else if (token_is(t, n, "obj=") || token_is(t, n, "vertex_input=")) {
-            const bool obj = t[0] == 'o';
-            fi_alias_text(frame, obj ? e->object_kind : NT_GFX_OBJECT_VERTEX_INPUT, obj ? e->object : e->data.draw.vertex_input, alias, sizeof(alias));
-            append(buf, size, &at, alias, strlen(alias));
-        } else if (e->kind == NT_GFX_EVENT_SKIP && token_is(t, n, "key=")) {
-            append(buf, size, &at, "cache ", 6); /* a skip records its cache key, not the GL arguments */
-            append(buf, size, &at, t, n);
-        } else {
-            append(buf, size, &at, t, n);
-        }
+    if (e->kind == NT_GFX_EVENT_NOTE_FIELD) {
+        note_field_text(frame, e, buf, size, &at);
+        return;
     }
+    if (e->kind > NT_GFX_EVENT_ARGUMENT) { /* notes and markers: their captured line is their text */
+        const char *line = NULL;
+        const size_t len = fi_record_text(frame, record, &line);
+        appendf(buf, size, &at, "%.*s", (int)len, line);
+        return;
+    }
+    if (e->kind == NT_GFX_EVENT_BACKEND) {
+        call_text(frame, e, buf, size, &at);
+        return;
+    }
+    if (e->kind == NT_GFX_EVENT_SKIP && e->detail != 0) { /* a cache skip: the call it left out, then its key's fields */
+        appendf(buf, size, &at, "%s cache", nt_gfx_gl_call_name(e->detail));
+        fields_text(frame, e, only, buf, size, &at);
+        return;
+    }
+    if (e->kind != NT_GFX_EVENT_OP) {
+        appendf(buf, size, &at, "%s ", nt_gfx_event_kind_name((uint32_t)e->kind));
+    }
+    appendf(buf, size, &at, "%s", nt_gfx_operation_name(e->operation));
+    if (e->object_kind != NT_GFX_OBJECT_NONE) {
+        char alias[FI_ALIAS_LEN];
+        value_text(frame, NT_GFX_MEANING_HANDLE, e->object_kind, e->object, alias, sizeof(alias));
+        appendf(buf, size, &at, " %s", alias);
+    }
+    if (e->kind == NT_GFX_EVENT_DEFINITION && e->operation == NT_GFX_OP_STATE) {
+        appendf(buf, size, &at, " %s", nt_gfx_object_kind_name(e->detail));
+    } else if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_STATE) {
+        appendf(buf, size, &at, " %s", e->detail == NT_GFX_INITIAL_BACKEND ? "BACKEND" : "FRONTEND");
+    }
+    fields_text(frame, e, only, buf, size, &at);
     if (e->kind == NT_GFX_EVENT_OP && (e->operation == NT_GFX_OP_DRAW_INSTANCED || e->operation == NT_GFX_OP_DRAW_INDEXED_INSTANCED)) {
-        (void)snprintf(buf + at, size - at, " x%u", e->data.draw.instances);
-    } else if (e->kind == NT_GFX_EVENT_OP && e->operation == NT_GFX_OP_SCISSOR_ENABLE) {
-        (void)snprintf(buf + at, size - at, " %s", e->data.state.integers[0] != 0 ? "on" : "off");
+        appendf(buf, size, &at, " x%u", e->data.draw.instances);
+    } else if ((e->operation == NT_GFX_OP_SCISSOR_ENABLE || e->operation == NT_GFX_OP_GPU_TIMING) && !e->data.toggle.on) {
+        appendf(buf, size, &at, " off");
+    }
+    if (e->kind == NT_GFX_EVENT_INITIAL && e->result == NT_GFX_RESULT_UNKNOWN) {
+        appendf(buf, size, &at, " unknown");
     }
 }
 
@@ -278,7 +727,40 @@ static uint32_t slot_before(const fi_gl_slot_t *slot, const fi_gl_state_t *befor
     return FI_NONE;
 }
 
-static bool scissor_on(const fi_frame_t *fr, uint32_t record) { return record != FI_NONE && fr->view.events[record].data.state.integers[0] != 0; }
+/* The field of an inherited backend record that holds this slot; NULL when the record holds only the slot. */
+static const char *slot_field(const fi_frame_t *fr, uint32_t call, uint32_t record) {
+    const nt_gfx_event_t *e = &fr->view.events[record];
+    if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_TEXTURE) {
+        return call == NT_GFX_GL_glBindSampler ? "sampler" : "texture";
+    }
+    if (e->kind != NT_GFX_EVENT_INITIAL || e->operation != NT_GFX_OP_STATE) {
+        return NULL;
+    }
+    switch (call) {
+    case NT_GFX_GL_glUseProgram:
+        return "program";
+    case NT_GFX_GL_glBindVertexArray:
+        return "vertex_array";
+    case NT_GFX_GL_glBindFramebuffer:
+        return "framebuffer";
+    case NT_GFX_GL_glActiveTexture:
+        return "active_texture";
+    case NT_GFX_GL_glBindBuffer:
+        return "array_buffer";
+    default:
+        return NULL;
+    }
+}
+
+void fi_state_value(const fi_frame_t *frame, const fi_state_line_t *line, uint32_t record, char *buf, size_t size) {
+    const char *only = line->gl ? slot_field(frame, line->call, record) : NULL;
+    row_text(frame, record, only, buf, size);
+    if (only != NULL && strchr(buf, '=') == NULL) {
+        (void)snprintf(buf + strlen(buf), size - strlen(buf), " %s=0", only); /* a zero field prints nothing on its own */
+    }
+}
+
+static bool scissor_on(const fi_frame_t *fr, uint32_t record) { return record != FI_NONE && fr->view.events[record].data.toggle.on; }
 
 uint32_t fi_state_lines(const fi_frame_t *frame, const fi_state_view_t *view, bool all, fi_state_line_t out[FI_STATE_LINES]) {
     const fi_request_state_t *req = &view->req;
@@ -321,6 +803,7 @@ uint32_t fi_state_lines(const fi_frame_t *frame, const fi_state_view_t *view, bo
         const fi_gl_slot_t *slot = &view->gl.slot[k];
         fi_state_line_t *l = &out[n++];
         gl_slot_name(slot, l->name, sizeof(l->name));
+        l->call = slot->call;
         l->now = slot->record;
         l->before = view->was_gl_at != FI_NONE ? slot_before(slot, &view->was_gl) : slot->record;
         l->inherited = slot->inherited;
@@ -534,20 +1017,6 @@ void fi_number_diff(const fi_frame_t *a, const fi_frame_t *b, fi_number_diff_t *
     }
 }
 
-static void appendf(char *buf, size_t size, size_t *at, const char *fmt, ...) NT_PRINTF_ATTR(4, 5);
-static void appendf(char *buf, size_t size, size_t *at, const char *fmt, ...) {
-    if (*at + 1U >= size) {
-        return;
-    }
-    va_list args;
-    va_start(args, fmt);
-    const int n = vsnprintf(buf + *at, size - *at, fmt, args);
-    va_end(args);
-    if (n > 0) {
-        *at = *at + (size_t)n < size ? *at + (size_t)n : size - 1U;
-    }
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void fi_change_text(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_row_t *row, char *buf, size_t size) {
     const nt_gfx_event_t *x = &a->view.events[row->a];
@@ -575,7 +1044,7 @@ void fi_change_text(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_row_
         return;
     }
     if (!fi_is_draw(x)) { /* A's request; B's is on the row */
-        char was[256];
+        char was[400];
         fi_row_text(a, row->a, was, sizeof(was));
         appendf(buf, size, &at, "%sA: %s", sep, was);
         return;
@@ -812,16 +1281,24 @@ static void cmd_record(const fi_frame_t *fr, uint32_t id, fi_out_t *out) {
     put(out, "captured %.*s\n", (int)len, line);
 }
 
+static void put_state_record(fi_out_t *out, const fi_frame_t *fr, const char *prefix, const fi_state_line_t *l, uint32_t record) {
+    char body[600];
+    fi_state_value(fr, l, record, body, sizeof(body));
+    const char *word = fi_result_word(&fr->view.events[record]);
+    const bool badge = word[0] != '\0';
+    put(out, "%s@%u  %s%s%s%s\n", prefix, record, body, badge ? "  [" : "", word, badge ? "]" : "");
+}
+
 static void put_state_line(const fi_frame_t *fr, const fi_state_line_t *l, fi_out_t *out) {
     char prefix[96];
     (void)snprintf(prefix, sizeof(prefix), "%c %-26s %s", l->changed ? '*' : ' ', l->name, l->inherited ? "inherited " : "");
     if (l->now == FI_NONE) {
         put(out, "%sunset\n", prefix);
     } else {
-        put_record(out, fr, prefix, l->now);
+        put_state_record(out, fr, prefix, l, l->now);
     }
     if (l->changed && l->before != FI_NONE) {
-        put_record(out, fr, "    was ", l->before);
+        put_state_record(out, fr, "    was ", l, l->before);
     } else if (l->changed) {
         put(out, "    was unset\n");
     }
@@ -1080,7 +1557,13 @@ static void cmd_help(fi_out_t *out) {
              "find TEXT                  # records whose captured line holds TEXT (any case)\n"
              "list KEY                   # the records behind a number: a summary key or gN.METRIC of groups\n"
              "compare INDEX [GROUP]      # this frame (B) against frame INDEX (A): numbers and groups that differ; with a\n"
-             "                           # group of its list (gN, a.gN), that group's commands aligned\n");
+             "                           # group of its list (gN, a.gN), that group's commands aligned\n"
+             "# rows: each record's fields by name, values decoded (GL_LEQUAL, U16, tex/atlas); record @N adds the line as\n"
+             "# captured, raw. Zero fields are left out; a request's unset render target or sampler reads as its default.\n"
+             "# objects: kind/label (buf/frame_uniform), kind/label#N when the frame has more than one with that label,\n"
+             "# kind#N when unlabeled; N counts first use in the frame's work, then the snapshot's, per kind and label.\n"
+             "# badges: [merged] joined the previous GL draw, [already set] the engine held that state, [found] a cached\n"
+             "# object, [GL skipped] the GL cache held that value (its cache key follows the call name).\n");
 }
 
 static const char *const k_commands[] = {"help", "frames", "frame", "summary", "groups", "record", "state", "find", "list", "compare"};

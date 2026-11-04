@@ -672,6 +672,7 @@ typedef enum {
     NT_GFX_NOTE_U64,
     NT_GFX_NOTE_F32,
     NT_GFX_NOTE_STR,
+    NT_GFX_NOTE_HANDLE, /* a gfx object: its kind and handle, so a reader names the object */
 } nt_gfx_note_type_t;
 
 typedef enum {
@@ -719,23 +720,87 @@ typedef union {
         uint32_t object;
         uint32_t detail;
         uint32_t link;
+        /* One arm per meaning; nt_gfx_capture_fields names each field of a record and what its value is.
+         * CREATE requests and definitions share their object's arm: slot and label are definition fields. */
         union {
-            struct {
+            struct { /* an issued GL call, or a cache skip's key: meaning per call */
                 uint64_t bytes;
                 uint32_t args[12];
                 float values[4];
             } backend;
             struct {
+                uint32_t gl_name, stage;
+                nt_gfx_capture_string_t label;
+            } shader;
+            struct {
+                uint32_t slot, vertex_shader, fragment_shader;
+                nt_gfx_capture_string_t label;
+            } program;
+            struct {
+                uint32_t slot, program;
+                nt_gfx_capture_string_t label;
+            } pipeline;
+            struct {
+                uint32_t slot, vertex_buffer, index_buffer, index_type;
+                nt_gfx_capture_string_t label;
+            } vertex_input;
+            struct {
                 uint64_t size;
-                uint32_t backend, related[3], type, usage, width, height, format, levels, flags;
-                nt_gfx_capture_string_t label; /* DEFINITION: the object's desc label */
-            } resource;
+                uint32_t slot, type, usage, index_type;
+                bool data;
+                nt_gfx_capture_string_t label;
+            } buffer;
+            struct {
+                uint32_t slot, width, height, format, levels, sampler;
+                bool gen_mipmaps;
+                nt_gfx_capture_string_t label;
+            } texture;
+            struct {
+                uint32_t gl_name, min_filter, mag_filter, wrap_u, wrap_v, compare;
+            } sampler;
+            struct {
+                uint32_t slot, color, depth, width, height, color_format, depth_format;
+                nt_gfx_capture_string_t label;
+            } render_target;
+            struct {
+                uint32_t slot, stride, locations;
+            } instance_layout;
+            struct {
+                uint32_t buffer, offset, stride, location, type, count, normalized, divisor;
+            } attribute;
+            struct {
+                uint64_t size;
+                uint32_t offset;
+                bool data;
+            } upload;
+            struct {
+                int32_t x, y, width, height;
+                uint32_t source; /* BUFFER_READ: the render target it reads */
+            } rect;
+            struct {
+                bool on;
+            } toggle;
+            struct {
+                bool context_lost;
+            } frontend;
+            struct {
+                uint32_t count;
+            } texture_set;
+            struct {
+                uint32_t name, sampler;
+            } texture_binding;
+            struct {
+                uint32_t buffer, layout, offset;
+            } instance_binding;
+            struct {
+                uint32_t slot, offset, size;
+            } ubo;
+            struct {
+                uint32_t name;
+            } segment;
             struct {
                 uint32_t first, count, vertices, instances, vertex_input;
             } draw;
-            struct {
-                uint32_t secondary, name, slot, offset, size;
-            } binding;
             struct {
                 uint32_t target;
                 float color[4], depth;
@@ -743,13 +808,27 @@ typedef union {
                 bool load_color, load_depth, discard_color, discard_depth;
             } pass;
             nt_clear_desc_t clear;
+            struct { /* backend pipeline state: a definition names its program by slot, inherited state by GL name */
+                union {
+                    uint32_t program_slot, program_gl;
+                };
+                uint32_t slot; /* definition: the backend pipeline slot */
+                uint32_t depth_test, depth_write, depth_func, cull, blend, src_rgb, dst_rgb, src_alpha, dst_alpha, op_rgb, op_alpha, polygon_offset;
+                float blend_color[4], offset_factor, offset_units;
+            } pipeline_state;
+            struct { /* DEFINITION/STATE: a backend slot's GL name; a vertex input adds its instance binding */
+                uint32_t slot, gl_name, instance_buffer, instance_offset, instance_layout;
+            } backend_resource;
+            struct { /* INITIAL/STATE of the backend: cached GL names and the framebuffer size */
+                uint32_t program, vertex_array, framebuffer, active_texture, width, height, upload_vertex_array, array_buffer;
+            } backend_state;
             struct {
-                uint32_t buffer, offset, stride, location, type, count, normalized, divisor;
-            } attribute;
+                uint32_t unit, texture, sampler; /* GL names */
+            } texture_unit;
             struct {
-                uint32_t integers[14];
-                float values[6];
-            } state;
+                uint32_t program, name, unit, sampler_class;
+                int32_t location;
+            } program_sampler;
         } data;
     };
     struct {
@@ -766,6 +845,9 @@ typedef union {
             uint64_t u64;
             float f32;
             nt_gfx_capture_string_t str;
+            struct {
+                uint32_t id, kind; /* kind: nt_gfx_object_kind_t */
+            } handle;
         } value;
     } field;
 } nt_gfx_event_t;
@@ -822,6 +904,9 @@ typedef struct {
         uint64_t u64;
         float f32;
         const char *str;
+        struct {
+            uint32_t id, kind; /* kind: nt_gfx_object_kind_t */
+        } handle;
     } value;
 } nt_gfx_note_field_t;
 
@@ -830,6 +915,7 @@ typedef struct {
 #define NT_NOTE_U64(k, v) ((nt_gfx_note_field_t){.key = (k), .type = NT_GFX_NOTE_U64, .value.u64 = (v)})
 #define NT_NOTE_F32(k, v) ((nt_gfx_note_field_t){.key = (k), .type = NT_GFX_NOTE_F32, .value.f32 = (v)})
 #define NT_NOTE_STR(k, v) ((nt_gfx_note_field_t){.key = (k), .type = NT_GFX_NOTE_STR, .value.str = (v)})
+#define NT_NOTE_HANDLE(k, object_kind, handle_id) ((nt_gfx_note_field_t){.key = (k), .type = NT_GFX_NOTE_HANDLE, .value.handle = {.id = (handle_id), .kind = (object_kind)}})
 
 #if NT_GFX_CAPTURE_ENABLED
 void nt_gfx_note_record(const char *label, const nt_gfx_note_field_t *fields, uint32_t count);

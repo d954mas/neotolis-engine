@@ -6,10 +6,11 @@
 
 #include "fi_model.h"
 
-/* The record's capture-text line without what a tree row shows elsewhere (its kind tag, result, parent link
- * and draw details); handles as short names (pipe#3), GL calls as calls: glEnable(GL_SCISSOR_TEST). */
+/* The record as a row, from its fields (capture field table): values decoded by meaning, handles as aliases
+ * (pipe/mesh), GL calls as calls (glEnable(GL_SCISSOR_TEST)); without what a tree row shows elsewhere (its
+ * result, parent link and a draw's first, vertices and instances). */
 void fi_row_text(const fi_frame_t *frame, uint32_t record, char *buf, size_t size);
-/* A handle as the views name it: vi/mesh#3, vi#3 unlabeled, vi:65537 when the frame never names it (fi_alias); a
+/* A handle as the views name it: vi/mesh, vi/mesh#3 when the label repeats, vi#3 unlabeled, vi:65537 when the frame never names it (fi_alias); a
  * long label is cut, never the number. buf holds FI_ALIAS_LEN bytes. */
 #define FI_ALIAS_LEN 128
 void fi_alias_text(const fi_frame_t *frame, uint32_t kind, uint32_t object, char *buf, size_t size);
@@ -23,10 +24,15 @@ typedef struct {
     char name[48];
     uint32_t now, before; /* records, FI_NONE: unset */
     bool inherited, changed, gl;
+    uint32_t call; /* gl: the slot's nt_gfx_gl_call_t */
 } fi_state_line_t;
 #define FI_STATE_LINES (16U + FI_GL_SLOTS)
 /* all: every GL line; otherwise only the GL lines that changed, when the view compares with a GL draw. */
 uint32_t fi_state_lines(const fi_frame_t *frame, const fi_state_view_t *view, bool all, fi_state_line_t out[FI_STATE_LINES]);
+
+/* The value a state line shows at `record` (its now or before): the record's row text, or, for one field of an
+ * inherited backend record that holds several slots, only that slot's field ("texture=5"). */
+void fi_state_value(const fi_frame_t *frame, const fi_state_line_t *line, uint32_t record, char *buf, size_t size);
 
 /* What a state view is compared with, as text: "previous draw", "previous GL draw", "frame start". */
 const char *fi_compare_name(uint8_t compare, bool gl);
@@ -57,7 +63,7 @@ typedef struct {
 } fi_number_diff_t;
 void fi_number_diff(const fi_frame_t *a, const fi_frame_t *b, fi_number_diff_t *out);
 /* What changed in a changed pair of fi_diff, e.g. "CACHE -> ACCEPTED; break: merged -> a command recorded between"
- * or, for arguments other than a draw's range, A's request: "A: VIEWPORT integers=[0,0,1280,720]". */
+ * or, for arguments other than a draw's range, A's request: "A: VIEWPORT width=1280 height=720". */
 void fi_change_text(const fi_frame_t *a, const fi_frame_t *b, const fi_diff_row_t *row, char *buf, size_t size);
 /* What sets a compared group apart, e.g. "only in A; requests 3 -> 4; 2 of 9 requests differ"; empty when
  * nothing does. */

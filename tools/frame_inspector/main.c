@@ -2061,9 +2061,8 @@ static void declare_compare_page(void) {
 // #endregion
 
 // #region details
-static void link_line(const fi_frame_t *fr, const char *what, uint32_t record) {
-    char body[400];
-    fi_row_text(fr, record, body, sizeof(body));
+/* A record as a link: @N and its text. */
+static void link_text(const fi_frame_t *fr, const char *what, uint32_t record, const char *body) {
     char buf[512];
     (void)snprintf(buf, sizeof(buf), "%s@%u  %s", what, record, body);
     const bool commands = s.page == PAGE_COMMANDS;
@@ -2077,6 +2076,12 @@ static void link_line(const fi_frame_t *fr, const char *what, uint32_t record) {
     } else if (!commands) {
         open_record(ev.clicked, record);
     }
+}
+
+static void link_line(const fi_frame_t *fr, const char *what, uint32_t record) {
+    char body[400];
+    fi_row_text(fr, record, body, sizeof(body));
+    link_text(fr, what, record, body);
 }
 
 /* What the selected-command panel needs from whole-frame scans, computed once per selection, not per UI frame. */
@@ -2197,16 +2202,20 @@ static void state_line(const fi_frame_t *fr, const fi_state_line_t *l) {
     ROW_(6) {
         const nt_ui_label_style_t *style = l->inherited ? &k_dim : &k_text;
         CELL_(210) { text(l->name, l->changed ? &k_changed : style); }
+        char body[400];
         if (l->now == FI_NONE) {
             text("unset", &k_dim);
         } else {
-            link_line(fr, l->inherited ? "inherited " : "", l->now);
+            fi_state_value(fr, l, l->now, body, sizeof(body));
+            link_text(fr, l->inherited ? "inherited " : "", l->now, body);
         }
     }
     if (l->changed && l->before != FI_NONE) {
         ROW_(6) {
             CELL_(210) { text("  was", &k_changed); }
-            link_line(fr, "", l->before);
+            char body[400];
+            fi_state_value(fr, l, l->before, body, sizeof(body));
+            link_text(fr, "", l->before, body);
         }
     }
 }

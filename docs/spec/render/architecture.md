@@ -1232,72 +1232,93 @@ issued calls too and are recorded like any other.
 Float arguments occupy `backend.values` in float argument order. `arg_count` holds how many integer arguments (low nibble) and float values (high nibble) a call set, so trailing zeros stay distinguishable from absent arguments. `backend.bytes` is actual CPU upload payload, zero for NULL storage.
 No event borrows upload memory, shader source or caller labels: strings are copied into the frame's strings.
 
-Resource `DEFINITION/STATE` records with `object_kind=NONE` use `detail` as the
-resource kind and `backend.args[0..1]` as backend slot/raw GL name. Frontend resource definitions
-carry the full handle, the backend identifier and available dimensions/relationships. Programs,
-pipelines, vertex inputs, buffers, textures and render targets carry the slot of `object`; a shader
-carries its raw GL name and a sampler its backend sampler id. A husk carries 0.
-A render-target definition carries the color and depth texture handles in
-`related[0..1]`, the color format in `format` and the depth format in `usage`,
-zero for an absent attachment, and the size of those textures.
-Shader, program and vertex-input definitions carry result `UNKNOWN`: the frontend
-retains no shader stage or source, program stage pair or vertex-input layout, so
-those fields are absent, not zero. A vertex input created during a recorded frame
-follows its definition with `DEFINITION/ATTRIBUTE` records for its per-vertex
-attributes (divisor 0, naming the vertex buffer handle). A vertex-input
-definition relates its vertex and index buffer handles in `related[0..1]`. An
-instance layout (`NT_GFX_OBJECT_INSTANCE_LAYOUT`) is defined at registration
-and in the initial state: `backend` is its handle, `size` its stride and
-`flags` its location mask, followed by its attribute records (divisor 1, buffer
-0). The backend defines the vertex input's VAO with its GL name in
-`backend.args[1]` and the instance binding its pointers hold: the instance
-buffer's GL name in `args[2]` (0 without one), the offset in `args[3]` and the
-layout slot in `args[4]` (all 0 from creation); the layout's own definition
-names its attributes. An upload that
-finds its buffer already bound to `GL_ARRAY_BUFFER` records a `SKIP` of
-`glBindBuffer`. Both bind forms are `NT_GFX_OP_VERTEX_INPUT`; the instanced
-one carries the instance buffer in `binding.secondary`, the layout in
-`binding.slot` and the offset in `binding.offset`.
-Restore defines no resource. Primary resources survive a loss as husks and get
-no fresh definition; pipelines, vertex inputs and render targets that the first
-detection frees get no DESTROY record. Samplers are re-defined when lazily recreated. Definitions
-remain meaningful after resource destruction or slot reuse.
+Every data field has one meaning. `nt_gfx_capture_fields(e, &fields)`
+(`graphics/nt_gfx_capture_text.h`) returns a gfx record's fields in text order,
+chosen by its kind, operation, object kind and `detail`: each field's name, offset,
+storage type and meaning (a plain value, a bool, a name hash, a frontend handle of an
+object kind, a backend slot of an object kind, a raw GL name of a GL object kind, or
+one value of a set: an engine enum, a GL enum or a flag set). The capture text, its parser and readers such as the Frame Inspector
+walk that one description. A `CREATE` request and its `DEFINITION` share their
+object's fields: the request leaves `slot` and `label` 0, and the definition leaves
+the request-only fields 0.
 
-The frontend `INITIAL/STATE` record (`detail` `NT_GFX_INITIAL_FRONTEND`, arg 0 =
-context lost) opens the snapshot; pass-scoped bindings are not recorded, because the
-first `begin_pass` discards them. The scissor enable and rectangle records (the rectangle
-carries over frames) and the
-frontend resource definitions follow, then the backend `INITIAL/STATE` record
-(`NT_GFX_INITIAL_BACKEND`, cached GL names including the `GL_ARRAY_BUFFER` binding
-in `args[7]`, and framebuffer size) and the backend's
-own definitions. While the context is known lost, the backend records hold the
-dead names of the lost context.
-Among INITIAL records, `detail` is meaningful only on INITIAL/STATE.
-Program publication and initial state include `INITIAL/SAMPLER` records with
-backend program slot, name hash, location, unit and sampler class in args 0–4.
-These INITIAL records can occur inside CREATE when the program first becomes
-available. Inactive texture-set names emit SKIP/INACTIVE; cache skips are distinct
-from invalid requests.
+| Record | Fields |
+|---|---|
+| CREATE, SHADER | `gl_name` (GL shader, definition), `stage` (`nt_shader_type_t`, request), `label` |
+| CREATE, PROGRAM | `slot`, `vertex_shader`, `fragment_shader` (shader handles, request), `label` |
+| CREATE, PIPELINE | `slot`, `program` (program handle), `label` |
+| CREATE, VERTEX_INPUT | `slot`, `vertex_buffer`, `index_buffer` (buffer handles), `index_type` (`NT_INDEX_*`, definition), `label` |
+| CREATE, BUFFER | `size` (bytes), `slot`, `type`, `usage`, `index_type`, `data` (initial data present, request), `label` |
+| CREATE, TEXTURE | `slot`, `width`, `height`, `format`, `levels`, `sampler` (default sampler handle, definition), `gen_mipmaps` (request), `label` |
+| CREATE, SAMPLER | `gl_name` (GL sampler, definition), `min_filter`, `mag_filter`, `wrap_u`, `wrap_v`, `compare` (`nt_sampler_desc_t` values) |
+| CREATE, RENDER_TARGET | `slot`, `color`, `depth` (texture handles), `width`, `height`, `color_format`, `depth_format` (texture formats, definition), `label` |
+| CREATE, INSTANCE_LAYOUT | `slot`, `stride` (bytes), `locations` (bit n: location n) |
+| DEFINITION/ATTRIBUTE | `buffer` (handle, 0 for an instance layout), `offset`, `stride`, `location`, `type` (`nt_vertex_type_t`), `count`, `normalized`, `divisor` |
+| DEFINITION/STATE (`detail`: resource kind) | `slot`, `gl_name`: the program, buffer, texture, the vertex input's VAO or the render target's framebuffer; a vertex input adds `instance_buffer` (GL name, 0 without one), `instance_offset` and `instance_layout` (slot) |
+| DEFINITION/PIPELINE | `slot` (the backend pipeline slot), `program_slot`, then the pipeline state |
+| INITIAL/PIPELINE | `program_gl` (the current GL program), then the pipeline state |
+| pipeline state | `depth_test`, `depth_write`, `depth_func` (GL), `cull` (0 none, 1 back, 2 front), `blend`, `src_rgb`, `dst_rgb`, `src_alpha`, `dst_alpha` (GL blend factors), `op_rgb`, `op_alpha` (GL blend equations), `polygon_offset`, `blend_color`, `offset_factor`, `offset_units` |
+| INITIAL/STATE, FRONTEND | `context_lost` |
+| INITIAL/STATE, BACKEND | `program`, `vertex_array`, `framebuffer` (GL names), `active_texture` (`GL_TEXTUREn`), `width`, `height` (framebuffer size), `upload_vertex_array`, `array_buffer` (GL names) |
+| INITIAL/SAMPLER | `program` (slot), `name` (hash), `unit`, `sampler_class` (0 float, 1 shadow, 2 uint), `location` |
+| INITIAL/TEXTURE | `unit`, `texture`, `sampler` (GL names) |
+| PASS | `target` (render target handle, 0 the default framebuffer), `color`, `depth`, `load_color`, `load_depth`, `discard_color`, `discard_depth`; INITIAL/PASS holds the cached clear values only |
+| VIEWPORT, SCISSOR, READ_PIXELS, TEXTURE_UPLOAD (OP and INITIAL) | `x`, `y`, `width`, `height` (signed) |
+| BUFFER_READ (native) | `x`, `y`, `width`, `height`, `source` (render target handle, 0 the default framebuffer) |
+| SCISSOR_ENABLE (OP and INITIAL), GPU_TIMING | `on` |
+| BUFFER_UPLOAD | `size`, `offset` (bytes), `data` (data present) |
+| VERTEX_INPUT | `buffer`, `layout` (instance buffer and instance layout handles, 0 for the plain bind), `offset` (bytes) |
+| UBO | `slot`, `offset`, `size` (bytes) |
+| TEXTURE_SET | `count`; its ARGUMENT records and SKIP/INACTIVE: `name` (hash), `sampler` (handle, 0 the texture's default; ARGUMENT only) |
+| SEGMENT_BEGIN, SEGMENT_POLL | `name` (hash) |
+| the four draws | `first`, `count`, `vertices`, `instances`, `vertex_input` (handle) |
+| CLEAR | `clear_color`, `clear_depth`, `color`, `depth` |
+| BACKEND | `args`, `values`, `bytes` |
+| SKIP with a call (`detail`: the skipped call) | its cache key: `glUseProgram` `program`; `glBindVertexArray` `vertex_array`; `glVertexAttribPointer` `vertex_array`, `buffer` (GL names), `offset`, `layout` (instance layout slot); `glBindBuffer` `buffer`; `glBindBufferRange` `slot`, `offset`, `size`; `glBindTexture` `texture`, `unit`; `glBindSampler` `sampler`, `unit` |
+
+Every other record has no data fields. A husk's definition carries `slot` or
+`gl_name` 0. Shader, program and vertex-input definitions carry result `UNKNOWN`:
+the frontend retains no shader stage or source, program stage pair or vertex-input
+layout, so those fields are absent, not zero. A vertex input created during a
+recorded frame follows its definition with `DEFINITION/ATTRIBUTE` records for its
+per-vertex attributes (divisor 0, naming the vertex buffer handle). An instance
+layout (`NT_GFX_OBJECT_INSTANCE_LAYOUT`) is defined at registration and in the
+initial state, followed by its attribute records (divisor 1, buffer 0). The
+backend's vertex-input definition holds the instance binding its pointers hold
+(all 0 from creation); the layout's own definition names its attributes. An upload
+that finds its buffer already bound to `GL_ARRAY_BUFFER` records a `SKIP` of
+`glBindBuffer`. Both bind forms are `NT_GFX_OP_VERTEX_INPUT`; the instanced one
+names its instance buffer, layout and offset. Restore defines no resource.
+Primary resources survive a loss as husks and get no fresh definition; pipelines,
+vertex inputs and render targets that the first detection frees get no DESTROY
+record. Samplers are re-defined when lazily recreated. Definitions remain
+meaningful after resource destruction or slot reuse.
+
+The frontend `INITIAL/STATE` record (`detail` `NT_GFX_INITIAL_FRONTEND`) opens the
+snapshot; pass-scoped bindings are not recorded, because the first `begin_pass`
+discards them. The scissor enable and rectangle records (the rectangle carries over
+frames) and the frontend resource definitions follow, then the backend
+`INITIAL/STATE` record (`NT_GFX_INITIAL_BACKEND`) and the backend's own definitions.
+While the context is known lost, the backend records hold the dead names of the
+lost context. Among INITIAL records, `detail` is meaningful only on INITIAL/STATE.
+Program publication and initial state include `INITIAL/SAMPLER` records. These
+INITIAL records can occur inside CREATE when the program first becomes available.
+Inactive texture-set names emit SKIP/INACTIVE; cache skips are distinct from invalid
+requests.
 
 `SKIP` records mark work that was not issued without ending an operation:
 backend cache skips (`SKIP/CACHE`) and inactive texture-set names
 (`SKIP/INACTIVE`). A backend cache skip names the skipped call in `detail` and carries its cache
-key (not the GL signature) in `backend.args`, counted by `arg_count`; an
-inactive texture-set name has `detail` 0 and uses the binding fields.
+key (not the GL signature) as that call's key fields; an inactive texture-set name has
+`detail` 0.
 
-Pipeline state records use integers 0–12 for program, depth enable/write/function,
-cull, blend enable, RGB source/destination, alpha source/destination, RGB/alpha
-operation and polygon offset enable. Values 0–5 hold blend color, offset factor
-and units. Only the backend defines pipeline state: its `DEFINITION/PIPELINE`
-record uses the program backend slot and backend enums, and the frontend
-pipeline definition carries the program handle in `related[0]`. The backend
-`DEFINITION/PIPELINE` record carries the pipeline backend slot in `detail`;
-initial state uses the current raw program name. `DEFINITION/ATTRIBUTE` records
-are frontend records: `object_kind` and `object` name the vertex input or the
-instance layout. Vertex-input creation copies each per-vertex attribute with its
-layout and buffer; instance attributes belong to the instance layout. The initial SCISSOR record holds the
-carried-over rectangle; it is `UNKNOWN` before the first set and after a
-context loss. Uniform-block bindings are not recorded: a pass binds every block it reads. A bind inside the capture that
+Only the backend defines pipeline state, in its slots and enums; the frontend
+pipeline definition names its program handle. `DEFINITION/ATTRIBUTE` records are
+frontend records: `object_kind` and `object` name the vertex input or the instance
+layout. Vertex-input creation copies each per-vertex attribute with its layout and
+buffer; instance attributes belong to the instance layout. The initial SCISSOR
+record holds the carried-over rectangle; it is `UNKNOWN` before the first set and
+after a context loss. Uniform-block bindings are not recorded: a pass binds every block it reads. A bind inside the capture that
 ends `CACHE` matches this state or one set earlier in the frame. Inherited
 layouts unavailable in existing CPU state are explicitly unknown. Capture
 never adds a GL-state mirror of its own or queries GL to reconstruct state.
@@ -1307,8 +1328,10 @@ never adds a GL-state mirror of its own or queries GL to reconstruct state.
 Any code (renderers, UI, the game) adds its own context to a capture; gfx stores
 it and never interprets it. `NT_GFX_NOTE(label, fields...)` records a `NOTE`
 followed by one `NOTE_FIELD` record per field, built with `NT_NOTE_U32`,
-`NT_NOTE_I32`, `NT_NOTE_U64`, `NT_NOTE_F32` or `NT_NOTE_STR`; a note may have no
-fields. A reader takes every consecutive `NOTE_FIELD` as the fields of the
+`NT_NOTE_I32`, `NT_NOTE_U64`, `NT_NOTE_F32`, `NT_NOTE_STR` or
+`NT_NOTE_HANDLE(key, object_kind, id)`; a note may have no fields. A HANDLE field
+names a gfx object by its kind and handle, so a reader names the object as the
+records do; gfx asserts the kind and stores the handle without checking it. A reader takes every consecutive `NOTE_FIELD` as the fields of the
 `NOTE` before it. `NT_GFX_MARKER_PUSH(name)` / `NT_GFX_MARKER_POP()` record
 nested groups; nesting follows from record order.
 
@@ -1336,7 +1359,7 @@ published; strings have no length limit of their own.
 Every desc `label` and `nt_gfx_make_program`'s label is a debug name in static
 storage: capture builds keep the pointer per live object and copy the text into each
 recorded frame. A create's resource `DEFINITION` and every later begin_frame snapshot
-carry it in `resource.label`; the OP record of the create does not. A pipeline, shared
+carry it in its `label` field; the OP record of the create does not. A pipeline, shared
 by equal descs, is named by its program; samplers, shared by key, and instance layouts
 have no name. `capture_string_capacity` covers the snapshot's labels plus the frame's
 note text: a sprite note takes 21 bytes plus its material label.
@@ -1371,7 +1394,7 @@ means the selection has no pipeline, a lost context included.
 | Label | Fields | Written |
 |---|---|---|
 | `mesh` | `material`, `mesh`; `drop`: `program not ready`, `context lost` | before each run of `draw_list`, `draw_list_skinned` and each direct mesh draw; a deformation-only split notes the same pair again |
-| `sprite` | `material`, `page`; `drop`: `program not ready`, `page not ready` | before each immediate emit of a live region and each `draw_list` run; a merged emit keeps its note before a `CACHE` draw |
+| `sprite` | `material`, `page` (a texture HANDLE, 0 when not ready); `drop`: `program not ready`, `page not ready` | before each immediate emit of a live region and each `draw_list` run; a merged emit keeps its note before a `CACHE` draw |
 | `text` | `material`, `font`; `drop`: `program not ready`, `font not loaded`, `font texture not ready` | once per non-empty `draw_n` call |
 | `shape` | none; `drop`: `program not ready` | before each shape draw of a flush, or once for a non-empty flush whose programs are not ready |
 
@@ -1399,12 +1422,12 @@ document starts with its own version line and stays self-contained (its own init
 snapshot, record indices and links).
 
 ```text
-ntcapture 3
+ntcapture 4
 frame sequence=<n> platform=<native|web> records=<n> overflow=<0|1> execute=<begin>..<end>
 counter <name>=<n>                       (one line per nonzero counter)
 <index> <indent><KIND> op=<OP> [obj=<KIND>:<handle>] [result=<R>] [<detail>] [link=@<index>] <fields> [label="<text>"]
 <index> <indent>NOTE label="<text>"
-<index> <indent>NOTE_FIELD key="<text>" type=<U32|I32|U64|F32|STR> value=<value>
+<index> <indent>NOTE_FIELD key="<text>" type=<U32|I32|U64|F32|STR|HANDLE> value=<value>   (HANDLE: <KIND>:<handle>)
 <index> <indent>MARKER_PUSH label="<text>"
 <index> <indent>MARKER_POP
 ```
@@ -1419,12 +1442,13 @@ counter <name>=<n>                       (one line per nonzero counter)
   draw it joined), `detail=<n>` otherwise. `resource=` and `layer=` always print;
   the others are omitted when 0. `link` and `joined` name earlier records: an OP
   record, a draw for `joined`. Lines end with `\n` alone.
-- Fields print as `name=value` for the data arm of the record (table below); zero
-  fields are omitted, and arrays print up to their last nonzero element. Issued-call
-  arguments print exactly `arg_count` elements, so a zero argument stays visible
-  (`args=`, `key=` on a cache skip, `values=`). Formatting asserts that a record holds
-  no data outside its arm and an issued call no argument beyond its count.
-- Integers print in decimal as stored; GL arguments are stored as `uint32`.
+- Fields print as `name=value` in the order `nt_gfx_capture_fields` gives (Frame
+  observation, the field table); zero fields are omitted, and arrays print up to their
+  last nonzero element. Issued-call arguments print exactly `arg_count` elements, so a
+  zero argument stays visible (`args=`, `values=`). Formatting
+  asserts that a record holds no data outside its fields and an issued call no
+  argument beyond its count.
+- Integers print in decimal as stored, signed fields with a sign; GL arguments are stored as `uint32`.
   Floats print as the shortest `%g` (6 to 9 significant digits) that reads back
   to the same float32, including `-0` and `inf`, always with `.` as the decimal point;
   NaN prints as `nan:0x<bits>`.
@@ -1435,20 +1459,8 @@ counter <name>=<n>                       (one line per nonzero counter)
   capped at 32 levels, so the text grows linearly with records; `link` is
   authoritative.
 
-| Record | Data arm |
-|---|---|
-| BACKEND, SKIP with a call | `backend` (`key=` on SKIP) |
-| SKIP without a call (inactive texture-set name), ARGUMENT | `binding` |
-| DEFINITION: ATTRIBUTE / PIPELINE / STATE / other | `attribute` / `state` / `backend` / `resource` |
-| INITIAL: STATE of the backend layer, SAMPLER, TEXTURE | `backend` |
-| INITIAL: PASS / other | `pass` / `state` |
-| OP: CREATE, BUFFER_UPLOAD | `resource` |
-| OP: the four draws / PASS / CLEAR | `draw` / `pass` / `clear` |
-| OP: VERTEX_INPUT, UBO, SEGMENT_BEGIN, SEGMENT_POLL | `binding` |
-| OP: other | `state` |
-
-Any change of names, fields or grammar bumps the `ntcapture` version. The
-formatter and the parser walk the same per-arm field tables.
+Any change of names, fields or grammar bumps the `ntcapture` version; a parser reads
+only its own version. The formatter and the parser walk the same field table.
 
 `platform` is `nt_gfx_capture_view_t.platform`, set by gfx at publication. The parser
 resolves names as strings in its own build's tables; the web build's operation and

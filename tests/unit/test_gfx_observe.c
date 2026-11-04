@@ -543,7 +543,7 @@ static void test_restore_is_one_context_operation_after_the_lost_snapshot(void) 
     TEST_ASSERT_FALSE(capture.overflow);
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_EVENT_INITIAL, capture.events[0].kind);
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_INITIAL_FRONTEND, capture.events[0].detail);
-    TEST_ASSERT_EQUAL_UINT32(1, capture.events[0].data.state.integers[0]); /* context_lost */
+    TEST_ASSERT_EQUAL_UINT32(1, capture.events[0].data.frontend.context_lost);
     uint32_t restores = 0;
     bool pipeline_defined = false;
     for (uint32_t i = 0; i < capture.count; i++) {
@@ -720,8 +720,8 @@ static void test_frame_storage_uploads_are_recorded_operations(void) {
         const nt_gfx_event_t *e = &capture.events[i];
         if (e->kind == NT_GFX_EVENT_OP && e->operation == NT_GFX_OP_BUFFER_UPLOAD) {
             TEST_ASSERT_EQUAL_UINT32(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX).id, e->object);
-            TEST_ASSERT_EQUAL_UINT32(24, e->data.resource.size);
-            TEST_ASSERT_EQUAL_UINT32(0, e->data.resource.related[0]);
+            TEST_ASSERT_EQUAL_UINT64(24, e->data.upload.size);
+            TEST_ASSERT_EQUAL_UINT32(0, e->data.upload.offset);
             uploads++;
         }
     }
@@ -799,7 +799,7 @@ static void test_capture_defines_inherited_resources_and_unknown_scissor(void) {
     for (uint32_t i = 0; i < initial.count; i++) {
         const nt_gfx_event_t *e = &initial.events[i];
         if (e->kind == NT_GFX_EVENT_DEFINITION && e->object_kind == NT_GFX_OBJECT_BUFFER && e->object == buffer.id) {
-            TEST_ASSERT_EQUAL_UINT64(24, e->data.resource.size);
+            TEST_ASSERT_EQUAL_UINT64(24, e->data.buffer.size);
             buffer_found = true;
         }
         if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_SCISSOR && e->result == NT_GFX_RESULT_UNKNOWN) {
@@ -866,7 +866,7 @@ static void test_capture_defines_reused_slots_and_husks_without_backend(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(first.id, reused.id);
     const nt_gfx_event_t *live = capture_texture_definition(reused);
     TEST_ASSERT_NOT_NULL(live);
-    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(reused.id), live->data.resource.backend);
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(reused.id), live->data.texture.slot);
 
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_end_frame();
@@ -874,7 +874,7 @@ static void test_capture_defines_reused_slots_and_husks_without_backend(void) {
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
     const nt_gfx_event_t *husk = capture_texture_definition(reused);
     TEST_ASSERT_NOT_NULL(husk);
-    TEST_ASSERT_EQUAL_UINT32(0, husk->data.resource.backend);
+    TEST_ASSERT_EQUAL_UINT32(0, husk->data.texture.slot);
 }
 
 /* An equal bind and a merged indexed draw each end CACHE in the capture. */
@@ -933,16 +933,16 @@ static void test_capture_initial_state_holds_carried_over_bindings(void) {
     for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *e = &capture.events[i];
         if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_SCISSOR) {
-            TEST_ASSERT_EQUAL_UINT32(1, e->data.state.integers[0]);
-            TEST_ASSERT_EQUAL_UINT32(2, e->data.state.integers[1]);
-            TEST_ASSERT_EQUAL_UINT32(3, e->data.state.integers[2]);
-            TEST_ASSERT_EQUAL_UINT32(4, e->data.state.integers[3]);
+            TEST_ASSERT_EQUAL_INT32(1, e->data.rect.x);
+            TEST_ASSERT_EQUAL_INT32(2, e->data.rect.y);
+            TEST_ASSERT_EQUAL_INT32(3, e->data.rect.width);
+            TEST_ASSERT_EQUAL_INT32(4, e->data.rect.height);
             scissor_found = true;
         }
-        if (e->kind == NT_GFX_EVENT_OP && e->operation == NT_GFX_OP_UBO && e->data.binding.slot == 5) {
+        if (e->kind == NT_GFX_EVENT_OP && e->operation == NT_GFX_OP_UBO && e->data.ubo.slot == 5) {
             TEST_ASSERT_EQUAL_UINT32(ubo.id, e->object);
-            TEST_ASSERT_EQUAL_UINT32(256, e->data.binding.offset);
-            TEST_ASSERT_EQUAL_UINT32(128, e->data.binding.size);
+            TEST_ASSERT_EQUAL_UINT32(256, e->data.ubo.offset);
+            TEST_ASSERT_EQUAL_UINT32(128, e->data.ubo.size);
             ubo_begins++;
         }
         if (e->kind == NT_GFX_EVENT_OP && (e->operation == NT_GFX_OP_SCISSOR || e->operation == NT_GFX_OP_UBO) && e->result == NT_GFX_RESULT_CACHE) {
@@ -971,12 +971,12 @@ static void test_depth_only_render_target_definition_has_no_color_fields(void) {
         if (e->kind != NT_GFX_EVENT_DEFINITION || e->object_kind != NT_GFX_OBJECT_RENDER_TARGET || e->object != rt.id) {
             continue;
         }
-        TEST_ASSERT_EQUAL_UINT32(0, e->data.resource.related[0]);
-        TEST_ASSERT_EQUAL_UINT32(depth_id, e->data.resource.related[1]);
-        TEST_ASSERT_EQUAL_UINT32(0, e->data.resource.format);
-        TEST_ASSERT_EQUAL_UINT32(NT_TEXTURE_FORMAT_DEPTH16, e->data.resource.usage);
-        TEST_ASSERT_EQUAL_UINT32(64, e->data.resource.width);
-        TEST_ASSERT_EQUAL_UINT32(32, e->data.resource.height);
+        TEST_ASSERT_EQUAL_UINT32(0, e->data.render_target.color);
+        TEST_ASSERT_EQUAL_UINT32(depth_id, e->data.render_target.depth);
+        TEST_ASSERT_EQUAL_UINT32(0, e->data.render_target.color_format);
+        TEST_ASSERT_EQUAL_UINT32(NT_TEXTURE_FORMAT_DEPTH16, e->data.render_target.depth_format);
+        TEST_ASSERT_EQUAL_UINT32(64, e->data.render_target.width);
+        TEST_ASSERT_EQUAL_UINT32(32, e->data.render_target.height);
         definitions++;
     }
     TEST_ASSERT_EQUAL_UINT32(1, definitions);
@@ -1205,13 +1205,31 @@ static void test_capture_read_after_shutdown_is_empty(void) {
     nt_gfx_begin_frame();
 }
 
-/* The label of the create DEFINITION of an object in the open frame; NULL when it has none. */
+/* The label of the create DEFINITION of an object in the open frame: "" when its kind has no label field, NULL
+ * when the frame defines no such object. */
 static const char *definition_label(nt_gfx_object_kind_t kind, uint32_t object) {
     const nt_gfx_capture_view_t v = nt_test_capture_open();
     for (uint32_t i = 0; i < v.count; i++) {
         const nt_gfx_event_t *e = &v.events[i];
         if (e->kind == NT_GFX_EVENT_DEFINITION && e->operation == NT_GFX_OP_CREATE && e->object_kind == kind && e->object == object) {
-            return v.strings + e->data.resource.label;
+            switch (kind) {
+            case NT_GFX_OBJECT_SHADER:
+                return v.strings + e->data.shader.label;
+            case NT_GFX_OBJECT_PROGRAM:
+                return v.strings + e->data.program.label;
+            case NT_GFX_OBJECT_PIPELINE:
+                return v.strings + e->data.pipeline.label;
+            case NT_GFX_OBJECT_VERTEX_INPUT:
+                return v.strings + e->data.vertex_input.label;
+            case NT_GFX_OBJECT_BUFFER:
+                return v.strings + e->data.buffer.label;
+            case NT_GFX_OBJECT_TEXTURE:
+                return v.strings + e->data.texture.label;
+            case NT_GFX_OBJECT_RENDER_TARGET:
+                return v.strings + e->data.render_target.label;
+            default:
+                return ""; /* samplers and instance layouts have no label field */
+            }
         }
     }
     return NULL;
