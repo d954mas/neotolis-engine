@@ -2096,7 +2096,9 @@ static struct {
     fi_verdict_t verdict;
     uint32_t children[40];
     uint32_t child_count, child_total;
-    uint32_t gl_draw; /* a merged draw's GL draw call */
+    uint32_t gl_draw;           /* a merged draw's GL draw call */
+    fi_named_t named[FI_NAMED]; /* the objects it names, each with its definition and the records that name it */
+    uint32_t named_count, named_def[FI_NAMED], named_records[FI_NAMED];
 } s_panel = {.epoch = FI_NONE};
 
 static uint32_t panel_prev_draw(void) { return s_panel.st.was; }
@@ -2117,6 +2119,22 @@ static void panel_cache(const fi_frame_t *fr, uint32_t at) {
     }
     s_panel.verdict = fi_verdict(fr, at);
     s_panel.gl_draw = fi_gl_draw(fr, at);
+    s_panel.named_count = fi_named_objects(fr, at, s_panel.named);
+    for (uint32_t k = 0; k < s_panel.named_count; k++) {
+        s_panel.named_def[k] = fi_object(fr, s_panel.named[k].kind, s_panel.named[k].object).definition;
+        s_panel.named_records[k] = 0;
+    }
+    for (uint32_t i = 0; s_panel.named_count > 0 && i < fr->view.count; i++) {
+        fi_named_t named[FI_NAMED];
+        const uint32_t m = fi_named_objects(fr, i, named);
+        for (uint32_t k = 0; k < s_panel.named_count; k++) {
+            bool names = false;
+            for (uint32_t j = 0; j < m; j++) {
+                names = names || (named[j].kind == s_panel.named[k].kind && named[j].object == s_panel.named[k].object);
+            }
+            s_panel.named_records[k] += names ? 1U : 0U;
+        }
+    }
 }
 
 static const fi_state_view_t *panel_state(const fi_frame_t *fr, uint32_t at) {
@@ -2173,26 +2191,40 @@ static void filter_object(const fi_frame_t *fr, uint32_t kind, uint32_t object, 
     set_query((fi_query_t){.kind = FI_Q_OBJECT, .a = object, .b = (uint8_t)kind}, label);
 }
 
-/* The objects a record names, each a link that filters Commands to it. */
+/* One object the selected record names: the name links to its definition, as every record link does; the record
+ * count filters Commands to the records that name it, as a number on Information does. */
+static void object_row(const fi_frame_t *fr, uint32_t k) {
+    const fi_named_t *o = &s_panel.named[k];
+    char buf[FI_ALIAS_LEN + 64];
+    char alias[FI_ALIAS_LEN];
+    char count[32];
+    fi_alias_text(fr, o->kind, o->object, alias, sizeof(alias));
+    (void)snprintf(buf, sizeof(buf), "%s: %s", o->field, alias);
+    (void)snprintf(count, sizeof(count), "%u record%s", s_panel.named_records[k], s_panel.named_records[k] == 1 ? "" : "s");
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
+        const uint32_t ui = next_id();
+        const nt_ui_events_t ev = nt_ui_events(s_ctx, ui, NULL);
+        const bool linked = s_panel.named_def[k] != FI_NONE;
+        CLAY(
+            {.id = (Clay_ElementId){.id = ui}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .padding = {4, 4, 1, 1}}, .backgroundColor = ev.hovered && linked ? k_hover : k_panel}) {
+            text(buf, linked ? &k_link_wrap : &k_wrap);
+        }
+        if (ev.clicked && linked) {
+            select_record(s_panel.named_def[k]);
+        }
+        if (button(count, &k_link, false)) {
+            filter_object(fr, o->kind, o->object, alias);
+        }
+    }
+}
+
 static void declare_objects(const fi_frame_t *fr, uint32_t id) {
-    fi_named_t named[FI_NAMED];
-    const uint32_t n = fi_named_objects(fr, id, named);
-    for (uint32_t k = 0; k < n; k++) {
+    panel_cache(fr, id);
+    for (uint32_t k = 0; k < s_panel.named_count; k++) {
         if (k == 0) {
             section("Objects it names");
         }
-        char buf[FI_ALIAS_LEN + 64];
-        char alias[FI_ALIAS_LEN];
-        fi_alias_text(fr, named[k].kind, named[k].object, alias, sizeof(alias));
-        (void)snprintf(buf, sizeof(buf), "%s: %s", named[k].field, alias);
-        const uint32_t ui = next_id();
-        const nt_ui_events_t ev = nt_ui_events(s_ctx, ui, NULL);
-        CLAY({.id = (Clay_ElementId){.id = ui}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .padding = {4, 4, 1, 1}}, .backgroundColor = ev.hovered ? k_hover : k_panel}) {
-            text(buf, &k_link_wrap);
-        }
-        if (ev.clicked) {
-            filter_object(fr, named[k].kind, named[k].object, alias);
-        }
+        object_row(fr, k);
     }
 }
 
