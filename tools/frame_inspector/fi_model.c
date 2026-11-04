@@ -877,24 +877,14 @@ static bool creates_names(uint32_t call) { return call < NT_GFX_GL_COUNT && k_ca
 // #region gl names
 /* The GL namespace a frontend object's backend name lives in; NONE when GL has no object for it. */
 static uint8_t gl_kind_of(uint32_t kind) {
-    switch (kind) {
-    case NT_GFX_OBJECT_SHADER:
-        return NT_GFX_GL_OBJECT_SHADER;
-    case NT_GFX_OBJECT_PROGRAM:
-        return NT_GFX_GL_OBJECT_PROGRAM;
-    case NT_GFX_OBJECT_BUFFER:
-        return NT_GFX_GL_OBJECT_BUFFER;
-    case NT_GFX_OBJECT_TEXTURE:
-        return NT_GFX_GL_OBJECT_TEXTURE;
-    case NT_GFX_OBJECT_SAMPLER:
-        return NT_GFX_GL_OBJECT_SAMPLER;
-    case NT_GFX_OBJECT_VERTEX_INPUT:
-        return NT_GFX_GL_OBJECT_VERTEX_ARRAY;
-    case NT_GFX_OBJECT_RENDER_TARGET:
-        return NT_GFX_GL_OBJECT_FRAMEBUFFER;
-    default:
-        return NT_GFX_GL_OBJECT_NONE;
-    }
+    static const uint8_t k_gl[FI_OBJECTS] = {[NT_GFX_OBJECT_SHADER] = NT_GFX_GL_OBJECT_SHADER,
+                                             [NT_GFX_OBJECT_PROGRAM] = NT_GFX_GL_OBJECT_PROGRAM,
+                                             [NT_GFX_OBJECT_BUFFER] = NT_GFX_GL_OBJECT_BUFFER,
+                                             [NT_GFX_OBJECT_TEXTURE] = NT_GFX_GL_OBJECT_TEXTURE,
+                                             [NT_GFX_OBJECT_SAMPLER] = NT_GFX_GL_OBJECT_SAMPLER,
+                                             [NT_GFX_OBJECT_VERTEX_INPUT] = NT_GFX_GL_OBJECT_VERTEX_ARRAY,
+                                             [NT_GFX_OBJECT_RENDER_TARGET] = NT_GFX_GL_OBJECT_FRAMEBUFFER};
+    return kind < FI_OBJECTS ? k_gl[kind] : (uint8_t)NT_GFX_GL_OBJECT_NONE;
 }
 
 /* The GL names a record holds: its GL_NAME fields, then an issued call's name arguments. */
@@ -1141,60 +1131,33 @@ uint32_t fi_named_objects(const fi_frame_t *frame, uint32_t record, fi_named_t o
     return n;
 }
 
-void fi_object(const fi_frame_t *frame, uint32_t kind, uint32_t object, fi_object_t *out) {
-    const uint32_t n = frame->view.count;
-    memset(out, 0, sizeof(*out));
-    out->kind = (uint8_t)kind;
-    out->object = object;
-    out->definition = FI_NONE;
-    uint32_t *hits = (uint32_t *)fi_alloc(n, sizeof(uint32_t));
-    uint32_t *per_group = (uint32_t *)fi_alloc((size_t)frame->group_count + 1U, sizeof(uint32_t));
-    uint32_t count = 0;
-    for (uint32_t i = 0; i < n; i++) {
-        const nt_gfx_event_t *e = &frame->view.events[i];
-        if (e->kind == NT_GFX_EVENT_DEFINITION && e->operation == NT_GFX_OP_CREATE && e->object_kind == kind && e->object == object) {
-            out->definition = i;
-        }
-        fi_named_t named[FI_NAMED];
-        const uint32_t m = fi_named_objects(frame, i, named);
-        bool names = false;
-        for (uint32_t k = 0; k < m; k++) {
-            names = names || (named[k].kind == kind && named[k].object == object);
-        }
-        for (uint32_t k = frame->gl_first[i]; k < frame->gl_first[i + 1U]; k++) {
-            const fi_gl_ref_t *ref = &frame->gl_ref[k];
-            const uint32_t name = handle_at(e, ref->at);
-            const bool held = ref->owner == FI_GL_OBJECT && ref->kind == kind && ref->object == object;
-            if (held && out->gl_name == 0) {
-                out->gl_name = name;
-                out->gl_from = i;
-            }
-        }
-        if (names) {
-            hits[count++] = i;
-            per_group[frame->group[i] + 1U]++;
-        }
-    }
-    for (uint32_t g = 1; g <= frame->group_count; g++) { /* counting sort by group, stable in record order */
-        per_group[g] += per_group[g - 1U];
-    }
-    out->record = (uint32_t *)fi_alloc(count, sizeof(uint32_t));
-    out->count = count;
-    for (uint32_t k = 0; k < count; k++) {
-        out->record[per_group[frame->group[hits[k]]]++] = hits[k];
-    }
-    free(per_group);
-    free(hits);
+static bool names_object(const fi_frame_t *frame, uint32_t record, uint32_t kind, uint32_t object) {
     fi_named_t named[FI_NAMED];
-    const uint32_t m = count > 0 ? fi_named_objects(frame, out->record[0], named) : 0U;
-    for (uint32_t k = m; k-- > 0;) {
-        out->field = named[k].kind == kind && named[k].object == object ? named[k].field : out->field;
+    const uint32_t m = fi_named_objects(frame, record, named);
+    for (uint32_t k = 0; k < m; k++) {
+        if (named[k].kind == kind && named[k].object == object) {
+            return true;
+        }
     }
+    return false;
 }
 
-void fi_object_free(fi_object_t *object) {
-    free(object->record);
-    memset(object, 0, sizeof(*object));
+fi_object_t fi_object(const fi_frame_t *frame, uint32_t kind, uint32_t object) {
+    fi_object_t out = {.definition = FI_NONE};
+    for (uint32_t i = 0; i < frame->view.count; i++) {
+        const nt_gfx_event_t *e = &frame->view.events[i];
+        if (e->kind == NT_GFX_EVENT_DEFINITION && e->operation == NT_GFX_OP_CREATE && e->object_kind == kind && e->object == object) {
+            out.definition = i;
+        }
+        for (uint32_t k = frame->gl_first[i]; out.gl_name == 0 && k < frame->gl_first[i + 1U]; k++) {
+            const fi_gl_ref_t *ref = &frame->gl_ref[k];
+            if (ref->owner == FI_GL_OBJECT && ref->kind == kind && ref->object == object) {
+                out.gl_name = handle_at(e, ref->at);
+                out.gl_from = i;
+            }
+        }
+    }
+    return out;
 }
 // #endregion
 
@@ -1442,6 +1405,7 @@ static fi_cell_t *cell_in(fi_summary_t *s, uint32_t group_count, fi_query_t q) {
         return &s->drops;
     case FI_Q_PROBLEM:
         return &s->problems;
+    case FI_Q_OBJECT: /* no summary cell: fi_matches answers it per record */
     case FI_Q_NONE:
         return NULL;
     }
@@ -1464,6 +1428,9 @@ fi_cell_t fi_cell(const fi_frame_t *frame, fi_query_t q) {
 }
 
 bool fi_matches(const fi_frame_t *frame, uint32_t record, fi_query_t q) {
+    if (q.kind == FI_Q_OBJECT) {
+        return names_object(frame, record, q.b, q.a);
+    }
     fi_query_t qs[FI_MAX_CONTRIB];
     uint64_t sums[FI_MAX_CONTRIB];
     const uint32_t c = contributions(frame, record, qs, sums);

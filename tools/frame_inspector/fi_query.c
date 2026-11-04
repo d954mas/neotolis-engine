@@ -1203,6 +1203,8 @@ static void cmd_record(const fi_frame_t *fr, uint32_t id, fi_out_t *out) {
     put(out, "captured %.*s\n", (int)len, line);
 }
 
+static void put_matches(const fi_frame_t *fr, fi_query_t q, const char *needle, fi_out_t *out);
+
 /* object @N[.FIELD]: the object record N names (by FIELD when it names several), and every record of the frame
  * that names it. */
 static bool cmd_object(const fi_frame_t *fr, const char *arg, fi_out_t *out) {
@@ -1228,11 +1230,10 @@ static bool cmd_object(const fi_frame_t *fr, const char *arg, fi_out_t *out) {
         put(out, "error: record @%u names no object%s%s; record @%u lists its objects\n", record, dot != NULL ? " by " : "", dot != NULL ? dot + 1 : "", record);
         return false;
     }
-    fi_object_t obj;
-    fi_object(fr, named[pick].kind, named[pick].object, &obj);
+    const fi_object_t obj = fi_object(fr, named[pick].kind, named[pick].object);
     char alias[FI_ALIAS_LEN];
-    fi_alias_text(fr, obj.kind, obj.object, alias, sizeof(alias));
-    put(out, "object %s  # %s %u\n", alias, nt_gfx_object_kind_name(obj.kind), obj.object);
+    fi_alias_text(fr, named[pick].kind, named[pick].object, alias, sizeof(alias));
+    put(out, "object %s  # %s %u\n", alias, nt_gfx_object_kind_name(named[pick].kind), named[pick].object);
     if (fr->view.overflow || fr->error != NULL) {
         put(out, "incomplete  # the frame %s: records after it are missing\n", fr->view.overflow ? "overflowed" : "parsed only up to an error");
     }
@@ -1244,17 +1245,7 @@ static bool cmd_object(const fi_frame_t *fr, const char *arg, fi_out_t *out) {
     if (obj.gl_name != 0) {
         put(out, "gl_name %u from @%u\n", obj.gl_name, obj.gl_from);
     }
-    put(out, "records %u\n", obj.count);
-    uint32_t group = FI_NONE;
-    for (uint32_t k = 0; k < obj.count; k++) {
-        const uint32_t g = fr->group[obj.record[k]];
-        if (g != group) {
-            put(out, "group g%u  # %s\n", g, fr->group_key[g]);
-            group = g;
-        }
-        put_record(out, fr, "  ", obj.record[k]);
-    }
-    fi_object_free(&obj);
+    put_matches(fr, (fi_query_t){.kind = FI_Q_OBJECT, .a = named[pick].object, .b = named[pick].kind}, "", out);
     return true;
 }
 
@@ -1531,7 +1522,7 @@ static void cmd_help(fi_out_t *out) {
              "groups                     # per marker and note: requests, GL draws, GL calls, upload bytes, drops\n"
              "record @N                  # the record, merged or a new GL draw and why, its parent, group, objects and GL calls\n"
              "object @N[.FIELD]          # the object record N names (by FIELD of its object lines): its definition, its GL\n"
-             "                           # names, and every record of the frame that names it, by group\n"
+             "                           # name, and every record of the frame that names it\n"
              "state @N|init|end [all]    # engine and GL state; * marks a change against the previous draw or the start\n"
              "find TEXT                  # records whose captured line holds TEXT (any case)\n"
              "list KEY                   # the records behind a number: a summary key or gN.METRIC of groups\n"

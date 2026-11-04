@@ -1,13 +1,13 @@
 /* Frame inspector: opens capture files (render architecture, "Capture text") and shows what each recorded
- * frame did. Usage: frame_inspector [file...] [--frame INDEX] [--base INDEX] [--page frames|commands|info|compare|init|end|object]
- * [--select RECORD] [--filter TEXT] [--monkey SECONDS [SEED]]; Open... adds more files. --frame takes the
+ * frame did. Usage: frame_inspector [file...] [--frame INDEX] [--base INDEX] [--page frames|commands|info|compare|init|end]
+ * [--select RECORD [--object FIELD]] [--filter TEXT] [--monkey SECONDS [SEED]]; Open... adds more files. --frame takes the
  * frame's index across the files (query frames lists them), --select a record's @ number in that frame. Run it by its path: its asset pack
  * is found next to argv[0].
  * Pages: Frames (per-file tracks of draw calls, GL calls, upload and records on one zoomable axis; a click
  * picks a frame, a click again opens it), Commands (the logical tree with a panel for the selection or a
  * Shift range), Information (numbers that filter the tree to their records), Compare (the frame against a
- * base frame set with B: numbers, groups and their requests aligned like a text diff), Init and End state, Object
- * (one object a record names, from its panel: its definition, GL names and every record that names it).
+ * base frame set with B: numbers, groups and their requests aligned like a text diff), Init and End state. An object
+ * a record names (its panel lists them) filters Commands to the records that name it.
  * --monkey drives random clicks, drags, wheel and keys for that long and prints the frame times.
  * Without a window, for scripts and agents: frame_inspector query FILE... [--frame INDEX] COMMAND [ARGS]
  * answers one command; frame_inspector --serve FILE... [--frame INDEX] answers a command per stdin line,
@@ -112,15 +112,14 @@ static const nt_ui_label_style_t k_wrap = {.font_id = 0, .font_size = FONT, .col
 // #region state
 typedef enum { VIEW_LOGICAL, VIEW_RAW, VIEW_GL, VIEW_COUNT } view_t;
 /* One task per page, as in Spector: frames over time, the frame's commands, its numbers, the frame against a base
- * frame, its start and end state, one object through the frame. */
-typedef enum { PAGE_FRAMES, PAGE_COMMANDS, PAGE_INFO, PAGE_COMPARE, PAGE_INIT, PAGE_END, PAGE_OBJECT, PAGE_COUNT } page_t;
+ * frame, its start and end state. */
+typedef enum { PAGE_FRAMES, PAGE_COMMANDS, PAGE_INFO, PAGE_COMPARE, PAGE_INIT, PAGE_END, PAGE_COUNT } page_t;
 typedef enum { TRACK_DRAW_CALLS, TRACK_GL_CALLS, TRACK_UPLOAD, TRACK_RECORDS, TRACK_COUNT } track_t;
 
-/* A place to go back to: a page, a frame, the row selected there and the object Object shows. */
+/* A place to go back to: a page, a frame and the row selected there. */
 typedef struct {
     int page;
     uint32_t file, frame, selected;
-    uint32_t obj_kind, obj;
 } place_t;
 
 static struct {
@@ -136,7 +135,6 @@ static struct {
     fi_query_t query;
     char query_label[96];
     int page;
-    uint32_t obj_kind, obj;   /* the object Object shows; obj 0: none picked */
     place_t history[HISTORY]; /* places left by a click or a jump, for Back */
     uint32_t history_count;
     place_t future[HISTORY];
@@ -422,11 +420,14 @@ static void clear_filters(void);
 /* A group filter follows its group into the new frame: group numbers are per frame. */
 static void select_frame(uint32_t file, uint32_t frame) {
     const fi_frame_t *was = s.query.kind == FI_Q_GROUP ? frame_sel() : NULL;
-    s.obj = file != s.file ? 0U : s.obj; /* handles name objects of one capture file */
+    const bool object_elsewhere = s.query.kind == FI_Q_OBJECT && file != s.file; /* handles name objects of one file */
     s.file = file;
     s.frame = frame;
     s.frame_epoch++;
     const fi_frame_t *fr = frame_sel();
+    if (object_elsewhere) {
+        clear_filters();
+    }
     if (was != NULL) {
         s.query.a = frame_ok(fr) ? fi_group_in(fr, was, s.query.a) : FI_NONE;
         if (s.query.a == FI_NONE) {
@@ -478,7 +479,7 @@ static void reveal(uint32_t id) {
     s.flash_until = nt_time_now() + 0.8;
 }
 
-static place_t here(void) { return (place_t){.page = s.page, .file = s.file, .frame = s.frame, .selected = s.selected, .obj_kind = s.obj_kind, .obj = s.obj}; }
+static place_t here(void) { return (place_t){.page = s.page, .file = s.file, .frame = s.frame, .selected = s.selected}; }
 
 /* Pushes the current place for Back, unless it is already the last one. */
 static void remember(void) {
@@ -500,8 +501,6 @@ static void go_to(place_t p) {
         select_frame(p.file, p.frame);
     }
     s.page = p.page;
-    s.obj_kind = p.obj_kind;
-    s.obj = p.obj;
     if (p.selected != FI_NONE) {
         reveal(p.selected);
     } else {
@@ -516,13 +515,6 @@ static void select_record(uint32_t id) {
     }
     reveal(id);
     s.page = PAGE_COMMANDS;
-}
-
-static void open_object(uint32_t kind, uint32_t object) {
-    remember();
-    s.obj_kind = kind;
-    s.obj = object;
-    s.page = PAGE_OBJECT;
 }
 
 /* History holds file and frame numbers: closing a file drops it (close_file). */
@@ -632,7 +624,6 @@ static void close_file(uint32_t f) {
         return;
     }
     clear_filters();
-    s.obj = 0; /* the object's file is gone; another may now sit at its index */
     if (s.file_count > 0) {
         select_frame(0, 0);
     }
@@ -2166,7 +2157,23 @@ static void declare_verdict(const fi_frame_t *fr, uint32_t id) {
     }
 }
 
-/* The objects a record names, each a link to its Object page. */
+/* Commands shows only the records that name an object; the label says where it is defined and its GL name. */
+static void filter_object(const fi_frame_t *fr, uint32_t kind, uint32_t object, const char *alias) {
+    const fi_object_t o = fi_object(fr, kind, object);
+    char label[96];
+    char defined[24] = "no definition";
+    char gl[24] = "";
+    if (o.definition != FI_NONE) {
+        (void)snprintf(defined, sizeof(defined), "defined @%u", o.definition);
+    }
+    if (o.gl_name != 0) {
+        (void)snprintf(gl, sizeof(gl), ", GL name %u", o.gl_name);
+    }
+    (void)snprintf(label, sizeof(label), "records naming %s (%s%s)", alias, defined, gl);
+    set_query((fi_query_t){.kind = FI_Q_OBJECT, .a = object, .b = (uint8_t)kind}, label);
+}
+
+/* The objects a record names, each a link that filters Commands to it. */
 static void declare_objects(const fi_frame_t *fr, uint32_t id) {
     fi_named_t named[FI_NAMED];
     const uint32_t n = fi_named_objects(fr, id, named);
@@ -2184,7 +2191,7 @@ static void declare_objects(const fi_frame_t *fr, uint32_t id) {
             text(buf, &k_link_wrap);
         }
         if (ev.clicked) {
-            open_object(named[k].kind, named[k].object);
+            filter_object(fr, named[k].kind, named[k].object, alias);
         }
     }
 }
@@ -2305,70 +2312,6 @@ static void declare_state(const fi_frame_t *fr, const fi_state_view_t *st, bool 
     if (shown == 0 && prev_issue != FI_NONE) {
         textf(&k_dim, "no GL state changed since the %s", fi_compare_name(st->compare, true));
     }
-}
-// #endregion
-
-// #region object
-/* One object through the frame: its definition, the GL names it held, every record that names it by group.
- * Built by one scan when the object or the frame changes. */
-static void declare_object_page(const fi_frame_t *fr) {
-    static struct {
-        uint32_t epoch, kind, object;
-        fi_object_t obj;
-    } view = {.epoch = FI_NONE};
-    if (s.obj == 0) {
-        text("Pick an object: a record's \"Objects it names\" in Commands opens it here.", &k_dim);
-        return;
-    }
-    if (view.epoch != s.frame_epoch || view.kind != s.obj_kind || view.object != s.obj) {
-        fi_object_free(&view.obj);
-        fi_object(fr, s.obj_kind, s.obj, &view.obj);
-        view.epoch = s.frame_epoch;
-        view.kind = s.obj_kind;
-        view.object = s.obj;
-        nt_ui_scroll_to(s_ctx, nt_ui_id("object"), 0.0F, 0.0F);
-    }
-    const fi_object_t *o = &view.obj;
-    const nt_ui_scroll_style_t scroll = nt_ui_scroll_style_defaults();
-    nt_ui_scroll_begin(
-        s_ctx, NULL, nt_ui_id("object"), &scroll,
-        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .padding = CLAY_PADDING_ALL(12), .childGap = 2},
-                                   .backgroundColor = k_panel});
-    char alias[FI_ALIAS_LEN];
-    fi_alias_text(fr, o->kind, o->object, alias, sizeof(alias));
-    textf(&k_head, "%s  (%s %u)", alias, nt_gfx_object_kind_name(o->kind), o->object);
-    if (fr->view.overflow || fr->error != NULL) {
-        textf(&k_warn, "the frame %s: records after it are missing", fr->view.overflow ? "overflowed" : "parsed only up to an error");
-    }
-    section("Definition");
-    if (o->definition != FI_NONE) {
-        link_line(fr, "", o->definition);
-    } else {
-        text("none: the frame holds no CREATE definition of it", &k_dim);
-    }
-    if (o->gl_name != 0) {
-        char what[48];
-        (void)snprintf(what, sizeof(what), "GL name %u from ", o->gl_name);
-        section("GL name");
-        link_line(fr, what, o->gl_from);
-    }
-    char title[64];
-    (void)snprintf(title, sizeof(title), "Records that name it (%u), by group", o->count);
-    section(title);
-    enum { SHOWN = 400 };
-    uint32_t group = FI_NONE;
-    for (uint32_t k = 0; k < o->count && k < SHOWN; k++) {
-        const uint32_t g = fr->group[o->record[k]];
-        if (g != group) {
-            textf(&k_head, "%s", fr->group_key[g]);
-            group = g;
-        }
-        link_line(fr, "", o->record[k]);
-    }
-    if (o->count > SHOWN) {
-        textf(&k_dim, "... %u more; query mode lists them all: object @%u.%s", o->count - SHOWN, o->record[0], o->field);
-    }
-    nt_ui_scroll_end(s_ctx);
 }
 // #endregion
 
@@ -2597,7 +2540,6 @@ static void declare_status(void) {
         break;
     case PAGE_INIT:
     case PAGE_END:
-    case PAGE_OBJECT:
     case PAGE_COUNT:
         text("click: pick a record, again: open it in Commands   Alt+Left: back", &k_dim);
         break;
@@ -2624,7 +2566,7 @@ static void declare_frame_picker(void) {
 }
 
 static void declare_menu(void) {
-    static const char *const k_pages[PAGE_COUNT] = {"Frames", "Commands", "Information", "Compare", "Init state", "End state", "Object"};
+    static const char *const k_pages[PAGE_COUNT] = {"Frames", "Commands", "Information", "Compare", "Init state", "End state"};
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
         if (button("Open...", &k_link, false)) {
             s.open_requested = true;
@@ -2668,8 +2610,6 @@ static void declare_ui(void) {
                 declare_info_page();
             } else if (s.page == PAGE_COMPARE) {
                 declare_compare_page();
-            } else if (s.page == PAGE_OBJECT) {
-                declare_object_page(frame_sel());
             } else {
                 declare_frame_state(frame_sel(), s.page == PAGE_END);
             }
@@ -2789,15 +2729,16 @@ static void frame(void) {
 // #region main
 /* Files to open, --monkey SECONDS [SEED], and where the window opens: --frame INDEX (the frame's index across
  * the files), --base INDEX (Compare's A), --page frames|commands|info|compare|init|end|object, --select RECORD (its
- * @ number; with --page object, the first object it names), --filter TEXT. */
+ * @ number), --object FIELD (filter Commands to the object the selected record names by FIELD), --filter TEXT. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void parse_args(int argc, char *argv[]) {
-    static const char *const k_pages[PAGE_COUNT] = {"frames", "commands", "info", "compare", "init", "end", "object"};
+    static const char *const k_pages[PAGE_COUNT] = {"frames", "commands", "info", "compare", "init", "end"};
     const char *frame = NULL;
     const char *base = NULL;
     const char *page = NULL;
     const char *select = NULL;
     const char *filter = NULL;
+    const char *object = NULL;
     for (int a = 1; a < argc; a++) {
         const char *arg = argv[a];
         const bool value = a + 1 < argc;
@@ -2811,6 +2752,8 @@ static void parse_args(int argc, char *argv[]) {
             select = argv[++a];
         } else if (strcmp(arg, "--filter") == 0 && value) {
             filter = argv[++a];
+        } else if (strcmp(arg, "--object") == 0 && value) {
+            object = argv[++a];
         } else if (strcmp(arg, "--monkey") == 0 && value) {
             s_monkey.on = true;
             s_monkey.seconds = strtod(argv[++a], NULL);
@@ -2820,7 +2763,7 @@ static void parse_args(int argc, char *argv[]) {
             }
             s_monkey.seed = s_monkey.seed != 0 ? s_monkey.seed : 1U;
         } else if (strncmp(arg, "--", 2) == 0) {
-            nt_log_error("frame_inspector: unknown option %s (--frame N, --base N, --page frames|commands|info|compare|init|end|object, --select N, --filter TEXT, --monkey S [SEED])", arg);
+            nt_log_error("frame_inspector: unknown option %s (--frame N, --base N, --page frames|commands|info|compare|init|end, --select N, --object FIELD, --filter TEXT, --monkey S [SEED])", arg);
         } else {
             add_file(arg);
         }
@@ -2857,9 +2800,17 @@ static void parse_args(int argc, char *argv[]) {
         s.page = strcmp(page, k_pages[p]) == 0 ? p : s.page;
     }
     fi_named_t named[FI_NAMED];
-    if (s.page == PAGE_OBJECT && select != NULL && frame_ok(fr) && record < fr->view.count && fi_named_objects(fr, record, named) > 0) {
-        s.obj_kind = named[0].kind; /* the first object the selected record names */
-        s.obj = named[0].object;
+    const uint32_t n = object != NULL && select != NULL && frame_ok(fr) && record < fr->view.count ? fi_named_objects(fr, record, named) : 0U;
+    uint32_t k = 0;
+    while (k < n && strcmp(named[k].field, object) != 0) {
+        k++;
+    }
+    if (k < n) {
+        char alias[FI_ALIAS_LEN];
+        fi_alias_text(fr, named[k].kind, named[k].object, alias, sizeof(alias));
+        filter_object(fr, named[k].kind, named[k].object, alias);
+    } else if (object != NULL) {
+        nt_log_error("frame_inspector: --object %s needs --select of a record that names an object by that field", object);
     }
 }
 

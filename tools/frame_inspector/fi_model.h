@@ -59,6 +59,7 @@ typedef enum {
     FI_Q_GROUP,       /* a = group, b = fi_metric_t */
     FI_Q_DROP,        /* renderer `drop` note fields */
     FI_Q_PROBLEM,     /* drops and results other than ACCEPTED/CACHE/NONE; a SKIP is the backend cache working */
+    FI_Q_OBJECT,      /* a = handle, b = nt_gfx_object_kind_t: records that name the object (fi_named_objects) */
 } fi_query_kind_t;
 
 typedef enum { FI_RES_LIVE, FI_RES_CREATED, FI_RES_DESTROYED, FI_RES_COUNT } fi_res_t;
@@ -296,20 +297,13 @@ typedef struct {
 #define FI_NAMED 28U
 uint32_t fi_named_objects(const fi_frame_t *frame, uint32_t record, fi_named_t out[FI_NAMED]);
 
-/* One object through the frame, by one scan: its definition, its GL name (a frame holds one: a lost context is
- * dropped before the snapshot, a restore makes new objects), and every record that names it, by group and then in
- * record order. */
+/* One object of the frame, by one scan: its definition and its GL name (a frame holds one: a lost context is dropped
+ * before the snapshot, a restore makes new objects). The records that name it are the FI_Q_OBJECT query. */
 typedef struct {
-    uint8_t kind;
-    uint32_t object;
     uint32_t definition;       /* its latest CREATE definition, FI_NONE: the frame has none */
     uint32_t gl_name, gl_from; /* its GL name and the first record that names it by it; 0: none */
-    uint32_t *record;          /* malloc'd */
-    uint32_t count;
-    const char *field; /* the field record[0] names it by, for object @N.FIELD */
 } fi_object_t;
-void fi_object(const fi_frame_t *frame, uint32_t kind, uint32_t object, fi_object_t *out);
-void fi_object_free(fi_object_t *object);
+fi_object_t fi_object(const fi_frame_t *frame, uint32_t kind, uint32_t object);
 
 bool fi_is_draw(const nt_gfx_event_t *e);           /* a draw request of any kind */
 bool fi_is_mergeable_draw(const nt_gfx_event_t *e); /* a plain or indexed draw: instanced draws never merge */

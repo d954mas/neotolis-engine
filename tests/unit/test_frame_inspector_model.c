@@ -1253,12 +1253,20 @@ static void test_gl_names_follow_their_objects(void) {
         fi_row_text(fr, k_rows[k].record, row, sizeof(row));
         TEST_ASSERT_EQUAL_STRING(k_rows[k].row, row);
     }
-    fi_object_t b;
-    fi_object(fr, NT_GFX_OBJECT_BUFFER, 0x20001, &b);
+    const fi_object_t b = fi_object(fr, NT_GFX_OBJECT_BUFFER, 0x20001);
     TEST_ASSERT_EQUAL_UINT32(10, b.definition);
     TEST_ASSERT_EQUAL_UINT32(5, b.gl_name);
     TEST_ASSERT_EQUAL_UINT32(7, b.gl_from);
-    fi_object_free(&b);
+    /* the records that name b: its create and its own records, none of a's */
+    static const uint32_t k_b[] = {6, 7, 8, 9, 10};
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < fr->view.count; i++) {
+        if (fi_matches(fr, i, (fi_query_t){.kind = FI_Q_OBJECT, .a = 0x20001, .b = NT_GFX_OBJECT_BUFFER})) {
+            TEST_ASSERT_LESS_THAN_UINT32(sizeof(k_b) / sizeof(k_b[0]), n);
+            TEST_ASSERT_EQUAL_UINT32(k_b[n++], i);
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(sizeof(k_b) / sizeof(k_b[0]), n);
 }
 
 /* After a context loss a sampler keeps its handle: the snapshot defines it as a husk (no GL name), and its first
@@ -1275,12 +1283,10 @@ static void test_a_lazy_sampler_takes_its_name(void) {
     char row[256];
     fi_row_text(fr, 2, row, sizeof(row));
     TEST_ASSERT_EQUAL_STRING("glGenSamplers(1,3 smp/nearest_clamp#1)", row);
-    fi_object_t smp;
-    fi_object(fr, NT_GFX_OBJECT_SAMPLER, 2, &smp);
+    const fi_object_t smp = fi_object(fr, NT_GFX_OBJECT_SAMPLER, 2);
     TEST_ASSERT_EQUAL_UINT32(3, smp.definition); /* the latest definition, not the husk */
     TEST_ASSERT_EQUAL_UINT32(3, smp.gl_name);
     TEST_ASSERT_EQUAL_UINT32(2, smp.gl_from);
-    fi_object_free(&smp);
 }
 
 static nt_gfx_event_t layout_attribute(uint32_t location, uint32_t type, uint32_t count, bool normalized, uint32_t offset) {

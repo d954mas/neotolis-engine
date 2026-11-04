@@ -148,15 +148,14 @@ static void test_object_lists_where_it_is_named(void) {
     assert_holds(ask("record @128", true), "\nobject texture tex#1  # object @128.texture\nobject sampler smp/linear_mip_linear_repeat#1  # object @128.sampler\n");
     const char *text = ask("object @128.texture", true);
     assert_holds(text, "object tex#1  # TEXTURE 65541\ndefinition @74  DEFINITION CREATE tex#1 slot=5 ");
-    assert_holds(text, "\ngl_name 5 from @128\nrecords 44\ngroup g0  # (no note or marker)\n  @74  ");
-    assert_holds(text, "\n  @183  DEFINITION STATE TEXTURE slot=5 gl_name=5 tex#1\ngroup g2  # > sprite\n  @218  NOTE_FIELD page=tex#1\n");
-    assert_holds(text, "\n  @689  glBindTexture(GL_TEXTURE_2D,5 tex#1)\n");
+    assert_holds(text, "\ngl_name 5 from @128\n@74  DEFINITION CREATE tex#1 ");
+    assert_holds(text, "\n@183  DEFINITION STATE TEXTURE slot=5 gl_name=5 tex#1\n@218  NOTE_FIELD page=tex#1\n");
+    assert_holds(text, "\n@689  glBindTexture(GL_TEXTURE_2D,5 tex#1)\n");
+    assert_holds(text, "\nrecords 44\n");
     static char texture[8192];
     (void)snprintf(texture, sizeof(texture), "%s", text);
     TEST_ASSERT_EQUAL_STRING(texture, ask("object @74", true)); /* a definition names its own object first */
     assert_holds(ask("object @657.0", true), "object prog/shape/fill#1  # PROGRAM ");
-    /* frame_vertex's GL calls at end_frame (g0) list before its shape requests (g1): by group, not by record */
-    assert_holds(ask("object @114.array_buffer", true), "\n  @649  glBindBuffer(GL_ARRAY_BUFFER,3 buf/frame_vertex#1)\ngroup g1  # > shape\n  @202  ");
     TEST_ASSERT_NULL(strstr(ask("record @79", true), "object gl_name")); /* a definition's own GL name is not a second object */
     assert_holds(ask("object @000000000000000000000000009", false), "error: the frame has no record @000000000000000000000000009");
     /* a note's handle is selected by value: its key is game text, never a command token */

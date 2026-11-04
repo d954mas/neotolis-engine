@@ -1524,9 +1524,9 @@ first record, as it describes one moment. A create call's names belong to its op
 has the names' GL kind, else to the object a later definition of the same operation gives them (a lazy sampler
 re-creation), else a vertex array a context restore makes is the upload VAO. GL hands out a deleted or lost name
 again only through a create call, which owns it anew, so deletes and restores end nothing. Every query name is a
-timer query. A name nothing recorded reads as its number. The Object page and
-`object @N[.FIELD]` show one object of a record: its definition, its GL name, and every record that
-names it, by group, built by one scan of the selected frame; a file's handles stay with that file. A frame holds
+timer query. A name nothing recorded reads as its number. An object a record
+names filters Commands to the records that name it, and `object @N[.FIELD]` lists them after the object's
+definition and GL name; a file's handles stay with that file. A frame holds
 one GL name per object: a lost context is dropped before the snapshot, and a restore makes new objects. A
 definition's own GL name reads as its number, as its row already names the object. A draw-phase request whose
 execution issued no GL call (a state already set) shows the GL state where it sits in the stream: after the game's
