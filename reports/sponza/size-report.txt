@@ -1,5 +1,5 @@
 # Size Report: sponza (wasm-analysis-paired)
-# Commit: 9d52eff
+# Commit: b9d5099
 
 ## WASM Section Sizes
 
@@ -13,17 +13,17 @@ Memory                 7 B
 Global                 8 B
 Export                83 B
 Elem                  78 B
-Code              203648 B
+Code              203651 B
 Data              210325 B
 Custom             10678 B
 ---------------- ----------
-TOTAL             425868 B
+TOTAL             425871 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-37710 B   frame
+37713 B   frame
 31497 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
 27329 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 17094 B   nt_gfx_activate_texture
@@ -55,7 +55,7 @@ TOTAL             425868 B
   738 B   emmalloc_aligned_realloc
 
 Total functions: 166
-Total code size: 203373 B
+Total code size: 203376 B
 
 ## Built Engine Archives
 

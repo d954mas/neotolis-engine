@@ -1,5 +1,5 @@
 # Size Report: bunnymark (wasm-analysis-paired)
-# Commit: 9d52eff
+# Commit: b9d5099
 
 ## WASM Section Sizes
 
