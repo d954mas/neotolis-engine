@@ -5,6 +5,7 @@
 #include "log/nt_log.h"
 
 #include <ctype.h>
+#include <inttypes.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -295,16 +296,22 @@ static void appendf(char *buf, size_t size, size_t *at, const char *fmt, ...) {
     *at = *at < size ? *at : size - 1U;
 }
 
-/* The shortest %g that reads back to the same float32, so two different values never print alike. */
+static uint32_t float_bits(float f) {
+    uint32_t bits = 0;
+    memcpy(&bits, &f, sizeof(bits));
+    return bits;
+}
+
+/* The capture's float forms: the shortest %g that reads back to the same float32, NaN as its bits, so two
+ * different values never print alike. */
 static const char *float_text(float f, char out[24]) {
+    if (isnan(f)) {
+        (void)snprintf(out, 24, "nan:0x%08" PRIx32, float_bits(f));
+        return out;
+    }
     for (int precision = 6; precision <= 9; precision++) {
         (void)snprintf(out, 24, "%.*g", precision, (double)f);
-        const float back = strtof(out, NULL);
-        uint32_t a = 0;
-        uint32_t b = 0;
-        memcpy(&a, &back, sizeof(a));
-        memcpy(&b, &f, sizeof(b));
-        if (a == b || isnan(f)) {
+        if (float_bits(strtof(out, NULL)) == float_bits(f)) {
             break;
         }
     }
@@ -721,18 +728,15 @@ static uint32_t slot_before(const fi_gl_slot_t *slot, const fi_gl_state_t *befor
 }
 
 /* The field of an inherited backend record that holds this slot; NULL when the record holds only the slot. */
-static const char *slot_field(const fi_frame_t *fr, const fi_gl_slot_t *slot, uint32_t record) {
+static const char *slot_field(const fi_frame_t *fr, uint32_t call, uint32_t record) {
     const nt_gfx_event_t *e = &fr->view.events[record];
     if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_TEXTURE) {
-        return slot->call == NT_GFX_GL_glBindSampler ? "sampler" : "texture";
-    }
-    if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_PASS) {
-        return "color"; /* the clear color slot; the cached depth is another slot's */
+        return call == NT_GFX_GL_glBindSampler ? "sampler" : "texture";
     }
     if (e->kind != NT_GFX_EVENT_INITIAL || e->operation != NT_GFX_OP_STATE) {
         return NULL;
     }
-    switch (slot->call) {
+    switch (call) {
     case NT_GFX_GL_glUseProgram:
         return "program";
     case NT_GFX_GL_glBindVertexArray:
@@ -749,7 +753,7 @@ static const char *slot_field(const fi_frame_t *fr, const fi_gl_slot_t *slot, ui
 }
 
 void fi_state_value(const fi_frame_t *frame, const fi_state_line_t *line, uint32_t record, char *buf, size_t size) {
-    const char *only = line->gl ? slot_field(frame, &line->slot, record) : NULL;
+    const char *only = line->gl ? slot_field(frame, line->call, record) : NULL;
     row_text(frame, record, only, buf, size);
     if (only != NULL && strchr(buf, '=') == NULL) {
         (void)snprintf(buf + strlen(buf), size - strlen(buf), " %s=0", only); /* a zero field prints nothing on its own */
@@ -799,7 +803,7 @@ uint32_t fi_state_lines(const fi_frame_t *frame, const fi_state_view_t *view, bo
         const fi_gl_slot_t *slot = &view->gl.slot[k];
         fi_state_line_t *l = &out[n++];
         gl_slot_name(slot, l->name, sizeof(l->name));
-        l->slot = *slot;
+        l->call = slot->call;
         l->now = slot->record;
         l->before = view->was_gl_at != FI_NONE ? slot_before(slot, &view->was_gl) : slot->record;
         l->inherited = slot->inherited;

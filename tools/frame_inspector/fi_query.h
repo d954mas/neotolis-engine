@@ -24,7 +24,7 @@ typedef struct {
     char name[48];
     uint32_t now, before; /* records, FI_NONE: unset */
     bool inherited, changed, gl;
-    fi_gl_slot_t slot; /* gl: the slot the line shows */
+    uint32_t call; /* gl: the slot's nt_gfx_gl_call_t */
 } fi_state_line_t;
 #define FI_STATE_LINES (16U + FI_GL_SLOTS)
 /* all: every GL line; otherwise only the GL lines that changed, when the view compares with a GL draw. */

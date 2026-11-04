@@ -386,6 +386,8 @@ static void test_state_of_a_gl_call_is_its_request_state(void) {
     assert_holds(text, "\n    was @128  INITIAL TEXTURE texture=5\n");
     assert_holds(text, "\n    was @128  INITIAL TEXTURE sampler=2\n");
     assert_holds(text, "\n  GL_FRAMEBUFFER             inherited @114  INITIAL STATE BACKEND framebuffer=0\n");
+    /* The inherited pass record holds the clear color and depth together; its line shows both. */
+    assert_holds(ask("state init all", true), "INITIAL PASS color=[0.035,0.05,0.08,1] depth=1\n");
     /* An operation with no link (a frame storage upload) is its own request. */
     static char upload[4096];
     (void)snprintf(upload, sizeof(upload), "%s", strstr(ask("state @639", true), "\n# engine state"));

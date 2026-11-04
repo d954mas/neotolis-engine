@@ -882,7 +882,7 @@ static void test_note_handles_number_their_objects(void) {
 /* Row text keeps apart what the records keep apart: two floats one ulp apart, a quoted string's backslash and
  * quote, and a label that holds '#' next to an alias number. */
 static void test_rows_keep_values_apart(void) {
-    nt_gfx_event_t ev[5];
+    nt_gfx_event_t ev[6];
     memset(ev, 0, sizeof(ev));
     ev[0] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_DEFINITION, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_BUFFER, .object = 0x10001};
     ev[0].data.buffer.label = 1; /* "mesh#1": one buffer, so its alias has no number of its own */
@@ -895,8 +895,11 @@ static void test_rows_keep_values_apart(void) {
     ev[3].field.key = 8;
     ev[3].field.value.str = 10;
     ev[4] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_UBO, .object_kind = NT_GFX_OBJECT_BUFFER, .object = 0x10001, .result = NT_GFX_RESULT_ACCEPTED};
+    ev[5] = ev[1];
+    const uint32_t quiet_nan = 0x7FC00001U; /* one NaN payload of many */
+    memcpy(&ev[5].data.pass.depth, &quiet_nan, sizeof(float));
     static const char k_strings[] = "\0mesh#1\0v\0a\\b\"";
-    nt_gfx_capture_view_t view = {.events = ev, .count = 5, .strings = k_strings, .string_bytes = sizeof(k_strings)};
+    nt_gfx_capture_view_t view = {.events = ev, .count = 6, .strings = k_strings, .string_bytes = sizeof(k_strings)};
     const size_t len = nt_gfx_capture_format(&view, NULL, 0);
     char *text = (char *)malloc(len + 1);
     TEST_ASSERT_NOT_NULL(text);
@@ -909,6 +912,8 @@ static void test_rows_keep_values_apart(void) {
     TEST_ASSERT_EQUAL_STRING("NOTE_FIELD v=\"a\\x5cb\\x22\"", row);
     fi_row_text(fr, 4, row, sizeof(row));
     TEST_ASSERT_EQUAL_STRING("UBO buf/mesh\\x231", row);
+    fi_row_text(fr, 5, row, sizeof(row));
+    TEST_ASSERT_EQUAL_STRING("PASS target=default framebuffer depth=nan:0x7fc00001", row);
     fi_file_close(&s_file);
 }
 
