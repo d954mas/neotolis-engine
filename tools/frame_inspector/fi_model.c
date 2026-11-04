@@ -42,6 +42,14 @@ static uint32_t owner(const fi_frame_t *fr, uint32_t i) {
     return is_gfx(e) && e->link != 0 && e->link - 1U < fr->view.count ? e->link - 1U : FI_NONE;
 }
 
+/* The top-level operation a record belongs to, itself when it has no owner. */
+static uint32_t top_request(const fi_frame_t *fr, uint32_t i) {
+    while (owner(fr, i) != FI_NONE) {
+        i = owner(fr, i);
+    }
+    return i;
+}
+
 /* Bytes GL was asked to hold for a resource definition: buffer size, texture levels. Depth sizes are those
  * of the GL storage type (DEPTH24 as 32-bit); the runtime never uploads depth, so the shared table has none. */
 static uint64_t definition_bytes(const nt_gfx_event_t *e) {
@@ -879,7 +887,8 @@ typedef struct {
     uint32_t mask;
 } gl_table_t;
 
-/* The entry of (space, key), made empty when the table has none. */
+/* The entry of (space, key), made empty when the table has none: lookups insert too, which the tables' size
+ * allows (every name of every record, plus a slot per record). */
 static gl_owner_t *gl_entry(gl_table_t *t, uint8_t space, uint32_t key) {
     for (uint32_t h = (key * 0x9E3779B1U) ^ (space * 0x85EBCA77U);; h++) {
         gl_owner_t *e = &t->entry[h & t->mask];
@@ -907,15 +916,14 @@ static void own_name(gl_owners_t *o, uint8_t gl, uint32_t name, gl_owner_t owner
 
 static void own_slot(gl_owners_t *o, uint32_t kind, uint32_t slot, uint32_t object) { gl_entry(&o->slots, (uint8_t)kind, slot)->id = object; }
 
-/* What a definition tells: a frontend definition holds its object's slot or, for a shader or sampler, its GL
- * name; a backend definition (STATE) holds a slot's GL name. A slot or name of 0 is a husk: nothing. In an
- * operation on an object of the slot's kind, the slot is that object's before its frontend definition says so. */
+/* In an operation on an object of a backend definition's kind, the slot is that object's before its frontend
+ * definition says so. A husk's 0 slot or name is never looked up. */
 static void learn_definition(gl_owners_t *o, const nt_gfx_event_t *e, const nt_gfx_event_t *op) {
     if (e->operation == NT_GFX_OP_STATE) {
         const uint32_t slot = e->data.backend_resource.slot;
         const uint32_t name = e->data.backend_resource.gl_name;
         const uint8_t gl = gl_kind_of(e->detail);
-        if (slot == 0 || name == 0 || gl == NT_GFX_GL_OBJECT_NONE) {
+        if (gl == NT_GFX_GL_OBJECT_NONE) {
             return;
         }
         own_name(o, gl, name, (gl_owner_t){.owner = FI_GL_OBJECT, .kind = (uint8_t)e->detail, .id = slot, .via_slot = true});
@@ -925,7 +933,7 @@ static void learn_definition(gl_owners_t *o, const nt_gfx_event_t *e, const nt_g
         return;
     }
     const uint32_t v = backend_of(e);
-    if (e->operation != NT_GFX_OP_CREATE || e->object_kind >= FI_OBJECTS || e->object == 0 || v == 0) {
+    if (e->operation != NT_GFX_OP_CREATE || e->object_kind >= FI_OBJECTS || e->object == 0) {
         return;
     }
     if (e->object_kind == NT_GFX_OBJECT_SHADER || e->object_kind == NT_GFX_OBJECT_SAMPLER) { /* backend_of: their GL name */
@@ -935,16 +943,14 @@ static void learn_definition(gl_owners_t *o, const nt_gfx_event_t *e, const nt_g
     }
 }
 
-/* Names a create call returns: the operation's object when it has the names' GL kind, else the object a later
- * frontend definition of the same operation gives the name (a lazy re-creation), else the upload VAO a context
- * restore makes. */
+/* Names a create call returns (render architecture, "Capture text"). */
 static gl_owner_t created_owner(const fi_frame_t *fr, uint32_t i, uint8_t gl, uint32_t name) {
     const nt_gfx_event_t *ev = fr->view.events;
     const uint32_t op = owner(fr, i);
     if (op != FI_NONE && gl_kind_of(ev[op].object_kind) == gl && ev[op].object != 0) {
         return (gl_owner_t){.owner = FI_GL_OBJECT, .kind = ev[op].object_kind, .id = ev[op].object};
     }
-    for (uint32_t j = i + 1U; op != FI_NONE && j < fr->view.count; j++) {
+    for (uint32_t j = i + 1U; op != FI_NONE && j < fr->view.count && top_request(fr, j) == top_request(fr, i); j++) {
         const nt_gfx_event_t *d = &ev[j];
         if (d->link != ev[i].link || d->kind != NT_GFX_EVENT_DEFINITION || d->operation != NT_GFX_OP_CREATE) {
             continue;
@@ -972,7 +978,7 @@ static void learn(const fi_frame_t *fr, gl_owners_t *o, uint32_t i) {
         const gl_names_t g = gl_names_of(e);
         for (uint32_t k = 0; k < g.count; k++) {
             const uint32_t name = handle_at(e, g.at[k]);
-            if (name != 0 && g.gl[k] != NT_GFX_GL_OBJECT_QUERY) {
+            if (name != 0) {
                 own_name(o, g.gl[k], name, created_owner(fr, i, g.gl[k], name));
             }
         }
@@ -990,10 +996,8 @@ static fi_gl_ref_t resolve(gl_owners_t *o, uint8_t gl, uint32_t name, uint16_t a
     return ref;
 }
 
-/* Every GL name of every record resolved at its record, in one forward pass: slots and GL names are reused
- * within a frame, so one final map would misname earlier rows. The snapshot describes one moment, so its
- * definitions own names from its first record. A deleted or lost name comes back only through a create call,
- * which owns it again, so deletes and context restores need no bookkeeping. */
+/* Every GL name of every record resolved at its record, in one forward pass: slots and GL names are reused within
+ * a frame, so one final map would misname earlier rows (render architecture, "Capture text"). */
 static void index_gl_names(fi_frame_t *fr) {
     const uint32_t n = fr->view.count;
     const nt_gfx_event_t *ev = fr->view.events;
@@ -1042,12 +1046,29 @@ fi_gl_ref_t fi_gl_ref(const fi_frame_t *frame, uint32_t record, uint32_t at) {
 // #region objects
 /* Short names for an issued call's arguments: the field of fi_named_t. */
 static const char *const k_arg_names[] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"};
+_Static_assert(sizeof(k_arg_names) / sizeof(k_arg_names[0]) == sizeof(((nt_gfx_event_t *)0)->data.backend.args) / sizeof(uint32_t), "frame inspector: a name per issued call argument");
 
 _Static_assert(FI_NAMED >= FI_HANDLES + FI_GL_NAMES, "frame inspector: FI_NAMED holds every handle and GL name of a record");
 
 static void add_named(fi_named_t *out, uint32_t *n, const char *field, uint32_t kind, uint32_t object) {
     if (object != 0) {
         out[(*n)++] = (fi_named_t){.field = field, .kind = (uint8_t)kind, .object = object};
+    }
+}
+
+/* The field a GL name at byte offset `at` sits in: an issued call's argument index, else its capture field. */
+static const char *gl_name_field(const nt_gfx_event_t *e, size_t at) {
+    const size_t args = offsetof(nt_gfx_event_t, data.backend.args);
+    if (e->kind == NT_GFX_EVENT_BACKEND && at >= args) {
+        return k_arg_names[(at - args) / sizeof(uint32_t)];
+    }
+    const nt_gfx_capture_field_t *f = NULL;
+    const uint32_t count = nt_gfx_capture_fields(e, &f);
+    for (uint32_t k = 0;; k++) {
+        NT_ASSERT(k < count && "frame inspector: a GL name outside its record's fields");
+        if (f[k].offset == at) {
+            return f[k].name;
+        }
     }
 }
 
@@ -1058,20 +1079,12 @@ uint32_t fi_named_objects(const fi_frame_t *frame, uint32_t record, fi_named_t o
     for (uint32_t k = 0; k < h.count; k++) {
         add_named(out, &n, h.field[k] != NULL ? h.field[k] : frame->view.strings + e->field.key, h.kind[k], handle_at(e, h.at[k]));
     }
-    const nt_gfx_capture_field_t *f = NULL;
-    const uint32_t count = is_gfx(e) ? nt_gfx_capture_fields(e, &f) : 0U;
-    const size_t args = offsetof(nt_gfx_event_t, data.backend.args);
     for (uint32_t k = frame->gl_first[record]; k < frame->gl_first[record + 1U]; k++) {
         const fi_gl_ref_t *ref = &frame->gl_ref[k];
         if (ref->owner != FI_GL_OBJECT || (ref->kind == e->object_kind && ref->object == e->object)) { /* a definition's own name */
             continue;
         }
-        const bool arg = e->kind == NT_GFX_EVENT_BACKEND && ref->at >= args;
-        const char *field = arg ? k_arg_names[(ref->at - args) / sizeof(uint32_t)] : "?";
-        for (uint32_t j = 0; !arg && j < count; j++) {
-            field = f[j].offset == ref->at ? f[j].name : field;
-        }
-        add_named(out, &n, field, ref->kind, ref->object);
+        add_named(out, &n, gl_name_field(e, ref->at), ref->kind, ref->object);
     }
     return n;
 }
@@ -1083,6 +1096,7 @@ void fi_object(const fi_frame_t *frame, uint32_t kind, uint32_t object, fi_objec
     out->object = object;
     out->definition = FI_NONE;
     uint32_t *hits = (uint32_t *)fi_alloc(n, sizeof(uint32_t));
+    out->span = (fi_gl_span_t *)fi_alloc(frame->gl_first[n], sizeof(fi_gl_span_t)); /* at most one per GL name */
     uint32_t *per_group = (uint32_t *)fi_alloc((size_t)frame->group_count + 1U, sizeof(uint32_t));
     uint32_t count = 0;
     for (uint32_t i = 0; i < n; i++) {
@@ -1101,10 +1115,7 @@ void fi_object(const fi_frame_t *frame, uint32_t kind, uint32_t object, fi_objec
             const uint32_t name = handle_at(e, ref->at);
             const bool held = ref->owner == FI_GL_OBJECT && ref->kind == kind && ref->object == object;
             if (held && (out->span_count == 0 || out->span[out->span_count - 1U].name != name)) {
-                out->spans_full = out->spans_full || out->span_count == FI_GL_SPANS;
-                if (out->span_count < FI_GL_SPANS) {
-                    out->span[out->span_count++] = (fi_gl_span_t){.name = name, .from = i};
-                }
+                out->span[out->span_count++] = (fi_gl_span_t){.name = name, .from = i};
             }
         }
         if (names) {
@@ -1126,6 +1137,7 @@ void fi_object(const fi_frame_t *frame, uint32_t kind, uint32_t object, fi_objec
 
 void fi_object_free(fi_object_t *object) {
     free(object->record);
+    free(object->span);
     memset(object, 0, sizeof(*object));
 }
 // #endregion
@@ -1745,13 +1757,6 @@ static uint32_t previous(const fi_frame_t *fr, uint32_t at, bool (*accept)(const
 }
 
 static bool is_draw_op(const nt_gfx_event_t *e) { return e->link == 0 && fi_is_draw(e); }
-
-static uint32_t top_request(const fi_frame_t *fr, uint32_t i) {
-    while (owner(fr, i) != FI_NONE) {
-        i = owner(fr, i);
-    }
-    return i;
-}
 static bool is_draw_issue(const nt_gfx_event_t *e) { return e->kind == NT_GFX_EVENT_BACKEND && fi_is_draw_call(e->detail); }
 
 void fi_state_at(const fi_frame_t *frame, uint32_t at, fi_state_view_t *out) {
@@ -1777,14 +1782,27 @@ void fi_state_at(const fi_frame_t *frame, uint32_t at, fi_state_view_t *out) {
     for (uint32_t i = source + 1U; i < frame->view.count; i++) {
         out->gl_at = frame->parent[i] == source && frame->view.events[i].kind == NT_GFX_EVENT_BACKEND ? i : out->gl_at;
     }
-    /* A streamed request that issued nothing (a state already set) runs at end_frame after the requests before it:
-     * its GL state is the last call they issued, not the state before execution. */
-    const bool silent = out->gl_at == gl_anchor && gl_anchor == request && streamed(&frame->view.events[request]);
-    for (uint32_t i = frame->view.execute_begin; silent && request < frame->view.execute_begin && i < frame->view.execute_end; i++) {
-        out->gl_at = frame->view.events[i].kind == NT_GFX_EVENT_BACKEND && top_request(frame, i) < request ? i : out->gl_at;
+    /* A streamed request whose execution issued nothing (a state already set, or cache skips only) ran at end_frame
+     * after the frame storage upload and the requests before it: its GL state is the last call those issued, and it
+     * compares with the draw it sits on. Operations recorded at end_frame (the upload) top at execute_begin or later. */
+    const bool silent = gl_anchor == request && streamed(&frame->view.events[request]) && !in_execute(frame, out->gl_at);
+    uint32_t point = FI_NONE;
+    bool commands = false; /* past the upload: a game request's calls */
+    for (uint32_t i = frame->view.execute_begin; silent && i < frame->view.execute_end; i++) {
+        const uint32_t top = top_request(frame, i);
+        const bool upload = top >= frame->view.execute_begin;
+        if (frame->view.events[i].kind != NT_GFX_EVENT_BACKEND || (upload && commands)) {
+            continue;
+        }
+        if (!upload && top > request) {
+            break;
+        }
+        commands = commands || !upload;
+        point = i;
     }
+    out->gl_at = point != FI_NONE ? point : out->gl_at;
     fi_gl_state(frame, out->gl_at, &out->gl);
-    out->was_gl_at = previous(frame, out->gl_at, is_draw_issue);
+    out->was_gl_at = previous(frame, out->gl_at + (point != FI_NONE ? 1U : 0U), is_draw_issue);
     if (out->was_gl_at != FI_NONE) {
         fi_gl_state(frame, out->was_gl_at, &out->was_gl);
     }

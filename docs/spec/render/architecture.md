@@ -1520,11 +1520,13 @@ backend definition (`DEFINITION STATE`) gives a slot's GL name, and inside an op
 kind the slot is that object's before its frontend definition follows; the snapshot's definitions hold from its
 first record, as it describes one moment. A create call's names belong to its operation's object when that object
 has the names' GL kind, else to the object a later definition of the same operation gives them (a lazy sampler
-re-creation), else, in a context restore, to the upload VAO. GL hands out a deleted or lost name again only
-through a create call, which owns it anew, so deletes and restores end nothing. A husk (slot or name 0) owns
-nothing. Every query name is a timer query. A name nothing recorded reads as its number. The Object page and
+re-creation), else a vertex array a context restore makes is the upload VAO. GL hands out a deleted or lost name
+again only through a create call, which owns it anew, so deletes and restores end nothing. Every query name is a
+timer query. A name nothing recorded reads as its number. The Object page and
 `object @N[.FIELD]` show one object of a record: its definition, the GL names it held, and every record that
-names it, by group, built by one scan of the selected frame; a file's handles stay with that file.
+names it, by group, built by one scan of the selected frame; a file's handles stay with that file. A streamed
+request whose execution issued no GL call (a state already set) shows the GL state where it ran: after the frame
+storage upload and the last call of the requests before it, compared with the draw it sits on.
 
 ## Shape strokes
 

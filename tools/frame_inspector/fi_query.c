@@ -1257,9 +1257,6 @@ static bool cmd_object(const fi_frame_t *fr, const char *arg, fi_out_t *out) {
     for (uint32_t k = 0; k < obj.span_count; k++) {
         put(out, "gl_name %u from @%u\n", obj.span[k].name, obj.span[k].from);
     }
-    if (obj.spans_full) {
-        put(out, "gl_name ...  # more GL names than listed\n");
-    }
     put(out, "records %u\n", obj.count);
     uint32_t group = FI_NONE;
     for (uint32_t k = 0; k < obj.count; k++) {

@@ -622,7 +622,6 @@ static void close_file(uint32_t f) {
     const bool current = s.file == f;
     fi_file_close(&s.files[f]);
     memmove(&s.files[f], &s.files[f + 1U], (s.file_count - f - 1U) * sizeof(fi_file_t));
-    s.obj = 0; /* the files shift: an index no longer names the file the object came from */
     s.file_count--;
     s.history_count = 0;
     s.future_count = 0;
@@ -633,6 +632,7 @@ static void close_file(uint32_t f) {
         return;
     }
     clear_filters();
+    s.obj = 0; /* the object's file is gone; another may now sit at its index */
     if (s.file_count > 0) {
         select_frame(0, 0);
     }
@@ -2353,9 +2353,6 @@ static void declare_object_page(const fi_frame_t *fr) {
         char what[48];
         (void)snprintf(what, sizeof(what), "GL name %u from ", o->span[k].name);
         link_line(fr, what, o->span[k].from);
-    }
-    if (o->spans_full) {
-        text("... more GL names than listed", &k_dim);
     }
     char title[64];
     (void)snprintf(title, sizeof(title), "Records that name it (%u), by group", o->count);

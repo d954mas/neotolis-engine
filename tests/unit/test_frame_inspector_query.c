@@ -151,7 +151,9 @@ static void test_object_lists_where_it_is_named(void) {
     assert_holds(text, "\ngl_name 5 from @128\nrecords 44\ngroup g0  # (no note or marker)\n  @74  ");
     assert_holds(text, "\n  @183  DEFINITION STATE TEXTURE slot=5 gl_name=5 tex#1\ngroup g2  # > sprite\n  @218  NOTE_FIELD page=tex#1\n");
     assert_holds(text, "\n  @689  glBindTexture(GL_TEXTURE_2D,5 tex#1)\n");
-    TEST_ASSERT_EQUAL_STRING(text, ask("object @74", true)); /* a definition names its own object first */
+    static char texture[8192];
+    (void)snprintf(texture, sizeof(texture), "%s", text);
+    TEST_ASSERT_EQUAL_STRING(texture, ask("object @74", true)); /* a definition names its own object first */
     assert_holds(ask("object @657.0", true), "object prog/shape/fill#1  # PROGRAM ");
     /* frame_vertex's GL calls at end_frame (g0) list before its shape requests (g1): by group, not by record */
     assert_holds(ask("object @114.array_buffer", true), "\n  @649  glBindBuffer(GL_ARRAY_BUFFER,3 buf/frame_vertex#1)\ngroup g1  # > shape\n  @202  ");
@@ -422,7 +424,8 @@ static void test_state_of_a_gl_call_is_its_request_state(void) {
 static void test_a_command_without_calls_takes_the_stream_point(void) {
     const char *text = ask("state @228 all", true);
     assert_holds(text, "\n# GL state at @680\n");
-    assert_holds(text, "\n* UseProgram                 @673  glUseProgram(19 prog/skeletal_showcase/sprite#1)\n");
+    assert_holds(text, "\ncompared previous GL draw @680  glDrawElements("); /* the draw it sits on: nothing changed */
+    assert_holds(text, "\n  UseProgram                 @673  glUseProgram(19 prog/skeletal_showcase/sprite#1)\n");
 }
 
 /* Every row of the native and web fixtures is built from fields: no generic list survives outside an issued call. */

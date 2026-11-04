@@ -204,7 +204,7 @@ typedef enum { FI_COMPARE_NONE, FI_COMPARE_PREVIOUS_DRAW, FI_COMPARE_FRAME_START
 typedef struct {
     fi_request_state_t req, was_req;
     fi_gl_state_t gl, was_gl;
-    uint32_t gl_at;          /* the record whose GL state is shown: an operation's last GL call */
+    uint32_t gl_at;          /* the record whose GL state is shown: an operation's last GL call, or its stream point */
     uint32_t was, was_gl_at; /* the records compared with, FI_NONE: nothing */
     uint8_t compare;         /* fi_compare_t */
 } fi_state_view_t;
@@ -299,14 +299,12 @@ uint32_t fi_named_objects(const fi_frame_t *frame, uint32_t record, fi_named_t o
 typedef struct {
     uint32_t name, from; /* a GL name, and the first record that names the object by it */
 } fi_gl_span_t;
-#define FI_GL_SPANS 8U
 typedef struct {
     uint8_t kind;
     uint32_t object;
     uint32_t definition; /* its latest CREATE definition, FI_NONE: the frame has none */
-    fi_gl_span_t span[FI_GL_SPANS];
+    fi_gl_span_t *span;  /* malloc'd */
     uint32_t span_count;
-    bool spans_full;  /* more GL names than FI_GL_SPANS: the rest are not listed */
     uint32_t *record; /* malloc'd */
     uint32_t count;
 } fi_object_t;
