@@ -231,6 +231,7 @@ void fi_file_close(fi_file_t *file) {
         free(fr->alias_object);
         free(fr->alias_ordinal);
         free((void *)fr->alias_label);
+        free(fr->content_label);
         free(fr->alias_slot);
         free(fr->alias_kind);
         free(fr->def);
@@ -595,6 +596,48 @@ static void number_aliases(fi_frame_t *fr, uint32_t count) {
     free(seen);
 }
 
+const char *fi_locations_text(uint32_t v, char *buf, size_t size) {
+    size_t at = 0;
+    buf[0] = '\0';
+    for (uint32_t bit = 0; bit < 32 && at + 8 < size; bit++) {
+        const bool starts_run = (v & (1U << bit)) != 0 && (bit == 0 || (v & (1U << (bit - 1U))) == 0);
+        if (!starts_run) {
+            continue;
+        }
+        uint32_t last = bit;
+        while (last + 1U < 32 && (v & (1U << (last + 1U))) != 0) {
+            last++;
+        }
+        at += (size_t)snprintf(buf + at, size - at, last > bit ? "%s%u-%u" : "%s%u", at > 0 ? "," : "", bit, last);
+    }
+    return v != 0 ? buf : NULL;
+}
+
+/* Samplers and instance layouts are shared by content, so a desc label is not theirs: their content names them
+ * (linear_mip_linear_repeat, 44B:1-4). False for any other kind or a value the engine does not make. */
+static bool content_label(const nt_gfx_event_t *e, char out[FI_CONTENT_LABEL]) {
+    static const char *const k_filter[] = {"nearest", "linear", "nearest_mip_nearest", "linear_mip_nearest", "nearest_mip_linear", "linear_mip_linear"};
+    static const char *const k_wrap[] = {"clamp", "repeat", "mirror"};
+    static const char *const k_compare[] = {"", "_lequal", "_less", "_gequal", "_greater", "_equal", "_notequal", "_always", "_never"};
+    if (e->object_kind == NT_GFX_OBJECT_INSTANCE_LAYOUT) {
+        char locations[32];
+        (void)snprintf(out, FI_CONTENT_LABEL, "%uB:%s", e->data.instance_layout.stride, fi_locations_text(e->data.instance_layout.locations, locations, sizeof(locations)) != NULL ? locations : "");
+        return true;
+    }
+    const uint32_t min = e->data.sampler.min_filter;
+    const uint32_t mag = e->data.sampler.mag_filter;
+    const uint32_t u = e->data.sampler.wrap_u;
+    const uint32_t v = e->data.sampler.wrap_v;
+    const uint32_t cmp = e->data.sampler.compare;
+    if (e->object_kind != NT_GFX_OBJECT_SAMPLER || min > 5U || mag > 1U || u > 2U || v > 2U || cmp > 8U) {
+        return false;
+    }
+    /* mag only when it is not min's own filter; v only when it differs from u */
+    (void)snprintf(out, FI_CONTENT_LABEL, "%s%s%s_%s%s%s%s", k_filter[min], mag != (min & 1U) ? "_mag_" : "", mag != (min & 1U) ? k_filter[mag] : "", k_wrap[u], v != u ? "_" : "",
+                   v != u ? k_wrap[v] : "", k_compare[cmp]);
+    return true;
+}
+
 /* Aliases: every handle the records name, in order of first use after the snapshot, then the snapshot's, so a
  * live object the frame never touches shifts no number; a definition's label names its object. */
 static void index_aliases(fi_frame_t *fr) {
@@ -608,6 +651,7 @@ static void index_aliases(fi_frame_t *fr) {
     fr->alias_ordinal = (uint32_t *)fi_alloc(cap, sizeof(uint32_t));
     fr->alias_kind = (uint8_t *)fi_alloc(cap, sizeof(uint8_t));
     fr->alias_label = (const char **)fi_alloc(cap, sizeof(const char *));
+    fr->content_label = (char(*)[FI_CONTENT_LABEL])fi_alloc(cap, FI_CONTENT_LABEL);
     const uint32_t slots = table_size(cap);
     fr->alias_slot = (uint32_t *)fi_alloc(slots, sizeof(uint32_t));
     fr->alias_mask = slots - 1U;
@@ -627,9 +671,13 @@ static void index_aliases(fi_frame_t *fr) {
                 fr->alias_label[count - 1U] = "";
             }
         }
-        const nt_gfx_capture_string_t label = e->kind == NT_GFX_EVENT_DEFINITION && e->operation == NT_GFX_OP_CREATE ? label_of(e) : 0U;
-        if (label != 0 && e->object_kind != 0 && e->object_kind < FI_OBJECTS && e->object != 0) {
-            fr->alias_label[*alias_slot(fr, e->object_kind, e->object) - 1U] = fr->view.strings + label;
+        const bool definition = e->kind == NT_GFX_EVENT_DEFINITION && e->operation == NT_GFX_OP_CREATE && e->object_kind != 0 && e->object_kind < FI_OBJECTS && e->object != 0;
+        const uint32_t a = definition ? *alias_slot(fr, e->object_kind, e->object) - 1U : 0U;
+        const nt_gfx_capture_string_t label = definition ? label_of(e) : 0U;
+        if (label != 0) {
+            fr->alias_label[a] = fr->view.strings + label;
+        } else if (definition && content_label(e, fr->content_label[a])) {
+            fr->alias_label[a] = fr->content_label[a];
         }
     }
     number_aliases(fr, count);

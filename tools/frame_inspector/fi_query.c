@@ -192,24 +192,6 @@ _Static_assert(NT_TEXTURE_FORMAT_RGB9E5 == 21 && NT_FILTER_LINEAR_MIPMAP_LINEAR 
 _Static_assert(NT_BUFFER_READBACK == 2, "frame inspector: a buffer type changed; update k_engine_enums");
 #endif
 
-/* Bit n is location n, printed as runs: 1-4,7. */
-static const char *locations_text(uint32_t v, char *buf, size_t size) {
-    size_t at = 0;
-    buf[0] = '\0';
-    for (uint32_t bit = 0; bit < 32 && at + 8 < size; bit++) {
-        const bool starts_run = (v & (1U << bit)) != 0 && (bit == 0 || (v & (1U << (bit - 1U))) == 0);
-        if (!starts_run) {
-            continue;
-        }
-        uint32_t last = bit;
-        while (last + 1U < 32 && (v & (1U << (last + 1U))) != 0) {
-            last++;
-        }
-        at += (size_t)snprintf(buf + at, size - at, last > bit ? "%s%u-%u" : "%s%u", at > 0 ? "," : "", bit, last);
-    }
-    return v != 0 ? buf : NULL;
-}
-
 static const char *clear_mask_text(uint32_t v, char *buf, size_t size) {
     (void)snprintf(buf, size, "%s%s%s", (v & 0x4000U) != 0 ? "COLOR|" : "", (v & 0x100U) != 0 ? "DEPTH|" : "", (v & 0x400U) != 0 ? "STENCIL|" : "");
     buf[strlen(buf) > 0 ? strlen(buf) - 1U : 0U] = '\0';
@@ -231,7 +213,7 @@ static const char *domain_name(uint32_t domain, uint32_t v, char *buf, size_t si
         (void)snprintf(buf, size, "GL_TEXTURE%u", v - 0x84C0U);
         return v >= 0x84C0U && v < 0x84E0U ? buf : NULL;
     case NT_GFX_DOMAIN_LOCATIONS:
-        return locations_text(v, buf, size);
+        return fi_locations_text(v, buf, size);
     case FI_DOMAIN_GL_PRIMITIVE:
         return v < sizeof(k_modes) / sizeof(k_modes[0]) ? k_modes[v] : NULL;
     case FI_DOMAIN_GL_CLEAR_MASK:
@@ -1552,7 +1534,8 @@ static void cmd_help(fi_out_t *out) {
              "                           # group of its list (gN, a.gN), that group's commands aligned\n"
              "# rows: each record's fields by name, values decoded (GL_LEQUAL, U16, tex/atlas); record @N adds the line as\n"
              "# captured, raw. Zero fields are left out; a request's unset render target or sampler reads as its default.\n"
-             "# objects: kind/label#N (buf/frame_uniform#1), kind#N when unlabeled; N counts first use in the frame's work,\n"
+             "# objects: kind/label#N (buf/frame_uniform#1), kind#N when unlabeled; samplers and instance layouts, shared by\n"
+             "# content, by their content (smp/linear_mip_linear_repeat#1, layout/44B:1-4#1); N counts first use in the frame's work,\n"
              "# then the snapshot's, per kind and label. A GL name reads with the object it belonged to at that record\n"
              "# (glUseProgram(19 prog/sprite#1)), or its role (upload VAO, timer query); a bare number: the frame never said.\n"
              "# badges: [merged] joined the previous GL draw, [already set] the engine held that state, [found] a cached\n"

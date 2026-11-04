@@ -1254,8 +1254,8 @@ static void test_gl_names_follow_their_objects(void) {
         {8, "glBindBuffer(GL_ARRAY_BUFFER,5 buf/b#1)"},
         {9, "DEFINITION STATE BUFFER slot=1 gl_name=5 buf/b#1"}, /* slot 1 is b's before its frontend definition */
         {12, "glGetQueryObjectuiv(9 timer query,GL_QUERY_RESULT_AVAILABLE)"},
-        {14, "glGenSamplers(1,3 smp#1)"}, /* the operation is the pipeline's: the sampler's definition names it */
-        {15, "glSamplerParameteri(3 smp#1,GL_TEXTURE_MIN_FILTER,GL_LINEAR)"},
+        {14, "glGenSamplers(1,3 smp/nearest_clamp#1)"}, /* the operation is the pipeline's: the sampler's definition names it */
+        {15, "glSamplerParameteri(3 smp/nearest_clamp#1,GL_TEXTURE_MIN_FILTER,GL_LINEAR)"},
     };
     char row[256];
     for (uint32_t k = 0; k < sizeof(k_rows) / sizeof(k_rows[0]); k++) {
@@ -1269,6 +1269,30 @@ static void test_gl_names_follow_their_objects(void) {
     TEST_ASSERT_EQUAL_UINT32(5, b.span[0].name);
     TEST_ASSERT_EQUAL_UINT32(7, b.span[0].from);
     fi_object_free(&b);
+}
+
+/* A sampler and an instance layout are shared by content, so their content names them; a mag filter shows only
+ * when it differs from the min filter's, a wrap per axis only when the axes differ. */
+static void test_shared_objects_take_their_content_as_name(void) {
+    nt_gfx_event_t ev[2];
+    memset(ev, 0, sizeof(ev));
+    ev[0] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_DEFINITION, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_SAMPLER, .object = 1};
+    ev[0].data.sampler.gl_name = 3;
+    ev[0].data.sampler.min_filter = NT_FILTER_LINEAR;
+    ev[0].data.sampler.mag_filter = NT_FILTER_NEAREST;
+    ev[0].data.sampler.wrap_u = NT_WRAP_CLAMP_TO_EDGE;
+    ev[0].data.sampler.wrap_v = NT_WRAP_REPEAT;
+    ev[0].data.sampler.compare = NT_COMPARE_LEQUAL;
+    ev[1] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_DEFINITION, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_INSTANCE_LAYOUT, .object = 1};
+    ev[1].data.instance_layout.slot = 1;
+    ev[1].data.instance_layout.stride = 44;
+    ev[1].data.instance_layout.locations = 0x9EU; /* 1-4 and 7 */
+    const fi_frame_t *fr = load_built((nt_gfx_capture_view_t){.events = ev, .count = 2, .strings = "", .string_bytes = 1});
+    char alias[FI_ALIAS_LEN];
+    fi_alias_text(fr, NT_GFX_OBJECT_SAMPLER, 1, alias, sizeof(alias));
+    TEST_ASSERT_EQUAL_STRING("smp/linear_mag_nearest_clamp_repeat_lequal#1", alias);
+    fi_alias_text(fr, NT_GFX_OBJECT_INSTANCE_LAYOUT, 1, alias, sizeof(alias));
+    TEST_ASSERT_EQUAL_STRING("layout/44B:1-4,7#1", alias);
 }
 
 /* The restore, right after begin_frame's snapshot, makes the upload VAO first. */
@@ -1342,6 +1366,7 @@ int main(void) {
     RUN_TEST(test_an_overflowed_frame_opens);
     RUN_TEST(test_gl_names_follow_their_objects);
     RUN_TEST(test_a_restore_makes_the_upload_vao);
+    RUN_TEST(test_shared_objects_take_their_content_as_name);
     RUN_TEST(test_a_silent_request_takes_its_stream_point);
     RUN_TEST(test_compare_aligns_requests_and_names_changes);
     RUN_TEST(test_compare_pairs_handles_by_alias);

@@ -1504,7 +1504,8 @@ path and note); inside a group their requests align like a text diff. A pair com
 break, GL call count, arguments and the records the request wrote (ARGUMENT, resource and attribute
 DEFINITION, NOTE_FIELD) and strings as text. Handles compare as aliases: an object's kind, label and number
 among the frame's objects of that kind and label, counted by first use in the frame's work, then in the
-snapshot (`vi/mesh#3`, unlabeled `vi#3`). Runs whose handles differ still pair, a live object the frame never
+snapshot (`vi/mesh#3`, unlabeled `vi#3`); samplers and instance layouts, shared by content, take it as their label
+(`smp/linear_mip_linear_repeat#1`, `layout/44B:1-4#1`). Runs whose handles differ still pair, a live object the frame never
 uses shifts no number, and an object of another label shifts none of this label's; a renamed object is another
 object; GL calls are counted per request, not aligned, as backends issue different
 calls for one request. Between their common start and end, requests more than 1024 edits apart list A's,

@@ -79,6 +79,7 @@ typedef struct {
 #define FI_RESULTS (NT_GFX_RESULT_UNKNOWN + 1)
 #define FI_OBJECTS (NT_GFX_OBJECT_INSTANCE_LAYOUT + 1)
 #define FI_KEY_LEN 160
+#define FI_CONTENT_LABEL 48
 
 typedef struct {
     fi_cell_t op[NT_GFX_OP_COUNT][FI_RESULTS];
@@ -142,11 +143,12 @@ typedef struct {
     /* Short names for handles (vi/mesh#3): per kind and label, numbered by first use in the frame's work. */
     uint32_t *alias_object, *alias_ordinal, *alias_slot, alias_mask;
     uint8_t *alias_kind;
-    const char **alias_label;          /* the frame's strings; "" when unlabeled */
-    uint32_t *def;                     /* per operation on an object: the object's latest definition before it, FI_NONE */
-    uint32_t *gl_first;                /* per record: its first gl_ref; record count + 1 entries */
-    fi_gl_ref_t *gl_ref;               /* every GL name of every record, resolved at its record */
-    fi_buffer_upload_t *buffer_upload; /* the biggest first */
+    const char **alias_label;                /* the frame's strings, a content name, or "" when unlabeled */
+    char (*content_label)[FI_CONTENT_LABEL]; /* per alias: the name of an object shared by its content */
+    uint32_t *def;                           /* per operation on an object: the object's latest definition before it, FI_NONE */
+    uint32_t *gl_first;                      /* per record: its first gl_ref; record count + 1 entries */
+    fi_gl_ref_t *gl_ref;                     /* every GL name of every record, resolved at its record */
+    fi_buffer_upload_t *buffer_upload;       /* the biggest first */
     uint32_t buffer_upload_count;
     /* Merge check: per draw the break and the record that caused it (the command between, or the previous draw). */
     uint8_t *brk;
@@ -243,6 +245,8 @@ fi_alias_t fi_alias(const fi_frame_t *frame, uint32_t kind, uint32_t object);
  * or also space, '#' and non-ASCII bytes (a token: an alias label or a key, so text splits on spaces and '#' ends a label). */
 typedef enum { FI_TEXT_PLAIN, FI_TEXT_QUOTED, FI_TEXT_TOKEN } fi_text_t;
 void fi_one_line(const char *src, char *buf, size_t size, fi_text_t mode);
+/* A location bit set as runs: bit n is location n, 1-4,7; NULL for none. */
+const char *fi_locations_text(uint32_t v, char *buf, size_t size);
 /* Group g of frame `from` in frame `to`: the same marker path and note; FI_NONE when `to` has none. */
 uint32_t fi_group_in(const fi_frame_t *to, const fi_frame_t *from, uint32_t g);
 /* The tree parent of a record or phase; FI_NONE above the frame. */

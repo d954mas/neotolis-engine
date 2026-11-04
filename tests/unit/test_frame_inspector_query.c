@@ -145,7 +145,7 @@ static void test_record_tells_merged_and_broken_draws(void) {
 
 /* A texture of the snapshot and of the sprite group: its definition, its GL name, and its records by group. */
 static void test_object_lists_where_it_is_named(void) {
-    assert_holds(ask("record @128", true), "\nobject texture tex#1  # object @128.texture\nobject sampler smp#2  # object @128.sampler\n");
+    assert_holds(ask("record @128", true), "\nobject texture tex#1  # object @128.texture\nobject sampler smp/linear_mip_linear_repeat#1  # object @128.sampler\n");
     const char *text = ask("object @128.texture", true);
     assert_holds(text, "object tex#1  # TEXTURE 65541\ndefinition @74  DEFINITION CREATE tex#1 slot=5 ");
     assert_holds(text, "\ngl_name 5 from @128\nrecords 44\ngroup g0  # (no note or marker)\n  @74  ");
@@ -385,13 +385,13 @@ static void test_rows_decode_captured_values(void) {
                                            "width=1280 height=800 upload_vertex_array=1 upload VAO array_buffer=3 buf/frame_vertex#1\n");
     assert_holds(ask("record @114", true), "\ncaptured INITIAL op=STATE layer=BACKEND program=19 vertex_array=7 active_texture=33984 ");
     assert_holds(ask("record @117", true), "INITIAL PIPELINE program_gl=19 prog/skeletal_showcase/sprite#1 depth_func=GL_LEQUAL blend src_rgb=GL_ONE dst_rgb=GL_ONE_MINUS_SRC_ALPHA ");
-    assert_holds(ask("record @79", true), "DEFINITION CREATE smp#2 gl_name=2 min_filter=LINEAR_MIPMAP_LINEAR mag_filter=LINEAR wrap_u=REPEAT wrap_v=REPEAT\n");
-    assert_holds(ask("record @90", true), "DEFINITION CREATE layout#2 slot=3 stride=32 locations=1-5\n");
+    assert_holds(ask("record @79", true), "DEFINITION CREATE smp/linear_mip_linear_repeat#1 gl_name=2 min_filter=LINEAR_MIPMAP_LINEAR mag_filter=LINEAR wrap_u=REPEAT wrap_v=REPEAT\n");
+    assert_holds(ask("record @90", true), "DEFINITION CREATE layout/32B:1-5#1 slot=3 stride=32 locations=1-5\n");
     assert_holds(ask("record @36", true), " vertex_buffer=buf/shape_line_template#1 index_buffer=buf/shape_line_template#2 index_type=U16 ");
     assert_holds(ask("record @218", true), "@218  NOTE_FIELD page=tex#1\n");
     assert_holds(ask("record @639", true), "@639  BUFFER_UPLOAD buf/frame_index#1 size=11184 data\n");
     assert_holds(ask("record @642", true), "@642  glBufferSubData(GL_ELEMENT_ARRAY_BUFFER,0,11184,data) bytes=11184\n");
-    assert_holds(ask("record @678", true), "@678  glBindSampler cache sampler=2 smp#2  [GL skipped]\n");
+    assert_holds(ask("record @678", true), "@678  glBindSampler cache sampler=2 smp/linear_mip_linear_repeat#1  [GL skipped]\n");
     assert_holds(ask("record @662", true), "@662  glVertexAttribPointer cache vertex_array=3 vi/shape_fill_vi#1 buffer=3 buf/frame_vertex#1 layout=1  [GL skipped]\n");
     assert_holds(ask("record @663", true), "@663  glBindBufferRange cache slot=2 offset=256 size=96  [GL skipped]\n");
     assert_holds(ask("record @118", true), "@118  DEFINITION PIPELINE slot=1 program_slot=1 depth_func=GL_LEQUAL ");
@@ -407,7 +407,7 @@ static void test_state_of_a_gl_call_is_its_request_state(void) {
     assert_holds(text, "\n* program: pipeline          @265  PIPELINE pipe/skeletal_showcase/text#1\n");
     assert_holds(text, "\n* UseProgram                 @681  glUseProgram(20 prog/skeletal_showcase/text#1)\n");
     assert_holds(text, "\n    was @128  INITIAL TEXTURE texture=5 tex#1\n");
-    assert_holds(text, "\n    was @128  INITIAL TEXTURE sampler=2 smp#2\n");
+    assert_holds(text, "\n    was @128  INITIAL TEXTURE sampler=2 smp/linear_mip_linear_repeat#1\n");
     assert_holds(text, "\n  GL_FRAMEBUFFER             inherited @114  INITIAL STATE BACKEND framebuffer=0\n");
     /* The inherited pass record holds the clear color and depth together; its line shows both. */
     assert_holds(ask("state init all", true), "INITIAL PASS color=[0.035,0.05,0.08,1] depth=1\n");
