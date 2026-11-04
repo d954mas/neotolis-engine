@@ -1505,7 +1505,8 @@ break, GL call count, arguments and the records the request wrote (ARGUMENT, res
 DEFINITION, NOTE_FIELD) and strings as text. Handles compare as aliases: an object's kind, label and number
 among the frame's objects of that kind and label, counted by first use in the frame's work, then in the
 snapshot (`vi/mesh#3`, unlabeled `vi#3`); samplers and instance layouts, shared by content, take it as their label
-(`smp/linear_mip_linear_repeat#1`, `layout/44B:1-4#1`). Runs whose handles differ still pair, a live object the frame never
+(`smp/linear_mip_linear_repeat#1`, `layout/44B:1fx3,2fx3,3fx4,4u8x4n#1`: stride, then each attribute's location, type,
+count, normalization and an offset that does not follow the previous attribute). Runs whose handles differ still pair, a live object the frame never
 uses shifts no number, and an object of another label shifts none of this label's; a renamed object is another
 object; GL calls are counted per request, not aligned, as backends issue different
 calls for one request. Between their common start and end, requests more than 1024 edits apart list A's,
@@ -1518,16 +1519,19 @@ A GL name reads as the frontend object it belonged to at its record (`glUseProgr
 resolved in one forward pass: slots and GL names are reused within a frame, so one map of the frame's end would
 misname earlier rows. A frontend definition gives its object a slot or, for a shader or sampler, a GL name; a
 backend definition (`DEFINITION STATE`) gives a slot's GL name, and inside an operation on an object of the slot's
-kind the slot is that object's before its frontend definition follows; the snapshot's definitions hold from its
+kind the slot is that object's before its frontend definition follows (nobody's when that create failed); the snapshot's definitions hold from its
 first record, as it describes one moment. A create call's names belong to its operation's object when that object
 has the names' GL kind, else to the object a later definition of the same operation gives them (a lazy sampler
 re-creation), else a vertex array a context restore makes is the upload VAO. GL hands out a deleted or lost name
 again only through a create call, which owns it anew, so deletes and restores end nothing. Every query name is a
 timer query. A name nothing recorded reads as its number. The Object page and
-`object @N[.FIELD]` show one object of a record: its definition, the GL names it held, and every record that
-names it, by group, built by one scan of the selected frame; a file's handles stay with that file. A streamed
-request whose execution issued no GL call (a state already set) shows the GL state where it ran: after the frame
-storage upload and the last call of the requests before it, compared with the draw it sits on.
+`object @N[.FIELD]` show one object of a record: its definition, its GL name, and every record that
+names it, by group, built by one scan of the selected frame; a file's handles stay with that file. A frame holds
+one GL name per object: a lost context is dropped before the snapshot, and a restore makes new objects. A
+definition's own GL name reads as its number, as its row already names the object. A draw-phase request whose
+execution issued no GL call (a state already set) shows the GL state where it sits in the stream: after the game's
+calls before end_frame, the frame storage upload and the last call of the requests before it, compared with the
+draw it sits on.
 
 ## Shape strokes
 

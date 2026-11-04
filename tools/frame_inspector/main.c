@@ -2346,13 +2346,11 @@ static void declare_object_page(const fi_frame_t *fr) {
     } else {
         text("none: the frame holds no CREATE definition of it", &k_dim);
     }
-    if (o->span_count > 0) {
-        section("GL names (a new one after a context restore or a re-creation)");
-    }
-    for (uint32_t k = 0; k < o->span_count; k++) {
+    if (o->gl_name != 0) {
         char what[48];
-        (void)snprintf(what, sizeof(what), "GL name %u from ", o->span[k].name);
-        link_line(fr, what, o->span[k].from);
+        (void)snprintf(what, sizeof(what), "GL name %u from ", o->gl_name);
+        section("GL name");
+        link_line(fr, what, o->gl_from);
     }
     char title[64];
     (void)snprintf(title, sizeof(title), "Records that name it (%u), by group", o->count);
@@ -2368,13 +2366,7 @@ static void declare_object_page(const fi_frame_t *fr) {
         link_line(fr, "", o->record[k]);
     }
     if (o->count > SHOWN) {
-        fi_named_t named[FI_NAMED];
-        const uint32_t n = fi_named_objects(fr, o->record[0], named);
-        const char *field = "?";
-        for (uint32_t k = n; k-- > 0;) {
-            field = named[k].kind == o->kind && named[k].object == o->object ? named[k].field : field;
-        }
-        textf(&k_dim, "... %u more; query mode lists them all: object @%u.%s", o->count - SHOWN, o->record[0], field);
+        textf(&k_dim, "... %u more; query mode lists them all: object @%u.%s", o->count - SHOWN, o->record[0], o->field);
     }
     nt_ui_scroll_end(s_ctx);
 }

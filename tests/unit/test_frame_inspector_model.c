@@ -1219,8 +1219,8 @@ static const fi_frame_t *load_built(nt_gfx_capture_view_t view) {
 /* A GL name reads as the object it belonged to at its record: slot 1 and GL name 5 pass from a destroyed buffer to a
  * new one, a lazily re-created sampler takes its name inside the pipeline's texture set, and a query is a timer query. */
 static void test_gl_names_follow_their_objects(void) {
-    enum { GL_ARRAY_BUFFER = 0x8892, GL_QUERY_RESULT_AVAILABLE = 0x8867, GL_TEXTURE_MIN_FILTER = 0x2801, GL_LINEAR = 0x2601 };
-    nt_gfx_event_t ev[17];
+    enum { GL_ARRAY_BUFFER = 0x8892, GL_QUERY_RESULT_AVAILABLE = 0x8867 };
+    nt_gfx_event_t ev[13];
     memset(ev, 0, sizeof(ev));
     ev[0] = buffer_definition(0, 0x10001, 1, 1); /* snapshot: a, slot 1, GL name 5 */
     ev[1] = backend_buffer(0, 1, 5);
@@ -1235,15 +1235,8 @@ static void test_gl_names_follow_their_objects(void) {
     ev[10] = buffer_definition(7, 0x20001, 1, 3);
     ev[11] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_SEGMENT_POLL, .result = NT_GFX_RESULT_ACCEPTED};
     ev[12] = gl_call(11, NT_GFX_GL_glGetQueryObjectuiv, 9, GL_QUERY_RESULT_AVAILABLE); /* a query made before the frame */
-    ev[13] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_TEXTURE_SET, .object_kind = NT_GFX_OBJECT_PIPELINE, .object = 0x10009, .result = NT_GFX_RESULT_ACCEPTED};
-    ev[14] = gl_call(13, NT_GFX_GL_glGenSamplers, 1, 3);
-    ev[15] = gl_call(13, NT_GFX_GL_glSamplerParameteri, 3, GL_TEXTURE_MIN_FILTER);
-    ev[15].data.backend.args[2] = GL_LINEAR;
-    ev[15].arg_count = 3;
-    ev[16] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_DEFINITION, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_SAMPLER, .object = 2, .link = 14};
-    ev[16].data.sampler.gl_name = 3;
     static const char k_strings[] = "\0a\0b";
-    const fi_frame_t *fr = load_built((nt_gfx_capture_view_t){.events = ev, .count = 17, .strings = k_strings, .string_bytes = sizeof(k_strings)});
+    const fi_frame_t *fr = load_built((nt_gfx_capture_view_t){.events = ev, .count = 13, .strings = k_strings, .string_bytes = sizeof(k_strings)});
     static const struct {
         uint32_t record;
         const char *row;
@@ -1254,8 +1247,6 @@ static void test_gl_names_follow_their_objects(void) {
         {8, "glBindBuffer(GL_ARRAY_BUFFER,5 buf/b#1)"},
         {9, "DEFINITION STATE BUFFER slot=1 gl_name=5 buf/b#1"}, /* slot 1 is b's before its frontend definition */
         {12, "glGetQueryObjectuiv(9 timer query,GL_QUERY_RESULT_AVAILABLE)"},
-        {14, "glGenSamplers(1,3 smp/nearest_clamp#1)"}, /* the operation is the pipeline's: the sampler's definition names it */
-        {15, "glSamplerParameteri(3 smp/nearest_clamp#1,GL_TEXTURE_MIN_FILTER,GL_LINEAR)"},
     };
     char row[256];
     for (uint32_t k = 0; k < sizeof(k_rows) / sizeof(k_rows[0]); k++) {
@@ -1265,16 +1256,50 @@ static void test_gl_names_follow_their_objects(void) {
     fi_object_t b;
     fi_object(fr, NT_GFX_OBJECT_BUFFER, 0x20001, &b);
     TEST_ASSERT_EQUAL_UINT32(10, b.definition);
-    TEST_ASSERT_EQUAL_UINT32(1, b.span_count);
-    TEST_ASSERT_EQUAL_UINT32(5, b.span[0].name);
-    TEST_ASSERT_EQUAL_UINT32(7, b.span[0].from);
+    TEST_ASSERT_EQUAL_UINT32(5, b.gl_name);
+    TEST_ASSERT_EQUAL_UINT32(7, b.gl_from);
     fi_object_free(&b);
 }
 
+/* After a context loss a sampler keeps its handle: the snapshot defines it as a husk (no GL name), and its first
+ * texture set re-creates it lazily, in the pipeline's operation, before its new definition names the GL name. */
+static void test_a_lazy_sampler_takes_its_name(void) {
+    nt_gfx_event_t ev[4];
+    memset(ev, 0, sizeof(ev));
+    ev[0] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_DEFINITION, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_SAMPLER, .object = 2};
+    ev[1] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_TEXTURE_SET, .object_kind = NT_GFX_OBJECT_PIPELINE, .object = 0x10009, .result = NT_GFX_RESULT_ACCEPTED};
+    ev[2] = gl_call(1, NT_GFX_GL_glGenSamplers, 1, 3);
+    ev[3] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_DEFINITION, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_SAMPLER, .object = 2, .link = 2};
+    ev[3].data.sampler.gl_name = 3;
+    const fi_frame_t *fr = load_built((nt_gfx_capture_view_t){.events = ev, .count = 4, .strings = "", .string_bytes = 1});
+    char row[256];
+    fi_row_text(fr, 2, row, sizeof(row));
+    TEST_ASSERT_EQUAL_STRING("glGenSamplers(1,3 smp/nearest_clamp#1)", row);
+    fi_object_t smp;
+    fi_object(fr, NT_GFX_OBJECT_SAMPLER, 2, &smp);
+    TEST_ASSERT_EQUAL_UINT32(3, smp.definition); /* the latest definition, not the husk */
+    TEST_ASSERT_EQUAL_UINT32(3, smp.gl_name);
+    TEST_ASSERT_EQUAL_UINT32(2, smp.gl_from);
+    fi_object_free(&smp);
+}
+
+static nt_gfx_event_t layout_attribute(uint32_t location, uint32_t type, uint32_t count, bool normalized, uint32_t offset) {
+    nt_gfx_event_t e = {.kind = NT_GFX_EVENT_DEFINITION, .operation = NT_GFX_OP_ATTRIBUTE, .object_kind = NT_GFX_OBJECT_INSTANCE_LAYOUT, .object = 1};
+    e.data.attribute.stride = 44;
+    e.data.attribute.location = location;
+    e.data.attribute.type = type;
+    e.data.attribute.count = count;
+    e.data.attribute.normalized = normalized;
+    e.data.attribute.offset = offset;
+    e.data.attribute.divisor = 1;
+    return e;
+}
+
 /* A sampler and an instance layout are shared by content, so their content names them; a mag filter shows only
- * when it differs from the min filter's, a wrap per axis only when the axes differ. */
+ * when it differs from the min filter's, a wrap per axis only when the axes differ, an attribute's offset only when
+ * it does not follow the previous attribute. */
 static void test_shared_objects_take_their_content_as_name(void) {
-    nt_gfx_event_t ev[2];
+    nt_gfx_event_t ev[6];
     memset(ev, 0, sizeof(ev));
     ev[0] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_DEFINITION, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_SAMPLER, .object = 1};
     ev[0].data.sampler.gl_name = 3;
@@ -1286,16 +1311,20 @@ static void test_shared_objects_take_their_content_as_name(void) {
     ev[1] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_DEFINITION, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_INSTANCE_LAYOUT, .object = 1};
     ev[1].data.instance_layout.slot = 1;
     ev[1].data.instance_layout.stride = 44;
-    ev[1].data.instance_layout.locations = 0x9EU; /* 1-4 and 7 */
-    const fi_frame_t *fr = load_built((nt_gfx_capture_view_t){.events = ev, .count = 2, .strings = "", .string_bytes = 1});
+    ev[1].data.instance_layout.locations = 0x96U; /* 1, 2, 4, 7 */
+    ev[2] = layout_attribute(1, NT_VERTEX_FLOAT, 3, false, 0);
+    ev[3] = layout_attribute(2, NT_VERTEX_FLOAT, 3, false, 12);
+    ev[4] = layout_attribute(4, NT_VERTEX_UINT8, 4, true, 24);
+    ev[5] = layout_attribute(7, NT_VERTEX_HALF, 2, false, 32); /* 28 would follow: a gap */
+    const fi_frame_t *fr = load_built((nt_gfx_capture_view_t){.events = ev, .count = 6, .strings = "", .string_bytes = 1});
     char alias[FI_ALIAS_LEN];
     fi_alias_text(fr, NT_GFX_OBJECT_SAMPLER, 1, alias, sizeof(alias));
     TEST_ASSERT_EQUAL_STRING("smp/linear_mag_nearest_clamp_repeat_lequal#1", alias);
     fi_alias_text(fr, NT_GFX_OBJECT_INSTANCE_LAYOUT, 1, alias, sizeof(alias));
-    TEST_ASSERT_EQUAL_STRING("layout/44B:1-4,7#1", alias);
+    TEST_ASSERT_EQUAL_STRING("layout/44B:1fx3,2fx3,4u8x4n,7hx2@32#1", alias);
 }
 
-/* The restore, right after begin_frame's snapshot, makes the upload VAO first. */
+/* The restore, right after begin_frame's snapshot, resets the GL state and then makes the upload VAO. */
 static void test_a_restore_makes_the_upload_vao(void) {
     nt_gfx_event_t ev[2];
     memset(ev, 0, sizeof(ev));
@@ -1307,26 +1336,21 @@ static void test_a_restore_makes_the_upload_vao(void) {
     TEST_ASSERT_EQUAL_STRING("glGenVertexArrays(1,1 upload VAO)", row);
 }
 
-/* A streamed request whose execution issued no GL call shows the state where it ran: after the frame storage upload
- * (@0: nothing earlier issued), even when it made calls while recorded (@1, a lazy sampler); one that issued is its own. */
+/* A draw-phase request whose execution issued no GL call, with nothing issued before it, sits after the frame storage
+ * upload and before the next request's calls. */
 static void test_a_silent_request_takes_its_stream_point(void) {
     enum { GL_ARRAY_BUFFER = 0x8892 };
-    nt_gfx_event_t ev[7];
+    nt_gfx_event_t ev[5];
     memset(ev, 0, sizeof(ev));
     ev[0] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_VIEWPORT, .result = NT_GFX_RESULT_CACHE};
-    ev[1] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_TEXTURE_SET, .object_kind = NT_GFX_OBJECT_PIPELINE, .object = 0x10001, .result = NT_GFX_RESULT_ACCEPTED};
-    ev[2] = gl_call(1, NT_GFX_GL_glGenSamplers, 1, 3);
-    ev[3] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_VIEWPORT, .result = NT_GFX_RESULT_ACCEPTED};
-    ev[4] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_BUFFER_UPLOAD, .object_kind = NT_GFX_OBJECT_BUFFER, .object = 0x10002, .result = NT_GFX_RESULT_ACCEPTED};
-    ev[5] = gl_call(4, NT_GFX_GL_glBindBuffer, GL_ARRAY_BUFFER, 4);
-    ev[6] = gl_call(3, NT_GFX_GL_glViewport, 0, 0);
-    const fi_frame_t *fr = load_built((nt_gfx_capture_view_t){.events = ev, .count = 7, .strings = "", .string_bytes = 1, .execute_begin = 4, .execute_end = 7});
+    ev[1] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_VIEWPORT, .result = NT_GFX_RESULT_ACCEPTED};
+    ev[2] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_BUFFER_UPLOAD, .object_kind = NT_GFX_OBJECT_BUFFER, .object = 0x10002, .result = NT_GFX_RESULT_ACCEPTED};
+    ev[3] = gl_call(2, NT_GFX_GL_glBindBuffer, GL_ARRAY_BUFFER, 4);
+    ev[4] = gl_call(1, NT_GFX_GL_glViewport, 0, 0);
+    const fi_frame_t *fr = load_built((nt_gfx_capture_view_t){.events = ev, .count = 5, .strings = "", .string_bytes = 1, .execute_begin = 2, .execute_end = 5});
     static fi_state_view_t st;
-    static const uint32_t k_at[][2] = {{0, 5}, {1, 5}, {3, 6}};
-    for (uint32_t k = 0; k < 3; k++) {
-        fi_state_at(fr, k_at[k][0], &st);
-        TEST_ASSERT_EQUAL_UINT32(k_at[k][1], st.gl_at);
-    }
+    fi_state_at(fr, 0, &st);
+    TEST_ASSERT_EQUAL_UINT32(3, st.gl_at);
 }
 
 /* A silent request with nothing issued before it at end_frame still runs after the game's immediate calls: an
@@ -1346,6 +1370,23 @@ static void test_a_silent_request_runs_after_the_immediate_calls(void) {
     TEST_ASSERT_EQUAL_UINT32(3, st.gl_at); /* the last record before execution */
 }
 
+/* A create that failed after its backend made a name (a context loss while its default sampler was made) has no
+ * object: the name is nobody's, not the destroyed buffer's whose slot it reused. */
+static void test_a_failed_create_owns_no_name(void) {
+    nt_gfx_event_t ev[5];
+    memset(ev, 0, sizeof(ev));
+    ev[0] = buffer_definition(0, 0x10001, 1, 1);
+    ev[1] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_DESTROY, .object_kind = NT_GFX_OBJECT_BUFFER, .object = 0x10001, .result = NT_GFX_RESULT_ACCEPTED};
+    ev[2] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_BUFFER, .result = NT_GFX_RESULT_CONTEXT_LOST};
+    ev[3] = gl_call(2, NT_GFX_GL_glGenBuffers, 1, 7);
+    ev[4] = backend_buffer(3, 1, 7);
+    static const char k_strings[] = "\0a";
+    const fi_frame_t *fr = load_built((nt_gfx_capture_view_t){.events = ev, .count = 5, .strings = k_strings, .string_bytes = sizeof(k_strings)});
+    char row[256];
+    fi_row_text(fr, 4, row, sizeof(row));
+    TEST_ASSERT_EQUAL_STRING("DEFINITION STATE BUFFER slot=1 gl_name=7", row);
+}
+
 /* An overflowed frame opens with its records; its counters stay complete, so recount falls short. */
 static void test_an_overflowed_frame_opens(void) {
     const fi_frame_t *fr = capture(overflow_body);
@@ -1355,6 +1396,19 @@ static void test_an_overflowed_frame_opens(void) {
     (void)fi_counter_rows(fr, rows);
     TEST_ASSERT_EQUAL_STRING("vertices", rows[0].name);
     TEST_ASSERT_LESS_THAN_UINT64(rows[0].counter, rows[0].recount);
+    fi_named_t named[FI_NAMED];
+    uint32_t record = 0;
+    while (record < fr->view.count && fi_named_objects(fr, record, named) == 0) {
+        record++;
+    }
+    TEST_ASSERT_LESS_THAN_UINT32(fr->view.count, record);
+    char command[32];
+    (void)snprintf(command, sizeof(command), "object @%u", record);
+    fi_session_t session = {.files = &s_file, .file_count = 1};
+    fi_out_t out = {0};
+    TEST_ASSERT_TRUE(fi_query(&session, command, &out));
+    TEST_ASSERT_NOT_NULL(strstr(out.text, "\nincomplete  # the frame overflowed"));
+    free(out.text);
 }
 // #endregion
 
@@ -1383,6 +1437,8 @@ int main(void) {
     RUN_TEST(test_an_overflowed_frame_opens);
     RUN_TEST(test_gl_names_follow_their_objects);
     RUN_TEST(test_a_restore_makes_the_upload_vao);
+    RUN_TEST(test_a_lazy_sampler_takes_its_name);
+    RUN_TEST(test_a_failed_create_owns_no_name);
     RUN_TEST(test_shared_objects_take_their_content_as_name);
     RUN_TEST(test_a_silent_request_takes_its_stream_point);
     RUN_TEST(test_a_silent_request_runs_after_the_immediate_calls);

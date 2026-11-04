@@ -327,9 +327,14 @@ static void value_text(const fi_frame_t *fr, uint8_t meaning, uint8_t sub, uint3
 
 /* A GL name and what it stood for at its record: "19 prog/skeletal_showcase/text#1", "1 upload VAO", or the bare
  * name when the frame never recorded its owner or the row already names it (a definition's own name). */
+_Static_assert(FI_CONTENT_LABEL <= FI_ALIAS_LEN - 24U, "frame inspector: a content name fits an alias");
+
 static void gl_name_text(const fi_frame_t *fr, const nt_gfx_event_t *e, size_t at, uint32_t v, char *buf, size_t size) {
+    NT_ASSERT(e >= fr->view.events && e < fr->view.events + fr->view.count && "frame inspector: a row of another frame");
     const fi_gl_ref_t ref = fi_gl_ref(fr, (uint32_t)(e - fr->view.events), (uint32_t)at);
-    const char *role = fi_gl_role(ref.owner);
+    const char *role = NULL;
+    role = ref.owner == FI_GL_UPLOAD_VAO ? "upload VAO" : role;
+    role = ref.owner == FI_GL_TIMER_QUERY ? "timer query" : role;
     char alias[FI_ALIAS_LEN];
     if (ref.owner == FI_GL_OBJECT && !(ref.kind == e->object_kind && ref.object == e->object)) {
         fi_alias_text(fr, ref.kind, ref.object, alias, sizeof(alias));
@@ -1236,8 +1241,8 @@ static bool cmd_object(const fi_frame_t *fr, const char *arg, fi_out_t *out) {
     } else {
         put(out, "definition none  # the frame holds no CREATE definition of it\n");
     }
-    for (uint32_t k = 0; k < obj.span_count; k++) {
-        put(out, "gl_name %u from @%u\n", obj.span[k].name, obj.span[k].from);
+    if (obj.gl_name != 0) {
+        put(out, "gl_name %u from @%u\n", obj.gl_name, obj.gl_from);
     }
     put(out, "records %u\n", obj.count);
     uint32_t group = FI_NONE;

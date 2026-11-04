@@ -455,9 +455,8 @@ uint32_t fi_joined(const fi_frame_t *frame, uint32_t record) {
 }
 
 uint32_t fi_gl_draw(const fi_frame_t *frame, uint32_t record) {
-    const uint32_t joined = fi_joined(frame, record); /* the draw that wrote the command, never another merge */
-    const uint32_t head = joined != FI_NONE ? joined : record;
-    for (uint32_t i = head + 1U; i < frame->view.count; i++) {
+    const uint32_t head = fi_joined(frame, record); /* the draw that wrote the command, never another merge */
+    for (uint32_t i = head + 1U; head != FI_NONE && i < frame->view.count; i++) {
         const nt_gfx_event_t *e = &frame->view.events[i];
         if (e->kind == NT_GFX_EVENT_BACKEND && e->link == head + 1U && fi_is_draw_call(e->detail)) {
             return i;
@@ -613,29 +612,66 @@ const char *fi_locations_text(uint32_t v, char *buf, size_t size) {
     return v != 0 ? buf : NULL;
 }
 
-/* Samplers and instance layouts are shared by content, so a desc label is not theirs: their content names them
- * (linear_mip_linear_repeat, 44B:1-4). False for any other kind or a value the engine does not make. */
-static bool content_label(const nt_gfx_event_t *e, char out[FI_CONTENT_LABEL]) {
+_Static_assert(NT_FILTER_LINEAR_MIPMAP_LINEAR == 5 && NT_WRAP_MIRRORED_REPEAT == 2 && NT_COMPARE_NEVER == 8 && NT_VERTEX_INT16 == 5,
+               "frame inspector: an engine enum changed; update the content names");
+
+/* An instance layout by what makes it equal (nt_gfx.c instance_layout_equal): its stride, then per attribute its
+ * location, type, count, normalization, and its offset where it does not follow the previous one: 44B:1fx3,4u8x4n.
+ * The ATTRIBUTE definitions after its definition hold them. False for a type the engine does not make. */
+static bool layout_label(const nt_gfx_event_t *ev, uint32_t n, uint32_t i, char out[FI_CONTENT_LABEL]) {
+    static const char *const k_type[] = {"f", "h", "u8", "i8", "u16", "i16"};
+    static const uint8_t k_size[] = {4, 2, 1, 1, 2, 2};
+    size_t at = (size_t)snprintf(out, FI_CONTENT_LABEL, "%uB:", ev[i].data.instance_layout.stride);
+    uint32_t packed = 0;
+    for (uint32_t j = i + 1U; j < n && ev[j].kind == NT_GFX_EVENT_DEFINITION && ev[j].operation == NT_GFX_OP_ATTRIBUTE && ev[j].object == ev[i].object; j++) {
+        const uint32_t type = ev[j].data.attribute.type;
+        const uint32_t offset = ev[j].data.attribute.offset;
+        if (type >= sizeof(k_type) / sizeof(k_type[0])) {
+            return false;
+        }
+        if (at < FI_CONTENT_LABEL) {
+            at += (size_t)snprintf(out + at, FI_CONTENT_LABEL - at, "%s%u%sx%u%s", j > i + 1U ? "," : "", ev[j].data.attribute.location, k_type[type], ev[j].data.attribute.count,
+                                   ev[j].data.attribute.normalized != 0 ? "n" : "");
+        }
+        if (at < FI_CONTENT_LABEL && offset != packed) {
+            at += (size_t)snprintf(out + at, FI_CONTENT_LABEL - at, "@%u", offset);
+        }
+        packed = offset + (k_size[type] * ev[j].data.attribute.count);
+    }
+    return true;
+}
+
+/* A sampler by its filters, wraps and compare: linear_mip_linear_repeat. A mag filter shows only when it is not the
+ * min filter's own, a v wrap only when it differs from u. False for a value the engine does not make. */
+static bool sampler_label(const nt_gfx_event_t *e, char out[FI_CONTENT_LABEL]) {
     static const char *const k_filter[] = {"nearest", "linear", "nearest_mip_nearest", "linear_mip_nearest", "nearest_mip_linear", "linear_mip_linear"};
     static const char *const k_wrap[] = {"clamp", "repeat", "mirror"};
     static const char *const k_compare[] = {"", "_lequal", "_less", "_gequal", "_greater", "_equal", "_notequal", "_always", "_never"};
-    if (e->object_kind == NT_GFX_OBJECT_INSTANCE_LAYOUT) {
-        char locations[32];
-        (void)snprintf(out, FI_CONTENT_LABEL, "%uB:%s", e->data.instance_layout.stride, fi_locations_text(e->data.instance_layout.locations, locations, sizeof(locations)) != NULL ? locations : "");
-        return true;
-    }
     const uint32_t min = e->data.sampler.min_filter;
     const uint32_t mag = e->data.sampler.mag_filter;
     const uint32_t u = e->data.sampler.wrap_u;
     const uint32_t v = e->data.sampler.wrap_v;
     const uint32_t cmp = e->data.sampler.compare;
-    if (e->object_kind != NT_GFX_OBJECT_SAMPLER || min > 5U || mag > 1U || u > 2U || v > 2U || cmp > 8U) {
+    if (min > 5U || mag > 1U || u > 2U || v > 2U || cmp > 8U) {
         return false;
     }
-    /* mag only when it is not min's own filter; v only when it differs from u */
     (void)snprintf(out, FI_CONTENT_LABEL, "%s%s%s_%s%s%s%s", k_filter[min], mag != (min & 1U) ? "_mag_" : "", mag != (min & 1U) ? k_filter[mag] : "", k_wrap[u], v != u ? "_" : "",
                    v != u ? k_wrap[v] : "", k_compare[cmp]);
     return true;
+}
+
+/* The name definition i gives alias a: samplers and instance layouts are shared by content, so their content names
+ * them, never a desc label; other objects take their desc label. */
+static void name_alias(fi_frame_t *fr, uint32_t i, uint32_t a) {
+    const nt_gfx_event_t *e = &fr->view.events[i];
+    const bool layout = e->object_kind == NT_GFX_OBJECT_INSTANCE_LAYOUT;
+    const bool sampler = e->object_kind == NT_GFX_OBJECT_SAMPLER;
+    const nt_gfx_capture_string_t label = label_of(e);
+    if ((layout && layout_label(fr->view.events, fr->view.count, i, fr->content_label[a])) || (sampler && sampler_label(e, fr->content_label[a]))) {
+        fr->alias_label[a] = fr->content_label[a];
+    } else if (label != 0) {
+        fr->alias_label[a] = fr->view.strings + label;
+    }
 }
 
 /* Aliases: every handle the records name, in order of first use after the snapshot, then the snapshot's, so a
@@ -671,13 +707,8 @@ static void index_aliases(fi_frame_t *fr) {
                 fr->alias_label[count - 1U] = "";
             }
         }
-        const bool definition = e->kind == NT_GFX_EVENT_DEFINITION && e->operation == NT_GFX_OP_CREATE && e->object_kind != 0 && e->object_kind < FI_OBJECTS && e->object != 0;
-        const uint32_t a = definition ? *alias_slot(fr, e->object_kind, e->object) - 1U : 0U;
-        const nt_gfx_capture_string_t label = definition ? label_of(e) : 0U;
-        if (label != 0) {
-            fr->alias_label[a] = fr->view.strings + label;
-        } else if (definition && content_label(e, fr->content_label[a])) {
-            fr->alias_label[a] = fr->content_label[a];
+        if (e->kind == NT_GFX_EVENT_DEFINITION && e->operation == NT_GFX_OP_CREATE && e->object_kind != 0 && e->object_kind < FI_OBJECTS && e->object != 0) {
+            name_alias(fr, i, *alias_slot(fr, e->object_kind, e->object) - 1U);
         }
     }
     number_aliases(fr, count);
@@ -873,19 +904,6 @@ static uint8_t gl_kind_of(uint32_t kind) {
     }
 }
 
-const char *fi_gl_role(uint8_t owner) {
-    switch ((fi_gl_owner_t)owner) {
-    case FI_GL_UPLOAD_VAO:
-        return "upload VAO";
-    case FI_GL_TIMER_QUERY:
-        return "timer query";
-    case FI_GL_UNKNOWN:
-    case FI_GL_OBJECT:
-        return NULL;
-    }
-    return NULL;
-}
-
 /* The GL names a record holds: its GL_NAME fields, then an issued call's name arguments. */
 enum { FI_GL_NAMES = 24 };
 typedef struct {
@@ -961,9 +979,10 @@ static void own_name(gl_owners_t *o, uint8_t gl, uint32_t name, gl_owner_t owner
 
 static void own_slot(gl_owners_t *o, uint32_t kind, uint32_t slot, uint32_t object) { gl_entry(&o->slots, (uint8_t)kind, slot)->id = object; }
 
-/* A backend definition names its slot's object when recorded: the operation's object when it has the slot's kind
- * (its frontend definition follows), else the object an earlier frontend definition gave the slot (the snapshot
- * writes frontend definitions first; a program link finishes after its create). A husk's 0 is never looked up. */
+/* A backend definition names its slot's object when recorded: the object of an operation of the slot's kind (its
+ * frontend definition follows; none when the create failed), else the object an earlier frontend definition gave the
+ * slot (the snapshot writes frontend definitions first; a program link finishes after its create). A husk's 0 is
+ * never looked up. */
 static void learn_definition(gl_owners_t *o, const nt_gfx_event_t *e, const nt_gfx_event_t *op) {
     if (e->operation == NT_GFX_OP_STATE) {
         const uint32_t slot = e->data.backend_resource.slot;
@@ -972,8 +991,8 @@ static void learn_definition(gl_owners_t *o, const nt_gfx_event_t *e, const nt_g
         if (gl == NT_GFX_GL_OBJECT_NONE) {
             return;
         }
-        const bool ours = op != NULL && op->object_kind == e->detail && op->object != 0;
-        const uint32_t object = ours ? op->object : gl_entry(&o->slots, (uint8_t)e->detail, slot)->id;
+        const bool in_op = op != NULL && op->object_kind == e->detail; /* a create that failed has no object: nobody's */
+        const uint32_t object = in_op ? op->object : gl_entry(&o->slots, (uint8_t)e->detail, slot)->id;
         own_name(o, gl, name, (gl_owner_t){.owner = object != 0 ? (uint8_t)FI_GL_OBJECT : (uint8_t)FI_GL_UNKNOWN, .kind = (uint8_t)e->detail, .id = object});
         return;
     }
@@ -1136,7 +1155,6 @@ void fi_object(const fi_frame_t *frame, uint32_t kind, uint32_t object, fi_objec
     out->object = object;
     out->definition = FI_NONE;
     uint32_t *hits = (uint32_t *)fi_alloc(n, sizeof(uint32_t));
-    out->span = (fi_gl_span_t *)fi_alloc(frame->gl_first[n], sizeof(fi_gl_span_t)); /* at most one per GL name */
     uint32_t *per_group = (uint32_t *)fi_alloc((size_t)frame->group_count + 1U, sizeof(uint32_t));
     uint32_t count = 0;
     for (uint32_t i = 0; i < n; i++) {
@@ -1154,8 +1172,9 @@ void fi_object(const fi_frame_t *frame, uint32_t kind, uint32_t object, fi_objec
             const fi_gl_ref_t *ref = &frame->gl_ref[k];
             const uint32_t name = handle_at(e, ref->at);
             const bool held = ref->owner == FI_GL_OBJECT && ref->kind == kind && ref->object == object;
-            if (held && (out->span_count == 0 || out->span[out->span_count - 1U].name != name)) {
-                out->span[out->span_count++] = (fi_gl_span_t){.name = name, .from = i};
+            if (held && out->gl_name == 0) {
+                out->gl_name = name;
+                out->gl_from = i;
             }
         }
         if (names) {
@@ -1173,17 +1192,21 @@ void fi_object(const fi_frame_t *frame, uint32_t kind, uint32_t object, fi_objec
     }
     free(per_group);
     free(hits);
+    fi_named_t named[FI_NAMED];
+    const uint32_t m = count > 0 ? fi_named_objects(frame, out->record[0], named) : 0U;
+    for (uint32_t k = m; k-- > 0;) {
+        out->field = named[k].kind == kind && named[k].object == object ? named[k].field : out->field;
+    }
 }
 
 void fi_object_free(fi_object_t *object) {
     free(object->record);
-    free(object->span);
     memset(object, 0, sizeof(*object));
 }
 // #endregion
 
 // #region merge check
-/* A request the command stream carries to end_frame (nt_gfx.c), whatever its result. */
+/* A request of the draw phase (nt_gfx.c): the command stream carries it to end_frame when it records a command. */
 static bool streamed(const nt_gfx_event_t *e) {
     if (e->kind != NT_GFX_EVENT_OP || e->link != 0) {
         return false;
@@ -1822,22 +1845,20 @@ void fi_state_at(const fi_frame_t *frame, uint32_t at, fi_state_view_t *out) {
     for (uint32_t i = source + 1U; i < frame->view.count; i++) {
         out->gl_at = frame->parent[i] == source && frame->view.events[i].kind == NT_GFX_EVENT_BACKEND ? i : out->gl_at;
     }
-    /* A streamed request whose execution issued nothing (a state already set, or cache skips only) ran at end_frame
+    /* A draw-phase request whose execution issued nothing (a state already set, or cache skips only) sits at end_frame
      * after the frame storage upload and the requests before it: its GL state is the last call those issued, and it
      * compares with the draw it sits on. Operations recorded at end_frame (the upload) top at execute_begin or later. */
     const bool silent = gl_anchor == request && streamed(&frame->view.events[request]) && !in_execute(frame, out->gl_at);
-    uint32_t point = silent && frame->view.execute_end != 0 ? frame->view.execute_begin - 1U : FI_NONE; /* nothing issued yet: the game's calls */
-    bool commands = false;                                                                              /* past the upload: a game request's calls */
-    for (uint32_t i = frame->view.execute_begin; silent && i < frame->view.execute_end; i++) {
+    const bool executes = silent && frame->view.execute_begin > 0 && frame->view.execute_end != 0;
+    uint32_t point = executes ? frame->view.execute_begin - 1U : FI_NONE; /* nothing issued before it: after the game's calls */
+    for (uint32_t i = frame->view.execute_begin; executes && i < frame->view.execute_end; i++) {
         const uint32_t top = top_request(frame, i);
-        const bool upload = top >= frame->view.execute_begin;
-        if (frame->view.events[i].kind != NT_GFX_EVENT_BACKEND || (upload && commands)) {
+        if (frame->view.events[i].kind != NT_GFX_EVENT_BACKEND) {
             continue;
         }
-        if (!upload && top > request) {
+        if (top < frame->view.execute_begin && top > request) { /* the upload runs first, then the requests in order */
             break;
         }
-        commands = commands || !upload;
         point = i;
     }
     out->gl_at = point != FI_NONE ? point : out->gl_at;

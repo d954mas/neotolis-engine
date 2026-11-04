@@ -79,7 +79,7 @@ typedef struct {
 #define FI_RESULTS (NT_GFX_RESULT_UNKNOWN + 1)
 #define FI_OBJECTS (NT_GFX_OBJECT_INSTANCE_LAYOUT + 1)
 #define FI_KEY_LEN 160
-#define FI_CONTENT_LABEL 48
+#define FI_CONTENT_LABEL 104 /* the room fi_alias_text leaves a label */
 
 typedef struct {
     fi_cell_t op[NT_GFX_OP_COUNT][FI_RESULTS];
@@ -253,8 +253,7 @@ uint32_t fi_group_in(const fi_frame_t *to, const fi_frame_t *from, uint32_t g);
 uint32_t fi_parent(const fi_frame_t *frame, uint32_t id);
 /* The draw a merged (CACHE) draw joined; FI_NONE for anything else. */
 uint32_t fi_joined(const fi_frame_t *frame, uint32_t record);
-/* The GL draw call that drew a draw request: its own, or for a merged draw that of the draw its merges joined;
- * FI_NONE when no GL draw call names it. */
+/* The GL draw call a merged draw joined: the call of the draw that wrote the command; FI_NONE for any other record. */
 uint32_t fi_gl_draw(const fi_frame_t *frame, uint32_t record);
 /* Whether two records that set one piece of request state leave it alike: an inherited value (INITIAL)
  * and a request (OP) compare by value, a texture set by its textures. FI_NONE is unset. */
@@ -285,8 +284,6 @@ fi_arg_t fi_call_arg(uint32_t call, uint32_t k);
 
 /* The GL name at byte offset `at` of a record, resolved at that record. */
 fi_gl_ref_t fi_gl_ref(const fi_frame_t *frame, uint32_t record, uint32_t at);
-/* A role's words: "upload VAO", "timer query"; NULL for an object or an unknown name. */
-const char *fi_gl_role(uint8_t owner);
 
 /* The frontend objects a record names: its own object, its handle fields, a note's handle, and the GL names it
  * holds resolved at that record. field: the capture field's name, "obj", "value" (a note's handle) or an issued
@@ -299,19 +296,17 @@ typedef struct {
 #define FI_NAMED 28U
 uint32_t fi_named_objects(const fi_frame_t *frame, uint32_t record, fi_named_t out[FI_NAMED]);
 
-/* One object through the frame, by one scan: its definition, the GL names it held (a new one after a context
- * restore or a re-creation), and every record that names it, by group and then in record order. */
-typedef struct {
-    uint32_t name, from; /* a GL name, and the first record that names the object by it */
-} fi_gl_span_t;
+/* One object through the frame, by one scan: its definition, its GL name (a frame holds one: a lost context is
+ * dropped before the snapshot, a restore makes new objects), and every record that names it, by group and then in
+ * record order. */
 typedef struct {
     uint8_t kind;
     uint32_t object;
-    uint32_t definition; /* its latest CREATE definition, FI_NONE: the frame has none */
-    fi_gl_span_t *span;  /* malloc'd */
-    uint32_t span_count;
-    uint32_t *record; /* malloc'd */
+    uint32_t definition;       /* its latest CREATE definition, FI_NONE: the frame has none */
+    uint32_t gl_name, gl_from; /* its GL name and the first record that names it by it; 0: none */
+    uint32_t *record;          /* malloc'd */
     uint32_t count;
+    const char *field; /* the field record[0] names it by, for object @N.FIELD */
 } fi_object_t;
 void fi_object(const fi_frame_t *frame, uint32_t kind, uint32_t object, fi_object_t *out);
 void fi_object_free(fi_object_t *object);
