@@ -497,7 +497,7 @@ enum { FI_HANDLES = 4 };
 typedef struct {
     uint8_t kind[FI_HANDLES];
     uint16_t at[FI_HANDLES];
-    const char *field[FI_HANDLES]; /* the capture field's name, "obj", or NULL for a note's handle */
+    const char *field[FI_HANDLES]; /* the capture field's name, "obj", or "value" for a note's handle (its key is game text) */
     uint32_t count;
 } handles_t;
 
@@ -510,7 +510,7 @@ static void add_handle(handles_t *h, uint32_t kind, size_t at, const char *field
 static handles_t handles_of(const nt_gfx_event_t *e) {
     handles_t h = {0};
     if (e->kind == NT_GFX_EVENT_NOTE_FIELD && e->field.type == NT_GFX_NOTE_HANDLE && e->field.value.handle.kind < FI_OBJECTS) {
-        add_handle(&h, e->field.value.handle.kind, offsetof(nt_gfx_event_t, field.value.handle.id), NULL);
+        add_handle(&h, e->field.value.handle.kind, offsetof(nt_gfx_event_t, field.value.handle.id), "value");
     }
     if (!is_gfx(e)) {
         return h;
@@ -922,13 +922,11 @@ static gl_names_t gl_names_of(const nt_gfx_event_t *e) {
     return g;
 }
 
-/* Who a GL name or a backend slot belongs to as the frame recorded it so far. A name's owner is an object
- * directly, an object's backend slot (via_slot: id is the slot, kind its object kind), or a role; a slot's
- * owner is the object (id) that holds it. space 0 marks an empty entry. */
+/* Who a GL name or a backend slot belongs to as the frame recorded it so far: a name's owner is an object (kind,
+ * id) or a role; a slot's is the object (id) that holds it. space 0 marks an empty entry. */
 typedef struct {
     uint32_t key, id;
     uint8_t space, owner, kind;
-    bool via_slot;
 } gl_owner_t;
 typedef struct {
     gl_owner_t *entry;
@@ -959,13 +957,13 @@ static void own_name(gl_owners_t *o, uint8_t gl, uint32_t name, gl_owner_t owner
     e->owner = owner.owner;
     e->kind = owner.kind;
     e->id = owner.id;
-    e->via_slot = owner.via_slot;
 }
 
 static void own_slot(gl_owners_t *o, uint32_t kind, uint32_t slot, uint32_t object) { gl_entry(&o->slots, (uint8_t)kind, slot)->id = object; }
 
-/* In an operation on an object of a backend definition's kind, the slot is that object's before its frontend
- * definition says so. A husk's 0 slot or name is never looked up. */
+/* A backend definition names its slot's object when recorded: the operation's object when it has the slot's kind
+ * (its frontend definition follows), else the object an earlier frontend definition gave the slot (the snapshot
+ * writes frontend definitions first; a program link finishes after its create). A husk's 0 is never looked up. */
 static void learn_definition(gl_owners_t *o, const nt_gfx_event_t *e, const nt_gfx_event_t *op) {
     if (e->operation == NT_GFX_OP_STATE) {
         const uint32_t slot = e->data.backend_resource.slot;
@@ -974,10 +972,9 @@ static void learn_definition(gl_owners_t *o, const nt_gfx_event_t *e, const nt_g
         if (gl == NT_GFX_GL_OBJECT_NONE) {
             return;
         }
-        own_name(o, gl, name, (gl_owner_t){.owner = FI_GL_OBJECT, .kind = (uint8_t)e->detail, .id = slot, .via_slot = true});
-        if (op != NULL && op->object_kind == e->detail && op->object != 0) {
-            own_slot(o, e->detail, slot, op->object);
-        }
+        const bool ours = op != NULL && op->object_kind == e->detail && op->object != 0;
+        const uint32_t object = ours ? op->object : gl_entry(&o->slots, (uint8_t)e->detail, slot)->id;
+        own_name(o, gl, name, (gl_owner_t){.owner = object != 0 ? (uint8_t)FI_GL_OBJECT : (uint8_t)FI_GL_UNKNOWN, .kind = (uint8_t)e->detail, .id = object});
         return;
     }
     const uint32_t v = backend_of(e);
@@ -1036,12 +1033,7 @@ static void learn(const fi_frame_t *fr, gl_owners_t *o, uint32_t i) {
 /* The engine's only queries are its timer queries, so a query name reads as one even when made before the frame. */
 static fi_gl_ref_t resolve(gl_owners_t *o, uint8_t gl, uint32_t name, uint16_t at) {
     const gl_owner_t *e = gl_entry(&o->names, gl, name);
-    fi_gl_ref_t ref = {.at = at, .owner = gl == NT_GFX_GL_OBJECT_QUERY ? (uint8_t)FI_GL_TIMER_QUERY : e->owner, .kind = e->kind, .object = e->id};
-    if (e->owner == FI_GL_OBJECT && e->via_slot) {
-        ref.object = gl_entry(&o->slots, e->kind, e->id)->id;
-        ref.owner = ref.object != 0 ? FI_GL_OBJECT : FI_GL_UNKNOWN;
-    }
-    return ref;
+    return (fi_gl_ref_t){.at = at, .owner = gl == NT_GFX_GL_OBJECT_QUERY ? (uint8_t)FI_GL_TIMER_QUERY : e->owner, .kind = e->kind, .object = e->id};
 }
 
 /* Every GL name of every record resolved at its record, in one forward pass: slots and GL names are reused within
@@ -1125,7 +1117,7 @@ uint32_t fi_named_objects(const fi_frame_t *frame, uint32_t record, fi_named_t o
     uint32_t n = 0;
     const handles_t h = handles_of(e);
     for (uint32_t k = 0; k < h.count; k++) {
-        add_named(out, &n, h.field[k] != NULL ? h.field[k] : frame->view.strings + e->field.key, h.kind[k], handle_at(e, h.at[k]));
+        add_named(out, &n, h.field[k], h.kind[k], handle_at(e, h.at[k]));
     }
     for (uint32_t k = frame->gl_first[record]; k < frame->gl_first[record + 1U]; k++) {
         const fi_gl_ref_t *ref = &frame->gl_ref[k];
@@ -1834,8 +1826,8 @@ void fi_state_at(const fi_frame_t *frame, uint32_t at, fi_state_view_t *out) {
      * after the frame storage upload and the requests before it: its GL state is the last call those issued, and it
      * compares with the draw it sits on. Operations recorded at end_frame (the upload) top at execute_begin or later. */
     const bool silent = gl_anchor == request && streamed(&frame->view.events[request]) && !in_execute(frame, out->gl_at);
-    uint32_t point = FI_NONE;
-    bool commands = false; /* past the upload: a game request's calls */
+    uint32_t point = silent && frame->view.execute_end != 0 ? frame->view.execute_begin - 1U : FI_NONE; /* nothing issued yet: the game's calls */
+    bool commands = false;                                                                              /* past the upload: a game request's calls */
     for (uint32_t i = frame->view.execute_begin; silent && i < frame->view.execute_end; i++) {
         const uint32_t top = top_request(frame, i);
         const bool upload = top >= frame->view.execute_begin;

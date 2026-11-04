@@ -289,7 +289,8 @@ fi_gl_ref_t fi_gl_ref(const fi_frame_t *frame, uint32_t record, uint32_t at);
 const char *fi_gl_role(uint8_t owner);
 
 /* The frontend objects a record names: its own object, its handle fields, a note's handle, and the GL names it
- * holds resolved at that record. field: the capture field's name, "obj", or an issued call's argument index. */
+ * holds resolved at that record. field: the capture field's name, "obj", "value" (a note's handle) or an issued
+ * call's argument index; never game text, so it is a command token. */
 typedef struct {
     const char *field;
     uint8_t kind;

@@ -159,6 +159,8 @@ static void test_object_lists_where_it_is_named(void) {
     assert_holds(ask("object @114.array_buffer", true), "\n  @649  glBindBuffer(GL_ARRAY_BUFFER,3 buf/frame_vertex#1)\ngroup g1  # > shape\n  @202  ");
     TEST_ASSERT_NULL(strstr(ask("record @79", true), "object gl_name")); /* a definition's own GL name is not a second object */
     assert_holds(ask("object @000000000000000000000000009", false), "error: the frame has no record @000000000000000000000000009");
+    /* a note's handle is selected by value: its key is game text, never a command token */
+    assert_holds(ask("record @218", true), "\nobject value tex#1  # object @218.value\n");
     assert_holds(ask("object @128.unit", false), "error: record @128 names no object by unit");
     assert_holds(ask("object @1", false), "error: record @1 names no object;");
     assert_holds(ask("object", false), "error: object needs @N[.FIELD]");

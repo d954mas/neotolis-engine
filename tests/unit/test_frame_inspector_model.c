@@ -1329,6 +1329,23 @@ static void test_a_silent_request_takes_its_stream_point(void) {
     }
 }
 
+/* A silent request with nothing issued before it at end_frame still runs after the game's immediate calls: an
+ * update_buffer recorded after it binds buffer 9 before the stream executes. */
+static void test_a_silent_request_runs_after_the_immediate_calls(void) {
+    enum { GL_ARRAY_BUFFER = 0x8892 };
+    nt_gfx_event_t ev[5];
+    memset(ev, 0, sizeof(ev));
+    ev[0] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_VIEWPORT, .result = NT_GFX_RESULT_CACHE};
+    ev[1] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_BUFFER_UPLOAD, .object_kind = NT_GFX_OBJECT_BUFFER, .object = 0x10002, .result = NT_GFX_RESULT_ACCEPTED};
+    ev[2] = gl_call(1, NT_GFX_GL_glBindBuffer, GL_ARRAY_BUFFER, 9);
+    ev[3] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_VIEWPORT, .result = NT_GFX_RESULT_ACCEPTED};
+    ev[4] = gl_call(3, NT_GFX_GL_glViewport, 0, 0);
+    const fi_frame_t *fr = load_built((nt_gfx_capture_view_t){.events = ev, .count = 5, .strings = "", .string_bytes = 1, .execute_begin = 4, .execute_end = 5});
+    static fi_state_view_t st;
+    fi_state_at(fr, 0, &st);
+    TEST_ASSERT_EQUAL_UINT32(3, st.gl_at); /* the last record before execution */
+}
+
 /* An overflowed frame opens with its records; its counters stay complete, so recount falls short. */
 static void test_an_overflowed_frame_opens(void) {
     const fi_frame_t *fr = capture(overflow_body);
@@ -1368,6 +1385,7 @@ int main(void) {
     RUN_TEST(test_a_restore_makes_the_upload_vao);
     RUN_TEST(test_shared_objects_take_their_content_as_name);
     RUN_TEST(test_a_silent_request_takes_its_stream_point);
+    RUN_TEST(test_a_silent_request_runs_after_the_immediate_calls);
     RUN_TEST(test_compare_aligns_requests_and_names_changes);
     RUN_TEST(test_compare_pairs_handles_by_alias);
     RUN_TEST(test_compare_names_note_handles_and_read_sources);
