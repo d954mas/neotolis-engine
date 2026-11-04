@@ -116,10 +116,12 @@ typedef enum { VIEW_LOGICAL, VIEW_RAW, VIEW_GL, VIEW_COUNT } view_t;
 typedef enum { PAGE_FRAMES, PAGE_COMMANDS, PAGE_INFO, PAGE_COMPARE, PAGE_INIT, PAGE_END, PAGE_COUNT } page_t;
 typedef enum { TRACK_DRAW_CALLS, TRACK_GL_CALLS, TRACK_UPLOAD, TRACK_RECORDS, TRACK_COUNT } track_t;
 
-/* A place to go back to: a page, a frame and the row selected there. */
+/* A place to go back to: a page, a frame, the row selected there and the number filtering Commands. */
 typedef struct {
     int page;
     uint32_t file, frame, selected;
+    fi_query_t query;
+    char query_label[96];
 } place_t;
 
 static struct {
@@ -479,13 +481,20 @@ static void reveal(uint32_t id) {
     s.flash_until = nt_time_now() + 0.8;
 }
 
-static place_t here(void) { return (place_t){.page = s.page, .file = s.file, .frame = s.frame, .selected = s.selected}; }
+static bool same_query(fi_query_t a, fi_query_t b);
+static void declare_object_filter(const fi_frame_t *fr);
+
+static place_t here(void) {
+    place_t p = {.page = s.page, .file = s.file, .frame = s.frame, .selected = s.selected, .query = s.query};
+    (void)snprintf(p.query_label, sizeof(p.query_label), "%s", s.query_label);
+    return p;
+}
 
 /* Pushes the current place for Back, unless it is already the last one. */
 static void remember(void) {
     const place_t now = here();
     const place_t *top = s.history_count > 0 ? &s.history[s.history_count - 1U] : NULL;
-    if (top != NULL && memcmp(top, &now, sizeof(now)) == 0) {
+    if (top != NULL && top->page == now.page && top->file == now.file && top->frame == now.frame && top->selected == now.selected && same_query(top->query, now.query)) {
         return;
     }
     if (s.history_count == HISTORY) {
@@ -501,6 +510,11 @@ static void go_to(place_t p) {
         select_frame(p.file, p.frame);
     }
     s.page = p.page;
+    if (!same_query(p.query, s.query)) { /* the filter it had */
+        s.query = p.query;
+        (void)snprintf(s.query_label, sizeof(s.query_label), "%s", p.query_label);
+        s.dirty = true;
+    }
     if (p.selected != FI_NONE) {
         reveal(p.selected);
     } else {
@@ -1283,7 +1297,12 @@ static void declare_tree_bar(void) {
     }
     ROW_(6) {
         if (filtering()) {
-            textf(&k_link, "showing: %s  (%u of %u records)", s.query.kind != FI_Q_NONE ? s.query_label : "filtered", s.vis_count, frame_sel()->view.count);
+            if (s.query.kind == FI_Q_OBJECT) {
+                declare_object_filter(frame_sel());
+            } else {
+                textf(&k_text, "showing: %s", s.query.kind != FI_Q_NONE ? s.query_label : "filtered");
+            }
+            textf(&k_dim, "(%u of %u records)", s.vis_count, frame_sel()->view.count);
             if (button("clear", &k_text, false)) {
                 clear_filters();
             }
@@ -2103,6 +2122,65 @@ static struct {
 
 static uint32_t panel_prev_draw(void) { return s_panel.st.was; }
 
+static bool names(const fi_named_t *named, uint32_t n, const fi_named_t *o) {
+    for (uint32_t j = 0; j < n; j++) {
+        if (named[j].kind == o->kind && named[j].object == o->object) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Per object the selected record names: its latest definition and the records that name it, in one pass. */
+static void panel_objects(const fi_frame_t *fr, uint32_t at) {
+    s_panel.named_count = fi_named_objects(fr, at, s_panel.named);
+    for (uint32_t k = 0; k < s_panel.named_count; k++) {
+        s_panel.named_def[k] = FI_NONE;
+        s_panel.named_records[k] = 0;
+    }
+    for (uint32_t i = 0; s_panel.named_count > 0 && i < fr->view.count; i++) {
+        const nt_gfx_event_t *e = &fr->view.events[i];
+        const bool definition = e->kind == NT_GFX_EVENT_DEFINITION && e->operation == NT_GFX_OP_CREATE;
+        fi_named_t named[FI_NAMED];
+        const uint32_t m = fi_named_objects(fr, i, named);
+        for (uint32_t k = 0; k < s_panel.named_count; k++) {
+            const fi_named_t *o = &s_panel.named[k];
+            s_panel.named_def[k] = definition && e->object_kind == o->kind && e->object == o->object ? i : s_panel.named_def[k];
+            s_panel.named_records[k] += names(named, m, o) ? 1U : 0U;
+        }
+    }
+}
+
+/* The filter line of an object: its name, a link to its definition, its GL name; built from the shown frame, so
+ * it never names a record of the frame it was set in. */
+static void declare_object_filter(const fi_frame_t *fr) {
+    static struct {
+        uint32_t epoch;
+        fi_query_t q;
+        fi_object_t o;
+    } c = {.epoch = FI_NONE};
+    if (c.epoch != s.frame_epoch || !same_query(c.q, s.query)) {
+        c.epoch = s.frame_epoch;
+        c.q = s.query;
+        c.o = fi_object(fr, s.query.b, s.query.a);
+    }
+    char alias[FI_ALIAS_LEN];
+    fi_alias_text(fr, s.query.b, s.query.a, alias, sizeof(alias));
+    textf(&k_text, "showing records naming %s:", alias);
+    if (c.o.definition != FI_NONE) {
+        char what[24];
+        (void)snprintf(what, sizeof(what), "defined @%u", c.o.definition);
+        if (button(what, &k_link, false)) {
+            select_record(c.o.definition);
+        }
+    } else {
+        text("no definition in this frame", &k_dim);
+    }
+    if (c.o.gl_name != 0) {
+        textf(&k_text, "GL name %u", c.o.gl_name);
+    }
+}
+
 static void panel_cache(const fi_frame_t *fr, uint32_t at) {
     if (s_panel.epoch == s.frame_epoch && s_panel.at == at) {
         return;
@@ -2119,22 +2197,7 @@ static void panel_cache(const fi_frame_t *fr, uint32_t at) {
     }
     s_panel.verdict = fi_verdict(fr, at);
     s_panel.gl_draw = fi_gl_draw(fr, at);
-    s_panel.named_count = fi_named_objects(fr, at, s_panel.named);
-    for (uint32_t k = 0; k < s_panel.named_count; k++) {
-        s_panel.named_def[k] = fi_object(fr, s_panel.named[k].kind, s_panel.named[k].object).definition;
-        s_panel.named_records[k] = 0;
-    }
-    for (uint32_t i = 0; s_panel.named_count > 0 && i < fr->view.count; i++) {
-        fi_named_t named[FI_NAMED];
-        const uint32_t m = fi_named_objects(fr, i, named);
-        for (uint32_t k = 0; k < s_panel.named_count; k++) {
-            bool names = false;
-            for (uint32_t j = 0; j < m; j++) {
-                names = names || (named[j].kind == s_panel.named[k].kind && named[j].object == s_panel.named[k].object);
-            }
-            s_panel.named_records[k] += names ? 1U : 0U;
-        }
-    }
+    panel_objects(fr, at);
 }
 
 static const fi_state_view_t *panel_state(const fi_frame_t *fr, uint32_t at) {
@@ -2175,21 +2238,8 @@ static void declare_verdict(const fi_frame_t *fr, uint32_t id) {
     }
 }
 
-/* Commands shows only the records that name an object; the label says where it is defined and its GL name. */
-static void filter_object(const fi_frame_t *fr, uint32_t kind, uint32_t object, const char *alias) {
-    const fi_object_t o = fi_object(fr, kind, object);
-    char label[96];
-    char defined[24] = "no definition";
-    char gl[24] = "";
-    if (o.definition != FI_NONE) {
-        (void)snprintf(defined, sizeof(defined), "defined @%u", o.definition);
-    }
-    if (o.gl_name != 0) {
-        (void)snprintf(gl, sizeof(gl), ", GL name %u", o.gl_name);
-    }
-    (void)snprintf(label, sizeof(label), "records naming %s (%s%s)", alias, defined, gl);
-    set_query((fi_query_t){.kind = FI_Q_OBJECT, .a = object, .b = (uint8_t)kind}, label);
-}
+/* Commands shows only the records that name an object. */
+static void filter_object(uint32_t kind, uint32_t object) { set_query((fi_query_t){.kind = FI_Q_OBJECT, .a = object, .b = (uint8_t)kind}, ""); }
 
 /* One object the selected record names: the name links to its definition, as every record link does; the record
  * count filters Commands to the records that name it, as a number on Information does. */
@@ -2212,8 +2262,9 @@ static void object_row(const fi_frame_t *fr, uint32_t k) {
         if (ev.clicked && linked) {
             select_record(s_panel.named_def[k]);
         }
-        if (button(count, &k_link, false)) {
-            filter_object(fr, o->kind, o->object, alias);
+        const fi_query_t q = {.kind = FI_Q_OBJECT, .a = o->object, .b = o->kind};
+        if (button(count, &k_link, same_query(s.query, q))) {
+            filter_object(o->kind, o->object);
         }
     }
 }
@@ -2250,7 +2301,6 @@ static void declare_details(const fi_frame_t *fr) {
     }
     textf(&k_dim, "group: %s", fr->group_key[fr->group[id]]);
     declare_objects(fr, id);
-    panel_cache(fr, id);
     for (uint32_t k = 0; k < s_panel.child_count; k++) {
         if (k == 0) {
             section("GL calls and records it caused");
@@ -2760,7 +2810,7 @@ static void frame(void) {
 
 // #region main
 /* Files to open, --monkey SECONDS [SEED], and where the window opens: --frame INDEX (the frame's index across
- * the files), --base INDEX (Compare's A), --page frames|commands|info|compare|init|end|object, --select RECORD (its
+ * the files), --base INDEX (Compare's A), --page frames|commands|info|compare|init|end, --select RECORD (its
  * @ number), --object FIELD (filter Commands to the object the selected record names by FIELD), --filter TEXT. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void parse_args(int argc, char *argv[]) {
@@ -2816,12 +2866,23 @@ static void parse_args(int argc, char *argv[]) {
     if (base != NULL && !(isdigit((unsigned char)base[0]) && *end == '\0' && fi_frame_at(s.files, s.file_count, base_index, &s.base_file, &s.base_frame))) {
         nt_log_error("frame_inspector: no readable base frame %s in the open files", base);
     }
+    const fi_frame_t *fr = frame_sel();
+    const uint32_t record = select != NULL ? (uint32_t)strtoul(select[0] == '@' ? select + 1 : select, NULL, 10) : FI_NONE;
+    fi_named_t named[FI_NAMED];
+    const uint32_t n = object != NULL && select != NULL && frame_ok(fr) && record < fr->view.count ? fi_named_objects(fr, record, named) : 0U;
+    uint32_t k = 0;
+    while (k < n && strcmp(named[k].field, object) != 0) {
+        k++;
+    }
+    if (k < n) {
+        filter_object(named[k].kind, named[k].object);
+    } else if (object != NULL) {
+        nt_log_error("frame_inspector: --object %s needs --select of a record that names an object by that field", object);
+    }
     if (filter != NULL) {
         (void)snprintf(s.filter, sizeof(s.filter), "%s", filter);
         s.dirty = true;
     }
-    const fi_frame_t *fr = frame_sel();
-    const uint32_t record = select != NULL ? (uint32_t)strtoul(select[0] == '@' ? select + 1 : select, NULL, 10) : FI_NONE;
     if (select != NULL && frame_ok(fr) && record < fr->view.count) {
         reveal(record);
         s.page = PAGE_COMMANDS;
@@ -2830,19 +2891,6 @@ static void parse_args(int argc, char *argv[]) {
     }
     for (int p = 0; page != NULL && p < PAGE_COUNT; p++) {
         s.page = strcmp(page, k_pages[p]) == 0 ? p : s.page;
-    }
-    fi_named_t named[FI_NAMED];
-    const uint32_t n = object != NULL && select != NULL && frame_ok(fr) && record < fr->view.count ? fi_named_objects(fr, record, named) : 0U;
-    uint32_t k = 0;
-    while (k < n && strcmp(named[k].field, object) != 0) {
-        k++;
-    }
-    if (k < n) {
-        char alias[FI_ALIAS_LEN];
-        fi_alias_text(fr, named[k].kind, named[k].object, alias, sizeof(alias));
-        filter_object(fr, named[k].kind, named[k].object, alias);
-    } else if (object != NULL) {
-        nt_log_error("frame_inspector: --object %s needs --select of a record that names an object by that field", object);
     }
 }
 

@@ -1506,7 +1506,7 @@ DEFINITION, NOTE_FIELD) and strings as text. Handles compare as aliases: an obje
 among the frame's objects of that kind and label, counted by first use in the frame's work, then in the
 snapshot (`vi/mesh#3`, unlabeled `vi#3`); samplers and instance layouts, shared by content, take it as their label
 (`smp/linear_mip_linear_repeat#1`, `layout/44B:1-4~ac44#1`: stride and locations, then a hash of the attributes'
-types, counts, normalization and offsets, which its ATTRIBUTE definitions print). Runs whose handles differ still pair, a live object the frame never
+locations, types, counts, normalization and offsets, which its ATTRIBUTE definitions print). Runs whose handles differ still pair, a live object the frame never
 uses shifts no number, and an object of another label shifts none of this label's; a renamed object is another
 object; GL calls are counted per request, not aligned, as backends issue different
 calls for one request. Between their common start and end, requests more than 1024 edits apart list A's,
@@ -1527,8 +1527,9 @@ again only through a create call, which owns it anew, so deletes and restores en
 timer query. A name nothing recorded reads as its number. An object a record
 names filters Commands to the records that name it, and `object @N[.FIELD]` lists them after the object's
 definition and GL name; a file's handles stay with that file. A frame holds
-one GL name per object: a lost context is dropped before the snapshot, and a restore makes new objects. A
-definition's own GL name reads as its number, as its row already names the object. A draw-phase request whose
+one GL name per object: the objects of a lost context are husks in its snapshot, and a restore makes new objects.
+A frontend definition's own GL name reads as its number, as its row already names the object. An accepted or
+already-set draw-phase request whose
 execution issued no GL call (a state already set) shows the GL state where it sits in the stream: after the game's
 calls before end_frame, the frame storage upload and the last call of the requests before it, compared with the
 draw it sits on.

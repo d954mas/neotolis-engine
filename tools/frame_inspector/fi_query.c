@@ -1243,7 +1243,7 @@ static bool cmd_object(const fi_frame_t *fr, const char *arg, fi_out_t *out) {
         put(out, "definition none  # the frame holds no CREATE definition of it\n");
     }
     if (obj.gl_name != 0) {
-        put(out, "gl_name %u from @%u\n", obj.gl_name, obj.gl_from);
+        put(out, "gl_name %u\n", obj.gl_name);
     }
     put_matches(fr, (fi_query_t){.kind = FI_Q_OBJECT, .a = named[pick].object, .b = named[pick].kind}, "", out);
     return true;

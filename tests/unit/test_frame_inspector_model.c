@@ -1217,7 +1217,7 @@ static const fi_frame_t *load_built(nt_gfx_capture_view_t view) {
 }
 
 /* A GL name reads as the object it belonged to at its record: slot 1 and GL name 5 pass from a destroyed buffer to a
- * new one, a lazily re-created sampler takes its name inside the pipeline's texture set, and a query is a timer query. */
+ * new one, and a query is a timer query. */
 static void test_gl_names_follow_their_objects(void) {
     enum { GL_ARRAY_BUFFER = 0x8892, GL_QUERY_RESULT_AVAILABLE = 0x8867 };
     nt_gfx_event_t ev[13];
@@ -1256,7 +1256,6 @@ static void test_gl_names_follow_their_objects(void) {
     const fi_object_t b = fi_object(fr, NT_GFX_OBJECT_BUFFER, 0x20001);
     TEST_ASSERT_EQUAL_UINT32(10, b.definition);
     TEST_ASSERT_EQUAL_UINT32(5, b.gl_name);
-    TEST_ASSERT_EQUAL_UINT32(7, b.gl_from);
     /* the records that name b: its create and its own records, none of a's */
     static const uint32_t k_b[] = {6, 7, 8, 9, 10};
     uint32_t n = 0;
@@ -1286,7 +1285,6 @@ static void test_a_lazy_sampler_takes_its_name(void) {
     const fi_object_t smp = fi_object(fr, NT_GFX_OBJECT_SAMPLER, 2);
     TEST_ASSERT_EQUAL_UINT32(3, smp.definition); /* the latest definition, not the husk */
     TEST_ASSERT_EQUAL_UINT32(3, smp.gl_name);
-    TEST_ASSERT_EQUAL_UINT32(2, smp.gl_from);
 }
 
 static nt_gfx_event_t layout_attribute(uint32_t location, uint32_t type, uint32_t count, bool normalized, uint32_t offset) {
@@ -1352,51 +1350,63 @@ static void test_a_restore_makes_the_upload_vao(void) {
  * upload and before the next request's calls. */
 static void test_a_silent_request_takes_its_stream_point(void) {
     enum { GL_ARRAY_BUFFER = 0x8892 };
-    nt_gfx_event_t ev[5];
+    nt_gfx_event_t ev[6];
     memset(ev, 0, sizeof(ev));
-    ev[0] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_VIEWPORT, .result = NT_GFX_RESULT_CACHE};
-    ev[1] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_VIEWPORT, .result = NT_GFX_RESULT_ACCEPTED};
-    ev[2] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_BUFFER_UPLOAD, .object_kind = NT_GFX_OBJECT_BUFFER, .object = 0x10002, .result = NT_GFX_RESULT_ACCEPTED};
-    ev[3] = gl_call(2, NT_GFX_GL_glBindBuffer, GL_ARRAY_BUFFER, 4);
-    ev[4] = gl_call(1, NT_GFX_GL_glViewport, 0, 0);
-    const fi_frame_t *fr = load_built((nt_gfx_capture_view_t){.events = ev, .count = 5, .strings = "", .string_bytes = 1, .execute_begin = 2, .execute_end = 5});
+    ev[0] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_PASS, .result = NT_GFX_RESULT_ACCEPTED}; /* a pass whose state GL held */
+    ev[1] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_VIEWPORT, .result = NT_GFX_RESULT_CACHE};
+    ev[2] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_VIEWPORT, .result = NT_GFX_RESULT_ACCEPTED};
+    ev[3] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_BUFFER_UPLOAD, .object_kind = NT_GFX_OBJECT_BUFFER, .object = 0x10002, .result = NT_GFX_RESULT_ACCEPTED};
+    ev[4] = gl_call(3, NT_GFX_GL_glBindBuffer, GL_ARRAY_BUFFER, 4);
+    ev[5] = gl_call(2, NT_GFX_GL_glViewport, 0, 0);
+    const fi_frame_t *fr = load_built((nt_gfx_capture_view_t){.events = ev, .count = 6, .strings = "", .string_bytes = 1, .execute_begin = 3, .execute_end = 6});
     static fi_state_view_t st;
-    fi_state_at(fr, 0, &st);
-    TEST_ASSERT_EQUAL_UINT32(3, st.gl_at);
+    fi_state_at(fr, 1, &st);
+    TEST_ASSERT_EQUAL_UINT32(4, st.gl_at);
 }
 
 /* A silent request with nothing issued before it at end_frame still runs after the game's immediate calls: an
  * update_buffer recorded after it binds buffer 9 before the stream executes. */
 static void test_a_silent_request_runs_after_the_immediate_calls(void) {
     enum { GL_ARRAY_BUFFER = 0x8892 };
-    nt_gfx_event_t ev[5];
+    nt_gfx_event_t ev[6];
     memset(ev, 0, sizeof(ev));
-    ev[0] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_VIEWPORT, .result = NT_GFX_RESULT_CACHE};
-    ev[1] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_BUFFER_UPLOAD, .object_kind = NT_GFX_OBJECT_BUFFER, .object = 0x10002, .result = NT_GFX_RESULT_ACCEPTED};
-    ev[2] = gl_call(1, NT_GFX_GL_glBindBuffer, GL_ARRAY_BUFFER, 9);
-    ev[3] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_VIEWPORT, .result = NT_GFX_RESULT_ACCEPTED};
-    ev[4] = gl_call(3, NT_GFX_GL_glViewport, 0, 0);
-    const fi_frame_t *fr = load_built((nt_gfx_capture_view_t){.events = ev, .count = 5, .strings = "", .string_bytes = 1, .execute_begin = 4, .execute_end = 5});
+    ev[0] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_PASS, .result = NT_GFX_RESULT_ACCEPTED};
+    ev[1] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_VIEWPORT, .result = NT_GFX_RESULT_CACHE};
+    ev[2] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_BUFFER_UPLOAD, .object_kind = NT_GFX_OBJECT_BUFFER, .object = 0x10002, .result = NT_GFX_RESULT_ACCEPTED};
+    ev[3] = gl_call(2, NT_GFX_GL_glBindBuffer, GL_ARRAY_BUFFER, 9);
+    ev[4] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_VIEWPORT, .result = NT_GFX_RESULT_ACCEPTED};
+    ev[5] = gl_call(4, NT_GFX_GL_glViewport, 0, 0);
+    const fi_frame_t *fr = load_built((nt_gfx_capture_view_t){.events = ev, .count = 6, .strings = "", .string_bytes = 1, .execute_begin = 5, .execute_end = 6});
     static fi_state_view_t st;
-    fi_state_at(fr, 0, &st);
-    TEST_ASSERT_EQUAL_UINT32(3, st.gl_at); /* the last record before execution */
+    fi_state_at(fr, 1, &st);
+    TEST_ASSERT_EQUAL_UINT32(4, st.gl_at); /* the last record before execution */
+    fi_file_close(&s_file);
+    ev[1].result = NT_GFX_RESULT_INVALID_HANDLE; /* a request that failed never reached the stream: its own point */
+    fr = load_built((nt_gfx_capture_view_t){.events = ev, .count = 6, .strings = "", .string_bytes = 1, .execute_begin = 5, .execute_end = 6});
+    fi_state_at(fr, 1, &st);
+    TEST_ASSERT_EQUAL_UINT32(1, st.gl_at);
 }
 
-/* A create that failed after its backend made a name (a context loss while its default sampler was made) has no
- * object: the name is nobody's, not the destroyed buffer's whose slot it reused. */
+/* A texture create that failed after its backend made a name (its default sampler lost the context, nt_gfx.c
+ * make_texture) has no object: the name is nobody's, not the destroyed texture's whose slot it reused. */
 static void test_a_failed_create_owns_no_name(void) {
-    nt_gfx_event_t ev[5];
+    nt_gfx_event_t ev[6];
     memset(ev, 0, sizeof(ev));
-    ev[0] = buffer_definition(0, 0x10001, 1, 1);
-    ev[1] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_DESTROY, .object_kind = NT_GFX_OBJECT_BUFFER, .object = 0x10001, .result = NT_GFX_RESULT_ACCEPTED};
-    ev[2] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_BUFFER, .result = NT_GFX_RESULT_CONTEXT_LOST};
-    ev[3] = gl_call(2, NT_GFX_GL_glGenBuffers, 1, 7);
-    ev[4] = backend_buffer(3, 1, 7);
+    ev[0] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_DEFINITION, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_TEXTURE, .object = 0x10001};
+    ev[0].data.texture.slot = 1;
+    ev[0].data.texture.label = 1;
+    ev[1] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_DESTROY, .object_kind = NT_GFX_OBJECT_TEXTURE, .object = 0x10001, .result = NT_GFX_RESULT_ACCEPTED};
+    ev[2] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_TEXTURE, .result = NT_GFX_RESULT_CONTEXT_LOST};
+    ev[3] = gl_call(2, NT_GFX_GL_glGenTextures, 1, 7);
+    ev[4] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_DEFINITION, .operation = NT_GFX_OP_STATE, .detail = NT_GFX_OBJECT_TEXTURE, .link = 3};
+    ev[4].data.backend_resource.slot = 1;
+    ev[4].data.backend_resource.gl_name = 7;
+    ev[5] = (nt_gfx_event_t){.kind = NT_GFX_EVENT_OP, .operation = NT_GFX_OP_CREATE, .object_kind = NT_GFX_OBJECT_SAMPLER, .link = 3, .result = NT_GFX_RESULT_CONTEXT_LOST};
     static const char k_strings[] = "\0a";
-    const fi_frame_t *fr = load_built((nt_gfx_capture_view_t){.events = ev, .count = 5, .strings = k_strings, .string_bytes = sizeof(k_strings)});
+    const fi_frame_t *fr = load_built((nt_gfx_capture_view_t){.events = ev, .count = 6, .strings = k_strings, .string_bytes = sizeof(k_strings)});
     char row[256];
     fi_row_text(fr, 4, row, sizeof(row));
-    TEST_ASSERT_EQUAL_STRING("DEFINITION STATE BUFFER slot=1 gl_name=7", row);
+    TEST_ASSERT_EQUAL_STRING("DEFINITION STATE TEXTURE slot=1 gl_name=7", row);
 }
 
 /* An overflowed frame opens with its records; its counters stay complete, so recount falls short. */

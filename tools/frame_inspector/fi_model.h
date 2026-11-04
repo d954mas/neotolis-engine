@@ -145,11 +145,12 @@ typedef struct {
     uint32_t *alias_object, *alias_ordinal, *alias_slot, alias_mask;
     uint8_t *alias_kind;
     const char **alias_label;                /* the frame's strings, a content name, or "" when unlabeled */
-    char (*content_label)[FI_CONTENT_LABEL]; /* per alias: the name of an object shared by its content */
-    uint32_t *def;                           /* per operation on an object: the object's latest definition before it, FI_NONE */
-    uint32_t *gl_first;                      /* per record: its first gl_ref; record count + 1 entries */
-    fi_gl_ref_t *gl_ref;                     /* every GL name of every record, resolved at its record */
-    fi_buffer_upload_t *buffer_upload;       /* the biggest first */
+    char (*content_label)[FI_CONTENT_LABEL]; /* per sampler or instance layout definition: its content name */
+    uint32_t content_count;
+    uint32_t *def;                     /* per operation on an object: the object's latest definition before it, FI_NONE */
+    uint32_t *gl_first;                /* per record: its first gl_ref; record count + 1 entries */
+    fi_gl_ref_t *gl_ref;               /* every GL name of every record, resolved at its record */
+    fi_buffer_upload_t *buffer_upload; /* the biggest first */
     uint32_t buffer_upload_count;
     /* Merge check: per draw the break and the record that caused it (the command between, or the previous draw). */
     uint8_t *brk;
@@ -300,8 +301,8 @@ uint32_t fi_named_objects(const fi_frame_t *frame, uint32_t record, fi_named_t o
 /* One object of the frame, by one scan: its definition and its GL name (a frame holds one: a lost context is dropped
  * before the snapshot, a restore makes new objects). The records that name it are the FI_Q_OBJECT query. */
 typedef struct {
-    uint32_t definition;       /* its latest CREATE definition, FI_NONE: the frame has none */
-    uint32_t gl_name, gl_from; /* its GL name and the first record that names it by it; 0: none */
+    uint32_t definition; /* its latest CREATE definition, FI_NONE: the frame has none */
+    uint32_t gl_name;    /* 0: none */
 } fi_object_t;
 fi_object_t fi_object(const fi_frame_t *frame, uint32_t kind, uint32_t object);
 

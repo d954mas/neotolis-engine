@@ -655,13 +655,14 @@ static void name_alias(fi_frame_t *fr, uint32_t i, uint32_t a) {
     const bool sampler = e->object_kind == NT_GFX_OBJECT_SAMPLER;
     const nt_gfx_capture_string_t label = label_of(e);
     char locations[48];
+    char *content = layout || sampler ? fr->content_label[fr->content_count++] : NULL;
     if (layout) {
         const uint32_t h = layout_hash(fr->view.events, fr->view.count, i);
-        (void)snprintf(fr->content_label[a], FI_CONTENT_LABEL, "%uB:%s~%04x", e->data.instance_layout.stride,
+        (void)snprintf(content, FI_CONTENT_LABEL, "%uB:%s~%04x", e->data.instance_layout.stride,
                        fi_locations_text(e->data.instance_layout.locations, locations, sizeof(locations)) != NULL ? locations : "", (h ^ (h >> 16)) & 0xFFFFU);
     }
-    if (layout || (sampler && sampler_label(e, fr->content_label[a]))) {
-        fr->alias_label[a] = fr->content_label[a];
+    if (layout || (sampler && sampler_label(e, content))) {
+        fr->alias_label[a] = content;
     } else if (label != 0) {
         fr->alias_label[a] = fr->view.strings + label;
     }
@@ -680,7 +681,11 @@ static void index_aliases(fi_frame_t *fr) {
     fr->alias_ordinal = (uint32_t *)fi_alloc(cap, sizeof(uint32_t));
     fr->alias_kind = (uint8_t *)fi_alloc(cap, sizeof(uint8_t));
     fr->alias_label = (const char **)fi_alloc(cap, sizeof(const char *));
-    fr->content_label = (char(*)[FI_CONTENT_LABEL])fi_alloc(cap, FI_CONTENT_LABEL);
+    uint32_t shared = 0; /* sampler and instance layout definitions: they name their objects by content */
+    for (uint32_t i = 0; i < n; i++) {
+        shared += ev[i].kind == NT_GFX_EVENT_DEFINITION && ev[i].operation == NT_GFX_OP_CREATE && (ev[i].object_kind == NT_GFX_OBJECT_SAMPLER || ev[i].object_kind == NT_GFX_OBJECT_INSTANCE_LAYOUT);
+    }
+    fr->content_label = (char(*)[FI_CONTENT_LABEL])fi_alloc(shared, FI_CONTENT_LABEL);
     const uint32_t slots = table_size(cap);
     fr->alias_slot = (uint32_t *)fi_alloc(slots, sizeof(uint32_t));
     fr->alias_mask = slots - 1U;
@@ -1153,7 +1158,6 @@ fi_object_t fi_object(const fi_frame_t *frame, uint32_t kind, uint32_t object) {
             const fi_gl_ref_t *ref = &frame->gl_ref[k];
             if (ref->owner == FI_GL_OBJECT && ref->kind == kind && ref->object == object) {
                 out.gl_name = handle_at(e, ref->at);
-                out.gl_from = i;
             }
         }
     }
@@ -1808,7 +1812,8 @@ void fi_state_at(const fi_frame_t *frame, uint32_t at, fi_state_view_t *out) {
     /* A draw-phase request whose execution issued nothing (a state already set, or cache skips only) sits at end_frame
      * after the frame storage upload and the requests before it: its GL state is the last call those issued, and it
      * compares with the draw it sits on. Operations recorded at end_frame (the upload) top at execute_begin or later. */
-    const bool silent = gl_anchor == request && streamed(&frame->view.events[request]) && !in_execute(frame, out->gl_at);
+    const uint8_t result = frame->view.events[request].result; /* a request that failed never reached the stream */
+    const bool silent = gl_anchor == request && streamed(&frame->view.events[request]) && (result == NT_GFX_RESULT_ACCEPTED || result == NT_GFX_RESULT_CACHE) && !in_execute(frame, out->gl_at);
     const bool executes = silent && frame->view.execute_begin > 0 && frame->view.execute_end != 0;
     uint32_t point = executes ? frame->view.execute_begin - 1U : FI_NONE; /* nothing issued before it: after the game's calls */
     for (uint32_t i = frame->view.execute_begin; executes && i < frame->view.execute_end; i++) {
