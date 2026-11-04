@@ -22,9 +22,9 @@ typedef struct {
     uint64_t specular_rid;
     float transform[16];
     float base_color[4];
-    uint8_t shader_type;       /* SPONZA_SHADER_* */
-    uint8_t alpha_cutoff_x100; /* alpha cutoff * 100 */
-    uint8_t _pad[6];
+    uint8_t shader_type; /* SPONZA_SHADER_* */
+    uint8_t _pad[3];
+    float alpha_cutoff; /* glTF alphaCutoff, used by SPONZA_SHADER_ALPHA */
 } SponzaManifestNode;
 #pragma pack(pop)
 

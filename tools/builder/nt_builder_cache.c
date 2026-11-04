@@ -16,7 +16,7 @@
 #include <unistd.h>
 #endif
 
-/* The encode identity of an entry: its cache key and, after an exact pixel match, its early-dedup test. */
+/* The encode identity of an entry: its cache key, and early dedup's test after a pixel-hash match. */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- exact identity lists each active field
 uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
@@ -34,18 +34,24 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
     switch (pe->kind) {
     case NT_BUILD_ASSET_TEXTURE: {
         const NtBuildTextureData *td = (const NtBuildTextureData *)pe->data;
-        /* Equal pixel bytes can still differ in shape. */
-        memcpy(buf + pos, &td->width, sizeof(td->width));
-        pos += (uint32_t)sizeof(td->width);
-        memcpy(buf + pos, &td->height, sizeof(td->height));
-        pos += (uint32_t)sizeof(td->height);
+        /* Equal pixel bytes can still differ in shape; the level-0 size is the
+           target extent, so a max_size above the source changes nothing. */
+        uint32_t target[2] = {0};
+        nt_builder_texture_target_extent(td->width, td->height, td->opts.max_size, &target[0], &target[1]);
+        const uint32_t dims[4] = {td->width, td->height, target[0], target[1]};
+        memcpy(buf + pos, dims, sizeof(dims));
+        pos += (uint32_t)sizeof(dims);
         uint32_t format = (uint32_t)td->opts.format;
         memcpy(buf + pos, &format, sizeof(format));
         pos += (uint32_t)sizeof(format);
 
-        uint8_t premul = td->opts.premultiplied ? 1 : 0;
-        memcpy(buf + pos, &premul, sizeof(premul));
-        pos += (uint32_t)sizeof(premul);
+        const nt_tex_process_t *process = &td->opts.process;
+        buf[pos++] = (uint8_t)process->rgb;
+        buf[pos++] = (uint8_t)process->alpha;
+        buf[pos++] = (uint8_t)process->resize_filter;
+        buf[pos++] = (uint8_t)process->mip_filter;
+        /* The threshold byte, not the float: cutoffs between two bytes build the same levels. */
+        buf[pos++] = process->alpha_cutoff > 0.0F ? (uint8_t)nt_builder_texture_cutoff_byte(process->alpha_cutoff) : 0U;
 
         uint8_t fmin = (uint8_t)td->opts.filter_min;
         uint8_t fmag = (uint8_t)td->opts.filter_mag;

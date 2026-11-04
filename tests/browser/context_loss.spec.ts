@@ -210,20 +210,22 @@ function expectTexel(sample: number, expected: number[], tolerance: number, labe
 }
 
 // The RGBA fixture is 128x128: left half (200,40,40,255), right half (40,40,200,128). Levels 0 and 3
-// sample texel (0,0) inside the left half; the 1x1 level 7 is the linear average of both halves.
+// sample texel (0,0) inside the left half; the 1x1 level 7 is the alpha-weighted average of both
+// halves (straight alpha): RGB weighs each half by its alpha, so red is (200*255+40*128)/383.
 // Compressed targets approximate solid blocks, hence the tolerances: the level-3 corner measures
 // 13 off in red for UASTC through ASTC (the codec's own content, not a transcode) under SwiftShader,
-// so 16 keeps every real target while a channel swap or a flip still misses by 160 and the 1x1
-// average by 80.
+// so 16 keeps every real target while a channel swap or a flip still misses by 160, and the 1x1
+// average misses an unweighted mip by 27 in red and blue.
 const FIXTURE_LEFT = [200, 40, 40, 255];
-const FIXTURE_AVERAGE = [120, 40, 120, 191];
+const FIXTURE_AVERAGE = [147, 40, 93, 191];
 const FIXTURE_TOLERANCE = 16;
 // sRGB storage samples linear: the left half decodes to (147,5,5,255); undecoded, red would read 200.
 // Decoding steepens codec error near 200 by about 1.8x, hence the wider tolerance; red discriminates.
-// The 1x1 level averages light, (0.30,0.02,0.30) linear, and alpha 128/255 linearly: an encoded-value
-// mip would read red 48, a lost alpha 255. The uncompressed texel's 128s decode to 55 with alpha untouched.
+// The 1x1 level averages light weighted by alpha, (0.392,0.021,0.207) linear, and alpha 128/255
+// linearly: an encoded-value mip would read red 74, an unweighted one 76, a lost alpha 255. The
+// uncompressed texel's 128s decode to 55 with alpha untouched.
 const FIXTURE_LEFT_LINEAR = [147, 5, 5, 255];
-const FIXTURE_AVERAGE_LINEAR = [76, 5, 76, 191];
+const FIXTURE_AVERAGE_LINEAR = [100, 5, 53, 191];
 const SRGB_TEXEL_LINEAR = [55, 55, 55, 128];
 
 async function checkSrgbFixture(page: Page, label: string, caps: number, buildTargets: number, codec: number): Promise<{ srgb: number; srgbLast: number; texel: number }> {

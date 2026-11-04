@@ -178,7 +178,9 @@ One full baseline serves all configurations. `test_basisu_golden_produce`
 (native encoder + full transcoder) is built only when both codecs and all
 compressed targets are enabled. It writes the 12 fixtures and 60 transcodes
 listed in `tests/unit/basisu_fixtures.h` into `build/tests/basisu_golden/` and
-checks all 72 files against `tests/fixtures/basisu_golden.sha256`. Regenerate
+checks all 72 files against `tests/fixtures/basisu_golden.sha256`. The
+fixtures encode test-owned level chains, so the baseline pins the encoder and
+the transcoder, never the builder's mip filtering. Regenerate
 that checksum file only for an intentional baseline change:
 `sha256sum *.basis *.bin | LC_ALL=C sort -k2` inside the golden directory.
 `test_basisu_trimmed` decodes them byte-for-byte with the runtime library of

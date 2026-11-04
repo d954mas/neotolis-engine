@@ -33,6 +33,15 @@
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
 #include "version/nt_version.h"
+#ifdef NT_DEVAPI_ENABLED
+#include "devapi/nt_devapi.h"
+#include "devapi/nt_devapi_groups.h"
+#ifdef NT_PLATFORM_WEB
+#include "devapi/nt_devapi_web.h"
+#else
+#include "devapi/nt_devapi_net.h"
+#endif
+#endif
 #include <inttypes.h>
 #ifndef NT_PLATFORM_WEB
 #include "fs/nt_fs.h"
@@ -293,7 +302,7 @@ static void load_scene_from_manifest(void) {
             /* Alpha: diffuse only, 3 streams, double-sided */
             mat_desc.textures[0] = (nt_material_texture_desc_t){.name = "u_diffuse", .resource = (mn->diffuse_rid != 0) ? s_tex_handles[tex_base + 0] : s_neutral_white_handle};
             mat_desc.texture_count = 1;
-            params[4] = (float)mn->alpha_cutoff_x100 / 100.0F;
+            params[4] = mn->alpha_cutoff;
             mat_desc.params_size = sizeof(params);
             mat_desc.blend = nt_blend_opaque();
             mat_desc.cull_mode = NT_CULL_NONE; /* double-sided for foliage */
@@ -346,6 +355,9 @@ static void load_scene_from_manifest(void) {
 static void frame(void) {
     nt_window_poll();
     nt_example_frames_begin();
+#ifdef NT_DEVAPI_ENABLED
+    nt_devapi_update();
+#endif
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_MESH);
@@ -538,57 +550,65 @@ static void frame(void) {
 
     /* ---- Render ---- */
 
-    nt_gfx_begin_pass(&(nt_pass_desc_t){
-        .clear_color = {0.529F, 0.808F, 0.922F, 1.0F}, /* sky blue */
-        .clear_depth = 1.0F,
-        .discard_depth = true,
-    });
+    const bool render_enabled = nt_app_render_enabled();
+    if (render_enabled) {
+        nt_gfx_begin_pass(&(nt_pass_desc_t){
+            .clear_color = {0.529F, 0.808F, 0.922F, 1.0F}, /* sky blue */
+            .clear_depth = 1.0F,
+            .discard_depth = true,
+        });
 
-    if (item_count > 0) {
-        /* View block (slot 0) */
-        nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &uniforms, sizeof(uniforms));
+        if (item_count > 0) {
+            /* View block (slot 0) */
+            nt_gfx_bind_uniform_block(NT_GFX_SLOT_GLOBALS, &uniforms, sizeof(uniforms));
 
-        /* Lighting block (slot 1) */
-        nt_lighting_t lighting = {
-            .light_dir = {0.5F, 0.7F, 0.5F, 0.0F},    /* angled sunlight */
-            .light_color = {1.0F, 0.95F, 0.9F, 1.2F}, /* warm white, intensity 1.2 */
-            .ambient = {0.6F, 0.65F, 0.8F, 0.08F},    /* cool ambient, intensity 0.08 */
-        };
-        nt_gfx_bind_uniform_block(NT_GFX_SLOT_GAME, &lighting, sizeof(lighting));
+            /* Lighting block (slot 1) */
+            nt_lighting_t lighting = {
+                .light_dir = {0.5F, 0.7F, 0.5F, 0.0F},    /* angled sunlight */
+                .light_color = {1.0F, 0.95F, 0.9F, 1.2F}, /* warm white, intensity 1.2 */
+                .ambient = {0.6F, 0.65F, 0.8F, 0.08F},    /* cool ambient, intensity 0.08 */
+            };
+            nt_gfx_bind_uniform_block(NT_GFX_SLOT_GAME, &lighting, sizeof(lighting));
 
-        /* Draw all render items */
-        nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, items, item_count);
+            /* Draw all render items */
+            nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, items, item_count);
 
 #if NT_LOG_MIN_LEVEL == 0
-        /* Per-second FPS + render stats */
-        {
-            static double s_stats_accum;
-            static uint32_t s_stats_frames;
-            static float s_stats_max_dt;
-            s_stats_accum += (double)g_nt_app.dt;
-            s_stats_frames++;
-            if (g_nt_app.dt > s_stats_max_dt) {
-                s_stats_max_dt = g_nt_app.dt;
+            /* Per-second FPS + render stats */
+            {
+                static double s_stats_accum;
+                static uint32_t s_stats_frames;
+                static float s_stats_max_dt;
+                s_stats_accum += (double)g_nt_app.dt;
+                s_stats_frames++;
+                if (g_nt_app.dt > s_stats_max_dt) {
+                    s_stats_max_dt = g_nt_app.dt;
+                }
+                if (s_stats_accum >= 1.0) {
+                    float avg_fps = (float)s_stats_frames / (float)s_stats_accum;
+                    float min_fps = (s_stats_max_dt > 0.0F) ? (1.0F / s_stats_max_dt) : 0.0F;
+                    nt_log_info("FPS avg=%.1f min=%.1f dt=%.4f spd=%.0f | draws=%u inst=%" PRIu64 " verts=%" PRIu64 " tris=%" PRIu64 " items=%u/%u", (double)avg_fps, (double)min_fps,
+                                (double)g_nt_app.dt, (double)s_move_speed, nt_gfx_draw_calls(&g_nt_gfx.counters), g_nt_gfx.counters.instances, g_nt_gfx.counters.vertices,
+                                g_nt_gfx.counters.indices / 3, item_count, s_entity_count);
+                    s_stats_accum = 0.0;
+                    s_stats_frames = 0;
+                    s_stats_max_dt = 0.0F;
+                }
             }
-            if (s_stats_accum >= 1.0) {
-                float avg_fps = (float)s_stats_frames / (float)s_stats_accum;
-                float min_fps = (s_stats_max_dt > 0.0F) ? (1.0F / s_stats_max_dt) : 0.0F;
-                nt_log_info("FPS avg=%.1f min=%.1f dt=%.4f spd=%.0f | draws=%u inst=%" PRIu64 " verts=%" PRIu64 " tris=%" PRIu64 " items=%u/%u", (double)avg_fps, (double)min_fps, (double)g_nt_app.dt,
-                            (double)s_move_speed, nt_gfx_draw_calls(&g_nt_gfx.counters), g_nt_gfx.counters.instances, g_nt_gfx.counters.vertices, g_nt_gfx.counters.indices / 3, item_count,
-                            s_entity_count);
-                s_stats_accum = 0.0;
-                s_stats_frames = 0;
-                s_stats_max_dt = 0.0F;
-            }
-        }
 #endif
-    }
+        }
 
-    nt_gfx_end_pass();
+        nt_gfx_end_pass();
+    }
     nt_gfx_end_frame();
     nt_example_frames_end(s_full_promoted && s_scene_loaded);
 
-    nt_window_swap_buffers();
+    if (render_enabled) {
+#ifdef NT_DEVAPI_ENABLED
+        nt_devapi_frame_rendered();
+#endif
+        nt_window_swap_buffers();
+    }
 }
 
 int main(int argc, char **argv) {
@@ -692,11 +712,44 @@ int main(int argc, char **argv) {
 
     /* 17. Loading screen stays until geo pack is ready (see frame()) */
 
+#ifdef NT_DEVAPI_ENABLED
+    if (nt_devapi_init() != NT_OK) {
+        nt_log_error("sponza: devapi init failed");
+        return 1;
+    }
+#ifdef NT_DEVAPI_GROUP_CORE
+    nt_devapi_register_core();
+#endif
+#ifdef NT_DEVAPI_GROUP_TIME
+    nt_devapi_register_time();
+#endif
+#ifdef NT_DEVAPI_GROUP_INPUT
+    nt_devapi_register_input();
+#endif
+#ifdef NT_DEVAPI_GROUP_CAPTURE
+    nt_devapi_register_capture();
+#endif
+#ifndef NT_PLATFORM_WEB
+    uint16_t devapi_port = 0;
+    if (!nt_devapi_net_port_from_env(NT_DEVAPI_DEFAULT_PORT, &devapi_port) || !nt_devapi_net_start(devapi_port)) {
+        nt_log_error("sponza: devapi server did not start");
+        nt_devapi_shutdown();
+        return 1;
+    }
+#else
+    nt_devapi_web_install_shim();
+#endif
+#endif
+
     /* 18. Run main loop */
     nt_app_run(frame);
 
     /* 19. Shutdown (native only) */
 #ifndef NT_PLATFORM_WEB
+#ifdef NT_DEVAPI_ENABLED
+    nt_devapi_net_stop();
+    nt_devapi_shutdown();
+#endif
     nt_mesh_renderer_shutdown();
     nt_drawable_comp_shutdown();
     nt_material_comp_shutdown();

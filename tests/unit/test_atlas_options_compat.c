@@ -39,7 +39,7 @@ int main(void) {
         .shape = NT_ATLAS_SHAPE_CONVEX_HULL,
         .allowed_transforms = NT_ATLAS_TRANSFORMS_IDENTITY_ROT90,
         .power_of_two = true,
-        .premultiplied = true,
+        .process = {.rgb = NT_TEX_RGB_DATA, .alpha = NT_TEX_ALPHA_DATA, .resize_filter = NT_TEX_FILTER_KAISER, .mip_filter = NT_TEX_FILTER_MITCHELL},
         .pixels_per_unit = 1.25F,
         .filter_min = NT_TEXTURE_DEFAULT_FILTER_NEAREST,
         .filter_mag = NT_TEXTURE_DEFAULT_FILTER_NEAREST,
@@ -66,7 +66,8 @@ int main(void) {
     if (atlas.compress.codec != compress.codec || atlas.compress.etc1s.quality != compress.etc1s.quality || atlas.compress.etc1s.endpoint_rdo_threshold != compress.etc1s.endpoint_rdo_threshold ||
         atlas.compress.etc1s.selector_rdo_threshold != compress.etc1s.selector_rdo_threshold || atlas.format != NT_TEXTURE_FORMAT_RG8 || atlas.max_size != 100 || atlas.padding != 102 ||
         atlas.margin != 103 || atlas.extrude != 104 || atlas.alpha_threshold != 105 || atlas.max_vertices != 6 || atlas.max_added_area_percent != 7.5F || atlas.shape != NT_ATLAS_SHAPE_CONVEX_HULL ||
-        atlas.allowed_transforms != NT_ATLAS_TRANSFORMS_IDENTITY_ROT90 || !atlas.power_of_two || atlas.debug_png || !atlas.premultiplied || atlas.pixels_per_unit != 1.25F ||
+        atlas.allowed_transforms != NT_ATLAS_TRANSFORMS_IDENTITY_ROT90 || !atlas.power_of_two || atlas.debug_png || atlas.process.rgb != NT_TEX_RGB_DATA || atlas.process.alpha != NT_TEX_ALPHA_DATA ||
+        atlas.process.resize_filter != NT_TEX_FILTER_KAISER || atlas.process.mip_filter != NT_TEX_FILTER_MITCHELL || atlas.pixels_per_unit != 1.25F ||
         atlas.filter_min != NT_TEXTURE_DEFAULT_FILTER_NEAREST || atlas.filter_mag != NT_TEXTURE_DEFAULT_FILTER_NEAREST || atlas.wrap_u != NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE ||
         atlas.wrap_v != NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE || atlas.mips != NT_TEX_MIPS_NONE || !atlas.dedup) {
         return 1;
@@ -78,7 +79,8 @@ int main(void) {
     }
 
     const nt_atlas_opts_t defaults = nt_atlas_opts_defaults();
-    if (defaults.allowed_transforms != NT_ATLAS_TRANSFORMS_ALL || !defaults.dedup) {
+    if (defaults.allowed_transforms != NT_ATLAS_TRANSFORMS_ALL || !defaults.dedup || defaults.process.alpha != NT_TEX_ALPHA_PREMULTIPLIED || defaults.process.rgb != NT_TEX_RGB_COLOR ||
+        defaults.process.resize_filter != NT_TEX_FILTER_BOX || defaults.process.mip_filter != NT_TEX_FILTER_BOX) {
         return 3;
     }
 

@@ -559,6 +559,13 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     double cache_restore_secs = 0.0;
 #endif
 
+    /* One encode identity per entry: early dedup compares it, the cache keys on it. */
+    uint64_t *opts_hashes = (uint64_t *)calloc(ctx->pending_count, sizeof(uint64_t));
+    NT_BUILD_ASSERT(opts_hashes && "finish_pack: alloc failed");
+    for (uint32_t i = 0; i < ctx->pending_count; i++) {
+        opts_hashes[i] = nt_builder_compute_opts_hash(&ctx->pending[i]);
+    }
+
     // #region Early dedup
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         NtBuildEntry *pe = &ctx->pending[i];
@@ -577,6 +584,28 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                 continue;
             }
             if (pe->decoded_hash != candidate->decoded_hash) {
+                continue;
+            }
+            /* Another source shape or level-0 size is another image, not the same data. */
+            if (pe->kind == NT_BUILD_ASSET_TEXTURE) {
+                const NtBuildTextureData *ta = (const NtBuildTextureData *)pe->data;
+                const NtBuildTextureData *tb = (const NtBuildTextureData *)candidate->data;
+                uint32_t a_extent[2] = {0};
+                uint32_t b_extent[2] = {0};
+                nt_builder_texture_target_extent(ta->width, ta->height, ta->opts.max_size, &a_extent[0], &a_extent[1]);
+                nt_builder_texture_target_extent(tb->width, tb->height, tb->opts.max_size, &b_extent[0], &b_extent[1]);
+                if (ta->width != tb->width || ta->height != tb->height || a_extent[0] != b_extent[0] || a_extent[1] != b_extent[1]) {
+                    continue;
+                }
+            }
+            /* The encode options are one hashed identity, the cache key. Different
+               options are never merged, so they are reported without a re-decode. */
+            if (opts_hashes[i] != opts_hashes[j]) {
+                if (ctx->dedup_warn_count < NT_BUILD_MAX_ASSETS) {
+                    ctx->dedup_warn_a[ctx->dedup_warn_count] = i;
+                    ctx->dedup_warn_b[ctx->dedup_warn_count] = j;
+                    ctx->dedup_warn_count++;
+                }
                 continue;
             }
             /* Hash match -- verify with memcmp */
@@ -612,16 +641,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                 /* Non-texture types must always have decoded_data for memcmp verify */
                 NT_BUILD_ASSERT(0 && "hash match but no decoded_data on non-texture entry");
             }
-            /* The pixels matched exactly; the encode options are one hashed identity, the cache key. */
-            if (nt_builder_compute_opts_hash(pe) == nt_builder_compute_opts_hash(candidate)) {
-                candidate->dedup_original = (int32_t)i;
-                ctx->early_dedup_count++;
-                NT_LOG_INFO("early dedup: [%u] %s -> [%u] %s", j, candidate->path, i, pe->path);
-            } else if (ctx->dedup_warn_count < NT_BUILD_MAX_ASSETS) {
-                ctx->dedup_warn_a[ctx->dedup_warn_count] = i;
-                ctx->dedup_warn_b[ctx->dedup_warn_count] = j;
-                ctx->dedup_warn_count++;
-            }
+            candidate->dedup_original = (int32_t)i;
+            ctx->early_dedup_count++;
+            NT_LOG_INFO("early dedup: [%u] %s -> [%u] %s", j, candidate->path, i, pe->path);
         }
     }
     // #endregion
@@ -630,8 +652,6 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     /* Per-asset encode results (heap-allocated to support large asset counts) */
     NtEncodeResult *results = (NtEncodeResult *)calloc(ctx->pending_count, sizeof(NtEncodeResult));
     NT_BUILD_ASSERT(results && "finish_pack: alloc failed");
-    uint64_t *opts_hashes = (uint64_t *)calloc(ctx->pending_count, sizeof(uint64_t));
-    NT_BUILD_ASSERT(opts_hashes && "finish_pack: alloc failed");
 
     /* Basis global initialization must finish before encode workers start. */
     bool needs_basis = false;
@@ -675,7 +695,6 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
         /* Shader cache: check before encode */
         if (ctx->cache_dir) {
-            opts_hashes[i] = nt_builder_compute_opts_hash(pe);
             uint8_t *cached_data = NULL;
             uint32_t cached_size = 0;
             nt_cache_status_t status = nt_builder_cache_lookup(ctx->cache_dir, pe->decoded_hash, opts_hashes[i], &cached_data, &cached_size);
@@ -731,7 +750,6 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             continue;
         }
 
-        opts_hashes[i] = nt_builder_compute_opts_hash(pe);
         uint8_t *cached_data = NULL;
         uint32_t cached_size = 0;
         nt_cache_status_t status = nt_builder_cache_lookup(ctx->cache_dir, pe->decoded_hash, opts_hashes[i], &cached_data, &cached_size);
@@ -801,7 +819,10 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             NtBuildEntry *pe = &ctx->pending[work_indices[wi]];
             if (pe->kind == NT_BUILD_ASSET_TEXTURE) {
                 NtBuildTextureData *td = (NtBuildTextureData *)pe->data;
-                if (td->opts.compress.codec != NT_BASISU_CODEC_NONE && td->width * td->height >= 128 * 128) {
+                uint32_t tw = 0;
+                uint32_t th = 0;
+                nt_builder_texture_target_extent(td->width, td->height, td->opts.max_size, &tw, &th);
+                if (td->opts.compress.codec != NT_BASISU_CODEC_NONE && tw * th >= 128 * 128) {
                     heavy_count++;
                 }
             }
@@ -1294,12 +1315,12 @@ static void *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *out_w
     uint32_t w = 0;
     uint32_t h = 0;
     if (td->source_data) {
-        pixels = nt_builder_decode_texture(td->source_data, td->source_size, td->opts.format, td->opts.max_size, &w, &h);
+        pixels = nt_builder_decode_texture(td->source_data, td->source_size, td->opts.format, &w, &h);
     } else if (td->source_path) {
         uint32_t fsize = 0;
         uint8_t *fdata = (uint8_t *)nt_builder_read_file(td->source_path, &fsize);
         NT_BUILD_ASSERT(fdata && "redecode_texture: re-read file failed");
-        pixels = nt_builder_decode_texture(fdata, fsize, td->opts.format, td->opts.max_size, &w, &h);
+        pixels = nt_builder_decode_texture(fdata, fsize, td->opts.format, &w, &h);
         free(fdata);
     } else {
         NT_BUILD_ASSERT(0 && "redecode_texture: no source (raw texture should have decoded_data)");
@@ -1316,11 +1337,17 @@ static void *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *out_w
     return pixels;
 }
 
-/* A max_size resize already block-aligns, so only an unresized source can miss. */
+/* A max_size resize block-aligns level 0, so only a source at its own size can miss. */
 static void assert_basis_block_aligned(const char *source, uint32_t w, uint32_t h, const nt_tex_opts_t *opts) {
-    if (opts && opts->compress.codec != NT_BASISU_CODEC_NONE && (w % 4 != 0 || h % 4 != 0)) {
-        NT_BUILD_FAIL("texture: a Basis texture needs width and height that are multiples of 4", "texture '%s': Basis level 0 is %ux%u -- edit the source so both sides are multiples of 4", source, w,
-                      h);
+    if (!opts || opts->compress.codec == NT_BASISU_CODEC_NONE) {
+        return;
+    }
+    uint32_t lw = 0;
+    uint32_t lh = 0;
+    nt_builder_texture_target_extent(w, h, opts->max_size, &lw, &lh);
+    if (lw % 4 != 0 || lh % 4 != 0) {
+        NT_BUILD_FAIL("texture: a Basis texture needs width and height that are multiples of 4", "texture '%s': Basis level 0 is %ux%u -- edit the source so both sides are multiples of 4", source, lw,
+                      lh);
     }
 }
 
@@ -1401,7 +1428,7 @@ void nt_builder_add_texture(NtBuilderContext *ctx, const char *path, const nt_te
 
     uint32_t w = 0;
     uint32_t h = 0;
-    void *pixels = nt_builder_decode_texture(file_data, file_size, effective_format, opts ? opts->max_size : 0, &w, &h);
+    void *pixels = nt_builder_decode_texture(file_data, file_size, effective_format, &w, &h);
     free(file_data);
 
     /* Hash decoded pixels, then free -- re-read from stored path at encode time */
@@ -1471,7 +1498,7 @@ void nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *da
 
     uint32_t w = 0;
     uint32_t h = 0;
-    void *pixels = nt_builder_decode_texture(data, size, effective_format, opts ? opts->max_size : 0, &w, &h);
+    void *pixels = nt_builder_decode_texture(data, size, effective_format, &w, &h);
 
     /* Hash decoded pixels, then free -- deep copy source for re-decode at encode time */
     const uint32_t decoded_size = nt_builder_texture_source_size(effective_format, w, h);
@@ -1491,14 +1518,12 @@ void nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *da
 
 static void add_texture_pixels(NtBuilderContext *ctx, const void *pixels, uint32_t width, uint32_t height, const char *resource_id, const nt_tex_opts_t *opts,
                                nt_texture_pixel_format_t effective_format) {
-    uint32_t w = 0;
-    uint32_t h = 0;
-    void *decoded = nt_builder_decode_texture_raw(pixels, width, height, effective_format, opts ? opts->max_size : 0, &w, &h);
+    void *decoded = nt_builder_decode_texture_raw(pixels, width, height, effective_format);
 
     /* Hash and keep decoded_data -- can't re-derive from source */
-    const uint32_t decoded_size = nt_builder_texture_source_size(effective_format, w, h);
+    const uint32_t decoded_size = nt_builder_texture_source_size(effective_format, width, height);
     uint64_t hash = nt_hash64(decoded, decoded_size).value;
-    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, make_texture_data(resource_id, w, h, opts, effective_format), (uint8_t *)decoded, decoded_size, hash);
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, make_texture_data(resource_id, width, height, opts, effective_format), (uint8_t *)decoded, decoded_size, hash);
 }
 
 void nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const char *resource_id, const nt_tex_opts_t *opts) {

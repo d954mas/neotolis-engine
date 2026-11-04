@@ -2,9 +2,11 @@
 #include "nt_basisu_transcoder.h"
 #include "nt_builder.h"
 #include "nt_pack_format.h"
+#include "test_helpers/basis_test_chain.h"
 #include "test_helpers/build_assert_trap.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "unity.h"
+#include <math.h>
 #include <string.h>
 
 #define MAX_W 96U
@@ -87,13 +89,14 @@ static void roundtrip(uint32_t width, uint32_t height, nt_basisu_codec_t codec, 
     uint8_t src[MAX_W * MAX_H * 4];
     fill_pixels(src, width, height, alpha);
     nt_basisu_encode_opts_t opts = codec == NT_BASISU_CODEC_ETC1S ? nt_tex_compress_etc1s_high() : nt_tex_compress_uastc_default();
-    nt_basisu_encode_result_t enc = nt_basisu_encode(1, src, width, height, alpha ? NT_TEXTURE_FORMAT_RGBA8 : NT_TEXTURE_FORMAT_RGB8, &opts, true);
-    TEST_ASSERT_NOT_NULL(enc.data);
     uint32_t levels = 1;
     for (uint32_t size = width > height ? width : height; size > 1; size >>= 1U) {
         levels++;
     }
-    TEST_ASSERT_EQUAL_UINT32(levels, enc.mip_count);
+    basis_test_chain_t chain = basis_test_chain(src, width, height, levels);
+    nt_basisu_encode_result_t enc = nt_basisu_encode(1, chain.data, chain.count, width, height, alpha ? NT_TEXTURE_FORMAT_RGBA8 : NT_TEXTURE_FORMAT_RGB8, &opts, true);
+    basis_test_chain_free(&chain);
+    TEST_ASSERT_NOT_NULL(enc.data);
 
     const nt_basisu_info_t info = nt_basisu_info(enc.data, enc.size);
     TEST_ASSERT_EQUAL_INT(codec, info.codec);
@@ -128,11 +131,14 @@ void test_non_basis_header_asserts(void) {
     NT_TEST_EXPECT_ASSERT((void)nt_basisu_info(pixels, sizeof(pixels)));
 }
 
-void test_encode_without_threads_asserts(void) {
+void test_encode_argument_asserts(void) {
     uint8_t pixels[16 * 8 * 4];
     fill_pixels(pixels, 16, 8, false);
     const nt_basisu_encode_opts_t opts = nt_tex_compress_etc1s_high();
-    EXPECT_BUILD_ASSERT_MATCH((void)nt_basisu_encode(0, pixels, 16, 8, NT_TEXTURE_FORMAT_RGB8, &opts, true), "basis_threads");
+    EXPECT_BUILD_ASSERT_MATCH((void)nt_basisu_encode(0, pixels, 1, 16, 8, NT_TEXTURE_FORMAT_RGB8, &opts, true), "basis_threads");
+    /* 16x8 has 5 levels; a sixth has no size. */
+    EXPECT_BUILD_ASSERT_MATCH((void)nt_basisu_encode(1, pixels, 6, 16, 8, NT_TEXTURE_FORMAT_RGB8, &opts, true), "level_count outside");
+    EXPECT_BUILD_ASSERT_MATCH((void)nt_basisu_encode(1, pixels, 0, 16, 8, NT_TEXTURE_FORMAT_RGB8, &opts, true), "level_count outside");
 }
 
 /* An RGBA source the encoder finds fully opaque loses its alpha slices, so the
@@ -142,13 +148,15 @@ void test_opaque_rgba_source_reports_no_alpha(void) {
     fill_pixels(pixels, 16, 8, false);
     nt_basisu_encode_opts_t codecs[2];
     const uint32_t codec_count = enabled_codec_presets(codecs);
+    basis_test_chain_t chain = basis_test_chain(pixels, 16, 8, nt_texture_full_chain_levels(16, 8));
     for (uint32_t i = 0; i < codec_count; i++) {
-        nt_basisu_encode_result_t enc = nt_basisu_encode(1, pixels, 16, 8, NT_TEXTURE_FORMAT_RGBA8, &codecs[i], true);
+        nt_basisu_encode_result_t enc = nt_basisu_encode(1, chain.data, chain.count, 16, 8, NT_TEXTURE_FORMAT_RGBA8, &codecs[i], true);
         TEST_ASSERT_NOT_NULL(enc.data);
         const nt_basisu_info_t info = nt_basisu_info(enc.data, enc.size);
         nt_basisu_encode_free(&enc);
         TEST_ASSERT_FALSE(info.has_alpha);
     }
+    basis_test_chain_free(&chain);
 }
 
 #if NT_BASISU_HAS_UASTC
@@ -177,7 +185,9 @@ void test_mip_level_with_a_shrunken_stored_width_asserts(void) {
     fill_pixels(pixels, 13, 7, false);
     nt_basisu_encode_opts_t opts = nt_tex_compress_uastc_default();
     /* Opaque UASTC: exactly one slice per level, so level 1 has its own desc. */
-    nt_basisu_encode_result_t enc = nt_basisu_encode(1, pixels, 13, 7, NT_TEXTURE_FORMAT_RGB8, &opts, true);
+    basis_test_chain_t chain = basis_test_chain(pixels, 13, 7, nt_texture_full_chain_levels(13, 7));
+    nt_basisu_encode_result_t enc = nt_basisu_encode(1, chain.data, chain.count, 13, 7, NT_TEXTURE_FORMAT_RGB8, &opts, true);
+    basis_test_chain_free(&chain);
     TEST_ASSERT_NOT_NULL(enc.data);
 
     const nt_basisu_info_t info = nt_basisu_info(enc.data, enc.size);
@@ -206,55 +216,161 @@ void test_mip_level_with_a_shrunken_stored_width_asserts(void) {
 }
 #endif
 
-/* The decoded 1x1 tail of an 8x8 checker of `even` and `odd` texels, built as a
- * pack through the public builder so its format reaches the encoder. */
-static void encode_checker_tail(nt_basisu_codec_t codec, nt_texture_pixel_format_t format, const uint8_t even[4], const uint8_t odd[4], uint8_t out_tail[4]) {
+/* Unity terminates failed reads with longjmp before the stream is reused. */
+// NOLINTBEGIN(clang-analyzer-unix.Stream)
+/* The Basis payload of one raw texture built as a pack through the public
+ * builder, so its format reaches the encoder. Returns the payload size. */
+static uint32_t encode_raw_pack(nt_basisu_codec_t codec, nt_texture_pixel_format_t format, nt_tex_process_t process, const uint8_t *pixels, uint32_t width, uint32_t height, uint8_t basis[4096]) {
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.format = format;
+    opts.process = process;
+    opts.compress = codec == NT_BASISU_CODEC_ETC1S ? nt_tex_compress_etc1s_high() : nt_tex_compress_uastc_default();
+    opts.mips = NT_TEX_MIPS_BAKED;
+    NtBuilderContext *ctx = nt_builder_start_pack("basis_raw.ntpack");
+    nt_builder_add_texture_raw(ctx, pixels, width, height, "raw", &opts);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    FILE *file = fopen("basis_raw.ntpack", "rb");
+    TEST_ASSERT_NOT_NULL(file);
+    NtPackHeader pack = {0};
+    NtAssetEntry entry = {0};
+    NtTextureAssetHeader header = {0};
+    TEST_ASSERT_EQUAL(1, fread(&pack, sizeof(pack), 1, file));
+    TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, file));
+    (void)fseek(file, (long)entry.offset, SEEK_SET);
+    TEST_ASSERT_EQUAL(1, fread(&header, sizeof(header), 1, file));
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32(4096, header.data_size);
+    TEST_ASSERT_EQUAL(header.data_size, fread(basis, 1, header.data_size, file));
+    (void)fclose(file);
+    TEST_ASSERT_EQUAL_UINT16(format, header.format);
+    return header.data_size;
+}
+// NOLINTEND(clang-analyzer-unix.Stream)
+
+/* The decoded 1x1 tail of an 8x8 checker of `even` and `odd` texels. */
+static void encode_checker_tail(nt_basisu_codec_t codec, nt_texture_pixel_format_t format, nt_tex_alpha_t alpha, const uint8_t even[4], const uint8_t odd[4], uint8_t out_tail[4]) {
     uint8_t pixels[8 * 8 * 4];
     for (uint32_t y = 0; y < 8; y++) {
         for (uint32_t x = 0; x < 8; x++) {
             memcpy(&pixels[(((size_t)y * 8) + x) * 4], ((x + y) & 1U) ? odd : even, 4);
         }
     }
-    nt_tex_opts_t opts = nt_tex_opts_defaults();
-    opts.format = format;
-    opts.compress = codec == NT_BASISU_CODEC_ETC1S ? nt_tex_compress_etc1s_high() : nt_tex_compress_uastc_default();
-    opts.mips = NT_TEX_MIPS_BAKED;
-    NtBuilderContext *ctx = nt_builder_start_pack("basis_checker.ntpack");
-    nt_builder_add_texture_raw(ctx, pixels, 8, 8, "checker", &opts);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
-    nt_builder_free_pack(ctx);
-
-    FILE *file = fopen("basis_checker.ntpack", "rb");
-    TEST_ASSERT_NOT_NULL(file);
-    NtPackHeader pack = {0};
-    NtAssetEntry entry = {0};
-    NtTextureAssetHeader header = {0};
     uint8_t basis[4096] = {0};
-    TEST_ASSERT_EQUAL(1, fread(&pack, sizeof(pack), 1, file));
-    TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, file));
-    (void)fseek(file, (long)entry.offset, SEEK_SET);
-    TEST_ASSERT_EQUAL(1, fread(&header, sizeof(header), 1, file));
-    TEST_ASSERT_LESS_OR_EQUAL_UINT32(sizeof(basis), header.data_size);
-    TEST_ASSERT_EQUAL(header.data_size, fread(basis, 1, header.data_size, file));
-    (void)fclose(file);
-    TEST_ASSERT_EQUAL_UINT16(format, header.format);
-
-    const nt_basisu_info_t info = nt_basisu_info(basis, header.data_size);
+    const uint32_t size = encode_raw_pack(codec, format, (nt_tex_process_t){.alpha = alpha}, pixels, 8, 8, basis);
+    const nt_basisu_info_t info = nt_basisu_info(basis, size);
     /* 8x8 -> 4x4 -> 2x2 -> 1x1: the 4 RGBA8 bytes at the end are the tail level. */
     uint8_t chain[((8 * 8) + (4 * 4) + (2 * 2) + 1) * 4] = {0};
     TEST_ASSERT_EQUAL_UINT32(4, info.level_count);
-    nt_basisu_transcode_chain(basis, header.data_size, &info, NT_TEXTURE_FORMAT_RGBA8, chain);
+    nt_basisu_transcode_chain(basis, size, &info, NT_TEXTURE_FORMAT_RGBA8, chain);
     memcpy(out_tail, chain + sizeof(chain) - 4, 4);
 }
 
-static void check_premultiplied_mip(nt_basisu_codec_t codec) {
-    static const uint8_t black[4] = {0, 0, 0, 0};
-    static const uint8_t white[4] = {255, 255, 255, 255};
-    uint8_t mip[4];
-    encode_checker_tail(codec, NT_TEXTURE_FORMAT_RGBA8, black, white, mip);
-    /* Equal opaque-white and transparent-black coverage averages every channel to 128. */
-    for (uint32_t c = 0; c < 4; c++) {
-        TEST_ASSERT_INT_WITHIN(8, 128, mip[c]);
+/* Level l is solid colour l, which no downsample of level 0 can produce: the
+ * blob carries the caller's levels at max(1, extent >> l), not a chain of its own. */
+void test_encoder_stores_the_caller_levels(void) {
+    static const uint8_t colours[4][4] = {{255, 0, 0, 255}, {0, 255, 0, 255}, {0, 0, 255, 255}, {255, 255, 0, 255}};
+    enum { W = 12, H = 5, LEVELS = 4 }; /* 12x5 -> 6x2 -> 3x1 -> 1x1 */
+    uint8_t texels[((W * H) + (6 * 2) + (3 * 1) + 1) * 4];
+    uint8_t *dst = texels;
+    for (uint32_t l = 0; l < LEVELS; l++) {
+        const uint32_t count = nt_texture_level_extent(W, l) * nt_texture_level_extent(H, l);
+        for (uint32_t i = 0; i < count; i++) {
+            memcpy(dst + ((size_t)i * 4), colours[l], 4);
+        }
+        dst += (size_t)count * 4;
+    }
+    nt_basisu_encode_opts_t codecs[2];
+    const uint32_t codec_count = enabled_codec_presets(codecs);
+    for (uint32_t c = 0; c < codec_count; c++) {
+        nt_basisu_encode_result_t enc = nt_basisu_encode(1, texels, LEVELS, W, H, NT_TEXTURE_FORMAT_RGB8, &codecs[c], true);
+        const nt_basisu_info_t info = nt_basisu_info(enc.data, enc.size);
+        TEST_ASSERT_EQUAL_UINT32(W, info.width);
+        TEST_ASSERT_EQUAL_UINT32(H, info.height);
+        TEST_ASSERT_EQUAL_UINT32(LEVELS, info.level_count);
+        nt_basisu_transcode_chain(enc.data, enc.size, &info, NT_TEXTURE_FORMAT_RGBA8, s_out);
+        nt_basisu_encode_free(&enc);
+        for (uint32_t i = 0; i < sizeof(texels); i++) {
+            TEST_ASSERT_INT_WITHIN(12, texels[i], s_out[i]);
+        }
+    }
+}
+
+/* Transparent source texels in an RGB8 or SRGB8 texture must not reach Basis:
+ * it scans user levels for alpha even with alpha checks off. */
+void test_alpha_less_formats_encode_opaque_levels(void) {
+    uint8_t pixels[8 * 8 * 4];
+    for (uint32_t i = 0; i < 8 * 8; i++) {
+        const uint8_t rgba[4] = {(uint8_t)(i * 4), 90, 200, (i & 1U) ? 255 : 0};
+        memcpy(pixels + ((size_t)i * 4), rgba, 4);
+    }
+    static const nt_texture_pixel_format_t formats[] = {NT_TEXTURE_FORMAT_RGB8, NT_TEXTURE_FORMAT_SRGB8};
+    nt_basisu_encode_opts_t codecs[2];
+    const uint32_t codec_count = enabled_codec_presets(codecs);
+    for (uint32_t c = 0; c < codec_count; c++) {
+        for (uint32_t f = 0; f < 2; f++) {
+            uint8_t basis[4096] = {0};
+            const uint32_t size = encode_raw_pack(codecs[c].codec, formats[f], (nt_tex_process_t){0}, pixels, 8, 8, basis);
+            const nt_basisu_info_t info = nt_basisu_info(basis, size);
+            TEST_ASSERT_FALSE(info.has_alpha);
+            TEST_ASSERT_EQUAL_UINT32(4, info.level_count);
+            const uint32_t bytes = chain_bytes(NT_TEXTURE_FORMAT_RGBA8, 8, 8, 4);
+            nt_basisu_transcode_chain(basis, size, &info, NT_TEXTURE_FORMAT_RGBA8, s_out);
+            for (uint32_t i = 3; i < bytes; i += 4) {
+                TEST_ASSERT_EQUAL_UINT8(255, s_out[i]);
+            }
+        }
+    }
+}
+
+/* alpha_cutoff survives Basis: decoded levels of 64 texels or more stay nearer level
+ * 0's coverage at the threshold, within a codec tolerance (ETC1S also nearer than the
+ * uncut chain; UASTC's uncut large levels are already close). The
+ * UASTC 4x4 level keeps over half of it where the uncut chain lost every texel; the
+ * ETC1S alpha slice is too coarse at 4x4 and loses it either way. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one fixture, decoded uncut and cut
+static void check_alpha_cutoff_coverage(nt_basisu_codec_t codec) {
+    enum { N = 32 };
+    uint8_t pixels[N * N * 4];
+    for (uint32_t i = 0; i < N * N; i++) {
+        const uint32_t row = i / N;
+        const double d = fabs((double)(i % N) - 8.0 - (0.35 * row));
+        const double d2 = fabs((double)(i % N) - 21.0 - (0.35 * row));
+        const double coverage = fmax(fmin(1.0, 1.6 - d), fmin(1.0, 1.6 - d2));
+        const uint8_t texel[4] = {60, 140, 40, (uint8_t)lround(fmax(coverage, 0.0) * 255.0)};
+        memcpy(pixels + ((size_t)i * 4), texel, 4);
+    }
+    double worst[2] = {0.0, 0.0}; /* drift of levels of 64 texels or more, uncut and cut */
+    double small[2] = {0.0, 0.0}; /* coverage of the 4x4 level, uncut and cut */
+    for (uint32_t cut = 0; cut < 2; cut++) {
+        uint8_t basis[4096] = {0};
+        const uint32_t size = encode_raw_pack(codec, NT_TEXTURE_FORMAT_RGBA8, (nt_tex_process_t){.alpha_cutoff = cut ? 0.5F : 0.0F}, pixels, N, N, basis);
+        const nt_basisu_info_t info = nt_basisu_info(basis, size);
+        nt_basisu_transcode_chain(basis, size, &info, NT_TEXTURE_FORMAT_RGBA8, s_out);
+        const uint8_t *level = s_out;
+        double c0 = 0.0;
+        for (uint32_t l = 0; l < info.level_count; l++) {
+            const uint32_t texels = nt_texture_level_extent(N, l) * nt_texture_level_extent(N, l);
+            uint32_t count = 0;
+            for (uint32_t i = 0; i < texels; i++) {
+                count += level[((size_t)i * 4) + 3] >= 128 ? 1U : 0U;
+            }
+            const double coverage = (double)count / texels;
+            c0 = l == 0 ? coverage : c0;
+            if (texels >= 64) {
+                worst[cut] = fmax(worst[cut], fabs(coverage - c0));
+            }
+            small[cut] = texels == 16 ? coverage / c0 : small[cut];
+            level += (size_t)texels * 4;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(worst[1] < (codec == NT_BASISU_CODEC_UASTC_LDR ? 0.03 : 0.06), "decoded coverage drifts from level 0");
+    if (codec == NT_BASISU_CODEC_ETC1S) {
+        TEST_ASSERT_TRUE_MESSAGE(worst[1] < worst[0], "the cutoff does not improve decoded coverage");
+    }
+    TEST_ASSERT_TRUE(small[0] < 0.5);
+    if (codec == NT_BASISU_CODEC_UASTC_LDR) {
+        TEST_ASSERT_TRUE(small[1] > 0.5);
     }
 }
 
@@ -265,20 +381,20 @@ static void check_srgb_mip(nt_basisu_codec_t codec) {
     static const uint8_t opaque_white[4] = {255, 255, 255, 255};
     static const uint8_t clear_white[4] = {255, 255, 255, 0};
     uint8_t mip[4];
-    encode_checker_tail(codec, NT_TEXTURE_FORMAT_SRGB8_ALPHA8, opaque_black, opaque_white, mip);
+    encode_checker_tail(codec, NT_TEXTURE_FORMAT_SRGB8_ALPHA8, NT_TEX_ALPHA_STRAIGHT, opaque_black, opaque_white, mip);
     for (uint32_t c = 0; c < 3; c++) {
         TEST_ASSERT_INT_WITHIN(8, 188, mip[c]);
     }
     TEST_ASSERT_INT_WITHIN(8, 255, mip[3]);
-    encode_checker_tail(codec, NT_TEXTURE_FORMAT_SRGB8_ALPHA8, clear_white, opaque_white, mip);
+    encode_checker_tail(codec, NT_TEXTURE_FORMAT_SRGB8_ALPHA8, NT_TEX_ALPHA_STRAIGHT, clear_white, opaque_white, mip);
     TEST_ASSERT_INT_WITHIN(8, 128, mip[3]);
 }
 
-#if NT_BASISU_HAS_ETC1S
-void test_etc1s_premultiplied_mip(void) { check_premultiplied_mip(NT_BASISU_CODEC_ETC1S); }
-#endif
 #if NT_BASISU_HAS_UASTC
-void test_uastc_premultiplied_mip(void) { check_premultiplied_mip(NT_BASISU_CODEC_UASTC_LDR); }
+void test_uastc_alpha_cutoff_coverage(void) { check_alpha_cutoff_coverage(NT_BASISU_CODEC_UASTC_LDR); }
+#endif
+#if NT_BASISU_HAS_ETC1S
+void test_etc1s_alpha_cutoff_coverage(void) { check_alpha_cutoff_coverage(NT_BASISU_CODEC_ETC1S); }
 #endif
 #if NT_BASISU_HAS_ETC1S
 void test_etc1s_srgb_mip(void) { check_srgb_mip(NT_BASISU_CODEC_ETC1S); }
@@ -386,7 +502,7 @@ void test_public_basis_file_memory_atlas(void) {
         nt_tex_opts_t opts = nt_tex_opts_defaults();
         opts.compress = codecs[i];
         opts.max_size = 8;
-        opts.premultiplied = true;
+        opts.process.alpha = NT_TEX_ALPHA_PREMULTIPLIED;
         opts.mips = NT_TEX_MIPS_BAKED;
         nt_builder_add_texture(ctx, "basis_source.tga", &opts);
         opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
@@ -452,19 +568,21 @@ int main(void) {
 #if NT_BASISU_HAS_ETC1S
     RUN_TEST(test_etc1s_rgb);
     RUN_TEST(test_etc1s_alpha);
-    RUN_TEST(test_etc1s_premultiplied_mip);
+    RUN_TEST(test_etc1s_alpha_cutoff_coverage);
     RUN_TEST(test_etc1s_srgb_mip);
 #endif
 #if NT_BASISU_HAS_UASTC
     RUN_TEST(test_uastc_rgb);
     RUN_TEST(test_uastc_alpha);
     RUN_TEST(test_mip_level_with_a_shrunken_stored_width_asserts);
-    RUN_TEST(test_uastc_premultiplied_mip);
+    RUN_TEST(test_uastc_alpha_cutoff_coverage);
     RUN_TEST(test_uastc_srgb_mip);
 #endif
     RUN_TEST(test_non_basis_header_asserts);
-    RUN_TEST(test_encode_without_threads_asserts);
+    RUN_TEST(test_encode_argument_asserts);
     RUN_TEST(test_opaque_rgba_source_reports_no_alpha);
+    RUN_TEST(test_encoder_stores_the_caller_levels);
+    RUN_TEST(test_alpha_less_formats_encode_opaque_levels);
     RUN_TEST(test_public_basis_one_block_full_mip_chain);
     RUN_TEST(test_public_basis_file_memory_atlas);
     return UNITY_END();

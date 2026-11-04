@@ -56,6 +56,9 @@ static inline bool nt_texture_pixel_format_valid(nt_texture_pixel_format_t fmt) 
     return (fmt >= NT_TEXTURE_FORMAT_RGBA8 && fmt <= NT_TEXTURE_FORMAT_R8) || (fmt >= NT_TEXTURE_FORMAT_SRGB8_ALPHA8 && fmt <= NT_TEXTURE_FORMAT_RGB9E5);
 }
 
+/* Pixel formats that store alpha; the others hold opaque texels. */
+static inline bool nt_texture_pixel_format_has_alpha(nt_texture_pixel_format_t fmt) { return fmt == NT_TEXTURE_FORMAT_RGBA8 || fmt == NT_TEXTURE_FORMAT_SRGB8_ALPHA8; }
+
 /* Bytes per pixel for each format */
 static inline uint32_t nt_texture_bpp(nt_texture_pixel_format_t fmt) {
     switch (fmt) {

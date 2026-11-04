@@ -37,6 +37,7 @@ void tearDown(void) {}
 static nt_tex_opts_t hdr_opts(nt_tex_mips_t mips) {
     nt_tex_opts_t opts = nt_tex_opts_defaults();
     opts.format = NT_TEXTURE_FORMAT_RGB9E5;
+    opts.process = (nt_tex_process_t){0};
     opts.mips = mips;
     if (mips == NT_TEX_MIPS_NONE) {
         opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
@@ -211,7 +212,7 @@ void test_rgb9e5_chain_box_filters_each_level(void) {
 void test_rgb9e5_max_size_resizes_with_the_box_filter(void) {
     float rgb[16 * 8 * 3];
     for (uint32_t i = 0; i < 16 * 8; i++) {
-        rgb[(i * 3) + 0] = (i % 2 == 0) ? 8.0F : 0.0F;
+        rgb[(i * 3) + 0] = ((const float[4]){8.0F, 0.0F, 4.0F, 0.0F})[i % 4];
         rgb[(i * 3) + 1] = 2.0F;
         rgb[(i * 3) + 2] = 0.25F;
     }
@@ -223,6 +224,10 @@ void test_rgb9e5_max_size_resizes_with_the_box_filter(void) {
     float px[3];
     unpack_rgb9e5(t.words[0], px);
     EXPECT_NEAR(1.0F / 64.0F, 4.0F, px[0]);
+    EXPECT_NEAR(1.0F / 64.0F, 2.0F, px[1]);
+    EXPECT_NEAR(1.0F / 64.0F, 0.25F, px[2]);
+    unpack_rgb9e5(t.words[1], px); /* the resized level is read as RGBA, the source as RGB */
+    EXPECT_NEAR(1.0F / 64.0F, 2.0F, px[0]);
     EXPECT_NEAR(1.0F / 64.0F, 2.0F, px[1]);
     EXPECT_NEAR(1.0F / 64.0F, 0.25F, px[2]);
     free(t.pack);
@@ -381,8 +386,8 @@ void test_hdr_opts_contract(void) {
     EXPECT_BUILD_ASSERT_MATCH((void)nt_builder_assert_texture_opts(&opts), "Basis compression requires");
     /* Premultiplying would treat the float source as RGBA8 bytes. */
     opts = hdr_opts(NT_TEX_MIPS_BAKED);
-    opts.premultiplied = true;
-    EXPECT_BUILD_ASSERT_MATCH((void)nt_builder_assert_texture_opts(&opts), "premultiplied=true requires RGBA8");
+    opts.process.alpha = NT_TEX_ALPHA_PREMULTIPLIED;
+    EXPECT_BUILD_ASSERT_MATCH((void)nt_builder_assert_texture_opts(&opts), "process.alpha PREMULTIPLIED requires RGBA8");
     /* A mip filter without a baked chain has no levels to sample. */
     opts = hdr_opts(NT_TEX_MIPS_NONE);
     opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR;

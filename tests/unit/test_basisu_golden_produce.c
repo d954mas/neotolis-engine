@@ -10,6 +10,7 @@
 #include "nt_basisu_transcoder.h"
 #include "nt_texture_format.h"
 #include "ntpack_parse.h"
+#include "test_helpers/basis_test_chain.h"
 #include "unity.h"
 
 void setUp(void) {}
@@ -88,7 +89,9 @@ static void produce_fixture(const fixture_t *fx) {
         opts.uastc.pack_level = 2;
         opts.uastc.rdo_lambda = 1.0F;
     }
-    nt_basisu_encode_result_t enc = nt_basisu_encode(1, pixels, fx->w, fx->h, fx->alpha ? NT_TEXTURE_FORMAT_RGBA8 : NT_TEXTURE_FORMAT_RGB8, &opts, true);
+    basis_test_chain_t chain = basis_test_chain(pixels, fx->w, fx->h, fx->levels);
+    nt_basisu_encode_result_t enc = nt_basisu_encode(1, chain.data, chain.count, fx->w, fx->h, fx->alpha ? NT_TEXTURE_FORMAT_RGBA8 : NT_TEXTURE_FORMAT_RGB8, &opts, true);
+    basis_test_chain_free(&chain);
     free(pixels);
     TEST_ASSERT_NOT_NULL_MESSAGE(enc.data, fx->name);
 
@@ -101,7 +104,6 @@ static void produce_fixture(const fixture_t *fx) {
     TEST_ASSERT_EQUAL_UINT32(fx->w, info.width);
     TEST_ASSERT_EQUAL_UINT32(fx->h, info.height);
     TEST_ASSERT_EQUAL(fx->alpha, info.has_alpha);
-    TEST_ASSERT_EQUAL_UINT32(enc.mip_count, info.level_count);
     TEST_ASSERT_EQUAL_UINT32(fx->levels, info.level_count);
 
     for (size_t t = 0; t < TARGET_COUNT; t++) {
