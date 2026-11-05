@@ -18,13 +18,21 @@ static bool cmd_record_start(const cJSON *params, cJSON *result, nt_devapi_error
     if (fps == 0) {
         return nt_devapi_fail(err, bad_fps);
     }
+    const char *bad_bitrate = "record.start: bitrate_bps must be an integer 1..4294967295";
+    uint32_t bitrate_bps = 0;
+    if (!nt_devapi_parse_u32_param_exact(cJSON_GetObjectItemCaseSensitive(params, "bitrate_bps"), UINT32_MAX, err, bad_bitrate, &bitrate_bps)) {
+        return false;
+    }
+    if (bitrate_bps == 0) {
+        return nt_devapi_fail(err, bad_bitrate);
+    }
     if (nt_recorder_active()) {
         return nt_devapi_fail_code(err, "recording", "record.start: a recording is active");
     }
     if (!nt_recorder_ready()) {
         return nt_devapi_fail_code(err, "not_ready", "record.start: the recorder is not ready yet, start again");
     }
-    if (!nt_recorder_start(name->valuestring, fps)) {
+    if (!nt_recorder_start(name->valuestring, fps, bitrate_bps)) {
         return nt_devapi_fail_code(err, "failed", "record.start: the recorder refused to start (see log and console)");
     }
     return true;
@@ -42,7 +50,7 @@ static const nt_devapi_command k_record_cmds[] = {
         .method = "record.start",
         .summary = "start recording an MP4 of the presented frames on game time; web dispatches 'nt-recorder' when the recording ends, Windows writes the file at name (a path); not_ready while the "
                    "web codec probe runs",
-        .params_shape = "{name:string, fps:int}",
+        .params_shape = "{name:string, fps:int, bitrate_bps:int}",
         .result_shape = "{}",
         .fn = cmd_record_start,
     },

@@ -27,9 +27,11 @@ globalThis['NtRecorder'] = (function () {
             }).then(function (aac) { if (aac) { acodec = 'mp4a.40.2'; } }),
         ]).then(function () { probed = true; });
     }
-    // H.264 levels: [level_idc hex, max frame macroblocks, max macroblocks per second].
-    var LEVELS = [['1F', 3600, 108000], ['28', 8192, 245760], ['2A', 8704, 522240], ['32', 22080, 589824], ['33', 36864, 983040],
-                  ['34', 36864, 2073600], ['3C', 139264, 4177920], ['3E', 139264, 16711680]];
+    // H.264 Annex A: [level_idc hex, MaxFS, MaxMBPS, MaxBR in baseline kbps]; High allows 1.25x MaxBR.
+    var LEVELS = [['1F', 3600, 108000, 14000], ['20', 5120, 216000, 20000], ['28', 8192, 245760, 20000],
+                  ['29', 8192, 245760, 50000], ['2A', 8704, 522240, 50000], ['32', 22080, 589824, 135000],
+                  ['33', 36864, 983040, 240000], ['34', 36864, 2073600, 240000], ['3C', 139264, 4177920, 240000],
+                  ['3D', 139264, 8355840, 480000], ['3E', 139264, 16711680, 800000]];
 
     // An encoder error or the browser's resource reclamation may already have closed an encoder.
     function closeEncoders(r) {
@@ -42,7 +44,7 @@ globalThis['NtRecorder'] = (function () {
         if (r.out) { r.out.cancel().catch(function () {}); }
     }
 
-    function open(name, canvas, w, h, fps) {
+    function open(name, canvas, w, h, fps, bitrate_bps) {
         if (!probed || !profile || !acodec) {
             console.warn(!probed ? 'nt_recorder: codec probe still running, start again'
                          : typeof VideoEncoder === 'undefined' || typeof AudioEncoder === 'undefined'
@@ -50,10 +52,13 @@ globalThis['NtRecorder'] = (function () {
                              : 'nt_recorder: no ' + (profile ? 'AAC or Opus' : 'H.264') + ' encoder in this browser');
             return false;
         }
-        var mbs = Math.ceil(w / 16) * Math.ceil(h / 16);
-        var level = LEVELS.find(function (l) { return mbs <= l[1] && mbs * fps <= l[2]; });
+        var mw = Math.ceil(w / 16), mh = Math.ceil(h / 16), mbs = mw * mh;
+        var level = LEVELS.find(function (l) {
+            return mw * mw <= 8 * l[1] && mh * mh <= 8 * l[1] && mbs <= l[1] && mbs * fps <= l[2]
+                && bitrate_bps <= l[3] * (profile === '6400' ? 1250 : 1000);
+        });
         if (!level) {
-            console.warn('nt_recorder: ' + w + 'x' + h + ' at ' + fps + ' fps exceeds H.264 level 6.2');
+            console.warn('nt_recorder: ' + w + 'x' + h + ' at ' + fps + ' fps, ' + bitrate_bps + ' bps exceeds H.264 level 6.2');
             return false;
         }
         var MB = NtMediabunny;
@@ -78,10 +83,11 @@ globalThis['NtRecorder'] = (function () {
             };
             r.venc = new VideoEncoder({ output: add(r.vsrc), error: fail });
             r.venc.configure({ codec: 'avc1.' + profile + level[0], width: w, height: h, framerate: fps,
-                               bitrate: Math.round(w * h * fps * 0.1), alpha: 'discard', avc: { format: 'avc' } });
+                               bitrate: bitrate_bps, alpha: 'discard', avc: { format: 'avc' } });
             r.aenc = new AudioEncoder({ output: add(r.asrc), error: fail });
             r.aenc.configure({ codec: acodec, sampleRate: 48000, numberOfChannels: 2, bitrate: 192000 });
         } catch (e) {
+            console.warn('nt_recorder: start failed: ' + e);
             release(r);
             return false;
         }

@@ -2,6 +2,7 @@
    answers not_ready, a refusal once ready answers failed, and record.stop reports the stats. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -17,15 +18,17 @@ static struct {
     bool refuse;
     bool active;
     uint32_t starts;
+    uint32_t bitrate_bps;
     nt_recorder_stats_t stats;
 } s_fake;
 
 bool nt_recorder_ready(void) { return s_fake.ready; }
 
-bool nt_recorder_start(const char *name, uint32_t fps) {
+bool nt_recorder_start(const char *name, uint32_t fps, uint32_t bitrate_bps) {
     (void)name;
     (void)fps;
     s_fake.starts++;
+    s_fake.bitrate_bps = bitrate_bps;
     s_fake.active = !s_fake.refuse;
     return s_fake.active;
 }
@@ -60,7 +63,7 @@ static void assert_error(const char *line, const char *code) {
     cJSON_Delete(root);
 }
 
-#define START_LINE "{\"method\":\"record.start\",\"request_id\":1,\"params\":{\"name\":\"a.mp4\",\"fps\":30}}"
+#define START_LINE "{\"method\":\"record.start\",\"request_id\":1,\"params\":{\"name\":\"a.mp4\",\"fps\":30,\"bitrate_bps\":100000000}}"
 
 static void test_start_while_not_ready_answers_not_ready(void) {
     assert_error(START_LINE, "not_ready");
@@ -93,11 +96,40 @@ static void test_stop_reports_frames_and_drift_ms(void) {
     cJSON_Delete(root);
 }
 
+static void test_invalid_bitrate_never_starts(void) {
+    s_fake.ready = true;
+    const char *values[] = {"null", "true", "\"100000000\"", "0", "-1", "0.5", "4294967296", "1e100"};
+    assert_error("{\"method\":\"record.start\",\"request_id\":1,\"params\":{\"name\":\"a.mp4\",\"fps\":30}}", "bad_params");
+    for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); i++) {
+        char line[256];
+        (void)snprintf(line, sizeof(line), "{\"method\":\"record.start\",\"request_id\":1,\"params\":{\"name\":\"a.mp4\",\"fps\":30,\"bitrate_bps\":%s}}", values[i]);
+        assert_error(line, "bad_params");
+    }
+    TEST_ASSERT_EQUAL_UINT32(0, s_fake.starts);
+}
+
+static void test_bitrate_reaches_recorder_unchanged(void) {
+    s_fake.ready = true;
+    const uint32_t values[] = {1, 50000000, 100000000, UINT32_MAX};
+    for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); i++) {
+        char line[256];
+        (void)snprintf(line, sizeof(line), "{\"method\":\"record.start\",\"request_id\":1,\"params\":{\"name\":\"a.mp4\",\"fps\":30,\"bitrate_bps\":%u}}", values[i]);
+        cJSON *root = submit(line);
+        TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
+        TEST_ASSERT_EQUAL_UINT32(values[i], s_fake.bitrate_bps);
+        cJSON_Delete(root);
+        (void)nt_recorder_stop();
+    }
+    TEST_ASSERT_EQUAL_UINT32(4, s_fake.starts);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_start_while_not_ready_answers_not_ready);
     RUN_TEST(test_refusal_once_ready_answers_failed);
     RUN_TEST(test_recording_answers_before_not_ready);
     RUN_TEST(test_stop_reports_frames_and_drift_ms);
+    RUN_TEST(test_invalid_bitrate_never_starts);
+    RUN_TEST(test_bitrate_reaches_recorder_unchanged);
     return UNITY_END();
 }

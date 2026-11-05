@@ -11,10 +11,11 @@
    ready until that probe settles; Windows is always ready. Ready does not promise an encoder exists. */
 bool nt_recorder_ready(void);
 
-/* name: web — download name, copied; Windows — UTF-8 file path, overwritten. fps 1..120. Returns false
+/* name: web — download name, copied; Windows — UTF-8 file path, overwritten. fps 1..120, bitrate_bps > 0:
+   target video bits per second (actual VBR output varies). Returns false
    (logged) when a framebuffer side is under 2 px or the backend refuses (not ready, no encoder, size
-   rejected, output not opened; web: past H.264 level 6.2). Asserts while recording. */
-bool nt_recorder_start(const char *name, uint32_t fps);
+   or bitrate rejected, output not opened; web: past H.264 level 6.2). Asserts while recording. */
+bool nt_recorder_start(const char *name, uint32_t fps, uint32_t bitrate_bps);
 
 /* After nt_gfx_end_frame and before nt_window_swap_buffers, once per presented frame; dt is the advance
    that produced this frame. The first call sets the recording's origin: t - dt, or where audio pushed

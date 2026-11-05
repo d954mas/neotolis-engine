@@ -17,7 +17,7 @@
 
 static struct {
     uint32_t opens;
-    uint32_t width, height, fps;
+    uint32_t width, height, fps, bitrate_bps;
     uint32_t videos;
     uint32_t video_calls;
     uint32_t next_index;
@@ -46,7 +46,7 @@ static struct {
 
 bool nt_recorder_platform_ready(void) { return true; }
 
-bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height, uint32_t fps) {
+bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height, uint32_t fps, uint32_t bitrate_bps) {
     (void)name;
     s_be.opens++;
     if (s_be.fail_open) {
@@ -55,6 +55,7 @@ bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height
     s_be.width = width;
     s_be.height = height;
     s_be.fps = fps;
+    s_be.bitrate_bps = bitrate_bps;
     s_be.period = 1.0 / (double)fps;
     s_be.at = 0;
     return true;
@@ -129,7 +130,7 @@ void tearDown(void) {
 /* t: the origin the first frame call should set, for the video deadline check. */
 static void start_at(uint32_t fps, double t) {
     s_be.t0 = t;
-    TEST_ASSERT_TRUE(nt_recorder_start("clip.mp4", fps));
+    TEST_ASSERT_TRUE(nt_recorder_start("clip.mp4", fps, 50000000));
     TEST_ASSERT_EQUAL_UINT32(fps, s_be.fps);
 }
 
@@ -168,6 +169,15 @@ static void test_size_rounds_down_to_even(void) {
     start_at(30, 0.0);
     TEST_ASSERT_EQUAL_UINT32(640, s_be.width);
     TEST_ASSERT_EQUAL_UINT32(360, s_be.height);
+}
+
+static void test_bitrate_reaches_backend_unchanged(void) {
+    const uint32_t bitrates[] = {1, 50000000, 100000000, UINT32_MAX};
+    for (size_t i = 0; i < sizeof(bitrates) / sizeof(bitrates[0]); i++) {
+        TEST_ASSERT_TRUE(nt_recorder_start("clip.mp4", 60, bitrates[i]));
+        TEST_ASSERT_EQUAL_UINT32(bitrates[i], s_be.bitrate_bps);
+        (void)nt_recorder_stop();
+    }
 }
 
 static void test_one_frame_per_step(void) {
@@ -311,17 +321,17 @@ static void test_close_failure_returns_zero(void) {
 
 static void test_open_failure_refuses_to_start(void) {
     s_be.fail_open = true;
-    TEST_ASSERT_FALSE(nt_recorder_start("clip.mp4", 30));
+    TEST_ASSERT_FALSE(nt_recorder_start("clip.mp4", 30, 50000000));
     TEST_ASSERT_FALSE(nt_recorder_active());
     TEST_ASSERT_EQUAL_UINT32(1, s_be.warns);
 }
 
 static void test_tiny_framebuffer_refuses_to_start(void) {
     g_nt_window.fb_width = 1;
-    TEST_ASSERT_FALSE(nt_recorder_start("clip.mp4", 30));
+    TEST_ASSERT_FALSE(nt_recorder_start("clip.mp4", 30, 50000000));
     g_nt_window.fb_width = 641;
     g_nt_window.fb_height = 1;
-    TEST_ASSERT_FALSE(nt_recorder_start("clip.mp4", 30));
+    TEST_ASSERT_FALSE(nt_recorder_start("clip.mp4", 30, 50000000));
     TEST_ASSERT_FALSE(nt_recorder_active());
     TEST_ASSERT_EQUAL_UINT32(0, s_be.opens);
     TEST_ASSERT_EQUAL_UINT32(2, s_be.warns);
@@ -675,6 +685,7 @@ static void test_audio_failure_ends_the_recording(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_size_rounds_down_to_even);
+    RUN_TEST(test_bitrate_reaches_backend_unchanged);
     RUN_TEST(test_one_frame_per_step);
     RUN_TEST(test_two_ticks_per_frame);
     RUN_TEST(test_float_step_below_period_does_not_drift);

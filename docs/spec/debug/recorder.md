@@ -17,7 +17,7 @@ typedef struct {
 } nt_recorder_stats_t;
 
 bool nt_recorder_ready(void);
-bool nt_recorder_start(const char *name, uint32_t fps);
+bool nt_recorder_start(const char *name, uint32_t fps, uint32_t bitrate_bps);
 void nt_recorder_frame(double t, double dt);
 void nt_recorder_push_audio(const float *stereo48k, uint32_t frames);
 nt_recorder_stats_t nt_recorder_stop(void);
@@ -38,9 +38,9 @@ and audio sample 0 sits there, so `start` can come anywhere in a step: between s
 before or after its push.
 
 `start` fixes the size to the window framebuffer, rounded down to even (H.264 4:2:0). It asserts a
-non-empty `name`, `fps` within 1..120 and no active recording. It returns false (logged) when either
+non-empty `name`, `fps` within 1..120, nonzero `bitrate_bps` and no active recording. It returns false (logged) when either
 side of that size is under 2 px or the backend refuses: not ready, no encoder, a size the encoder
-rejects, or an output that cannot be opened (see Backends). `frame`, `push_audio` and `stop` are no-ops while idle.
+rejects, an unsupported bitrate, or an output that cannot be opened (see Backends). `frame`, `push_audio` and `stop` are no-ops while idle.
 `stop` returns the frames sent to the encoder and `max_drift` (see Audio); the whole struct is zero
 while idle and when a final write failed (audio, or on Windows the last frames, see Backends).
 
@@ -48,6 +48,34 @@ A recording also ends on its own, with a WARN, in three cases. A change of the e
 framebuffer size, and a `frame` call with more than two seconds (`2 · fps`) of due frames (render
 off while time ran), end it with the audio padded to the video. An encoder failure ends it; web
 writes no file, Windows keeps the fragments already on disk. After any of them `stop` returns zero stats.
+
+## Choosing the bitrate
+
+`bitrate_bps` is the target **video bits per second**, fixed for that recording; audio is separate.
+The game chooses it at each start. There is no default, preset or automatic quality adjustment.
+Variable bitrate output can be above or below the target; an encoder can also reject a configuration.
+To change the target, stop and start another recording.
+
+A starting estimate is `round(width * height * fps * k)`, using the even-rounded framebuffer size
+and floating-point or sufficiently wide arithmetic. These coefficients are guidance to test on the
+game's content, not quality guarantees or engine modes:
+
+| Content and purpose | k (bits per pixel per frame) | 1080p30 | 1080p60 |
+|---|---:|---:|---:|
+| Compact debug/agent clips | 0.1 | 6.22 Mbps | 12.44 Mbps |
+| Higher-quality gameplay | 0.4 | 24.88 Mbps | 49.77 Mbps |
+| Dense detail and trailer source | 0.8 | 49.77 Mbps | 99.53 Mbps |
+
+For example, `nt_recorder_start("trailer.mp4", 60, 100000000)` requests 100 Mbps.
+Thin outlines, small text, particles and rapid motion may need more bits than a smooth scene.
+Inspect a representative clip at its final resolution before selecting a target. H.264 here uses
+4:2:0 chroma subsampling; increasing bitrate does not make it lossless or preserve every colored edge.
+
+Approximate file size is `(video_bps + 192000) * seconds / 8`, plus container overhead, using the
+**measured** video rate when available. At the target rate, 100 Mbps video uses about 12.5 MB/s or
+752 MB/minute including audio. A higher bitrate increases storage and potentially encoding cost;
+it does not remove GPU readback or encoder waits. Windows is the primary path for long, high-quality
+clips; web keeps the whole file in memory (see Backends).
 
 ## Frame selection
 
@@ -97,12 +125,14 @@ stays.
 the task presents it: a `VideoFrame` from the canvas inside the rAF task, before the swap, reads the
 finished frame. Frames and samples go to `VideoEncoder` and `AudioEncoder`. Codecs are probed once
 when the script loads: H.264 High, else Constrained Baseline, at the lowest listed level (3.1 to 6.2)
-whose frame size and macroblock rate fit (bitrate `0.1 · w · h · fps`); AAC-LC, else Opus (Firefox,
+whose frame size, macroblock rate and requested bitrate fit; AAC-LC, else Opus (Firefox,
 Chrome on Linux; editors handle Opus in MP4 poorly), both 192 kbps. While the probe runs
 `nt_recorder_ready` is false and `start` returns false (a console warning says so; start again). Once
 it settles `ready` is true, and `start` still returns false past level 6.2 and in a browser without
 WebCodecs, an H.264 encoder or an AAC/Opus encoder (a console warning names the cause). The probe uses 640x360 at
-30 fps: an encoder that rejects the level picked for the real size ends the recording at the first
+30 fps: this is not a capability check for the requested size, rate and bitrate. A synchronous
+configuration rejection makes `start` return false with a console warning; an encoder that rejects
+the configuration asynchronously ends the recording at the first
 frame call after it reports so (`error` in the event). WebCodecs needs a secure context: a page over
 plain `http` to a LAN address (a phone) has none, so recording there needs `https` or `localhost`.
 The vendored Mediabunny muxer (`deps/mediabunny`) writes the MP4. The JS lives in
@@ -110,7 +140,14 @@ The vendored Mediabunny muxer (`deps/mediabunny`) writes the MP4. The JS lives i
 recorder evaluates the muxer (about 125 KB) at load. One recording at a time per page, on the main
 thread.
 
-Encoded bytes stay in tab memory (the target bitrate at 1080p30 is about 0.8 MB/s; finishing copies
+The level table follows [H.264 Annex A limits as used by Chromium](https://github.com/chromium/chromium/blob/main/media/parsers/h264_level_limits.cc):
+MaxFS, MaxMBPS and baseline MaxBR; High allows 1.25 times the baseline bitrate. Each side in macroblocks
+also must not exceed `sqrt(8 * MaxFS)`. The table includes
+3.2, 4.1 and 6.1, so raising the bitrate can select the next sufficient level without skipping one.
+No level fits above 1,000,000,000 bps for High or 800,000,000 bps for Constrained Baseline; the browser
+may have lower limits. A selected level does not guarantee that its encoder accepts the request.
+
+Encoded bytes stay in tab memory (100 Mbps is about 12.5 MB/s; finishing copies
 the buffer into a `Blob`, so the peak is at least twice the file size): a dev-only exception to
 preallocated storage; long web recordings are not a goal. Nothing paces the game to the encoder: an
 encoder queue above four seconds of frames (two of backlog plus one call's catch-up) ends the
@@ -131,12 +168,15 @@ recording (UTF-8, relative to the working directory, overwritten; a name that do
 path under `MAX_PATH` makes `start` return false). A killed process leaves a file readable up to the
 last fragment, which loses about one fragment plus the frames still in the encoder. Video is H.264
 High without B-frames (the MP4 sink writes no edit list, so B-frames would start the video a frame
-late), peak-constrained VBR at the web bitrate, BT.709 tags; audio is AAC-LC 192 kbps from the float
+late), peak-constrained VBR at `bitrate_bps`, with peak `2 * bitrate_bps`, BT.709 tags; audio is AAC-LC 192 kbps from the float
 samples. Both backends put a keyframe every two seconds. Media Foundation takes a hardware encoder
 when one accepts the stream, else its software one. `start` returns false where no encoder accepts
-the size (very small, or past 4K) and blocks for encoder setup, up to about a second with a hardware
+the size (very small, or past 4K) or bitrate and blocks for encoder setup, up to about a second with a hardware
 encoder, so in RUN the step after `start` advances by that wait and its `frame` call repeats a frame
 for each deadline it covers.
+Targets above `UINT32_MAX / 2` return false before opening the output, because the peak must fit
+Media Foundation's UINT32 attribute. The target is passed unchanged to `MF_MT_AVG_BITRATE`; there
+is no clamp or quality-mode fallback. Media Foundation chooses the H.264 level.
 Media Foundation must be installed: a game that links the recorder does not start on a Windows N
 edition without the Media Feature Pack. The executable links `nt_gfx`, not its stub: the recorder
 reads the window through it. A recording takes five `nt_gfx` readback buffers of `w · h · 4` bytes
@@ -179,7 +219,7 @@ which could wait on the dead encoder, and keeps the fragments on disk; so does a
 
 | Command | Params | Result | Errors |
 |---|---|---|---|
-| `record.start` | `{name, fps}` | `{}` | `bad_params` (name not a non-empty string, fps not an integer 1..120), `recording` (active), `not_ready` (`nt_recorder_ready` is false; start again), `failed` (`start` returned false) |
+| `record.start` | `{name, fps, bitrate_bps}` | `{}` | `bad_params` (name not a non-empty string, fps not an integer 1..120, bitrate_bps missing or not an integer 1..4294967295), `recording` (active), `not_ready` (`nt_recorder_ready` is false; start again), `failed` (`start` returned false) |
 | `record.stop` | `{}` | `{frames, max_drift_ms}` | none of its own; both are 0 when nothing was active, the recording ended on its own, or a final write failed |
 
 Both commands also answer the core `busy` while a deferred reply is pending ([Logging, Errors, Debugging](logging-errors-debugging.md), Developer API).

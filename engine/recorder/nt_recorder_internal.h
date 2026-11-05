@@ -11,7 +11,7 @@
    return false when a write to the encoder fails; the core then ends the recording and still calls
    close: web writes no file, native keeps the fragments already on disk (none without a frame). */
 bool nt_recorder_platform_ready(void);
-bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height, uint32_t fps);
+bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height, uint32_t fps, uint32_t bitrate_bps);
 /* Records the current framebuffer as output frames first .. first + count - 1 (pts index / fps).
    Windows queues a read of it and encodes that read when its ring of three is full, or in close. */
 bool nt_recorder_platform_video(uint32_t first, uint32_t count);

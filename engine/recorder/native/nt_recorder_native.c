@@ -228,7 +228,7 @@ static void attach_device(IMFAttributes *attrs) {
     must(IMFAttributes_SetUnknown(attrs, &MF_SINK_WRITER_D3D_MANAGER, (IUnknown *)s_mf.devices));
 }
 
-static bool create_writer(void) {
+static bool create_writer(uint32_t bitrate_bps) {
     IMFAttributes *attrs = NULL;
     must(MFCreateAttributes(&attrs, 4));
     attach_device(attrs);
@@ -246,8 +246,7 @@ static bool create_writer(void) {
     // #region stream types
     IMFMediaType *vout = video_type(&MFVideoFormat_H264);
     must(IMFMediaType_SetUINT32(vout, &MF_MT_MPEG2_PROFILE, NT_RECORDER_H264_HIGH));
-    UINT32 bitrate = (UINT32)(0.1 * s_mf.width * s_mf.height * s_mf.fps);
-    must(IMFMediaType_SetUINT32(vout, &MF_MT_AVG_BITRATE, bitrate));
+    must(IMFMediaType_SetUINT32(vout, &MF_MT_AVG_BITRATE, bitrate_bps));
     /* Untagged output decodes with the wrong matrix in ffmpeg and players. */
     must(IMFMediaType_SetUINT32(vout, &MF_MT_YUV_MATRIX, MFVideoTransferMatrix_BT709));
     must(IMFMediaType_SetUINT32(vout, &MF_MT_VIDEO_PRIMARIES, MFVideoPrimaries_BT709));
@@ -263,7 +262,7 @@ static bool create_writer(void) {
     must(IMFAttributes_SetUINT32(encoder, &k_bframes, 0));
     must(IMFAttributes_SetUINT32(encoder, &k_gop, 2U * s_mf.fps));
     must(IMFAttributes_SetUINT32(encoder, &k_rate_control, NT_RECORDER_PEAK_CONSTRAINED_VBR));
-    must(IMFAttributes_SetUINT32(encoder, &k_max_bitrate, 2U * bitrate));
+    must(IMFAttributes_SetUINT32(encoder, &k_max_bitrate, 2U * bitrate_bps));
     IMFMediaType *aout = audio_type(&MFAudioFormat_AAC, 16, 24000); /* 192 kbps */
     IMFMediaType *ain = audio_type(&MFAudioFormat_Float, 32, NT_RECORDER_AUDIO_RATE * 8U);
     must(IMFMediaType_SetUINT32(ain, &MF_MT_AUDIO_BLOCK_ALIGNMENT, 8));
@@ -282,7 +281,11 @@ static bool create_writer(void) {
 
 bool nt_recorder_platform_ready(void) { return true; }
 
-bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height, uint32_t fps) {
+bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height, uint32_t fps, uint32_t bitrate_bps) {
+    if (bitrate_bps > UINT32_MAX / 2U) {
+        NT_LOG_WARN("%u bps: twice the target bitrate exceeds Media Foundation's UINT32 peak bitrate", bitrate_bps);
+        return false;
+    }
     if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, name, -1, s_mf.path, MAX_PATH) == 0) {
         NT_LOG_WARN("%s: not a UTF-8 path under %d characters", name, MAX_PATH);
         return false;
@@ -302,7 +305,7 @@ bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height
        already has COM, which the free-threaded sink writer can use. */
     s_mf.com = SUCCEEDED(CoInitializeEx(NULL, COINIT_MULTITHREADED));
     must(MFStartup(MF_VERSION, MFSTARTUP_FULL)); /* the process could not start without Media Foundation */
-    if (!create_writer()) {
+    if (!create_writer(bitrate_bps)) {
         release(true);
         return false;
     }

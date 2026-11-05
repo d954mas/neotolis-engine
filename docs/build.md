@@ -484,7 +484,11 @@ steps at fps 30) and checks the MP4 with `tools/devapi/check_recording.py`: stre
 count, 48 kHz stereo audio as long as the video, flash/beep offset within a frame. That needs
 ffmpeg/ffprobe on `PATH` or in `FFMPEG_DIR`. `nt_recorder` is OFF in the push gate: the CI web-smoke
 `wasm-release` run links it under Closure. Native `test_recorder` covers frame selection and the audio
-stream.
+stream and exact bitrate forwarding. `test_devapi_recorder` checks required integer bitrate bounds.
+`record_demo` also checks Windows peak overflow without touching an existing file, and the actual
+unsigned WASM bridge plus H.264 level selection and encoder rejections against isolated WebCodecs
+doubles. Its native RUN clip requests 100 Mbps and the native/web lockstep clip requests 50 Mbps;
+these simple patterns check recording correctness, not dense-scene compression quality.
 
 ## Troubleshooting
 
