@@ -75,17 +75,17 @@ static void warn_drift(double t) {
     }
 }
 
-bool nt_recorder_start(const char *name, uint32_t fps) {
+bool nt_recorder_start(const char *name, uint32_t fps, uint32_t bitrate_bps) {
     NT_ASSERT(!s_rec.active && "nt_recorder_start: already recording");
     NT_ASSERT(name != NULL && name[0] != '\0');
-    NT_ASSERT(fps >= 1 && fps <= 120);
+    NT_ASSERT(fps >= 1 && fps <= 120 && bitrate_bps > 0);
     uint32_t w = g_nt_window.fb_width & ~1U; /* H.264 4:2:0 needs even sizes */
     uint32_t h = g_nt_window.fb_height & ~1U;
     if (w == 0 || h == 0) {
         NT_LOG_WARN("%s: framebuffer is %ux%u, not recording", name, g_nt_window.fb_width, g_nt_window.fb_height);
         return false;
     }
-    if (!nt_recorder_platform_open(name, w, h, fps)) {
+    if (!nt_recorder_platform_open(name, w, h, fps, bitrate_bps)) {
         NT_LOG_WARN("%s: not recording", name); /* the backend logged why */
         return false;
     }

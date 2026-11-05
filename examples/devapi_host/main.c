@@ -155,8 +155,7 @@ static void render_pattern(bool flash) {
 /* A/V probe for record.*, mixed like a game: each frame pushes the samples for its advance, and the
    step that crosses a whole game second starts a 50 ms 1 kHz beep at the block start while its frame
    starts a 100 ms white flash. */
-#define HOST_TONE_RATE 48000
-#define HOST_BEEP_FRAMES (HOST_TONE_RATE / 20)
+enum { HOST_TONE_RATE = 48000, HOST_BEEP_FRAMES = HOST_TONE_RATE / 20 };
 static uint32_t s_beep_left;
 
 static bool second_crossed(void) { return floor(g_nt_app.time) != floor(g_nt_app.time - (double)g_nt_app.dt); }
@@ -168,9 +167,9 @@ static void push_tone(void) {
         return;
     }
     double start = g_nt_app.time - (double)g_nt_app.dt;
-    int64_t n = llround(g_nt_app.time * HOST_TONE_RATE) - llround(start * HOST_TONE_RATE);
+    int64_t n = llround(g_nt_app.time * (double)HOST_TONE_RATE) - llround(start * (double)HOST_TONE_RATE);
     /* Cap a huge step: past the recorder's two-second catch-up the next frame call ends the recording. */
-    n = n < 3 * HOST_TONE_RATE ? n : 3 * HOST_TONE_RATE;
+    n = n < 3LL * HOST_TONE_RATE ? n : 3LL * HOST_TONE_RATE;
     if (second_crossed()) {
         s_beep_left = HOST_BEEP_FRAMES;
     }
@@ -182,8 +181,8 @@ static void push_tone(void) {
                 v = 0.5F * sinf(6.2831853F * 1000.0F * (float)(HOST_BEEP_FRAMES - s_beep_left) / (float)HOST_TONE_RATE);
                 s_beep_left--;
             }
-            s_buf[2 * i] = v;
-            s_buf[(2 * i) + 1] = v;
+            s_buf[(size_t)i * 2U] = v;
+            s_buf[((size_t)i * 2U) + 1U] = v;
         }
         nt_recorder_push_audio(s_buf, chunk);
         done += chunk;

@@ -12,8 +12,8 @@ EM_JS(int, nt_recorder_web_ready, (void), {
     return globalThis['NtRecorder']['ready']() ? 1 : 0;
 })
 
-EM_JS(int, nt_recorder_web_open, (const char *name, uint32_t w, uint32_t h, uint32_t fps), {
-    return globalThis['NtRecorder']['open'](UTF8ToString(name), Module['canvas'], w, h, fps) ? 1 : 0;
+EM_JS(int, nt_recorder_web_open, (const char *name, uint32_t w, uint32_t h, uint32_t fps, uint32_t bitrate_bps), {
+    return globalThis['NtRecorder']['open'](UTF8ToString(name), Module['canvas'], w, h, fps, bitrate_bps >>> 0) ? 1 : 0;
 })
 
 EM_JS(int, nt_recorder_web_video, (uint32_t index), {
@@ -31,7 +31,7 @@ EM_JS(void, nt_recorder_web_close, (void), {
 
 bool nt_recorder_platform_ready(void) { return nt_recorder_web_ready() != 0; }
 
-bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height, uint32_t fps) { return nt_recorder_web_open(name, width, height, fps) != 0; }
+bool nt_recorder_platform_open(const char *name, uint32_t width, uint32_t height, uint32_t fps, uint32_t bitrate_bps) { return nt_recorder_web_open(name, width, height, fps, bitrate_bps) != 0; }
 
 bool nt_recorder_platform_video(uint32_t first, uint32_t count) {
     for (uint32_t i = 0; i < count; i++) {

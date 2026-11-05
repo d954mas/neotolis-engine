@@ -20,6 +20,7 @@ import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from .. import launch
 from ..client import DevApiClient
@@ -49,10 +50,10 @@ def _error_code(client: DevApiClient, method: str, params: dict) -> str:
     return resp["error"]["code"]
 
 
-def _start(client: DevApiClient, name: str, fps: int) -> None:
+def _start(client: DevApiClient, name: str, fps: int, bitrate_bps: int) -> None:
     deadline = time.monotonic() + 30.0
     while True:
-        resp = client.request("record.start", {"name": name, "fps": fps})
+        resp = client.request("record.start", {"name": name, "fps": fps, "bitrate_bps": bitrate_bps})
         if resp.get("ok") is True:
             return
         code = resp["error"]["code"]
@@ -71,7 +72,7 @@ def _real_time(client: DevApiClient, page, out_dir: str) -> None:
     client.resume()
     client.set_fps(50)  # native runs uncapped; 50 fps x scale 7 gives 0.14 s steps
     client.set_scale(7)
-    _start(client, name, 5)
+    _start(client, name, 5, 2_000_000)
     a = client.frame_current()
     time.sleep(1.5)
     b = client.frame_current()
@@ -99,8 +100,8 @@ def _lockstep(client: DevApiClient, page, downloads: list, out_dir: str) -> None
     steps = round(((math.floor(t) + 1.5 - t) % 1) * 60)
     if steps:
         client.step(steps)
-    _start(client, os.path.basename(path) if page else path, 30)
-    assert _error_code(client, "record.start", {"name": "again.mp4", "fps": 30}) == "recording"
+    _start(client, os.path.basename(path) if page else path, 30, 50_000_000)
+    assert _error_code(client, "record.start", {"name": "again.mp4", "fps": 30, "bitrate_bps": 50_000_000}) == "recording"
     client.step(360)
     if page:
         with page.expect_download(timeout=30_000) as info:
@@ -123,7 +124,7 @@ def _real_time_file(client: DevApiClient, out_dir: str) -> None:
     path = os.path.join(out_dir, "record_run30.mp4")
     client.set_mode("run")
     client.resume()
-    _start(client, path, 30)
+    _start(client, path, 30, 100_000_000)
     client.time_wait(4.0)
     frames = client.result("record.stop")["frames"]
     assert frames > 0, "real time fps 30: no frames"
@@ -131,10 +132,103 @@ def _real_time_file(client: DevApiClient, out_dir: str) -> None:
     print(f"PASS real time fps 30: {frames} frames, check_recording passed")
 
 
+def _web_config_checks(page) -> None:
+    """Exercise the shipped JS against encoder doubles, isolated from the live WASM page."""
+    backend = Path(launch.REPO_ROOT, "engine/recorder/web/nt_recorder_web.js")
+    for high in (True, False):
+        probe = page.context.new_page()
+        try:
+            probe.evaluate("""high => {
+                window.configs = []; window.warnings = []; window.rejectConfig = false;
+                console.warn = msg => warnings.push(msg);
+                window.VideoEncoder = class {
+                    static async isConfigSupported(c) { return {supported: high || c.codec.includes('42E0')}; }
+                    constructor(c) { this.state = 'unconfigured'; window.encoderError = c.error; }
+                    configure(c) { if (rejectConfig) throw new Error('test codec refusal'); configs.push(c); }
+                    close() { this.state = 'closed'; }
+                };
+                window.AudioEncoder = class {
+                    static async isConfigSupported() { return {supported: true}; }
+                    configure() {} close() { this.state = 'closed'; }
+                };
+                window.NtMediabunny = {
+                    Output: class { addVideoTrack() {} addAudioTrack() {} start() { return Promise.resolve(); }
+                                    cancel() { return Promise.resolve(); } },
+                    Mp4OutputFormat: class {}, BufferTarget: class {},
+                    EncodedVideoPacketSource: class {}, EncodedAudioPacketSource: class {}
+                };
+                window.addEventListener('nt-recorder', e => { e.preventDefault(); window.ended = e.detail; });
+            }""", high)
+            probe.add_script_tag(path=str(backend))
+            probe.wait_for_function("() => NtRecorder.ready()")
+            limit31 = 17_500_000 if high else 14_000_000
+            cases = [(1280, 720, 30, limit31, "1F"), (1280, 720, 30, limit31 + 1, "20"),
+                     (1280, 720, 60, 1_000_000, "20"), (1920, 1080, 30, 50_000_000, "29"),
+                     (1920, 1080, 60, 100_000_000, "32"), (8192, 4320, 60, 100_000_000, "3D"),
+                     (3840, 128, 30, 1_000_000, "28"), (128, 3840, 30, 1_000_000, "28")]
+            for w, h, fps, bitrate, level in cases:
+                cfg = probe.evaluate("""([w,h,fps,bps]) => {
+                    if (!NtRecorder.open('test.mp4', {}, w,h,fps,bps)) throw new Error('open refused');
+                    NtRecorder.close(); return configs.at(-1);
+                }""", [w, h, fps, bitrate])
+                assert cfg["bitrate"] == bitrate, cfg
+                assert cfg["codec"] == "avc1." + ("6400" if high else "42E0") + level, cfg
+            assert probe.evaluate("""bps => {
+                const before = configs.length;
+                return !NtRecorder.open('test.mp4', {}, 640,360,30,bps) && configs.length === before
+                    && warnings.at(-1).includes('level 6.2');
+            }""", 1_000_000_001 if high else 800_000_001)
+            assert probe.evaluate("""() => {
+                rejectConfig = true;
+                return !NtRecorder.open('test.mp4', {}, 640,360,30,1000000)
+                    && warnings.at(-1).includes('test codec refusal');
+            }""")
+            probe.evaluate("""() => {
+                rejectConfig = false; ended = null;
+                if (!NtRecorder.open('test.mp4', {}, 640,360,30,1000000)) throw new Error('restart refused');
+                encoderError(new Error('test async refusal'));
+                if (NtRecorder.video(0)) throw new Error('error swallowed');
+                NtRecorder.close();
+            }""")
+            ended = probe.wait_for_function("() => ended").json_value()
+            assert ended["blob"] is None and "test async refusal" in ended["error"], ended
+        finally:
+            probe.close()
+    print("PASS web configurations: High/Baseline levels, exact bitrate, sync/async rejection")
+
+
+def _backend_limits(client: DevApiClient, page, out_dir: str) -> None:
+    if page:
+        page.wait_for_function("() => NtRecorder.ready()")
+        page.evaluate("""() => {
+            window.savedRecorderOpen = NtRecorder.open;
+            NtRecorder.open = (...args) => { window.receivedBitrate = args[5]; return false; };
+        }""")
+        try:
+            assert _error_code(client, "record.start", {"name": "unused.mp4", "fps": 30, "bitrate_bps": 4_294_967_295}) == "failed"
+            assert page.evaluate("() => receivedBitrate") == 4_294_967_295, "WASM bridge lost the unsigned bitrate"
+        finally:
+            page.evaluate("() => { NtRecorder.open = savedRecorderOpen; delete window.savedRecorderOpen; }")
+        _web_config_checks(page)
+    else:
+        path = Path(out_dir, "record_overflow.mp4")
+        path.write_bytes(b"untouched output")
+        assert _error_code(client, "record.start", {"name": str(path), "fps": 30, "bitrate_bps": 2_147_483_648}) == "failed"
+        assert path.read_bytes() == b"untouched output", "rejected bitrate changed the output file"
+    print("PASS backend bitrate boundary")
+
+
 def run(client: DevApiClient, out_dir: str) -> None:
-    for params in ({"name": "x.mp4", "fps": 0}, {"name": "x.mp4", "fps": 121}, {"name": "", "fps": 5}):
+    for params in ({"name": "x.mp4", "fps": 0, "bitrate_bps": 50_000_000},
+                   {"name": "x.mp4", "fps": 121, "bitrate_bps": 50_000_000},
+                   {"name": "", "fps": 5, "bitrate_bps": 50_000_000},
+                   {"name": "x.mp4", "fps": 30}):
+        assert _error_code(client, "record.start", params) == "bad_params", params
+    for bitrate in (None, True, "100000000", 0, -1, 0.5, 4_294_967_296):
+        params = {"name": "x.mp4", "fps": 30, "bitrate_bps": bitrate}
         assert _error_code(client, "record.start", params) == "bad_params", params
     page = getattr(client.transport, "page", None)
+    _backend_limits(client, page, out_dir)
     downloads = []
     if page:
         page.on("download", lambda d: downloads.append(d))
