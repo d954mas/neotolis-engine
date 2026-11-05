@@ -1,7 +1,5 @@
-/* Windows backend: a Media Foundation sink writer streams H.264 + AAC into a fragmented MP4 at the
-   name path, so a killed process keeps every fragment written before. Main thread; MF reads the
-   window's pixels in place from the readback buffers, converts them (on a D3D11 device when one can
-   be made) and encodes on its own threads. */
+/* Fragmented MP4 keeps completed fragments after a killed process. Main-thread calls hand readback
+   buffers to Media Foundation, which reads their pixels in place and converts/encodes on its threads. */
 
 #define COBJMACROS
 #define WIN32_LEAN_AND_MEAN
@@ -209,8 +207,7 @@ static void release(bool remove_file) {
     }
 }
 
-/* With this device MF can convert RGB32 to NV12 on the GPU; its CPU converter took about a third of
-   a core at 1080p30. Without a hardware device with video support it converts on the CPU. */
+/* A D3D11 video device lets MF convert RGB32 to NV12 on the GPU. */
 static void attach_device(IMFAttributes *attrs) {
     HRESULT hr = D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, D3D11_CREATE_DEVICE_VIDEO_SUPPORT, NULL, 0, D3D11_SDK_VERSION, &s_mf.device, NULL, NULL);
     if (FAILED(hr)) {
@@ -234,8 +231,7 @@ static bool create_writer(uint32_t bitrate_bps) {
     attach_device(attrs);
     must(IMFAttributes_SetGUID(attrs, &MF_TRANSCODE_CONTAINERTYPE, &MFTranscodeContainerType_FMPEG4));
     must(IMFAttributes_SetUINT32(attrs, &MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE));
-    /* The readback slots bound the pixels in flight; throttling alone let a hardware encoder queue
-       seconds of frames. */
+    /* Readback-slot ownership already bounds the pixels in flight. */
     must(IMFAttributes_SetUINT32(attrs, &MF_SINK_WRITER_DISABLE_THROTTLING, TRUE));
     bool good = ok(MFCreateSinkWriterFromURL(s_mf.path, NULL, attrs, &s_mf.writer), "MFCreateSinkWriterFromURL");
     IMFAttributes_Release(attrs);

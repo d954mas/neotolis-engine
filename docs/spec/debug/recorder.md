@@ -124,17 +124,18 @@ stays.
 **Web.** The context uses `preserveDrawingBuffer:false`, so the drawing buffer is valid only until
 the task presents it: a `VideoFrame` from the canvas inside the rAF task, before the swap, reads the
 finished frame. Frames and samples go to `VideoEncoder` and `AudioEncoder`. Codecs are probed once
-when the script loads: H.264 High, else Constrained Baseline, at the lowest listed level (3.1 to 6.2)
-whose frame size, macroblock rate and requested bitrate fit; AAC-LC, else Opus (Firefox,
-Chrome on Linux; editors handle Opus in MP4 poorly), both 192 kbps. While the probe runs
+when the script loads: H.264 High, else Constrained Baseline; AAC-LC, else Opus (Firefox,
+Chrome on Linux; editors handle Opus in MP4 poorly), both 192 kbps. Each `start` selects the lowest
+listed H.264 level (3.1 to 6.2) whose frame size, macroblock rate and requested bitrate fit. While the probe runs
 `nt_recorder_ready` is false and `start` returns false (a console warning says so; start again). Once
 it settles `ready` is true, and `start` still returns false past level 6.2 and in a browser without
-WebCodecs, an H.264 encoder or an AAC/Opus encoder (a console warning names the cause). The probe uses 640x360 at
-30 fps: this is not a capability check for the requested size, rate and bitrate. A synchronous
+WebCodecs, an H.264 encoder or an AAC/Opus encoder (a console warning names the cause). The video probe uses 640x360 at
+30 fps and level 3.1: this is not a capability check for the requested size, rate and bitrate. A synchronous
 configuration rejection makes `start` return false with a console warning; an encoder that rejects
-the configuration asynchronously ends the recording at the first
-frame call after it reports so (`error` in the event). WebCodecs needs a secure context: a page over
-plain `http` to a LAN address (a phone) has none, so recording there needs `https` or `localhost`.
+the configuration asynchronously ends the recording on the next video/audio submission or `stop`
+(`error` in the event). A paused `frame` call with no video or audio to submit does not observe that failure.
+WebCodecs needs a secure context: a page over plain `http` to a LAN address (a phone) has none,
+so recording there needs `https` or `localhost`.
 The vendored Mediabunny muxer (`deps/mediabunny`) writes the MP4. The JS lives in
 `web/nt_recorder_web.js` and loads with `--extern-pre-js`, outside Closure; a page that links the
 recorder evaluates the muxer (about 125 KB) at load. One recording at a time per page, on the main
@@ -149,19 +150,19 @@ may have lower limits. A selected level does not guarantee that its encoder acce
 
 Encoded bytes stay in tab memory (100 Mbps is about 12.5 MB/s; finishing copies
 the buffer into a `Blob`, so the peak is at least twice the file size): a dev-only exception to
-preallocated storage; long web recordings are not a goal. Nothing paces the game to the encoder: an
-encoder queue above four seconds of frames (two of backlog plus one call's catch-up) ends the
-recording (`encoder backlog`), so lockstep that makes frames faster than the encoder drains them
-ends once about two seconds of frames wait.
+preallocated storage; long web recordings are not a goal. Nothing paces the game to the encoder.
+Before submitting each video frame, `encodeQueueSize > 4 * fps` ends the recording (`encoder backlog`),
+including during catch-up. Lockstep that outpaces the encoder can therefore accumulate just over
+four seconds of pending encode requests before the next submission ends it.
 
 When a recording ends (`stop`, or on its own) and the encoders flush, the window event
 `nt-recorder` (cancelable, `detail {name, blob, frames, error}`) is dispatched after the C call
 returns. `blob` is null and `error` set when no file was written (`'no frames'` when no frame was
 due). Unless a listener cancels the event, the browser downloads `blob` as `name` (Chrome asks
 before a second automatic download from a page). A throw in a backend call (a lost context) ends the
-recording in that call. An asynchronous codec, muxer or backlog failure ends it at the next call
-into the backend, or, after the last one, shows only as `error` in the event: the event is the
-authority for whether a file exists.
+recording in that call. An asynchronous codec or muxer failure ends it on the next video/audio
+submission. If no further submission occurs, `stop` reports the failure only through `error` in the
+event: the event is the authority for whether a file exists.
 
 **Windows.** A Media Foundation sink writer writes a fragmented MP4 to the `name` path while
 recording (UTF-8, relative to the working directory, overwritten; a name that does not convert to a
@@ -171,9 +172,9 @@ High without B-frames (the MP4 sink writes no edit list, so B-frames would start
 late), peak-constrained VBR at `bitrate_bps`, with peak `2 * bitrate_bps`, BT.709 tags; audio is AAC-LC 192 kbps from the float
 samples. Both backends put a keyframe every two seconds. Media Foundation takes a hardware encoder
 when one accepts the stream, else its software one. `start` returns false where no encoder accepts
-the size (very small, or past 4K) or bitrate and blocks for encoder setup, up to about a second with a hardware
-encoder, so in RUN the step after `start` advances by that wait and its `frame` call repeats a frame
-for each deadline it covers.
+the size or bitrate and blocks for encoder setup. Any repeated frames depend on the game's next
+`t` and `dt`: in `nt_app` RUN, elapsed wall time is clamped to `max_dt` before applying `scale`,
+so setup time does not necessarily advance the recording clock by the full wait.
 Targets above `UINT32_MAX / 2` return false before opening the output, because the peak must fit
 Media Foundation's UINT32 attribute. The target is passed unchanged to `MF_MT_AVG_BITRATE`; there
 is no clamp or quality-mode fallback. Media Foundation chooses the H.264 level.
@@ -182,14 +183,14 @@ edition without the Media Feature Pack. The executable links `nt_gfx`, not its s
 reads the window through it. A recording takes five `nt_gfx` readback buffers of `w · h · 4` bytes
 (about 41 MB at 1080p), so `nt_gfx_desc_t.max_buffers` needs five spare slots. The sink writer gets
 a hardware D3D11 device with video support, so Media Foundation can convert the frames to NV12 on the
-GPU; where no such device can be made, `start` WARNs and the conversion runs on the CPU (about a
-third of a core at 1080p30 on an RTX 4080 Laptop test machine).
+GPU; where no such device can be made, `start` WARNs and the conversion runs on the CPU.
 
 A `frame` call with due frames queues one read of the window into a readback buffer
-(`nt_gfx_read_pixels_to_buffer`, see [Rendering Architecture](../render/architecture.md#readback)) and
-returns without waiting for the GPU. When three reads are in flight, the call first encodes the
-oldest one, issued three `frame` calls earlier, which the GPU has normally written. Media Foundation
-reads its pixels in place, bottom-up; the recorder copies nothing: each output frame the read covers
+(`nt_gfx_read_pixels_to_buffer`, see [Rendering Architecture](../render/architecture.md#readback)).
+When three reads are pending, the next read submission first encodes the oldest one. The delay counts
+queued reads, not all `frame` calls: a call with no due frames queues nothing. Deferring the readback
+gives the GPU time to finish, but the call can still block on the GPU or encoder (see pacing below).
+Media Foundation reads its pixels in place, bottom-up; the recorder copies nothing: each output frame the read covers
 (several when one call takes several deadlines) is one sample over the same buffer. The frames keep their pts, so
 the delay does not move the video against the audio, and the end of a recording, unless a write
 failed, encodes the reads still in flight before it finishes the file. The read takes the top rows,

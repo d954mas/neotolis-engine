@@ -11,22 +11,18 @@
    ready until that probe settles; Windows is always ready. Ready does not promise an encoder exists. */
 bool nt_recorder_ready(void);
 
-/* name: web — download name, copied; Windows — UTF-8 file path, overwritten. fps 1..120, bitrate_bps > 0:
-   target video bits per second (actual VBR output varies). Returns false
-   (logged) when a framebuffer side is under 2 px or the backend refuses (not ready, no encoder, size
-   or bitrate rejected, output not opened; web: past H.264 level 6.2). Asserts while recording. */
+/* Non-empty name: web download name (copied), Windows UTF-8 path (overwritten). Requires idle, fps 1..120 and bitrate_bps > 0; violations assert.
+   bitrate_bps is target video bits/s; VBR output varies. Returns false (logged) for a framebuffer side under 2 px or backend rejection
+   (not ready, no encoder, unsupported size/bitrate or output failure; web: past H.264 level 6.2). */
 bool nt_recorder_start(const char *name, uint32_t fps, uint32_t bitrate_bps);
 
-/* After nt_gfx_end_frame and before nt_window_swap_buffers, once per presented frame; dt is the advance
-   that produced this frame. The first call sets the recording's origin: t - dt, or where audio pushed
-   before it begins. A resize, over two seconds of due frames or an encoder failure ends the recording
-   (WARN). Windows blocks here while the encoder is behind. No-op while idle. */
+/* Once per presented frame, after nt_gfx_end_frame and before nt_window_swap_buffers; dt is the advance that produced it.
+   The first call sets t0 to t - dt, or the start of audio already pushed. Resize, over two seconds of due frames or encoder failure ends it (WARN).
+   Windows can wait for the GPU or encoder. No-op while idle. */
 void nt_recorder_frame(double t, double dt);
 
-/* The next interleaved stereo 48 kHz samples of the game's mix, pushed before nt_recorder_frame for
-   the same step. Until the first push the track is silence up to each frame's t; from then on the stream
-   continues sample by sample, so push every step's samples, silence included. A stream that drifts
-   from the clock by over 100 ms is reported once (WARN). Main thread. No-op while idle. */
+/* Push each step's interleaved stereo 48 kHz float samples before its frame call, on the main thread; include silence once pushing starts.
+   Until the first push, frame calls fill silence to t. Later samples continue the stream; drift over 100 ms warns once. No-op while idle. */
 void nt_recorder_push_audio(const float *stereo48k, uint32_t frames);
 
 typedef struct {

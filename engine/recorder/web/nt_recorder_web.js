@@ -13,7 +13,7 @@ globalThis['NtRecorder'] = (function () {
         var supported = function (enc, cfg) {
             return enc.isConfigSupported(cfg).then(function (s) { return s.supported; }, function () { return false; });
         };
-        // A small config: a bigger canvas the encoder rejects ends that recording at its first frame.
+        // A small probe avoids rejecting a profile just because a larger configuration is unsupported.
         var vcfg = { width: 640, height: 360, framerate: 30 };
         var acfg = { sampleRate: 48000, numberOfChannels: 2 };
         Promise.all([
@@ -99,8 +99,7 @@ globalThis['NtRecorder'] = (function () {
     // (lost context) ends the recording instead of unwinding into wasm.
     function video(index) {
         var r = cur;
-        // Nothing paces the game to the encoder: two seconds of backlog beyond one call's catch-up
-        // (at most two seconds of frames) end the recording.
+        // Lockstep can outpace the encoder; cap its queue instead of pacing the game.
         if (!r.error && r.venc.encodeQueueSize > r.fps * 4) { r.fail('encoder backlog'); }
         if (r.error) {
             return false;
