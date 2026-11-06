@@ -539,9 +539,8 @@ long combo list). There is no data-array form — immediate-only.
 Per-frame menu scratch is GAME-owned (`nt_ui_menu_ctx_t`, allocated by the
 game — static / app field / arena slice — and init via `nt_ui_menu_init`), so
 the core `nt_ui_context` pays zero bytes for a game that uses no menu and the
-menu TU dead-strips. The SAME instance MUST be reused every frame: it holds the
-per-level keyboard-nav record, so a fresh `{0}` each frame would silently break
-nav. The combo carries no such scratch (its state lives in the core ctx's pool,
+menu TU dead-strips. It holds only the current declaration's per-level keyboard
+navigation records; retained selection lives in the UI context's state pool. The combo carries no such scratch (its state lives in the core ctx's pool,
 bounded by caps). Row identity is KEY-STABLE via a scope stack:
 `mix(scope_id, key)` (fmix, never additive — additive sibling ids collide in
 Clay's anonymous child-id space). A submenu pushes its own row id as the child
@@ -557,6 +556,23 @@ Keyboard nav runs in `menu_end` against THIS frame's per-level record (built as
 rows declare, complete by `menu_end`); a focus or open-chain change re-declares
 the tree and becomes navigable NEXT frame — a 1-frame latency in the EFFECT,
 not in the record lookup.
+
+Retained focus and open parents use the fully scoped row IDs, independent of
+layout order. Inserting, deleting or reordering other siblings preserves the
+same selection. Removing or disabling the focused row clears focus; Enter then
+does nothing until hover or keyboard navigation selects a current row. Removing,
+disabling or changing an open parent into a leaf closes its descendants before
+keyboard navigation. Replacing or collapsing a branch clears all descendant
+focus, open selections, hover intent and navigation records. The replacement
+child is declared next frame. Keyboard opening selects that child's first enabled
+row when it is declared; an empty child stays open without focus.
+
+Selection belongs to `(UI context, menu_id)`, not the declaration scratch: one
+scratch may declare different menus sequentially. At the default depth cap, the
+runtime uses two state-pool cells: 44 payload bytes for focus and navigation state,
+32 for open parent IDs. This occupies two 76-byte slots instead of one, without
+changing the 64-byte payload cap, the preallocated pool size or the menu scratch
+size. It adds no heap allocation or per-row state lookup.
 
 ## Atlas region identity
 

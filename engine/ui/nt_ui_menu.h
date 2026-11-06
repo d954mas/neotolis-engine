@@ -114,8 +114,8 @@ typedef struct {
 _Static_assert(sizeof(nt_ui_menu_state_t) == 12, "nt_ui_menu_state_t stable ABI (2 float + 1 bool + 3 pad)");
 
 /* Game-owned per-frame menu scratch (module-owned storage so the core ctx pays zero bytes for a non-menu
- * game and nt_ui_menu.o dead-strips). REUSE THE SAME INSTANCE EVERY FRAME: frame_record holds the per-level
- * nav record, so a fresh {0} each frame would silently break keyboard nav. `ui` is stashed at
+ * game and nt_ui_menu.o dead-strips). Records are rebuilt each begin; selection lives in the UI state
+ * pool, so scratch can be reused for different menus sequentially. `ui` is stashed at
  * nt_ui_menu_begin for the begin/end span and cleared (NULL) at nt_ui_menu_end — no cross-frame borrowed
  * handle. Fully zero-init-correct (only frame_record_count==0 matters at rest). See the spec's
  * "Immediate menu + combo" for the model. */
@@ -258,20 +258,16 @@ uint32_t nt_ui_menu_test_check_id(uint32_t menu_id, uint8_t depth, uint32_t item
 /* Scope-stack id derivation probe: mix(scope_id, key) — drives the sibling/scope distinctness test. The
  * id is position-stable (no running idx folded in); the test asserts dynamic sibling lists keep ids. */
 uint32_t nt_ui_menu_test_item_id(uint32_t scope_id, uint32_t key);
-/* Frame-record focus probe: the recorded item id at rt->focus[depth] (the focus committed in the prior
- * menu_end — a 1-frame-effect latency). Takes the live ctx (runtime cell lives in its state pool) and the
- * game-owned menu (which owns frame_record). */
-uint32_t nt_ui_menu_test_focus_item_id(const nt_ui_context_t *ctx, const nt_ui_menu_ctx_t *menu, uint32_t menu_id, uint8_t depth);
-/* Open-chain probe: the retained open child index at a level (rt->open_path[depth]); -1 = none open.
- * Reads only the runtime cell, so it takes the live ctx (no menu needed). Drives the immediate hover-open
- * test (hover a parent row -> the corridor opens its submenu). */
-int16_t nt_ui_menu_test_open_path(const nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth);
+/* Retained focused row ID; 0 = no focus, independently of the current frame record. */
+uint32_t nt_ui_menu_test_focus_item_id(const nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth);
+/* Open-chain probe: the retained parent's scoped row ID; 0 = no open child. */
+uint32_t nt_ui_menu_test_open_path(const nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth);
 /* Deepest-open-level probe (rt->active_depth): the depth-cap regression asserts it never exceeds
  * NT_UI_MENU_MAX_DEPTH-1 even when Right/Enter-open is driven at the deepest allowable level. */
 uint8_t nt_ui_menu_test_active_depth(const nt_ui_context_t *ctx, uint32_t menu_id);
-/* Force the open chain open `depth` levels deep (clamped to the cap). The depth-cap DEATH test uses this to
+/* Force a chain of the same sibling key open `depth` levels deep (clamped to the cap). The depth-cap DEATH test uses this to
  * drive submenu_begin's decl-time backstop assert directly (the nav-open path no-ops at the cap). */
-void nt_ui_menu_test_force_open_to(nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth);
+void nt_ui_menu_test_force_open_to(nt_ui_context_t *ctx, uint32_t menu_id, uint32_t key, uint8_t depth);
 #endif
 
 #endif /* NT_UI_MENU_H */

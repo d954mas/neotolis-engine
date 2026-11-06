@@ -47,21 +47,24 @@ typedef struct {
     uint8_t _pad[3];
 } nt_ui_menu_hover_t;
 
-/* Per-menu retained runtime cell (keyed by the menu id). open_path[d] is the index of the item whose
- * submenu is open at level d (-1 = none open at that level); focus[d] is the keyboard-focused item at
- * level d. active_depth is the deepest currently-open level (0 = only the root). The recursion reads/
- * writes this so the open chain survives across frames without the game tracking per-level state. */
+/* Retained selection belongs to (UI context, menu id), independently of the declaration scratch.
+ * Full row IDs keep focus and open branches stable when siblings change order. */
 typedef struct {
-    int16_t open_path[NT_UI_MENU_MAX_DEPTH];
-    int16_t focus[NT_UI_MENU_MAX_DEPTH];
+    uint32_t focus[NT_UI_MENU_MAX_DEPTH];
     uint32_t opened_frame;  /* ctx->frame_counter at arm; the right-click dismiss skips this frame so the opening click never self-closes */
     uint32_t kbd_activated; /* row id a keyboard Enter activated in the PREVIOUS frame's menu_end; the NEXT frame's row call fires its inline return for it, then menu_end clears it (1-frame latency,
                                fires once) */
     uint8_t active_depth;
-    bool primed; /* a zeroed fresh cell would read open_path[0]==0 (= item 0 open); init to -1 once */
+    uint8_t focus_first_depth; /* keyboard-open child awaiting its first enabled row; 0 = none */
     uint8_t _pad[2];
 } nt_ui_menu_runtime_t;
 _Static_assert(sizeof(nt_ui_menu_runtime_t) <= NT_UI_STATE_PAYLOAD_MAX, "menu runtime cell must fit the state pool payload");
+
+/* The open IDs use a second existing pool slot; no other widget's payload grows. */
+typedef struct {
+    uint32_t id[NT_UI_MENU_MAX_DEPTH];
+} nt_ui_menu_open_path_t;
+_Static_assert(sizeof(nt_ui_menu_open_path_t) <= NT_UI_STATE_PAYLOAD_MAX, "menu open path must fit the state pool payload");
 
 #define NT_UI_MENU_TAG NT_UI_STATE_TAG('m', 'e', 'n', 'u')
 
@@ -78,6 +81,7 @@ enum {
     NT_UI_MENU_KIND_ICON = 7,
     NT_UI_MENU_KIND_SHORTCUT = 8,
     NT_UI_MENU_KIND_CHECK = 9,
+    NT_UI_MENU_KIND_OPEN_PATH = 10,
 };
 
 /* fmix-style 32-bit hash combining menu_id + kind + depth + index. Non-XOR-symmetric, so distinct
@@ -108,6 +112,7 @@ static inline uint32_t menu_item_id(uint32_t scope_id, uint32_t key) {
 }
 
 static inline uint32_t menu_runtime_id(uint32_t menu_id) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_RUNTIME, 0U, 0U); }
+static inline uint32_t menu_open_path_id(uint32_t menu_id) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_OPEN_PATH, 0U, 0U); }
 static inline uint32_t menu_level_id(uint32_t menu_id, uint8_t depth) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_LEVEL, depth, 0U); }
 static inline uint32_t menu_panel_id(uint32_t menu_id, uint8_t depth) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_PANEL, depth, 0U); }
 static inline uint32_t menu_occluder_id(uint32_t menu_id) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_OCCLUDER, 0U, 0U); }
@@ -218,26 +223,16 @@ void nt_ui_menu_init(nt_ui_menu_ctx_t *menu) {
     memset(menu, 0, sizeof *menu); /* zeroed scratch is correct at rest: only frame_record_count==0 matters */
 }
 
-/* Reset the open chain + focus to "nothing open". A fresh (zeroed) cell would otherwise read
- * open_path[0]==0 as "item 0's submenu is open", auto-flying-out the first parent. */
-static void menu_runtime_reset(nt_ui_menu_runtime_t *rt) {
-    for (uint32_t d = 0; d < NT_UI_MENU_MAX_DEPTH; ++d) {
-        rt->open_path[d] = -1;
-        rt->focus[d] = -1;
-    }
-    rt->active_depth = 0U;
-    rt->opened_frame = 0U;
-    rt->kbd_activated = 0U;
-    rt->primed = true;
-}
+static nt_ui_menu_runtime_t *menu_runtime(nt_ui_context_t *ctx, uint32_t menu_id) { return nt_ui_state(ctx, menu_runtime_id(menu_id), sizeof(nt_ui_menu_runtime_t), NT_UI_MENU_TAG); }
 
-/* Get-or-create the runtime cell, resetting it on first creation. */
-static nt_ui_menu_runtime_t *menu_runtime(nt_ui_context_t *ctx, uint32_t menu_id) {
-    nt_ui_menu_runtime_t *rt = nt_ui_state(ctx, menu_runtime_id(menu_id), sizeof *rt, NT_UI_MENU_TAG);
-    if (!rt->primed) {
-        menu_runtime_reset(rt);
+static nt_ui_menu_open_path_t *menu_open_path(nt_ui_context_t *ctx, uint32_t menu_id) { return nt_ui_state(ctx, menu_open_path_id(menu_id), sizeof(nt_ui_menu_open_path_t), NT_UI_MENU_TAG); }
+
+static void menu_runtime_reset(nt_ui_context_t *ctx, uint32_t menu_id, nt_ui_menu_runtime_t *rt, nt_ui_menu_open_path_t *path) {
+    for (uint8_t d = 1U; d <= rt->active_depth; ++d) {
+        nt_ui_state_clear(ctx, menu_hover_id(menu_id, d));
     }
-    return rt;
+    memset(rt, 0, sizeof *rt);
+    memset(path, 0, sizeof *path);
 }
 
 /* Current pointer pos (UI space) from the active frame snapshot — the menu reads the cursor directly
@@ -286,7 +281,7 @@ bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t menu_id, uint32_t ta
         st->anchor_y = my;
         st->open = true;
         nt_ui_menu_runtime_t *rt = menu_runtime(ctx, menu_id);
-        menu_runtime_reset(rt);
+        menu_runtime_reset(ctx, menu_id, rt, menu_open_path(ctx, menu_id));
         rt->opened_frame = ctx->frame_counter; /* skip the dismiss on the opening frame (right-click is also the open trigger) */
     }
     return armed;
@@ -472,7 +467,11 @@ static nt_ui_interaction_t menu_im_row(nt_ui_menu_ctx_t *menu, uint32_t key, con
     const bool enabled = !opts->disabled;
 
     const nt_ui_interaction_t in = enabled ? nt_ui_query_interaction(ctx, row_id) : (nt_ui_interaction_t){0};
-    const bool focused = (rt->focus[depth] == (int16_t)running_idx);
+    if (enabled && rt->focus_first_depth == depth && depth != 0U) {
+        rt->focus[depth] = row_id;
+        rt->focus_first_depth = 0U;
+    }
+    const bool focused = (rt->focus[depth] == row_id);
     const bool highlit = enabled && (in.hovered || focused);
 
     const nt_ui_anim_target_t tgt = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F, .value_t = highlit ? 1.0F : 0.0F};
@@ -518,7 +517,7 @@ static nt_ui_interaction_t menu_im_row(nt_ui_menu_ctx_t *menu, uint32_t key, con
      * label are the game's responsibility there. */
 
     if (enabled && in.hovered) {
-        rt->focus[depth] = (int16_t)running_idx; /* hover moves keyboard focus too */
+        rt->focus[depth] = row_id; /* hover moves keyboard focus too */
         /* Hover-open: record the hovered row so menu_end can drive the mouse-aim corridor. A
          * hovered PARENT is a candidate to fly out; a hovered LEAF requests collapsing the open child
          * (gated by the corridor so a diagonal cursor toward the open child does not collapse it). */
@@ -571,7 +570,7 @@ static void menu_open_popup(nt_ui_menu_ctx_t *menu, uint32_t menu_id, uint8_t de
 /* Present-only state for a CLOSED menu: declare nothing, but the game still calls item/submenu/end every
  * frame (immediate mode) — so stay `active` (those calls assert it) yet flag open_frame=false to no-op. */
 static void menu_begin_present_only(nt_ui_menu_ctx_t *menu, uint32_t menu_id, nt_ui_menu_state_t *st) {
-    menu_runtime_reset(menu_runtime(menu->ui, menu_id)); /* clean chain for a later reopen */
+    menu_runtime_reset(menu->ui, menu_id, menu_runtime(menu->ui, menu_id), menu_open_path(menu->ui, menu_id));
     menu->pending_menu.st = st;
     menu->pending_menu.menu_id = menu_id;
     menu->pending_menu.depth = 0U;
@@ -590,6 +589,12 @@ void nt_ui_menu_begin(nt_ui_menu_ctx_t *menu, nt_ui_context_t *ctx, const nt_ui_
     NT_ASSERT(!menu->pending_menu.active && "nt_ui_menu_begin: a menu does not re-enter at depth 0");
 
     menu->ui = ctx; /* stash the core ctx for the begin/end span; cleared in menu_end */
+    for (uint8_t d = 0U; d < NT_UI_MENU_MAX_DEPTH; ++d) {
+        menu->frame_record_count[d] = 0U;
+        menu->pending_menu.pending_open[d] = -1;
+        menu->pending_menu.hover_parent[d] = -1;
+        menu->pending_menu.hover_leaf[d] = 0U;
+    }
 
     if (!st->open) {
         menu_begin_present_only(menu, menu_id, st);
@@ -604,16 +609,12 @@ void nt_ui_menu_begin(nt_ui_menu_ctx_t *menu, nt_ui_context_t *ctx, const nt_ui_
     menu->pending_menu.menu_id = menu_id;
     menu->pending_menu.scope_id[0] = menu_id;
     menu->pending_menu.item_idx[0] = 0U;
-    menu->pending_menu.pending_open[0] = -1;
-    menu->pending_menu.hover_parent[0] = -1;
-    menu->pending_menu.hover_leaf[0] = 0U;
     menu->pending_menu.chosen = 0U;
     menu->pending_menu.fill_layer = fill_layer;
     menu->pending_menu.label_layer = label_layer;
     menu->pending_menu.depth = 0U;
     menu->pending_menu.active = true;
     menu->pending_menu.open_frame = true;
-    menu->frame_record_count[0] = 0U;
 
     /* Root opens BELOW the cursor point; BELOW only edge-flips on the VERTICAL axis, so a cursor near the
      * RIGHT screen edge would grow the root panel off-screen horizontally (and drag the whole submenu stack
@@ -734,8 +735,8 @@ bool nt_ui_menu_submenu_begin_ex(nt_ui_menu_ctx_t *menu, uint32_t key, const cha
         menu->pending_menu.pending_open[depth] = (int16_t)running_idx; /* mouse-open this parent (committed in menu_end) */
     }
 
-    nt_ui_menu_runtime_t *rt = menu_runtime(ctx, menu->pending_menu.menu_id);
-    if (rt->open_path[depth] != (int16_t)running_idx) {
+    const nt_ui_menu_open_path_t *path = menu_open_path(ctx, menu->pending_menu.menu_id);
+    if (path->id[depth] != row_id) {
         return false; /* this submenu is not the open one — game skips its body */
     }
 
@@ -744,11 +745,7 @@ bool nt_ui_menu_submenu_begin_ex(nt_ui_menu_ctx_t *menu, uint32_t key, const cha
     const uint8_t child = (uint8_t)(depth + 1U);
     menu->pending_menu.scope_id[child] = row_id;
     menu->pending_menu.item_idx[child] = 0U;
-    menu->pending_menu.pending_open[child] = -1;
-    menu->pending_menu.hover_parent[child] = -1;
-    menu->pending_menu.hover_leaf[child] = 0U;
     menu->pending_menu.depth = child;
-    menu->frame_record_count[child] = 0U;
 
     nt_ui_menu_style_t *style = (nt_ui_menu_style_t *)menu->pending_menu.style;
     const uint8_t fill_layer = menu->pending_menu.fill_layer;
@@ -797,16 +794,15 @@ void nt_ui_menu_separator_text(nt_ui_menu_ctx_t *menu, const char *label) {
     menu->pending_menu.item_idx[depth] = (uint16_t)(menu->pending_menu.item_idx[depth] + 1U);
 }
 
-/* Step focus over this-frame-recorded items at a level, skipping disabled records.
- * focus is a layout index; find its position in the recorded array, step ±1, return the new layout idx.
- * From "no focus" (-1) Down lands on the first enabled record, Up on the last. */
-static int16_t menu_im_focus_step(const nt_ui_menu_record_t *recs, uint16_t count, int16_t focus, int step) {
+/* Find the focused ID in this frame's order, then step to an enabled ID.
+ * From no focus (0), Down lands on the first enabled record, Up on the last. */
+static uint32_t menu_im_focus_step(const nt_ui_menu_record_t *recs, uint16_t count, uint32_t focus, int step) {
     if (count == 0U) {
         return focus;
     }
     int pos = -1;
     for (uint16_t k = 0; k < count; ++k) {
-        if (recs[k].idx == focus) {
+        if (recs[k].id == focus) {
             pos = (int)k;
             break;
         }
@@ -818,22 +814,77 @@ static int16_t menu_im_focus_step(const nt_ui_menu_record_t *recs, uint16_t coun
             pos = (pos <= 0) ? (int)count - 1 : pos - 1;
         }
         if (recs[pos].enabled != 0U) {
-            return (int16_t)recs[pos].idx;
+            return recs[pos].id;
         }
     }
     return focus;
 }
 
+/* A parent replacement invalidates every descendant, including this frame's old branch records. */
+static void menu_set_open(nt_ui_menu_ctx_t *menu, nt_ui_menu_runtime_t *rt, nt_ui_menu_open_path_t *path, uint8_t depth, uint32_t id) {
+    if (path->id[depth] == id) {
+        return;
+    }
+    path->id[depth] = id;
+    for (uint8_t d = (uint8_t)(depth + 1U); d < NT_UI_MENU_MAX_DEPTH; ++d) {
+        path->id[d] = 0U;
+        rt->focus[d] = 0U;
+        menu->frame_record_count[d] = 0U;
+        menu->pending_menu.pending_open[d] = -1;
+        menu->pending_menu.hover_parent[d] = -1;
+        menu->pending_menu.hover_leaf[d] = 0U;
+        if (d <= rt->active_depth) {
+            nt_ui_state_clear(menu->ui, menu_hover_id(menu->pending_menu.menu_id, d));
+        }
+    }
+    rt->focus_first_depth = 0U;
+    rt->active_depth = (uint8_t)(depth + (id != 0U ? 1U : 0U));
+}
+
+/* Layout indices are frame-local; convert mouse candidates through the current record. */
+static uint32_t menu_record_id(const nt_ui_menu_ctx_t *menu, uint8_t depth, int16_t idx) {
+    if (idx < 0) {
+        return 0U;
+    }
+    for (uint16_t k = 0; k < menu->frame_record_count[depth]; ++k) {
+        if (menu->frame_record[depth][k].idx == idx) {
+            return menu->frame_record[depth][k].id;
+        }
+    }
+    return 0U;
+}
+
+/* Removal or disabling must be resolved before a key can act on the retained selection. */
+static void menu_reconcile_selection(nt_ui_menu_ctx_t *menu, nt_ui_menu_runtime_t *rt, nt_ui_menu_open_path_t *path) {
+    for (uint8_t d = 0U; d <= rt->active_depth; ++d) {
+        bool focus_found = false;
+        bool open_found = false;
+        for (uint16_t k = 0U; k < menu->frame_record_count[d]; ++k) {
+            const nt_ui_menu_record_t *rec = &menu->frame_record[d][k];
+            if (rec->enabled != 0U) {
+                focus_found |= rec->id == rt->focus[d];
+                open_found |= rec->id == path->id[d] && rec->has_sub != 0U;
+            }
+        }
+        if (!focus_found) {
+            rt->focus[d] = 0U;
+        }
+        if (!open_found && path->id[d] != 0U) {
+            menu_set_open(menu, rt, path, d, 0U);
+        }
+    }
+    rt->focus_first_depth = 0U;
+}
+
 /* Keyboard nav at nav_depth against the per-level record built THIS frame (the deepest open level was
  * declared this frame, so its record is complete by menu_end). Up/Down move focus; Right/Enter open a
  * focused parent (which is declared + navigable NEXT frame — the 1-frame latency); Enter
- * activates a focused leaf; Left/Esc collapse the level. Mutates rt->focus/open_path/active_depth + the
- * menu's chosen sink. Returns true if the level should close. */
+ * activates a focused leaf; Left/Esc collapse the level. Returns true if the level should close. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — flat key branch over the recorded slice, not deep nesting
-static bool menu_im_keyboard_nav(nt_ui_menu_ctx_t *menu, uint8_t depth, nt_ui_menu_runtime_t *rt) {
+static bool menu_im_keyboard_nav(nt_ui_menu_ctx_t *menu, uint8_t depth, nt_ui_menu_runtime_t *rt, nt_ui_menu_open_path_t *path) {
     const nt_ui_menu_record_t *recs = menu->frame_record[depth];
     const uint16_t count = menu->frame_record_count[depth];
-    int16_t f = rt->focus[depth];
+    uint32_t f = rt->focus[depth];
     if (nt_input_key_is_pressed(NT_KEY_ARROW_DOWN)) {
         f = menu_im_focus_step(recs, count, f, +1);
     } else if (nt_input_key_is_pressed(NT_KEY_ARROW_UP)) {
@@ -843,7 +894,7 @@ static bool menu_im_keyboard_nav(nt_ui_menu_ctx_t *menu, uint8_t depth, nt_ui_me
 
     const nt_ui_menu_record_t *cur = NULL;
     for (uint16_t k = 0; k < count; ++k) {
-        if (recs[k].idx == f && recs[k].enabled != 0U) {
+        if (recs[k].id == f && recs[k].enabled != 0U) {
             cur = &recs[k];
             break;
         }
@@ -855,11 +906,8 @@ static bool menu_im_keyboard_nav(nt_ui_menu_ctx_t *menu, uint8_t depth, nt_ui_me
             /* The deepest allowable level (depth == MAX_DEPTH-1) cannot open a child: open_path/active_depth/
              * focus[depth+1] would all index == MAX_DEPTH (OOB). Right/Enter on a parent there is a no-op. */
             if (depth + 1U < NT_UI_MENU_MAX_DEPTH) {
-                rt->open_path[depth] = f;
-                if (depth + 1U > rt->active_depth) {
-                    rt->active_depth = (uint8_t)(depth + 1U);
-                }
-                rt->focus[depth + 1U] = 0; /* focus the child's first row (layout idx 0) */
+                menu_set_open(menu, rt, path, depth, f);
+                rt->focus_first_depth = (uint8_t)(depth + 1U);
             }
         } else if (cur->has_sub == 0U && activate_key) {
             /* Right on a leaf is a no-op; only Enter activates. Stash the leaf id for the NEXT frame's row
@@ -882,14 +930,14 @@ static nt_ui_menu_hover_t *menu_hover_cell(nt_ui_context_t *ctx, uint32_t menu_i
  * at (or sits over) the open child, KEEP it (a diagonal toward the child never collapses it). Once the
  * corridor releases, a hovered SIBLING parent flies out instead, or a hovered leaf collapses the child.
  * A keyboard-opened submenu is authoritative — this only governs MOUSE switching, never a blanket close.
- * Mutates rt->open_path/active_depth; re-primes the corridor cell on an open-child change (1-frame lag:
+ * Mutates the keyed open path and active_depth; re-primes the corridor cell on an open-child change (1-frame lag:
  * the new child is declared next frame). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — flat per-depth corridor branch, not deep nesting
-static void menu_resolve_hover_open(nt_ui_menu_ctx_t *menu, uint32_t menu_id, nt_ui_menu_runtime_t *rt, float mx, float my, float dt) {
+static void menu_resolve_hover_open(nt_ui_menu_ctx_t *menu, uint32_t menu_id, nt_ui_menu_runtime_t *rt, nt_ui_menu_open_path_t *path, float mx, float my, float dt) {
     nt_ui_context_t *ctx = menu->ui;
     for (uint8_t d = 0; d <= rt->active_depth && d < NT_UI_MENU_MAX_DEPTH; ++d) {
-        const int16_t cur_open = rt->open_path[d];
-        const int16_t hov_parent = menu->pending_menu.hover_parent[d];
+        const uint32_t cur_open = path->id[d];
+        const uint32_t hov_parent = menu_record_id(menu, d, menu->pending_menu.hover_parent[d]);
         const bool hov_leaf = menu->pending_menu.hover_leaf[d] != 0U;
 
         /* The deepest allowable level cannot open a child (d+1 would index == MAX_DEPTH, OOB on
@@ -897,18 +945,18 @@ static void menu_resolve_hover_open(nt_ui_menu_ctx_t *menu, uint32_t menu_id, nt
         const bool can_open_child = (d + 1U) < NT_UI_MENU_MAX_DEPTH;
 
         /* No switch requested (no hovered sibling parent, no hovered leaf): leave the level as-is. */
-        if (hov_parent < 0 && !hov_leaf) {
+        if (hov_parent == 0U && !hov_leaf) {
             continue;
         }
         /* The hovered parent is already the open one: nothing to switch. */
-        if (hov_parent >= 0 && hov_parent == cur_open) {
+        if (hov_parent != 0U && hov_parent == cur_open) {
             continue;
         }
 
         /* If a child is open at this level, gate the switch on the mouse-aim corridor: while the cursor is
          * aiming at / over the open child, KEEP it (do not switch/collapse). */
         bool may_switch = true;
-        if (cur_open >= 0 && can_open_child) {
+        if (cur_open != 0U && can_open_child) {
             const nt_ui_bbox_t cbb = nt_ui_get_bbox(ctx, menu_level_id(menu_id, (uint8_t)(d + 1U)));
             if (cbb.found) {
                 nt_ui_menu_hover_t *hc = menu_hover_cell(ctx, menu_id, (uint8_t)(d + 1U));
@@ -920,32 +968,23 @@ static void menu_resolve_hover_open(nt_ui_menu_ctx_t *menu, uint32_t menu_id, nt
             continue; /* corridor holds: keep aiming at the open child */
         }
 
-        int16_t new_open = cur_open;
-        if (hov_parent >= 0 && can_open_child) {
+        uint32_t new_open = cur_open;
+        if (hov_parent != 0U && can_open_child) {
             new_open = hov_parent; /* fly out the hovered sibling parent (never past the depth cap) */
         } else if (hov_leaf) {
-            new_open = -1; /* a hovered leaf with the corridor released collapses the open child */
+            new_open = 0U; /* a hovered leaf with the corridor released collapses the open child */
         }
         if (new_open == cur_open) {
             continue;
         }
-        rt->open_path[d] = new_open;
-        if (new_open >= 0) {
-            if (d + 1U > rt->active_depth) {
-                rt->active_depth = (uint8_t)(d + 1U);
-            }
-        } else if (rt->active_depth > d) {
-            rt->active_depth = d; /* collapsed: this level no longer has an open child */
-        }
-        /* The open child changed: clear the stale aim apex/timer so menu_hover_intent re-primes next frame
-         * against the new child rect (without this the new child reuses the prior corridor). */
-        nt_ui_state_clear(ctx, menu_hover_id(menu_id, (uint8_t)(d + 1U)));
+        menu_set_open(menu, rt, path, d, new_open);
+        break; /* the replacement child is declared next frame */
     }
 }
 
 /* Resolve this frame's keyboard nav + mouse-open commit + outside-click dismiss against the runtime cell.
  * Returns true if the whole chain should close (Esc at root / leaf activate / outside-click). */
-static bool menu_resolve_nav_and_dismiss(nt_ui_menu_ctx_t *menu, uint32_t menu_id, nt_ui_menu_runtime_t *rt) {
+static bool menu_resolve_nav_and_dismiss(nt_ui_menu_ctx_t *menu, uint32_t menu_id, nt_ui_menu_runtime_t *rt, nt_ui_menu_open_path_t *path) {
     nt_ui_context_t *ctx = menu->ui;
     bool close_chain = false;
     /* Defense-in-depth: clamp below the cap so menu_im_keyboard_nav never indexes frame_record[MAX_DEPTH]
@@ -953,12 +992,11 @@ static bool menu_resolve_nav_and_dismiss(nt_ui_menu_ctx_t *menu, uint32_t menu_i
     const uint8_t nav_depth = (rt->active_depth < NT_UI_MENU_MAX_DEPTH) ? rt->active_depth : (uint8_t)(NT_UI_MENU_MAX_DEPTH - 1U);
     const bool kbd_acted = nt_input_key_is_pressed(NT_KEY_ARROW_UP) || nt_input_key_is_pressed(NT_KEY_ARROW_DOWN) || nt_input_key_is_pressed(NT_KEY_ARROW_LEFT) ||
                            nt_input_key_is_pressed(NT_KEY_ARROW_RIGHT) || nt_input_key_is_pressed(NT_KEY_ENTER) || nt_input_key_is_pressed(NT_KEY_ESCAPE);
-    if (menu_im_keyboard_nav(menu, nav_depth, rt)) {
+    if (menu_im_keyboard_nav(menu, nav_depth, rt, path)) {
         if (nav_depth == 0U) {
             close_chain = true;
         } else {
-            rt->open_path[nav_depth - 1U] = -1; /* collapse this level back into the parent */
-            rt->active_depth = (uint8_t)(nav_depth - 1U);
+            menu_set_open(menu, rt, path, (uint8_t)(nav_depth - 1U), 0U);
         }
     }
     float mx = 0.0F;
@@ -967,15 +1005,14 @@ static bool menu_resolve_nav_and_dismiss(nt_ui_menu_ctx_t *menu, uint32_t menu_i
     /* Hover-open: the mouse-aim corridor drives the open chain. Skipped on a keyboard-nav frame so a
      * keyboard-opened submenu is authoritative and never collapses from cursor distance the same frame. */
     if (!kbd_acted && ctx->frame_pointers[ctx->frame_primary].active) {
-        menu_resolve_hover_open(menu, menu_id, rt, mx, my, ctx->frame_dt);
+        menu_resolve_hover_open(menu, menu_id, rt, path, mx, my, ctx->frame_dt);
     }
-    /* Commit a mouse-opened root parent (an explicit click this frame, e.g. touch) so submenu_begin returns
-     * true next frame. Hover-open already handles the common pointer case above. */
-    const int16_t mouse_open = menu->pending_menu.pending_open[0];
-    if (mouse_open >= 0) {
-        rt->open_path[0] = mouse_open;
-        if (rt->active_depth < 1U) {
-            rt->active_depth = 1U;
+    /* A click opens its current keyed parent even while the aim corridor holds the old branch. */
+    for (uint8_t d = 0U; d < NT_UI_MENU_MAX_DEPTH - 1U; ++d) {
+        const uint32_t mouse_open = menu_record_id(menu, d, menu->pending_menu.pending_open[d]);
+        if (mouse_open != 0U) {
+            menu_set_open(menu, rt, path, d, mouse_open);
+            break;
         }
     }
     /* Menu-owned outside-press dismiss (a click or a tap); skip the opening frame so the arming click does not self-dismiss. */
@@ -991,9 +1028,9 @@ static bool menu_resolve_nav_and_dismiss(nt_ui_menu_ctx_t *menu, uint32_t menu_i
  * PREVIOUS frame's menu_end was already consumed by THIS frame's row calls (they ran before menu_end), so
  * snapshot it before kbd-nav (which may set a NEW activation for the next frame) and clear ONLY that
  * consumed value — so each keyboard activation fires its inline return exactly once. */
-static bool menu_resolve_and_consume_kbd(nt_ui_menu_ctx_t *menu, uint32_t menu_id, nt_ui_menu_runtime_t *rt) {
+static bool menu_resolve_and_consume_kbd(nt_ui_menu_ctx_t *menu, uint32_t menu_id, nt_ui_menu_runtime_t *rt, nt_ui_menu_open_path_t *path) {
     const uint32_t consumed_kbd = rt->kbd_activated;
-    bool close_chain = menu_resolve_nav_and_dismiss(menu, menu_id, rt);
+    bool close_chain = menu_resolve_nav_and_dismiss(menu, menu_id, rt, path);
     if (menu->pending_menu.chosen != 0U) {
         close_chain = true; /* an activation (mouse this frame, or keyboard consumed via the inline return) closes the chain */
     }
@@ -1024,13 +1061,15 @@ void nt_ui_menu_end(nt_ui_menu_ctx_t *menu) {
     nt_ui_menu_state_t *st = menu->pending_menu.st;
     nt_ui_menu_runtime_t *rt = menu_runtime(ctx, menu_id);
 
-    const bool close_chain = menu_resolve_and_consume_kbd(menu, menu_id, rt);
+    nt_ui_menu_open_path_t *path = menu_open_path(ctx, menu_id);
+    menu_reconcile_selection(menu, rt, path);
+    const bool close_chain = menu_resolve_and_consume_kbd(menu, menu_id, rt, path);
 
     nt_ui_popup_end(ctx); /* balance menu_begin's root popup_begin */
 
     if (close_chain) {
         st->open = false;
-        menu_runtime_reset(rt);
+        menu_runtime_reset(ctx, menu_id, rt, path);
     }
     menu->pending_menu.active = false;
     menu->ui = NULL; /* clear the span handle: a between-frames inner call now traps on a NULL ctx */
@@ -1058,23 +1097,10 @@ float nt_ui_menu_test_switch_timer(const nt_ui_context_t *ctx, uint32_t menu_id,
 
 uint32_t nt_ui_menu_test_item_id(uint32_t scope_id, uint32_t key) { return menu_item_id(scope_id, key); }
 
-/* The most-recently-rendered frame's recorded item id at rt->focus[depth]. 0 if none / no record. The
- * runtime cell lives in ctx's state pool (persists across frames); the per-level record lives on the
- * game-owned menu — both outlive the in-frame ctx span, so the post-nt_ui_end read is clean. */
-uint32_t nt_ui_menu_test_focus_item_id(const nt_ui_context_t *ctx, const nt_ui_menu_ctx_t *menu, uint32_t menu_id, uint8_t depth) {
+uint32_t nt_ui_menu_test_focus_item_id(const nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth) {
     NT_ASSERT(ctx != NULL && "nt_ui_menu_test_focus_item_id: ctx must be non-NULL");
     const nt_ui_menu_runtime_t *rt = nt_ui_state_find((nt_ui_context_t *)ctx, menu_runtime_id(menu_id));
-    if (rt == NULL || depth >= NT_UI_MENU_MAX_DEPTH) {
-        return 0U;
-    }
-    const int16_t focus = rt->focus[depth];
-    const uint16_t count = menu->frame_record_count[depth];
-    for (uint16_t k = 0; k < count; ++k) {
-        if (menu->frame_record[depth][k].idx == focus) {
-            return menu->frame_record[depth][k].id;
-        }
-    }
-    return 0U;
+    return (rt != NULL && depth < NT_UI_MENU_MAX_DEPTH) ? rt->focus[depth] : 0U;
 }
 
 uint32_t nt_ui_menu_test_panel_id(uint32_t menu_id, uint8_t depth) { return menu_panel_id(menu_id, depth); }
@@ -1085,16 +1111,11 @@ uint32_t nt_ui_menu_test_occluder_id(uint32_t menu_id) { return menu_occluder_id
 uint32_t nt_ui_menu_test_shortcut_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_shortcut_id(menu_id, depth, item_idx); }
 uint32_t nt_ui_menu_test_check_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_check_id(menu_id, depth, item_idx); }
 
-/* The retained open-chain index at a level (rt->open_path[depth]): -1 = no submenu open at that depth.
- * Drives the immediate hover-open probe (hover a parent row -> open_path opens it). The runtime cell lives
- * in ctx's state pool. */
-int16_t nt_ui_menu_test_open_path(const nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth) {
+/* Retained open parent ID; 0 means no open child. */
+uint32_t nt_ui_menu_test_open_path(const nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth) {
     NT_ASSERT(ctx != NULL && "nt_ui_menu_test_open_path: ctx must be non-NULL");
-    const nt_ui_menu_runtime_t *rt = nt_ui_state_find((nt_ui_context_t *)ctx, menu_runtime_id(menu_id));
-    if (rt == NULL || depth >= NT_UI_MENU_MAX_DEPTH) {
-        return -1;
-    }
-    return rt->open_path[depth];
+    const nt_ui_menu_open_path_t *path = nt_ui_state_find((nt_ui_context_t *)ctx, menu_open_path_id(menu_id));
+    return (path != NULL && depth < NT_UI_MENU_MAX_DEPTH) ? path->id[depth] : 0U;
 }
 
 /* The deepest currently-open level (rt->active_depth). 0 = only the root open / no runtime cell yet. */
@@ -1107,16 +1128,19 @@ uint8_t nt_ui_menu_test_active_depth(const nt_ui_context_t *ctx, uint32_t menu_i
 /* Force the open chain to a target depth (self-keyed: every level opens item 0). The nav guard caps
  * keyboard-open at the cap, so the decl-time backstop assert in submenu_begin is only reachable when the
  * chain is forced open this deep — the death test drives it directly via this setter. */
-void nt_ui_menu_test_force_open_to(nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth) {
+void nt_ui_menu_test_force_open_to(nt_ui_context_t *ctx, uint32_t menu_id, uint32_t key, uint8_t depth) {
     NT_ASSERT(ctx != NULL && "nt_ui_menu_test_force_open_to: ctx must be non-NULL");
     nt_ui_menu_runtime_t *rt = menu_runtime(ctx, menu_id);
     /* Mark every level's item-0 submenu open up to `depth` (clamped to the last valid array index). Setting
      * open_path at index MAX_DEPTH-1 makes submenu_begin ENTER its body there and try to push past the cap —
      * the decl-time backstop the death test verifies. active_depth itself stays within the cap. */
     const uint8_t last = (depth < NT_UI_MENU_MAX_DEPTH) ? depth : (uint8_t)(NT_UI_MENU_MAX_DEPTH - 1U);
+    nt_ui_menu_open_path_t *path = menu_open_path(ctx, menu_id);
+    uint32_t scope = menu_id;
     for (uint8_t d = 0; d <= last; ++d) {
-        rt->open_path[d] = 0; /* level d's item 0 (the self-keyed submenu) is open */
-        rt->focus[d] = 0;
+        scope = menu_item_id(scope, key);
+        path->id[d] = scope;
+        rt->focus[d] = scope;
     }
     rt->active_depth = (last < NT_UI_MENU_MAX_DEPTH - 1U) ? last : (uint8_t)(NT_UI_MENU_MAX_DEPTH - 1U);
 }
