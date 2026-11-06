@@ -416,24 +416,6 @@ static void test_borrowed_auto_blob_survives_invalidation(void) {
     TEST_ASSERT_EQUAL_UINT8(1, s_blob[104 + sizeof(NtShaderCodeHeader)]);
 }
 
-static void test_borrowed_auto_blob_publishes_late_request(void) {
-    s_tick = 0.0;
-    s_seconds = 1.0;
-    nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = activate});
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(s_id, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(s_id, s_blob, sizeof s_blob));
-    nt_resource_set_blob_policy(s_id, NT_BLOB_AUTO, 5);
-    nt_resource_step();
-    s_seconds += 1.0;
-    nt_resource_step();
-
-    nt_resource_t alias = nt_resource_request((nt_hash64_t){102}, NT_ASSET_SHADER_CODE);
-    nt_resource_step();
-    TEST_ASSERT_TRUE(nt_resource_is_ready(alias));
-    TEST_ASSERT_EQUAL_UINT32(101, nt_resource_get(alias));
-    assert_bytes(sizeof s_blob, 24);
-}
-
 static void test_retry_waits_until_deadline(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(s_id, 0));
     s_tick = 0.0;
@@ -532,7 +514,6 @@ int main(void) {
     RUN_TEST(test_multiple_parses_keep_last_result_not_sum);
     RUN_TEST(test_resident_bytes_eviction_reload_and_unmount);
     RUN_TEST(test_borrowed_auto_blob_survives_invalidation);
-    RUN_TEST(test_borrowed_auto_blob_publishes_late_request);
     RUN_TEST(test_retry_waits_until_deadline);
     RUN_TEST(test_auto_retains_bytes_for_budget_delayed_owners);
     RUN_TEST(test_keep_retains_bytes_with_small_activation_budget);

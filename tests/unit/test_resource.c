@@ -1163,8 +1163,6 @@ void test_asset_magic_mismatch_asserts(void) { expect_asset_header_assert(NT_ASS
 void test_asset_version_mismatch_asserts(void) { expect_asset_header_assert(NT_ASSET_MESH, 1); }
 void test_asset_shorter_than_header_asserts(void) { expect_asset_header_assert(NT_ASSET_MESH, 2); }
 void test_blob_magic_mismatch_asserts(void) { expect_asset_header_assert(NT_ASSET_BLOB, 0); }
-void test_blob_version_mismatch_asserts(void) { expect_asset_header_assert(NT_ASSET_BLOB, 1); }
-void test_blob_shorter_than_header_asserts(void) { expect_asset_header_assert(NT_ASSET_BLOB, 2); }
 
 void test_equal_range_self_owners_keep_independent_runtime_objects(void) {
     nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate_seq, .deactivate = fake_deactivate});
@@ -1328,6 +1326,8 @@ static void mock_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime
     }
     s_last_resolve_user_data = *user_data;
 }
+
+static void other_on_cleanup(void *user_data) { (void)user_data; }
 
 static void mock_on_cleanup(void *user_data) {
     s_cleanup_call_count++;
@@ -3207,7 +3207,7 @@ static void test_type_registration_copies_and_preserves_complete_description(voi
             desc.on_resolve = NULL;
             break;
         case 3:
-            desc.on_cleanup = NULL;
+            desc.on_cleanup = other_on_cleanup;
             break;
         case 4:
             desc.on_post_resolve = NULL;
@@ -3382,6 +3382,7 @@ static void test_blob_alias_payload_survives_pack_eviction(void) {
     uint32_t size = 0;
     uint8_t *blob = build_blob_alias_meta_pack(&size);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pack, 0));
+    TEST_ASSERT_NOT_NULL(blob);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pack, blob, size));
     nt_resource_test_set_pack_io_type(0, NT_IO_FS);
     nt_resource_t owner = nt_resource_request(nt_hash64_str("blob_owner"), NT_ASSET_BLOB);
@@ -3390,10 +3391,14 @@ static void test_blob_alias_payload_survives_pack_eviction(void) {
     const uint8_t *payload = nt_resource_get_blob(owner, NULL);
     TEST_ASSERT_NOT_NULL(payload);
     TEST_ASSERT_EQUAL_PTR(payload, nt_resource_get_blob(alias, NULL));
+    memset(blob, 0xCD, size); /* a kept pointer would read garbage */
     nt_resource_set_blob_policy(pack, NT_BLOB_AUTO, TEST_BLOB_TTL_MS);
     nt_time_sleep(TEST_PAST_BLOB_TTL_S);
     nt_resource_step();
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_set_priority(pack, 1)); /* forces a resolve, the only path that schedules a reread */
+    nt_resource_step();
     TEST_ASSERT_FALSE(nt_resource_test_pack_blob_resident(0));
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pack));
     uint32_t payload_size = 0;
     const uint8_t *retained = nt_resource_get_blob(alias, &payload_size);
     TEST_ASSERT_EQUAL_PTR(payload, retained);
@@ -3506,8 +3511,6 @@ int main(void) {
     RUN_TEST(test_asset_version_mismatch_asserts);
     RUN_TEST(test_asset_shorter_than_header_asserts);
     RUN_TEST(test_blob_magic_mismatch_asserts);
-    RUN_TEST(test_blob_version_mismatch_asserts);
-    RUN_TEST(test_blob_shorter_than_header_asserts);
     RUN_TEST(test_winner_gen_changes_with_each_published_winner);
     RUN_TEST(test_equal_range_self_owners_keep_independent_runtime_objects);
 

@@ -1128,6 +1128,7 @@ int main(int argc, char *argv[]) {
     nt_sprite_renderer_shutdown();
     nt_shape_renderer_shutdown();
     nt_font_destroy(s_font);
+    nt_font_shutdown();
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);
     nt_material_destroy(s_overlay_sprite_material);
@@ -1138,7 +1139,6 @@ int main(int argc, char *argv[]) {
     nt_material_shutdown();
     nt_debug_overlay_shutdown();
     nt_resource_shutdown();
-    nt_font_shutdown();
     nt_fs_shutdown();
     nt_http_shutdown();
     nt_hash_shutdown();

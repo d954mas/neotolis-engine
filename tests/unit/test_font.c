@@ -141,7 +141,7 @@ static uint8_t *build_font_blob_codepoints(uint16_t units_per_em, int16_t ascent
     return blob;
 }
 
-/* The fixture owns its parsed pack wrapper; activation copies the FONT payload. */
+/* The fixture owns its parsed pack wrapper; publication copies the FONT payload. */
 static nt_resource_t register_font_resource(const char *name, const uint8_t *blob, uint32_t blob_size) {
     (void)name;
     return nt_font_test_resource(nt_font_test_register_data(blob, blob_size));
@@ -201,45 +201,38 @@ void setUp(void) {
 
 void tearDown(void) {
     nt_log_remove_sink(capture_errors, NULL);
-    nt_resource_shutdown();
     nt_font_shutdown(); /* frees the test-only pack wrappers it owns */
+    nt_resource_shutdown();
     nt_hash_shutdown();
     nt_gfx_shutdown();
 }
 
 /* ---- Test 0: Blob self-test ---- */
 
-static void test_font_add_rejects_foreign_resource_handle_collision(void) {
-    uint32_t size = 0;
-    uint8_t *blob = build_test_font_blob(&size);
-    nt_resource_t source = nt_font_test_resource(nt_font_test_register_data(blob, size));
-    free(blob);
-    nt_resource_step();
-    uint32_t handle = nt_resource_get(source);
-    TEST_ASSERT_NOT_EQUAL(0, handle);
-    const nt_hash32_t pack = nt_hash32_str("foreign_font_source");
-    const nt_hash64_t texture_id = nt_hash64_str("foreign_texture");
+static void test_font_virtual_provider_asserts(void) {
+    const nt_hash32_t pack = nt_hash32_str("virtual_font_pack");
+    const nt_hash64_t id = nt_hash64_str("virtual_font");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pack, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pack, texture_id, NT_ASSET_TEXTURE, handle));
-    nt_resource_t texture = nt_resource_request(texture_id, NT_ASSET_TEXTURE);
-    nt_resource_step();
-    TEST_ASSERT_EQUAL_UINT32(handle, nt_resource_get(texture));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pack, id, NT_ASSET_FONT, 7));
+    (void)nt_resource_request(id, NT_ASSET_FONT);
+    NT_TEST_EXPECT_ASSERT(nt_resource_step());
+}
+
+static void test_font_add_rejects_non_font_resource(void) {
+    nt_resource_t texture = nt_resource_request(nt_hash64_str("foreign_texture"), NT_ASSET_TEXTURE);
     nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8});
     NT_TEST_EXPECT_ASSERT(nt_font_add(font, texture));
-    nt_font_add(font, source);
-    nt_font_step();
-    TEST_ASSERT_FALSE(nt_font_lookup_glyph(font, 'A')->is_tofu);
     nt_font_destroy(font);
 }
 
 static void restore_lost_context(void);
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- Unity assertions inflate the metric.
-static void test_font_shared_source_survives_pack_eviction(void) {
+static void test_font_source_survives_pack_eviction(void) {
     uint32_t font_size = 0;
     uint8_t *font_blob = build_test_font_blob(&font_size);
     const uint32_t header_size = 128;
-    const uint32_t pack_size = 8U * 1024U * 1024U;
+    const uint32_t pack_size = header_size + font_size;
     uint8_t *pack_blob = calloc(1, pack_size);
     TEST_ASSERT_NOT_NULL(pack_blob);
     NtPackHeader *header = (NtPackHeader *)pack_blob;
@@ -256,7 +249,7 @@ static void test_font_shared_source_survives_pack_eviction(void) {
     const nt_hash32_t pack = nt_hash32_str("owned_font_pack");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pack, 0));
     /* Ownership transfers through the I/O fixture hook; eviction frees this buffer. */
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pack, pack_blob, pack_size)); // NOLINT(clang-analyzer-unix.Malloc)
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pack, pack_blob, pack_size));
     nt_resource_test_set_pack_io_type(0, NT_IO_FS);
     nt_resource_t owner = nt_resource_request(owner_id, NT_ASSET_FONT);
     nt_resource_t alias = nt_resource_request(alias_id, NT_ASSET_FONT);
@@ -269,23 +262,26 @@ static void test_font_shared_source_survives_pack_eviction(void) {
     TEST_ASSERT_EQUAL_UINT64(pack_size, nt_resource_get_resident_bytes().blob_bytes);
     TEST_ASSERT_EQUAL_UINT16(1, nt_font_get_stats(first).glyphs_cached);
     TEST_ASSERT_EQUAL_UINT16(1, nt_font_get_stats(second).glyphs_cached);
-    TEST_ASSERT_NOT_EQUAL(0, nt_resource_get(owner));
-    TEST_ASSERT_EQUAL_UINT32(nt_resource_get(owner), nt_resource_get(alias));
     TEST_ASSERT_FALSE(nt_font_lookup_glyph(first, 'A')->is_tofu);
-    nt_resource_set_blob_policy(pack, NT_BLOB_AUTO, 1);
+    memset(pack_blob + header_size, 0xCD, font_size);   /* a kept pointer would decode garbage */
+    nt_resource_set_blob_policy(pack, NT_BLOB_AUTO, 1); // NOLINT(clang-analyzer-unix.Malloc) -- eviction frees pack_blob
     nt_time_sleep(0.01);
     nt_resource_step();
     TEST_ASSERT_FALSE(nt_resource_test_pack_blob_resident(0));
     TEST_ASSERT_EQUAL_UINT64(0, nt_resource_get_resident_bytes().blob_bytes);
-    uint32_t source_handle = nt_resource_get(owner);
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
     nt_font_step();
     TEST_ASSERT_EQUAL_UINT16(1000, nt_font_get_metrics(second).units_per_em);
+    TEST_ASSERT_NULL(nt_font_lookup_glyph(first, 'B'));
     restore_lost_context();
     nt_font_step();
-    TEST_ASSERT_EQUAL_UINT32(source_handle, nt_resource_get(owner));
-    TEST_ASSERT_EQUAL_UINT32(source_handle, nt_resource_get(alias));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_set_priority(pack, 1)); /* forces a resolve, the only path that schedules a reread */
+    nt_resource_step();
     TEST_ASSERT_FALSE(nt_resource_test_pack_blob_resident(0));
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pack));
     TEST_ASSERT_TRUE(nt_gfx_texture_ready(nt_font_get_curve_texture(first)));
     TEST_ASSERT_TRUE(nt_gfx_texture_ready(nt_font_get_curve_texture(second)));
     TEST_ASSERT_TRUE(nt_font_measure_n(second, "BC", 2, 20.0F, 0.0F).width == 20.0F);
@@ -294,7 +290,6 @@ static void test_font_shared_source_survives_pack_eviction(void) {
     nt_font_destroy(first);
     TEST_ASSERT_FALSE(nt_font_lookup_glyph(second, 'B')->is_tofu);
     nt_resource_unmount(pack);
-    TEST_ASSERT_TRUE(nt_font_lookup_glyph(second, 'A')->is_tofu);
     nt_resource_step();
     nt_font_step();
     TEST_ASSERT_EQUAL_UINT16(0, nt_font_get_metrics(second).units_per_em);
@@ -329,8 +324,8 @@ void test_font_blob_valid(void) {
 
 void test_font_init_shutdown(void) {
     /* setUp already called init -- shutdown and re-init */
-    nt_resource_shutdown();
     nt_font_shutdown();
+    nt_resource_shutdown();
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 4});
     nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 2});
@@ -419,8 +414,8 @@ void test_font_destroy_frees_unready_texture(void) {
         if (i == 0U) {
             nt_font_destroy(font);
         } else {
-            nt_resource_shutdown();
             nt_font_shutdown();
+            nt_resource_shutdown();
             nt_resource_init(&(nt_resource_desc_t){0});
             nt_font_init(&(nt_font_desc_t){.max_fonts = 4});
         }
@@ -3056,8 +3051,9 @@ static void test_font_worstcase_glyph_miss_budget(void) {
 #endif
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_font_add_rejects_foreign_resource_handle_collision);
-    RUN_TEST(test_font_shared_source_survives_pack_eviction);
+    RUN_TEST(test_font_virtual_provider_asserts);
+    RUN_TEST(test_font_add_rejects_non_font_resource);
+    RUN_TEST(test_font_source_survives_pack_eviction);
     RUN_TEST(test_font_blob_valid);
     RUN_TEST(test_font_shared_contours_padding_and_empty_glyph_remain_valid);
     RUN_TEST(test_font_contour_points_above_curve_cap_stay_valid);

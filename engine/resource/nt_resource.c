@@ -1199,13 +1199,6 @@ const uint8_t *nt_resource_get_blob(nt_resource_t handle, uint32_t *out_size) {
     if (meta->resource_id == 0 || s_resource.assets[meta->owner_asset].state != NT_ASSET_STATE_READY) {
         return NULL;
     }
-    if (meta->pack_index >= NT_RESOURCE_MAX_PACKS) {
-        return NULL;
-    }
-    const NtPackMeta *pack = &s_resource.packs[meta->pack_index];
-    if (!pack->mounted) {
-        return NULL;
-    }
     if (meta->size <= sizeof(NtBlobAssetHeader)) {
         return NULL;
     }

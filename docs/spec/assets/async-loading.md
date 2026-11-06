@@ -244,9 +244,4 @@ bytes in transport buffers: JS response chunks plus their WASM copy. The bridge
 drops its JS record after copying; garbage collection timing is browser-owned.
 This is transport accounting, not a bound on the complete loading peak.
 
-Canonical owned FONT/BLOB payloads totaling C add to the resident source pack:
-P + C during construction, C after source-byte eviction. Their aliases and font
-caches share C. Copied metadata, other CPU assets, glyph caches, GPU allocations,
-registry storage and allocator overhead are separate. KEEP retains P + C.
-Measure JS/WASM/GPU overlap for a process peak; neither 2P nor P + C alone is
-that measurement. See [resource memory accounting](resource.md#optional-measurements-and-resident-bytes).
+See [resource memory accounting](resource.md#optional-measurements-and-resident-bytes).

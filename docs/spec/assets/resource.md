@@ -54,18 +54,10 @@ runtime CPU/GPU assets or total process memory; there is no mirrored allocation
 accounting.
 
 Owned FONT and BLOB data have separate construction and steady-state costs. With
-source pack size P and canonical compact FONT/BLOB payloads totaling C, those
-bytes occupy P + C during construction and C after AUTO eviction. Aliases and
-additional font caches do not multiply C. Cache storage, GPU textures, metadata,
+source pack size P and owned payloads totaling C (one per published FONT slot, one
+per canonical BLOB), those bytes occupy P + C during construction and C after AUTO
+eviction. BLOB aliases and additional font caches do not multiply C. Cache storage, GPU textures, metadata,
 registry storage and allocator overhead are separate; KEEP retains P + C.
-
-The font eviction regression uses an 8,388,608-byte pack containing a 150-byte
-FONT, two resource names and two caches: source-byte accounting peaks at 8,388,758 bytes
-and retains 150 bytes after eviction. These are allocation sizes, not a measured
-process-memory peak. At the default 2,048-entry cap, new wasm32 ownership tables
-occupy 32,776 bytes: 8,192 for BLOB pointers, 8,196 for FONT pointers, 8,196 for
-source pool IDs and 8,192 for its free queue, excluding small state fields and
-allocator overhead. FONT tables are allocated only when its module initializes.
 
 ## Core concepts
 
@@ -278,10 +270,10 @@ A plain activator (`activate`/`deactivate`, no resolve callbacks) turns the payl
 into a self-contained runtime object and never reads the pack blob again. MESH
 owns GPU buffers; the skeletal types (`NSKL`, `NSKN`, `NANM`,
 `engine/skeletal_assets`) own one CPU payload allocation per canonical asset.
-FONT owns one compact payload shared by its caches; BLOB owns its payload bytes.
+BLOB owns its payload bytes.
 Aliases share their canonical owner's object.
 
-An auxiliary consumer (`NT_RESOURCE_BEHAVIOR_AUX_BACKED`, such as atlas) copies
+An auxiliary consumer (`NT_RESOURCE_BEHAVIOR_AUX_BACKED`, such as atlas and FONT) copies
 its required bytes into owned `user_data` during `on_resolve`. Once built, that
 snapshot remains usable after pack-byte eviction. A different target winner
 needs resident source bytes until its own snapshot has been prepared.
@@ -371,9 +363,8 @@ A font keeps its `nt_font_add` source list of resource handles. Once the context
 is usable, `nt_font_step` recreates a non-ready curve texture before its
 resource rescan; this does not require source-asset reactivation. GPU restore
 does not invalidate FONT: its owned CPU payload survives context loss. Explicit
-`nt_resource_invalidate(NT_ASSET_FONT)` remains legal when the game needs to
-re-activate those sources; it releases and rebuilds them through the normal
-resource path. Re-adding an existing source asserts on the duplicate. Call `nt_font_step` after
+`nt_resource_invalidate(NT_ASSET_FONT)` remains legal; it re-activates and copies
+those sources through the normal resource path, rereading an evicted pack. Re-adding an existing source asserts on the duplicate. Call `nt_font_step` after
 `nt_gfx_begin_frame` and before any render pass: recovery destroys and replaces
 the old texture handles. An atlas keeps its parsed regions and
 needs its page textures resolved again.
@@ -381,7 +372,7 @@ needs its page textures resolved again.
 The current invalidation bridge schedules all evicted file packs for reload,
 even when a pack contains no asset of the invalidated type. CPU FONT objects
 remain intact, but an unrelated GPU-type invalidation may still reread their
-source pack. Demand-driven recovery in #509 removes this migration limitation.
+source pack. #503 limits reloads to packs owning an invalidated asset.
 
 Programs from file-backed stages come back as the resource step re-activates
 their stages from `NT_ASSET_SHADER_CODE` within its activation budget, starting
@@ -488,15 +479,12 @@ returning `void`. Call it after `nt_resource_init`, before the first successful
 file or virtual mount. The descriptor must be non-NULL with positive `max_fonts`;
 invalid arguments, double initialization and allocation failure assert.
 `nt_font_shutdown` does not reset type registration in the resource lifecycle.
-Release resource-owned FONT objects with `nt_resource_shutdown` (or unmount all
-their packs) before `nt_font_shutdown`. The latter asserts if sources remain live.
-Keep graphics alive until both modules finish teardown.
 
-Activation copies the compact FONT payload once into a generational source pool
-bounded by `NT_RESOURCE_MAX_ASSETS`; it does not expand glyph contours. Canonical
-entries own their sources; aliases and multiple font caches share the same source
-handle. Cache destruction does not release the source. Resource deactivation
-releases it once. A stale handle cannot read a freed or reused source slot.
+Publication copies the compact FONT payload into the slot's `user_data`; it does
+not expand glyph contours. Fonts referencing one resource share its copy; each
+published alias holds its own. A new winner replaces the copy, and it is released
+when the slot loses its winner or at resource shutdown. A virtual FONT provider has
+no bytes to copy and asserts at publication.
 
 Builder produces font assets from TTF/OTF sources. Binary layout:
 
