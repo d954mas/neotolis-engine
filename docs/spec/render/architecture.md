@@ -1404,10 +1404,13 @@ means the selection has no pipeline, a lost context included.
 
 | Label | Fields | Written |
 |---|---|---|
-| `mesh` | `material`, `mesh`; `drop`: `program not ready`, `context lost` | before each run of `draw_list`, `draw_list_skinned` and each direct mesh draw; a deformation-only split notes the same pair again |
+| `mesh` | `material`, `mesh`; `drop`: `program not ready`, `context lost`, `mesh not ready` | before each run of `draw_list`, `draw_list_skinned` and each direct mesh draw; a deformation-only split notes the same pair again |
 | `sprite` | `material`, `page` (a texture HANDLE, 0 when not ready); `drop`: `program not ready`, `page not ready` | before each immediate emit of a live region and each `draw_list` run; a merged emit keeps its note before a `CACHE` draw |
 | `text` | `material`, `font`; `drop`: `program not ready`, `font not loaded`, `font texture not ready` | once per non-empty `draw_n` call |
 | `shape` | none; `drop`: `program not ready` | before each shape draw of a flush, or once for a non-empty flush whose programs are not ready |
+
+With a ready program and a live context, mesh buffers awaiting reconstruction
+produce `drop: mesh not ready`.
 
 On a loss taken at `nt_gfx_begin_frame`, mesh draws return before noting, and
 sprite, text and shape note `drop: program not ready`: the wipe leaves no ready
