@@ -383,13 +383,9 @@ static void scroll_route_drag(nt_ui_scroll_state_t *s, const nt_ui_scroll_style_
     }
 }
 
-/* Strip the tap threshold from the cumulative-from-press delta on the LATCHING frame only, so the
- * crossing frame doesn't dump the whole dead-zone into pos and vel. Once latched the dead-zone is
- * spent and later frames pass the per-frame delta through untouched (1:1 tracking). */
-static void scroll_consume_threshold(bool latched, float *ddx, float *ddy) {
-    if (latched) {
-        return; /* dead-zone already consumed; route the full per-frame delta 1:1 */
-    }
+/* Strip the tap threshold when a free press claims capture, avoiding a jump in pos and vel.
+ * Later frames route the full per-frame delta through the OWNED path. */
+static void scroll_consume_threshold(float *ddx, float *ddy) {
     const float len = sqrtf(((*ddx) * (*ddx)) + ((*ddy) * (*ddy)));
     if (len <= NT_UI_SCROLL_STEAL_THRESHOLD_PX) {
         *ddx = 0.0F;
@@ -442,7 +438,7 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
     const bool can_x = style->scroll_x && (scroll_min_bound(content[0], container[0]) < 0.0F);
     const bool can_y = style->scroll_y && (scroll_min_bound(content[1], container[1]) < 0.0F);
     if (!can_x && !can_y) {
-        const uint8_t gesture_flags = NT_UI_SCROLL_FLAG_DRAGGING | NT_UI_SCROLL_FLAG_DRAG_LATCHED | NT_UI_SCROLL_FLAG_FREE_PRESS;
+        const uint8_t gesture_flags = NT_UI_SCROLL_FLAG_DRAGGING | NT_UI_SCROLL_FLAG_FREE_PRESS;
         s->flags &= (uint8_t)~gesture_flags;
         return;
     }
@@ -518,7 +514,6 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
             }
             cap->press_pos[0] = cap->pos[0]; /* re-anchor: next frame's delta is per-frame, 1:1 */
             cap->press_pos[1] = cap->pos[1];
-            s->flags |= NT_UI_SCROLL_FLAG_DRAG_LATCHED;
             any_drag = true;
             continue;
         }
@@ -576,9 +571,8 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
         cap->press_pos[1] = p->y;
         cap->pos[0] = p->x;
         cap->pos[1] = p->y;
-        scroll_consume_threshold(false, &ddx, &ddy);
+        scroll_consume_threshold(&ddx, &ddy);
         scroll_route_drag(s, style, ddx, ddy, dt);
-        s->flags |= NT_UI_SCROLL_FLAG_DRAG_LATCHED;
         any_drag = true;
         // #endregion
     }
@@ -586,7 +580,6 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
         s->flags |= NT_UI_SCROLL_FLAG_DRAGGING;
     } else {
         s->flags &= (uint8_t)~NT_UI_SCROLL_FLAG_DRAGGING;
-        s->flags &= (uint8_t)~NT_UI_SCROLL_FLAG_DRAG_LATCHED; /* gesture ended: next drag re-arms the dead-zone */
     }
     if (any_free_press) {
         s->flags |= NT_UI_SCROLL_FLAG_FREE_PRESS;
