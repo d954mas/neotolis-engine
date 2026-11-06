@@ -141,7 +141,8 @@ The existing resident metadata copy remains separate and survives blob eviction.
 With the pack blob resident, a validated entry's payload begins at
 `blob + entry.offset` and spans `entry.size` bytes. Runtime activators borrow
 that range for the call. FONT activation copies its compact payload. BLOB parsing
-copies the bytes after `NtBlobAssetHeader` once per canonical entry;
+asserts each canonical `NtBlobAssetHeader` size, magic and version, then copies
+the following payload bytes once per canonical entry;
 `nt_resource_get_blob` returns this owned payload for a published BLOB resource.
 Aliases share the allocation. It survives pack-byte eviction, and is freed when
 the canonical entry is released at unmount/shutdown.

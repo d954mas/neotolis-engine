@@ -432,10 +432,10 @@ static void resource_resolve_pass(void) {
 
 /* ---- Asset header check ---- */
 
-/* Every activated payload starts with {u32 magic; u16 version} of its type's format. BLOB is
- * published at parse and never activated. */
+/* Every payload starts with its type's {u32 magic; u16 version}; BLOB is checked at parse. */
 _Static_assert(offsetof(NtMeshAssetHeader, version) == 4 && offsetof(NtTextureAssetHeader, version) == 4 && offsetof(NtShaderCodeHeader, version) == 4 && offsetof(NtFontAssetHeader, version) == 4 &&
-                   offsetof(NtAtlasHeader, version) == 4 && offsetof(NtSklHeader, version) == 4 && offsetof(NtSknHeader, version) == 4 && offsetof(NtAnmHeader, version) == 4,
+                   offsetof(NtAtlasHeader, version) == 4 && offsetof(NtSklHeader, version) == 4 && offsetof(NtSknHeader, version) == 4 && offsetof(NtAnmHeader, version) == 4 &&
+                   offsetof(NtBlobAssetHeader, version) == 4,
                "asset headers share the {u32 magic; u16 version} prefix");
 static const struct {
     uint32_t magic;
@@ -445,6 +445,7 @@ static const struct {
     [NT_ASSET_MESH] = {NT_MESH_MAGIC, NT_MESH_VERSION, sizeof(NtMeshAssetHeader)},
     [NT_ASSET_TEXTURE] = {NT_TEXTURE_MAGIC, NT_TEXTURE_VERSION, sizeof(NtTextureAssetHeader)},
     [NT_ASSET_SHADER_CODE] = {NT_SHADER_CODE_MAGIC, NT_SHADER_CODE_VERSION, sizeof(NtShaderCodeHeader)},
+    [NT_ASSET_BLOB] = {NT_BLOB_MAGIC, NT_BLOB_VERSION, sizeof(NtBlobAssetHeader)},
     [NT_ASSET_FONT] = {NT_FONT_MAGIC, NT_FONT_VERSION, sizeof(NtFontAssetHeader)},
     [NT_ASSET_ATLAS] = {NT_ATLAS_MAGIC, NT_ATLAS_VERSION, sizeof(NtAtlasHeader)},
     [NT_ASSET_SKELETON] = {NT_SKL_MAGIC, NT_SKELETAL_FORMAT_VERSION, sizeof(NtSklHeader)},
@@ -1039,11 +1040,14 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
             .meta_offset = (entry->meta_offset != 0 && entry->meta_offset >= meta_section_start) ? entry->meta_offset - meta_section_start : NT_NO_METADATA,
             .state = (entry->asset_type == NT_ASSET_BLOB && entry->owner_entry == i) ? NT_ASSET_STATE_READY : NT_ASSET_STATE_REGISTERED,
         };
-        if (entry->asset_type == NT_ASSET_BLOB && entry->owner_entry == i && entry->size > sizeof(NtBlobAssetHeader)) {
-            uint32_t payload_size = entry->size - (uint32_t)sizeof(NtBlobAssetHeader);
-            s_resource.blob_data[idx] = malloc(payload_size);
-            NT_ASSERT(s_resource.blob_data[idx]);
-            memcpy(s_resource.blob_data[idx], blob + entry->offset + sizeof(NtBlobAssetHeader), payload_size);
+        if (entry->asset_type == NT_ASSET_BLOB && entry->owner_entry == i) {
+            asset_header_check(meta, blob + entry->offset);
+            if (entry->size > sizeof(NtBlobAssetHeader)) {
+                uint32_t payload_size = entry->size - (uint32_t)sizeof(NtBlobAssetHeader);
+                s_resource.blob_data[idx] = malloc(payload_size);
+                NT_ASSERT(s_resource.blob_data[idx]);
+                memcpy(s_resource.blob_data[idx], blob + entry->offset + sizeof(NtBlobAssetHeader), payload_size);
+            }
         }
     }
 

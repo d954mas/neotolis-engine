@@ -279,6 +279,15 @@ does not implicitly unload any source resources.
 The font module's source capacity is explicit and independent of registry capacity
 and cache count: several caches may share one source or compose several sources.
 
+The game's multi-pack workflow stays intact: create one `nt_font_t`, attach FONT
+sources from any number of packs within its configured source limit, then use
+that same font for text and UI. For example, a primary alphabet and supplemental
+alphabets can come from separate packs. Attachment composes sources; it does not
+flatten or eagerly copy their glyphs into the cache. Source order is explicit
+font policy, independent of pack priorities. A FONT registry entry identifies
+source data, while `nt_font_t` is the game-created composition/cache that uses it.
+Replacing a resource-backed source updates the existing composition at publication.
+
 **Atlases:** introduce a real owned atlas-data object containing regions,
 geometry, scale and page identifiers. Direct construction accepts prepared runtime
 data; it does not invoke the atlas packer. Pack loading produces the same kind of
@@ -460,12 +469,11 @@ a configuration error. This deliberately replaces the current parse-time demand
 for all activators and permits mixed packs with unused optional modules.
 
 Single-resource binding maps a logical resource name to a pack entry explicitly.
-An explicit `bind_all` convenience operation may map every catalog name to the
-same logical name. The initial helper requires a ready catalog. It preflights
-conflicts and capacity before mutation; an occupied, different binding is a
-reported conflict rather than an implicit replacement. Identical bindings are
-idempotent. Selective source changes use the same per-resource installation
-operation as first load, with deferred publication.
+The initial API exposes catalog enumeration and per-resource installation; a
+game loop selects and installs entries under the names it wants. A `bind_all`
+API, bulk preflight and group-wide conflict semantics are deferred until a
+concrete caller needs them. Selective source changes use the same per-resource
+installation operation as first load, with deferred publication.
 
 ### 6.2 Three separate lifetime operations
 
@@ -482,9 +490,9 @@ touch a name that the game has since rebound elsewhere.
 **Close/unmount the pack source:** discard catalog, metadata, location and pending
 I/O. The base operation rejects closing while any registry binding still names
 that pack, including unloaded bindings and live pending installation references.
-This prevents losing current recovery or candidate source information. A removal
-helper unbinds current bindings and cancels
-pending installs referencing that pack before closing it. Cancelling a candidate
+This prevents losing current recovery or candidate source information. Game code
+can enumerate bindings, unbind current references and cancel pending installs
+referencing that pack before closing it. Cancelling a candidate
 from this pack must not unload current content committed from another pack.
 Old source handles must not attach to a later mount
 that reuses a storage slot or the same public pack name.
@@ -492,21 +500,23 @@ that reuses a storage slot or the same public pack name.
 This deliberately separates the current combined unmount behavior. Closing a
 source is not required to release its potentially large byte buffer.
 
-### 6.3 Group helpers
+### 6.3 Game-owned groups
 
 Runtime resources need no replacement for virtual packs. A game-owned list of
 resource handles is sufficient for grouping load/unload commands, including groups
 that mix pack-backed and runtime resources. Such a list creates no source, adds no
 ownership and does not change any member's restoration responsibility.
 
-Helpers are compositions of core operations, not a second lifetime system:
+These game-side loops compose core operations without another lifetime system:
 
 - bind all catalog entries, then load those selected resources;
 - load or unload all current resource bindings from one pack;
 - unbind those resources and close the source;
 - load/unload the page resources referenced by a ready atlas.
 
-No helper increments a hidden ownership count. If two game systems or atlases
+The initial engine API needs no bulk command or group transaction. Add a helper
+only when a concrete game caller demonstrates repeated policy-free work.
+No group increments a hidden ownership count. If two game systems or atlases
 share a texture, the game decides whether it is safe to unload it. Loading an
 atlas together with its pages requires waiting for atlas metadata first. Initially
 the game can perform these two steps explicitly; a one-call asynchronous group
@@ -983,13 +993,19 @@ Give font sources their own explicit capacity. Make direct sources usable in fon
 compositions alongside resource references, with the borrowed lifetimes above.
 Replace BLOB's temporary registry pointer table with its owned object path.
 Keep optional resource adapters separate and document input ownership without
-double copies. These objects become inputs to the same installation mechanism.
+double copies. Prove direct font construction, composition, measurement and draw
+work without registry initialization; merely exposing a constructor is not enough.
+Remove superseded storage and adapter paths in this step, without a compatibility
+representation. These objects become inputs to the same installation mechanism.
 
 ### Step 3 — Installation and consumer publication (#504–#506)
 
 #504 adds stable committed bindings plus bounded installation state. First install
 and replacement share publication; retain current objects/sources until success.
 No priorities, alternate staging names or public replace/swap protocol.
+Remove priority-selection and virtual-pack APIs/state together with their callers
+when installation replaces them. Keep only observation identities still required
+by consumers; do not carry a parallel legacy model until final integration.
 Keep pending source/outcome in the slot. Synchronous activation creates and
 publishes its candidate within one lifecycle call; retain an unpublished object
 only when a concrete type contract requires waiting afterward.
@@ -1032,11 +1048,13 @@ The separately recorded program/custom-owner scope conflict remains to be resolv
 
 ### Step 6 — Integration and cleanup (#510)
 
-Remove priorities/winners, virtual packs, dummy activators,
-atlas tombstones and eager assumptions. Keep epoch/local invalidation.
-Update resource/async/pack/runtime-format/frame/API chapters and affected skeletal
-assumptions. Migrate existing textured_quad/bunnymark/sponza/font/UI examples and
-DevAPI diagnostics to current availability plus installation outcome.
+Verify earlier steps removed superseded priorities/winners, virtual packs, dummy
+activators, atlas tombstones and eager assumptions when replacing those paths.
+This step verifies integration, not deferred retention of legacy APIs or storage.
+Keep epoch/local invalidation.
+Verify resource/async/pack/runtime-format/frame/API chapters, affected skeletal
+assumptions, existing examples and DevAPI migrated in their owning steps. Complete
+cross-module checks of current availability plus installation outcome.
 Measure resident memory, preparation overlap/peak, idle cost and native/WASM size.
 Complete all acceptance scenarios below using existing test infrastructure.
 
@@ -1071,6 +1089,9 @@ for this document. Prefer existing unit/fake-backend/browser test infrastructure
    Measure/render from a direct borrowed font source without initializing the
    resource registry; also use resource-backed composition and follow replacement.
    Several caches share a source; destroying a cache does not destroy that source.
+   Compose compatible alphabet sources from two packs into one font, use both
+   through the same text/UI font handle, and replace one source without re-adding
+   the others or changing that handle. Source order decides overlapping glyphs.
    Create/read/destroy BLOB objects without a registry or temporary pack.
 8. **Unified installation:** use the same operation for an empty slot and SD→HD
    under one stable handle. During delayed HD preparation render SD and retain its

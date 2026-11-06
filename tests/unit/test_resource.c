@@ -1084,14 +1084,15 @@ static uint8_t *build_alias_pack_with_rid(uint64_t rid, uint8_t atype, uint32_t 
     return blob;
 }
 
-/* A payload whose header does not match its type is a stale pack: activation asserts before the
- * type's activator runs. case 0 flips the magic, 1 the version, 2 cuts the payload below its header. */
-static void expect_asset_header_assert(uint32_t which) {
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate});
+/* A stale payload asserts before use. Cases corrupt magic, version, or header length. */
+static void expect_asset_header_assert(uint8_t asset_type, uint32_t which) {
+    if (asset_type != NT_ASSET_BLOB) {
+        nt_resource_register_type(asset_type, &(nt_resource_type_desc_t){.activate = fake_activate});
+    }
     const nt_hash64_t rid = nt_hash64_str("header_check");
-    (void)nt_resource_request(rid, NT_ASSET_MESH);
+    (void)nt_resource_request(rid, asset_type);
     uint32_t size = 0;
-    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size);
+    uint8_t *blob = build_pack_with_rid(rid.value, asset_type, &size);
     TEST_ASSERT_NOT_NULL(blob);
     NtAssetEntry *entry = (NtAssetEntry *)(blob + sizeof(NtPackHeader));
     if (which == 0) {
@@ -1099,17 +1100,22 @@ static void expect_asset_header_assert(uint32_t which) {
     } else if (which == 1) {
         blob[entry->offset + 4U] ^= 1U;
     } else {
-        entry->size = (uint32_t)sizeof(NtMeshAssetHeader) - 1U;
+        entry->size = (uint32_t)(asset_type == NT_ASSET_BLOB ? sizeof(NtBlobAssetHeader) : sizeof(NtMeshAssetHeader)) - 1U;
     }
     const NtPackHeader *ph = (const NtPackHeader *)blob;
     ((NtPackHeader *)blob)->checksum = nt_crc32(blob + ph->header_size, size - ph->header_size);
     const nt_hash32_t pid = nt_hash32_str("header_pack");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
     s_activate_call_count = 0;
-    EXPECT_ASSERT(nt_resource_step());
+    if (asset_type == NT_ASSET_BLOB) {
+        EXPECT_ASSERT(nt_resource_parse_pack(pid, blob, size));
+    } else {
+        TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
+        EXPECT_ASSERT(nt_resource_step());
+    }
     TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, which == 2 ? "shorter than its header" : "magic or version mismatch"));
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, s_activate_call_count, "the activator never sees a mismatched header");
+    nt_resource_unmount(pid);
     free(blob);
 }
 
@@ -1153,9 +1159,12 @@ void test_winner_gen_changes_with_each_published_winner(void) {
     free(blob);
 }
 
-void test_asset_magic_mismatch_asserts(void) { expect_asset_header_assert(0); }
-void test_asset_version_mismatch_asserts(void) { expect_asset_header_assert(1); }
-void test_asset_shorter_than_header_asserts(void) { expect_asset_header_assert(2); }
+void test_asset_magic_mismatch_asserts(void) { expect_asset_header_assert(NT_ASSET_MESH, 0); }
+void test_asset_version_mismatch_asserts(void) { expect_asset_header_assert(NT_ASSET_MESH, 1); }
+void test_asset_shorter_than_header_asserts(void) { expect_asset_header_assert(NT_ASSET_MESH, 2); }
+void test_blob_magic_mismatch_asserts(void) { expect_asset_header_assert(NT_ASSET_BLOB, 0); }
+void test_blob_version_mismatch_asserts(void) { expect_asset_header_assert(NT_ASSET_BLOB, 1); }
+void test_blob_shorter_than_header_asserts(void) { expect_asset_header_assert(NT_ASSET_BLOB, 2); }
 
 void test_equal_range_self_owners_keep_independent_runtime_objects(void) {
     nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate_seq, .deactivate = fake_deactivate});
@@ -3496,6 +3505,9 @@ int main(void) {
     RUN_TEST(test_asset_magic_mismatch_asserts);
     RUN_TEST(test_asset_version_mismatch_asserts);
     RUN_TEST(test_asset_shorter_than_header_asserts);
+    RUN_TEST(test_blob_magic_mismatch_asserts);
+    RUN_TEST(test_blob_version_mismatch_asserts);
+    RUN_TEST(test_blob_shorter_than_header_asserts);
     RUN_TEST(test_winner_gen_changes_with_each_published_winner);
     RUN_TEST(test_equal_range_self_owners_keep_independent_runtime_objects);
 

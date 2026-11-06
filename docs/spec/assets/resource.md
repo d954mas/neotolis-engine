@@ -212,7 +212,9 @@ that needs a rebuild. An activator asserts only the structure its views address
 a lower-priority pack still published, only for device or build limits such as a
 texture above the GPU's maximum size or a lost context.
 
-BLOB readiness is built in and needs no activator. Other file asset types require
+BLOB readiness is built in and needs no activator. Parsing checks each canonical
+BLOB with the same header assertions before copying its payload; aliases share
+that checked object. Other file asset types require
 a configured activator: missing one is a configuration error asserted during
 parse, before any asset records or blob ownership change. Unknown manifest types
 are malformed input and reject the pack through the recoverable parse error.
