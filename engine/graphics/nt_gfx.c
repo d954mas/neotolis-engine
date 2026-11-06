@@ -3188,16 +3188,16 @@ nt_vertex_input_t nt_gfx_mesh_vertex_input(nt_mesh_t mesh, nt_buffer_t instance_
     NT_ASSERT(nt_pool_valid(&s_gfx.mesh_pool, mesh.id) && "mesh_vertex_input: invalid or stale mesh");
     NT_ASSERT(nt_pool_valid(&s_gfx.buffer_pool, instance_buffer.id) && "mesh_vertex_input: invalid or stale instance buffer (an unsized frame stream has none)");
     const uint32_t slot = nt_pool_slot_index(mesh.id);
-    const nt_gfx_mesh_info_t *info = &s_gfx.mesh_table[slot];
-    if (!s_gfx.buffer_metas[nt_pool_slot_index(info->vbo.id)].live || (info->ibo.id != 0 && !s_gfx.buffer_metas[nt_pool_slot_index(info->ibo.id)].live)) {
-        return NT_VERTEX_INPUT_INVALID;
-    }
     const uint32_t frame_stream = s_gfx.buffer_metas[nt_pool_slot_index(instance_buffer.id)].frame_stream;
     const uint32_t k = frame_stream > NT_GFX_FRAME_VERTEX ? frame_stream - 1U - NT_GFX_FRAME_VERTEX : NT_GFX_MAX_VERTEX_STREAMS;
     nt_vertex_input_t *vi = &s_gfx.mesh_vertex_inputs[((size_t)slot * NT_GFX_MESH_VERTEX_INPUTS) + k];
-    /* A loss frees every vertex input; the next use after the restore makes it again. */
+    /* Loss and buffer destruction invalidate every dependent vertex input. */
     if (!nt_pool_valid(&s_gfx.vertex_input_pool, vi->id)) {
-        *vi = make_mesh_vertex_input(&s_gfx.mesh_table[slot]);
+        const nt_gfx_mesh_info_t *info = &s_gfx.mesh_table[slot];
+        if (!s_gfx.buffer_metas[nt_pool_slot_index(info->vbo.id)].live || (info->ibo.id != 0 && !s_gfx.buffer_metas[nt_pool_slot_index(info->ibo.id)].live)) {
+            return NT_VERTEX_INPUT_INVALID;
+        }
+        *vi = make_mesh_vertex_input(info);
     }
     return *vi;
 }

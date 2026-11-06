@@ -142,11 +142,17 @@ static const NtFontGlyphEntry *find_glyph_in_pack(const uint8_t *blob, uint32_t 
     return (const NtFontGlyphEntry *)bsearch(&codepoint, glyphs, hdr->glyph_count, sizeof(NtFontGlyphEntry), compare_glyph_codepoint);
 }
 
-/* Find glyph across all resources (first wins). ASCII codepoints take the
+typedef struct {
+    const NtFontGlyphEntry *entry; /* NULL on tofu fallback */
+    const uint8_t *blob;
+} nt_font_glyph_lookup_t;
+
+/* Find glyph across retained payloads. ASCII codepoints take the
  * precomputed ascii_glyph_idx table (one array lookup); non-ASCII falls
  * through to the per-payload bsearch loop. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool find_glyph_in_payloads(nt_font_slot_t *slot, uint32_t codepoint, uint8_t *out_payload_index, const NtFontGlyphEntry **out_glyph_entry) {
+static nt_font_glyph_lookup_t lookup_glyph_entry_in_slot(const nt_font_slot_t *slot, uint32_t codepoint) {
+    nt_font_glyph_lookup_t out = {0};
     if (codepoint < 128U) {
         const uint16_t gi = slot->ascii_glyph_idx[codepoint];
         if (gi != NT_FONT_ASCII_IDX_NONE) {
@@ -156,23 +162,22 @@ static bool find_glyph_in_payloads(nt_font_slot_t *slot, uint32_t codepoint, uin
             /* gi is bounded when fill builds the ASCII index. */
             NT_ASSERT(gi < hdr->glyph_count);
             const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader));
-            *out_payload_index = ri;
-            *out_glyph_entry = glyphs + gi;
-            return true;
+            out.entry = glyphs + gi;
+            out.blob = blob;
         }
-        return false;
+        return out;
     }
 
     for (uint8_t i = 0; i < slot->payload_count; i++) {
         const uint8_t *blob = slot->payloads[i];
         const NtFontGlyphEntry *entry = find_glyph_in_pack(blob, codepoint);
         if (entry) {
-            *out_payload_index = i;
-            *out_glyph_entry = entry;
-            return true;
+            out.entry = entry;
+            out.blob = blob;
+            return out;
         }
     }
-    return false;
+    return out;
 }
 
 /* Find glyph index (position in glyph table) for a codepoint in a blob */
@@ -238,7 +243,7 @@ static void clear_glyph_cache(nt_font_slot_t *slot) {
 
 /* ---- Tofu ---- */
 
-/* NULL until nt_font_step has generated tofu (needs metrics and a ready texture). */
+/* NULL until fill or texture recovery generates tofu from metrics and a ready texture. */
 static const nt_glyph_cache_entry_t *tofu_entry(const nt_font_slot_t *slot) { return slot->cache[0].entry.is_tofu ? &slot->cache[0].entry : NULL; }
 
 /* ---- Decode contours and upload glyph to GPU ---- */
@@ -1545,17 +1550,15 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph_offset(nt_font_slot_t *slot, 
     // #endregion
 
     // #region Cache miss -- find glyph in payloads
-    uint8_t payload_idx = 0;
-    const NtFontGlyphEntry *glyph_entry = NULL;
-    bool found = find_glyph_in_payloads(slot, codepoint, &payload_idx, &glyph_entry);
-
-    if (!found) {
+    const nt_font_glyph_lookup_t lookup = lookup_glyph_entry_in_slot(slot, codepoint);
+    const NtFontGlyphEntry *glyph_entry = lookup.entry;
+    if (glyph_entry == NULL) {
         return tofu_entry(slot);
     }
     // #endregion
 
     // #region Decode contour data
-    const uint8_t *blob = slot->payloads[payload_idx];
+    const uint8_t *blob = lookup.blob;
     NT_ASSERT(blob);
 
     uint16_t cache_idx = take_slot(slot);
@@ -1690,11 +1693,9 @@ nt_glyph_metrics_t nt_font_lookup_metrics(nt_font_t font, uint32_t codepoint) {
     nt_font_slot_t *slot = get_slot(font);
 
     /* Search glyph entry across all retained payloads */
-    uint8_t payload_idx = 0;
-    const NtFontGlyphEntry *entry = NULL;
-    bool found = find_glyph_in_payloads(slot, codepoint, &payload_idx, &entry);
+    const NtFontGlyphEntry *entry = lookup_glyph_entry_in_slot(slot, codepoint).entry;
 
-    if (found) {
+    if (entry != NULL) {
         return (nt_glyph_metrics_t){
             .advance = entry->advance,
             .bbox_x0 = entry->bbox_x0,
@@ -1741,43 +1742,6 @@ static inline uint32_t measure_size_bits(float size) {
  * (we just looked up its metrics) is reused for the kern bsearch — saving
  * one of three bsearches per character pair.
  */
-
-typedef struct {
-    const NtFontGlyphEntry *entry; /* NULL on tofu fallback */
-    const uint8_t *blob;
-} nt_font_glyph_lookup_t;
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static nt_font_glyph_lookup_t lookup_glyph_entry_in_slot(const nt_font_slot_t *slot, uint32_t codepoint) {
-    nt_font_glyph_lookup_t out = {0};
-
-    /* ASCII fast-path: O(1) array lookup instead of per-payload bsearch. */
-    if (codepoint < 128U) {
-        const uint16_t gi = slot->ascii_glyph_idx[codepoint];
-        if (gi != NT_FONT_ASCII_IDX_NONE) {
-            const uint8_t ri = slot->ascii_glyph_payload[codepoint];
-            const uint8_t *blob = slot->payloads[ri];
-            const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)blob;
-            NT_ASSERT(gi < hdr->glyph_count); /* see find_glyph_in_payloads rationale */
-            const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader));
-            out.entry = glyphs + gi;
-            out.blob = blob;
-            return out;
-        }
-        return out;
-    }
-
-    for (uint8_t i = 0; i < slot->payload_count; i++) {
-        const uint8_t *blob = slot->payloads[i];
-        const NtFontGlyphEntry *entry = find_glyph_in_pack(blob, codepoint);
-        if (entry) {
-            out.entry = entry;
-            out.blob = blob;
-            return out;
-        }
-    }
-    return out;
-}
 
 /* Kern lookup that REUSES the already-found left entry/blob from the
  * previous iteration. Skips the leftmost bsearch — 1 of 3 inside the
