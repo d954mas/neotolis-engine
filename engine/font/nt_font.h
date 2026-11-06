@@ -117,10 +117,9 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc);
 void nt_font_destroy(nt_font_t font);
 bool nt_font_valid(nt_font_t font);
 
-/* Sources survive context loss; adding the same source twice asserts.
- * nt_font_step recreates unavailable curve/band textures once the context is usable,
- * independently of font asset
- * reactivation. */
+/* resource must be NT_ASSET_FONT; adding another type or the same source twice asserts.
+ * Sources survive context loss. nt_font_step recreates curve/band textures once the
+ * context is usable, independently of font asset reactivation. */
 void nt_font_add(nt_font_t font, nt_resource_t resource);
 
 nt_font_metrics_t nt_font_get_metrics(nt_font_t font);

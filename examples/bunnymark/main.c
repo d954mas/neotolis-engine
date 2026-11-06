@@ -275,7 +275,6 @@ static void frame(void) {
     if (g_nt_gfx.context_restored) {
         /* Before this iteration's steps: they re-resolve what is invalidated here. */
         nt_resource_invalidate(NT_ASSET_TEXTURE);
-        nt_resource_invalidate(NT_ASSET_FONT);
         /* Materials keep their handles and draw again once their programs relink. */
         nt_program_ref_drop(&s_sprite_program);
         nt_program_ref_drop(&s_text_program);

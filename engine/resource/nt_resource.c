@@ -41,6 +41,7 @@
 static struct {
     NtPackMeta packs[NT_RESOURCE_MAX_PACKS];
     NtAssetMeta assets[NT_RESOURCE_MAX_ASSETS];
+    uint8_t *blob_data[NT_RESOURCE_MAX_ASSETS];            /* owned by canonical BLOB entries */
     NtResourceSlot slots[NT_RESOURCE_MAX_SLOTS + 1];       /* index 0 reserved */
     NtResolveTemp resolve_temp[NT_RESOURCE_MAX_SLOTS + 1]; /* valid only during resource_resolve_pass */
     NtResourceTypeEntry types[NT_RESOURCE_MAX_ASSET_TYPES];
@@ -181,6 +182,8 @@ static void asset_free(uint16_t idx) {
             slot->user_data_asset_idx = UINT16_MAX;
         }
     }
+    free(s_resource.blob_data[idx]);
+    s_resource.blob_data[idx] = NULL;
     meta->resource_id = 0;
     NT_ASSERT(s_resource.free_asset_count < NT_RESOURCE_MAX_ASSETS);
     s_resource.free_assets[s_resource.free_asset_count++] = idx;
@@ -210,11 +213,6 @@ static uint32_t asset_effective_runtime_handle(uint32_t asset_index, const NtAss
 }
 
 static bool asset_is_publishable(const NtResourceSlot *slot, const NtAssetMeta *meta, uint16_t asset_index, uint8_t behavior_flags) {
-    /* PIN_BLOB is a hard precondition, independent of AUX_BACKED: a zero-copy provider needs a real
-     * resident blob, so a dual-flagged asset on a blobless/virtual pack is never publishable. */
-    if ((behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0 && s_resource.packs[meta->pack_index].blob == NULL) {
-        return false;
-    }
     if ((behavior_flags & NT_RESOURCE_BEHAVIOR_AUX_BACKED) != 0) {
         return slot_user_data_synced_for(slot, asset_index) || asset_blob_resident(meta);
     }
@@ -252,11 +250,6 @@ static void schedule_pack_redownload_if_needed(NtPackMeta *pack) {
 static void resource_resolve_pass(void) {
     NtResolveTemp *resolve_temp = s_resource.resolve_temp;
     memset(resolve_temp, 0, (s_resource.slot_count + 1U) * sizeof(*resolve_temp));
-
-    /* Publication rebuilds pins from its winners, so discard the previous counts first. */
-    for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS; pi++) {
-        s_resource.packs[pi].blob_pins = 0;
-    }
 
     // #region prepare resolve candidates
     for (uint32_t si = 1; si <= s_resource.slot_count; si++) {
@@ -367,20 +360,10 @@ static void resource_resolve_pass(void) {
         const bool next_changed = next_has_real_winner && (next_asset_idx != slot->resolve_asset_idx || next_handle != slot->runtime_handle);
         const bool needs_aux_sync = next_has_real_winner && aux_backed && !slot_user_data_synced_for(slot, next_asset_idx);
 
-        // #region PIN_BLOB pin count — rebuilt from published winners (reset at top of resolve pass)
-        if ((behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0 && next_has_real_winner) {
-            const uint16_t win_pack = s_resource.assets[next_asset_idx].pack_index;
-            if (win_pack < NT_RESOURCE_MAX_PACKS) {
-                s_resource.packs[win_pack].blob_pins++;
-            }
-        }
-        // #endregion
-
         bool target_missing_aux = false;
-        const bool pin_blob = (behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0;
-        if ((aux_backed || pin_blob) && tmp->target_asset_idx < s_resource.asset_hwm) {
+        if (aux_backed && tmp->target_asset_idx < s_resource.asset_hwm) {
             const NtAssetMeta *target = &s_resource.assets[tmp->target_asset_idx];
-            target_missing_aux = aux_backed ? (!slot_user_data_synced_for(slot, tmp->target_asset_idx) && !asset_blob_resident(target)) : !asset_blob_resident(target);
+            target_missing_aux = !slot_user_data_synced_for(slot, tmp->target_asset_idx) && !asset_blob_resident(target);
             if (target_missing_aux) {
                 schedule_pack_redownload_if_needed(&s_resource.packs[target->pack_index]);
             }
@@ -402,9 +385,7 @@ static void resource_resolve_pass(void) {
         }
 
         if (!next_has_real_winner && slot->user_data != NULL) {
-            if (entry->on_cleanup != NULL) {
-                entry->on_cleanup(slot->user_data);
-            }
+            entry->on_cleanup(slot->user_data);
             slot->user_data = NULL;
             slot->user_data_asset_idx = UINT16_MAX;
         }
@@ -451,10 +432,10 @@ static void resource_resolve_pass(void) {
 
 /* ---- Asset header check ---- */
 
-/* Every activated payload starts with {u32 magic; u16 version} of its type's format. BLOB is
- * published at parse and never activated. */
+/* Every payload starts with its type's {u32 magic; u16 version}; BLOB is checked at parse. */
 _Static_assert(offsetof(NtMeshAssetHeader, version) == 4 && offsetof(NtTextureAssetHeader, version) == 4 && offsetof(NtShaderCodeHeader, version) == 4 && offsetof(NtFontAssetHeader, version) == 4 &&
-                   offsetof(NtAtlasHeader, version) == 4 && offsetof(NtSklHeader, version) == 4 && offsetof(NtSknHeader, version) == 4 && offsetof(NtAnmHeader, version) == 4,
+                   offsetof(NtAtlasHeader, version) == 4 && offsetof(NtSklHeader, version) == 4 && offsetof(NtSknHeader, version) == 4 && offsetof(NtAnmHeader, version) == 4 &&
+                   offsetof(NtBlobAssetHeader, version) == 4,
                "asset headers share the {u32 magic; u16 version} prefix");
 static const struct {
     uint32_t magic;
@@ -464,6 +445,7 @@ static const struct {
     [NT_ASSET_MESH] = {NT_MESH_MAGIC, NT_MESH_VERSION, sizeof(NtMeshAssetHeader)},
     [NT_ASSET_TEXTURE] = {NT_TEXTURE_MAGIC, NT_TEXTURE_VERSION, sizeof(NtTextureAssetHeader)},
     [NT_ASSET_SHADER_CODE] = {NT_SHADER_CODE_MAGIC, NT_SHADER_CODE_VERSION, sizeof(NtShaderCodeHeader)},
+    [NT_ASSET_BLOB] = {NT_BLOB_MAGIC, NT_BLOB_VERSION, sizeof(NtBlobAssetHeader)},
     [NT_ASSET_FONT] = {NT_FONT_MAGIC, NT_FONT_VERSION, sizeof(NtFontAssetHeader)},
     [NT_ASSET_ATLAS] = {NT_ATLAS_MAGIC, NT_ATLAS_VERSION, sizeof(NtAtlasHeader)},
     [NT_ASSET_SKELETON] = {NT_SKL_MAGIC, NT_SKELETAL_FORMAT_VERSION, sizeof(NtSklHeader)},
@@ -561,10 +543,7 @@ void nt_resource_shutdown(void) {
     for (uint32_t si = 1; si <= s_resource.slot_count; si++) {
         NtResourceSlot *slot = &s_resource.slots[si];
         if (slot->user_data != NULL) {
-            uint8_t atype = slot->asset_type;
-            if (atype < NT_RESOURCE_MAX_ASSET_TYPES && s_resource.types[atype].desc.on_cleanup) {
-                s_resource.types[atype].desc.on_cleanup(slot->user_data);
-            }
+            s_resource.types[slot->asset_type].desc.on_cleanup(slot->user_data);
             slot->user_data = NULL;
         }
     }
@@ -783,19 +762,6 @@ void nt_resource_step(void) {
             if (pack->blob_ttl_ms == 0) {
                 continue;
             }
-            // #region blob-pin evict gate — a pinned blob is held as KEEP + timer-frozen
-            if (pack->blob_pins > 0) {
-                /* Zero-copy reads do not update last-access. Refresh it while pinned so
-                 * dropping the last pin starts a fresh TTL grace period. */
-                pack->blob_last_access_ms = now_ms;
-                if (!pack->blob_evict_skip_logged) {
-                    NT_LOG_WARN("blob pack %u pinned (pins=%u) — NT_BLOB_AUTO held as KEEP", pi, pack->blob_pins);
-                    pack->blob_evict_skip_logged = 1; /* edge-trigger: never log per-frame */
-                }
-                continue;
-            }
-            pack->blob_evict_skip_logged = 0; /* no longer pinned — re-arm the one-shot */
-            // #endregion
             if (now_ms - pack->blob_last_access_ms >= pack->blob_ttl_ms) {
                 if (pack->activate_cursor < s_resource.asset_hwm) {
                     continue;
@@ -888,14 +854,7 @@ void nt_resource_unmount(nt_hash32_t pack_id) {
 
     NtPackMeta *pack = &s_resource.packs[pack_idx];
 
-    /* Developer owns unmount — proceed even while pinned, warn ONCE. Teardown's memset below clears
-     * blob_pins; the next resolve rebuilds it from the current winners, and this now-absent pack is
-     * simply not counted (no stale pin, no double-free); consumers render tofu next resolve. */
-    if (pack->blob_pins > 0) {
-        NT_LOG_ERROR("unmount pack 0x%08x while blob pinned (pins=%u) — consumers will render tofu", pack_id.value, pack->blob_pins);
-    }
-
-    /* Deactivate owned objects before severing their providers. */
+    /* Deactivate owned objects before releasing pack data. */
     for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
         if (s_resource.assets[i].pack_index == (uint16_t)pack_idx && s_resource.assets[i].resource_id != 0) {
             /* Aliases borrow the canonical owner's object. */
@@ -918,28 +877,6 @@ void nt_resource_unmount(nt_hash32_t pack_id) {
             nt_fs_free((nt_fs_request_t){.id = pack->io_request_id});
         }
 #endif
-    }
-
-    /* Sever every zero-copy provider viewing this pack's blob BEFORE the free, else a font read before
-     * the next resolve pass dereferences freed memory. Drop only user_data; the resolve pass handles
-     * winner-loss. Copy-out providers without PIN_BLOB survive the free and stay intact here. */
-    for (uint32_t si = 1; si <= s_resource.slot_count; si++) {
-        NtResourceSlot *slot = &s_resource.slots[si];
-        if (slot->user_data == NULL || slot->resolve_asset_idx >= s_resource.asset_hwm) {
-            continue;
-        }
-        if (s_resource.assets[slot->resolve_asset_idx].pack_index != (uint16_t)pack_idx) {
-            continue;
-        }
-        uint8_t sever_atype = slot->asset_type;
-        if (sever_atype >= NT_RESOURCE_MAX_ASSET_TYPES || (s_resource.types[sever_atype].desc.behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) == 0) {
-            continue;
-        }
-        if (s_resource.types[sever_atype].desc.on_cleanup != NULL) {
-            s_resource.types[sever_atype].desc.on_cleanup(slot->user_data);
-        }
-        slot->user_data = NULL;
-        slot->user_data_asset_idx = UINT16_MAX;
     }
 
     for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
@@ -1103,6 +1040,15 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
             .meta_offset = (entry->meta_offset != 0 && entry->meta_offset >= meta_section_start) ? entry->meta_offset - meta_section_start : NT_NO_METADATA,
             .state = (entry->asset_type == NT_ASSET_BLOB && entry->owner_entry == i) ? NT_ASSET_STATE_READY : NT_ASSET_STATE_REGISTERED,
         };
+        if (entry->asset_type == NT_ASSET_BLOB && entry->owner_entry == i) {
+            asset_header_check(meta, blob + entry->offset);
+            if (entry->size > sizeof(NtBlobAssetHeader)) {
+                uint32_t payload_size = entry->size - (uint32_t)sizeof(NtBlobAssetHeader);
+                s_resource.blob_data[idx] = malloc(payload_size);
+                NT_ASSERT(s_resource.blob_data[idx]);
+                memcpy(s_resource.blob_data[idx], blob + entry->offset + sizeof(NtBlobAssetHeader), payload_size);
+            }
+        }
     }
 
     /* Parse metadata section */
@@ -1253,20 +1199,13 @@ const uint8_t *nt_resource_get_blob(nt_resource_t handle, uint32_t *out_size) {
     if (meta->resource_id == 0 || s_resource.assets[meta->owner_asset].state != NT_ASSET_STATE_READY) {
         return NULL;
     }
-    if (meta->pack_index >= NT_RESOURCE_MAX_PACKS) {
-        return NULL;
-    }
-    const NtPackMeta *pack = &s_resource.packs[meta->pack_index];
-    if (!pack->mounted || pack->blob == NULL) {
-        return NULL;
-    }
     if (meta->size <= sizeof(NtBlobAssetHeader)) {
         return NULL;
     }
     if (out_size) {
         *out_size = meta->size - (uint32_t)sizeof(NtBlobAssetHeader);
     }
-    return pack->blob + meta->offset + sizeof(NtBlobAssetHeader);
+    return s_resource.blob_data[meta->owner_asset];
 }
 
 /* ---- Metadata query ---- */
@@ -1354,7 +1293,6 @@ nt_result_t nt_resource_register(nt_hash32_t pack_id, nt_hash64_t resource_id, u
 
     NT_ASSERT(resource_id.value != 0);
     NT_ASSERT(asset_type < NT_RESOURCE_MAX_ASSET_TYPES);
-    NT_ASSERT((s_resource.types[asset_type].desc.behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) == 0);
 
     int16_t pack_idx = find_pack(pack_id.value);
     if (pack_idx < 0) {
@@ -1531,19 +1469,8 @@ bool nt_resource_asset_info(uint16_t i, nt_resource_asset_info_t *out) {
             continue;
         }
         if (seen == i) {
-            /* Report the pack aggregate only for the published winner of a PIN_BLOB slot — that asset pins the blob; others report 0. */
-            uint32_t blob_pins = 0;
-            uint32_t si = slot_map_find(meta->resource_id);
-            if (si != 0) {
-                const NtResourceSlot *slot = &s_resource.slots[si];
-                if (slot->asset_type == meta->asset_type && slot->asset_type < NT_RESOURCE_MAX_ASSET_TYPES && slot->resolve_asset_idx == a &&
-                    (s_resource.types[slot->asset_type].desc.behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0) {
-                    blob_pins = s_resource.packs[meta->pack_index].blob_pins;
-                }
-            }
             *out = (nt_resource_asset_info_t){
                 .resource_id = meta->resource_id,
-                .blob_pins = blob_pins,
                 .pack_index = meta->pack_index,
                 .type = meta->asset_type,
                 .state = s_resource.assets[meta->owner_asset].state,
@@ -1599,9 +1526,8 @@ void nt_resource_register_type(uint8_t asset_type, const nt_resource_type_desc_t
     NT_ASSERT(s_resource.next_mount_seq == 1);
     NT_ASSERT(asset_type < NT_RESOURCE_MAX_ASSET_TYPES);
     NT_ASSERT(desc != NULL);
-    NT_ASSERT((desc->behavior_flags & ~(NT_RESOURCE_BEHAVIOR_AUX_BACKED | NT_RESOURCE_BEHAVIOR_PIN_BLOB)) == 0);
-    /* Only a PIN_BLOB view borrows its user_data; anything else on_resolve builds needs a cleanup. */
-    NT_ASSERT(desc->on_resolve == NULL || desc->on_cleanup != NULL || (desc->behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0);
+    NT_ASSERT((desc->behavior_flags & ~NT_RESOURCE_BEHAVIOR_AUX_BACKED) == 0);
+    NT_ASSERT(desc->on_resolve == NULL || desc->on_cleanup != NULL);
     NT_ASSERT((desc->behavior_flags & NT_RESOURCE_BEHAVIOR_AUX_BACKED) == 0 || (desc->on_resolve != NULL && desc->on_cleanup != NULL));
     NtResourceTypeEntry *entry = &s_resource.types[asset_type];
     NT_ASSERT(!entry->registered);
@@ -1774,32 +1700,11 @@ void nt_resource_test_set_asset_state(nt_hash64_t resource_id, uint16_t pack_ind
     }
 }
 
-uint32_t nt_resource_test_pack_blob_pins(uint16_t pack_index) {
-    if (pack_index >= NT_RESOURCE_MAX_PACKS) {
-        return 0;
-    }
-    return s_resource.packs[pack_index].blob_pins;
-}
-
 uint8_t nt_resource_test_pack_blob_resident(uint16_t pack_index) {
     if (pack_index >= NT_RESOURCE_MAX_PACKS) {
         return 0;
     }
     return s_resource.packs[pack_index].blob != NULL ? 1 : 0;
-}
-
-uint32_t nt_resource_test_pack_blob_last_access(uint16_t pack_index) {
-    if (pack_index >= NT_RESOURCE_MAX_PACKS) {
-        return 0;
-    }
-    return s_resource.packs[pack_index].blob_last_access_ms;
-}
-
-uint8_t nt_resource_test_pack_evict_skip_logged(uint16_t pack_index) {
-    if (pack_index >= NT_RESOURCE_MAX_PACKS) {
-        return 0;
-    }
-    return s_resource.packs[pack_index].blob_evict_skip_logged;
 }
 
 void nt_resource_test_set_pack_io_type(uint16_t pack_index, uint8_t io_type) {

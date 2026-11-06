@@ -3,7 +3,7 @@
 All loading is potentially async on every platform (the web cannot block).
 Defines the pack and asset state machines, the fetch-bridge loading flow, eager
 rate-limited asset activation, dirty-slot resolve passes, retry with backoff,
-and the `NtPackMeta` fields including blob eviction and pin counts.
+and the `NtPackMeta` fields including blob eviction.
 
 Related: [Resource System](resource.md), [Pack Format](ntpack.md), [Platform Architecture](../runtime/platform.md)
 
@@ -79,7 +79,7 @@ The private `NtPackMeta` layout lives in
 It stores per-pack I/O progress (`bytes_received`, `bytes_total`), request linkage,
 retry state, blob residency, and the activation cursor described below.
 
-`meta_data` is copied out of the pack blob at parse time so metadata queries survive blob eviction. `retry_*`, `io_type`, and `load_path` drive both normal retry/backoff and immediate aux-miss reloads. `blob_last_access_ms` + `blob_ttl_ms` implement `NT_BLOB_AUTO` eviction. `blob_pins` is the per-pack aggregate pin count that gates eviction for zero-copy consumers. Explicit unmount overrides pins and clears their borrowed views before freeing the blob — see [Resource System — blob pinning](resource.md#blob-pinning) for the full lifecycle.
+`meta_data` is copied out of the pack blob at parse time so metadata queries survive blob eviction. `retry_*`, `io_type`, and `load_path` drive both normal retry/backoff and immediate aux-miss reloads. `blob_last_access_ms` + `blob_ttl_ms` implement `NT_BLOB_AUTO` eviction. Activated assets and copied auxiliary snapshots own their data and survive source-byte eviction; see [Resource System — owned asset data](resource.md#owned-asset-data). Caller-owned blobs passed to `nt_resource_parse_pack` remain resident until unmount or shutdown regardless of policy.
 
 ## HTTP requests — nt_http contract
 
@@ -207,7 +207,7 @@ The activation phase of a stable idle registry needs only the bounded pack walk.
 Cursor movement alone does not dirty resolve or change the publication epoch.
 Callbacks follow the [resource callback contract](resource.md#resource-callback-contract).
 
-An expired, unpinned AUTO blob remains resident while its activation cursor is
+An expired AUTO blob remains resident while its activation cursor is
 below the asset high-water mark. A budget stop leaves the cursor before the
 pending owner, so eviction cannot remove bytes needed on a later step. Types
 cannot gain activators after mounting, so a completed cursor cannot conceal
@@ -239,4 +239,9 @@ Aux-miss reloads (target winner requires aux data but its blob was evicted) reus
 
 ## Memory note
 
-Peak memory during loading = 2x pack size (JS fetch buffer + WASM heap copy). For packs in the low megabytes range this is acceptable.
+For a source pack of size P, the HTTP handoff can temporarily hold about 2P
+bytes in transport buffers: JS response chunks plus their WASM copy. The bridge
+drops its JS record after copying; garbage collection timing is browser-owned.
+This is transport accounting, not a bound on the complete loading peak.
+
+See [resource memory accounting](resource.md#optional-measurements-and-resident-bytes).

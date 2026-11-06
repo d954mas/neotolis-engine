@@ -61,8 +61,7 @@ typedef struct {
 typedef uint32_t (*nt_activate_fn)(const uint8_t *data, uint32_t size);
 typedef void (*nt_deactivate_fn)(uint32_t runtime_handle);
 /* Borrowed pack bytes; NULL for virtual winners or an evicted blob. Never free or mutate.
- * Copy to retain unless PIN_BLOB is set; then keep the view only until this slot's next
- * on_resolve/on_cleanup. See docs/spec/assets/resource.md for the pin lifecycle. */
+ * Non-NULL bytes are valid only during the callback; copy anything retained. */
 typedef void (*nt_resolve_fn)(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data);
 typedef void (*nt_cleanup_fn)(void *user_data);
 typedef void (*nt_post_resolve_fn)(const uint8_t *data, uint32_t size, nt_resource_t handle, uint32_t runtime_handle, void *user_data);
@@ -80,10 +79,6 @@ typedef void (*nt_post_resolve_fn)(const uint8_t *data, uint32_t size, nt_resour
 typedef enum {
     NT_RESOURCE_BEHAVIOR_NONE = 0,
     NT_RESOURCE_BEHAVIOR_AUX_BACKED = 1 << 0,
-    /* Zero-copy consumers (fonts) read the live pack blob through a raw pointer, so the
-     * published winner must PIN its pack blob. The resolve pass owns the pin (per-pack
-     * aggregate NtPackMeta.blob_pins), rebuilt from the published winners each resolve pass. */
-    NT_RESOURCE_BEHAVIOR_PIN_BLOB = 1 << 1,
 } nt_resource_behavior_t;
 
 typedef struct {
@@ -96,7 +91,7 @@ typedef struct {
 } nt_resource_type_desc_t;
 
 /* Copies non-NULL desc; pointer borrowed only for this call. Register once per type after resource init, before the first successful file or virtual mount.
- * Duplicate or late registration asserts. on_resolve requires on_cleanup unless PIN_BLOB (a borrowed view);
+ * Duplicate or late registration asserts. on_resolve requires on_cleanup;
  * AUX_BACKED requires both.
  * Simple virtual providers and BLOB need no registration. Full contract: docs/spec/assets/resource.md. */
 void nt_resource_register_type(uint8_t asset_type, const nt_resource_type_desc_t *desc);
@@ -164,17 +159,17 @@ uint8_t nt_resource_get_state(nt_resource_t handle);
  * boundaries (e.g. nt_atlas_*() asserting it received an atlas resource). */
 uint8_t nt_resource_get_asset_type(nt_resource_t handle);
 /* Advances only during resolve when a published winner, state or auxiliary payload changes.
- * Release invalidates source indices and unmount severs zero-copy views immediately;
+ * Release invalidates source indices immediately;
  * publication and epoch changes follow in nt_resource_step(). */
 uint32_t nt_resource_publication_epoch(void);
 /* Changes each time the slot publishes a winner (pack swap, remount, aux resync) and never repeats
  * within one init; 0 until the first publication. Identifies the winner's bytes where runtime handles repeat. */
 uint32_t nt_resource_winner_gen(nt_resource_t handle);
 
-/* Get raw blob data pointer (after NtBlobAssetHeader). Returns NULL if not ready,
- * not a blob, or the current blob is absent; out_size may be NULL. Non-NULL data
- * is the current published winner's pack-blob view, valid until this slot publishes
- * another winner, the blob is evicted/unmounted, or shutdown. */
+/* Get the owned BLOB payload (without NtBlobAssetHeader). Returns NULL if not ready,
+ * not a blob, or empty; out_size may be NULL. Aliases share their canonical payload.
+ * The view survives pack-byte eviction; valid until this slot publishes another
+ * winner, its pack is unmounted, or shutdown. */
 const uint8_t *nt_resource_get_blob(nt_resource_t handle, uint32_t *out_size);
 
 /* Get metadata for a resource by kind hash. Returns pointer to metadata bytes
@@ -186,7 +181,7 @@ const void *nt_resource_get_meta(nt_resource_t handle, nt_hash64_t kind, uint32_
 /* ---- Virtual packs ---- */
 
 /* Virtual packs store caller-owned runtime handles; unregister/unmount never deactivate their objects. Cleanup callbacks may still release per-slot user_data.
- * Register/unregister assert on zero resource_id; registering a PIN_BLOB provider asserts before mutation.
+ * Register/unregister assert on zero resource_id.
  * Unregister is virtual-only; file assets leave through whole-pack unmount. */
 nt_result_t nt_resource_create_pack(nt_hash32_t pack_id, int16_t priority);
 nt_result_t nt_resource_register(nt_hash32_t pack_id, nt_hash64_t resource_id, uint8_t asset_type, uint32_t runtime_handle);
@@ -258,7 +253,6 @@ typedef struct {
 
 typedef struct {
     uint64_t resource_id; /* nt_hash64 value */
-    uint32_t blob_pins;   /* PIN_BLOB pins held via this asset's pack (0 unless it is the published winner of a pinning slot) */
     uint16_t pack_index;  /* index into the pack store (packs[]) */
     uint8_t type;         /* nt_asset_type_t */
     uint8_t state;        /* nt_asset_state_t value */
@@ -283,10 +277,7 @@ uint64_t nt_resource_source_of(uint8_t asset_type, uint32_t runtime_handle);
 // #region test_access
 #ifdef NT_TEST_ACCESS
 void nt_resource_test_set_asset_state(nt_hash64_t resource_id, uint16_t pack_index, uint8_t state, uint32_t runtime_handle);
-uint32_t nt_resource_test_pack_blob_pins(uint16_t pack_index);
 uint8_t nt_resource_test_pack_blob_resident(uint16_t pack_index);
-uint32_t nt_resource_test_pack_blob_last_access(uint16_t pack_index);
-uint8_t nt_resource_test_pack_evict_skip_logged(uint16_t pack_index);
 /* Force a pack's io_type so unmount frees its blob (simulates an I/O-owned pack for a
  * parse_pack'd blob). Value is nt_io_type_t; nonzero hands blob ownership to the resource system. */
 void nt_resource_test_set_pack_io_type(uint16_t pack_index, uint8_t io_type);

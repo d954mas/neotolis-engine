@@ -2638,7 +2638,6 @@ static void frame(void) {
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_TEXTURE);
-        nt_resource_invalidate(NT_ASSET_FONT);
         nt_resource_invalidate(NT_ASSET_MESH);
         restore_mesh_scene();
         nt_shape_renderer_restore_gpu();

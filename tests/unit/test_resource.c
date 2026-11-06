@@ -44,9 +44,8 @@ static void test_assert_trap(const char *expr, const char *file, int line) {
         nt_assert_handler = NULL;                                                                                                                                                                      \
     } while (0)
 
-/* AUTO blob TTL for the eviction tests. A step longer than the TTL evicts a
- * blob in the step that reloaded it, before resolve pins it, so the TTL must
- * dwarf one step on a slow runner; the sleep then clears it. */
+/* AUTO blob TTL must exceed one slow-runner step so a reloaded blob survives
+ * until resolve; the sleep then clears it. */
 #define TEST_BLOB_TTL_MS 50U
 #define TEST_PAST_BLOB_TTL_S 0.06
 
@@ -1085,14 +1084,15 @@ static uint8_t *build_alias_pack_with_rid(uint64_t rid, uint8_t atype, uint32_t 
     return blob;
 }
 
-/* A payload whose header does not match its type is a stale pack: activation asserts before the
- * type's activator runs. case 0 flips the magic, 1 the version, 2 cuts the payload below its header. */
-static void expect_asset_header_assert(uint32_t which) {
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate});
+/* A stale payload asserts before use. Cases corrupt magic, version, or header length. */
+static void expect_asset_header_assert(uint8_t asset_type, uint32_t which) {
+    if (asset_type != NT_ASSET_BLOB) {
+        nt_resource_register_type(asset_type, &(nt_resource_type_desc_t){.activate = fake_activate});
+    }
     const nt_hash64_t rid = nt_hash64_str("header_check");
-    (void)nt_resource_request(rid, NT_ASSET_MESH);
+    (void)nt_resource_request(rid, asset_type);
     uint32_t size = 0;
-    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size);
+    uint8_t *blob = build_pack_with_rid(rid.value, asset_type, &size);
     TEST_ASSERT_NOT_NULL(blob);
     NtAssetEntry *entry = (NtAssetEntry *)(blob + sizeof(NtPackHeader));
     if (which == 0) {
@@ -1100,17 +1100,22 @@ static void expect_asset_header_assert(uint32_t which) {
     } else if (which == 1) {
         blob[entry->offset + 4U] ^= 1U;
     } else {
-        entry->size = (uint32_t)sizeof(NtMeshAssetHeader) - 1U;
+        entry->size = (uint32_t)(asset_type == NT_ASSET_BLOB ? sizeof(NtBlobAssetHeader) : sizeof(NtMeshAssetHeader)) - 1U;
     }
     const NtPackHeader *ph = (const NtPackHeader *)blob;
     ((NtPackHeader *)blob)->checksum = nt_crc32(blob + ph->header_size, size - ph->header_size);
     const nt_hash32_t pid = nt_hash32_str("header_pack");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
     s_activate_call_count = 0;
-    EXPECT_ASSERT(nt_resource_step());
+    if (asset_type == NT_ASSET_BLOB) {
+        EXPECT_ASSERT(nt_resource_parse_pack(pid, blob, size));
+    } else {
+        TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
+        EXPECT_ASSERT(nt_resource_step());
+    }
     TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, which == 2 ? "shorter than its header" : "magic or version mismatch"));
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, s_activate_call_count, "the activator never sees a mismatched header");
+    nt_resource_unmount(pid);
     free(blob);
 }
 
@@ -1154,9 +1159,10 @@ void test_winner_gen_changes_with_each_published_winner(void) {
     free(blob);
 }
 
-void test_asset_magic_mismatch_asserts(void) { expect_asset_header_assert(0); }
-void test_asset_version_mismatch_asserts(void) { expect_asset_header_assert(1); }
-void test_asset_shorter_than_header_asserts(void) { expect_asset_header_assert(2); }
+void test_asset_magic_mismatch_asserts(void) { expect_asset_header_assert(NT_ASSET_MESH, 0); }
+void test_asset_version_mismatch_asserts(void) { expect_asset_header_assert(NT_ASSET_MESH, 1); }
+void test_asset_shorter_than_header_asserts(void) { expect_asset_header_assert(NT_ASSET_MESH, 2); }
+void test_blob_magic_mismatch_asserts(void) { expect_asset_header_assert(NT_ASSET_BLOB, 0); }
 
 void test_equal_range_self_owners_keep_independent_runtime_objects(void) {
     nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate_seq, .deactivate = fake_deactivate});
@@ -1320,6 +1326,8 @@ static void mock_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime
     }
     s_last_resolve_user_data = *user_data;
 }
+
+static void other_on_cleanup(void *user_data) { (void)user_data; }
 
 static void mock_on_cleanup(void *user_data) {
     s_cleanup_call_count++;
@@ -1687,447 +1695,6 @@ void test_blob_policy_keep(void) {
     TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pid));
 
     (void)remove("build/test_blob_keep.ntpack");
-}
-
-/* ---- PIN_BLOB tests — blob_pins rebuilt from winners each pass, goes to 0 when unpinned ---- */
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_blob_pin_balance_winner_change(void) {
-    nt_hash32_t pid_a = nt_hash32_str("pin_pack_a");
-    nt_hash32_t pid_b = nt_hash32_str("pin_pack_b");
-    nt_hash64_t rid = nt_hash64_str("pin_shared_res");
-
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = test_activate, .behavior_flags = NT_RESOURCE_BEHAVIOR_PIN_BLOB});
-
-    /* A high priority (pack_index 0), B low (pack_index 1) -- both provide rid */
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_a, 10));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_b, 1));
-
-    uint32_t size_a = 0;
-    uint8_t *blob_a = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size_a);
-    TEST_ASSERT_NOT_NULL(blob_a);
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_a, blob_a, size_a));
-
-    uint32_t size_b = 0;
-    uint8_t *blob_b = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size_b);
-    TEST_ASSERT_NOT_NULL(blob_b);
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_b, blob_b, size_b));
-
-    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
-
-    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 100); /* A */
-    nt_resource_test_set_asset_state(rid, 1, NT_ASSET_STATE_READY, 200); /* B */
-    nt_resource_step();
-
-    /* (a) A wins -> A pinned once, B zero */
-    TEST_ASSERT_EQUAL_UINT32(100, nt_resource_get(h));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(1));
-
-    /* (b) raise B above A -> winner changes pack, pin follows the winner (rebuilt, no leak) */
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_set_priority(pid_b, 20));
-    nt_resource_step();
-    TEST_ASSERT_EQUAL_UINT32(200, nt_resource_get(h));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(1));
-
-    /* (c) unmount winner B -> its pins recompute to 0; A becomes winner and pins once */
-    nt_resource_unmount(pid_b);
-    nt_resource_step();
-    TEST_ASSERT_EQUAL_UINT32(100, nt_resource_get(h));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(1));
-
-    free(blob_a);
-    free(blob_b);
-}
-
-void test_blob_pin_absent_without_flag(void) {
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = test_activate});
-    nt_hash32_t pid = nt_hash32_str("nopin_pack");
-    nt_hash64_t rid = nt_hash64_str("nopin_res");
-
-    /* No PIN_BLOB flag on NT_ASSET_MESH (setUp re-init cleared it) */
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
-
-    uint32_t size = 0;
-    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size);
-    TEST_ASSERT_NOT_NULL(blob);
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
-
-    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
-    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 42);
-    nt_resource_step();
-
-    TEST_ASSERT_EQUAL_UINT32(42, nt_resource_get(h));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0)); /* no flag -> never pinned */
-
-    free(blob);
-}
-
-/* Reused packs[] index for a different blob: the resolve rebuild recomputes blob_pins from the
- * current winner, so the fresh mount counts (==1). */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_blob_pin_survives_reregister(void) {
-    nt_hash32_t pid = nt_hash32_str("pin_reregister_pack");
-    nt_hash64_t rid = nt_hash64_str("pin_reregister_res");
-
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = test_activate, .behavior_flags = NT_RESOURCE_BEHAVIOR_PIN_BLOB});
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
-
-    uint32_t size = 0;
-    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size);
-    TEST_ASSERT_NOT_NULL(blob);
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
-
-    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
-    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 100);
-    nt_resource_step();
-    TEST_ASSERT_EQUAL_UINT32(100, nt_resource_get(h));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0)); /* winner pins the first mount */
-
-    /* Same-step hot-reload: unmount + remount the same pack_id -> packs[] index 0 is reused
-     * for a different blob. No resolve/step between unmount and remount. */
-    nt_resource_unmount(pid);
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
-    uint32_t size2 = 0;
-    uint8_t *blob2 = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size2);
-    TEST_ASSERT_NOT_NULL(blob2);
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob2, size2));
-    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 200);
-    nt_resource_step();
-
-    /* Rebuild counts the fresh winner on the reused index. */
-    TEST_ASSERT_EQUAL_UINT32(200, nt_resource_get(h));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
-
-    free(blob);
-    free(blob2);
-}
-
-/* ---- PIN_BLOB eviction / unmount safety ---- */
-
-/* A referenced NT_BLOB_AUTO blob survives TTL expiry (timer-freeze); ref->0 -> fresh TTL grace, then evicts. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_blob_pin_eviction_skip_and_timer_freeze(void) {
-    nt_hash32_t pid = nt_hash32_str("pin_evict_pack");
-    nt_hash64_t rid = nt_hash64_str("pin_evict_res");
-
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = test_activate, .behavior_flags = NT_RESOURCE_BEHAVIOR_PIN_BLOB});
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
-
-    const char *path = "build/test_pin_evict.ntpack";
-    write_test_pack_file(path, rid.value, NT_ASSET_MESH);
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, path));
-    nt_resource_step();
-
-    /* Establish the pin first (default KEEP) — a real font resolves before eviction pressure arrives. */
-    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
-    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 77);
-    nt_resource_step();
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
-    TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_blob_resident(0));
-
-    /* (1) Apply AUTO pressure; TTL expires while referenced -> NOT evicted, timer refreshed, logged once */
-    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, TEST_BLOB_TTL_MS);
-    uint32_t access_before = nt_resource_test_pack_blob_last_access(0);
-    nt_time_sleep(TEST_PAST_BLOB_TTL_S);
-    nt_resource_step();
-    TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_blob_resident(0));     /* held as KEEP */
-    TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_evict_skip_logged(0)); /* one-shot fired */
-    /* Strictly greater: blob_last_access_ms is monotonic, so >= can never fail (removing the freeze
-     * leaves it equal, still passing). The 5ms sleep guarantees now_ms > access_before, so > passes
-     * only when the freeze actually refreshed the timer and fails if the freeze is deleted. */
-    TEST_ASSERT_TRUE(nt_resource_test_pack_blob_last_access(0) > access_before);
-
-    /* Eviction sees the previous pin count; resolve drops the pin afterward. */
-    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_FAILED, 0);
-    nt_resource_step();
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0));
-
-    /* (3) Fresh full TTL grace after ref->0, then eviction resumes and the one-shot re-arms */
-    nt_time_sleep(TEST_PAST_BLOB_TTL_S);
-    nt_resource_step();
-    TEST_ASSERT_EQUAL_UINT8(0, nt_resource_test_pack_blob_resident(0));     /* evicted now */
-    TEST_ASSERT_EQUAL_UINT8(0, nt_resource_test_pack_evict_skip_logged(0)); /* re-armed */
-
-    (void)h;
-    nt_resource_unmount(pid);
-    (void)remove(path);
-}
-
-/* NT_BLOB_AUTO behaves as KEEP while referenced; the skip log is edge-triggered (once, not per-frame). */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_blob_pin_auto_as_keep_one_shot_log(void) {
-    nt_hash32_t pid = nt_hash32_str("pin_keep_pack");
-    nt_hash64_t rid = nt_hash64_str("pin_keep_res");
-
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = test_activate, .behavior_flags = NT_RESOURCE_BEHAVIOR_PIN_BLOB});
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
-
-    const char *path = "build/test_pin_keep.ntpack";
-    write_test_pack_file(path, rid.value, NT_ASSET_MESH);
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, path));
-    nt_resource_step();
-
-    /* Establish the pin first (default KEEP), then apply AUTO pressure. */
-    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
-    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 55);
-    nt_resource_step();
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
-    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, TEST_BLOB_TTL_MS);
-
-    /* Many steps past TTL: blob stays resident and the flag is set once and never toggles.
-     * The skip log is gated by `if (!blob_evict_skip_logged)`, so a stable flag == single emission. */
-    nt_time_sleep(TEST_PAST_BLOB_TTL_S);
-    for (int i = 0; i < 20; i++) {
-        nt_resource_step();
-        TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_blob_resident(0));
-        TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_evict_skip_logged(0));
-    }
-
-    (void)h;
-    nt_resource_unmount(pid);
-    (void)remove(path);
-}
-
-/* Unmount while referenced -> no crash, aggregate resets to 0 (no double-free), consumer renders tofu. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_blob_pin_unmount_while_referenced(void) {
-    nt_hash32_t pid = nt_hash32_str("pin_unmount_pack");
-    nt_hash64_t rid = nt_hash64_str("pin_unmount_res");
-
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = test_activate, .behavior_flags = NT_RESOURCE_BEHAVIOR_PIN_BLOB});
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
-
-    uint32_t size = 0;
-    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size);
-    TEST_ASSERT_NOT_NULL(blob);
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
-
-    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
-    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 88);
-    nt_resource_step();
-    TEST_ASSERT_EQUAL_UINT32(88, nt_resource_get(h));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0)); /* referenced -> triggers unmount error log */
-
-    /* Unmount overrides the ref: proceeds, one-shot error log, teardown clears blob_pins (single-source) */
-    nt_resource_unmount(pid);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0));
-
-    /* Consumer loses its provider (tofu); the resolve rebuild recomputes blob_pins as 0 for the now-absent winner -> no underflow/double-free */
-    nt_resource_step();
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_get(h));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0));
-
-    free(blob);
-}
-
-/* ---- Zero-copy provider callbacks (mirror the real font activator) ---- */
-
-typedef struct {
-    const uint8_t *data;
-    uint32_t size;
-} test_provider_t;
-
-static void test_provider_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data) {
-    (void)runtime_handle;
-    if (data == NULL) {
-        return;
-    }
-    test_provider_t *p = (test_provider_t *)*user_data;
-    if (p == NULL) {
-        p = (test_provider_t *)calloc(1, sizeof(*p));
-        *user_data = p;
-    }
-    p->data = data; /* view into the live pack blob — dangles if the blob is freed under us */
-    p->size = size;
-}
-
-static void test_provider_on_cleanup(void *user_data) {
-    const test_provider_t *provider = user_data;
-    TEST_ASSERT_EQUAL_UINT8(0, provider->data[provider->size - 1U]);
-    s_cleanup_call_count++;
-    free(user_data);
-}
-
-/* Unmount frees an I/O-owned pinned blob synchronously; the zero-copy provider viewing into it must
- * be severed inline (user_data -> NULL) in the SAME call, before any read can dereference freed memory.
- * Without the sever, user_data stays non-NULL (dangling) until the next resolve pass -> UAF window. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void check_blob_pin_unmount_severs_provider_synchronously(bool aliases) {
-    s_cleanup_call_count = 0;
-    nt_hash32_t pid = nt_hash32_str("pin_sever_pack");
-    nt_hash64_t rid = nt_hash64_str("pin_sever_res");
-
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate_seq,
-                                                                        .deactivate = fake_deactivate,
-                                                                        .on_resolve = test_provider_on_resolve,
-                                                                        .on_cleanup = test_provider_on_cleanup,
-                                                                        .behavior_flags = NT_RESOURCE_BEHAVIOR_PIN_BLOB});
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
-
-    uint32_t size = 0;
-    /* Ownership transfers to the resource system below (set_pack_io_type) -> unmount frees blob, not
-     * this function. The analyzer can't see the transfer, so suppress its leak false-positive here. */
-    uint8_t *blob = aliases ? build_alias_pack_with_rid(rid.value, NT_ASSET_MESH, &size) : build_pack_with_rid(rid.value, NT_ASSET_MESH, &size); // NOLINT(clang-analyzer-unix.Malloc)
-    TEST_ASSERT_NOT_NULL(blob);
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size)); // NOLINT(clang-analyzer-unix.Malloc)
-
-    /* Hand blob ownership to the resource system so unmount frees it (mirrors an I/O-loaded pack). */
-    nt_resource_test_set_pack_io_type(0, NT_IO_FS);
-
-    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
-    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 55);
-    nt_resource_step();
-
-    /* Provider resolved into the live blob and pinned it. */
-    TEST_ASSERT_NOT_NULL(nt_resource_peek_user_data(h));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
-    const test_provider_t *provider = (const test_provider_t *)nt_resource_peek_user_data(h);
-    const NtAssetEntry *entries = (const NtAssetEntry *)(blob + sizeof(NtPackHeader));
-    TEST_ASSERT_EQUAL_PTR(blob + entries[0].offset, provider->data);
-    TEST_ASSERT_EQUAL_UINT32(entries[0].size, provider->size);
-    const nt_resource_type_desc_t without_pin = {.activate = fake_activate_seq, .deactivate = fake_deactivate, .on_resolve = test_provider_on_resolve, .on_cleanup = test_provider_on_cleanup};
-    EXPECT_ASSERT(nt_resource_register_type(NT_ASSET_MESH, &without_pin));
-    TEST_ASSERT_EQUAL_PTR(provider, nt_resource_peek_user_data(h));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
-    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, TEST_BLOB_TTL_MS);
-    nt_time_sleep(TEST_PAST_BLOB_TTL_S);
-    nt_resource_step();
-    TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_blob_resident(0));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
-    TEST_ASSERT_EQUAL_PTR(provider, nt_resource_peek_user_data(h));
-
-    /* Cleanup must read live bytes inside unmount, without an intervening step masking the order. */
-    nt_resource_unmount(pid);
-    TEST_ASSERT_NULL(nt_resource_peek_user_data(h));
-    TEST_ASSERT_EQUAL_UINT32(1, s_cleanup_call_count);
-
-    /* Next resolve reconciles the dropped winner. */
-    nt_resource_step();
-    TEST_ASSERT_NULL(nt_resource_peek_user_data(h));
-    TEST_ASSERT_EQUAL_UINT32(1, s_cleanup_call_count);
-    TEST_ASSERT_FALSE(nt_resource_is_ready(h));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0));
-
-    /* blob is owned + freed by unmount; do not free here. */
-}
-
-void test_blob_pin_unmount_severs_provider_synchronously(void) { check_blob_pin_unmount_severs_provider_synchronously(false); }
-
-void test_blob_alias_pin_survives_eviction_and_severs_on_unmount(void) { check_blob_pin_unmount_severs_provider_synchronously(true); }
-
-/* A PIN_BLOB winner whose NT_BLOB_AUTO blob was evicted before any consumer
- * pinned it must NOT publish READY — the zero-copy provider would view into
- * freed memory. asset_is_publishable gates it (needs a resident blob). */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_blob_pin_unpublishable_when_blob_evicted_before_pin(void) {
-    nt_hash32_t pid = nt_hash32_str("pin_unpub_pack");
-    nt_hash64_t rid = nt_hash64_str("pin_unpub_res");
-
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate, .deactivate = fake_deactivate, .behavior_flags = NT_RESOURCE_BEHAVIOR_PIN_BLOB});
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
-    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, TEST_BLOB_TTL_MS);
-
-    const char *path = "build/test_pin_unpub.ntpack";
-    write_test_pack_file(path, rid.value, NT_ASSET_MESH);
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, path));
-    nt_resource_step();
-
-    /* No consumer yet -> blob_pins stays 0; TTL expiry evicts the blob before
-     * any pin is established. */
-    nt_time_sleep(TEST_PAST_BLOB_TTL_S);
-    nt_resource_step();
-    TEST_ASSERT_EQUAL_UINT8(0, nt_resource_test_pack_blob_resident(0));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0));
-
-    /* Consumer arrives; the asset reports READY but its blob is gone. The
-     * PIN_BLOB provider must NOT publish as a usable winner. */
-    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
-    nt_resource_step();
-
-    TEST_ASSERT_FALSE(nt_resource_is_ready(h)); /* unpublishable without a resident blob */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_get(h));
-
-    nt_resource_step();
-    TEST_ASSERT_TRUE(nt_resource_is_ready(h));
-    TEST_ASSERT_EQUAL_UINT32(0xBEEF, nt_resource_get(h));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
-    nt_resource_unmount(pid);
-    (void)remove(path);
-}
-
-/* Rejected virtual registration must preserve the file provider and its pin. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_blob_pin_virtual_pack_not_publishable(void) {
-    nt_hash32_t pid_file = nt_hash32_str("pin_vp_file");
-    nt_hash32_t pid_virt = nt_hash32_str("pin_vp_virt");
-    nt_hash64_t rid = nt_hash64_str("pin_vp_res");
-
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = test_activate, .behavior_flags = NT_RESOURCE_BEHAVIOR_PIN_BLOB});
-
-    /* File pack (index 0) at low priority — real resident blob, handle 100 */
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_file, 1));
-    uint32_t size = 0;
-    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size);
-    TEST_ASSERT_NOT_NULL(blob);
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_file, blob, size));
-    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 100);
-
-    /* Virtual pack (index 1) at HIGHER priority — no blob, handle 200 */
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid_virt, 10));
-    EXPECT_ASSERT((void)nt_resource_register(pid_virt, rid, NT_ASSET_MESH, 200));
-
-    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
-    nt_resource_step();
-
-    /* File wins despite lower priority (virtual is unpublishable); the pin stays
-     * on the resident file pack, never transfers to the blobless virtual pack. */
-    TEST_ASSERT_TRUE(nt_resource_is_ready(h));
-    TEST_ASSERT_EQUAL_UINT32(100, nt_resource_get(h));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0)); /* file pinned */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(1)); /* virtual never pinned */
-
-    free(blob);
-}
-
-/* AUX_BACKED does not relax the PIN_BLOB virtual-provider restriction. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_blob_pin_and_aux_virtual_pack_not_publishable(void) {
-    reset_resolve_state();
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate_seq,
-                                                                        .deactivate = fake_deactivate,
-                                                                        .on_resolve = mock_on_resolve,
-                                                                        .on_cleanup = mock_on_cleanup,
-                                                                        .behavior_flags = NT_RESOURCE_BEHAVIOR_PIN_BLOB | NT_RESOURCE_BEHAVIOR_AUX_BACKED});
-
-    nt_hash32_t pid_file = nt_hash32_str("pin_aux_vp_file");
-    nt_hash32_t pid_virt = nt_hash32_str("pin_aux_vp_virt");
-    nt_hash64_t rid = nt_hash64_str("pin_aux_vp_res");
-
-    /* File pack (index 0) at low priority — real resident blob, handle 100. */
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_file, 1));
-    uint32_t size = 0;
-    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size);
-    TEST_ASSERT_NOT_NULL(blob);
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_file, blob, size));
-    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 100);
-
-    /* Virtual pack (index 1) at HIGHER priority — no blob, handle 200. */
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid_virt, 10));
-    EXPECT_ASSERT((void)nt_resource_register(pid_virt, rid, NT_ASSET_MESH, 200));
-
-    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
-    nt_resource_step();
-
-    /* Rejection leaves the existing file winner intact. */
-    TEST_ASSERT_TRUE(nt_resource_is_ready(h));
-    TEST_ASSERT_EQUAL_UINT32(100, nt_resource_get(h));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0)); /* file pinned */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(1)); /* virtual never pinned */
-
-    free(blob);
 }
 
 /* ---- Invalidate tests ---- */
@@ -2837,14 +2404,15 @@ void test_on_resolve_merge_on_reactivation(void) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void check_aux_publish_falls_back_to_best_usable_winner(bool aliases, uint8_t flags) {
+static void check_aux_publish_falls_back_to_best_usable_winner(bool aliases) {
     reset_resolve_state();
     s_activate_call_count = 0;
     s_next_handle = 0xBEEF;
     nt_resource_register_type(
-        NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate_seq, .deactivate = fake_deactivate, .on_resolve = mock_on_resolve, .on_cleanup = mock_on_cleanup, .behavior_flags = flags});
+        NT_ASSET_MESH,
+        &(nt_resource_type_desc_t){
+            .activate = fake_activate_seq, .deactivate = fake_deactivate, .on_resolve = mock_on_resolve, .on_cleanup = mock_on_cleanup, .behavior_flags = NT_RESOURCE_BEHAVIOR_AUX_BACKED});
     void (*write_pack)(const char *, uint64_t, uint8_t) = aliases ? write_test_alias_pack_file : write_test_pack_file;
-    bool pinned = (flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0;
 
     nt_hash64_t rid = nt_hash64_str("aux_publish_fallback_res");
 
@@ -2878,26 +2446,20 @@ static void check_aux_publish_falls_back_to_best_usable_winner(bool aliases, uin
     TEST_ASSERT_TRUE(nt_resource_is_ready(h));
     TEST_ASSERT_NOT_EQUAL(handle_a, handle_c);
     TEST_ASSERT_EQUAL_UINT32(3, s_activate_call_count);
-    TEST_ASSERT_EQUAL_UINT32(pinned ? 1U : 0U, nt_resource_test_pack_blob_pins(2));
 
     nt_time_sleep(TEST_PAST_BLOB_TTL_S);
     nt_resource_step(); /* evict pack A while pack C is still published */
     TEST_ASSERT_EQUAL_UINT8(0, nt_resource_test_pack_blob_resident(1));
 
     nt_resource_unmount(pid_c);
-    if (pinned) {
-        TEST_ASSERT_NULL(nt_resource_peek_user_data(h));
-    } else {
-        TEST_ASSERT_NOT_NULL(nt_resource_peek_user_data(h));
-    }
+    TEST_ASSERT_NOT_NULL(nt_resource_peek_user_data(h));
     nt_resource_step(); /* target A missing -> published should fall back to resident B */
 
     TEST_ASSERT_TRUE(nt_resource_is_ready(h));
     TEST_ASSERT_EQUAL_UINT32(handle_b, nt_resource_get(h));
     TEST_ASSERT_EQUAL(NT_PACK_STATE_NONE, nt_resource_pack_state(pid_a));
     TEST_ASSERT_EQUAL_UINT32(4, s_resolve_call_count);
-    TEST_ASSERT_EQUAL_UINT32(pinned ? 42U : 45U, *(uint32_t *)s_last_resolve_user_data);
-    TEST_ASSERT_EQUAL_UINT32(pinned ? 1U : 0U, nt_resource_test_pack_blob_pins(0));
+    TEST_ASSERT_EQUAL_UINT32(45U, *(uint32_t *)s_last_resolve_user_data);
 
     nt_resource_step(); /* re-download A and republish it */
     if (nt_resource_pack_state(pid_a) == NT_PACK_STATE_REQUESTED) {
@@ -2908,24 +2470,18 @@ static void check_aux_publish_falls_back_to_best_usable_winner(bool aliases, uin
     TEST_ASSERT_TRUE(nt_resource_is_ready(h));
     TEST_ASSERT_EQUAL_UINT32(handle_a, nt_resource_get(h));
     TEST_ASSERT_EQUAL_UINT32(5, s_resolve_call_count);
-    TEST_ASSERT_EQUAL_UINT32(pinned ? 43U : 46U, *(uint32_t *)s_last_resolve_user_data);
+    TEST_ASSERT_EQUAL_UINT32(46U, *(uint32_t *)s_last_resolve_user_data);
     TEST_ASSERT_EQUAL_UINT32(3, s_activate_call_count);
     TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_blob_resident(1));
-    TEST_ASSERT_EQUAL_UINT32(pinned ? 1U : 0U, nt_resource_test_pack_blob_pins(1));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0));
 
     (void)remove("build/test_aux_publish_b.ntpack");
     (void)remove("build/test_aux_publish_a.ntpack");
     (void)remove("build/test_aux_publish_c.ntpack");
 }
 
-void test_aux_publish_falls_back_to_best_usable_winner(void) { check_aux_publish_falls_back_to_best_usable_winner(false, NT_RESOURCE_BEHAVIOR_AUX_BACKED); }
+void test_aux_publish_falls_back_to_best_usable_winner(void) { check_aux_publish_falls_back_to_best_usable_winner(false); }
 
-void test_alias_aux_publish_falls_back_then_reloads(void) { check_aux_publish_falls_back_to_best_usable_winner(true, NT_RESOURCE_BEHAVIOR_AUX_BACKED); }
-
-void test_alias_pin_publish_falls_back_then_reloads(void) { check_aux_publish_falls_back_to_best_usable_winner(true, NT_RESOURCE_BEHAVIOR_PIN_BLOB); }
-
-void test_alias_pin_and_aux_publish_falls_back_then_reloads(void) { check_aux_publish_falls_back_to_best_usable_winner(true, NT_RESOURCE_BEHAVIOR_PIN_BLOB | NT_RESOURCE_BEHAVIOR_AUX_BACKED); }
+void test_alias_aux_publish_falls_back_then_reloads(void) { check_aux_publish_falls_back_to_best_usable_winner(true); }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void check_aux_publish_waits_for_reload_when_no_usable_fallback_exists(bool aliases) {
@@ -3608,7 +3164,9 @@ void test_blob_and_meta_reuse_stay_unpublished_until_step(void) {
 /* ---- Startup type registration ---- */
 
 static void test_type_registration_rejects_incomplete_description_before_registering(void) {
-    nt_resource_type_desc_t desc = {.behavior_flags = NT_RESOURCE_BEHAVIOR_AUX_BACKED};
+    nt_resource_type_desc_t desc = {.on_resolve = mock_on_resolve};
+    EXPECT_ASSERT(nt_resource_register_type(NT_ASSET_MESH, &desc));
+    desc = (nt_resource_type_desc_t){.behavior_flags = NT_RESOURCE_BEHAVIOR_AUX_BACKED};
     EXPECT_ASSERT(nt_resource_register_type(NT_ASSET_MESH, &desc));
     desc.on_resolve = mock_on_resolve;
     EXPECT_ASSERT(nt_resource_register_type(NT_ASSET_MESH, &desc));
@@ -3646,16 +3204,16 @@ static void test_type_registration_copies_and_preserves_complete_description(voi
             desc.deactivate = NULL;
             break;
         case 2:
-            desc.on_resolve = test_provider_on_resolve;
+            desc.on_resolve = NULL;
             break;
         case 3:
-            desc.on_cleanup = test_provider_on_cleanup;
+            desc.on_cleanup = other_on_cleanup;
             break;
         case 4:
             desc.on_post_resolve = NULL;
             break;
         default:
-            desc.behavior_flags = NT_RESOURCE_BEHAVIOR_PIN_BLOB;
+            desc.behavior_flags = NT_RESOURCE_BEHAVIOR_AUX_BACKED;
             break;
         }
         EXPECT_ASSERT(nt_resource_register_type(NT_ASSET_MESH, &desc));
@@ -3688,38 +3246,6 @@ static void test_virtual_provider_uses_default_description(void) {
     TEST_ASSERT_EQUAL_UINT32(77, nt_resource_get(resource));
     nt_resource_unmount(pack);
     EXPECT_ASSERT(nt_resource_register_type(NT_ASSET_MESH, &changed));
-}
-
-static void test_aux_type_cannot_gain_pin_after_blob_eviction(void) {
-    reset_resolve_state();
-    nt_resource_type_desc_t desc = {
-        .activate = fake_activate, .deactivate = fake_deactivate, .on_resolve = mock_on_resolve, .on_cleanup = mock_on_cleanup, .behavior_flags = NT_RESOURCE_BEHAVIOR_AUX_BACKED};
-    nt_resource_register_type(NT_ASSET_MESH, &desc);
-    const nt_hash32_t pack = {996};
-    const nt_hash64_t rid = {996};
-    const char *path = "build/test_aux_pin_after_eviction.ntpack";
-    write_test_pack_file(path, rid.value, NT_ASSET_MESH);
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pack, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pack, path));
-    nt_resource_t resource = nt_resource_request(rid, NT_ASSET_MESH);
-    nt_resource_step();
-    uint32_t runtime_handle = nt_resource_get(resource);
-    const void *aux = nt_resource_peek_user_data(resource);
-    TEST_ASSERT_NOT_NULL(aux);
-    nt_resource_set_blob_policy(pack, NT_BLOB_AUTO, TEST_BLOB_TTL_MS);
-    nt_time_sleep(TEST_PAST_BLOB_TTL_S);
-    nt_resource_step();
-    TEST_ASSERT_EQUAL_UINT8(0, nt_resource_test_pack_blob_resident(0));
-    uint32_t epoch = nt_resource_publication_epoch();
-    desc.behavior_flags |= NT_RESOURCE_BEHAVIOR_PIN_BLOB;
-    EXPECT_ASSERT(nt_resource_register_type(NT_ASSET_MESH, &desc));
-    TEST_ASSERT_EQUAL_UINT32(epoch, nt_resource_publication_epoch());
-    TEST_ASSERT_TRUE(nt_resource_is_ready(resource));
-    TEST_ASSERT_EQUAL_UINT32(runtime_handle, nt_resource_get(resource));
-    TEST_ASSERT_EQUAL_PTR(aux, nt_resource_peek_user_data(resource));
-    TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pack));
-    nt_resource_unmount(pack);
-    (void)remove(path);
 }
 
 static void test_blob_without_registration_rejects_invalidation(void) {
@@ -3851,8 +3377,43 @@ static void test_file_owner_requires_activator_before_parse_mutation(void) {
     nt_resource_unmount(pack);
 }
 
+static void test_blob_alias_payload_survives_pack_eviction(void) {
+    const nt_hash32_t pack = nt_hash32_str("owned_blob_pack");
+    uint32_t size = 0;
+    uint8_t *blob = build_blob_alias_meta_pack(&size);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pack, 0));
+    TEST_ASSERT_NOT_NULL(blob);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pack, blob, size));
+    nt_resource_test_set_pack_io_type(0, NT_IO_FS);
+    nt_resource_t owner = nt_resource_request(nt_hash64_str("blob_owner"), NT_ASSET_BLOB);
+    nt_resource_t alias = nt_resource_request(nt_hash64_str("blob_alias"), NT_ASSET_BLOB);
+    nt_resource_step();
+    const uint8_t *payload = nt_resource_get_blob(owner, NULL);
+    TEST_ASSERT_NOT_NULL(payload);
+    TEST_ASSERT_EQUAL_PTR(payload, nt_resource_get_blob(alias, NULL));
+    memset(blob, 0xCD, size); /* a kept pointer would read garbage */
+    nt_resource_set_blob_policy(pack, NT_BLOB_AUTO, TEST_BLOB_TTL_MS);
+    nt_time_sleep(TEST_PAST_BLOB_TTL_S);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_set_priority(pack, 1)); /* forces a resolve, the only path that schedules a reread */
+    nt_resource_step();
+    TEST_ASSERT_FALSE(nt_resource_test_pack_blob_resident(0));
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pack));
+    uint32_t payload_size = 0;
+    const uint8_t *retained = nt_resource_get_blob(alias, &payload_size);
+    TEST_ASSERT_EQUAL_PTR(payload, retained);
+    TEST_ASSERT_EQUAL_UINT32(8, payload_size);
+    for (uint32_t i = 0; i < payload_size; i++) {
+        TEST_ASSERT_EQUAL_HEX8(0xAB, retained[i]);
+    }
+    nt_resource_unmount(pack);
+    TEST_ASSERT_NULL(nt_resource_get_blob(owner, NULL));
+    TEST_ASSERT_NULL(nt_resource_get_blob(alias, NULL));
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_blob_alias_payload_survives_pack_eviction);
     RUN_TEST(test_type_registration_rejects_identical_repeat_before_mount);
     RUN_TEST(test_file_mount_closes_type_registration_until_reinit);
     RUN_TEST(test_virtual_mount_closes_type_registration_until_reinit);
@@ -3861,7 +3422,6 @@ int main(void) {
     RUN_TEST(test_type_registration_rejects_incomplete_description_before_registering);
     RUN_TEST(test_type_registration_copies_and_preserves_complete_description);
     RUN_TEST(test_virtual_provider_uses_default_description);
-    RUN_TEST(test_aux_type_cannot_gain_pin_after_blob_eviction);
     RUN_TEST(test_blob_without_registration_rejects_invalidation);
     RUN_TEST(test_failed_owner_does_not_retry_through_alias);
     RUN_TEST(test_virtual_reuse_same_handle_rebuilds_aux);
@@ -3950,6 +3510,7 @@ int main(void) {
     RUN_TEST(test_asset_magic_mismatch_asserts);
     RUN_TEST(test_asset_version_mismatch_asserts);
     RUN_TEST(test_asset_shorter_than_header_asserts);
+    RUN_TEST(test_blob_magic_mismatch_asserts);
     RUN_TEST(test_winner_gen_changes_with_each_published_winner);
     RUN_TEST(test_equal_range_self_owners_keep_independent_runtime_objects);
 
@@ -3974,21 +3535,6 @@ int main(void) {
 
     /* Blob policy tests */
     RUN_TEST(test_blob_policy_keep);
-
-    /* PIN_BLOB ref-balance tests */
-    RUN_TEST(test_blob_pin_balance_winner_change);
-    RUN_TEST(test_blob_pin_absent_without_flag);
-    RUN_TEST(test_blob_pin_survives_reregister);
-
-    /* PIN_BLOB eviction / unmount safety */
-    RUN_TEST(test_blob_pin_eviction_skip_and_timer_freeze);
-    RUN_TEST(test_blob_pin_auto_as_keep_one_shot_log);
-    RUN_TEST(test_blob_pin_unmount_while_referenced);
-    RUN_TEST(test_blob_pin_unmount_severs_provider_synchronously);
-    RUN_TEST(test_blob_alias_pin_survives_eviction_and_severs_on_unmount);
-    RUN_TEST(test_blob_pin_unpublishable_when_blob_evicted_before_pin);
-    RUN_TEST(test_blob_pin_virtual_pack_not_publishable);
-    RUN_TEST(test_blob_pin_and_aux_virtual_pack_not_publishable);
 
     /* Invalidate tests */
     RUN_TEST(test_invalidate_marks_registered);
@@ -4026,8 +3572,6 @@ int main(void) {
     RUN_TEST(test_aux_publish_falls_back_to_best_usable_winner);
     RUN_TEST(test_aux_publish_waits_for_reload_when_no_usable_fallback_exists);
     RUN_TEST(test_alias_aux_publish_falls_back_then_reloads);
-    RUN_TEST(test_alias_pin_publish_falls_back_then_reloads);
-    RUN_TEST(test_alias_pin_and_aux_publish_falls_back_then_reloads);
     RUN_TEST(test_alias_aux_waits_for_reload_without_fallback);
     RUN_TEST(test_on_cleanup_fires_on_unmount);
     RUN_TEST(test_on_cleanup_fires_on_shutdown);
