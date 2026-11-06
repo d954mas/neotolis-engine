@@ -3380,8 +3380,16 @@ static void test_font_entry_bytes_are_pure_and_stay_evicted_on_gpu_invalidation(
     EXPECT_ASSERT(nt_resource_invalidate(NT_ASSET_FONT));
 }
 
+static void test_request_invalid_type_asserts_before_slot_creation(void) {
+    const nt_hash64_t name = nt_hash64_str("invalid_type");
+    EXPECT_ASSERT((void)nt_resource_request(name, NT_RESOURCE_MAX_ASSET_TYPES));
+    EXPECT_ASSERT((void)nt_resource_request(name, UINT8_MAX));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_find(name).id);
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_request_invalid_type_asserts_before_slot_creation);
     RUN_TEST(test_font_entry_bytes_are_pure_and_stay_evicted_on_gpu_invalidation);
     RUN_TEST(test_blob_alias_payload_survives_pack_eviction);
     RUN_TEST(test_type_registration_rejects_identical_repeat_before_mount);

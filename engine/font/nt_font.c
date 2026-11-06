@@ -1225,7 +1225,7 @@ static void upload_glyph(nt_font_slot_t *slot, uint16_t cache_idx, const NtFontG
 
 /* Tofu is a rectangle outline in slot 0, which LRU never takes. */
 static void generate_tofu(nt_font_slot_t *slot) {
-    if (slot->cache[0].entry.is_tofu || !slot->metrics_set || !nt_gfx_texture_ready(slot->curve_texture)) {
+    if (slot->cache[0].entry.is_tofu || slot->payload_count == 0 || !nt_gfx_texture_ready(slot->curve_texture)) {
         return;
     }
     const int16_t w = (int16_t)(slot->metrics.units_per_em / 2);
@@ -1336,10 +1336,7 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
     NT_ASSERT(desc->max_glyphs > 1 && desc->max_glyphs <= 2048 && "max_glyphs: tofu + glyphs, at most 2048 texture rows");
 
     uint32_t id = nt_pool_alloc(&s_font.pool);
-    if (id == 0) {
-        NT_LOG_ERROR("font pool full -- increase max_fonts");
-        return NT_FONT_INVALID;
-    }
+    NT_ASSERT(id != 0 && "font pool full -- increase max_fonts");
 
     uint32_t slot_index = nt_pool_slot_index(id);
     nt_font_slot_t *slot = &s_font.slots[slot_index];
@@ -1367,11 +1364,7 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
         NT_ASSERT(cache_size <= 32768U && "measure_cache_size exceeds the 32768 POT cap (uint16_t-sized field)");
         const size_t per_entry_bytes = NT_FONT_MEASURE_CACHE_ENTRY_BYTES;
         uint8_t *block = (uint8_t *)calloc((size_t)cache_size, per_entry_bytes);
-        if (!block) {
-            NT_LOG_ERROR("font measure_cache allocation failed (size=%u, bytes=%zu)", (unsigned)cache_size, (size_t)cache_size * per_entry_bytes);
-            nt_pool_free(&s_font.pool, id);
-            return NT_FONT_INVALID;
-        }
+        NT_ASSERT(block != NULL);
         /* Partition the byte block into 4 type-cast sub-arrays. Calloc returns
          * memory aligned for any object type (8 B on x64), so the first array
          * (uint64_t) is correctly aligned; the others follow the size of the
@@ -1448,7 +1441,7 @@ void nt_font_fill(nt_font_t font, const uint8_t *data, uint32_t size) {
     NT_ASSERT(sizeof(*hdr) + (uint64_t)hdr->glyph_count * sizeof(NtFontGlyphEntry) <= size);
     nt_font_slot_t *slot = get_slot(font);
     NT_ASSERT(slot->payload_count < slot->max_payloads);
-    NT_ASSERT(!slot->metrics_set ||
+    NT_ASSERT(slot->payload_count == 0 ||
               (slot->metrics.units_per_em == hdr->units_per_em && slot->metrics.ascent == hdr->ascent && slot->metrics.descent == hdr->descent && slot->metrics.line_gap == hdr->line_gap));
     const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(data + sizeof(*hdr));
     for (uint32_t gi = 0; gi < hdr->glyph_count; gi++) {
@@ -1463,7 +1456,7 @@ void nt_font_fill(nt_font_t font, const uint8_t *data, uint32_t size) {
     const uint8_t pi = slot->payload_count;
     slot->payloads[pi] = owned;
     slot->payload_count++;
-    if (!slot->metrics_set) {
+    if (pi == 0) {
         slot->metrics = (nt_font_metrics_t){.ascent = hdr->ascent,
                                             .descent = hdr->descent,
                                             .line_gap = hdr->line_gap,
@@ -1473,7 +1466,6 @@ void nt_font_fill(nt_font_t font, const uint8_t *data, uint32_t size) {
                                             .underline_thickness = hdr->underline_thickness,
                                             .strikeout_position = hdr->strikeout_position,
                                             .strikeout_size = hdr->strikeout_size};
-        slot->metrics_set = true;
     }
     for (uint32_t gi = 0; gi < hdr->glyph_count; gi++) {
         slot->has_any_kern |= glyphs[gi].kern_count != 0;
@@ -1500,9 +1492,6 @@ nt_font_metrics_t nt_font_get_metrics(nt_font_t font) {
     NT_ASSERT(s_font.initialized);
     NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
     nt_font_slot_t *slot = get_slot(font);
-    if (!slot->metrics_set) {
-        return (nt_font_metrics_t){0}; /* font not filled yet */
-    }
     return slot->metrics;
 }
 
@@ -1826,7 +1815,7 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
     }
 
     nt_font_slot_t *slot = get_slot(font);
-    if (!slot->metrics_set) {
+    if (slot->payload_count == 0) {
         return result; /* font not yet resolved */
     }
 
@@ -2022,18 +2011,6 @@ void nt_font_test_reset_measure_counters(void) {
         s_font.slots[i].test_measure_cache_hits = 0U;
         s_font.slots[i].test_measure_cache_misses = 0U;
     }
-}
-
-void nt_font_test_set_metrics(nt_font_t font, uint16_t units_per_em, int16_t ascent, int16_t descent, int16_t line_height) {
-    NT_ASSERT(nt_pool_valid(&s_font.pool, font.id) && "nt_font_test_set_metrics: invalid font handle");
-    nt_font_slot_t *slot = get_slot(font);
-    slot->metrics.units_per_em = units_per_em;
-    slot->metrics.ascent = ascent;
-    slot->metrics.descent = descent;
-    slot->metrics.line_height = line_height;
-    slot->metrics_set = true;
-    clear_glyph_cache(slot); /* as a real metrics change does */
-    generate_tofu(slot);
 }
 
 #if NT_FONT_EMBOLDEN_ENABLED

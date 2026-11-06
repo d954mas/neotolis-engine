@@ -32,7 +32,6 @@ typedef struct nt_font_slot_s nt_font_slot_t;
 
 struct nt_font_slot_s {
     nt_font_metrics_t metrics;
-    bool metrics_set;
 
     uint8_t **payloads;
     uint8_t payload_count;

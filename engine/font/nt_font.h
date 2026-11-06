@@ -110,6 +110,7 @@ void nt_font_shutdown(void);
  * GPU texture and clears the glyph cache that this frame's draws will sample. */
 void nt_font_step(void);
 
+/* Invalid configuration, pool exhaustion and allocation failure assert. */
 nt_font_t nt_font_create(const nt_font_create_desc_t *desc);
 void nt_font_destroy(nt_font_t font);
 bool nt_font_valid(nt_font_t font);
@@ -140,10 +141,6 @@ int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right
 uint32_t nt_font_test_measure_cache_hits(nt_font_t font);
 uint32_t nt_font_test_measure_cache_misses(nt_font_t font);
 void nt_font_test_reset_measure_counters(void);
-
-/* Set metrics on a stub font so measure_n returns predictable tofu widths
- * (advance = units_per_em * 0.5 * size / units_per_em = size/2 per char). */
-void nt_font_test_set_metrics(nt_font_t font, uint16_t units_per_em, int16_t ascent, int16_t descent, int16_t line_height);
 
 uint16_t nt_font_test_decode_contours(const uint8_t *contour_data, float weight, float *out_curves, uint16_t max_curves);
 #if NT_FONT_EMBOLDEN_ENABLED

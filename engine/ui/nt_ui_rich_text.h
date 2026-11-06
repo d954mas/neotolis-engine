@@ -258,7 +258,7 @@ typedef struct {
 } nt_ui_rich_test_atom_t;
 
 /* Solver entry: font_size feeds the deterministic measure (advance = size/2/char
- * under nt_font_test_set_metrics); the resolved per-atom boxes land in the atoms probe.
+ * with a glyph-free FONT payload); the resolved per-atom boxes land in the atoms probe.
  * The bare form is LEFT-aligned, id 0 (explicit container_w only). */
 void nt_ui_rich_test_solve(nt_ui_context_t *ctx, float container_w, float font_size);
 /* Full form: id feeds the two-pass nt_ui_get_bbox fallback when container_w<=0; align

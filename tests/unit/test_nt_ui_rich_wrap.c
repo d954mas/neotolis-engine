@@ -1,5 +1,5 @@
 /* Full word-wrap + baseline solver: break-anywhere overflow, L/C/R alignment, max-line-height
- * over asymmetric atoms. Deterministic via nt_font_test_set_metrics, no GL. The icon is the
+ * over asymmetric atoms. Deterministic via a glyph-free FONT payload, no GL. The icon is the
  * 1x1 white region scaled, so icon_w == scale. */
 
 #include <math.h>
@@ -32,7 +32,7 @@ void setUp(void) {
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     /* units_per_em=1000, ascent=800, descent=-200: advance = size/2/char. */
-    nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000);
+    ui_walker_fixture_fill_stub_font(&s_fx);
 }
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
@@ -446,7 +446,7 @@ static void test_break_anywhere_multibyte_codepoint_safe(void) {
  * the sum of isolated per-glyph measures (which drops kerning and lets a chunk exceed the box).
  *
  * The test stub font has no glyph table -> tofu fallback -> NO kerning, so isolated-sum and
- * whole-span measure are numerically equal here. The stub cannot express kerning (nt_font_test_set_metrics
+ * whole-span measure are numerically equal here. The stub cannot express kerning (a glyph-free FONT payload
  * sets only metrics, no kern table), so this asserts the weaker-but-still-meaningful invariant:
  * chunk width == measure(whole chunk bytes). Reconstruct each chunk's byte span from the known word
  * (uniform 1-byte 'A' glyphs, EURO_W px each) and compare a.w to the standalone measure. */
