@@ -58,6 +58,8 @@ source pack size P and owned payloads totaling C (one per published FONT slot, o
 per canonical BLOB), those bytes occupy P + C during construction and C after AUTO
 eviction. BLOB aliases and additional font caches do not multiply C. Cache storage, GPU textures, metadata,
 registry storage and allocator overhead are separate; KEEP retains P + C.
+Replacing a FONT snapshot temporarily holds both its old and new payloads;
+P + C describes initial construction, not the replacement peak.
 
 ## Core concepts
 
@@ -76,7 +78,7 @@ Each slot tracks two winner notions:
 - **target winner**: highest-priority READY asset for this resource_id
 - **published winner**: highest-priority asset that is usable right now
 
-For simple runtime-handle asset types (texture, mesh, blob), target and published winners usually match. Asset types that derive persistent auxiliary state from pack bytes (atlas, future similar types) may defer publication until `user_data` has been synchronized to the target winner.
+For simple runtime-handle asset types (texture, mesh, blob), target and published winners usually match. Asset types that derive persistent auxiliary state from pack bytes (atlas, font) may defer publication until `user_data` has been synchronized to the target winner.
 
 ## ResourceId
 
@@ -363,8 +365,10 @@ A font keeps its `nt_font_add` source list of resource handles. Once the context
 is usable, `nt_font_step` recreates a non-ready curve texture before its
 resource rescan; this does not require source-asset reactivation. GPU restore
 does not invalidate FONT: its owned CPU payload survives context loss. Explicit
-`nt_resource_invalidate(NT_ASSET_FONT)` remains legal; it re-activates and copies
-those sources through the normal resource path, rereading an evicted pack. Re-adding an existing source asserts on the duplicate. Call `nt_font_step` after
+`nt_resource_invalidate(NT_ASSET_FONT)` remains legal; it re-activates
+those sources through the normal resource path, rereading an evicted pack.
+The existing copy can remain when the same winner stays published.
+Re-adding an existing source asserts on the duplicate. Call `nt_font_step` after
 `nt_gfx_begin_frame` and before any render pass: recovery destroys and replaces
 the old texture handles. An atlas keeps its parsed regions and
 needs its page textures resolved again.
@@ -486,6 +490,10 @@ published alias holds its own. A new winner replaces the copy, and it is release
 when the slot loses its winner or at resource shutdown. A virtual FONT provider has
 no bytes to copy and asserts at publication.
 
+FONT publication currently allocates, copies and frees during resolve, outside
+the activation budget. This is a temporary deviation from the hot-path memory
+policy; #503 removes this bridge when FONT becomes a direct runtime object.
+
 Builder produces font assets from TTF/OTF sources. Binary layout:
 
 ```
@@ -568,7 +576,7 @@ metrics stay unchanged.
 
 **Decoration metrics.** The 24-byte header ends with four `int16` decoration-metric fields (`underline_position`, `underline_thickness`, `strikeout_position`, `strikeout_size`). The builder reads these raw from the source font's `post` (`underlinePosition`@8, `underlineThickness`@10) and `OS/2` (`yStrikeoutSize`@26, `yStrikeoutPosition`@28) tables (big-endian, UPM-rescaled with the other metrics); when a table is absent it bakes a metric-correct heuristic (underline just below baseline, strike near mid x-height) so the runtime never sees garbage. This keeps decoration metrics in the builder — the runtime stays a parser-free safety net.
 
-**Activation checks.** FONT activation asserts only that the glyph table fits the blob (O(1)): the pack is trusted. Activation copies the compact payload in O(bytes); glyph decode asserts each glyph's point and curve counts on first use. Shared glyph payloads, trailing padding and zero-curve glyphs are valid. Coordinate and metric values are builder guarantees.
+**Activation checks.** FONT activation asserts only that the glyph table fits the blob (O(1)): the pack is trusted. Publication copies the compact payload in O(bytes); glyph decode asserts each glyph's point and curve counts on first use. Shared glyph payloads, trailing padding and zero-curve glyphs are valid. Coordinate and metric values are builder guarantees.
 
 ### NT_ASSET_ATLAS binary format
 

@@ -46,9 +46,7 @@ static uint32_t font_activate(const uint8_t *data, uint32_t size) {
 /* Keep the compact payload so unused glyphs stay undecoded after pack eviction. */
 static void font_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data) {
     (void)runtime_handle;
-    if (data == NULL) {
-        return; /* a synced copy outlives its evicted bytes */
-    }
+    NT_ASSERT(data != NULL);
     uint8_t *owned = malloc(size);
     NT_ASSERT(owned);
     memcpy(owned, data, size);

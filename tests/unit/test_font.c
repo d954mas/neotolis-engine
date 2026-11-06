@@ -218,6 +218,23 @@ static void test_font_virtual_provider_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_resource_step());
 }
 
+static void test_font_virtual_replacement_asserts(void) {
+    uint32_t size = 0;
+    uint8_t *blob = build_test_font_blob(&size);
+    nt_resource_t resource = register_font_resource("file_font", blob, size);
+    free(blob);
+    nt_resource_step();
+    TEST_ASSERT_TRUE(nt_resource_is_ready(resource));
+    TEST_ASSERT_NOT_NULL(nt_resource_peek_user_data(resource));
+
+    nt_resource_asset_info_t asset;
+    TEST_ASSERT_TRUE(nt_resource_asset_info(0, &asset));
+    const nt_hash32_t pack = nt_hash32_str("virtual_font_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pack, 1));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pack, (nt_hash64_t){asset.resource_id}, NT_ASSET_FONT, 7));
+    NT_TEST_EXPECT_ASSERT(nt_resource_step());
+}
+
 static void test_font_add_rejects_non_font_resource(void) {
     nt_resource_t texture = nt_resource_request(nt_hash64_str("foreign_texture"), NT_ASSET_TEXTURE);
     nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8});
@@ -3052,6 +3069,7 @@ static void test_font_worstcase_glyph_miss_budget(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_font_virtual_provider_asserts);
+    RUN_TEST(test_font_virtual_replacement_asserts);
     RUN_TEST(test_font_add_rejects_non_font_resource);
     RUN_TEST(test_font_source_survives_pack_eviction);
     RUN_TEST(test_font_blob_valid);
