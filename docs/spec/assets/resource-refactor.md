@@ -89,10 +89,15 @@ pointers truncated to 32 bits; zero means no object.
 | `bind(res, handle)` | `current` becomes `RUNTIME(handle)` and `pending` clears. The game keeps ownership, destroys the object itself, and calls `bind` again after recreating it. |
 | `unload(res)` | `current` and `pending` become `NONE`. The slot stops exposing an object before the call returns. Reloading means installing again. |
 | `evict(pack)` | Frees source bytes. A later read frees them again once needed entries have activated. Memory-backed bytes stay with the caller. |
-| `close(pack)` | Unloads every slot naming the pack, destroys its objects and invalidates the handle. Like any GPU destruction, it is illegal from the first pass until the frame ends. |
+| `close(pack)` | Unloads slots whose `current` names the pack. For other slots, clears only a `pending` naming that pack, preserving `current`. Destroys the pack's objects and invalidates its handle. Like any GPU destruction, it is illegal from the first pass until the frame ends. |
 
 Installing the source that `current` already names clears `pending` and changes nothing else.
 Installing a source whose entry or pack failed retries it.
+
+With SD from one pack in `current` and HD from another in `pending`, closing the HD
+pack cancels only the replacement: SD stays READY and drawable. Closing the SD pack
+unloads that slot, clearing both sources; so does `unload(res)`. If both sources name
+the closed pack, the slot is unloaded. Late I/O cannot restore a cleared pending source.
 
 ### 3.2 Everything else is derived
 
