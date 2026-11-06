@@ -567,6 +567,27 @@ void test_font_lookup_glyph_miss_tofu(void) {
     free(blob);
 }
 
+void test_font_tofu_measure_matches_glyph_advance_with_odd_upm(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_test_font_blob_with_metrics(1001, 800, -200, 0, &blob_size);
+    nt_font_fill(font, blob, blob_size);
+    free(blob);
+
+    const nt_glyph_cache_entry_t *glyph = nt_font_lookup_glyph(font, 'Z');
+    TEST_ASSERT_NOT_NULL(glyph);
+    TEST_ASSERT_TRUE(glyph->is_tofu);
+    TEST_ASSERT_EQUAL_INT16(500, glyph->advance);
+
+    nt_text_size_t measured = nt_font_measure(font, "ZZ", 1001.0F, 0.0F);
+    TEST_ASSERT_TRUE(fabsf(measured.width - 1000.0F) < 0.001F);
+    nt_text_size_t scaled = nt_font_measure_n(font, "ZZ", 2U, 20.02F, 1.0F);
+    TEST_ASSERT_TRUE(fabsf(scaled.width - 21.0F) < 0.001F);
+
+    nt_font_destroy(font);
+}
+
 /* ---- Test 7: Get stats (FONT-02, FONT-03) ---- */
 
 void test_font_get_stats(void) {
@@ -2607,6 +2628,7 @@ int main(void) {
     RUN_TEST(test_font_get_metrics);
     RUN_TEST(test_font_lookup_glyph_hit);
     RUN_TEST(test_font_lookup_glyph_miss_tofu);
+    RUN_TEST(test_font_tofu_measure_matches_glyph_advance_with_odd_upm);
     RUN_TEST(test_font_disjoint_payloads);
     RUN_TEST(test_font_first_fill_owns_decoration);
     RUN_TEST(test_font_cmap_bounded_no_parse);

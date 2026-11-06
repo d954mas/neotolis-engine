@@ -1815,10 +1815,9 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
      * bsearches inside the original kern lookup. */
     const float scale = size / (float)slot->metrics.units_per_em;
     const bool font_has_kern = slot->has_any_kern;
-    /* Cache tofu metrics — slot-wide constants, recomputed per call but never per codepoint.
-     * Compute advance in float (units_per_em * 0.5) instead of integer divide-then-promote;
-     * matches nt_font_lookup_metrics for power-of-2 EMs (the common case). */
-    const float tofu_advance_px = (float)slot->metrics.units_per_em * 0.5F * scale;
+    /* Match the integer tofu advance used by glyphs before scaling. */
+    const uint16_t tofu_advance = slot->metrics.units_per_em / 2U;
+    const float tofu_advance_px = (float)tofu_advance * scale;
     const float tofu_min_y_px = (float)slot->metrics.descent * scale;
     const float tofu_max_y_px = (float)slot->metrics.ascent * scale;
 
