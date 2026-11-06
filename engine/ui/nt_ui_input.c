@@ -698,7 +698,7 @@ static void focus_step(input_frame_t *f) {
     const nt_ui_input_style_t *style = f->style;
 
     // #region focus-order bookkeeping (Tab wrap target)
-    if (ctx->focus_first_id == 0U) {
+    if (f->enabled && ctx->focus_first_id == 0U) {
         ctx->focus_first_id = id;
     }
     /* A pending Tab seek set by the previously-declared focused field: this field claims focus.

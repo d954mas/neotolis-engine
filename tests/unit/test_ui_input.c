@@ -163,15 +163,14 @@ static void two_field_frame(const nt_pointer_t *p, uint32_t id_a, char *a, uint3
     nt_ui_end(s_fx.ctx);
 }
 
-/* One frame with three stacked fields (A, B, C). B's enabled state is a parameter so Tab-through-disabled
- * can be exercised. All buffers are char[32]. */
-static void three_field_frame(const nt_pointer_t *p, uint32_t ia, char *a, uint32_t ib, char *b, bool b_enabled, uint32_t ic, char *c) {
+/* One frame with three stacked fields (A, B, C), each independently enabled. All buffers are char[32]. */
+static void three_field_frame(const nt_pointer_t *p, uint32_t ia, char *a, bool a_enabled, uint32_t ib, char *b, bool b_enabled, uint32_t ic, char *c, bool c_enabled) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1, 0);
     CLAY({.id = CLAY_ID("root3"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col3"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
-            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, ia, a, 32U, &s_props, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, ia, a, 32U, &s_props, &s_style, &s_field_decl, a_enabled, NULL);
             (void)nt_ui_input_text(s_fx.ctx, NULL, 0, ib, b, 32U, &s_props, &s_style, &s_field_decl, b_enabled, NULL);
-            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, ic, c, 32U, &s_props, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, ic, c, 32U, &s_props, &s_style, &s_field_decl, c_enabled, NULL);
         }
     }
     nt_ui_end(s_fx.ctx);
@@ -1077,24 +1076,90 @@ static void test_tab_skips_disabled_field(void) {
     const uint32_t ia = nt_ui_id("ta");
     const uint32_t ib = nt_ui_id("tb");
     const uint32_t ic = nt_ui_id("tc");
-    three_field_frame(&IDLE_PTR, ia, a, ib, b, false, ic, c); /* warm; middle field B disabled */
+    three_field_frame(&IDLE_PTR, ia, a, true, ib, b, false, ic, c, true); /* warm; middle field B disabled */
 
     /* Click field A (top row) to focus it. */
     const float ay = IN_Y + (IN_H * 0.5F);
     nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, ay, true, true, false);
-    three_field_frame(&press, ia, a, ib, b, false, ic, c);
+    three_field_frame(&press, ia, a, true, ib, b, false, ic, c, true);
     nt_pointer_t rel = make_pointer(IN_X + PAD_X + 1.0F, ay, false, false, true);
-    three_field_frame(&rel, ia, a, ib, b, false, ic, c);
+    three_field_frame(&rel, ia, a, true, ib, b, false, ic, c, true);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ia));
 
     /* Tab: B is disabled, so the seek must skip it and land on C. */
     nt_input_poll();
     nt_input_set_key(NT_KEY_TAB, true);
-    three_field_frame(&IDLE_PTR, ia, a, ib, b, false, ic, c);
+    three_field_frame(&IDLE_PTR, ia, a, true, ib, b, false, ic, c, true);
     nt_input_set_key(NT_KEY_TAB, false);
     TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, ia));
     TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, ib)); /* a disabled field never holds focus */
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ic));  /* seek skipped B and reached C */
+}
+
+static void test_tab_wrap_skips_disabled_first_field(void) {
+    char a[32] = {0};
+    char b[32] = {0};
+    char c[32] = {0};
+    const uint32_t ia = nt_ui_id("wa");
+    const uint32_t ib = nt_ui_id("wb");
+    const uint32_t ic = nt_ui_id("wc");
+    three_field_frame(&IDLE_PTR, ia, a, false, ib, b, true, ic, c, true);
+
+    const float cy = IN_Y + (2.0F * IN_H) + (IN_H * 0.5F);
+    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, cy, true, true, false);
+    three_field_frame(&press, ia, a, false, ib, b, true, ic, c, true);
+    nt_pointer_t rel = make_pointer(IN_X + PAD_X + 1.0F, cy, false, false, true);
+    three_field_frame(&rel, ia, a, false, ib, b, true, ic, c, true);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ic));
+
+    nt_input_poll();
+    nt_input_set_key(NT_KEY_TAB, true);
+    three_field_frame(&IDLE_PTR, ia, a, false, ib, b, true, ic, c, true);
+    nt_input_set_key(NT_KEY_TAB, false);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ib));
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, ia));
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, ic));
+
+    nt_input_poll();
+    nt_input_buffer_char('x');
+    three_field_frame(&IDLE_PTR, ia, a, false, ib, b, true, ic, c, true);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ib));
+    TEST_ASSERT_EQUAL_STRING("", a);
+    TEST_ASSERT_EQUAL_STRING("x", b);
+    TEST_ASSERT_EQUAL_STRING("", c);
+}
+
+static void test_tab_wrap_keeps_only_enabled_field_focused(void) {
+    char a[32] = {0};
+    char b[32] = {0};
+    char c[32] = {0};
+    const uint32_t ia = nt_ui_id("sa");
+    const uint32_t ib = nt_ui_id("sb");
+    const uint32_t ic = nt_ui_id("sc");
+    three_field_frame(&IDLE_PTR, ia, a, false, ib, b, true, ic, c, false);
+
+    const float by = IN_Y + IN_H + (IN_H * 0.5F);
+    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, by, true, true, false);
+    three_field_frame(&press, ia, a, false, ib, b, true, ic, c, false);
+    nt_pointer_t rel = make_pointer(IN_X + PAD_X + 1.0F, by, false, false, true);
+    three_field_frame(&rel, ia, a, false, ib, b, true, ic, c, false);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ib));
+
+    nt_input_poll();
+    nt_input_set_key(NT_KEY_TAB, true);
+    three_field_frame(&IDLE_PTR, ia, a, false, ib, b, true, ic, c, false);
+    nt_input_set_key(NT_KEY_TAB, false);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ib));
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, ia));
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, ic));
+
+    nt_input_poll();
+    nt_input_buffer_char('x');
+    three_field_frame(&IDLE_PTR, ia, a, false, ib, b, true, ic, c, false);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ib));
+    TEST_ASSERT_EQUAL_STRING("", a);
+    TEST_ASSERT_EQUAL_STRING("x", b);
+    TEST_ASSERT_EQUAL_STRING("", c);
 }
 
 /* ---- Test 36: a responsive (GROW) width field still scrolls to keep the caret visible. ---- */
@@ -1541,6 +1606,8 @@ int main(void) {
     RUN_TEST(test_max_length_byte_cap);
     RUN_TEST(test_click_refocus_other_field);
     RUN_TEST(test_tab_skips_disabled_field);
+    RUN_TEST(test_tab_wrap_skips_disabled_first_field);
+    RUN_TEST(test_tab_wrap_keeps_only_enabled_field_focused);
     RUN_TEST(test_scroll_responsive_width);
     RUN_TEST(test_offscreen_clip_scissor_balanced);
     RUN_TEST(test_state_speed_eases_bg_color);
