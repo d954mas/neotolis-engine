@@ -1,5 +1,5 @@
 # Size Report: text (wasm-analysis-paired)
-# Commit: 98d08b2
+# Commit: 1544a2c
 
 ## WASM Section Sizes
 
@@ -7,25 +7,25 @@ Section                Size
 ---------------- ----------
 Type                 220 B
 Import               598 B
-Function             108 B
+Function             107 B
 Table                  5 B
 Memory                 7 B
 Global                 8 B
 Export                83 B
-Elem                  30 B
-Code               88493 B
-Data                8650 B
-Custom              4240 B
+Elem                  31 B
+Code               88340 B
+Data                8599 B
+Custom              4203 B
 ---------------- ----------
-TOTAL             102442 B
+TOTAL             102201 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-28327 B   frame
+28460 B   frame
  5861 B   nt_text_renderer_draw
- 4617 B   main
+ 4624 B   main
  4236 B   upload_glyph
  3585 B   nt_http_request_ex
  3002 B   fmt_fp
@@ -54,8 +54,8 @@ TOTAL             102442 B
   483 B   find_pack
   451 B   nt_gfx_activate_shader
 
-Total functions: 107
-Total code size: 88314 B
+Total functions: 106
+Total code size: 88163 B
 
 ## Built Engine Archives
 
@@ -77,7 +77,7 @@ libnt_crash.a              16938 B
 libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
-libnt_font.a               65220 B
+libnt_font.a               65358 B
 libnt_gfx.a               113224 B
 libnt_gfx_stub.a            6838 B
 libnt_hash.a                4108 B
@@ -103,7 +103,7 @@ libnt_pool.a                1404 B
 libnt_postfx_blur.a         6726 B
 libnt_recorder.a           16242 B
 libnt_render.a              7668 B
-libnt_resource.a          232018 B
+libnt_resource.a          238908 B
 libnt_shape_renderer.a    911296 B
 libnt_skeletal.a            7464 B
 libnt_skeletal_assets.a     4046 B
@@ -125,9 +125,9 @@ libnt_version.a              638 B
 libnt_window.a              4028 B
 libnt_window_stub.a         1888 B
 ------------------------ ----------
-TOTAL (archives)         2668610 B
+TOTAL (archives)         2675638 B
 
 ## Data Segments Summary
 
-Segments: 24
-Total data size: 8483 B
+Segments: 23
+Total data size: 8438 B

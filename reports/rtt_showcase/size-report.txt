@@ -1,5 +1,5 @@
 # Size Report: rtt_showcase (wasm-analysis-paired)
-# Commit: 98d08b2
+# Commit: 1544a2c
 
 ## WASM Section Sizes
 
@@ -12,23 +12,23 @@ Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                77 B
-Elem                  48 B
-Code              237496 B
-Data               21176 B
-Custom              6735 B
+Elem                  49 B
+Code              237369 B
+Data               21120 B
+Custom              6723 B
 ---------------- ----------
-TOTAL             266688 B
+TOTAL             266494 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-60846 B   frame
+60702 B   frame
 19237 B   dispatch_command
 13190 B   create_gpu
 10206 B   declare_slider_control
  8812 B   Clay__ConfigureOpenElementPtr
- 8585 B   main
+ 8592 B   main
  6038 B   Clay__SizeContainersAlongAxis
  5616 B   Clay__InitializeEphemeralMemory
  4343 B   upload_glyph
@@ -55,7 +55,7 @@ TOTAL             266688 B
  1312 B   nt_ui_image
 
 Total functions: 188
-Total code size: 237170 B
+Total code size: 237043 B
 
 ## Built Engine Archives
 
@@ -77,7 +77,7 @@ libnt_crash.a              16938 B
 libnt_debug_overlay.a       2210 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
-libnt_font.a               65220 B
+libnt_font.a               65358 B
 libnt_gfx.a               113224 B
 libnt_gfx_stub.a            6838 B
 libnt_hash.a                4108 B
@@ -103,7 +103,7 @@ libnt_pool.a                1404 B
 libnt_postfx_blur.a         6726 B
 libnt_recorder.a           16242 B
 libnt_render.a              7668 B
-libnt_resource.a          232018 B
+libnt_resource.a          238908 B
 libnt_shape_renderer.a    911296 B
 libnt_skeletal.a            7464 B
 libnt_skeletal_assets.a     4046 B
@@ -125,9 +125,9 @@ libnt_version.a              638 B
 libnt_window.a              4028 B
 libnt_window_stub.a         1888 B
 ------------------------ ----------
-TOTAL (archives)         2668610 B
+TOTAL (archives)         2675638 B
 
 ## Data Segments Summary
 
-Segments: 59
-Total data size: 20758 B
+Segments: 58
+Total data size: 20709 B
