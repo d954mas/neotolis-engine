@@ -222,7 +222,6 @@ static void frame(void) {
     nt_example_frames_begin();
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
-
         /* Materials keep their handles and draw again once their programs relink. */
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);

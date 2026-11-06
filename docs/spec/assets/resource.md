@@ -2,8 +2,8 @@
 
 Two-level resource registry: `NtAssetMeta` per pack asset, `NtResourceSlot` per
 requested resource_id, stable `nt_resource_t` indices, and priority-stacked
-packs with target/published winner resolve. Covers resolve callbacks, blob
-pinning (PIN_BLOB), virtual packs, asset types with the NT_ASSET_FONT and
+packs with target/published winner resolve. Covers resolve callbacks, owned
+asset data, virtual packs, asset types with the NT_ASSET_FONT and
 NT_ASSET_ATLAS binary formats, placeholder policy, and `nt_hash` identity hashing.
 
 Related: [Async Loading](async-loading.md), [Pack Format](ntpack.md), [Builder Architecture](../builder/builder.md)
@@ -218,11 +218,10 @@ parse, before any asset records or blob ownership change. Unknown manifest types
 are malformed input and reject the pack through the recoverable parse error.
 
 Registration requires an initialized registry, a valid type-table index, a non-NULL
-descriptor and known flag bits. `on_resolve` requires `on_cleanup` unless the type
-is PIN_BLOB (its `user_data` is a borrowed view); AUX_BACKED requires both. Validation precedes registration, so an invalid description leaves
-the type available for a valid first registration. PIN_BLOB is incompatible with
-virtual assets: registering a virtual provider for a PIN type asserts before
-mutation. Callbacks and flags stay together for the registry lifetime.
+descriptor and known flag bits. `on_resolve` requires `on_cleanup`; AUX_BACKED
+requires both. Validation precedes registration, so an invalid description leaves
+the type available for a valid first registration. Callbacks and flags stay
+together for the registry lifetime.
 
 ### Resolve callbacks (on_resolve / on_cleanup / on_post_resolve)
 
@@ -248,7 +247,6 @@ const void *nt_resource_peek_user_data(handle);
 
 Behavior flags:
 - `NT_RESOURCE_BEHAVIOR_AUX_BACKED`: published winner is deferred until `user_data` is synchronized to the winning asset. If the target winner requires aux data but its file-pack blob is currently missing, `resource_step()` schedules that pack for immediate re-download.
-- `NT_RESOURCE_BEHAVIOR_PIN_BLOB`: the published winner PINs its pack blob so a zero-copy consumer can read the live bytes at any time (see [Blob pinning](#blob-pinning)). Mutually independent of `AUX_BACKED` — a copy-out consumer never needs it, a zero-copy consumer always does.
 
 **on_resolve** fires during publication for the published winner when:
 - published asset identity changes
@@ -258,15 +256,13 @@ Behavior flags:
 `on_resolve` only runs when the published winner is usable now. For aux-backed assets this means the callback either already owns matching `user_data`, or the winner's blob is resident and can be parsed immediately. For simple runtime-handle asset types, `data` may still be NULL (virtual pack or evicted blob) because publication can proceed from the runtime handle alone.
 
 Non-NULL `data` borrows the winner's pack bytes; callbacks must not mutate or free
-them. Without `PIN_BLOB`, the view is valid only during the call and must be copied
-if needed later. A `PIN_BLOB` consumer may keep the view between callbacks because
-its published winner pins the blob. The next `on_resolve` for this slot must
-replace or clear any retained view; the engine passes existing `user_data`
-without calling `on_cleanup` first. `on_cleanup` must discard the retained view.
-Explicit unmount invokes that cleanup before freeing the blob, including during
-shutdown; see [Blob pinning](#blob-pinning).
+them. The view is valid only during the call and must be copied if needed later.
+The next `on_resolve` receives existing owned `user_data` without calling
+`on_cleanup` first, so the callback updates or replaces it.
 
-**on_cleanup** fires for non-NULL `user_data` when a resolve finds no publishable real winner, synchronously when explicit unmount removes a `PIN_BLOB` slot's published provider, and during shutdown for remaining data. Copy-out data without `PIN_BLOB` survives unmount until the next resolve or shutdown. A type whose `user_data` owns nothing (a borrowed `PIN_BLOB` view) registers no `on_cleanup`; the core still clears `user_data`.
+**on_cleanup** fires for non-NULL `user_data` when a resolve finds no publishable
+real winner and during shutdown for remaining data. Owned auxiliary data survives
+unmount until the next resolve or shutdown.
 
 **on_post_resolve** fires after the resolve iteration finishes. It may call `request` / `find` / `get` style resource accessors under the callback contract above. Typical use: materialize dependent resource slots from ids that were copied in `on_resolve`.
 
@@ -274,32 +270,28 @@ Publication change detection uses three pieces of state: published asset identit
 
 `resource_step()` may run more than one resolve pass in the same frame when `on_post_resolve` work creates new slots that need resolution. The pass count is bounded.
 
-### Blob pinning
+### Owned asset data
 
-A plain activator (`activate`/`deactivate`, no resolve callbacks) is already
-copy-out: it turns the payload into a self-contained runtime object and never
-reads the blob again. MESH does it with GPU buffers; the skeletal types
-(`NSKL`, `NSKN`, `NANM`, `engine/skeletal_assets`) do it with one CPU allocation
-per asset holding a copy of the payload, which is already the runtime layout.
-FONT likewise owns one compact payload per canonical asset, shared by its caches;
-BLOB owns its payload bytes. None of these types pins.
+A plain activator (`activate`/`deactivate`, no resolve callbacks) turns the payload
+into a self-contained runtime object and never reads the pack blob again. MESH
+owns GPU buffers; the skeletal types (`NSKL`, `NSKN`, `NANM`,
+`engine/skeletal_assets`) own one CPU payload allocation per canonical asset.
+FONT owns one compact payload shared by its caches; BLOB owns its payload bytes.
+Aliases share their canonical owner's object.
 
-Two consumption models exist for asset types that derive state from pack bytes
-through the resolve callbacks:
+An auxiliary consumer (`NT_RESOURCE_BEHAVIOR_AUX_BACKED`, such as atlas) copies
+its required bytes into owned `user_data` during `on_resolve`. Once built, that
+snapshot remains usable after pack-byte eviction. A different target winner
+needs resident source bytes until its own snapshot has been prepared.
 
-- **Copy-out** (`NT_RESOURCE_BEHAVIOR_AUX_BACKED`, e.g. atlas): `on_resolve` copies the bytes it needs into a self-contained `user_data`. Once built, `user_data` never touches the blob again, so the pack blob can be evicted freely and the consumer keeps working. Copy-out consumers do **not** pin.
-- **Zero-copy** (`NT_RESOURCE_BEHAVIOR_PIN_BLOB`, custom consumers): the consumer reads the *live* pack blob on demand. Its `user_data` borrows the winner's asset bytes inside the pack blob, so the blob must stay resident for as long as it is the published winner. Zero-copy consumers **pin** the blob. FONT no longer uses this path.
+`NT_BLOB_AUTO` can evict I/O-owned pack bytes after activation completes and the
+TTL expires. Requested resources do not retain their source blob. Caller-owned
+bytes passed to `nt_resource_parse_pack` remain borrowed until unmount or
+shutdown and are never evicted by the registry.
 
-**Pin count (`NtPackMeta.blob_pins`).** Each pack carries the aggregate count of published winners (across all slots) pinning its blob. The resolve pass resets every pack's count to zero, then increments it once per published `PIN_BLOB` winner. Rebuilding from the selected winners avoids maintaining separate pin ownership on each slot. Consumers never pin/unpin themselves. Eviction checks the previous pass's count and skips pinned blobs: pins are normal residency state, not an invariant violation.
-
-**Eviction vs. the pin (`NT_BLOB_AUTO`).**
-- **Timer-freeze:** while `blob_pins > 0`, blob eviction is skipped *and* `blob_last_access_ms` is refreshed each step. Zero-copy reads never bump last-access, so freezing the clock means a fresh full TTL grace begins only once the pin drops to 0.
-- **AUTO-as-KEEP:** a pinned `NT_BLOB_AUTO` pack behaves as `NT_BLOB_KEEP`. This is not an error; it is reported once via an edge-triggered log (re-armed when `blob_pins` returns to 0), never per frame.
-- **Plain assets (copy-out) recover via invalidate:** for a plain asset (texture/mesh) the GPU `runtime_handle` is self-contained after activation, so rendering continues with `blob == NULL`. Recovery after GPU context loss is game-driven: the game calls `nt_resource_invalidate(asset_type)` (contract: "game must re-create resources" on `context_restored`), which deactivates + marks assets back to `REGISTERED` (Pass 1) and, for any pack whose `AUTO`-evicted blob is now `NULL`, resets `pack_state` to re-issue the download (Pass 2) — so the next `resource_step()` re-downloads and re-activates. `AUTO` is therefore recoverable for plain assets; no source is permanently lost as long as the game invalidates on context restore. With explicit pack-level lifetime, `AUTO` for plain assets is mostly a memory optimization (unmount already bounds the blob).
-
-**Unmount override.** Explicit `nt_resource_unmount` overrides the pin: it proceeds (developer intent wins), emits a one-shot error log if `blob_pins > 0`, and preserves the deactivate-before-free ordering. Teardown zeroes `blob_pins`; the next resolve rebuilds it from the current winners, and the unmounted pack (no longer a winner) is simply not counted — no stale pin, no double-free. The zero-copy consumer loses its provider **synchronously, before the blob is freed**: unmount walks the `PIN_BLOB` slots whose published winner resolves to this pack and runs `on_cleanup` + clears `user_data` first — otherwise a consumer read between unmount and the next resolve pass would dereference freed memory. Copy-out consumers without `PIN_BLOB` are **not** severed — their `user_data` is self-contained. The severed consumer degrades to its fallback. Invariant: **every blob-freeing path is reconciled with the pin — eviction respects it (skip), unmount overrides it (proceed + log).**
-
-The per-asset pin (the published winner of a pinning slot) is exposed for diagnostics as `nt_resource_asset_info_t.blob_pins` and surfaced in the devapi `resource.list` group.
+Explicit unmount deactivates canonical runtime objects once and releases their
+asset records and pack data. Owned per-slot auxiliary data is updated or cleaned
+up by the next resolve, or cleaned up during shutdown.
 
 ## GPU context loss recovery
 
@@ -375,11 +367,19 @@ and game-side structures need no re-binding.
 
 A font keeps its `nt_font_add` source list of resource handles. Once the context
 is usable, `nt_font_step` recreates a non-ready curve texture before its
-resource rescan; this does not require source-asset reactivation. Re-adding an
-existing source asserts on the duplicate. Call `nt_font_step` after
+resource rescan; this does not require source-asset reactivation. GPU restore
+does not invalidate FONT: its owned CPU payload survives context loss. Explicit
+`nt_resource_invalidate(NT_ASSET_FONT)` remains legal when the game needs to
+re-activate those sources; it releases and rebuilds them through the normal
+resource path. Re-adding an existing source asserts on the duplicate. Call `nt_font_step` after
 `nt_gfx_begin_frame` and before any render pass: recovery destroys and replaces
 the old texture handles. An atlas keeps its parsed regions and
 needs its page textures resolved again.
+
+The current invalidation bridge schedules all evicted file packs for reload,
+even when a pack contains no asset of the invalidated type. CPU FONT objects
+remain intact, but an unrelated GPU-type invalidation may still reread their
+source pack. Demand-driven recovery in #509 removes this migration limitation.
 
 Programs from file-backed stages come back as the resource step re-activates
 their stages from `NT_ASSET_SHADER_CODE` within its activation budget, starting
@@ -414,8 +414,7 @@ Asset lifetime is **explicit pack-level mount/unmount, owned by the developer** 
 there is **no refcounting by design** (declined: it hides lifetime instead of
 expressing it; see api-contracts "Do not introduce refcounting"). Group assets by
 lifetime: level assets go in level packs, mounted on enter and unmounted on
-leave. `blob_pins` above is a *pin* (a derived residency requirement), not a
-refcount — nothing counts consumers, and unmount always wins.
+leave.
 
 ## Virtual packs
 
@@ -451,8 +450,7 @@ uses it to translate manifest ordinals without allocating a separate map.
 Before releasing an index, invalidate matching published-winner and auxiliary
 source indices in its requested slot. This preserves change detection even if
 the same name and runtime handle reuse that index before the next step. Copy-out
-user_data survives until normal resolve cleanup/rebuild; PIN_BLOB providers are
-severed before indices become reusable and before freeing the blob. BLOB and
+user_data survives until normal resolve cleanup/rebuild. BLOB and
 metadata getters return NULL after release until the next publication. Published
 handle/state and the publication epoch remain owned by the resolve pass.
 

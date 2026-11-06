@@ -35,7 +35,7 @@ typedef enum {
 typedef enum {
     NT_BLOB_KEEP = 0, /* blob lives as long as pack is mounted */
     /* Auto-evict resource-managed I/O blobs after TTL; invalidation reloads them on demand.
-     * Caller-owned blobs and published PIN_BLOB sources stay resident. */
+     * Caller-owned blobs stay resident. */
     NT_BLOB_AUTO = 1,
 } nt_blob_policy_t;
 
@@ -96,9 +96,8 @@ typedef struct {
     uint32_t bytes_received;
     uint32_t bytes_total;
     /* I/O request linkage */
-    uint32_t io_request_id;         /* nt_http or nt_fs handle.id */
-    uint8_t io_type;                /* nt_io_type_t */
-    uint8_t blob_evict_skip_logged; /* log pinned AUTO skip once; re-arm when pins reach zero */
+    uint32_t io_request_id; /* nt_http or nt_fs handle.id */
+    uint8_t io_type;        /* nt_io_type_t */
     /* Retry state */
     uint16_t attempt_count;
     uint32_t retry_delay_ms;
@@ -106,7 +105,6 @@ typedef struct {
     /* Blob eviction */
     uint32_t blob_last_access_ms;
     uint32_t blob_ttl_ms;
-    uint32_t blob_pins;       /* published PIN_BLOB winners; rebuilt each resolve pass, prevents eviction */
     uint32_t activate_cursor; /* no activation-eligible owner lies below this registry index */
     /* Original load path for retry and re-download after invalidation */
     char load_path[256];

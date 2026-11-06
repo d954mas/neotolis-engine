@@ -1214,8 +1214,7 @@ static void frame(void) {
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         s_atlas_bound = false;
-        /* Font sources survive restore; adding them again asserts on duplicates.
-         * nt_font_step rebuilds textures after the font assets reactivate. */
+        /* Font sources survive restore; nt_font_step rebuilds their textures. */
         s_gpu_restore_pending = true;
     }
     if (s_gpu_restore_pending) {

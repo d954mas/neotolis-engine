@@ -1,7 +1,7 @@
 # Resource, Runtime Object and Pack Refactor
 
 **Status:** Proposed architecture and migration specification; not implemented.
-**Date:** 2026-09-17; installation/publication contract revised 2026-11-06.
+**Date:** 2026-09-17; installation/publication and minimality review revised 2026-11-06.
 **Reviewed baseline:** `cce1ea6a94cae53810c257ec996994c8d3718fa9`.
 
 This document specifies the intended replacement for eager activation and
@@ -54,9 +54,10 @@ The agreed behavior is:
 10. Keep the global publication epoch as a synchronization optimization. Atlas
     revisions and font-local source checks determine which caches actually change.
 
-A pending installation is bounded operation state, not another public resource
-name, a priority candidate or a fallback provider. A failed preparation preserves
-the current object and binding. No separate public replace/swap protocol is needed.
+A resource retains one committed source/object and at most one pending source
+selection with its progress/outcome. A failed preparation preserves the current
+object and binding. This needs no separate operation pool, public staging resource,
+priority candidate, or replace/swap protocol.
 
 Source selection is game policy. The target registry has no pack-priority field,
 automatic provider selection, or automatic fallback to another source. Opening a
@@ -102,9 +103,10 @@ The coupling at the reviewed baseline was:
 - Virtual packs publish borrowed game-owned handles.
 
 Migration status: step 1 now gives FONT and BLOB owned payloads. FONT activation
-copies its compact source and no longer uses publication callbacks or PIN_BLOB;
-BLOB access survives pack-byte eviction. The current resource chapter documents
-these shipped contracts. The remaining steps below are still proposed.
+copies its compact source and no longer uses publication callbacks. PIN_BLOB and
+its accounting/cleanup paths are removed; BLOB access survives pack-byte eviction.
+The current resource chapter documents these shipped contracts. The remaining
+steps below are still proposed.
 
 Mesh upload already stops retaining source bytes after construction. Atlas already
 copies geometry; preserve useful owned data while extracting standalone objects.
@@ -141,8 +143,9 @@ The logical information associated with an entry is:
 - for `PACK`, a specific pack instance and entry identity;
 - `wanted`: the latest explicit load/unload intent;
 - effective state and current runtime object, if any;
-- bounded pending-installation state: requested source, progress/outcome and
-  candidate ownership; separate from current availability, without a public slot;
+- an optional pending source selection and progress/outcome, separate from current
+  availability; retain an unpublished object only when its type must wait after
+  construction;
 - failure information distinguishing a failed installation from current availability;
 - bounded type-specific binding data where needed, such as an atlas's explicitly
   assigned page resources and local revision; not lifetime region-index history.
@@ -150,6 +153,10 @@ The logical information associated with an entry is:
 This is a contract, not a required C struct layout. Do not duplicate canonical
 owner state in every alias or introduce a second independently mutable readiness
 flag. Pack-entry records describe sources; the resource API owns the public view.
+Synchronous construction uses a local candidate handle and publishes it in the
+same lifecycle call. Do not allocate a generic operation record for each attempt.
+Shared canonical preparation progress/errors are derived through the selected
+source, not mirrored independently in each alias's pending state.
 
 ### 3.3 Origin and ownership are different
 
@@ -269,6 +276,8 @@ the cache/composition object, distinct from the registered font-source resource.
 Creating a font source directly may accept the existing prebuilt font format.
 It does not add a TTF/OTF parser or runtime font builder. Destroying an `nt_font_t`
 does not implicitly unload any source resources.
+The font module's source capacity is explicit and independent of registry capacity
+and cache count: several caches may share one source or compose several sources.
 
 **Atlases:** introduce a real owned atlas-data object containing regions,
 geometry, scale and page identifiers. Direct construction accepts prepared runtime
@@ -279,6 +288,9 @@ object. Construction itself does not request or load page textures.
 Parsing a catalog does not make BLOB entries ready. Its data getter returns an
 object-backed view valid until object unload/replacement/unbinding/shutdown,
 independent of source-byte eviction. BLOB is not a special pointer into the pack.
+Its direct constructor/destructor and packed adapter share one byte-object
+implementation. Step 2 removes the temporary registry-owned `blob_data` table;
+step 4 changes catalog parsing to demand-driven construction.
 
 The same source-lifetime rule applies to future registered types, including
 skeletons and clips, without implementing those modules as part of this work.
@@ -289,6 +301,9 @@ Type constructors work without mounting a pack and without creating a registry
 slot. Resource adapters register the type's packed decoder/destructor separately
 from this basic construction capability; avoid mandatory registry initialization
 in a constructor merely because its module also supports resource lookup.
+For fonts this includes using an unregistered source for measurement and rendering,
+not only constructing a handle that must then be registered. The composition
+contract below defines direct and resource-backed inputs.
 
 Input lifetime is specified per constructor. Synchronous GPU constructors may
 borrow input for the call. CPU-owning constructors copy retained input, or expose
@@ -389,6 +404,16 @@ Successful ready-runtime installation and destructive commands take effect befor
 return at that same legal boundary. Mutation/publication occurs before consumer
 sync, layout and draw-list preparation, or after all old prepared work is finished
 or discarded. The registry does not keep retired objects alive for recorded draws.
+This follows the existing [frame rule](../runtime/frame-lifecycle.md#engine-frame-order),
+including its prohibition on destroying live GPU objects after the first pass.
+
+During asynchronous pack I/O, retain the requested source and preparation outcome.
+Once its bytes are available, synchronous activation constructs a local candidate,
+publishes the completed binding and retires the old ownership claim in the same
+`nt_resource_step` call. There is no persistent candidate-object slot for this
+path. A type that must wait after construction may retain an unpublished object
+under its own bounded contract; resolve the atlas/page case in #505 rather than
+giving every type a transaction framework.
 
 Pending progress/failure is observable in diagnostics without changing current
 object identity, source metadata, atlas revision or font metrics. The global epoch
@@ -402,7 +427,7 @@ Type callbacks must not reenter lifecycle mutation. Legal render-local
 font/material setters keep their existing flush contracts.
 
 A seamless installation needs simultaneous storage for old and candidate objects.
-Configure bounded operation/object capacity and measure this overlap; no hidden
+Configure bounded source/object capacity and measure this overlap; no hidden
 pool growth, destructive eviction of the old object, or promise of zero headroom.
 Programmer capacity violations keep the owning constructor's assert policy.
 This differs from context-loss recovery: dead records are retired before recreation.
@@ -513,8 +538,9 @@ supersedes only the old candidate; current publication stays intact. Shared I/O
 may continue for other demand. Late results must not resurrect unloaded content,
 overwrite a newer install or target a reused source instance.
 
-Use source identity and existing request generations where sufficient. An
-installation that can outlive its selection needs an operation identity check.
+Use source identity and existing request generations where sufficient. Work that
+can complete independently after its selection changes needs an operation identity
+check. Synchronous activation/publication needs no additional operation token.
 Do not add generations mechanically when current linkage already proves validity.
 Release unpublished objects/source references once and preserve shared owners
 still used by other current bindings or pending installations.
@@ -540,9 +566,15 @@ network availability or immediate completion.
 Retain the existing explicit I/O retry configuration; changing the shipped default
 is not part of this refactor. Currently zero means unlimited attempts, so a game
 requiring a terminal failure configures a finite limit. Network failures and
-activation failures remain distinguishable. A bad payload does not retry every
-frame simply because demand remains true. Automatic restoration is an attempt,
+activation failures remain distinguishable. A terminal activation failure does
+not retry every frame simply because demand remains true. Automatic restoration is an attempt,
 not a guarantee of successful recovery.
+
+Recoverable source, I/O and outer-container failures follow the loader contract.
+Trusted asset header or structural violations assert: the resource core checks
+magic/version/header size and the activator checks its structure. They are not
+retryable installation outcomes. Value validation remains in the builder; device
+or build limits may produce the type's documented activation failure.
 
 When a new unload/load attempt restarts a terminal pack-I/O failure, all still-
 demanded current bindings/candidates blocked by that same source failure join the shared read,
@@ -731,14 +763,23 @@ current readiness/revision before exposing geometry. Validation precedes any
 dereference of an old cached pointer, including item and batch-key generation.
 
 A generic per-resource version is not required in addition to these mechanisms.
-Operation tokens reject stale async work; pool generations identify object reuse;
-atlas revisions invalidate atlas caches. They solve different problems. Removing
+Existing request identities (and operation tokens only where needed) reject stale
+async work; pool generations identify object reuse; atlas revisions invalidate
+atlas caches. They solve different problems. Removing
 the coarse epoch later is a performance choice, not a prerequisite for manual
 source selection or this refactor.
 
 ### 8.5 Font caches and UI measurements
 
-Font compositions retain resource references to independently owned font sources.
+Font compositions accept borrowed `nt_font_source_t` handles and stable
+`nt_resource_t` references. Use two explicit entry points (provisionally
+`nt_font_add_source` and `nt_font_add_resource`) and a small type-local tagged
+source entry, not a generic reference framework. Only resource references follow
+registry replacement. A direct source remains owned by its creator and must
+outlive every composition that uses it.
+Validate source/resource types when adding them; reconcile both kinds into source
+handles before glyph access. Source setters use the existing dirty/cache paths.
+
 Source loss or successful installation refreshes metrics, source indexing and
 glyph/measurement caches before their next use. Preparation, failure and cancellation
 leave the current source and its measurement/glyph caches unchanged. Several font caches may share a source without
@@ -837,21 +878,26 @@ mesh pool record by itself does not prove that its GPU storage survived.
 
 ### 9.3 Frame ordering
 
-The current resource step precedes `nt_gfx_begin_frame`, which observes context
-events later. The migration must wire loss invalidation into that observation
-boundary, before game resource queries/rebuild decisions following it. GPU
-activation while loss is known stays suspended. Restoration may complete on
-subsequent resource steps; same-frame recovery is not promised.
+`nt_gfx_begin_frame` observes context loss/restoration before `nt_resource_step`
+and `nt_font_step`, as specified by the
+[frame order](../runtime/frame-lifecycle.md#engine-frame-order). Wire invalidation
+of affected managed GPU objects into that observation boundary, before subsequent
+queries and rebuild decisions. Preserve CPU sources, including FONT; rebuilding
+glyph textures does not invalidate their source assets. GPU activation while loss
+is known stays suspended. Restoration may complete on subsequent resource steps;
+same-frame recovery is not promised.
 
 An activation attempted before begin-frame has processed a newly lost context
 must also defer when the backend cannot accept creation. It must not mistake a
-temporary backend-unavailable result for a terminal malformed-payload failure.
+temporary backend-unavailable result for a terminal activation failure.
 
-Keep the current restored-frame rule: discard earlier prepared draw state and
-skip dependent draws on that frame. Poll/enumerate for game recreation only after
-backend recovery has completed. Automatic file recovery must also work in an
-application using the public module loop without the default app runner; do not
-hide required invalidation solely in one example's event handler.
+Discard draw state prepared against the lost context. Once begin-frame recovery
+has completed, poll/enumerate for game recreation, step resources and consumers,
+and render the iteration normally. Readiness gates skip unavailable assets;
+restoration does not require skipping all dependent draws for that frame.
+Automatic file recovery must also work in an application using the public module
+loop without the default app runner; do not hide required invalidation solely in
+one example's event handler.
 
 ## 10. Registry enumeration and diagnostics
 
@@ -900,8 +946,10 @@ into 32 bits. Zero means no object, including BLOB. Resource identity and object
 pool identity remain separate. Owned installation requires a destructor; a
 borrowed object cannot be consumed. Follow current type ownership contracts.
 
-Use bounded, preallocated registry/operation work storage. Allocation belongs at
-explicit construction/decode/preparation boundaries. Idle steps and hot getters
+Use bounded, preallocated registry and type-owned work storage. Pending source
+intent belongs to its existing resource slot; do not add a generic operation pool.
+Allocation belongs at explicit construction/decode/preparation boundaries.
+Idle steps and hot getters
 do no heap work or repeated publication scans. Do not add a generic observer,
 factory, dependency graph or transaction framework.
 
@@ -915,22 +963,36 @@ owned registration. Current chapters describe shipped behavior, not this proposa
 
 Import this revised proposal. Give font sources owned compact payloads with lazy
 glyph decode and BLOBs owned bytes. Audit retained activation/publication pointers,
-including atlas, metadata and mesh descriptors. Remove font PIN_BLOB after consumer
-migration; preserve existing scheduling/priorities temporarily. Prove a previously
-uncached glyph and loaded BLOB/atlas work after source bytes are freed.
+including atlas, metadata and mesh descriptors. Remove PIN_BLOB and its unused
+accounting, cleanup and diagnostics after consumer migration; preserve existing
+scheduling/priorities temporarily. Remove FONT invalidation from GPU-restore
+callers and assert the resource type at the font-source input boundary. Prove a
+previously uncached glyph and loaded BLOB/atlas work after source bytes are freed,
+including glyph-texture recovery without font-source reloading.
+
+The current manual GPU-type invalidation bridge can still reread unrelated
+evicted packs, including FONT-only packs, without recreating their CPU sources.
+Step 1 proves font-local recovery needs no pack read; selective pack I/O remains
+part of demand-driven loading and recovery in #507/#509.
 
 ### Step 2 — Direct runtime constructors (#503)
 
-Expose font-source, AtlasData and mesh constructors/destructors without a
+Expose font-source, AtlasData, BLOB and mesh constructors/destructors without a
 pack/registry; reuse texture/shader constructors and packed implementations.
-Keep optional adapters separate and document input ownership without double copies.
-These objects become candidate inputs to the same installation mechanism.
+Give font sources their own explicit capacity. Make direct sources usable in font
+compositions alongside resource references, with the borrowed lifetimes above.
+Replace BLOB's temporary registry pointer table with its owned object path.
+Keep optional resource adapters separate and document input ownership without
+double copies. These objects become inputs to the same installation mechanism.
 
 ### Step 3 — Installation and consumer publication (#504–#506)
 
 #504 adds stable committed bindings plus bounded installation state. First install
 and replacement share publication; retain current objects/sources until success.
 No priorities, alternate staging names or public replace/swap protocol.
+Keep pending source/outcome in the slot. Synchronous activation creates and
+publishes its candidate within one lifecycle call; retain an unpublished object
+only when a concrete type contract requires waiting afterward.
 Migrate runtime ownership, cancellation, inspection and source metadata together.
 Retire lost RUNTIME records before recreation and expose wanted/unready entries;
 CPU data survives. Keep the manual PACK recovery bridge until #509.
@@ -970,7 +1032,7 @@ The separately recorded program/custom-owner scope conflict remains to be resolv
 
 ### Step 6 — Integration and cleanup (#510)
 
-Remove priorities/winners, virtual packs, dummy activators, obsolete pinning,
+Remove priorities/winners, virtual packs, dummy activators,
 atlas tombstones and eager assumptions. Keep epoch/local invalidation.
 Update resource/async/pack/runtime-format/frame/API chapters and affected skeletal
 assumptions. Migrate existing textured_quad/bunnymark/sponza/font/UI examples and
@@ -1006,12 +1068,18 @@ for this document. Prefer existing unit/fake-backend/browser test infrastructure
    ownership. Recreate under the original handle. Declare runtime origin before
    first creation and discover its wanted, unready slot through enumeration.
    Creating and registering these objects allocates no virtual-pack record.
+   Measure/render from a direct borrowed font source without initializing the
+   resource registry; also use resource-backed composition and follow replacement.
+   Several caches share a source; destroying a cache does not destroy that source.
+   Create/read/destroy BLOB objects without a registry or temporary pack.
 8. **Unified installation:** use the same operation for an empty slot and SD→HD
    under one stable handle. During delayed HD preparation render SD and retain its
    source/metadata. Successful publication exposes HD and updates consumers without
    reassignment. Failure/cancellation keeps SD; inspect/retry the failed operation
    without unloading SD. Supersede HD with a newer request and reject late results.
    Mounting same names never overrides anything; there is no priority fallback.
+   For synchronous activation without a type-specific wait, publish the candidate
+   in the same step; retain no separate operation allocation or persistent object.
 9. **Atlas identity/pages:** reorder/add/remove/reintroduce names across replacement,
    unload/reload and source rebinding. Existing sprites/UI refs resolve their same
    names using the new revision; no old numeric index selects a different name.
@@ -1032,13 +1100,17 @@ for this document. Prefer existing unit/fake-backend/browser test infrastructure
     readiness. Restore wanted pack objects; enumerate and recreate runtime ones;
     retain CPU data; do not reload deliberately unloaded objects or packs used
     solely by them. Resolve new runtime handles through stable resource references.
+    Evict a FONT source pack before loss, then rebuild glyph textures and decode
+    an uncached glyph without invalidating the CPU source or reading that pack.
     Recreate runtime fallbacks at full pool capacity without direct game destruction
     of registry-owned objects. Repeat loss during recovery without stale publication;
     defer GPU activation even before begin-frame processes the loss event. Cover
     loss with both current and candidate objects, and cancellation during recovery.
 12. **Failure:** simulate missing source, exhausted configured retries, invalid
-    payload and same-size changed pack data. Expose failure, publish no partial
-    object, preserve unrelated ready objects and allow explicit unload/load retry.
+    outer-container data and same-size changed pack data. Expose recoverable
+    source failures, publish no partial object, preserve unrelated ready objects
+    and allow explicit unload/load retry. Separately verify trusted asset header
+    and structural violations assert instead of becoming retryable outcomes.
     Fail one shared read for two different canonical owners; retry through one and
     include every wanted entry blocked by that same source failure, without
     resetting unrelated terminal activation failures.
@@ -1054,6 +1126,7 @@ for this document. Prefer existing unit/fake-backend/browser test infrastructure
     resident memory; independent data may increase construction peak while
     reducing the long-lived pack residency that motivated this work. Measure live
     SD plus HD-candidate overlap and configured pool headroom; do not hide growth.
+    Configure font-source capacity independently of registry and cache capacities.
 15. **Catalog metadata and teardown:** query metadata before object load and
     after unload/byte eviction; rebind and observe the new entry's metadata.
     Shut down with live pack and runtime objects, shared aliases and pending I/O;
