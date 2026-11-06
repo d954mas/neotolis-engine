@@ -1209,7 +1209,6 @@ static void frame(void) {
 #endif
         /* One-shot per restored event; the GPU recreation below may retry. */
         nt_resource_invalidate(NT_ASSET_TEXTURE);
-        nt_resource_invalidate(NT_ASSET_FONT);
         /* Materials keep their handles and draw again once their programs relink. */
         nt_program_ref_drop(&s_sprite_program);
         nt_program_ref_drop(&s_text_program);

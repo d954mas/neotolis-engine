@@ -1656,6 +1656,7 @@ bool nt_font_valid(nt_font_t font) {
 void nt_font_add(nt_font_t font, nt_resource_t resource) {
     NT_ASSERT(s_font.initialized);
     NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
+    NT_ASSERT(nt_resource_get_asset_type(resource) == NT_ASSET_FONT);
 
     nt_font_slot_t *slot = get_slot(font);
     NT_ASSERT(slot->resource_count < NT_FONT_MAX_SOURCES_PER_FONT);
