@@ -1,7 +1,7 @@
 # Resource, Runtime Object and Pack Refactor
 
 **Status:** Proposed architecture and migration specification; not implemented.
-**Date:** 2026-09-17; installation/publication and minimality review revised 2026-11-06.
+**Date:** 2026-09-17; installation/publication, minimality and extensible fonts revised 2026-11-06.
 **Reviewed baseline:** `cce1ea6a94cae53810c257ec996994c8d3718fa9`.
 
 This document specifies the intended replacement for eager activation and
@@ -52,7 +52,11 @@ The agreed behavior is:
 9. Consumers may retain stable resource references. Changing their selected
    objects invalidates dependent caches; the game need not reassign every sprite.
 10. Keep the global publication epoch as a synchronization optimization. Atlas
-    revisions and font-local source checks determine which caches actually change.
+    revisions and font-local content revisions determine which caches actually change.
+11. The font itself is an extensible resource. One fill operation adds glyphs;
+    overlapping codepoints assert unless overwrite is explicitly permitted.
+    Builder selects ranges. Old data stays usable until the complete addition is
+    ready; successful publication preserves the font handle and refreshes caches.
 
 A resource retains one committed source/object and at most one pending source
 selection with its progress/outcome. A failed preparation preserves the current
@@ -267,26 +271,40 @@ mesh owns its GPU buffers and retained descriptor data. Initial direct construct
 may upload caller buffers during the call; it need not offer every future buffer
 borrowing/consumption variant.
 
-**Fonts:** introduce a real owned font-source object. It stores only the font's
-validated compact payload and required indexing data. Copying this payload is
-enough; eager glyph expansion is not required. Multiple `nt_font_t` cache objects
-can read one source object without duplicating its font payload. `nt_font_t` remains
-the cache/composition object, distinct from the registered font-source resource.
+**Fonts:** the font itself is the owned, extensible runtime resource. Create an
+empty `nt_font_t`, fill it from one pack, then add glyphs from other packs to the
+same object used by text/UI. A FONT registry entry identifies that font, not a
+separate public source object feeding a composition. It owns retained compact
+payloads, glyph indexing and its caches; glyph decoding remains lazy. Internal
+payload storage is an implementation detail, not a public source list.
 
-Creating a font source directly may accept the existing prebuilt font format.
-It does not add a TTF/OTF parser or runtime font builder. Destroying an `nt_font_t`
-does not implicitly unload any source resources.
-The font module's source capacity is explicit and independent of registry capacity
-and cache count: several caches may share one source or compose several sources.
+One fill operation adds missing codepoints and, only when explicitly permitted,
+overwrites existing ones. By default any incoming codepoint already present in
+the font triggers `NT_ASSERT` before publication. Explicit overwrite permission
+applies only to incoming codepoints; characters absent from the input survive.
+There is no source precedence, fallback stack or automatic pack override.
+Builder selects the glyph ranges and emits each desired subset. This version
+adds no runtime range selector, TTF/OTF parser or runtime font builder. Preserve
+the existing compatibility requirements for font-wide metrics when combining
+subsets; overwrite permission does not waive them.
 
-The game's multi-pack workflow stays intact: create one `nt_font_t`, attach FONT
-sources from any number of packs within its configured source limit, then use
-that same font for text and UI. For example, a primary alphabet and supplemental
-alphabets can come from separate packs. Attachment composes sources; it does not
-flatten or eagerly copy their glyphs into the cache. Source order is explicit
-font policy, independent of pack priorities. A FONT registry entry identifies
-source data, while `nt_font_t` is the game-created composition/cache that uses it.
-Replacing a resource-backed source updates the existing composition at publication.
+Prepare the complete addition before changing the live font. Publish it at the
+lifecycle boundary before measurement/layout/drawing, retaining the font handle.
+Until then old glyphs, metrics and caches remain usable. I/O failure or cancelled
+preparation leaves them unchanged; no partial prefix of the addition is visible.
+Source bytes are needed only during preparation; the font owns everything needed
+afterwards, including for uncached glyph decode and GPU-cache reconstruction.
+Font and retained-payload capacities are explicit, independent of registry size;
+no allocation or growing source search is added to per-glyph access.
+
+A game-created font filled from several packs has RUNTIME origin when registered:
+the game repeats its fill calls after explicitly destroying/unloading the font.
+Pack input does not create a persistent reload recipe or change that origin.
+Pending reads protect their input pack until completion/cancellation, but a
+completed fill retains no pack dependency. Whole-object PACK installation still
+recreates exactly its selected entry; extending such an object must not silently
+promise that replaying one entry reconstructs the extensions. The #506 API must
+make that ownership/origin boundary explicit without adding a source-history graph.
 
 **Atlases:** introduce a real owned atlas-data object containing regions,
 geometry, scale and page identifiers. Direct construction accepts prepared runtime
@@ -310,9 +328,9 @@ Type constructors work without mounting a pack and without creating a registry
 slot. Resource adapters register the type's packed decoder/destructor separately
 from this basic construction capability; avoid mandatory registry initialization
 in a constructor merely because its module also supports resource lookup.
-For fonts this includes using an unregistered source for measurement and rendering,
-not only constructing a handle that must then be registered. The composition
-contract below defines direct and resource-backed inputs.
+For fonts this includes creating, filling, measuring and rendering the font
+without registry initialization. The same font object can then be registered
+through ordinary ownership transfer; it is not wrapped in another composition.
 
 Input lifetime is specified per constructor. Synchronous GPU constructors may
 borrow input for the call. CPU-owning constructors copy retained input, or expose
@@ -746,7 +764,7 @@ that the page GPU object is unchanged. Avoid caching such values unnecessarily.
 Keep `publication_epoch` as a cheap coarse change signal. Its equality lets a
 module skip its whole resource reconciliation pass when it has no local dirty
 state. After a change, the module examines its actual dependencies: sprite caches
-compare atlas revisions; fonts compare source presence and runtime identities.
+compare atlas revisions; font consumers compare font identity and content revision.
 An unrelated shader publication can trigger a scan, not a flush of every cache.
 
 Advance the epoch before a public mutation returns whenever it changes observable
@@ -781,36 +799,35 @@ source selection or this refactor.
 
 ### 8.5 Font caches and UI measurements
 
-Font compositions accept borrowed `nt_font_source_t` handles and stable
-`nt_resource_t` references. Use two explicit entry points (provisionally
-`nt_font_add_source` and `nt_font_add_resource`) and a small type-local tagged
-source entry, not a generic reference framework. Only resource references follow
-registry replacement. A direct source remains owned by its creator and must
-outlive every composition that uses it.
-Validate source/resource types when adding them; reconcile both kinds into source
-handles before glyph access. Source setters use the existing dirty/cache paths.
+Text and UI use the extensible font defined in section 4.2, directly or through
+its stable resource reference. Do not expose a second font-source resource,
+source-list setters or tagged direct/resource source attachments. Successful
+fill keeps the font identity; whole-resource installation keeps the registry
+identity. Both update dependent caches before their next use.
 
-Source loss or successful installation refreshes metrics, source indexing and
-glyph/measurement caches before their next use. Preparation, failure and cancellation
-leave the current source and its measurement/glyph caches unchanged. Several font caches may share a source without
-keeping it loaded. A ready glyph texture does not authorize use of an unloaded
-source's stale cache. Preserve metrics-compatibility rules for fallback sources.
+Validate all incoming codepoint collisions before publication. Default overlap
+asserts; explicit overwrite replaces only incoming glyphs and adds missing ones.
+Untouched codepoints retain their definitions. Preparation, failure and
+cancellation leave the current glyph and measurement caches valid. A published
+addition or overwrite refreshes glyph indexing and affected cache observations;
+unload/destroy cannot leave cached glyphs accessible through a dead font.
 
 Keep the font's glyph-cache generation and preflush contract: GPU glyph offsets
 can become stale on eviction, cache clear or texture reconstruction. Resource
 replacement happens at the lifecycle boundary after old prepared work is finished
 or discarded, not by flushing dangling source pointers after their destruction.
 
-Separately expose a font-local metrics/source revision for changes that can alter
-text measurement, including source replacement with different advance widths but
-identical vertical metrics. Font source-list setters mark reconciliation dirty;
-it updates this revision before layout. Glyph-cache eviction or GPU reconstruction
+Separately expose a font-local content/metrics revision for changes that can alter
+text measurement, including newly added glyphs and overwritten glyphs with
+different advance widths but identical vertical metrics. Successful publication
+updates this revision before layout, including fills of a direct font without
+a registry epoch change. Glyph-cache eviction or GPU reconstruction
 alone must not change this revision when the source content is unchanged.
 
 Before Clay layout, the UI checks its bound `(font handle, metrics revision)`
 pairs and clears its measurement cache if they changed. Track this per UI context,
 including an inactive context when it is next used. Clay's existing key does
-not include source identity; clearing only the font module's cache is insufficient.
+not include font content identity; clearing only the font module's cache is insufficient.
 Direct UI font rebinding also invalidates measurement, even if the numeric UI
 font ID stays the same. The game need not rebind every text widget.
 
@@ -851,7 +868,7 @@ not commit or supersede a pending installation accidentally; cancellation/unload
 still wins. Loss itself can make the old object unusable, so the keep-old guarantee
 applies only while it remains valid. Verify loss during preparation and publication.
 
-CPU-only objects survive GPU context loss. In particular, owned font sources,
+CPU-only objects survive GPU context loss. In particular, owned font glyph data,
 atlas geometry and BLOB bytes do not need to be reloaded. The font module may keep
 its existing recovery of its own glyph-cache textures from surviving CPU data.
 
@@ -892,8 +909,8 @@ mesh pool record by itself does not prove that its GPU storage survived.
 and `nt_font_step`, as specified by the
 [frame order](../runtime/frame-lifecycle.md#engine-frame-order). Wire invalidation
 of affected managed GPU objects into that observation boundary, before subsequent
-queries and rebuild decisions. Preserve CPU sources, including FONT; rebuilding
-glyph textures does not invalidate their source assets. GPU activation while loss
+queries and rebuild decisions. Preserve CPU data, including filled FONT resources;
+rebuilding glyph textures does not invalidate their content. GPU activation while loss
 is known stays suspended. Restoration may complete on subsequent resource steps;
 same-frame recovery is not promised.
 
@@ -987,13 +1004,15 @@ part of demand-driven loading and recovery in #507/#509.
 
 ### Step 2 — Direct runtime constructors (#503)
 
-Expose font-source, AtlasData, BLOB and mesh constructors/destructors without a
-pack/registry; reuse texture/shader constructors and packed implementations.
-Give font sources their own explicit capacity. Make direct sources usable in font
-compositions alongside resource references, with the borrowed lifetimes above.
+Expose extensible font, AtlasData, BLOB and mesh constructors/destructors without
+a pack/registry; reuse texture/shader constructors and packed implementations.
+Replace the public font-source/composition split with one owned font object and
+one fill operation over prepared compact data. Assert codepoint overlap by default;
+explicit overwrite also adds missing glyphs and preserves absent ones. Builder
+selects ranges; no runtime range API. Keep glyph decode lazy and storage bounded.
 Replace BLOB's temporary registry pointer table with its owned object path.
 Keep optional resource adapters separate and document input ownership without
-double copies. Prove direct font construction, composition, measurement and draw
+double copies. Prove direct font construction, fill, measurement and draw
 work without registry initialization; merely exposing a constructor is not enough.
 Remove superseded storage and adapter paths in this step, without a compatibility
 representation. These objects become inputs to the same installation mechanism.
@@ -1016,8 +1035,11 @@ CPU data survives. Keep the manual PACK recovery bridge until #509.
 #505 defines explicit atlas pages and coherent preparation/publication for changed
 geometry, removes lifetime region indices/tombstones, and synchronizes sprite/UI
 name-plus-revision caches. Resolve the atlas transition boundary before coding.
-#506 preserves font reconciliation and adds font-metrics/UI cache invalidation
-at successful publication, not at candidate start/failure. Both retain epoch gates.
+#506 connects multi-pack font filling to preparation/publication, preserves the
+font handle and adds font-content/UI cache invalidation at successful publication,
+not at candidate start/failure. Remove old source-list/precedence APIs and migrate
+their callers/tests in this task. Both consumers retain useful epoch/local gates;
+direct font fills must also invalidate observations without a registry change.
 
 Prove SD remains READY during HD preparation/failure and the same resource handle
 publishes HD on success. Runtime consumption has the same installation semantics.
@@ -1086,12 +1108,12 @@ for this document. Prefer existing unit/fake-backend/browser test infrastructure
    ownership. Recreate under the original handle. Declare runtime origin before
    first creation and discover its wanted, unready slot through enumeration.
    Creating and registering these objects allocates no virtual-pack record.
-   Measure/render from a direct borrowed font source without initializing the
-   resource registry; also use resource-backed composition and follow replacement.
-   Several caches share a source; destroying a cache does not destroy that source.
-   Compose compatible alphabet sources from two packs into one font, use both
-   through the same text/UI font handle, and replace one source without re-adding
-   the others or changing that handle. Source order decides overlapping glyphs.
+   Create/fill/measure/render a font without initializing the resource registry,
+   then register the same object through ordinary ownership transfer. Add compatible
+   alphabet subsets from two packs to one font and use the same text/UI handle.
+   Assert overlapping codepoints by default. Explicit overwrite replaces incoming
+   glyphs and adds missing ones while preserving all absent codepoints. Builder
+   subsets determine ranges; no runtime selector or source-order precedence exists.
    Create/read/destroy BLOB objects without a registry or temporary pack.
 8. **Unified installation:** use the same operation for an empty slot and SD→HD
    under one stable handle. During delayed HD preparation render SD and retain its
@@ -1121,8 +1143,9 @@ for this document. Prefer existing unit/fake-backend/browser test infrastructure
     readiness. Restore wanted pack objects; enumerate and recreate runtime ones;
     retain CPU data; do not reload deliberately unloaded objects or packs used
     solely by them. Resolve new runtime handles through stable resource references.
-    Evict a FONT source pack before loss, then rebuild glyph textures and decode
-    an uncached glyph without invalidating the CPU source or reading that pack.
+    Evict packs used to fill a FONT before loss, then rebuild glyph textures and
+    decode uncached glyphs from both additions without invalidating CPU font data
+    or reading those packs.
     Recreate runtime fallbacks at full pool capacity without direct game destruction
     of registry-owned objects. Repeat loss during recovery without stale publication;
     defer GPU activation even before begin-frame processes the loss event. Cover
@@ -1147,18 +1170,21 @@ for this document. Prefer existing unit/fake-backend/browser test infrastructure
     resident memory; independent data may increase construction peak while
     reducing the long-lived pack residency that motivated this work. Measure live
     SD plus HD-candidate overlap and configured pool headroom; do not hide growth.
-    Configure font-source capacity independently of registry and cache capacities.
+    Configure font/payload capacity independently of registry capacity; measure
+    live font plus prepared-addition overlap without eager full-font glyph expansion.
 15. **Catalog metadata and teardown:** query metadata before object load and
     after unload/byte eviction; rebind and observe the new entry's metadata.
     Shut down with live pack and runtime objects, shared aliases and pending I/O;
     free every owned object once while its module is still initialized.
-16. **Font/UI invalidation:** replace a source with identical vertical metrics but
-    different glyph advances, add an already-published source and allow a late
-    primary source to arrive. Font caches and a previously cached Clay label must
+16. **Font/UI invalidation:** explicitly overwrite glyphs with identical vertical
+    metrics but different advances, and add previously absent glyphs from a second
+    pack. Font caches and a previously cached Clay label must
     reflect the new widths without per-widget reassignment. Cover an inactive UI
     context when next used and a new font handle under the same UI font ID.
-    Pending/failed/cancelled installations keep current text/layout caches valid;
-    successful publication refreshes before layout. GPU-only glyph-cache rebuild
+    Delay/fail/cancel a fill and preserve current text/layout caches; publish the
+    complete addition before layout, never a partial prefix. Test direct fills
+    without a registry epoch change and stale completions after destruction.
+    GPU-only glyph-cache rebuild
     must not unnecessarily change the metrics revision.
 17. **Synchronization:** change an atlas/page mapping after a sync, synchronize
     again, then build items/layout. Old borrowed views cannot be read between
