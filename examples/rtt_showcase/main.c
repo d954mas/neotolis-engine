@@ -91,7 +91,6 @@ static NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
 static nt_ui_context_t *s_ui_ctx;
 static nt_hash32_t s_pack_id;
 static nt_resource_t s_atlas_handle;
-static nt_resource_t s_font_resource;
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
 static nt_program_ref_t s_sprite_program;
@@ -277,8 +276,10 @@ static void try_bind_ui_resources(void) {
         nt_log_info("rtt_showcase: UI atlas white region bound");
     }
 
-    if (!s_font_bound && nt_resource_is_ready(s_font_resource)) {
-        nt_font_add(s_font, s_font_resource);
+    if (!s_font_bound && nt_resource_pack_state(s_pack_id) == NT_PACK_STATE_READY) {
+        uint32_t size = 0;
+        const uint8_t *bytes = nt_resource_entry_bytes(s_pack_id, ASSET_FONT_RTT_SHOWCASE_FONT, &size);
+        nt_font_fill(s_font, bytes, size);
         nt_ui_set_font(s_ui_ctx, 0U, s_font);
         s_font_bound = true;
         nt_log_info("rtt_showcase: UI font bound at slot 0");
@@ -503,7 +504,7 @@ static void frame(void) {
         s_atlas_bound = false;
         /* The font keeps its sources across a restore -- only its GPU textures
          * died, and nt_font_step rebuilds those itself. Clearing this would make
-         * the gate call nt_font_add twice, which asserts on the duplicate. */
+         * the gate call nt_font_fill twice, which asserts on the duplicate. */
 
         /* Loss freed the targets; their textures are husks that only we can destroy. */
         destroy_targets();
@@ -589,7 +590,7 @@ int main(void) {
     s_text_program.label = "rtt_showcase/text";
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_RTT_SHOWCASE_UI_ATLAS, NT_ASSET_ATLAS);
-    s_font_resource = nt_resource_request(ASSET_FONT_RTT_SHOWCASE_FONT, NT_ASSET_FONT);
+
     s_white_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_RTT_SHOWCASE_UI_ATLAS__WHITE.value);
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
@@ -609,6 +610,7 @@ int main(void) {
     nt_ui_set_sprite_material(s_ui_ctx, s_sprite_material);
     nt_ui_set_text_material(s_ui_ctx, s_text_material);
     s_font = nt_font_create(&(nt_font_create_desc_t){
+        .max_payloads = 8,
         .max_glyphs = 256,
         .measure_cache_size = 256,
     });

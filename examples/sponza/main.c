@@ -1,3 +1,4 @@
+#include "blob/nt_blob.h"
 /*
  * Sponza Demo -- Neotolis Engine
  *
@@ -240,8 +241,9 @@ static void camera_update(float dt) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void load_scene_from_manifest(void) {
-    uint32_t manifest_size = 0;
-    const uint8_t *blob = nt_resource_get_blob(s_manifest_handle, &manifest_size);
+    const nt_blob_view_t view = nt_blob_read((nt_blob_t){nt_resource_get(s_manifest_handle)});
+    const uint8_t *blob = view.data;
+    const uint32_t manifest_size = view.size;
     if (!blob || manifest_size < sizeof(SponzaManifestHeader)) {
         nt_log_info("Manifest blob not available or too small");
         return;
@@ -648,7 +650,9 @@ int main(int argc, char **argv) {
     nt_fs_init();
 #endif
     nt_hash_init(&(nt_hash_desc_t){0});
+    nt_blob_init(2);
     nt_resource_init(&(nt_resource_desc_t){0});
+    nt_resource_register_type(NT_ASSET_BLOB, &(nt_resource_type_desc_t){.activate = nt_blob_activate, .deactivate = nt_blob_deactivate});
 
     /* 6. Register GFX activators */
     nt_resource_register_type(NT_ASSET_TEXTURE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_texture, .deactivate = nt_gfx_deactivate_texture});
@@ -764,6 +768,7 @@ int main(int argc, char **argv) {
         nt_program_ref_drop(&s_programs[t]);
     }
     nt_resource_shutdown();
+    nt_blob_shutdown();
     nt_fs_shutdown();
     nt_http_shutdown();
     nt_hash_shutdown();

@@ -3004,6 +3004,60 @@ static void destroy_unpublished_buffer(nt_buffer_t buf) {
     NT_GFX_END(destroy_buffer(buf));
 }
 
+static uint32_t mesh_finish(const nt_mesh_desc_t *desc, nt_buffer_t vbo, nt_buffer_t ibo) {
+    uint32_t mesh_id = nt_pool_alloc(&s_gfx.mesh_pool);
+    NT_ASSERT(mesh_id != 0 && "activate_mesh: mesh pool full -- raise nt_gfx_desc_t.max_meshes");
+
+    uint32_t slot = nt_pool_slot_index(mesh_id);
+    memset(&s_gfx.mesh_table[slot], 0, sizeof(nt_gfx_mesh_info_t));
+    memset(&s_gfx.mesh_vertex_inputs[(size_t)slot * NT_GFX_MESH_VERTEX_INPUTS], 0, NT_GFX_MESH_VERTEX_INPUTS * sizeof(nt_vertex_input_t));
+
+    s_gfx.mesh_table[slot].vbo = vbo;
+    s_gfx.mesh_table[slot].ibo = ibo;
+    s_gfx.mesh_table[slot].vertex_count = desc->vertex_count;
+    s_gfx.mesh_table[slot].index_count = desc->index_count;
+    s_gfx.mesh_table[slot].stream_count = desc->stream_count;
+    s_gfx.mesh_table[slot].index_type = desc->index_type;
+
+    /* Copy stream descriptors for render module vertex layout building */
+    const NtStreamDesc *src_streams = desc->streams;
+    memcpy(s_gfx.mesh_table[slot].streams, src_streams, (size_t)desc->stream_count * sizeof(NtStreamDesc));
+
+    /* Compute stride: sum of all stream sizes (type_size * count) */
+    uint16_t stride = 0;
+    for (uint8_t i = 0; i < desc->stream_count; i++) {
+        stride += (uint16_t)(nt_stream_type_size(src_streams[i].type) * src_streams[i].count);
+    }
+    s_gfx.mesh_table[slot].stride = stride;
+
+    return mesh_id;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+nt_mesh_t nt_gfx_make_mesh(const nt_mesh_desc_t *desc) {
+    NT_ASSERT(desc != NULL && desc->streams != NULL && desc->vertices != NULL);
+    NT_ASSERT(desc->stream_count > 0 && desc->stream_count <= NT_MESH_MAX_STREAMS && desc->index_type <= 2);
+    uint32_t stride = mesh_stream_stride(desc->streams, desc->stream_count);
+    uint64_t vertex_bytes = (uint64_t)desc->vertex_count * stride;
+    uint64_t index_bytes = (uint64_t)desc->index_count * (desc->index_type == 1 ? 2U : 4U);
+    NT_ASSERT(vertex_bytes > 0 && vertex_bytes <= UINT32_MAX && index_bytes <= UINT32_MAX);
+    NT_ASSERT(desc->index_count == 0 || (desc->index_type != 0 && desc->indices != NULL));
+    NT_ASSERT((desc->index_count != 0 ? desc->index_count : desc->vertex_count) % 3 == 0);
+    nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = desc->vertices, .size = (uint32_t)vertex_bytes});
+    if (vbo.id == 0) {
+        return NT_MESH_INVALID;
+    }
+    nt_buffer_t ibo = {0};
+    if (desc->index_count != 0) {
+        ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_IMMUTABLE, .data = desc->indices, .size = (uint32_t)index_bytes, .index_type = desc->index_type});
+        if (ibo.id == 0) {
+            destroy_unpublished_buffer(vbo);
+            return NT_MESH_INVALID;
+        }
+    }
+    return (nt_mesh_t){mesh_finish(desc, vbo, ibo)};
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
     mesh_blob_check(data, size);
@@ -3049,32 +3103,12 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
         return 0;
     }
 
-    uint32_t mesh_id = nt_pool_alloc(&s_gfx.mesh_pool);
-    NT_ASSERT(mesh_id != 0 && "activate_mesh: mesh pool full -- raise nt_gfx_desc_t.max_meshes");
-
-    uint32_t slot = nt_pool_slot_index(mesh_id);
-    memset(&s_gfx.mesh_table[slot], 0, sizeof(nt_gfx_mesh_info_t));
-    memset(&s_gfx.mesh_vertex_inputs[(size_t)slot * NT_GFX_MESH_VERTEX_INPUTS], 0, NT_GFX_MESH_VERTEX_INPUTS * sizeof(nt_vertex_input_t));
-
-    s_gfx.mesh_table[slot].vbo = vbo;
-    s_gfx.mesh_table[slot].ibo = ibo;
-    s_gfx.mesh_table[slot].vertex_count = hdr->vertex_count;
-    s_gfx.mesh_table[slot].index_count = hdr->index_count;
-    s_gfx.mesh_table[slot].stream_count = hdr->stream_count;
-    s_gfx.mesh_table[slot].index_type = hdr->index_type;
-
-    /* Copy stream descriptors from pack data for render module vertex layout building */
-    const NtStreamDesc *src_streams = (const NtStreamDesc *)(data + sizeof(NtMeshAssetHeader));
-    memcpy(s_gfx.mesh_table[slot].streams, src_streams, (size_t)hdr->stream_count * sizeof(NtStreamDesc));
-
-    /* Compute stride: sum of all stream sizes (type_size * count) */
-    uint16_t stride = 0;
-    for (uint8_t i = 0; i < hdr->stream_count; i++) {
-        stride += (uint16_t)(nt_stream_type_size(src_streams[i].type) * src_streams[i].count);
-    }
-    s_gfx.mesh_table[slot].stride = stride;
-
-    return mesh_id;
+    return mesh_finish(&(nt_mesh_desc_t){.streams = (const NtStreamDesc *)(data + sizeof(NtMeshAssetHeader)),
+                                         .vertex_count = hdr->vertex_count,
+                                         .index_count = hdr->index_count,
+                                         .stream_count = hdr->stream_count,
+                                         .index_type = hdr->index_type},
+                       vbo, ibo);
 }
 
 uint32_t nt_gfx_activate_shader(const uint8_t *data, uint32_t size) {
@@ -3101,14 +3135,12 @@ void nt_gfx_deactivate_texture(uint32_t handle) {
     nt_gfx_destroy_texture(tex);
 }
 
-void nt_gfx_deactivate_mesh(uint32_t handle) {
+void nt_gfx_destroy_mesh(nt_mesh_t mesh) {
+    uint32_t handle = mesh.id;
     if (handle == 0) {
         return;
     }
-    if (!nt_pool_valid(&s_gfx.mesh_pool, handle)) {
-        NT_LOG_ERROR("deactivate_mesh: invalid or stale handle");
-        return;
-    }
+    NT_ASSERT(nt_pool_valid(&s_gfx.mesh_pool, handle) && "destroy_mesh: invalid or stale handle");
     uint32_t index = nt_pool_slot_index(handle);
     /* The vertex buffer's destroy cascade takes the mesh's vertex inputs along. */
     nt_gfx_destroy_buffer(s_gfx.mesh_table[index].vbo);
@@ -3118,6 +3150,8 @@ void nt_gfx_deactivate_mesh(uint32_t handle) {
     memset(&s_gfx.mesh_table[index], 0, sizeof(nt_gfx_mesh_info_t));
     nt_pool_free(&s_gfx.mesh_pool, handle);
 }
+
+void nt_gfx_deactivate_mesh(uint32_t handle) { nt_gfx_destroy_mesh((nt_mesh_t){handle}); }
 
 void nt_gfx_deactivate_shader(uint32_t handle) {
     nt_shader_t shd = {.id = handle};
@@ -3154,6 +3188,10 @@ nt_vertex_input_t nt_gfx_mesh_vertex_input(nt_mesh_t mesh, nt_buffer_t instance_
     NT_ASSERT(nt_pool_valid(&s_gfx.mesh_pool, mesh.id) && "mesh_vertex_input: invalid or stale mesh");
     NT_ASSERT(nt_pool_valid(&s_gfx.buffer_pool, instance_buffer.id) && "mesh_vertex_input: invalid or stale instance buffer (an unsized frame stream has none)");
     const uint32_t slot = nt_pool_slot_index(mesh.id);
+    const nt_gfx_mesh_info_t *info = &s_gfx.mesh_table[slot];
+    if (!s_gfx.buffer_metas[nt_pool_slot_index(info->vbo.id)].live || (info->ibo.id != 0 && !s_gfx.buffer_metas[nt_pool_slot_index(info->ibo.id)].live)) {
+        return NT_VERTEX_INPUT_INVALID;
+    }
     const uint32_t frame_stream = s_gfx.buffer_metas[nt_pool_slot_index(instance_buffer.id)].frame_stream;
     const uint32_t k = frame_stream > NT_GFX_FRAME_VERTEX ? frame_stream - 1U - NT_GFX_FRAME_VERTEX : NT_GFX_MAX_VERTEX_STREAMS;
     nt_vertex_input_t *vi = &s_gfx.mesh_vertex_inputs[((size_t)slot * NT_GFX_MESH_VERTEX_INPUTS) + k];

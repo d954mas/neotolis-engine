@@ -91,6 +91,15 @@ Clay's pinned API (`CLAY_PINNED_MAJOR/MINOR` enforced via
 publicly-promised surface; bumping Clay can require coordinated
 game-side changes.
 
+## Font measurements
+
+Each context keeps the last content revision of its bound fonts. Before layout,
+`nt_ui_begin` resets Clay's measurement cache if a font was filled, including
+when this context was inactive during the fill. `nt_ui_set_font` resets the
+context's measurements when a different handle is bound under the same font ID.
+GPU glyph eviction and texture recovery do not change the content revision.
+Fill fonts before layout; a fill after layout requires rebuilding that layout.
+
 ## Widget IDs
 
 Never assign sibling widget IDs as `base_id + index`: Clay's anonymous child IDs

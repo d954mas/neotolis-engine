@@ -392,6 +392,7 @@ struct nt_ui_context {
 #endif
 
     nt_font_t fonts[NT_UI_MAX_FONTS];
+    uint32_t font_revisions[NT_UI_MAX_FONTS];
 
     nt_ui_anim_interaction_t anim[NT_UI_ANIM_SLOTS];
     nt_ui_anim_interaction_t anim_snap; /* nt_ui_anim no-slot fast path (both speeds 0): snapped target, consumes no pool slot */

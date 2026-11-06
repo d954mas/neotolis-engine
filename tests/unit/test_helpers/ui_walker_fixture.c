@@ -90,6 +90,7 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
      * true so walker's contract assert passes, but units_per_em stays 0 so
      * nt_text_renderer_draw_n early-returns before any glyph work. */
     fx->stub_font = nt_font_create(&(nt_font_create_desc_t){
+        .max_payloads = 8,
         .max_glyphs = 16,
         .measure_cache_size = 0,
     });
@@ -168,9 +169,8 @@ nt_font_t ui_walker_fixture_make_real_font(ui_walker_fixture_t *fx) {
     if (fx->real_font_blob == NULL) {
         fx->real_font_blob = nt_test_font_blob(32U, 126U, &fx->real_font_blob_size);
     }
-    const nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
-    nt_font_add(font, nt_font_test_resource(nt_font_test_register_data(fx->real_font_blob, fx->real_font_blob_size)));
-    nt_resource_step();
+    const nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = 16});
+    nt_font_fill(font, fx->real_font_blob, fx->real_font_blob_size);
     nt_font_step();
     return font;
 }
