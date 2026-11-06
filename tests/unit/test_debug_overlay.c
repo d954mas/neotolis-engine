@@ -160,8 +160,8 @@ static void test_draw_records_a_text_draw(void) {
     const nt_material_t material = nt_material_create(&(nt_material_create_desc_t){.label = "test_material", .program = program, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
     uint32_t blob_size = 0;
     uint8_t *blob = nt_test_font_blob('F', 'F', &blob_size); /* the HUD starts with "FPS:" */
-    const nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
-    nt_font_add(font, nt_font_test_resource(nt_font_test_register_data(blob, blob_size)));
+    const nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = 16});
+    nt_font_fill(font, blob, blob_size);
     nt_resource_step();
     nt_font_step();
 

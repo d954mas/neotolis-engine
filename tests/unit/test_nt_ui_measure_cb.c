@@ -29,26 +29,21 @@
 /* clang-format on */
 
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
+alignas(NT_UI_ARENA_ALIGN) static uint8_t s_other_arena[NT_UI_TEST_ARENA_SIZE];
 static const nt_ui_create_desc_t s_ui_desc = {.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT, .modal_zband_stride = NT_UI_MODAL_ZBAND_STRIDE};
 
-static nt_resource_t register_font_resource(const char *name, const uint8_t *blob, uint32_t blob_size) {
-    /* fonts resolve bytes from a resident pack blob — use a real parsed pack. */
-    (void)name;
-    return nt_font_test_resource(nt_font_test_register_data(blob, blob_size));
-}
-
 static nt_font_t make_resolved_test_font(const char *name, uint8_t **out_blob) {
+    (void)name;
     nt_font_create_desc_t fd = {
         .max_glyphs = 16,
         .measure_cache_size = 256,
+        .max_payloads = 2,
     };
     nt_font_t font = nt_font_create(&fd);
 
     uint32_t blob_size = 0;
     uint8_t *blob = nt_test_font_blob('A', 'C', &blob_size);
-    nt_resource_t res = register_font_resource(name, blob, blob_size);
-    nt_font_add(font, res);
-    nt_resource_step();
+    nt_font_fill(font, blob, blob_size);
     nt_font_step();
 
     *out_blob = blob;
@@ -208,9 +203,41 @@ static void test_measure_callback_out_of_range_font_asserts(void) {
     NT_TEST_EXPECT_ASSERT(declare_and_measure_text(ctx, "ABC", NT_UI_MAX_FONTS, 14U));
 }
 
+static void test_layout_refreshes_after_fill_and_rebind(void) {
+    uint8_t *blob = NULL;
+    nt_font_t font = make_resolved_test_font("fill", &blob);
+    free(blob);
+    nt_ui_context_t *ctx = nt_ui_create_context(s_arena, sizeof s_arena, &s_ui_desc);
+    nt_ui_context_t *inactive = nt_ui_create_context(s_other_arena, sizeof s_other_arena, &s_ui_desc);
+    nt_ui_set_font(ctx, 0, font);
+    nt_ui_set_font(inactive, 0, font);
+    TEST_ASSERT_EQUAL_INT32(10, (int32_t)declare_and_measure_text(ctx, "D", 0, 20).width);
+    TEST_ASSERT_EQUAL_INT32(10, (int32_t)declare_and_measure_text(inactive, "D", 0, 20).width);
+    uint32_t size = 0;
+    blob = nt_test_font_blob('D', 'D', &size);
+    ((NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader)))->advance = 700;
+    nt_font_fill(font, blob, size);
+    free(blob);
+    TEST_ASSERT_EQUAL_INT32(14, (int32_t)declare_and_measure_text(ctx, "D", 0, 20).width);
+    TEST_ASSERT_EQUAL_INT32(14, (int32_t)declare_and_measure_text(inactive, "D", 0, 20).width);
+    nt_font_t other = make_resolved_test_font("other", &blob);
+    free(blob);
+    blob = nt_test_font_blob('E', 'E', &size);
+    nt_font_fill(other, blob, size);
+    free(blob);
+    TEST_ASSERT_EQUAL_UINT32(nt_font_content_revision(font), nt_font_content_revision(other));
+    nt_ui_set_font(ctx, 0, other);
+    TEST_ASSERT_EQUAL_INT32(10, (int32_t)declare_and_measure_text(ctx, "D", 0, 20).width);
+    nt_ui_destroy_context(ctx);
+    nt_ui_destroy_context(inactive);
+    nt_font_destroy(other);
+    nt_font_destroy(font);
+}
+
 int main(void) {
     (void)setvbuf(stdout, NULL, _IONBF, 0);
     UNITY_BEGIN();
+    RUN_TEST(test_layout_refreshes_after_fill_and_rebind);
     /* Happy-path tests first so a crashing death-test doesn't hide them. */
     RUN_TEST(test_measure_callback_forwards_to_font_measure_n);
     RUN_TEST(test_measure_callback_letter_spacing_matches_render_width);

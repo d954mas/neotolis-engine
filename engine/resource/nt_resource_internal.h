@@ -30,15 +30,6 @@ typedef enum {
     NT_PACK_VIRTUAL = 1, /* runtime-created resources */
 } nt_pack_type_t;
 
-/* ---- Blob retention policy ---- */
-
-typedef enum {
-    NT_BLOB_KEEP = 0, /* blob lives as long as pack is mounted */
-    /* Auto-evict resource-managed I/O blobs after TTL; invalidation reloads them on demand.
-     * Caller-owned blobs stay resident. */
-    NT_BLOB_AUTO = 1,
-} nt_blob_policy_t;
-
 /* ---- I/O request type ---- */
 
 typedef enum {
@@ -85,7 +76,7 @@ typedef struct {
     uint8_t mounted;     /* 1 if mounted, 0 if slot available */
     uint32_t mount_seq;  /* monotonic mount order for tiebreak (runtime-only, not serialized) */
     uint8_t pack_state;  /* nt_pack_state_t */
-    uint8_t blob_policy; /* nt_blob_policy_t */
+    bool evict_bytes;    /* release after activation and resolve, including future rereads */
     const uint8_t *blob; /* loaded pack data */
     uint32_t blob_size;  /* size of loaded blob */
     uint32_t checksum;   /* pack CRC32 from the first parse; a re-download must match it */
@@ -103,8 +94,6 @@ typedef struct {
     uint32_t retry_delay_ms;
     uint32_t retry_time_ms; /* wall clock ms of next retry */
     /* Blob eviction */
-    uint32_t blob_last_access_ms;
-    uint32_t blob_ttl_ms;
     uint32_t activate_cursor; /* no activation-eligible owner lies below this registry index */
     /* Original load path for retry and re-download after invalidation */
     char load_path[256];
@@ -122,7 +111,6 @@ typedef struct {
     uint16_t user_data_asset_idx; /* asset idx last used to build user_data (aux sync check) */
     uint8_t asset_type;           /* nt_asset_type_t */
     uint8_t state;                /* nt_asset_state_t visible to game code */
-    uint32_t winner_gen;          /* unique per published winner; bumps with every on_resolve */
     void *user_data;              /* per-slot auxiliary data (on_resolve/on_cleanup) */
 } NtResourceSlot;
 

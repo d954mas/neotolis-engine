@@ -564,8 +564,8 @@ is borrowed only for the call; its label is static storage, kept for the capture
 context. The instanced bind asserts that instance and vertex locations do not
 overlap, and the instance buffer's type and liveness. `nt_gfx_mesh_vertex_input`
 returns a vertex input gfx owns, so the caller asks again rather than keeping
-it; it returns INVALID when the vertex input must be made on a lost context, and
-a stale mesh or buffer asserts. The registry and
+it; it returns INVALID while the mesh buffers have no live GPU storage, including
+after restore until the mesh is reconstructed. A stale mesh or buffer asserts. The registry and
 lifetime rules of both live in
 [render architecture, Vertex inputs](../render/architecture.md#vertex-inputs).
 Creating a pipeline or a vertex input

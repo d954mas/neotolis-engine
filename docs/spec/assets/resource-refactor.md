@@ -260,8 +260,8 @@ step is gone before consumers run, which is legal because the step precedes the 
 ### 5.4 Font and UI caches
 
 A font carries a content revision that advances on a successful fill, including a font used without
-a registry. GPU-only glyph cache rebuild or eviction does not change it, and keeps the existing
-glyph generation and preflush contract.
+a registry. GPU-only glyph cache rebuild or eviction does not change it. Disjoint fills preserve existing
+glyph rows; the existing protection of rows used in the current frame remains.
 
 Before Clay layout, each UI context compares its bound `(font, revision)` pairs and clears Clay's
 measurement cache on a change, including an inactive context on next use and a different font under
@@ -323,3 +323,18 @@ Type modules own construction and destruction. The registries own demand, source
 ownership and publication. I/O stays behind `nt_fs` and `nt_http`. No generic loader, factory, observer,
 dependency graph, transaction framework or operation pool is added, and no CMake target per concept.
 Allocation belongs at explicit construction boundaries; idle steps and hot getters do no heap work.
+
+## Implementation order for direct objects
+
+#503 migrates FONT with #506 UI cache invalidation, then BLOB into its own typed
+pool, then mesh direct construction, then explicit pack-byte eviction. Entry byte
+lookup is pure: NULL for nonresident bytes, no hidden I/O or holds. Mesh pack
+activation keeps sequential decode/upload with max(vertex, index) staging;
+direct and packed paths share only final object assembly. Mesh readiness derives
+from existing buffer state, without another flag.
+
+Until #504, activation remains eager. Explicit eviction records one intent bit;
+reread bytes are released after activation and all AUX resolve/post-resolve
+passes. No temporary demand registry is introduced. Invalidation schedules I/O
+only for packs with matching canonical owners. Full reread catalog identity
+verification belongs to #504/#508; the current payload CRC does not cover the catalog.

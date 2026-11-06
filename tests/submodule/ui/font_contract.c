@@ -15,7 +15,7 @@ int main(int argc, char **argv) {
     puts("font-contract-ready");
     (void)fflush(stdout);
     const uint32_t transparent = 0U;
-    nt_text_style_t style = {.font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 2}), .size = 16.0F};
+    nt_text_style_t style = {.font = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = 2}), .size = 16.0F};
     if (argc > 1 && strcmp(argv[1], "outline") == 0) {
         style.outline_w = 0x1p-20F;
         style.outline_color = transparent;

@@ -28,23 +28,14 @@
 #include "hash/nt_hash.h"
 #include "nt_font_format.h"
 #include "nt_pack_format.h"
-#include "resource/nt_resource.h"
 #include "time/nt_time.h"
 #include "unity.h"
 #include "test_helpers/nt_test_font_blob.h"
 /* clang-format on */
 
-/* ---- Helper: register font blob as test resource ---- */
-
-static nt_resource_t register_font_resource(const char *name, const uint8_t *blob, uint32_t blob_size) {
-    /* fonts resolve bytes from a resident pack blob — use a real parsed pack. */
-    (void)name;
-    return nt_font_test_resource(nt_font_test_register_data(blob, blob_size));
-}
-
 static nt_font_create_desc_t bench_font_desc(void) {
     return (nt_font_create_desc_t){
-        .max_glyphs = 16, .measure_cache_size = 256, /* benchmark measures cache hit/miss — explicit opt-in */
+        .max_payloads = 8, .max_glyphs = 16, .measure_cache_size = 256, /* benchmark measures cache hit/miss — explicit opt-in */
     };
 }
 
@@ -55,10 +46,9 @@ static nt_font_t make_bench_font(const char *name, uint8_t **out_blob) {
 
     uint32_t blob_size = 0;
     uint8_t *blob = nt_test_font_blob('A', 'C', &blob_size);
-    nt_resource_t res = register_font_resource(name, blob, blob_size);
 
-    nt_font_add(font, res);
-    nt_resource_step();
+    nt_font_fill(font, blob, blob_size);
+
     nt_font_step();
 
     *out_blob = blob;
@@ -77,13 +67,13 @@ void setUp(void) {
     nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 32, .max_meshes = 8, .max_vertex_inputs = 16, .max_render_targets = 16));
     nt_gfx_begin_frame();
     nt_hash_init(&(nt_hash_desc_t){0});
-    nt_resource_init(&(nt_resource_desc_t){0});
+
     nt_font_init(&(nt_font_desc_t){.max_fonts = 4});
 }
 
 void tearDown(void) {
     nt_font_shutdown();
-    nt_resource_shutdown();
+
     nt_hash_shutdown();
     nt_gfx_shutdown();
 }

@@ -93,7 +93,7 @@ typedef struct {
 /* Copies non-NULL desc; pointer borrowed only for this call. Register once per type after resource init, before the first successful file or virtual mount.
  * Duplicate or late registration asserts. on_resolve requires on_cleanup;
  * AUX_BACKED requires both.
- * Simple virtual providers and BLOB need no registration. Full contract: docs/spec/assets/resource.md. */
+ * Simple virtual providers need no registration. BLOB packs register nt_blob adapters. Full contract: docs/spec/assets/resource.md. */
 void nt_resource_register_type(uint8_t asset_type, const nt_resource_type_desc_t *desc);
 
 /* ---- Descriptor ---- */
@@ -137,13 +137,19 @@ nt_result_t nt_resource_set_priority(nt_hash32_t pack_id, int16_t new_priority);
 /* ---- Pack parsing ---- */
 
 /* A file mount accepts one parse; repeats and unknown manifest types return NT_ERR_INVALID_ARG. Remount to replace data.
- * Missing non-BLOB activators assert before records or ownership change; register them before mounting.
+ * Missing non-FONT activators assert before records or ownership change; register them before mounting.
  * Without resource-managed I/O, success borrows blob until unmount/shutdown: caller keeps it valid and unchanged. Failure retains nothing. */
 nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uint32_t blob_size);
 
 /* ---- Resource access ---- */
 
 nt_resource_t nt_resource_request(nt_hash64_t resource_id, uint8_t asset_type);
+
+/* Pure lookup of a named entry in one pack. No I/O, activation or resource slot.
+ * Returns NULL if absent or nonresident; out_size may be NULL, receives 0 on miss.
+ * Borrowed bytes remain valid until pack byte eviction, unmount or shutdown.
+ * Copy/fill before then. FONT entries are inputs to nt_font_fill, not resources. */
+const uint8_t *nt_resource_entry_bytes(nt_hash32_t pack_id, nt_hash64_t entry_id, uint32_t *out_size);
 
 /* Pure lookup — returns the handle for an already-registered resource, or
  * NT_RESOURCE_INVALID if no slot exists. Never allocates a new slot.
@@ -162,15 +168,6 @@ uint8_t nt_resource_get_asset_type(nt_resource_t handle);
  * Release invalidates source indices immediately;
  * publication and epoch changes follow in nt_resource_step(). */
 uint32_t nt_resource_publication_epoch(void);
-/* Changes each time the slot publishes a winner (pack swap, remount, aux resync) and never repeats
- * within one init; 0 until the first publication. Identifies the winner's bytes where runtime handles repeat. */
-uint32_t nt_resource_winner_gen(nt_resource_t handle);
-
-/* Get the owned BLOB payload (without NtBlobAssetHeader). Returns NULL if not ready,
- * not a blob, or empty; out_size may be NULL. Aliases share their canonical payload.
- * The view survives pack-byte eviction; valid until this slot publishes another
- * winner, its pack is unmounted, or shutdown. */
-const uint8_t *nt_resource_get_blob(nt_resource_t handle, uint32_t *out_size);
 
 /* Get metadata for a resource by kind hash. Returns pointer to metadata bytes
  * in resident pack memory, NULL + size 0 if absent; out_size may be NULL.
@@ -222,15 +219,14 @@ void nt_resource_set_retry_policy(uint32_t max_attempts, uint32_t base_delay_ms,
  * A stalled request fails and follows the retry policy. */
 void nt_resource_set_http_idle_timeout(uint32_t idle_timeout_ms);
 
-/* ---- Blob policy ---- */
-
-/* AUTO eviction applies only to resource-managed FS/HTTP blobs. Direct parse_pack
- * borrows the caller's bytes until unmount/shutdown, regardless of this policy. */
-void nt_resource_set_blob_policy(nt_hash32_t pack_id, uint8_t policy, uint32_t ttl_ms);
+/* Release owned pack bytes at the end of step, after activation and AUX resolve.
+ * Future activation rereads the source and releases those bytes again. Caller-owned
+ * parse_pack bytes stay borrowed until unmount/shutdown. Unmounted pack asserts. */
+void nt_resource_evict(nt_hash32_t pack_id);
 
 /* ---- Context loss recovery ---- */
 
-/* Invalidates non-virtual assets of one type for later reactivation. BLOB asserts: raw bytes have no activation to repeat.
+/* Invalidates non-virtual assets of one type for later reactivation. FONT asserts: fonts own their bytes and rebuild their GPU cache locally.
  * On context_restored, call it before this iteration's resource_step; assets come back as it reactivates them. */
 void nt_resource_invalidate(uint8_t asset_type);
 

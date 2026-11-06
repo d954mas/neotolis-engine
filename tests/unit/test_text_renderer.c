@@ -30,15 +30,6 @@
 #include "unity.h"
 /* clang-format on */
 
-/* ---- Helper: register font blob as test resource ---- */
-
-static nt_resource_t register_font_resource(const char *name, const uint8_t *blob, uint32_t blob_size) {
-    /* fonts resolve bytes from a resident pack blob, so wrap the blob in a
-     * real parsed pack (owned by the font module) rather than a virtual pack. */
-    (void)name;
-    return nt_font_test_resource(nt_font_test_register_data(blob, blob_size));
-}
-
 /* ---- Shared test state ---- */
 
 static uint8_t *s_blob;
@@ -186,18 +177,20 @@ void setUp(void) {
     nt_gfx_fake_set_samplers((const char *const[]){"u_curve_texture"}, 1);
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
+
     nt_material_init(&(nt_material_desc_t){.max_materials = 8});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 4});
 
     /* Build font and create handle */
     s_blob = nt_test_font_blob('A', 'C', &s_blob_size);
     nt_font_create_desc_t desc = {
+        .max_payloads = 8,
         .max_glyphs = 16,
     };
     s_font = nt_font_create(&desc);
-    nt_resource_t res = register_font_resource("test_text_font", s_blob, s_blob_size);
-    nt_font_add(s_font, res);
-    nt_resource_step();
+
+    nt_font_fill(s_font, s_blob, s_blob_size);
+
     nt_font_step();
 
     const nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
@@ -216,6 +209,7 @@ void tearDown(void) {
     nt_font_shutdown();
     nt_material_shutdown();
     nt_resource_shutdown();
+
     nt_hash_shutdown();
     nt_gfx_shutdown();
 }
@@ -371,9 +365,9 @@ void test_quad_covers_fp16_rounded_tofu(void) {
         hdr.descent = cases[i].descent;
         memcpy(blob, &hdr, sizeof hdr);
 
-        nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
-        nt_font_add(font, register_font_resource("rounded_tofu", blob, blob_size));
-        nt_resource_step();
+        nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = 16});
+        nt_font_fill(font, blob, blob_size);
+
         nt_font_step();
         style.font = font;
         style.size = (float)cases[i].upm * 2.0F;
@@ -499,9 +493,9 @@ void test_a_call_without_quads_records_nothing(void) {
 /* Two draws of one font and material are one GPU draw; another font splits it with only a texture set. */
 void test_equal_draws_merge_and_a_font_change_splits(void) {
     nt_text_style_t style = plain();
-    nt_font_t other = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
-    nt_font_add(other, register_font_resource("text_other_font", s_blob, s_blob_size));
-    nt_resource_step();
+    nt_font_t other = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = 16});
+    nt_font_fill(other, s_blob, s_blob_size);
+
     nt_font_step();
 
     nt_gfx_fake_reset();
@@ -666,11 +660,12 @@ void test_a_reused_program_slot_does_not_hit_the_dead_entry(void) {
 void test_full_glyph_cache_still_draws_the_entire_run(void) {
     nt_text_style_t style = plain();
     nt_font_create_desc_t desc = {
+        .max_payloads = 8,
         .max_glyphs = 2,
     };
     nt_font_t tiny_font = nt_font_create(&desc);
-    nt_font_add(tiny_font, register_font_resource("text_cache_full", s_blob, s_blob_size));
-    nt_resource_step();
+    nt_font_fill(tiny_font, s_blob, s_blob_size);
+
     nt_font_step();
     style.font = tiny_font;
 
@@ -696,8 +691,8 @@ void test_decoration_only_run_draws(void) {
     memcpy(blob + sizeof(NtFontAssetHeader), &entry, sizeof(entry));
     nt_font_create_desc_t desc = nt_font_create_desc_defaults();
     nt_font_t font = nt_font_create(&desc);
-    nt_font_add(font, register_font_resource("text_decoration_only", blob, blob_size));
-    nt_resource_step();
+    nt_font_fill(font, blob, blob_size);
+
     nt_font_step();
     style.font = font;
     style.underline = true;
@@ -725,8 +720,8 @@ void test_unready_font_skips_glyph_and_decoration_uploads(void) {
     nt_gfx_fake_set_context_lost(true);
     nt_font_create_desc_t desc = nt_font_create_desc_defaults();
     nt_font_t font = nt_font_create(&desc);
-    nt_font_add(font, register_font_resource("text_unready_font", s_blob, s_blob_size));
-    nt_resource_step();
+    nt_font_fill(font, s_blob, s_blob_size);
+
     nt_font_step();
     style.font = font;
     nt_gfx_fake_set_context_lost(false);
@@ -1248,7 +1243,7 @@ void test_embolden_off_rejects_nonzero_before_drawing(void) {
 /* A merged draw keeps its note before a CACHE draw; a font without a loaded resource notes its skip. */
 void test_notes_survive_merges_and_an_unloaded_font_notes_its_skip(void) {
     nt_text_style_t style = plain();
-    nt_font_t empty = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
+    nt_font_t empty = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = 16});
     nt_gfx_capture_request();
     next_frame();
     nt_text_renderer_draw(&style, s_identity, ""); /* empty: no note */

@@ -280,8 +280,10 @@ static nt_resource_t s_mix_texture_resource;
 static nt_material_t s_mix_material;
 
 typedef struct {
-    uint8_t *data;   /* owned decoded MESH, independent of pack and GPU lifetime */
-    uint8_t *output; /* last CPU-deformed RAW MESH, retained through context loss */
+    uint8_t *data;   /* owned interleaved vertices and indices */
+    uint8_t *output; /* last CPU-deformed vertices, retained through context loss */
+    nt_mesh_desc_t mesh;
+    NtStreamDesc streams[NT_MESH_MAX_STREAMS];
     uint32_t size;
     uint32_t stride;
     uint32_t position;
@@ -327,7 +329,6 @@ static nt_ui_context_t *s_ui;
 NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
 static nt_frame_uniforms_t s_frame_uniforms; /* filled each frame; stage parts set its camera */
 static nt_resource_t s_atlas;
-static nt_resource_t s_font_resource;
 static nt_font_t s_font;
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
@@ -1257,9 +1258,10 @@ static void ordering_cancel_input(void) { s_order_combo_open = false; }
 // #region scene meshes
 /* Deformation rewrites only positions; the other streams and indices stay as copied. */
 static void retain_cpu_output(cpu_mesh_t *source) {
-    source->output = malloc(source->size);
+    const uint32_t size = source->mesh.vertex_count * source->stride;
+    source->output = malloc(size);
     NT_ASSERT(source->output != NULL);
-    memcpy(source->output, source->data, source->size);
+    memcpy(source->output, source->data, size);
 }
 
 /* The standard MESH activator already checked structure. Decode once per publication;
@@ -1270,10 +1272,17 @@ static void copy_mesh_source(cpu_mesh_t *source, const uint8_t *wire) {
     const NtStreamDesc *streams = (const NtStreamDesc *)(wire + sizeof(*header));
     const uint32_t prefix = (uint32_t)sizeof(*header) + (header->stream_count * (uint32_t)sizeof(*streams));
     const uint32_t index_size = header->index_type == 1 ? 2U : 4U;
-    source->size = prefix + header->vertex_data_size + header->index_count * index_size;
+    source->size = header->vertex_data_size + header->index_count * index_size;
     source->data = malloc(source->size);
     NT_ASSERT(source->data != NULL);
-    memcpy(source->data, wire, prefix);
+    memcpy(source->streams, streams, header->stream_count * sizeof(*streams));
+    source->mesh = (nt_mesh_desc_t){.vertices = source->data,
+                                    .indices = source->data + header->vertex_data_size,
+                                    .streams = source->streams,
+                                    .vertex_count = header->vertex_count,
+                                    .index_count = header->index_count,
+                                    .stream_count = header->stream_count,
+                                    .index_type = header->index_type};
     uint32_t elements[NT_MESH_MAX_STREAMS];
     source->position = source->joints = source->weights = UINT32_MAX;
     for (uint32_t i = 0; i < header->stream_count; ++i) {
@@ -1294,24 +1303,20 @@ static void copy_mesh_source(cpu_mesh_t *source, const uint8_t *wire) {
     }
     NT_ASSERT(source->position != UINT32_MAX && source->joints != UINT32_MAX && source->weights != UINT32_MAX);
     if (header->vertex_wire == NT_MESH_WIRE_VTX_SOA) {
-        const bool decoded = nt_meshwire_reinterleave(source->data + prefix, wire + prefix, header->vertex_count, elements, header->stream_count);
+        const bool decoded = nt_meshwire_reinterleave(source->data, wire + prefix, header->vertex_count, elements, header->stream_count);
         NT_ASSERT(decoded);
     } else {
         NT_ASSERT(header->vertex_wire == NT_MESH_WIRE_VTX_RAW && "skeletal_showcase: decode the new vertex wire like nt_gfx_activate_mesh");
-        memcpy(source->data + prefix, wire + prefix, header->vertex_data_size);
+        memcpy(source->data, wire + prefix, header->vertex_data_size);
     }
-    const uint32_t indices = prefix + header->vertex_data_size;
+    const uint32_t indices = header->vertex_data_size;
     if (header->index_wire == NT_MESH_WIRE_IDX_MESHOPT) {
-        const bool decoded = nt_meshwire_decode_indices(source->data + indices, header->index_count, index_size, wire + indices, header->index_data_size, header->vertex_count);
+        const bool decoded = nt_meshwire_decode_indices(source->data + indices, header->index_count, index_size, wire + prefix + indices, header->index_data_size, header->vertex_count);
         NT_ASSERT(decoded);
     } else {
         NT_ASSERT(header->index_wire == NT_MESH_WIRE_IDX_RAW && "skeletal_showcase: decode the new index wire like nt_gfx_activate_mesh");
-        memcpy(source->data + indices, wire + indices, header->index_data_size);
+        memcpy(source->data + indices, wire + prefix + indices, header->index_data_size);
     }
-    NtMeshAssetHeader *raw = (NtMeshAssetHeader *)source->data;
-    raw->vertex_wire = NT_MESH_WIRE_VTX_RAW;
-    raw->index_wire = NT_MESH_WIRE_IDX_RAW;
-    raw->index_data_size = header->index_count * index_size;
     retain_cpu_output(source);
 }
 
@@ -1327,7 +1332,7 @@ static void on_mesh_published(const uint8_t *data, uint32_t size, nt_resource_t 
         NT_ASSERT(data != NULL && "skeletal_showcase: packs keep their blobs");
         cpu_mesh_t *source = &s_cpu_mesh[rig];
         if (source->reference.id != 0) {
-            nt_gfx_deactivate_mesh(source->reference.id);
+            nt_gfx_destroy_mesh(source->reference);
         }
         free(source->data);
         free(source->output);
@@ -1343,14 +1348,13 @@ static void deform_cpu_mesh(cpu_mesh_t *source, const nt_skin_binding_t *skin, c
         return;
     }
     memcpy(source->pose, model, joint_count * sizeof *model);
-    const NtMeshAssetHeader *header = (const NtMeshAssetHeader *)source->data;
-    const uint32_t prefix = (uint32_t)sizeof(*header) + (header->stream_count * (uint32_t)sizeof(NtStreamDesc));
+
     nt_skeletal_mat34_t palette[SKELETAL_SHOWCASE_MAX_PALETTE];
     nt_skin_palette_build(skin, model, joint_count, palette, SKELETAL_SHOWCASE_MAX_PALETTE);
-    for (uint32_t i = 0; i < header->vertex_count; ++i) {
-        const uint8_t *v = source->data + prefix + ((size_t)i * source->stride);
+    for (uint32_t i = 0; i < source->mesh.vertex_count; ++i) {
+        const uint8_t *v = source->data + ((size_t)i * source->stride);
         const float *position = (const float *)(v + source->position);
-        float *out = (float *)(source->output + prefix + ((size_t)i * source->stride) + source->position);
+        float *out = (float *)(source->output + ((size_t)i * source->stride) + source->position);
         out[0] = out[1] = out[2] = 0.0F;
         for (uint32_t lane = 0; lane < 4; ++lane) {
             const float weight = (float)v[source->weights + lane] / 255.0F;
@@ -1360,9 +1364,11 @@ static void deform_cpu_mesh(cpu_mesh_t *source, const nt_skin_binding_t *skin, c
             }
         }
     }
-    nt_gfx_deactivate_mesh(source->reference.id);
+    nt_gfx_destroy_mesh(source->reference);
     /* 0 on a lost context; drawing skips while lost and the restore remakes it. */
-    source->reference = (nt_mesh_t){nt_gfx_activate_mesh(source->output, source->size)};
+    nt_mesh_desc_t mesh = source->mesh;
+    mesh.vertices = source->output;
+    source->reference = nt_gfx_make_mesh(&mesh);
 }
 
 /* Three rings per bone include a half-weight ring, so bending exercises blending. */
@@ -1375,30 +1381,27 @@ static void make_humanoid_mesh(cpu_mesh_t *source, bool clothes, bool local_spac
     const uint32_t segments = clothes ? 6U : HUMANOID_JOINT_COUNT - 1U;
     const uint32_t vertices = segments * 24U;
     const uint32_t indices = segments * 96U;
-    const uint32_t prefix = (uint32_t)sizeof(NtMeshAssetHeader) + (4U * (uint32_t)sizeof(NtStreamDesc));
     source->stride = sizeof(vertex_t);
     source->position = offsetof(vertex_t, position);
     source->joints = offsetof(vertex_t, joints);
     source->weights = offsetof(vertex_t, weights);
-    source->size = prefix + (vertices * source->stride) + (indices * (uint32_t)sizeof(uint16_t));
+    source->size = (vertices * source->stride) + (indices * (uint32_t)sizeof(uint16_t));
     source->data = calloc(1, source->size);
     NT_ASSERT(source->data != NULL);
-    NtMeshAssetHeader *header = (NtMeshAssetHeader *)source->data;
-    *header = (NtMeshAssetHeader){.magic = NT_MESH_MAGIC,
-                                  .version = NT_MESH_VERSION,
-                                  .stream_count = 4,
-                                  .index_type = 1,
-                                  .vertex_count = vertices,
-                                  .index_count = indices,
-                                  .vertex_data_size = vertices * source->stride,
-                                  .index_data_size = indices * 2U};
-    NtStreamDesc *streams = (NtStreamDesc *)(source->data + sizeof(*header));
+    source->mesh = (nt_mesh_desc_t){.vertices = source->data,
+                                    .indices = source->data + ((size_t)vertices * source->stride),
+                                    .streams = source->streams,
+                                    .vertex_count = vertices,
+                                    .index_count = indices,
+                                    .stream_count = 4,
+                                    .index_type = 1};
+    NtStreamDesc *streams = source->streams;
     streams[0] = (NtStreamDesc){.type = NT_STREAM_FLOAT32, .count = 3, .location = NT_LOC_POSITION};
     streams[1] = (NtStreamDesc){.type = NT_STREAM_FLOAT32, .count = 2, .location = NT_LOC_UV0};
     streams[2] = (NtStreamDesc){.type = NT_STREAM_UINT8, .count = 4, .location = NT_LOC_JOINTS};
     streams[3] = (NtStreamDesc){.type = NT_STREAM_UINT8, .count = 4, .normalized = 1, .location = NT_LOC_WEIGHTS};
-    vertex_t *v = (vertex_t *)(source->data + prefix);
-    uint16_t *idx = (uint16_t *)(source->data + prefix + header->vertex_data_size);
+    vertex_t *v = (vertex_t *)source->data;
+    uint16_t *idx = (uint16_t *)(source->data + ((size_t)vertices * source->stride));
     uint32_t segment = 0;
     for (uint16_t j = 1; j < HUMANOID_JOINT_COUNT; ++j) {
         if (clothes && j != 1 && j != 2 && j != 6 && j != 7 && j != 10 && j != 11) {
@@ -1429,12 +1432,6 @@ static void make_humanoid_mesh(cpu_mesh_t *source, bool clothes, bool local_spac
                     const float authored = a[k] + (fraction * direction[k]) + (radius * ((cosf(angle) * u[k]) + (sinf(angle) * w[k])));
                     const float translation[3] = {0.3F, 0.25F, -0.2F};
                     out->position[k] = local_space ? (authored - translation[k]) / 1.25F : authored;
-                    if (segment == 0 && ring == 0 && side == 0) {
-                        header->aabb_min[k] = header->aabb_max[k] = out->position[k];
-                    } else {
-                        header->aabb_min[k] = fminf(header->aabb_min[k], out->position[k]);
-                        header->aabb_max[k] = fmaxf(header->aabb_max[k], out->position[k]);
-                    }
                 }
                 out->uv[0] = (float)side / 8.0F;
                 out->uv[1] = fraction;
@@ -1493,7 +1490,7 @@ static void init_humanoid_meshes(void) {
     const uint32_t sources[3] = {RIG_HUMANOID, CPU_CLOTHES, CPU_ORDER_CLOTHES};
     for (uint32_t i = 0; i < 3; ++i) {
         const cpu_mesh_t *source = &s_cpu_mesh[sources[i]];
-        s_procedural_mesh[i] = (nt_mesh_t){nt_gfx_activate_mesh(source->data, source->size)};
+        s_procedural_mesh[i] = nt_gfx_make_mesh(&source->mesh);
         NT_ASSERT(s_procedural_mesh[i].id != 0);
     }
 }
@@ -1598,16 +1595,18 @@ static void restore_mesh_scene(void) {
     nt_program_ref_drop(&s_static_program);
     const uint32_t sources[3] = {RIG_HUMANOID, CPU_CLOTHES, CPU_ORDER_CLOTHES};
     for (uint32_t i = 0; i < 3; ++i) {
-        nt_gfx_deactivate_mesh(s_procedural_mesh[i].id);
+        nt_gfx_destroy_mesh(s_procedural_mesh[i]);
         const cpu_mesh_t *source = &s_cpu_mesh[sources[i]];
         /* 0 on a new loss; the next restore remakes it. */
-        s_procedural_mesh[i] = (nt_mesh_t){nt_gfx_activate_mesh(source->data, source->size)};
+        s_procedural_mesh[i] = nt_gfx_make_mesh(&source->mesh);
     }
     for (uint32_t i = 0; i < CPU_SOURCE_COUNT; ++i) {
         cpu_mesh_t *source = &s_cpu_mesh[i];
         if (source->reference.id != 0) {
-            nt_gfx_deactivate_mesh(source->reference.id);
-            source->reference = (nt_mesh_t){nt_gfx_activate_mesh(source->output, source->size)};
+            nt_gfx_destroy_mesh(source->reference);
+            nt_mesh_desc_t mesh = source->mesh;
+            mesh.vertices = source->output;
+            source->reference = nt_gfx_make_mesh(&mesh);
         }
     }
 }
@@ -1617,7 +1616,7 @@ static void shutdown_mesh_scene(void) {
     nt_mesh_renderer_shutdown();
     nt_skeletal_gpu_shutdown();
     for (uint32_t i = 0; i < 3; ++i) {
-        nt_gfx_deactivate_mesh(s_procedural_mesh[i].id);
+        nt_gfx_destroy_mesh(s_procedural_mesh[i]);
     }
     for (uint32_t i = 0; i < CPU_SOURCE_COUNT; ++i) {
         if (s_cpu_mesh[i].reference.id != 0) {
@@ -1671,8 +1670,10 @@ static void try_bind_resources(void) {
         nt_ui_set_atlas_white_region(s_ui, s_atlas, s_white_region);
         s_atlas_bound = true;
     }
-    if (!s_font_bound && nt_resource_is_ready(s_font_resource)) {
-        nt_font_add(s_font, s_font_resource);
+    if (!s_font_bound && nt_resource_pack_state(nt_hash32_str("skeletal_showcase")) == NT_PACK_STATE_READY) {
+        uint32_t size = 0;
+        const uint8_t *bytes = nt_resource_entry_bytes(nt_hash32_str("skeletal_showcase"), ASSET_FONT_SKELETAL_SHOWCASE_FONT, &size);
+        nt_font_fill(s_font, bytes, size);
         nt_ui_set_font(s_ui, 0U, s_font);
         s_font_bound = true;
     }
@@ -2340,7 +2341,7 @@ static void skinned_prepare(void) {
     for (uint32_t i = 0; i < CPU_SOURCE_COUNT; ++i) {
         cpu_mesh_t *source = &s_cpu_mesh[i];
         if (source != sources[0] && (!humanoid || source != sources[1]) && source->reference.id != 0) {
-            nt_gfx_deactivate_mesh(source->reference.id);
+            nt_gfx_destroy_mesh(source->reference);
             source->reference = NT_MESH_INVALID;
         }
     }
@@ -2802,7 +2803,7 @@ int main(int argc, char *argv[]) {
     s_text_program.label = "skeletal_showcase/text";
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas = nt_resource_request(ASSET_ATLAS_SKELETAL_SHOWCASE_UI, NT_ASSET_ATLAS);
-    s_font_resource = nt_resource_request(ASSET_FONT_SKELETAL_SHOWCASE_FONT, NT_ASSET_FONT);
+
     s_rig_resource[RIG_FOX] = nt_resource_request(ASSET_SKELETON_SKELETAL_SHOWCASE_FOX_NSKL, NT_ASSET_SKELETON);
     s_rig_resource[RIG_CESIUMMAN] = nt_resource_request(ASSET_SKELETON_SKELETAL_SHOWCASE_CESIUMMAN_NSKL, NT_ASSET_SKELETON);
     s_mix_rig_resource = nt_resource_request(ASSET_SKELETON_SKELETAL_SHOWCASE_KAYKIT_NSKL, NT_ASSET_SKELETON);
@@ -2821,7 +2822,7 @@ int main(int argc, char *argv[]) {
     }
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){.blend = nt_blend_alpha_premultiplied(), .cull_mode = NT_CULL_NONE, .label = "skeletal_showcase_sprite"});
     s_text_material = nt_material_create(&(nt_material_create_desc_t){.blend = nt_blend_alpha_premultiplied(), .cull_mode = NT_CULL_NONE, .label = "skeletal_showcase_text"});
-    s_font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 256, .measure_cache_size = 256});
+    s_font = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = 256, .measure_cache_size = 256});
     nt_ui_set_sprite_material(s_ui, s_sprite_material);
     nt_ui_set_text_material(s_ui, s_text_material);
 

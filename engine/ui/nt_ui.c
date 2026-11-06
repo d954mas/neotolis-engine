@@ -407,6 +407,12 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_font: ctx must be non-NULL");
     NT_ASSERT(!ctx->in_frame && "nt_ui_set_font: must be called outside begin/end");
     NT_ASSERT(font_id < NT_UI_MAX_FONTS && "nt_ui_set_font: font_id >= NT_UI_MAX_FONTS");
+    if (ctx->fonts[font_id].id != font.id) {
+        Clay_Context *saved = Clay_GetCurrentContext();
+        Clay_SetCurrentContext(ctx->clay);
+        Clay_ResetMeasureTextCache();
+        Clay_SetCurrentContext(saved);
+    }
     ctx->fonts[font_id] = font;
 }
 // #endregion
@@ -430,6 +436,16 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
 
     /* MUST be first so subsequent Clay calls operate on ctx->clay. */
     Clay_SetCurrentContext(ctx->clay);
+
+    bool fonts_changed = false;
+    for (uint32_t i = 0; i < NT_UI_MAX_FONTS; i++) {
+        uint32_t revision = ctx->fonts[i].id != 0 ? nt_font_content_revision(ctx->fonts[i]) : 0;
+        fonts_changed |= revision != ctx->font_revisions[i];
+        ctx->font_revisions[i] = revision;
+    }
+    if (fonts_changed) {
+        Clay_ResetMeasureTextCache();
+    }
 
     ctx->in_frame = true;
     g_nt_ui_inframe_ctx = ctx;

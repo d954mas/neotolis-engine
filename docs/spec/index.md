@@ -91,6 +91,7 @@ lifetime, and naming vocabulary.
 | `engine/sort` | [render/items-sorting-batching.md](render/items-sorting-batching.md) |
 | `engine/material` | [render/material.md](render/material.md), [render/shader.md](render/shader.md) |
 | `engine/resource` | [assets/resource.md](assets/resource.md), [assets/async-loading.md](assets/async-loading.md), [assets/ntpack.md](assets/ntpack.md) |
+| `engine/blob` | [assets/resource.md](assets/resource.md) (owned byte objects) |
 | `engine/atlas` | [assets/resource.md](assets/resource.md) (format), [builder/builder.md](builder/builder.md) (atlas builder) |
 | `engine/font` | [assets/resource.md](assets/resource.md) (NT_ASSET_FONT), [ui/rich-text.md](ui/rich-text.md) (decoration) |
 | `engine/hash` | [assets/resource.md](assets/resource.md) (identity hashing) |
