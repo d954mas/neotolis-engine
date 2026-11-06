@@ -6,7 +6,7 @@
  * click hit-test lands on a codepoint boundary; Tab/Esc arbitrate focus across two
  * fields; the generic dblclick/longpress primitive reports edges.
  *
- * Determinism: a stub font with nt_font_test_set_metrics returns tofu advance =
+ * Determinism: a stub font with a glyph-free FONT payload returns tofu advance =
  * size/2 per codepoint, so caret math is exact. Typed chars are fed straight into
  * the global input char ring (nt_input_buffer_char); physical keys via the
  * set_key/poll edge path. */
@@ -75,7 +75,7 @@ void setUp(void) {
     nt_test_assert_install();
     nt_input_init(); /* clean key + char-ring state per test */
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
-    nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000); /* tofu advance = size/2 */
+    ui_walker_fixture_fill_stub_font(&s_fx); /* tofu advance = size/2 */
     init_style();
 }
 

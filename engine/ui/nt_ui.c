@@ -408,10 +408,7 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
     NT_ASSERT(!ctx->in_frame && "nt_ui_set_font: must be called outside begin/end");
     NT_ASSERT(font_id < NT_UI_MAX_FONTS && "nt_ui_set_font: font_id >= NT_UI_MAX_FONTS");
     if (ctx->fonts[font_id].id != font.id) {
-        Clay_Context *saved = Clay_GetCurrentContext();
-        Clay_SetCurrentContext(ctx->clay);
-        Clay_ResetMeasureTextCache();
-        Clay_SetCurrentContext(saved);
+        ctx->font_revisions[font_id] = UINT32_MAX; /* no payload count can equal this */
     }
     ctx->fonts[font_id] = font;
 }

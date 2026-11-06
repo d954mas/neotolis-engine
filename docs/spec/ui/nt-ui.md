@@ -95,8 +95,9 @@ game-side changes.
 
 Each context keeps the last content revision of its bound fonts. Before layout,
 `nt_ui_begin` resets Clay's measurement cache if a font was filled, including
-when this context was inactive during the fill. `nt_ui_set_font` resets the
-context's measurements when a different handle is bound under the same font ID.
+when this context was inactive during the fill. `nt_ui_set_font` invalidates the
+observed revision when a different handle is bound under the same font ID;
+the next `nt_ui_begin` performs the cache reset, including equal-revision rebinds.
 GPU glyph eviction and texture recovery do not change the content revision.
 Fill fonts before layout; a fill after layout requires rebuilding that layout.
 

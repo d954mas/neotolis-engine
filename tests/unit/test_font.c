@@ -203,6 +203,14 @@ void tearDown(void) {
 
 /* ---- Test 0: Blob self-test ---- */
 
+static void test_font_pool_exhaustion_asserts(void) {
+    const nt_font_create_desc_t desc = test_font_desc();
+    for (uint32_t i = 0; i < 4; i++) {
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_font_create(&desc).id);
+    }
+    NT_TEST_EXPECT_ASSERT((void)nt_font_create(&desc));
+}
+
 static void test_font_fill_preserves_glyphs_and_refreshes_measurement(void) {
     nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8, .measure_cache_size = 16, .max_payloads = 2});
     uint32_t size = 0;
@@ -2578,6 +2586,7 @@ static void test_font_worstcase_glyph_miss_budget(void) {
 #endif
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_font_pool_exhaustion_asserts);
     RUN_TEST(test_font_fill_preserves_glyphs_and_refreshes_measurement);
     RUN_TEST(test_font_fill_overlap_preserves_existing_data);
     RUN_TEST(test_second_fill_adds_kerning);

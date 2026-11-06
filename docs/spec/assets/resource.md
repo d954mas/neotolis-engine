@@ -475,6 +475,9 @@ Additional types (material, audio) will be added as needed.
 registry. The descriptor requires positive `max_fonts`; invalid arguments,
 double initialization and allocation failure assert. Each `nt_font_t` owns a
 list of compact payload copies, bounded by `nt_font_create_desc_t.max_payloads`.
+`nt_font_create` asserts on invalid configuration, pool exhaustion and allocation
+failure. Payload count also determines whether metrics are present; no separate
+readiness flag is stored.
 
 `nt_font_fill(font, bytes, size)` copies one trusted FONT payload synchronously.
 The caller may free its input after return. Fill happens outside a render pass,

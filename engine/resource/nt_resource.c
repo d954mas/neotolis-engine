@@ -1052,7 +1052,9 @@ parse_done:
 
 /* ---- Resource access ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_resource_t nt_resource_request(nt_hash64_t resource_id, uint8_t asset_type) {
+    NT_ASSERT(asset_type < NT_RESOURCE_MAX_ASSET_TYPES);
     NT_ASSERT(asset_type != NT_ASSET_FONT && "FONT entries fill direct font objects");
     if (!s_resource.initialized) {
         return NT_RESOURCE_INVALID;

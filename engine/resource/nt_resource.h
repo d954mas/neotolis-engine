@@ -143,6 +143,7 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
 
 /* ---- Resource access ---- */
 
+/* Zero names, out-of-range types and FONT assert before creating a slot. */
 nt_resource_t nt_resource_request(nt_hash64_t resource_id, uint8_t asset_type);
 
 /* Pure lookup of a named entry in one pack. No I/O, activation or resource slot.
