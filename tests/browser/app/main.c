@@ -833,6 +833,33 @@ EMSCRIPTEN_KEEPALIVE double nt_test_gpu_command(int operation, int segment) {
 }
 EMSCRIPTEN_KEEPALIVE const char *nt_test_input_buffer(void) { return s_state.cyrillic; }
 EMSCRIPTEN_KEEPALIVE int nt_test_mouse(void) { return (g_nt_input.pointers[0].active ? 1 : 0) | (g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_down ? 2 : 0); }
+
+/* Poll and read before another browser task or the UI can consume this frame's edges and chars. */
+EMSCRIPTEN_KEEPALIVE const char *nt_test_input_poll(void) {
+    static char snapshot[8192];
+    nt_input_poll();
+    size_t len = (size_t)snprintf(snapshot, sizeof(snapshot), "{\"keys\":[");
+    for (int i = 0; i < NT_KEY_COUNT; i++) {
+        const nt_key_t key = (nt_key_t)i;
+        len += (size_t)snprintf(snapshot + len, sizeof(snapshot) - len, "%s[%d,%d,%d]", i ? "," : "", nt_input_key_is_down(key), nt_input_key_is_pressed(key), nt_input_key_is_released(key));
+    }
+    len += (size_t)snprintf(snapshot + len, sizeof(snapshot) - len, "],\"pointers\":[");
+    for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
+        const nt_pointer_t *p = &g_nt_input.pointers[i];
+        const nt_button_state_t *b = &p->buttons[NT_BUTTON_LEFT];
+        len += (size_t)snprintf(snapshot + len, sizeof(snapshot) - len, "%s{\"id\":%u,\"active\":%d,\"down\":%d,\"pressed\":%d,\"released\":%d,\"x\":%g,\"y\":%g,\"wheel\":%g}", i ? "," : "", p->id,
+                                p->active, b->is_down, b->is_pressed, b->is_released, (double)p->x, (double)p->y, (double)p->wheel_dy);
+    }
+    len += (size_t)snprintf(snapshot + len, sizeof(snapshot) - len, "],\"chars\":[");
+    uint32_t cp = 0;
+    bool first = true;
+    while (nt_input_pop_char(&cp)) {
+        len += (size_t)snprintf(snapshot + len, sizeof(snapshot) - len, "%s%u", first ? "" : ",", cp);
+        first = false;
+    }
+    (void)snprintf(snapshot + len, sizeof(snapshot) - len, "]}");
+    return snapshot;
+}
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_walk_text_cmd_count(void) { return nt_ui_get_last_walk_text_command_count(s_ctx); }
 EMSCRIPTEN_KEEPALIVE float nt_test_field_css_x(void) { return s_nt_field_css_x; }
 EMSCRIPTEN_KEEPALIVE float nt_test_field_css_y(void) { return s_nt_field_css_y; }
@@ -997,6 +1024,7 @@ EM_JS(void, nt_test_install_hooks, (void), {
     window['__nt'] = {
         get 'ready'() { return _nt_test_ready() !== 0; },
         'input_buffer': function() { return UTF8ToString(_nt_test_input_buffer()); },
+        'input_poll': function() { return JSON.parse(UTF8ToString(_nt_test_input_poll())); },
         'mouse': function() { var m = _nt_test_mouse(); return { 'active': (m & 1) !== 0, 'down': (m & 2) !== 0 }; },
         'walk_text_cmd_count': function() { return _nt_test_walk_text_cmd_count() >>> 0; },
         'drawn_frames': function() { return _nt_test_drawn_frames() >>> 0; },

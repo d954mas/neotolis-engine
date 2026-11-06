@@ -1,11 +1,19 @@
 import { test, expect } from '@playwright/test';
 
+type InputSnapshot = {
+  keys: number[][]; // [down, pressed, released], indexed by nt_key_t
+  pointers: { id: number; active: number; down: number; pressed: number; released: number; x: number; y: number; wheel: number }[];
+  chars: number[];
+};
+
 // Window hooks the browser_smoke web build exposes (tests/browser/app/main.c, #ifdef __EMSCRIPTEN__).
 declare global {
   interface Window {
+    __blurTouch?: InputSnapshot;
     __nt?: {
       ready: boolean;
       input_buffer(): string;
+      input_poll(): InputSnapshot;
       walk_text_cmd_count(): number;
       field_visible(): boolean;
       field_css(): { x: number; y: number };
@@ -144,4 +152,84 @@ test('mouse: a blur during a drag releases it for good', async ({ page }) => {
   await frame();
   expect(await page.evaluate(() => window.__nt!.mouse())).toEqual({ active: true, down: false });
   await page.mouse.up();
+});
+
+
+test('blur: keys and UTF-32 chars after refocus survive the next poll', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto('/index.html');
+  await page.waitForFunction(() => window.__nt?.ready === true, null, { timeout: 30_000 });
+  // One JS task prevents the frame loop from polling between blur and the new input.
+  const { held, current, next } = await page.evaluate(() => {
+    const canvas = document.querySelector('canvas')!;
+    const key = (code: string, value: string) => canvas.dispatchEvent(new KeyboardEvent('keydown', { code, key: value, bubbles: true }));
+    canvas.focus();
+    key('KeyH', 'h');
+    const held = window.__nt!.input_poll();
+    key('KeyB', 'b');
+    canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: 120, clientX: 100, clientY: 100 }));
+    canvas.blur();
+    canvas.focus();
+    key('KeyA', '😀');
+    canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: 240, clientX: 100, clientY: 100 }));
+    const current = window.__nt!.input_poll();
+    const next = window.__nt!.input_poll();
+    return { held, current, next };
+  });
+  expect(held.keys[7]).toEqual([1, 1, 0]); // H was already held when focus was lost.
+  expect(held.chars).toEqual(['h'.codePointAt(0)]);
+  expect(current.keys[7]).toEqual([0, 0, 1]);
+  expect(current.keys[1]).toEqual([0, 0, 0]); // B and its char were queued before blur.
+  expect(current.keys[0]).toEqual([1, 1, 0]);
+  expect(current.chars).toEqual([0x1f600]);
+  expect(current.pointers[0].wheel).toBe(2);
+  expect(next.keys[0]).toEqual([1, 0, 0]);
+  expect(next.keys[7]).toEqual([0, 0, 0]);
+  expect(next.chars).toEqual([]);
+  expect(next.pointers[0].wheel).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test('blur: a new touch before poll survives and follows later moves', async ({ page, context }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto('/index.html');
+  await page.waitForFunction(() => window.__nt?.ready === true, null, { timeout: 30_000 });
+  const frame = () => page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  const cdp = await context.newCDPSession(page);
+  const oldTouch = { id: 11, x: 120, y: 240, force: 0.5 };
+  const newTouch = { id: 22, x: 350, y: 300, force: 0.5 };
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [oldTouch] });
+  await frame();
+  const held = await page.evaluate(() => window.__nt!.input_poll().pointers[1]);
+  expect(held).toMatchObject({ active: 1, down: 1, x: 120, y: 240 });
+  await page.evaluate((oldId) => {
+    const canvas = document.querySelector('canvas')!;
+    // Capture runs before the engine's genuine pointerdown listener; the final listener polls after it.
+    canvas.addEventListener('pointerdown', () => {
+      canvas.dispatchEvent(new PointerEvent('pointermove', { pointerType: 'touch', pointerId: oldId, clientX: 333, clientY: 444, buttons: 1 }));
+      canvas.blur();
+      canvas.focus();
+    }, { capture: true, once: true });
+    canvas.addEventListener('pointerdown', () => {
+      window.__blurTouch = window.__nt!.input_poll();
+    }, { once: true });
+  }, held.id);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [oldTouch, newTouch] });
+  const current = await page.evaluate(() => window.__blurTouch!);
+  expect(current.pointers[1]).toMatchObject({ id: held.id, active: 1, down: 0, released: 1, x: 120, y: 240 });
+  expect(current.pointers[2]).toMatchObject({ active: 1, down: 1, pressed: 1, released: 0, x: 350, y: 300 });
+  const newId = current.pointers[2].id;
+  expect(newId).not.toBe(held.id);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [oldTouch, { ...newTouch, x: 390, y: 320 }] });
+  await frame();
+  const moved = await page.evaluate(() => window.__nt!.input_poll());
+  expect(moved.pointers[1].active).toBe(0);
+  expect(moved.pointers[2]).toMatchObject({ id: newId, active: 1, down: 1, x: 390, y: 320 });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await frame();
+  const ended = await page.evaluate(() => window.__nt!.input_poll());
+  expect(ended.pointers.filter((p) => p.active && p.down)).toEqual([]);
+  expect(errors).toEqual([]);
 });
