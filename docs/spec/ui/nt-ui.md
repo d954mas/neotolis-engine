@@ -476,9 +476,16 @@ capture edges (`hovered/pressed/released/held/clicked`) PLUS cfg-gated gestures
 `long_press_secs` while `held && hovered`). The base path delegates to
 `step_interaction` verbatim (byte-for-byte capture parity); the gesture cell is
 allocated ONLY when `cfg` opts in (`cfg==NULL` grows the state pool by zero), so
-zero-overhead is the default — explicit-over-implicit. The dbl-click window and
-drag move-radius are engine-global (`nt_ui_set_gesture_constants`); dragging off
-the bbox or past the radius resets `hold_progress` and suppresses `long_pressed`.
+zero-overhead is the default — explicit-over-implicit. The double-click time window
+and distance between presses are engine-global (`nt_ui_set_gesture_constants`).
+The move radius gates double-click only: leaving the bbox resets `hold_progress`
+and cancels long-press until a new press; motion within the bbox keeps the hold.
+Skipping gesture processing for a frame (`cfg==NULL`, neither gesture requested,
+or no mutating step) ends both the previous double-click candidate and the live
+hold candidate. Re-enabling gestures requires a new press to start a hold, even
+if base capture survived the gap. Continuous processing advances gesture time
+only by `dt`; `dt==0` pauses time without cancelling a candidate. A processing
+gap cancels candidates even at `dt==0`.
 `nt_ui_query_events` is the idempotent read-side mirror (advances nothing).
 `hold_progress` is the hold-to-confirm feedback signal and feeds the radial phase.
 

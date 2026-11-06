@@ -197,6 +197,10 @@ static void test_events_hold_progress_ramp_and_one_shot_long_press(void) {
     TEST_ASSERT_TRUE(float_near(e2.hold_progress, 0.50F, 0.01F));
     TEST_ASSERT_FALSE(e2.long_pressed);
 
+    nt_ui_events_t paused = events_btn_frame(&fh, 0.0F, &cfg);
+    TEST_ASSERT_TRUE(float_near(paused.hold_progress, e2.hold_progress, 0.001F));
+    TEST_ASSERT_FALSE(paused.long_pressed);
+
     /* Cross 1.0s -> progress clamps to 1.0 AND long_pressed fires this frame. */
     nt_ui_events_t e3 = events_btn_frame(&fh, 0.60F, &cfg);
     TEST_ASSERT_TRUE(float_near(e3.hold_progress, 1.0F, 0.001F));
@@ -386,6 +390,105 @@ static void test_query_events_no_stale_latch_across_frames(void) {
     TEST_ASSERT_TRUE_MESSAGE(float_near(q_stale.hold_progress, 0.0F, 0.001F), "stale hold_progress must read 0 on a later frame");
 }
 
+static void test_events_cfg_null_gap_expires_double_click(void) {
+    const nt_ui_events_cfg_t cfg = {.double_click = true};
+    nt_pointer_t idle = make_pointer(BTN_CX, BTN_CY, false, false, false);
+    nt_pointer_t press = make_pointer(BTN_CX, BTN_CY, true, true, false);
+    nt_pointer_t release = make_pointer(BTN_CX, BTN_CY, false, false, true);
+    warm_btn_frame(&idle);
+    (void)events_btn_frame(&press, 0.0F, &cfg);
+    (void)events_btn_frame(&release, 0.05F, &cfg);
+
+    for (int i = 0; i < 600; ++i) {
+        (void)events_btn_frame(&idle, 1.0F / 60.0F, NULL);
+    }
+
+    nt_ui_events_t resumed = events_btn_frame(&press, 0.0F, &cfg);
+    TEST_ASSERT_TRUE(resumed.pressed_now);
+    TEST_ASSERT_FALSE(resumed.double_clicked);
+    (void)events_btn_frame(&release, 0.0F, &cfg);
+    nt_ui_events_t next = events_btn_frame(&press, 0.0F, &cfg);
+    TEST_ASSERT_TRUE(next.double_clicked);
+    (void)events_btn_frame(&release, 0.0F, &cfg);
+    nt_ui_events_t third = events_btn_frame(&press, 0.0F, &cfg);
+    TEST_ASSERT_FALSE(third.double_clicked);
+}
+
+static void test_events_continuous_double_click_respects_window_and_radius(void) {
+    const nt_ui_events_cfg_t cfg = {.double_click = true};
+    nt_pointer_t idle = make_pointer(BTN_CX, BTN_CY, false, false, false);
+    nt_pointer_t press = make_pointer(BTN_CX, BTN_CY, true, true, false);
+    nt_pointer_t release = make_pointer(BTN_CX, BTN_CY, false, false, true);
+    warm_btn_frame(&idle);
+    nt_ui_set_gesture_constants(s_fx.ctx, 0.25F, 8.0F);
+    (void)events_btn_frame(&press, 0.0F, &cfg);
+    (void)events_btn_frame(&release, 0.125F, &cfg);
+    nt_ui_events_t late = events_btn_frame(&press, 0.25F, &cfg);
+    TEST_ASSERT_TRUE(late.pressed_now);
+    TEST_ASSERT_FALSE(late.double_clicked);
+
+    (void)events_btn_frame(&release, 0.0F, &cfg);
+    press.x += 9.0F;
+    nt_ui_events_t distant = events_btn_frame(&press, 0.0F, &cfg);
+    TEST_ASSERT_TRUE(distant.pressed_now);
+    TEST_ASSERT_FALSE(distant.double_clicked);
+    release.x = press.x;
+    (void)events_btn_frame(&release, 0.125F, &cfg);
+    press.x += 8.0F;
+    nt_ui_events_t boundary = events_btn_frame(&press, 0.125F, &cfg);
+    TEST_ASSERT_TRUE(boundary.double_clicked);
+}
+
+static void test_events_skipped_step_expires_double_click_at_zero_dt(void) {
+    const nt_ui_events_cfg_t cfg = {.double_click = true};
+    nt_pointer_t idle = make_pointer(BTN_CX, BTN_CY, false, false, false);
+    nt_pointer_t press = make_pointer(BTN_CX, BTN_CY, true, true, false);
+    nt_pointer_t release = make_pointer(BTN_CX, BTN_CY, false, false, true);
+    warm_btn_frame(&idle);
+    (void)events_btn_frame(&press, 0.0F, &cfg);
+    (void)events_btn_frame(&release, 0.0F, &cfg);
+
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &idle, 1, 0);
+    declare_btn_element();
+    nt_ui_end(s_fx.ctx);
+    (void)events_btn_frame(&idle, 0.0F, &cfg); /* Re-register before the next press. */
+
+    nt_ui_events_t resumed = events_btn_frame(&press, 0.0F, &cfg);
+    TEST_ASSERT_TRUE(resumed.pressed_now);
+    TEST_ASSERT_FALSE(resumed.double_clicked);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_events_disabled_gestures_cancel_hold_until_new_press(void) {
+    const nt_ui_events_cfg_t cfg = {.long_press_secs = 1.0F};
+    const nt_ui_events_cfg_t disabled = {0};
+    nt_pointer_t idle = make_pointer(BTN_CX, BTN_CY, false, false, false);
+    nt_pointer_t press = make_pointer(BTN_CX, BTN_CY, true, true, false);
+    nt_pointer_t hold = make_pointer(BTN_CX, BTN_CY, true, false, false);
+    nt_pointer_t release = make_pointer(BTN_CX, BTN_CY, false, false, true);
+    warm_btn_frame(&idle);
+    (void)events_btn_frame(&press, 0.0F, &cfg);
+    nt_ui_events_t partial = events_btn_frame(&hold, 0.5F, &cfg);
+    TEST_ASSERT_TRUE(float_near(partial.hold_progress, 0.5F, 0.001F));
+
+    (void)events_btn_frame(&hold, 0.0F, &disabled);
+    nt_ui_events_t resumed = events_btn_frame(&hold, 0.5F, &cfg);
+    TEST_ASSERT_TRUE(resumed.held);
+    TEST_ASSERT_FALSE(resumed.long_pressed);
+    TEST_ASSERT_TRUE(float_near(resumed.hold_progress, 0.0F, 0.001F));
+    nt_ui_events_t still_held = events_btn_frame(&hold, 1.0F, &cfg);
+    TEST_ASSERT_FALSE(still_held.long_pressed);
+    TEST_ASSERT_TRUE(float_near(still_held.hold_progress, 0.0F, 0.001F));
+
+    (void)events_btn_frame(&release, 0.0F, &cfg);
+    nt_ui_events_t fresh = events_btn_frame(&press, 0.0F, &cfg);
+    TEST_ASSERT_TRUE(fresh.pressed_now);
+    TEST_ASSERT_TRUE(float_near(fresh.hold_progress, 0.0F, 0.001F));
+    nt_ui_events_t completed = events_btn_frame(&hold, 1.0F, &cfg);
+    TEST_ASSERT_TRUE(completed.long_pressed);
+    TEST_ASSERT_TRUE(float_near(completed.hold_progress, 1.0F, 0.001F));
+}
+
 /* nt_ui_set_gesture_constants asserts finite & >= 0 (fail-early, no silent clamp). */
 static void test_set_gesture_constants_rejects_bad_values(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_set_gesture_constants(s_fx.ctx, -1.0F, 6.0F));
@@ -409,6 +512,10 @@ int main(void) {
     RUN_TEST(test_query_events_idempotent);
     RUN_TEST(test_query_events_surfaces_gestures_after_mutating_step);
     RUN_TEST(test_query_events_no_stale_latch_across_frames);
+    RUN_TEST(test_events_cfg_null_gap_expires_double_click);
+    RUN_TEST(test_events_continuous_double_click_respects_window_and_radius);
+    RUN_TEST(test_events_skipped_step_expires_double_click_at_zero_dt);
+    RUN_TEST(test_events_disabled_gestures_cancel_hold_until_new_press);
     RUN_TEST(test_set_gesture_constants_rejects_bad_values);
     return UNITY_END();
 }

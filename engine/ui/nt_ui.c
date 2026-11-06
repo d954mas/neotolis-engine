@@ -2849,6 +2849,11 @@ static void events_step_gesture(nt_ui_context_t *ctx, uint32_t id, const nt_ui_e
     const float pos_y = e->pos[1];
 
     nt_ui_events_gesture_t *g = (nt_ui_events_gesture_t *)nt_ui_state(ctx, events_gesture_id(id), (uint32_t)sizeof(nt_ui_events_gesture_t), NT_UI_STATE_TAG('e', 'v', 'g', 's'));
+    /* A skipped gesture frame ends both candidates, even while base capture survives. */
+    if (g->latched_frame != ctx->frame_counter - 1U) {
+        g->has_prev = 0U;
+        g->press_live = 0U;
+    }
     g->clock += ctx->frame_dt; /* monotonic; dt may be 0 in headless tests (caller drives time via dt) */
 
     /* Clear last frame's latch before recomputing — query_events reads these back this frame. */
