@@ -20,8 +20,11 @@
 #include "nt_half.h"
 #include "nt_pack_format.h"
 #include "resource/nt_resource.h"
+#include "resource/nt_resource_internal.h"
 #include "stb_truetype.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/nt_test_pack.h"
+#include "time/nt_time.h"
 #include "unity.h"
 /* clang-format on */
 
@@ -200,13 +203,70 @@ void setUp(void) {
 
 void tearDown(void) {
     nt_log_remove_sink(capture_errors, NULL);
-    nt_font_shutdown(); /* frees the test-only pack wrappers it owns */
     nt_resource_shutdown();
+    nt_font_shutdown(); /* frees the test-only pack wrappers it owns */
     nt_hash_shutdown();
     nt_gfx_shutdown();
 }
 
 /* ---- Test 0: Blob self-test ---- */
+
+static void test_font_shared_source_survives_pack_eviction(void) {
+    uint32_t font_size = 0;
+    uint8_t *font_blob = build_test_font_blob(&font_size);
+    const uint32_t header_size = 128;
+    const uint32_t pack_size = 8U * 1024U * 1024U;
+    uint8_t *pack_blob = calloc(1, pack_size);
+    TEST_ASSERT_NOT_NULL(pack_blob);
+    NtPackHeader *header = (NtPackHeader *)pack_blob;
+    *header = (NtPackHeader){.magic = NT_PACK_MAGIC, .version = NT_PACK_VERSION, .header_size = header_size, .total_size = pack_size, .asset_count = 2};
+    NtAssetEntry *entries = (NtAssetEntry *)(pack_blob + sizeof(*header));
+    const nt_hash64_t owner_id = nt_hash64_str("owned_font");
+    const nt_hash64_t alias_id = nt_hash64_str("owned_font_alias");
+    entries[0] = (NtAssetEntry){.resource_id = owner_id.value, .asset_type = NT_ASSET_FONT, .offset = header_size, .size = font_size};
+    entries[1] = entries[0];
+    entries[1].resource_id = alias_id.value;
+    memcpy(pack_blob + header_size, font_blob, font_size);
+    free(font_blob);
+    nt_test_seal_pack(pack_blob);
+    const nt_hash32_t pack = nt_hash32_str("owned_font_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pack, 0));
+    /* Ownership transfers through the I/O fixture hook; eviction frees this buffer. */
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pack, pack_blob, pack_size)); // NOLINT(clang-analyzer-unix.Malloc)
+    nt_resource_test_set_pack_io_type(0, NT_IO_FS);
+    nt_resource_t owner = nt_resource_request(owner_id, NT_ASSET_FONT);
+    nt_resource_t alias = nt_resource_request(alias_id, NT_ASSET_FONT);
+    nt_font_t first = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8});
+    nt_font_t second = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8});
+    nt_font_add(first, owner);
+    nt_font_add(second, alias);
+    nt_resource_step();
+    nt_font_step();
+    TEST_ASSERT_EQUAL_UINT64(pack_size, nt_resource_get_resident_bytes().blob_bytes);
+    TEST_ASSERT_EQUAL_UINT16(1, nt_font_get_stats(first).glyphs_cached);
+    TEST_ASSERT_EQUAL_UINT16(1, nt_font_get_stats(second).glyphs_cached);
+    TEST_ASSERT_NOT_EQUAL(0, nt_resource_get(owner));
+    TEST_ASSERT_EQUAL_UINT32(nt_resource_get(owner), nt_resource_get(alias));
+    TEST_ASSERT_FALSE(nt_font_lookup_glyph(first, 'A')->is_tofu);
+    nt_resource_set_blob_policy(pack, NT_BLOB_AUTO, 1);
+    nt_time_sleep(0.01);
+    nt_resource_step();
+    TEST_ASSERT_FALSE(nt_resource_test_pack_blob_resident(0));
+    TEST_ASSERT_EQUAL_UINT64(0, nt_resource_get_resident_bytes().blob_bytes);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0));
+    nt_font_step();
+    TEST_ASSERT_TRUE(nt_font_measure_n(second, "BC", 2, 20.0F, 0.0F).width == 20.0F);
+    TEST_ASSERT_FALSE(nt_font_lookup_glyph(first, 'B')->is_tofu);
+    TEST_ASSERT_FALSE(nt_font_lookup_glyph(second, 'C')->is_tofu);
+    nt_font_destroy(first);
+    TEST_ASSERT_FALSE(nt_font_lookup_glyph(second, 'B')->is_tofu);
+    nt_resource_unmount(pack);
+    TEST_ASSERT_TRUE(nt_font_lookup_glyph(second, 'A')->is_tofu);
+    nt_resource_step();
+    nt_font_step();
+    TEST_ASSERT_EQUAL_UINT16(0, nt_font_get_metrics(second).units_per_em);
+    nt_font_destroy(second);
+}
 
 void test_font_blob_valid(void) {
     uint32_t size = 0;
@@ -236,8 +296,8 @@ void test_font_blob_valid(void) {
 
 void test_font_init_shutdown(void) {
     /* setUp already called init -- shutdown and re-init */
-    nt_font_shutdown();
     nt_resource_shutdown();
+    nt_font_shutdown();
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 4});
     nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 2});
@@ -326,8 +386,8 @@ void test_font_destroy_frees_unready_texture(void) {
         if (i == 0U) {
             nt_font_destroy(font);
         } else {
-            nt_font_shutdown();
             nt_resource_shutdown();
+            nt_font_shutdown();
             nt_resource_init(&(nt_resource_desc_t){0});
             nt_font_init(&(nt_font_desc_t){.max_fonts = 4});
         }
@@ -1157,12 +1217,7 @@ void test_font_flushes_on_same_metrics_winner_swap(void) {
     free(blob_b);
 }
 
-/* ---- FONT-02k: pack unmount clears stale provider + metrics ----
- *
- * Unmount drops the winner; the resolve pass fires font_on_cleanup
- * (frees the {blob,size} holder) and the epoch-gated font_step then flushes the
- * glyph cache and resets metrics. After unmount + a resource/font step the font
- * has no provider and measure_n short-circuits at !metrics_set. */
+/* Unmount releases the source; the next font step flushes cached glyphs and metrics. */
 void test_font_file_pack_unmount_cleans_state(void) {
     nt_font_create_desc_t desc = test_font_desc();
     nt_font_t font = nt_font_create(&desc);
@@ -1182,7 +1237,7 @@ void test_font_file_pack_unmount_cleans_state(void) {
     TEST_ASSERT_EQUAL_UINT16(1U, nt_font_get_stats(font).glyphs_cached); /* tofu */
 
     nt_font_test_deactivate(tok);
-    nt_resource_step(); /* resolve -> font_on_cleanup, provider lost */
+    nt_resource_step(); /* publish the lost source */
     nt_font_step();     /* epoch changed -> flush + clear metrics */
 
     TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
@@ -1302,12 +1357,7 @@ void test_font_outline_over_curve_cap_asserts_on_decode(void) {
     expect_glyph_decode_assert(blob, build_ring_font_blob(blob, 1U, NT_FONT_MAX_CURVES_PER_GLYPH + 1U, 1U), "curve cap");
 }
 
-/* ---- FONT-03: unmount a font's pack WHILE it is referenced ----
- *
- * The font reads glyph bytes zero-copy from the pinned pack blob, then the pack
- * is unmounted while the pin is held. The unmount overrides the pin, the resolve
- * pass frees the holder exactly once (no double-free), and the font degrades
- * cleanly — no dangling read. */
+/* A referenced source may disappear at unmount without leaving dangling payload reads. */
 void test_font_unmount_while_referenced_renders_tofu(void) {
     nt_font_create_desc_t desc = test_font_desc();
     nt_font_t font = nt_font_create(&desc);
@@ -1321,7 +1371,7 @@ void test_font_unmount_while_referenced_renders_tofu(void) {
     nt_resource_step();
     nt_font_step();
 
-    /* Reference the blob: 'A' is a real glyph (zero-copy decode through the pin);
+    /* 'A' is a real glyph decoded from the owned source;
      * 'Z' is absent -> the single font-level tofu sentinel (0xFFFFFFFF). */
     const nt_glyph_cache_entry_t *a = nt_font_lookup_glyph(font, 'A');
     TEST_ASSERT_NOT_NULL(a);
@@ -1333,7 +1383,7 @@ void test_font_unmount_while_referenced_renders_tofu(void) {
     TEST_ASSERT_TRUE(z->is_tofu);
     TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFFU, z->codepoint);
 
-    /* Unmount while referenced: no crash, holder freed once (no double-free). */
+    /* Unmount while referenced: the source is released once. */
     nt_font_test_deactivate(tok);
     nt_resource_step();
     nt_font_step();
@@ -2973,6 +3023,7 @@ static void test_font_worstcase_glyph_miss_budget(void) {
 #endif
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_font_shared_source_survives_pack_eviction);
     RUN_TEST(test_font_blob_valid);
     RUN_TEST(test_font_shared_contours_padding_and_empty_glyph_remain_valid);
     RUN_TEST(test_font_contour_points_above_curve_cap_stay_valid);

@@ -55,6 +55,7 @@ The chapters below define engine behavior.
 | [render/shader.md](render/shader.md) | ShaderAsset interface and the four levels of shader data |
 | [render/material.md](render/material.md) | Material model, vec4 params, render state ownership, draw-time texture resolve |
 | [assets/resource.md](assets/resource.md) | Resource registry, handles, resolve/publication, blob pinning, asset types |
+| [assets/resource-refactor.md](assets/resource-refactor.md) | Proposed resource/runtime-object/pack architecture and migration plan; not implemented |
 | [assets/async-loading.md](assets/async-loading.md) | Pack/asset state machines, async loading flow, retry policy |
 | [assets/ntpack.md](assets/ntpack.md) | NTPACK flat binary pack format and parsing |
 | [assets/runtime-formats.md](assets/runtime-formats.md) | Runtime-format rule, validation, mesh format strategy |

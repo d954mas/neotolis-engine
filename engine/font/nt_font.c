@@ -34,30 +34,38 @@ static void generate_tofu(nt_font_slot_t *slot);
 static void font_test_shutdown_packs(void);
 #endif
 
-// #region Asset callbacks — activate, on_resolve + PIN_BLOB
+// #region Asset callbacks
 /* Packs are trusted: one O(1) table bound here, and glyph decode asserts each glyph's point and
- * curve counts on first use. The handle is never interpreted; nt_resource_winner_gen identifies the winner. */
+ * curve counts on first use. Keep the compact payload so unused glyphs stay undecoded. */
 static uint32_t font_activate(const uint8_t *data, uint32_t size) {
     const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)data;
     NT_ASSERT(sizeof(NtFontAssetHeader) + ((uint64_t)hdr->glyph_count * sizeof(NtFontGlyphEntry)) <= size && "font glyph table past the blob");
-    return 1;
+    uint32_t handle = nt_pool_alloc(&s_font.source_pool);
+    NT_ASSERT(handle != 0);
+    uint32_t index = nt_pool_slot_index(handle);
+    uint8_t *owned = malloc(size);
+    NT_ASSERT(owned);
+    memcpy(owned, data, size);
+    s_font.source_data[index] = owned;
+    return handle;
 }
 
-/* Zero-copy provider: user_data borrows the winner's asset bytes inside its pack blob. The winner
- * PINs that blob (PIN_BLOB), and the resource system severs user_data before freeing it. */
-static void font_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data) {
-    (void)size;
-    (void)runtime_handle;
-    NT_ASSERT(data != NULL && "PIN_BLOB winner is published only with a resident blob");
-    union {
-        const uint8_t *blob;
-        void *slot;
-    } borrowed = {.blob = data}; /* user_data is untyped; font_provider_blob reads it back as const */
-    *user_data = borrowed.slot;
+static void font_deactivate(uint32_t handle) {
+    NT_ASSERT(nt_pool_valid(&s_font.source_pool, handle));
+    uint32_t index = nt_pool_slot_index(handle);
+    free(s_font.source_data[index]);
+    s_font.source_data[index] = NULL;
+    nt_pool_free(&s_font.source_pool, handle);
 }
 
-/* The winning resource's live blob (never a raw pointer cached across frames); NULL when gone. */
-static const uint8_t *font_provider_blob(nt_resource_t resource) { return (const uint8_t *)nt_resource_peek_user_data(resource); }
+static const uint8_t *font_provider_blob(nt_resource_t resource) {
+    uint32_t handle = nt_resource_get(resource);
+    uint32_t index = nt_pool_slot_index(handle);
+    if (index > s_font.source_pool.capacity || s_font.source_pool.slots[index].id != handle) {
+        return NULL;
+    }
+    return s_font.source_data[index]; /* reserved slot 0 stays NULL */
+}
 // #endregion
 
 /* Single source of truth for the cleanup that must follow any change in a slot's
@@ -1335,13 +1343,14 @@ void nt_font_init(const nt_font_desc_t *desc) {
     NT_ASSERT(desc->max_fonts > 0);
 
     nt_pool_init(&s_font.pool, desc->max_fonts);
+    nt_pool_init(&s_font.source_pool, NT_RESOURCE_MAX_ASSETS);
+    s_font.source_data = (uint8_t **)calloc((size_t)NT_RESOURCE_MAX_ASSETS + 1U, sizeof(*s_font.source_data));
+    NT_ASSERT(s_font.source_data);
 
     s_font.slots = (nt_font_slot_t *)calloc((size_t)desc->max_fonts + 1, sizeof(nt_font_slot_t));
     NT_ASSERT(s_font.slots);
 
-    /* Fonts are zero-copy consumers: on_resolve borrows the winner's bytes as user_data (no
-     * cleanup needed), and PIN_BLOB keeps the winning pack blob resident so glyph reads never dangle. */
-    nt_resource_register_type(NT_ASSET_FONT, &(nt_resource_type_desc_t){.activate = font_activate, .on_resolve = font_on_resolve, .behavior_flags = NT_RESOURCE_BEHAVIOR_PIN_BLOB});
+    nt_resource_register_type(NT_ASSET_FONT, &(nt_resource_type_desc_t){.activate = font_activate, .deactivate = font_deactivate});
 
     s_font.last_resolve_epoch = 0;
     s_font.initialized = true;
@@ -1351,6 +1360,7 @@ void nt_font_shutdown(void) {
     if (!s_font.initialized) {
         return;
     }
+    NT_ASSERT(s_font.source_pool.queue_top == s_font.source_pool.capacity && "release resource-owned fonts before font shutdown");
     // #region Per-slot cleanup
     for (uint32_t i = 1; i <= s_font.pool.capacity; i++) {
         if (!nt_pool_slot_alive(&s_font.pool, i)) {
@@ -1365,6 +1375,8 @@ void nt_font_shutdown(void) {
     // #endregion
     free(s_font.slots);
     nt_pool_shutdown(&s_font.pool);
+    free((void *)s_font.source_data);
+    nt_pool_shutdown(&s_font.source_pool);
     memset(&s_font, 0, sizeof(s_font));
 #ifdef NT_TEST_ACCESS
     font_test_shutdown_packs();
@@ -2173,9 +2185,8 @@ void nt_font_measure_invalidate(nt_font_t font) {
 #ifdef NT_TEST_ACCESS
 
 // #region Test-only real-pack registry
-/* Fonts read bytes zero-copy from a RESIDENT pack blob (virtual packs carry none), so tests wrap a
- * font blob in a real single-asset .ntpack, mount + parse it, and return a token. parse_pack keeps a
- * zero-copy pointer, so the wrapper is retained until deactivate/shutdown; keyed by token for remount. */
+/* parse_pack borrows the caller-owned wrapper until unmount/shutdown;
+ * FONT activation copies its payload. Tokens let fixtures remount the same source. */
 
 #define NT_FONT_TEST_MAX_PACKS 128
 typedef struct {
@@ -2271,9 +2282,7 @@ void nt_font_test_reregister(uint32_t token, const uint8_t *data, uint32_t size)
 }
 
 static void font_test_shutdown_packs(void) {
-    /* Free the caller-owned pack wrappers. Safe regardless of tearDown ordering:
-     * these packs are io_type == NT_IO_NONE, so nt_resource_shutdown/unmount never
-     * frees the blob (no double-free) and never dereferences it (no dangling read). */
+    /* Resource shutdown has already released the objects; the fixture owns only pack bytes. */
     for (uint32_t i = 0; i < s_test_pack_count; i++) {
         free(s_test_packs[i].pack_blob);
         s_test_packs[i].pack_blob = NULL;

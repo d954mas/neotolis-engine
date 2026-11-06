@@ -502,11 +502,11 @@ int main(int argc, char *argv[]) {
 #ifndef NT_PLATFORM_WEB
     nt_text_renderer_shutdown();
     nt_font_destroy(s_font);
-    nt_font_shutdown();
     nt_material_destroy(s_text_material);
     nt_program_ref_drop(&s_text_program);
     nt_material_shutdown();
     nt_resource_shutdown();
+    nt_font_shutdown();
     nt_fs_shutdown();
     nt_http_shutdown();
     nt_hash_shutdown();

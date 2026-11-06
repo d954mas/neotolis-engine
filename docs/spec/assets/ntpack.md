@@ -3,7 +3,8 @@
 NTPACK is a custom flat binary pack format: 32-byte header with embedded
 manifest, packed asset entries, aligned asset data, and an optional metadata
 section. No backwards compatibility — the runtime asserts the exact version and
-old packs are rebuilt. Parsing is direct struct reads; asset access is zero-copy.
+old packs are rebuilt. Parsing uses direct struct reads; runtime objects own the
+data they need after construction.
 
 Related: [Resource System](resource.md), [Async Loading](async-loading.md), [Builder Architecture](../builder/builder.md), [Runtime Formats](runtime-formats.md)
 
@@ -13,7 +14,7 @@ Custom flat binary format instead of ZIP. Rationale:
 
 - no external library dependency (no miniz in WASM, saves ~15-25KB binary size)
 - trivial parsing: direct struct reads, no variable-length header parsing
-- zero-copy asset access: pointer + offset into loaded blob
+- borrowed construction input: pointer + offset into loaded blob
 - manifest is embedded in header, not a separate file
 - HTTP transport compression (gzip/brotli) handles delivery size
 - partial loading via HTTP Range requests is straightforward (header first, then assets by offset)
@@ -139,8 +140,11 @@ The existing resident metadata copy remains separate and survives blob eviction.
 
 With the pack blob resident, a validated entry's payload begins at
 `blob + entry.offset` and spans `entry.size` bytes. Runtime activators borrow
-that range. `nt_resource_get_blob` returns the bytes after `NtBlobAssetHeader`
-for a published BLOB resource; its public contract defines the view's lifetime.
+that range for the call. FONT activation copies its compact payload. BLOB parsing
+copies the bytes after `NtBlobAssetHeader` once per canonical entry;
+`nt_resource_get_blob` returns this owned payload for a published BLOB resource.
+Aliases share the allocation. It survives pack-byte eviction, and is freed when
+the canonical entry is released at unmount/shutdown.
 
 ## Debugging
 

@@ -30,9 +30,9 @@ int main(int argc, char **argv) {
     nt_text_renderer_draw_n(&style, identity, "", 0U);
     nt_font_destroy(style.font);
     nt_text_renderer_shutdown();
-    nt_gfx_shutdown();
-    nt_font_shutdown();
     nt_resource_shutdown();
+    nt_font_shutdown();
+    nt_gfx_shutdown();
     nt_hash_shutdown();
     puts("font-contract-accepted");
     return 0;

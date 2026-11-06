@@ -50,8 +50,22 @@ the metadata count describes the separate resident copy. After blob eviction,
 its preserved size contributes nothing, but its metadata copy remains counted.
 Unmount/shutdown remove the corresponding bytes. Virtual packs without data
 contribute zero. This is resident pack data, not registry storage, I/O buffers,
-runtime GPU assets or total process memory; there is no mirrored allocation
+runtime CPU/GPU assets or total process memory; there is no mirrored allocation
 accounting.
+
+Owned FONT and BLOB data have separate construction and steady-state costs. With
+source pack size P and canonical compact FONT/BLOB payloads totaling C, those
+bytes occupy P + C during construction and C after AUTO eviction. Aliases and
+additional font caches do not multiply C. Cache storage, GPU textures, metadata,
+registry storage and allocator overhead are separate; KEEP retains P + C.
+
+The font eviction regression uses an 8,388,608-byte pack containing a 150-byte
+FONT, two resource names and two caches: source-byte accounting peaks at 8,388,758 bytes
+and retains 150 bytes after eviction. These are allocation sizes, not a measured
+process-memory peak. At the default 2,048-entry cap, new wasm32 ownership tables
+occupy 32,776 bytes: 8,192 for BLOB pointers, 8,196 for FONT pointers, 8,196 for
+source pool IDs and 8,192 for its free queue, excluding small state fields and
+allocator overhead. FONT tables are allocated only when its module initializes.
 
 ## Core concepts
 
@@ -267,13 +281,14 @@ copy-out: it turns the payload into a self-contained runtime object and never
 reads the blob again. MESH does it with GPU buffers; the skeletal types
 (`NSKL`, `NSKN`, `NANM`, `engine/skeletal_assets`) do it with one CPU allocation
 per asset holding a copy of the payload, which is already the runtime layout.
-Neither pins.
+FONT likewise owns one compact payload per canonical asset, shared by its caches;
+BLOB owns its payload bytes. None of these types pins.
 
 Two consumption models exist for asset types that derive state from pack bytes
 through the resolve callbacks:
 
 - **Copy-out** (`NT_RESOURCE_BEHAVIOR_AUX_BACKED`, e.g. atlas): `on_resolve` copies the bytes it needs into a self-contained `user_data`. Once built, `user_data` never touches the blob again, so the pack blob can be evicted freely and the consumer keeps working. Copy-out consumers do **not** pin.
-- **Zero-copy** (`NT_RESOURCE_BEHAVIOR_PIN_BLOB`, e.g. font): the consumer reads the *live* pack blob on demand (glyph decode at cache-miss). Its `user_data` borrows the winner's asset bytes inside the pack blob, so the blob must stay resident for as long as it is the published winner. Zero-copy consumers **pin** the blob.
+- **Zero-copy** (`NT_RESOURCE_BEHAVIOR_PIN_BLOB`, custom consumers): the consumer reads the *live* pack blob on demand. Its `user_data` borrows the winner's asset bytes inside the pack blob, so the blob must stay resident for as long as it is the published winner. Zero-copy consumers **pin** the blob. FONT no longer uses this path.
 
 **Pin count (`NtPackMeta.blob_pins`).** Each pack carries the aggregate count of published winners (across all slots) pinning its blob. The resolve pass resets every pack's count to zero, then increments it once per published `PIN_BLOB` winner. Rebuilding from the selected winners avoids maintaining separate pin ownership on each slot. Consumers never pin/unpin themselves. Eviction checks the previous pass's count and skips pinned blobs: pins are normal residency state, not an invariant violation.
 
@@ -282,7 +297,7 @@ through the resolve callbacks:
 - **AUTO-as-KEEP:** a pinned `NT_BLOB_AUTO` pack behaves as `NT_BLOB_KEEP`. This is not an error; it is reported once via an edge-triggered log (re-armed when `blob_pins` returns to 0), never per frame.
 - **Plain assets (copy-out) recover via invalidate:** for a plain asset (texture/mesh) the GPU `runtime_handle` is self-contained after activation, so rendering continues with `blob == NULL`. Recovery after GPU context loss is game-driven: the game calls `nt_resource_invalidate(asset_type)` (contract: "game must re-create resources" on `context_restored`), which deactivates + marks assets back to `REGISTERED` (Pass 1) and, for any pack whose `AUTO`-evicted blob is now `NULL`, resets `pack_state` to re-issue the download (Pass 2) — so the next `resource_step()` re-downloads and re-activates. `AUTO` is therefore recoverable for plain assets; no source is permanently lost as long as the game invalidates on context restore. With explicit pack-level lifetime, `AUTO` for plain assets is mostly a memory optimization (unmount already bounds the blob).
 
-**Unmount override.** Explicit `nt_resource_unmount` overrides the pin: it proceeds (developer intent wins), emits a one-shot error log if `blob_pins > 0`, and preserves the deactivate-before-free ordering. Teardown zeroes `blob_pins`; the next resolve rebuilds it from the current winners, and the unmounted pack (no longer a winner) is simply not counted — no stale pin, no double-free. The zero-copy consumer loses its provider **synchronously, before the blob is freed**: unmount walks the `PIN_BLOB` slots whose published winner resolves to this pack and runs `on_cleanup` + clears `user_data` first — otherwise a font read between the unmount and the next resolve pass would dereference freed memory. Copy-out consumers without `PIN_BLOB` are **not** severed — their `user_data` is self-contained. The severed consumer degrades to its fallback (a font renders tofu, then clears metrics once no provider remains). Invariant: **every blob-freeing path is reconciled with the pin — eviction respects it (skip), unmount overrides it (proceed + log).**
+**Unmount override.** Explicit `nt_resource_unmount` overrides the pin: it proceeds (developer intent wins), emits a one-shot error log if `blob_pins > 0`, and preserves the deactivate-before-free ordering. Teardown zeroes `blob_pins`; the next resolve rebuilds it from the current winners, and the unmounted pack (no longer a winner) is simply not counted — no stale pin, no double-free. The zero-copy consumer loses its provider **synchronously, before the blob is freed**: unmount walks the `PIN_BLOB` slots whose published winner resolves to this pack and runs `on_cleanup` + clears `user_data` first — otherwise a consumer read between unmount and the next resolve pass would dereference freed memory. Copy-out consumers without `PIN_BLOB` are **not** severed — their `user_data` is self-contained. The severed consumer degrades to its fallback. Invariant: **every blob-freeing path is reconciled with the pin — eviction respects it (skip), unmount overrides it (proceed + log).**
 
 The per-asset pin (the published winner of a pinning slot) is exposed for diagnostics as `nt_resource_asset_info_t.blob_pins` and surfaced in the devapi `resource.list` group.
 
@@ -473,6 +488,15 @@ returning `void`. Call it after `nt_resource_init`, before the first successful
 file or virtual mount. The descriptor must be non-NULL with positive `max_fonts`;
 invalid arguments, double initialization and allocation failure assert.
 `nt_font_shutdown` does not reset type registration in the resource lifecycle.
+Release resource-owned FONT objects with `nt_resource_shutdown` (or unmount all
+their packs) before `nt_font_shutdown`. The latter asserts if sources remain live.
+Keep graphics alive until both modules finish teardown.
+
+Activation copies the compact FONT payload once into a generational source pool
+bounded by `NT_RESOURCE_MAX_ASSETS`; it does not expand glyph contours. Canonical
+entries own their sources; aliases and multiple font caches share the same source
+handle. Cache destruction does not release the source. Resource deactivation
+releases it once. A stale handle cannot read a freed or reused source slot.
 
 Builder produces font assets from TTF/OTF sources. Binary layout:
 
@@ -556,7 +580,7 @@ metrics stay unchanged.
 
 **Decoration metrics.** The 24-byte header ends with four `int16` decoration-metric fields (`underline_position`, `underline_thickness`, `strikeout_position`, `strikeout_size`). The builder reads these raw from the source font's `post` (`underlinePosition`@8, `underlineThickness`@10) and `OS/2` (`yStrikeoutSize`@26, `yStrikeoutPosition`@28) tables (big-endian, UPM-rescaled with the other metrics); when a table is absent it bakes a metric-correct heuristic (underline just below baseline, strike near mid x-height) so the runtime never sees garbage. This keeps decoration metrics in the builder — the runtime stays a parser-free safety net.
 
-**Activation checks.** FONT activation asserts only that the glyph table fits the blob (O(1)): the pack is trusted, and glyph decode asserts each glyph's point and curve counts on its first use, so a large font costs nothing at load. Shared glyph payloads, trailing padding and zero-curve glyphs are valid. Coordinate and metric values are builder guarantees.
+**Activation checks.** FONT activation asserts only that the glyph table fits the blob (O(1)): the pack is trusted. Activation copies the compact payload in O(bytes); glyph decode asserts each glyph's point and curve counts on first use. Shared glyph payloads, trailing padding and zero-curve glyphs are valid. Coordinate and metric values are builder guarantees.
 
 ### NT_ASSET_ATLAS binary format
 

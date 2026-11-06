@@ -176,10 +176,10 @@ static void test_draw_records_a_text_draw(void) {
 
     nt_debug_overlay_shutdown();
     nt_font_destroy(font);
-    nt_font_shutdown();
     free(blob);
     nt_material_shutdown();
     nt_resource_shutdown();
+    nt_font_shutdown();
     nt_hash_shutdown();
 }
 

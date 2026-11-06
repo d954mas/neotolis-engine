@@ -67,6 +67,8 @@ struct nt_font_slot_s {
 
 typedef struct {
     nt_pool_t pool;
+    nt_pool_t source_pool;
+    uint8_t **source_data;       /* compact FONT payloads, one per canonical asset */
     nt_font_slot_t *slots;       /* [capacity+1], index 0 reserved */
     uint32_t last_resolve_epoch; /* last nt_resource_publication_epoch() seen — gates the step rescan */
     bool needs_resource_rescan;  /* a font's resource set changed; epoch alone won't reflect it */

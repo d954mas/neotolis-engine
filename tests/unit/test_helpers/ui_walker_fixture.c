@@ -155,11 +155,11 @@ void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx) {
     nt_text_renderer_shutdown();
 
     nt_material_shutdown();
-    nt_font_shutdown();
     free(fx->real_font_blob);
     fx->real_font_blob = NULL;
     nt_atlas_test_reset();
     nt_resource_shutdown();
+    nt_font_shutdown();
     nt_gfx_shutdown();
     nt_hash_shutdown();
 }

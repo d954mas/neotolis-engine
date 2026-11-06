@@ -80,7 +80,7 @@ typedef void (*nt_post_resolve_fn)(const uint8_t *data, uint32_t size, nt_resour
 typedef enum {
     NT_RESOURCE_BEHAVIOR_NONE = 0,
     NT_RESOURCE_BEHAVIOR_AUX_BACKED = 1 << 0,
-    /* Zero-copy consumers (fonts) read the live pack blob through a raw pointer, so the
+    /* Custom zero-copy consumers read the live pack blob through a raw pointer, so the
      * published winner must PIN its pack blob. The resolve pass owns the pin (per-pack
      * aggregate NtPackMeta.blob_pins), rebuilt from the published winners each resolve pass. */
     NT_RESOURCE_BEHAVIOR_PIN_BLOB = 1 << 1,
@@ -171,10 +171,10 @@ uint32_t nt_resource_publication_epoch(void);
  * within one init; 0 until the first publication. Identifies the winner's bytes where runtime handles repeat. */
 uint32_t nt_resource_winner_gen(nt_resource_t handle);
 
-/* Get raw blob data pointer (after NtBlobAssetHeader). Returns NULL if not ready,
- * not a blob, or the current blob is absent; out_size may be NULL. Non-NULL data
- * is the current published winner's pack-blob view, valid until this slot publishes
- * another winner, the blob is evicted/unmounted, or shutdown. */
+/* Get the owned BLOB payload (without NtBlobAssetHeader). Returns NULL if not ready,
+ * not a blob, or empty; out_size may be NULL. Aliases share their canonical payload.
+ * The view survives pack-byte eviction; valid until this slot publishes another
+ * winner, its pack is unmounted, or shutdown. */
 const uint8_t *nt_resource_get_blob(nt_resource_t handle, uint32_t *out_size);
 
 /* Get metadata for a resource by kind hash. Returns pointer to metadata bytes

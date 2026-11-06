@@ -41,6 +41,7 @@
 static struct {
     NtPackMeta packs[NT_RESOURCE_MAX_PACKS];
     NtAssetMeta assets[NT_RESOURCE_MAX_ASSETS];
+    uint8_t *blob_data[NT_RESOURCE_MAX_ASSETS];            /* owned by canonical BLOB entries */
     NtResourceSlot slots[NT_RESOURCE_MAX_SLOTS + 1];       /* index 0 reserved */
     NtResolveTemp resolve_temp[NT_RESOURCE_MAX_SLOTS + 1]; /* valid only during resource_resolve_pass */
     NtResourceTypeEntry types[NT_RESOURCE_MAX_ASSET_TYPES];
@@ -181,6 +182,8 @@ static void asset_free(uint16_t idx) {
             slot->user_data_asset_idx = UINT16_MAX;
         }
     }
+    free(s_resource.blob_data[idx]);
+    s_resource.blob_data[idx] = NULL;
     meta->resource_id = 0;
     NT_ASSERT(s_resource.free_asset_count < NT_RESOURCE_MAX_ASSETS);
     s_resource.free_assets[s_resource.free_asset_count++] = idx;
@@ -1103,6 +1106,12 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
             .meta_offset = (entry->meta_offset != 0 && entry->meta_offset >= meta_section_start) ? entry->meta_offset - meta_section_start : NT_NO_METADATA,
             .state = (entry->asset_type == NT_ASSET_BLOB && entry->owner_entry == i) ? NT_ASSET_STATE_READY : NT_ASSET_STATE_REGISTERED,
         };
+        if (entry->asset_type == NT_ASSET_BLOB && entry->owner_entry == i && entry->size > sizeof(NtBlobAssetHeader)) {
+            uint32_t payload_size = entry->size - (uint32_t)sizeof(NtBlobAssetHeader);
+            s_resource.blob_data[idx] = malloc(payload_size);
+            NT_ASSERT(s_resource.blob_data[idx]);
+            memcpy(s_resource.blob_data[idx], blob + entry->offset + sizeof(NtBlobAssetHeader), payload_size);
+        }
     }
 
     /* Parse metadata section */
@@ -1257,7 +1266,7 @@ const uint8_t *nt_resource_get_blob(nt_resource_t handle, uint32_t *out_size) {
         return NULL;
     }
     const NtPackMeta *pack = &s_resource.packs[meta->pack_index];
-    if (!pack->mounted || pack->blob == NULL) {
+    if (!pack->mounted) {
         return NULL;
     }
     if (meta->size <= sizeof(NtBlobAssetHeader)) {
@@ -1266,7 +1275,7 @@ const uint8_t *nt_resource_get_blob(nt_resource_t handle, uint32_t *out_size) {
     if (out_size) {
         *out_size = meta->size - (uint32_t)sizeof(NtBlobAssetHeader);
     }
-    return pack->blob + meta->offset + sizeof(NtBlobAssetHeader);
+    return s_resource.blob_data[meta->owner_asset];
 }
 
 /* ---- Metadata query ---- */

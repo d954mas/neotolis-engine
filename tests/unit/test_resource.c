@@ -3851,8 +3851,38 @@ static void test_file_owner_requires_activator_before_parse_mutation(void) {
     nt_resource_unmount(pack);
 }
 
+static void test_blob_alias_payload_survives_pack_eviction(void) {
+    const nt_hash32_t pack = nt_hash32_str("owned_blob_pack");
+    uint32_t size = 0;
+    uint8_t *blob = build_blob_alias_meta_pack(&size);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pack, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pack, blob, size));
+    nt_resource_test_set_pack_io_type(0, NT_IO_FS);
+    nt_resource_t owner = nt_resource_request(nt_hash64_str("blob_owner"), NT_ASSET_BLOB);
+    nt_resource_t alias = nt_resource_request(nt_hash64_str("blob_alias"), NT_ASSET_BLOB);
+    nt_resource_step();
+    const uint8_t *payload = nt_resource_get_blob(owner, NULL);
+    TEST_ASSERT_NOT_NULL(payload);
+    TEST_ASSERT_EQUAL_PTR(payload, nt_resource_get_blob(alias, NULL));
+    nt_resource_set_blob_policy(pack, NT_BLOB_AUTO, TEST_BLOB_TTL_MS);
+    nt_time_sleep(TEST_PAST_BLOB_TTL_S);
+    nt_resource_step();
+    TEST_ASSERT_FALSE(nt_resource_test_pack_blob_resident(0));
+    uint32_t payload_size = 0;
+    const uint8_t *retained = nt_resource_get_blob(alias, &payload_size);
+    TEST_ASSERT_EQUAL_PTR(payload, retained);
+    TEST_ASSERT_EQUAL_UINT32(8, payload_size);
+    for (uint32_t i = 0; i < payload_size; i++) {
+        TEST_ASSERT_EQUAL_HEX8(0xAB, retained[i]);
+    }
+    nt_resource_unmount(pack);
+    TEST_ASSERT_NULL(nt_resource_get_blob(owner, NULL));
+    TEST_ASSERT_NULL(nt_resource_get_blob(alias, NULL));
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_blob_alias_payload_survives_pack_eviction);
     RUN_TEST(test_type_registration_rejects_identical_repeat_before_mount);
     RUN_TEST(test_file_mount_closes_type_registration_until_reinit);
     RUN_TEST(test_virtual_mount_closes_type_registration_until_reinit);

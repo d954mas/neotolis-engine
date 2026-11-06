@@ -213,9 +213,9 @@ void tearDown(void) {
     nt_font_destroy(s_font);
     free(s_blob);
     s_blob = NULL;
-    nt_font_shutdown();
     nt_material_shutdown();
     nt_resource_shutdown();
+    nt_font_shutdown();
     nt_hash_shutdown();
     nt_gfx_shutdown();
 }

@@ -3055,6 +3055,7 @@ int main(int argc, char *argv[]) {
     nt_text_renderer_shutdown();
     nt_sprite_renderer_shutdown();
     nt_font_destroy(s_font);
+    nt_resource_shutdown();
     nt_font_shutdown();
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);

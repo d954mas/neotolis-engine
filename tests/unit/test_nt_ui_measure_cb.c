@@ -69,8 +69,8 @@ void setUp(void) {
 
 void tearDown(void) {
     nt_ui_module_shutdown();
-    nt_font_shutdown();
     nt_resource_shutdown();
+    nt_font_shutdown();
     nt_hash_shutdown();
     nt_gfx_shutdown();
 }
