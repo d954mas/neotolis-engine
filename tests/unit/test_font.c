@@ -284,13 +284,15 @@ static void test_font_fill_rejects_header_metrics_and_capacity_before_mutation(v
     NT_TEST_EXPECT_ASSERT(nt_font_fill(font, blob, sizeof(*header)));
     TEST_ASSERT_EQUAL_UINT32(0, nt_font_content_revision(font));
     nt_font_fill(font, blob, size);
-    NT_TEST_EXPECT_ASSERT(nt_font_fill(font, blob, size));
+    NtFontAssetHeader empty = *header;
+    empty.glyph_count = 0;
+    NT_TEST_EXPECT_ASSERT(nt_font_fill(font, (const uint8_t *)&empty, sizeof empty));
     TEST_ASSERT_EQUAL_UINT32(1, nt_font_content_revision(font));
     nt_font_destroy(font);
     font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8, .max_payloads = 2});
     nt_font_fill(font, blob, size);
-    header->ascent++;
-    NT_TEST_EXPECT_ASSERT(nt_font_fill(font, blob, size));
+    empty.ascent++;
+    NT_TEST_EXPECT_ASSERT(nt_font_fill(font, (const uint8_t *)&empty, sizeof empty));
     TEST_ASSERT_EQUAL_INT16(800, nt_font_get_metrics(font).ascent);
     TEST_ASSERT_EQUAL_UINT32(1, nt_font_content_revision(font));
     nt_font_destroy(font);

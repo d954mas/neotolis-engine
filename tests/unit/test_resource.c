@@ -740,6 +740,13 @@ void test_register_update_handle(void) {
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(42, nt_resource_get(h));
 
+    uint32_t epoch = nt_resource_publication_epoch();
+    EXPECT_ASSERT((void)nt_resource_register(pid, rid, NT_ASSET_MESH, 77));
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(42, nt_resource_get(h));
+    TEST_ASSERT_EQUAL_UINT8(NT_ASSET_TEXTURE, nt_resource_get_asset_type(h));
+    TEST_ASSERT_EQUAL_UINT32(epoch, nt_resource_publication_epoch());
+
     /* Re-register same resource with new handle */
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, rid, NT_ASSET_TEXTURE, 99));
     nt_resource_step();

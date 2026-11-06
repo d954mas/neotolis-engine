@@ -82,8 +82,9 @@ typedef struct {
 } mesh_draw_t;
 
 /* Resolves pipeline and vertex input, reusing the previous run's on equal handles. False skips
- * the run: the program is not ready (linking or lost) or a create met a loss (retried by the next
- * run). The mesh's vertex input for this call's buffer does not depend on the material. */
+ * the run: the program is not ready, a create met a loss, or the mesh awaits reconstruction.
+ * The mesh's vertex input for this call's buffer does not depend on the material. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- Assert and capture macro expansions inflate the score.
 static bool resolve(mesh_draw_t *d, nt_material_t material, const nt_material_info_t *mi, nt_mesh_t mesh) {
     if (!nt_gfx_program_ready(mi->program)) {
         NT_GFX_NOTE("mesh", NT_NOTE_STR("material", mi->label), NT_NOTE_U32("mesh", mesh.id), NT_NOTE_STR("drop", "program not ready"));
@@ -101,7 +102,7 @@ static bool resolve(mesh_draw_t *d, nt_material_t material, const nt_material_in
         d->vertex_input = nt_gfx_mesh_vertex_input(mesh, d->instances);
     }
     if (d->pipeline.id == 0 || d->vertex_input.id == 0) {
-        NT_GFX_NOTE("mesh", NT_NOTE_STR("material", mi->label), NT_NOTE_U32("mesh", mesh.id), NT_NOTE_STR("drop", "context lost"));
+        NT_GFX_NOTE("mesh", NT_NOTE_STR("material", mi->label), NT_NOTE_U32("mesh", mesh.id), NT_NOTE_STR("drop", g_nt_gfx.context_lost ? "context lost" : "mesh not ready"));
         d->material = (nt_material_t){0};
         d->mesh = (nt_mesh_t){0};
         return false;

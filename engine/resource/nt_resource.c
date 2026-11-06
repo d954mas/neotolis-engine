@@ -1253,6 +1253,7 @@ nt_result_t nt_resource_register(nt_hash32_t pack_id, nt_hash64_t resource_id, u
     /* Check for duplicate: update existing entry */
     for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
         if (s_resource.assets[i].resource_id == resource_id.value && s_resource.assets[i].pack_index == (uint16_t)pack_idx) {
+            NT_ASSERT(s_resource.assets[i].asset_type == asset_type);
             s_resource.assets[i].runtime_handle = runtime_handle;
             s_resource.assets[i].state = NT_ASSET_STATE_READY;
             s_resource.needs_resolve = true;

@@ -180,6 +180,7 @@ const void *nt_resource_get_meta(nt_resource_t handle, nt_hash64_t kind, uint32_
 
 /* Virtual packs store caller-owned runtime handles; unregister/unmount never deactivate their objects. Cleanup callbacks may still release per-slot user_data.
  * Register/unregister assert on zero resource_id.
+ * Re-registering an existing name requires the same asset type; a mismatch asserts before mutation.
  * Unregister is virtual-only; file assets leave through whole-pack unmount. */
 nt_result_t nt_resource_create_pack(nt_hash32_t pack_id, int16_t priority);
 nt_result_t nt_resource_register(nt_hash32_t pack_id, nt_hash64_t resource_id, uint8_t asset_type, uint32_t runtime_handle);
