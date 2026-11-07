@@ -462,6 +462,14 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     ctx->begin_h = screen_h;
     ctx->viewport = (nt_ui_viewport_t){.x = 0.0F, .y = 0.0F, .w = screen_w, .h = screen_h};
 
+    /* Frames without nt_ui_begin swallow edges: no release edge, yet the button is up or newly pressed. */
+    for (uint32_t i = 0; i < count; ++i) {
+        const nt_button_state_t btn = pointers[i].buttons[NT_BUTTON_LEFT];
+        if (!btn.is_released && (!btn.is_down || btn.is_pressed)) {
+            ctx->captures[i].active_id = 0U;
+        }
+    }
+
     /* Orphan cleanup — captures unqueried last frame would hold the pointer forever. */
     for (uint32_t i = 0; i < NT_INPUT_MAX_POINTERS; ++i) {
         if (ctx->captures[i].active_id != 0U && ctx->capture_seen[i] == 0U) {

@@ -372,6 +372,27 @@ static void test_query_reads_hold(void) {
     TEST_ASSERT_TRUE(float_near(after.hold_secs, 0.25F));
 }
 
+/* ---- edges lost while the game skipped nt_ui_begin: a new press edge starts a new hold ---- */
+static void test_press_edge_on_held_capture_restarts_hold(void) {
+    (void)btn_frame(idle_at(BTN_CY), 0.0F);
+    (void)btn_frame(press_at(BTN_CY), 0.0F);
+    TEST_ASSERT_TRUE(float_near(btn_frame(hold_at(BTN_CY), 0.75F).hold_secs, 0.75F));
+
+    const nt_ui_interaction_t e = btn_frame(press_at(BTN_CY), 0.5F);
+    TEST_ASSERT_TRUE(e.pressed_now);
+    TEST_ASSERT_TRUE(float_near(e.hold_secs, 0.0F));
+}
+
+/* ---- a release lost the same way must not keep the pointer bound to the old widget ---- */
+static void test_lost_release_frees_capture_for_next_press(void) {
+    nt_ui_set_gesture_constants(s_fx.ctx, 0.0F, 0.0F);
+    (void)two_btn_frame(idle_at(BTN_CY), false);
+    TEST_ASSERT_TRUE(two_btn_frame(press_at(BTN_CY), false).pressed_now);
+
+    (void)two_btn_frame(idle_at(OTHER_CY), true);
+    TEST_ASSERT_TRUE(two_btn_frame(press_at(OTHER_CY), true).pressed_now);
+}
+
 /* nt_ui_set_gesture_constants asserts finite & >= 0 (fail-early, no silent clamp). */
 static void test_set_gesture_constants_rejects_bad_values(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_set_gesture_constants(s_fx.ctx, -1.0F, 6.0F));
@@ -399,6 +420,8 @@ int main(void) {
     RUN_TEST(test_retap_in_other_pointer_slot_pairs);
     RUN_TEST(test_query_never_reports_double_click);
     RUN_TEST(test_query_reads_hold);
+    RUN_TEST(test_press_edge_on_held_capture_restarts_hold);
+    RUN_TEST(test_lost_release_frees_capture_for_next_press);
     RUN_TEST(test_set_gesture_constants_rejects_bad_values);
     return UNITY_END();
 }
