@@ -17,10 +17,8 @@
 #include "ui/nt_ui_state.h"
 #include "utf8/nt_utf8.h"
 
-/* Apply the field's keyboard hint on focus via the input platform layer (web shows the matching
- * soft keyboard; native/stub no-op). This is a UX hint only -- actual input restriction is the
- * allow filter, not this. The enum maps explicitly so the two vocabularies stay decoupled. */
-static inline void apply_keyboard_hint(nt_ui_input_keyboard_t kb, bool password) {
+/* Password masking overrides the keyboard hint; map UI vocabulary to the platform input mode. */
+static inline nt_text_input_mode_t keyboard_mode(nt_ui_input_keyboard_t kb, bool password) {
     nt_text_input_mode_t mode = NT_TEXT_INPUT_TEXT;
     if (password) {
         mode = NT_TEXT_INPUT_PASSWORD;
@@ -44,7 +42,7 @@ static inline void apply_keyboard_hint(nt_ui_input_keyboard_t kb, bool password)
             break;
         }
     }
-    nt_input_set_text_input_mode(mode);
+    return mode;
 }
 
 const nt_ui_widget_def_t NT_UI_INPUT_DEF = {
@@ -685,11 +683,10 @@ typedef struct {
     nt_ui_events_t in;
     nt_ui_bbox_t bb;
     bool focused;
-    bool claimed_now;
 } input_frame_t;
 
 /* focus-order bookkeeping (Tab wrap) + the single mutating interaction step + focus capture / drag.
- * Resolves f->st, f->in, f->bb, f->claimed_now, f->focused for the rest of the frame. */
+ * Resolves f->st, f->in, f->bb, f->focused for the rest of the frame. */
 static void focus_step(input_frame_t *f) {
     nt_ui_context_t *ctx = f->ctx;
     const uint32_t id = f->id;
@@ -700,17 +697,16 @@ static void focus_step(input_frame_t *f) {
     // #region focus-order bookkeeping (Tab wrap target)
     if (f->enabled && ctx->focus_first_id == 0U) {
         ctx->focus_first_id = id;
+        ctx->focus_first_mode = keyboard_mode(props->keyboard, props->password);
     }
-    /* A pending Tab seek set by the previously-declared focused field: this field claims focus.
-     * claimed_now suppresses this field's OWN Tab handling so the still-pressed Tab key does not
-     * immediately re-advance focus off the field that just received it. Only an ENABLED field claims:
-     * a disabled field must leave the seek intact so Tab skips it to the next enabled field. */
-    f->claimed_now = false;
+    /* Only an enabled field consumes the seek; input and visuals switch next frame,
+     * matching wrap to an earlier field whose commands have already been emitted. */
+    bool claimed_now = false;
     if (f->enabled && ctx->focus_tab_seek != 0U && ctx->focus_tab_seek != id) {
         ctx->focused_input_id = id;
         ctx->focus_tab_seek = 0U;
-        f->claimed_now = true;
-        apply_keyboard_hint(props->keyboard, props->password); /* Tab into the field also surfaces the keyboard */
+        claimed_now = true;
+        nt_input_set_text_input_mode(keyboard_mode(props->keyboard, props->password));
     }
     // #endregion
 
@@ -766,7 +762,7 @@ static void focus_step(input_frame_t *f) {
         st->anchor = st->caret; /* a fresh press collapses the selection to the click point */
         st->drag = 1U;
         if (!was_focused) {
-            apply_keyboard_hint(props->keyboard, props->password); /* surface the soft keyboard on web */
+            nt_input_set_text_input_mode(keyboard_mode(props->keyboard, props->password));
         }
     }
 
@@ -797,20 +793,19 @@ static void focus_step(input_frame_t *f) {
         st->drag = 0U;
     }
 
-    /* Mark this field not-orphan for next begin's focus cleanup whenever it holds focus (even if
-     * disabled this frame — it's still declared, so focus should survive). */
+    /* Mark the focused field present for next begin's orphan cleanup. */
     if (ctx->focused_input_id == id) {
         ctx->focused_input_seen = 1U;
     }
     f->in = in;
     f->bb = bb;
-    f->focused = enabled && (ctx->focused_input_id == id);
+    f->focused = enabled && (ctx->focused_input_id == id) && !claimed_now;
     // #endregion
 }
 
 /* The focused edit pipeline: drain the typed-char ring, then run the physical editing keys
  * (delete/arrows/home/end), selection chords (Shift/Ctrl+A), clipboard (Ctrl+C/X/V), submit + Tab/Esc.
- * No-op when the field is not focused. Sets the changed/submitted out-flags; cur_len re-derived in f->cur_len. */
+ * No-op when unfocused or newly reached by Tab. Sets changed/submitted; cur_len re-derived in f->cur_len. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
     if (!f->focused) {
@@ -823,7 +818,6 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
     const nt_ui_input_props_t *props = f->props;
     nt_ui_input_state_t *st = f->st;
     uint32_t cur_len = f->cur_len;
-    const bool claimed_now = f->claimed_now;
     {
         // #region drain typed chars (FIFO from the input ring)
         uint32_t cp = 0U;
@@ -955,14 +949,16 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
         if (nt_input_key_is_pressed(NT_KEY_ENTER)) {
             *submitted = true;
         }
-        if (nt_input_key_is_pressed(NT_KEY_TAB) && !claimed_now) {
-            /* Advance focus to the next field declared this frame; wrap to the first. claimed_now
-             * fields skip this so the field that just received Tab focus does not re-advance. */
-            ctx->focus_tab_seek = id;
-            ctx->focused_input_id = ctx->focus_first_id; /* fallback: wrap (overridden if a later field claims) */
-        }
         if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
             ctx->focused_input_id = 0U; /* unfocus first; modal close (if any) handles the next Esc */
+        } else if (nt_input_key_is_pressed(NT_KEY_TAB)) {
+            /* Advance focus to the next enabled field declared this frame; wrap to the first. */
+            ctx->focus_tab_seek = id;
+            ctx->focused_input_id = ctx->focus_first_id; /* fallback: wrap (overridden if a later field claims) */
+            if (ctx->focus_first_id != id) {
+                /* A later field may replace this hint; keeping it here leaves text-free UI independent of input. */
+                nt_input_set_text_input_mode(ctx->focus_first_mode);
+            }
         }
         // #endregion
     }

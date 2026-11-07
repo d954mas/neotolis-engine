@@ -455,7 +455,16 @@ façade (paste decodes untrusted bytes per-codepoint, runs the allow-predicate,
 clamps, and drops a non-fitting multibyte codepoint whole), a render-only password
 mask, stock allow-predicates (numeric/email/url), a per-field `placeholder` string
 shown dimmed while empty+unfocused, and a minimal focus arbiter (Esc unfocus, Tab
-advance/wrap). Caret, selection highlight, and the text all float as clipped
+advance/wrap). A field reached by Tab starts processing keyboard input on the
+next frame; it never replays editing or submit events handled by the source field.
+Focus queries report the destination during the transition frame, while the source
+keeps its focused appearance until the next frame, equally for advance and wrap.
+Esc takes priority over Tab when both arrive in one frame. The destination's
+keyboard hint is applied during the transition; idle frames and Tab back to the
+sole enabled field do not reapply it. A Tab from a middle field applies the wrap
+fallback's hint before a later field replaces it, keeping the platform dependency
+inside the text widget rather than the base UI lifecycle.
+Caret, selection highlight, and the text all float as clipped
 children carrying a `HAS_TRANSFORM` offset of `pad_x - scroll_x` (set as the Clay
 element `userData`, which the walker reads for layer+transform), so the line
 scrolls to keep the caret visible while clipping to the field box. Cut is a no-op

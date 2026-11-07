@@ -121,6 +121,9 @@ static bool s_font_bound;
 static bool s_rich_font_bound;
 static uint32_t s_atlas_white_region;
 static uint32_t s_rich_composition_mode;
+static unsigned int s_input_wrap_mode;
+static char s_input_wrap_disabled[32];
+static char s_input_wrap_source[32];
 
 #define RICH_COMPOSITION_ENABLED 1U
 #define RICH_COMPOSITION_CLIP 2U
@@ -988,6 +991,11 @@ EM_JS(unsigned int, nt_test_rich_composition_mode, (void), {
     return 1 | (mode === 'clip' ? 2 : 0) | (query.get('rich_effect') === 'off' ? 4 : 0);
 })
 
+EM_JS(unsigned int, nt_test_input_wrap_mode, (void), {
+    const mode = new URLSearchParams(window.location.search).get('input_wrap');
+    return mode === 'password' ? 1 : mode === 'numeric' ? 2 : 0;
+})
+
 EM_JS(uint32_t, nt_test_crash_mode, (void), {
     return Math.max(0, ["", "trap", "abort", "read", "reject", "jserror"].indexOf(new URLSearchParams(window.location.search).get("crash") || ""));
 })
@@ -1287,8 +1295,19 @@ static void frame(void) {
               .backgroundColor = {18.0F, 20.0F, 26.0F, 255.0F}}) {
             /* Surface 1: Cyrillic input field. */
             nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Cyrillic (multi-byte UTF-8)", caption);
-            (void)nt_ui_input_text(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_input_cyrillic, s_state.cyrillic, sizeof s_state.cyrillic, &(nt_ui_input_props_t){0}, input_style,
+            if (s_input_wrap_mode != 0U) {
+                (void)nt_ui_input_text(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("app/input_wrap_disabled"), s_input_wrap_disabled, sizeof s_input_wrap_disabled,
+                                       &(nt_ui_input_props_t){.keyboard = NT_UI_KB_URL}, input_style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(320), CLAY_SIZING_FIXED(40)}}},
+                                       false, NULL);
+            }
+            (void)nt_ui_input_text(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_input_cyrillic, s_state.cyrillic, sizeof s_state.cyrillic,
+                                   &(nt_ui_input_props_t){.keyboard = s_input_wrap_mode == 2U ? NT_UI_KB_EMAIL : NT_UI_KB_TEXT}, input_style,
                                    &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(320), CLAY_SIZING_FIXED(40)}}}, true, NULL);
+            if (s_input_wrap_mode != 0U) {
+                (void)nt_ui_input_text(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("app/input_wrap_source"), s_input_wrap_source, sizeof s_input_wrap_source,
+                                       &(nt_ui_input_props_t){.keyboard = s_input_wrap_mode == 2U ? NT_UI_KB_NUMERIC : NT_UI_KB_TEXT, .password = s_input_wrap_mode == 1U}, input_style,
+                                       &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(320), CLAY_SIZING_FIXED(40)}}}, true, NULL);
+            }
 
             /* Surface 2: rich-text block with one clickable link. */
             nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Rich text (one clickable <link>):", &s_body);
@@ -1537,6 +1556,10 @@ int main(int argc, char *argv[]) {
 
 #if defined(__EMSCRIPTEN__)
     s_rich_composition_mode = nt_test_rich_composition_mode();
+    s_input_wrap_mode = nt_test_input_wrap_mode();
+    if (s_input_wrap_mode != 0U) {
+        s_state.cyrillic[0] = '\0';
+    }
     /* Transparency removes one probe's pixels without changing layout or readiness. */
     s_nt_hidden_input_style = s_input_style;
     for (uint32_t i = 0; i < NT_UI_INPUT_STATE_COUNT; i++) {
