@@ -539,9 +539,8 @@ long combo list). There is no data-array form — immediate-only.
 Per-frame menu scratch is GAME-owned (`nt_ui_menu_ctx_t`, allocated by the
 game — static / app field / arena slice — and init via `nt_ui_menu_init`), so
 the core `nt_ui_context` pays zero bytes for a game that uses no menu and the
-menu TU dead-strips. The SAME instance MUST be reused every frame: it holds the
-per-level keyboard-nav record, so a fresh `{0}` each frame would silently break
-nav. The combo carries no such scratch (its state lives in the core ctx's pool,
+menu TU dead-strips. It holds only the current declaration's per-level keyboard
+navigation records; retained selection lives in the game-owned `nt_ui_menu_state_t`. The combo carries no such scratch (its state lives in the core ctx's pool,
 bounded by caps). Row identity is KEY-STABLE via a scope stack:
 `mix(scope_id, key)` (fmix, never additive — additive sibling ids collide in
 Clay's anonymous child-id space). A submenu pushes its own row id as the child
@@ -557,6 +556,28 @@ Keyboard nav runs in `menu_end` against THIS frame's per-level record (built as
 rows declare, complete by `menu_end`); a focus or open-chain change re-declares
 the tree and becomes navigable NEXT frame — a 1-frame latency in the EFFECT,
 not in the record lookup.
+
+Retained focus and open parents use the fully scoped row IDs, independent of
+layout order. Inserting, deleting or reordering other siblings preserves the
+same selection. Removing or disabling the focused row clears focus; Enter then
+does nothing until hover or keyboard navigation selects a current row. Removing,
+disabling or changing an open parent into a leaf closes its descendants before
+keyboard navigation. Replacing or collapsing a branch clears all descendant
+focus, open selections, hover intent and navigation records. The replacement
+child is declared next frame. Keyboard opening selects that child's first enabled
+row when it is declared; an empty child stays open without focus.
+
+The game keeps one zero-initialized `nt_ui_menu_state_t` per logical menu and UI
+context, alongside its open flag and anchor. The engine maintains focus, open
+parent IDs and keyboard navigation in this object; declaration scratch may be
+shared between menus sequentially. At the default depth cap the state is 88 bytes.
+Navigation needs no state-pool cells, payload-cap workaround or heap allocation.
+Popup tween and mouse-aim state still use the existing UI pool.
+
+Zeroing the state resets navigation even without a closed declaration frame.
+`nt_ui_state_clear_all` clears UI cells but preserves game-owned menu navigation;
+on a screen transition, reset the menu state too when a fresh menu is wanted.
+Reusing the state for another menu or UI context requires zero-initializing it.
 
 ## Atlas region identity
 
