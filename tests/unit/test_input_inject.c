@@ -48,6 +48,7 @@ void test_focus_lost_releases_real_input(void) {
     nt_input_mouse_move(1.0F, 1.0F, 1);
     nt_input_poll();
     nt_input_focus_lost();
+    nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_key_is_released(NT_KEY_A));
     TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_LEFT));
 }

@@ -9,7 +9,7 @@ type InputSnapshot = {
 // Window hooks the browser_smoke web build exposes (tests/browser/app/main.c, #ifdef __EMSCRIPTEN__).
 declare global {
   interface Window {
-    __blurTouch?: InputSnapshot;
+    __blurTouch?: InputSnapshot[];
     __nt?: {
       ready: boolean;
       input_buffer(): string;
@@ -154,8 +154,7 @@ test('mouse: a blur during a drag releases it for good', async ({ page }) => {
   await page.mouse.up();
 });
 
-
-test('blur: keys and UTF-32 chars after refocus survive the next poll', async ({ page }) => {
+test('blur: the next poll only releases; keys and UTF-32 chars after refocus follow', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/index.html');
@@ -180,18 +179,18 @@ test('blur: keys and UTF-32 chars after refocus survive the next poll', async ({
   expect(held.keys[7]).toEqual([1, 1, 0]); // H was already held when focus was lost.
   expect(held.chars).toEqual(['h'.codePointAt(0)]);
   expect(current.keys[7]).toEqual([0, 0, 1]);
-  expect(current.keys[1]).toEqual([0, 0, 0]); // B and its char were queued before blur.
-  expect(current.keys[0]).toEqual([1, 1, 0]);
-  expect(current.chars).toEqual([0x1f600]);
-  expect(current.pointers[0].wheel).toBe(2);
-  expect(next.keys[0]).toEqual([1, 0, 0]);
+  expect(current.keys[0]).toEqual([0, 0, 0]);
+  expect(current.chars).toEqual([]);
+  expect(current.pointers[0].wheel).toBe(0);
+  expect(next.keys[0]).toEqual([1, 1, 0]);
+  expect(next.keys[1]).toEqual([0, 0, 0]); // B and its char were queued before blur.
   expect(next.keys[7]).toEqual([0, 0, 0]);
-  expect(next.chars).toEqual([]);
-  expect(next.pointers[0].wheel).toBe(0);
+  expect(next.chars).toEqual([0x1f600]);
+  expect(next.pointers[0].wheel).toBe(2);
   expect(errors).toEqual([]);
 });
 
-test('blur: a new touch before poll survives and follows later moves', async ({ page, context }) => {
+test('blur: a new touch before poll takes the released slot and follows later moves', async ({ page, context }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/index.html');
@@ -213,20 +212,20 @@ test('blur: a new touch before poll survives and follows later moves', async ({ 
       canvas.focus();
     }, { capture: true, once: true });
     canvas.addEventListener('pointerdown', () => {
-      window.__blurTouch = window.__nt!.input_poll();
+      window.__blurTouch = [window.__nt!.input_poll(), window.__nt!.input_poll()];
     }, { once: true });
   }, held.id);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [oldTouch, newTouch] });
-  const current = await page.evaluate(() => window.__blurTouch!);
+  const [current, next] = await page.evaluate(() => window.__blurTouch!);
   expect(current.pointers[1]).toMatchObject({ id: held.id, active: 1, down: 0, released: 1, x: 120, y: 240 });
-  expect(current.pointers[2]).toMatchObject({ active: 1, down: 1, pressed: 1, released: 0, x: 350, y: 300 });
-  const newId = current.pointers[2].id;
+  expect(current.pointers[2].active).toBe(0);
+  expect(next.pointers[1]).toMatchObject({ active: 1, down: 1, pressed: 1, released: 0, x: 350, y: 300 });
+  const newId = next.pointers[1].id;
   expect(newId).not.toBe(held.id);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [oldTouch, { ...newTouch, x: 390, y: 320 }] });
   await frame();
   const moved = await page.evaluate(() => window.__nt!.input_poll());
-  expect(moved.pointers[1].active).toBe(0);
-  expect(moved.pointers[2]).toMatchObject({ id: newId, active: 1, down: 1, x: 390, y: 320 });
+  expect(moved.pointers.slice(1).filter((p) => p.active)).toMatchObject([{ id: newId, down: 1, x: 390, y: 320 }]);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await frame();
   const ended = await page.evaluate(() => window.__nt!.input_poll());

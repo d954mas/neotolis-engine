@@ -10,10 +10,8 @@ Related: [Platform Architecture](../runtime/platform.md), [Frame Lifecycle](../r
 
 Input system is polling-based. Game queries state each frame, does not subscribe to callbacks.
 
-On web, canvas focus loss discards earlier buffered events. The next poll releases
-held player input before delivering events received after that blur. New events
-remain subject to normal input limits, including contact slots retained for their
-release frame.
+Focus loss drops the events buffered before it. The next poll only releases held
+player input; events after the loss arrive in the poll after that.
 
 ## Typed characters
 

@@ -129,7 +129,6 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
     Module['_ntCharBuf'] = [];
     Module['_ntPtrBuf'] = [];
     Module['_ntWheelBuf'] = [];
-    Module['_ntBlurred'] = false;
 
     /* Keyboard events */
     canvas.addEventListener("keydown", function(e) {
@@ -161,9 +160,9 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
         }
     });
 
-    /* Discard only events queued before focus loss. */
+    /* Events queued before focus loss are stale; later ones wait for the poll after the release. */
     canvas.addEventListener("blur", function() {
-        Module['_ntBlurred'] = true;
+        Module['_nt_input_web_on_blur']();
         Module['_ntKeyBuf'].length = 0;
         Module['_ntCharBuf'].length = 0;
         Module['_ntPtrBuf'].length = 0;
@@ -271,12 +270,6 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
 })
 
 EM_JS(void, nt_input_web_flush_events, (void), {
-    /* Release held input before delivering events received after blur. */
-    if (Module['_ntBlurred']) {
-        Module['_nt_input_web_on_blur']();
-        Module['_ntBlurred'] = false;
-    }
-
     /* Drain key buffer (stride 2: key, down) */
     var kb = Module['_ntKeyBuf'];
     for (var i = 0; i < kb.length; i += 2) {
