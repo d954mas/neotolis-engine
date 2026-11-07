@@ -319,18 +319,18 @@ typedef struct {
 
 /* Events tab: hold-to-confirm + a double-click readout (all game-owned). */
 typedef struct {
-    uint32_t confirms;   /* hold-to-confirm fire count (long_pressed) */
+    uint32_t confirms;   /* hold-to-confirm fire count (nt_ui_hold_crossed) */
     uint32_t dbl_clicks; /* double-click readout */
-    float last_progress; /* hold_progress latched for the fill display */
+    float last_progress; /* last nt_ui_hold_progress for the fill display */
 } events_params_t;
 
 /* Radial tab: a game-owned cooldown timer (ramps 0->1 then resets) drives the cooldown wedge;
- * the hold-to-confirm radial reads the events hold_progress; the rest are static demos. */
+ * the hold-to-confirm radial reads nt_ui_hold_progress; the rest are static demos. */
 typedef struct {
     float cooldown;      /* 0..1, ramps over cooldown_secs then loops (drives nt_ui_radial_fill) */
     float cooldown_secs; /* full sweep duration */
-    uint32_t hold_fires; /* hold-to-confirm fire count (long_pressed) */
-    float hold_progress; /* latched hold_progress for the radial fill display */
+    uint32_t hold_fires; /* hold-to-confirm fire count (nt_ui_hold_crossed) */
+    float hold_progress; /* last nt_ui_hold_progress for the radial fill display */
 } radial_params_t;
 
 /* Rich Text tab: the GAME owns the effect clock (no engine global clock); `time` accumulates from frame dt. */
@@ -504,7 +504,7 @@ static uint32_t s_id_tab_btn_base; /* per-tab list buttons salt from this + inde
 /* App-widget ids. */
 static uint32_t s_id_events_hold;                           /* hold-to-confirm button */
 static uint32_t s_id_events_dbl;                            /* double-click target */
-static uint32_t s_id_events_fill;                           /* hold_progress fill bar */
+static uint32_t s_id_events_fill;                           /* hold progress fill bar */
 static uint32_t s_id_radial_hold;                           /* radial tab: hold-to-confirm button */
 static uint32_t s_id_dd_fruit, s_id_dd_city, s_id_dd_color; /* combo triggers (color = custom swatch) */
 static uint32_t s_id_tip_a, s_id_tip_b, s_id_tip_c;         /* tooltip targets */
@@ -663,7 +663,7 @@ static const showcase_entry_t g_tabs[] = {
     {"Virtual List", "10k-row windowed list, vertical + horizontal; cost ~visible count.", "examples/ui_showcase/main.c:render_vlist", render_vlist, NULL},
     {"Modals", "Confirm + nested depth-2 modal; Esc/backdrop close; live transition panel.", "examples/ui_showcase/main.c:render_modals", render_modals, props_modal},
     {"Input", "Plain / numeric-filtered / password-masked / Cyrillic text fields; selection + Ctrl+C/X/V + Tab focus.", "examples/ui_showcase/main.c:render_input", render_input, NULL},
-    {"Events", "Hold-to-confirm (events hold_progress fill + long_pressed) + a double-click readout.", "examples/ui_showcase/main.c:render_events", render_events, NULL},
+    {"Events", "Hold-to-confirm (nt_ui_hold_progress fill + nt_ui_hold_crossed) + a double-click readout.", "examples/ui_showcase/main.c:render_events", render_events, NULL},
     {"Radial", "SDF radial feedback: cooldown wedge + hold-to-confirm + four-mode image reveal + a batched dense grid.", "examples/ui_showcase/main.c:render_radial", render_radial, NULL},
     {"Base Material", "One custom-attr base material for the whole UI: plain emits bake its attr defaults, so panels, icons and SDF radials share one batch.",
      "examples/ui_showcase/main.c:render_base_material", render_base_material, NULL},
@@ -1195,7 +1195,7 @@ static void button_cell(nt_ui_context_t *ctx, uint32_t id, nt_ui_button_style_t 
         ctx, NT_UI_DATA_LAYER(LAYER_IMG), id, style,
         &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(72)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                    .cornerRadius = rounded ? CLAY_CORNER_RADIUS(8) : CLAY_CORNER_RADIUS(0)},
-        enabled, NULL);
+        enabled);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, g_current->body);
     (void)nt_ui_button_end(ctx);
 }
@@ -1247,7 +1247,7 @@ static void render_buttons(nt_ui_context_t *ctx, tab_state_t *st) {
                 &(Clay_ElementDeclaration){
                     .layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(72)}, .padding = CLAY_PADDING_ALL(8), .childGap = 14, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                     .cornerRadius = CLAY_CORNER_RADIUS(8)},
-                true, NULL);
+                true);
             CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(48), CLAY_SIZING_FIXED(48)}}}) { nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_icon_bunny_ref, &g_panel_img_style, NULL); }
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Play", g_current->body);
             (void)nt_ui_button_end(ctx);
@@ -1280,7 +1280,7 @@ static void render_button_transform(nt_ui_context_t *ctx, tab_state_t *st) {
                                &(Clay_ElementDeclaration){
                                    .layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(96)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                    .cornerRadius = CLAY_CORNER_RADIUS(8)},
-                               true, NULL);
+                               true);
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Click me", g_current->body);
             if (nt_ui_button_end(ctx)) {
                 st->btn_xform.clicks++;
@@ -1539,7 +1539,7 @@ static void render_vlist(nt_ui_context_t *ctx, tab_state_t *st) {
         for (uint32_t i = ry.first; i <= ry.last; ++i) {
             const uint32_t row_id = nt_ui_vlist_item_id(ctx, i);
             const uint32_t hit_id = nt_ui_child_id(row_id, "row_hit"); /* recycles WITH the row; no magic salt */
-            const nt_ui_events_t ev = nt_ui_events(ctx, hit_id, NULL);
+            const nt_ui_interaction_t ev = nt_ui_step_interaction(ctx, hit_id);
             if (ev.clicked) {
                 vlist_sel_toggle(i); /* dispatch by ABSOLUTE index, NEVER by the recycled id */
             }
@@ -1660,7 +1660,7 @@ static void props_button_transform(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_button_begin(
         ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/btn_xform_reset"), g_current->btn_secondary,
         &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(120), CLAY_SIZING_FIXED(44)}, .padding = CLAY_PADDING_ALL(6), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
-        true, NULL);
+        true);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Reset", g_current->body);
     if (nt_ui_button_end(ctx)) {
         st->btn_xform.rotation_deg = 20.0F;
@@ -1694,7 +1694,7 @@ static bool modal_action_btn(nt_ui_context_t *ctx, uint32_t id, const char *text
                                                              .padding = {.left = 16, .right = 16, .top = 8, .bottom = 8},
                                                              .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                                   .cornerRadius = CLAY_CORNER_RADIUS(8)},
-                       true, NULL);
+                       true);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, g_current->body);
     return nt_ui_button_end(ctx);
 }
@@ -1709,7 +1709,7 @@ static void render_modals(nt_ui_context_t *ctx, tab_state_t *st) {
         ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_modal_show_btn, g_current->btn_primary,
         &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(64)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                    .cornerRadius = CLAY_CORNER_RADIUS(8)},
-        true, NULL);
+        true);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Show confirm", g_current->body);
     if (nt_ui_button_end(ctx)) {
         st->confirm_open = true;
@@ -1812,32 +1812,28 @@ static void render_input(nt_ui_context_t *ctx, tab_state_t *st) {
     input_field(ctx, "Disabled (greyed, no focus)", s_id_input_disabled, st->input.disabled, sizeof st->input.disabled, &props_disabled, g_current->input, false);
 }
 
-/* Events tab: a hold-to-confirm button (nt_ui_events gesture cfg -> hold_progress fill + long_pressed
- * fire) and a double-click target. All counters are game-owned; the engine owns only the
- * gesture cell behind the button id. */
+/* Events tab: a hold-to-confirm button (nt_ui_button_begin result -> nt_ui_hold_progress fill + nt_ui_hold_crossed
+ * fire) and a double-click target. All counters are game-owned. */
+#define SHOWCASE_HOLD_SECS 1.5F
+
 static void render_events(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[96];
     /* Hold past this many seconds (without dragging off) confirms; the fill ramps over the same window. */
-    static const nt_ui_events_cfg_t hold_cfg = {.long_press_secs = 1.5F, .double_click = false};
-    static const nt_ui_events_cfg_t dbl_cfg = {.long_press_secs = 0.0F, .double_click = true};
     static const Clay_ElementDeclaration bar_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(14)}}};
 
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Press and HOLD the button: the fill ramps to full over ~1.5s and confirms at the top.", g_current->caption);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Drag the cursor off the button mid-hold to RESET the fill (no confirm).", g_current->caption);
 
-    /* The button itself drives the gesture cell via its cfg; we read the latched result back
-     * idempotently after end() for the fill + the one-shot confirm. */
-    nt_ui_button_begin(
+    const nt_ui_interaction_t hold = nt_ui_button_begin(
         ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_events_hold, g_current->btn_primary,
         &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(64)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                    .cornerRadius = CLAY_CORNER_RADIUS(8)},
-        true, &hold_cfg);
+        true);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Hold to confirm", g_current->body);
     (void)nt_ui_button_end(ctx);
 
-    const nt_ui_events_t hold = nt_ui_query_events(ctx, s_id_events_hold);
-    st->events.last_progress = hold.hold_progress;
-    if (hold.long_pressed) {
+    st->events.last_progress = nt_ui_hold_progress(&hold, SHOWCASE_HOLD_SECS);
+    if (nt_ui_hold_crossed(&hold, SHOWCASE_HOLD_SECS)) {
         st->events.confirms++;
     }
 
@@ -1846,24 +1842,24 @@ static void render_events(nt_ui_context_t *ctx, tab_state_t *st) {
 
     /* A separate double-click target (a plain button) with a dbl-click readout. */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Double-click the button below:", g_current->caption);
-    nt_ui_button_begin(
+    const nt_ui_interaction_t dbl = nt_ui_button_begin(
         ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_events_dbl, g_current->btn_secondary,
         &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                    .cornerRadius = CLAY_CORNER_RADIUS(8)},
-        true, &dbl_cfg);
+        true);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Double-click me", g_current->body);
     (void)nt_ui_button_end(ctx);
-    if (nt_ui_query_events(ctx, s_id_events_dbl).double_clicked) {
+    if (dbl.double_clicked) {
         st->events.dbl_clicks++;
     }
 
-    (void)snprintf(buf, sizeof buf, "confirms: %u   double-clicks: %u   hold_progress: %.2f", st->events.confirms, st->events.dbl_clicks, (double)st->events.last_progress);
+    (void)snprintf(buf, sizeof buf, "confirms: %u   double-clicks: %u   hold: %.2f", st->events.confirms, st->events.dbl_clicks, (double)st->events.last_progress);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
 }
 
 /* Radial tab: the two radial widgets driven by game-owned feedback state.
  *   1. COOLDOWN wedge        — nt_ui_radial_fill from a looping timer (game-owned fill).
- *   2. HOLD-TO-CONFIRM wedge — nt_ui_radial_fill from the events hold_progress.
+ *   2. HOLD-TO-CONFIRM wedge — nt_ui_radial_fill from nt_ui_hold_progress.
  *   3. FOUR REVEAL MODES     — nt_ui_radial_image (desat/dim/hide/tint) on the [0,1]-UV art.
  *   4. DENSE GRID            — N radials sharing ONE material => one batched draw;
  *      the header's draw-call readout proves the count does NOT scale with radial count.
@@ -1986,7 +1982,7 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
         .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 20, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}};
 
     /* #region 1: cooldown + 2: hold-to-confirm + ring + oval */
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Cooldown sweep (looping timer) + hold-to-confirm (events hold_progress); ring + oval variants.", g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Cooldown sweep (looping timer) + hold-to-confirm (nt_ui_hold_progress); ring + oval variants.", g_current->caption);
     CLAY(row_decl) {
         /* Cooldown: fill ramps 0->1 over ~3s; start at +90deg (top), sweep a full turn. */
         nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), 0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &rstyle, &disc_decl);
@@ -1999,23 +1995,22 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
         nt_ui_radial_style_t cstyle = rstyle;
         cstyle.color_packed = showcase_hue_abgr(st->radial.cooldown);
         nt_ui_radial(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), 0.0F, RADIAL_TAU, &cstyle, &disc_decl);
-        /* Hold-to-confirm: a button drives the events cell; its hold_progress fills the radial. */
+        /* Hold-to-confirm: the button's hold progress fills the radial. */
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
             nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), 0.5F * NT_PI, st->radial.hold_progress, RADIAL_TAU, &ring_style, &disc_decl);
-            static const nt_ui_events_cfg_t hold_cfg = {.long_press_secs = 1.5F, .double_click = false};
-            nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_radial_hold, g_current->btn_primary,
-                               &(Clay_ElementDeclaration){
-                                   .layout = {.sizing = {CLAY_SIZING_FIXED(140), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(6), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-                                   .cornerRadius = CLAY_CORNER_RADIUS(8)},
-                               true, &hold_cfg);
+            const nt_ui_interaction_t hold = nt_ui_button_begin(
+                ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_radial_hold, g_current->btn_primary,
+                &(Clay_ElementDeclaration){
+                    .layout = {.sizing = {CLAY_SIZING_FIXED(140), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(6), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                    .cornerRadius = CLAY_CORNER_RADIUS(8)},
+                true);
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Hold", g_current->body);
             (void)nt_ui_button_end(ctx);
+            st->radial.hold_progress = nt_ui_hold_progress(&hold, SHOWCASE_HOLD_SECS);
+            if (nt_ui_hold_crossed(&hold, SHOWCASE_HOLD_SECS)) {
+                st->radial.hold_fires++;
+            }
         }
-    }
-    const nt_ui_events_t hold = nt_ui_query_events(ctx, s_id_radial_hold);
-    st->radial.hold_progress = hold.hold_progress;
-    if (hold.long_pressed) {
-        st->radial.hold_fires++;
     }
     // #endregion
 
@@ -3051,12 +3046,12 @@ static void render_tooltip(nt_ui_context_t *ctx, tab_state_t *st) {
 
     /* The targets are plain buttons so they are still clickable (proving the tooltip has no catcher).
      * The tooltip is declared AFTER each target so the target carries a queryable bbox this frame. */
-    nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_tip_a, g_current->btn_primary, &target_decl, true, NULL);
+    nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_tip_a, g_current->btn_primary, &target_decl, true);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Hover me", g_current->body);
     (void)nt_ui_button_end(ctx);
     (void)nt_ui_tooltip(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_tip_a, "A simple tooltip revealed after the hover delay.", g_current->tooltip);
 
-    nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_tip_b, g_current->btn_secondary, &target_decl, true, NULL);
+    nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_tip_b, g_current->btn_secondary, &target_decl, true);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "And me", g_current->body);
     (void)nt_ui_button_end(ctx);
     (void)nt_ui_tooltip(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_tip_b, "Tooltips wrap to the style max_width so long content stays readable on one panel.", g_current->tooltip);
@@ -3065,7 +3060,7 @@ static void render_tooltip(nt_ui_context_t *ctx, tab_state_t *st) {
      * content area, so its tooltip has no room below and visibly flips ABOVE the target (edge-flip demo). */
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(360)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_BOTTOM}}}) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) {} /* GROW spacer: pin the target to the bottom */
-        nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_tip_c, g_current->btn_primary, &target_decl, true, NULL);
+        nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_tip_c, g_current->btn_primary, &target_decl, true);
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Bottom edge", g_current->body);
         (void)nt_ui_button_end(ctx);
     }
@@ -3168,7 +3163,7 @@ static void render_menu_zone(nt_ui_context_t *ctx, tab_state_t *st) {
         (void)snprintf(opacity_buf, sizeof opacity_buf, "Opacity %u%%", st->menu.opacity_pct);
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), opacity_buf, g_current->body);
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {}
-        nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_menu_opacity_btn, g_current->btn_secondary, NULL, true, NULL);
+        nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_menu_opacity_btn, g_current->btn_secondary, NULL, true);
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "reset", g_current->body);
         if (nt_ui_button_end(ctx)) {
             st->menu.opacity_pct = 100; /* the inner control owns the click; a real state change, not a magic log */
@@ -3205,8 +3200,7 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
           .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}}}) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Zone menu: right-click the panel = (re)open here", g_current->body);
     }
-    static const nt_ui_events_cfg_t menu_cfg = {.long_press_secs = 0.5F, .double_click = false};
-    const nt_ui_events_t zone_ev = nt_ui_events(ctx, s_id_menu_panel, &menu_cfg);
+    const nt_ui_interaction_t zone_ev = nt_ui_step_interaction(ctx, s_id_menu_panel);
 
     /* Mutually exclusive arming: a right-click over the zone panel must arm ONLY the zone menu, anywhere
      * else ONLY the global. Same cursor + bbox snapshot the trigger reads (prev-frame bbox vs this-frame
@@ -3214,7 +3208,7 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     const nt_ui_bbox_t zone_bb = nt_ui_get_bbox(ctx, s_id_menu_panel);
     const bool over_zone = zone_bb.found && zone_ev.pos[0] >= zone_bb.x && zone_ev.pos[0] <= zone_bb.x + zone_bb.width && zone_ev.pos[1] >= zone_bb.y && zone_ev.pos[1] <= zone_bb.y + zone_bb.height;
 
-    const bool zone_armed = nt_ui_menu_open_trigger(ctx, s_id_menu_zone, s_id_menu_panel, zone_ev.long_pressed, &st->menu.zone_state);
+    const bool zone_armed = nt_ui_menu_open_trigger(ctx, s_id_menu_zone, s_id_menu_panel, nt_ui_hold_crossed(&zone_ev, 0.5F), &st->menu.zone_state);
     /* Global only when NOT over the zone, so a right-click on the panel never also arms the global. */
     const bool global_armed = !over_zone && nt_ui_menu_open_trigger(ctx, s_id_menu_global, /*target_id=*/0U, /*long_pressed=*/false, &st->menu.global_state);
 
@@ -3328,7 +3322,7 @@ static void modal_seg_select(nt_ui_context_t *ctx, const char *title, uint32_t b
                 &(Clay_ElementDeclaration){
                     .layout = {.sizing = {CLAY_SIZING_FIXED((float)btn_w), CLAY_SIZING_FIXED(36)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                     .cornerRadius = CLAY_CORNER_RADIUS(8)},
-                true, NULL);
+                true);
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), names[i], &g_seg_label);
             if (nt_ui_button_end(ctx)) {
                 *value = i;
@@ -3391,7 +3385,7 @@ static void props_stress(nt_ui_context_t *ctx, tab_state_t *st) {
                                &(Clay_ElementDeclaration){
                                    .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                    .cornerRadius = CLAY_CORNER_RADIUS(8)},
-                               true, NULL);
+                               true);
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, &g_seg_label);
             if (nt_ui_button_end(ctx)) {
                 st->stress.label_count = counts[i];
@@ -3509,7 +3503,7 @@ static void declare_header(nt_ui_context_t *ctx) {
                            &(Clay_ElementDeclaration){
                                .layout = {.sizing = {CLAY_SIZING_FIXED(150), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                .cornerRadius = CLAY_CORNER_RADIUS(8)},
-                           true, NULL);
+                           true);
         (void)snprintf(buf, sizeof buf, "Theme: %s", g_current->name);
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
         if (nt_ui_button_end(ctx)) {

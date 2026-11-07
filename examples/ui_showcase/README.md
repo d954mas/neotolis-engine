@@ -49,12 +49,12 @@ lighten and writes the index on click).
 10. **Modals** - confirm modal + nested depth-2 modal + a live transition panel.
 11. **Input** - plain / numeric-filtered / password-masked / Cyrillic text fields
     (`nt_ui_input_text`); see the **Input controls** table below.
-12. **Events** - a hold-to-confirm button (`nt_ui_events` gesture cfg) whose
-    `hold_progress` drives a fill bar and confirms on `long_pressed`, plus a
+12. **Events** - a hold-to-confirm button (the result of `nt_ui_button_begin`) whose
+    `nt_ui_hold_progress` drives a fill bar and confirms on `nt_ui_hold_crossed`, plus a
     double-click target with a readout; see the **Interaction-events controls** below.
 13. **Radial** - SDF radial feedback (`nt_ui_radial` + `nt_ui_radial_image`): a
-    looping **cooldown** wedge, a **hold-to-confirm** wedge driven by the events
-    `hold_progress`, ring + oval shape variants, the **four reveal modes**
+    looping **cooldown** wedge, a **hold-to-confirm** wedge driven by
+    `nt_ui_hold_progress`, ring + oval shape variants, the **four reveal modes**
     (desaturate / dim / hide / tint) on a textured radial-image, and a **dense
     batched grid** that proves N radials sharing one material stay one draw call;
     see the **Radial controls** + **Radial visual-QA protocol** below.
@@ -171,12 +171,12 @@ Per-field behavior:
 ## Interaction-events controls (Events / Dropdown / Tooltip / Menu tabs)
 
 These tabs wire the interaction events + app-widgets. All widget state is
-**game-owned** (Model D); the engine owns only the gesture / hover-delay / popup cells.
+**game-owned** (Model D); the engine owns only the hover-delay / popup cells.
 
 | Input | Action |
 |-------|--------|
-| **Events** — press and HOLD the button | the fill bar ramps 0→1 over ~1.5s (`hold_progress`) and confirms at the top (`long_pressed`) |
-| **Events** — drag off the button mid-hold | resets the fill (no confirm) — release-outside / move past the drag radius cancels |
+| **Events** — press and HOLD the button | the fill bar ramps 0→1 over ~1.5s (`nt_ui_hold_progress`) and confirms at the top (`nt_ui_hold_crossed`) |
+| **Events** — drag off the button mid-hold | resets the fill (no confirm) until a new press |
 | **Events** — double-click the second button | increments the double-click readout |
 | **Dropdown** — click a trigger | toggles the list open; click a row to select (the game writes its own index) |
 | **Dropdown** — the swatch trigger | a custom-content trigger (swatch + label) via `combo_preview_begin`/`end` |
@@ -189,15 +189,15 @@ These tabs wire the interaction events + app-widgets. All widget state is
 
 ## Radial controls (Radial tab)
 
-The radial widgets are **Model D**: the game owns the `fill` (a looping cooldown timer or the
-events `hold_progress`); the engine draws an SDF arc/sector/ring/oval per pixel (crisp AA, no
+The radial widgets are **Model D**: the game owns the `fill` (a looping cooldown timer or
+`nt_ui_hold_progress`); the engine draws an SDF arc/sector/ring/oval per pixel (crisp AA, no
 vertex-pie facets) and bakes the angles into a per-vertex custom attribute so many radials batch.
 
 | Element | Behavior |
 |---------|----------|
 | **Cooldown** disc + ring | a looping timer ramps `fill` 0→1 over ~3 s; `nt_ui_radial_fill` sweeps a full turn from the top |
 | **Oval** sector | a static 270° sector on a non-square (140×80) bbox — the `aspect` (w/h) keeps 0° at +X with no distortion |
-| **Hold** disc | press and HOLD the button; the events `hold_progress` fills the ring and confirms at the long-press threshold |
+| **Hold** disc | press and HOLD the button; `nt_ui_hold_progress` fills the ring and confirms at the long-press threshold |
 | **Reveal** row (desaturate / dim / hide / tint) | `nt_ui_radial_image` on a full-bleed (UV [0,1]) textured swatch; the **swept** sector is full color, the **un-swept** sector gets the per-mode composite |
 | **Dense grid** (12×8) | every cell sweeps to a different phase but shares ONE `s_radial_material` — the header `draw calls` count stays flat as the grid count grows (batched) |
 
@@ -215,7 +215,7 @@ regression. Build + run the native showcase, open the **Radial** tab, and confir
 4. **Four reveal modes** — desaturate / dim / hide / tint each apply ONLY to the un-swept sector;
    the swept sector stays full color; no premultiply halos at the swept boundary.
 5. **Cooldown + hold feel** — the cooldown wedge sweeps smoothly and loops; the hold radial fills
-   with `hold_progress` and confirms (the confirm counter ticks) at the long-press threshold.
+   with `nt_ui_hold_progress` and confirms (the confirm counter ticks) at the long-press threshold.
 6. **Batched scale** — the header `draw calls` readout does NOT scale with the 96-cell grid (it
    stays at roughly the same count as without the grid); FPS stays stable.
 7. **Dark/Light parity** — press **T**; both palettes render the radial tab correctly.

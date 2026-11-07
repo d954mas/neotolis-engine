@@ -30,8 +30,7 @@ static void assert_state_valid(const nt_ui_btn_state_t *st, const char *which) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled,
-                        const nt_ui_events_cfg_t *cfg) {
+nt_ui_interaction_t nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled) {
     NT_ASSERT(ctx != NULL && "nt_ui_button_begin: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_button_begin: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(style != NULL && "nt_ui_button_begin: style must be non-NULL");
@@ -57,14 +56,12 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     }
     // #region state-pick + ease
     /* Disabled skips hit-test but still records a zone so the overlay can show why. The ONE mutating
-     * interaction step is nt_ui_events: forwards the optional behavioral cfg into the gesture cell so
-     * the GAME can read long-press / double-click via nt_ui_query_events. cfg==NULL = zero gesture alloc.
-     * No second events/step call on this id: one mutating step per id (the canonical-step contract). */
-    nt_ui_events_t in;
+     * interaction step is this one; its result goes back to the game. No second step on this id. */
+    nt_ui_interaction_t in;
     if (enabled) {
-        in = nt_ui_events_padded(ctx, id, cfg, style->hit_padding_lrtb);
+        in = nt_ui_step_interaction_padded(ctx, id, style->hit_padding_lrtb);
     } else {
-        in = (nt_ui_events_t){0};
+        in = (nt_ui_interaction_t){0};
         /* Inert occluder: still block the pointer so a disabled overlay can't leak clicks through. */
         nt_ui_block_pointer(ctx, id, style->hit_padding_lrtb);
         nt_ui_debug_record_disabled_zone(ctx, id, style->hit_padding_lrtb);
@@ -149,6 +146,7 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
 
     ctx->pending_button.active = true;
     ctx->pending_button.clicked = in.clicked;
+    return in;
 }
 
 bool nt_ui_button_end(nt_ui_context_t *ctx) {
@@ -158,13 +156,6 @@ bool nt_ui_button_end(nt_ui_context_t *ctx) {
 
     nt_ui_clay_priv_close_element();
 
-    const bool clicked = ctx->pending_button.clicked;
     ctx->pending_button.active = false;
-    ctx->pending_button.clicked = false;
-    return clicked;
-}
-
-bool nt_ui_button(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled, const nt_ui_events_cfg_t *cfg) {
-    nt_ui_button_begin(ctx, data, id, style, decl, enabled, cfg);
-    return nt_ui_button_end(ctx);
+    return ctx->pending_button.clicked;
 }

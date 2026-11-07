@@ -229,7 +229,7 @@ static nt_ui_interaction_t combo_emit_row_decl(nt_ui_context_t *ctx, uint8_t fil
 }
 
 /* One list row: the shared row rect + an engine column (optional leading icon gutter + left label), closed
- * here. Returns clicked (the canonical mutating step_interaction). */
+ * here. Returns clicked (the mutating step_interaction). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — icon-gutter CLAY nesting, not deep control flow
 static bool dropdown_declare_row(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t row_id, uint32_t label_id, const char *label, const nt_atlas_region_ref_t *icon, bool selected,
                                  nt_ui_dropdown_style_t *style) {

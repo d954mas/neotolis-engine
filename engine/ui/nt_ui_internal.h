@@ -181,14 +181,14 @@ typedef struct {
 #define NT_UI_COMBO_DUP_KEY_WINDOW 64
 #endif
 
-/* App-wide gesture defaults. Per-ctx, settable via nt_ui_set_gesture_constants. Touch-friendly baseline
- * (looser than ImGui's mouse 6px/0.3s) since the engine targets mobile/WASM; mouse-only apps can tighten. */
-#ifndef NT_UI_GESTURE_DBL_WINDOW_SECS
-#define NT_UI_GESTURE_DBL_WINDOW_SECS 0.50F
-#endif
-#ifndef NT_UI_GESTURE_MOVE_RADIUS_PX
-#define NT_UI_GESTURE_MOVE_RADIUS_PX 16.0F
-#endif
+typedef struct {
+    uint32_t active_id; /* widget this pointer captured; 0 = none */
+    float press_pos[2]; /* UI-space press origin */
+    float pos[2];       /* current UI-space pos; drag = pos - press_pos */
+    float hold_secs;    /* dt accumulated since the press */
+    float hold_prev_secs;
+    bool hold_live; /* false once the pointer left the hitbox; only a new press restarts the hold */
+} nt_ui_capture_t;
 
 /* Lives at arena head; hot fields first. Per-ctx — no module globals. Field order is deliberately
  * hot-first for cache locality, not padding-optimal; a context is per-UI (not a dense array), so the
@@ -377,7 +377,7 @@ struct nt_ui_context {
     nt_ui_interactive_t *interactive_cur;
 
     uint32_t current_generation;
-    uint32_t frame_counter; /* ++ each nt_ui_begin; STABLE for the whole begin->end->post-end-query window (current_generation bumps mid-end, so it can't gate post-end reads) */
+    uint32_t frame_counter; /* ++ each nt_ui_begin; stable for the whole frame */
     uint32_t interactive_prev_count;
     uint32_t interactive_cur_count;
 
@@ -407,10 +407,12 @@ struct nt_ui_context {
      * inside ui_hit_test instead of silently raycasting through a stale frame's camera. */
     bool view_proj_set;
     float element_depth_bias_ndc;
-    /* App-wide gesture constants (nt_ui_events). Set in create_context to the #define defaults,
-     * overridable via nt_ui_set_gesture_constants. Grouped with the float block to avoid padding. */
+    /* App-wide gesture constants, see nt_ui_set_gesture_constants. Grouped with the float block to avoid padding. */
     float gesture_dbl_window_secs;
-    float gesture_move_radius_px;
+    float gesture_move_radius;
+    uint32_t last_press_id; /* widget of the previous press; 0 = nothing to pair with */
+    float last_press_age;   /* dt accumulated since that press */
+    float last_press_pos[2];
     float view_proj[16];
     float inv_view_proj[16];
 #if NT_UI_DEBUG_TOOLS
