@@ -351,6 +351,11 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_input COMMAND test_input)
 
+    # --- Native input backend: staged events across a focus loss ---
+    add_executable(test_input_native unit/test_input_native.c)
+    target_link_libraries(test_input_native PRIVATE nt_input nt_window_stub nt_log_stub unity)
+    nt_setup_test_target(test_input_native)
+
     # --- Input inject + player-gate tests ---
     add_executable(test_input_inject unit/test_input_inject.c)
     target_link_libraries(test_input_inject PRIVATE nt_input_stub nt_log_stub unity)

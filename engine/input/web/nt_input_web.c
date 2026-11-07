@@ -129,7 +129,6 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
     Module['_ntCharBuf'] = [];
     Module['_ntPtrBuf'] = [];
     Module['_ntWheelBuf'] = [];
-    Module['_ntBlurred'] = false;
 
     /* Keyboard events */
     canvas.addEventListener("keydown", function(e) {
@@ -161,9 +160,13 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
         }
     });
 
-    /* Blur: clear all keys on focus loss */
+    /* Events queued before focus loss are stale. */
     canvas.addEventListener("blur", function() {
-        Module['_ntBlurred'] = true;
+        Module['_nt_input_web_on_blur']();
+        Module['_ntKeyBuf'].length = 0;
+        Module['_ntCharBuf'].length = 0;
+        Module['_ntPtrBuf'].length = 0;
+        Module['_ntWheelBuf'].length = 0;
         mouseOwned = false; /* the release may land outside; a held capture or the next wheel must not press again */
         mouseButtons = 0;
     });
@@ -267,17 +270,6 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
 })
 
 EM_JS(void, nt_input_web_flush_events, (void), {
-    /* Blur handling — discard stale pre-blur events */
-    if (Module['_ntBlurred']) {
-        Module['_nt_input_web_on_blur']();
-        Module['_ntBlurred'] = false;
-        Module['_ntKeyBuf'].length = 0;
-        Module['_ntCharBuf'].length = 0;
-        Module['_ntPtrBuf'].length = 0;
-        Module['_ntWheelBuf'].length = 0;
-        return;
-    }
-
     /* Drain key buffer (stride 2: key, down) */
     var kb = Module['_ntKeyBuf'];
     for (var i = 0; i < kb.length; i += 2) {

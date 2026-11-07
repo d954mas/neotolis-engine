@@ -10,6 +10,9 @@ Related: [Platform Architecture](../runtime/platform.md), [Frame Lifecycle](../r
 
 Input system is polling-based. Game queries state each frame, does not subscribe to callbacks.
 
+Focus loss drops the events buffered before it. The next poll releases held player
+input and delivers no device events; events after the loss arrive in the poll after that.
+
 ## Typed characters
 
 Text input is separate from key state: characters arrive as UTF-32 codepoints in a
@@ -36,8 +39,9 @@ position and deltas in framebuffer pixels, wheel notches, pressure, type, and pe
 `is_down`/`is_pressed`/`is_released`.
 
 - **`pointers[0]` is the mouse.** It is active while the cursor is over the window, or while a
-  button is held (a drag outside the window keeps it). A button release keeps it; a leave or a
-  focus loss deactivates it on the next poll, so that frame still reads the release. The wheel
+  button is held (a drag outside the window keeps it). A button release keeps it; a leave
+  deactivates it on the next poll and a focus loss on the poll after its release frame, so the
+  release stays readable. The wheel
   lands only on an active mouse. On a device without a mouse it stays inactive. Its pressure is 1
   while a button is down, else 0. A press counts only when it starts on the window (on web: while
   the canvas holds the pointer capture), so a drag from outside never presses.

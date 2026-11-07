@@ -37,8 +37,6 @@ static uint32_t s_wheel_count;
 static uint32_t s_char_buf[NT_MAX_CHAR_EVENTS];
 static uint32_t s_char_count;
 
-static bool s_focus_lost;
-
 /* ---- Buffer write functions (called from nt_window_native.c callbacks) ---- */
 
 void nt_input_buffer_key(nt_key_t key, bool down) {
@@ -95,7 +93,14 @@ void nt_input_buffer_char_event(uint32_t cp) {
     }
 }
 
-void nt_input_buffer_focus_lost(void) { s_focus_lost = true; }
+void nt_input_buffer_focus_lost(void) {
+    /* Events staged before the loss are stale. */
+    s_key_count = 0;
+    s_ptr_count = 0;
+    s_wheel_count = 0;
+    s_char_count = 0;
+    nt_input_focus_lost();
+}
 
 /* ---- Platform lifecycle ---- */
 
@@ -105,17 +110,6 @@ void nt_input_platform_init(void) {}
 void nt_input_set_text_input_mode(nt_text_input_mode_t mode) { (void)mode; }
 
 void nt_input_platform_poll(void) {
-    /* Focus lost: clear all state, discard buffered events */
-    if (s_focus_lost) {
-        nt_input_focus_lost();
-        s_focus_lost = false;
-        s_key_count = 0;
-        s_ptr_count = 0;
-        s_wheel_count = 0;
-        s_char_count = 0;
-        return;
-    }
-
     /* Apply DPR at drain time — always uses the most current value */
     float dpr = g_nt_window.dpr;
 

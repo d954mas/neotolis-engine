@@ -176,6 +176,7 @@ void test_mouse_focus_lost_drops_pressure(void) {
     nt_input_mouse_move(10.0F, 10.0F, 1);
     nt_input_poll();
     nt_input_focus_lost();
+    nt_input_poll();
     TEST_ASSERT_TRUE(float_near(0.0F, g_nt_input.pointers[0].pressure, 1e-6F));
 }
 

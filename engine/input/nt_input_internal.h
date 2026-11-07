@@ -19,7 +19,8 @@ void nt_input_pointer_up(uint32_t id);
 void nt_input_wheel(float dx, float dy);
 void nt_input_clear_all_keys(void);
 void nt_input_clear_all_pointers(void);
-/* Backends call this on focus loss: the release events never arrive, so held input releases here. */
+/* Backends call this on focus loss after dropping their staged events: the release events never
+   arrive, so the next poll releases held input and skips the backend drain. */
 void nt_input_focus_lost(void);
 
 /* nt_input automation surface (player gate + synthetic input injection). Compiled only when
