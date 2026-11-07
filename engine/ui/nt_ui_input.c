@@ -729,14 +729,11 @@ static void focus_step(input_frame_t *f) {
         st->anchor = cur_len; /* keep the selection anchor in-bounds too */
     }
 
-    /* ONE mutating interaction step (the canonical-step contract): the events step with double_click
-     * opt-in. Word-select reads double_clicked off this single result — no separate call. long_press is
-     * not wanted here (<=0 disables it + hold_progress, keeping the gesture cell dbl-only). The app-wide
-     * dbl window + move radius come from the context (nt_ui_set_gesture_constants), not hard-coded. */
-    static const nt_ui_events_cfg_t s_field_gesture_cfg = {.long_press_secs = 0.0F, .double_click = true};
+    /* ONE mutating interaction step (the canonical-step contract). Word-select reads double_clicked
+     * off this single result; the dbl window + move radius come from the context. */
     nt_ui_events_t in;
     if (enabled) {
-        in = nt_ui_events(ctx, id, &s_field_gesture_cfg);
+        in = nt_ui_events(ctx, id, 0.0F);
     } else {
         in = (nt_ui_events_t){0};
         nt_ui_block_pointer(ctx, id, NULL);
@@ -770,7 +767,7 @@ static void focus_step(input_frame_t *f) {
         }
     }
 
-    /* Double-click select-word rides the same single events step (cfg.double_click). */
+    /* Double-click select-word rides the same single events step. */
     if (enabled && in.double_clicked) {
         uint32_t ws = 0U;
         uint32_t we = 0U;

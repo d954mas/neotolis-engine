@@ -265,7 +265,7 @@ bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t menu_id, uint32_t ta
     /* Idempotent reads only — no mutating step here (nt_ui_events is the caller's one canonical step per
      * widget). Right-click is the desktop trigger: bound (target_id != 0) it arms over the target; target_id
      * == 0 arms anywhere. long_pressed is the touch trigger, supplied by the caller from its target widget's
-     * own events gesture step. */
+     * own events step. */
     bool right_armed = nt_input_mouse_is_pressed(NT_BUTTON_RIGHT);
     if (right_armed && target_id != 0U) {
         /* Geometry hit-test (not arbitrated hover) so a right-click RE-opens the menu through its own root

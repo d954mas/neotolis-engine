@@ -219,7 +219,7 @@ void nt_ui_menu_end(nt_ui_menu_ctx_t *menu);
  * 0 = arm anywhere (any right-click); non-zero = arm over that widget's bbox via a GEOMETRY hit-test (NOT
  * arbitrated hover, so a right-click RE-opens the menu through its own occluder; does not respect z-order).
  * `long_pressed` is the touch trigger: the
- * caller passes the long_pressed flag from ITS target widget's own nt_ui_events gesture step (this helper
+ * caller passes the long_pressed flag from ITS target widget's own nt_ui_events step (this helper
  * owns no gesture timing). Returns true if it armed this frame (so the caller can stop other handling). */
 bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t menu_id, uint32_t target_id, bool long_pressed, nt_ui_menu_state_t *st);
 

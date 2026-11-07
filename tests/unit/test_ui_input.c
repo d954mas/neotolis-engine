@@ -528,7 +528,7 @@ static void test_double_click_word_select(void) {
     TEST_ASSERT_EQUAL_STRING(" bar", buf);
 }
 
-/* ---- word-select fires via the field's single nt_ui_events step (cfg.double_click),
+/* ---- word-select fires via the field's single nt_ui_events step,
  *      not a separate gesture detector. A double-click in "foo bar" lands the caret at the word end. ---- */
 static void test_word_select_fires_via_events(void) {
     char buf[32];
@@ -552,17 +552,17 @@ static void test_word_select_fires_via_events(void) {
 }
 
 /* ---- The field runs exactly ONE mutating interaction step on its id: a press-release cycle does not
- *      double-count capture or leak a duplicate gesture cell (the state-pool slot count is stable
- *      across repeated identical press-release frames once warmed). ---- */
+ *      double-count capture or grow the state pool across repeated identical press-release frames
+ *      once warmed. ---- */
 static void test_field_press_release_no_double_count(void) {
     char buf[32];
     strcpy(buf, "abc");
     const uint32_t id = nt_ui_id("f");
-    warmup_focus(id, buf, sizeof buf); /* establishes the state + gesture cells once */
+    warmup_focus(id, buf, sizeof buf); /* establishes the state cell once */
 
     const uint32_t after_warm = nt_ui_state_used_slots(s_fx.ctx);
 
-    /* A fresh press-release cycle must not grow the pool (one events step => one gesture cell, reused). */
+    /* A fresh press-release cycle must not grow the pool. */
     nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
     (void)field_frame(&press, id, buf, sizeof buf, true, NULL);
     nt_pointer_t rel = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), false, false, true);

@@ -468,18 +468,30 @@ the buffer or `max_length` (both count the NUL byte). A codepoint is never split
 
 ## Consolidated interaction events
 
-`nt_ui_events(ctx, id, cfg)` is the single
-canonical MUTATING interaction step (one per widget per frame), superseding the
-raw `nt_ui_step_interaction` as the widget-facing call: it returns the base
-capture edges (`hovered/pressed/released/held/clicked`) PLUS cfg-gated gestures
-(`double_clicked`, `long_pressed`, `hold_progress` — a linear 0..1 ramp toward
-`long_press_secs` while `held && hovered`). The base path delegates to
-`step_interaction` verbatim (byte-for-byte capture parity); the gesture cell is
-allocated ONLY when `cfg` opts in (`cfg==NULL` grows the state pool by zero), so
-zero-overhead is the default — explicit-over-implicit. The dbl-click window and
-drag move-radius are engine-global (`nt_ui_set_gesture_constants`); dragging off
-the bbox or past the radius resets `hold_progress` and suppresses `long_pressed`.
-`nt_ui_query_events` is the idempotent read-side mirror (advances nothing).
+`nt_ui_events(ctx, id, long_press_secs)` is the single canonical MUTATING
+interaction step (one per widget per frame), superseding the raw
+`nt_ui_step_interaction` as the widget-facing call. It returns the capture edges
+(`hovered/pressed/released/held/clicked/pressed_now`) plus the gestures:
+`double_clicked`, `long_pressed`, and `hold_progress`, a linear 0..1 ramp toward
+`long_press_secs`. `long_press_secs <= 0` disables the last two.
+`nt_ui_button_begin` returns the events of its own step.
+
+Gesture state follows the press, not the widget, and uses no state-pool cell:
+
+- **Hold** lives in the pointer's capture and counts `dt` since the press. Motion
+  inside the hitbox keeps the hold. Leaving the hitbox resets `hold_progress` and
+  cancels `long_pressed` until a new press. A widget that skips its step loses the
+  capture at the next `nt_ui_begin`, so its hold cannot resume without a new press.
+- **Double-click** pairs a press with the previous press through one record per
+  context: same widget, within the window and the move radius
+  (`nt_ui_set_gesture_constants`). A press on another widget replaces the record;
+  a completed pair empties it, so a third press starts a new pair. The move radius
+  gates double-click only.
+
+Gesture time is UI time. Every `nt_ui_begin` advances it by `dt`, whether or not the
+widget stepped, so frames with a disabled widget count toward the window and
+`dt==0` pauses both gestures. A frame without `nt_ui_begin` does not exist for
+gestures: the game passes the elapsed time in the next `dt` if it must count.
 `hold_progress` is the hold-to-confirm feedback signal and feeds the radial phase.
 
 ## Popup-core

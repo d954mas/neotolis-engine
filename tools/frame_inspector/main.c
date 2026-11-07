@@ -661,7 +661,7 @@ static void textf(const nt_ui_label_style_t *style, const char *fmt, ...) {
 
 static bool button(const char *label, const nt_ui_label_style_t *style, bool active) {
     const uint32_t id = next_id();
-    const nt_ui_events_t ev = nt_ui_events(s_ctx, id, NULL);
+    const nt_ui_events_t ev = nt_ui_events(s_ctx, id, 0.0F);
     CLAY({.id = (Clay_ElementId){.id = id}, .layout = {.padding = {6, 6, 2, 2}}, .backgroundColor = active ? k_select : (ev.hovered ? k_hover : k_panel), .cornerRadius = CLAY_CORNER_RADIUS(3)}) {
         text(label, style);
     }
@@ -871,7 +871,7 @@ static void tracks_input(void) {
     s.hover_file = FI_NONE;
     for (uint32_t f = 0; f < s.file_count; f++) {
         for (int t = 0; t < TRACK_COUNT; t++) {
-            const nt_ui_events_t ev = nt_ui_events(s_ctx, track_id(f, (track_t)t), NULL);
+            const nt_ui_events_t ev = nt_ui_events(s_ctx, track_id(f, (track_t)t), 0.0F);
             if (ev.pressed_now) {
                 s.drag_first = s.axis_first;
             }
@@ -899,7 +899,7 @@ static void tracks_input(void) {
 static void strip_input(float *thumb_x, float *thumb_w) {
     const uint32_t id = nt_ui_id("axis_strip");
     const nt_ui_bbox_t box = nt_ui_get_bbox(s_ctx, id);
-    const nt_ui_events_t ev = nt_ui_events(s_ctx, id, NULL);
+    const nt_ui_events_t ev = nt_ui_events(s_ctx, id, 0.0F);
     const double most = (double)axis_frames();
     const double first = axis_hold(s.axis_first);
     const float width = box.found && box.width > 0.0F ? box.width : 1.0F;
@@ -1045,7 +1045,7 @@ static void declare_frame_table(void) {
         for (uint32_t k = 0; k < s.files[f].frame_count; k++) {
             const fi_frame_t *fr = &s.files[f].frames[k];
             const uint32_t id = next_id();
-            const nt_ui_events_t ev = nt_ui_events(s_ctx, id, NULL);
+            const nt_ui_events_t ev = nt_ui_events(s_ctx, id, 0.0F);
             if (ev.clicked) {
                 pick_frame(f, k);
             }
@@ -1241,7 +1241,7 @@ static void declare_timeline(const fi_frame_t *fr) {
             const bool selected = c == selected_column;
             const uint32_t target = targets[c];
             const uint32_t id = next_id();
-            const nt_ui_events_t ev = nt_ui_events(s_ctx, id, NULL);
+            const nt_ui_events_t ev = nt_ui_events(s_ctx, id, 0.0F);
             if (ev.clicked) {
                 select_record(target);
             }
@@ -1397,8 +1397,8 @@ static void declare_tree(void) {
                     const uint32_t r = s.vis_row[k];
                     const uint32_t row_id = nt_ui_vlist_item_id(s_ctx, k);
                     const uint32_t fold_id = nt_ui_child_id(row_id, "fold");
-                    const nt_ui_events_t ev = nt_ui_events(s_ctx, row_id, NULL);
-                    const nt_ui_events_t fold_ev = nt_ui_events(s_ctx, fold_id, NULL);
+                    const nt_ui_events_t ev = nt_ui_events(s_ctx, row_id, 0.0F);
+                    const nt_ui_events_t fold_ev = nt_ui_events(s_ctx, fold_id, 0.0F);
                     const bool parent = r != FI_NONE && r + 1U < fr->row_count && fr->depth[r + 1U] > fr->depth[r];
                     if (fold_ev.clicked && parent) {
                         s.collapsed[r] ^= 1U;
@@ -1466,7 +1466,7 @@ static void declare_banners(const fi_frame_t *fr) {
 
 static void card(fi_query_t q, const char *value, const char *label, const char *detail) {
     const uint32_t id = next_id();
-    const nt_ui_events_t ev = nt_ui_events(s_ctx, id, NULL);
+    const nt_ui_events_t ev = nt_ui_events(s_ctx, id, 0.0F);
     const bool any = fi_cell(frame_sel(), q).n > 0;
     if (any) {
         open_query(ev.clicked, q, label);
@@ -2038,7 +2038,7 @@ static void declare_compare_list(void) {
             for (uint32_t k = range.first; k <= range.last && k < s_cmp.row_count; ++k) {
                 const cmp_row_t *row = &s_cmp.rows[k];
                 const uint32_t row_id = nt_ui_vlist_item_id(s_ctx, k);
-                const nt_ui_events_t ev = nt_ui_events(s_ctx, row_id, NULL);
+                const nt_ui_events_t ev = nt_ui_events(s_ctx, row_id, 0.0F);
                 const bool fold = row->kind == CMP_GROUP || row->kind == CMP_SAME;
                 CLAY({.id = (Clay_ElementId){.id = row_id},
                       .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(ROW_H)}, .childGap = 4, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
@@ -2091,7 +2091,7 @@ static void link_text(const fi_frame_t *fr, const char *what, uint32_t record, c
     (void)snprintf(buf, sizeof(buf), "%s@%u  %s", what, record, body);
     const bool commands = s.page == PAGE_COMMANDS;
     const uint32_t id = next_id();
-    const nt_ui_events_t ev = nt_ui_events(s_ctx, id, NULL);
+    const nt_ui_events_t ev = nt_ui_events(s_ctx, id, 0.0F);
     Clay_Color background = ev.hovered ? k_hover : k_panel;
     background = !commands && s.selected == record ? k_select : background;
     CLAY({.id = (Clay_ElementId){.id = id}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .padding = {4, 4, 1, 1}}, .backgroundColor = background}) { text(buf, &k_link_wrap); }
@@ -2253,7 +2253,7 @@ static void object_row(const fi_frame_t *fr, uint32_t k) {
     (void)snprintf(count, sizeof(count), "%u record%s", s_panel.named_records[k], s_panel.named_records[k] == 1 ? "" : "s");
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
         const uint32_t ui = next_id();
-        const nt_ui_events_t ev = nt_ui_events(s_ctx, ui, NULL);
+        const nt_ui_events_t ev = nt_ui_events(s_ctx, ui, 0.0F);
         const bool linked = s_panel.named_def[k] != FI_NONE;
         CLAY(
             {.id = (Clay_ElementId){.id = ui}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .padding = {4, 4, 1, 1}}, .backgroundColor = ev.hovered && linked ? k_hover : k_panel}) {

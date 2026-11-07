@@ -411,6 +411,9 @@ struct nt_ui_context {
      * overridable via nt_ui_set_gesture_constants. Grouped with the float block to avoid padding. */
     float gesture_dbl_window_secs;
     float gesture_move_radius_px;
+    uint32_t last_press_id; /* widget of the previous press; 0 = nothing to pair with */
+    float last_press_age;   /* dt accumulated since that press */
+    float last_press_pos[2];
     float view_proj[16];
     float inv_view_proj[16];
 #if NT_UI_DEBUG_TOOLS
