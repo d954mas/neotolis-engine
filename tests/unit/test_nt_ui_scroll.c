@@ -26,8 +26,13 @@
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
 
-/* {friction, wheel_ease, rubber_c, bounce, wheel_step}. */
-static const float s_tun[5] = {0.92F, 18.0F, 0.55F, 12.0F, 40.0F};
+static const nt_ui_scroll_style_t s_physics_style = {
+    .friction = 0.92F,
+    .wheel_ease_speed = 18.0F,
+    .rubber_band_c = 0.55F,
+    .bounce_speed = 12.0F,
+    .wheel_step_px = 40.0F,
+};
 
 void setUp(void) {
     nt_test_assert_install();
@@ -49,7 +54,7 @@ static void test_scroll_momentum_decays_monotonic(void) {
 
     float prev_speed = fabsf(s.vel[1]);
     for (int i = 0; i < 60; ++i) {
-        nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, s_tun);
+        nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, &s_physics_style);
         const float speed = fabsf(s.vel[1]);
         TEST_ASSERT_TRUE(speed <= prev_speed + 0.001F); /* never speeds up */
         prev_speed = speed;
@@ -70,7 +75,7 @@ static void test_scroll_clamp_holds(void) {
     s.vel[1] = -100000.0F; /* huge fling, would overshoot far past the edge */
 
     for (int i = 0; i < 240; ++i) {
-        nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, s_tun);
+        nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, &s_physics_style);
     }
     TEST_ASSERT_TRUE(s.pos[1] >= lo - 0.5F);
     TEST_ASSERT_TRUE(s.pos[1] <= 0.0F + 0.5F);
@@ -105,7 +110,7 @@ static void test_scroll_to_reaches_target(void) {
 
     int frames = 0;
     while ((s.flags & NT_UI_SCROLL_FLAG_SCROLL_TO) != 0U && frames < 600) {
-        nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, s_tun);
+        nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, &s_physics_style);
         ++frames;
     }
     TEST_ASSERT_TRUE(frames < 600);                                                   /* arrived */
@@ -125,7 +130,7 @@ static void test_scroll_wheel_sign(void) {
     /* Run enough frames for the eased pos to follow target. */
     for (int i = 0; i < 120; ++i) {
         const float none[2] = {0.0F, 0.0F};
-        nt_ui_scroll_test_integrate(&s, (i == 0) ? wheel_down : none, 1.0F / 60.0F, content, container, s_tun);
+        nt_ui_scroll_test_integrate(&s, (i == 0) ? wheel_down : none, 1.0F / 60.0F, content, container, &s_physics_style);
     }
     /* target moved by wheel * wheel_step = -40; pos eased toward it (negative). */
     TEST_ASSERT_TRUE(float_near(s.target[1], -40.0F, 0.001F));
@@ -150,6 +155,107 @@ static void scroll_frame_dt(nt_pointer_t *p, const nt_ui_scroll_style_t *style, 
 }
 
 static void scroll_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style) { scroll_frame_dt(p, style, 1.0F / 60.0F); }
+
+static nt_ui_interaction_t scroll_child_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style) {
+    nt_ui_interaction_t interaction = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
+    CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, style, NULL);
+        CLAY({.id = CLAY_ID("interactive_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {
+            interaction = nt_ui_step_interaction(s_fx.ctx, CLAY_ID("interactive_content").id);
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+    return interaction;
+}
+
+static void test_scroll_release_crossing_threshold_allows_next_press(void) {
+    const nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_pointer_t p = {.x = 100.0F, .y = 100.0F, .active = true};
+    scroll_child_frame(&p, &style);
+    scroll_child_frame(&p, &style);
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    TEST_ASSERT_TRUE(scroll_child_frame(&p, &style).pressed);
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+    p.y = 96.0F;
+    scroll_child_frame(&p, &style);
+    p.buttons[NT_BUTTON_LEFT].is_down = false;
+    p.buttons[NT_BUTTON_LEFT].is_released = true;
+    p.y = 80.0F;
+    TEST_ASSERT_FALSE(scroll_child_frame(&p, &style).clicked);
+    TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
+
+    p.buttons[NT_BUTTON_LEFT].is_released = false;
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    p.y = 120.0F;
+    TEST_ASSERT_TRUE(scroll_child_frame(&p, &style).pressed);
+    TEST_ASSERT_EQUAL_UINT32(CLAY_ID("interactive_content").id, s_fx.ctx->captures[0].active_id);
+}
+
+static void test_scroll_hard_edges_stop_release_fling(void) {
+    const nt_ui_scroll_style_t style = {.friction = 0.92F, .wheel_step_px = 40.0F};
+    nt_ui_scroll_state_t s = {.pos = {-1.0F, -799.0F}, .target = {-1.0F, -799.0F}, .vel = {1000.0F, -1000.0F}};
+    const float content[2] = {500.0F, 1000.0F};
+    const float container[2] = {200.0F, 200.0F};
+    const float wheel[2] = {0.0F, 0.0F};
+    nt_ui_scroll_test_integrate(&s, wheel, 1.0F / 60.0F, content, container, &style);
+    TEST_ASSERT_TRUE(float_near(s.pos[0], 0.0F, 0.001F));
+    TEST_ASSERT_TRUE(float_near(s.pos[1], -800.0F, 0.001F));
+    TEST_ASSERT_TRUE(float_near(s.vel[0], 0.0F, 0.001F));
+    TEST_ASSERT_TRUE(float_near(s.vel[1], 0.0F, 0.001F));
+}
+
+static void test_scroll_steal_real_child_tracks_current_pointer(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    style.rubber_band_c = 0.0F;
+    nt_pointer_t p = {.x = 100.0F, .y = 100.0F, .active = true};
+    scroll_child_frame(&p, &style);
+    scroll_child_frame(&p, &style);
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    scroll_child_frame(&p, &style);
+    TEST_ASSERT_EQUAL_UINT32(CLAY_ID("interactive_content").id, s_fx.ctx->captures[0].active_id);
+
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+    p.y = 80.0F;
+    scroll_child_frame(&p, &style);
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
+    const nt_ui_scroll_state_t *s = nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(float_near(s->raw[1], 0.0F, 0.001F));
+    p.y = 60.0F;
+    scroll_child_frame(&p, &style);
+    s = nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_TRUE(float_near(s->raw[1], -20.0F, 0.001F));
+}
+
+static void test_scroll_threshold_ignores_disabled_axis(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    style.rubber_band_c = 0.0F;
+    nt_pointer_t p = {.x = 100.0F, .y = 100.0F, .active = true};
+    scroll_frame(&p, &style);
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    scroll_frame(&p, &style);
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+    p.x = 150.0F;
+    p.y = 93.0F;
+    scroll_frame(&p, &style);
+    const nt_ui_scroll_state_t *s = nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(float_near(s->raw[1], 0.0F, 0.001F));
+    p.y = 91.0F;
+    scroll_frame(&p, &style);
+    s = nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_TRUE(float_near(s->raw[1], -1.0F, 0.001F));
+    p.y = 89.0F;
+    scroll_frame(&p, &style);
+    s = nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_TRUE(float_near(s->raw[1], -3.0F, 0.001F));
+}
 
 /* ---- Test 6: wheel applied ONCE — one notch moves childOffset by the wheel contribution ---- */
 static void test_scroll_wheel_applied_once(void) {
@@ -206,11 +312,7 @@ static void inject_inner_capture(uint32_t inner_id, float press_x, float press_y
     s_fx.ctx->capture_seen[0] = 1U;
 }
 
-/* ---- Test 8: capture-steal — drag>threshold cancels inner capture AND claims it, but routes ZERO
- *      delta on the LATCH frame (the inner widget, declared earlier, already applied that same delta;
- *      re-routing it here double-moves for one frame). The container CLAIMS the capture (active_id =
- *      scroll id, not 0) so the gesture has a single owner; the inner widget sees a foreign owner ->
- *      no click (cancelled). The scroll starts tracking 1:1 from the NEXT frame's per-frame delta. ---- */
+/* Stealing cancels the child, routes zero delta, then tracks 1:1 from the next frame. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_scroll_capture_steal_drag(void) {
     nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
@@ -225,6 +327,7 @@ static void test_scroll_capture_steal_drag(void) {
     /* Pointer dragged 40 px down (>> 8 px threshold) along the scrolling y axis. */
     p.x = 100.0F;
     p.y = 140.0F;
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
     /* Inject AFTER begin (orphan-clear ran) so the simulated inner capture is live. */
     inject_inner_capture(inner_id, 100.0F, 100.0F, 100.0F, 140.0F);
@@ -239,8 +342,7 @@ static void test_scroll_capture_steal_drag(void) {
 
     /* Container claimed the gesture -> inner capture cancelled (active id is the container, no click). */
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
-    /* LATCH frame routes ZERO delta: pos AND raw stay at rest (fails before the fix, which dumped the
-     * already-inner-applied 40 px delta into pos the same frame — the one-frame double-motion). */
+    /* The crossing frame leaves pos and raw at rest. */
     float oy = 0.0F;
     nt_ui_scroll_test_last_child_offset(NULL, &oy);
     TEST_ASSERT_TRUE(float_near(oy, 0.0F, 0.5F)); /* no movement on the steal frame */
@@ -298,6 +400,7 @@ static void test_scroll_capture_steal_dt_zero_no_phantom(void) {
      * velocity to compute — it MUST be zeroed, not left at the stale -5000. */
     p.x = 100.0F;
     p.y = 140.0F;
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &p, 1, 0); /* dt == 0 */
     inject_inner_capture(inner_id, 100.0F, 100.0F, 100.0F, 140.0F);
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
@@ -1131,6 +1234,7 @@ static void test_scroll_steal_continues_across_frames(void) {
     /* Frame 1: inner widget owns the pointer; a 40 px drag steals + claims. */
     p.x = 100.0F;
     p.y = 140.0F;
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
     inject_inner_capture(inner_id, 100.0F, 100.0F, 100.0F, 140.0F);
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
@@ -1359,12 +1463,12 @@ static void test_scroll_wheel_kills_fling(void) {
     nt_ui_scroll_state_t s = {0};
     s.vel[1] = -3000.0F; /* a fling in motion */
     const float no_wheel[2] = {0.0F, 0.0F};
-    nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, s_tun);
+    nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, &s_physics_style);
     TEST_ASSERT_TRUE(fabsf(s.vel[1]) > 100.0F); /* still flinging */
 
     const float target_before = s.target[1];
     const float wheel_up[2] = {0.0F, 1.0F}; /* one notch toward 0 (Clay sign up) */
-    nt_ui_scroll_test_integrate(&s, wheel_up, 1.0F / 60.0F, content, container, s_tun);
+    nt_ui_scroll_test_integrate(&s, wheel_up, 1.0F / 60.0F, content, container, &s_physics_style);
     /* Momentum killed so the easing branch picks up the new target (target moved by +step). */
     TEST_ASSERT_TRUE(float_near(s.vel[1], 0.0F, 0.001F));
     TEST_ASSERT_TRUE(s.target[1] > target_before + 1.0F); /* the notch registered (not lost) */
@@ -1554,7 +1658,7 @@ static float fling_max_overshoot(float dt, int steps) {
     s.vel[1] = -4000.0F; /* fling down past the edge */
     float deepest = 0.0F;
     for (int i = 0; i < steps; ++i) {
-        nt_ui_scroll_test_integrate(&s, no_wheel, dt, content, container, s_tun);
+        nt_ui_scroll_test_integrate(&s, no_wheel, dt, content, container, &s_physics_style);
         const float depth = (-800.0F) - s.pos[1]; /* positive = past the bottom edge */
         if (depth > deepest) {
             deepest = depth;
@@ -1587,13 +1691,13 @@ static void test_scroll_content_shrink_clamps_pos(void) {
     s.pos[1] = -800.0F;
     s.raw[1] = -800.0F;
     s.target[1] = -800.0F;
-    nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, s_tun);
+    nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, &s_physics_style);
     TEST_ASSERT_TRUE(float_near(s.pos[1], -800.0F, 1.0F)); /* parked at the old bottom */
 
     /* Content SHRINKS to 400 -> new bottom edge is -(400-200) = -200. pos at -800 is now past it. */
     content[1] = 400.0F;
     for (int i = 0; i < 240; ++i) {
-        nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, s_tun);
+        nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, &s_physics_style);
     }
     /* The offset must animate back up to the new bound (-200), not stay parked at -800. */
     TEST_ASSERT_TRUE(float_near(s.pos[1], -200.0F, 1.0F));
@@ -2105,6 +2209,10 @@ static void test_assert_wheel_candidate_overflow(void) { NT_TEST_EXPECT_ASSERT(c
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_scroll_momentum_decays_monotonic);
+    RUN_TEST(test_scroll_steal_real_child_tracks_current_pointer);
+    RUN_TEST(test_scroll_release_crossing_threshold_allows_next_press);
+    RUN_TEST(test_scroll_hard_edges_stop_release_fling);
+    RUN_TEST(test_scroll_threshold_ignores_disabled_axis);
     RUN_TEST(test_scroll_clamp_holds);
     RUN_TEST(test_scroll_rubber_band_compresses);
     RUN_TEST(test_scroll_to_reaches_target);

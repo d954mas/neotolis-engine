@@ -42,17 +42,6 @@ static inline uint32_t scrollbar_id(uint32_t scroll_id, int axis) { return nt_ui
  * going down/right, content moves up/left. Clamp bounds are [-(content-container), 0].
  * Only the input edge (wheel) and scrollbar-thumb mapping flip sign. */
 
-// #region tunables index
-enum {
-    NT_UI_SCROLL_T_FRICTION = 0,   /* per-60fps momentum decay base */
-    NT_UI_SCROLL_T_WHEEL_EASE = 1, /* pos eases toward target at this rate */
-    NT_UI_SCROLL_T_RUBBER_C = 2,   /* overscroll coefficient (0 = none) */
-    NT_UI_SCROLL_T_BOUNCE = 3,     /* bounce-back spring ease */
-    NT_UI_SCROLL_T_WHEEL_STEP = 4, /* px per wheel unit */
-    NT_UI_SCROLL_T_COUNT = 5,
-};
-// #endregion
-
 /* Below this |vel| (px/s) momentum is dead — zero it so pos settles exactly. */
 #define NT_UI_SCROLL_VEL_EPS 0.5F
 /* Below this |target-pos| scroll-to/wheel-ease has arrived. */
@@ -91,12 +80,12 @@ static inline float scroll_min_bound(float content, float container) {
 
 // #region integrator
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void scroll_integrate(nt_ui_scroll_state_t *s, const float wheel[2], float dt, const float content[2], const float container[2], const float tunables[NT_UI_SCROLL_T_COUNT]) {
-    const float friction = tunables[NT_UI_SCROLL_T_FRICTION];
-    const float wheel_ease = tunables[NT_UI_SCROLL_T_WHEEL_EASE];
-    const float rubber_c = tunables[NT_UI_SCROLL_T_RUBBER_C];
-    const float bounce = tunables[NT_UI_SCROLL_T_BOUNCE];
-    const float wheel_step = tunables[NT_UI_SCROLL_T_WHEEL_STEP];
+static void scroll_integrate(nt_ui_scroll_state_t *s, const float wheel[2], float dt, const float content[2], const float container[2], const nt_ui_scroll_style_t *style) {
+    const float friction = style->friction;
+    const float wheel_ease = style->wheel_ease_speed;
+    const float rubber_c = style->rubber_band_c;
+    const float bounce = style->bounce_speed;
+    const float wheel_step = style->wheel_step_px;
     const bool dragging = (s->flags & NT_UI_SCROLL_FLAG_DRAGGING) != 0U;
     const bool scroll_to = (s->flags & NT_UI_SCROLL_FLAG_SCROLL_TO) != 0U;
     bool activity = dragging || scroll_to;
@@ -158,7 +147,10 @@ static void scroll_integrate(nt_ui_scroll_state_t *s, const float wheel[2], floa
             /* Fling overshoot: decay vel per dt-normalized frame (not instant kill, which is
              * FPS-dependent) so the rubber compresses to the same depth at any step rate, then
              * hand off to the bounce spring once vel has bled down. */
-            if (fabsf(s->vel[a]) > NT_UI_SCROLL_VEL_EPS) {
+            if (rubber_c == 0.0F && bounce == 0.0F) {
+                s->pos[a] = edge;
+                s->vel[a] = 0.0F;
+            } else if (fabsf(s->vel[a]) > NT_UI_SCROLL_VEL_EPS) {
                 s->vel[a] *= powf(NT_UI_SCROLL_OVERSCROLL_DECAY, dt * 60.0F);
             } else {
                 s->vel[a] = 0.0F; /* bounce absorbs the remainder */
@@ -200,14 +192,6 @@ static void scroll_integrate(nt_ui_scroll_state_t *s, const float wheel[2], floa
     s->idle = activity ? 0.0F : (s->idle + dt);
 }
 // #endregion
-
-static void style_to_tunables(const nt_ui_scroll_style_t *style, float tun[NT_UI_SCROLL_T_COUNT]) {
-    tun[NT_UI_SCROLL_T_FRICTION] = style->friction;
-    tun[NT_UI_SCROLL_T_WHEEL_EASE] = style->wheel_ease_speed;
-    tun[NT_UI_SCROLL_T_RUBBER_C] = style->rubber_band_c;
-    tun[NT_UI_SCROLL_T_BOUNCE] = style->bounce_speed;
-    tun[NT_UI_SCROLL_T_WHEEL_STEP] = style->wheel_step_px;
-}
 
 nt_ui_scroll_style_t nt_ui_scroll_style_defaults(void) {
     /* Mobile-game feel: 0.92 decay reads snappier than Clay's 0.95; 18/40 ease+step
@@ -493,27 +477,27 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
             if (!point_in_bbox(bb, cap->press_pos[0], cap->press_pos[1])) {
                 continue; /* press began outside us — another container's gesture */
             }
-            float ddx = cap->pos[0] - cap->press_pos[0];
-            float ddy = cap->pos[1] - cap->press_pos[1];
+            const float ddx = p->x - cap->press_pos[0];
+            const float ddy = p->y - cap->press_pos[1];
             const float axis_move = (can_x ? fabsf(ddx) : 0.0F) + (can_y ? fabsf(ddy) : 0.0F);
             if (axis_move < NT_UI_SCROLL_STEAL_THRESHOLD_PX) {
                 continue; /* tap (below threshold) leaves the inner capture -> inner clicks */
             }
+            if (!btn.is_down) {
+                cap->active_id = 0U; /* cancel the child without carrying capture into the next press */
+                continue;
+            }
             cap->active_id = id;       /* CLAIM (not 0): hold the gesture so it can't be re-adopted */
             ctx->capture_seen[i] = 1U; /* keep the claim past begin's orphan-clear */
-            /* Route ZERO delta on the latch frame: the inner widget (declared earlier) already applied
-             * this same delta, so re-routing it here double-moves for one frame. Re-anchor and let the
-             * scroll track from NEXT frame's per-frame delta; zero vel so a prior fling can't leak past. */
-            (void)ddx;
-            (void)ddy;
+            /* Skip the crossing delta and anchor to this frame's pointer: children may step later. */
             if (can_x) {
                 s->vel[0] = 0.0F;
             }
             if (can_y) {
                 s->vel[1] = 0.0F;
             }
-            cap->press_pos[0] = cap->pos[0]; /* re-anchor: next frame's delta is per-frame, 1:1 */
-            cap->press_pos[1] = cap->pos[1];
+            cap->press_pos[0] = p->x; /* re-anchor: next frame's delta is per-frame, 1:1 */
+            cap->press_pos[1] = p->y;
             any_drag = true;
             continue;
         }
@@ -558,9 +542,9 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
             any_free_press = true;
             continue; /* armed this frame; delta accrues from next frame */
         }
-        float ddx = p->x - s->free_press_pos[0];
-        float ddy = p->y - s->free_press_pos[1];
-        const float axis_move = (can_x ? fabsf(ddx) : 0.0F) + (can_y ? fabsf(ddy) : 0.0F);
+        float ddx = can_x ? p->x - s->free_press_pos[0] : 0.0F;
+        float ddy = can_y ? p->y - s->free_press_pos[1] : 0.0F;
+        const float axis_move = fabsf(ddx) + fabsf(ddy);
         any_free_press = true;
         if (axis_move < NT_UI_SCROLL_STEAL_THRESHOLD_PX) {
             continue; /* still within the tap threshold — not yet a drag */
@@ -907,9 +891,7 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     }
 #endif
 
-    float tun[NT_UI_SCROLL_T_COUNT];
-    style_to_tunables(style, tun);
-    scroll_integrate(s, wheel, ctx->frame_dt, content, container, tun);
+    scroll_integrate(s, wheel, ctx->frame_dt, content, container, style);
 
     Clay_ElementDeclaration final = (decl != NULL) ? *decl : (Clay_ElementDeclaration){0};
     final.id = (Clay_ElementId){.id = id};
@@ -980,11 +962,9 @@ Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id
 
     const nt_scroll_bbox_t cbb = scroll_fetch_bbox(id);
 
-    /* Same pointer/touch gesture as game containers: one drag implementation, reused. Only the axes
-     * matter to scroll_drag_check + scroll_route_drag; the synthetic style carries nothing else.
-     * inspector_owned=true: the pane is the topmost overlay, so it bypasses the sidebar-consume gate. */
-    const nt_ui_scroll_style_t drag_style = {.scroll_x = scroll_x, .scroll_y = scroll_y};
-    scroll_drag_check(ctx, id, &drag_style, s, &cbb, content, container, true);
+    /* Inspector panes share game scroll physics with instant wheel and hard edge clamping. */
+    const nt_ui_scroll_style_t style = {.scroll_x = scroll_x, .scroll_y = scroll_y, .friction = 0.92F, .wheel_step_px = 40.0F};
+    scroll_drag_check(ctx, id, &style, s, &cbb, content, container, true);
 
     /* Wheel only when the pointer is over this pane (innermost-wins routing). The inspector floats
      * above the game UI, so register at a depth above any plausible game scroll nesting. */
@@ -995,23 +975,14 @@ Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id
     float wheel[2];
     scroll_gather_wheel(ctx, id, &cbb, scroll_x, scroll_y, wheel);
 
-    /* Instant wheel, friction-based fling on release, hard edge clamp: wheel_ease 0 -> pos snaps to
-     * target; friction 0.92 lets a drag-release coast; rubber/bounce 0 so overscroll clamps hard (no
-     * spring in a debug pane). Named index so the tunable order is compiler-checked. */
-    float tun[NT_UI_SCROLL_T_COUNT] = {0};
-    tun[NT_UI_SCROLL_T_FRICTION] = 0.92F;
-    tun[NT_UI_SCROLL_T_WHEEL_EASE] = 0.0F;
-    tun[NT_UI_SCROLL_T_RUBBER_C] = 0.0F;
-    tun[NT_UI_SCROLL_T_BOUNCE] = 0.0F;
-    tun[NT_UI_SCROLL_T_WHEEL_STEP] = 40.0F;
-    scroll_integrate(s, wheel, ctx->frame_dt, content, container, tun);
+    scroll_integrate(s, wheel, ctx->frame_dt, content, container, &style);
     return (Clay_Vector2){.x = s->pos[0], .y = s->pos[1]};
 }
 
 #ifdef NT_TEST_ACCESS
-void nt_ui_scroll_test_integrate(nt_ui_scroll_state_t *s, const float wheel[2], float dt, const float content[2], const float container[2], const float tunables[5]) {
-    NT_ASSERT(s != NULL && wheel != NULL && content != NULL && container != NULL && tunables != NULL && "nt_ui_scroll_test_integrate: null arg");
-    scroll_integrate(s, wheel, dt, content, container, tunables);
+void nt_ui_scroll_test_integrate(nt_ui_scroll_state_t *s, const float wheel[2], float dt, const float content[2], const float container[2], const nt_ui_scroll_style_t *style) {
+    NT_ASSERT(s != NULL && wheel != NULL && content != NULL && container != NULL && style != NULL && "nt_ui_scroll_test_integrate: null arg");
+    scroll_integrate(s, wheel, dt, content, container, style);
 }
 float nt_ui_scroll_test_rubber_band(float d, float dim) { return nt_ui_rubber_band(d, dim, 0.55F); }
 void nt_ui_scroll_test_last_child_offset(float *out_x, float *out_y) {

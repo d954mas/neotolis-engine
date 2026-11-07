@@ -405,9 +405,12 @@ Capture-steal-by-threshold
 (`NT_UI_SCROLL_STEAL_THRESHOLD_PX`, ~8 px) arbitrates an inner widget's click vs a
 scroll drag: a drag past the threshold cancels the inner capture and scrolls; a tap
 below it leaves the inner widget to click. On the latch frame the steal routes zero
-positional delta (the inner widget already applied it), tracking 1:1 from the next
-frame; the cancelled inner widget keeps any value change it made before the steal
-(Model D — the value lives in the game, so the engine cannot revert it). The
+positional delta and anchors at the current pointer position, tracking 1:1 from the
+next frame; the cancelled inner widget keeps any value change it made before the steal
+(Model D — the value lives in the game, so the engine cannot revert it). A free-press
+drag consumes the threshold using only axes that are enabled and overflow. A release
+that first crosses the threshold cancels the child without retaining capture. With
+both rubber-band and bounce coefficients zero, release momentum clamps at the edge. The
 scrollbar (2-piece slice9 track + thumb, both axes) emits as floating children of
 the container with
 ALWAYS / AUTO / AUTO_HIDE visibility (AUTO_HIDE shows on scroll activity and fades
