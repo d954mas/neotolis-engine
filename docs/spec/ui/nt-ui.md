@@ -540,7 +540,7 @@ Per-frame menu scratch is GAME-owned (`nt_ui_menu_ctx_t`, allocated by the
 game — static / app field / arena slice — and init via `nt_ui_menu_init`), so
 the core `nt_ui_context` pays zero bytes for a game that uses no menu and the
 menu TU dead-strips. It holds only the current declaration's per-level keyboard
-navigation records; retained selection lives in the UI context's state pool. The combo carries no such scratch (its state lives in the core ctx's pool,
+navigation records; retained selection lives in the game-owned `nt_ui_menu_state_t`. The combo carries no such scratch (its state lives in the core ctx's pool,
 bounded by caps). Row identity is KEY-STABLE via a scope stack:
 `mix(scope_id, key)` (fmix, never additive — additive sibling ids collide in
 Clay's anonymous child-id space). A submenu pushes its own row id as the child
@@ -567,12 +567,17 @@ focus, open selections, hover intent and navigation records. The replacement
 child is declared next frame. Keyboard opening selects that child's first enabled
 row when it is declared; an empty child stays open without focus.
 
-Selection belongs to `(UI context, menu_id)`, not the declaration scratch: one
-scratch may declare different menus sequentially. At the default depth cap, the
-runtime uses two state-pool cells: 44 payload bytes for focus and navigation state,
-32 for open parent IDs. This occupies two 76-byte slots instead of one, without
-changing the 64-byte payload cap, the preallocated pool size or the menu scratch
-size. It adds no heap allocation or per-row state lookup.
+The game keeps one zero-initialized `nt_ui_menu_state_t` per logical menu and UI
+context, alongside its open flag and anchor. The engine maintains focus, open
+parent IDs and keyboard navigation in this object; declaration scratch may be
+shared between menus sequentially. At the default depth cap the state is 88 bytes.
+Navigation needs no state-pool cells, payload-cap workaround or heap allocation.
+Popup tween and mouse-aim state still use the existing UI pool.
+
+Zeroing the state resets navigation even without a closed declaration frame.
+`nt_ui_state_clear_all` clears UI cells but preserves game-owned menu navigation;
+on a screen transition, reset the menu state too when a fresh menu is wanted.
+Reusing the state for another menu or UI context requires zero-initializing it.
 
 ## Atlas region identity
 

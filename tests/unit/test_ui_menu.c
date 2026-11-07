@@ -87,7 +87,7 @@ static void fx_begin(float dt) {
 static void test_menu_abi_sizes(void) {
     TEST_ASSERT_EQUAL_UINT(EXPECTED_MENU_STYLE_ABI, (unsigned)sizeof(nt_ui_menu_style_t));
     TEST_ASSERT_EQUAL_UINT((unsigned)(16U + ((((sizeof(void *) + 4U) + 7U) / 8U) * 8U)), (unsigned)sizeof(nt_ui_menu_item_opts_t));
-    TEST_ASSERT_EQUAL_UINT(12U, (unsigned)sizeof(nt_ui_menu_state_t)); /* 2 float + 1 bool + 3 pad */
+    TEST_ASSERT_EQUAL_UINT(24U + (8U * NT_UI_MENU_MAX_DEPTH), (unsigned)sizeof(nt_ui_menu_state_t));
 }
 
 static void test_menu_defaults_valid(void) {
@@ -573,7 +573,7 @@ static void menu_open_deep_branch(nt_ui_menu_state_t *st, nt_ui_menu_style_t *st
     menu_im_frame2(st, style, 0.0F, 0.0F, false);
     menu_key(NT_KEY_ARROW_DOWN);
     menu_im_frame2(st, style, 0.0F, 0.0F, false);
-    TEST_ASSERT_EQUAL_UINT8(2U, nt_ui_menu_test_active_depth(s_fx.ctx, MENU_A));
+    TEST_ASSERT_EQUAL_UINT8(2U, st->active_depth);
     nt_input_poll();
     nt_input_clear_all_keys();
 }
@@ -583,7 +583,7 @@ static void menu_activate_tools_leaf(nt_ui_menu_state_t *st, nt_ui_menu_style_t 
     s_act_hit = false;
     menu_key(NT_KEY_ARROW_DOWN);
     menu_im_frame2(st, style, 0.0F, 0.0F, false);
-    TEST_ASSERT_EQUAL_UINT32(s_act_capture_id, nt_ui_menu_test_focus_item_id(s_fx.ctx, MENU_A, 1U));
+    TEST_ASSERT_EQUAL_UINT32(s_act_capture_id, st->focus[1U]);
     menu_key(NT_KEY_ENTER);
     menu_im_frame2(st, style, 0.0F, 0.0F, false);
     TEST_ASSERT_FALSE(s_act_hit);
@@ -592,6 +592,33 @@ static void menu_activate_tools_leaf(nt_ui_menu_state_t *st, nt_ui_menu_style_t 
     menu_im_frame2(st, style, 0.0F, 0.0F, false);
     TEST_ASSERT_TRUE_MESSAGE(s_act_hit, "Enter must activate the currently declared Tools leaf");
     TEST_ASSERT_FALSE(st->open);
+}
+
+static void test_menu_selection_survives_ui_pool_clear(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {0};
+    menu_open_deep_branch(&st, &style);
+    nt_ui_state_clear_all(s_fx.ctx);
+    menu_im_frame(&st, &style, 0.0F, 0.0F);
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_panel_id(MENU_A, 2U)).found, "game-owned navigation survives clearing UI cells");
+    s_act_capture_id = nt_ui_menu_test_item_id(nt_ui_menu_test_item_id(nt_ui_menu_test_item_id(MENU_A, KEY_FILE), KEY_OPEN), KEY_FILE2);
+    s_act_hit = false;
+    menu_key(NT_KEY_ENTER);
+    menu_im_frame(&st, &style, 0.0F, 0.0F);
+    nt_input_poll();
+    nt_input_clear_all_keys();
+    menu_im_frame(&st, &style, 0.0F, 0.0F);
+    TEST_ASSERT_TRUE(s_act_hit);
+}
+
+static void test_menu_zeroed_state_reopens_at_root(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {0};
+    menu_open_deep_branch(&st, &style);
+    st = (nt_ui_menu_state_t){.anchor_x = 120.0F, .anchor_y = 80.0F, .open = true};
+    menu_im_frame2(&st, &style, 0.0F, 0.0F, false);
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_panel_id(MENU_A, 1U)).found, "zeroed state must not inherit a previous object's branch");
+    TEST_ASSERT_TRUE(st.open);
 }
 
 static void test_menu_click_root_parent_switches_branch(void) {
@@ -606,10 +633,10 @@ static void test_menu_click_root_parent_switches_branch(void) {
     menu_im_frame2(&st, &style, cx, cy, true);
     menu_im_frame2_edges(&st, &style, cx, cy, false, true);
     TEST_ASSERT_TRUE_MESSAGE(st.open, "clicking a root parent must NOT dismiss the chain");
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, nt_ui_menu_test_active_depth(s_fx.ctx, MENU_A), "switching parent must discard the old grandchild depth");
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_menu_test_open_path(s_fx.ctx, MENU_A, 1U));
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, st.active_depth, "switching parent must discard the old grandchild depth");
+    TEST_ASSERT_EQUAL_UINT32(0U, st.open_path[1U]);
     menu_im_frame2(&st, &style, cx, cy, false);
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_menu_test_focus_item_id(s_fx.ctx, MENU_A, 2U));
+    TEST_ASSERT_EQUAL_UINT32(0U, st.focus[2U]);
     menu_activate_tools_leaf(&st, &style);
 }
 
@@ -621,14 +648,14 @@ static void test_menu_hover_root_parent_discards_descendants(void) {
     TEST_ASSERT_TRUE(rb.found);
     const float cx = rb.x + (rb.width * 0.5F);
     const float cy = rb.y + (rb.height * 0.5F);
-    for (int f = 0; f < 30 && nt_ui_menu_test_open_path(s_fx.ctx, MENU_A, 0U) != nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS); ++f) {
+    for (int f = 0; f < 30 && st.open_path[0U] != nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS); ++f) {
         menu_im_frame2(&st, &style, cx, cy, false);
     }
-    TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS), nt_ui_menu_test_open_path(s_fx.ctx, MENU_A, 0U));
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, nt_ui_menu_test_active_depth(s_fx.ctx, MENU_A), "hover switch must discard the old grandchild depth");
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_menu_test_open_path(s_fx.ctx, MENU_A, 1U));
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS), st.open_path[0U]);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, st.active_depth, "hover switch must discard the old grandchild depth");
+    TEST_ASSERT_EQUAL_UINT32(0U, st.open_path[1U]);
     menu_im_frame2(&st, &style, cx, cy, false);
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_menu_test_focus_item_id(s_fx.ctx, MENU_A, 2U));
+    TEST_ASSERT_EQUAL_UINT32(0U, st.focus[2U]);
     menu_activate_tools_leaf(&st, &style);
 }
 
@@ -638,25 +665,25 @@ static void test_menu_hover_collapse_reopen_discards_descendants(void) {
     menu_open_deep_branch(&st, &style);
     const nt_ui_bbox_t edit = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_item_id(MENU_A, KEY_EDIT));
     TEST_ASSERT_TRUE(edit.found);
-    for (int f = 0; f < 30 && nt_ui_menu_test_active_depth(s_fx.ctx, MENU_A) != 0U; ++f) {
+    for (int f = 0; f < 30 && st.active_depth != 0U; ++f) {
         menu_im_frame2(&st, &style, edit.x + (edit.width * 0.5F), edit.y + (edit.height * 0.5F), false);
     }
-    TEST_ASSERT_EQUAL_UINT8(0U, nt_ui_menu_test_active_depth(s_fx.ctx, MENU_A));
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, nt_ui_menu_test_open_path(s_fx.ctx, MENU_A, 1U), "collapse must clear the old grandchild selection");
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_menu_test_focus_item_id(s_fx.ctx, MENU_A, 2U));
+    TEST_ASSERT_EQUAL_UINT8(0U, st.active_depth);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, st.open_path[1U], "collapse must clear the old grandchild selection");
+    TEST_ASSERT_EQUAL_UINT32(0U, st.focus[2U]);
 
     const nt_ui_bbox_t file = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_item_id(MENU_A, KEY_FILE));
     TEST_ASSERT_TRUE(file.found);
     menu_im_frame2(&st, &style, file.x + (file.width * 0.5F), file.y + (file.height * 0.5F), false);
     menu_im_frame2(&st, &style, file.x + (file.width * 0.5F), file.y + (file.height * 0.5F), false);
-    TEST_ASSERT_EQUAL_UINT8(1U, nt_ui_menu_test_active_depth(s_fx.ctx, MENU_A));
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_menu_test_open_path(s_fx.ctx, MENU_A, 1U));
+    TEST_ASSERT_EQUAL_UINT8(1U, st.active_depth);
+    TEST_ASSERT_EQUAL_UINT32(0U, st.open_path[1U]);
     const uint32_t open_scope = nt_ui_menu_test_item_id(nt_ui_menu_test_item_id(MENU_A, KEY_FILE), KEY_OPEN);
     TEST_ASSERT_FALSE(nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_item_id(open_scope, KEY_FILE2)).found);
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_menu_test_focus_item_id(s_fx.ctx, MENU_A, 1U));
+    TEST_ASSERT_EQUAL_UINT32(0U, st.focus[1U]);
     menu_key(NT_KEY_ENTER);
     menu_im_frame2(&st, &style, 0.0F, 0.0F, false);
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, nt_ui_menu_test_active_depth(s_fx.ctx, MENU_A), "reopening by mouse must not restore the old child focus");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, st.active_depth, "reopening by mouse must not restore the old child focus");
     TEST_ASSERT_TRUE(st.open);
 }
 
@@ -688,7 +715,7 @@ static void menu_selection_survives_siblings(const uint32_t *before, uint16_t be
         menu_dynamic_frame(&st, &style, before, before_count, parents);
     }
     const uint32_t selected = nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS);
-    TEST_ASSERT_EQUAL_UINT32(selected, nt_ui_menu_test_focus_item_id(s_fx.ctx, MENU_A, 0U));
+    TEST_ASSERT_EQUAL_UINT32(selected, st.focus[0U]);
     if (parents) {
         menu_key(NT_KEY_ARROW_RIGHT);
         menu_dynamic_frame(&st, &style, before, before_count, parents);
@@ -696,11 +723,11 @@ static void menu_selection_survives_siblings(const uint32_t *before, uint16_t be
     nt_input_poll();
     nt_input_clear_all_keys();
     menu_dynamic_frame(&st, &style, after, after_count, parents);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(selected, nt_ui_menu_test_focus_item_id(s_fx.ctx, MENU_A, 0U), "sibling edits must retain the same focused key");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(selected, st.focus[0U], "sibling edits must retain the same focused key");
     s_act_capture_id = parents ? nt_ui_menu_test_item_id(selected, KEY_OPT) : selected;
     s_act_hit = false;
     if (parents) {
-        TEST_ASSERT_EQUAL_UINT8(1U, nt_ui_menu_test_active_depth(s_fx.ctx, MENU_A));
+        TEST_ASSERT_EQUAL_UINT8(1U, st.active_depth);
         TEST_ASSERT_EQUAL_UINT16(1U, s_menu.frame_record_count[1]);
         TEST_ASSERT_EQUAL_UINT32_MESSAGE(s_act_capture_id, s_menu.frame_record[1][0].id, "sibling edits must keep the same branch declared");
     }
@@ -734,14 +761,14 @@ static void test_menu_removed_open_parent_closes_descendants(void) {
     nt_input_poll();
     nt_input_clear_all_keys();
     menu_dynamic_frame(&st, &style, before, 3U, true);
-    TEST_ASSERT_EQUAL_UINT8(1U, nt_ui_menu_test_active_depth(s_fx.ctx, MENU_A));
+    TEST_ASSERT_EQUAL_UINT8(1U, st.active_depth);
 
     const uint32_t after[] = {KEY_FILE, KEY_EDIT};
     menu_dynamic_frame(&st, &style, after, 2U, true);
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, nt_ui_menu_test_active_depth(s_fx.ctx, MENU_A), "removing the parent must close its branch");
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_menu_test_open_path(s_fx.ctx, MENU_A, 0U));
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_menu_test_focus_item_id(s_fx.ctx, MENU_A, 0U));
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_menu_test_focus_item_id(s_fx.ctx, MENU_A, 1U));
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, st.active_depth, "removing the parent must close its branch");
+    TEST_ASSERT_EQUAL_UINT32(0U, st.open_path[0U]);
+    TEST_ASSERT_EQUAL_UINT32(0U, st.focus[0U]);
+    TEST_ASSERT_EQUAL_UINT32(0U, st.focus[1U]);
     TEST_ASSERT_TRUE(st.open);
 }
 
@@ -764,7 +791,7 @@ static void test_menu_removed_focused_key_does_not_activate_replacement(void) {
     menu_dynamic_frame(&st, &style, after, 2U, false);
     TEST_ASSERT_FALSE_MESSAGE(s_act_hit, "removing a focused key must not transfer Enter to its former index");
     TEST_ASSERT_TRUE(st.open);
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_menu_test_focus_item_id(s_fx.ctx, MENU_A, 0U));
+    TEST_ASSERT_EQUAL_UINT32(0U, st.focus[0U]);
 }
 
 static void test_menu_scratch_reused_by_independent_menus(void) {
@@ -795,8 +822,8 @@ static void test_menu_scratch_reused_by_independent_menus(void) {
         const uint32_t parent_id = nt_ui_menu_test_item_id(menu_ids[m], branch_keys[m]);
         const uint32_t child_id = nt_ui_menu_test_item_id(parent_id, KEY_OPT);
         TEST_ASSERT_TRUE(states[m].open);
-        TEST_ASSERT_EQUAL_UINT32(parent_id, nt_ui_menu_test_open_path(s_fx.ctx, menu_ids[m], 0U));
-        TEST_ASSERT_EQUAL_UINT8(1U, nt_ui_menu_test_active_depth(s_fx.ctx, menu_ids[m]));
+        TEST_ASSERT_EQUAL_UINT32(parent_id, states[m].open_path[0]);
+        TEST_ASSERT_EQUAL_UINT8(1U, states[m].active_depth);
         TEST_ASSERT_TRUE_MESSAGE(nt_ui_get_bbox(s_fx.ctx, child_id).found, "shared scratch must preserve each menu's independently open keyed branch");
     }
 }
@@ -831,7 +858,13 @@ static void test_menu_depth_cap_asserts(void) {
     /* The nav-open path caps at the deepest level (no OOB), so it cannot itself drive submenu_begin past
      * the cap. Force the open chain to the last valid level so the deepest submenu_begin ENTERS its body and
      * tries to push child == MAX_DEPTH — the decl-time backstop NT_ASSERT must still fire (different path). */
-    nt_ui_menu_test_force_open_to(s_fx.ctx, MENU_A, KEY_FILE, (uint8_t)(NT_UI_MENU_MAX_DEPTH - 1U));
+    uint32_t scope = MENU_A;
+    for (uint8_t d = 0U; d < NT_UI_MENU_MAX_DEPTH; ++d) {
+        scope = nt_ui_menu_test_item_id(scope, KEY_FILE);
+        st.open_path[d] = scope;
+        st.focus[d] = scope;
+    }
+    st.active_depth = NT_UI_MENU_MAX_DEPTH - 1U;
     menu_key(NT_KEY_ARROW_DOWN); /* a non-open key so the frame just declares the forced-open chain */
 
     bool tripped = false;
@@ -854,10 +887,9 @@ static void test_menu_depth_cap_asserts(void) {
 static void menu_im_self_ref_capped(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style) {
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
     nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, st, style);
-    /* Open only while the next push stays within the cap (guard < MAX_DEPTH-1): submenu_begin asserts at
-     * the cap, so we stop one short and let the kbd-nav open path try (and be a no-op) at the deepest level. */
+    /* Declare the parent at the deepest level too, so Right/Enter exercises the nav guard. */
     int guard = 0;
-    while (guard < (NT_UI_MENU_MAX_DEPTH - 1) && nt_ui_menu_submenu_begin(&s_menu, KEY_FILE, "loop")) {
+    while (nt_ui_menu_submenu_begin(&s_menu, KEY_FILE, "loop")) {
         ++guard;
     }
     for (int i = 0; i < guard; ++i) {
@@ -871,16 +903,19 @@ static void test_menu_kbd_open_at_depth_cap_is_noop(void) {
     nt_ui_menu_state_t st = {0};
     menu_im_open(&st, 120.0F, 80.0F);
 
+    menu_key(NT_KEY_ARROW_DOWN);
+    menu_im_self_ref_capped(&st, &style);
+
     /* Drive enough Right presses to open every allowable level AND keep pressing at the deepest one. Each
      * frame opens one deeper level (1-frame latency); extra presses past the cap must be no-ops. */
     for (int i = 0; i < NT_UI_MENU_MAX_DEPTH + 6; ++i) {
         menu_key(NT_KEY_ARROW_RIGHT);
         menu_im_self_ref_capped(&st, &style);
-        TEST_ASSERT_TRUE_MESSAGE(nt_ui_menu_test_active_depth(s_fx.ctx, MENU_A) <= NT_UI_MENU_MAX_DEPTH - 1, "kbd Right/Enter open must never push active_depth past the depth cap (UBSan OOB)");
+        TEST_ASSERT_TRUE_MESSAGE(st.active_depth <= NT_UI_MENU_MAX_DEPTH - 1, "kbd Right/Enter open must never push active_depth past the depth cap (UBSan OOB)");
     }
     /* At the deepest allowable level Enter on a parent stays a no-op (no crash, depth held). The chain is
      * still open (no dismiss), so the menu survived the cap drive without tripping the decl-time assert. */
-    TEST_ASSERT_TRUE_MESSAGE(nt_ui_menu_test_active_depth(s_fx.ctx, MENU_A) <= NT_UI_MENU_MAX_DEPTH - 1, "active_depth held within the cap after the open drive");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_UI_MENU_MAX_DEPTH - 1U, st.active_depth, "navigation must reach the cap before testing its guard");
     TEST_ASSERT_TRUE_MESSAGE(st.open, "the menu chain stays open across the cap drive (no spurious dismiss)");
 }
 
@@ -1121,7 +1156,7 @@ static void test_menu_item_id_distinct_siblings_and_scopes(void) {
 
 /* ---- Frame-record nav — across two frames build a 3-item level, press Down, and assert the frame-record
  *      introspection probe maps focus to the recorded item id (focus committed in menu_end is observable
- *      the following frame — a 1-frame effect). Drives nt_ui_menu_test_focus_item_id(menu_id, depth). ---- */
+ *      the following frame — a 1-frame effect). Checks retained focus directly. ---- */
 static void test_menu_record_nav_focuses_recorded_item(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_state_t st = {0};
@@ -1142,7 +1177,7 @@ static void test_menu_record_nav_focuses_recorded_item(void) {
     nt_input_clear_all_keys();
     menu_im_frame(&st, &style, 0.0F, 0.0F);
 
-    const uint32_t focus_id = nt_ui_menu_test_focus_item_id(s_fx.ctx, MENU_A, 0U);
+    const uint32_t focus_id = st.focus[0U];
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(nt_ui_menu_test_item_id(MENU_A, KEY_FILE), focus_id, "Down must focus the first recorded item (this-frame record, 1-frame effect)");
 }
 
@@ -1545,7 +1580,8 @@ static void test_menu_submenu_begin_ex_icon_disabled(void) {
 
     /* Force the open chain to point at the parent (depth-0 item 0), then redeclare it DISABLED: it must not
      * fly out (the child panel never lays out) even though open_path targets it. */
-    nt_ui_menu_test_force_open_to(s_fx.ctx, MENU_A, KEY_OPEN, 0U);
+    st.open_path[0] = nt_ui_menu_test_item_id(MENU_A, KEY_OPEN);
+    st.active_depth = 1U;
     menu_im_frame_submenu_ex(&st, &style, false);
     menu_im_frame_submenu_ex(&st, &style, false);
     const nt_ui_bbox_t child_panel = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_panel_id(MENU_A, 1U));
@@ -1636,7 +1672,7 @@ static void test_menu_hover_opens_submenu(void) {
 
     /* F1: lay out the root so the File row bbox exists next frame. */
     menu_im_hover_frame(&st, &style, 0.0F, 0.0F);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, nt_ui_menu_test_open_path(s_fx.ctx, MENU_A, 0U), "nothing open before any hover");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, st.open_path[0U], "nothing open before any hover");
 
     /* F2: hover the File parent row center -> records the hover; menu_end commits open_path (1-frame lag). */
     float fx = 0.0F;
@@ -1646,7 +1682,7 @@ static void test_menu_hover_opens_submenu(void) {
 
     /* F3: settle; open_path[0] now identifies File, whose submenu flies out. */
     menu_im_hover_frame(&st, &style, fx, fy);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(file_row, nt_ui_menu_test_open_path(s_fx.ctx, MENU_A, 0U), "hovering the parent row must open its keyed submenu");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(file_row, st.open_path[0U], "hovering the parent row must open its keyed submenu");
     TEST_ASSERT_TRUE(st.open);
 }
 
@@ -1668,7 +1704,7 @@ static void test_menu_hover_sibling_leaf_collapses_submenu(void) {
     menu_row_center(file_row, &fx, &fy);
     menu_im_hover_frame(&st, &style, fx, fy);
     menu_im_hover_frame(&st, &style, fx, fy);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(file_row, nt_ui_menu_test_open_path(s_fx.ctx, MENU_A, 0U), "File submenu open before the sibling hover");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(file_row, st.open_path[0U], "File submenu open before the sibling hover");
 
     /* Hover the Edit sibling leaf far from the open child corridor for enough frames that the dwell timer
      * crosses AIM_FALLBACK and the corridor releases -> the open child collapses. */
@@ -1678,7 +1714,7 @@ static void test_menu_hover_sibling_leaf_collapses_submenu(void) {
     bool collapsed = false;
     for (int f = 0; f < 30 && !collapsed; ++f) {
         menu_im_hover_frame(&st, &style, ex, ey);
-        collapsed = (nt_ui_menu_test_open_path(s_fx.ctx, MENU_A, 0U) == 0U);
+        collapsed = (st.open_path[0U] == 0U);
     }
     TEST_ASSERT_TRUE_MESSAGE(collapsed, "hovering a sibling leaf (corridor released) must collapse the open submenu");
 }
@@ -1754,6 +1790,8 @@ int main(void) {
     RUN_TEST(test_menu_nested_dismiss_esc_deepest_first);
     RUN_TEST(test_menu_switch_root_branch_while_submenu_open);
     RUN_TEST(test_menu_root_row_hittable_while_submenu_open);
+    RUN_TEST(test_menu_selection_survives_ui_pool_clear);
+    RUN_TEST(test_menu_zeroed_state_reopens_at_root);
     RUN_TEST(test_menu_click_root_parent_switches_branch);
     RUN_TEST(test_menu_hover_root_parent_discards_descendants);
     RUN_TEST(test_menu_hover_collapse_reopen_discards_descendants);

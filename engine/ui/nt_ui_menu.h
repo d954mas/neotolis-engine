@@ -42,7 +42,6 @@ extern const nt_ui_widget_def_t NT_UI_MENU_DEF;
  * per-level slice (built as rows declare). Separators are never recorded (skipped by nav). */
 typedef struct {
     uint32_t id;     /* the row's derived scope-stack id */
-    uint16_t idx;    /* the row's running layout index at its level */
     uint8_t enabled; /* 0 = disabled: nav skips it */
     uint8_t has_sub; /* 1 = parent (submenu) row */
 } nt_ui_menu_record_t;
@@ -101,7 +100,9 @@ typedef struct {
  * multiple of the 8-byte ref alignment; express portably as 16 + the (ptr+4) cell rounded up to 8. */
 _Static_assert(sizeof(nt_ui_menu_item_opts_t) == 16 + (((sizeof(void *) + 4) + 7) / 8 * 8), "nt_ui_menu_item_opts_t stable ABI (16 ref + ptr + 3 bool + pad, 8-aligned)");
 
-/* Live menu state the game owns and persists across frames. `open` is set by an open helper (or the
+/* One persistent game-owned state per logical menu and UI context. Zero the whole object to reset it.
+ * nt_ui_state_clear_all clears UI cells, not this navigation state.
+ * Live menu state the game owns and persists across frames. `open` is set by an open helper (or the
  * game directly); the menu clears it on dismiss. Setting open false then true directly reopens cleanly
  * (the menu resets its runtime chain on the closed frame). anchor_x/y is the screen-space open point
  * (cursor at open). Activation is reported INLINE by the row calls (if (menu_item(...)) act();) for BOTH
@@ -110,12 +111,20 @@ typedef struct {
     float anchor_x, anchor_y; /* open point (UI space) — root menu top-left attaches here */
     bool open;                /* game-owned open flag; menu clears on dismiss */
     uint8_t _pad[3];
+    /* Engine-maintained navigation; zero-init together with open/anchor. */
+    uint32_t focus[NT_UI_MENU_MAX_DEPTH];
+    uint32_t open_path[NT_UI_MENU_MAX_DEPTH];
+    uint32_t opened_frame;
+    uint32_t kbd_activated;
+    uint8_t active_depth;
+    uint8_t focus_first_depth; /* keyboard-open child awaiting its first enabled row; 0 = none */
+    uint8_t _nav_pad[2];
 } nt_ui_menu_state_t;
-_Static_assert(sizeof(nt_ui_menu_state_t) == 12, "nt_ui_menu_state_t stable ABI (2 float + 1 bool + 3 pad)");
+_Static_assert(sizeof(nt_ui_menu_state_t) == 24U + (8U * NT_UI_MENU_MAX_DEPTH), "menu state contains anchor, flags and two ID paths");
 
 /* Game-owned per-frame menu scratch (module-owned storage so the core ctx pays zero bytes for a non-menu
- * game and nt_ui_menu.o dead-strips). Records are rebuilt each begin; selection lives in the UI state
- * pool, so scratch can be reused for different menus sequentially. `ui` is stashed at
+ * game and nt_ui_menu.o dead-strips). Records are rebuilt each begin; selection lives in nt_ui_menu_state_t,
+ * so scratch can be reused for different menus sequentially. `ui` is stashed at
  * nt_ui_menu_begin for the begin/end span and cleared (NULL) at nt_ui_menu_end — no cross-frame borrowed
  * handle. Fully zero-init-correct (only frame_record_count==0 matters at rest). See the spec's
  * "Immediate menu + combo" for the model. */
@@ -132,13 +141,13 @@ typedef struct nt_ui_menu_ctx {
         const void *style; /* nt_ui_menu_style_t* (void to keep this struct's deps minimal) */
         nt_ui_menu_state_t *st;
         uint32_t menu_id;
-        uint32_t scope_id[NT_UI_MENU_MAX_DEPTH];    /* mix base per level; level 0 = menu_id */
-        uint16_t item_idx[NT_UI_MENU_MAX_DEPTH];    /* per-level running layout index (separators advance it) */
-        uint32_t chosen;                            /* leaf id activated this frame (0 = none) */
-        int16_t pending_open[NT_UI_MENU_MAX_DEPTH]; /* running idx of a row whose submenu a click opens this frame (-1 none) */
-        int16_t hover_parent[NT_UI_MENU_MAX_DEPTH]; /* running idx of a hovered parent at this depth (-1 none) */
-        uint8_t hover_leaf[NT_UI_MENU_MAX_DEPTH];   /* 1 = an enabled non-parent row is hovered at this depth */
-        uint8_t level_side[NT_UI_MENU_MAX_DEPTH];   /* each level's resolved popup side (mouse-aim corridor near-edge pick) */
+        uint32_t scope_id[NT_UI_MENU_MAX_DEPTH];     /* mix base per level; level 0 = menu_id */
+        uint16_t item_idx[NT_UI_MENU_MAX_DEPTH];     /* per-level running layout index (separators advance it) */
+        uint32_t chosen;                             /* leaf id activated this frame (0 = none) */
+        uint32_t pending_open[NT_UI_MENU_MAX_DEPTH]; /* clicked parent ID; 0 = none */
+        uint32_t hover_parent[NT_UI_MENU_MAX_DEPTH]; /* hovered parent ID; 0 = none */
+        uint8_t hover_leaf[NT_UI_MENU_MAX_DEPTH];    /* 1 = an enabled non-parent row is hovered at this depth */
+        uint8_t level_side[NT_UI_MENU_MAX_DEPTH];    /* each level's resolved popup side (mouse-aim corridor near-edge pick) */
         uint8_t fill_layer;
         uint8_t label_layer;
         uint8_t depth;
@@ -160,11 +169,11 @@ typedef struct nt_ui_menu_ctx {
 } nt_ui_menu_ctx_t;
 /* ABI guard: 3 pointers (ui + pending_menu.style/.st) + a pointer-independent remainder dominated by
  * frame_record[8][64] (4096) + frame_record_count (16). Express the total via sizeof(void*) so it holds on
- * both 64-bit native (4256) and 32-bit wasm. Tied to NT_UI_MENU_MAX_DEPTH/ITEMS_PER_LEVEL at default caps. */
+ * both 64-bit native (4288) and 32-bit wasm. Tied to NT_UI_MENU_MAX_DEPTH/ITEMS_PER_LEVEL at default caps. */
 /* The struct size scales with the build-overridable caps (frame_record[DEPTH][ITEMS]), so the fixed-layout ABI
  * check only applies at the default caps — it still catches accidental field reorder/padding in the common config. */
 #if NT_UI_MENU_MAX_DEPTH == 8 && NT_UI_MENU_MAX_ITEMS_PER_LEVEL == 64
-_Static_assert(sizeof(nt_ui_menu_ctx_t) == (3U * sizeof(void *)) + 4232U, "nt_ui_menu_ctx_t stable ABI (3 ptr + frame_record-dominated remainder at default caps)");
+_Static_assert(sizeof(nt_ui_menu_ctx_t) == (3U * sizeof(void *)) + 4264U, "nt_ui_menu_ctx_t stable ABI (3 ptr + frame_record-dominated remainder at default caps)");
 #endif
 
 /* Init-in-place: zero the scratch (mirrors nt_ui_create_context / nt_comp_storage_init). Takes NO ctx and
@@ -258,16 +267,6 @@ uint32_t nt_ui_menu_test_check_id(uint32_t menu_id, uint8_t depth, uint32_t item
 /* Scope-stack id derivation probe: mix(scope_id, key) — drives the sibling/scope distinctness test. The
  * id is position-stable (no running idx folded in); the test asserts dynamic sibling lists keep ids. */
 uint32_t nt_ui_menu_test_item_id(uint32_t scope_id, uint32_t key);
-/* Retained focused row ID; 0 = no focus, independently of the current frame record. */
-uint32_t nt_ui_menu_test_focus_item_id(const nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth);
-/* Open-chain probe: the retained parent's scoped row ID; 0 = no open child. */
-uint32_t nt_ui_menu_test_open_path(const nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth);
-/* Deepest-open-level probe (rt->active_depth): the depth-cap regression asserts it never exceeds
- * NT_UI_MENU_MAX_DEPTH-1 even when Right/Enter-open is driven at the deepest allowable level. */
-uint8_t nt_ui_menu_test_active_depth(const nt_ui_context_t *ctx, uint32_t menu_id);
-/* Force a chain of the same sibling key open `depth` levels deep (clamped to the cap). The depth-cap DEATH test uses this to
- * drive submenu_begin's decl-time backstop assert directly (the nav-open path no-ops at the cap). */
-void nt_ui_menu_test_force_open_to(nt_ui_context_t *ctx, uint32_t menu_id, uint32_t key, uint8_t depth);
 #endif
 
 #endif /* NT_UI_MENU_H */
