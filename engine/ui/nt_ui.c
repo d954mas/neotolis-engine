@@ -2794,21 +2794,18 @@ nt_ui_interaction_t nt_ui_step_interaction(nt_ui_context_t *ctx, uint32_t id) { 
 
 // #region nt_ui_events (consolidated step + cfg-gated gesture)
 
-/* Gesture cell for nt_ui_events, owned by this TU (tag 'evgs'). hold_progress is derived from
- * press_clock/clock, so it needs NO stored field. */
+/* Gesture cell for nt_ui_events, owned by this TU (tag 'evgs'). Both gestures time the latest press. */
 #define NT_UI_EVENTS_GESTURE_SALT 0x65C0E5A7U
 typedef struct {
-    float last_press_time; /* gesture-clock time of the previous press (valid only if has_prev) */
+    float press_age; /* elapsed dt since the latest press; reset before timing its hold */
     float origin_x, origin_y;
-    float clock;       /* monotonic accumulator fed by ctx->frame_dt */
-    float press_clock; /* clock value at the live press (for long-press + hold_progress timing) */
     /* Latched gesture outputs so nt_ui_query_events can surface what the mutating step computed this
      * frame (game-reads-gestures-via-query_events contract). Recomputed/cleared by the next step. */
     float latched_hold_progress;
     uint32_t latched_frame;         /* ctx->frame_counter when the latch was last written; query reads it only on the same frame (no stale leak) */
     uint8_t latched_double_clicked; /* 1 if the mutating step fired a double-click this frame */
     uint8_t latched_long_pressed;   /* 1 if the mutating step fired a long-press this frame */
-    uint8_t has_prev;               /* 1 once a first press has been seen (clock==0 is a valid time) */
+    uint8_t has_prev;               /* 1 while the latest press can pair with the next press */
     uint8_t press_live;             /* 1 while a press is held without a drag-cancel or release */
     uint8_t long_fired;             /* 1 once long-press fired for the current hold (one-shot) */
     uint8_t _pad[3];
@@ -2838,7 +2835,7 @@ static nt_ui_events_t events_from_interaction(const nt_ui_interaction_t *in) {
 
 static inline bool events_want_gesture(const nt_ui_events_cfg_t *cfg) { return cfg != NULL && (cfg->double_click || cfg->long_press_secs > 0.0F); }
 
-/* The mutating gesture step: advance the cell clock + dbl/long machine, fill the gesture fields.
+/* The mutating gesture step: advance the press age + dbl/long machine, fill the gesture fields.
  * `e` already carries the base edges. Double-click + one-shot long-press machine. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void events_step_gesture(nt_ui_context_t *ctx, uint32_t id, const nt_ui_events_cfg_t *cfg, bool pressed_now, bool released_now, nt_ui_events_t *e) {
@@ -2854,7 +2851,7 @@ static void events_step_gesture(nt_ui_context_t *ctx, uint32_t id, const nt_ui_e
         g->has_prev = 0U;
         g->press_live = 0U;
     }
-    g->clock += ctx->frame_dt; /* monotonic; dt may be 0 in headless tests (caller drives time via dt) */
+    g->press_age += ctx->frame_dt;
 
     /* Clear last frame's latch before recomputing — query_events reads these back this frame. */
     g->latched_double_clicked = 0U;
@@ -2865,17 +2862,16 @@ static void events_step_gesture(nt_ui_context_t *ctx, uint32_t id, const nt_ui_e
         const float dx = pos_x - g->origin_x;
         const float dy = pos_y - g->origin_y;
         const bool in_radius = (dx * dx + dy * dy) <= (radius * radius);
-        const bool in_window = (g->has_prev != 0U) && ((g->clock - g->last_press_time) <= dbl_window);
+        const bool in_window = (g->has_prev != 0U) && (g->press_age <= dbl_window);
         if (cfg->double_click && in_window && in_radius) {
             e->double_clicked = true;
             g->has_prev = 0U; /* consume so a triple-press isn't two double-clicks */
         } else {
-            g->last_press_time = g->clock;
             g->has_prev = 1U;
         }
         g->origin_x = pos_x;
         g->origin_y = pos_y;
-        g->press_clock = g->clock;
+        g->press_age = 0.0F;
         g->press_live = 1U;
         g->long_fired = 0U;
     }
@@ -2886,7 +2882,7 @@ static void events_step_gesture(nt_ui_context_t *ctx, uint32_t id, const nt_ui_e
     if (g->press_live != 0U && e->pressed && !e->held) {
         g->press_live = 0U; /* dragged outside the hitbox -> reset long-press candidate + hold_progress */
     }
-    if (e->held && g->press_live != 0U && long_press_secs > 0.0F && g->long_fired == 0U && (g->clock - g->press_clock) >= long_press_secs) {
+    if (e->held && g->press_live != 0U && long_press_secs > 0.0F && g->long_fired == 0U && g->press_age >= long_press_secs) {
         e->long_pressed = true;
         g->long_fired = 1U; /* one-shot per hold */
     }
@@ -2894,7 +2890,7 @@ static void events_step_gesture(nt_ui_context_t *ctx, uint32_t id, const nt_ui_e
     /* Linear hold_progress: only while the press candidate is live AND over the widget. press_live==0
      * (left hitbox / release) => 0. Clamp so a malformed long_press_secs can't escape [0,1]. */
     if (g->press_live != 0U && e->held && long_press_secs > 0.0F) {
-        e->hold_progress = nt_ui_clampf((g->clock - g->press_clock) / long_press_secs, 0.0F, 1.0F);
+        e->hold_progress = nt_ui_clampf(g->press_age / long_press_secs, 0.0F, 1.0F);
     }
 
     if (released_now) {

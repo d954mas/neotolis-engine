@@ -486,6 +486,8 @@ hold candidate. Re-enabling gestures requires a new press to start a hold, even
 if base capture survived the gap. Continuous processing advances gesture time
 only by `dt`; `dt==0` pauses time without cancelling a candidate. A processing
 gap cancels candidates even at `dt==0`.
+Both gestures measure elapsed `dt` since the latest press, reset on each new
+press, so the length of the UI session does not reduce a new gesture's timer precision.
 `nt_ui_query_events` is the idempotent read-side mirror (advances nothing).
 `hold_progress` is the hold-to-confirm feedback signal and feeds the radial phase.
 
