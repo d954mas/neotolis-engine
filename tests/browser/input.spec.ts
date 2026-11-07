@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 type InputSnapshot = {
+  dpr: number; // framebuffer pixels per CSS pixel
   keys: number[][]; // [down, pressed, released], indexed by nt_key_t
   pointers: { id: number; active: number; down: number; pressed: number; released: number; x: number; y: number; wheel: number }[];
   chars: number[];
@@ -189,7 +190,8 @@ test('blur: the next poll only releases; keys and UTF-32 chars after refocus fol
   expect(errors).toEqual([]);
 });
 
-test('blur: a new touch before poll takes the released slot and follows later moves', async ({ page, context }) => {
+test('blur: a new touch before poll takes the released slot and follows later moves', async ({ page, context, browserName }) => {
+  test.skip(browserName !== 'chromium', 'genuine touch needs CDP');
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/index.html');
@@ -200,8 +202,10 @@ test('blur: a new touch before poll takes the released slot and follows later mo
   const newTouch = { id: 22, x: 350, y: 300, force: 0.5 };
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [oldTouch] });
   await frame();
-  const held = await page.evaluate(() => window.__nt!.input_poll().pointers[1]);
-  expect(held).toMatchObject({ active: 1, down: 1, x: 120, y: 240 });
+  const snap = await page.evaluate(() => window.__nt!.input_poll());
+  const k = snap.dpr;
+  const held = snap.pointers[1];
+  expect(held).toMatchObject({ active: 1, down: 1, x: 120 * k, y: 240 * k });
   await page.evaluate((oldId) => {
     const canvas = document.querySelector('canvas')!;
     // Capture runs before the engine's genuine pointerdown listener; the final listener polls after it.
@@ -216,14 +220,14 @@ test('blur: a new touch before poll takes the released slot and follows later mo
   }, held.id);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [oldTouch, newTouch] });
   const [current, next] = await page.evaluate(() => window.__blurTouch!);
-  expect(current.pointers[1]).toMatchObject({ id: held.id, active: 1, down: 0, released: 1, x: 120, y: 240 });
+  expect(current.pointers[1]).toMatchObject({ id: held.id, active: 1, down: 0, released: 1, x: 120 * k, y: 240 * k });
   expect(current.pointers[2].active).toBe(0);
-  expect(next.pointers[1]).toMatchObject({ active: 1, down: 1, pressed: 1, released: 0, x: 350, y: 300 });
+  expect(next.pointers[1]).toMatchObject({ active: 1, down: 1, pressed: 1, released: 0, x: 350 * k, y: 300 * k });
   const newId = next.pointers[1].id;
   expect(newId).not.toBe(held.id);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...oldTouch, x: 130 }, { ...newTouch, x: 390, y: 320 }] });
   await frame();
   const moved = await page.evaluate(() => window.__nt!.input_poll());
-  expect(moved.pointers.slice(1).filter((p) => p.active)).toMatchObject([{ id: newId, down: 1, x: 390, y: 320 }]);
+  expect(moved.pointers.slice(1).filter((p) => p.active)).toMatchObject([{ id: newId, down: 1, x: 390 * k, y: 320 * k }]);
   expect(errors).toEqual([]);
 });

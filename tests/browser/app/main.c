@@ -840,7 +840,7 @@ EMSCRIPTEN_KEEPALIVE const char *nt_test_input_poll(void) {
     /* Worst case per entry: key "[1,1,1]," 8, pointer object 160, codepoint 11; the snprintf sums never wrap. */
     _Static_assert((NT_KEY_COUNT * 8) + (NT_INPUT_MAX_POINTERS * 160) + (NT_INPUT_CHAR_RING * 11) + 64 <= sizeof(snapshot), "input_poll snapshot");
     nt_input_poll();
-    size_t len = (size_t)snprintf(snapshot, sizeof(snapshot), "{\"keys\":[");
+    size_t len = (size_t)snprintf(snapshot, sizeof(snapshot), "{\"dpr\":%g,\"keys\":[", (double)g_nt_window.dpr);
     for (int i = 0; i < NT_KEY_COUNT; i++) {
         const nt_key_t key = (nt_key_t)i;
         len += (size_t)snprintf(snapshot + len, sizeof(snapshot) - len, "%s[%d,%d,%d]", i ? "," : "", nt_input_key_is_down(key), nt_input_key_is_pressed(key), nt_input_key_is_released(key));
