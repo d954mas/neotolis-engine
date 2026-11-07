@@ -9,7 +9,7 @@
 #include "atlas/nt_atlas.h" /* nt_atlas_region_ref_t */
 #include "clay.h"
 #include "resource/nt_resource.h"
-#include "ui/nt_ui.h" /* nt_ui_element_data_t, nt_ui_events_t */
+#include "ui/nt_ui.h" /* nt_ui_element_data_t, nt_ui_interaction_t */
 
 typedef struct nt_ui_context nt_ui_context_t;
 
@@ -40,13 +40,8 @@ _Static_assert(sizeof(nt_ui_button_style_t) == 176, "nt_ui_button_style_t stable
  * Engine OWNS .id/.image/.backgroundColor/.userData on the Clay decl.
  * style->idle.bg.atlas.id == 0 = text-only button (no background IMAGE emitted);
  * other states inherit idle when their bg.atlas.id == 0.
- * long_press_secs is a BEHAVIORAL arg (NOT in the visual style), <= 0 disables the hold thresholds.
- * Returns this frame's events (zero when disabled); nt_ui_button_end returns the same clicked. */
-nt_ui_events_t nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled,
-                                  float long_press_secs);
+ * Returns this frame's interaction (zero when disabled); nt_ui_button_end returns the same clicked. */
+nt_ui_interaction_t nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled);
 bool nt_ui_button_end(nt_ui_context_t *ctx);
-
-/* Content-less button (slice9 bg only). Returns clicked. */
-bool nt_ui_button(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled);
 
 #endif /* NT_UI_BUTTON_H */

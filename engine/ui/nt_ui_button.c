@@ -30,8 +30,7 @@ static void assert_state_valid(const nt_ui_btn_state_t *st, const char *which) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_ui_events_t nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled,
-                                  float long_press_secs) {
+nt_ui_interaction_t nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled) {
     NT_ASSERT(ctx != NULL && "nt_ui_button_begin: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_button_begin: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(style != NULL && "nt_ui_button_begin: style must be non-NULL");
@@ -57,13 +56,12 @@ nt_ui_events_t nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data
     }
     // #region state-pick + ease
     /* Disabled skips hit-test but still records a zone so the overlay can show why. The ONE mutating
-     * interaction step is nt_ui_events; its result goes back to the game. No second events/step call
-     * on this id: one mutating step per id (the canonical-step contract). */
-    nt_ui_events_t in;
+     * interaction step is this one; its result goes back to the game. No second step on this id. */
+    nt_ui_interaction_t in;
     if (enabled) {
-        in = nt_ui_events_padded(ctx, id, long_press_secs, style->hit_padding_lrtb);
+        in = nt_ui_step_interaction_padded(ctx, id, style->hit_padding_lrtb);
     } else {
-        in = (nt_ui_events_t){0};
+        in = (nt_ui_interaction_t){0};
         /* Inert occluder: still block the pointer so a disabled overlay can't leak clicks through. */
         nt_ui_block_pointer(ctx, id, style->hit_padding_lrtb);
         nt_ui_debug_record_disabled_zone(ctx, id, style->hit_padding_lrtb);
@@ -162,9 +160,4 @@ bool nt_ui_button_end(nt_ui_context_t *ctx) {
     ctx->pending_button.active = false;
     ctx->pending_button.clicked = false;
     return clicked;
-}
-
-bool nt_ui_button(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled) {
-    (void)nt_ui_button_begin(ctx, data, id, style, decl, enabled, 0.0F);
-    return nt_ui_button_end(ctx);
 }

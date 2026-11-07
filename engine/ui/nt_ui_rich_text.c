@@ -2201,8 +2201,8 @@ static void rich_declare_fixed_block(nt_ui_rich_state_t *st, uint32_t id, const 
 // #endregion
 
 // #region LINK
-/* Per-rich-block retained press-target cell. Links have NO Clay element, so the capture-cell
- * mechanism (nt_ui_events) cannot track them; this keyed-by-block-id cell persists the link the
+/* Per-rich-block retained press-target cell. Links have NO Clay element, so the capture
+ * mechanism cannot track them; this keyed-by-block-id cell persists the link the
  * press STARTED on across frames so a click requires press+release on the SAME link. */
 #define NT_UI_RICH_LINK_TAG NT_UI_STATE_TAG('r', 'l', 'n', 'k')
 typedef struct {

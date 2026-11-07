@@ -181,6 +181,24 @@ typedef struct {
 #define NT_UI_COMBO_DUP_KEY_WINDOW 64
 #endif
 
+/* Multitouch (α-semantics: single capture per widget). step/query iterate all
+ * frame_pointers[0..count) and resolve the pointer that "owns" each widget:
+ *   - if a pidx is already holding the id, it stays the owner
+ *   - else the first pressed_now pointer over the widget captures it
+ *   - additional fingers landing on a captured widget are silently ignored
+ *   - a pointer bound to one widget is invisible to all other widgets
+ * Aggregated interaction_t.hovered = any pointer over; pressed/released/clicked
+ * track the single owner pidx. interaction_t.pointer_id holds the OS id of the
+ * owning (or first hovering) pointer. */
+typedef struct {
+    uint32_t active_id; /* widget this pointer captured; 0 = none */
+    float press_pos[2]; /* UI-space press origin */
+    float pos[2];       /* current UI-space pos; drag = pos - press_pos */
+    float hold_secs;    /* dt accumulated since the press */
+    float hold_prev_secs;
+    bool hold_live; /* false once the pointer left the hitbox; only a new press restarts the hold */
+} nt_ui_capture_t;
+
 /* App-wide gesture defaults. Per-ctx, settable via nt_ui_set_gesture_constants. Touch-friendly baseline
  * (looser than ImGui's mouse 6px/0.3s) since the engine targets mobile/WASM; mouse-only apps can tighten. */
 #ifndef NT_UI_GESTURE_DBL_WINDOW_SECS
@@ -407,7 +425,7 @@ struct nt_ui_context {
      * inside ui_hit_test instead of silently raycasting through a stale frame's camera. */
     bool view_proj_set;
     float element_depth_bias_ndc;
-    /* App-wide gesture constants (nt_ui_events). Set in create_context to the #define defaults,
+    /* App-wide gesture constants. Set in create_context to the #define defaults,
      * overridable via nt_ui_set_gesture_constants. Grouped with the float block to avoid padding. */
     float gesture_dbl_window_secs;
     float gesture_move_radius_px;

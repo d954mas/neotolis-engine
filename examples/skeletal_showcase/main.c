@@ -1766,7 +1766,7 @@ static bool text_button(uint32_t id, const char *text, bool active) {
     nt_ui_button_style_t style = s_button_style;
     const uint32_t color = active ? NT_RGBA8(100, 170, 230, 255) : NT_RGBA8(215, 220, 230, 255);
     bool clicked = false;
-    nt_ui_button_begin(s_ui, NT_UI_DATA_LAYER(3), id, &style, &decl, true, 0.0F);
+    nt_ui_button_begin(s_ui, NT_UI_DATA_LAYER(3), id, &style, &decl, true);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, &(nt_ui_label_style_t){.font_id = 0U, .font_size = 14.0F, .color = color});
     clicked = nt_ui_button_end(s_ui);
     return clicked;
@@ -1778,7 +1778,7 @@ static bool text_button_fixed(uint32_t id, const char *text, bool active, float 
     };
     nt_ui_button_style_t style = s_button_style;
     const uint32_t color = active ? NT_RGBA8(100, 170, 230, 255) : NT_RGBA8(215, 220, 230, 255);
-    nt_ui_button_begin(s_ui, NT_UI_DATA_LAYER(3), id, &style, &decl, true, 0.0F);
+    nt_ui_button_begin(s_ui, NT_UI_DATA_LAYER(3), id, &style, &decl, true);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, &(nt_ui_label_style_t){.font_id = 0U, .font_size = 14.0F, .color = color});
     return nt_ui_button_end(s_ui);
 }

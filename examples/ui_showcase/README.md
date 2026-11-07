@@ -49,8 +49,8 @@ lighten and writes the index on click).
 10. **Modals** - confirm modal + nested depth-2 modal + a live transition panel.
 11. **Input** - plain / numeric-filtered / password-masked / Cyrillic text fields
     (`nt_ui_input_text`); see the **Input controls** table below.
-12. **Events** - a hold-to-confirm button (`long_press_secs` of `nt_ui_button_begin`) whose
-    `hold_progress` drives a fill bar and confirms on `long_pressed`, plus a
+12. **Events** - a hold-to-confirm button (the result of `nt_ui_button_begin`) whose
+    `nt_ui_hold_progress` drives a fill bar and confirms on `nt_ui_hold_crossed`, plus a
     double-click target with a readout; see the **Interaction-events controls** below.
 13. **Radial** - SDF radial feedback (`nt_ui_radial` + `nt_ui_radial_image`): a
     looping **cooldown** wedge, a **hold-to-confirm** wedge driven by the events
@@ -175,7 +175,7 @@ These tabs wire the interaction events + app-widgets. All widget state is
 
 | Input | Action |
 |-------|--------|
-| **Events** — press and HOLD the button | the fill bar ramps 0→1 over ~1.5s (`hold_progress`) and confirms at the top (`long_pressed`) |
+| **Events** — press and HOLD the button | the fill bar ramps 0→1 over ~1.5s (`nt_ui_hold_progress`) and confirms at the top (`long_pressed`) |
 | **Events** — drag off the button mid-hold | resets the fill (no confirm) until a new press |
 | **Events** — double-click the second button | increments the double-click readout |
 | **Dropdown** — click a trigger | toggles the list open; click a row to select (the game writes its own index) |

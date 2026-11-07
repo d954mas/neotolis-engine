@@ -214,12 +214,12 @@ void nt_ui_menu_end(nt_ui_menu_ctx_t *menu);
 
 /* Open trigger: arms the menu at the cursor on a right-click OR a caller-supplied long-press this frame.
  * Does ONLY idempotent reads — NO mutating interaction step (so it never double-steps the caller's
- * widget; nt_ui_events is the one canonical mutating step per widget per frame). `menu_id` is the menu's
+ * widget; nt_ui_step_interaction is the one mutating step per widget per frame). `menu_id` is the menu's
  * stable id (drives every level's salted state). `target_id` optionally binds the right-click to a widget:
  * 0 = arm anywhere (any right-click); non-zero = arm over that widget's bbox via a GEOMETRY hit-test (NOT
  * arbitrated hover, so a right-click RE-opens the menu through its own occluder; does not respect z-order).
  * `long_pressed` is the touch trigger: the
- * caller passes the long_pressed flag from ITS target widget's own nt_ui_events step (this helper
+ * caller passes nt_ui_hold_crossed of ITS target widget's own step (this helper
  * owns no gesture timing). Returns true if it armed this frame (so the caller can stop other handling). */
 bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t menu_id, uint32_t target_id, bool long_pressed, nt_ui_menu_state_t *st);
 

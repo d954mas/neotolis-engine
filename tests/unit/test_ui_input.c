@@ -528,7 +528,7 @@ static void test_double_click_word_select(void) {
     TEST_ASSERT_EQUAL_STRING(" bar", buf);
 }
 
-/* ---- word-select fires via the field's single nt_ui_events step,
+/* ---- word-select fires via the field's single step,
  *      not a separate gesture detector. A double-click in "foo bar" lands the caret at the word end. ---- */
 static void test_word_select_fires_via_events(void) {
     char buf[32];
@@ -568,7 +568,7 @@ static void test_field_press_release_no_double_count(void) {
     nt_pointer_t rel = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), false, false, true);
     (void)field_frame(&rel, id, buf, sizeof buf, true, NULL);
 
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(after_warm, nt_ui_state_used_slots(s_fx.ctx), "a press-release must not grow the state pool (no double-count / duplicate gesture cell)");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(after_warm, nt_ui_state_used_slots(s_fx.ctx), "a press-release must not grow the state pool");
 }
 
 /* ---- Test 16: Ctrl+C copies the selection; Ctrl+V pastes it (round-trip via the fake clipboard). ---- */

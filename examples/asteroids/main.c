@@ -1279,7 +1279,7 @@ static bool ui_action(const char *id, const char *label, bool primary, bool enab
                        &(Clay_ElementDeclaration){.layout = {.sizing = {width > 0 ? CLAY_SIZING_FIXED(width) : CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(44)},
                                                              .padding = CLAY_PADDING_ALL(8),
                                                              .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
-                       enabled, 0.0F);
+                       enabled);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), label, &s_ui_body);
     return nt_ui_button_end(s_ui);
 }

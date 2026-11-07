@@ -2519,21 +2519,13 @@ static void resolve_hot_if_needed(nt_ui_context_t *ctx); /* defined below; query
  * an OR of pointer_over_any (observability for nt_ui_wants_pointer) and the once-per-frame hot resolve
  * (so a query-only frame still arbitrates); state-machine writes (capture, button edges) live in
  * step_interaction_padded. */
-/* One record per ctx, not per pointer: a quick re-tap can land in another pointer slot. */
-static bool press_pairs_with_last(const nt_ui_context_t *ctx, uint32_t id, float x, float y) {
-    const float dx = x - ctx->last_press_pos[0];
-    const float dy = y - ctx->last_press_pos[1];
-    const float radius = ctx->gesture_move_radius_px;
-    return ctx->last_press_id == id && ctx->last_press_age <= ctx->gesture_dbl_window_secs && (dx * dx) + (dy * dy) <= radius * radius;
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
-    NT_ASSERT(ctx != NULL && "nt_ui_query_interaction_padded: ctx must be non-NULL");
-    NT_ASSERT(id != 0U && "nt_ui_query_interaction_padded: id must be non-zero (0 = no widget)");
-    NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_query_interaction_padded: no frame pointer snapshot yet (call after first nt_ui_begin)");
+static nt_ui_interaction_t query_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
+    NT_ASSERT(ctx != NULL && "nt_ui_query_interaction: ctx must be non-NULL");
+    NT_ASSERT(id != 0U && "nt_ui_query_interaction: id must be non-zero (0 = no widget)");
+    NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_query_interaction: no frame pointer snapshot yet (call after first nt_ui_begin)");
     /* Negative padding is a use error — size the widget smaller instead. */
-    NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_query_interaction_padded: pad_lrtb components must be >= 0");
+    NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_query_interaction: pad_lrtb components must be >= 0");
 
     nt_ui_interaction_t out = {0};
 
@@ -2578,11 +2570,10 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
         if (s.new_capture) {
             out.press_pos[0] = p->x;
             out.press_pos[1] = p->y;
-            out.double_clicked = press_pairs_with_last(ctx, id, p->x, p->y);
         } else {
             out.press_pos[0] = cap->press_pos[0];
             out.press_pos[1] = cap->press_pos[1];
-            if (cap->hold_live && btn.is_down && s.any_hovered) {
+            if (cap->hold_live && btn.is_down && over) {
                 out.hold_secs = cap->hold_secs;
                 out.hold_prev_secs = cap->hold_prev_secs;
             }
@@ -2606,7 +2597,7 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
     return out;
 }
 
-nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id) { return nt_ui_query_interaction_padded(ctx, id, NULL); }
+nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id) { return query_interaction_padded(ctx, id, NULL); }
 
 /* Lazy once-per-frame resolve of the front-most interactive widget per pointer, from LAST frame's
  * registry (this frame's transforms/bboxes are still prev-frame until nt_ui_end). 3D: nearest world
@@ -2701,6 +2692,14 @@ static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
     Clay_SetCurrentContext(saved_clay);
 }
 
+/* One record per ctx, not per pointer: a quick re-tap can land in another pointer slot. */
+static bool press_pairs_with_last(const nt_ui_context_t *ctx, uint32_t id, float x, float y) {
+    const float dx = x - ctx->last_press_pos[0];
+    const float dy = y - ctx->last_press_pos[1];
+    const float radius = ctx->gesture_move_radius_px;
+    return ctx->last_press_id == id && ctx->last_press_age <= ctx->gesture_dbl_window_secs && (dx * dx) + (dy * dy) <= radius * radius;
+}
+
 /* Same compute as query_padded plus state-machine commits; ONCE per widget per frame. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
@@ -2712,7 +2711,7 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
 
     /* query_padded triggers the once-per-frame hot resolve; step reaches resolve_widget_pidx_state
      * (which reads pointer_hot) only when query did NOT early-return, i.e. after that resolve ran. */
-    const nt_ui_interaction_t out = nt_ui_query_interaction_padded(ctx, id, pad_lrtb);
+    nt_ui_interaction_t out = query_interaction_padded(ctx, id, pad_lrtb);
 
     /* Record this interactive widget for NEXT frame's hot resolve (resolve re-validates id/transform,
      * so recording an id that later vanishes is harmless). Silently capped at max_elements —
@@ -2753,12 +2752,13 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
             cap->hold_secs = 0.0F;
             cap->hold_prev_secs = 0.0F;
             cap->hold_live = true;
+            out.double_clicked = press_pairs_with_last(ctx, id, p->x, p->y);
             /* A completed pair empties the record so a third press starts a new pair. */
             ctx->last_press_id = out.double_clicked ? 0U : id;
             ctx->last_press_age = 0.0F;
             ctx->last_press_pos[0] = p->x;
             ctx->last_press_pos[1] = p->y;
-        } else if (!s.any_hovered) {
+        } else if (!ui_hit_test(ctx, id, p->x, p->y, pad_lrtb, NULL, NULL)) {
             cap->hold_live = false;
         }
         cap->pos[0] = p->x;
@@ -2820,35 +2820,6 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
 
 nt_ui_interaction_t nt_ui_step_interaction(nt_ui_context_t *ctx, uint32_t id) { return nt_ui_step_interaction_padded(ctx, id, NULL); }
 
-// #region nt_ui_events (consolidated step + hold thresholds)
-
-nt_ui_events_t nt_ui_events_padded(nt_ui_context_t *ctx, uint32_t id, float long_press_secs, const int16_t pad_lrtb[4]) {
-    const nt_ui_interaction_t in = nt_ui_step_interaction_padded(ctx, id, pad_lrtb);
-    nt_ui_events_t e;
-    e.hovered = in.hovered;
-    e.pressed = in.pressed;
-    e.released = in.released_now;
-    e.held = in.pressed && in.hovered;
-    e.clicked = in.clicked;
-    e.pressed_now = in.pressed_now;
-    e.double_clicked = in.double_clicked;
-    e.long_pressed = false;
-    e.hold_progress = 0.0F;
-    e.pos[0] = in.pos[0];
-    e.pos[1] = in.pos[1];
-    e.drag_dx = in.drag_dx;
-    e.drag_dy = in.drag_dy;
-    e.pointer_id = in.pointer_id;
-    if (long_press_secs > 0.0F) {
-        /* Compare stored values: subtracting dt could round across the threshold and fire twice. */
-        e.long_pressed = in.hold_prev_secs < long_press_secs && in.hold_secs >= long_press_secs;
-        e.hold_progress = nt_ui_clampf(in.hold_secs / long_press_secs, 0.0F, 1.0F);
-    }
-    return e;
-}
-
-nt_ui_events_t nt_ui_events(nt_ui_context_t *ctx, uint32_t id, float long_press_secs) { return nt_ui_events_padded(ctx, id, long_press_secs, NULL); }
-
 void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_px) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_gesture_constants: ctx must be non-NULL");
     NT_ASSERT(isfinite(dbl_window_secs) && dbl_window_secs >= 0.0F && "nt_ui_set_gesture_constants: dbl_window_secs must be finite and >= 0");
@@ -2856,8 +2827,6 @@ void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, fl
     ctx->gesture_dbl_window_secs = dbl_window_secs;
     ctx->gesture_move_radius_px = move_radius_px;
 }
-
-// #endregion
 
 /* Inert registry entry: the id wins next-frame hot arbitration over anything behind it (topmost-z),
  * but never captures, clicks, or reports hover. Disabled widgets call this so the pointer can't leak

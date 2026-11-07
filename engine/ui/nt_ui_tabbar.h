@@ -3,7 +3,7 @@
 
 /* Reusable tab-bar. A column (or row) of full-width click targets; the active tab carries an accent bar
  * + a selected fill, hovered tabs lighten and ease. A click sets the game-owned `int *active` — the
- * widget never owns the index. No popup, no gesture cell: a tab is a plain click.
+ * widget never owns the index. No popup: a tab is a plain click.
  *
  * Customizable game UI (button/checkbox parity): each tab visual is a per-state model (idle/hover/
  * selected) with an OPTIONAL atlas-ref bg (slice9), a tint, and a flat fallback color — atlas-free still

@@ -1585,7 +1585,7 @@ if(NOT EMSCRIPTEN)
         test_nt_ui_vlist
         test_ui_input
         test_nt_ui_progress
-        test_ui_events
+        test_ui_gestures
         test_ui_popup
         test_ui_menu
         test_ui_dropdown

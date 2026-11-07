@@ -682,7 +682,7 @@ typedef struct {
     nt_font_t font;
     float line_h;
     uint32_t cur_len;
-    nt_ui_events_t in;
+    nt_ui_interaction_t in;
     nt_ui_bbox_t bb;
     bool focused;
     bool claimed_now;
@@ -731,11 +731,11 @@ static void focus_step(input_frame_t *f) {
 
     /* ONE mutating interaction step (the canonical-step contract). Word-select reads double_clicked
      * off this single result; the dbl window + move radius come from the context. */
-    nt_ui_events_t in;
+    nt_ui_interaction_t in;
     if (enabled) {
-        in = nt_ui_events(ctx, id, 0.0F);
+        in = nt_ui_step_interaction(ctx, id);
     } else {
-        in = (nt_ui_events_t){0};
+        in = (nt_ui_interaction_t){0};
         nt_ui_block_pointer(ctx, id, NULL);
         nt_ui_debug_record_disabled_zone(ctx, id, NULL);
         /* A disabled field can't be clicked to refocus and gates out Esc/Tab while focused==false, so
@@ -767,7 +767,7 @@ static void focus_step(input_frame_t *f) {
         }
     }
 
-    /* Double-click select-word rides the same single events step. */
+    /* Double-click select-word rides the same single step. */
     if (enabled && in.double_clicked) {
         uint32_t ws = 0U;
         uint32_t we = 0U;
@@ -790,7 +790,7 @@ static void focus_step(input_frame_t *f) {
         st->caret = caret_from_x(style, props->password, font, buffer, cur_len, local_x);
         st->blink = 0.0F;
     }
-    if (in.released) {
+    if (in.released_now) {
         st->drag = 0U;
     }
 
