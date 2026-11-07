@@ -24,8 +24,7 @@ extern const nt_ui_widget_def_t NT_UI_SCROLLBAR_DEF;
  * UI units — the space passed to nt_ui_begin (games typically feed nt_ui_scale's
  * logical space, making this resolution-independent) — steals capture from the inner
  * widget and scrolls. Mobile standard ~8-10 px. The latch frame routes ZERO delta
- * (the inner widget already applied it;
- * re-routing would double-move once); scroll tracks 1:1 from the next frame. The
+ * and anchors at the current pointer; scroll tracks 1:1 from the next frame. The
  * cancelled inner widget keeps any value it wrote before the steal (Model D — value
  * lives in the game), so commit-on-release is the safe pattern for sliders. */
 #ifndef NT_UI_SCROLL_STEAL_THRESHOLD_PX
@@ -38,10 +37,6 @@ extern const nt_ui_widget_def_t NT_UI_SCROLLBAR_DEF;
 #define NT_UI_SCROLL_FLAG_DRAGGING ((uint8_t)(1U << 1))
 /* A free pointer (no widget capture) is mid-press inside the bbox; free_press_pos is its anchor. */
 #define NT_UI_SCROLL_FLAG_FREE_PRESS ((uint8_t)(1U << 2))
-/* Drag crossed the threshold and latched: dead-zone consumed, so later frames route the
- * full per-frame delta 1:1 (only the latching frame subtracts the threshold). Per-CONTAINER,
- * not per-pointer — single-touch by design. */
-#define NT_UI_SCROLL_FLAG_DRAG_LATCHED ((uint8_t)(1U << 3))
 
 /* Per-container retained state in the nt_ui_state pool. pos/vel/target in Clay's
  * negative-down sign convention. ~52B; under NT_UI_STATE_PAYLOAD_MAX. */
@@ -102,8 +97,8 @@ void nt_ui_scroll_to(nt_ui_context_t *ctx, uint32_t id, float x, float y);
 #ifdef NT_TEST_ACCESS
 /* Physics-only probe: drives the static integrator directly so unit tests can
  * assert momentum decay / clamp / rubber-band / scroll-to without a Clay frame.
- * tunables: {friction, wheel_ease_speed, rubber_band_c, bounce_speed, wheel_step_px}. */
-void nt_ui_scroll_test_integrate(nt_ui_scroll_state_t *s, const float wheel[2], float dt, const float content[2], const float container[2], const float tunables[5]);
+ * Reads physics settings from style for the duration of the call. */
+void nt_ui_scroll_test_integrate(nt_ui_scroll_state_t *s, const float wheel[2], float dt, const float content[2], const float container[2], const nt_ui_scroll_style_t *style);
 float nt_ui_scroll_test_rubber_band(float d, float dim);
 /* Reads back the last clip.childOffset fed to Clay by scroll_begin (Clay sign). */
 void nt_ui_scroll_test_last_child_offset(float *out_x, float *out_y);
