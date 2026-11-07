@@ -504,6 +504,7 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
                 continue; /* tap (below threshold) leaves the inner capture -> inner clicks */
             }
             cap->active_id = id;       /* CLAIM (not 0): hold the gesture so it can't be re-adopted */
+            cap->hold_live = false;    /* a claim is not a press: the slot's hold belongs to an earlier one */
             ctx->capture_seen[i] = 1U; /* keep the claim past begin's orphan-clear */
             /* Route ZERO delta on the latch frame: the inner widget (declared earlier) already applied
              * this same delta, so re-routing it here double-moves for one frame. Re-anchor and let the
@@ -550,6 +551,7 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
                 s->raw[0] = s->pos[0];
                 s->raw[1] = s->pos[1];
                 cap->active_id = id;       /* swallow the tap: own the gesture so inner content can't click */
+                cap->hold_live = false;    /* a claim is not a press: the slot's hold belongs to an earlier one */
                 ctx->capture_seen[i] = 1U; /* keep the claim past begin's orphan-clear */
                 cap->press_pos[0] = p->x;
                 cap->press_pos[1] = p->y;
@@ -571,6 +573,7 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
             continue; /* still within the tap threshold — not yet a drag */
         }
         cap->active_id = id;       /* CLAIM: from here the OWNED case routes this pointer */
+        cap->hold_live = false;    /* a claim is not a press: the slot's hold belongs to an earlier one */
         ctx->capture_seen[i] = 1U; /* keep the claim past begin's orphan-clear */
         cap->press_pos[0] = p->x;
         cap->press_pos[1] = p->y;

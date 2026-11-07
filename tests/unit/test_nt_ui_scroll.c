@@ -206,6 +206,75 @@ static void inject_inner_capture(uint32_t inner_id, float press_x, float press_y
     s_fx.ctx->capture_seen[0] = 1U;
 }
 
+/* ---- a scroll claim is not a gesture press: it must not report the hold left in its pointer slot ---- */
+static void assert_scroll_claim_reports_no_hold(void) {
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
+    TEST_ASSERT_TRUE(float_near(nt_ui_query_interaction(s_fx.ctx, SCROLL_ID).hold_secs, 0.0F, 0.001F));
+}
+
+static void leave_stale_hold_in_slot(void) {
+    s_fx.ctx->captures[0].hold_secs = 0.9F;
+    s_fx.ctx->captures[0].hold_prev_secs = 0.9F;
+    s_fx.ctx->captures[0].hold_live = true;
+}
+
+static void test_scroll_steal_claim_reports_no_hold(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_pointer_t p = {0};
+    p.x = 100.0F;
+    p.y = 100.0F;
+    p.active = true;
+    scroll_frame(&p, &style);
+
+    p.y = 140.0F;
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
+    inject_inner_capture(0xBEEFU, 100.0F, 100.0F, 100.0F, 140.0F);
+    leave_stale_hold_in_slot();
+    CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &style, NULL);
+        {
+            CLAY({.id = CLAY_ID("content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {}
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+    assert_scroll_claim_reports_no_hold();
+}
+
+static void test_scroll_free_press_claims_report_no_hold(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_pointer_t p = {0};
+    p.x = 100.0F;
+    p.y = 100.0F;
+    p.active = true;
+    scroll_frame(&p, &style);
+
+    /* Button released in this slot, then a drag on the scroll: the candidate claim. */
+    leave_stale_hold_in_slot();
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    scroll_frame(&p, &style);
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+    for (int i = 1; i <= 6; ++i) {
+        p.y = 100.0F - (float)(i * 10);
+        scroll_frame(&p, &style);
+    }
+    assert_scroll_claim_reports_no_hold();
+
+    p.buttons[NT_BUTTON_LEFT].is_down = false;
+    p.buttons[NT_BUTTON_LEFT].is_released = true;
+    scroll_frame(&p, &style);
+    p.buttons[NT_BUTTON_LEFT].is_released = false;
+
+    /* A press while the fling still runs: the tap-to-stop claim. */
+    leave_stale_hold_in_slot();
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    scroll_frame(&p, &style);
+    assert_scroll_claim_reports_no_hold();
+}
+
 /* ---- Test 8: capture-steal — drag>threshold cancels inner capture AND claims it, but routes ZERO
  *      delta on the LATCH frame (the inner widget, declared earlier, already applied that same delta;
  *      re-routing it here double-moves for one frame). The container CLAIMS the capture (active_id =
@@ -2114,6 +2183,8 @@ int main(void) {
     RUN_TEST(test_scroll_capture_steal_drag);
     RUN_TEST(test_scroll_capture_steal_dt_zero_no_phantom);
     RUN_TEST(test_scroll_capture_tap_no_steal);
+    RUN_TEST(test_scroll_steal_claim_reports_no_hold);
+    RUN_TEST(test_scroll_free_press_claims_report_no_hold);
     RUN_TEST(test_scrollbar_auto_only_on_overflow);
     RUN_TEST(test_scrollbar_always_shows);
     RUN_TEST(test_scrollbar_standalone_no_z_lift);

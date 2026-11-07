@@ -2528,7 +2528,7 @@ static void resolve_hot_if_needed(nt_ui_context_t *ctx); /* defined below; query
  * (so a query-only frame still arbitrates); state-machine writes (capture, button edges) live in
  * step_interaction_padded. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static nt_ui_interaction_t query_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
+static nt_ui_interaction_t query_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4], bool *out_owner_over) {
     NT_ASSERT(ctx != NULL && "nt_ui_query_interaction: ctx must be non-NULL");
     NT_ASSERT(id != 0U && "nt_ui_query_interaction: id must be non-zero (0 = no widget)");
     NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_query_interaction: no frame pointer snapshot yet (call after first nt_ui_begin)");
@@ -2570,6 +2570,7 @@ static nt_ui_interaction_t query_interaction_padded(nt_ui_context_t *ctx, uint32
         const nt_ui_capture_t *cap = &ctx->captures[pidx];
         const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
         const bool over = ui_hit_test(ctx, id, p->x, p->y, pad_lrtb, NULL, NULL);
+        *out_owner_over = over;
         out.pressed = btn.is_down;
         out.released_now = btn.is_released;
         out.pressed_now = s.new_capture;
@@ -2605,7 +2606,10 @@ static nt_ui_interaction_t query_interaction_padded(nt_ui_context_t *ctx, uint32
     return out;
 }
 
-nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id) { return query_interaction_padded(ctx, id, NULL); }
+nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id) {
+    bool owner_over = false;
+    return query_interaction_padded(ctx, id, NULL, &owner_over);
+}
 
 /* Lazy once-per-frame resolve of the front-most interactive widget per pointer, from LAST frame's
  * registry (this frame's transforms/bboxes are still prev-frame until nt_ui_end). 3D: nearest world
@@ -2719,7 +2723,8 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
 
     /* query_padded triggers the once-per-frame hot resolve; step reaches resolve_widget_pidx_state
      * (which reads pointer_hot) only when query did NOT early-return, i.e. after that resolve ran. */
-    nt_ui_interaction_t out = query_interaction_padded(ctx, id, pad_lrtb);
+    bool owner_over = false;
+    nt_ui_interaction_t out = query_interaction_padded(ctx, id, pad_lrtb, &owner_over);
 
     /* Record this interactive widget for NEXT frame's hot resolve (resolve re-validates id/transform,
      * so recording an id that later vanishes is harmless). Silently capped at max_elements —
@@ -2766,7 +2771,7 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
             ctx->last_press_age = 0.0F;
             ctx->last_press_pos[0] = p->x;
             ctx->last_press_pos[1] = p->y;
-        } else if (!ui_hit_test(ctx, id, p->x, p->y, pad_lrtb, NULL, NULL)) {
+        } else if (!owner_over) {
             cap->hold_live = false;
         }
         cap->pos[0] = p->x;
