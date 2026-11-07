@@ -1,5 +1,5 @@
 # Size Report: asteroids (wasm-analysis-paired)
-# Commit: 1544a2c
+# Commit: 3833640
 
 ## WASM Section Sizes
 
@@ -7,26 +7,26 @@ Section                Size
 ---------------- ----------
 Type                 412 B
 Import               682 B
-Function             259 B
+Function             260 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                95 B
 Elem                  65 B
-Code              398992 B
+Code              399849 B
 Data              218916 B
-Custom             13248 B
+Custom             13268 B
 ---------------- ----------
-TOTAL             632690 B
+TOTAL             633568 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-84552 B   frame
+85219 B   frame
 31662 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
 27440 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
-20896 B   ui_panel
+20959 B   ui_panel
 19239 B   dispatch_command
 17318 B   nt_gfx_activate_texture
 10755 B   main
@@ -47,15 +47,15 @@ TOTAL             632690 B
  3065 B   nt_gfx_make_texture
  3020 B   fmt_fp
  2608 B   basist::huffman_decoding_table::init(unsigned int, unsigned char const*, unsigned int)
- 2588 B   scrollbar_emit_axis
+ 2586 B   scrollbar_emit_axis
  2551 B   nt_font_lookup_glyph_offset
  2540 B   basist::pack_eac_high_quality(basist::eac_block&, unsigned char const*, unsigned int)
  2476 B   basist::unpack_uastc(unsigned int, unsigned int, basist::color32 const&, basist::astc_block_desc const&, basist::color32*, bool)
  2456 B   select_level
  2436 B   printf_core
 
-Total functions: 257
-Total code size: 398543 B
+Total functions: 258
+Total code size: 399399 B
 
 ## Built Engine Archives
 
@@ -116,7 +116,7 @@ libnt_sprite_renderer.a    16114 B
 libnt_text_renderer.a       7650 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                352764 B
+libnt_ui.a                352494 B
 libnt_ui_rich.a            39736 B
 libnt_ui_rich_fx.a          3050 B
 libnt_ui_stub.a             1324 B
@@ -125,7 +125,7 @@ libnt_version.a              638 B
 libnt_window.a              4028 B
 libnt_window_stub.a         1888 B
 ------------------------ ----------
-TOTAL (archives)         2675638 B
+TOTAL (archives)         2675368 B
 
 ## Data Segments Summary
 
