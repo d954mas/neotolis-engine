@@ -156,8 +156,6 @@ bool nt_ui_button_end(nt_ui_context_t *ctx) {
 
     nt_ui_clay_priv_close_element();
 
-    const bool clicked = ctx->pending_button.clicked;
     ctx->pending_button.active = false;
-    ctx->pending_button.clicked = false;
-    return clicked;
+    return ctx->pending_button.clicked;
 }
