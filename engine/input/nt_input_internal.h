@@ -20,7 +20,7 @@ void nt_input_wheel(float dx, float dy);
 void nt_input_clear_all_keys(void);
 void nt_input_clear_all_pointers(void);
 /* Backends call this on focus loss after dropping their staged events: the release events never
-   arrive, so the next poll releases held input and delivers no backend events. */
+   arrive, so the next poll releases held input and skips the backend drain. */
 void nt_input_focus_lost(void);
 
 /* nt_input automation surface (player gate + synthetic input injection). Compiled only when
@@ -28,7 +28,7 @@ void nt_input_focus_lost(void);
    gate, the inject buffer, and all these symbols entirely.
 
    Player gate: when disabled the public real-apply wrappers (set_key, mouse_move, mouse_leave,
-   pointer_*, wheel, buffer_char) early-return and a focus-loss poll releases nothing: whoever pressed releases.
+   pointer_*, wheel, buffer_char, focus_lost) early-return. It releases nothing: whoever pressed releases.
    Inject calls the *_apply cores directly so it always flows.
 
    Inject API (L1 engine capability; L2 devapi group drives it untrusted): IMMEDIATE only — each call

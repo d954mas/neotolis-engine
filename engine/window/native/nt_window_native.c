@@ -137,6 +137,8 @@ static void glfw_mouse_button_callback(GLFWwindow *window, int button, int actio
 
     if (action == GLFW_PRESS) {
         s_cached_buttons |= bit;
+    } else if ((s_cached_buttons & bit) == 0) {
+        return; /* GLFW's synthetic release after a focus loss: the core already released it */
     } else {
         s_cached_buttons &= (uint8_t)~bit;
     }

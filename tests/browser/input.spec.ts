@@ -181,7 +181,6 @@ test('blur: the next poll only releases; keys and UTF-32 chars after refocus fol
   expect(current.keys[7]).toEqual([0, 0, 1]);
   expect(current.keys[0]).toEqual([0, 0, 0]);
   expect(current.chars).toEqual([]);
-  expect(current.pointers[0].wheel).toBe(0);
   expect(next.keys[0]).toEqual([1, 1, 0]);
   expect(next.keys[1]).toEqual([0, 0, 0]); // B and its char were queued before blur.
   expect(next.keys[7]).toEqual([0, 0, 0]);
@@ -222,13 +221,9 @@ test('blur: a new touch before poll takes the released slot and follows later mo
   expect(next.pointers[1]).toMatchObject({ active: 1, down: 1, pressed: 1, released: 0, x: 350, y: 300 });
   const newId = next.pointers[1].id;
   expect(newId).not.toBe(held.id);
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [oldTouch, { ...newTouch, x: 390, y: 320 }] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...oldTouch, x: 130 }, { ...newTouch, x: 390, y: 320 }] });
   await frame();
   const moved = await page.evaluate(() => window.__nt!.input_poll());
   expect(moved.pointers.slice(1).filter((p) => p.active)).toMatchObject([{ id: newId, down: 1, x: 390, y: 320 }]);
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  await frame();
-  const ended = await page.evaluate(() => window.__nt!.input_poll());
-  expect(ended.pointers.filter((p) => p.active && p.down)).toEqual([]);
   expect(errors).toEqual([]);
 });

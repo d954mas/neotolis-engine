@@ -53,6 +53,17 @@ void test_focus_lost_releases_real_input(void) {
     TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_LEFT));
 }
 
+void test_focus_lost_gate_counts_at_loss(void) {
+    nt_input_set_key(NT_KEY_A, true);
+    nt_input_poll();
+    nt_input_focus_lost();
+    nt_input_set_player_enabled(false);
+    TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_B, true));
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_key_is_released(NT_KEY_A));
+    TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_B)); /* injects still apply in the release poll */
+}
+
 /* Gated, held input is the bot's: a click into another window must not cut a bot drag. */
 void test_gated_focus_lost_keeps_bot_input(void) {
     nt_input_set_player_enabled(false);
@@ -60,6 +71,7 @@ void test_gated_focus_lost_keeps_bot_input(void) {
     TEST_ASSERT_TRUE(nt_input_inject_mouse(5.0F, 5.0F, 1));
     nt_input_poll();
     nt_input_focus_lost();
+    nt_input_set_player_enabled(true); /* the gate counts at the loss, not at the release poll */
     nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
@@ -289,6 +301,7 @@ int main(void) {
     RUN_TEST(test_gate_reenable_applies_real);
     RUN_TEST(test_gate_off_keeps_held_pointer);
     RUN_TEST(test_focus_lost_releases_real_input);
+    RUN_TEST(test_focus_lost_gate_counts_at_loss);
     RUN_TEST(test_gated_focus_lost_keeps_bot_input);
     RUN_TEST(test_inject_key_down_up);
     RUN_TEST(test_inject_same_poll_down_then_up);

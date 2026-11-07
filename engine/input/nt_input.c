@@ -23,7 +23,6 @@ static uint32_t s_char_ring[NT_INPUT_CHAR_RING];
 static uint32_t s_char_head; /* next write slot */
 static uint32_t s_char_tail; /* next read slot */
 
-/* Set by a backend at focus loss; the next poll releases held input and delivers nothing else. */
 static bool s_focus_lost;
 
 /* ---- nt_input automation surface (player gate + immediate inject buffer) ---- */
@@ -164,16 +163,6 @@ static void primary_update(void) {
     }
 }
 
-static void release_player_input(void) {
-#if NT_INPUT_AUTOMATION_ENABLED
-    if (!s_player_enabled) {
-        return; /* gated: the held input is the bot's, and a click into another window must not cut it */
-    }
-#endif
-    nt_input_clear_all_keys();
-    nt_input_clear_all_pointers();
-}
-
 void nt_input_poll(void) {
     /* Deactivate pointers that had pointer_up last frame */
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
@@ -204,7 +193,8 @@ void nt_input_poll(void) {
        slots; events after the loss stay buffered in the backend until the next poll. */
     if (s_focus_lost) {
         s_focus_lost = false;
-        release_player_input();
+        nt_input_clear_all_keys();
+        nt_input_clear_all_pointers();
     } else {
         /* Platform backend delivers events (calls set_key, pointer_down/move/up,
            which set edge flags immediately) */
@@ -484,7 +474,14 @@ void nt_input_clear_all_pointers(void) {
     }
 }
 
-void nt_input_focus_lost(void) { s_focus_lost = true; }
+void nt_input_focus_lost(void) {
+#if NT_INPUT_AUTOMATION_ENABLED
+    if (!s_player_enabled) {
+        return; /* gated: the held input is the bot's, and a click into another window must not cut it */
+    }
+#endif
+    s_focus_lost = true;
+}
 
 /* ---- nt_input automation surface (player gate API + synthetic input injection) ---- */
 

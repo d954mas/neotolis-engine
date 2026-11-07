@@ -837,6 +837,8 @@ EMSCRIPTEN_KEEPALIVE int nt_test_mouse(void) { return (g_nt_input.pointers[0].ac
 /* Poll and read before another browser task or the UI can consume this frame's edges and chars. */
 EMSCRIPTEN_KEEPALIVE const char *nt_test_input_poll(void) {
     static char snapshot[8192];
+    /* Worst case per entry: key "[1,1,1]," 8, pointer object 160, codepoint 11; the snprintf sums never wrap. */
+    _Static_assert((NT_KEY_COUNT * 8) + (NT_INPUT_MAX_POINTERS * 160) + (NT_INPUT_CHAR_RING * 11) + 64 <= sizeof(snapshot), "input_poll snapshot");
     nt_input_poll();
     size_t len = (size_t)snprintf(snapshot, sizeof(snapshot), "{\"keys\":[");
     for (int i = 0; i < NT_KEY_COUNT; i++) {

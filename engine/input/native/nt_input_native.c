@@ -94,7 +94,7 @@ void nt_input_buffer_char_event(uint32_t cp) {
 }
 
 void nt_input_buffer_focus_lost(void) {
-    /* Events staged before the loss are stale; later ones wait for the poll after the release. */
+    /* Events staged before the loss are stale. */
     s_key_count = 0;
     s_ptr_count = 0;
     s_wheel_count = 0;

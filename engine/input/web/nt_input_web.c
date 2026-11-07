@@ -160,7 +160,7 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
         }
     });
 
-    /* Events queued before focus loss are stale; later ones wait for the poll after the release. */
+    /* Events queued before focus loss are stale. */
     canvas.addEventListener("blur", function() {
         Module['_nt_input_web_on_blur']();
         Module['_ntKeyBuf'].length = 0;
