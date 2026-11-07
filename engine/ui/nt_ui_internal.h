@@ -252,9 +252,10 @@ struct nt_ui_context {
     uint32_t focused_input_id;
     /* Tab focus-advance bookkeeping, scoped to one frame: _seek set the frame a focused field
      * sees Tab; the NEXT field declared that frame claims focus and clears _seek. _first_id
-     * tracks the earliest field so Tab off the last field wraps to the first. */
+     * tracks the earliest enabled field and its keyboard mode for wrap. */
     uint32_t focus_tab_seek;
     uint32_t focus_first_id;
+    nt_text_input_mode_t focus_first_mode;
     uint32_t wheel_candidate_count;
     /* Raw rich-text per-block caps (0 = compile-time NT_UI_RICH_MAX_* default); resolved in
      * nt_ui_rich_begin, which owns the rich #defines. Raw here so this widget-agnostic header stays

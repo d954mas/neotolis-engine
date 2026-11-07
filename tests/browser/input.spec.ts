@@ -10,6 +10,7 @@ declare global {
       field_visible(): boolean;
       field_css(): { x: number; y: number };
       mouse(): { active: boolean; down: boolean };
+      drawn_frames(): number;
     };
   }
 }
@@ -93,6 +94,69 @@ test('input field: real keydown (Cyrillic) + paste reaches the buffer and the re
   const cmdCount = await page.evaluate(() => window.__nt!.walk_text_cmd_count());
   expect(cmdCount).toBeGreaterThan(0);
 });
+
+for (const mode of ['password', 'numeric']) {
+  test(`input Tab wrap: ${mode} restores the first enabled field's keyboard hint`, async ({ page }) => {
+    await page.goto(`/index.html?input_wrap=${mode}`);
+    const frame = () => page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+    await page.waitForFunction(() => window.__nt?.ready && window.__nt.field_visible(), null, { timeout: 30_000 });
+    const canvas = page.locator('canvas');
+    const targetMode = mode === 'password' ? 'text' : 'email';
+    const { x, y } = await page.evaluate(() => window.__nt!.field_css());
+    await page.mouse.move(x, y);
+    await frame();
+    await page.mouse.down();
+    await frame();
+    await page.mouse.up();
+    await frame();
+    await expect(canvas).toHaveAttribute('inputmode', targetMode);
+    expect(await canvas.getAttribute('type')).toBeNull();
+
+    // Attribute mutations also count writes of the same value, exposing per-frame hint updates.
+    const probe = await canvas.evaluateHandle((el) => {
+      const writes: string[] = [];
+      const observer = new MutationObserver((records) => {
+        for (const record of records) writes.push(record.attributeName!);
+      });
+      observer.observe(el, { attributes: true, attributeFilter: ['inputmode', 'type'] });
+      return { writes, observer };
+    });
+
+    // Forward Tab must apply the receiving field's hint exactly once.
+    await page.keyboard.down('Tab');
+    await frame();
+    await page.keyboard.up('Tab');
+    await frame();
+    await expect(canvas).toHaveAttribute('inputmode', mode === 'password' ? 'text' : 'numeric');
+    expect(await canvas.getAttribute('type')).toBe(mode === 'password' ? 'password' : null);
+    expect(await probe.evaluate((p) => p.writes.splice(0).filter((name) => name === 'inputmode'))).toEqual(['inputmode']);
+
+    const forwardFrame = await page.evaluate(() => window.__nt!.drawn_frames());
+    await page.waitForFunction((n) => window.__nt!.drawn_frames() >= n + 3, forwardFrame);
+    expect(await probe.evaluate((p) => p.writes.splice(0))).toEqual([]);
+
+    // The disabled URL field is declared first; wrap must restore the text/email field after it.
+    await page.keyboard.down('Tab');
+    await frame();
+    await page.keyboard.up('Tab');
+    await frame();
+    await expect(canvas).toHaveAttribute('inputmode', targetMode);
+    expect(await canvas.getAttribute('type')).toBeNull();
+    expect(await probe.evaluate((p) => p.writes.splice(0).filter((name) => name === 'inputmode'))).toEqual(['inputmode']);
+
+    const wrapFrame = await page.evaluate(() => window.__nt!.drawn_frames());
+    await page.waitForFunction((n) => window.__nt!.drawn_frames() >= n + 3, wrapFrame);
+    expect(await probe.evaluate((p) => p.writes.splice(0))).toEqual([]);
+    await probe.evaluate((p) => p.observer.disconnect());
+    await probe.dispose();
+
+    await page.keyboard.down('x');
+    await frame();
+    await page.keyboard.up('x');
+    await frame();
+    expect(await page.evaluate(() => window.__nt!.input_buffer())).toBe('x');
+  });
+}
 
 // A real mouse dragged from the canvas and released outside it: the captured release lands and the mouse
 // leaves (not every browser sends a pointerleave after a captured drag), so no button sticks.
