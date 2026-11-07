@@ -357,7 +357,7 @@ void nt_ui_set_viewport(nt_ui_context_t *ctx, nt_ui_viewport_t vp);
 void nt_ui_screen_to_layout(const nt_ui_context_t *ctx, const float screen[2], float out_layout[2]);
 void nt_ui_layout_to_screen(const nt_ui_context_t *ctx, const float layout[2], float out_screen[2]);
 
-/* pointers[0..count) drive multitouch under α-semantics — see nt_ui_capture_t in nt_ui_internal.h. pointers carry
+/* pointers[0..count) drive multitouch under α-semantics — see the multitouch note above nt_ui_interaction_t. pointers carry
  * RAW DEVICE coords; the ctx converts them to layout space via the viewport at the lazy hit resolve.
  * pointers[primary] anchors menus, rich-text links, the Clay feed and the inspector: a single-pointer UI
  * passes its one pointer with primary 0, a whole g_nt_input array passes g_nt_input.primary. */
@@ -550,6 +550,15 @@ typedef struct {
 } nt_ui_bbox_t;
 nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id);
 
+/* Multitouch (α-semantics: single capture per widget). step/query iterate all
+ * frame_pointers[0..count) and resolve the pointer that "owns" each widget:
+ *   - if a pidx is already holding the id, it stays the owner
+ *   - else the first pressed_now pointer over the widget captures it
+ *   - additional fingers landing on a captured widget are silently ignored
+ *   - a pointer bound to one widget is invisible to all other widgets
+ * Aggregated interaction_t.hovered = any pointer over; pressed/released/clicked
+ * track the single owner pidx. interaction_t.pointer_id holds the OS id of the
+ * owning (or first hovering) pointer. */
 /* Computed lazily: this-frame pointer vs PREVIOUS-frame bbox (1-frame IM lag). */
 typedef struct {
     bool hovered;           /* pointer over bbox (transform-aware) */
@@ -589,16 +598,16 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
 
 /* One-shot long press: true on the frame the hold crosses secs > 0. secs must stay constant for the
  * whole hold. Compares stored values: subtracting dt could round across secs and fire twice. */
-static inline bool nt_ui_hold_crossed(const nt_ui_interaction_t *in, float secs) { return in->hold_prev_secs < secs && in->hold_secs >= secs; }
+bool nt_ui_hold_crossed(const nt_ui_interaction_t *in, float secs);
 
 /* Linear 0..1 ramp toward secs > 0 while the hold is live, 0 otherwise (the hold-to-confirm signal). */
-static inline float nt_ui_hold_progress(const nt_ui_interaction_t *in, float secs) { return in->hold_secs >= secs ? 1.0F : in->hold_secs / secs; }
+float nt_ui_hold_progress(const nt_ui_interaction_t *in, float secs);
 
 /* App-wide gesture constants: the double-click window (secs) and the move radius (layout units) within
  * which a second press still counts as a double-click. Hold/long-press is NOT cancelled by
  * movement — only by leaving the widget's hitbox. Asserts each is finite and >= 0 (fail-early,
  * no silent clamp). Defaults: 0.5 s, 16. */
-void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_px);
+void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius);
 
 /* Inert occluder: enters id into the interactive registry so it wins next-frame topmost-z
  * arbitration over widgets behind it (the pointer can't leak through), but never captures,

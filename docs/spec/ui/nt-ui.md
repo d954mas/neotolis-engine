@@ -249,12 +249,14 @@ measured peak.
 Game ids interact via `nt_ui_query_interaction`
 (idempotent until the step, multiple calls per frame OK) and `nt_ui_step_interaction`
 (mutating, exactly one call per id per frame). The step commits capture, so a later
-query that frame no longer sees the press edge: read one-shot edges from the step's
+query that frame can read different edges: read one-shot edges from the step's
 result, and `double_clicked` only from there. Capture is per-pointer:
 a press records `active_id`; release clears. Other widgets are
 `exclusive_gated` while one holds capture. **Orphan cleanup** at
 `nt_ui_begin` drops `active_id` if the widget didn't call step last
-frame — covers scene switches, conditional disable, and widget hide.
+frame — covers scene switches, conditional disable, and widget hide. It also drops
+`active_id` when a pointer has no release edge and its button is up or newly pressed:
+frames without `nt_ui_begin` swallow edges, and the pointer must not stay bound.
 Result: 1-frame IM-lag is intrinsic (current frame reads previous
 frame's bbox); no stuck input on widget disappearance.
 
@@ -480,18 +482,19 @@ state-pool cell:
   step loses the capture at the next `nt_ui_begin`, so its hold cannot resume without a
   new press.
 - **Long press** is a threshold over the hold. `nt_ui_hold_crossed` fires once as the
-  hold crosses `secs`, which must stay constant for the whole hold.
+  hold crosses `secs`, which must be positive and stay constant for the whole hold.
   `nt_ui_hold_progress` is the linear 0..1 ramp for hold-to-confirm feedback.
 - **Double-click** pairs a stepped press with the previous stepped press through one
-  record per context: same widget, within the window and the move radius
-  (`nt_ui_set_gesture_constants`). A press on another widget replaces the record, even
-  from another finger; a completed pair empties it, so a third press starts a new pair.
+  record per context: same widget, within the window and the move radius in layout
+  units (`nt_ui_set_gesture_constants`). A stepped press on another widget replaces the
+  record, even from another finger; a completed pair empties it, so a third press starts a new pair.
   The move radius gates double-click only.
 
 Gesture time is UI time. Every `nt_ui_begin` advances it by `dt`, whether or not the
 widget stepped, so frames with a disabled widget count toward the window and
-`dt==0` pauses both gestures. A frame without `nt_ui_begin` does not exist for
-gestures: the game passes the elapsed time in the next `dt` if it must count.
+`dt==0` pauses both gestures. A frame without `nt_ui_begin` adds no gesture time: the
+game passes the elapsed time in the next `dt` if it must count. Edges lost in such a
+frame end the capture, see "Interaction model".
 
 ## Popup-core
 

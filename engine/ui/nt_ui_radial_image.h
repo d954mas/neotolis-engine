@@ -82,7 +82,7 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
                         const Clay_ElementDeclaration *decl);
 
 /* fill convenience: angle_end = angle_start + clamp(fill,0,1) * sweep_total
- * (shares nt_ui_radial_fill_to_end). The common cooldown / hold_progress idiom.
+ * (shares nt_ui_radial_fill_to_end). The common cooldown / nt_ui_hold_progress idiom.
  * fill is clamped [0,1]; sweep_total is the full sweep in radians. */
 void nt_ui_radial_image_fill(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t *region, float angle_start, float fill, float sweep_total,
                              const nt_ui_radial_image_style_t *style, const Clay_ElementDeclaration *decl);

@@ -319,18 +319,18 @@ typedef struct {
 
 /* Events tab: hold-to-confirm + a double-click readout (all game-owned). */
 typedef struct {
-    uint32_t confirms;   /* hold-to-confirm fire count (long_pressed) */
+    uint32_t confirms;   /* hold-to-confirm fire count (nt_ui_hold_crossed) */
     uint32_t dbl_clicks; /* double-click readout */
-    float last_progress; /* hold_progress latched for the fill display */
+    float last_progress; /* last nt_ui_hold_progress for the fill display */
 } events_params_t;
 
 /* Radial tab: a game-owned cooldown timer (ramps 0->1 then resets) drives the cooldown wedge;
- * the hold-to-confirm radial reads the events hold_progress; the rest are static demos. */
+ * the hold-to-confirm radial reads nt_ui_hold_progress; the rest are static demos. */
 typedef struct {
     float cooldown;      /* 0..1, ramps over cooldown_secs then loops (drives nt_ui_radial_fill) */
     float cooldown_secs; /* full sweep duration */
-    uint32_t hold_fires; /* hold-to-confirm fire count (long_pressed) */
-    float hold_progress; /* latched hold_progress for the radial fill display */
+    uint32_t hold_fires; /* hold-to-confirm fire count (nt_ui_hold_crossed) */
+    float hold_progress; /* last nt_ui_hold_progress for the radial fill display */
 } radial_params_t;
 
 /* Rich Text tab: the GAME owns the effect clock (no engine global clock); `time` accumulates from frame dt. */
@@ -504,7 +504,7 @@ static uint32_t s_id_tab_btn_base; /* per-tab list buttons salt from this + inde
 /* App-widget ids. */
 static uint32_t s_id_events_hold;                           /* hold-to-confirm button */
 static uint32_t s_id_events_dbl;                            /* double-click target */
-static uint32_t s_id_events_fill;                           /* hold_progress fill bar */
+static uint32_t s_id_events_fill;                           /* hold progress fill bar */
 static uint32_t s_id_radial_hold;                           /* radial tab: hold-to-confirm button */
 static uint32_t s_id_dd_fruit, s_id_dd_city, s_id_dd_color; /* combo triggers (color = custom swatch) */
 static uint32_t s_id_tip_a, s_id_tip_b, s_id_tip_c;         /* tooltip targets */
@@ -663,7 +663,7 @@ static const showcase_entry_t g_tabs[] = {
     {"Virtual List", "10k-row windowed list, vertical + horizontal; cost ~visible count.", "examples/ui_showcase/main.c:render_vlist", render_vlist, NULL},
     {"Modals", "Confirm + nested depth-2 modal; Esc/backdrop close; live transition panel.", "examples/ui_showcase/main.c:render_modals", render_modals, props_modal},
     {"Input", "Plain / numeric-filtered / password-masked / Cyrillic text fields; selection + Ctrl+C/X/V + Tab focus.", "examples/ui_showcase/main.c:render_input", render_input, NULL},
-    {"Events", "Hold-to-confirm (events hold_progress fill + long_pressed) + a double-click readout.", "examples/ui_showcase/main.c:render_events", render_events, NULL},
+    {"Events", "Hold-to-confirm (nt_ui_hold_progress fill + nt_ui_hold_crossed) + a double-click readout.", "examples/ui_showcase/main.c:render_events", render_events, NULL},
     {"Radial", "SDF radial feedback: cooldown wedge + hold-to-confirm + four-mode image reveal + a batched dense grid.", "examples/ui_showcase/main.c:render_radial", render_radial, NULL},
     {"Base Material", "One custom-attr base material for the whole UI: plain emits bake its attr defaults, so panels, icons and SDF radials share one batch.",
      "examples/ui_showcase/main.c:render_base_material", render_base_material, NULL},
@@ -1853,13 +1853,13 @@ static void render_events(nt_ui_context_t *ctx, tab_state_t *st) {
         st->events.dbl_clicks++;
     }
 
-    (void)snprintf(buf, sizeof buf, "confirms: %u   double-clicks: %u   hold_progress: %.2f", st->events.confirms, st->events.dbl_clicks, (double)st->events.last_progress);
+    (void)snprintf(buf, sizeof buf, "confirms: %u   double-clicks: %u   hold: %.2f", st->events.confirms, st->events.dbl_clicks, (double)st->events.last_progress);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
 }
 
 /* Radial tab: the two radial widgets driven by game-owned feedback state.
  *   1. COOLDOWN wedge        — nt_ui_radial_fill from a looping timer (game-owned fill).
- *   2. HOLD-TO-CONFIRM wedge — nt_ui_radial_fill from the events hold_progress.
+ *   2. HOLD-TO-CONFIRM wedge — nt_ui_radial_fill from nt_ui_hold_progress.
  *   3. FOUR REVEAL MODES     — nt_ui_radial_image (desat/dim/hide/tint) on the [0,1]-UV art.
  *   4. DENSE GRID            — N radials sharing ONE material => one batched draw;
  *      the header's draw-call readout proves the count does NOT scale with radial count.
@@ -1982,7 +1982,7 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
         .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 20, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}};
 
     /* #region 1: cooldown + 2: hold-to-confirm + ring + oval */
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Cooldown sweep (looping timer) + hold-to-confirm (events hold_progress); ring + oval variants.", g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Cooldown sweep (looping timer) + hold-to-confirm (nt_ui_hold_progress); ring + oval variants.", g_current->caption);
     CLAY(row_decl) {
         /* Cooldown: fill ramps 0->1 over ~3s; start at +90deg (top), sweep a full turn. */
         nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), 0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &rstyle, &disc_decl);

@@ -244,7 +244,7 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
               "nt_ui_create_context: modal_zband_stride must be > 1 and stride * NT_UI_MODAL_MAX_DEPTH must fit int16");
     /* Touch-friendly baseline, looser than ImGui's mouse 6px/0.3s: the engine targets mobile/WASM. */
     ctx->gesture_dbl_window_secs = 0.50F;
-    ctx->gesture_move_radius_px = 16.0F;
+    ctx->gesture_move_radius = 16.0F;
     const size_t tree_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_root_bytes = NT_ALIGN_UP(sizeof(*ctx->tree_root_for_elem) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_dfs_bytes = NT_ALIGN_UP(sizeof(nt_ui_dfs_frame_t) * NT_UI_TREE_DFS_DEPTH_CAP, NT_UI_CACHE_LINE);
@@ -2704,7 +2704,7 @@ static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
 static bool press_pairs_with_last(const nt_ui_context_t *ctx, uint32_t id, float x, float y) {
     const float dx = x - ctx->last_press_pos[0];
     const float dy = y - ctx->last_press_pos[1];
-    const float radius = ctx->gesture_move_radius_px;
+    const float radius = ctx->gesture_move_radius;
     return ctx->last_press_id == id && ctx->last_press_age <= ctx->gesture_dbl_window_secs && (dx * dx) + (dy * dy) <= radius * radius;
 }
 
@@ -2828,12 +2828,22 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
 
 nt_ui_interaction_t nt_ui_step_interaction(nt_ui_context_t *ctx, uint32_t id) { return nt_ui_step_interaction_padded(ctx, id, NULL); }
 
-void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_px) {
+bool nt_ui_hold_crossed(const nt_ui_interaction_t *in, float secs) {
+    NT_ASSERT(in != NULL && secs > 0.0F && "nt_ui_hold_crossed: in must be non-NULL, secs must be > 0");
+    return in->hold_prev_secs < secs && in->hold_secs >= secs;
+}
+
+float nt_ui_hold_progress(const nt_ui_interaction_t *in, float secs) {
+    NT_ASSERT(in != NULL && secs > 0.0F && "nt_ui_hold_progress: in must be non-NULL, secs must be > 0");
+    return in->hold_secs >= secs ? 1.0F : in->hold_secs / secs;
+}
+
+void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_gesture_constants: ctx must be non-NULL");
     NT_ASSERT(isfinite(dbl_window_secs) && dbl_window_secs >= 0.0F && "nt_ui_set_gesture_constants: dbl_window_secs must be finite and >= 0");
-    NT_ASSERT(isfinite(move_radius_px) && move_radius_px >= 0.0F && "nt_ui_set_gesture_constants: move_radius_px must be finite and >= 0");
+    NT_ASSERT(isfinite(move_radius) && move_radius >= 0.0F && "nt_ui_set_gesture_constants: move_radius must be finite and >= 0");
     ctx->gesture_dbl_window_secs = dbl_window_secs;
-    ctx->gesture_move_radius_px = move_radius_px;
+    ctx->gesture_move_radius = move_radius;
 }
 
 /* Inert registry entry: the id wins next-frame hot arbitration over anything behind it (topmost-z),

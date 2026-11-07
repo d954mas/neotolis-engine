@@ -52,7 +52,7 @@ static inline float nt_ui_radial_fill_to_end(float angle_start, float fill, floa
 void nt_ui_radial(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, float angle_start, float angle_end, const nt_ui_radial_style_t *style, const Clay_ElementDeclaration *decl);
 
 /* fill convenience: angle_end = angle_start + clamp(fill,0,1) * sweep_total.
- * The common cooldown / hold_progress idiom. fill is clamped [0,1]; sweep_total
+ * The common cooldown / nt_ui_hold_progress idiom. fill is clamped [0,1]; sweep_total
  * is the full sweep in radians (e.g. 2*PI for a full disc). */
 void nt_ui_radial_fill(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, float angle_start, float fill, float sweep_total, const nt_ui_radial_style_t *style,
                        const Clay_ElementDeclaration *decl);

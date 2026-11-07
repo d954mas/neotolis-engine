@@ -729,7 +729,7 @@ static void focus_step(input_frame_t *f) {
         st->anchor = cur_len; /* keep the selection anchor in-bounds too */
     }
 
-    /* ONE mutating interaction step (the canonical-step contract). Word-select reads double_clicked
+    /* ONE mutating interaction step. Word-select reads double_clicked
      * off this single result; the dbl window + move radius come from the context. */
     nt_ui_interaction_t in;
     if (enabled) {

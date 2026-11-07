@@ -116,6 +116,6 @@ with any rectangular region (full-bleed `[0,1]` texture or a packed sub-region).
   flag — direction is implicit in the start/end order, and **swapping the two
   angles reverses the sweep** (flip is API-layer, no shader branch).
 - **`fill` 0..1** is a thin convenience mapping `angle_end = angle_start +
-  clamp(fill,0,1) * sweep_total` for cooldown / hold_progress idioms.
+  clamp(fill,0,1) * sweep_total` for cooldown / `nt_ui_hold_progress` idioms.
 - **`inner_radius_norm` `[0,1)`** carves a ring (0 = full disc); aspect from the
   bbox lets the same shape render as an oval.

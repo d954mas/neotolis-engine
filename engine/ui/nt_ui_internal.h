@@ -181,15 +181,6 @@ typedef struct {
 #define NT_UI_COMBO_DUP_KEY_WINDOW 64
 #endif
 
-/* Multitouch (α-semantics: single capture per widget). step/query iterate all
- * frame_pointers[0..count) and resolve the pointer that "owns" each widget:
- *   - if a pidx is already holding the id, it stays the owner
- *   - else the first pressed_now pointer over the widget captures it
- *   - additional fingers landing on a captured widget are silently ignored
- *   - a pointer bound to one widget is invisible to all other widgets
- * Aggregated interaction_t.hovered = any pointer over; pressed/released/clicked
- * track the single owner pidx. interaction_t.pointer_id holds the OS id of the
- * owning (or first hovering) pointer. */
 typedef struct {
     uint32_t active_id; /* widget this pointer captured; 0 = none */
     float press_pos[2]; /* UI-space press origin */
@@ -386,7 +377,7 @@ struct nt_ui_context {
     nt_ui_interactive_t *interactive_cur;
 
     uint32_t current_generation;
-    uint32_t frame_counter; /* ++ each nt_ui_begin; STABLE for the whole begin->end->post-end-query window (current_generation bumps mid-end, so it can't gate post-end reads) */
+    uint32_t frame_counter; /* ++ each nt_ui_begin; stable for the whole frame */
     uint32_t interactive_prev_count;
     uint32_t interactive_cur_count;
 
@@ -418,7 +409,7 @@ struct nt_ui_context {
     float element_depth_bias_ndc;
     /* App-wide gesture constants, see nt_ui_set_gesture_constants. Grouped with the float block to avoid padding. */
     float gesture_dbl_window_secs;
-    float gesture_move_radius_px;
+    float gesture_move_radius;
     uint32_t last_press_id; /* widget of the previous press; 0 = nothing to pair with */
     float last_press_age;   /* dt accumulated since that press */
     float last_press_pos[2];

@@ -104,11 +104,13 @@ static void test_hold_ramp_and_one_shot_crossing(void) {
     TEST_ASSERT_TRUE(float_near(nt_ui_hold_progress(&e, LONG_PRESS_SECS), 1.0F));
 }
 
-/* A widget with no hold reads an empty ramp and no crossing. */
+/* A widget with no hold reads an empty ramp and no crossing; a threshold must be positive. */
 static void test_hold_progress_is_zero_without_a_hold(void) {
     const nt_ui_interaction_t none = {0};
     TEST_ASSERT_TRUE(float_near(nt_ui_hold_progress(&none, LONG_PRESS_SECS), 0.0F));
     TEST_ASSERT_FALSE(nt_ui_hold_crossed(&none, LONG_PRESS_SECS));
+    NT_TEST_EXPECT_ASSERT((void)nt_ui_hold_crossed(&none, 0.0F));
+    NT_TEST_EXPECT_ASSERT((void)nt_ui_hold_progress(&none, 0.0F));
 }
 
 /* ---- motion inside the hitbox, past the move radius, keeps the hold ---- */
