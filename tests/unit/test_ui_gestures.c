@@ -161,7 +161,10 @@ static void test_other_pointer_over_widget_does_not_keep_hold(void) {
     TEST_ASSERT_TRUE(e.hovered);
     TEST_ASSERT_TRUE(float_near(e.hold_secs, 0.0F));
 
+    /* Back over the widget, still down: leaving cancelled the hold despite the other pointer. */
+    pointers[0] = hold_at(BTN_CY);
     e = pointers_frame(pointers, 2, LONG_PRESS_SECS);
+    TEST_ASSERT_TRUE(float_near(e.hold_secs, 0.0F));
     TEST_ASSERT_FALSE(nt_ui_hold_crossed(&e, LONG_PRESS_SECS));
 }
 
@@ -390,6 +393,7 @@ static void test_lost_release_frees_capture_for_next_press(void) {
     TEST_ASSERT_TRUE(two_btn_frame(press_at(BTN_CY), false).pressed_now);
 
     (void)two_btn_frame(idle_at(OTHER_CY), true);
+    TEST_ASSERT_TRUE(two_btn_frame(idle_at(OTHER_CY), true).hovered);
     TEST_ASSERT_TRUE(two_btn_frame(press_at(OTHER_CY), true).pressed_now);
 }
 
