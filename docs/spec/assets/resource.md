@@ -54,12 +54,12 @@ runtime CPU/GPU assets or total process memory; there is no mirrored allocation
 accounting.
 
 Owned FONT and BLOB data have separate construction and steady-state costs. With
-source pack size P and owned payloads totaling C (one per published FONT slot, one
-per canonical BLOB), those bytes occupy P + C during construction and C after AUTO
-eviction. BLOB aliases and additional font caches do not multiply C. Cache storage, GPU textures, metadata,
-registry storage and allocator overhead are separate; KEEP retains P + C.
-Replacing a FONT snapshot temporarily holds both its old and new payloads;
-P + C describes initial construction, not the replacement peak.
+source pack size P and owned payloads totaling C (one copy per font fill, one
+per canonical BLOB), those bytes occupy P + C while the pack is resident and C
+after byte eviction. BLOB aliases share their canonical copy; separate font
+objects own separate payloads. Glyph caches, GPU textures, metadata, registry
+storage and allocator overhead are additional. A fill temporarily holds both
+the caller's new bytes and their owned copy; existing payloads remain intact.
 
 ## Core concepts
 
@@ -78,7 +78,7 @@ Each slot tracks two winner notions:
 - **target winner**: highest-priority READY asset for this resource_id
 - **published winner**: highest-priority asset that is usable right now
 
-For simple runtime-handle asset types (texture, mesh, blob), target and published winners usually match. Asset types that derive persistent auxiliary state from pack bytes (atlas, font) may defer publication until `user_data` has been synchronized to the target winner.
+For simple runtime-handle asset types (texture, mesh, blob), target and published winners usually match. Asset types that derive persistent auxiliary state from pack bytes (atlas) may defer publication until `user_data` has been synchronized to the target winner.
 
 ## ResourceId
 
@@ -112,26 +112,25 @@ texture creation does not poll GPU errors.
 Typed wrappers (MeshHandle, TextureHandle) live outside nt_resource — game code or future phases.
 
 `nt_resource_publication_epoch()` exposes a monotonic change counter for systems that want to skip work when published slot data has not changed.
-`nt_resource_winner_gen(handle)` changes each time that slot publishes a winner and never repeats within one init, so a consumer can tell a winner swap or remount apart even when runtime handles repeat.
 
 ## AssetMeta stability
 
 **Unmount** removes asset entries (resource_id = 0) — slots are recycled for new packs. **Unload** clears runtime handle/state but preserves metadata — enables fast reload without re-parsing.
 
-`NT_BLOB_AUTO` applies only to blobs loaded through resource-managed FS/HTTP I/O.
+`nt_resource_evict` releases only bytes loaded through resource-managed FS/HTTP I/O.
 Direct `nt_resource_parse_pack` borrows the caller's bytes without copying; the
-registry retains that pointer until unmount/shutdown regardless of the blob
-policy. The caller keeps those bytes valid and unchanged for that lifetime.
+registry retains that pointer until unmount/shutdown regardless of an eviction request. The caller keeps those bytes valid and unchanged for that lifetime.
 
 Eviction clears only the pack blob bytes. Already-activated assets keep `state == READY` and their `runtime_handle`. Whether a slot can stay published after eviction depends on asset type:
 - simple assets stay usable from the runtime handle alone
 - aux-backed assets stay published only if their existing `user_data` already belongs to the published winner
 
-AUTO never evicts bytes while the pack has pending activation. The existing
-activation cursor gates eviction until its scan completes; no owner scan or
-pending counter is needed. Every non-BLOB file type has an activator registered
-before mounting. READY/FAILED owners do not prevent eviction, and explicit
-unmount removes the pack even while activation is pending.
+Eviction runs at the end of `nt_resource_step`, after activation and all resolve/
+post-resolve passes. The activation cursor keeps bytes resident through budget
+carryover. One eviction-intent bit also releases future rereads at that boundary.
+READY/FAILED owners do not retain bytes. Every file type except FONT requires a
+registered activator; FONT entries are raw inputs skipped by activation.
+Explicit unmount removes a pack even while activation is pending.
 
 ## Registry state split
 
@@ -143,8 +142,7 @@ mirror them here). The contract is the SPLIT, not the fields:
   `meta_offset`), and a direct `owner_asset` index. Owners reference themselves;
   aliases reference a canonical record in the same pack. Only the owner has
   authoritative activation state and runtime handle; aliases read through it.
-  Payload headers retain their own format versions. A BLOB's effective handle
-  remains its named record index, including zero, rather than its owner's index.
+  Payload headers retain their own format versions.
 - **`NtResourceSlot`** — one persistent record per unique resource_id the game
   asked for. Holds what the game currently sees (`runtime_handle`, `state`), the published winner's identity
   (`resolve_asset_idx`), and the `user_data` built by `on_resolve` with its
@@ -193,10 +191,8 @@ shutdown/init, even if every pack is later unmounted. Repeated registration
 asserts, including an identical description. No replace, freeze or finalize API
 exists; parsing and publication do not change type descriptions.
 
-Font and atlas init register their descriptions, and the game registers the gfx
-activators it uses. Complete those module initializations before mounting packs.
-`nt_font_shutdown()` does not remove the FONT type registration: initializing
-font again requires a new resource shutdown/init lifecycle first.
+Atlas init registers its description. The game registers the gfx and BLOB
+activators it uses before mounting packs. Font init is independent of the registry.
 Simple virtual providers use the empty default without explicit registration.
 Packs are trusted output of the engine builder. Before an activator runs, the
 resource core asserts the payload's common `{u32 magic; u16 version}` prefix and
@@ -206,12 +202,10 @@ that needs a rebuild. An activator asserts only the structure its views address
 a lower-priority pack still published, only for device or build limits such as a
 texture above the GPU's maximum size or a lost context.
 
-BLOB readiness is built in and needs no activator. Parsing checks each canonical
-BLOB with the same header assertions before copying its payload; aliases share
-that checked object. Other file asset types require
-a configured activator: missing one is a configuration error asserted during
-parse, before any asset records or blob ownership change. Unknown manifest types
-are malformed input and reject the pack through the recoverable parse error.
+Every file asset type except FONT requires a configured activator, including
+BLOB. Missing one asserts during parse, before records or byte ownership change.
+FONT has no resource object: its common header is checked by `nt_font_fill`.
+Unknown manifest types reject the pack through the recoverable parse error.
 
 Registration requires an initialized registry, a valid type-table index, a non-NULL
 descriptor and known flag bits. `on_resolve` requires `on_cleanup`; AUX_BACKED
@@ -275,13 +269,13 @@ owns GPU buffers; the skeletal types (`NSKL`, `NSKN`, `NANM`,
 BLOB owns its payload bytes.
 Aliases share their canonical owner's object.
 
-An auxiliary consumer (`NT_RESOURCE_BEHAVIOR_AUX_BACKED`, such as atlas and FONT) copies
+An auxiliary consumer (`NT_RESOURCE_BEHAVIOR_AUX_BACKED`, such as atlas) copies
 its required bytes into owned `user_data` during `on_resolve`. Once built, that
 snapshot remains usable after pack-byte eviction. A different target winner
 needs resident source bytes until its own snapshot has been prepared.
 
-`NT_BLOB_AUTO` can evict I/O-owned pack bytes after activation completes and the
-TTL expires. Requested resources do not retain their source blob. Caller-owned
+`nt_resource_evict` requests byte release at the end of step, after activation
+and all AUX resolve/post-resolve passes complete. Requested resources do not retain their source blob. Caller-owned
 bytes passed to `nt_resource_parse_pack` remain borrowed until unmount or
 shutdown and are never evicted by the registry.
 
@@ -291,9 +285,13 @@ up by the next resolve, or cleaned up during shutdown.
 
 ## GPU context loss recovery
 
-`nt_resource_invalidate(NT_ASSET_BLOB)` asserts before any registry mutation.
-Raw BLOB bytes have no activation to repeat. Invalidation of other asset types
-preserves BLOB owner/alias readiness and resident payloads.
+`nt_blob` owns a fixed-capacity generational pool independent of the registry.
+The game calls `nt_blob_init(max_blobs)` and registers `nt_blob_activate` /
+`nt_blob_deactivate` for BLOB packs. `nt_blob_create` copies caller bytes,
+`nt_blob_read` returns an immutable view until destroy or module shutdown,
+and `nt_blob_destroy` frees it. An empty BLOB has a valid handle and {NULL, 0}
+view. Stale reads/destroys and pool/OOM failures assert; destroying zero is a no-op.
+The resource registry shuts down before the BLOB pool so deactivation can finish.
 
 `nt_gfx_begin_frame()`, the first gfx call of each host iteration, restores the
 context and sets `g_nt_gfx.context_restored` until the next begin_frame. Detection
@@ -361,29 +359,23 @@ program bumps its slot generation, so `nt_gfx_program_ready(info->program)`
 reports false. Material handles remain unchanged; ECS components, the UI context,
 and game-side structures need no re-binding.
 
-A font keeps its `nt_font_add` source list of resource handles. Once the context
-is usable, `nt_font_step` recreates a non-ready curve texture before its
-resource rescan; this does not require source-asset reactivation. GPU restore
-does not invalidate FONT: its owned CPU payload survives context loss. Explicit
-`nt_resource_invalidate(NT_ASSET_FONT)` remains legal; it re-activates
-those sources through the normal resource path, rereading an evicted pack.
-The existing copy can remain when the same winner stays published.
-Re-adding an existing source asserts on the duplicate. Call `nt_font_step` after
-`nt_gfx_begin_frame` and before any render pass: recovery destroys and replaces
-the old texture handles. An atlas keeps its parsed regions and
-needs its page textures resolved again.
+A font retains its own compact payloads. GPU restore
+does not invalidate FONT: its independent CPU payloads survive context loss.
+`nt_resource_invalidate(NT_ASSET_FONT)` asserts. `nt_font_step` rebuilds glyph
+textures locally; call it after `nt_gfx_begin_frame` and before any render pass.
+No refill or source reread is needed. An atlas keeps its parsed regions and needs
+its page textures resolved again.
 
-The current invalidation bridge schedules all evicted file packs for reload,
-even when a pack contains no asset of the invalidated type. CPU FONT objects
-remain intact, but an unrelated GPU-type invalidation may still reread their
-source pack. #503 limits reloads to packs owning an invalidated asset.
+Invalidation schedules a reread only for packs with matching canonical owners.
+An evicted empty or FONT-only pack remains evicted. Ready objects of unrelated
+types remain intact.
 
 Programs from file-backed stages come back as the resource step re-activates
 their stages from `NT_ASSET_SHADER_CODE` within its activation budget, starting
 with the restored iteration's own step. The game links a new program once both
 stages resolve and assigns it with `nt_material_set_program`. Assigning the same handle
 is a no-op, so each material may be gated on its own program every frame without
-an assignment latch. A blob-resident pack (the default, `NT_BLOB_KEEP`) can
+an assignment latch. A resident pack can
 re-activate on the next step within the activation budget; an evicted pack must
 re-download first. Rebuild resource-dependent render state after publication.
 
@@ -425,7 +417,8 @@ nt_resource_unregister(pack_id, resource_id);
 
 Register/unregister assert a nonzero resource_id. Unregister applies only to
 virtual packs; file entries leave together on unmount. Re-registering an existing
-virtual name updates its record without allocating. Virtual records own their
+virtual name updates its runtime handle without allocating; changing its asset
+type asserts before mutation. Virtual records own their
 registry identity, while the game retains ownership of their runtime objects.
 
 ## Shared runtime objects and free slots
@@ -447,8 +440,9 @@ uses it to translate manifest ordinals without allocating a separate map.
 Before releasing an index, invalidate matching published-winner and auxiliary
 source indices in its requested slot. This preserves change detection even if
 the same name and runtime handle reuse that index before the next step. Copy-out
-user_data survives until normal resolve cleanup/rebuild. BLOB and
-metadata getters return NULL after release until the next publication. Published
+user_data survives until normal resolve cleanup/rebuild. Metadata getters return
+NULL after release until the next publication. A released BLOB handle is stale;
+consumers reacquire the runtime object after the next resource step. Published
 handle/state and the publication epoch remain owned by the resolve pass.
 
 ## Asset types
@@ -478,21 +472,31 @@ Additional types (material, audio) will be added as needed.
 
 ### NT_ASSET_FONT binary format
 
-`nt_font_init(desc)` initializes the font pool and registers the FONT type,
-returning `void`. Call it after `nt_resource_init`, before the first successful
-file or virtual mount. The descriptor must be non-NULL with positive `max_fonts`;
-invalid arguments, double initialization and allocation failure assert.
-`nt_font_shutdown` does not reset type registration in the resource lifecycle.
+`nt_font_init(desc)` initializes an independent font pool. It needs no resource
+registry. The descriptor requires positive `max_fonts`; invalid arguments,
+double initialization and allocation failure assert. Each `nt_font_t` owns a
+list of compact payload copies, bounded by `nt_font_create_desc_t.max_payloads`.
+`nt_font_create` asserts on invalid configuration, pool exhaustion and allocation
+failure. Payload count also determines whether metrics are present; no separate
+readiness flag is stored.
 
-Publication copies the compact FONT payload into the slot's `user_data`; it does
-not expand glyph contours. Fonts referencing one resource share its copy; each
-published alias holds its own. A new winner replaces the copy, and it is released
-when the slot loses its winner or at resource shutdown. A virtual FONT provider has
-no bytes to copy and asserts at publication.
+`nt_font_fill(font, bytes, size)` copies one trusted FONT payload synchronously.
+The caller may free its input after return. Fill happens outside a render pass,
+before layout. Existing glyphs and GPU cache rows stay valid. Overlapping
+codepoints, incompatible units-per-em/ascent/descent/line-gap, capacity overflow,
+invalid headers and OOM assert before publication. The first fill owns decoration
+metrics. Ranges are selected in the builder; runtime replacement is not provided
+yet. Destroy and shutdown free all owned copies.
 
-FONT publication currently allocates, copies and frees during resolve, outside
-the activation budget. This is a temporary deviation from the hot-path memory
-policy; #503 removes this bridge when FONT becomes a direct runtime object.
+FONT pack entries are raw inputs, with no activator and no resource slot.
+`nt_resource_entry_bytes(pack, entry, &size)` reads a resident entry without I/O
+or activation; absence/nonresidency returns NULL and size 0. The view is borrowed
+until byte eviction, unmount or shutdown. The game fills its font before evicting.
+Requesting or registering FONT as a resource asserts.
+
+Fill increments `nt_font_content_revision` and clears only the font measurement
+cache. CPU data survives GPU context loss, so texture recovery needs no pack
+read. UI consumes the revision before layout; see [font measurements](../ui/nt-ui.md#font-measurements).
 
 Builder produces font assets from TTF/OTF sources. Binary layout:
 
@@ -533,8 +537,9 @@ guaranteed texture size) and one RGBA16F curve texture with a row per slot
 (`NT_FONT_GLYPH_TEXELS` = 2048 texels, 16 KB). A row starts with one header
 texel per band, `(y_start, y_count, x_start, x_count)`, followed by the
 band-sorted curves; evicting a slot frees its row, so the cache never clears
-itself for space. Slot 0 holds tofu, which `nt_font_step` generates once
-metrics and a ready texture exist.
+itself for space. Slot 0 holds tofu, generated by the first `nt_font_fill`
+with a ready texture. After texture recovery, `nt_font_step` regenerates it
+from the retained metrics.
 
 - A miss takes a never-used slot, else the least recently used slot not looked
   up in the current gfx frame (since `nt_gfx_begin_frame`): that frame's
@@ -543,7 +548,7 @@ metrics and a ready texture exist.
   naming `max_glyphs`. The glyph set depends on content the game does
   not control (player text, localisation), so this is recoverable.
 - The whole cache is cleared only inside `nt_font_step`: after texture
-  re-creation and after a provider or metrics change. Call it once per frame
+  re-creation. Call it once per frame
   before any text.
 
 Bands only speed up the shader's curve search: more bands mean fewer curves per
@@ -576,7 +581,7 @@ metrics stay unchanged.
 
 **Decoration metrics.** The 24-byte header ends with four `int16` decoration-metric fields (`underline_position`, `underline_thickness`, `strikeout_position`, `strikeout_size`). The builder reads these raw from the source font's `post` (`underlinePosition`@8, `underlineThickness`@10) and `OS/2` (`yStrikeoutSize`@26, `yStrikeoutPosition`@28) tables (big-endian, UPM-rescaled with the other metrics); when a table is absent it bakes a metric-correct heuristic (underline just below baseline, strike near mid x-height) so the runtime never sees garbage. This keeps decoration metrics in the builder — the runtime stays a parser-free safety net.
 
-**Activation checks.** FONT activation asserts only that the glyph table fits the blob (O(1)): the pack is trusted. Publication copies the compact payload in O(bytes); glyph decode asserts each glyph's point and curve counts on first use. Shared glyph payloads, trailing padding and zero-curve glyphs are valid. Coordinate and metric values are builder guarantees.
+**Fill checks.** FONT fill asserts magic, version, minimum header size and that the glyph table fits the blob. Payload values are trusted builder output. It checks incoming codepoints against existing payloads before copying in O(bytes); glyph decode asserts each glyph's point and curve counts on first use. Shared glyph payloads, trailing padding and zero-curve glyphs are valid. Coordinate and metric values are builder guarantees.
 
 ### NT_ASSET_ATLAS binary format
 

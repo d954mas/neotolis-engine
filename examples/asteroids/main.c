@@ -2112,6 +2112,7 @@ static void collect_pending_noise(void) {
     select_level(s_requested_level);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     const double begin = nt_time_now();
     const double interval = s_last_tick > 0 ? begin - s_last_tick : 0;
@@ -2138,6 +2139,11 @@ static void frame(void) {
         select_level(s_requested_level);
     }
     nt_resource_step();
+    if (nt_font_content_revision(s_font) == 0 && nt_resource_pack_state(nt_hash32_str("asteroids_core")) == NT_PACK_STATE_READY) {
+        uint32_t size = 0;
+        const uint8_t *bytes = nt_resource_entry_bytes(nt_hash32_str("asteroids_core"), nt_hash64_str("asteroids/font"), &size);
+        nt_font_fill(s_font, bytes, size);
+    }
     nt_font_step();
     const bool ready = prepare_gpu();
     if (ready && !s_ready) {
@@ -2279,8 +2285,8 @@ int main(int argc, char **argv) {
     nt_resource_register_type(NT_ASSET_TEXTURE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_texture, .deactivate = nt_gfx_deactivate_texture});
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 1});
-    s_font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 128, .measure_cache_size = 128});
-    nt_font_add(s_font, nt_resource_request(nt_hash64_str("asteroids/font"), NT_ASSET_FONT));
+    s_font = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = 128, .measure_cache_size = 128});
+
     nt_material_init(&(nt_material_desc_t){.max_materials = 2});
     s_text_material = nt_material_create(&(nt_material_create_desc_t){.blend = nt_blend_alpha_premultiplied(), .cull_mode = NT_CULL_NONE, .label = "asteroids_text"});
     init_ui();

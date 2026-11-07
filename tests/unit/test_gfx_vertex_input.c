@@ -458,6 +458,26 @@ static nt_mesh_t activate_test_mesh(const NtStreamDesc *streams, uint8_t stream_
     return (nt_mesh_t){nt_gfx_activate_mesh(blob, size)};
 }
 
+static void test_direct_mesh_owns_layout_and_skips_lost_buffers(void) {
+    const float vertices[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+    const uint16_t indices[3] = {0, 1, 2};
+    NtStreamDesc stream = {.type = NT_STREAM_FLOAT32, .count = 3, .location = 5};
+    nt_mesh_t mesh = nt_gfx_make_mesh(&(nt_mesh_desc_t){.vertices = vertices, .indices = indices, .streams = &stream, .vertex_count = 3, .index_count = 3, .stream_count = 1, .index_type = 1});
+    stream.location = 0;
+    const nt_gfx_mesh_info_t *info = nt_gfx_get_mesh_info(mesh);
+    TEST_ASSERT_NOT_NULL(info);
+    TEST_ASSERT_EQUAL_UINT16(12, info->stride);
+    TEST_ASSERT_EQUAL_UINT8(5, info->streams[0].location);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_mesh_vertex_input(mesh, frame0()).id);
+    nt_gfx_end_frame();
+    nt_gfx_fake_lose_and_restore_context();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_NOT_NULL(nt_gfx_get_mesh_info(mesh));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_mesh_vertex_input(mesh, frame0()).id);
+    nt_gfx_destroy_mesh(mesh);
+    TEST_ASSERT_NULL(nt_gfx_get_mesh_info(mesh));
+}
+
 /* Each stream type maps to its vertex type at the pack's location, offsets packed in stream order. */
 void test_mesh_vertex_input_maps_every_stream_type(void) {
     const NtStreamDesc streams[] = {
@@ -950,6 +970,7 @@ int main(void) {
     RUN_TEST(test_destroy_instance_buffer_keeps_vi);
     RUN_TEST(test_deactivate_mesh_cascades_to_vi);
     RUN_TEST(test_mesh_vertex_input_maps_every_stream_type);
+    RUN_TEST(test_direct_mesh_owns_layout_and_skips_lost_buffers);
     RUN_TEST(test_mesh_vertex_input_per_buffer);
     RUN_TEST(test_bind_vi_reaches_backend);
     RUN_TEST(test_bind_of_a_stale_vi_asserts);

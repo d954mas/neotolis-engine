@@ -633,7 +633,7 @@ if(NOT EMSCRIPTEN)
     add_executable(test_sponza_program_assignment unit/test_sponza_program_assignment.c)
     target_include_directories(test_sponza_program_assignment PRIVATE "${CMAKE_SOURCE_DIR}/examples/sponza/generated")
     target_link_libraries(test_sponza_program_assignment PRIVATE
-        nt_mesh_renderer nt_app_stub nt_input_stub nt_window_stub nt_resource nt_material
+        nt_mesh_renderer nt_app_stub nt_input_stub nt_window_stub nt_resource nt_blob nt_material
         nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp nt_render
         nt_hash nt_math nt_time nt_shared nt_core nt_version
         nt_gfx_fake nt_basisu_transcoder_stub nt_meshwire_stub nt_http_stub nt_fs_stub nt_log_stub unity
@@ -690,7 +690,7 @@ if(NOT EMSCRIPTEN)
 
     # --- Font module tests ---
     add_executable(test_font unit/test_font.c unit/test_helpers/nt_assert_trap.c)
-    target_link_libraries(test_font PRIVATE nt_font nt_gfx_fake nt_basisu_transcoder_stub nt_resource nt_hash nt_pool nt_http_stub nt_fs_stub nt_log stb_truetype unity nt_meshwire_stub)
+    target_link_libraries(test_font PRIVATE nt_font nt_gfx_fake nt_basisu_transcoder_stub nt_hash nt_pool nt_log stb_truetype unity nt_meshwire_stub)
     target_compile_definitions(test_font PRIVATE _CRT_SECURE_NO_WARNINGS NT_LILITA_TTF="${CMAKE_SOURCE_DIR}/assets/fonts/LilitaOne-RussianChineseKo.ttf")
     nt_setup_test_target(test_font)
 
@@ -698,7 +698,7 @@ if(NOT EMSCRIPTEN)
     # Measures hit vs miss ns/call for the nt_font_measure_n LRU cache.
     # Uses nt_time_nanos() for the ns clock (same module used by test_time).
     add_executable(test_nt_font_measure_bench unit/test_nt_font_measure_bench.c unit/test_helpers/nt_test_font_blob.c)
-    target_link_libraries(test_nt_font_measure_bench PRIVATE nt_font nt_gfx_fake nt_basisu_transcoder_stub nt_resource nt_hash nt_pool nt_time nt_http_stub nt_fs_stub nt_log_stub unity nt_meshwire_stub)
+    target_link_libraries(test_nt_font_measure_bench PRIVATE nt_font nt_gfx_fake nt_basisu_transcoder_stub nt_hash nt_pool nt_time nt_log_stub unity nt_meshwire_stub)
     target_compile_definitions(test_nt_font_measure_bench PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_font_measure_bench)
 
@@ -743,6 +743,11 @@ if(NOT EMSCRIPTEN)
     add_test(NAME test_hash COMMAND test_hash)
 
     # --- Resource module tests ---
+    add_executable(test_blob unit/test_blob.c unit/test_helpers/nt_assert_trap.c)
+    target_include_directories(test_blob PRIVATE unit)
+    target_link_libraries(test_blob PRIVATE nt_blob unity)
+    nt_setup_test_target(test_blob)
+
     add_executable(test_resource unit/test_resource.c)
     add_executable(test_resource_timing unit/test_resource_timing.c)
     target_link_libraries(test_resource_timing PRIVATE nt_resource nt_http_stub nt_fs nt_log_stub unity)
@@ -751,7 +756,7 @@ if(NOT EMSCRIPTEN)
     # Real nt_fs/nt_http: test_resource drives the real loader pipeline (native
     # file reads + request-fail paths). Stubs make nt_fs_read_file return INVALID,
     # so assets never activate and the activation/resolve callbacks never fire.
-    target_link_libraries(test_resource PRIVATE nt_resource nt_http nt_fs nt_log_stub unity)
+    target_link_libraries(test_resource PRIVATE nt_resource nt_blob nt_http nt_fs nt_log_stub unity)
     target_compile_definitions(test_resource PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_resource WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     # Only test that drives REAL nt_fs/nt_http + nt_time_sleep TTL paths on real time;

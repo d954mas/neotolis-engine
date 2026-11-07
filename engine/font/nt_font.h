@@ -5,9 +5,6 @@
 
 #include "core/nt_types.h"
 #include "graphics/nt_gfx.h"
-#include "resource/nt_resource.h"
-
-#define NT_FONT_MAX_SOURCES_PER_FONT 8
 #define NT_FONT_MAX_BANDS 16
 
 typedef struct {
@@ -29,12 +26,14 @@ static inline nt_font_desc_t nt_font_desc_defaults(void) {
 typedef struct {
     uint16_t max_glyphs;         /* glyph-cache slots incl. tofu, one curve-texture row each (16 KB); 2..2048 */
     uint16_t measure_cache_size; /* POT if non-zero; 0 = disabled; max 32768 */
+    uint8_t max_payloads;        /* retained compact payloads; positive, no hidden growth */
 } nt_font_create_desc_t;
 
 static inline nt_font_create_desc_t nt_font_create_desc_defaults(void) {
     return (nt_font_create_desc_t){
         .max_glyphs = 256,
         .measure_cache_size = 1024,
+        .max_payloads = 8,
     };
 }
 
@@ -104,23 +103,24 @@ nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size, flo
 void nt_font_measure_invalidate_cache(void);
 void nt_font_measure_invalidate(nt_font_t font);
 
-/* Call after nt_resource_init(), before its first successful file or virtual mount.
- * Registers FONT once per resource lifecycle; nt_font_shutdown() does not reset that registration.
- * NULL desc, zero capacity, double init and allocation failure assert. */
+/* Independent of the resource registry. NULL desc, zero capacity, double init and OOM assert. */
 void nt_font_init(const nt_font_desc_t *desc);
 void nt_font_shutdown(void);
 /* Call once per frame after gfx begin_frame, outside a pass and before any text: recovery replaces the
- * GPU texture, and a provider change clears the glyph cache that this frame's draws will sample. */
+ * GPU texture and clears the glyph cache that this frame's draws will sample. */
 void nt_font_step(void);
 
+/* Invalid configuration, pool exhaustion and allocation failure assert. */
 nt_font_t nt_font_create(const nt_font_create_desc_t *desc);
 void nt_font_destroy(nt_font_t font);
 bool nt_font_valid(nt_font_t font);
 
-/* resource must be NT_ASSET_FONT; adding another type or the same source twice asserts.
- * Sources survive context loss. nt_font_step recreates curve/band textures once the
- * context is usable, independently of font asset reactivation. */
-void nt_font_add(nt_font_t font, nt_resource_t resource);
+/* Copies a trusted FONT payload before returning; caller bytes may then be freed.
+ * Outside a render pass, before layout. Overlap, incompatible metrics, invalid structure,
+ * capacity exhaustion and OOM assert. Existing glyphs stay valid; destroy frees all copies. */
+void nt_font_fill(nt_font_t font, const uint8_t *data, uint32_t size);
+/* Zero before the first fill; advances on fill only, not glyph-cache eviction or GPU recovery. */
+uint32_t nt_font_content_revision(nt_font_t font);
 
 nt_font_metrics_t nt_font_get_metrics(nt_font_t font);
 nt_font_stats_t nt_font_get_stats(nt_font_t font);
@@ -138,21 +138,9 @@ int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right
 
 // #region test_access
 #ifdef NT_TEST_ACCESS
-/* Test helpers — drive the on_resolve/on_cleanup path via a real parsed pack
- * (virtual packs carry no blob). register_data returns a 1-based token; resource()
- * requests it; deactivate() unmounts; reregister() re-mounts the same (pid,rid). */
-uint32_t nt_font_test_register_data(const uint8_t *data, uint32_t size);
-nt_resource_t nt_font_test_resource(uint32_t token);
-void nt_font_test_deactivate(uint32_t token);
-void nt_font_test_reregister(uint32_t token, const uint8_t *data, uint32_t size);
-
 uint32_t nt_font_test_measure_cache_hits(nt_font_t font);
 uint32_t nt_font_test_measure_cache_misses(nt_font_t font);
 void nt_font_test_reset_measure_counters(void);
-
-/* Set metrics on a stub font so measure_n returns predictable tofu widths
- * (advance = units_per_em * 0.5 * size / units_per_em = size/2 per char). */
-void nt_font_test_set_metrics(nt_font_t font, uint16_t units_per_em, int16_t ascent, int16_t descent, int16_t line_height);
 
 uint16_t nt_font_test_decode_contours(const uint8_t *contour_data, float weight, float *out_curves, uint16_t max_curves);
 #if NT_FONT_EMBOLDEN_ENABLED

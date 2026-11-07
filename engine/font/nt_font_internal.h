@@ -8,7 +8,7 @@
 /* Used by both calloc (in create) and memset (in clear) — macro keeps them in sync. */
 #define NT_FONT_MEASURE_CACHE_ENTRY_BYTES (sizeof(uint64_t) + sizeof(uint32_t) + sizeof(nt_text_size_t) + sizeof(uint8_t))
 
-/* Sentinel for ascii_glyph_idx[] — codepoint absent in all resources. */
+/* Sentinel for ascii_glyph_idx[] — codepoint absent in all payloads. */
 #define NT_FONT_ASCII_IDX_NONE ((uint16_t)0xFFFFU)
 
 /* SoA: hash + size + valid in separate arrays so misses don't drag value
@@ -32,11 +32,10 @@ typedef struct nt_font_slot_s nt_font_slot_t;
 
 struct nt_font_slot_s {
     nt_font_metrics_t metrics;
-    bool metrics_set;
 
-    nt_resource_t resources[NT_FONT_MAX_SOURCES_PER_FONT];
-    uint32_t resource_gens[NT_FONT_MAX_SOURCES_PER_FONT];
-    uint8_t resource_count;
+    uint8_t **payloads;
+    uint8_t payload_count;
+    uint8_t max_payloads;
 
     nt_texture_t curve_texture; /* RGBA16F, NT_FONT_GLYPH_TEXELS x max_glyphs: row i = cache slot i */
 
@@ -55,9 +54,9 @@ struct nt_font_slot_s {
     bool has_any_kern;
 
     /* For codepoint < 128, ascii_glyph_idx[cp] is the glyph position inside
-     * resource ascii_glyph_res[cp]. NONE sentinel = not in any resource. */
+     * payload ascii_glyph_payload[cp]. NONE sentinel = not in any payload. */
     uint16_t ascii_glyph_idx[128];
-    uint8_t ascii_glyph_res[128];
+    uint8_t ascii_glyph_payload[128];
 
 #ifdef NT_TEST_ACCESS
     uint32_t test_measure_cache_hits;
@@ -67,9 +66,7 @@ struct nt_font_slot_s {
 
 typedef struct {
     nt_pool_t pool;
-    nt_font_slot_t *slots;       /* [capacity+1], index 0 reserved */
-    uint32_t last_resolve_epoch; /* last nt_resource_publication_epoch() seen — gates the step rescan */
-    bool needs_resource_rescan;  /* a font's resource set changed; epoch alone won't reflect it */
+    nt_font_slot_t *slots; /* [capacity+1], index 0 reserved */
     bool initialized;
 } nt_font_state_t;
 

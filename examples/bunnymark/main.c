@@ -291,6 +291,11 @@ static void frame(void) {
 #endif
 
     nt_resource_step();
+    if (nt_font_content_revision(s_overlay_font) == 0 && nt_resource_pack_state(s_pack_id) == NT_PACK_STATE_READY) {
+        uint32_t size = 0;
+        const uint8_t *bytes = nt_resource_entry_bytes(s_pack_id, ASSET_FONT_BUNNYMARK_FONT_OVERLAY, &size);
+        nt_font_fill(s_overlay_font, bytes, size);
+    }
     link_programs();
     nt_sprite_comp_sync_resources();
 
@@ -637,10 +642,8 @@ int main(int argc, char **argv) {
         .label = "stats_overlay",
     });
     s_overlay_font = nt_font_create(&(nt_font_create_desc_t){
-        .max_glyphs = 256, .measure_cache_size = 0, /* bunnymark never calls nt_font_measure*; disable to skip the alloc. */
+        .max_payloads = 8, .max_glyphs = 256, .measure_cache_size = 0, /* bunnymark never calls nt_font_measure*; disable to skip the alloc. */
     });
-    nt_resource_t overlay_font_res = nt_resource_request(ASSET_FONT_BUNNYMARK_FONT_OVERLAY, NT_ASSET_FONT);
-    nt_font_add(s_overlay_font, overlay_font_res);
 
     nt_resource_set_activate_time_budget(0);
 

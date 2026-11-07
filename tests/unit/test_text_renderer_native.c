@@ -11,7 +11,6 @@
 #include "hash/nt_hash.h"
 #include "material/nt_material.h"
 #include "renderers/nt_text_renderer.h"
-#include "resource/nt_resource.h"
 #include "test_helpers/nt_gfx_test_desc.h"
 #include "test_helpers/nt_gfx_test_frame.h"
 #include "test_helpers/nt_test_font_blob.h"
@@ -51,15 +50,15 @@ void setUp(void) {
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 4, .max_programs = 2, .max_pipelines = 2, .max_buffers = 8, .max_textures = 4, .max_meshes = 2, .max_vertex_inputs = 4, .max_render_targets = 2));
     nt_gfx_begin_frame();
-    nt_resource_init(&(nt_resource_desc_t){0});
+
     nt_material_init(&(nt_material_desc_t){.max_materials = 2});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 1});
 
     uint32_t size = 0;
     s_blob = nt_test_font_blob('A', 'B', &size);
-    s_font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = MAX_GLYPHS});
-    nt_font_add(s_font, nt_font_test_resource(nt_font_test_register_data(s_blob, size)));
-    nt_resource_step();
+    s_font = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = MAX_GLYPHS});
+    nt_font_fill(s_font, s_blob, size);
+
     nt_font_step();
 
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_vs_src});
@@ -74,7 +73,7 @@ void tearDown(void) {
     nt_material_shutdown();
     nt_font_destroy(s_font);
     nt_font_shutdown();
-    nt_resource_shutdown();
+
     nt_gfx_shutdown();
     nt_hash_shutdown();
     free(s_blob);
