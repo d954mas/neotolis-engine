@@ -199,15 +199,6 @@ typedef struct {
     bool hold_live; /* false once the pointer left the hitbox; only a new press restarts the hold */
 } nt_ui_capture_t;
 
-/* App-wide gesture defaults. Per-ctx, settable via nt_ui_set_gesture_constants. Touch-friendly baseline
- * (looser than ImGui's mouse 6px/0.3s) since the engine targets mobile/WASM; mouse-only apps can tighten. */
-#ifndef NT_UI_GESTURE_DBL_WINDOW_SECS
-#define NT_UI_GESTURE_DBL_WINDOW_SECS 0.50F
-#endif
-#ifndef NT_UI_GESTURE_MOVE_RADIUS_PX
-#define NT_UI_GESTURE_MOVE_RADIUS_PX 16.0F
-#endif
-
 /* Lives at arena head; hot fields first. Per-ctx — no module globals. Field order is deliberately
  * hot-first for cache locality, not padding-optimal; a context is per-UI (not a dense array), so the
  * padding is irrelevant — suppress the analyzer's reorder suggestion. */
@@ -425,8 +416,7 @@ struct nt_ui_context {
      * inside ui_hit_test instead of silently raycasting through a stale frame's camera. */
     bool view_proj_set;
     float element_depth_bias_ndc;
-    /* App-wide gesture constants. Set in create_context to the #define defaults,
-     * overridable via nt_ui_set_gesture_constants. Grouped with the float block to avoid padding. */
+    /* App-wide gesture constants, see nt_ui_set_gesture_constants. Grouped with the float block to avoid padding. */
     float gesture_dbl_window_secs;
     float gesture_move_radius_px;
     uint32_t last_press_id; /* widget of the previous press; 0 = nothing to pair with */

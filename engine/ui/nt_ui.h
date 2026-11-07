@@ -594,10 +594,10 @@ static inline bool nt_ui_hold_crossed(const nt_ui_interaction_t *in, float secs)
 /* Linear 0..1 ramp toward secs > 0 while the hold is live, 0 otherwise (the hold-to-confirm signal). */
 static inline float nt_ui_hold_progress(const nt_ui_interaction_t *in, float secs) { return in->hold_secs >= secs ? 1.0F : in->hold_secs / secs; }
 
-/* App-wide gesture constants: the double-click window (secs) and the move radius (px) within
+/* App-wide gesture constants: the double-click window (secs) and the move radius (layout units) within
  * which a second press still counts as a double-click. Hold/long-press is NOT cancelled by
  * movement — only by leaving the widget's hitbox. Asserts each is finite and >= 0 (fail-early,
- * no silent clamp). Defaults: NT_UI_GESTURE_DBL_WINDOW_SECS / _MOVE_RADIUS_PX. */
+ * no silent clamp). Defaults: 0.5 s, 16. */
 void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_px);
 
 /* Inert occluder: enters id into the interactive registry so it wins next-frame topmost-z
