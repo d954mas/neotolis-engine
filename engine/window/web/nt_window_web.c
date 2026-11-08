@@ -43,8 +43,10 @@ static void map_css_to_fb(float css_x, float css_y, float *fb_x, float *fb_y) {
 _Static_assert(NT_INPUT_EV_KEY == 0 && NT_INPUT_EV_CHAR == 1 && NT_INPUT_EV_MOUSE_MOVE == 2 && NT_INPUT_EV_MOUSE_LEAVE == 4 && NT_INPUT_EV_CONTACT_DOWN == 5 && NT_INPUT_EV_CONTACT_MOVE == 6 &&
                    NT_INPUT_EV_CONTACT_UP == 7 && NT_INPUT_EV_WHEEL == 8 && NT_INPUT_EV_FOCUS_LOST == 9,
                "EV_* in nt_window_web_register_input");
-_Static_assert(NT_KEY_0 == 26 && NT_KEY_ARROW_UP == 36 && NT_KEY_RALT == 50 && NT_KEY_F1 == 51 && NT_KEY_DELETE == 63 && NT_KEY_PAGE_DOWN == 68 && NT_POINTER_TOUCH == 1 && NT_POINTER_PEN == 2,
-               "keyMap and the contact type in nt_window_web_register_input");
+_Static_assert(NT_KEY_A == 0 && NT_KEY_0 == 26 && NT_KEY_ARROW_UP == 36 && NT_KEY_SPACE == 40 && NT_KEY_LSHIFT == 45 && NT_KEY_F1 == 51 && NT_KEY_DELETE == 63 && NT_KEY_COUNT == 69 &&
+                   NT_POINTER_TOUCH == 1 && NT_POINTER_PEN == 2,
+               "codes (nt_key_t order) and the contact type in nt_window_web_register_input");
+_Static_assert(NT_TEXT_INPUT_URL == 3 && NT_TEXT_INPUT_PASSWORD == 4, "modes in nt_window_js_set_text_input_mode");
 
 /* One stride-7 record [kind, a, b, c, d, e, f], kind = nt_input_event_kind_t. */
 EMSCRIPTEN_KEEPALIVE void nt_window_web_on_input(int kind, double a, double b, double c, double d, double e, double f) {
@@ -92,39 +94,22 @@ EMSCRIPTEN_KEEPALIVE void nt_window_web_on_input(int kind, double a, double b, d
 EM_JS(void, nt_window_web_register_input, (void), {
     var canvas = Module['canvas'];
 
-    /* Key mapping: KeyboardEvent.code -> nt_key_t enum value */
-    var keyMap = {};
-    var letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    /* KeyboardEvent.code in nt_key_t order: keyMap[code] is the enum value */
+    var codes = [];
     for (var i = 0; i < 26; i++) {
-        keyMap["Key" + letters[i]] = i;
+        codes.push("Key" + String.fromCharCode(65 + i));
     }
     for (var d = 0; d < 10; d++) {
-        keyMap["Digit" + d] = 26 + d;
+        codes.push("Digit" + d);
     }
-    keyMap["ArrowUp"]    = 36;
-    keyMap["ArrowDown"]  = 37;
-    keyMap["ArrowLeft"]  = 38;
-    keyMap["ArrowRight"] = 39;
-    keyMap["Space"]      = 40;
-    keyMap["Enter"]      = 41;
-    keyMap["Escape"]     = 42;
-    keyMap["Tab"]        = 43;
-    keyMap["Backspace"]  = 44;
-    keyMap["ShiftLeft"]  = 45;
-    keyMap["ShiftRight"] = 46;
-    keyMap["ControlLeft"]  = 47;
-    keyMap["ControlRight"] = 48;
-    keyMap["AltLeft"]  = 49;
-    keyMap["AltRight"] = 50;
+    codes.push("ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "Enter", "Escape", "Tab", "Backspace",
+               "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight", "AltLeft", "AltRight");
     for (var f = 1; f <= 12; f++) {
-        keyMap["F" + f] = 50 + f;
+        codes.push("F" + f);
     }
-    keyMap["Delete"]   = 63;
-    keyMap["Insert"]   = 64;
-    keyMap["Home"]     = 65;
-    keyMap["End"]      = 66;
-    keyMap["PageUp"]   = 67;
-    keyMap["PageDown"] = 68;
+    codes.push("Delete", "Insert", "Home", "End", "PageUp", "PageDown");
+    var keyMap = {};
+    codes.forEach(function(c, k) { keyMap[c] = k; });
 
     /* Keys that need preventDefault to avoid browser defaults */
     var preventSet = {
@@ -196,7 +181,7 @@ EM_JS(void, nt_window_web_register_input, (void), {
     var mouseOwned = false;
     function mouseMove(e, buttons) {
         mouseButtons = buttons & 7; /* back/forward buttons are not engine buttons */
-        mouseOwned = mouseOwned && mouseButtons !== 0;
+        mouseOwned = mouseOwned && buttons !== 0; /* a held back button keeps the press on the canvas */
         ev(EV_MOUSE_MOVE, e.clientX - rect.left, e.clientY - rect.top, mouseButtons);
     }
 

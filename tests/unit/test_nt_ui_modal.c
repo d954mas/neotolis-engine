@@ -194,6 +194,10 @@ static void test_modal_esc_requires_flag(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
     st.flags = 0U; /* no LISTEN_ESC, no CLOSE_ON_BACKDROP */
+    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
+    (void)nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true); /* top from the next frame on */
+    nt_ui_modal_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
     nt_ui_modal_result_t r = nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true);

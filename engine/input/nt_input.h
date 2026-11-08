@@ -124,11 +124,9 @@ typedef struct {
 
 /* ---- Global input state ---- */
 
-/* Typed UTF-32 characters per frame; later ones in the same frame are dropped. Exposed so the
-   devapi layer can reject a text batch that could never land whole. */
-#ifndef NT_INPUT_CHAR_MAX
+/* Typed UTF-32 characters per frame; later ones in the same frame are dropped. Fixed: it sizes the
+   published struct, so every target must agree. */
 #define NT_INPUT_CHAR_MAX 32
-#endif
 
 /* pointers[0] is the mouse: active while the cursor is over the window or a button is held, and a
    button release keeps it. Touch and pen contacts take slots 1.., each from its down to its up.

@@ -33,7 +33,7 @@ void nt_window_set_text_input_mode(nt_text_input_mode_t mode);  // soft-keyboard
 ```
 
 - Chars carry *text* (layout-resolved, includes key repeat); physical keys carry
-  navigation/editing. Web has no GLFW char callback, so the web backend
+  navigation/editing. Web has no GLFW char callback, so the web window pump
   synthesizes chars from `e.key` incl. `e.repeat` to match native behavior.
 - Frame-local like key edges: `nt_input_poll` publishes the characters typed since
   the previous poll and drops the ones the game left unread. Each publish has its own

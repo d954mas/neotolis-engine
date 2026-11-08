@@ -223,6 +223,24 @@ static void apply_contact_move(uint32_t id, float x, float y, float pressure, ui
     apply_buttons_mask(ptr, buttons);
 }
 
+static void apply_mouse_buttons(uint8_t buttons) {
+    nt_pointer_t *m = NEXT_MOUSE;
+    NT_ASSERT(buttons <= 7U);
+    if (m->active && !m->deactivate_pending) { /* no press at (0,0) for a mouse that is not over the window */
+        apply_mouse_move(m->x, m->y, buttons);
+    }
+}
+
+static void apply_mouse_leave(void) {
+    nt_pointer_t *m = NEXT_MOUSE;
+    for (int b = 0; b < NT_BUTTON_MAX; b++) {
+        if (m->buttons[b].is_down) {
+            return; /* a drag outside keeps the mouse; the window pump leaves after the release */
+        }
+    }
+    m->deactivate_pending = m->active;
+}
+
 static void apply_focus_lost(void) {
     for (int i = 0; i < NT_KEY_COUNT; i++) {
         apply_key((nt_key_t)i, false);
@@ -249,20 +267,11 @@ static void apply(const nt_input_event_t *e) {
         apply_mouse_move(e->mouse.x, e->mouse.y, e->mouse.buttons);
         break;
     case NT_INPUT_EV_MOUSE_BUTTONS:
-        if (m->active && !m->deactivate_pending) { /* no press at (0,0) for a mouse that is not over the window */
-            apply_mouse_move(m->x, m->y, e->mouse.buttons);
-        }
+        apply_mouse_buttons(e->mouse.buttons);
         break;
-    case NT_INPUT_EV_MOUSE_LEAVE: {
-        bool held = false;
-        for (int b = 0; b < NT_BUTTON_MAX; b++) {
-            held = held || m->buttons[b].is_down;
-        }
-        if (!held) { /* a drag outside keeps the mouse; the backend leaves after the release */
-            m->deactivate_pending = m->active;
-        }
+    case NT_INPUT_EV_MOUSE_LEAVE:
+        apply_mouse_leave();
         break;
-    }
     case NT_INPUT_EV_CONTACT_DOWN:
         apply_contact_down(e->contact.id, e->contact.x, e->contact.y, e->contact.pressure, e->contact.type, e->contact.buttons);
         break;

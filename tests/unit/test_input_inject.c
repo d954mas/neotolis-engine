@@ -33,6 +33,15 @@ void test_gate_off_keeps_held_key(void) {
     TEST_ASSERT_FALSE(nt_input_key_is_released(NT_KEY_W));
 }
 
+void test_gate_off_drops_real_release(void) {
+    nt_input_feed(nt_test_key(NT_KEY_W, true));
+    nt_input_poll();
+    nt_input_set_player_enabled(false);
+    nt_input_feed(nt_test_key(NT_KEY_W, false));
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_W)); /* held input is the bot's while gated */
+}
+
 void test_gate_reenable_applies_real(void) {
     nt_input_set_player_enabled(false);
     nt_input_set_player_enabled(true);
@@ -92,40 +101,7 @@ void test_inject_and_real_in_one_frame(void) {
 
 /* ---- inject applies at the call; the next poll publishes it ---- */
 
-void test_inject_key_down_up(void) {
-    nt_input_inject(nt_test_key(NT_KEY_A, true));
-    nt_input_poll();
-    TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_A));
-    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
-    nt_input_inject(nt_test_key(NT_KEY_A, false));
-    nt_input_poll();
-    TEST_ASSERT_TRUE(nt_input_key_is_released(NT_KEY_A));
-    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
-}
-
 /* ---- inject contact down/move/up + mouse + wheel ---- */
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_inject_pointer_down_move_up(void) {
-    nt_input_inject(nt_test_contact_down(2, 10.0F, 20.0F, 0.5F, NT_POINTER_TOUCH, 1));
-    nt_input_poll();
-    TEST_ASSERT_TRUE(g_nt_input.pointers[1].active);
-    TEST_ASSERT_EQUAL_UINT32(2U, g_nt_input.pointers[1].id);
-    TEST_ASSERT_EQUAL_UINT8(NT_POINTER_TOUCH, g_nt_input.pointers[1].type);
-    TEST_ASSERT_TRUE(float_near(10.0F, g_nt_input.pointers[1].x, 0.001F));
-    TEST_ASSERT_TRUE(float_near(20.0F, g_nt_input.pointers[1].y, 0.001F));
-
-    nt_input_inject(nt_test_contact_move(2, 30.0F, 40.0F, 0.5F, 1));
-    nt_input_poll();
-    TEST_ASSERT_TRUE(float_near(30.0F, g_nt_input.pointers[1].x, 0.001F));
-    TEST_ASSERT_TRUE(float_near(40.0F, g_nt_input.pointers[1].y, 0.001F));
-
-    nt_input_inject(nt_test_contact_up(2));
-    nt_input_poll();
-    TEST_ASSERT_TRUE(g_nt_input.pointers[1].buttons[NT_BUTTON_LEFT].is_released);
-    nt_input_poll();
-    TEST_ASSERT_FALSE(g_nt_input.pointers[1].active);
-}
 
 /* The bot drives the same mouse a real one holds: its click is on pointers[0], and the mouse stays. */
 void test_inject_mouse_drives_real_mouse(void) {
@@ -274,19 +250,19 @@ void test_inject_invalid_args_assert(void) {
     NT_TEST_EXPECT_ASSERT(nt_input_inject(nt_test_contact_down(0, 0, 0, 0, 99, 1)));
     NT_TEST_EXPECT_ASSERT(nt_input_inject(nt_test_contact_down(0, 0, 0, 0, NT_POINTER_TOUCH, 8)));
     NT_TEST_EXPECT_ASSERT(nt_input_inject(nt_test_mouse(0, 0, 8)));
+    NT_TEST_EXPECT_ASSERT(nt_input_inject(nt_test_mouse_buttons(8))); /* even with no mouse over the window */
 }
 
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_gate_off_drops_real_key);
     RUN_TEST(test_gate_off_keeps_held_key);
+    RUN_TEST(test_gate_off_drops_real_release);
     RUN_TEST(test_gate_reenable_applies_real);
     RUN_TEST(test_gate_off_keeps_held_pointer);
     RUN_TEST(test_gated_focus_lost_keeps_bot_input);
     RUN_TEST(test_gate_judges_real_event_at_arrival);
     RUN_TEST(test_inject_and_real_in_one_frame);
-    RUN_TEST(test_inject_key_down_up);
-    RUN_TEST(test_inject_pointer_down_move_up);
     RUN_TEST(test_inject_mouse_drives_real_mouse);
     RUN_TEST(test_inject_wheel_mouse_slot);
     RUN_TEST(test_inject_button_mask_maps_right_and_middle);

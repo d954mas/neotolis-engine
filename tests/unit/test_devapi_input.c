@@ -446,6 +446,7 @@ static void test_reset_reenables_player(void) {
     nt_input_feed(nt_test_key(NT_KEY_B, true));
     nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_B));
+    nt_input_poll(); /* a released mouse would still publish once */
     TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
 }
 
@@ -623,6 +624,19 @@ static void test_input_state_text_reads_codepoints(void) {
     TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(cps));
     TEST_ASSERT_EQUAL_INT(104, cJSON_GetArrayItem(cps, 0)->valueint);
     TEST_ASSERT_EQUAL_INT(105, cJSON_GetArrayItem(cps, 1)->valueint);
+    cJSON_Delete(root);
+}
+
+/* The game reading the text does not hide it from the bot. */
+static void test_input_state_text_after_game_read(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"hi\"}}")));
+    advance();
+    uint32_t cp = 0;
+    while (nt_input_pop_char(&cp)) {
+    }
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"text\":true}}"));
+    const cJSON *cps = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(root, "result"), "codepoints");
+    TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(cps));
     cJSON_Delete(root);
 }
 
@@ -842,7 +856,7 @@ static void test_sched_full_rejects_then_releases(void) {
     /* All released + applied: the key set by fill_schedule_leaving (NT_KEY_A) is down, and the
        schedule is now empty so a fresh 1-entry command succeeds again. */
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
-    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"C\"}}")));
+    TEST_ASSERT_TRUE(nt_devapi_input_sched_can_reserve(NT_DEVAPI_INPUT_SCHED_MAX));
 }
 
 /* Over-reserving the schedule is whole-or-nothing: a command that needs more entries than the cap
@@ -944,6 +958,7 @@ int main(void) {
     RUN_TEST(test_sched_full_rejects_then_releases);
     RUN_TEST(test_sched_over_reserve_whole_or_nothing);
     RUN_TEST(test_input_state_text_reads_codepoints);
+    RUN_TEST(test_input_state_text_after_game_read);
     RUN_TEST(test_input_state_registers);
     RUN_TEST(test_input_state_describe);
     RUN_TEST(test_input_state_empty_ok);

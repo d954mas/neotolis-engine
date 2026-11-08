@@ -225,6 +225,7 @@ test('blur: a new touch in the same frame gets a free slot and follows later mov
     }, { once: true });
   }, held.id);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [oldTouch, newTouch] });
+  await page.waitForFunction(() => window.__blurTouch !== undefined);
   const current = await page.evaluate(() => window.__blurTouch!);
   // The move before blur applies, then blur releases the old contact; the new one takes a free slot.
   expect(current.pointers[1]).toMatchObject({ id: held.id, active: 1, down: 0, released: 1, x: 333 * k, y: 444 * k });

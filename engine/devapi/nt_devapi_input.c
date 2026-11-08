@@ -27,31 +27,15 @@ static uint32_t s_sched_count;
 bool nt_devapi_input_sched_can_reserve(uint32_t n) { return n <= NT_DEVAPI_INPUT_SCHED_MAX - s_sched_count; }
 
 /* Whole-or-nothing: every handler preflights nt_devapi_input_sched_can_reserve(N) for its whole command before the
-   first sched_* call, so a near-full schedule never accepts a DOWN and rejects its UP. */
-static sched_entry_t *sched_reserve(uint32_t n) {
-    NT_ASSERT(nt_devapi_input_sched_can_reserve(n));
-    sched_entry_t *first = &s_sched[s_sched_count];
-    s_sched_count += n;
-    return first;
+   first sched call, so a near-full schedule never accepts a DOWN and rejects its UP. */
+void nt_devapi_input_sched(nt_input_event_t ev, uint16_t at_frame) {
+    NT_ASSERT(nt_devapi_input_sched_can_reserve(1));
+    s_sched[s_sched_count++] = (sched_entry_t){at_frame, ev};
 }
 
-static void sched(nt_input_event_t ev, uint16_t at_frame) {
-    sched_entry_t *e = sched_reserve(1);
-    e->frames_remaining = at_frame;
-    e->ev = ev;
-}
-
-void nt_devapi_input_sched_mouse(float x, float y, uint8_t buttons_mask, uint16_t at_frame) { sched((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_MOVE, .mouse = {x, y, buttons_mask}}, at_frame); }
-
-/* Mask applies at the mouse's apply-time position (schedule order), so a queued move is honored. */
-void nt_devapi_input_sched_mouse_buttons(uint8_t buttons_mask, uint16_t at_frame) { sched((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_BUTTONS, .mouse = {.buttons = buttons_mask}}, at_frame); }
-
-void nt_devapi_input_sched_wheel(float dx, float dy, uint16_t at_frame) { sched((nt_input_event_t){.kind = NT_INPUT_EV_WHEEL, .wheel = {dx, dy}}, at_frame); }
-
-static void sched_key(nt_key_t key, bool down, uint16_t at_frame) { sched((nt_input_event_t){.kind = NT_INPUT_EV_KEY, .key = {(uint8_t)key, down}}, at_frame); }
-
-static void sched_contact(nt_input_event_kind_t kind, uint32_t id, float x, float y, uint8_t type, uint8_t buttons, uint16_t at_frame) {
-    sched((nt_input_event_t){.kind = (uint8_t)kind, .contact = {id, x, y, 1.0F, type, buttons}}, at_frame);
+/* A bot contact presses at full pressure. */
+static nt_input_event_t contact_ev(nt_input_event_kind_t kind, uint32_t id, float x, float y, uint8_t type, uint8_t buttons) {
+    return (nt_input_event_t){.kind = (uint8_t)kind, .contact = {id, x, y, 1.0F, type, buttons}};
 }
 
 /* Release due entries in enqueue order (preserves bot event ordering); survivors decrement + compact. */
@@ -182,8 +166,8 @@ static bool cmd_input_key(const cJSON *params, cJSON *result, nt_devapi_error *e
         if (!nt_devapi_input_sched_can_reserve(2U)) {
             return nt_devapi_fail(err, "input.key: inject schedule overflow");
         }
-        sched_key(key, true, 0);
-        sched_key(key, false, h);
+        nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_KEY, .key = {(uint8_t)key, true}}, 0);
+        nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_KEY, .key = {(uint8_t)key, false}}, h);
     } else {
         bool down = true;
         const cJSON *d = cJSON_GetObjectItemCaseSensitive(params, "down");
@@ -196,7 +180,7 @@ static bool cmd_input_key(const cJSON *params, cJSON *result, nt_devapi_error *e
         if (!nt_devapi_input_sched_can_reserve(1U)) {
             return nt_devapi_fail(err, "input.key: inject schedule overflow");
         }
-        sched_key(key, down, 0);
+        nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_KEY, .key = {(uint8_t)key, down}}, 0);
     }
     devapi_add_bool(result, "ok", true);
     return true;
@@ -248,7 +232,7 @@ static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_erro
     if (!nt_devapi_input_sched_can_reserve(1U)) {
         return nt_devapi_fail(err, "input.pointer: inject schedule overflow");
     }
-    sched_contact(kind, id, x, y, type, buttons, 0);
+    nt_devapi_input_sched(contact_ev(kind, id, x, y, type, buttons), 0);
     devapi_add_number(result, "queued", 1.0);
     return true;
 }
@@ -266,7 +250,7 @@ static bool cmd_input_move(const cJSON *params, cJSON *result, nt_devapi_error *
     if (!nt_devapi_input_sched_can_reserve(1U)) {
         return nt_devapi_fail(err, "input.move: inject schedule overflow");
     }
-    nt_devapi_input_sched_mouse(x, y, 0, 0);
+    nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_MOVE, .mouse = {x, y, 0}}, 0);
     devapi_add_number(result, "queued", 1.0);
     return true;
 }
@@ -298,8 +282,8 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
     if (!nt_devapi_input_sched_can_reserve(2U)) {
         return nt_devapi_fail(err, "input.click: inject schedule overflow");
     }
-    nt_devapi_input_sched_mouse(x, y, buttons, 0);
-    nt_devapi_input_sched_mouse_buttons(0, hold);
+    nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_MOVE, .mouse = {x, y, buttons}}, 0);
+    nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_BUTTONS, .mouse = {.buttons = 0}}, hold);
     devapi_add_number(result, "queued", 2.0);
     return true;
 }
@@ -331,11 +315,11 @@ static bool cmd_input_wheel(const cJSON *params, cJSON *result, nt_devapi_error 
         if (!nt_devapi_input_sched_can_reserve(2U)) {
             return nt_devapi_fail(err, "input.wheel: inject schedule overflow");
         }
-        nt_devapi_input_sched_mouse(x, y, 0, 0);
+        nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_MOVE, .mouse = {x, y, 0}}, 0);
     } else if (!nt_devapi_input_sched_can_reserve(1U)) {
         return nt_devapi_fail(err, "input.wheel: inject schedule overflow");
     }
-    nt_devapi_input_sched_wheel(dx, dy, 0);
+    nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_WHEEL, .wheel = {dx, dy}}, 0);
     devapi_add_bool(result, "ok", true);
     return true;
 }
@@ -395,7 +379,7 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
     const cJSON *first = cJSON_GetArrayItem(points, 0);
     float fx = (float)cJSON_GetArrayItem(first, 0)->valuedouble;
     float fy = flip_y_up_to_device((float)cJSON_GetArrayItem(first, 1)->valuedouble); /* each point's Y is Y-up. */
-    sched_contact(NT_INPUT_EV_CONTACT_DOWN, id, fx, fy, type, 1U, 0);
+    nt_devapi_input_sched(contact_ev(NT_INPUT_EV_CONTACT_DOWN, id, fx, fy, type, 1U), 0);
     int idx = 0;
     cJSON_ArrayForEach(p, points) {
         if (idx == 0) {
@@ -407,10 +391,10 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
         /* Compute the offset in int64 so the narrowing source is self-evidently within the
            already-validated [0, UINT16_MAX] span (idx <= npoints-1 => at <= last_offset). */
         uint16_t at = (uint16_t)((int64_t)idx * (int64_t)stride);
-        sched_contact(NT_INPUT_EV_CONTACT_MOVE, id, mx, my, type, 1U, at);
+        nt_devapi_input_sched(contact_ev(NT_INPUT_EV_CONTACT_MOVE, id, mx, my, type, 1U), at);
         idx++;
     }
-    sched_contact(NT_INPUT_EV_CONTACT_UP, id, 0.0F, 0.0F, type, 0, (uint16_t)last_offset);
+    nt_devapi_input_sched(contact_ev(NT_INPUT_EV_CONTACT_UP, id, 0.0F, 0.0F, type, 0), (uint16_t)last_offset);
     devapi_add_number(result, "queued", (double)npoints + 1.0);
     return true;
 }
@@ -425,7 +409,7 @@ static bool cmd_input_button(const cJSON *params, cJSON *result, nt_devapi_error
     if (!nt_devapi_input_sched_can_reserve(1U)) {
         return nt_devapi_fail(err, "input.button: inject schedule overflow");
     }
-    nt_devapi_input_sched_mouse_buttons(buttons, 0);
+    nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_BUTTONS, .mouse = {.buttons = buttons}}, 0);
     devapi_add_bool(result, "ok", true);
     return true;
 }
@@ -502,7 +486,7 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
         return nt_devapi_fail(err, "input.text: inject schedule overflow");
     }
     for (uint32_t i = 0; i < n; i++) {
-        sched((nt_input_event_t){.kind = NT_INPUT_EV_CHAR, .cp = cps[i]}, 0);
+        nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_CHAR, .cp = cps[i]}, 0);
     }
     devapi_add_number(result, "queued", (double)n);
     return true;
@@ -614,7 +598,7 @@ static const nt_devapi_command k_input_cmds[] = {
     },
     {
         .method = "input.state",
-        .summary = "IMMEDIATE read of the last sim-advancing poll: key down/edges and the text the game left unread (an inject shows after the next sim-advance)",
+        .summary = "IMMEDIATE read of the last sim-advancing poll: key down/edges and the text it published (an inject shows after the next sim-advance)",
         .params_shape = "{key?:string, text?:bool}",
         .result_shape = "{down?:bool, pressed?:bool, released?:bool, codepoints?:[number]}",
         .fn = cmd_input_state,

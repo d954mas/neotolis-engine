@@ -206,13 +206,13 @@ static void sync_sizes(void) {
        Content scale may not reflect the real framebuffer size on Windows
        when the process lacks DPI awareness. */
     float device_dpr = (win_w > 0) ? (float)fb_w / (float)win_w : 1.0F;
+    s_event_dpr = nt_window_effective_dpr(device_dpr); /* the pump may have left a transient one */
 
-    if ((uint32_t)win_w == g_nt_window.width && (uint32_t)win_h == g_nt_window.height && nt_window_effective_dpr(device_dpr) == g_nt_window.dpr) {
+    if ((uint32_t)win_w == g_nt_window.width && (uint32_t)win_h == g_nt_window.height && s_event_dpr == g_nt_window.dpr) {
         return;
     }
 
     nt_window_apply_sizes((float)win_w, (float)win_h, device_dpr);
-    s_event_dpr = g_nt_window.dpr;
 }
 
 /* ---- Lifecycle ---- */

@@ -37,6 +37,15 @@ void test_press_and_release_in_one_frame(void) {
 
 void test_key_enum_count(void) { TEST_ASSERT_EQUAL_INT(69, NT_KEY_COUNT); }
 
+void test_key_repeat_is_no_new_press(void) {
+    nt_input_feed(nt_test_key(NT_KEY_K, true));
+    nt_input_poll();
+    nt_input_feed(nt_test_key(NT_KEY_K, true)); /* GLFW_REPEAT */
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_K));
+    TEST_ASSERT_FALSE(nt_input_key_is_pressed(NT_KEY_K));
+}
+
 void test_key_released_edge(void) {
     nt_input_feed(nt_test_key(NT_KEY_S, true));
     nt_input_poll();
@@ -316,6 +325,17 @@ void test_contact_same_id_down_after_up_new_slot(void) {
     TEST_ASSERT_TRUE(g_nt_input.pointers[2].buttons[NT_BUTTON_LEFT].is_pressed);
 }
 
+void test_contacts_fill_slots_1_to_7(void) {
+    for (uint32_t id = 1; id <= NT_INPUT_MAX_POINTERS; id++) {
+        nt_input_feed(nt_test_contact_down(id, 1.0F, 1.0F, 0.5F, NT_POINTER_TOUCH, 1));
+    }
+    nt_input_poll();
+    TEST_ASSERT_FALSE(g_nt_input.pointers[0].active);
+    for (uint32_t i = 1; i < NT_INPUT_MAX_POINTERS; i++) {
+        TEST_ASSERT_EQUAL_UINT32(i, g_nt_input.pointers[i].id); /* the 8th down finds no slot */
+    }
+}
+
 void test_contact_move_without_down_ignored(void) {
     nt_input_feed(nt_test_contact_move(5, 50.0F, 60.0F, 0.0F, 0)); /* a hovering pen */
     nt_input_poll();
@@ -339,6 +359,7 @@ int main(void) {
     RUN_TEST(test_event_invisible_until_poll);
     RUN_TEST(test_press_and_release_in_one_frame);
     RUN_TEST(test_key_enum_count);
+    RUN_TEST(test_key_repeat_is_no_new_press);
     RUN_TEST(test_key_released_edge);
     RUN_TEST(test_key_pressed_clears_next_frame);
     RUN_TEST(test_any_key_pressed);
@@ -364,6 +385,7 @@ int main(void) {
     RUN_TEST(test_contact_move_and_delta);
     RUN_TEST(test_contact_up_deactivates_next_poll);
     RUN_TEST(test_contact_same_id_down_after_up_new_slot);
+    RUN_TEST(test_contacts_fill_slots_1_to_7);
     RUN_TEST(test_contact_move_without_down_ignored);
     RUN_TEST(test_mouse_convenience);
     return UNITY_END();
