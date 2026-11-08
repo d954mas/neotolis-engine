@@ -36,7 +36,7 @@ if(NOT EMSCRIPTEN)
 endif()
 # The platform pump (native and web) calls the nt_input backend entry points (declared in
 # input/nt_input_internal.h, found via the shared engine/ include root). The symbols resolve at
-# executable link time -- the app chooses which input backend to link (nt_input or nt_input_stub).
+# executable link time -- the app links nt_input (tests: nt_input_automation).
 
 if(UNIX)
     target_link_libraries(nt_window PRIVATE m)

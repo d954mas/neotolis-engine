@@ -10,7 +10,7 @@
 
 void nt_input_set_key(nt_key_t key, bool down);
 /* A typed UTF-32 codepoint. */
-void nt_input_buffer_char(uint32_t cp);
+void nt_input_char(uint32_t cp);
 /* The mouse: every real mouse event is a move with the current button mask (a release keeps the mouse).
    A leave is ignored while a button is held, so a drag outside the window keeps it. */
 void nt_input_mouse_move(float x, float y, uint8_t buttons_mask);
@@ -32,17 +32,18 @@ void nt_input_focus_lost(void);
    Player gate: when disabled the real-input entry points above (including focus_lost) early-return,
    judging each event when it reaches the core. It releases nothing: whoever pressed releases.
 
-   Inject API (L1 engine capability; L2 devapi group drives it untrusted): applies at the call through
-   the *_apply cores, past the gate. Returns false on invalid input and applies nothing. NEVER
-   asserts; validates defensively (out-of-range key / kind / type / mask -> false). */
+   Inject API (L1 engine capability): applies at the call through the *_apply cores, past the gate.
+   The devapi group validates the untrusted command first; an invalid argument here asserts. */
 #if NT_INPUT_AUTOMATION_ENABLED
 void nt_input_set_player_enabled(bool enabled);
-bool nt_input_inject_key(nt_key_t key, bool down);
-/* A touch/pen contact event: kind POINTER_DOWN/MOVE/UP, type touch or pen. */
-bool nt_input_inject_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask);
-bool nt_input_inject_mouse(float x, float y, uint8_t buttons_mask);
+void nt_input_inject_key(nt_key_t key, bool down);
+/* Touch/pen contacts (type touch or pen), like the backend entry points. */
+void nt_input_inject_pointer_down(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask);
+void nt_input_inject_pointer_move(uint32_t id, float x, float y, float pressure, uint8_t buttons_mask);
+void nt_input_inject_pointer_up(uint32_t id);
+void nt_input_inject_mouse(float x, float y, uint8_t buttons_mask);
 /* The mouse's button mask at its current position. No-op while the mouse is not over the window. */
-bool nt_input_inject_mouse_buttons(uint8_t buttons_mask);
+void nt_input_inject_mouse_buttons(uint8_t buttons_mask);
 void nt_input_inject_wheel(float dx, float dy);
 void nt_input_inject_char(uint32_t cp);
 #endif

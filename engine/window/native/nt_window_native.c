@@ -105,7 +105,7 @@ static void glfw_key_callback(GLFWwindow *window, int key, int scancode, int act
 
 static void glfw_char_callback(GLFWwindow *window, unsigned int codepoint) {
     (void)window;
-    nt_input_buffer_char(codepoint); /* GLFW delivers native-endian UTF-32 already */
+    nt_input_char(codepoint); /* GLFW delivers native-endian UTF-32 already */
 }
 
 static void glfw_cursor_pos_callback(GLFWwindow *window, double xpos, double ypos) {
@@ -143,6 +143,8 @@ static void glfw_mouse_button_callback(GLFWwindow *window, int button, int actio
 
     if (action == GLFW_PRESS) {
         s_cached_buttons |= bit;
+    } else if ((s_cached_buttons & bit) == 0) {
+        return; /* GLFW's synthetic release after a focus loss: the loss already released it */
     } else {
         s_cached_buttons &= (uint8_t)~bit;
     }
@@ -193,11 +195,7 @@ static void sync_sizes(void) {
         return;
     }
 
-    const float old_dpr = g_nt_window.dpr;
     nt_window_apply_sizes((float)win_w, (float)win_h, device_dpr);
-    if (g_nt_window.dpr != old_dpr && glfwGetWindowAttrib(s_glfw_window, GLFW_HOVERED)) {
-        mouse_at_cursor(); /* events map at arrival: a still cursor would keep the old DPR */
-    }
 }
 
 /* ---- Lifecycle ---- */
@@ -299,6 +297,8 @@ void nt_window_set_fullscreen(bool fullscreen) {
         glfwSetWindowMonitor(s_glfw_window, NULL, s_windowed_x, s_windowed_y, s_windowed_w, s_windowed_h, 0);
     }
 }
+
+void nt_window_set_text_input_mode(nt_text_input_mode_t mode) { (void)mode; /* desktop has a physical keyboard */ }
 
 /* ---- Presentation ---- */
 

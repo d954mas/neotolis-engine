@@ -2,6 +2,7 @@
 
 #ifdef NT_PLATFORM_WEB
 
+#include "core/nt_assert.h"
 #include "input/nt_input_internal.h" /* the nt_input backend entry points */
 #include "window/nt_window.h"
 #include <emscripten.h>
@@ -58,14 +59,14 @@ EMSCRIPTEN_KEEPALIVE void nt_window_web_on_input(int type, double a, double b, d
     switch ((web_event_t)type) {
     case WEB_CONTACT_DOWN:
         map_css_to_fb((float)b, (float)c, &fx, &fy);
-        nt_input_pointer_down((uint32_t)a, fx, fy, (float)d, (uint8_t)e, (uint8_t)f);
+        nt_input_pointer_down((uint32_t)(int32_t)a, fx, fy, (float)d, (uint8_t)e, (uint8_t)f); /* pointerId is a signed long */
         break;
     case WEB_CONTACT_MOVE:
         map_css_to_fb((float)b, (float)c, &fx, &fy);
-        nt_input_pointer_move((uint32_t)a, fx, fy, (float)d, (uint8_t)f);
+        nt_input_pointer_move((uint32_t)(int32_t)a, fx, fy, (float)d, (uint8_t)f);
         break;
     case WEB_CONTACT_UP:
-        nt_input_pointer_up((uint32_t)a);
+        nt_input_pointer_up((uint32_t)(int32_t)a);
         break;
     case WEB_MOUSE_MOVE:
         map_css_to_fb((float)a, (float)b, &fx, &fy);
@@ -78,13 +79,16 @@ EMSCRIPTEN_KEEPALIVE void nt_window_web_on_input(int type, double a, double b, d
         nt_input_set_key((nt_key_t)a, b != 0.0);
         break;
     case WEB_CHAR:
-        nt_input_buffer_char((uint32_t)a);
+        nt_input_char((uint32_t)a);
         break;
     case WEB_WHEEL:
         nt_input_wheel((float)a, (float)b);
         break;
     case WEB_BLUR:
         nt_input_focus_lost();
+        break;
+    default:
+        NT_ASSERT(false && "unknown web input record");
         break;
     }
 }
@@ -321,6 +325,9 @@ static void sync_sizes(void) {
 /* ---- Lifecycle ---- */
 
 void nt_window_init(void) {
+    static bool s_registered;
+    NT_ASSERT(!s_registered && "the DOM listeners are never removed: init once per page");
+    s_registered = true;
     sync_sizes();
     nt_window_web_register_input();
 }
@@ -341,6 +348,25 @@ void nt_window_set_fullscreen(bool fullscreen) {
         emscripten_exit_fullscreen();
     }
 }
+
+/* ---- Soft-keyboard hint ---- */
+
+/* clang-format off */
+EM_JS(void, nt_window_js_set_text_input_mode, (int mode), {
+    var modes = ['text', 'numeric', 'email', 'url', 'text'];
+    var el = Module['canvas'] || document.activeElement;
+    if (!el) { return; }
+    el.setAttribute('inputmode', modes[mode] || 'text');
+    if (mode === 4 /* NT_TEXT_INPUT_PASSWORD */) {
+        el.setAttribute('type', 'password');
+    } else {
+        el.removeAttribute('type');
+    }
+})
+/* clang-format on */
+
+/* Map the field's text-input mode to the web on-screen keyboard (canvas inputmode/type). */
+void nt_window_set_text_input_mode(nt_text_input_mode_t mode) { nt_window_js_set_text_input_mode((int)mode); }
 
 /* ---- Presentation ---- */
 

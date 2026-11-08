@@ -315,7 +315,7 @@ static void test_input_text_empty_queued_zero(void) {
     cJSON_Delete(root);
 }
 
-/* ---- > 32 codepoints can never land whole in the 32-slot char ring -> bad_params ---- */
+/* ---- > 32 codepoints can never land whole in one frame -> bad_params ---- */
 
 /* Build an input.text request of `count` ASCII 'a's so the boundary derives from the real cap. */
 static char *make_text_request(uint32_t count) {
@@ -332,14 +332,14 @@ static char *make_text_request(uint32_t count) {
 }
 
 /* One over NT_INPUT_CHAR_MAX: can never land whole in one frame. queued must never overstate. */
-static void test_input_text_exceeds_char_ring_bad_params(void) {
+static void test_input_text_exceeds_char_max_bad_params(void) {
     char *req = make_text_request(NT_INPUT_CHAR_MAX + 1U);
     assert_bad_params(nt_devapi_submit(req));
     free(req);
 }
 
 /* Exactly NT_INPUT_CHAR_MAX codepoints is the boundary -> still accepted (queued:MAX). */
-static void test_input_text_at_char_ring_ok(void) {
+static void test_input_text_at_char_max_ok(void) {
     char *req = make_text_request(NT_INPUT_CHAR_MAX);
     cJSON *root = parse_ok(nt_devapi_submit(req));
     free(req);
@@ -911,8 +911,8 @@ int main(void) {
     RUN_TEST(test_input_text_surrogate_bad_params);
     RUN_TEST(test_input_text_above_max_bad_params);
     RUN_TEST(test_input_text_empty_queued_zero);
-    RUN_TEST(test_input_text_exceeds_char_ring_bad_params);
-    RUN_TEST(test_input_text_at_char_ring_ok);
+    RUN_TEST(test_input_text_exceeds_char_max_bad_params);
+    RUN_TEST(test_input_text_at_char_max_ok);
     RUN_TEST(test_input_key_hold_fractional_bad_params);
     RUN_TEST(test_input_key_hold_negative_fractional_bad_params);
     RUN_TEST(test_input_gesture_frame_stride_fractional_bad_params);

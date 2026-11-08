@@ -114,10 +114,59 @@ void test_mouse_focus_lost_drops_pressure(void) {
 
 void test_init_forgets_unpublished_events(void) {
     nt_input_set_key(NT_KEY_A, true);
-    nt_input_shutdown();
     nt_input_init();
     nt_input_poll();
     TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
+}
+
+/* The published frame never changes between polls, whatever arrives. */
+void test_published_frame_stable_between_polls(void) {
+    nt_input_set_key(NT_KEY_A, true);
+    nt_input_pointer_down(3, 1.0F, 1.0F, 0.5F, NT_POINTER_TOUCH, 1);
+    nt_input_poll();
+    nt_input_set_key(NT_KEY_A, false);
+    nt_input_pointer_up(3);
+    nt_input_focus_lost();
+    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
+    TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_A));
+    TEST_ASSERT_TRUE(g_nt_input.pointers[1].buttons[NT_BUTTON_LEFT].is_down);
+}
+
+/* A click and a tap between two polls are both readable: pressed and released together. */
+void test_click_and_tap_in_one_frame(void) {
+    nt_input_mouse_move(5.0F, 5.0F, 0);
+    nt_input_poll();
+    nt_input_mouse_move(5.0F, 5.0F, 1);
+    nt_input_mouse_move(5.0F, 5.0F, 0);
+    nt_input_pointer_down(9, 1.0F, 1.0F, 0.5F, NT_POINTER_TOUCH, 1);
+    nt_input_pointer_up(9);
+    nt_input_poll();
+    const nt_button_state_t mouse = g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT];
+    const nt_button_state_t tap = g_nt_input.pointers[1].buttons[NT_BUTTON_LEFT];
+    TEST_ASSERT_TRUE(mouse.is_pressed && mouse.is_released && !mouse.is_down);
+    TEST_ASSERT_TRUE(tap.is_pressed && tap.is_released && !tap.is_down);
+    nt_input_poll();
+    TEST_ASSERT_FALSE(g_nt_input.pointers[1].active);
+}
+
+void test_mouse_deactivates_after_focus_lost(void) {
+    nt_input_mouse_move(5.0F, 5.0F, 0);
+    nt_input_poll();
+    nt_input_focus_lost();
+    nt_input_poll();
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].active); /* the loss frame is still readable */
+    nt_input_poll();
+    TEST_ASSERT_FALSE(g_nt_input.pointers[0].active);
+}
+
+void test_mouse_move_after_focus_lost_keeps_mouse(void) {
+    nt_input_mouse_move(5.0F, 5.0F, 0);
+    nt_input_poll();
+    nt_input_focus_lost();
+    nt_input_mouse_move(6.0F, 5.0F, 0);
+    nt_input_poll();
+    nt_input_poll();
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
 }
 
 /* ---- Mouse: pointers[0], kept across a release ---- */
@@ -281,6 +330,10 @@ int main(void) {
     RUN_TEST(test_focus_lost_then_press_same_key);
     RUN_TEST(test_mouse_focus_lost_drops_pressure);
     RUN_TEST(test_init_forgets_unpublished_events);
+    RUN_TEST(test_published_frame_stable_between_polls);
+    RUN_TEST(test_click_and_tap_in_one_frame);
+    RUN_TEST(test_mouse_deactivates_after_focus_lost);
+    RUN_TEST(test_mouse_move_after_focus_lost_keeps_mouse);
     RUN_TEST(test_mouse_move_activates_slot_0);
     RUN_TEST(test_mouse_release_keeps_mouse);
     RUN_TEST(test_mouse_leave_deactivates_next_poll);

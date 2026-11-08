@@ -16,6 +16,18 @@
 /* NT_DEVAPI_INPUT_SCHED_MAX (bounded BSS schedule cap, -D overridable) is defined in
    nt_devapi_input_internal.h so the ui group + the unit tests derive their sizes from the real cap. */
 
+/* Schedule entry kinds, each released through its nt_input inject call. */
+typedef enum {
+    NT_INJECT_KEY = 0,       /* key down/up */
+    NT_INJECT_MOUSE_MOVE,    /* the mouse at (x,y) with a button mask */
+    NT_INJECT_MOUSE_BUTTONS, /* the mouse's button mask at its CURRENT position (no-op while it is not over the window) */
+    NT_INJECT_POINTER_DOWN,  /* touch/pen contact create/press */
+    NT_INJECT_POINTER_MOVE,  /* touch/pen contact move */
+    NT_INJECT_POINTER_UP,    /* touch/pen contact release + deactivate-pending */
+    NT_INJECT_WHEEL,         /* the mouse only */
+    NT_INJECT_CHAR,          /* a typed codepoint */
+} nt_inject_kind_t;
+
 typedef struct {
     uint16_t frames_remaining; /* sim-advance countdown; 0 = release on the next advancing tick */
     uint8_t kind;              /* nt_inject_kind_t */
@@ -131,29 +143,34 @@ static void sched_text(const uint32_t *cps, uint32_t n) {
     }
 }
 
-/* Apply one due entry through the inject API. false == engine invariant violation (every entry was
-   validated when it was scheduled), so the caller asserts. */
-static bool sched_release_one(const sched_entry_t *e) {
+/* Apply one due entry through the inject API (validated when it was scheduled). */
+static void sched_release_one(const sched_entry_t *e) {
     switch ((nt_inject_kind_t)e->kind) {
     case NT_INJECT_KEY:
-        return nt_input_inject_key((nt_key_t)e->u.key.key, e->u.key.down);
+        nt_input_inject_key((nt_key_t)e->u.key.key, e->u.key.down);
+        break;
     case NT_INJECT_MOUSE_MOVE:
-        return nt_input_inject_mouse(e->u.mouse.x, e->u.mouse.y, e->u.mouse.buttons_mask);
+        nt_input_inject_mouse(e->u.mouse.x, e->u.mouse.y, e->u.mouse.buttons_mask);
+        break;
     case NT_INJECT_MOUSE_BUTTONS:
-        return nt_input_inject_mouse_buttons(e->u.mouse.buttons_mask);
+        nt_input_inject_mouse_buttons(e->u.mouse.buttons_mask);
+        break;
     case NT_INJECT_POINTER_DOWN:
+        nt_input_inject_pointer_down(e->u.pointer.id, e->u.pointer.x, e->u.pointer.y, e->u.pointer.pressure, e->u.pointer.type, e->u.pointer.buttons_mask);
+        break;
     case NT_INJECT_POINTER_MOVE:
-        return nt_input_inject_pointer((nt_inject_kind_t)e->kind, e->u.pointer.id, e->u.pointer.x, e->u.pointer.y, e->u.pointer.pressure, e->u.pointer.type, e->u.pointer.buttons_mask);
+        nt_input_inject_pointer_move(e->u.pointer.id, e->u.pointer.x, e->u.pointer.y, e->u.pointer.pressure, e->u.pointer.buttons_mask);
+        break;
     case NT_INJECT_POINTER_UP:
-        return nt_input_inject_pointer(NT_INJECT_POINTER_UP, e->u.pointer_up.id, 0.0F, 0.0F, 0.0F, 0, 0);
+        nt_input_inject_pointer_up(e->u.pointer_up.id);
+        break;
     case NT_INJECT_WHEEL:
         nt_input_inject_wheel(e->u.wheel.dx, e->u.wheel.dy);
-        return true;
+        break;
     case NT_INJECT_CHAR:
         nt_input_inject_char(e->u.chr.cp);
-        return true;
+        break;
     }
-    return false; /* unreachable: kind is always one of the above. */
 }
 
 /* Release due entries in enqueue order (preserves bot event ordering); survivors decrement + compact. */
@@ -161,9 +178,7 @@ static void sched_tick(void) {
     uint32_t out = 0;
     for (uint32_t i = 0; i < s_sched_count; i++) {
         if (s_sched[i].frames_remaining == 0) {
-            bool ok = sched_release_one(&s_sched[i]); /* due: release, do NOT carry forward. */
-            NT_ASSERT(ok);                            /* validated at schedule time; a rejection is a build bug. */
-            (void)ok;
+            sched_release_one(&s_sched[i]); /* due: release, do NOT carry forward. */
             continue;
         }
         s_sched[i].frames_remaining--;

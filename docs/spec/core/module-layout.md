@@ -29,9 +29,8 @@ engine/
         default/            # real impl (note: "default", not "native")
         stub/
         CMakeLists.txt
-    input/                  # swappable; platform events come from window's pump
+    input/                  # platform-free core; window's platform pump feeds it
         nt_input.h
-        web/  stub/         # web: soft-keyboard hint; native builds stub/
         CMakeLists.txt
     clipboard/              # swappable
         nt_clipboard.h
@@ -92,7 +91,11 @@ Two gates enforce this:
   undefined reference. Proves omission fails loudly (exit 0 only when the
   expected unresolved-symbol error is observed).
 
-Current swappable pairs: `nt_log`, `nt_input`, `nt_http`, `nt_gfx`,
+`nt_input` has one platform-free implementation: the window module's platform pump feeds it. Tests
+that drive the inject API link `nt_input_automation`, the same core with the automation surface always
+compiled.
+
+Current swappable pairs: `nt_log`, `nt_http`, `nt_gfx`,
 `nt_basisu_transcoder`, `nt_meshwire`, `nt_window`, `nt_app`, `nt_fs` (native
 only), `nt_clipboard`.
 
@@ -239,7 +242,6 @@ A no-op / empty stub is safe ONLY when the caller already treats "nothing
 happened" as a legitimate runtime state, not an error:
 
 - `nt_log` — a dropped log is functionally invisible.
-- `nt_input` — a frame with "no events" is already a normal, handled case.
 - `nt_clipboard` get/paste — an empty clipboard is a real state the text field
   already tolerates (paste of "" is a no-op).
 

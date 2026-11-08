@@ -137,19 +137,6 @@ typedef struct {
 
 extern nt_input_t g_nt_input;
 
-/* ---- Text input mode ---- */
-
-/* Hint to the platform on-screen keyboard / text-entry surface (mobile soft keyboard). Web maps
- * these to the <canvas> inputmode/type; native + stub are no-ops. The web EM_JS depends on the
- * numeric values (PASSWORD == 4) -- keep them in sync. */
-typedef enum {
-    NT_TEXT_INPUT_TEXT = 0,
-    NT_TEXT_INPUT_NUMERIC,
-    NT_TEXT_INPUT_EMAIL,
-    NT_TEXT_INPUT_URL,
-    NT_TEXT_INPUT_PASSWORD,
-} nt_text_input_mode_t;
-
 /* ---- Key query functions ---- */
 
 bool nt_input_key_is_down(nt_key_t key);
@@ -167,10 +154,6 @@ bool nt_input_any_key_pressed(void);
    untouched when none is left. */
 bool nt_input_pop_char(uint32_t *out_codepoint);
 
-/* Hint the platform on-screen keyboard for the focused text field (mobile soft keyboard).
-   No-op on native/stub. Apply it when a field gains focus. */
-void nt_input_set_text_input_mode(nt_text_input_mode_t mode);
-
 /* ---- nt_input automation surface (player gate + synthetic input injection) ---- */
 
 /* Capability gate for the whole nt_input automation surface (inject pipeline + player gate). The
@@ -179,18 +162,6 @@ void nt_input_set_text_input_mode(nt_text_input_mode_t mode);
 #ifndef NT_INPUT_AUTOMATION_ENABLED
 #define NT_INPUT_AUTOMATION_ENABLED 0
 #endif
-
-/* Event kinds the devapi schedule releases through the inject API. */
-typedef enum {
-    NT_INJECT_KEY = 0,       /* key down/up */
-    NT_INJECT_MOUSE_MOVE,    /* the mouse at (x,y) with a button mask */
-    NT_INJECT_MOUSE_BUTTONS, /* the mouse's button mask at its CURRENT position (no-op while it is not over the window) */
-    NT_INJECT_POINTER_DOWN,  /* touch/pen contact create/press */
-    NT_INJECT_POINTER_MOVE,  /* touch/pen contact move */
-    NT_INJECT_POINTER_UP,    /* touch/pen contact release + deactivate-pending */
-    NT_INJECT_WHEEL,         /* the mouse only */
-    NT_INJECT_CHAR,          /* a typed codepoint */
-} nt_inject_kind_t;
 
 /* ---- Mouse convenience helpers ---- */
 

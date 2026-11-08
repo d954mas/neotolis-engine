@@ -39,6 +39,22 @@ void nt_window_poll(void);
 void nt_window_shutdown(void);
 void nt_window_set_fullscreen(bool fullscreen);
 
+/* ---- On-screen keyboard ---- */
+
+/* Hint to the platform on-screen keyboard / text-entry surface (mobile soft keyboard). Web maps
+ * these to the <canvas> inputmode/type; native + stub are no-ops. The web EM_JS depends on the
+ * numeric values (PASSWORD == 4) -- keep them in sync. */
+typedef enum {
+    NT_TEXT_INPUT_TEXT = 0,
+    NT_TEXT_INPUT_NUMERIC,
+    NT_TEXT_INPUT_EMAIL,
+    NT_TEXT_INPUT_URL,
+    NT_TEXT_INPUT_PASSWORD,
+} nt_text_input_mode_t;
+
+/* Hint the keyboard for the focused text field. Apply it when a field gains focus. */
+void nt_window_set_text_input_mode(nt_text_input_mode_t mode);
+
 /* ---- Presentation ---- */
 
 void nt_window_swap_buffers(void);

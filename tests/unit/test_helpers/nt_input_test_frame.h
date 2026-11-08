@@ -7,8 +7,7 @@
 
 /* Publish a frame with nothing held and no edges. */
 static inline void nt_input_test_idle(void) {
-    nt_input_focus_lost();
-    nt_input_poll();
+    nt_input_init();
     nt_input_poll();
 }
 

@@ -16,6 +16,7 @@
 #include "ui/nt_ui_label.h"
 #include "ui/nt_ui_state.h"
 #include "utf8/nt_utf8.h"
+#include "window/nt_window.h"
 
 /* Apply the field's keyboard hint on focus via the input platform layer (web shows the matching
  * soft keyboard; native/stub no-op). This is a UX hint only -- actual input restriction is the
@@ -44,7 +45,7 @@ static inline void apply_keyboard_hint(nt_ui_input_keyboard_t kb, bool password)
             break;
         }
     }
-    nt_input_set_text_input_mode(mode);
+    nt_window_set_text_input_mode(mode);
 }
 
 const nt_ui_widget_def_t NT_UI_INPUT_DEF = {

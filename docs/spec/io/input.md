@@ -12,16 +12,17 @@ Input system is polling-based. Game queries state each frame, does not subscribe
 
 The window module's platform pump, `nt_window_poll`, applies each device event to the next
 frame's input state in arrival order (native: GLFW callbacks during `glfwPollEvents`; web: one
-ordered queue the DOM listeners fill between frames). On both platforms C runs only inside the
-frame, never in a platform callback.
+ordered queue the DOM listeners fill between frames, drained there). Input applies only inside the
+pump; on web the DOM listeners only queue. A GLFW callback outside `glfwPollEvents` (a window
+operation such as fullscreen) also writes only the next frame.
 `nt_input_poll` publishes that state for the frame and starts the next one, so the state the game
 reads changes only at the poll. Edges accumulate: a press and a release between two polls are both
 readable. `g_nt_input` and the query functions are read-only for their consumers.
 
 A focus loss is applied in that order: it releases held player input, and events after it apply
 after it. A release and a new press of one button in one frame therefore read pressed and released
-together, like any fast press and release inside one frame. On web, `nt_window_init` registers the
-listeners once per page (they are never removed).
+together, like any fast press and release inside one frame. On web, `nt_window_init` runs once per
+page.
 
 ## Typed characters
 
@@ -30,7 +31,7 @@ Text input is separate from key state: characters arrive as UTF-32 codepoints, u
 
 ```c
 bool nt_input_pop_char(uint32_t *out_codepoint);  // false when empty
-void nt_input_set_text_input_mode(nt_text_input_mode_t mode);  // soft-keyboard hint; no-op on native/stub
+void nt_window_set_text_input_mode(nt_text_input_mode_t mode);  // soft-keyboard hint (window/nt_window.h); no-op on native/stub
 ```
 
 - Chars carry *text* (layout-resolved, includes key repeat); physical keys carry

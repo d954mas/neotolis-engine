@@ -136,5 +136,5 @@ reverse direction, file → chapter):
 | Change UI text wrapping | Wrapping itself lives in vendored Clay (`deps/clay`, `CLAY_TEXT_WRAP_*`); the engine owns only the measure callback (`engine/ui/nt_ui.c` → `nt_font_measure_n`) and the wrap mode it passes. Rich text has its own solver: `engine/ui/nt_ui_rich_text.c` |
 | Touch the `.ntpack` format | Layout: `shared/include/nt_pack_format.h` (magic `NPAK`) → writer `nt_builder_finish_pack` (`tools/builder/nt_builder.c`) → reader `engine/resource/nt_resource.c` (header/version check) |
 | Add builder validation | Programmer/IO errors assert (`NT_BUILD_ASSERT`, e.g. `tools/builder/nt_builder_texture.c`); content errors of atlas sprites go to the graceful channel `nt_builder_get_errors` (`tools/builder/nt_builder_atlas.c`) |
-| Add a web platform entry | Convention `engine/<mod>/{interface,native,web,stub}`: the web bridge is `engine/<mod>/web/nt_<mod>_web.c` (EM_JS), e.g. `engine/input/web/nt_input_web.c` |
+| Add a web platform entry | Convention `engine/<mod>/{interface,native,web,stub}`: the web bridge is `engine/<mod>/web/nt_<mod>_web.c` (EM_JS), e.g. `engine/window/web/nt_window_web.c` |
 | Add a UI widget demo | New tab in `examples/ui_showcase` (never a new example dir) |

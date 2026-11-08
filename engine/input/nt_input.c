@@ -230,9 +230,7 @@ bool nt_input_mouse_is_released(nt_button_t button) {
 /* ---- Apply cores and the gated real-input wrappers (called by platform backends) ---- */
 
 static void nt_input_set_key_apply(nt_key_t key, bool down) {
-    if (key >= NT_KEY_COUNT) {
-        return;
-    }
+    NT_ASSERT(key < NT_KEY_COUNT);
     if (down && !s_next_keys.down[key]) {
         s_next_keys.pressed[key] = true;
     }
@@ -251,19 +249,19 @@ void nt_input_set_key(nt_key_t key, bool down) {
     nt_input_set_key_apply(key, down);
 }
 
-static void nt_input_buffer_char_apply(uint32_t cp) {
+static void nt_input_char_apply(uint32_t cp) {
     if (s_next_chars.count < NT_INPUT_CHAR_MAX) { /* drop-newest: earlier typing is never clobbered */
         s_next_chars.cps[s_next_chars.count++] = cp;
     }
 }
 
-void nt_input_buffer_char(uint32_t cp) {
+void nt_input_char(uint32_t cp) {
 #if NT_INPUT_AUTOMATION_ENABLED
     if (!s_player_enabled) {
         return;
     }
 #endif
-    nt_input_buffer_char_apply(cp);
+    nt_input_char_apply(cp);
 }
 
 static void nt_input_mouse_move_apply(float x, float y, uint8_t buttons_mask) {
@@ -426,63 +424,37 @@ void nt_input_focus_lost(void) {
 
 void nt_input_set_player_enabled(bool enabled) { s_player_enabled = enabled; }
 
-static void nt_input_mouse_buttons_apply(uint8_t buttons_mask) {
-    if (MOUSE->active) {
+/* Inject applies through the *_apply cores, past the player gate: injected input is
+   indistinguishable from human to the query API. The devapi layer validated the untrusted command. */
+
+void nt_input_inject_key(nt_key_t key, bool down) { nt_input_set_key_apply(key, down); }
+
+void nt_input_inject_mouse(float x, float y, uint8_t buttons_mask) {
+    NT_ASSERT(buttons_mask <= 7U);
+    nt_input_mouse_move_apply(x, y, buttons_mask);
+}
+
+void nt_input_inject_mouse_buttons(uint8_t buttons_mask) {
+    NT_ASSERT(buttons_mask <= 7U);
+    if (MOUSE->active) { /* at its current position; no mouse over the window -> no press at (0,0) */
         nt_input_mouse_move_apply(MOUSE->x, MOUSE->y, buttons_mask);
     }
 }
 
-/* Inject applies through the *_apply cores, past the player gate: injected input is
-   indistinguishable from human to the query API. */
-
-bool nt_input_inject_key(nt_key_t key, bool down) {
-    if (key >= NT_KEY_COUNT) {
-        return false; /* L1 defense-in-depth: out-of-range key (L2 validates first; never asserts). */
-    }
-    nt_input_set_key_apply(key, down);
-    return true;
+void nt_input_inject_pointer_down(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask) {
+    NT_ASSERT((type == NT_POINTER_TOUCH || type == NT_POINTER_PEN) && buttons_mask <= 7U);
+    nt_input_pointer_down_apply(id, x, y, pressure, type, buttons_mask);
 }
 
-bool nt_input_inject_mouse(float x, float y, uint8_t buttons_mask) {
-    if (buttons_mask > 7U) {
-        return false; /* L1 defense-in-depth (L2 validates first; never asserts) */
-    }
-    nt_input_mouse_move_apply(x, y, buttons_mask);
-    return true;
+void nt_input_inject_pointer_move(uint32_t id, float x, float y, float pressure, uint8_t buttons_mask) {
+    NT_ASSERT(buttons_mask <= 7U);
+    nt_input_pointer_move_apply(id, x, y, pressure, buttons_mask);
 }
 
-bool nt_input_inject_mouse_buttons(uint8_t buttons_mask) {
-    if (buttons_mask > 7U) {
-        return false;
-    }
-    nt_input_mouse_buttons_apply(buttons_mask);
-    return true;
-}
-
-bool nt_input_inject_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask) {
-    /* L1 defense-in-depth (L2 validates first; never asserts): reject a kind that is not a contact
-       event, a type that is not touch/pen, or a mask with bits outside {1,2,4}. */
-    if (kind != NT_INJECT_POINTER_DOWN && kind != NT_INJECT_POINTER_MOVE && kind != NT_INJECT_POINTER_UP) {
-        return false;
-    }
-    if (kind == NT_INJECT_POINTER_DOWN && (type == (uint8_t)NT_POINTER_MOUSE || type > (uint8_t)NT_POINTER_PEN)) {
-        return false;
-    }
-    if (kind != NT_INJECT_POINTER_UP && buttons_mask > 7U) {
-        return false;
-    }
-    if (kind == NT_INJECT_POINTER_DOWN) {
-        nt_input_pointer_down_apply(id, x, y, pressure, type, buttons_mask);
-    } else if (kind == NT_INJECT_POINTER_MOVE) {
-        nt_input_pointer_move_apply(id, x, y, pressure, buttons_mask);
-    } else {
-        nt_input_pointer_up_apply(id);
-    }
-    return true;
-}
+void nt_input_inject_pointer_up(uint32_t id) { nt_input_pointer_up_apply(id); }
 
 void nt_input_inject_wheel(float dx, float dy) { nt_input_wheel_apply(dx, dy); }
 
-void nt_input_inject_char(uint32_t cp) { nt_input_buffer_char_apply(cp); }
+void nt_input_inject_char(uint32_t cp) { nt_input_char_apply(cp); }
 
 #endif /* NT_INPUT_AUTOMATION_ENABLED */

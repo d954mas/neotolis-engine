@@ -160,6 +160,7 @@ target_link_libraries(nt_ui
         nt_material
         nt_input_interface
         nt_clipboard_interface
+        nt_window_interface
         nt_memory
         # PUBLIC: nt_atlas_region_ref_t appears in public widget headers
         # (nt_ui_button.h / nt_ui_image.h / nt_ui_panel.h).

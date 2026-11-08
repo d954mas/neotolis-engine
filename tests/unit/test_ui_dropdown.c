@@ -43,7 +43,6 @@ static const char *const s_long[] = {"r0", "r1", "r2", "r3", "r4", "r5", "r6", "
 void setUp(void) {
     nt_test_assert_install();
     nt_input_test_idle();
-    nt_input_poll(); /* clear sticky edges from a prior test */
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
 }
 
@@ -149,12 +148,8 @@ static void test_dropdown_trigger_toggles_open(void) {
     TEST_ASSERT_TRUE(open);
 }
 
-/* Raise exactly one fresh pressed-key edge for this frame (mirrors test_ui_menu's menu_key): poll clears
- * the sticky edges, clear_all drops the held state, set_key(true) raises a clean rising edge. */
-static void dropdown_key(nt_key_t key) {
-    nt_input_test_idle();
-    nt_input_set_key(key, true);
-}
+/* Publish exactly one fresh pressed-key edge for this frame. */
+static void dropdown_key(nt_key_t key) { nt_input_test_key_press(key); }
 
 /* ---- Combo keyboard is INERT: the immediate combo wires NO keyboard nav. combo_open_list routes through
  *      nt_ui_popup_visible (the non-ext popup path), which has esc_close=false and dismisses only on an

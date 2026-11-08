@@ -70,7 +70,7 @@ test('input field: real keydown (Cyrillic) + paste reaches the buffer and the re
   // engine's keydown->_ntCharBuf path never sees it. Dispatching genuine KeyboardEvent('keydown') with
   // the Cyrillic e.key drives the exact same listener a Cyrillic keyboard would (the path under test);
   // only the event ORIGIN is synthetic, unavoidable for non-US chars. The first char replaces the
-  // select-all selection; frame-sync each so the char ring drains it.
+  // select-all selection; frame-sync each so the poll publishes it.
   for (const ch of 'Привет') {
     await page.evaluate((k) => document.querySelector('canvas')!.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })), ch);
     await frame();

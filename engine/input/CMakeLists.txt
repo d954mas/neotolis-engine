@@ -1,4 +1,4 @@
-# nt_input -- input polling with swappable backends
+# nt_input -- input state: platform events apply to the next frame, nt_input_poll publishes it
 
 # nt_input automation surface (player gate + inject pipeline) is gated behind
 # NT_INPUT_AUTOMATION_ENABLED so a build without the devapi input group is the lean apply layer (no
@@ -10,39 +10,27 @@ else()
     set(NT_INPUT_AUTOMATION_DEFS NT_INPUT_AUTOMATION_ENABLED=0)
 endif()
 
-# Header-only interface carries nt_input.h's include root; the exe selects the impl.
+# Header-only interface carries nt_input.h's include root; the exe selects the impl. The input core is
+# platform-free: the window module's platform pump feeds it.
 nt_declare_interface(nt_input)
 
-if(EMSCRIPTEN)
-    nt_add_module(nt_input LOG_DOMAIN "input"
-        nt_input.c
-        web/nt_input_web.c
-        nt_input.h
-        nt_input_internal.h
-    )
-else()
-    # Native has no on-screen keyboard hint; platform events come from the window module.
-    nt_add_module(nt_input LOG_DOMAIN "input"
-        nt_input.c
-        stub/nt_input_stub.c
-        nt_input.h
-        nt_input_internal.h
-    )
-endif()
+nt_add_module(nt_input LOG_DOMAIN "input"
+    nt_input.c
+    nt_input.h
+    nt_input_internal.h
+)
 
 target_link_libraries(nt_input PUBLIC nt_core nt_input_interface)
 # PUBLIC: nt_input.h's #if NT_INPUT_AUTOMATION_ENABLED is evaluated in every consumer TU (the devapi
 # layer + the input header itself), so the value must propagate to anything that links nt_input.
 target_compile_definitions(nt_input PUBLIC ${NT_INPUT_AUTOMATION_DEFS})
 
-# Stub implementation for headless builds (CI, builder, tests)
-nt_add_module(nt_input_stub LOG_DOMAIN "input_stub"
+# The same core with the automation surface always compiled, for tests that drive the inject API and
+# the player gate regardless of NT_DEVAPI_ENABLED.
+nt_add_module(nt_input_automation LOG_DOMAIN "input"
     nt_input.c
-    stub/nt_input_stub.c
     nt_input.h
 )
 
-target_link_libraries(nt_input_stub PUBLIC nt_core nt_input_interface)
-# The unit tests (test_input_inject / test_devapi_input) link the stub and drive the L1 inject API
-# directly, so the stub ALWAYS carries the automation surface regardless of NT_DEVAPI_ENABLED.
-target_compile_definitions(nt_input_stub PUBLIC NT_INPUT_AUTOMATION_ENABLED=1)
+target_link_libraries(nt_input_automation PUBLIC nt_core nt_input_interface)
+target_compile_definitions(nt_input_automation PUBLIC NT_INPUT_AUTOMATION_ENABLED=1)

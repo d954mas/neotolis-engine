@@ -915,9 +915,8 @@ static void test_menu_record_nav_focuses_recorded_item(void) {
     menu_key(NT_KEY_ARROW_DOWN);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
 
-    /* Frame 3: settle so the focus committed in frame 2 is observable via the record probe (1-frame effect).
-     * poll() consumes the frame-2 Down PRESSED edge (clear_all_keys alone leaves the sticky edge, which
-     * would re-step focus this frame). */
+    /* Frame 3: settle so the focus committed in frame 2 is observable via the record probe (1-frame effect);
+     * an idle frame has no Down edge to re-step focus. */
     nt_input_test_idle();
     menu_im_frame(&st, &style, 0.0F, 0.0F);
 
