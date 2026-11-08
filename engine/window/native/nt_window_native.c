@@ -1,7 +1,7 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
-#include "input/nt_input_internal.h" /* nt_input_buffer_* */
+#include "input/nt_input_internal.h" /* the nt_input backend entry points */
 #include "log/nt_log.h"
 #include "window/nt_window.h"
 
@@ -13,11 +13,11 @@ static int s_windowed_y;
 static int s_windowed_w;
 static int s_windowed_h;
 
-/* ---- Mouse button mask tracking (moved from nt_input_native.c) ---- */
+/* ---- Mouse button mask tracking ---- */
 
 static uint8_t s_cached_buttons;
 
-/* ---- Key mapping (moved from nt_input_native.c) ---- */
+/* ---- Key mapping ---- */
 
 static nt_key_t glfw_key_to_nt(int key) {
     /* Letters A-Z */
@@ -81,7 +81,17 @@ static nt_key_t glfw_key_to_nt(int key) {
     }
 }
 
-/* ---- GLFW Callbacks — buffer events for nt_input_poll() to drain ---- */
+/* ---- GLFW Callbacks — each event applies to the next input frame as it arrives ---- */
+
+/* The mouse at a cursor position in window coordinates, with the held buttons. */
+static void mouse_at(double xpos, double ypos) { nt_input_mouse_move((float)xpos * g_nt_window.dpr, (float)ypos * g_nt_window.dpr, s_cached_buttons); }
+
+static void mouse_at_cursor(void) {
+    double xpos = 0.0;
+    double ypos = 0.0;
+    glfwGetCursorPos(s_glfw_window, &xpos, &ypos);
+    mouse_at(xpos, ypos);
+}
 
 static void glfw_key_callback(GLFWwindow *window, int key, int scancode, int action, int mods) {
     (void)window;
@@ -89,30 +99,26 @@ static void glfw_key_callback(GLFWwindow *window, int key, int scancode, int act
     (void)mods;
     nt_key_t nt_key = glfw_key_to_nt(key);
     if (nt_key < NT_KEY_COUNT) {
-        nt_input_buffer_key(nt_key, action != GLFW_RELEASE);
+        nt_input_set_key(nt_key, action != GLFW_RELEASE);
     }
 }
 
 static void glfw_char_callback(GLFWwindow *window, unsigned int codepoint) {
     (void)window;
-    /* GLFW delivers native-endian UTF-32 already. Stage (not ring-write) so platform_poll drains
-       it into the ring after nt_input_poll's frame clear -- otherwise the clear eats the char. */
-    nt_input_buffer_char_event(codepoint);
+    nt_input_buffer_char(codepoint); /* GLFW delivers native-endian UTF-32 already */
 }
 
 static void glfw_cursor_pos_callback(GLFWwindow *window, double xpos, double ypos) {
     (void)window;
-    nt_input_buffer_mouse(xpos, ypos, s_cached_buttons);
+    mouse_at(xpos, ypos);
 }
 
 static void glfw_cursor_enter_callback(GLFWwindow *window, int entered) {
+    (void)window;
     if (entered) {
-        double xpos;
-        double ypos;
-        glfwGetCursorPos(window, &xpos, &ypos);
-        nt_input_buffer_mouse(xpos, ypos, s_cached_buttons); /* a window shown under a still cursor gets no move */
+        mouse_at_cursor(); /* a window shown under a still cursor gets no move */
     } else {
-        nt_input_buffer_mouse_leave();
+        nt_input_mouse_leave();
     }
 }
 
@@ -141,13 +147,9 @@ static void glfw_mouse_button_callback(GLFWwindow *window, int button, int actio
         s_cached_buttons &= (uint8_t)~bit;
     }
 
-    double xpos = 0.0;
-    double ypos = 0.0;
-    glfwGetCursorPos(s_glfw_window, &xpos, &ypos);
-
-    nt_input_buffer_mouse(xpos, ypos, s_cached_buttons);
+    mouse_at_cursor();
     if (s_cached_buttons == 0 && !glfwGetWindowAttrib(s_glfw_window, GLFW_HOVERED)) {
-        nt_input_buffer_mouse_leave(); /* a drag released outside: the leave was ignored while held */
+        nt_input_mouse_leave(); /* a drag released outside: the leave was ignored while held */
     }
 }
 
@@ -156,21 +158,18 @@ static void glfw_scroll_callback(GLFWwindow *window, double xoffset, double yoff
     /* The wheel lands on the mouse: a move to the cursor first, since a bot may have left the mouse elsewhere
        and GLFW reports no position before the first cursor move. A wheel from outside brings no mouse in. */
     if (glfwGetWindowAttrib(s_glfw_window, GLFW_HOVERED)) {
-        double xpos = 0.0;
-        double ypos = 0.0;
-        glfwGetCursorPos(s_glfw_window, &xpos, &ypos);
-        nt_input_buffer_mouse(xpos, ypos, s_cached_buttons);
+        mouse_at_cursor();
     }
     /* GLFW yoffset is ±1.0 per notch with OPPOSITE Y sign to the DOM (GLFW: up=+, DOM deltaY: down=+).
      * Web is canonical, so negate yoffset to match. X already agrees (right=+ on both). */
-    nt_input_buffer_wheel((float)xoffset, -(float)yoffset);
+    nt_input_wheel((float)xoffset, -(float)yoffset);
 }
 
 static void glfw_focus_callback(GLFWwindow *window, int focused) {
     (void)window;
     if (!focused) {
         s_cached_buttons = 0;
-        nt_input_buffer_focus_lost();
+        nt_input_focus_lost(); /* GLFW's synthetic releases that follow are ordinary events */
     }
 }
 
@@ -194,7 +193,11 @@ static void sync_sizes(void) {
         return;
     }
 
+    const float old_dpr = g_nt_window.dpr;
     nt_window_apply_sizes((float)win_w, (float)win_h, device_dpr);
+    if (g_nt_window.dpr != old_dpr && glfwGetWindowAttrib(s_glfw_window, GLFW_HOVERED)) {
+        mouse_at_cursor(); /* events map at arrival: a still cursor would keep the old DPR */
+    }
 }
 
 /* ---- Lifecycle ---- */
@@ -261,8 +264,8 @@ void nt_window_init(void) {
 }
 
 void nt_window_poll(void) {
-    glfwPollEvents(); /* Pump OS events → callbacks buffer input */
-    sync_sizes();     /* Update DPR/sizes (used by nt_input_poll drain) */
+    glfwPollEvents(); /* Pump OS events → callbacks apply input */
+    sync_sizes();
 }
 
 void nt_window_shutdown(void) {

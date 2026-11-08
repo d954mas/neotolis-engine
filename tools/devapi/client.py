@@ -130,7 +130,7 @@ class DevApiClient:
         return self.result("input.set_player_enabled", {"enabled": enabled})
 
     def text(self, s: str) -> Dict[str, Any]:
-        """Decode a UTF-8 string -> codepoints and enqueue them into the char ring."""
+        """Decode a UTF-8 string -> codepoints and enqueue them as typed text."""
         return self.result("input.text", {"text": s})
 
     def state(self, key: Optional[str] = None, text: bool = False) -> Dict[str, Any]:

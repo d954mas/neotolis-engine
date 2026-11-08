@@ -234,7 +234,11 @@ static struct {
     double total_ms, worst_ms, started;
     uint32_t press_frames; /* frames left to hold the button */
     uint32_t again;        /* frames until the second click of a double-click */
+    nt_pointer_t pointer;  /* the monkey's mouse: published input is replaced by the next poll */
 } s_monkey;
+
+/* The pointer this frame's UI follows. */
+static const nt_pointer_t *frame_pointer(void) { return s_monkey.on ? &s_monkey.pointer : &g_nt_input.pointers[g_nt_input.primary]; }
 
 static uint32_t monkey_rand(void) {
     s_monkey.seed ^= s_monkey.seed << 13U;
@@ -247,8 +251,7 @@ static uint32_t monkey_rand(void) {
 static void monkey_input(float w, float h) {
     static const nt_key_t k_keys[] = {NT_KEY_ARROW_UP, NT_KEY_ARROW_DOWN, NT_KEY_ARROW_LEFT, NT_KEY_ARROW_RIGHT, NT_KEY_PAGE_UP, NT_KEY_PAGE_DOWN, NT_KEY_HOME, NT_KEY_END,
                                       NT_KEY_D,        NT_KEY_P,          NT_KEY_ENTER,      NT_KEY_BACKSPACE,   NT_KEY_ESCAPE,  NT_KEY_C,         NT_KEY_B};
-    nt_pointer_t *p = &g_nt_input.pointers[0];
-    g_nt_input.primary = 0;
+    nt_pointer_t *p = &s_monkey.pointer;
     p->active = true;
     p->wheel_dy = 0.0F;
     p->dx = 0.0F;
@@ -851,7 +854,7 @@ static void tracks_input(void) {
     if (!box.found || box.width <= 0.0F) {
         return;
     }
-    const nt_pointer_t *pointer = &g_nt_input.pointers[g_nt_input.primary];
+    const nt_pointer_t *pointer = frame_pointer();
     double at = ((double)pointer->x - (double)box.x) / ((double)box.width * SHARE_);
     at = at < 0.0 ? 0.0 : (at > 1.0 ? 1.0 : at); // NOLINT(readability-avoid-nested-conditional-operator)
     if (s.track_wheel != 0.0F) {
@@ -2781,7 +2784,7 @@ static void frame(void) {
     const nt_material_info_t *txt = nt_material_get_info(s_text_material);
     const bool can_render = s_bound_atlas && s_bound_font && sprite != NULL && nt_gfx_program_ready(sprite->program) && txt != NULL && nt_gfx_program_ready(txt->program);
     /* The wheel over the tracks (last frame's layout) belongs to the frame axis: the UI gets the pointer without it. */
-    nt_pointer_t pointer = g_nt_input.pointers[g_nt_input.primary];
+    nt_pointer_t pointer = *frame_pointer();
     const nt_ui_bbox_t tracks = nt_ui_get_bbox(s_ctx, CLAY_ID("tracks").id);
     const bool over = s.page == PAGE_FRAMES && tracks.found && pointer.x >= tracks.x && pointer.x < tracks.x + tracks.width && pointer.y >= tracks.y && pointer.y < tracks.y + tracks.height;
     s.track_wheel = over && !s_keys.shift ? pointer.wheel_dy : 0.0F;

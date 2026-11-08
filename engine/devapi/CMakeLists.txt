@@ -42,7 +42,7 @@ if(NT_DEVAPI_GROUP_TIME)
 endif()
 
 # The ui group delegates inject scheduling to the input group's single scheduler (one scheduler, one
-# cap <= the immediate buffer), so nt_devapi_ui hard-links nt_devapi_input. Fail early if UI lacks INPUT.
+# cap), so nt_devapi_ui hard-links nt_devapi_input. Fail early if UI lacks INPUT.
 if(NT_DEVAPI_GROUP_UI AND NOT NT_DEVAPI_GROUP_INPUT)
     message(FATAL_ERROR "NT_DEVAPI_GROUP_UI requires NT_DEVAPI_GROUP_INPUT (ui.click/drag/scroll reuse the input group's inject scheduler).")
 endif()

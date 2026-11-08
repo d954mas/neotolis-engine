@@ -171,6 +171,7 @@ static void test_input_move_keeps_mouse_type(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.move\",\"params\":{\"x\":10,\"y\":10,\"type\":\"touch\"}}")));
     advance();
     nt_input_mouse_move(10.0F, 10.0F, 1);
+    nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
 }
 
@@ -330,20 +331,20 @@ static char *make_text_request(uint32_t count) {
     return buf;
 }
 
-/* One over NT_INPUT_CHAR_RING: can never land whole in the ring. queued must never overstate. */
+/* One over NT_INPUT_CHAR_MAX: can never land whole in one frame. queued must never overstate. */
 static void test_input_text_exceeds_char_ring_bad_params(void) {
-    char *req = make_text_request(NT_INPUT_CHAR_RING + 1U);
+    char *req = make_text_request(NT_INPUT_CHAR_MAX + 1U);
     assert_bad_params(nt_devapi_submit(req));
     free(req);
 }
 
-/* Exactly NT_INPUT_CHAR_RING codepoints is the boundary -> still accepted (queued:RING). */
+/* Exactly NT_INPUT_CHAR_MAX codepoints is the boundary -> still accepted (queued:MAX). */
 static void test_input_text_at_char_ring_ok(void) {
-    char *req = make_text_request(NT_INPUT_CHAR_RING);
+    char *req = make_text_request(NT_INPUT_CHAR_MAX);
     cJSON *root = parse_ok(nt_devapi_submit(req));
     free(req);
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
-    TEST_ASSERT_EQUAL_INT(NT_INPUT_CHAR_RING, cJSON_GetObjectItemCaseSensitive(result, "queued")->valueint);
+    TEST_ASSERT_EQUAL_INT(NT_INPUT_CHAR_MAX, cJSON_GetObjectItemCaseSensitive(result, "queued")->valueint);
     cJSON_Delete(root);
 }
 
@@ -441,8 +442,8 @@ static void test_reset_reenables_player(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":false}}")));
     nt_devapi_run_reset_hooks();
     nt_input_set_key(NT_KEY_B, true);
-    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_B));
     nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_B));
     TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
 }
 

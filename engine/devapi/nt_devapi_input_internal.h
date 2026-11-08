@@ -15,7 +15,7 @@
 #endif
 
 /* Reuse surface for the ui group: it resolves coords then DELEGATES scheduling here, so there is one
-   scheduler on the immediate buffer. Whole-or-nothing: preflight can_reserve(N), then issue N
+   scheduler. Whole-or-nothing: preflight can_reserve(N), then issue N
    sched_* calls (single-threaded -> atomic). */
 bool nt_devapi_input_sched_can_reserve(uint32_t n);
 void nt_devapi_input_sched_mouse(float x, float y, uint8_t buttons_mask, uint16_t at_frame);

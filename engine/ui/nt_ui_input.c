@@ -805,7 +805,7 @@ static void focus_step(input_frame_t *f) {
     // #endregion
 }
 
-/* The focused edit pipeline: drain the typed-char ring, then run the physical editing keys
+/* The focused edit pipeline: drain the typed chars, then run the physical editing keys
  * (delete/arrows/home/end), selection chords (Shift/Ctrl+A), clipboard (Ctrl+C/X/V), submit + Tab/Esc.
  * No-op when the field is not focused. Sets the changed/submitted out-flags; cur_len re-derived in f->cur_len. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)

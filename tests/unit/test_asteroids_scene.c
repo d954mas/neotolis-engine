@@ -5,6 +5,7 @@
 
 #include "input/nt_input_internal.h"
 #include "test_helpers/nt_gfx_fake.h"
+#include "test_helpers/nt_input_test_frame.h"
 #include "unity.h"
 
 #include <stdlib.h>
@@ -384,6 +385,13 @@ static void test_reset_cancels_pending_camera_motion(void) {
     s_camera = old_camera;
 }
 
+/* Publish the keys fed so far; these tests write the pointers in g_nt_input directly. */
+static void publish_keys(void) {
+    const nt_input_t pointers = g_nt_input;
+    nt_input_poll();
+    g_nt_input = pointers;
+}
+
 static void test_modal_and_resize_cancel_scene_drag_before_input_early_return(void) {
     const nt_window_t old_window = g_nt_window;
     const camera_orientation_t old_camera = s_camera;
@@ -407,11 +415,12 @@ static void test_modal_and_resize_cancel_scene_drag_before_input_early_return(vo
     TEST_ASSERT_EQUAL_UINT8(2, s_pointer_owner[0][NT_BUTTON_LEFT]);
     pointer->buttons[NT_BUTTON_LEFT].is_pressed = false;
     nt_input_set_key(NT_KEY_F4, true);
+    publish_keys();
     s_hide_hud = false;
     handle_input(0);
     TEST_ASSERT_TRUE(s_hide_hud);
     nt_input_set_key(NT_KEY_F4, false);
-    nt_input_poll();
+    publish_keys();
     s_ui_keyboard_blocked = false;
     pointer->x = 200;
     pointer->dx = -700;
@@ -459,12 +468,12 @@ static void test_keyboard_resets_win_over_already_sampled_drag(void) {
     TEST_ASSERT_TRUE(fabsf(s_initial_camera.eye[0] - s_camera.eye[0]) > 0.001F);
     nt_input_set_key(NT_KEY_LALT, true);
     nt_input_set_key(NT_KEY_R, true);
+    publish_keys();
     pointer->x = 500;
     handle_input(0);
     TEST_ASSERT_EQUAL_MEMORY(&s_initial_camera, &s_camera, sizeof(s_camera));
     TEST_ASSERT_EQUAL_UINT8(2, s_pointer_owner[0][NT_BUTTON_LEFT]);
-    nt_input_clear_all_keys();
-    nt_input_poll();
+    nt_input_test_idle();
     *pointer = (nt_pointer_t){.active = true, .x = 300, .y = 300};
     pointer->buttons[NT_BUTTON_RIGHT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
     handle_input(0);
@@ -475,6 +484,7 @@ static void test_keyboard_resets_win_over_already_sampled_drag(void) {
     TEST_ASSERT_TRUE(fabsf(s_initial_light.eye[0] - s_light.eye[0]) > 0.001F);
     nt_input_set_key(NT_KEY_LCTRL, true);
     nt_input_set_key(NT_KEY_L, true);
+    publish_keys();
     pointer->x = 500;
     handle_input(0);
     TEST_ASSERT_EQUAL_MEMORY(&s_initial_light, &s_light, sizeof(s_light));

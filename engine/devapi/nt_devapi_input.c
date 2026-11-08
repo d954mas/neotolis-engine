@@ -16,9 +16,6 @@
 /* NT_DEVAPI_INPUT_SCHED_MAX (bounded BSS schedule cap, -D overridable) is defined in
    nt_devapi_input_internal.h so the ui group + the unit tests derive their sizes from the real cap. */
 
-/* Links the two caps so a full schedule's release can never exceed the immediate buffer. */
-_Static_assert(NT_DEVAPI_INPUT_SCHED_MAX <= NT_INPUT_INJECT_QUEUE_MAX, "schedule must never release more than the immediate buffer can hold");
-
 typedef struct {
     uint16_t frames_remaining; /* sim-advance countdown; 0 = release on the next advancing tick */
     uint8_t kind;              /* nt_inject_kind_t */
@@ -134,8 +131,8 @@ static void sched_text(const uint32_t *cps, uint32_t n) {
     }
 }
 
-/* Release one due entry into the immediate inject buffer. false == engine invariant violation
-   (capacity preflighted + _Static_assert), so the caller asserts. */
+/* Apply one due entry through the inject API. false == engine invariant violation (every entry was
+   validated when it was scheduled), so the caller asserts. */
 static bool sched_release_one(const sched_entry_t *e) {
     switch ((nt_inject_kind_t)e->kind) {
     case NT_INJECT_KEY:
@@ -150,11 +147,11 @@ static bool sched_release_one(const sched_entry_t *e) {
     case NT_INJECT_POINTER_UP:
         return nt_input_inject_pointer(NT_INJECT_POINTER_UP, e->u.pointer_up.id, 0.0F, 0.0F, 0.0F, 0, 0);
     case NT_INJECT_WHEEL:
-        return nt_input_inject_wheel(e->u.wheel.dx, e->u.wheel.dy);
-    case NT_INJECT_CHAR: {
-        uint32_t cp = e->u.chr.cp;
-        return nt_input_inject_text(&cp, 1U);
-    }
+        nt_input_inject_wheel(e->u.wheel.dx, e->u.wheel.dy);
+        return true;
+    case NT_INJECT_CHAR:
+        nt_input_inject_char(e->u.chr.cp);
+        return true;
     }
     return false; /* unreachable: kind is always one of the above. */
 }
@@ -165,7 +162,7 @@ static void sched_tick(void) {
     for (uint32_t i = 0; i < s_sched_count; i++) {
         if (s_sched[i].frames_remaining == 0) {
             bool ok = sched_release_one(&s_sched[i]); /* due: release, do NOT carry forward. */
-            NT_ASSERT(ok);                            /* buffer >= schedule by _Static_assert; a drop is a build bug. */
+            NT_ASSERT(ok);                            /* validated at schedule time; a rejection is a build bug. */
             (void)ok;
             continue;
         }
@@ -184,7 +181,7 @@ static struct {
     bool down[NT_KEY_COUNT];
     bool pressed[NT_KEY_COUNT];
     bool released[NT_KEY_COUNT];
-    uint32_t chars[NT_INPUT_CHAR_RING];
+    uint32_t chars[NT_INPUT_CHAR_MAX];
     uint32_t char_count;
 } s_seen;
 
@@ -206,7 +203,7 @@ static void seen_refresh(void) {
     s_seen.char_count = 0;
     uint32_t cp;
     while (nt_input_pop_char(&cp)) {
-        NT_ASSERT(s_seen.char_count < NT_INPUT_CHAR_RING); /* nt_input's ring drops chars past this cap */
+        NT_ASSERT(s_seen.char_count < NT_INPUT_CHAR_MAX); /* nt_input drops a frame's chars past this cap */
         s_seen.chars[s_seen.char_count++] = cp;
     }
 }
@@ -572,8 +569,8 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
         return nt_devapi_fail(err, "input.text: text must be a string");
     }
     const unsigned char *s = (const unsigned char *)t->valuestring;
-    /* Bounded by the char ring: beyond it the reply's queued would overstate what the game can read. */
-    uint32_t cps[NT_INPUT_CHAR_RING];
+    /* Bounded by a frame's char cap: beyond it the reply's queued would overstate what the game can read. */
+    uint32_t cps[NT_INPUT_CHAR_MAX];
     uint32_t n = 0;
     while (*s != 0) {
         uint32_t cp;
@@ -609,8 +606,8 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
         if (cp < k_min_cp[extra] || cp > 0x10FFFFU || (cp >= 0xD800U && cp <= 0xDFFFU)) {
             return nt_devapi_fail(err, "input.text: invalid UTF-8");
         }
-        if (n >= NT_INPUT_CHAR_RING) {
-            return nt_devapi_fail(err, "input.text: more than " NT_DEVAPI_STR(NT_INPUT_CHAR_RING) " codepoints (the char ring)");
+        if (n >= NT_INPUT_CHAR_MAX) {
+            return nt_devapi_fail(err, "input.text: more than " NT_DEVAPI_STR(NT_INPUT_CHAR_MAX) " codepoints (one frame of text)");
         }
         cps[n] = cp;
         n++;
@@ -728,7 +725,7 @@ static const nt_devapi_command k_input_cmds[] = {
     },
     {
         .method = "input.text",
-        .summary = "decode a UTF-8 string -> codepoints and enqueue them into the char ring",
+        .summary = "decode a UTF-8 string -> codepoints and enqueue them as typed text",
         .params_shape = "{text:string}",
         .result_shape = "{queued:number}",
         .fn = cmd_input_text,

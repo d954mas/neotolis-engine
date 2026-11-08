@@ -2,7 +2,7 @@
 
 # nt_input automation surface (player gate + inject pipeline) is gated behind
 # NT_INPUT_AUTOMATION_ENABLED so a build without the devapi input group is the lean apply layer (no
-# gate, no inject buffer or symbols). DERIVED from the devapi input group, never hand-set: it is an
+# gate, no inject symbols). DERIVED from the devapi input group, never hand-set: it is an
 # nt_input-layer flag (this module must not carry a devapi name), distinct from NT_DEVAPI_GROUP_INPUT.
 if(NT_DEVAPI_ENABLED AND NT_DEVAPI_GROUP_INPUT)
     set(NT_INPUT_AUTOMATION_DEFS NT_INPUT_AUTOMATION_ENABLED=1)
@@ -21,9 +21,10 @@ if(EMSCRIPTEN)
         nt_input_internal.h
     )
 else()
+    # Native has nothing to stage: GLFW callbacks call the entry points directly.
     nt_add_module(nt_input LOG_DOMAIN "input"
         nt_input.c
-        native/nt_input_native.c
+        stub/nt_input_stub.c
         nt_input.h
         nt_input_internal.h
     )
@@ -38,9 +39,6 @@ if(EMSCRIPTEN)
     # g_nt_window resolves at executable link time (exe picks a window impl).
     target_link_libraries(nt_input PUBLIC nt_window_interface)
 endif()
-# Native: nt_input_native.c reads g_nt_window.dpr at flush time. The header is
-# found via the shared engine/ include root; the symbol g_nt_window resolves at
-# executable link time (app links a window impl).
 
 # Stub implementation for headless builds (CI, builder, tests)
 nt_add_module(nt_input_stub LOG_DOMAIN "input_stub"

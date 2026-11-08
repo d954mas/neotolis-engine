@@ -10,11 +10,21 @@ Related: [Platform Architecture](../runtime/platform.md), [Frame Lifecycle](../r
 
 Input system is polling-based. Game queries state each frame, does not subscribe to callbacks.
 
+Backends apply each device event to the next frame's input state as the event reaches the core
+(native: GLFW callbacks; web: one ordered queue of DOM events, drained by `nt_input_poll`).
+`nt_input_poll` publishes that state for the frame and starts the next one, so the state the game
+reads changes only at the poll. Edges accumulate: a press and a release between two polls are both
+readable. `g_nt_input` and the query functions are read-only for their consumers.
+
+A focus loss is applied in that order: it releases held player input, and events after it apply
+after it. A release and a new press of one button in one frame therefore read pressed and released
+together, like any fast press and release inside one frame. On web, input is initialized once per
+page (the listeners are never removed).
+
 ## Typed characters
 
-Text input is separate from key state: characters arrive as UTF-32 codepoints in a
-small FIFO ring (`NT_INPUT_CHAR_RING`, 32, power-of-2), drained by the focused
-widget via:
+Text input is separate from key state: characters arrive as UTF-32 codepoints, up to
+`NT_INPUT_CHAR_MAX` (32) per frame, read in order by the focused widget via:
 
 ```c
 bool nt_input_pop_char(uint32_t *out_codepoint);  // false when empty
@@ -24,10 +34,10 @@ void nt_input_set_text_input_mode(nt_text_input_mode_t mode);  // soft-keyboard 
 - Chars carry *text* (layout-resolved, includes key repeat); physical keys carry
   navigation/editing. Web has no GLFW char callback, so the web backend
   synthesizes chars from `e.key` incl. `e.repeat` to match native behavior.
-- Frame-local like key edges: `nt_input_poll` drops unconsumed chars, then the
-  platform poll refills this frame's typing — a focused widget always sees the
-  current frame's characters.
-- Overflow is drop-newest: a full ring never clobbers unread characters.
+- Frame-local like key edges: `nt_input_poll` publishes the characters typed since
+  the previous poll and drops the ones the game left unread. Each frame has its own
+  capacity, so unread text never takes room from the next frame's typing.
+- Overflow is drop-newest: earlier characters of the frame are never clobbered.
 
 ## Pointers
 
@@ -36,8 +46,9 @@ position and deltas in framebuffer pixels, wheel notches, pressure, type, and pe
 `is_down`/`is_pressed`/`is_released`.
 
 - **`pointers[0]` is the mouse.** It is active while the cursor is over the window, or while a
-  button is held (a drag outside the window keeps it). A button release keeps it; a leave or a
-  focus loss deactivates it on the next poll, so that frame still reads the release. The wheel
+  button is held (a drag outside the window keeps it). A button release keeps it; after a leave
+  or a focus loss it is published once more (that frame still reads the release) and then
+  deactivates, unless a move brings it back first. The wheel
   lands only on an active mouse. On a device without a mouse it stays inactive. Its pressure is 1
   while a button is down, else 0. A press counts only when it starts on the window (on web: while
   the canvas holds the pointer capture), so a drag from outside never presses.
@@ -45,7 +56,7 @@ position and deltas in framebuffer pixels, wheel notches, pressure, type, and pe
   platform contact id. A move for an unknown id is ignored, so a hovering pen has no slot (pen
   hover is not supported).
 - **The primary pointer**, for code that follows one pointer: `g_nt_input.pointers[g_nt_input.primary]`,
-  updated at the end of `nt_input_poll`. A pointer becomes primary by a press; the mouse also takes
+  chosen by `nt_input_poll` before it publishes. A pointer becomes primary by a press; the mouse also takes
   it by hovering while no pointer is held or releasing. It stays primary from its press through its
   release frame. A contact already held when the primary ends never takes over, and a press that
   lands while the primary is held or releasing is not primary: a single-pointer consumer never sees

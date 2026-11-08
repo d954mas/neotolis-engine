@@ -12,6 +12,7 @@
 #include "input/nt_input_internal.h"
 #include "memory/nt_mem_scratch.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/nt_input_test_frame.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -41,13 +42,13 @@ static const char *const s_long[] = {"r0", "r1", "r2", "r3", "r4", "r5", "r6", "
 
 void setUp(void) {
     nt_test_assert_install();
-    nt_input_clear_all_keys();
+    nt_input_test_idle();
     nt_input_poll(); /* clear sticky edges from a prior test */
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
 }
 
 void tearDown(void) {
-    nt_input_clear_all_keys();
+    nt_input_test_idle();
     ui_walker_fixture_shutdown(&s_fx);
 }
 
@@ -151,8 +152,7 @@ static void test_dropdown_trigger_toggles_open(void) {
 /* Raise exactly one fresh pressed-key edge for this frame (mirrors test_ui_menu's menu_key): poll clears
  * the sticky edges, clear_all drops the held state, set_key(true) raises a clean rising edge. */
 static void dropdown_key(nt_key_t key) {
-    nt_input_poll();
-    nt_input_clear_all_keys();
+    nt_input_test_idle();
     nt_input_set_key(key, true);
 }
 
@@ -188,8 +188,7 @@ static void test_dropdown_combo_keyboard_inert(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(-1, selected, "arrows/Enter must not change *selected (mouse-only)");
     TEST_ASSERT_FALSE_MESSAGE(made, "Enter must not commit a selectable");
 
-    nt_input_poll();
-    nt_input_clear_all_keys();
+    nt_input_test_idle();
 }
 
 /* ---- A combo_selectable click writes *selected and closes the list. ---- */

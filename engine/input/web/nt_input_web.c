@@ -12,40 +12,57 @@ static void map_css_to_fb(float css_x, float css_y, float *fb_x, float *fb_y) {
     *fb_y = roundf(css_y * scale);
 }
 
-/* ---- KEEPALIVE wrappers for JS event handlers ---- */
+/* ---- Drained events (one ordered JS queue, see nt_input_web_register_listeners) ---- */
 
-EMSCRIPTEN_KEEPALIVE void nt_input_web_on_key(int key, int down) { nt_input_set_key((nt_key_t)key, down != 0); }
+/* Stride-7 records [type, a, b, c, d, e, f]; the JS listeners push these numeric types. */
+typedef enum {
+    WEB_CONTACT_DOWN = 0, /* id, x, y, pressure, type, buttons */
+    WEB_CONTACT_MOVE = 1, /* id, x, y, pressure, -, buttons */
+    WEB_CONTACT_UP = 2,   /* id */
+    WEB_MOUSE_MOVE = 3,   /* x, y, buttons */
+    WEB_MOUSE_LEAVE = 4,
+    WEB_KEY = 5,   /* key, down */
+    WEB_CHAR = 6,  /* codepoint */
+    WEB_WHEEL = 7, /* dx, dy in notches */
+    WEB_BLUR = 8,
+} web_event_t;
 
-EMSCRIPTEN_KEEPALIVE void nt_input_web_on_char(unsigned int cp) { nt_input_buffer_char((uint32_t)cp); }
-
-EMSCRIPTEN_KEEPALIVE void nt_input_web_on_mouse_move(float cx, float cy, int buttons) {
-    float fx;
-    float fy;
-    map_css_to_fb(cx, cy, &fx, &fy);
-    nt_input_mouse_move(fx, fy, (uint8_t)buttons);
+EMSCRIPTEN_KEEPALIVE void nt_input_web_on_event(int type, double a, double b, double c, double d, double e, double f) {
+    float fx = 0.0F;
+    float fy = 0.0F;
+    switch ((web_event_t)type) {
+    case WEB_CONTACT_DOWN:
+        map_css_to_fb((float)b, (float)c, &fx, &fy);
+        nt_input_pointer_down((uint32_t)a, fx, fy, (float)d, (uint8_t)e, (uint8_t)f);
+        break;
+    case WEB_CONTACT_MOVE:
+        map_css_to_fb((float)b, (float)c, &fx, &fy);
+        nt_input_pointer_move((uint32_t)a, fx, fy, (float)d, (uint8_t)f);
+        break;
+    case WEB_CONTACT_UP:
+        nt_input_pointer_up((uint32_t)a);
+        break;
+    case WEB_MOUSE_MOVE:
+        map_css_to_fb((float)a, (float)b, &fx, &fy);
+        nt_input_mouse_move(fx, fy, (uint8_t)c);
+        break;
+    case WEB_MOUSE_LEAVE:
+        nt_input_mouse_leave();
+        break;
+    case WEB_KEY:
+        nt_input_set_key((nt_key_t)a, b != 0.0);
+        break;
+    case WEB_CHAR:
+        nt_input_buffer_char((uint32_t)a);
+        break;
+    case WEB_WHEEL:
+        nt_input_wheel((float)a, (float)b);
+        break;
+    case WEB_BLUR:
+        nt_input_focus_lost();
+        break;
+    }
 }
-
-EMSCRIPTEN_KEEPALIVE void nt_input_web_on_mouse_leave(void) { nt_input_mouse_leave(); }
-
-EMSCRIPTEN_KEEPALIVE void nt_input_web_on_pointer_down(int id, float cx, float cy, float pressure, int ptype, int buttons) {
-    float fx;
-    float fy;
-    map_css_to_fb(cx, cy, &fx, &fy);
-    nt_input_pointer_down((uint32_t)id, fx, fy, pressure, (uint8_t)ptype, (uint8_t)buttons);
-}
-
-EMSCRIPTEN_KEEPALIVE void nt_input_web_on_pointer_move(int id, float cx, float cy, float pressure, int buttons) {
-    float fx;
-    float fy;
-    map_css_to_fb(cx, cy, &fx, &fy);
-    nt_input_pointer_move((uint32_t)id, fx, fy, pressure, (uint8_t)buttons);
-}
-
-EMSCRIPTEN_KEEPALIVE void nt_input_web_on_pointer_up(int id) { nt_input_pointer_up((uint32_t)id); }
-
-EMSCRIPTEN_KEEPALIVE void nt_input_web_on_wheel(float dx, float dy) { nt_input_wheel(dx, dy); }
-
-EMSCRIPTEN_KEEPALIVE void nt_input_web_on_blur(void) { nt_input_focus_lost(); }
 
 /* ---- Soft-keyboard hint ---- */
 
@@ -120,16 +137,13 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
         rect = canvas.getBoundingClientRect();
     }).observe(canvas);
 
-    /* Flat event buffers — no object allocation per event.
-       Key:     stride 2  [key, down, ...]
-       Pointer: stride 7  [type, id, x, y, pressure, ptype, buttons, ...]
-                type 0/1/2 = contact down/move/up, 3 = mouse move, 4 = mouse leave
-       Wheel:   stride 2  [dx, dy, ...] */
-    Module['_ntKeyBuf'] = [];
-    Module['_ntCharBuf'] = [];
-    Module['_ntPtrBuf'] = [];
-    Module['_ntWheelBuf'] = [];
-    Module['_ntBlurred'] = false;
+    /* One ordered queue of stride-7 records (web_event_t in C), drained in nt_input_poll. Listeners
+       only push, so C never runs inside a DOM callback. */
+    var q = [];
+    Module['_ntInputEvents'] = q;
+    function ev(t, a, b, c, d, e, f) {
+        q.push(t, a || 0, b || 0, c || 0, d || 0, e || 0, f || 0);
+    }
 
     /* Keyboard events */
     canvas.addEventListener("keydown", function(e) {
@@ -138,7 +152,7 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
         if (!e.repeat) {
             var k = keyMap[e.code];
             if (k !== undefined) {
-                Module['_ntKeyBuf'].push(k, 1);
+                ev(5, k, 1);
             }
         }
         /* Typed character: e.key is a single printable codepoint (not "Enter"/"ArrowUp"/...).
@@ -147,7 +161,7 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
            glfwSetCharCallback on web; this hand-rolled path is the char source. Emitted on e.repeat
            too so a held key types a run, matching native GLFW char-repeat. */
         if (Array.from(e.key).length === 1 && !e.ctrlKey && !e.metaKey) {
-            Module['_ntCharBuf'].push(e.key.codePointAt(0));
+            ev(6, e.key.codePointAt(0));
         }
         if (preventSet[e.code]) {
             e.preventDefault();
@@ -157,19 +171,19 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
     canvas.addEventListener("keyup", function(e) {
         var k = keyMap[e.code];
         if (k !== undefined) {
-            Module['_ntKeyBuf'].push(k, 0);
+            ev(5, k, 0);
         }
     });
 
-    /* Blur: clear all keys on focus loss */
+    /* Blur: held input releases in order with the events around it */
     canvas.addEventListener("blur", function() {
-        Module['_ntBlurred'] = true;
+        ev(8);
         mouseOwned = false; /* the release may land outside; a held capture or the next wheel must not press again */
         mouseButtons = 0;
     });
 
     /* Pointer events — pass CSS-relative coords, C maps with engine DPR. Every mouse event is a move
-       with the buttons (type 3; a release keeps the mouse); touch and pen are contacts. The buttons
+       with the buttons (a release keeps the mouse); touch and pen are contacts. The buttons
        count only from a press on the canvas until they are all up, like a native window: a drag from
        outside never presses, and a cancel or a blur never leaves a button stuck. */
     var mouseButtons = 0;
@@ -177,7 +191,7 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
     function mouseMove(e, buttons) {
         mouseButtons = buttons & 7; /* back/forward buttons are not engine buttons */
         mouseOwned = mouseOwned && mouseButtons !== 0;
-        Module['_ntPtrBuf'].push(3, 0, e.clientX - rect.left, e.clientY - rect.top, 0, 0, mouseButtons);
+        ev(3, e.clientX - rect.left, e.clientY - rect.top, mouseButtons);
     }
 
     function ownedButtons(e) {
@@ -189,9 +203,8 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
     }
 
     function contact(type, e) {
-        Module['_ntPtrBuf'].push(type, e.pointerId,
-            e.clientX - rect.left, e.clientY - rect.top,
-            e.pressure, e.pointerType === "pen" ? 2 : 1, e.buttons);
+        ev(type, e.pointerId, e.clientX - rect.left, e.clientY - rect.top,
+           e.pressure, e.pointerType === "pen" ? 2 : 1, e.buttons);
     }
 
     canvas.addEventListener("pointerdown", function(e) {
@@ -234,7 +247,7 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
 
     canvas.addEventListener("pointerleave", function(e) {
         if (!isContact(e)) {
-            Module['_ntPtrBuf'].push(4, 0, 0, 0, 0, 0, 0);
+            ev(4);
         }
     });
 
@@ -258,7 +271,7 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
             dy /= WHEEL_PX_PER_NOTCH;
         }
         mouseMove(e, mouseButtons); /* the wheel lands on the mouse at the cursor: a bot may have left it elsewhere */
-        Module['_ntWheelBuf'].push(dx, dy);
+        ev(7, dx, dy);
         e.preventDefault();
     }, {passive: false});
 
@@ -267,56 +280,12 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
 })
 
 EM_JS(void, nt_input_web_flush_events, (void), {
-    /* Blur handling — discard stale pre-blur events */
-    if (Module['_ntBlurred']) {
-        Module['_nt_input_web_on_blur']();
-        Module['_ntBlurred'] = false;
-        Module['_ntKeyBuf'].length = 0;
-        Module['_ntCharBuf'].length = 0;
-        Module['_ntPtrBuf'].length = 0;
-        Module['_ntWheelBuf'].length = 0;
-        return;
+    var q = Module['_ntInputEvents'];
+    var on_event = Module['_nt_input_web_on_event'];
+    for (var i = 0; i < q.length; i += 7) {
+        on_event(q[i], q[i + 1], q[i + 2], q[i + 3], q[i + 4], q[i + 5], q[i + 6]);
     }
-
-    /* Drain key buffer (stride 2: key, down) */
-    var kb = Module['_ntKeyBuf'];
-    for (var i = 0; i < kb.length; i += 2) {
-        Module['_nt_input_web_on_key'](kb[i], kb[i + 1]);
-    }
-    kb.length = 0;
-
-    /* Drain char buffer (stride 1: UTF-32 codepoint) */
-    var cb = Module['_ntCharBuf'];
-    for (var i = 0; i < cb.length; i++) {
-        Module['_nt_input_web_on_char'](cb[i]);
-    }
-    cb.length = 0;
-
-    /* Drain pointer buffer (stride 7: type, id, x, y, pressure, ptype, buttons) */
-    var pb = Module['_ntPtrBuf'];
-    for (var i = 0; i < pb.length; i += 7) {
-        if (pb[i] === 0) {
-            Module['_nt_input_web_on_pointer_down'](
-                pb[i + 1], pb[i + 2], pb[i + 3], pb[i + 4], pb[i + 5], pb[i + 6]);
-        } else if (pb[i] === 1) {
-            Module['_nt_input_web_on_pointer_move'](
-                pb[i + 1], pb[i + 2], pb[i + 3], pb[i + 4], pb[i + 6]);
-        } else if (pb[i] === 2) {
-            Module['_nt_input_web_on_pointer_up'](pb[i + 1]);
-        } else if (pb[i] === 3) {
-            Module['_nt_input_web_on_mouse_move'](pb[i + 2], pb[i + 3], pb[i + 6]);
-        } else {
-            Module['_nt_input_web_on_mouse_leave']();
-        }
-    }
-    pb.length = 0;
-
-    /* Drain wheel buffer (stride 2: dx, dy) */
-    var wb = Module['_ntWheelBuf'];
-    for (var i = 0; i < wb.length; i += 2) {
-        Module['_nt_input_web_on_wheel'](wb[i], wb[i + 1]);
-    }
-    wb.length = 0;
+    q.length = 0;
 })
 /* clang-format on */
 
@@ -325,5 +294,3 @@ EM_JS(void, nt_input_web_flush_events, (void), {
 void nt_input_platform_init(void) { nt_input_web_register_listeners(); }
 
 void nt_input_platform_poll(void) { nt_input_web_flush_events(); }
-
-void nt_input_platform_shutdown(void) { /* Listeners GC'd with module unload */ }

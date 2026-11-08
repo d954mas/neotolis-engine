@@ -128,7 +128,8 @@ typedef struct {
    button release keeps it. Touch and pen contacts take slots 1.., each from its down to its up.
    primary indexes the pointer a single-pointer consumer follows (updated by nt_input_poll): taken
    by a press, or by hovering while nothing is held, and kept from the press through its release
-   frame. A contact already held when the primary ends never takes over. */
+   frame. A contact already held when the primary ends never takes over. nt_input_poll publishes
+   it; consumers only read it. */
 typedef struct {
     nt_pointer_t pointers[NT_INPUT_MAX_POINTERS];
     uint8_t primary;
@@ -156,14 +157,14 @@ bool nt_input_key_is_pressed(nt_key_t key);
 bool nt_input_key_is_released(nt_key_t key);
 bool nt_input_any_key_pressed(void);
 
-/* UTF-32 typed-char ring capacity (power-of-2). One frame's typing fits; drop-when-full. Exposed
-   so the devapi layer can reject a text batch that could never land whole. */
-#ifndef NT_INPUT_CHAR_RING
-#define NT_INPUT_CHAR_RING 32
+/* Typed UTF-32 characters per frame; later ones in the same frame are dropped. Exposed so the
+   devapi layer can reject a text batch that could never land whole. */
+#ifndef NT_INPUT_CHAR_MAX
+#define NT_INPUT_CHAR_MAX 32
 #endif
 
-/* Drain one typed UTF-32 codepoint (FIFO). Returns false and leaves *out
-   untouched when the char ring is empty. Fed by the platform char source. */
+/* Read the next character typed before the last poll (FIFO). Returns false and leaves *out
+   untouched when none is left. */
 bool nt_input_pop_char(uint32_t *out_codepoint);
 
 /* Hint the platform on-screen keyboard for the focused text field (mobile soft keyboard).
@@ -174,12 +175,12 @@ void nt_input_set_text_input_mode(nt_text_input_mode_t mode);
 
 /* Capability gate for the whole nt_input automation surface (inject pipeline + player gate). The
    sole driver is the devapi input group; CMake derives this from it. Default 0 -> the lean apply
-   layer (no gate, no inject buffer or symbols), so a consumer that forgets to wire it stays lean. */
+   layer (no gate, no inject symbols), so a consumer that forgets to wire it stays lean. */
 #ifndef NT_INPUT_AUTOMATION_ENABLED
 #define NT_INPUT_AUTOMATION_ENABLED 0
 #endif
 
-/* Event kinds applied through the immediate inject buffer (drained every poll). */
+/* Event kinds the devapi schedule releases through the inject API. */
 typedef enum {
     NT_INJECT_KEY = 0,       /* key down/up */
     NT_INJECT_MOUSE_MOVE,    /* the mouse at (x,y) with a button mask */
@@ -188,13 +189,8 @@ typedef enum {
     NT_INJECT_POINTER_MOVE,  /* touch/pen contact move */
     NT_INJECT_POINTER_UP,    /* touch/pen contact release + deactivate-pending */
     NT_INJECT_WHEEL,         /* the mouse only */
-    NT_INJECT_CHAR,          /* codepoint into the char ring */
+    NT_INJECT_CHAR,          /* a typed codepoint */
 } nt_inject_kind_t;
-
-/* Bounded BSS immediate inject buffer cap (-D overridable). */
-#ifndef NT_INPUT_INJECT_QUEUE_MAX
-#define NT_INPUT_INJECT_QUEUE_MAX 256
-#endif
 
 /* ---- Mouse convenience helpers ---- */
 
@@ -206,8 +202,9 @@ bool nt_input_mouse_is_released(nt_button_t button);
 
 void nt_input_init(void);
 
-/* Poll input state. Call once per frame AFTER nt_window_poll(). Pure apply: no frame, no schedule
-   (the devapi layer owns scheduling and releases due inject events before this poll). */
+/* Publish the input that reached the core since the previous poll and start the next frame. Call
+   once per frame AFTER nt_window_poll(). No schedule: the devapi layer releases due inject events
+   before this poll. */
 void nt_input_poll(void);
 
 void nt_input_shutdown(void);

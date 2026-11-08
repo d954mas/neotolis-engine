@@ -14,6 +14,7 @@ void tearDown(void) { nt_input_shutdown(); }
 void test_gate_off_drops_real_key(void) {
     nt_input_set_player_enabled(false);
     nt_input_set_key(NT_KEY_A, true); /* real device event — must be dropped at the wrapper */
+    nt_input_poll();
     TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
 }
 
@@ -31,6 +32,7 @@ void test_gate_reenable_applies_real(void) {
     nt_input_set_player_enabled(false);
     nt_input_set_player_enabled(true);
     nt_input_set_key(NT_KEY_B, true);
+    nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_B));
 }
 
@@ -48,6 +50,7 @@ void test_focus_lost_releases_real_input(void) {
     nt_input_mouse_move(1.0F, 1.0F, 1);
     nt_input_poll();
     nt_input_focus_lost();
+    nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_key_is_released(NT_KEY_A));
     TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_LEFT));
 }
@@ -59,12 +62,39 @@ void test_gated_focus_lost_keeps_bot_input(void) {
     TEST_ASSERT_TRUE(nt_input_inject_mouse(5.0F, 5.0F, 1));
     nt_input_poll();
     nt_input_focus_lost();
+    nt_input_set_player_enabled(true); /* the gate judged the loss when it arrived */
     nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
 }
 
-/* ---- inject is IMMEDIATE — staged this poll, applied this poll ---- */
+/* A real event is judged by the gate when it reaches the core, not at the next poll. */
+void test_gate_judges_real_event_at_arrival(void) {
+    nt_input_set_key(NT_KEY_A, true);
+    nt_input_set_player_enabled(false);
+    nt_input_set_key(NT_KEY_B, true);
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
+    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_B));
+}
+
+/* Real and injected input reaching the core in one frame both apply, in arrival order. */
+void test_inject_and_real_in_one_frame(void) {
+    nt_input_set_key(NT_KEY_A, true);
+    TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_B, true));
+    nt_input_buffer_char('r');
+    nt_input_inject_char('i');
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_A));
+    TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_B));
+    uint32_t cp = 0;
+    TEST_ASSERT_TRUE(nt_input_pop_char(&cp));
+    TEST_ASSERT_EQUAL_UINT32('r', cp);
+    TEST_ASSERT_TRUE(nt_input_pop_char(&cp));
+    TEST_ASSERT_EQUAL_UINT32('i', cp);
+}
+
+/* ---- inject applies at the call; the next poll publishes it ---- */
 
 void test_inject_key_down_up(void) {
     TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_A, true));
@@ -77,8 +107,8 @@ void test_inject_key_down_up(void) {
     TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
 }
 
-/* The whole buffer drains in ONE poll, in stage order: down then up -> pressed && released the same
-   poll, ending not-down. (Holding across frames is a devapi-schedule concern, not an L1 one.) */
+/* Down then up before one poll: pressed && released that frame, ending not-down. (Holding across
+   frames is a devapi-schedule concern, not an L1 one.) */
 void test_inject_same_poll_down_then_up(void) {
     TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_A, true));
     TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_A, false));
@@ -134,9 +164,9 @@ void test_inject_mouse_drives_real_mouse(void) {
 }
 
 void test_inject_wheel_mouse_slot(void) {
-    /* Both stage this poll: the move brings the mouse over the window and the wheel lands on it. */
+    /* The move brings the mouse over the window and the wheel lands on it. */
     TEST_ASSERT_TRUE(nt_input_inject_mouse(5.0F, 5.0F, 0));
-    TEST_ASSERT_TRUE(nt_input_inject_wheel(0.0F, 3.0F));
+    nt_input_inject_wheel(0.0F, 3.0F);
     nt_input_poll();
     TEST_ASSERT_TRUE(float_near(3.0F, g_nt_input.pointers[0].wheel_dy, 0.001F));
 }
@@ -179,9 +209,6 @@ void test_inject_buttons_without_mouse_is_noop(void) {
     nt_input_poll();
     TEST_ASSERT_FALSE(g_nt_input.pointers[0].active); /* never a press at (0,0) */
 }
-
-/* ---- whole-or-nothing overflow rejection (no poll between fills: the buffer drains
-   whole each poll, so the cap is probed purely by staging without draining) ---- */
 
 static void touch(nt_inject_kind_t kind, uint32_t id) { TEST_ASSERT_TRUE(nt_input_inject_pointer(kind, id, (float)id, (float)id, 0.5F, NT_POINTER_TOUCH, kind == NT_INJECT_POINTER_UP ? 0 : 1)); }
 
@@ -249,20 +276,6 @@ void test_primary_mouse_waits_until_nothing_in_use(void) {
     TEST_ASSERT_EQUAL_UINT8(0, g_nt_input.primary);
 }
 
-void test_overflow_rejects_whole(void) {
-    /* Fill the immediate buffer to CAP-1 (no poll, so nothing drains). */
-    for (uint32_t i = 0; i < NT_INPUT_INJECT_QUEUE_MAX - 1U; i++) {
-        TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_A, true));
-    }
-    /* A 2-codepoint text needs 2 slots but only 1 remains -> rejected WHOLE, writes nothing. */
-    uint32_t two[2] = {'x', 'y'};
-    TEST_ASSERT_FALSE(nt_input_inject_text(two, 2U));
-    /* Proof the text left no partial entry: exactly 1 free slot must remain, so a single 1-entry
-       inject succeeds and a second one then overflows. */
-    TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_C, true));
-    TEST_ASSERT_FALSE(nt_input_inject_key(NT_KEY_D, true));
-}
-
 /* ---- L1 defensive validation: inject rejects out-of-domain key/kind/type/mask (never asserts) ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -274,11 +287,10 @@ void test_inject_rejects_invalid_args(void) {
     TEST_ASSERT_FALSE(nt_input_inject_pointer(NT_INJECT_POINTER_DOWN, 0, 0, 0, 0, NT_POINTER_TOUCH, 8)); /* mask bit > {1,2,4} */
     TEST_ASSERT_FALSE(nt_input_inject_mouse(0, 0, 8));
     TEST_ASSERT_FALSE(nt_input_inject_mouse_buttons(8));
-    /* Each reject must write NOTHING: the buffer still has full capacity, so CAP keys all stage. */
-    for (uint32_t i = 0; i < NT_INPUT_INJECT_QUEUE_MAX; i++) {
-        TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_A, true));
+    nt_input_poll();
+    for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
+        TEST_ASSERT_FALSE(g_nt_input.pointers[i].active); /* a rejection applies nothing */
     }
-    TEST_ASSERT_FALSE(nt_input_inject_key(NT_KEY_A, true)); /* now full */
 }
 
 int main(void) {
@@ -289,6 +301,8 @@ int main(void) {
     RUN_TEST(test_gate_off_keeps_held_pointer);
     RUN_TEST(test_focus_lost_releases_real_input);
     RUN_TEST(test_gated_focus_lost_keeps_bot_input);
+    RUN_TEST(test_gate_judges_real_event_at_arrival);
+    RUN_TEST(test_inject_and_real_in_one_frame);
     RUN_TEST(test_inject_key_down_up);
     RUN_TEST(test_inject_same_poll_down_then_up);
     RUN_TEST(test_inject_flows_when_gated);
@@ -303,7 +317,6 @@ int main(void) {
     RUN_TEST(test_primary_releasing_touch_stays);
     RUN_TEST(test_primary_held_contact_never_takes_over);
     RUN_TEST(test_primary_mouse_waits_until_nothing_in_use);
-    RUN_TEST(test_overflow_rejects_whole);
     RUN_TEST(test_inject_rejects_invalid_args);
     return UNITY_END();
 }
