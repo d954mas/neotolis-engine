@@ -782,7 +782,7 @@ static void test_menu_root_occluder_present_while_open(void) {
 /* Drive a clean GLOBAL right-button press edge at (px,py): mask 2 = NT_BUTTON_RIGHT. */
 static void menu_right_press(float px, float py) {
     nt_input_init();
-    nt_input_event(nt_test_mouse(px, py, 2U));
+    nt_input_feed(nt_test_mouse(px, py, 2U));
     nt_input_poll();
 }
 

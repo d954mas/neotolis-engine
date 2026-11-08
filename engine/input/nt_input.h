@@ -124,6 +124,12 @@ typedef struct {
 
 /* ---- Global input state ---- */
 
+/* Typed UTF-32 characters per frame; later ones in the same frame are dropped. Exposed so the
+   devapi layer can reject a text batch that could never land whole. */
+#ifndef NT_INPUT_CHAR_MAX
+#define NT_INPUT_CHAR_MAX 32
+#endif
+
 /* pointers[0] is the mouse: active while the cursor is over the window or a button is held, and a
    button release keeps it. Touch and pen contacts take slots 1.., each from its down to its up.
    primary indexes the pointer a single-pointer consumer follows (updated by nt_input_poll): taken
@@ -133,6 +139,11 @@ typedef struct {
 typedef struct {
     nt_pointer_t pointers[NT_INPUT_MAX_POINTERS];
     uint8_t primary;
+    bool key_down[NT_KEY_COUNT];
+    bool key_pressed[NT_KEY_COUNT];
+    bool key_released[NT_KEY_COUNT];
+    uint32_t chars[NT_INPUT_CHAR_MAX]; /* typed this frame, in order; nt_input_pop_char reads them */
+    uint32_t char_count;
 } nt_input_t;
 
 extern nt_input_t g_nt_input;
@@ -143,12 +154,6 @@ bool nt_input_key_is_down(nt_key_t key);
 bool nt_input_key_is_pressed(nt_key_t key);
 bool nt_input_key_is_released(nt_key_t key);
 bool nt_input_any_key_pressed(void);
-
-/* Typed UTF-32 characters per frame; later ones in the same frame are dropped. Exposed so the
-   devapi layer can reject a text batch that could never land whole. */
-#ifndef NT_INPUT_CHAR_MAX
-#define NT_INPUT_CHAR_MAX 32
-#endif
 
 /* Read the next character typed before the last poll (FIFO). Returns false and leaves *out
    untouched when none is left. */

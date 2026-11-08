@@ -35,8 +35,9 @@ extern nt_window_t g_nt_window;
 /* ---- Lifecycle (platform-specific) ---- */
 
 void nt_window_init(void);
-/* Pump platform events: device input into nt_input's next frame (mapped with the DPR current at
-   each event), then publish the window sizes. Call before nt_input_poll. */
+/* Pump platform events into nt_input's next frame and publish the window sizes. Native maps each
+   event with the DPR at its arrival, then publishes sizes; web publishes sizes, then maps the queued
+   events with that DPR. Call before nt_input_poll. */
 void nt_window_poll(void);
 void nt_window_shutdown(void);
 void nt_window_set_fullscreen(bool fullscreen);

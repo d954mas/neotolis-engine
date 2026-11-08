@@ -157,7 +157,7 @@ static void test_input_set_player_enabled_ok(void) {
 
 /* A real mouse holds slot 0 (no gate): the bot's click drives that mouse, so it lands on pointers[0]. */
 static void test_input_click_lands_on_real_mouse_slot(void) {
-    nt_input_event(nt_test_mouse(1.0F, 1.0F, 0));
+    nt_input_feed(nt_test_mouse(1.0F, 1.0F, 0));
     nt_input_poll();
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.click\",\"params\":{\"x\":5,\"y\":5}}")));
     advance();
@@ -440,10 +440,10 @@ static void test_reset_drops_schedule_keeps_applied_input(void) {
 
 /* A client that leaves gated hands the player back; an observer leaving keeps the real mouse. */
 static void test_reset_reenables_player(void) {
-    nt_input_event(nt_test_mouse(10.0F, 10.0F, 0));
+    nt_input_feed(nt_test_mouse(10.0F, 10.0F, 0));
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":false}}")));
     nt_devapi_run_reset_hooks();
-    nt_input_event(nt_test_key(NT_KEY_B, true));
+    nt_input_feed(nt_test_key(NT_KEY_B, true));
     nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_B));
     TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
@@ -837,8 +837,7 @@ static void test_sched_full_rejects_then_releases(void) {
     fill_schedule_leaving(0U);
     /* One more 1-entry command must now overflow (schedule full) -> whole-or-nothing reject. */
     assert_bad_params(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"B\"}}"));
-    /* One advance releases ALL due entries into the 256-slot immediate buffer; sched_tick must NOT
-       trap (NT_ASSERT(ok)) — the single cap <= the buffer guarantees room for the whole schedule. */
+    /* One advance injects every due entry. */
     advance();
     /* All released + applied: the key set by fill_schedule_leaving (NT_KEY_A) is down, and the
        schedule is now empty so a fresh 1-entry command succeeds again. */

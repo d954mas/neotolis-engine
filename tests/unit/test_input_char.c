@@ -1,5 +1,5 @@
 #include "input/nt_input_feed.h"
-#include "test_helpers/nt_input_test_frame.h" /* nt_input_char (direct feed) */
+#include "test_helpers/nt_input_test_frame.h"
 #include "unity.h"
 
 void setUp(void) { nt_input_init(); }
@@ -9,9 +9,9 @@ void tearDown(void) { nt_input_shutdown(); }
 /* ---- FIFO order ---- */
 
 void test_pop_char_fifo_order(void) {
-    nt_input_event(nt_test_char(0x41U)); /* 'A' */
-    nt_input_event(nt_test_char(0x42U)); /* 'B' */
-    nt_input_event(nt_test_char(0x43U)); /* 'C' */
+    nt_input_feed(nt_test_char(0x41U)); /* 'A' */
+    nt_input_feed(nt_test_char(0x42U)); /* 'B' */
+    nt_input_feed(nt_test_char(0x43U)); /* 'C' */
     nt_input_poll();
 
     uint32_t cp = 0;
@@ -27,7 +27,7 @@ void test_pop_char_fifo_order(void) {
 /* ---- Multi-byte codepoint survives intact ---- */
 
 void test_pop_char_utf32_roundtrip(void) {
-    nt_input_event(nt_test_char(0x0410U)); /* Cyrillic 'А' */
+    nt_input_feed(nt_test_char(0x0410U)); /* Cyrillic 'А' */
     nt_input_poll();
     uint32_t cp = 0;
     TEST_ASSERT_TRUE(nt_input_pop_char(&cp));
@@ -39,7 +39,7 @@ void test_pop_char_utf32_roundtrip(void) {
 
 void test_pop_char_overflow_drop(void) {
     for (uint32_t i = 0; i < 50U; i++) {
-        nt_input_event(nt_test_char(100U + i));
+        nt_input_feed(nt_test_char(100U + i));
     }
     nt_input_poll();
 
@@ -62,11 +62,11 @@ void test_pop_char_empty_leaves_out_untouched(void) {
 /* ---- Frame-local: a char typed before a poll is readable after it, for that frame only ---- */
 
 void test_chars_published_for_one_frame(void) {
-    nt_input_event(nt_test_char(0x41U));
+    nt_input_feed(nt_test_char(0x41U));
     uint32_t cp = 0xDEADBEEFU;
     TEST_ASSERT_FALSE(nt_input_pop_char(&cp)); /* not published yet */
     nt_input_poll();
-    nt_input_event(nt_test_char(0x42U)); /* typed during the frame: next frame's */
+    nt_input_feed(nt_test_char(0x42U)); /* typed during the frame: next frame's */
     TEST_ASSERT_TRUE(nt_input_pop_char(&cp));
     TEST_ASSERT_EQUAL_UINT32(0x41U, cp);
     TEST_ASSERT_FALSE(nt_input_pop_char(&cp));
@@ -80,10 +80,10 @@ void test_chars_published_for_one_frame(void) {
 /* A frame of unread text never takes capacity from the next frame's typing. */
 void test_unread_frame_keeps_next_frame_capacity(void) {
     for (uint32_t i = 0; i < NT_INPUT_CHAR_MAX; i++) {
-        nt_input_event(nt_test_char(100U + i));
+        nt_input_feed(nt_test_char(100U + i));
     }
     nt_input_poll();
-    nt_input_event(nt_test_char(0x41U));
+    nt_input_feed(nt_test_char(0x41U));
     nt_input_poll();
     uint32_t cp = 0;
     TEST_ASSERT_TRUE(nt_input_pop_char(&cp));

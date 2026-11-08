@@ -1,7 +1,7 @@
 #ifndef NT_INPUT_TEST_FRAME_H
 #define NT_INPUT_TEST_FRAME_H
 
-/* Tests feed input like a backend: nt_input_event (gated) or nt_input_inject (bot) apply an event to the
+/* Tests feed input like the window pump: nt_input_feed (gated) or nt_input_inject (bot) apply an event to the
    next frame, nt_input_poll publishes it. */
 
 #include "input/nt_input_feed.h"
@@ -24,7 +24,7 @@ static inline nt_input_event_t nt_test_focus_lost(void) { return (nt_input_event
 /* Publish a frame with exactly one fresh press of key and nothing else held. */
 static inline void nt_input_test_key_press(nt_key_t key) {
     nt_input_init();
-    nt_input_event(nt_test_key(key, true));
+    nt_input_feed(nt_test_key(key, true));
     nt_input_poll();
 }
 

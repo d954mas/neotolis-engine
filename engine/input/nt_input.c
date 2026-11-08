@@ -6,20 +6,9 @@
 
 /* ---- Input state: the frame the game reads, and the next one events apply to ---- */
 
-typedef struct {
-    bool key_down[NT_KEY_COUNT];
-    bool key_pressed[NT_KEY_COUNT];
-    bool key_released[NT_KEY_COUNT];
-    uint32_t chars[NT_INPUT_CHAR_MAX];
-    uint32_t char_count;
-} frame_t; /* the half of a frame that has no public struct */
-
 nt_input_t g_nt_input; /* published by nt_input_poll */
-static frame_t s_frame;
 static uint32_t s_char_read;
-
 static nt_input_t s_next; /* events apply here in arrival order */
-static frame_t s_next_frame;
 
 static bool s_player_enabled = true;
 
@@ -82,8 +71,6 @@ static void release_pointer(nt_pointer_t *ptr) {
 static void reset_state(void) {
     memset(&g_nt_input, 0, sizeof(g_nt_input));
     memset(&s_next, 0, sizeof(s_next));
-    memset(&s_frame, 0, sizeof(s_frame));
-    memset(&s_next_frame, 0, sizeof(s_next_frame));
     s_char_read = 0;
     s_player_enabled = true;
 }
@@ -123,13 +110,12 @@ static void primary_update(void) {
 void nt_input_poll(void) {
     primary_update();
     g_nt_input = s_next;
-    s_frame = s_next_frame;
     s_char_read = 0;
 
     /* Edges, deltas and text are per frame; a released pointer was published once and is gone now. */
-    memset(s_next_frame.key_pressed, 0, sizeof(s_next_frame.key_pressed));
-    memset(s_next_frame.key_released, 0, sizeof(s_next_frame.key_released));
-    s_next_frame.char_count = 0;
+    memset(s_next.key_pressed, 0, sizeof(s_next.key_pressed));
+    memset(s_next.key_released, 0, sizeof(s_next.key_released));
+    s_next.char_count = 0;
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
         nt_pointer_t *p = &s_next.pointers[i];
         if (p->deactivate_pending) {
@@ -151,15 +137,15 @@ void nt_input_shutdown(void) { reset_state(); }
 
 /* ---- Queries (the published frame) ---- */
 
-bool nt_input_key_is_down(nt_key_t key) { return key < NT_KEY_COUNT && s_frame.key_down[key]; }
+bool nt_input_key_is_down(nt_key_t key) { return key < NT_KEY_COUNT && g_nt_input.key_down[key]; }
 
-bool nt_input_key_is_pressed(nt_key_t key) { return key < NT_KEY_COUNT && s_frame.key_pressed[key]; }
+bool nt_input_key_is_pressed(nt_key_t key) { return key < NT_KEY_COUNT && g_nt_input.key_pressed[key]; }
 
-bool nt_input_key_is_released(nt_key_t key) { return key < NT_KEY_COUNT && s_frame.key_released[key]; }
+bool nt_input_key_is_released(nt_key_t key) { return key < NT_KEY_COUNT && g_nt_input.key_released[key]; }
 
 bool nt_input_any_key_pressed(void) {
     for (int i = 0; i < NT_KEY_COUNT; i++) {
-        if (s_frame.key_pressed[i]) {
+        if (g_nt_input.key_pressed[i]) {
             return true;
         }
     }
@@ -167,10 +153,10 @@ bool nt_input_any_key_pressed(void) {
 }
 
 bool nt_input_pop_char(uint32_t *out_codepoint) {
-    if (s_char_read == s_frame.char_count) {
+    if (s_char_read == g_nt_input.char_count) {
         return false; /* empty — leave *out untouched */
     }
-    *out_codepoint = s_frame.chars[s_char_read++];
+    *out_codepoint = g_nt_input.chars[s_char_read++];
     return true;
 }
 
@@ -184,9 +170,9 @@ bool nt_input_mouse_is_released(nt_button_t button) { return button < NT_BUTTON_
 
 static void apply_key(nt_key_t key, bool down) {
     NT_ASSERT(key < NT_KEY_COUNT);
-    s_next_frame.key_pressed[key] = s_next_frame.key_pressed[key] || (down && !s_next_frame.key_down[key]);
-    s_next_frame.key_released[key] = s_next_frame.key_released[key] || (!down && s_next_frame.key_down[key]);
-    s_next_frame.key_down[key] = down;
+    s_next.key_pressed[key] = s_next.key_pressed[key] || (down && !s_next.key_down[key]);
+    s_next.key_released[key] = s_next.key_released[key] || (!down && s_next.key_down[key]);
+    s_next.key_down[key] = down;
 }
 
 static void apply_mouse_move(float x, float y, uint8_t buttons) {
@@ -255,8 +241,8 @@ static void apply(const nt_input_event_t *e) {
         apply_key((nt_key_t)e->key.key, e->key.down);
         break;
     case NT_INPUT_EV_CHAR:
-        if (s_next_frame.char_count < NT_INPUT_CHAR_MAX) { /* drop-newest: earlier typing is never clobbered */
-            s_next_frame.chars[s_next_frame.char_count++] = e->cp;
+        if (s_next.char_count < NT_INPUT_CHAR_MAX) { /* drop-newest: earlier typing is never clobbered */
+            s_next.chars[s_next.char_count++] = e->cp;
         }
         break;
     case NT_INPUT_EV_MOUSE_MOVE:
@@ -291,7 +277,7 @@ static void apply(const nt_input_event_t *e) {
         break;
     }
     case NT_INPUT_EV_WHEEL:
-        if (m->active) { /* no mouse over the window: the backends and the bot move it first */
+        if (m->active) { /* no mouse over the window: the window pump and the bot move it first */
             m->wheel_dx += e->wheel.dx;
             m->wheel_dy += e->wheel.dy;
         }
@@ -305,7 +291,7 @@ static void apply(const nt_input_event_t *e) {
     }
 }
 
-void nt_input_event(nt_input_event_t e) {
+void nt_input_feed(nt_input_event_t e) {
     if (s_player_enabled) { /* closed: the held input is the bot's, and a click into another window must not cut it */
         apply(&e);
     }

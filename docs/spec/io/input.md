@@ -10,15 +10,16 @@ Related: [Platform Architecture](../runtime/platform.md), [Frame Lifecycle](../r
 
 The window module's platform pump, `nt_window_poll`, applies each device event to the next
 frame's input state in arrival order (native: GLFW callbacks during `glfwPollEvents`; web: one
-ordered queue the DOM listeners fill between frames, drained there). Input applies only inside the
-pump; on web the DOM listeners only queue. A GLFW callback outside `glfwPollEvents` (a window
+ordered queue the DOM listeners fill between frames, drained there). Device input applies only inside
+the pump; on web the DOM listeners only queue. A GLFW callback outside `glfwPollEvents` (a window
 operation such as fullscreen) also writes only the next frame.
 `nt_input_poll` publishes that state for the frame and starts the next one, so the state the game
 reads changes only at the poll. Edges accumulate: a press and a release between two polls are both
-readable. `g_nt_input` and the query functions are read-only for their consumers.
+readable. `g_nt_input` is the whole published frame (pointers, primary, key state, the frame's
+typed characters); it and the query functions are read-only for their consumers.
 
-A focus loss is applied in that order: it releases held player input, and events after it apply
-after it. A release and a new press of one button in one frame therefore read pressed and released
+A focus loss is applied in that order: it releases all held input (while the bot drives, the gate
+drops it and the bot's input stays), and events after it apply after it. A release and a new press of one button in one frame therefore read pressed and released
 together, like any fast press and release inside one frame.
 
 ## Typed characters

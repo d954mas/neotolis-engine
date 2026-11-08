@@ -18,14 +18,14 @@ void tearDown(void) { nt_input_shutdown(); }
 
 void test_gate_off_drops_real_key(void) {
     nt_input_set_player_enabled(false);
-    nt_input_event(nt_test_key(NT_KEY_A, true)); /* real device event — must be dropped at the wrapper */
+    nt_input_feed(nt_test_key(NT_KEY_A, true)); /* real device event — must be dropped at the wrapper */
     nt_input_poll();
     TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
 }
 
 /* The gate filters; it releases nothing. */
 void test_gate_off_keeps_held_key(void) {
-    nt_input_event(nt_test_key(NT_KEY_W, true));
+    nt_input_feed(nt_test_key(NT_KEY_W, true));
     nt_input_poll();
     nt_input_set_player_enabled(false);
     nt_input_poll();
@@ -36,13 +36,13 @@ void test_gate_off_keeps_held_key(void) {
 void test_gate_reenable_applies_real(void) {
     nt_input_set_player_enabled(false);
     nt_input_set_player_enabled(true);
-    nt_input_event(nt_test_key(NT_KEY_B, true));
+    nt_input_feed(nt_test_key(NT_KEY_B, true));
     nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_B));
 }
 
 void test_gate_off_keeps_held_pointer(void) {
-    nt_input_event(nt_test_mouse(1.0F, 1.0F, 1));
+    nt_input_feed(nt_test_mouse(1.0F, 1.0F, 1));
     nt_input_poll();
     nt_input_set_player_enabled(false);
     nt_input_poll();
@@ -56,7 +56,7 @@ void test_gated_focus_lost_keeps_bot_input(void) {
     nt_input_inject(nt_test_key(NT_KEY_A, true));
     nt_input_inject(nt_test_mouse(5.0F, 5.0F, 1));
     nt_input_poll();
-    nt_input_event(nt_test_focus_lost());
+    nt_input_feed(nt_test_focus_lost());
     nt_input_set_player_enabled(true); /* the gate judged the loss when it arrived */
     nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
@@ -65,9 +65,9 @@ void test_gated_focus_lost_keeps_bot_input(void) {
 
 /* A real event is judged by the gate when it reaches the core, not at the next poll. */
 void test_gate_judges_real_event_at_arrival(void) {
-    nt_input_event(nt_test_key(NT_KEY_A, true));
+    nt_input_feed(nt_test_key(NT_KEY_A, true));
     nt_input_set_player_enabled(false);
-    nt_input_event(nt_test_key(NT_KEY_B, true));
+    nt_input_feed(nt_test_key(NT_KEY_B, true));
     nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
     TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_B));
@@ -75,9 +75,9 @@ void test_gate_judges_real_event_at_arrival(void) {
 
 /* Real and injected input reaching the core in one frame both apply, in arrival order. */
 void test_inject_and_real_in_one_frame(void) {
-    nt_input_event(nt_test_key(NT_KEY_A, true));
+    nt_input_feed(nt_test_key(NT_KEY_A, true));
     nt_input_inject(nt_test_key(NT_KEY_A, false));
-    nt_input_event(nt_test_char('r'));
+    nt_input_feed(nt_test_char('r'));
     nt_input_inject(nt_test_char('i'));
     nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_A));
@@ -129,7 +129,7 @@ void test_inject_pointer_down_move_up(void) {
 
 /* The bot drives the same mouse a real one holds: its click is on pointers[0], and the mouse stays. */
 void test_inject_mouse_drives_real_mouse(void) {
-    nt_input_event(nt_test_mouse(1.0F, 1.0F, 0));
+    nt_input_feed(nt_test_mouse(1.0F, 1.0F, 0));
     nt_input_poll();
     nt_input_inject(nt_test_mouse(5.0F, 5.0F, 1));
     nt_input_poll();
@@ -179,6 +179,7 @@ void test_inject_buttons_at_current_position(void) {
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
     TEST_ASSERT_TRUE(float_near(70.0F, g_nt_input.pointers[0].x, 0.001F));
     TEST_ASSERT_TRUE(float_near(80.0F, g_nt_input.pointers[0].y, 0.001F));
+    TEST_ASSERT_TRUE(float_near(0.0F, g_nt_input.pointers[0].dx, 0.001F)); /* no move -> no delta */
 }
 
 void test_inject_buttons_without_mouse_is_noop(void) {
@@ -237,6 +238,18 @@ void test_primary_held_contact_never_takes_over(void) {
     TEST_ASSERT_EQUAL_UINT8(0, g_nt_input.primary);
 }
 
+void test_primary_next_contact_press_takes_over(void) {
+    touch_down(1);
+    nt_input_poll();
+    touch_down(2);
+    nt_input_inject(nt_test_contact_up(1));
+    nt_input_poll();
+    nt_input_poll();
+    touch_down(4); /* contact 2 is still held */
+    nt_input_poll();
+    TEST_ASSERT_EQUAL_UINT32(4, primary_id());
+}
+
 /* The mouse pressed during a touch never takes over: not on its release, not while it hovers with a contact held. */
 void test_primary_mouse_waits_until_nothing_in_use(void) {
     touch_down(1);
@@ -283,6 +296,7 @@ int main(void) {
     RUN_TEST(test_primary_held_mouse_keeps_over_touch_press);
     RUN_TEST(test_primary_releasing_touch_stays);
     RUN_TEST(test_primary_held_contact_never_takes_over);
+    RUN_TEST(test_primary_next_contact_press_takes_over);
     RUN_TEST(test_primary_mouse_waits_until_nothing_in_use);
     RUN_TEST(test_inject_invalid_args_assert);
     return UNITY_END();

@@ -87,9 +87,7 @@ static nt_key_t glfw_key_to_nt(int key) {
 static float s_event_dpr = 1.0F;
 
 /* The mouse at a cursor position in window coordinates, with the held buttons. */
-static void mouse_at(double xpos, double ypos) {
-    nt_input_event((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_MOVE, .mouse = {(float)xpos * s_event_dpr, (float)ypos * s_event_dpr, s_cached_buttons}});
-}
+static void mouse_at(double xpos, double ypos) { nt_input_feed((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_MOVE, .mouse = {(float)xpos * s_event_dpr, (float)ypos * s_event_dpr, s_cached_buttons}}); }
 
 static void mouse_at_cursor(void) {
     double xpos = 0.0;
@@ -104,13 +102,13 @@ static void glfw_key_callback(GLFWwindow *window, int key, int scancode, int act
     (void)mods;
     nt_key_t nt_key = glfw_key_to_nt(key);
     if (nt_key < NT_KEY_COUNT) {
-        nt_input_event((nt_input_event_t){.kind = NT_INPUT_EV_KEY, .key = {(uint8_t)nt_key, action != GLFW_RELEASE}});
+        nt_input_feed((nt_input_event_t){.kind = NT_INPUT_EV_KEY, .key = {(uint8_t)nt_key, action != GLFW_RELEASE}});
     }
 }
 
 static void glfw_char_callback(GLFWwindow *window, unsigned int codepoint) {
     (void)window;
-    nt_input_event((nt_input_event_t){.kind = NT_INPUT_EV_CHAR, .cp = codepoint}); /* GLFW delivers native-endian UTF-32 already */
+    nt_input_feed((nt_input_event_t){.kind = NT_INPUT_EV_CHAR, .cp = codepoint}); /* GLFW delivers native-endian UTF-32 already */
 }
 
 static void glfw_cursor_pos_callback(GLFWwindow *window, double xpos, double ypos) {
@@ -123,7 +121,7 @@ static void glfw_cursor_enter_callback(GLFWwindow *window, int entered) {
     if (entered) {
         mouse_at_cursor(); /* a window shown under a still cursor gets no move */
     } else {
-        nt_input_event((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_LEAVE});
+        nt_input_feed((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_LEAVE});
     }
 }
 
@@ -156,7 +154,7 @@ static void glfw_mouse_button_callback(GLFWwindow *window, int button, int actio
 
     mouse_at_cursor();
     if (s_cached_buttons == 0 && !glfwGetWindowAttrib(s_glfw_window, GLFW_HOVERED)) {
-        nt_input_event((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_LEAVE}); /* a drag released outside: the leave was ignored while held */
+        nt_input_feed((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_LEAVE}); /* a drag released outside: the leave was ignored while held */
     }
 }
 
@@ -169,7 +167,7 @@ static void glfw_scroll_callback(GLFWwindow *window, double xoffset, double yoff
     }
     /* GLFW yoffset is ±1.0 per notch with OPPOSITE Y sign to the DOM (GLFW: up=+, DOM deltaY: down=+).
      * Web is canonical, so negate yoffset to match. X already agrees (right=+ on both). */
-    nt_input_event((nt_input_event_t){.kind = NT_INPUT_EV_WHEEL, .wheel = {(float)xoffset, -(float)yoffset}});
+    nt_input_feed((nt_input_event_t){.kind = NT_INPUT_EV_WHEEL, .wheel = {(float)xoffset, -(float)yoffset}});
 }
 
 /* A DPR change (e.g. a move to another monitor) inside a pump: later events of the same pump map with
@@ -178,6 +176,7 @@ static void glfw_framebuffer_size_callback(GLFWwindow *window, int fb_w, int fb_
     (void)fb_h;
     int win_w = 0;
     int win_h = 0;
+    glfwGetFramebufferSize(window, &fb_w, &fb_h); /* both live: on X11 the argument can be older than the window size */
     glfwGetWindowSize(window, &win_w, &win_h);
     if (win_w > 0) {
         s_event_dpr = nt_window_effective_dpr((float)fb_w / (float)win_w);
@@ -188,7 +187,7 @@ static void glfw_focus_callback(GLFWwindow *window, int focused) {
     (void)window;
     if (!focused) {
         s_cached_buttons = 0;
-        nt_input_event((nt_input_event_t){.kind = NT_INPUT_EV_FOCUS_LOST}); /* GLFW's synthetic key releases that follow are no-ops; the button callback drops the mouse ones */
+        nt_input_feed((nt_input_event_t){.kind = NT_INPUT_EV_FOCUS_LOST}); /* GLFW's synthetic key releases that follow are no-ops; the button callback drops the mouse ones */
     }
 }
 
@@ -208,7 +207,7 @@ static void sync_sizes(void) {
        when the process lacks DPI awareness. */
     float device_dpr = (win_w > 0) ? (float)fb_w / (float)win_w : 1.0F;
 
-    if ((uint32_t)win_w == g_nt_window.width && (uint32_t)win_h == g_nt_window.height && device_dpr == g_nt_window.dpr) {
+    if ((uint32_t)win_w == g_nt_window.width && (uint32_t)win_h == g_nt_window.height && nt_window_effective_dpr(device_dpr) == g_nt_window.dpr) {
         return;
     }
 

@@ -40,6 +40,13 @@ static void map_css_to_fb(float css_x, float css_y, float *fb_x, float *fb_y) {
 
 /* ---- Input events (one ordered JS queue, see nt_window_web_register_input) ---- */
 
+/* The JS listeners below write these enum values as numbers. */
+_Static_assert(NT_INPUT_EV_KEY == 0 && NT_INPUT_EV_CHAR == 1 && NT_INPUT_EV_MOUSE_MOVE == 2 && NT_INPUT_EV_MOUSE_LEAVE == 4 && NT_INPUT_EV_CONTACT_DOWN == 5 && NT_INPUT_EV_CONTACT_MOVE == 6 &&
+                   NT_INPUT_EV_CONTACT_UP == 7 && NT_INPUT_EV_WHEEL == 8 && NT_INPUT_EV_FOCUS_LOST == 9,
+               "EV_* in nt_window_web_register_input");
+_Static_assert(NT_KEY_0 == 26 && NT_KEY_ARROW_UP == 36 && NT_KEY_RALT == 50 && NT_KEY_F1 == 51 && NT_KEY_DELETE == 63 && NT_KEY_PAGE_DOWN == 68 && NT_POINTER_TOUCH == 1 && NT_POINTER_PEN == 2,
+               "keyMap and the contact type in nt_window_web_register_input");
+
 /* One stride-7 record [kind, a, b, c, d, e, f], kind = nt_input_event_kind_t. */
 EMSCRIPTEN_KEEPALIVE void nt_window_web_on_input(int kind, double a, double b, double c, double d, double e, double f) {
     nt_input_event_t ev = {.kind = (uint8_t)kind};
@@ -77,7 +84,7 @@ EMSCRIPTEN_KEEPALIVE void nt_window_web_on_input(int kind, double a, double b, d
     default:
         break; /* MOUSE_LEAVE and FOCUS_LOST carry nothing; the core asserts an unknown kind */
     }
-    nt_input_event(ev);
+    nt_input_feed(ev);
 }
 
 /* ---- Input event registration ---- */
@@ -134,7 +141,7 @@ EM_JS(void, nt_window_web_register_input, (void), {
         rect = canvas.getBoundingClientRect();
     }).observe(canvas);
 
-    /* One ordered queue of stride-7 records (web_event_t in C), drained by nt_window_poll like the
+    /* One ordered queue of stride-7 records (decoded by nt_window_web_on_input), drained by nt_window_poll like the
        native event pump. Listeners only push, so C never runs inside a DOM callback. */
     var q = [];
     Module['_ntInputEvents'] = q;
@@ -296,10 +303,7 @@ static void sync_sizes(void) {
     float canvas_h = (float)nt_window_js_get_canvas_height();
     float device_dpr = (float)nt_window_js_get_dpr();
 
-    float effective_dpr = fminf(device_dpr, g_nt_window.max_dpr);
-    if (effective_dpr < 1.0F) {
-        effective_dpr = 1.0F;
-    }
+    float effective_dpr = nt_window_effective_dpr(device_dpr);
 
     uint32_t w = (uint32_t)canvas_w;
     uint32_t h = (uint32_t)canvas_h;

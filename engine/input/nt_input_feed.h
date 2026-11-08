@@ -45,7 +45,7 @@ typedef struct {
 } nt_input_event_t;
 
 /* A real device event: dropped while the player gate is closed. */
-void nt_input_event(nt_input_event_t e);
+void nt_input_feed(nt_input_event_t e);
 
 /* A bot event: always applies. The devapi group validates untrusted commands; a bad event asserts. */
 void nt_input_inject(nt_input_event_t e);

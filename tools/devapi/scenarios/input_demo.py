@@ -3,7 +3,7 @@
 
 Connects to a running examples/devapi_host over its devapi transport (native or web) and exercises the three
 behaviors the unit tests structurally cannot cover, because only a live host runs the
-full enqueue -> net_poll -> input_poll -> drain timing:
+full enqueue -> net_poll -> inject -> input_poll timing:
 
   1. Drain-race — MANUAL mode: a tap (key down@0 + up@offset) stays down across the hold
      window and releases only after stepping past it, proving the up countdown ticks only
@@ -14,7 +14,7 @@ full enqueue -> net_poll -> input_poll -> drain timing:
   3. input.text — text("hi") + one sim-advance arrives as typed text; input.state{text:true}
      reads codepoints == [104,105] ('h','i').
 
-Scheduling lives in the devapi layer (nt_input is a pure apply layer): an enqueued inject is applied
+Scheduling lives in the devapi layer: an enqueued inject is applied
 to nt_input ONLY on a real sim-advance, then nt_input_poll publishes it. So an
 enqueued inject is invisible until a step advances the frame — which is exactly what lets this UAT
 machine-assert the drain-race (offset>0 release pinned to advances) over the transport.

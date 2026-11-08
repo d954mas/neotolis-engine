@@ -177,7 +177,7 @@ static void test_modal_esc_top_only(void) {
     nt_ui_end(s_fx.ctx);
 
     /* Frame 2: Esc held. Only B (last frame's deepest = top) consumes it; A stays silent. */
-    nt_input_event(nt_test_key(NT_KEY_ESCAPE, true));
+    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
     nt_ui_modal_result_t outer = nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true); /* NOT top */
     nt_ui_modal_result_t inner = nt_ui_modal_begin(s_fx.ctx, MODAL_B, &st, true); /* TOP */
@@ -194,7 +194,7 @@ static void test_modal_esc_requires_flag(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
     st.flags = 0U; /* no LISTEN_ESC, no CLOSE_ON_BACKDROP */
-    nt_input_event(nt_test_key(NT_KEY_ESCAPE, true));
+    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
     nt_ui_modal_result_t r = nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true);
     nt_ui_modal_end(s_fx.ctx);
@@ -307,7 +307,7 @@ static void test_modal_wrapper_contract(void) {
     TEST_ASSERT_TRUE(open);
 
     /* Frame 2: Esc -> wrapper clears *open but STILL returns true (animating closed). */
-    nt_input_event(nt_test_key(NT_KEY_ESCAPE, true));
+    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
     declared = nt_ui_modal_visible(s_fx.ctx, MODAL_A, &st, &open);
     TEST_ASSERT_TRUE(declared); /* body still declared during the close animation */
@@ -598,7 +598,7 @@ static void test_modal_closed_same_depth_does_not_steal_top(void) {
     TEST_ASSERT_FALSE(a_decl); /* the closed modal declared no body */
 
     /* Frame 2: Esc held. The OPEN second modal (B) must be top and consume Esc. */
-    nt_input_event(nt_test_key(NT_KEY_ESCAPE, true));
+    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
     a_open = false;
     const bool a_decl2 = nt_ui_modal_visible(s_fx.ctx, MODAL_A, &st, &a_open);

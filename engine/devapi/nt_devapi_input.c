@@ -72,14 +72,8 @@ static void sched_tick(void) {
    first post-register tick doesn't fire spuriously. */
 static uint32_t s_last_frame;
 
-/* The keys and text of the last sim-advancing poll, which input.state reports: frozen polls clear nt_input's edges and text. */
-static struct {
-    bool down[NT_KEY_COUNT];
-    bool pressed[NT_KEY_COUNT];
-    bool released[NT_KEY_COUNT];
-    uint32_t chars[NT_INPUT_CHAR_MAX];
-    uint32_t char_count;
-} s_seen;
+/* The last sim-advancing poll, which input.state reports: frozen polls clear nt_input's edges and text. */
+static nt_input_t s_seen;
 
 /* true: s_seen lacks the last advancing poll. Commands run after one tick's poll and before the next
    tick's input update (native transport phase, web between frames), so a refresh there copies it. */
@@ -90,18 +84,7 @@ static void seen_refresh(void) {
         return;
     }
     s_seen_stale = false;
-    for (int k = 0; k < NT_KEY_COUNT; k++) {
-        s_seen.down[k] = nt_input_key_is_down((nt_key_t)k);
-        s_seen.pressed[k] = nt_input_key_is_pressed((nt_key_t)k);
-        s_seen.released[k] = nt_input_key_is_released((nt_key_t)k);
-    }
-    /* Popping is safe: the coming poll drops the unread chars anyway. */
-    s_seen.char_count = 0;
-    uint32_t cp;
-    while (nt_input_pop_char(&cp)) {
-        NT_ASSERT(s_seen.char_count < NT_INPUT_CHAR_MAX); /* nt_input drops a frame's chars past this cap */
-        s_seen.chars[s_seen.char_count++] = cp;
-    }
+    s_seen = g_nt_input;
 }
 
 static void nt_devapi_input_update(void) {
@@ -537,9 +520,9 @@ static bool cmd_input_state(const cJSON *params, cJSON *result, nt_devapi_error 
             return nt_devapi_fail(err, "input.state: unknown key name");
         }
         seen_refresh();
-        devapi_add_bool(result, "down", s_seen.down[key]);
-        devapi_add_bool(result, "pressed", s_seen.pressed[key]);
-        devapi_add_bool(result, "released", s_seen.released[key]);
+        devapi_add_bool(result, "down", s_seen.key_down[key]);
+        devapi_add_bool(result, "pressed", s_seen.key_pressed[key]);
+        devapi_add_bool(result, "released", s_seen.key_released[key]);
     }
     const cJSON *pt = cJSON_GetObjectItemCaseSensitive(params, "text");
     if (pt != NULL) {
