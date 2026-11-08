@@ -167,11 +167,22 @@ static void glfw_scroll_callback(GLFWwindow *window, double xoffset, double yoff
     nt_input_wheel((float)xoffset, -(float)yoffset);
 }
 
+static void sync_sizes(void);
+
+/* A size or DPR change (e.g. a move to another monitor) inside a pump: later events of the same
+   pump map with the new DPR. */
+static void glfw_framebuffer_size_callback(GLFWwindow *window, int fb_w, int fb_h) {
+    (void)window;
+    (void)fb_w;
+    (void)fb_h;
+    sync_sizes();
+}
+
 static void glfw_focus_callback(GLFWwindow *window, int focused) {
     (void)window;
     if (!focused) {
         s_cached_buttons = 0;
-        nt_input_focus_lost(); /* GLFW's synthetic releases that follow are ordinary events */
+        nt_input_focus_lost(); /* GLFW's synthetic key releases that follow are no-ops; the button callback drops the mouse ones */
     }
 }
 
@@ -255,6 +266,7 @@ void nt_window_init(void) {
     glfwSetMouseButtonCallback(s_glfw_window, glfw_mouse_button_callback);
     glfwSetScrollCallback(s_glfw_window, glfw_scroll_callback);
     glfwSetWindowFocusCallback(s_glfw_window, glfw_focus_callback);
+    glfwSetFramebufferSizeCallback(s_glfw_window, glfw_framebuffer_size_callback);
 
     /* Establish a known swap interval. Without this the interval depends on
        the driver default, which varies across vendors. */

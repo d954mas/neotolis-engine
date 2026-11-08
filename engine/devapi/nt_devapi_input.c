@@ -18,19 +18,19 @@
 
 /* Schedule entry kinds, each released through its nt_input inject call. */
 typedef enum {
-    NT_INJECT_KEY = 0,       /* key down/up */
-    NT_INJECT_MOUSE_MOVE,    /* the mouse at (x,y) with a button mask */
-    NT_INJECT_MOUSE_BUTTONS, /* the mouse's button mask at its CURRENT position (no-op while it is not over the window) */
-    NT_INJECT_POINTER_DOWN,  /* touch/pen contact create/press */
-    NT_INJECT_POINTER_MOVE,  /* touch/pen contact move */
-    NT_INJECT_POINTER_UP,    /* touch/pen contact release + deactivate-pending */
-    NT_INJECT_WHEEL,         /* the mouse only */
-    NT_INJECT_CHAR,          /* a typed codepoint */
-} nt_inject_kind_t;
+    SCHED_KEY = 0,       /* key down/up */
+    SCHED_MOUSE_MOVE,    /* the mouse at (x,y) with a button mask */
+    SCHED_MOUSE_BUTTONS, /* the mouse's button mask at its CURRENT position (no-op while it is not over the window) */
+    SCHED_POINTER_DOWN,  /* touch/pen contact create/press */
+    SCHED_POINTER_MOVE,  /* touch/pen contact move */
+    SCHED_POINTER_UP,    /* touch/pen contact release + deactivate-pending */
+    SCHED_WHEEL,         /* the mouse only */
+    SCHED_CHAR,          /* a typed codepoint */
+} sched_kind_t;
 
 typedef struct {
     uint16_t frames_remaining; /* sim-advance countdown; 0 = release on the next advancing tick */
-    uint8_t kind;              /* nt_inject_kind_t */
+    uint8_t kind;              /* sched_kind_t */
     union {
         struct {
             uint8_t key; /* nt_key_t fits in u8 (COUNT=69) */
@@ -75,16 +75,16 @@ static sched_entry_t *sched_reserve(uint32_t n) {
 static void sched_key(nt_key_t key, bool down, uint16_t at_frame) {
     sched_entry_t *e = sched_reserve(1);
     e->frames_remaining = at_frame;
-    e->kind = NT_INJECT_KEY;
+    e->kind = SCHED_KEY;
     e->u.key.key = (uint8_t)key;
     e->u.key.down = down;
 }
 
-static void sched_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask, uint16_t at_frame) {
+static void sched_pointer(sched_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask, uint16_t at_frame) {
     sched_entry_t *e = sched_reserve(1);
     e->frames_remaining = at_frame;
     e->kind = (uint8_t)kind;
-    if (kind == NT_INJECT_POINTER_UP) {
+    if (kind == SCHED_POINTER_UP) {
         e->u.pointer_up.id = id;
     } else {
         e->u.pointer.id = id;
@@ -99,7 +99,7 @@ static void sched_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, 
 void nt_devapi_input_sched_mouse(float x, float y, uint8_t buttons_mask, uint16_t at_frame) {
     sched_entry_t *e = sched_reserve(1);
     e->frames_remaining = at_frame;
-    e->kind = NT_INJECT_MOUSE_MOVE;
+    e->kind = SCHED_MOUSE_MOVE;
     e->u.mouse.x = x;
     e->u.mouse.y = y;
     e->u.mouse.buttons_mask = buttons_mask;
@@ -109,14 +109,14 @@ void nt_devapi_input_sched_mouse(float x, float y, uint8_t buttons_mask, uint16_
 void nt_devapi_input_sched_mouse_buttons(uint8_t buttons_mask, uint16_t at_frame) {
     sched_entry_t *e = sched_reserve(1);
     e->frames_remaining = at_frame;
-    e->kind = NT_INJECT_MOUSE_BUTTONS;
+    e->kind = SCHED_MOUSE_BUTTONS;
     e->u.mouse.buttons_mask = buttons_mask;
 }
 
 void nt_devapi_input_sched_wheel(float dx, float dy, uint16_t at_frame) {
     sched_entry_t *e = sched_reserve(1);
     e->frames_remaining = at_frame;
-    e->kind = NT_INJECT_WHEEL;
+    e->kind = SCHED_WHEEL;
     e->u.wheel.dx = dx;
     e->u.wheel.dy = dy;
 }
@@ -125,11 +125,11 @@ void nt_devapi_input_sched_wheel(float dx, float dy, uint16_t at_frame) {
 static void sched_tap(nt_key_t key, uint16_t hold_frames) {
     sched_entry_t *e = sched_reserve(2);
     e[0].frames_remaining = 0;
-    e[0].kind = NT_INJECT_KEY;
+    e[0].kind = SCHED_KEY;
     e[0].u.key.key = (uint8_t)key;
     e[0].u.key.down = true;
     e[1].frames_remaining = hold_frames;
-    e[1].kind = NT_INJECT_KEY;
+    e[1].kind = SCHED_KEY;
     e[1].u.key.key = (uint8_t)key;
     e[1].u.key.down = false;
 }
@@ -138,36 +138,36 @@ static void sched_text(const uint32_t *cps, uint32_t n) {
     sched_entry_t *e = sched_reserve(n);
     for (uint32_t i = 0; i < n; i++) {
         e[i].frames_remaining = 0;
-        e[i].kind = NT_INJECT_CHAR;
+        e[i].kind = SCHED_CHAR;
         e[i].u.chr.cp = cps[i];
     }
 }
 
 /* Apply one due entry through the inject API (validated when it was scheduled). */
 static void sched_release_one(const sched_entry_t *e) {
-    switch ((nt_inject_kind_t)e->kind) {
-    case NT_INJECT_KEY:
+    switch ((sched_kind_t)e->kind) {
+    case SCHED_KEY:
         nt_input_inject_key((nt_key_t)e->u.key.key, e->u.key.down);
         break;
-    case NT_INJECT_MOUSE_MOVE:
+    case SCHED_MOUSE_MOVE:
         nt_input_inject_mouse(e->u.mouse.x, e->u.mouse.y, e->u.mouse.buttons_mask);
         break;
-    case NT_INJECT_MOUSE_BUTTONS:
+    case SCHED_MOUSE_BUTTONS:
         nt_input_inject_mouse_buttons(e->u.mouse.buttons_mask);
         break;
-    case NT_INJECT_POINTER_DOWN:
+    case SCHED_POINTER_DOWN:
         nt_input_inject_pointer_down(e->u.pointer.id, e->u.pointer.x, e->u.pointer.y, e->u.pointer.pressure, e->u.pointer.type, e->u.pointer.buttons_mask);
         break;
-    case NT_INJECT_POINTER_MOVE:
+    case SCHED_POINTER_MOVE:
         nt_input_inject_pointer_move(e->u.pointer.id, e->u.pointer.x, e->u.pointer.y, e->u.pointer.pressure, e->u.pointer.buttons_mask);
         break;
-    case NT_INJECT_POINTER_UP:
+    case SCHED_POINTER_UP:
         nt_input_inject_pointer_up(e->u.pointer_up.id);
         break;
-    case NT_INJECT_WHEEL:
+    case SCHED_WHEEL:
         nt_input_inject_wheel(e->u.wheel.dx, e->u.wheel.dy);
         break;
-    case NT_INJECT_CHAR:
+    case SCHED_CHAR:
         nt_input_inject_char(e->u.chr.cp);
         break;
     }
@@ -337,19 +337,19 @@ static bool cmd_input_key(const cJSON *params, cJSON *result, nt_devapi_error *e
     return true;
 }
 
-/* The contact primitive: action -> nt_inject_kind_t, type string -> nt_pointer_type_t. */
+/* The contact primitive: action -> sched_kind_t, type string -> nt_pointer_type_t. */
 static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     const cJSON *a = cJSON_GetObjectItemCaseSensitive(params, "action");
     if (!cJSON_IsString(a) || a->valuestring == NULL) {
         return nt_devapi_fail(err, "input.pointer: action must be a string");
     }
-    nt_inject_kind_t kind;
+    sched_kind_t kind;
     if (strcmp(a->valuestring, "down") == 0) {
-        kind = NT_INJECT_POINTER_DOWN;
+        kind = SCHED_POINTER_DOWN;
     } else if (strcmp(a->valuestring, "move") == 0) {
-        kind = NT_INJECT_POINTER_MOVE;
+        kind = SCHED_POINTER_MOVE;
     } else if (strcmp(a->valuestring, "up") == 0) {
-        kind = NT_INJECT_POINTER_UP;
+        kind = SCHED_POINTER_UP;
     } else {
         return nt_devapi_fail(err, "input.pointer: action must be 'down', 'move' or 'up'");
     }
@@ -360,7 +360,7 @@ static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_erro
     }
     float x = 0.0F;
     float y = 0.0F;
-    if (kind != NT_INJECT_POINTER_UP) {
+    if (kind != SCHED_POINTER_UP) {
         const cJSON *xj = cJSON_GetObjectItemCaseSensitive(params, "x");
         const cJSON *yj = cJSON_GetObjectItemCaseSensitive(params, "y");
         if (!nt_devapi_parse_f32_param(xj, err, "input.pointer: x must be a finite number for down/move", &x) ||
@@ -530,7 +530,7 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
     const cJSON *first = cJSON_GetArrayItem(points, 0);
     float fx = (float)cJSON_GetArrayItem(first, 0)->valuedouble;
     float fy = flip_y_up_to_device((float)cJSON_GetArrayItem(first, 1)->valuedouble); /* each point's Y is Y-up. */
-    sched_pointer(NT_INJECT_POINTER_DOWN, id, fx, fy, 1.0F, type, 1U, 0);
+    sched_pointer(SCHED_POINTER_DOWN, id, fx, fy, 1.0F, type, 1U, 0);
     int idx = 0;
     cJSON_ArrayForEach(p, points) {
         if (idx == 0) {
@@ -542,10 +542,10 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
         /* Compute the offset in int64 so the narrowing source is self-evidently within the
            already-validated [0, UINT16_MAX] span (idx <= npoints-1 => at <= last_offset). */
         uint16_t at = (uint16_t)((int64_t)idx * (int64_t)stride);
-        sched_pointer(NT_INJECT_POINTER_MOVE, id, mx, my, 1.0F, type, 1U, at);
+        sched_pointer(SCHED_POINTER_MOVE, id, mx, my, 1.0F, type, 1U, at);
         idx++;
     }
-    sched_pointer(NT_INJECT_POINTER_UP, id, 0.0F, 0.0F, 0.0F, type, 0, (uint16_t)last_offset);
+    sched_pointer(SCHED_POINTER_UP, id, 0.0F, 0.0F, 0.0F, type, 0, (uint16_t)last_offset);
     devapi_add_number(result, "queued", (double)npoints + 1.0);
     return true;
 }

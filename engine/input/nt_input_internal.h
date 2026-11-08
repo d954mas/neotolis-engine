@@ -25,16 +25,13 @@ void nt_input_wheel(float dx, float dy);
    with the events around it. */
 void nt_input_focus_lost(void);
 
-/* nt_input automation surface (player gate + synthetic input injection). Compiled only when
-   NT_INPUT_AUTOMATION_ENABLED (devapi input group in the build, or tests); a lean build drops the
-   gate and all these symbols entirely.
+/* Automation (the devapi input group drives it).
 
    Player gate: when disabled the real-input entry points above (including focus_lost) early-return,
    judging each event when it reaches the core. It releases nothing: whoever pressed releases.
 
    Inject API (L1 engine capability): applies at the call through the *_apply cores, past the gate.
    The devapi group validates the untrusted command first; an invalid argument here asserts. */
-#if NT_INPUT_AUTOMATION_ENABLED
 void nt_input_set_player_enabled(bool enabled);
 void nt_input_inject_key(nt_key_t key, bool down);
 /* Touch/pen contacts (type touch or pen), like the backend entry points. */
@@ -46,6 +43,5 @@ void nt_input_inject_mouse(float x, float y, uint8_t buttons_mask);
 void nt_input_inject_mouse_buttons(uint8_t buttons_mask);
 void nt_input_inject_wheel(float dx, float dy);
 void nt_input_inject_char(uint32_t cp);
-#endif
 
 #endif /* NT_INPUT_INTERNAL_H */

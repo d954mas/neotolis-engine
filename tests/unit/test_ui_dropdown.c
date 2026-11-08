@@ -168,6 +168,7 @@ static void test_dropdown_combo_keyboard_inert(void) {
 
     /* Esc with the list open: the plain combo popup has no esc_close, so the list stays open. */
     dropdown_key(NT_KEY_ESCAPE);
+    TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_ESCAPE)); /* the combo really sees the key */
     combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
     TEST_ASSERT_TRUE_MESSAGE(open, "Esc must NOT close the immediate combo (no keyboard dismiss wired)");
 
@@ -182,8 +183,6 @@ static void test_dropdown_combo_keyboard_inert(void) {
     TEST_ASSERT_TRUE_MESSAGE(open, "arrows/Enter must not close the combo");
     TEST_ASSERT_EQUAL_INT_MESSAGE(-1, selected, "arrows/Enter must not change *selected (mouse-only)");
     TEST_ASSERT_FALSE_MESSAGE(made, "Enter must not commit a selectable");
-
-    nt_input_test_idle();
 }
 
 /* ---- A combo_selectable click writes *selected and closes the list. ---- */

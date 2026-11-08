@@ -9,7 +9,6 @@
 #include <stdint.h>
 
 #include "clay.h"
-#include "input/nt_input_internal.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_input_test_frame.h"
 #include "test_helpers/ui_test_arena.h"

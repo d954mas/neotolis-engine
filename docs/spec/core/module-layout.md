@@ -1,7 +1,7 @@
 # Module Layout
 
 Directory layout of engine modules and the interface/impl/stub composition model
-for swappable modules (log, input, http, gfx, basisu, meshwire, window, app, fs, clipboard).
+for swappable modules (log, http, gfx, basisu, meshwire, window, app, fs, clipboard).
 Consumers link header-only interface targets; each executable picks exactly one
 impl at link time — omission is a loud link error, enforced by CI scripts.
 Includes stub semantics and runtime capability queries.
@@ -91,9 +91,8 @@ Two gates enforce this:
   undefined reference. Proves omission fails loudly (exit 0 only when the
   expected unresolved-symbol error is observed).
 
-`nt_input` has one platform-free implementation: the window module's platform pump feeds it. Tests
-that drive the inject API link `nt_input_automation`, the same core with the automation surface always
-compiled.
+`nt_input` is not swappable: it has one platform-free implementation, which the window module's
+platform pump feeds and which games, tests and the devapi link directly.
 
 Current swappable pairs: `nt_log`, `nt_http`, `nt_gfx`,
 `nt_basisu_transcoder`, `nt_meshwire`, `nt_window`, `nt_app`, `nt_fs` (native

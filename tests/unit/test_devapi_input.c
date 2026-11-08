@@ -394,7 +394,8 @@ static void test_input_wheel_overfloat_dy_bad_params(void) { assert_bad_params(n
 /* input.key down@0 -> not visible until a sim-advance ticks the schedule + polls. */
 static void test_sched_offset0_applies_on_advance(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}"))); /* down@0 staged in schedule */
-    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));                                                 /* not yet — schedule untouched (the drain-race) */
+    tick_no_advance();                                                                                 /* a frozen tick polls but releases nothing (the drain-race) */
+    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
     advance();
     TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_A));
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));

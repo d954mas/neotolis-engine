@@ -79,7 +79,7 @@ static void init_style(void) {
 
 void setUp(void) {
     nt_test_assert_install();
-    nt_input_init(); /* clean key + char-ring state per test */
+    nt_input_init(); /* clean input state per test */
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
     nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000); /* tofu advance = size/2 */
     init_style();
@@ -725,8 +725,7 @@ static void test_clipboard_paste_replaces_selection(void) {
 static void test_password_mask_render(void) {
     /* "Аб" = 2 codepoints / 4 bytes -> the mask string is exactly 2 glyphs, not 4. */
     const char *src = "\xD0\x90\xD0\xB1";
-    nt_input_poll();                                              /* publish the input fed since the last frame */
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1, 0); /* scratch frame for the mask alloc */
+    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1, 0); /* scratch frame for the mask alloc */
     const char *masked = nt_ui_input_build_display_text(src, (uint32_t)strlen(src));
     TEST_ASSERT_EQUAL_UINT(2U, (unsigned)strlen(masked)); /* 2 codepoints -> 2 mask chars */
     TEST_ASSERT_EQUAL_UINT8((uint8_t)'*', (uint8_t)masked[0]);
@@ -1357,7 +1356,6 @@ static void test_edit_step_insert_caret_on_codepoint_boundary(void) {
     (void)key_frame(id, buf, sizeof buf, NT_KEY_END);        /* caret = 4 */
     (void)key_frame(id, buf, sizeof buf, NT_KEY_ARROW_LEFT); /* caret = 2 (one codepoint left) */
 
-    nt_input_poll();              /* clear the held ARROW_LEFT so its auto-repeat can't re-fire on the insert frame */
     nt_input_char((uint32_t)'X'); /* splice 'X' between 'А' and 'б' */
     (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
 

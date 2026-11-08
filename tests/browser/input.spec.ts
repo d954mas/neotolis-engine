@@ -191,6 +191,10 @@ test('blur: held input releases in order with the events around it', async ({ pa
   expect(errors).toEqual([]);
 });
 
+test.describe('at DPR 2', () => {
+  // A DPR other than 1 makes the CSS -> framebuffer mapping observable.
+  test.use({ deviceScaleFactor: 2 });
+
 test('blur: a new touch in the same frame gets a free slot and follows later moves', async ({ page, context, browserName }) => {
   test.skip(browserName !== 'chromium', 'genuine touch needs CDP');
   const errors: string[] = [];
@@ -205,6 +209,7 @@ test('blur: a new touch in the same frame gets a free slot and follows later mov
   await frame();
   const snap = await page.evaluate(() => window.__nt!.input_poll());
   const k = snap.dpr;
+  expect(k).toBe(2);
   const held = snap.pointers[1];
   expect(held).toMatchObject({ active: 1, down: 1, x: 120 * k, y: 240 * k });
   await page.evaluate((oldId) => {
@@ -231,4 +236,5 @@ test('blur: a new touch in the same frame gets a free slot and follows later mov
   const moved = await page.evaluate(() => window.__nt!.input_poll());
   expect(moved.pointers.slice(1).filter((p) => p.active)).toMatchObject([{ id: newId, down: 1, x: 390 * k, y: 320 * k }]);
   expect(errors).toEqual([]);
+});
 });

@@ -38,7 +38,7 @@ void nt_window_set_text_input_mode(nt_text_input_mode_t mode);  // soft-keyboard
   navigation/editing. Web has no GLFW char callback, so the web backend
   synthesizes chars from `e.key` incl. `e.repeat` to match native behavior.
 - Frame-local like key edges: `nt_input_poll` publishes the characters typed since
-  the previous poll and drops the ones the game left unread. Each frame has its own
+  the previous poll and drops the ones the game left unread. Each publish has its own
   capacity, so unread text never takes room from the next frame's typing.
 - Overflow is drop-newest: earlier characters of the frame are never clobbered.
 

@@ -158,7 +158,7 @@ target_link_libraries(nt_ui
         nt_resource
         nt_font
         nt_material
-        nt_input_interface
+        nt_input
         nt_clipboard_interface
         nt_window_interface
         nt_memory

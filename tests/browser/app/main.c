@@ -1347,7 +1347,7 @@ static void frame(void) {
 #if defined(__EMSCRIPTEN__)
         /* Map the Cyrillic field's logical bbox -> canvas CSS px so Playwright clicks the real widget.
          * UI logical -> framebuffer px (offset + ui*scale) -> CSS px (/dpr). Clay bbox + fb are both
-         * Y-down, matching nt_input_web's css->fb map (no Y-flip). */
+         * Y-down, matching nt_window_web's css->fb map (no Y-flip). */
         {
             const nt_ui_bbox_t fb = nt_ui_get_bbox(s_ctx, s_id_input_cyrillic);
             s_nt_field_visible = fb.found ? 1 : 0;

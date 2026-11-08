@@ -154,15 +154,6 @@ bool nt_input_any_key_pressed(void);
    untouched when none is left. */
 bool nt_input_pop_char(uint32_t *out_codepoint);
 
-/* ---- nt_input automation surface (player gate + synthetic input injection) ---- */
-
-/* Capability gate for the whole nt_input automation surface (inject pipeline + player gate). The
-   sole driver is the devapi input group; CMake derives this from it. Default 0 -> the lean apply
-   layer (no gate, no inject symbols), so a consumer that forgets to wire it stays lean. */
-#ifndef NT_INPUT_AUTOMATION_ENABLED
-#define NT_INPUT_AUTOMATION_ENABLED 0
-#endif
-
 /* ---- Mouse convenience helpers ---- */
 
 bool nt_input_mouse_is_down(nt_button_t button);

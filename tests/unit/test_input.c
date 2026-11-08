@@ -103,6 +103,19 @@ void test_focus_lost_then_press_same_key(void) {
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_H));
 }
 
+void test_focus_lost_then_press_same_button(void) {
+    nt_input_mouse_move(5.0F, 5.0F, 1);
+    nt_input_poll();
+    nt_input_focus_lost();
+    nt_input_mouse_move(5.0F, 5.0F, 1);
+    nt_input_poll();
+    const nt_button_state_t b = g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT];
+    TEST_ASSERT_TRUE(b.is_released && b.is_pressed && b.is_down);
+    nt_input_poll();
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
+    TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+}
+
 void test_mouse_focus_lost_drops_pressure(void) {
     nt_input_mouse_move(10.0F, 10.0F, 1);
     nt_input_poll();
@@ -126,8 +139,11 @@ void test_published_frame_stable_between_polls(void) {
     nt_input_poll();
     nt_input_set_key(NT_KEY_A, false);
     nt_input_pointer_up(3);
+    nt_input_mouse_move(9.0F, 9.0F, 1);
+    nt_input_wheel(0.0F, 1.0F);
     nt_input_focus_lost();
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
+    TEST_ASSERT_FALSE(g_nt_input.pointers[0].active);
     TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_A));
     TEST_ASSERT_TRUE(g_nt_input.pointers[1].buttons[NT_BUTTON_LEFT].is_down);
 }
@@ -328,6 +344,7 @@ int main(void) {
     RUN_TEST(test_focus_lost_releases_held_keys);
     RUN_TEST(test_events_after_focus_lost_apply_in_the_same_frame);
     RUN_TEST(test_focus_lost_then_press_same_key);
+    RUN_TEST(test_focus_lost_then_press_same_button);
     RUN_TEST(test_mouse_focus_lost_drops_pressure);
     RUN_TEST(test_init_forgets_unpublished_events);
     RUN_TEST(test_published_frame_stable_between_polls);

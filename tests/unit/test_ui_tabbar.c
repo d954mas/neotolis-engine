@@ -6,7 +6,6 @@
 #include <stdint.h>
 
 #include "clay.h"
-#include "input/nt_input_internal.h"
 #include "memory/nt_mem_scratch.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_input_test_frame.h"
@@ -33,7 +32,6 @@ static const char *const s_tabs[] = {"One", "Two", "Three", "Four"};
 void setUp(void) {
     nt_test_assert_install();
     nt_input_test_idle();
-    nt_input_poll();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
 }
 

@@ -287,6 +287,8 @@ void test_inject_invalid_args_assert(void) {
     NT_TEST_EXPECT_ASSERT(nt_input_inject_key(NT_KEY_COUNT, true));
     NT_TEST_EXPECT_ASSERT(nt_input_inject_pointer_down(0, 0, 0, 0, NT_POINTER_MOUSE, 1)); /* the mouse is not a contact */
     NT_TEST_EXPECT_ASSERT(nt_input_inject_pointer_down(0, 0, 0, 0, 99, 1));
+    NT_TEST_EXPECT_ASSERT(nt_input_inject_pointer_down(0, 0, 0, 0, NT_POINTER_TOUCH, 8));
+    NT_TEST_EXPECT_ASSERT(nt_input_inject_pointer_move(0, 0, 0, 0, 8));
     NT_TEST_EXPECT_ASSERT(nt_input_inject_mouse(0, 0, 8));
     NT_TEST_EXPECT_ASSERT(nt_input_inject_mouse_buttons(8));
 }

@@ -167,7 +167,7 @@ EM_JS(void, nt_window_web_register_input, (void), {
         }
         /* Typed character: e.key is a single printable codepoint (not "Enter"/"ArrowUp"/...).
            Array.from counts CODEPOINTS, so a non-BMP char (e.key.length 2 surrogate pair) still
-           passes -- the ring is UTF-32. Exclude Ctrl/Cmd shortcuts so Ctrl+A does not type 'a'. No
+           passes -- typed text is UTF-32. Exclude Ctrl/Cmd shortcuts so Ctrl+A does not type 'a'. No
            glfwSetCharCallback on web; this hand-rolled path is the char source. Emitted on e.repeat
            too so a held key types a run, matching native GLFW char-repeat. */
         if (Array.from(e.key).length === 1 && !e.ctrlKey && !e.metaKey) {
@@ -214,7 +214,7 @@ EM_JS(void, nt_window_web_register_input, (void), {
 
     function contact(type, e) {
         ev(type, e.pointerId, e.clientX - rect.left, e.clientY - rect.top,
-           e.pressure, e.pointerType === "pen" ? 2 : 1, e.buttons);
+           e.pressure, e.pointerType === "pen" ? 2 : 1, e.buttons & 7);
     }
 
     canvas.addEventListener("pointerdown", function(e) {

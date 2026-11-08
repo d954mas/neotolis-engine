@@ -391,7 +391,6 @@ static void test_menu_outside_tap_dismisses_chain(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_state_t st = {0};
     menu_im_open(&st, 120.0F, 80.0F);
-    nt_input_test_idle();
     menu_im_frame(&st, &style, 700.0F, 500.0F);
     TEST_ASSERT_TRUE(st.open);
 
@@ -832,7 +831,6 @@ static void trigger_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, uin
 static void test_menu_open_trigger_unbound_arms_anywhere(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_state_t st = {0};
-    nt_input_test_idle();
     menu_right_press(20.0F, 20.0F); /* far from the target panel */
     trigger_frame(&st, &style, 0U, 20.0F, 20.0F, false);
     TEST_ASSERT_TRUE_MESSAGE(st.open, "unbound trigger must arm on a right-click anywhere");
@@ -842,7 +840,6 @@ static void test_menu_open_trigger_unbound_arms_anywhere(void) {
 static void test_menu_opening_right_click_does_not_self_close(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_state_t st = {0};
-    nt_input_test_idle();
     menu_right_press(20.0F, 20.0F);
     trigger_frame(&st, &style, 0U, 20.0F, 20.0F, false);
     TEST_ASSERT_TRUE_MESSAGE(st.open, "the opening right-click arms and must NOT self-close the menu");
@@ -908,7 +905,6 @@ static void test_menu_record_nav_focuses_recorded_item(void) {
     menu_im_open(&st, 120.0F, 80.0F);
 
     /* Frame 1: lay out the root level (records {File, Edit, ...}); no key yet -> no focus committed. */
-    nt_input_test_idle();
     menu_im_frame(&st, &style, 0.0F, 0.0F);
 
     /* Frame 2: Down — nav runs in menu_end against THIS frame's record, focusing the first enabled item. */
@@ -1407,7 +1403,6 @@ static void test_menu_hover_opens_submenu(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_state_t st = {0};
     menu_im_open(&st, 120.0F, 80.0F);
-    nt_input_test_idle();
 
     const uint32_t file_row = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
 
@@ -1433,7 +1428,6 @@ static void test_menu_hover_sibling_leaf_collapses_submenu(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_state_t st = {0};
     menu_im_open(&st, 120.0F, 80.0F);
-    nt_input_test_idle();
 
     const uint32_t file_row = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
     const uint32_t edit_row = nt_ui_menu_test_item_id(MENU_A, KEY_EDIT);
@@ -1482,7 +1476,6 @@ static void test_menu_right_edge_root_clamp_and_submenu_flip(void) {
     nt_ui_menu_state_t st = {0};
     menu_im_open(&st, 780.0F, 100.0F); /* open hard against the right edge (780 + min_width 160 > 800) */
 
-    nt_input_test_idle();
     menu_im_submenu_frame(&st, &style, 0.0F, 0.0F); /* F1: lay out root */
     menu_key(NT_KEY_ARROW_DOWN);
     menu_im_submenu_frame(&st, &style, 0.0F, 0.0F); /* F2: focus File */

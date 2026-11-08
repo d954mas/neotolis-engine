@@ -35,6 +35,8 @@ extern nt_window_t g_nt_window;
 /* ---- Lifecycle (platform-specific) ---- */
 
 void nt_window_init(void);
+/* Pump platform events: sizes, then device input into nt_input's next frame. Call before
+   nt_input_poll. */
 void nt_window_poll(void);
 void nt_window_shutdown(void);
 void nt_window_set_fullscreen(bool fullscreen);

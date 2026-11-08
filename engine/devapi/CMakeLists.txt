@@ -54,12 +54,11 @@ if(NT_DEVAPI_GROUP_UI AND NOT NT_UI_DEBUG_TOOLS)
     message(FATAL_ERROR "NT_DEVAPI_GROUP_UI requires NT_UI_DEBUG_TOOLS (the ui probe is DEBUG_TOOLS-gated).")
 endif()
 
-# Input group: the synthetic-input scheduler + input.* veneer. NT_INPUT_AUTOMATION_ENABLED is PUBLIC so
-# every consumer (and the ui group, which reuses the scheduler) sees nt_input's inject API decls.
+# Input group: the synthetic-input scheduler + input.* veneer over nt_input's inject API.
 if(NT_DEVAPI_GROUP_INPUT)
     nt_add_module(nt_devapi_input LOG_DOMAIN "devapi" nt_devapi_input.c nt_devapi_input_internal.h)
-    target_link_libraries(nt_devapi_input PUBLIC nt_devapi nt_input_interface)
-    target_compile_definitions(nt_devapi_input PUBLIC NT_DEVAPI_GROUP_INPUT=1 NT_INPUT_AUTOMATION_ENABLED=1)
+    target_link_libraries(nt_devapi_input PUBLIC nt_devapi nt_input)
+    target_compile_definitions(nt_devapi_input PUBLIC NT_DEVAPI_GROUP_INPUT=1)
 endif()
 
 # UI group: read veneer over nt_ui_probe_collect + write veneer delegating to the input scheduler.
