@@ -9,11 +9,7 @@ void setUp(void) {
     g_nt_window.dpr = 1.0F;
 }
 
-void tearDown(void) {
-    nt_input_poll(); /* drain the backend staging: init does not reset it */
-    nt_input_poll();
-    nt_input_shutdown();
-}
+void tearDown(void) { nt_input_shutdown(); }
 
 /* Held H and mouse; B, a move and a wheel staged before the loss; then GLFW's synthetic H release,
    A and a mouse press. */
@@ -59,9 +55,33 @@ void test_events_after_focus_lost_arrive_next_poll(void) {
     TEST_ASSERT_FALSE(nt_input_pop_char(&cp));
 }
 
+/* The window callback drops GLFW's synthetic release, so the loss itself must forget the held mask. */
+void test_press_and_move_after_focus_lost_keep_delta(void) {
+    nt_input_buffer_mouse(10.0, 10.0, 1);
+    nt_input_poll();
+    nt_input_buffer_focus_lost();
+    nt_input_poll();
+    nt_input_poll();
+    nt_input_buffer_mouse(10.0, 10.0, 1);
+    nt_input_buffer_mouse(20.0, 10.0, 1);
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_mouse_is_pressed(NT_BUTTON_LEFT));
+    TEST_ASSERT_TRUE(float_near(10.0F, g_nt_input.pointers[0].dx, 1e-6F));
+}
+
+void test_shutdown_drops_staged_events(void) {
+    nt_input_buffer_key(NT_KEY_A, true);
+    nt_input_shutdown();
+    nt_input_init();
+    nt_input_poll();
+    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_focus_lost_poll_only_releases);
     RUN_TEST(test_events_after_focus_lost_arrive_next_poll);
+    RUN_TEST(test_press_and_move_after_focus_lost_keep_delta);
+    RUN_TEST(test_shutdown_drops_staged_events);
     return UNITY_END();
 }

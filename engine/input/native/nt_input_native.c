@@ -93,12 +93,17 @@ void nt_input_buffer_char_event(uint32_t cp) {
     }
 }
 
-void nt_input_buffer_focus_lost(void) {
-    /* Events staged before the loss are stale. */
+static void drop_staged_events(void) {
     s_key_count = 0;
     s_ptr_count = 0;
+    s_ptr_last_buttons = 0; /* the window drops GLFW's synthetic release, so the next press is an edge */
     s_wheel_count = 0;
     s_char_count = 0;
+}
+
+void nt_input_buffer_focus_lost(void) {
+    /* Events staged before the loss are stale. */
+    drop_staged_events();
     nt_input_focus_lost();
 }
 
@@ -140,4 +145,4 @@ void nt_input_platform_poll(void) {
     s_char_count = 0;
 }
 
-void nt_input_platform_shutdown(void) {}
+void nt_input_platform_shutdown(void) { drop_staged_events(); }
