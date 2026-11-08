@@ -1,7 +1,7 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
-#include "input/nt_input_feed.h" /* the nt_input backend entry points */
+#include "input/nt_input_feed.h"
 #include "log/nt_log.h"
 #include "window/nt_window.h"
 

@@ -13,9 +13,6 @@
 // #region devapi input schedule
 /* Schedule lives in devapi, not nt_input: only the devtool legitimately knows g_nt_app.frame. */
 
-/* NT_DEVAPI_INPUT_SCHED_MAX (bounded BSS schedule cap, -D overridable) is defined in
-   nt_devapi_input_internal.h so the ui group + the unit tests derive their sizes from the real cap. */
-
 typedef struct {
     uint16_t frames_remaining; /* sim-advance countdown; 0 = release on the next advancing tick */
     nt_input_event_t ev;
@@ -325,7 +322,7 @@ static bool cmd_input_wheel(const cJSON *params, cJSON *result, nt_devapi_error 
 }
 
 /* sugar: down@0 + a move per point (each on its own frame_offset using frame_stride, default 1) + up.
-   NO C interpolation — the bot supplies the path samples. Per-entry overflow -> bad_params. */
+   NO C interpolation — the bot supplies the path samples. No room for the whole gesture -> bad_params. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     const cJSON *idj = cJSON_GetObjectItemCaseSensitive(params, "id");
@@ -577,21 +574,21 @@ static const nt_devapi_command k_input_cmds[] = {
     },
     {
         .method = "input.button",
-        .summary = "set the mouse-button mask {1,2,4} on the mouse",
+        .summary = "set the mouse-button mask {1,2,4} at the mouse's position when applied (no mouse over the window -> no-op)",
         .params_shape = "{buttons:number}",
         .result_shape = "{ok:bool}",
         .fn = cmd_input_button,
     },
     {
         .method = "input.set_player_enabled",
-        .summary = "toggle the player-input gate (false suppresses the real device; inject still flows)",
+        .summary = "toggle the player-input gate (false suppresses the real device; inject still flows; a client reset re-enables it)",
         .params_shape = "{enabled:bool}",
         .result_shape = "{enabled:bool}",
         .fn = cmd_input_set_player_enabled,
     },
     {
         .method = "input.text",
-        .summary = "decode a UTF-8 string -> codepoints and enqueue them as typed text",
+        .summary = "decode a UTF-8 string -> codepoints and enqueue them as typed text (at most " NT_DEVAPI_STR(NT_INPUT_CHAR_MAX) ", released on the next sim-advance)",
         .params_shape = "{text:string}",
         .result_shape = "{queued:number}",
         .fn = cmd_input_text,

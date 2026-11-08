@@ -18,7 +18,7 @@
 #include "utf8/nt_utf8.h"
 #include "window/nt_window.h"
 
-/* Apply the field's keyboard hint on focus via the input platform layer (web shows the matching
+/* Apply the field's keyboard hint on focus via the window module (web shows the matching
  * soft keyboard; native/stub no-op). This is a UX hint only -- actual input restriction is the
  * allow filter, not this. The enum maps explicitly so the two vocabularies stay decoupled. */
 static inline void apply_keyboard_hint(nt_ui_input_keyboard_t kb, bool password) {

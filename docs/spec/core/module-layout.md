@@ -31,6 +31,8 @@ engine/
         CMakeLists.txt
     input/                  # platform-free core; window's platform pump feeds it
         nt_input.h
+        nt_input_feed.h     # the feed: window pump and devapi
+        nt_input.c
         CMakeLists.txt
     clipboard/              # swappable
         nt_clipboard.h

@@ -3,7 +3,7 @@
 #ifdef NT_PLATFORM_WEB
 
 #include "core/nt_assert.h"
-#include "input/nt_input_feed.h" /* the nt_input backend entry points */
+#include "input/nt_input_feed.h"
 #include "window/nt_window.h"
 #include <emscripten.h>
 #include <emscripten/html5.h>
@@ -138,8 +138,8 @@ EM_JS(void, nt_window_web_register_input, (void), {
 
     /* Keyboard events */
     canvas.addEventListener("keydown", function(e) {
-        /* First press emits the key event; OS auto-repeat (e.repeat) does NOT — nav/edit-key
-           repeat is the input field's own timer (is_down), so re-pushing key edges would double it. */
+        /* OS auto-repeat (e.repeat) pushes no key event: the field's own timer repeats nav/edit
+           keys from is_down. */
         if (!e.repeat) {
             var k = keyMap[e.code];
             if (k !== undefined) {
@@ -173,8 +173,9 @@ EM_JS(void, nt_window_web_register_input, (void), {
         mouseButtons = 0;
     });
 
-    /* Pointer events — pass CSS-relative coords, C maps with engine DPR. Every mouse event is a move
-       with the buttons (a release keeps the mouse); touch and pen are contacts. The buttons
+    /* Pointer events — pass CSS-relative coords, C maps with engine DPR. Every mouse press, release and
+       move is a move with the buttons (a release keeps the mouse), a leave is its own event; touch and
+       pen are contacts. The buttons
        count only from a press on the canvas until they are all up, like a native window: a drag from
        outside never presses, and a cancel or a blur never leaves a button stuck. */
     var mouseButtons = 0;

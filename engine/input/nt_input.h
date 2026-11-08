@@ -118,7 +118,7 @@ typedef struct {
     float pressure;          /* 0.0-1.0 */
     uint8_t type;            /* nt_pointer_type_t */
     bool active;             /* Pointer currently exists */
-    bool deactivate_pending; /* an up or a mouse leave defers deactivation by one frame */
+    bool deactivate_pending; /* an up, a mouse leave or a focus loss defers deactivation by one frame */
     nt_button_state_t buttons[NT_BUTTON_MAX];
 } nt_pointer_t;
 
@@ -129,8 +129,9 @@ typedef struct {
 #define NT_INPUT_CHAR_MAX 32
 
 /* pointers[0] is the mouse: active while the cursor is over the window or a button is held, and a
-   button release keeps it. Touch and pen contacts take slots 1.., each from its down to its up.
-   primary indexes the pointer a single-pointer consumer follows (updated by nt_input_poll): taken
+   button release keeps it; a focus loss releases it until the next move. Touch and pen contacts take
+   slots 1.., each from its down to its up.
+   primary indexes the pointer a single-pointer consumer follows: taken
    by a press, or by hovering while nothing is held, and kept from the press through its release
    frame. A contact already held when the primary ends never takes over. nt_input_poll publishes
    it; consumers only read it. */
@@ -168,8 +169,8 @@ bool nt_input_mouse_is_released(nt_button_t button);
 void nt_input_init(void);
 
 /* Publish the input that reached the core since the previous poll and start the next frame. Call
-   once per frame AFTER nt_window_poll(). No schedule: the devapi layer releases due inject events
-   before this poll. */
+   once per frame AFTER nt_window_poll(). nt_input keeps no schedule: nt_devapi_update injects due bot
+   events before this poll. */
 void nt_input_poll(void);
 
 void nt_input_shutdown(void);

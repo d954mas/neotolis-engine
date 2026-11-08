@@ -395,7 +395,7 @@ static void test_input_wheel_overfloat_dy_bad_params(void) { assert_bad_params(n
 /* input.key down@0 -> not visible until a sim-advance ticks the schedule + polls. */
 static void test_sched_offset0_applies_on_advance(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}"))); /* down@0 staged in schedule */
-    tick_no_advance();                                                                                 /* a frozen tick polls but releases nothing (the drain-race) */
+    tick_no_advance();                                                                                 /* a frozen tick polls but releases nothing */
     TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
     advance();
     TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_A));
@@ -694,7 +694,7 @@ static int text_count(void) {
     return n;
 }
 
-/* The drain-race, machine-observable: inject A -> input.state reads down==false (stale, no
+/* An inject is invisible to input.state until a sim-advance: inject A -> input.state reads down==false (stale, no
    advance yet) -> advance -> input.state reads down==true. */
 static void test_input_state_observes_injected_key(void) {
     assert_key_state(false, false, false); /* pre: not yet polled */

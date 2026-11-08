@@ -18,7 +18,7 @@ void tearDown(void) { nt_input_shutdown(); }
 
 void test_gate_off_drops_real_key(void) {
     nt_input_set_player_enabled(false);
-    nt_input_feed(nt_test_key(NT_KEY_A, true)); /* real device event — must be dropped at the wrapper */
+    nt_input_feed(nt_test_key(NT_KEY_A, true)); /* real device event — dropped by the player gate */
     nt_input_poll();
     TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
 }

@@ -33,7 +33,7 @@ void nt_window_set_text_input_mode(nt_text_input_mode_t mode);  // soft-keyboard
 ```
 
 - Chars carry *text* (layout-resolved, includes key repeat); physical keys carry
-  navigation/editing. Web has no GLFW char callback, so the web window pump
+  navigation/editing. Web has no GLFW char callback, so the web keydown listener
   synthesizes chars from `e.key` incl. `e.repeat` to match native behavior.
 - Frame-local like key edges: `nt_input_poll` publishes the characters typed since
   the previous poll and drops the ones the game left unread. Each publish has its own
@@ -51,8 +51,9 @@ position and deltas in framebuffer pixels (fractional, never rounded), wheel not
   or a focus loss it is published once more (that frame still reads the release) and then
   deactivates, unless a move brings it back first. The wheel
   lands only on an active mouse. On a device without a mouse it stays inactive. Its pressure is 1
-  while a button is down, else 0. A press counts only when it starts on the window (on web: while
-  the canvas holds the pointer capture), so a drag from outside never presses.
+  while a button is down, else 0. A press counts only when it starts on the window (on web: from a
+  press on the canvas until all buttons are up or the canvas loses focus), so a drag from outside
+  never presses.
 - **Touch and pen contacts take slots 1..7** (7 contacts), each from its down to its up, with the
   platform contact id. A move for an unknown id is ignored, so a hovering pen has no slot (pen
   hover is not supported).

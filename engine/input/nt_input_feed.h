@@ -10,8 +10,8 @@
 typedef enum {
     NT_INPUT_EV_KEY = 0,
     NT_INPUT_EV_CHAR,          /* a typed UTF-32 codepoint */
-    NT_INPUT_EV_MOUSE_MOVE,    /* every real mouse event is a move with the held buttons */
-    NT_INPUT_EV_MOUSE_BUTTONS, /* buttons at the mouse's current position; no-op off the window */
+    NT_INPUT_EV_MOUSE_MOVE,    /* a real pump reports a button change as a move with the held buttons */
+    NT_INPUT_EV_MOUSE_BUTTONS, /* bot only: buttons at the mouse's current position; no-op off the window */
     NT_INPUT_EV_MOUSE_LEAVE,   /* ignored while a button is held: a drag outside keeps the mouse */
     NT_INPUT_EV_CONTACT_DOWN,  /* touch/pen: a down creates a contact, a move for an unknown id is ignored */
     NT_INPUT_EV_CONTACT_MOVE,
