@@ -11,7 +11,8 @@
 #include "devapi/nt_devapi_input_internal.h" /* the schedule-fill tests derive from the real sched cap */
 #include "devapi/nt_devapi_internal.h" /* nt_devapi_update (via nt_devapi.h) — ticks the schedule on a sim-advance */
 #include "input/nt_input.h"
-#include "input/nt_input_internal.h" /* inject API: fill the buffer to probe whole-or-nothing */
+#include "input/nt_input_feed.h"
+#include "test_helpers/nt_input_test_frame.h"
 #include "window/nt_window.h"        /* g_nt_window.fb_height — the basis for the input.* Y-up flip */
 #include "unity.h"
 /* clang-format on */
@@ -26,7 +27,7 @@
 void setUp(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
     nt_devapi_register_input();             /* re-registers input -> resets the schedule */
-    nt_input_init();                        /* clean immediate buffer + key/pointer state */
+    nt_input_init();                        /* clean input state */
     g_nt_window.fb_height = TEST_FB_HEIGHT; /* deterministic basis for the Y-up flip */
 }
 
@@ -34,8 +35,8 @@ void tearDown(void) { nt_devapi_shutdown(); }
 
 /* ---- frame driving ---- */
 
-/* One real sim-advance: bump the frame, run devapi update (which sees the advance and releases due
-   schedule entries into nt_input's immediate buffer), then poll to apply that buffer. */
+/* One real sim-advance: bump the frame, run devapi update (which sees the advance and injects the due
+   schedule entries), then poll to publish them. */
 static void advance(void) {
     g_nt_app.frame++;
     nt_devapi_update();
@@ -156,7 +157,7 @@ static void test_input_set_player_enabled_ok(void) {
 
 /* A real mouse holds slot 0 (no gate): the bot's click drives that mouse, so it lands on pointers[0]. */
 static void test_input_click_lands_on_real_mouse_slot(void) {
-    nt_input_mouse_move(1.0F, 1.0F, 0);
+    nt_input_event(nt_test_mouse(1.0F, 1.0F, 0));
     nt_input_poll();
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.click\",\"params\":{\"x\":5,\"y\":5}}")));
     advance();
@@ -170,9 +171,9 @@ static void test_input_click_lands_on_real_mouse_slot(void) {
 static void test_input_move_keeps_mouse_type(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.move\",\"params\":{\"x\":10,\"y\":10,\"type\":\"touch\"}}")));
     advance();
-    nt_input_mouse_move(10.0F, 10.0F, 1);
-    nt_input_poll();
-    TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
+    TEST_ASSERT_EQUAL_UINT8(NT_POINTER_MOUSE, g_nt_input.pointers[0].type);
+    TEST_ASSERT_FALSE(g_nt_input.pointers[1].active);
 }
 
 /* Handing control back keeps the schedule: the bot's pending release still lands. */
@@ -439,10 +440,10 @@ static void test_reset_drops_schedule_keeps_applied_input(void) {
 
 /* A client that leaves gated hands the player back; an observer leaving keeps the real mouse. */
 static void test_reset_reenables_player(void) {
-    nt_input_mouse_move(10.0F, 10.0F, 0);
+    nt_input_event(nt_test_mouse(10.0F, 10.0F, 0));
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":false}}")));
     nt_devapi_run_reset_hooks();
-    nt_input_set_key(NT_KEY_B, true);
+    nt_input_event(nt_test_key(NT_KEY_B, true));
     nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_B));
     TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
@@ -614,7 +615,7 @@ static void test_sched_click_hold_zero_same_frame(void) {
 
 static void test_input_state_text_reads_codepoints(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"hi\"}}"))); /* enqueue char@0 'h','i' */
-    advance();                                                                                            /* advance -> release + drain into the ring */
+    advance();                                                                                            /* advance -> inject + publish */
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"text\":true}}"));
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
     cJSON *cps = cJSON_GetObjectItemCaseSensitive(result, "codepoints");
@@ -828,15 +829,10 @@ static void test_input_gesture_single_point_applied_once(void) {
     TEST_ASSERT_TRUE(slot->dy >= -0.001F && slot->dy <= 0.001F);
 }
 
-/* ---- single unified scheduler: a FULL schedule drains in one tick without a buffer overflow ---- */
+/* ---- a FULL schedule rejects the next command and releases every entry in one tick ---- */
 
-/* Locks the inject-buffer over-subscription fix: there is ONE scheduler (the input group's), capped
-   <= the 256-slot immediate buffer, so filling it completely with frame-0-due entries and advancing
-   ONE tick releases ALL of them with no sched_tick trap (the buffer can always hold a full schedule).
-   The ui group delegates to THIS scheduler, so two sibling groups can never over-subscribe the buffer
-   by construction. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_sched_full_drains_in_one_tick(void) {
+static void test_sched_full_rejects_then_releases(void) {
     /* Fill the WHOLE schedule with NT_DEVAPI_INPUT_SCHED_MAX frame-0-due key-down entries. */
     fill_schedule_leaving(0U);
     /* One more 1-entry command must now overflow (schedule full) -> whole-or-nothing reject. */
@@ -946,7 +942,7 @@ int main(void) {
     RUN_TEST(test_input_button_move_branch_updates_mask);
     RUN_TEST(test_input_button_applies_at_pending_move_position);
     RUN_TEST(test_input_gesture_single_point_applied_once);
-    RUN_TEST(test_sched_full_drains_in_one_tick);
+    RUN_TEST(test_sched_full_rejects_then_releases);
     RUN_TEST(test_sched_over_reserve_whole_or_nothing);
     RUN_TEST(test_input_state_text_reads_codepoints);
     RUN_TEST(test_input_state_registers);

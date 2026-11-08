@@ -3,7 +3,7 @@
 #include "../../examples/asteroids/main.c"
 #undef main
 
-#include "input/nt_input_internal.h"
+#include "input/nt_input_feed.h"
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/nt_input_test_frame.h"
 #include "unity.h"
@@ -414,12 +414,12 @@ static void test_modal_and_resize_cancel_scene_drag_before_input_early_return(vo
     handle_input(0);
     TEST_ASSERT_EQUAL_UINT8(2, s_pointer_owner[0][NT_BUTTON_LEFT]);
     pointer->buttons[NT_BUTTON_LEFT].is_pressed = false;
-    nt_input_set_key(NT_KEY_F4, true);
+    nt_input_event(nt_test_key(NT_KEY_F4, true));
     publish_keys();
     s_hide_hud = false;
     handle_input(0);
     TEST_ASSERT_TRUE(s_hide_hud);
-    nt_input_set_key(NT_KEY_F4, false);
+    nt_input_event(nt_test_key(NT_KEY_F4, false));
     publish_keys();
     s_ui_keyboard_blocked = false;
     pointer->x = 200;
@@ -466,14 +466,14 @@ static void test_keyboard_resets_win_over_already_sampled_drag(void) {
     pointer->dx = 100;
     handle_input(0);
     TEST_ASSERT_TRUE(fabsf(s_initial_camera.eye[0] - s_camera.eye[0]) > 0.001F);
-    nt_input_set_key(NT_KEY_LALT, true);
-    nt_input_set_key(NT_KEY_R, true);
+    nt_input_event(nt_test_key(NT_KEY_LALT, true));
+    nt_input_event(nt_test_key(NT_KEY_R, true));
     publish_keys();
     pointer->x = 500;
     handle_input(0);
     TEST_ASSERT_EQUAL_MEMORY(&s_initial_camera, &s_camera, sizeof(s_camera));
     TEST_ASSERT_EQUAL_UINT8(2, s_pointer_owner[0][NT_BUTTON_LEFT]);
-    nt_input_test_idle();
+    nt_input_init();
     *pointer = (nt_pointer_t){.active = true, .x = 300, .y = 300};
     pointer->buttons[NT_BUTTON_RIGHT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
     handle_input(0);
@@ -482,8 +482,8 @@ static void test_keyboard_resets_win_over_already_sampled_drag(void) {
     pointer->dx = 100;
     handle_input(0);
     TEST_ASSERT_TRUE(fabsf(s_initial_light.eye[0] - s_light.eye[0]) > 0.001F);
-    nt_input_set_key(NT_KEY_LCTRL, true);
-    nt_input_set_key(NT_KEY_L, true);
+    nt_input_event(nt_test_key(NT_KEY_LCTRL, true));
+    nt_input_event(nt_test_key(NT_KEY_L, true));
     publish_keys();
     pointer->x = 500;
     handle_input(0);

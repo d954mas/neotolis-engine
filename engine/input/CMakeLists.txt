@@ -4,7 +4,7 @@
 nt_add_module(nt_input LOG_DOMAIN "input"
     nt_input.c
     nt_input.h
-    nt_input_internal.h
+    nt_input_feed.h
 )
 
 target_link_libraries(nt_input PUBLIC nt_core)

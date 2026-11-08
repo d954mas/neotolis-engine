@@ -8,7 +8,6 @@
 #include "clay.h"
 #include "memory/nt_mem_scratch.h"
 #include "test_helpers/nt_assert_trap.h"
-#include "test_helpers/nt_input_test_frame.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -31,14 +30,10 @@ static const char *const s_tabs[] = {"One", "Two", "Three", "Four"};
 
 void setUp(void) {
     nt_test_assert_install();
-    nt_input_test_idle();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
 }
 
-void tearDown(void) {
-    nt_input_test_idle();
-    ui_walker_fixture_shutdown(&s_fx);
-}
+void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
 static nt_pointer_t pointer_at(float x, float y, bool is_down, bool is_pressed, bool is_released) {
     nt_pointer_t p = {0};

@@ -12,7 +12,7 @@
 #include <stdint.h>
 
 #include "clay.h"
-#include "input/nt_input_internal.h"
+#include "input/nt_input_feed.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_input_test_frame.h"
 #include "test_helpers/ui_test_arena.h"
@@ -51,15 +51,12 @@ static nt_ui_menu_ctx_t s_menu;
 
 void setUp(void) {
     nt_test_assert_install();
-    nt_input_test_idle();
+    nt_input_init();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
     nt_ui_menu_init(&s_menu); /* zero the game menu scratch: fresh nav record per test */
 }
 
-void tearDown(void) {
-    nt_input_test_idle();
-    ui_walker_fixture_shutdown(&s_fx);
-}
+void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
 static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps; }
 
@@ -337,7 +334,7 @@ static void test_menu_kbd_nav_activates_nested_leaf(void) {
     TEST_ASSERT_TRUE_MESSAGE(st.open, "the chain stays open one more frame so the inline return can fire");
 
     /* Frame 7: File2's row call consumes kbd_activated -> its inline return goes true; the chain closes. */
-    nt_input_test_idle();
+    nt_input_init();
     menu_im_frame(&st, &style, 0.0F, 0.0F);
 
     TEST_ASSERT_TRUE_MESSAGE(s_act_hit, "keyboard Enter must fire the leaf's INLINE return (1-frame latency)");
@@ -376,7 +373,6 @@ static void test_menu_outside_click_dismisses_chain(void) {
     menu_im_open(&st, 120.0F, 80.0F);
 
     /* frame 1: render so the panel bbox exists next frame (no press) */
-    nt_input_test_idle();
     menu_im_frame(&st, &style, 700.0F, 500.0F);
     TEST_ASSERT_TRUE(st.open);
 
@@ -406,7 +402,6 @@ static void test_menu_inside_click_keeps_open(void) {
     menu_im_open(&st, 120.0F, 80.0F);
 
     /* frame 1: render so the root panel bbox exists next frame. Anchor at (120,80) -> panel grows below. */
-    nt_input_test_idle();
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     TEST_ASSERT_TRUE(st.open);
 
@@ -416,13 +411,6 @@ static void test_menu_inside_click_keeps_open(void) {
     TEST_ASSERT_TRUE_MESSAGE(st.open, "a click inside an open panel must NOT dismiss the chain");
 }
 
-/* Drive a clean GLOBAL right-button press edge at (px,py): mask 2 = NT_BUTTON_RIGHT. */
-static void menu_right_press_at(float px, float py) {
-    nt_input_test_idle();
-    nt_input_mouse_move(px, py, 2U);
-    nt_input_poll();
-}
-
 /* ---- Right-click outside (a frame AFTER opening) dismisses the chain, mirroring the left-click dismiss. ---- */
 static void test_menu_right_click_outside_dismisses_chain(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
@@ -430,13 +418,11 @@ static void test_menu_right_click_outside_dismisses_chain(void) {
     menu_im_open(&st, 120.0F, 80.0F);
 
     /* frame 1: render so the panel bbox exists next frame (no press) */
-    nt_input_test_idle();
     menu_im_frame(&st, &style, 700.0F, 500.0F);
     TEST_ASSERT_TRUE(st.open);
 
     /* frame 2: RIGHT press far from the panel -> menu-owned outside dismiss. The snapshot pointer carries
      * the right-button edge so the menu reads a consistent right-press this frame. */
-    menu_right_press_at(780.0F, 580.0F);
     nt_pointer_t p = {.x = 780.0F, .y = 580.0F, .active = true};
     p.buttons[NT_BUTTON_RIGHT].is_down = true;
     p.buttons[NT_BUTTON_RIGHT].is_pressed = true;
@@ -514,7 +500,7 @@ static void test_menu_switch_root_branch_while_submenu_open(void) {
     menu_im_frame2(&st, &style, 0.0F, 0.0F, false);
 
     /* Settle one frame: Opt's row call consumes kbd_activated -> its inline return fires; the chain closes. */
-    nt_input_test_idle();
+    nt_input_init();
     menu_im_frame2(&st, &style, 0.0F, 0.0F, false);
 
     TEST_ASSERT_TRUE_MESSAGE(s_act_hit, "must reach the OTHER root branch's leaf (inline return) while the first was open");
@@ -563,7 +549,7 @@ static void test_menu_click_root_parent_switches_branch(void) {
     TEST_ASSERT_TRUE(st.open);
 
     /* settle so the Tools root row bbox is queryable */
-    nt_input_test_idle();
+    nt_input_init();
     menu_im_frame2(&st, &style, 0.0F, 0.0F, false);
     const uint32_t tools_row = nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS);
     nt_ui_bbox_t rb = nt_ui_get_bbox(s_fx.ctx, tools_row);
@@ -747,7 +733,7 @@ static void test_menu_separator_non_interactive(void) {
     /* Enter on the focused item -> stashes kbd_activated; the next frame's row call fires the inline return. */
     menu_key(NT_KEY_ENTER);
     menu_im_frame25(&st, &style, 0.0F, 0.0F);
-    nt_input_test_idle();
+    nt_input_init();
     menu_im_frame25(&st, &style, 0.0F, 0.0F);
     TEST_ASSERT_TRUE_MESSAGE(s_act_hit, "Down must skip the separator (focus Iconed->Plain); Plain's inline return fires on Enter");
 }
@@ -795,8 +781,8 @@ static void test_menu_root_occluder_present_while_open(void) {
 
 /* Drive a clean GLOBAL right-button press edge at (px,py): mask 2 = NT_BUTTON_RIGHT. */
 static void menu_right_press(float px, float py) {
-    nt_input_test_idle();
-    nt_input_mouse_move(px, py, 2U);
+    nt_input_init();
+    nt_input_event(nt_test_mouse(px, py, 2U));
     nt_input_poll();
 }
 
@@ -849,7 +835,7 @@ static void test_menu_opening_right_click_does_not_self_close(void) {
 static void test_menu_open_trigger_long_press_passed_in_arms(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_state_t st = {0};
-    nt_input_test_idle(); /* no right-click this frame; arming comes solely from long_pressed */
+    nt_input_init(); /* no right-click this frame; arming comes solely from long_pressed */
     trigger_frame(&st, &style, 0U, 40.0F, 40.0F, true);
     TEST_ASSERT_TRUE_MESSAGE(st.open, "caller-supplied long_pressed must arm the trigger");
     TEST_ASSERT_TRUE_MESSAGE(float_near(st.anchor_x, 40.0F, 0.5F) && float_near(st.anchor_y, 40.0F, 0.5F), "long-press arms the menu at the cursor");
@@ -861,7 +847,6 @@ static void test_menu_open_trigger_bound_requires_target_hover(void) {
     nt_ui_menu_state_t st = {0};
 
     /* Settle one frame so the target panel is registered for next-frame hover arbitration. */
-    nt_input_test_idle();
     trigger_frame(&st, &style, TARGET_ID, 280.0F, 210.0F, false);
     TEST_ASSERT_FALSE(st.open);
 
@@ -913,7 +898,7 @@ static void test_menu_record_nav_focuses_recorded_item(void) {
 
     /* Frame 3: settle so the focus committed in frame 2 is observable via the record probe (1-frame effect);
      * an idle frame has no Down edge to re-step focus. */
-    nt_input_test_idle();
+    nt_input_init();
     menu_im_frame(&st, &style, 0.0F, 0.0F);
 
     const uint32_t focus_id = nt_ui_menu_test_focus_item_id(s_fx.ctx, &s_menu, MENU_A, 0U);
@@ -1238,7 +1223,7 @@ static void test_menu_separator_text_non_interactive(void) {
     menu_im_frame_sep_text(&st, &style);
     menu_key(NT_KEY_ENTER);
     menu_im_frame_sep_text(&st, &style);
-    nt_input_test_idle();
+    nt_input_init();
     menu_im_frame_sep_text(&st, &style);
     TEST_ASSERT_TRUE_MESSAGE(s_act_hit, "Down must skip the section header (focus Top->Bottom); Bottom's inline return fires on Enter");
 }
@@ -1481,7 +1466,7 @@ static void test_menu_right_edge_root_clamp_and_submenu_flip(void) {
     menu_im_submenu_frame(&st, &style, 0.0F, 0.0F); /* F2: focus File */
     menu_key(NT_KEY_ARROW_RIGHT);
     menu_im_submenu_frame(&st, &style, 0.0F, 0.0F); /* F3: open File submenu */
-    nt_input_test_idle();
+    nt_input_init();
     menu_im_submenu_frame(&st, &style, 0.0F, 0.0F); /* F4-5: settle so widths measure + side resolves */
     menu_im_submenu_frame(&st, &style, 0.0F, 0.0F);
 

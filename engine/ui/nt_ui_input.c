@@ -823,7 +823,7 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
     uint32_t cur_len = f->cur_len;
     const bool claimed_now = f->claimed_now;
     {
-        // #region drain typed chars (FIFO from the input ring)
+        // #region drain typed chars (FIFO, this frame's)
         uint32_t cp = 0U;
         while (nt_input_pop_char(&cp)) {
             const bool ok = (props->allow != NULL) ? props->allow(cp) : allow_printable(cp);

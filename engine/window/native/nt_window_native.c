@@ -1,7 +1,7 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
-#include "input/nt_input_internal.h" /* the nt_input backend entry points */
+#include "input/nt_input_feed.h" /* the nt_input backend entry points */
 #include "log/nt_log.h"
 #include "window/nt_window.h"
 
@@ -83,8 +83,13 @@ static nt_key_t glfw_key_to_nt(int key) {
 
 /* ---- GLFW Callbacks — each event applies to the next input frame as it arrives ---- */
 
+/* The DPR events map with: current at each event, while g_nt_window changes only in nt_window_poll. */
+static float s_event_dpr = 1.0F;
+
 /* The mouse at a cursor position in window coordinates, with the held buttons. */
-static void mouse_at(double xpos, double ypos) { nt_input_mouse_move((float)xpos * g_nt_window.dpr, (float)ypos * g_nt_window.dpr, s_cached_buttons); }
+static void mouse_at(double xpos, double ypos) {
+    nt_input_event((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_MOVE, .mouse = {(float)xpos * s_event_dpr, (float)ypos * s_event_dpr, s_cached_buttons}});
+}
 
 static void mouse_at_cursor(void) {
     double xpos = 0.0;
@@ -99,13 +104,13 @@ static void glfw_key_callback(GLFWwindow *window, int key, int scancode, int act
     (void)mods;
     nt_key_t nt_key = glfw_key_to_nt(key);
     if (nt_key < NT_KEY_COUNT) {
-        nt_input_set_key(nt_key, action != GLFW_RELEASE);
+        nt_input_event((nt_input_event_t){.kind = NT_INPUT_EV_KEY, .key = {(uint8_t)nt_key, action != GLFW_RELEASE}});
     }
 }
 
 static void glfw_char_callback(GLFWwindow *window, unsigned int codepoint) {
     (void)window;
-    nt_input_char(codepoint); /* GLFW delivers native-endian UTF-32 already */
+    nt_input_event((nt_input_event_t){.kind = NT_INPUT_EV_CHAR, .cp = codepoint}); /* GLFW delivers native-endian UTF-32 already */
 }
 
 static void glfw_cursor_pos_callback(GLFWwindow *window, double xpos, double ypos) {
@@ -118,7 +123,7 @@ static void glfw_cursor_enter_callback(GLFWwindow *window, int entered) {
     if (entered) {
         mouse_at_cursor(); /* a window shown under a still cursor gets no move */
     } else {
-        nt_input_mouse_leave();
+        nt_input_event((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_LEAVE});
     }
 }
 
@@ -151,7 +156,7 @@ static void glfw_mouse_button_callback(GLFWwindow *window, int button, int actio
 
     mouse_at_cursor();
     if (s_cached_buttons == 0 && !glfwGetWindowAttrib(s_glfw_window, GLFW_HOVERED)) {
-        nt_input_mouse_leave(); /* a drag released outside: the leave was ignored while held */
+        nt_input_event((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_LEAVE}); /* a drag released outside: the leave was ignored while held */
     }
 }
 
@@ -164,25 +169,26 @@ static void glfw_scroll_callback(GLFWwindow *window, double xoffset, double yoff
     }
     /* GLFW yoffset is ±1.0 per notch with OPPOSITE Y sign to the DOM (GLFW: up=+, DOM deltaY: down=+).
      * Web is canonical, so negate yoffset to match. X already agrees (right=+ on both). */
-    nt_input_wheel((float)xoffset, -(float)yoffset);
+    nt_input_event((nt_input_event_t){.kind = NT_INPUT_EV_WHEEL, .wheel = {(float)xoffset, -(float)yoffset}});
 }
 
-static void sync_sizes(void);
-
-/* A size or DPR change (e.g. a move to another monitor) inside a pump: later events of the same
-   pump map with the new DPR. */
+/* A DPR change (e.g. a move to another monitor) inside a pump: later events of the same pump map with
+   it. Also fires outside the pump (a fullscreen switch), so it touches no window state. */
 static void glfw_framebuffer_size_callback(GLFWwindow *window, int fb_w, int fb_h) {
-    (void)window;
-    (void)fb_w;
     (void)fb_h;
-    sync_sizes();
+    int win_w = 0;
+    int win_h = 0;
+    glfwGetWindowSize(window, &win_w, &win_h);
+    if (win_w > 0) {
+        s_event_dpr = nt_window_effective_dpr((float)fb_w / (float)win_w);
+    }
 }
 
 static void glfw_focus_callback(GLFWwindow *window, int focused) {
     (void)window;
     if (!focused) {
         s_cached_buttons = 0;
-        nt_input_focus_lost(); /* GLFW's synthetic key releases that follow are no-ops; the button callback drops the mouse ones */
+        nt_input_event((nt_input_event_t){.kind = NT_INPUT_EV_FOCUS_LOST}); /* GLFW's synthetic key releases that follow are no-ops; the button callback drops the mouse ones */
     }
 }
 
@@ -207,6 +213,7 @@ static void sync_sizes(void) {
     }
 
     nt_window_apply_sizes((float)win_w, (float)win_h, device_dpr);
+    s_event_dpr = g_nt_window.dpr;
 }
 
 /* ---- Lifecycle ---- */

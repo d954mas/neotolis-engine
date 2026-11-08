@@ -1,4 +1,4 @@
-#include "input/nt_input_internal.h"
+#include "input/nt_input_feed.h"
 
 #include <string.h>
 
@@ -7,33 +7,25 @@
 /* ---- Input state: the frame the game reads, and the next one events apply to ---- */
 
 typedef struct {
-    bool down[NT_KEY_COUNT];
-    bool pressed[NT_KEY_COUNT];
-    bool released[NT_KEY_COUNT];
-} key_state_t;
+    bool key_down[NT_KEY_COUNT];
+    bool key_pressed[NT_KEY_COUNT];
+    bool key_released[NT_KEY_COUNT];
+    uint32_t chars[NT_INPUT_CHAR_MAX];
+    uint32_t char_count;
+} frame_t; /* the half of a frame that has no public struct */
 
-typedef struct {
-    uint32_t cps[NT_INPUT_CHAR_MAX];
-    uint32_t count;
-} char_list_t;
-
-/* Published by nt_input_poll; read by the game. */
-nt_input_t g_nt_input;
-static key_state_t s_keys;
-static char_list_t s_chars;
+nt_input_t g_nt_input; /* published by nt_input_poll */
+static frame_t s_frame;
 static uint32_t s_char_read;
 
-/* Events apply here as they reach the core, in arrival order; nt_input_poll publishes it. */
-static nt_input_t s_next;
-static key_state_t s_next_keys;
-static char_list_t s_next_chars;
+static nt_input_t s_next; /* events apply here in arrival order */
+static frame_t s_next_frame;
 
-/* Player gate: judges a real event when it reaches the core (devapi automation). */
 static bool s_player_enabled = true;
 
-/* ---- Internal pointer helpers ---- */
+#define NEXT_MOUSE (&s_next.pointers[0])
 
-#define MOUSE (&s_next.pointers[0])
+/* ---- Pointer helpers ---- */
 
 static nt_pointer_t *find_contact(uint32_t id) {
     for (int i = 1; i < NT_INPUT_MAX_POINTERS; i++) {
@@ -65,6 +57,7 @@ static void reset_pointer_transients(nt_pointer_t *ptr) {
 
 static void apply_buttons_mask(nt_pointer_t *ptr, uint8_t buttons_mask) {
     static const uint8_t masks[NT_BUTTON_MAX] = {1U, 2U, 4U};
+    NT_ASSERT(buttons_mask <= 7U);
     for (int b = 0; b < NT_BUTTON_MAX; b++) {
         bool now = (buttons_mask & masks[b]) != 0;
         if (now && !ptr->buttons[b].is_down) {
@@ -77,17 +70,22 @@ static void apply_buttons_mask(nt_pointer_t *ptr, uint8_t buttons_mask) {
     }
 }
 
+/* Its release is published with it; it is gone the frame after. */
+static void release_pointer(nt_pointer_t *ptr) {
+    apply_buttons_mask(ptr, 0);
+    ptr->pressure = 0.0F;
+    ptr->deactivate_pending = true;
+}
+
 /* ---- Lifecycle ---- */
 
 static void reset_state(void) {
     memset(&g_nt_input, 0, sizeof(g_nt_input));
     memset(&s_next, 0, sizeof(s_next));
-    memset(&s_keys, 0, sizeof(s_keys));
-    memset(&s_next_keys, 0, sizeof(s_next_keys));
-    s_chars.count = 0;
-    s_next_chars.count = 0;
+    memset(&s_frame, 0, sizeof(s_frame));
+    memset(&s_next_frame, 0, sizeof(s_next_frame));
     s_char_read = 0;
-    s_player_enabled = true; /* clean default: real devices drive until a bot gates them */
+    s_player_enabled = true;
 }
 
 void nt_input_init(void) { reset_state(); }
@@ -117,7 +115,7 @@ static void primary_update(void) {
         }
         in_use = in_use || pointer_in_use(&s_next.pointers[i]);
     }
-    if (!in_use && MOUSE->active && !MOUSE->deactivate_pending) {
+    if (!in_use && NEXT_MOUSE->active && !NEXT_MOUSE->deactivate_pending) {
         s_next.primary = 0;
     }
 }
@@ -125,15 +123,13 @@ static void primary_update(void) {
 void nt_input_poll(void) {
     primary_update();
     g_nt_input = s_next;
-    s_keys = s_next_keys;
-    s_chars = s_next_chars;
+    s_frame = s_next_frame;
     s_char_read = 0;
 
-    /* Start the next frame: edges, deltas and typed text are per frame; a released pointer was
-       published once with its release and is gone now. */
-    memset(s_next_keys.pressed, 0, sizeof(s_next_keys.pressed));
-    memset(s_next_keys.released, 0, sizeof(s_next_keys.released));
-    s_next_chars.count = 0;
+    /* Edges, deltas and text are per frame; a released pointer was published once and is gone now. */
+    memset(s_next_frame.key_pressed, 0, sizeof(s_next_frame.key_pressed));
+    memset(s_next_frame.key_released, 0, sizeof(s_next_frame.key_released));
+    s_next_frame.char_count = 0;
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
         nt_pointer_t *p = &s_next.pointers[i];
         if (p->deactivate_pending) {
@@ -151,38 +147,19 @@ void nt_input_poll(void) {
     }
 }
 
-void nt_input_shutdown(void) {
-    /* Symmetric with nt_input_init: leave NO observable state (stale key edges or a disabled
-       gate) for a consumer that queries after shutdown or relies on it to drop a bot gate. */
-    reset_state();
-}
+void nt_input_shutdown(void) { reset_state(); }
 
-/* ---- Key query functions ---- */
+/* ---- Queries (the published frame) ---- */
 
-bool nt_input_key_is_down(nt_key_t key) {
-    if (key >= NT_KEY_COUNT) {
-        return false;
-    }
-    return s_keys.down[key];
-}
+bool nt_input_key_is_down(nt_key_t key) { return key < NT_KEY_COUNT && s_frame.key_down[key]; }
 
-bool nt_input_key_is_pressed(nt_key_t key) {
-    if (key >= NT_KEY_COUNT) {
-        return false;
-    }
-    return s_keys.pressed[key];
-}
+bool nt_input_key_is_pressed(nt_key_t key) { return key < NT_KEY_COUNT && s_frame.key_pressed[key]; }
 
-bool nt_input_key_is_released(nt_key_t key) {
-    if (key >= NT_KEY_COUNT) {
-        return false;
-    }
-    return s_keys.released[key];
-}
+bool nt_input_key_is_released(nt_key_t key) { return key < NT_KEY_COUNT && s_frame.key_released[key]; }
 
 bool nt_input_any_key_pressed(void) {
     for (int i = 0; i < NT_KEY_COUNT; i++) {
-        if (s_keys.pressed[i]) {
+        if (s_frame.key_pressed[i]) {
             return true;
         }
     }
@@ -190,107 +167,48 @@ bool nt_input_any_key_pressed(void) {
 }
 
 bool nt_input_pop_char(uint32_t *out_codepoint) {
-    if (s_char_read == s_chars.count) {
+    if (s_char_read == s_frame.char_count) {
         return false; /* empty — leave *out untouched */
     }
-    *out_codepoint = s_chars.cps[s_char_read++];
+    *out_codepoint = s_frame.chars[s_char_read++];
     return true;
 }
 
-/* ---- Mouse convenience helpers ---- */
+bool nt_input_mouse_is_down(nt_button_t button) { return button < NT_BUTTON_MAX && g_nt_input.pointers[0].active && g_nt_input.pointers[0].buttons[button].is_down; }
 
-static const nt_pointer_t *published_mouse(nt_button_t button) {
-    const nt_pointer_t *m = &g_nt_input.pointers[0];
-    return button < NT_BUTTON_MAX && m->active ? m : NULL;
-}
+bool nt_input_mouse_is_pressed(nt_button_t button) { return button < NT_BUTTON_MAX && g_nt_input.pointers[0].active && g_nt_input.pointers[0].buttons[button].is_pressed; }
 
-bool nt_input_mouse_is_down(nt_button_t button) {
-    const nt_pointer_t *m = published_mouse(button);
-    return m != NULL && m->buttons[button].is_down;
-}
+bool nt_input_mouse_is_released(nt_button_t button) { return button < NT_BUTTON_MAX && g_nt_input.pointers[0].active && g_nt_input.pointers[0].buttons[button].is_released; }
 
-bool nt_input_mouse_is_pressed(nt_button_t button) {
-    const nt_pointer_t *m = published_mouse(button);
-    return m != NULL && m->buttons[button].is_pressed;
-}
+/* ---- Applying an event to the next frame ---- */
 
-bool nt_input_mouse_is_released(nt_button_t button) {
-    const nt_pointer_t *m = published_mouse(button);
-    return m != NULL && m->buttons[button].is_released;
-}
-
-/* ---- Apply cores and the gated real-input wrappers (called by platform backends) ---- */
-
-static void nt_input_set_key_apply(nt_key_t key, bool down) {
+static void apply_key(nt_key_t key, bool down) {
     NT_ASSERT(key < NT_KEY_COUNT);
-    if (down && !s_next_keys.down[key]) {
-        s_next_keys.pressed[key] = true;
-    }
-    if (!down && s_next_keys.down[key]) {
-        s_next_keys.released[key] = true;
-    }
-    s_next_keys.down[key] = down;
+    s_next_frame.key_pressed[key] = s_next_frame.key_pressed[key] || (down && !s_next_frame.key_down[key]);
+    s_next_frame.key_released[key] = s_next_frame.key_released[key] || (!down && s_next_frame.key_down[key]);
+    s_next_frame.key_down[key] = down;
 }
 
-void nt_input_set_key(nt_key_t key, bool down) {
-    if (!s_player_enabled) {
-        return; /* gated: real device suppressed while a bot drives (inject bypasses via *_apply). */
+static void apply_mouse_move(float x, float y, uint8_t buttons) {
+    nt_pointer_t *m = NEXT_MOUSE;
+    if (!m->active) {
+        reset_pointer_transients(m);
+        m->active = true;
+    } else if (!m->deactivate_pending) {
+        m->dx += x - m->x;
+        m->dy += y - m->y;
     }
-    nt_input_set_key_apply(key, down);
+    m->deactivate_pending = false; /* back before the leave took effect: keep this frame's edges */
+    m->x = x;
+    m->y = y;
+    m->pressure = buttons != 0U ? 1.0F : 0.0F;
+    apply_buttons_mask(m, buttons);
 }
 
-static void nt_input_char_apply(uint32_t cp) {
-    if (s_next_chars.count < NT_INPUT_CHAR_MAX) { /* drop-newest: earlier typing is never clobbered */
-        s_next_chars.cps[s_next_chars.count++] = cp;
-    }
-}
-
-void nt_input_char(uint32_t cp) {
-    if (!s_player_enabled) {
-        return;
-    }
-    nt_input_char_apply(cp);
-}
-
-static void nt_input_mouse_move_apply(float x, float y, uint8_t buttons_mask) {
-    if (!MOUSE->active) {
-        reset_pointer_transients(MOUSE);
-        MOUSE->active = true;
-    } else if (!MOUSE->deactivate_pending) {
-        MOUSE->dx += x - MOUSE->x;
-        MOUSE->dy += y - MOUSE->y;
-    }
-    MOUSE->deactivate_pending = false; /* back before the leave took effect: keep this frame's edges */
-    MOUSE->x = x;
-    MOUSE->y = y;
-    MOUSE->pressure = buttons_mask != 0U ? 1.0F : 0.0F;
-    apply_buttons_mask(MOUSE, buttons_mask);
-}
-
-void nt_input_mouse_move(float x, float y, uint8_t buttons_mask) {
-    if (!s_player_enabled) {
-        return;
-    }
-    nt_input_mouse_move_apply(x, y, buttons_mask);
-}
-
-void nt_input_mouse_leave(void) {
-    if (!s_player_enabled) {
-        return;
-    }
-    for (int b = 0; b < NT_BUTTON_MAX; b++) {
-        if (MOUSE->buttons[b].is_down) {
-            return; /* a drag outside the window keeps the mouse; the backend leaves after the release */
-        }
-    }
-    MOUSE->deactivate_pending = MOUSE->active;
-}
-
-static void nt_input_pointer_down_apply(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask) {
-    NT_ASSERT((type == NT_POINTER_TOUCH || type == NT_POINTER_PEN) && "a contact is touch or pen; the mouse uses nt_input_mouse_move");
+static void apply_contact_down(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons) {
+    NT_ASSERT((type == NT_POINTER_TOUCH || type == NT_POINTER_PEN) && "a contact is touch or pen; the mouse moves");
     nt_pointer_t *ptr = find_contact(id);
-    bool fresh = (ptr == NULL);
-    if (fresh) {
+    if (ptr == NULL) {
         ptr = find_free_contact_slot();
         if (ptr == NULL) {
             return; /* All slots full */
@@ -303,17 +221,10 @@ static void nt_input_pointer_down_apply(uint32_t id, float x, float y, float pre
     ptr->pressure = pressure;
     ptr->x = x;
     ptr->y = y;
-    apply_buttons_mask(ptr, buttons_mask);
+    apply_buttons_mask(ptr, buttons);
 }
 
-void nt_input_pointer_down(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask) {
-    if (!s_player_enabled) {
-        return;
-    }
-    nt_input_pointer_down_apply(id, x, y, pressure, type, buttons_mask);
-}
-
-static void nt_input_pointer_move_apply(uint32_t id, float x, float y, float pressure, uint8_t buttons_mask) {
+static void apply_contact_move(uint32_t id, float x, float y, float pressure, uint8_t buttons) {
     nt_pointer_t *ptr = find_contact(id);
     if (ptr == NULL) {
         return; /* a contact exists only from its down to its up (a hovering pen has no slot) */
@@ -323,108 +234,83 @@ static void nt_input_pointer_move_apply(uint32_t id, float x, float y, float pre
     ptr->x = x;
     ptr->y = y;
     ptr->pressure = pressure;
-    apply_buttons_mask(ptr, buttons_mask);
+    apply_buttons_mask(ptr, buttons);
 }
 
-void nt_input_pointer_move(uint32_t id, float x, float y, float pressure, uint8_t buttons_mask) {
-    if (!s_player_enabled) {
-        return;
-    }
-    nt_input_pointer_move_apply(id, x, y, pressure, buttons_mask);
-}
-
-static void nt_input_pointer_up_apply(uint32_t id) {
-    nt_pointer_t *ptr = find_contact(id);
-    if (ptr == NULL) {
-        return; /* Unknown pointer */
-    }
-    for (int b = 0; b < NT_BUTTON_MAX; b++) {
-        if (ptr->buttons[b].is_down) {
-            ptr->buttons[b].is_released = true;
-        }
-        ptr->buttons[b].is_down = false;
-    }
-    ptr->deactivate_pending = true;
-}
-
-void nt_input_pointer_up(uint32_t id) {
-    if (!s_player_enabled) {
-        return;
-    }
-    nt_input_pointer_up_apply(id);
-}
-
-static void nt_input_wheel_apply(float dx, float dy) {
-    if (!MOUSE->active) {
-        return; /* no mouse over the window: the backends and the bot move it first */
-    }
-    MOUSE->wheel_dx += dx;
-    MOUSE->wheel_dy += dy;
-}
-
-void nt_input_wheel(float dx, float dy) {
-    if (!s_player_enabled) {
-        return;
-    }
-    nt_input_wheel_apply(dx, dy);
-}
-
-void nt_input_focus_lost(void) {
-    if (!s_player_enabled) {
-        return; /* gated: the held input is the bot's, and a click into another window must not cut it */
-    }
+static void apply_focus_lost(void) {
     for (int i = 0; i < NT_KEY_COUNT; i++) {
-        s_next_keys.released[i] = s_next_keys.released[i] || s_next_keys.down[i];
+        apply_key((nt_key_t)i, false);
     }
-    memset(s_next_keys.down, 0, sizeof(s_next_keys.down));
-    /* Like a pointer up: the release is published with the pointer, which is gone the frame after. */
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
-        nt_pointer_t *p = &s_next.pointers[i];
-        if (!p->active) {
-            continue;
+        if (s_next.pointers[i].active) {
+            release_pointer(&s_next.pointers[i]);
         }
-        for (int b = 0; b < NT_BUTTON_MAX; b++) {
-            p->buttons[b].is_released = p->buttons[b].is_released || p->buttons[b].is_down;
-            p->buttons[b].is_down = false;
-        }
-        p->pressure = 0.0F;
-        p->deactivate_pending = true;
     }
 }
 
-/* ---- Automation: player gate + synthetic input injection (devapi) ---- */
+static void apply(const nt_input_event_t *e) {
+    nt_pointer_t *m = NEXT_MOUSE;
+    switch ((nt_input_event_kind_t)e->kind) {
+    case NT_INPUT_EV_KEY:
+        apply_key((nt_key_t)e->key.key, e->key.down);
+        break;
+    case NT_INPUT_EV_CHAR:
+        if (s_next_frame.char_count < NT_INPUT_CHAR_MAX) { /* drop-newest: earlier typing is never clobbered */
+            s_next_frame.chars[s_next_frame.char_count++] = e->cp;
+        }
+        break;
+    case NT_INPUT_EV_MOUSE_MOVE:
+        apply_mouse_move(e->mouse.x, e->mouse.y, e->mouse.buttons);
+        break;
+    case NT_INPUT_EV_MOUSE_BUTTONS:
+        if (m->active && !m->deactivate_pending) { /* no press at (0,0) for a mouse that is not over the window */
+            apply_mouse_move(m->x, m->y, e->mouse.buttons);
+        }
+        break;
+    case NT_INPUT_EV_MOUSE_LEAVE: {
+        bool held = false;
+        for (int b = 0; b < NT_BUTTON_MAX; b++) {
+            held = held || m->buttons[b].is_down;
+        }
+        if (!held) { /* a drag outside keeps the mouse; the backend leaves after the release */
+            m->deactivate_pending = m->active;
+        }
+        break;
+    }
+    case NT_INPUT_EV_CONTACT_DOWN:
+        apply_contact_down(e->contact.id, e->contact.x, e->contact.y, e->contact.pressure, e->contact.type, e->contact.buttons);
+        break;
+    case NT_INPUT_EV_CONTACT_MOVE:
+        apply_contact_move(e->contact.id, e->contact.x, e->contact.y, e->contact.pressure, e->contact.buttons);
+        break;
+    case NT_INPUT_EV_CONTACT_UP: {
+        nt_pointer_t *ptr = find_contact(e->contact.id);
+        if (ptr != NULL) {
+            release_pointer(ptr);
+        }
+        break;
+    }
+    case NT_INPUT_EV_WHEEL:
+        if (m->active) { /* no mouse over the window: the backends and the bot move it first */
+            m->wheel_dx += e->wheel.dx;
+            m->wheel_dy += e->wheel.dy;
+        }
+        break;
+    case NT_INPUT_EV_FOCUS_LOST:
+        apply_focus_lost();
+        break;
+    default:
+        NT_ASSERT(false && "unknown input event kind");
+        break;
+    }
+}
+
+void nt_input_event(nt_input_event_t e) {
+    if (s_player_enabled) { /* closed: the held input is the bot's, and a click into another window must not cut it */
+        apply(&e);
+    }
+}
+
+void nt_input_inject(nt_input_event_t e) { apply(&e); }
 
 void nt_input_set_player_enabled(bool enabled) { s_player_enabled = enabled; }
-
-/* Inject applies through the *_apply cores, past the player gate: injected input is
-   indistinguishable from human to the query API. The devapi layer validated the untrusted command. */
-
-void nt_input_inject_key(nt_key_t key, bool down) { nt_input_set_key_apply(key, down); }
-
-void nt_input_inject_mouse(float x, float y, uint8_t buttons_mask) {
-    NT_ASSERT(buttons_mask <= 7U);
-    nt_input_mouse_move_apply(x, y, buttons_mask);
-}
-
-void nt_input_inject_mouse_buttons(uint8_t buttons_mask) {
-    NT_ASSERT(buttons_mask <= 7U);
-    if (MOUSE->active && !MOUSE->deactivate_pending) { /* at its current position; no mouse over the window -> no press at (0,0) */
-        nt_input_mouse_move_apply(MOUSE->x, MOUSE->y, buttons_mask);
-    }
-}
-
-void nt_input_inject_pointer_down(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask) {
-    NT_ASSERT(buttons_mask <= 7U);
-    nt_input_pointer_down_apply(id, x, y, pressure, type, buttons_mask);
-}
-
-void nt_input_inject_pointer_move(uint32_t id, float x, float y, float pressure, uint8_t buttons_mask) {
-    NT_ASSERT(buttons_mask <= 7U);
-    nt_input_pointer_move_apply(id, x, y, pressure, buttons_mask);
-}
-
-void nt_input_inject_pointer_up(uint32_t id) { nt_input_pointer_up_apply(id); }
-
-void nt_input_inject_wheel(float dx, float dy) { nt_input_wheel_apply(dx, dy); }
-
-void nt_input_inject_char(uint32_t cp) { nt_input_char_apply(cp); }

@@ -35,8 +35,8 @@ extern nt_window_t g_nt_window;
 /* ---- Lifecycle (platform-specific) ---- */
 
 void nt_window_init(void);
-/* Pump platform events: sizes, then device input into nt_input's next frame. Call before
-   nt_input_poll. */
+/* Pump platform events: device input into nt_input's next frame (mapped with the DPR current at
+   each event), then publish the window sizes. Call before nt_input_poll. */
 void nt_window_poll(void);
 void nt_window_shutdown(void);
 void nt_window_set_fullscreen(bool fullscreen);
@@ -69,6 +69,7 @@ void nt_window_request_close(void);
 
 /* ---- Shared DPR math (used by all platform backends) ---- */
 
+float nt_window_effective_dpr(float device_dpr); /* min(device, max_dpr), at least 1 */
 void nt_window_apply_sizes(float canvas_w, float canvas_h, float device_dpr);
 
 #endif /* NT_WINDOW_H */

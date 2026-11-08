@@ -8,8 +8,6 @@ Related: [Platform Architecture](../runtime/platform.md), [Frame Lifecycle](../r
 
 ## Model
 
-Input system is polling-based. Game queries state each frame, does not subscribe to callbacks.
-
 The window module's platform pump, `nt_window_poll`, applies each device event to the next
 frame's input state in arrival order (native: GLFW callbacks during `glfwPollEvents`; web: one
 ordered queue the DOM listeners fill between frames, drained there). Input applies only inside the
@@ -21,8 +19,7 @@ readable. `g_nt_input` and the query functions are read-only for their consumers
 
 A focus loss is applied in that order: it releases held player input, and events after it apply
 after it. A release and a new press of one button in one frame therefore read pressed and released
-together, like any fast press and release inside one frame. On web, `nt_window_init` runs once per
-page.
+together, like any fast press and release inside one frame.
 
 ## Typed characters
 
@@ -71,9 +68,8 @@ position and deltas in framebuffer pixels, wheel notches, pressure, type, and pe
   multi-pointer UI passes the whole array with `g_nt_input.primary`, so a widget capture stays with
   its slot. `nt_ui` anchors menus, rich-text links, the Clay feed and the inspector on that pointer.
 
-Backends feed the mouse through `nt_input_mouse_move(x, y, buttons)` (every real mouse event,
-including a button change) and `nt_input_mouse_leave()`; contacts through
-`nt_input_pointer_down/move/up`. Each real wheel event first moves the mouse to the cursor.
+Every real mouse event is a move with the held buttons (a button change too), plus a leave; each
+real wheel event first moves the mouse to the cursor. Contacts arrive as down, move and up.
 Devapi input automation drives the same mouse and its own contacts (see "Input automation" in
 [Logging, errors and debugging](../debug/logging-errors-debugging.md)).
 

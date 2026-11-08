@@ -34,7 +34,7 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(nt_window PRIVATE nt_log_interface)
     target_compile_definitions(nt_window PRIVATE NT_GFX_NATIVE_GL_DEBUG=$<BOOL:${NT_GFX_NATIVE_GL_DEBUG}>)
 endif()
-# The platform pump (native and web) feeds the nt_input entry points (input/nt_input_internal.h).
+# The platform pump (native and web) feeds the nt_input entry points (input/nt_input_feed.h).
 target_link_libraries(nt_window PRIVATE nt_input)
 
 if(UNIX)

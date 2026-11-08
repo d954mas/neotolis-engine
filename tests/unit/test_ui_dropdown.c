@@ -9,7 +9,7 @@
 #include <stdint.h>
 
 #include "clay.h"
-#include "input/nt_input_internal.h"
+#include "input/nt_input_feed.h"
 #include "memory/nt_mem_scratch.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_input_test_frame.h"
@@ -42,14 +42,11 @@ static const char *const s_long[] = {"r0", "r1", "r2", "r3", "r4", "r5", "r6", "
 
 void setUp(void) {
     nt_test_assert_install();
-    nt_input_test_idle();
+    nt_input_init();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
 }
 
-void tearDown(void) {
-    nt_input_test_idle();
-    ui_walker_fixture_shutdown(&s_fx);
-}
+void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
 static nt_pointer_t pointer_at(float x, float y, bool is_down, bool is_pressed, bool is_released) {
     nt_pointer_t p = {0};
