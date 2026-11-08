@@ -107,7 +107,7 @@ typedef struct {
 
 typedef struct {
     uint32_t id;             /* touch/pen: the platform contact id; 0 for the mouse */
-    float x, y;              /* Framebuffer pixels, canvas-relative */
+    float x, y;              /* Framebuffer pixels, canvas-relative, fractional */
     float dx, dy;            /* Movement delta in framebuffer pixels */
     float wheel_dx;          /* Wheel delta in NOTCHES: 1.0 == one physical detent (platform edge
                                 normalizes; trackpads deliver fractional notches). Consumers scale

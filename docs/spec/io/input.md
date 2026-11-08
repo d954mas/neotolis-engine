@@ -43,7 +43,7 @@ void nt_window_set_text_input_mode(nt_text_input_mode_t mode);  // soft-keyboard
 ## Pointers
 
 `g_nt_input.pointers[NT_INPUT_MAX_POINTERS]` holds `nt_pointer_t` (`engine/input/nt_input.h`):
-position and deltas in framebuffer pixels, wheel notches, pressure, type, and per-button
+position and deltas in framebuffer pixels (fractional, never rounded), wheel notches, pressure, type, and per-button
 `is_down`/`is_pressed`/`is_released`.
 
 - **`pointers[0]` is the mouse.** It is active while the cursor is over the window, or while a

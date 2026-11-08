@@ -7,7 +7,6 @@
 #include "window/nt_window.h"
 #include <emscripten.h>
 #include <emscripten/html5.h>
-#include <math.h>
 
 /* ---- EM_JS canvas bridge ---- */
 
@@ -34,8 +33,8 @@ EM_JS(void, nt_window_js_set_backing_size, (int w, int h), {
 
 static void map_css_to_fb(float css_x, float css_y, float *fb_x, float *fb_y) {
     float scale = g_nt_window.dpr; /* effective DPR = min(device_dpr, max_dpr) */
-    *fb_x = roundf(css_x * scale);
-    *fb_y = roundf(css_y * scale);
+    *fb_x = css_x * scale;         /* fractional, like native: a sub-pixel move is kept */
+    *fb_y = css_y * scale;
 }
 
 /* ---- Input events (one ordered JS queue, see nt_window_web_register_input) ---- */
