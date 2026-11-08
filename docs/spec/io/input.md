@@ -10,16 +10,18 @@ Related: [Platform Architecture](../runtime/platform.md), [Frame Lifecycle](../r
 
 Input system is polling-based. Game queries state each frame, does not subscribe to callbacks.
 
-Backends apply each device event to the next frame's input state as the event reaches the core
-(native: GLFW callbacks; web: one ordered queue of DOM events, drained by `nt_input_poll`).
+The window module's platform pump, `nt_window_poll`, applies each device event to the next
+frame's input state in arrival order (native: GLFW callbacks during `glfwPollEvents`; web: one
+ordered queue the DOM listeners fill between frames). On both platforms C runs only inside the
+frame, never in a platform callback.
 `nt_input_poll` publishes that state for the frame and starts the next one, so the state the game
 reads changes only at the poll. Edges accumulate: a press and a release between two polls are both
 readable. `g_nt_input` and the query functions are read-only for their consumers.
 
 A focus loss is applied in that order: it releases held player input, and events after it apply
 after it. A release and a new press of one button in one frame therefore read pressed and released
-together, like any fast press and release inside one frame. On web, input is initialized once per
-page (the listeners are never removed).
+together, like any fast press and release inside one frame. On web, `nt_window_init` registers the
+listeners once per page (they are never removed).
 
 ## Typed characters
 

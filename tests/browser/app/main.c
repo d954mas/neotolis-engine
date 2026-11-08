@@ -834,11 +834,12 @@ EMSCRIPTEN_KEEPALIVE double nt_test_gpu_command(int operation, int segment) {
 EMSCRIPTEN_KEEPALIVE const char *nt_test_input_buffer(void) { return s_state.cyrillic; }
 EMSCRIPTEN_KEEPALIVE int nt_test_mouse(void) { return (g_nt_input.pointers[0].active ? 1 : 0) | (g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_down ? 2 : 0); }
 
-/* Poll and read before another browser task or the UI can consume this frame's edges and chars. */
+/* Pump and poll, then read before another browser task or the UI can consume this frame's edges and chars. */
 EMSCRIPTEN_KEEPALIVE const char *nt_test_input_poll(void) {
     static char snapshot[8192];
     /* Worst case per entry: key "[1,1,1]," 8, pointer object 160, codepoint 11; the snprintf sums never wrap. */
     _Static_assert((NT_KEY_COUNT * 8) + (NT_INPUT_MAX_POINTERS * 160) + (NT_INPUT_CHAR_MAX * 11) + 64 <= sizeof(snapshot), "input_poll snapshot");
+    nt_window_poll();
     nt_input_poll();
     size_t len = (size_t)snprintf(snapshot, sizeof(snapshot), "{\"dpr\":%g,\"keys\":[", (double)g_nt_window.dpr);
     for (int i = 0; i < NT_KEY_COUNT; i++) {

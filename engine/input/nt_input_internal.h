@@ -3,9 +3,10 @@
 
 #include "input/nt_input.h"
 
-/* Backend entry points. A backend calls them on the game thread as each platform event reaches
-   it; they apply to the next frame's state in that order, and nt_input_poll publishes it.
-   Coordinates are in framebuffer pixels; each backend maps from its own space. */
+/* Backend entry points. The window module's platform pump (nt_window_poll) calls them on the game
+   thread for each platform event, in arrival order; they apply to the next frame's state, and
+   nt_input_poll publishes it. Coordinates are in framebuffer pixels; the pump maps from its own
+   space. */
 
 void nt_input_set_key(nt_key_t key, bool down);
 /* A typed UTF-32 codepoint. */
@@ -45,11 +46,5 @@ bool nt_input_inject_mouse_buttons(uint8_t buttons_mask);
 void nt_input_inject_wheel(float dx, float dy);
 void nt_input_inject_char(uint32_t cp);
 #endif
-
-/* Platform hooks — implemented by each backend (web, stub). poll runs first in nt_input_poll, for
-   a backend that stages events outside the frame (web). */
-
-void nt_input_platform_init(void);
-void nt_input_platform_poll(void);
 
 #endif /* NT_INPUT_INTERNAL_H */

@@ -33,11 +33,10 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(nt_window PUBLIC glfw)
     target_link_libraries(nt_window PRIVATE nt_log_interface)
     target_compile_definitions(nt_window PRIVATE NT_GFX_NATIVE_GL_DEBUG=$<BOOL:${NT_GFX_NATIVE_GL_DEBUG}>)
-    # NOTE: nt_window_native.c calls the nt_input backend entry points (declared in
-    # input/nt_input_internal.h). The header is found via the shared engine/
-    # include root. The actual symbols are resolved at executable link time --
-    # the app chooses which input backend to link (nt_input or nt_input_stub).
 endif()
+# The platform pump (native and web) calls the nt_input backend entry points (declared in
+# input/nt_input_internal.h, found via the shared engine/ include root). The symbols resolve at
+# executable link time -- the app chooses which input backend to link (nt_input or nt_input_stub).
 
 if(UNIX)
     target_link_libraries(nt_window PRIVATE m)

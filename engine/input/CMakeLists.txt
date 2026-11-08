@@ -21,7 +21,7 @@ if(EMSCRIPTEN)
         nt_input_internal.h
     )
 else()
-    # Native has nothing to stage: GLFW callbacks call the entry points directly.
+    # Native has no on-screen keyboard hint; platform events come from the window module.
     nt_add_module(nt_input LOG_DOMAIN "input"
         nt_input.c
         stub/nt_input_stub.c
@@ -34,11 +34,6 @@ target_link_libraries(nt_input PUBLIC nt_core nt_input_interface)
 # PUBLIC: nt_input.h's #if NT_INPUT_AUTOMATION_ENABLED is evaluated in every consumer TU (the devapi
 # layer + the input header itself), so the value must propagate to anything that links nt_input.
 target_compile_definitions(nt_input PUBLIC ${NT_INPUT_AUTOMATION_DEFS})
-if(EMSCRIPTEN)
-    # Web: nt_input_web.c reads g_nt_window.dpr for coordinate mapping.
-    # g_nt_window resolves at executable link time (exe picks a window impl).
-    target_link_libraries(nt_input PUBLIC nt_window_interface)
-endif()
 
 # Stub implementation for headless builds (CI, builder, tests)
 nt_add_module(nt_input_stub LOG_DOMAIN "input_stub"

@@ -29,9 +29,9 @@ engine/
         default/            # real impl (note: "default", not "native")
         stub/
         CMakeLists.txt
-    input/                  # swappable
+    input/                  # swappable; platform events come from window's pump
         nt_input.h
-        native/  web/  stub/
+        web/  stub/         # web: soft-keyboard hint; native builds stub/
         CMakeLists.txt
     clipboard/              # swappable
         nt_clipboard.h

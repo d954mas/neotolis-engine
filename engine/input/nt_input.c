@@ -98,10 +98,7 @@ static void reset_state(void) {
 #endif
 }
 
-void nt_input_init(void) {
-    reset_state();
-    nt_input_platform_init();
-}
+void nt_input_init(void) { reset_state(); }
 
 static bool pointer_in_use(const nt_pointer_t *p) {
     for (int b = 0; b < NT_BUTTON_MAX; b++) {
@@ -134,7 +131,6 @@ static void primary_update(void) {
 }
 
 void nt_input_poll(void) {
-    nt_input_platform_poll();
     primary_update();
     g_nt_input = s_next;
     s_keys = s_next_keys;
