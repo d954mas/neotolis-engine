@@ -1,61 +1,61 @@
 # Size Report: asteroids (wasm-analysis-paired)
-# Commit: 3833640
+# Commit: b3a208a
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
-Type                 412 B
-Import               682 B
-Function             260 B
+Type                 413 B
+Import               675 B
+Function             252 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
-Export                95 B
+Export                47 B
 Elem                  65 B
-Code              399849 B
-Data              218916 B
-Custom             13268 B
+Code              400065 B
+Data              220000 B
+Custom             13030 B
 ---------------- ----------
-TOTAL             633568 B
+TOTAL             634568 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-85219 B   frame
-31662 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
-27440 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
-20959 B   ui_panel
+85189 B   frame
+31657 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
+27442 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
+20974 B   ui_panel
 19239 B   dispatch_command
-17318 B   nt_gfx_activate_texture
-10755 B   main
+17321 B   nt_gfx_activate_texture
+10781 B   main
  8845 B   Clay__ConfigureOpenElementPtr
  6059 B   Clay__SizeContainersAlongAxis
- 5766 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
+ 5772 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
  5643 B   Clay__InitializeEphemeralMemory
  4538 B   basist::transcode_uastc_to_etc1(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
  4360 B   upload_glyph
+ 4152 B   nt_window_web_on_input
  4046 B   nt_gfx_end_frame
  4005 B   Clay__MeasureTextCached
- 3920 B   basist::pack_eac(basist::eac_block&, unsigned char const*, unsigned int)
+ 3924 B   basist::pack_eac(basist::eac_block&, unsigned char const*, unsigned int)
  3819 B   init_ui_styles
  3599 B   nt_http_request_ex
  3365 B   Clay__CloseElement
  3352 B   nt_ui_label
  3319 B   void std::__2::__introsort<std::__2::_ClassicAlgPolicy, std::__2::ranges::less, unsigned int*, true>(unsigned int*, unsigned int*, std::__2::ranges::less, std::__2::iterator_traits<unsigned int*>::difference_type, bool)
  3065 B   nt_gfx_make_texture
- 3020 B   fmt_fp
- 2608 B   basist::huffman_decoding_table::init(unsigned int, unsigned char const*, unsigned int)
+ 3009 B   fmt_fp
+ 2603 B   basist::huffman_decoding_table::init(unsigned int, unsigned char const*, unsigned int)
  2586 B   scrollbar_emit_axis
  2551 B   nt_font_lookup_glyph_offset
- 2540 B   basist::pack_eac_high_quality(basist::eac_block&, unsigned char const*, unsigned int)
- 2476 B   basist::unpack_uastc(unsigned int, unsigned int, basist::color32 const&, basist::astc_block_desc const&, basist::color32*, bool)
+ 2542 B   basist::pack_eac_high_quality(basist::eac_block&, unsigned char const*, unsigned int)
+ 2481 B   basist::unpack_uastc(unsigned int, unsigned int, basist::color32 const&, basist::astc_block_desc const&, basist::color32*, bool)
  2456 B   select_level
- 2436 B   printf_core
 
-Total functions: 258
-Total code size: 399399 B
+Total functions: 250
+Total code size: 399627 B
 
 ## Built Engine Archives
 
@@ -83,8 +83,7 @@ libnt_gfx_stub.a            6838 B
 libnt_hash.a                4108 B
 libnt_http.a               18238 B
 libnt_http_stub.a          13148 B
-libnt_input.a              21278 B
-libnt_input_stub.a         23996 B
+libnt_input.a              12762 B
 libnt_introspect.a           908 B
 libnt_log.a                11916 B
 libnt_log_ring.a             696 B
@@ -116,18 +115,18 @@ libnt_sprite_renderer.a    16114 B
 libnt_text_renderer.a       7650 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                352494 B
+libnt_ui.a                352612 B
 libnt_ui_rich.a            39736 B
 libnt_ui_rich_fx.a          3050 B
 libnt_ui_stub.a             1324 B
 libnt_utf8.a                1098 B
 libnt_version.a              638 B
-libnt_window.a              4028 B
-libnt_window_stub.a         1888 B
+libnt_window.a             14562 B
+libnt_window_stub.a         1960 B
 ------------------------ ----------
-TOTAL (archives)         2675368 B
+TOTAL (archives)         2653580 B
 
 ## Data Segments Summary
 
 Segments: 184
-Total data size: 217531 B
+Total data size: 218614 B
