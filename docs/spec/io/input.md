@@ -76,10 +76,10 @@ position and deltas in framebuffer pixels (fractional, never rounded), wheel not
   a press or a release it did not get, and a widget capture never moves to another device. The cost
   is that a single-pointer consumer misses such a press, for example a second finger landing in the
   frame the first lifts; a UI that needs it passes the whole array. With no candidate the index
-  stays on the last primary, now inactive. `nt_ui_begin(..., pointers, count, primary)` takes the
-  primary explicitly: a single-pointer UI passes `&pointers[g_nt_input.primary], 1, 0`; a
-  multi-pointer UI passes the whole array with `g_nt_input.primary`, so a widget capture stays with
-  its slot. `nt_ui` anchors menus, rich-text links, the Clay feed and the inspector on that pointer.
+  stays on the last primary, now inactive. `nt_ui_begin`'s frame desc takes the
+  primary explicitly (`.pointers`, `.pointer_count`, `.primary`): a single-pointer UI passes
+  `&pointers[g_nt_input.primary]`, count 1, primary 0; a multi-pointer UI passes the whole array with
+  `g_nt_input.primary`, so a widget capture stays with its slot. `nt_ui` anchors menus, rich-text links, the Clay feed and the inspector on that pointer.
 
 Every real mouse event is a move with the held buttons (a button change too), plus a leave; each
 real wheel event first moves the mouse to the cursor. Contacts arrive as down, move and up.

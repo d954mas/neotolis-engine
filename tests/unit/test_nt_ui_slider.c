@@ -88,7 +88,7 @@ static const Clay_ElementDeclaration s_track_decl = {
 
 static bool slider_float_frame(const nt_pointer_t *p, float *value, float min, float max, float step, bool enabled) {
     bool changed = false;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = p, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = SL_X, .y = SL_Y}}}) {
         changed = nt_ui_slider_float(s_fx.ctx, NULL, 0, nt_ui_id("sl"), NULL, value, min, max, step, &s_style, &s_track_decl, enabled);
     }
@@ -98,7 +98,7 @@ static bool slider_float_frame(const nt_pointer_t *p, float *value, float min, f
 
 static bool slider_int_frame(const nt_pointer_t *p, int *value, int min, int max, int step, bool enabled) {
     bool changed = false;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = p, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = SL_X, .y = SL_Y}}}) {
         changed = nt_ui_slider_int(s_fx.ctx, NULL, 0, nt_ui_id("sl"), NULL, value, min, max, step, &s_style, &s_track_decl, enabled);
     }
@@ -143,7 +143,7 @@ static void init_vstyle(nt_ui_fill_direction_t dir) {
 
 static bool slider_vfloat_frame(const nt_pointer_t *p, float *value, float min, float max, float step, bool enabled) {
     bool changed = false;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = p, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = VT_X, .y = VT_Y}}}) {
         changed = nt_ui_slider_float(s_fx.ctx, NULL, 0, nt_ui_id("vsl"), NULL, value, min, max, step, &s_style, &s_vtrack_decl, enabled);
     }
@@ -158,7 +158,7 @@ static void warmup_vfloat(float *value, float min, float max) {
 
 static bool slider_vint_frame(const nt_pointer_t *p, int *value, int min, int max, int step, bool enabled) {
     bool changed = false;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = p, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = VT_X, .y = VT_Y}}}) {
         changed = nt_ui_slider_int(s_fx.ctx, NULL, 0, nt_ui_id("vsl"), NULL, value, min, max, step, &s_style, &s_vtrack_decl, enabled);
     }
@@ -516,7 +516,7 @@ static nt_ui_scroll_style_t scroll_y_style(void) {
 
 /* One frame: scroll container holding the slider low in tall content. */
 static void slider_in_scroll_frame(const nt_pointer_t *p, float *value, const nt_ui_scroll_style_t *scroll_style) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = p, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = SCROLL_X, .y = SCROLL_Y}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_SL_ID, scroll_style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(SCROLL_DIM), CLAY_SIZING_FIXED(SCROLL_DIM)}}});
         {
@@ -584,7 +584,7 @@ static bool active_floating_clip_at(int32_t thumb_index, Clay_BoundingBox *out_c
 /* Slider at the TOP of the scroll content: track at (SCROLL_X..+SL_W, SCROLL_Y..+SL_H). */
 static void slider_top_in_scroll_frame(const nt_pointer_t *p, float *value) {
     const nt_ui_scroll_style_t scroll_style = scroll_y_style();
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = SCROLL_X, .y = SCROLL_Y}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_SL_ID, &scroll_style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(SCROLL_DIM), CLAY_SIZING_FIXED(SCROLL_DIM)}}});
         CLAY({.id = CLAY_ID("scroll-content"), .layout = {.sizing = {CLAY_SIZING_FIXED(SCROLL_DIM), CLAY_SIZING_FIXED(SCROLL_CONTENT_H)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
@@ -834,7 +834,7 @@ static void test_vertical_axis_mismatch_no_mutation(void) {
     init_vstyle(NT_UI_FILL_LTR); /* LTR is a HORIZONTAL anchor -> mismatch for VERTICAL */
     float value = 0.0F;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_slider_float(s_fx.ctx, NULL, 0, nt_ui_id("vsl"), NULL, &value, 0.0F, 1.0F, 0.0F, &s_style, &s_vtrack_decl, true)); }
     nt_ui_end(s_fx.ctx);
     /* The caller's style is untouched: still LTR (the coerce lives in a local, not the struct). */
@@ -847,7 +847,7 @@ static void test_horizontal_rtl_unsupported_no_mutation(void) {
     s_style.fill_direction = NT_UI_FILL_RTL; /* RTL is a HORIZONTAL anchor but unsupported by the slider */
     float value = 0.0F;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_slider_float(s_fx.ctx, NULL, 0, nt_ui_id("sl"), NULL, &value, 0.0F, 1.0F, 0.0F, &s_style, &s_track_decl, true)); }
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_EQUAL_INT(NT_UI_FILL_RTL, s_style.fill_direction); /* caller's style untouched (coerce is local) */
@@ -859,7 +859,7 @@ static void test_assert_track_w_zero(void) {
     nt_ui_slider_style_t bad = s_style;
     bad.track_w = 0.0F;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_slider_float(s_fx.ctx, NULL, 0, nt_ui_id("sl"), NULL, &value, 0.0F, 1.0F, 0.0F, &bad, &s_track_decl, true)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -868,7 +868,7 @@ static void test_assert_track_w_zero(void) {
 static void test_assert_min_eq_max(void) {
     float value = 0.5F;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_slider_float(s_fx.ctx, NULL, 0, nt_ui_id("sl"), NULL, &value, 1.0F, 1.0F, 0.0F, &s_style, &s_track_decl, true)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -878,7 +878,7 @@ static void test_assert_min_gt_max(void) {
     float fvalue = 0.5F;
     int ivalue = 5;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {
         NT_TEST_EXPECT_ASSERT((void)nt_ui_slider_float(s_fx.ctx, NULL, 0, nt_ui_id("slf"), NULL, &fvalue, 1.0F, 0.0F, 0.0F, &s_style, &s_track_decl, true));
         NT_TEST_EXPECT_ASSERT((void)nt_ui_slider_int(s_fx.ctx, NULL, 0, nt_ui_id("sli"), NULL, &ivalue, 10, 0, 0, &s_style, &s_track_decl, true));
@@ -891,7 +891,7 @@ static void test_assert_data_flags_transform(void) {
     float value = 0.5F;
     nt_ui_transform_t t = nt_ui_transform_defaults();
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {
         const nt_ui_element_data_t *bad = NT_UI_DATA_XFORM(0U, &t, 1.0F); /* sets HAS_TRANSFORM|HAS_OPACITY */
         NT_TEST_EXPECT_ASSERT((void)nt_ui_slider_float(s_fx.ctx, bad, 0, nt_ui_id("sl"), NULL, &value, 0.0F, 1.0F, 0.0F, &s_style, &s_track_decl, true));
@@ -903,7 +903,7 @@ static void test_assert_data_flags_transform(void) {
 static void test_assert_negative_step(void) {
     float value = 0.5F;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_slider_float(s_fx.ctx, NULL, 0, nt_ui_id("sl"), NULL, &value, 0.0F, 1.0F, -1.0F, &s_style, &s_track_decl, true)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -914,7 +914,7 @@ static void test_assert_orientation_invalid(void) {
     nt_ui_slider_style_t bad = s_style;
     bad.orientation = (nt_ui_slider_orientation_t)7; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_slider_float(s_fx.ctx, NULL, 0, nt_ui_id("sl"), NULL, &value, 0.0F, 1.0F, 0.0F, &bad, &s_track_decl, true)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -933,7 +933,7 @@ static void test_thumb_above_modal_band_first_frame(void) {
     nt_ui_modal_style_t mst = nt_ui_modal_style_defaults();
     mst.ease_speed = 0.0F; /* snap open: the panel is at full size on frame 1 */
 
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &idle, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &idle, .pointer_count = 1});
     (void)nt_ui_modal_begin(s_fx.ctx, 0x5D0001U, &mst, true);
     CLAY({.id = CLAY_ID("modal_panel"),
           .layout = {.sizing = {CLAY_SIZING_FIXED(400.0F), CLAY_SIZING_FIXED(200.0F)}},

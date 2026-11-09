@@ -2158,8 +2158,12 @@ static void mixing_declare_controls(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_ui(const nt_ui_scale_t *scale) {
-    nt_ui_begin(s_ui, scale->logical_w, scale->logical_h, g_nt_app.dt, &g_nt_input.pointers[g_nt_input.primary], 1, 0);
-    nt_ui_set_viewport(s_ui, nt_ui_viewport_from_scale(scale, g_nt_window.dpr));
+    nt_ui_begin(s_ui, &(nt_ui_frame_desc_t){.layout_w = scale->logical_w,
+                                            .layout_h = scale->logical_h,
+                                            .dt = g_nt_app.dt,
+                                            .pointers = &g_nt_input.pointers[g_nt_input.primary],
+                                            .pointer_count = 1,
+                                            .viewport = nt_ui_viewport_from_scale(scale, g_nt_window.dpr)});
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 10, .padding = CLAY_PADDING_ALL(10)}}) {
         declare_header();
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 10}}) {

@@ -2794,8 +2794,10 @@ static void frame(void) {
         pointer.wheel_dy = 0.0F;
     }
     if (can_render) {
-        nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &pointer, 1, 0);
-        nt_ui_set_viewport(s_ctx, nt_ui_viewport_from_scale(&scale, g_nt_window.dpr));
+        nt_ui_begin(
+            s_ctx,
+            &(nt_ui_frame_desc_t){
+                .layout_w = scale.logical_w, .layout_h = scale.logical_h, .dt = g_nt_app.dt, .pointers = &pointer, .pointer_count = 1, .viewport = nt_ui_viewport_from_scale(&scale, g_nt_window.dpr)});
         declare_ui();
         nt_ui_end(s_ctx);
     }

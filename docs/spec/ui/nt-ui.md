@@ -206,7 +206,7 @@ Two coord-space modes are gated by `nt_ui_create_desc_t.use_raycast_input`:
   add `vy+vh` to m[13]). Hit-test reverses through the top-left 2×2 +
   col3 of the same mat4 (closed-form inverse-affine).
 - **3D ctx** (`use_raycast_input=true`): walker leaves `world_mat4`
-  unflipped; the game owns the screen mapping via `nt_ui_set_view_proj`.
+  unflipped; the game owns the screen mapping via `nt_ui_frame_desc_t.view_proj`.
   Hit-test raycasts pointer → NDC (Clay Y-down to NDC Y-up) → world ray
   via `inv_view_proj` → ray-plane at widget Z=0 → `mat4_inv_trs(baked.m)`
   back to widget-local → bbox check. Optional `element_depth_bias_ndc`
@@ -246,8 +246,12 @@ measured peak.
 
 ## Interaction model
 
-Game ids interact via `nt_ui_query_interaction`
-(idempotent until the step, multiple calls per frame OK) and
+A frame starts with `nt_ui_begin(ctx, &frame)`: `nt_ui_frame_desc_t` carries everything
+the frame's input decisions read — layout size, dt, the raw device pointers, the device
+viewport (zero = identity), and for a 3D ctx the `view_proj` and per-pointer occlusion.
+Begin converts the pointers to layout space, resolves the front-most record per pointer
+and decides the scroll gestures; no setter may change that input later in the frame.
+Game ids interact via `nt_ui_query_interaction` (a pure read, multiple calls per frame OK) and
 `nt_ui_step(ctx, id, desc)` (mutating, exactly one call per id per frame; `desc` carries
 the hit padding and the drag axes the widget consumes itself, NULL for a plain tap
 target). The step commits capture, so a later
@@ -268,12 +272,11 @@ frame's bbox); no stuck input on widget disappearance.
 
 When interactive widgets overlap a pointer, only
 the front-most may react; the rest are gated off. The hot widget per pointer
-is resolved once per frame — lazily, at the frame's first pointer use (a step, a
-query, `nt_ui_pointer_hot`, a scroll or menu begin) — from the PREVIOUS frame's
+is resolved once per frame, in `nt_ui_begin`, from the PREVIOUS frame's
 interactive registry; only widgets that called `nt_ui_step` (or registered as a
 blocker or scroll surface) last frame are candidates. 3D ctx (`use_raycast_input`):
 nearest world ray-distance within a game-fed occlusion cutoff
-(`nt_ui_set_pointer_occlusion`, reset each begin) so UI can't be clicked through
+(`nt_ui_frame_desc_t.occlusion`) so UI can't be clicked through
 world geometry — the game owns the raycast, the engine only takes the cutoff distance;
 `nt_ui_interaction_t.distance` reports the hit distance. Hits within 1e-5 of the nearest
 distance (relative, floored at one unit) are coplanar and compete like 2D. 2D ctx: highest effective Clay
@@ -403,8 +406,8 @@ edge is hard for drag and fling (no reversal dead zone); a rubber band needs
 `bounce_speed > 0` to return (asserted).
 
 **Gesture arbitration.** One arbiter per frame decides every pointer's scroll gesture,
-at the frame's first pointer use (with the hot resolve), so every interaction result of
-the frame already reflects it. It reads only last frame's layout: the
+in `nt_ui_begin` right after the hot resolve, so every step and query of the frame only
+reads its result. It reads only last frame's layout: the
 interactive registry and each scroll's eligible axes (clipped AND overflowing, from the
 clip data Clay keeps for a scroll declared last frame). A scroll container registers its own bbox as a
 *surface* record, so an empty-area press resolves through the normal front-most

@@ -266,8 +266,8 @@ void nt_ui_module_shutdown(void);
 
 typedef struct {
     uint32_t max_elements; /* Clay layout-element cap. */
-    /* true = raycast hit-test against game's view_proj (3D ctx); the game must populate view_proj
-     * via nt_ui_set_view_proj after each nt_ui_begin (per-frame reset). false (default) =
+    /* true = raycast hit-test against game's view_proj (3D ctx); every frame passes it in
+     * nt_ui_frame_desc_t.view_proj. false (default) =
      * inverse-affine 2D hit-test against baked screen-space transform. */
     bool use_raycast_input;
     /* 3D ctx render-only depth bias. 0 = off. Positive values draw deeper hierarchy levels
@@ -320,23 +320,6 @@ void nt_ui_context_layout_size(const nt_ui_context_t *ctx, float *out_w, float *
    bounds are only valid then — a never-begun ctx has degenerate (0) dims that trap the converters. */
 bool nt_ui_context_has_frame(const nt_ui_context_t *ctx);
 
-/* REQUIRED for ctx with use_raycast_input=true. Call IMMEDIATELY after nt_ui_begin and BEFORE
- * any widget hit-test (nt_ui_button_begin, nt_ui_step, nt_ui_test_hit etc.). The
- * setter copies into ctx and pre-computes the inverse for raycast; `nt_ui_begin` resets the
- * view_proj_set flag so a forgotten setter trips the per-frame assert instead of silently
- * raycasting through last frame's stale camera. ctx is non-NULL, use_raycast_input is true,
- * view_proj is finite + non-singular.
- *
- * Coord convention: baked.m for 3D ctx carries NO implicit Y-flip; game's view_proj must map
- * LAYOUT-space input (Y-down, matching Clay) → clip space directly. For screen-fit 3D UI use
- * `glm_ortho(0, w, h, 0, near, far)` (flipped top/bottom). For perspective 3D world UI, set up
- * lookAt with up = (0, -1, 0) so screen-down aligns with Clay layout-down.
- *
- * Render-side contract: this setter only feeds the hit-test path. The sprite/text materials
- * must receive the SAME view_proj via the game's frame-uniforms UBO before nt_ui_walk, or the
- * rendered geometry will not match where hit-test thinks the widgets are. */
-void nt_ui_set_view_proj(nt_ui_context_t *ctx, const float view_proj[16]);
-
 void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font);
 
 /* Device->layout viewport, the ctx's single device<->layout mapping.
@@ -348,22 +331,32 @@ typedef struct {
     float px_per_dp;
 } nt_ui_viewport_t;
 
-/* Overrides this frame's viewport (begin reset it to the identity {0,0,screen_w,screen_h}, px_per_dp 1).
- * Call AFTER nt_ui_begin and BEFORE the first hit-test resolve (step/query/pointer_hot) — same
- * lazy window as nt_ui_set_view_proj. Scaled apps feed nt_ui_viewport_from_scale here. */
-void nt_ui_set_viewport(nt_ui_context_t *ctx, nt_ui_viewport_t vp);
-
 /* Bidirectional device<->layout converters through the ctx viewport (cglm vec2 = float[2], passed
  * float[16]-style so the public header stays cglm-free). screen = device px; layout = Clay px.
  * No Y-flip (device and Clay layout are both Y-down). */
 void nt_ui_screen_to_layout(const nt_ui_context_t *ctx, const float screen[2], float out_layout[2]);
 void nt_ui_layout_to_screen(const nt_ui_context_t *ctx, const float layout[2], float out_screen[2]);
 
-/* pointers[0..count) drive multitouch under α-semantics — see the multitouch note above nt_ui_interaction_t. pointers carry
- * RAW DEVICE coords; the ctx converts them to layout space via the viewport at the lazy hit resolve.
- * pointers[primary] anchors menus, rich-text links, the Clay feed and the inspector: a single-pointer UI
- * passes its one pointer with primary 0, a whole g_nt_input array passes g_nt_input.primary. */
-void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *pointers, uint32_t count, uint32_t primary);
+/* One frame's input. nt_ui_begin converts the pointers, resolves the front-most record per pointer
+ * and decides the scroll gestures once, from it: every step and query of the frame then only reads.
+ *
+ * view_proj (3D ctx only, required there; finite, non-singular): baked.m carries NO implicit Y-flip,
+ * so it maps LAYOUT-space input (Y-down, matching Clay) to clip space directly — `glm_ortho(0, w, h,
+ * 0, near, far)` for screen-fit 3D UI, lookAt with up = (0, -1, 0) for perspective world UI. The
+ * sprite/text materials must receive the SAME view_proj through the game's frame uniforms before
+ * nt_ui_walk, or the drawn geometry will not match the hit-test. */
+typedef struct {
+    float layout_w, layout_h;     /* Clay layout size (logical space for scaled apps), > 0 */
+    float dt;                     /* seconds, >= 0 */
+    const nt_pointer_t *pointers; /* RAW DEVICE coords; [0..count) drive multitouch (see nt_ui_interaction_t) */
+    uint32_t pointer_count;       /* 1..NT_INPUT_MAX_POINTERS */
+    uint32_t primary;             /* anchors menus, rich-text links, the Clay feed and the inspector */
+    nt_ui_viewport_t viewport;    /* device content rect (nt_ui_viewport_from_scale); all zero = identity, 1 px per dp */
+    const float *view_proj;       /* 3D ctx: mat4 (above); 2D ctx: NULL */
+    const float *occlusion;       /* 3D ctx: per-pointer max ray distance, e.g. the nearest world hit; NULL = none */
+} nt_ui_frame_desc_t;
+
+void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame);
 void nt_ui_end(nt_ui_context_t *ctx);
 
 /* Extensible widget descriptor for the inspector. Descriptors must be pointer-stable
@@ -585,10 +578,8 @@ typedef struct {
     float distance; /* world distance in 3D ctx; 0 in 2D */
 } nt_ui_hot_t;
 
-/* Idempotent until the step: same result N times per frame; safe outside begin/end. A widget's own
- * capture and button edges live in nt_ui_step. In frame, the first pointer use (this query included)
- * also runs the front-most resolve and the scroll gesture arbiter, which may commit scroll captures.
- * Once the step has run, read one-shot edges from its result: its capture changes a later query. */
+/* Pure read: same result N times per frame; safe outside begin/end. Capture and button edges live
+ * in nt_ui_step; once the step has run, read one-shot edges from its result. */
 nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id);
 
 /* Drag axes a widget consumes itself (slider, thumb, custom draggable): a drag along them stays with
@@ -628,18 +619,11 @@ void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lr
 /* True when any capture is active OR a pointer is over a widget this frame. */
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
 
-/* 3D ctx only (asserts use_raycast_input): max world distance the pointer's ray may travel before UI
- * stops registering. Feed the nearest world-geometry hit (so the player can't click UI through a
- * wall) and/or an interaction range. Default +inf = no cutoff. Reset each nt_ui_begin; feed it BEFORE
- * this frame's first pointer use (step, query, nt_ui_pointer_hot, scroll/menu/rich-text begin). */
-void nt_ui_set_pointer_occlusion(nt_ui_context_t *ctx, uint32_t pointer_index, float max_world_distance);
-
-/* Front-most interactive record under the pointer this frame (3D: nearest within the cutoff, coplanar
- * hits by zIndex; 2D: highest effective zIndex, tie → last-registered = later nt_ui_step call, which
- * equals declaration/paint order when widgets step in declaration order). Resolved lazily from the
- * prev-frame registry at the first pointer use: stepped widgets, blockers and scroll surfaces (a scroll
- * id over its empty area). In 3D ctx call nt_ui_set_view_proj first — the lazy resolve hit-tests,
- * which asserts view_proj is set. id 0 = none. */
+/* Front-most interactive record under the pointer this frame (3D: nearest within the occlusion
+ * cutoff, coplanar hits by zIndex; 2D: highest effective zIndex, tie → last-registered = later
+ * nt_ui_step call, which equals declaration/paint order when widgets step in declaration order).
+ * Resolved by nt_ui_begin from the prev-frame registry: stepped widgets, blockers and scroll surfaces
+ * (a scroll id over its empty area). id 0 = none. */
 nt_ui_hot_t nt_ui_pointer_hot(nt_ui_context_t *ctx, uint32_t pointer_index);
 // #endregion
 

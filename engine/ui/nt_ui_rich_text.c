@@ -2224,7 +2224,6 @@ static void rich_resolve_links(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uin
     const float ox = bb.found ? bb.x : 0.0F;
     const float oy = bb.found ? bb.y : 0.0F;
 
-    nt_ui_internal_ensure_pointers_layout(ctx); /* device -> layout (idempotent) before reading */
     if (ctx->frame_pointer_count == 0U) {
         return;
     }

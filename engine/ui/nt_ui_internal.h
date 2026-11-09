@@ -204,21 +204,10 @@ struct nt_ui_context {
     uint32_t frame_pointer_count;
     uint32_t frame_primary; /* the nt_ui_begin primary: menus, rich-text links and the inspector follow it */
     float frame_dt;
-    /* frame_pointers hold RAW device coords until the lazy hot resolve converts them to layout
-     * space via `viewport` (once per frame, gated by frame_pointers_converted). begin defaults the
-     * viewport to identity {0,0,screen_w,screen_h}; nt_ui_set_viewport overrides it before resolve. */
-    bool frame_pointers_converted;
     nt_ui_viewport_t viewport;
     /* begin dims (= screen_w/h) — the layout size the device<->layout conversion divides by. Stored so
      * the conversion is self-contained (no g_nt_window, no Clay read). */
     float begin_w, begin_h;
-#if NT_UI_DEBUG_TOOLS
-    /* Prev-frame viewport + dims. The inspector's pointer-over is tested against LAST frame's solved tree
-     * (Clay_BeginLayout wipes the roots), so the device->layout convert must use the viewport that laid
-     * out THAT tree — not this frame's (set later via nt_ui_set_viewport). */
-    nt_ui_viewport_t prev_viewport;
-    float prev_begin_w, prev_begin_h;
-#endif
 
     /* capture_seen[] tracks who touched the capture this frame — orphans cleared on begin. */
     nt_ui_capture_t captures[NT_INPUT_MAX_POINTERS];
@@ -264,7 +253,6 @@ struct nt_ui_context {
     uint8_t active_modal_depth;
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
     bool pointer_over_any;
-    bool hot_resolved; /* gates the once-per-frame lazy hot resolve */
     /* Modal-presence across frames: _cur set when any modal declares a backdrop this frame;
      * nt_ui_begin commits it into _prev. nt_ui_modal_active reads _prev so the game can gate its
      * next-frame hotkeys (the live depth is always 0 by nt_ui_end, can't be queried after). */
@@ -399,9 +387,6 @@ struct nt_ui_context {
 
     /* 3D-mode flag — copied from create_desc; gates raycast vs inverse-affine hit-test. */
     bool use_raycast_input;
-    /* Set by nt_ui_set_view_proj; reset by nt_ui_begin so a forgotten setter trips the assert
-     * inside ui_hit_test instead of silently raycasting through a stale frame's camera. */
-    bool view_proj_set;
     float element_depth_bias_ndc;
     /* App-wide gesture constants, see nt_ui_set_gesture_constants. Grouped with the float block to avoid padding. */
     float gesture_dbl_window_secs;
@@ -550,11 +535,6 @@ bool nt_ui_internal_widget_enabled(const nt_ui_context_t *ctx, uint32_t id);
 
 /* Caller (nt_ui_end) must run inside the Clay current-ctx scope. */
 void nt_ui_internal_build_tree(nt_ui_context_t *ctx);
-
-/* Idempotent once-per-frame device->layout conversion of frame_pointers via ctx->viewport. The hot
- * resolve calls it; other-TU pointer consumers (scroll wheel, menu) call it too so they read layout
- * coords regardless of whether a widget stepped first. No-op after the first call each frame. */
-void nt_ui_internal_ensure_pointers_layout(nt_ui_context_t *ctx);
 
 #ifdef NT_TEST_ACCESS
 const nt_ui_baked_xform_t *nt_ui_internal_test_get_tree_baked(const nt_ui_context_t *ctx, int32_t elem_idx);

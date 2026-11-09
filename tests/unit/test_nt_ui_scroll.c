@@ -142,7 +142,7 @@ static void test_scroll_wheel_sign(void) {
 static const uint32_t SCROLL_ID = 0x5C0011U;
 
 static void scroll_frame_dt(nt_pointer_t *p, const nt_ui_scroll_style_t *style, float dt) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, dt, p, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = dt, .pointers = p, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, style, NULL);
         {
@@ -158,7 +158,7 @@ static void scroll_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style) { s
 
 static nt_ui_interaction_t scroll_child_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style) {
     nt_ui_interaction_t interaction = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, style, NULL);
         CLAY({.id = CLAY_ID("interactive_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {
@@ -358,7 +358,7 @@ static void test_scroll_free_press_claims_report_no_hold(void) {
 /* A scroll frame with a chosen style + content height so the bar emit can be exercised.
  * Container 200x200; content 200 x content_h. */
 static void scrollbar_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style, float content_h) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, style, NULL);
         {
@@ -562,7 +562,7 @@ static const uint32_t SCROLL_ID_B = 0x5C00B2U;
  * both to top" call runs AFTER both are declared (exactly where the demo's button-end fires
  * nt_ui_scroll_to). do_scroll_to gates the call so we can establish state first. */
 static void twin_scroll_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style, bool do_scroll_to) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(500), CLAY_SIZING_FIXED(200)}, .layoutDirection = CLAY_LEFT_TO_RIGHT}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID_A, style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}});
         {
@@ -723,7 +723,7 @@ static const uint32_t EXCL_INNER_ID = 0x5CE002U;
 /* Outer scroll (300x300 over 300x1000) holding an INNER scroll (200x200 over 200x800) with bars,
  * pinned at the outer content's top-left. */
 static void excl_nested_frame2(nt_pointer_t *p, const nt_ui_scroll_style_t *outer, const nt_ui_scroll_style_t *inner) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
     CLAY({.id = CLAY_ID("excl-root"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(300)}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, EXCL_OUTER_ID, outer, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(300)}}});
         {
@@ -1317,7 +1317,7 @@ static void test_scroll_velocity_clamp_on_dt_hitch(void) {
 
     /* One frame with a 500 px jump at a 0.001 s dt would sample 500000 px/s raw. */
     p.y = 100.0F - 500.0F;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.001F, &p, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 0.001F, .pointers = &p, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &style, NULL);
         {
@@ -1620,7 +1620,7 @@ static void wheel_tile(uint32_t id, const nt_ui_scroll_style_t *style, int rows)
  * Clay_GetElementData, so on the frames A reappears its ancient bbox can overlap the live tiles. */
 static void wheel_grid_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style_a, const nt_ui_scroll_style_t *style_other, int b_rows, float spacer_h, bool drop_a) {
     nt_arena_reset(&g_nt_mem_scratch); /* per-frame scratch reset, exactly as the engine main loop does */
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
     CLAY({.id = CLAY_ID("wheel-root"), .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 0}}) {
         if (spacer_h > 0.0F) {
             CLAY({.id = CLAY_ID("wheel-spacer"), .layout = {.sizing = {CLAY_SIZING_FIXED(10), CLAY_SIZING_FIXED(spacer_h)}}}) {}
@@ -1714,7 +1714,7 @@ static const uint32_t NEST_INNER_ID = 0x5CF002U;
  * y>200) is outer-only. The pointer is parked by the caller. */
 static void nested_scroll_frame(nt_pointer_t *p) {
     const nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
     CLAY({.id = CLAY_ID("nest-root"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(300)}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, NEST_OUTER_ID, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(300)}}});
         {
@@ -1795,7 +1795,7 @@ static const uint32_t TIE_SMALL_ID = 0x5CF102U;
 
 static void tie_break_frame(nt_pointer_t *p) {
     const nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
     CLAY({.id = CLAY_ID("tie-root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(400)}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, TIE_BIG_ID, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(400)}}});
         {
@@ -1950,7 +1950,7 @@ static void test_scrollbar_nested_clipped_to_outer(void) {
     nt_pointer_t p = {0};
 
     for (int frame = 0; frame < 4; ++frame) {
-        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
+        nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
         CLAY({.id = CLAY_ID("nested-clip-root"), .layout = {.sizing = {CLAY_SIZING_FIXED(800), CLAY_SIZING_FIXED(600)}, .padding = {.left = 37, .top = 53}}}) {
             nt_ui_scroll_begin(s_fx.ctx, NULL, EXCL_OUTER_ID, &outer_style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(310), CLAY_SIZING_FIXED(190)}}});
             {
@@ -2026,10 +2026,8 @@ static nt_ui_interaction_t s_child_in;
 static nt_ui_interaction_t s_fg_in;
 
 static void arb_frame(const nt_pointer_t *pointers, uint32_t count) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, s_arb_dt, pointers, count, 0);
-    if (s_scene.px_per_dp > 0.0F) {
-        nt_ui_set_viewport(s_fx.ctx, (nt_ui_viewport_t){.x = 0.0F, .y = 0.0F, .w = 800.0F, .h = 600.0F, .px_per_dp = s_scene.px_per_dp});
-    }
+    const nt_ui_viewport_t vp = {.w = 800.0F, .h = 600.0F, .px_per_dp = (s_scene.px_per_dp > 0.0F) ? s_scene.px_per_dp : 1.0F};
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = s_arb_dt, .pointers = pointers, .pointer_count = count, .viewport = vp});
     if (s_scene.outside_before != NULL) {
         s_scene.outside_before();
     }
@@ -2448,11 +2446,31 @@ static void test_arb_popup_barrier_keeps_drag_from_list(void) {
     TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], 0.0F, 0.001F));
 }
 
+/* A list's owner lifts and presses elsewhere in one frame: the jump between the two touch points is
+ * not a finger move, so the list does not move by it. */
+static void test_arb_release_and_press_does_not_jump_list(void) {
+    arb_scene_reset();
+    nt_pointer_t p = arb_pointer(100.0F, 150.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    arb_hold(&p);
+    p.y = 120.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
+    const float raw_before = arb_list()->raw[1];
+    p.y = 20.0F; /* up at 120, down again at 20 */
+    p.buttons[NT_BUTTON_LEFT].is_released = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    arb_frame(&p, 1);
+    TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], raw_before, 0.001F));
+}
+
 /* Release and a new press in one frame: the old widget gets its release, the new press captures. */
 static nt_ui_interaction_t s_a_in;
 static nt_ui_interaction_t s_b_in;
 static void two_buttons_frame(const nt_pointer_t *p) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
     CLAY({.id = CLAY_ID("two_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(100)}}}) {
         CLAY({.id = CLAY_ID("btn_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}}) { s_a_in = nt_ui_step(s_fx.ctx, CLAY_ID("btn_a").id, NULL); }
         CLAY({.id = CLAY_ID("btn_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}}) { s_b_in = nt_ui_step(s_fx.ctx, CLAY_ID("btn_b").id, NULL); }
@@ -2510,7 +2528,7 @@ static void nesting_overflow_frame(void) {
     nt_pointer_t p = {0};
     p.active = true;
     nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
     for (uint32_t i = 0; i <= (uint32_t)(NT_UI_SCROLL_MAX_DEPTH + NT_UI_MODAL_MAX_DEPTH); ++i) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, 0x100U + i, &style, NULL);
     }
@@ -2540,6 +2558,7 @@ int main(void) {
     RUN_TEST(test_arb_thumb_press_during_fling_grabs_bar);
     RUN_TEST(test_arb_thumb_press_takes_list_from_content_drag);
     RUN_TEST(test_arb_popup_barrier_keeps_drag_from_list);
+    RUN_TEST(test_arb_release_and_press_does_not_jump_list);
     RUN_TEST(test_release_and_press_in_one_frame);
     RUN_TEST(test_hard_edge_drag_reversal_has_no_dead_zone);
     RUN_TEST(test_scroll_momentum_decays_monotonic);

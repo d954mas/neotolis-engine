@@ -1,6 +1,6 @@
 /* 3D raycast hit-test.
  *
- * Validates use_raycast_input=true path: nt_ui_set_view_proj caches inverse,
+ * Validates use_raycast_input=true path: the frame's view_proj caches its inverse,
  * ui_hit_test unprojects pixel → world ray → widget local → bbox.
  *
  * Asymmetric test data: NON-square bbox 200×60 at non-origin (150, 80) within
@@ -67,8 +67,10 @@ static void make_ortho_clay_y_down(float view_proj[16]) {
 /* Declare bbox at Clay (BBOX_X, BBOX_Y, BBOX_W, BBOX_H), apply Y-flip via transform offset_y
  * so the widget's world position matches the Y-up GL space at (BBOX_X, SCREEN_H - BBOX_Y - BBOX_H). */
 static void declare_bbox_3d(void) {
+    float vp[16];
+    make_ortho_clay_y_down(vp);
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = &mouse, .pointer_count = 1, .view_proj = vp});
     CLAY({.id = CLAY_ID("hit3d"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}},
@@ -85,11 +87,8 @@ static nt_ui_interaction_t step_bbox_3d(float px, float py, float occlusion) {
     mouse.x = px;
     mouse.y = py;
     mouse.active = true;
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
-    nt_ui_set_view_proj(s_fx.ctx, vp);
-    if (occlusion >= 0.0F) {
-        nt_ui_set_pointer_occlusion(s_fx.ctx, 0U, occlusion);
-    }
+    const float cutoff[1] = {occlusion};
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = &mouse, .pointer_count = 1, .view_proj = vp, .occlusion = (occlusion >= 0.0F) ? cutoff : NULL});
     CLAY({.id = CLAY_ID("hit3d"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) {}
     nt_ui_interaction_t in = nt_ui_step(s_fx.ctx, nt_ui_id("hit3d"), NULL);
     nt_ui_end(s_fx.ctx);
@@ -118,19 +117,16 @@ static void test_occlusion_allows_widget_within_cutoff(void) {
     TEST_ASSERT_TRUE(allowed.hovered);
 }
 
-/* ---- Test 1: view_proj setter caches inverse + flag, and round-trip is sane. ---- */
+/* ---- Test 1: the frame's view_proj caches its inverse, and round-trip is sane. ---- */
 static void test_view_proj_set_caches_inverse(void) {
     float vp[16];
     make_ortho_clay_y_down(vp);
-    nt_ui_set_view_proj(s_fx.ctx, vp);
     /* No direct getter — round-trip via a hit-test. Declare a widget and probe its center. */
     declare_bbox_3d();
 
     /* Frame 2: probe. */
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
-    /* Must reset view_proj each frame (engine asserts view_proj_set per walk; hit-test reads cached inverse). */
-    nt_ui_set_view_proj(s_fx.ctx, vp);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = &mouse, .pointer_count = 1, .view_proj = vp});
     const uint32_t id = nt_ui_id("hit3d");
     /* For ortho Y-up view, Clay (BBOX_X, BBOX_Y) maps to GL (BBOX_X, SCREEN_H - BBOX_Y). The widget's
      * world position lives in Clay-layout space (no extra transform attached → identity baked).
@@ -146,12 +142,10 @@ static void test_view_proj_set_caches_inverse(void) {
 static void test_raycast_hit_accept_and_reject(void) {
     float vp[16];
     make_ortho_clay_y_down(vp);
-    nt_ui_set_view_proj(s_fx.ctx, vp);
     declare_bbox_3d();
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
-    nt_ui_set_view_proj(s_fx.ctx, vp);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = &mouse, .pointer_count = 1, .view_proj = vp});
     const uint32_t id = nt_ui_id("hit3d");
     const float center_x = BBOX_X + (BBOX_W * 0.5F);
     const float center_y = BBOX_Y + (BBOX_H * 0.5F);
@@ -162,29 +156,27 @@ static void test_raycast_hit_accept_and_reject(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 3b: 3D ctx hit-test asserts when nt_ui_set_view_proj was not called. ---- */
-static void test_hit_test_asserts_when_view_proj_not_set(void) {
-    /* Don't call nt_ui_set_view_proj — view_proj_set stays false. */
-    declare_bbox_3d();
-
+/* ---- Test 3b: a 3D ctx frame needs a view_proj; a 2D ctx frame takes none. ---- */
+static void begin_3d_without_view_proj(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
-    const uint32_t id = nt_ui_id("hit3d");
-    NT_TEST_EXPECT_ASSERT(nt_ui_test_hit(s_fx.ctx, id, 200.0F, 100.0F));
-    nt_ui_end(s_fx.ctx);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = &mouse, .pointer_count = 1});
 }
 
-/* ---- Test 4: set_view_proj asserts when ctx is not 3D mode. ---- */
+static void test_hit_test_asserts_when_view_proj_not_set(void) { NT_TEST_EXPECT_ASSERT(begin_3d_without_view_proj()); }
+
+static void begin_2d_with_view_proj(void) {
+    float vp[16];
+    make_ortho_clay_y_down(vp);
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = &mouse, .pointer_count = 1, .view_proj = vp});
+}
+
 static void test_set_view_proj_asserts_on_2d_ctx(void) {
-    /* Recreate 2D ctx. */
     nt_ui_destroy_context(s_fx.ctx);
     nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
     s_fx.ctx = nt_ui_create_context(s_arena, sizeof s_arena, &desc);
     nt_ui_set_font(s_fx.ctx, 0U, s_fx.stub_font);
-
-    float vp[16];
-    make_ortho_clay_y_down(vp);
-    NT_TEST_EXPECT_ASSERT(nt_ui_set_view_proj(s_fx.ctx, vp));
+    NT_TEST_EXPECT_ASSERT(begin_2d_with_view_proj());
 }
 
 /* ---- Test 5: perspective view_proj — widget in front of camera should still hit at center pixel.
@@ -200,19 +192,15 @@ static void test_raycast_hit_perspective(void) {
     glm_mat4_mul(proj, view, vp_mat);
     float vp[16];
     memcpy(vp, vp_mat, sizeof vp);
-    nt_ui_set_view_proj(s_fx.ctx, vp);
 
     /* Widget at Clay layout-space (0, 0, 100x100) with no transform → world position at (0, 0). */
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = &mouse, .pointer_count = 1, .view_proj = vp});
     CLAY({.id = CLAY_ID("persp"), .layout = {.sizing = {CLAY_SIZING_FIXED(100.0F), CLAY_SIZING_FIXED(100.0F)}}, .userData = NULL}) {}
     nt_ui_end(s_fx.ctx);
 
-    /* Frame 2 probe. Widget at world (0, 0) → projects to screen center (400, 300).
-     * Mandatory per-frame setter after begin — nt_ui_begin resets view_proj_set, so hit-test
-     * asserts if the call is omitted. */
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1, 0);
-    nt_ui_set_view_proj(s_fx.ctx, vp);
+    /* Frame 2 probe. Widget at world (0, 0) → projects to screen center (400, 300). */
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = &mouse, .pointer_count = 1, .view_proj = vp});
     const uint32_t id = nt_ui_id("persp");
     const bool h_center = nt_ui_test_hit(s_fx.ctx, id, SCREEN_W * 0.5F, SCREEN_H * 0.5F);
     const bool h_corner = nt_ui_test_hit(s_fx.ctx, id, 10.0F, 10.0F);
@@ -229,8 +217,7 @@ static nt_ui_interaction_t list_row_frame_3d(const nt_pointer_t *p) {
     make_ortho_clay_y_down(vp);
     const nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
     nt_ui_interaction_t row = {0};
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 1.0F / 60.0F, p, 1, 0);
-    nt_ui_set_view_proj(s_fx.ctx, vp);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1, .view_proj = vp});
     s_hot3d = nt_ui_pointer_hot(s_fx.ctx, 0U);
     CLAY({.id = CLAY_ID("list3d_root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, LIST3D_ID, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(200)}}});

@@ -86,7 +86,7 @@ static void test_destroy_clears_dangling_clay_current(void) {
 
     nt_pointer_t mouse;
     memset(&mouse, 0, sizeof mouse);
-    nt_ui_begin(ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     nt_ui_end(ctx);
     Clay_SetCurrentContext(ctx->clay); /* simulate stray restore */
     TEST_ASSERT_NOT_NULL(Clay_GetCurrentContext());

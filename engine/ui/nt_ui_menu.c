@@ -243,9 +243,6 @@ static nt_ui_menu_runtime_t *menu_runtime(nt_ui_context_t *ctx, uint32_t menu_id
 /* Current pointer pos (UI space) from the active frame snapshot — the menu reads the cursor directly
  * for the open-point anchor and the hover-intent apex. */
 static void menu_mouse_pos(nt_ui_context_t *ctx, float *mx, float *my) {
-    /* The menu reads the cursor directly (not via step), so force the once-per-frame device->layout
-     * conversion before handing back a layout-space anchor. Idempotent. */
-    nt_ui_internal_ensure_pointers_layout(ctx);
     if (ctx->frame_pointer_count > 0U) {
         const nt_pointer_t *p = &ctx->frame_pointers[ctx->frame_primary];
         *mx = p->x;

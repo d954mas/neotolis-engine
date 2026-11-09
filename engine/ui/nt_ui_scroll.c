@@ -596,9 +596,6 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         s->idle = NT_UI_SCROLL_BORN_IDLE; /* born idle: AUTO_HIDE bar starts hidden, no frame-1 flash (any activity resets to 0) */
     }
 
-    /* The arbiter runs before this container touches its own links and flags (one snapshot). */
-    nt_ui_internal_ensure_pointers_layout(ctx);
-
     /* Clamp bounds from Clay's post-layout measurement (found==false on frame 1 ->
      * dims 0 -> bounds default to 0, accepted 1-frame lag). */
     const Clay_ScrollContainerData scd = Clay_GetScrollContainerData((Clay_ElementId){.id = id});
@@ -677,7 +674,6 @@ Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id
     NT_ASSERT(ctx != NULL && "nt_ui_internal_scroll_pane_offset: ctx must be non-NULL");
     NT_ASSERT(id != 0U && "nt_ui_internal_scroll_pane_offset: id must be non-zero");
     nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state(ctx, id, (uint32_t)sizeof *s, NT_UI_SCROLL_TAG);
-    nt_ui_internal_ensure_pointers_layout(ctx);
 
     /* Prev-frame dims; found==false (frame 1, clip not solved) -> 0 -> bounds 0 (1-frame lag). */
     const Clay_ScrollContainerData scd = Clay_GetScrollContainerData((Clay_ElementId){.id = id});

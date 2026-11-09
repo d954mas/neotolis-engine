@@ -39,7 +39,7 @@ static ui_walker_fixture_t s_fx;
 /* One UI frame: publish the input fed since the last frame, then begin. */
 static void ui_frame_begin(nt_ui_context_t *ctx, float w, float h, float dt, const nt_pointer_t *p, uint32_t count, uint32_t primary) {
     nt_input_poll();
-    nt_ui_begin(ctx, w, h, dt, p, count, primary);
+    nt_ui_begin(ctx, &(nt_ui_frame_desc_t){.layout_w = w, .layout_h = h, .dt = dt, .pointers = p, .pointer_count = count, .primary = primary});
 }
 static nt_ui_input_style_t s_style;
 static nt_ui_input_props_t s_props; /* per-field behaviour; tests set allow/password/keyboard here */
