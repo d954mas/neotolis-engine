@@ -36,8 +36,8 @@ extern nt_window_t g_nt_window;
 
 void nt_window_init(void);
 /* Feed pending device events to nt_input's next frame (native: GLFW callbacks; web: the DOM listeners
-   already did as each event fired), each mapped with the DPR at its arrival; then publish the window
-   sizes. Call before nt_input_poll. */
+   already did as each event fired), mapped with the DPR of the last poll; then publish the window
+   sizes, so a DPR change maps input from the next frame. Call before nt_input_poll. */
 void nt_window_poll(void);
 void nt_window_shutdown(void);
 void nt_window_set_fullscreen(bool fullscreen);

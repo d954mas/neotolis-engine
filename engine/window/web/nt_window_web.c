@@ -42,10 +42,10 @@ _Static_assert(NT_KEY_A == 0 && NT_KEY_0 == 26 && NT_KEY_ARROW_UP == 36 && NT_KE
                "codes (nt_key_t order) and the contact type in nt_window_web_register_input");
 _Static_assert(NT_TEXT_INPUT_URL == 3 && NT_TEXT_INPUT_PASSWORD == 4, "modes in nt_window_js_set_text_input_mode");
 
-/* One DOM event: kind = nt_input_event_kind_t, a..f its fields, dpr the devicePixelRatio when it fired.
-   Coordinates map with that DPR, like native at arrival; fractional, so a sub-pixel move is kept. */
-EMSCRIPTEN_KEEPALIVE void nt_window_web_on_input(int kind, double a, double b, double c, double d, double e, double f, double dpr) {
-    const float scale = nt_window_effective_dpr((float)dpr);
+/* One DOM event: kind = nt_input_event_kind_t, a..f its fields. CSS coordinates map with the last
+   poll's DPR, fractional, so a sub-pixel move is kept. */
+EMSCRIPTEN_KEEPALIVE void nt_window_web_on_input(int kind, double a, double b, double c, double d, double e, double f) {
+    const float scale = g_nt_window.dpr;
     nt_input_event_t ev = {.kind = (uint8_t)kind};
     switch ((nt_input_event_kind_t)kind) {
     case NT_INPUT_EV_KEY:
@@ -124,7 +124,7 @@ EM_JS(void, nt_window_web_register_input, (void), {
     var EV_KEY = 0, EV_CHAR = 1, EV_MOUSE_MOVE = 2, EV_MOUSE_LEAVE = 4, EV_CONTACT_DOWN = 5, EV_CONTACT_MOVE = 6,
         EV_CONTACT_UP = 7, EV_WHEEL = 8, EV_FOCUS_LOST = 9;
     function ev(t, a, b, c, d, e, f) {
-        onInput(t, a || 0, b || 0, c || 0, d || 0, e || 0, f || 0, window.devicePixelRatio || 1.0);
+        onInput(t, a || 0, b || 0, c || 0, d || 0, e || 0, f || 0);
     }
 
     /* Keyboard events */

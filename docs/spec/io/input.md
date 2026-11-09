@@ -9,9 +9,10 @@ Related: [Platform Architecture](../runtime/platform.md), [Frame Lifecycle](../r
 ## Model
 
 The window module applies each device event to the next frame's input state when the platform
-delivers it, in arrival order, mapped with the DPR at that moment (native: GLFW callbacks during
-`glfwPollEvents` in `nt_window_poll`; web: the DOM listeners, as each event fires). A GLFW callback
-outside `glfwPollEvents` (a window operation such as fullscreen) also writes only the next frame.
+delivers it, in arrival order (native: GLFW callbacks during `glfwPollEvents` in `nt_window_poll`;
+web: the DOM listeners, as each event fires). Coordinates map with the DPR of the last poll, so a DPR
+change (another monitor, browser zoom) maps input from the next frame. A GLFW callback outside
+`glfwPollEvents` (a window operation such as fullscreen) also writes only the next frame.
 `nt_input_poll` publishes that state for the frame and starts the next one, so the state the game
 reads changes only at the poll. Edges accumulate: a press and a release between two polls are both
 readable. `g_nt_input` is the whole published frame (pointers, primary, key state, the frame's

@@ -83,11 +83,10 @@ static nt_key_t glfw_key_to_nt(int key) {
 
 /* ---- GLFW Callbacks — each event applies to the next input frame as it arrives ---- */
 
-/* The DPR events map with: current at each event, while g_nt_window changes only in nt_window_poll. */
-static float s_event_dpr = 1.0F;
-
 /* The mouse at a cursor position in window coordinates, with the held buttons. */
-static void mouse_at(double xpos, double ypos) { nt_input_feed((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_MOVE, .mouse = {(float)xpos * s_event_dpr, (float)ypos * s_event_dpr, s_cached_buttons}}); }
+static void mouse_at(double xpos, double ypos) {
+    nt_input_feed((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_MOVE, .mouse = {(float)xpos * g_nt_window.dpr, (float)ypos * g_nt_window.dpr, s_cached_buttons}});
+}
 
 static void mouse_at_cursor(void) {
     double xpos = 0.0;
@@ -170,19 +169,6 @@ static void glfw_scroll_callback(GLFWwindow *window, double xoffset, double yoff
     nt_input_feed((nt_input_event_t){.kind = NT_INPUT_EV_WHEEL, .wheel = {(float)xoffset, -(float)yoffset}});
 }
 
-/* A DPR change (e.g. a move to another monitor) inside a pump: later events of the same pump map with
-   it. Also fires outside the pump (a fullscreen switch), so it touches no window state. */
-static void glfw_framebuffer_size_callback(GLFWwindow *window, int fb_w, int fb_h) {
-    (void)fb_h;
-    int win_w = 0;
-    int win_h = 0;
-    glfwGetFramebufferSize(window, &fb_w, &fb_h); /* both live: on X11 the argument can be older than the window size */
-    glfwGetWindowSize(window, &win_w, &win_h);
-    if (win_w > 0) {
-        s_event_dpr = nt_window_effective_dpr((float)fb_w / (float)win_w);
-    }
-}
-
 static void glfw_focus_callback(GLFWwindow *window, int focused) {
     (void)window;
     if (!focused) {
@@ -206,9 +192,7 @@ static void sync_sizes(void) {
        Content scale may not reflect the real framebuffer size on Windows
        when the process lacks DPI awareness. */
     float device_dpr = (win_w > 0) ? (float)fb_w / (float)win_w : 1.0F;
-    s_event_dpr = nt_window_effective_dpr(device_dpr); /* the pump may have left a transient one */
-
-    if ((uint32_t)win_w == g_nt_window.width && (uint32_t)win_h == g_nt_window.height && s_event_dpr == g_nt_window.dpr) {
+    if ((uint32_t)win_w == g_nt_window.width && (uint32_t)win_h == g_nt_window.height && nt_window_effective_dpr(device_dpr) == g_nt_window.dpr) {
         return;
     }
 
@@ -272,7 +256,6 @@ void nt_window_init(void) {
     glfwSetMouseButtonCallback(s_glfw_window, glfw_mouse_button_callback);
     glfwSetScrollCallback(s_glfw_window, glfw_scroll_callback);
     glfwSetWindowFocusCallback(s_glfw_window, glfw_focus_callback);
-    glfwSetFramebufferSizeCallback(s_glfw_window, glfw_framebuffer_size_callback);
 
     /* Establish a known swap interval. Without this the interval depends on
        the driver default, which varies across vendors. */
