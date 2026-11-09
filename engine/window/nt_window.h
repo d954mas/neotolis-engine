@@ -70,7 +70,6 @@ void nt_window_request_close(void);
 
 /* ---- Shared DPR math (used by all platform backends) ---- */
 
-float nt_window_effective_dpr(float device_dpr); /* min(device, max_dpr), at least 1 */
 void nt_window_apply_sizes(float canvas_w, float canvas_h, float device_dpr);
 
 #endif /* NT_WINDOW_H */

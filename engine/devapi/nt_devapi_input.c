@@ -4,7 +4,6 @@
 #include "core/nt_assert.h"
 #include "devapi/nt_devapi_input_internal.h"
 #include "devapi/nt_devapi_internal.h"
-#include "input/nt_input.h"
 #include "input/nt_input_feed.h"
 #include "window/nt_window.h" /* g_nt_window.fb_height — the height basis for the input.* Y flip. */
 

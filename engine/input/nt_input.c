@@ -12,8 +12,6 @@ static nt_input_t s_next; /* events apply here in arrival order */
 
 static bool s_player_enabled = true;
 
-#define NEXT_MOUSE (&s_next.pointers[0])
-
 /* ---- Pointer helpers ---- */
 
 static nt_pointer_t *find_contact(uint32_t id) {
@@ -33,15 +31,6 @@ static nt_pointer_t *find_free_contact_slot(void) {
         }
     }
     return NULL;
-}
-
-static void reset_pointer_transients(nt_pointer_t *ptr) {
-    ptr->dx = 0.0F;
-    ptr->dy = 0.0F;
-    ptr->wheel_dx = 0.0F;
-    ptr->wheel_dy = 0.0F;
-    ptr->deactivate_pending = false;
-    memset(ptr->buttons, 0, sizeof(ptr->buttons));
 }
 
 static void apply_buttons_mask(nt_pointer_t *ptr, uint8_t buttons_mask) {
@@ -68,19 +57,19 @@ static void release_pointer(nt_pointer_t *ptr) {
 
 /* ---- Lifecycle ---- */
 
-static void reset_state(void) {
+void nt_input_init(void) {
     memset(&g_nt_input, 0, sizeof(g_nt_input));
     memset(&s_next, 0, sizeof(s_next));
     s_char_read = 0;
     s_player_enabled = true;
 }
 
-void nt_input_init(void) { reset_state(); }
+void nt_input_shutdown(void) { nt_input_init(); }
 
 static bool pointer_in_use(const nt_pointer_t *p) {
     for (int b = 0; b < NT_BUTTON_MAX; b++) {
-        if (p->active && (p->buttons[b].is_down || p->buttons[b].is_released)) {
-            return true;
+        if (p->buttons[b].is_down || p->buttons[b].is_released) {
+            return p->active;
         }
     }
     return false;
@@ -102,7 +91,7 @@ static void primary_update(void) {
         }
         in_use = in_use || pointer_in_use(&s_next.pointers[i]);
     }
-    if (!in_use && NEXT_MOUSE->active && !NEXT_MOUSE->deactivate_pending) {
+    if (!in_use && s_next.pointers[0].active && !s_next.pointers[0].deactivate_pending) {
         s_next.primary = 0;
     }
 }
@@ -132,8 +121,6 @@ void nt_input_poll(void) {
         }
     }
 }
-
-void nt_input_shutdown(void) { reset_state(); }
 
 /* ---- Queries (the published frame) ---- */
 
@@ -176,10 +163,9 @@ static void apply_key(nt_key_t key, bool down) {
 }
 
 static void apply_mouse_move(float x, float y, uint8_t buttons) {
-    nt_pointer_t *m = NEXT_MOUSE;
+    nt_pointer_t *m = &s_next.pointers[0];
     if (!m->active) {
-        reset_pointer_transients(m);
-        m->active = true;
+        *m = (nt_pointer_t){.active = true};
     } else if (!m->deactivate_pending) {
         m->dx += x - m->x;
         m->dy += y - m->y;
@@ -199,10 +185,7 @@ static void apply_contact_down(uint32_t id, float x, float y, float pressure, ui
         if (ptr == NULL) {
             return; /* All slots full */
         }
-        ptr->active = true;
-        ptr->id = id;
-        ptr->type = type;
-        reset_pointer_transients(ptr);
+        *ptr = (nt_pointer_t){.id = id, .type = type, .active = true};
     }
     ptr->pressure = pressure;
     ptr->x = x;
@@ -224,7 +207,7 @@ static void apply_contact_move(uint32_t id, float x, float y, float pressure, ui
 }
 
 static void apply_mouse_buttons(uint8_t buttons) {
-    nt_pointer_t *m = NEXT_MOUSE;
+    const nt_pointer_t *m = &s_next.pointers[0];
     NT_ASSERT(buttons <= 7U);
     if (m->active && !m->deactivate_pending) { /* no press at (0,0) for a mouse that is not over the window */
         apply_mouse_move(m->x, m->y, buttons);
@@ -232,7 +215,7 @@ static void apply_mouse_buttons(uint8_t buttons) {
 }
 
 static void apply_mouse_leave(void) {
-    nt_pointer_t *m = NEXT_MOUSE;
+    nt_pointer_t *m = &s_next.pointers[0];
     for (int b = 0; b < NT_BUTTON_MAX; b++) {
         if (m->buttons[b].is_down) {
             return; /* a drag outside keeps the mouse; the window pump leaves after the release */
@@ -253,7 +236,7 @@ static void apply_focus_lost(void) {
 }
 
 static void apply(const nt_input_event_t *e) {
-    nt_pointer_t *m = NEXT_MOUSE;
+    nt_pointer_t *m = &s_next.pointers[0];
     switch ((nt_input_event_kind_t)e->kind) {
     case NT_INPUT_EV_KEY:
         apply_key((nt_key_t)e->key.key, e->key.down);

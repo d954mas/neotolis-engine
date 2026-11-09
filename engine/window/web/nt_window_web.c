@@ -2,7 +2,6 @@
 
 #ifdef NT_PLATFORM_WEB
 
-#include "core/nt_assert.h"
 #include "input/nt_input_feed.h"
 #include "window/nt_window.h"
 #include <emscripten.h>
@@ -24,12 +23,13 @@ EM_JS(double, nt_window_js_get_canvas_height, (void), {
 })
 
 EM_JS(void, nt_window_js_set_backing_size, (int w, int h), {
-    Module['canvas'].width = w;
-    Module['canvas'].height = h;
+    var canvas = Module['canvas'];
+    if (canvas.width !== w || canvas.height !== h) { /* a write clears the drawing buffer */
+        canvas.width = w;
+        canvas.height = h;
+    }
 })
 /* clang-format on */
-
-/* ---- CSS → framebuffer coordinate mapping ---- */
 
 /* ---- Input events (the DOM listeners in nt_window_web_register_input call the dispatcher) ---- */
 
@@ -267,29 +267,13 @@ EM_JS(void, nt_window_web_register_input, (void), {
 /* ---- Helpers ---- */
 
 static void sync_sizes(void) {
-    float canvas_w = (float)nt_window_js_get_canvas_width();
-    float canvas_h = (float)nt_window_js_get_canvas_height();
-    float device_dpr = (float)nt_window_js_get_dpr();
-
-    float effective_dpr = nt_window_effective_dpr(device_dpr);
-
-    uint32_t w = (uint32_t)canvas_w;
-    uint32_t h = (uint32_t)canvas_h;
-
-    if (w == g_nt_window.width && h == g_nt_window.height && effective_dpr == g_nt_window.dpr) {
-        return;
-    }
-
-    nt_window_apply_sizes(canvas_w, canvas_h, device_dpr);
+    nt_window_apply_sizes((float)nt_window_js_get_canvas_width(), (float)nt_window_js_get_canvas_height(), (float)nt_window_js_get_dpr());
     nt_window_js_set_backing_size((int)g_nt_window.fb_width, (int)g_nt_window.fb_height);
 }
 
 /* ---- Lifecycle ---- */
 
 void nt_window_init(void) {
-    static bool s_registered;
-    NT_ASSERT(!s_registered && "the DOM listeners are never removed: init once per page");
-    s_registered = true;
     sync_sizes();
     nt_window_web_register_input();
 }
