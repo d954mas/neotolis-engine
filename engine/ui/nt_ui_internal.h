@@ -591,18 +591,27 @@ void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *targ
  * Feed the result to clip.childOffset. */
 Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id);
 
-/* Scroll gesture arbiter, run once per frame from the pointer gate (before any interaction result
- * leaves the engine): starts press records, decides crossings, resolves wheel owners. */
-void nt_ui_internal_scroll_arbitrate(nt_ui_context_t *ctx);
+/* How a hit on a registry record counts in the front-most resolve. */
+typedef enum { NT_UI_HIT_NONE = 0, NT_UI_HIT, NT_UI_HIT_PANE } nt_ui_hit_kind_t;
 
-/* End-of-frame: writes each declared scroll's eligible axes from the just-solved layout, the
- * snapshot next frame's arbiter and hot resolve read. */
-void nt_ui_internal_scroll_finalize(nt_ui_context_t *ctx);
+/* The pointer `self` takes scroll `id`: older owners of its content or bars let go (newest wins). */
+void nt_ui_internal_scroll_take(nt_ui_context_t *ctx, uint32_t id, uint32_t self);
 
-/* How a hot hit on a scroll surface counts: NONE when the scroll cannot move (a fitting list is
- * see-through), PANE for an inspector pane (front-most over any game record, also in 3D). */
-typedef enum { NT_UI_SURFACE_NONE = 0, NT_UI_SURFACE_LIVE, NT_UI_SURFACE_PANE } nt_ui_surface_kind_t;
-nt_ui_surface_kind_t nt_ui_internal_scroll_surface_kind(nt_ui_context_t *ctx, uint32_t id);
+/* True when an axis overflows; the half unit absorbs layout rounding, so a fitting list never turns
+ * scrollable (or shows an AUTO bar) by noise. */
+static inline bool nt_ui_internal_overflows(float content, float container) { return content > container + 0.5F; }
+
+/* Axes a scroll can move on in last frame's layout: clipped AND overflowing (NT_UI_DRAG_X | _Y). */
+static inline uint8_t nt_ui_internal_scroll_axes(const Clay_ScrollContainerData *scd) {
+    const bool x = scd->found && scd->config.horizontal && nt_ui_internal_overflows(scd->contentDimensions.width, scd->scrollContainerDimensions.width);
+    const bool y = scd->found && scd->config.vertical && nt_ui_internal_overflows(scd->contentDimensions.height, scd->scrollContainerDimensions.height);
+    return (uint8_t)((x ? NT_UI_DRAG_X : 0U) | (y ? NT_UI_DRAG_Y : 0U));
+}
+
+/* Per-axis scrollbar id derived from its scroll id (axis 0 = horizontal, 1 = vertical). */
+#define NT_UI_SCROLLBAR_VERT_SALT 0x5CB00000U
+#define NT_UI_SCROLLBAR_HORIZ_SALT 0x5CB10000U
+static inline uint32_t nt_ui_internal_scrollbar_id(uint32_t scroll_id, int axis) { return nt_ui_derived_id(scroll_id, (axis == 1) ? NT_UI_SCROLLBAR_VERT_SALT : NT_UI_SCROLLBAR_HORIZ_SALT); }
 
 /* Adds a registry record for the front-most resolve with the current scroll scope. */
 void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4], uint32_t scope);

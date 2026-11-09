@@ -44,7 +44,7 @@
 //   9. Clay_GetScrollContainerData returns the clip config stored when the element was last
 //      declared, instead of reading it through the cached layoutElement pointer: mid-frame that
 //      slot may already hold another element (e.g. a parent's scrollbar declared first), which
-//      returned found=false and zero dims for a nested scroll. Search "NT patch 9" (3 sites).
+//      returned found=false and zero dims for a nested scroll. Search "NT patch 9" (field + 3 sites).
 // NT DEPENDENCY: nt_ui_clay_impl.c wraps Clay__OpenElement /
 //   Clay__ConfigureOpenElement / Clay__CloseElement for the begin/end split
 //   pattern used by nt_ui widgets. Verify these internals still exist on update.

@@ -54,7 +54,7 @@ static void test_scroll_momentum_decays_monotonic(void) {
 
     float prev_speed = fabsf(s.vel[1]);
     for (int i = 0; i < 60; ++i) {
-        nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, &s_physics_style);
+        nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, &s_physics_style, false);
         const float speed = fabsf(s.vel[1]);
         TEST_ASSERT_TRUE(speed <= prev_speed + 0.001F); /* never speeds up */
         prev_speed = speed;
@@ -75,7 +75,7 @@ static void test_scroll_clamp_holds(void) {
     s.vel[1] = -100000.0F; /* huge fling, would overshoot far past the edge */
 
     for (int i = 0; i < 240; ++i) {
-        nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, &s_physics_style);
+        nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, &s_physics_style, false);
     }
     TEST_ASSERT_TRUE(s.pos[1] >= lo - 0.5F);
     TEST_ASSERT_TRUE(s.pos[1] <= 0.0F + 0.5F);
@@ -110,7 +110,7 @@ static void test_scroll_to_reaches_target(void) {
 
     int frames = 0;
     while ((s.flags & NT_UI_SCROLL_FLAG_SCROLL_TO) != 0U && frames < 600) {
-        nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, &s_physics_style);
+        nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, &s_physics_style, false);
         ++frames;
     }
     TEST_ASSERT_TRUE(frames < 600);                                     /* arrived */
@@ -130,7 +130,7 @@ static void test_scroll_wheel_sign(void) {
     /* Run enough frames for the eased pos to follow target. */
     for (int i = 0; i < 120; ++i) {
         const float none[2] = {0.0F, 0.0F};
-        nt_ui_scroll_test_integrate(&s, (i == 0) ? wheel_down : none, 1.0F / 60.0F, content, container, &s_physics_style);
+        nt_ui_scroll_test_integrate(&s, (i == 0) ? wheel_down : none, 1.0F / 60.0F, content, container, &s_physics_style, false);
     }
     /* target moved by wheel * wheel_step = -40; pos eased toward it (negative). */
     TEST_ASSERT_TRUE(float_near(s.target[1], -40.0F, 0.001F));
@@ -208,7 +208,7 @@ static void test_scroll_hard_edges_stop_release_fling(void) {
     const float content[2] = {500.0F, 1000.0F};
     const float container[2] = {200.0F, 200.0F};
     const float wheel[2] = {0.0F, 0.0F};
-    nt_ui_scroll_test_integrate(&s, wheel, 1.0F / 60.0F, content, container, &style);
+    nt_ui_scroll_test_integrate(&s, wheel, 1.0F / 60.0F, content, container, &style, false);
     TEST_ASSERT_TRUE(float_near(s.pos[0], 0.0F, 0.001F));
     TEST_ASSERT_TRUE(float_near(s.pos[1], -800.0F, 0.001F));
     TEST_ASSERT_TRUE(float_near(s.vel[0], 0.0F, 0.001F));
@@ -908,8 +908,8 @@ static void test_scroll_held_still_in_bounds_frozen(void) {
         scroll_frame(&p, &style);
         s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
         TEST_ASSERT_NOT_NULL(s);
-        TEST_ASSERT_TRUE(float_near(s->pos[1], frozen, 0.001F));         /* pos frozen — no creep, no drift */
-        TEST_ASSERT_TRUE((s->flags & NT_UI_SCROLL_FLAG_DRAGGING) != 0U); /* still dragging */
+        TEST_ASSERT_TRUE(float_near(s->pos[1], frozen, 0.001F));                         /* pos frozen — no creep, no drift */
+        TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U)); /* still owned */
     }
 }
 
@@ -1287,12 +1287,12 @@ static void test_scroll_wheel_kills_fling(void) {
     nt_ui_scroll_state_t s = {0};
     s.vel[1] = -3000.0F; /* a fling in motion */
     const float no_wheel[2] = {0.0F, 0.0F};
-    nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, &s_physics_style);
+    nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, &s_physics_style, false);
     TEST_ASSERT_TRUE(fabsf(s.vel[1]) > 100.0F); /* still flinging */
 
     const float target_before = s.target[1];
     const float wheel_up[2] = {0.0F, 1.0F}; /* one notch toward 0 (Clay sign up) */
-    nt_ui_scroll_test_integrate(&s, wheel_up, 1.0F / 60.0F, content, container, &s_physics_style);
+    nt_ui_scroll_test_integrate(&s, wheel_up, 1.0F / 60.0F, content, container, &s_physics_style, false);
     /* Momentum killed so the easing branch picks up the new target (target moved by +step). */
     TEST_ASSERT_TRUE(float_near(s.vel[1], 0.0F, 0.001F));
     TEST_ASSERT_TRUE(s.target[1] > target_before + 1.0F); /* the notch registered (not lost) */
@@ -1358,7 +1358,6 @@ static void test_scroll_no_overflow_takes_no_gesture(void) {
     TEST_ASSERT_NOT_NULL(s);
     TEST_ASSERT_TRUE(float_near(s->pos[1], 0.0F, 0.5F));                      /* never scrolled (no-op axis) */
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0U)); /* never stole a capture */
-    TEST_ASSERT_EQUAL_UINT8(0U, s->flags & NT_UI_SCROLL_FLAG_DRAGGING);       /* no gesture armed */
 }
 
 /* ---- Test 39 (fix 2): a tap on a FLINGING container stops the fling immediately and swallows the
@@ -1482,7 +1481,7 @@ static float fling_max_overshoot(float dt, int steps) {
     s.vel[1] = -4000.0F; /* fling down past the edge */
     float deepest = 0.0F;
     for (int i = 0; i < steps; ++i) {
-        nt_ui_scroll_test_integrate(&s, no_wheel, dt, content, container, &s_physics_style);
+        nt_ui_scroll_test_integrate(&s, no_wheel, dt, content, container, &s_physics_style, false);
         const float depth = (-800.0F) - s.pos[1]; /* positive = past the bottom edge */
         if (depth > deepest) {
             deepest = depth;
@@ -1515,13 +1514,13 @@ static void test_scroll_content_shrink_clamps_pos(void) {
     s.pos[1] = -800.0F;
     s.raw[1] = -800.0F;
     s.target[1] = -800.0F;
-    nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, &s_physics_style);
+    nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, &s_physics_style, false);
     TEST_ASSERT_TRUE(float_near(s.pos[1], -800.0F, 1.0F)); /* parked at the old bottom */
 
     /* Content SHRINKS to 400 -> new bottom edge is -(400-200) = -200. pos at -800 is now past it. */
     content[1] = 400.0F;
     for (int i = 0; i < 240; ++i) {
-        nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, &s_physics_style);
+        nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, &s_physics_style, false);
     }
     /* The offset must animate back up to the new bound (-200), not stay parked at -800. */
     TEST_ASSERT_TRUE(float_near(s.pos[1], -200.0F, 1.0F));
@@ -2495,12 +2494,12 @@ static void test_hard_edge_drag_reversal_has_no_dead_zone(void) {
     const float content[2] = {0.0F, 1000.0F};
     const float container[2] = {0.0F, 200.0F};
     const float wheel[2] = {0.0F, 0.0F};
-    nt_ui_scroll_state_t s = {.flags = NT_UI_SCROLL_FLAG_DRAGGING};
+    nt_ui_scroll_state_t s = {0};
     s.raw[1] = 50.0F; /* dragged 50 past the top edge */
-    nt_ui_scroll_test_integrate(&s, wheel, 1.0F / 60.0F, content, container, &style);
+    nt_ui_scroll_test_integrate(&s, wheel, 1.0F / 60.0F, content, container, &style, true);
     TEST_ASSERT_TRUE(float_near(s.pos[1], 0.0F, 0.001F));
     s.raw[1] -= 10.0F; /* finger reverses 10 */
-    nt_ui_scroll_test_integrate(&s, wheel, 1.0F / 60.0F, content, container, &style);
+    nt_ui_scroll_test_integrate(&s, wheel, 1.0F / 60.0F, content, container, &style, true);
     TEST_ASSERT_TRUE(float_near(s.pos[1], -10.0F, 0.001F));
 }
 // #endregion

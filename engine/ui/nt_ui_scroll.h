@@ -14,6 +14,7 @@
 #include "atlas/nt_atlas.h" /* nt_atlas_region_ref_t */
 #include "clay.h"
 #include "ui/nt_ui.h" /* nt_ui_element_data_t, nt_ui_widget_def_t */
+#include "ui/nt_ui_state.h"
 
 typedef struct nt_ui_context nt_ui_context_t;
 
@@ -29,26 +30,22 @@ extern const nt_ui_widget_def_t NT_UI_SCROLLBAR_DEF;
 
 /* Scroll-to active: ease pos toward target, clear on arrival. */
 #define NT_UI_SCROLL_FLAG_SCROLL_TO ((uint8_t)(1U << 0))
-/* A pointer owns this container's drag this frame; gates rubber-band. */
-#define NT_UI_SCROLL_FLAG_DRAGGING ((uint8_t)(1U << 1))
-/* Axis clipped AND overflowing in the last solved layout (written at nt_ui_end): the snapshot the
- * next frame's gesture arbiter, wheel routing and hot resolve read. */
-#define NT_UI_SCROLL_FLAG_CAN_X ((uint8_t)(1U << 2))
-#define NT_UI_SCROLL_FLAG_CAN_Y ((uint8_t)(1U << 3))
 /* Engine-internal inspector pane (floats above the game; takes the sidebar's pointer). */
-#define NT_UI_SCROLL_FLAG_PANE ((uint8_t)(1U << 4))
+#define NT_UI_SCROLL_FLAG_PANE ((uint8_t)(1U << 1))
+
+/* State-pool tag of a scroll cell (game scrolls and inspector panes). */
+#define NT_UI_SCROLL_TAG NT_UI_STATE_TAG('s', 'c', 'r', 'l')
 
 /* Per-container retained state in the nt_ui_state pool. pos/vel/target in Clay's
- * negative-down sign convention. 52B; under NT_UI_STATE_PAYLOAD_MAX. */
+ * negative-down sign convention. 48B; under NT_UI_STATE_PAYLOAD_MAX. */
 typedef struct {
-    float pos[2];          /* DISPLAY offset fed to clip.childOffset (raw clamped/rubber-banded) */
-    float raw[2];          /* un-rubber-banded scroll pos: accumulates finger 1:1 even past the edge (drag anchor) */
-    float vel[2];          /* momentum velocity (px/s), sampled from drag for the release fling */
-    float target[2];       /* smooth-wheel + scroll-to target */
-    float idle;            /* seconds since last scroll activity (AUTO_HIDE linger; dt-accumulated, no wall clock) */
-    float thumb_grab;      /* offset of the press point within the thumb (track-axis px); set on thumb-press */
-    uint32_t parent;       /* enclosing scroll at the last declaration (0 = none or a popup barrier) */
-    uint32_t solved_frame; /* frame whose layout set the CAN bits: a link counts only from the next frame */
+    float pos[2];     /* DISPLAY offset fed to clip.childOffset (raw clamped/rubber-banded) */
+    float raw[2];     /* un-rubber-banded scroll pos: accumulates finger 1:1 even past the edge (drag anchor) */
+    float vel[2];     /* momentum velocity (px/s), sampled from drag for the release fling */
+    float target[2];  /* smooth-wheel + scroll-to target */
+    float idle;       /* seconds since last scroll activity (AUTO_HIDE linger; dt-accumulated, no wall clock) */
+    float thumb_grab; /* offset of the press point within the thumb (track-axis px); set on thumb-press */
+    uint32_t parent;  /* enclosing scroll at the last declaration (0 = none or a popup barrier) */
     uint8_t flags;
 } nt_ui_scroll_state_t;
 
@@ -99,7 +96,7 @@ void nt_ui_scroll_to(nt_ui_context_t *ctx, uint32_t id, float x, float y);
 /* Physics-only probe: drives the static integrator directly so unit tests can
  * assert momentum decay / clamp / rubber-band / scroll-to without a Clay frame.
  * Reads physics settings from style for the duration of the call. */
-void nt_ui_scroll_test_integrate(nt_ui_scroll_state_t *s, const float wheel[2], float dt, const float content[2], const float container[2], const nt_ui_scroll_style_t *style);
+void nt_ui_scroll_test_integrate(nt_ui_scroll_state_t *s, const float wheel[2], float dt, const float content[2], const float container[2], const nt_ui_scroll_style_t *style, bool dragging);
 float nt_ui_scroll_test_rubber_band(float d, float dim);
 /* Reads back the last clip.childOffset fed to Clay by scroll_begin (Clay sign). */
 void nt_ui_scroll_test_last_child_offset(float *out_x, float *out_y);

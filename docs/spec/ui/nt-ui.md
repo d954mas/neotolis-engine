@@ -275,8 +275,8 @@ blocker or scroll surface) last frame are candidates. 3D ctx (`use_raycast_input
 nearest world ray-distance within a game-fed occlusion cutoff
 (`nt_ui_set_pointer_occlusion`, reset each begin) so UI can't be clicked through
 world geometry — the game owns the raycast, the engine only takes the cutoff distance;
-`nt_ui_interaction_t.distance` reports the hit distance. Hits within a relative 1e-5 of
-the nearest distance are coplanar and compete like 2D. 2D ctx: highest effective Clay
+`nt_ui_interaction_t.distance` reports the hit distance. Hits within 1e-5 of the nearest
+distance (relative, floored at one unit) are coplanar and compete like 2D. 2D ctx: highest effective Clay
 zIndex (tie → last-registered, i.e. the later `nt_ui_step` call; widget code should
 step in declaration order so this matches paint order). Any resolved hit counts as UI
 under the pointer for `nt_ui_wants_pointer`. Each registry record also stores its
@@ -404,9 +404,9 @@ edge is hard for drag and fling (no reversal dead zone); a rubber band needs
 
 **Gesture arbitration.** One arbiter per frame decides every pointer's scroll gesture,
 at the frame's first pointer use (with the hot resolve), so every interaction result of
-the frame already reflects it. It reads only data finalized at the previous
-`nt_ui_end`: the interactive registry and each scroll's eligible axes (enabled AND
-overflowing in the just-solved layout). A scroll container registers its own bbox as a
+the frame already reflects it. It reads only last frame's layout: the
+interactive registry and each scroll's eligible axes (clipped AND overflowing, from the
+clip data Clay keeps for a scroll declared last frame). A scroll container registers its own bbox as a
 *surface* record, so an empty-area press resolves through the normal front-most
 arbitration (z-order, blockers, modals, transforms, 3D occlusion); a scroll whose content
 fits (within half a unit) is see-through. Scrolls form a declaration chain: `scroll_begin` pushes its id and

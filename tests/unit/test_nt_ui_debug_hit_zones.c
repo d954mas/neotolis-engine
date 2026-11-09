@@ -374,25 +374,19 @@ static void test_debug_disabled_helper_off_no_capture(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 10: at-cap pushes are silently saturated (no assert) ---- */
-static void test_debug_cap_saturates_silently(void) {
-    /* Declare one button, then call get_interaction debug_zone_cap+10 times
-     * (re-querying the same id). count must clamp to the cap, no assert. */
+/* ---- Test 10: stepping one widget past the registry (max_elements) is misuse and traps ---- */
+static void step_past_registry_frame(void) {
     nt_pointer_t f1 = make_pointer(BTN_CX, BTN_CY, false, false);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1, 0);
     declare_btn("btnA", BTN_X, BTN_Y);
-    nt_ui_end(s_fx.ctx);
-
-    nt_ui_debug_set_recording(s_fx.ctx, true);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1, 0);
-    declare_btn("btnA", BTN_X, BTN_Y);
-    const uint32_t cap = s_fx.ctx->debug_zone_cap;
-    const uint32_t over = cap + 10U;
-    for (uint32_t i = 0; i < over; ++i) {
+    for (uint32_t i = 0; i <= s_fx.ctx->max_elements; ++i) {
         (void)nt_ui_step(s_fx.ctx, nt_ui_id("btnA"), NULL);
     }
-    TEST_ASSERT_EQUAL_UINT32(cap, nt_ui_debug_get_zone_count(s_fx.ctx));
-    nt_ui_end(s_fx.ctx);
+}
+
+static void test_debug_step_past_registry_asserts(void) {
+    nt_ui_debug_set_recording(s_fx.ctx, true);
+    NT_TEST_EXPECT_ASSERT(step_past_registry_frame());
 }
 
 int main(void) {
@@ -407,7 +401,7 @@ int main(void) {
     RUN_TEST(test_debug_labels_draw_after_all_fills);
     RUN_TEST(test_debug_disabled_helper_records_zone);
     RUN_TEST(test_debug_disabled_helper_off_no_capture);
-    RUN_TEST(test_debug_cap_saturates_silently);
+    RUN_TEST(test_debug_step_past_registry_asserts);
     return UNITY_END();
 }
 
