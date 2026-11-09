@@ -28,6 +28,9 @@ static nt_key_t glfw_key_to_nt(int key) {
     if (key >= GLFW_KEY_0 && key <= GLFW_KEY_9) {
         return (nt_key_t)(NT_KEY_0 + (key - GLFW_KEY_0));
     }
+    if (key >= GLFW_KEY_KP_0 && key <= GLFW_KEY_KP_9) {
+        return (nt_key_t)(NT_KEY_NUMPAD_0 + (key - GLFW_KEY_KP_0));
+    }
     /* Function keys F1-F12 */
     if (key >= GLFW_KEY_F1 && key <= GLFW_KEY_F12) {
         return (nt_key_t)(NT_KEY_F1 + (key - GLFW_KEY_F1));
@@ -64,6 +67,10 @@ static nt_key_t glfw_key_to_nt(int key) {
         return NT_KEY_LALT;
     case GLFW_KEY_RIGHT_ALT:
         return NT_KEY_RALT;
+    case GLFW_KEY_LEFT_SUPER:
+        return NT_KEY_LMETA;
+    case GLFW_KEY_RIGHT_SUPER:
+        return NT_KEY_RMETA;
     case GLFW_KEY_DELETE:
         return NT_KEY_DELETE;
     case GLFW_KEY_INSERT:
@@ -76,6 +83,40 @@ static nt_key_t glfw_key_to_nt(int key) {
         return NT_KEY_PAGE_UP;
     case GLFW_KEY_PAGE_DOWN:
         return NT_KEY_PAGE_DOWN;
+    case GLFW_KEY_MINUS:
+        return NT_KEY_MINUS;
+    case GLFW_KEY_EQUAL:
+        return NT_KEY_EQUAL;
+    case GLFW_KEY_GRAVE_ACCENT:
+        return NT_KEY_BACKQUOTE;
+    case GLFW_KEY_LEFT_BRACKET:
+        return NT_KEY_BRACKET_LEFT;
+    case GLFW_KEY_RIGHT_BRACKET:
+        return NT_KEY_BRACKET_RIGHT;
+    case GLFW_KEY_BACKSLASH:
+        return NT_KEY_BACKSLASH;
+    case GLFW_KEY_SEMICOLON:
+        return NT_KEY_SEMICOLON;
+    case GLFW_KEY_APOSTROPHE:
+        return NT_KEY_QUOTE;
+    case GLFW_KEY_COMMA:
+        return NT_KEY_COMMA;
+    case GLFW_KEY_PERIOD:
+        return NT_KEY_PERIOD;
+    case GLFW_KEY_SLASH:
+        return NT_KEY_SLASH;
+    case GLFW_KEY_KP_ENTER:
+        return NT_KEY_NUMPAD_ENTER;
+    case GLFW_KEY_KP_ADD:
+        return NT_KEY_NUMPAD_ADD;
+    case GLFW_KEY_KP_SUBTRACT:
+        return NT_KEY_NUMPAD_SUBTRACT;
+    case GLFW_KEY_KP_MULTIPLY:
+        return NT_KEY_NUMPAD_MULTIPLY;
+    case GLFW_KEY_KP_DIVIDE:
+        return NT_KEY_NUMPAD_DIVIDE;
+    case GLFW_KEY_KP_DECIMAL:
+        return NT_KEY_NUMPAD_DECIMAL;
     default:
         return NT_KEY_COUNT; /* Unmapped sentinel */
     }

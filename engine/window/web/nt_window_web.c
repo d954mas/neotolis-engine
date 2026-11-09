@@ -134,6 +134,8 @@ static const char *const k_dom_codes[NT_KEY_COUNT] = {
     [NT_KEY_RCTRL] = "ControlRight",
     [NT_KEY_LALT] = "AltLeft",
     [NT_KEY_RALT] = "AltRight",
+    [NT_KEY_LMETA] = "MetaLeft",
+    [NT_KEY_RMETA] = "MetaRight",
     [NT_KEY_F1] = "F1",
     [NT_KEY_F2] = "F2",
     [NT_KEY_F3] = "F3",
@@ -152,6 +154,33 @@ static const char *const k_dom_codes[NT_KEY_COUNT] = {
     [NT_KEY_END] = "End",
     [NT_KEY_PAGE_UP] = "PageUp",
     [NT_KEY_PAGE_DOWN] = "PageDown",
+    [NT_KEY_MINUS] = "Minus",
+    [NT_KEY_EQUAL] = "Equal",
+    [NT_KEY_BACKQUOTE] = "Backquote",
+    [NT_KEY_BRACKET_LEFT] = "BracketLeft",
+    [NT_KEY_BRACKET_RIGHT] = "BracketRight",
+    [NT_KEY_BACKSLASH] = "Backslash",
+    [NT_KEY_SEMICOLON] = "Semicolon",
+    [NT_KEY_QUOTE] = "Quote",
+    [NT_KEY_COMMA] = "Comma",
+    [NT_KEY_PERIOD] = "Period",
+    [NT_KEY_SLASH] = "Slash",
+    [NT_KEY_NUMPAD_0] = "Numpad0",
+    [NT_KEY_NUMPAD_1] = "Numpad1",
+    [NT_KEY_NUMPAD_2] = "Numpad2",
+    [NT_KEY_NUMPAD_3] = "Numpad3",
+    [NT_KEY_NUMPAD_4] = "Numpad4",
+    [NT_KEY_NUMPAD_5] = "Numpad5",
+    [NT_KEY_NUMPAD_6] = "Numpad6",
+    [NT_KEY_NUMPAD_7] = "Numpad7",
+    [NT_KEY_NUMPAD_8] = "Numpad8",
+    [NT_KEY_NUMPAD_9] = "Numpad9",
+    [NT_KEY_NUMPAD_ENTER] = "NumpadEnter",
+    [NT_KEY_NUMPAD_ADD] = "NumpadAdd",
+    [NT_KEY_NUMPAD_SUBTRACT] = "NumpadSubtract",
+    [NT_KEY_NUMPAD_MULTIPLY] = "NumpadMultiply",
+    [NT_KEY_NUMPAD_DIVIDE] = "NumpadDivide",
+    [NT_KEY_NUMPAD_DECIMAL] = "NumpadDecimal",
 };
 
 EM_JS_DEPS(nt_window_web, "$UTF8ToString")
@@ -170,8 +199,12 @@ EM_JS(void, nt_window_web_register_input, (const char *const *codes, int count),
         "Space": 1, "Tab": 1,
         "ArrowUp": 1, "ArrowDown": 1, "ArrowLeft": 1, "ArrowRight": 1,
         "F1": 1, "F2": 1, "F3": 1, "F4": 1,
-        "F6": 1, "F7": 1, "F8": 1, "F9": 1, "F10": 1
+        "F6": 1, "F7": 1, "F8": 1, "F9": 1, "F10": 1,
+        "Slash": 1, "Quote": 1 /* Firefox quick find */
     };
+
+    /* macOS sends no keyup for a key released while Cmd is held: Cmd's keyup releases them. */
+    var pressedWithMeta = [];
 
     /* Cached canvas rect — updated on resize */
     var rect = canvas.getBoundingClientRect();
@@ -197,6 +230,9 @@ EM_JS(void, nt_window_web_register_input, (const char *const *codes, int count),
             var k = keyMap[e.code];
             if (k !== undefined) {
                 ev(EV_KEY, k, 1);
+                if (e.metaKey && e.key !== "Meta") {
+                    pressedWithMeta.push(k);
+                }
             }
         }
         /* Typed character: e.key is a single printable codepoint (not "Enter"/"ArrowUp"/...).
@@ -217,11 +253,16 @@ EM_JS(void, nt_window_web_register_input, (const char *const *codes, int count),
         if (k !== undefined) {
             ev(EV_KEY, k, 0);
         }
+        if (e.key === "Meta") {
+            pressedWithMeta.forEach(function(held) { ev(EV_KEY, held, 0); });
+            pressedWithMeta.length = 0;
+        }
     });
 
     /* Blur: held input releases in order with the events around it */
     canvas.addEventListener("blur", function() {
         ev(EV_FOCUS_LOST);
+        pressedWithMeta.length = 0;
         mouseOwned = false; /* the release may land outside; a held capture or the next wheel must not press again */
     });
 

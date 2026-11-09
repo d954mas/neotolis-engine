@@ -35,7 +35,7 @@ void test_press_and_release_in_one_frame(void) {
 
 /* ---- Key tests ---- */
 
-void test_key_enum_count(void) { TEST_ASSERT_EQUAL_INT(69, NT_KEY_COUNT); }
+void test_key_enum_count(void) { TEST_ASSERT_EQUAL_INT(98, NT_KEY_COUNT); }
 
 void test_key_repeat_is_no_new_press(void) {
     nt_input_feed(nt_test_key(NT_KEY_K, true));

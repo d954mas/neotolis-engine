@@ -191,6 +191,33 @@ test('blur: held input releases in order with the events around it', async ({ pa
   expect(errors).toEqual([]);
 });
 
+test('keys: punctuation and numpad map, and Cmd up releases what macOS never releases', async ({ page }) => {
+  await page.goto('/index.html');
+  await page.waitForFunction(() => window.__nt?.ready === true, null, { timeout: 30_000 });
+  const { added, afterCmd } = await page.evaluate(() => {
+    const canvas = document.querySelector('canvas')!;
+    const key = (type: string, code: string, value: string, metaKey = false) =>
+      canvas.dispatchEvent(new KeyboardEvent(type, { code, key: value, metaKey, bubbles: true }));
+    canvas.focus();
+    window.__nt!.input_poll();
+    key('keydown', 'Equal', '=');
+    key('keydown', 'Numpad5', '5');
+    key('keydown', 'Backquote', '`');
+    const added = window.__nt!.input_poll();
+    key('keyup', 'Equal', '=');
+    key('keyup', 'Numpad5', '5');
+    key('keyup', 'Backquote', '`');
+    key('keydown', 'MetaLeft', 'Meta', true);
+    key('keydown', 'KeyC', 'c', true); // its keyup never comes on macOS
+    key('keyup', 'MetaLeft', 'Meta');
+    window.__nt!.input_poll();
+    const afterCmd = window.__nt!.input_poll();
+    return { added, afterCmd };
+  });
+  expect(added.keys.filter((k) => k[1] === 1).length).toBe(3);
+  expect(afterCmd.keys.every((k) => k[0] === 0)).toBe(true);
+});
+
 test.describe('at DPR 2', () => {
   // A DPR other than 1 makes the CSS -> framebuffer mapping observable.
   test.use({ deviceScaleFactor: 2 });

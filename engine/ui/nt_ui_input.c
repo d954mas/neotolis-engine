@@ -254,7 +254,8 @@ static bool allow_printable(uint32_t cp) { return cp >= 0x20U && cp != 0x7FU && 
 // #endregion
 
 static inline bool shift_held(void) { return nt_input_key_is_down(NT_KEY_LSHIFT) || nt_input_key_is_down(NT_KEY_RSHIFT); }
-static inline bool ctrl_held(void) { return nt_input_key_is_down(NT_KEY_LCTRL) || nt_input_key_is_down(NT_KEY_RCTRL); }
+/* Ctrl, or Cmd on macOS. */
+static inline bool shortcut_held(void) { return nt_input_key_is_down(NT_KEY_LCTRL) || nt_input_key_is_down(NT_KEY_RCTRL) || nt_input_key_is_down(NT_KEY_LMETA) || nt_input_key_is_down(NT_KEY_RMETA); }
 
 /* PC-style auto-repeat core. Last-pressed wins (a newer repeatable key re-arms to it).
  * Edges arrive as params so the unit test can drive timing with fake input. */
@@ -922,16 +923,16 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
             }
             st->blink = 0.0F;
         }
-        if (ctrl_held() && nt_input_key_is_pressed(NT_KEY_A)) {
+        if (shortcut_held() && nt_input_key_is_pressed(NT_KEY_A)) {
             st->anchor = 0U; /* Ctrl+A selects the whole buffer */
             st->caret = cur_len;
             st->blink = 0.0F;
         }
         // #region clipboard chords (Ctrl+C/X/V)
-        if (ctrl_held() && nt_input_key_is_pressed(NT_KEY_C)) {
+        if (shortcut_held() && nt_input_key_is_pressed(NT_KEY_C)) {
             clipboard_copy_selection(buffer, st); /* copy selection; no-op if empty */
         }
-        if (ctrl_held() && nt_input_key_is_pressed(NT_KEY_X) && nt_clipboard_available()) {
+        if (shortcut_held() && nt_input_key_is_pressed(NT_KEY_X) && nt_clipboard_available()) {
             /* No-op cut when the clipboard is unavailable: deleting locally without a store is data loss. */
             clipboard_copy_selection(buffer, st);
             if (st->anchor != st->caret) {
@@ -944,7 +945,7 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
                 st->blink = 0.0F;
             }
         }
-        if (ctrl_held() && nt_input_key_is_pressed(NT_KEY_V)) {
+        if (shortcut_held() && nt_input_key_is_pressed(NT_KEY_V)) {
             st->caret = clipboard_paste(buffer, buffer_size, props, st, cur_len, changed);
             cur_len = (uint32_t)strlen(buffer);
             st->blink = 0.0F;

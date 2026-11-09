@@ -22,6 +22,15 @@ A focus loss is applied in that order: it releases all held input (while the bot
 drops it and the bot's input stays), and events after it apply after it. A release and a new press of one button in one frame therefore read pressed and released
 together, like any fast press and release inside one frame.
 
+## Keys
+
+`nt_key_t` names physical keys, independent of the layout: letters, top-row digits, arrows,
+Space/Enter/Escape/Tab/Backspace, left and right Shift/Ctrl/Alt/Meta (Meta is Cmd on macOS),
+F1–F12, Delete/Insert/Home/End/PageUp/PageDown, the punctuation keys and the numpad. Each platform
+maps its own key codes to it by name (web: `KeyboardEvent.code`; native: GLFW keys); a key outside
+the set is not reported. macOS sends no keyup for a key released while Cmd is held, so on web
+Cmd's release also releases the keys pressed with it.
+
 ## Typed characters
 
 Text input is separate from key state: characters arrive as UTF-32 codepoints, up to

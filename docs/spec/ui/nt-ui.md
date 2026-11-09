@@ -452,9 +452,9 @@ integer pixel gap is used for Clay child spacing, row stride and spacers.
 only caret/selection/scroll/blink/focus in the state pool). Editing is UTF-8
 codepoint-aware: insert/backspace/delete/arrows never split a multi-byte sequence
 and clamp to `buffer_size-1` / `max_length-1` bytes. Typed text arrives via the
-`nt_input_pop_char` UTF-32 ring (frame-local, drained each frame while focused);
+`nt_input_pop_char` UTF-32 characters (frame-local, read each frame while focused);
 physical keys drive navigation/edit. T2 adds selection (Shift+arrows, mouse drag,
-double-click word-select, Ctrl+A), copy/cut/paste via the swappable `nt_clipboard`
+double-click word-select, Ctrl+A; Cmd works as Ctrl on macOS), copy/cut/paste via the swappable `nt_clipboard`
 façade (paste decodes untrusted bytes per-codepoint, runs the allow-predicate,
 clamps, and drops a non-fitting multibyte codepoint whole), a render-only password
 mask, stock allow-predicates (numeric/email/url), a per-field `placeholder` string
