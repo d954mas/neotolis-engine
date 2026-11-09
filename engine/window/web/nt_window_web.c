@@ -2,6 +2,7 @@
 
 #ifdef NT_PLATFORM_WEB
 
+#include "core/nt_assert.h"
 #include "input/nt_input_feed.h"
 #include "window/nt_window.h"
 #include <emscripten.h>
@@ -271,6 +272,9 @@ static void sync_sizes(void) {
 /* ---- Lifecycle ---- */
 
 void nt_window_init(void) {
+    static bool s_registered;
+    NT_ASSERT(!s_registered && "the DOM listeners are never removed: init once per page");
+    s_registered = true;
     sync_sizes();
     nt_window_web_register_input();
 }
