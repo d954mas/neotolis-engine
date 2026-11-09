@@ -662,6 +662,33 @@ static void test_slider_in_scroll_thumb_tap_keeps_game_value(void) {
     TEST_ASSERT_TRUE(float_near(value, 0.2F, 0.0001F));
 }
 
+/* A thumb drag inside a scroll that crosses the slop on its release frame applies the release point. */
+static void test_slider_in_scroll_drag_crossing_on_release_applies(void) {
+    float value = 0.5F;
+    const float thumb_x = SCROLL_X + (SL_TW * 0.5F) + (0.5F * SL_USABLE);
+    nt_pointer_t p = make_pointer(thumb_x, TOP_SL_CY, false, false, false);
+    slider_top_in_scroll_frame(&p, &value);
+    slider_top_in_scroll_frame(&p, &value);
+    p = make_pointer(thumb_x, TOP_SL_CY, true, true, false);
+    slider_top_in_scroll_frame(&p, &value);
+    p = make_pointer(thumb_x + 36.0F, TOP_SL_CY, false, false, true);
+    slider_top_in_scroll_frame(&p, &value);
+    TEST_ASSERT_TRUE(float_near(value, 0.5F + (36.0F / SL_USABLE), 0.01F));
+}
+
+/* A track tap inside a scroll released off the slider (below the slop) is cancelled. */
+static void test_slider_in_scroll_track_tap_released_outside_keeps_value(void) {
+    float value = 0.5F;
+    nt_pointer_t p = make_pointer(TOP_SL_TRACK_X, SCROLL_Y + SL_H, false, false, false);
+    slider_top_in_scroll_frame(&p, &value);
+    slider_top_in_scroll_frame(&p, &value);
+    p = make_pointer(TOP_SL_TRACK_X, SCROLL_Y + SL_H, true, true, false);
+    slider_top_in_scroll_frame(&p, &value);
+    p = make_pointer(TOP_SL_TRACK_X, SCROLL_Y + SL_H + 7.0F, false, false, true);
+    slider_top_in_scroll_frame(&p, &value);
+    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.0001F));
+}
+
 /* A tap on the track inside a scroll applies its jump on release. */
 static void test_slider_in_scroll_track_tap_applies_on_release(void) {
     float value = 0.5F;
@@ -1015,6 +1042,8 @@ int main(void) {
     RUN_TEST(test_slider_in_scroll_vertical_drag_keeps_value);
     RUN_TEST(test_slider_in_scroll_horizontal_drag_moves_value);
     RUN_TEST(test_slider_in_scroll_track_tap_applies_on_release);
+    RUN_TEST(test_slider_in_scroll_drag_crossing_on_release_applies);
+    RUN_TEST(test_slider_in_scroll_track_tap_released_outside_keeps_value);
     RUN_TEST(test_slider_in_scroll_thumb_tap_keeps_value);
     RUN_TEST(test_slider_in_scroll_thumb_tap_keeps_game_value);
     RUN_TEST(test_thumb_above_modal_band_first_frame);

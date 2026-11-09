@@ -415,13 +415,14 @@ clip data Clay keeps for a scroll declared last frame). A scroll container regis
 *surface* record, so an empty-area press resolves through the normal front-most
 arbitration (z-order, blockers, modals, transforms, 3D occlusion); a scroll whose content
 fits (within half a unit) is see-through. Scrolls form a declaration chain: `scroll_begin` pushes its id and
-records the enclosing scroll as its parent; popup core (dropdown, menu, modal, tooltip),
-the menu occluder and scrollbars push a 0 barrier, so a drag inside a popup never reaches
-a scroll behind it and a press on a bar is the bar's. Widgets inside a scroll must step between its begin and end.
+records the enclosing scroll as its parent; popup core (dropdown, menu, modal, tooltip)
+and the menu occluder push a 0 barrier, so a drag inside a popup never reaches a scroll
+behind it. Scrollbars belong to their scroll's chain (the wheel over a bar scrolls it). Widgets inside a scroll must step between its begin and end.
 
 A press starts a gesture record on the chain of the front-most record under it (its
-scope); a chain with no eligible axis decides at once (widgets in fitting panels and
-scrollbars are never pending). A chain link counts
+scope); a press on a bar that can move takes its scroll from older pointers and decides
+at once (a thumb has no slop), and a chain with no eligible axis decides at once (widgets
+in fitting panels are never pending). A chain link counts
 only if that scroll was declared and its layout solved last frame, so a vanished scroll
 takes nothing. While pending, the pressed widget sees `gesture_pending`. Each frame the
 pointer's displacement from the press is compared per axis with the drag slop
@@ -433,8 +434,9 @@ widget sees a foreign owner and goes silent (no release, no click), keeping any 
 draggables hold value changes while pending). On the first crossing frame the excess past
 the slop is routed (no jump, no lost distance); a later claim anchors at the pointer.
 A crossing on the release frame still claims (fling, no click), and the owner keeps the
-capture through its release frame. A release with nothing crossed leaves the widget its
-release (click when over it). The newest pointer to claim a scroll or press its bar takes
+capture through its release frame. A release with nothing crossed stays pending through
+its release frame: the widget gets its release (click when over it) with `gesture_pending`,
+which marks a tap; a pending draggable applies a tap only when `clicked`. The newest pointer to claim a scroll or press its bar takes
 it from older pointers (Android). A press on a flinging, undragged scroll of the chain
 stops the fling and is swallowed (tap-to-stop). Wheel goes per pointer and axis to the
 first scroll of the hovered chain that can move on that axis, consumed the same frame:

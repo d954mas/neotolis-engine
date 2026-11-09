@@ -2460,6 +2460,82 @@ static void test_arb_release_and_press_does_not_jump_list(void) {
     TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], raw_before, 0.001F));
 }
 
+/* A pending press on the list lifts and presses elsewhere in one frame: the jump is not a finger move. */
+static void test_arb_pending_retap_does_not_scroll(void) {
+    arb_scene_reset();
+    nt_pointer_t p = arb_pointer(100.0F, 150.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    arb_hold(&p);
+    arb_frame(&p, 1);
+    p.y = 20.0F;
+    p.buttons[NT_BUTTON_LEFT].is_released = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    arb_frame(&p, 1);
+    p.buttons[NT_BUTTON_LEFT].is_released = false;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+    arb_frame(&p, 1);
+    TEST_ASSERT_TRUE(float_near(arb_list()->pos[1], 0.0F, 0.001F));
+    TEST_ASSERT_TRUE(float_near(arb_list()->vel[1], 0.0F, 0.001F));
+}
+
+/* The wheel over a scrollbar scrolls its list. */
+static void test_arb_wheel_over_bar_scrolls_list(void) {
+    arb_scene_reset();
+    s_scene.style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    s_scene.style.wheel_ease_speed = 0.0F;
+    nt_pointer_t p = arb_pointer(195.0F, 100.0F);
+    arb_warm(&p);
+    p.wheel_dy = 1.0F;
+    arb_frame(&p, 1);
+    arb_frame(&p, 1);
+    TEST_ASSERT_TRUE(arb_list()->pos[1] < -1.0F);
+}
+
+/* A second finger takes a list whose thumb just moved: the content drag starts from the thumb's position. */
+static void test_arb_content_take_keeps_last_thumb_move(void) {
+    arb_scene_reset();
+    s_scene.style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    s_scene.style.rubber_band_c = 0.0F;
+    nt_pointer_t ps[2] = {arb_pointer(195.0F, 10.0F), arb_pointer(80.0F, 150.0F)};
+    ps[1].id = 7U;
+    arb_frame(ps, 2);
+    arb_frame(ps, 2);
+    arb_press(&ps[0]);
+    arb_frame(ps, 2);
+    arb_hold(&ps[0]);
+    ps[0].y = 30.0F;
+    arb_frame(ps, 2);
+    ps[0].y = 50.0F; /* the thumb moves in the same frame the second finger presses */
+    arb_press(&ps[1]);
+    arb_frame(ps, 2);
+    const float after_thumb = arb_list()->pos[1];
+    TEST_ASSERT_TRUE(after_thumb < -1.0F);
+    arb_hold(&ps[1]);
+    ps[1].y = 110.0F; /* 40 up: claims the list, the excess past the 8 slop routes */
+    arb_frame(ps, 2);
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[1].active_id);
+    TEST_ASSERT_TRUE(float_near(arb_list()->pos[1], after_thumb - 32.0F, 0.5F));
+}
+
+/* A second finger pressing a held thumb takes it (newest pointer wins). */
+static void test_arb_second_finger_takes_held_bar(void) {
+    arb_scene_reset();
+    s_scene.style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    nt_pointer_t ps[2] = {arb_pointer(195.0F, 10.0F), arb_pointer(195.0F, 12.0F)};
+    ps[1].id = 7U;
+    arb_frame(ps, 2);
+    arb_frame(ps, 2);
+    arb_press(&ps[0]);
+    arb_frame(ps, 2);
+    arb_hold(&ps[0]);
+    arb_press(&ps[1]);
+    arb_frame(ps, 2);
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_scroll_test_bar_id(SCROLL_ID, 1), s_fx.ctx->captures[1].active_id);
+    TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
+}
+
 /* One gesture edge per frame: a release sharing its frame with a newer press ends the old gesture
  * first; the press starts next frame. */
 static nt_ui_interaction_t s_a_in;
@@ -2571,6 +2647,10 @@ int main(void) {
     RUN_TEST(test_arb_thumb_press_takes_list_from_content_drag);
     RUN_TEST(test_arb_popup_barrier_keeps_drag_from_list);
     RUN_TEST(test_arb_release_and_press_does_not_jump_list);
+    RUN_TEST(test_arb_pending_retap_does_not_scroll);
+    RUN_TEST(test_arb_wheel_over_bar_scrolls_list);
+    RUN_TEST(test_arb_content_take_keeps_last_thumb_move);
+    RUN_TEST(test_arb_second_finger_takes_held_bar);
     RUN_TEST(test_release_and_press_in_one_frame);
     RUN_TEST(test_hard_edge_drag_reversal_has_no_dead_zone);
     RUN_TEST(test_scroll_momentum_decays_monotonic);

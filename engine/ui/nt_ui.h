@@ -568,7 +568,7 @@ typedef struct {
     float pos[2];           /* current pointer pos (UI-space) */
     float drag_dx, drag_dy; /* = pos - press_pos (convenience) */
     uint32_t pointer_id;    /* which pointer captured (multitouch) */
-    bool gesture_pending;   /* an enclosing scroll may still take this press: hold off value changes */
+    bool gesture_pending;   /* an enclosing scroll may still take this press: hold off value changes; a pending release is a tap */
     float distance;         /* 3D ctx: world distance (near-plane-relative) to this widget; 0 in 2D */
 } nt_ui_interaction_t;
 

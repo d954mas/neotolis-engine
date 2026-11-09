@@ -28,8 +28,7 @@ typedef struct {
     float grab_offset; /* press_pos.x - thumb_left at grab; thumb_w/2 = track-jump */
     float tap_frac;    /* track jump a tap applies on release while a scroll still decides; < 0 for the thumb */
     uint8_t active;    /* 1 while a drag is live */
-    uint8_t decided;   /* the slider owns the drag: the value follows the pointer */
-    uint8_t _pad[2];
+    uint8_t _pad[3];
 } nt_ui_slider_drag_t;
 
 /* Persistent thumb-view cell (separate salt; written EVERY frame, never cleared). Lets the
@@ -112,7 +111,6 @@ static float slider_resolve_drag(nt_ui_context_t *ctx, uint32_t id, const nt_ui_
         const float thumb_lead = track_origin + (pos_frac * usable);
         const bool on_thumb = bb.found && in->press_pos[axis] >= thumb_lead && in->press_pos[axis] <= (thumb_lead + thumb_extent);
         drag->active = 1U;
-        drag->decided = in->gesture_pending ? 0U : 1U;
         if (on_thumb) {
             drag->grab_offset = in->press_pos[axis] - thumb_lead; /* relative grab, value unchanged this frame */
             drag->tap_frac = -1.0F;                               /* a thumb tap changes nothing */
@@ -122,12 +120,12 @@ static float slider_resolve_drag(nt_ui_context_t *ctx, uint32_t id, const nt_ui_
         const float v = slider_pos_to_value(in->press_pos[axis], track_origin, usable, thumb_extent, min, max, invert);
         drag->tap_frac = slider_value_to_frac(v, min, max);
         /* Inside a scroll the jump waits: the press may still become a scroll (Android SeekBar). */
-        return (drag->decided != 0U) ? drag->tap_frac : frac;
+        return in->gesture_pending ? frac : drag->tap_frac;
     }
     if (in->gesture_pending) {
-        return frac;
+        /* A pending release is a tap: it applies the track jump when it lands on the slider. */
+        return (in->clicked && drag->tap_frac >= 0.0F) ? drag->tap_frac : frac;
     }
-    drag->decided = 1U;
     if (drag->active != 0U) { /* held: thumb follows pointer keeping the grab offset */
         const float v = slider_pos_to_value(in->pos[axis] - drag->grab_offset + (thumb_extent * 0.5F), track_origin, usable, thumb_extent, min, max, invert);
         return slider_value_to_frac(v, min, max);
@@ -302,14 +300,10 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     // #endregion
     // #region drag math (press-ON-thumb grab vs track jump)
     float frac = nt_ui_clampf(in_frac, 0.0F, 1.0F);
-    if (enabled && (in.pressed_now || in.pressed)) {
+    if (enabled && (in.pressed_now || in.pressed || in.released_now)) {
         frac = slider_resolve_drag(ctx, id, &in, style, style->fill_direction, frac, min, max);
-    } else {
-        /* A tap released before any scroll took it applies its deferred track jump. */
-        const nt_ui_slider_drag_t *drag = (const nt_ui_slider_drag_t *)nt_ui_state_find(ctx, slider_drag_id(id));
-        if (enabled && in.released_now && drag != NULL && drag->decided == 0U && drag->tap_frac >= 0.0F) {
-            frac = drag->tap_frac;
-        }
+    }
+    if (!enabled || !in.pressed) {
         /* Release OR disabled-mid-drag: drop the cell so re-enable can't resume a stale grab. */
         nt_ui_state_clear(ctx, slider_drag_id(id));
     }

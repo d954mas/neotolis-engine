@@ -332,9 +332,23 @@ static bool gesture_owned(const nt_ui_context_t *ctx, uint32_t id) {
     return false;
 }
 
-/* Press edge. A flinging, unowned scroll on the chain stops and swallows the tap (iOS); a chain
- * that cannot scroll decides at once, so widgets in fitting panels (and scrollbars, which sit behind
- * a barrier) are never pending. */
+/* The newest pointer takes a scroll (Android): older owners of its content or bars let go, also of
+ * any gesture they still had pending. */
+static void scroll_take(nt_ui_context_t *ctx, uint32_t id, uint32_t self) {
+    const uint32_t bar_x = scrollbar_id(id, 0);
+    const uint32_t bar_y = scrollbar_id(id, 1);
+    for (uint32_t j = 0; j < ctx->frame_pointer_count; ++j) {
+        const uint32_t held = ctx->captures[j].active_id;
+        if (j != self && (held == id || held == bar_x || held == bar_y)) {
+            ctx->captures[j].active_id = 0U;
+            ctx->captures[j].scroll_scope = 0U;
+        }
+    }
+}
+
+/* Press edge. A press on a bar that can move takes its scroll from older pointers and decides at
+ * once (a thumb has no slop); a flinging, unowned scroll on the chain stops and swallows the tap
+ * (iOS); a chain that cannot scroll decides at once, so widgets in fitting panels are never pending. */
 static void gesture_press(nt_ui_context_t *ctx, uint32_t i) {
     nt_ui_capture_t *cap = &ctx->captures[i];
     const nt_pointer_t *p = &ctx->frame_pointers[i];
@@ -344,6 +358,12 @@ static void gesture_press(nt_ui_context_t *ctx, uint32_t i) {
     cap->press_pos[1] = p->y;
     cap->pos[0] = p->x;
     cap->pos[1] = p->y;
+    const uint32_t hot = ctx->pointer_hot[i].id;
+    const uint8_t scope_axes = gesture_link(ctx, scope).axes;
+    if ((hot == scrollbar_id(scope, 0) && (scope_axes & NT_UI_DRAG_X) != 0U) || (hot == scrollbar_id(scope, 1) && (scope_axes & NT_UI_DRAG_Y) != 0U)) {
+        scroll_take(ctx, scope, i);
+        return;
+    }
     uint32_t id = scope;
     bool can_scroll = false;
     for (gesture_link_t link = gesture_link(ctx, id); link.s != NULL; link = gesture_parent(ctx, link, &id)) {
@@ -372,20 +392,6 @@ static void gesture_press(nt_ui_context_t *ctx, uint32_t i) {
     }
 }
 
-/* The newest pointer takes a scroll (Android): older owners of its content or bars let go, also of
- * any gesture they still had pending. */
-static void scroll_take(nt_ui_context_t *ctx, uint32_t id, uint32_t self) {
-    const uint32_t bar_x = scrollbar_id(id, 0);
-    const uint32_t bar_y = scrollbar_id(id, 1);
-    for (uint32_t j = 0; j < ctx->frame_pointer_count; ++j) {
-        const uint32_t held = ctx->captures[j].active_id;
-        if (j != self && (held == id || held == bar_x || held == bar_y)) {
-            ctx->captures[j].active_id = 0U;
-            ctx->captures[j].scroll_scope = 0U;
-        }
-    }
-}
-
 /* Claim: the excess past the slop is routed on the first crossing frame (no 8 dp loss, no jump); a
  * claim on a later frame anchors at the pointer. The owner path does the routing once. */
 static void gesture_claim(nt_ui_context_t *ctx, uint32_t i, uint32_t id, gesture_link_t link, const float d[2], const float slop[2]) {
@@ -408,8 +414,9 @@ static void gesture_claim(nt_ui_context_t *ctx, uint32_t i, uint32_t id, gesture
 }
 
 /* Pending gesture: the strongest crossing wins; on a tie the pressed widget, then the inner scroll.
- * Nothing crossed keeps it pending, and a release then leaves the widget its release (click). */
-static void gesture_decide(nt_ui_context_t *ctx, uint32_t i, const float slop[2], bool released) {
+ * Nothing crossed keeps it pending, through a release too: the widget sees a pending release, a tap
+ * (nt_ui_begin drops the scope next frame). */
+static void gesture_decide(nt_ui_context_t *ctx, uint32_t i, const float slop[2]) {
     nt_ui_capture_t *cap = &ctx->captures[i];
     const nt_pointer_t *p = &ctx->frame_pointers[i];
     const float d[2] = {p->x - cap->press_pos[0], p->y - cap->press_pos[1]};
@@ -428,9 +435,6 @@ static void gesture_decide(nt_ui_context_t *ctx, uint32_t i, const float slop[2]
     if (best == 0.0F) {
         cap->pos[0] = p->x; /* last processed position: tells the first crossing frame apart */
         cap->pos[1] = p->y;
-        if (released) {
-            cap->scroll_scope = 0U;
-        }
         return;
     }
     cap->scroll_scope = 0U;
@@ -477,7 +481,7 @@ void nt_ui_internal_scroll_arbitrate(nt_ui_context_t *ctx) {
                 cap->scroll_scope = 0U; /* pressed and released within one frame: a tap */
             }
         } else if (cap->scroll_scope != 0U) {
-            gesture_decide(ctx, i, slop, btn.is_released);
+            gesture_decide(ctx, i, slop);
         }
     }
 }
@@ -629,11 +633,6 @@ static void scrollbar_interact(nt_ui_context_t *ctx, uint32_t scroll_id, uint32_
     const float press_a = (axis == 1) ? in.press_pos[1] : in.press_pos[0];
 
     if (in.pressed_now) {
-        for (uint32_t j = 0; j < ctx->frame_pointer_count; ++j) {
-            if (ctx->captures[j].active_id == bar_id) {
-                scroll_take(ctx, scroll_id, j);
-            }
-        }
         const float thumb_lo = bar_origin + thumb_off;
         const bool on_thumb = press_a >= thumb_lo && press_a <= (thumb_lo + thumb_len);
         if (on_thumb) {
@@ -661,6 +660,7 @@ static void scrollbar_interact(nt_ui_context_t *ctx, uint32_t scroll_id, uint32_
         frac = nt_ui_clampf(frac, 0.0F, 1.0F);
         s->pos[axis] = -(frac * over);
         s->target[axis] = s->pos[axis];
+        s->raw[axis] = s->pos[axis]; /* a content drag that takes over continues from here */
         s->vel[axis] = 0.0F;
         s->idle = 0.0F;                                    /* bar-drag is activity (keeps AUTO_HIDE awake) */
         s->flags &= (uint8_t)~NT_UI_SCROLL_FLAG_SCROLL_TO; /* drag overrides any pending jump */
@@ -860,9 +860,7 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
      * read THIS frame's offset (s->pos) but the bbox/content dims at a 1-frame lag. The bar draws on
      * the container's own layer so it isn't buried under higher-layer content (e.g. a dropdown panel). */
     const uint8_t bar_layer = (data != NULL) ? data->layer : 0U;
-    nt_ui_internal_scroll_push(ctx, 0U); /* a press on a bar is the bar's: no scroll takes it */
     scrollbar_emit(ctx, id, style, s, content, container, &cbb, bar_layer);
-    nt_ui_internal_scroll_pop(ctx, true);
 
 #ifdef NT_TEST_ACCESS
     s_last_child_offset[0] = s->pos[0];

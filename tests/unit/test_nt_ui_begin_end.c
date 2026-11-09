@@ -57,6 +57,15 @@ static void test_stray_nested_begin_asserts(void) {
     nt_ui_destroy_context(b);
 }
 
+/* An identity viewport takes a zero DPR as 1, never repairs a broken one. */
+static void test_identity_viewport_bad_dpr_asserts(void) {
+    nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a, &s_ui_desc);
+    nt_pointer_t mouse;
+    memset(&mouse, 0, sizeof mouse);
+    NT_TEST_EXPECT_ASSERT(nt_ui_begin(a, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1, .viewport = {.px_per_dp = -1.0F}}));
+    nt_ui_destroy_context(a);
+}
+
 static void test_end_clears_in_frame(void) {
     nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a, &s_ui_desc);
     TEST_ASSERT_NOT_NULL(a);
@@ -126,6 +135,7 @@ int main(void) {
     RUN_TEST(test_clay_debug_view_engine_contract);
     RUN_TEST(test_begin_sets_current_ctx);
     RUN_TEST(test_stray_nested_begin_asserts);
+    RUN_TEST(test_identity_viewport_bad_dpr_asserts);
     RUN_TEST(test_end_clears_in_frame);
     RUN_TEST(test_end_clears_clay_current);
     RUN_TEST(test_end_without_begin_asserts);

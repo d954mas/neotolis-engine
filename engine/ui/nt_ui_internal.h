@@ -154,7 +154,7 @@ typedef struct {
     int16_t pad[4]; /* hit padding L/R/T/B */
 } nt_ui_interactive_t;
 
-/* Scroll nesting depth; popups, the menu occluder and scrollbars push a 0 barrier on the same stack. */
+/* Scroll nesting depth; popups and the menu occluder push a 0 barrier on the same stack. */
 #ifndef NT_UI_SCROLL_MAX_DEPTH
 #define NT_UI_SCROLL_MAX_DEPTH 16
 #endif
@@ -166,8 +166,8 @@ typedef struct {
 #define NT_UI_MODAL_MAX_DEPTH 16
 #endif
 
-/* Declaration stack: nested scrolls, popup barriers, and one transient scrollbar barrier. */
-#define NT_UI_SCROLL_STACK_CAP (NT_UI_SCROLL_MAX_DEPTH + NT_UI_MODAL_MAX_DEPTH + 1)
+/* Declaration stack: nested scrolls and popup barriers. */
+#define NT_UI_SCROLL_STACK_CAP (NT_UI_SCROLL_MAX_DEPTH + NT_UI_MODAL_MAX_DEPTH)
 
 /* Bound the storage and per-row work of NT_UI_CHECKS duplicate detection. */
 #ifndef NT_UI_COMBO_DUP_KEY_WINDOW

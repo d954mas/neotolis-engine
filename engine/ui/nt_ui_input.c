@@ -74,7 +74,6 @@ typedef struct {
     float repeat_t;      /* seconds until the held repeat_key fires again (initial delay, then rate) */
     uint16_t repeat_key; /* the nt_key_t currently auto-repeating (0 = none) */
     uint8_t drag;        /* 1 while a press is dragging to extend the selection */
-    uint8_t tap_focus;   /* the press waits for a scroll's decision: focus on its release */
 } nt_ui_input_state_t;
 
 static inline uint32_t input_state_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_INPUT_STATE_SALT); }
@@ -693,11 +692,11 @@ typedef struct {
 
 /* An unfocused field inside a scroll focuses on the tap's release, so a list drag never opens the
  * keyboard; a scroll that takes the drag leaves the field silent. Otherwise the press focuses. */
-static bool input_focus_edge(nt_ui_input_state_t *st, const nt_ui_interaction_t *in, bool was_focused) {
-    if (in->pressed_now) {
-        st->tap_focus = (in->gesture_pending && !was_focused) ? 1U : 0U;
+static bool input_focus_edge(const nt_ui_interaction_t *in, bool was_focused) {
+    if (was_focused || !in->gesture_pending) {
+        return in->pressed_now;
     }
-    return (in->pressed_now && st->tap_focus == 0U) || (in->clicked && st->tap_focus != 0U);
+    return in->clicked; /* a pending release is a tap */
 }
 
 /* focus-order bookkeeping (Tab wrap) + the single mutating interaction step + focus capture / drag.
@@ -760,7 +759,7 @@ static void focus_step(input_frame_t *f) {
             ctx->focused_input_id = 0U;
         }
     }
-    const bool focus_now = input_focus_edge(st, &in, was_focused);
+    const bool focus_now = input_focus_edge(&in, was_focused);
 
     /* Map a pointer x (UI-space) to a codepoint boundary via the prev-frame bbox. */
     const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, id);

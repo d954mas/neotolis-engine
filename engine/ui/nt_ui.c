@@ -427,6 +427,16 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     NT_ASSERT(g_nt_ui_inframe_ctx == NULL && "nt_ui_begin: another ctx is mid-frame");
     NT_ASSERT(!ctx->in_frame && "nt_ui_begin: ctx already in_frame");
 
+    /* Viewport: device content rect -> layout. Zero size = identity (unscaled apps), keeping a given DPR. */
+    nt_ui_viewport_t vp = frame->viewport;
+    if (vp.w == 0.0F && vp.h == 0.0F) {
+        NT_ASSERT(vp.x == 0.0F && vp.y == 0.0F && "nt_ui_begin: a viewport offset needs a size");
+        vp = (nt_ui_viewport_t){.x = 0.0F, .y = 0.0F, .w = layout_w, .h = layout_h, .px_per_dp = (vp.px_per_dp == 0.0F) ? 1.0F : vp.px_per_dp};
+    }
+    NT_ASSERT(isfinite(vp.x) && isfinite(vp.y) && "nt_ui_begin: viewport offset must be finite");
+    NT_ASSERT(isfinite(vp.w) && isfinite(vp.h) && vp.w > 0.0F && vp.h > 0.0F && "nt_ui_begin: viewport size must be finite and > 0");
+    NT_ASSERT(isfinite(vp.px_per_dp) && vp.px_per_dp > 0.0F && "nt_ui_begin: viewport px_per_dp must be finite and > 0 (the window DPR)");
+
     /* MUST be first so subsequent Clay calls operate on ctx->clay. */
     Clay_SetCurrentContext(ctx->clay);
 
@@ -434,15 +444,6 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     g_nt_ui_inframe_ctx = ctx;
     ctx->frame_counter++; /* one bump per frame (stable across the whole frame) */
 
-    /* Viewport: device content rect -> layout. Zero size = identity (unscaled apps), keeping a given DPR. */
-    nt_ui_viewport_t vp = frame->viewport;
-    if (vp.w == 0.0F && vp.h == 0.0F) {
-        NT_ASSERT(vp.x == 0.0F && vp.y == 0.0F && "nt_ui_begin: a viewport offset needs a size");
-        vp = (nt_ui_viewport_t){.x = 0.0F, .y = 0.0F, .w = layout_w, .h = layout_h, .px_per_dp = (vp.px_per_dp > 0.0F) ? vp.px_per_dp : 1.0F};
-    }
-    NT_ASSERT(isfinite(vp.x) && isfinite(vp.y) && "nt_ui_begin: viewport offset must be finite");
-    NT_ASSERT(isfinite(vp.w) && isfinite(vp.h) && vp.w > 0.0F && vp.h > 0.0F && "nt_ui_begin: viewport size must be finite and > 0");
-    NT_ASSERT(isfinite(vp.px_per_dp) && vp.px_per_dp > 0.0F && "nt_ui_begin: viewport px_per_dp must be finite and > 0 (the window DPR)");
     ctx->begin_w = layout_w;
     ctx->begin_h = layout_h;
     ctx->viewport = vp;
@@ -493,8 +494,8 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
             ctx->deferred_press[i] = 1U;
             b->is_pressed = ctx->was_down[i] == 0U;
             b->is_down = false;
-            if (ctx->captures[i].active_id != 0U) {
-                /* The position is the new press's: the held gesture ends where it was last seen. */
+            if (ctx->captures[i].active_id != 0U || ctx->captures[i].scroll_scope != 0U) {
+                /* The position is the new press's: the held or pending gesture ends where it was last seen. */
                 ctx->frame_pointers[i].x = ctx->captures[i].pos[0];
                 ctx->frame_pointers[i].y = ctx->captures[i].pos[1];
             }
