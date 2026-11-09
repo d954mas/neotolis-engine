@@ -569,7 +569,7 @@ static int test_panel_body(const char *title, const uint32_t ids[TPICK_COUNT], i
 
 /* Two panels mounted BEHIND the central object so the cursor ray must pass it to reach them. NEAR
  * (z=-2.5) sits slightly left, FAR (z=-4.0) slightly right → they overlap along the sightline.
- *   - Aim THROUGH the object → buttons are occluded (set_pointer_occlusion blocks the click).
+ *   - Aim THROUGH the object → buttons are occluded (the frame's occlusion blocks the click).
  *   - Where NEAR & FAR overlap → only NEAR's button reacts (front-most arbitration); strafe (A/D)
  *     so the object stops blocking to see it. The side that sticks out belongs to one panel only.
  * Declared inside ui3d-root (floating, bbox at 0,0); the XFORM maps each to its world mount. */

@@ -351,7 +351,7 @@ typedef struct {
     const nt_pointer_t *pointers; /* RAW DEVICE coords; [0..count) drive multitouch (see nt_ui_interaction_t) */
     uint32_t pointer_count;       /* 1..NT_INPUT_MAX_POINTERS */
     uint32_t primary;             /* anchors menus, rich-text links, the Clay feed and the inspector */
-    nt_ui_viewport_t viewport;    /* device content rect (nt_ui_viewport_from_scale); all zero = identity, 1 px per dp */
+    nt_ui_viewport_t viewport;    /* device content rect (nt_ui_viewport_from_scale); zero size = identity (px_per_dp 0 = 1) */
     const float *view_proj;       /* 3D ctx: mat4 (above); 2D ctx: NULL */
     const float *occlusion;       /* 3D ctx: per-pointer max ray distance, e.g. the nearest world hit; NULL = none */
 } nt_ui_frame_desc_t;
@@ -624,7 +624,7 @@ bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
  * nt_ui_step call, which equals declaration/paint order when widgets step in declaration order).
  * Resolved by nt_ui_begin from the prev-frame registry: stepped widgets, blockers and scroll surfaces
  * (a scroll id over its empty area). id 0 = none. */
-nt_ui_hot_t nt_ui_pointer_hot(nt_ui_context_t *ctx, uint32_t pointer_index);
+nt_ui_hot_t nt_ui_pointer_hot(const nt_ui_context_t *ctx, uint32_t pointer_index);
 // #endregion
 
 // #region test_access

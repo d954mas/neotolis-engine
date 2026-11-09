@@ -107,8 +107,7 @@ static void declare_hud(void) {
 }
 
 /* Scaled hud: same layout, but the ctx viewport is the nt_ui_scale content rect so the ctx maps the
-   device pointer device->layout internally. The viewport MUST be set after nt_ui_begin and before the
-   first hit-test (nt_ui_step). */
+   device pointer device->layout internally (nt_ui_frame_desc_t.viewport). */
 static void declare_hud_scaled(void) {
     const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800);
     const float fb_h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 600);

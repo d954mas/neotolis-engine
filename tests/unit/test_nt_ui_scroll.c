@@ -1636,8 +1636,8 @@ static void wheel_grid_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style_
 }
 
 /* ---- Test 45 (THE wheel-broadcast bug): a wheel notch EVERY frame, pointer parked at the center
- *      of tile A, while the grid churns (A's AUTO_HIDE bar, B's row count, a root spacer). ONLY A's
- *      offset may change on any frame; B/C/D must stay frozen at 0. ---- */
+ *      of tile A, while the grid churns (A's AUTO_HIDE bar, B's row count, a root spacer). No frame
+ *      moves more than one container. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_scroll_wheel_no_broadcast_under_churn(void) {
     nt_ui_scroll_style_t style_a = nt_ui_scroll_style_defaults();
@@ -1649,6 +1649,8 @@ static void test_scroll_wheel_no_broadcast_under_churn(void) {
     style_a.thumb_ref = art;
 
     nt_ui_scroll_style_t style_other = nt_ui_scroll_style_defaults();
+    style_a.wheel_ease_speed = 0.0F; /* instant wheel: a container moves only on the frame it is routed a notch */
+    style_other.wheel_ease_speed = 0.0F;
 
     nt_pointer_t p = {0};
     p.active = true;
@@ -1666,24 +1668,24 @@ static void test_scroll_wheel_no_broadcast_under_churn(void) {
      * every few frames (its stale bbox lingers); the spacer + B row count add layout-slot churn. No
      * single frame may route the notch to more than ONE container (exclusive routing, never a
      * broadcast). */
-    uint32_t max_recipients = 0U;
     for (int f = 0; f < 300; ++f) {
         p.wheel_dy = 1.0F;                              /* one notch this frame */
         const int b_rows = ((f / 30) % 2 == 0) ? 6 : 3; /* B's row count toggles every ~30 frames */
         const float spacer_h = (float)((f * 5) % 40);   /* sawtooth 0..35 px of extra slot churn */
         const bool drop_a = (f % 3) == 0;               /* A vanishes every 3rd frame (stale-bbox lingers) */
 
-        nt_ui_scroll_test_wheel_recipients_reset();
-        wheel_grid_frame(&p, &style_a, &style_other, b_rows, spacer_h, drop_a);
-
-        const uint32_t got = nt_ui_scroll_test_wheel_recipients();
-        if (got > max_recipients) {
-            max_recipients = got;
+        const uint32_t ids[4] = {WHEEL_ID_A, WHEEL_ID_B, WHEEL_ID_C, WHEEL_ID_D};
+        float before[4];
+        for (int k = 0; k < 4; ++k) {
+            before[k] = wheel_pos_y(ids[k]);
         }
-        /* The notch reached at most ONE container this frame (exclusive routing — never a broadcast). */
-        TEST_ASSERT_TRUE_MESSAGE(got <= 1U, "wheel notch broadcast to more than one scroll container in a single frame");
+        wheel_grid_frame(&p, &style_a, &style_other, b_rows, spacer_h, drop_a);
+        int got = 0;
+        for (int k = 0; k < 4; ++k) {
+            got += (wheel_pos_y(ids[k]) < before[k] - 0.01F) ? 1 : 0; /* a notch scrolls toward negative pos; a settle moves back */
+        }
+        TEST_ASSERT_TRUE_MESSAGE(got <= 1, "wheel notch broadcast to more than one scroll container in a single frame");
     }
-    TEST_ASSERT_TRUE(max_recipients <= 1U); /* no frame ever broadcast */
 
     /* Sanity: the notch was actually consumed by SOME container (the pointer sat over the stack the
      * whole run); exclusivity above is the real pin, so we don't assert WHICH tile owns it. */
@@ -1827,18 +1829,10 @@ static void test_scroll_wheel_front_most_sibling_wins(void) {
     tie_break_frame(&p);
     tie_break_frame(&p);
 
-    uint32_t max_recipients = 0U;
     for (int f = 0; f < 20; ++f) {
         p.wheel_dy = 1.0F;
-        nt_ui_scroll_test_wheel_recipients_reset();
         tie_break_frame(&p);
-        const uint32_t got = nt_ui_scroll_test_wheel_recipients();
-        if (got > max_recipients) {
-            max_recipients = got;
-        }
-        TEST_ASSERT_TRUE_MESSAGE(got <= 1U, "tie-break: wheel reached more than one same-depth container");
     }
-    TEST_ASSERT_TRUE(max_recipients <= 1U);
 
     nt_ui_scroll_state_t *big = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, TIE_BIG_ID);
     nt_ui_scroll_state_t *small = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, TIE_SMALL_ID);
@@ -2466,7 +2460,8 @@ static void test_arb_release_and_press_does_not_jump_list(void) {
     TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], raw_before, 0.001F));
 }
 
-/* Release and a new press in one frame: the old widget gets its release, the new press captures. */
+/* One gesture edge per frame: a release sharing its frame with a newer press ends the old gesture
+ * first; the press starts next frame. */
 static nt_ui_interaction_t s_a_in;
 static nt_ui_interaction_t s_b_in;
 static void two_buttons_frame(const nt_pointer_t *p) {
@@ -2485,25 +2480,42 @@ static void test_release_and_press_in_one_frame(void) {
     arb_press(&p);
     two_buttons_frame(&p);
     TEST_ASSERT_TRUE(s_a_in.pressed_now);
-    /* Up on A and down on B within one frame. */
+    /* Up on A and down on B within one frame: A releases where it was last seen (a click), B's press
+     * starts next frame. */
     p.x = 150.0F;
     p.buttons[NT_BUTTON_LEFT].is_released = true;
     p.buttons[NT_BUTTON_LEFT].is_pressed = true;
     p.buttons[NT_BUTTON_LEFT].is_down = true;
     two_buttons_frame(&p);
-    TEST_ASSERT_TRUE(s_a_in.released_now);
-    TEST_ASSERT_FALSE(s_a_in.pressed);
+    TEST_ASSERT_TRUE(s_a_in.clicked);
+    TEST_ASSERT_FALSE(s_b_in.pressed);
+    p.buttons[NT_BUTTON_LEFT].is_released = false;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+    two_buttons_frame(&p);
     TEST_ASSERT_TRUE(s_b_in.pressed_now);
-    TEST_ASSERT_FALSE(s_b_in.released_now);
     TEST_ASSERT_EQUAL_UINT32(CLAY_ID("btn_b").id, s_fx.ctx->captures[0].active_id);
 
-    /* Retap of the same widget: its release and its new press both land. */
+    /* Retap of the same widget: its click lands now, its new press next frame. */
     p.buttons[NT_BUTTON_LEFT].is_released = true;
     p.buttons[NT_BUTTON_LEFT].is_pressed = true;
     two_buttons_frame(&p);
     TEST_ASSERT_TRUE(s_b_in.clicked);
+    p.buttons[NT_BUTTON_LEFT].is_released = false;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+    two_buttons_frame(&p);
     TEST_ASSERT_TRUE(s_b_in.pressed_now);
-    TEST_ASSERT_EQUAL_UINT32(CLAY_ID("btn_b").id, s_fx.ctx->captures[0].active_id);
+
+    /* Up, tap and up again within one frame: the release now, the tap next frame. */
+    p.buttons[NT_BUTTON_LEFT].is_released = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    p.buttons[NT_BUTTON_LEFT].is_down = false;
+    two_buttons_frame(&p);
+    TEST_ASSERT_TRUE(s_b_in.clicked);
+    p.buttons[NT_BUTTON_LEFT].is_released = false;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+    two_buttons_frame(&p);
+    TEST_ASSERT_TRUE(s_b_in.pressed_now);
+    TEST_ASSERT_TRUE(s_b_in.clicked);
 }
 
 /* rubber_band_c == 0: a drag past the edge leaves no dead zone — reversing moves content at once. */
@@ -2529,7 +2541,7 @@ static void nesting_overflow_frame(void) {
     p.active = true;
     nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
-    for (uint32_t i = 0; i <= (uint32_t)(NT_UI_SCROLL_MAX_DEPTH + NT_UI_MODAL_MAX_DEPTH); ++i) {
+    for (uint32_t i = 0; i <= (uint32_t)NT_UI_SCROLL_STACK_CAP; ++i) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, 0x100U + i, &style, NULL);
     }
 }

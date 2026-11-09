@@ -146,7 +146,7 @@ static inline nt_ui_baked_xform_t nt_ui_internal_identity_baked(void) {
     return bx;
 }
 
-/* Per-frame record of an interactive widget (one per nt_ui_step), used next frame by the
+/* Per-frame record of a step, blocker or scroll surface, used next frame by the
  * front-most hot-widget resolve. The transform/bbox are re-fetched by id at resolve time. */
 typedef struct {
     uint32_t id;
@@ -154,7 +154,7 @@ typedef struct {
     int16_t pad[4]; /* hit padding L/R/T/B */
 } nt_ui_interactive_t;
 
-/* Scroll nesting depth; popups and the menu occluder each push a 0 barrier on the same stack. */
+/* Scroll nesting depth; popups, the menu occluder and scrollbars push a 0 barrier on the same stack. */
 #ifndef NT_UI_SCROLL_MAX_DEPTH
 #define NT_UI_SCROLL_MAX_DEPTH 16
 #endif
@@ -165,6 +165,9 @@ typedef struct {
 #ifndef NT_UI_MODAL_MAX_DEPTH
 #define NT_UI_MODAL_MAX_DEPTH 16
 #endif
+
+/* Declaration stack: nested scrolls, popup barriers, and one transient scrollbar barrier. */
+#define NT_UI_SCROLL_STACK_CAP (NT_UI_SCROLL_MAX_DEPTH + NT_UI_MODAL_MAX_DEPTH + 1)
 
 /* Bound the storage and per-row work of NT_UI_CHECKS duplicate detection. */
 #ifndef NT_UI_COMBO_DUP_KEY_WINDOW
@@ -180,9 +183,6 @@ typedef struct {
     /* Scroll gesture of this press: the scope chain still deciding it (0 = decided or none). Lives
      * from the press edge to the release, independent of active_id (an empty-area press has none). */
     uint32_t scroll_scope;
-    /* Holder of the previous gesture when release and a new press share one frame: it still gets
-     * its release (and click) while the new press captures freely. Cleared every begin. */
-    uint32_t released_id;
     bool hold_live;    /* false once the pointer left the hitbox; only a new press restarts the hold */
     uint8_t drag_axes; /* NT_UI_DRAG_* the capturing widget drags along itself (from its step desc) */
 } nt_ui_capture_t;
@@ -211,8 +211,8 @@ struct nt_ui_context {
 
     /* capture_seen[] tracks who touched the capture this frame — orphans cleared on begin. */
     nt_ui_capture_t captures[NT_INPUT_MAX_POINTERS];
-    /* Per-pointer front-most interactive widget + game-fed occlusion cutoff (3D), resolved lazily once
-     * per frame from prev-frame layout (3D: nearest ray-t within cutoff; 2D: top zIndex). Ordered here
+    /* Per-pointer front-most interactive widget + game-fed occlusion cutoff (3D), resolved by
+     * nt_ui_begin from prev-frame layout (3D: nearest ray-t within cutoff; 2D: top zIndex). Ordered here
      * by alignment (after the 4B-aligned captures) to avoid adding struct padding. */
     nt_ui_hot_t pointer_hot[NT_INPUT_MAX_POINTERS];
     float pointer_occlusion[NT_INPUT_MAX_POINTERS]; /* max world ray distance; default +inf = no cutoff */
@@ -222,7 +222,7 @@ struct nt_ui_context {
     /* Per pointer and axis (0 = x, 1 = y): the scroll allowed to consume this frame's wheel. */
     uint32_t wheel_owner[NT_INPUT_MAX_POINTERS][2];
     /* Declaration stack of open scrolls (0 = popup barrier); top = scroll_top. */
-    uint32_t scroll_stack[NT_UI_SCROLL_MAX_DEPTH + NT_UI_MODAL_MAX_DEPTH];
+    uint32_t scroll_stack[NT_UI_SCROLL_STACK_CAP];
     /* Top-modal targeting with the standard 1-frame IM lag: _cur tracks the DEEPEST modal id seen
      * this frame; nt_ui_begin commits it into _prev, which the Esc/backdrop close-scan targets so
      * only the genuinely-topmost modal consumes the event (same-frame nesting can't be known at
@@ -252,7 +252,11 @@ struct nt_ui_context {
     uint16_t scroll_top;
     uint8_t active_modal_depth;
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
-    bool pointer_over_any;
+    /* One gesture edge per pointer and frame (nt_ui_begin): the button state shown last frame, and a
+     * press held back one frame because a release shared its frame. */
+    uint8_t was_down[NT_INPUT_MAX_POINTERS];
+    uint8_t deferred_press[NT_INPUT_MAX_POINTERS];
+    bool pointer_over_any; /* the front-most record under a pointer was declared again this frame */
     /* Modal-presence across frames: _cur set when any modal declares a backdrop this frame;
      * nt_ui_begin commits it into _prev. nt_ui_modal_active reads _prev so the game can gate its
      * next-frame hotkeys (the live depth is always 0 by nt_ui_end, can't be queried after). */
@@ -574,8 +578,12 @@ Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id
 /* How a hit on a registry record counts in the front-most resolve. */
 typedef enum { NT_UI_HIT_NONE = 0, NT_UI_HIT, NT_UI_HIT_PANE } nt_ui_hit_kind_t;
 
-/* The pointer `self` takes scroll `id`: older owners of its content or bars let go (newest wins). */
-void nt_ui_internal_scroll_take(nt_ui_context_t *ctx, uint32_t id, uint32_t self);
+/* nt_ui_begin's gesture arbiter (nt_ui_scroll.c): starts press records, decides slop crossings,
+ * routes the wheel. Reads last frame's layout and this frame's front-most records. */
+void nt_ui_internal_scroll_arbitrate(nt_ui_context_t *ctx);
+
+/* How a hit on a scroll surface record counts in the front-most resolve. */
+nt_ui_hit_kind_t nt_ui_internal_scroll_surface_kind(nt_ui_context_t *ctx, uint32_t id);
 
 /* True when an axis overflows; the half unit absorbs layout rounding, so a fitting list never turns
  * scrollable (or shows an AUTO bar) by noise. */
@@ -587,11 +595,6 @@ static inline uint8_t nt_ui_internal_scroll_axes(const Clay_ScrollContainerData 
     const bool y = scd->found && scd->config.vertical && nt_ui_internal_overflows(scd->contentDimensions.height, scd->scrollContainerDimensions.height);
     return (uint8_t)((x ? NT_UI_DRAG_X : 0U) | (y ? NT_UI_DRAG_Y : 0U));
 }
-
-/* Per-axis scrollbar id derived from its scroll id (axis 0 = horizontal, 1 = vertical). */
-#define NT_UI_SCROLLBAR_VERT_SALT 0x5CB00000U
-#define NT_UI_SCROLLBAR_HORIZ_SALT 0x5CB10000U
-static inline uint32_t nt_ui_internal_scrollbar_id(uint32_t scroll_id, int axis) { return nt_ui_derived_id(scroll_id, (axis == 1) ? NT_UI_SCROLLBAR_VERT_SALT : NT_UI_SCROLLBAR_HORIZ_SALT); }
 
 /* Adds a registry record for the front-most resolve with the current scroll scope. */
 void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4], uint32_t scope);

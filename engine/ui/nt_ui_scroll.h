@@ -59,8 +59,8 @@ typedef struct {
     float wheel_ease_speed;  /* smooth-wheel ease toward target; 0 = instant */
     float rubber_band_c;     /* overscroll coefficient (0 = hard edge for drag and fling; default 0.55) */
     float bounce_speed;      /* bounce-back spring ease; > 0 when rubber_band_c > 0 */
-    float wheel_step_px;     /* UI units (nt_ui_begin space) per wheel notch; name kept for ABI */
-    /* scrollbar visual (declared here for one-struct ABI). */
+    float wheel_step_px;     /* UI units (nt_ui_begin space) per wheel notch */
+    /* scrollbar visual */
     nt_ui_scrollbar_visibility_t bar_visibility;
     float bar_thickness;
     float bar_thumb_min_px;
@@ -71,9 +71,6 @@ typedef struct {
     nt_atlas_region_ref_t track_ref, thumb_ref;
     uint32_t track_tint, thumb_tint;
 } nt_ui_scroll_style_t;
-/* 88 not 84: the 16B atlas refs force 8B struct alignment, so dropping bar_placement just moved
- * 4B of padding ahead of track_ref — the size is unchanged. */
-_Static_assert(sizeof(nt_ui_scroll_style_t) == 88, "nt_ui_scroll_style_t stable ABI (2 bool + 5 float + 1 enum + 4 float[8B aligned] + 2x16B ref + 2 u32)");
 
 /* A valid baseline: mobile-game-like tunables, y-only scroll, ALWAYS-visible overlay bar. */
 nt_ui_scroll_style_t nt_ui_scroll_style_defaults(void);
@@ -109,10 +106,6 @@ uint32_t nt_ui_scroll_test_bar_id(uint32_t scroll_id, int axis);
 /* The draw layer the last-emitted bar used (per axis); must match the container's content layer so the
  * bar isn't buried under higher-layer content. */
 uint8_t nt_ui_scroll_test_last_bar_layer(int axis);
-/* Count of scroll_begin gathers that consumed a wheel since the last reset; lets a multi-container
- * test detect a wheel axis reaching more than one container in a single frame. */
-uint32_t nt_ui_scroll_test_wheel_recipients(void);
-void nt_ui_scroll_test_wheel_recipients_reset(void);
 #endif
 
 #endif /* NT_UI_SCROLL_H */

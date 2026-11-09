@@ -647,6 +647,21 @@ static void test_slider_in_scroll_thumb_tap_keeps_value(void) {
     TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.0001F));
 }
 
+/* A thumb tap leaves a value the game set while the press was pending. */
+static void test_slider_in_scroll_thumb_tap_keeps_game_value(void) {
+    float value = 0.5F;
+    const float thumb_x = SCROLL_X + (SL_TW * 0.5F) + (0.5F * SL_USABLE);
+    nt_pointer_t p = make_pointer(thumb_x + 5.0F, TOP_SL_CY, false, false, false);
+    slider_top_in_scroll_frame(&p, &value);
+    slider_top_in_scroll_frame(&p, &value);
+    p = make_pointer(thumb_x + 5.0F, TOP_SL_CY, true, true, false);
+    slider_top_in_scroll_frame(&p, &value);
+    value = 0.2F;
+    p = make_pointer(thumb_x + 5.0F, TOP_SL_CY, false, false, true);
+    slider_top_in_scroll_frame(&p, &value);
+    TEST_ASSERT_TRUE(float_near(value, 0.2F, 0.0001F));
+}
+
 /* A tap on the track inside a scroll applies its jump on release. */
 static void test_slider_in_scroll_track_tap_applies_on_release(void) {
     float value = 0.5F;
@@ -1001,6 +1016,7 @@ int main(void) {
     RUN_TEST(test_slider_in_scroll_horizontal_drag_moves_value);
     RUN_TEST(test_slider_in_scroll_track_tap_applies_on_release);
     RUN_TEST(test_slider_in_scroll_thumb_tap_keeps_value);
+    RUN_TEST(test_slider_in_scroll_thumb_tap_keeps_game_value);
     RUN_TEST(test_thumb_above_modal_band_first_frame);
     RUN_TEST(test_vertical_track_jump_bottom_up);
     RUN_TEST(test_vertical_track_jump_top_down);

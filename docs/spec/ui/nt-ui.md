@@ -258,9 +258,10 @@ target). The step commits capture, so a later
 query that frame can read different edges: read one-shot edges from the step's
 result, and `double_clicked` only from there. Capture is per-pointer:
 a press records `active_id`; release clears. Other widgets are
-`exclusive_gated` while one holds capture. When a release and a new press arrive in
-one frame, the old holder still gets its release (and click) and the new press
-captures freely, also when it lands on the same widget. **Orphan cleanup** at
+`exclusive_gated` while one holds capture. A pointer shows one gesture edge per frame:
+when a release and a new press arrive in one frame (a fast re-tap), the held gesture
+releases where it was last seen and the press starts next frame; from an up button the
+whole tap completes at once. **Orphan cleanup** at
 `nt_ui_begin` drops `active_id` if the widget didn't call step last
 frame — covers scene switches, conditional disable, and widget hide. It also drops
 `active_id` when a pointer has no release edge and its button is up or newly pressed:
@@ -281,8 +282,9 @@ world geometry — the game owns the raycast, the engine only takes the cutoff d
 `nt_ui_interaction_t.distance` reports the hit distance. Hits within 1e-5 of the nearest
 distance (relative, floored at one unit) are coplanar and compete like 2D. 2D ctx: highest effective Clay
 zIndex (tie → last-registered, i.e. the later `nt_ui_step` call; widget code should
-step in declaration order so this matches paint order). Any resolved hit counts as UI
-under the pointer for `nt_ui_wants_pointer`. Each registry record also stores its
+step in declaration order so this matches paint order). `nt_ui_wants_pointer` is true
+while a pointer holds a capture or its front-most record is declared again this frame (a
+record that vanished this frame is not UI under the pointer). Each registry record also stores its
 scroll scope (the innermost scroll open when it registered), which starts the scroll
 chain of a press on it. A free pointer drives a
 widget only if it is the resolved hot
@@ -413,13 +415,13 @@ clip data Clay keeps for a scroll declared last frame). A scroll container regis
 *surface* record, so an empty-area press resolves through the normal front-most
 arbitration (z-order, blockers, modals, transforms, 3D occlusion); a scroll whose content
 fits (within half a unit) is see-through. Scrolls form a declaration chain: `scroll_begin` pushes its id and
-records the enclosing scroll as its parent; popup core (dropdown, menu, modal, tooltip)
-and the menu occluder push a 0 barrier, so a drag inside a popup never reaches a scroll
-behind it. Widgets inside a scroll must step between its begin and end.
+records the enclosing scroll as its parent; popup core (dropdown, menu, modal, tooltip),
+the menu occluder and scrollbars push a 0 barrier, so a drag inside a popup never reaches
+a scroll behind it and a press on a bar is the bar's. Widgets inside a scroll must step between its begin and end.
 
 A press starts a gesture record on the chain of the front-most record under it (its
-scope); a chain with no eligible axis, and a press on a scrollbar, decide at once
-(widgets in fitting panels are never pending, a thumb has no slop). A chain link counts
+scope); a chain with no eligible axis decides at once (widgets in fitting panels and
+scrollbars are never pending). A chain link counts
 only if that scroll was declared and its layout solved last frame, so a vanished scroll
 takes nothing. While pending, the pressed widget sees `gesture_pending`. Each frame the
 pointer's displacement from the press is compared per axis with the drag slop
@@ -427,7 +429,7 @@ pointer's displacement from the press is compared per axis with the drag slop
 pressed widget's own `drag_axes` and the chain's eligible axes, inner first. The
 strongest crossing (|d| / slop) wins, ties going to the widget, then the inner scroll;
 nothing crossed keeps the gesture pending. A scroll that wins takes the capture — the
-widget sees a foreign owner, reports no click and keeps any value it wrote (Model D:
+widget sees a foreign owner and goes silent (no release, no click), keeping any value it wrote (Model D:
 draggables hold value changes while pending). On the first crossing frame the excess past
 the slop is routed (no jump, no lost distance); a later claim anchors at the pointer.
 A crossing on the release frame still claims (fling, no click), and the owner keeps the
