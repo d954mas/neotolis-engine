@@ -47,6 +47,7 @@ typedef struct {
     float thumb_grab; /* offset of the press point within the thumb (track-axis px); set on thumb-press */
     uint32_t parent;  /* enclosing scroll at the last declaration (0 = none or a popup barrier) */
     uint8_t flags;
+    uint8_t bar_axis; /* 1 + axis while the owner drags this scroll by a thumb; 0 = content drag */
 } nt_ui_scroll_state_t;
 
 /* Scrollbar visibility (defined here so the style stays one struct). Bars always float

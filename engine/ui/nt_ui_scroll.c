@@ -332,23 +332,20 @@ static bool gesture_owned(const nt_ui_context_t *ctx, uint32_t id) {
     return false;
 }
 
-/* The newest pointer takes a scroll (Android): older owners of its content or bars let go, also of
- * any gesture they still had pending. */
+/* The newest pointer takes a scroll (Android): an older owner, by content or by a thumb, lets go,
+ * also of any gesture it still had pending. */
 static void scroll_take(nt_ui_context_t *ctx, uint32_t id, uint32_t self) {
-    const uint32_t bar_x = scrollbar_id(id, 0);
-    const uint32_t bar_y = scrollbar_id(id, 1);
     for (uint32_t j = 0; j < ctx->frame_pointer_count; ++j) {
-        const uint32_t held = ctx->captures[j].active_id;
-        if (j != self && (held == id || held == bar_x || held == bar_y)) {
+        if (j != self && ctx->captures[j].active_id == id) {
             ctx->captures[j].active_id = 0U;
             ctx->captures[j].scroll_scope = 0U;
         }
     }
 }
 
-/* Press edge. A press on a bar that can move takes its scroll from older pointers and decides at
- * once (a thumb has no slop); a flinging, unowned scroll on the chain stops and swallows the tap
- * (iOS); a chain that cannot scroll decides at once, so widgets in fitting panels are never pending. */
+/* Press edge. A press on a bar that can move owns its scroll at once (a thumb has no slop; the bar
+ * code drives the thumb); a flinging, unowned scroll on the chain stops and swallows the tap (iOS);
+ * a chain that cannot scroll decides at once, so widgets in fitting panels are never pending. */
 static void gesture_press(nt_ui_context_t *ctx, uint32_t i) {
     nt_ui_capture_t *cap = &ctx->captures[i];
     const nt_pointer_t *p = &ctx->frame_pointers[i];
@@ -359,10 +356,15 @@ static void gesture_press(nt_ui_context_t *ctx, uint32_t i) {
     cap->pos[0] = p->x;
     cap->pos[1] = p->y;
     const uint32_t hot = ctx->pointer_hot[i].id;
-    const uint8_t scope_axes = gesture_link(ctx, scope).axes;
-    if ((hot == scrollbar_id(scope, 0) && (scope_axes & NT_UI_DRAG_X) != 0U) || (hot == scrollbar_id(scope, 1) && (scope_axes & NT_UI_DRAG_Y) != 0U)) {
-        scroll_take(ctx, scope, i);
-        return;
+    const gesture_link_t scope_link = gesture_link(ctx, scope);
+    for (int a = 0; a < 2 && scope_link.s != NULL; ++a) {
+        if (hot == scrollbar_id(scope, a) && (scope_link.axes & (1U << a)) != 0U) {
+            scroll_take(ctx, scope, i);
+            cap->active_id = scope;
+            cap->hold_live = false; /* owning a scroll is not a widget press */
+            scope_link.s->bar_axis = (uint8_t)(a + 1);
+            return;
+        }
     }
     uint32_t id = scope;
     bool can_scroll = false;
@@ -382,6 +384,7 @@ static void gesture_press(nt_ui_context_t *ctx, uint32_t i) {
             link.s->target[1] = link.s->pos[1];
             link.s->raw[0] = link.s->pos[0];
             link.s->raw[1] = link.s->pos[1];
+            link.s->bar_axis = 0U;
             cap->active_id = id;
             cap->hold_live = false; /* a claim is not a press: the slot's hold belongs to an earlier one */
             return;
@@ -409,6 +412,7 @@ static void gesture_claim(nt_ui_context_t *ctx, uint32_t i, uint32_t id, gesture
         link.s->vel[a] = 0.0F;
     }
     link.s->flags &= (uint8_t)~NT_UI_SCROLL_FLAG_SCROLL_TO;
+    link.s->bar_axis = 0U;
     cap->active_id = id;
     cap->hold_live = false; /* a claim is not a press: the slot's hold belongs to an earlier one */
 }
@@ -493,6 +497,9 @@ void nt_ui_internal_scroll_arbitrate(nt_ui_context_t *ctx) {
  * through its release frame (children still see a foreign owner); nt_ui_begin frees it. Returns
  * whether an owner dragged this frame, the release frame included. */
 static bool scroll_route_owner(nt_ui_context_t *ctx, uint32_t id, nt_ui_scroll_state_t *s, uint8_t axes) {
+    if (s->bar_axis != 0U) {
+        return false; /* a thumb owner: scrollbar_drive maps it after the bars are laid out */
+    }
     bool dragged = false;
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
         nt_ui_capture_t *cap = &ctx->captures[i];
@@ -615,64 +622,54 @@ static void scrollbar_hit_pad(int axis, float thickness, int16_t out[4]) {
     }
 }
 
-/* Thumb-drag + track-click for one axis, on the bar's own id and prev-frame bbox.
- * Drag delta along the axis maps back into s->pos
- * (Clay sign); a track click (off the thumb) smooth-jumps via nt_ui_scroll_to. */
+/* The bar registers its hit-test record on its scroll's chain (the wheel over it scrolls the
+ * scroll; the arbiter turns a press on it into the scroll's thumb owner). The thumb owner maps the
+ * pointer so the grabbed point stays under it; a track press jumps (a held one at once, a tap
+ * smoothly). Returns whether a thumb drag is live. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void scrollbar_interact(nt_ui_context_t *ctx, uint32_t scroll_id, uint32_t bar_id, int axis, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, float content, float container,
-                               float bar_origin, float track_len, float thumb_off, float thumb_len, bool *out_active) {
-    *out_active = false;
+static bool scrollbar_drive(nt_ui_context_t *ctx, uint32_t scroll_id, uint32_t bar_id, int axis, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, float content, float container,
+                            float bar_origin, float track_len, float thumb_off, float thumb_len) {
     int16_t pad[4];
     scrollbar_hit_pad(axis, style->bar_thickness, pad);
+    nt_ui_internal_register_interactive(ctx, bar_id, pad, scroll_id);
+    if (s->bar_axis != (uint8_t)(axis + 1) || !nt_ui_internal_overflows(content, container) || track_len - thumb_len <= 0.0F) {
+        return false;
+    }
     const float over = content - container;
-    const nt_ui_interaction_t in = nt_ui_step(ctx, bar_id, &(nt_ui_step_desc_t){.pad_lrtb = pad});
-    if (!nt_ui_internal_overflows(content, container) || track_len - thumb_len <= 0.0F) {
-        return; /* registered for a consistent hit-test, but nothing to drag */
-    }
-    const float pointer_a = (axis == 1) ? in.pos[1] : in.pos[0];
-    const float press_a = (axis == 1) ? in.press_pos[1] : in.press_pos[0];
-
-    if (in.pressed_now) {
-        /* Presses on both bars in one frame: the later capture takes the scroll (the arbiter only
-         * freed holders from earlier frames). */
-        for (uint32_t j = 0; j < ctx->frame_pointer_count; ++j) {
-            if (ctx->captures[j].active_id == bar_id) {
-                scroll_take(ctx, scroll_id, j);
-            }
+    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
+        if (ctx->captures[i].active_id != scroll_id) {
+            continue;
         }
-        const float thumb_lo = bar_origin + thumb_off;
-        const bool on_thumb = press_a >= thumb_lo && press_a <= (thumb_lo + thumb_len);
-        if (on_thumb) {
-            /* Grab the thumb where it was clicked: remember the press offset INSIDE the thumb so the
-             * held mapping keeps that point under the cursor (no jump-to-center on press). */
-            s->thumb_grab = press_a - thumb_lo;
-        } else {
-            /* Track click (off the thumb): smooth-jump the clicked fraction, and seed the grab to the
-             * thumb center so a continued drag from a track click maps from the thumb's middle. */
-            s->thumb_grab = thumb_len * 0.5F;
-            float frac = (press_a - bar_origin) / (track_len - thumb_len);
-            frac = nt_ui_clampf(frac, 0.0F, 1.0F);
-            const float target = -(frac * over);
-            if (axis == 1) {
-                nt_ui_scroll_to(ctx, scroll_id, s->pos[0], target);
+        const nt_pointer_t *p = &ctx->frame_pointers[i];
+        const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
+        const float pointer_a = (axis == 1) ? p->y : p->x;
+        if (btn.is_pressed) {
+            const float thumb_lo = bar_origin + thumb_off;
+            if (pointer_a >= thumb_lo && pointer_a <= (thumb_lo + thumb_len)) {
+                s->thumb_grab = pointer_a - thumb_lo; /* keep the grabbed point under the pointer */
             } else {
-                nt_ui_scroll_to(ctx, scroll_id, target, s->pos[1]);
+                s->thumb_grab = thumb_len * 0.5F; /* track press: the thumb centers under the pointer */
+                if (!btn.is_down) {
+                    const float frac = nt_ui_clampf((pointer_a - bar_origin) / (track_len - thumb_len), 0.0F, 1.0F);
+                    const float target = -(frac * over);
+                    nt_ui_scroll_to(ctx, scroll_id, (axis == 1) ? s->pos[0] : target, (axis == 1) ? target : s->pos[1]);
+                }
             }
         }
-    }
-    if (in.pressed) {
-        /* Held: map the pointer so the GRABBED point of the thumb stays under the cursor (true 1:1
-         * thumb drag). Off-thumb track clicks seeded the grab to thumb-center above. */
-        float frac = (pointer_a - bar_origin - s->thumb_grab) / (track_len - thumb_len);
-        frac = nt_ui_clampf(frac, 0.0F, 1.0F);
+        if (!btn.is_down) {
+            return false;
+        }
+        const float frac = nt_ui_clampf((pointer_a - bar_origin - s->thumb_grab) / (track_len - thumb_len), 0.0F, 1.0F);
         s->pos[axis] = -(frac * over);
         s->target[axis] = s->pos[axis];
         s->raw[axis] = s->pos[axis]; /* a content drag that takes over continues from here */
         s->vel[axis] = 0.0F;
         s->idle = 0.0F;                                    /* bar-drag is activity (keeps AUTO_HIDE awake) */
         s->flags &= (uint8_t)~NT_UI_SCROLL_FLAG_SCROLL_TO; /* drag overrides any pending jump */
-        *out_active = true;
+        ctx->capture_seen[i] = 1U;
+        return true;
     }
+    return false;
 }
 
 /* Emits one axis' 2-piece slice9 bar (track + thumb) as floating children of the open
@@ -703,8 +700,7 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
         bar_origin = (axis == 1) ? cbb->boundingBox.y : cbb->boundingBox.x;
     }
 
-    bool dragging = false;
-    scrollbar_interact(ctx, scroll_id, bar_id, axis, style, s, ccontent, clen, bar_origin, track_len, thumb_off, thumb_len, &dragging);
+    const bool dragging = scrollbar_drive(ctx, scroll_id, bar_id, axis, style, s, ccontent, clen, bar_origin, track_len, thumb_off, thumb_len);
 
     /* AUTO_HIDE: visible on scroll activity (idle within the linger window), thumb-drag, or bar-hover;
      * fades out once s->idle passes bar_hide_delay. The integrator resets s->idle on any scroll motion,
@@ -784,7 +780,7 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(track_decl);
     int16_t reg_pad[4];
-    scrollbar_hit_pad(axis, thickness, reg_pad); /* same pad the interact step used (inspector overlay parity) */
+    scrollbar_hit_pad(axis, thickness, reg_pad); /* same pad as the hit-test record (inspector overlay parity) */
     nt_ui_widget_register(ctx, bar_id, &NT_UI_SCROLLBAR_DEF, reg_pad, true);
     nt_ui_clay_priv_close_element();
 

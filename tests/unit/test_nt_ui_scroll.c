@@ -9,6 +9,7 @@
 #include <stdalign.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "clay.h"
@@ -691,12 +692,19 @@ static void test_scroll_free_press_tap_no_scroll(void) {
     TEST_ASSERT_TRUE(float_near(s->pos[1], 0.0F, 0.5F)); /* tap left it at rest */
 }
 
+/* Pointer `pidx` owns scroll `id` by its thumb on `axis`. */
+static void assert_thumb_owner(uint32_t pidx, uint32_t id, int axis) {
+    TEST_ASSERT_EQUAL_UINT32(id, s_fx.ctx->captures[pidx].active_id);
+    const nt_ui_scroll_state_t *st = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, id);
+    TEST_ASSERT_NOT_NULL(st);
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)(axis + 1), st->bar_axis);
+}
+
 /* ---- Test 20: the container does NOT take its OWN scrollbar's thumb drag: a real press on the
- *      thumb dragged past the slop stays with the bar, which moves the content. ---- */
+ *      thumb dragged past the slop stays a thumb drag, which moves the content. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_scroll_does_not_steal_own_scrollbar(void) {
     nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
-    const uint32_t bar_id = nt_ui_scroll_test_bar_id(SCROLL_ID, 1);
 
     nt_pointer_t p = {0};
     p.x = 195.0F; /* on the thumb of the right-edge vertical bar */
@@ -711,7 +719,7 @@ static void test_scroll_does_not_steal_own_scrollbar(void) {
     p.y = 60.0F; /* 40 down the bar, well past the slop */
     scrollbar_frame(&p, &style, 1000.0F);
 
-    TEST_ASSERT_EQUAL_UINT32(bar_id, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
+    assert_thumb_owner(0U, SCROLL_ID, 1);
     const nt_ui_scroll_state_t *s = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
     TEST_ASSERT_TRUE(s->pos[1] < -1.0F); /* the thumb drove the content down */
 }
@@ -741,13 +749,12 @@ static void excl_nested_frame2(nt_pointer_t *p, const nt_ui_scroll_style_t *oute
 }
 
 /* ---- Test 20b: a parent scroll does NOT take a nested scroll's thumb drag along its own axis:
- *      the thumb declares both drag axes, so it wins the tie. ---- */
+ *      a thumb press owns its own scroll at once. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_scroll_does_not_steal_nested_scrollbar(void) {
     /* The outer bar is drawn before the inner scroll declares: the inner still reads its own dims. */
     const nt_ui_scroll_style_t outer = bar_style(NT_UI_SCROLLBAR_ALWAYS);
     const nt_ui_scroll_style_t inner = bar_style(NT_UI_SCROLLBAR_ALWAYS);
-    const uint32_t inner_bar_id = nt_ui_scroll_test_bar_id(EXCL_INNER_ID, 1);
 
     nt_pointer_t p = {0};
     p.x = 195.0F; /* on the inner scroll's vertical thumb, inside the outer */
@@ -762,7 +769,7 @@ static void test_scroll_does_not_steal_nested_scrollbar(void) {
     p.y = 60.0F; /* 40 down: the outer scroll could take it on y, the thumb keeps it */
     excl_nested_frame2(&p, &outer, &inner);
 
-    TEST_ASSERT_EQUAL_UINT32(inner_bar_id, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
+    assert_thumb_owner(0U, EXCL_INNER_ID, 1);
 }
 
 /* ---- Test 21: free-press drag must NOT hijack a click on a non-scrolling tap. A press inside
@@ -2393,7 +2400,7 @@ static void test_arb_thumb_press_during_fling_grabs_bar(void) {
     ((nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID))->vel[1] = -1500.0F;
     arb_press(&p);
     arb_frame(&p, 1);
-    TEST_ASSERT_EQUAL_UINT32(nt_ui_scroll_test_bar_id(SCROLL_ID, 1), s_fx.ctx->captures[0].active_id);
+    assert_thumb_owner(0U, SCROLL_ID, 1);
 }
 
 /* A thumb press by a second finger takes the list from the finger dragging its content. */
@@ -2412,7 +2419,7 @@ static void test_arb_thumb_press_takes_list_from_content_drag(void) {
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
     arb_press(&ps[1]);
     arb_frame(ps, 2);
-    TEST_ASSERT_EQUAL_UINT32(nt_ui_scroll_test_bar_id(SCROLL_ID, 1), s_fx.ctx->captures[1].active_id);
+    assert_thumb_owner(1U, SCROLL_ID, 1);
     TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
 }
 
@@ -2539,11 +2546,32 @@ static void test_arb_both_bars_pressed_together(void) {
     arb_hold(&ps[0]);
     arb_hold(&ps[1]);
     arb_frame(ps, 2);
-    const uint32_t held0 = s_fx.ctx->captures[0].active_id;
-    const uint32_t held1 = s_fx.ctx->captures[1].active_id;
-    TEST_ASSERT_TRUE(held0 == 0U || held1 == 0U);
+    TEST_ASSERT_TRUE(s_fx.ctx->captures[0].active_id == 0U || s_fx.ctx->captures[1].active_id == 0U);
     TEST_ASSERT_TRUE(float_near(arb_list()->pos[0], x0, 0.001F));
     TEST_ASSERT_TRUE(float_near(arb_list()->pos[1], y0, 0.001F));
+}
+
+/* A tap on the second bar while the first is held: a still frame moves nothing. */
+static void test_arb_tap_on_other_bar_while_held(void) {
+    arb_scene_reset();
+    s_scene.style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    s_scene.style.scroll_x = true;
+    s_scene.content_w = 1000.0F;
+    nt_pointer_t ps[2] = {arb_pointer(30.0F, 195.0F), arb_pointer(195.0F, 10.0F)};
+    ps[1].id = 7U;
+    arb_frame(ps, 2);
+    arb_frame(ps, 2);
+    arb_press(&ps[0]);
+    arb_frame(ps, 2);
+    arb_hold(&ps[0]);
+    const float x0 = arb_list()->pos[0];
+    ps[1].buttons[NT_BUTTON_LEFT].is_pressed = true;
+    ps[1].buttons[NT_BUTTON_LEFT].is_released = true;
+    arb_frame(ps, 2);
+    ps[1].buttons[NT_BUTTON_LEFT].is_pressed = false;
+    ps[1].buttons[NT_BUTTON_LEFT].is_released = false;
+    arb_frame(ps, 2);
+    TEST_ASSERT_TRUE(float_near(arb_list()->pos[0], x0, 0.001F));
 }
 
 /* A second finger pressing a held thumb takes it (newest pointer wins). */
@@ -2559,7 +2587,7 @@ static void test_arb_second_finger_takes_held_bar(void) {
     arb_hold(&ps[0]);
     arb_press(&ps[1]);
     arb_frame(ps, 2);
-    TEST_ASSERT_EQUAL_UINT32(nt_ui_scroll_test_bar_id(SCROLL_ID, 1), s_fx.ctx->captures[1].active_id);
+    assert_thumb_owner(1U, SCROLL_ID, 1);
     TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
 }
 
@@ -2679,6 +2707,7 @@ int main(void) {
     RUN_TEST(test_arb_content_take_keeps_last_thumb_move);
     RUN_TEST(test_arb_second_finger_takes_held_bar);
     RUN_TEST(test_arb_both_bars_pressed_together);
+    RUN_TEST(test_arb_tap_on_other_bar_while_held);
     RUN_TEST(test_release_and_press_in_one_frame);
     RUN_TEST(test_hard_edge_drag_reversal_has_no_dead_zone);
     RUN_TEST(test_scroll_momentum_decays_monotonic);

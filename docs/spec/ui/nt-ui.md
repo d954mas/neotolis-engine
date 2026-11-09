@@ -420,8 +420,8 @@ and the menu occluder push a 0 barrier, so a drag inside a popup never reaches a
 behind it. Scrollbars belong to their scroll's chain (the wheel over a bar scrolls it). Widgets inside a scroll must step between its begin and end.
 
 A press starts a gesture record on the chain of the front-most record under it (its
-scope); a press on a bar that can move takes its scroll from older pointers and decides
-at once (a thumb has no slop), and a chain with no eligible axis decides at once (widgets
+scope); a press on a bar that can move makes the pointer its scroll's owner by the thumb
+at once (a thumb has no slop; one owner per scroll, by content or by a thumb), and a chain with no eligible axis decides at once (widgets
 in fitting panels are never pending). A chain link counts
 only if that scroll was declared and its layout solved last frame, so a vanished scroll
 takes nothing. While pending, the pressed widget sees `gesture_pending`. Each frame the
