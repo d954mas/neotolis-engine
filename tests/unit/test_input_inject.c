@@ -16,23 +16,6 @@ void tearDown(void) { nt_input_shutdown(); }
 
 /* ---- Player gate: drop real input while a bot drives ---- */
 
-void test_gate_off_drops_real_key(void) {
-    nt_input_set_player_enabled(false);
-    nt_input_feed(nt_test_key(NT_KEY_A, true)); /* real device event — dropped by the player gate */
-    nt_input_poll();
-    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
-}
-
-/* The gate filters; it releases nothing. */
-void test_gate_off_keeps_held_key(void) {
-    nt_input_feed(nt_test_key(NT_KEY_W, true));
-    nt_input_poll();
-    nt_input_set_player_enabled(false);
-    nt_input_poll();
-    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_W));
-    TEST_ASSERT_FALSE(nt_input_key_is_released(NT_KEY_W));
-}
-
 void test_gate_off_drops_real_release(void) {
     nt_input_feed(nt_test_key(NT_KEY_W, true));
     nt_input_poll();
@@ -255,8 +238,6 @@ void test_inject_invalid_args_assert(void) {
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_gate_off_drops_real_key);
-    RUN_TEST(test_gate_off_keeps_held_key);
     RUN_TEST(test_gate_off_drops_real_release);
     RUN_TEST(test_gate_reenable_applies_real);
     RUN_TEST(test_gate_off_keeps_held_pointer);

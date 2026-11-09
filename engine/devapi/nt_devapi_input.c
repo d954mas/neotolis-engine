@@ -22,8 +22,6 @@ static uint32_t s_sched_count;
 
 bool nt_devapi_input_sched_can_reserve(uint32_t n) { return n <= NT_DEVAPI_INPUT_SCHED_MAX - s_sched_count; }
 
-/* Whole-or-nothing: every handler preflights nt_devapi_input_sched_can_reserve(N) for its whole command before the
-   first sched call, so a near-full schedule never accepts a DOWN and rejects its UP. */
 void nt_devapi_input_sched(nt_input_event_t ev, uint16_t at_frame) {
     NT_ASSERT(nt_devapi_input_sched_can_reserve(1));
     s_sched[s_sched_count++] = (sched_entry_t){at_frame, ev};
@@ -98,9 +96,6 @@ static const char *const k_key_names[NT_KEY_COUNT] = {
 _Static_assert(NT_COUNTOF(k_key_names) == NT_KEY_COUNT, "key-name table must match nt_key_t");
 
 static bool nt_input_key_from_name(const char *name, nt_key_t *out) {
-    if (name == NULL || out == NULL) {
-        return false;
-    }
     for (int i = 0; i < NT_KEY_COUNT; i++) {
         if (strcmp(name, k_key_names[i]) == 0) {
             *out = (nt_key_t)i;

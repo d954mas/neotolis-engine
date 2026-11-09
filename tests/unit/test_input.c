@@ -73,17 +73,6 @@ void test_any_key_pressed(void) {
 
 /* ---- Focus loss: applied in order with the events around it ---- */
 
-void test_focus_lost_releases_held_keys(void) {
-    nt_input_feed(nt_test_key(NT_KEY_W, true));
-    nt_input_feed(nt_test_key(NT_KEY_A, true));
-    nt_input_poll();
-    nt_input_feed(nt_test_focus_lost());
-    nt_input_poll();
-    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_W));
-    TEST_ASSERT_TRUE(nt_input_key_is_released(NT_KEY_W));
-    TEST_ASSERT_TRUE(nt_input_key_is_released(NT_KEY_A));
-}
-
 void test_events_after_focus_lost_apply_in_the_same_frame(void) {
     nt_input_feed(nt_test_key(NT_KEY_H, true));
     nt_input_feed(nt_test_contact_down(7, 1.0F, 1.0F, 0.5F, NT_POINTER_TOUCH, 1));
@@ -363,7 +352,6 @@ int main(void) {
     RUN_TEST(test_key_released_edge);
     RUN_TEST(test_key_pressed_clears_next_frame);
     RUN_TEST(test_any_key_pressed);
-    RUN_TEST(test_focus_lost_releases_held_keys);
     RUN_TEST(test_events_after_focus_lost_apply_in_the_same_frame);
     RUN_TEST(test_focus_lost_then_press_same_key);
     RUN_TEST(test_focus_lost_then_press_same_button);

@@ -7,8 +7,7 @@
 #include <stdint.h>
 
 /* Input-group internals: the inject scheduler shared with the ui group (ui resolves coords then reuses
-   this one scheduler). Kept out of the core internal header so the core never knows the input group's
-   scheduler. Only included by group-on TUs. */
+   this one scheduler). Only included by group-on TUs. */
 
 /* Bounded BSS schedule cap (-D overridable). Lives here, not in nt_devapi_input.c, so the ui drag cap +
    the unit tests derive their sizes from the real cap. */

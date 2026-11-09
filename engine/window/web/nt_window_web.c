@@ -161,7 +161,6 @@ EM_JS(void, nt_window_web_register_input, (void), {
     canvas.addEventListener("blur", function() {
         ev(EV_FOCUS_LOST);
         mouseOwned = false; /* the release may land outside; a held capture or the next wheel must not press again */
-        mouseButtons = 0;
     });
 
     /* Pointer events — pass CSS-relative coords, C maps with engine DPR. Every mouse press, release and
@@ -169,12 +168,10 @@ EM_JS(void, nt_window_web_register_input, (void), {
        pen are contacts. The buttons
        count only from a press on the canvas until they are all up, like a native window: a drag from
        outside never presses, and a cancel or a blur never leaves a button stuck. */
-    var mouseButtons = 0;
     var mouseOwned = false;
     function mouseMove(e, buttons) {
-        mouseButtons = buttons & 7; /* back/forward buttons are not engine buttons */
         mouseOwned = mouseOwned && buttons !== 0; /* a held back button keeps the press on the canvas */
-        ev(EV_MOUSE_MOVE, e.clientX - rect.left, e.clientY - rect.top, mouseButtons);
+        ev(EV_MOUSE_MOVE, e.clientX - rect.left, e.clientY - rect.top, buttons & 7); /* back/forward are not engine buttons */
     }
 
     function ownedButtons(e) {
@@ -253,7 +250,7 @@ EM_JS(void, nt_window_web_register_input, (void), {
             dx /= WHEEL_PX_PER_NOTCH;
             dy /= WHEEL_PX_PER_NOTCH;
         }
-        mouseMove(e, mouseButtons); /* the wheel lands on the mouse at the cursor: a bot may have left it elsewhere */
+        mouseMove(e, ownedButtons(e)); /* the wheel lands on the mouse at the cursor: a bot may have left it elsewhere */
         ev(EV_WHEEL, dx, dy);
         e.preventDefault();
     }, {passive: false});
