@@ -150,23 +150,13 @@ static inline nt_ui_baked_xform_t nt_ui_internal_identity_baked(void) {
  * front-most hot-widget resolve. The transform/bbox are re-fetched by id at resolve time. */
 typedef struct {
     uint32_t id;
+    uint32_t scope; /* innermost scroll open when recorded (0 = none); scope == id marks a scroll surface */
     int16_t pad[4]; /* hit padding L/R/T/B */
 } nt_ui_interactive_t;
 
-/* Wheel-routing candidate: every scroll container/pane declared this frame appends one. The bbox is
- * NOT stored — nt_ui_end re-fetches it from the just-solved layout so the resolve and next frame's
- * consume read the same layout snapshot. Ownership is decided purely by bbox containment; per-axis
- * gating lives in the consume step. The winner per pointer lands in wheel_owner[]. */
-typedef struct {
-    uint32_t id;
-    uint16_t depth; /* scroll-nesting depth; deeper (inner) wins */
-} nt_ui_wheel_candidate_t;
-
-/* Deep scroll nesting is rare; a small cap keeps the list in BSS (no heap in hot path).
- * The DEBUG_TOOLS inspector registers 2 of these (tree + selection panes), so the effective
- * game budget is this minus 2 when the inspector is active. */
-#ifndef NT_UI_WHEEL_CANDIDATES
-#define NT_UI_WHEEL_CANDIDATES 24
+/* Scroll nesting depth; popups and the menu occluder each push a 0 barrier on the same stack. */
+#ifndef NT_UI_SCROLL_MAX_DEPTH
+#define NT_UI_SCROLL_MAX_DEPTH 16
 #endif
 
 /* Nested-modal cap (fail-early assert on overflow; depth is a counter, no heap). Depth is the
@@ -187,6 +177,12 @@ typedef struct {
     float pos[2];       /* current UI-space pos; drag = pos - press_pos */
     float hold_secs;    /* dt accumulated since the press */
     float hold_prev_secs;
+    /* Scroll gesture of this press: the scope chain still deciding it (0 = decided or none). Lives
+     * from the press edge to the release, independent of active_id (an empty-area press has none). */
+    uint32_t scroll_scope;
+    /* Holder of the previous gesture when release and a new press share one frame: it still gets
+     * its release (and click) while the new press captures freely. Cleared every begin. */
+    uint32_t released_id;
     bool hold_live;    /* false once the pointer left the hitbox; only a new press restarts the hold */
     uint8_t drag_axes; /* NT_UI_DRAG_* the capturing widget drags along itself (from its step desc) */
 } nt_ui_capture_t;
@@ -231,13 +227,13 @@ struct nt_ui_context {
      * by alignment (after the 4B-aligned captures) to avoid adding struct padding. */
     nt_ui_hot_t pointer_hot[NT_INPUT_MAX_POINTERS];
     float pointer_occlusion[NT_INPUT_MAX_POINTERS]; /* max world ray distance; default +inf = no cutoff */
-    /* Exclusive wheel routing (innermost-wins): the scroll id allowed to consume this pointer's wheel
-     * this frame (0 = free). Resolved at the end of the previous frame from the candidate list below,
-     * so it carries the same 1-frame lag as every prev-frame bbox hit-test. Frame 1: all 0. */
-    uint32_t wheel_owner[NT_INPUT_MAX_POINTERS];
-    /* This frame's wheel candidates; cleared in begin, appended by every scroll_begin/pane, resolved
-     * in end (which re-fetches + sanity-checks each bbox). wheel_depth: live nesting counter (begin++/end--). */
-    nt_ui_wheel_candidate_t wheel_candidates[NT_UI_WHEEL_CANDIDATES];
+    /* Scope of the front-most record under each pointer (set with pointer_hot) — where its scroll
+     * chain starts. */
+    uint32_t pointer_scope[NT_INPUT_MAX_POINTERS];
+    /* Per pointer and axis (0 = x, 1 = y): the scroll allowed to consume this frame's wheel. */
+    uint32_t wheel_owner[NT_INPUT_MAX_POINTERS][2];
+    /* Declaration stack of open scrolls (0 = popup barrier); top = scroll_top. */
+    uint32_t scroll_stack[NT_UI_SCROLL_MAX_DEPTH + NT_UI_MODAL_MAX_DEPTH];
     /* Top-modal targeting with the standard 1-frame IM lag: _cur tracks the DEEPEST modal id seen
      * this frame; nt_ui_begin commits it into _prev, which the Esc/backdrop close-scan targets so
      * only the genuinely-topmost modal consumes the event (same-frame nesting can't be known at
@@ -256,7 +252,6 @@ struct nt_ui_context {
      * tracks the earliest field so Tab off the last field wraps to the first. */
     uint32_t focus_tab_seek;
     uint32_t focus_first_id;
-    uint32_t wheel_candidate_count;
     /* Raw rich-text per-block caps (0 = compile-time NT_UI_RICH_MAX_* default); resolved in
      * nt_ui_rich_begin, which owns the rich #defines. Raw here so this widget-agnostic header stays
      * rich-text-agnostic. Slotted into the uint32 run so they add no struct padding. */
@@ -265,7 +260,7 @@ struct nt_ui_context {
     uint32_t rich_max_text_bytes;
     /* Band each overlay level declares above the floating enclosing it; validated in create_context (> 1). */
     int16_t modal_zband_stride;
-    uint16_t wheel_depth;
+    uint16_t scroll_top;
     uint8_t active_modal_depth;
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
     bool pointer_over_any;
@@ -410,7 +405,9 @@ struct nt_ui_context {
     float element_depth_bias_ndc;
     /* App-wide gesture constants, see nt_ui_set_gesture_constants. Grouped with the float block to avoid padding. */
     float gesture_dbl_window_secs;
-    float gesture_move_radius;
+    float gesture_move_radius_dp;
+    float gesture_drag_slop_dp;
+    float layout_per_dp[2]; /* layout units per dp on x/y, from the viewport each frame */
     uint32_t last_press_id; /* widget of the previous press; 0 = nothing to pair with */
     float last_press_age;   /* dt accumulated since that press */
     float last_press_pos[2];
@@ -592,11 +589,26 @@ void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *targ
 /* Scroll offset for an engine-internal clip pane (inspector) keyed by Clay element id; drives
  * the custom scroll integrator off prev-frame dims + wheel. Feed the result to clip.childOffset.
  * `tag` keeps each pane's state cell distinct (NT_UI_STATE_TAG). */
-Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id, uint32_t tag, bool scroll_x, bool scroll_y);
+Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id, bool scroll_x, bool scroll_y);
 
-/* End-of-frame wheel-owner resolve: picks, per pointer, the winning scroll candidate (max depth,
- * then min bbox area, then latest declaration) into ctx->wheel_owner[] for NEXT frame's consume. */
-void nt_ui_internal_resolve_wheel_owners(nt_ui_context_t *ctx);
+/* Scroll gesture arbiter, run once per frame from the pointer gate (before any interaction result
+ * leaves the engine): starts press records, decides crossings, resolves wheel owners. */
+void nt_ui_internal_scroll_arbitrate(nt_ui_context_t *ctx);
+
+/* End-of-frame: writes each declared scroll's eligible axes from the just-solved layout, the
+ * snapshot next frame's arbiter and hot resolve read. */
+void nt_ui_internal_scroll_finalize(nt_ui_context_t *ctx);
+
+/* A hot hit on a scroll surface counts only while that scroll can move (a fitting list is see-through). */
+bool nt_ui_internal_scroll_surface_live(nt_ui_context_t *ctx, uint32_t id);
+
+/* Adds a registry record for the front-most resolve with the current scroll scope. */
+void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4], uint32_t scope);
+
+/* Declaration stack: scrolls push their id, popups push 0 (a barrier for the scroll chain). */
+void nt_ui_internal_scroll_push(nt_ui_context_t *ctx, uint32_t id);
+void nt_ui_internal_scroll_pop(nt_ui_context_t *ctx);
+static inline uint32_t nt_ui_internal_scroll_open(const nt_ui_context_t *ctx) { return (ctx->scroll_top > 0U) ? ctx->scroll_stack[ctx->scroll_top - 1U] : 0U; }
 
 /* Prev-frame transform-aware point-in-bbox test (same 1-frame IM lag as step/query), with optional
  * L/R/T/B padding. Sets the Clay current-ctx internally. Used by the modal close-on-backdrop guard. */

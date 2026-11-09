@@ -115,7 +115,7 @@ static void declare_hud_scaled(void) {
     const nt_ui_scale_t scale = nt_ui_compute_scale(&sdesc, fb_w, fb_h);
     /* begin with the LOGICAL dims (Clay layout space); the viewport bridges logical<->device. */
     nt_ui_begin(s_hud_scaled_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, g_nt_input.pointers, NT_INPUT_MAX_POINTERS, g_nt_input.primary);
-    nt_ui_set_viewport(s_hud_scaled_ctx, nt_ui_viewport_from_scale(&scale));
+    nt_ui_set_viewport(s_hud_scaled_ctx, nt_ui_viewport_from_scale(&scale, g_nt_window.dpr));
     CLAY({.id = CLAY_ID("scaled_root"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(20), .childGap = 12}}) {
         CLAY({.id = CLAY_ID("scaled_btn"), .layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(30)}}}) {}
     }

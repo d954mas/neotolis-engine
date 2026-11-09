@@ -113,9 +113,9 @@ static void test_scroll_to_reaches_target(void) {
         nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, &s_physics_style);
         ++frames;
     }
-    TEST_ASSERT_TRUE(frames < 600);                                                   /* arrived */
-    TEST_ASSERT_EQUAL_UINT8(0U, s.flags & NT_UI_SCROLL_FLAG_SCROLL_TO);               /* flag cleared */
-    TEST_ASSERT_TRUE(float_near(s.pos[1], -500.0F, NT_UI_SCROLL_STEAL_THRESHOLD_PX)); /* near target */
+    TEST_ASSERT_TRUE(frames < 600);                                     /* arrived */
+    TEST_ASSERT_EQUAL_UINT8(0U, s.flags & NT_UI_SCROLL_FLAG_SCROLL_TO); /* flag cleared */
+    TEST_ASSERT_TRUE(float_near(s.pos[1], -500.0F, 1.0F));              /* near target */
 }
 
 /* ---- Test 5: Clay sign — a positive (Clay-sign) wheel down moves childOffset negative ---- */
@@ -185,9 +185,16 @@ static void test_scroll_release_crossing_threshold_allows_next_press(void) {
     p.buttons[NT_BUTTON_LEFT].is_released = true;
     p.y = 80.0F;
     TEST_ASSERT_FALSE(scroll_child_frame(&p, &style).clicked);
-    TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
+    /* The scroll owns the release frame, so the game does not see a world release there. */
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
+    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
 
     p.buttons[NT_BUTTON_LEFT].is_released = false;
+    scroll_child_frame(&p, &style);
+    TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id); /* nothing carried past the release */
+    for (int i = 0; i < 180; ++i) {
+        scroll_child_frame(&p, &style); /* let the release fling settle: a press on a fling only stops it */
+    }
     p.buttons[NT_BUTTON_LEFT].is_down = true;
     p.buttons[NT_BUTTON_LEFT].is_pressed = true;
     p.y = 120.0F;
@@ -225,11 +232,11 @@ static void test_scroll_steal_real_child_tracks_current_pointer(void) {
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
     const nt_ui_scroll_state_t *s = nt_ui_state_find(s_fx.ctx, SCROLL_ID);
     TEST_ASSERT_NOT_NULL(s);
-    TEST_ASSERT_TRUE(float_near(s->raw[1], 0.0F, 0.001F));
+    TEST_ASSERT_TRUE(float_near(s->raw[1], -12.0F, 0.001F)); /* the 20 px move minus the 8 dp slop */
     p.y = 60.0F;
     scroll_child_frame(&p, &style);
     s = nt_ui_state_find(s_fx.ctx, SCROLL_ID);
-    TEST_ASSERT_TRUE(float_near(s->raw[1], -20.0F, 0.001F));
+    TEST_ASSERT_TRUE(float_near(s->raw[1], -32.0F, 0.001F)); /* then 1:1 */
 }
 
 static void test_scroll_threshold_ignores_disabled_axis(void) {
@@ -301,10 +308,11 @@ static void test_scroll_childoffset_from_our_pos(void) {
     TEST_ASSERT_TRUE(float_near(oy, -150.0F, 1.0F)); /* emitted offset == our pos */
 }
 
-/* Inject a simulated inner-widget capture on pointer 0 with the given press/cur pos,
- * marking it seen so nt_ui_begin's orphan-clear preserves it. */
+/* Inject a simulated inner-widget capture on pointer 0 with the given press/cur pos and the press
+ * record of a widget declared inside SCROLL_ID, marking it seen so nt_ui_begin's orphan-clear keeps it. */
 static void inject_inner_capture(uint32_t inner_id, float press_x, float press_y, float cur_x, float cur_y) {
     s_fx.ctx->captures[0].active_id = inner_id;
+    s_fx.ctx->captures[0].scroll_scope = SCROLL_ID;
     s_fx.ctx->captures[0].press_pos[0] = press_x;
     s_fx.ctx->captures[0].press_pos[1] = press_y;
     s_fx.ctx->captures[0].pos[0] = cur_x;
@@ -426,12 +434,6 @@ static void test_scroll_capture_steal_drag(void) {
     p.y = 160.0F;                             /* +20 px further down */
     p.buttons[NT_BUTTON_LEFT].is_down = true; /* finger still held — the OWNED path routes the drag */
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
-    s_fx.ctx->captures[0].active_id = SCROLL_ID; /* container owns it now (claimed last frame) */
-    s_fx.ctx->captures[0].press_pos[0] = 100.0F; /* matches last frame's re-anchor (cap->pos was 140) */
-    s_fx.ctx->captures[0].press_pos[1] = 140.0F;
-    s_fx.ctx->captures[0].pos[0] = 100.0F;
-    s_fx.ctx->captures[0].pos[1] = 160.0F;
-    s_fx.ctx->capture_seen[0] = 1U;
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &style, NULL);
         {
@@ -1364,8 +1366,10 @@ static void test_scroll_release_reclaims_on_next_edge(void) {
     p.buttons[NT_BUTTON_LEFT].is_released = true;
     scroll_frame(&p, &style);
     p.buttons[NT_BUTTON_LEFT].is_released = false;
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U)); /* owns its release frame */
+    scroll_frame(&p, &style);
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0U)); /* released */
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 0; i < 7; ++i) {
         scroll_frame(&p, &style);
     }
     s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
@@ -2256,27 +2260,398 @@ static void test_scrollbar_nested_clipped_to_outer(void) {
     TEST_ASSERT_EQUAL_INT_ARRAY(expected, scissors[1], 4);
 }
 
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
-/* Declaring more scroll containers in one frame than the candidate cap traps (no silent wheel-dead). */
-static void candidate_overflow_frame(void) {
-    nt_pointer_t p = {0};
-    p.active = true;
-    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
-    CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(800), CLAY_SIZING_FIXED(600)}}}) {
-        for (uint32_t i = 0; i <= (uint32_t)NT_UI_WHEEL_CANDIDATES; ++i) {
-            nt_ui_scroll_begin(s_fx.ctx, NULL, 0x100U + i, &style, NULL);
-            nt_ui_scroll_end(s_fx.ctx);
+// #region gesture arbitration (real declaration order)
+/* A 200x200 list at the layout origin with 1000-tall content. `body` declares what sits inside the
+ * list (stepped between its begin and end); `outside_before` / `outside_after` declare root-level
+ * floating UI before / after the list. */
+typedef struct {
+    void (*outside_before)(void);
+    void (*body)(void);
+    void (*outside_after)(void);
+    nt_ui_scroll_style_t style;
+    float content_h;
+    float px_per_dp; /* 0 = keep the identity viewport */
+} arb_scene_t;
+
+static arb_scene_t s_scene;
+static nt_ui_interaction_t s_child_in;
+static nt_ui_interaction_t s_fg_in;
+
+static void arb_frame(const nt_pointer_t *pointers, uint32_t count) {
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, pointers, count, 0);
+    if (s_scene.px_per_dp > 0.0F) {
+        nt_ui_set_viewport(s_fx.ctx, (nt_ui_viewport_t){.x = 0.0F, .y = 0.0F, .w = 800.0F, .h = 600.0F, .px_per_dp = s_scene.px_per_dp});
+    }
+    if (s_scene.outside_before != NULL) {
+        s_scene.outside_before();
+    }
+    CLAY({.id = CLAY_ID("arb_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &s_scene.style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}});
+        CLAY({.id = CLAY_ID("arb_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(s_scene.content_h)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+            if (s_scene.body != NULL) {
+                s_scene.body();
+            }
         }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    if (s_scene.outside_after != NULL) {
+        s_scene.outside_after();
     }
     nt_ui_end(s_fx.ctx);
 }
 
-static void test_assert_wheel_candidate_overflow(void) { NT_TEST_EXPECT_ASSERT(candidate_overflow_frame()); }
+static void arb_scene_reset(void) {
+    s_scene = (arb_scene_t){.style = nt_ui_scroll_style_defaults(), .content_h = 1000.0F};
+    s_scene.style.rubber_band_c = 0.0F; /* raw == the routed drag, easy to read */
+    s_child_in = (nt_ui_interaction_t){0};
+    s_fg_in = (nt_ui_interaction_t){0};
+}
+
+static nt_pointer_t arb_pointer(float x, float y) {
+    nt_pointer_t p = {0};
+    p.x = x;
+    p.y = y;
+    p.active = true;
+    return p;
+}
+
+static void arb_press(nt_pointer_t *p) {
+    p->buttons[NT_BUTTON_LEFT].is_down = true;
+    p->buttons[NT_BUTTON_LEFT].is_pressed = true;
+}
+
+static void arb_hold(nt_pointer_t *p) { p->buttons[NT_BUTTON_LEFT].is_pressed = false; }
+
+static void arb_release(nt_pointer_t *p) {
+    p->buttons[NT_BUTTON_LEFT].is_pressed = false;
+    p->buttons[NT_BUTTON_LEFT].is_down = false;
+    p->buttons[NT_BUTTON_LEFT].is_released = true;
+}
+
+static const nt_ui_scroll_state_t *arb_list(void) { return (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID); }
+
+/* Bodies: a full-width 60-tall row, as a button, a disabled row, or an x-draggable. */
+static void body_button_row(void) {
+    CLAY({.id = CLAY_ID("arb_row"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(60)}}}) { s_child_in = nt_ui_step(s_fx.ctx, CLAY_ID("arb_row").id, NULL); }
+}
+static void body_disabled_row(void) {
+    CLAY({.id = CLAY_ID("arb_row"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(60)}}}) { nt_ui_block_pointer(s_fx.ctx, CLAY_ID("arb_row").id, NULL); }
+}
+static void body_x_draggable_row(void) {
+    CLAY({.id = CLAY_ID("arb_row"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(60)}}}) {
+        s_child_in = nt_ui_step(s_fx.ctx, CLAY_ID("arb_row").id, &(nt_ui_step_desc_t){.drag_axes = NT_UI_DRAG_X});
+    }
+}
+/* A floating foreground button over the list, declared OUTSIDE it (before). */
+static void outside_fg_button(void) {
+    CLAY({.id = CLAY_ID("arb_fg"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = 10, .offset = {.x = 50.0F, .y = 50.0F}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(80)}}}) {
+        s_fg_in = nt_ui_step(s_fx.ctx, CLAY_ID("arb_fg").id, NULL);
+    }
+}
+/* An inert modal catcher over the whole screen, declared after the list. */
+static void outside_modal_blocker(void) {
+    CLAY({.id = CLAY_ID("arb_modal"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = 10}, .layout = {.sizing = {CLAY_SIZING_FIXED(800), CLAY_SIZING_FIXED(600)}}}) {
+        nt_ui_block_pointer(s_fx.ctx, CLAY_ID("arb_modal").id, NULL);
+    }
+}
+
+static void arb_warm(nt_pointer_t *p) {
+    arb_frame(p, 1);
+    arb_frame(p, 1);
+}
+
+/* A widget declared outside a list, floating over it, keeps its drag (#862). */
+static void test_arb_foreground_outside_list_not_stolen(void) {
+    arb_scene_reset();
+    s_scene.outside_before = outside_fg_button;
+    nt_pointer_t p = arb_pointer(90.0F, 90.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(CLAY_ID("arb_fg").id, s_fx.ctx->captures[0].active_id);
+    arb_hold(&p);
+    p.y = 50.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(CLAY_ID("arb_fg").id, s_fx.ctx->captures[0].active_id);
+    TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], 0.0F, 0.001F));
+}
+
+/* An inert modal over a flinging list: the press neither stops the fling nor scrolls the list. */
+static void test_arb_modal_blocks_tap_to_stop_and_drag(void) {
+    arb_scene_reset();
+    s_scene.outside_after = outside_modal_blocker;
+    nt_pointer_t p = arb_pointer(100.0F, 100.0F);
+    arb_warm(&p);
+    ((nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID))->vel[1] = -2000.0F;
+    arb_press(&p);
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
+    TEST_ASSERT_TRUE(fabsf(arb_list()->vel[1]) > 100.0F); /* still flinging */
+    arb_hold(&p);
+    p.y = 60.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
+    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx)); /* the modal is UI under the pointer */
+}
+
+/* A drag that starts on a disabled row (an inert blocker inside the list) still scrolls. */
+static void test_arb_drag_from_disabled_row_scrolls(void) {
+    arb_scene_reset();
+    s_scene.body = body_disabled_row;
+    nt_pointer_t p = arb_pointer(100.0F, 30.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    arb_hold(&p);
+    p.y = 0.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
+    TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], -22.0F, 0.001F));
+}
+
+/* A thumb arc (14, 10): the list takes it once its own axis crosses the slop, despite more x. */
+static void test_arb_diagonal_arc_scrolls_vertical_list(void) {
+    arb_scene_reset();
+    s_scene.body = body_button_row;
+    nt_pointer_t p = arb_pointer(100.0F, 30.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    arb_hold(&p);
+    p.x = 114.0F;
+    p.y = 20.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
+    arb_release(&p);
+    arb_frame(&p, 1);
+    TEST_ASSERT_FALSE(s_child_in.clicked); /* the row was cancelled */
+}
+
+/* Both axes cross in one frame: the stronger crossing wins — a mostly-vertical flick scrolls the
+ * list, a mostly-horizontal one stays with the x-draggable row. */
+static void test_arb_strongest_crossing_wins(void) {
+    arb_scene_reset();
+    s_scene.body = body_x_draggable_row;
+    nt_pointer_t p = arb_pointer(100.0F, 40.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    arb_hold(&p);
+    p.x = 110.0F;
+    p.y = 12.0F; /* (10, -28) */
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
+}
+
+static void test_arb_strongest_crossing_keeps_horizontal_with_row(void) {
+    arb_scene_reset();
+    s_scene.body = body_x_draggable_row;
+    nt_pointer_t p = arb_pointer(100.0F, 40.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    arb_hold(&p);
+    p.x = 128.0F;
+    p.y = 30.0F; /* (28, -10) */
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(CLAY_ID("arb_row").id, s_fx.ctx->captures[0].active_id);
+    TEST_ASSERT_FALSE(s_child_in.gesture_pending);
+}
+
+/* A second finger dragging the same list takes it over; the first finger lets go of it. */
+static void test_arb_newest_pointer_takes_list(void) {
+    arb_scene_reset();
+    nt_pointer_t ps[2] = {arb_pointer(50.0F, 150.0F), arb_pointer(150.0F, 150.0F)};
+    ps[1].id = 7U;
+    arb_frame(ps, 2);
+    arb_frame(ps, 2);
+    arb_press(&ps[0]);
+    arb_frame(ps, 2);
+    arb_hold(&ps[0]);
+    ps[0].y = 120.0F;
+    arb_frame(ps, 2);
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
+    arb_press(&ps[1]);
+    arb_frame(ps, 2);
+    arb_hold(&ps[1]);
+    ps[1].y = 120.0F;
+    arb_frame(ps, 2);
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[1].active_id);
+    TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
+}
+
+/* A list whose content fits is see-through; an overflowing one counts as UI over its empty area. */
+static void test_arb_fitting_list_is_see_through(void) {
+    arb_scene_reset();
+    s_scene.content_h = 100.0F;
+    nt_pointer_t p = arb_pointer(100.0F, 150.0F);
+    arb_warm(&p);
+    arb_frame(&p, 1);
+    TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx));
+    s_scene.content_h = 1000.0F;
+    arb_warm(&p);
+    arb_frame(&p, 1);
+    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
+}
+
+/* The slop is physical: at 3 device px per dp the 8 dp slop is 24 layout units here. */
+static void test_arb_slop_is_in_dp(void) {
+    arb_scene_reset();
+    s_scene.px_per_dp = 3.0F;
+    nt_pointer_t p = arb_pointer(100.0F, 150.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    arb_hold(&p);
+    p.y = 130.0F; /* 20 units: below 24 */
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
+    p.y = 120.0F; /* 30 units: past it, the excess 6 is routed */
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
+    TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], -6.0F, 0.001F));
+}
+
+/* Nested X track inside the Y list: each axis goes to the scroll that moves on it, also for wheel. */
+static void body_x_track(void) {
+    nt_ui_scroll_style_t st = nt_ui_scroll_style_defaults();
+    st.scroll_x = true;
+    st.scroll_y = false;
+    st.rubber_band_c = 0.0F;
+    st.wheel_ease_speed = 0.0F;
+    nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID + 1U, &st, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(100)}}});
+    CLAY({.id = CLAY_ID("arb_track_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(1000), CLAY_SIZING_FIXED(100)}}}) {}
+    nt_ui_scroll_end(s_fx.ctx);
+}
+
+static void test_arb_nested_axes_route_to_their_scroll(void) {
+    arb_scene_reset();
+    s_scene.body = body_x_track;
+    s_scene.style.wheel_ease_speed = 0.0F;
+    nt_pointer_t p = arb_pointer(100.0F, 50.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    arb_hold(&p);
+    p.y = 20.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id); /* vertical: the outer list */
+}
+
+static void test_arb_nested_horizontal_drag_goes_to_track(void) {
+    arb_scene_reset();
+    s_scene.body = body_x_track;
+    nt_pointer_t p = arb_pointer(100.0F, 50.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    arb_hold(&p);
+    p.x = 70.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID + 1U, s_fx.ctx->captures[0].active_id); /* horizontal: the track */
+}
+
+static void test_arb_nested_vertical_wheel_passes_to_list(void) {
+    arb_scene_reset();
+    s_scene.body = body_x_track;
+    s_scene.style.wheel_ease_speed = 0.0F;
+    nt_pointer_t p = arb_pointer(100.0F, 50.0F);
+    arb_warm(&p);
+    const float before = arb_list()->pos[1];
+    p.wheel_dy = 1.0F; /* vertical wheel over the X track reaches the Y list */
+    arb_frame(&p, 1);
+    TEST_ASSERT_TRUE(arb_list()->pos[1] < before);
+}
+
+/* Release and a new press in one frame: the old widget gets its release, the new press captures. */
+static nt_ui_interaction_t s_a_in;
+static nt_ui_interaction_t s_b_in;
+static void two_buttons_frame(const nt_pointer_t *p) {
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
+    CLAY({.id = CLAY_ID("two_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(100)}}}) {
+        CLAY({.id = CLAY_ID("btn_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}}) { s_a_in = nt_ui_step(s_fx.ctx, CLAY_ID("btn_a").id, NULL); }
+        CLAY({.id = CLAY_ID("btn_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}}) { s_b_in = nt_ui_step(s_fx.ctx, CLAY_ID("btn_b").id, NULL); }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+static void test_release_and_press_in_one_frame(void) {
+    nt_pointer_t p = arb_pointer(50.0F, 50.0F);
+    two_buttons_frame(&p);
+    two_buttons_frame(&p);
+    arb_press(&p);
+    two_buttons_frame(&p);
+    TEST_ASSERT_TRUE(s_a_in.pressed_now);
+    /* Up on A and down on B within one frame. */
+    p.x = 150.0F;
+    p.buttons[NT_BUTTON_LEFT].is_released = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    two_buttons_frame(&p);
+    TEST_ASSERT_TRUE(s_a_in.released_now);
+    TEST_ASSERT_FALSE(s_a_in.pressed);
+    TEST_ASSERT_TRUE(s_b_in.pressed_now);
+    TEST_ASSERT_FALSE(s_b_in.released_now);
+    TEST_ASSERT_EQUAL_UINT32(CLAY_ID("btn_b").id, s_fx.ctx->captures[0].active_id);
+
+    /* Retap of the same widget: its release and its new press both land. */
+    p.buttons[NT_BUTTON_LEFT].is_released = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    two_buttons_frame(&p);
+    TEST_ASSERT_TRUE(s_b_in.clicked);
+    TEST_ASSERT_TRUE(s_b_in.pressed_now);
+    TEST_ASSERT_EQUAL_UINT32(CLAY_ID("btn_b").id, s_fx.ctx->captures[0].active_id);
+}
+
+/* rubber_band_c == 0: a drag past the edge leaves no dead zone — reversing moves content at once. */
+static void test_hard_edge_drag_reversal_has_no_dead_zone(void) {
+    const nt_ui_scroll_style_t style = {.friction = 0.92F, .wheel_step_px = 40.0F};
+    const float content[2] = {0.0F, 1000.0F};
+    const float container[2] = {0.0F, 200.0F};
+    const float wheel[2] = {0.0F, 0.0F};
+    nt_ui_scroll_state_t s = {.flags = NT_UI_SCROLL_FLAG_DRAGGING};
+    s.raw[1] = 50.0F; /* dragged 50 past the top edge */
+    nt_ui_scroll_test_integrate(&s, wheel, 1.0F / 60.0F, content, container, &style);
+    TEST_ASSERT_TRUE(float_near(s.pos[1], 0.0F, 0.001F));
+    s.raw[1] -= 10.0F; /* finger reverses 10 */
+    nt_ui_scroll_test_integrate(&s, wheel, 1.0F / 60.0F, content, container, &style);
+    TEST_ASSERT_TRUE(float_near(s.pos[1], -10.0F, 0.001F));
+}
+// #endregion
+
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+/* Nesting scrolls past the declaration-stack cap traps instead of losing scope links. */
+static void nesting_overflow_frame(void) {
+    nt_pointer_t p = {0};
+    p.active = true;
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
+    for (uint32_t i = 0; i <= (uint32_t)(NT_UI_SCROLL_MAX_DEPTH + NT_UI_MODAL_MAX_DEPTH); ++i) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, 0x100U + i, &style, NULL);
+    }
+}
+
+static void test_assert_scroll_nesting_overflow(void) { NT_TEST_EXPECT_ASSERT(nesting_overflow_frame()); }
 #endif /* NT_ASSERT_MODE == NT_ASSERT_FULL */
 
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_arb_foreground_outside_list_not_stolen);
+    RUN_TEST(test_arb_modal_blocks_tap_to_stop_and_drag);
+    RUN_TEST(test_arb_drag_from_disabled_row_scrolls);
+    RUN_TEST(test_arb_diagonal_arc_scrolls_vertical_list);
+    RUN_TEST(test_arb_strongest_crossing_wins);
+    RUN_TEST(test_arb_strongest_crossing_keeps_horizontal_with_row);
+    RUN_TEST(test_arb_newest_pointer_takes_list);
+    RUN_TEST(test_arb_fitting_list_is_see_through);
+    RUN_TEST(test_arb_slop_is_in_dp);
+    RUN_TEST(test_arb_nested_axes_route_to_their_scroll);
+    RUN_TEST(test_arb_nested_horizontal_drag_goes_to_track);
+    RUN_TEST(test_arb_nested_vertical_wheel_passes_to_list);
+    RUN_TEST(test_release_and_press_in_one_frame);
+    RUN_TEST(test_hard_edge_drag_reversal_has_no_dead_zone);
     RUN_TEST(test_scroll_momentum_decays_monotonic);
     RUN_TEST(test_scroll_steal_real_child_tracks_current_pointer);
     RUN_TEST(test_scroll_release_crossing_threshold_allows_next_press);
@@ -2338,7 +2713,7 @@ int main(void) {
     RUN_TEST(test_scrollbar_standalone_renders_inside_clip);
     RUN_TEST(test_scrollbar_nested_clipped_to_outer);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
-    RUN_TEST(test_assert_wheel_candidate_overflow);
+    RUN_TEST(test_assert_scroll_nesting_overflow);
 #endif
     return UNITY_END();
 }

@@ -247,12 +247,16 @@ measured peak.
 ## Interaction model
 
 Game ids interact via `nt_ui_query_interaction`
-(idempotent until the step, multiple calls per frame OK) and `nt_ui_step`
-(mutating, exactly one call per id per frame). The step commits capture, so a later
+(idempotent until the step, multiple calls per frame OK) and
+`nt_ui_step(ctx, id, desc)` (mutating, exactly one call per id per frame; `desc` carries
+the hit padding and the drag axes the widget consumes itself, NULL for a plain tap
+target). The step commits capture, so a later
 query that frame can read different edges: read one-shot edges from the step's
 result, and `double_clicked` only from there. Capture is per-pointer:
 a press records `active_id`; release clears. Other widgets are
-`exclusive_gated` while one holds capture. **Orphan cleanup** at
+`exclusive_gated` while one holds capture. When a release and a new press arrive in
+one frame, the old holder still gets its release (and click) and the new press
+captures freely, also when it lands on the same widget. **Orphan cleanup** at
 `nt_ui_begin` drops `active_id` if the widget didn't call step last
 frame — covers scene switches, conditional disable, and widget hide. It also drops
 `active_id` when a pointer has no release edge and its button is up or newly pressed:
@@ -264,16 +268,20 @@ frame's bbox); no stuck input on widget disappearance.
 
 When interactive widgets overlap a pointer, only
 the front-most may react; the rest are gated off. The hot widget per pointer
-is resolved once per frame — lazily, on the first `nt_ui_step` /
-`query_interaction` / `nt_ui_pointer_hot` — from the PREVIOUS frame's
-interactive registry; only widgets that called `nt_ui_step` last
-frame are candidates. 3D ctx (`use_raycast_input`): nearest world ray-distance
-within a game-fed occlusion cutoff (`nt_ui_set_pointer_occlusion`, reset each
-begin) so UI can't be clicked through world geometry — the game owns the
-raycast, the engine only takes the cutoff distance; `nt_ui_interaction_t.distance`
-reports the hit distance. 2D ctx: highest effective Clay zIndex (tie →
-last-registered, i.e. the later `nt_ui_step` call; widget code should step
-in declaration order so this matches paint order). A free pointer drives a
+is resolved once per frame — lazily, at the frame's first pointer use (a step, a
+query, `nt_ui_pointer_hot`, a scroll or menu begin) — from the PREVIOUS frame's
+interactive registry; only widgets that called `nt_ui_step` (or registered as a
+blocker or scroll surface) last frame are candidates. 3D ctx (`use_raycast_input`):
+nearest world ray-distance within a game-fed occlusion cutoff
+(`nt_ui_set_pointer_occlusion`, reset each begin) so UI can't be clicked through
+world geometry — the game owns the raycast, the engine only takes the cutoff distance;
+`nt_ui_interaction_t.distance` reports the hit distance. Hits within a relative 1e-5 of
+the nearest distance are coplanar and compete like 2D. 2D ctx: highest effective Clay
+zIndex (tie → last-registered, i.e. the later `nt_ui_step` call; widget code should
+step in declaration order so this matches paint order). Any resolved hit counts as UI
+under the pointer for `nt_ui_wants_pointer`. Each registry record also stores its
+scroll scope (the innermost scroll open when it registered), which starts the scroll
+chain of a press on it. A free pointer drives a
 widget only if it is the resolved hot
 widget or already holds capture; `nt_ui_pointer_hot` exposes the resolved id.
 Consequence: a freshly-shown widget registers on its first step and only
@@ -389,32 +397,49 @@ and animated `nt_ui_scroll_to`. Release-fling velocity is tracked over a TIME WI
 (`TAU_GAIN`/`TAU_DECAY`), not a per-frame delta: a moving frame blends toward the
 instantaneous sample, a zero-delta frame decays toward 0, so a fling survives pointer
 events arriving slower than the render loop instead of depending on release-frame parity.
-A press landing on a flinging container stops the fling and is swallowed (tap-to-stop).
 Per-container scroll state (pos/vel/target/flags)
-rides the state pool keyed by the scroll id; no heap. Wheel input is normalized to a
-NOTCH unit at the platform edge — `1.0 == one physical detent` (GLFW pass-through; web
-`deltaMode` divided to notches), so wheel strength is platform-independent and the
-consumer scales by `wheel_step_px`. Wheel routing is exclusive
-(innermost-wins): each frame every scroll container registers as a candidate, and
-ownership is resolved at frame END — for each pointer the engine picks the candidate
-whose just-solved bbox holds it (ranked by max scroll-nesting depth, then smallest
-area, then latest declaration) and writes a single owner per pointer. That owner is
-consumed the NEXT frame, so wheel routing carries a 1-frame lag: a newly shown
-container sees its first wheel notch one frame late (the same intrinsic IM lag as
-hit-test, which reads the previous frame's bbox). All scroll sizes and pixel
-thresholds (`NT_UI_SCROLL_STEAL_THRESHOLD_PX`, `wheel_step_px`, bar/hit dimensions)
-are in the coordinate space passed to `nt_ui_begin` — NOT framebuffer pixels; games
-typically feed `nt_ui_scale`'s logical space, so these are resolution-independent.
-Capture-steal-by-threshold
-(`NT_UI_SCROLL_STEAL_THRESHOLD_PX`, ~8 px) arbitrates an inner widget's click vs a
-scroll drag: a drag past the threshold cancels the inner capture and scrolls; a tap
-below it leaves the inner widget to click. On the latch frame the steal routes zero
-positional delta and anchors at the current pointer position, tracking 1:1 from the
-next frame; the cancelled inner widget keeps any value change it made before the steal
-(Model D — the value lives in the game, so the engine cannot revert it). A free-press
-drag consumes the threshold using only axes that are enabled and overflow. A release
-that first crosses the threshold cancels the child without retaining capture. With
-both rubber-band and bounce coefficients zero, release momentum clamps at the edge. The
+rides the state pool keyed by the scroll id; no heap. With `rubber_band_c == 0` the
+edge is hard for drag and fling (no reversal dead zone); a rubber band needs
+`bounce_speed > 0` to return (asserted).
+
+**Gesture arbitration.** One arbiter per frame decides every pointer's scroll gesture,
+at the frame's first pointer use (with the hot resolve), so every interaction result of
+the frame already reflects it. It reads only data finalized at the previous
+`nt_ui_end`: the interactive registry and each scroll's eligible axes (enabled AND
+overflowing in the just-solved layout). A scroll container registers its own bbox as a
+*surface* record, so an empty-area press resolves through the normal front-most
+arbitration (z-order, blockers, modals, transforms, 3D occlusion); a scroll whose content
+fits is see-through. Scrolls form a declaration chain: `scroll_begin` pushes its id and
+records the enclosing scroll as its parent; popup core (dropdown, menu, modal, tooltip)
+and the menu occluder push a 0 barrier, so a drag inside a popup never reaches a scroll
+behind it. Widgets inside a scroll must step between its begin and end.
+
+A press starts a gesture record on the chain of the front-most record under it (its
+scope); a chain with no eligible axis decides at once (widgets in fitting panels are
+never pending). While pending, the pressed widget sees `gesture_pending`. Each frame the
+pointer's displacement from the press is compared per axis with the drag slop
+(`nt_ui_set_gesture_constants`, default 8 dp, Android touchSlop): candidates are the
+pressed widget's own `drag_axes` and the chain's eligible axes, inner first. The
+strongest crossing (|d| / slop) wins, ties going to the widget, then the inner scroll;
+nothing crossed keeps the gesture pending. A scroll that wins takes the capture — the
+widget sees a foreign owner, reports no click and keeps any value it wrote (Model D:
+draggables hold value changes while pending). On the first crossing frame the excess past
+the slop is routed (no jump, no lost distance); a later claim anchors at the pointer.
+A crossing on the release frame still claims (fling, no click), and the owner keeps the
+capture through its release frame. A release with nothing crossed leaves the widget its
+release (click when over it). The newest pointer to claim a scroll or press its bar takes
+it from older pointers (Android). A press on a flinging, undragged scroll of the chain
+stops the fling and is swallowed (tap-to-stop). Wheel goes per pointer and axis to the
+first scroll of the hovered chain that can move on that axis, consumed the same frame:
+a vertical wheel over a horizontal track reaches its vertical parent. Engine-internal
+inspector panes are chain roots; the sidebar's pointer only reaches panes, and a game
+drag that enters the sidebar ends. Wheel input is normalized to a NOTCH unit at the
+platform edge — `1.0 == one physical detent` (GLFW pass-through; web `deltaMode` divided
+to notches), so wheel strength is platform-independent and the consumer scales by
+`wheel_step_px`. Scroll sizes (`wheel_step_px`, bar/hit dimensions) are in the coordinate
+space passed to `nt_ui_begin`; gesture tolerances (slop, double-click radius, tap-to-stop
+speed) are in dp, converted per axis through `nt_ui_viewport_t.px_per_dp` (the window
+DPR; the identity viewport uses 1). The
 scrollbar (2-piece slice9 track + thumb, both axes) emits as floating children of
 the container with
 ALWAYS / AUTO / AUTO_HIDE visibility (AUTO_HIDE shows on scroll activity and fades
@@ -488,8 +513,8 @@ state-pool cell:
   hold crosses `secs`, which must be positive and stay constant for the whole hold.
   `nt_ui_hold_progress` is the linear 0..1 ramp for hold-to-confirm feedback.
 - **Double-click** pairs a stepped press with the previous stepped press through one
-  record per context: same widget, within the window and the move radius in layout
-  units (`nt_ui_set_gesture_constants`). A stepped press on another widget replaces the
+  record per context: same widget, within the window and the move radius (dp)
+  (`nt_ui_set_gesture_constants`). A stepped press on another widget replaces the
   record, even from another finger; a completed pair empties it, so a third press starts a new pair.
   The move radius gates double-click only.
 

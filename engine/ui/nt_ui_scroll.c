@@ -54,8 +54,8 @@ static inline uint32_t scrollbar_id(uint32_t scroll_id, int axis) { return nt_ui
 #define NT_UI_SCROLL_VEL_TAU_GAIN 0.03F
 #define NT_UI_SCROLL_VEL_TAU_DECAY 0.02F
 #define NT_UI_SCROLL_VEL_MAX 8000.0F
-/* A tap on a flinging container faster than this (px/s) stops the fling and is swallowed (iOS). */
-#define NT_UI_SCROLL_FLING_STOP_PX 50.0F
+/* A tap on a flinging container faster than this (dp/s) stops the fling and is swallowed (iOS). */
+#define NT_UI_SCROLL_FLING_STOP_DP 50.0F
 /* Overscroll: per-60fps-frame velocity decay while the fling compresses past the edge.
  * Tuned so total overshoot depth is dt-invariant, then the bounce spring settles the rest. */
 #define NT_UI_SCROLL_OVERSCROLL_DECAY 0.55F
@@ -111,7 +111,12 @@ static void scroll_integrate(nt_ui_scroll_state_t *s, const float wheel[2], floa
             if (s->raw[a] < lo || s->raw[a] > hi) {
                 const float edge = (s->raw[a] < lo) ? lo : hi;
                 const float over = s->raw[a] - edge; /* RAW over-edge distance from the anchor */
-                s->pos[a] = (rubber_c > 0.0F) ? (edge + nt_ui_rubber_band(over, container[a], rubber_c)) : edge;
+                if (rubber_c > 0.0F) {
+                    s->pos[a] = edge + nt_ui_rubber_band(over, container[a], rubber_c);
+                } else if (container[a] > 0.0F) {
+                    s->pos[a] = edge;
+                    s->raw[a] = edge; /* hard edge: a reversing finger moves the content at once */
+                }
             } else {
                 s->pos[a] = s->raw[a];
             }
@@ -147,8 +152,8 @@ static void scroll_integrate(nt_ui_scroll_state_t *s, const float wheel[2], floa
             /* Fling overshoot: decay vel per dt-normalized frame (not instant kill, which is
              * FPS-dependent) so the rubber compresses to the same depth at any step rate, then
              * hand off to the bounce spring once vel has bled down. */
-            if (rubber_c == 0.0F && bounce == 0.0F) {
-                s->pos[a] = edge;
+            if (rubber_c == 0.0F && container[a] > 0.0F) {
+                s->pos[a] = edge; /* hard edge for flings too; unsolved dims (0) keep pos */
                 s->vel[a] = 0.0F;
             } else if (fabsf(s->vel[a]) > NT_UI_SCROLL_VEL_EPS) {
                 s->vel[a] *= powf(NT_UI_SCROLL_OVERSCROLL_DECAY, dt * 60.0F);
@@ -230,9 +235,7 @@ static uint32_t s_wheel_recipients = 0U;           /* # of scroll_begin gathers 
 #endif
 // #endregion
 
-/* Container's prev-frame layout bbox, fetched once per call and threaded to every hit-test so
- * Clay_GetElementData runs once per container per frame. found==false on frame 1 (1-frame lag);
- * callers treat !found as "no hit". */
+/* Container's prev-frame layout bbox (the bar origin). found==false on frame 1 (1-frame lag). */
 typedef struct {
     Clay_BoundingBox box;
     bool found;
@@ -243,95 +246,7 @@ static inline nt_scroll_bbox_t scroll_fetch_bbox(uint32_t id) {
     return (nt_scroll_bbox_t){.box = d.boundingBox, .found = d.found};
 }
 
-/* Is the UI-unit point (px,py) inside the (prev-frame) container bbox? !found -> false.
- * Point + bbox share nt_ui_begin space (games typically feed nt_ui_scale's logical space),
- * so the hit-test is resolution-independent. Both are Clay Y-down. */
-static inline bool point_in_bbox(const nt_scroll_bbox_t *bb, float px, float py) {
-    if (!bb->found) {
-        return false;
-    }
-    return px >= bb->box.x && px <= (bb->box.x + bb->box.width) && py >= bb->box.y && py <= (bb->box.y + bb->box.height);
-}
-
-/* Inspector panes float above the game UI, so they enter the wheel resolve above any plausible game
- * scroll nesting (deep nests are rare and capped by NT_UI_WHEEL_CANDIDATES). */
-#define NT_UI_WHEEL_INSPECTOR_DEPTH 1000U
-
-/* Register this container as a wheel candidate for end-of-frame resolution (innermost-wins). Only
- * id/depth are recorded; the bbox is re-fetched at resolve from the just-solved layout. Depth is the
- * live scroll-nesting counter so a candidate inside another scroll outranks its parent. */
-static void scroll_register_wheel_candidate(nt_ui_context_t *ctx, uint32_t scroll_id) {
-    /* Silent skip would leave the container wheel-dead — fail early like the state pool. */
-    NT_ASSERT(ctx->wheel_candidate_count < NT_UI_WHEEL_CANDIDATES && "nt_ui_scroll: too many scroll containers declared this frame — raise NT_UI_WHEEL_CANDIDATES");
-    nt_ui_wheel_candidate_t *c = &ctx->wheel_candidates[ctx->wheel_candidate_count++];
-    c->id = scroll_id;
-    c->depth = ctx->wheel_depth;
-}
-
-/* The one wheel-consume path: accumulate enabled-axis wheel deltas from hovering pointers in Clay's
- * negative-down sign (vertical flips wheel_dy). Innermost-wins routing: a pointer's wheel goes to at
- * most one container per frame; the winner was resolved at the end of the previous frame into
- * ctx->wheel_owner[i], so here we only consume when that owner is us. */
-static void scroll_gather_wheel(nt_ui_context_t *ctx, uint32_t scroll_id, const nt_scroll_bbox_t *bb, bool scroll_x, bool scroll_y, float out_wheel[2]) {
-    out_wheel[0] = 0.0F;
-    out_wheel[1] = 0.0F;
-    if (!bb->found || bb->box.width <= 0.0F || bb->box.height <= 0.0F) {
-        return; /* no solved geometry -> never a hit (frame-1 lag or a zeroed stale entry) */
-    }
-    nt_ui_internal_ensure_pointers_layout(ctx); /* layout-space bbox compare below; force conversion */
-    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
-        const nt_pointer_t *p = &ctx->frame_pointers[i];
-        if (p->wheel_dx == 0.0F && p->wheel_dy == 0.0F) {
-            continue; /* no notch on this pointer */
-        }
-        if (ctx->wheel_owner[i] != scroll_id) {
-            continue; /* prev-frame resolve gave this pointer to a different (or no) container */
-        }
-        if (!point_in_bbox(bb, p->x, p->y)) {
-            continue; /* owner moved off us since the resolve (e.g. pointer left) -> no consume */
-        }
-        if (scroll_x) {
-            out_wheel[0] += p->wheel_dx;
-        }
-        if (scroll_y) {
-            out_wheel[1] += -p->wheel_dy; /* input edge: flip to Clay's negative-down */
-        }
-    }
-}
-
-/* End-of-frame resolve: for each pointer, the winning candidate is the one whose bbox holds it,
- * ranked (max depth, then min area, then latest declaration). The bbox is re-fetched from the
- * just-solved layout so it matches what next frame's consume reads. `<=` on area lets a later
- * equal-best candidate (latest declaration) override. */
-void nt_ui_internal_resolve_wheel_owners(nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_internal_resolve_wheel_owners: ctx must be non-NULL");
-    nt_ui_internal_ensure_pointers_layout(ctx); /* end-of-frame resolve compares pointer vs layout bbox */
-    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
-        const nt_pointer_t *p = &ctx->frame_pointers[i];
-        uint32_t best_id = 0U;
-        uint16_t best_depth = 0U;
-        float best_area = 0.0F;
-        for (uint32_t k = 0; k < ctx->wheel_candidate_count; ++k) {
-            const nt_ui_wheel_candidate_t *c = &ctx->wheel_candidates[k];
-            const nt_scroll_bbox_t bb = scroll_fetch_bbox(c->id);
-            if (!bb.found || bb.box.width <= 0.0F || bb.box.height <= 0.0F) {
-                continue; /* unsolved/zeroed this frame -> can't own */
-            }
-            if (!point_in_bbox(&bb, p->x, p->y)) {
-                continue;
-            }
-            const float area = bb.box.width * bb.box.height;
-            if (best_id == 0U || c->depth > best_depth || (c->depth == best_depth && area <= best_area)) {
-                best_id = c->id; /* <= on area lets a later equal-area candidate (latest declaration) win */
-                best_depth = c->depth;
-                best_area = area;
-            }
-        }
-        ctx->wheel_owner[i] = best_id;
-    }
-    /* Pointers beyond frame_pointer_count keep their stale owner; harmless (no consume without a notch),
-     * and the next begin overwrites frame_pointers before the next consume reads them. */
-}
+#define NT_UI_SCROLL_TAG NT_UI_STATE_TAG('s', 'c', 'r', 'l')
 
 /* Time-windowed release-fling velocity for one axis. A moving frame blends toward the instantaneous
  * sample with a dt-based gain (clamped); a zero-delta frame decays toward 0 with a dt-based factor so
@@ -353,227 +268,298 @@ static float scroll_sample_vel(float prev_vel, float delta, float dt) {
     return v;
 }
 
-/* Route one incremental drag delta (drag_x, drag_y in UI units — nt_ui_begin space) into the RAW scroll pos (1:1,
- * accumulates even past the edge — the integrator rubber-bands raw->display each frame). vel is
- * SAMPLED (time-windowed + clamp) for the release fling; see scroll_sample_vel for the decay contract. */
-static void scroll_route_drag(nt_ui_scroll_state_t *s, const nt_ui_scroll_style_t *style, float drag_x, float drag_y, float dt) {
-    if (style->scroll_x) {
-        s->raw[0] += drag_x;
-        s->vel[0] = scroll_sample_vel(s->vel[0], drag_x, dt);
-    }
-    if (style->scroll_y) {
-        s->raw[1] += drag_y;
-        s->vel[1] = scroll_sample_vel(s->vel[1], drag_y, dt);
-    }
+// #region scope stack
+void nt_ui_internal_scroll_push(nt_ui_context_t *ctx, uint32_t id) {
+    NT_ASSERT(ctx->scroll_top < (uint16_t)(sizeof ctx->scroll_stack / sizeof ctx->scroll_stack[0]) && "nt_ui_scroll: nesting exceeds NT_UI_SCROLL_MAX_DEPTH + NT_UI_MODAL_MAX_DEPTH");
+    ctx->scroll_stack[ctx->scroll_top++] = id;
 }
 
-/* Strip the tap threshold when a free press claims capture, avoiding a jump in pos and vel.
- * Later frames route the full per-frame delta through the OWNED path. */
-static void scroll_consume_threshold(float *ddx, float *ddy) {
-    const float len = sqrtf(((*ddx) * (*ddx)) + ((*ddy) * (*ddy)));
-    if (len <= NT_UI_SCROLL_STEAL_THRESHOLD_PX) {
-        *ddx = 0.0F;
-        *ddy = 0.0F;
-        return;
+void nt_ui_internal_scroll_pop(nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx->scroll_top > 0U && "nt_ui_scroll: unbalanced scroll/popup end");
+    --ctx->scroll_top;
+}
+// #endregion
+
+// #region gesture arbiter
+/* The game scroll cell behind a chain link; NULL once the cell is gone or recycled for another use. */
+static nt_ui_scroll_state_t *scroll_cell(nt_ui_context_t *ctx, uint32_t id) {
+    if (id == 0U || !nt_ui_state_has_tag(ctx, id, NT_UI_SCROLL_TAG)) {
+        return NULL;
     }
-    const float keep = (len - NT_UI_SCROLL_STEAL_THRESHOLD_PX) / len; /* strip the threshold radius */
-    *ddx *= keep;
-    *ddy *= keep;
+    return (nt_ui_scroll_state_t *)nt_ui_state_find(ctx, id);
 }
 
-/* A capture this container must NOT steal: its OWN scrollbar (floats inside the bbox, a thumb
- * drag must reach the bar), or any nested scroll/scrollbar widget (the inner scroller owns its
- * own gesture). Nested CONTAINERS carry an always-on state-pool 'scrl' cell; a nested SCROLLBAR
- * id is reversible (id = container_id ^ salt), so XOR the salt back out and probe that 'scrl' cell
- * — both checks work in ALL builds. nt_ui_widget_lookup is DEBUG_TOOLS-only (NULL when OFF), kept
- * only as redundant extra coverage. */
-static bool scroll_capture_excluded(const nt_ui_context_t *ctx, uint32_t scroll_id, uint32_t cap_id) {
-    if (cap_id == scrollbar_id(scroll_id, 0) || cap_id == scrollbar_id(scroll_id, 1)) {
-        return true;
-    }
-    const uint32_t scrl_tag = NT_UI_STATE_TAG('s', 'c', 'r', 'l');
-    if (nt_ui_state_has_tag(ctx, cap_id, scrl_tag)) {
-        return true; /* nested scroll container — works in all builds */
-    }
-    /* Recover the owning container id from a bar id (salts XOR out) and check its 'scrl' cell:
-     * catches a nested SCROLLBAR's thumb drag without the DEBUG_TOOLS-only registry. */
-    if (nt_ui_state_has_tag(ctx, cap_id ^ NT_UI_SCROLLBAR_VERT_SALT, scrl_tag) || nt_ui_state_has_tag(ctx, cap_id ^ NT_UI_SCROLLBAR_HORIZ_SALT, scrl_tag)) {
-        return true;
-    }
-    const nt_ui_widget_def_t *def = nt_ui_widget_lookup(ctx, cap_id);
-    return def == &NT_UI_SCROLL_DEF || def == &NT_UI_SCROLLBAR_DEF;
+static inline uint8_t scroll_can_flag(int axis) { return (axis == 0) ? NT_UI_SCROLL_FLAG_CAN_X : NT_UI_SCROLL_FLAG_CAN_Y; }
+
+bool nt_ui_internal_scroll_surface_live(nt_ui_context_t *ctx, uint32_t id) {
+    const nt_ui_scroll_state_t *s = scroll_cell(ctx, id);
+    return s != NULL && (s->flags & (NT_UI_SCROLL_FLAG_CAN_X | NT_UI_SCROLL_FLAG_CAN_Y)) != 0U;
 }
 
-/* Per-pointer gesture arbitration (iOS/Android contract): ownership is assigned at the pointer-down
- * EDGE to the container holding the press point and never reassigned until release. The single owner
- * per pointer is ctx->captures[i].active_id; the three regions below (OWNED / STEAL / CANDIDATE) are
- * mutually exclusive. A merely-held finger (is_down, no press edge) never starts a gesture, so a
- * finger dragged in from a neighbour can't latch us. Claimed captures must be re-marked seen every
- * frame or begin's orphan-clear wipes them; on overlap the first to CLAIM (outermost) wins. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, const nt_scroll_bbox_t *bb, const float content[2],
-                              const float container[2], bool inspector_owned) {
-    /* Pointers are raw device until the viewport conversion runs; this gesture path reads them directly
-     * (not via step), so force the once-per-frame conversion before any layout-space compare. */
-    nt_ui_internal_ensure_pointers_layout(ctx);
-    /* Per-axis scrollability: a gesture only arms/steals on an axis that is BOTH enabled and can
-     * actually move (content overflows). A container whose content fits takes no gestures at all,
-     * so taps + drags pass through to inner widgets untouched (no no-op scroll stealing clicks). */
-    const bool can_x = style->scroll_x && (scroll_min_bound(content[0], container[0]) < 0.0F);
-    const bool can_y = style->scroll_y && (scroll_min_bound(content[1], container[1]) < 0.0F);
-    if (!can_x && !can_y) {
-        const uint8_t gesture_flags = NT_UI_SCROLL_FLAG_DRAGGING | NT_UI_SCROLL_FLAG_FREE_PRESS;
-        s->flags &= (uint8_t)~gesture_flags;
-        return;
+/* How strongly displacement d crossed the slop on any axis of `axes` (bit0 = x, bit1 = y): the
+ * largest |d| / slop, or 0 when no axis crossed. */
+static float scroll_crossing(const float d[2], const float slop[2], uint8_t axes) {
+    float best = 0.0F;
+    for (int a = 0; a < 2; ++a) {
+        const float r = fabsf(d[a]) / slop[a];
+        if ((axes & (1U << a)) != 0U && r >= 1.0F && r > best) {
+            best = r;
+        }
     }
+    return best;
+}
 
-    bool any_drag = false;
-    bool any_free_press = false;
-    const float dt = ctx->frame_dt;
-    /* The inspector floats on top: when its sidebar has consumed a pointer, a game container under it
-     * must not arm/steal/own that pointer (topmost owns input — same gate nt_ui_step uses). The
-     * inspector's own panes pass inspector_owned and bypass this. OFF builds have no inspector. */
-#if NT_UI_DEBUG_TOOLS
-    const bool pane_blocked = !inspector_owned && ctx->inspector_pointer_consumed;
-#else
-    const bool pane_blocked = false;
-    (void)inspector_owned;
-#endif
-    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
-        nt_ui_capture_t *cap = &ctx->captures[i];
-        const nt_pointer_t *p = &ctx->frame_pointers[i];
-        const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
-        if (pane_blocked) {
-            if (cap->active_id == id) {
-                cap->active_id = 0U; /* drop a gesture the inspector stole the pointer out from under */
-            }
-            continue;
-        }
+static inline uint8_t scroll_can_axes(const nt_ui_scroll_state_t *s) {
+    return (uint8_t)((((s->flags & NT_UI_SCROLL_FLAG_CAN_X) != 0U) ? 1U : 0U) | (((s->flags & NT_UI_SCROLL_FLAG_CAN_Y) != 0U) ? 2U : 0U));
+}
 
-        // #region OWNED: we already own this pointer's gesture
-        if (cap->active_id == id) {
-            if (!btn.is_down) {
-                cap->active_id = 0U; /* release: we own the capture, so we end it (fling owns the rest) */
-                continue;
-            }
-            ctx->capture_seen[i] = 1U; /* keep our claim alive past begin's orphan-clear */
-            /* We own the capture but are not a stepped widget, so cap->pos isn't refreshed for us —
-             * track the live pointer ourselves so the per-frame delta is current. */
-            cap->pos[0] = p->x;
-            cap->pos[1] = p->y;
-            float ddx = cap->pos[0] - cap->press_pos[0];
-            float ddy = cap->pos[1] - cap->press_pos[1];
-            scroll_route_drag(s, style, ddx, ddy, dt);
-            cap->press_pos[0] = cap->pos[0]; /* re-anchor: next frame's delta is per-frame, 1:1 */
-            cap->press_pos[1] = cap->pos[1];
-            any_drag = true;
-            continue;
+/* Press edge: the gesture starts on the chain of the front-most record. A flinging, undragged
+ * scroll on the chain stops and swallows the tap (iOS); a chain that cannot scroll decides at once. */
+static void scroll_press_edge(nt_ui_context_t *ctx, uint32_t i) {
+    nt_ui_capture_t *cap = &ctx->captures[i];
+    const nt_pointer_t *p = &ctx->frame_pointers[i];
+    cap->scroll_scope = 0U;
+    cap->drag_axes = 0U;
+    cap->press_pos[0] = p->x;
+    cap->press_pos[1] = p->y;
+    cap->pos[0] = p->x;
+    cap->pos[1] = p->y;
+    bool can_scroll = false;
+    uint32_t id = ctx->pointer_scope[i];
+    for (uint32_t n = 0; id != 0U && n < NT_UI_SCROLL_MAX_DEPTH; ++n) {
+        nt_ui_scroll_state_t *s = scroll_cell(ctx, id);
+        if (s == NULL) {
+            break;
         }
-        // #endregion
-
-        // #region STEAL: an inner widget owns it; take over past the threshold
-        const bool inner_capture = cap->active_id != 0U && !scroll_capture_excluded(ctx, id, cap->active_id);
-        if (inner_capture) {
-            if (!point_in_bbox(bb, cap->press_pos[0], cap->press_pos[1])) {
-                continue; /* press began outside us — another container's gesture */
+        const uint8_t axes = scroll_can_axes(s);
+        if (axes != 0U) {
+            can_scroll = true;
+            bool flinging = false;
+            for (int a = 0; a < 2; ++a) {
+                flinging = flinging || (((axes & (1U << a)) != 0U) && fabsf(s->vel[a]) > NT_UI_SCROLL_FLING_STOP_DP * ctx->layout_per_dp[a]);
             }
-            const float ddx = p->x - cap->press_pos[0];
-            const float ddy = p->y - cap->press_pos[1];
-            const float axis_move = (can_x ? fabsf(ddx) : 0.0F) + (can_y ? fabsf(ddy) : 0.0F);
-            if (axis_move < NT_UI_SCROLL_STEAL_THRESHOLD_PX) {
-                continue; /* tap (below threshold) leaves the inner capture -> inner clicks */
-            }
-            if (!btn.is_down) {
-                cap->active_id = 0U; /* cancel the child without carrying capture into the next press */
-                continue;
-            }
-            cap->active_id = id;       /* CLAIM (not 0): hold the gesture so it can't be re-adopted */
-            cap->hold_live = false;    /* a claim is not a press: the slot's hold belongs to an earlier one */
-            ctx->capture_seen[i] = 1U; /* keep the claim past begin's orphan-clear */
-            /* Skip the crossing delta and anchor to this frame's pointer: children may step later. */
-            if (can_x) {
-                s->vel[0] = 0.0F;
-            }
-            if (can_y) {
-                s->vel[1] = 0.0F;
-            }
-            cap->press_pos[0] = p->x; /* re-anchor: next frame's delta is per-frame, 1:1 */
-            cap->press_pos[1] = p->y;
-            any_drag = true;
-            continue;
-        }
-        if (cap->active_id != 0U) {
-            continue; /* captured by THIS container's bar or an excluded nested scroller */
-        }
-        // #endregion
-
-        // #region CANDIDATE: free pointer; only the press EDGE inside our bbox arms a gesture
-        if (!btn.is_down) {
-            continue; /* not held — nothing to track */
-        }
-        const bool armed = (s->flags & NT_UI_SCROLL_FLAG_FREE_PRESS) != 0U;
-        if (!armed) {
-            /* Edge-gate: only a fresh press (is_pressed) inside the bbox arms. A finger that entered
-             * while already held (no edge) never starts a gesture. */
-            if (!btn.is_pressed || !point_in_bbox(bb, p->x, p->y)) {
-                continue;
-            }
-            /* Tap-to-stop (iOS): a press landing on a FLINGING container stops the fling instantly and
-             * CLAIMS the capture so the tap can't click moving inner content. A press on a resting
-             * container falls through to normal arming (inner widgets stay tappable). */
-            const bool flinging = (can_x && fabsf(s->vel[0]) > NT_UI_SCROLL_FLING_STOP_PX) || (can_y && fabsf(s->vel[1]) > NT_UI_SCROLL_FLING_STOP_PX);
-            if (flinging) {
+            if (flinging && (s->flags & NT_UI_SCROLL_FLAG_DRAGGING) == 0U && cap->active_id == 0U) {
                 s->vel[0] = 0.0F;
                 s->vel[1] = 0.0F;
                 s->target[0] = s->pos[0];
                 s->target[1] = s->pos[1];
                 s->raw[0] = s->pos[0];
                 s->raw[1] = s->pos[1];
-                cap->active_id = id;       /* swallow the tap: own the gesture so inner content can't click */
-                cap->hold_live = false;    /* a claim is not a press: the slot's hold belongs to an earlier one */
-                ctx->capture_seen[i] = 1U; /* keep the claim past begin's orphan-clear */
-                cap->press_pos[0] = p->x;
-                cap->press_pos[1] = p->y;
-                cap->pos[0] = p->x;
-                cap->pos[1] = p->y;
-                any_drag = true; /* mark DRAGGING so the integrator freezes pos (drag owns the axis) */
-                continue;
+                cap->active_id = id;
+                cap->hold_live = false; /* a claim is not a press: the slot's hold belongs to an earlier one */
+                return;
             }
-            s->free_press_pos[0] = p->x;
-            s->free_press_pos[1] = p->y;
-            any_free_press = true;
-            continue; /* armed this frame; delta accrues from next frame */
         }
-        float ddx = can_x ? p->x - s->free_press_pos[0] : 0.0F;
-        float ddy = can_y ? p->y - s->free_press_pos[1] : 0.0F;
-        const float axis_move = fabsf(ddx) + fabsf(ddy);
-        any_free_press = true;
-        if (axis_move < NT_UI_SCROLL_STEAL_THRESHOLD_PX) {
-            continue; /* still within the tap threshold — not yet a drag */
+        id = s->parent;
+    }
+    if (can_scroll) {
+        cap->scroll_scope = ctx->pointer_scope[i];
+    }
+}
+
+/* The newest pointer takes a scroll (Android): older owners of its content or bars let go. */
+static void scroll_drop_other_owners(nt_ui_context_t *ctx, uint32_t id, uint32_t self) {
+    const uint32_t bar_x = scrollbar_id(id, 0);
+    const uint32_t bar_y = scrollbar_id(id, 1);
+    for (uint32_t j = 0; j < ctx->frame_pointer_count; ++j) {
+        const uint32_t held = ctx->captures[j].active_id;
+        if (j != self && (held == id || held == bar_x || held == bar_y)) {
+            ctx->captures[j].active_id = 0U;
         }
-        cap->active_id = id;       /* CLAIM: from here the OWNED case routes this pointer */
-        cap->hold_live = false;    /* a claim is not a press: the slot's hold belongs to an earlier one */
-        ctx->capture_seen[i] = 1U; /* keep the claim past begin's orphan-clear */
-        cap->press_pos[0] = p->x;
-        cap->press_pos[1] = p->y;
+    }
+}
+
+/* Claim: the excess past the slop is routed on the first crossing frame (no 8 dp loss, no jump);
+ * a claim on a later frame anchors at the pointer. The owner path does the routing once. */
+static void scroll_claim(nt_ui_context_t *ctx, uint32_t i, uint32_t id, const float d[2], const float slop[2]) {
+    nt_ui_capture_t *cap = &ctx->captures[i];
+    const nt_pointer_t *p = &ctx->frame_pointers[i];
+    nt_ui_scroll_state_t *s = scroll_cell(ctx, id);
+    const uint8_t axes = scroll_can_axes(s);
+    const float prev[2] = {cap->pos[0] - cap->press_pos[0], cap->pos[1] - cap->press_pos[1]};
+    const bool first_crossing = scroll_crossing(prev, slop, axes) == 0.0F;
+    scroll_drop_other_owners(ctx, id, i);
+    for (int a = 0; a < 2; ++a) {
+        float route = 0.0F;
+        if (first_crossing && (axes & (1U << a)) != 0U && fabsf(d[a]) > slop[a]) {
+            route = (d[a] > 0.0F) ? (d[a] - slop[a]) : (d[a] + slop[a]);
+        }
+        cap->pos[a] = ((a == 0) ? p->x : p->y) - route;
+        s->vel[a] = 0.0F;
+    }
+    s->flags &= (uint8_t)~NT_UI_SCROLL_FLAG_SCROLL_TO;
+    cap->active_id = id;
+    cap->drag_axes = 0U;
+    cap->hold_live = false; /* a claim is not a press: the slot's hold belongs to an earlier one */
+}
+
+/* Pending gesture: the strongest slop crossing among the pressed widget's own drag axes and the
+ * chain's scrollable axes wins; on a tie the widget, then the inner scroll. */
+static void scroll_decide(nt_ui_context_t *ctx, uint32_t i, const float slop[2], bool released) {
+    nt_ui_capture_t *cap = &ctx->captures[i];
+    const nt_pointer_t *p = &ctx->frame_pointers[i];
+    const float d[2] = {p->x - cap->press_pos[0], p->y - cap->press_pos[1]};
+    float best = (cap->active_id != 0U) ? scroll_crossing(d, slop, cap->drag_axes) : 0.0F;
+    uint32_t winner = 0U;
+    uint32_t id = cap->scroll_scope;
+    for (uint32_t n = 0; id != 0U && n < NT_UI_SCROLL_MAX_DEPTH; ++n) {
+        nt_ui_scroll_state_t *s = scroll_cell(ctx, id);
+        if (s == NULL) {
+            break;
+        }
+        const float r = scroll_crossing(d, slop, scroll_can_axes(s));
+        if (r > best) {
+            best = r;
+            winner = id;
+        }
+        id = s->parent;
+    }
+    if (best == 0.0F) {
+        cap->pos[0] = p->x; /* last processed position: tells the first crossing frame apart */
+        cap->pos[1] = p->y;
+        if (released) {
+            cap->scroll_scope = 0U; /* nobody took it: the widget keeps its release */
+        }
+        return;
+    }
+    cap->scroll_scope = 0U;
+    if (winner != 0U) {
+        scroll_claim(ctx, i, winner, d, slop);
+    }
+}
+
+/* Next frame's wheel goes, per axis, to the first scroll on the hovered chain that can move on it. */
+static void scroll_route_wheel(nt_ui_context_t *ctx, uint32_t i) {
+    uint32_t id = ctx->pointer_scope[i];
+    for (uint32_t n = 0; id != 0U && n < NT_UI_SCROLL_MAX_DEPTH; ++n) {
+        nt_ui_scroll_state_t *s = scroll_cell(ctx, id);
+        if (s == NULL) {
+            break;
+        }
+        for (int a = 0; a < 2; ++a) {
+            if (ctx->wheel_owner[i][a] == 0U && (s->flags & scroll_can_flag(a)) != 0U) {
+                ctx->wheel_owner[i][a] = id;
+            }
+        }
+        id = s->parent;
+    }
+}
+
+void nt_ui_internal_scroll_arbitrate(nt_ui_context_t *ctx) {
+    const float slop[2] = {ctx->gesture_drag_slop_dp * ctx->layout_per_dp[0], ctx->gesture_drag_slop_dp * ctx->layout_per_dp[1]};
+    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
+        nt_ui_capture_t *cap = &ctx->captures[i];
+        const nt_button_state_t btn = ctx->frame_pointers[i].buttons[NT_BUTTON_LEFT];
+#if NT_UI_DEBUG_TOOLS
+        if (i == ctx->frame_primary && ctx->inspector_pointer_consumed) {
+            /* The sidebar owns this pointer: only its panes scroll, and a game drag that entered it ends. */
+            const nt_ui_scroll_state_t *held = scroll_cell(ctx, cap->active_id);
+            if (held != NULL && (held->flags & NT_UI_SCROLL_FLAG_PANE) == 0U) {
+                cap->active_id = 0U;
+            }
+            const nt_ui_scroll_state_t *top = scroll_cell(ctx, ctx->pointer_scope[i]);
+            if (top == NULL || (top->flags & NT_UI_SCROLL_FLAG_PANE) == 0U) {
+                ctx->pointer_scope[i] = 0U;
+            }
+        }
+#endif
+        scroll_route_wheel(ctx, i);
+        if (btn.is_pressed) {
+            scroll_press_edge(ctx, i);
+            if (!btn.is_down) {
+                cap->scroll_scope = 0U; /* pressed and released within one frame: a tap */
+            }
+        } else if (cap->scroll_scope != 0U && (btn.is_down || btn.is_released)) {
+            scroll_decide(ctx, i, slop, btn.is_released);
+        }
+    }
+}
+
+/* End of frame: eligibility from the just-solved layout (read here, while it is valid; mid-frame the
+ * Clay slot behind a scroll id may already hold another element). */
+void nt_ui_internal_scroll_finalize(nt_ui_context_t *ctx) {
+    for (uint32_t k = 0; k < ctx->interactive_cur_count; ++k) {
+        const nt_ui_interactive_t *rec = &ctx->interactive_cur[k];
+        if (rec->scope != rec->id) {
+            continue; /* not a scroll surface */
+        }
+        nt_ui_scroll_state_t *s = scroll_cell(ctx, rec->id);
+        if (s == NULL) {
+            continue;
+        }
+        const Clay_ScrollContainerData scd = Clay_GetScrollContainerData((Clay_ElementId){.id = rec->id});
+        s->flags &= (uint8_t)~(NT_UI_SCROLL_FLAG_CAN_X | NT_UI_SCROLL_FLAG_CAN_Y);
+        if (scd.found && (s->flags & NT_UI_SCROLL_FLAG_ENABLED_X) != 0U && scroll_min_bound(scd.contentDimensions.width, scd.scrollContainerDimensions.width) < 0.0F) {
+            s->flags |= NT_UI_SCROLL_FLAG_CAN_X;
+        }
+        if (scd.found && (s->flags & NT_UI_SCROLL_FLAG_ENABLED_Y) != 0U && scroll_min_bound(scd.contentDimensions.height, scd.scrollContainerDimensions.height) < 0.0F) {
+            s->flags |= NT_UI_SCROLL_FLAG_CAN_Y;
+        }
+    }
+}
+// #endregion
+
+// #region owner path
+/* The pointer that owns this container's drag moves it 1:1 on its scrollable axes (an axis that
+ * stopped overflowing settles at its edge). A released owner keeps the capture unseen through its
+ * release frame (children still see a foreign owner) and nt_ui_begin frees it. Returns held. */
+static bool scroll_route_owner(nt_ui_context_t *ctx, uint32_t id, nt_ui_scroll_state_t *s, const float content[2], const float container[2], const bool can[2]) {
+    bool held = false;
+    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
+        nt_ui_capture_t *cap = &ctx->captures[i];
+        if (cap->active_id != id && cap->released_id != id) {
+            continue;
+        }
+        const nt_pointer_t *p = &ctx->frame_pointers[i];
+        const float d[2] = {p->x - cap->pos[0], p->y - cap->pos[1]};
+        for (int a = 0; a < 2; ++a) {
+            if (can[a]) {
+                s->raw[a] += d[a];
+                s->vel[a] = scroll_sample_vel(s->vel[a], d[a], ctx->frame_dt);
+            } else {
+                s->raw[a] = nt_ui_clampf(s->raw[a], scroll_min_bound(content[a], container[a]), 0.0F);
+                s->pos[a] = s->raw[a];
+                s->vel[a] = 0.0F;
+            }
+        }
         cap->pos[0] = p->x;
         cap->pos[1] = p->y;
-        scroll_consume_threshold(&ddx, &ddy);
-        scroll_route_drag(s, style, ddx, ddy, dt);
-        any_drag = true;
-        // #endregion
+        if (cap->active_id == id && p->buttons[NT_BUTTON_LEFT].is_down) {
+            ctx->capture_seen[i] = 1U;
+            held = true;
+        }
     }
-    if (any_drag) {
+    return held;
+}
+
+/* One frame of input for a scroll: chain link + surface record, the owner's drag, this frame's wheel. */
+static void scroll_take_input(nt_ui_context_t *ctx, uint32_t id, nt_ui_scroll_state_t *s, const nt_ui_scroll_style_t *style, const float content[2], const float container[2], uint32_t parent,
+                              float out_wheel[2]) {
+    s->parent = parent;
+    s->flags &= (uint8_t)~(NT_UI_SCROLL_FLAG_ENABLED_X | NT_UI_SCROLL_FLAG_ENABLED_Y);
+    s->flags |= (uint8_t)((style->scroll_x ? NT_UI_SCROLL_FLAG_ENABLED_X : 0U) | (style->scroll_y ? NT_UI_SCROLL_FLAG_ENABLED_Y : 0U));
+    nt_ui_internal_register_interactive(ctx, id, NULL, id); /* the surface: empty-area presses start here */
+
+    const bool can[2] = {style->scroll_x && scroll_min_bound(content[0], container[0]) < 0.0F, style->scroll_y && scroll_min_bound(content[1], container[1]) < 0.0F};
+    if (scroll_route_owner(ctx, id, s, content, container, can)) {
         s->flags |= NT_UI_SCROLL_FLAG_DRAGGING;
     } else {
         s->flags &= (uint8_t)~NT_UI_SCROLL_FLAG_DRAGGING;
     }
-    if (any_free_press) {
-        s->flags |= NT_UI_SCROLL_FLAG_FREE_PRESS;
-    } else {
-        s->flags &= (uint8_t)~NT_UI_SCROLL_FLAG_FREE_PRESS;
+
+    out_wheel[0] = 0.0F;
+    out_wheel[1] = 0.0F;
+    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
+        const nt_pointer_t *p = &ctx->frame_pointers[i];
+        if (ctx->wheel_owner[i][0] == id) {
+            out_wheel[0] += p->wheel_dx;
+        }
+        if (ctx->wheel_owner[i][1] == id) {
+            out_wheel[1] += -p->wheel_dy; /* input edge: flip to Clay's negative-down */
+        }
     }
 }
+// #endregion
 
 /* Scratch element_data carrying layer + whole-bar opacity (no transform). */
 static nt_ui_element_data_t *scrollbar_make_data(uint8_t layer, float opacity) {
@@ -651,8 +637,8 @@ static void scrollbar_hit_pad(int axis, float thickness, int16_t out[4]) {
     }
 }
 
-/* Thumb-drag + track-click for one axis. Reads the bar's prev-frame bbox, steals nothing
- * from the container (different id). Drag delta along the axis maps back into s->pos
+/* Thumb-drag + track-click for one axis, on the bar's own id and prev-frame bbox.
+ * Drag delta along the axis maps back into s->pos
  * (Clay sign); a track click (off the thumb) smooth-jumps via nt_ui_scroll_to. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void scrollbar_interact(nt_ui_context_t *ctx, uint32_t scroll_id, uint32_t bar_id, int axis, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, float content, float container,
@@ -661,15 +647,22 @@ static void scrollbar_interact(nt_ui_context_t *ctx, uint32_t scroll_id, uint32_
     int16_t pad[4];
     scrollbar_hit_pad(axis, style->bar_thickness, pad);
     const float over = content - container;
+    /* Both drag axes: a press on the bar is never taken by its own or an enclosing scroll. */
+    const nt_ui_step_desc_t desc = {.pad_lrtb = pad, .drag_axes = NT_UI_DRAG_X | NT_UI_DRAG_Y};
     if (over <= 0.0F || track_len - thumb_len <= 0.0F) {
-        (void)nt_ui_step(ctx, bar_id, &(nt_ui_step_desc_t){.pad_lrtb = pad}); /* keep the id registered (consistent hit-test) */
+        (void)nt_ui_step(ctx, bar_id, &desc); /* keep the id registered (consistent hit-test) */
         return;
     }
-    const nt_ui_interaction_t in = nt_ui_step(ctx, bar_id, &(nt_ui_step_desc_t){.pad_lrtb = pad});
+    const nt_ui_interaction_t in = nt_ui_step(ctx, bar_id, &desc);
     const float pointer_a = (axis == 1) ? in.pos[1] : in.pos[0];
     const float press_a = (axis == 1) ? in.press_pos[1] : in.press_pos[0];
 
     if (in.pressed_now) {
+        for (uint32_t j = 0; j < ctx->frame_pointer_count; ++j) {
+            if (ctx->captures[j].active_id == scroll_id) {
+                ctx->captures[j].active_id = 0U; /* the newest pointer drives the scroll */
+            }
+        }
         const float thumb_lo = bar_origin + thumb_off;
         const bool on_thumb = press_a >= thumb_lo && press_a <= (thumb_lo + thumb_len);
         if (on_thumb) {
@@ -850,6 +843,7 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     NT_ASSERT(isfinite(style->wheel_step_px) && "nt_ui_scroll_begin: wheel_step_px must be finite");
     NT_ASSERT(isfinite(style->rubber_band_c) && style->rubber_band_c >= 0.0F && "nt_ui_scroll_begin: rubber_band_c must be finite >= 0");
     NT_ASSERT(isfinite(style->bounce_speed) && style->bounce_speed >= 0.0F && "nt_ui_scroll_begin: bounce_speed must be finite >= 0");
+    NT_ASSERT((style->rubber_band_c == 0.0F || style->bounce_speed > 0.0F) && "nt_ui_scroll_begin: a rubber band needs bounce_speed > 0 to return");
     NT_ASSERT(isfinite(style->bar_thickness) && style->bar_thickness >= 0.0F && "nt_ui_scroll_begin: bar_thickness must be finite >= 0");
     NT_ASSERT(isfinite(style->bar_thumb_min_px) && style->bar_thumb_min_px >= 0.0F && "nt_ui_scroll_begin: bar_thumb_min_px must be finite >= 0");
     NT_ASSERT(isfinite(style->bar_fade_speed) && style->bar_fade_speed >= 0.0F && "nt_ui_scroll_begin: bar_fade_speed must be finite >= 0");
@@ -867,27 +861,21 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         s->idle = NT_UI_SCROLL_BORN_IDLE; /* born idle: AUTO_HIDE bar starts hidden, no frame-1 flash (any activity resets to 0) */
     }
 
+    /* The arbiter runs before this container touches its own links and flags (one snapshot). */
+    nt_ui_internal_ensure_pointers_layout(ctx);
+
     /* Clamp bounds from Clay's post-layout measurement (found==false on frame 1 ->
      * dims 0 -> bounds default to 0, accepted 1-frame lag). */
     const Clay_ScrollContainerData scd = Clay_GetScrollContainerData((Clay_ElementId){.id = id});
     const float content[2] = {scd.contentDimensions.width, scd.contentDimensions.height};
     const float container[2] = {scd.scrollContainerDimensions.width, scd.scrollContainerDimensions.height};
 
-    /* One bbox fetch per container per frame — shared by drag-check, wheel-gather, and bar origin. */
+    /* One bbox fetch per container per frame — the bar origin. */
     const nt_scroll_bbox_t cbb = scroll_fetch_bbox(id);
 
-    /* Enter this container's scroll-nesting level; matched by the decrement in scroll_end. A nested
-     * scroll thus registers at a deeper depth than its parent so it wins the end-of-frame resolve. */
-    ++ctx->wheel_depth;
-
-    /* Drag arbitration (steal + free-press) updates DRAGGING + routes drag delta before integrate. */
-    scroll_drag_check(ctx, id, style, s, &cbb, content, container, false);
-
-    /* Register as a wheel candidate this frame; consume the wheel the prev-frame resolve granted us
-     * (innermost-wins, 1-frame lag — see scroll_gather_wheel / nt_ui_internal_resolve_wheel_owners). */
-    scroll_register_wheel_candidate(ctx, id);
     float wheel[2];
-    scroll_gather_wheel(ctx, id, &cbb, style->scroll_x, style->scroll_y, wheel);
+    scroll_take_input(ctx, id, s, style, content, container, nt_ui_internal_scroll_open(ctx), wheel);
+    nt_ui_internal_scroll_push(ctx, id);
 #ifdef NT_TEST_ACCESS
     if (wheel[0] != 0.0F || wheel[1] != 0.0F) {
         s_wheel_recipients++;
@@ -929,8 +917,7 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
 void nt_ui_scroll_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_scroll_end: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_scroll_end: must be called between nt_ui_begin and nt_ui_end on the active ctx");
-    NT_ASSERT(ctx->wheel_depth > 0U && "nt_ui_scroll_end: unbalanced scroll_begin/scroll_end (wheel-nesting underflow)");
-    --ctx->wheel_depth; /* leave this container's scroll-nesting level (matches scroll_begin's ++) */
+    nt_ui_internal_scroll_pop(ctx);
     nt_ui_clay_priv_close_element();
 }
 
@@ -953,31 +940,29 @@ void nt_ui_scroll_to(nt_ui_context_t *ctx, uint32_t id, float x, float y) {
  * MUST be called as a statement BEFORE the pane's clip element opens: the prev-frame
  * Clay_GetScrollContainerData entry is lost once sibling elements reuse the layout slots, so an
  * inline read in the .childOffset initializer returns zero dims. */
-Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id, uint32_t tag, bool scroll_x, bool scroll_y) {
+Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id, bool scroll_x, bool scroll_y) {
     NT_ASSERT(ctx != NULL && "nt_ui_internal_scroll_pane_offset: ctx must be non-NULL");
     NT_ASSERT(id != 0U && "nt_ui_internal_scroll_pane_offset: id must be non-zero");
-    nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state(ctx, id, (uint32_t)sizeof *s, tag);
+    nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state(ctx, id, (uint32_t)sizeof *s, NT_UI_SCROLL_TAG);
+    nt_ui_internal_ensure_pointers_layout(ctx);
 
     /* Prev-frame dims; found==false (frame 1, clip not solved) -> 0 -> bounds 0 (1-frame lag). */
     const Clay_ScrollContainerData scd = Clay_GetScrollContainerData((Clay_ElementId){.id = id});
     const float content[2] = {scd.contentDimensions.width, scd.contentDimensions.height};
     const float container[2] = {scd.scrollContainerDimensions.width, scd.scrollContainerDimensions.height};
 
-    const nt_scroll_bbox_t cbb = scroll_fetch_bbox(id);
-
     /* Inspector panes share game scroll physics with instant wheel and hard edge clamping. */
-    const nt_ui_scroll_style_t style = {.scroll_x = scroll_x, .scroll_y = scroll_y, .friction = 0.92F, .wheel_step_px = 40.0F};
-    scroll_drag_check(ctx, id, &style, s, &cbb, content, container, true);
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    style.scroll_x = scroll_x;
+    style.scroll_y = scroll_y;
+    style.wheel_ease_speed = 0.0F;
+    style.rubber_band_c = 0.0F;
+    style.bounce_speed = 0.0F;
 
-    /* Wheel only when the pointer is over this pane (innermost-wins routing). The inspector floats
-     * above the game UI, so register at a depth above any plausible game scroll nesting. */
-    const uint16_t saved_depth = ctx->wheel_depth;
-    ctx->wheel_depth = NT_UI_WHEEL_INSPECTOR_DEPTH;
-    scroll_register_wheel_candidate(ctx, id);
-    ctx->wheel_depth = saved_depth;
+    /* A pane floats above the game UI, so its chain never reaches a game scroll. */
     float wheel[2];
-    scroll_gather_wheel(ctx, id, &cbb, scroll_x, scroll_y, wheel);
-
+    scroll_take_input(ctx, id, s, &style, content, container, 0U, wheel);
+    s->flags |= NT_UI_SCROLL_FLAG_PANE;
     scroll_integrate(s, wheel, ctx->frame_dt, content, container, &style);
     return (Clay_Vector2){.x = s->pos[0], .y = s->pos[1]};
 }

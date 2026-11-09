@@ -20,34 +20,37 @@ typedef struct nt_ui_context nt_ui_context_t;
 extern const nt_ui_widget_def_t NT_UI_SCROLL_DEF;
 extern const nt_ui_widget_def_t NT_UI_SCROLLBAR_DEF;
 
-/* Capture-steal threshold: a drag inside a scroll container exceeding this many
- * UI units — the space passed to nt_ui_begin (games typically feed nt_ui_scale's
- * logical space, making this resolution-independent) — steals capture from the inner
- * widget and scrolls. Mobile standard ~8-10 px. The latch frame routes ZERO delta
- * and anchors at the current pointer; scroll tracks 1:1 from the next frame. The
- * cancelled inner widget keeps any value it wrote before the steal (Model D — value
- * lives in the game), so commit-on-release is the safe pattern for sliders. */
-#ifndef NT_UI_SCROLL_STEAL_THRESHOLD_PX
-#define NT_UI_SCROLL_STEAL_THRESHOLD_PX 8.0F
-#endif
+/* Scroll gestures: a press records the scroll chain of the front-most widget under it (its
+ * declaration scope). Once the pointer moves the drag slop (nt_ui_set_gesture_constants, 8 dp) along an
+ * axis, the strongest crossing among the pressed widget's own drag axes (nt_ui_step_desc_t.drag_axes)
+ * and the chain's scrollable axes (inner first) takes the gesture; a scroll that wins cancels the
+ * widget (no click). The cancelled widget keeps any value it wrote before (Model D), so a draggable
+ * holds value changes while nt_ui_interaction_t.gesture_pending is set. */
 
 /* Scroll-to active: ease pos toward target, clear on arrival. */
 #define NT_UI_SCROLL_FLAG_SCROLL_TO ((uint8_t)(1U << 0))
-/* A pointer is dragging this container (set by capture-steal); gates rubber-band. */
+/* A pointer owns this container's drag this frame; gates rubber-band. */
 #define NT_UI_SCROLL_FLAG_DRAGGING ((uint8_t)(1U << 1))
-/* A free pointer (no widget capture) is mid-press inside the bbox; free_press_pos is its anchor. */
-#define NT_UI_SCROLL_FLAG_FREE_PRESS ((uint8_t)(1U << 2))
+/* Axis enabled by the style (written each scroll_begin). */
+#define NT_UI_SCROLL_FLAG_ENABLED_X ((uint8_t)(1U << 2))
+#define NT_UI_SCROLL_FLAG_ENABLED_Y ((uint8_t)(1U << 3))
+/* Axis enabled AND overflowing in the last solved layout (written at nt_ui_end): the snapshot the
+ * next frame's gesture arbiter, wheel routing and hot resolve read. */
+#define NT_UI_SCROLL_FLAG_CAN_X ((uint8_t)(1U << 4))
+#define NT_UI_SCROLL_FLAG_CAN_Y ((uint8_t)(1U << 5))
+/* Engine-internal inspector pane (floats above the game; takes the sidebar's pointer). */
+#define NT_UI_SCROLL_FLAG_PANE ((uint8_t)(1U << 6))
 
 /* Per-container retained state in the nt_ui_state pool. pos/vel/target in Clay's
  * negative-down sign convention. ~52B; under NT_UI_STATE_PAYLOAD_MAX. */
 typedef struct {
-    float pos[2];            /* DISPLAY offset fed to clip.childOffset (raw clamped/rubber-banded) */
-    float raw[2];            /* un-rubber-banded scroll pos: accumulates finger 1:1 even past the edge (drag anchor) */
-    float vel[2];            /* momentum velocity (px/s), sampled from drag for the release fling */
-    float target[2];         /* smooth-wheel + scroll-to target */
-    float free_press_pos[2]; /* free-press drag anchor (re-anchored each frame; FREE_PRESS gates it) */
-    float idle;              /* seconds since last scroll activity (AUTO_HIDE linger; dt-accumulated, no wall clock) */
-    float thumb_grab;        /* offset of the press point within the thumb (track-axis px); set on thumb-press */
+    float pos[2];     /* DISPLAY offset fed to clip.childOffset (raw clamped/rubber-banded) */
+    float raw[2];     /* un-rubber-banded scroll pos: accumulates finger 1:1 even past the edge (drag anchor) */
+    float vel[2];     /* momentum velocity (px/s), sampled from drag for the release fling */
+    float target[2];  /* smooth-wheel + scroll-to target */
+    float idle;       /* seconds since last scroll activity (AUTO_HIDE linger; dt-accumulated, no wall clock) */
+    float thumb_grab; /* offset of the press point within the thumb (track-axis px); set on thumb-press */
+    uint32_t parent;  /* enclosing scroll at the last declaration (0 = none or a popup barrier) */
     uint8_t flags;
 } nt_ui_scroll_state_t;
 
@@ -59,8 +62,8 @@ typedef struct {
     bool scroll_x, scroll_y; /* which axes scroll */
     float friction;          /* momentum decay (per-60fps base) */
     float wheel_ease_speed;  /* smooth-wheel ease toward target; 0 = instant */
-    float rubber_band_c;     /* overscroll coefficient (0 = no rubber-band; default 0.55) */
-    float bounce_speed;      /* bounce-back spring ease */
+    float rubber_band_c;     /* overscroll coefficient (0 = hard edge for drag and fling; default 0.55) */
+    float bounce_speed;      /* bounce-back spring ease; > 0 when rubber_band_c > 0 */
     float wheel_step_px;     /* UI units (nt_ui_begin space) per wheel notch; name kept for ABI */
     /* scrollbar visual (declared here for one-struct ABI). */
     nt_ui_scrollbar_visibility_t bar_visibility;
@@ -112,7 +115,7 @@ uint32_t nt_ui_scroll_test_bar_id(uint32_t scroll_id, int axis);
  * bar isn't buried under higher-layer content. */
 uint8_t nt_ui_scroll_test_last_bar_layer(int axis);
 /* Count of scroll_begin gathers that consumed a wheel since the last reset; lets a multi-container
- * test detect a wheel reaching more than one container in a single frame (the broadcast bug). */
+ * test detect a wheel axis reaching more than one container in a single frame. */
 uint32_t nt_ui_scroll_test_wheel_recipients(void);
 void nt_ui_scroll_test_wheel_recipients_reset(void);
 #endif

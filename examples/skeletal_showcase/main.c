@@ -2159,7 +2159,7 @@ static void mixing_declare_controls(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_ui(const nt_ui_scale_t *scale) {
     nt_ui_begin(s_ui, scale->logical_w, scale->logical_h, g_nt_app.dt, &g_nt_input.pointers[g_nt_input.primary], 1, 0);
-    nt_ui_set_viewport(s_ui, nt_ui_viewport_from_scale(scale));
+    nt_ui_set_viewport(s_ui, nt_ui_viewport_from_scale(scale, g_nt_window.dpr));
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 10, .padding = CLAY_PADDING_ALL(10)}}) {
         declare_header();
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 10}}) {
@@ -2290,7 +2290,7 @@ static void skeleton_draw(void) {
 /* Part `part` of `count` equal side-by-side stage rectangles (GL bottom-left x, y, w, h), all with
  * the same camera and one projection for their aspect ratio: writes s_frame_uniforms.view_proj. */
 static void stage_camera(uint32_t part, uint32_t count, int rect[4]) {
-    const nt_ui_viewport_t viewport = nt_ui_viewport_from_scale(&s_ui_scale);
+    const nt_ui_viewport_t viewport = nt_ui_viewport_from_scale(&s_ui_scale, g_nt_window.dpr);
     const int stage_width = (int)(s_stage_bbox.width * s_ui_scale.scale_x) / (int)count;
     const int stage_height = (int)(s_stage_bbox.height * s_ui_scale.scale_y);
     const int width = stage_width > 0 ? stage_width : 1; /* a collapsed stage still gets a finite projection */

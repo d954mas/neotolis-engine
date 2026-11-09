@@ -81,8 +81,9 @@ nt_pointer_t nt_ui_scale_apply_pointer(const nt_ui_scale_t *s, nt_pointer_t phys
     return physical;
 }
 
-nt_ui_viewport_t nt_ui_viewport_from_scale(const nt_ui_scale_t *s) {
+nt_ui_viewport_t nt_ui_viewport_from_scale(const nt_ui_scale_t *s, float px_per_dp) {
     NT_ASSERT(s != NULL && "nt_ui_viewport_from_scale: s must be non-NULL");
+    NT_ASSERT(isfinite(px_per_dp) && px_per_dp > 0.0F && "nt_ui_viewport_from_scale: px_per_dp must be finite > 0");
     NT_ASSERT(s->scale_x > 0.0F && s->scale_y > 0.0F && "nt_ui_viewport_from_scale: scale must be positive");
     /* Device content rect: matches nt_ui_scale_apply_pointer's (device - offset) / scale math, since
      * size = logical * scale => (device - offset) * (logical / size) == (device - offset) / scale. */
@@ -91,6 +92,7 @@ nt_ui_viewport_t nt_ui_viewport_from_scale(const nt_ui_scale_t *s) {
         .y = s->offset_y,
         .w = s->logical_w * s->scale_x,
         .h = s->logical_h * s->scale_y,
+        .px_per_dp = px_per_dp,
     };
 }
 

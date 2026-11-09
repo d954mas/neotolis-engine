@@ -244,7 +244,8 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
               "nt_ui_create_context: modal_zband_stride must be > 1 and stride * NT_UI_MODAL_MAX_DEPTH must fit int16");
     /* Touch-friendly baseline, looser than ImGui's mouse 6px/0.3s: the engine targets mobile/WASM. */
     ctx->gesture_dbl_window_secs = 0.50F;
-    ctx->gesture_move_radius = 16.0F;
+    ctx->gesture_move_radius_dp = 16.0F;
+    ctx->gesture_drag_slop_dp = 8.0F; /* Android touchSlop */
     const size_t tree_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_root_bytes = NT_ALIGN_UP(sizeof(*ctx->tree_root_for_elem) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_dfs_bytes = NT_ALIGN_UP(sizeof(nt_ui_dfs_frame_t) * NT_UI_TREE_DFS_DEPTH_CAP, NT_UI_CACHE_LINE);
@@ -386,6 +387,7 @@ void nt_ui_set_viewport(nt_ui_context_t *ctx, nt_ui_viewport_t vp) {
     NT_ASSERT(!ctx->frame_pointers_converted && "nt_ui_set_viewport: fed too late — the pointer conversion already latched this frame; set BEFORE the first step/query/pointer_hot");
     NT_ASSERT(isfinite(vp.x) && isfinite(vp.y) && "nt_ui_set_viewport: offset must be finite");
     NT_ASSERT(isfinite(vp.w) && isfinite(vp.h) && vp.w > 0.0F && vp.h > 0.0F && "nt_ui_set_viewport: viewport size must be finite and > 0");
+    NT_ASSERT(isfinite(vp.px_per_dp) && vp.px_per_dp > 0.0F && "nt_ui_set_viewport: px_per_dp must be finite and > 0 (the window DPR)");
     ctx->viewport = vp;
 }
 
@@ -460,13 +462,22 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     /* Default viewport = identity device==layout (no set_viewport => unscaled apps unchanged). */
     ctx->begin_w = screen_w;
     ctx->begin_h = screen_h;
-    ctx->viewport = (nt_ui_viewport_t){.x = 0.0F, .y = 0.0F, .w = screen_w, .h = screen_h};
+    ctx->viewport = (nt_ui_viewport_t){.x = 0.0F, .y = 0.0F, .w = screen_w, .h = screen_h, .px_per_dp = 1.0F};
 
-    /* Frames without nt_ui_begin swallow edges: no release edge, yet the button is up or newly pressed. */
     for (uint32_t i = 0; i < count; ++i) {
         const nt_button_state_t btn = pointers[i].buttons[NT_BUTTON_LEFT];
-        if (!btn.is_released && (!btn.is_down || btn.is_pressed)) {
-            ctx->captures[i].active_id = 0U;
+        nt_ui_capture_t *cap = &ctx->captures[i];
+        cap->released_id = 0U;
+        if (btn.is_released && btn.is_pressed && btn.is_down) {
+            /* Release and a new press in one frame: the old holder still gets its release, the new
+             * press captures freely. */
+            cap->released_id = cap->active_id;
+            cap->active_id = 0U;
+            cap->scroll_scope = 0U;
+        } else if (!btn.is_released && (!btn.is_down || btn.is_pressed)) {
+            /* Frames without nt_ui_begin swallow edges: no release edge, yet the button is up or newly pressed. */
+            cap->active_id = 0U;
+            cap->scroll_scope = 0U;
         }
     }
 
@@ -481,14 +492,13 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
         }
         ctx->capture_seen[i] = 0U;
         ctx->pointer_hot[i] = (nt_ui_hot_t){0}; /* resolved lazily on first step/query this frame */
-        ctx->pointer_occlusion[i] = INFINITY;   /* game re-feeds per frame; default = no cutoff */
-        /* wheel_owner[] is NOT reset here — it carries the prev-frame end-of-frame resolution into
-         * this frame's consume (innermost-wins, 1-frame lag). It's rewritten in nt_ui_end. */
+        ctx->pointer_scope[i] = 0U;
+        ctx->wheel_owner[i][0] = 0U; /* rewritten by this frame's arbiter */
+        ctx->wheel_owner[i][1] = 0U;
+        ctx->pointer_occlusion[i] = INFINITY; /* game re-feeds per frame; default = no cutoff */
     }
     ctx->last_press_age += dt;
-    /* New frame of wheel candidates; depth counter re-zeroes (begin++/end-- balance across the frame). */
-    ctx->wheel_candidate_count = 0U;
-    ctx->wheel_depth = 0U;
+    ctx->scroll_top = 0U;         /* scroll/popup push-pop balance across the frame (asserted == 0 at end) */
     ctx->active_modal_depth = 0U; /* modal begin++/end-- balance across the frame (asserted == 0 at end) */
     /* Commit last frame's deepest modal as the close-scan target (1-frame IM lag), then reset. */
     ctx->modal_top_id_prev = ctx->modal_top_id_cur;
@@ -617,8 +627,8 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     ctx->last_build_tree_ms = (float)((nt_time_now() - build_t0) * 1000.0);
 #endif
 
-    /* Resolve this frame's wheel candidates into wheel_owner[] for next frame's consume (innermost-wins). */
-    nt_ui_internal_resolve_wheel_owners(ctx);
+    NT_ASSERT(ctx->scroll_top == 0U && "nt_ui_end: unbalanced scroll/popup begin/end");
+    nt_ui_internal_scroll_finalize(ctx);
 
     /* Publish this frame's modal presence for nt_ui_modal_active: a game polls it next frame BEFORE
      * begin (e.g. gating its own hotkeys), so commit at end (not begin) to hold the latest result. */
@@ -2471,18 +2481,24 @@ typedef struct {
     int32_t first_hover_pidx; /* fallback for pos/id when no owner */
     bool any_hovered;
     bool new_capture; /* effective_pidx is a fresh press_now capture (no prior holder) */
+    bool releasing;   /* effective_pidx released this widget while a new press began in the same frame */
     float distance;   /* world hit distance for the first hovering pidx (3D); 0 in 2D / no hover */
 } nt_ui_widget_pidx_state_t;
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_ui_widget_pidx_state_t resolve_widget_pidx_state(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
-    nt_ui_widget_pidx_state_t s = {.effective_pidx = -1, .first_hover_pidx = -1, .any_hovered = false, .new_capture = false, .distance = 0.0F};
+    nt_ui_widget_pidx_state_t s = {.effective_pidx = -1, .first_hover_pidx = -1, .any_hovered = false, .new_capture = false, .releasing = false, .distance = 0.0F};
     int32_t holder = -1;
     int32_t candidate = -1;
-    /* Pass 1: existing holder. */
+    /* Pass 1: existing holder (or the holder releasing while its pointer pressed again this frame). */
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
         if (ctx->captures[i].active_id == id) {
             holder = (int32_t)i;
+            break;
+        }
+        if (ctx->captures[i].released_id == id) {
+            holder = (int32_t)i;
+            s.releasing = true;
             break;
         }
     }
@@ -2498,7 +2514,7 @@ static nt_ui_widget_pidx_state_t resolve_widget_pidx_state(nt_ui_context_t *ctx,
          * 3D all hits beyond the occlusion cutoff) gates OFF — a freshly-shown / just-moved widget waits
          * one frame to register before it can react. Reliability over instant first-frame response (matches Dear ImGui). */
         const uint32_t hot = ctx->pointer_hot[i].id;
-        const bool arbitrated_ok = (hot == id) || (cap->active_id == id);
+        const bool arbitrated_ok = (hot == id) || (cap->active_id == id) || (s.releasing && (int32_t)i == holder);
         float hit_t = 0.0F;
         const bool over = arbitrated_ok && ui_hit_test(ctx, id, p->x, p->y, pad_lrtb, &hit_t, NULL);
         if (!over) {
@@ -2522,6 +2538,7 @@ static nt_ui_widget_pidx_state_t resolve_widget_pidx_state(nt_ui_context_t *ctx,
 }
 
 static void resolve_hot_if_needed(nt_ui_context_t *ctx); /* defined below; query triggers it too */
+static void resolve_hot(nt_ui_context_t *ctx);
 
 /* Compute-pure: same returned struct N calls per frame. Side effects are idempotent and frame-scoped:
  * an OR of pointer_over_any (observability for nt_ui_wants_pointer) and the once-per-frame hot resolve
@@ -2571,18 +2588,21 @@ static nt_ui_interaction_t query_interaction_padded(nt_ui_context_t *ctx, uint32
         const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
         const bool over = ui_hit_test(ctx, id, p->x, p->y, pad_lrtb, NULL, NULL);
         *out_owner_over = over;
-        out.pressed = btn.is_down;
-        out.released_now = btn.is_released;
+        out.pressed = btn.is_down && !s.releasing;
+        /* A press that began this frame and is still down is not the gesture that released. */
+        const bool released = btn.is_released && !(s.new_capture && btn.is_down);
+        out.released_now = released;
         out.pressed_now = s.new_capture;
-        out.clicked = btn.is_released && over;
+        out.clicked = released && over;
         out.pointer_id = p->id;
+        out.gesture_pending = !s.releasing && cap->scroll_scope != 0U;
         if (s.new_capture) {
             out.press_pos[0] = p->x;
             out.press_pos[1] = p->y;
         } else {
             out.press_pos[0] = cap->press_pos[0];
             out.press_pos[1] = cap->press_pos[1];
-            if (cap->hold_live && btn.is_down && over) {
+            if (!s.releasing && cap->hold_live && btn.is_down && over) {
                 out.hold_secs = cap->hold_secs;
                 out.hold_prev_secs = cap->hold_prev_secs;
             }
@@ -2638,6 +2658,8 @@ void nt_ui_internal_ensure_pointers_layout(nt_ui_context_t *ctx) {
         p->dx *= inv_sx; /* delta carries only the scale (no offset) */
         p->dy *= inv_sy;
     }
+    ctx->layout_per_dp[0] = ctx->viewport.px_per_dp * inv_sx;
+    ctx->layout_per_dp[1] = ctx->viewport.px_per_dp * inv_sy;
 #if NT_UI_DEBUG_TOOLS
     /* Re-gate the inspector sidebar with THIS frame's viewport now it is known: begin gated using the
      * PREV-frame viewport (1-frame lag, off only on a resize). frame_pointers are now layout-space; the
@@ -2647,16 +2669,24 @@ void nt_ui_internal_ensure_pointers_layout(nt_ui_context_t *ctx) {
         ctx->inspector_pointer_consumed = ctx->inspector_active && (primary->x >= (ctx->begin_w - ctx->inspector_metrics.panel_width));
     }
 #endif
+    /* The scroll arbiter runs here, at the frame's first pointer use, so every interaction result of
+     * the frame already reflects its decisions. It reads the front-most records, hence the hot resolve. */
+    if (ctx->in_frame) {
+        resolve_hot(ctx);
+        nt_ui_internal_scroll_arbitrate(ctx);
+    }
+}
+
+static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
+    /* The conversion (and, in frame, the hot resolve with it) must run before any hit-test reads. */
+    nt_ui_internal_ensure_pointers_layout(ctx);
+    if (!ctx->hot_resolved) {
+        resolve_hot(ctx); /* out of frame: nt_ui_pointer_hot / query after nt_ui_end */
+    }
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
-    /* MUST precede the hot_resolved early-out: a frame where set_pointer_occlusion latches hot via a
-     * different call still needs the device->layout conversion to have run before any hit-test reads. */
-    nt_ui_internal_ensure_pointers_layout(ctx);
-    if (ctx->hot_resolved) {
-        return;
-    }
+static void resolve_hot(nt_ui_context_t *ctx) {
     ctx->hot_resolved = true;
     /* ui_hit_test -> Clay_GetElementData reads the GLOBAL current Clay ctx, so make the resolve robust
      * to nt_ui_pointer_hot being called outside the frame or under a different current ctx. */
@@ -2668,8 +2698,10 @@ static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
             continue; /* a gone pointer hovers nothing (its hot stays 0) */
         }
         nt_ui_hot_t best = {0};
+        uint32_t best_scope = 0U;
         bool found = false;
-        int16_t best_zindex = INT16_MIN; /* 2D: highest effective zIndex seen so far */
+        int16_t best_zindex = INT16_MIN; /* highest effective zIndex among the competing hits */
+        float nearest_t = INFINITY;      /* 3D: hits within a relative epsilon of the nearest compete like 2D */
         for (uint32_t k = 0; k < ctx->interactive_prev_count; ++k) {
             const nt_ui_interactive_t *rec = &ctx->interactive_prev[k];
             float t = 0.0F;
@@ -2677,38 +2709,51 @@ static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
             if (!ui_hit_test(ctx, rec->id, p->x, p->y, rec->pad, &t, &zi)) {
                 continue;
             }
+            if (rec->scope == rec->id && !nt_ui_internal_scroll_surface_live(ctx, rec->id)) {
+                continue; /* a scroll that cannot move is see-through */
+            }
+            bool wins = false;
             if (ctx->use_raycast_input) {
                 if (t > ctx->pointer_occlusion[pidx]) {
                     continue; /* behind the game-fed cutoff (e.g. a wall) → occluded, leaves hot=0 (skip) */
                 }
-                if (!found || t < best.distance) {
-                    best.id = rec->id;
-                    best.distance = t;
-                    found = true;
+                /* Coplanar content (a row on its scroll surface) ties: zIndex, then later registration. */
+                const float tie_eps = 1.0e-5F * fmaxf(fabsf(nearest_t), 1.0F);
+                if (!found || t < nearest_t - tie_eps) {
+                    wins = true;
+                } else if (t <= nearest_t + tie_eps) {
+                    wins = zi >= best_zindex;
                 }
+                nearest_t = fminf(nearest_t, t);
             } else {
                 /* 2D: highest effective zIndex wins; >= so a later-registered tie overwrites. Registry
                  * order = nt_ui_step call order = declaration (paint) order when the game steps in
                  * declaration order — the normal pattern. */
-                if (!found || zi >= best_zindex) {
-                    best.id = rec->id;
-                    best.distance = 0.0F;
-                    best_zindex = zi;
-                    found = true;
-                }
+                wins = !found || zi >= best_zindex;
+            }
+            if (wins) {
+                best.id = rec->id;
+                best.distance = ctx->use_raycast_input ? t : 0.0F;
+                best_scope = rec->scope;
+                best_zindex = zi;
+                found = true;
             }
         }
         /* best stays {0} when nothing was hit OR all hits were occluded — both gate to skip. */
         ctx->pointer_hot[pidx] = best;
+        ctx->pointer_scope[pidx] = best_scope;
+        if (best.id != 0U) {
+            ctx->pointer_over_any = true; /* surfaces and blockers count as UI under the pointer */
+        }
     }
     Clay_SetCurrentContext(saved_clay);
 }
 
 /* One record per ctx, not per pointer: a quick re-tap can land in another pointer slot. */
 static bool press_pairs_with_last(const nt_ui_context_t *ctx, uint32_t id, float x, float y) {
-    const float dx = x - ctx->last_press_pos[0];
-    const float dy = y - ctx->last_press_pos[1];
-    const float radius = ctx->gesture_move_radius;
+    const float dx = (x - ctx->last_press_pos[0]) / ctx->layout_per_dp[0];
+    const float dy = (y - ctx->last_press_pos[1]) / ctx->layout_per_dp[1];
+    const float radius = ctx->gesture_move_radius_dp;
     return ctx->last_press_id == id && ctx->last_press_age <= ctx->gesture_dbl_window_secs && (dx * dx) + (dy * dy) <= radius * radius;
 }
 
@@ -2730,17 +2775,8 @@ nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_st
     nt_ui_interaction_t out = query_interaction_padded(ctx, id, pad_lrtb, &owner_over);
 
     /* Record this interactive widget for NEXT frame's hot resolve (resolve re-validates id/transform,
-     * so recording an id that later vanishes is harmless). Silently capped at max_elements —
-     * graceful degradation (some ctx configs size the registry to 0), not a hard error. */
-    if (ctx->interactive_cur_count < ctx->max_elements) {
-        nt_ui_interactive_t *rec = &ctx->interactive_cur[ctx->interactive_cur_count++];
-        rec->id = id;
-        if (pad_lrtb != NULL) {
-            memcpy(rec->pad, pad_lrtb, sizeof rec->pad);
-        } else {
-            memset(rec->pad, 0, sizeof rec->pad);
-        }
-    }
+     * so recording an id that later vanishes is harmless). */
+    nt_ui_internal_register_interactive(ctx, id, pad_lrtb, nt_ui_internal_scroll_open(ctx));
 
 #if NT_UI_DEBUG_TOOLS
     /* capture_seen stays 0 so next begin's orphan cleanup wipes in-progress capture (no phantom drag). */
@@ -2761,7 +2797,21 @@ nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_st
         const nt_pointer_t *p = &ctx->frame_pointers[pidx];
         nt_ui_capture_t *cap = &ctx->captures[pidx];
         const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
-        if (s.new_capture) {
+        bool new_capture = s.new_capture;
+        bool commit = true;
+        if (s.releasing) {
+            /* The old gesture ends here; the same frame's new press restarts on this widget when it is hot. */
+            cap->released_id = 0U;
+            new_capture = cap->active_id == 0U && ctx->pointer_hot[pidx].id == id;
+            commit = new_capture;
+            if (new_capture) {
+                out.pressed = true;
+                out.pressed_now = true;
+                out.press_pos[0] = p->x;
+                out.press_pos[1] = p->y;
+            }
+        }
+        if (commit && new_capture) {
             cap->active_id = id;
             cap->press_pos[0] = p->x;
             cap->press_pos[1] = p->y;
@@ -2774,16 +2824,19 @@ nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_st
             ctx->last_press_age = 0.0F;
             ctx->last_press_pos[0] = p->x;
             ctx->last_press_pos[1] = p->y;
-        } else if (!owner_over) {
+        } else if (commit && !owner_over) {
             cap->hold_live = false;
         }
-        cap->pos[0] = p->x;
-        cap->pos[1] = p->y;
-        cap->drag_axes = drag_axes;
-        /* Marks not-orphan for next begin's cleanup. */
-        ctx->capture_seen[pidx] = 1U;
-        if (btn.is_released) {
-            cap->active_id = 0U;
+        if (commit) {
+            cap->pos[0] = p->x;
+            cap->pos[1] = p->y;
+            cap->drag_axes = drag_axes;
+            /* Marks not-orphan for next begin's cleanup. */
+            ctx->capture_seen[pidx] = 1U;
+            /* A press that began this frame and is still down survives a same-frame release of the previous gesture. */
+            if (btn.is_released && !(new_capture && btn.is_down)) {
+                cap->active_id = 0U;
+            }
         }
     }
 
@@ -2845,12 +2898,15 @@ float nt_ui_hold_progress(const nt_ui_interaction_t *in, float secs) {
     return in->hold_secs >= secs ? 1.0F : in->hold_secs / secs;
 }
 
-void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius) {
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — count is all NT_ASSERT guards, not logic
+void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_dp, float drag_slop_dp) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_gesture_constants: ctx must be non-NULL");
     NT_ASSERT(isfinite(dbl_window_secs) && dbl_window_secs >= 0.0F && "nt_ui_set_gesture_constants: dbl_window_secs must be finite and >= 0");
-    NT_ASSERT(isfinite(move_radius) && move_radius >= 0.0F && "nt_ui_set_gesture_constants: move_radius must be finite and >= 0");
+    NT_ASSERT(isfinite(move_radius_dp) && move_radius_dp >= 0.0F && "nt_ui_set_gesture_constants: move_radius_dp must be finite and >= 0");
+    NT_ASSERT(isfinite(drag_slop_dp) && drag_slop_dp > 0.0F && "nt_ui_set_gesture_constants: drag_slop_dp must be finite and > 0");
     ctx->gesture_dbl_window_secs = dbl_window_secs;
-    ctx->gesture_move_radius = move_radius;
+    ctx->gesture_move_radius_dp = move_radius_dp;
+    ctx->gesture_drag_slop_dp = drag_slop_dp;
 }
 
 /* Inert registry entry: the id wins next-frame hot arbitration over anything behind it (topmost-z),
@@ -2865,14 +2921,21 @@ void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lr
 
     /* Same registry record as step (so next-frame resolve_hot ranks it for topmost arbitration), minus
      * the capture/button-edge state machine — an inert occluder, not an interactive widget. */
-    if (ctx->interactive_cur_count < ctx->max_elements) {
-        nt_ui_interactive_t *rec = &ctx->interactive_cur[ctx->interactive_cur_count++];
-        rec->id = id;
-        if (pad_lrtb != NULL) {
-            memcpy(rec->pad, pad_lrtb, sizeof rec->pad);
-        } else {
-            memset(rec->pad, 0, sizeof rec->pad);
-        }
+    nt_ui_internal_register_interactive(ctx, id, pad_lrtb, nt_ui_internal_scroll_open(ctx));
+}
+
+/* Silently capped at max_elements — graceful degradation (some ctx configs size the registry to 0). */
+void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4], uint32_t scope) {
+    if (ctx->interactive_cur_count >= ctx->max_elements) {
+        return;
+    }
+    nt_ui_interactive_t *rec = &ctx->interactive_cur[ctx->interactive_cur_count++];
+    rec->id = id;
+    rec->scope = scope;
+    if (pad_lrtb != NULL) {
+        memcpy(rec->pad, pad_lrtb, sizeof rec->pad);
+    } else {
+        memset(rec->pad, 0, sizeof rec->pad);
     }
 }
 

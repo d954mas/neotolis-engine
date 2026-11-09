@@ -72,11 +72,11 @@ static void declare_btn_element(void) {
     CLAY({.id = CLAY_ID("btn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BTN_X, .y = BTN_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
 }
 
-static nt_ui_viewport_t letterbox_vp(void) { return (nt_ui_viewport_t){.x = VP_OFF_X, .y = VP_OFF_Y, .w = SCREEN_W * VP_SCALE, .h = SCREEN_H * VP_SCALE}; }
+static nt_ui_viewport_t letterbox_vp(void) { return (nt_ui_viewport_t){.x = VP_OFF_X, .y = VP_OFF_Y, .w = SCREEN_W * VP_SCALE, .h = SCREEN_H * VP_SCALE, .px_per_dp = 1.0F}; }
 
 /* w/SCREEN_W (=2.0) != h/SCREEN_H (=0.5): a per-axis-scale converter that transposed w<->h would map
    the device pointer to the WRONG layout coord, missing the widget (the non-vacuous guard below). */
-static nt_ui_viewport_t aniso_vp(void) { return (nt_ui_viewport_t){.x = ANISO_OFF_X, .y = ANISO_OFF_Y, .w = SCREEN_W * ANISO_SCALE_X, .h = SCREEN_H * ANISO_SCALE_Y}; }
+static nt_ui_viewport_t aniso_vp(void) { return (nt_ui_viewport_t){.x = ANISO_OFF_X, .y = ANISO_OFF_Y, .w = SCREEN_W * ANISO_SCALE_X, .h = SCREEN_H * ANISO_SCALE_Y, .px_per_dp = 1.0F}; }
 
 /* Warm + step frame so btn enters the interactive registry; optionally set a viewport first.
  * Front-most arbitration reads the PREVIOUS frame's registry, so the widget reacts only from the

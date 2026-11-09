@@ -1571,7 +1571,7 @@ static void emit_scroll_pane_frame(float screen_w, float screen_h, float ptr_x, 
     CLAY({.id = CLAY_ID("scroll_pane_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
         /* Resolve offset BEFORE opening the clip element (the scroll_begin pattern: the
          * prev-frame Clay_GetScrollContainerData read must precede this frame's reconfigure). */
-        const Clay_Vector2 off = nt_ui_internal_scroll_pane_offset(s_fx.ctx, nt_ui_id("scroll_pane_test"), NT_UI_STATE_TAG('t', 's', 't', 'p'), false, true);
+        const Clay_Vector2 off = nt_ui_internal_scroll_pane_offset(s_fx.ctx, nt_ui_id("scroll_pane_test"), false, true);
         CLAY({.id = CLAY_ID("scroll_pane_test"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .clip = {.vertical = true, .childOffset = off}}) {
             /* Tall content forces y overflow so the pane can scroll. */
             CLAY({.id = CLAY_ID("scroll_pane_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(180), CLAY_SIZING_FIXED(1000)}}}) {}
@@ -2302,7 +2302,7 @@ static void test_inspector_tree_pane_scrolls_on_wheel_integration(void) {
     TEST_ASSERT_TRUE_MESSAGE(s1->pos[1] < 0.0F, "wheel over the real inspector tree pane must scroll it");
 }
 
-/* The inspector pane (depth NT_UI_WHEEL_INSPECTOR_DEPTH) must win EXCLUSIVELY over a game scroll
+/* The inspector pane must win EXCLUSIVELY over a game scroll
  * container directly beneath it: the pane scrolls, the game container under the same pointer stays
  * put. Pins the always-on-top debug-overlay contract against the innermost-wins resolve. */
 static const uint32_t REPRO_GAME_SCROLL_ID = 0x1A5C01U;
@@ -2354,7 +2354,7 @@ static void test_inspector_pane_wins_over_game_container(void) {
 static void emit_scroll_pane_drag_frame(float screen_w, float screen_h, const nt_pointer_t *p) {
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, p, 1, 0);
     CLAY({.id = CLAY_ID("scroll_pane_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
-        const Clay_Vector2 off = nt_ui_internal_scroll_pane_offset(s_fx.ctx, nt_ui_id("scroll_pane_test"), NT_UI_STATE_TAG('t', 's', 't', 'p'), false, true);
+        const Clay_Vector2 off = nt_ui_internal_scroll_pane_offset(s_fx.ctx, nt_ui_id("scroll_pane_test"), false, true);
         CLAY({.id = CLAY_ID("scroll_pane_test"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .clip = {.vertical = true, .childOffset = off}}) {
             CLAY({.id = CLAY_ID("scroll_pane_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(180), CLAY_SIZING_FIXED(1000)}}}) {}
         }
@@ -2381,7 +2381,7 @@ static void test_inspector_pane_drag_tracks_1to1(void) {
     nt_pointer_t f1 = make_pointer(px, 100.0F);
     emit_scroll_pane_drag_frame(screen_w, screen_h, &f1);
 
-    /* Frame 2: fresh press inside the pane -> free-press arms (delta accrues from next frame). */
+    /* Frame 2: fresh press inside the pane -> the press starts a pending gesture on the pane. */
     nt_pointer_t f2 = make_drag_pointer(px, 100.0F, true, true);
     emit_scroll_pane_drag_frame(screen_w, screen_h, &f2);
 
@@ -2448,7 +2448,7 @@ static void test_inspector_pane_drag_release_flings(void) {
     TEST_ASSERT_TRUE_MESSAGE(sN->pos[1] <= after_first_coast, "fling settles at or past the first coast point");
 }
 
-/* ---- A tap (below the 8px threshold) on a tree row still selects it: the pane's free-press
+/* ---- A tap (below the 8px threshold) on a tree row still selects it: the pane gesture
  * doesn't swallow the Clay PRESSED_THIS_FRAME pick that drives inspector_selected_id. ---- */
 static void test_inspector_pane_tap_still_selects_row(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -2479,7 +2479,7 @@ static void test_inspector_pane_tap_still_selects_row(void) {
     }
     nt_ui_end(s_fx.ctx);
 
-    TEST_ASSERT_TRUE_MESSAGE(s_fx.ctx->inspector_selected_id != 0U, "a tap on a tree row must still select it (pane free-press must not swallow the pick)");
+    TEST_ASSERT_TRUE_MESSAGE(s_fx.ctx->inspector_selected_id != 0U, "a tap on a tree row must still select it (a pending pane gesture must not swallow the pick)");
 }
 
 /* ---- A drag inside the pane must NOT scroll a game container directly beneath it: the pane
@@ -2517,7 +2517,7 @@ static void test_inspector_pane_drag_does_not_scroll_game(void) {
     nt_pointer_t f2 = make_pointer(ptr_x, ptr_y);
     inspector_drag_over_game_scroll_frame(screen_w, screen_h, &f2);
 
-    /* Frame 3: press arms the pane's free-press. */
+    /* Frame 3: press starts the pane gesture. */
     nt_pointer_t f3 = make_drag_pointer(ptr_x, ptr_y, true, true);
     inspector_drag_over_game_scroll_frame(screen_w, screen_h, &f3);
 

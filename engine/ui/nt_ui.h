@@ -340,13 +340,15 @@ void nt_ui_set_view_proj(nt_ui_context_t *ctx, const float view_proj[16]);
 void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font);
 
 /* Device->layout viewport, the ctx's single device<->layout mapping.
- *   (x, y) — device-space offset of the layout content rect (LETTERBOX/CROP margins; 0 for unscaled)
- *   (w, h) — device-space size of that content rect (logical_dim * scale), must be > 0. */
+ *   (x, y)    — device-space offset of the layout content rect (LETTERBOX/CROP margins; 0 for unscaled)
+ *   (w, h)    — device-space size of that content rect (logical_dim * scale), must be > 0.
+ *   px_per_dp — device px per dp (the window DPR), > 0: gesture tolerances are physical finger sizes. */
 typedef struct {
     float x, y, w, h;
+    float px_per_dp;
 } nt_ui_viewport_t;
 
-/* Overrides this frame's viewport (begin reset it to the identity {0,0,screen_w,screen_h}).
+/* Overrides this frame's viewport (begin reset it to the identity {0,0,screen_w,screen_h}, px_per_dp 1).
  * Call AFTER nt_ui_begin and BEFORE the first hit-test resolve (step/query/pointer_hot) — same
  * lazy window as nt_ui_set_view_proj. Scaled apps feed nt_ui_viewport_from_scale here. */
 void nt_ui_set_viewport(nt_ui_context_t *ctx, nt_ui_viewport_t vp);
@@ -573,6 +575,7 @@ typedef struct {
     float pos[2];           /* current pointer pos (UI-space) */
     float drag_dx, drag_dy; /* = pos - press_pos (convenience) */
     uint32_t pointer_id;    /* which pointer captured (multitouch) */
+    bool gesture_pending;   /* an enclosing scroll may still take this press: hold off value changes */
     float distance;         /* 3D ctx: world distance (near-plane-relative) to this widget; 0 in 2D */
 } nt_ui_interaction_t;
 
@@ -609,11 +612,12 @@ bool nt_ui_hold_crossed(const nt_ui_interaction_t *in, float secs);
 /* Linear 0..1 ramp toward secs > 0 while the hold is live, 0 otherwise (the hold-to-confirm signal). */
 float nt_ui_hold_progress(const nt_ui_interaction_t *in, float secs);
 
-/* App-wide gesture constants: the double-click window (secs) and the move radius (layout units) within
- * which a second press still counts as a double-click. Hold/long-press is NOT cancelled by
- * movement — only by leaving the widget's hitbox. Asserts each is finite and >= 0 (fail-early,
- * no silent clamp). Defaults: 0.5 s, 16. */
-void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius);
+/* App-wide gesture constants: the double-click window (secs), the move radius (dp) within which a
+ * second press still counts as a double-click, and the drag slop (dp) a press must move along an axis
+ * before an enclosing scroll or a draggable widget takes it. Hold/long-press is NOT cancelled by
+ * movement — only by leaving the widget's hitbox. Asserts each is finite and >= 0 (slop > 0).
+ * Defaults: 0.5 s, 16 dp, 8 dp. */
+void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_dp, float drag_slop_dp);
 
 /* Inert occluder: enters id into the interactive registry so it wins next-frame topmost-z
  * arbitration over widgets behind it (the pointer can't leak through), but never captures,

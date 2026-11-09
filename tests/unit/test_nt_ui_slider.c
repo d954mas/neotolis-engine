@@ -580,6 +580,71 @@ static bool active_floating_clip_at(int32_t thumb_index, Clay_BoundingBox *out_c
     return found;
 }
 
+// #region slider inside a scroll: the press is pending until the slop decides
+/* Slider at the TOP of the scroll content: track at (SCROLL_X..+SL_W, SCROLL_Y..+SL_H). */
+static void slider_top_in_scroll_frame(const nt_pointer_t *p, float *value) {
+    const nt_ui_scroll_style_t scroll_style = scroll_y_style();
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
+    CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = SCROLL_X, .y = SCROLL_Y}}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_SL_ID, &scroll_style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(SCROLL_DIM), CLAY_SIZING_FIXED(SCROLL_DIM)}}});
+        CLAY({.id = CLAY_ID("scroll-content"), .layout = {.sizing = {CLAY_SIZING_FIXED(SCROLL_DIM), CLAY_SIZING_FIXED(SCROLL_CONTENT_H)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+            (void)nt_ui_slider_float(s_fx.ctx, NULL, 0, SCROLL_SL_ID + 1U, NULL, value, 0.0F, 1.0F, 0.0F, &s_style, &s_track_decl, true);
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+#define TOP_SL_CY (SCROLL_Y + (SL_H * 0.5F))
+#define TOP_SL_TRACK_X (SCROLL_X + SL_W - 15.0F) /* on the track, right of the mid thumb */
+
+/* A vertical drag that starts on the track scrolls the list and leaves the value alone. */
+static void test_slider_in_scroll_vertical_drag_keeps_value(void) {
+    float value = 0.5F;
+    nt_pointer_t p = make_pointer(TOP_SL_TRACK_X, TOP_SL_CY, false, false, false);
+    slider_top_in_scroll_frame(&p, &value);
+    slider_top_in_scroll_frame(&p, &value);
+    p = make_pointer(TOP_SL_TRACK_X, TOP_SL_CY, true, true, false);
+    slider_top_in_scroll_frame(&p, &value);
+    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.0001F)); /* pending: no track jump yet */
+    p = make_pointer(TOP_SL_TRACK_X, TOP_SL_CY - 30.0F, true, false, false);
+    slider_top_in_scroll_frame(&p, &value);
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_SL_ID, s_fx.ctx->captures[0].active_id);
+    p = make_pointer(TOP_SL_TRACK_X, TOP_SL_CY - 30.0F, false, false, true);
+    slider_top_in_scroll_frame(&p, &value);
+    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.0001F));
+}
+
+/* A horizontal drag on the thumb stays with the slider: the value follows once the slop is crossed. */
+static void test_slider_in_scroll_horizontal_drag_moves_value(void) {
+    float value = 0.5F;
+    const float thumb_x = SCROLL_X + (SL_TW * 0.5F) + (0.5F * SL_USABLE);
+    nt_pointer_t p = make_pointer(thumb_x, TOP_SL_CY, false, false, false);
+    slider_top_in_scroll_frame(&p, &value);
+    slider_top_in_scroll_frame(&p, &value);
+    p = make_pointer(thumb_x, TOP_SL_CY, true, true, false);
+    slider_top_in_scroll_frame(&p, &value);
+    p = make_pointer(thumb_x + 36.0F, TOP_SL_CY + 2.0F, true, false, false);
+    slider_top_in_scroll_frame(&p, &value);
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_SL_ID + 1U, s_fx.ctx->captures[0].active_id);
+    TEST_ASSERT_TRUE(float_near(value, 0.5F + (36.0F / SL_USABLE), 0.01F)); /* grab kept, no jump */
+}
+
+/* A tap on the track inside a scroll applies its jump on release. */
+static void test_slider_in_scroll_track_tap_applies_on_release(void) {
+    float value = 0.5F;
+    nt_pointer_t p = make_pointer(TOP_SL_TRACK_X, TOP_SL_CY, false, false, false);
+    slider_top_in_scroll_frame(&p, &value);
+    slider_top_in_scroll_frame(&p, &value);
+    p = make_pointer(TOP_SL_TRACK_X, TOP_SL_CY, true, true, false);
+    slider_top_in_scroll_frame(&p, &value);
+    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.0001F));
+    p = make_pointer(TOP_SL_TRACK_X, TOP_SL_CY, false, false, true);
+    slider_top_in_scroll_frame(&p, &value);
+    TEST_ASSERT_TRUE(value > 0.9F);
+}
+// #endregion
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_thumb_clipped_in_scroll(void) {
     nt_ui_scroll_style_t scroll_style = scroll_y_style();
@@ -915,6 +980,9 @@ int main(void) {
     RUN_TEST(test_step_thumb_visual_snap);
     RUN_TEST(test_out_of_range_writeback);
     RUN_TEST(test_thumb_clipped_in_scroll);
+    RUN_TEST(test_slider_in_scroll_vertical_drag_keeps_value);
+    RUN_TEST(test_slider_in_scroll_horizontal_drag_moves_value);
+    RUN_TEST(test_slider_in_scroll_track_tap_applies_on_release);
     RUN_TEST(test_thumb_above_modal_band_first_frame);
     RUN_TEST(test_vertical_track_jump_bottom_up);
     RUN_TEST(test_vertical_track_jump_top_down);
