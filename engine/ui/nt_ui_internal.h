@@ -587,9 +587,9 @@ void nt_ui_internal_emit_outline_m(nt_resource_t atlas, uint32_t region, const f
 void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *target, int x, int y, int wp, int hp);
 
 /* Scroll offset for an engine-internal clip pane (inspector) keyed by Clay element id; drives
- * the custom scroll integrator off prev-frame dims + wheel. Feed the result to clip.childOffset.
- * `tag` keeps each pane's state cell distinct (NT_UI_STATE_TAG). */
-Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id, bool scroll_x, bool scroll_y);
+ * the custom scroll integrator off prev-frame dims + wheel, on the axes its clip config enables.
+ * Feed the result to clip.childOffset. */
+Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id);
 
 /* Scroll gesture arbiter, run once per frame from the pointer gate (before any interaction result
  * leaves the engine): starts press records, decides crossings, resolves wheel owners. */
@@ -599,15 +599,17 @@ void nt_ui_internal_scroll_arbitrate(nt_ui_context_t *ctx);
  * snapshot next frame's arbiter and hot resolve read. */
 void nt_ui_internal_scroll_finalize(nt_ui_context_t *ctx);
 
-/* A hot hit on a scroll surface counts only while that scroll can move (a fitting list is see-through). */
-bool nt_ui_internal_scroll_surface_live(nt_ui_context_t *ctx, uint32_t id);
+/* How a hot hit on a scroll surface counts: NONE when the scroll cannot move (a fitting list is
+ * see-through), PANE for an inspector pane (front-most over any game record, also in 3D). */
+typedef enum { NT_UI_SURFACE_NONE = 0, NT_UI_SURFACE_LIVE, NT_UI_SURFACE_PANE } nt_ui_surface_kind_t;
+nt_ui_surface_kind_t nt_ui_internal_scroll_surface_kind(nt_ui_context_t *ctx, uint32_t id);
 
 /* Adds a registry record for the front-most resolve with the current scroll scope. */
 void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4], uint32_t scope);
 
 /* Declaration stack: scrolls push their id, popups push 0 (a barrier for the scroll chain). */
 void nt_ui_internal_scroll_push(nt_ui_context_t *ctx, uint32_t id);
-void nt_ui_internal_scroll_pop(nt_ui_context_t *ctx);
+void nt_ui_internal_scroll_pop(nt_ui_context_t *ctx, bool barrier);
 static inline uint32_t nt_ui_internal_scroll_open(const nt_ui_context_t *ctx) { return (ctx->scroll_top > 0U) ? ctx->scroll_stack[ctx->scroll_top - 1U] : 0U; }
 
 /* Prev-frame transform-aware point-in-bbox test (same 1-frame IM lag as step/query), with optional

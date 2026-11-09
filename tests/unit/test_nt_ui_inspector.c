@@ -1571,7 +1571,7 @@ static void emit_scroll_pane_frame(float screen_w, float screen_h, float ptr_x, 
     CLAY({.id = CLAY_ID("scroll_pane_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
         /* Resolve offset BEFORE opening the clip element (the scroll_begin pattern: the
          * prev-frame Clay_GetScrollContainerData read must precede this frame's reconfigure). */
-        const Clay_Vector2 off = nt_ui_internal_scroll_pane_offset(s_fx.ctx, nt_ui_id("scroll_pane_test"), false, true);
+        const Clay_Vector2 off = nt_ui_internal_scroll_pane_offset(s_fx.ctx, nt_ui_id("scroll_pane_test"));
         CLAY({.id = CLAY_ID("scroll_pane_test"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .clip = {.vertical = true, .childOffset = off}}) {
             /* Tall content forces y overflow so the pane can scroll. */
             CLAY({.id = CLAY_ID("scroll_pane_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(180), CLAY_SIZING_FIXED(1000)}}}) {}
@@ -2354,7 +2354,7 @@ static void test_inspector_pane_wins_over_game_container(void) {
 static void emit_scroll_pane_drag_frame(float screen_w, float screen_h, const nt_pointer_t *p) {
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, p, 1, 0);
     CLAY({.id = CLAY_ID("scroll_pane_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
-        const Clay_Vector2 off = nt_ui_internal_scroll_pane_offset(s_fx.ctx, nt_ui_id("scroll_pane_test"), false, true);
+        const Clay_Vector2 off = nt_ui_internal_scroll_pane_offset(s_fx.ctx, nt_ui_id("scroll_pane_test"));
         CLAY({.id = CLAY_ID("scroll_pane_test"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .clip = {.vertical = true, .childOffset = off}}) {
             CLAY({.id = CLAY_ID("scroll_pane_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(180), CLAY_SIZING_FIXED(1000)}}}) {}
         }

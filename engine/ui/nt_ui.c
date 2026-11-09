@@ -2631,11 +2631,10 @@ nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id) {
     return query_interaction_padded(ctx, id, NULL, &owner_over);
 }
 
-/* Lazy once-per-frame resolve of the front-most interactive widget per pointer, from LAST frame's
+/* Lazy once-per-frame resolve of the front-most interactive record per pointer, from LAST frame's
  * registry (this frame's transforms/bboxes are still prev-frame until nt_ui_end). 3D: nearest world
  * distance within the occlusion cutoff; 2D: highest effective zIndex (tie → last-registered, i.e.
- * later nt_ui_step call). Registry holds game-layer widgets only, so their distances share one
- * view_proj and compare cleanly. */
+ * later nt_ui_step call). Game records share one view_proj; inspector panes win outright. */
 
 /* Convert this frame's RAW DEVICE pointers to LAYOUT space via ctx->viewport, in place, once per frame.
  * Runs at the lazy hot resolve (after nt_ui_set_viewport, before any hit-test reads frame_pointers). The
@@ -2685,6 +2684,20 @@ static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
     }
 }
 
+/* One registry record against a pointer: NONE when missed, occluded (3D cutoff) or a see-through
+ * scroll surface; PANE for an inspector pane; LIVE otherwise. */
+static nt_ui_surface_kind_t hot_candidate(nt_ui_context_t *ctx, const nt_ui_interactive_t *rec, uint32_t pidx, float *out_t, int16_t *out_zi) {
+    const nt_pointer_t *p = &ctx->frame_pointers[pidx];
+    if (!ui_hit_test(ctx, rec->id, p->x, p->y, rec->pad, out_t, out_zi)) {
+        return NT_UI_SURFACE_NONE;
+    }
+    const nt_ui_surface_kind_t kind = (rec->scope == rec->id) ? nt_ui_internal_scroll_surface_kind(ctx, rec->id) : NT_UI_SURFACE_LIVE;
+    if (kind == NT_UI_SURFACE_LIVE && ctx->use_raycast_input && *out_t > ctx->pointer_occlusion[pidx]) {
+        return NT_UI_SURFACE_NONE; /* behind the game-fed cutoff (e.g. a wall) */
+    }
+    return kind;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void resolve_hot(nt_ui_context_t *ctx) {
     ctx->hot_resolved = true;
@@ -2697,46 +2710,40 @@ static void resolve_hot(nt_ui_context_t *ctx) {
         if (!p->active) {
             continue; /* a gone pointer hovers nothing (its hot stays 0) */
         }
+        /* 3D: hits within a relative epsilon of the NEAREST hit are coplanar (a row on its scroll surface)
+         * and compete like 2D; the nearest is known first so the band never drifts with registry order. */
+        float nearest_t = INFINITY;
+        if (ctx->use_raycast_input) {
+            for (uint32_t k = 0; k < ctx->interactive_prev_count; ++k) {
+                float t = 0.0F;
+                if (hot_candidate(ctx, &ctx->interactive_prev[k], pidx, &t, NULL) == NT_UI_SURFACE_LIVE) {
+                    nearest_t = fminf(nearest_t, t);
+                }
+            }
+        }
+        const float band = nearest_t + (1.0e-5F * fmaxf(fabsf(nearest_t), 1.0F));
         nt_ui_hot_t best = {0};
         uint32_t best_scope = 0U;
-        bool found = false;
-        int16_t best_zindex = INT16_MIN; /* highest effective zIndex among the competing hits */
-        float nearest_t = INFINITY;      /* 3D: hits within a relative epsilon of the nearest compete like 2D */
+        int16_t best_zindex = INT16_MIN;
         for (uint32_t k = 0; k < ctx->interactive_prev_count; ++k) {
             const nt_ui_interactive_t *rec = &ctx->interactive_prev[k];
             float t = 0.0F;
             int16_t zi = 0;
-            if (!ui_hit_test(ctx, rec->id, p->x, p->y, rec->pad, &t, &zi)) {
+            const nt_ui_surface_kind_t kind = hot_candidate(ctx, rec, pidx, &t, &zi);
+            if (kind == NT_UI_SURFACE_NONE || (ctx->use_raycast_input && kind == NT_UI_SURFACE_LIVE && t > band)) {
                 continue;
             }
-            if (rec->scope == rec->id && !nt_ui_internal_scroll_surface_live(ctx, rec->id)) {
-                continue; /* a scroll that cannot move is see-through */
-            }
-            bool wins = false;
-            if (ctx->use_raycast_input) {
-                if (t > ctx->pointer_occlusion[pidx]) {
-                    continue; /* behind the game-fed cutoff (e.g. a wall) → occluded, leaves hot=0 (skip) */
-                }
-                /* Coplanar content (a row on its scroll surface) ties: zIndex, then later registration. */
-                const float tie_eps = 1.0e-5F * fmaxf(fabsf(nearest_t), 1.0F);
-                if (!found || t < nearest_t - tie_eps) {
-                    wins = true;
-                } else if (t <= nearest_t + tie_eps) {
-                    wins = zi >= best_zindex;
-                }
-                nearest_t = fminf(nearest_t, t);
-            } else {
-                /* 2D: highest effective zIndex wins; >= so a later-registered tie overwrites. Registry
-                 * order = nt_ui_step call order = declaration (paint) order when the game steps in
-                 * declaration order — the normal pattern. */
-                wins = !found || zi >= best_zindex;
-            }
-            if (wins) {
+            /* Highest effective zIndex wins; >= so a later-registered tie overwrites. Registry order =
+             * nt_ui_step call order = declaration (paint) order when the game steps in declaration order.
+             * An inspector pane floats above the game in any view_proj, so it wins outright. */
+            if (kind == NT_UI_SURFACE_PANE || best.id == 0U || zi >= best_zindex) {
                 best.id = rec->id;
                 best.distance = ctx->use_raycast_input ? t : 0.0F;
                 best_scope = rec->scope;
                 best_zindex = zi;
-                found = true;
+                if (kind == NT_UI_SURFACE_PANE) {
+                    best_zindex = INT16_MAX;
+                }
             }
         }
         /* best stays {0} when nothing was hit OR all hits were occluded — both gate to skip. */
@@ -2768,6 +2775,7 @@ nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_st
     const uint8_t drag_axes = (desc != NULL) ? desc->drag_axes : 0U;
     NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_step: pad_lrtb components must be >= 0");
     NT_ASSERT((drag_axes & (uint8_t)~(NT_UI_DRAG_X | NT_UI_DRAG_Y)) == 0U && "nt_ui_step: drag_axes takes only NT_UI_DRAG_X | NT_UI_DRAG_Y");
+    NT_ASSERT(id != nt_ui_internal_scroll_open(ctx) && "nt_ui_step: a scroll's own id is its surface, not a widget (step a child id)");
 
     /* query_padded triggers the once-per-frame hot resolve; step reaches resolve_widget_pidx_state
      * (which reads pointer_hot) only when query did NOT early-return, i.e. after that resolve ran. */
@@ -2809,6 +2817,9 @@ nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_st
                 out.pressed_now = true;
                 out.press_pos[0] = p->x;
                 out.press_pos[1] = p->y;
+                out.drag_dx = 0.0F;
+                out.drag_dy = 0.0F;
+                out.gesture_pending = cap->scroll_scope != 0U;
             }
         }
         if (commit && new_capture) {

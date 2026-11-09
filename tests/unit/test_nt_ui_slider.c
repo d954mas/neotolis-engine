@@ -622,12 +622,29 @@ static void test_slider_in_scroll_horizontal_drag_moves_value(void) {
     nt_pointer_t p = make_pointer(thumb_x, TOP_SL_CY, false, false, false);
     slider_top_in_scroll_frame(&p, &value);
     slider_top_in_scroll_frame(&p, &value);
-    p = make_pointer(thumb_x, TOP_SL_CY, true, true, false);
+    p = make_pointer(thumb_x + 5.0F, TOP_SL_CY, true, true, false); /* off-center grab */
     slider_top_in_scroll_frame(&p, &value);
-    p = make_pointer(thumb_x + 36.0F, TOP_SL_CY + 2.0F, true, false, false);
+    p = make_pointer(thumb_x + 10.0F, TOP_SL_CY, true, false, false); /* below the slop: pending */
+    slider_top_in_scroll_frame(&p, &value);
+    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.0001F));
+    p = make_pointer(thumb_x + 41.0F, TOP_SL_CY + 2.0F, true, false, false);
     slider_top_in_scroll_frame(&p, &value);
     TEST_ASSERT_EQUAL_UINT32(SCROLL_SL_ID + 1U, s_fx.ctx->captures[0].active_id);
     TEST_ASSERT_TRUE(float_near(value, 0.5F + (36.0F / SL_USABLE), 0.01F)); /* grab kept, no jump */
+}
+
+/* A tap on the thumb inside a scroll changes nothing. */
+static void test_slider_in_scroll_thumb_tap_keeps_value(void) {
+    float value = 0.5F;
+    const float thumb_x = SCROLL_X + (SL_TW * 0.5F) + (0.5F * SL_USABLE);
+    nt_pointer_t p = make_pointer(thumb_x + 5.0F, TOP_SL_CY, false, false, false);
+    slider_top_in_scroll_frame(&p, &value);
+    slider_top_in_scroll_frame(&p, &value);
+    p = make_pointer(thumb_x + 5.0F, TOP_SL_CY, true, true, false);
+    slider_top_in_scroll_frame(&p, &value);
+    p = make_pointer(thumb_x + 5.0F, TOP_SL_CY, false, false, true);
+    slider_top_in_scroll_frame(&p, &value);
+    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.0001F));
 }
 
 /* A tap on the track inside a scroll applies its jump on release. */
@@ -983,6 +1000,7 @@ int main(void) {
     RUN_TEST(test_slider_in_scroll_vertical_drag_keeps_value);
     RUN_TEST(test_slider_in_scroll_horizontal_drag_moves_value);
     RUN_TEST(test_slider_in_scroll_track_tap_applies_on_release);
+    RUN_TEST(test_slider_in_scroll_thumb_tap_keeps_value);
     RUN_TEST(test_thumb_above_modal_band_first_frame);
     RUN_TEST(test_vertical_track_jump_bottom_up);
     RUN_TEST(test_vertical_track_jump_top_down);

@@ -308,18 +308,6 @@ static void test_scroll_childoffset_from_our_pos(void) {
     TEST_ASSERT_TRUE(float_near(oy, -150.0F, 1.0F)); /* emitted offset == our pos */
 }
 
-/* Inject a simulated inner-widget capture on pointer 0 with the given press/cur pos and the press
- * record of a widget declared inside SCROLL_ID, marking it seen so nt_ui_begin's orphan-clear keeps it. */
-static void inject_inner_capture(uint32_t inner_id, float press_x, float press_y, float cur_x, float cur_y) {
-    s_fx.ctx->captures[0].active_id = inner_id;
-    s_fx.ctx->captures[0].scroll_scope = SCROLL_ID;
-    s_fx.ctx->captures[0].press_pos[0] = press_x;
-    s_fx.ctx->captures[0].press_pos[1] = press_y;
-    s_fx.ctx->captures[0].pos[0] = cur_x;
-    s_fx.ctx->captures[0].pos[1] = cur_y;
-    s_fx.ctx->capture_seen[0] = 1U;
-}
-
 /* ---- a scroll claim is not a gesture press: it must not report the hold left in its pointer slot ---- */
 static void assert_scroll_claim_reports_no_hold(void) {
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
@@ -330,30 +318,6 @@ static void leave_stale_hold_in_slot(void) {
     s_fx.ctx->captures[0].hold_secs = 0.9F;
     s_fx.ctx->captures[0].hold_prev_secs = 0.9F;
     s_fx.ctx->captures[0].hold_live = true;
-}
-
-static void test_scroll_steal_claim_reports_no_hold(void) {
-    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
-    nt_pointer_t p = {0};
-    p.x = 100.0F;
-    p.y = 100.0F;
-    p.active = true;
-    scroll_frame(&p, &style);
-
-    p.y = 140.0F;
-    p.buttons[NT_BUTTON_LEFT].is_down = true;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
-    inject_inner_capture(0xBEEFU, 100.0F, 100.0F, 100.0F, 140.0F);
-    leave_stale_hold_in_slot();
-    CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
-        nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &style, NULL);
-        {
-            CLAY({.id = CLAY_ID("content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {}
-        }
-        nt_ui_scroll_end(s_fx.ctx);
-    }
-    nt_ui_end(s_fx.ctx);
-    assert_scroll_claim_reports_no_hold();
 }
 
 static void test_scroll_free_press_claims_report_no_hold(void) {
@@ -387,139 +351,6 @@ static void test_scroll_free_press_claims_report_no_hold(void) {
     p.buttons[NT_BUTTON_LEFT].is_pressed = true;
     scroll_frame(&p, &style);
     assert_scroll_claim_reports_no_hold();
-}
-
-/* Stealing cancels the child, routes zero delta, then tracks 1:1 from the next frame. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_scroll_capture_steal_drag(void) {
-    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
-    const uint32_t inner_id = 0xBEEFU;
-
-    nt_pointer_t p = {0};
-    p.x = 100.0F;
-    p.y = 100.0F;
-    p.active = true;
-    scroll_frame(&p, &style); /* establish container bbox */
-
-    /* Pointer dragged 40 px down (>> 8 px threshold) along the scrolling y axis. */
-    p.x = 100.0F;
-    p.y = 140.0F;
-    p.buttons[NT_BUTTON_LEFT].is_down = true;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
-    /* Inject AFTER begin (orphan-clear ran) so the simulated inner capture is live. */
-    inject_inner_capture(inner_id, 100.0F, 100.0F, 100.0F, 140.0F);
-    CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
-        nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &style, NULL);
-        {
-            CLAY({.id = CLAY_ID("content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {}
-        }
-        nt_ui_scroll_end(s_fx.ctx);
-    }
-    nt_ui_end(s_fx.ctx);
-
-    /* Container claimed the gesture -> inner capture cancelled (active id is the container, no click). */
-    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
-    /* The crossing frame leaves pos and raw at rest. */
-    float oy = 0.0F;
-    nt_ui_scroll_test_last_child_offset(NULL, &oy);
-    TEST_ASSERT_TRUE(float_near(oy, 0.0F, 0.5F)); /* no movement on the steal frame */
-    nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
-    TEST_ASSERT_NOT_NULL(s);
-    TEST_ASSERT_TRUE(float_near(s->pos[1], 0.0F, 0.5F)); /* pos unchanged on the latch frame */
-    TEST_ASSERT_TRUE(float_near(s->raw[1], 0.0F, 0.5F)); /* raw unchanged on the latch frame */
-
-    /* NEXT frame: the container OWNS the capture; a further 20 px drag must route 1:1 into pos. The
-     * OWNED path tracks the live pointer and re-anchors press_pos each frame, so the offset advances
-     * by exactly the per-frame finger delta (no threshold dead-zone left to consume). */
-    p.y = 160.0F;                             /* +20 px further down */
-    p.buttons[NT_BUTTON_LEFT].is_down = true; /* finger still held — the OWNED path routes the drag */
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
-    CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
-        nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &style, NULL);
-        {
-            CLAY({.id = CLAY_ID("content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {}
-        }
-        nt_ui_scroll_end(s_fx.ctx);
-    }
-    nt_ui_end(s_fx.ctx);
-
-    s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
-    TEST_ASSERT_NOT_NULL(s);
-    /* 20 px finger move down -> raw tracks it 1:1 (Clay sign: positive raw past the top edge). */
-    TEST_ASSERT_TRUE(float_near(s->raw[1], 20.0F, 0.5F));
-}
-
-/* ---- Test 8b: a capture-steal drag on a dt==0 frame zeroes velocity, so a prior
- *      fling's momentum can't leak past the drag (no phantom momentum on release). ---- */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_scroll_capture_steal_dt_zero_no_phantom(void) {
-    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
-    const uint32_t inner_id = 0xBEEFU;
-
-    nt_pointer_t p = {0};
-    p.x = 100.0F;
-    p.y = 100.0F;
-    p.active = true;
-    scroll_frame(&p, &style); /* establish container bbox + state cell */
-
-    /* Seed a leftover fling velocity into the live state cell (as if mid-momentum). */
-    nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
-    TEST_ASSERT_NOT_NULL(s);
-    s->vel[1] = -5000.0F; /* a strong residual fling */
-
-    /* A steal-worthy drag (40 px down) on a dt==0 frame. With dt<=0 there is no fresh
-     * velocity to compute — it MUST be zeroed, not left at the stale -5000. */
-    p.x = 100.0F;
-    p.y = 140.0F;
-    p.buttons[NT_BUTTON_LEFT].is_down = true;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &p, 1, 0); /* dt == 0 */
-    inject_inner_capture(inner_id, 100.0F, 100.0F, 100.0F, 140.0F);
-    CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
-        nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &style, NULL);
-        {
-            CLAY({.id = CLAY_ID("content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {}
-        }
-        nt_ui_scroll_end(s_fx.ctx);
-    }
-    nt_ui_end(s_fx.ctx);
-
-    /* Velocity zeroed by the steal on the dt==0 frame (no leftover fling). */
-    s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
-    TEST_ASSERT_NOT_NULL(s);
-    TEST_ASSERT_TRUE(float_near(s->vel[1], 0.0F, 0.001F));
-}
-
-/* ---- Test 9: tap<threshold leaves inner capture intact and does NOT scroll ---- */
-static void test_scroll_capture_tap_no_steal(void) {
-    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
-    const uint32_t inner_id = 0xBEEFU;
-
-    nt_pointer_t p = {0};
-    p.x = 100.0F;
-    p.y = 100.0F;
-    p.active = true;
-    scroll_frame(&p, &style);
-
-    /* Tiny 3 px move (< 8 px threshold) — a tap, not a drag. */
-    p.x = 101.0F;
-    p.y = 103.0F;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
-    inject_inner_capture(inner_id, 100.0F, 100.0F, 101.0F, 103.0F);
-    CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
-        nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &style, NULL);
-        {
-            CLAY({.id = CLAY_ID("content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {}
-        }
-        nt_ui_scroll_end(s_fx.ctx);
-    }
-    nt_ui_end(s_fx.ctx);
-
-    /* Inner capture survives -> inner widget will click normally. */
-    TEST_ASSERT_EQUAL_UINT32(inner_id, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
-    /* Did NOT scroll (offset stayed at rest). */
-    float oy = 0.0F;
-    nt_ui_scroll_test_last_child_offset(NULL, &oy);
-    TEST_ASSERT_TRUE(float_near(oy, 0.0F, 0.5F));
 }
 
 /* ================= Scrollbar visual cases ================= */
@@ -860,41 +691,29 @@ static void test_scroll_free_press_tap_no_scroll(void) {
     TEST_ASSERT_TRUE(float_near(s->pos[1], 0.0F, 0.5F)); /* tap left it at rest */
 }
 
-/* ---- Test 20: the container does NOT steal its OWN scrollbar's thumb drag. A drag on the
- *      bar id (>threshold) must reach the scrollbar (thumb maps the offset), not be cancelled
- *      by the steal path. We assert the bar capture survives the drag_check. ---- */
+/* ---- Test 20: the container does NOT take its OWN scrollbar's thumb drag: a real press on the
+ *      thumb dragged past the slop stays with the bar, which moves the content. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_scroll_does_not_steal_own_scrollbar(void) {
     nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
     const uint32_t bar_id = nt_ui_scroll_test_bar_id(SCROLL_ID, 1);
 
     nt_pointer_t p = {0};
-    p.x = 195.0F; /* over the right-edge vertical bar (thickness 12 in a 200-wide container) */
-    p.y = 100.0F;
+    p.x = 195.0F; /* on the thumb of the right-edge vertical bar */
+    p.y = 20.0F;
     p.active = true;
-    scrollbar_frame(&p, &style, 1000.0F); /* establish bar bbox */
+    scrollbar_frame(&p, &style, 1000.0F);
+    scrollbar_frame(&p, &style, 1000.0F);
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    scrollbar_frame(&p, &style, 1000.0F);
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+    p.y = 60.0F; /* 40 down the bar, well past the slop */
     scrollbar_frame(&p, &style, 1000.0F);
 
-    /* Press on the bar so it captures, then drag 40 px (>threshold) along y. The steal path
-     * MUST exclude the container's own bar id, leaving the bar capture intact. */
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
-    s_fx.ctx->captures[0].active_id = bar_id;
-    s_fx.ctx->captures[0].press_pos[0] = 195.0F;
-    s_fx.ctx->captures[0].press_pos[1] = 100.0F;
-    s_fx.ctx->captures[0].pos[0] = 195.0F;
-    s_fx.ctx->captures[0].pos[1] = 140.0F;
-    s_fx.ctx->capture_seen[0] = 1U;
-    CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
-        nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &style, NULL);
-        {
-            CLAY({.id = CLAY_ID("content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {}
-        }
-        nt_ui_scroll_end(s_fx.ctx);
-    }
-    nt_ui_end(s_fx.ctx);
-
-    /* Bar capture NOT cancelled by the container's steal path (own-bar exclusion). */
     TEST_ASSERT_EQUAL_UINT32(bar_id, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
+    const nt_ui_scroll_state_t *s = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_TRUE(s->pos[1] < -1.0F); /* the thumb drove the content down */
 }
 
 /* IDs for the nested outer+inner scroll used by the nested-scrollbar exclusion test. */
@@ -902,14 +721,14 @@ static const uint32_t EXCL_OUTER_ID = 0x5CE001U;
 static const uint32_t EXCL_INNER_ID = 0x5CE002U;
 
 /* Outer scroll (300x300 over 300x1000) holding an INNER scroll (200x200 over 200x800) with bars,
- * pinned at the outer content's top-left. Both register their 'scrl' state cells. */
-static void excl_nested_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style) {
+ * pinned at the outer content's top-left. */
+static void excl_nested_frame2(nt_pointer_t *p, const nt_ui_scroll_style_t *outer, const nt_ui_scroll_style_t *inner) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
     CLAY({.id = CLAY_ID("excl-root"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(300)}}}) {
-        nt_ui_scroll_begin(s_fx.ctx, NULL, EXCL_OUTER_ID, style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(300)}}});
+        nt_ui_scroll_begin(s_fx.ctx, NULL, EXCL_OUTER_ID, outer, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(300)}}});
         {
             CLAY({.id = CLAY_ID("excl-outer-content"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(1000)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
-                nt_ui_scroll_begin(s_fx.ctx, NULL, EXCL_INNER_ID, style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}});
+                nt_ui_scroll_begin(s_fx.ctx, NULL, EXCL_INNER_ID, inner, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}});
                 {
                     CLAY({.id = CLAY_ID("excl-inner-content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(800)}}}) {}
                 }
@@ -921,50 +740,29 @@ static void excl_nested_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 20b: a parent scroll must NOT steal a nested scroll's SCROLLBAR thumb drag. The bar id
- *      reverses (id ^ salt) to the inner container's id, whose always-on 'scrl' state cell is the
- *      all-builds exclusion path (the DEBUG_TOOLS widget registry is NOT relied on). A press on the
- *      inner bar dragged > threshold past the outer must leave the inner-bar capture intact. ---- */
+/* ---- Test 20b: a parent scroll does NOT take a nested scroll's thumb drag along its own axis:
+ *      the thumb declares both drag axes, so it wins the tie. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_scroll_does_not_steal_nested_scrollbar(void) {
-    nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    /* The outer bar stays hidden (AUTO_HIDE at rest) so its elements do not shift the Clay slot the
+     * inner scroll reads its dims from mid-frame. */
+    const nt_ui_scroll_style_t outer = bar_style(NT_UI_SCROLLBAR_AUTO_HIDE);
+    const nt_ui_scroll_style_t inner = bar_style(NT_UI_SCROLLBAR_ALWAYS);
     const uint32_t inner_bar_id = nt_ui_scroll_test_bar_id(EXCL_INNER_ID, 1);
 
     nt_pointer_t p = {0};
-    p.x = 100.0F;
-    p.y = 100.0F;
+    p.x = 195.0F; /* on the inner scroll's vertical thumb, inside the outer */
+    p.y = 20.0F;
     p.active = true;
-    excl_nested_frame(&p, &style); /* solve bboxes + create both 'scrl' cells */
-    excl_nested_frame(&p, &style);
+    excl_nested_frame2(&p, &outer, &inner);
+    excl_nested_frame2(&p, &outer, &inner);
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    excl_nested_frame2(&p, &outer, &inner);
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+    p.y = 60.0F; /* 40 down: the outer scroll could take it on y, the thumb keeps it */
+    excl_nested_frame2(&p, &outer, &inner);
 
-    /* The inner bar's 'scrl' reverse cell must exist all-builds (no registry). */
-    TEST_ASSERT_TRUE(nt_ui_state_has_tag(s_fx.ctx, EXCL_INNER_ID, NT_UI_STATE_TAG('s', 'c', 'r', 'l')));
-
-    /* Inject a capture held by the inner bar id, pressed inside the outer, dragged 40 px (>threshold).
-     * The OUTER's steal path must exclude it (reverse-tag path), leaving the capture on the inner bar. */
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
-    s_fx.ctx->captures[0].active_id = inner_bar_id;
-    s_fx.ctx->captures[0].press_pos[0] = 100.0F;
-    s_fx.ctx->captures[0].press_pos[1] = 100.0F;
-    s_fx.ctx->captures[0].pos[0] = 100.0F;
-    s_fx.ctx->captures[0].pos[1] = 140.0F;
-    s_fx.ctx->capture_seen[0] = 1U;
-    CLAY({.id = CLAY_ID("excl-root"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(300)}}}) {
-        nt_ui_scroll_begin(s_fx.ctx, NULL, EXCL_OUTER_ID, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(300)}}});
-        {
-            CLAY({.id = CLAY_ID("excl-outer-content"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(1000)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
-                nt_ui_scroll_begin(s_fx.ctx, NULL, EXCL_INNER_ID, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}});
-                {
-                    CLAY({.id = CLAY_ID("excl-inner-content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(800)}}}) {}
-                }
-                nt_ui_scroll_end(s_fx.ctx);
-            }
-        }
-        nt_ui_scroll_end(s_fx.ctx);
-    }
-    nt_ui_end(s_fx.ctx);
-
-    /* Capture stayed on the inner bar: the outer did not steal a nested scrollbar's drag. */
     TEST_ASSERT_EQUAL_UINT32(inner_bar_id, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
 }
 
@@ -1287,52 +1085,6 @@ static void test_scroll_held_entry_no_edge_no_gesture(void) {
     TEST_ASSERT_NOT_NULL(s);
     TEST_ASSERT_TRUE(float_near(s->pos[1], 0.0F, 0.5F));                      /* never scrolled */
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0U)); /* nothing claimed */
-}
-
-/* ---- Test 31: steal continuity — after the container claims an inner-widget gesture it keeps
- *      routing into that same container over subsequent frames (guards claim-not-zero). ---- */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_scroll_steal_continues_across_frames(void) {
-    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
-    const uint32_t inner_id = 0xBEEFU;
-
-    nt_pointer_t p = {0};
-    p.x = 100.0F;
-    p.y = 100.0F;
-    p.active = true;
-    scroll_frame(&p, &style); /* establish bbox */
-
-    /* Frame 1: inner widget owns the pointer; a 40 px drag steals + claims. */
-    p.x = 100.0F;
-    p.y = 140.0F;
-    p.buttons[NT_BUTTON_LEFT].is_down = true;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
-    inject_inner_capture(inner_id, 100.0F, 100.0F, 100.0F, 140.0F);
-    CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
-        nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &style, NULL);
-        {
-            CLAY({.id = CLAY_ID("content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {}
-        }
-        nt_ui_scroll_end(s_fx.ctx);
-    }
-    nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U)); /* claimed */
-    float oy_claim = 0.0F;
-    nt_ui_scroll_test_last_child_offset(NULL, &oy_claim);
-
-    /* Subsequent frames: the container OWNS the capture (no inner injection). The held finger keeps
-     * dragging down and the OWNED path must keep routing into THIS container. capture_seen is re-marked
-     * each frame so begin's orphan-clear doesn't drop the claim. */
-    for (int i = 1; i <= 5; ++i) {
-        p.buttons[NT_BUTTON_LEFT].is_down = true;
-        p.y = 140.0F + (float)(i * 10);
-        scroll_frame(&p, &style);
-        TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U)); /* still owned */
-    }
-    float oy_after = 0.0F;
-    nt_ui_scroll_test_last_child_offset(NULL, &oy_after);
-    /* The drag kept feeding the same container -> the offset advanced past the claim frame. */
-    TEST_ASSERT_TRUE(fabsf(oy_after) > fabsf(oy_claim) + 1.0F);
 }
 
 /* ---- Test 32: releasing a claimed gesture releases the capture (re-arms), flings, and the NEXT
@@ -2037,11 +1789,9 @@ static void test_scroll_wheel_nested_outer_band(void) {
     TEST_ASSERT_TRUE(float_near(inner->pos[1], 0.0F, 0.5F)); /* the inner never received the wheel */
 }
 
-/* Two SAME-DEPTH overlapping scroll containers (both direct children of root, neither nested in the
- * other): a BIG one declared FIRST, then a SMALL one FLOATING over the big's top-left corner so their
- * bboxes genuinely overlap there (the deterministic stand-in for the stale-bbox overlap the routing
- * must arbitrate). The pointer sits in the overlap. Declaration order (BIG first) is deliberately the
- * OPPOSITE of the area order so only the smaller-area rule can pick the small one. */
+/* Two overlapping sibling scroll containers: a BIG one, then a SMALL one FLOATING over the big's
+ * top-left corner. The pointer sits in the overlap; front-most arbitration gives the wheel to the
+ * floating one only. */
 static const uint32_t TIE_BIG_ID = 0x5CF101U;
 static const uint32_t TIE_SMALL_ID = 0x5CF102U;
 
@@ -2066,11 +1816,10 @@ static void tie_break_frame(nt_pointer_t *p) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 48 (tie-break): two SAME-DEPTH candidates whose bboxes overlap the parked pointer -> the
- *      SMALLER-area one receives the wheel, and ONLY one does. Declaration order favours the big one,
- *      so a pass proves area (not order) decides the tie. ---- */
+/* ---- Test 48: overlapping sibling scrolls -> the front-most (floating) one receives the wheel, and
+ *      ONLY one does. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_scroll_wheel_tie_break_smaller_area(void) {
+static void test_scroll_wheel_front_most_sibling_wins(void) {
     nt_pointer_t p = {0};
     p.active = true;
     p.x = 60.0F; /* inside the overlap [0,120]x[0,120] of both BIG and the floating SMALL */
@@ -2274,11 +2023,12 @@ typedef struct {
 } arb_scene_t;
 
 static arb_scene_t s_scene;
+static float s_arb_dt = 1.0F / 60.0F;
 static nt_ui_interaction_t s_child_in;
 static nt_ui_interaction_t s_fg_in;
 
 static void arb_frame(const nt_pointer_t *pointers, uint32_t count) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, pointers, count, 0);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, s_arb_dt, pointers, count, 0);
     if (s_scene.px_per_dp > 0.0F) {
         nt_ui_set_viewport(s_fx.ctx, (nt_ui_viewport_t){.x = 0.0F, .y = 0.0F, .w = 800.0F, .h = 600.0F, .px_per_dp = s_scene.px_per_dp});
     }
@@ -2303,6 +2053,7 @@ static void arb_frame(const nt_pointer_t *pointers, uint32_t count) {
 static void arb_scene_reset(void) {
     s_scene = (arb_scene_t){.style = nt_ui_scroll_style_defaults(), .content_h = 1000.0F};
     s_scene.style.rubber_band_c = 0.0F; /* raw == the routed drag, easy to read */
+    s_arb_dt = 1.0F / 60.0F;
     s_child_in = (nt_ui_interaction_t){0};
     s_fg_in = (nt_ui_interaction_t){0};
 }
@@ -2438,6 +2189,7 @@ static void test_arb_strongest_crossing_wins(void) {
     arb_warm(&p);
     arb_press(&p);
     arb_frame(&p, 1);
+    TEST_ASSERT_TRUE(s_child_in.gesture_pending); /* the list may still take it */
     arb_hold(&p);
     p.x = 110.0F;
     p.y = 12.0F; /* (10, -28) */
@@ -2565,6 +2317,139 @@ static void test_arb_nested_vertical_wheel_passes_to_list(void) {
     TEST_ASSERT_TRUE(arb_list()->pos[1] < before);
 }
 
+/* A tap below the slop on a row inside a list clicks it and leaves the list at rest. */
+static void test_arb_tap_below_slop_clicks(void) {
+    arb_scene_reset();
+    s_scene.body = body_button_row;
+    nt_pointer_t p = arb_pointer(100.0F, 30.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    TEST_ASSERT_TRUE(s_child_in.gesture_pending);
+    arb_hold(&p);
+    p.x = 103.0F;
+    p.y = 27.0F;
+    arb_frame(&p, 1);
+    arb_release(&p);
+    arb_frame(&p, 1);
+    TEST_ASSERT_TRUE(s_child_in.clicked);
+    TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], 0.0F, 0.001F));
+}
+
+/* A scroll claim is not a press: it reports no hold left in its pointer slot. */
+static void test_arb_claim_reports_no_hold(void) {
+    arb_scene_reset();
+    s_scene.body = body_button_row;
+    nt_pointer_t p = arb_pointer(100.0F, 30.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    arb_hold(&p);
+    leave_stale_hold_in_slot();
+    p.y = 0.0F;
+    arb_frame(&p, 1);
+    assert_scroll_claim_reports_no_hold();
+}
+
+/* A drag on dt == 0 frames samples no velocity: the release does not fling. */
+static void test_arb_dt_zero_drag_no_phantom_fling(void) {
+    arb_scene_reset();
+    s_scene.body = body_button_row;
+    nt_pointer_t p = arb_pointer(100.0F, 150.0F);
+    arb_warm(&p);
+    s_arb_dt = 0.0F;
+    arb_press(&p);
+    arb_frame(&p, 1);
+    arb_hold(&p);
+    p.y = 120.0F;
+    arb_frame(&p, 1);
+    p.y = 90.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
+    arb_release(&p);
+    arb_frame(&p, 1);
+    TEST_ASSERT_TRUE(float_near(arb_list()->vel[1], 0.0F, 0.001F));
+}
+
+/* The slop first crossed on the release frame, outside every hitbox: the list takes it, flings, and
+ * the game does not see a world release that frame. */
+static void test_arb_release_crossing_outside_flings(void) {
+    arb_scene_reset();
+    nt_pointer_t p = arb_pointer(100.0F, 150.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    arb_hold(&p);
+    p.y = 146.0F;
+    arb_frame(&p, 1);
+    arb_release(&p);
+    p.x = 300.0F;
+    p.y = 110.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
+    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
+    TEST_ASSERT_TRUE(arb_list()->vel[1] < -100.0F);
+    TEST_ASSERT_TRUE(float_near(arb_list()->pos[1], -32.0F, 0.5F)); /* the 40 move minus the slop */
+}
+
+/* A press on the thumb of a flinging list grabs the thumb (no tap-to-stop claim on the list). */
+static void test_arb_thumb_press_during_fling_grabs_bar(void) {
+    arb_scene_reset();
+    s_scene.style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    nt_pointer_t p = arb_pointer(195.0F, 20.0F);
+    arb_warm(&p);
+    ((nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID))->vel[1] = -1500.0F;
+    arb_press(&p);
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_scroll_test_bar_id(SCROLL_ID, 1), s_fx.ctx->captures[0].active_id);
+}
+
+/* A thumb press by a second finger takes the list from the finger dragging its content. */
+static void test_arb_thumb_press_takes_list_from_content_drag(void) {
+    arb_scene_reset();
+    s_scene.style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    nt_pointer_t ps[2] = {arb_pointer(80.0F, 150.0F), arb_pointer(195.0F, 20.0F)};
+    ps[1].id = 7U;
+    arb_frame(ps, 2);
+    arb_frame(ps, 2);
+    arb_press(&ps[0]);
+    arb_frame(ps, 2);
+    arb_hold(&ps[0]);
+    ps[0].y = 130.0F;
+    arb_frame(ps, 2);
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
+    arb_press(&ps[1]);
+    arb_frame(ps, 2);
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_scroll_test_bar_id(SCROLL_ID, 1), s_fx.ctx->captures[1].active_id);
+    TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
+}
+
+/* A floating panel declared inside the list behind a popup barrier keeps its drags. */
+static void body_barrier_panel(void) {
+    nt_ui_internal_scroll_push(s_fx.ctx, 0U);
+    CLAY({.id = CLAY_ID("arb_popup"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = 10, .offset = {.x = 50.0F, .y = 50.0F}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(80)}}}) {
+        s_fg_in = nt_ui_step(s_fx.ctx, CLAY_ID("arb_popup").id, NULL);
+    }
+    nt_ui_internal_scroll_pop(s_fx.ctx, true);
+}
+
+static void test_arb_popup_barrier_keeps_drag_from_list(void) {
+    arb_scene_reset();
+    s_scene.body = body_barrier_panel;
+    nt_pointer_t p = arb_pointer(90.0F, 90.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    TEST_ASSERT_FALSE(s_fg_in.gesture_pending); /* no scroll on its chain */
+    arb_hold(&p);
+    p.y = 50.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(CLAY_ID("arb_popup").id, s_fx.ctx->captures[0].active_id);
+    TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], 0.0F, 0.001F));
+}
+
 /* Release and a new press in one frame: the old widget gets its release, the new press captures. */
 static nt_ui_interaction_t s_a_in;
 static nt_ui_interaction_t s_b_in;
@@ -2650,6 +2535,13 @@ int main(void) {
     RUN_TEST(test_arb_nested_axes_route_to_their_scroll);
     RUN_TEST(test_arb_nested_horizontal_drag_goes_to_track);
     RUN_TEST(test_arb_nested_vertical_wheel_passes_to_list);
+    RUN_TEST(test_arb_tap_below_slop_clicks);
+    RUN_TEST(test_arb_claim_reports_no_hold);
+    RUN_TEST(test_arb_dt_zero_drag_no_phantom_fling);
+    RUN_TEST(test_arb_release_crossing_outside_flings);
+    RUN_TEST(test_arb_thumb_press_during_fling_grabs_bar);
+    RUN_TEST(test_arb_thumb_press_takes_list_from_content_drag);
+    RUN_TEST(test_arb_popup_barrier_keeps_drag_from_list);
     RUN_TEST(test_release_and_press_in_one_frame);
     RUN_TEST(test_hard_edge_drag_reversal_has_no_dead_zone);
     RUN_TEST(test_scroll_momentum_decays_monotonic);
@@ -2663,10 +2555,6 @@ int main(void) {
     RUN_TEST(test_scroll_wheel_sign);
     RUN_TEST(test_scroll_wheel_applied_once);
     RUN_TEST(test_scroll_childoffset_from_our_pos);
-    RUN_TEST(test_scroll_capture_steal_drag);
-    RUN_TEST(test_scroll_capture_steal_dt_zero_no_phantom);
-    RUN_TEST(test_scroll_capture_tap_no_steal);
-    RUN_TEST(test_scroll_steal_claim_reports_no_hold);
     RUN_TEST(test_scroll_free_press_claims_report_no_hold);
     RUN_TEST(test_scrollbar_auto_only_on_overflow);
     RUN_TEST(test_scrollbar_always_shows);
@@ -2691,7 +2579,6 @@ int main(void) {
     RUN_TEST(test_scroll_held_no_momentum_midhold);
     RUN_TEST(test_scroll_cross_container_no_adoption);
     RUN_TEST(test_scroll_held_entry_no_edge_no_gesture);
-    RUN_TEST(test_scroll_steal_continues_across_frames);
     RUN_TEST(test_scroll_release_reclaims_on_next_edge);
     RUN_TEST(test_scrollbar_auto_hide_fades_in_on_activity);
     RUN_TEST(test_scrollbar_auto_hide_hover_keeps_visible);
@@ -2709,7 +2596,7 @@ int main(void) {
     RUN_TEST(test_scroll_wheel_no_broadcast_under_churn);
     RUN_TEST(test_scroll_wheel_nested_innermost_wins);
     RUN_TEST(test_scroll_wheel_nested_outer_band);
-    RUN_TEST(test_scroll_wheel_tie_break_smaller_area);
+    RUN_TEST(test_scroll_wheel_front_most_sibling_wins);
     RUN_TEST(test_scrollbar_standalone_renders_inside_clip);
     RUN_TEST(test_scrollbar_nested_clipped_to_outer);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL

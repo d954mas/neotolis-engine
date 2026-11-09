@@ -409,14 +409,16 @@ the frame already reflects it. It reads only data finalized at the previous
 overflowing in the just-solved layout). A scroll container registers its own bbox as a
 *surface* record, so an empty-area press resolves through the normal front-most
 arbitration (z-order, blockers, modals, transforms, 3D occlusion); a scroll whose content
-fits is see-through. Scrolls form a declaration chain: `scroll_begin` pushes its id and
+fits (within half a unit) is see-through. Scrolls form a declaration chain: `scroll_begin` pushes its id and
 records the enclosing scroll as its parent; popup core (dropdown, menu, modal, tooltip)
 and the menu occluder push a 0 barrier, so a drag inside a popup never reaches a scroll
 behind it. Widgets inside a scroll must step between its begin and end.
 
 A press starts a gesture record on the chain of the front-most record under it (its
-scope); a chain with no eligible axis decides at once (widgets in fitting panels are
-never pending). While pending, the pressed widget sees `gesture_pending`. Each frame the
+scope); a chain with no eligible axis, and a press on a scrollbar, decide at once
+(widgets in fitting panels are never pending, a thumb has no slop). A chain link counts
+only if that scroll was declared and its layout solved last frame, so a vanished scroll
+takes nothing. While pending, the pressed widget sees `gesture_pending`. Each frame the
 pointer's displacement from the press is compared per axis with the drag slop
 (`nt_ui_set_gesture_constants`, default 8 dp, Android touchSlop): candidates are the
 pressed widget's own `drag_axes` and the chain's eligible axes, inner first. The

@@ -339,7 +339,7 @@ void nt_ui_popup_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_popup_end: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(ctx->active_modal_depth > 0U && "nt_ui_popup_end: unbalanced begin/end (stack underflow)");
     nt_ui_clay_priv_close_element();
-    nt_ui_internal_scroll_pop(ctx);
+    nt_ui_internal_scroll_pop(ctx, true);
     --ctx->active_modal_depth;
 }
 

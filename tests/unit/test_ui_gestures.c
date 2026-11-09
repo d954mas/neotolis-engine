@@ -405,6 +405,8 @@ static void test_set_gesture_constants_rejects_bad_values(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_set_gesture_constants(s_fx.ctx, 0.30F, -2.0F, 8.0F));
     NT_TEST_EXPECT_ASSERT(nt_ui_set_gesture_constants(s_fx.ctx, NAN, 6.0F, 8.0F));
     NT_TEST_EXPECT_ASSERT(nt_ui_set_gesture_constants(s_fx.ctx, 0.30F, INFINITY, 8.0F));
+    NT_TEST_EXPECT_ASSERT(nt_ui_set_gesture_constants(s_fx.ctx, 0.30F, 6.0F, 0.0F));
+    NT_TEST_EXPECT_ASSERT(nt_ui_set_gesture_constants(s_fx.ctx, 0.30F, 6.0F, NAN));
     /* A valid pair is accepted. */
     nt_ui_set_gesture_constants(s_fx.ctx, 0.25F, 8.0F, 8.0F);
 }

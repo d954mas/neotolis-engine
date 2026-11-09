@@ -1658,7 +1658,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
         }
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(1)}}, .backgroundColor = CDV_COLOR_3, .userData = debug_bg_data}) {}
         /* Resolve offset BEFORE opening the clip element (helper reads prev-frame Clay dims). */
-        const Clay_Vector2 treeOffset = nt_ui_internal_scroll_pane_offset(ctx, scrollId.id, true, true);
+        const Clay_Vector2 treeOffset = nt_ui_internal_scroll_pane_offset(ctx, scrollId.id);
         /* Static bg on the clip element itself so truncation/overscroll shows the panel, not the game
          * (Clay paints clip bg before scrolled children). Tree rows live IN the scrolled flow now —
          * each row carries its own full-width zebra/selection bg so text + stripe scroll together. */
@@ -1707,7 +1707,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
             if (selectedItem->generation == context->generation + 1U) {
                 Clay_ElementId selInfoId = Clay__HashString(CLAY_STRING("ntInsp_SelectedInfoPane"), 0, 0);
                 /* Resolve offset BEFORE opening the clip element (helper reads prev-frame Clay dims). */
-                const Clay_Vector2 selInfoOffset = nt_ui_internal_scroll_pane_offset(ctx, selInfoId.id, false, true);
+                const Clay_Vector2 selInfoOffset = nt_ui_internal_scroll_pane_offset(ctx, selInfoId.id);
                 CLAY({.id = selInfoId,
                       .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(300)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
                       .backgroundColor = CDV_COLOR_2,
