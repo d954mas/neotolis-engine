@@ -198,8 +198,8 @@ static cJSON *parse_ok(const char *resp) {
 /* The result object of an ok envelope (borrowed; caller deletes root). */
 static cJSON *ok_result(cJSON *root) { return cJSON_GetObjectItemCaseSensitive(root, "result"); }
 
-/* One real sim-advance: bump the frame, run devapi update (releases due schedule entries into the
-   inject buffer), poll to apply. Lets a ui.click's scheduled DOWN land in g_nt_input so the resolved
+/* One real sim-advance: bump the frame, run devapi update (injects the due schedule entries), poll to
+   publish them. Lets a ui.click's scheduled DOWN land in g_nt_input so the resolved
    device coord is observable. */
 static void advance(void) {
     g_nt_app.frame++;
@@ -209,10 +209,8 @@ static void advance(void) {
 
 /* The mouse slot after a release, or NULL if it never landed. */
 static nt_pointer_t *inject_slot(void) {
-    for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
-        if (i == 0 && g_nt_input.pointers[i].active) {
-            return &g_nt_input.pointers[i];
-        }
+    if (g_nt_input.pointers[0].active) {
+        return &g_nt_input.pointers[0];
     }
     return NULL;
 }

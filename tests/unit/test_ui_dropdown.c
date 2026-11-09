@@ -9,9 +9,10 @@
 #include <stdint.h>
 
 #include "clay.h"
-#include "input/nt_input_internal.h"
+#include "input/nt_input_feed.h"
 #include "memory/nt_mem_scratch.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/nt_input_test_frame.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -41,15 +42,11 @@ static const char *const s_long[] = {"r0", "r1", "r2", "r3", "r4", "r5", "r6", "
 
 void setUp(void) {
     nt_test_assert_install();
-    nt_input_clear_all_keys();
-    nt_input_poll(); /* clear sticky edges from a prior test */
+    nt_input_init();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
 }
 
-void tearDown(void) {
-    nt_input_clear_all_keys();
-    ui_walker_fixture_shutdown(&s_fx);
-}
+void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
 static nt_pointer_t pointer_at(float x, float y, bool is_down, bool is_pressed, bool is_released) {
     nt_pointer_t p = {0};
@@ -148,13 +145,8 @@ static void test_dropdown_trigger_toggles_open(void) {
     TEST_ASSERT_TRUE(open);
 }
 
-/* Raise exactly one fresh pressed-key edge for this frame (mirrors test_ui_menu's menu_key): poll clears
- * the sticky edges, clear_all drops the held state, set_key(true) raises a clean rising edge. */
-static void dropdown_key(nt_key_t key) {
-    nt_input_poll();
-    nt_input_clear_all_keys();
-    nt_input_set_key(key, true);
-}
+/* Publish exactly one fresh pressed-key edge for this frame. */
+static void dropdown_key(nt_key_t key) { nt_input_test_key_press(key); }
 
 /* ---- Combo keyboard is INERT: the immediate combo wires NO keyboard nav. combo_open_list routes through
  *      nt_ui_popup_visible (the non-ext popup path), which has esc_close=false and dismisses only on an
@@ -173,6 +165,7 @@ static void test_dropdown_combo_keyboard_inert(void) {
 
     /* Esc with the list open: the plain combo popup has no esc_close, so the list stays open. */
     dropdown_key(NT_KEY_ESCAPE);
+    TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_ESCAPE)); /* the combo really sees the key */
     combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
     TEST_ASSERT_TRUE_MESSAGE(open, "Esc must NOT close the immediate combo (no keyboard dismiss wired)");
 
@@ -187,9 +180,6 @@ static void test_dropdown_combo_keyboard_inert(void) {
     TEST_ASSERT_TRUE_MESSAGE(open, "arrows/Enter must not close the combo");
     TEST_ASSERT_EQUAL_INT_MESSAGE(-1, selected, "arrows/Enter must not change *selected (mouse-only)");
     TEST_ASSERT_FALSE_MESSAGE(made, "Enter must not commit a selectable");
-
-    nt_input_poll();
-    nt_input_clear_all_keys();
 }
 
 /* ---- A combo_selectable click writes *selected and closes the list. ---- */

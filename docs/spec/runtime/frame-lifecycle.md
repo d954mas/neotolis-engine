@@ -23,7 +23,8 @@ void game_shutdown(void);
 ## Engine frame order
 
 ```text
-platform_step
+platform_step         ← nt_window_poll: native pumps device events into the next input
+                        frame (web DOM listeners already did); publishes window sizes
 nt_devapi_update      ← optional, dev-only: between frames, before nt_gfx_begin_frame
                         (stores the last finished capture, commands, injected input)
 nt_gfx_begin_frame    ← closes the previous frame into g_nt_gfx.last_frame, syncs
@@ -32,9 +33,8 @@ nt_gfx_begin_frame    ← closes the previous frame into g_nt_gfx.last_frame, sy
                         compile; every pending one, blocking, without it);
                         capture builds keep the closed recorded frame for
                         nt_gfx_capture_read
-input_begin_frame
+nt_input_poll         ← publishes the input frame (no event is applied here)
     → if pointer pressed && audio suspended → audio_try_resume()
-input_event_apply
 resource_step         ← async loading processing (also pumps nt_http_update)
     → a game issuing its own nt_http requests without resource_step calls
       nt_http_update() itself once per frame (no-op on stub)

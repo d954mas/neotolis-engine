@@ -9,7 +9,6 @@
 #include <stdint.h>
 
 #include "clay.h"
-#include "input/nt_input_internal.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
@@ -30,14 +29,10 @@ static ui_walker_fixture_t s_fx;
 
 void setUp(void) {
     nt_test_assert_install();
-    nt_input_clear_all_keys();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
 }
 
-void tearDown(void) {
-    nt_input_clear_all_keys();
-    ui_walker_fixture_shutdown(&s_fx);
-}
+void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
 static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps; }
 

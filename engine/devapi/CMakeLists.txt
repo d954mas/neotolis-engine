@@ -42,7 +42,7 @@ if(NT_DEVAPI_GROUP_TIME)
 endif()
 
 # The ui group delegates inject scheduling to the input group's single scheduler (one scheduler, one
-# cap <= the immediate buffer), so nt_devapi_ui hard-links nt_devapi_input. Fail early if UI lacks INPUT.
+# cap), so nt_devapi_ui hard-links nt_devapi_input. Fail early if UI lacks INPUT.
 if(NT_DEVAPI_GROUP_UI AND NOT NT_DEVAPI_GROUP_INPUT)
     message(FATAL_ERROR "NT_DEVAPI_GROUP_UI requires NT_DEVAPI_GROUP_INPUT (ui.click/drag/scroll reuse the input group's inject scheduler).")
 endif()
@@ -54,16 +54,15 @@ if(NT_DEVAPI_GROUP_UI AND NOT NT_UI_DEBUG_TOOLS)
     message(FATAL_ERROR "NT_DEVAPI_GROUP_UI requires NT_UI_DEBUG_TOOLS (the ui probe is DEBUG_TOOLS-gated).")
 endif()
 
-# Input group: the synthetic-input scheduler + input.* veneer. NT_INPUT_AUTOMATION_ENABLED is PUBLIC so
-# every consumer (and the ui group, which reuses the scheduler) sees nt_input's inject API decls.
+# Input group: the synthetic-input scheduler + input.* veneer over nt_input's inject API.
 if(NT_DEVAPI_GROUP_INPUT)
     nt_add_module(nt_devapi_input LOG_DOMAIN "devapi" nt_devapi_input.c nt_devapi_input_internal.h)
-    target_link_libraries(nt_devapi_input PUBLIC nt_devapi nt_input_interface)
-    target_compile_definitions(nt_devapi_input PUBLIC NT_DEVAPI_GROUP_INPUT=1 NT_INPUT_AUTOMATION_ENABLED=1)
+    target_link_libraries(nt_devapi_input PUBLIC nt_devapi nt_input)
+    target_compile_definitions(nt_devapi_input PUBLIC NT_DEVAPI_GROUP_INPUT=1)
 endif()
 
 # UI group: read veneer over nt_ui_probe_collect + write veneer delegating to the input scheduler.
-# PUBLIC nt_devapi_input (the reuse wrappers live there); nt_ui_interface header-only (exe picks the
+# PUBLIC nt_devapi_input (the shared inject scheduler lives there); nt_ui_interface header-only (exe picks the
 # impl); nt_window_interface for the coordinate-space metadata. NT_DEVAPI_GROUP_UI is PUBLIC because the
 # host-facing nt_devapi_ui_set_contexts is gated by it in the public nt_devapi.h.
 if(NT_DEVAPI_GROUP_UI)

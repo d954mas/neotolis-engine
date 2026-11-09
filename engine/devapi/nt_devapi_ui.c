@@ -305,8 +305,8 @@ static bool cmd_ui_click(const cJSON *params, cJSON *result, nt_devapi_error *er
     if (!nt_devapi_input_sched_can_reserve(2U)) {
         return nt_devapi_fail(err, "ui.click: inject schedule overflow");
     }
-    nt_devapi_input_sched_mouse(cx, cy, 1U, 0);
-    nt_devapi_input_sched_mouse_buttons(0, hold);
+    nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_MOVE, .mouse = {cx, cy, 1U}}, 0);
+    nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_BUTTONS, .mouse = {.buttons = 0}}, hold);
     devapi_add_number(result, "queued", 2.0);
     return true;
 }
@@ -336,8 +336,8 @@ static bool cmd_ui_scroll(const cJSON *params, cJSON *result, nt_devapi_error *e
     if (!nt_devapi_input_sched_can_reserve(2U)) {
         return nt_devapi_fail(err, "ui.scroll: inject schedule overflow");
     }
-    nt_devapi_input_sched_mouse(cx, cy, 0, 0);
-    nt_devapi_input_sched_wheel(dx, dy, 0);
+    nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_MOVE, .mouse = {cx, cy, 0}}, 0);
+    nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_WHEEL, .wheel = {dx, dy}}, 0);
     devapi_add_number(result, "queued", 2.0);
     return true;
 }
@@ -373,15 +373,15 @@ static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err
     if (!nt_devapi_input_sched_can_reserve(total)) {
         return nt_devapi_fail(err, "ui.drag: inject schedule overflow");
     }
-    nt_devapi_input_sched_mouse(fx, fy, 1U, 0);
+    nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_MOVE, .mouse = {fx, fy, 1U}}, 0);
     for (uint32_t i = 1; i <= frames; i++) { /* uint32: the cap may be -D'd up to UINT16_MAX */
         /* In double: to - from cannot overflow and keeps its precision; the last MOVE lands exactly on to. */
         double t = (double)i / (double)frames; /* frames >= 1 enforced above, so the divisor is never 0. */
         float mx = i == frames ? tx : (float)((double)fx + (((double)tx - (double)fx) * t));
         float my = i == frames ? ty : (float)((double)fy + (((double)ty - (double)fy) * t));
-        nt_devapi_input_sched_mouse(mx, my, 1U, (uint16_t)i);
+        nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_MOVE, .mouse = {mx, my, 1U}}, (uint16_t)i);
     }
-    nt_devapi_input_sched_mouse_buttons(0, frames);
+    nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_BUTTONS, .mouse = {.buttons = 0}}, frames);
     devapi_add_number(result, "queued", (double)total);
     return true;
 }

@@ -57,6 +57,8 @@ typedef enum {
     NT_KEY_RCTRL,
     NT_KEY_LALT,
     NT_KEY_RALT,
+    NT_KEY_LMETA, /* Cmd on macOS, Win on Windows */
+    NT_KEY_RMETA,
     NT_KEY_F1,
     NT_KEY_F2,
     NT_KEY_F3,
@@ -75,6 +77,33 @@ typedef enum {
     NT_KEY_END,
     NT_KEY_PAGE_UP,
     NT_KEY_PAGE_DOWN,
+    NT_KEY_MINUS,
+    NT_KEY_EQUAL,
+    NT_KEY_BACKQUOTE,
+    NT_KEY_BRACKET_LEFT,
+    NT_KEY_BRACKET_RIGHT,
+    NT_KEY_BACKSLASH,
+    NT_KEY_SEMICOLON,
+    NT_KEY_QUOTE,
+    NT_KEY_COMMA,
+    NT_KEY_PERIOD,
+    NT_KEY_SLASH,
+    NT_KEY_NUMPAD_0,
+    NT_KEY_NUMPAD_1,
+    NT_KEY_NUMPAD_2,
+    NT_KEY_NUMPAD_3,
+    NT_KEY_NUMPAD_4,
+    NT_KEY_NUMPAD_5,
+    NT_KEY_NUMPAD_6,
+    NT_KEY_NUMPAD_7,
+    NT_KEY_NUMPAD_8,
+    NT_KEY_NUMPAD_9,
+    NT_KEY_NUMPAD_ENTER,
+    NT_KEY_NUMPAD_ADD,
+    NT_KEY_NUMPAD_SUBTRACT,
+    NT_KEY_NUMPAD_MULTIPLY,
+    NT_KEY_NUMPAD_DIVIDE,
+    NT_KEY_NUMPAD_DECIMAL,
     NT_KEY_COUNT /* Must be last -- array size sentinel */
 } nt_key_t;
 
@@ -107,7 +136,7 @@ typedef struct {
 
 typedef struct {
     uint32_t id;             /* touch/pen: the platform contact id; 0 for the mouse */
-    float x, y;              /* Framebuffer pixels, canvas-relative */
+    float x, y;              /* Framebuffer pixels, canvas-relative, fractional */
     float dx, dy;            /* Movement delta in framebuffer pixels */
     float wheel_dx;          /* Wheel delta in NOTCHES: 1.0 == one physical detent (platform edge
                                 normalizes; trackpads deliver fractional notches). Consumers scale
@@ -118,36 +147,34 @@ typedef struct {
     float pressure;          /* 0.0-1.0 */
     uint8_t type;            /* nt_pointer_type_t */
     bool active;             /* Pointer currently exists */
-    bool deactivate_pending; /* an up or a mouse leave defers deactivation by one frame */
+    bool deactivate_pending; /* an up, a mouse leave or a focus loss defers deactivation by one frame */
     nt_button_state_t buttons[NT_BUTTON_MAX];
 } nt_pointer_t;
 
 /* ---- Global input state ---- */
 
+/* Typed UTF-32 characters per frame; later ones in the same frame are dropped. Fixed: it sizes the
+   published struct, so every target must agree. */
+#define NT_INPUT_CHAR_MAX 32
+
 /* pointers[0] is the mouse: active while the cursor is over the window or a button is held, and a
-   button release keeps it. Touch and pen contacts take slots 1.., each from its down to its up.
-   primary indexes the pointer a single-pointer consumer follows (updated by nt_input_poll): taken
+   button release keeps it; a focus loss releases it until the next move. Touch and pen contacts take
+   slots 1.., each from its down to its up.
+   primary indexes the pointer a single-pointer consumer follows: taken
    by a press, or by hovering while nothing is held, and kept from the press through its release
-   frame. A contact already held when the primary ends never takes over. */
+   frame. A contact already held when the primary ends never takes over. nt_input_poll publishes
+   it; consumers only read it. */
 typedef struct {
     nt_pointer_t pointers[NT_INPUT_MAX_POINTERS];
     uint8_t primary;
+    bool key_down[NT_KEY_COUNT];
+    bool key_pressed[NT_KEY_COUNT];
+    bool key_released[NT_KEY_COUNT];
+    uint32_t chars[NT_INPUT_CHAR_MAX]; /* typed this frame, in order; nt_input_pop_char reads them */
+    uint32_t char_count;
 } nt_input_t;
 
 extern nt_input_t g_nt_input;
-
-/* ---- Text input mode ---- */
-
-/* Hint to the platform on-screen keyboard / text-entry surface (mobile soft keyboard). Web maps
- * these to the <canvas> inputmode/type; native + stub are no-ops. The web EM_JS depends on the
- * numeric values (PASSWORD == 4) -- keep them in sync. */
-typedef enum {
-    NT_TEXT_INPUT_TEXT = 0,
-    NT_TEXT_INPUT_NUMERIC,
-    NT_TEXT_INPUT_EMAIL,
-    NT_TEXT_INPUT_URL,
-    NT_TEXT_INPUT_PASSWORD,
-} nt_text_input_mode_t;
 
 /* ---- Key query functions ---- */
 
@@ -156,45 +183,9 @@ bool nt_input_key_is_pressed(nt_key_t key);
 bool nt_input_key_is_released(nt_key_t key);
 bool nt_input_any_key_pressed(void);
 
-/* UTF-32 typed-char ring capacity (power-of-2). One frame's typing fits; drop-when-full. Exposed
-   so the devapi layer can reject a text batch that could never land whole. */
-#ifndef NT_INPUT_CHAR_RING
-#define NT_INPUT_CHAR_RING 32
-#endif
-
-/* Drain one typed UTF-32 codepoint (FIFO). Returns false and leaves *out
-   untouched when the char ring is empty. Fed by the platform char source. */
+/* Read the next character typed before the last poll (FIFO). Returns false and leaves *out
+   untouched when none is left. */
 bool nt_input_pop_char(uint32_t *out_codepoint);
-
-/* Hint the platform on-screen keyboard for the focused text field (mobile soft keyboard).
-   No-op on native/stub. Apply it when a field gains focus. */
-void nt_input_set_text_input_mode(nt_text_input_mode_t mode);
-
-/* ---- nt_input automation surface (player gate + synthetic input injection) ---- */
-
-/* Capability gate for the whole nt_input automation surface (inject pipeline + player gate). The
-   sole driver is the devapi input group; CMake derives this from it. Default 0 -> the lean apply
-   layer (no gate, no inject buffer or symbols), so a consumer that forgets to wire it stays lean. */
-#ifndef NT_INPUT_AUTOMATION_ENABLED
-#define NT_INPUT_AUTOMATION_ENABLED 0
-#endif
-
-/* Event kinds applied through the immediate inject buffer (drained every poll). */
-typedef enum {
-    NT_INJECT_KEY = 0,       /* key down/up */
-    NT_INJECT_MOUSE_MOVE,    /* the mouse at (x,y) with a button mask */
-    NT_INJECT_MOUSE_BUTTONS, /* the mouse's button mask at its CURRENT position (no-op while it is not over the window) */
-    NT_INJECT_POINTER_DOWN,  /* touch/pen contact create/press */
-    NT_INJECT_POINTER_MOVE,  /* touch/pen contact move */
-    NT_INJECT_POINTER_UP,    /* touch/pen contact release + deactivate-pending */
-    NT_INJECT_WHEEL,         /* the mouse only */
-    NT_INJECT_CHAR,          /* codepoint into the char ring */
-} nt_inject_kind_t;
-
-/* Bounded BSS immediate inject buffer cap (-D overridable). */
-#ifndef NT_INPUT_INJECT_QUEUE_MAX
-#define NT_INPUT_INJECT_QUEUE_MAX 256
-#endif
 
 /* ---- Mouse convenience helpers ---- */
 
@@ -206,8 +197,9 @@ bool nt_input_mouse_is_released(nt_button_t button);
 
 void nt_input_init(void);
 
-/* Poll input state. Call once per frame AFTER nt_window_poll(). Pure apply: no frame, no schedule
-   (the devapi layer owns scheduling and releases due inject events before this poll). */
+/* Publish the input that reached the core since the previous poll and start the next frame. Call
+   once per frame AFTER nt_window_poll(). nt_input keeps no schedule: nt_devapi_update injects due bot
+   events before this poll. */
 void nt_input_poll(void);
 
 void nt_input_shutdown(void);

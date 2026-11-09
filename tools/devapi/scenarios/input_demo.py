@@ -3,21 +3,21 @@
 
 Connects to a running examples/devapi_host over its devapi transport (native or web) and exercises the three
 behaviors the unit tests structurally cannot cover, because only a live host runs the
-full enqueue -> net_poll -> input_poll -> drain timing:
+full enqueue -> net_poll -> inject -> input_poll timing:
 
-  1. Drain-race — MANUAL mode: a tap (key down@0 + up@offset) stays down across the hold
+  1. Advance race — MANUAL mode: a tap (key down@0 + up@offset) stays down across the hold
      window and releases only after stepping past it, proving the up countdown ticks only
      on a real sim-advance (frozen across idle polls).
   2. Gate cutover — set_player_enabled(false) then inject a key: input.state observes
      it pressed, then released, proving inject is orthogonal to the gate. (The "real physical device dropped
      while gated" half needs a live device and stays a manual note.)
-  3. input.text — text("hi") + one sim-advance drains into the char ring; input.state{text:true}
+  3. input.text — text("hi") + one sim-advance arrives as typed text; input.state{text:true}
      reads codepoints == [104,105] ('h','i').
 
-Scheduling lives in the devapi layer (nt_input is a pure apply layer): an enqueued inject releases
-into nt_input's immediate buffer ONLY on a real sim-advance, then nt_input_poll applies it. So an
+Scheduling lives in the devapi layer: an enqueued inject is applied
+to nt_input ONLY on a real sim-advance, then nt_input_poll publishes it. So an
 enqueued inject is invisible until a step advances the frame — which is exactly what lets this UAT
-machine-assert the drain-race (offset>0 release pinned to advances) over the transport.
+machine-assert the advance race (offset>0 release pinned to advances) over the transport.
 
 Usage: python -m tools.devapi.scenarios.input_demo [--target native|web] (options: tools/devapi/launch.py)
 Exit 0 pass, 1 failure, 2 usage / launch (tools/devapi/launch.py).
@@ -54,7 +54,7 @@ def run(client: DevApiClient, out_dir: str) -> None:
 
 
 def _run(client: DevApiClient) -> None:
-    # 1. Drain-race — a tap's release pins to the sim-advance count, not wall-clock.
+    # 1. Advance race — a tap's release pins to the sim-advance count, not wall-clock.
     client.set_mode("manual")
     # Settle C to a known-released state: a prior session may have left a residual down/inject.
     client.key("C", down=False)
@@ -67,14 +67,14 @@ def _run(client: DevApiClient) -> None:
     client.key("C", hold=hold)  # down@0 + up@offset=hold
     client.step(count=1)
     first = _frozen_state(client, key="C")
-    assert first.get("down") is True and first.get("pressed") is True, f"drain-race: C is {first!r} after the first step, expected down and pressed (inject observed, not lost)"
+    assert first.get("down") is True and first.get("pressed") is True, f"advance race: C is {first!r} after the first step, expected down and pressed (inject observed, not lost)"
     client.step(count=hold // 2)  # still inside the hold window
     mid = client.state(key="C").get("down")
-    assert mid is True, f"drain-race: C.down is {mid!r} mid-hold, expected True (release pinned to the hold, not applied early)"
+    assert mid is True, f"advance race: C.down is {mid!r} mid-hold, expected True (release pinned to the hold, not applied early)"
     client.step(count=hold)  # step well past the up@hold deadline
     end = client.state(key="C").get("down")
-    assert end is False, f"drain-race: C.down is {end!r} after stepping past the hold, expected False (released after the advance-pinned countdown)"
-    print(f"PASS[1/3] drain-race: tap(hold={hold}) observed down, stayed down mid-hold, released after the advance-pinned countdown.")
+    assert end is False, f"advance race: C.down is {end!r} after stepping past the hold, expected False (released after the advance-pinned countdown)"
+    print(f"PASS[1/3] advance race: tap(hold={hold}) observed down, stayed down mid-hold, released after the advance-pinned countdown.")
 
     # 2. Gate cutover — inject is orthogonal to the gate, observed via input.state.
     off = client.set_player_enabled(False)
@@ -94,20 +94,20 @@ def _run(client: DevApiClient) -> None:
         "NOTE: 'real physical device dropped while gated' needs a live device — manual."
     )
 
-    # 3. input.text — codepoints reach the char ring; input.state{text} reads them back.
+    # 3. input.text — codepoints arrive as typed text; input.state{text} reads them back.
     # A text() inject is invisible until a step() advances; input.state then reads that advance's text.
     queued = client.text("hi")
     assert queued.get("queued") == 2, f"input.text echoed {queued!r}, expected {{queued:2}}"
     client.step(count=1)
     cps = _frozen_state(client, text=True).get("codepoints")
     assert cps == [104, 105], f"input.state(text).codepoints is {cps!r}, expected [104, 105] ('h','i') after an advancing step"
-    print("PASS[3/3] input.text: codepoints == [104, 105] drained from the char ring after a sim-advance.")
+    print("PASS[3/3] input.text: codepoints == [104, 105] read back after a sim-advance.")
 
     # Restore a normal live state for the next session: back to RUN, unpaused.
     client.set_mode("run")
     client.resume()
 
-    print("PASS: input.* end-to-end over the transport — drain-race, gate cutover, and input.text all machine-asserted.")
+    print("PASS: input.* end-to-end over the transport — advance race, gate cutover, and input.text all machine-asserted.")
 
 
 if __name__ == "__main__":

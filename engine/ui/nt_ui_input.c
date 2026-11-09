@@ -16,8 +16,9 @@
 #include "ui/nt_ui_label.h"
 #include "ui/nt_ui_state.h"
 #include "utf8/nt_utf8.h"
+#include "window/nt_window.h"
 
-/* Apply the field's keyboard hint on focus via the input platform layer (web shows the matching
+/* Apply the field's keyboard hint on focus via the window module (web shows the matching
  * soft keyboard; native/stub no-op). This is a UX hint only -- actual input restriction is the
  * allow filter, not this. The enum maps explicitly so the two vocabularies stay decoupled. */
 static inline void apply_keyboard_hint(nt_ui_input_keyboard_t kb, bool password) {
@@ -44,7 +45,7 @@ static inline void apply_keyboard_hint(nt_ui_input_keyboard_t kb, bool password)
             break;
         }
     }
-    nt_input_set_text_input_mode(mode);
+    nt_window_set_text_input_mode(mode);
 }
 
 const nt_ui_widget_def_t NT_UI_INPUT_DEF = {
@@ -253,7 +254,8 @@ static bool allow_printable(uint32_t cp) { return cp >= 0x20U && cp != 0x7FU && 
 // #endregion
 
 static inline bool shift_held(void) { return nt_input_key_is_down(NT_KEY_LSHIFT) || nt_input_key_is_down(NT_KEY_RSHIFT); }
-static inline bool ctrl_held(void) { return nt_input_key_is_down(NT_KEY_LCTRL) || nt_input_key_is_down(NT_KEY_RCTRL); }
+/* Ctrl, or Cmd on macOS. */
+static inline bool shortcut_held(void) { return nt_input_key_is_down(NT_KEY_LCTRL) || nt_input_key_is_down(NT_KEY_RCTRL) || nt_input_key_is_down(NT_KEY_LMETA) || nt_input_key_is_down(NT_KEY_RMETA); }
 
 /* PC-style auto-repeat core. Last-pressed wins (a newer repeatable key re-arms to it).
  * Edges arrive as params so the unit test can drive timing with fake input. */
@@ -805,7 +807,7 @@ static void focus_step(input_frame_t *f) {
     // #endregion
 }
 
-/* The focused edit pipeline: drain the typed-char ring, then run the physical editing keys
+/* The focused edit pipeline: drain the typed chars, then run the physical editing keys
  * (delete/arrows/home/end), selection chords (Shift/Ctrl+A), clipboard (Ctrl+C/X/V), submit + Tab/Esc.
  * No-op when the field is not focused. Sets the changed/submitted out-flags; cur_len re-derived in f->cur_len. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -822,7 +824,7 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
     uint32_t cur_len = f->cur_len;
     const bool claimed_now = f->claimed_now;
     {
-        // #region drain typed chars (FIFO from the input ring)
+        // #region drain typed chars (FIFO, this frame's)
         uint32_t cp = 0U;
         while (nt_input_pop_char(&cp)) {
             const bool ok = (props->allow != NULL) ? props->allow(cp) : allow_printable(cp);
@@ -921,16 +923,16 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
             }
             st->blink = 0.0F;
         }
-        if (ctrl_held() && nt_input_key_is_pressed(NT_KEY_A)) {
+        if (shortcut_held() && nt_input_key_is_pressed(NT_KEY_A)) {
             st->anchor = 0U; /* Ctrl+A selects the whole buffer */
             st->caret = cur_len;
             st->blink = 0.0F;
         }
         // #region clipboard chords (Ctrl+C/X/V)
-        if (ctrl_held() && nt_input_key_is_pressed(NT_KEY_C)) {
+        if (shortcut_held() && nt_input_key_is_pressed(NT_KEY_C)) {
             clipboard_copy_selection(buffer, st); /* copy selection; no-op if empty */
         }
-        if (ctrl_held() && nt_input_key_is_pressed(NT_KEY_X) && nt_clipboard_available()) {
+        if (shortcut_held() && nt_input_key_is_pressed(NT_KEY_X) && nt_clipboard_available()) {
             /* No-op cut when the clipboard is unavailable: deleting locally without a store is data loss. */
             clipboard_copy_selection(buffer, st);
             if (st->anchor != st->caret) {
@@ -943,7 +945,7 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
                 st->blink = 0.0F;
             }
         }
-        if (ctrl_held() && nt_input_key_is_pressed(NT_KEY_V)) {
+        if (shortcut_held() && nt_input_key_is_pressed(NT_KEY_V)) {
             st->caret = clipboard_paste(buffer, buffer_size, props, st, cur_len, changed);
             cur_len = (uint32_t)strlen(buffer);
             st->blink = 0.0F;

@@ -11,6 +11,8 @@ void nt_window_shutdown(void) { /* No-op */ }
 
 void nt_window_set_fullscreen(bool fullscreen) { (void)fullscreen; }
 
+void nt_window_set_text_input_mode(nt_text_input_mode_t mode) { (void)mode; }
+
 /* ---- Presentation ---- */
 
 void nt_window_swap_buffers(void) { /* No-op */ }

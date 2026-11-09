@@ -334,8 +334,7 @@ if(NOT EMSCRIPTEN)
     nt_set_static_crt(glfw)
 endif()
 
-# Tests build only at top level. NT_BUILDING_TESTS gates the test targets; it does not touch the
-# nt_input automation surface, so production nt_input stays lean under a devapi-OFF build.
+# Tests build only at top level. NT_BUILDING_TESTS gates the test targets.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(NT_BUILDING_TESTS ON)
 endif()

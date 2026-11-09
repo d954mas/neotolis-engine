@@ -1,7 +1,7 @@
 # Module Layout
 
 Directory layout of engine modules and the interface/impl/stub composition model
-for swappable modules (log, input, http, gfx, basisu, meshwire, window, app, fs, clipboard).
+for swappable modules (log, http, gfx, basisu, meshwire, window, app, fs, clipboard).
 Consumers link header-only interface targets; each executable picks exactly one
 impl at link time — omission is a loud link error, enforced by CI scripts.
 Includes stub semantics and runtime capability queries.
@@ -29,9 +29,10 @@ engine/
         default/            # real impl (note: "default", not "native")
         stub/
         CMakeLists.txt
-    input/                  # swappable
+    input/                  # platform-free core; window's platform pump feeds it
         nt_input.h
-        native/  web/  stub/
+        nt_input_feed.h     # the feed: window pump and devapi
+        nt_input.c
         CMakeLists.txt
     clipboard/              # swappable
         nt_clipboard.h
@@ -92,7 +93,10 @@ Two gates enforce this:
   undefined reference. Proves omission fails loudly (exit 0 only when the
   expected unresolved-symbol error is observed).
 
-Current swappable pairs: `nt_log`, `nt_input`, `nt_http`, `nt_gfx`,
+`nt_input` is not swappable: it has one platform-free implementation, which the window module's
+platform pump feeds and which games, tests and the devapi link directly.
+
+Current swappable pairs: `nt_log`, `nt_http`, `nt_gfx`,
 `nt_basisu_transcoder`, `nt_meshwire`, `nt_window`, `nt_app`, `nt_fs` (native
 only), `nt_clipboard`.
 
@@ -239,7 +243,6 @@ A no-op / empty stub is safe ONLY when the caller already treats "nothing
 happened" as a legitimate runtime state, not an error:
 
 - `nt_log` — a dropped log is functionally invisible.
-- `nt_input` — a frame with "no events" is already a normal, handled case.
 - `nt_clipboard` get/paste — an empty clipboard is a real state the text field
   already tolerates (paste of "" is a no-op).
 
