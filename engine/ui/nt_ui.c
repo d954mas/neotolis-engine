@@ -2688,7 +2688,7 @@ nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_st
     const int16_t *pad_lrtb = (desc != NULL) ? desc->pad_lrtb : NULL;
     const uint8_t drag_axes = (desc != NULL) ? desc->drag_axes : 0U;
     NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_step: pad_lrtb components must be >= 0");
-    NT_ASSERT((drag_axes & (uint8_t)~(NT_UI_DRAG_X | NT_UI_DRAG_Y)) == 0U && "nt_ui_step: drag_axes takes only NT_UI_DRAG_X | NT_UI_DRAG_Y");
+    NT_ASSERT(drag_axes <= (NT_UI_DRAG_X | NT_UI_DRAG_Y) && "nt_ui_step: drag_axes takes only NT_UI_DRAG_X | NT_UI_DRAG_Y");
     NT_ASSERT(id != nt_ui_internal_scroll_open(ctx) && "nt_ui_step: a scroll's own id is its surface, not a widget (step a child id)");
 
     bool owner_over = false;
