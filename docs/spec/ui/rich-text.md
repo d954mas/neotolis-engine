@@ -241,9 +241,12 @@ nt_ui_rich_text_n(ctx, "Hello", 5);
 nt_ui_rich_pop(ctx);
 ```
 
-- **Links** (`<link=id>`): the widget hit-tests its **own** solver rects against
-  the pointer (offset by the block's prev-frame bbox origin) and reports
-  `{hovered_link, clicked_link}` — there is **no extra Clay element per link**.
+- **Links** (`<link=id>`): a block with links is one interactive widget (one
+  `nt_ui_step` on its id), so front-most arbitration, modals, capture and a scroll
+  taking the drag apply as to a button. Its pointer hit-tests the block's **own**
+  solver rects (offset by the block's prev-frame bbox origin); a click needs press
+  and release on the same link. It reports `{hovered_link, clicked_link}` — there
+  is **no extra Clay element per link**; a block without links registers nothing.
   Link hover gates effects (an effect sees `hovered == true` only for the hovered
   link's atoms). The Model-D game reacts to the reported click. The builder call
   is **set/clear, NOT push/pop**: `nt_ui_rich_link(ctx, id)` starts a pending

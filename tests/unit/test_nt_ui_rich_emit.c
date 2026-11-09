@@ -30,6 +30,7 @@
 #include "ui/nt_ui_rich_fx.h"
 #include "ui/nt_ui_rich_tagset.h"
 #include "ui/nt_ui_rich_text.h"
+#include "ui/nt_ui_scroll.h"
 #include "unity.h"
 
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
@@ -1363,6 +1364,77 @@ static float link2_b_x(void) { return LINK_ROOT_X + (13.0F * 8.0F); }
 
 /* (13) press+release-on-the-SAME-link click semantics (the press must START on the link the
  * release lands on). hover is purely geometric; a release without a matching press is no click. */
+/* The link block at the top of a 400x200 list (1000-tall content); `modal` adds an inert full-screen
+ * blocker declared after it. */
+static nt_ui_rich_result_t frame_link_in_scroll(const nt_pointer_t *p, bool modal) {
+    nt_arena_reset(&g_nt_mem_scratch);
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    const nt_ui_scroll_style_t list = nt_ui_scroll_style_defaults();
+    nt_ui_rich_result_t res = {0};
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = p, .pointer_count = 1});
+    CLAY({.id = CLAY_ID("links_root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {LINK_ROOT_X, LINK_ROOT_Y}}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, CLAY_ID("links_list").id, &list, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}});
+        CLAY({.id = CLAY_ID("links_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(1000)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+            nt_ui_rich_begin(s_fx.ctx, &base);
+            nt_ui_rich_text_n(s_fx.ctx, "go ", 3);
+            nt_ui_rich_link(s_fx.ctx, LINK_ID);
+            nt_ui_rich_text_n(s_fx.ctx, "HERE", 4);
+            nt_ui_rich_link(s_fx.ctx, 0U);
+            nt_ui_rich_end(s_fx.ctx);
+            nt_ui_rich_text(s_fx.ctx, CLAY_ID("links_rt").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, &res);
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    if (modal) {
+        CLAY({.id = CLAY_ID("links_modal"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = 10}, .layout = {.sizing = {CLAY_SIZING_FIXED(800), CLAY_SIZING_FIXED(600)}}}) {
+            nt_ui_block_pointer(s_fx.ctx, CLAY_ID("links_modal").id, NULL);
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+    return res;
+}
+
+/* Inside a list a tap clicks the link; a list drag that returns to the link and releases does not. */
+static void test_link_in_scroll_drag_cancels_click(void) {
+    const float x = link_hit_x();
+    const float y = LINK_ROOT_Y + 8.0F;
+    nt_pointer_t p = make_ptr(x, y, false, false, false);
+    (void)frame_link_in_scroll(&p, false);
+    (void)frame_link_in_scroll(&p, false);
+    p = make_ptr(x, y, true, true, false);
+    (void)frame_link_in_scroll(&p, false);
+    p = make_ptr(x, y, false, false, true);
+    TEST_ASSERT_EQUAL_UINT32(LINK_ID, frame_link_in_scroll(&p, false).clicked_link);
+
+    p = make_ptr(x, y, false, false, false);
+    (void)frame_link_in_scroll(&p, false);
+    p = make_ptr(x, y, true, true, false);
+    (void)frame_link_in_scroll(&p, false);
+    p = make_ptr(x, y + 40.0F, true, false, false);
+    (void)frame_link_in_scroll(&p, false);
+    TEST_ASSERT_EQUAL_UINT32(CLAY_ID("links_list").id, s_fx.ctx->captures[0].active_id);
+    p = make_ptr(x, y, true, false, false);
+    (void)frame_link_in_scroll(&p, false);
+    p = make_ptr(x, y, false, false, true);
+    TEST_ASSERT_EQUAL_UINT32(0U, frame_link_in_scroll(&p, false).clicked_link);
+}
+
+/* A modal over a link takes its hover and click. */
+static void test_link_under_modal_is_inert(void) {
+    const float x = link_hit_x();
+    const float y = LINK_ROOT_Y + 8.0F;
+    nt_pointer_t p = make_ptr(x, y, false, false, false);
+    (void)frame_link_in_scroll(&p, true);
+    TEST_ASSERT_EQUAL_UINT32(0U, frame_link_in_scroll(&p, true).hovered_link);
+    p = make_ptr(x, y, true, true, false);
+    (void)frame_link_in_scroll(&p, true);
+    p = make_ptr(x, y, false, false, true);
+    TEST_ASSERT_EQUAL_UINT32(0U, frame_link_in_scroll(&p, true).clicked_link);
+}
+
 static void test_link_hover_and_click(void) {
     nt_arena_reset(&g_nt_mem_scratch);
     s_fx.ctx->pending_rich = NULL;
@@ -2674,6 +2746,8 @@ int main(void) {
     RUN_TEST(test_fx_image_shifts_quad_visual_only);
     RUN_TEST(test_fx_fade_in_skips_image);
     RUN_TEST(test_link_hover_and_click);
+    RUN_TEST(test_link_in_scroll_drag_cancels_click);
+    RUN_TEST(test_link_under_modal_is_inert);
     RUN_TEST(test_link_press_a_release_b_no_click);
     RUN_TEST(test_link_no_union_across_gap);
     RUN_TEST(test_link_hover_honors_block_transform);

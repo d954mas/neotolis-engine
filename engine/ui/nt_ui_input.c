@@ -74,6 +74,7 @@ typedef struct {
     float repeat_t;      /* seconds until the held repeat_key fires again (initial delay, then rate) */
     uint16_t repeat_key; /* the nt_key_t currently auto-repeating (0 = none) */
     uint8_t drag;        /* 1 while a press is dragging to extend the selection */
+    uint8_t tap_focus;   /* the press waits for a scroll's decision: focus on its release */
 } nt_ui_input_state_t;
 
 static inline uint32_t input_state_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_INPUT_STATE_SALT); }
@@ -690,6 +691,15 @@ typedef struct {
     bool claimed_now;
 } input_frame_t;
 
+/* An unfocused field inside a scroll focuses on the tap's release, so a list drag never opens the
+ * keyboard; a scroll that takes the drag leaves the field silent. Otherwise the press focuses. */
+static bool input_focus_edge(nt_ui_input_state_t *st, const nt_ui_interaction_t *in, bool was_focused) {
+    if (in->pressed_now) {
+        st->tap_focus = (in->gesture_pending && !was_focused) ? 1U : 0U;
+    }
+    return (in->pressed_now && st->tap_focus == 0U) || (in->clicked && st->tap_focus != 0U);
+}
+
 /* focus-order bookkeeping (Tab wrap) + the single mutating interaction step + focus capture / drag.
  * Resolves f->st, f->in, f->bb, f->claimed_now, f->focused for the rest of the frame. */
 static void focus_step(input_frame_t *f) {
@@ -732,10 +742,13 @@ static void focus_step(input_frame_t *f) {
     }
 
     /* ONE mutating interaction step. Word-select reads double_clicked
-     * off this single result; the dbl window + move radius come from the context. */
+     * off this single result; the dbl window + move radius come from the context. A focused field
+     * drags its selection along x, so inside a vertical list that drag is the field's. */
+    const bool was_focused = (ctx->focused_input_id == id);
+    const nt_ui_step_desc_t step = {.drag_axes = was_focused ? NT_UI_DRAG_X : 0U};
     nt_ui_interaction_t in;
     if (enabled) {
-        in = nt_ui_step(ctx, id, NULL);
+        in = nt_ui_step(ctx, id, &step);
     } else {
         in = (nt_ui_interaction_t){0};
         nt_ui_block_pointer(ctx, id, NULL);
@@ -747,23 +760,20 @@ static void focus_step(input_frame_t *f) {
             ctx->focused_input_id = 0U;
         }
     }
-    /* The real press-began edge (one-shot, survives a same-frame press+release — `pressed` does not, so a
-     * sub-frame tap would otherwise never focus the field / place the caret). */
-    const bool pressed_now = in.pressed_now;
+    const bool focus_now = input_focus_edge(st, &in, was_focused);
 
     /* Map a pointer x (UI-space) to a codepoint boundary via the prev-frame bbox. */
     const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, id);
-    if (enabled && pressed_now) {
-        const bool was_focused = (ctx->focused_input_id == id);
+    if (enabled && focus_now) {
         ctx->focused_input_id = id;
         st->blink = 0.0F;
         if (bb.found) {
-            /* On the press frame pos == press point (the pointer has not moved yet). */
+            /* The press (or tap release) point. */
             const float local_x = (in.pos[0] - bb.x - style->pad_x) + st->scroll_x;
             st->caret = caret_from_x(style, props->password, font, buffer, cur_len, local_x);
         }
         st->anchor = st->caret; /* a fresh press collapses the selection to the click point */
-        st->drag = 1U;
+        st->drag = (uint8_t)in.pressed;
         if (!was_focused) {
             apply_keyboard_hint(props->keyboard, props->password); /* surface the soft keyboard on web */
         }

@@ -494,7 +494,9 @@ façade (paste decodes untrusted bytes per-codepoint, runs the allow-predicate,
 clamps, and drops a non-fitting multibyte codepoint whole), a render-only password
 mask, stock allow-predicates (numeric/email/url), a per-field `placeholder` string
 shown dimmed while empty+unfocused, and a minimal focus arbiter (Esc unfocus, Tab
-advance/wrap). Caret, selection highlight, and the text all float as clipped
+advance/wrap). A press focuses the field, except an unfocused field whose press waits
+for a scroll (`gesture_pending`): it focuses on the tap's release, so a list drag never
+opens the keyboard. A focused field drags its selection along x (`drag_axes`). Caret, selection highlight, and the text all float as clipped
 children carrying a `HAS_TRANSFORM` offset of `pad_x - scroll_x` (set as the Clay
 element `userData`, which the walker reads for layer+transform), so the line
 scrolls to keep the caret visible while clipping to the field box. Cut is a no-op

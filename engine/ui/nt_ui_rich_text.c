@@ -2201,50 +2201,31 @@ static void rich_declare_fixed_block(nt_ui_rich_state_t *st, uint32_t id, const 
 // #endregion
 
 // #region LINK
-/* Per-rich-block retained press-target cell. Links have NO Clay element, so the capture
- * mechanism cannot track them; this keyed-by-block-id cell persists the link the
- * press STARTED on across frames so a click requires press+release on the SAME link. */
+/* Per-rich-block retained press-target cell: the link a press started on, so a click needs press and
+ * release on the SAME link. Links have no Clay element of their own. */
 #define NT_UI_RICH_LINK_TAG NT_UI_STATE_TAG('r', 'l', 'n', 'k')
 typedef struct {
-    uint32_t pressed_link; /* link id the LEFT press began over (0 = pressed over no link / no press) */
+    uint32_t pressed_link; /* link id the press began over (0 = none) */
 } nt_ui_rich_link_press_t;
 
-/* Resolve {hovered_link, clicked_link} from the solver's `<link>` rects (no per-link Clay element).
- * A click needs press AND release over the SAME link (latched in the per-block press cell).
- * Must run BEFORE emit -- emit reads st->hovered_link (hover gates effects). */
+/* A block with links is one interactive widget (front-most, modals, capture, a scroll taking the
+ * drag); its pointer picks the link rect. Must run BEFORE emit -- emit reads st->hovered_link. */
 static void rich_resolve_links(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id) {
     st->hovered_link = 0U;
     st->clicked_link = 0U;
     if (st->link_count == 0U) {
         return;
     }
-    /* Link rects are offsets from the block origin; map the pointer into the SAME local space (prev-
-     * frame bbox; first frame not-found -> origin 0,0) before testing. */
+    const nt_ui_interaction_t in = nt_ui_step(ctx, id, NULL);
+    /* Link rects are offsets from the block origin (prev-frame bbox; first frame -> origin 0,0). The
+     * block's baked transform maps the pointer like the draw; !mapped (clipped / 3D miss) -> no link. */
     const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, id);
     const float ox = bb.found ? bb.x : 0.0F;
     const float oy = bb.found ? bb.y : 0.0F;
-
-    if (ctx->frame_pointer_count == 0U) {
-        return;
-    }
-    /* Links hit-test the PRIMARY pointer only; multi-pointer link interaction (a 2nd touch
-     * hovering/clicking a different link) is not supported. */
-    const nt_pointer_t *p = &ctx->frame_pointers[ctx->frame_primary];
-    if (!p->active) {
-        return; /* a gone pointer hovers nothing, like the widget hit test */
-    }
-    const bool pressed = p->buttons[NT_BUTTON_LEFT].is_pressed;
-    const bool released = p->buttons[NT_BUTTON_LEFT].is_released;
-
-    /* Map via the block's baked transform (inverse-affine 2D / raycast 3D) so the hit-test matches the
-     * draw; the flat 2D case maps 1:1. !mapped (clipped / 3D ray miss) -> no link under the pointer. */
     float lpx = 0.0F;
     float lpy = 0.0F;
-    const bool mapped = nt_ui_internal_pointer_to_local(ctx, id, p->x, p->y, &lpx, &lpy);
-
-    /* The link under the pointer this frame (0 = none); geometric hover doubles as the press/release target. */
     uint32_t over_link = 0U;
-    if (mapped) {
+    if ((in.hovered || in.pressed || in.released_now) && nt_ui_internal_pointer_to_local(ctx, id, in.pos[0], in.pos[1], &lpx, &lpy)) {
         for (uint32_t i = 0; i < st->link_count; i++) {
             const nt_ui_rich_link_rect_t *lr = &st->links[i];
             const float x0 = ox + lr->x;
@@ -2255,19 +2236,14 @@ static void rich_resolve_links(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uin
             }
         }
     }
-    st->hovered_link = over_link;
+    st->hovered_link = in.hovered ? over_link : 0U;
 
-    /* Retained press-target cell, keyed by the block id (links have no Clay element / capture cell). */
     nt_ui_rich_link_press_t *cell = (nt_ui_rich_link_press_t *)nt_ui_state(ctx, id, (uint32_t)sizeof *cell, NT_UI_RICH_LINK_TAG);
-    if (pressed) {
-        cell->pressed_link = over_link; /* press-edge: latch the link the press started on (0 = none) */
+    if (in.pressed_now) {
+        cell->pressed_link = over_link;
     }
-    if (released) {
-        /* Click only when the release lands on the SAME link the press started on. */
-        if (over_link != 0U && over_link == cell->pressed_link) {
-            st->clicked_link = over_link;
-        }
-        cell->pressed_link = 0U; /* release clears the latch regardless */
+    if (in.clicked && over_link != 0U && over_link == cell->pressed_link) {
+        st->clicked_link = over_link;
     }
 }
 

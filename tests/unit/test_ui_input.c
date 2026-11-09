@@ -29,6 +29,7 @@
 #include "ui/nt_ui_input.h"
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_modal.h"
+#include "ui/nt_ui_scroll.h"
 #include "ui/nt_ui_state.h"
 #include "unity.h"
 #include "utf8/nt_utf8.h"
@@ -125,6 +126,56 @@ static const Clay_RenderCommand *find_field_bg_rect(const nt_ui_context_t *ctx) 
         }
     }
     return NULL;
+}
+
+/* One frame with a single field at the top of a 300x200 list with 1000-tall content. */
+static void field_in_scroll_frame(const nt_pointer_t *p, uint32_t id, char *buf, size_t cap) {
+    const nt_ui_scroll_style_t list = nt_ui_scroll_style_defaults();
+    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1, 0);
+    CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, CLAY_ID("list").id, &list, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(200)}}});
+        CLAY({.id = CLAY_ID("list_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(1000)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id, buf, cap, &s_props, &s_style, &s_field_decl, true, NULL);
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* Inside a list a tap focuses the field on its release; a press still waiting for the list does not. */
+static void test_input_in_scroll_focuses_on_tap_release(void) {
+    char buf[32] = "hello";
+    const uint32_t id = 0x1F00D01U;
+    const float x = IN_X + 50.0F;
+    const float y = IN_Y + (IN_H * 0.5F);
+    nt_pointer_t p = make_pointer(x, y, false, false, false);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    p = make_pointer(x, y, true, true, false);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id));
+    p = make_pointer(x, y, false, false, true);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
+}
+
+/* A list drag that starts on an unfocused field scrolls and leaves the field unfocused. */
+static void test_input_in_scroll_drag_never_focuses(void) {
+    char buf[32] = "hello";
+    const uint32_t id = 0x1F00D02U;
+    const float x = IN_X + 50.0F;
+    const float y = IN_Y + (IN_H * 0.5F);
+    nt_pointer_t p = make_pointer(x, y, false, false, false);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    p = make_pointer(x, y, true, true, false);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    p = make_pointer(x, y - 40.0F, true, false, false);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    TEST_ASSERT_EQUAL_UINT32(CLAY_ID("list").id, s_fx.ctx->captures[0].active_id);
+    p = make_pointer(x, y, false, false, true);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id));
 }
 
 /* One frame with a single field. Feeds the given pointer; returns the change flag. */
@@ -1492,6 +1543,8 @@ static void test_field_text_above_modal_band(void) {
 
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_input_in_scroll_focuses_on_tap_release);
+    RUN_TEST(test_input_in_scroll_drag_never_focuses);
     RUN_TEST(test_insert_cyrillic_codepoints);
     RUN_TEST(test_backspace_one_codepoint);
     RUN_TEST(test_arrow_left_codepoint);
