@@ -2306,11 +2306,9 @@ static void test_inspector_tree_pane_scrolls_on_wheel_integration(void) {
  * container directly beneath it: the pane scrolls, the game container under the same pointer stays
  * put. Pins the always-on-top debug-overlay contract against the innermost-wins resolve. */
 static const uint32_t REPRO_GAME_SCROLL_ID = 0x1A5C01U;
-static void inspector_over_game_scroll_frame(float screen_w, float screen_h, float ptr_x, float ptr_y, float wheel_dy) {
-    nt_pointer_t p = make_pointer(ptr_x, ptr_y);
-    p.wheel_dy = wheel_dy;
+static void inspector_over_game_scroll_pointer_frame(float screen_w, float screen_h, const nt_pointer_t *p) {
     const nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
-    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, &p, 1, 0);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, p, 1, 0);
     CLAY({.id = CLAY_ID("repro2_root")}) {
         /* Full-width game scroll so its bbox spans under the right-attached inspector pane too. */
         nt_ui_scroll_begin(s_fx.ctx, NULL, REPRO_GAME_SCROLL_ID, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(screen_w), CLAY_SIZING_FIXED(screen_h)}}});
@@ -2324,6 +2322,33 @@ static void inspector_over_game_scroll_frame(float screen_w, float screen_h, flo
         }
     }
     nt_ui_end(s_fx.ctx);
+}
+
+static void inspector_over_game_scroll_frame(float screen_w, float screen_h, float ptr_x, float ptr_y, float wheel_dy) {
+    nt_pointer_t p = make_pointer(ptr_x, ptr_y);
+    p.wheel_dy = wheel_dy;
+    inspector_over_game_scroll_pointer_frame(screen_w, screen_h, &p);
+}
+
+/* A press on the game list that is still pending when the pointer enters the sidebar is not taken
+ * by the game list: the sidebar's pointer only reaches inspector panes. */
+static void test_inspector_sidebar_drops_pending_game_drag(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    nt_pointer_t p = make_pointer(500.0F, 400.0F);
+    inspector_over_game_scroll_pointer_frame(screen_w, screen_h, &p);
+    inspector_over_game_scroll_pointer_frame(screen_w, screen_h, &p);
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    inspector_over_game_scroll_pointer_frame(screen_w, screen_h, &p);
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+    p.x = 1000.0F; /* into the sidebar, far past the slop on both axes */
+    p.y = 360.0F;
+    inspector_over_game_scroll_pointer_frame(screen_w, screen_h, &p);
+    TEST_ASSERT_NOT_EQUAL_UINT32(REPRO_GAME_SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
+    const nt_ui_scroll_state_t *game = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, REPRO_GAME_SCROLL_ID);
+    TEST_ASSERT_TRUE(game->raw[1] == 0.0F);
 }
 
 static void test_inspector_pane_wins_over_game_container(void) {
@@ -2729,6 +2754,7 @@ int main(void) {
     RUN_TEST(test_inspector_truncated_pane_scroll_press_safe);
     RUN_TEST(test_inspector_tree_pane_scrolls_on_wheel_integration);
     RUN_TEST(test_inspector_pane_wins_over_game_container);
+    RUN_TEST(test_inspector_sidebar_drops_pending_game_drag);
     RUN_TEST(test_inspector_pane_drag_tracks_1to1);
     RUN_TEST(test_inspector_pane_drag_release_flings);
     RUN_TEST(test_inspector_pane_tap_still_selects_row);

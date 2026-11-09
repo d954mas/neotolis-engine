@@ -744,9 +744,8 @@ static void excl_nested_frame2(nt_pointer_t *p, const nt_ui_scroll_style_t *oute
  *      the thumb declares both drag axes, so it wins the tie. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_scroll_does_not_steal_nested_scrollbar(void) {
-    /* The outer bar stays hidden (AUTO_HIDE at rest) so its elements do not shift the Clay slot the
-     * inner scroll reads its dims from mid-frame. */
-    const nt_ui_scroll_style_t outer = bar_style(NT_UI_SCROLLBAR_AUTO_HIDE);
+    /* The outer bar is drawn before the inner scroll declares: the inner still reads its own dims. */
+    const nt_ui_scroll_style_t outer = bar_style(NT_UI_SCROLLBAR_ALWAYS);
     const nt_ui_scroll_style_t inner = bar_style(NT_UI_SCROLLBAR_ALWAYS);
     const uint32_t inner_bar_id = nt_ui_scroll_test_bar_id(EXCL_INNER_ID, 1);
 

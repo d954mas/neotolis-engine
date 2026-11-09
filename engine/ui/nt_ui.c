@@ -2806,12 +2806,10 @@ nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_st
         nt_ui_capture_t *cap = &ctx->captures[pidx];
         const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
         bool new_capture = s.new_capture;
-        bool commit = true;
         if (s.releasing) {
             /* The old gesture ends here; the same frame's new press restarts on this widget when it is hot. */
             cap->released_id = 0U;
             new_capture = cap->active_id == 0U && ctx->pointer_hot[pidx].id == id;
-            commit = new_capture;
             if (new_capture) {
                 out.pressed = true;
                 out.pressed_now = true;
@@ -2822,23 +2820,23 @@ nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_st
                 out.gesture_pending = cap->scroll_scope != 0U;
             }
         }
-        if (commit && new_capture) {
-            cap->active_id = id;
-            cap->press_pos[0] = p->x;
-            cap->press_pos[1] = p->y;
-            cap->hold_secs = 0.0F;
-            cap->hold_prev_secs = 0.0F;
-            cap->hold_live = true;
-            out.double_clicked = press_pairs_with_last(ctx, id, p->x, p->y);
-            /* A completed pair empties the record so a third press starts a new pair. */
-            ctx->last_press_id = out.double_clicked ? 0U : id;
-            ctx->last_press_age = 0.0F;
-            ctx->last_press_pos[0] = p->x;
-            ctx->last_press_pos[1] = p->y;
-        } else if (commit && !owner_over) {
-            cap->hold_live = false;
-        }
-        if (commit) {
+        if (!s.releasing || new_capture) {
+            if (new_capture) {
+                cap->active_id = id;
+                cap->press_pos[0] = p->x;
+                cap->press_pos[1] = p->y;
+                cap->hold_secs = 0.0F;
+                cap->hold_prev_secs = 0.0F;
+                cap->hold_live = true;
+                out.double_clicked = press_pairs_with_last(ctx, id, p->x, p->y);
+                /* A completed pair empties the record so a third press starts a new pair. */
+                ctx->last_press_id = out.double_clicked ? 0U : id;
+                ctx->last_press_age = 0.0F;
+                ctx->last_press_pos[0] = p->x;
+                ctx->last_press_pos[1] = p->y;
+            } else if (!owner_over) {
+                cap->hold_live = false;
+            }
             cap->pos[0] = p->x;
             cap->pos[1] = p->y;
             cap->drag_axes = drag_axes;

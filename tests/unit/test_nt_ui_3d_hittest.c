@@ -19,6 +19,7 @@
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
+#include "ui/nt_ui_scroll.h"
 #include "unity.h"
 
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
@@ -220,8 +221,55 @@ static void test_raycast_hit_perspective(void) {
     TEST_ASSERT_FALSE_MESSAGE(h_corner, "perspective camera: top-left pixel must miss widget at world origin");
 }
 
+/* A list floating at (BBOX_X, BBOX_Y) with a row on its content: coplanar with the list's surface. */
+#define LIST3D_ID 0x3D5C01U
+static nt_ui_hot_t s_hot3d;
+static nt_ui_interaction_t list_row_frame_3d(const nt_pointer_t *p) {
+    float vp[16];
+    make_ortho_clay_y_down(vp);
+    const nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_ui_interaction_t row = {0};
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 1.0F / 60.0F, p, 1, 0);
+    nt_ui_set_view_proj(s_fx.ctx, vp);
+    s_hot3d = nt_ui_pointer_hot(s_fx.ctx, 0U);
+    CLAY({.id = CLAY_ID("list3d_root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, LIST3D_ID, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(200)}}});
+        CLAY({.id = CLAY_ID("list3d_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(1000)}}}) {
+            CLAY({.id = CLAY_ID("list3d_row"), .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) { row = nt_ui_step(s_fx.ctx, nt_ui_id("list3d_row"), NULL); }
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+    return row;
+}
+
+static void test_coplanar_row_beats_its_scroll_surface(void) {
+    nt_pointer_t p = {0};
+    p.x = BBOX_X + 100.0F;
+    p.y = BBOX_Y + 30.0F;
+    p.active = true;
+    (void)list_row_frame_3d(&p);
+    (void)list_row_frame_3d(&p);
+    (void)list_row_frame_3d(&p);
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("list3d_row"), s_hot3d.id); /* the later-registered coplanar row */
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    TEST_ASSERT_TRUE(list_row_frame_3d(&p).pressed_now);
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+    p.y -= 30.0F;
+    (void)list_row_frame_3d(&p);
+    TEST_ASSERT_EQUAL_UINT32(LIST3D_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U)); /* the drag scrolls */
+    p.x = BBOX_X + 100.0F;
+    p.y = BBOX_Y + 150.0F; /* empty list area: the surface itself */
+    p.buttons[NT_BUTTON_LEFT].is_down = false;
+    (void)list_row_frame_3d(&p);
+    (void)list_row_frame_3d(&p);
+    TEST_ASSERT_EQUAL_UINT32(LIST3D_ID, s_hot3d.id);
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_coplanar_row_beats_its_scroll_surface);
     RUN_TEST(test_view_proj_set_caches_inverse);
     RUN_TEST(test_raycast_hit_accept_and_reject);
     RUN_TEST(test_hit_test_asserts_when_view_proj_not_set);
